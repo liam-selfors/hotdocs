@@ -236,11 +236,48 @@ the **git branching strategy**, not chosen once globally.
 - **Developers can run a cold regen on any part of the repo on demand** during
   development, not only at merge time.
 
+### D2 — Component granularity
+
+**Hard splitting trigger: verifiability.** If a component's full public behavior
+cannot be captured by *complete* machine-checkable acceptance criteria, it is too
+big and must be split. This is the non-negotiable rule.
+
+Secondary sizing inputs, applied within what the trigger allows:
+
+- **Cohesion** — a typical spec change stays inside the component's own bundle
+  and does not force an edit to a depended-upon `interface.md`.
+- **Context ceiling** — spec bundle + dependency interfaces fit inside the
+  generation model's reliable-output budget with margin (empirical; loosens as
+  models improve).
+- **Ownership** — tiebreaker: prefer the boundary that lands on a single owner.
+
+**`architecture/` owns the decomposition.** The list of components and the
+boundaries between them live in `architecture/` specs. Splitting or merging
+components is a distinct, heavier, explicitly-reviewed operation — a refactor of
+the spec corpus, not a normal change.
+
+**Flat component namespace** + explicit dependency graph. No nested components
+(nesting makes it ambiguous where behavior is specified). `architecture/`
+expresses subsystems and grouping.
+
+**Size caps** — educated first guesses, tunable, enforced by the linter:
+
+| Dimension | Target (warn above) | Hard fail above |
+| --- | --- | --- |
+| Generated code per component | 800 LOC | 1500 LOC |
+| Spec bundle (`spec` + `interface` + `acceptance` + `constraints`) | 2000 words | 4000 words |
+| Requirements (`R-id`s) per component | 20 | 40 |
+| Public interface surface elements (endpoints / fns / events / types) | 10 | 20 |
+| `depends_on` count (fan-out) | 7 | — (warn only) |
+| Dependents count (fan-in) | 10 | — (warn only) |
+
+The interface-churn ratio that motivated these caps is tracked as a corpus-health
+metric — see [`metrics.md`](metrics.md).
+
 ---
 
 ## 12. Open questions
 
-- How granular is a "component"? What's the right blast radius per spec?
 - Single generation model vs. ensemble / voting.
 - How to represent acceptance criteria: tagged prose, a small DSL, or literal
   co-located test files?

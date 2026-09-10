@@ -1,0 +1,165 @@
+# Trackable Metrics — Running List
+
+_Working notes. Non-normative. Started: 2026-09-10._
+
+A premise of spec-driven agentic development: **metrics are first-class citizens
+of the spec corpus**, not an afterthought bolted on by an observability team.
+Developers, stakeholders, and the system's own agents should be able to reference
+high-level metrics at every phase — ideation, specification, review, generation,
+verification, release, and production operation — to inform their decisions.
+
+This file is a growing catalog of candidate metrics. Nothing here is committed.
+Later work: decide which are computed, where their definitions live (likely a
+`metrics/` area or metric blocks attached to specs), how agents query them, and
+which ones become hard CI gates vs. dashboards vs. trend lines.
+
+Consumer tags: `[dev]` developer · `[stk]` stakeholder · `[agt]` system agent ·
+`[gate]` candidate hard CI gate.
+
+---
+
+## Corpus health (cross-cutting)
+
+- **Requirement coverage ratio** — % of `R-id`s with ≥1 passing acceptance
+  check. Target 100%. `[gate] [agt] [dev] [stk]`
+- **Spec completeness** — % of `ratified` specs with zero open questions and a
+  clean lint pass. `[gate] [dev]`
+- **Orphan rate** — specs with no forward trace to a product spec, or no
+  backward trace to a decision record. `[agt] [dev]`
+- **Glossary conformance** — undefined-term occurrences per spec. `[agt]`
+- **Ambiguity density** — linter-flagged ambiguous phrases per 1000 words of
+  spec. `[agt] [dev]`
+- **Dependency graph health** — max fan-in, max fan-out, cycle count (must be
+  0), graph diameter. `[agt] [dev]`
+- **Interface-churn ratio** — interface-changing PRs vs. internal-only PRs, per
+  component and overall. High ratio ⇒ component boundaries are wrong.
+  `[dev] [stk]`
+- **Component size distribution** — count of components over soft / hard caps
+  (see [`initial-ideas.md`](initial-ideas.md) D2). `[gate] [dev]`
+- **Spec churn** — edits per spec per time window; surfaces unstable specs.
+  `[dev] [stk]`
+- **Sealed-component ratio** — % of components that are sealed (legacy
+  perimeter) vs. fully spec-driven. Adoption progress. `[stk]`
+- **Cold-regen freshness** — for each component, time since last underlying-doc
+  change vs. time since last successful cold regen. `[gate] [agt]`
+
+---
+
+## Ideation phase
+
+- **Idea → ratified-spec conversion rate** and **latency**. `[stk]`
+- **Predicted blast radius** of a proposed change — components impacted, `R-id`s
+  touched — computed before work starts. `[dev] [stk] [agt]`
+- **Overlap / duplication score** — does this proposal restate behavior already
+  specified elsewhere? `[agt] [dev]`
+- **Open-question burn-down** during ideation — raised vs. resolved. `[stk]`
+- **Estimated generation cost** of the proposal (tokens / $ / wall-clock) from
+  predicted blast radius. `[stk]`
+
+---
+
+## Specification / authoring phase
+
+- **Time-in-draft** — duration a spec sits in `draft` before `ratified`.
+  `[dev] [stk]`
+- **Clarifying-questions count** — questions the authoring agent had to ask, or
+  assumptions it surfaced, per spec revision. Trend toward zero. `[agt] [dev]`
+- **First-submission lint pass rate**. `[dev]`
+- **Completeness-agent confidence** — the assist agent's own score that a spec
+  change is complete (deps updated, no discrepancies, no redundancy). `[agt]`
+- **Hint-mode preview delta** — size of the preview change vs. expectation; large
+  unexpected deltas suggest an incomplete or wrong spec edit. `[agt] [dev]`
+- **Normative-statement density** — RFC-2119 keyword count per section; flags
+  under-specified sections. `[agt]`
+- **Review iterations per spec PR**. `[dev]`
+
+---
+
+## Review & merge phase
+
+- **Spec-diff review time** — human minutes per changed `R-id`. `[dev] [stk]`
+- **Review packet size** — components regenerated, `R-id`s changed,
+  residual-risk items. `[dev]`
+- **Merge-blocked rate and reasons** — lint fail, verification fail, cold-regen
+  fail, unwaived assumption. `[gate] [dev]`
+- **Assumption-waiver count** — assumptions explicitly waived rather than folded
+  into the spec. A debt metric. `[stk] [dev]`
+
+---
+
+## Generation phase
+
+- **Cold-regen first-pass success rate** — % of components that regenerate to
+  passing verification with no retry. `[gate] [agt] [stk]`
+- **Regen attempts to green** — retries needed per component. `[agt]`
+- **Generation determinism / churn** — diff size between two cold regens of the
+  same unchanged spec bundle under the same model pin. Should trend to zero.
+  `[agt] [dev]`
+- **Cache hit rate** — components skipped via content-addressed caching.
+  `[dev] [stk]`
+- **Generation cost & latency** — tokens, $, wall-clock, per component and per
+  merge. `[stk]`
+- **Surfaced-assumption count per generation** — gaps the agent had to fill.
+  Must be 0 for `ratified` specs; nonzero ⇒ spec bug. `[gate] [agt]`
+- **Hint-mode vs. cold-regen divergence** — how often the feature-branch preview
+  differs materially from the final cold regen. `[agt] [dev]`
+
+---
+
+## Verification phase
+
+- **Per-run requirement coverage** — see corpus health. `[gate]`
+- **Independent-path agreement rate** — how often code-from-spec and
+  tests-from-spec agree without human intervention. Disagreement = spec
+  ambiguity signal. `[gate] [agt]`
+- **Mutation score on generated tests** — % of injected faults caught. Guards
+  against vacuous / tautological tests. `[gate] [agt]`
+- **Property / metamorphic check pass rate** and **flakiness**. `[agt] [dev]`
+- **Contract-drift incidents** — generated interface ≠ `interface.md`.
+  `[gate] [dev]`
+- **Non-functional gate results vs. targets** — latency, size budgets, security
+  findings. `[gate] [stk]`
+- **Verification runtime and cost** per merge. `[stk]`
+- **Flaky-check rate** — checks with non-deterministic pass/fail. `[dev]`
+
+---
+
+## Release phase
+
+- **Lead time for a spec change** — ratified spec edit → deployed. Core velocity
+  metric. `[stk] [dev]`
+- **Change failure rate** — % of releases that cause an incident. `[stk]`
+- **Cold-regen freshness at release** — proof that 100% of `gen/` on `main` was
+  cold-regenerated since the last doc change (D1 invariant). `[gate]`
+- **Rollback rate** and **MTTR**. `[stk]`
+- **Release size** — `R-id`s changed, components touched. `[dev] [stk]`
+
+---
+
+## Operation / production feedback phase
+
+- **Incident cause classification** — spec bug vs. generation bug vs.
+  verification gap. Tells you which layer to harden. `[stk] [agt] [dev]`
+- **Symptom → `R-id` trace time** — how long to map a production symptom back to
+  a requirement. `[dev]`
+- **Spec-gap discovery rate** — production incidents that reveal a missing or
+  ambiguous requirement, per time window. `[stk] [agt]`
+- **Post-incident spec-edit latency** — how fast the fix lands as a spec change.
+  `[dev] [stk]`
+- **Behavioral drift** — production behavior vs. golden acceptance scenarios,
+  tracked over time. `[agt] [stk]`
+
+---
+
+## Agent-effectiveness meta-metrics
+
+Metrics about the system's own agents, not the product being built.
+
+- **Per-agent success / retry / cost / latency**, by role (authoring assist,
+  generation, test generation, review, impact analysis). `[stk] [agt]`
+- **Human-intervention rate per phase** — where humans still have to step in.
+  `[stk]`
+- **Autonomy ratio** — % of spec PRs that reach `main` with zero human code
+  edits. The headline claim of the whole methodology. `[stk] [dev]`
+- **Assist-agent acceptance rate** — how often a developer accepts vs. overrides
+  the authoring agent's completeness suggestions. `[agt] [dev]`
