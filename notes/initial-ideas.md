@@ -1,0 +1,237 @@
+# Spec-Driven Agentic Development — Initial Ideas
+
+_Working notes. Non-normative. Date: 2026-09-10._
+
+---
+
+## 1. The core bet
+
+Invert the dependency between specification and code.
+
+- **Today:** code is the source of truth; docs are a lossy, out-of-date shadow of
+  it. Intent lives in people's heads and in chat logs, and evaporates.
+- **Here:** a corpus of specification documents is the source of truth and the
+  thing humans edit and review. Code, tests, config, and infra are **build
+  outputs** produced by coding agents. When code and spec disagree, the spec is
+  right and the code has a bug.
+
+The analogy is `spec : code :: source : compiled binary`. The difference — and
+the entire engineering problem — is that the "compiler" is a nondeterministic
+agent. Everything below is about making that compiler trustworthy enough to run
+unattended in CI/CD.
+
+### Why this is worth trying now
+
+Coding agents are already reliable at **bounded, well-specified** implementation
+tasks. They are unreliable at **holding a large system's intent coherent over
+months**. So put the humans where the leverage is: specifying intent precisely
+and keeping the specification corpus coherent. Let the pipeline do the typing.
+
+---
+
+## 2. What "vibe coding" gets wrong for long-term iteration
+
+Vibe coding works great for the first week and rots fast. The failure modes:
+
+1. **Intent is transient.** It lives in a chat transcript, then it's gone. The
+   next change starts from the *code*, re-deriving intent by archaeology.
+2. **Nothing small to review.** The only reviewable artifact is the code diff,
+   which is larger and noisier than the intent behind it.
+3. **Regeneration is impossible.** You cannot re-run a vibe. There is no
+   deterministic-enough path from "what I wanted" to "what got built."
+4. **Context compounds badly.** Every change carries the cost of understanding
+   every prior undocumented change.
+
+The fix is **not** "write more docs alongside the code" — that just adds a second
+thing to keep in sync. The fix is to make the doc the thing you edit and the
+code the thing you regenerate, with enough structural discipline that
+regeneration is trustworthy.
+
+---
+
+## 3. Design principles
+
+1. **Specs are normative; code is derived.** A spec/code disagreement is always a
+   code bug.
+2. **A spec is "done" only when an agent can execute it with zero clarifying
+   questions.** Ambiguity is a defect the linter should catch.
+3. **Every requirement has a machine-checkable acceptance criterion.** "The
+   pipeline is trusted" is exactly equivalent to "the acceptance criteria are
+   strong." This is the load-bearing principle.
+4. **Small, composable spec units with explicit dependencies** — not one giant
+   document. The unit of change and the unit of regeneration should be small.
+5. **Deterministic scaffolding around nondeterministic generation:** pinned model
+   versions, frozen prompts, content-addressed caching, reproducible
+   verification. Isolate the randomness.
+6. **Humans review the spec diff; machines review the code diff.** Plus targeted
+   human spot-checks of generated code, not line-by-line reading.
+7. **Drift is detectable and fails CI.** Hand-edits to `gen/`, generated
+   interfaces that don't match the contract, requirements with no passing check —
+   all hard failures.
+
+---
+
+## 4. Repository layout (first sketch)
+
+```
+specs/
+  product/            # WHY: user-facing capabilities, end-to-end scenarios
+  architecture/       # HOW (system level): components, boundaries, data flow,
+                      #                     cross-cutting tech decisions
+  components/
+    <component>/
+      spec.md         # normative behavior for this unit
+      interface.md    # public contract: types, endpoints, events, CLI
+      acceptance.md   # machine-checkable criteria + test scenarios
+      constraints.md  # non-functional: perf, security, compatibility
+  decisions/          # ADR-style, append-only, immutable once ratified
+  glossary.md         # canonical vocabulary; specs MUST use these terms
+SPEC_GUIDELINES.md    # the rules every authoring/generating agent follows
+gen/                  # generated code — regenerable, never hand-edited
+pipeline/             # workflow definitions, frozen prompts, model pins
+verification/         # spec-derived tests, contract checks, drift checks
+notes/                # brainstorming; non-normative
+```
+
+Open question: is `gen/` committed or rebuilt on checkout? Leaning **committed**,
+for `git bisect`, offline work, and so a given commit is fully self-describing.
+
+---
+
+## 5. Anatomy of a spec document
+
+**Frontmatter (YAML):** `id`, `title`, `status` (`draft` | `ratified` |
+`deprecated`), `owners`, `depends_on` (list of spec ids), `supersedes`,
+`model_pin` (optional per-spec override), `last_ratified_commit`.
+
+**Body — fixed section order:**
+
+| Section                       | Rule                                                                                          |
+| ----------------------------- | ------------------------------------------------------------------------------------------- |
+| Purpose                       | One paragraph. Why this unit exists.                                                        |
+| Scope                         | Explicit in-scope / out-of-scope bullets.                                                   |
+| Definitions                   | Only deltas from `glossary.md`.                                                             |
+| Behavior                      | Normative requirements. Each has a stable ID (`R-<comp>-001`) and uses RFC 2119 keywords.  |
+| Interfaces                    | Contracts with worked examples. The generated code must match this exactly.                 |
+| Data                          | Schemas, invariants, migration rules.                                                       |
+| Acceptance criteria           | Each maps to ≥1 requirement ID and is machine-checkable (a test, a property, a threshold). |
+| Non-functional constraints    | With measurable targets and how they're measured.                                          |
+| Open questions                | MUST be empty when `status: ratified`.                                                     |
+| Change log                    | Human-readable history.                                                                     |
+
+**Traceability invariant:** every `R-id` is traceable *forward* to at least one
+acceptance criterion and *backward* to a rationale or a decision record. The
+linter enforces both directions.
+
+---
+
+## 6. The pipeline
+
+**Trigger:** a pull request that modifies anything under `specs/`.
+
+1. **Spec lint.** Structure, frontmatter, RFC-2119 usage, no open questions in
+   ratified specs, glossary conformance, acyclic dependency graph, every `R-id`
+   covered by an acceptance criterion, no dangling `depends_on`.
+2. **Impact analysis.** From the changed spec ids plus the dependency graph,
+   compute the minimal set of components to regenerate.
+3. **Generation.** For each impacted component, an agent regenerates
+   `gen/<component>/` from its spec bundle (`spec` + `interface` + `constraints`
+   + depended-upon `interface`s + `glossary`). Frozen prompt, pinned model.
+   Prior code supplied as a *hint only*, or not at all (see open questions).
+4. **Verification.**
+   - Spec-derived tests, generated by an **independent path** (different
+     prompt/model) from `acceptance.md`.
+   - Contract/property tests derived from `interface.md` and `Data`.
+   - Drift check: generated interface must match `interface.md` exactly.
+   - Non-functional gates where feasible (benchmarks, size budgets, static
+     security checks).
+5. **Review packet.** The pipeline emits a human-readable summary: the spec diff,
+   which requirements changed, which components regenerated, verification
+   results, and residual risk. The human reviews **this and the spec diff**, not
+   the code.
+6. **Merge.** `specs/` and `gen/` update atomically in one squashed commit.
+
+---
+
+## 7. Verification is the crux
+
+The system is only as trustworthy as the closing of the gap between "spec says X"
+and "code does X." Techniques, roughly in order of value:
+
+- **Double-entry bookkeeping.** Generate the code and the tests by independent
+  prompts/models from the same spec. Agreement is evidence; disagreement is a
+  spec ambiguity to resolve.
+- **Executable acceptance criteria.** Prefer criteria that *are* tests, or
+  compile to tests, over prose.
+- **Property-based testing** from invariants in `Data` / `Interfaces`.
+- **Golden end-to-end scenarios** from product specs, run against the whole
+  assembled system.
+- **Metamorphic checks** where a true oracle is hard (e.g. "reordering inputs
+  doesn't change the result").
+- **Requirement coverage, not line coverage.** Every `R-id` must have a passing
+  check or CI fails.
+- **Mutation testing on the generated tests** to catch vacuous / tautological
+  ones.
+
+---
+
+## 8. Hard problems to harden against
+
+| Problem | Sketch of mitigation |
+| --- | --- |
+| **Nondeterministic churn** — regen produces diffs with no spec change. | Only regenerate impacted units; content-address the generation cache by spec-bundle hash; accept code-diff noise since humans don't read it; pin models. |
+| **Silent underspecification** — agent fills a gap without telling anyone. | Generation agent MUST emit a machine-readable list of assumptions it made; any assumption fails CI until it's folded into the spec or explicitly waived. |
+| **Legacy / large code** that can't be regenerated wholesale. | Component-scoped adoption. "Sealed" components get a spec that says only "matches existing behavior; do not regenerate" plus characterization tests. |
+| **Cross-component incoherence** — every local spec correct, system still wrong. | Architecture-level acceptance scenarios; contract tests at every boundary. |
+| **Model drift** — the pinned model is deprecated or changes. | Per-spec model pin; bumping it is a re-ratification event gated by full regen + verification. |
+| **Non-functional work** agents are weak at (perf, concurrency, security-critical). | Keep as constraints with benchmarks; allow human-authored `gen/` overrides that are explicitly pinned and carry their own mini-spec. |
+| **Review burden shifts, doesn't vanish.** Reviewing a precise spec is real work. | Accept it. It's smaller, more durable, and more reusable than reviewing code. |
+| **Incident debugging** — is this a spec bug or a generation bug? | Traceability from running code back to `R-id`s (comments/annotations in `gen/`); reproduce against acceptance criteria first. |
+| **Concurrent spec edits / merge conflicts.** | Small spec units; treat `specs/` merges like code merges; re-run lint + impact on the merge result. |
+| **Non-spec-driven change** (dependency bumps, runtime upgrades). | A separate lane that regenerates + re-verifies without a spec diff; if verification stays green, merge. |
+
+---
+
+## 9. Adoption path
+
+1. One greenfield component inside an existing repo — `specs/` + `gen/` living
+   next to hand-written code.
+2. Expand component by component as trust builds.
+3. Wrap the legacy perimeter in sealed specs.
+4. Never require a whole-repo conversion.
+
+---
+
+## 10. What to prototype first, in this repo
+
+1. `SPEC_GUIDELINES.md` — the actual, enforceable rules.
+2. A spec template and one small-but-real example project (candidates: a CLI
+   tool, a small HTTP API, a parser/formatter).
+3. The spec linter.
+4. The generation + verification pipeline as local scripts first, then CI.
+5. **The measurement that matters:** can we make a spec change, run the pipeline,
+   and get correct code plus green verification with **zero human code edits**?
+   Find where it breaks. Iterate there.
+
+---
+
+## 11. Open questions
+
+- Zero-context regeneration vs. prior-code-as-hint — purity vs. stability.
+- How granular is a "component"? What's the right blast radius per spec?
+- Single generation model vs. ensemble / voting.
+- How to represent acceptance criteria: tagged prose, a small DSL, or literal
+  co-located test files?
+- If tests are also generated, who owns them and how do we trust them? (Current
+  answer: independent generation path + mutation testing.)
+- Commit `gen/` or rebuild on checkout? (Leaning: commit.)
+- Provenance / licensing of generated code.
+- How do product-level specs and component-level specs stay reconciled — is
+  there a generated traceability matrix?
+
+---
+
+## 12. Naming
+
+Repo is `hotdocs`. The methodology needs a name — candidates: "spec-as-source",
+"normative development", "documents-first". Decide later; it doesn't matter yet.
