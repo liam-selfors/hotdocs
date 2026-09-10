@@ -215,9 +215,31 @@ and "code does X." Techniques, roughly in order of value:
 
 ---
 
-## 11. Open questions
+## 11. Decisions (resolved from open questions)
 
-- Zero-context regeneration vs. prior-code-as-hint — purity vs. stability.
+### D1 — Cold regen is the contract; hint mode is a feature-branch tool
+
+The relationship between cold regeneration and prior-code-as-hint is governed by
+the **git branching strategy**, not chosen once globally.
+
+- **Feature branches use hint mode freely.** It is a fast, low-compute *preview*
+  of how a spec change affects the product, so developers can iterate on the
+  specs without paying for full regeneration each time.
+- **Hint mode is also an input to the spec-authoring agents.** The assistant
+  agents that help a developer land a *complete* spec change — dependencies
+  updated, no logical discrepancies, no redundancies — use the hint-mode preview
+  to evaluate completeness before merge.
+- **Hard invariant:** 100% of the generated code on `main` must have undergone a
+  full **cold regen** since the last change to the underlying documents.
+- **Cold regen is part of every merge into `main`** from a feature branch, gated
+  by the full verification suite.
+- **Developers can run a cold regen on any part of the repo on demand** during
+  development, not only at merge time.
+
+---
+
+## 12. Open questions
+
 - How granular is a "component"? What's the right blast radius per spec?
 - Single generation model vs. ensemble / voting.
 - How to represent acceptance criteria: tagged prose, a small DSL, or literal
@@ -231,7 +253,7 @@ and "code does X." Techniques, roughly in order of value:
 
 ---
 
-## 12. Naming
+## 13. Naming
 
 Repo is `hotdocs`. The methodology needs a name — candidates: "spec-as-source",
 "normative development", "documents-first". Decide later; it doesn't matter yet.
