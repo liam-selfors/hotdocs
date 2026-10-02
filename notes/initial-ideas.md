@@ -80,6 +80,9 @@ specs/
   product/            # WHY: capabilities (P-id) + golden end-to-end scenarios
   architecture/       # HOW (system level): components, boundaries, data flow,
                       #                     cross-cutting tech decisions
+  vars/               # env/config parameter declarations (VAR-id): name, type,
+                      # required/optional, description, sensitivity — NEVER
+                      # values (no such field exists) — see D12
   components/
     <component>/
       spec.md         # normative behavior for this unit
@@ -108,8 +111,9 @@ through Git LFS) — see D6. The rendered docs/graph-explorer site built from
 **Frontmatter (YAML):** `id`, `title`, `status` (`draft` | `ratified` |
 `deprecated`), `owners`, `depends_on` (list of spec ids), `realizes` (list of
 product capability `P-id`s this component contributes to — see D8; omit only
-with `sealed: true`), `supersedes`, `model_pin` (optional per-spec override),
-`last_ratified_commit`.
+with `sealed: true`), `uses_var` (list of `VAR-id`s from `specs/vars/` this
+component reads — see D12), `supersedes`, `model_pin` (optional per-spec
+override), `last_ratified_commit`.
 
 **Body — fixed section order:**
 
@@ -611,20 +615,52 @@ nothing dormant that might be broken when it's finally needed.
   a rule for `SPEC_GUIDELINES.md`, already covered by `gate_version` being part
   of the cache key.
 
+### D12 — Secrets never in scope; config *contracts* are, config *values* aren't; `specs/vars/`
+
+Corrects an earlier over-broad answer: "config is out of scope" conflated
+config *values* (rightly excluded) with config *contracts* — the name, meaning,
+and required/optional-ness of a parameter — which belongs in the spec corpus
+like anything else a component's behavior depends on.
+
+- **Secrets — unconditional, not a scope question.** Never in `specs/`, `gen/`,
+  or `verification/`. An automated secret-pattern scan (same shape as D7's
+  license scan: no human sign-off to clear, every flag strictly tracked and
+  communicated) runs pre-merge-gate and, where tooling allows, as early as
+  pre-commit/pre-push.
+- **New area: `specs/vars/`**, parallel to `product/`/`architecture/`/
+  `components/`. Each entry declares a parameter by name — `required` /
+  `optional`, a type (`string`, `url`, `connection-string`, `secret-ref`,
+  `integer`, `enum`, …), a description, and a **`sensitivity: secret |
+  non-secret`** classification. **There is no `value` field in the schema at
+  all** — not a convention to leave it blank, it has nowhere to go.
+- **Anything marked `secret` structurally forbids an `example`/`default`
+  field** — closes off "someone pastes a real-looking example" at the schema
+  level, with the secret scanner as the second layer underneath.
+- **Components declare `uses_var: [VAR-<id>, ...]`** in frontmatter (mirrors
+  `realizes`/`depends_on`) — they reference the declaration, never redefine it,
+  avoiding the same variable getting inconsistently described across multiple
+  components' `constraints.md`.
+- **Component behavior toward configuration is ordinary spec territory**: "if
+  `DATABASE_URL` is missing, fail fast with error X" is a normal `R-id` with a
+  normal acceptance criterion, same as anything else.
+- **Still out of scope:** the actual deployment-time values (conventional
+  secrets manager / env files / CI secret store) and infra-as-code/provisioning
+  itself (Terraform, K8s manifests) — this is about declaring the *shape* of
+  configuration, not pulling deployment automation into the spec corpus.
+- **Lint:** every `uses_var` entry must reference a real declaration (no
+  dangling refs). A declared-but-unused var is a **soft metric**
+  (orphan-var rate), not a hard fail — some config is legitimately
+  global/infra-level without tying to one component (same posture D2 took on
+  fan-in/fan-out).
+- Slots into D9 for free: the graph explorer gets a new node type (vars) with
+  edges to the components that use them.
+
 ---
 
 ## 12. Open questions
 
 _Populated by the review pass below — none of these were in the original
 brainstorm._
-
-**Q11 — How much of secrets/config/infra is in scope?** Specs are plain text,
-committed, and constantly read/written by agents — secrets must never appear in
-them. Config and infra-as-code are a gray zone. Recommendation: **out of scope
-for v1.** Spec-driven generation targets application code; infra/config stays
-conventionally managed. Add a hard linter rule to `SPEC_GUIDELINES.md` — scan
-`specs/`, `gen/`, and `verification/` for secret-shaped strings, same mechanism
-as the D7 license scanner, blocking regardless of scope questions.
 
 **Q12 — Per-merge pipeline cost is in tension with "small, frequent changes"
 (§3 principle 4).** Multiple model calls per merge (canonical gen, best-of-k,

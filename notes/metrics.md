@@ -32,6 +32,8 @@ Consumer tags: `[dev]` developer · `[stk]` stakeholder · `[agt]` system agent 
 - **Orphan-component rate** — components with no `realizes` entry and not
   marked `sealed` — no declared product reason to exist (per D8).
   `[gate] [agt] [dev]`
+- **Orphan-var rate** — declared `specs/vars/` parameters with no component
+  `uses_var` reference. Soft signal, not a gate (per D12). `[agt] [dev]`
 - **Glossary conformance** — undefined-term occurrences per spec. `[agt]`
 - **Ambiguity density** — linter-flagged ambiguous phrases per 1000 words of
   spec. `[agt] [dev]`
