@@ -331,8 +331,14 @@ cache_hit           bool — if true, the fields below are copied from the
                      matching prior commit, not freshly computed
 generated_at
 verification_run_id
-cross_model_check   divergence-gate outcome
-license_scan        result
+verification_report  the VerificationReport (verifier-orchestrator)
+cross_model_check   divergence-gate outcome (cross-model-divergence-checker)
+license_scan        result (license-scanner)
+secret_scan         result (secret-scanner) — missing from an earlier draft
+                     of this schema even though gate_versions already
+                     expected a secret_scanner entry; found while specifying
+                     provenance-writer, which is what actually assembles
+                     this file from every other component's output
 ```
 
 This is the evidence trail for incident debugging (is this a spec bug or a

@@ -30,7 +30,7 @@ change.
 | `license-scanner` | Automated, unconditional license/similarity scan (D7) — k-gram/shingle hashing against a reference corpus, fully deterministic. Fully specced. | `cache-manager` |
 | `secret-scanner` | Automated, unconditional secret-pattern scan (D12), plus a distinct, cache-free pre-commit/pre-push invocation. Fully specced. | `cache-manager` |
 | `cache-manager` | Content-addressed cache keyed by `(spec_bundle_hash, artifact/gate-inputs hash, gate_version, model_pin)` (D13); cache-hit detection feeds rollback (D11). | — |
-| `provenance-writer` | Assembles and writes `.provenance.json` (D7) from the other components' outputs. | `generator`, `verifier-orchestrator`, `cross-model-divergence-checker`, `license-scanner`, `secret-scanner`, `cache-manager` |
+| `provenance-writer` | Assembles and writes `.provenance.json` (D7) from the other components' outputs — collects, never invents. Fully specced; also where D7's schema gap (missing `secret_scan` field) was found and fixed. | `generator`, `verifier-orchestrator`, `cross-model-divergence-checker`, `license-scanner`, `secret-scanner`, `cache-manager` |
 | `review-packet-builder` | Assembles the human-readable PR summary (D11/D12/§6 step 7). | `provenance-writer`, `verifier-orchestrator`, `license-scanner`, `secret-scanner`, `cache-manager` |
 | `corpus-graph-builder` | Builds `corpus-graph.json` (D8/D9) — the `P-id → component → R-id → acceptance → verification-status` walk, orphan-rate computation. | `spec-linter`, `provenance-writer`, `verifier-orchestrator` |
 | `docs-site-renderer` | Pure renderer of `corpus-graph.json` into the interactive graph/docs site (D9). Not committed; CI build artifact. | `corpus-graph-builder` |

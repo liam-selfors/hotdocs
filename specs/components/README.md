@@ -50,6 +50,12 @@ Specced in full depth so far:
   space. Both carry a "retry doesn't erase flagged history" requirement, and
   `secret-scanner` additionally supports a cache-free pre-commit/pre-push
   invocation distinct from its full merge-gate scan.
+- **`provenance-writer`** — all `kind: compiled`. Collects every other
+  gate's already-produced result into one manifest; never invents a field.
+  Found and fixed a real gap in `SPEC_GUIDELINES.md` §8's schema (a missing
+  `secret_scan` field, even though `gate_versions` already expected a
+  `secret_scanner` entry) and gave D11's "cache hit copies the prior
+  manifest forward" claim its first concrete mechanism.
 
 Everything else in the pipeline's own architecture
 (`specs/architecture/pipeline-decomposition.md`) is declared but not yet

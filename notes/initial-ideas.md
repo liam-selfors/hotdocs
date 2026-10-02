@@ -510,6 +510,11 @@ gen/<component>/.provenance.json   (and verification/<component>/)
   verification_run_id
   cross_model_check  — divergence-gate outcome (D3/D5)
   license_scan       — result of the check below
+  secret_scan        — result of D12's secret scan (added here to match
+                       SPEC_GUIDELINES.md §8 — missing from this sketch
+                       even though gate_versions already expected a
+                       secret_scanner entry; found while specifying
+                       provenance-writer)
 ```
 
 This is the hard evidence trail for incident tracing (§8) and doubles as an
