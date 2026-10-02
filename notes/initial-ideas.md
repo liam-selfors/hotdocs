@@ -93,8 +93,8 @@ verification/         # spec-derived tests, contract checks, drift checks
 notes/                # brainstorming; non-normative
 ```
 
-Open question: is `gen/` committed or rebuilt on checkout? Leaning **committed**,
-for `git bisect`, offline work, and so a given commit is fully self-describing.
+`gen/` and `verification/` are committed on every branch (large binary assets go
+through Git LFS) — see D6.
 
 ---
 
@@ -384,11 +384,35 @@ New metrics (added to `metrics.md`): **`llm-judge` criteria ratio** and
 **judge disagreement rate**, parallel to the compiled-vs-freeform metric from
 D4.
 
+### D6 — `gen/` and `verification/` are committed, always, with an LFS exception
+
+Settled, not a toss-up — it follows from decisions already made rather than a
+fresh tradeoff:
+
+- The usual reason to `.gitignore` build output is to avoid a second,
+  potentially-stale source of truth. **D1 already makes that impossible on
+  `main`**: cold regen is mandatory at every merge, so whatever's committed
+  there is always fresh by construction.
+- The usual cost of committing generated output is repo bloat from iterative
+  regeneration churn. **§6 already neutralizes that**: merges into `main` are
+  squashed, so all feature-branch hint-mode iteration collapses into one clean
+  commit and never pollutes `main`'s permanent history.
+
+So: **`gen/` and `verification/` are committed on every branch, no exceptions**
+for ordinary generated source — this gets real `git bisect` / `git blame` on
+`main`, self-describing commits, offline work, and simple deploys (checkout and
+run, no pipeline dependency at deploy time). It also avoids depending on exact
+reproducibility of generation, which D3's best-of-k retry already doesn't
+guarantee unless the winning artifact itself is what's stored.
+
+**Exception: large generated binary assets go through Git LFS**, not a plain
+blob commit, to keep plain-text diffing and clone size sane for the actual
+source-like output.
+
 ---
 
 ## 12. Open questions
 
-- Commit `gen/` or rebuild on checkout? (Leaning: commit.)
 - Provenance / licensing of generated code.
 - How do product-level specs and component-level specs stay reconciled — is
   there a generated traceability matrix?
