@@ -71,6 +71,10 @@ Consumer tags: `[dev]` developer · `[stk]` stakeholder · `[agt]` system agent 
   unexpected deltas suggest an incomplete or wrong spec edit. `[agt] [dev]`
 - **Normative-statement density** — RFC-2119 keyword count per section; flags
   under-specified sections. `[agt]`
+- **Mechanically-compiled vs. freeform acceptance criteria** — % of criteria
+  expressible as structured Given/When/Then (deterministically compiled) vs.
+  requiring freeform LLM interpretation to become executable (per D4). High
+  freeform % ⇒ specs are under-formalized. `[agt] [dev]`
 - **Review iterations per spec PR**. `[dev]`
 
 ---

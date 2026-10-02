@@ -306,12 +306,40 @@ mechanisms, judged separately:
   pass every component's verification?" is the readiness gate for bumping a
   pin (itself a re-ratification event, per §8).
 
+### D4 — Acceptance criteria: constrained Given/When/Then, not prose or raw test files
+
+Rejected the pure forms: **tagged prose** alone can't be mechanically checked for
+traceability (only an LLM's judgment call, which undermines "independent path"
+agreement as evidence) and **literal test files** are code — hand-authoring them
+in `specs/` would blur the line that `specs/` is never executable, and couples
+specs to one stack/framework.
+
+- `acceptance.md` constrains each criterion to a **Given/When/Then block** with a
+  required `Covers: <R-id>` field. This is readable as plain English in a spec
+  diff *and* mechanically parseable — the linter checks "every block covers a
+  real `R-id`, every `R-id` has ≥1 block" with a real parser, no LLM judgment
+  needed.
+- **Reuse actual Gherkin syntax** for the structured subset (embedded as
+  Gherkin-style blocks inside the markdown `acceptance.md`, tagged
+  `@covers:R-<id>`), rather than inventing a bespoke grammar — mature parsers
+  and tooling already exist for it.
+- Where Given/When/Then can express the criterion (the majority), it **compiles
+  deterministically** to test scaffolding — no LLM in that step, which is what
+  makes the independent-generation-path agreement in §7 meaningful.
+- Where it can't (fuzzy, UX, some non-functional criteria), it stays freeform
+  prose and the test-generation agent fills the gap — an explicit, *tracked*
+  degraded path, not treated the same as the mechanically-compiled majority.
+- **Generated tests live in `verification/`, never in `specs/`.** `specs/`
+  stays non-executable even for generated artifacts; `verification/` output is
+  regenerable under the same cold-regen/caching discipline as `gen/`.
+- New metric (added to `metrics.md`): % of acceptance criteria requiring
+  freeform LLM interpretation vs. mechanically compiled — a corpus-health
+  signal, not a gate.
+
 ---
 
 ## 12. Open questions
 
-- How to represent acceptance criteria: tagged prose, a small DSL, or literal
-  co-located test files?
 - If tests are also generated, who owns them and how do we trust them? (Current
   answer: independent generation path + mutation testing.)
 - Commit `gen/` or rebuild on checkout? (Leaning: commit.)
