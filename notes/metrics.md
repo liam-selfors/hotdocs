@@ -53,10 +53,12 @@ Consumer tags: `[dev]` developer · `[stk]` stakeholder · `[agt]` system agent 
   perimeter) vs. fully spec-driven. Adoption progress. `[stk]`
 - **Cold-regen freshness** — for each component, time since last underlying-doc
   change vs. time since last successful cold regen. `[gate] [agt]`
-- **Multi-model coverage rate** — % of merges where a second model was
-  available for the D3 cross-model and D5 `llm-judge` disagreement checks.
-  Low rate ⇒ the corpus is running in degraded single-model mode for those
-  defenses more often than intended (per D10). `[stk] [agt]`
+- **Multi-model coverage rate** — % of merges with a **verified, promotable
+  standby build** available (`cross_model_divergence_check` or
+  `fallback_standby_build` enabled with a second model configured, per D10) —
+  not merely "a second model is configured," since the toggle (D3) decouples
+  the two. Low rate ⇒ a primary-model outage would halt merges more often than
+  intended. `[stk] [agt]`
 
 ---
 
