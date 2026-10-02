@@ -41,6 +41,15 @@ Specced in full depth so far:
   at the judgment/model boundary: coordinating `llm-judge` evaluations is
   itself deterministic dispatch-and-record logic, even though what it
   dispatches to isn't.
+- **`cross-model-divergence-checker`** — all `kind: compiled`, for the same
+  reason as `verifier-orchestrator`: comparing two already-produced,
+  concrete candidates needs no judgment, even though producing them did.
+- **`license-scanner`** / **`secret-scanner`** — all `kind: compiled`;
+  k-gram/pattern-matching is fully deterministic, so neither needed
+  `generated-test` or `llm-judge` despite sitting in the compliance/scanning
+  space. Both carry a "retry doesn't erase flagged history" requirement, and
+  `secret-scanner` additionally supports a cache-free pre-commit/pre-push
+  invocation distinct from its full merge-gate scan.
 
 Everything else in the pipeline's own architecture
 (`specs/architecture/pipeline-decomposition.md`) is declared but not yet
