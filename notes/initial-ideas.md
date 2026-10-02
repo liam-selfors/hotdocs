@@ -595,7 +595,7 @@ No special "incident mode." A spec revert that returns the corpus to a
 byte-identical prior state produces the same `spec_bundle_hash` that an earlier,
 already-verified commit produced — which means it's **a cache hit across the
 entire gate stack** (generation, D3 cross-model, D5 `llm-judge`, D7 license
-scan) under the same content-addressed caching Q12 establishes generally, not a
+scan) under the same content-addressed caching D13 establishes generally, not a
 feature built specifically for incidents. Nothing new to invoke under pressure,
 nothing dormant that might be broken when it's finally needed.
 
@@ -655,22 +655,38 @@ like anything else a component's behavior depends on.
 - Slots into D9 for free: the graph explorer gets a new node type (vars) with
   edges to the components that use them.
 
+### D13 — Merge cost is already bounded by D1+D2; cache, parallelize, and treat cost as a D2 signal
+
+The premise that the full gate stack runs on every tiny edit doesn't hold: **D1**
+already makes iteration cheap (hint mode on feature branches; the full stack
+runs once, at merge, not per edit), and **D2** already bounds the ceiling
+(impact analysis scopes a merge's cost to touched components; size caps bound
+how expensive any one component's gates can get). So the real question narrows
+to "is the cost of one PR's merge low enough to not pressure batching unrelated
+changes into it" — answered with three additions, not a more aggressive
+tiered-verification scheme:
+
+1. **Content-addressed caching across every gate**, not just generation —
+   cache key `(spec_bundle_hash, artifact/gate-inputs hash, gate_version,
+   model_pin)`, applied to generation, D10's cross-model/judge checks, and D7's
+   license scan alike. This is the mechanism D11's rollback-as-cache-hit relies
+   on. Mainly pays off for reverts/duplicate work, a secondary win.
+2. **Parallelize independent gates within a merge** — canonical generation, the
+   cross-model check, and the license scan have no sequential dependency on
+   each other given the same inputs. Cuts wall-clock latency (what a developer
+   feels) even where it doesn't cut total spend.
+3. **Rising merge cost/latency is a corpus-health signal, not a problem for more
+   pipeline cleverness.** A consistently expensive or slow component is
+   evidence it's oversized or over-coupled — feeds back into D2's existing
+   size-cap enforcement rather than spawning new cost-cutting machinery. Cheap
+   merges are a *consequence* of good component boundaries.
+
 ---
 
 ## 12. Open questions
 
 _Populated by the review pass below — none of these were in the original
 brainstorm._
-
-**Q12 — Per-merge pipeline cost is in tension with "small, frequent changes"
-(§3 principle 4).** Multiple model calls per merge (canonical gen, best-of-k,
-cross-model check, possible `llm-judge` dual runs, license scan) creates
-pressure to batch spec edits to amortize cost — working against the small-unit
-principle the whole design leans on. Recommendation: extend the
-content-addressed caching already assumed for generation (§8) to **every
-gate** — cross-model divergence, `llm-judge` runs, license scan — keyed by
-(spec-bundle hash, artifact hash, gate version), so an unrelated spec change
-never re-pays for a gate whose inputs didn't change.
 
 **Q13 — `glossary.md` is a single global file** — exactly the "one giant
 document" shape §3 principle 4 warns specs away from. Low priority, but cheap
