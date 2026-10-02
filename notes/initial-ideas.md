@@ -208,8 +208,8 @@ and "code does X." Techniques, roughly in order of value:
 | **Incident debugging** — is this a spec bug or a generation bug? | The D7 provenance manifest gives a hard answer (exact spec-bundle hash, model, prompt version, sample index behind any `gen/` output); reproduce against acceptance criteria first. |
 | **Concurrent spec edits / merge conflicts.** | Small spec units; treat `specs/` merges like code merges; re-run lint + impact on the merge result. |
 | **Non-spec-driven change** (dependency bumps, runtime upgrades). | A separate lane that regenerates + re-verifies without a spec diff; if verification stays green, merge. |
-| **Secrets, environment config, infra-as-code** — specs are plain text, committed, and constantly read/written by agents; secrets must never land in them. | *Pending — see Q11 in §12.* |
-| **Pinned-model unavailability** — D1 makes cold regen mandatory at every merge; if the pinned model is deprecated or has an outage, every merge repo-wide blocks. | *Pending — see Q9 in §12.* |
+| **Secrets, environment config, infra-as-code** — specs are plain text, committed, and constantly read/written by agents; secrets must never land in them. | Secrets: an automated, strictly-tracked scan, same shape as the license gate (D12). Config *contracts* (not values) are spec-driven via `specs/vars/` (D12); values and infra provisioning stay out of scope. |
+| **Pinned-model unavailability** — D1 makes cold regen mandatory at every merge; if the pinned model is deprecated or has an outage, every merge repo-wide blocks. | A second model, when configured, already produces a passing build every merge (D3/D10) and gets promoted to canonical on confirmed outage — no dormant fallback. With only one model available, merges halt; accepted as rare (D10). |
 
 ---
 
@@ -681,24 +681,41 @@ tiered-verification scheme:
    size-cap enforcement rather than spawning new cost-cutting machinery. Cheap
    merges are a *consequence* of good component boundaries.
 
+### D14 — `glossary.md` stays a single file; splitting is a bounded-context decision, not a size response
+
+Reversed my own initial recommendation here (sharding by a D2-style size cap).
+That was a category error: components are split *because* separability is the
+goal (independent regeneration, independent ownership); a glossary's entire
+purpose is the opposite — one canonical definition for terms used *across*
+components. Sharding by namespace would reintroduce the scattered-definition
+problem a glossary exists to prevent.
+
+- `glossary.md` stays a single file by default, **no size-based sharding
+  rule**. Glossaries grow sublinearly with corpus size (new components mostly
+  reuse existing terms), and even a large one stays a small, greppable text
+  file — nowhere near D2's caps, which exist for a different reason (generation
+  context budget), not lookup cost. Edits are overwhelmingly additive, so
+  merge-conflict risk stays low without any special handling.
+- The only legitimate reason to split it is a genuinely separate bounded
+  context — two subsystems that don't share vocabulary — made as a deliberate
+  `architecture/`-level decomposition decision (same tier as splitting
+  components, D2), never as a routine response to word count.
+- Glossary size is tracked as a visibility metric (`metrics.md`) so growth
+  doesn't go unnoticed, but isn't lint-gated.
+
 ---
 
 ## 12. Open questions
 
-_Populated by the review pass below — none of these were in the original
-brainstorm._
+_None outstanding — Q9–Q13 from the review pass are now D10–D14._
 
-**Q13 — `glossary.md` is a single global file** — exactly the "one giant
-document" shape §3 principle 4 warns specs away from. Low priority, but cheap
-to decide now rather than retrofit later. Recommendation: allow sharding into
-`glossary/<namespace>.md` once it crosses a D2-style size cap, with a single
-generated merged view for lookups and the linter.
-
-Also fixed in this pass (not decisions, just drift that had accumulated as D1–D9
-landed): §3 principle 6, §6 step 3, and §7's double-entry/executable-criteria
-bullets no longer matched D1/D3/D4/D5 — reworded to match. §8 gained the two
-rows above plus a tightened incident-debugging mitigation pointing at D7. D8/D9
-no longer imply two separate generated manifests.
+Also fixed in the original review pass (not decisions, just drift that had
+accumulated as D1–D9 landed): §3 principle 6, §6 step 3, and §7's
+double-entry/executable-criteria bullets no longer matched D1/D3/D4/D5 —
+reworded to match. §8 gained new rows for secrets/config scope (D12) and
+pinned-model unavailability (D10), plus a tightened incident-debugging
+mitigation pointing at D7. D8/D9 no longer imply two separate generated
+manifests.
 
 ---
 

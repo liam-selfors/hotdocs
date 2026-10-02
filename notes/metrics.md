@@ -35,6 +35,9 @@ Consumer tags: `[dev]` developer · `[stk]` stakeholder · `[agt]` system agent 
 - **Orphan-var rate** — declared `specs/vars/` parameters with no component
   `uses_var` reference. Soft signal, not a gate (per D12). `[agt] [dev]`
 - **Glossary conformance** — undefined-term occurrences per spec. `[agt]`
+- **Glossary size** — word/entry count over time. Visibility only, not gated —
+  a split is a deliberate bounded-context call (D14), never a size response.
+  `[dev] [stk]`
 - **Ambiguity density** — linter-flagged ambiguous phrases per 1000 words of
   spec. `[agt] [dev]`
 - **Dependency graph health** — max fan-in, max fan-out, cycle count (must be
