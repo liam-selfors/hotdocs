@@ -70,7 +70,10 @@ regeneration is trustworthy.
    mutation testing), not from a person reading output.
 7. **Drift is detectable and fails CI.** Hand-edits to `gen/`, generated
    interfaces that don't match the contract, requirements with no passing check —
-   all hard failures.
+   all hard failures, with exactly two declared, tracked exemptions and no
+   others: `sealed` components (§8, component granularity) and pinned overrides
+   (§8, file granularity) — both require characterization tests and visible
+   provenance, never a silent exception.
 
 ---
 
@@ -219,7 +222,7 @@ and "code does X." Techniques, roughly in order of value:
 | **Legacy / large code** that can't be regenerated wholesale. | Component-scoped adoption. "Sealed" components (`sealed: true`) get a spec that says only "matches existing behavior; do not regenerate" plus characterization tests. **Their actual code lives at `source_path`, outside `gen/` entirely** — `gen/` is reserved for cold-regen-governed output, so a sealed component's hand-maintained code is never subject to principle 7's "no hand-edits to `gen/`" rule or D1's cold-regen invariant (which excludes sealed components explicitly). Its characterization tests still live in `verification/<component>/` the normal way — wrapping legacy code in traceability/verification doesn't require rewriting it. |
 | **Cross-component incoherence** — every local spec correct, system still wrong. | Architecture-level acceptance scenarios; contract tests at every boundary. |
 | **Model drift** — the pinned model is deprecated or changes. | Per-spec model pin; bumping it is a re-ratification event gated by full regen + verification. |
-| **Non-functional work** agents are weak at (perf, concurrency, security-critical). | Keep as constraints with benchmarks; allow human-authored `gen/` overrides that are explicitly pinned and carry their own mini-spec. |
+| **Non-functional work** agents are weak at (perf, concurrency, security-critical). | Keep as constraints with benchmarks. Where a human-authored override is genuinely needed, it's a **pinned override**, not a silent exception to principle 7 or D1: declared in `gen/<component>/.overrides.json` (exempted file paths, rationale, owner), still requires characterization tests in `verification/` (the same bar `sealed` components meet), and is visible in the D9 node view and tracked as a debt metric (`metrics.md`) — the file-granularity version of the same escape hatch `sealed`/`source_path` is at component granularity, not a second, unreconciled mechanism. |
 | **Review burden shifts, doesn't vanish.** Reviewing a precise spec is real work. | Accept it. It's smaller, more durable, and more reusable than reviewing code. |
 | **Incident debugging** — is this a spec bug or a generation bug? | The D7 provenance manifest gives a hard answer (exact spec-bundle hash, model, prompt version, sample index behind any `gen/` output); reproduce against acceptance criteria first. |
 | **Concurrent spec edits / merge conflicts.** | Small spec units; treat `specs/` merges like code merges; re-run lint + impact on the merge result. |

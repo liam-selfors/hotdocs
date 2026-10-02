@@ -114,6 +114,10 @@ Consumer tags: `[dev]` developer · `[stk]` stakeholder · `[agt]` system agent 
   fail, unwaived assumption. `[gate] [dev]`
 - **Assumption-waiver count** — assumptions explicitly waived rather than folded
   into the spec. A debt metric. `[stk] [dev]`
+- **Pinned-override file count** — human-authored exemptions declared in
+  `gen/<component>/.overrides.json` (per §8/principle 7). A debt metric,
+  parallel to assumption-waiver count — tracks how much of `gen/` is outside
+  the normal cold-regen discipline, file by file. `[stk] [dev]`
 
 ---
 
