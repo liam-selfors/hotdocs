@@ -12,15 +12,20 @@ reviewing diffs of intent.
 
 ## Status
 
-Early brainstorming. Nothing here is settled. See `notes/` for working ideas and
-`specs/` (once it exists) for the real thing.
+Brainstorming is done (`notes/initial-ideas.md`, decisions D1–D14), the rules
+are formalized (`SPEC_GUIDELINES.md`), and the repository scaffold exists.
+Nothing under `specs/`, `gen/`, `pipeline/`, or `verification/` has real
+content yet — no components, no linter, no generation pipeline. Next up: a
+small example project to stress-test the design against something concrete.
 
-## Repository conventions (planned)
+## Repository conventions
+
+See `SPEC_GUIDELINES.md` for the full, enforceable rules. Summary:
 
 | Path            | Purpose                                                        |
 | --------------- | ------------------------------------------------------------- |
 | `specs/`        | Normative specification documents — the source of truth.      |
-| `gen/`          | Generated code. Not hand-edited. Regenerable from `specs/`.   |
-| `pipeline/`     | Agent workflow definitions, frozen prompts, model pins.       |
-| `verification/` | Spec-derived test suites, contract checks, drift detection.   |
+| `gen/`          | Generated code. Not hand-edited (two declared exemptions only). |
+| `pipeline/`     | Agent workflow definitions, frozen prompts, model pins, toggles. |
+| `verification/` | Generated tests, contract checks, drift detection, corpus graph. |
 | `notes/`        | Brainstorming and design discussion. Non-normative.           |
