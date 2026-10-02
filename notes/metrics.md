@@ -8,10 +8,13 @@ Developers, stakeholders, and the system's own agents should be able to referenc
 high-level metrics at every phase — ideation, specification, review, generation,
 verification, release, and production operation — to inform their decisions.
 
-This file is a growing catalog of candidate metrics. Nothing here is committed.
-Later work: decide which are computed, where their definitions live (likely a
-`metrics/` area or metric blocks attached to specs), how agents query them, and
-which ones become hard CI gates vs. dashboards vs. trend lines.
+This file is a growing catalog. Most entries are still candidates — nothing
+about *computing* them is decided (where definitions live, how agents query
+them, dashboards vs. trend lines). A subset, though, are no longer speculative:
+where an entry is tagged `[gate]` *and* cited by a `D<n>` decision in
+[`initial-ideas.md`](initial-ideas.md) (orphan rates/D8, cross-model divergence
+incidents/D3, judge disagreement rate/D5, license-scan flag rate/D7), the gate
+itself is settled — only its dashboarding/trend-reporting is still open.
 
 Consumer tags: `[dev]` developer · `[stk]` stakeholder · `[agt]` system agent ·
 `[gate]` candidate hard CI gate.
