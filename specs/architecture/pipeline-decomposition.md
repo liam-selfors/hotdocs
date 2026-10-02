@@ -21,7 +21,7 @@ change.
 | Component | Purpose | `depends_on` |
 | --- | --- | --- |
 | `spec-linter` | Structural/traceability/size-cap checks over a spec bundle. Pure, deterministic, no model calls. | — |
-| `impact-analyzer` | From changed spec ids + the dependency graph, computes the minimal set of components to regenerate. | `spec-linter` |
+| `impact-analyzer` | From changed spec ids + the dependency graph, computes the minimal set of components to regenerate — now fully specced, including the interface-vs-internal-change distinction (`spec-bundle` changes stay local; `interface.md`/`specs/vars/`/capability changes propagate) that D2 previously stated only as a sizing heuristic, never as an executable rule. | `spec-linter` |
 | `spec-bundle-assembler` | Assembles a component's full generation input (spec + interface + constraints + dependency interfaces + referenced vars + glossary) into one payload. Reused by canonical generation, the cross-model check, and hint-mode previews. | `spec-linter` |
 | `criterion-compiler` | Deterministic Gherkin → test-scaffolding compiler for `compiled`-kind acceptance criteria. | — |
 | `generator` | Calls the pinned canonical model (cold, best-of-k retry) to produce `gen/<component>/` from a bundle. | `spec-bundle-assembler`, `cache-manager` |
@@ -73,6 +73,22 @@ definition (`source_path`, characterization tests, exempt from the D1
 cold-regen invariant) already covers this use case correctly; it doesn't need
 a new mechanism, just a note that "sealed" isn't only for legacy debt.
 
-Its full spec bundle isn't written yet — this document records its place in
-the dependency graph and its `sealed` status so the graph is honest about it;
-`specs/components/criterion-compiler/` is a follow-up.
+Full spec bundle now at `specs/components/criterion-compiler/` — see its
+`spec.md` for the resolved generated-test/circularity question this raised
+(its own acceptance criteria are all `kind: generated-test`, verified by a
+human-authored test suite independent of the hand-maintained implementation —
+verifying the compiler with the compiler would prove nothing).
+
+## The step-phrase grammar is a corpus-wide, architecture-level convention
+
+`criterion-compiler` implements a fixed Given/When/Then step-phrase grammar
+(the full table lives in its `interface.md`, since that component is what
+implements it). The grammar itself doesn't fit any other document type — not
+a component's own behavior, not a product capability — but it *is* exactly
+what this document already claims to own: a cross-cutting technical decision
+(`notes/initial-ideas.md` §4). Recorded here so it's unambiguous: **changing
+the step-phrase grammar is an architecture-level decision**, carrying the
+same governance weight as splitting a component (D2) — not something a
+routine `criterion-compiler` spec edit does on its own, because it's a
+breaking change to every `compiled` criterion in the corpus, not just to that
+one component.

@@ -1,0 +1,23 @@
+---
+id: comp-impact-analyzer-constraints
+title: Impact Analyzer — Non-Functional Constraints
+status: draft
+owners: [pipeline-team]
+---
+
+# Impact Analyzer — Non-Functional Constraints
+
+- **Determinism.** Same `(changed_ids, corpus state)` input MUST always
+  produce byte-identical output. Required for D13's cache-key correctness,
+  same as `spec-linter`.
+- **Performance.** Computing blast radius for a single-digit number of
+  changed ids MUST complete in well under 1 second against a corpus with
+  hundreds of components — it is a graph traversal, not a search, and must
+  not become a merge-latency bottleneck (D13).
+- **No network access, no model calls.** Pure graph logic over the already-
+  validated corpus graph `spec-linter` produces.
+- **Fail closed, not best-effort.** Per R-IMPACT-007, an invalid corpus graph
+  MUST produce an explicit precondition error, never a partial or
+  silently-wrong blast radius — an under-computed blast radius here directly
+  threatens `P-ZERO-EDIT` (a component that needed regeneration silently
+  not getting it).
