@@ -178,7 +178,10 @@ linter enforces both directions.
 5. **Review packet.** The pipeline emits a human-readable summary: the spec
    diff, which requirements changed, which components regenerated, verification
    results, residual risk, any license/secret-scan flags (D7/D12, surfaced even
-   when auto-resolved), and whether the merge was a cache hit (D11). The human
+   when auto-resolved), whether the merge was a cache hit (D11), and any new or
+   changed `sealed` / `.overrides.json` declarations (principle 7/§8) — a
+   declared exemption from the normal discipline is exactly the kind of thing a
+   reviewer should see called out, not buried in a frontmatter diff. The human
    reviews **this and the spec diff**, not the code.
 6. **Merge.** `specs/`, `gen/`, and `verification/` (including the
    `corpus-graph.json` manifest, D8/D9) update atomically in one squashed
@@ -271,11 +274,12 @@ the **git branching strategy**, not chosen once globally.
   to evaluate completeness before merge.
 - **Hard invariant:** 100% of the **spec-driven** generated code on `main` must
   have undergone a full **cold regen** since the last change to the underlying
-  documents. Explicitly scoped to exclude `sealed` components (§8/§9) — a
-  sealed component is, by definition, not meant to be regenerated at all, so it
-  can't be measured against a regeneration invariant. Its trust model is
-  characterization tests in `verification/`, not cold regen; see the
-  `sealed`/`source_path` clarification added to §8.
+  documents. Explicitly scoped to exclude both of principle 7's declared
+  exemptions: `sealed` components (component granularity) and files declared in
+  a `.overrides.json` pinned override (file granularity) — §8/§9. Neither is
+  meant to be regenerated at all, so neither can be measured against a
+  regeneration invariant; their trust model is characterization tests in
+  `verification/`, not cold regen.
 - **Cold regen is part of every merge into `main`** from a feature branch, gated
   by the full verification suite.
 - **Developers can run a cold regen on any part of the repo on demand** during
@@ -489,6 +493,14 @@ gen/<component>/.provenance.json   (and verification/<component>/)
   prompt_version     — id of the frozen prompt template used
   sample_index       — which best-of-k sample won (D3)
   pipeline_version   — version of the generation pipeline itself
+  gate_versions      — per-gate version map (e.g. {compiler, license_scanner,
+                       cross_model_check, mutation_harness, secret_scanner}) —
+                       the actual cache-key granularity D11/D13 need; a single
+                       pipeline_version can't express "only the license
+                       scanner's signature DB changed"
+  cache_hit          — bool; if true, verification_run_id/cross_model_check/
+                       license_scan below are copied from the matching prior
+                       commit (D11), not freshly computed this merge
   generated_at
   verification_run_id
   cross_model_check  — divergence-gate outcome (D3/D5)
@@ -591,7 +603,7 @@ produces.
 - **Build cadence:** regenerated on every merge to `main`, same as everything
   else — it's a cheap render over data the pipeline already computed, no model
   call involved, so there's no reason for it to lag behind `main` the way a
-  scheduled job would (consistent with the Q3/Q7 preference for pre-merge over
+  scheduled job would (consistent with the D3/D7 preference for pre-merge over
   scheduled).
 - **What's committed vs. built:** the manifest JSON is committed under D6 (cheap,
   text, diffable, useful to other tooling beyond the docs site itself). The
@@ -720,8 +732,8 @@ tiered-verification scheme:
 
 1. **Content-addressed caching across every gate**, not just generation —
    cache key `(spec_bundle_hash, artifact/gate-inputs hash, gate_version,
-   model_pin)`, applied to generation, D10's cross-model/judge checks, and D7's
-   license scan alike. This is the mechanism D11's rollback-as-cache-hit relies
+   model_pin)`, applied to generation, D10's cross-model/judge checks, D7's
+   license scan, and D12's secrets scan alike. This is the mechanism D11's rollback-as-cache-hit relies
    on. Mainly pays off for reverts/duplicate work, a secondary win.
 2. **Parallelize independent gates within a merge** — canonical generation, the
    cross-model check, and the license scan have no sequential dependency on

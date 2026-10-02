@@ -97,9 +97,11 @@ Consumer tags: `[dev]` developer · `[stk]` stakeholder · `[agt]` system agent 
   low for components with testable runtime behavior; high ratio there is a
   signal the spec is reaching for judgment where a real test should exist.
   `[agt] [dev]`
-- **Judge disagreement rate** — how often two independent `llm-judge` models
-  disagree on a criterion, blocking merge (per D5). A per-criterion or
-  per-component hot spot here means that criterion's wording is ambiguous.
+- **Judge disagreement rate** — of the `llm-judge` evaluations that actually ran
+  with the dual-model check active (D3's toggle enabled, a second model
+  configured — see multi-model coverage rate), how often the two disagree,
+  blocking merge (per D5). A per-criterion or per-component hot spot here means
+  that criterion's wording is ambiguous.
   `[gate] [agt]`
 - **Review iterations per spec PR**. `[dev]`
 
@@ -175,8 +177,8 @@ Consumer tags: `[dev]` developer · `[stk]` stakeholder · `[agt]` system agent 
   metric. `[stk] [dev]`
 - **Change failure rate** — % of releases that cause an incident. `[stk]`
 - **Cold-regen freshness at release** — proof that 100% of `gen/` on `main` was
-  cold-regenerated since the last doc change (D1 invariant, scoped to
-  non-`sealed` components). `[gate]`
+  cold-regenerated since the last doc change (D1 invariant, scoped to exclude
+  `sealed` components and `.overrides.json`-pinned files). `[gate]`
 - **Rollback rate** and **MTTR**. `[stk]`
 - **Release size** — `R-id`s changed, components touched. `[dev] [stk]`
 
