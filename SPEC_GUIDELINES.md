@@ -188,8 +188,11 @@ place subsystem grouping is expressed.
 ## 5. Acceptance criteria
 
 Each criterion in `acceptance.md` is a **Given/When/Then block**, written in
-Gherkin syntax, with a required `Covers: R-<id>` tag (`@covers:R-<id>`) and a
-required `kind`:
+Gherkin syntax, with a required `Covers:` tag (`@covers:<id>`) and a required
+`kind`. `Covers:` takes an `R-<id>` in a component's `acceptance.md`, or a
+`P-<id>` in a product capability's golden scenarios (D8) — product-level
+scenarios have no component `R-id` to reference, only their own capability
+id:
 
 | `kind` | How it's checked | Use when |
 | --- | --- | --- |
@@ -198,8 +201,9 @@ required `kind`:
 | `llm-judge` | An agent evaluates the criterion directly against an artifact — no code produced. | Qualities that are not runtime behavior at all (spec hardening, absence of contradiction, clarity). |
 
 Rules:
-- Every criterion, of any `kind`, **MUST** carry `Covers: R-<id>` referencing a
-  real requirement.
+- Every criterion, of any `kind`, **MUST** carry a `Covers:` tag referencing a
+  real `R-<id>` (component) or `P-<id>` (product capability) — never a
+  dangling reference.
 - Prefer `compiled`, then `generated-test`; reach for `llm-judge` only when no
   test could capture the criterion even in principle. (D5)
 - Generated test code **MUST** live under `verification/`, never under
