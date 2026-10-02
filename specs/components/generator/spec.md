@@ -5,7 +5,7 @@ status: draft
 owners: [pipeline-team]
 depends_on: [comp-spec-bundle-assembler, comp-cache-manager]
 realizes: [P-ZERO-EDIT]
-uses_var: [VAR-ANTHROPIC-API-KEY]
+uses_var: [VAR-ANTHROPIC-API-KEY, VAR-SECOND-MODEL-API-KEY]
 model_pin: claude-sonnet-5
 sealed: false
 ---
@@ -65,7 +65,13 @@ No deltas from `specs/glossary.md`.
 - **R-GEN-004** — The model identifier MUST be an explicit parameter, never
   hardcoded to "the canonical pin" — this is the single mechanism that lets
   `cross-model-divergence-checker` call this same component with a second
-  model rather than reimplementing generation.
+  model rather than reimplementing generation. Credential resolution MUST
+  follow the model identifier, not a fixed assumption of which vendor is in
+  play — this is why `uses_var` lists both `VAR-ANTHROPIC-API-KEY` and
+  `VAR-SECOND-MODEL-API-KEY` rather than only the former: found as a gap
+  while specifying `cross-model-divergence-checker`, which needs this
+  component to actually be able to authenticate to a second vendor, not
+  just accept its identifier as a string.
 - **R-GEN-005** — Before calling any model, generation MUST check
   `cache-manager` using the key `(spec_bundle_hash, gate_inputs_hash,
   gate_version, model_pin)`; on a cache hit, the cached result MUST be
