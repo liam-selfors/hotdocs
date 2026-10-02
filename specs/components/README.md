@@ -56,6 +56,12 @@ Specced in full depth so far:
   `secret_scan` field, even though `gate_versions` already expected a
   `secret_scanner` entry) and gave D11's "cache hit copies the prior
   manifest forward" claim its first concrete mechanism.
+- **`review-packet-builder`** — all `kind: compiled`. Formats already-
+  computed results; deliberately never includes the generated-code diff
+  itself (principle 6).
+- **`corpus-graph-builder`** — all `kind: compiled`. The single source of
+  the `corpus-graph.json` manifest D8's traceability matrix and D9's
+  docs-site-renderer both read — neither recomputes any part of it.
 
 Everything else in the pipeline's own architecture
 (`specs/architecture/pipeline-decomposition.md`) is declared but not yet
