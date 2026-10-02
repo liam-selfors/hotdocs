@@ -41,31 +41,49 @@ notes/                 # brainstorming — non-normative, not read by the pipeli
   commit. (D6)
 - Nothing under `gen/` or `verification/` is hand-edited, with exactly two
   declared exemptions — see §9.
+- A `README.md` anywhere under `specs/` is non-normative scaffolding, not a
+  governed spec — the linter and every other tool in this document **MUST**
+  skip it. The governed set is exactly: `spec.md` / `interface.md` /
+  `acceptance.md` / `constraints.md` under `specs/components/<x>/`; any other
+  named `.md` file directly under `specs/product/`, `specs/architecture/`,
+  `specs/vars/`, or `specs/decisions/`; and `specs/glossary.md`. (Found while
+  bootstrapping `spec-linter` — nothing previously said how to tell a real
+  spec from a placeholder sitting in the same directory.)
 
 ---
 
 ## 2. Universal frontmatter
 
-Every file under `specs/` (except `glossary.md`) carries YAML frontmatter.
-Fields marked **(component only)** apply to `specs/components/<x>/*.md`; all
-others apply wherever relevant.
+Every governed file under `specs/` (per §1's governed-vs-scaffold list;
+excludes `glossary.md`, which has no frontmatter at all) carries YAML
+frontmatter. **Only `spec.md` carries the full field set below** — a
+component's `interface.md`, `acceptance.md`, and `constraints.md` carry just
+`id` / `title` / `status` / `owners`, nothing else. (Established by every
+component bundle written so far; stated explicitly here because nothing said
+it in words before.) Fields marked **(component `spec.md` only)** apply only
+there; all others apply wherever relevant.
+
+"Required" below is one of: **always** (every instance of this field is
+mandatory), **never** (optional everywhere), or a stated **condition**
+(mandatory only when the condition holds, forbidden otherwise — not merely
+optional).
 
 | Field | Required | Meaning |
 | --- | --- | --- |
-| `id` | yes | Stable identifier. `R-<comp>-NNN` scheme for requirements (inline, not frontmatter); the spec file itself uses a document id. |
-| `title` | yes | Human-readable name. |
-| `status` | yes | `draft` \| `ratified` \| `deprecated`. |
-| `owners` | yes | Who (human or team) is accountable for this spec. |
-| `depends_on` | no | List of spec ids this one requires. Forms the dependency graph (D2). |
-| `realizes` | **(component only)**, conditionally required | List of `P-<id>`s this component contributes to. Required unless `sealed: true`. (D8) |
-| `uses_var` | **(component only)**, no | List of `VAR-<id>`s this component reads from `specs/vars/`. (D12) |
-| `supersedes` | no | Prior spec id this one replaces. |
-| `model_pin` | no | Per-spec override of the repo-wide canonical model. |
-| `cross_model_divergence_check` | no | Per-spec override of the repo-wide toggle: `enabled` \| `disabled`. (D3) |
-| `fallback_standby_build` | no | Per-spec override of the repo-wide toggle: `enabled` \| `disabled`. (D10) |
-| `sealed` | **(component only)**, no, default `false` | Legacy-perimeter escape hatch. See §9. (D1/D8) |
-| `source_path` | **(component only)**, required when `sealed: true` | Where the actual, hand-maintained code lives. **MUST NOT** point under `gen/`. |
-| `last_ratified_commit` | yes when `status: ratified` | Commit hash of the ratifying merge. |
+| `id` | always | Stable identifier. `R-<comp>-NNN` scheme for requirements (inline in `spec.md`'s body, not frontmatter); the file itself uses a document id in frontmatter. |
+| `title` | always | Human-readable name. |
+| `status` | always | `draft` \| `ratified` \| `deprecated`. |
+| `owners` | always | Who (human or team) is accountable for this spec. |
+| `depends_on` | never (optional) | List of spec ids this one requires. Forms the dependency graph (D2). **(component `spec.md` only)** |
+| `realizes` | condition: required unless `sealed: true` | List of `P-<id>`s this component contributes to. (D8) **(component `spec.md` only)** |
+| `uses_var` | never (optional) | List of `VAR-<id>`s this component reads from `specs/vars/`. (D12) **(component `spec.md` only)** |
+| `supersedes` | never (optional) | Prior spec id this one replaces. |
+| `model_pin` | never (optional); **inapplicable when `sealed: true`** | Per-spec override of the repo-wide canonical model. **MUST** be omitted (not filled with a placeholder) on a sealed component — there is no generation to pin. **(component `spec.md` only)** |
+| `cross_model_divergence_check` | never (optional); **inapplicable when `sealed: true`**, same reason | Per-spec override of the repo-wide toggle: `enabled` \| `disabled`. (D3) **(component `spec.md` only)** |
+| `fallback_standby_build` | never (optional); **inapplicable when `sealed: true`**, same reason | Per-spec override of the repo-wide toggle: `enabled` \| `disabled`. (D10) **(component `spec.md` only)** |
+| `sealed` | never (optional), default `false` | Legacy-perimeter escape hatch — and, per the `criterion-compiler` precedent, also the correct mechanism for a *permanently* hand-maintained trust anchor, not only temporary legacy debt. See §9. (D1/D8) **(component `spec.md` only)** |
+| `source_path` | condition: required when `sealed: true`, forbidden otherwise | Where the actual, hand-maintained code lives. **MUST NOT** point under `gen/`. **(component `spec.md` only)** |
+| `last_ratified_commit` | condition: required when `status: ratified` | Commit hash of the ratifying merge. |
 
 **Rules:**
 - A spec **MUST NOT** be `status: ratified` while it has any non-empty `Open
@@ -75,6 +93,13 @@ others apply wherever relevant.
   a real, existing spec id. Dangling references are a hard lint failure.
 - `sealed: true` **MUST** carry a `source_path`; `sealed: false` or absent
   **MUST NOT** carry one.
+- A `specs/vars/` declaration's own fields (`required`/`optional`, `type`,
+  `description`, `sensitivity`, `example`/`default`) live in the document
+  **body**, as bullets, not in frontmatter — its frontmatter is just `id` /
+  `title` / `status` / `owners`, same as a component's non-`spec.md` files.
+  (Established by every var declaration written so far; stated explicitly
+  because nothing said it in words before, and frontmatter-vs-body for `vars/`
+  was genuinely ambiguous until now.)
 
 ---
 
