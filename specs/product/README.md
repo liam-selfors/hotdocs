@@ -6,4 +6,6 @@ never against one component in isolation.
 
 See `SPEC_GUIDELINES.md` §3.1.
 
-_No capabilities declared yet._
+- **`P-ZERO-EDIT`** — zero-human-edit merge (the methodology's headline claim).
+- **`P-AMBIGUITY-GATE`** — ambiguity caught before merge, not after.
+- **`P-COMPLIANCE-GATE`** — secrets/license risk never reaches `main` silently.

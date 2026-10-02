@@ -9,4 +9,7 @@ cannot carry an `example` or `default` field.
 
 See `SPEC_GUIDELINES.md` §3.3 and §10 (secrets).
 
-_No variables declared yet._
+- **`VAR-ANTHROPIC-API-KEY`** (secret, required)
+- **`VAR-SECOND-MODEL-API-KEY`** (secret, optional)
+- **`VAR-CACHE-STORE-URL`** (non-secret, required)
+- **`VAR-COMPLIANCE-WEBHOOK-URL`** (non-secret, optional)

@@ -6,4 +6,7 @@ operation that goes through here — never an ordinary component spec edit.
 
 See `SPEC_GUIDELINES.md` §3.2.
 
-_No architecture specs yet._
+- **`pipeline-decomposition.md`** — the hotdocs pipeline tool's own 15-component
+  decomposition and dependency graph. Includes a flagged, unresolved tension
+  (an orchestrator component's fan-out exceeds D2's cap) — see the file for
+  why it wasn't silently patched.
