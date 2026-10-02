@@ -22,10 +22,10 @@ change.
 | --- | --- | --- |
 | `spec-linter` | Structural/traceability/size-cap checks over a spec bundle. Pure, deterministic, no model calls. | — |
 | `impact-analyzer` | From changed spec ids + the dependency graph, computes the minimal set of components to regenerate — now fully specced, including the interface-vs-internal-change distinction (`spec-bundle` changes stay local; `interface.md`/`specs/vars/`/capability changes propagate) that D2 previously stated only as a sizing heuristic, never as an executable rule. | `spec-linter` |
-| `spec-bundle-assembler` | Assembles a component's full generation input (spec + interface + constraints + dependency interfaces + referenced vars + glossary) into one payload. Reused by canonical generation, the cross-model check, and hint-mode previews. | `spec-linter` |
+| `spec-bundle-assembler` | Assembles a component's full generation input (spec + interface + constraints + dependency interfaces + referenced vars + glossary — deliberately excluding `acceptance.md`, to avoid the generation model overfitting to its own tests) into one payload. Reused by canonical generation, the cross-model check, and hint-mode previews. Fully specced. | `spec-linter` |
 | `criterion-compiler` | Deterministic Gherkin → test-scaffolding compiler for `compiled`-kind acceptance criteria. | — |
-| `generator` | Calls the pinned canonical model (cold, best-of-k retry) to produce `gen/<component>/` from a bundle. | `spec-bundle-assembler`, `cache-manager` |
-| `verifier-orchestrator` | Runs per-criterion verification (`compiled` via the compiler, `generated-test`, `llm-judge`) plus contract/property tests and the interface drift check. | `criterion-compiler`, `generator` |
+| `generator` | Produces **exactly one candidate** `gen/<component>/` per call, given a `SpecBundle` and an explicit model identifier (never a hardcoded "canonical pin" — this is what lets `cross-model-divergence-checker` reuse it with a second model). Single-shot and stateless about prior attempts, deliberately: the best-of-k *retry loop* (D3) lives in `merge-orchestrator`, not here — putting it here would require a `verifier-orchestrator` dependency this component doesn't have. Fully specced. | `spec-bundle-assembler`, `cache-manager` |
+| `verifier-orchestrator` | Runs per-criterion verification (`compiled` via the compiler, `generated-test`, `llm-judge`) plus contract/property tests and the interface drift check. Its own coordination logic is 100% `compiled` — dispatching to judgment-involving mechanisms is itself deterministic. Fully specced. | `criterion-compiler`, `generator` |
 | `cross-model-divergence-checker` | The D3 toggleable gate: regenerates with a second model, differential-tests against the canonical build. | `generator`, `verifier-orchestrator`, `cache-manager` |
 | `license-scanner` | Automated, unconditional license/similarity scan (D7). | `cache-manager` |
 | `secret-scanner` | Automated, unconditional secret-pattern scan (D12). | `cache-manager` |
@@ -34,7 +34,7 @@ change.
 | `review-packet-builder` | Assembles the human-readable PR summary (D11/D12/§6 step 7). | `provenance-writer`, `verifier-orchestrator`, `license-scanner`, `secret-scanner`, `cache-manager` |
 | `corpus-graph-builder` | Builds `corpus-graph.json` (D8/D9) — the `P-id → component → R-id → acceptance → verification-status` walk, orphan-rate computation. | `spec-linter`, `provenance-writer`, `verifier-orchestrator` |
 | `docs-site-renderer` | Pure renderer of `corpus-graph.json` into the interactive graph/docs site (D9). Not committed; CI build artifact. | `corpus-graph-builder` |
-| `merge-orchestrator` | Sequences the above per `SPEC_GUIDELINES.md` §6, parallelizing independent gates (D13). | everything above |
+| `merge-orchestrator` | Sequences the above per `SPEC_GUIDELINES.md` §6, parallelizing independent gates (D13). **Owns the best-of-k retry loop (D3)** — calls `generator` once per sample, checks the result against `verifier-orchestrator`, decides whether to call `generator` again with a different seed. Not specced yet; this responsibility was implicit/unassigned until `generator`'s spec made the boundary explicit. | everything above |
 
 ## A finding from writing this down: `merge-orchestrator`'s fan-out
 

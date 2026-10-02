@@ -30,7 +30,21 @@ Specced in full depth so far:
   generated-test`. The one piece of this pipeline that is permanently
   hand-maintained by design, never agent-generated (D5's circularity
   argument: the compiler can't be the thing that verifies itself).
+- **`spec-bundle-assembler`** — all `kind: compiled`. Deliberately excludes
+  `acceptance.md` from what it assembles, to keep generation from
+  overfitting to its own tests.
+- **`generator`** — the first component whose job genuinely requires a
+  model call; mostly `kind: generated-test` (tested via an injected mock
+  model), one `compiled` path-safety check. Single-shot by design — the
+  best-of-k retry loop lives in `merge-orchestrator`, not here.
+- **`verifier-orchestrator`** — all `kind: compiled`, despite sitting right
+  at the judgment/model boundary: coordinating `llm-judge` evaluations is
+  itself deterministic dispatch-and-record logic, even though what it
+  dispatches to isn't.
 
 Everything else in the pipeline's own architecture
 (`specs/architecture/pipeline-decomposition.md`) is declared but not yet
-specced to this depth.
+specced to this depth. `merge-orchestrator` is worth calling out specifically
+— it now has a concrete, assigned responsibility (the best-of-k retry loop)
+that nothing had explicitly owned before `generator`'s spec forced the
+question.
