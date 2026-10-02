@@ -9,7 +9,7 @@ from. See `.provenance.json` alongside this file and
 `verification/spec-linter/BOOTSTRAP.md` for the honest account of what was
 bootstrapped, what was ambiguous, and what was decided unilaterally.
 
-Implements all fourteen R-LINT-* requirements from
+Implements all fifteen R-LINT-* requirements from
 `specs/components/spec-linter/spec.md`, matching the CLI and `LintReport`
 contract in `specs/components/spec-linter/interface.md` exactly.
 """
@@ -37,6 +37,7 @@ RFC2119_KEYWORDS = ("MUST NOT", "MUST", "SHOULD NOT", "SHOULD", "MAY")
 
 SEVERITY_FAIL = "fail"
 SEVERITY_WARN = "warn"
+SEVERITY_SKIPPED = "skipped"
 
 
 # ---------------------------------------------------------------------------
@@ -50,15 +51,19 @@ class Finding:
     file: str
     line: int
     message: str
+    rationale: str | None = None  # present only for llm-judge findings that actually ran
 
     def to_json(self) -> dict:
-        return {
+        out = {
             "rule_id": self.rule_id,
             "severity": self.severity,
             "file": self.file,
             "line": self.line,
             "message": self.message,
         }
+        if self.rationale is not None:
+            out["rationale"] = self.rationale
+        return out
 
 
 @dataclass
@@ -73,12 +78,17 @@ class LintReport:
     def warnings(self) -> int:
         return sum(1 for f in self.findings if f.severity == SEVERITY_WARN)
 
+    @property
+    def skipped(self) -> int:
+        return sum(1 for f in self.findings if f.severity == SEVERITY_SKIPPED)
+
     def to_json(self) -> dict:
         return {
             "findings": [f.to_json() for f in self.findings],
             "summary": {
                 "hard_failures": self.hard_failures,
                 "warnings": self.warnings,
+                "skipped": self.skipped,
             },
         }
 
@@ -89,7 +99,8 @@ class LintReport:
         for f in self.findings:
             lines.append(f"[{f.severity.upper():4}] {f.file}:{f.line} {f.rule_id} — {f.message}")
         lines.append("")
-        lines.append(f"{self.hard_failures} failure(s), {self.warnings} warning(s)")
+        lines.append(f"{self.hard_failures} failure(s), {self.warnings} warning(s), "
+                      f"{self.skipped} skipped")
         return "\n".join(lines)
 
 
@@ -98,12 +109,11 @@ class LintReport:
 # ---------------------------------------------------------------------------
 
 # Doc types we actually lint. README.md placeholders under specs/ are
-# scaffolding/documentation, not governed specs — SPEC_GUIDELINES.md never
-# actually says how the linter tells a real spec file apart from a README
-# placeholder living in the same directory. Resolved here by convention
-# (component dirs: only spec/interface/acceptance/constraints.md are specs;
-# everywhere else: any *.md that isn't named README.md). Flagged in the
-# bootstrap report as a gap SPEC_GUIDELINES.md should probably close.
+# scaffolding/documentation, not governed specs. This was a genuine gap when
+# this bootstrap was first written — SPEC_GUIDELINES.md didn't say how to
+# tell a real spec apart from a README placeholder in the same directory —
+# since resolved: SPEC_GUIDELINES.md §1 now states this exact governed-set
+# rule explicitly. The convention below matches it.
 COMPONENT_FILES = {"spec.md", "interface.md", "acceptance.md", "constraints.md"}
 
 REQUIREMENT_RE = re.compile(r"\*\*(R-[A-Z0-9]+-\d+)\*\*\s*(?:[—-]\s*(.*))?")
@@ -112,6 +122,12 @@ KIND_RE = re.compile(r"^Kind:\s*(\S+)", re.MULTILINE)
 GHERKIN_BLOCK_RE = re.compile(r"```gherkin\n(.*?)```", re.DOTALL)
 CRITERION_HEADER_RE = re.compile(r"^###\s+(\S+)\s*$", re.MULTILINE)
 GLOSSARY_TERM_RE = re.compile(r"^-\s+\*\*([^*]+)\*\*", re.MULTILINE)
+# Captures a glossary bullet's full text (term + definition, up to the next
+# top-level bullet or end of section) so R-LINT-011/015 can compare content,
+# not just term names.
+GLOSSARY_ENTRY_RE = re.compile(r"^-\s+\*\*([^*]+)\*\*(.*?)(?=^-\s+\*\*|\Z)",
+                                re.MULTILINE | re.DOTALL)
+WORD_RE = re.compile(r"[a-z0-9']+")
 
 
 @dataclass
@@ -130,8 +146,12 @@ class Corpus:
     repo_root: Path
     docs: list[Doc]
     id_index: dict[str, Doc]
-    glossary_terms: set[str]
+    glossary_defs: dict[str, str]  # lowercased term -> its definition text
     glossary_files: list[Path]
+
+    @property
+    def glossary_terms(self) -> set[str]:
+        return set(self.glossary_defs)
 
 
 def _parse_frontmatter(text: str) -> tuple[dict, str, int]:
@@ -200,7 +220,7 @@ def load_corpus(repo_root: Path) -> Corpus:
     specs_dir = repo_root / "specs"
     docs: list[Doc] = []
     id_index: dict[str, Doc] = {}
-    glossary_terms: set[str] = set()
+    glossary_defs: dict[str, str] = {}
     glossary_files: list[Path] = []
 
     for path in sorted(specs_dir.rglob("*.md")):
@@ -211,8 +231,8 @@ def load_corpus(repo_root: Path) -> Corpus:
         text = path.read_text(encoding="utf-8")
         if doc_type == "glossary":
             glossary_files.append(path)
-            for m in GLOSSARY_TERM_RE.finditer(text):
-                glossary_terms.add(m.group(1).strip().lower())
+            for m in GLOSSARY_ENTRY_RE.finditer(text):
+                glossary_defs[m.group(1).strip().lower()] = m.group(2).strip()
             continue
         fm, body, _ = _parse_frontmatter(text)
         doc_id = fm.get("id")
@@ -231,7 +251,7 @@ def load_corpus(repo_root: Path) -> Corpus:
             glossary_files.append(path)
 
     return Corpus(repo_root=repo_root, docs=docs, id_index=id_index,
-                  glossary_terms=glossary_terms, glossary_files=glossary_files)
+                  glossary_defs=glossary_defs, glossary_files=glossary_files)
 
 
 # ---------------------------------------------------------------------------
@@ -536,32 +556,181 @@ def rule_criterion_wellformed(corpus: Corpus) -> list[Finding]:
     return findings
 
 
-def rule_glossary_conformance(corpus: Corpus) -> list[Finding]:
-    """R-LINT-011.
+def _token_overlap(a: str, b: str) -> float:
+    """Normalized token-overlap ratio in [0, 1]: |intersection| / |union| of
+    each text's lowercased word set. Deterministic, no model call — this is
+    deliberately a blunt textual-similarity measure, not a semantic one; that
+    split is exactly what separates R-LINT-011 (compiled) from R-LINT-015
+    (llm-judge)."""
+    wa, wb = set(WORD_RE.findall(a.lower())), set(WORD_RE.findall(b.lower()))
+    if not wa and not wb:
+        return 1.0
+    if not wa or not wb:
+        return 0.0
+    return len(wa & wb) / len(wa | wb)
 
-    Heuristic, flagged as a limitation in the bootstrap report: this can only
-    structurally detect "a glossary term's exact name reappears as a defined
-    term in a Definitions section," not whether that reappearance is truly a
-    full redefinition versus a legitimate delta that happens to share a
-    heading style. Distinguishing those precisely looks like it may need
-    `llm-judge`, not `compiled` — a candidate re-think for this criterion's
-    `kind`, not just this implementation.
+
+NEAR_VERBATIM_THRESHOLD = 0.8
+
+
+def _definitions_glossary_entries(doc: Doc, glossary_defs: dict[str, str]) -> list[tuple[str, str, str]]:
+    """Yield (term, local_text, matched_heading_text) for every entry in a
+    spec's Definitions section whose term also exists in the glossary."""
+    def_match = re.search(r"##\s*Definitions\s*\n(.*?)(\n##|\Z)", doc.body, re.DOTALL)
+    if not def_match:
+        return []
+    section = def_match.group(1)
+    out = []
+    for m in GLOSSARY_ENTRY_RE.finditer(section):
+        term = m.group(1).strip().lower()
+        if term in glossary_defs:
+            out.append((term, m.group(2).strip(), m.group(0)))
+    return out
+
+
+def rule_glossary_conformance(corpus: Corpus) -> list[Finding]:
+    """R-LINT-011 — compiled, textual-similarity only.
+
+    Resolved from an earlier heuristic that only checked "does the term name
+    reappear," which couldn't tell a restatement from a legitimate delta.
+    Now: a Definitions entry fails only when its text is a near-verbatim
+    copy (token-overlap ratio >= NEAR_VERBATIM_THRESHOLD) of the glossary's
+    own definition for that term — genuinely new, lower-overlap nuance is a
+    permitted delta and does not fire this rule (see R-LINT-015 for the
+    "same words, different meaning" case this can't catch by design).
     """
     findings = []
     for doc in corpus.docs:
         if doc.doc_type != "component-spec":
             continue
-        def_match = re.search(r"##\s*Definitions\s*\n(.*?)(\n##|\Z)", doc.body, re.DOTALL)
-        if not def_match:
-            continue
-        section = def_match.group(1)
-        for m in GLOSSARY_TERM_RE.finditer(section):
-            term = m.group(1).strip().lower()
-            if term in corpus.glossary_terms:
-                findings.append(Finding("R-LINT-011", SEVERITY_FAIL, doc.rel_path,
-                                         _find_line(doc.body, m.group(0)),
-                                         f"Definitions redefines glossary term '{m.group(1).strip()}'"))
+        for term, local_text, heading in _definitions_glossary_entries(doc, corpus.glossary_defs):
+            overlap = _token_overlap(local_text, corpus.glossary_defs[term])
+            if overlap >= NEAR_VERBATIM_THRESHOLD:
+                findings.append(Finding(
+                    "R-LINT-011", SEVERITY_FAIL, doc.rel_path,
+                    _find_line(doc.body, heading),
+                    f"Definitions entry for '{term}' is a near-verbatim restatement "
+                    f"of the glossary definition (token overlap {overlap:.2f}) — "
+                    f"only deltas are permitted here"))
     return findings
+
+
+
+def rule_llm_judge_glossary_conflict(corpus: Corpus, judge=None) -> list[Finding]:
+    """R-LINT-015 — the one llm-judge rule in this component.
+
+    `judge` is an injectable callable `(term: str, local_text: str,
+    glossary_text: str) -> tuple[bool, str] | None` (returns
+    `(conflicts, rationale)`, or None to mean "could not judge"). No real
+    model is wired into this bootstrap — there is no model-call integration
+    in a hand-authored CLI prototype, and faking one here would be dishonest
+    about what was actually validated. When `judge` is not provided (the
+    default — no model configured), every Definitions entry that reaches
+    this rule is reported `skipped`, never silently passed, per D10's "tool
+    must keep working" posture applied a third time.
+    """
+    findings = []
+    for doc in corpus.docs:
+        if doc.doc_type != "component-spec":
+            continue
+        for term, local_text, heading in _definitions_glossary_entries(doc, corpus.glossary_defs):
+            overlap = _token_overlap(local_text, corpus.glossary_defs[term])
+            if overlap >= NEAR_VERBATIM_THRESHOLD:
+                continue  # already R-LINT-011's job
+            line = _find_line(doc.body, heading)
+            if judge is None:
+                findings.append(Finding(
+                    "R-LINT-015", SEVERITY_SKIPPED, doc.rel_path, line,
+                    f"no model configured — '{term}' not evaluated for "
+                    f"semantic conflict with the glossary", rationale=None))
+                continue
+            result = judge(term, local_text, corpus.glossary_defs[term])
+            if result is None:
+                findings.append(Finding(
+                    "R-LINT-015", SEVERITY_SKIPPED, doc.rel_path, line,
+                    f"judge could not evaluate '{term}'", rationale=None))
+                continue
+            conflicts, rationale = result
+            if conflicts:
+                findings.append(Finding(
+                    "R-LINT-015", SEVERITY_FAIL, doc.rel_path, line,
+                    f"Definitions entry for '{term}' conflicts with the glossary "
+                    f"definition", rationale=rationale))
+    return findings
+
+
+def _extract_fenced_block(body: str, heading: str) -> str | None:
+    """Return the content of the first fenced code block found under a
+    `## <heading>` section (before the next `##` heading), or None."""
+    lines = body.splitlines()
+    in_section = False
+    in_fence = False
+    fence_lines: list[str] = []
+    for line in lines:
+        if re.match(rf"^##\s+{re.escape(heading)}\b", line):
+            in_section = True
+            continue
+        if in_section and re.match(r"^##\s+\S", line) and not in_fence:
+            break
+        if in_section and line.strip().startswith("```"):
+            if not in_fence:
+                in_fence = True
+                continue
+            return "\n".join(fence_lines)
+        if in_fence:
+            fence_lines.append(line)
+    return None
+
+
+def _logical_lines(block: str) -> list[str]:
+    """Join backslash line-continuations, then return non-blank logical
+    lines — so a CLI invocation wrapped across physical lines still counts
+    as one surface element, not two."""
+    merged: list[str] = []
+    buf = ""
+    for raw in block.splitlines():
+        stripped = raw.rstrip()
+        if stripped.endswith("\\"):
+            buf += stripped[:-1] + " "
+        else:
+            buf += stripped
+            if buf.strip():
+                merged.append(buf.strip())
+            buf = ""
+    if buf.strip():
+        merged.append(buf.strip())
+    return merged
+
+
+LIBRARY_SIGNATURE_RE = re.compile(r"^\w+\(.*\)\s*(->|:)")
+
+
+def _count_interface_surface(iface: Doc) -> int:
+    """R-LINT-012's 'interface surface elements' dimension, concretely
+    defined (previously: no canonical algorithm existed at all, and the
+    bootstrap's first pass used a markdown-bullet heuristic that happened to
+    count CLI flag descriptions instead of actual surface elements).
+
+    Count = one per distinct invocation line in the `## CLI` fenced block,
+    plus one per distinct function-signature line in the `## Library`
+    fenced block, plus one per `## Data: ...` heading (each already names
+    exactly one type, by the convention every component bundle in this
+    corpus already follows). Deliberately mechanical — no judgment, no
+    model call, consistent with every other size-cap dimension.
+    """
+    body = iface.body
+    total = 0
+
+    cli_block = _extract_fenced_block(body, "CLI")
+    if cli_block:
+        total += len(_logical_lines(cli_block))
+
+    lib_block = _extract_fenced_block(body, "Library")
+    if lib_block:
+        total += len([l for l in _logical_lines(lib_block) if LIBRARY_SIGNATURE_RE.match(l)])
+
+    total += len(re.findall(r"^##\s+Data:", body, re.MULTILINE))
+    return total
 
 
 def rule_size_caps(corpus: Corpus) -> list[Finding]:
@@ -574,6 +743,12 @@ def rule_size_caps(corpus: Corpus) -> list[Finding]:
     is nothing to count post-compilation at lint time anyway; this made the
     "pre or post" framing of the open question moot once actually
     implemented, which is itself worth reporting back.
+
+    Second gap resolved here (found after the initial bootstrap, once
+    sibling components' real interface.md files existed to test against):
+    `interface_surface` now uses `_count_interface_surface`, a concrete,
+    deterministic algorithm, replacing a markdown-bullet heuristic that
+    actually counted CLI flag descriptions rather than surface elements.
     """
     findings = []
     CAPS = {
@@ -614,9 +789,7 @@ def rule_size_caps(corpus: Corpus) -> list[Finding]:
             for f in gen_dir.rglob("*.py"):
                 loc += sum(1 for l in f.read_text(encoding="utf-8").splitlines()
                            if l.strip() and not l.strip().startswith("#"))
-        iface_surface = 0
-        if iface:
-            iface_surface = len(re.findall(r"^-\s+`", iface.body, re.MULTILINE))
+        iface_surface = _count_interface_surface(iface) if iface else 0
         fan_out = len(spec.frontmatter.get("depends_on") or [])
 
         measurements = {
@@ -709,9 +882,13 @@ ALL_RULES = [
 # Public library entry point
 # ---------------------------------------------------------------------------
 
-def lint(paths: list[Path] | None, repo_root: Path, strict: bool = False) -> LintReport:
-    """Pure function over the filesystem state at repo_root. No network
-    access, no model calls, no side effects — per constraints.md."""
+def lint(paths: list[Path] | None, repo_root: Path, strict: bool = False, judge=None) -> LintReport:
+    """Pure function over the filesystem state at repo_root, for 14 of 15
+    rules — no network access, no model calls, no side effects (per
+    constraints.md). The exception is R-LINT-015, which takes an optional
+    `judge` callable; omit it (the default) to run in single-model-absent
+    mode, where R-LINT-015 reports `skipped` rather than running, silently
+    passing, or crashing."""
     corpus = load_corpus(repo_root)
 
     if paths:
@@ -726,8 +903,12 @@ def lint(paths: list[Path] | None, repo_root: Path, strict: bool = False) -> Lin
     report = LintReport()
     for rule in ALL_RULES:
         report.findings.extend(rule(corpus))
+    report.findings.extend(rule_llm_judge_glossary_conflict(corpus, judge=judge))
 
     if strict:
+        # skipped findings are deliberately never escalated — "not evaluated"
+        # is not the same thing as "warned," and --strict only tightens
+        # warn-vs-fail, not evaluated-vs-skipped.
         report.findings = [
             Finding(f.rule_id, SEVERITY_FAIL, f.file, f.line, f.message) if f.severity == SEVERITY_WARN else f
             for f in report.findings

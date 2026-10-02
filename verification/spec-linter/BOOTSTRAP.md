@@ -119,3 +119,38 @@ schema were sufficient to implement from directly, with no guessing. The
 14 `R-LINT-*` requirements and their 1:1 covering criteria were, with the
 exceptions above, implementable without needing to invent behavior the spec
 didn't describe.
+
+## Follow-up round: resolving what this bootstrap flagged as open
+
+Two things this report originally flagged — "no canonical algorithm for
+interface surface elements" and "R-LINT-011 may be mis-assigned `compiled`"
+— were resolved afterward, against this same real implementation:
+
+- **`_count_interface_surface` replaced the markdown-bullet heuristic**
+  (which happened to count CLI flag descriptions, not actual surface
+  elements) with a concrete algorithm: one per CLI invocation line, one per
+  `Library` function signature, one per `## Data: ...` heading. Verified
+  against this repo's four real `interface.md` files
+  (`test_interface_surface_counting.py`) — `spec-linter`/`impact-analyzer`/
+  `criterion-compiler` = 3 each, `cache-manager` = 6 (its `get`/`put` and
+  `inspect`/`stats` pairs are two signatures each in one fenced block, which
+  is exactly why "one per code block" would have undercounted it).
+- **R-LINT-011 split into two requirements**, matching D5's own guidance
+  about when `llm-judge` is warranted: R-LINT-011 stays `compiled` but now
+  only fires on a *near-verbatim* restatement (token-overlap ratio ≥ 0.8) of
+  the glossary's definition — genuinely mechanical, no judgment. A new
+  R-LINT-015 (`llm-judge`) covers the case R-LINT-011 structurally cannot:
+  different wording that still substantively *conflicts* with the glossary's
+  meaning. With no model configured, R-LINT-015 reports `severity: skipped`
+  — never silently passing, never crashing — the same posture D10
+  established for model-pin availability, applied a third time. A
+  regression test (`test_ac_lint_011_old_fixture_now_routes_to_015_not_011`)
+  confirms this bootstrap's *own original* R-LINT-011 fixture — which
+  happened to pass under the old, too-broad heuristic — now correctly
+  routes to R-LINT-015 instead.
+
+No model-call integration exists in this bootstrap (`rule_llm_judge_
+glossary_conflict` takes an injectable `judge` callable, tested with a mock
+in `test_ac_lint_015_conflict_detected_with_judge_configured`) — wiring a
+real model in is explicitly out of scope for a hand-authored CLI prototype,
+and would have been dishonest about what was actually validated here.

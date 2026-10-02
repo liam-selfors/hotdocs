@@ -111,14 +111,81 @@ def test_ac_lint_010_criterion_missing_kind_tag(corpus_root):
     assert has_finding(report, "R-LINT-010")
 
 
-def test_ac_lint_011_definitions_redefines_glossary_term(corpus_root):
+def test_ac_lint_011_near_verbatim_restatement_fails(corpus_root):
+    # R-LINT-011 was revised from "does the term name reappear" (too broad —
+    # couldn't tell a restatement from a legitimate delta) to "is the local
+    # text a near-verbatim copy of the glossary's own definition." This
+    # fixture's text is a near-identical restatement of "a thing this corpus
+    # talks about" (the glossary's definition of Widget), so it should still
+    # fire R-LINT-011.
+    spec = corpus_root / "specs" / "components" / "foo" / "spec.md"
+    spec.write_text(spec.read_text().replace(
+        "## Definitions\n\nNo deltas from `specs/glossary.md`.\n",
+        "## Definitions\n\n- **Widget** — a thing this corpus talks about.\n",
+    ))
+    report = run_lint(corpus_root)
+    assert has_finding(report, "R-LINT-011")
+
+
+def test_ac_lint_011b_genuine_delta_does_not_fail(corpus_root):
+    # A low-overlap, genuinely additional nuance must NOT fire R-LINT-011 —
+    # that would be exactly the over-broad behavior the rule was revised
+    # away from. (It legitimately falls to R-LINT-015 instead, which will
+    # report `skipped` with no judge configured — asserted separately below,
+    # not here, since R-LINT-011's own correctness is what this test is for.)
+    spec = corpus_root / "specs" / "components" / "foo" / "spec.md"
+    spec.write_text(spec.read_text().replace(
+        "## Definitions\n\nNo deltas from `specs/glossary.md`.\n",
+        "## Definitions\n\n- **Widget** — in Foo specifically, always carries a "
+        "serial number assigned at creation time.\n",
+    ))
+    report = run_lint(corpus_root)
+    assert not has_finding(report, "R-LINT-011")
+
+
+def test_ac_lint_011_old_fixture_now_routes_to_015_not_011(corpus_root):
+    # Regression check: this is literally the old (pre-revision) test's
+    # fixture text. Under the old term-reappearance heuristic it
+    # (coincidentally correctly, but for the wrong reason) fired R-LINT-011.
+    # Under the revised split it has low token-overlap with the glossary
+    # definition, so it must NOT fire R-LINT-011 — it's R-LINT-015's job
+    # (a semantic conflict, not a structural restatement) and, with no judge
+    # configured here, reports skipped rather than silently passing.
     spec = corpus_root / "specs" / "components" / "foo" / "spec.md"
     spec.write_text(spec.read_text().replace(
         "## Definitions\n\nNo deltas from `specs/glossary.md`.\n",
         "## Definitions\n\n- **Widget** — a totally different meaning than the glossary gives it.\n",
     ))
     report = run_lint(corpus_root)
-    assert has_finding(report, "R-LINT-011")
+    assert not has_finding(report, "R-LINT-011")
+    assert has_finding(report, "R-LINT-015", severity="skipped")
+
+
+def test_ac_lint_015_conflict_detected_with_judge_configured(corpus_root):
+    spec = corpus_root / "specs" / "components" / "foo" / "spec.md"
+    spec.write_text(spec.read_text().replace(
+        "## Definitions\n\nNo deltas from `specs/glossary.md`.\n",
+        "## Definitions\n\n- **Widget** — a totally different meaning than the glossary gives it.\n",
+    ))
+
+    def mock_judge(term, local_text, glossary_text):
+        return (True, f"'{local_text}' contradicts '{glossary_text}' for '{term}'")
+
+    report = run_lint(corpus_root, judge=mock_judge)
+    assert has_finding(report, "R-LINT-015", severity="fail")
+    finding = next(f for f in report.findings if f.rule_id == "R-LINT-015")
+    assert finding.rationale and "contradicts" in finding.rationale
+
+
+def test_ac_lint_015b_skipped_without_model(corpus_root):
+    spec = corpus_root / "specs" / "components" / "foo" / "spec.md"
+    spec.write_text(spec.read_text().replace(
+        "## Definitions\n\nNo deltas from `specs/glossary.md`.\n",
+        "## Definitions\n\n- **Widget** — a totally different meaning than the glossary gives it.\n",
+    ))
+    report = run_lint(corpus_root)  # no judge
+    assert has_finding(report, "R-LINT-015", severity="skipped")
+    assert report.hard_failures == 0  # skipped must never count as a failure
 
 
 def test_ac_lint_012_generated_code_over_hard_cap(corpus_root):

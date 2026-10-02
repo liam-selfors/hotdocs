@@ -129,10 +129,24 @@ Covers: R-LINT-011
 Kind: compiled
 
 ```gherkin
-Given a component's Definitions section that restates a full redefinition of
-  a term already present in specs/glossary.md, rather than only a delta
+Given a component's Definitions section whose entry for a glossary term is a
+  near-verbatim copy (token-overlap ratio >= 0.8) of that term's definition in
+  specs/glossary.md
 When hotdocs lint runs against the component
 Then the report contains a fail-severity finding for rule R-LINT-011
+```
+
+### AC-LINT-011b
+Covers: R-LINT-011
+Kind: compiled
+
+```gherkin
+Given a component's Definitions section whose entry for a glossary term adds
+  genuinely new, component-specific nuance with low textual overlap against
+  the glossary's definition
+When hotdocs lint runs against the component
+Then the report contains no R-LINT-011 finding — this is a permitted delta,
+  not a redefinition
 ```
 
 ### AC-LINT-012
@@ -166,4 +180,36 @@ Given two files under specs/ that both declare themselves a corpus glossary,
   with no architecture/ spec recording a bounded-context split decision
 When hotdocs lint runs against the corpus
 Then the report contains a fail-severity finding for rule R-LINT-014
+```
+
+### AC-LINT-015
+Covers: R-LINT-015
+Kind: llm-judge
+
+The one criterion in this component that is not `kind: compiled` or
+`generated-test` — by design, matching D5's own guidance that `llm-judge` is
+for qualities no test could capture even in principle. Detecting a
+*structural* restatement (R-LINT-011) is mechanical; detecting that two
+differently-worded passages mean *conflicting* things is not.
+
+```gherkin
+Given a component's Definitions section whose entry for a glossary term uses
+  substantially different wording from specs/glossary.md's definition (so
+  R-LINT-011's textual-similarity check does not fire), but asserts something
+  that actually contradicts that definition
+When hotdocs lint runs against the component with a model configured
+Then the report contains a fail-severity finding for rule R-LINT-015, with a
+  structured rationale explaining the conflict
+```
+
+### AC-LINT-015b
+Covers: R-LINT-015
+Kind: llm-judge
+
+```gherkin
+Given no model is configured for the linter at all
+When hotdocs lint runs against a component with a Definitions-section entry
+  that would otherwise need an R-LINT-015 judgment
+Then R-LINT-015 is skipped with a visible, non-silent notice in the report —
+  neither treated as passing nor causing a crash
 ```

@@ -11,7 +11,8 @@ from pathlib import Path
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "gen" / "spec-linter"))
+REPO_ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(REPO_ROOT / "gen" / "spec-linter"))
 import spec_linter  # noqa: E402
 
 
@@ -157,8 +158,8 @@ def corpus_root(tmp_path):
     return tmp_path
 
 
-def run_lint(root: Path):
-    return spec_linter.lint(None, root)
+def run_lint(root: Path, judge=None):
+    return spec_linter.lint(None, root, judge=judge)
 
 
 def has_finding(report, rule_id: str, severity: str = "fail") -> bool:
