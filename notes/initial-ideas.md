@@ -585,23 +585,38 @@ direct consequence for model-pin-unavailability risk:
   a second model was available for the D3/D5 checks — makes single-model
   degraded operation visible rather than silent.
 
+### D11 — Rollback is a cache-hit, not a dedicated incident feature
+
+No special "incident mode." A spec revert that returns the corpus to a
+byte-identical prior state produces the same `spec_bundle_hash` that an earlier,
+already-verified commit produced — which means it's **a cache hit across the
+entire gate stack** (generation, D3 cross-model, D5 `llm-judge`, D7 license
+scan) under the same content-addressed caching Q12 establishes generally, not a
+feature built specifically for incidents. Nothing new to invoke under pressure,
+nothing dormant that might be broken when it's finally needed.
+
+- A merge whose spec bundle exactly matches a prior verified state restores the
+  matching `gen/`, `verification/`, and provenance artifacts directly — no
+  regeneration, no re-verification.
+- **Still unconditional:** the human spec-diff review (D1/§6). A cache hit
+  skips compute, never review.
+- **Safety net:** even on a cache hit, the §8 "non-spec-driven change" lane
+  re-runs **asynchronously, non-blocking**, afterward — the spec matching
+  exactly doesn't guarantee the *environment* it runs against still does
+  (dependency/infra drift since).
+- **Visibility:** the review packet notes when a merge was a full cache hit.
+- **Discipline this requires:** a gate's `gate_version` must bump whenever its
+  underlying detection logic changes (e.g. the license-scanner's signature
+  database), so a stale cache hit never papers over a genuinely changed risk —
+  a rule for `SPEC_GUIDELINES.md`, already covered by `gate_version` being part
+  of the cache key.
+
 ---
 
 ## 12. Open questions
 
 _Populated by the review pass below — none of these were in the original
 brainstorm._
-
-**Q10 — No incident/rollback fast path.** The per-merge gate stack is heavy:
-cold regen + best-of-k + cross-model divergence + possible `llm-judge`
-dual-model runs + license scan + docs rebuild. Reverting a bad production
-change under incident pressure shouldn't have to pay all of that again.
-Recommendation: a spec revert that returns the corpus to a byte-identical prior
-state should be allowed to **restore the prior commit's already-verified
-`gen/`/`verification/` artifacts directly** (matched via the D7 provenance
-manifest) rather than regenerating from scratch — it's already known-good. The
-full pipeline still re-validates asynchronously afterward, non-blocking, in
-case something environment-dependent changed since.
 
 **Q11 — How much of secrets/config/infra is in scope?** Specs are plain text,
 committed, and constantly read/written by agents — secrets must never appear in
