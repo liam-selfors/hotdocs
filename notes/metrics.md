@@ -171,7 +171,8 @@ Consumer tags: `[dev]` developer · `[stk]` stakeholder · `[agt]` system agent 
   metric. `[stk] [dev]`
 - **Change failure rate** — % of releases that cause an incident. `[stk]`
 - **Cold-regen freshness at release** — proof that 100% of `gen/` on `main` was
-  cold-regenerated since the last doc change (D1 invariant). `[gate]`
+  cold-regenerated since the last doc change (D1 invariant, scoped to
+  non-`sealed` components). `[gate]`
 - **Rollback rate** and **MTTR**. `[stk]`
 - **Release size** — `R-id`s changed, components touched. `[dev] [stk]`
 
