@@ -274,11 +274,42 @@ expresses subsystems and grouping.
 The interface-churn ratio that motivated these caps is tracked as a corpus-health
 metric — see [`metrics.md`](metrics.md).
 
+### D3 — Single generation model, no voting, divergence checked pre-merge
+
+Ensembling the *generation* step can't raise the correctness ceiling —
+verification already defines that (D1 + the independent-path double-entry tests
+in §7). Model diversity is only worth paying for where it affects **throughput**
+(first-pass success) or **spec hardening** (catching ambiguity). Three
+mechanisms, judged separately:
+
+- **Voting (majority output) — rejected.** Code isn't votable; many correct
+  implementations differ textually, and majority doesn't mean correct.
+- **Canonical generation = one pinned model, one frozen prompt.** Defines the
+  reproducible `gen/`, cached by (spec-bundle hash, prompt version, model pin).
+- **Best-of-k retry against verification** — accepted. If the first sample fails,
+  draw up to k−1 more from the *same* model (varied seed) before failing the
+  merge; keep the first that passes; record the winning sample index so it's
+  reproducible. Small k (2–4).
+- **Cross-model divergence check — a pre-merge gate, not a scheduled job.**
+  Underspecified specs must be caught *before* they merge, not audited after.
+  So on every merge, for each impacted component (already scoped by impact
+  analysis — see §6 step 2), also regenerate with a second, different model. If
+  that build **passes the same verification suite but is behaviorally divergent**
+  from the canonical build (differential testing against the acceptance suite /
+  fuzzed inputs), the merge is **blocked** as a spec defect — the acceptance
+  criteria don't pin the behavior tightly enough. If the second model's build
+  simply *fails* verification, that is not blocking by itself (a capability gap
+  in the second model, not necessarily a spec bug) but is logged.
+  Cost is bounded because it only applies to the components already in the
+  blast radius of the change, not the whole repo.
+- This reuses directly for **model-pin migration**: "does candidate model X
+  pass every component's verification?" is the readiness gate for bumping a
+  pin (itself a re-ratification event, per §8).
+
 ---
 
 ## 12. Open questions
 
-- Single generation model vs. ensemble / voting.
 - How to represent acceptance criteria: tagged prose, a small DSL, or literal
   co-located test files?
 - If tests are also generated, who owns them and how do we trust them? (Current

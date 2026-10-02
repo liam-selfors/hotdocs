@@ -103,6 +103,13 @@ Consumer tags: `[dev]` developer · `[stk]` stakeholder · `[agt]` system agent 
   Must be 0 for `ratified` specs; nonzero ⇒ spec bug. `[gate] [agt]`
 - **Hint-mode vs. cold-regen divergence** — how often the feature-branch preview
   differs materially from the final cold regen. `[agt] [dev]`
+- **Cross-model divergence incidents** — merges blocked because a second model's
+  build passed verification but diverged behaviorally from the canonical build
+  (a spec-underspecification signal caught pre-merge, per D3). `[gate] [stk]`
+- **Second-model verification-failure rate** — how often the cross-check model
+  fails verification outright (capability gap, not necessarily a spec bug;
+  tracked separately from divergence incidents so it doesn't get conflated with
+  spec defects). `[agt]`
 
 ---
 
