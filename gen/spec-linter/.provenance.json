@@ -1,0 +1,14 @@
+{
+  "spec_bundle_hash": "not computed — no generator exists yet to compute it",
+  "model_pin": "none (manually authored bootstrap, not cold-regenerated)",
+  "prompt_version": "n/a",
+  "sample_index": "n/a",
+  "pipeline_version": "n/a — bootstrap predates the pipeline existing",
+  "gate_versions": {},
+  "cache_hit": false,
+  "generated_at": "this is a hand-authored bootstrap artifact, not a timestamped generation run",
+  "verification_run_id": "see verification/spec-linter/ — tests run manually, not by a verifier-orchestrator that doesn't exist yet",
+  "cross_model_check": "n/a — no second model involved, no generator to check against",
+  "license_scan": "not run — no license-scanner component exists yet",
+  "bootstrap_note": "This file intentionally violates the normal D7 provenance schema's expectations (a real model_pin, a real pipeline_version, etc.) by design, so this artifact can never be confused with a real cold-regen output once generator/criterion-compiler/license-scanner actually exist. Replace this file with a real one the first time spec-linter goes through the real pipeline."
+}
