@@ -33,15 +33,17 @@ change.
 | `provenance-writer` | Assembles and writes `.provenance.json` (D7) from the other components' outputs — collects, never invents. Fully specced; also where D7's schema gap (missing `secret_scan` field) was found and fixed. | `generator`, `verifier-orchestrator`, `cross-model-divergence-checker`, `license-scanner`, `secret-scanner`, `cache-manager` |
 | `review-packet-builder` | Assembles the human-readable PR summary (D11/D12/§6 step 7) — deliberately never includes the generated code diff itself. Fully specced. | `provenance-writer`, `verifier-orchestrator`, `license-scanner`, `secret-scanner`, `cache-manager` |
 | `corpus-graph-builder` | Builds `corpus-graph.json` (D8/D9) — the `P-id → component → R-id → acceptance → verification-status` walk, orphan-rate computation, including orphan-var rate (D12). Fully specced. | `spec-linter`, `provenance-writer`, `verifier-orchestrator` |
-| `docs-site-renderer` | Pure renderer of `corpus-graph.json` into the interactive graph/docs site (D9). Not committed; CI build artifact. | `corpus-graph-builder` |
-| `merge-orchestrator` | Sequences the above per `SPEC_GUIDELINES.md` §6, parallelizing independent gates (D13). **Owns the best-of-k retry loop (D3)** — calls `generator` once per sample, checks the result against `verifier-orchestrator`, decides whether to call `generator` again with a different seed. Not specced yet; this responsibility was implicit/unassigned until `generator`'s spec made the boundary explicit. | everything above |
+| `docs-site-renderer` | Pure renderer of `corpus-graph.json` into the interactive graph/docs site (D9). Not committed; CI build artifact. Fully specced. | `corpus-graph-builder` |
+| `merge-orchestrator` | Sequences the above per `SPEC_GUIDELINES.md` §6, parallelizing independent gates (D13). **Owns the best-of-k retry loop (D3)** — calls `generator` once per sample, checks the result against `verifier-orchestrator`, decides whether to call `generator` again with a different seed. Fully specced — and its real `fan_out` (12), checked against the actual linter, triggers exactly the warn-only finding this document predicted below, confirming the prediction rather than just asserting it. | everything above |
 
 ## A finding from writing this down: `merge-orchestrator`'s fan-out
 
-`merge-orchestrator` depends on 11 components — well past D2's fan-out warn
-threshold of 7. This is a genuine tension surfaced by actually doing the
-decomposition, not a mistake to quietly fix by padding the dependency list
-down:
+`merge-orchestrator` depends on 12 components (11 at the time this was first
+written, before its real spec existed; the actual, now-specced `depends_on`
+list and the real linter's measurement both independently confirm 12) —
+well past D2's fan-out warn threshold of 7. This is a genuine tension
+surfaced by actually doing the decomposition, not a mistake to quietly fix
+by padding the dependency list down:
 
 `merge-orchestrator` is a **thin coordinator** — its own `spec.md` and
 `gen/` output should be almost entirely sequencing calls to other components'

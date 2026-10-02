@@ -62,10 +62,19 @@ Specced in full depth so far:
 - **`corpus-graph-builder`** — all `kind: compiled`. The single source of
   the `corpus-graph.json` manifest D8's traceability matrix and D9's
   docs-site-renderer both read — neither recomputes any part of it.
+- **`docs-site-renderer`** — all `kind: compiled`. A pure function of
+  `corpus-graph.json`; its output is deliberately never committed (D9).
+- **`merge-orchestrator`** — all `kind: compiled`, the capstone data point
+  for D5's guidance: even the component sequencing every model-calling,
+  judgment-involving gate in the whole pipeline is itself fully
+  deterministic. Owns the best-of-k retry loop (D3) — a responsibility
+  nothing had explicitly assigned before `generator`'s spec forced the
+  question. Its real, measured `fan_out` is 12, confirmed against the
+  actual linter — exactly the warn-only finding (not a hard failure)
+  `specs/architecture/pipeline-decomposition.md` predicted before this
+  component existed.
 
-Everything else in the pipeline's own architecture
-(`specs/architecture/pipeline-decomposition.md`) is declared but not yet
-specced to this depth. `merge-orchestrator` is worth calling out specifically
-— it now has a concrete, assigned responsibility (the best-of-k retry loop)
-that nothing had explicitly owned before `generator`'s spec forced the
-question.
+**All 15 architecture components are now specced in full depth.** The real
+linter (`gen/spec-linter/`) validates the entire corpus clean: 0 failures,
+3 warnings (two components over the spec-bundle word-count *target*, and
+`merge-orchestrator`'s fan-out — none are hard-fail-severity).
