@@ -24,8 +24,11 @@ Consumer tags: `[dev]` developer · `[stk]` stakeholder · `[agt]` system agent 
   check. Target 100%. `[gate] [agt] [dev] [stk]`
 - **Spec completeness** — % of `ratified` specs with zero open questions and a
   clean lint pass. `[gate] [dev]`
-- **Orphan rate** — specs with no forward trace to a product spec, or no
-  backward trace to a decision record. `[agt] [dev]`
+- **Orphan-capability rate** — product capabilities (`P-id`) with no realizing
+  component. `[gate] [agt] [stk]`
+- **Orphan-component rate** — components with no `realizes` entry and not
+  marked `sealed` — no declared product reason to exist (per D8).
+  `[gate] [agt] [dev]`
 - **Glossary conformance** — undefined-term occurrences per spec. `[agt]`
 - **Ambiguity density** — linter-flagged ambiguous phrases per 1000 words of
   spec. `[agt] [dev]`

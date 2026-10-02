@@ -75,7 +75,7 @@ regeneration is trustworthy.
 
 ```
 specs/
-  product/            # WHY: user-facing capabilities, end-to-end scenarios
+  product/            # WHY: capabilities (P-id) + golden end-to-end scenarios
   architecture/       # HOW (system level): components, boundaries, data flow,
                       #                     cross-cutting tech decisions
   components/
@@ -83,6 +83,7 @@ specs/
       spec.md         # normative behavior for this unit
       interface.md    # public contract: types, endpoints, events, CLI
       acceptance.md   # machine-checkable criteria + test scenarios
+                      # (realizes: [P-id, ...] in frontmatter — see D8)
       constraints.md  # non-functional: perf, security, compatibility
   decisions/          # ADR-style, append-only, immutable once ratified
   glossary.md         # canonical vocabulary; specs MUST use these terms
@@ -90,19 +91,23 @@ SPEC_GUIDELINES.md    # the rules every authoring/generating agent follows
 gen/                  # generated code — regenerable, never hand-edited
 pipeline/             # workflow definitions, frozen prompts, model pins
 verification/         # spec-derived tests, contract checks, drift checks
+                      # + corpus-graph.json (generated manifest, D8/D9)
 notes/                # brainstorming; non-normative
 ```
 
 `gen/` and `verification/` are committed on every branch (large binary assets go
-through Git LFS) — see D6.
+through Git LFS) — see D6. The rendered docs/graph-explorer site built from
+`corpus-graph.json` is a CI build artifact, not committed — see D9.
 
 ---
 
 ## 5. Anatomy of a spec document
 
 **Frontmatter (YAML):** `id`, `title`, `status` (`draft` | `ratified` |
-`deprecated`), `owners`, `depends_on` (list of spec ids), `supersedes`,
-`model_pin` (optional per-spec override), `last_ratified_commit`.
+`deprecated`), `owners`, `depends_on` (list of spec ids), `realizes` (list of
+product capability `P-id`s this component contributes to — see D8; omit only
+with `sealed: true`), `supersedes`, `model_pin` (optional per-spec override),
+`last_ratified_commit`.
 
 **Body — fixed section order:**
 
@@ -460,14 +465,80 @@ This keeps the "no mandatory human review" precedent (Q5) intact for
 *correctness* while treating *compliance* as a different category that still
 must never be silent, per your instruction.
 
+### D8 — Product/component reconciliation: linkage is lint-checked, composition is golden-scenario-verified
+
+Two different jobs; one must not stand in for the other.
+
+1. **The matrix is bookkeeping** — a mechanical, lint-level check that declared
+   linkage is complete. It catches *missing or dangling links*, nothing more.
+2. **Golden end-to-end scenarios (§7) are verification** — they prove the
+   linked components actually compose correctly. Only an end-to-end run can
+   catch "local specs correct, system wrong" (§8).
+
+Mechanism:
+
+- `specs/product/` capabilities get stable IDs (`P-<id>`) and their own
+  Given/When/Then golden scenarios (D4's format, any of D5's three `kind`s),
+  exercised **black-box against the whole assembled system**.
+- Component specs get a new frontmatter field, **`realizes: [P-<id>, ...]`** —
+  coarse (component-level, not per-`R-id`) to stay within the D2 size caps.
+- **The matrix is generated, never hand-maintained** —
+  `verification/traceability.json`, computed by walking
+  `P-id → realizing components → R-ids → acceptance criteria → verification
+  status`, regenerated every merge and committed under D6.
+- **New lint rules:** every `P-id` has ≥1 realizing component (no orphan
+  capability); every `realizes` entry references a real `P-id` (no dangling
+  link); every component has ≥1 `realizes` entry unless explicitly
+  `sealed: true` (the legacy-perimeter escape hatch, §9).
+- Refines the `metrics.md` orphan-rate entry into two precise, gate-able
+  metrics: **orphan-capability rate** and **orphan-component rate**.
+
+### D9 — Generated graph/documentation explorer
+
+An interactive, auto-generated documentation site over the whole spec corpus —
+never hand-authored, always a rendering of structured data the pipeline already
+produces.
+
+- **Interactive DAG** of the corpus: nodes are product capabilities and
+  components (optionally clustered by `architecture/` subsystem); edges are
+  `depends_on` (D2) and `realizes` (D8). Clickable, searchable.
+- **Per-node detail view**, assembled entirely from existing artifacts — no new
+  generation step needed, this is a pure renderer:
+  - Rendered `spec.md` / `interface.md` / `acceptance.md` / `constraints.md`.
+  - `R-id` list with live coverage/pass-fail status.
+  - Acceptance criteria broken out by `kind` (D5) with current verification
+    result.
+  - Provenance (D7): model pin, prompt version, last cold-regen timestamp,
+    freshness relative to the D1 invariant.
+  - Size vs. the D2 caps, color-coded warn/fail.
+  - Owners.
+- **Corpus-health dashboard** surfacing the live, computable numbers from
+  `metrics.md` directly — turns that catalog from a document agents consult
+  into a page people look at too.
+- **Data source:** a single generated **corpus graph manifest**
+  (`verification/corpus-graph.json`) that subsumes D8's `traceability.json` —
+  one machine-readable snapshot of the whole corpus (nodes, edges, statuses,
+  provenance, metrics), extended rather than duplicated.
+- **Build cadence:** regenerated on every merge to `main`, same as everything
+  else — it's a cheap render over data the pipeline already computed, no model
+  call involved, so there's no reason for it to lag behind `main` the way a
+  scheduled job would (consistent with the Q3/Q7 preference for pre-merge over
+  scheduled).
+- **What's committed vs. built:** the manifest JSON is committed under D6 (cheap,
+  text, diffable, useful to other tooling beyond the docs site itself). The
+  *rendered* static HTML/JS site is a build artifact — built in CI from the
+  manifest and deployed to a docs host — not committed, the same way you
+  wouldn't commit a compiled website for a typical static-site generator.
+
+**For you:** agree with manifest-committed-but-rendered-site-not? And confirm
+per-merge rebuild rather than on a schedule — anything else about this you want
+to shape before it's "decided" rather than "proposed"?
+
 ---
 
 ## 12. Open questions
 
-- How do product-level specs and component-level specs stay reconciled — is
-  there a generated traceability matrix?
-- How do product-level specs and component-level specs stay reconciled — is
-  there a generated traceability matrix?
+_None outstanding from the original brainstorm — see §13 for what's next._
 
 ---
 
