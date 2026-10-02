@@ -409,11 +409,63 @@ guarantee unless the winning artifact itself is what's stored.
 blob commit, to keep plain-text diffing and clone size sane for the actual
 source-like output.
 
+### D7 — Provenance manifest + automated, strictly-tracked license gate
+
+Split into two kinds of question, resolved differently:
+
+**Provenance (engineering — settled outright).** Every generated artifact
+carries a manifest alongside it, committed under the same D6 discipline:
+
+```
+gen/<component>/.provenance.json   (and verification/<component>/)
+  spec_bundle_hash   — content hash of every spec file that fed generation
+  model_pin          — model id + version
+  prompt_version     — id of the frozen prompt template used
+  sample_index       — which best-of-k sample won (D3)
+  pipeline_version   — version of the generation pipeline itself
+  generated_at
+  verification_run_id
+  cross_model_check  — divergence-gate outcome (D3/D5)
+  license_scan       — result of the check below
+```
+
+This is the hard evidence trail for incident tracing (§8) and doubles as an
+SBOM/SLSA-style attestation if the code ships as a product.
+
+**Licensing/copyright risk (a compliance question — technical control only,
+legal ownership/copyrightability questions are explicitly out of scope for an
+engineering doc and belong with counsel).** Decided: the license/similarity
+scan is a **fully automated verification gate** — same shape as the other
+gates in §7/D3/D5, no legal sign-off required to pass. A flag above the
+similarity threshold blocks the merge the same way a failed test does, and the
+pipeline can retry generation (same best-of-k spirit as D3) without escalating
+to a person.
+
+But — **every flag is strictly tracked and communicated, whether or not it
+ends up blocking the merge:**
+
+- Every scan result (clean or flagged) is written into `license_scan` in the
+  provenance manifest — an append-only record, not just a CI log line that
+  disappears.
+- Flags are surfaced as an explicit line item in the review packet (§6 step 5)
+  even though no human sign-off gates the merge — visibility after the fact is
+  mandatory, silence is not acceptable for this category.
+- A flag above a severity threshold (not just "blocked the merge") triggers an
+  explicit notification to a standing compliance/legal channel — separate from
+  the merge outcome, so a flag that got auto-resolved by retry still gets seen.
+- Tracked as a metric with trend visibility for stakeholders (added to
+  `metrics.md`): **license-scan flag rate**, by component and over time.
+
+This keeps the "no mandatory human review" precedent (Q5) intact for
+*correctness* while treating *compliance* as a different category that still
+must never be silent, per your instruction.
+
 ---
 
 ## 12. Open questions
 
-- Provenance / licensing of generated code.
+- How do product-level specs and component-level specs stay reconciled — is
+  there a generated traceability matrix?
 - How do product-level specs and component-level specs stay reconciled — is
   there a generated traceability matrix?
 

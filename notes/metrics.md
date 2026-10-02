@@ -139,6 +139,10 @@ Consumer tags: `[dev]` developer · `[stk]` stakeholder · `[agt]` system agent 
   `[gate] [dev]`
 - **Non-functional gate results vs. targets** — latency, size budgets, security
   findings. `[gate] [stk]`
+- **License-scan flag rate** — generated-code similarity-to-licensed-training-
+  data flags, by component and over time, whether or not the flag ultimately
+  blocked a merge (per D7). Every flag is tracked and communicated, never
+  silent. `[gate] [stk]`
 - **Verification runtime and cost** per merge. `[stk]`
 - **Flaky-check rate** — checks with non-deterministic pass/fail. `[dev]`
 
