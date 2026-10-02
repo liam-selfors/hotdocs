@@ -75,6 +75,15 @@ Consumer tags: `[dev]` developer · `[stk]` stakeholder · `[agt]` system agent 
   expressible as structured Given/When/Then (deterministically compiled) vs.
   requiring freeform LLM interpretation to become executable (per D4). High
   freeform % ⇒ specs are under-formalized. `[agt] [dev]`
+- **`llm-judge` criteria ratio** — % of acceptance criteria whose `kind` is
+  `llm-judge` rather than `compiled` / `generated-test` (per D5). Should stay
+  low for components with testable runtime behavior; high ratio there is a
+  signal the spec is reaching for judgment where a real test should exist.
+  `[agt] [dev]`
+- **Judge disagreement rate** — how often two independent `llm-judge` models
+  disagree on a criterion, blocking merge (per D5). A per-criterion or
+  per-component hot spot here means that criterion's wording is ambiguous.
+  `[gate] [agt]`
 - **Review iterations per spec PR**. `[dev]`
 
 ---
