@@ -55,7 +55,8 @@ regeneration is trustworthy.
    code bug.
 2. **A spec is "done" only when an agent can execute it with zero clarifying
    questions.** Ambiguity is a defect the linter should catch.
-3. **Every requirement has a machine-checkable acceptance criterion.** "The
+3. **Every requirement has an agent-checkable acceptance criterion** (D5 —
+   not necessarily a code test). "The
    pipeline is trusted" is exactly equivalent to "the acceptance criteria are
    strong." This is the load-bearing principle.
 4. **Small, composable spec units with explicit dependencies** — not one giant
@@ -87,7 +88,7 @@ specs/
     <component>/
       spec.md         # normative behavior for this unit
       interface.md    # public contract: types, endpoints, events, CLI
-      acceptance.md   # machine-checkable criteria + test scenarios
+      acceptance.md   # agent-checkable criteria (D5) + test scenarios
                       # (realizes: [P-id, ...] in frontmatter — see D8)
       constraints.md  # non-functional: perf, security, compatibility
   decisions/          # ADR-style, append-only, immutable once ratified
@@ -260,8 +261,11 @@ the **git branching strategy**, not chosen once globally.
 ### D2 — Component granularity
 
 **Hard splitting trigger: verifiability.** If a component's full public behavior
-cannot be captured by *complete* machine-checkable acceptance criteria, it is too
-big and must be split. This is the non-negotiable rule.
+cannot be captured by *complete*, agent-checkable acceptance criteria (D5 —
+`compiled`, `generated-test`, and `llm-judge` all count toward completeness; a
+component isn't oversized just because some of its behavior is legitimately
+judgment-based rather than test-based), it is too big and must be split. This is
+the non-negotiable rule.
 
 Secondary sizing inputs, applied within what the trigger allows:
 
@@ -313,7 +317,7 @@ mechanisms, judged separately:
   reproducible. Small k (2–4).
 - **Cross-model divergence check — a pre-merge gate, not a scheduled job, and
   best-effort, not mandatory.** The tool must keep working with only one model
-  available (see Q9) — so this gate runs *only when a second model is
+  available (see D10) — so this gate runs *only when a second model is
   configured*. When one is: on every merge, for each impacted component
   (already scoped by impact analysis — §6 step 2), also regenerate with that
   second, different model. If that build **passes the same verification suite
@@ -487,7 +491,7 @@ ends up blocking the merge:**
 - Tracked as a metric with trend visibility for stakeholders (added to
   `metrics.md`): **license-scan flag rate**, by component and over time.
 
-This keeps the "no mandatory human review" precedent (Q5) intact for
+This keeps the "no mandatory human review" precedent (D5) intact for
 *correctness* while treating *compliance* as a different category that still
 must never be silent, per your instruction.
 
