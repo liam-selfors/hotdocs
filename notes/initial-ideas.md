@@ -576,6 +576,10 @@ produces.
   - Verification-toggle state (`cross_model_divergence_check`,
     `fallback_standby_build` — D3/D10) actually in effect for this component,
     so a viewer can see *why* a gate didn't run, not just that it didn't.
+  - Declared exemptions from the normal cold-regen discipline: whether the
+    component is `sealed` (with its `source_path`) or carries file-level
+    pinned overrides (`.overrides.json`) — §8/principle 7 — each with its
+    characterization-test status.
   - Owners.
 - **Corpus-health dashboard** surfacing the live, computable numbers from
   `metrics.md` directly — turns that catalog from a document agents consult
