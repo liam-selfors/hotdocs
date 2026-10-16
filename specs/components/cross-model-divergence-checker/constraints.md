@@ -1,10 +1,3 @@
----
-id: comp-cross-model-divergence-checker-constraints
-title: Cross-Model Divergence Checker — Non-Functional Constraints
-status: draft
-owners: [pipeline-team]
----
-
 # Cross-Model Divergence Checker — Non-Functional Constraints
 
 - **This component's own logic is deterministic; what it calls isn't.**

@@ -1,10 +1,3 @@
----
-id: comp-generator-constraints
-title: Generator — Non-Functional Constraints
-status: draft
-owners: [pipeline-team]
----
-
 # Generator — Non-Functional Constraints
 
 - **Not deterministic, and that's expected — but bounded.** Unlike every

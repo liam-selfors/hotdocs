@@ -1,10 +1,3 @@
----
-id: comp-merge-orchestrator-constraints
-title: Merge Orchestrator — Non-Functional Constraints
-status: draft
-owners: [pipeline-team]
----
-
 # Merge Orchestrator — Non-Functional Constraints
 
 - **Determinism of sequencing, not of everything sequenced.** Given the

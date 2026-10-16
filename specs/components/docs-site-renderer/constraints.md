@@ -1,10 +1,3 @@
----
-id: comp-docs-site-renderer-constraints
-title: Docs Site Renderer — Non-Functional Constraints
-status: draft
-owners: [pipeline-team]
----
-
 # Docs Site Renderer — Non-Functional Constraints
 
 - **Purity.** A function of `corpus-graph.json` alone — no network access,

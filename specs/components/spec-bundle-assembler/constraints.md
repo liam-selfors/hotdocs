@@ -1,10 +1,3 @@
----
-id: comp-spec-bundle-assembler-constraints
-title: Spec Bundle Assembler — Non-Functional Constraints
-status: draft
-owners: [pipeline-team]
----
-
 # Spec Bundle Assembler — Non-Functional Constraints
 
 - **Determinism.** Same corpus content, byte-for-byte, MUST always produce

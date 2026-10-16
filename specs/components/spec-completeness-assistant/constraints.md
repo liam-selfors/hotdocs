@@ -1,10 +1,3 @@
----
-id: comp-spec-completeness-assistant-constraints
-title: Spec Completeness Assistant — Non-Functional Constraints
-status: draft
-owners: [pipeline-team]
----
-
 # Spec Completeness Assistant — Non-Functional Constraints
 
 - **Never a gate.** This is a structural property, not a convention to be

@@ -1,10 +1,3 @@
----
-id: comp-corpus-graph-builder-constraints
-title: Corpus Graph Builder — Non-Functional Constraints
-status: draft
-owners: [pipeline-team]
----
-
 # Corpus Graph Builder — Non-Functional Constraints
 
 - **Determinism.** Same corpus/provenance/verification state MUST always

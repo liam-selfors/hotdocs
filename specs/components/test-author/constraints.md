@@ -1,10 +1,3 @@
----
-id: comp-test-author-constraints
-title: Test Author — Non-Functional Constraints
-status: draft
-owners: [pipeline-team]
----
-
 # Test Author — Non-Functional Constraints
 
 - **Not deterministic, and that's expected — but bounded**, same posture as

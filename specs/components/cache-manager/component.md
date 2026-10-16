@@ -1,0 +1,77 @@
+---
+id: comp-cache-manager
+title: Cache Manager
+status: draft
+owners: [pipeline-team]
+depends_on: []
+realizes: [P-ZERO-EDIT]
+uses_var: [VAR-CACHE-STORE-URL]
+model_pin: claude-sonnet-5
+sealed: false
+---
+
+# Cache Manager
+
+## Purpose
+
+The content-addressed cache backing D13's "cache every gate" mandate and
+D11's cache-hit rollback mechanism: a get/put store keyed by
+`(spec_bundle_hash, artifact/gate-inputs hash, gate_version, model_pin)`,
+used by `generator`, `cross-model-divergence-checker`, `license-scanner`, and
+`secret-scanner`.
+
+## Scope
+
+**In scope:** the key/value contract, key formation, fail-closed behavior on
+store errors, protection against a caller writing a result under the wrong
+gate's key.
+
+**Out of scope:** deciding *what* is cacheable or *when* to check the cache
+(that's each calling gate's own concern — `cache-manager` is a dumb,
+trustworthy store, not a policy engine); the actual backing store's storage
+engine/scaling characteristics (treated as an implementation detail behind
+`VAR-CACHE-STORE-URL`).
+
+## Definitions
+
+No deltas from `specs/glossary.md`.
+
+## Behavior
+
+See `requirements/`.
+
+## Interfaces
+
+See `interface/`.
+
+## Data
+
+See `interface/data/`.
+
+## Acceptance criteria
+
+See `acceptance/`.
+
+Every criterion below is `kind: compiled` — a third real component, after
+`spec-linter` and `impact-analyzer`, whose entire behavior is deterministic
+store logic with no model call anywhere in it.
+
+## Non-functional constraints
+
+See `constraints.md`.
+
+## Open questions
+
+- R-CACHE-003's "last-write-wins is safe only because gates are
+  deterministic" assumption depends entirely on every other component in
+  this system actually upholding its own determinism constraint. This
+  component cannot verify that from the inside — it's a cross-cutting
+  assumption this spec inherits rather than enforces. Not resolved here;
+  flagged as a standing dependency on every gate's own constraints.md.
+- Cache eviction/retention policy (how long entries live, whether there's a
+  size bound on the backing store) is undecided — out of scope for this
+  draft, deferred to an operational concern rather than a correctness one.
+
+## Change log
+
+- Initial draft.

@@ -1,10 +1,3 @@
----
-id: comp-cache-manager-constraints
-title: Cache Manager — Non-Functional Constraints
-status: draft
-owners: [pipeline-team]
----
-
 # Cache Manager — Non-Functional Constraints
 
 - **Fail closed to "miss," never to a crash.** Per R-CACHE-004 — this is the

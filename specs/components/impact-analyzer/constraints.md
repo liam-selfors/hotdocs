@@ -1,10 +1,3 @@
----
-id: comp-impact-analyzer-constraints
-title: Impact Analyzer — Non-Functional Constraints
-status: draft
-owners: [pipeline-team]
----
-
 # Impact Analyzer — Non-Functional Constraints
 
 - **Determinism.** Same `(changed_ids, corpus state)` input MUST always

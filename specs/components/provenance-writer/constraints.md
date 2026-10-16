@@ -1,10 +1,3 @@
----
-id: comp-provenance-writer-constraints
-title: Provenance Writer — Non-Functional Constraints
-status: draft
-owners: [pipeline-team]
----
-
 # Provenance Writer — Non-Functional Constraints
 
 - **Never invents data.** If a required input is missing, this component

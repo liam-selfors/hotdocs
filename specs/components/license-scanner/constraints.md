@@ -1,10 +1,3 @@
----
-id: comp-license-scanner-constraints
-title: License Scanner — Non-Functional Constraints
-status: draft
-owners: [pipeline-team]
----
-
 # License Scanner — Non-Functional Constraints
 
 - **Determinism.** Same `gen/<component>/` content and the same reference

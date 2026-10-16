@@ -1,10 +1,3 @@
----
-id: comp-verifier-orchestrator-constraints
-title: Verifier Orchestrator — Non-Functional Constraints
-status: draft
-owners: [pipeline-team]
----
-
 # Verifier Orchestrator — Non-Functional Constraints
 
 - **Determinism of orchestration, not of everything it orchestrates.** This

@@ -1,10 +1,3 @@
----
-id: comp-review-packet-builder-constraints
-title: Review Packet Builder — Non-Functional Constraints
-status: draft
-owners: [pipeline-team]
----
-
 # Review Packet Builder — Non-Functional Constraints
 
 - **Determinism.** Given the same upstream results, the packet MUST be

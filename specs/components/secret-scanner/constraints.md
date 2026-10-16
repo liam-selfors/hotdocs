@@ -1,10 +1,3 @@
----
-id: comp-secret-scanner-constraints
-title: Secret Scanner — Non-Functional Constraints
-status: draft
-owners: [pipeline-team]
----
-
 # Secret Scanner — Non-Functional Constraints
 
 - **Determinism (full-scan form).** Same corpus content and pattern

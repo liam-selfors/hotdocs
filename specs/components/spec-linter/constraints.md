@@ -1,10 +1,3 @@
----
-id: comp-spec-linter-constraints
-title: Spec Linter — Non-Functional Constraints
-status: draft
-owners: [pipeline-team]
----
-
 # Spec Linter — Non-Functional Constraints
 
 - **Determinism, for 14 of 15 rules.** The same spec bundle, byte-for-byte,
