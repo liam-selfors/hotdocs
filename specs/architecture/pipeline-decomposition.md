@@ -25,7 +25,8 @@ change.
 | `spec-bundle-assembler` | Assembles a component's full generation input (spec + interface + constraints + dependency interfaces + referenced vars + glossary — deliberately excluding `acceptance.md`, to avoid the generation model overfitting to its own tests) into one payload. Reused by canonical generation, the cross-model check, and hint-mode previews. Fully specced. | `spec-linter` |
 | `criterion-compiler` | Deterministic Gherkin → test-scaffolding compiler for `compiled`-kind acceptance criteria. | — |
 | `generator` | Produces **exactly one candidate** `gen/<component>/` per call, given a `SpecBundle` and an explicit model identifier (never a hardcoded "canonical pin" — this is what lets `cross-model-divergence-checker` reuse it with a second model). Single-shot and stateless about prior attempts, deliberately: the best-of-k *retry loop* (D3) lives in `merge-orchestrator`, not here — putting it here would require a `verifier-orchestrator` dependency this component doesn't have. Fully specced. | `spec-bundle-assembler`, `cache-manager` |
-| `verifier-orchestrator` | Runs per-criterion verification (`compiled` via the compiler, `generated-test`, `llm-judge`) plus contract/property tests and the interface drift check. Its own coordination logic is 100% `compiled` — dispatching to judgment-involving mechanisms is itself deterministic. Fully specced. | `criterion-compiler`, `generator` |
+| `test-author` | Authors the test code for one `generated-test`-kind criterion — D4/D5's "independent generation path," given a real component for the first time. Invoked by `verifier-orchestrator` via an injectable callable, not sequenced top-level by `merge-orchestrator` — same pattern `llm-judge`'s `judge` parameter already established. Prefers a different model than `generator` used, when one is configured, for genuine independence. Fully specced. | `spec-bundle-assembler`, `cache-manager` |
+| `verifier-orchestrator` | Runs per-criterion verification (`compiled` via the compiler, `generated-test` via `test-author`, `llm-judge`) plus contract/property tests and the interface drift check. Its own coordination logic is 100% `compiled` — dispatching to judgment-involving mechanisms is itself deterministic. **Never re-decides a criterion's declared `kind`** — that stays fixed at spec-authoring time, lint-checked, normative. Fully specced. | `criterion-compiler`, `generator`, `test-author` |
 | `cross-model-divergence-checker` | The D3 toggleable gate: regenerates with a second model, differential-tests against the canonical build — or, in `standby-only` mode, just keeps a verified spare warm for D10's fallback. All `compiled`: comparing two concrete candidates needs no judgment. Fully specced. | `generator`, `verifier-orchestrator`, `cache-manager` |
 | `license-scanner` | Automated, unconditional license/similarity scan (D7) — k-gram/shingle hashing against a reference corpus, fully deterministic. Fully specced. | `cache-manager` |
 | `secret-scanner` | Automated, unconditional secret-pattern scan (D12), plus a distinct, cache-free pre-commit/pre-push invocation. Fully specced. | `cache-manager` |
@@ -34,14 +35,15 @@ change.
 | `review-packet-builder` | Assembles the human-readable PR summary (D11/D12/§6 step 7) — deliberately never includes the generated code diff itself. Fully specced. | `provenance-writer`, `verifier-orchestrator`, `license-scanner`, `secret-scanner`, `cache-manager` |
 | `corpus-graph-builder` | Builds `corpus-graph.json` (D8/D9) — the `P-id → component → R-id → acceptance → verification-status` walk, orphan-rate computation, including orphan-var rate (D12). Fully specced. | `spec-linter`, `provenance-writer`, `verifier-orchestrator` |
 | `docs-site-renderer` | Pure renderer of `corpus-graph.json` into the interactive graph/docs site (D9). Not committed; CI build artifact. Fully specced. | `corpus-graph-builder` |
-| `merge-orchestrator` | Sequences the above per `SPEC_GUIDELINES.md` §6, parallelizing independent gates (D13). **Owns the best-of-k retry loop (D3)** — calls `generator` once per sample, checks the result against `verifier-orchestrator`, decides whether to call `generator` again with a different seed. Fully specced — and its real `fan_out` (12), checked against the actual linter, triggers exactly the warn-only finding this document predicted below, confirming the prediction rather than just asserting it. | everything above |
+| `merge-orchestrator` | Sequences the above per `SPEC_GUIDELINES.md` §6, parallelizing independent gates (D13). **Owns the best-of-k retry loop (D3)** — calls `generator` once per sample, checks the result against `verifier-orchestrator`, decides whether to call `generator` again with a different seed. Also where the real `test_author`/`judge` callables get wired into `verifier-orchestrator`'s call — nothing upstream assigned that wiring either, until this component's spec made it explicit. Fully specced — its real `fan_out` (13, after `test-author` was added) is checked against the actual linter and still triggers exactly the warn-only finding this document predicted below, confirming the prediction rather than just asserting it. | everything above |
 
 ## A finding from writing this down: `merge-orchestrator`'s fan-out
 
-`merge-orchestrator` depends on 12 components (11 at the time this was first
-written, before its real spec existed; the actual, now-specced `depends_on`
-list and the real linter's measurement both independently confirm 12) —
-well past D2's fan-out warn threshold of 7. This is a genuine tension
+`merge-orchestrator` depends on 13 components (11 at the time this was
+first written, before its real spec existed; 12 once specced; 13 once
+`test-author` was added and `merge-orchestrator` took on wiring its
+callable into `verifier-orchestrator`'s call) — well past D2's fan-out warn
+threshold of 7. This is a genuine tension
 surfaced by actually doing the decomposition, not a mistake to quietly fix
 by padding the dependency list down:
 

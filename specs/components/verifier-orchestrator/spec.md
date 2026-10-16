@@ -3,7 +3,7 @@ id: comp-verifier-orchestrator
 title: Verifier Orchestrator
 status: draft
 owners: [pipeline-team]
-depends_on: [comp-criterion-compiler, comp-generator]
+depends_on: [comp-criterion-compiler, comp-generator, comp-test-author]
 realizes: [P-ZERO-EDIT, P-AMBIGUITY-GATE]
 sealed: false
 ---
@@ -26,9 +26,18 @@ aggregating mutation scores; producing one `VerificationReport`.
 
 **Out of scope:** the cross-model divergence check (`cross-model-divergence-
 checker`'s job — a different gate, D3); the license/secret scans (separate
-components, D7/D12); *performing* an `llm-judge` evaluation (this component
-dispatches to an injectable judge and records the result — it does not
-itself judge anything, see the note below).
+components, D7/D12); *performing* an `llm-judge` evaluation or *authoring*
+`generated-test` code (this component dispatches to an injectable judge and
+an injectable `test_author` and records their results — it does not itself
+judge or author anything, see the note below); **re-deciding a criterion's
+declared `kind`** — `compiled`/`generated-test`/`llm-judge` is fixed at
+spec-authoring time in `acceptance.md`, lint-checked (R-LINT-010), and never
+reconsidered here. Giving this component (or `test-author`) the power to
+override that declaration at verification time was considered and
+explicitly rejected: it would make `kind:` advisory rather than normative,
+and would turn this component's own dispatch logic into a judgment call,
+breaking the determinism D13's cache-key validity and R-VERIFY-008's
+idempotency claim both depend on.
 
 ## Definitions
 
@@ -41,9 +50,10 @@ No deltas from `specs/glossary.md`.
   produce test scaffolding, execute it against `gen/<component>/`, and
   record a pass/fail per criterion.
 - **R-VERIFY-002** — For every `generated-test`-kind criterion, this
-  component MUST execute the already-generated test code (produced
-  separately, per D4/D5's independent-path mechanism) against
-  `gen/<component>/` and record a pass/fail per criterion.
+  component MUST obtain the test code — from cache if already authored for
+  this criterion's content, or by dispatching to an injectable
+  `test_author` callable otherwise (R-VERIFY-009) — execute it against
+  `gen/<component>/`, and record a pass/fail per criterion.
 - **R-VERIFY-003** — For every `llm-judge`-kind criterion, this component
   MUST invoke an injectable judge callable and record its pass/fail +
   rationale, or record `skipped` when no judge is configured — the same
@@ -78,6 +88,25 @@ No deltas from `specs/glossary.md`.
   `llm-judge` evaluations are reproducible in general (they may not be,
   which is exactly why this requirement is phrased conditionally on the
   judge callable's own consistency, not as a blanket idempotency claim).
+- **R-VERIFY-009** — For a `generated-test`-kind criterion with no cached
+  test yet, this component MUST dispatch to an injectable `test_author`
+  callable, passing exactly the `CriterionBundle` `spec-bundle-assembler`
+  produces for that criterion, and use the returned test code. **This
+  component's role here is dispatch and recording, identical in shape to
+  R-VERIFY-003's handling of `llm-judge`** — the actual authoring happens
+  inside whatever callable is injected, never in this component's own
+  logic, which is why this requirement, like R-VERIFY-003, is `kind:
+  compiled` despite coordinating non-deterministic work.
+- **R-VERIFY-010** — Unlike a `skipped` `llm-judge` finding, a
+  `generated-test` criterion with no cached test and no `test_author`
+  configured MUST be recorded as `fail`, not `skipped`. The two `kind`s
+  differ in exactly this way: `llm-judge` is for qualities no test could
+  capture even in principle, so "not evaluated" is a legitimate, visible
+  gap (D10's posture). A `generated-test` criterion exists specifically
+  *because* a real, mutation-tested check is possible for it — an
+  unauthored one isn't a degraded-but-acceptable state, it's a verification
+  gap the mutation-score gate (R-VERIFY-006) already presumes doesn't
+  exist.
 
 ## Interfaces
 
@@ -97,12 +126,10 @@ See `constraints.md`.
 
 ## Open questions
 
-- Where "the already-generated test code" for `generated-test`-kind
-  criteria (R-VERIFY-002) actually comes from — which component authors it,
-  and at what pipeline stage — is referenced throughout the brainstorm (D4's
-  "independent generation path") but no component in this architecture is
-  explicitly assigned that job yet. Flagged, not resolved here; a real gap
-  this spec surfaced rather than quietly assumed an answer for.
+None. The gap this spec originally surfaced — which component authors
+`generated-test` code — is resolved: `test-author`, invoked via the
+`test_author` injectable callable (R-VERIFY-009), the same pattern already
+established for `judge`.
 
 ## Change log
 

@@ -102,3 +102,28 @@ Given unchanged gen/<component>/ and acceptance.md, and a judge callable
 When verify runs twice
 Then the two VerificationReports are identical
 ```
+
+### AC-VERIFY-009
+Covers: R-VERIFY-009
+Kind: compiled
+
+```gherkin
+Given a component with one generated-test-kind criterion and no cached test
+  for it, and a mock test_author
+When verify runs
+Then test_author is invoked with exactly the CriterionBundle for that
+  criterion, and the returned test code is executed to produce that
+  criterion's result
+```
+
+### AC-VERIFY-010
+Covers: R-VERIFY-010
+Kind: compiled
+
+```gherkin
+Given a component with one generated-test-kind criterion, no cached test,
+  and no test_author configured
+When verify runs
+Then that criterion's result is fail, not skipped, and the overall verdict
+  is fail
+```

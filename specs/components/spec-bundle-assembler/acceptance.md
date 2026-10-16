@@ -99,3 +99,17 @@ When assemble runs in hint mode for that component
 Then hint_code contains that content, keyed by relative path, and every
   other field matches what cold mode would have produced
 ```
+
+### AC-ASSEMBLE-009
+Covers: R-ASSEMBLE-009
+Kind: compiled
+
+```gherkin
+Given a component with existing gen/<component>/ content and a multi-
+  criterion acceptance.md
+When assemble_criterion runs for one specific criterion
+Then the resulting CriterionBundle contains that criterion's text, its
+  covered requirement's text, the interface, and the glossary — and
+  contains no field derived from gen/<component>/, spec.md's other
+  requirements, or constraints.md
+```

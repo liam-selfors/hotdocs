@@ -30,10 +30,11 @@ hotdocs assemble <component-id> [--mode=cold|hint] [--repo-root=<dir>] [--format
 
 ```
 assemble(component_id: str, repo_root: Path, mode: str = "cold") -> SpecBundle
+assemble_criterion(component_id: str, criterion_id: str, repo_root: Path) -> CriterionBundle
 ```
 
-A pure function over the filesystem state at `repo_root` — no network
-access, no model calls, no side effects.
+Both are pure functions over the filesystem state at `repo_root` — no
+network access, no model calls, no side effects.
 
 ## Data: `SpecBundle`
 
@@ -53,3 +54,20 @@ access, no model calls, no side effects.
 
 `hint_code` is `null` in `cold` mode; in `hint` mode it holds the component's
 current `gen/<component>/` file contents, keyed by relative path.
+
+## Data: `CriterionBundle`
+
+```json
+{
+  "component_id": "comp-foo",
+  "criterion_id": "AC-FOO-003",
+  "covers": "R-FOO-003",
+  "criterion_text": "<Given/When/Then prose>",
+  "requirement_text": "<the covered R-id's own text from spec.md>",
+  "interface": "<interface.md body>",
+  "glossary": "<specs/glossary.md body>"
+}
+```
+
+Narrower than `SpecBundle` by design (R-ASSEMBLE-009) — `test-author`'s
+consumer of this schema.

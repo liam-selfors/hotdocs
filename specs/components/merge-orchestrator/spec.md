@@ -3,7 +3,7 @@ id: comp-merge-orchestrator
 title: Merge Orchestrator
 status: draft
 owners: [pipeline-team]
-depends_on: [comp-spec-linter, comp-impact-analyzer, comp-spec-bundle-assembler, comp-generator, comp-verifier-orchestrator, comp-cross-model-divergence-checker, comp-license-scanner, comp-secret-scanner, comp-cache-manager, comp-provenance-writer, comp-review-packet-builder, comp-corpus-graph-builder]
+depends_on: [comp-spec-linter, comp-impact-analyzer, comp-spec-bundle-assembler, comp-generator, comp-test-author, comp-verifier-orchestrator, comp-cross-model-divergence-checker, comp-license-scanner, comp-secret-scanner, comp-cache-manager, comp-provenance-writer, comp-review-packet-builder, comp-corpus-graph-builder]
 realizes: [P-ZERO-EDIT, P-AMBIGUITY-GATE, P-COMPLIANCE-GATE]
 sealed: false
 ---
@@ -50,7 +50,13 @@ No deltas from `specs/glossary.md`.
   them.
 - **R-MERGE-004** — For a cache miss, MUST call `spec-bundle-assembler`
   then `generator` (cold mode, sample index 0) to produce a candidate, then
-  `verifier-orchestrator` to check it.
+  `verifier-orchestrator` to check it — **wiring a real `test_author`
+  callable (backed by `test-author`) and a real `judge` callable (a direct
+  call to the configured model, for `llm-judge`-kind criteria) into that
+  call.** This component is where those two injectable parameters actually
+  get their real implementations in production; nothing upstream of this
+  requirement assigned who does that wiring, so it's stated explicitly here
+  rather than left implicit.
 - **R-MERGE-005** — **This is the best-of-k retry loop (D3), owned here.**
   If `verifier-orchestrator`'s verdict is `fail`, MUST call `generator`
   again with a new sample index, up to a configured `k` (default range
