@@ -26,7 +26,10 @@ Specced in full depth so far:
   this pipeline doesn't have yet. See `verification/spec-linter/BOOTSTRAP.md`.
 - **`impact-analyzer`** — all `kind: compiled`. Pins down, as an executable
   rule for the first time, the interface-vs-internal-change distinction D2
-  only ever stated as a sizing heuristic.
+  only ever stated as a sizing heuristic. Since D16, also computes a
+  narrowed blast radius for behavioral guarantees specifically (opt-in via
+  `depends_on_guarantees`) — types stay coarse and always propagate,
+  guarantees can be precisely scoped per dependent.
 - **`cache-manager`** — all `kind: compiled`. Fail-closed on backing-store
   errors (the D10 "tool must keep working" posture, applied to a new
   subsystem).
@@ -81,14 +84,17 @@ Specced in full depth so far:
 - **`merge-orchestrator`** — all `kind: compiled`, the capstone data point
   for D5's guidance: even the component sequencing every model-calling,
   judgment-involving gate in the whole pipeline is itself fully
-  deterministic. Owns the best-of-k retry loop (D3) and the real wiring of
-  `test_author`/`judge` callables into `verifier-orchestrator`'s call —
-  two responsibilities nothing had explicitly assigned before `generator`'s
-  and `verifier-orchestrator`'s specs forced the questions. Its real,
-  measured `fan_out` is 13 (12 before `test-author` was added), confirmed
-  against the actual linter — exactly the warn-only finding (not a hard
-  failure) `specs/architecture/pipeline-decomposition.md` predicted before
-  this component existed.
+  deterministic. Owns the best-of-k retry loop (D3), the real wiring of
+  `test_author`/`judge` callables into `verifier-orchestrator`'s call, and
+  (since D16) running golden-scenario verification against the real
+  assembled system, reusing that same callable wiring — three
+  responsibilities nothing had explicitly assigned before `generator`'s,
+  `verifier-orchestrator`'s, and the blast-radius/D16 threads each forced
+  the question. Its real, measured `fan_out` is 14 (13 before
+  `criterion-compiler` was added directly), confirmed against the actual
+  linter — exactly the warn-only finding (not a hard failure)
+  `specs/architecture/pipeline-decomposition.md` predicted before this
+  component existed.
 
 - **`spec-completeness-assistant`** — the assist agent D1 describes but
   never names, and that two `notes/metrics.md` metrics already assumed

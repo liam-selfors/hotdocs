@@ -21,7 +21,7 @@ change.
 | Component | Purpose | `depends_on` |
 | --- | --- | --- |
 | `spec-linter` | Structural/traceability/size-cap checks over a spec bundle. Pure, deterministic, no model calls. | — |
-| `impact-analyzer` | From changed spec ids + the dependency graph, computes the minimal set of components to regenerate — now fully specced, including the interface-vs-internal-change distinction (`component.md`/`requirements/`/`constraints.md`/`acceptance/` changes stay local; `interface/`/`specs/vars/`/capability changes propagate) that D2 previously stated only as a sizing heuristic, never as an executable rule — and, since D15, computed as plain file-level hashing rather than needing bespoke section parsing (each `interface/` file already is its own hash boundary). | `spec-linter` |
+| `impact-analyzer` | From changed spec ids + the dependency graph, computes the minimal set of components to regenerate — now fully specced, including the interface-vs-internal-change distinction (`component.md`/`requirements/`/`constraints.md`/`acceptance/` changes stay local; `interface/cli.md`/`library.md`/`data/*.md`/`specs/vars/`/capability changes always propagate; `interface/guarantees/*.md` changes propagate too, but **narrowably** — opt-in per-dependent via `depends_on_guarantees`, D16) that D2 previously stated only as a sizing heuristic, never as an executable rule — and, since D15, computed as plain file-level hashing rather than needing bespoke section parsing (each `interface/` file already is its own hash boundary). | `spec-linter` |
 | `spec-bundle-assembler` | Assembles a component's full generation input (`component.md` + `requirements/` + `interface/` + `constraints.md` + dependency `interface/` content + referenced vars + glossary — deliberately excluding `acceptance/`, to avoid the generation model overfitting to its own tests) into one payload. Reused by canonical generation, the cross-model check, and hint-mode previews. Fully specced. | `spec-linter` |
 | `criterion-compiler` | Deterministic Gherkin → test-scaffolding compiler for `compiled`-kind acceptance criteria. | — |
 | `generator` | Produces **exactly one candidate** `gen/<component>/` per call, given a `SpecBundle` and an explicit model identifier (never a hardcoded "canonical pin" — this is what lets `cross-model-divergence-checker` reuse it with a second model). Single-shot and stateless about prior attempts, deliberately: the best-of-k *retry loop* (D3) lives in `merge-orchestrator`, not here — putting it here would require a `verifier-orchestrator` dependency this component doesn't have. Fully specced. | `spec-bundle-assembler`, `cache-manager` |
@@ -35,7 +35,7 @@ change.
 | `review-packet-builder` | Assembles the human-readable PR summary (D11/D12/§6 step 7) — deliberately never includes the generated code diff itself. Fully specced. | `provenance-writer`, `verifier-orchestrator`, `license-scanner`, `secret-scanner`, `cache-manager` |
 | `corpus-graph-builder` | Builds `corpus-graph.json` (D8/D9) — the `P-id → component → R-id → acceptance → verification-status` walk, orphan-rate computation, including orphan-var rate (D12). Fully specced. | `spec-linter`, `provenance-writer`, `verifier-orchestrator` |
 | `docs-site-renderer` | Pure renderer of `corpus-graph.json` into the interactive graph/docs site (D9). Not committed; CI build artifact. Fully specced. | `corpus-graph-builder` |
-| `merge-orchestrator` | Sequences the above per `SPEC_GUIDELINES.md` §6, parallelizing independent gates (D13). **Owns the best-of-k retry loop (D3)** — calls `generator` once per sample, checks the result against `verifier-orchestrator`, decides whether to call `generator` again with a different seed. Also where the real `test_author`/`judge` callables get wired into `verifier-orchestrator`'s call — nothing upstream assigned that wiring either, until this component's spec made it explicit. Fully specced — its real `fan_out` (13, after `test-author` was added) is checked against the actual linter and still triggers exactly the warn-only finding this document predicted below, confirming the prediction rather than just asserting it. | everything above |
+| `merge-orchestrator` | Sequences the above per `SPEC_GUIDELINES.md` §6, parallelizing independent gates (D13). **Owns the best-of-k retry loop (D3)** — calls `generator` once per sample, checks the result against `verifier-orchestrator`, decides whether to call `generator` again with a different seed. Also where the real `test_author`/`judge` callables get wired into `verifier-orchestrator`'s call — nothing upstream assigned that wiring either, until this component's spec made it explicit. **Since D16, also runs golden-scenario verification** against the real assembled system, reusing that same callable wiring — the permanent backstop for cross-component behavioral risk `interface/guarantees/` can't fully rule out by documentation alone. Fully specced — its real `fan_out` (14, after `criterion-compiler` was added directly) is checked against the actual linter and still triggers exactly the warn-only finding this document predicted below, confirming the prediction rather than just asserting it. | everything above |
 
 ## Feature-branch tooling (not part of the merge pipeline)
 
@@ -49,11 +49,13 @@ merge:
 
 ## A finding from writing this down: `merge-orchestrator`'s fan-out
 
-`merge-orchestrator` depends on 13 components (11 at the time this was
+`merge-orchestrator` depends on 14 components (11 at the time this was
 first written, before its real spec existed; 12 once specced; 13 once
 `test-author` was added and `merge-orchestrator` took on wiring its
-callable into `verifier-orchestrator`'s call) — well past D2's fan-out warn
-threshold of 7. This is a genuine tension
+callable into `verifier-orchestrator`'s call; 14 once `criterion-compiler`
+was added directly, for the D16 golden-scenario gate reusing that same
+callable-wiring pattern) — well past D2's fan-out warn threshold of 7.
+This is a genuine tension
 surfaced by actually doing the decomposition, not a mistake to quietly fix
 by padding the dependency list down:
 
