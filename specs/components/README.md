@@ -86,9 +86,20 @@ Specced in full depth so far:
   failure) `specs/architecture/pipeline-decomposition.md` predicted before
   this component existed.
 
-**All 16 architecture components are now specced in full depth** (15
+- **`spec-completeness-assistant`** — the assist agent D1 describes but
+  never names, and that two `notes/metrics.md` metrics already assumed
+  existed before this spec did. Lives outside the merge pipeline entirely —
+  never in `merge-orchestrator`'s dependency list, no mechanism to gate
+  anything. The one component whose core value genuinely *is* judgment
+  (`llm-judge` for completeness scoring and redundancy detection), not
+  dispatch around it — a deliberate contrast to every coordination
+  component specced so far.
+
+**All 17 architecture components are now specced in full depth** (15
 original + `test-author`, added when a design discussion surfaced that
-nothing owned authoring `generated-test` code). The real linter
+nothing owned authoring `generated-test` code + `spec-completeness-
+assistant`, added when the same discussion surfaced it was referenced by
+name in `notes/metrics.md` but never specced). The real linter
 (`gen/spec-linter/`) validates the entire corpus clean: 0 failures, 3
 warnings (two components over the spec-bundle word-count *target*, and
 `merge-orchestrator`'s fan-out — none are hard-fail-severity).

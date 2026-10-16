@@ -37,6 +37,16 @@ change.
 | `docs-site-renderer` | Pure renderer of `corpus-graph.json` into the interactive graph/docs site (D9). Not committed; CI build artifact. Fully specced. | `corpus-graph-builder` |
 | `merge-orchestrator` | Sequences the above per `SPEC_GUIDELINES.md` §6, parallelizing independent gates (D13). **Owns the best-of-k retry loop (D3)** — calls `generator` once per sample, checks the result against `verifier-orchestrator`, decides whether to call `generator` again with a different seed. Also where the real `test_author`/`judge` callables get wired into `verifier-orchestrator`'s call — nothing upstream assigned that wiring either, until this component's spec made it explicit. Fully specced — its real `fan_out` (13, after `test-author` was added) is checked against the actual linter and still triggers exactly the warn-only finding this document predicted below, confirming the prediction rather than just asserting it. | everything above |
 
+## Feature-branch tooling (not part of the merge pipeline)
+
+One component lives outside the table above by design — it never appears
+in `merge-orchestrator`'s dependency list and has no mechanism to gate a
+merge:
+
+| Component | Purpose | `depends_on` |
+| --- | --- | --- |
+| `spec-completeness-assistant` | The assist agent D1 describes but never names, and that `notes/metrics.md`'s "Completeness-agent confidence" / "Assist-agent acceptance rate" metrics already assumed existed. Runs on a feature branch, before a merge is even attempted: lint + predicted blast radius + hint-mode preview (all `compiled`), plus a genuinely judgment-based completeness score and redundancy check (`llm-judge`) — the one component in this corpus whose core value *is* judgment, not dispatch around it. Fully specced. | `spec-linter`, `impact-analyzer`, `spec-bundle-assembler`, `generator` |
+
 ## A finding from writing this down: `merge-orchestrator`'s fan-out
 
 `merge-orchestrator` depends on 13 components (11 at the time this was

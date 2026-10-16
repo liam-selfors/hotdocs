@@ -268,10 +268,13 @@ the **git branching strategy**, not chosen once globally.
 - **Feature branches use hint mode freely.** It is a fast, low-compute *preview*
   of how a spec change affects the product, so developers can iterate on the
   specs without paying for full regeneration each time.
-- **Hint mode is also an input to the spec-authoring agents.** The assistant
-  agents that help a developer land a *complete* spec change — dependencies
-  updated, no logical discrepancies, no redundancies — use the hint-mode preview
-  to evaluate completeness before merge.
+- **Hint mode is also an input to the spec-authoring agents** — concretely,
+  `spec-completeness-assistant` (`specs/components/spec-completeness-
+  assistant/`), which uses the hint-mode preview to evaluate completeness
+  — dependencies updated, no logical discrepancies, no redundancies —
+  before a change is even submitted for merge. Advisory only; it has no
+  mechanism to block anything, which is exactly what keeps the real gates
+  (lint, verification, compliance scans) the sole source of merge truth.
 - **Hard invariant:** 100% of the **spec-driven** generated code on `main` must
   have undergone a full **cold regen** since the last change to the underlying
   documents. Explicitly scoped to exclude both of principle 7's declared
