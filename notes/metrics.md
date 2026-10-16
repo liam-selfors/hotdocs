@@ -158,8 +158,8 @@ Consumer tags: `[dev]` developer · `[stk]` stakeholder · `[agt]` system agent 
 - **Mutation score on generated tests** — % of injected faults caught. Guards
   against vacuous / tautological tests. `[gate] [agt]`
 - **Property / metamorphic check pass rate** and **flakiness**. `[agt] [dev]`
-- **Contract-drift incidents** — generated interface ≠ `interface.md`.
-  `[gate] [dev]`
+- **Contract-drift incidents** — generated interface ≠ the `interface/`
+  contract (D15). `[gate] [dev]`
 - **Non-functional gate results vs. targets** — latency, size budgets, security
   findings. `[gate] [stk]`
 - **License-scan flag rate** — generated-code similarity-to-licensed-training-

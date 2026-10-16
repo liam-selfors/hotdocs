@@ -21,10 +21,20 @@ specs/
   vars/                # env/config parameter declarations (VAR-id) — never values
   components/
     <component>/
-      spec.md          # normative behavior
-      interface.md     # public contract
-      acceptance.md    # acceptance criteria
-      constraints.md   # non-functional requirements
+      component.md      # root: frontmatter + Purpose/Scope/Definitions/
+                         # Open questions/Change log + pointers to the below
+      requirements/
+        R-<comp>-NNN.md  # one Behavior requirement each
+      interface/
+        cli.md           # CLI contract
+        library.md       # library/function contract
+        data/
+          <TypeName>.md   # one schema/type each
+      acceptance/
+        AC-<comp>-NNN.md  # one acceptance criterion each
+      constraints.md      # non-functional requirements (stays one file —
+                           # see §3.4; no `Covers:`-style reference ever
+                           # addresses one constraint individually)
   decisions/           # ADR-style, append-only, immutable once ratified
   glossary.md          # canonical vocabulary
 SPEC_GUIDELINES.md      # this file
@@ -43,25 +53,51 @@ notes/                 # brainstorming — non-normative, not read by the pipeli
   declared exemptions — see §9.
 - A `README.md` anywhere under `specs/` is non-normative scaffolding, not a
   governed spec — the linter and every other tool in this document **MUST**
-  skip it. The governed set is exactly: `spec.md` / `interface.md` /
-  `acceptance.md` / `constraints.md` under `specs/components/<x>/`; any other
-  named `.md` file directly under `specs/product/`, `specs/architecture/`,
-  `specs/vars/`, or `specs/decisions/`; and `specs/glossary.md`. (Found while
-  bootstrapping `spec-linter` — nothing previously said how to tell a real
-  spec from a placeholder sitting in the same directory.)
+  skip it. The governed set under a component directory is exactly:
+  `component.md`; every file under `requirements/`, `interface/` (including
+  `interface/data/`), and `acceptance/`; and `constraints.md`. Elsewhere: any
+  other named `.md` file directly under `specs/product/`,
+  `specs/architecture/`, `specs/vars/`, or `specs/decisions/`; and
+  `specs/glossary.md`. (Found while bootstrapping `spec-linter` — nothing
+  previously said how to tell a real spec from a placeholder sitting in the
+  same directory.)
+- **Why one file per unit, not one file per document type.** A component's
+  individually-addressed units — each requirement, each acceptance criterion,
+  each interface section — get their own file; narrative/frontmatter does
+  not. This replaced an earlier four-flat-files design (`spec.md` /
+  `interface.md` / `acceptance.md` / `constraints.md`) once it became clear
+  the flat-file version was both harder to hash precisely for blast-radius
+  purposes (D2's "interface change vs. internal change" distinction needed
+  section-level parsing to approximate) and inconsistent with itself (every
+  `R-id` and every `AC-id` was already independently addressed by other
+  specs — `realizes`, `uses_var`, `Covers:` — while living in a shared file
+  with no file-level boundary to hash against). One file per unit makes
+  content hashing *exact* rather than approximated, and removes a whole
+  class of block-boundary parsing bugs (the kind that caused a real,
+  caught-in-testing bug in `spec-linter`'s own bootstrap).
 
 ---
 
 ## 2. Universal frontmatter
 
-Every governed file under `specs/` (per §1's governed-vs-scaffold list;
-excludes `glossary.md`, which has no frontmatter at all) carries YAML
-frontmatter. **Only `spec.md` carries the full field set below** — a
-component's `interface.md`, `acceptance.md`, and `constraints.md` carry just
-`id` / `title` / `status` / `owners`, nothing else. (Established by every
-component bundle written so far; stated explicitly here because nothing said
-it in words before.) Fields marked **(component `spec.md` only)** apply only
-there; all others apply wherever relevant.
+Frontmatter lives in exactly one place per component: **`component.md`**,
+the root file. Every other file in a component — each `requirements/R-*.md`,
+each `interface/cli.md` / `interface/library.md` / `interface/data/*.md`,
+each `acceptance/AC-*.md`, and `constraints.md` — carries **no frontmatter
+at all**. A unit file's identity is its filename and its position in the
+directory tree; there is nothing left for frontmatter to declare. (This
+replaced an earlier, less uniform rule — "only `spec.md` carries the full
+field set, the other three carry `id`/`title`/`status`/`owners`" — once the
+component was split into one-file-per-unit: there's no longer a meaningful
+"this sub-file's own id/status" to track separately from the root's.)
+
+A product capability (`specs/product/<name>.md`), an architecture doc
+(`specs/architecture/<name>.md`), a var declaration (`specs/vars/<name>.md`),
+and a decision record (`specs/decisions/<id>.md`) each remain one flat file
+and carry the full field set below, same as `component.md` does for a
+component (minus the component-only fields, naturally — a product capability
+has no `sealed`, for instance). `specs/glossary.md` has no frontmatter at
+all, same as before.
 
 "Required" below is one of: **always** (every instance of this field is
 mandatory), **never** (optional everywhere), or a stated **condition**
@@ -70,19 +106,19 @@ optional).
 
 | Field | Required | Meaning |
 | --- | --- | --- |
-| `id` | always | Stable identifier. `R-<comp>-NNN` scheme for requirements (inline in `spec.md`'s body, not frontmatter); the file itself uses a document id in frontmatter. |
+| `id` | always | Stable identifier for the whole spec document (`component.md`, a product capability, etc.). A unit file's own id is its filename (e.g. `R-FOO-001.md`), not a frontmatter field — there is no unit-level frontmatter to hold one. |
 | `title` | always | Human-readable name. |
 | `status` | always | `draft` \| `ratified` \| `deprecated`. |
 | `owners` | always | Who (human or team) is accountable for this spec. |
-| `depends_on` | never (optional) | List of spec ids this one requires. Forms the dependency graph (D2). **(component `spec.md` only)** |
-| `realizes` | condition: required unless `sealed: true` | List of `P-<id>`s this component contributes to. (D8) **(component `spec.md` only)** |
-| `uses_var` | never (optional) | List of `VAR-<id>`s this component reads from `specs/vars/`. (D12) **(component `spec.md` only)** |
+| `depends_on` | never (optional) | List of spec ids this one requires. Forms the dependency graph (D2). **(component `component.md` only)** |
+| `realizes` | condition: required unless `sealed: true` | List of `P-<id>`s this component contributes to. (D8) **(component `component.md` only)** |
+| `uses_var` | never (optional) | List of `VAR-<id>`s this component reads from `specs/vars/`. (D12) **(component `component.md` only)** |
 | `supersedes` | never (optional) | Prior spec id this one replaces. |
-| `model_pin` | never (optional); **inapplicable when `sealed: true`** | Per-spec override of the repo-wide canonical model. **MUST** be omitted (not filled with a placeholder) on a sealed component — there is no generation to pin. **(component `spec.md` only)** |
-| `cross_model_divergence_check` | never (optional); **inapplicable when `sealed: true`**, same reason | Per-spec override of the repo-wide toggle: `enabled` \| `disabled`. (D3) **(component `spec.md` only)** |
-| `fallback_standby_build` | never (optional); **inapplicable when `sealed: true`**, same reason | Per-spec override of the repo-wide toggle: `enabled` \| `disabled`. (D10) **(component `spec.md` only)** |
-| `sealed` | never (optional), default `false` | Legacy-perimeter escape hatch — and, per the `criterion-compiler` precedent, also the correct mechanism for a *permanently* hand-maintained trust anchor, not only temporary legacy debt. See §9. (D1/D8) **(component `spec.md` only)** |
-| `source_path` | condition: required when `sealed: true`, forbidden otherwise | Where the actual, hand-maintained code lives. **MUST NOT** point under `gen/`. **(component `spec.md` only)** |
+| `model_pin` | never (optional); **inapplicable when `sealed: true`** | Per-spec override of the repo-wide canonical model. **MUST** be omitted (not filled with a placeholder) on a sealed component — there is no generation to pin. **(component `component.md` only)** |
+| `cross_model_divergence_check` | never (optional); **inapplicable when `sealed: true`**, same reason | Per-spec override of the repo-wide toggle: `enabled` \| `disabled`. (D3) **(component `component.md` only)** |
+| `fallback_standby_build` | never (optional); **inapplicable when `sealed: true`**, same reason | Per-spec override of the repo-wide toggle: `enabled` \| `disabled`. (D10) **(component `component.md` only)** |
+| `sealed` | never (optional), default `false` | Legacy-perimeter escape hatch — and, per the `criterion-compiler` precedent, also the correct mechanism for a *permanently* hand-maintained trust anchor, not only temporary legacy debt. See §9. (D1/D8) **(component `component.md` only)** |
+| `source_path` | condition: required when `sealed: true`, forbidden otherwise | Where the actual, hand-maintained code lives. **MUST NOT** point under `gen/`. **(component `component.md` only)** |
 | `last_ratified_commit` | condition: required when `status: ratified` | Commit hash of the ratifying merge. |
 
 **Rules:**
@@ -96,10 +132,13 @@ optional).
 - A `specs/vars/` declaration's own fields (`required`/`optional`, `type`,
   `description`, `sensitivity`, `example`/`default`) live in the document
   **body**, as bullets, not in frontmatter — its frontmatter is just `id` /
-  `title` / `status` / `owners`, same as a component's non-`spec.md` files.
-  (Established by every var declaration written so far; stated explicitly
-  because nothing said it in words before, and frontmatter-vs-body for `vars/`
-  was genuinely ambiguous until now.)
+  `title` / `status` / `owners`. (A var declaration is a single flat file,
+  not split into units — there's exactly one thing in it to address.)
+- A unit file under `requirements/`, `interface/`, or `acceptance/`, or
+  `constraints.md`, **MUST NOT** carry any frontmatter block at all. Finding
+  one is a hard lint failure — the same structural guarantee that used to
+  rely on a convention ("only `spec.md` has the full set") now holds by
+  construction instead.
 
 ---
 
@@ -135,22 +174,27 @@ Declares one configuration parameter. Fields: `name`, `required` \|
 
 ### 3.4 Component (`specs/components/<name>/`)
 
-Four files, each with the frontmatter in §2 and the body rules below.
+One root file plus three unit directories plus one flat file:
 
-**`spec.md`** — fixed section order:
+**`component.md`** — the root. Carries the frontmatter (§2) and this fixed
+section order:
 
 | Section | Rule |
 | --- | --- |
 | Purpose | One paragraph: why this unit exists. |
 | Scope | Explicit in-scope / out-of-scope bullets. |
 | Definitions | Only deltas from `glossary.md`. |
-| Behavior | Normative requirements, each a stable `R-<comp>-NNN`, each using RFC 2119 keywords. |
-| Interfaces | Contracts with worked examples. Generated code **MUST** match exactly. |
-| Data | Schemas, invariants, migration rules. |
-| Acceptance criteria | See §3.5 below — lives in `acceptance.md`, cross-referenced here. |
-| Non-functional constraints | Measurable targets and how they're measured. |
+| Behavior | Pointer: "See `requirements/`." |
+| Interfaces | Pointer: "See `interface/`." |
+| Data | Pointer: "See `interface/data/`." |
+| Acceptance criteria | Pointer: "See `acceptance/`." |
+| Non-functional constraints | Pointer: "See `constraints.md`." |
 | Open questions | **MUST** be empty when `status: ratified`. |
 | Change log | Human-readable history. |
+
+**`requirements/R-<comp>-NNN.md`** — one normative requirement per file,
+using RFC 2119 keywords. The filename *is* the requirement's id — no
+frontmatter, no separate id field to keep in sync with it.
 
 - Every `R-id` **MUST** be traceable forward to ≥1 acceptance criterion and
   backward to a rationale or decision record.
@@ -158,14 +202,26 @@ Four files, each with the frontmatter in §2 and the body rules below.
   zero clarifying questions. An agent that must ask one **MUST** surface it as
   a tracked assumption or an open question, never silently guess.
 
-**`interface.md`** — the public contract (types, endpoints, events, CLI). The
-generated interface **MUST** match this file exactly; any divergence is a hard
-drift-check failure.
+**`interface/`** — the public contract (types, endpoints, events, CLI),
+split by kind:
+- `interface/cli.md` — the CLI contract, if any.
+- `interface/library.md` — the library/function contract, if any.
+- `interface/data/<TypeName>.md` — one schema/type per file.
 
-**`acceptance.md`** — see §5.
+A component need not have all three — e.g. a purely-library component may
+have no `cli.md`. The generated interface **MUST** match this content
+exactly; any divergence is a hard drift-check failure.
 
-**`constraints.md`** — non-functional requirements (perf, security,
-compatibility), each with a measurable target and a measurement method.
+**`acceptance/AC-<comp>-NNN.md`** — one acceptance criterion per file. See
+§5 for its internal format. The filename is the criterion's id.
+
+**`constraints.md`** — stays one flat file, non-functional requirements
+(perf, security, compatibility), each with a measurable target and a
+measurement method. Deliberately **not** split like the three directories
+above: nothing elsewhere in the corpus addresses one individual constraint
+by id the way `Covers:`/`realizes`/`uses_var` address a requirement,
+criterion, or interface section — there's no reference-granularity reason to
+pay the extra-file cost here.
 
 ### 3.5 Decision record (`specs/decisions/<id>.md`)
 
@@ -199,7 +255,7 @@ Below that bar, size caps are linter-enforced:
 | Dimension | Warn above | Hard fail above |
 | --- | --- | --- |
 | Generated code per component | 800 LOC | 1500 LOC |
-| Spec bundle (`spec`+`interface`+`acceptance`+`constraints`) | 2000 words | 4000 words |
+| Spec bundle (`component.md` + everything under `requirements/`, `interface/`, `acceptance/` + `constraints.md`) | 2000 words | 4000 words |
 | Requirements (`R-id`s) per component | 20 | 40 |
 | Public interface surface elements | 10 | 20 |
 | `depends_on` count (fan-out) | 7 | — (warn only) |
@@ -212,12 +268,13 @@ place subsystem grouping is expressed.
 
 ## 5. Acceptance criteria
 
-Each criterion in `acceptance.md` is a **Given/When/Then block**, written in
-Gherkin syntax, with a required `Covers:` tag (`@covers:<id>`) and a required
-`kind`. `Covers:` takes an `R-<id>` in a component's `acceptance.md`, or a
-`P-<id>` in a product capability's golden scenarios (D8) — product-level
-scenarios have no component `R-id` to reference, only their own capability
-id:
+Each file under a component's `acceptance/` directory (or, for a product
+capability, each golden scenario inline in its one file) is a **Given/
+When/Then block**, written in Gherkin syntax, with a required `Covers:` tag
+(`@covers:<id>`) and a required `kind`. `Covers:` takes an `R-<id>` for a
+component criterion, or a `P-<id>` for a product capability's own golden
+scenario (D8) — product-level scenarios have no component `R-id` to
+reference, only their own capability id:
 
 | `kind` | How it's checked | Use when |
 | --- | --- | --- |
@@ -249,13 +306,15 @@ Run per merge, scoped to the components in the impact-analysis blast radius:
    traceability closure (every `R-id`, `realizes`, `uses_var`, `depends_on`
    reference resolves), size caps.
 2. **Generation** — the pinned canonical model, cold, no prior code, from the
-   spec bundle (`spec` + `interface` + `constraints` + depended-upon
-   interfaces + referenced `specs/vars/` declarations + `glossary`). Best-of-k
+   spec bundle (`component.md` + `requirements/` + `interface/` +
+   `constraints.md` + depended-upon components' `interface/` + referenced
+   `specs/vars/` declarations + `glossary` — deliberately excluding
+   `acceptance/`, so the model doesn't overfit to its own tests). Best-of-k
    retry (k = 2–4) against verification on failure; the winning sample index
    is recorded. (D1/D3)
 3. **Per-criterion verification** — compiled / generated-test / llm-judge, per
-   §5. Contract/property tests from `interface.md`/`Data`. A drift check that
-   generated interfaces match `interface.md` exactly.
+   §5. Contract/property tests from `interface/`. A drift check that
+   generated interfaces match `interface/`'s contract exactly.
 4. **Cross-model divergence check** — runs only when `cross_model_divergence_check`
    resolves to `enabled` (repo default: enabled when a second model is
    configured) **and** a second model is actually configured. Regenerates the

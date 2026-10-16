@@ -89,11 +89,16 @@ specs/
                       # values (no such field exists) — see D12
   components/
     <component>/
-      spec.md         # normative behavior for this unit
-      interface.md    # public contract: types, endpoints, events, CLI
-      acceptance.md   # agent-checkable criteria (D5) + test scenarios
-                      # (realizes: [P-id, ...] in frontmatter — see D8)
-      constraints.md  # non-functional: perf, security, compatibility
+      component.md     # root: frontmatter (realizes: [P-id,...] — D8) +
+                       # Purpose/Scope/Definitions/Open questions/Change log
+      requirements/    # one R-id per file (D15 — superseded the original
+                       # single-file spec.md Behavior section)
+      interface/       # cli.md / library.md / data/<Type>.md (D15 —
+                       # superseded the original single-file interface.md)
+      acceptance/      # one AC-id per file, agent-checkable (D5) — (D15 —
+                       # superseded the original single-file acceptance.md)
+      constraints.md   # non-functional: perf, security, compatibility —
+                       # stays one file, see D15 for why
   decisions/          # ADR-style, append-only, immutable once ratified
   glossary.md         # canonical vocabulary; specs MUST use these terms
 SPEC_GUIDELINES.md    # the rules every authoring/generating agent follows
@@ -111,6 +116,13 @@ through Git LFS) — see D6. The rendered docs/graph-explorer site built from
 ---
 
 ## 5. Anatomy of a spec document
+
+**Since D15: this frontmatter lives only on a component's root file
+(`component.md`), and the body's Behavior/Interfaces/Data/Acceptance
+criteria sections are pointers to `requirements/`/`interface/`/`acceptance/`
+directories, not the content itself** — `SPEC_GUIDELINES.md` §2–3.4 is the
+current, authoritative version; what follows is the original, pre-D15
+design, kept for history.
 
 **Frontmatter (YAML):** `id`, `title`, `status` (`draft` | `ratified` |
 `deprecated`), `owners`, `depends_on` (list of spec ids), `realizes` (list of
@@ -802,11 +814,78 @@ problem a glossary exists to prevent.
 - Glossary size is tracked as a visibility metric (`metrics.md`) so growth
   doesn't go unnoticed, but isn't lint-gated.
 
+### D15 — One file per addressable unit, not one file per document type
+
+Replaces the original four-flat-files component anatomy (§5) — `spec.md` /
+`interface.md` / `acceptance.md` / `constraints.md` — with:
+
+```
+components/<component>/
+  component.md          # root: frontmatter + Purpose/Scope/Definitions/
+                         # Open questions/Change log + pointers
+  requirements/R-<comp>-NNN.md   # one Behavior requirement per file
+  interface/
+    cli.md
+    library.md
+    data/<TypeName>.md   # one schema/type per file
+  acceptance/AC-<comp>-NNN.md    # one criterion per file
+  constraints.md          # stays one flat file
+```
+
+Arose from a blast-radius question (how should `impact-analyzer` tell an
+`interface.md` *contract* change from a cosmetic edit without full semantic
+diffing?) that, on examination, generalized into a better answer than the
+question asked: **every unit already independently addressed elsewhere in
+the corpus — a requirement via `Covers:`/`realizes`, a criterion via
+`Covers:`, an interface section via the drift check — should be its own
+file**, so content hashing for blast-radius/cache-key purposes is *exact*
+rather than approximated by parsing block boundaries inside a shared file.
+
+- **Frontmatter lives only on `component.md`.** Every unit file carries
+  none at all — its filename is its identity, nothing left to declare. This
+  is simpler than the rule it replaced ("only `spec.md` has the full field
+  set, the other three carry `id`/`title`/`status`/`owners`"), not just
+  different.
+- **`constraints.md` stays one flat file**, deliberately not split like the
+  other three — nothing in the corpus addresses one individual constraint
+  by id, so there's no reference-granularity reason to pay the extra-file
+  cost there.
+- **Readability and tooling concerns are answered by assembly, not by
+  keeping one big file.** `spec-bundle-assembler` — whose whole job was
+  already "assemble a component's files into one payload" for machine
+  consumption — gained a human-readable flattened-view mode, the same
+  operation with a different serializer. `corpus-graph-builder`/
+  `docs-site-renderer` consume that flattened view and never need to know
+  the split happened.
+- **A real quality side effect, not just a structural one:** `spec-linter`'s
+  block-boundary regex parsing (`_requirement_blocks()` and similar) —
+  exactly the kind of parsing that caused a real bug during its own
+  bootstrap (the RFC-2119 check missing multi-line continuations) —
+  is replaced by directory listing, which can't have that class of bug by
+  construction.
+- **Scope decided explicitly:** extends to `spec.md`'s requirements and
+  `acceptance.md`'s criteria (both independently addressed by id elsewhere,
+  same reasoning as `interface.md`'s sections), but not to `constraints.md`
+  (no such addressing exists for it) and not to `specs/vars/`'s declarations
+  (already one file per variable, nothing further to split) or
+  `specs/product/`'s golden scenarios (kept inline per capability file for
+  now — fewer of them per file in practice, lower cost from leaving them
+  as-is).
+
+This is a genuine redesign, not a refinement — it touched every existing
+component's file layout, `spec-linter`'s actual implementation and test
+suite, and several components' specs that referenced the old file names
+directly (`spec-bundle-assembler`, `impact-analyzer`, `criterion-compiler`,
+`corpus-graph-builder`). See `SPEC_GUIDELINES.md` §1–§5 for the current,
+authoritative rules this produced.
+
 ---
 
 ## 12. Open questions
 
-_None outstanding — Q9–Q13 from the review pass are now D10–D14._
+_None outstanding — Q9–Q13 from the review pass are now D10–D14; D15 was a
+redesign triggered by resolving blast-radius item 3 from a later working
+session, not an open question left over from the original brainstorm._
 
 Also fixed in the original review pass (not decisions, just drift that had
 accumulated as D1–D9 landed): §3 principle 6, §6 step 3, and §7's

@@ -9,9 +9,15 @@ deliberate, `architecture/`-level) conditions under which it's allowed to
 split.
 
 - **Spec bundle** — the full set of files a generation or verification step
-  needs for one component: `spec.md` + `interface.md` + `constraints.md` +
-  depended-upon components' `interface.md`s + referenced `specs/vars/`
-  declarations + `glossary.md`.
+  needs for one component: `component.md` + `requirements/` + `interface/` +
+  `constraints.md` + depended-upon components' `interface/` directories +
+  referenced `specs/vars/` declarations + `glossary.md` (deliberately
+  excluding `acceptance/`, to avoid overfitting to its own tests — D15).
+- **Unit file** — a file under a component's `requirements/`, `interface/`
+  (including `interface/data/`), or `acceptance/` directory, holding exactly
+  one addressable thing (one requirement, one interface section, one
+  criterion), identified by its filename, with no frontmatter of its own
+  (D15).
 - **Blast radius** — the minimal set of components `impact-analyzer`
   determines need regeneration/re-verification for a given spec change.
 - **Gate** — one verification step in the pipeline (lint, a `kind`-specific
