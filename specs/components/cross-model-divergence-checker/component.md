@@ -4,6 +4,7 @@ title: Cross-Model Divergence Checker
 status: draft
 owners: [pipeline-team]
 depends_on: [comp-generator, comp-verifier-orchestrator, comp-cache-manager]
+depends_on_guarantees: [G-CACHE-001]
 realizes: [P-AMBIGUITY-GATE]
 cross_model_divergence_check: enabled
 sealed: false
@@ -20,6 +21,16 @@ acceptance criteria before merge, or (b) just keeps it as a warm, promotable
 spare for model-outage fallback, depending on which of the two independent
 toggles (`cross_model_divergence_check`, `fallback_standby_build`) is
 active.
+
+Declares `depends_on_guarantees: [G-CACHE-001]` — the D16 worked example.
+This component's own correctness genuinely depends on `cache-manager`'s
+consistency guarantee specifically (concurrent writes for the same cache
+key are safe under last-write-wins): the canonical and second-model builds
+checked in the same merge are exactly the kind of concurrent caller this
+guarantee is about. It does *not* depend on `cache-manager`'s other
+properties (store-error fail-closed behavior, CLI inspection, etc.) in any
+way its own logic cares about — so a future change to *those* should not,
+and now will not, pull this component into an unrelated blast radius.
 
 ## Scope
 

@@ -32,7 +32,10 @@ Specced in full depth so far:
   guarantees can be precisely scoped per dependent.
 - **`cache-manager`** — all `kind: compiled`. Fail-closed on backing-store
   errors (the D10 "tool must keep working" posture, applied to a new
-  subsystem).
+  subsystem). Since D16, exposes `interface/guarantees/G-CACHE-001.md` —
+  the worked example behind the whole guarantee/narrowing mechanism, with
+  `cross-model-divergence-checker` as the real component declaring
+  `depends_on_guarantees: [G-CACHE-001]` against it.
 - **`criterion-compiler`** — the `sealed: true` component, all `kind:
   generated-test`. The one piece of this pipeline that is permanently
   hand-maintained by design, never agent-generated (D5's circularity

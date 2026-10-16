@@ -18,7 +18,11 @@ The content-addressed cache backing D13's "cache every gate" mandate and
 D11's cache-hit rollback mechanism: a get/put store keyed by
 `(spec_bundle_hash, artifact/gate-inputs hash, gate_version, model_pin)`,
 used by `generator`, `cross-model-divergence-checker`, `license-scanner`, and
-`secret-scanner`.
+`secret-scanner`. Also the worked example behind D16: its one declared
+behavioral guarantee (`interface/guarantees/G-CACHE-001.md`, a retrofit of
+the consistency property `R-CACHE-003` already stated) is what let
+`cross-model-divergence-checker` narrow its own blast-radius dependency to
+specifically that guarantee, via `depends_on_guarantees`.
 
 ## Scope
 
