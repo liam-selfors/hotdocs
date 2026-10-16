@@ -21,8 +21,8 @@ change.
 | Component | Purpose | `depends_on` |
 | --- | --- | --- |
 | `spec-linter` | Structural/traceability/size-cap checks over a spec bundle. Pure, deterministic, no model calls. | — |
-| `impact-analyzer` | From changed spec ids + the dependency graph, computes the minimal set of components to regenerate — now fully specced, including the interface-vs-internal-change distinction (`spec-bundle` changes stay local; `interface.md`/`specs/vars/`/capability changes propagate) that D2 previously stated only as a sizing heuristic, never as an executable rule. | `spec-linter` |
-| `spec-bundle-assembler` | Assembles a component's full generation input (spec + interface + constraints + dependency interfaces + referenced vars + glossary — deliberately excluding `acceptance.md`, to avoid the generation model overfitting to its own tests) into one payload. Reused by canonical generation, the cross-model check, and hint-mode previews. Fully specced. | `spec-linter` |
+| `impact-analyzer` | From changed spec ids + the dependency graph, computes the minimal set of components to regenerate — now fully specced, including the interface-vs-internal-change distinction (`component.md`/`requirements/`/`constraints.md`/`acceptance/` changes stay local; `interface/`/`specs/vars/`/capability changes propagate) that D2 previously stated only as a sizing heuristic, never as an executable rule — and, since D15, computed as plain file-level hashing rather than needing bespoke section parsing (each `interface/` file already is its own hash boundary). | `spec-linter` |
+| `spec-bundle-assembler` | Assembles a component's full generation input (`component.md` + `requirements/` + `interface/` + `constraints.md` + dependency `interface/` content + referenced vars + glossary — deliberately excluding `acceptance/`, to avoid the generation model overfitting to its own tests) into one payload. Reused by canonical generation, the cross-model check, and hint-mode previews. Fully specced. | `spec-linter` |
 | `criterion-compiler` | Deterministic Gherkin → test-scaffolding compiler for `compiled`-kind acceptance criteria. | — |
 | `generator` | Produces **exactly one candidate** `gen/<component>/` per call, given a `SpecBundle` and an explicit model identifier (never a hardcoded "canonical pin" — this is what lets `cross-model-divergence-checker` reuse it with a second model). Single-shot and stateless about prior attempts, deliberately: the best-of-k *retry loop* (D3) lives in `merge-orchestrator`, not here — putting it here would require a `verifier-orchestrator` dependency this component doesn't have. Fully specced. | `spec-bundle-assembler`, `cache-manager` |
 | `test-author` | Authors the test code for one `generated-test`-kind criterion — D4/D5's "independent generation path," given a real component for the first time. Invoked by `verifier-orchestrator` via an injectable callable, not sequenced top-level by `merge-orchestrator` — same pattern `llm-judge`'s `judge` parameter already established. Prefers a different model than `generator` used, when one is configured, for genuine independence. Fully specced. | `spec-bundle-assembler`, `cache-manager` |
@@ -57,9 +57,9 @@ threshold of 7. This is a genuine tension
 surfaced by actually doing the decomposition, not a mistake to quietly fix
 by padding the dependency list down:
 
-`merge-orchestrator` is a **thin coordinator** — its own `spec.md` and
+`merge-orchestrator` is a **thin coordinator** — its own `component.md` and
 `gen/` output should be almost entirely sequencing calls to other components'
-`interface.md`s, with very little original logic or state of its own. D2's
+`interface/` contracts, with very little original logic or state of its own. D2's
 fan-out cap exists to catch a component that is *doing too much* (real logic
 coupled to many neighbors, each a real maintenance liability). A coordinator
 with negligible logic of its own but a legitimately wide dependency list is a
@@ -88,16 +88,20 @@ cold-regen invariant) already covers this use case correctly; it doesn't need
 a new mechanism, just a note that "sealed" isn't only for legacy debt.
 
 Full spec bundle now at `specs/components/criterion-compiler/` — see its
-`spec.md` for the resolved generated-test/circularity question this raised
-(its own acceptance criteria are all `kind: generated-test`, verified by a
-human-authored test suite independent of the hand-maintained implementation —
-verifying the compiler with the compiler would prove nothing).
+`component.md` for the resolved generated-test/circularity question this
+raised (its own acceptance criteria are all `kind: generated-test`, verified
+by a human-authored test suite independent of the hand-maintained
+implementation — verifying the compiler with the compiler would prove
+nothing).
 
 ## The step-phrase grammar is a corpus-wide, architecture-level convention
 
 `criterion-compiler` implements a fixed Given/When/Then step-phrase grammar
-(the full table lives in its `interface.md`, since that component is what
-implements it). The grammar itself doesn't fit any other document type — not
+(the full table lives at `specs/architecture/step-phrase-grammar.md` — see
+that file; relocated there from `criterion-compiler/interface/` during the
+D15 migration, which made the mismatch between "where this content lived"
+and "what governance it actually needs" concrete for the first time). The
+grammar itself doesn't fit any other document type — not
 a component's own behavior, not a product capability — but it *is* exactly
 what this document already claims to own: a cross-cutting technical decision
 (`notes/initial-ideas.md` §4). Recorded here so it's unambiguous: **changing

@@ -13,10 +13,11 @@ sealed: false
 
 ## Purpose
 
-Assembles a component's full generation input — its own `spec.md` +
-`interface.md` + `constraints.md`, its dependencies' `interface.md`s, its
-referenced `specs/vars/` declarations, and `specs/glossary.md` — into one
-payload (`SpecBundle`). Reused by canonical generation, the cross-model
+Assembles a component's full generation input — its own `component.md` +
+`requirements/` + `interface/` + `constraints.md`, its dependencies'
+`interface/` content, its referenced `specs/vars/` declarations, and
+`specs/glossary.md` — into one payload (`SpecBundle`). Reused by canonical
+generation, the cross-model
 divergence check, and hint-mode previews — one assembly implementation, not
 three.
 

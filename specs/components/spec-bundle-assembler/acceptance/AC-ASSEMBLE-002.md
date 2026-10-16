@@ -4,9 +4,10 @@ Covers: R-ASSEMBLE-002
 Kind: compiled
 
 ```gherkin
-Given a component that depends_on another component with its own spec.md,
-  interface.md, and constraints.md
+Given a component that depends_on another component with its own
+  component.md, requirements/, and constraints.md
 When assemble runs for the dependent component
-Then dependency_interfaces contains only the dependency's interface.md
-  content, and contains neither its spec.md nor its constraints.md
+Then dependency_interfaces contains only the dependency's interface/
+  content, and contains neither its component.md/requirements/ nor its
+  constraints.md
 ```

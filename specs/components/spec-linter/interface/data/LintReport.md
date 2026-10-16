@@ -6,14 +6,14 @@
     {
       "rule_id": "R-LINT-003",
       "severity": "fail",
-      "file": "specs/components/foo/spec.md",
+      "file": "specs/components/foo/component.md",
       "line": 12,
       "message": "depends_on references 'comp-bar', which does not exist"
     },
     {
       "rule_id": "R-LINT-015",
       "severity": "skipped",
-      "file": "specs/components/foo/spec.md",
+      "file": "specs/components/foo/component.md",
       "line": 8,
       "message": "no model configured — R-LINT-015 not evaluated",
       "rationale": null
@@ -27,9 +27,9 @@
 }
 ```
 
-`rule_id` always corresponds to an `R-LINT-NNN` id in `spec.md`'s Behavior
-section — this is how a reviewer traces a reported finding back to the
-requirement that produced it.
+`rule_id` always corresponds to an `R-LINT-NNN` id — the filename of a file
+under `requirements/` — this is how a reviewer traces a reported finding
+back to the requirement that produced it.
 
 - `severity` is one of `fail` / `warn` / `skipped`. `skipped` exists only for
   `kind: llm-judge` rules when no model is configured (R-LINT-015 currently)

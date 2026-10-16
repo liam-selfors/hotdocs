@@ -4,10 +4,14 @@ One subdirectory per component, flat namespace, no nesting:
 
 ```
 <component>/
-  spec.md          # normative behavior
-  interface.md     # public contract
-  acceptance.md    # acceptance criteria
-  constraints.md   # non-functional requirements
+  component.md      # root: frontmatter + narrative + pointers
+  requirements/     # one R-id per file
+  interface/
+    cli.md
+    library.md
+    data/           # one schema/type per file
+  acceptance/       # one AC-id per file
+  constraints.md    # non-functional requirements — stays one file (D15)
 ```
 
 See `SPEC_GUIDELINES.md` §3.4 (anatomy) and §4 (sizing / when to split).
@@ -31,7 +35,7 @@ Specced in full depth so far:
   hand-maintained by design, never agent-generated (D5's circularity
   argument: the compiler can't be the thing that verifies itself).
 - **`spec-bundle-assembler`** — all `kind: compiled`. Deliberately excludes
-  `acceptance.md` from what it assembles, to keep generation from
+  `acceptance/` from what it assembles, to keep generation from
   overfitting to its own tests.
 - **`generator`** — the first component whose job genuinely requires a
   model call; mostly `kind: generated-test` (tested via an injected mock

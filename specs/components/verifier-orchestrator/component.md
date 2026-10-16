@@ -15,8 +15,8 @@ sealed: false
 Runs every applicable verification gate against one component's generated
 output and produces a single, structured pass/fail verdict: `compiled`
 criteria (via `criterion-compiler`), `generated-test` criteria, `llm-judge`
-criteria, the contract/property tests derived from `interface.md`/`Data`,
-and the interface drift check.
+criteria, the contract/property tests derived from `interface/`, and the
+interface drift check.
 
 ## Scope
 
@@ -31,7 +31,7 @@ components, D7/D12); *performing* an `llm-judge` evaluation or *authoring*
 an injectable `test_author` and records their results — it does not itself
 judge or author anything, see the note below); **re-deciding a criterion's
 declared `kind`** — `compiled`/`generated-test`/`llm-judge` is fixed at
-spec-authoring time in `acceptance.md`, lint-checked (R-LINT-010), and never
+spec-authoring time in `acceptance/`, lint-checked (R-LINT-010), and never
 reconsidered here. Giving this component (or `test-author`) the power to
 override that declaration at verification time was considered and
 explicitly rejected: it would make `kind:` advisory rather than normative,

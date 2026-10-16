@@ -63,19 +63,23 @@ See `constraints.md`.
 
 ## Open questions
 
-- R-IMPACT-002/003 define contract-change detection as "is `interface.md`
-  byte-identical." This is simple and correct but blunt — a purely
-  cosmetic `interface.md` edit (fixing a typo in a worked example, with no
-  change to any declared type/endpoint) would still trigger full transitive
-  regeneration under this rule. A semantic diff (did the actual declared
-  contract change, not just the file's bytes) would be more precise but adds
-  real complexity (parsing `interface.md`'s structure, not just hashing it).
-  Left as byte-identical for this draft; semantic diffing is a candidate
-  refinement, not a correctness requirement — a false-positive (unnecessary
-  regen) is safe, just wasteful, unlike a false-negative.
+- ~~R-IMPACT-002/003 define contract-change detection as "is `interface.md`
+  byte-identical" — blunt, since a purely cosmetic edit anywhere in the
+  file would trigger full transitive regeneration~~ — resolved by D15, not
+  by inventing semantic diffing: once a component's interface is
+  `interface/cli.md` + `interface/library.md` + `interface/data/*.md`
+  (one file per unit, each independently hashed), a prose-only edit
+  confined to `component.md`/`requirements/`/`acceptance/`/
+  `constraints.md` no longer touches `interface/` at all, so it no longer
+  forces propagation — without needing to parse "did the declared contract
+  actually change" out of a shared file's structure. True semantic
+  diffing (would a cosmetic edit *within* one `interface/` file, e.g. a
+  typo fix in `library.md`'s explanatory prose, still force propagation?)
+  remains a real, open refinement beyond what D15 solved for free — still
+  safe-but-wasteful in the false-positive direction, never incorrect.
 - Should `R-IMPACT-004`/`005`'s transitive inclusion itself cascade further
   (e.g., does a component pulled in via `transitive-var` propagate to *its*
-  dependents if its own `interface.md` is thereby considered changed)? As
+  dependents if its own `interface/` is thereby considered changed)? As
   written, no — `uses_var`/`realizes` inclusion is one hop, not transitively
   re-applied. Not yet stress-tested against a real multi-hop corpus.
 

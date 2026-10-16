@@ -7,7 +7,7 @@
 - **`kind:` is read-only input, never written.** This component (and
   `test_author`) MUST NOT alter, reinterpret, or override a criterion's
   declared `kind` at verification time — it is fixed at spec-authoring time
-  in `acceptance.md` and lint-checked. A criterion's `kind` reaching this
+  in `acceptance/` and lint-checked. A criterion's `kind` reaching this
   component is treated as ground truth, full stop.
 - **No bypassing `skipped` or the `generated-test`/`llm-judge` `fail`
   asymmetry.** A `skipped` `llm-judge` result MUST never be silently

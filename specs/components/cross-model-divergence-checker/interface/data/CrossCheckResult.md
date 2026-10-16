@@ -6,7 +6,7 @@
   "second_model": "gpt-5",
   "mode": "divergence",
   "different_vendor": true,
-  "second_candidate_verification": { "...": "a VerificationReport, see verifier-orchestrator/interface.md" },
+  "second_candidate_verification": { "...": "a VerificationReport, see verifier-orchestrator/interface/" },
   "diverged": false,
   "divergence_detail": null
 }

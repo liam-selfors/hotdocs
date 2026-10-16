@@ -5,7 +5,7 @@ Kind: compiled
 
 ```gherkin
 Given a component whose gen/<component>/ public interface does not match
-  interface.md
+  its interface/ contract
 When verify runs
 Then interface_drift is true and the overall verdict is fail
 ```

@@ -25,11 +25,11 @@ at spec-authoring time); this component decides *how* to author one.
 ## Scope
 
 **In scope:** producing test code from one criterion's Given/When/Then
-prose plus the target component's `interface.md`; model selection for
+prose plus the target component's `interface/` content; model selection for
 authoring independence; caching.
 
 **Out of scope, and deliberately so:** deciding whether a criterion needs a
-test at all — that is the `kind:` tag in `acceptance.md`, fixed at
+test at all — that is the `kind:` tag in `acceptance/`, fixed at
 spec-authoring time and lint-checked (R-LINT-010), never re-decided here or
 by `verifier-orchestrator` at verification time. This boundary was the
 explicit resolution of a design discussion about this component: giving it,

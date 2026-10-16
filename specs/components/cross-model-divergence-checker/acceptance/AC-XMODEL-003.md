@@ -7,5 +7,5 @@ Kind: compiled
 Given a second candidate has been produced
 When cross-check runs
 Then verifier-orchestrator is invoked against it using the same
-  acceptance.md as the canonical build
+  acceptance/ content as the canonical build
 ```
