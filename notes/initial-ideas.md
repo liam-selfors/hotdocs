@@ -879,6 +879,84 @@ directly (`spec-bundle-assembler`, `impact-analyzer`, `criterion-compiler`,
 `corpus-graph-builder`). See `SPEC_GUIDELINES.md` §1–§5 for the current,
 authoritative rules this produced.
 
+### D16 — Behavioral guarantees are part of the contract; golden scenarios are a permanent backstop, not a transitional one
+
+Arose from a single thread of questions about `impact-analyzer`'s blast
+radius: should `transitive-var`/`transitive-capability` inclusion cascade
+beyond one hop? The answer settled on — **no, stay one-hop** — only holds
+up once two real gaps it exposed are closed. Both are closed here,
+together, because neither alone was sufficient.
+
+**Gap 1: nothing ever actually ran golden scenarios.** `SPEC_GUIDELINES.md`
+§3.1 and D8 both describe golden scenarios as "exercised black-box against
+the whole assembled system," but no component had a requirement to
+actually execute them — stated intent with nobody assigned to do it, the
+same shape of gap `test-author` and `spec-completeness-assistant` each
+turned out to be. **Fixed:** `merge-orchestrator` gains a new gate — once
+every component in the blast radius has regenerated and passed its own
+per-component verification, run every product capability's golden scenarios
+whose `realizes`-set intersects the blast radius, against the real
+assembled `gen/` output, blocking the merge on failure the same way a
+per-component failure does (`SPEC_GUIDELINES.md` §6 step 6). This is the
+backstop for cross-component behavioral risk no amount of interface-level
+diffing can rule out *in principle* — permanently, not just until gap 2 is
+closed, because documentation of foreseeable guarantees can never be
+complete (the same irreducible-ambiguity-residual this methodology accepts
+everywhere else, per principle 2).
+
+**Gap 2: a component's real contract with its dependents isn't only
+types.** Worked example: swapping `cache-manager`'s backing store from a
+single-node store to a distributed one can leave every type signature
+identical and every drift check green, while quietly changing a
+consistency guarantee (`R-CACHE-003`'s "last-write-wins is safe because
+writers are deterministic") that a dependent (`cross-model-divergence-
+checker`) actually relies on — invisible to blast radius because the
+guarantee lived in `requirements/`, which dependents never even receive
+(`spec-bundle-assembler` only hands out `interface/`). **Fixed:** `interface/`
+gains a fourth kind, `interface/guarantees/G-<comp>-NNN.md` — one
+behavioral/non-functional guarantee per file, exactly the one-file-per-unit
+convention D15 already established, now extended to behavioral contract
+content, not just types. A change to a declared guarantee propagates via
+the ordinary `interface/` file-level mechanism `impact-analyzer` already
+has (generalized, per below) — no new propagation machinery needed, because
+the fix is making more of the real contract *visible* to that machinery,
+not making the machinery cleverer.
+
+**The narrowing mechanism, and why it's safe.** A new optional field,
+`depends_on_guarantees: [G-<comp>-NNN, ...]`, lets a dependent declare
+*which specific* guarantees of a dependency it relies on — tightening its
+own blast-radius inclusion to only those guarantees changing, instead of
+any file under the dependency's `interface/` changing. This is **strictly
+opt-in narrowing**, never the only path: a component that doesn't declare
+it still gets the safe, coarse default (any `interface/` file change
+propagates, same as every other interface content). The real risk this
+field introduces — a component under-declaring, claiming reliance on fewer
+guarantees than it actually has, producing a false-negative blast-radius
+miss — is the *reason* gap 1's golden-scenario gate stays permanent rather
+than being treated as superseded once guarantees are explicit: an
+under-declaration is exactly the kind of wrong-but-locally-plausible spec
+claim golden scenarios exist to catch when it manifests as real cross-
+component breakage. This mirrors D10's precedent directly — a refinement is
+safe to add precisely because it never replaces the safe default, only
+sits on top of it.
+
+- **`impact-analyzer`'s R-IMPACT-002/003 generalize** from enumerating
+  `interface/cli.md`/`library.md`/`data/*.md` by name to "any file under
+  `interface/`, compared independently" — not just to accommodate
+  `guarantees/`, but so any *future* `interface/` file type is covered
+  without another edit.
+- **Reference resolution**: `depends_on_guarantees` entries must resolve to
+  a real `G-id` whose owning component is already in this component's own
+  `depends_on` — referencing a guarantee of something you don't depend on
+  is meaningless, not just unresolved.
+- `cache-manager`'s `R-CACHE-003` was retrofitted into `G-CACHE-001` as the
+  worked demonstration, with `cross-model-divergence-checker` declaring
+  `depends_on_guarantees: [G-CACHE-001]` as the concrete example of
+  narrowing in practice.
+
+See `SPEC_GUIDELINES.md` §1–§3.4 and §6 step 6 for the current,
+authoritative rules this produced.
+
 ---
 
 ## 12. Open questions

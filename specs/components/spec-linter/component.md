@@ -22,15 +22,16 @@ gate and the component everything else assumes has already run.
 
 **In scope:** frontmatter completeness and typing on a component's root file,
 and frontmatter *absence* on every unit file (D15); cross-reference
-resolution (`depends_on` / `realizes` / `uses_var`); dependency-graph
-acyclicity; `R-id` formation and RFC 2119 usage; forward and backward
-traceability between requirements and acceptance criteria;
-acceptance-criterion well-formedness; glossary conformance; the D2 size
-caps; `specs/vars/` secret-field safety; glossary singularity (D14).
+resolution (`depends_on` / `realizes` / `uses_var` / `depends_on_guarantees`,
+D16); dependency-graph acyclicity; `R-id`/`G-id` formation and RFC 2119
+usage; forward and backward traceability between requirements and
+acceptance criteria; acceptance-criterion well-formedness; glossary
+conformance; the D2 size caps; `specs/vars/` secret-field safety; glossary
+singularity (D14).
 
 **Out of scope:** generation; verification of generated code's actual
 behavior. **Mostly, but not entirely, free of model calls and judgment** —
-14 of 15 requirements are pure structural/textual checks; R-LINT-015 is a
+17 of 18 requirements are pure structural/textual checks; R-LINT-015 is a
 deliberate, narrow exception (see its entry and `constraints.md`) for the one
 case in this component's scope that is genuinely about meaning, not
 structure, and D5 says exactly that's when `llm-judge` is the right tool.

@@ -237,3 +237,57 @@ def test_ac_lint_016_stray_frontmatter_on_unit_file(corpus_root):
     )
     report = run_lint(corpus_root)
     assert has_finding(report, "R-LINT-016")
+
+
+def test_ac_lint_017_guarantee_heading_mismatch(corpus_root):
+    guarantees_dir = _comp(corpus_root) / "interface" / "guarantees"
+    guarantees_dir.mkdir(parents=True)
+    (guarantees_dir / "G-FOO-001.md").write_text(
+        "# G-FOO-002\n\n**G-FOO-002** — Calls MUST be idempotent.\n"
+    )
+    report = run_lint(corpus_root)
+    assert has_finding(report, "R-LINT-017")
+
+
+def test_ac_lint_018_dangling_depends_on_guarantees(corpus_root):
+    component = _comp(corpus_root) / "component.md"
+    component.write_text(component.read_text().replace(
+        "depends_on: []", "depends_on: []\ndepends_on_guarantees: [G-DOES-NOT-EXIST]"
+    ))
+    report = run_lint(corpus_root)
+    assert has_finding(report, "R-LINT-018")
+
+
+def test_ac_lint_018b_guarantee_owner_not_in_depends_on(corpus_root):
+    bar_dir = _comp(corpus_root, "bar")
+    (bar_dir / "requirements").mkdir(parents=True)
+    (bar_dir / "interface" / "guarantees").mkdir(parents=True)
+    (bar_dir / "acceptance").mkdir(parents=True)
+    (bar_dir / "component.md").write_text(
+        "---\nid: comp-bar\ntitle: Bar\nstatus: draft\nowners: [test-team]\n"
+        "depends_on: []\nrealizes: [P-TEST]\nsealed: false\n---\n\n# Bar\n\n"
+        "## Purpose\n\nGuarantee owner.\n\n## Scope\n\nIn scope: n/a.\n\n"
+        "## Definitions\n\nNo deltas.\n\n## Behavior\n\nSee `requirements/`.\n\n"
+        "## Interfaces\n\nSee `interface/`.\n\n## Data\n\nNone.\n\n"
+        "## Acceptance criteria\n\nSee `acceptance/`.\n\n## Non-functional constraints\n\nNone.\n\n"
+        "## Open questions\n\n## Change log\n\n- Initial.\n"
+    )
+    (bar_dir / "requirements" / "R-BAR-001.md").write_text(
+        "# R-BAR-001\n\n**R-BAR-001** — The component MUST exist.\n"
+    )
+    (bar_dir / "interface" / "guarantees" / "G-BAR-001.md").write_text(
+        "# G-BAR-001\n\n**G-BAR-001** — Calls MUST be idempotent.\n"
+    )
+    (bar_dir / "acceptance" / "AC-BAR-001.md").write_text(
+        "# AC-BAR-001\n\nCovers: R-BAR-001\nKind: compiled\n\n"
+        "```gherkin\nGiven nothing\nWhen checked\nThen it exists\n```\n"
+    )
+
+    # foo references bar's guarantee but never declares bar as a dependency.
+    foo = _comp(corpus_root) / "component.md"
+    foo.write_text(foo.read_text().replace(
+        "depends_on: []", "depends_on: []\ndepends_on_guarantees: [G-BAR-001]"
+    ))
+    report = run_lint(corpus_root)
+    assert has_finding(report, "R-LINT-018")
+    assert any("comp-bar" in f.message for f in report.findings if f.rule_id == "R-LINT-018")

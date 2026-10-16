@@ -160,6 +160,15 @@ Consumer tags: `[dev]` developer · `[stk]` stakeholder · `[agt]` system agent 
 - **Property / metamorphic check pass rate** and **flakiness**. `[agt] [dev]`
 - **Contract-drift incidents** — generated interface ≠ the `interface/`
   contract (D15). `[gate] [dev]`
+- **Golden-scenario pass rate** — the D16 merge-time gate's own pass/fail
+  rate, per capability and over time; a sustained failure cluster on one
+  capability flags a recurring cross-component composition risk that
+  interface-level checks alone aren't catching. `[gate] [stk]`
+- **Guarantee-narrowing adoption rate** — % of `depends_on` edges that have
+  been narrowed via `depends_on_guarantees` vs. left at the coarse,
+  whole-`interface/` default (D16). Low adoption isn't a problem by
+  itself (the coarse default is always safe) — it's a signal of how much
+  blast-radius precision is still on the table. `[dev] [stk]`
 - **Non-functional gate results vs. targets** — latency, size budgets, security
   findings. `[gate] [stk]`
 - **License-scan flag rate** — generated-code similarity-to-licensed-training-

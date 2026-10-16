@@ -47,6 +47,7 @@ def _load_component_interface(name: str) -> spec_linter.Component:
         interface_cli=load("interface/cli.md"),
         interface_library=load("interface/library.md"),
         interface_data=interface_data,
+        interface_guarantees={},
         acceptance={}, constraints=None,
     )
 

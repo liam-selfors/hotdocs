@@ -30,6 +30,10 @@ specs/
         library.md       # library/function contract
         data/
           <TypeName>.md   # one schema/type each
+        guarantees/
+          G-<comp>-NNN.md # one behavioral/non-functional guarantee each,
+                          # that a *dependent* may rely on (D16) — optional,
+                          # like cli.md/library.md
       acceptance/
         AC-<comp>-NNN.md  # one acceptance criterion each
       constraints.md      # non-functional requirements (stays one file —
@@ -113,6 +117,7 @@ optional).
 | `depends_on` | never (optional) | List of spec ids this one requires. Forms the dependency graph (D2). **(component `component.md` only)** |
 | `realizes` | condition: required unless `sealed: true` | List of `P-<id>`s this component contributes to. (D8) **(component `component.md` only)** |
 | `uses_var` | never (optional) | List of `VAR-<id>`s this component reads from `specs/vars/`. (D12) **(component `component.md` only)** |
+| `depends_on_guarantees` | never (optional) | List of `G-<comp>-NNN` ids — a **strictly opt-in narrowing** of which of a dependency's `interface/guarantees/` entries this component actually relies on. (D16) **(component `component.md` only)** |
 | `supersedes` | never (optional) | Prior spec id this one replaces. |
 | `model_pin` | never (optional); **inapplicable when `sealed: true`** | Per-spec override of the repo-wide canonical model. **MUST** be omitted (not filled with a placeholder) on a sealed component — there is no generation to pin. **(component `component.md` only)** |
 | `cross_model_divergence_check` | never (optional); **inapplicable when `sealed: true`**, same reason | Per-spec override of the repo-wide toggle: `enabled` \| `disabled`. (D3) **(component `component.md` only)** |
@@ -127,6 +132,10 @@ optional).
 - `depends_on` **MUST** form an acyclic graph across the whole corpus.
 - Every `depends_on`, `realizes`, and `uses_var` reference **MUST** resolve to
   a real, existing spec id. Dangling references are a hard lint failure.
+- Every `depends_on_guarantees` entry **MUST** resolve to a real `G-<comp>-NNN`
+  id, **and** that id's owning component **MUST** already be listed in this
+  component's own `depends_on` — referencing a guarantee of a component you
+  don't even depend on is meaningless, not just unresolved. (D16)
 - `sealed: true` **MUST** carry a `source_path`; `sealed: false` or absent
   **MUST NOT** carry one.
 - A `specs/vars/` declaration's own fields (`required`/`optional`, `type`,
@@ -202,15 +211,24 @@ frontmatter, no separate id field to keep in sync with it.
   zero clarifying questions. An agent that must ask one **MUST** surface it as
   a tracked assumption or an open question, never silently guess.
 
-**`interface/`** — the public contract (types, endpoints, events, CLI),
-split by kind:
+**`interface/`** — the public contract (types, endpoints, events, CLI,
+*and* behavioral guarantees — D16 extended "the contract" to include the
+last of these, not just type signatures), split by kind:
 - `interface/cli.md` — the CLI contract, if any.
 - `interface/library.md` — the library/function contract, if any.
 - `interface/data/<TypeName>.md` — one schema/type per file.
+- `interface/guarantees/G-<comp>-NNN.md` — one behavioral/non-functional
+  guarantee per file, that a *dependent* is entitled to rely on
+  (consistency, ordering, idempotency, error-handling semantics, latency
+  bounds). Like a requirement, each uses RFC 2119 keywords and its
+  filename is its id. **Not** a place for internal implementation
+  rationale — that stays in `requirements/`/`constraints.md`. (D16)
 
-A component need not have all three — e.g. a purely-library component may
-have no `cli.md`. The generated interface **MUST** match this content
-exactly; any divergence is a hard drift-check failure.
+A component need not have all four — e.g. a purely-library component may
+have no `cli.md`, and most components have no `guarantees/` at all (nothing
+externally relied upon beyond ordinary types). The generated interface
+**MUST** match this content exactly; any divergence is a hard drift-check
+failure.
 
 **`acceptance/AC-<comp>-NNN.md`** — one acceptance criterion per file. See
 §5 for its internal format. The filename is the criterion's id.
@@ -303,8 +321,8 @@ Run per merge, scoped to the components in the impact-analysis blast radius:
 
 1. **Spec lint** — structure, frontmatter, RFC 2119 usage, no open questions in
    ratified specs, glossary conformance, acyclic dependency graph, full
-   traceability closure (every `R-id`, `realizes`, `uses_var`, `depends_on`
-   reference resolves), size caps.
+   traceability closure (every `R-id`, `realizes`, `uses_var`, `depends_on`,
+   `depends_on_guarantees` reference resolves), size caps.
 2. **Generation** — the pinned canonical model, cold, no prior code, from the
    spec bundle (`component.md` + `requirements/` + `interface/` +
    `constraints.md` + depended-upon components' `interface/` + referenced
@@ -328,13 +346,24 @@ Run per merge, scoped to the components in the impact-analysis blast radius:
    not, resolved or not) is written to the provenance manifest and the review
    packet — never silent. A flag above a severity threshold notifies a
    standing compliance channel. (D7/D12)
-6. **Non-functional gates** where feasible (benchmarks, size budgets).
-7. **Review packet** — spec diff, changed requirements, regenerated
+6. **Golden-scenario verification** — once every component in the blast
+   radius has regenerated and passed its own per-component verification
+   (steps 2–3), run the golden scenarios of every product capability whose
+   `realizes`-set intersects the blast radius, against the real, fully
+   assembled `gen/` output — not a prediction, the actual regenerated
+   system. A failure blocks the merge the same way a per-component
+   verification failure does. This is the backstop for cross-component
+   behavioral risk that no amount of interface-level diffing can rule out
+   in principle (D16) — not a redundant check: `interface/guarantees/`
+   (D16) makes *foreseen* behavioral dependencies explicit and propagating,
+   this gate catches what wasn't foreseen.
+7. **Non-functional gates** where feasible (benchmarks, size budgets).
+8. **Review packet** — spec diff, changed requirements, regenerated
    components, verification results, residual risk, license/secret flags,
-   cache-hit status, and any new/changed `sealed`/override declarations. A
-   human reviews this and the spec diff. **No human review of generated code
-   is required, of any kind.** (D5)
-8. **Merge** — `specs/`, `gen/`, and `verification/` (including
+   cache-hit status, golden-scenario results, and any new/changed
+   `sealed`/override declarations. A human reviews this and the spec diff.
+   **No human review of generated code is required, of any kind.** (D5)
+9. **Merge** — `specs/`, `gen/`, and `verification/` (including
    `corpus-graph.json`) update atomically in one squashed commit.
 
 A merge whose spec bundle exactly matches an already-verified prior state

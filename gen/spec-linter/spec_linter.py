@@ -9,7 +9,7 @@ from. See `.provenance.json` alongside this file and
 `verification/spec-linter/BOOTSTRAP.md` for the honest account of what was
 bootstrapped, what was ambiguous, and what was decided unilaterally.
 
-Implements all sixteen R-LINT-* requirements from
+Implements all eighteen R-LINT-* requirements from
 `specs/components/spec-linter/requirements/`, matching the CLI and
 `LintReport` contract in `specs/components/spec-linter/interface/` exactly.
 
@@ -25,6 +25,14 @@ class of parsing bug by construction, not just by convention. Product
 capabilities (`specs/product/`) are unaffected by D15 and keep their
 original one-file-with-inline-scenarios shape; `rule_criterion_wellformed`
 still branches on that.
+
+EXTENDED for D16 (behavioral guarantees + opt-in blast-radius narrowing):
+`interface/` gained a fourth kind, `interface/guarantees/G-<comp>-NNN.md`
+(R-LINT-017, mirroring R-LINT-007's requirement-identity check exactly),
+and a new frontmatter field, `depends_on_guarantees`, got its own
+reference-resolution rule (R-LINT-018) distinct from R-LINT-003's, because
+a `G-id` resolves against `Component.interface_guarantees`, never
+`id_index` — the same separation R-ids/AC-ids already had.
 """
 
 from __future__ import annotations
@@ -129,6 +137,7 @@ class LintReport:
 
 REQUIREMENT_FILE_RE = re.compile(r"^(R-[A-Z0-9]+-\d+)\.md$")
 ACCEPTANCE_FILE_RE = re.compile(r"^(AC-[A-Z0-9]+-\d+[a-z]?)\.md$")
+GUARANTEE_FILE_RE = re.compile(r"^(G-[A-Z0-9]+-\d+)\.md$")
 COVERS_RE = re.compile(r"^Covers:\s*(\S+)", re.MULTILINE)
 KIND_RE = re.compile(r"^Kind:\s*(\S+)", re.MULTILINE)
 GHERKIN_BLOCK_RE = re.compile(r"```gherkin\n(.*?)```", re.DOTALL)
@@ -142,6 +151,7 @@ GLOSSARY_ENTRY_RE = re.compile(r"^-\s+\*\*([^*]+)\*\*(.*?)(?=^-\s+\*\*|\Z)",
 WORD_RE = re.compile(r"[a-z0-9']+")
 REQ_ID_HEADER_RE = re.compile(r"^#\s+(R-[A-Z0-9]+-\d+)\s*$", re.MULTILINE)
 AC_ID_HEADER_RE = re.compile(r"^#\s+(AC-[A-Z0-9]+-\d+[a-z]?)\s*$", re.MULTILINE)
+GUARANTEE_ID_HEADER_RE = re.compile(r"^#\s+(G-[A-Z0-9]+-\d+)\s*$", re.MULTILINE)
 
 
 @dataclass
@@ -168,6 +178,7 @@ class Component:
     interface_cli: Doc | None
     interface_library: Doc | None
     interface_data: dict[str, Doc]
+    interface_guarantees: dict[str, Doc]
     acceptance: dict[str, Doc]
     constraints: Doc | None
 
@@ -236,6 +247,9 @@ def _classify(rel_path: str) -> tuple[str | None, str | None]:
             return "component-interface-library", component
         if len(rest) == 3 and rest[0] == "interface" and rest[1] == "data":
             return "component-interface-data", component
+        if (len(rest) == 3 and rest[0] == "interface" and rest[1] == "guarantees"
+                and GUARANTEE_FILE_RE.match(rest[2])):
+            return "component-interface-guarantee", component
         if len(rest) == 2 and rest[0] == "acceptance" and ACCEPTANCE_FILE_RE.match(rest[1]):
             return "component-acceptance", component
         if rest == ["constraints.md"]:
@@ -264,8 +278,8 @@ def load_corpus(repo_root: Path) -> Corpus:
         return components.setdefault(
             name,
             Component(name=name, root=None, requirements={}, interface_cli=None,
-                      interface_library=None, interface_data={}, acceptance={},
-                      constraints=None),
+                      interface_library=None, interface_data={}, interface_guarantees={},
+                      acceptance={}, constraints=None),
         )
 
     for path in sorted(specs_dir.rglob("*.md")):
@@ -281,9 +295,7 @@ def load_corpus(repo_root: Path) -> Corpus:
             continue
         fm, body, had_fm = _parse_frontmatter(text)
         doc_id = fm.get("id")
-        if doc_type == "component-requirement":
-            doc_id = path.stem
-        elif doc_type == "component-acceptance":
+        if doc_type in ("component-requirement", "component-acceptance", "component-interface-guarantee"):
             doc_id = path.stem
 
         doc = Doc(
@@ -307,6 +319,8 @@ def load_corpus(repo_root: Path) -> Corpus:
                 comp.interface_library = doc
             elif doc_type == "component-interface-data":
                 comp.interface_data[path.stem] = doc
+            elif doc_type == "component-interface-guarantee":
+                comp.interface_guarantees[doc_id] = doc
             elif doc_type == "component-acceptance":
                 comp.acceptance[doc_id] = doc
             elif doc_type == "component-constraints":
@@ -337,7 +351,8 @@ def _find_line(body: str, needle: str, fallback: int = 1) -> int:
 FRONTMATTER_BEARING_TYPES = ("component-root", "product", "architecture", "var", "decision")
 UNIT_FILE_TYPES = (
     "component-requirement", "component-interface-cli", "component-interface-library",
-    "component-interface-data", "component-acceptance", "component-constraints",
+    "component-interface-data", "component-interface-guarantee", "component-acceptance",
+    "component-constraints",
 )
 
 
@@ -358,7 +373,7 @@ def rule_frontmatter_completeness(corpus: Corpus) -> list[Finding]:
     this rule's.
     """
     findings = []
-    list_fields = ("depends_on", "realizes", "uses_var", "owners")
+    list_fields = ("depends_on", "realizes", "uses_var", "depends_on_guarantees", "owners")
     bool_fields = ("sealed",)
     for doc in corpus.docs:
         if doc.doc_type not in FRONTMATTER_BEARING_TYPES:
@@ -431,6 +446,37 @@ def rule_reference_resolution(corpus: Corpus) -> list[Finding]:
                 elif target.frontmatter.get("status") == "deprecated":
                     findings.append(Finding("R-LINT-003", SEVERITY_FAIL, doc.rel_path, 1,
                                              f"{field_name} references '{ref}', which is deprecated"))
+    return findings
+
+
+def rule_depends_on_guarantees_resolution(corpus: Corpus) -> list[Finding]:
+    """R-LINT-018 — `depends_on_guarantees` entries must resolve to a real
+    `G-id` whose owning component is already in this component's own
+    `depends_on` (D16). A stricter check than plain existence: referencing a
+    guarantee of a component you don't even depend on is meaningless, not
+    just unresolved — the same ownership-aware check D16 added to
+    `SPEC_GUIDELINES.md` §2's rules.
+    """
+    findings = []
+    owner_by_gid: dict[str, Component] = {
+        gid: comp for comp in corpus.components.values() for gid in comp.interface_guarantees
+    }
+    for doc in corpus.docs:
+        if doc.doc_type != "component-root":
+            continue
+        declared_deps = set(doc.frontmatter.get("depends_on") or [])
+        for gid in doc.frontmatter.get("depends_on_guarantees", []) or []:
+            owner = owner_by_gid.get(gid)
+            if owner is None:
+                findings.append(Finding("R-LINT-018", SEVERITY_FAIL, doc.rel_path, 1,
+                                         f"depends_on_guarantees references '{gid}', which does not exist"))
+                continue
+            owner_id = owner.root.doc_id if owner.root else None
+            if owner_id not in declared_deps:
+                findings.append(Finding(
+                    "R-LINT-018", SEVERITY_FAIL, doc.rel_path, 1,
+                    f"depends_on_guarantees references '{gid}' (owned by '{owner_id}'), "
+                    f"but '{owner_id}' is not in this component's own depends_on"))
     return findings
 
 
@@ -526,6 +572,26 @@ def rule_requirement_identity(corpus: Corpus) -> list[Finding]:
             if not any(kw in doc.body for kw in RFC2119_KEYWORDS):
                 findings.append(Finding("R-LINT-007", SEVERITY_FAIL, doc.rel_path, 1,
                                          f"{rid} uses no RFC 2119 keyword ({'/'.join(RFC2119_KEYWORDS)})"))
+    return findings
+
+
+def rule_guarantee_identity(corpus: Corpus) -> list[Finding]:
+    """R-LINT-017 — one behavioral/non-functional guarantee per file under
+    `interface/guarantees/` (D16), mirroring `rule_requirement_identity`
+    exactly: the file's own `# G-ID` heading must match its filename, and it
+    MUST use an RFC 2119 keyword — a guarantee is a normative promise to a
+    dependent, not descriptive prose."""
+    findings = []
+    for comp in corpus.components.values():
+        for gid, doc in comp.interface_guarantees.items():
+            header_m = GUARANTEE_ID_HEADER_RE.search(doc.body)
+            if header_m and header_m.group(1) != gid:
+                findings.append(Finding("R-LINT-017", SEVERITY_FAIL, doc.rel_path, 1,
+                                         f"file is named {gid}.md but its own heading says "
+                                         f"{header_m.group(1)}"))
+            if not any(kw in doc.body for kw in RFC2119_KEYWORDS):
+                findings.append(Finding("R-LINT-017", SEVERITY_FAIL, doc.rel_path, 1,
+                                         f"{gid} uses no RFC 2119 keyword ({'/'.join(RFC2119_KEYWORDS)})"))
     return findings
 
 
@@ -774,6 +840,12 @@ def _count_interface_surface(comp: Component) -> int:
     construction — no heading-counting needed, replacing the earlier "one
     per `## Data: ...` heading" approach now that headings aren't the unit
     boundary).
+
+    Deliberately excludes `interface/guarantees/` (D16): a guarantee is
+    cross-cutting behavioral narrative about the surface above, not itself
+    a separate callable/addressable surface element — counting it here
+    would conflate "how many things can you call" with "how many promises
+    were made about them."
     """
     total = 0
     if comp.interface_cli:
@@ -826,6 +898,7 @@ def rule_size_caps(corpus: Corpus) -> list[Finding]:
             + ([comp.interface_cli] if comp.interface_cli else [])
             + ([comp.interface_library] if comp.interface_library else [])
             + list(comp.interface_data.values())
+            + list(comp.interface_guarantees.values())
             + list(comp.acceptance.values())
             + ([comp.constraints] if comp.constraints else [])
         )
@@ -910,10 +983,12 @@ ALL_RULES = [
     rule_no_stray_frontmatter,
     rule_ratified_closure,
     rule_reference_resolution,
+    rule_depends_on_guarantees_resolution,
     rule_acyclic_graph,
     rule_sealed_consistency,
     rule_realizes_coverage,
     rule_requirement_identity,
+    rule_guarantee_identity,
     rule_forward_traceability,
     rule_backward_traceability,
     rule_criterion_wellformed,
