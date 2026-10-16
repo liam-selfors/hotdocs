@@ -551,6 +551,28 @@ This keeps the "no mandatory human review" precedent (D5) intact for
 *correctness* while treating *compliance* as a different category that still
 must never be silent, per your instruction.
 
+**D7 addendum — block and severity are orthogonal, not two cutoffs on one
+score.** Left open in the original draft ("a flag above a *severity*
+threshold" never said what severity was *of*, relative to the
+merge-blocking threshold); resolved while specifying `license-scanner` and
+`secret-scanner`:
+
+- **Block** is a *confidence* question — is this match certain enough to
+  stop the merge? A single score/threshold, as originally designed.
+- **Severity** is a *risk* question — if the match is real, how bad is it?
+  Not a function of confidence at all. Each reference-corpus entry
+  (license-scanner) or pattern-database rule (secret-scanner) carries its
+  own **`risk_tier`** (`high`/`medium`/`low` — license family for one,
+  credential-shape specificity for the other).
+- **Notification fires when:** `(the match blocked the merge) OR (the
+  matched entry's risk_tier is "high", regardless of confidence)`. This
+  captures the real asymmetry a same-scale reading misses in both
+  directions: a high-confidence match to a low-risk (permissive-license,
+  say) reference doesn't need to page anyone just because it's confident;
+  a lower-confidence match to a high-risk reference (copyleft/unknown-
+  license, or a recognizable credential shape) is worth surfacing even
+  when the pipeline isn't sure enough to hard-block.
+
 ### D8 — Product/component reconciliation: linkage is lint-checked, composition is golden-scenario-verified
 
 Two different jobs; one must not stand in for the other.

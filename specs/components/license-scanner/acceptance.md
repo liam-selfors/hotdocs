@@ -38,11 +38,37 @@ Covers: R-LICENSE-003
 Kind: compiled
 
 ```gherkin
-Given a similarity score at or above the severity threshold and
+Given a similarity score at or above the block threshold (so the merge is
+  blocked) against a reference entry with risk_tier "low", and
   VAR-COMPLIANCE-WEBHOOK-URL configured
 When license-scan runs
-Then a notification is sent to that webhook, independent of whether the
-  merge is later unblocked by a retry
+Then notified is true, because the match blocked the merge — independent
+  of that entry's low risk_tier
+```
+
+### AC-LICENSE-003b
+Covers: R-LICENSE-003
+Kind: compiled
+
+```gherkin
+Given a similarity score below the block threshold against a reference
+  entry with risk_tier "high", and VAR-COMPLIANCE-WEBHOOK-URL configured
+When license-scan runs
+Then blocked is false but notified is true — the exact case a same-scale
+  severity threshold could never express
+```
+
+### AC-LICENSE-003c
+Covers: R-LICENSE-003
+Kind: compiled
+
+```gherkin
+Given a similarity score at or above the block threshold against a
+  reference entry with risk_tier "low", but VAR-COMPLIANCE-WEBHOOK-URL not
+  configured
+When license-scan runs
+Then blocked is true, notified is false, and the LicenseScanResult (per
+  R-LICENSE-002) is still recorded regardless
 ```
 
 ### AC-LICENSE-004

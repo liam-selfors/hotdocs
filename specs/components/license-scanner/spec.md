@@ -23,13 +23,17 @@ result is written to the provenance manifest regardless of outcome.
 ## Scope
 
 **In scope:** fingerprinting generated code; comparing against the
-reference corpus; the merge-blocking decision; the separate severity-based
-notification path; cache-awareness.
+reference corpus; the merge-blocking decision (confidence-based); the
+severity-based notification path (risk-based, orthogonal to confidence —
+see the D7 addendum in `notes/initial-ideas.md`); cache-awareness.
 
 **Out of scope:** legal interpretation of a match (explicitly out of scope
 for an engineering component — D7); maintaining the reference corpus's
-content itself (treated as an external input, versioned via `gate_version`
-like the signature database it is).
+content itself, including its per-entry `risk_tier` classifications
+(treated as an external input, versioned via `gate_version` like the
+signature database it is — assigning a license family's risk tier is
+itself a judgment call made when the reference corpus is curated, not by
+this component at scan time).
 
 ## Definitions
 
@@ -44,18 +48,30 @@ No deltas from `specs/glossary.md`.
   matching window-hashes against the reference corpus's precomputed hash
   sets. A score at or above the configured **block threshold** MUST cause
   the merge to be blocked, the same way a failed test does — no human
-  sign-off is required or able to override this.
+  sign-off is required or able to override this. Block is a pure confidence
+  determination, independent of which reference entry matched or how risky
+  it is — that's R-LICENSE-003's job, not this one's.
 - **R-LICENSE-002** — Every scan result — clean or flagged, regardless of
   whether it ultimately blocks the merge — MUST be written into the
   provenance manifest's `license_scan` field. A clean result MUST be
   recorded just as faithfully as a flagged one; absence of a flag MUST NOT
   mean absence of a record.
-- **R-LICENSE-003** — A match at or above a separate **severity threshold**
-  MUST trigger a notification to `VAR-COMPLIANCE-WEBHOOK-URL`, independent
-  of the merge outcome — including when a later retry (R-LICENSE-007)
-  produces clean code, so an auto-resolved flag still gets seen by a human
-  channel. When `VAR-COMPLIANCE-WEBHOOK-URL` is absent, no notification is
-  sent, but the record from R-LICENSE-002 still exists regardless.
+- **R-LICENSE-003** — Each reference-corpus entry MUST carry a declared
+  **`risk_tier`** (`high` / `medium` / `low` — reflecting the matched
+  entry's license family: e.g. `high` for strong-copyleft or
+  unlicensed/proprietary sources, `medium` for weak-copyleft, `low` for
+  permissive). A notification to `VAR-COMPLIANCE-WEBHOOK-URL` MUST fire
+  when **either** the match blocked the merge (R-LICENSE-001) **or** the
+  matched entry's `risk_tier` is `high` — regardless of confidence in the
+  latter case. Severity is deliberately **not** a function of the
+  similarity score: block answers "are we confident," `risk_tier` answers
+  "how bad if real," and conflating the two would both over-notify on
+  confident-but-low-risk matches and under-notify on uncertain-but-
+  high-risk ones. Notification is independent of the merge outcome,
+  including when a later retry (R-LICENSE-007) produces clean code, so an
+  auto-resolved flag still gets seen. When `VAR-COMPLIANCE-WEBHOOK-URL` is
+  absent, no notification is sent, but the record from R-LICENSE-002 still
+  exists regardless.
 - **R-LICENSE-004** — Before scanning, the scanner MUST check
   `cache-manager` using key `(spec_bundle_hash, gen_output_hash, gate_version,
   model_pin)`; on a cache hit, the cached result MUST be reused and no
@@ -94,15 +110,6 @@ See `constraints.md`.
 
 ## Open questions
 
-- **D7 never specified the relationship between the block threshold and the
-  severity threshold** — whether they're two cutoffs on the same similarity
-  score (e.g. block at 0.7, "severe" at 0.9), or orthogonal dimensions (e.g.
-  severity depends on *which* license family matched — copyleft vs.
-  permissive — not how similar the match was). This spec adopts the
-  simpler same-scale reading (severity threshold ≥ block threshold, both
-  configurable) as a concrete default, but this is a real gap in D7, not a
-  judgment call this spec is positioned to close on its own — flagged for
-  the main thread rather than silently assumed.
 - Exact k-gram window size and the reference-corpus format are
   implementation details not pinned down here.
 

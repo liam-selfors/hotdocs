@@ -46,11 +46,34 @@ Covers: R-SECRET-004
 Kind: compiled
 
 ```gherkin
-Given a match whose confidence crosses the severity threshold and
-  VAR-COMPLIANCE-WEBHOOK-URL configured
+Given a match against a high-risk_tier rule (e.g. a recognizable AWS
+  access-key shape) and VAR-COMPLIANCE-WEBHOOK-URL configured
 When secret-scan runs
 Then a notification is sent, independent of whether a later retry scans
   clean
+```
+
+### AC-SECRET-004b
+Covers: R-SECRET-004
+Kind: compiled
+
+```gherkin
+Given a match against a low-risk_tier rule (a generic high-entropy
+  heuristic) that nonetheless blocked the merge, and
+  VAR-COMPLIANCE-WEBHOOK-URL configured
+When secret-scan runs
+Then a notification is still sent, because the match blocked the merge —
+  independent of that rule's low risk_tier
+```
+
+### AC-SECRET-004c
+Covers: R-SECRET-004
+Kind: compiled
+
+```gherkin
+Given a clean scan with no match at all
+When secret-scan runs
+Then notified is false
 ```
 
 ### AC-SECRET-005

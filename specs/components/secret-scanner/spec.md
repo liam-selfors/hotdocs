@@ -22,9 +22,11 @@ clear a flag, but no result is ever silent.
 ## Scope
 
 **In scope:** pattern- and entropy-based detection across all three
-directories; the merge-blocking decision; the separate severity-based
-notification path; cache-awareness; a lightweight pre-commit/pre-push
-invocation distinct from the full merge-gate run.
+directories; the merge-blocking decision (confidence-based); the
+severity-based notification path (risk-based, orthogonal to confidence —
+see the D7 addendum in `notes/initial-ideas.md`); cache-awareness; a
+lightweight pre-commit/pre-push invocation distinct from the full
+merge-gate run.
 
 **Out of scope:** `spec-linter`'s R-LINT-013 (the narrow, structural check
 that a `specs/vars/` declaration with `sensitivity: secret` carries no
@@ -44,14 +46,26 @@ No deltas from `specs/glossary.md`.
 
 - **R-SECRET-001** — On a full scan, the scanner MUST check every file
   under `specs/`, `gen/`, and `verification/` against a pattern database
-  (common API-key/token shapes) and a high-entropy-string heuristic.
+  (common API-key/token shapes) and a high-entropy-string heuristic. Each
+  pattern-database rule MUST carry a declared **`risk_tier`** (`high` /
+  `medium` / `low`) — `high` for a recognizable, provider-specific
+  credential shape (e.g. an AWS access-key-ID format, a GitHub PAT prefix, a
+  PEM private-key block), `low` for a generic high-entropy-string heuristic
+  with no specific shape behind it (more prone to false positives; a real
+  secret is possible but far less certain from the pattern alone).
 - **R-SECRET-002** — A match MUST block the merge, the same way a failed
-  test does — no human sign-off is required or able to override this.
+  test does — no human sign-off is required or able to override this. Block
+  is a pure confidence determination (did the pattern/entropy check match
+  at all), independent of which rule matched or how risky that rule's
+  shape is — that's R-SECRET-004's job, not this one's.
 - **R-SECRET-003** — Every scan result — clean or flagged — MUST be written
   into the provenance manifest, regardless of outcome. Absence of a flag
   MUST NOT mean absence of a record.
-- **R-SECRET-004** — A match at or above a severity threshold MUST trigger
-  a notification to `VAR-COMPLIANCE-WEBHOOK-URL`, independent of the merge
+- **R-SECRET-004** — A notification to `VAR-COMPLIANCE-WEBHOOK-URL` MUST
+  fire when **either** a match blocked the merge (R-SECRET-002) **or** the
+  matched rule's `risk_tier` is `high` — mirroring `license-scanner`'s
+  R-LICENSE-003 exactly, the same orthogonal block/severity split, not a
+  second, independently-designed mechanism. Independent of the merge
   outcome, including when a retry later scans clean.
 - **R-SECRET-005** — Before scanning, the scanner MUST check
   `cache-manager` using key `(spec_bundle_hash, gen_output_hash, gate_version,
@@ -93,9 +107,6 @@ See `constraints.md`.
 
 ## Open questions
 
-- Same underspecified block-vs-severity-threshold relationship flagged in
-  `license-scanner`'s spec applies here too — not re-litigated, see that
-  spec's Open Questions for the shared gap.
 - Exact pattern database (which key/token shapes, entropy threshold) is an
   implementation detail not pinned down here.
 
