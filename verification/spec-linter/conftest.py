@@ -4,6 +4,11 @@ Builds a minimal, otherwise-fully-valid spec corpus in a tmp directory, so
 each AC-LINT-* test can mutate exactly one thing and assert exactly one rule
 fires — rather than depending on this repository's real (and constantly
 changing) spec corpus.
+
+REWRITTEN for D15 (one-file-per-unit component layout): `foo`'s spec is now
+`component.md` + `requirements/R-FOO-001.md` + `interface/library.md` +
+`acceptance/AC-FOO-001.md` + `constraints.md`, replacing the original
+`spec.md`/`interface.md`/`acceptance.md`/`constraints.md` flat files.
 """
 
 import sys
@@ -45,7 +50,7 @@ Then it works
 ```
 """
 
-SPEC = """---
+COMPONENT = """---
 id: comp-foo
 title: Foo
 status: draft
@@ -71,19 +76,19 @@ No deltas from `specs/glossary.md`.
 
 ## Behavior
 
-- **R-FOO-001** — The component MUST do the one thing it is specified to do.
+See `requirements/`.
 
 ## Interfaces
 
-See `interface.md`.
+See `interface/`.
 
 ## Data
 
-None.
+See `interface/data/`.
 
 ## Acceptance criteria
 
-See `acceptance.md`.
+See `acceptance/`.
 
 ## Non-functional constraints
 
@@ -96,28 +101,22 @@ See `constraints.md`.
 - Initial draft.
 """
 
-INTERFACE = """---
-id: comp-foo-interface
-title: Foo — Interface
-status: draft
-owners: [test-team]
----
+REQUIREMENT = """# R-FOO-001
 
-# Foo — Interface
-
-- `do_the_thing()` — does the one thing.
+**R-FOO-001** — The component MUST do the one thing it is specified to do.
 """
 
-ACCEPTANCE = """---
-id: comp-foo-acceptance
-title: Foo — Acceptance Criteria
-status: draft
-owners: [test-team]
----
+LIBRARY = """# Library
 
-# Foo — Acceptance Criteria
+```
+do_the_thing() -> None
+```
 
-### AC-FOO-001
+Does the one thing.
+"""
+
+ACCEPTANCE = """# AC-FOO-001
+
 Covers: R-FOO-001
 Kind: compiled
 
@@ -128,28 +127,26 @@ Then it does the thing
 ```
 """
 
-CONSTRAINTS = """---
-id: comp-foo-constraints
-title: Foo — Non-Functional Constraints
-status: draft
-owners: [test-team]
----
-
-# Foo — Non-Functional Constraints
+CONSTRAINTS = """# Foo — Non-Functional Constraints
 
 - **Determinism.** The component MUST behave the same way every time.
 """
 
 
 def write_baseline(root: Path) -> None:
+    comp_dir = root / "specs" / "components" / "foo"
     (root / "specs" / "product").mkdir(parents=True, exist_ok=True)
-    (root / "specs" / "components" / "foo").mkdir(parents=True, exist_ok=True)
+    (comp_dir / "requirements").mkdir(parents=True, exist_ok=True)
+    (comp_dir / "interface" / "data").mkdir(parents=True, exist_ok=True)
+    (comp_dir / "acceptance").mkdir(parents=True, exist_ok=True)
+
     (root / "specs" / "glossary.md").write_text(GLOSSARY)
     (root / "specs" / "product" / "test-capability.md").write_text(PRODUCT)
-    (root / "specs" / "components" / "foo" / "spec.md").write_text(SPEC)
-    (root / "specs" / "components" / "foo" / "interface.md").write_text(INTERFACE)
-    (root / "specs" / "components" / "foo" / "acceptance.md").write_text(ACCEPTANCE)
-    (root / "specs" / "components" / "foo" / "constraints.md").write_text(CONSTRAINTS)
+    (comp_dir / "component.md").write_text(COMPONENT)
+    (comp_dir / "requirements" / "R-FOO-001.md").write_text(REQUIREMENT)
+    (comp_dir / "interface" / "library.md").write_text(LIBRARY)
+    (comp_dir / "acceptance" / "AC-FOO-001.md").write_text(ACCEPTANCE)
+    (comp_dir / "constraints.md").write_text(CONSTRAINTS)
 
 
 @pytest.fixture

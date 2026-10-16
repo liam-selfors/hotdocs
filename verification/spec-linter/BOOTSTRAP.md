@@ -154,3 +154,22 @@ glossary_conflict` takes an injectable `judge` callable, tested with a mock
 in `test_ac_lint_015_conflict_detected_with_judge_configured`) — wiring a
 real model in is explicitly out of scope for a hand-authored CLI prototype,
 and would have been dishonest about what was actually validated here.
+
+## Note: D15 superseded the layout this document describes
+
+Everything above describes the original four-flat-files component layout
+(`spec.md`/`interface.md`/`acceptance.md`/`constraints.md`) — accurate
+history, kept as-is rather than rewritten to pretend D15 existed at the
+time. D15 (see `notes/initial-ideas.md`) later replaced that layout with
+one-file-per-unit (`component.md` + `requirements/` + `interface/` +
+`acceptance/` + `constraints.md`), which required a real rewrite of
+`gen/spec-linter/spec_linter.py` and this directory's test suite — not a
+small patch. A sixteenth requirement, R-LINT-016 (no unit file may carry
+frontmatter), was added as a direct consequence of the new layout
+introducing an invariant that didn't exist before. The bug this document
+describes catching (the RFC-2119 multi-line continuation miss) and the
+lessons drawn from it still apply unchanged to the rewritten implementation
+— directory-listing-based parsing removes that *specific* class of bug by
+construction, but the general lesson ("validate against real, multi-author
+content, not only hand-built fixtures") was reapplied during the rewrite,
+not superseded by it.

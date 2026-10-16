@@ -1,47 +1,57 @@
-"""One test per AC-LINT-* criterion in specs/components/spec-linter/acceptance.md.
+"""One test per AC-LINT-* criterion in specs/components/spec-linter/acceptance/.
 
 HAND-AUTHORED BOOTSTRAP — see BOOTSTRAP.md. These are what `criterion-compiler`
 would deterministically compile from the Gherkin blocks once it exists; a
 human stood in for that compiler exactly once here, by transcribing each
 Given/When/Then into pytest by hand. Not a general-purpose test-writing
 pattern going forward — this is the explicitly one-time bootstrap exception.
+
+REWRITTEN for D15 (one-file-per-unit component layout): every test that used
+to mutate `spec.md`/`interface.md`/`acceptance.md` as shared files now mutates
+the specific unit file (`component.md`, one `requirements/R-*.md`, one
+`acceptance/AC-*.md`) that actually owns the content being tested.
 """
 
 from conftest import run_lint, has_finding
 
 
+def _comp(root, name="foo"):
+    return root / "specs" / "components" / name
+
+
 def test_ac_lint_001_missing_owners(corpus_root):
-    spec = corpus_root / "specs" / "components" / "foo" / "spec.md"
-    spec.write_text(spec.read_text().replace("owners: [test-team]\n", ""))
+    component = _comp(corpus_root) / "component.md"
+    component.write_text(component.read_text().replace("owners: [test-team]\n", ""))
     report = run_lint(corpus_root)
     assert has_finding(report, "R-LINT-001")
 
 
 def test_ac_lint_002_ratified_with_open_questions(corpus_root):
-    spec = corpus_root / "specs" / "components" / "foo" / "spec.md"
-    text = spec.read_text()
+    component = _comp(corpus_root) / "component.md"
+    text = component.read_text()
     text = text.replace("status: draft", "status: ratified")
     text = text.replace("## Open questions\n", "## Open questions\n\n- Still unresolved.\n")
-    spec.write_text(text)
+    component.write_text(text)
     report = run_lint(corpus_root)
     assert has_finding(report, "R-LINT-002")
 
 
 def test_ac_lint_003_dangling_depends_on(corpus_root):
-    spec = corpus_root / "specs" / "components" / "foo" / "spec.md"
-    spec.write_text(spec.read_text().replace("depends_on: []", "depends_on: [comp-bar]"))
+    component = _comp(corpus_root) / "component.md"
+    component.write_text(component.read_text().replace("depends_on: []", "depends_on: [comp-bar]"))
     report = run_lint(corpus_root)
     assert has_finding(report, "R-LINT-003")
     assert any("comp-bar" in f.message for f in report.findings if f.rule_id == "R-LINT-003")
 
 
 def test_ac_lint_004_dependency_cycle(corpus_root):
-    foo_spec = corpus_root / "specs" / "components" / "foo" / "spec.md"
-    foo_spec.write_text(foo_spec.read_text().replace("depends_on: []", "depends_on: [comp-bar]"))
+    foo = _comp(corpus_root) / "component.md"
+    foo.write_text(foo.read_text().replace("depends_on: []", "depends_on: [comp-bar]"))
 
-    bar_dir = corpus_root / "specs" / "components" / "bar"
-    bar_dir.mkdir(parents=True)
-    (bar_dir / "spec.md").write_text(
+    bar_dir = _comp(corpus_root, "bar")
+    (bar_dir / "requirements").mkdir(parents=True)
+    (bar_dir / "acceptance").mkdir(parents=True)
+    (bar_dir / "component.md").write_text(
         "---\n"
         "id: comp-bar\n"
         "title: Bar\n"
@@ -51,61 +61,65 @@ def test_ac_lint_004_dependency_cycle(corpus_root):
         "realizes: [P-TEST]\n"
         "sealed: false\n"
         "---\n\n# Bar\n\n## Purpose\n\nCycle partner.\n\n## Scope\n\nIn scope: n/a.\n\n"
-        "## Definitions\n\nNo deltas.\n\n## Behavior\n\n"
-        "- **R-BAR-001** — The component MUST exist.\n\n"
+        "## Definitions\n\nNo deltas.\n\n## Behavior\n\nSee `requirements/`.\n\n"
         "## Interfaces\n\nNone.\n\n## Data\n\nNone.\n\n"
-        "## Acceptance criteria\n\nNone.\n\n## Non-functional constraints\n\nNone.\n\n"
+        "## Acceptance criteria\n\nSee `acceptance/`.\n\n## Non-functional constraints\n\nNone.\n\n"
         "## Open questions\n\n## Change log\n\n- Initial.\n"
+    )
+    (bar_dir / "requirements" / "R-BAR-001.md").write_text(
+        "# R-BAR-001\n\n**R-BAR-001** — The component MUST exist.\n"
+    )
+    (bar_dir / "acceptance" / "AC-BAR-001.md").write_text(
+        "# AC-BAR-001\n\nCovers: R-BAR-001\nKind: compiled\n\n"
+        "```gherkin\nGiven nothing\nWhen checked\nThen it exists\n```\n"
     )
     report = run_lint(corpus_root)
     assert has_finding(report, "R-LINT-004")
 
 
 def test_ac_lint_005_sealed_without_source_path(corpus_root):
-    spec = corpus_root / "specs" / "components" / "foo" / "spec.md"
-    spec.write_text(spec.read_text().replace("sealed: false", "sealed: true"))
+    component = _comp(corpus_root) / "component.md"
+    component.write_text(component.read_text().replace("sealed: false", "sealed: true"))
     report = run_lint(corpus_root)
     assert has_finding(report, "R-LINT-005")
 
 
 def test_ac_lint_006_non_sealed_zero_realizes(corpus_root):
-    spec = corpus_root / "specs" / "components" / "foo" / "spec.md"
-    spec.write_text(spec.read_text().replace("realizes: [P-TEST]", "realizes: []"))
+    component = _comp(corpus_root) / "component.md"
+    component.write_text(component.read_text().replace("realizes: [P-TEST]", "realizes: []"))
     report = run_lint(corpus_root)
     assert has_finding(report, "R-LINT-006")
 
 
 def test_ac_lint_007_requirement_without_rfc2119_keyword(corpus_root):
-    spec = corpus_root / "specs" / "components" / "foo" / "spec.md"
-    spec.write_text(spec.read_text().replace(
-        "- **R-FOO-001** — The component MUST do the one thing it is specified to do.",
-        "- **R-FOO-001** — The component does the one thing it is specified to do.",
+    req = _comp(corpus_root) / "requirements" / "R-FOO-001.md"
+    req.write_text(req.read_text().replace(
+        "**R-FOO-001** — The component MUST do the one thing it is specified to do.",
+        "**R-FOO-001** — The component does the one thing it is specified to do.",
     ))
     report = run_lint(corpus_root)
     assert has_finding(report, "R-LINT-007")
 
 
 def test_ac_lint_008_requirement_with_no_covering_criterion(corpus_root):
-    spec = corpus_root / "specs" / "components" / "foo" / "spec.md"
-    spec.write_text(spec.read_text().replace(
-        "## Behavior\n\n- **R-FOO-001** — The component MUST do the one thing it is specified to do.\n",
-        "## Behavior\n\n- **R-FOO-001** — The component MUST do the one thing it is specified to do.\n"
-        "- **R-FOO-002** — The component MUST also do a second thing.\n",
-    ))
+    req_dir = _comp(corpus_root) / "requirements"
+    (req_dir / "R-FOO-002.md").write_text(
+        "# R-FOO-002\n\n**R-FOO-002** — The component MUST also do a second thing.\n"
+    )
     report = run_lint(corpus_root)
     assert has_finding(report, "R-LINT-008")
     assert any("R-FOO-002" in f.message for f in report.findings if f.rule_id == "R-LINT-008")
 
 
 def test_ac_lint_009_covers_dangling_reference(corpus_root):
-    acc = corpus_root / "specs" / "components" / "foo" / "acceptance.md"
+    acc = _comp(corpus_root) / "acceptance" / "AC-FOO-001.md"
     acc.write_text(acc.read_text().replace("Covers: R-FOO-001", "Covers: R-DOES-NOT-EXIST"))
     report = run_lint(corpus_root)
     assert has_finding(report, "R-LINT-009")
 
 
 def test_ac_lint_010_criterion_missing_kind_tag(corpus_root):
-    acc = corpus_root / "specs" / "components" / "foo" / "acceptance.md"
+    acc = _comp(corpus_root) / "acceptance" / "AC-FOO-001.md"
     acc.write_text(acc.read_text().replace("Kind: compiled\n", ""))
     report = run_lint(corpus_root)
     assert has_finding(report, "R-LINT-010")
@@ -118,8 +132,8 @@ def test_ac_lint_011_near_verbatim_restatement_fails(corpus_root):
     # fixture's text is a near-identical restatement of "a thing this corpus
     # talks about" (the glossary's definition of Widget), so it should still
     # fire R-LINT-011.
-    spec = corpus_root / "specs" / "components" / "foo" / "spec.md"
-    spec.write_text(spec.read_text().replace(
+    component = _comp(corpus_root) / "component.md"
+    component.write_text(component.read_text().replace(
         "## Definitions\n\nNo deltas from `specs/glossary.md`.\n",
         "## Definitions\n\n- **Widget** — a thing this corpus talks about.\n",
     ))
@@ -133,8 +147,8 @@ def test_ac_lint_011b_genuine_delta_does_not_fail(corpus_root):
     # away from. (It legitimately falls to R-LINT-015 instead, which will
     # report `skipped` with no judge configured — asserted separately below,
     # not here, since R-LINT-011's own correctness is what this test is for.)
-    spec = corpus_root / "specs" / "components" / "foo" / "spec.md"
-    spec.write_text(spec.read_text().replace(
+    component = _comp(corpus_root) / "component.md"
+    component.write_text(component.read_text().replace(
         "## Definitions\n\nNo deltas from `specs/glossary.md`.\n",
         "## Definitions\n\n- **Widget** — in Foo specifically, always carries a "
         "serial number assigned at creation time.\n",
@@ -151,8 +165,8 @@ def test_ac_lint_011_old_fixture_now_routes_to_015_not_011(corpus_root):
     # definition, so it must NOT fire R-LINT-011 — it's R-LINT-015's job
     # (a semantic conflict, not a structural restatement) and, with no judge
     # configured here, reports skipped rather than silently passing.
-    spec = corpus_root / "specs" / "components" / "foo" / "spec.md"
-    spec.write_text(spec.read_text().replace(
+    component = _comp(corpus_root) / "component.md"
+    component.write_text(component.read_text().replace(
         "## Definitions\n\nNo deltas from `specs/glossary.md`.\n",
         "## Definitions\n\n- **Widget** — a totally different meaning than the glossary gives it.\n",
     ))
@@ -162,8 +176,8 @@ def test_ac_lint_011_old_fixture_now_routes_to_015_not_011(corpus_root):
 
 
 def test_ac_lint_015_conflict_detected_with_judge_configured(corpus_root):
-    spec = corpus_root / "specs" / "components" / "foo" / "spec.md"
-    spec.write_text(spec.read_text().replace(
+    component = _comp(corpus_root) / "component.md"
+    component.write_text(component.read_text().replace(
         "## Definitions\n\nNo deltas from `specs/glossary.md`.\n",
         "## Definitions\n\n- **Widget** — a totally different meaning than the glossary gives it.\n",
     ))
@@ -178,8 +192,8 @@ def test_ac_lint_015_conflict_detected_with_judge_configured(corpus_root):
 
 
 def test_ac_lint_015b_skipped_without_model(corpus_root):
-    spec = corpus_root / "specs" / "components" / "foo" / "spec.md"
-    spec.write_text(spec.read_text().replace(
+    component = _comp(corpus_root) / "component.md"
+    component.write_text(component.read_text().replace(
         "## Definitions\n\nNo deltas from `specs/glossary.md`.\n",
         "## Definitions\n\n- **Widget** — a totally different meaning than the glossary gives it.\n",
     ))
@@ -214,3 +228,12 @@ def test_ac_lint_014_duplicate_glossary_without_split_decision(corpus_root):
     (corpus_root / "specs" / "glossary-extra.md").write_text("# Another Glossary\n\n- **Gadget** — also a thing.\n")
     report = run_lint(corpus_root)
     assert has_finding(report, "R-LINT-014")
+
+
+def test_ac_lint_016_stray_frontmatter_on_unit_file(corpus_root):
+    req = _comp(corpus_root) / "requirements" / "R-FOO-001.md"
+    req.write_text(
+        "---\nid: R-FOO-001\ntitle: should not be here\n---\n\n" + req.read_text()
+    )
+    report = run_lint(corpus_root)
+    assert has_finding(report, "R-LINT-016")

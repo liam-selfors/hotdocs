@@ -20,12 +20,13 @@ gate and the component everything else assumes has already run.
 
 ## Scope
 
-**In scope:** frontmatter completeness and typing; cross-reference resolution
-(`depends_on` / `realizes` / `uses_var`); dependency-graph acyclicity; `R-id`
-formation and RFC 2119 usage; forward and backward traceability between
-requirements and acceptance criteria; acceptance-criterion well-formedness;
-glossary conformance; the D2 size caps; `specs/vars/` secret-field safety;
-glossary singularity (D14).
+**In scope:** frontmatter completeness and typing on a component's root file,
+and frontmatter *absence* on every unit file (D15); cross-reference
+resolution (`depends_on` / `realizes` / `uses_var`); dependency-graph
+acyclicity; `R-id` formation and RFC 2119 usage; forward and backward
+traceability between requirements and acceptance criteria;
+acceptance-criterion well-formedness; glossary conformance; the D2 size
+caps; `specs/vars/` secret-field safety; glossary singularity (D14).
 
 **Out of scope:** generation; verification of generated code's actual
 behavior. **Mostly, but not entirely, free of model calls and judgment** —
@@ -84,11 +85,13 @@ as decisions, not left open:_
   out to be moot: compiled test scaffolding doesn't exist at lint time at
   all (generation hasn't run yet), so there's nothing post-compilation to
   count regardless.
-- R-LINT-012's "interface surface elements" dimension: now concretely
-  defined in `SPEC_GUIDELINES.md` §4 and implemented in
-  `gen/spec-linter/spec_linter.py` — one per distinct CLI invocation line,
-  one per distinct `Library` function signature, one per `## Data: ...`
-  heading. Previously flagged as having no canonical algorithm; resolved.
+- R-LINT-012's "interface surface elements" dimension: concretely defined in
+  `SPEC_GUIDELINES.md` §4 and implemented in `gen/spec-linter/spec_linter.py`
+  — one per distinct CLI invocation line in `interface/cli.md`, one per
+  distinct function signature in `interface/library.md`, one per file under
+  `interface/data/` (D15 — each already names exactly one type by
+  construction, replacing the earlier "one per `## Data: ...` heading"
+  counting once headings stopped being the unit boundary).
 
 ## Change log
 

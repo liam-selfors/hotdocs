@@ -9,9 +9,22 @@ from. See `.provenance.json` alongside this file and
 `verification/spec-linter/BOOTSTRAP.md` for the honest account of what was
 bootstrapped, what was ambiguous, and what was decided unilaterally.
 
-Implements all fifteen R-LINT-* requirements from
-`specs/components/spec-linter/spec.md`, matching the CLI and `LintReport`
-contract in `specs/components/spec-linter/interface.md` exactly.
+Implements all sixteen R-LINT-* requirements from
+`specs/components/spec-linter/requirements/`, matching the CLI and
+`LintReport` contract in `specs/components/spec-linter/interface/` exactly.
+
+REWRITTEN for D15 (one-file-per-unit component layout): a component is no
+longer four flat files (`spec.md`/`interface.md`/`acceptance.md`/
+`constraints.md`) parsed by regex into sub-sections — it's `component.md`
+(root) plus `requirements/`, `interface/` (+ `interface/data/`), and
+`acceptance/` directories, each holding one file per addressable unit, plus
+`constraints.md` staying flat. This rewrite replaces block-boundary regex
+parsing (`_requirement_blocks`, `CRITERION_HEADER_RE`-over-one-shared-file)
+with directory listing wherever D15 made that possible — removing a whole
+class of parsing bug by construction, not just by convention. Product
+capabilities (`specs/product/`) are unaffected by D15 and keep their
+original one-file-with-inline-scenarios shape; `rule_criterion_wellformed`
+still branches on that.
 """
 
 from __future__ import annotations
@@ -26,12 +39,12 @@ from pathlib import Path
 # ---------------------------------------------------------------------------
 # RFC 2119 keyword set.
 #
-# Open question in spec.md asked: full RFC 2119 set, or the curated subset
-# this project actually uses? Resolved by cross-referencing SPEC_GUIDELINES.md
-# itself, which opens by declaring: "Keywords MUST, MUST NOT, SHOULD, SHOULD
-# NOT, and MAY are used per RFC 2119." That sentence already answers this
-# open question directly — it didn't need to be left open in spec.md at all.
-# Flagged in the bootstrap report.
+# Open question in spec originally asked: full RFC 2119 set, or the curated
+# subset this project actually uses? Resolved by cross-referencing
+# SPEC_GUIDELINES.md itself, which opens by declaring: "Keywords MUST, MUST
+# NOT, SHOULD, SHOULD NOT, and MAY are used per RFC 2119." That sentence
+# already answers this open question directly. Flagged in the bootstrap
+# report.
 # ---------------------------------------------------------------------------
 RFC2119_KEYWORDS = ("MUST NOT", "MUST", "SHOULD NOT", "SHOULD", "MAY")
 
@@ -109,18 +122,17 @@ class LintReport:
 # ---------------------------------------------------------------------------
 
 # Doc types we actually lint. README.md placeholders under specs/ are
-# scaffolding/documentation, not governed specs. This was a genuine gap when
-# this bootstrap was first written — SPEC_GUIDELINES.md didn't say how to
-# tell a real spec apart from a README placeholder in the same directory —
-# since resolved: SPEC_GUIDELINES.md §1 now states this exact governed-set
-# rule explicitly. The convention below matches it.
-COMPONENT_FILES = {"spec.md", "interface.md", "acceptance.md", "constraints.md"}
+# scaffolding/documentation, not governed specs — SPEC_GUIDELINES.md §1
+# states this explicitly, and the D15 governed set for a component is:
+# component.md, everything under requirements/ and interface/ (including
+# interface/data/) and acceptance/, and constraints.md.
 
-REQUIREMENT_RE = re.compile(r"\*\*(R-[A-Z0-9]+-\d+)\*\*\s*(?:[—-]\s*(.*))?")
+REQUIREMENT_FILE_RE = re.compile(r"^(R-[A-Z0-9]+-\d+)\.md$")
+ACCEPTANCE_FILE_RE = re.compile(r"^(AC-[A-Z0-9]+-\d+[a-z]?)\.md$")
 COVERS_RE = re.compile(r"^Covers:\s*(\S+)", re.MULTILINE)
 KIND_RE = re.compile(r"^Kind:\s*(\S+)", re.MULTILINE)
 GHERKIN_BLOCK_RE = re.compile(r"```gherkin\n(.*?)```", re.DOTALL)
-CRITERION_HEADER_RE = re.compile(r"^###\s+(\S+)\s*$", re.MULTILINE)
+CRITERION_HEADER_RE = re.compile(r"^###\s+(\S+)\s*$", re.MULTILINE)  # product capabilities only
 GLOSSARY_TERM_RE = re.compile(r"^-\s+\*\*([^*]+)\*\*", re.MULTILINE)
 # Captures a glossary bullet's full text (term + definition, up to the next
 # top-level bullet or end of section) so R-LINT-011/015 can compare content,
@@ -128,6 +140,8 @@ GLOSSARY_TERM_RE = re.compile(r"^-\s+\*\*([^*]+)\*\*", re.MULTILINE)
 GLOSSARY_ENTRY_RE = re.compile(r"^-\s+\*\*([^*]+)\*\*(.*?)(?=^-\s+\*\*|\Z)",
                                 re.MULTILINE | re.DOTALL)
 WORD_RE = re.compile(r"[a-z0-9']+")
+REQ_ID_HEADER_RE = re.compile(r"^#\s+(R-[A-Z0-9]+-\d+)\s*$", re.MULTILINE)
+AC_ID_HEADER_RE = re.compile(r"^#\s+(AC-[A-Z0-9]+-\d+[a-z]?)\s*$", re.MULTILINE)
 
 
 @dataclass
@@ -137,14 +151,32 @@ class Doc:
     doc_id: str | None
     frontmatter: dict
     body: str
-    doc_type: str  # "component-spec" | "component-interface" | ... | "product" | "var" | "architecture" | "decision"
+    doc_type: str
+    # "component-root" | "component-requirement" | "component-interface-cli" |
+    # "component-interface-library" | "component-interface-data" |
+    # "component-acceptance" | "component-constraints" | "product" | "var" |
+    # "architecture" | "decision"
     component: str | None = None  # component directory name, if applicable
+    has_frontmatter: bool = False  # True if a --- block was found, regardless of content
+
+
+@dataclass
+class Component:
+    name: str
+    root: Doc | None
+    requirements: dict[str, Doc]
+    interface_cli: Doc | None
+    interface_library: Doc | None
+    interface_data: dict[str, Doc]
+    acceptance: dict[str, Doc]
+    constraints: Doc | None
 
 
 @dataclass
 class Corpus:
     repo_root: Path
     docs: list[Doc]
+    components: dict[str, Component]
     id_index: dict[str, Doc]
     glossary_defs: dict[str, str]  # lowercased term -> its definition text
     glossary_files: list[Path]
@@ -154,19 +186,18 @@ class Corpus:
         return set(self.glossary_defs)
 
 
-def _parse_frontmatter(text: str) -> tuple[dict, str, int]:
+def _parse_frontmatter(text: str) -> tuple[dict, str, bool]:
     """Minimal frontmatter parser: flat `key: value` / `key: [a, b]` pairs.
 
     No PyYAML dependency — every frontmatter block observed in this corpus is
     a flat scalar/inline-list block, so a small hand-rolled parser keeps the
-    bootstrap runnable with zero external packages. A real generator-produced
-    implementation would likely just use PyYAML; noted as a simplification.
+    bootstrap runnable with zero external packages.
 
-    Returns (frontmatter_dict, body_text, body_start_line).
+    Returns (frontmatter_dict, body_text, had_frontmatter_block).
     """
     lines = text.splitlines()
     if not lines or lines[0].strip() != "---":
-        return {}, text, 1
+        return {}, text, False
     fm: dict = {}
     i = 1
     while i < len(lines) and lines[i].strip() != "---":
@@ -183,9 +214,8 @@ def _parse_frontmatter(text: str) -> tuple[dict, str, int]:
             else:
                 fm[key] = value.strip('"').strip("'")
         i += 1
-    body_start = i + 2  # 1-indexed line after closing '---'
     body = "\n".join(lines[i + 1:]) if i < len(lines) else ""
-    return fm, body, body_start
+    return fm, body, True
 
 
 def _classify(rel_path: str) -> tuple[str | None, str | None]:
@@ -195,16 +225,22 @@ def _classify(rel_path: str) -> tuple[str | None, str | None]:
         return "glossary", None
     if len(parts) >= 3 and parts[0] == "specs" and parts[1] == "components":
         component = parts[2]
-        fname = parts[-1]
-        if fname == "spec.md":
-            return "component-spec", component
-        if fname == "interface.md":
-            return "component-interface", component
-        if fname == "acceptance.md":
+        rest = parts[3:]
+        if rest == ["component.md"]:
+            return "component-root", component
+        if len(rest) == 2 and rest[0] == "requirements" and REQUIREMENT_FILE_RE.match(rest[1]):
+            return "component-requirement", component
+        if len(rest) == 2 and rest[0] == "interface" and rest[1] == "cli.md":
+            return "component-interface-cli", component
+        if len(rest) == 2 and rest[0] == "interface" and rest[1] == "library.md":
+            return "component-interface-library", component
+        if len(rest) == 3 and rest[0] == "interface" and rest[1] == "data":
+            return "component-interface-data", component
+        if len(rest) == 2 and rest[0] == "acceptance" and ACCEPTANCE_FILE_RE.match(rest[1]):
             return "component-acceptance", component
-        if fname == "constraints.md":
+        if rest == ["constraints.md"]:
             return "component-constraints", component
-        return None, None  # README.md etc. — not a governed spec
+        return None, None  # README.md, a stray file, etc. — not governed
     if len(parts) == 3 and parts[0] == "specs" and parts[1] == "product":
         return (None, None) if parts[2] == "README.md" else ("product", None)
     if len(parts) == 3 and parts[0] == "specs" and parts[1] == "architecture":
@@ -222,6 +258,15 @@ def load_corpus(repo_root: Path) -> Corpus:
     id_index: dict[str, Doc] = {}
     glossary_defs: dict[str, str] = {}
     glossary_files: list[Path] = []
+    components: dict[str, Component] = {}
+
+    def get_component(name: str) -> Component:
+        return components.setdefault(
+            name,
+            Component(name=name, root=None, requirements={}, interface_cli=None,
+                      interface_library=None, interface_data={}, acceptance={},
+                      constraints=None),
+        )
 
     for path in sorted(specs_dir.rglob("*.md")):
         rel = str(path.relative_to(repo_root))
@@ -234,15 +279,38 @@ def load_corpus(repo_root: Path) -> Corpus:
             for m in GLOSSARY_ENTRY_RE.finditer(text):
                 glossary_defs[m.group(1).strip().lower()] = m.group(2).strip()
             continue
-        fm, body, _ = _parse_frontmatter(text)
+        fm, body, had_fm = _parse_frontmatter(text)
         doc_id = fm.get("id")
+        if doc_type == "component-requirement":
+            doc_id = path.stem
+        elif doc_type == "component-acceptance":
+            doc_id = path.stem
+
         doc = Doc(
             path=path, rel_path=rel, doc_id=doc_id, frontmatter=fm,
             body=body, doc_type=doc_type, component=component,
+            has_frontmatter=had_fm,
         )
         docs.append(doc)
-        if doc_id:
+        if doc_id and doc_type in ("component-root", "product", "architecture", "var", "decision"):
             id_index[doc_id] = doc
+
+        if component:
+            comp = get_component(component)
+            if doc_type == "component-root":
+                comp.root = doc
+            elif doc_type == "component-requirement":
+                comp.requirements[doc_id] = doc
+            elif doc_type == "component-interface-cli":
+                comp.interface_cli = doc
+            elif doc_type == "component-interface-library":
+                comp.interface_library = doc
+            elif doc_type == "component-interface-data":
+                comp.interface_data[path.stem] = doc
+            elif doc_type == "component-acceptance":
+                comp.acceptance[doc_id] = doc
+            elif doc_type == "component-constraints":
+                comp.constraints = doc
 
     # Also catch any stray "glossary-like" file outside the canonical path —
     # feeds R-LINT-014.
@@ -250,8 +318,9 @@ def load_corpus(repo_root: Path) -> Corpus:
         if path not in glossary_files:
             glossary_files.append(path)
 
-    return Corpus(repo_root=repo_root, docs=docs, id_index=id_index,
-                  glossary_defs=glossary_defs, glossary_files=glossary_files)
+    return Corpus(repo_root=repo_root, docs=docs, components=components,
+                  id_index=id_index, glossary_defs=glossary_defs,
+                  glossary_files=glossary_files)
 
 
 # ---------------------------------------------------------------------------
@@ -265,8 +334,15 @@ def _find_line(body: str, needle: str, fallback: int = 1) -> int:
     return body.count("\n", 0, idx) + 1
 
 
+FRONTMATTER_BEARING_TYPES = ("component-root", "product", "architecture", "var", "decision")
+UNIT_FILE_TYPES = (
+    "component-requirement", "component-interface-cli", "component-interface-library",
+    "component-interface-data", "component-acceptance", "component-constraints",
+)
+
+
 def rule_frontmatter_completeness(corpus: Corpus) -> list[Finding]:
-    """R-LINT-001 — universal frontmatter fields present and typed.
+    """R-LINT-001 — frontmatter completeness, root-level documents only.
 
     Scope decision: SPEC_GUIDELINES.md §2's table conflates "unconditionally
     required" (id/title/status/owners) with "conditionally required"
@@ -274,14 +350,19 @@ def rule_frontmatter_completeness(corpus: Corpus) -> list[Finding]:
     last_ratified_commit-when-ratified). Those conditionals are each covered
     by their own, more specific rule (R-LINT-002/005/006) below, so this rule
     only checks the four unconditional fields plus basic typing of whichever
-    optional fields are present. Flagged as an ambiguous rule boundary in the
-    bootstrap report — SPEC_GUIDELINES.md doesn't actually draw this line
-    itself.
+    optional fields are present.
+
+    Since D15, this only applies to frontmatter-bearing documents
+    (`component-root` + product/architecture/var/decision) — unit files
+    carry no frontmatter at all, and that absence is R-LINT-016's job, not
+    this rule's.
     """
     findings = []
     list_fields = ("depends_on", "realizes", "uses_var", "owners")
     bool_fields = ("sealed",)
     for doc in corpus.docs:
+        if doc.doc_type not in FRONTMATTER_BEARING_TYPES:
+            continue
         for required in ("id", "title", "status", "owners"):
             if required not in doc.frontmatter:
                 findings.append(Finding("R-LINT-001", SEVERITY_FAIL, doc.rel_path, 1,
@@ -300,10 +381,26 @@ def rule_frontmatter_completeness(corpus: Corpus) -> list[Finding]:
     return findings
 
 
-def rule_ratified_closure(corpus: Corpus) -> list[Finding]:
-    """R-LINT-002."""
+def rule_no_stray_frontmatter(corpus: Corpus) -> list[Finding]:
+    """R-LINT-016 — a unit file (requirements/*, interface/*, acceptance/*,
+    constraints.md) MUST NOT carry a frontmatter block at all (D15,
+    `SPEC_GUIDELINES.md` §2's last bullet)."""
     findings = []
     for doc in corpus.docs:
+        if doc.doc_type in UNIT_FILE_TYPES and doc.has_frontmatter:
+            findings.append(Finding("R-LINT-016", SEVERITY_FAIL, doc.rel_path, 1,
+                                     "unit file carries a frontmatter block — unit files "
+                                     "carry none at all; frontmatter lives only on component.md"))
+    return findings
+
+
+def rule_ratified_closure(corpus: Corpus) -> list[Finding]:
+    """R-LINT-002. Open questions/status live on the frontmatter-bearing
+    document (component.md for a component)."""
+    findings = []
+    for doc in corpus.docs:
+        if doc.doc_type not in FRONTMATTER_BEARING_TYPES:
+            continue
         if doc.frontmatter.get("status") != "ratified":
             continue
         oq_match = re.search(r"##\s*Open questions\s*\n(.*?)(\n##|\Z)", doc.body, re.DOTALL)
@@ -323,6 +420,8 @@ def rule_reference_resolution(corpus: Corpus) -> list[Finding]:
     """R-LINT-003."""
     findings = []
     for doc in corpus.docs:
+        if doc.doc_type not in FRONTMATTER_BEARING_TYPES:
+            continue
         for field_name in ("depends_on", "realizes", "uses_var"):
             for ref in doc.frontmatter.get(field_name, []) or []:
                 target = corpus.id_index.get(ref)
@@ -342,7 +441,10 @@ def rule_acyclic_graph(corpus: Corpus) -> list[Finding]:
     the standard white/gray/black DFS marking.
     """
     WHITE, GRAY, BLACK = 0, 1, 2
-    color: dict[str, int] = {doc.doc_id: WHITE for doc in corpus.docs if doc.doc_id}
+    color: dict[str, int] = {
+        doc.doc_id: WHITE for doc in corpus.docs
+        if doc.doc_id and doc.doc_type in FRONTMATTER_BEARING_TYPES
+    }
     findings: list[Finding] = []
     reported_cycles: set[frozenset] = set()
 
@@ -377,20 +479,10 @@ def rule_acyclic_graph(corpus: Corpus) -> list[Finding]:
 
 
 def rule_sealed_consistency(corpus: Corpus) -> list[Finding]:
-    """R-LINT-005 — only applies to a component's spec.md.
-
-    Ambiguity resolved: SPEC_GUIDELINES.md describes `sealed`/`source_path`
-    as component-level fields without saying which of the four files in a
-    component directory carries them. The actual example (spec-linter)
-    carries all component-identifying fields (depends_on, realizes, sealed,
-    source_path, uses_var, model_pin, toggles) on spec.md only —
-    interface/acceptance/constraints.md carry only the four universal
-    fields. Implemented against that convention; flagged in the bootstrap
-    report.
-    """
+    """R-LINT-005 — only applies to a component's root (`component.md`)."""
     findings = []
     for doc in corpus.docs:
-        if doc.doc_type != "component-spec":
+        if doc.doc_type != "component-root":
             continue
         sealed = doc.frontmatter.get("sealed", False)
         has_source_path = bool(doc.frontmatter.get("source_path"))
@@ -407,7 +499,7 @@ def rule_realizes_coverage(corpus: Corpus) -> list[Finding]:
     """R-LINT-006."""
     findings = []
     for doc in corpus.docs:
-        if doc.doc_type != "component-spec":
+        if doc.doc_type != "component-root":
             continue
         if doc.frontmatter.get("sealed", False):
             continue
@@ -417,56 +509,24 @@ def rule_realizes_coverage(corpus: Corpus) -> list[Finding]:
     return findings
 
 
-def _requirement_blocks(section: str) -> list[tuple[str, str]]:
-    """Split a Behavior section into (R-id, full block text) pairs.
-
-    A requirement's text wraps across multiple physical lines up to the next
-    top-level bullet (`- **R-...**`) or the end of the section — an earlier
-    version of this rule only checked the single line carrying the `**R-id**`
-    marker itself, which produced false positives on every multi-line
-    requirement (the common case, not the exception). Fixed after it
-    mis-flagged several requirements in sibling components' specs that were
-    in fact correctly written; documented in the bootstrap report as a bug
-    caught by testing against real spec content, not just hand-built
-    fixtures.
-    """
-    markers = list(re.finditer(r"^-\s+\*\*(R-[A-Z0-9]+-\d+)\*\*", section, re.MULTILINE))
-    blocks = []
-    for i, m in enumerate(markers):
-        start = m.start()
-        end = markers[i + 1].start() if i + 1 < len(markers) else len(section)
-        blocks.append((m.group(1), section[start:end]))
-    return blocks
-
-
 def rule_requirement_identity(corpus: Corpus) -> list[Finding]:
-    """R-LINT-007."""
+    """R-LINT-007 — since D15, one requirement per file under requirements/.
+    Duplicate-id detection now reduces to "does the file's own '# R-ID'
+    header match its filename" (a mismatch would mean someone copy-pasted a
+    file without updating its heading) — directory listing itself already
+    guarantees no two files share a name."""
     findings = []
-    for doc in corpus.docs:
-        if doc.doc_type != "component-spec":
-            continue
-        behavior_match = re.search(r"##\s*Behavior\s*\n(.*?)(\n##|\Z)", doc.body, re.DOTALL)
-        if not behavior_match:
-            continue
-        section = behavior_match.group(1)
-        seen_ids: set[str] = set()
-        for rid, block_text in _requirement_blocks(section):
-            if rid in seen_ids:
-                findings.append(Finding("R-LINT-007", SEVERITY_FAIL, doc.rel_path,
-                                         _find_line(doc.body, rid), f"duplicate requirement id {rid}"))
-            seen_ids.add(rid)
-            if not any(kw in block_text for kw in RFC2119_KEYWORDS):
-                findings.append(Finding("R-LINT-007", SEVERITY_FAIL, doc.rel_path,
-                                         _find_line(doc.body, rid),
+    for comp in corpus.components.values():
+        for rid, doc in comp.requirements.items():
+            header_m = REQ_ID_HEADER_RE.search(doc.body)
+            if header_m and header_m.group(1) != rid:
+                findings.append(Finding("R-LINT-007", SEVERITY_FAIL, doc.rel_path, 1,
+                                         f"file is named {rid}.md but its own heading says "
+                                         f"{header_m.group(1)}"))
+            if not any(kw in doc.body for kw in RFC2119_KEYWORDS):
+                findings.append(Finding("R-LINT-007", SEVERITY_FAIL, doc.rel_path, 1,
                                          f"{rid} uses no RFC 2119 keyword ({'/'.join(RFC2119_KEYWORDS)})"))
     return findings
-
-
-def _collect_requirement_ids(doc: Doc) -> set[str]:
-    behavior_match = re.search(r"##\s*Behavior\s*\n(.*?)(\n##|\Z)", doc.body, re.DOTALL)
-    if not behavior_match:
-        return set()
-    return {m.group(1) for m in REQUIREMENT_RE.finditer(behavior_match.group(1))}
 
 
 def _collect_covers(doc: Doc) -> list[tuple[str, int]]:
@@ -477,24 +537,17 @@ def _collect_covers(doc: Doc) -> list[tuple[str, int]]:
 
 
 def rule_forward_traceability(corpus: Corpus) -> list[Finding]:
-    """R-LINT-008."""
+    """R-LINT-008 — since D15, requirements and their covering criteria are
+    each a directory listing, not a regex-parsed shared-file section."""
     findings = []
-    by_component: dict[str, list[Doc]] = {}
-    for doc in corpus.docs:
-        if doc.component:
-            by_component.setdefault(doc.component, []).append(doc)
-
-    for component, docs in by_component.items():
-        spec_doc = next((d for d in docs if d.doc_type == "component-spec"), None)
-        acc_doc = next((d for d in docs if d.doc_type == "component-acceptance"), None)
-        if not spec_doc:
+    for comp in corpus.components.values():
+        if not comp.root:
             continue
-        required_ids = _collect_requirement_ids(spec_doc)
-        covered = {ref for d in docs for ref, _ in _collect_covers(d)} if acc_doc else set()
-        for rid in sorted(required_ids - covered):
-            findings.append(Finding("R-LINT-008", SEVERITY_FAIL, spec_doc.rel_path,
-                                     _find_line(spec_doc.body, rid),
-                                     f"{rid} has zero covering acceptance criteria"))
+        covered = {ref for doc in comp.acceptance.values() for ref, _ in _collect_covers(doc)}
+        for rid, doc in comp.requirements.items():
+            if rid not in covered:
+                findings.append(Finding("R-LINT-008", SEVERITY_FAIL, doc.rel_path, 1,
+                                         f"{rid} has zero covering acceptance criteria"))
     return findings
 
 
@@ -502,10 +555,9 @@ def rule_backward_traceability(corpus: Corpus) -> list[Finding]:
     """R-LINT-009 — Covers: must resolve to a real R-id (component-local) or
     P-id (corpus-wide product capability)."""
     findings = []
-    all_r_ids: set[str] = set()
-    for doc in corpus.docs:
-        if doc.doc_type == "component-spec":
-            all_r_ids |= _collect_requirement_ids(doc)
+    all_r_ids: set[str] = {
+        rid for comp in corpus.components.values() for rid in comp.requirements
+    }
     all_p_ids = {d.doc_id for d in corpus.docs if d.doc_type == "product" and d.doc_id}
 
     for doc in corpus.docs:
@@ -524,35 +576,46 @@ def rule_backward_traceability(corpus: Corpus) -> list[Finding]:
     return findings
 
 
+def _check_criterion_block(doc: Doc, name: str, block: str, line: int) -> list[Finding]:
+    findings = []
+    if not KIND_RE.search(block):
+        findings.append(Finding("R-LINT-010", SEVERITY_FAIL, doc.rel_path, line,
+                                 f"{name} is missing a Kind: tag"))
+    if not COVERS_RE.search(block):
+        findings.append(Finding("R-LINT-010", SEVERITY_FAIL, doc.rel_path, line,
+                                 f"{name} is missing a Covers: tag"))
+    gherkin = GHERKIN_BLOCK_RE.search(block)
+    if not gherkin:
+        findings.append(Finding("R-LINT-010", SEVERITY_FAIL, doc.rel_path, line,
+                                 f"{name} has no gherkin block"))
+    else:
+        g = gherkin.group(1)
+        for step in ("Given", "When", "Then"):
+            if step not in g:
+                findings.append(Finding("R-LINT-010", SEVERITY_FAIL, doc.rel_path, line,
+                                         f"{name}'s gherkin block is missing a {step} step"))
+    return findings
+
+
 def rule_criterion_wellformed(corpus: Corpus) -> list[Finding]:
-    """R-LINT-010."""
+    """R-LINT-010. Branches on doc_type: a `component-acceptance` file (D15)
+    *is* one criterion already, so the whole body is the block. A `product`
+    capability doc is unaffected by D15 — it still holds multiple inline
+    `### GS-...` golden scenarios in one file, so that case keeps the
+    original header-splitting logic."""
     findings = []
     for doc in corpus.docs:
-        if doc.doc_type not in ("component-acceptance", "product"):
-            continue
-        headers = list(CRITERION_HEADER_RE.finditer(doc.body))
-        for i, h in enumerate(headers):
-            start = h.end()
-            end = headers[i + 1].start() if i + 1 < len(headers) else len(doc.body)
-            block = doc.body[start:end]
-            name = h.group(1)
-            line = _find_line(doc.body, h.group(0))
-            if not KIND_RE.search(block):
-                findings.append(Finding("R-LINT-010", SEVERITY_FAIL, doc.rel_path, line,
-                                         f"{name} is missing a Kind: tag"))
-            if not COVERS_RE.search(block):
-                findings.append(Finding("R-LINT-010", SEVERITY_FAIL, doc.rel_path, line,
-                                         f"{name} is missing a Covers: tag"))
-            gherkin = GHERKIN_BLOCK_RE.search(block)
-            if not gherkin:
-                findings.append(Finding("R-LINT-010", SEVERITY_FAIL, doc.rel_path, line,
-                                         f"{name} has no gherkin block"))
-            else:
-                g = gherkin.group(1)
-                for step in ("Given", "When", "Then"):
-                    if step not in g:
-                        findings.append(Finding("R-LINT-010", SEVERITY_FAIL, doc.rel_path, line,
-                                                 f"{name}'s gherkin block is missing a {step} step"))
+        if doc.doc_type == "component-acceptance":
+            findings.extend(_check_criterion_block(doc, doc.doc_id, doc.body, 1))
+        elif doc.doc_type == "product":
+            headers = list(CRITERION_HEADER_RE.finditer(doc.body))
+            for i, h in enumerate(headers):
+                start = h.end()
+                end = headers[i + 1].start() if i + 1 < len(headers) else len(doc.body)
+                block = doc.body[start:end]
+                name = h.group(1)
+                line = _find_line(doc.body, h.group(0))
+                findings.extend(_check_criterion_block(doc, name, block, line))
     return findings
 
 
@@ -575,7 +638,8 @@ NEAR_VERBATIM_THRESHOLD = 0.8
 
 def _definitions_glossary_entries(doc: Doc, glossary_defs: dict[str, str]) -> list[tuple[str, str, str]]:
     """Yield (term, local_text, matched_heading_text) for every entry in a
-    spec's Definitions section whose term also exists in the glossary."""
+    component root's Definitions section whose term also exists in the
+    glossary."""
     def_match = re.search(r"##\s*Definitions\s*\n(.*?)(\n##|\Z)", doc.body, re.DOTALL)
     if not def_match:
         return []
@@ -601,7 +665,7 @@ def rule_glossary_conformance(corpus: Corpus) -> list[Finding]:
     """
     findings = []
     for doc in corpus.docs:
-        if doc.doc_type != "component-spec":
+        if doc.doc_type != "component-root":
             continue
         for term, local_text, heading in _definitions_glossary_entries(doc, corpus.glossary_defs):
             overlap = _token_overlap(local_text, corpus.glossary_defs[term])
@@ -613,7 +677,6 @@ def rule_glossary_conformance(corpus: Corpus) -> list[Finding]:
                     f"of the glossary definition (token overlap {overlap:.2f}) — "
                     f"only deltas are permitted here"))
     return findings
-
 
 
 def rule_llm_judge_glossary_conflict(corpus: Corpus, judge=None) -> list[Finding]:
@@ -631,7 +694,7 @@ def rule_llm_judge_glossary_conflict(corpus: Corpus, judge=None) -> list[Finding
     """
     findings = []
     for doc in corpus.docs:
-        if doc.doc_type != "component-spec":
+        if doc.doc_type != "component-root":
             continue
         for term, local_text, heading in _definitions_glossary_entries(doc, corpus.glossary_defs):
             overlap = _token_overlap(local_text, corpus.glossary_defs[term])
@@ -659,20 +722,16 @@ def rule_llm_judge_glossary_conflict(corpus: Corpus, judge=None) -> list[Finding
     return findings
 
 
-def _extract_fenced_block(body: str, heading: str) -> str | None:
-    """Return the content of the first fenced code block found under a
-    `## <heading>` section (before the next `##` heading), or None."""
+def _extract_first_fenced_block(body: str) -> str | None:
+    """Return the content of the first fenced code block in `body`, or None.
+    Since D15, a unit file like `interface/cli.md` *is* its own section — no
+    `## CLI` heading to search under first, unlike the old shared-file
+    parsing."""
     lines = body.splitlines()
-    in_section = False
     in_fence = False
     fence_lines: list[str] = []
     for line in lines:
-        if re.match(rf"^##\s+{re.escape(heading)}\b", line):
-            in_section = True
-            continue
-        if in_section and re.match(r"^##\s+\S", line) and not in_fence:
-            break
-        if in_section and line.strip().startswith("```"):
+        if line.strip().startswith("```"):
             if not in_fence:
                 in_fence = True
                 continue
@@ -705,31 +764,27 @@ def _logical_lines(block: str) -> list[str]:
 LIBRARY_SIGNATURE_RE = re.compile(r"^\w+\(.*\)\s*(->|:)")
 
 
-def _count_interface_surface(iface: Doc) -> int:
-    """R-LINT-012's 'interface surface elements' dimension, concretely
-    defined (previously: no canonical algorithm existed at all, and the
-    bootstrap's first pass used a markdown-bullet heuristic that happened to
-    count CLI flag descriptions instead of actual surface elements).
+def _count_interface_surface(comp: Component) -> int:
+    """R-LINT-012's 'interface surface elements' dimension.
 
-    Count = one per distinct invocation line in the `## CLI` fenced block,
-    plus one per distinct function-signature line in the `## Library`
-    fenced block, plus one per `## Data: ...` heading (each already names
-    exactly one type, by the convention every component bundle in this
-    corpus already follows). Deliberately mechanical — no judgment, no
-    model call, consistent with every other size-cap dimension.
+    Since D15: one per distinct invocation line in `interface/cli.md`'s
+    fenced block, plus one per distinct function-signature line in
+    `interface/library.md`'s fenced block, plus one per file under
+    `interface/data/` (each file already names exactly one type, by
+    construction — no heading-counting needed, replacing the earlier "one
+    per `## Data: ...` heading" approach now that headings aren't the unit
+    boundary).
     """
-    body = iface.body
     total = 0
-
-    cli_block = _extract_fenced_block(body, "CLI")
-    if cli_block:
-        total += len(_logical_lines(cli_block))
-
-    lib_block = _extract_fenced_block(body, "Library")
-    if lib_block:
-        total += len([l for l in _logical_lines(lib_block) if LIBRARY_SIGNATURE_RE.match(l)])
-
-    total += len(re.findall(r"^##\s+Data:", body, re.MULTILINE))
+    if comp.interface_cli:
+        cli_block = _extract_first_fenced_block(comp.interface_cli.body)
+        if cli_block:
+            total += len(_logical_lines(cli_block))
+    if comp.interface_library:
+        lib_block = _extract_first_fenced_block(comp.interface_library.body)
+        if lib_block:
+            total += len([l for l in _logical_lines(lib_block) if LIBRARY_SIGNATURE_RE.match(l)])
+    total += len(comp.interface_data)
     return total
 
 
@@ -737,18 +792,11 @@ def rule_size_caps(corpus: Corpus) -> list[Finding]:
     """R-LINT-012.
 
     Open question resolved: spec-bundle word count is computed from the
-    source markdown of spec.md+interface.md+acceptance.md+constraints.md as
-    authored (pre-compilation) — a Gherkin block's compiled test scaffolding
-    isn't spec-bundle text and doesn't exist until generation runs, so there
-    is nothing to count post-compilation at lint time anyway; this made the
-    "pre or post" framing of the open question moot once actually
-    implemented, which is itself worth reporting back.
-
-    Second gap resolved here (found after the initial bootstrap, once
-    sibling components' real interface.md files existed to test against):
-    `interface_surface` now uses `_count_interface_surface`, a concrete,
-    deterministic algorithm, replacing a markdown-bullet heuristic that
-    actually counted CLI flag descriptions rather than surface elements.
+    source markdown of component.md + requirements/ + interface/
+    (+ interface/data/) + acceptance/ + constraints.md as authored
+    (pre-compilation) — a Gherkin block's compiled test scaffolding isn't
+    spec-bundle text and doesn't exist until generation runs, so there is
+    nothing to count post-compilation at lint time anyway.
     """
     findings = []
     CAPS = {
@@ -760,37 +808,37 @@ def rule_size_caps(corpus: Corpus) -> list[Finding]:
         "fan_in": (10, None),
     }
 
-    by_component: dict[str, list[Doc]] = {}
-    for doc in corpus.docs:
-        if doc.component:
-            by_component.setdefault(doc.component, []).append(doc)
-
-    fan_in: dict[str, int] = {c: 0 for c in by_component}
-    for docs in by_component.values():
-        spec = next((d for d in docs if d.doc_type == "component-spec"), None)
-        if not spec:
+    fan_in: dict[str, int] = {c: 0 for c in corpus.components}
+    for comp in corpus.components.values():
+        if not comp.root:
             continue
-        for dep in spec.frontmatter.get("depends_on") or []:
+        for dep in comp.root.frontmatter.get("depends_on") or []:
             dep_doc = corpus.id_index.get(dep)
             if dep_doc and dep_doc.component in fan_in:
                 fan_in[dep_doc.component] += 1
 
-    for component, docs in by_component.items():
-        spec = next((d for d in docs if d.doc_type == "component-spec"), None)
-        iface = next((d for d in docs if d.doc_type == "component-interface"), None)
-        if not spec:
+    for name, comp in corpus.components.items():
+        if not comp.root:
             continue
-        rel = spec.rel_path
-        word_count = sum(len(d.body.split()) for d in docs)
-        req_count = len(_collect_requirement_ids(spec))
-        gen_dir = corpus.repo_root / "gen" / component
+        rel = comp.root.rel_path
+        all_docs = (
+            [comp.root] + list(comp.requirements.values())
+            + ([comp.interface_cli] if comp.interface_cli else [])
+            + ([comp.interface_library] if comp.interface_library else [])
+            + list(comp.interface_data.values())
+            + list(comp.acceptance.values())
+            + ([comp.constraints] if comp.constraints else [])
+        )
+        word_count = sum(len(d.body.split()) for d in all_docs)
+        req_count = len(comp.requirements)
+        gen_dir = corpus.repo_root / "gen" / name
         loc = 0
         if gen_dir.is_dir():
             for f in gen_dir.rglob("*.py"):
                 loc += sum(1 for l in f.read_text(encoding="utf-8").splitlines()
                            if l.strip() and not l.strip().startswith("#"))
-        iface_surface = _count_interface_surface(iface) if iface else 0
-        fan_out = len(spec.frontmatter.get("depends_on") or [])
+        iface_surface = _count_interface_surface(comp)
+        fan_out = len(comp.root.frontmatter.get("depends_on") or [])
 
         measurements = {
             "generated_code_loc": loc,
@@ -798,7 +846,7 @@ def rule_size_caps(corpus: Corpus) -> list[Finding]:
             "requirement_count": req_count,
             "interface_surface": iface_surface,
             "fan_out": fan_out,
-            "fan_in": fan_in.get(component, 0),
+            "fan_in": fan_in.get(name, 0),
         }
         for dim, value in measurements.items():
             warn_at, fail_at = CAPS[dim]
@@ -818,11 +866,8 @@ def rule_secret_field_safety(corpus: Corpus) -> list[Finding]:
     (required/type/sensitivity/description/example/default) without saying
     whether they're frontmatter or body content. The actual example files
     use body bullets (`- **sensitivity:** secret`), not frontmatter, so this
-    rule parses body bullets. Flagged in the bootstrap report: this is
-    genuinely ambiguous and arguably should be frontmatter instead, for
-    consistency with every other doc type and so this rule could reuse the
-    same frontmatter-parsing path as R-LINT-001 rather than needing bespoke
-    body parsing.
+    rule parses body bullets. Unaffected by D15 — `specs/vars/` declarations
+    were already one flat file per variable before D15 and stay that way.
     """
     findings = []
     for doc in corpus.docs:
@@ -841,7 +886,7 @@ def rule_secret_field_safety(corpus: Corpus) -> list[Finding]:
 
 
 def rule_glossary_singularity(corpus: Corpus) -> list[Finding]:
-    """R-LINT-014."""
+    """R-LINT-014. Unaffected by D15."""
     findings = []
     canonical = corpus.repo_root / "specs" / "glossary.md"
     extra = [p for p in corpus.glossary_files if p != canonical]
@@ -862,6 +907,7 @@ def rule_glossary_singularity(corpus: Corpus) -> list[Finding]:
 
 ALL_RULES = [
     rule_frontmatter_completeness,
+    rule_no_stray_frontmatter,
     rule_ratified_closure,
     rule_reference_resolution,
     rule_acyclic_graph,
@@ -883,7 +929,7 @@ ALL_RULES = [
 # ---------------------------------------------------------------------------
 
 def lint(paths: list[Path] | None, repo_root: Path, strict: bool = False, judge=None) -> LintReport:
-    """Pure function over the filesystem state at repo_root, for 14 of 15
+    """Pure function over the filesystem state at repo_root, for 15 of 16
     rules — no network access, no model calls, no side effects (per
     constraints.md). The exception is R-LINT-015, which takes an optional
     `judge` callable; omit it (the default) to run in single-model-absent

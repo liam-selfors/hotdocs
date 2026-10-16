@@ -9,13 +9,14 @@ See `SPEC_GUIDELINES.md` §6 (verification gates) and §8 (provenance).
 
 ## `spec-linter/`
 
-14 tests, one per `AC-LINT-*` criterion, plus one sanity smoke test. **Hand-
-authored bootstrap** — `criterion-compiler` doesn't exist yet to have
-compiled these from `acceptance.md`'s Gherkin blocks the normal way. Run
-with `pytest` (not vendored into the repo — install into your own
-environment). See `BOOTSTRAP.md` in this directory for the full account,
-including a real bug the bootstrap caught that hand-built fixtures alone had
-missed.
+25 tests, covering all 16 `AC-LINT-*` criteria plus a sanity smoke test and
+an interface-surface-counting regression suite. **Hand-authored bootstrap**
+— `criterion-compiler` doesn't exist yet to have compiled these from
+`acceptance/`'s Gherkin blocks the normal way. Run with `pytest` (not
+vendored into the repo — install into your own environment). See
+`BOOTSTRAP.md` in this directory for the full account, including a real bug
+the bootstrap caught that hand-built fixtures alone had missed, and a note
+on the D15 one-file-per-unit layout this suite was later rewritten for.
 
 Everything else fills in as the corresponding components get specced and
 (eventually) really generated.
