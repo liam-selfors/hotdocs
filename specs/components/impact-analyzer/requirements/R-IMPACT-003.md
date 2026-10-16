@@ -1,7 +1,13 @@
 # R-IMPACT-003
 
-**R-IMPACT-003** — For a changed component whose `interface/` content
-  *did* change relative to the prior commit (per R-IMPACT-002's file-level
-  comparison), the analyzer MUST include every component with a
-  `depends_on` edge to it, tagged with reason `transitive-interface`,
-  naming the upstream component whose interface changed.
+**R-IMPACT-003** — For a changed component whose `interface/cli.md`,
+  `interface/library.md`, or any file under `interface/data/` changed
+  relative to the prior commit (each compared independently; a file added
+  or removed counts as changed) — **excluding `interface/guarantees/`,
+  which R-IMPACT-008 handles separately and may narrow** — the analyzer
+  MUST include every component with a `depends_on` edge to it, tagged with
+  reason `transitive-interface`, naming the upstream component whose
+  interface changed. These three file kinds always propagate in full,
+  unconditionally — unlike `interface/guarantees/`, there is no coherent
+  notion of "a dependent that only cares about some of a component's types
+  or CLI surface" the way there is for behavioral guarantees (D16).

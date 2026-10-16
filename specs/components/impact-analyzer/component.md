@@ -26,7 +26,10 @@ components are directly changed and which are transitively impacted because
 something they depend on changed in a way that affects their contract.
 Distinguishing a dependency's *contract* changing from its *internals*
 changing, so an unrelated component's change doesn't force regeneration of
-everything downstream of it.
+everything downstream of it. Since D16: distinguishing, within the
+contract itself, type-level content (`cli.md`/`library.md`/`data/*.md` —
+always coarse, always propagates) from behavioral guarantees
+(`guarantees/*.md` — narrowable, opt-in, per `depends_on_guarantees`).
 
 **Out of scope:** generation itself; deciding *how* to regenerate a component,
 only *whether* it's in scope this merge; re-running `spec-linter`'s own
@@ -63,25 +66,35 @@ See `constraints.md`.
 
 ## Open questions
 
+None. The two originally recorded here are both resolved:
+
 - ~~R-IMPACT-002/003 define contract-change detection as "is `interface.md`
-  byte-identical" — blunt, since a purely cosmetic edit anywhere in the
-  file would trigger full transitive regeneration~~ — resolved by D15, not
-  by inventing semantic diffing: once a component's interface is
-  `interface/cli.md` + `interface/library.md` + `interface/data/*.md`
-  (one file per unit, each independently hashed), a prose-only edit
-  confined to `component.md`/`requirements/`/`acceptance/`/
-  `constraints.md` no longer touches `interface/` at all, so it no longer
-  forces propagation — without needing to parse "did the declared contract
-  actually change" out of a shared file's structure. True semantic
-  diffing (would a cosmetic edit *within* one `interface/` file, e.g. a
-  typo fix in `library.md`'s explanatory prose, still force propagation?)
-  remains a real, open refinement beyond what D15 solved for free — still
-  safe-but-wasteful in the false-positive direction, never incorrect.
-- Should `R-IMPACT-004`/`005`'s transitive inclusion itself cascade further
-  (e.g., does a component pulled in via `transitive-var` propagate to *its*
-  dependents if its own `interface/` is thereby considered changed)? As
-  written, no — `uses_var`/`realizes` inclusion is one hop, not transitively
-  re-applied. Not yet stress-tested against a real multi-hop corpus.
+  byte-identical" — blunt~~ — resolved by D15 (one-file-per-unit hashing,
+  no semantic diffing needed) and sharpened further by D16: true semantic
+  diffing *within* one `interface/` file (e.g. a typo fix in `library.md`'s
+  prose still forcing propagation) remains unsolved for `cli.md`/
+  `library.md`/`data/*.md` — accepted as safe-but-wasteful, same as
+  before — but for behavioral guarantees specifically, D16's
+  `interface/guarantees/` + `depends_on_guarantees` narrowing solves the
+  *coarser* version of this same problem: a dependent that only cares
+  about one guarantee no longer pays for changes to unrelated ones.
+- ~~Should `R-IMPACT-004`/`005`'s transitive inclusion cascade further?~~ —
+  resolved: stays one-hop, by design, **not** because the residual risk
+  was dismissed, but because it's covered by a different, better-suited
+  mechanism. One-hop risks a second-order change (e.g., component A's
+  *behavior* shifting as a side effect of a var/capability-driven
+  regeneration) going uncaught this merge if A's dependents aren't pulled
+  in too. D16 closes this two ways: (1) `interface/guarantees/` makes any
+  *foreseen* behavioral dependency explicit and propagating, the same
+  one-hop mechanism everything else uses — no cascading needed once the
+  guarantee itself is visible; (2) `merge-orchestrator`'s golden-scenario
+  gate (R-MERGE-014) is the permanent backstop for whatever wasn't
+  foreseen, tested against the real regenerated system rather than
+  guessed at here. Eager multi-hop cascading from every `transitive-var`/
+  `transitive-capability` edge was rejected as the alternative — it would
+  trade this bounded, already-covered risk for routinely ballooning the
+  blast radius on pure speculation, undermining D13's whole cost-
+  containment premise.
 
 ## Change log
 
