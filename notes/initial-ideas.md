@@ -959,6 +959,91 @@ authoritative rules this produced.
 
 ---
 
+### D17 — Diagnostic-guided retry: feed best-of-k failed-requirement ids back, via graph topology, not test content
+
+Arose from the working-queue's item 6 (best-of-k's exact value), which
+turned into something more fundamental after a round of challenges to a
+first, weaker proposal.
+
+**The dead ends, in the order they were ruled out.** First framing: drop
+best-of-k, treat a single generation failure as evidence of an underspecified
+requirement rather than retrying. Rejected — a failure is frequently a
+generation miss on an otherwise-adequate spec, and discarding retry entirely
+would push real spec-authoring overhead onto every transient miss. Second
+framing: let a retry see the *prior attempt's code* as hinted context, so it
+edits toward the spec instead of re-rolling blind — proposed as "surely this
+is just an extension of cold regen, not a cold-then-warm sequence." Challenged
+and conceded: the real test for whether something is safe to feed back
+isn't "within one merge vs. across merges," it's whether the fed-back
+information is **derivable from the current spec bundle alone**. Prior code
+fails that test — it's external, potentially-stale state, exactly
+`hint_code`'s risk (D1), not a new category. Third framing, after accepting
+that: feed back which specific acceptance criteria failed, including their
+Gherkin text. Challenged again, more sharply: this doesn't just risk the
+cold/warm line, it reopens `spec-bundle-assembler`'s R-ASSEMBLE-001 exclusion
+of `acceptance/` from what a generation model ever sees — the whole reason
+that exclusion exists (not overfitting generation to specific test
+assertions) applies exactly as much to *retry* feedback as to a first
+attempt's bundle. No clean fix was found at the AC-content level: any amount
+of acceptance-criteria-adjacent detail leaking through reopens the same risk
+in degree, not in kind.
+
+**The resolution, proposed by the user: lean on graph topology.** Every
+acceptance criterion already declares `Covers: R-<id>` — the same
+traceability edge `R-LINT-008`/`009` enforce and `corpus-graph-builder`
+already materializes, nothing new. Project each criterion's own pass/fail
+result onto the `R-id`(s) it covers (AND-aggregated: any failing *or
+skipped* covering criterion makes that requirement `fail` — "not yet
+demonstrated" and "demonstrated wrong" both mean "not verified"), and feed
+back **only that projection** — a bare `{R-id: pass|fail}` map, never
+Gherkin text, `rationale`, or expected/actual values. This cleanly resolves
+all three objections at once: it's derivable entirely from the current spec
+bundle plus the current sequence's own output (passes the cold-mode test);
+it discloses nothing beyond "your attempt didn't satisfy text you already
+had" (a requirement's normative text is already in the model's bundle via
+`requirements/`, regardless of which `kind` of criterion covers it), so it
+can't be used to reverse-engineer a specific test assertion (passes the
+overfitting test); and it's still concrete enough to turn a blind re-roll
+into a targeted edit (stays useful).
+
+**What got built:**
+- `verifier-orchestrator` gains `R-VERIFY-011`: `VerificationReport`'s new
+  `requirement_results` field, computed by the graph projection above.
+  Deliberately a stricter rule than `overall`'s own skip-handling
+  (R-VERIFY-005) — a requirement with even one skipped covering criterion
+  is `fail` here, because "safe to retry against" is a higher bar than
+  "safe to report as the merge verdict."
+- `generator` gains `R-GEN-010`: an optional `retry_feedback` parameter
+  (bare `R-id` list), explicitly not an exception to cold-mode rules
+  (R-GEN-001's clarification), folded into the cache key (R-GEN-005) so a
+  fed-back retry can never collide with a blind retry sharing the same
+  seed. `generator` itself is purely a pass-through — it doesn't decide
+  *whether* to retry, only accepts the hint when told to.
+- `merge-orchestrator`'s existing best-of-k loop (R-MERGE-005) now extracts
+  the immediately preceding attempt's failing `R-id`s and passes them as
+  the next attempt's `retry_feedback`, unchanged and uninterpreted. Feedback
+  is **not accumulated** across more than one prior attempt — only the
+  immediately preceding attempt's failures count, so a requirement fixed two
+  attempts ago doesn't keep steering later attempts away from content
+  already corrected.
+- **`k`'s default is resolved**: 2 (`R-MERGE-016`) — one blind attempt, one
+  informed retry — not the wider 2–4 range D3 originally left open. Informed
+  retries capture most of "try again"'s value in a single pass; a third or
+  fourth attempt buys much less once the retry is no longer blind. A new
+  `best_of_k` frontmatter field (mirroring `model_pin`'s pattern) lets a
+  specific component opt into a higher `k` when its requirements are
+  unusually numerous or interdependent.
+- Provenance (`SPEC_GUIDELINES.md` §8) gains a `retry_feedback` field
+  alongside `sample_index`, for the same audit reason: reconstructing why a
+  winning attempt looks the way it does requires knowing whether it was
+  informed by a prior failure or produced blind.
+
+See `SPEC_GUIDELINES.md` §2 (`best_of_k` row), §8 (provenance schema), and
+`specs/components/{generator,verifier-orchestrator,merge-orchestrator,
+provenance-writer}/` for the current, authoritative rules this produced.
+
+---
+
 ## 12. Open questions
 
 _None outstanding — Q9–Q13 from the review pass are now D10–D14; D15 was a

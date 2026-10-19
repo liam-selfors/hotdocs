@@ -122,6 +122,7 @@ optional).
 | `model_pin` | never (optional); **inapplicable when `sealed: true`** | Per-spec override of the repo-wide canonical model. **MUST** be omitted (not filled with a placeholder) on a sealed component — there is no generation to pin. **(component `component.md` only)** |
 | `cross_model_divergence_check` | never (optional); **inapplicable when `sealed: true`**, same reason | Per-spec override of the repo-wide toggle: `enabled` \| `disabled`. (D3) **(component `component.md` only)** |
 | `fallback_standby_build` | never (optional); **inapplicable when `sealed: true`**, same reason | Per-spec override of the repo-wide toggle: `enabled` \| `disabled`. (D10) **(component `component.md` only)** |
+| `best_of_k` | never (optional); **inapplicable when `sealed: true`**, same reason | Per-spec override of the repo-wide default best-of-k attempt count (default `2`, integer `2`–`4` inclusive). `merge-orchestrator`'s retry loop reads this when deciding how many diagnostic-guided attempts a component gets. (D3, R-MERGE-016) **(component `component.md` only)** |
 | `sealed` | never (optional), default `false` | Legacy-perimeter escape hatch — and, per the `criterion-compiler` precedent, also the correct mechanism for a *permanently* hand-maintained trust anchor, not only temporary legacy debt. See §9. (D1/D8) **(component `component.md` only)** |
 | `source_path` | condition: required when `sealed: true`, forbidden otherwise | Where the actual, hand-maintained code lives. **MUST NOT** point under `gen/`. **(component `component.md` only)** |
 | `last_ratified_commit` | condition: required when `status: ratified` | Commit hash of the ratifying merge. |
@@ -412,6 +413,8 @@ spec_bundle_hash    content hash of every spec file that fed generation
 model_pin           model id + version
 prompt_version      id of the frozen prompt template used
 sample_index        which best-of-k sample won
+retry_feedback       R-id list fed to the winning sample's generation call
+                     (R-GEN-010) — null if it won on the first attempt
 pipeline_version    version of the generation pipeline itself
 gate_versions       per-gate version map (compiler, license_scanner,
                      cross_model_check, mutation_harness, secret_scanner, ...)

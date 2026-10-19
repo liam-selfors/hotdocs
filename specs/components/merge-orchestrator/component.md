@@ -27,7 +27,13 @@ this list.
 owning the best-of-k retry loop (D3) — this is the component that resolves
 the gap `generator`'s spec surfaced: nothing before this assigned who
 retries generation on a verification failure, and the answer is here, not
-inside `generator` itself. Since D16: also owns running golden-scenario
+inside `generator` itself. The retry loop is diagnostic-guided
+(R-MERGE-005): each retry's `retry_feedback` is this component's own
+extraction of the failing `R-id`s from the immediately preceding attempt's
+`requirement_results` (R-VERIFY-011) — `merge-orchestrator` reads that
+field and passes it through, it does not compute pass/fail itself. `k`
+itself defaults to 2 and is overridable per-component (R-MERGE-016).
+Since D16: also owns running golden-scenario
 verification against the real assembled system (R-MERGE-014), reusing the
 exact same `criterion-compiler`/`test_author`/`judge` dispatch already
 wired for `verifier-orchestrator` — not a second dispatch mechanism. Also
@@ -59,7 +65,7 @@ See `interface/data/`.
 
 See `acceptance/`.
 
-All sixteen criteria are `kind: compiled` — tested by mocking every
+All nineteen criteria are `kind: compiled` — tested by mocking every
 dependency and asserting on call order/arguments, the same pattern
 `verifier-orchestrator` and `cross-model-divergence-checker` already
 established for coordination logic. A twelfth component in this corpus
@@ -74,9 +80,11 @@ See `constraints.md`.
 
 ## Open questions
 
-- Exact value of `k` (best-of-k sample count) — D3 names a range (2–4), not
-  a fixed default. Left as a `pipeline/`-level configuration value, not
-  hardcoded in this spec.
+- ~~Exact value of `k` (best-of-k sample count) — D3 names a range (2–4),
+  not a fixed default~~ — resolved: default `k=2`, per-component override
+  via `best_of_k` frontmatter (R-MERGE-016), alongside diagnostic-guided
+  retry feeding each retry the immediately preceding attempt's failing
+  `R-id`s (R-MERGE-005, R-GEN-010, R-VERIFY-011).
 - Whether R-MERGE-007/008's parallelization is literal concurrent
   execution or just "no artificial sequential dependency" at the spec
   level (leaving scheduling to the implementation) — this spec states the

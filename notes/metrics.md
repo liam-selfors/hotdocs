@@ -128,6 +128,11 @@ Consumer tags: `[dev]` developer · `[stk]` stakeholder · `[agt]` system agent 
 - **Cold-regen first-pass success rate** — % of components that regenerate to
   passing verification with no retry. `[gate] [agt] [stk]`
 - **Regen attempts to green** — retries needed per component. `[agt]`
+- **Diagnostic-retry recovery rate** — of components that failed their first
+  attempt, % that pass on the single diagnostic-guided retry (D17) vs. exhaust
+  `best_of_k`. Low recovery despite feedback ⇒ signal to raise that
+  component's `best_of_k` override, not evidence the mechanism is broken.
+  `[gate] [agt]`
 - **Generation determinism / churn** — diff size between two cold regens of the
   same unchanged spec bundle under the same model pin. Should trend to zero.
   `[agt] [dev]`

@@ -59,7 +59,7 @@ See `interface/data/`.
 
 See `acceptance/`.
 
-All eight criteria are `kind: compiled` — this component coordinates
+All nine criteria are `kind: compiled` — this component coordinates
 checking mechanisms (some of which involve judgment or external calls), but
 the coordination itself is deterministic dispatch-and-record logic, testable
 by mocking `criterion-compiler` and the judge callable. A fourth component

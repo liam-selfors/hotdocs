@@ -20,10 +20,10 @@ exactly one candidate per invocation.
 
 ## Scope
 
-**In scope:** constructing the model call from a `SpecBundle` and a model
-identifier; checking/populating the cache before/after calling a model;
-writing the result under `gen/<component>/`; recording what it did for
-provenance.
+**In scope:** constructing the model call from a `SpecBundle`, a model
+identifier, and (optionally) `retry_feedback` (R-GEN-010); checking/
+populating the cache before/after calling a model; writing the result
+under `gen/<component>/`; recording what it did for provenance.
 
 **Out of scope, deliberately, and recorded here because the architecture
 doc's dependency list only shows `spec-bundle-assembler` and
@@ -41,6 +41,13 @@ This single-shot design is also what lets `cross-model-divergence-checker`
 reuse this exact component with a second model (R-GEN-004) instead of
 duplicating generation logic — it only ever needs "one candidate from model
 X," the same thing `merge-orchestrator` asks for.
+
+`retry_feedback` (R-GEN-010) does not change any of this: this component
+still produces exactly one candidate per call and still has no memory of
+its own across calls — `merge-orchestrator` is still the one deciding
+whether, and with what feedback, to call again. The only thing that
+changed is that one of the inputs a caller MAY supply is now a derived
+fact about a *previous* call in the same sequence, not just a fresh seed.
 
 ## Definitions
 
@@ -62,9 +69,9 @@ See `interface/data/`.
 
 See `acceptance/`.
 
-Mixed `kind`, and deliberately so: R-GEN-001–008 describe behavior around an
-external model call, tested with an injected mock model (same
-dependency-injection pattern `spec-linter`'s `judge` parameter already
+Mixed `kind`, and deliberately so: R-GEN-001–008 and R-GEN-010 describe
+behavior around an external model call, tested with an injected mock model
+(same dependency-injection pattern `spec-linter`'s `judge` parameter already
 established) — `generated-test`, not `compiled`, since exercising them means
 setting up and asserting on a mocked call, not purely structural text/graph
 analysis. R-GEN-009 is a pure path-safety check with no model involved at

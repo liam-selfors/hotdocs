@@ -9,6 +9,7 @@ convenience, not as a second definition:
   "model_pin": "claude-sonnet-5",
   "prompt_version": "v1",
   "sample_index": 0,
+  "retry_feedback": null,
   "pipeline_version": "v1",
   "gate_versions": { "compiler": "1.0.0", "license_scanner": "k-gram@1.0.0" },
   "cache_hit": false,

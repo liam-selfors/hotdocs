@@ -46,7 +46,10 @@ Specced in full depth so far:
 - **`generator`** — the first component whose job genuinely requires a
   model call; mostly `kind: generated-test` (tested via an injected mock
   model), one `compiled` path-safety check. Single-shot by design — the
-  best-of-k retry loop lives in `merge-orchestrator`, not here.
+  best-of-k retry loop lives in `merge-orchestrator`, not here. Accepts an
+  optional `retry_feedback` (bare `R-id` list from the immediately
+  preceding attempt), folded into its cache key so a fed-back retry can't
+  collide with a blind one sharing the same seed.
 - **`test-author`** — the second component whose job genuinely requires a
   model call, mirroring `generator`'s split. Authors `generated-test` test
   code, dispatched to by `verifier-orchestrator` via the same
@@ -60,7 +63,11 @@ Specced in full depth so far:
   even though what it dispatches to isn't. A criterion's declared `kind` is
   treated as fixed, normative input here — never re-decided at verification
   time, a boundary made explicit after a design discussion about exactly
-  that temptation.
+  that temptation. Also projects per-criterion results onto `requirement_
+  results` (bare `R-id` pass/fail, via the existing `Covers:` graph edges)
+  — the graph-topology mechanism `merge-orchestrator`'s diagnostic-guided
+  retry loop feeds on, kept content-free enough that it can't reopen
+  `spec-bundle-assembler`'s exclusion of `acceptance/` from generation.
 - **`cross-model-divergence-checker`** — all `kind: compiled`, for the same
   reason as `verifier-orchestrator`: comparing two already-produced,
   concrete candidates needs no judgment, even though producing them did.
@@ -87,12 +94,16 @@ Specced in full depth so far:
 - **`merge-orchestrator`** — all `kind: compiled`, the capstone data point
   for D5's guidance: even the component sequencing every model-calling,
   judgment-involving gate in the whole pipeline is itself fully
-  deterministic. Owns the best-of-k retry loop (D3), the real wiring of
-  `test_author`/`judge` callables into `verifier-orchestrator`'s call, and
-  (since D16) running golden-scenario verification against the real
-  assembled system, reusing that same callable wiring — three
-  responsibilities nothing had explicitly assigned before `generator`'s,
-  `verifier-orchestrator`'s, and the blast-radius/D16 threads each forced
+  deterministic. Owns the best-of-k retry loop (D3) — now diagnostic-
+  guided, extracting failing `R-id`s from the preceding attempt's
+  `requirement_results` and passing them through to `generator` as
+  `retry_feedback`, pure pass-through with no interpretation of its own —
+  the real wiring of `test_author`/`judge` callables into
+  `verifier-orchestrator`'s call, and (since D16) running golden-scenario
+  verification against the real assembled system, reusing that same
+  callable wiring — three responsibilities nothing had explicitly assigned
+  before `generator`'s, `verifier-orchestrator`'s, and the blast-radius/D16
+  threads each forced
   the question. Its real, measured `fan_out` is 14 (13 before
   `criterion-compiler` was added directly), confirmed against the actual
   linter — exactly the warn-only finding (not a hard failure)

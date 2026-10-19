@@ -1,7 +1,8 @@
 # CLI
 
 ```
-hotdocs generate <component-id> --model=<model-id> [--seed=<n>] [--repo-root=<dir>] [--format=json|text]
+hotdocs generate <component-id> --model=<model-id> [--seed=<n>] \
+  [--retry-feedback=<R-id>,...] [--repo-root=<dir>] [--format=json|text]
 ```
 
 - `<component-id>` — target component.
@@ -9,6 +10,9 @@ hotdocs generate <component-id> --model=<model-id> [--seed=<n>] [--repo-root=<di
   implicit default, even for "the canonical pin," to keep this component
   honest about never hardcoding which model it calls.
 - `--seed` — sample seed/index (R-GEN-007). Default `0`.
+- `--retry-feedback` — comma-separated `R-id` list from a prior attempt in
+  the same retry sequence (R-GEN-010). Optional; omit on a sequence's first
+  attempt.
 - Bundle mode (`cold`/`hint`) is inherited from whatever `SpecBundle` is
   passed in — this component does not itself choose a mode, it consumes
   whatever `spec-bundle-assembler` produced.
