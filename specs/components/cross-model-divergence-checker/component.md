@@ -12,6 +12,18 @@ sealed: false
 
 # Cross-Model Divergence Checker
 
+**Build status: deferred for the initial example-project build.** This
+spec is complete and intended as the target design, but implementation is
+not scheduled for the first build — the example project ships single-model
+only for now. This costs nothing elsewhere in the corpus: single-model
+operation was always a first-class, explicitly-designed degraded mode
+(D10), not a fallback bolted on afterward — `merge-orchestrator` already
+treats both toggles resolving to disabled-or-no-second-model as a plain
+"not applicable" path (`R-XMODEL-001`), so no other component's spec
+changes because of this deferral. Revisit once the single-model pipeline
+is working end-to-end and there's a concrete need for either divergence
+detection or outage resilience.
+
 ## Purpose
 
 Implements D3's toggleable gate and D10's standby-build mechanism with one
@@ -83,8 +95,39 @@ See `constraints.md`.
   suite's own inputs (mentioned in D3 as part of the differential check) —
   whether this component generates additional inputs itself (e.g. via a
   property-based testing library) or only ever diffs against the existing
-  test suite's inputs. Left open; the existing-inputs-only path is already
-  a real, useful check and doesn't require this to be resolved first.
+  test suite's inputs. Paused mid-analysis (not resolved) when this
+  component's implementation was deferred; partial findings worth keeping
+  for whenever work resumes:
+  - As written, `R-XMODEL-004`'s "diffing outputs" has nothing concrete to
+    diff — neither `VerificationReport` nor `CrossCheckResult` capture
+    actual output *values*, only `pass`/`fail`/`skipped`. Since both
+    candidates must pass the same literal assertions to reach this
+    comparison, comparing verdicts alone is close to a no-op for
+    `compiled`-kind criteria. The real signal lives in parts of the output
+    the Gherkin assertion didn't pin — e.g. a `Then result.hit equals
+    false` step only pins `.hit`; the rest of `result` is unchecked and
+    could still diverge between models.
+  - Candidate fix, not yet implemented: for `compiled`-kind criteria only
+    (the one category where the step grammar guarantees a concrete,
+    structured `result` value by construction), have `criterion-compiler`'s
+    emitted test also serialize the full captured `result` — written
+    before the assertion runs, so it's captured regardless of pass/fail —
+    and give `CrossCheckResult` a field holding the canonical-vs-second-
+    candidate pair for structural diffing. Deliberately scoped to
+    `compiled` only; `generated-test` code has no guaranteed structured
+    value to extract generically, and `llm-judge` isn't about exact match.
+  - That fix has its own prerequisite gap: `R-XMODEL-003` requires running
+    `verifier-orchestrator` "against the second candidate," but
+    `verifier-orchestrator`'s own requirements (`R-VERIFY-001`/`002`)
+    hardcode execution against `gen/<component>/` — there's no way today to
+    point it at the isolated location `R-XMODEL-002` writes the second
+    candidate to. Candidate fix: an optional `source_root` parameter on
+    `verify()`, defaulting to today's behavior.
+  - True fuzzing (synthesizing novel inputs, not just diffing existing
+    ones) stays separately deferred regardless of the above — a distinct
+    capability needing new machinery (e.g. property-based generation
+    against `interface/` type schemas), not a natural extension of fixing
+    the "nothing to diff" gap.
 
 ## Change log
 

@@ -75,6 +75,9 @@ Specced in full depth so far:
 - **`cross-model-divergence-checker`** — all `kind: compiled`, for the same
   reason as `verifier-orchestrator`: comparing two already-produced,
   concrete candidates needs no judgment, even though producing them did.
+  **Implementation deferred for the initial build** — single-model-only is
+  an explicitly supported degraded mode (D10), not a workaround, so this
+  costs nothing elsewhere in the corpus; see its `component.md`.
 - **`license-scanner`** / **`secret-scanner`** — all `kind: compiled`;
   k-gram/pattern-matching is fully deterministic, so neither needed
   `generated-test` or `llm-judge` despite sitting in the compliance/scanning

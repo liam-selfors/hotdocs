@@ -268,6 +268,20 @@ and "code does X." Techniques, roughly in order of value:
    and get correct code plus green verification with **zero human code edits**?
    Find where it breaks. Iterate there.
 
+**Scope cut for the initial build: `cross-model-divergence-checker` is
+deferred.** Its spec stays complete as the intended target design, but it
+isn't scheduled for this build — ship single-model only first. This is a
+free cut, not a compromise requiring any other spec to change: single-model
+operation was already a first-class, explicitly-designed degraded mode
+(D10's "the tool MUST keep functioning with only one model configured"),
+so every caller already treats "no second model" as a normal, handled path
+rather than something this deferral needs to newly accommodate. The
+tradeoff being accepted: no cross-model underspecification signal and no
+warm standby build until this is picked back up — revisit once the
+single-model pipeline is proven end-to-end. Mid-analysis notes on this
+component's own open question (what "diffing outputs" actually requires)
+are preserved in its `component.md` for whenever work resumes.
+
 ---
 
 ## 11. Decisions (resolved from open questions)
