@@ -49,8 +49,8 @@ See `interface/data/`.
 See `acceptance/`.
 
 All eight criteria are `kind: compiled` — graph-walking and aggregation
-over already-computed data. A ninth component in this corpus with a fully
-`compiled` acceptance set.
+over already-computed data. An eighth component in this corpus with a
+fully `compiled` acceptance set.
 
 ## Non-functional constraints
 

@@ -4,6 +4,7 @@ title: Generator
 status: draft
 owners: [pipeline-team]
 depends_on: [comp-spec-bundle-assembler, comp-cache-manager]
+depends_on_guarantees: [G-CACHE-001]
 realizes: [P-ZERO-EDIT]
 uses_var: [VAR-ANTHROPIC-API-KEY]
 model_pin: claude-sonnet-5
@@ -17,6 +18,17 @@ sealed: false
 Calls a pinned model to produce `gen/<component>/` from a `SpecBundle` —
 cold, with no prior code (unless the bundle carries `hint_code`, D1),
 exactly one candidate per invocation.
+
+Declares `depends_on_guarantees: [G-CACHE-001]` — the D16 worked example.
+R-GEN-005/006's whole cache-check-before-call / cache-write-after-call
+behavior genuinely depends on `cache-manager`'s consistency guarantee: a
+`get` that returns a hit is trusted as authoritative with no locking of its
+own, which is only safe because concurrent writers for the same key are
+safe under last-write-wins (G-CACHE-001). It does *not* depend on
+`cache-manager`'s other properties (store-error fail-closed behavior, CLI
+inspection, etc.) in any way this component's own logic cares about — so a
+future change to *those* should not, and now will not, pull this component
+into an unrelated blast radius.
 
 ## Scope
 
@@ -36,11 +48,6 @@ again with a different seed. Putting the retry loop inside `generator`
 would require it to depend on `verifier-orchestrator`, which nothing
 upstream of this spec ever said it does — a gap this spec is resolving by
 making the boundary explicit, not assuming an answer silently.
-
-This single-shot design is also what lets `cross-model-divergence-checker`
-reuse this exact component with a second model (R-GEN-004) instead of
-duplicating generation logic — it only ever needs "one candidate from model
-X," the same thing `merge-orchestrator` asks for.
 
 `retry_feedback` (R-GEN-010) does not change any of this: this component
 still produces exactly one candidate per call and still has no memory of

@@ -4,7 +4,7 @@ Covers: R-PACKET-008
 Kind: compiled
 
 ```gherkin
-Given a second-model verification failure that did not block the merge
+Given a component that passed only on its second (final) best_of_k attempt
 When build_review_packet runs
 Then residual_risk includes that finding
 ```

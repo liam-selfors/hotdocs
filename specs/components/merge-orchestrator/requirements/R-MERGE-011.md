@@ -2,9 +2,8 @@
 
 **R-MERGE-011** — The overall merge MUST be blocked if any impacted
   component exhausted retries (R-MERGE-006), or a sealed component's
-  characterization-test verification (R-MERGE-015) failed, or
-  `cross-model-divergence-checker` reported a blocking divergence, or
-  either scanner reported a blocking flag, or golden-scenario verification
+  characterization-test verification (R-MERGE-015) failed, or either
+  scanner reported a blocking flag, or golden-scenario verification
   (R-MERGE-014) failed — and MUST proceed otherwise.
 
   The sealed-component case is listed explicitly, not folded into

@@ -48,7 +48,7 @@ rendered site.
 See `acceptance/`.
 
 All six criteria are `kind: compiled` — rendering already-computed data is
-pure, deterministic templating. An eleventh component in this corpus with a
+pure, deterministic templating. A tenth component in this corpus with a
 fully `compiled` acceptance set.
 
 ## Non-functional constraints

@@ -3,7 +3,7 @@ id: comp-provenance-writer
 title: Provenance Writer
 status: draft
 owners: [pipeline-team]
-depends_on: [comp-generator, comp-verifier-orchestrator, comp-cross-model-divergence-checker, comp-license-scanner, comp-secret-scanner, comp-cache-manager]
+depends_on: [comp-generator, comp-verifier-orchestrator, comp-license-scanner, comp-secret-scanner, comp-cache-manager]
 realizes: [P-ZERO-EDIT, P-COMPLIANCE-GATE]
 sealed: false
 ---
@@ -12,7 +12,7 @@ sealed: false
 
 ## Purpose
 
-Assembles `.provenance.json` (`SPEC_GUIDELINES.md` §8) from every other
+Assembles `.provenance.json` (`SPEC_GUIDELINES.md` §7) from every other
 gate component's own output, and writes it. The single place that schema is
 populated — every other component reports its own result; this component
 collects, never invents.
@@ -42,14 +42,14 @@ See `interface/`.
 ## Data
 
 See `interface/data/`. (the provenance manifest schema is `SPEC_GUIDELINES.md`
-§8 itself — this component does not redefine it).
+§7 itself — this component does not redefine it).
 
 ## Acceptance criteria
 
 See `acceptance/`.
 
-All eleven criteria are `kind: compiled` — collecting and writing already-
-produced results is pure, deterministic logic. A seventh component in this
+All ten criteria are `kind: compiled` — collecting and writing already-
+produced results is pure, deterministic logic. A sixth component in this
 corpus with a fully `compiled` acceptance set.
 
 ## Non-functional constraints

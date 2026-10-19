@@ -268,40 +268,13 @@ and "code does X." Techniques, roughly in order of value:
    and get correct code plus green verification with **zero human code edits**?
    Find where it breaks. Iterate there.
 
-**Scope cut for the initial build: `cross-model-divergence-checker` is
-deferred.** Its spec stays complete as the intended target design, but it
-isn't scheduled for this build — ship single-model only first. This is a
-free cut, not a compromise requiring any other spec to change: single-model
-operation was already a first-class, explicitly-designed degraded mode
-(D10's "the tool MUST keep functioning with only one model configured"),
-so every caller already treats "no second model" as a normal, handled path
-rather than something this deferral needs to newly accommodate. The
-tradeoff being accepted: no cross-model underspecification signal and no
-warm standby build until this is picked back up — revisit once the
-single-model pipeline is proven end-to-end. Mid-analysis notes on this
-component's own open question (what "diffing outputs" actually requires)
-are preserved in its `component.md` for whenever work resumes.
-
-**Follow-up: the second-model scope cut goes further than one component.**
-Once `cross-model-divergence-checker` was deferred, its dormant
-self-override (`cross_model_divergence_check: enabled` in its own
-frontmatter) was cleared as inert config — then a full corpus sweep for
-"second model" turned up one more *active*, non-dormant usage:
-`test-author`'s preference for a model different from `generator`'s, for
-genuine authoring independence (D4/D5). Unlike the cleared config, this
-wasn't dormant — it was a real, already-specified, gracefully-degrading
-requirement (`R-AUTHOR-003`). Deferring it is a different kind of cut than
-clearing config: it means `generated-test` criteria's independence
-argument is, for this build, "an agent authored this test from spec prose
-alone, with no access to the implementation" — not also "with a different
-model than the one that wrote that implementation." Treated the same way
-as the component-level deferral rather than deleted: `R-AUTHOR-003`,
-`generator`'s `R-GEN-004`, and both components' `uses_var` were updated to
-single-model-only as the sole active behavior, with the original design
-and rationale preserved in each requirement's own text for reintroduction
-later. `VAR-SECOND-MODEL-API-KEY` itself stays declared (not deleted) —
-currently unreferenced by any `uses_var`, which is a tracked, non-blocking
-condition (D12's orphan-var rate), not a lint error.
+**Scope cut for the initial build: single-model only.** Every second-model
+mechanism (`cross-model-divergence-checker`, D10's fallback-standby-build,
+`test-author`'s second-model authoring preference) has been fully removed
+from the active spec corpus for this build, not merely deferred inline —
+see §14 ("Future enhancements") for the preserved design and why this cut
+is effectively free (single-model operation was always a first-class,
+explicitly-designed mode, D10).
 
 ---
 
@@ -421,6 +394,12 @@ mechanisms, judged separately:
 - This reuses directly for **model-pin migration**: "does candidate model X
   pass every component's verification?" is the readiness gate for bumping a
   pin (itself a re-ratification event, per §8).
+
+**Status: the cross-model divergence check is removed from the active spec
+corpus for this build** (single-model-only scope cut; best-of-k retry is
+unaffected and remains fully active). The design above stays as the
+intended target; see §14 ("Future enhancements") for what was preserved
+and why the cut is effectively free.
 
 ### D4 — Acceptance criteria: constrained Given/When/Then, not prose or raw test files
 
@@ -585,7 +564,7 @@ ends up blocking the merge:**
 - Every scan result (clean or flagged) is written into `license_scan` in the
   provenance manifest — an append-only record, not just a CI log line that
   disappears.
-- Flags are surfaced as an explicit line item in the review packet (§6 step 5)
+- Flags are surfaced as an explicit line item in the review packet (§6 step 4)
   even though no human sign-off gates the merge — visibility after the fact is
   mandatory, silence is not acceptable for this category.
 - A flag above a severity threshold (not just "blocked the merge") triggers an
@@ -734,6 +713,13 @@ verified standby build exists to promote." Three regimes, not two:
   actually matters: % of merges with a **verified, promotable standby build**
   available (regime 1 or 2) — not merely "a second model was configured," which
   the toggle means is no longer the same thing.
+
+**Status: this decision's core invariant stays fully active** — the tool
+running with only one model configured is exactly this build's actual,
+permanent state, not a temporary condition. **The opportunistic-fallback
+mechanism itself (the three regimes, standby-build promotion) is removed
+from the active spec corpus for this build** — there is currently no second
+model to make a standby build *from*. See §14 ("Future enhancements").
 
 ### D11 — Rollback is a cache-hit, not a dedicated incident feature
 
@@ -932,7 +918,7 @@ every component in the blast radius has regenerated and passed its own
 per-component verification, run every product capability's golden scenarios
 whose `realizes`-set intersects the blast radius, against the real
 assembled `gen/` output, blocking the merge on failure the same way a
-per-component failure does (`SPEC_GUIDELINES.md` §6 step 6). This is the
+per-component failure does (`SPEC_GUIDELINES.md` §6 step 5). This is the
 backstop for cross-component behavioral risk no amount of interface-level
 diffing can rule out *in principle* — permanently, not just until gap 2 is
 closed, because documentation of foreseeable guarantees can never be
@@ -985,11 +971,15 @@ sits on top of it.
   `depends_on` — referencing a guarantee of something you don't depend on
   is meaningless, not just unresolved.
 - `cache-manager`'s `R-CACHE-003` was retrofitted into `G-CACHE-001` as the
-  worked demonstration, with `cross-model-divergence-checker` declaring
-  `depends_on_guarantees: [G-CACHE-001]` as the concrete example of
-  narrowing in practice.
+  worked demonstration. Originally `cross-model-divergence-checker` declared
+  `depends_on_guarantees: [G-CACHE-001]` as the concrete example of narrowing
+  in practice; since that component was removed (single-model scope cut,
+  §14), `generator` — whose own cache-check/cache-write behavior
+  (R-GEN-005/006) genuinely depends on the same consistency guarantee —
+  took over as the worked example instead, so D16's mechanism keeps a real
+  consumer rather than only an abstract description.
 
-See `SPEC_GUIDELINES.md` §1–§3.4 and §6 step 6 for the current,
+See `SPEC_GUIDELINES.md` §1–§3.4 and §6 step 5 for the current,
 authoritative rules this produced.
 
 ---
@@ -1125,3 +1115,105 @@ manifests.
 
 Repo is `hotdocs`. The methodology needs a name — candidates: "spec-as-source",
 "normative development", "documents-first". Decide later; it doesn't matter yet.
+
+---
+
+## 14. Future enhancements
+
+Design ideas that were fully specced at some point, then **removed from the
+active spec corpus** for this build's single-model scope cut — not deferred
+inline component-by-component (an earlier, now-superseded approach), but
+consolidated here so the live specs read clean and these ideas aren't lost.
+Nothing below is normative; it's a record of what to reintroduce, and why
+each piece was designed the way it was, if a second model becomes part of
+this build later.
+
+### Cross-model divergence checking (D3)
+
+A pre-merge, toggleable gate (`cross-model-divergence-checker`): when a
+second model is configured and the check is enabled, regenerate each
+impacted component with that second model and differential-test it against
+the canonical build. A build that **passes verification but diverges
+behaviorally** from the canonical build blocks the merge as a spec defect —
+the acceptance criteria didn't pin the behavior tightly enough. A build that
+simply **fails** verification is logged, not blocking (a capability gap in
+the second model, not necessarily a spec bug).
+
+**A real mechanical gap was found and only partially resolved before this
+was removed**, worth keeping for whenever this is rebuilt: as specified,
+the "diffing outputs" step had nothing concrete to diff — both candidates
+are forced to pass the same literal acceptance-criteria assertions to reach
+the comparison at all, so re-comparing pass/fail verdicts alone is close to
+a no-op. The real signal lives in parts of a candidate's output the Gherkin
+assertion never pinned (e.g. a `Then result.hit equals false` step only
+pins `.hit`, not the rest of `result`). Candidate fix, never implemented:
+for `compiled`-kind criteria specifically (the one category with a
+guaranteed structured, diffable `result` value by construction of the step
+grammar), have `criterion-compiler`'s emitted test also serialize the full
+captured `result`, and give the comparison a field holding the canonical-
+vs-second-candidate pair for structural diffing — deliberately scoped to
+`compiled` only, since `generated-test` code has no guaranteed structured
+value to extract generically and `llm-judge` isn't about exact match at
+all. That fix has its own prerequisite gap: `verifier-orchestrator` has no
+way to point `verify()` at an isolated source tree (it hardcodes execution
+against `gen/<component>/`), which the divergence check already silently
+depended on in order to run verification against the second candidate at
+all. Candidate fix: an optional `source_root` parameter on `verify()`,
+defaulting to today's behavior.
+
+True fuzzing (synthesizing novel inputs the existing acceptance suite never
+considered, vs. only diffing on its existing inputs) was always a separate,
+still-open question from the above — a distinct capability needing new
+machinery (e.g. property-based generation against `interface/` type
+schemas), not a natural extension of fixing the "nothing to diff" gap.
+
+### Fallback standby build (D10)
+
+Independent of the divergence check above (a separate toggle,
+`fallback_standby_build`): when a second model is configured, keep a build
+from it continuously generated and verified (but not diffed or gated on)
+as a warm, promotable spare. If the primary model pin is confirmed
+unavailable, promote the standby to canonical for the duration — no new
+config surface, recorded in the provenance manifest with an explicit
+notification to a standing ops channel. This is what made "multi-model
+coverage rate" (`metrics.md`) meaningful as "a verified, promotable standby
+build exists," not merely "a second model is configured."
+
+This build's actual posture (D10's *other* half, which stayed active and is
+not part of this future-enhancements list): the tool keeps functioning with
+only one model configured, full stop — an outage of the only configured
+model halts merges until a human re-ratifies a working pin. That's not a
+placeholder for the fallback mechanism above; it's this build's real,
+permanent state.
+
+### `test-author`'s second-model authoring preference (D4/D5)
+
+`test-author` selecting a model different from the one `generator` used for
+a component's current code, when a second model is configured, so
+`generated-test`'s "independent path" is independent in practice and not
+just in name. This build's actual posture: an agent authors the test from
+spec prose alone with no access to the implementation under test, using the
+canonical model — weaker evidence than a genuinely independent model would
+provide, but still a real, executable test. Reintroducing the preference is
+additive: a new conditional branch on top of `R-AUTHOR-003`'s current
+single-model behavior, not a rewrite of it; `VAR-SECOND-MODEL-API-KEY`
+would need re-declaring since its var contract was deleted (not just its
+`uses_var` references) once nothing in the active corpus referenced it any
+longer.
+
+### Mechanical notes for reintroduction
+
+- `generator`'s `depends_on_guarantees: [G-CACHE-001]` (the D16 worked
+  example) currently belongs to `generator`, not
+  `cross-model-divergence-checker` — if the latter returns, it would
+  likely want the same declaration for the same reason (its own concurrent
+  cache calls alongside the canonical build), but `generator` should keep
+  it too; both are legitimate independent consumers of the same guarantee.
+- `R-GEN-004`'s "explicit model identifier, never hardcoded" rule was
+  never specific to second-model support — it's unaffected by any of this
+  and needs no change to support a second-vendor caller returning.
+- `best_of_k`'s default-of-2 resolution (R-MERGE-016) and the
+  diagnostic-guided retry mechanism (R-GEN-010/R-VERIFY-011) are unrelated
+  to second-model support and are fully active regardless of anything in
+  this section — best-of-k retries the *same* model, it was never about a
+  second one.

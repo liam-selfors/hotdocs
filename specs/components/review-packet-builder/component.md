@@ -13,7 +13,7 @@ sealed: false
 ## Purpose
 
 Assembles the human-readable summary a reviewer actually reads before
-merging (`SPEC_GUIDELINES.md` §6 steps 5/7): the spec diff, changed
+merging (`SPEC_GUIDELINES.md` §6 steps 4/6): the spec diff, changed
 requirements, regenerated components, verification results, flags, and
 residual risk — never the generated code itself.
 
@@ -48,7 +48,7 @@ See `interface/data/`.
 See `acceptance/`.
 
 All ten criteria are `kind: compiled` — formatting already-computed results
-is pure, deterministic logic. An eighth component in this corpus whose
+is pure, deterministic logic. A seventh component in this corpus whose
 entire acceptance set is `compiled`.
 
 ## Non-functional constraints

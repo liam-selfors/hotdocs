@@ -10,6 +10,6 @@ owners: [pipeline-team]
 - **required:** yes
 - **type:** secret-ref
 - **sensitivity:** secret
-- **description:** Credential used by `generator` and
-  `cross-model-divergence-checker` to call the canonical model vendor's API.
-  No example or default — forbidden for `sensitivity: secret` (D12).
+- **description:** Credential used by `generator` and `test-author` to call
+  the canonical model vendor's API. No example or default — forbidden for
+  `sensitivity: secret` (D12).

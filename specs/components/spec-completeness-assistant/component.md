@@ -65,9 +65,9 @@ Mixed `kind`, and deliberately the opposite mix from most of this corpus:
 R-ASSIST-001–003 and R-ASSIST-006 are `compiled` (dispatch, path/data
 checks), but R-ASSIST-004/005 — this component's actual reason to exist —
 are `llm-judge`. Unlike every coordination component specced so far
-(`verifier-orchestrator`, `cross-model-divergence-checker`,
-`merge-orchestrator`), this one's core value genuinely *is* judgment, not
-dispatch around it — a useful contrast case for D5's guidance rather than
+(`verifier-orchestrator`, `merge-orchestrator`), this one's core value
+genuinely *is* judgment, not dispatch around it — a useful contrast case
+for D5's guidance rather than
 another confirmation of "prefer compiled."
 
 ## Non-functional constraints
@@ -76,10 +76,7 @@ See `constraints.md`.
 
 ## Open questions
 
-- Whether this component should itself get a second-model cross-check for
-  R-ASSIST-004/005 (two independent completeness judgments, compared) — the
-  same question left open for `test-author`. Not addressed here; a
-  plausible future refinement, not assumed.
+None.
 
 ## Change log
 

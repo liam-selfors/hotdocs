@@ -34,7 +34,7 @@ Specced in full depth so far:
   errors (the D10 "tool must keep working" posture, applied to a new
   subsystem). Since D16, exposes `interface/guarantees/G-CACHE-001.md` —
   the worked example behind the whole guarantee/narrowing mechanism, with
-  `cross-model-divergence-checker` as the real component declaring
+  `generator` as the real component declaring
   `depends_on_guarantees: [G-CACHE-001]` against it.
 - **`criterion-compiler`** — the `sealed: true` component, all `kind:
   generated-test`. The one piece of this pipeline that is permanently
@@ -58,12 +58,8 @@ Specced in full depth so far:
   model call, mirroring `generator`'s split. Authors `generated-test` test
   code, dispatched to by `verifier-orchestrator` via the same
   injectable-callable pattern `llm-judge`'s `judge` already established.
-  Currently single-model only (`R-AUTHOR-003`) — a model different from
-  `generator`'s, for genuine independence (D4/D5), was the original design
-  but is deferred alongside the broader second-model scope reduction for
-  this build (see `cross-model-divergence-checker`'s deferral note);
-  authoring with the canonical model alone is weaker evidence but still a
-  real, executable test (D10's single-model posture, applied here).
+  Single-model (`R-AUTHOR-003`): independence comes from authoring the test
+  from spec prose alone, with no access to the implementation under test.
 - **`verifier-orchestrator`** — all `kind: compiled`, despite sitting right
   at the judgment/model boundary: coordinating `llm-judge` and
   `test_author` dispatch is itself deterministic dispatch-and-record logic,
@@ -75,12 +71,6 @@ Specced in full depth so far:
   — the graph-topology mechanism `merge-orchestrator`'s diagnostic-guided
   retry loop feeds on, kept content-free enough that it can't reopen
   `spec-bundle-assembler`'s exclusion of `acceptance/` from generation.
-- **`cross-model-divergence-checker`** — all `kind: compiled`, for the same
-  reason as `verifier-orchestrator`: comparing two already-produced,
-  concrete candidates needs no judgment, even though producing them did.
-  **Implementation deferred for the initial build** — single-model-only is
-  an explicitly supported degraded mode (D10), not a workaround, so this
-  costs nothing elsewhere in the corpus; see its `component.md`.
 - **`license-scanner`** / **`secret-scanner`** — all `kind: compiled`;
   k-gram/pattern-matching is fully deterministic, so neither needed
   `generated-test` or `llm-judge` despite sitting in the compliance/scanning
@@ -89,7 +79,7 @@ Specced in full depth so far:
   invocation distinct from its full merge-gate scan.
 - **`provenance-writer`** — all `kind: compiled`. Collects every other
   gate's already-produced result into one manifest; never invents a field.
-  Found and fixed a real gap in `SPEC_GUIDELINES.md` §8's schema (a missing
+  Found and fixed a real gap in `SPEC_GUIDELINES.md` §7's schema (a missing
   `secret_scan` field, even though `gate_versions` already expected a
   `secret_scanner` entry) and gave D11's "cache hit copies the prior
   manifest forward" claim its first concrete mechanism.

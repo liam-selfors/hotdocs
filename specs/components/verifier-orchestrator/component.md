@@ -24,9 +24,8 @@ interface drift check.
 mechanism by its declared `kind`; running the interface drift check;
 aggregating mutation scores; producing one `VerificationReport`.
 
-**Out of scope:** the cross-model divergence check (`cross-model-divergence-
-checker`'s job — a different gate, D3); the license/secret scans (separate
-components, D7/D12); *performing* an `llm-judge` evaluation or *authoring*
+**Out of scope:** the license/secret scans (separate components, D7/D12);
+*performing* an `llm-judge` evaluation or *authoring*
 `generated-test` code (this component dispatches to an injectable judge and
 an injectable `test_author` and records their results — it does not itself
 judge or author anything, see the note below); **re-deciding a criterion's

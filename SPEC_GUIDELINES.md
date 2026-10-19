@@ -54,7 +54,7 @@ notes/                 # brainstorming — non-normative, not read by the pipeli
   generated binary assets **MUST** go through Git LFS rather than a plain blob
   commit. (D6)
 - Nothing under `gen/` or `verification/` is hand-edited, with exactly two
-  declared exemptions — see §9.
+  declared exemptions — see §8.
 - A `README.md` anywhere under `specs/` is non-normative scaffolding, not a
   governed spec — the linter and every other tool in this document **MUST**
   skip it. The governed set under a component directory is exactly:
@@ -120,10 +120,8 @@ optional).
 | `depends_on_guarantees` | never (optional) | List of `G-<comp>-NNN` ids — a **strictly opt-in narrowing** of which of a dependency's `interface/guarantees/` entries this component actually relies on. (D16) **(component `component.md` only)** |
 | `supersedes` | never (optional) | Prior spec id this one replaces. |
 | `model_pin` | never (optional); **inapplicable when `sealed: true`** | Per-spec override of the repo-wide canonical model. **MUST** be omitted (not filled with a placeholder) on a sealed component — there is no generation to pin. **(component `component.md` only)** |
-| `cross_model_divergence_check` | never (optional); **inapplicable when `sealed: true`**, same reason | Per-spec override of the repo-wide toggle: `enabled` \| `disabled`. (D3) **(component `component.md` only)** |
-| `fallback_standby_build` | never (optional); **inapplicable when `sealed: true`**, same reason | Per-spec override of the repo-wide toggle: `enabled` \| `disabled`. (D10) **(component `component.md` only)** |
 | `best_of_k` | never (optional); **inapplicable when `sealed: true`**, same reason | Per-spec override of the repo-wide default best-of-k attempt count (default `2`, integer `2`–`4` inclusive). `merge-orchestrator`'s retry loop reads this when deciding how many diagnostic-guided attempts a component gets. (D3, R-MERGE-016) **(component `component.md` only)** |
-| `sealed` | never (optional), default `false` | Legacy-perimeter escape hatch — and, per the `criterion-compiler` precedent, also the correct mechanism for a *permanently* hand-maintained trust anchor, not only temporary legacy debt. See §9. (D1/D8) **(component `component.md` only)** |
+| `sealed` | never (optional), default `false` | Legacy-perimeter escape hatch — and, per the `criterion-compiler` precedent, also the correct mechanism for a *permanently* hand-maintained trust anchor, not only temporary legacy debt. See §8. (D1/D8) **(component `component.md` only)** |
 | `source_path` | condition: required when `sealed: true`, forbidden otherwise | Where the actual, hand-maintained code lives. **MUST NOT** point under `gen/`. **(component `component.md` only)** |
 | `last_ratified_commit` | condition: required when `status: ratified` | Commit hash of the ratifying merge. |
 
@@ -329,25 +327,20 @@ Run per merge, scoped to the components in the impact-analysis blast radius:
    `constraints.md` + depended-upon components' `interface/` + referenced
    `specs/vars/` declarations + `glossary` — deliberately excluding
    `acceptance/`, so the model doesn't overfit to its own tests). Best-of-k
-   retry (k = 2–4) against verification on failure; the winning sample index
-   is recorded. (D1/D3)
+   retry (`best_of_k`, default 2, overridable 2–4 per component) against
+   verification on failure, each retry informed by the immediately preceding
+   attempt's failing requirements (R-GEN-010/R-VERIFY-011); the winning
+   sample index is recorded. (D1/D3)
 3. **Per-criterion verification** — compiled / generated-test / llm-judge, per
    §5. Contract/property tests from `interface/`. A drift check that
    generated interfaces match `interface/`'s contract exactly.
-4. **Cross-model divergence check** — runs only when `cross_model_divergence_check`
-   resolves to `enabled` (repo default: enabled when a second model is
-   configured) **and** a second model is actually configured. Regenerates the
-   component with that second model; a build that **passes verification but
-   diverges behaviorally** from the canonical build **blocks the merge** as a
-   spec defect. A build that **fails** verification outright does not block,
-   but is logged. (D3)
-5. **License scan** and **secrets scan** — automated, unconditional, run
-   regardless of the toggle in step 4. A flag blocks the merge; the pipeline
-   may retry generation without escalating to a person. Every flag (clean or
-   not, resolved or not) is written to the provenance manifest and the review
-   packet — never silent. A flag above a severity threshold notifies a
+4. **License scan** and **secrets scan** — automated, unconditional. A flag
+   blocks the merge; the pipeline may retry generation without escalating to
+   a person. Every flag (clean or not, resolved or not) is written to the
+   provenance manifest and the review packet — never silent. A flag above a
+   severity threshold notifies a
    standing compliance channel. (D7/D12)
-6. **Golden-scenario verification** — once every component in the blast
+5. **Golden-scenario verification** — once every component in the blast
    radius has regenerated and passed its own per-component verification
    (steps 2–3), run the golden scenarios of every product capability whose
    `realizes`-set intersects the blast radius, against the real, fully
@@ -358,13 +351,13 @@ Run per merge, scoped to the components in the impact-analysis blast radius:
    in principle (D16) — not a redundant check: `interface/guarantees/`
    (D16) makes *foreseen* behavioral dependencies explicit and propagating,
    this gate catches what wasn't foreseen.
-7. **Non-functional gates** where feasible (benchmarks, size budgets).
-8. **Review packet** — spec diff, changed requirements, regenerated
+6. **Non-functional gates** where feasible (benchmarks, size budgets).
+7. **Review packet** — spec diff, changed requirements, regenerated
    components, verification results, residual risk, license/secret flags,
    cache-hit status, golden-scenario results, and any new/changed
    `sealed`/override declarations. A human reviews this and the spec diff.
    **No human review of generated code is required, of any kind.** (D5)
-9. **Merge** — `specs/`, `gen/`, and `verification/` (including
+8. **Merge** — `specs/`, `gen/`, and `verification/` (including
    `corpus-graph.json`) update atomically in one squashed commit.
 
 A merge whose spec bundle exactly matches an already-verified prior state
@@ -381,28 +374,7 @@ papers over a genuinely changed risk.
 
 ---
 
-## 7. Toggles
-
-Two independent, repo-wide settings in `pipeline/`, each overridable per-spec:
-
-- **`cross_model_divergence_check`**: `enabled` | `disabled`. Default:
-  `enabled` whenever a second model is configured.
-- **`fallback_standby_build`**: `enabled` | `disabled`. Independent of the
-  above — when the divergence check is off but a warm, promotable fallback
-  build is still wanted, this keeps one generated and verified (not diffed or
-  gated on) every merge, at lower cost than full divergence checking. (D10)
-
-The tool **MUST** keep functioning with only one model configured. With both
-toggles off (or no second model at all), an outage of the only configured
-model **halts merges** until a human re-ratifies a working pin. This is an
-accepted, explicit tradeoff — not a bug.
-
-A second model from a different vendor than the canonical pin is **RECOMMENDED**,
-never required.
-
----
-
-## 8. Provenance
+## 7. Provenance
 
 Every generated artifact carries `.provenance.json` alongside it (in
 `gen/<component>/` and `verification/<component>/`), committed under the same
@@ -417,13 +389,12 @@ retry_feedback       R-id list fed to the winning sample's generation call
                      (R-GEN-010) — null if it won on the first attempt
 pipeline_version    version of the generation pipeline itself
 gate_versions       per-gate version map (compiler, license_scanner,
-                     cross_model_check, mutation_harness, secret_scanner, ...)
+                     mutation_harness, secret_scanner, ...)
 cache_hit           bool — if true, the fields below are copied from the
                      matching prior commit, not freshly computed
 generated_at
 verification_run_id
 verification_report  the VerificationReport (verifier-orchestrator)
-cross_model_check   divergence-gate outcome (cross-model-divergence-checker)
 license_scan        result (license-scanner)
 secret_scan         result (secret-scanner) — missing from an earlier draft
                      of this schema even though gate_versions already
@@ -437,7 +408,7 @@ generation bug?) and doubles as an SBOM/SLSA-style attestation.
 
 ---
 
-## 9. Exemptions from cold regen
+## 8. Exemptions from cold regen
 
 Exactly two, both declared and tracked — never silent:
 
@@ -460,7 +431,7 @@ mechanisms are a hard CI failure.
 
 ---
 
-## 10. Secrets
+## 9. Secrets
 
 Unconditional, not a scope question:
 
@@ -473,7 +444,7 @@ Unconditional, not a scope question:
 
 ---
 
-## 11. What this document does not cover
+## 10. What this document does not cover
 
 Implementation details — the actual linter, the generation pipeline's code,
 prompt templates, the corpus-graph renderer — live under `pipeline/` and

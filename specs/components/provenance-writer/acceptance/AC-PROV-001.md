@@ -7,5 +7,5 @@ Kind: compiled
 Given a complete set of ProvenanceInputs
 When write_provenance runs
 Then the written manifest's top-level keys exactly match SPEC_GUIDELINES.md
-  §8's field list — no extra keys, no missing ones
+  §7's field list — no extra keys, no missing ones
 ```

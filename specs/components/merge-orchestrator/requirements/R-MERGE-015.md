@@ -2,10 +2,10 @@
 
 **R-MERGE-015** — For a cache miss (same precondition as R-MERGE-004) on a
   component marked `sealed: true`, MUST skip `spec-bundle-assembler`,
-  `generator`, the best-of-k retry loop, and `cross-model-divergence-
-  checker` entirely, and invoke `verifier-orchestrator` directly against
-  the component's existing code at its declared `source_path` — proving
-  its characterization tests (`acceptance/` criteria, §9) still pass
+  `generator`, and the best-of-k retry loop entirely, and invoke
+  `verifier-orchestrator` directly against the component's existing code
+  at its declared `source_path` — proving
+  its characterization tests (`acceptance/` criteria, §8) still pass
   against the unchanged, hand-maintained implementation. There is nothing
   to generate for a sealed component by definition; routing it through
   `generator` anyway would be both wasted cost and conceptually wrong, not

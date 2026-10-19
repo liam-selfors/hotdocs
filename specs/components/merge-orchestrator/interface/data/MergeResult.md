@@ -9,7 +9,6 @@
       "attempts": 1,
       "sample_index": 0,
       "verification": { "...": "a VerificationReport" },
-      "cross_model_check": "not-run",
       "license_scan": { "...": "a LicenseScanResult" },
       "secret_scan": { "...": "a SecretScanResult" }
     }

@@ -21,8 +21,8 @@ split.
 - **Blast radius** — the minimal set of components `impact-analyzer`
   determines need regeneration/re-verification for a given spec change.
 - **Gate** — one verification step in the pipeline (lint, a `kind`-specific
-  acceptance check, cross-model divergence, license scan, secret scan,
-  non-functional checks). A merge requires every applicable gate to pass.
+  acceptance check, license scan, secret scan, non-functional checks). A
+  merge requires every applicable gate to pass.
 - **Cache hit** — a merge whose spec bundle hash exactly matches an
   already-verified prior state; restores prior artifacts instead of
   re-running gates (D11).

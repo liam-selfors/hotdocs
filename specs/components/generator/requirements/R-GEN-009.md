@@ -4,7 +4,7 @@
   the target component only. It MUST NOT write to any `sealed` component's
   `source_path`, and MUST NOT overwrite a file listed in that component's
   `gen/<component>/.overrides.json` (the two declared cold-regen exemptions,
-  §9) — generation must never silently clobber a declared hands-off path.
+  §8) — generation must never silently clobber a declared hands-off path.
 
   This MUST be a **precondition check, resolved before any model call is
   attempted** — refusing only at write-time, after already paying for a
@@ -15,7 +15,7 @@
   that fails verification"; conflating a precondition refusal with either
   of those would misclassify why nothing was generated.
 
-  This is one of two independent enforcement layers (D5/§9): `merge-
+  This is one of two independent enforcement layers (D5/§8): `merge-
   orchestrator` is expected not to call this component for a sealed
   component's regeneration at all (its own routing requirement), and this
   check is the second, independent layer — in case it's ever invoked
