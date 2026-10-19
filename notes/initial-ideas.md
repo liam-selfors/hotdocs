@@ -1044,6 +1044,32 @@ provenance-writer}/` for the current, authoritative rules this produced.
 
 ---
 
+### D18 — `criterion-compiler`: single fixed emit target for v1, formalized as a two-phase split
+
+Resolved item 7 (canonical target test framework for emitted scaffolding).
+Single fixed target (`pytest`) for v1 is confirmed — no multi-target
+machinery designed in now, consistent with this project's own
+anti-premature-abstraction stance (no plugin/registry mechanism for a
+second target nobody has asked for yet).
+
+What made this safe to decide quickly: the step-phrase grammar
+(`specs/architecture/step-phrase-grammar.md`) was already written in
+target-independent terms before this question was ever raised — each
+template's "compiles to" column describes a bound fact ("a call to the
+named function," "an equality assertion on `result.<path>`"), never
+literal pytest syntax. New `R-COMPILE-011` makes that separation — parse+bind
+(grammar matching, `interface/` resolution) vs. emit (literal source text for
+one `--target`) — a formal requirement rather than an implicit property, and
+requires any `--target` other than `pytest` to fail as a specific usage
+error (exit `2`), never a silent fallback. A future second target is
+therefore an additive emitter function, not a grammar rework or a change to
+`R-COMPILE-001`–`010`.
+
+See `specs/components/criterion-compiler/requirements/R-COMPILE-011.md` and
+`interface/cli.md` for the current, authoritative rule this produced.
+
+---
+
 ## 12. Open questions
 
 _None outstanding — Q9–Q13 from the review pass are now D10–D14; D15 was a

@@ -39,7 +39,11 @@ Specced in full depth so far:
 - **`criterion-compiler`** — the `sealed: true` component, all `kind:
   generated-test`. The one piece of this pipeline that is permanently
   hand-maintained by design, never agent-generated (D5's circularity
-  argument: the compiler can't be the thing that verifies itself).
+  argument: the compiler can't be the thing that verifies itself). Its
+  parse+bind phase (grammar matching, `interface/` resolution) is formally
+  target-independent (R-COMPILE-011); v1 ships one emitter (`pytest`), with
+  any other `--target` rejected as a usage error rather than silently
+  falling back.
 - **`spec-bundle-assembler`** — all `kind: compiled`. Deliberately excludes
   `acceptance/` from what it assembles, to keep generation from
   overfitting to its own tests.

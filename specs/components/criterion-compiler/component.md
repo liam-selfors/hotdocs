@@ -90,11 +90,18 @@ See `constraints.md`.
 
 ## Open questions
 
-- Canonical target test framework/language for emitted scaffolding — this
-  spec assumes Python + pytest-style test functions as a concrete default
-  (`interface/cli.md`), but the grammar itself doesn't require that target;
-  is a single fixed target acceptable for v1, or does multi-target emission
-  need to be designed in now?
+- ~~Canonical target test framework/language for emitted scaffolding — is a
+  single fixed target acceptable for v1, or does multi-target emission need
+  to be designed in now?~~ — resolved: single fixed target (`pytest`) for
+  v1, confirmed (R-COMPILE-011); no multi-target machinery designed in now.
+  Safe to defer because the grammar (`specs/architecture/
+  step-phrase-grammar.md`) was already written in target-independent terms
+  — each template's "compiles to" column describes a bound fact ("a call to
+  the named function," "an equality assertion on `result.<path>`"), never
+  pytest syntax specifically. R-COMPILE-011 makes that separation a formal
+  requirement (parse+bind vs. emit) so a future second target is an
+  additive emitter, not a grammar rework — without adding any
+  plugin/registry abstraction nobody has asked for yet.
 - ~~Where the published step-phrase grammar itself is versioned and
   reviewed~~ — resolved, and since D15, physically relocated too:
   `specs/architecture/` owns "cross-cutting tech decisions" by its own
