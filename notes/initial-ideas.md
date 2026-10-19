@@ -282,6 +282,27 @@ single-model pipeline is proven end-to-end. Mid-analysis notes on this
 component's own open question (what "diffing outputs" actually requires)
 are preserved in its `component.md` for whenever work resumes.
 
+**Follow-up: the second-model scope cut goes further than one component.**
+Once `cross-model-divergence-checker` was deferred, its dormant
+self-override (`cross_model_divergence_check: enabled` in its own
+frontmatter) was cleared as inert config — then a full corpus sweep for
+"second model" turned up one more *active*, non-dormant usage:
+`test-author`'s preference for a model different from `generator`'s, for
+genuine authoring independence (D4/D5). Unlike the cleared config, this
+wasn't dormant — it was a real, already-specified, gracefully-degrading
+requirement (`R-AUTHOR-003`). Deferring it is a different kind of cut than
+clearing config: it means `generated-test` criteria's independence
+argument is, for this build, "an agent authored this test from spec prose
+alone, with no access to the implementation" — not also "with a different
+model than the one that wrote that implementation." Treated the same way
+as the component-level deferral rather than deleted: `R-AUTHOR-003`,
+`generator`'s `R-GEN-004`, and both components' `uses_var` were updated to
+single-model-only as the sole active behavior, with the original design
+and rationale preserved in each requirement's own text for reintroduction
+later. `VAR-SECOND-MODEL-API-KEY` itself stays declared (not deleted) —
+currently unreferenced by any `uses_var`, which is a tracked, non-blocking
+condition (D12's orphan-var rate), not a lint error.
+
 ---
 
 ## 11. Decisions (resolved from open questions)

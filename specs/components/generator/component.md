@@ -5,7 +5,7 @@ status: draft
 owners: [pipeline-team]
 depends_on: [comp-spec-bundle-assembler, comp-cache-manager]
 realizes: [P-ZERO-EDIT]
-uses_var: [VAR-ANTHROPIC-API-KEY, VAR-SECOND-MODEL-API-KEY]
+uses_var: [VAR-ANTHROPIC-API-KEY]
 model_pin: claude-sonnet-5
 sealed: false
 ---

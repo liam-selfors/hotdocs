@@ -58,9 +58,12 @@ Specced in full depth so far:
   model call, mirroring `generator`'s split. Authors `generated-test` test
   code, dispatched to by `verifier-orchestrator` via the same
   injectable-callable pattern `llm-judge`'s `judge` already established.
-  Prefers a model different from `generator`'s, for genuine independence
-  (D4/D5), falling back to the canonical model alone when no second model
-  exists (D10's posture, a fourth instance).
+  Currently single-model only (`R-AUTHOR-003`) — a model different from
+  `generator`'s, for genuine independence (D4/D5), was the original design
+  but is deferred alongside the broader second-model scope reduction for
+  this build (see `cross-model-divergence-checker`'s deferral note);
+  authoring with the canonical model alone is weaker evidence but still a
+  real, executable test (D10's single-model posture, applied here).
 - **`verifier-orchestrator`** — all `kind: compiled`, despite sitting right
   at the judgment/model boundary: coordinating `llm-judge` and
   `test_author` dispatch is itself deterministic dispatch-and-record logic,
