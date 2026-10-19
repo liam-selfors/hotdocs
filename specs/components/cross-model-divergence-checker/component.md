@@ -6,7 +6,6 @@ owners: [pipeline-team]
 depends_on: [comp-generator, comp-verifier-orchestrator, comp-cache-manager]
 depends_on_guarantees: [G-CACHE-001]
 realizes: [P-AMBIGUITY-GATE]
-cross_model_divergence_check: enabled
 sealed: false
 ---
 
