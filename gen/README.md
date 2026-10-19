@@ -4,7 +4,7 @@ Regenerable output of the pipeline. Committed on every branch (large binary
 assets go through Git LFS). Never hand-edited, with exactly two declared,
 tracked exemptions — `sealed` components and file-level pinned overrides.
 
-See `SPEC_GUIDELINES.md` §1 (commit policy) and §9 (exemptions).
+See `SPEC_GUIDELINES.md` §1 (commit policy) and §8 (exemptions).
 
 ## `spec-linter/`
 

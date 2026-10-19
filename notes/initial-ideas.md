@@ -1058,12 +1058,12 @@ into a targeted edit (stays useful).
   `best_of_k` frontmatter field (mirroring `model_pin`'s pattern) lets a
   specific component opt into a higher `k` when its requirements are
   unusually numerous or interdependent.
-- Provenance (`SPEC_GUIDELINES.md` §8) gains a `retry_feedback` field
+- Provenance (`SPEC_GUIDELINES.md` §7) gains a `retry_feedback` field
   alongside `sample_index`, for the same audit reason: reconstructing why a
   winning attempt looks the way it does requires knowing whether it was
   informed by a prior failure or produced blind.
 
-See `SPEC_GUIDELINES.md` §2 (`best_of_k` row), §8 (provenance schema), and
+See `SPEC_GUIDELINES.md` §2 (`best_of_k` row), §7 (provenance schema), and
 `specs/components/{generator,verifier-orchestrator,merge-orchestrator,
 provenance-writer}/` for the current, authoritative rules this produced.
 

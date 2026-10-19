@@ -12,9 +12,13 @@ This file is a growing catalog. Most entries are still candidates — nothing
 about *computing* them is decided (where definitions live, how agents query
 them, dashboards vs. trend lines). A subset, though, are no longer speculative:
 where an entry is tagged `[gate]` *and* cited by a `D<n>` decision in
-[`initial-ideas.md`](initial-ideas.md) (orphan rates/D8, cross-model divergence
-incidents/D3, judge disagreement rate/D5, license-scan flag rate/D7), the gate
-itself is settled — only its dashboarding/trend-reporting is still open.
+[`initial-ideas.md`](initial-ideas.md) (orphan rates/D8, license-scan flag
+rate/D7), the gate itself is settled — only its dashboarding/trend-reporting is
+still open. (Cross-model divergence incidents/D3 and judge disagreement
+rate/D5 were dropped from this list of examples: the former is currently
+inactive for this build — second-model scope cut, §14 — and the latter was
+never actually backed by a real gate anywhere in the corpus, a separate,
+pre-existing gap; see each entry below.)
 
 Consumer tags: `[dev]` developer · `[stk]` stakeholder · `[agt]` system agent ·
 `[gate]` candidate hard CI gate.
@@ -58,7 +62,10 @@ Consumer tags: `[dev]` developer · `[stk]` stakeholder · `[agt]` system agent 
   `fallback_standby_build` enabled with a second model configured, per D10) —
   not merely "a second model is configured," since the toggle (D3) decouples
   the two. Low rate ⇒ a primary-model outage would halt merges more often than
-  intended. `[stk] [agt]`
+  intended. **Currently a fixed 0%**: both toggles were removed from this
+  build's active scope (single-model-only; see `notes/initial-ideas.md` §14)
+  — this metric describes what to track again once that returns, not a
+  gap in today's tracking. `[stk] [agt]`
 
 ---
 
@@ -101,7 +108,13 @@ Consumer tags: `[dev]` developer · `[stk]` stakeholder · `[agt]` system agent 
   with the dual-model check active (D3's toggle enabled, a second model
   configured — see multi-model coverage rate), how often the two disagree,
   blocking merge (per D5). A per-criterion or per-component hot spot here means
-  that criterion's wording is ambiguous.
+  that criterion's wording is ambiguous. **Not currently computable, on two
+  independent counts**: the second-model scope cut (§14) means no dual-model
+  check runs at all right now, and — separate from that, a pre-existing gap —
+  no component anywhere in the corpus actually implements a "run `llm-judge`
+  twice and compare" mechanism; `P-AMBIGUITY-GATE`'s Scope names it as an
+  in-scope detection path, but it was never given a real requirement. Left
+  here as a candidate pending both.
   `[gate] [agt]`
 - **Review iterations per spec PR**. `[dev]`
 
@@ -146,11 +159,13 @@ Consumer tags: `[dev]` developer · `[stk]` stakeholder · `[agt]` system agent 
   differs materially from the final cold regen. `[agt] [dev]`
 - **Cross-model divergence incidents** — merges blocked because a second model's
   build passed verification but diverged behaviorally from the canonical build
-  (a spec-underspecification signal caught pre-merge, per D3). `[gate] [stk]`
+  (a spec-underspecification signal caught pre-merge, per D3). **Currently a
+  fixed 0**: the mechanism this counts is removed from this build's active
+  scope (single-model-only; see `notes/initial-ideas.md` §14). `[gate] [stk]`
 - **Second-model verification-failure rate** — how often the cross-check model
   fails verification outright (capability gap, not necessarily a spec bug;
   tracked separately from divergence incidents so it doesn't get conflated with
-  spec defects). `[agt]`
+  spec defects). **Currently a fixed 0, same reason as above.** `[agt]`
 
 ---
 
