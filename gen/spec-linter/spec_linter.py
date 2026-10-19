@@ -978,6 +978,28 @@ def rule_glossary_singularity(corpus: Corpus) -> list[Finding]:
     return findings
 
 
+def rule_no_trailing_whitespace(corpus: Corpus) -> list[Finding]:
+    """R-LINT-019. Resolves item 9's cache-hit-rate concern by keeping
+    cosmetic byte differences out of committed files, rather than teaching
+    spec_bundle_hash a normalization rule that Markdown's own
+    whitespace-sensitive constructs (CommonMark hard line breaks, nested-list
+    indentation) could make unsafe. Scans every file that can reach
+    spec_bundle_hash's input: corpus.docs plus the glossary (which
+    rule-loading excludes from corpus.docs to avoid double-definition
+    parsing, per `_load_corpus`).
+    """
+    findings = []
+    paths = [doc.path for doc in corpus.docs] + list(corpus.glossary_files)
+    for path in paths:
+        text = path.read_text(encoding="utf-8")
+        rel = str(path.relative_to(corpus.repo_root))
+        for i, line in enumerate(text.splitlines(), start=1):
+            if line != line.rstrip():
+                findings.append(Finding("R-LINT-019", SEVERITY_FAIL, rel, i,
+                                         "line has trailing whitespace"))
+    return findings
+
+
 ALL_RULES = [
     rule_frontmatter_completeness,
     rule_no_stray_frontmatter,
@@ -996,6 +1018,7 @@ ALL_RULES = [
     rule_size_caps,
     rule_secret_field_safety,
     rule_glossary_singularity,
+    rule_no_trailing_whitespace,
 ]
 
 

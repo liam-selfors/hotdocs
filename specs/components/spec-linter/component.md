@@ -27,11 +27,13 @@ D16); dependency-graph acyclicity; `R-id`/`G-id` formation and RFC 2119
 usage; forward and backward traceability between requirements and
 acceptance criteria; acceptance-criterion well-formedness; glossary
 conformance; the D2 size caps; `specs/vars/` secret-field safety; glossary
-singularity (D14).
+singularity (D14); no trailing whitespace anywhere in a spec file
+(R-LINT-019) — keeps `spec_bundle_hash` (`spec-bundle-assembler`) safely
+hashing raw bytes without a cosmetic-diff cache-hit cost.
 
 **Out of scope:** generation; verification of generated code's actual
 behavior. **Mostly, but not entirely, free of model calls and judgment** —
-17 of 18 requirements are pure structural/textual checks; R-LINT-015 is a
+18 of 19 requirements are pure structural/textual checks; R-LINT-015 is a
 deliberate, narrow exception (see its entry and `constraints.md`) for the one
 case in this component's scope that is genuinely about meaning, not
 structure, and D5 says exactly that's when `llm-judge` is the right tool.

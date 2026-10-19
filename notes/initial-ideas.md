@@ -1095,6 +1095,42 @@ See `specs/components/criterion-compiler/requirements/R-COMPILE-011.md` and
 
 ---
 
+### D19 — `spec_bundle_hash` stays raw bytes, permanently; cache-hit-rate concern moves to a lint rule, not the hash function
+
+Resolved item 9 (`spec-bundle-assembler`'s open question: raw bytes vs. a
+normalized form for `spec_bundle_hash`). Raw bytes is confirmed as the
+permanent answer, not a provisional one pending cache-hit-rate data — the
+risk a normalized hash introduces isn't something more data would resolve.
+
+The concrete risk: these are Markdown files, and Markdown is not
+whitespace-insensitive. Two-or-more trailing spaces are CommonMark's
+hard-line-break syntax; indentation is load-bearing inside nested lists and
+code fences. The open question's own example ("trailing whitespace
+stripped") is exactly the kind of normalization that could make two
+**meaningfully different** spec bundles hash identically — a correctness
+risk, not just a missed optimization, and precisely the kind of silent
+failure this methodology is built to avoid everywhere else (D5/D7/D12/D16's
+recurring "never silent").
+
+The cache-hit-rate concern itself is real and still gets addressed — just
+at a different layer. `spec-linter` gains `R-LINT-019`: a fail-severity
+rule rejecting trailing whitespace anywhere in a spec file (frontmatter
+included), scanning every file that can reach `spec_bundle_hash`'s input.
+This keeps the cosmetic diff from ever reaching a committed file in the
+first place, so the cache-hit benefit is real rather than approximate, and
+the hash function stays dead simple (raw bytes, nothing taught to ignore
+anything) and therefore trustworthy. Implemented in the real
+`gen/spec-linter/spec_linter.py` and covered by a real pytest test
+(`verification/spec-linter/test_lint_rules.py`), per this project's
+standing discipline of validating every spec change against the actual
+tool.
+
+See `specs/components/spec-bundle-assembler/component.md`'s resolved open
+question and `specs/components/spec-linter/requirements/R-LINT-019.md` for
+the current, authoritative rule this produced.
+
+---
+
 ## 12. Open questions
 
 _None outstanding — Q9–Q13 from the review pass are now D10–D14; D15 was a

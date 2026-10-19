@@ -291,3 +291,12 @@ def test_ac_lint_018b_guarantee_owner_not_in_depends_on(corpus_root):
     report = run_lint(corpus_root)
     assert has_finding(report, "R-LINT-018")
     assert any("comp-bar" in f.message for f in report.findings if f.rule_id == "R-LINT-018")
+
+
+def test_ac_lint_019_trailing_whitespace(corpus_root):
+    req = _comp(corpus_root) / "requirements" / "R-FOO-002.md"
+    req.write_text(
+        "# R-FOO-002\n\n**R-FOO-002** — The component MUST also do a second thing.  \n"
+    )
+    report = run_lint(corpus_root)
+    assert has_finding(report, "R-LINT-019")
