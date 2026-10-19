@@ -8,9 +8,15 @@
   the properties D11/D13's cache-key correctness actually depends on, not
   "the model always says the same thing."
 - **Defense-in-depth on write paths.** R-GEN-009's sealed/pinned-override
-  check MUST be enforced here even though `merge-orchestrator` should never
-  call this component for a sealed component's regeneration in the first
-  place — a second, independent layer, not a redundant one to remove.
+  check MUST be enforced here even though `merge-orchestrator`'s own
+  routing requirement (R-MERGE-015) means it should never call this
+  component for a sealed component's regeneration in the first place — a
+  second, independent layer, not a redundant one to remove now that the
+  primary layer is a real requirement rather than an assumption.
+- **No wasted model calls on a known-refused target.** R-GEN-009's
+  precondition check MUST run, and MUST short-circuit, before any model
+  call — paying for a call whose result can never be written is pure
+  waste.
 - **No silent partial output.** A model-call error MUST leave
   `gen/<component>/` untouched — never a half-written tree.
 - **Credential handling.** `VAR-ANTHROPIC-API-KEY` MUST never appear in

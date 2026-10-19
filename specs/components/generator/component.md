@@ -84,10 +84,15 @@ See `constraints.md`.
   R-GEN-008's "report a model-call error," which is about *classification*,
   not retry policy) — not addressed here; candidate home is `pipeline/`
   configuration once that exists for real, not this component's spec.
-- Whether `gen/<component>/.overrides.json` paths should be read by this
-  component directly, or whether `merge-orchestrator` should filter the
-  write-set before calling `generator` at all. R-GEN-009 states the
-  invariant; which component enforces it mechanically is not decided.
+- ~~Whether `.overrides.json` paths should be read by this component
+  directly, or whether `merge-orchestrator` should filter the write-set
+  first~~ — resolved: both, as two independent layers. `generator` reads
+  sealed/`.overrides.json` status directly as a precondition check, before
+  any model call (R-GEN-009, refined). `merge-orchestrator` gained its own
+  routing requirement (R-MERGE-015) to skip calling `generator` for a
+  sealed component in the first place — the primary, cost-aware path;
+  `generator`'s own check is the independent backstop, not the only
+  enforcement.
 
 ## Change log
 

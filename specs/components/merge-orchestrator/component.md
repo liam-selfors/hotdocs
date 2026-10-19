@@ -30,7 +30,11 @@ retries generation on a verification failure, and the answer is here, not
 inside `generator` itself. Since D16: also owns running golden-scenario
 verification against the real assembled system (R-MERGE-014), reusing the
 exact same `criterion-compiler`/`test_author`/`judge` dispatch already
-wired for `verifier-orchestrator` — not a second dispatch mechanism.
+wired for `verifier-orchestrator` — not a second dispatch mechanism. Also
+owns routing a sealed component away from generation entirely (R-MERGE-015)
+— the primary layer of the sealed/pinned-override write-protection
+invariant, previously only asserted as something this component "should"
+do in `generator`'s own spec, never specified here until now.
 
 **Out of scope:** any gate's own logic — this component calls, it doesn't
 reimplement.
@@ -55,7 +59,7 @@ See `interface/data/`.
 
 See `acceptance/`.
 
-All fourteen criteria are `kind: compiled` — tested by mocking every
+All sixteen criteria are `kind: compiled` — tested by mocking every
 dependency and asserting on call order/arguments, the same pattern
 `verifier-orchestrator` and `cross-model-divergence-checker` already
 established for coordination logic. A twelfth component in this corpus
@@ -77,6 +81,15 @@ See `constraints.md`.
   execution or just "no artificial sequential dependency" at the spec
   level (leaving scheduling to the implementation) — this spec states the
   *independence*, not a specific concurrency mechanism.
+- Whether R-MERGE-015's sealed-component path still participates in
+  R-MERGE-003's cache-hit short-circuit, and if so, what a "cache hit"
+  even means for a component whose code is hand-maintained rather than
+  regenerated (the spec bundle hash could match a prior verified commit,
+  but nothing about regeneration risk — the usual reason freshness
+  matters — applies the same way to code a human controls directly). Not
+  addressed here; R-MERGE-015 as written applies R-MERGE-003's existing
+  precondition ("for a cache miss") without re-examining whether that
+  precondition means the same thing for a sealed component.
 
 ## Change log
 
