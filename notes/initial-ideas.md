@@ -1543,6 +1543,51 @@ current, authoritative rules this produced.
 
 ---
 
+### D27 — `spec-linter`'s requirement-traceability rules (R-LINT-008/009) adopted onto `nodes`/`edges`, closing D24's one deferred item
+
+D24 deferred this because it looked like it needed a second graph
+vocabulary (`R-id`/`AC-id` nodes, a `Covers:`-derived edge) separate from
+`nodes`/`edges`. Reading `spec_linter.py`'s actual
+`rule_forward_traceability`/`rule_backward_traceability` implementation
+before deciding (rather than reasoning from the rule names alone)
+changed that assessment: R-LINT-008 only needs a *count* of `covers`
+edges per requirement; R-LINT-009 only needs each edge's *target*
+validated against known `R-id`/`P-id` nodes. Neither needs `AC-id` or
+`GS-id` as addressable nodes — golden scenarios in particular, living as
+inline `### GS-...` headings inside a product file rather than their own
+file, never have to be resolved as a node, only extracted as an edge
+*target value*. The real scope was smaller than D24 estimated.
+
+Presented as a choice regardless of the smaller real scope — minimal
+extension (just enough for these two rules), full node modeling
+(`requirement`/`acceptance`/`golden_scenario` all as proper `nodes`), or
+not adopting this one at all. **Chose full node modeling**, for a
+complete graph rather than one trimmed to exactly today's two
+consumers, even though neither current rule strictly needs the extra
+completeness.
+
+- **`nodes`** gains three kinds: `requirement` (R-id, filename-derived,
+  frontmatter-less like `guarantee`), `acceptance` (AC-id, same), and
+  `golden_scenario` (GS-id — the one kind extracted from headings inside
+  a file's body rather than from a glob, since it has no file of its
+  own).
+- **`edges`** gains `covers`: from each component-acceptance file's
+  single `Covers:` line (D15: the file *is* one criterion), and from
+  each golden scenario's `Covers:` line paired with the heading
+  immediately above it inside its product file — the one branch flagged
+  explicitly in `graph-query-engine.md` as genuinely harder than every
+  other view built so far, since it breaks the "one row per file" shape
+  everything else here has.
+- **`spec-linter`'s `R-LINT-021`** (new) adopts both rules onto this
+  extended surface.
+
+See `specs/architecture/graph-query-engine.md`'s "Query surface" and
+"Scope of adoption" sections, and `specs/components/spec-linter/
+requirements/R-LINT-021.md` for the current, authoritative rules this
+produced.
+
+---
+
 ## 12. Open questions
 
 _None outstanding — Q9–Q13 from the review pass are now D10–D14; D15 was a

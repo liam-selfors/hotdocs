@@ -91,12 +91,17 @@ below) but MUST NOT redefine these four — and if a second component ever
 needs one of its own local views, that is the signal to promote it here
 instead, same as `component_provenance`'s own history.
 
-**`nodes`** — one row per spec id in the corpus, across all four kinds.
+**`nodes`** — one row per spec id in the corpus, across seven kinds.
 Components, product capabilities, and vars come from their own
-frontmatter; **guarantees carry no frontmatter at all** (D15 — unit-file
-identity is the filename, not a `---` block), so a guarantee row is built
-from `read_text()` and its filename alone, with `owner_component_id`
-extracted from its path rather than read from any field:
+frontmatter; **guarantees, requirements, and acceptance criteria carry no
+frontmatter at all** (D15 — unit-file identity is the filename, not a
+`---` block), so those rows are built from `read_text()` and filenames
+alone, with `owner_component_id` extracted from path rather than read
+from any field. **Golden scenarios are the one kind with no file of
+their own** — they're `### GS-...` headings inside a product
+capability's single file (`SPEC_GUIDELINES.md` §5), so their rows come
+from extracting headings out of that file's body text, not from a glob
+at all:
 
 ```sql
 CREATE VIEW nodes AS
@@ -110,21 +115,43 @@ SELECT id, title, status, 'var', NULL
 FROM read_yaml_frontmatter('specs/vars/*.md', filename:=true)
 UNION ALL
 SELECT
-  regexp_extract(filename, '(G-[A-Z0-9-]+)\.md$', 1), NULL, NULL, 'guarantee',
+  regexp_extract(filename, '(G-[A-Za-z0-9-]+)\.md$', 1), NULL, NULL, 'guarantee',
   'comp-' || regexp_extract(filename, 'specs/components/([^/]+)/interface/guarantees/', 1)
-FROM read_text('specs/components/*/interface/guarantees/*.md', filename:=true);
+FROM read_text('specs/components/*/interface/guarantees/*.md', filename:=true)
+UNION ALL
+SELECT
+  regexp_extract(filename, '(R-[A-Za-z0-9-]+)\.md$', 1), NULL, NULL, 'requirement',
+  'comp-' || regexp_extract(filename, 'specs/components/([^/]+)/requirements/', 1)
+FROM read_text('specs/components/*/requirements/*.md', filename:=true)
+UNION ALL
+SELECT
+  regexp_extract(filename, '(AC-[A-Za-z0-9-]+)\.md$', 1), NULL, NULL, 'acceptance',
+  'comp-' || regexp_extract(filename, 'specs/components/([^/]+)/acceptance/', 1)
+FROM read_text('specs/components/*/acceptance/*.md', filename:=true)
+UNION ALL
+SELECT UNNEST(regexp_extract_all(content, '### (GS-[A-Za-z0-9-]+)', 1)), NULL, NULL, 'golden_scenario', NULL
+FROM read_text('specs/product/*.md', filename:=true);
 ```
 
-This is the fix for a gap `R-IMPACT-009`'s original wording left open:
-that wording named only the three frontmatter sources, with no mechanism
-for enumerating guarantee nodes at all — meaning the target side of a
-`depends_on_guarantees` edge was never actually resolvable against a real
-node, only assumed to exist. `nodes` closes that gap, and
-`owner_component_id` is what lets `spec-linter`'s R-LINT-018 check (below)
-be a plain join instead of bespoke path-parsing.
+The first four kinds (`component`/`capability`/`var`/`guarantee`) fix a
+gap `R-IMPACT-009`'s original wording left open: that wording named only
+the three frontmatter sources, with no mechanism for enumerating
+guarantee nodes at all — the target side of a `depends_on_guarantees`
+edge was never actually resolvable against a real node, only assumed to
+exist. `owner_component_id` is what lets `spec-linter`'s R-LINT-018 check
+(below) be a plain join instead of bespoke path-parsing; it's `NULL` for
+`golden_scenario` rows since their parent is a capability, not a
+component — the `covers` edge below carries that relationship instead.
 
-**`edges`** — one row per `(source_id, target_id, edge_type)`, unnested
-from each component's list-valued frontmatter fields:
+**`edges`** — one row per `(source_id, target_id, edge_type)`. The first
+four edge types are unnested from each component's list-valued
+frontmatter fields; `covers` is extracted from `Covers:` lines in
+requirement-traceability files' body text (`spec-linter`'s
+`rule_forward_traceability`/`rule_backward_traceability`, R-LINT-008/009)
+rather than from frontmatter, since that's where `Covers:` actually
+lives — a component-acceptance file carries exactly one (D15: the file
+*is* one criterion), a product file carries one per golden scenario,
+paired with the heading immediately above it:
 
 ```sql
 CREATE VIEW edges AS
@@ -138,8 +165,30 @@ SELECT id, UNNEST(uses_var), 'uses_var'
 FROM read_yaml_frontmatter('specs/components/*/component.md')
 UNION ALL
 SELECT id, UNNEST(depends_on_guarantees), 'depends_on_guarantees'
-FROM read_yaml_frontmatter('specs/components/*/component.md');
+FROM read_yaml_frontmatter('specs/components/*/component.md')
+UNION ALL
+SELECT
+  regexp_extract(filename, '(AC-[A-Za-z0-9-]+)\.md$', 1),
+  regexp_extract(content, 'Covers:\s*(\S+)', 1), 'covers'
+FROM read_text('specs/components/*/acceptance/*.md', filename:=true)
+UNION ALL
+SELECT m['gs_id'], m['target'], 'covers'
+FROM (
+  SELECT UNNEST(regexp_extract_all(
+    content, '### (GS-[A-Za-z0-9-]+)\s*\nCovers:\s*(\S+)', ['gs_id', 'target']
+  )) AS m
+  FROM read_text('specs/product/*.md', filename:=true)
+);
 ```
+
+**The last `edges` branch is the one genuinely harder piece of this
+corpus's DuckDB adoption** — pairing a golden scenario's heading with
+its own `Covers:` line in one pass, rather than the clean "one row per
+file" shape every other view here has. Flagged plainly rather than
+glossed over: the exact capture-group extraction function/signature
+above is illustrative of intent, same as every other SQL sketch in this
+document, but implementing this branch is where that gap between
+sketch and working query is most likely to need real adjustment.
 
 **`component_docs`** — one row per component, frontmatter fields joined
 with the file's full raw text (frontmatter included), for anything that
@@ -207,11 +256,10 @@ pointing back to this document, exactly as `R-IMPACT-009` does:
   (R-GRAPH-001/002) is `nodes`/`edges` directly; its per-node annotations
   (R-GRAPH-003: verification status, provenance summary, size-vs-cap
   status, sealed/override) and corpus-wide orphan rates (R-GRAPH-004/005)
-  are joins and aggregates against `nodes`/`edges` plus two views scoped
-  to this component alone (`component_provenance`, `component_size` —
-  see `R-GRAPH-009`), since no other component needs verification/
-  provenance/size data joined onto the graph. Its JSON-writing role is
-  unchanged (R-GRAPH-006/008: `verification/corpus-graph.json` is still a
+  are joins and aggregates against `nodes`/`edges`/`component_provenance`
+  plus `component_size`, the one view still scoped to this component
+  alone (see `R-GRAPH-009`). Its JSON-writing role is unchanged
+  (R-GRAPH-006/008: `verification/corpus-graph.json` is still a
   committed, deterministic artifact — only the *construction* step, not
   the output format, moves onto this engine).
 - **`golden-scenario-verifier`'s capability-intersection lookup**
@@ -222,19 +270,24 @@ pointing back to this document, exactly as `R-IMPACT-009` does:
   with the rest of the golden-scenario gate when D25 extracted
   `golden-scenario-verifier` out of `merge-orchestrator` to relieve that
   component's fan-out/word-count caps.
-
-**Not adopted, flagged as a distinct future candidate, not folded into
-the above:** `spec-linter`'s requirement-traceability rules
-(`rule_forward_traceability`/R-LINT-008, `rule_backward_traceability`/
-R-LINT-009) walk a *different* graph — `R-id`/`AC-id` nodes (also
-frontmatter-less unit files, same as guarantees) joined by each
-acceptance file's `Covers:` tag, which is prose inside the file body, not
-a list-valued frontmatter field. Modeling it would mean extending the
-node/edge vocabulary this document defines (today: components,
-capabilities, vars, guarantees) to cover requirement- and
-acceptance-criterion-level ids too, which is a bigger scope change than
-reusing the existing `nodes`/`edges` shape — worth its own decision later,
-not assumed here.
+- **`review-packet-builder`** (`R-PACKET-011`) — every field it reports
+  from `verifier-orchestrator`/`license-scanner`/`secret-scanner`/
+  `cache-manager` is read via `component_provenance` instead of a live
+  call into any of them, since `provenance-writer` (which it already
+  depended on) already collected all of it. Dropped its `depends_on`
+  from 5 to 1 (D26).
+- **`spec-linter`'s requirement-traceability rules**
+  (`rule_forward_traceability`/R-LINT-008, `rule_backward_traceability`/
+  R-LINT-009, `R-LINT-021`, D27) — originally flagged below as a
+  distinct, deferred candidate because it appeared to need a second graph
+  vocabulary (`R-id`/`AC-id`/`GS-id` nodes). Reading `spec_linter.py`'s
+  actual implementation showed the real need is smaller: R-LINT-008 only
+  counts `covers`-edges per requirement, R-LINT-009 only validates each
+  edge's *target* against `nodes` — neither needs `AC-id`/`GS-id` as
+  addressable nodes for its own check to work. D27 adopted the fuller
+  shape anyway (`requirement`/`acceptance`/`golden_scenario` all modeled
+  as proper `nodes`, not just the minimum each rule strictly needs), for
+  a complete graph rather than one trimmed to today's two consumers.
 
 ## What this document does not cover
 
