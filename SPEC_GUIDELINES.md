@@ -52,9 +52,16 @@ tools/                 # hand-written repo-maintenance/authoring scripts —
                        # this document). Scaffolding convenience only.
 notes/                 # brainstorming — non-normative, not read by the pipeline
 .hotdocs/              # LOCAL ONLY, gitignored — merge-tracking records
-                       # (merge-tracker, D22) and any DuckDB index built
-                       # over them. Never committed, never read by any
-                       # gate's pass/fail decision — purely observability.
+  tracking/            # (merge-tracker, D22) one record per merge attempt
+  attempts/            # (merge-tracker, D32) one record per per-component
+                       # generation+verification attempt, full detail —
+                       # what D31's retired best-of-k loop used to fold
+                       # into one provenance manifest, now the only place
+                       # a blocked attempt's detail survives at all
+  calls/               # (llm-endpoint, D32) one record per model call,
+                       # caller-agnostic, transport-level only
+                       # All of the above: never committed, never read by
+                       # any gate's pass/fail decision — purely observability.
 ```
 
 - `specs/` **MUST NOT** contain executable code of any kind, generated or

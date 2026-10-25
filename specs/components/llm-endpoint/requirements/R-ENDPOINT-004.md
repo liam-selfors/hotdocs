@@ -6,9 +6,11 @@
   established for `generator`, now owned at the layer that actually
   touches the network rather than restated by every caller. A call either
   succeeds, or fails within its backend's own bounded timeout, reported
-  as `model_call_error` (network, auth, rate-limit, or timeout — the
-  vocabulary `R-GEN-008` originally defined, owned here now) exactly once
-  — no internal attempt loop. Recovery from a `model_call_error` stays
+  as a `model_call_error` object with a `category` field — exactly one
+  of `network`/`auth`/`rate_limit`/`timeout`, a real, queryable field
+  (`D32`; see `ModelResponse`), not just a classification named in prose
+  — exactly once, no internal attempt loop. Recovery from a
+  `model_call_error` stays
   one layer up, same as before (re-running the merge, `R-MERGE-017`), not
   this component's job.
 

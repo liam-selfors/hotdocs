@@ -26,3 +26,17 @@ read_json('.hotdocs/tracking/*.json') ORDER BY timestamp DESC LIMIT
 ?` (optionally filtered to one component) — not a second implementation
 of anything, just this component saving a caller from typing the query
 by hand (R-TRACK-006).
+
+```
+write_attempt_record(
+    component_id: str,
+    generation_result: GenerationResult,
+    verification_report: VerificationReport | None,
+    spec_bundle_hash: str,
+    repo_root: Path,
+) -> AttemptRecord
+```
+
+Writes to `.hotdocs/attempts/<component_id>/` (R-TRACK-007) and returns
+the record. Called once per component per merge attempt, by
+`merge-orchestrator`, regardless of outcome.

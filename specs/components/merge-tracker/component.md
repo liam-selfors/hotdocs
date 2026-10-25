@@ -44,6 +44,16 @@ directly — this component's job ends at writing a well-documented,
 directly-queryable shape, not building a second query layer on top of a
 database that already is one.
 
+**Since D32, also writes `AttemptRecord`s to `.hotdocs/attempts/`** — the
+full `GenerationResult`/`VerificationReport` for one component's one
+generation attempt per merge, taken as direct parameters the same way
+merge-level facts already are. A separate store from `TrackingRecord`,
+not a change to its deliberately flattened shape — this closes the gap
+`D31`'s retirement of best-of-k opened: a blocked merge commits no
+provenance at all, so without this, a failed attempt's full diagnostic
+detail would exist only in `merge-orchestrator`'s process memory for one
+merge, then vanish.
+
 ## Definitions
 
 No deltas from `specs/glossary.md`.
@@ -64,7 +74,7 @@ See `interface/data/`.
 
 See `acceptance/`.
 
-All six criteria are `kind: compiled` — assembling already-produced facts
+All seven criteria are `kind: compiled` — assembling already-produced facts
 into a JSON file is pure, deterministic logic; nothing here needs a model
 or judgment, same case `spec-bundle-assembler`/`provenance-writer` already
 made.

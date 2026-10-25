@@ -18,3 +18,8 @@
   arguments MAY return different `text` — caching that result, if a
   caller wants repeatability or cost control, is `cache-manager`'s job
   (via each caller's own cache key), not this component's.
+- **The call log (`R-ENDPOINT-006`) is a local write side effect, not a
+  gate input.** `.hotdocs/calls/` follows the same boundary `.hotdocs/
+  tracking/` already does (`SPEC_GUIDELINES.md` §1) — never read by any
+  gate's pass/fail decision, purely for a human or analytical tool to
+  query afterward.

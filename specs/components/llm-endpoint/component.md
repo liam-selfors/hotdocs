@@ -34,8 +34,10 @@ vendor-agnostic string parameter, but nothing previously owned the
 
 **In scope:** resolving a model identifier to the right vendor backend;
 authenticating and dispatching one completion request; normalizing every
-backend's failure modes into one `model_call_error` vocabulary
-(`R-GEN-008`'s definition, now owned here).
+backend's failure modes into one structured `model_call_error` vocabulary
+(`R-GEN-008`'s definition, now owned here, given real queryable shape by
+`D32`); writing a low-level, caller-agnostic call log of every dispatch
+(`R-ENDPOINT-006`).
 
 **Out of scope, deliberately:** prompt construction and response parsing
 for any specific task (what a *generation* prompt or a *judge* prompt

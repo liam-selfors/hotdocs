@@ -112,7 +112,10 @@ Specced in full depth so far:
   of depending on `merge-orchestrator`'s own `MergeResult` type, the same
   "need the caller's facts without depending on the caller" pattern
   `review-packet-builder` already established, used here specifically to
-  avoid a dependency cycle.
+  avoid a dependency cycle. Since D32, also writes a separate,
+  full-detail `AttemptRecord` per component per merge attempt to
+  `.hotdocs/attempts/` — closing the gap D31's retired best-of-k loop
+  opened (a blocked merge commits no provenance at all).
 - **`merge-tracker-ui`** — mostly `kind: compiled` (rendering is a pure
   function of already-written `TrackingRecord` data), one `generated-test`
   criterion for the client-side DuckDB-WASM query itself actually running
@@ -173,7 +176,9 @@ Specced in full depth so far:
   all. The single vendor-agnostic transport every model call in the
   pipeline now dispatches through; v1 ships exactly one backend
   (Anthropic) by design, not as an unfinished gap (D18/D20's
-  anti-premature-abstraction stance).
+  anti-premature-abstraction stance). Since D32, `model_call_error` is a
+  structured `{category, message}` object, not a boolean, and every
+  call writes a caller-agnostic record to `.hotdocs/calls/`.
 
 **All 20 architecture components are now specced in full depth** (15
 original + `test-author` + `spec-completeness-assistant`, both added

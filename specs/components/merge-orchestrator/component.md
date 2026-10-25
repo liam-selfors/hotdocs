@@ -23,16 +23,22 @@ this list.
 
 ## Scope
 
-**In scope:** sequencing and parallelizing calls to every other component;
-owning the diagnostic-guided best-of-k retry loop (D3, R-MERGE-005/016) —
-nothing before this assigned who retries generation on a verification
-failure. Since D16: also calls `golden-scenario-verifier` once every
-component has passed per-component verification (R-MERGE-014) — the
-dispatch itself moved there (D25), this component only owns *when* and
-*with what* it's called. Since D30, the real `test_author`/`judge`
-callables wired into both that call and `verifier-orchestrator`'s
-(R-MERGE-004) are backed by `llm-endpoint`. Also routes a sealed component away from
-generation entirely (R-MERGE-015), and runs every impacted component to
+**In scope:** sequencing and parallelizing calls to every other
+component; calling `generator` exactly once per cache-miss component per
+merge attempt (R-MERGE-005) — since `D31` retired the best-of-k retry
+loop that used to call it again on failure, there is no retry decision
+left to own here, only the one call and an immediate block on failure.
+Since `D32`, also writes a per-attempt record (`R-MERGE-021`) via
+`merge-tracker` right after that call (and the verification call, if
+reached) concludes, so a human has full diagnostic detail before
+deciding whether to just re-run or fix the spec first. Since D16: also
+calls `golden-scenario-verifier` once every component has passed
+per-component verification (R-MERGE-014) — the dispatch itself moved
+there (D25), this component only owns *when* and *with what* it's
+called. Since D30, the real `test_author`/`judge` callables wired into
+both that call and `verifier-orchestrator`'s (R-MERGE-004) are backed by
+`llm-endpoint`. Also routes a sealed component away from generation
+entirely (R-MERGE-015), and runs every impacted component to
 completion before evaluating block status (R-MERGE-017) — no fail-fast —
 which is what makes re-running a blocked merge a complete, free recovery
 path (R-MERGE-018).
