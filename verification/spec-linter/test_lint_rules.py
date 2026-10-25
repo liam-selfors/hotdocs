@@ -231,6 +231,43 @@ def test_ac_lint_022_does_not_fire_on_one_crowded_dimension(corpus_root):
     assert not has_finding(report, "R-LINT-022", severity="warn")
 
 
+def test_ac_lint_023_fires_on_long_requirement_file(corpus_root):
+    requirement = _comp(corpus_root) / "requirements" / "R-FOO-001.md"
+    requirement.write_text(requirement.read_text() + "\n\n" + " ".join(["word"] * 520))
+    report = run_lint(corpus_root)
+    assert has_finding(report, "R-LINT-023", severity="fail")
+    finding = next(f for f in report.findings if f.rule_id == "R-LINT-023")
+    assert "R-FOO-001" in finding.file
+
+
+def test_ac_lint_023_does_not_fire_on_short_file(corpus_root):
+    report = run_lint(corpus_root)
+    assert not has_finding(report, "R-LINT-023", severity="fail")
+    assert not has_finding(report, "R-LINT-023", severity="warn")
+
+
+def test_guarantee_count_cap(corpus_root):
+    guarantees_dir = _comp(corpus_root) / "interface" / "guarantees"
+    guarantees_dir.mkdir(parents=True, exist_ok=True)
+    for i in range(1, 12):
+        (guarantees_dir / f"G-FOO-{i:03d}.md").write_text(f"# G-FOO-{i:03d}\n\nSome guarantee text.\n")
+    report = run_lint(corpus_root)
+    assert has_finding(report, "R-LINT-012", severity="fail")
+    assert any("guarantee_count" in f.message for f in report.findings if f.rule_id == "R-LINT-012")
+
+
+def test_acceptance_count_cap(corpus_root):
+    acceptance_dir = _comp(corpus_root) / "acceptance"
+    for i in range(2, 52):
+        (acceptance_dir / f"AC-FOO-{i:03d}.md").write_text(
+            f"# AC-FOO-{i:03d}\n\nCovers: R-FOO-001\nKind: compiled\n\n"
+            "```gherkin\nGiven a thing\nWhen it happens\nThen it works\n```\n"
+        )
+    report = run_lint(corpus_root)
+    assert has_finding(report, "R-LINT-012", severity="fail")
+    assert any("acceptance_count" in f.message for f in report.findings if f.rule_id == "R-LINT-012")
+
+
 def test_ac_lint_013_secret_var_with_default(corpus_root):
     vars_dir = corpus_root / "specs" / "vars"
     vars_dir.mkdir(parents=True)

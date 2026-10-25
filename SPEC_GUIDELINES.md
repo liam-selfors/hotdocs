@@ -300,6 +300,18 @@ Below that bar, size caps are linter-enforced:
 | Public interface surface elements | 10 | 20 |
 | `depends_on` count (fan-out) | 7 | — (warn only) |
 | Dependents count (fan-in) | 10 | — (warn only) |
+| Guarantees (`G-id`s) per component (D29) | 5 | 10 |
+| Acceptance criteria (`AC-id`s) per component (D29) | 25 | 50 |
+| **Per-file** words, for any single file under `requirements/` or `acceptance/` (D29) — distinct from the spec-bundle row above, which is a whole-bundle aggregate | 250 | 500 |
+
+The last three rows are a first pass (D29), calibrated against this
+corpus's own content at the time they were added rather than an a
+priori judgment — expect them to be revisited as more components
+exercise them. `guarantee_count` in particular had no cap at all
+before: the interface-surface-elements row deliberately excludes
+`interface/guarantees/` (a promise, not a callable surface element — see
+`_count_interface_surface`'s own docstring), which meant an unbounded
+number of guarantee files could previously accumulate with zero signal.
 
 Components are a **flat namespace** — no nesting. `architecture/` is the only
 place subsystem grouping is expressed.

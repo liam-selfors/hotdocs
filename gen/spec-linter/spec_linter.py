@@ -9,7 +9,7 @@ from. See `.provenance.json` alongside this file and
 `verification/spec-linter/BOOTSTRAP.md` for the honest account of what was
 bootstrapped, what was ambiguous, and what was decided unilaterally.
 
-Implements all twenty-two R-LINT-* requirements from
+Implements all twenty-three R-LINT-* requirements from
 `specs/components/spec-linter/requirements/`, matching the CLI and
 `LintReport` contract in `specs/components/spec-linter/interface/` exactly.
 
@@ -867,7 +867,23 @@ SIZE_CAPS = {
     "interface_surface": (10, 20),
     "fan_out": (7, None),
     "fan_in": (10, None),
+    # Added per R-LINT-023/SPEC_GUIDELINES.md Sec4 (D29) — first-pass
+    # thresholds, explicitly open to recalibration once real corpus growth
+    # tests them. guarantee_count in particular had zero cap visibility
+    # before this: interface_surface deliberately excludes guarantees
+    # (a promise, not a callable surface element), so an unbounded number
+    # of them could previously accumulate with no signal at all.
+    "guarantee_count": (5, 10),
+    "acceptance_count": (25, 50),
 }
+
+# R-LINT-023 (D29): a per-FILE word cap, distinct from spec_bundle_words'
+# whole-bundle aggregate above — flags which specific unit file is dense,
+# rather than only the bundle total. Applies to requirements/ and
+# acceptance/ files specifically: D15's design intent is that each is one
+# atomic, single-purpose unit, so an oversized one is a direct signal that
+# assumption broke down, not just "this component has a lot of content."
+PER_FILE_WORD_CAP = (250, 500)
 
 
 def _size_measurements(corpus: Corpus) -> dict[str, dict[str, int]]:
@@ -915,6 +931,8 @@ def _size_measurements(corpus: Corpus) -> dict[str, dict[str, int]]:
             "interface_surface": iface_surface,
             "fan_out": fan_out,
             "fan_in": fan_in.get(name, 0),
+            "guarantee_count": len(comp.interface_guarantees),
+            "acceptance_count": len(comp.acceptance),
         }
     return result
 
@@ -967,6 +985,31 @@ def rule_decomposition_signal(corpus: Corpus) -> list[Finding]:
                 f"{len(crowded)} size-cap dimensions over warn threshold at once: "
                 f"{dims} — a decomposition signal per SPEC_GUIDELINES.md §4, "
                 f"not just {len(crowded)} independent near-misses"))
+    return findings
+
+
+def rule_unit_file_size(corpus: Corpus) -> list[Finding]:
+    """R-LINT-023 (D29, SPEC_GUIDELINES.md §4).
+
+    A per-FILE word cap, distinct from R-LINT-012's spec_bundle_words
+    aggregate — names the specific oversized file rather than only the
+    bundle total. Scoped to requirements/ and acceptance/: D15's intent is
+    that each is one atomic, single-purpose unit, so one running long is a
+    direct signal that assumption broke down for that file specifically.
+    """
+    findings = []
+    warn_at, fail_at = PER_FILE_WORD_CAP
+    for comp in corpus.components.values():
+        if not comp.root:
+            continue
+        for doc in list(comp.requirements.values()) + list(comp.acceptance.values()):
+            words = len(doc.body.split())
+            if words > fail_at:
+                findings.append(Finding("R-LINT-023", SEVERITY_FAIL, doc.rel_path, 1,
+                                         f"{words} words, exceeding per-file hard-fail threshold {fail_at}"))
+            elif words > warn_at:
+                findings.append(Finding("R-LINT-023", SEVERITY_WARN, doc.rel_path, 1,
+                                         f"{words} words, exceeding per-file warn threshold {warn_at}"))
     return findings
 
 
@@ -1055,6 +1098,7 @@ ALL_RULES = [
     rule_glossary_conformance,
     rule_size_caps,
     rule_decomposition_signal,
+    rule_unit_file_size,
     rule_secret_field_safety,
     rule_glossary_singularity,
     rule_no_trailing_whitespace,
