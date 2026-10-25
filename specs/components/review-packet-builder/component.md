@@ -3,7 +3,7 @@ id: comp-review-packet-builder
 title: Review Packet Builder
 status: draft
 owners: [pipeline-team]
-depends_on: [comp-provenance-writer, comp-verifier-orchestrator, comp-license-scanner, comp-secret-scanner, comp-cache-manager]
+depends_on: [comp-provenance-writer]
 realizes: [P-ZERO-EDIT, P-COMPLIANCE-GATE]
 sealed: false
 ---
@@ -19,9 +19,12 @@ residual risk — never the generated code itself.
 
 ## Scope
 
-**In scope:** formatting already-computed results from `provenance-writer`,
-`verifier-orchestrator`, `license-scanner`, and `secret-scanner` into one
-reviewable document.
+**In scope:** formatting already-computed results — verification,
+license/secret scan, cache-hit status — into one reviewable document,
+read entirely from `provenance-writer`'s already-written manifests
+(`R-PACKET-011`, D26), which already collected all of it; no live
+dependency on `verifier-orchestrator`, `license-scanner`,
+`secret-scanner`, or `cache-manager` is needed to do this.
 
 **Out of scope:** computing any of those results itself; deciding whether
 the merge is allowed (gates already decided that; this component reports,
@@ -47,9 +50,9 @@ See `interface/data/`.
 
 See `acceptance/`.
 
-All ten criteria are `kind: compiled` — formatting already-computed results
-is pure, deterministic logic. A seventh component in this corpus whose
-entire acceptance set is `compiled`.
+All eleven criteria are `kind: compiled` — formatting already-computed
+results is pure, deterministic logic. A seventh component in this corpus
+whose entire acceptance set is `compiled`.
 
 ## Non-functional constraints
 

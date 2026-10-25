@@ -1503,6 +1503,46 @@ authoritative rules this produced.
 
 ---
 
+### D26 — `review-packet-builder`'s redundant fan-out dropped; `merge-tracker-ui`'s local-open question resolved to a trivial static-file server
+
+Two small, unrelated loose ends closed together, both flagged during the
+warnings/next-steps review that followed D25.
+
+- **`review-packet-builder`'s fan-out (5 → 1).** It depended directly on
+  `verifier-orchestrator`, `license-scanner`, `secret-scanner`, and
+  `cache-manager` — but every field it reports from them
+  (`verification_results`, `compliance_flags`, `cache_hit_status`) was
+  already sitting in `provenance-writer`'s manifest, which this
+  component already depended on. None of those four write their own
+  file; the manifest already collected everything. New
+  `R-PACKET-011` makes this explicit (read via `component_provenance`,
+  never a live call), and `depends_on` drops to `[comp-provenance-writer]`
+  alone. In the process, `component_provenance` (previously scoped to
+  `corpus-graph-builder` alone, D24) was promoted into
+  `graph-query-engine.md`'s shared "Query surface" section — the premise
+  for keeping it local ("no other component needs this") stopped holding
+  the moment a second consumer appeared, the same reasoning that already
+  governs `nodes`/`edges`/`component_docs`.
+- **`merge-tracker-ui`'s open question — resolved, not deferred again.**
+  `component.md` had genuinely left open whether a developer opens the
+  built page via `file://` (CORS-fragile, inconsistent across browsers)
+  or a trivial local server. Resolved to the server (`R-UI-006`,
+  `hotdocs track ui serve`): static bytes only, zero backend
+  computation, DuckDB-WASM still runs the actual query entirely
+  client-side. This required clarifying `R-UI-001`/`constraints.md`'s
+  "no server process" wording to mean "no backend *computation*" — the
+  original posture was never about the transport a developer uses to
+  open the page, only about where the query executes, but the old
+  wording read as a contradiction once a server entered the picture at
+  all. `AC-UI-001` updated accordingly.
+
+See `specs/architecture/graph-query-engine.md`'s "Query surface" section,
+`specs/components/review-packet-builder/requirements/R-PACKET-011.md`,
+and `specs/components/merge-tracker-ui/requirements/R-UI-006.md` for the
+current, authoritative rules this produced.
+
+---
+
 ## 12. Open questions
 
 _None outstanding — Q9–Q13 from the review pass are now D10–D14; D15 was a

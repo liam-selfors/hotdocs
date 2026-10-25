@@ -62,12 +62,12 @@ See `interface/data/`.
 
 See `acceptance/`.
 
-Five criteria, mixed `kind`: four are `compiled` (rendering/absence
-logic, a pure function of `TrackingRecord` data, same case
-`docs-site-renderer` already makes); `AC-UI-001` is `generated-test`,
-since asserting that DuckDB-WASM's `read_json` actually runs correctly in
-a real browser environment needs an executable check, not graph/text
-analysis.
+Six criteria, mixed `kind`: five are `compiled` (rendering/absence logic
+and the serve command's static-only behavior, each a pure function of
+its inputs, same case `docs-site-renderer` already makes); `AC-UI-001` is
+`generated-test`, since asserting that DuckDB-WASM's `read_json` actually
+runs correctly in a real browser environment needs an executable check,
+not graph/text analysis.
 
 ## Non-functional constraints
 
@@ -75,12 +75,10 @@ See `constraints.md`.
 
 ## Open questions
 
-- **How a developer actually opens this locally** — a generated static
-  HTML file a developer opens directly (`file://`), which may hit CORS
-  restrictions on `fetch`-ing local JSON from a `file://` context
-  depending on the browser; or a trivial local HTTP server (e.g. `hotdocs
-  track serve`) started on demand. Not resolved here — genuinely open,
-  not a gap papered over with false precision.
+- ~~How a developer actually opens this locally~~ — resolved
+  (`R-UI-006`): a trivial local static-file server (`hotdocs track ui
+  serve`), not `file://` — removes the CORS inconsistency across
+  browsers entirely rather than leaving it to chance per developer.
 - Whether this component should eventually consume
   `specs/architecture/graph-query-engine.md`'s corpus graph too (so a
   failed component's view can show what else depends on it), making this

@@ -8,26 +8,12 @@
 
   R-GRAPH-003's per-node annotations and R-GRAPH-004/005's corpus-wide
   orphan rates MUST be computed as joins and aggregates against
-  `nodes`/`edges` plus two views scoped to this component alone (no other
-  component needs verification/provenance/size data joined onto the
-  graph, so these do not belong in the shared architecture doc):
-
-  - **`component_provenance`** — one row per component, read directly
-    from the provenance manifests `provenance-writer` already writes
-    (`verification/<component>/.provenance.json`), which already embed
-    `verification_report`, `license_scan`, `secret_scan`, and `cache_hit`
-    (`SPEC_GUIDELINES.md` §7) — no separate read of
-    `verifier-orchestrator`'s, `license-scanner`'s, or `secret-scanner`'s
-    output is needed, since none of them write their own file:
-
-    ```sql
-    CREATE VIEW component_provenance AS
-    SELECT
-      'comp-' || regexp_extract(filename, 'verification/([^/]+)/\.provenance\.json$', 1)
-        AS component_id,
-      *
-    FROM read_json('verification/*/.provenance.json', filename:=true);
-    ```
+  `nodes`/`edges`/`component_provenance` (all three named in
+  `graph-query-engine.md`'s "Query surface" section — `component_provenance`
+  is shared with `review-packet-builder`, R-PACKET-011, D26) plus one view
+  scoped to this component alone (no other component needs size data
+  joined onto the graph, so this one does not belong in the shared
+  architecture doc):
 
   - **`component_size`** — one row per component, the spec-bundle word
     count R-LINT-012/D2 already defines (component.md + requirements/ +

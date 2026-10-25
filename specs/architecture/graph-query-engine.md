@@ -83,11 +83,13 @@ recursive CTEs — more verbose, not infeasible.
 ## Query surface
 
 Rather than let every adopting component write its own
-`read_yaml_frontmatter()`/`read_text()`/`UNNEST` calls, this document
-names three views as the one shared surface all of them query. A
-component MAY define additional views of its own for data no other
-component needs (see `corpus-graph-builder` below) but MUST NOT redefine
-these three.
+`read_yaml_frontmatter()`/`read_text()`/`read_json()`/`UNNEST` calls,
+this document names four views as the one shared surface all of them
+query. A component MAY define additional views of its own for data no
+other component needs (see `corpus-graph-builder`'s `component_size`
+below) but MUST NOT redefine these four — and if a second component ever
+needs one of its own local views, that is the signal to promote it here
+instead, same as `component_provenance`'s own history.
 
 **`nodes`** — one row per spec id in the corpus, across all four kinds.
 Components, product capabilities, and vars come from their own
@@ -157,6 +159,31 @@ a human see." Assembling an actual compiled, cross-linked document
 `docs-site-renderer`'s job, the same way `merge-tracker-ui` renders
 `merge-tracker`'s data rather than the data layer doing its own
 presentation.
+
+**`component_provenance`** — one row per component, read directly from
+the provenance manifests `provenance-writer` already writes
+(`verification/<component>/.provenance.json`), which already embed
+`verification_report`, `license_scan`, `secret_scan`, and `cache_hit`
+(`SPEC_GUIDELINES.md` §7):
+
+```sql
+CREATE VIEW component_provenance AS
+SELECT
+  'comp-' || regexp_extract(filename, 'verification/([^/]+)/\.provenance\.json$', 1)
+    AS component_id,
+  *
+FROM read_json('verification/*/.provenance.json', filename:=true);
+```
+
+Not graph-shaped — it uses neither `yaml` nor `duckpgq`, just core
+`read_json` — and originally lived only inside `corpus-graph-builder`'s
+own spec (`R-GRAPH-009`) on the premise that no other component needed
+it. That premise held only until `review-packet-builder` (`R-PACKET-011`,
+D26) needed the exact same thing: every field its `ReviewPacket` reports
+per component (`verification_results`, `compliance_flags`,
+`cache_hit_status`) is already in this manifest. Promoted here once a
+second consumer appeared, for the same reason `nodes`/`edges` exist as
+one shared definition instead of two independently-written ones.
 
 ## Scope of adoption
 
