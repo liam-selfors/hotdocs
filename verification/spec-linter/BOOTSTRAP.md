@@ -173,3 +173,27 @@ lessons drawn from it still apply unchanged to the rewritten implementation
 construction, but the general lesson ("validate against real, multi-author
 content, not only hand-built fixtures") was reapplied during the rewrite,
 not superseded by it.
+
+## Note: three more requirements added after D15
+
+Three requirements were added after the D15 rewrite above, each a direct
+consequence of a later corpus-wide decision rather than anything found by
+further bootstrapping — no new lessons of the bootstrapping kind this
+document otherwise records, just listed here so this account doesn't go
+silent after R-LINT-016 while the real rule count keeps climbing.
+
+- **R-LINT-017** (D16) — a component's `interface/guarantees/G-*.md` file's
+  `#`-heading `G-id` must match its filename, the same identity check
+  `rule_requirement_identity` already did for `R-id`s, extended to the new
+  guarantee-file kind D16 introduced.
+- **R-LINT-018** (D16) — `depends_on_guarantees` entries must resolve to a
+  real `G-id` whose owning component is already in the dependent's own
+  `depends_on` — referencing a guarantee of something you don't depend on
+  is meaningless, not just unresolved (see D16's narrowing-mechanism
+  write-up in `notes/initial-ideas.md`).
+- **R-LINT-019** (D19) — no line in any spec file (frontmatter included)
+  may end in trailing whitespace, so `spec_bundle_hash` can keep hashing
+  raw bytes without an inconsequential whitespace edit forcing a cache
+  miss. Unlike 017/018, this one scans every file `spec_bundle_hash` can
+  reach (`corpus.docs` plus `corpus.glossary_files`), not per-component
+  content — the first rule in this corpus to need that scope.

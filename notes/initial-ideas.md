@@ -488,6 +488,22 @@ New metrics (added to `metrics.md`): **`llm-judge` criteria ratio** and
 **judge disagreement rate**, parallel to the compiled-vs-freeform metric from
 D4.
 
+**Status: the dual-judge disagreement mechanism is simplified away for this
+build, not newly broken.** This build runs single-model only (the
+second-model scope cut, §14), which is exactly the degraded mode this
+decision already anticipated above ("in single-model mode, the single
+configured model judges alone — no disagreement gate for that criterion")
+— the difference is that degraded mode is now the *only* mode, since no
+second model exists to disagree with. `verifier-orchestrator`'s
+`R-VERIFY-003` makes this the explicit, normative behavior: exactly one
+judge call per `llm-judge`-kind criterion. The dual-call design was never
+actually built even when a second model was in scope — a pre-existing gap,
+distinct from the scope cut — so nothing regressed; the design is recorded
+in §14 for whenever it's worth building. The **judge disagreement rate**
+metric proposed above was removed from `metrics.md` for the same reason
+(nothing to compute, no real gate behind it), not demoted to a zero-valued
+placeholder.
+
 ### D6 — `gen/` and `verification/` are committed, always, with an LFS exception
 
 Settled, not a toss-up — it follows from decisions already made rather than a
@@ -1203,6 +1219,11 @@ still-open question from the above — a distinct capability needing new
 machinery (e.g. property-based generation against `interface/` type
 schemas), not a natural extension of fixing the "nothing to diff" gap.
 
+The **cross-model divergence incidents** and **second-model
+verification-failure rate** metrics (`notes/metrics.md`) measured this
+mechanism directly and were removed from the catalog along with it —
+re-add both together if this is rebuilt.
+
 ### Fallback standby build (D10)
 
 Independent of the divergence check above (a separate toggle,
@@ -1236,6 +1257,37 @@ single-model behavior, not a rewrite of it; `VAR-SECOND-MODEL-API-KEY`
 would need re-declaring since its var contract was deleted (not just its
 `uses_var` references) once nothing in the active corpus referenced it any
 longer.
+
+### Dual-judge disagreement checking for `llm-judge` criteria (D5)
+
+For judgment ambiguity specifically (as opposed to the behavioral
+ambiguity cross-model divergence checking targets): run an `llm-judge`
+evaluation **twice**, independently, and treat disagreement between the
+two verdicts as a spec-ambiguity signal that blocks the merge — the exact
+same "two independent readings disagreeing is a spec defect" argument
+`P-AMBIGUITY-GATE` is built around, applied to judgment-kind criteria
+specifically. D5's original text already anticipated this needing a
+second model for genuine independence ("run the judgment with two
+independent models"), with single-model operation as the explicitly
+accepted degraded mode ("the single configured model judges alone — no
+disagreement gate for that criterion") — which is exactly this build's
+*only* mode now, not a new compromise.
+
+**Distinct from the broader second-model scope cut, worth keeping separate
+in anyone's mind reintroducing this:** this mechanism was never actually
+built, even back when a second model was in scope. `verifier-orchestrator`
+always dispatched to exactly one injectable judge callable
+(`R-VERIFY-003`); nothing ever called it twice or compared verdicts. So
+reintroducing this isn't "restore what was removed" the way cross-model
+divergence checking or `test-author`'s preference are — it's building a
+mechanism that was only ever described, never implemented. `R-VERIFY-003`
+now states "exactly once" explicitly, as the actual, confirmed design for
+this build; a future dual-call version would need to change that
+normative text, not just add a caller that happens to invoke it twice.
+
+The **judge disagreement rate** metric (`notes/metrics.md`) was proposed
+alongside this design and removed from the catalog for the same reason —
+re-add it once (and if) this mechanism is actually built, not before.
 
 ### Mechanical notes for reintroduction
 
