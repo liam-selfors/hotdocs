@@ -45,6 +45,10 @@ SPEC_GUIDELINES.md      # this file
 gen/                   # generated code
 pipeline/              # workflow definitions, frozen prompts, model pins, toggles
 verification/          # generated tests, contract checks, corpus-graph.json
+tools/                 # hand-written repo-maintenance/authoring scripts —
+                       # outside the spec-driven pipeline entirely (not
+                       # generated, not gated, never read by any rule in
+                       # this document). Scaffolding convenience only.
 notes/                 # brainstorming — non-normative, not read by the pipeline
 .hotdocs/              # LOCAL ONLY, gitignored — merge-tracking records
                        # (merge-tracker, D22) and any DuckDB index built
@@ -65,6 +69,15 @@ notes/                 # brainstorming — non-normative, not read by the pipeli
   just a storage convention: letting a gate's decision depend on local,
   uncommitted history would break every determinism/purity requirement
   elsewhere in this document (e.g. `impact-analyzer`'s R-IMPACT-006).
+- `tools/` is committed (unlike `.hotdocs/`) but otherwise occupies the
+  same "outside the methodology" position: a script here **MUST NOT** be
+  invoked by `merge-orchestrator` or any gate, and **MUST NOT** write to
+  `specs/`/`gen/`/`verification/` on a human's behalf without the human
+  reviewing the result before committing — it may *create* new, empty
+  scaffolding (directory structure, placeholder frontmatter), never
+  author normative content. The distinction that matters: a scaffolding
+  script removes mechanical friction; it does not do the spec-authoring
+  work D1 reserves for a human or an assist agent.
 - A `README.md` anywhere under `specs/` is non-normative scaffolding, not a
   governed spec — the linter and every other tool in this document **MUST**
   skip it. The governed set under a component directory is exactly:
