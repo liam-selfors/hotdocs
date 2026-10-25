@@ -58,13 +58,9 @@ See `interface/data/`.
 
 See `acceptance/`.
 
-Every criterion below is `kind: compiled` — nothing in this component's
-behavior is runtime-behavior-of-generated-code or a judgment call; it is all
-deterministic, rule-based logic over spec text, so none of it needs a second
-model or an `llm-judge` evaluator. (A deliberate test of D5's own guidance:
-"prefer `compiled` whenever the criterion is in principle about runtime
-behavior... reach for `llm-judge` only for criteria no code test could
-capture" — a linter is the cleanest possible case for that guidance to hold.)
+Every criterion below is `kind: compiled` except R-LINT-015's
+(`llm-judge`) — deterministic, rule-based logic over spec text needs
+neither a second model nor a judgment call.
 
 ## Non-functional constraints
 
@@ -72,29 +68,10 @@ See `constraints.md`.
 
 ## Open questions
 
-_None. The three originally recorded here were resolved during the bootstrap
-implementation (`verification/spec-linter/BOOTSTRAP.md` has the full
-account); a fourth gap (interface-surface-element counting), flagged
-separately after the bootstrap, is resolved below too. All four recorded here
-as decisions, not left open:_
-
-- RFC 2119 keyword list for R-LINT-007: the curated 5 (`MUST` / `MUST NOT` /
-  `SHOULD` / `SHOULD NOT` / `MAY`) — directly answerable from
-  `SPEC_GUIDELINES.md`'s own opening line, which already declares that as its
-  keyword set.
-- R-LINT-004's cycle detection: standard DFS tri-color (white/gray/black
-  marking) — no genuine ambiguity once actually implemented.
-- R-LINT-012's word/LOC counting is pre-compilation, and the question turned
-  out to be moot: compiled test scaffolding doesn't exist at lint time at
-  all (generation hasn't run yet), so there's nothing post-compilation to
-  count regardless.
-- R-LINT-012's "interface surface elements" dimension: concretely defined in
-  `SPEC_GUIDELINES.md` §4 and implemented in `gen/spec-linter/spec_linter.py`
-  — one per distinct CLI invocation line in `interface/cli.md`, one per
-  distinct function signature in `interface/library.md`, one per file under
-  `interface/data/` (D15 — each already names exactly one type by
-  construction, replacing the earlier "one per `## Data: ...` heading"
-  counting once headings stopped being the unit boundary).
+_None — all four originally recorded here were resolved during the
+bootstrap implementation; `verification/spec-linter/BOOTSTRAP.md` has
+the full account (RFC 2119 keyword list, cycle-detection algorithm,
+word/LOC counting scope, interface-surface-element counting)._
 
 ## Change log
 

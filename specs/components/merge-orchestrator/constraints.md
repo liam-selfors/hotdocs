@@ -12,13 +12,9 @@
 - **No gate skipped silently.** A cache hit (R-MERGE-003) skips real work,
   but MUST be visible in `MergeResult` and the review packet — never
   indistinguishable from "this gate ran and found nothing."
-- **This component's own fan-out (14 dependencies, `golden-scenario-
-  verifier` replacing `criterion-compiler` after D25's extraction) is
-  accepted, not a defect** — see `specs/architecture/
-  pipeline-decomposition.md`'s dedicated note on why a thin coordinator is
-  a different risk shape than D2's fan-out cap was designed to catch, and
-  why extracting `golden-scenario-verifier` (D25) relieved the word-count
-  cap without moving this number.
+- **This component's own fan-out (14) is accepted, not a defect** —
+  rationale: `specs/decisions/D25.md` and `specs/architecture/
+  pipeline-decomposition.md`'s dedicated note.
 - **Golden-scenario failure is its own result category, never conflated
   with a component's own verification result.** (R-MERGE-014,
   `golden-scenario-verifier`'s `GoldenScenarioReport`) A cross-component

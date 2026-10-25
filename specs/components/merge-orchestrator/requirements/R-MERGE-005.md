@@ -10,25 +10,18 @@
   `pass` MUST be kept; its sample index MUST be the one recorded for
   provenance (D3).
 
-  **Closes a real gap:** retrying only on verification failure meant a
-  `model_call_error` never had a `fail` verdict to trigger on, so one
-  transient hiccup silently exhausted `k` for nothing — worse now that
-  `generator` does no retry of its own (R-GEN-011, D21).
+  Closes a gap `specs/decisions/D22.md` found and fixed: retrying only
+  on verification failure meant `model_call_error` never triggered a
+  retry at all (see `specs/decisions/D21.md` on why that's worse now
+  that `generator` retries nothing itself).
 
   A retry whose **immediately preceding** attempt reached verification
-  (produced a candidate `verifier-orchestrator` then failed) MUST pass
-  `retry_feedback` to `generator`: the `R-id`s whose `requirement_results`
-  entry (R-VERIFY-011) was `fail` on that attempt — a pure pass-through,
-  never inspected, filtered, or interpreted beyond extraction from the
-  prior `VerificationReport`. A retry whose immediately preceding attempt
-  was instead a `model_call_error` MUST NOT pass `retry_feedback` — no
-  `VerificationReport` exists to derive it from, so this retry is blind,
-  same as the sequence's first attempt (also never passes it, for the
-  same reason).
-
-  Feedback is deliberately **not accumulated** across more than one prior
-  attempt — only the immediately preceding attempt's failures are passed,
-  not a running union across the whole sequence. A requirement that failed
-  two attempts ago and now passes should not keep showing up in feedback;
-  carrying stale failures forward risks steering the model away from
-  content it has already fixed.
+  MUST pass `retry_feedback` to `generator`: the `R-id`s whose
+  `requirement_results` entry (R-VERIFY-011) was `fail` on that attempt
+  — a pure pass-through, never inspected or filtered. A retry whose
+  immediately preceding attempt was instead a `model_call_error` MUST
+  NOT pass `retry_feedback` — no `VerificationReport` exists to derive
+  it from, so this retry is blind, same as the sequence's first attempt.
+  Feedback is **not accumulated** across more than one prior attempt —
+  only the immediately preceding attempt's failures count (rationale:
+  `specs/decisions/D17.md`).

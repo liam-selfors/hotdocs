@@ -6,14 +6,12 @@
   one impacted component's processing MUST NOT skip, abort, or short-circuit
   processing of any other impacted component in the same merge attempt.
 
-  **This resolves the parallelization-mechanism open question without
-  forcing a specific answer to it:** whether components are processed
-  sequentially or concurrently (R-MERGE-007/008's "MAY run in parallel")
-  stays an implementation choice — this requirement constrains the
-  *outcome* (every component attempted, every result collected) not the
-  *mechanism*. What this rules out is fail-fast: stopping at the first
-  component that fails and never attempting the rest. Fail-fast would mean
-  a merge touching three components, where the first fails, never reveals
-  whether the other two would have succeeded — exactly the information
-  R-MERGE-018's free retry-via-re-run property depends on existing for
-  every component, not just the first failure encountered.
+  This resolves the parallelization-mechanism question without forcing a
+  specific answer (rationale: `specs/decisions/D21.md`): whether
+  components are processed sequentially or concurrently
+  (R-MERGE-007/008's "MAY run in parallel") stays an implementation
+  choice — this requirement constrains the *outcome*, not the
+  *mechanism*. What it rules out is fail-fast: stopping at the first
+  failing component and never attempting the rest, which would deny
+  `R-MERGE-018`'s free retry-via-re-run property the information it
+  depends on.

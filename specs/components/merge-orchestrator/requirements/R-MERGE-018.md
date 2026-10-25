@@ -15,7 +15,7 @@
   from the blocked attempt's own `MergeResult`, exactly which ones already
   passed and don't need attention.
 
-  This is the same "rollback is a cache hit, not a dedicated incident
-  feature" posture D11 already established for reverts — applied here to
-  the symmetric case of moving a multi-component merge forward through
-  partial failure, not backward through one.
+  Rationale: `specs/decisions/D21.md` (the same "rollback is a cache
+  hit, not a dedicated incident feature" posture D11 established for
+  reverts, applied here to moving forward through partial failure
+  rather than backward).

@@ -60,12 +60,7 @@ See `acceptance/`.
 
 All twenty-two criteria are `kind: compiled` — tested by mocking every
 dependency and asserting on call order/arguments, the same pattern
-`verifier-orchestrator` already established for coordination logic. An
-eleventh component in this corpus
-whose entire acceptance set is `compiled` — the capstone data point for
-D5's guidance: even the component that sequences every model-calling,
-judgment-involving gate in the whole pipeline is, in its own right, fully
-deterministic.
+`verifier-orchestrator` already established for coordination logic.
 
 ## Non-functional constraints
 
@@ -73,19 +68,12 @@ See `constraints.md`.
 
 ## Open questions
 
-- ~~Exact value of `k` (best-of-k sample count) — D3 names a range (2–4),
-  not a fixed default~~ — resolved: default `k=2`, per-component override
-  via `best_of_k` frontmatter (R-MERGE-016), alongside diagnostic-guided
-  retry feeding each retry the immediately preceding attempt's failing
-  `R-id`s (R-MERGE-005, R-GEN-010, R-VERIFY-011).
-- ~~Whether R-MERGE-008's parallelization (with R-MERGE-004) is literal
-  concurrent execution or just "no artificial sequential dependency" at
-  the spec level~~ — resolved without forcing an answer: R-MERGE-017
-  constrains the *outcome* (every impacted component attempted to
-  completion, no fail-fast short-circuiting) rather than the mechanism —
-  sequential and concurrent execution both satisfy it. What actually
-  mattered about this question was ruling out fail-fast, not settling on
-  a concurrency primitive.
+- ~~Exact value of `k`~~ — resolved by `specs/decisions/D17.md`
+  (default `k=2`, diagnostic-guided retry via `R-MERGE-005`/`016`).
+- ~~Whether R-MERGE-008's parallelization is literal concurrency or just
+  "no artificial sequential dependency"~~ — resolved by
+  `specs/decisions/D21.md` (the requirement constrains the *outcome*,
+  not the mechanism — `R-MERGE-017`).
 - Whether R-MERGE-015's sealed-component path still participates in
   R-MERGE-003's cache-hit short-circuit, and if so, what a "cache hit"
   even means for a component whose code is hand-maintained rather than
