@@ -17,7 +17,7 @@ sealed: false
 A single, vendor-agnostic transport for every model call this pipeline
 makes — `generator`, `test-author`, `spec-completeness-assistant`, and
 the real `judge` callable `merge-orchestrator` wires into
-`verifier-orchestrator`/`golden-scenario-verifier` all dispatch through
+`verifier-orchestrator`/`capability-scenario-verifier` all dispatch through
 here instead of each independently knowing how to authenticate to, and
 call, a specific vendor's API.
 

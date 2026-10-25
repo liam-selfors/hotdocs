@@ -19,9 +19,9 @@ In scope: component spec changes that pass lint and have complete acceptance
 criteria. Out of scope: `sealed` components and `.overrides.json`-pinned
 files, which are explicitly exempt from this capability's promise (D1/§8).
 
-## Golden scenario
+## Capability scenario
 
-### GS-ZERO-EDIT-001
+### CS-ZERO-EDIT-001
 Covers: P-ZERO-EDIT
 Kind: generated-test
 

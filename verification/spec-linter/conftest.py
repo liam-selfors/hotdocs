@@ -39,7 +39,7 @@ owners: [test-team]
 
 A minimal capability for exercising the linter.
 
-### GS-TEST-001
+### CS-TEST-001
 Covers: P-TEST
 Kind: generated-test
 

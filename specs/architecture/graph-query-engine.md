@@ -97,8 +97,8 @@ frontmatter; **guarantees, requirements, and acceptance criteria carry no
 frontmatter at all** (D15 — unit-file identity is the filename, not a
 `---` block), so those rows are built from `read_text()` and filenames
 alone, with `owner_component_id` extracted from path rather than read
-from any field. **Golden scenarios are the one kind with no file of
-their own** — they're `### GS-...` headings inside a product
+from any field. **Capability scenarios are the one kind with no file of
+their own** — they're `### CS-...` headings inside a product
 capability's single file (`SPEC_GUIDELINES.md` §5), so their rows come
 from extracting headings out of that file's body text, not from a glob
 at all:
@@ -129,7 +129,7 @@ SELECT
   'comp-' || regexp_extract(filename, 'specs/components/([^/]+)/acceptance/', 1)
 FROM read_text('specs/components/*/acceptance/*.md', filename:=true)
 UNION ALL
-SELECT UNNEST(regexp_extract_all(content, '### (GS-[A-Za-z0-9-]+)', 1)), NULL, NULL, 'golden_scenario', NULL
+SELECT UNNEST(regexp_extract_all(content, '### (CS-[A-Za-z0-9-]+)', 1)), NULL, NULL, 'capability_scenario', NULL
 FROM read_text('specs/product/*.md', filename:=true);
 ```
 
@@ -140,7 +140,7 @@ guarantee nodes at all — the target side of a `depends_on_guarantees`
 edge was never actually resolvable against a real node, only assumed to
 exist. `owner_component_id` is what lets `spec-linter`'s R-LINT-018 check
 (below) be a plain join instead of bespoke path-parsing; it's `NULL` for
-`golden_scenario` rows since their parent is a capability, not a
+`capability_scenario` rows since their parent is a capability, not a
 component — the `covers` edge below carries that relationship instead.
 
 **`edges`** — one row per `(source_id, target_id, edge_type)`. The first
@@ -150,7 +150,7 @@ requirement-traceability files' body text (`spec-linter`'s
 `rule_forward_traceability`/`rule_backward_traceability`, R-LINT-008/009)
 rather than from frontmatter, since that's where `Covers:` actually
 lives — a component-acceptance file carries exactly one (D15: the file
-*is* one criterion), a product file carries one per golden scenario,
+*is* one criterion), a product file carries one per capability scenario,
 paired with the heading immediately above it:
 
 ```sql
@@ -172,17 +172,17 @@ SELECT
   regexp_extract(content, 'Covers:\s*(\S+)', 1), 'covers'
 FROM read_text('specs/components/*/acceptance/*.md', filename:=true)
 UNION ALL
-SELECT m['gs_id'], m['target'], 'covers'
+SELECT m['cs_id'], m['target'], 'covers'
 FROM (
   SELECT UNNEST(regexp_extract_all(
-    content, '### (GS-[A-Za-z0-9-]+)\s*\nCovers:\s*(\S+)', ['gs_id', 'target']
+    content, '### (CS-[A-Za-z0-9-]+)\s*\nCovers:\s*(\S+)', ['cs_id', 'target']
   )) AS m
   FROM read_text('specs/product/*.md', filename:=true)
 );
 ```
 
 **The last `edges` branch is the one genuinely harder piece of this
-corpus's DuckDB adoption** — pairing a golden scenario's heading with
+corpus's DuckDB adoption** — pairing a capability scenario's heading with
 its own `Covers:` line in one pass, rather than the clean "one row per
 file" shape every other view here has. Flagged plainly rather than
 glossed over: the exact capture-group extraction function/signature
@@ -286,14 +286,15 @@ pointing back to this document, exactly as `R-IMPACT-009` does:
   (R-GRAPH-006/008: `verification/corpus-graph.json` is still a
   committed, deterministic artifact — only the *construction* step, not
   the output format, moves onto this engine).
-- **`golden-scenario-verifier`'s capability-intersection lookup**
-  (`R-GOLDEN-002`) — "every product capability whose `realizes`-set
+- **`capability-scenario-verifier`'s capability-intersection lookup**
+  (`R-SCENARIO-002`) — "every product capability whose `realizes`-set
   intersects the blast radius" is a single query against `edges`, not a
   bespoke intersection written once for this call site. This logic
   originally lived in `merge-orchestrator` as `R-MERGE-020`; it moved
-  with the rest of the golden-scenario gate when D25 extracted
-  `golden-scenario-verifier` out of `merge-orchestrator` to relieve that
-  component's fan-out/word-count caps.
+  with the rest of the capability-scenario gate when D25 extracted
+  `capability-scenario-verifier` (named `golden-scenario-verifier` at
+  the time; renamed by `D36`) out of `merge-orchestrator` to relieve
+  that component's fan-out/word-count caps.
 - **`review-packet-builder`** (`R-PACKET-011`) — every field it reports
   from `verifier-orchestrator`/`license-scanner`/`secret-scanner`/
   `cache-manager` is read via `component_provenance` instead of a live
@@ -304,12 +305,13 @@ pointing back to this document, exactly as `R-IMPACT-009` does:
   (`rule_forward_traceability`/R-LINT-008, `rule_backward_traceability`/
   R-LINT-009, `R-LINT-021`, D27) — originally flagged below as a
   distinct, deferred candidate because it appeared to need a second graph
-  vocabulary (`R-id`/`AC-id`/`GS-id` nodes). Reading `spec_linter.py`'s
-  actual implementation showed the real need is smaller: R-LINT-008 only
-  counts `covers`-edges per requirement, R-LINT-009 only validates each
-  edge's *target* against `nodes` — neither needs `AC-id`/`GS-id` as
-  addressable nodes for its own check to work. D27 adopted the fuller
-  shape anyway (`requirement`/`acceptance`/`golden_scenario` all modeled
+  vocabulary (`R-id`/`AC-id`/`GS-id` nodes — `GS-id` renamed `CS-id` by
+  `D36`). Reading `spec_linter.py`'s actual implementation showed the
+  real need is smaller: R-LINT-008 only counts `covers`-edges per
+  requirement, R-LINT-009 only validates each edge's *target* against
+  `nodes` — neither needs `AC-id`/`CS-id` as addressable nodes for its
+  own check to work. D27 adopted the fuller
+  shape anyway (`requirement`/`acceptance`/`capability_scenario` all modeled
   as proper `nodes`, not just the minimum each rule strictly needs), for
   a complete graph rather than one trimmed to today's two consumers.
 - **`spec-bundle-assembler`** (`R-ASSEMBLE-010`, `D35`) — each

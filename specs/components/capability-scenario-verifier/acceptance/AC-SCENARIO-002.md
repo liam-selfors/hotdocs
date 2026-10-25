@@ -1,6 +1,6 @@
-# AC-GOLDEN-002
+# AC-SCENARIO-002
 
-Covers: R-GOLDEN-002
+Covers: R-SCENARIO-002
 Kind: compiled
 
 ```gherkin

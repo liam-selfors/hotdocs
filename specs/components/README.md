@@ -137,12 +137,12 @@ Specced in full depth so far:
   backed by `llm-endpoint`) — three responsibilities nothing had
   explicitly assigned before `generator`'s, `verifier-orchestrator`'s, and
   the blast-radius/D16 threads each forced the question. Since D16, also
-  calls `golden-scenario-verifier` once every component has passed
-  per-component verification; the golden-scenario dispatch logic itself
+  calls `capability-scenario-verifier` once every component has passed
+  per-component verification; the capability-scenario dispatch logic itself
   (and the capability-intersection lookup) lived here only until D25,
   once both this component's fan-out and its spec-bundle word count
   crowded their caps at once — it was extracted into
-  `golden-scenario-verifier` as the cross-component analog of
+  `capability-scenario-verifier` as the cross-component analog of
   `verifier-orchestrator`'s own per-component dispatch; this component now
   only owns *when* and *with what* that gets called. Its real, measured
   `fan_out` is 15 as of D30 (14 after D25's extraction, +1 for
@@ -161,10 +161,10 @@ Specced in full depth so far:
   dispatch around it — a deliberate contrast to every coordination
   component specced so far. Since D30, dispatches through `llm-endpoint`
   rather than holding a model credential itself.
-- **`golden-scenario-verifier`** — all `kind: compiled`. Extracted from
+- **`capability-scenario-verifier`** — all `kind: compiled`. Extracted from
   `merge-orchestrator` by D25: the cross-component analog of
   `verifier-orchestrator`'s per-component dispatch, one scope level up —
-  runs every product capability's golden scenarios whose `realizes`-set
+  runs every product capability's capability scenarios whose `realizes`-set
   intersects a merge's blast radius, against the real assembled system.
   The permanent backstop for cross-component behavioral risk no
   `interface/`-level diffing can rule out in principle (D16).
@@ -183,7 +183,7 @@ Specced in full depth so far:
 **All 20 architecture components are now specced in full depth** (15
 original + `test-author` + `spec-completeness-assistant`, both added
 when earlier design discussions surfaced real gaps nothing owned yet,
-+ `golden-scenario-verifier` (D25) + `llm-endpoint` (D30), both
++ `capability-scenario-verifier` (D25) + `llm-endpoint` (D30), both
 extracted from or added beneath `merge-orchestrator` once a real
 coupling or crowding signal, not speculation, justified it). The real
 linter (`gen/spec-linter/`) validates the entire corpus clean: 0

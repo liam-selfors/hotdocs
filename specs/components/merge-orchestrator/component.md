@@ -3,7 +3,7 @@ id: comp-merge-orchestrator
 title: Merge Orchestrator
 status: draft
 owners: [pipeline-team]
-depends_on: [comp-spec-linter, comp-impact-analyzer, comp-spec-bundle-assembler, comp-generator, comp-test-author, comp-golden-scenario-verifier, comp-verifier-orchestrator, comp-license-scanner, comp-secret-scanner, comp-cache-manager, comp-provenance-writer, comp-review-packet-builder, comp-corpus-graph-builder, comp-merge-tracker, comp-llm-endpoint]
+depends_on: [comp-spec-linter, comp-impact-analyzer, comp-spec-bundle-assembler, comp-generator, comp-test-author, comp-capability-scenario-verifier, comp-verifier-orchestrator, comp-license-scanner, comp-secret-scanner, comp-cache-manager, comp-provenance-writer, comp-review-packet-builder, comp-corpus-graph-builder, comp-merge-tracker, comp-llm-endpoint]
 realizes: [P-ZERO-EDIT, P-AMBIGUITY-GATE, P-COMPLIANCE-GATE, P-MERGE-VISIBILITY]
 sealed: false
 ---
@@ -14,7 +14,8 @@ sealed: false
 
 Sequences every other component into one merge, per `SPEC_GUIDELINES.md`
 §6: lint, impact analysis, generation, verification, compliance gates,
-golden-scenario verification, provenance, review packet, atomic commit.
+capability-scenario verification, provenance, review packet, atomic
+commit.
 
 ## Rationale
 
@@ -37,7 +38,7 @@ a per-attempt record (`R-MERGE-021`) via
 `merge-tracker` right after that call (and the verification call, if
 reached) concludes, so a human has full diagnostic detail before
 deciding whether to just re-run or fix the spec first. Since D16: also
-calls `golden-scenario-verifier` once every component has passed
+calls `capability-scenario-verifier` once every component has passed
 per-component verification (R-MERGE-014) — the dispatch itself moved
 there (D25), this component only owns *when* and *with what* it's
 called. Since D30, the real `test_author`/`judge` callables wired into

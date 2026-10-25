@@ -15,9 +15,9 @@
 - **This component's own fan-out (15) is accepted, not a defect** —
   rationale: `specs/decisions/D25.md` and `specs/architecture/
   pipeline-decomposition.md`'s dedicated note.
-- **Golden-scenario failure is its own result category, never conflated
-  with a component's own verification result.** (R-MERGE-014,
-  `golden-scenario-verifier`'s `GoldenScenarioReport`) A cross-component
+- **Capability-scenario failure is its own result category, never
+  conflated with a component's own verification result.** (R-MERGE-014,
+  `capability-scenario-verifier`'s `CapabilityScenarioReport`) A cross-component
   finding and a single-component finding point a developer to different
   places to fix the problem — collapsing them into one undifferentiated
   "something failed" would undo the whole point of having a separate

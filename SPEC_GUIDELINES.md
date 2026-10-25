@@ -17,7 +17,7 @@ follows its own rule: no open questions, no ambiguity a linter couldn't catch.
 
 ```
 specs/
-  product/            # capabilities (P-id) + golden end-to-end scenarios
+  product/            # capabilities (P-id) + capability end-to-end scenarios
   architecture/        # component decomposition, dependency graph ownership
   vars/                # env/config parameter declarations (VAR-id) — never values
   components/
@@ -186,7 +186,7 @@ optional).
 ### 3.1 Product capability (`specs/product/<name>.md`)
 
 Declares a capability with a stable `P-<id>`. Body: Purpose, Scope, and one or
-more Given/When/Then golden scenarios (§5 format) exercised **black-box
+more Given/When/Then capability scenarios (§5 format) exercised **black-box
 against the whole assembled system** — never against one component in
 isolation. (D8)
 
@@ -354,7 +354,7 @@ The fix is not automatically a bigger cap, but it is also not
 automatically a split — the signal means "look closely," not "extract
 something." Start by asking whether a structural precedent for a split
 already exists elsewhere in the corpus: `D25` extracted
-`golden-scenario-verifier` out of `merge-orchestrator` once both caps
+`capability-scenario-verifier` out of `merge-orchestrator` once both caps
 crowded at once, because that logic was already the cross-component
 analog of `verifier-orchestrator`'s existing per-component dispatch — the
 split mirrored a pattern already present, it wasn't invented from
@@ -379,11 +379,11 @@ D2's "thin coordinator" shape, not this signal at all.
 ## 5. Acceptance criteria
 
 Each file under a component's `acceptance/` directory (or, for a product
-capability, each golden scenario inline in its one file) is a **Given/
+capability, each capability scenario inline in its one file) is a **Given/
 When/Then block**, written in Gherkin syntax, with a required `Covers:` tag
 (`@covers:<id>`) and a required `kind`. `Covers:` takes an `R-<id>` for a
-component criterion, or a `P-<id>` for a product capability's own golden
-scenario (D8) — product-level scenarios have no component `R-id` to
+component criterion, or a `P-<id>` for a product capability's own
+capability scenario (D8) — product-level scenarios have no component `R-id` to
 reference, only their own capability id:
 
 | `kind` | How it's checked | Use when |
@@ -437,9 +437,9 @@ Run per merge, scoped to the components in the impact-analysis blast radius:
    provenance manifest and the review packet — never silent. A flag above a
    severity threshold notifies a
    standing compliance channel. (D7/D12)
-5. **Golden-scenario verification** — once every component in the blast
+5. **Capability-scenario verification** — once every component in the blast
    radius has regenerated and passed its own per-component verification
-   (steps 2–3), run the golden scenarios of every product capability whose
+   (steps 2–3), run the capability scenarios of every product capability whose
    `realizes`-set intersects the blast radius, against the real, fully
    assembled `gen/` output — not a prediction, the actual regenerated
    system. A failure blocks the merge the same way a per-component
@@ -451,7 +451,7 @@ Run per merge, scoped to the components in the impact-analysis blast radius:
 6. **Non-functional gates** where feasible (benchmarks, size budgets).
 7. **Review packet** — spec diff, changed requirements, regenerated
    components, verification results, residual risk, license/secret flags,
-   cache-hit status, golden-scenario results, and any new/changed
+   cache-hit status, capability-scenario results, and any new/changed
    `sealed`/override declarations. A human reviews this and the spec diff.
    **No human review of generated code is required, of any kind.** (D5)
 8. **Merge** — `specs/`, `gen/`, and `verification/` (including

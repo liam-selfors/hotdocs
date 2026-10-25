@@ -26,14 +26,14 @@ for the full record.
 
 ## Four gaps found during the `D31`/`D32` corpus-wide audit, not yet acted on
 
-**`GoldenScenarioReport` has no `rationale` field.** Golden scenarios can
-be `llm-judge`-kind (`R-GOLDEN-001`), but unlike `VerificationReport`'s
-`criteria` entries (which carry `rationale` for exactly this case),
-`GoldenScenarioReport` has nowhere to put a judge's reasoning when one
-fires. A failing or skipped judgment-based golden scenario's *why* is
-structurally unrecorded. High confidence this is a real gap, not a
-deliberate minimization (nothing argues for omitting it the way `D17`
-argued for `retry_feedback`'s own content limits).
+~~**`GoldenScenarioReport` has no `rationale` field.**~~ **Resolved by
+`D36`.** Capability scenarios (renamed from "golden scenarios") can be
+`llm-judge`-kind (`R-SCENARIO-001`), and `CapabilityScenarioReport` now
+carries a per-scenario `rationale` field alongside `result`, mirroring
+`VerificationReport.criteria[]`'s existing convention — plus the
+report moved from one aggregate verdict per capability to one entry
+per scenario, closing a second, deeper gap found during the same
+analysis. See `specs/decisions/D36.md`.
 
 **`license-scanner`/`secret-scanner`'s webhook notification has no
 failure path.** `R-LICENSE-003`/`R-SECRET-004` specify precisely when a

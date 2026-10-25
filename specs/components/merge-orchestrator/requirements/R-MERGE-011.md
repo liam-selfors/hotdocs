@@ -4,7 +4,7 @@
   component's one generation/verification attempt failed (R-MERGE-006),
   or a sealed component's
   characterization-test verification (R-MERGE-015) failed, or either
-  scanner reported a blocking flag, or golden-scenario verification
+  scanner reported a blocking flag, or capability-scenario verification
   (R-MERGE-014) failed — and MUST proceed otherwise.
 
   The sealed-component case is listed explicitly, not folded into

@@ -1,6 +1,6 @@
 ---
-id: comp-golden-scenario-verifier
-title: Golden Scenario Verifier
+id: comp-capability-scenario-verifier
+title: Capability Scenario Verifier
 status: draft
 owners: [pipeline-team]
 depends_on: [comp-criterion-compiler, comp-test-author]
@@ -8,11 +8,11 @@ realizes: [P-ZERO-EDIT, P-AMBIGUITY-GATE]
 sealed: false
 ---
 
-# Golden Scenario Verifier
+# Capability Scenario Verifier
 
 ## Purpose
 
-Runs the golden scenarios of every product capability whose
+Runs the capability scenarios of every product capability whose
 `realizes`-set intersects a merge's blast radius, against the real,
 fully assembled `gen/` output produced by that merge — the permanent,
 cross-component backstop for behavioral risk no `interface/`-level
@@ -27,21 +27,26 @@ Covers `interface/guarantees/` too (D16) — the same reasoning
 `R-IMPACT-008` already states. Extracted from `merge-orchestrator` (D25)
 once that component's fan-out and spec-bundle-word caps crowded their
 ceilings simultaneously — a signal, D25 concluded, that this dispatch
-logic had its own identity, not merely convenient placement.
+logic had its own identity, not merely convenient placement. Renamed
+from "golden-scenario-verifier" (`D36`): "golden" named nothing about
+what this actually is — a capability-level, end-to-end analog of a
+component's own acceptance criteria, exactly mirroring "Acceptance
+Criterion" one scope level up.
 
 ## Scope
 
 **In scope:** the capability-intersection lookup (which `P-id`s to run);
-dispatching each golden scenario by its declared `kind` using exactly the
-mechanisms `verifier-orchestrator` already established — no new dispatch
-machinery; producing one result keyed by `P-id`.
+dispatching each capability scenario by its declared `kind` using
+exactly the mechanisms `verifier-orchestrator` already established — no
+new dispatch machinery; producing one result per scenario, keyed by
+`P-id`.
 
 **Out of scope:** deciding whether a failure here blocks the merge
 (`merge-orchestrator`'s `R-MERGE-011` job, unchanged by this extraction);
-authoring golden scenarios themselves (a product-capability spec author's
-job, same as any other acceptance criterion); re-deciding a criterion's
-declared `kind` (fixed at spec-authoring time, same invariant
-`verifier-orchestrator` already honors).
+authoring capability scenarios themselves (a product-capability spec
+author's job, same as any other acceptance criterion); re-deciding a
+criterion's declared `kind` (fixed at spec-authoring time, same
+invariant `verifier-orchestrator` already honors).
 
 ## Definitions
 
@@ -63,7 +68,7 @@ See `interface/data/`.
 
 See `acceptance/`.
 
-Both criteria are `kind: compiled` — dispatch-and-aggregate logic, tested
+All three criteria are `kind: compiled` — dispatch-and-aggregate logic, tested
 by mocking the dispatch mechanisms and asserting on call
 arguments/results, the same pattern `verifier-orchestrator` already
 established for coordination logic.
@@ -80,3 +85,6 @@ None — extracted whole from `merge-orchestrator`'s already-resolved
 ## Change log
 
 - Initial draft (extracted from `merge-orchestrator`, D25).
+- Renamed from `golden-scenario-verifier`; `CapabilityScenarioReport`
+  moved to per-scenario granularity with a shared `rationale` field
+  (`D36`).

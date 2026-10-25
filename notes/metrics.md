@@ -178,7 +178,7 @@ Consumer tags: `[dev]` developer · `[stk]` stakeholder · `[agt]` system agent 
 - **Property / metamorphic check pass rate** and **flakiness**. `[agt] [dev]`
 - **Contract-drift incidents** — generated interface ≠ the `interface/`
   contract (D15). `[gate] [dev]`
-- **Golden-scenario pass rate** — the D16 merge-time gate's own pass/fail
+- **Capability-scenario pass rate** — the D16 merge-time gate's own pass/fail
   rate, per capability and over time; a sustained failure cluster on one
   capability flags a recurring cross-component composition risk that
   interface-level checks alone aren't catching. `[gate] [stk]`
@@ -221,7 +221,7 @@ Consumer tags: `[dev]` developer · `[stk]` stakeholder · `[agt]` system agent 
   ambiguous requirement, per time window. `[stk] [agt]`
 - **Post-incident spec-edit latency** — how fast the fix lands as a spec change.
   `[dev] [stk]`
-- **Behavioral drift** — production behavior vs. golden acceptance scenarios,
+- **Behavioral drift** — production behavior vs. capability acceptance scenarios,
   tracked over time. `[agt] [stk]`
 
 ---

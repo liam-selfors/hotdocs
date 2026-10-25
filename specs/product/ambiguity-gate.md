@@ -33,9 +33,9 @@ divergence, dual-judge disagreement) are recorded in
 accepted as a tracked, visible tradeoff, not a gap this capability claims
 to close.
 
-## Golden scenarios
+## Capability scenarios
 
-### GS-AMBIGUITY-001
+### CS-AMBIGUITY-001
 Covers: P-AMBIGUITY-GATE
 Kind: generated-test
 

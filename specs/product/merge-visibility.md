@@ -25,9 +25,9 @@ merge itself the complete recovery path — this capability is about
 across developers or machines (a deferred, not-yet-speced future
 enhancement, `notes/initial-ideas.md` §14).
 
-## Golden scenario
+## Capability scenario
 
-### GS-MERGE-VISIBILITY-001
+### CS-MERGE-VISIBILITY-001
 Covers: P-MERGE-VISIBILITY
 Kind: generated-test
 

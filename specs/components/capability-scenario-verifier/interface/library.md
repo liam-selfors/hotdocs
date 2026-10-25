@@ -1,7 +1,7 @@
 # Library
 
 ```
-run_golden_scenarios(blast_radius: list[str], repo_root: Path, judge=None, test_author=None) -> GoldenScenarioReport
+run_capability_scenarios(blast_radius: list[str], repo_root: Path, judge=None, test_author=None) -> CapabilityScenarioReport
 ```
 
 `judge`/`test_author` are the same injectable-callable pattern

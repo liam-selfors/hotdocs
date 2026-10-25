@@ -21,9 +21,9 @@ In scope: `specs/`, `gen/`, and `verification/`, scanned pre-merge-gate and
 deployment-time config values and infra-as-code, which never enter the spec
 corpus at all (D12) and so aren't this capability's concern.
 
-## Golden scenario
+## Capability scenario
 
-### GS-COMPLIANCE-001
+### CS-COMPLIANCE-001
 Covers: P-COMPLIANCE-GATE
 Kind: generated-test
 

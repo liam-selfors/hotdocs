@@ -27,4 +27,4 @@ See `SPEC_GUIDELINES.md` §3.2.
   `component_provenance`) every adopter queries instead of writing its
   own ingestion — `impact-analyzer`'s blast-radius computation was the
   first adopter, since joined by `spec-linter`, `corpus-graph-builder`,
-  `golden-scenario-verifier`, and `review-packet-builder` (D24, D26, D27).
+  `capability-scenario-verifier`, and `review-packet-builder` (D24, D26, D27).

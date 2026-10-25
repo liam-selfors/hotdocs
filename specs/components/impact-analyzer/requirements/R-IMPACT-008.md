@@ -22,7 +22,7 @@
   real residual risk this requirement does not eliminate — it is
   structurally impossible for a graph-reachability computation to verify
   a claim about what code *actually* relies on — which is exactly why
-  D16's golden-scenario gate (`golden-scenario-verifier`, called by
+  D16's capability-scenario gate (`capability-scenario-verifier`, called by
   `merge-orchestrator` per R-MERGE-014) exists as a permanent backstop,
   not a transitional one, independent of how precise these declarations
   get.

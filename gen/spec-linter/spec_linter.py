@@ -667,7 +667,7 @@ def rule_criterion_wellformed(corpus: Corpus) -> list[Finding]:
     """R-LINT-010. Branches on doc_type: a `component-acceptance` file (D15)
     *is* one criterion already, so the whole body is the block. A `product`
     capability doc is unaffected by D15 — it still holds multiple inline
-    `### GS-...` golden scenarios in one file, so that case keeps the
+    `### CS-...` capability scenarios in one file, so that case keeps the
     original header-splitting logic."""
     findings = []
     for doc in corpus.docs:
