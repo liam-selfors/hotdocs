@@ -1147,6 +1147,52 @@ the current, authoritative rule this produced.
 
 ---
 
+### D20 — Cross-step literal substitution: bare bound identifiers only, resolved at compile time; anything else is a compile error
+
+Resolved `criterion-compiler`'s open question on the exact boundary of
+"literal data" (`R-COMPILE-007`) for cross-step fixture references —
+`step-phrase-grammar.md`'s own text already asserted an answer in prose
+("still a literal substitution, not evaluation") without ever stating the
+precise rule.
+
+**The rule:** a bare identifier occupying an entire leaf/scalar position
+within the literal syntax — whether the whole argument value or nested
+inside a larger object/array literal (`{"owner": user_id}`) — is literal
+substitution if it exactly matches a fixture bound by an earlier `Given`
+step in the same criterion. The compiler resolves it at **compile time**
+by simple lookup against that fixture's own already-known literal value —
+never by runtime computation, which is the actual property that keeps
+this safe under `R-COMPILE-007`'s anti-code-execution intent, not
+anything about the Gherkin's surface syntax. An unresolved bare identifier
+(matching no earlier binding) is a compile error, the same
+unresolved-reference discipline `R-COMPILE-001`/`002` already apply
+elsewhere — never silently treated as a literal string.
+
+Anything beyond a bare identifier in a leaf position — an operator, a
+field/index access, string concatenation, a function-like call — crosses
+into expression evaluation and is a compile error, specific and located,
+never a silent best-effort attempt.
+
+**Deliberately excluded, not overlooked:** field/index access into an
+already-bound literal (`foo.id`) would actually still be compile-time-only
+and therefore no less safe than bare-identifier substitution — the
+compiler already has the full literal value, so a field lookup is pure
+structural traversal, never dynamic attribute resolution, and could never
+become a reflection-style attack vector. It's excluded anyway, because
+allowing it means extending the step-phrase grammar table itself
+(D2-level governance weight, a breaking change to every `compiled`
+criterion in the corpus) for a need nothing in this corpus has actually
+raised yet. An author needing a bound value's field elsewhere binds that
+field directly in its own `Given` step instead — consistent with this
+project's standing bias against designing in generality nobody's asked
+for.
+
+See `specs/components/criterion-compiler/requirements/R-COMPILE-007.md`
+and `specs/architecture/step-phrase-grammar.md` for the current,
+authoritative rule this produced.
+
+---
+
 ## 12. Open questions
 
 _None outstanding — Q9–Q13 from the review pass are now D10–D14; D15 was a

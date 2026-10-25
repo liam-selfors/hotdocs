@@ -112,9 +112,16 @@ See `constraints.md`.
   governed-there-while-living-in-`interface/`), carrying the same
   governance weight as splitting a component (D2) — not a routine
   `criterion-compiler` spec edit.
-- Exact boundary of "literal data" in R-COMPILE-007 — are template
+- ~~Exact boundary of "literal data" in R-COMPILE-007 — are template
   interpolations (e.g. referencing a previously-bound fixture name inside a
-  later step) literal, or does that cross into expression evaluation?
+  later step) literal, or does that cross into expression evaluation?~~ —
+  resolved directly in `R-COMPILE-007`: a bare identifier in a leaf
+  position, resolved at compile time to a fixture bound earlier in the
+  same criterion, is substitution; anything more (operators, field/index
+  access, concatenation, calls) is evaluation and a compile error.
+  Deliberately doesn't extend the step-phrase grammar itself (field/index
+  access would still be compile-time-safe, but nothing has asked for it
+  yet) — see `R-COMPILE-007` for the full reasoning.
 
 ## Change log
 

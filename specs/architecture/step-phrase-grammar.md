@@ -48,9 +48,12 @@ best-effort guess (`criterion-compiler`'s `R-COMPILE-001`/`002`).
 Literal values are JSON-like scalars, strings, or object/array literals only
 — never expressions. A fixture name referenced in a later step (e.g. a
 `Given`-bound variable used in a `When` step's args) resolves to the literal
-it was bound to; this is the one allowed form of cross-step reference, and it
-is still a literal substitution, not evaluation (see `criterion-compiler`'s
-own open questions for the exact boundary of this rule).
+it was bound to — a bare identifier in a leaf/scalar position only, resolved
+at compile time by simple lookup; this is the one allowed form of cross-step
+reference, and it is still a literal substitution, not evaluation. Anything
+beyond a bare identifier (an operator, field/index access, concatenation, a
+call) is expression evaluation and a compile error — see `criterion-compiler`'s
+`R-COMPILE-007` for the full rule and rationale.
 
 ## Change log
 
