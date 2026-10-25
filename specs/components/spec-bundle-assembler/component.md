@@ -15,15 +15,22 @@ sealed: false
 
 Assembles a component's full generation input — its own `component.md` +
 `requirements/` + `interface/` + `constraints.md`, its dependencies'
-`interface/` content, its referenced `specs/vars/` declarations, and
-`specs/glossary.md` — into one payload (`SpecBundle`). Reused by canonical
-generation and hint-mode previews — one assembly implementation, not two.
+`interface/` content and `Purpose` text, its referenced `specs/vars/`
+declarations, and `specs/glossary.md` — into one payload (`SpecBundle`).
+Reused by canonical generation and hint-mode previews — one assembly
+implementation, not two.
 
 ## Scope
 
 **In scope:** reading and concatenating the right files for a given
 component id; computing `spec_bundle_hash`; the cold-vs-hint distinction
-(D1) at the bundle level.
+at the bundle level; including each dependency's `Purpose` text
+alongside its `interface/` content (`R-ASSEMBLE-010`), so a generating
+model sees not just a dependency's contract but what it's for.
+
+## Rationale
+
+The cold-vs-hint split traces to D1.
 
 **Out of scope:** calling any model (`generator`'s job); deciding *whether*
 to regenerate (`impact-analyzer`'s job); verifying anything.

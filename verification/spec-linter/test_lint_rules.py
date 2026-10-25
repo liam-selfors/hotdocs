@@ -372,3 +372,19 @@ def test_ac_lint_024_purpose_cites_decision(corpus_root):
 def test_ac_lint_024_clean_purpose_does_not_fire(corpus_root):
     report = run_lint(corpus_root)
     assert not has_finding(report, "R-LINT-024")
+
+
+def test_ac_lint_025_long_purpose(corpus_root):
+    component = _comp(corpus_root) / "component.md"
+    long_purpose = " ".join(["word"] * 160)
+    component.write_text(component.read_text().replace(
+        "A minimal component for exercising the linter.", long_purpose
+    ))
+    report = run_lint(corpus_root)
+    assert has_finding(report, "R-LINT-025")
+    assert not has_finding(report, "R-LINT-024")
+
+
+def test_ac_lint_025_short_purpose_does_not_fire(corpus_root):
+    report = run_lint(corpus_root)
+    assert not has_finding(report, "R-LINT-025")

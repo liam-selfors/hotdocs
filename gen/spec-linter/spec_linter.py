@@ -9,7 +9,7 @@ from. See `.provenance.json` alongside this file and
 `verification/spec-linter/BOOTSTRAP.md` for the honest account of what was
 bootstrapped, what was ambiguous, and what was decided unilaterally.
 
-Implements all twenty-four R-LINT-* requirements from
+Implements all twenty-five R-LINT-* requirements from
 `specs/components/spec-linter/requirements/`, matching the CLI and
 `LintReport` contract in `specs/components/spec-linter/interface/` exactly.
 
@@ -1014,6 +1014,12 @@ def rule_unit_file_size(corpus: Corpus) -> list[Finding]:
 
 
 DECISION_CITATION_RE = re.compile(r"\bD\d+\b")
+PURPOSE_WORD_CAP = (80, 150)
+
+
+def _extract_purpose(body: str) -> str | None:
+    match = re.search(r"##\s*Purpose\s*\n(.*?)(\n##|\Z)", body, re.DOTALL)
+    return match.group(1) if match else None
 
 
 def rule_purpose_dependent_safe(corpus: Corpus) -> list[Finding]:
@@ -1028,15 +1034,42 @@ def rule_purpose_dependent_safe(corpus: Corpus) -> list[Finding]:
     for comp in corpus.components.values():
         if not comp.root:
             continue
-        match = re.search(r"##\s*Purpose\s*\n(.*?)(\n##|\Z)", comp.root.body, re.DOTALL)
-        if not match:
+        purpose_text = _extract_purpose(comp.root.body)
+        if purpose_text is None:
             continue
-        purpose_text = match.group(1)
         if DECISION_CITATION_RE.search(purpose_text):
             findings.append(Finding(
                 "R-LINT-024", SEVERITY_FAIL, comp.root.rel_path,
                 _find_line(comp.root.body, "## Purpose"),
                 "Purpose section cites a decision id (D<N>) - move this content to a Rationale section instead"))
+    return findings
+
+
+def rule_purpose_length(corpus: Corpus) -> list[Finding]:
+    """R-LINT-025 (D35).
+
+    Purpose MUST stay one genuine paragraph, not several disguised as
+    one, now that D34 gives it nowhere to hide rationale padding - this
+    is what makes 'one paragraph' (SPEC_GUIDELINES.md Sec3.4) a checked
+    fact rather than an unenforced description.
+    """
+    findings = []
+    warn_at, fail_at = PURPOSE_WORD_CAP
+    for comp in corpus.components.values():
+        if not comp.root:
+            continue
+        purpose_text = _extract_purpose(comp.root.body)
+        if purpose_text is None:
+            continue
+        words = len(purpose_text.split())
+        if words > fail_at:
+            findings.append(Finding("R-LINT-025", SEVERITY_FAIL, comp.root.rel_path,
+                                     _find_line(comp.root.body, "## Purpose"),
+                                     f"Purpose is {words} words, exceeding hard-fail threshold {fail_at}"))
+        elif words > warn_at:
+            findings.append(Finding("R-LINT-025", SEVERITY_WARN, comp.root.rel_path,
+                                     _find_line(comp.root.body, "## Purpose"),
+                                     f"Purpose is {words} words, exceeding warn threshold {warn_at}"))
     return findings
 
 
@@ -1127,6 +1160,7 @@ ALL_RULES = [
     rule_decomposition_signal,
     rule_unit_file_size,
     rule_purpose_dependent_safe,
+    rule_purpose_length,
     rule_secret_field_safety,
     rule_glossary_singularity,
     rule_no_trailing_whitespace,

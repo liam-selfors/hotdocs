@@ -13,17 +13,21 @@ sealed: false
 
 ## Purpose
 
-From a set of changed spec ids, computes the minimal **blast radius** (the
-term as defined in `specs/glossary.md`) — the set of components that actually
-need regeneration or re-verification for this change. Runs after
-`spec-linter` passes, assuming a validated, acyclic, reference-resolved
-corpus graph; it does not re-validate that graph itself.
+From a set of changed spec ids, computes the minimal **blast radius**
+(the term as defined in `specs/glossary.md`) — the set of components
+that actually need regeneration or re-verification for this change.
+Runs after `spec-linter` passes, assuming a validated, acyclic,
+reference-resolved corpus graph; it does not re-validate that graph
+itself.
+
+## Rationale
 
 Built on the engine named in `specs/architecture/graph-query-engine.md`
-(R-IMPACT-009): the corpus graph is loaded directly from spec frontmatter
-via DuckDB's `yaml` extension, and transitive propagation is computed via
-`duckpgq` graph-pattern queries — this is the first component rebuilt on
-that shared engine, not a bespoke traversal implementation.
+(R-IMPACT-009): the corpus graph is loaded directly from spec
+frontmatter via DuckDB's `yaml` extension, and transitive propagation
+is computed via `duckpgq` graph-pattern queries — this is the first
+component rebuilt on that shared engine, not a bespoke traversal
+implementation.
 
 ## Scope
 

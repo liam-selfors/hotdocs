@@ -312,6 +312,7 @@ Below that bar, size caps are linter-enforced:
 | Guarantees (`G-id`s) per component (D29) | 5 | 10 |
 | Acceptance criteria (`AC-id`s) per component (D29) | 25 | 50 |
 | **Per-file** words, for any single file under `requirements/` or `acceptance/` (D29) — distinct from the spec-bundle row above, which is a whole-bundle aggregate | 250 | 500 |
+| **`Purpose` section** words (D35) — checks the "one paragraph" rule above mechanically; distinct from both rows above, scoped to one section, not a file or the bundle | 80 | 150 |
 
 The last three rows are a first pass (D29), calibrated against this
 corpus's own content at the time they were added rather than an a

@@ -84,10 +84,10 @@ recursive CTEs — more verbose, not infeasible.
 
 Rather than let every adopting component write its own
 `read_yaml_frontmatter()`/`read_text()`/`read_json()`/`UNNEST` calls,
-this document names four views as the one shared surface all of them
+this document names five views as the one shared surface all of them
 query. A component MAY define additional views of its own for data no
 other component needs (see `corpus-graph-builder`'s `component_size`
-below) but MUST NOT redefine these four — and if a second component ever
+below) but MUST NOT redefine these five — and if a second component ever
 needs one of its own local views, that is the signal to promote it here
 instead, same as `component_provenance`'s own history.
 
@@ -209,6 +209,30 @@ a human see." Assembling an actual compiled, cross-linked document
 `merge-tracker`'s data rather than the data layer doing its own
 presentation.
 
+**`component_context`** — one row per component, just its `Purpose`
+section's text, extracted from `component_docs` the same way
+`rule_ratified_closure` already extracts `Open questions` for
+`R-LINT-002`:
+
+```sql
+CREATE VIEW component_context AS
+SELECT
+  id AS component_id,
+  regexp_extract(body, '##\s*Purpose\s*\n(.*?)\n##', 1) AS purpose
+FROM component_docs;
+```
+
+Deliberately narrower than `component_docs` — this is the one slice of
+a component's own file that's safe to hand to a *dependent*
+(`spec-bundle-assembler`'s `R-ASSEMBLE-010`, `D35`), because `D34`
+made `Purpose` dependent-safe by construction (no decision citations,
+no historical rationale — enforced by `R-LINT-024`) and nothing else
+in `component.md` carries that guarantee. `requirements/`,
+`constraints.md`, and the rest of `component.md` stay exactly as
+excluded as `R-ASSEMBLE-002` already says; this view does not, and
+must not, become a way around that boundary for anything but `Purpose`
+specifically.
+
 **`component_provenance`** — one row per component, read directly from
 the provenance manifests `provenance-writer` already writes
 (`verification/<component>/.provenance.json`), which already embed
@@ -288,6 +312,13 @@ pointing back to this document, exactly as `R-IMPACT-009` does:
   shape anyway (`requirement`/`acceptance`/`golden_scenario` all modeled
   as proper `nodes`, not just the minimum each rule strictly needs), for
   a complete graph rather than one trimmed to today's two consumers.
+- **`spec-bundle-assembler`** (`R-ASSEMBLE-010`, `D35`) — each
+  dependency's `Purpose` text, handed to a dependent as
+  `dependency_context`, is read via `component_context` rather than
+  reaching into the dependency's `component.md` directly. A narrow,
+  explicit exception to `R-ASSEMBLE-002`'s otherwise-correct "never
+  `component.md`" rule, scoped to exactly the one section `D34` made
+  dependent-safe by construction.
 
 ## What this document does not cover
 
