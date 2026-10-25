@@ -1362,6 +1362,81 @@ current, authoritative rules this produced.
 
 ---
 
+### D24 — `nodes`/`edges`/`component_docs` promoted to named views; adopted by `spec-linter`, `corpus-graph-builder`, and `merge-orchestrator`'s R-MERGE-014
+
+Closes out the "candidates, not adopted" list D22's own
+`graph-query-engine.md` had already named, and fixes a real gap found
+while writing up the corpus-graph data model for review: `R-IMPACT-009`'s
+original wording named three frontmatter sources for node loading but
+never said how guarantee nodes — the target side of a
+`depends_on_guarantees` edge — get enumerated at all, since guarantee
+files carry no frontmatter (D15) for `read_yaml_frontmatter()` to read.
+
+- **`graph-query-engine.md` gains a "Query surface" section** naming
+  three views as the one shared surface every adopting component queries,
+  instead of each writing its own ingestion calls: `nodes` (one row per
+  spec id — components/capabilities/vars from frontmatter, guarantees
+  from `read_text()` + filename, since they have none, with
+  `owner_component_id` resolved from the file's path), `edges` (one row
+  per `(source_id, target_id, edge_type)`, unnested from each component's
+  list-valued frontmatter fields), and `component_docs` (frontmatter
+  joined with a component's full raw text, for anything needing structure
+  and prose together — a data layer, not a rendered document;
+  `docs-site-renderer` still owns presentation).
+- **`impact-analyzer`'s `R-IMPACT-009`** now points at `nodes`/`edges`
+  directly rather than restating the raw `read_yaml_frontmatter()`/
+  `duckpgq` calls inline — and, in doing so, actually resolves the
+  guarantee-node gap rather than just describing the three sources that
+  never covered it.
+- **`spec-linter`'s `R-LINT-020`** (new) — R-LINT-003 (reference
+  resolution), R-LINT-004 (acyclic `depends_on`), and R-LINT-018
+  (`depends_on_guarantees` resolution) now query `nodes`/`edges` instead
+  of independently-written traversal code, closing the sequencing
+  argument already named in D22: `spec-linter` validates this graph
+  *before* `impact-analyzer` trusts it (R-IMPACT-007), so one ingestion
+  bug now surfaces in both places identically instead of two parsers
+  silently disagreeing. Explicitly deferred, not folded in:
+  R-LINT-008/009 (requirement-to-acceptance traceability) walk a
+  different graph — `R-id`/`AC-id` nodes joined by each acceptance file's
+  `Covers:` tag, which is prose, not a frontmatter field. Modeling that
+  would mean extending the node/edge vocabulary itself, a bigger scope
+  change than reusing the existing shape — a distinct future candidate,
+  not assumed here.
+- **`corpus-graph-builder`'s `R-GRAPH-009`** (new) — R-GRAPH-001/002
+  (node/edge construction) build from `nodes`/`edges` directly;
+  R-GRAPH-003's per-node annotations and R-GRAPH-004/005's orphan-rate
+  aggregates join against two views scoped to this component alone:
+  `component_provenance` (reads `provenance-writer`'s already-written
+  `.provenance.json` manifests directly — `verification_report`,
+  `license_scan`, `secret_scan`, and `cache_hit` are already embedded
+  there per `SPEC_GUIDELINES.md` §7, so no separate read of
+  `verifier-orchestrator`/`license-scanner`/`secret-scanner`'s own output
+  is needed) and `component_size` (the spec-bundle word count
+  R-LINT-012/D2 already defines, computed the same way
+  `spec_linter.py`'s `rule_size_caps` does, not a second counting rule
+  that could disagree with it). R-GRAPH-006/008's committed,
+  deterministic `verification/corpus-graph.json` output is unchanged —
+  only the construction step moves onto this engine.
+- **`merge-orchestrator`'s `R-MERGE-020`** (new) — R-MERGE-014's
+  capability-intersection lookup ("every product capability whose
+  `realizes`-set intersects the blast radius") is now one query against
+  `edges`, not a bespoke intersection written once for this call site.
+
+All four are implementation requirements, not behavioral ones — nothing
+about what any of R-IMPACT-009, R-LINT-003/004/018, R-GRAPH-001–005, or
+R-MERGE-014 require the *answer* to be has changed, only how the graph
+each of them walks gets built.
+
+See `specs/architecture/graph-query-engine.md`'s "Query surface" and
+"Scope of adoption" sections, `specs/components/impact-analyzer/
+requirements/R-IMPACT-009.md`, `specs/components/spec-linter/
+requirements/R-LINT-020.md`, `specs/components/corpus-graph-builder/
+requirements/R-GRAPH-009.md`, and `specs/components/merge-orchestrator/
+requirements/R-MERGE-020.md` for the current, authoritative rules this
+produced.
+
+---
+
 ## 12. Open questions
 
 _None outstanding — Q9–Q13 from the review pass are now D10–D14; D15 was a

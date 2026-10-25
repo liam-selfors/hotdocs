@@ -11,11 +11,9 @@
   provenance (D3).
 
   **Closes a real gap:** retrying only on verification failure meant a
-  `model_call_error` on attempt one had no verdict to be `fail`, so the
-  trigger never fired and one transient hiccup exhausted `k` for nothing
-  — a bigger problem now that `generator` does no retry of its own
-  (R-GEN-011, D21) and best-of-k is the only cheap layer short of a full
-  merge re-run (R-MERGE-018) that can absorb it.
+  `model_call_error` never had a `fail` verdict to trigger on, so one
+  transient hiccup silently exhausted `k` for nothing — worse now that
+  `generator` does no retry of its own (R-GEN-011, D21).
 
   A retry whose **immediately preceding** attempt reached verification
   (produced a candidate `verifier-orchestrator` then failed) MUST pass

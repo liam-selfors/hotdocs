@@ -1,15 +1,16 @@
 # R-IMPACT-009
 
-**R-IMPACT-009** — The corpus graph this component walks (nodes: spec ids;
-  edges: `depends_on`, `realizes`, `uses_var`, `depends_on_guarantees`)
-  MUST be built via the engine named in `specs/architecture/
-  graph-query-engine.md`: frontmatter loaded directly from
-  `specs/components/*/component.md`, `specs/product/*.md`, and
-  `specs/vars/*.md` (DuckDB's `yaml` extension, `read_yaml_frontmatter()`
-  — no intermediate file, no restructuring of those files' existing
-  layout), with transitive propagation (R-IMPACT-003/004/005/008)
-  expressed as graph-pattern queries (DuckDB's `duckpgq` extension) over
-  that loaded data.
+**R-IMPACT-009** — The corpus graph this component walks MUST be the
+  `nodes`/`edges` views named in `specs/architecture/
+  graph-query-engine.md`'s "Query surface" section — not a
+  separately-written frontmatter load, and not a second definition of
+  what counts as a node or edge. Those views already resolve every kind
+  this component needs, guarantee nodes included (via `read_text()` over
+  `interface/guarantees/*.md`, since those files carry no frontmatter to
+  extract — `read_yaml_frontmatter()` alone cannot see them). Transitive
+  propagation (R-IMPACT-003/004/005/008) MUST be expressed as
+  graph-pattern queries (DuckDB's `duckpgq` extension, per `MATCH` syntax)
+  over `edges`.
 
   This is an implementation requirement, not a behavioral one — it
   constrains *how* the graph is built and traversed, not *what*

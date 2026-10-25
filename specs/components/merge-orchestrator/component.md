@@ -24,29 +24,15 @@ this list.
 ## Scope
 
 **In scope:** sequencing and parallelizing calls to every other component;
-owning the best-of-k retry loop (D3) — this is the component that resolves
-the gap `generator`'s spec surfaced: nothing before this assigned who
-retries generation on a verification failure, and the answer is here, not
-inside `generator` itself. The retry loop is diagnostic-guided
-(R-MERGE-005): each retry's `retry_feedback` is this component's own
-extraction of the failing `R-id`s from the immediately preceding attempt's
-`requirement_results` (R-VERIFY-011) — `merge-orchestrator` reads that
-field and passes it through, it does not compute pass/fail itself. `k`
-itself defaults to 2 and is overridable per-component (R-MERGE-016).
-Since D16: also owns running golden-scenario
-verification against the real assembled system (R-MERGE-014), reusing the
-exact same `criterion-compiler`/`test_author`/`judge` dispatch already
-wired for `verifier-orchestrator` — not a second dispatch mechanism. Also
-owns routing a sealed component away from generation entirely (R-MERGE-015)
-— the primary layer of the sealed/pinned-override write-protection
-invariant, previously only asserted as something this component "should"
-do in `generator`'s own spec, never specified here until now. Also owns
-running every impacted component to completion before evaluating block
-status (R-MERGE-017) — no fail-fast short-circuiting — which is what
-makes re-running a blocked merge a complete, free recovery path
-(R-MERGE-018): nothing dedicated to "retry," just the same cache-hit/
-cache-miss behavior every merge already has, now relied upon explicitly
-for partial-failure recovery, not only for genuinely unchanged specs.
+owning the diagnostic-guided best-of-k retry loop (D3, R-MERGE-005/016) —
+nothing before this assigned who retries generation on a verification
+failure. Since D16: also owns golden-scenario verification against the
+real assembled system (R-MERGE-014), reusing the exact dispatch already
+wired for `verifier-orchestrator`, routing a sealed component away from
+generation entirely (R-MERGE-015), and running every impacted component to
+completion before evaluating block status (R-MERGE-017) — no fail-fast —
+which is what makes re-running a blocked merge a complete, free recovery
+path (R-MERGE-018).
 
 **Out of scope:** any gate's own logic — this component calls, it doesn't
 reimplement.
