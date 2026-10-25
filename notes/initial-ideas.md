@@ -851,6 +851,18 @@ problem a glossary exists to prevent.
 - Glossary size is tracked as a visibility metric (`metrics.md`) so growth
   doesn't go unnoticed, but isn't lint-gated.
 
+---
+
+**D15 onward are also formalized as real decision records in
+`specs/decisions/` (`D15.md` … `D27.md`), per `D25`-adjacent proposal
+work on making this project's own methodology easier to navigate. This
+section remains the full discussion — the back-and-forth, the dead
+ends, the exact prose each decision was argued in — while each
+`specs/decisions/D<N>.md` file is the distilled, addressable Context/
+Decision/Consequences version meant to be linked from requirements
+instead of re-explained inline. Every decision from here on gets its
+record written at the time it's made, not appended here first.**
+
 ### D15 — One file per addressable unit, not one file per document type
 
 Replaces the original four-flat-files component anatomy (§5) — `spec.md` /

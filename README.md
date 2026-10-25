@@ -12,11 +12,26 @@ reviewing diffs of intent.
 
 ## Status
 
-Brainstorming is done (`notes/initial-ideas.md`, decisions D1–D14), the rules
-are formalized (`SPEC_GUIDELINES.md`), and the repository scaffold exists.
-Nothing under `specs/`, `gen/`, `pipeline/`, or `verification/` has real
-content yet — no components, no linter, no generation pipeline. Next up: a
-small example project to stress-test the design against something concrete.
+The rules are formalized (`SPEC_GUIDELINES.md`), and the repository's own
+pipeline is itself the worked example: **19 components, fully specced**
+under `specs/components/` (component anatomy, requirements, interfaces,
+acceptance criteria, constraints — see `specs/architecture/
+pipeline-decomposition.md` for the full decomposition), covering lint,
+blast-radius analysis, generation, verification, compliance scanning,
+provenance, merge-tracking, and a DuckDB-backed query layer shared across
+several of them (`specs/architecture/graph-query-engine.md`).
+
+`spec-linter` is the one component with a real, hand-bootstrapped
+implementation (`gen/spec-linter/`) and a real passing test suite
+(`verification/spec-linter/`) — standing in for the not-yet-built
+generator/criterion-compiler pipeline, and the thing every spec change in
+this repo is actually re-validated against before it's committed.
+Everything else is fully specced but not yet generated: `pipeline/` (the
+agent workflow that would do that generation) doesn't exist yet either.
+
+Decisions are tracked as formal ADRs in `specs/decisions/` (`D15` onward);
+`notes/initial-ideas.md` holds the original brainstorm (`D1`–`D14`,
+informal) plus the full discussion behind every later decision.
 
 ## Repository conventions
 
