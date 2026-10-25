@@ -40,3 +40,13 @@ write_attempt_record(
 Writes to `.hotdocs/attempts/<component_id>/` (R-TRACK-007) and returns
 the record. Called once per component per merge attempt, by
 `merge-orchestrator`, regardless of outcome.
+
+```
+last_requirement_failures(component_id: str, repo_root: Path) -> list[str]
+```
+
+Reads the most recent `AttemptRecord` for `component_id` with a
+non-null `verification` and returns its `requirement_results`' failing
+`R-id`s, or `[]` if none exists (R-TRACK-008). A pure convenience
+lookup for a human deciding what to pass as `--retry-feedback` — never
+called by the merge pipeline itself.

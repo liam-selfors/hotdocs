@@ -54,6 +54,13 @@ provenance at all, so without this, a failed attempt's full diagnostic
 detail would exist only in `merge-orchestrator`'s process memory for one
 merge, then vanish.
 
+**Since D33, also exposes `last_requirement_failures`** — a pure,
+read-only convenience over `.hotdocs/attempts/` that tells a developer
+which `R-id`s a component's last attempt failed, so they can decide
+whether to pass them as `retry_feedback` on their next `hotdocs merge`
+call (`R-MERGE-022`). Never called by the merge pipeline itself — this
+component answers "what failed," it never decides "retry with this."
+
 ## Definitions
 
 No deltas from `specs/glossary.md`.
@@ -74,7 +81,7 @@ See `interface/data/`.
 
 See `acceptance/`.
 
-All seven criteria are `kind: compiled` — assembling already-produced facts
+All eight criteria are `kind: compiled` — assembling already-produced facts
 into a JSON file is pure, deterministic logic; nothing here needs a model
 or judgment, same case `spec-bundle-assembler`/`provenance-writer` already
 made.

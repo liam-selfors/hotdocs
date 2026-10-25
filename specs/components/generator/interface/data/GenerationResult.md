@@ -8,15 +8,21 @@
   "cache_hit": false,
   "files": { "spec_linter.py": "<file content>" },
   "model_call_error": null,
-  "refused": null
+  "refused": null,
+  "retry_feedback": ["R-FOO-003"]
 }
 ```
 
-No `seed`/`retry_feedback`/`sample_index` fields — `D31` retired the
-best-of-k retry loop that was their only reason to exist. `generator` is
-called at most once per component per merge attempt now, so there is no
-"which sample won" or "what was this attempt informed by" left to
-record.
+No `seed`/`sample_index` fields — `D31` retired the best-of-k retry loop
+that was their only reason to exist, and `generator` is still called at
+most once per component per merge attempt, so there is no "which sample
+won" left to record. `retry_feedback` itself came back under `D33`:
+`D31` mistakenly removed it along with the automatic loop, but it was
+never only useful for feeding that loop — it's restored here as a plain
+echo of whatever a caller supplied (`null` if nothing was), for the same
+audit reason it always existed: an auditor reconstructing why a given
+attempt looks the way it does needs to know whether it was informed or
+blind.
 
 Exactly one of `files` (non-empty), `model_call_error`, or `refused` is
 populated on any given result — never more than one, and `cache_hit` is

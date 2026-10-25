@@ -31,10 +31,11 @@ into an unrelated blast radius.
 
 ## Scope
 
-**In scope:** constructing the model call from a `SpecBundle` and a model
-identifier; checking/populating the cache before/after calling a model;
-writing the result under `gen/<component>/`; recording what it did for
-provenance.
+**In scope:** constructing the model call from a `SpecBundle`, a model
+identifier, and optionally `retry_feedback` (`R-GEN-012`, restored by
+`D33` after `D31` mistakenly dropped it); checking/populating the cache
+before/after calling a model; writing the result under
+`gen/<component>/`; recording what it did for provenance.
 
 **Out of scope, deliberately, and recorded here because the architecture
 doc's dependency list only shows `spec-bundle-assembler` and

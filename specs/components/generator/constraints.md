@@ -3,10 +3,18 @@
 - **Not deterministic, and that's expected — but bounded.** Unlike every
   other component specced so far, a fresh model call is not required to be
   reproducible. What MUST be deterministic: a **cache hit** (R-GEN-005)
-  always returns byte-identical output for the same key, and the recorded
-  `seed` always matches what was actually requested (R-GEN-007) — those are
-  the properties D11/D13's cache-key correctness actually depends on, not
-  "the model always says the same thing."
+  always returns byte-identical output for the same key — that's the
+  property D11/D13's cache-key correctness actually depends on, not "the
+  model always says the same thing." (`R-GEN-007`, about recording which
+  `seed`/sample won, was retired along with best-of-k under `D31` — no
+  seed variation exists once there is only ever one call per merge.)
+- **`retry_feedback`'s content boundary is load-bearing, not cosmetic.**
+  `R-GEN-012` (restored by `D33`) restricts `retry_feedback` to a bare
+  `R-id` list — this MUST hold at every layer that touches it here, not
+  just at the CLI/library boundary: the prompt-construction logic MUST
+  NOT enrich it with Gherkin text, `rationale`, or expected/actual values
+  pulled from anywhere else this component can reach (e.g. by
+  re-deriving them from `acceptance/` files that happen to be on disk).
 - **Defense-in-depth on write paths.** R-GEN-009's sealed/pinned-override
   check MUST be enforced here even though `merge-orchestrator`'s own
   routing requirement (R-MERGE-015) means it should never call this

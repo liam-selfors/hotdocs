@@ -421,7 +421,10 @@ Run per merge, scoped to the components in the impact-analysis blast radius:
    best-of-k retry this step used to run was retired; a failed attempt
    blocks the merge for that component, and a human re-running the merge,
    after reviewing the per-attempt record D32 requires, is the only path
-   back to a fresh generation call).
+   back to a fresh generation call). That re-run's one call MAY carry
+   `retry_feedback` — the immediately preceding attempt's failing
+   requirements — but only if the human explicitly supplies it (D33);
+   nothing computes or injects it automatically.
 3. **Per-criterion verification** — compiled / generated-test / llm-judge, per
    §5. Contract/property tests from `interface/`. A drift check that
    generated interfaces match `interface/`'s contract exactly.
@@ -475,6 +478,11 @@ discipline as the artifact itself:
 spec_bundle_hash    content hash of every spec file that fed generation
 model_pin           model id + version
 prompt_version      id of the frozen prompt template used
+retry_feedback      R-id list the caller supplied for this call, if any
+                    (R-GEN-012, D33) — null if the call was blind. No
+                    sample_index: D31 retired same-merge retry, so there
+                    is no "which sample" left to record, only whether
+                    this one call was informed.
 pipeline_version    version of the generation pipeline itself
 gate_versions       per-gate version map (compiler, license_scanner,
                      mutation_harness, secret_scanner, ...)

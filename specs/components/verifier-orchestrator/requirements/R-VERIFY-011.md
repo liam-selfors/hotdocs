@@ -17,14 +17,12 @@
   `llm-judge` criteria), its expected/actual values, or any other content
   that could let a consumer reconstruct what a specific test checked.
 
-  This boundary predates, and outlives, `D31`'s retirement of
-  `generator`'s retry mechanism — it was never only about feeding that
-  loop. `requirement_results` is this component's own
-  requirement-level summary of a verification run, useful on its own
-  (a human or a review packet reading "which requirements failed," not
-  just "which criteria") independent of whether anything downstream ever
-  used it to drive a retry. Keeping it content-free the same way
-  regardless protects `spec-bundle-assembler`'s R-ASSEMBLE-001 exclusion
-  of `acceptance/` against ever being reconstituted through this field by
-  *any* future consumer, not only the one that originally motivated the
-  rule.
+  This boundary predates, and outlives, `D31`'s retirement of automatic
+  retry — it was never only about feeding that loop. `requirement_results`
+  is a standalone requirement-level summary, useful to a human or review
+  packet on its own, and — since `D33` restored `retry_feedback` as a
+  developer-supplied input (via `R-TRACK-008`) rather than an automatic
+  one — also what a developer now reads to decide what to supply.
+  Keeping it content-free regardless of who reads it protects
+  `spec-bundle-assembler`'s R-ASSEMBLE-001 exclusion of `acceptance/`
+  against ever being reconstituted through this field by any consumer.

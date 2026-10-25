@@ -26,9 +26,12 @@ this list.
 **In scope:** sequencing and parallelizing calls to every other
 component; calling `generator` exactly once per cache-miss component per
 merge attempt (R-MERGE-005) — since `D31` retired the best-of-k retry
-loop that used to call it again on failure, there is no retry decision
+loop that used to call it again on failure, there is no retry *decision*
 left to own here, only the one call and an immediate block on failure.
-Since `D32`, also writes a per-attempt record (`R-MERGE-021`) via
+That one call MAY carry caller-supplied `retry_feedback` (`R-MERGE-022`,
+`D33`) — this component passes it through for exactly the components
+named, never computes or decides on it itself. Since `D32`, also writes
+a per-attempt record (`R-MERGE-021`) via
 `merge-tracker` right after that call (and the verification call, if
 reached) concludes, so a human has full diagnostic detail before
 deciding whether to just re-run or fix the spec first. Since D16: also

@@ -2,6 +2,7 @@
 
 ```
 hotdocs track query [--last=<n>] [--component=<spec-id>] [--repo-root=<dir>] [--format=json|text]
+hotdocs track feedback <component-id> [--repo-root=<dir>]
 ```
 
 - `--last` — how many most-recent records to return. Default `10`.
@@ -9,6 +10,13 @@ hotdocs track query [--last=<n>] [--component=<spec-id>] [--repo-root=<dir>] [--
   Optional.
 - `--repo-root` — defaults to the current git repository root.
 - `--format` — `text` (human-readable, default) or `json`.
+
+`track feedback` (`R-TRACK-008`, `D33`) prints the named component's
+most recent failing `R-id`s, comma-separated, ready to paste into
+`hotdocs merge --retry-feedback=<component-id>=...` — or nothing, if
+no failed attempt exists. It does not pass anything anywhere itself;
+it only answers "what would I pass," leaving whether to pass it to the
+developer running the command.
 
 There is no `hotdocs track write` CLI command — writing is invoked by
 `merge-orchestrator` directly (`write_tracking_record`, never run
