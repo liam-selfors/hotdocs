@@ -1276,24 +1276,38 @@ than bespoke traversal code reinvented per component.
   needs an actual file), so only its graph-*construction* step is a
   candidate. `merge-orchestrator`'s `R-MERGE-014` capability-intersection
   lookup is a smaller, related case.
-- **Explicitly separate, not yet speced:** a merge-tracking data store
-  (per-attempt, per-component generation/verification history, feeding
-  metrics and an eventual UI) also plans to use DuckDB, but as a query
-  layer over durable, append-only JSON event records on disk, local-only
-  and not committed (a `.duckdb` file is a disposable, derived index, not
-  a spec artifact — the raw JSON records are the durable truth). That
-  work — the tracking schema itself, `review-packet-builder`/
-  `provenance-writer` handling a failed component's story coherently, the
-  new metrics, and a `duckpgq`-over-DuckDB-WASM UI (confirmed viable:
-  `duckpgq` has real WASM support on current DuckDB, so this can stay a
-  static, serverless client consistent with `docs-site-renderer`'s
-  existing design, D9) — is real, agreed-upon future work, not abandoned,
-  just not yet reduced to actual requirements the way this decision's
-  pieces are.
+- **Status: the merge-tracking piece flagged above as "not yet speced" is
+  now built.** `merge-tracker` (new component) writes one `TrackingRecord`
+  per merge attempt — success or block — to `.hotdocs/tracking/` (a new,
+  gitignored, non-gating area of the repo layout, `SPEC_GUIDELINES.md`
+  §1), queryable by DuckDB's core `read_json` with no bespoke query API
+  (`R-TRACK-006`). It depends only on `provenance-writer`, not
+  `merge-orchestrator`, specifically to avoid a dependency cycle —
+  reading already-written manifests from disk rather than taking
+  `merge-orchestrator`'s own `MergeResult` type as input, the same
+  pattern `review-packet-builder` already established for the same
+  reason. `merge-tracker-ui` (new component) renders it, client-side,
+  static, no server — but needs only DuckDB-WASM's **core** `read_json`,
+  not `duckpgq`: `TrackingRecord` is plain JSON, not graph-shaped, so the
+  original "a `duckpgq`-over-WASM UI" framing above overstated what this
+  piece actually needs; `duckpgq` would only become relevant if this UI
+  is later extended to show corpus-graph context alongside tracking data
+  (a real, flagged, but undecided future direction, not assumed). New
+  product capability `P-MERGE-VISIBILITY` names what this pair actually
+  delivers. Two real, pre-existing gaps were found and fixed along the
+  way: `R-MERGE-005`/`006` only triggered best-of-k's retry on a
+  *verification* failure, never on `generator` itself returning
+  `model_call_error` — meaning a single transient model-API hiccup would
+  have exhausted the entire `k` budget doing nothing, a bigger problem now
+  that `generator` does no retry of its own (this decision's own
+  `R-GEN-011`); and `provenance-writer`'s `ProvenanceInputs` type was
+  referenced in three places but never actually defined anywhere.
 
-See `specs/architecture/graph-query-engine.md` and
-`specs/components/impact-analyzer/requirements/R-IMPACT-009.md` for the
-current, authoritative rules this produced.
+See `specs/architecture/graph-query-engine.md`,
+`specs/components/impact-analyzer/requirements/R-IMPACT-009.md`,
+`specs/components/merge-tracker/`, `specs/components/merge-tracker-ui/`,
+and `specs/product/merge-visibility.md` for the current, authoritative
+rules this produced.
 
 ---
 

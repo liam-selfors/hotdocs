@@ -91,6 +91,24 @@ Specced in full depth so far:
   docs-site-renderer both read — neither recomputes any part of it.
 - **`docs-site-renderer`** — all `kind: compiled`. A pure function of
   `corpus-graph.json`; its output is deliberately never committed (D9).
+- **`merge-tracker`** — all `kind: compiled`. Writes one local-only,
+  gitignored record per merge attempt — success or block — directly
+  queryable via DuckDB's `read_json`, no bespoke query layer (D22).
+  Depends only on `provenance-writer`, not `merge-orchestrator`, despite
+  being called by it — reads already-written manifests from disk instead
+  of depending on `merge-orchestrator`'s own `MergeResult` type, the same
+  "need the caller's facts without depending on the caller" pattern
+  `review-packet-builder` already established, used here specifically to
+  avoid a dependency cycle.
+- **`merge-tracker-ui`** — mostly `kind: compiled` (rendering is a pure
+  function of already-written `TrackingRecord` data), one `generated-test`
+  criterion for the client-side DuckDB-WASM query itself actually running
+  in a real browser. Local-only, like `merge-tracker`'s own data — not a
+  CI artifact the way `docs-site-renderer`'s output is, a genuinely
+  different lifecycle for a genuinely different kind of data. Implements
+  no retry/resume action of its own: re-running `hotdocs merge` already is
+  the complete recovery path (`R-MERGE-018`), so there is nothing for this
+  component to wire up beyond showing status clearly.
 - **`merge-orchestrator`** — all `kind: compiled`, the capstone data point
   for D5's guidance: even the component sequencing every model-calling,
   judgment-involving gate in the whole pipeline is itself fully

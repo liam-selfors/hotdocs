@@ -8,6 +8,10 @@
 /tmp/
 /scratch/
 
+# Local-only merge-tracking records and DuckDB index (SPEC_GUIDELINES.md §1) —
+# observability data, never a gate input, never committed.
+/.hotdocs/
+
 # Dependency + build dirs (per-prototype; refine later)
 node_modules/
 __pycache__/

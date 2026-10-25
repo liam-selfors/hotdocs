@@ -46,6 +46,10 @@ gen/                   # generated code
 pipeline/              # workflow definitions, frozen prompts, model pins, toggles
 verification/          # generated tests, contract checks, corpus-graph.json
 notes/                 # brainstorming — non-normative, not read by the pipeline
+.hotdocs/              # LOCAL ONLY, gitignored — merge-tracking records
+                       # (merge-tracker, D22) and any DuckDB index built
+                       # over them. Never committed, never read by any
+                       # gate's pass/fail decision — purely observability.
 ```
 
 - `specs/` **MUST NOT** contain executable code of any kind, generated or
@@ -55,6 +59,12 @@ notes/                 # brainstorming — non-normative, not read by the pipeli
   commit. (D6)
 - Nothing under `gen/` or `verification/` is hand-edited, with exactly two
   declared exemptions — see §8.
+- `.hotdocs/` **MUST** be gitignored and **MUST NOT** be read by any gate's
+  pass/fail decision — it is observability data about past merge attempts,
+  never an input to the current one. This is a correctness boundary, not
+  just a storage convention: letting a gate's decision depend on local,
+  uncommitted history would break every determinism/purity requirement
+  elsewhere in this document (e.g. `impact-analyzer`'s R-IMPACT-006).
 - A `README.md` anywhere under `specs/` is non-normative scaffolding, not a
   governed spec — the linter and every other tool in this document **MUST**
   skip it. The governed set under a component directory is exactly:

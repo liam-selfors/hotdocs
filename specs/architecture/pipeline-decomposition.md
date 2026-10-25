@@ -33,8 +33,10 @@ change.
 | `provenance-writer` | Assembles and writes `.provenance.json` (D7) from the other components' outputs — collects, never invents. Fully specced; also where D7's schema gap (missing `secret_scan` field) was found and fixed. | `generator`, `verifier-orchestrator`, `license-scanner`, `secret-scanner`, `cache-manager` |
 | `review-packet-builder` | Assembles the human-readable PR summary (D11/D12/§6 step 7) — deliberately never includes the generated code diff itself. Fully specced. | `provenance-writer`, `verifier-orchestrator`, `license-scanner`, `secret-scanner`, `cache-manager` |
 | `corpus-graph-builder` | Builds `corpus-graph.json` (D8/D9) — the `P-id → component → R-id → acceptance → verification-status` walk, orphan-rate computation, including orphan-var rate (D12). Fully specced. | `spec-linter`, `provenance-writer`, `verifier-orchestrator` |
+| `merge-tracker` | Writes one durable, local-only (`.hotdocs/`, gitignored, never a gate input) record per merge attempt — success or block — directly queryable via DuckDB's `read_json`, no bespoke query API (D22). Reads `provenance-writer`'s already-written manifests for per-component detail rather than depending on `merge-orchestrator`'s own `MergeResult` type, specifically to avoid a dependency cycle. Fully specced. | `provenance-writer` |
+| `merge-tracker-ui` | A local, per-developer static page (DuckDB-WASM, core `read_json` only — not `duckpgq`, which this component doesn't actually need) rendering `.hotdocs/tracking/` directly in the browser. Not a CI artifact like `docs-site-renderer` — a different data lifecycle (local-only vs. committed) genuinely requires a different one. Implements no retry action of its own; re-running the merge command already is the complete recovery path (`R-MERGE-018`). Fully specced, with one real open question (how a developer actually opens it locally) left open rather than papered over. | `merge-tracker` |
 | `docs-site-renderer` | Pure renderer of `corpus-graph.json` into the interactive graph/docs site (D9). Not committed; CI build artifact. Fully specced. | `corpus-graph-builder` |
-| `merge-orchestrator` | Sequences the above per `SPEC_GUIDELINES.md` §6, parallelizing independent gates (D13). **Owns the best-of-k retry loop (D3)** — calls `generator` once per sample, checks the result against `verifier-orchestrator`, decides whether to call `generator` again with a different seed. The loop is **diagnostic-guided**: on a retry, this component extracts the failing `R-id`s from the preceding attempt's `requirement_results` (R-VERIFY-011, itself a graph-projection of criteria results onto requirements via the existing `Covers:` traceability edges) and passes them through unchanged as `generator`'s `retry_feedback` — a bare pass/fail signal, never Gherkin text or expected/actual values, so it can't reopen `spec-bundle-assembler`'s exclusion of `acceptance/` from what a generation model ever sees. `k` defaults to 2 (one blind attempt, one informed retry) and is overridable per component. Also where the real `test_author`/`judge` callables get wired into `verifier-orchestrator`'s call — nothing upstream assigned that wiring either, until this component's spec made it explicit. **Since D16, also runs golden-scenario verification** against the real assembled system, reusing that same callable wiring — the permanent backstop for cross-component behavioral risk `interface/guarantees/` can't fully rule out by documentation alone. Fully specced — its real `fan_out` (13, after `criterion-compiler` was added directly and `cross-model-divergence-checker` later removed) is checked against the actual linter and still triggers exactly the warn-only finding this document predicted below, confirming the prediction rather than just asserting it. | everything above |
+| `merge-orchestrator` | Sequences the above per `SPEC_GUIDELINES.md` §6, parallelizing independent gates (D13). **Owns the best-of-k retry loop (D3)** — calls `generator` once per sample, checks the result against `verifier-orchestrator`, decides whether to call `generator` again with a different seed. The loop is **diagnostic-guided**: on a retry, this component extracts the failing `R-id`s from the preceding attempt's `requirement_results` (R-VERIFY-011, itself a graph-projection of criteria results onto requirements via the existing `Covers:` traceability edges) and passes them through unchanged as `generator`'s `retry_feedback` — a bare pass/fail signal, never Gherkin text or expected/actual values, so it can't reopen `spec-bundle-assembler`'s exclusion of `acceptance/` from what a generation model ever sees. `k` defaults to 2 (one blind attempt, one informed retry) and is overridable per component. Also where the real `test_author`/`judge` callables get wired into `verifier-orchestrator`'s call — nothing upstream assigned that wiring either, until this component's spec made it explicit. **Since D16, also runs golden-scenario verification** against the real assembled system, reusing that same callable wiring — the permanent backstop for cross-component behavioral risk `interface/guarantees/` can't fully rule out by documentation alone. Fully specced — its real `fan_out` (14, after `criterion-compiler` was added directly, `cross-model-divergence-checker` later removed, and `merge-tracker` added for D22's merge-visibility work) is checked against the actual linter and still triggers exactly the warn-only finding this document predicted below, confirming the prediction rather than just asserting it. | everything above |
 
 ## Feature-branch tooling (not part of the merge pipeline)
 
@@ -48,14 +50,15 @@ merge:
 
 ## A finding from writing this down: `merge-orchestrator`'s fan-out
 
-`merge-orchestrator` depends on 13 components (11 at the time this was
+`merge-orchestrator` depends on 14 components (11 at the time this was
 first written, before its real spec existed; 12 once specced; 13 once
 `test-author` was added and `merge-orchestrator` took on wiring its
 callable into `verifier-orchestrator`'s call; 14 once `criterion-compiler`
 was added directly, for the D16 golden-scenario gate reusing that same
 callable-wiring pattern; 13 again once `cross-model-divergence-checker`
 was removed from the dependency list, part of the second-model scope cut
-for this build) — well past D2's fan-out warn threshold of 7.
+for this build; 14 again once `merge-tracker` was added for D22's
+merge-visibility work) — well past D2's fan-out warn threshold of 7.
 This is a genuine tension
 surfaced by actually doing the decomposition, not a mistake to quietly fix
 by padding the dependency list down:
@@ -76,6 +79,15 @@ rather than *generation*). Left as an open question against
 `notes/initial-ideas.md` rather than silently patched — a real refinement
 candidate for D2, discovered by using the methodology rather than just
 designing it.
+
+**Same tension, now also showing up in word count, not just fan-out:**
+after D22's `merge-tracker` addition, `merge-orchestrator`'s
+`spec_bundle_words` sits at 3964 — a trim away from D2's 4000 hard-fail
+cap, not just the 2000 warn threshold every heavily-coordinating component
+here already exceeds. Trimmed to fit this time; the next addition to this
+component likely won't fit without either trimming again or actually
+splitting something out, which is exactly the signal D2/D13 say a rising
+cost like this should be treated as.
 
 ## Sealed component, by design rather than by legacy debt
 

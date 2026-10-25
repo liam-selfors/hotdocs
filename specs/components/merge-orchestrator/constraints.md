@@ -12,7 +12,7 @@
 - **No gate skipped silently.** A cache hit (R-MERGE-003) skips real work,
   but MUST be visible in `MergeResult` and the review packet — never
   indistinguishable from "this gate ran and found nothing."
-- **This component's own fan-out (13 dependencies, after D16 added
+- **This component's own fan-out (14 dependencies, after D16 added
   `criterion-compiler`) is accepted, not a defect** — see
   `specs/architecture/pipeline-decomposition.md`'s dedicated note on why a
   thin coordinator is a different risk shape than D2's fan-out cap was

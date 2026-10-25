@@ -143,6 +143,23 @@ Consumer tags: `[dev]` developer · `[stk]` stakeholder · `[agt]` system agent 
   Must be 0 for `ratified` specs; nonzero ⇒ spec bug. `[gate] [agt]`
 - **Hint-mode vs. cold-regen divergence** — how often the feature-branch preview
   differs materially from the final cold regen. `[agt] [dev]`
+- **Correction cycles per merge** — of a blocked merge later followed by a
+  passing one touching an overlapping component set, how many attempts it
+  took to go green (D22, `merge-tracker`). **Computed from `.hotdocs/tracking/`
+  via time-proximity + component-overlap between consecutive records, not an
+  explicit link** — `TrackingRecord` doesn't mark one attempt as "the retry
+  of" another (nothing at write time reliably knows that), so this is a
+  heuristic query over already-written records, not a guaranteed-precise
+  count. `[agt] [dev]`
+- **Attempts resolved by best-of-k vs. requiring a spec edit** — of
+  components that failed their first sample, how many passed within the
+  same merge attempt (best-of-k recovered it, R-MERGE-005) vs. only passed
+  in a *later*, separate merge attempt (a human had to change the spec in
+  between) — the same `merge-tracker` data, read as a sequence rather than
+  a single record. Low best-of-k recovery despite diagnostic feedback is a
+  signal to raise that component's `best_of_k` override, not evidence the
+  mechanism is broken (same posture as the existing diagnostic-retry
+  recovery-rate metric below). `[gate] [agt]`
 
 ---
 

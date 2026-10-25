@@ -1,0 +1,95 @@
+---
+id: comp-merge-tracker-ui
+title: Merge Tracker UI
+status: draft
+owners: [pipeline-team]
+depends_on: [comp-merge-tracker]
+realizes: [P-MERGE-VISIBILITY]
+sealed: false
+---
+
+# Merge Tracker UI
+
+## Purpose
+
+A local, per-developer view of `.hotdocs/tracking/` — the same role
+`docs-site-renderer` plays for `corpus-graph.json`, applied to a
+genuinely different kind of data with a genuinely different lifecycle.
+`docs-site-renderer`'s output is a **CI build artifact**, published
+somewhere shared, rendering **committed** corpus state (D9). This
+component's data is **local-only, gitignored, per-developer** (D22) — it
+cannot be a CI artifact, because CI has no `.hotdocs/` to render. It is a
+local dev tool, run by one developer against their own machine's tracking
+history, not a published site.
+
+## Scope
+
+**In scope:** rendering `.hotdocs/tracking/*.json` (via `merge-tracker`'s
+documented `TrackingRecord` shape) as a per-component status view across
+recent merge attempts; the one action this view needs is "re-run the
+merge," which is not a feature this component implements — it is already
+the correct, complete recovery path (`R-MERGE-018`) a developer invokes
+themselves, outside this UI, same as any other `hotdocs merge` call.
+
+**Out of scope:** a dedicated retry/resume action wired into this UI (per
+the point above, there is nothing to wire — re-running the merge command
+*is* the action, and building a button that just re-runs it on the
+developer's behalf is a thin convenience this spec doesn't commit to
+yet, not a gap); cross-developer or cross-machine aggregation (explicitly
+deferred, `notes/initial-ideas.md` §14); any read of `specs/`,
+`corpus-graph.json`, or anything else committed — if a future version
+wants to show blast-radius context alongside tracking data, that is a
+deliberate, separate extension (joining this component's data with
+`specs/architecture/graph-query-engine.md`'s), not assumed here.
+
+## Definitions
+
+No deltas from `specs/glossary.md`.
+
+## Behavior
+
+See `requirements/`.
+
+## Interfaces
+
+See `interface/`.
+
+## Data
+
+See `interface/data/`.
+
+## Acceptance criteria
+
+See `acceptance/`.
+
+Five criteria, mixed `kind`: four are `compiled` (rendering/absence
+logic, a pure function of `TrackingRecord` data, same case
+`docs-site-renderer` already makes); `AC-UI-001` is `generated-test`,
+since asserting that DuckDB-WASM's `read_json` actually runs correctly in
+a real browser environment needs an executable check, not graph/text
+analysis.
+
+## Non-functional constraints
+
+See `constraints.md`.
+
+## Open questions
+
+- **How a developer actually opens this locally** — a generated static
+  HTML file a developer opens directly (`file://`), which may hit CORS
+  restrictions on `fetch`-ing local JSON from a `file://` context
+  depending on the browser; or a trivial local HTTP server (e.g. `hotdocs
+  track serve`) started on demand. Not resolved here — genuinely open,
+  not a gap papered over with false precision.
+- Whether this component should eventually consume
+  `specs/architecture/graph-query-engine.md`'s corpus graph too (so a
+  failed component's view can show what else depends on it), making this
+  and `docs-site-renderer` converge into one UI reading two data sources
+  instead of two separate UIs. Flagged as a plausible future direction,
+  not assumed — these currently have different lifecycles (committed vs.
+  local-only) for a real reason, and merging them needs its own
+  deliberate decision, not an accident of sharing a webpage.
+
+## Change log
+
+- Initial draft.
