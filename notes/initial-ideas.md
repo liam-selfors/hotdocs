@@ -1193,6 +1193,110 @@ authoritative rule this produced.
 
 ---
 
+### D21 — No custom retry/timeout logic in `generator`; re-running a blocked merge is the recovery mechanism, for free
+
+Resolved item 2 (`generator`'s model-API retry/timeout policy), which grew
+into something smaller than originally scoped once two observations
+landed: a well-behaved model SDK already has its own bounded timeout and
+will eventually error on its own — `generator` doesn't need to reinvent
+that, just not disable it — and `generator` never caches a failed call
+(`R-GEN-006` writes only on success), so re-running a merge after *any*
+failure, transient or not, is already a correct, free retry: components
+that already succeeded are a cache hit, only the failed one gets a fresh
+attempt.
+
+- **`generator` (`R-GEN-011`):** no internal retry-with-backoff, no
+  invented timeout duration. A single call either succeeds or fails
+  within the SDK's own bound; any failure is `model_call_error`
+  (`R-GEN-008`, unchanged) exactly once, no attempt loop to exhaust
+  first. Explicitly **not** the same mechanism as D3's best-of-k retry
+  (`R-MERGE-005`) — that retries *generation* with a new seed after
+  *code* fails verification; this is about infrastructure failures
+  before any code exists to verify.
+- **`merge-orchestrator` (`R-MERGE-017`/`R-MERGE-018`):** every impacted
+  component MUST be processed to completion before block status is
+  evaluated — no fail-fast short-circuiting on the first failure. This
+  resolves the separate, previously-open parallelization-mechanism
+  question (queue item 5) as a side effect: the requirement constrains
+  the *outcome* (every component attempted, every result collected), not
+  whether that happens sequentially or concurrently, which is what the
+  open question was actually asking. With that in place, re-running a
+  blocked merge is stated explicitly as the designed, complete recovery
+  path (`R-MERGE-018`) — the same "rollback is a cache hit, not a
+  dedicated incident feature" posture D11 established for reverts,
+  applied to the symmetric case of moving a partially-failed merge
+  forward rather than backward.
+
+See `specs/components/generator/requirements/R-GEN-011.md` and
+`specs/components/merge-orchestrator/requirements/R-MERGE-017.md`/
+`R-MERGE-018.md` for the current, authoritative rules this produced.
+
+### D22 — DuckDB (`yaml` + `duckpgq` extensions) as the local graph-query engine; `impact-analyzer` rebuilt on it
+
+Grew out of designing how merge/generation tracking should be queryable
+(metrics, an eventual UI) into a broader realignment: `impact-analyzer`'s
+blast-radius computation and the corpus's dependency graph are the same
+kind of problem a real graph-query engine already solves well, rather
+than bespoke traversal code reinvented per component.
+
+- **DuckDB, embedded and local** (no server, no network — same posture
+  every other component already has), with two community extensions:
+  **`yaml`**, specifically `read_yaml_frontmatter()`, which queries
+  frontmatter **directly out of existing spec files**
+  (`component.md`/`specs/product/*.md`/`specs/vars/*.md`, all already
+  using the same `---`-delimited convention) with native glob support —
+  no file restructuring needed. A prior version of this decision
+  considered splitting frontmatter into its own per-component file
+  specifically to make it queryable; `read_yaml_frontmatter()` already
+  does that without the split, found only after a WASM-compatibility
+  check that was initially read wrong (the markdown-converted summary of
+  a compatibility matrix silently drops SVG check-mark icons and reads
+  as "unsupported" when it isn't — caught and corrected against the raw
+  HTML, worth remembering for any future compatibility check on this kind
+  of page). **`duckpgq`** provides SQL/PGQ graph-pattern matching for the
+  traversal itself (transitive reachability, cycle detection) — chosen
+  over hand-rolled recursive CTEs for the same reason `criterion-compiler`
+  exists: a well-defined operation expressed in its own grammar beats
+  reimplementing it in a more general one.
+- **`impact-analyzer` (`R-IMPACT-009`)** is the first component rebuilt on
+  this engine — an implementation requirement, not a behavioral one;
+  `R-IMPACT-001`–`008` and the `BlastRadiusReport` contract are unchanged,
+  and `R-IMPACT-006`'s purity requirement is, if anything, strengthened
+  (a maintained query engine instead of bespoke traversal code written
+  once for one component).
+- **Flagged as realignment candidates, deliberately not adopted here:**
+  `spec-linter`'s graph-shaped rules (cycle detection, forward/backward
+  traceability, reference resolution) are the strongest next candidate —
+  they already have to validate the same graph is well-formed *before*
+  `impact-analyzer` trusts it, a real sequencing argument for sharing the
+  construction step, not just a tidiness one. `corpus-graph-builder`
+  builds the same structural graph with verification/provenance
+  annotations joined on; its JSON-writing role stays necessary either way
+  (`docs-site-renderer` is a detached, later, browser-based consumer that
+  needs an actual file), so only its graph-*construction* step is a
+  candidate. `merge-orchestrator`'s `R-MERGE-014` capability-intersection
+  lookup is a smaller, related case.
+- **Explicitly separate, not yet speced:** a merge-tracking data store
+  (per-attempt, per-component generation/verification history, feeding
+  metrics and an eventual UI) also plans to use DuckDB, but as a query
+  layer over durable, append-only JSON event records on disk, local-only
+  and not committed (a `.duckdb` file is a disposable, derived index, not
+  a spec artifact — the raw JSON records are the durable truth). That
+  work — the tracking schema itself, `review-packet-builder`/
+  `provenance-writer` handling a failed component's story coherently, the
+  new metrics, and a `duckpgq`-over-DuckDB-WASM UI (confirmed viable:
+  `duckpgq` has real WASM support on current DuckDB, so this can stay a
+  static, serverless client consistent with `docs-site-renderer`'s
+  existing design, D9) — is real, agreed-upon future work, not abandoned,
+  just not yet reduced to actual requirements the way this decision's
+  pieces are.
+
+See `specs/architecture/graph-query-engine.md` and
+`specs/components/impact-analyzer/requirements/R-IMPACT-009.md` for the
+current, authoritative rules this produced.
+
+---
+
 ## 12. Open questions
 
 _None outstanding — Q9–Q13 from the review pass are now D10–D14; D15 was a

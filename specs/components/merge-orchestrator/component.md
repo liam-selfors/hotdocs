@@ -40,7 +40,13 @@ wired for `verifier-orchestrator` — not a second dispatch mechanism. Also
 owns routing a sealed component away from generation entirely (R-MERGE-015)
 — the primary layer of the sealed/pinned-override write-protection
 invariant, previously only asserted as something this component "should"
-do in `generator`'s own spec, never specified here until now.
+do in `generator`'s own spec, never specified here until now. Also owns
+running every impacted component to completion before evaluating block
+status (R-MERGE-017) — no fail-fast short-circuiting — which is what
+makes re-running a blocked merge a complete, free recovery path
+(R-MERGE-018): nothing dedicated to "retry," just the same cache-hit/
+cache-miss behavior every merge already has, now relied upon explicitly
+for partial-failure recovery, not only for genuinely unchanged specs.
 
 **Out of scope:** any gate's own logic — this component calls, it doesn't
 reimplement.
@@ -65,7 +71,7 @@ See `interface/data/`.
 
 See `acceptance/`.
 
-All eighteen criteria are `kind: compiled` — tested by mocking every
+All twenty criteria are `kind: compiled` — tested by mocking every
 dependency and asserting on call order/arguments, the same pattern
 `verifier-orchestrator` already established for coordination logic. An
 eleventh component in this corpus
@@ -85,10 +91,14 @@ See `constraints.md`.
   via `best_of_k` frontmatter (R-MERGE-016), alongside diagnostic-guided
   retry feeding each retry the immediately preceding attempt's failing
   `R-id`s (R-MERGE-005, R-GEN-010, R-VERIFY-011).
-- Whether R-MERGE-008's parallelization (with R-MERGE-004) is literal
+- ~~Whether R-MERGE-008's parallelization (with R-MERGE-004) is literal
   concurrent execution or just "no artificial sequential dependency" at
-  the spec level (leaving scheduling to the implementation) — this spec
-  states the *independence*, not a specific concurrency mechanism.
+  the spec level~~ — resolved without forcing an answer: R-MERGE-017
+  constrains the *outcome* (every impacted component attempted to
+  completion, no fail-fast short-circuiting) rather than the mechanism —
+  sequential and concurrent execution both satisfy it. What actually
+  mattered about this question was ruling out fail-fast, not settling on
+  a concurrency primitive.
 - Whether R-MERGE-015's sealed-component path still participates in
   R-MERGE-003's cache-hit short-circuit, and if so, what a "cache hit"
   even means for a component whose code is hand-maintained rather than

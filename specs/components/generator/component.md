@@ -76,13 +76,14 @@ See `interface/data/`.
 
 See `acceptance/`.
 
-Mixed `kind`, and deliberately so: R-GEN-001–008 and R-GEN-010 describe
-behavior around an external model call, tested with an injected mock model
-(same dependency-injection pattern `spec-linter`'s `judge` parameter already
-established) — `generated-test`, not `compiled`, since exercising them means
-setting up and asserting on a mocked call, not purely structural text/graph
-analysis. R-GEN-009 is a pure path-safety check with no model involved at
-all, and is `compiled` like everything in `spec-bundle-assembler`.
+Mixed `kind`, and deliberately so: R-GEN-001–008, R-GEN-010, and R-GEN-011
+describe behavior around an external model call, tested with an injected
+mock model (same dependency-injection pattern `spec-linter`'s `judge`
+parameter already established) — `generated-test`, not `compiled`, since
+exercising them means setting up and asserting on a mocked call, not purely
+structural text/graph analysis. R-GEN-009 is a pure path-safety check with
+no model involved at all, and is `compiled` like everything in
+`spec-bundle-assembler`.
 
 Whether R-GEN-001–008 could instead be `compiled` depends on whether
 `criterion-compiler`'s step grammar grows mock/dependency-injection support
@@ -94,10 +95,13 @@ See `constraints.md`.
 
 ## Open questions
 
-- Timeout/retry policy for transient model-API errors (distinct from
+- ~~Timeout/retry policy for transient model-API errors (distinct from
   R-GEN-008's "report a model-call error," which is about *classification*,
-  not retry policy) — not addressed here; candidate home is `pipeline/`
-  configuration once that exists for real, not this component's spec.
+  not retry policy)~~ — resolved (R-GEN-011): no custom retry/backoff logic
+  here, no invented timeout duration — trust the vendor SDK's own bounded
+  behavior, report `model_call_error` once, and let a merge re-run
+  (R-MERGE-017) be the retry mechanism, which is already free given
+  R-GEN-006's cache-on-success-only behavior.
 - ~~Whether `.overrides.json` paths should be read by this component
   directly, or whether `merge-orchestrator` should filter the write-set
   first~~ — resolved: both, as two independent layers. `generator` reads

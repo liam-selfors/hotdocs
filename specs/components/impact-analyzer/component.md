@@ -19,6 +19,12 @@ need regeneration or re-verification for this change. Runs after
 `spec-linter` passes, assuming a validated, acyclic, reference-resolved
 corpus graph; it does not re-validate that graph itself.
 
+Built on the engine named in `specs/architecture/graph-query-engine.md`
+(R-IMPACT-009): the corpus graph is loaded directly from spec frontmatter
+via DuckDB's `yaml` extension, and transitive propagation is computed via
+`duckpgq` graph-pattern queries — this is the first component rebuilt on
+that shared engine, not a bespoke traversal implementation.
+
 ## Scope
 
 **In scope:** determining, for a given set of changed spec ids, which
