@@ -33,24 +33,35 @@ plausible real risk: a call that's type-correct per the signature but
 wrong per an intent that was only ever stated in prose nothing shares
 with dependents.
 
-**Open questions this would need to resolve before becoming a real
-decision:**
-- Is this a *new* compiled artifact (e.g. `interface/context.md`,
-  hand-authored like `cli.md`/`library.md`), or a change to
-  `spec-bundle-assembler` to also include a trimmed slice of the
-  dependency's `Purpose` section in `dependency_interfaces`?
-- If hand-authored, how does it avoid duplicating — and drifting from —
-  `component.md`'s own `Purpose` section? If compiled/derived, from
-  what, exactly, and does "concise" mean a hard length cap (another
-  D2-style size discipline) or just a convention?
-- Does this reopen any boundary `D1`'s cold-mode exclusions established
-  (it shouldn't — `Purpose` prose isn't `acceptance/` content — but
-  worth checking explicitly before committing to a design)?
-- Precedent to check first: does this look more like
-  `spec-bundle-assembler`'s existing "human-readable flattened view"
-  mode, or `graph-query-engine.md`'s `component_docs` view (frontmatter
-  + raw text, already assembled for a different consumer)? Either could
-  plausibly already be 80% of the way there.
+**Resolved (`D34`): the "is `Purpose` clean enough to extract
+mechanically" question.** `component.md`'s anatomy now has a dedicated
+`Rationale` section (`SPEC_GUIDELINES.md` §3.4) — `Purpose` MUST be
+dependent-safe (no decision citations, no historical justification),
+enforced by a real lint rule (`R-LINT-024`), not left as an unchecked
+convention. All 13 components whose `Purpose` mixed "what" with "why
+this design was chosen" have been retrofitted. This means the context
+view, when built, can take the *entire* `Purpose` section verbatim —
+no fragile "first paragraph" extraction needed, since `Purpose` is now
+guaranteed clean by construction.
+
+**Still open, now that `Purpose` is ready to be extracted:**
+- Is the view itself a *new* one (`component_context`, extending
+  `graph-query-engine.md`'s `component_docs` pattern — join
+  frontmatter + `Purpose`-section text, same regex-extraction technique
+  `rule_ratified_closure` already uses for `Open questions`), or does
+  `spec-bundle-assembler` just query `component_docs` directly and pull
+  `Purpose` out itself?
+- `R-ASSEMBLE-002` currently excludes `component.md` from
+  `dependency_interfaces` *entirely* ("never its `component.md`") — this
+  idea requires carving a narrow, explicit exception for just `Purpose`
+  into that rule, not reopening it wholesale. `requirements/` and
+  `constraints.md` should stay excluded; if something in a dependency's
+  constraints is genuinely dependent-relevant, the existing mechanism
+  for that is a proper `interface/guarantees/G-id.md` entry, not a
+  second channel for the same fact.
+- Does "concise" need a hard length cap on `Purpose` (another D2-style
+  size discipline), or is "one paragraph" (already the rule) enough on
+  its own now that it can't carry rationale padding anymore?
 
 ---
 

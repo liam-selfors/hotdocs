@@ -12,10 +12,16 @@ sealed: false
 
 ## Purpose
 
-Builds `verification/corpus-graph.json` (D8/D9) — the single generated
-manifest that both D8's traceability matrix and D9's graph/docs explorer
-are views over. Walks `P-id → component → R-id → acceptance →
-verification-status` and computes corpus-health aggregates.
+Builds `verification/corpus-graph.json` — the single generated manifest
+the corpus's traceability matrix and graph/docs explorer are both views
+over. Walks `P-id → component → R-id → acceptance → verification-status`
+and computes corpus-health aggregates.
+
+## Rationale
+
+D8 established the traceability-matrix need; D9 established the
+graph/docs explorer this manifest also feeds — this component is the
+single source both read from, never two independently-computed copies.
 
 ## Scope
 

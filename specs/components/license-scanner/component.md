@@ -15,10 +15,15 @@ sealed: false
 ## Purpose
 
 Automated, unconditional scan of `gen/<component>/` against a reference
-corpus of known-licensed-code fingerprints (D7). No human sign-off is
-required to clear a flag — a match blocks the merge the same way a failed
-test does — but no result, clean or flagged, is ever silent: every scan
-result is written to the provenance manifest regardless of outcome.
+corpus of known-licensed-code fingerprints. No human sign-off is
+required to clear a flag — a match blocks the merge the same way a
+failed test does — but no result, clean or flagged, is ever silent:
+every scan result is written to the provenance manifest regardless of
+outcome.
+
+## Rationale
+
+D7 established this scan's unconditional, no-sign-off posture.
 
 ## Scope
 

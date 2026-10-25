@@ -15,19 +15,22 @@ sealed: false
 ## Purpose
 
 Calls a pinned model to produce `gen/<component>/` from a `SpecBundle` —
-cold, with no prior code (unless the bundle carries `hint_code`, D1),
+cold, with no prior code (unless the bundle carries `hint_code`),
 exactly one candidate per invocation.
 
-Declares `depends_on_guarantees: [G-CACHE-001]` — the D16 worked example.
+## Rationale
+
+`hint_code` is a feature-branch-only exception (D1). Declares
+`depends_on_guarantees: [G-CACHE-001]` — the D16 worked example:
 R-GEN-005/006's whole cache-check-before-call / cache-write-after-call
 behavior genuinely depends on `cache-manager`'s consistency guarantee: a
-`get` that returns a hit is trusted as authoritative with no locking of its
-own, which is only safe because concurrent writers for the same key are
-safe under last-write-wins (G-CACHE-001). It does *not* depend on
-`cache-manager`'s other properties (store-error fail-closed behavior, CLI
-inspection, etc.) in any way this component's own logic cares about — so a
-future change to *those* should not, and now will not, pull this component
-into an unrelated blast radius.
+`get` that returns a hit is trusted as authoritative with no locking of
+its own, which is only safe because concurrent writers for the same key
+are safe under last-write-wins (G-CACHE-001). It does *not* depend on
+`cache-manager`'s other properties (store-error fail-closed behavior,
+CLI inspection, etc.) in any way this component's own logic cares about
+— so a future change to *those* should not, and now will not, pull this
+component into an unrelated blast radius.
 
 ## Scope
 

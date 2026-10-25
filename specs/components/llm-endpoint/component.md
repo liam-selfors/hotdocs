@@ -15,20 +15,23 @@ sealed: false
 ## Purpose
 
 A single, vendor-agnostic transport for every model call this pipeline
-makes — `generator`, `test-author`, `spec-completeness-assistant`, and the
-real `judge` callable `merge-orchestrator` wires into
+makes — `generator`, `test-author`, `spec-completeness-assistant`, and
+the real `judge` callable `merge-orchestrator` wires into
 `verifier-orchestrator`/`golden-scenario-verifier` all dispatch through
 here instead of each independently knowing how to authenticate to, and
-call, a specific vendor's API. (D30.)
+call, a specific vendor's API.
 
-Extracted once a real coupling was found, not invented speculatively:
-`generator` and `test-author` each independently declared
-`uses_var: [VAR-ANTHROPIC-API-KEY]`, and `merge-orchestrator`'s `judge`
-wiring (`R-MERGE-004`) was "a direct call to the configured model" with
-no component behind it at all. Swapping vendors meant touching at least
-three places; `R-GEN-004` already treats the model *identifier* as a
-vendor-agnostic string parameter, but nothing previously owned the
-*mechanics* of actually calling whatever that identifier names.
+## Rationale
+
+(D30.) Extracted once a real coupling was found, not invented
+speculatively: `generator` and `test-author` each independently
+declared `uses_var: [VAR-ANTHROPIC-API-KEY]`, and `merge-orchestrator`'s
+`judge` wiring (`R-MERGE-004`) was "a direct call to the configured
+model" with no component behind it at all. Swapping vendors meant
+touching at least three places; `R-GEN-004` already treats the model
+*identifier* as a vendor-agnostic string parameter, but nothing
+previously owned the *mechanics* of actually calling whatever that
+identifier names.
 
 ## Scope
 

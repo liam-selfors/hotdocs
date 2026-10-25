@@ -15,12 +15,15 @@ sealed: false
 A local, per-developer view of `.hotdocs/tracking/` — the same role
 `docs-site-renderer` plays for `corpus-graph.json`, applied to a
 genuinely different kind of data with a genuinely different lifecycle.
+It is a local dev tool, run by one developer against their own
+machine's tracking history, not a published site.
+
+## Rationale
+
 `docs-site-renderer`'s output is a **CI build artifact**, published
 somewhere shared, rendering **committed** corpus state (D9). This
-component's data is **local-only, gitignored, per-developer** (D22) — it
-cannot be a CI artifact, because CI has no `.hotdocs/` to render. It is a
-local dev tool, run by one developer against their own machine's tracking
-history, not a published site.
+component's data is **local-only, gitignored, per-developer** (D22) —
+it cannot be a CI artifact, because CI has no `.hotdocs/` to render.
 
 ## Scope
 

@@ -13,19 +13,21 @@ sealed: false
 ## Purpose
 
 Runs the golden scenarios of every product capability whose
-`realizes`-set intersects a merge's blast radius, against the real, fully
-assembled `gen/` output produced by that merge — the permanent,
+`realizes`-set intersects a merge's blast radius, against the real,
+fully assembled `gen/` output produced by that merge — the permanent,
 cross-component backstop for behavioral risk no `interface/`-level
-diffing (including `interface/guarantees/`, D16) can fully rule out by
-documentation alone (same reasoning `R-IMPACT-008` already states).
+diffing can fully rule out by documentation alone. Structurally, the
+cross-component analog of what `verifier-orchestrator` already does
+per-component: same dispatch mechanisms
+(`criterion-compiler`/`test_author`/`judge`), one scope level up.
 
-Extracted from `merge-orchestrator` (D25) once that component's fan-out
-and spec-bundle-word caps crowded their ceilings simultaneously — a
-signal, D25 concluded, that this dispatch logic had its own identity, not
-merely convenient placement. Structurally, it is the cross-component
-analog of what `verifier-orchestrator` already does per-component: same
-dispatch mechanisms (`criterion-compiler`/`test_author`/`judge`), one
-scope level up.
+## Rationale
+
+Covers `interface/guarantees/` too (D16) — the same reasoning
+`R-IMPACT-008` already states. Extracted from `merge-orchestrator` (D25)
+once that component's fan-out and spec-bundle-word caps crowded their
+ceilings simultaneously — a signal, D25 concluded, that this dispatch
+logic had its own identity, not merely convenient placement.
 
 ## Scope
 

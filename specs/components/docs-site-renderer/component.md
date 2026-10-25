@@ -13,8 +13,12 @@ sealed: false
 ## Purpose
 
 Renders `verification/corpus-graph.json` into the interactive graph/docs
-explorer D9 describes — a pure presentation layer over data the pipeline
-already computed, nothing more.
+explorer — a pure presentation layer over data the pipeline already
+computed, nothing more.
+
+## Rationale
+
+D9 is the product decision describing the explorer this renders.
 
 ## Scope
 

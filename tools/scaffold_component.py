@@ -44,7 +44,16 @@ sealed: {sealed}
 ## Purpose
 
 TODO: one paragraph. What does this component do, and why does it exist
-— what would be missing from the pipeline without it?
+— what would be missing from the pipeline without it? Dependent-safe
+(D34): no decision citations, no historical justification — that
+belongs in Rationale below. Delete the Rationale section entirely if
+this component genuinely needs none.
+
+## Rationale
+
+TODO, or delete this section — decision citations, historical
+justification, why this design was arrived at. Never included in
+anything assembled for a dependent.
 
 ## Scope
 

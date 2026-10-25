@@ -22,8 +22,9 @@ specs/
   vars/                # env/config parameter declarations (VAR-id) — never values
   components/
     <component>/
-      component.md      # root: frontmatter + Purpose/Scope/Definitions/
-                         # Open questions/Change log + pointers to the below
+      component.md      # root: frontmatter + Purpose/Rationale/Scope/
+                         # Definitions/Open questions/Change log +
+                         # pointers to the below (Rationale optional, D34)
       requirements/
         R-<comp>-NNN.md  # one Behavior requirement each
       interface/
@@ -219,7 +220,8 @@ section order:
 
 | Section | Rule |
 | --- | --- |
-| Purpose | One paragraph: why this unit exists. |
+| Purpose | One paragraph: what this unit does and why it exists — **dependent-safe** (D34): no decision citations (`D<N>`), no historical justification, no cross-references to how this design was arrived at. This is the one section a *dependent* may see as part of its own context (`notes/backlog.md`'s "context" idea, once built) — everything that would make it internal rationale instead of a clean description belongs in Rationale, not here. |
+| Rationale | Everything Purpose used to carry that isn't dependent-safe: decision citations, historical justification, cross-references to the discussion that produced this design. **Internal only** — never included in anything assembled for a dependent. Optional: a component whose Purpose genuinely needs no supporting history MAY omit this section entirely, rather than leave it empty for form's sake. |
 | Scope | Explicit in-scope / out-of-scope bullets. |
 | Definitions | Only deltas from `glossary.md`. |
 | Behavior | Pointer: "See `requirements/`." |

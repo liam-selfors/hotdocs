@@ -357,3 +357,18 @@ def test_ac_lint_019_trailing_whitespace(corpus_root):
     )
     report = run_lint(corpus_root)
     assert has_finding(report, "R-LINT-019")
+
+
+def test_ac_lint_024_purpose_cites_decision(corpus_root):
+    component = _comp(corpus_root) / "component.md"
+    component.write_text(component.read_text().replace(
+        "A minimal component for exercising the linter.",
+        "A minimal component for exercising the linter, extracted once D30 found a real coupling.",
+    ))
+    report = run_lint(corpus_root)
+    assert has_finding(report, "R-LINT-024")
+
+
+def test_ac_lint_024_clean_purpose_does_not_fire(corpus_root):
+    report = run_lint(corpus_root)
+    assert not has_finding(report, "R-LINT-024")

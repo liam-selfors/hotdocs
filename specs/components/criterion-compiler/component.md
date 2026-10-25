@@ -15,17 +15,21 @@ source_path: pipeline/criterion-compiler/
 
 Deterministically compiles `kind: compiled` Given/When/Then acceptance
 criteria into executable test scaffolding, with no model involved at any
-step. It is the trust anchor for `compiled`-kind criteria (D5/D4): `compiled`
-criteria are the strongest tier of evidence specifically *because* nothing
-agent-generated sits between the criterion and the check — and that argument
-only holds if the compiler itself is not agent-generated. It is therefore
-**permanently sealed** (`sealed: true`), not as legacy debt being wrapped
-(§8's original framing for `sealed`) but as a deliberate, permanent design
-choice: if this component lived under `gen/`, trusting a `compiled` criterion
-would mean trusting an agent-generated compiler to correctly compile
-agent-generated tests for agent-generated code — a circularity `compiled`
-exists specifically to avoid. See `specs/architecture/pipeline-decomposition.md`
-for the fuller rationale.
+step. Permanently sealed (`sealed: true`) — never agent-generated.
+
+## Rationale
+
+The trust anchor for `compiled`-kind criteria (D5/D4): `compiled`
+criteria are the strongest tier of evidence specifically *because*
+nothing agent-generated sits between the criterion and the check — and
+that argument only holds if the compiler itself is not agent-generated.
+Sealed as a deliberate, permanent design choice, not legacy debt being
+wrapped (§8's original framing for `sealed`): if this component lived
+under `gen/`, trusting a `compiled` criterion would mean trusting an
+agent-generated compiler to correctly compile agent-generated tests for
+agent-generated code — a circularity `compiled` exists specifically to
+avoid. See `specs/architecture/pipeline-decomposition.md` for the fuller
+rationale.
 
 ## Scope
 

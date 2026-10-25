@@ -13,14 +13,17 @@ sealed: false
 
 ## Purpose
 
-The assist agent D1 describes but never names: helps a developer land a
-*complete* spec change on a feature branch — dependencies updated, no
-logical discrepancies, no redundancies — using hint-mode previews to
-evaluate completeness **before** a change is even submitted to the real
-merge pipeline. This is the component `notes/metrics.md` already assumes
-exists (its "Completeness-agent confidence" and "Assist-agent acceptance
-rate" metrics predate this spec) but that, until now, had never actually
-been specced.
+Helps a developer land a *complete* spec change on a feature branch —
+dependencies updated, no logical discrepancies, no redundancies — using
+hint-mode previews to evaluate completeness **before** a change is even
+submitted to the real merge pipeline.
+
+## Rationale
+
+The assist agent D1 describes but never names. This is the component
+`notes/metrics.md` already assumes exists (its "Completeness-agent
+confidence" and "Assist-agent acceptance rate" metrics predate this
+spec) but that, until now, had never actually been specced.
 
 ## Scope
 

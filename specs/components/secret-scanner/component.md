@@ -14,10 +14,15 @@ sealed: false
 
 ## Purpose
 
-Automated, unconditional scan of `specs/`, `gen/`, and `verification/` for
-secret-shaped strings (API-key/token patterns, high-entropy strings) per
-D12. Same trust shape as `license-scanner`: no human sign-off required to
-clear a flag, but no result is ever silent.
+Automated, unconditional scan of `specs/`, `gen/`, and `verification/`
+for secret-shaped strings (API-key/token patterns, high-entropy
+strings). Same trust shape as `license-scanner`: no human sign-off
+required to clear a flag, but no result is ever silent.
+
+## Rationale
+
+D12 established this scan's unconditional, no-sign-off posture,
+mirroring D7's for `license-scanner`.
 
 ## Scope
 

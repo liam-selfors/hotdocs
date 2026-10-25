@@ -9,7 +9,7 @@ from. See `.provenance.json` alongside this file and
 `verification/spec-linter/BOOTSTRAP.md` for the honest account of what was
 bootstrapped, what was ambiguous, and what was decided unilaterally.
 
-Implements all twenty-three R-LINT-* requirements from
+Implements all twenty-four R-LINT-* requirements from
 `specs/components/spec-linter/requirements/`, matching the CLI and
 `LintReport` contract in `specs/components/spec-linter/interface/` exactly.
 
@@ -1013,6 +1013,33 @@ def rule_unit_file_size(corpus: Corpus) -> list[Finding]:
     return findings
 
 
+DECISION_CITATION_RE = re.compile(r"\bD\d+\b")
+
+
+def rule_purpose_dependent_safe(corpus: Corpus) -> list[Finding]:
+    """R-LINT-024 (D34).
+
+    Purpose MUST be dependent-safe: no decision citations. Rationale is
+    where that content belongs instead. Scoped to exactly the Purpose
+    section's own text, the same section-extraction technique
+    rule_ratified_closure already uses for Open questions.
+    """
+    findings = []
+    for comp in corpus.components.values():
+        if not comp.root:
+            continue
+        match = re.search(r"##\s*Purpose\s*\n(.*?)(\n##|\Z)", comp.root.body, re.DOTALL)
+        if not match:
+            continue
+        purpose_text = match.group(1)
+        if DECISION_CITATION_RE.search(purpose_text):
+            findings.append(Finding(
+                "R-LINT-024", SEVERITY_FAIL, comp.root.rel_path,
+                _find_line(comp.root.body, "## Purpose"),
+                "Purpose section cites a decision id (D<N>) - move this content to a Rationale section instead"))
+    return findings
+
+
 def rule_secret_field_safety(corpus: Corpus) -> list[Finding]:
     """R-LINT-013.
 
@@ -1099,6 +1126,7 @@ ALL_RULES = [
     rule_size_caps,
     rule_decomposition_signal,
     rule_unit_file_size,
+    rule_purpose_dependent_safe,
     rule_secret_field_safety,
     rule_glossary_singularity,
     rule_no_trailing_whitespace,

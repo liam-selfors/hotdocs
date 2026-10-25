@@ -13,15 +13,19 @@ sealed: false
 
 ## Purpose
 
-Authors the test code for one `generated-test`-kind acceptance criterion —
-the "independent generation path" D4/D5 require for that `kind` to be
-trustworthy: an agent authoring the test from spec prose alone, with no
-access to the implementation under test. Invoked by `verifier-orchestrator`
-via an injectable callable
-(the same pattern already established for `llm-judge`'s `judge` parameter),
-not sequenced as a top-level pipeline step — `verifier-orchestrator` decides
-*when* a test needs authoring (a criterion's `kind` says so, already fixed
-at spec-authoring time); this component decides *how* to author one.
+Authors the test code for one `generated-test`-kind acceptance
+criterion: an agent authoring the test from spec prose alone, with no
+access to the implementation under test. Invoked by
+`verifier-orchestrator` via an injectable callable, not sequenced as a
+top-level pipeline step — `verifier-orchestrator` decides *when* a test
+needs authoring (a criterion's `kind` says so, already fixed at
+spec-authoring time); this component decides *how* to author one.
+
+## Rationale
+
+The "independent generation path" D4/D5 require for that `kind` to be
+trustworthy. The injectable-callable invocation pattern mirrors the one
+already established for `llm-judge`'s `judge` parameter.
 
 ## Scope
 

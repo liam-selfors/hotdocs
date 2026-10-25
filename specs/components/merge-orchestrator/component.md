@@ -13,13 +13,15 @@ sealed: false
 ## Purpose
 
 Sequences every other component into one merge, per `SPEC_GUIDELINES.md`
-§6: lint, impact analysis, generation (with retry), verification,
-compliance gates, golden-scenario verification, provenance, review packet,
-atomic commit. This is the component
-`specs/architecture/pipeline-decomposition.md` flagged as having a
-15-component fan-out past D2's warn threshold — a known, accepted tension
-(see that document), not something to resolve by artificially shrinking
-this list.
+§6: lint, impact analysis, generation, verification, compliance gates,
+golden-scenario verification, provenance, review packet, atomic commit.
+
+## Rationale
+
+Flagged by `specs/architecture/pipeline-decomposition.md` as having a
+15-component fan-out past D2's warn threshold — a known, accepted
+tension (see that document), not something to resolve by artificially
+shrinking this list.
 
 ## Scope
 
