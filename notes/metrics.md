@@ -125,13 +125,13 @@ Consumer tags: `[dev]` developer · `[stk]` stakeholder · `[agt]` system agent 
 ## Generation phase
 
 - **Cold-regen first-pass success rate** — % of components that regenerate to
-  passing verification with no retry. `[gate] [agt] [stk]`
-- **Regen attempts to green** — retries needed per component. `[agt]`
-- **Diagnostic-retry recovery rate** — of components that failed their first
-  attempt, % that pass on the single diagnostic-guided retry (D17) vs. exhaust
-  `best_of_k`. Low recovery despite feedback ⇒ signal to raise that
-  component's `best_of_k` override, not evidence the mechanism is broken.
-  `[gate] [agt]`
+  passing verification on their one attempt. Since `D31` retired automatic
+  retry, this is now simply "did the merge's one generation call for this
+  component pass" — no within-merge retry exists to qualify it against.
+  `[gate] [agt] [stk]`
+- **Merge attempts to green** — of components that blocked at least once,
+  how many separate merge attempts (not samples — `D31` retired same-merge
+  retry entirely) it took before that component passed. `[agt]`
 - **Generation determinism / churn** — diff size between two cold regens of the
   same unchanged spec bundle under the same model pin. Should trend to zero.
   `[agt] [dev]`
@@ -151,15 +151,19 @@ Consumer tags: `[dev]` developer · `[stk]` stakeholder · `[agt]` system agent 
   of" another (nothing at write time reliably knows that), so this is a
   heuristic query over already-written records, not a guaranteed-precise
   count. `[agt] [dev]`
-- **Attempts resolved by best-of-k vs. requiring a spec edit** — of
-  components that failed their first sample, how many passed within the
-  same merge attempt (best-of-k recovered it, R-MERGE-005) vs. only passed
-  in a *later*, separate merge attempt (a human had to change the spec in
-  between) — the same `merge-tracker` data, read as a sequence rather than
-  a single record. Low best-of-k recovery despite diagnostic feedback is a
-  signal to raise that component's `best_of_k` override, not evidence the
-  mechanism is broken (same posture as the existing diagnostic-retry
-  recovery-rate metric below). `[gate] [agt]`
+- **Blocked attempts resolved by a plain re-run vs. requiring a spec
+  edit** — since `D31` retired automatic retry, every recovery from a
+  blocked component is now a *separate* merge attempt, and the one
+  question actually worth asking is whether the spec changed in between:
+  a plain re-run with an unchanged `spec_bundle_hash` recovering means
+  the failure was transient (bad luck, not a spec problem); recovery only
+  after a `spec_bundle_hash` change means a human genuinely found and
+  fixed something. Computed from `.hotdocs/attempts/` (`D32`) joined
+  against `merge-tracker`'s cross-merge sequence — a high rate of
+  unchanged-spec-hash recovery is the generation-noise baseline to
+  expect; a low rate (most recoveries require a spec edit) is a signal
+  this corpus's specs are frequently underspecified, not that the
+  pipeline is unreliable. `[gate] [agt]`
 
 ---
 

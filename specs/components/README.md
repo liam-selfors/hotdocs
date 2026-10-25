@@ -59,11 +59,10 @@ Specced in full depth so far:
   overfitting to its own tests.
 - **`generator`** — the first component whose job genuinely requires a
   model call; mostly `kind: generated-test` (tested via an injected mock
-  model), one `compiled` path-safety check. Single-shot by design — the
-  best-of-k retry loop lives in `merge-orchestrator`, not here. Accepts an
-  optional `retry_feedback` (bare `R-id` list from the immediately
-  preceding attempt), folded into its cache key so a fed-back retry can't
-  collide with a blind one sharing the same seed.
+  model), one `compiled` path-safety check. Single-shot by design, called
+  at most once per component per merge attempt — since `D31` retired
+  `merge-orchestrator`'s best-of-k retry loop, there is no second call to
+  make within one merge at all, not just no retry loop living here.
 - **`test-author`** — the second component whose job genuinely requires a
   model call, mirroring `generator`'s split. Authors `generated-test` test
   code, dispatched to by `verifier-orchestrator` via the same
@@ -124,11 +123,13 @@ Specced in full depth so far:
   the complete recovery path (`R-MERGE-018`), so there is nothing for this
   component to wire up beyond showing status clearly.
 - **`merge-orchestrator`** — all `kind: compiled`, despite sequencing every
-  model-calling, judgment-involving gate in the whole pipeline. Owns the
-  best-of-k retry loop (D3) — now diagnostic-guided, extracting failing
-  `R-id`s from the preceding attempt's `requirement_results` and passing
-  them through to `generator` as `retry_feedback`, pure pass-through with
-  no interpretation of its own. Wires the real `test_author`/`judge`
+  model-calling, judgment-involving gate in the whole pipeline. Called
+  `generator` up to `k` times per component via a diagnostic-guided
+  best-of-k retry loop (D3/D17) until D31 retired that loop entirely —
+  now calls it exactly once per component per merge attempt, blocking
+  immediately on failure rather than retrying with feedback; a human
+  reviewing D32's per-attempt record and re-running the merge is the
+  only recovery path left. Wires the real `test_author`/`judge`
   callables into `verifier-orchestrator`'s call (since D30, `judge` is
   backed by `llm-endpoint`) — three responsibilities nothing had
   explicitly assigned before `generator`'s, `verifier-orchestrator`'s, and

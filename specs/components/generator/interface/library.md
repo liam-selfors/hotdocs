@@ -1,7 +1,7 @@
 # Library
 
 ```
-generate(bundle: SpecBundle, model: str, seed: int = 0, retry_feedback: list[str] | None = None) -> GenerationResult
+generate(bundle: SpecBundle, model: str) -> GenerationResult
 ```
 
 Not a pure function — this is the one component in the corpus whose job

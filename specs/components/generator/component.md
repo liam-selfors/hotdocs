@@ -31,29 +31,27 @@ into an unrelated blast radius.
 
 ## Scope
 
-**In scope:** constructing the model call from a `SpecBundle`, a model
-identifier, and (optionally) `retry_feedback` (R-GEN-010); checking/
-populating the cache before/after calling a model; writing the result
-under `gen/<component>/`; recording what it did for provenance.
+**In scope:** constructing the model call from a `SpecBundle` and a model
+identifier; checking/populating the cache before/after calling a model;
+writing the result under `gen/<component>/`; recording what it did for
+provenance.
 
 **Out of scope, deliberately, and recorded here because the architecture
 doc's dependency list only shows `spec-bundle-assembler` and
-`cache-manager` — not `verifier-orchestrator`:** the best-of-k *retry loop*
-across verification failures (D3). This component produces **exactly one
-candidate per call** — single-shot, stateless about prior attempts.
-Something above it (`merge-orchestrator`) calls this once per sample, checks
-the result against `verifier-orchestrator`, and decides whether to call
-again with a different seed. Putting the retry loop inside `generator`
-would require it to depend on `verifier-orchestrator`, which nothing
-upstream of this spec ever said it does — a gap this spec is resolving by
-making the boundary explicit, not assuming an answer silently.
-
-`retry_feedback` (R-GEN-010) does not change any of this: this component
-still produces exactly one candidate per call and still has no memory of
-its own across calls — `merge-orchestrator` is still the one deciding
-whether, and with what feedback, to call again. The only thing that
-changed is that one of the inputs a caller MAY supply is now a derived
-fact about a *previous* call in the same sequence, not just a fresh seed.
+`cache-manager` — not `verifier-orchestrator`:** any retry of its own.
+This component produces **exactly one candidate per call, ever** —
+single-shot, stateless about prior attempts, with no notion of a retry
+sequence at all. `merge-orchestrator` calls this once per component per
+merge attempt (`R-MERGE-005`); since `D31` retired the best-of-k retry
+loop that used to call it again with different feedback on a
+verification failure, this component is never called a second time
+within one merge regardless of outcome — a fresh merge attempt (a human
+re-running `hotdocs merge`, `R-MERGE-018`) is the only path back to
+`generator` for a component whose one attempt failed. Putting any retry
+logic inside `generator` would still require it to depend on
+`verifier-orchestrator`, which nothing upstream of this spec says it
+does — the boundary stays explicit for the same reason it always was,
+even though there's no longer a loop on the other side of it to serve.
 
 ## Definitions
 

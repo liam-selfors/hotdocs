@@ -1,27 +1,26 @@
 # R-MERGE-005
 
-**R-MERGE-005** — **This is the best-of-k retry loop (D3), owned here.**
-  If an attempt did not produce a passing candidate — either because
-  `generator` itself returned `model_call_error` (R-GEN-008, no candidate
-  was ever produced to verify) or because a candidate was produced but
-  `verifier-orchestrator`'s verdict on it was `fail` — MUST call
-  `generator` again with a new sample index, up to `k` total attempts
-  (R-MERGE-016 resolves `k`'s value). The first sample whose verdict is
-  `pass` MUST be kept; its sample index MUST be the one recorded for
-  provenance (D3).
+**R-MERGE-005** — MUST call `generator` **exactly once** per cache-miss,
+  non-sealed component per merge attempt — no automatic retry loop
+  (superseded `D3`/`D17`'s best-of-k mechanism; see `specs/decisions/
+  D31.md`). If that one call does not produce a passing candidate —
+  either because `generator` itself returned `model_call_error`
+  (R-GEN-008, no candidate was ever produced to verify) or because a
+  candidate was produced but `verifier-orchestrator`'s verdict on it was
+  `fail` — the component is blocked (R-MERGE-006) for this merge attempt,
+  full stop. Nothing here re-calls `generator` with a different seed or
+  feeds anything back into a second attempt within the same merge.
 
-  Closes a gap `specs/decisions/D22.md` found and fixed: retrying only
-  on verification failure meant `model_call_error` never triggered a
-  retry at all (see `specs/decisions/D21.md` on why that's worse now
-  that `generator` retries nothing itself).
-
-  A retry whose **immediately preceding** attempt reached verification
-  MUST pass `retry_feedback` to `generator`: the `R-id`s whose
-  `requirement_results` entry (R-VERIFY-011) was `fail` on that attempt
-  — a pure pass-through, never inspected or filtered. A retry whose
-  immediately preceding attempt was instead a `model_call_error` MUST
-  NOT pass `retry_feedback` — no `VerificationReport` exists to derive
-  it from, so this retry is blind, same as the sequence's first attempt.
-  Feedback is **not accumulated** across more than one prior attempt —
-  only the immediately preceding attempt's failures count (rationale:
-  `specs/decisions/D17.md`).
+  **This is a deliberate reversal, not an oversight.** `D17` explicitly
+  considered and rejected dropping retry entirely, because a failure is
+  frequently a generation miss on an otherwise-adequate spec, and losing
+  the recovery path would push real spec-authoring overhead onto every
+  transient miss. `D31` resolves that same concern differently: the
+  recovery path is **not removed**, it moves outside this component
+  entirely — re-running the merge (R-MERGE-018, unaffected by this
+  requirement) is still free for every component that already passed,
+  and gives a human a deliberate pause to look at *why* the one attempt
+  failed (via `D32`'s per-attempt record) before deciding whether to
+  just re-run unchanged or fix the spec first. A transient miss costs one
+  conscious re-run instead of a silent, automatic one; a genuine spec gap
+  gets a human's attention before the model is asked to guess again.

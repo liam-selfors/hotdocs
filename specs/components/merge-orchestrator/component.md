@@ -70,8 +70,10 @@ See `constraints.md`.
 
 ## Open questions
 
-- ~~Exact value of `k`~~ — resolved by `specs/decisions/D17.md`
-  (default `k=2`, diagnostic-guided retry via `R-MERGE-005`/`016`).
+- ~~Exact value of `k`~~ — `D17` resolved this (default `k=2`,
+  diagnostic-guided retry); `D31` later retired the whole best-of-k
+  mechanism this question was about, superseding the answer along with
+  the question.
 - ~~Whether R-MERGE-008's parallelization is literal concurrency or just
   "no artificial sequential dependency"~~ — resolved by
   `specs/decisions/D21.md` (the requirement constrains the *outcome*,

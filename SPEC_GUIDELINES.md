@@ -144,7 +144,6 @@ optional).
 | `depends_on_guarantees` | never (optional) | List of `G-<comp>-NNN` ids — a **strictly opt-in narrowing** of which of a dependency's `interface/guarantees/` entries this component actually relies on. (D16) **(component `component.md` only)** |
 | `supersedes` | never (optional) | Prior spec id this one replaces. |
 | `model_pin` | never (optional); **inapplicable when `sealed: true`** | Per-spec override of the repo-wide canonical model. **MUST** be omitted (not filled with a placeholder) on a sealed component — there is no generation to pin. **(component `component.md` only)** |
-| `best_of_k` | never (optional); **inapplicable when `sealed: true`**, same reason | Per-spec override of the repo-wide default best-of-k attempt count (default `2`, integer `2`–`4` inclusive). `merge-orchestrator`'s retry loop reads this when deciding how many diagnostic-guided attempts a component gets. (D3, R-MERGE-016) **(component `component.md` only)** |
 | `sealed` | never (optional), default `false` | Legacy-perimeter escape hatch — and, per the `criterion-compiler` precedent, also the correct mechanism for a *permanently* hand-maintained trust anchor, not only temporary legacy debt. See §8. (D1/D8) **(component `component.md` only)** |
 | `source_path` | condition: required when `sealed: true`, forbidden otherwise | Where the actual, hand-maintained code lives. **MUST NOT** point under `gen/`. **(component `component.md` only)** |
 | `last_ratified_commit` | condition: required when `status: ratified` | Commit hash of the ratifying merge. |
@@ -410,11 +409,12 @@ Run per merge, scoped to the components in the impact-analysis blast radius:
    spec bundle (`component.md` + `requirements/` + `interface/` +
    `constraints.md` + depended-upon components' `interface/` + referenced
    `specs/vars/` declarations + `glossary` — deliberately excluding
-   `acceptance/`, so the model doesn't overfit to its own tests). Best-of-k
-   retry (`best_of_k`, default 2, overridable 2–4 per component) against
-   verification on failure, each retry informed by the immediately preceding
-   attempt's failing requirements (R-GEN-010/R-VERIFY-011); the winning
-   sample index is recorded. (D1/D3)
+   `acceptance/`, so the model doesn't overfit to its own tests). Exactly
+   one attempt per component per merge — no automatic retry (D1/D31: the
+   best-of-k retry this step used to run was retired; a failed attempt
+   blocks the merge for that component, and a human re-running the merge,
+   after reviewing the per-attempt record D32 requires, is the only path
+   back to a fresh generation call).
 3. **Per-criterion verification** — compiled / generated-test / llm-judge, per
    §5. Contract/property tests from `interface/`. A drift check that
    generated interfaces match `interface/`'s contract exactly.
@@ -468,9 +468,6 @@ discipline as the artifact itself:
 spec_bundle_hash    content hash of every spec file that fed generation
 model_pin           model id + version
 prompt_version      id of the frozen prompt template used
-sample_index        which best-of-k sample won
-retry_feedback       R-id list fed to the winning sample's generation call
-                     (R-GEN-010) — null if it won on the first attempt
 pipeline_version    version of the generation pipeline itself
 gate_versions       per-gate version map (compiler, license_scanner,
                      mutation_harness, secret_scanner, ...)

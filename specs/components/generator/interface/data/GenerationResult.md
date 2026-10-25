@@ -4,22 +4,19 @@
 {
   "component_id": "comp-foo",
   "model": "claude-sonnet-5",
-  "seed": 0,
   "prompt_version": "v1",
   "cache_hit": false,
   "files": { "spec_linter.py": "<file content>" },
   "model_call_error": null,
-  "refused": null,
-  "retry_feedback": ["R-FOO-003"]
+  "refused": null
 }
 ```
 
-`retry_feedback` (R-GEN-010) echoes exactly what was passed into this
-specific call — `null` on a sequence's first attempt, an `R-id` list on a
-later one. Recorded for the same reason `sample_index` already is: an
-auditor reconstructing why a given attempt looks the way it does needs to
-know not just *which* sample won, but whether it was informed by a prior
-failure or a blind attempt.
+No `seed`/`retry_feedback`/`sample_index` fields — `D31` retired the
+best-of-k retry loop that was their only reason to exist. `generator` is
+called at most once per component per merge attempt now, so there is no
+"which sample won" or "what was this attempt informed by" left to
+record.
 
 Exactly one of `files` (non-empty), `model_call_error`, or `refused` is
 populated on any given result — never more than one, and `cache_hit` is

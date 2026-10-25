@@ -1,7 +1,7 @@
 # R-PROV-002
 
-**R-PROV-002** — `spec_bundle_hash`, `model_pin`, `prompt_version`,
-  `sample_index`, and `retry_feedback` MUST be populated from `generator`'s
-  `GenerationResult` — `retry_feedback` copied through exactly as
-  `GenerationResult` recorded it (R-GEN-010), including `null` when the
-  winning sample was a sequence's first attempt.
+**R-PROV-002** — `spec_bundle_hash`, `model_pin`, and `prompt_version`
+  MUST be populated from `generator`'s `GenerationResult`. No
+  `sample_index`/`retry_feedback` fields — `D31` retired the best-of-k
+  retry loop that gave either one a meaning, and `GenerationResult`
+  itself no longer carries them.

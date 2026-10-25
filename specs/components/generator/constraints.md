@@ -24,13 +24,3 @@
   (`R-ENDPOINT-005`) — so it's structurally absent from
   `GenerationResult`, logs, and the provenance manifest, not merely
   filtered out of them. Only `model` (the identifier) is ever recorded.
-- **`retry_feedback`'s content boundary is load-bearing, not cosmetic.**
-  R-GEN-010 restricts `retry_feedback` to a bare `R-id` list — this MUST
-  hold at every layer that touches it here, not just at the CLI/library
-  boundary: the prompt-construction logic MUST NOT enrich it with Gherkin
-  text, `rationale`, or expected/actual values pulled from anywhere else
-  this component can reach (e.g. by re-deriving them from `acceptance/`
-  files that happen to be on disk). The guarantee `R-VERIFY-011` makes —
-  that `requirement_results` never carries more than pass/fail — only
-  protects `spec-bundle-assembler`'s R-ASSEMBLE-001 exclusion if this
-  component also never reconstitutes the missing detail on its own.

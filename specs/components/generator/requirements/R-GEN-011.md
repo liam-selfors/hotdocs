@@ -20,8 +20,9 @@
   up, for free, and would hide failures from the batch-level visibility
   R-MERGE-017 depends on.
 
-  This is **not** `merge-orchestrator`'s best-of-k retry loop (D3,
-  R-MERGE-005) — that retries *generation itself*, with a new seed,
-  because a prior attempt's *code* failed verification. This requirement
-  is about infrastructure-level call failures, before any code was ever
-  produced to verify.
+  This was never the same thing as `merge-orchestrator`'s best-of-k
+  retry loop, which used to retry *generation itself* on a verification
+  failure — `D31` retired that loop entirely, but this requirement was
+  always about a different layer (infrastructure-level call failures,
+  before any code was ever produced to verify) and is unaffected by that
+  retirement.

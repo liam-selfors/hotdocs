@@ -15,11 +15,16 @@
   `requirement_results` MUST contain **only** `R-id` keys and `pass`/`fail`
   values — never a criterion's Gherkin text, its `rationale` (for
   `llm-judge` criteria), its expected/actual values, or any other content
-  that could let a consumer reconstruct what a specific test checked. This
-  boundary exists specifically so `requirement_results` can safely feed
-  `generator`'s retry mechanism (R-GEN-010) without reopening
-  `spec-bundle-assembler`'s R-ASSEMBLE-001 exclusion of `acceptance/` from
-  what a generation model ever sees — a requirement's own normative text is
-  already in the model's bundle via `requirements/`; a bare pass/fail
-  discloses nothing beyond "your attempt didn't satisfy text you already
-  had," regardless of which `kind` of criterion covers it.
+  that could let a consumer reconstruct what a specific test checked.
+
+  This boundary predates, and outlives, `D31`'s retirement of
+  `generator`'s retry mechanism — it was never only about feeding that
+  loop. `requirement_results` is this component's own
+  requirement-level summary of a verification run, useful on its own
+  (a human or a review packet reading "which requirements failed," not
+  just "which criteria") independent of whether anything downstream ever
+  used it to drive a retry. Keeping it content-free the same way
+  regardless protects `spec-bundle-assembler`'s R-ASSEMBLE-001 exclusion
+  of `acceptance/` against ever being reconstituted through this field by
+  *any* future consumer, not only the one that originally motivated the
+  rule.

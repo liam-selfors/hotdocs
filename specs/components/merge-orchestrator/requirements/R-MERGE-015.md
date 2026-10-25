@@ -1,9 +1,9 @@
 # R-MERGE-015
 
 **R-MERGE-015** — For a cache miss (same precondition as R-MERGE-004) on a
-  component marked `sealed: true`, MUST skip `spec-bundle-assembler`,
-  `generator`, and the best-of-k retry loop entirely, and invoke
-  `verifier-orchestrator` directly against the component's existing code
+  component marked `sealed: true`, MUST skip `spec-bundle-assembler` and
+  `generator` entirely, and invoke `verifier-orchestrator` directly
+  against the component's existing code
   at its declared `source_path` — proving
   its characterization tests (`acceptance/` criteria, §8) still pass
   against the unchanged, hand-maintained implementation. There is nothing

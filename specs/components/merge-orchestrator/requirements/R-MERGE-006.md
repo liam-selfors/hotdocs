@@ -1,10 +1,10 @@
 # R-MERGE-006
 
-**R-MERGE-006** — If all `k` samples fail to produce a passing candidate
-  — whether by `model_call_error`, by failing verification, or any mix
-  of the two across the `k` attempts — the merge MUST be blocked for that
-  component — retries exhausted, not silently accepted. The reason
-  recorded for the block MUST distinguish which of the `k` attempts, if
-  any, actually reached verification and failed it, versus which never
-  produced a candidate at all — both exhaust the same retry budget, but
-  they are different facts for a human reading the block reason to know.
+**R-MERGE-006** — If the one generation attempt (`R-MERGE-005`, `D31`)
+  does not produce a passing candidate, the merge MUST be blocked for
+  that component — never silently accepted. The block reason MUST
+  distinguish whether the attempt never produced a candidate at all
+  (`model_call_error`) from whether it produced one that failed
+  verification — different facts for a human deciding, from `D32`'s
+  per-attempt record, whether this looks like a transient failure worth
+  a plain re-run or a genuine spec gap worth fixing first.
