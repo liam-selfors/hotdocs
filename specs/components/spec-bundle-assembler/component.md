@@ -50,8 +50,6 @@ See `acceptance/`.
 
 Every criterion is `kind: compiled` — reading, concatenating, and hashing
 files is pure, deterministic logic; nothing here needs a model or judgment.
-The third component in this corpus for which that's true of 100% of its
-acceptance criteria.
 
 ## Non-functional constraints
 

@@ -3,7 +3,8 @@
 This document is the rulebook. Every authoring agent, generation agent, and
 linter invocation in this repository follows it. It states **what** is
 required; it does not re-derive **why** — the rationale and the decision
-history live in `notes/initial-ideas.md` (`D1`–`D14`) and are cited here by
+history live in `notes/initial-ideas.md` (`D1`–`D14`, informal brainstorm)
+and `specs/decisions/` (`D15` onward, formal ADRs) and are cited here by
 number for traceability, not repeated.
 
 Keywords **MUST**, **MUST NOT**, **SHOULD**, **SHOULD NOT**, and **MAY** are
@@ -320,32 +321,49 @@ place subsystem grouping is expressed.
 running high can be an accepted shape on its own — a thin coordinator
 legitimately has wide fan-out with little owned logic of its own (see
 `specs/architecture/pipeline-decomposition.md`'s note on
-`merge-orchestrator`). But when **two independent dimensions** above
-crowd their ceilings **for the same component at the same time** — in
-practice, most often fan-out together with spec-bundle words — treat that
-as a sign the component owns a cross-cutting concern that has outgrown
-its placement, not as evidence the caps themselves are miscalibrated.
-Fan-out measures how many neighbors a component calls; spec-bundle words
-measures how much decision logic it owns. A thin coordinator runs one
-high without the other; both crowding together means it isn't just
-calling a lot of neighbors, it's also carrying enough logic to show up in
-word count too.
+`merge-orchestrator`). But when **two or more independent dimensions**
+above crowd their ceilings **for the same component at the same time**,
+treat that as a sign the component owns a cross-cutting concern that has
+outgrown its placement, not as evidence the caps themselves are
+miscalibrated. This is enforced directly, not just described here: `spec-
+linter`'s `R-LINT-022` (`D28`) emits a distinct finding whenever it fires.
+Two shapes of this have shown up in practice so far, not just one: a thin
+coordinator crowding fan-out together with spec-bundle words
+(`merge-orchestrator`, resolved by `D25`), and a self-contained component
+with no fan-out at all crowding spec-bundle words together with its own
+requirement/acceptance/generated-code counts instead (`spec-linter`
+itself, after `D29` added those dimensions — fan-out is irrelevant there;
+the signal is still real). Fan-out measures how many neighbors a
+component calls; the count/words dimensions measure how much it owns
+directly. A thin coordinator runs fan-out high without the others; a
+dense, isolated component can crowd several of the others with zero
+fan-out. Either combination means the component isn't just one simple
+shape (thin-and-wide, or fat-but-isolated) — it's carrying more than one
+dimension's worth of cost at once.
 
-The fix in that case is usually not a bigger cap — it's finding the
-dispatch/decision logic that has its own identity and pulling it into its
-own component, and the search should start by asking whether a structural
-precedent for that split already exists elsewhere in the corpus (D25
-extracted `golden-scenario-verifier` out of `merge-orchestrator` once
-both caps crowded at once, because that logic was already the
-cross-component analog of `verifier-orchestrator`'s existing
-per-component dispatch — the split mirrored a pattern already present,
-it wasn't invented from scratch). Expect fan-out itself **not** to drop
-from such a split — the coordinator still has to call the new
-component, one dependency swapped for another — the dimension that
-should actually move is spec-bundle words, since that's the one tracking
-owned logic rather than call count. If fan-out was the *only* dimension
-crowding, extraction is the wrong tool; that is D2's already-accepted
-"thin coordinator" shape, not this signal.
+The fix is not automatically a bigger cap, but it is also not
+automatically a split — the signal means "look closely," not "extract
+something." Start by asking whether a structural precedent for a split
+already exists elsewhere in the corpus: `D25` extracted
+`golden-scenario-verifier` out of `merge-orchestrator` once both caps
+crowded at once, because that logic was already the cross-component
+analog of `verifier-orchestrator`'s existing per-component dispatch — the
+split mirrored a pattern already present, it wasn't invented from
+scratch. Expect fan-out itself **not** to drop from such a split — the
+coordinator still has to call the new component — the dimension that
+should actually move is spec-bundle words.
+
+Sometimes the honest conclusion is that no precedent exists and no split
+is warranted: `spec-linter` crowding `generated_code_loc`,
+`requirement_count`, and `spec_bundle_words` together reflects one
+cohesive component with many genuinely independent, correlated rules —
+not a hidden second responsibility with some other component's shape to
+borrow. Splitting a single-pass structural linter into sub-checkers for
+no architectural reason would be the wrong response to this signal, not
+the right one; treat the signal as a prompt to check for a real
+precedent, not a mandate to always act on it. If fan-out was the *only*
+dimension crowding, that's a different, already-accepted case —
+D2's "thin coordinator" shape, not this signal at all.
 
 ---
 

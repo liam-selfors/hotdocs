@@ -6,7 +6,7 @@ a change in direction is a new record that supersedes the old one
 
 See `SPEC_GUIDELINES.md` §3.5.
 
-**D15 through D27 are formalized here** (`D15.md` … `D27.md`), one file
+**D15 through D30 are formalized here** (`D15.md` … `D30.md`), one file
 per decision, each `ratified` with the commit that landed it. Every new
 decision going forward gets a real record here at the time it's made —
 not appended to a growing notes file.

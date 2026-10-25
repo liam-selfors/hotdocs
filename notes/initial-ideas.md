@@ -854,7 +854,7 @@ problem a glossary exists to prevent.
 ---
 
 **D15 onward are also formalized as real decision records in
-`specs/decisions/` (`D15.md` … `D27.md`), per `D25`-adjacent proposal
+`specs/decisions/` (`D15.md` … `D30.md`), per `D25`-adjacent proposal
 work on making this project's own methodology easier to navigate. This
 section remains the full discussion — the back-and-forth, the dead
 ends, the exact prose each decision was argued in — while each

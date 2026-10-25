@@ -51,8 +51,7 @@ See `interface/data/`.
 See `acceptance/`.
 
 All eleven criteria are `kind: compiled` — formatting already-computed
-results is pure, deterministic logic. A seventh component in this corpus
-whose entire acceptance set is `compiled`.
+results is pure, deterministic logic.
 
 ## Non-functional constraints
 

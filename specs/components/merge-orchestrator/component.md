@@ -17,7 +17,7 @@ Sequences every other component into one merge, per `SPEC_GUIDELINES.md`
 compliance gates, golden-scenario verification, provenance, review packet,
 atomic commit. This is the component
 `specs/architecture/pipeline-decomposition.md` flagged as having a
-14-component fan-out past D2's warn threshold — a known, accepted tension
+15-component fan-out past D2's warn threshold — a known, accepted tension
 (see that document), not something to resolve by artificially shrinking
 this list.
 
@@ -29,7 +29,9 @@ nothing before this assigned who retries generation on a verification
 failure. Since D16: also calls `golden-scenario-verifier` once every
 component has passed per-component verification (R-MERGE-014) — the
 dispatch itself moved there (D25), this component only owns *when* and
-*with what* it's called. Also routes a sealed component away from
+*with what* it's called. Since D30, the real `test_author`/`judge`
+callables wired into both that call and `verifier-orchestrator`'s
+(R-MERGE-004) are backed by `llm-endpoint`. Also routes a sealed component away from
 generation entirely (R-MERGE-015), and runs every impacted component to
 completion before evaluating block status (R-MERGE-017) — no fail-fast —
 which is what makes re-running a blocked merge a complete, free recovery

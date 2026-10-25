@@ -13,7 +13,7 @@ reviewing diffs of intent.
 ## Status
 
 The rules are formalized (`SPEC_GUIDELINES.md`), and the repository's own
-pipeline is itself the worked example: **19 components, fully specced**
+pipeline is itself the worked example: **20 components, fully specced**
 under `specs/components/` (component anatomy, requirements, interfaces,
 acceptance criteria, constraints — see `specs/architecture/
 pipeline-decomposition.md` for the full decomposition), covering lint,
@@ -43,4 +43,5 @@ See `SPEC_GUIDELINES.md` for the full, enforceable rules. Summary:
 | `gen/`          | Generated code. Not hand-edited (two declared exemptions only). |
 | `pipeline/`     | Agent workflow definitions, frozen prompts, model pins, toggles. |
 | `verification/` | Generated tests, contract checks, drift detection, corpus graph. |
+| `tools/`        | Hand-written repo-maintenance/authoring scripts. Not spec-driven, not gated. |
 | `notes/`        | Brainstorming and design discussion. Non-normative.           |

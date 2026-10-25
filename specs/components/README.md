@@ -19,11 +19,21 @@ See `SPEC_GUIDELINES.md` §3.4 (anatomy) and §4 (sizing / when to split).
 Specced in full depth so far:
 
 - **`spec-linter`** — the first one, deliberately: a component whose entire
-  acceptance criteria set is `kind: compiled`, as a concrete test of D5's own
+  acceptance criteria set is `kind: compiled` except one deliberate
+  `llm-judge` exception (R-LINT-015), as a concrete test of D5's own
   guidance. Also the only component with a real, working bootstrap
   implementation (`gen/spec-linter/` + `verification/spec-linter/`) —
   hand-authored once, standing in for the `generator`/`criterion-compiler`
   this pipeline doesn't have yet. See `verification/spec-linter/BOOTSTRAP.md`.
+  Grew well past its original scope as this corpus grew: its own graph-shaped
+  rules (reference resolution, acyclicity, both traceability directions) now
+  run as queries over `graph-query-engine.md`'s shared `nodes`/`edges` views
+  (`R-LINT-020`/`021`, D24/D27) rather than bespoke traversal code, and it
+  now also enforces `SPEC_GUIDELINES.md` §4's own decomposition-signal
+  guidance as a real finding (`R-LINT-022`, D28) plus three additional
+  size-cap dimensions (`R-LINT-023`, `guarantee_count`, `acceptance_count`,
+  D29) — it is, by its own `R-LINT-022`, now one of the two components in
+  this corpus actually crowding multiple size-cap dimensions at once.
 - **`impact-analyzer`** — all `kind: compiled`. Pins down, as an executable
   rule for the first time, the interface-vs-internal-change distinction D2
   only ever stated as a sizing heuristic. Since D16, also computes a
@@ -85,7 +95,11 @@ Specced in full depth so far:
   manifest forward" claim its first concrete mechanism.
 - **`review-packet-builder`** — all `kind: compiled`. Formats already-
   computed results; deliberately never includes the generated-code diff
-  itself (principle 6).
+  itself (principle 6). Originally depended directly on
+  `verifier-orchestrator`/`license-scanner`/`secret-scanner`/
+  `cache-manager` for that data; since D26, reads all of it from
+  `provenance-writer`'s already-written manifest via the shared
+  `component_provenance` view instead — `depends_on` dropped from 5 to 1.
 - **`corpus-graph-builder`** — all `kind: compiled`. The single source of
   the `corpus-graph.json` manifest D8's traceability matrix and D9's
   docs-site-renderer both read — neither recomputes any part of it.
@@ -109,24 +123,30 @@ Specced in full depth so far:
   no retry/resume action of its own: re-running `hotdocs merge` already is
   the complete recovery path (`R-MERGE-018`), so there is nothing for this
   component to wire up beyond showing status clearly.
-- **`merge-orchestrator`** — all `kind: compiled`, the capstone data point
-  for D5's guidance: even the component sequencing every model-calling,
-  judgment-involving gate in the whole pipeline is itself fully
-  deterministic. Owns the best-of-k retry loop (D3) — now diagnostic-
-  guided, extracting failing `R-id`s from the preceding attempt's
-  `requirement_results` and passing them through to `generator` as
-  `retry_feedback`, pure pass-through with no interpretation of its own —
-  the real wiring of `test_author`/`judge` callables into
-  `verifier-orchestrator`'s call, and (since D16) running golden-scenario
-  verification against the real assembled system, reusing that same
-  callable wiring — three responsibilities nothing had explicitly assigned
-  before `generator`'s, `verifier-orchestrator`'s, and the blast-radius/D16
-  threads each forced
-  the question. Its real, measured `fan_out` is 14 (13 before
-  `criterion-compiler` was added directly), confirmed against the actual
-  linter — exactly the warn-only finding (not a hard failure)
-  `specs/architecture/pipeline-decomposition.md` predicted before this
-  component existed.
+- **`merge-orchestrator`** — all `kind: compiled`, despite sequencing every
+  model-calling, judgment-involving gate in the whole pipeline. Owns the
+  best-of-k retry loop (D3) — now diagnostic-guided, extracting failing
+  `R-id`s from the preceding attempt's `requirement_results` and passing
+  them through to `generator` as `retry_feedback`, pure pass-through with
+  no interpretation of its own. Wires the real `test_author`/`judge`
+  callables into `verifier-orchestrator`'s call (since D30, `judge` is
+  backed by `llm-endpoint`) — three responsibilities nothing had
+  explicitly assigned before `generator`'s, `verifier-orchestrator`'s, and
+  the blast-radius/D16 threads each forced the question. Since D16, also
+  calls `golden-scenario-verifier` once every component has passed
+  per-component verification; the golden-scenario dispatch logic itself
+  (and the capability-intersection lookup) lived here only until D25,
+  once both this component's fan-out and its spec-bundle word count
+  crowded their caps at once — it was extracted into
+  `golden-scenario-verifier` as the cross-component analog of
+  `verifier-orchestrator`'s own per-component dispatch; this component now
+  only owns *when* and *with what* that gets called. Its real, measured
+  `fan_out` is 15 as of D30 (14 after D25's extraction, +1 for
+  `llm-endpoint`) — confirmed against the actual linter, together with
+  `spec_bundle_words` the one component besides `spec-linter` whose
+  `R-LINT-022` crowding finding is real, accepted, and explained rather
+  than resolved — see `specs/architecture/pipeline-decomposition.md`'s
+  dedicated note.
 
 - **`spec-completeness-assistant`** — the assist agent D1 describes but
   never names, and that two `notes/metrics.md` metrics already assumed
@@ -135,13 +155,35 @@ Specced in full depth so far:
   anything. The one component whose core value genuinely *is* judgment
   (`llm-judge` for completeness scoring and redundancy detection), not
   dispatch around it — a deliberate contrast to every coordination
-  component specced so far.
+  component specced so far. Since D30, dispatches through `llm-endpoint`
+  rather than holding a model credential itself.
+- **`golden-scenario-verifier`** — all `kind: compiled`. Extracted from
+  `merge-orchestrator` by D25: the cross-component analog of
+  `verifier-orchestrator`'s per-component dispatch, one scope level up —
+  runs every product capability's golden scenarios whose `realizes`-set
+  intersects a merge's blast radius, against the real assembled system.
+  The permanent backstop for cross-component behavioral risk no
+  `interface/`-level diffing can rule out in principle (D16).
+- **`llm-endpoint`** — mostly `kind: compiled` (backend resolution,
+  credential safety), one `generated-test` criterion for the actual
+  dispatched call. Added by D30 once `generator` and `test-author` were
+  each found independently coupled to `VAR-ANTHROPIC-API-KEY`, and
+  `merge-orchestrator`'s `judge` wiring had no component behind it at
+  all. The single vendor-agnostic transport every model call in the
+  pipeline now dispatches through; v1 ships exactly one backend
+  (Anthropic) by design, not as an unfinished gap (D18/D20's
+  anti-premature-abstraction stance).
 
-**All 17 architecture components are now specced in full depth** (15
-original + `test-author`, added when a design discussion surfaced that
-nothing owned authoring `generated-test` code + `spec-completeness-
-assistant`, added when the same discussion surfaced it was referenced by
-name in `notes/metrics.md` but never specced). The real linter
-(`gen/spec-linter/`) validates the entire corpus clean: 0 failures, 3
-warnings (two components over the spec-bundle word-count *target*, and
-`merge-orchestrator`'s fan-out — none are hard-fail-severity).
+**All 20 architecture components are now specced in full depth** (15
+original + `test-author` + `spec-completeness-assistant`, both added
+when earlier design discussions surfaced real gaps nothing owned yet,
++ `golden-scenario-verifier` (D25) + `llm-endpoint` (D30), both
+extracted from or added beneath `merge-orchestrator` once a real
+coupling or crowding signal, not speculation, justified it). The real
+linter (`gen/spec-linter/`) validates the entire corpus clean: 0
+failures, 16 warnings — all `spec_bundle_words`/`requirement_count`/
+`acceptance_count`/`generated_code_loc` near-misses, `merge-orchestrator`
+and `spec-linter`'s `R-LINT-022` crowding findings (D28), and four
+individual dense files caught by the per-file check (`R-LINT-023`,
+D29). None are hard-fail-severity; see `SPEC_GUIDELINES.md` §4 for what
+each warning dimension means and when (if ever) it calls for action.
