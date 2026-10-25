@@ -93,10 +93,11 @@ None. The two originally recorded here are both resolved:
   in too. D16 closes this two ways: (1) `interface/guarantees/` makes any
   *foreseen* behavioral dependency explicit and propagating, the same
   one-hop mechanism everything else uses — no cascading needed once the
-  guarantee itself is visible; (2) `merge-orchestrator`'s golden-scenario
-  gate (R-MERGE-014) is the permanent backstop for whatever wasn't
-  foreseen, tested against the real regenerated system rather than
-  guessed at here. Eager multi-hop cascading from every `transitive-var`/
+  guarantee itself is visible; (2) `golden-scenario-verifier`, called by
+  `merge-orchestrator` once per-component verification passes
+  (R-MERGE-014), is the permanent backstop for whatever wasn't foreseen,
+  tested against the real regenerated system rather than guessed at here.
+  Eager multi-hop cascading from every `transitive-var`/
   `transitive-capability` edge was rejected as the alternative — it would
   trade this bounded, already-covered risk for routinely ballooning the
   blast radius on pure speculation, undermining D13's whole cost-

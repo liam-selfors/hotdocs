@@ -291,6 +291,37 @@ Below that bar, size caps are linter-enforced:
 Components are a **flat namespace** — no nesting. `architecture/` is the only
 place subsystem grouping is expressed.
 
+**A decomposition signal, not just a cap to satisfy.** A single dimension
+running high can be an accepted shape on its own — a thin coordinator
+legitimately has wide fan-out with little owned logic of its own (see
+`specs/architecture/pipeline-decomposition.md`'s note on
+`merge-orchestrator`). But when **two independent dimensions** above
+crowd their ceilings **for the same component at the same time** — in
+practice, most often fan-out together with spec-bundle words — treat that
+as a sign the component owns a cross-cutting concern that has outgrown
+its placement, not as evidence the caps themselves are miscalibrated.
+Fan-out measures how many neighbors a component calls; spec-bundle words
+measures how much decision logic it owns. A thin coordinator runs one
+high without the other; both crowding together means it isn't just
+calling a lot of neighbors, it's also carrying enough logic to show up in
+word count too.
+
+The fix in that case is usually not a bigger cap — it's finding the
+dispatch/decision logic that has its own identity and pulling it into its
+own component, and the search should start by asking whether a structural
+precedent for that split already exists elsewhere in the corpus (D25
+extracted `golden-scenario-verifier` out of `merge-orchestrator` once
+both caps crowded at once, because that logic was already the
+cross-component analog of `verifier-orchestrator`'s existing
+per-component dispatch — the split mirrored a pattern already present,
+it wasn't invented from scratch). Expect fan-out itself **not** to drop
+from such a split — the coordinator still has to call the new
+component, one dependency swapped for another — the dimension that
+should actually move is spec-bundle words, since that's the one tracking
+owned logic rather than call count. If fan-out was the *only* dimension
+crowding, extraction is the wrong tool; that is D2's already-accepted
+"thin coordinator" shape, not this signal.
+
 ---
 
 ## 5. Acceptance criteria

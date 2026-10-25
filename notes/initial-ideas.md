@@ -1432,8 +1432,74 @@ See `specs/architecture/graph-query-engine.md`'s "Query surface" and
 requirements/R-IMPACT-009.md`, `specs/components/spec-linter/
 requirements/R-LINT-020.md`, `specs/components/corpus-graph-builder/
 requirements/R-GRAPH-009.md`, and `specs/components/merge-orchestrator/
-requirements/R-MERGE-020.md` for the current, authoritative rules this
+requirements/R-MERGE-014.md` for the current, authoritative rules this
 produced.
+
+**Superseded by D25:** the `R-MERGE-020` this decision created moved,
+content and all, into `golden-scenario-verifier`'s own `R-GOLDEN-002`
+when D25 extracted that component out of `merge-orchestrator` — the id
+`R-MERGE-020` no longer exists. The `edges`-view query itself is
+unchanged, only which component owns it.
+
+---
+
+### D25 — `golden-scenario-verifier` extracted from `merge-orchestrator`; a general decomposition lesson added to `SPEC_GUIDELINES.md` §4
+
+D24's `R-MERGE-020` addition pushed `merge-orchestrator`'s
+`spec_bundle_words` to 4074 — over D2's 4000 hard-fail cap, and the exact
+outcome `pipeline-decomposition.md`'s own "finding" section had already
+predicted after D22: fan-out (14, already at double the warn threshold)
+and word count crowding their ceilings *at the same time*, not just
+either alone. The question that prompted this decision: is that pairing
+a sign the caps are set too low, or a sign of a genuinely
+over-complicated spec that should be split?
+
+**Conclusion: a real decomposition signal, not a calibration problem —
+with a precedent already sitting in the corpus.** The golden-scenario
+gate (`R-MERGE-014`'s dispatch mechanics, `R-MERGE-020`'s
+capability-intersection lookup) is, structurally, the cross-component
+analog of what `verifier-orchestrator` already does per-component: same
+`criterion-compiler`/`test_author`/`judge` dispatch, one scope level up.
+It lived inside `merge-orchestrator` only because D16 added it to an
+existing sequencing step, not because it conceptually belongs there.
+Extracted into a new component, `golden-scenario-verifier`:
+
+- **`merge-orchestrator`'s `R-MERGE-014`** is now a thin call-out —
+  *when* and *with what* `golden-scenario-verifier` gets called (after
+  all per-component verification, with the real `judge`/`test_author`
+  callables) — not the dispatch mechanics themselves. `R-MERGE-011`'s
+  block decision and `MergeResult.golden_scenarios`'s shape are
+  unchanged; both now source from `golden-scenario-verifier`'s
+  `GoldenScenarioReport` return value instead of computing it inline.
+- **`golden-scenario-verifier`** (new component) owns `R-GOLDEN-001`
+  (run every intersecting capability's golden scenarios against the real
+  assembled system) and `R-GOLDEN-002` (the `edges`-view
+  capability-intersection query, moved verbatim from the retired
+  `R-MERGE-020`).
+- **Fan-out stayed at 14** — `comp-criterion-compiler` (needed only for
+  this dispatch) dropped off `merge-orchestrator`'s `depends_on`,
+  replaced by `comp-golden-scenario-verifier`. This is expected, not a
+  shortfall: extraction swaps one dependency for another, it doesn't
+  reduce how many components a coordinator has to call. **`spec_bundle_
+  words` is what actually moved**, dropping well clear of both
+  thresholds once `R-MERGE-014`/`R-MERGE-020` and their acceptance
+  criteria left the bundle.
+
+**The general lesson, written up in `SPEC_GUIDELINES.md` §4 so future
+work (agent or human) recognizes the pattern instead of re-deriving it:**
+two independent size-cap dimensions crowding their ceilings for the same
+component at once is a stronger, different signal than either alone — it
+means the component isn't just calling a lot of neighbors (fan-out), it's
+also carrying enough decision logic to show up in word count too. The
+fix is to look for that logic's own identity, starting with whether a
+structural precedent for the split already exists elsewhere in the
+corpus — not to raise the cap, and not to expect fan-out itself to drop
+as proof the split worked.
+
+See `SPEC_GUIDELINES.md` §4, `specs/architecture/
+pipeline-decomposition.md`'s "Resolved (D25)" note, and
+`specs/components/golden-scenario-verifier/` for the current,
+authoritative rules this produced.
 
 ---
 

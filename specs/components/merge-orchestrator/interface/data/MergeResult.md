@@ -32,8 +32,9 @@ it; a component where at least one attempt reached verification has
 `null`, even if an earlier attempt in the same sequence *did* hit a
 `model_call_error` before a later attempt succeeded or failed — this field
 reports the *last* attempt's outcome, which is the one that actually
-determined the component's final status. `golden_scenarios` (R-MERGE-014)
-is keyed by `P-id`, covering every capability whose `realizes`-set
-intersects this merge's blast radius — a distinct result category from
-`components`, never merged into any single component's own entry (per
-`constraints.md`'s "never conflated" rule).
+determined the component's final status. `golden_scenarios` (R-MERGE-014) is
+`golden-scenario-verifier`'s `GoldenScenarioReport` return value, passed
+through unchanged — keyed by `P-id`, covering every capability whose
+`realizes`-set intersects this merge's blast radius — a distinct result
+category from `components`, never merged into any single component's own
+entry (per `constraints.md`'s "never conflated" rule).

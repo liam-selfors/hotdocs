@@ -3,7 +3,7 @@ id: comp-merge-orchestrator
 title: Merge Orchestrator
 status: draft
 owners: [pipeline-team]
-depends_on: [comp-spec-linter, comp-impact-analyzer, comp-spec-bundle-assembler, comp-generator, comp-test-author, comp-criterion-compiler, comp-verifier-orchestrator, comp-license-scanner, comp-secret-scanner, comp-cache-manager, comp-provenance-writer, comp-review-packet-builder, comp-corpus-graph-builder, comp-merge-tracker]
+depends_on: [comp-spec-linter, comp-impact-analyzer, comp-spec-bundle-assembler, comp-generator, comp-test-author, comp-golden-scenario-verifier, comp-verifier-orchestrator, comp-license-scanner, comp-secret-scanner, comp-cache-manager, comp-provenance-writer, comp-review-packet-builder, comp-corpus-graph-builder, comp-merge-tracker]
 realizes: [P-ZERO-EDIT, P-AMBIGUITY-GATE, P-COMPLIANCE-GATE, P-MERGE-VISIBILITY]
 sealed: false
 ---
@@ -26,10 +26,11 @@ this list.
 **In scope:** sequencing and parallelizing calls to every other component;
 owning the diagnostic-guided best-of-k retry loop (D3, R-MERGE-005/016) —
 nothing before this assigned who retries generation on a verification
-failure. Since D16: also owns golden-scenario verification against the
-real assembled system (R-MERGE-014), reusing the exact dispatch already
-wired for `verifier-orchestrator`, routing a sealed component away from
-generation entirely (R-MERGE-015), and running every impacted component to
+failure. Since D16: also calls `golden-scenario-verifier` once every
+component has passed per-component verification (R-MERGE-014) — the
+dispatch itself moved there (D25), this component only owns *when* and
+*with what* it's called. Also routes a sealed component away from
+generation entirely (R-MERGE-015), and runs every impacted component to
 completion before evaluating block status (R-MERGE-017) — no fail-fast —
 which is what makes re-running a blocked merge a complete, free recovery
 path (R-MERGE-018).

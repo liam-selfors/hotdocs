@@ -4,13 +4,12 @@ Covers: R-MERGE-014
 Kind: compiled
 
 ```gherkin
-Given a blast radius of two components, both of which have regenerated and
-  passed their own per-component verification, and one product capability
-  whose realizes-set includes both
-When run_merge is called
-Then that capability's golden scenarios are run against the real assembled
-  gen/ output, dispatched via criterion-compiler/test_author/judge exactly
-  as verifier-orchestrator's own criteria are, and a failure there blocks
-  the overall merge independent of either component's own verification
-  result
+Given every component in the blast radius has passed its own
+  per-component verification
+When run_merge reaches the golden-scenario step
+Then golden-scenario-verifier is called with the full blast-radius id set
+  and the same real judge/test_author callables wired into
+  verifier-orchestrator's call, and a failing GoldenScenarioReport it
+  returns blocks the overall merge independent of any component's own
+  verification result
 ```

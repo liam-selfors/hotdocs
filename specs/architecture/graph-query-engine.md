@@ -187,10 +187,14 @@ pointing back to this document, exactly as `R-IMPACT-009` does:
   unchanged (R-GRAPH-006/008: `verification/corpus-graph.json` is still a
   committed, deterministic artifact — only the *construction* step, not
   the output format, moves onto this engine).
-- **`merge-orchestrator`'s `R-MERGE-014`** (golden-scenario gate) — "every
-  product capability whose `realizes`-set intersects the blast radius" is
-  now a single query against `edges` (`R-MERGE-020`), not a bespoke
-  intersection written once for this call site.
+- **`golden-scenario-verifier`'s capability-intersection lookup**
+  (`R-GOLDEN-002`) — "every product capability whose `realizes`-set
+  intersects the blast radius" is a single query against `edges`, not a
+  bespoke intersection written once for this call site. This logic
+  originally lived in `merge-orchestrator` as `R-MERGE-020`; it moved
+  with the rest of the golden-scenario gate when D25 extracted
+  `golden-scenario-verifier` out of `merge-orchestrator` to relieve that
+  component's fan-out/word-count caps.
 
 **Not adopted, flagged as a distinct future candidate, not folded into
 the above:** `spec-linter`'s requirement-traceability rules
