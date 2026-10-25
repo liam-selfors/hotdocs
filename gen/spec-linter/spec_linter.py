@@ -9,7 +9,7 @@ from. See `.provenance.json` alongside this file and
 `verification/spec-linter/BOOTSTRAP.md` for the honest account of what was
 bootstrapped, what was ambiguous, and what was decided unilaterally.
 
-Implements all nineteen R-LINT-* requirements from
+Implements all twenty-two R-LINT-* requirements from
 `specs/components/spec-linter/requirements/`, matching the CLI and
 `LintReport` contract in `specs/components/spec-linter/interface/` exactly.
 
@@ -860,26 +860,21 @@ def _count_interface_surface(comp: Component) -> int:
     return total
 
 
-def rule_size_caps(corpus: Corpus) -> list[Finding]:
-    """R-LINT-012.
+SIZE_CAPS = {
+    "generated_code_loc": (800, 1500),
+    "spec_bundle_words": (2000, 4000),
+    "requirement_count": (20, 40),
+    "interface_surface": (10, 20),
+    "fan_out": (7, None),
+    "fan_in": (10, None),
+}
 
-    Open question resolved: spec-bundle word count is computed from the
-    source markdown of component.md + requirements/ + interface/
-    (+ interface/data/) + acceptance/ + constraints.md as authored
-    (pre-compilation) — a Gherkin block's compiled test scaffolding isn't
-    spec-bundle text and doesn't exist until generation runs, so there is
-    nothing to count post-compilation at lint time anyway.
-    """
-    findings = []
-    CAPS = {
-        "generated_code_loc": (800, 1500),
-        "spec_bundle_words": (2000, 4000),
-        "requirement_count": (20, 40),
-        "interface_surface": (10, 20),
-        "fan_out": (7, None),
-        "fan_in": (10, None),
-    }
 
+def _size_measurements(corpus: Corpus) -> dict[str, dict[str, int]]:
+    """Shared by R-LINT-012 (per-dimension caps) and R-LINT-022
+    (multi-dimension crowding, SPEC_GUIDELINES.md §4) so both rules see
+    the exact same numbers — two independently-computed measurement passes
+    could drift apart silently otherwise."""
     fan_in: dict[str, int] = {c: 0 for c in corpus.components}
     for comp in corpus.components.values():
         if not comp.root:
@@ -889,10 +884,10 @@ def rule_size_caps(corpus: Corpus) -> list[Finding]:
             if dep_doc and dep_doc.component in fan_in:
                 fan_in[dep_doc.component] += 1
 
+    result: dict[str, dict[str, int]] = {}
     for name, comp in corpus.components.items():
         if not comp.root:
             continue
-        rel = comp.root.rel_path
         all_docs = (
             [comp.root] + list(comp.requirements.values())
             + ([comp.interface_cli] if comp.interface_cli else [])
@@ -913,7 +908,7 @@ def rule_size_caps(corpus: Corpus) -> list[Finding]:
         iface_surface = _count_interface_surface(comp)
         fan_out = len(comp.root.frontmatter.get("depends_on") or [])
 
-        measurements = {
+        result[name] = {
             "generated_code_loc": loc,
             "spec_bundle_words": word_count,
             "requirement_count": req_count,
@@ -921,14 +916,57 @@ def rule_size_caps(corpus: Corpus) -> list[Finding]:
             "fan_out": fan_out,
             "fan_in": fan_in.get(name, 0),
         }
+    return result
+
+
+def rule_size_caps(corpus: Corpus) -> list[Finding]:
+    """R-LINT-012.
+
+    Open question resolved: spec-bundle word count is computed from the
+    source markdown of component.md + requirements/ + interface/
+    (+ interface/data/) + acceptance/ + constraints.md as authored
+    (pre-compilation) — a Gherkin block's compiled test scaffolding isn't
+    spec-bundle text and doesn't exist until generation runs, so there is
+    nothing to count post-compilation at lint time anyway.
+    """
+    findings = []
+    measurements_by_component = _size_measurements(corpus)
+    for name, measurements in measurements_by_component.items():
+        rel = corpus.components[name].root.rel_path
         for dim, value in measurements.items():
-            warn_at, fail_at = CAPS[dim]
+            warn_at, fail_at = SIZE_CAPS[dim]
             if fail_at is not None and value > fail_at:
                 findings.append(Finding("R-LINT-012", SEVERITY_FAIL, rel, 1,
                                          f"'{dim}' is {value}, exceeding hard-fail threshold {fail_at}"))
             elif value > warn_at:
                 findings.append(Finding("R-LINT-012", SEVERITY_WARN, rel, 1,
                                          f"'{dim}' is {value}, exceeding warn threshold {warn_at}"))
+    return findings
+
+
+def rule_decomposition_signal(corpus: Corpus) -> list[Finding]:
+    """R-LINT-022 (SPEC_GUIDELINES.md §4).
+
+    Two independent size-cap dimensions crowding their warn thresholds for
+    the same component at once is a stronger, different signal than either
+    alone — not just two R-LINT-012 findings a human has to notice
+    correlate. Deliberately keyed off *warn*, not hard-fail: the whole
+    point is to catch this before a hard-fail forces the question, the way
+    D25's own merge-orchestrator extraction happened only after the fact.
+    """
+    findings = []
+    measurements_by_component = _size_measurements(corpus)
+    for name, measurements in measurements_by_component.items():
+        rel = corpus.components[name].root.rel_path
+        crowded = [dim for dim, value in measurements.items()
+                   if value > SIZE_CAPS[dim][0]]
+        if len(crowded) >= 2:
+            dims = ", ".join(f"'{d}' ({measurements[d]})" for d in sorted(crowded))
+            findings.append(Finding(
+                "R-LINT-022", SEVERITY_WARN, rel, 1,
+                f"{len(crowded)} size-cap dimensions over warn threshold at once: "
+                f"{dims} — a decomposition signal per SPEC_GUIDELINES.md §4, "
+                f"not just {len(crowded)} independent near-misses"))
     return findings
 
 
@@ -1016,6 +1054,7 @@ ALL_RULES = [
     rule_criterion_wellformed,
     rule_glossary_conformance,
     rule_size_caps,
+    rule_decomposition_signal,
     rule_secret_field_safety,
     rule_glossary_singularity,
     rule_no_trailing_whitespace,

@@ -211,6 +211,26 @@ def test_ac_lint_012_generated_code_over_hard_cap(corpus_root):
     assert any("generated_code_loc" in f.message for f in report.findings if f.rule_id == "R-LINT-012")
 
 
+def test_ac_lint_022_fires_on_two_crowded_dimensions(corpus_root):
+    gen_dir = corpus_root / "gen" / "foo"
+    gen_dir.mkdir(parents=True)
+    (gen_dir / "big.py").write_text("\n".join(f"x{i} = {i}" for i in range(900)))
+    requirement = _comp(corpus_root) / "requirements" / "R-FOO-001.md"
+    requirement.write_text(requirement.read_text() + "\n\n" + " ".join(["word"] * 2100))
+    report = run_lint(corpus_root)
+    assert has_finding(report, "R-LINT-022", severity="warn")
+    finding = next(f for f in report.findings if f.rule_id == "R-LINT-022")
+    assert "generated_code_loc" in finding.message and "spec_bundle_words" in finding.message
+
+
+def test_ac_lint_022_does_not_fire_on_one_crowded_dimension(corpus_root):
+    gen_dir = corpus_root / "gen" / "foo"
+    gen_dir.mkdir(parents=True)
+    (gen_dir / "big.py").write_text("\n".join(f"x{i} = {i}" for i in range(900)))
+    report = run_lint(corpus_root)
+    assert not has_finding(report, "R-LINT-022", severity="warn")
+
+
 def test_ac_lint_013_secret_var_with_default(corpus_root):
     vars_dir = corpus_root / "specs" / "vars"
     vars_dir.mkdir(parents=True)
