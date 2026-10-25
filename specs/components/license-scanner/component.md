@@ -65,8 +65,11 @@ See `constraints.md`.
 
 ## Open questions
 
-- Exact k-gram window size and the reference-corpus format are
-  implementation details not pinned down here.
+- ~~Exact k-gram window size and the reference-corpus format are
+  implementation details not pinned down here~~ — resolved (`R-LICENSE-001`):
+  9-token windows; the corpus is precomputed hashes plus metadata, sourced
+  from a maintained external reference set, never raw license text and
+  never a one-time list frozen into this spec.
 
 ## Change log
 

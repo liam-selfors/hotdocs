@@ -67,8 +67,11 @@ See `constraints.md`.
 
 ## Open questions
 
-- Exact pattern database (which key/token shapes, entropy threshold) is an
-  implementation detail not pinned down here.
+- ~~Exact pattern database (which key/token shapes, entropy threshold) is
+  an implementation detail not pinned down here~~ — resolved
+  (`R-SECRET-001`): entropy threshold 4.0 bits/char; the shape database is
+  sourced from a maintained external reference set, never hand-rolled and
+  frozen into this spec.
 
 ## Change log
 

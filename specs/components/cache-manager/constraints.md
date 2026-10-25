@@ -12,3 +12,8 @@
   gate work they're short-circuiting — a slow cache defeats D13's purpose.
 - **No model calls.** Pure store logic, same trust tier as `spec-linter` and
   `impact-analyzer`.
+- **Eviction policy is unspecified by design, not by oversight.** Per
+  `R-CACHE-008`, this component may evict anything, anytime, without
+  correctness consequence — the exact policy is an operational tuning
+  choice specific to whichever backing store `VAR-CACHE-STORE-URL`
+  resolves to, not a number this spec pins.

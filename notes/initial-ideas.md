@@ -1311,6 +1311,57 @@ rules this produced.
 
 ---
 
+### D23 — Cache eviction has no correctness dimension; license/secret reference data must come from a maintained external source, not a frozen spec snapshot
+
+Closes the last three items in the deferred-items queue, all the same
+shape: an exact tuning value or policy previously left as "an
+implementation detail not pinned down here."
+
+- **`cache-manager`'s eviction/retention policy (`R-CACHE-008`)** — resolved
+  by noticing it was never actually a correctness question. `R-CACHE-001`
+  already requires `get` to return a definitive miss, never an
+  approximation; `R-CACHE-004` already requires a backing-store problem to
+  degrade to "nothing is cached yet," never a crash. An evicted entry is,
+  to a caller, indistinguishable from either — eviction can happen for any
+  reason, at any time, with zero correctness impact, only ever affecting
+  hit rate (and therefore cost, D13). The exact policy stays unpinned
+  deliberately: the backing store is pluggable (`VAR-CACHE-STORE-URL`),
+  and the right policy depends on which store it ends up being.
+- **`license-scanner`'s k-gram size and reference-corpus format
+  (`R-LICENSE-001`)** — 9-token windows (large enough that one shared
+  keyword can't trigger a false match, small enough that a genuinely
+  copied passage still produces many overlapping matches). The corpus
+  itself must be precomputed hashes plus metadata, sourced from a
+  maintained, continuously-updated external reference set — never raw
+  license text (no reason for this repo to hold a copy of copyrighted
+  source to scan against) and never a one-time list hand-curated and
+  frozen into this spec, since license fingerprints for active OSS
+  projects change as those projects evolve and a frozen snapshot would
+  silently stop catching real matches.
+- **`secret-scanner`'s pattern database and entropy threshold
+  (`R-SECRET-001`)** — entropy threshold 4.0 bits/char (catches
+  random-looking base64/hex-style secrets while tolerating ordinary prose
+  and most identifiers, which run meaningfully lower). The shape database
+  follows the same sourcing rule as `license-scanner`'s corpus, for the
+  same reason: new leaked-credential shapes (a new cloud vendor, a new
+  token prefix) appear constantly, and the kind of curated, actively-
+  maintained rule sets tools like `gitleaks`/`detect-secrets` already keep
+  up to date are the right source, not a hand-rolled list this spec would
+  need to maintain itself.
+
+**Deliberately not added:** a new `specs/vars/` declaration for "which
+external source" either scanner pulls from. That's a vendored-dependency
+choice (which library/package this component is built against), not a
+deployment-time config parameter a human sets per environment — the
+distinction `specs/vars/` exists to capture is the latter, not the former.
+
+See `specs/components/cache-manager/requirements/R-CACHE-008.md`,
+`specs/components/license-scanner/requirements/R-LICENSE-001.md`, and
+`specs/components/secret-scanner/requirements/R-SECRET-001.md` for the
+current, authoritative rules this produced.
+
+---
+
 ## 12. Open questions
 
 _None outstanding — Q9–Q13 from the review pass are now D10–D14; D15 was a

@@ -72,9 +72,14 @@ See `constraints.md`.
   component cannot verify that from the inside — it's a cross-cutting
   assumption this spec inherits rather than enforces. Not resolved here;
   flagged as a standing dependency on every gate's own constraints.md.
-- Cache eviction/retention policy (how long entries live, whether there's a
-  size bound on the backing store) is undecided — out of scope for this
-  draft, deferred to an operational concern rather than a correctness one.
+- ~~Cache eviction/retention policy (how long entries live, whether
+  there's a size bound on the backing store) is undecided~~ — resolved
+  (`R-CACHE-008`): it has no correctness dimension to pin down. Eviction
+  is always permitted, unconditionally — a caller already treats a miss
+  as fully correct and expected regardless of cause (`R-CACHE-001`/
+  `004`), so eviction only ever costs hit rate, never correctness. The
+  exact policy stays an operational, backing-store-specific tuning
+  choice, not a spec'd number.
 
 ## Change log
 
