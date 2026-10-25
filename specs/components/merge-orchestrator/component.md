@@ -3,7 +3,7 @@ id: comp-merge-orchestrator
 title: Merge Orchestrator
 status: draft
 owners: [pipeline-team]
-depends_on: [comp-spec-linter, comp-impact-analyzer, comp-spec-bundle-assembler, comp-generator, comp-test-author, comp-golden-scenario-verifier, comp-verifier-orchestrator, comp-license-scanner, comp-secret-scanner, comp-cache-manager, comp-provenance-writer, comp-review-packet-builder, comp-corpus-graph-builder, comp-merge-tracker]
+depends_on: [comp-spec-linter, comp-impact-analyzer, comp-spec-bundle-assembler, comp-generator, comp-test-author, comp-golden-scenario-verifier, comp-verifier-orchestrator, comp-license-scanner, comp-secret-scanner, comp-cache-manager, comp-provenance-writer, comp-review-packet-builder, comp-corpus-graph-builder, comp-merge-tracker, comp-llm-endpoint]
 realizes: [P-ZERO-EDIT, P-AMBIGUITY-GATE, P-COMPLIANCE-GATE, P-MERGE-VISIBILITY]
 sealed: false
 ---

@@ -3,9 +3,8 @@ id: comp-spec-completeness-assistant
 title: Spec Completeness Assistant
 status: draft
 owners: [pipeline-team]
-depends_on: [comp-spec-linter, comp-impact-analyzer, comp-spec-bundle-assembler, comp-generator]
+depends_on: [comp-spec-linter, comp-impact-analyzer, comp-spec-bundle-assembler, comp-generator, comp-llm-endpoint]
 realizes: [P-AMBIGUITY-GATE]
-uses_var: [VAR-ANTHROPIC-API-KEY]
 model_pin: claude-sonnet-5
 sealed: false
 ---

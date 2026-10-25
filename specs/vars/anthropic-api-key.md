@@ -10,6 +10,9 @@ owners: [pipeline-team]
 - **required:** yes
 - **type:** secret-ref
 - **sensitivity:** secret
-- **description:** Credential used by `generator` and `test-author` to call
-  the canonical model vendor's API. No example or default — forbidden for
+- **description:** Credential used by `llm-endpoint` (D30) to call
+  Anthropic's API on behalf of every caller that needs a model call
+  (`generator`, `test-author`, `spec-completeness-assistant`,
+  `merge-orchestrator`'s `judge` wiring) — none of which hold this
+  credential themselves. No example or default — forbidden for
   `sensitivity: secret` (D12).

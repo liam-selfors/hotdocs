@@ -19,9 +19,11 @@
   waste.
 - **No silent partial output.** A model-call error MUST leave
   `gen/<component>/` untouched — never a half-written tree.
-- **Credential handling.** `VAR-ANTHROPIC-API-KEY` MUST never appear in
-  `GenerationResult`, logs, or the provenance manifest — only `model`
-  (the identifier) is recorded, never the credential used to reach it.
+- **Credential handling.** Since `D30`, this component no longer holds
+  `VAR-ANTHROPIC-API-KEY` at all — `llm-endpoint` does
+  (`R-ENDPOINT-005`) — so it's structurally absent from
+  `GenerationResult`, logs, and the provenance manifest, not merely
+  filtered out of them. Only `model` (the identifier) is ever recorded.
 - **`retry_feedback`'s content boundary is load-bearing, not cosmetic.**
   R-GEN-010 restricts `retry_feedback` to a bare `R-id` list — this MUST
   hold at every layer that touches it here, not just at the CLI/library

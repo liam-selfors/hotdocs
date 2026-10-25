@@ -3,9 +3,8 @@ id: comp-test-author
 title: Test Author
 status: draft
 owners: [pipeline-team]
-depends_on: [comp-spec-bundle-assembler, comp-cache-manager]
+depends_on: [comp-spec-bundle-assembler, comp-cache-manager, comp-llm-endpoint]
 realizes: [P-ZERO-EDIT, P-AMBIGUITY-GATE]
-uses_var: [VAR-ANTHROPIC-API-KEY]
 model_pin: claude-sonnet-5
 sealed: false
 ---

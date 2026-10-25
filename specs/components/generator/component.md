@@ -3,10 +3,9 @@ id: comp-generator
 title: Generator
 status: draft
 owners: [pipeline-team]
-depends_on: [comp-spec-bundle-assembler, comp-cache-manager]
+depends_on: [comp-spec-bundle-assembler, comp-cache-manager, comp-llm-endpoint]
 depends_on_guarantees: [G-CACHE-001]
 realizes: [P-ZERO-EDIT]
-uses_var: [VAR-ANTHROPIC-API-KEY]
 model_pin: claude-sonnet-5
 sealed: false
 ---
@@ -98,9 +97,9 @@ See `constraints.md`.
 - ~~Timeout/retry policy for transient model-API errors (distinct from
   R-GEN-008's "report a model-call error," which is about *classification*,
   not retry policy)~~ — resolved (R-GEN-011): no custom retry/backoff logic
-  here, no invented timeout duration — trust the vendor SDK's own bounded
-  behavior, report `model_call_error` once, and let a merge re-run
-  (R-MERGE-017) be the retry mechanism, which is already free given
+  here, trust `llm-endpoint`'s own bounded-call guarantee (D30), report
+  `model_call_error` once, and let a merge re-run (R-MERGE-017) be the
+  retry mechanism, which is already free given
   R-GEN-006's cache-on-success-only behavior.
 - ~~Whether `.overrides.json` paths should be read by this component
   directly, or whether `merge-orchestrator` should filter the write-set

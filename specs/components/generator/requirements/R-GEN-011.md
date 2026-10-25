@@ -1,14 +1,12 @@
 # R-GEN-011
 
 **R-GEN-011** — This component MUST NOT implement its own retry-with-backoff
-  logic around a model call, and MUST NOT configure the underlying model
-  SDK/HTTP client with an unbounded (infinite) wait. A single call either
-  succeeds, or fails within the SDK's own bounded timeout — the vendor
-  SDK's own timeout/error behavior is the right source of truth for "how
-  long is reasonable," not a number this component invents. Any resulting
-  failure (network error, auth failure, rate-limit, or a timeout from the
-  SDK's own bound) is reported as `model_call_error` (R-GEN-008) exactly
-  once per call — there is no internal attempt loop to exhaust first.
+  logic around an `llm-endpoint` call — `llm-endpoint`'s own bounded-call
+  guarantee (`R-ENDPOINT-004`, D30) is the right source of truth for "how
+  long is reasonable," not a number this component invents, and not a
+  loop this component adds on top. A single call either succeeds, or
+  comes back as `model_call_error` (R-GEN-008) exactly once — there is no
+  internal attempt loop to exhaust first.
 
   **Resolves the retry/timeout open question by making the retry mechanism
   someone else's job, deliberately:** a transient failure's recovery path
