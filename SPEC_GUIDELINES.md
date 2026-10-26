@@ -573,7 +573,46 @@ Unconditional, not a scope question:
 
 ---
 
-## 10. What this document does not cover
+## 10. Single source of truth for computed facts
+
+Any atomic fact more than one component could need — a word count, a
+graph relationship, a verification verdict, a provenance field — MUST
+have exactly one canonical definition in the corpus. A second
+component needing the same fact MUST read or query that definition,
+never recompute it independently, however small the computation looks.
+This corpus has already been caught by exactly this gap once
+(`component_size`, `D42`): two independently-written algorithms for the
+same word count, one of them never actually run, silently diverging
+from the other it was supposed to match.
+
+- **Before specifying a new computation, check whether it already
+  exists** — a shared view (`specs/architecture/graph-query-engine.md`'s
+  "Query surface"), an already-written manifest
+  (`provenance-writer`'s `.provenance.json`), or another component's
+  already-computed result. See `notes/audit-before-you-build.md` for
+  the concrete places to check, in order.
+- **When a second component needs a fact one component's spec already
+  defines, promote the definition to shared, explicit infrastructure**
+  rather than let two components each maintain their own copy — the
+  same rule that has grown `graph-query-engine.md`'s shared views from
+  two to six so far, each time a second real consumer appeared.
+- **A requirement that claims a specific implementation mechanism
+  (`"implemented as queries over X"`, `"MUST reuse Y's exact
+  algorithm"`) is a claim about running code, not a description to take
+  on faith.** Verify it actually runs, against real data, before
+  treating it as settled — `component_size`'s SQL was wrong in three
+  separate ways that reading it never would have caught, only running
+  it did. An unverified claim like this is itself a single-source-of-
+  truth violation in waiting: the spec describes one mechanism, the
+  code silently does another, and nothing but careful reading connects
+  the two until something breaks.
+- **This is a design-time discipline, not a runtime cache-hit question**
+  — don't confuse it with `notes/determinism-trust-playbook.md`'s
+  three bands, which classify whether a *result* is safe to reuse
+  across calls. This section is about whether a *computation itself*
+  has one definition or two.
+
+## 11. What this document does not cover
 
 Implementation details — the actual linter, the generation pipeline's code,
 prompt templates, the corpus-graph renderer — live under `pipeline/` and
