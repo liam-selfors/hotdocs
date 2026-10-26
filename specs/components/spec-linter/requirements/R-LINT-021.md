@@ -15,14 +15,6 @@
   (per its existing distinct-message behavior) report separately whether
   a non-resolving target looked like an `R-id`, a `P-id`, or neither.
 
-  Implementation requirement, not a behavioral one: neither rule's
-  actual check changes.
-
-  Exception (D44): R-LINT-009's own iteration and reported line number
-  stay a native `_collect_covers` scan over each `component-acceptance`/
-  `product` doc's body — `nodes`/`edges` resolve whether a `Covers:`
-  target exists, but don't model which `product` doc owns a given
-  `CS-id` (`R-GQE-001` leaves `capability_scenario` rows' owner
-  deliberately unset — the `covers` edge carries that relationship, not
-  a reverse lookup), so there is no view-only path back to the right
-  doc and line to report against.
+  Implementation requirement, not behavioral. Exception (D44):
+  R-LINT-009's line-reporting stays a native scan — `nodes`/`edges`
+  don't map a `CS-id` back to its owning `product` doc.

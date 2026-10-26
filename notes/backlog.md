@@ -78,21 +78,22 @@ against real DuckDB (`yaml`/`duckpgq` extensions both install and load
 fine here) with every count cross-checked against an independent
 file-system count. See `specs/decisions/D43.md`.
 
-**`R-LINT-003`/`004`/`008`/`009`/`018`/`020`/`021` claim an
-implementation that doesn't exist.** All seven state (`R-LINT-020`/
-`021` explicitly, the other five by being the rules those two govern)
-that reference resolution, acyclicity, `depends_on_guarantees`
-resolution, and both traceability directions are "implemented as
-queries over the `nodes`/`edges` views." `gen/spec-linter/
-spec_linter.py` contains zero references to `duckdb` outside the new
-`_component_doc_words` lookup (`D42`) — `rule_reference_resolution`,
-`rule_acyclic_graph`, and the rest are plain Python over
-`corpus.id_index`/`corpus.frontmatter`, logically equivalent but never
-actually running the SQL the requirements describe. `BOOTSTRAP.md`
-was never updated to document this gap when `R-LINT-020`/`021` were
-added (`D24`/`D27`) — its own "requirements added after D15" section
-stops at `R-LINT-019`. High confidence; confirmed by reading the real
-code, not inferred.
+~~**`R-LINT-003`/`004`/`008`/`009`/`018`/`020`/`021` claim an
+implementation that doesn't exist.**~~ **Resolved by `D44`.** All five
+rules now actually query `graph-query-engine`'s shared `nodes`/`edges`
+views (extracted as a real component in the same decision, out of
+`graph-query-engine.md`'s previously-unverified embedded SQL) rather
+than independently-written Python. Two residual native-Python checks
+remain, each confirmed necessary by grep rather than assumed: an
+`architecture`-doc `depends_on` check in `R-LINT-003`/`004` (the shared
+views are component-scoped only), and `R-LINT-009`'s own line-number
+reporting (the views don't map a `CS-id` back to its owning `product`
+doc). Wiring this in also surfaced two new real bugs in
+`graph-query-engine` itself — `read_yaml_frontmatter` raising on a
+zero-match glob, and its struct-column auto-detection silently
+dropping a field absent from every file in a glob at once — neither
+reachable until a second, sparser caller (`spec-linter`'s own test
+fixtures) actually exercised it. See `specs/decisions/D44.md`.
 
 **`corpus-graph-builder`'s `R-GRAPH-003` has no defined mechanism for
 six of the eight size-cap dimensions.** `component_size` (`D42`) now

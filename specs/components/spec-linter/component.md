@@ -32,11 +32,11 @@ singularity (D14); no trailing whitespace anywhere in a spec file
 hashing raw bytes without a cosmetic-diff cache-hit cost.
 
 **Out of scope:** generation; verification of generated code's actual
-behavior. **Mostly, but not entirely, free of model calls and judgment** —
-18 of 19 requirements are pure structural/textual checks; R-LINT-015 is a
-deliberate, narrow exception (see its entry and `constraints.md`) for the one
-case in this component's scope that is genuinely about meaning, not
-structure, and D5 says exactly that's when `llm-judge` is the right tool.
+behavior. **Mostly free of model calls and judgment** — 18 of 19
+requirements are pure structural/textual checks; R-LINT-015 is a
+deliberate, narrow exception (see its entry and `constraints.md`) for the
+one case here that's genuinely about meaning, not structure, and D5 says
+that's when `llm-judge` is the right tool.
 
 ## Definitions
 
@@ -77,7 +77,8 @@ word/LOC counting scope, interface-surface-element counting)._
 
 - Initial draft.
 - `D40`–`D42`: `spec_bundle_words` renamed `component_doc_words`;
-  added `R-LINT-026`/`027` (`D<N>` and section-pointer validation);
-  trimmed `R-LINT-020`/`021`'s duplicate rationale; `component_doc_words`
-  now queries the shared `component_size` view (first real dependency,
-  `duckdb`) instead of its own algorithm.
+  added `R-LINT-026`/`027`; `component_doc_words` now queries the
+  shared `component_size` view (first real `duckdb` dependency).
+- `D44`: `R-LINT-003`/`004`/`008`/`009`/`018` rewired onto
+  `graph-query-engine`'s shared `nodes`/`edges` views; `depends_on`
+  now `[comp-graph-query-engine]`.
