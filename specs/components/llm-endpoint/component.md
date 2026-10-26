@@ -104,3 +104,16 @@ open question.
   from-scratch API client. `interface/library.md` gained a `backend`
   injection parameter, a pre-existing gap `AC-ENDPOINT-002`/`003`/`006`
   already implied.
+- `D51`: **self-hosted regeneration.** The real `generator` (`D50`),
+  dispatching through this exact `D47` implementation, cold-regenerated
+  `gen/llm-endpoint/` from this component's own current spec; the
+  result passed every `AC-ENDPOINT-*` criterion and was swapped in,
+  replacing the hand-written version. Revises `D47`'s "nothing could
+  ever generate `llm-endpoint`" to the more precise claim: nothing could
+  generate the *first* working version — once one exists, it can author
+  its own successor, the same way a compiler can compile itself once a
+  first version exists by other means. `interface/library.md`'s
+  `backend` parameter's exact shape (a plain callable vs. a
+  `.complete()`-method object) is not fixed by this spec and changed in
+  the self-hosted version; `verification/llm-endpoint/`'s own test
+  suite was updated to match.

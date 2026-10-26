@@ -235,15 +235,22 @@ Specced in full depth so far:
   anti-premature-abstraction stance). Since D32, `model_call_error` is a
   structured `{category, message}` object, not a boolean, and every
   call writes a caller-agnostic record to `.hotdocs/calls/`.
-  **A real `gen/llm-endpoint/` implementation since `D47`** — a fourth
-  hand-bootstrapped component, but a structurally permanent exception
-  rather than a temporary one (`BOOTSTRAP.md`): nothing could ever
-  cold-regenerate the component every generation call dispatches
-  through. `AnthropicBackend` dispatches via the `claude` CLI's
+  **A real `gen/llm-endpoint/` implementation since `D47`, self-hosted
+  since `D51`** — the fourth component with real code, originally hand-
+  bootstrapped on the theory that nothing could cold-regenerate the
+  component every generation call dispatches through. Once a real
+  `generator` existed (`D50`), that theory was tested directly: `D51`
+  used this exact hand-written implementation to cold-regenerate itself
+  from its own current spec, verified the result against every
+  `AC-ENDPOINT-*` criterion, and swapped it in — the first real
+  self-hosted regeneration in this corpus, resolving the generator/
+  llm-endpoint chicken-and-egg problem the same way a compiler
+  bootstraps by compiling itself once a first version exists by other
+  means. `AnthropicBackend` dispatches via the `claude` CLI's
   non-interactive mode (`D45`/`D46`) instead of a from-scratch API
-  client; confirmed live exactly once (real money, `D46`'s billing
-  finding applies), with the full test suite otherwise running on an
-  injected mock backend at zero cost.
+  client; confirmed live exactly once per generation (real money,
+  `D46`'s billing finding applies), with the full test suite otherwise
+  running on an injected mock backend at zero cost.
 
 **All 22 architecture components are now specced in full depth** (15
 original + `test-author` + `spec-completeness-assistant`, both added

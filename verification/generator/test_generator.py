@@ -1,18 +1,21 @@
 """One test per AC-GEN-* criterion in
 specs/components/generator/acceptance/.
+
+Rewritten for D51 against the self-hosted gen/llm-endpoint/ package --
+MockBackend now returns plain (text, error) tuples, matching that
+package's own callable-backend convention (see conftest.py's docstring).
 """
 
 import json
 
 from conftest import FakeBundle, MockBackend
-from llm_endpoint import BackendResult
 import generator
 from generator import GATE_VERSION, PROMPT_VERSION, generate
 import cache_manager
 
 
 def test_ac_gen_001_cold_prompt_contains_exactly_cold_fields(repo_root):
-    backend = MockBackend([BackendResult(text="-----BEGIN FILE: foo.py-----\nx = 1\n-----END FILE-----")])
+    backend = MockBackend([("-----BEGIN FILE: foo.py-----\nx = 1\n-----END FILE-----", None)])
     bundle = FakeBundle()
     generate(bundle, "claude-sonnet-5", repo_root=repo_root, llm_backend=backend)
 
@@ -26,7 +29,7 @@ def test_ac_gen_001_cold_prompt_contains_exactly_cold_fields(repo_root):
 
 
 def test_ac_gen_002_hint_code_is_a_distinct_section(repo_root):
-    backend = MockBackend([BackendResult(text="-----BEGIN FILE: foo.py-----\nx = 1\n-----END FILE-----")])
+    backend = MockBackend([("-----BEGIN FILE: foo.py-----\nx = 1\n-----END FILE-----", None)])
     bundle = FakeBundle(hint_code={"foo.py": "x = 0"})
     generate(bundle, "claude-sonnet-5", repo_root=repo_root, llm_backend=backend)
 
@@ -36,14 +39,14 @@ def test_ac_gen_002_hint_code_is_a_distinct_section(repo_root):
 
 
 def test_ac_gen_003_prompt_version_matches_frozen_template(repo_root):
-    backend = MockBackend([BackendResult(text="")])
+    backend = MockBackend([("", None)])
     result = generate(FakeBundle(), "claude-sonnet-5", repo_root=repo_root, llm_backend=backend)
     assert result.prompt_version == PROMPT_VERSION == "v1"
 
 
 def test_ac_gen_004_model_identifier_passed_through_unchanged(repo_root):
-    backend_a = MockBackend([BackendResult(text="")])
-    backend_b = MockBackend([BackendResult(text="")])
+    backend_a = MockBackend([("", None)])
+    backend_b = MockBackend([("", None)])
     generate(FakeBundle(), "claude-sonnet-5", repo_root=repo_root, llm_backend=backend_a)
     generate(FakeBundle(spec_bundle_hash="sha256:other"), "claude-opus-5", repo_root=repo_root, llm_backend=backend_b)
     assert backend_a.calls[0][1] == "claude-sonnet-5"
@@ -77,7 +80,7 @@ def test_ac_gen_005_cache_hit_skips_the_model(repo_root):
 
 
 def test_ac_gen_006_successful_call_is_cached(repo_root):
-    backend = MockBackend([BackendResult(text="-----BEGIN FILE: foo.py-----\nx = 1\n-----END FILE-----")])
+    backend = MockBackend([("-----BEGIN FILE: foo.py-----\nx = 1\n-----END FILE-----", None)])
     bundle = FakeBundle()
     generate(bundle, "claude-sonnet-5", repo_root=repo_root, llm_backend=backend)
 
@@ -93,7 +96,7 @@ def test_ac_gen_006_successful_call_is_cached(repo_root):
 
 
 def test_ac_gen_008_model_call_error_surfaces_cleanly(repo_root):
-    backend = MockBackend([BackendResult(text=None, error_category="network", error_message="connection reset")])
+    backend = MockBackend([(None, {"category": "network", "message": "connection reset"})])
     result = generate(FakeBundle(), "claude-sonnet-5", repo_root=repo_root, llm_backend=backend)
     assert result.model_call_error == {"category": "network", "message": "connection reset"}
     assert result.files == {}
@@ -133,14 +136,14 @@ def test_ac_gen_009_sealed_and_override_refuse_before_any_call(repo_root):
 
 
 def test_ac_gen_012_timeout_classified_error_no_internal_retry(repo_root):
-    backend = MockBackend([BackendResult(text=None, error_category="timeout", error_message="bounded wait exceeded")])
+    backend = MockBackend([(None, {"category": "timeout", "message": "bounded wait exceeded"})])
     result = generate(FakeBundle(), "claude-sonnet-5", repo_root=repo_root, llm_backend=backend)
     assert result.model_call_error["category"] == "timeout"
     assert len(backend.calls) == 1
 
 
 def test_ac_gen_013_retry_feedback_is_bare_and_distinct(repo_root):
-    backend = MockBackend([BackendResult(text="-----BEGIN FILE: foo.py-----\nx = 1\n-----END FILE-----")])
+    backend = MockBackend([("-----BEGIN FILE: foo.py-----\nx = 1\n-----END FILE-----", None)])
     result = generate(FakeBundle(), "claude-sonnet-5", ["R-FOO-003"], repo_root=repo_root, llm_backend=backend)
 
     sent_prompt = backend.calls[0][0]

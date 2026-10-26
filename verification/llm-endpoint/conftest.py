@@ -1,10 +1,17 @@
 """Fixtures for llm-endpoint's test suite.
 
-Every test here uses an injected mock backend (interface/library.md's
-`backend` parameter, D47) -- never a real network call. The real
-`AnthropicBackend` (which shells out to the `claude` CLI and costs real
-money per D46) is verified separately, once, manually -- see
-BOOTSTRAP.md -- not on every test run.
+Rewritten for D51: gen/llm-endpoint/ is now the output of a real
+self-hosted generation pass (generator regenerating llm-endpoint from
+its own current spec), not the original hand-written bootstrap. The
+self-hosted version chose a different, equally valid internal backend
+convention -- a plain callable `backend(prompt, model, **params) ->
+(text, error)` instead of the original's `backend.complete(...)
+-> BackendResult` object -- so this MockBackend matches what the
+*current* gen/llm-endpoint/ code actually expects, not the retired
+convention. Every test still verifies the same AC-ENDPOINT-* criteria;
+only the mock's shape changed, because that shape was never part of
+the public interface spec (interface/library.md only fixes
+`complete(prompt, model, *, backend=None, **params) -> ModelResponse`).
 """
 
 import sys
@@ -18,21 +25,20 @@ import llm_endpoint  # noqa: E402
 
 
 class MockBackend:
-    """A scripted backend: pass a list of BackendResult-producing
-    callables (or plain BackendResult instances), one consumed per call.
-    Records every (prompt, model, params) it was actually called with,
-    so a test can assert on call count -- e.g. confirming no retry."""
+    """A scripted, callable backend -- matches gen/llm-endpoint/llm_endpoint/
+    backends/anthropic.py's own `__call__(prompt, model, **params) ->
+    (text, error)` convention exactly."""
 
     name = "mock"
 
-    def __init__(self, results):
-        self._results = list(results)
+    def __init__(self, text=None, error=None):
+        self.text = text
+        self.error = error
         self.calls = []
 
-    def complete(self, prompt, model, **params):
+    def __call__(self, prompt, model, **params):
         self.calls.append((prompt, model, params))
-        result = self._results.pop(0)
-        return result() if callable(result) else result
+        return self.text, self.error
 
 
 @pytest.fixture

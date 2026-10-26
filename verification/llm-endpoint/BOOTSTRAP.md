@@ -1,5 +1,24 @@
 # Bootstrap Account: `llm-endpoint`
 
+**Superseded by a real self-hosted regeneration (`D51`).** Everything
+below this notice describes the original hand-written bootstrap
+(`D47`) — kept as the historical record, since the discovery process
+and bugs it documents are still real and still relevant. As of `D51`,
+`gen/llm-endpoint/` is no longer that hand-written file: it is the
+output of a genuine `generate()` call (the real `generator`, `D50`,
+dispatching through the very `llm-endpoint` it was about to replace)
+against this component's own current spec, verified against every
+`AC-ENDPOINT-*` criterion and swapped in because it passed. See
+`specs/decisions/D51.md` for the full account, including the one real
+behavioral difference the swap introduced: the self-hosted version's
+backend-injection shape is a plain callable, not the original's
+`.complete()`-method object — `verification/llm-endpoint/`'s own test
+suite was updated to match, since that shape was never part of the
+public interface spec, only an internal choice each version is free to
+make independently.
+
+---
+
 A fourth hand-authored bootstrap exception, same honest flag
 `spec-linter`/`graph-query-engine`/`corpus-graph-builder`'s own
 `BOOTSTRAP.md` accounts already establish — but a structurally different

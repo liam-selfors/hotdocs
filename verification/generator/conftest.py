@@ -9,12 +9,17 @@ sys.path.insert(0, str(REPO_ROOT / "gen" / "generator"))
 sys.path.insert(0, str(REPO_ROOT / "gen" / "llm-endpoint"))
 sys.path.insert(0, str(REPO_ROOT / "gen" / "cache-manager"))
 import generator  # noqa: E402
-from llm_endpoint import BackendResult  # noqa: E402
 
 
 class MockBackend:
-    """Same shape as llm-endpoint's own test MockBackend -- a scripted
-    backend recording every call it actually received."""
+    """Matches gen/llm-endpoint/llm_endpoint/'s own current backend
+    convention (D51 -- a self-hosted regeneration of llm-endpoint chose
+    a plain-callable shape, `backend(prompt, model, **params) ->
+    (text, error)`, instead of the original `.complete() -> BackendResult`
+    object). `generate()` passes `llm_backend` straight through to
+    `llm_endpoint.complete()`'s own `backend` parameter, so this mock
+    must match whatever that package currently expects, not a retired
+    convention."""
 
     name = "mock"
 
@@ -22,7 +27,7 @@ class MockBackend:
         self._results = list(results)
         self.calls = []
 
-    def complete(self, prompt, model, **params):
+    def __call__(self, prompt, model, **params):
         self.calls.append((prompt, model, params))
         result = self._results.pop(0)
         return result() if callable(result) else result
