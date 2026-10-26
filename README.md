@@ -13,7 +13,7 @@ reviewing diffs of intent.
 ## Status
 
 The rules are formalized (`SPEC_GUIDELINES.md`), and the repository's own
-pipeline is itself the worked example: **20 components, fully specced**
+pipeline is itself the worked example: **22 components, fully specced**
 under `specs/components/` (component anatomy, requirements, interfaces,
 acceptance criteria, constraints — see `specs/architecture/
 pipeline-decomposition.md` for the full decomposition), covering lint,
@@ -21,17 +21,55 @@ blast-radius analysis, generation, verification, compliance scanning,
 provenance, merge-tracking, and a DuckDB-backed query layer shared across
 several of them (`specs/architecture/graph-query-engine.md`).
 
-`spec-linter` is the one component with a real, hand-bootstrapped
-implementation (`gen/spec-linter/`) and a real passing test suite
-(`verification/spec-linter/`) — standing in for the not-yet-built
-generator/criterion-compiler pipeline, and the thing every spec change in
-this repo is actually re-validated against before it's committed.
-Everything else is fully specced but not yet generated: `pipeline/` (the
-agent workflow that would do that generation) doesn't exist yet either.
+**Seven of those components have real code**, and the central claim this
+repo exists to test — that a real generation pipeline can cold-regenerate
+a component from its spec, verified, with no human hand-writing the
+result — is no longer theoretical:
 
-Decisions are tracked as formal ADRs in `specs/decisions/` (`D15` onward);
-`notes/initial-ideas.md` holds the original brainstorm (`D1`–`D14`,
-informal) plus the full discussion behind every later decision.
+- `spec-linter`, `graph-query-engine` — hand-authored bootstrap, standing
+  in for the generator this pipeline didn't have yet when they were built.
+- `cache-manager`, `spec-bundle-assembler` — also hand-authored, but
+  temporary exceptions: nothing stops a real `generator` from
+  cold-regenerating either, later.
+- `llm-endpoint`, `generator` — hand-authored, but *permanent* exceptions:
+  each is what the other dispatches through, so neither could ever be
+  produced the normal way *first*.
+- `corpus-graph-builder` — the first component actually **cold-generated**,
+  not hand-written: a real model call, through a real `generator`
+  dispatching through a real `llm-endpoint`, from exactly this
+  component's assembled spec bundle and nothing else (`specs/decisions/
+  D45.md`).
+
+Once that real chain existed, the obvious next question was testable
+directly: can a bootstrapped component regenerate *itself*, resolving the
+generator/llm-endpoint chicken-and-egg problem the way a compiler
+bootstraps by compiling itself once a first version exists by other
+means? **Yes** — `llm-endpoint` has cold-regenerated itself twice,
+through its own prior version, replacing it each time only because the
+result passed every one of its own acceptance criteria (`D51`; then
+`D52`/`D53`, after two real failures the process itself surfaced: a
+timeout bound too short for a larger component's spec bundle, and a
+genuine tool-access/repo-context contamination the fix had to close
+structurally, not just in a prompt). The same experiment attempted on
+`generator` itself produced a plausible candidate that failed to import
+— a real dependency-layout assumption two independently-generated
+components hadn't yet had to agree on — and was correctly **not** swapped
+in (`D54`). Both outcomes are the methodology working as intended: a
+generation attempt earns its place by passing verification, not by
+merely completing.
+
+`pipeline/` — the directory that would hold frozen prompts and model
+pins once they're shared by more than one caller — stays intentionally
+thin for now (`D18`/`D20`); `criterion-compiler`, the one deliberately
+permanent gap in this chain, remains unbuilt by design (sealed,
+`specs/components/criterion-compiler/component.md` — trusting a
+`compiled` criterion requires the compiler that compiles it to never
+itself be agent-generated).
+
+Decisions are tracked as formal ADRs in `specs/decisions/` (`D15` onward,
+currently through `D54`); `notes/initial-ideas.md` holds the original
+brainstorm (`D1`–`D14`, informal) plus the full discussion behind every
+later decision.
 
 ## Repository conventions
 

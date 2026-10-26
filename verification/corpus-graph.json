@@ -343,6 +343,11 @@
     {
       "from": "comp-spec-bundle-assembler",
       "kind": "depends_on",
+      "to": "comp-graph-query-engine"
+    },
+    {
+      "from": "comp-spec-bundle-assembler",
+      "kind": "depends_on",
       "to": "comp-spec-linter"
     },
     {

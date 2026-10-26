@@ -7,16 +7,45 @@ render from.
 
 See `SPEC_GUIDELINES.md` §6 (verification gates) and §7 (provenance).
 
-## `spec-linter/`
+## Seven real test suites, one per real component
 
-29 tests, covering all 22 `AC-LINT-*` criteria plus a sanity smoke test and
-an interface-surface-counting regression suite. **Hand-authored bootstrap**
-— `criterion-compiler` doesn't exist yet to have compiled these from
-`acceptance/`'s Gherkin blocks the normal way. Run with `pytest` (not
-vendored into the repo — install into your own environment). See
-`BOOTSTRAP.md` in this directory for the full account, including a real bug
-the bootstrap caught that hand-built fixtures alone had missed, and a note
-on the D15 one-file-per-unit layout this suite was later rewritten for.
+Each directory below has its own `BOOTSTRAP.md` with the full, honest
+account: what was ambiguous, what was decided, and — for every one of
+them — at least one real bug a synthetic fixture or a real end-to-end
+run caught that reading the code alone would have missed.
 
-Everything else fills in as the corresponding components get specced and
-(eventually) really generated.
+- `spec-linter/` — 42 tests. `criterion-compiler` doesn't exist to have
+  compiled these the normal way.
+- `graph-query-engine/` — 7 tests, run against this repo's own real
+  corpus (not a synthetic fixture — these views exist specifically to
+  query the real thing).
+- `corpus-graph-builder/` — 8 tests. **Cold-generated, not hand-written**
+  (`D45`) — the fixture suite here still had to be hand-authored, since
+  `test-author` doesn't exist yet either.
+- `llm-endpoint/` — 6 tests, all against an injected mock backend, zero
+  cost to re-run. **Self-hosted twice over** (`D51`, `D52`/`D53`) — this
+  suite has been rewritten twice to match each regeneration's own,
+  equally spec-conformant internal backend convention, since
+  `interface/library.md` only ever fixes the public `complete()` call
+  shape, never a Python return type.
+- `cache-manager/` — 10 tests, including eight real concurrent writer
+  threads that caught a genuine race condition no amount of reading the
+  code would have found.
+- `spec-bundle-assembler/` — 10 tests against a synthetic
+  dependency-pair fixture, plus a direct smoke test against this repo's
+  own real corpus.
+- `generator/` — 10 tests, all against an injected mock backend. Used in
+  anger twice: once to regenerate `llm-endpoint` (twice), once to
+  attempt regenerating itself — the one real generation attempt this
+  corpus has made that failed and was correctly rejected (`D54`).
+
+Run any one with `pytest` (not vendored into the repo — install into your
+own environment) — but run every suite as its **own, separate** `pytest`
+invocation, never two or more together in one command. Each directory's
+bare-named `conftest.py` collides with any other's in Python's own
+module cache the moment both are collected in the same run — a known,
+accepted quirk of non-package test directories (confirmed directly:
+every pairwise combination collides the same way), not a bug in any one
+suite. See any `BOOTSTRAP.md` for the full note.
+
+Everything else fills in as the corresponding components get real code.
