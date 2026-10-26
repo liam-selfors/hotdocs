@@ -261,9 +261,9 @@ from or added beneath `merge-orchestrator`/`spec-linter`/the
 architecture docs once a real coupling, crowding, or correctness
 signal — not speculation — justified it). The real linter
 (`gen/spec-linter/`) validates the entire corpus clean: 0 failures,
-21 warnings — all `component_doc_words`/`requirement_count`/
+24 warnings — all `component_doc_words`/`requirement_count`/
 `acceptance_count`/`generated_code_loc` near-misses, `merge-orchestrator`
-and `spec-linter`'s `R-LINT-022` crowding findings (D28), and five
+and `spec-linter`'s `R-LINT-022` crowding findings (D28), and seven
 individual dense files caught by the per-file check (`R-LINT-023`,
 D29). None are hard-fail-severity; see `SPEC_GUIDELINES.md` §4 for what
 each warning dimension means and when (if ever) it calls for action.

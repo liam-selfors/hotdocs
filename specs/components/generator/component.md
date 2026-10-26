@@ -134,3 +134,6 @@ See `constraints.md`.
   submodule; it is a flat module) and was correctly not swapped in —
   `gen/generator/generator.py` is unchanged. See `notes/backlog.md` for
   the generalizable gap this exposed.
+- `D55`: `R-GEN-013` — the prompt now includes `dependency_usage`
+  (`R-ASSEMBLE-011`) as its own distinct section when present, the
+  fix for `D54`'s failure. `PROMPT_VERSION` bumped to `v2`.

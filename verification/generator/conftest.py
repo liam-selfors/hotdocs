@@ -45,6 +45,7 @@ class FakeBundle:
     constraints: str = "FAKE CONSTRAINTS TEXT"
     dependency_interfaces: dict = field(default_factory=dict)
     dependency_context: dict = field(default_factory=dict)
+    dependency_usage: dict = field(default_factory=dict)
     vars: dict = field(default_factory=dict)
     glossary: str = "FAKE GLOSSARY TEXT"
     hint_code: dict | None = None

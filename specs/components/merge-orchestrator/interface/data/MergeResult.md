@@ -25,12 +25,12 @@
 ```
 
 No `attempts`/`sample_index` fields — `D31` retired the best-of-k retry
-loop that gave either one a meaning beyond "always 1"/"always 0."
-`model_call_error` and `verification` are **not both populated** — a
-component whose one attempt never produced a candidate
-(`model_call_error`) has `verification` stay `null`; a component whose
-one attempt reached verification has `verification` populated (pass or
-fail) and `model_call_error` stays `null`. `capability_scenarios`
+loop that gave either one meaning beyond "always 1"/"always 0."
+`model_call_error` and `verification` are **not both populated**: a
+component whose attempt never produced a candidate has `verification`
+stay `null`; one that reached verification has `verification`
+populated (pass or fail) and `model_call_error` stays `null`.
+`capability_scenarios`
 (R-MERGE-014) is `capability-scenario-verifier`'s
 `CapabilityScenarioReport` return value, passed through unchanged —
 keyed by `P-id`, covering every capability whose `realizes`-set
@@ -43,6 +43,6 @@ it never affects `blocked`/`block_reasons`, per `R-TRACK-005`.
 `provenance_hit` (R-MERGE-003, `D39`) is `true` only when
 `provenance-checker` reported a hit, meaning the other fields are
 copied from a committed `.provenance.json` rather than freshly
-computed — renamed from `cache_hit`, which never actually meant
+computed — renamed from `cache_hit`, which never meant
 "`cache-manager` had an entry" (a per-gate concern, e.g.
 `GenerationResult.cache_hit`).

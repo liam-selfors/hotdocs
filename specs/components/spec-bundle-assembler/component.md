@@ -87,3 +87,7 @@ See `constraints.md`.
   `depends_on` gained `comp-graph-query-engine` (R-ASSEMBLE-010 already
   required reading dependency `Purpose` text via its `component_context`
   view; the dependency was never declared).
+- `D55`: `R-ASSEMBLE-011` — `dependency_usage`, a new, third
+  `dependency_*` field, mechanically introspected from a dependency's
+  real `gen/` code (never its spec), the one-directional fix for
+  `D54`'s import-path failure.

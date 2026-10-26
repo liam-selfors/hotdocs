@@ -36,3 +36,15 @@ correctly for a component with a real dependency, and that no
 `requirements/` text happens to discuss the `Covers:`/`Kind:` tag
 convention by name (a legitimate requirement discussing the convention,
 not a leaked criterion file — checked by hand, not assumed).
+
+**`dependency_usage` (`R-ASSEMBLE-011`, `D55`)** — the direct fix for
+`D54`'s import failure. Introspects a dependency's real `gen/` code via
+`inspect` (never source text, never a model call); respects `__all__`
+when a package defines one (`corpus-graph-builder`'s own convention),
+falls back to a `__module__`-filtered scan of top-level
+functions/classes otherwise (every flat-module component so far).
+Confirmed directly against the real corpus: `assemble("comp-generator",
+...)` now surfaces `cache_manager.CacheKey`'s real constructor
+signature by name — exactly the fact `generator`'s own self-regeneration
+attempt (`D54`) was missing when it guessed wrong about `cache-manager`'s
+module layout.

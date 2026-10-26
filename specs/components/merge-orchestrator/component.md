@@ -21,36 +21,33 @@ commit.
 
 Flagged by `specs/architecture/pipeline-decomposition.md` as having a
 15-component fan-out past D2's warn threshold — a known, accepted
-tension (see that document), not something to resolve by artificially
-shrinking this list.
+tension, not something to resolve by artificially shrinking this list.
 
 ## Scope
 
 **In scope:** sequencing and parallelizing calls to every other
-component; calling `generator` exactly once per cache-miss component per
-merge attempt (R-MERGE-005) — since `D31` retired the best-of-k retry
-loop that used to call it again on failure, there is no retry *decision*
-left to own here, only the one call and an immediate block on failure.
-That one call MAY carry caller-supplied `retry_feedback` (`R-MERGE-022`,
-`D33`) — this component passes it through for exactly the components
-named, never computes or decides on it itself. Since `D32`, also writes
-a per-attempt record (`R-MERGE-021`) via
-`merge-tracker` right after that call (and the verification call, if
-reached) concludes, so a human has full diagnostic detail before
-deciding whether to just re-run or fix the spec first. Since D16: also
-calls `capability-scenario-verifier` once every component has passed
-per-component verification (R-MERGE-014) — the dispatch itself moved
-there (D25), this component only owns *when* and *with what* it's
-called. Since D30, the real `test_author`/`judge` callables wired into
-both that call and `verifier-orchestrator`'s (R-MERGE-004) are backed by
-`llm-endpoint`. Also routes a sealed component away from generation
-entirely (R-MERGE-015), and runs every impacted component to
-completion before evaluating block status (R-MERGE-017) — no fail-fast —
-which is what makes re-running a blocked merge a complete, free recovery
+component, in `depends_on` order (`R-MERGE-023`, `D55`); calling
+`generator` exactly once per cache-miss component per merge attempt
+(R-MERGE-005) — `D31` retired the best-of-k retry loop, so there's no
+retry *decision* left to own, only the one call and an immediate block
+on failure. That call MAY carry caller-supplied `retry_feedback`
+(`R-MERGE-022`, `D33`) — passed through for exactly the components
+named, never computed here. Since `D32`, also writes a per-attempt
+record (`R-MERGE-021`) via `merge-tracker` right after that call (and
+the verification call, if reached) concludes, so a human has full
+diagnostic detail before deciding whether to re-run or fix the spec
+first. Since D16: also calls `capability-scenario-verifier` once every
+component has passed verification (R-MERGE-014) — the dispatch itself
+moved there (D25), this component only owns *when* and *with what*
+it's called. Since D30, the real `test_author`/`judge` callables wired
+into both that call and `verifier-orchestrator`'s (R-MERGE-004) are
+backed by `llm-endpoint`. Also routes a sealed component away from
+generation (R-MERGE-015), and runs every impacted component to
+completion before evaluating block status (R-MERGE-017) — no
+fail-fast — making a blocked merge's re-run a complete, free recovery
 path (R-MERGE-018).
 
-**Out of scope:** any gate's own logic — this component calls, it doesn't
-reimplement.
+**Out of scope:** any gate's own logic.
 
 ## Definitions
 
@@ -72,7 +69,7 @@ See `interface/data/`.
 
 See `acceptance/`.
 
-All twenty-four criteria are `kind: compiled` — tested by mocking every
+All twenty-five criteria are `kind: compiled` — tested by mocking every
 dependency and asserting on call order/arguments, the same pattern
 `verifier-orchestrator` already established for coordination logic.
 
@@ -101,5 +98,7 @@ See `constraints.md`.
   (`R-MERGE-015`) and added `tracking_write_error` visibility for a
   failed `merge-tracker` call (`R-MERGE-019`, `AC-MERGE-024`).
 - `D39`: `R-MERGE-003` now checks `provenance-checker`, not
-  `cache-manager`, for a non-sealed component; `depends_on` swaps
-  accordingly. `MergeResult`'s `cache_hit` renamed `provenance_hit`.
+  `cache-manager`; `depends_on` swaps accordingly. `cache_hit` renamed
+  `provenance_hit`.
+- `D55`: `R-MERGE-023` — generation now sequenced in `depends_on` order
+  within a blast radius, for `dependency_usage` (`R-ASSEMBLE-011`).

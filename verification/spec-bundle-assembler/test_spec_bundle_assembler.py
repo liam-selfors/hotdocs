@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+from conftest import FOO_ACCEPTANCE, FOO_DATA, FOO_LIBRARY, FOO_REQUIREMENT, _write_component
 from spec_bundle_assembler import PreconditionFailureError, assemble, assemble_criterion
 
 
@@ -98,3 +99,140 @@ def test_ac_assemble_010_dependency_context_is_purpose_only(corpus_root):
     # content assertion this criterion actually cares about.
     assert bundle.dependency_context["comp-bar"].strip() == "Caches results."
     assert "D13" not in bundle.dependency_context["comp-bar"]
+
+
+BAZ_COMPONENT = """---
+id: comp-baz
+title: Baz
+status: draft
+owners: [test-team]
+depends_on: []
+realizes: [P-TEST]
+sealed: false
+---
+
+# Baz
+
+## Purpose
+
+A second dependency with no real code, for AC-ASSEMBLE-011's
+degradation case.
+
+## Scope
+
+In scope: everything. Out of scope: nothing.
+
+## Definitions
+
+No deltas from `specs/glossary.md`.
+
+## Behavior
+
+See `requirements/`.
+
+## Interfaces
+
+See `interface/`.
+
+## Data
+
+See `interface/data/`.
+
+## Acceptance criteria
+
+See `acceptance/`.
+
+## Non-functional constraints
+
+See `constraints.md`.
+
+## Open questions
+
+## Change log
+
+- Initial draft.
+"""
+
+FOO_WITH_TWO_DEPS = """---
+id: comp-foo
+title: Foo
+status: draft
+owners: [test-team]
+depends_on: [comp-bar, comp-baz]
+realizes: [P-TEST]
+uses_var: [VAR-FOO-URL]
+sealed: false
+---
+
+# Foo
+
+## Purpose
+
+A minimal component for exercising the assembler.
+
+## Scope
+
+In scope: everything. Out of scope: nothing.
+
+## Definitions
+
+No deltas from `specs/glossary.md`.
+
+## Behavior
+
+See `requirements/`.
+
+## Interfaces
+
+See `interface/`.
+
+## Data
+
+See `interface/data/`.
+
+## Acceptance criteria
+
+See `acceptance/`.
+
+## Non-functional constraints
+
+See `constraints.md`.
+
+## Open questions
+
+## Change log
+
+- Initial draft.
+"""
+
+
+def test_ac_assemble_011_dependency_usage_is_introspected_and_degrades(corpus_root):
+    # comp-bar gets real code defining the exact function its own
+    # interface/library.md promises.
+    gen_bar = corpus_root / "gen" / "bar"
+    gen_bar.mkdir(parents=True)
+    (gen_bar / "bar.py").write_text(
+        "def bar_get(key: str) -> str:\n"
+        "    \"\"\"Return the cached value for key.\"\"\"\n"
+        "    return key\n"
+    )
+    # comp-baz is a second real dependency with no gen/ code at all.
+    _write_component(corpus_root, "baz", BAZ_COMPONENT, "R-BAZ-001.md",
+                      "# R-BAZ-001\n\n**R-BAZ-001** — Baz MUST exist.\n",
+                      "# Library\n\n```\nbaz_noop() -> None\n```\n")
+    (corpus_root / "specs" / "components" / "baz" / "acceptance" / "AC-BAZ-001.md").write_text(
+        "# AC-BAZ-001\n\nCovers: R-BAZ-001\nKind: compiled\n\n```gherkin\nGiven baz\nWhen baz_noop runs\nThen it works\n```\n"
+    )
+    # comp-foo now depends on both comp-bar and comp-baz.
+    _write_component(corpus_root, "foo", FOO_WITH_TWO_DEPS, "R-FOO-001.md",
+                      FOO_REQUIREMENT, FOO_LIBRARY, data_files={"Thing.md": FOO_DATA})
+    (corpus_root / "specs" / "components" / "foo" / "acceptance" / "AC-FOO-001.md").write_text(FOO_ACCEPTANCE)
+
+    bundle = assemble("comp-foo", corpus_root)
+
+    bar_usage = bundle.dependency_usage["comp-bar"]
+    assert "Importable as: `bar`" in bar_usage
+    assert "bar_get(key: str) -> str" in bar_usage
+    assert "Return the cached value for key." in bar_usage
+
+    assert bundle.dependency_usage["comp-baz"] == ""

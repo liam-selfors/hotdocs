@@ -57,3 +57,14 @@ but failed to import (it assumed `cache-manager` was a package with a
 rejected rather than swapped in. `gen/generator/generator.py` is still
 this file, unchanged. See `D54` for the full account and
 `notes/backlog.md` for the generalizable import-path gap it exposed.
+
+**`D55` closes that gap, one-directionally.** `_build_prompt` now
+includes `bundle.dependency_usage` (`R-ASSEMBLE-011`) as its own
+section (`R-GEN-013`) — real, introspected import facts about each
+dependency's current code, never anything about how *this* component's
+own dependents use it (that direction was considered and rejected, see
+`D55` for why). `PROMPT_VERSION` bumped to `v2` since the template text
+changed. A real re-attempt of `generator` regenerating itself, with
+this fix in place, is tracked as the natural next verification step —
+not done here, to keep this decision's own implementation verified on
+its own terms first.

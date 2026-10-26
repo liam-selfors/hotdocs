@@ -48,6 +48,7 @@ class SpecBundle:
     constraints: str
     dependency_interfaces: dict[str, str]
     dependency_context: dict[str, str]
+    dependency_usage: dict[str, str]
     vars: dict[str, str]
     glossary: str
     hint_code: dict[str, str] | None
@@ -61,6 +62,7 @@ class SpecBundle:
             "constraints": self.constraints,
             "dependency_interfaces": self.dependency_interfaces,
             "dependency_context": self.dependency_context,
+            "dependency_usage": self.dependency_usage,
             "vars": self.vars,
             "glossary": self.glossary,
             "hint_code": self.hint_code,
@@ -145,6 +147,60 @@ def _dependency_context(con: duckdb.DuckDBPyConnection, comp_id: str) -> str:
     return row[0] if row else ""
 
 
+def _dependency_usage(repo_root: Path, dep_bare_name: str) -> str:
+    """R-ASSEMBLE-011 -- a mechanically-derived usage card for a real
+    dependency, introspected from its already-verified gen/ code (never
+    its spec, the reverse of every other dependency_* field). Empty
+    string for a dependency with no real code yet, or whose real code
+    fails to import/introspect for any reason -- the same fail-to-empty
+    posture R-GQE-005/R-CACHE-004 already take elsewhere in this corpus,
+    never a crash that blocks assembling the rest of the bundle."""
+    import importlib
+    import inspect
+
+    module_name = dep_bare_name.replace("-", "_")
+    gen_dir = repo_root / "gen" / dep_bare_name
+    if not gen_dir.is_dir():
+        return ""
+    if not (gen_dir / f"{module_name}.py").is_file() and not (gen_dir / module_name / "__init__.py").is_file():
+        return ""
+
+    gen_dir_str = str(gen_dir)
+    added_to_path = gen_dir_str not in sys.path
+    if added_to_path:
+        sys.path.insert(0, gen_dir_str)
+    try:
+        module = importlib.import_module(module_name)
+    except Exception:
+        return ""
+    finally:
+        if added_to_path:
+            sys.path.remove(gen_dir_str)
+
+    public_names = getattr(module, "__all__", None)
+    if public_names is None:
+        public_names = [
+            name for name in dir(module)
+            if not name.startswith("_")
+            and (inspect.isfunction(getattr(module, name)) or inspect.isclass(getattr(module, name)))
+            and getattr(getattr(module, name), "__module__", None) == module.__name__
+        ]
+
+    lines = [f"Importable as: `{module_name}` (module path `gen/{dep_bare_name}/`)."]
+    for name in sorted(public_names):
+        obj = getattr(module, name, None)
+        if obj is None:
+            continue
+        try:
+            signature = str(inspect.signature(obj))
+        except (TypeError, ValueError):
+            signature = ""
+        doc = inspect.getdoc(obj) or ""
+        first_line = doc.splitlines()[0] if doc else ""
+        lines.append(f"- `{name}{signature}` -- {first_line}".rstrip(" -"))
+    return "\n".join(lines)
+
+
 def _read_hint_code(repo_root: Path, bare_name: str) -> dict[str, str]:
     """R-ASSEMBLE-008 -- the component's current gen/<component>/ content,
     keyed by path relative to that directory."""
@@ -188,10 +244,14 @@ def assemble(component_id: str, repo_root: Path, mode: str = "cold") -> SpecBund
     dep_ids = comp.root.frontmatter.get("depends_on") or []
     dependency_interfaces: dict[str, str] = {}
     dependency_context: dict[str, str] = {}
+    dependency_usage: dict[str, str] = {}
     for dep_id in dep_ids:
         dep_comp = _find_component_by_id(corpus, dep_id)
         if dep_comp is not None:
             dependency_interfaces[dep_id] = _component_interface_text(dep_comp)
+            dependency_usage[dep_id] = _dependency_usage(repo_root, dep_comp.name)
+        else:
+            dependency_usage[dep_id] = ""
         dependency_context[dep_id] = _dependency_context(con, dep_id)
 
     var_ids = comp.root.frontmatter.get("uses_var") or []
@@ -210,6 +270,7 @@ def assemble(component_id: str, repo_root: Path, mode: str = "cold") -> SpecBund
         "constraints": comp.constraints.body if comp.constraints else "",
         "dependency_interfaces": dependency_interfaces,
         "dependency_context": dependency_context,
+        "dependency_usage": dependency_usage,
         "vars": variables,
         "glossary": glossary,
         "hint_code": None,

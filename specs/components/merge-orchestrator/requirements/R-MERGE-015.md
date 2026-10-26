@@ -11,18 +11,16 @@
   wrong, not merely inefficient.
 
   **Unconditional, never gated on a provenance check** — `R-MERGE-003`
-  never checks `provenance-checker` for a sealed component at all. A
-  sealed component's `spec_bundle_hash` reflects only its *spec*, never
-  `source_path`'s actual content, so a human editing the hand-maintained
-  implementation directly would leave a prior committed
-  `.provenance.json`'s hash unchanged; trusting that hit would mean
-  never re-running the one check that could catch exactly that edit
-  silently breaking something.
+  never checks `provenance-checker` for a sealed component. A sealed
+  component's `spec_bundle_hash` reflects only its *spec*, never
+  `source_path`'s actual content, so a human editing the implementation
+  directly would leave a prior `.provenance.json`'s hash unchanged;
+  trusting that hit would mean never re-running the one check that
+  could catch that edit silently breaking something.
 
   This is the primary enforcement layer behind the sealed-component
   write-protection invariant (`generator`'s R-GEN-009 is the
-  independent, secondary layer — in case this routing is ever
-  bypassed). If a sealed component's requirements changed in a way the
+  independent, secondary layer). If a sealed component's requirements changed in a way the
   existing hand-maintained code no longer satisfies, this surfaces as
   an ordinary characterization-test failure here, blocking the merge
   the normal way — the fix is a human editing `source_path` directly.

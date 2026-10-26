@@ -27,7 +27,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "cache-manager")
 import llm_endpoint  # noqa: E402
 import cache_manager  # noqa: E402
 
-PROMPT_VERSION = "v1"
+PROMPT_VERSION = "v2"  # D55: _build_prompt gained a DEPENDENCY USAGE section
 GATE_VERSION = "generator@1.0.0"
 
 _FILE_BLOCK_RE = re.compile(
@@ -103,6 +103,9 @@ def _build_prompt(bundle: Any, retry_feedback: list[str] | None) -> str:
         f"\nCONSTRAINTS:\n{bundle.constraints}",
         f"\nDEPENDENCY INTERFACES:\n{json.dumps(bundle.dependency_interfaces)}",
         f"\nDEPENDENCY CONTEXT:\n{json.dumps(bundle.dependency_context)}",
+        f"\nDEPENDENCY USAGE (R-ASSEMBLE-011, real -- how to actually import "
+        f"and call each dependency's current code; empty for a dependency "
+        f"with none yet):\n{json.dumps(getattr(bundle, 'dependency_usage', {}))}",
         f"\nVARS:\n{json.dumps(bundle.vars)}",
         f"\nGLOSSARY:\n{bundle.glossary}",
     ]

@@ -41,7 +41,7 @@ def test_ac_gen_002_hint_code_is_a_distinct_section(repo_root):
 def test_ac_gen_003_prompt_version_matches_frozen_template(repo_root):
     backend = MockBackend([{"text": "", "model_call_error": None}])
     result = generate(FakeBundle(), "claude-sonnet-5", repo_root=repo_root, llm_backend=backend)
-    assert result.prompt_version == PROMPT_VERSION == "v1"
+    assert result.prompt_version == PROMPT_VERSION  # frozen, whatever it currently is (D55: "v2")
 
 
 def test_ac_gen_004_model_identifier_passed_through_unchanged(repo_root):
@@ -152,3 +152,17 @@ def test_ac_gen_013_retry_feedback_is_bare_and_distinct(repo_root):
     assert "Gherkin" not in sent_prompt
     assert "rationale" not in sent_prompt.lower()
     assert result.retry_feedback == ["R-FOO-003"]
+
+
+def test_ac_gen_014_dependency_usage_is_a_distinct_section(repo_root):
+    backend = MockBackend([{"text": "-----BEGIN FILE: foo.py-----\nx = 1\n-----END FILE-----", "model_call_error": None}])
+    bundle = FakeBundle(dependency_usage={"comp-bar": "Importable as: `bar`.\n- `bar_get(key: str) -> str`"})
+    generate(bundle, "claude-sonnet-5", repo_root=repo_root, llm_backend=backend)
+
+    sent_prompt = backend.calls[0][0]
+    assert "DEPENDENCY USAGE" in sent_prompt
+    assert "bar_get(key: str) -> str" in sent_prompt
+    # Still clearly separate from dependency_interfaces' own section.
+    dep_iface_idx = sent_prompt.index("DEPENDENCY INTERFACES")
+    dep_usage_idx = sent_prompt.index("DEPENDENCY USAGE")
+    assert dep_iface_idx != dep_usage_idx
