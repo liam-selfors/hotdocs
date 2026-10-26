@@ -48,3 +48,17 @@ is just as retry-worthy as "demonstrated wrong" — both mean this
 requirement isn't verified yet. The worked example above shows exactly
 this: `AC-FOO-002` is `skipped`, contributing `R-FOO-002: fail` to
 `requirement_results`, while `overall` is still `pass`.
+
+**`failure_detail`** (R-VERIFY-012) — present only on a `compiled` or
+`generated-test` criterion whose `result` is `fail`:
+
+```json
+{ "id": "AC-FOO-004", "covers": "R-FOO-004", "kind": "compiled", "result": "fail",
+  "failure_detail": { "message": "result.foo equals 5 failed", "expected": 5, "actual": 3 } }
+```
+
+Mirrors `llm-judge`'s `rationale` one `kind` family over — every `kind`
+that can fail now carries its own structured account of why. Exposed
+for provenance/review-packet/human consumption only: it never reaches
+`requirement_results` (already boolean-only, above) or
+`retry_feedback`'s `R-id`-only channel (`R-GEN-012`).

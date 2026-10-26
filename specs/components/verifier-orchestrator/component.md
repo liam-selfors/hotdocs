@@ -58,7 +58,7 @@ See `interface/data/`.
 
 See `acceptance/`.
 
-All twelve criteria are `kind: compiled` — this component coordinates
+All thirteen criteria are `kind: compiled` — this component coordinates
 checking mechanisms (some of which involve judgment or external calls), but
 the coordination itself is deterministic dispatch-and-record logic, testable
 by mocking `criterion-compiler` and the judge callable. A fourth component
@@ -78,3 +78,6 @@ established for `judge`.
 ## Change log
 
 - Initial draft.
+- `D38`: added `failure_detail` (`R-VERIFY-012`) to `criteria[]` for
+  `compiled`/`generated-test` failures, mirroring `llm-judge`'s
+  `rationale`.

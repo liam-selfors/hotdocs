@@ -83,3 +83,5 @@ None.
 ## Change log
 
 - Initial draft.
+- `D38`: defined `redundancy_flags`' populated-entry shape
+  (`{new_requirement, overlaps_with, rationale}`, `R-ASSIST-005`).

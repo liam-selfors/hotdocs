@@ -24,7 +24,7 @@ for the full record.
 
 ---
 
-## Four gaps found during the `D31`/`D32` corpus-wide audit, not yet acted on
+## ~~Four gaps found during the `D31`/`D32` corpus-wide audit~~ — all resolved, `D36`/`D38`
 
 ~~**`GoldenScenarioReport` has no `rationale` field.**~~ **Resolved by
 `D36`.** Capability scenarios (renamed from "golden scenarios") can be
@@ -35,26 +35,26 @@ report moved from one aggregate verdict per capability to one entry
 per scenario, closing a second, deeper gap found during the same
 analysis. See `specs/decisions/D36.md`.
 
-**`license-scanner`/`secret-scanner`'s webhook notification has no
-failure path.** `R-LICENSE-003`/`R-SECRET-004` specify precisely when a
-notification to `VAR-COMPLIANCE-WEBHOOK-URL` must fire, but neither
-schema (`LicenseScanResult`/`SecretScanResult`'s `notified` field) can
-distinguish "notification was due and delivered" from "notification was
-due and the webhook call itself failed" — a real HTTP call with the same
-network/auth/timeout failure modes this corpus is otherwise careful
-about everywhere else. High confidence.
+~~**`license-scanner`/`secret-scanner`'s webhook notification has no
+failure path.**~~ **Resolved by `D38`.** Both schemas gained a
+`notification_delivery_error` field (`{category, message}` or `null`,
+mirroring `model_call_error`'s shape) — `notified` keeps meaning
+"was due," computed from preconditions alone; delivery outcome is this
+separate field's job. The webhook call itself is now explicitly a
+bounded, no-retry call, same posture `R-ENDPOINT-004` established for
+model calls. See `specs/decisions/D38.md`.
 
-**`compiled`-kind verification failures carry no underlying detail.**
-`VerificationReport.criteria[].result` is just `pass`/`fail`/`skipped`
-for a `compiled` criterion — no slot for which assertion failed or
-expected-vs-actual, unlike the `rationale` field already carved out for
-`llm-judge` results. Medium confidence — "this is just normal
-test-runner output, out of scope for a structured report" is a
-plausible, just-never-stated justification.
+~~**`compiled`-kind verification failures carry no underlying detail.**~~
+**Resolved by `D38`.** `VerificationReport.criteria[]` gained
+`failure_detail` (`{message, expected, actual}`, `R-VERIFY-012`) for a
+failing `compiled`/`generated-test` criterion, mirroring `llm-judge`'s
+`rationale` one `kind` family over. Deliberately excluded from
+`requirement_results` and `retry_feedback`, preserving the existing
+content boundaries. See `specs/decisions/D38.md`.
 
-**`spec-completeness-assistant`'s `redundancy_flags` has no defined
-shape.** `CompletenessReport.md` shows `"redundancy_flags": []` with no
-example of a populated entry, even though `R-ASSIST-005` describes this
-as exactly the kind of judgment call that should carry a rationale.
-Medium confidence — may be under-specified rather than demonstrably
-wrong.
+~~**`spec-completeness-assistant`'s `redundancy_flags` has no defined
+shape.**~~ **Resolved by `D38`.** Defined as
+`{new_requirement, overlaps_with, rationale}` (`R-ASSIST-005`), with
+`rationale` mandatory on every populated entry — there is no
+fired-but-unexplained state, since an entry exists only when a real
+judgment call actually flagged one. See `specs/decisions/D38.md`.

@@ -11,6 +11,7 @@
     { "reference_id": "ref-123", "license_family": "gpl-3.0", "risk_tier": "high", "score": 0.55 }
   ],
   "notified": true,
+  "notification_delivery_error": null,
   "cache_hit": false
 }
 ```
@@ -25,3 +26,9 @@ Each match entry carries its reference's own `license_family` and
 `similarity_score` against a second threshold; the worked example above is
 a *below-block-threshold, high-risk-tier* match that still notifies, which
 is exactly the case a same-scale severity threshold couldn't express.
+`notified` reflects whether a notification was **due**, from those
+preconditions alone — never whether it was actually delivered.
+`notification_delivery_error` is `{category, message}` or `null`
+(`category` one of `network`/`auth`/`timeout`), populated only when
+`notified` is `true` and the webhook call itself failed (`R-LICENSE-003`);
+it never affects `blocked`.

@@ -16,3 +16,14 @@
   auto-resolved flag still gets seen. When `VAR-COMPLIANCE-WEBHOOK-URL` is
   absent, no notification is sent, but the record from R-LICENSE-002 still
   exists regardless.
+
+  The webhook call itself MUST be attempted at most once, with no
+  retry-with-backoff — the same bounded-call posture `R-ENDPOINT-004`
+  already established for model calls. A failure (network, auth, or
+  timeout) MUST be caught and recorded as `notification_delivery_error`
+  on the result, never retried, never raised, and never allowed to
+  affect `blocked`. `notified` itself is unaffected by delivery outcome
+  — it already reflects whether a notification was *due*, computed
+  purely from the preconditions above, before any call is attempted;
+  whether it was actually delivered is `notification_delivery_error`'s
+  job to report.

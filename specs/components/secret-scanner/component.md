@@ -81,3 +81,5 @@ See `constraints.md`.
 ## Change log
 
 - Initial draft.
+- `D38`: added `notification_delivery_error`, mirroring
+  `license-scanner`'s same fix.
