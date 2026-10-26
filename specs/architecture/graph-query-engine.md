@@ -84,238 +84,33 @@ recursive CTEs — more verbose, not infeasible.
 
 Rather than let every adopting component write its own
 `read_yaml_frontmatter()`/`read_text()`/`read_json()`/`UNNEST` calls,
-this document names six views as the one shared surface all of them
-query. A component MAY define additional views of its own for data no
-other component needs, but MUST NOT redefine these six — and if a
-second component ever needs one of its own local views, that is the
-signal to promote it here instead, same as `component_provenance` and
-`component_size`'s own history.
+six shared views are the one surface all of them query — `nodes`,
+`edges`, `component_docs`, `component_context`, `component_provenance`,
+`component_size`. Their exact definitions, generated SQL, and data
+contracts now live in their own component,
+`specs/components/graph-query-engine/` (`D44`) — this document keeps
+the adoption history below, not a second copy of the SQL.
 
-**`nodes`** — one row per spec id in the corpus, across seven kinds.
-Components, product capabilities, and vars come from their own
-frontmatter; **guarantees, requirements, and acceptance criteria carry no
-frontmatter at all** (D15 — unit-file identity is the filename, not a
-`---` block), so those rows are built from `read_text()` and filenames
-alone, with `owner_component_id` extracted from path rather than read
-from any field. **Capability scenarios are the one kind with no file of
-their own** — they're `### CS-...` headings inside a product
-capability's single file (`SPEC_GUIDELINES.md` §5), so their rows come
-from extracting headings out of that file's body text, not from a glob
-at all:
+Two of the six were promoted here from a single component's own
+private definition, by the same rule each time: `component_provenance`
+originally lived only in `corpus-graph-builder`'s spec (`R-GRAPH-009`)
+until `review-packet-builder` (`R-PACKET-011`, D26) needed the exact
+same manifest fields; `component_size` lived there too until
+`spec-linter` (`D42`) needed the same word count `rule_size_caps` had
+been computing independently. A component MAY define additional views
+of its own for data no other component needs, but MUST NOT redefine
+these six — a second real consumer is the signal to promote a local
+view here, not leave two components maintaining their own copies.
 
-```sql
-CREATE VIEW nodes AS
-SELECT id, title, status, 'component' AS kind, NULL AS owner_component_id
-FROM read_yaml_frontmatter('specs/components/*/component.md', filename:=true)
-UNION ALL
-SELECT id, title, status, 'capability', NULL
-FROM read_yaml_frontmatter('specs/product/*.md', filename:=true)
-UNION ALL
-SELECT id, title, status, 'var', NULL
-FROM read_yaml_frontmatter('specs/vars/*.md', filename:=true)
-UNION ALL
-SELECT
-  regexp_extract(filename, '(G-[A-Za-z0-9-]+)\.md$', 1), NULL, NULL, 'guarantee',
-  'comp-' || regexp_extract(filename, 'specs/components/([^/]+)/interface/guarantees/', 1)
-FROM read_text('specs/components/*/interface/guarantees/*.md')
-UNION ALL
-SELECT
-  regexp_extract(filename, '(R-[A-Za-z0-9-]+)\.md$', 1), NULL, NULL, 'requirement',
-  'comp-' || regexp_extract(filename, 'specs/components/([^/]+)/requirements/', 1)
-FROM read_text('specs/components/*/requirements/*.md')
-UNION ALL
-SELECT
-  regexp_extract(filename, '(AC-[A-Za-z0-9-]+)\.md$', 1), NULL, NULL, 'acceptance',
-  'comp-' || regexp_extract(filename, 'specs/components/([^/]+)/acceptance/', 1)
-FROM read_text('specs/components/*/acceptance/*.md')
-UNION ALL
-SELECT UNNEST(regexp_extract_all(content, '### (CS-[A-Za-z0-9-]+)', 1)), NULL, NULL, 'capability_scenario', NULL
-FROM read_text('specs/product/*.md');
-```
-
-`read_text` already returns `filename` unconditionally — unlike
-`read_yaml_frontmatter`, it has no `filename:=true` parameter and
-errors if given one (`D43`; confirmed by actually running this view,
-which could not be created as originally written). Once fixed,
-verified against this repo's real corpus: 21 `component`, 4
-`capability`, 4 `var`, 1 `guarantee`, 201 `requirement`, 227
-`acceptance`, 4 `capability_scenario` — each count cross-checked
-against an independent file-system count, exact match.
-
-The first four kinds (`component`/`capability`/`var`/`guarantee`) fix a
-gap `R-IMPACT-009`'s original wording left open: that wording named only
-the three frontmatter sources, with no mechanism for enumerating
-guarantee nodes at all — the target side of a `depends_on_guarantees`
-edge was never actually resolvable against a real node, only assumed to
-exist. `owner_component_id` is what lets `spec-linter`'s R-LINT-018 check
-(below) be a plain join instead of bespoke path-parsing; it's `NULL` for
-`capability_scenario` rows since their parent is a capability, not a
-component — the `covers` edge below carries that relationship instead.
-
-**`edges`** — one row per `(source_id, target_id, edge_type)`. The first
-four edge types are unnested from each component's list-valued
-frontmatter fields; `covers` is extracted from `Covers:` lines in
-requirement-traceability files' body text (`spec-linter`'s
-`rule_forward_traceability`/`rule_backward_traceability`, R-LINT-008/009)
-rather than from frontmatter, since that's where `Covers:` actually
-lives — a component-acceptance file carries exactly one (D15: the file
-*is* one criterion), a product file carries one per capability scenario,
-paired with the heading immediately above it:
-
-```sql
-CREATE VIEW edges AS
-SELECT id AS source_id, UNNEST(depends_on) AS target_id, 'depends_on' AS edge_type
-FROM read_yaml_frontmatter('specs/components/*/component.md')
-UNION ALL
-SELECT id, UNNEST(realizes), 'realizes'
-FROM read_yaml_frontmatter('specs/components/*/component.md')
-UNION ALL
-SELECT id, UNNEST(uses_var), 'uses_var'
-FROM read_yaml_frontmatter('specs/components/*/component.md')
-UNION ALL
-SELECT id, UNNEST(depends_on_guarantees), 'depends_on_guarantees'
-FROM read_yaml_frontmatter('specs/components/*/component.md')
-UNION ALL
-SELECT
-  regexp_extract(filename, '(AC-[A-Za-z0-9-]+)\.md$', 1),
-  regexp_extract(content, 'Covers:\s*(\S+)', 1), 'covers'
-FROM read_text('specs/components/*/acceptance/*.md')
-UNION ALL
-SELECT m['cs_id'], m['target'], 'covers'
-FROM (
-  SELECT UNNEST(regexp_extract_all(
-    content, '### (CS-[A-Za-z0-9-]+)\s*\nCovers:\s*(\S+)', ['cs_id', 'target']
-  )) AS m
-  FROM read_text('specs/product/*.md')
-);
-```
-
-**The last `edges` branch turned out to be the one piece of this
-corpus's DuckDB adoption that worked on the first try** (`D43`) —
-flagged in an earlier draft of this section as the part most likely to
-need real adjustment once actually implemented; running it against
-real DuckDB found the opposite was true, and the two `read_text`
-calls above it were the ones that needed fixing instead. Verified
-against this repo's real corpus: 231 `covers` edges total (227 from
-`acceptance/` files, 4 from capability scenarios), matching an
-independent file-count check exactly.
-
-**`component_docs`** — one row per component, frontmatter fields joined
-with the file's full raw text (frontmatter included), for anything that
-needs structure and prose together rather than just the graph shape:
-
-```sql
-CREATE VIEW component_docs AS
-SELECT fm.*, t.content AS body
-FROM read_yaml_frontmatter('specs/components/*/component.md', filename:=true) fm
-JOIN read_text('specs/components/*/component.md') t USING (filename);
-```
-
-`component_docs` is the data layer, not the rendered output — it answers
-"what does this component's frontmatter and prose say," not "what should
-a human see." Assembling an actual compiled, cross-linked document
-(ordering sections, turning ids into hyperlinks) is still
-`docs-site-renderer`'s job, the same way `merge-tracker-ui` renders
-`merge-tracker`'s data rather than the data layer doing its own
-presentation.
-
-**`component_context`** — one row per component, just its `Purpose`
-section's text, extracted from `component_docs` the same way
-`rule_ratified_closure` already extracts `Open questions` for
-`R-LINT-002`:
-
-```sql
-CREATE VIEW component_context AS
-SELECT
-  id AS component_id,
-  regexp_extract(body, '##\s*Purpose\s*\n(.*?)\n##', 1, 's') AS purpose
-FROM component_docs;
-```
-
-The `'s'` flag (`D43`) is load-bearing, not stylistic: without it,
-`.` does not match newlines, so a multi-line `Purpose` section (nearly
-all of them) silently extracts to an empty string instead of failing
-loudly — found only by actually running this view and checking its
-output, not by reading the SQL. The equivalent Python
-(`spec_linter.py`'s `_extract_purpose`) already passes `re.DOTALL`;
-this view's SQL had drifted from that without anyone noticing, since
-nothing had ever executed it.
-
-Deliberately narrower than `component_docs` — this is the one slice of
-a component's own file that's safe to hand to a *dependent*
-(`spec-bundle-assembler`'s `R-ASSEMBLE-010`, `D35`), because `D34`
-made `Purpose` dependent-safe by construction (no decision citations,
-no historical rationale — enforced by `R-LINT-024`) and nothing else
-in `component.md` carries that guarantee. `requirements/`,
-`constraints.md`, and the rest of `component.md` stay exactly as
-excluded as `R-ASSEMBLE-002` already says; this view does not, and
-must not, become a way around that boundary for anything but `Purpose`
-specifically.
-
-**`component_provenance`** — one row per component, read directly from
-the provenance manifests `provenance-writer` already writes
-(`verification/<component>/.provenance.json`), which already embed
-`verification_report`, `license_scan`, `secret_scan`, and
-`provenance_hit` (`SPEC_GUIDELINES.md` §7):
-
-```sql
-CREATE VIEW component_provenance AS
-SELECT
-  'comp-' || regexp_extract(filename, 'verification/([^/]+)/\.provenance\.json$', 1)
-    AS component_id,
-  *
-FROM read_json('verification/*/.provenance.json', filename:=true);
-```
-
-Not graph-shaped — it uses neither `yaml` nor `duckpgq`, just core
-`read_json` — and originally lived only inside `corpus-graph-builder`'s
-own spec (`R-GRAPH-009`) on the premise that no other component needed
-it. That premise held only until `review-packet-builder` (`R-PACKET-011`,
-D26) needed the exact same thing: every field its `ReviewPacket` reports
-per component (`verification_results`, `compliance_flags`,
-`provenance_hit_status`) is already in this manifest. Promoted here once a
-second consumer appeared, for the same reason `nodes`/`edges` exist as
-one shared definition instead of two independently-written ones.
-
-**`component_size`** — one row per component, the word count
-`R-LINT-012`'s `component_doc_words` dimension measures:
-
-```sql
-CREATE VIEW component_size AS
-SELECT
-  'comp-' || regexp_extract(filename, 'specs/components/([^/]+)/', 1) AS component_id,
-  sum(len(list_filter(
-    regexp_split_to_array(
-      trim(regexp_replace(content, '^---\n.*?\n---\n', '', 's')),
-      '\s+'
-    ),
-    lambda x: x != ''
-  ))) AS word_count
-FROM read_text('specs/components/*/**/*.md')
-GROUP BY 1;
-```
-
-Promoted here the same way, by the same rule, once `spec-linter`
-(`D42`) became this view's first *real* consumer rather than a second
-independently-written algorithm: `rule_size_caps` previously computed
-`component_doc_words` via its own Python loop over `corpus.docs`,
-right alongside `corpus-graph-builder`'s already-specced (but, until
-`D42`, never actually implemented) `component_size` view — the same
-"two parsers, one graph" risk `R-LINT-020`'s own rationale already
-warns about, just for word-counting instead of reference resolution.
-`D42` also fixed two latent bugs the original SQL carried, found only
-by actually running it against real DuckDB rather than taking the
-written SQL on faith: `read_text` has no `filename:=true` parameter
-(that's a `read_json`/`read_csv`-only keyword — `component_provenance`
-above uses it correctly; this view never needed it, since
-`regexp_extract` can pull the component id from the `filename` column
-`read_text` already returns unconditionally), and `trim()` without an
-explicit character set strips spaces only, not newlines — producing a
-spurious trailing empty token on every file's split that inflated
-every component's count by exactly one. Both fixes are already folded
-into the SQL above, verified word-for-word against `spec-linter`'s own
-prior Python computation before the switch (zero mismatches across
-all 21 components).
+None of these six had ever actually been run before `D42`/`D43` found
+and fixed three real bugs across them — `read_text`'s nonexistent
+`filename:=true` parameter (present in four of `nodes`'s seven
+branches, two of `edges`'s six, and `component_docs`), a missing
+DOTALL flag in `component_context`, and `trim()`'s space-only
+whitespace handling in `component_size`. All three were found by
+running the SQL against real DuckDB and checking results against
+independent counts, not by reading the written text — see
+`graph-query-engine`'s own `BOOTSTRAP.md` for the full account.
 
 ## Scope of adoption
 

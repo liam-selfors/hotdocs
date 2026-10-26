@@ -7,7 +7,7 @@ operation that goes through here — never an ordinary component spec edit.
 See `SPEC_GUIDELINES.md` §3.2.
 
 - **`pipeline-decomposition.md`** — the hotdocs pipeline tool's own
-  21-component decomposition and dependency graph. Documents a real,
+  22-component decomposition and dependency graph. Documents a real,
   deliberately-explained tension (`merge-orchestrator`'s fan-out exceeds
   D2's warn threshold) rather than silently patching it — D25 resolved
   the word-count half of that tension by extraction once it actually hit
@@ -20,11 +20,14 @@ See `SPEC_GUIDELINES.md` §3.2.
   criterion in the corpus, same governance weight as splitting a
   component (D2).
 - **`graph-query-engine.md`** — the DuckDB-based engine (`yaml` extension
-  for direct frontmatter queries, `duckpgq` for graph traversal) that
-  queries the corpus's `depends_on`/`realizes`/`uses_var`/
-  `depends_on_guarantees`/`covers` graph. Its "Query surface" section
-  names the shared views (`nodes`, `edges`, `component_docs`,
-  `component_provenance`) every adopter queries instead of writing its
-  own ingestion — `impact-analyzer`'s blast-radius computation was the
-  first adopter, since joined by `spec-linter`, `corpus-graph-builder`,
-  `capability-scenario-verifier`, and `review-packet-builder` (D24, D26, D27).
+  for direct frontmatter queries, `duckpgq` available for graph traversal)
+  that queries the corpus's `depends_on`/`realizes`/`uses_var`/
+  `depends_on_guarantees`/`covers` graph — the decomposition rationale and
+  adoption history only; the six shared views' exact definitions and
+  generated SQL now live in their own component, `graph-query-engine`
+  (`D44`), once the embedded SQL here turned out to be an unverified
+  implementation rather than documentation (`D42`/`D43` found three of
+  six views broken, never having actually been run). `impact-analyzer`'s
+  blast-radius computation was the first adopter, since joined by
+  `spec-linter`, `corpus-graph-builder`, `capability-scenario-verifier`,
+  and `review-packet-builder` (D24, D26, D27).

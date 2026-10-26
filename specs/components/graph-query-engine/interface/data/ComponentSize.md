@@ -1,0 +1,15 @@
+# `component_size` (view)
+
+```
+component_id  TEXT  -- bare component name (e.g. "cache-manager"), no comp- prefix
+word_count    BIGINT
+```
+
+One row per component (`R-GQE-006`) — `component_doc_words`
+(`R-LINT-012`) read from this view, not recomputed. `component_id`'s
+bare-name format (unlike every other view's `comp-`-prefixed ids) is
+inherited unchanged from `spec-linter`'s own existing lookup key
+(`D42`) — a pre-existing inconsistency, not introduced here, and not
+fixed here since doing so would also require changing `spec-linter`'s
+own internal `corpus.components` dict key format for no behavioral
+benefit.

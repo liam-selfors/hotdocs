@@ -21,19 +21,32 @@ Specced in full depth so far:
 - **`spec-linter`** — the first one, deliberately: a component whose entire
   acceptance criteria set is `kind: compiled` except one deliberate
   `llm-judge` exception (R-LINT-015), as a concrete test of D5's own
-  guidance. Also the only component with a real, working bootstrap
-  implementation (`gen/spec-linter/` + `verification/spec-linter/`) —
+  guidance. One of two components with a real, working bootstrap
+  implementation (`gen/spec-linter/` + `verification/spec-linter/`,
+  `graph-query-engine` since `D44` being the other) —
   hand-authored once, standing in for the `generator`/`criterion-compiler`
   this pipeline doesn't have yet. See `verification/spec-linter/BOOTSTRAP.md`.
   Grew well past its original scope as this corpus grew: its own graph-shaped
   rules (reference resolution, acyclicity, both traceability directions) now
-  run as queries over `graph-query-engine.md`'s shared `nodes`/`edges` views
-  (`R-LINT-020`/`021`, D24/D27) rather than bespoke traversal code, and it
+  actually run as queries over `graph-query-engine`'s shared `nodes`/`edges`
+  views (`R-LINT-020`/`021`, D24/D27, real as of `D44` — previously claimed
+  but never actually implemented) rather than bespoke traversal code, and it
   now also enforces `SPEC_GUIDELINES.md` §4's own decomposition-signal
   guidance as a real finding (`R-LINT-022`, D28) plus three additional
   size-cap dimensions (`R-LINT-023`, `guarantee_count`, `acceptance_count`,
   D29) — it is, by its own `R-LINT-022`, now one of the two components in
   this corpus actually crowding multiple size-cap dimensions at once.
+- **`graph-query-engine`** — all `kind: compiled`. Extracted from
+  `specs/architecture/graph-query-engine.md`'s own prose (`D44`) once that
+  document's embedded SQL stopped being documentation and started being an
+  unverified implementation nobody had ever run — `D42`/`D43` found three
+  of its six views broken. Generates the six shared views
+  (`nodes`/`edges`/`component_docs`/`component_context`/
+  `component_provenance`/`component_size`) as a real `gen/graph-query-engine/
+  views.sql` asset plus a thin loader, each view's requirement citing the
+  exact `SPEC_GUIDELINES.md` section it reads under as its data contract.
+  The second component with a real, hand-bootstrapped implementation,
+  the same honest exception `spec-linter` already established.
 - **`impact-analyzer`** — all `kind: compiled`. Pins down, as an executable
   rule for the first time, the interface-vs-internal-change distinction D2
   only ever stated as a sizing heuristic. Since D16, also computes a
@@ -202,15 +215,16 @@ Specced in full depth so far:
   structured `{category, message}` object, not a boolean, and every
   call writes a caller-agnostic record to `.hotdocs/calls/`.
 
-**All 21 architecture components are now specced in full depth** (15
+**All 22 architecture components are now specced in full depth** (15
 original + `test-author` + `spec-completeness-assistant`, both added
 when earlier design discussions surfaced real gaps nothing owned yet,
 + `capability-scenario-verifier` (D25) + `llm-endpoint` (D30) +
-`provenance-checker` (D39), each extracted from or added beneath
-`merge-orchestrator` once a real coupling, crowding, or correctness
+`provenance-checker` (D39) + `graph-query-engine` (D44), each extracted
+from or added beneath `merge-orchestrator`/`spec-linter`/the
+architecture docs once a real coupling, crowding, or correctness
 signal — not speculation — justified it). The real linter
 (`gen/spec-linter/`) validates the entire corpus clean: 0 failures,
-17 warnings — all `component_doc_words`/`requirement_count`/
+TBD warnings — all `component_doc_words`/`requirement_count`/
 `acceptance_count`/`generated_code_loc` near-misses, `merge-orchestrator`
 and `spec-linter`'s `R-LINT-022` crowding findings (D28), and four
 individual dense files caught by the per-file check (`R-LINT-023`,
