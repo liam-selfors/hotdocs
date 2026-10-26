@@ -12,14 +12,17 @@ import generator  # noqa: E402
 
 
 class MockBackend:
-    """Matches gen/llm-endpoint/llm_endpoint/'s own current backend
-    convention (D51 -- a self-hosted regeneration of llm-endpoint chose
-    a plain-callable shape, `backend(prompt, model, **params) ->
-    (text, error)`, instead of the original `.complete() -> BackendResult`
-    object). `generate()` passes `llm_backend` straight through to
-    `llm_endpoint.complete()`'s own `backend` parameter, so this mock
-    must match whatever that package currently expects, not a retired
-    convention."""
+    """Matches gen/llm-endpoint/llm_endpoint.py's own current backend
+    convention (D53 -- a self-hosted regeneration of llm-endpoint
+    returns a plain ModelResponse-shaped dict from `complete()`,
+    unwrapped from whatever the injected/resolved backend returned,
+    rather than D51's `(text, error)` tuple or the original's
+    `BackendResult` object). `generate()` passes `llm_backend` straight
+    through to `llm_endpoint.complete()`'s own `backend` parameter, and
+    `generator.py`'s own `_as_dict()` adapter tolerates whichever shape
+    comes back -- but an *injected* backend callable must itself return
+    something dict-shaped, since `complete()` does not transform a
+    caller-supplied backend's return value at all."""
 
     name = "mock"
 

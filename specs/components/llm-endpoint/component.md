@@ -117,3 +117,13 @@ open question.
   `.complete()`-method object) is not fixed by this spec and changed in
   the self-hosted version; `verification/llm-endpoint/`'s own test
   suite was updated to match.
+- `D52`/`D53`: `R-ENDPOINT-004` gained a concrete 300-second timeout
+  floor (found by a real timeout regenerating `generator`'s own, larger
+  bundle); `R-ENDPOINT-003` gained a structural requirement that every
+  `claude`-CLI dispatch pass `--tools ""` and `--bare` (found by a real
+  tool-access contamination during the timeout fix's own regeneration
+  attempt). A second self-hosted regeneration reflecting both landed as
+  `gen/llm-endpoint/llm_endpoint.py` — a third distinct `complete()`
+  return shape (a plain dict this time); `generator.py` gained an
+  `_as_dict()` adapter so it depends on the JSON contract rather than
+  any one version's Python shape.

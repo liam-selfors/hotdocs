@@ -23,3 +23,13 @@
   component's contract to every caller stays uniform regardless of which
   backend is configured. Not resolved generically here, because no
   second backend exists yet to resolve it against.
+
+  **The bound MUST be at least 300 seconds** (`D52`) — found by actually
+  running a real generation call, not assumed: a 120-second bound (the
+  self-hosted Anthropic backend's own first choice) was too short for
+  `generator`'s own, larger `SpecBundle` (three real dependencies), which
+  timed out with no candidate produced. A single prompt-completion call
+  for a realistically-sized component needs meaningfully more headroom
+  than a small one (`llm-endpoint`'s own, dependency-free bundle) does —
+  this is a floor other backends and future tuning MAY raise, never
+  lower.

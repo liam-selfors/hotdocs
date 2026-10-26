@@ -15,7 +15,7 @@ import cache_manager
 
 
 def test_ac_gen_001_cold_prompt_contains_exactly_cold_fields(repo_root):
-    backend = MockBackend([("-----BEGIN FILE: foo.py-----\nx = 1\n-----END FILE-----", None)])
+    backend = MockBackend([{"text": "-----BEGIN FILE: foo.py-----\nx = 1\n-----END FILE-----", "model_call_error": None}])
     bundle = FakeBundle()
     generate(bundle, "claude-sonnet-5", repo_root=repo_root, llm_backend=backend)
 
@@ -29,7 +29,7 @@ def test_ac_gen_001_cold_prompt_contains_exactly_cold_fields(repo_root):
 
 
 def test_ac_gen_002_hint_code_is_a_distinct_section(repo_root):
-    backend = MockBackend([("-----BEGIN FILE: foo.py-----\nx = 1\n-----END FILE-----", None)])
+    backend = MockBackend([{"text": "-----BEGIN FILE: foo.py-----\nx = 1\n-----END FILE-----", "model_call_error": None}])
     bundle = FakeBundle(hint_code={"foo.py": "x = 0"})
     generate(bundle, "claude-sonnet-5", repo_root=repo_root, llm_backend=backend)
 
@@ -39,14 +39,14 @@ def test_ac_gen_002_hint_code_is_a_distinct_section(repo_root):
 
 
 def test_ac_gen_003_prompt_version_matches_frozen_template(repo_root):
-    backend = MockBackend([("", None)])
+    backend = MockBackend([{"text": "", "model_call_error": None}])
     result = generate(FakeBundle(), "claude-sonnet-5", repo_root=repo_root, llm_backend=backend)
     assert result.prompt_version == PROMPT_VERSION == "v1"
 
 
 def test_ac_gen_004_model_identifier_passed_through_unchanged(repo_root):
-    backend_a = MockBackend([("", None)])
-    backend_b = MockBackend([("", None)])
+    backend_a = MockBackend([{"text": "", "model_call_error": None}])
+    backend_b = MockBackend([{"text": "", "model_call_error": None}])
     generate(FakeBundle(), "claude-sonnet-5", repo_root=repo_root, llm_backend=backend_a)
     generate(FakeBundle(spec_bundle_hash="sha256:other"), "claude-opus-5", repo_root=repo_root, llm_backend=backend_b)
     assert backend_a.calls[0][1] == "claude-sonnet-5"
@@ -80,7 +80,7 @@ def test_ac_gen_005_cache_hit_skips_the_model(repo_root):
 
 
 def test_ac_gen_006_successful_call_is_cached(repo_root):
-    backend = MockBackend([("-----BEGIN FILE: foo.py-----\nx = 1\n-----END FILE-----", None)])
+    backend = MockBackend([{"text": "-----BEGIN FILE: foo.py-----\nx = 1\n-----END FILE-----", "model_call_error": None}])
     bundle = FakeBundle()
     generate(bundle, "claude-sonnet-5", repo_root=repo_root, llm_backend=backend)
 
@@ -96,7 +96,7 @@ def test_ac_gen_006_successful_call_is_cached(repo_root):
 
 
 def test_ac_gen_008_model_call_error_surfaces_cleanly(repo_root):
-    backend = MockBackend([(None, {"category": "network", "message": "connection reset"})])
+    backend = MockBackend([{"text": None, "model_call_error": {"category": "network", "message": "connection reset"}}])
     result = generate(FakeBundle(), "claude-sonnet-5", repo_root=repo_root, llm_backend=backend)
     assert result.model_call_error == {"category": "network", "message": "connection reset"}
     assert result.files == {}
@@ -136,14 +136,14 @@ def test_ac_gen_009_sealed_and_override_refuse_before_any_call(repo_root):
 
 
 def test_ac_gen_012_timeout_classified_error_no_internal_retry(repo_root):
-    backend = MockBackend([(None, {"category": "timeout", "message": "bounded wait exceeded"})])
+    backend = MockBackend([{"text": None, "model_call_error": {"category": "timeout", "message": "bounded wait exceeded"}}])
     result = generate(FakeBundle(), "claude-sonnet-5", repo_root=repo_root, llm_backend=backend)
     assert result.model_call_error["category"] == "timeout"
     assert len(backend.calls) == 1
 
 
 def test_ac_gen_013_retry_feedback_is_bare_and_distinct(repo_root):
-    backend = MockBackend([("-----BEGIN FILE: foo.py-----\nx = 1\n-----END FILE-----", None)])
+    backend = MockBackend([{"text": "-----BEGIN FILE: foo.py-----\nx = 1\n-----END FILE-----", "model_call_error": None}])
     result = generate(FakeBundle(), "claude-sonnet-5", ["R-FOO-003"], repo_root=repo_root, llm_backend=backend)
 
     sent_prompt = backend.calls[0][0]

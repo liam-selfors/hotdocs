@@ -123,3 +123,9 @@ See `constraints.md`.
   parameters (`interface/library.md`), two real, pre-existing gaps.
   `cache-manager`'s `gate_type` registry gained `generator` as a sixth
   known type — also a real, pre-existing gap.
+- `D51`/`D53`: used in anger to regenerate `llm-endpoint` from its own
+  spec (`D51`, then again after `D52`/`D53`'s spec changes). Gained a
+  small `_as_dict()` adapter around `llm_endpoint.complete()`'s return
+  value — `interface/data/ModelResponse.md` only ever fixes a JSON
+  shape, not a Python type, and each self-hosted regeneration of
+  `llm-endpoint` has returned a different concrete one.

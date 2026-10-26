@@ -117,6 +117,22 @@ def _parse_files(text: str) -> dict[str, str]:
     return {m.group("path").strip(): m.group("content") for m in _FILE_BLOCK_RE.finditer(text)}
 
 
+def _as_dict(response: Any) -> dict:
+    """llm-endpoint's own interface spec only ever shows `ModelResponse`
+    as a JSON object shape (interface/data/ModelResponse.md) -- not a
+    specific Python type. Each self-hosted regeneration of llm-endpoint
+    has returned a different concrete shape for it (a dataclass with
+    `.to_dict()`, D51; a plain dict, D53) -- all equally spec-conformant,
+    since the spec never pinned one. This adapter lets generator depend
+    on the actual JSON contract rather than whichever shape the
+    currently-installed llm-endpoint happens to return."""
+    if isinstance(response, dict):
+        return response
+    if hasattr(response, "to_dict"):
+        return response.to_dict()
+    return vars(response)
+
+
 def _gate_inputs_hash(retry_feedback: list[str] | None) -> str:
     """R-GEN-005 -- MUST incorporate retry_feedback when present, so a
     blind call and an informed one never collide in the cache."""
@@ -182,18 +198,19 @@ def generate(
         )
 
     prompt = _build_prompt(bundle, retry_feedback)
-    response = llm_endpoint.complete(
+    raw_response = llm_endpoint.complete(
         prompt, model, backend=llm_backend, system_prompt=_SYSTEM_PROMPT.format(component_id=bundle.component_id),
     )
+    response = _as_dict(raw_response)
 
-    if response.model_call_error is not None:
+    if response.get("model_call_error") is not None:
         return GenerationResult(
             component_id=bundle.component_id, model=model, prompt_version=PROMPT_VERSION,
-            cache_hit=False, files={}, model_call_error=response.model_call_error,
+            cache_hit=False, files={}, model_call_error=response["model_call_error"],
             refused=None, retry_feedback=retry_feedback,
         )
 
-    files = _parse_files(response.text or "")
+    files = _parse_files(response.get("text") or "")
     result = GenerationResult(
         component_id=bundle.component_id, model=model, prompt_version=PROMPT_VERSION,
         cache_hit=False, files=files, model_call_error=None, refused=None,

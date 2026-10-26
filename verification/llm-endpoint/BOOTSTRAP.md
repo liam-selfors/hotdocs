@@ -1,5 +1,30 @@
 # Bootstrap Account: `llm-endpoint`
 
+**Superseded twice by real self-hosted regeneration (`D51`, then
+`D52`/`D53`).** The current `gen/llm-endpoint/llm_endpoint.py` is the
+*second* generated version — produced after `R-ENDPOINT-004` gained a
+concrete 300-second timeout floor (`D52`) and `R-ENDPOINT-003` gained a
+structural `--tools ""`/`--bare` isolation requirement (`D53`, found by
+a real contamination: an earlier regeneration attempt, dispatched
+without a properly-forwarded system prompt, used tool access to inspect
+this actual repository's live git state instead of treating its prompt
+as an isolated completion). Both fixes show up directly in this
+version's own code and comments — confirmed by reading it, not assumed.
+This is now a *third* distinct internal convention for `complete()`'s
+return shape across three generations (an object with `.to_dict()`,
+`D47`; a bare `(text, error)` tuple, `D51`; a plain dict, `D53`) — every
+one spec-conformant, since `interface/library.md` only ever fixed the
+public `complete(prompt, model, *, backend=None, **params)` signature,
+never a Python return type. `generator.py` (`gen/generator/generator.py`)
+was given a small `_as_dict()` adapter so it depends on the JSON
+contract rather than whichever shape the currently-installed
+`llm-endpoint` happens to return — the real, recurring cost of this
+kind of self-replacement, paid once properly rather than re-patched
+ad hoc on every future swap. See `specs/decisions/D52.md`/`D53.md` for
+the full account.
+
+---
+
 **Superseded by a real self-hosted regeneration (`D51`).** Everything
 below this notice describes the original hand-written bootstrap
 (`D47`) — kept as the historical record, since the discovery process
