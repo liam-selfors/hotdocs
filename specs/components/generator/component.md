@@ -116,3 +116,10 @@ See `constraints.md`.
 ## Change log
 
 - Initial draft.
+- `D50`: first real `gen/generator/` implementation — a hand-authored
+  bootstrap exception, structurally permanent like `llm-endpoint`:
+  nothing could cold-regenerate the component that does the
+  cold-regenerating. `generate()` gained `repo_root`/`llm_backend`
+  parameters (`interface/library.md`), two real, pre-existing gaps.
+  `cache-manager`'s `gate_type` registry gained `generator` as a sixth
+  known type — also a real, pre-existing gap.

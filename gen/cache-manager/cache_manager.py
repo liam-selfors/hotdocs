@@ -32,6 +32,7 @@ _CACHE_DIR_RELATIVE = Path(".hotdocs") / "cache"
 # LintReport under a license_scanner gate_version), not a full JSON-schema
 # validator nothing in this corpus needs yet (D18/D20).
 _REQUIRED_PAYLOAD_KEYS: dict[str, frozenset[str]] = {
+    "generator": frozenset({"component_id", "model", "prompt_version", "files"}),
     "compiler": frozenset({"outputs", "gate_version", "summary"}),
     "generated_test": frozenset({"component_id", "criterion_id", "model", "file"}),
     "llm_judge": frozenset({"result", "rationale"}),
