@@ -21,11 +21,13 @@ Specced in full depth so far:
 - **`spec-linter`** — the first one, deliberately: a component whose entire
   acceptance criteria set is `kind: compiled` except one deliberate
   `llm-judge` exception (R-LINT-015), as a concrete test of D5's own
-  guidance. One of two components with a real, working bootstrap
-  implementation (`gen/spec-linter/` + `verification/spec-linter/`,
-  `graph-query-engine` since `D44` being the other) —
-  hand-authored once, standing in for the `generator`/`criterion-compiler`
-  this pipeline doesn't have yet. See `verification/spec-linter/BOOTSTRAP.md`.
+  guidance. One of three components with a real implementation
+  (`gen/spec-linter/` + `verification/spec-linter/`) — this one and
+  `graph-query-engine` (`D44`) hand-authored once, standing in for the
+  `generator`/`criterion-compiler` this pipeline didn't have yet when they
+  were built; `corpus-graph-builder` (`D45`) is the first to actually be
+  produced by a real generation step instead, once a working stand-in for
+  that pipeline existed. See `verification/spec-linter/BOOTSTRAP.md`.
   Grew well past its original scope as this corpus grew: its own graph-shaped
   rules (reference resolution, acyclicity, both traceability directions) now
   actually run as queries over `graph-query-engine`'s shared `nodes`/`edges`
@@ -136,6 +138,20 @@ Specced in full depth so far:
 - **`corpus-graph-builder`** — all `kind: compiled`. The single source of
   the `corpus-graph.json` manifest D8's traceability matrix and D9's
   docs-site-renderer both read — neither recomputes any part of it.
+  **The first component in this corpus whose `gen/` code was actually
+  produced by a generation step** (`D45`), not hand-written: a real model
+  call, dispatched through a Claude Code subagent standing in for
+  `llm-endpoint` (no real one exists yet), constructed from exactly this
+  component's assembled `SpecBundle` and nothing else — the same
+  cold-mode purity `R-GEN-001` requires of the real `generator`. Verified
+  independently against this repo's real corpus (node/edge counts and all
+  three orphan rates cross-checked by hand) and against a synthetic
+  fixture covering every `AC-GRAPH-*` criterion a real corpus can't
+  currently exercise (its own orphan rates are all `0.0` today). One real
+  bug found this way: `component_provenance`'s `generated_at` field
+  auto-detects as `TIMESTAMP WITH TIME ZONE`, requiring `pytz` to
+  materialize — invisible until a real `.provenance.json` existed to
+  query (`R-GQE-005`).
 - **`docs-site-renderer`** — all `kind: compiled`. A pure function of
   `corpus-graph.json`; its output is deliberately never committed (D9).
 - **`merge-tracker`** — all `kind: compiled`. Writes one local-only,
@@ -224,9 +240,9 @@ from or added beneath `merge-orchestrator`/`spec-linter`/the
 architecture docs once a real coupling, crowding, or correctness
 signal — not speculation — justified it). The real linter
 (`gen/spec-linter/`) validates the entire corpus clean: 0 failures,
-19 warnings — all `component_doc_words`/`requirement_count`/
+20 warnings — all `component_doc_words`/`requirement_count`/
 `acceptance_count`/`generated_code_loc` near-misses, `merge-orchestrator`
-and `spec-linter`'s `R-LINT-022` crowding findings (D28), and four
+and `spec-linter`'s `R-LINT-022` crowding findings (D28), and five
 individual dense files caught by the per-file check (`R-LINT-023`,
 D29). None are hard-fail-severity; see `SPEC_GUIDELINES.md` §4 for what
 each warning dimension means and when (if ever) it calls for action.

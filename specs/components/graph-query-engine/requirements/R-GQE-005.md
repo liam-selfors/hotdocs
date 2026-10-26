@@ -28,3 +28,15 @@ FROM read_json('{repo_root}/verification/*/.provenance.json', filename:=true);
   `SELECT ... WHERE false` (`SPEC_GUIDELINES.md` §7's field list) when
   none exists, so a query naming any of this view's columns still
   succeeds, just returns zero rows.
+
+  **A real consumer dependency, not an optional extra** (`D45`): once a
+  real `.provenance.json` exists, `read_json`'s auto-detection types
+  `generated_at` as `TIMESTAMP WITH TIME ZONE` (it looks like an
+  ISO-8601 timestamp), and materializing that type requires the `pytz`
+  package. Any caller that actually queries this view against real
+  provenance data MUST have `pytz` installed — confirmed by hand that
+  pinning `generated_at`'s type via `read_json`'s `columns` parameter
+  isn't a clean alternative, since `columns` forces a closed schema
+  (the same intersection-only behavior `R-GQE-002`'s rewrite already
+  found), which would drop every other passthrough field this view's
+  `SELECT *` otherwise preserves.

@@ -11,6 +11,27 @@ Nothing here is normative. Nothing here is implemented.
 
 ---
 
+## The subagent-based model-call simulation isn't reproducible from a clean clone (`D45`)
+
+`.claude/agents/generator.md` (and its three siblings, `test-author`/
+`judge`/`spec-completeness-assistant`) are what actually produced
+`corpus-graph-builder`'s real `gen/` code — but `.claude/` is gitignored
+(session-local Claude Code configuration), so none of these four files
+are committed. Anyone cloning this repo fresh has the generated output
+but not the mechanism that produced it. Options not yet decided between:
+committing the definitions somewhere `.gitignore` doesn't reach (they
+aren't really "session-local" in the way settings.local.json is — they're
+a real, load-bearing part of how this methodology is currently being
+exercised); documenting their exact content in prose (e.g. an appendix
+to `verification/<component>/BOOTSTRAP.md`) even if the files themselves
+stay local; or accepting the gap as acceptable since a real
+`llm-endpoint`/`generator` would eventually replace this mechanism
+entirely anyway. Low urgency — nothing currently depends on re-running
+this reproducibly — but worth a real decision before a second component
+is generated this way, not three.
+
+---
+
 ## ~~A `context` property for component structure~~ — resolved, `D34`/`D35`
 
 Fully implemented: `component.md` gained a `Rationale` section so

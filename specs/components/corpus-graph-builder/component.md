@@ -3,7 +3,7 @@ id: comp-corpus-graph-builder
 title: Corpus Graph Builder
 status: draft
 owners: [pipeline-team]
-depends_on: [comp-spec-linter, comp-provenance-writer, comp-verifier-orchestrator]
+depends_on: [comp-graph-query-engine, comp-spec-linter, comp-provenance-writer, comp-verifier-orchestrator]
 realizes: [P-AMBIGUITY-GATE]
 sealed: false
 ---
@@ -70,3 +70,8 @@ None.
 - Initial draft.
 - `D39`: "cache hit" renamed "provenance hit" (`R-GRAPH-008`,
   `constraints.md`), following the corpus-wide rename.
+- `D45`: `depends_on` gained `comp-graph-query-engine` (R-GRAPH-009
+  already required building from its views; the dependency was never
+  declared — same drift `D44` found and fixed for `spec-linter`). First
+  real `gen/corpus-graph-builder/` implementation, produced by a real
+  generation step rather than hand-written.

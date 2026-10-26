@@ -12,6 +12,10 @@
 # observability data, never a gate input, never committed.
 /.hotdocs/
 
+# Claude Code session-local config (subagent definitions included) — not a
+# spec-driven artifact, per-machine/per-session tooling.
+/.claude/
+
 # Dependency + build dirs (per-prototype; refine later)
 node_modules/
 __pycache__/

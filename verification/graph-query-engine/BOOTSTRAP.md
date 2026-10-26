@@ -63,3 +63,20 @@ synthetic corpora rather than always using this repo's real one — D44):
   block-list style — and confirmed the rewrite produces the exact same
   323 edges on this repo's real corpus as the original did, before
   switching it in.
+
+**One more bug found only once a real `.provenance.json` existed**
+(`corpus-graph-builder`'s own bootstrap, D45): `component_provenance`'s
+`read_json(..., *)` auto-detects a field that looks like an ISO-8601
+timestamp (`generated_at`) as `TIMESTAMP WITH TIME ZONE` rather than
+leaving it `VARCHAR` — and materializing that type requires the `pytz`
+package, which is not one of this view's own dependencies and was never
+installed. This repo's real corpus has no real `.provenance.json` files
+yet, so nothing had ever hit this path before. Tried pinning
+`generated_at`'s type via `read_json`'s own `columns` parameter first —
+confirmed, by hand, that `columns` forces a closed schema (same
+intersection-only behavior `edges`' `read_yaml_frontmatter` rewrite
+already found, `D44`), which would drop every other passthrough field
+`component_provenance`'s own docstring promises. Accepted `pytz` as a
+real, declared runtime dependency instead (the simplest fix that doesn't
+fight DuckDB's type system for a two-package problem) — see
+`gen/corpus-graph-builder/pyproject.toml`.

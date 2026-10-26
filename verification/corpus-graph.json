@@ -1,0 +1,641 @@
+{
+  "aggregates": {
+    "orphan_capability_rate": 0.0,
+    "orphan_component_rate": 0.0,
+    "orphan_var_rate": 0.0
+  },
+  "edges": [
+    {
+      "from": "comp-cache-manager",
+      "kind": "realizes",
+      "to": "P-ZERO-EDIT"
+    },
+    {
+      "from": "comp-cache-manager",
+      "kind": "uses_var",
+      "to": "VAR-CACHE-STORE-URL"
+    },
+    {
+      "from": "comp-capability-scenario-verifier",
+      "kind": "realizes",
+      "to": "P-AMBIGUITY-GATE"
+    },
+    {
+      "from": "comp-capability-scenario-verifier",
+      "kind": "realizes",
+      "to": "P-ZERO-EDIT"
+    },
+    {
+      "from": "comp-capability-scenario-verifier",
+      "kind": "depends_on",
+      "to": "comp-criterion-compiler"
+    },
+    {
+      "from": "comp-capability-scenario-verifier",
+      "kind": "depends_on",
+      "to": "comp-test-author"
+    },
+    {
+      "from": "comp-corpus-graph-builder",
+      "kind": "realizes",
+      "to": "P-AMBIGUITY-GATE"
+    },
+    {
+      "from": "comp-corpus-graph-builder",
+      "kind": "depends_on",
+      "to": "comp-graph-query-engine"
+    },
+    {
+      "from": "comp-corpus-graph-builder",
+      "kind": "depends_on",
+      "to": "comp-provenance-writer"
+    },
+    {
+      "from": "comp-corpus-graph-builder",
+      "kind": "depends_on",
+      "to": "comp-spec-linter"
+    },
+    {
+      "from": "comp-corpus-graph-builder",
+      "kind": "depends_on",
+      "to": "comp-verifier-orchestrator"
+    },
+    {
+      "from": "comp-criterion-compiler",
+      "kind": "realizes",
+      "to": "P-AMBIGUITY-GATE"
+    },
+    {
+      "from": "comp-criterion-compiler",
+      "kind": "realizes",
+      "to": "P-ZERO-EDIT"
+    },
+    {
+      "from": "comp-docs-site-renderer",
+      "kind": "realizes",
+      "to": "P-AMBIGUITY-GATE"
+    },
+    {
+      "from": "comp-docs-site-renderer",
+      "kind": "depends_on",
+      "to": "comp-corpus-graph-builder"
+    },
+    {
+      "from": "comp-generator",
+      "kind": "realizes",
+      "to": "P-ZERO-EDIT"
+    },
+    {
+      "from": "comp-generator",
+      "kind": "depends_on",
+      "to": "comp-cache-manager"
+    },
+    {
+      "from": "comp-generator",
+      "kind": "depends_on",
+      "to": "comp-llm-endpoint"
+    },
+    {
+      "from": "comp-generator",
+      "kind": "depends_on",
+      "to": "comp-spec-bundle-assembler"
+    },
+    {
+      "from": "comp-graph-query-engine",
+      "kind": "realizes",
+      "to": "P-ZERO-EDIT"
+    },
+    {
+      "from": "comp-impact-analyzer",
+      "kind": "realizes",
+      "to": "P-ZERO-EDIT"
+    },
+    {
+      "from": "comp-impact-analyzer",
+      "kind": "depends_on",
+      "to": "comp-spec-linter"
+    },
+    {
+      "from": "comp-license-scanner",
+      "kind": "realizes",
+      "to": "P-COMPLIANCE-GATE"
+    },
+    {
+      "from": "comp-license-scanner",
+      "kind": "uses_var",
+      "to": "VAR-COMPLIANCE-WEBHOOK-URL"
+    },
+    {
+      "from": "comp-license-scanner",
+      "kind": "depends_on",
+      "to": "comp-cache-manager"
+    },
+    {
+      "from": "comp-llm-endpoint",
+      "kind": "realizes",
+      "to": "P-AMBIGUITY-GATE"
+    },
+    {
+      "from": "comp-llm-endpoint",
+      "kind": "realizes",
+      "to": "P-ZERO-EDIT"
+    },
+    {
+      "from": "comp-llm-endpoint",
+      "kind": "uses_var",
+      "to": "VAR-ANTHROPIC-API-KEY"
+    },
+    {
+      "from": "comp-merge-orchestrator",
+      "kind": "realizes",
+      "to": "P-AMBIGUITY-GATE"
+    },
+    {
+      "from": "comp-merge-orchestrator",
+      "kind": "realizes",
+      "to": "P-COMPLIANCE-GATE"
+    },
+    {
+      "from": "comp-merge-orchestrator",
+      "kind": "realizes",
+      "to": "P-MERGE-VISIBILITY"
+    },
+    {
+      "from": "comp-merge-orchestrator",
+      "kind": "realizes",
+      "to": "P-ZERO-EDIT"
+    },
+    {
+      "from": "comp-merge-orchestrator",
+      "kind": "depends_on",
+      "to": "comp-capability-scenario-verifier"
+    },
+    {
+      "from": "comp-merge-orchestrator",
+      "kind": "depends_on",
+      "to": "comp-corpus-graph-builder"
+    },
+    {
+      "from": "comp-merge-orchestrator",
+      "kind": "depends_on",
+      "to": "comp-generator"
+    },
+    {
+      "from": "comp-merge-orchestrator",
+      "kind": "depends_on",
+      "to": "comp-impact-analyzer"
+    },
+    {
+      "from": "comp-merge-orchestrator",
+      "kind": "depends_on",
+      "to": "comp-license-scanner"
+    },
+    {
+      "from": "comp-merge-orchestrator",
+      "kind": "depends_on",
+      "to": "comp-llm-endpoint"
+    },
+    {
+      "from": "comp-merge-orchestrator",
+      "kind": "depends_on",
+      "to": "comp-merge-tracker"
+    },
+    {
+      "from": "comp-merge-orchestrator",
+      "kind": "depends_on",
+      "to": "comp-provenance-checker"
+    },
+    {
+      "from": "comp-merge-orchestrator",
+      "kind": "depends_on",
+      "to": "comp-provenance-writer"
+    },
+    {
+      "from": "comp-merge-orchestrator",
+      "kind": "depends_on",
+      "to": "comp-review-packet-builder"
+    },
+    {
+      "from": "comp-merge-orchestrator",
+      "kind": "depends_on",
+      "to": "comp-secret-scanner"
+    },
+    {
+      "from": "comp-merge-orchestrator",
+      "kind": "depends_on",
+      "to": "comp-spec-bundle-assembler"
+    },
+    {
+      "from": "comp-merge-orchestrator",
+      "kind": "depends_on",
+      "to": "comp-spec-linter"
+    },
+    {
+      "from": "comp-merge-orchestrator",
+      "kind": "depends_on",
+      "to": "comp-test-author"
+    },
+    {
+      "from": "comp-merge-orchestrator",
+      "kind": "depends_on",
+      "to": "comp-verifier-orchestrator"
+    },
+    {
+      "from": "comp-merge-tracker",
+      "kind": "realizes",
+      "to": "P-MERGE-VISIBILITY"
+    },
+    {
+      "from": "comp-merge-tracker",
+      "kind": "depends_on",
+      "to": "comp-provenance-writer"
+    },
+    {
+      "from": "comp-merge-tracker-ui",
+      "kind": "realizes",
+      "to": "P-MERGE-VISIBILITY"
+    },
+    {
+      "from": "comp-merge-tracker-ui",
+      "kind": "depends_on",
+      "to": "comp-merge-tracker"
+    },
+    {
+      "from": "comp-provenance-checker",
+      "kind": "realizes",
+      "to": "P-ZERO-EDIT"
+    },
+    {
+      "from": "comp-provenance-checker",
+      "kind": "uses_var",
+      "to": "VAR-TRUST-JUDGE-PROVENANCE"
+    },
+    {
+      "from": "comp-provenance-writer",
+      "kind": "realizes",
+      "to": "P-COMPLIANCE-GATE"
+    },
+    {
+      "from": "comp-provenance-writer",
+      "kind": "realizes",
+      "to": "P-ZERO-EDIT"
+    },
+    {
+      "from": "comp-provenance-writer",
+      "kind": "depends_on",
+      "to": "comp-cache-manager"
+    },
+    {
+      "from": "comp-provenance-writer",
+      "kind": "depends_on",
+      "to": "comp-generator"
+    },
+    {
+      "from": "comp-provenance-writer",
+      "kind": "depends_on",
+      "to": "comp-license-scanner"
+    },
+    {
+      "from": "comp-provenance-writer",
+      "kind": "depends_on",
+      "to": "comp-secret-scanner"
+    },
+    {
+      "from": "comp-provenance-writer",
+      "kind": "depends_on",
+      "to": "comp-verifier-orchestrator"
+    },
+    {
+      "from": "comp-review-packet-builder",
+      "kind": "realizes",
+      "to": "P-COMPLIANCE-GATE"
+    },
+    {
+      "from": "comp-review-packet-builder",
+      "kind": "realizes",
+      "to": "P-ZERO-EDIT"
+    },
+    {
+      "from": "comp-review-packet-builder",
+      "kind": "depends_on",
+      "to": "comp-provenance-writer"
+    },
+    {
+      "from": "comp-secret-scanner",
+      "kind": "realizes",
+      "to": "P-COMPLIANCE-GATE"
+    },
+    {
+      "from": "comp-secret-scanner",
+      "kind": "uses_var",
+      "to": "VAR-COMPLIANCE-WEBHOOK-URL"
+    },
+    {
+      "from": "comp-secret-scanner",
+      "kind": "depends_on",
+      "to": "comp-cache-manager"
+    },
+    {
+      "from": "comp-spec-bundle-assembler",
+      "kind": "realizes",
+      "to": "P-ZERO-EDIT"
+    },
+    {
+      "from": "comp-spec-bundle-assembler",
+      "kind": "depends_on",
+      "to": "comp-spec-linter"
+    },
+    {
+      "from": "comp-spec-completeness-assistant",
+      "kind": "realizes",
+      "to": "P-AMBIGUITY-GATE"
+    },
+    {
+      "from": "comp-spec-completeness-assistant",
+      "kind": "depends_on",
+      "to": "comp-generator"
+    },
+    {
+      "from": "comp-spec-completeness-assistant",
+      "kind": "depends_on",
+      "to": "comp-impact-analyzer"
+    },
+    {
+      "from": "comp-spec-completeness-assistant",
+      "kind": "depends_on",
+      "to": "comp-llm-endpoint"
+    },
+    {
+      "from": "comp-spec-completeness-assistant",
+      "kind": "depends_on",
+      "to": "comp-spec-bundle-assembler"
+    },
+    {
+      "from": "comp-spec-completeness-assistant",
+      "kind": "depends_on",
+      "to": "comp-spec-linter"
+    },
+    {
+      "from": "comp-spec-linter",
+      "kind": "realizes",
+      "to": "P-AMBIGUITY-GATE"
+    },
+    {
+      "from": "comp-spec-linter",
+      "kind": "depends_on",
+      "to": "comp-graph-query-engine"
+    },
+    {
+      "from": "comp-test-author",
+      "kind": "realizes",
+      "to": "P-AMBIGUITY-GATE"
+    },
+    {
+      "from": "comp-test-author",
+      "kind": "realizes",
+      "to": "P-ZERO-EDIT"
+    },
+    {
+      "from": "comp-test-author",
+      "kind": "depends_on",
+      "to": "comp-cache-manager"
+    },
+    {
+      "from": "comp-test-author",
+      "kind": "depends_on",
+      "to": "comp-llm-endpoint"
+    },
+    {
+      "from": "comp-test-author",
+      "kind": "depends_on",
+      "to": "comp-spec-bundle-assembler"
+    },
+    {
+      "from": "comp-verifier-orchestrator",
+      "kind": "realizes",
+      "to": "P-AMBIGUITY-GATE"
+    },
+    {
+      "from": "comp-verifier-orchestrator",
+      "kind": "realizes",
+      "to": "P-ZERO-EDIT"
+    },
+    {
+      "from": "comp-verifier-orchestrator",
+      "kind": "depends_on",
+      "to": "comp-criterion-compiler"
+    },
+    {
+      "from": "comp-verifier-orchestrator",
+      "kind": "depends_on",
+      "to": "comp-generator"
+    },
+    {
+      "from": "comp-verifier-orchestrator",
+      "kind": "depends_on",
+      "to": "comp-test-author"
+    }
+  ],
+  "nodes": {
+    "P-AMBIGUITY-GATE": {
+      "type": "capability"
+    },
+    "P-COMPLIANCE-GATE": {
+      "type": "capability"
+    },
+    "P-MERGE-VISIBILITY": {
+      "type": "capability"
+    },
+    "P-ZERO-EDIT": {
+      "type": "capability"
+    },
+    "VAR-ANTHROPIC-API-KEY": {
+      "type": "var"
+    },
+    "VAR-CACHE-STORE-URL": {
+      "type": "var"
+    },
+    "VAR-COMPLIANCE-WEBHOOK-URL": {
+      "type": "var"
+    },
+    "VAR-TRUST-JUDGE-PROVENANCE": {
+      "type": "var"
+    },
+    "comp-cache-manager": {
+      "pinned_overrides": [],
+      "provenance": {},
+      "sealed": false,
+      "size_status": "ok",
+      "type": "component",
+      "verification": null
+    },
+    "comp-capability-scenario-verifier": {
+      "pinned_overrides": [],
+      "provenance": {},
+      "sealed": false,
+      "size_status": "ok",
+      "type": "component",
+      "verification": null
+    },
+    "comp-corpus-graph-builder": {
+      "pinned_overrides": [],
+      "provenance": {},
+      "sealed": false,
+      "size_status": "ok",
+      "type": "component",
+      "verification": null
+    },
+    "comp-criterion-compiler": {
+      "pinned_overrides": [],
+      "provenance": {},
+      "sealed": true,
+      "size_status": "ok",
+      "type": "component",
+      "verification": null
+    },
+    "comp-docs-site-renderer": {
+      "pinned_overrides": [],
+      "provenance": {},
+      "sealed": false,
+      "size_status": "ok",
+      "type": "component",
+      "verification": null
+    },
+    "comp-generator": {
+      "pinned_overrides": [],
+      "provenance": {},
+      "sealed": false,
+      "size_status": "ok",
+      "type": "component",
+      "verification": null
+    },
+    "comp-graph-query-engine": {
+      "pinned_overrides": [],
+      "provenance": {},
+      "sealed": false,
+      "size_status": "ok",
+      "type": "component",
+      "verification": null
+    },
+    "comp-impact-analyzer": {
+      "pinned_overrides": [],
+      "provenance": {},
+      "sealed": false,
+      "size_status": "ok",
+      "type": "component",
+      "verification": null
+    },
+    "comp-license-scanner": {
+      "pinned_overrides": [],
+      "provenance": {},
+      "sealed": false,
+      "size_status": "ok",
+      "type": "component",
+      "verification": null
+    },
+    "comp-llm-endpoint": {
+      "pinned_overrides": [],
+      "provenance": {},
+      "sealed": false,
+      "size_status": "ok",
+      "type": "component",
+      "verification": null
+    },
+    "comp-merge-orchestrator": {
+      "pinned_overrides": [],
+      "provenance": {},
+      "sealed": false,
+      "size_status": "ok",
+      "type": "component",
+      "verification": null
+    },
+    "comp-merge-tracker": {
+      "pinned_overrides": [],
+      "provenance": {},
+      "sealed": false,
+      "size_status": "ok",
+      "type": "component",
+      "verification": null
+    },
+    "comp-merge-tracker-ui": {
+      "pinned_overrides": [],
+      "provenance": {},
+      "sealed": false,
+      "size_status": "ok",
+      "type": "component",
+      "verification": null
+    },
+    "comp-provenance-checker": {
+      "pinned_overrides": [],
+      "provenance": {},
+      "sealed": false,
+      "size_status": "ok",
+      "type": "component",
+      "verification": null
+    },
+    "comp-provenance-writer": {
+      "pinned_overrides": [],
+      "provenance": {},
+      "sealed": false,
+      "size_status": "ok",
+      "type": "component",
+      "verification": null
+    },
+    "comp-review-packet-builder": {
+      "pinned_overrides": [],
+      "provenance": {},
+      "sealed": false,
+      "size_status": "ok",
+      "type": "component",
+      "verification": null
+    },
+    "comp-secret-scanner": {
+      "pinned_overrides": [],
+      "provenance": {},
+      "sealed": false,
+      "size_status": "ok",
+      "type": "component",
+      "verification": null
+    },
+    "comp-spec-bundle-assembler": {
+      "pinned_overrides": [],
+      "provenance": {},
+      "sealed": false,
+      "size_status": "ok",
+      "type": "component",
+      "verification": null
+    },
+    "comp-spec-completeness-assistant": {
+      "pinned_overrides": [],
+      "provenance": {},
+      "sealed": false,
+      "size_status": "ok",
+      "type": "component",
+      "verification": null
+    },
+    "comp-spec-linter": {
+      "pinned_overrides": [],
+      "provenance": {},
+      "sealed": false,
+      "size_status": "ok",
+      "type": "component",
+      "verification": null
+    },
+    "comp-test-author": {
+      "pinned_overrides": [],
+      "provenance": {},
+      "sealed": false,
+      "size_status": "ok",
+      "type": "component",
+      "verification": null
+    },
+    "comp-verifier-orchestrator": {
+      "pinned_overrides": [],
+      "provenance": {},
+      "sealed": false,
+      "size_status": "ok",
+      "type": "component",
+      "verification": null
+    }
+  }
+}
