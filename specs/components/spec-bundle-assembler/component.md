@@ -3,7 +3,7 @@ id: comp-spec-bundle-assembler
 title: Spec Bundle Assembler
 status: draft
 owners: [pipeline-team]
-depends_on: [comp-spec-linter]
+depends_on: [comp-graph-query-engine, comp-spec-linter]
 realizes: [P-ZERO-EDIT]
 model_pin: claude-sonnet-5
 sealed: false
@@ -82,3 +82,8 @@ See `constraints.md`.
 ## Change log
 
 - Initial draft.
+- `D49`: first real `gen/spec-bundle-assembler/` implementation — a
+  hand-authored bootstrap exception, temporary like `cache-manager`.
+  `depends_on` gained `comp-graph-query-engine` (R-ASSEMBLE-010 already
+  required reading dependency `Purpose` text via its `component_context`
+  view; the dependency was never declared).
