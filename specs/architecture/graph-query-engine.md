@@ -84,12 +84,12 @@ recursive CTEs — more verbose, not infeasible.
 
 Rather than let every adopting component write its own
 `read_yaml_frontmatter()`/`read_text()`/`read_json()`/`UNNEST` calls,
-this document names five views as the one shared surface all of them
+this document names six views as the one shared surface all of them
 query. A component MAY define additional views of its own for data no
-other component needs (see `corpus-graph-builder`'s `component_size`
-below) but MUST NOT redefine these five — and if a second component ever
-needs one of its own local views, that is the signal to promote it here
-instead, same as `component_provenance`'s own history.
+other component needs, but MUST NOT redefine these six — and if a
+second component ever needs one of its own local views, that is the
+signal to promote it here instead, same as `component_provenance` and
+`component_size`'s own history.
 
 **`nodes`** — one row per spec id in the corpus, across seven kinds.
 Components, product capabilities, and vars come from their own
@@ -258,6 +258,46 @@ per component (`verification_results`, `compliance_flags`,
 second consumer appeared, for the same reason `nodes`/`edges` exist as
 one shared definition instead of two independently-written ones.
 
+**`component_size`** — one row per component, the word count
+`R-LINT-012`'s `component_doc_words` dimension measures:
+
+```sql
+CREATE VIEW component_size AS
+SELECT
+  'comp-' || regexp_extract(filename, 'specs/components/([^/]+)/', 1) AS component_id,
+  sum(len(list_filter(
+    regexp_split_to_array(
+      trim(regexp_replace(content, '^---\n.*?\n---\n', '', 's')),
+      '\s+'
+    ),
+    lambda x: x != ''
+  ))) AS word_count
+FROM read_text('specs/components/*/**/*.md')
+GROUP BY 1;
+```
+
+Promoted here the same way, by the same rule, once `spec-linter`
+(`D42`) became this view's first *real* consumer rather than a second
+independently-written algorithm: `rule_size_caps` previously computed
+`component_doc_words` via its own Python loop over `corpus.docs`,
+right alongside `corpus-graph-builder`'s already-specced (but, until
+`D42`, never actually implemented) `component_size` view — the same
+"two parsers, one graph" risk `R-LINT-020`'s own rationale already
+warns about, just for word-counting instead of reference resolution.
+`D42` also fixed two latent bugs the original SQL carried, found only
+by actually running it against real DuckDB rather than taking the
+written SQL on faith: `read_text` has no `filename:=true` parameter
+(that's a `read_json`/`read_csv`-only keyword — `component_provenance`
+above uses it correctly; this view never needed it, since
+`regexp_extract` can pull the component id from the `filename` column
+`read_text` already returns unconditionally), and `trim()` without an
+explicit character set strips spaces only, not newlines — producing a
+spurious trailing empty token on every file's split that inflated
+every component's count by exactly one. Both fixes are already folded
+into the SQL above, verified word-for-word against `spec-linter`'s own
+prior Python computation before the switch (zero mismatches across
+all 21 components).
+
 ## Scope of adoption
 
 `impact-analyzer`'s blast-radius computation was the first component
@@ -280,12 +320,20 @@ pointing back to this document, exactly as `R-IMPACT-009` does:
   (R-GRAPH-001/002) is `nodes`/`edges` directly; its per-node annotations
   (R-GRAPH-003: verification status, provenance summary, size-vs-cap
   status, sealed/override) and corpus-wide orphan rates (R-GRAPH-004/005)
-  are joins and aggregates against `nodes`/`edges`/`component_provenance`
-  plus `component_size`, the one view still scoped to this component
-  alone (see `R-GRAPH-009`). Its JSON-writing role is unchanged
-  (R-GRAPH-006/008: `verification/corpus-graph.json` is still a
-  committed, deterministic artifact — only the *construction* step, not
-  the output format, moves onto this engine).
+  are joins and aggregates against `nodes`/`edges`/`component_provenance`/
+  `component_size` — all four now shared here, none scoped to this
+  component alone (`D42` promoted the last one). Its JSON-writing role
+  is unchanged (R-GRAPH-006/008: `verification/corpus-graph.json` is
+  still a committed, deterministic artifact — only the *construction*
+  step, not the output format, moves onto this engine).
+- **`spec-linter`'s size-cap rule** (`rule_size_caps`/`R-LINT-012`,
+  `D42`) — `component_doc_words` is this view's `word_count`, queried
+  directly rather than recomputed by a second, independently-written
+  Python loop. The one adopter that actually runs a query against this
+  engine via a real `duckdb` dependency, rather than reimplementing
+  equivalent logic natively in Python the way `R-LINT-003`/`004`/`008`/
+  `009`/`018`'s bootstrap implementation still does today (flagged in
+  `notes/backlog.md`, not yet resolved).
 - **`capability-scenario-verifier`'s capability-intersection lookup**
   (`R-SCENARIO-002`) — "every product capability whose `realizes`-set
   intersects the blast radius" is a single query against `edges`, not a

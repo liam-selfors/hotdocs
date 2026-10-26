@@ -76,8 +76,8 @@ word/LOC counting scope, interface-surface-element counting)._
 ## Change log
 
 - Initial draft.
-- `D40`: `spec_bundle_words` renamed `component_doc_words`
-  (`R-LINT-012`) — collided with the narrower `SpecBundle` type. Added
-  `R-LINT-026`/`027`, validating `D<N>` citations and quoted-section
-  pointers; trimmed `R-LINT-020`/`021`'s now-duplicate rationale into
-  pointers at `graph-query-engine.md` instead.
+- `D40`–`D42`: `spec_bundle_words` renamed `component_doc_words`;
+  added `R-LINT-026`/`027` (`D<N>` and section-pointer validation);
+  trimmed `R-LINT-020`/`021`'s duplicate rationale; `component_doc_words`
+  now queries the shared `component_size` view (first real dependency,
+  `duckdb`) instead of its own algorithm.

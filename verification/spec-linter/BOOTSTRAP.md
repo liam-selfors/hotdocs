@@ -10,11 +10,16 @@ turned `acceptance.md`'s Given/When/Then blocks into
 stand-ins are one-time bootstrap exceptions, not a new pattern — flagged
 explicitly here rather than left implicit.
 
-**Language:** Python 3, no external dependencies (frontmatter is hand-parsed
-rather than using PyYAML). A real generator-produced implementation would
-likely reach for PyYAML; the zero-dependency choice here is specifically to
-keep this bootstrap trivially runnable. Tests use `pytest`, installed into an
-isolated venv for the run, not added to the repo.
+**Language:** Python 3, originally zero external dependencies (frontmatter
+is hand-parsed rather than using PyYAML) — specifically to keep this
+bootstrap trivially runnable. One dependency was added since: `duckdb`
+(`D42`), once `component_doc_words` moved from its own Python algorithm
+onto the shared `component_size` view `specs/architecture/
+graph-query-engine.md` already specified — a real external dependency is
+the honest cost of actually running a shared SQL definition rather than
+reimplementing its logic natively a second time, and worth paying for
+exactly that reason. Tests use `pytest`, installed into an isolated venv
+for the run, not added to the repo.
 
 ## The three pre-existing open questions, resolved
 

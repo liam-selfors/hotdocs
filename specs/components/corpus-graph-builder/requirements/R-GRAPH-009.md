@@ -8,30 +8,13 @@
 
   R-GRAPH-003's per-node annotations and R-GRAPH-004/005's corpus-wide
   orphan rates MUST be computed as joins and aggregates against
-  `nodes`/`edges`/`component_provenance` (all three named in
-  `specs/architecture/graph-query-engine.md`'s "Query surface" section —
-  `component_provenance` is shared with `review-packet-builder`,
-  R-PACKET-011, D26) plus one view
-  scoped to this component alone (no other component needs size data
-  joined onto the graph, so this one does not belong in the shared
-  architecture doc):
-
-  - **`component_size`** — one row per component, the `component_doc_words`
-    count R-LINT-012/D2 already defines (`D40`; component.md + requirements/ +
-    interface/ (+ data/, + guarantees/) + acceptance/ + constraints.md,
-    as authored), computed the same way `spec_linter.py`'s
-    `rule_size_caps` already does (`len(body.split())` summed per file)
-    — this view MUST reuse that exact counting method, not introduce a
-    second one that could disagree with the one `spec-linter` enforces:
-
-    ```sql
-    CREATE VIEW component_size AS
-    SELECT
-      'comp-' || regexp_extract(filename, 'specs/components/([^/]+)/', 1) AS component_id,
-      sum(len(regexp_split_to_array(trim(content), '\s+'))) AS word_count
-    FROM read_text('specs/components/*/**/*.md', filename:=true)
-    GROUP BY 1;
-    ```
+  `nodes`/`edges`/`component_provenance`/`component_size`, all four
+  named in `specs/architecture/graph-query-engine.md`'s "Query surface"
+  section — `component_provenance` is shared with `review-packet-builder`
+  (R-PACKET-011, D26), `component_size` with `spec-linter`'s own
+  `rule_size_caps` (`R-LINT-012`, `D42`). Neither is redefined here;
+  this component MUST query the shared view, not maintain its own copy
+  of either.
 
   This is an implementation requirement, not a behavioral one —
   R-GRAPH-001 through 008 are unaffected; R-GRAPH-006/008 (the committed,

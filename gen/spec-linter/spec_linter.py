@@ -9,7 +9,7 @@ from. See `.provenance.json` alongside this file and
 `verification/spec-linter/BOOTSTRAP.md` for the honest account of what was
 bootstrapped, what was ambiguous, and what was decided unilaterally.
 
-Implements all twenty-five R-LINT-* requirements from
+Implements all twenty-seven R-LINT-* requirements from
 `specs/components/spec-linter/requirements/`, matching the CLI and
 `LintReport` contract in `specs/components/spec-linter/interface/` exactly.
 
@@ -43,6 +43,8 @@ import re
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
+
+import duckdb
 
 # ---------------------------------------------------------------------------
 # RFC 2119 keyword set.
@@ -886,11 +888,38 @@ SIZE_CAPS = {
 PER_FILE_WORD_CAP = (250, 500)
 
 
+def _component_doc_words(repo_root: Path) -> dict[str, int]:
+    """component_doc_words via the shared `component_size` DuckDB view
+    (specs/architecture/graph-query-engine.md's "Query surface" section,
+    D41) — the single source of truth for this count, not a second,
+    independently-written Python algorithm. `corpus-graph-builder`
+    (R-GRAPH-009) queries this exact same view for the same number."""
+    con = duckdb.connect()
+    rows = con.execute(
+        r"""
+        SELECT
+          regexp_extract(filename, 'specs/components/([^/]+)/', 1) AS component,
+          sum(len(list_filter(
+            regexp_split_to_array(
+              trim(regexp_replace(content, '^---\n.*?\n---\n', '', 's')),
+              '\s+'
+            ),
+            lambda x: x != ''
+          ))) AS word_count
+        FROM read_text(?)
+        GROUP BY 1
+        """,
+        [str(repo_root / "specs" / "components" / "*" / "**" / "*.md")],
+    ).fetchall()
+    return {name: count for name, count in rows}
+
+
 def _size_measurements(corpus: Corpus) -> dict[str, dict[str, int]]:
     """Shared by R-LINT-012 (per-dimension caps) and R-LINT-022
     (multi-dimension crowding, SPEC_GUIDELINES.md §4) so both rules see
     the exact same numbers — two independently-computed measurement passes
     could drift apart silently otherwise."""
+    doc_words = _component_doc_words(corpus.repo_root)
     fan_in: dict[str, int] = {c: 0 for c in corpus.components}
     for comp in corpus.components.values():
         if not comp.root:
@@ -904,16 +933,7 @@ def _size_measurements(corpus: Corpus) -> dict[str, dict[str, int]]:
     for name, comp in corpus.components.items():
         if not comp.root:
             continue
-        all_docs = (
-            [comp.root] + list(comp.requirements.values())
-            + ([comp.interface_cli] if comp.interface_cli else [])
-            + ([comp.interface_library] if comp.interface_library else [])
-            + list(comp.interface_data.values())
-            + list(comp.interface_guarantees.values())
-            + list(comp.acceptance.values())
-            + ([comp.constraints] if comp.constraints else [])
-        )
-        word_count = sum(len(d.body.split()) for d in all_docs)
+        word_count = doc_words.get(name, 0)
         req_count = len(comp.requirements)
         gen_dir = corpus.repo_root / "gen" / name
         loc = 0
