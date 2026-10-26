@@ -61,25 +61,22 @@ judgment call actually flagged one. See `specs/decisions/D38.md`.
 
 ---
 
-## Three gaps found while settling `component_size` on DuckDB (`D42`), not yet acted on
+## Three gaps found while settling `component_size` on DuckDB (`D42`)
 
-**`graph-query-engine.md`'s `nodes`/`edges`/`component_docs` views
-likely do not actually run.** Confirmed for `nodes` and the `read_text`
-half of `component_docs` by actually executing the SQL against real
-DuckDB (2.0.0): `read_text(path, filename:=true)` errors —
-`filename:=true` is a `read_json`/`read_csv` keyword, not `read_text`'s,
-which already returns a `filename` column unconditionally. Nine of
-`graph-query-engine.md`'s fourteen `filename:=true` occurrences call
-`read_text`; the `nodes` view alone uses it in three of its seven
-branches (guarantee/requirement/acceptance node kinds) plus the
-`capability_scenario` branch, so the view as specified cannot be
-created at all. The other four occurrences (`read_json`, confirmed
-fine) and four more (`read_yaml_frontmatter`, an extension function
-not verified here — not installed) weren't checked. This was never
-caught because nothing has ever actually executed any of this SQL —
-see the next item. High confidence on the `read_text` calls
-specifically (empirically confirmed, same bug `component_size` had);
-unverified on `read_yaml_frontmatter`.
+~~**`graph-query-engine.md`'s `nodes`/`edges`/`component_docs` views
+likely do not actually run.**~~ **Resolved by `D43`.** Confirmed and
+fixed: `read_text(path, filename:=true)` errors (same bug
+`component_size` had), present in `nodes` (four of seven branches),
+`edges` (two branches), and `component_docs`. `read_yaml_frontmatter`'s
+own `filename:=true` is a real, working parameter — only `read_text`
+lacked it. A fourth, different bug surfaced in `component_context`
+while fixing these: its `regexp_extract` needed the `'s'` (DOTALL) flag
+to span a multi-line `Purpose` section, silently extracting an empty
+string without it rather than erroring — the equivalent Python
+(`_extract_purpose`) already had this right. All four views now run
+against real DuckDB (`yaml`/`duckpgq` extensions both install and load
+fine here) with every count cross-checked against an independent
+file-system count. See `specs/decisions/D43.md`.
 
 **`R-LINT-003`/`004`/`008`/`009`/`018`/`020`/`021` claim an
 implementation that doesn't exist.** All seven state (`R-LINT-020`/

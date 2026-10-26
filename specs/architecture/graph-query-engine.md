@@ -117,21 +117,30 @@ UNION ALL
 SELECT
   regexp_extract(filename, '(G-[A-Za-z0-9-]+)\.md$', 1), NULL, NULL, 'guarantee',
   'comp-' || regexp_extract(filename, 'specs/components/([^/]+)/interface/guarantees/', 1)
-FROM read_text('specs/components/*/interface/guarantees/*.md', filename:=true)
+FROM read_text('specs/components/*/interface/guarantees/*.md')
 UNION ALL
 SELECT
   regexp_extract(filename, '(R-[A-Za-z0-9-]+)\.md$', 1), NULL, NULL, 'requirement',
   'comp-' || regexp_extract(filename, 'specs/components/([^/]+)/requirements/', 1)
-FROM read_text('specs/components/*/requirements/*.md', filename:=true)
+FROM read_text('specs/components/*/requirements/*.md')
 UNION ALL
 SELECT
   regexp_extract(filename, '(AC-[A-Za-z0-9-]+)\.md$', 1), NULL, NULL, 'acceptance',
   'comp-' || regexp_extract(filename, 'specs/components/([^/]+)/acceptance/', 1)
-FROM read_text('specs/components/*/acceptance/*.md', filename:=true)
+FROM read_text('specs/components/*/acceptance/*.md')
 UNION ALL
 SELECT UNNEST(regexp_extract_all(content, '### (CS-[A-Za-z0-9-]+)', 1)), NULL, NULL, 'capability_scenario', NULL
-FROM read_text('specs/product/*.md', filename:=true);
+FROM read_text('specs/product/*.md');
 ```
+
+`read_text` already returns `filename` unconditionally — unlike
+`read_yaml_frontmatter`, it has no `filename:=true` parameter and
+errors if given one (`D43`; confirmed by actually running this view,
+which could not be created as originally written). Once fixed,
+verified against this repo's real corpus: 21 `component`, 4
+`capability`, 4 `var`, 1 `guarantee`, 201 `requirement`, 227
+`acceptance`, 4 `capability_scenario` — each count cross-checked
+against an independent file-system count, exact match.
 
 The first four kinds (`component`/`capability`/`var`/`guarantee`) fix a
 gap `R-IMPACT-009`'s original wording left open: that wording named only
@@ -170,25 +179,26 @@ UNION ALL
 SELECT
   regexp_extract(filename, '(AC-[A-Za-z0-9-]+)\.md$', 1),
   regexp_extract(content, 'Covers:\s*(\S+)', 1), 'covers'
-FROM read_text('specs/components/*/acceptance/*.md', filename:=true)
+FROM read_text('specs/components/*/acceptance/*.md')
 UNION ALL
 SELECT m['cs_id'], m['target'], 'covers'
 FROM (
   SELECT UNNEST(regexp_extract_all(
     content, '### (CS-[A-Za-z0-9-]+)\s*\nCovers:\s*(\S+)', ['cs_id', 'target']
   )) AS m
-  FROM read_text('specs/product/*.md', filename:=true)
+  FROM read_text('specs/product/*.md')
 );
 ```
 
-**The last `edges` branch is the one genuinely harder piece of this
-corpus's DuckDB adoption** — pairing a capability scenario's heading with
-its own `Covers:` line in one pass, rather than the clean "one row per
-file" shape every other view here has. Flagged plainly rather than
-glossed over: the exact capture-group extraction function/signature
-above is illustrative of intent, same as every other SQL sketch in this
-document, but implementing this branch is where that gap between
-sketch and working query is most likely to need real adjustment.
+**The last `edges` branch turned out to be the one piece of this
+corpus's DuckDB adoption that worked on the first try** (`D43`) —
+flagged in an earlier draft of this section as the part most likely to
+need real adjustment once actually implemented; running it against
+real DuckDB found the opposite was true, and the two `read_text`
+calls above it were the ones that needed fixing instead. Verified
+against this repo's real corpus: 231 `covers` edges total (227 from
+`acceptance/` files, 4 from capability scenarios), matching an
+independent file-count check exactly.
 
 **`component_docs`** — one row per component, frontmatter fields joined
 with the file's full raw text (frontmatter included), for anything that
@@ -198,7 +208,7 @@ needs structure and prose together rather than just the graph shape:
 CREATE VIEW component_docs AS
 SELECT fm.*, t.content AS body
 FROM read_yaml_frontmatter('specs/components/*/component.md', filename:=true) fm
-JOIN read_text('specs/components/*/component.md', filename:=true) t USING (filename);
+JOIN read_text('specs/components/*/component.md') t USING (filename);
 ```
 
 `component_docs` is the data layer, not the rendered output — it answers
@@ -218,9 +228,18 @@ section's text, extracted from `component_docs` the same way
 CREATE VIEW component_context AS
 SELECT
   id AS component_id,
-  regexp_extract(body, '##\s*Purpose\s*\n(.*?)\n##', 1) AS purpose
+  regexp_extract(body, '##\s*Purpose\s*\n(.*?)\n##', 1, 's') AS purpose
 FROM component_docs;
 ```
+
+The `'s'` flag (`D43`) is load-bearing, not stylistic: without it,
+`.` does not match newlines, so a multi-line `Purpose` section (nearly
+all of them) silently extracts to an empty string instead of failing
+loudly — found only by actually running this view and checking its
+output, not by reading the SQL. The equivalent Python
+(`spec_linter.py`'s `_extract_purpose`) already passes `re.DOTALL`;
+this view's SQL had drifted from that without anyone noticing, since
+nothing had ever executed it.
 
 Deliberately narrower than `component_docs` — this is the one slice of
 a component's own file that's safe to hand to a *dependent*
