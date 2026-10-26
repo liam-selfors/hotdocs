@@ -16,13 +16,14 @@ sealed: false
 
 A content-addressed cache: a get/put store keyed by
 `(spec_bundle_hash, artifact/gate-inputs hash, gate_version, model_pin)`,
-used by `generator`, `license-scanner`, and `secret-scanner` to avoid
-redundant work on unchanged inputs.
+used by `generator`, `test-author`, `license-scanner`, and
+`secret-scanner` to avoid redundant work on unchanged inputs.
 
 ## Rationale
 
-Backs D13's "cache every gate" mandate and D11's cache-hit rollback
-mechanism. Also the worked example behind D16: its one declared
+Backs D13's "cache every gate" mandate — pure cost-avoidance since D39,
+when D11's actual rollback mechanism moved to `provenance-checker`.
+Also the worked example behind D16: its one declared
 behavioral guarantee (`interface/guarantees/G-CACHE-001.md`, a retrofit
 of the consistency property `R-CACHE-003` already stated) is what let
 `generator` narrow its own blast-radius dependency to specifically that
@@ -38,7 +39,10 @@ gate's key.
 (that's each calling gate's own concern — `cache-manager` is a dumb,
 trustworthy store, not a policy engine); the actual backing store's storage
 engine/scaling characteristics (treated as an implementation detail behind
-`VAR-CACHE-STORE-URL`).
+`VAR-CACHE-STORE-URL`, including whether it resolves to a shared store or
+the local fallback, `R-CACHE-009`); deciding whether a component's work was
+ever *verified*, not just *produced* — `provenance-checker`'s job
+(`D39`), using a different data source entirely.
 
 ## Definitions
 
@@ -100,3 +104,8 @@ See `constraints.md`.
 - `D37`: corrected `G-CACHE-001`'s determinism precondition and added
   `AC-CACHE-009` for the non-deterministic-writer case; resolves the
   open question above.
+- `D39`: `VAR-CACHE-STORE-URL` is now optional, falling back to a local
+  `.hotdocs/cache/` store (`R-CACHE-009`); `merge-orchestrator` no
+  longer uses this component to decide whether to skip verification —
+  that moved to the new `provenance-checker`, narrowing this
+  component's role to pure cost-avoidance.

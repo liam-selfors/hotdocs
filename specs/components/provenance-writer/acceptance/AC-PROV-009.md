@@ -4,8 +4,10 @@ Covers: R-PROV-009
 Kind: compiled
 
 ```gherkin
-Given cache_hit is true and a matching prior commit's manifest exists
+Given ProvenanceInputs with provenance_hit true, carrying
+  verification_report/license_scan/secret_scan already sourced from a
+  prior manifest by the caller
 When write_provenance runs
-Then verification_report, license_scan, and secret_scan are copied
-  verbatim from that prior manifest, not freshly computed
+Then those three fields are written verbatim, unchanged, with no
+  lookup performed by this component itself
 ```

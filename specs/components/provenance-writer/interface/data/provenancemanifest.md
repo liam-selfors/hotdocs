@@ -11,7 +11,7 @@ convenience, not as a second definition:
   "retry_feedback": null,
   "pipeline_version": "v1",
   "gate_versions": { "compiler": "1.0.0", "license_scanner": "k-gram@1.0.0" },
-  "cache_hit": false,
+  "provenance_hit": false,
   "generated_at": "2026-01-01T00:00:00Z",
   "verification_run_id": "run-123",
   "verification_report": { "...": "a VerificationReport" },

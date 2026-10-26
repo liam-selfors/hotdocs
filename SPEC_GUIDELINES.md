@@ -451,23 +451,27 @@ Run per merge, scoped to the components in the impact-analysis blast radius:
 6. **Non-functional gates** where feasible (benchmarks, size budgets).
 7. **Review packet** — spec diff, changed requirements, regenerated
    components, verification results, residual risk, license/secret flags,
-   cache-hit status, capability-scenario results, and any new/changed
+   provenance-hit status, capability-scenario results, and any new/changed
    `sealed`/override declarations. A human reviews this and the spec diff.
    **No human review of generated code is required, of any kind.** (D5)
 8. **Merge** — `specs/`, `gen/`, and `verification/` (including
    `corpus-graph.json`) update atomically in one squashed commit.
 
 A merge whose spec bundle exactly matches an already-verified prior state
-**MUST** be treated as a cache hit across the entire gate stack (cache key:
-`spec_bundle_hash`, `artifact/gate-inputs hash`, `gate_version`, `model_pin`)
-— restore the matching artifacts, skip regeneration and re-verification, but
-**never** skip the human spec-diff review. The non-spec-driven-change lane
-still re-runs asynchronously afterward as an environment-drift safety net.
-(D11/D13)
+**MUST** be treated as a provenance hit (`provenance-checker`, `D39`) —
+its committed `.provenance.json` has a matching `spec_bundle_hash` and
+`gate_versions` — and restore the matching artifacts, skipping
+regeneration and re-verification, but **never** skipping the human
+spec-diff review. The non-spec-driven-change lane still re-runs
+asynchronously afterward as an environment-drift safety net. (D11)
+This is distinct from `cache-manager`'s own, narrower per-gate cache
+(cache key: `spec_bundle_hash`, `artifact/gate-inputs hash`,
+`gate_version`, `model_pin`), which only ever decides whether a model
+gets called again, never whether verification is skipped (D13).
 
 A gate's `gate_version` **MUST** bump whenever its underlying detection logic
-changes (e.g. the license scanner's signature database), so a cache hit never
-papers over a genuinely changed risk.
+changes (e.g. the license scanner's signature database), so neither a
+cache hit nor a provenance hit ever papers over a genuinely changed risk.
 
 ---
 
@@ -489,8 +493,12 @@ retry_feedback      R-id list the caller supplied for this call, if any
 pipeline_version    version of the generation pipeline itself
 gate_versions       per-gate version map (compiler, license_scanner,
                      mutation_harness, secret_scanner, ...)
-cache_hit           bool — if true, the fields below are copied from the
-                     matching prior commit, not freshly computed
+provenance_hit      bool — if true, the fields below are copied from the
+                     matching prior commit (via provenance-checker,
+                     D39), not freshly computed. Renamed from cache_hit,
+                     which never actually meant cache-manager had an
+                     entry — that's a per-gate concern, e.g.
+                     GenerationResult's own cache_hit field.
 generated_at
 verification_run_id
 verification_report  the VerificationReport (verifier-orchestrator)

@@ -45,7 +45,13 @@ Specced in full depth so far:
   subsystem). Since D16, exposes `interface/guarantees/G-CACHE-001.md` —
   the worked example behind the whole guarantee/narrowing mechanism, with
   `generator` as the real component declaring
-  `depends_on_guarantees: [G-CACHE-001]` against it.
+  `depends_on_guarantees: [G-CACHE-001]` against it. Since D39,
+  `VAR-CACHE-STORE-URL` is optional — a local `.hotdocs/cache/` fallback
+  keeps this component's cost-avoidance benefit available even with no
+  shared store configured — and this component no longer has any role
+  in deciding whether a merge skips verification; that moved entirely
+  to the new `provenance-checker`, once it was clear `cache-manager`
+  was being asked a question its own data could never answer.
 - **`criterion-compiler`** — the `sealed: true` component, all `kind:
   generated-test`. The one piece of this pipeline that is permanently
   hand-maintained by design, never agent-generated (D5's circularity
@@ -90,8 +96,23 @@ Specced in full depth so far:
   gate's already-produced result into one manifest; never invents a field.
   Found and fixed a real gap in `SPEC_GUIDELINES.md` §7's schema (a missing
   `secret_scan` field, even though `gate_versions` already expected a
-  `secret_scanner` entry) and gave D11's "cache hit copies the prior
+  `secret_scanner` entry) and gave D11's "provenance hit copies the prior
   manifest forward" claim its first concrete mechanism.
+- **`provenance-checker`** — all `kind: compiled`. Extracted by D39 once
+  a real correctness gap surfaced: `merge-orchestrator` was treating any
+  `cache-manager` hit as grounds to skip a non-sealed component's
+  verification entirely, but `cache-manager` never recorded whether a
+  candidate was ever actually *verified*, only that one was *produced*.
+  Reads a component's already-committed `.provenance.json` directly —
+  the one place a passing verdict could ever have legitimately landed,
+  since a failing one never gets committed — and matches it against the
+  current `spec_bundle_hash`/`gate_versions`, gated additionally by
+  `VAR-TRUST-JUDGE-PROVENANCE` for any component with an `llm-judge`
+  criterion. Deliberately excluded from `sealed`-component routing
+  (`R-MERGE-003`/`015`): a sealed component's hash reflects only its
+  spec, never its hand-maintained `source_path`, so trusting a hit there
+  would mean never re-running the one check that could catch a human's
+  own edit silently breaking something.
 - **`review-packet-builder`** — all `kind: compiled`. Formats already-
   computed results; deliberately never includes the generated-code diff
   itself (principle 6). Originally depended directly on
@@ -146,7 +167,8 @@ Specced in full depth so far:
   `verifier-orchestrator`'s own per-component dispatch; this component now
   only owns *when* and *with what* that gets called. Its real, measured
   `fan_out` is 15 as of D30 (14 after D25's extraction, +1 for
-  `llm-endpoint`) — confirmed against the actual linter, together with
+  `llm-endpoint`; D39 swapped `cache-manager` for `provenance-checker`
+  without changing the count) — confirmed against the actual linter, together with
   `spec_bundle_words` the one component besides `spec-linter` whose
   `R-LINT-022` crowding finding is real, accepted, and explained rather
   than resolved — see `specs/architecture/pipeline-decomposition.md`'s
@@ -180,14 +202,15 @@ Specced in full depth so far:
   structured `{category, message}` object, not a boolean, and every
   call writes a caller-agnostic record to `.hotdocs/calls/`.
 
-**All 20 architecture components are now specced in full depth** (15
+**All 21 architecture components are now specced in full depth** (15
 original + `test-author` + `spec-completeness-assistant`, both added
 when earlier design discussions surfaced real gaps nothing owned yet,
-+ `capability-scenario-verifier` (D25) + `llm-endpoint` (D30), both
-extracted from or added beneath `merge-orchestrator` once a real
-coupling or crowding signal, not speculation, justified it). The real
-linter (`gen/spec-linter/`) validates the entire corpus clean: 0
-failures, 17 warnings — all `spec_bundle_words`/`requirement_count`/
++ `capability-scenario-verifier` (D25) + `llm-endpoint` (D30) +
+`provenance-checker` (D39), each extracted from or added beneath
+`merge-orchestrator` once a real coupling, crowding, or correctness
+signal — not speculation — justified it). The real linter
+(`gen/spec-linter/`) validates the entire corpus clean: 0 failures,
+17 warnings — all `spec_bundle_words`/`requirement_count`/
 `acceptance_count`/`generated_code_loc` near-misses, `merge-orchestrator`
 and `spec-linter`'s `R-LINT-022` crowding findings (D28), and four
 individual dense files caught by the per-file check (`R-LINT-023`,

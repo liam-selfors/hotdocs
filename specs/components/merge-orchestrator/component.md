@@ -3,7 +3,7 @@ id: comp-merge-orchestrator
 title: Merge Orchestrator
 status: draft
 owners: [pipeline-team]
-depends_on: [comp-spec-linter, comp-impact-analyzer, comp-spec-bundle-assembler, comp-generator, comp-test-author, comp-capability-scenario-verifier, comp-verifier-orchestrator, comp-license-scanner, comp-secret-scanner, comp-cache-manager, comp-provenance-writer, comp-review-packet-builder, comp-corpus-graph-builder, comp-merge-tracker, comp-llm-endpoint]
+depends_on: [comp-spec-linter, comp-impact-analyzer, comp-spec-bundle-assembler, comp-generator, comp-test-author, comp-capability-scenario-verifier, comp-verifier-orchestrator, comp-license-scanner, comp-secret-scanner, comp-provenance-checker, comp-provenance-writer, comp-review-packet-builder, comp-corpus-graph-builder, comp-merge-tracker, comp-llm-endpoint]
 realizes: [P-ZERO-EDIT, P-AMBIGUITY-GATE, P-COMPLIANCE-GATE, P-MERGE-VISIBILITY]
 sealed: false
 ---
@@ -91,10 +91,8 @@ See `constraints.md`.
   `specs/decisions/D21.md` (the requirement constrains the *outcome*,
   not the mechanism — `R-MERGE-017`).
 - ~~Whether R-MERGE-015's sealed-component path still participates in
-  R-MERGE-003's cache-hit short-circuit~~ — resolved (`D37`): it never
-  does, by construction — `verifier-orchestrator` never writes to
-  `cache-manager`, so there is no cached characterization-test outcome
-  to ever hit. See `R-MERGE-015`'s amended text.
+  R-MERGE-003's short-circuit~~ — resolved (`D37`, mechanism updated by
+  `D39`): it never does, unconditionally. See `R-MERGE-015`.
 
 ## Change log
 
@@ -102,3 +100,6 @@ See `constraints.md`.
 - `D37`: resolved the sealed-component cache-hit question
   (`R-MERGE-015`) and added `tracking_write_error` visibility for a
   failed `merge-tracker` call (`R-MERGE-019`, `AC-MERGE-024`).
+- `D39`: `R-MERGE-003` now checks `provenance-checker`, not
+  `cache-manager`, for a non-sealed component; `depends_on` swaps
+  accordingly. `MergeResult`'s `cache_hit` renamed `provenance_hit`.

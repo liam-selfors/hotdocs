@@ -20,12 +20,13 @@ collects, never invents.
 ## Scope
 
 **In scope:** collecting each dependency's reported output into the one
-canonical schema; writing it to both required locations; the cache-hit
-copy-forward behavior (D11).
+canonical schema; writing it to both required locations; the
+provenance-hit copy-forward behavior (D11).
 
-**Out of scope:** deciding *whether* a merge is a cache hit (`cache-manager`
-already decided that by the time this component runs); running any gate
-itself.
+**Out of scope:** deciding *whether* a component's result is a
+provenance hit (`provenance-checker`/`merge-orchestrator` already
+decided that and supplied the already-sourced fields by the time this
+component runs, `D39`); running any gate itself.
 
 ## Definitions
 
@@ -63,3 +64,6 @@ None.
 ## Change log
 
 - Initial draft.
+- `D39`: `cache_hit` renamed `provenance_hit` throughout (`R-PROV-004`);
+  `R-PROV-009`'s lookup is now the caller's job, not this component's —
+  `cache-manager` never held a `VerificationReport` to look up.

@@ -135,8 +135,12 @@ Consumer tags: `[dev]` developer · `[stk]` stakeholder · `[agt]` system agent 
 - **Generation determinism / churn** — diff size between two cold regens of the
   same unchanged spec bundle under the same model pin. Should trend to zero.
   `[agt] [dev]`
-- **Cache hit rate** — components skipped via content-addressed caching.
-  `[dev] [stk]`
+- **Cache hit rate** — model calls avoided via `cache-manager`'s
+  content-addressed cache, per gate. Since `D39`, this no longer means
+  a component was skipped — that's **provenance hit rate** — `gen/`
+  components short-circuited entirely via `provenance-checker`'s
+  committed-`.provenance.json` match, the actual instance of D11's
+  "restore a prior verified state" claim. `[dev] [stk]`
 - **Generation cost & latency** — tokens, $, wall-clock, per component and per
   merge. `[stk]`
 - **Surfaced-assumption count per generation** — gaps the agent had to fill.

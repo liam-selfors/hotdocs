@@ -7,7 +7,7 @@
   "verification_report": null,
   "license_scan_result": { "...": "a LicenseScanResult" },
   "secret_scan_result": { "...": "a SecretScanResult" },
-  "cache_hit": false,
+  "provenance_hit": false,
   "attempts": 2,
   "gate_versions": { "compiler": "1.0.0", "license_scanner": "k-gram@1.0.0" }
 }

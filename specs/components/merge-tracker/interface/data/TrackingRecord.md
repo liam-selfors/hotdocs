@@ -9,7 +9,7 @@
   "block_reasons": ["comp-bar: exhausted retries"],
   "components": {
     "comp-foo": {
-      "cache_hit": false,
+      "provenance_hit": false,
       "attempts": 1,
       "model_call_error": false,
       "verification_overall": "pass",
@@ -17,7 +17,7 @@
       "secret_flagged": false
     },
     "comp-bar": {
-      "cache_hit": false,
+      "provenance_hit": false,
       "attempts": 2,
       "model_call_error": false,
       "verification_overall": "fail",

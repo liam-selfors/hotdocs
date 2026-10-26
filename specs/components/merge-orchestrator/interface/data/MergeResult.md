@@ -5,7 +5,7 @@
   "blocked": false,
   "components": {
     "comp-foo": {
-      "cache_hit": false,
+      "provenance_hit": false,
       "model_call_error": null,
       "verification": { "...": "a VerificationReport" },
       "license_scan": { "...": "a LicenseScanResult" },
@@ -40,3 +40,9 @@ intersects this merge's blast radius — a distinct result category from
 (R-MERGE-019, `D37`) is `{category, message}` or `null`, mirroring
 `model_call_error`'s shape — set only if `merge-tracker` itself raised;
 it never affects `blocked`/`block_reasons`, per `R-TRACK-005`.
+`provenance_hit` (R-MERGE-003, `D39`) is `true` only when
+`provenance-checker` reported a hit, meaning the other fields are
+copied from a committed `.provenance.json` rather than freshly
+computed — renamed from `cache_hit`, which never actually meant
+"`cache-manager` had an entry" (a per-gate concern, e.g.
+`GenerationResult.cache_hit`).

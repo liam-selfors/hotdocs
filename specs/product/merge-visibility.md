@@ -38,6 +38,6 @@ Given a merge attempt touching three components where two succeed and one
 When a developer queries the local tracking store after each attempt
 Then the first query shows all three components' outcomes from the first
   attempt, and the second query shows the two unchanged components' prior
-  (still cache-hit) outcomes alongside the third component's fresh result
-  — without needing to have kept the first attempt's CLI output
+  (still provenance-hit) outcomes alongside the third component's fresh
+  result — without needing to have kept the first attempt's CLI output
 ```

@@ -68,3 +68,5 @@ None.
 ## Change log
 
 - Initial draft.
+- `D39`: "cache hit" renamed "provenance hit" (`R-GRAPH-008`,
+  `constraints.md`), following the corpus-wide rename.

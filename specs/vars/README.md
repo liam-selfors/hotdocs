@@ -10,5 +10,7 @@ cannot carry an `example` or `default` field.
 See `SPEC_GUIDELINES.md` §3.3 and §9 (secrets).
 
 - **`VAR-ANTHROPIC-API-KEY`** (secret, required)
-- **`VAR-CACHE-STORE-URL`** (non-secret, required)
+- **`VAR-CACHE-STORE-URL`** (non-secret, optional — local `.hotdocs/cache/`
+  fallback when absent, `D39`)
 - **`VAR-COMPLIANCE-WEBHOOK-URL`** (non-secret, optional)
+- **`VAR-TRUST-JUDGE-PROVENANCE`** (non-secret, optional, `D39`)

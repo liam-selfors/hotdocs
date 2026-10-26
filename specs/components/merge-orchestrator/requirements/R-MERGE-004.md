@@ -1,9 +1,8 @@
 # R-MERGE-004
 
-**R-MERGE-004** — For a cache miss on a **non-sealed** component (a sealed
-  component's cache miss is R-MERGE-015's job instead — the two are
-  mutually exclusive and jointly exhaustive over every component in the
-  blast radius), MUST call `spec-bundle-assembler` then `generator` (cold
+**R-MERGE-004** — For a provenance miss on a **non-sealed** component
+  (every sealed component is R-MERGE-015's job instead, unconditionally),
+  MUST call `spec-bundle-assembler` then `generator` (cold
   mode, sample index 0) to produce a candidate, then `verifier-orchestrator`
   to check it — **wiring a real `test_author` callable (backed by
   `test-author`) and a real `judge` callable (backed by `llm-endpoint`,

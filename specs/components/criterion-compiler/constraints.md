@@ -14,7 +14,7 @@
   content with no corpus-wide graph walk.
 - **Idempotent on unchanged input.** Recompiling unchanged input MUST NOT
   touch already-written output files (R-COMPILE-009) — avoids spurious diffs
-  that would otherwise defeat D11's cache-hit comparison.
+  that would otherwise defeat D11's provenance-hit comparison.
 - **Characterization coverage.** The hand-authored reference fixture suite
   (`acceptance/`+`interface/` content pairs with known-correct expected
   output, living in `verification/criterion-compiler/`) MUST cover every

@@ -9,9 +9,9 @@
   before any component that costs a model call — this ordering is itself a
   constraint, not an implementation detail, since getting it backward would
   burn generation cost on specs that were never going to lint clean.
-- **No gate skipped silently.** A cache hit (R-MERGE-003) skips real work,
-  but MUST be visible in `MergeResult` and the review packet — never
-  indistinguishable from "this gate ran and found nothing."
+- **No gate skipped silently.** A provenance hit (R-MERGE-003) skips real
+  work, but MUST be visible in `MergeResult` and the review packet —
+  never indistinguishable from "this gate ran and found nothing."
 - **This component's own fan-out (15) is accepted, not a defect** —
   rationale: `specs/decisions/D25.md` and `specs/architecture/
   pipeline-decomposition.md`'s dedicated note.

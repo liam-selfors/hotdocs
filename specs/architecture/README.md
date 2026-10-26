@@ -7,7 +7,7 @@ operation that goes through here — never an ordinary component spec edit.
 See `SPEC_GUIDELINES.md` §3.2.
 
 - **`pipeline-decomposition.md`** — the hotdocs pipeline tool's own
-  20-component decomposition and dependency graph. Documents a real,
+  21-component decomposition and dependency graph. Documents a real,
   deliberately-explained tension (`merge-orchestrator`'s fan-out exceeds
   D2's warn threshold) rather than silently patching it — D25 resolved
   the word-count half of that tension by extraction once it actually hit

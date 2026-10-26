@@ -119,3 +119,5 @@ See `constraints.md`.
 - `D37`: closed the best-effort/visibility open question —
   `merge-orchestrator`'s `R-MERGE-019` now owns the catch-and-surface
   behavior; nothing changes here.
+- `D39`: `TrackingRecord.components[].cache_hit` renamed
+  `provenance_hit` (`R-TRACK-002`).

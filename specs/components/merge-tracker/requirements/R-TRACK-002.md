@@ -3,7 +3,7 @@
 **R-TRACK-002** — The tracking record MUST include: a unique `attempt_id`;
   a `timestamp`; the `changed_ids` that triggered the attempt; the overall
   outcome (`pass` | `blocked`); `block_reasons` (empty unless blocked); and,
-  per impacted component, a flattened summary — `cache_hit`, `attempts`,
+  per impacted component, a flattened summary — `provenance_hit`, `attempts`,
   whether the final attempt was a `model_call_error` or reached
   verification, the verification `overall` result if it reached
   verification, and whether either scanner flagged it. See

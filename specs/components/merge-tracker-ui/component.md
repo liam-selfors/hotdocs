@@ -99,3 +99,5 @@ See `constraints.md`.
 - Initial draft.
 - `D37`: closed the `docs-site-renderer` convergence question — staying
   separate is the decision, not a deferral.
+- `D39`: "cache hit" renamed "provenance hit" (`R-UI-002`), following
+  `TrackingRecord`'s own field rename.

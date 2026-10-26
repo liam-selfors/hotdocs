@@ -236,8 +236,8 @@ specifically.
 **`component_provenance`** — one row per component, read directly from
 the provenance manifests `provenance-writer` already writes
 (`verification/<component>/.provenance.json`), which already embed
-`verification_report`, `license_scan`, `secret_scan`, and `cache_hit`
-(`SPEC_GUIDELINES.md` §7):
+`verification_report`, `license_scan`, `secret_scan`, and
+`provenance_hit` (`SPEC_GUIDELINES.md` §7):
 
 ```sql
 CREATE VIEW component_provenance AS
@@ -254,7 +254,7 @@ own spec (`R-GRAPH-009`) on the premise that no other component needed
 it. That premise held only until `review-packet-builder` (`R-PACKET-011`,
 D26) needed the exact same thing: every field its `ReviewPacket` reports
 per component (`verification_results`, `compliance_flags`,
-`cache_hit_status`) is already in this manifest. Promoted here once a
+`provenance_hit_status`) is already in this manifest. Promoted here once a
 second consumer appeared, for the same reason `nodes`/`edges` exist as
 one shared definition instead of two independently-written ones.
 
@@ -296,10 +296,10 @@ pointing back to this document, exactly as `R-IMPACT-009` does:
   the time; renamed by `D36`) out of `merge-orchestrator` to relieve
   that component's fan-out/word-count caps.
 - **`review-packet-builder`** (`R-PACKET-011`) — every field it reports
-  from `verifier-orchestrator`/`license-scanner`/`secret-scanner`/
-  `cache-manager` is read via `component_provenance` instead of a live
-  call into any of them, since `provenance-writer` (which it already
-  depended on) already collected all of it. Dropped its `depends_on`
+  from `verifier-orchestrator`/`license-scanner`/`secret-scanner` is
+  read via `component_provenance` instead of a live call into any of
+  them, since `provenance-writer` (which it already depended on)
+  already collected all of it. Dropped its `depends_on`
   from 5 to 1 (D26).
 - **`spec-linter`'s requirement-traceability rules**
   (`rule_forward_traceability`/R-LINT-008, `rule_backward_traceability`/
