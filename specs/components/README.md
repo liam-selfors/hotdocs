@@ -21,13 +21,16 @@ Specced in full depth so far:
 - **`spec-linter`** — the first one, deliberately: a component whose entire
   acceptance criteria set is `kind: compiled` except one deliberate
   `llm-judge` exception (R-LINT-015), as a concrete test of D5's own
-  guidance. One of three components with a real implementation
-  (`gen/spec-linter/` + `verification/spec-linter/`) — this one and
-  `graph-query-engine` (`D44`) hand-authored once, standing in for the
-  `generator`/`criterion-compiler` this pipeline didn't have yet when they
-  were built; `corpus-graph-builder` (`D45`) is the first to actually be
-  produced by a real generation step instead, once a working stand-in for
-  that pipeline existed. See `verification/spec-linter/BOOTSTRAP.md`.
+  guidance. One of four components with a real implementation
+  (`gen/spec-linter/` + `verification/spec-linter/`) — this one,
+  `graph-query-engine` (`D44`), and `llm-endpoint` (`D47`) hand-authored
+  once each, standing in for the `generator`/`criterion-compiler` this
+  pipeline didn't have yet when the first two were built (`llm-endpoint`
+  is a structurally permanent exception instead, not a temporary one —
+  see its own entry); `corpus-graph-builder` (`D45`) is the first to
+  actually be produced by a real generation step instead, once a working
+  stand-in for that pipeline existed. See
+  `verification/spec-linter/BOOTSTRAP.md`.
   Grew well past its original scope as this corpus grew: its own graph-shaped
   rules (reference resolution, acyclicity, both traceability directions) now
   actually run as queries over `graph-query-engine`'s shared `nodes`/`edges`
@@ -47,7 +50,8 @@ Specced in full depth so far:
   `component_provenance`/`component_size`) as a real `gen/graph-query-engine/
   views.sql` asset plus a thin loader, each view's requirement citing the
   exact `SPEC_GUIDELINES.md` section it reads under as its data contract.
-  The second component with a real, hand-bootstrapped implementation,
+  The second of three hand-bootstrapped components (after `spec-linter`,
+  before `llm-endpoint`),
   the same honest exception `spec-linter` already established.
 - **`impact-analyzer`** — all `kind: compiled`. Pins down, as an executable
   rule for the first time, the interface-vs-internal-change distinction D2
@@ -141,7 +145,8 @@ Specced in full depth so far:
   **The first component in this corpus whose `gen/` code was actually
   produced by a generation step** (`D45`), not hand-written: a real model
   call, dispatched through a Claude Code subagent standing in for
-  `llm-endpoint` (no real one exists yet), constructed from exactly this
+  `llm-endpoint` (no real one existed yet at the time — `D47` built one
+  shortly after, see its own entry below), constructed from exactly this
   component's assembled `SpecBundle` and nothing else — the same
   cold-mode purity `R-GEN-001` requires of the real `generator`. Verified
   independently against this repo's real corpus (node/edge counts and all
@@ -230,6 +235,15 @@ Specced in full depth so far:
   anti-premature-abstraction stance). Since D32, `model_call_error` is a
   structured `{category, message}` object, not a boolean, and every
   call writes a caller-agnostic record to `.hotdocs/calls/`.
+  **A real `gen/llm-endpoint/` implementation since `D47`** — a fourth
+  hand-bootstrapped component, but a structurally permanent exception
+  rather than a temporary one (`BOOTSTRAP.md`): nothing could ever
+  cold-regenerate the component every generation call dispatches
+  through. `AnthropicBackend` dispatches via the `claude` CLI's
+  non-interactive mode (`D45`/`D46`) instead of a from-scratch API
+  client; confirmed live exactly once (real money, `D46`'s billing
+  finding applies), with the full test suite otherwise running on an
+  injected mock backend at zero cost.
 
 **All 22 architecture components are now specced in full depth** (15
 original + `test-author` + `spec-completeness-assistant`, both added
@@ -240,7 +254,7 @@ from or added beneath `merge-orchestrator`/`spec-linter`/the
 architecture docs once a real coupling, crowding, or correctness
 signal — not speculation — justified it). The real linter
 (`gen/spec-linter/`) validates the entire corpus clean: 0 failures,
-20 warnings — all `component_doc_words`/`requirement_count`/
+21 warnings — all `component_doc_words`/`requirement_count`/
 `acceptance_count`/`generated_code_loc` near-misses, `merge-orchestrator`
 and `spec-linter`'s `R-LINT-022` crowding findings (D28), and five
 individual dense files caught by the per-file check (`R-LINT-023`,

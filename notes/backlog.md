@@ -11,24 +11,17 @@ Nothing here is normative. Nothing here is implemented.
 
 ---
 
-## The subagent-based model-call simulation isn't reproducible from a clean clone (`D45`)
-
-`.claude/agents/generator.md` (and its three siblings, `test-author`/
-`judge`/`spec-completeness-assistant`) are what actually produced
-`corpus-graph-builder`'s real `gen/` code — but `.claude/` is gitignored
-(session-local Claude Code configuration), so none of these four files
-are committed. Anyone cloning this repo fresh has the generated output
-but not the mechanism that produced it. Options not yet decided between:
-committing the definitions somewhere `.gitignore` doesn't reach (they
-aren't really "session-local" in the way settings.local.json is — they're
-a real, load-bearing part of how this methodology is currently being
-exercised); documenting their exact content in prose (e.g. an appendix
-to `verification/<component>/BOOTSTRAP.md`) even if the files themselves
-stay local; or accepting the gap as acceptable since a real
-`llm-endpoint`/`generator` would eventually replace this mechanism
-entirely anyway. Low urgency — nothing currently depends on re-running
-this reproducibly — but worth a real decision before a second component
-is generated this way, not three.
+~~**The subagent-based model-call simulation isn't reproducible from a
+clean clone.**~~ **Resolved by `D47`.** The four `.claude/agents/*.md`
+definitions (`generator`/`test-author`/`judge`/
+`spec-completeness-assistant`) are deleted outright rather than fixed
+in place — a real `gen/llm-endpoint/` implementation (dispatching via
+the `claude` CLI's non-interactive mode, `D45`/`D46`) replaces the
+mechanism entirely, and a fresh clone now has a real, working component
+instead of a gap to reproduce. `generator`/`test-author`/
+`spec-completeness-assistant`/the `judge` callable themselves remain
+unimplemented — `D47` only builds the transport they'd dispatch
+through. See `specs/decisions/D47.md`.
 
 ---
 
