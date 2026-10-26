@@ -488,38 +488,54 @@ def rule_reference_resolution(corpus: Corpus) -> list[Finding]:
 
 
 def rule_depends_on_guarantees_resolution(corpus: Corpus) -> list[Finding]:
-    """R-LINT-018 — `depends_on_guarantees` entries must resolve to a real
+    """R-LINT-018 — a query over the shared `edges`/`nodes` views
+    (`R-LINT-020`): `depends_on_guarantees` entries must resolve to a real
     `G-id` whose owning component is already in this component's own
     `depends_on` (D16). A stricter check than plain existence: referencing a
     guarantee of a component you don't even depend on is meaningless, not
     just unresolved — the same ownership-aware check D16 added to
-    `SPEC_GUIDELINES.md` §2's rules.
-    """
+    `SPEC_GUIDELINES.md` §2's rules. No architecture-doc special-casing is
+    needed here, unlike `R-LINT-003`: confirmed via grep that
+    `depends_on_guarantees` is never used outside `component.md`."""
     findings = []
-    owner_by_gid: dict[str, Component] = {
-        gid: comp for comp in corpus.components.values() for gid in comp.interface_guarantees
-    }
-    for doc in corpus.docs:
-        if doc.doc_type != "component-root":
+    rows = corpus.graph.execute("""
+        SELECT dog.source_id, dog.target_id AS gid, n.owner_component_id,
+               EXISTS (
+                   SELECT 1 FROM edges dep
+                   WHERE dep.edge_type = 'depends_on'
+                     AND dep.source_id = dog.source_id
+                     AND dep.target_id = n.owner_component_id
+               ) AS owner_in_depends_on
+        FROM edges dog
+        LEFT JOIN nodes n ON n.id = dog.target_id AND n.kind = 'guarantee'
+        WHERE dog.edge_type = 'depends_on_guarantees'
+    """).fetchall()
+    for source_id, gid, owner_id, owner_in_depends_on in rows:
+        doc = corpus.id_index.get(source_id)
+        if doc is None:
             continue
-        declared_deps = set(doc.frontmatter.get("depends_on") or [])
-        for gid in doc.frontmatter.get("depends_on_guarantees", []) or []:
-            owner = owner_by_gid.get(gid)
-            if owner is None:
-                findings.append(Finding("R-LINT-018", SEVERITY_FAIL, doc.rel_path, 1,
-                                         f"depends_on_guarantees references '{gid}', which does not exist"))
-                continue
-            owner_id = owner.root.doc_id if owner.root else None
-            if owner_id not in declared_deps:
-                findings.append(Finding(
-                    "R-LINT-018", SEVERITY_FAIL, doc.rel_path, 1,
-                    f"depends_on_guarantees references '{gid}' (owned by '{owner_id}'), "
-                    f"but '{owner_id}' is not in this component's own depends_on"))
+        if owner_id is None:
+            findings.append(Finding("R-LINT-018", SEVERITY_FAIL, doc.rel_path, 1,
+                                     f"depends_on_guarantees references '{gid}', which does not exist"))
+            continue
+        if not owner_in_depends_on:
+            findings.append(Finding(
+                "R-LINT-018", SEVERITY_FAIL, doc.rel_path, 1,
+                f"depends_on_guarantees references '{gid}' (owned by '{owner_id}'), "
+                f"but '{owner_id}' is not in this component's own depends_on"))
     return findings
 
 
 def rule_acyclic_graph(corpus: Corpus) -> list[Finding]:
-    """R-LINT-004 — DFS three-color cycle detection.
+    """R-LINT-004 — `depends_on` edges fetched via a query over the shared
+    `edges` view (`R-LINT-020`), plus the same small residual
+    architecture-doc check `R-LINT-003` uses (the shared view is scoped to
+    `component.md` only), then the standard white/gray/black DFS
+    cycle-detection algorithm runs in Python — deliberately not
+    `duckpgq`'s `MATCH` syntax (D18/D20): none of this repo's six shared
+    views otherwise need graph-traversal syntax, so reimplementing one
+    well-understood algorithm here is simpler than adopting a new query
+    grammar for a single caller.
 
     Open question resolved: any correct algorithm was acceptable; this is
     the standard white/gray/black DFS marking.
@@ -529,14 +545,24 @@ def rule_acyclic_graph(corpus: Corpus) -> list[Finding]:
         doc.doc_id: WHITE for doc in corpus.docs
         if doc.doc_id and doc.doc_type in FRONTMATTER_BEARING_TYPES
     }
+    adj: dict[str, list[str]] = {}
+    for source_id, target_id in corpus.graph.execute(
+        "SELECT source_id, target_id FROM edges WHERE edge_type = 'depends_on'"
+    ).fetchall():
+        if source_id in corpus.id_index and target_id in corpus.id_index:
+            adj.setdefault(source_id, []).append(target_id)
+    for doc in corpus.docs:
+        if doc.doc_type != "architecture":
+            continue
+        for ref in doc.frontmatter.get("depends_on", []) or []:
+            if ref in corpus.id_index:
+                adj.setdefault(doc.doc_id, []).append(ref)
+
     findings: list[Finding] = []
     reported_cycles: set[frozenset] = set()
 
     def edges(doc_id: str) -> list[str]:
-        doc = corpus.id_index.get(doc_id)
-        if not doc:
-            return []
-        return [d for d in (doc.frontmatter.get("depends_on") or []) if d in corpus.id_index]
+        return adj.get(doc_id, [])
 
     def dfs(node: str, stack: list[str]):
         color[node] = GRAY
@@ -642,12 +668,21 @@ def _collect_covers(doc: Doc) -> list[tuple[str, int]]:
 
 def rule_forward_traceability(corpus: Corpus) -> list[Finding]:
     """R-LINT-008 — since D15, requirements and their covering criteria are
-    each a directory listing, not a regex-parsed shared-file section."""
+    each a directory listing, not a regex-parsed shared-file section.
+    Coverage itself is a query over the shared `edges` view's `covers`
+    rows (`R-LINT-021`), rather than a second, independently-written
+    `_collect_covers` scan of every acceptance file per component —
+    filtered to `R-`-prefixed targets since this rule only cares whether
+    a requirement is covered, and (confirmed via grep) every capability
+    scenario's own `Covers:` targets a `P-id`, never an `R-id`, so no
+    corpus-specific coincidence is being relied on here."""
     findings = []
+    covered = {row[0] for row in corpus.graph.execute(
+        "SELECT DISTINCT target_id FROM edges WHERE edge_type = 'covers' AND target_id LIKE 'R-%'"
+    ).fetchall()}
     for comp in corpus.components.values():
         if not comp.root:
             continue
-        covered = {ref for doc in comp.acceptance.values() for ref, _ in _collect_covers(doc)}
         for rid, doc in comp.requirements.items():
             if rid not in covered:
                 findings.append(Finding("R-LINT-008", SEVERITY_FAIL, doc.rel_path, 1,
@@ -657,21 +692,26 @@ def rule_forward_traceability(corpus: Corpus) -> list[Finding]:
 
 def rule_backward_traceability(corpus: Corpus) -> list[Finding]:
     """R-LINT-009 — Covers: must resolve to a real R-id (component-local) or
-    P-id (corpus-wide product capability)."""
+    P-id (corpus-wide product capability). Existence/kind resolution is a
+    query over the shared `nodes` view (`R-LINT-021`); iteration and line
+    reporting stay native `_collect_covers` scans, since `nodes`/`edges`
+    don't model which product doc owns a given `CS-id` (`R-GQE-001`
+    deliberately leaves `capability_scenario` rows' owner unset — the
+    `covers` edge carries that relationship, not a reverse lookup this
+    rule would otherwise need)."""
     findings = []
-    all_r_ids: set[str] = {
-        rid for comp in corpus.components.values() for rid in comp.requirements
-    }
-    all_p_ids = {d.doc_id for d in corpus.docs if d.doc_type == "product" and d.doc_id}
+    known_ids = {row[0] for row in corpus.graph.execute(
+        "SELECT id FROM nodes WHERE kind IN ('requirement', 'capability')"
+    ).fetchall()}
 
     for doc in corpus.docs:
         if doc.doc_type not in ("component-acceptance", "product"):
             continue
         for ref, line in _collect_covers(doc):
-            if ref.startswith("R-") and ref not in all_r_ids:
+            if ref.startswith("R-") and ref not in known_ids:
                 findings.append(Finding("R-LINT-009", SEVERITY_FAIL, doc.rel_path, line,
                                          f"Covers: {ref} does not resolve to any requirement"))
-            elif ref.startswith("P-") and ref not in all_p_ids:
+            elif ref.startswith("P-") and ref not in known_ids:
                 findings.append(Finding("R-LINT-009", SEVERITY_FAIL, doc.rel_path, line,
                                          f"Covers: {ref} does not resolve to any product capability"))
             elif not ref.startswith("R-") and not ref.startswith("P-"):

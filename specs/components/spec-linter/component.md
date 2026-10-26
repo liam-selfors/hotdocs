@@ -3,7 +3,7 @@ id: comp-spec-linter
 title: Spec Linter
 status: draft
 owners: [pipeline-team]
-depends_on: []
+depends_on: [comp-graph-query-engine]
 realizes: [P-AMBIGUITY-GATE]
 model_pin: claude-sonnet-5
 sealed: false

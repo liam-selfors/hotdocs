@@ -17,3 +17,12 @@
 
   Implementation requirement, not a behavioral one: neither rule's
   actual check changes.
+
+  Exception (D44): R-LINT-009's own iteration and reported line number
+  stay a native `_collect_covers` scan over each `component-acceptance`/
+  `product` doc's body — `nodes`/`edges` resolve whether a `Covers:`
+  target exists, but don't model which `product` doc owns a given
+  `CS-id` (`R-GQE-001` leaves `capability_scenario` rows' owner
+  deliberately unset — the `covers` edge carries that relationship, not
+  a reverse lookup), so there is no view-only path back to the right
+  doc and line to report against.
