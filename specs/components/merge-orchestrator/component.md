@@ -72,7 +72,7 @@ See `interface/data/`.
 
 See `acceptance/`.
 
-All twenty-two criteria are `kind: compiled` — tested by mocking every
+All twenty-four criteria are `kind: compiled` — tested by mocking every
 dependency and asserting on call order/arguments, the same pattern
 `verifier-orchestrator` already established for coordination logic.
 
@@ -90,16 +90,15 @@ See `constraints.md`.
   "no artificial sequential dependency"~~ — resolved by
   `specs/decisions/D21.md` (the requirement constrains the *outcome*,
   not the mechanism — `R-MERGE-017`).
-- Whether R-MERGE-015's sealed-component path still participates in
-  R-MERGE-003's cache-hit short-circuit, and if so, what a "cache hit"
-  even means for a component whose code is hand-maintained rather than
-  regenerated (the spec bundle hash could match a prior verified commit,
-  but nothing about regeneration risk — the usual reason freshness
-  matters — applies the same way to code a human controls directly). Not
-  addressed here; R-MERGE-015 as written applies R-MERGE-003's existing
-  precondition ("for a cache miss") without re-examining whether that
-  precondition means the same thing for a sealed component.
+- ~~Whether R-MERGE-015's sealed-component path still participates in
+  R-MERGE-003's cache-hit short-circuit~~ — resolved (`D37`): it never
+  does, by construction — `verifier-orchestrator` never writes to
+  `cache-manager`, so there is no cached characterization-test outcome
+  to ever hit. See `R-MERGE-015`'s amended text.
 
 ## Change log
 
 - Initial draft.
+- `D37`: resolved the sealed-component cache-hit question
+  (`R-MERGE-015`) and added `tracking_write_error` visibility for a
+  failed `merge-tracker` call (`R-MERGE-019`, `AC-MERGE-024`).

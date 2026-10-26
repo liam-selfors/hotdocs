@@ -70,12 +70,21 @@ See `constraints.md`.
 
 ## Open questions
 
-- R-CACHE-003's "last-write-wins is safe only because gates are
+- ~~R-CACHE-003's "last-write-wins is safe only because gates are
   deterministic" assumption depends entirely on every other component in
   this system actually upholding its own determinism constraint. This
-  component cannot verify that from the inside — it's a cross-cutting
-  assumption this spec inherits rather than enforces. Not resolved here;
-  flagged as a standing dependency on every gate's own constraints.md.
+  component cannot verify that from the inside.~~ — resolved (`D37`):
+  the precondition was stated too strongly, and has been corrected in
+  `G-CACHE-001` rather than enforced from the outside. `license-scanner`/
+  `secret-scanner` are byte-identical-deterministic by their own
+  `constraints.md`, making last-write-wins trivially safe for them.
+  `generator`/`test-author` are **not** — their own `constraints.md`
+  already says so — but the guarantee never actually needed identical
+  payloads, only that whichever write survives a race is itself an
+  uncorrupted, legitimately-produced answer for that key, which their
+  single-call-then-cache flow (`R-GEN-006`) already guarantees
+  regardless of what a concurrent sibling call produces. See
+  `AC-CACHE-009`.
 - ~~Cache eviction/retention policy (how long entries live, whether
   there's a size bound on the backing store) is undecided~~ — resolved
   (`R-CACHE-008`): it has no correctness dimension to pin down. Eviction
@@ -88,3 +97,6 @@ See `constraints.md`.
 ## Change log
 
 - Initial draft.
+- `D37`: corrected `G-CACHE-001`'s determinism precondition and added
+  `AC-CACHE-009` for the non-deterministic-writer case; resolves the
+  open question above.

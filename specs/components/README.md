@@ -187,7 +187,7 @@ when earlier design discussions surfaced real gaps nothing owned yet,
 extracted from or added beneath `merge-orchestrator` once a real
 coupling or crowding signal, not speculation, justified it). The real
 linter (`gen/spec-linter/`) validates the entire corpus clean: 0
-failures, 16 warnings — all `spec_bundle_words`/`requirement_count`/
+failures, 17 warnings — all `spec_bundle_words`/`requirement_count`/
 `acceptance_count`/`generated_code_loc` near-misses, `merge-orchestrator`
 and `spec-linter`'s `R-LINT-022` crowding findings (D28), and four
 individual dense files caught by the per-file check (`R-LINT-023`,

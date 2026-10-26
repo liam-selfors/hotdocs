@@ -82,15 +82,20 @@ See `constraints.md`.
   (`R-UI-006`): a trivial local static-file server (`hotdocs track ui
   serve`), not `file://` — removes the CORS inconsistency across
   browsers entirely rather than leaving it to chance per developer.
-- Whether this component should eventually consume
-  `specs/architecture/graph-query-engine.md`'s corpus graph too (so a
-  failed component's view can show what else depends on it), making this
-  and `docs-site-renderer` converge into one UI reading two data sources
-  instead of two separate UIs. Flagged as a plausible future direction,
-  not assumed — these currently have different lifecycles (committed vs.
-  local-only) for a real reason, and merging them needs its own
-  deliberate decision, not an accident of sharing a webpage.
+- ~~Whether this component should eventually consume
+  `specs/architecture/graph-query-engine.md`'s corpus graph too..., making
+  this and `docs-site-renderer` converge into one UI...~~ — resolved
+  (`D37`): staying separate, by decision rather than by default. The
+  Scope section above already rules this out ("any read of `specs/`,
+  `corpus-graph.json`, or anything else committed" is out of scope) for
+  the reason restated here: committed, CI-rendered data and local,
+  gitignored, per-developer data have genuinely different lifecycles,
+  and nothing has asked for the convenience of one shared webpage badly
+  enough to justify coupling them. Revisit only if a concrete
+  cross-referencing need actually surfaces — not as a standing TODO.
 
 ## Change log
 
 - Initial draft.
+- `D37`: closed the `docs-site-renderer` convergence question — staying
+  separate is the decision, not a deferral.

@@ -9,3 +9,9 @@
   `R-TRACK-005`, this call's own success or failure MUST NOT alter the
   merge's outcome — it is invoked for its effect, not awaited as a
   precondition of anything.
+
+  If this call itself raises or errors, that failure MUST be caught and
+  surfaced as `MergeResult.tracking_write_error` (non-blocking, the same
+  structured `{category, message}` shape `model_call_error` already
+  established, D32) — never silently swallowed, per the non-gating
+  posture above.

@@ -92,16 +92,30 @@ See `constraints.md`.
 
 ## Open questions
 
-- Whether `merge-orchestrator` calling this component should be a hard
-  requirement (a merge attempt that somehow fails to write a tracking
-  record is still a successful or blocked merge either way — this
-  component is explicitly non-gating) or whether a failure to write a
-  tracking record should itself be surfaced somewhere visible (silently
-  losing observability data is still a silent failure, just not a
-  merge-blocking one). Not resolved here; leaning toward "best-effort,
-  but never silent about the attempt itself" without having picked the
-  exact visibility mechanism.
+- ~~Whether `merge-orchestrator` calling this component should be a hard
+  requirement... or whether a failure to write a tracking record should
+  itself be surfaced somewhere visible...~~ — resolved (`D37`):
+  best-effort, never silent, confirmed as both at once rather than a
+  choice between them. The non-gating half was already settled by
+  `R-MERGE-019`/`R-MERGE-021` and this component's own `R-TRACK-005` —
+  a write failure here MUST NOT alter the merge's outcome. The
+  visibility half: `merge-orchestrator` now catches a failed call and
+  surfaces it as `MergeResult.tracking_write_error` — `{category,
+  message}`, the same structured shape `llm-endpoint`'s
+  `model_call_error` already established (`D32`) for exactly this kind
+  of "degrade silently in function, never in visibility" requirement.
+  Chosen over inventing a new channel (a stderr line, a sentinel file
+  under `.hotdocs/`) because `MergeResult` is already the one place
+  every merge attempt's outcome is reported, in both `--format=json`
+  and `--format=text` — a second, parallel reporting path for one
+  specific failure mode would be exactly the kind of unrequested
+  abstraction this corpus avoids (D18/D20). See `R-MERGE-019` and
+  `AC-MERGE-024` for the normative behavior; this component's own
+  `R-TRACK-005` is unchanged.
 
 ## Change log
 
 - Initial draft.
+- `D37`: closed the best-effort/visibility open question —
+  `merge-orchestrator`'s `R-MERGE-019` now owns the catch-and-surface
+  behavior; nothing changes here.

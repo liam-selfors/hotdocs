@@ -23,3 +23,12 @@
   characterization-test failure here, blocking the merge the normal way —
   the fix is a human editing `source_path` directly, not anything this
   component does differently.
+
+  This path never participates in `R-MERGE-003`'s cache-hit
+  short-circuit: `verifier-orchestrator` never writes to `cache-manager`,
+  so a sealed component's characterization-test re-run always happens,
+  every merge — intentionally, since trusting a stale result here would
+  risk missing a human's own edit to `source_path` silently breaking its
+  own tests. `license-scanner`/`secret-scanner` still cache normally
+  against this component's unchanged content (`R-MERGE-008` applies
+  regardless of `sealed` status).

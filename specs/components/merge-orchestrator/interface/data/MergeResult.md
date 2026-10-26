@@ -19,7 +19,8 @@
     }
   },
   "review_packet": { "...": "a ReviewPacket" },
-  "block_reasons": []
+  "block_reasons": [],
+  "tracking_write_error": null
 }
 ```
 
@@ -35,4 +36,7 @@ fail) and `model_call_error` stays `null`. `capability_scenarios`
 keyed by `P-id`, covering every capability whose `realizes`-set
 intersects this merge's blast radius — a distinct result category from
 `components`, never merged into any single component's own entry (per
-`constraints.md`'s "never conflated" rule).
+`constraints.md`'s "never conflated" rule). `tracking_write_error`
+(R-MERGE-019, `D37`) is `{category, message}` or `null`, mirroring
+`model_call_error`'s shape — set only if `merge-tracker` itself raised;
+it never affects `blocked`/`block_reasons`, per `R-TRACK-005`.
