@@ -310,14 +310,14 @@ Below that bar, size caps are linter-enforced:
 | Dimension | Warn above | Hard fail above |
 | --- | --- | --- |
 | Generated code per component | 800 LOC | 1500 LOC |
-| Spec bundle (`component.md` + everything under `requirements/`, `interface/`, `acceptance/` + `constraints.md`) | 2000 words | 4000 words |
+| Component docs (`component.md` + everything under `requirements/`, `interface/`, `acceptance/` + `constraints.md`) — `component_doc_words`. Deliberately **not** called "spec bundle": this is every doc under the component's own directory, broader than the `SpecBundle` type `spec-bundle-assembler` actually builds, which excludes `acceptance/` entirely (`R-ASSEMBLE-001`). The two used to share a name despite measuring different things — renamed to stop that collision, not to change what's counted. | 2000 words | 4000 words |
 | Requirements (`R-id`s) per component | 20 | 40 |
 | Public interface surface elements | 10 | 20 |
 | `depends_on` count (fan-out) | 7 | — (warn only) |
 | Dependents count (fan-in) | 10 | — (warn only) |
 | Guarantees (`G-id`s) per component (D29) | 5 | 10 |
 | Acceptance criteria (`AC-id`s) per component (D29) | 25 | 50 |
-| **Per-file** words, for any single file under `requirements/` or `acceptance/` (D29) — distinct from the spec-bundle row above, which is a whole-bundle aggregate | 250 | 500 |
+| **Per-file** words, for any single file under `requirements/` or `acceptance/` (D29) — distinct from the component-docs row above, which is a whole-bundle aggregate | 250 | 500 |
 | **`Purpose` section** words (D35) — checks the "one paragraph" rule above mechanically; distinct from both rows above, scoped to one section, not a file or the bundle | 80 | 150 |
 
 The last three rows are a first pass (D29), calibrated against this
@@ -343,9 +343,9 @@ outgrown its placement, not as evidence the caps themselves are
 miscalibrated. This is enforced directly, not just described here: `spec-
 linter`'s `R-LINT-022` (`D28`) emits a distinct finding whenever it fires.
 Two shapes of this have shown up in practice so far, not just one: a thin
-coordinator crowding fan-out together with spec-bundle words
+coordinator crowding fan-out together with component-doc words
 (`merge-orchestrator`, resolved by `D25`), and a self-contained component
-with no fan-out at all crowding spec-bundle words together with its own
+with no fan-out at all crowding component-doc words together with its own
 requirement/acceptance/generated-code counts instead (`spec-linter`
 itself, after `D29` added those dimensions — fan-out is irrelevant there;
 the signal is still real). Fan-out measures how many neighbors a
@@ -366,11 +366,11 @@ analog of `verifier-orchestrator`'s existing per-component dispatch — the
 split mirrored a pattern already present, it wasn't invented from
 scratch. Expect fan-out itself **not** to drop from such a split — the
 coordinator still has to call the new component — the dimension that
-should actually move is spec-bundle words.
+should actually move is component-doc words.
 
 Sometimes the honest conclusion is that no precedent exists and no split
 is warranted: `spec-linter` crowding `generated_code_loc`,
-`requirement_count`, and `spec_bundle_words` together reflects one
+`requirement_count`, and `component_doc_words` together reflects one
 cohesive component with many genuinely independent, correlated rules —
 not a hidden second responsibility with some other component's shape to
 borrow. Splitting a single-pass structural linter into sub-checkers for

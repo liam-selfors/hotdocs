@@ -169,7 +169,7 @@ Specced in full depth so far:
   `fan_out` is 15 as of D30 (14 after D25's extraction, +1 for
   `llm-endpoint`; D39 swapped `cache-manager` for `provenance-checker`
   without changing the count) — confirmed against the actual linter, together with
-  `spec_bundle_words` the one component besides `spec-linter` whose
+  `component_doc_words` the one component besides `spec-linter` whose
   `R-LINT-022` crowding finding is real, accepted, and explained rather
   than resolved — see `specs/architecture/pipeline-decomposition.md`'s
   dedicated note.
@@ -210,7 +210,7 @@ when earlier design discussions surfaced real gaps nothing owned yet,
 `merge-orchestrator` once a real coupling, crowding, or correctness
 signal — not speculation — justified it). The real linter
 (`gen/spec-linter/`) validates the entire corpus clean: 0 failures,
-17 warnings — all `spec_bundle_words`/`requirement_count`/
+17 warnings — all `component_doc_words`/`requirement_count`/
 `acceptance_count`/`generated_code_loc` near-misses, `merge-orchestrator`
 and `spec-linter`'s `R-LINT-022` crowding findings (D28), and four
 individual dense files caught by the per-file check (`R-LINT-023`,

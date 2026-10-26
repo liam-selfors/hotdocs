@@ -63,7 +63,7 @@ nothing about it changed.
 
 ## A related, smaller discipline: don't let a name collide with itself
 
-Two of this session's own cleanup efforts (`spec_bundle_words` vs. the
+Two of this session's own cleanup efforts (`component_doc_words` vs. the
 `SpecBundle` type, and `cache_hit` meaning two different scopes before
 `D39`'s rename) both trace to the same root mistake: reusing a word for
 a narrower or broader concept than its existing meaning, rather than

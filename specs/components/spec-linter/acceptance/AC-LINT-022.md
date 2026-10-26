@@ -4,7 +4,7 @@ Covers: R-LINT-022
 Kind: compiled
 
 ```gherkin
-Given a component whose generated_code_loc and spec_bundle_words are both
+Given a component whose generated_code_loc and component_doc_words are both
   over their warn thresholds, and a second component with only
   generated_code_loc over its warn threshold
 When the linter runs

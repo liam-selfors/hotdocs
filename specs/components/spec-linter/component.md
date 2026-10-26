@@ -76,3 +76,6 @@ word/LOC counting scope, interface-surface-element counting)._
 ## Change log
 
 - Initial draft.
+- `D40`: `spec_bundle_words` renamed `component_doc_words`
+  (`R-LINT-012`) — collided with the narrower `SpecBundle` type. Added
+  `R-LINT-026`, validating `D<N>` citations.

@@ -862,7 +862,7 @@ def _count_interface_surface(comp: Component) -> int:
 
 SIZE_CAPS = {
     "generated_code_loc": (800, 1500),
-    "spec_bundle_words": (2000, 4000),
+    "component_doc_words": (2000, 4000),
     "requirement_count": (20, 40),
     "interface_surface": (10, 20),
     "fan_out": (7, None),
@@ -877,7 +877,7 @@ SIZE_CAPS = {
     "acceptance_count": (25, 50),
 }
 
-# R-LINT-023 (D29): a per-FILE word cap, distinct from spec_bundle_words'
+# R-LINT-023 (D29): a per-FILE word cap, distinct from component_doc_words'
 # whole-bundle aggregate above — flags which specific unit file is dense,
 # rather than only the bundle total. Applies to requirements/ and
 # acceptance/ files specifically: D15's design intent is that each is one
@@ -926,7 +926,7 @@ def _size_measurements(corpus: Corpus) -> dict[str, dict[str, int]]:
 
         result[name] = {
             "generated_code_loc": loc,
-            "spec_bundle_words": word_count,
+            "component_doc_words": word_count,
             "requirement_count": req_count,
             "interface_surface": iface_surface,
             "fan_out": fan_out,
@@ -991,7 +991,7 @@ def rule_decomposition_signal(corpus: Corpus) -> list[Finding]:
 def rule_unit_file_size(corpus: Corpus) -> list[Finding]:
     """R-LINT-023 (D29, SPEC_GUIDELINES.md §4).
 
-    A per-FILE word cap, distinct from R-LINT-012's spec_bundle_words
+    A per-FILE word cap, distinct from R-LINT-012's component_doc_words
     aggregate — names the specific oversized file rather than only the
     bundle total. Scoped to requirements/ and acceptance/: D15's intent is
     that each is one atomic, single-purpose unit, so one running long is a
@@ -1070,6 +1070,29 @@ def rule_purpose_length(corpus: Corpus) -> list[Finding]:
             findings.append(Finding("R-LINT-025", SEVERITY_WARN, comp.root.rel_path,
                                      _find_line(comp.root.body, "## Purpose"),
                                      f"Purpose is {words} words, exceeding warn threshold {warn_at}"))
+    return findings
+
+
+FROZEN_DECISION_MAX = 14  # D1-D14 live only in notes/initial-ideas.md by design (D40)
+
+
+def rule_decision_citation_resolution(corpus: Corpus) -> list[Finding]:
+    """R-LINT-026 (D40). Every D<N> citation in a live doc MUST resolve
+    to specs/decisions/D<N>.md, except D1-D14 (frozen, never formalized
+    as files). Mirrors rule_backward_traceability's R-id/P-id check for
+    the one reference kind it never covered."""
+    findings = []
+    for doc in corpus.docs:
+        if doc.doc_type == "decision":
+            continue
+        for m in DECISION_CITATION_RE.finditer(doc.body):
+            n = int(m.group(0)[1:])
+            if n <= FROZEN_DECISION_MAX:
+                continue
+            if not (corpus.repo_root / "specs" / "decisions" / f"D{n}.md").is_file():
+                line = doc.body.count("\n", 0, m.start()) + 1
+                findings.append(Finding("R-LINT-026", SEVERITY_FAIL, doc.rel_path, line,
+                                         f"D{n} does not resolve to any specs/decisions/D{n}.md file"))
     return findings
 
 
@@ -1161,6 +1184,7 @@ ALL_RULES = [
     rule_unit_file_size,
     rule_purpose_dependent_safe,
     rule_purpose_length,
+    rule_decision_citation_resolution,
     rule_secret_field_safety,
     rule_glossary_singularity,
     rule_no_trailing_whitespace,

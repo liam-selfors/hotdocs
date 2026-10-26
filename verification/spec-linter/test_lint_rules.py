@@ -220,7 +220,7 @@ def test_ac_lint_022_fires_on_two_crowded_dimensions(corpus_root):
     report = run_lint(corpus_root)
     assert has_finding(report, "R-LINT-022", severity="warn")
     finding = next(f for f in report.findings if f.rule_id == "R-LINT-022")
-    assert "generated_code_loc" in finding.message and "spec_bundle_words" in finding.message
+    assert "generated_code_loc" in finding.message and "component_doc_words" in finding.message
 
 
 def test_ac_lint_022_does_not_fire_on_one_crowded_dimension(corpus_root):
@@ -388,3 +388,23 @@ def test_ac_lint_025_long_purpose(corpus_root):
 def test_ac_lint_025_short_purpose_does_not_fire(corpus_root):
     report = run_lint(corpus_root)
     assert not has_finding(report, "R-LINT-025")
+
+
+def test_ac_lint_026_dangling_decision_citation(corpus_root):
+    component = _comp(corpus_root) / "component.md"
+    component.write_text(component.read_text().replace(
+        "In scope: everything. Out of scope: nothing.",
+        "In scope: everything (D500). Out of scope: nothing.",
+    ))
+    report = run_lint(corpus_root)
+    assert has_finding(report, "R-LINT-026")
+
+
+def test_ac_lint_026_frozen_decision_does_not_fire(corpus_root):
+    component = _comp(corpus_root) / "component.md"
+    component.write_text(component.read_text().replace(
+        "In scope: everything. Out of scope: nothing.",
+        "In scope: everything (D5). Out of scope: nothing.",
+    ))
+    report = run_lint(corpus_root)
+    assert not has_finding(report, "R-LINT-026")

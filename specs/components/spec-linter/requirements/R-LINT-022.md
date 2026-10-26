@@ -9,7 +9,7 @@
 
   Deliberately keyed off *warn*, not hard-fail: the whole point is to
   surface the signal before a hard-fail forces the question, the way D25's
-  own `merge-orchestrator` extraction happened only after `spec_bundle_words`
+  own `merge-orchestrator` extraction happened only after `component_doc_words`
   had already crossed 4000. This rule MUST NOT itself ever raise a hard
   failure — it is advisory, same severity class as the R-LINT-012 findings
   it correlates, never a merge-blocking condition of its own.

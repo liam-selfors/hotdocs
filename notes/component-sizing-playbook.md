@@ -26,7 +26,7 @@ If **two or more** dimensions are crowding together, continue.
 
 ## Step 1: Classify the shape
 
-- **Fan-out + spec-bundle words together** — a coordinator whose own
+- **Fan-out + component-doc words together** — a coordinator whose own
   owned-logic has grown alongside its call count (`merge-orchestrator`
   under `D25`, and again under `D39`). Go to Step 2.
 - **Words/counts crowding with little or no fan-out** — a dense,
@@ -53,10 +53,10 @@ produced”) — a real conceptual seam, not a cosmetic one.
 
 **If a real precedent exists:** extract it. Expect `fan_out` to **stay
 flat** — the coordinator still has to call the new component — the
-dimension that's supposed to move is `spec_bundle_words`.
+dimension that's supposed to move is `component_doc_words`.
 
 **But don't assume words will actually drop.** `D25`'s extraction did
-drop `spec_bundle_words` "well clear" of both thresholds — the
+drop `component_doc_words` "well clear" of both thresholds — the
 capability-scenario dispatch logic moved out completely, taking its
 words with it. `D39`'s extraction did **not**: `provenance-checker`
 took the *mechanics* of the hit/miss check, but `merge-orchestrator`
