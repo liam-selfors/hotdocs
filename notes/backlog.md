@@ -11,6 +11,25 @@ Nothing here is normative. Nothing here is implemented.
 
 ---
 
+## A generating model can guess a dependency's import path wrong (`D54`)
+
+`SpecBundle.dependency_interfaces` (`R-ASSEMBLE-002`) gives a
+dependency's public contract — names, signatures, fields — but never
+says how that contract is organized into files or submodules, since no
+component's `interface/` spec has ever needed to say so before two
+independently-generated components actually needed to interoperate.
+`generator`'s own self-regeneration attempt (`D54`) assumed
+`cache-manager` was a package with a `.data` submodule; the real one is
+a flat module — an import failure, caught before any acceptance
+criterion was even attempted. Not resolved: either a corpus-wide
+module-layout convention, or having `spec-bundle-assembler` expose a
+dependency's actual public import path explicitly in the bundle. Will
+matter more as more components are generated and start depending on
+each other's generated code rather than hand-written code a human laid
+out once.
+
+---
+
 ~~**The subagent-based model-call simulation isn't reproducible from a
 clean clone.**~~ **Resolved by `D47`.** The four `.claude/agents/*.md`
 definitions (`generator`/`test-author`/`judge`/

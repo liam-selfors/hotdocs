@@ -129,3 +129,8 @@ See `constraints.md`.
   value — `interface/data/ModelResponse.md` only ever fixes a JSON
   shape, not a Python type, and each self-hosted regeneration of
   `llm-endpoint` has returned a different concrete one.
+- `D54`: a real attempt to regenerate this component itself failed to
+  import (assumed `cache-manager` was a package with a `.data`
+  submodule; it is a flat module) and was correctly not swapped in —
+  `gen/generator/generator.py` is unchanged. See `notes/backlog.md` for
+  the generalizable gap this exposed.

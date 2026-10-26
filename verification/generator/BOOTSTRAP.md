@@ -49,3 +49,11 @@ verification requires a real model call.
 The real end-to-end integration — a genuine cold-generation attempt
 against the real corpus, through this exact code — is the self-hosting
 experiment recorded in `specs/decisions/D51.md`, not repeated here.
+
+**This component was itself the target of a real self-regeneration
+attempt (`D54`)** — a well-architected five-file candidate came back,
+but failed to import (it assumed `cache-manager` was a package with a
+`.data` submodule; the real one is a flat module) and was correctly
+rejected rather than swapped in. `gen/generator/generator.py` is still
+this file, unchanged. See `D54` for the full account and
+`notes/backlog.md` for the generalizable import-path gap it exposed.
