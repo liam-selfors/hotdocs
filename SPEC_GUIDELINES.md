@@ -261,6 +261,12 @@ externally relied upon beyond ordinary types). The generated interface
 **MUST** match this content exactly; any divergence is a hard drift-check
 failure.
 
+When a dependent needs one more fact than an existing boundary like
+this one currently exposes, see `notes/narrow-exception-pattern.md` —
+the move is almost always a new, narrowly-named field or mechanism
+alongside the original, never a loosened definition of what the
+original already means.
+
 **`acceptance/AC-<comp>-NNN.md`** — one acceptance criterion per file. See
 §5 for its internal format. The filename is the criterion's id.
 
@@ -410,6 +416,13 @@ Rules:
 - An `llm-judge` criterion **MUST** emit structured rationale alongside its
   verdict, for audit — the rationale is never itself a review gate.
 
+See `notes/determinism-trust-playbook.md` for how this `kind` split
+drives caching/trust design elsewhere in the pipeline (only `llm-judge`
+is ever a genuine trust decision; `compiled`/`generated-test` are
+always cheaply re-derivable), and `notes/structured-judgment-output.md`
+for the `{result, rationale}` pattern this rationale rule is one
+instance of.
+
 ---
 
 ## 6. Verification gates
@@ -517,6 +530,10 @@ secret_scan         result (secret-scanner) — missing from an earlier draft
 
 This is the evidence trail for incident debugging (is this a spec bug or a
 generation bug?) and doubles as an SBOM/SLSA-style attestation.
+
+Before designing any new mechanism to record or prove a fact happened,
+check whether this manifest (or the commit ledger it rides on) already
+carries it — see `notes/audit-before-you-build.md`.
 
 ---
 
