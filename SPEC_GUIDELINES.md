@@ -374,6 +374,11 @@ precedent, not a mandate to always act on it. If fan-out was the *only*
 dimension crowding, that's a different, already-accepted case —
 D2's "thin coordinator" shape, not this signal at all.
 
+See `notes/component-sizing-playbook.md` for the worked decision
+procedure and tightening toolbox this principle compresses — a
+step-by-step guide grounded in this corpus's own real cases (`D25`,
+`D29`, `D39`), not abstract advice.
+
 ---
 
 ## 5. Acceptance criteria
