@@ -78,4 +78,6 @@ word/LOC counting scope, interface-surface-element counting)._
 - Initial draft.
 - `D40`: `spec_bundle_words` renamed `component_doc_words`
   (`R-LINT-012`) — collided with the narrower `SpecBundle` type. Added
-  `R-LINT-026`, validating `D<N>` citations.
+  `R-LINT-026`/`027`, validating `D<N>` citations and quoted-section
+  pointers; trimmed `R-LINT-020`/`021`'s now-duplicate rationale into
+  pointers at `graph-query-engine.md` instead.

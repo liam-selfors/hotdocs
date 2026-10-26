@@ -161,7 +161,7 @@ Specced in full depth so far:
   calls `capability-scenario-verifier` once every component has passed
   per-component verification; the capability-scenario dispatch logic itself
   (and the capability-intersection lookup) lived here only until D25,
-  once both this component's fan-out and its spec-bundle word count
+  once both this component's fan-out and its component-doc word count
   crowded their caps at once — it was extracted into
   `capability-scenario-verifier` as the cross-component analog of
   `verifier-orchestrator`'s own per-component dispatch; this component now

@@ -19,34 +19,41 @@ def _comp(root, name="foo"):
     return root / "specs" / "components" / name
 
 
+def _patch(path, *replacements):
+    """Apply one or more (old, new) text replacements to a file in sequence.
+    Centralizes the read -> replace -> write boilerplate every fixture
+    mutation below used to repeat on its own (D40)."""
+    text = path.read_text()
+    for old, new in replacements:
+        text = text.replace(old, new)
+    path.write_text(text)
+
+
 def test_ac_lint_001_missing_owners(corpus_root):
-    component = _comp(corpus_root) / "component.md"
-    component.write_text(component.read_text().replace("owners: [test-team]\n", ""))
+    _patch(_comp(corpus_root) / "component.md", ("owners: [test-team]\n", ""))
     report = run_lint(corpus_root)
     assert has_finding(report, "R-LINT-001")
 
 
 def test_ac_lint_002_ratified_with_open_questions(corpus_root):
-    component = _comp(corpus_root) / "component.md"
-    text = component.read_text()
-    text = text.replace("status: draft", "status: ratified")
-    text = text.replace("## Open questions\n", "## Open questions\n\n- Still unresolved.\n")
-    component.write_text(text)
+    _patch(
+        _comp(corpus_root) / "component.md",
+        ("status: draft", "status: ratified"),
+        ("## Open questions\n", "## Open questions\n\n- Still unresolved.\n"),
+    )
     report = run_lint(corpus_root)
     assert has_finding(report, "R-LINT-002")
 
 
 def test_ac_lint_003_dangling_depends_on(corpus_root):
-    component = _comp(corpus_root) / "component.md"
-    component.write_text(component.read_text().replace("depends_on: []", "depends_on: [comp-bar]"))
+    _patch(_comp(corpus_root) / "component.md", ("depends_on: []", "depends_on: [comp-bar]"))
     report = run_lint(corpus_root)
     assert has_finding(report, "R-LINT-003")
     assert any("comp-bar" in f.message for f in report.findings if f.rule_id == "R-LINT-003")
 
 
 def test_ac_lint_004_dependency_cycle(corpus_root):
-    foo = _comp(corpus_root) / "component.md"
-    foo.write_text(foo.read_text().replace("depends_on: []", "depends_on: [comp-bar]"))
+    _patch(_comp(corpus_root) / "component.md", ("depends_on: []", "depends_on: [comp-bar]"))
 
     bar_dir = _comp(corpus_root, "bar")
     (bar_dir / "requirements").mkdir(parents=True)
@@ -78,25 +85,25 @@ def test_ac_lint_004_dependency_cycle(corpus_root):
 
 
 def test_ac_lint_005_sealed_without_source_path(corpus_root):
-    component = _comp(corpus_root) / "component.md"
-    component.write_text(component.read_text().replace("sealed: false", "sealed: true"))
+    _patch(_comp(corpus_root) / "component.md", ("sealed: false", "sealed: true"))
     report = run_lint(corpus_root)
     assert has_finding(report, "R-LINT-005")
 
 
 def test_ac_lint_006_non_sealed_zero_realizes(corpus_root):
-    component = _comp(corpus_root) / "component.md"
-    component.write_text(component.read_text().replace("realizes: [P-TEST]", "realizes: []"))
+    _patch(_comp(corpus_root) / "component.md", ("realizes: [P-TEST]", "realizes: []"))
     report = run_lint(corpus_root)
     assert has_finding(report, "R-LINT-006")
 
 
 def test_ac_lint_007_requirement_without_rfc2119_keyword(corpus_root):
-    req = _comp(corpus_root) / "requirements" / "R-FOO-001.md"
-    req.write_text(req.read_text().replace(
-        "**R-FOO-001** — The component MUST do the one thing it is specified to do.",
-        "**R-FOO-001** — The component does the one thing it is specified to do.",
-    ))
+    _patch(
+        _comp(corpus_root) / "requirements" / "R-FOO-001.md",
+        (
+            "**R-FOO-001** — The component MUST do the one thing it is specified to do.",
+            "**R-FOO-001** — The component does the one thing it is specified to do.",
+        ),
+    )
     report = run_lint(corpus_root)
     assert has_finding(report, "R-LINT-007")
 
@@ -112,15 +119,16 @@ def test_ac_lint_008_requirement_with_no_covering_criterion(corpus_root):
 
 
 def test_ac_lint_009_covers_dangling_reference(corpus_root):
-    acc = _comp(corpus_root) / "acceptance" / "AC-FOO-001.md"
-    acc.write_text(acc.read_text().replace("Covers: R-FOO-001", "Covers: R-DOES-NOT-EXIST"))
+    _patch(
+        _comp(corpus_root) / "acceptance" / "AC-FOO-001.md",
+        ("Covers: R-FOO-001", "Covers: R-DOES-NOT-EXIST"),
+    )
     report = run_lint(corpus_root)
     assert has_finding(report, "R-LINT-009")
 
 
 def test_ac_lint_010_criterion_missing_kind_tag(corpus_root):
-    acc = _comp(corpus_root) / "acceptance" / "AC-FOO-001.md"
-    acc.write_text(acc.read_text().replace("Kind: compiled\n", ""))
+    _patch(_comp(corpus_root) / "acceptance" / "AC-FOO-001.md", ("Kind: compiled\n", ""))
     report = run_lint(corpus_root)
     assert has_finding(report, "R-LINT-010")
 
@@ -132,11 +140,13 @@ def test_ac_lint_011_near_verbatim_restatement_fails(corpus_root):
     # fixture's text is a near-identical restatement of "a thing this corpus
     # talks about" (the glossary's definition of Widget), so it should still
     # fire R-LINT-011.
-    component = _comp(corpus_root) / "component.md"
-    component.write_text(component.read_text().replace(
-        "## Definitions\n\nNo deltas from `specs/glossary.md`.\n",
-        "## Definitions\n\n- **Widget** — a thing this corpus talks about.\n",
-    ))
+    _patch(
+        _comp(corpus_root) / "component.md",
+        (
+            "## Definitions\n\nNo deltas from `specs/glossary.md`.\n",
+            "## Definitions\n\n- **Widget** — a thing this corpus talks about.\n",
+        ),
+    )
     report = run_lint(corpus_root)
     assert has_finding(report, "R-LINT-011")
 
@@ -147,12 +157,14 @@ def test_ac_lint_011b_genuine_delta_does_not_fail(corpus_root):
     # away from. (It legitimately falls to R-LINT-015 instead, which will
     # report `skipped` with no judge configured — asserted separately below,
     # not here, since R-LINT-011's own correctness is what this test is for.)
-    component = _comp(corpus_root) / "component.md"
-    component.write_text(component.read_text().replace(
-        "## Definitions\n\nNo deltas from `specs/glossary.md`.\n",
-        "## Definitions\n\n- **Widget** — in Foo specifically, always carries a "
-        "serial number assigned at creation time.\n",
-    ))
+    _patch(
+        _comp(corpus_root) / "component.md",
+        (
+            "## Definitions\n\nNo deltas from `specs/glossary.md`.\n",
+            "## Definitions\n\n- **Widget** — in Foo specifically, always carries a "
+            "serial number assigned at creation time.\n",
+        ),
+    )
     report = run_lint(corpus_root)
     assert not has_finding(report, "R-LINT-011")
 
@@ -165,22 +177,26 @@ def test_ac_lint_011_old_fixture_now_routes_to_015_not_011(corpus_root):
     # definition, so it must NOT fire R-LINT-011 — it's R-LINT-015's job
     # (a semantic conflict, not a structural restatement) and, with no judge
     # configured here, reports skipped rather than silently passing.
-    component = _comp(corpus_root) / "component.md"
-    component.write_text(component.read_text().replace(
-        "## Definitions\n\nNo deltas from `specs/glossary.md`.\n",
-        "## Definitions\n\n- **Widget** — a totally different meaning than the glossary gives it.\n",
-    ))
+    _patch(
+        _comp(corpus_root) / "component.md",
+        (
+            "## Definitions\n\nNo deltas from `specs/glossary.md`.\n",
+            "## Definitions\n\n- **Widget** — a totally different meaning than the glossary gives it.\n",
+        ),
+    )
     report = run_lint(corpus_root)
     assert not has_finding(report, "R-LINT-011")
     assert has_finding(report, "R-LINT-015", severity="skipped")
 
 
 def test_ac_lint_015_conflict_detected_with_judge_configured(corpus_root):
-    component = _comp(corpus_root) / "component.md"
-    component.write_text(component.read_text().replace(
-        "## Definitions\n\nNo deltas from `specs/glossary.md`.\n",
-        "## Definitions\n\n- **Widget** — a totally different meaning than the glossary gives it.\n",
-    ))
+    _patch(
+        _comp(corpus_root) / "component.md",
+        (
+            "## Definitions\n\nNo deltas from `specs/glossary.md`.\n",
+            "## Definitions\n\n- **Widget** — a totally different meaning than the glossary gives it.\n",
+        ),
+    )
 
     def mock_judge(term, local_text, glossary_text):
         return (True, f"'{local_text}' contradicts '{glossary_text}' for '{term}'")
@@ -192,11 +208,13 @@ def test_ac_lint_015_conflict_detected_with_judge_configured(corpus_root):
 
 
 def test_ac_lint_015b_skipped_without_model(corpus_root):
-    component = _comp(corpus_root) / "component.md"
-    component.write_text(component.read_text().replace(
-        "## Definitions\n\nNo deltas from `specs/glossary.md`.\n",
-        "## Definitions\n\n- **Widget** — a totally different meaning than the glossary gives it.\n",
-    ))
+    _patch(
+        _comp(corpus_root) / "component.md",
+        (
+            "## Definitions\n\nNo deltas from `specs/glossary.md`.\n",
+            "## Definitions\n\n- **Widget** — a totally different meaning than the glossary gives it.\n",
+        ),
+    )
     report = run_lint(corpus_root)  # no judge
     assert has_finding(report, "R-LINT-015", severity="skipped")
     assert report.hard_failures == 0  # skipped must never count as a failure
@@ -307,10 +325,10 @@ def test_ac_lint_017_guarantee_heading_mismatch(corpus_root):
 
 
 def test_ac_lint_018_dangling_depends_on_guarantees(corpus_root):
-    component = _comp(corpus_root) / "component.md"
-    component.write_text(component.read_text().replace(
-        "depends_on: []", "depends_on: []\ndepends_on_guarantees: [G-DOES-NOT-EXIST]"
-    ))
+    _patch(
+        _comp(corpus_root) / "component.md",
+        ("depends_on: []", "depends_on: []\ndepends_on_guarantees: [G-DOES-NOT-EXIST]"),
+    )
     report = run_lint(corpus_root)
     assert has_finding(report, "R-LINT-018")
 
@@ -341,10 +359,10 @@ def test_ac_lint_018b_guarantee_owner_not_in_depends_on(corpus_root):
     )
 
     # foo references bar's guarantee but never declares bar as a dependency.
-    foo = _comp(corpus_root) / "component.md"
-    foo.write_text(foo.read_text().replace(
-        "depends_on: []", "depends_on: []\ndepends_on_guarantees: [G-BAR-001]"
-    ))
+    _patch(
+        _comp(corpus_root) / "component.md",
+        ("depends_on: []", "depends_on: []\ndepends_on_guarantees: [G-BAR-001]"),
+    )
     report = run_lint(corpus_root)
     assert has_finding(report, "R-LINT-018")
     assert any("comp-bar" in f.message for f in report.findings if f.rule_id == "R-LINT-018")
@@ -360,11 +378,13 @@ def test_ac_lint_019_trailing_whitespace(corpus_root):
 
 
 def test_ac_lint_024_purpose_cites_decision(corpus_root):
-    component = _comp(corpus_root) / "component.md"
-    component.write_text(component.read_text().replace(
-        "A minimal component for exercising the linter.",
-        "A minimal component for exercising the linter, extracted once D30 found a real coupling.",
-    ))
+    _patch(
+        _comp(corpus_root) / "component.md",
+        (
+            "A minimal component for exercising the linter.",
+            "A minimal component for exercising the linter, extracted once D30 found a real coupling.",
+        ),
+    )
     report = run_lint(corpus_root)
     assert has_finding(report, "R-LINT-024")
 
@@ -375,11 +395,11 @@ def test_ac_lint_024_clean_purpose_does_not_fire(corpus_root):
 
 
 def test_ac_lint_025_long_purpose(corpus_root):
-    component = _comp(corpus_root) / "component.md"
     long_purpose = " ".join(["word"] * 160)
-    component.write_text(component.read_text().replace(
-        "A minimal component for exercising the linter.", long_purpose
-    ))
+    _patch(
+        _comp(corpus_root) / "component.md",
+        ("A minimal component for exercising the linter.", long_purpose),
+    )
     report = run_lint(corpus_root)
     assert has_finding(report, "R-LINT-025")
     assert not has_finding(report, "R-LINT-024")
@@ -391,20 +411,38 @@ def test_ac_lint_025_short_purpose_does_not_fire(corpus_root):
 
 
 def test_ac_lint_026_dangling_decision_citation(corpus_root):
-    component = _comp(corpus_root) / "component.md"
-    component.write_text(component.read_text().replace(
-        "In scope: everything. Out of scope: nothing.",
-        "In scope: everything (D500). Out of scope: nothing.",
-    ))
+    _patch(
+        _comp(corpus_root) / "component.md",
+        ("In scope: everything. Out of scope: nothing.", "In scope: everything (D500). Out of scope: nothing."),
+    )
     report = run_lint(corpus_root)
     assert has_finding(report, "R-LINT-026")
 
 
 def test_ac_lint_026_frozen_decision_does_not_fire(corpus_root):
-    component = _comp(corpus_root) / "component.md"
-    component.write_text(component.read_text().replace(
-        "In scope: everything. Out of scope: nothing.",
-        "In scope: everything (D5). Out of scope: nothing.",
-    ))
+    _patch(
+        _comp(corpus_root) / "component.md",
+        ("In scope: everything. Out of scope: nothing.", "In scope: everything (D5). Out of scope: nothing."),
+    )
     report = run_lint(corpus_root)
     assert not has_finding(report, "R-LINT-026")
+
+
+def test_ac_lint_027_section_reference_resolution(corpus_root):
+    arch_dir = corpus_root / "specs" / "architecture"
+    arch_dir.mkdir(parents=True)
+    (arch_dir / "arch-doc.md").write_text("# Arch Doc\n\n## Query surface\n\nSome views.\n")
+    _patch(
+        _comp(corpus_root) / "requirements" / "R-FOO-001.md",
+        (
+            "The component MUST do the one thing it is specified to do.",
+            "The component MUST do the one thing `specs/architecture/arch-doc.md`'s "
+            '"Query surface" section describes, and the thing '
+            '`specs/architecture/arch-doc.md`\'s "Nonexistent Heading" section does not.',
+        ),
+    )
+    report = run_lint(corpus_root)
+    assert has_finding(report, "R-LINT-027")
+    findings = [f for f in report.findings if f.rule_id == "R-LINT-027"]
+    assert len(findings) == 1
+    assert "Nonexistent Heading" in findings[0].message

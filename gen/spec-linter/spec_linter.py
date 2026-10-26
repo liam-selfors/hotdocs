@@ -1096,6 +1096,34 @@ def rule_decision_citation_resolution(corpus: Corpus) -> list[Finding]:
     return findings
 
 
+SECTION_REF_RE = re.compile(r"`([\w./-]+\.md)`'s \"([^\"]+)\" section")
+
+
+def rule_section_reference_resolution(corpus: Corpus) -> list[Finding]:
+    """R-LINT-027 (D40). Every `<file>`'s "<Section>" section pointer in
+    a live doc MUST resolve to a real heading in that file. Catches a
+    cross-reference going stale when either the target file moves or
+    the section it names is renamed - exactly the risk R-LINT-020/021's
+    pointers to graph-query-engine.md's own sections now carry."""
+    findings = []
+    for doc in corpus.docs:
+        if doc.doc_type == "decision":
+            continue
+        for m in SECTION_REF_RE.finditer(doc.body):
+            path, heading = m.group(1), m.group(2)
+            line = doc.body.count("\n", 0, m.start()) + 1
+            target = corpus.repo_root / path
+            if not target.is_file():
+                findings.append(Finding("R-LINT-027", SEVERITY_FAIL, doc.rel_path, line,
+                                         f"{path} does not exist"))
+                continue
+            heading_re = re.compile(rf"^#+\s*{re.escape(heading)}\s*$", re.MULTILINE)
+            if not heading_re.search(target.read_text(encoding="utf-8")):
+                findings.append(Finding("R-LINT-027", SEVERITY_FAIL, doc.rel_path, line,
+                                         f'{path} has no "{heading}" heading'))
+    return findings
+
+
 def rule_secret_field_safety(corpus: Corpus) -> list[Finding]:
     """R-LINT-013.
 
@@ -1185,6 +1213,7 @@ ALL_RULES = [
     rule_purpose_dependent_safe,
     rule_purpose_length,
     rule_decision_citation_resolution,
+    rule_section_reference_resolution,
     rule_secret_field_safety,
     rule_glossary_singularity,
     rule_no_trailing_whitespace,

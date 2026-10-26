@@ -71,3 +71,20 @@ picking a more specific name. Before naming a new field or dimension,
 grep the corpus for the word you're about to reuse — if it already
 means something at a different scope, a few extra characters in a more
 specific name is cheaper than a future rename across a dozen files.
+
+## A named convention worth reusing by name: "implementation requirement, not a behavioral one"
+
+The exact phrase "This is an implementation requirement, not a
+behavioral one" appears independently in five requirements
+(`R-LINT-020`, `R-LINT-021`, `R-IMPACT-009`, `R-GRAPH-009`,
+`R-PACKET-011`) — every one of them moving *how* a check is computed
+(bespoke code → a shared graph query, a live call → an
+already-written manifest) without changing *what* it requires the
+answer to be. This is the narrow-exception pattern's natural
+companion: the boundary that must stay untouched here isn't a data
+contract, it's the distinction between relocating a mechanism and
+changing a behavior. When you make this exact move, use this exact
+phrase (or point at one of the five examples above) rather than
+re-deriving the distinction in your own words each time — it's a
+recognized convention now, not a coincidence five components arrived
+at independently.

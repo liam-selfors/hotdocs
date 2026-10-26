@@ -9,14 +9,15 @@
   R-GRAPH-003's per-node annotations and R-GRAPH-004/005's corpus-wide
   orphan rates MUST be computed as joins and aggregates against
   `nodes`/`edges`/`component_provenance` (all three named in
-  `graph-query-engine.md`'s "Query surface" section — `component_provenance`
-  is shared with `review-packet-builder`, R-PACKET-011, D26) plus one view
+  `specs/architecture/graph-query-engine.md`'s "Query surface" section —
+  `component_provenance` is shared with `review-packet-builder`,
+  R-PACKET-011, D26) plus one view
   scoped to this component alone (no other component needs size data
   joined onto the graph, so this one does not belong in the shared
   architecture doc):
 
-  - **`component_size`** — one row per component, the spec-bundle word
-    count R-LINT-012/D2 already defines (component.md + requirements/ +
+  - **`component_size`** — one row per component, the `component_doc_words`
+    count R-LINT-012/D2 already defines (`D40`; component.md + requirements/ +
     interface/ (+ data/, + guarantees/) + acceptance/ + constraints.md,
     as authored), computed the same way `spec_linter.py`'s
     `rule_size_caps` already does (`len(body.split())` summed per file)
