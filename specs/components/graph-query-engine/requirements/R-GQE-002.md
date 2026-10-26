@@ -10,17 +10,41 @@
 
 ```sql
 CREATE OR REPLACE VIEW edges AS
-SELECT id AS source_id, UNNEST(depends_on) AS target_id, 'depends_on' AS edge_type
-FROM read_yaml_frontmatter('{repo_root}/specs/components/*/component.md')
+SELECT
+  regexp_extract(content, 'id:\s*(\S+)', 1) AS source_id,
+  UNNEST(list_filter(list_transform(
+    string_split(regexp_extract(content, 'depends_on:\s*\[([^\]]*)\]', 1), ','),
+    lambda x: trim(x)
+  ), lambda x: x != '')) AS target_id,
+  'depends_on' AS edge_type
+FROM read_text('{repo_root}/specs/components/*/component.md')
 UNION ALL
-SELECT id, UNNEST(realizes), 'realizes'
-FROM read_yaml_frontmatter('{repo_root}/specs/components/*/component.md')
+SELECT
+  regexp_extract(content, 'id:\s*(\S+)', 1),
+  UNNEST(list_filter(list_transform(
+    string_split(regexp_extract(content, 'realizes:\s*\[([^\]]*)\]', 1), ','),
+    lambda x: trim(x)
+  ), lambda x: x != '')),
+  'realizes'
+FROM read_text('{repo_root}/specs/components/*/component.md')
 UNION ALL
-SELECT id, UNNEST(uses_var), 'uses_var'
-FROM read_yaml_frontmatter('{repo_root}/specs/components/*/component.md')
+SELECT
+  regexp_extract(content, 'id:\s*(\S+)', 1),
+  UNNEST(list_filter(list_transform(
+    string_split(regexp_extract(content, 'uses_var:\s*\[([^\]]*)\]', 1), ','),
+    lambda x: trim(x)
+  ), lambda x: x != '')),
+  'uses_var'
+FROM read_text('{repo_root}/specs/components/*/component.md')
 UNION ALL
-SELECT id, UNNEST(depends_on_guarantees), 'depends_on_guarantees'
-FROM read_yaml_frontmatter('{repo_root}/specs/components/*/component.md')
+SELECT
+  regexp_extract(content, 'id:\s*(\S+)', 1),
+  UNNEST(list_filter(list_transform(
+    string_split(regexp_extract(content, 'depends_on_guarantees:\s*\[([^\]]*)\]', 1), ','),
+    lambda x: trim(x)
+  ), lambda x: x != '')),
+  'depends_on_guarantees'
+FROM read_text('{repo_root}/specs/components/*/component.md')
 UNION ALL
 SELECT
   regexp_extract(filename, '(AC-[A-Za-z0-9-]+)\.md$', 1),
@@ -37,4 +61,15 @@ FROM (
 ```
 
   `{repo_root}` substitution and the `read_text` `filename:=true`
-  prohibition are the same as `R-GQE-001`.
+  prohibition are the same as `R-GQE-001`. The four `depends_on`/
+  `realizes`/`uses_var`/`depends_on_guarantees` arms MUST read
+  `component.md` via `read_text` and extract each field with a regex
+  over the flow-style `key: [a, b]` syntax `SPEC_GUIDELINES.md` §2
+  requires (confirmed via corpus-wide grep: never YAML block-list
+  style) — NOT via `read_yaml_frontmatter`'s struct-column
+  auto-detection, which silently DROPS a declared column from its
+  result schema (a bind-time "column not found" error at the call
+  site, not a null value) when that key is absent from every file in
+  the glob at once (`D44`) — true of `uses_var`/`depends_on_guarantees`
+  in sparse corpora such as `graph-query-engine`'s own test fixtures,
+  where no component happens to use either field.

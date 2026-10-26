@@ -46,6 +46,9 @@ from pathlib import Path
 
 import duckdb
 
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "graph-query-engine"))
+import graph_query_engine  # noqa: E402
+
 # ---------------------------------------------------------------------------
 # RFC 2119 keyword set.
 #
@@ -193,6 +196,7 @@ class Corpus:
     id_index: dict[str, Doc]
     glossary_defs: dict[str, str]  # lowercased term -> its definition text
     glossary_files: list[Path]
+    graph: duckdb.DuckDBPyConnection  # R-LINT-020/021: nodes/edges, loaded once per corpus
 
     @property
     def glossary_terms(self) -> set[str]:
@@ -334,9 +338,14 @@ def load_corpus(repo_root: Path) -> Corpus:
         if path not in glossary_files:
             glossary_files.append(path)
 
+    graph = duckdb.connect()
+    graph.execute("INSTALL yaml FROM community")
+    graph.execute("LOAD yaml")
+    graph_query_engine.load_views(graph, repo_root)
+
     return Corpus(repo_root=repo_root, docs=docs, components=components,
                   id_index=id_index, glossary_defs=glossary_defs,
-                  glossary_files=glossary_files)
+                  glossary_files=glossary_files, graph=graph)
 
 
 # ---------------------------------------------------------------------------
@@ -434,10 +443,37 @@ def rule_ratified_closure(corpus: Corpus) -> list[Finding]:
 
 
 def rule_reference_resolution(corpus: Corpus) -> list[Finding]:
-    """R-LINT-003."""
+    """R-LINT-003 — a query over the shared `edges`/`nodes` views
+    (`R-LINT-020`) for component-level depends_on/realizes/uses_var
+    references. Those views are scoped to component.md frontmatter only
+    (graph-query-engine's "Query surface"), so one small residual
+    native-Python check covers `architecture` docs — the one other
+    doc_type in FRONTMATTER_BEARING_TYPES with a real non-empty
+    depends_on in this corpus (`specs/architecture/
+    pipeline-decomposition.md`); confirmed via grep that `product`/`var`/
+    `decision` docs never populate these fields, so they need no such
+    special-casing."""
     findings = []
+    rows = corpus.graph.execute("""
+        SELECT e.source_id, e.edge_type, e.target_id,
+               n.id IS NOT NULL AS target_exists, n.status AS target_status
+        FROM edges e
+        LEFT JOIN nodes n ON n.id = e.target_id
+        WHERE e.edge_type IN ('depends_on', 'realizes', 'uses_var')
+    """).fetchall()
+    for source_id, field_name, ref, target_exists, target_status in rows:
+        doc = corpus.id_index.get(source_id)
+        if doc is None:
+            continue
+        if not target_exists:
+            findings.append(Finding("R-LINT-003", SEVERITY_FAIL, doc.rel_path, 1,
+                                     f"{field_name} references '{ref}', which does not exist"))
+        elif target_status == "deprecated":
+            findings.append(Finding("R-LINT-003", SEVERITY_FAIL, doc.rel_path, 1,
+                                     f"{field_name} references '{ref}', which is deprecated"))
+
     for doc in corpus.docs:
-        if doc.doc_type not in FRONTMATTER_BEARING_TYPES:
+        if doc.doc_type != "architecture":
             continue
         for field_name in ("depends_on", "realizes", "uses_var"):
             for ref in doc.frontmatter.get(field_name, []) or []:

@@ -34,3 +34,32 @@ real file tree, not DuckDB) — not just "did the query run without
 error." This is the same discipline `D42`/`D43` already established:
 running SQL and getting a result back is not the same as the result
 being correct.
+
+**Two more bugs found only once this engine was wired into a second,
+sparser caller** (`spec-linter`'s own test suite, which builds minimal
+synthetic corpora rather than always using this repo's real one — D44):
+
+- `read_yaml_frontmatter` raises when its glob matches zero files, the
+  same way `read_json` already did for `component_provenance` — but for
+  `nodes`'s `specs/vars/*.md` and `specs/product/*.md` arms this time.
+  Every one of `spec-linter`'s 42 tests hit this identically, since its
+  fixture never creates a `specs/vars/` directory at all. `load_views`
+  now pre-checks each such glob and substitutes a typed empty relation
+  when it has zero matches (`R-GQE-007`).
+- `read_yaml_frontmatter`'s struct-column auto-detection silently DROPS
+  a declared frontmatter key from its result schema — not a NULL value,
+  a bind-time "column not found" error at the call site — when that key
+  is absent from every file in the glob at once. `edges`'s `uses_var`/
+  `depends_on_guarantees` arms hit this against `spec-linter`'s fixture,
+  where no test component happens to set either field. Tried forcing an
+  explicit schema via `read_yaml`'s `columns`/`auto_detect` parameters
+  first — confirmed, by hand, that frontmatter-mode column detection
+  still silently intersects with whatever keys are actually present,
+  ignoring an explicitly requested wider schema. Rewrote those four arms
+  to read raw text and extract each field with a regex over the
+  flow-style `key: [a, b]` syntax instead (`R-GQE-002`) — confirmed via
+  corpus-wide grep that every real `depends_on`/`realizes`/`uses_var`/
+  `depends_on_guarantees` value already uses that syntax, never YAML
+  block-list style — and confirmed the rewrite produces the exact same
+  323 edges on this repo's real corpus as the original did, before
+  switching it in.

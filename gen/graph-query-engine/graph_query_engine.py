@@ -43,6 +43,31 @@ SELECT
 WHERE false;
 """
 
+# read_yaml_frontmatter (unlike read_text, which tolerates a zero-match
+# glob natively — confirmed by hand, not assumed) raises on a glob that
+# matches zero files. Found while wiring spec-linter's rules onto this
+# engine: its own test fixtures build minimal synthetic corpora that
+# legitimately have no specs/vars/ (and, hypothetically, no specs/
+# product/) yet — the same "expected state, not an error" shape as
+# component_provenance above, just for a different pair of call sites.
+# `specs/components/*/component.md` is deliberately NOT guarded here: a
+# corpus with zero components never occurs (there is no corpus without
+# at least the component whose spec is being linted), and the same
+# literal call text is shared with component_docs's JOIN ... USING
+# (filename), which a 3-column id/title/status fallback would break.
+_FRONTMATTER_ZERO_MATCH_GUARDS: list[tuple[str, str, str]] = [
+    (
+        "specs/vars/*.md",
+        "read_yaml_frontmatter('{repo_root}/specs/vars/*.md', filename:=true)",
+        "(SELECT NULL::VARCHAR AS id, NULL::VARCHAR AS title, NULL::VARCHAR AS status WHERE false)",
+    ),
+    (
+        "specs/product/*.md",
+        "read_yaml_frontmatter('{repo_root}/specs/product/*.md', filename:=true)",
+        "(SELECT NULL::VARCHAR AS id, NULL::VARCHAR AS title, NULL::VARCHAR AS status WHERE false)",
+    ),
+]
+
 
 def load_views(con: duckdb.DuckDBPyConnection, repo_root: Path) -> None:
     """R-GQE-007. Creates (or replaces) all six views on `con`, scoped
@@ -52,7 +77,11 @@ def load_views(con: duckdb.DuckDBPyConnection, repo_root: Path) -> None:
     degrading to an explicitly empty view when no .provenance.json
     files exist yet (R-GQE-005), which is expected state, not an error."""
     repo_root = repo_root.resolve()
-    sql = _VIEWS_SQL_PATH.read_text(encoding="utf-8").format(repo_root=str(repo_root))
+    sql = _VIEWS_SQL_PATH.read_text(encoding="utf-8")
+    for glob_suffix, needle, replacement in _FRONTMATTER_ZERO_MATCH_GUARDS:
+        if needle in sql and not any(repo_root.glob(glob_suffix)):
+            sql = sql.replace(needle, replacement)
+    sql = sql.format(repo_root=str(repo_root))
     has_provenance = any(repo_root.glob("verification/*/.provenance.json"))
     for statement in sql.split(";\n\n---\n\n"):
         # Strip leading full-line comments (-- ...) before checking for
