@@ -100,8 +100,11 @@ def _instantiate_backend(backend_name: str) -> Callable[..., Dict[str, Any]]:
 # ---------------------------------------------------------------------------
 
 # D52: floor is 300 seconds. Other backends/future tuning MAY raise this,
-# never lower it.
-ANTHROPIC_TIMEOUT_SECONDS = 300
+# never lower it. Raised to 600 after a real impact-analyzer generation
+# call (a larger, DuckDB/git-diffing-heavy component) took 437s -- still
+# within R-ENDPOINT-004's "at least 300 seconds" floor, just a tighter
+# bound than this corpus's largest real components now need.
+ANTHROPIC_TIMEOUT_SECONDS = 600
 
 _CLAUDE_CLI = "claude"
 
