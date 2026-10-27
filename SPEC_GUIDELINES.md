@@ -295,6 +295,24 @@ ADR-style. Append-only. Once a decision record is ratified it is immutable —
 a change in direction is a new, superseding record (`supersedes` field), never
 an edit to the old one.
 
+**One narrow, sanctioned exception (`D87`):** when a new decision's
+`supersedes` field names a prior one, that prior record's `status`
+field **MUST** flip from `ratified` to `deprecated` as part of the
+same change — a metadata-only edit, never touching the record's body.
+This is not a contradiction of immutability; it is the one update the
+`supersedes` mechanism itself requires to mean anything; without it,
+`deprecated` could never be set and `supersedes` would be a field with
+no consumer. `last_ratified_commit` **MUST** be retained unchanged —
+it is the historical fact of when the record *was* ratified, not a
+claim about whether it still is. See `R-LINT-029` for the resulting
+consistency check (every `supersedes` resolves to a now-`deprecated`
+record; every `deprecated` record is named by one).
+
+`supersedes` **MUST** name only a full replacement — a later decision
+that only partially reverses an earlier one's conclusion MUST NOT set
+`supersedes` or flip the earlier one to `deprecated`; it stays a plain
+prose cross-reference, same as before this rule existed.
+
 ### 3.6 Glossary (`specs/glossary.md`)
 
 Single file, no frontmatter, no per-spec entry limit. (D14)

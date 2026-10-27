@@ -84,10 +84,10 @@ recursive CTEs — more verbose, not infeasible.
 
 Rather than let every adopting component write its own
 `read_yaml_frontmatter()`/`read_text()`/`read_json()`/`UNNEST` calls,
-six shared views are the one surface all of them query — `nodes`,
+seven shared views are the one surface all of them query — `nodes`,
 `edges`, `component_docs`, `component_context`, `component_provenance`,
-`component_size`. Their exact definitions, generated SQL, and data
-contracts now live in their own component,
+`component_size`, `decision_lineage` (`D88`). Their exact definitions,
+generated SQL, and data contracts now live in their own component,
 `specs/components/graph-query-engine/` (`D44`) — this document keeps
 the adoption history below, not a second copy of the SQL.
 

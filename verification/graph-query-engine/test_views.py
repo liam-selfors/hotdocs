@@ -95,3 +95,21 @@ def test_ac_gqe_007_load_views_idempotent(con):
     load_views(con, REPO_ROOT)
     after = con.execute("SELECT count(*) FROM nodes").fetchone()[0]
     assert before == after
+
+
+def test_ac_gqe_008_decision_lineage_reflects_real_d31_d17_supersession(con):
+    """D88 -- decision_lineage must surface the one real supersedes
+    relationship this corpus actually has (D87, formalized under D88)."""
+    rows = con.execute(
+        "SELECT id, status, supersedes FROM decision_lineage WHERE id IN ('D17', 'D31')"
+    ).fetchall()
+    by_id = {r[0]: r for r in rows}
+    assert by_id["D31"][2] == "D17"  # supersedes column
+    assert by_id["D17"][1] == "deprecated"  # status column
+
+
+def test_ac_gqe_008_supersedes_is_null_not_empty_string(con):
+    rows = con.execute(
+        "SELECT supersedes FROM decision_lineage WHERE id = 'D44'"
+    ).fetchall()
+    assert rows[0][0] is None

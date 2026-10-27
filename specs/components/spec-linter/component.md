@@ -25,15 +25,15 @@ gate and the component everything else assumes has already run.
 `depends_on_guarantees` resolution; dependency-graph acyclicity;
 `R-id`/`G-id` formation and RFC 2119 usage; requirement↔acceptance
 traceability; acceptance-criterion well-formedness; glossary
-conformance and citation resolution; `supersedes`/`deprecated`
-consistency for decision records; component size caps; `specs/vars/`
-secret-field safety; glossary singularity; no trailing whitespace
+conformance/citation resolution; `supersedes`/`deprecated`
+consistency; component size caps; `specs/vars/` secret-field safety;
+glossary singularity; no trailing whitespace
 anywhere in a spec file.
 
-**Out of scope:** generation; verification of generated code's actual
+**Out of scope:** generation; verifying generated code's actual
 behavior. **Mostly free of model calls and judgment** — only
-R-LINT-015 is a deliberate exception (see its entry and
-`constraints.md`), genuinely about meaning, not structure.
+R-LINT-015 is a deliberate exception, genuinely about meaning, not
+structure.
 
 ## Definitions
 

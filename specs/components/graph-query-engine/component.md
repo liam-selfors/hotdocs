@@ -12,7 +12,7 @@ sealed: false
 
 ## Purpose
 
-Defines and generates the six shared DuckDB views
+Defines and generates the seven shared DuckDB views
 (`specs/architecture/graph-query-engine.md`'s "Query surface") every
 adopting component queries instead of writing its own frontmatter
 parsing, file globbing, or text extraction.
@@ -32,7 +32,7 @@ definition) and generates the SQL that runs it.
 
 ## Scope
 
-**In scope:** the six views' exact `CREATE VIEW` SQL; the loader
+**In scope:** the seven views' exact `CREATE VIEW` SQL; the loader
 contract a consumer calls to create them against a given repo root.
 
 **Out of scope:** deciding which queries a consumer runs against these
@@ -61,7 +61,7 @@ See `interface/data/`.
 
 See `acceptance/`.
 
-All seven criteria are `kind: compiled` — each view's SQL and the
+All eight criteria are `kind: compiled` — each view's SQL and the
 loader's own behavior are fully deterministic, no model or judgment
 involved.
 
