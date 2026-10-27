@@ -48,3 +48,44 @@ against rejected code without erroring. Caught by a failing traceback
 that still named the old (rejected) module's internal structure.
 Fixed by removing the whole `gen/test-author/` directory and
 recreating it with only the final candidate's one file.
+
+## Round 2 (`D94`): nonce-delimited output protocol
+
+The first real, non-mocked `author_test` call against a genuine
+downstream criterion — bootstrapping `provenance-tracker`, the first of
+the seven still-unbuilt components — surfaced a real gap invisible to
+every `AC-AUTHOR-*` criterion's own mocked-backend verification: the
+prompt said only "Output only the test code," with no reliable
+extraction step on the receiving end. Against five real criteria, this
+produced a markdown-fenced response once and four partial transcripts
+of an attempted (and blocked) tool call the rest of the time, since
+nothing told the model it has no tool or file access.
+
+Fixed in the spec first (`R-AUTHOR-009`, `D94`): the same per-call
+nonce-delimited BEGIN/END marker format `generator` already uses
+(`D38`), plus an explicit no-tool-access instruction. One real
+`generate()` call against the updated spec bundle produced a candidate
+that correctly implements both — markers, strict between-marker
+extraction (discarding any fence/narration outside them), and a
+distinct `malformed_response` outcome (file `None`, nothing cached or
+written to disk) when a response has no matching marker pair. Also
+drops this component's own redundant `CriterionBundle` class in favor
+of a bare duck-typed `bundle` parameter — not itself required by
+`R-AUTHOR-009`, but a reasonable simplification consistent with the
+corpus's general plain-value cross-component convention (the same
+reasoning `R-TRACK-004` states for `provenance-tracker`), so the hand-
+maintained `AC-AUTHOR-*` test suite's fixture now builds a
+`SimpleNamespace` instead.
+
+The hand-maintained `verification/test-author/test_test_author.py`
+suite (the same mocked-backend verification exception `D58`'s bootstrap
+already established for this component, since nothing else can verify
+`test-author` without it already working) was updated: every mock
+response now wraps its content in the real marker format via a shared
+`file_block` conftest helper that reads the nonce back out of the
+prompt actually sent, and two new cases cover `AC-AUTHOR-009` directly
+(stripping a fence-and-narration wrapper around the markers; a
+no-marker-pair response treated as a distinct failure with nothing
+cached or written). All 10 test cases (the original 8 `AC-AUTHOR-*`
+criteria plus 2 covering the new `AC-AUTHOR-009`) pass against the new
+candidate. Swapped in; the pre-fix candidate is not kept.

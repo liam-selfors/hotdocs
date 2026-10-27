@@ -2,28 +2,11 @@
 specs/components/test-author/acceptance/."""
 
 import dataclasses
-import hashlib
 import json
 
-from conftest import REPO_ROOT, MockBackend, fake_bundle, fake_bundle_dict
+from conftest import REPO_ROOT, MockBackend, fake_bundle, fake_bundle_dict, file_block
 import spec_bundle_assembler
-from test_author import GATE_VERSION, author_test
-
-
-def file_block(content: str):
-    def _build(prompt, model, **params):
-        return {"text": content, "model_call_error": None}
-    return _build
-
-
-def _criterion_hash(bundle_dict: dict) -> str:
-    canonical = json.dumps(bundle_dict, sort_keys=True, separators=(",", ":"))
-    return "sha256:" + hashlib.sha256(canonical.encode("utf-8")).hexdigest()
-
-
-def _gate_inputs_hash(seed: int = 0, prompt_version: str = "v1") -> str:
-    canonical = json.dumps({"seed": seed, "prompt_version": prompt_version}, sort_keys=True, separators=(",", ":"))
-    return "sha256:" + hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+from test_author import GATE_VERSION, author_test, _criterion_hash, _gate_inputs_hash
 
 
 def test_ac_author_001_prompt_contains_every_bundle_field(repo_root):
@@ -77,10 +60,10 @@ def test_ac_author_004_cache_hit_skips_the_model(repo_root):
     sys.path.insert(0, str(repo_root / "gen" / "cache-manager"))
     import cache_manager
 
-    bundle_dict = fake_bundle_dict()
+    bundle = fake_bundle()
     cache_key = cache_manager.CacheKey(
-        spec_bundle_hash=_criterion_hash(bundle_dict),
-        gate_inputs_hash=_gate_inputs_hash(),
+        spec_bundle_hash=_criterion_hash(bundle),
+        gate_inputs_hash=_gate_inputs_hash(0),
         gate_version=GATE_VERSION,
         model_pin="claude-sonnet-5",
     )
@@ -90,7 +73,7 @@ def test_ac_author_004_cache_hit_skips_the_model(repo_root):
             gate_type="generated_test",
             payload={
                 "component_id": "comp-foo", "criterion_id": "AC-FOO-003",
-                "model": "claude-sonnet-5",
+                "model": "claude-sonnet-5", "seed": 0, "prompt_version": "v2",
                 "file": {"path": "verification/foo/generated-test/test_ac_foo_003.py", "content": "def test_x(): pass"},
             },
             stored_at=cache_manager.now_iso(),
@@ -99,7 +82,7 @@ def test_ac_author_004_cache_hit_skips_the_model(repo_root):
     )
 
     backend = MockBackend([])  # must never be called
-    result = author_test(fake_bundle(), "claude-sonnet-5", repo_root=repo_root, llm_backend=backend)
+    result = author_test(bundle, "claude-sonnet-5", repo_root=repo_root, llm_backend=backend)
     assert result.cache_hit is True
     assert backend.calls == []
 
@@ -110,12 +93,12 @@ def test_ac_author_005_successful_call_is_cached(repo_root):
     import cache_manager
 
     backend = MockBackend([file_block("def test_x(): pass")])
-    bundle_dict = fake_bundle_dict()
-    author_test(fake_bundle(), "claude-sonnet-5", repo_root=repo_root, llm_backend=backend)
+    bundle = fake_bundle()
+    author_test(bundle, "claude-sonnet-5", repo_root=repo_root, llm_backend=backend)
 
     cache_key = cache_manager.CacheKey(
-        spec_bundle_hash=_criterion_hash(bundle_dict),
-        gate_inputs_hash=_gate_inputs_hash(),
+        spec_bundle_hash=_criterion_hash(bundle),
+        gate_inputs_hash=_gate_inputs_hash(0),
         gate_version=GATE_VERSION,
         model_pin="claude-sonnet-5",
     )
@@ -129,10 +112,10 @@ def test_ac_author_006_output_path_under_generated_test_dir(repo_root):
     bundle = fake_bundle()
     result = author_test(bundle, "claude-sonnet-5", repo_root=repo_root, llm_backend=backend)
 
-    assert result.file["path"] == "verification/foo/generated-test/test_ac_foo_003.py"
-    assert "gen/foo" not in result.file["path"]
-    assert "compiled" not in result.file["path"]
-    assert (repo_root / result.file["path"]).is_file()
+    assert result.file.path == "verification/foo/generated-test/test_ac_foo_003.py"
+    assert "gen/foo" not in result.file.path
+    assert "compiled" not in result.file.path
+    assert (repo_root / result.file.path).is_file()
 
 
 def test_ac_author_007_model_call_error_is_distinct(repo_root):
@@ -140,7 +123,8 @@ def test_ac_author_007_model_call_error_is_distinct(repo_root):
     bundle = fake_bundle()
     result = author_test(bundle, "claude-sonnet-5", repo_root=repo_root, llm_backend=backend)
 
-    assert result.model_call_error == {"category": "network", "message": "boom"}
+    assert result.model_call_error.category == "network"
+    assert result.model_call_error.message == "boom"
     assert result.file is None
     assert result.cache_hit is False
     assert not (repo_root / "verification" / "foo" / "generated-test").exists()
@@ -154,3 +138,44 @@ def test_ac_author_008_api_key_never_appears_in_output(repo_root, monkeypatch):
 
     serialized = json.dumps(dataclasses.asdict(result))
     assert "sk-super-secret-value" not in serialized
+
+
+def test_ac_author_009_strips_fence_and_narration_around_markers(repo_root):
+    backend = MockBackend([
+        file_block(
+            "def test_x(): pass",
+            wrapper="Sure, here is the test:\n\n```python\n{marked}\n```\n\nLet me know if you need anything else.",
+        )
+    ])
+    bundle = fake_bundle()
+    result = author_test(bundle, "claude-sonnet-5", repo_root=repo_root, llm_backend=backend)
+
+    assert result.model_call_error is None
+    assert result.file.content.strip() == "def test_x(): pass"
+    assert "```" not in result.file.content
+    assert "Sure, here is the test" not in result.file.content
+    assert "Let me know" not in result.file.content
+
+
+def test_ac_author_009_no_marker_pair_is_a_distinct_failure(repo_root):
+    import sys
+    sys.path.insert(0, str(repo_root / "gen" / "cache-manager"))
+    import cache_manager
+
+    backend = MockBackend([
+        {"text": "I could not find the right markers so here is some text instead.", "model_call_error": None}
+    ])
+    bundle = fake_bundle()
+    result = author_test(bundle, "claude-sonnet-5", repo_root=repo_root, llm_backend=backend)
+
+    assert result.file is None
+    assert result.model_call_error is not None
+    assert not (repo_root / "verification" / "foo" / "generated-test").exists()
+
+    cache_key = cache_manager.CacheKey(
+        spec_bundle_hash=_criterion_hash(bundle),
+        gate_inputs_hash=_gate_inputs_hash(0),
+        gate_version=GATE_VERSION,
+        model_pin="claude-sonnet-5",
+    )
+    assert isinstance(cache_manager.get(cache_key, repo_root=repo_root), cache_manager.Miss)

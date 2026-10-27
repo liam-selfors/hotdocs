@@ -87,3 +87,9 @@ None.
   `generate()` call, with both in place, passed all 8 `AC-AUTHOR-*`
   criteria. `gen/test-author/test_author.py` is now that candidate.
   See `verification/test-author/BOOTSTRAP.md` for the full account.
+- `D94`: `R-AUTHOR-009` adds a nonce-delimited single-file output
+  protocol and an explicit no-tool-access instruction, mirroring
+  `generator`'s own `D38` fix — found only once a real, non-mocked
+  `author_test` call (bootstrapping `provenance-tracker`) had to
+  survive a genuine model response for the first time. `PROMPT_VERSION`
+  → `v2`. New `AC-AUTHOR-009`.
