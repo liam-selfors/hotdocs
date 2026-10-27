@@ -20,17 +20,15 @@ gate and the component everything else assumes has already run.
 
 ## Scope
 
-**In scope:** frontmatter completeness and typing on a component's root
-file, and frontmatter *absence* on every unit file; cross-reference
-resolution (`depends_on` / `realizes` / `uses_var` /
-`depends_on_guarantees`); dependency-graph acyclicity; `R-id`/`G-id`
-formation and RFC 2119 usage; forward and backward traceability
-between requirements and acceptance criteria; acceptance-criterion
-well-formedness; glossary conformance and citation resolution
-(`R-LINT-028`); component size caps; `specs/vars/` secret-field
-safety; glossary singularity; no trailing whitespace anywhere in a
-spec file (`R-LINT-019`, keeps `spec_bundle_hash` hashing raw bytes
-without a cosmetic-diff cache-hit cost).
+**In scope:** frontmatter completeness/typing on a root file, and its
+*absence* on unit files; `depends_on`/`realizes`/`uses_var`/
+`depends_on_guarantees` resolution; dependency-graph acyclicity;
+`R-id`/`G-id` formation and RFC 2119 usage; requirement↔acceptance
+traceability; acceptance-criterion well-formedness; glossary
+conformance and citation resolution; `supersedes`/`deprecated`
+consistency for decision records; component size caps; `specs/vars/`
+secret-field safety; glossary singularity; no trailing whitespace
+anywhere in a spec file.
 
 **Out of scope:** generation; verification of generated code's actual
 behavior. **Mostly free of model calls and judgment** — only
@@ -76,4 +74,4 @@ Full narrative per entry lives in its own `specs/decisions/D<N>.md`.
 - Initial draft.
 - `D40`–`D42`: renamed `component_doc_words`; added `R-LINT-026`/`027`.
 - `D44`: rewired onto `graph-query-engine`'s shared views.
-- `D86`: added `R-LINT-028`.
+- `D86`/`D87`: added `R-LINT-028`/`029`.

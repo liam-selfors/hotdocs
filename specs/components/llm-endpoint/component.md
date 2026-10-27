@@ -100,7 +100,7 @@ open question.
   bootstrap exception, structurally permanent rather than temporary
   (nothing could ever cold-regenerate the component every generation
   call dispatches through). `AnthropicBackend` dispatches via the
-  `claude` CLI's non-interactive mode (`D45`/`D46`) rather than a
+  `claude` CLI's non-interactive mode (`D46`) rather than a
   from-scratch API client. `interface/library.md` gained a `backend`
   injection parameter, a pre-existing gap `AC-ENDPOINT-002`/`003`/`006`
   already implied.

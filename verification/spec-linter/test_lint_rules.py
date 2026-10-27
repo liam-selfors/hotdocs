@@ -470,3 +470,54 @@ def test_ac_lint_028_glossary_citation_resolution(corpus_root):
     findings = [f for f in report.findings if f.rule_id == "R-LINT-028"]
     assert len(findings) == 1
     assert "A Made Up Term" in findings[0].message
+
+
+def _write_decision(root: Path, doc_id: str, status: str = "ratified", supersedes: str | None = None) -> None:
+    decisions_dir = root / "specs" / "decisions"
+    decisions_dir.mkdir(parents=True, exist_ok=True)
+    frontmatter = (
+        f"---\nid: {doc_id}\ntitle: Test decision {doc_id}\nstatus: {status}\n"
+        f"owners: [test-team]\n"
+    )
+    if supersedes:
+        frontmatter += f"supersedes: {supersedes}\n"
+    frontmatter += f"last_ratified_commit: abc1234\n---\n\n# {doc_id}\n\nBody text.\n"
+    (decisions_dir / f"{doc_id}.md").write_text(frontmatter, encoding="utf-8")
+
+
+def test_ac_lint_029_dangling_supersedes_citation(corpus_root):
+    """D87 -- supersedes: D<N> must resolve to a real decision file."""
+    _write_decision(corpus_root, "D900", supersedes="D999")
+    report = run_lint(corpus_root)
+    assert has_finding(report, "R-LINT-029")
+
+
+def test_ac_lint_029_superseded_decision_not_deprecated(corpus_root):
+    """supersedes resolving to a still-ratified (not deprecated) decision
+    must fire -- supersedes means full replacement."""
+    _write_decision(corpus_root, "D900", supersedes="D901")
+    _write_decision(corpus_root, "D901", status="ratified")
+    report = run_lint(corpus_root)
+    findings = [f for f in report.findings if f.rule_id == "R-LINT-029"]
+    assert any("D901" in f.message for f in findings)
+
+
+def test_ac_lint_029_deprecated_with_no_superseder_fires(corpus_root):
+    """status: deprecated with no other decision's supersedes naming it
+    must fire -- deprecation is never a standalone edit."""
+    _write_decision(corpus_root, "D900", status="deprecated")
+    report = run_lint(corpus_root)
+    assert has_finding(report, "R-LINT-029")
+
+
+def test_ac_lint_029_consistent_pair_does_not_fire(corpus_root):
+    _write_decision(corpus_root, "D900", supersedes="D901")
+    _write_decision(corpus_root, "D901", status="deprecated")
+    report = run_lint(corpus_root)
+    assert not has_finding(report, "R-LINT-029")
+
+
+def test_ac_lint_029_frozen_range_exempt(corpus_root):
+    _write_decision(corpus_root, "D900", supersedes="D5")
+    report = run_lint(corpus_root)
+    assert not has_finding(report, "R-LINT-029")

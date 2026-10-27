@@ -31,10 +31,9 @@
 under `requirements/` — this is how a reviewer traces a reported finding
 back to the requirement that produced it.
 
-- `severity` is one of `fail` / `warn` / `skipped`. `skipped` exists only for
-  `kind: llm-judge` rules when no model is configured (R-LINT-015 currently)
-  — the D10-pattern graceful degradation, visible rather than silent, never
-  conflated with a pass.
+- `severity` is one of `fail` / `warn` / `skipped`. `skipped` exists only
+  for `kind: llm-judge` rules when no model is configured (R-LINT-015
+  currently) — visible degradation, never conflated with a pass.
 - `rationale` (optional, string) is present when the finding came from an
   `llm-judge` evaluation that actually ran, per `SPEC_GUIDELINES.md` §5's
   requirement that `llm-judge` criteria emit structured rationale. Absent or

@@ -8,7 +8,4 @@
   A conflict MUST be reported as a `fail`-severity finding with structured
   rationale (per `SPEC_GUIDELINES.md` §5). **When no model is configured at
   all, this one requirement MUST be skipped with a visible, non-silent
-  notice** — not treated as passing, not a crash — the same "tool must keep
-  working" posture D10 established for model-pin availability and
-  `cache-manager` established for backing-store availability; this is now a
-  third instance of that pattern, not a new one.
+  notice** — not treated as passing, not a crash.

@@ -247,7 +247,7 @@ Specced in full depth so far:
   llm-endpoint chicken-and-egg problem the same way a compiler
   bootstraps by compiling itself once a first version exists by other
   means. `AnthropicBackend` dispatches via the `claude` CLI's
-  non-interactive mode (`D45`/`D46`) instead of a from-scratch API
+  non-interactive mode (`D46`) instead of a from-scratch API
   client; confirmed live exactly once per generation (real money,
   `D46`'s billing finding applies), with the full test suite otherwise
   running on an injected mock backend at zero cost.

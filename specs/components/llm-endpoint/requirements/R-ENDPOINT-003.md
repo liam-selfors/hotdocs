@@ -13,7 +13,7 @@
   the public `complete()` contract (`R-ENDPOINT-001`) or of any caller.
 
   **When this backend dispatches via the `claude` CLI's non-interactive
-  mode (`D45`), it MUST invoke it with `--tools ""` and `--bare`, every
+  mode (`D46`), it MUST invoke it with `--tools ""` and `--bare`, every
   call, unconditionally** (`D53`) — found necessary by a real failure,
   not assumed: without them, the CLI retains its normal tool access
   (`Read`/`Bash`/etc.) and CLAUDE.md/repo-context auto-discovery even

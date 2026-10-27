@@ -8,9 +8,6 @@
   single-purpose unit; a single file running long is a direct signal that
   assumption broke down for *that file*, which a bundle-wide aggregate
   alone cannot distinguish from "this component just has a lot of
-  ordinary content spread evenly across many files."
-
-  First-pass thresholds (D29), explicitly open to recalibration once more
-  of the corpus exists to test them against — unlike R-LINT-012's
-  existing dimensions, there was no prior data point to calibrate
-  against before this rule existed.
+  ordinary content spread evenly across many files." Thresholds remain
+  open to recalibration as more of the corpus exists to test them
+  against.
