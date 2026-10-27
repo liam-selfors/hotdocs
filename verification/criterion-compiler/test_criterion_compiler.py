@@ -10,7 +10,7 @@ from pathlib import Path
 
 from conftest import write_component
 import criterion_compiler
-from criterion_compiler import compile, main, GATE_VERSION
+from criterion_compiler import compile, main, GATE_VERSION, compile_criterion, ParsedCriterion
 
 
 def test_ac_compile_001_unrecognized_step_is_a_located_error(repo_root):
@@ -211,3 +211,22 @@ def test_ac_compile_012_literal_substitution_and_expression_rejection(repo_root)
 
     assert by_id["AC-WID-012D"]["status"] == "error"
     assert "unresolved reference" in by_id["AC-WID-012D"]["message"]
+
+
+def test_ac_compile_013_compile_criterion_works_with_no_surface_at_all(repo_root):
+    literal_only = ParsedCriterion(
+        criterion_id="CS-FOO-001", covers="P-FOO", kind="compiled",
+        gherkin='Given a x is 1\nThen x equals 1', file="CS-FOO-001.md",
+    )
+    result = compile_criterion(literal_only, surface=None)
+    assert result["status"] == "compiled"
+    assert "x = 1" in result["source"]
+
+    references_a_function = ParsedCriterion(
+        criterion_id="CS-FOO-002", covers="P-FOO", kind="compiled",
+        gherkin='Given a x is 1\nWhen do_the_thing is invoked with x\nThen result.value equals 1',
+        file="CS-FOO-002.md",
+    )
+    result2 = compile_criterion(references_a_function, surface=None)
+    assert result2["status"] == "error"
+    assert "do_the_thing" in result2["message"]

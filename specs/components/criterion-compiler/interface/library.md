@@ -2,12 +2,27 @@
 
 ```
 compile(component_id: str, repo_root: Path, target: str = "pytest") -> CompileReport
+
+compile_criterion(criterion: ParsedCriterion, surface: InterfaceSurface | None = None) -> dict
 ```
 
-A pure function over corpus state at `repo_root` — no network access, no
-model calls, no side effects beyond writing the files it's asked to write.
-(Previously `compile(acceptance_md: Path, interface_md: Path, target: str =
-"pytest")`, taking two explicit file paths; updated for D15's
-one-file-per-unit layout, where a component's `acceptance/` and
-`interface/` are directories at known paths given its id, not individual
-files to pass in by hand.)
+`compile` is a pure function over corpus state at `repo_root` — no network
+access, no model calls, no side effects beyond writing the files it's
+asked to write. (Previously `compile(acceptance_md: Path, interface_md:
+Path, target: str = "pytest")`, taking two explicit file paths; updated
+for D15's one-file-per-unit layout, where a component's `acceptance/`
+and `interface/` are directories at known paths given its id, not
+individual files to pass in by hand.)
+
+`compile_criterion` (`R-COMPILE-012`, `D75`) is the lower-level
+primitive `compile` itself uses for each criterion it finds — exposed
+publicly for a caller compiling criterion content that doesn't live
+under any one component's `acceptance/` directory (e.g.
+`capability-scenario-verifier`'s product-capability scenarios). No
+directory scanning, no file I/O: given an already-parsed
+`ParsedCriterion` (`{criterion_id, covers, kind, gherkin, file}`) and
+an optional `InterfaceSurface` (omit it for content black-box against
+more than one component, which has no single surface to resolve
+against), returns `{"status": "compiled", "source": <text>}` or
+`{"status": "error", "message": <text>}` — never raises, and never
+writes anything to disk itself.

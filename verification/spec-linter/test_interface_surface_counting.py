@@ -70,16 +70,16 @@ def test_cache_manager_interface_surface_is_six():
     assert spec_linter._count_interface_surface(_load_component_interface("cache-manager")) == 6
 
 
-def test_criterion_compiler_interface_surface_is_three():
+def test_criterion_compiler_interface_surface_is_four():
     # 1 CLI invocation (wrapped across two physical lines via a trailing
-    # backslash — must be joined, not double-counted) + 1 Library function +
-    # 1 Data file (`CompileReport`). The step grammar lives at
-    # specs/architecture/step-phrase-grammar.md now (D15), not under this
-    # component's interface/ at all, so it was never a candidate for
-    # double-counting here even before that move — but it's worth noting the
-    # relocation makes that structurally obvious rather than a parsing
-    # nicety.
-    assert spec_linter._count_interface_surface(_load_component_interface("criterion-compiler")) == 3
+    # backslash — must be joined, not double-counted) + 2 Library functions
+    # (`compile`, and `compile_criterion` added by D75) + 1 Data file
+    # (`CompileReport`). The step grammar lives at specs/architecture/
+    # step-phrase-grammar.md now (D15), not under this component's
+    # interface/ at all, so it was never a candidate for double-counting
+    # here even before that move — but it's worth noting the relocation
+    # makes that structurally obvious rather than a parsing nicety.
+    assert spec_linter._count_interface_surface(_load_component_interface("criterion-compiler")) == 4
 
 
 def test_all_four_real_components_stay_well_under_the_hard_cap():

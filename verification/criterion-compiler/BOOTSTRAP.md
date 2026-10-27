@@ -75,3 +75,19 @@ requirement, structurally true here since nothing in this file ever
 imports a model-calling dependency): all 12 tests pass, one per
 `AC-COMPILE-*` criterion, against the synthetic `widget` fixture in
 `conftest.py`.
+
+**`D75`: `compile_criterion`, a directory-scanning-free primitive.**
+Building `capability-scenario-verifier` (which needs to compile
+`compiled`-kind criterion content that lives outside any component's
+`acceptance/` directory — a product-capability scenario, black-box
+against more than one component) found that `compile`'s own public
+surface had no way to serve that need without a second, duplicated
+compilation path, directly contradicting `R-SCENARIO-001`'s "no new
+dispatch machinery" rule. Refactored `compile` to call a new, public
+`compile_criterion(criterion, surface=None)` internally for each
+criterion it finds — behavior-preserving (all 12 pre-existing tests
+pass unchanged) — and exposed it for exactly this second caller.
+`surface=None` is a real, valid input (not merely "no interface yet"):
+a step that never references a function/type compiles fine with no
+surface at all; one that does is still a located compile error, never
+silently skipped for lack of one (`AC-COMPILE-013`).

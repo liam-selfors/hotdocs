@@ -609,6 +609,39 @@ def _emit_pytest(criterion: ParsedCriterion, scenarios: list[Scenario], surface:
 # Public library entry point (R-COMPILE-*, interface/library.md).
 # ---------------------------------------------------------------------------
 
+def compile_criterion(
+    criterion: ParsedCriterion, surface: InterfaceSurface | None = None
+) -> dict:
+    """Compiles one already-parsed `compiled`-kind criterion directly,
+    with no directory scanning and no file I/O -- the primitive `compile`
+    (below) uses internally for each criterion it finds under a
+    component's `acceptance/`, and that any other real caller needing to
+    compile a single criterion whose content doesn't live under a
+    component's `acceptance/` directory can call directly.
+
+    `surface=None` is a real, valid input, not just "component has no
+    interface yet" (that case already existed): a criterion that is
+    black-box against more than one component -- a product-capability
+    scenario, never scoped to one component's own `interface/` contract
+    -- has no single surface to resolve against at all. Every step
+    referencing a function/type still either matches the fixed grammar
+    and resolves (literal-only steps, e.g. `Given a foo is "x"`, never
+    need a surface) or is a located compile error (R-COMPILE-002's own
+    discipline, unchanged) -- never silently skipped for lack of one.
+
+    Returns `{"status": "compiled", "source": <text>}` or
+    `{"status": "error", "message": <text>}` -- never raises.
+    """
+    try:
+        scenarios = _split_scenarios(criterion.gherkin, start_line=1)
+        if not scenarios:
+            raise CompileError("no Given/When/Then steps found in gherkin block", criterion.file, 1)
+        source = _emit_pytest(criterion, scenarios, surface or InterfaceSurface())
+    except CompileError as exc:
+        return {"status": "error", "message": exc.message}
+    return {"status": "compiled", "source": source}
+
+
 def compile(component_id: str, repo_root: Path, target: str = "pytest", out_dir: Path | None = None) -> CompileReport:
     if target not in SUPPORTED_TARGETS:
         raise ValueError(f"unsupported --target {target!r}")
@@ -635,21 +668,18 @@ def compile(component_id: str, repo_root: Path, target: str = "pytest", out_dir:
         if surface is None:
             surface = _load_interface_surface(repo_root, slug)
 
-        try:
-            scenarios = _split_scenarios(criterion.gherkin, start_line=1)
-            if not scenarios:
-                raise CompileError("no Given/When/Then steps found in gherkin block", criterion.file, 1)
-            source = _emit_pytest(criterion, scenarios, surface)
-        except CompileError as exc:
+        result = compile_criterion(criterion, surface)
+        if result["status"] == "error":
             error_count += 1
             outputs.append({
                 "criterion_id": criterion.criterion_id,
                 "covers": criterion.covers,
                 "status": "error",
-                "message": exc.message,
+                "message": result["message"],
             })
             continue
 
+        source = result["source"]
         out_file = out_dir / f"test_{criterion.criterion_id.lower().replace('-', '_')}.py"
         # R-COMPILE-009: idempotent -- never touch an unchanged file.
         if not out_file.is_file() or out_file.read_text(encoding="utf-8") != source:

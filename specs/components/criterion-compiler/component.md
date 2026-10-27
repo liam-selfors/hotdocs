@@ -139,3 +139,9 @@ See `constraints.md`.
   fixture (`verification/criterion-compiler/`) as its only real test
   subject — exactly what `constraints.md`'s characterization-coverage
   clause already anticipated.
+- `D75`: new `R-COMPILE-012` / `compile_criterion` — a public,
+  directory-scanning-free primitive `compile` itself now uses
+  internally, exposed for a caller (`capability-scenario-verifier`)
+  compiling criterion content outside any component's `acceptance/`.
+  Hand-authored directly, same as `D60` — never a `generator`
+  candidate.
