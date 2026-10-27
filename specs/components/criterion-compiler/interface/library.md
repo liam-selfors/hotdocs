@@ -26,3 +26,13 @@ more than one component, which has no single surface to resolve
 against), returns `{"status": "compiled", "source": <text>}` or
 `{"status": "error", "message": <text>}` — never raises, and never
 writes anything to disk itself.
+
+`InterfaceSurface.module_name` (`R-COMPILE-013`, `D79`) is the target
+component's real importable module name (its underscored slug). Any
+emitted reference to a function or type resolved against the surface
+is qualified with it (`<module_name>.<name>`), and the emitted file
+gets exactly one top-level `import <module_name>` line if — and only
+if — at least one step actually needed it. A caller that *executes*
+emitted output (anything dispatching a `compiled`-kind criterion, see
+`R-COMPILE-013`) must scope its import search path to
+`gen/<component>/` itself, not a broader ancestor.

@@ -91,3 +91,29 @@ pass unchanged) — and exposed it for exactly this second caller.
 a step that never references a function/type compiles fine with no
 surface at all; one that does is still a located compile error, never
 silently skipped for lack of one (`AC-COMPILE-013`).
+
+**`D79`: emitted source never imported the target module.** Found
+while building `verifier-orchestrator`, whose job is to *execute*
+compiled scaffolding against real `gen/<component>/` code — something
+no test here had ever done before (every prior test checked emitted
+*content*, never ran the emitted function against a real target).
+Running it surfaced that every `When ... is invoked` and typed
+`Given` step compiled to a bare, unqualified call
+(`do_the_thing(1)`), which only works by accident if a caller happens
+to pre-populate globals. Fixed via `InterfaceSurface.module_name` (the
+target component's underscored slug) and a `_qualify()` step that
+prefixes every resolved function/type reference with it, emitting
+exactly one top-level `import <module_name>` line if and only if some
+step needed it (`R-COMPILE-013`, `AC-COMPILE-014`). This also exposed
+a previously undocumented execution contract for any caller running
+emitted output: the import search path must be scoped to the specific
+`gen/<component>/` directory, not a broader ancestor like `gen/` —
+otherwise `import <module_name>` resolves to an empty implicit
+namespace package rather than the real module (no `__init__.py`
+there). Now a formal part of `verifier-orchestrator`'s own
+`R-VERIFY-001`.
+
+All 15 tests pass, one per `AC-COMPILE-*` criterion (now 14 criteria,
+`AC-COMPILE-014` covered by two tests), against the synthetic
+`widget` fixture in `conftest.py` — still entirely without a model
+call.

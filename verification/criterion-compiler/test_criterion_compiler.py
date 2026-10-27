@@ -106,7 +106,14 @@ def test_ac_compile_007_literal_data_is_inert_never_executed(repo_root):
     ast.parse(source)  # must be valid, inert Python -- the string is data, not spliced code
     ns: dict = {}
     marker = []
-    exec(compile_src := source, {"os": type("FakeOS", (), {"system": staticmethod(lambda *a: marker.append(True))})()}, ns)  # noqa: F841
+    import types
+    fake_widget = types.ModuleType("widget")
+    fake_widget.do_the_thing = lambda *a, **k: None
+    sys.modules["widget"] = fake_widget
+    try:
+        exec(compile_src := source, {"os": type("FakeOS", (), {"system": staticmethod(lambda *a: marker.append(True))})()}, ns)  # noqa: F841
+    finally:
+        sys.modules.pop("widget", None)
     assert not marker  # os.system is never actually called by defining/holding this module
 
 
@@ -230,3 +237,28 @@ def test_ac_compile_013_compile_criterion_works_with_no_surface_at_all(repo_root
     result2 = compile_criterion(references_a_function, surface=None)
     assert result2["status"] == "error"
     assert "do_the_thing" in result2["message"]
+
+
+def test_ac_compile_014_emitted_source_imports_and_qualifies_the_target_module(repo_root):
+    write_component(repo_root, "widget", {
+        "AC-WID-014": ("R-WID-014", "compiled",
+                        'Given a x is 1\nWhen do_the_thing is invoked with x\nThen value equals 1'),
+    })
+    report = compile("widget", repo_root)
+    out_file = repo_root / report.outputs[0]["file"]
+    source = out_file.read_text(encoding="utf-8")
+    lines = source.splitlines()
+    import_lines = [line for line in lines if line.startswith("import ")]
+    assert import_lines == ["import widget"]
+    exercise_line = next(line for line in lines if "do_the_thing(" in line)
+    assert "widget.do_the_thing(" in exercise_line
+
+
+def test_ac_compile_014_no_target_reference_means_no_import(repo_root):
+    write_component(repo_root, "widget", {
+        "AC-WID-014B": ("R-WID-014B", "compiled", 'Given a x is 1\nThen x equals 1'),
+    })
+    report = compile("widget", repo_root)
+    out_file = repo_root / report.outputs[0]["file"]
+    source = out_file.read_text(encoding="utf-8")
+    assert not any(line.startswith("import ") for line in source.splitlines())

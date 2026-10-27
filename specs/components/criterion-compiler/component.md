@@ -145,3 +145,15 @@ See `constraints.md`.
   compiling criterion content outside any component's `acceptance/`.
   Hand-authored directly, same as `D60` — never a `generator`
   candidate.
+- `D79`: new `R-COMPILE-013` / `InterfaceSurface.module_name` — emitted
+  test code that references the target component's own functions or
+  types now imports and qualifies them (`<module_name>.<name>`)
+  instead of calling them as bare, unqualified globals. Found because
+  none of this component's own prior tests ever *executed* emitted
+  output against real target code — only checked its content. Also
+  documents, for the first time, the execution-environment contract
+  this creates for any caller that runs emitted scaffolding
+  (`verifier-orchestrator`'s `R-VERIFY-001`): the import search path
+  must be scoped to `gen/<component>/` itself, not a broader ancestor.
+  Hand-authored directly, same as `D60`/`D75` — never a `generator`
+  candidate.
