@@ -104,7 +104,7 @@ open question.
   from-scratch API client. `interface/library.md` gained a `backend`
   injection parameter, a pre-existing gap `AC-ENDPOINT-002`/`003`/`006`
   already implied.
-- **Self-hosted regeneration.** The real `generator`, dispatching
+- **Self-hosted regeneration (`D78`).** The real `generator`, dispatching
   through this exact `D33` implementation, cold-regenerated
   `gen/llm-endpoint/` from this component's own current spec; the
   result passed every `AC-ENDPOINT-*` criterion and was swapped in,
