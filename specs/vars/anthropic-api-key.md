@@ -7,7 +7,7 @@ owners: [pipeline-team]
 
 # VAR-ANTHROPIC-API-KEY
 
-- **required:** yes
+- **required:** no
 - **type:** secret-ref
 - **sensitivity:** secret
 - **description:** Credential used by `llm-endpoint` (D18) to call
@@ -35,6 +35,7 @@ owners: [pipeline-team]
   through it, unconditionally outranking any separate claude.ai/Pro-plan
   login in the same environment — confirmed by hand, not assumed. A
   project wanting `llm-endpoint` calls billed against a Pro/Max plan
-  instead MUST ensure this variable is unset in whatever environment
-  actually invokes it; a project that has deliberately set it (this one,
-  currently) is choosing direct API billing for those calls.
+  instead sets this variable unset in whatever environment actually
+  invokes it, and `llm-endpoint` dispatches against that plan's login
+  instead (`R-ENDPOINT-003`, `D82`) — no longer a hard requirement with
+  no fallback, since `D82` added one.

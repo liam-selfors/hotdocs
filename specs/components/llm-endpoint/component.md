@@ -128,3 +128,10 @@ open question.
   return shape (a plain dict this time); `generator.py` gained an
   `_as_dict()` adapter so it depends on the JSON contract rather than
   any one version's Python shape.
+- `D82`: `AnthropicBackend` no longer hard-requires
+  `VAR-ANTHROPIC-API-KEY` — when absent, it dispatches with
+  `--safe-mode` instead of `--bare` (found by direct testing that
+  `--bare` unconditionally refuses any non-API-key credential, where
+  `--safe-mode` gives the same CLAUDE.md/hooks isolation without that
+  restriction) and lets whatever credential the CLI itself resolves
+  determine the outcome, rather than refusing early.

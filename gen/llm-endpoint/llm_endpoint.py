@@ -112,30 +112,27 @@ _CLAUDE_CLI = "claude"
 class AnthropicBackend:
     """Dispatches a completion via the `claude` CLI's non-interactive mode
     (D45/D46), authenticating via `VAR-ANTHROPIC-API-KEY`
-    (`ANTHROPIC_API_KEY` in the process environment, D46) — never read or
-    forwarded by this component in any other way.
+    (`ANTHROPIC_API_KEY` in the process environment, D46) when configured,
+    or whatever Pro/Max subscription login the CLI itself resolves
+    otherwise (`D82`) — never read or forwarded by this component in any
+    other way.
     """
 
     name = "anthropic"
 
     def __call__(self, prompt: str, model: str, **params: Any) -> Dict[str, Any]:
-        if not os.environ.get("ANTHROPIC_API_KEY"):
-            # Caught here rather than left to the CLI so the failure is
-            # classified cleanly as `auth`, without ever naming or echoing
-            # the (absent) credential itself.
-            return _make_response(
-                text=None,
-                model=model,
-                backend=self.name,
-                model_call_error={
-                    "category": "auth",
-                    "message": "no credential configured for this backend",
-                },
-            )
-
-        # R-ENDPOINT-003 / D53: --tools "" and --bare, every call,
-        # unconditionally — structural isolation, not a system-prompt
-        # convention. --print selects non-interactive mode.
+        # R-ENDPOINT-003: --tools "" is unconditional, every call. The
+        # isolation flag alongside it depends on which credential is
+        # configured (`D82`) — `--bare` refuses any non-API-key
+        # credential outright, so a caller with no API key (billing
+        # against a Pro/Max login instead) needs `--safe-mode`, which
+        # gives the same CLAUDE.md/hooks isolation without that refusal.
+        # This component never pre-empts the call by checking for a
+        # credential itself; whatever the CLI resolves determines the
+        # outcome, classified the same way any other failure already is.
+        isolation_flag = (
+            "--bare" if os.environ.get("ANTHROPIC_API_KEY") else "--safe-mode"
+        )
         cmd = [
             _CLAUDE_CLI,
             "--print",
@@ -143,7 +140,7 @@ class AnthropicBackend:
             model,
             "--tools",
             "",
-            "--bare",
+            isolation_flag,
         ]
         for key, value in params.items():
             if value is None:
@@ -196,7 +193,7 @@ class AnthropicBackend:
                 model=model,
                 backend=self.name,
                 model_call_error=self._classify_failure(
-                    completed.returncode, completed.stderr
+                    completed.returncode, completed.stderr, completed.stdout
                 ),
             )
 
@@ -208,13 +205,20 @@ class AnthropicBackend:
         )
 
     @staticmethod
-    def _classify_failure(returncode: int, stderr: Optional[str]) -> Dict[str, str]:
+    def _classify_failure(
+        returncode: int, stderr: Optional[str], stdout: Optional[str] = None
+    ) -> Dict[str, str]:
         """Classify a non-zero CLI exit into one of the four
         `model_call_error` categories. Never includes raw vendor text or
         any credential material — a short, backend-agnostic description
         only.
+
+        Checks both streams (`D82`): a missing/invalid credential under
+        `--safe-mode` reports "Not logged in" on stdout, with stderr
+        empty — a real gap found once `--safe-mode` became a real
+        dispatch path, not just `--bare`'s stderr-only failure shapes.
         """
-        lowered = (stderr or "").lower()
+        lowered = ((stderr or "") + " " + (stdout or "")).lower()
         if "rate limit" in lowered or "429" in lowered or "too many requests" in lowered:
             return {
                 "category": "rate_limit",
@@ -227,6 +231,8 @@ class AnthropicBackend:
             or "403" in lowered
             or "api key" in lowered
             or "authentic" in lowered
+            or "not logged in" in lowered
+            or "/login" in lowered
         ):
             return {
                 "category": "auth",

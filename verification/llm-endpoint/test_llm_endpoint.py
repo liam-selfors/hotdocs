@@ -68,3 +68,55 @@ def test_ac_endpoint_006_call_log_has_two_independent_records(isolated_cwd):
     assert len(records) == 2
     categories = {r.get("model_call_error", {}).get("category") if r.get("model_call_error") else None for r in records}
     assert categories == {"timeout", None}
+
+
+class _FakeCompleted:
+    def __init__(self, returncode=0, stdout="ok", stderr=""):
+        self.returncode = returncode
+        self.stdout = stdout
+        self.stderr = stderr
+
+
+def test_d82_safe_mode_dispatched_without_api_key(isolated_cwd, monkeypatch):
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    captured = {}
+
+    def fake_run(cmd, **kwargs):
+        captured["cmd"] = cmd
+        return _FakeCompleted()
+
+    monkeypatch.setattr(llm_endpoint.subprocess, "run", fake_run)
+    response = llm_endpoint.AnthropicBackend()("say hi", "claude-sonnet-5")
+
+    assert "--safe-mode" in captured["cmd"]
+    assert "--bare" not in captured["cmd"]
+    assert response["text"] == "ok"
+    assert response["model_call_error"] is None
+
+
+def test_d82_bare_dispatched_with_api_key(isolated_cwd, monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-fake-for-this-test-only")
+    captured = {}
+
+    def fake_run(cmd, **kwargs):
+        captured["cmd"] = cmd
+        return _FakeCompleted()
+
+    monkeypatch.setattr(llm_endpoint.subprocess, "run", fake_run)
+    llm_endpoint.AnthropicBackend()("say hi", "claude-sonnet-5")
+
+    assert "--bare" in captured["cmd"]
+    assert "--safe-mode" not in captured["cmd"]
+
+
+def test_d82_not_logged_in_on_stdout_classifies_as_auth(isolated_cwd, monkeypatch):
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+
+    def fake_run(cmd, **kwargs):
+        return _FakeCompleted(returncode=1, stdout="Not logged in · Please run /login", stderr="")
+
+    monkeypatch.setattr(llm_endpoint.subprocess, "run", fake_run)
+    response = llm_endpoint.AnthropicBackend()("say hi", "claude-sonnet-5")
+
+    assert response["text"] is None
+    assert response["model_call_error"]["category"] == "auth"
