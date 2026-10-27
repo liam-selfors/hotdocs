@@ -85,3 +85,8 @@ See `constraints.md`.
 - Initial draft.
 - `D38`: added `notification_delivery_error`, mirroring
   `license-scanner`'s same fix.
+- `D69`/`D70`: `VAR-SECRET-PATTERNS-PATH` proactively declared before
+  the first real `generate()` attempt (mirroring `license-scanner`'s
+  `D67`); that attempt passed all 10 directly-testable `AC-SECRET-*`
+  criteria on the first real try. `gen/secret-scanner/
+  secret_scanner.py` is now that candidate.
