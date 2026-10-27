@@ -21,3 +21,8 @@ node_modules/
 __pycache__/
 *.pyc
 .venv/
+
+# docs-site-renderer's rendered output (R-DOCS-005) — a CI build artifact
+# deployed to a docs host, never committed. Found missing from this file
+# entirely while building this component's own test suite (D71).
+/dist/

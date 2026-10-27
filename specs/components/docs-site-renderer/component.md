@@ -51,8 +51,11 @@ rendered site.
 
 See `acceptance/`.
 
-All six criteria are `kind: compiled` — rendering already-computed data is
-pure, deterministic templating.
+All six criteria are `kind: generated-test` (`D59`) — rendering
+already-computed data is pure, deterministic templating that needs no
+model or judgment, but none are actually written in the step-phrase
+grammar, so `kind: compiled` would not describe how they're really
+verified.
 
 ## Non-functional constraints
 
@@ -65,3 +68,8 @@ None.
 ## Change log
 
 - Initial draft.
+- `D71`: first real implementation, passed all 6 `AC-DOCS-*` criteria
+  on the first real `generate()` attempt. Found `.gitignore` had no
+  `/dist/` entry at all — fixed there, not in this component's own
+  (already-correct) code. See `verification/docs-site-renderer/
+  BOOTSTRAP.md`.
