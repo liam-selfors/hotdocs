@@ -116,3 +116,11 @@ None. The two originally recorded here are both resolved:
   comparison at all. `BlastRadiusReport.md` now states `component_id`
   is always the full `comp-<slug>` form explicitly, not just by
   example.
+- `D65`: `R-IMPACT-008` now states `depends_on_guarantees`'s real flat
+  bare-`G-id` shape explicitly — a real candidate guessed a nested
+  structure instead, since the real shape lived only in
+  `SPEC_GUIDELINES.md`, never in any `SpecBundle`.
+- `D66`: a fourth retry, with every fix above in place, passed all 12
+  `AC-IMPACT-*` criteria for real — first successful implementation.
+  `gen/impact-analyzer/impact_analyzer.py` is now that candidate. See
+  `verification/impact-analyzer/BOOTSTRAP.md` for the full account.
