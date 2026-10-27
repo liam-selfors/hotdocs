@@ -34,6 +34,12 @@
 }
 ```
 
+`component_id` is always the full `comp-<slug>` form (`glossary.md`'s
+"Component id / component slug" entry), matching exactly what a
+caller's own `--changed` argument would use — never the bare slug,
+even though some of this component's own internal data (e.g.
+`spec-linter`'s `corpus.components` dict) is keyed by the bare form.
+
 `reason` is always one of `direct` | `transitive-interface` |
 `transitive-var` | `transitive-capability` | `transitive-guarantee`
 (R-IMPACT-001/003/004/005/008). `via` names the specific upstream id that
