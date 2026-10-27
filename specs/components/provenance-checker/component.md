@@ -75,9 +75,12 @@ See `interface/data/`.
 
 See `acceptance/`.
 
-Every criterion is `kind: compiled` — reading a committed file, comparing
-a hash, and reading one boolean var is pure, deterministic logic;
-nothing here needs a model or judgment.
+Every criterion is `kind: generated-test` (`D59`) — reading a committed
+file, comparing a hash, and reading one boolean var is pure,
+deterministic logic that needs no model or judgment, but none of this
+component's criteria are actually written in `specs/architecture/
+step-phrase-grammar.md`'s fixed step vocabulary, so `kind: compiled`
+would not describe how they're really verified.
 
 ## Non-functional constraints
 

@@ -8,6 +8,18 @@ Single file by default — see `SPEC_GUIDELINES.md` §3.6 for the (rare,
 deliberate, `architecture/`-level) conditions under which it's allowed to
 split.
 
+- **Component id / component slug** — a component's id, as carried in
+  `component.md`'s frontmatter and `SpecBundle.component_id`, is always
+  `comp-<slug>` (e.g. `comp-cache-manager`). The bare `<slug>` (`comp-`
+  stripped) is the directory name used everywhere a path is built from
+  it — `specs/components/<slug>/`, `gen/<slug>/`,
+  `verification/<slug>/` — never the full `comp-<slug>` id. This was
+  never written down anywhere before `D61`, despite being load-bearing
+  for every component that resolves a `gen/<component>/`-shaped path
+  from a `component_id` it was handed — each one independently
+  reimplemented the same strip-the-prefix logic, and a real generated
+  candidate (`provenance-checker`) got it wrong for exactly that
+  reason, silently treating every real hit as a miss.
 - **Spec bundle** — the full set of files a generation or verification step
   needs for one component: `component.md` + `requirements/` + `interface/` +
   `constraints.md` + depended-upon components' `interface/` directories +
