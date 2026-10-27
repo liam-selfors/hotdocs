@@ -93,3 +93,9 @@ None.
 ## Change log
 
 - Initial draft (`D39`).
+- `D63`: first real implementation, via three real `generate()`
+  retries (the first two found real, corpus-wide gaps — `D61`'s
+  `component_id`-to-slug mapping, `D62`'s output-layout requirement —
+  fixed in `generator`/`glossary.md`, not here). `gen/provenance-
+  checker/` is now a real top-level package. See `verification/
+  provenance-checker/BOOTSTRAP.md` for the full account.
