@@ -48,3 +48,16 @@ Confirmed directly against the real corpus: `assemble("comp-generator",
 signature by name — exactly the fact `generator`'s own self-regeneration
 attempt (`D54`) was missing when it guessed wrong about `cache-manager`'s
 module layout.
+
+**`D76`: sealed dependencies were silently invisible.** Only ever
+checked `gen/<dependency>/` — `criterion-compiler` (`sealed: true`,
+real code at `pipeline/criterion-compiler/`) always degraded to an
+empty usage card, indistinguishable from "no real code yet." Found
+only once a real dependent (`capability-scenario-verifier`) actually
+needed real usage info for it. Fixed by checking the dependency's own
+`component.md` for a `sealed: true` + `source_path` pair first, via a
+new `_dependency_real_code_dir` helper, before falling back to the
+normal `gen/<dependency>/` location — confirmed directly: `_dependency_
+usage(Path("."), "criterion-compiler")` now surfaces `compile`,
+`compile_criterion`, and every other real public symbol by name and
+signature.

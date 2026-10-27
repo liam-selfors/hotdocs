@@ -91,3 +91,9 @@ See `constraints.md`.
   `dependency_*` field, mechanically introspected from a dependency's
   real `gen/` code (never its spec), the one-directional fix for
   `D54`'s import-path failure.
+- `D76`: `_dependency_usage` now checks a sealed dependency's declared
+  `source_path` before falling back to `gen/<dependency>/` — every
+  sealed dependency's usage card had been silently degrading to empty,
+  indistinguishable from "no real code yet," found only once a real
+  dependent needed real usage info for `criterion-compiler` for the
+  first time.

@@ -16,6 +16,16 @@
   spec-only dependency has nothing real to introspect, and that is
   expected state, not an error.
 
+  **A `sealed` dependency's real code lives at its declared
+  `source_path`, never under `gen/<dependency>/`** (`D76`) — checked
+  first, against that dependency's own `component.md` frontmatter,
+  before falling back to the normal `gen/<dependency>/` location.
+  Missing this distinction silently degraded every sealed dependency's
+  usage card to empty, indistinguishable from "no real code yet" —
+  found only once a real dependent (`capability-scenario-verifier`)
+  needed real usage info for a real sealed dependency
+  (`criterion-compiler`) for the first time.
+
   **Requires the dependency to already have been (re)generated before
   the dependent's bundle is assembled** — whoever drives generation
   across more than one component in the same pass MUST do so in

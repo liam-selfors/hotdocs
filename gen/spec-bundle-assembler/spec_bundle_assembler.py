@@ -147,9 +147,33 @@ def _dependency_context(con: duckdb.DuckDBPyConnection, comp_id: str) -> str:
     return row[0] if row else ""
 
 
+def _dependency_real_code_dir(repo_root: Path, dep_bare_name: str) -> Path:
+    """Where a dependency's real, importable code actually lives.
+
+    D76: a *sealed* dependency's real code lives at its declared
+    `source_path` (`component.md` frontmatter), never under `gen/
+    <dep_bare_name>/` -- `criterion-compiler` is the first real sealed
+    component another real component (`capability-scenario-verifier`)
+    needed `dependency_usage` for, and this fell back to empty for it
+    every time, silently, exactly the fail-to-empty posture this
+    function already documents for a dependency with no real code --
+    indistinguishable, from a caller with no way to tell "sealed,
+    look elsewhere" from "doesn't exist yet." Checked first; falls
+    back to the normal `gen/<dep_bare_name>/` location otherwise."""
+    component_md = repo_root / "specs" / "components" / dep_bare_name / "component.md"
+    if component_md.is_file():
+        text = component_md.read_text(encoding="utf-8")
+        sealed_match = re.search(r"^sealed:\s*true", text, re.MULTILINE)
+        source_path_match = re.search(r"^source_path:\s*(\S+)", text, re.MULTILINE)
+        if sealed_match and source_path_match:
+            declared = source_path_match.group(1).strip().strip("\"'")
+            return repo_root / declared.rstrip("/")
+    return repo_root / "gen" / dep_bare_name
+
+
 def _dependency_usage(repo_root: Path, dep_bare_name: str) -> str:
     """R-ASSEMBLE-011 -- a mechanically-derived usage card for a real
-    dependency, introspected from its already-verified gen/ code (never
+    dependency, introspected from its already-verified real code (never
     its spec, the reverse of every other dependency_* field). Empty
     string for a dependency with no real code yet, or whose real code
     fails to import/introspect for any reason -- the same fail-to-empty
@@ -159,7 +183,7 @@ def _dependency_usage(repo_root: Path, dep_bare_name: str) -> str:
     import inspect
 
     module_name = dep_bare_name.replace("-", "_")
-    gen_dir = repo_root / "gen" / dep_bare_name
+    gen_dir = _dependency_real_code_dir(repo_root, dep_bare_name)
     if not gen_dir.is_dir():
         return ""
     if not (gen_dir / f"{module_name}.py").is_file() and not (gen_dir / module_name / "__init__.py").is_file():
@@ -186,7 +210,11 @@ def _dependency_usage(repo_root: Path, dep_bare_name: str) -> str:
             and getattr(getattr(module, name), "__module__", None) == module.__name__
         ]
 
-    lines = [f"Importable as: `{module_name}` (module path `gen/{dep_bare_name}/`)."]
+    try:
+        module_path_label = str(gen_dir.relative_to(repo_root))
+    except ValueError:
+        module_path_label = str(gen_dir)
+    lines = [f"Importable as: `{module_name}` (module path `{module_path_label}/`)."]
     for name in sorted(public_names):
         obj = getattr(module, name, None)
         if obj is None:

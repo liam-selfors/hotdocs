@@ -236,3 +236,29 @@ def test_ac_assemble_011_dependency_usage_is_introspected_and_degrades(corpus_ro
     assert "Return the cached value for key." in bar_usage
 
     assert bundle.dependency_usage["comp-baz"] == ""
+
+
+def test_dependency_usage_resolves_a_sealed_dependencys_real_source_path(corpus_root):
+    # D76: a sealed dependency's real code lives at its declared
+    # source_path, never under gen/<slug>/ -- confirmed with a synthetic
+    # sealed component whose real code sits somewhere else entirely.
+    sealed_dir = corpus_root / "specs" / "components" / "qux"
+    sealed_dir.mkdir(parents=True)
+    (sealed_dir / "component.md").write_text(
+        "---\nid: comp-qux\ntitle: Qux\nstatus: draft\nowners: [test-team]\n"
+        "depends_on: []\nrealizes: []\nsealed: true\n"
+        "source_path: pipeline/qux/\n---\n\n# Qux\n"
+    )
+    real_code_dir = corpus_root / "pipeline" / "qux"
+    real_code_dir.mkdir(parents=True)
+    (real_code_dir / "qux.py").write_text(
+        "def qux_run() -> None:\n"
+        "    \"\"\"Runs qux.\"\"\"\n"
+        "    return None\n"
+    )
+
+    import spec_bundle_assembler
+
+    usage = spec_bundle_assembler._dependency_usage(corpus_root, "qux")
+    assert "Importable as: `qux` (module path `pipeline/qux/`)" in usage
+    assert "qux_run() -> None" in usage
