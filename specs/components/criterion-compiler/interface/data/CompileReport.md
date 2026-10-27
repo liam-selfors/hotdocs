@@ -25,5 +25,6 @@
 }
 ```
 
-`gate_version` corresponds to the `gate_versions.compiler` entry in the D7
-provenance manifest (R-COMPILE-010).
+`gate_version` corresponds to the `gate_versions.compiler` entry in the
+provenance manifest described in `notes/initial-ideas.md`'s own D7
+(R-COMPILE-010).

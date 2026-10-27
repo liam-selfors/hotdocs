@@ -29,6 +29,7 @@
   access into an already-bound literal *would* still be compile-time-only
   and therefore no less safe, but allowing it would mean extending the
   step-phrase grammar itself (`specs/architecture/step-phrase-grammar.md`,
-  D2-level governance weight) for a need nothing in this corpus has
+  governance weight on par with `notes/initial-ideas.md`'s own D2) for a
+  need nothing in this corpus has
   actually raised yet. An author needing a bound value's field elsewhere
   MUST bind that field's value directly in its own `Given` step instead.

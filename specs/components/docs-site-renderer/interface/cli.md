@@ -6,7 +6,8 @@ hotdocs docs-site build [--repo-root=<dir>] [--out=<dir>]
 
 - `--out` — output directory for the rendered static site. Default:
   `dist/docs-site/` (a build artifact location, not `gen/` — this
-  component's output is never committed, per D9/R-DOCS-005).
+  component's output is never committed, per `notes/initial-ideas.md`'s
+  own D9/R-DOCS-005).
 
 **Exit codes:**
 

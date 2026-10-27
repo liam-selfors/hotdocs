@@ -15,7 +15,7 @@
   that fails verification"; conflating a precondition refusal with either
   of those would misclassify why nothing was generated.
 
-  This is one of two independent enforcement layers (D5/§8): `merge-
+  This is one of two independent enforcement layers (§8): `merge-
   orchestrator` is expected not to call this component for a sealed
   component's regeneration at all (its own routing requirement), and this
   check is the second, independent layer — in case it's ever invoked

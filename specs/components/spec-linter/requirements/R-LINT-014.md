@@ -2,4 +2,4 @@
 
 **R-LINT-014** — The linter MUST fail if more than one glossary-like file
   exists under `specs/` without a corresponding `architecture/`-level
-  bounded-context split decision (D14).
+  bounded-context split decision (`notes/initial-ideas.md`'s own D14).

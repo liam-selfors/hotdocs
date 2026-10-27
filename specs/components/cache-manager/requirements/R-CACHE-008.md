@@ -13,7 +13,8 @@
   caller's perspective, indistinguishable from either of those — a plain
   miss, already a fully specified, correct outcome everywhere a cache
   lookup happens in this corpus. Eviction only ever affects **hit rate**
-  (and therefore cost, per D13), never correctness. The exact
+  (and therefore cost, per `notes/initial-ideas.md`'s own D13), never
+  correctness. The exact
   policy — a size bound, a TTL, both, neither — is deliberately left
   unpinned here: the backing store is pluggable (`VAR-CACHE-STORE-URL`),
   and the right policy genuinely depends on which store it ends up being

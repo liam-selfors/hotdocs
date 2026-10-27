@@ -2,7 +2,8 @@
 
 - **Determinism.** Same `gen/<component>/` content and the same reference
   corpus version MUST always produce the same `similarity_score` — required
-  for cache-key correctness (D13), same as every other gate.
+  for cache-key correctness (`notes/initial-ideas.md`'s own D13), same as
+  every other gate.
 - **No model calls.** Pure hashing/comparison logic, same trust tier as
   `spec-linter`, `impact-analyzer`, and `cache-manager`.
 - **Never silent.** Per R-LICENSE-002/007 — a clean result is recorded with

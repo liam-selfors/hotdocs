@@ -13,8 +13,8 @@
   (`spec-bundle-assembler` `R-ASSEMBLE-007`), so a `hint`- and
   `cold`-mode call for the same spec state share one cache key —
   writing a hint-informed candidate there could let a later `cold`
-  build, which must see no prior code (`R-GEN-001`, `D1`), silently
-  reuse it.
+  build, which must see no prior code (`R-GEN-001`,
+  `notes/initial-ideas.md`'s own D1), silently reuse it.
 
   Reading a cache hit in `hint` mode stays safe: a hit only exists for
   a hash already matching some committed state, so reuse is correct

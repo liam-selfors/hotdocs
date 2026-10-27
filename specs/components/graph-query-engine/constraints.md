@@ -5,7 +5,7 @@
 - **Determinism.** Given the same corpus content and the same
   `repo_root`, every view MUST return byte-identical results on repeat
   queries — required for any consumer's own cache-key correctness
-  (D13) that reads through these views.
+  (`notes/initial-ideas.md`'s own D13) that reads through these views.
 - **Never embeds `repo_root` into the generated SQL file itself.** The
   `{repo_root}` placeholder (`R-GQE-001`–`006`) MUST be substituted at
   `load_views()` call time, not baked in at generation time — the
