@@ -2,7 +2,9 @@
 
 ```json
 {
-  "lint_findings": [],
+  "lint_findings": [
+    { "rule_id": "R-LINT-003", "severity": "fail", "file": "specs/components/foo/component.md", "line": 12, "message": "depends_on references 'comp-bar', which does not exist" }
+  ],
   "predicted_blast_radius": ["comp-foo"],
   "hint_previews": { "comp-foo": { "...": "a hint-mode SpecBundle-derived preview" } },
   "completeness_score": 0.9,
@@ -13,6 +15,11 @@
   "degraded": false
 }
 ```
+
+`lint_findings` entries are exactly `spec-linter`'s own `Finding` shape
+(`interface/data/LintReport.md`'s `findings[]`, bundle-visible via
+`depends_on`) — passed through unchanged, never restated or
+summarized here.
 
 `completeness_score`, `completeness_rationale`, and `redundancy_flags` are
 `null`/empty with `degraded: true` when no model was configured
