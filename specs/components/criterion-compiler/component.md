@@ -130,3 +130,12 @@ See `constraints.md`.
 ## Change log
 
 - Initial draft.
+- `D60`: first real implementation (`pipeline/criterion-compiler/
+  criterion_compiler.py`), hand-authored per `sealed: true` — never a
+  `generator` candidate. Preceded by `D59`, which found every existing
+  `kind: compiled` criterion corpus-wide was never actually written in
+  the step-phrase grammar and reclassified them all to
+  `generated-test`, leaving this component's own synthetic `widget`
+  fixture (`verification/criterion-compiler/`) as its only real test
+  subject — exactly what `constraints.md`'s characterization-coverage
+  clause already anticipated.
