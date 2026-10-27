@@ -68,10 +68,12 @@ See `interface/data/`.
 
 See `acceptance/`.
 
-All three criteria are `kind: compiled` — dispatch-and-aggregate logic, tested
-by mocking the dispatch mechanisms and asserting on call
-arguments/results, the same pattern `verifier-orchestrator` already
-established for coordination logic.
+All three criteria are `kind: generated-test` (`D59`) — dispatch-and-
+aggregate logic, tested by mocking the dispatch mechanisms and
+asserting on call arguments/results, the same pattern
+`verifier-orchestrator` already established for coordination logic;
+none are actually written in the step-phrase grammar, so
+`kind: compiled` would not describe how they're really verified.
 
 ## Non-functional constraints
 
@@ -88,3 +90,12 @@ None — extracted whole from `merge-orchestrator`'s already-resolved
 - Renamed from `golden-scenario-verifier`; `CapabilityScenarioReport`
   moved to per-scenario granularity with a shared `rationale` field
   (`D36`).
+- `D75`/`D76`/`D77`/`D78`: first real implementation, via three real
+  `generate()` calls. `D75` added `criterion-compiler`'s
+  `compile_criterion` primitive and fixed the real capability-scenario
+  location; `D76` fixed sealed-dependency visibility in
+  `spec-bundle-assembler`; `D77` clarified that `realizes` edges are
+  per-component. A third retry, with all three fixes in place, passed
+  all 3 `AC-SCENARIO-*` criteria. `gen/capability-scenario-verifier/
+  capability_scenario_verifier.py` is now that candidate. See
+  `verification/capability-scenario-verifier/BOOTSTRAP.md`.
