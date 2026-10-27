@@ -162,7 +162,7 @@ optional).
 | `uses_var` | never (optional) | List of `VAR-<id>`s this component reads from `specs/vars/`. (D12) **(component `component.md` only)** |
 | `depends_on_guarantees` | never (optional) | List of `G-<comp>-NNN` ids — a **strictly opt-in narrowing** of which of a dependency's `interface/guarantees/` entries this component actually relies on. (D16) **(component `component.md` only)** |
 | `supersedes` | never (optional) | Prior spec id this one replaces. |
-| `builds_on` | never (optional) | List of prior `D<N>`s this decision's reasoning depends on, without replacing any of them. (`D91`) **(decision record only)** |
+| `builds_on` | never (optional) | List of prior `D<N>`s this decision's reasoning depends on, without replacing any of them. **(decision record only)** |
 | `model_pin` | never (optional); **inapplicable when `sealed: true`** | Per-spec override of the repo-wide canonical model. **MUST** be omitted (not filled with a placeholder) on a sealed component — there is no generation to pin. **(component `component.md` only)** |
 | `sealed` | never (optional), default `false` | Legacy-perimeter escape hatch — and, per the `criterion-compiler` precedent, also the correct mechanism for a *permanently* hand-maintained trust anchor, not only temporary legacy debt. See §8. (D1/D8) **(component `component.md` only)** |
 | `source_path` | condition: required when `sealed: true`, forbidden otherwise | Where the actual, hand-maintained code lives. **MUST NOT** point under `gen/`. **(component `component.md` only)** |
@@ -292,83 +292,18 @@ pay the extra-file cost here.
 
 ### 3.5 Decision record (`specs/decisions/<id>.md`)
 
-ADR-style. Append-only. Once a decision record is ratified it is immutable —
-a change in direction is a new, superseding record (`supersedes` field), never
-an edit to the old one.
-
-**One narrow, sanctioned exception (`D87`):** when a new decision's
-`supersedes` field names a prior one, that prior record's `status`
-field **MUST** flip from `ratified` to `deprecated` as part of the
-same change — a metadata-only edit, never touching the record's body.
-This is not a contradiction of immutability; it is the one update the
-`supersedes` mechanism itself requires to mean anything; without it,
-`deprecated` could never be set and `supersedes` would be a field with
-no consumer. `last_ratified_commit` **MUST** be retained unchanged —
-it is the historical fact of when the record *was* ratified, not a
-claim about whether it still is. See `R-LINT-029` for the resulting
-consistency check (every `supersedes` resolves to a now-`deprecated`
-record; every `deprecated` record is named by one).
-
-`supersedes` **MUST** name only a full replacement — a later decision
-that only partially reverses an earlier one's conclusion MUST NOT set
-`supersedes` or flip the earlier one to `deprecated`; it stays a plain
-prose cross-reference, same as before this rule existed.
-
-**Atomicity (`D90`):** a decision record MUST cover exactly one topic
-— one problem, one conclusion. A follow-on finding discovered
-incidentally while verifying or implementing an unrelated decision
-(a stray mis-citation, an adjacent bug) MUST get its own record, never
-folded into the one that happened to surface it. This is a judgment
-call, the same way §4's component-splitting trigger is — not
-mechanically enforced — but it is a real, checkable question to ask
-before ratifying: "does removing any one paragraph here leave the
-rest meaning something different?" If yes, it is one topic. If a
-paragraph could be deleted intact with the rest unaffected, it belongs
-in its own record instead. (`D87` itself does not fully meet this bar
-— it bundled the supersession mechanism with an unrelated mis-citation
-fix found while verifying it; noted here as a known, now-immutable
-exception, not silently exempted from the rule it motivated.)
-
-**Citation discipline (`D90`):** a `D<N>` citation MUST point to the
-*specific* decision responsible for the *specific* fact being stated
-— never a loosely-remembered "see various decisions" or a citation
-copied from a nearby one without checking it actually says what is
-being attributed to it. `D87`/`D89` each found a real case of this
-going wrong (`D45` credited for a fact only `D46` states) by checking
-a citation against the decision it pointed to, not by assuming the
-citation was already correct. Checking a citation this way, before
-relying on or extending it, is the expected discipline, not an
-exceptional audit step.
-
-**Drift protection via grep (`D90`):** every citation uses the bare
-`D<N>` token, optionally backtick-wrapped, always at a word boundary
-— this is already true throughout the corpus, not a new formatting
-requirement. Before deprecating or altering a decision, the canonical
-check is:
-
-```
-grep -rn '\bD<N>\b' specs/ --include="*.md" | grep -v '^specs/decisions/'
-```
-
-`specs/decisions/` is excluded deliberately: a citation inside another
-*decision record's* own historical narrative is frozen, immutable
-content that will legitimately keep mentioning a now-deprecated id
-forever — it is never a drift candidate, only a citation inside a
-*live* spec file is. `decision-drift-detector` (`D89`) automates the
-commit-ancestry half of this same check; this command is the
-zero-tooling version a human can run in one line before that
-automation exists for a given corpus, or when checking a single
-decision quickly is faster than a full run.
-
-**`builds_on` (`D91`):** a new, optional, list-valued frontmatter
-field — "`D<N>`s this decision's own reasoning depends on, without
-replacing any of them" (the universal frontmatter table in §2 names
-it alongside `supersedes`). Unlike `supersedes`, `builds_on` is
-many-valued and carries no status-flip obligation on either side —
-it exists so a decision's own dependency on prior reasoning is a
-structured fact a tool can walk, not only prose a human has to parse.
-Every `builds_on` entry MUST resolve to a real decision (same frozen
-`D1`–`D14` exemption as `supersedes`/`R-LINT-026`).
+ADR-style. Append-only. Once a decision record is ratified it is
+immutable — a change in direction is a new, superseding record
+(`supersedes` field), never an edit to the old one, with one narrow,
+sanctioned exception: the superseded record's own `status` field
+flips to `deprecated` as part of that same change. A decision record
+MUST cover exactly one topic, and every `D<N>` citation MUST point to
+the specific decision responsible for the specific fact stated, never
+assumed correct because it merely resolves. See `specs/decisions/
+README.md` for the full guidelines — frontmatter shape,
+`supersedes`/`builds_on` semantics, citation discipline, and the
+grep-based drift check — this section states the normative rules in
+brief, not a second copy of the reasoning.
 
 ### 3.6 Glossary (`specs/glossary.md`)
 
@@ -381,18 +316,14 @@ Single file, no frontmatter, no per-spec entry limit. (D14)
   that genuinely don't share vocabulary) — never a routine response to word
   count.
 
-**When to promote a fact here (the judgment call §4's component-sizing
-trigger makes for size, made explicit for shared vocabulary, `D86`):**
-a convention, naming formula, file-path pattern, or callable contract
+**When to promote a fact here** (the judgment call §4's component-sizing
+trigger makes for size, made explicit for shared vocabulary): a
+convention, naming formula, file-path pattern, or callable contract
 **MUST** be promoted to the glossary as soon as a second component's
 spec states it, relies on it, or would need to independently guess it
 — never left to live only in one component's own text (where a
 dependent's `SpecBundle` never sees it, `R-ASSEMBLE-002`) or only in
-real `gen/` code (where no spec ever sees it at all). This corpus has
-been caught by exactly this gap nine times (`D61`, `D62`, `D65`,
-`D67`, `D69`, `D76`, `D80`, `D82`, `D83`) — every time, independently
-by different components, because the fact was true and needed but
-never had anywhere a `SpecBundle` would surface it. §10's "single
+real `gen/` code (where no spec ever sees it at all). §10's "single
 source of truth for computed facts" is the sibling discipline for
 *calculations*; this is the same discipline for *shared vocabulary and
 contracts* — a convention is not "computed," but it is exactly as
