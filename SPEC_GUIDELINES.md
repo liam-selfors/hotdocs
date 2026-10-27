@@ -501,51 +501,62 @@ drives it directly:
    ratified specs, glossary conformance, acyclic dependency graph, full
    traceability closure (every `R-id`, `realizes`, `uses_var`, `depends_on`,
    `depends_on_guarantees` reference resolves), size caps. Run directly;
-   nothing gates `hotdocs build` on it, but there is no reason to
-   attempt it against a spec that won't lint clean.
-2. **`hotdocs build [<component-id>] [--changed=...] --model=<model-id>
-   [--retry-feedback=...]`** (`provenance-tracker`, `D88`/`D92`) — the
-   one command replacing what were once three (`hotdocs
-   generate`/`check-capability`/`verify`). For every component in
-   scope (a single id, a blast radius via `impact-analyzer`, or the
-   whole corpus), in `depends_on` order: `component-gate-runner`
-   (`D86`) checks provenance first (skip real work on a hit); on a
-   miss, the pinned model, cold, no prior code, from the spec bundle
-   (`component.md` + `requirements/` + `interface/` + `constraints.md`
-   + depended-upon components' `interface/` + referenced `specs/vars/`
-   declarations + `glossary` — deliberately excluding `acceptance/`, so
-   the model doesn't overfit to its own tests); per-criterion
-   verification (compiled / generated-test / llm-judge, per §5,
-   contract/property tests from `interface/`, the interface-drift
-   check); license and secret scans, unconditional (D7/D12); provenance
-   written last. Exactly one generation attempt per component — no
-   automatic retry (D1/D3: the best-of-k retry this step used to run
-   was retired). `--retry-feedback` (the immediately preceding
-   attempt's failing requirements, valid only when scope is a single
-   component) MAY be supplied against an unchanged spec — this folds
-   into the generation cache key (`R-GEN-005`), so it is already a
-   fresh attempt, with no separate retry mechanism needed — but only
-   if a human explicitly supplies it (D3); nothing computes or injects
-   it automatically. Then, for every product capability whose
+   nothing gates `hotdocs generate`/`hotdocs verify` on it, but there is
+   no reason to attempt either against a spec that won't lint clean.
+2. **`hotdocs generate <component-id> --model=<model-id> [--seed=...]
+   [--retry-feedback=...]`** (`component-gate-runner`, `D86`/`D91`/`D93`)
+   — one component at a time, run by a developer in `depends_on` order
+   across a multi-component change. Checks provenance first (skip real
+   work on a hit); on a miss, the pinned model, cold, no prior code,
+   from the spec bundle (`component.md` + `requirements/` + `interface/`
+   + `constraints.md` + depended-upon components' `interface/` +
+   referenced `specs/vars/` declarations + `glossary` — deliberately
+   excluding `acceptance/`, so the model doesn't overfit to its own
+   tests); per-criterion verification (compiled / generated-test /
+   llm-judge, per §5, contract/property tests from `interface/`, the
+   interface-drift check); license and secret scans, unconditional
+   (D7/D12); provenance written last; the attempt recorded via
+   `provenance-tracker`'s `write_attempt_record` regardless of outcome.
+   Exactly one generation attempt per call — no automatic retry
+   (D1/D3: the best-of-k retry this step used to run was retired).
+   `--retry-feedback` (the immediately preceding attempt's failing
+   requirements against this same component) MAY be supplied against an
+   unchanged spec — this folds into the generation cache key
+   (`R-GEN-005`), so it is already a fresh attempt, with no separate
+   retry mechanism needed — but only if a human explicitly supplies it
+   (D3); nothing computes or injects it automatically.
+3. **`hotdocs verify [--changed=...] [--model=<model-id>] [--format=...]`**
+   (`provenance-tracker`, `D88`/`D93`) — for every component in scope
+   (a single id's blast radius via `impact-analyzer`, or the whole
+   corpus), a pure, read-only check against `provenance-checker`; this
+   never triggers `component-gate-runner` itself — generating new code
+   is `hotdocs generate`'s own deliberate action, never a side effect
+   of checking readiness. Then, for every product capability whose
    realizing components are now all current: `capability-scenario-verifier`
-   (`D89`) runs that capability's scenarios against the real, fully
-   assembled `gen/` output — not a prediction, the actual regenerated
-   system — and writes its own provenance, keyed on the realizing
-   set's actual current content (deliberately not their
-   `spec_bundle_hash`es, so an undeclared upstream change still
-   invalidates it). This is the backstop for cross-component
+   (`D89`) checks its own provenance and, on a miss, runs that
+   capability's scenarios against the real, fully assembled `gen/`
+   output — not a prediction, the actual regenerated system — then
+   writes its own provenance, keyed on the realizing set's actual
+   current content (deliberately not their `spec_bundle_hash`es, so an
+   undeclared upstream change still invalidates it). Unlike the
+   component half, this is check-then-run, not pure read: capability-
+   scenario verification never produces new source code, only exercises
+   what already exists, so `hotdocs verify` triggering it costs a
+   developer nothing they wouldn't expect from a command named
+   "verify." `--model` is required only if some capability in scope
+   actually needs a fresh run. This is the backstop for cross-component
    behavioral risk that no amount of interface-level diffing can rule
    out in principle (D2) — not a redundant check: `interface/guarantees/`
    (D2) makes *foreseen* behavioral dependencies explicit and
    propagating, this gate catches what wasn't foreseen. `hotdocs
-   build` then reports one ready/not-ready verdict across everything
-   it just checked or produced — this is the confirmation a human
-   reads before committing; it does not enforce anything itself
-   (`D87`), nothing requires it to run before a commit, same posture
-   `.hotdocs/`'s own non-gating rule already states.
-3. **Non-functional gates** where feasible (benchmarks, size budgets).
-4. **Review** — `review-packet-builder` assembles the same picture
-   `hotdocs build` checked (spec diff, changed requirements,
+   verify` then reports one ready/not-ready verdict across everything
+   it just checked — this is the confirmation a human reads before
+   committing; it does not enforce anything itself (`D87`), nothing
+   requires it to run before a commit, same posture `.hotdocs/`'s own
+   non-gating rule already states.
+4. **Non-functional gates** where feasible (benchmarks, size budgets).
+5. **Review** — `review-packet-builder` assembles the same picture
+   `hotdocs verify` checked (spec diff, changed requirements,
    regenerated components, verification results, residual risk,
    license/secret flags, provenance-hit status, capability-scenario
    results, any new/changed `sealed`/override declarations) into a
@@ -553,7 +564,7 @@ drives it directly:
    aggregate (`D90`) rather than recomputing anything. A human reviews
    this and the spec diff. **No human review of generated code is
    required, of any kind.** (D5)
-5. **Commit** — `specs/`, `gen/`, and `verification/` (including
+6. **Commit** — `specs/`, `gen/`, and `verification/` (including
    `corpus-graph.json`) update atomically, by the developer, in one
    squashed commit — ordinary version control, not a component's own
    action.

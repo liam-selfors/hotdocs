@@ -11,7 +11,7 @@ out (a dict with `result`/`verdict`/`model_call_error`/`file` keys, or
 an object with the same attributes). This component wires these
 itself, from the `model`/`seed`/`llm_backend` `run_capability_gates`
 receives — passed through unchanged by `provenance-tracker`'s
-`hotdocs build` (`D89`/`D92`), the same way `component-gate-runner`
+`hotdocs verify` (`D89`/`D92`/`D93`), the same way `component-gate-runner`
 wires its own. No caller does the wiring on this component's behalf.
 Omitting either
 degrades the same way it does for `verifier-orchestrator`: an

@@ -42,7 +42,7 @@ new dispatch machinery; producing one result per scenario, keyed by
 `P-id`; checking and writing its own provenance for one capability at a
 time, keyed on its realizing components' actual current content
 (`R-SCENARIO-004`, `D89`) — called internally by `provenance-tracker`'s
-`hotdocs build` (`D92`), never invoked by a developer directly.
+`hotdocs verify` (`D92`/`D93`), never invoked by a developer directly.
 
 **Out of scope:** deciding whether a merge should proceed (`D87` removed
 the component that used to decide that; `provenance-tracker`'s
@@ -121,3 +121,7 @@ None — extracted whole from `merge-orchestrator`'s already-resolved
 - `D92`: no longer has its own CLI (briefly `hotdocs check-capability`)
   — called internally by `provenance-tracker`'s combined `hotdocs
   build` instead.
+- `D93`: `hotdocs build` reverts to two separate commands, `hotdocs
+  generate` and `hotdocs verify`; this component's capability check
+  stays folded into `hotdocs verify` only (unreversed) — still no
+  standalone CLI of its own.

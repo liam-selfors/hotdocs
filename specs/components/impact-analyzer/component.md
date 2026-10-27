@@ -98,8 +98,8 @@ None. The two originally recorded here are both resolved:
   *foreseen* behavioral dependency explicit and propagating, the same
   one-hop mechanism everything else uses — no cascading needed once the
   guarantee itself is visible; (2) `capability-scenario-verifier`, run
-  as part of `hotdocs build` once its realizing components pass
-  (`D89`/`D92`), is the permanent backstop for whatever wasn't foreseen,
+  as part of `hotdocs verify` once its realizing components pass
+  (`D89`/`D92`/`D93`), is the permanent backstop for whatever wasn't foreseen,
   tested against the real regenerated system rather than guessed at here.
   Eager multi-hop cascading from every `transitive-var`/
   `transitive-capability` edge was rejected as the alternative — it would

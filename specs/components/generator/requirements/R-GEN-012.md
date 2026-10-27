@@ -25,5 +25,5 @@
   `retry_feedback` on a given call, and MUST NOT derive it from
   anything on disk itself — that decision, and the R-id list itself,
   come from whoever is invoking this generation call — a developer
-  running `hotdocs build` with `--retry-feedback` (`D86`/`D91`/`D92`) —
+  running `hotdocs generate` with `--retry-feedback` (`D86`/`D91`/`D93`) —
   never computed automatically in between.

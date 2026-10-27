@@ -17,7 +17,7 @@ capability, colored by current provenance status, navigable between a
 blast-radius view and a whole-corpus view, with per-node drill-down
 into `AttemptRecord` history and retry-feedback suggestions for
 anything currently failing. The visual answer to the same question
-`hotdocs build` answers as an exit code.
+`hotdocs verify` answers as an exit code.
 
 ## Rationale
 
@@ -45,7 +45,7 @@ blast-radius view (given a changed-ids set) and a whole-corpus view
 for any node currently failing or missing provenance (`R-UI-008`).
 
 **Out of scope:** a "retry"/"resume" action of its own (`R-UI-003`) —
-running `hotdocs build` again is already the complete path, a
+running `hotdocs generate` again is already the complete path, a
 developer invokes it themselves, outside this UI; any write to
 `specs/`, `gen/`, `verification/`, or `.hotdocs/` — this component only
 ever reads.
@@ -98,3 +98,7 @@ None.
   committed corpus state" boundary now that a concrete need surfaced).
   `AttemptRecord`/retry-feedback drill-down kept, now graph-attached
   rather than a flat per-component list.
+- `D93`: wording only — every reference to the since-reversed combined
+  `hotdocs build` command now names `hotdocs generate` (the recovery
+  action for a failing component) or `hotdocs verify` (the readiness
+  query this UI visualizes), whichever it actually meant.

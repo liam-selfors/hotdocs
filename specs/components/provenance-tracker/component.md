@@ -3,7 +3,7 @@ id: comp-provenance-tracker
 title: Provenance Tracker
 status: draft
 owners: [pipeline-team]
-depends_on: [comp-component-gate-runner, comp-impact-analyzer, comp-capability-scenario-verifier]
+depends_on: [comp-provenance-checker, comp-impact-analyzer, comp-capability-scenario-verifier]
 realizes: [P-MERGE-VISIBILITY]
 sealed: false
 ---
@@ -12,53 +12,65 @@ sealed: false
 
 ## Purpose
 
-`hotdocs build`: for a given scope (a single component, a blast
-radius, or the whole corpus), brings every component and every
-intersecting capability to current, passing provenance — generating or
-re-verifying only what isn't already current — and reports one
-ready/not-ready verdict with per-item detail. Also keeps a durable,
-local-only history of attempts (`AttemptRecord`) so a developer can see
-why a component's provenance check is currently failing.
+Answers "would a merge pass right now" (`hotdocs verify`) by checking
+every component's current provenance and checking-then-running every
+intersecting capability's scenarios, across a scope — a blast radius or
+the whole corpus — and reports one ready/not-ready verdict with
+per-item detail. Also keeps a durable, local-only history of `hotdocs
+generate` attempts (`AttemptRecord`) so a developer can see why a
+component's provenance check is currently failing.
 
 ## Rationale
 
 (`D88`, renamed from `merge-tracker`.) `merge-orchestrator`'s removal
 (`D87`) left nothing that still needed a per-merge-attempt log —
 `TrackingRecord` existed specifically to record outcomes of an
-automated action that no longer exists. `D92` went one step further
-than the live read-only query `D88` first introduced: this component
-already had to compute, for every item in scope, whether its
-provenance was current — the only thing missing was acting on a miss
-instead of just reporting it, the same check-then-do pattern
-`component-gate-runner`/`capability-scenario-verifier` already use
-internally. Combining `hotdocs generate`/`hotdocs check-capability`/
-`hotdocs verify` into this one command meant breaking a real
-dependency cycle: `component-gate-runner` writes its own
-`AttemptRecord`s directly now (`R-GATE-008`), rather than calling into
-this component for it, so this component can depend on
-`component-gate-runner` to trigger its gauntlet without a two-node
-cycle.
+automated action that no longer exists. What a developer actually
+needs is different: a live answer to "is everything ready," not a
+history of past attempts at something no component does automatically
+anymore. The per-component attempt history (`AttemptRecord`) is kept —
+a developer running `hotdocs generate` still benefits from seeing why a
+prior attempt failed, same as always.
+
+`D92` briefly combined `hotdocs generate`/`check-capability`/`verify`
+into one `hotdocs build` command, reasoning that this component
+already had to compute whether provenance was current for every item
+in scope — the only thing missing was acting on a miss. `D93` reversed
+the component half of that: a developer genuinely wants `generate` and
+`verify` as independently runnable commands, since generating new code
+is a deliberate, potentially expensive action that `verify` should
+never spring as a side effect. The capability half of `D92`'s
+reasoning stands, unreversed: `verify` still checks-then-runs
+`capability-scenario-verifier`'s own gauntlet for every intersecting
+capability, since capability-scenario verification never produces new
+source code, only exercises what already exists — triggering it from
+`verify` costs a developer nothing they wouldn't expect. `D93` also
+removes the dependency cycle `D92` introduced: this component no
+longer calls `component-gate-runner` for anything, so
+`component-gate-runner` can safely depend on this component again (to
+call `write_attempt_record`) without creating a two-node cycle.
 
 ## Scope
 
 **In scope:** for a given scope (`changed_ids`, via `impact-analyzer`,
-or the whole corpus), calling `component-gate-runner`'s
-`run_component_gates` for every component and
-`capability-scenario-verifier`'s `run_capability_gates` for every
-intersecting capability — each already checks its own provenance first
-and skips real work on a hit, so this component never re-derives
-hit/miss logic itself — and reporting one `ready` verdict plus
-per-item detail (`R-TRACK-009`/`010`); reading `.hotdocs/attempts/`
-(written directly by `component-gate-runner`, `R-GATE-008`) for
-`last_requirement_failures` (`R-TRACK-008`), a pure, read-only
-convenience for `--retry-feedback`.
+or the whole corpus), checking `provenance-checker` for every component
+— a pure, read-only check, never triggering generation (`R-TRACK-009`,
+`D93`) — and checking-then-running `capability-scenario-verifier`'s
+`run_capability_gates` for every intersecting capability (`R-TRACK-010`,
+unreversed by `D93`), then reporting one `ready` verdict plus per-item
+detail; writing one `AttemptRecord` per `hotdocs generate` attempt,
+taken as direct parameters from `component-gate-runner`
+(`R-TRACK-004`/`007`); exposing `last_requirement_failures` as a pure,
+read-only convenience over that history (`R-TRACK-008`).
 
 **Out of scope:** deciding whether a merge *should* proceed — nothing
 gates on this component's output (`D87`; a human reads `hotdocs
-build`'s verdict and decides); the actual generation/verification/scan
-mechanics (`component-gate-runner`'s own job) or capability-scenario
-dispatch mechanics (`capability-scenario-verifier`'s own job) — this
-component only decides *when* to call each, never how either runs.
+verify`'s verdict and decides); triggering component generation on a
+miss — that is `hotdocs generate`'s own job, by name, never a side
+effect of checking readiness (`D93`); re-deriving `provenance-checker`'s
+or `capability-scenario-verifier`'s own hit/miss logic — this component
+calls their real functions, never re-implements them against raw
+`.provenance.json`/capability-provenance files itself.
 
 ## Definitions
 
@@ -116,3 +128,15 @@ None.
   `component-gate-runner` writes `AttemptRecord`s itself now
   (`R-GATE-008`), breaking what would otherwise have become a
   dependency cycle; this component only reads them.
+- `D93`: reversed `D92`'s component half. `hotdocs generate` and
+  `hotdocs verify` are independently runnable commands again;
+  `check_readiness` goes back to a pure, read-only `provenance-checker`
+  check for components (`R-TRACK-009`), never triggering
+  `component-gate-runner`. `depends_on` swaps `component-gate-runner`
+  back for `provenance-checker`. `write_attempt_record`/
+  `last_requirement_failures` return (`R-TRACK-004`/`007`/`008`),
+  called by `component-gate-runner` directly — the cycle `D92` broke by
+  removing this call no longer exists, since this component no longer
+  depends on `component-gate-runner` for anything. The capability half
+  of `D92` (check-then-run via `capability-scenario-verifier`) stands
+  unreversed (`R-TRACK-010`).

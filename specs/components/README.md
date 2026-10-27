@@ -165,18 +165,20 @@ Specced in full depth so far:
   `merge-tracker` (`D88`, once `merge-orchestrator`'s removal, `D87`,
   retired the per-merge-attempt log this component used to write — no
   caller of `write_tracking_record` exists anymore). Owns `hotdocs
-  build` (`D92`), replacing `hotdocs generate`/`check-capability`/
-  `verify` entirely: for every component in scope, calls
-  `component-gate-runner`'s `run_component_gates` (which checks its own
-  provenance and skips real work on a hit); for every intersecting
-  capability, calls `capability-scenario-verifier`'s
-  `run_capability_gates` the same way — sequenced in `depends_on`
-  order, never re-deriving either component's own hit/miss logic.
-  Reads `.hotdocs/attempts/` (written directly by `component-gate-runner`,
-  `R-GATE-008` — never through a call into this component, specifically
-  to avoid a two-node dependency cycle now that this component calls
-  `component-gate-runner` to trigger work) for `last_requirement_failures`,
-  a retry-feedback convenience.
+  verify` (`D88`/`D93` — `D92` briefly combined it with `hotdocs
+  generate`/`check-capability` into one `hotdocs build` command,
+  reversed for the component half): for every component in scope, a
+  pure, read-only check against `provenance-checker`, never triggering
+  `component-gate-runner`; for every intersecting capability, calls
+  `capability-scenario-verifier`'s `run_capability_gates` (check-then-run,
+  unreversed by `D93` — exercising existing code, not producing new
+  code), never re-deriving either component's own hit/miss logic.
+  Reads `.hotdocs/attempts/` via its own `write_attempt_record`
+  (`R-TRACK-007`, called by `component-gate-runner` directly — the
+  dependency cycle `D92` briefly solved by having `component-gate-runner`
+  write the file directly no longer exists, since this component
+  doesn't call `component-gate-runner` for anything) for
+  `last_requirement_failures`, a retry-feedback convenience.
 - **`provenance-tracker-ui`** — mostly `kind: compiled` (rendering is a
   pure function of its two inputs), one `generated-test` criterion for
   the client-side DuckDB-WASM graph query itself actually running in a
@@ -185,26 +187,26 @@ Specced in full depth so far:
   alongside local provenance status data — a deliberate reversal of
   this component's own prior "never reads committed corpus state"
   boundary, once the concrete cross-referencing need that boundary's
-  own open question anticipated actually surfaced. Implements no build
-  action of its own: as a static page (R-UI-001), it never calls
-  `check_readiness` directly — it re-runs its own client-side query
-  against current on-disk state, and running `hotdocs build` already is
-  the complete path, so there is nothing for this component to wire up
-  beyond showing status clearly.
+  own open question anticipated actually surfaced. Implements no
+  generate action of its own: as a static page (R-UI-001), it never
+  calls `check_readiness` directly — it re-runs its own client-side
+  query against current on-disk state, and running `hotdocs generate`
+  already is the complete recovery path, so there is nothing for this
+  component to wire up beyond showing status clearly.
 - **`component-gate-runner`** — all `kind: compiled`. Extracted from
   `merge-orchestrator` by `D76` (the same fix `D14` applied once before
   for `capability-scenario-verifier`): runs one component through its
   provenance check, generation on a miss, verification dispatch,
   compliance scanning, and provenance write, producing one
-  `ComponentPipelineResult`. No CLI of its own (`D92`, after briefly
-  having one named `hotdocs generate`, `D86`/`D91`) — called internally
-  by `provenance-tracker`'s `hotdocs build`, once per component in
-  scope. Wires its own `test_author`/`judge` closures and writes its
-  own `AttemptRecord` directly to `.hotdocs/attempts/` (`D92` — never a
-  call into `provenance-tracker`'s own code for this, specifically to
-  avoid the dependency cycle that would otherwise create now that
-  `provenance-tracker` calls this component). Fully specced, not yet
-  regenerated.
+  `ComponentPipelineResult`. Has its own CLI again (`D93`, reversing
+  `D92`'s brief retirement of it): `hotdocs generate <component-id>`
+  (`D86`/`D91`/`D93`), independently runnable from `hotdocs verify`.
+  Wires its own `test_author`/`judge` closures and calls
+  `provenance-tracker`'s `write_attempt_record` once its own attempt
+  concludes (`D86`/`D93` — the dependency cycle `D92` solved by having
+  this component write the file directly no longer exists, since
+  `provenance-tracker` doesn't call this component for anything). Fully
+  specced, not yet regenerated.
 
 - **`spec-completeness-assistant`** — the assist agent this methodology
   always assumed but never named, and that two `notes/metrics.md` metrics
@@ -226,9 +228,10 @@ Specced in full depth so far:
   `D89`, also owns its own provenance, keyed on realizing components'
   actual current content rather than their `spec_bundle_hash`es, to
   avoid reopening the exact blind spot this component exists to close;
-  called internally by `provenance-tracker`'s `hotdocs build` (`D92`,
-  no standalone CLI of its own) the same uniform way it calls
-  `component-gate-runner`.
+  called internally by `provenance-tracker`'s `hotdocs verify`
+  (`D92`/`D93`, no standalone CLI of its own) — the capability half of
+  that check, check-then-run, unreversed when `D93` split component
+  generation back out.
 - **`llm-endpoint`** — mostly `kind: compiled` (backend resolution,
   credential safety), one `generated-test` criterion for the actual
   dispatched call. Added by D18 once `generator` and `test-author` were
