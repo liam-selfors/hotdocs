@@ -157,3 +157,7 @@ See `constraints.md`.
   must be scoped to `gen/<component>/` itself, not a broader ancestor.
   Hand-authored directly, same as `D44`/`D59` — never a `generator`
   candidate.
+- `D83`: `R-COMPILE-014` — backfilled the lazy, `repo_root`-relative
+  import convention any direct dependent MUST use to locate this
+  sealed component, found once a real `verifier-orchestrator`
+  candidate used a static top-level import instead and failed.

@@ -8,7 +8,14 @@
   underlying check is a direct equality/containment match — always
   populated for a `compiled` criterion, since the step-phrase grammar's
   own assertion templates (`specs/architecture/step-phrase-grammar.md`)
-  already name what was compared; `expected`/`actual` MAY be `null` for
+  already name what was compared. **Each value MUST be its original
+  Python type** (`D85`) — an int, float, bool, or `None` compared
+  value MUST NOT be left as the raw string pytest's own failure text
+  renders it as; a parser that can locate the compared values at all
+  MUST also recover their real type (e.g. via `ast.literal_eval` on the
+  located substring), since `5 == 5` and `"5" == "5"` are a materially
+  different fact for a human comparing this field against the
+  generated code. `expected`/`actual` MAY be `null` for
   a `generated-test` criterion whose test code made an assertion this
   component cannot structurally interpret, in which case `message`
   alone is still required. A `pass` or `skipped` criterion's

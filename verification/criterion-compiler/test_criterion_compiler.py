@@ -262,3 +262,49 @@ def test_ac_compile_014_no_target_reference_means_no_import(repo_root):
     out_file = repo_root / report.outputs[0]["file"]
     source = out_file.read_text(encoding="utf-8")
     assert not any(line.startswith("import ") for line in source.splitlines())
+
+
+def test_ac_compile_015_lazy_resolution_against_the_real_repo():
+    """R-COMPILE-014: the documented two-candidate-dir resolution
+    algorithm, exercised against this actual repo rather than a
+    synthetic fixture -- the real failure mode (a plain top-level
+    import breaking for a caller that never added pipeline/
+    criterion-compiler to sys.path itself) only reproduces against the
+    real repo_root layout."""
+    import importlib
+
+    real_repo_root = Path(__file__).resolve().parents[2]
+    module_name = "criterion_compiler"
+
+    sys.modules.pop(module_name, None)
+    for entry in ("pipeline/criterion-compiler", "gen/criterion-compiler"):
+        full = str(real_repo_root / entry)
+        if full in sys.path:
+            sys.path.remove(full)
+
+    try:
+        try:
+            module = importlib.import_module(module_name)
+        except ImportError:
+            module = None
+        if module is None:
+            for rel in ("pipeline/criterion-compiler", "gen/criterion-compiler"):
+                candidate = real_repo_root / rel
+                if not candidate.exists():
+                    continue
+                candidate_str = str(candidate)
+                if candidate_str not in sys.path:
+                    sys.path.insert(0, candidate_str)
+                try:
+                    module = importlib.import_module(module_name)
+                    break
+                except ImportError:
+                    continue
+
+        assert module is not None
+        assert hasattr(module, "compile")
+        assert hasattr(module, "compile_criterion")
+    finally:
+        sys.path.insert(0, str(real_repo_root / "pipeline" / "criterion-compiler"))
+        sys.modules.pop(module_name, None)
+        importlib.import_module(module_name)

@@ -81,3 +81,9 @@ established for `judge`.
 - `D27`: added `failure_detail` (`R-VERIFY-012`) to `criteria[]` for
   `compiled`/`generated-test` failures, mirroring `llm-judge`'s
   `rationale`.
+- `D84`: `R-VERIFY-004` clarified as one-directional — an extra,
+  undocumented public name is never drift on its own, found by a real
+  candidate's false-positive set-equality implementation.
+- `D85`: `R-VERIFY-012` clarified that `failure_detail.expected`/
+  `.actual` must be their original Python type, not a raw string,
+  found by the same real candidate leaving them as unparsed text.
