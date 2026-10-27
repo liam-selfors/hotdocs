@@ -1,7 +1,7 @@
 # AC-LINT-024
 
 Covers: R-LINT-024
-Kind: compiled
+Kind: generated-test
 
 ```gherkin
 Given a component's Purpose section containing the text "extracted once

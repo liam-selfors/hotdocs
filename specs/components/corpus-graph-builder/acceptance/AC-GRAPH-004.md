@@ -1,7 +1,7 @@
 # AC-GRAPH-004
 
 Covers: R-GRAPH-004
-Kind: compiled
+Kind: generated-test
 
 ```gherkin
 Given one product capability with no realizing component

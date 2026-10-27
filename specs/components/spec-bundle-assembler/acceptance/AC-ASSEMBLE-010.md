@@ -1,7 +1,7 @@
 # AC-ASSEMBLE-010
 
 Covers: R-ASSEMBLE-010
-Kind: compiled
+Kind: generated-test
 
 ```gherkin
 Given a component that depends_on comp-bar, whose Purpose section reads

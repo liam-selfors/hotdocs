@@ -1,7 +1,7 @@
 # AC-MERGE-020
 
 Covers: R-MERGE-005
-Kind: compiled
+Kind: generated-test
 
 ```gherkin
 Given a mock generator that returns model_call_error on its one call

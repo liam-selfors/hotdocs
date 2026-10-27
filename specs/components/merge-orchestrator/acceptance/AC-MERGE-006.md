@@ -1,7 +1,7 @@
 # AC-MERGE-006
 
 Covers: R-MERGE-006
-Kind: compiled
+Kind: generated-test
 
 ```gherkin
 Given a mock verifier-orchestrator that always returns fail, with k=2

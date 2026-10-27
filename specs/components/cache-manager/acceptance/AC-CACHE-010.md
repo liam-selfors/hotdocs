@@ -1,7 +1,7 @@
 # AC-CACHE-010
 
 Covers: R-CACHE-009
-Kind: compiled
+Kind: generated-test
 
 ```gherkin
 Given VAR-CACHE-STORE-URL is absent

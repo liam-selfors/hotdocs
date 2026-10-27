@@ -1,7 +1,7 @@
 # AC-LINT-012
 
 Covers: R-LINT-012
-Kind: compiled
+Kind: generated-test
 
 ```gherkin
 Given a component whose generated-code LOC estimate exceeds 1500

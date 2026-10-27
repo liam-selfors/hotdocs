@@ -1,7 +1,7 @@
 # AC-ASSIST-006
 
 Covers: R-ASSIST-006
-Kind: compiled
+Kind: generated-test
 
 ```gherkin
 Given any CompletenessReport, however low its completeness_score

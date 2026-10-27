@@ -1,7 +1,7 @@
 # AC-GQE-003
 
 Covers: R-GQE-003
-Kind: compiled
+Kind: generated-test
 
 ```gherkin
 Given a repo root with a real spec corpus

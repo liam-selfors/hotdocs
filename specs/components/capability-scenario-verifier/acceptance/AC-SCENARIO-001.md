@@ -1,7 +1,7 @@
 # AC-SCENARIO-001
 
 Covers: R-SCENARIO-001
-Kind: compiled
+Kind: generated-test
 
 ```gherkin
 Given a blast radius of two components, both already regenerated and

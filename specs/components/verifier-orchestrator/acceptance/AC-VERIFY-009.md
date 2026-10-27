@@ -1,7 +1,7 @@
 # AC-VERIFY-009
 
 Covers: R-VERIFY-009
-Kind: compiled
+Kind: generated-test
 
 ```gherkin
 Given a component with one generated-test-kind criterion and no cached test

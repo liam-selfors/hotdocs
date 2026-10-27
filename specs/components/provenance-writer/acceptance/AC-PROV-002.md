@@ -1,7 +1,7 @@
 # AC-PROV-002
 
 Covers: R-PROV-002
-Kind: compiled
+Kind: generated-test
 
 ```gherkin
 Given a GenerationResult with model "claude-sonnet-5", prompt_version

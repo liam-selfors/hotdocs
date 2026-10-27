@@ -1,7 +1,7 @@
 # AC-UI-003
 
 Covers: R-UI-003
-Kind: compiled
+Kind: generated-test
 
 ```gherkin
 Given the rendered page's source and rendering logic

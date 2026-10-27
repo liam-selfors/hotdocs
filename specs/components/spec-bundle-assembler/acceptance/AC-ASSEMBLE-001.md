@@ -1,7 +1,7 @@
 # AC-ASSEMBLE-001
 
 Covers: R-ASSEMBLE-001
-Kind: compiled
+Kind: generated-test
 
 ```gherkin
 Given a component with component.md, requirements/, interface/,

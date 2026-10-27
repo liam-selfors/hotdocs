@@ -1,7 +1,7 @@
 # AC-LINT-021
 
 Covers: R-LINT-021
-Kind: compiled
+Kind: generated-test
 
 ```gherkin
 Given comp-foo's R-FOO-001 has no acceptance file whose Covers: tag

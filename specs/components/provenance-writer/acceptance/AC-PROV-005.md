@@ -1,7 +1,7 @@
 # AC-PROV-005
 
 Covers: R-PROV-005
-Kind: compiled
+Kind: generated-test
 
 ```gherkin
 Given a VerificationReport with overall "fail"

@@ -1,7 +1,7 @@
 # AC-MERGE-009
 
 Covers: R-MERGE-009
-Kind: compiled
+Kind: generated-test
 
 ```gherkin
 Given generation, verification, and both scans have completed for a

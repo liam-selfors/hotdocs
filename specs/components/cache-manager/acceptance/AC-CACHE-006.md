@@ -1,7 +1,7 @@
 # AC-CACHE-006
 
 Covers: R-CACHE-006
-Kind: compiled
+Kind: generated-test
 
 ```gherkin
 Given a stored entry

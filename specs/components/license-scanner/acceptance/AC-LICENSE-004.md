@@ -1,7 +1,7 @@
 # AC-LICENSE-004
 
 Covers: R-LICENSE-004
-Kind: compiled
+Kind: generated-test
 
 ```gherkin
 Given cache-manager already holds a result for the exact

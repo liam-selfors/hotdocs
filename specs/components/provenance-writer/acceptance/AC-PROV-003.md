@@ -1,7 +1,7 @@
 # AC-PROV-003
 
 Covers: R-PROV-003
-Kind: compiled
+Kind: generated-test
 
 ```gherkin
 Given reported versions from cache-manager, criterion-compiler, and

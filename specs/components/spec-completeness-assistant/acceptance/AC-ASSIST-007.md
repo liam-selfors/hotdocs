@@ -1,7 +1,7 @@
 # AC-ASSIST-007
 
 Covers: R-ASSIST-007
-Kind: compiled
+Kind: generated-test
 
 ```gherkin
 Given assist is called with no model configured

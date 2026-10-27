@@ -1,7 +1,7 @@
 # AC-VERIFY-008
 
 Covers: R-VERIFY-008
-Kind: compiled
+Kind: generated-test
 
 ```gherkin
 Given unchanged gen/<component>/ and acceptance/ content, and a judge

@@ -1,7 +1,7 @@
 # AC-MERGE-010
 
 Covers: R-MERGE-010
-Kind: compiled
+Kind: generated-test
 
 ```gherkin
 Given provenance-writer has completed for every impacted component

@@ -1,7 +1,7 @@
 # AC-IMPACT-006
 
 Covers: R-IMPACT-006
-Kind: compiled
+Kind: generated-test
 
 ```gherkin
 Given an unchanged corpus and the same --changed argument

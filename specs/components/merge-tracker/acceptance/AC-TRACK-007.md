@@ -1,7 +1,7 @@
 # AC-TRACK-007
 
 Covers: R-TRACK-007
-Kind: compiled
+Kind: generated-test
 
 ```gherkin
 Given a GenerationResult with model_call_error populated and no

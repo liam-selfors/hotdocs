@@ -1,7 +1,7 @@
 # AC-SECRET-011
 
 Covers: R-SECRET-004
-Kind: compiled
+Kind: generated-test
 
 ```gherkin
 Given a match whose risk_tier is high and VAR-COMPLIANCE-WEBHOOK-URL is

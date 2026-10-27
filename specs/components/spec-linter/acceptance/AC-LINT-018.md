@@ -1,7 +1,7 @@
 # AC-LINT-018
 
 Covers: R-LINT-018
-Kind: compiled
+Kind: generated-test
 
 ```gherkin
 Given a component's depends_on_guarantees lists G-BAR-001, which exists

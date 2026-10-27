@@ -1,7 +1,7 @@
 # AC-VERIFY-001
 
 Covers: R-VERIFY-001
-Kind: compiled
+Kind: generated-test
 
 ```gherkin
 Given a component with one compiled-kind acceptance criterion and a mock

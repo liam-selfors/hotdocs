@@ -1,7 +1,7 @@
 # AC-LINT-026
 
 Covers: R-LINT-026
-Kind: compiled
+Kind: generated-test
 
 ```gherkin
 Given a live component.md citing a decision number with no

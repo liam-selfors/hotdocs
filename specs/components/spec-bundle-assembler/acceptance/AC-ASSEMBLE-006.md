@@ -1,7 +1,7 @@
 # AC-ASSEMBLE-006
 
 Covers: R-ASSEMBLE-006
-Kind: compiled
+Kind: generated-test
 
 ```gherkin
 Given an unchanged corpus

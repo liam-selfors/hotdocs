@@ -1,7 +1,7 @@
 # AC-LINT-010
 
 Covers: R-LINT-010
-Kind: compiled
+Kind: generated-test
 
 ```gherkin
 Given an acceptance criterion block missing a Kind: tag

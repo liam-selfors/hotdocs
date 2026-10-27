@@ -1,7 +1,7 @@
 # AC-CACHE-004
 
 Covers: R-CACHE-004
-Kind: compiled
+Kind: generated-test
 
 ```gherkin
 Given the backing store at VAR-CACHE-STORE-URL is unreachable

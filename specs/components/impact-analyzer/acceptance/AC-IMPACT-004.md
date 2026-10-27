@@ -1,7 +1,7 @@
 # AC-IMPACT-004
 
 Covers: R-IMPACT-004
-Kind: compiled
+Kind: generated-test
 
 ```gherkin
 Given VAR-CACHE-STORE-URL changed, and comp-cache-manager has

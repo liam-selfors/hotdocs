@@ -1,7 +1,7 @@
 # AC-TRACK-006
 
 Covers: R-TRACK-006
-Kind: compiled
+Kind: generated-test
 
 ```gherkin
 Given several tracking records already written under .hotdocs/tracking/

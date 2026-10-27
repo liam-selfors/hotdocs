@@ -1,7 +1,7 @@
 # AC-MERGE-008
 
 Covers: R-MERGE-008
-Kind: compiled
+Kind: generated-test
 
 ```gherkin
 Given any impacted component, regardless of any toggle's state

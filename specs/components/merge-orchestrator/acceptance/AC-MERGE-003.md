@@ -1,7 +1,7 @@
 # AC-MERGE-003
 
 Covers: R-MERGE-003
-Kind: compiled
+Kind: generated-test
 
 ```gherkin
 Given a non-sealed component provenance-checker reports a hit for

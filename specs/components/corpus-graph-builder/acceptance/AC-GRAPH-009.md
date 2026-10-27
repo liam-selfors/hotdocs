@@ -1,7 +1,7 @@
 # AC-GRAPH-009
 
 Covers: R-GRAPH-009
-Kind: compiled
+Kind: generated-test
 
 ```gherkin
 Given comp-foo has a provenance manifest at

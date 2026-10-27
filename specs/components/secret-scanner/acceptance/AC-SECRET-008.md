@@ -1,7 +1,7 @@
 # AC-SECRET-008
 
 Covers: R-SECRET-008
-Kind: compiled
+Kind: generated-test
 
 ```gherkin
 Given a set of files passed via --files, not yet committed

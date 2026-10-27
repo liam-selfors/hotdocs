@@ -1,7 +1,7 @@
 # AC-IMPACT-009
 
 Covers: R-IMPACT-009
-Kind: compiled
+Kind: generated-test
 
 ```gherkin
 Given comp-foo depends_on comp-bar, declared only in each component's own

@@ -1,7 +1,7 @@
 # AC-LINT-009
 
 Covers: R-LINT-009
-Kind: compiled
+Kind: generated-test
 
 ```gherkin
 Given an acceptance criterion with Covers: R-DOES-NOT-EXIST

@@ -1,7 +1,7 @@
 # AC-SECRET-004b
 
 Covers: R-SECRET-004
-Kind: compiled
+Kind: generated-test
 
 ```gherkin
 Given a match against a low-risk_tier rule (a generic high-entropy

@@ -1,7 +1,7 @@
 # AC-PROV-008
 
 Covers: R-PROV-008
-Kind: compiled
+Kind: generated-test
 
 ```gherkin
 Given a GenerationResult carrying an unrelated internal timestamp

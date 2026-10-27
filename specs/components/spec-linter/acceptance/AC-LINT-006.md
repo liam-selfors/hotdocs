@@ -1,7 +1,7 @@
 # AC-LINT-006
 
 Covers: R-LINT-006
-Kind: compiled
+Kind: generated-test
 
 ```gherkin
 Given a component component.md with sealed: false (or absent) and zero realizes

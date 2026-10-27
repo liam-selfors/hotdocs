@@ -1,7 +1,7 @@
 # AC-LINT-011
 
 Covers: R-LINT-011
-Kind: compiled
+Kind: generated-test
 
 ```gherkin
 Given a component's Definitions section whose entry for a glossary term is a

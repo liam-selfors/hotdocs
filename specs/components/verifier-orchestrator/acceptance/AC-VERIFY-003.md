@@ -1,7 +1,7 @@
 # AC-VERIFY-003
 
 Covers: R-VERIFY-003
-Kind: compiled
+Kind: generated-test
 
 ```gherkin
 Given a component with one llm-judge-kind acceptance criterion

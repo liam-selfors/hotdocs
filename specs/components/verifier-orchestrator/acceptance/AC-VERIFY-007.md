@@ -1,7 +1,7 @@
 # AC-VERIFY-007
 
 Covers: R-VERIFY-007
-Kind: compiled
+Kind: generated-test
 
 ```gherkin
 Given any component

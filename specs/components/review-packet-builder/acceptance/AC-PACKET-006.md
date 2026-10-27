@@ -1,7 +1,7 @@
 # AC-PACKET-006
 
 Covers: R-PACKET-006
-Kind: compiled
+Kind: generated-test
 
 ```gherkin
 Given one component was a provenance hit and another was not

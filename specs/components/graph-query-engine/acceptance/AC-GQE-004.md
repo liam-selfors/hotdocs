@@ -1,7 +1,7 @@
 # AC-GQE-004
 
 Covers: R-GQE-004
-Kind: compiled
+Kind: generated-test
 
 ```gherkin
 Given a component whose Purpose section spans multiple lines

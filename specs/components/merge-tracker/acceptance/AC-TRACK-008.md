@@ -1,7 +1,7 @@
 # AC-TRACK-008
 
 Covers: R-TRACK-008
-Kind: compiled
+Kind: generated-test
 
 ```gherkin
 Given comp-foo's most recent AttemptRecord with a non-null

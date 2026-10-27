@@ -1,7 +1,7 @@
 # AC-LINT-004
 
 Covers: R-LINT-004
-Kind: compiled
+Kind: generated-test
 
 ```gherkin
 Given two component specs whose depends_on entries form a cycle (A depends_on

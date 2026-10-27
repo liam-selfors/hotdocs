@@ -1,7 +1,7 @@
 # AC-LICENSE-003c
 
 Covers: R-LICENSE-003
-Kind: compiled
+Kind: generated-test
 
 ```gherkin
 Given a similarity score at or above the block threshold against a

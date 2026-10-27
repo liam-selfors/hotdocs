@@ -1,7 +1,7 @@
 # AC-PACKET-004
 
 Covers: R-PACKET-004
-Kind: compiled
+Kind: generated-test
 
 ```gherkin
 Given a VerificationReport with one passing and one failing criterion

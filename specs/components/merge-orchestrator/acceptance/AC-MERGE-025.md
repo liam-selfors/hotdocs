@@ -1,7 +1,7 @@
 # AC-MERGE-025
 
 Covers: R-MERGE-023
-Kind: compiled
+Kind: generated-test
 
 ```gherkin
 Given a blast radius containing comp-bar and comp-foo, where comp-foo

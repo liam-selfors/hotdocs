@@ -1,7 +1,7 @@
 # AC-IMPACT-002
 
 Covers: R-IMPACT-002
-Kind: compiled
+Kind: generated-test
 
 ```gherkin
 Given comp-foo's component.md changed but every file under its interface/

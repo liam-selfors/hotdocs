@@ -1,7 +1,7 @@
 # AC-ASSEMBLE-002
 
 Covers: R-ASSEMBLE-002
-Kind: compiled
+Kind: generated-test
 
 ```gherkin
 Given a component that depends_on another component with its own

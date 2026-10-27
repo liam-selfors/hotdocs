@@ -1,7 +1,7 @@
 # AC-LINT-023
 
 Covers: R-LINT-023
-Kind: compiled
+Kind: generated-test
 
 ```gherkin
 Given one requirement file over 500 words and a second requirement file

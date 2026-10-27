@@ -1,7 +1,7 @@
 # AC-LINT-016
 
 Covers: R-LINT-016
-Kind: compiled
+Kind: generated-test
 
 ```gherkin
 Given a requirements/R-FOO-001.md file that carries a YAML frontmatter

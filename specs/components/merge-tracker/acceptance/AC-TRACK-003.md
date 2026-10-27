@@ -1,7 +1,7 @@
 # AC-TRACK-003
 
 Covers: R-TRACK-003
-Kind: compiled
+Kind: generated-test
 
 ```gherkin
 Given three sequential merge attempts

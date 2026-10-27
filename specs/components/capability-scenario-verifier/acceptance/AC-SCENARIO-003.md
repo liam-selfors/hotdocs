@@ -1,7 +1,7 @@
 # AC-SCENARIO-003
 
 Covers: R-SCENARIO-001
-Kind: compiled
+Kind: generated-test
 
 ```gherkin
 Given one product capability with two capability scenarios, one

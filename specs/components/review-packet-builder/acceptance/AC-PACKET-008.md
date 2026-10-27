@@ -1,7 +1,7 @@
 # AC-PACKET-008
 
 Covers: R-PACKET-008
-Kind: compiled
+Kind: generated-test
 
 ```gherkin
 Given a component whose component_doc_words is within 5% of D2's hard-fail

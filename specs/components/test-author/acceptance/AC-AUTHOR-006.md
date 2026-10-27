@@ -1,7 +1,7 @@
 # AC-AUTHOR-006
 
 Covers: R-AUTHOR-006
-Kind: compiled
+Kind: generated-test
 
 ```gherkin
 Given a successful author_test call for a component

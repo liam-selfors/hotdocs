@@ -1,7 +1,7 @@
 # AC-SCENARIO-002
 
 Covers: R-SCENARIO-002
-Kind: compiled
+Kind: generated-test
 
 ```gherkin
 Given the blast radius is {comp-foo, comp-bar}, and only P-ZERO-EDIT's

@@ -1,7 +1,7 @@
 # AC-TRACK-005
 
 Covers: R-TRACK-005
-Kind: compiled
+Kind: generated-test
 
 ```gherkin
 Given a merge attempt where every real gate passes, and write_tracking_record

@@ -1,7 +1,7 @@
 # AC-GQE-005
 
 Covers: R-GQE-005
-Kind: compiled
+Kind: generated-test
 
 ```gherkin
 Given a component with a committed verification/<component>/.provenance.json

@@ -1,7 +1,7 @@
 # AC-ASSIST-008
 
 Covers: R-ASSIST-008
-Kind: compiled
+Kind: generated-test
 
 ```gherkin
 Given a CompletenessReport with a non-trivial completeness_score

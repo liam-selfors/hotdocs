@@ -1,7 +1,7 @@
 # AC-LINT-003
 
 Covers: R-LINT-003
-Kind: compiled
+Kind: generated-test
 
 ```gherkin
 Given a component component.md whose depends_on lists an id with no

@@ -1,7 +1,7 @@
 # AC-ASSIST-003
 
 Covers: R-ASSIST-003
-Kind: compiled
+Kind: generated-test
 
 ```gherkin
 Given a predicted blast radius of one component

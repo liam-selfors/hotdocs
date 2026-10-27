@@ -1,7 +1,7 @@
 # AC-PROV-004
 
 Covers: R-PROV-004
-Kind: compiled
+Kind: generated-test
 
 ```gherkin
 Given ProvenanceInputs with provenance_hit true

@@ -1,7 +1,7 @@
 # AC-SECRET-007
 
 Covers: R-SECRET-007
-Kind: compiled
+Kind: generated-test
 
 ```gherkin
 Given any full scan

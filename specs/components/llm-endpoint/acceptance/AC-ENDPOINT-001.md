@@ -1,7 +1,7 @@
 # AC-ENDPOINT-001
 
 Covers: R-ENDPOINT-002
-Kind: compiled
+Kind: generated-test
 
 ```gherkin
 Given a model identifier that matches no implemented backend's naming

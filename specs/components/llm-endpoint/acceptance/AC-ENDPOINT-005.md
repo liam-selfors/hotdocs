@@ -1,7 +1,7 @@
 # AC-ENDPOINT-005
 
 Covers: R-ENDPOINT-003
-Kind: compiled
+Kind: generated-test
 
 ```gherkin
 Given llm-endpoint configured with only its v1 backend (Anthropic) and

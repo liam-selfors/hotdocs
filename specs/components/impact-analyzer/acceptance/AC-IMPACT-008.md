@@ -1,7 +1,7 @@
 # AC-IMPACT-008
 
 Covers: R-IMPACT-008
-Kind: compiled
+Kind: generated-test
 
 ```gherkin
 Given comp-foo's interface/guarantees/G-FOO-001.md changed, and comp-bar

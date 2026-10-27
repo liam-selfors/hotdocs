@@ -1,7 +1,7 @@
 # AC-DOCS-002
 
 Covers: R-DOCS-002
-Kind: compiled
+Kind: generated-test
 
 ```gherkin
 Given a component node carrying a full detail payload (spec content,

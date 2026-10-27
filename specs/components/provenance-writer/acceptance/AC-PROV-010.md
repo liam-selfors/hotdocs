@@ -1,7 +1,7 @@
 # AC-PROV-010
 
 Covers: R-PROV-010
-Kind: compiled
+Kind: generated-test
 
 ```gherkin
 Given a completed write_provenance call

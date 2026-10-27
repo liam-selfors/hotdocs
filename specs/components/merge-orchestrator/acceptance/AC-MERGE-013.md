@@ -1,7 +1,7 @@
 # AC-MERGE-013
 
 Covers: R-MERGE-013
-Kind: compiled
+Kind: generated-test
 
 ```gherkin
 Given a successful merge

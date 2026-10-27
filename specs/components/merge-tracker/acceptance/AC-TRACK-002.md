@@ -1,7 +1,7 @@
 # AC-TRACK-002
 
 Covers: R-TRACK-002
-Kind: compiled
+Kind: generated-test
 
 ```gherkin
 Given a merge attempt where comp-foo succeeded (provenance hit) and

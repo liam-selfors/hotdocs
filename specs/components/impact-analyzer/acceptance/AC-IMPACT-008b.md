@@ -1,7 +1,7 @@
 # AC-IMPACT-008b
 
 Covers: R-IMPACT-008
-Kind: compiled
+Kind: generated-test
 
 ```gherkin
 Given comp-foo has two guarantees, G-FOO-001 and G-FOO-002; comp-bar

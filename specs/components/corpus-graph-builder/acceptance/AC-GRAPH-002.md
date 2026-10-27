@@ -1,7 +1,7 @@
 # AC-GRAPH-002
 
 Covers: R-GRAPH-002
-Kind: compiled
+Kind: generated-test
 
 ```gherkin
 Given a component that depends_on another, realizes a capability, and uses

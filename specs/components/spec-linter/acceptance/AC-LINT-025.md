@@ -1,7 +1,7 @@
 # AC-LINT-025
 
 Covers: R-LINT-025
-Kind: compiled
+Kind: generated-test
 
 ```gherkin
 Given a component whose Purpose section is 160 words long, with no

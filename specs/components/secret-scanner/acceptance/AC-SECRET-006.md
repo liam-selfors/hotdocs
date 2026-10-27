@@ -1,7 +1,7 @@
 # AC-SECRET-006
 
 Covers: R-SECRET-006
-Kind: compiled
+Kind: generated-test
 
 ```gherkin
 Given a cached result under gate_version "secret_scanner@1.0.0" and the

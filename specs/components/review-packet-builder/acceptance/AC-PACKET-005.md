@@ -1,7 +1,7 @@
 # AC-PACKET-005
 
 Covers: R-PACKET-005
-Kind: compiled
+Kind: generated-test
 
 ```gherkin
 Given clean license-scan and secret-scan results

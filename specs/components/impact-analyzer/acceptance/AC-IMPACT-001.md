@@ -1,7 +1,7 @@
 # AC-IMPACT-001
 
 Covers: R-IMPACT-001
-Kind: compiled
+Kind: generated-test
 
 ```gherkin
 Given a changed spec id for component comp-foo

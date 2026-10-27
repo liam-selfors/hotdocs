@@ -1,7 +1,7 @@
 # AC-MERGE-016
 
 Covers: R-MERGE-005
-Kind: compiled
+Kind: generated-test
 
 ```gherkin
 Given a mock generator/verifier-orchestrator pair where the one call's

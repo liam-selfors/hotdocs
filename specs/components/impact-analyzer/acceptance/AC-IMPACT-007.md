@@ -1,7 +1,7 @@
 # AC-IMPACT-007
 
 Covers: R-IMPACT-007
-Kind: compiled
+Kind: generated-test
 
 ```gherkin
 Given a corpus containing a dangling depends_on reference unrelated to the

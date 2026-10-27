@@ -1,7 +1,7 @@
 # AC-CACHE-009
 
 Covers: R-CACHE-003
-Kind: compiled
+Kind: generated-test
 
 ```gherkin
 Given two concurrent put calls for the same cache key with two different,

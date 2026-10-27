@@ -1,7 +1,7 @@
 # AC-VERIFY-013
 
 Covers: R-VERIFY-012
-Kind: compiled
+Kind: generated-test
 
 ```gherkin
 Given a compiled criterion whose compiled assertion checks result.foo

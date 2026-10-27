@@ -1,7 +1,7 @@
 # AC-LINT-020
 
 Covers: R-LINT-020
-Kind: compiled
+Kind: generated-test
 
 ```gherkin
 Given comp-foo's frontmatter declares depends_on_guarantees: [G-BAR-001],

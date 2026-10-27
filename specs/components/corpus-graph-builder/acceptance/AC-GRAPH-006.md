@@ -1,7 +1,7 @@
 # AC-GRAPH-006
 
 Covers: R-GRAPH-006
-Kind: compiled
+Kind: generated-test
 
 ```gherkin
 Given a successful build

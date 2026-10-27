@@ -1,7 +1,7 @@
 # AC-IMPACT-003
 
 Covers: R-IMPACT-003
-Kind: compiled
+Kind: generated-test
 
 ```gherkin
 Given comp-foo's interface/library.md changed relative to the prior

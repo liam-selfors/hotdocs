@@ -1,7 +1,7 @@
 # AC-UI-006
 
 Covers: R-UI-006
-Kind: compiled
+Kind: generated-test
 
 ```gherkin
 Given the built page exists at the configured --out directory and a

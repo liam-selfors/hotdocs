@@ -1,7 +1,7 @@
 # AC-GRAPH-008
 
 Covers: R-GRAPH-008
-Kind: compiled
+Kind: generated-test
 
 ```gherkin
 Given unchanged corpus, provenance, and verification state

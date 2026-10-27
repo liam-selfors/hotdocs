@@ -1,7 +1,7 @@
 # AC-MERGE-002
 
 Covers: R-MERGE-002
-Kind: compiled
+Kind: generated-test
 
 ```gherkin
 Given a lint-clean corpus and one changed spec id

@@ -1,7 +1,7 @@
 # AC-LINT-019
 
 Covers: R-LINT-019
-Kind: compiled
+Kind: generated-test
 
 ```gherkin
 Given a spec file with one line ending in two trailing spaces

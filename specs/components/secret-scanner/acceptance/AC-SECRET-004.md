@@ -1,7 +1,7 @@
 # AC-SECRET-004
 
 Covers: R-SECRET-004
-Kind: compiled
+Kind: generated-test
 
 ```gherkin
 Given a match against a high-risk_tier rule (e.g. a recognizable AWS

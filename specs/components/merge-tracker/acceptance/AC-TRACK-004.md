@@ -1,7 +1,7 @@
 # AC-TRACK-004
 
 Covers: R-TRACK-004
-Kind: compiled
+Kind: generated-test
 
 ```gherkin
 Given merge-orchestrator calling write_tracking_record with component_ids,

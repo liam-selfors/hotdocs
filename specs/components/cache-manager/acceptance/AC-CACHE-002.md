@@ -1,7 +1,7 @@
 # AC-CACHE-002
 
 Covers: R-CACHE-002
-Kind: compiled
+Kind: generated-test
 
 ```gherkin
 Given the same four key components (spec_bundle_hash, gate_inputs_hash,

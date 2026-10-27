@@ -1,7 +1,7 @@
 # AC-ASSEMBLE-008
 
 Covers: R-ASSEMBLE-008
-Kind: compiled
+Kind: generated-test
 
 ```gherkin
 Given a component with existing gen/<component>/ content

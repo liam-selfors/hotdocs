@@ -1,7 +1,7 @@
 # AC-MERGE-014
 
 Covers: R-MERGE-014
-Kind: compiled
+Kind: generated-test
 
 ```gherkin
 Given every component in the blast radius has passed its own

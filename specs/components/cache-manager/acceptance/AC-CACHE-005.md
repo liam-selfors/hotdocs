@@ -1,7 +1,7 @@
 # AC-CACHE-005
 
 Covers: R-CACHE-005
-Kind: compiled
+Kind: generated-test
 
 ```gherkin
 Given an entry stored under gate_version "license_scanner@1.0.0"

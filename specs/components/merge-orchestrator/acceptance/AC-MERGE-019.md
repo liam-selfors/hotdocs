@@ -1,7 +1,7 @@
 # AC-MERGE-019
 
 Covers: R-MERGE-018
-Kind: compiled
+Kind: generated-test
 
 ```gherkin
 Given a blocked merge attempt where component A succeeded and component

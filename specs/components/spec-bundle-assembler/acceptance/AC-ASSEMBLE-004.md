@@ -1,7 +1,7 @@
 # AC-ASSEMBLE-004
 
 Covers: R-ASSEMBLE-004
-Kind: compiled
+Kind: generated-test
 
 ```gherkin
 Given any component

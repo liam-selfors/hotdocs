@@ -1,7 +1,7 @@
 # AC-UI-002
 
 Covers: R-UI-002
-Kind: compiled
+Kind: generated-test
 
 ```gherkin
 Given two TrackingRecords, the first with comp-foo as a model_call_error

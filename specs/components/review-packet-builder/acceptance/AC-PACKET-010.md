@@ -1,7 +1,7 @@
 # AC-PACKET-010
 
 Covers: R-PACKET-010
-Kind: compiled
+Kind: generated-test
 
 ```gherkin
 Given a component whose generated code changed substantially

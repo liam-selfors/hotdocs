@@ -1,7 +1,7 @@
 # AC-MERGE-023
 
 Covers: R-MERGE-022
-Kind: compiled
+Kind: generated-test
 
 ```gherkin
 Given run_merge is called with retry_feedback={"comp-foo": ["R-FOO-002"]}

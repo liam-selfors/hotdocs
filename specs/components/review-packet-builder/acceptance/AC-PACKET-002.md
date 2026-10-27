@@ -1,7 +1,7 @@
 # AC-PACKET-002
 
 Covers: R-PACKET-002
-Kind: compiled
+Kind: generated-test
 
 ```gherkin
 Given a PR adding one new requirement R-FOO-002

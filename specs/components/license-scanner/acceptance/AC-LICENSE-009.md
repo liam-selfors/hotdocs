@@ -1,7 +1,7 @@
 # AC-LICENSE-009
 
 Covers: R-LICENSE-003
-Kind: compiled
+Kind: generated-test
 
 ```gherkin
 Given a match whose risk_tier is high and VAR-COMPLIANCE-WEBHOOK-URL is

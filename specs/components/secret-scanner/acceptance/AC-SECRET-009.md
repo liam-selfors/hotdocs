@@ -1,7 +1,7 @@
 # AC-SECRET-009
 
 Covers: R-SECRET-009
-Kind: compiled
+Kind: generated-test
 
 ```gherkin
 Given a first generation sample that scans flagged, and a retried sample

@@ -1,7 +1,7 @@
 # AC-MERGE-015
 
 Covers: R-MERGE-015
-Kind: compiled
+Kind: generated-test
 
 ```gherkin
 Given a sealed component with a cache miss in the blast radius

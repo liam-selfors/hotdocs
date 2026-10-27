@@ -1,7 +1,7 @@
 # AC-GRAPH-005
 
 Covers: R-GRAPH-005
-Kind: compiled
+Kind: generated-test
 
 ```gherkin
 Given one declared var with no component referencing it via uses_var

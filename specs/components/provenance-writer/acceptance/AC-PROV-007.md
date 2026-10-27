@@ -1,7 +1,7 @@
 # AC-PROV-007
 
 Covers: R-PROV-007
-Kind: compiled
+Kind: generated-test
 
 ```gherkin
 Given a clean LicenseScanResult and a clean SecretScanResult

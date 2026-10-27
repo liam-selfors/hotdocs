@@ -1,7 +1,7 @@
 # AC-MERGE-001
 
 Covers: R-MERGE-001
-Kind: compiled
+Kind: generated-test
 
 ```gherkin
 Given a corpus with a hard-fail spec-linter finding

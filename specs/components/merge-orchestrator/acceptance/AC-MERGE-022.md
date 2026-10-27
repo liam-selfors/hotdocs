@@ -1,7 +1,7 @@
 # AC-MERGE-022
 
 Covers: R-MERGE-021
-Kind: compiled
+Kind: generated-test
 
 ```gherkin
 Given a cache-miss component whose generator call returns

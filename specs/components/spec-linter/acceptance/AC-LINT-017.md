@@ -1,7 +1,7 @@
 # AC-LINT-017
 
 Covers: R-LINT-017
-Kind: compiled
+Kind: generated-test
 
 ```gherkin
 Given a file under interface/guarantees/ named G-FOO-001.md whose own

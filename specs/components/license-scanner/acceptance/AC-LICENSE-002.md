@@ -1,7 +1,7 @@
 # AC-LICENSE-002
 
 Covers: R-LICENSE-002
-Kind: compiled
+Kind: generated-test
 
 ```gherkin
 Given gen/<component>/ content with no match against the reference corpus

@@ -1,7 +1,7 @@
 # AC-LINT-014
 
 Covers: R-LINT-014
-Kind: compiled
+Kind: generated-test
 
 ```gherkin
 Given two files under specs/ that both declare themselves a corpus glossary,

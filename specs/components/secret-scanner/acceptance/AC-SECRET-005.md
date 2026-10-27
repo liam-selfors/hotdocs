@@ -1,7 +1,7 @@
 # AC-SECRET-005
 
 Covers: R-SECRET-005
-Kind: compiled
+Kind: generated-test
 
 ```gherkin
 Given cache-manager already holds a result for the exact full-scan cache key

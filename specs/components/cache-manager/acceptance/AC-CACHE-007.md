@@ -1,7 +1,7 @@
 # AC-CACHE-007
 
 Covers: R-CACHE-007
-Kind: compiled
+Kind: generated-test
 
 ```gherkin
 Given a put call whose payload shape does not match the schema for the

@@ -1,7 +1,7 @@
 # AC-AUTHOR-002
 
 Covers: R-AUTHOR-002
-Kind: compiled
+Kind: generated-test
 
 ```gherkin
 Given a CriterionBundle for a component with existing gen/<component>/

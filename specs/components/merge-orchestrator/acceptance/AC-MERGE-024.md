@@ -1,7 +1,7 @@
 # AC-MERGE-024
 
 Covers: R-MERGE-019
-Kind: compiled
+Kind: generated-test
 
 ```gherkin
 Given a merge attempt where merge-tracker itself raises when called

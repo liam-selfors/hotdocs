@@ -1,7 +1,7 @@
 # AC-DOCS-004
 
 Covers: R-DOCS-004
-Kind: compiled
+Kind: generated-test
 
 ```gherkin
 Given only corpus-graph.json as input, with no other files available

@@ -1,7 +1,7 @@
 # AC-ASSIST-002
 
 Covers: R-ASSIST-002
-Kind: compiled
+Kind: generated-test
 
 ```gherkin
 Given a draft change to one spec whose dependents impact-analyzer resolves

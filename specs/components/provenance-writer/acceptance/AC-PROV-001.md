@@ -1,7 +1,7 @@
 # AC-PROV-001
 
 Covers: R-PROV-001
-Kind: compiled
+Kind: generated-test
 
 ```gherkin
 Given a complete set of ProvenanceInputs

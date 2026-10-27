@@ -1,7 +1,7 @@
 # AC-LINT-001
 
 Covers: R-LINT-001
-Kind: compiled
+Kind: generated-test
 
 ```gherkin
 Given a component component.md with no `owners` field in its frontmatter

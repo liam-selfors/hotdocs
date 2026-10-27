@@ -1,7 +1,7 @@
 # AC-LINT-008
 
 Covers: R-LINT-008
-Kind: compiled
+Kind: generated-test
 
 ```gherkin
 Given a requirement R-FOO-001 with zero acceptance criteria whose Covers: tag

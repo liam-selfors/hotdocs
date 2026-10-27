@@ -1,7 +1,7 @@
 # AC-MERGE-012
 
 Covers: R-MERGE-012
-Kind: compiled
+Kind: generated-test
 
 ```gherkin
 Given a merge that is not blocked

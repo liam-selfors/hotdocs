@@ -1,7 +1,7 @@
 # AC-PACKET-009
 
 Covers: R-PACKET-009
-Kind: compiled
+Kind: generated-test
 
 ```gherkin
 Given a merge with zero flags, zero warnings, and full provenance hits

@@ -1,7 +1,7 @@
 # AC-LINT-002
 
 Covers: R-LINT-002
-Kind: compiled
+Kind: generated-test
 
 ```gherkin
 Given a component component.md with status: ratified and a non-empty

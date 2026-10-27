@@ -1,7 +1,7 @@
 # AC-DOCS-005
 
 Covers: R-DOCS-005
-Kind: compiled
+Kind: generated-test
 
 ```gherkin
 Given a successful render

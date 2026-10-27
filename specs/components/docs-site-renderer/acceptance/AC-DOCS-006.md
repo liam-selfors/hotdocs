@@ -1,7 +1,7 @@
 # AC-DOCS-006
 
 Covers: R-DOCS-006
-Kind: compiled
+Kind: generated-test
 
 ```gherkin
 Given a render run

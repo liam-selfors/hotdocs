@@ -1,7 +1,7 @@
 # AC-UI-005
 
 Covers: R-UI-005
-Kind: compiled
+Kind: generated-test
 
 ```gherkin
 Given a repo_root with no .hotdocs/tracking/ directory at all

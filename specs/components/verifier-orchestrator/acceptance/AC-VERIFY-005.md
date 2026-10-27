@@ -1,7 +1,7 @@
 # AC-VERIFY-005
 
 Covers: R-VERIFY-005
-Kind: compiled
+Kind: generated-test
 
 ```gherkin
 Given a component where every compiled and generated-test criterion passes,

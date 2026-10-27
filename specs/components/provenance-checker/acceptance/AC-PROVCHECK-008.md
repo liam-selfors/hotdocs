@@ -1,7 +1,7 @@
 # AC-PROVCHECK-008
 
 Covers: R-PROVCHECK-001
-Kind: compiled
+Kind: generated-test
 
 ```gherkin
 Given gen/comp-foo/.provenance.json exists with spec_bundle_hash H and

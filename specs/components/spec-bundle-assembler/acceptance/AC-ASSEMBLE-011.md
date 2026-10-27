@@ -1,7 +1,7 @@
 # AC-ASSEMBLE-011
 
 Covers: R-ASSEMBLE-011
-Kind: compiled
+Kind: generated-test
 
 ```gherkin
 Given a component that depends_on comp-bar, and comp-bar has real code

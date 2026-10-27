@@ -1,7 +1,7 @@
 # AC-TRACK-001
 
 Covers: R-TRACK-001
-Kind: compiled
+Kind: generated-test
 
 ```gherkin
 Given a merge attempt that blocks, followed by a spec edit and a second

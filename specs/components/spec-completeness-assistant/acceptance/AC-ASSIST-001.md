@@ -1,7 +1,7 @@
 # AC-ASSIST-001
 
 Covers: R-ASSIST-001
-Kind: compiled
+Kind: generated-test
 
 ```gherkin
 Given a draft spec change with a hard-fail spec-linter finding

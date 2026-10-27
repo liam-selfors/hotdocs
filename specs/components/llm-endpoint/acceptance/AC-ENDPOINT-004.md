@@ -1,7 +1,7 @@
 # AC-ENDPOINT-004
 
 Covers: R-ENDPOINT-005
-Kind: compiled
+Kind: generated-test
 
 ```gherkin
 Given a configured Anthropic credential and a backend call that fails

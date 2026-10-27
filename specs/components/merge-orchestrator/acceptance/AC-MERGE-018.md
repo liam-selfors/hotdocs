@@ -1,7 +1,7 @@
 # AC-MERGE-018
 
 Covers: R-MERGE-017
-Kind: compiled
+Kind: generated-test
 
 ```gherkin
 Given three impacted components where the first fails its one generation

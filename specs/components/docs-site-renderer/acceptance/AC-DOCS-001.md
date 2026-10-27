@@ -1,7 +1,7 @@
 # AC-DOCS-001
 
 Covers: R-DOCS-001
-Kind: compiled
+Kind: generated-test
 
 ```gherkin
 Given a corpus-graph.json with three nodes and two edges

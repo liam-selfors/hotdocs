@@ -1,7 +1,7 @@
 # AC-LICENSE-006
 
 Covers: R-LICENSE-006
-Kind: compiled
+Kind: generated-test
 
 ```gherkin
 Given any component

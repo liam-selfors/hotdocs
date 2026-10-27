@@ -1,7 +1,7 @@
 # AC-VERIFY-011
 
 Covers: R-VERIFY-011
-Kind: compiled
+Kind: generated-test
 
 ```gherkin
 Given a component with two criteria covering R-FOO-001 (both pass) and one

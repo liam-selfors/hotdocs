@@ -1,7 +1,7 @@
 # AC-LINT-013
 
 Covers: R-LINT-013
-Kind: compiled
+Kind: generated-test
 
 ```gherkin
 Given a specs/vars/ declaration with sensitivity: secret and a default field

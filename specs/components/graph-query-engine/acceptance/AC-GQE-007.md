@@ -1,7 +1,7 @@
 # AC-GQE-007
 
 Covers: R-GQE-007
-Kind: compiled
+Kind: generated-test
 
 ```gherkin
 Given a DuckDB connection with load_views already called once

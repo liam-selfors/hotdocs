@@ -1,7 +1,7 @@
 # AC-PACKET-007
 
 Covers: R-PACKET-007
-Kind: compiled
+Kind: generated-test
 
 ```gherkin
 Given a PR that newly marks a component sealed: true

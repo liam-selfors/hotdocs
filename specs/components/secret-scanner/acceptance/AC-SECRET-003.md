@@ -1,7 +1,7 @@
 # AC-SECRET-003
 
 Covers: R-SECRET-003
-Kind: compiled
+Kind: generated-test
 
 ```gherkin
 Given a full scan with zero matches

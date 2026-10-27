@@ -1,7 +1,7 @@
 # AC-VERIFY-006
 
 Covers: R-VERIFY-006
-Kind: compiled
+Kind: generated-test
 
 ```gherkin
 Given a component with a generated-test-kind criterion whose mutation score

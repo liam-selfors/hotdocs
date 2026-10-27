@@ -1,7 +1,7 @@
 # AC-CACHE-001
 
 Covers: R-CACHE-001
-Kind: compiled
+Kind: generated-test
 
 ```gherkin
 Given no entry stored for a given cache key

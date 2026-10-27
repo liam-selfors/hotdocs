@@ -1,7 +1,7 @@
 # AC-MERGE-011b
 
 Covers: R-MERGE-011
-Kind: compiled
+Kind: generated-test
 
 ```gherkin
 Given a sealed component whose characterization-test verification

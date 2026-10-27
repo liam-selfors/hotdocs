@@ -1,7 +1,7 @@
 # AC-MERGE-004
 
 Covers: R-MERGE-004
-Kind: compiled
+Kind: generated-test
 
 ```gherkin
 Given a cache miss for an impacted component with one generated-test-kind

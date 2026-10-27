@@ -1,7 +1,7 @@
 # AC-GRAPH-007
 
 Covers: R-GRAPH-007
-Kind: compiled
+Kind: generated-test
 
 ```gherkin
 Given a merge to main

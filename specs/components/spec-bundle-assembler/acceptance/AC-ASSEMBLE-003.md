@@ -1,7 +1,7 @@
 # AC-ASSEMBLE-003
 
 Covers: R-ASSEMBLE-003
-Kind: compiled
+Kind: generated-test
 
 ```gherkin
 Given a component with uses_var: [VAR-FOO-URL]

@@ -1,7 +1,7 @@
 # AC-ASSEMBLE-005
 
 Covers: R-ASSEMBLE-005
-Kind: compiled
+Kind: generated-test
 
 ```gherkin
 Given a corpus with a hard-fail-severity spec-linter finding anywhere in it

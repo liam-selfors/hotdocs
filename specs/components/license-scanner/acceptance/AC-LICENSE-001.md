@@ -1,7 +1,7 @@
 # AC-LICENSE-001
 
 Covers: R-LICENSE-001
-Kind: compiled
+Kind: generated-test
 
 ```gherkin
 Given gen/<component>/ content whose k-gram similarity to the reference

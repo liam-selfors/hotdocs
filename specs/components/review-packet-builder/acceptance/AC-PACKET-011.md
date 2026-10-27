@@ -1,7 +1,7 @@
 # AC-PACKET-011
 
 Covers: R-PACKET-011
-Kind: compiled
+Kind: generated-test
 
 ```gherkin
 Given comp-foo's provenance manifest at

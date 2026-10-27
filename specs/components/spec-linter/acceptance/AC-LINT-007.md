@@ -1,7 +1,7 @@
 # AC-LINT-007
 
 Covers: R-LINT-007
-Kind: compiled
+Kind: generated-test
 
 ```gherkin
 Given a Behavior section containing a requirement bullet with no RFC 2119

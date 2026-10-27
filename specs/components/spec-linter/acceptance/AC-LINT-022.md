@@ -1,7 +1,7 @@
 # AC-LINT-022
 
 Covers: R-LINT-022
-Kind: compiled
+Kind: generated-test
 
 ```gherkin
 Given a component whose generated_code_loc and component_doc_words are both

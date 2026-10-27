@@ -1,7 +1,7 @@
 # AC-VERIFY-004
 
 Covers: R-VERIFY-004
-Kind: compiled
+Kind: generated-test
 
 ```gherkin
 Given a component whose gen/<component>/ public interface does not match

@@ -1,7 +1,7 @@
 # AC-CACHE-008
 
 Covers: R-CACHE-008
-Kind: compiled
+Kind: generated-test
 
 ```gherkin
 Given a key that was successfully put, then evicted by the backing store

@@ -1,7 +1,7 @@
 # AC-MERGE-011
 
 Covers: R-MERGE-011
-Kind: compiled
+Kind: generated-test
 
 ```gherkin
 Given one impacted component that exhausted retries and another that

@@ -1,7 +1,7 @@
 # AC-DOCS-003
 
 Covers: R-DOCS-003
-Kind: compiled
+Kind: generated-test
 
 ```gherkin
 Given corpus-graph.json's aggregates field with known metric values

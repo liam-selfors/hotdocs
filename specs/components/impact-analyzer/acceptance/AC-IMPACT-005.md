@@ -1,7 +1,7 @@
 # AC-IMPACT-005
 
 Covers: R-IMPACT-005
-Kind: compiled
+Kind: generated-test
 
 ```gherkin
 Given P-ZERO-EDIT's capability scenarios changed, and comp-foo has

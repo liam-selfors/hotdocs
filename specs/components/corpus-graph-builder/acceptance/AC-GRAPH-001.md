@@ -1,7 +1,7 @@
 # AC-GRAPH-001
 
 Covers: R-GRAPH-001
-Kind: compiled
+Kind: generated-test
 
 ```gherkin
 Given a corpus with two product capabilities, three components, and one var

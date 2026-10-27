@@ -1,7 +1,7 @@
 # AC-GRAPH-003
 
 Covers: R-GRAPH-003
-Kind: compiled
+Kind: generated-test
 
 ```gherkin
 Given a component with a known VerificationReport and provenance manifest
