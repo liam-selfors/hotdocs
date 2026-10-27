@@ -15,19 +15,23 @@ sealed: false
 For every live spec file's `D<N>` citation, flags one whose cited
 decision has since been superseded by a decision ratified after the
 citing file's own last-modified commit — a candidate for staleness
-review, never a verdict.
+review, never a verdict. Also answers the forward-looking question:
+before altering or superseding a decision, what would be affected.
 
 ## Scope
 
 **In scope:** resolving every `D<N>` citation in every live (non-
 decision) spec file, the same citation shape `R-LINT-026` already
 validates for existence; for each, querying `graph-query-engine`'s
-`decision_lineage` for whether it has been superseded; for a
-superseded citation, comparing the citing file's own last commit
-touching it against the superseding decision's `last_ratified_commit`
-via `git merge-base --is-ancestor`; reporting every case where the
-file's commit is an ancestor of (predates) the superseding decision's
-ratification.
+`edges` for whether it has been superseded; for a superseded
+citation, comparing the citing file's own last commit touching it
+against the superseding decision's `last_ratified_commit`
+(`decision_lineage`) via `git merge-base --is-ancestor`; reporting
+every case where the file's commit predates the superseding
+decision's ratification. Also: given any decision id, not
+necessarily yet ratified, walking `edges` backward to find every
+decision and live file that would be affected by altering it
+(`R-DRIFT-003`).
 
 **Out of scope:** judging whether a flagged file is actually wrong —
 this surfaces candidates, never a correctness verdict, the same
@@ -57,11 +61,11 @@ See `interface/data/`.
 
 See `acceptance/`.
 
-Both criteria are `kind: compiled` — deterministic git/graph queries,
-no model or judgment involved, tested against a synthetic git repo
-built inside the test itself (real commits, real ancestry), not a
-mock — the actual behavior being checked is git ancestry, which a
-mock can't exercise meaningfully.
+All three criteria are `kind: compiled` — deterministic git/graph
+queries, no model or judgment involved, tested against a synthetic
+git repo built inside the test itself (real commits, real ancestry),
+not a mock — the actual behavior being checked is git ancestry, which
+a mock can't exercise meaningfully.
 
 ## Non-functional constraints
 
@@ -74,3 +78,6 @@ None.
 ## Change log
 
 - Initial draft (`D89`).
+- `D92`/`D93`: `R-DRIFT-001` rewired onto `edges` (decisions became
+  graph-native, `decision_lineage` narrowed); `R-DRIFT-003` added
+  pre-ratification impact analysis.
