@@ -24,3 +24,11 @@
   one-time, spec-frozen list would silently stop catching real patterns
   without ever reporting that it had gone stale — the same reasoning
   `license-scanner`'s reference-corpus sourcing follows (`R-LICENSE-001`).
+
+  **Where the pattern database lives:** `VAR-SECRET-PATTERNS-PATH`,
+  never `.hotdocs/` — mirroring `license-scanner`'s own
+  `VAR-LICENSE-CORPUS-PATH` fix exactly (`D69`; see `D67` for why
+  `.hotdocs/` can never be the real answer for input that determines
+  a gate's pass/fail decision). A missing or unreachable database MUST
+  still produce a real, recorded result — the entropy heuristic alone
+  needs no external database and still runs regardless.

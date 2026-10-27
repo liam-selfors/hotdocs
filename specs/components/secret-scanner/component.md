@@ -5,7 +5,7 @@ status: draft
 owners: [pipeline-team]
 depends_on: [comp-cache-manager]
 realizes: [P-COMPLIANCE-GATE]
-uses_var: [VAR-COMPLIANCE-WEBHOOK-URL]
+uses_var: [VAR-COMPLIANCE-WEBHOOK-URL, VAR-SECRET-PATTERNS-PATH]
 model_pin: claude-sonnet-5
 sealed: false
 ---
@@ -63,8 +63,10 @@ See `interface/data/`.
 
 See `acceptance/`.
 
-Every criterion is `kind: compiled` — pattern and entropy matching are
-deterministic; nothing here needs a model or judgment.
+Every criterion is `kind: generated-test` (`D59`) — pattern and entropy
+matching are deterministic and need no model or judgment, but none are
+actually written in the step-phrase grammar, so `kind: compiled` would
+not describe how they're really verified.
 
 ## Non-functional constraints
 
