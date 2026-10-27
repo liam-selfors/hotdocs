@@ -85,3 +85,7 @@ See `constraints.md`.
   defaulted the reference corpus's location to `.hotdocs/`, which
   `SPEC_GUIDELINES.md` forbids any gate decision from depending on.
   `R-LICENSE-001` now names the real location explicitly.
+- `D68`: a second retry, with that fix in place, passed all 8 directly
+  testable `AC-LICENSE-*` criteria for real — first successful
+  implementation. `gen/license-scanner/license_scanner.py` is now that
+  candidate. See `verification/license-scanner/BOOTSTRAP.md`.
