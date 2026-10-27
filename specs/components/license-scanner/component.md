@@ -5,7 +5,7 @@ status: draft
 owners: [pipeline-team]
 depends_on: [comp-cache-manager]
 realizes: [P-COMPLIANCE-GATE]
-uses_var: [VAR-COMPLIANCE-WEBHOOK-URL]
+uses_var: [VAR-COMPLIANCE-WEBHOOK-URL, VAR-LICENSE-CORPUS-PATH]
 model_pin: claude-sonnet-5
 sealed: false
 ---

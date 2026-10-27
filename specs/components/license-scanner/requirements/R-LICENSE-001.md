@@ -31,3 +31,12 @@
   business holding a copy of copyrighted source merely to scan against it,
   and a precomputed hash set never needs to.
 
+  **Where the corpus lives** (`D67`): `VAR-LICENSE-CORPUS-PATH`, never
+  `.hotdocs/` — `.hotdocs/` is gitignored and local-only
+  (`SPEC_GUIDELINES.md` §1), and this corpus's content directly
+  determines `blocked`, a gate's pass/fail decision, which that same
+  section forbids depending on anything there. A missing or
+  unreachable corpus (the var absent, or its target unreadable) MUST
+  still produce a real, recorded clean result — never an error, never
+  a silently-skipped scan.
+
