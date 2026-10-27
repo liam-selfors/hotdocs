@@ -15,9 +15,9 @@
   that fails verification"; conflating a precondition refusal with either
   of those would misclassify why nothing was generated.
 
-  This is one of two independent enforcement layers (§8): `merge-
-  orchestrator` is expected not to call this component for a sealed
-  component's regeneration at all (its own routing requirement), and this
-  check is the second, independent layer — in case it's ever invoked
-  anyway, by a bug or a future caller that doesn't yet know the routing
-  rule.
+  This is one of two independent enforcement layers (§8):
+  `component-gate-runner` is expected not to call this component for a
+  sealed component's regeneration at all (its own routing requirement,
+  `R-GATE-007`), and this check is the second, independent layer — in
+  case it's ever invoked anyway, by a bug or a future caller that
+  doesn't yet know the routing rule.
