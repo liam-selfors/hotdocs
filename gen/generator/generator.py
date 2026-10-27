@@ -18,6 +18,7 @@ from __future__ import annotations
 import json
 import re
 import sys
+import uuid
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -27,16 +28,24 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "cache-manager")
 import llm_endpoint  # noqa: E402
 import cache_manager  # noqa: E402
 
-PROMPT_VERSION = "v2"  # D55: _build_prompt gained a DEPENDENCY USAGE section
-GATE_VERSION = "generator@1.0.0"
-
-_FILE_BLOCK_RE = re.compile(
-    r"-----BEGIN FILE: (?P<path>[^\n]+)-----\n(?P<content>.*?)\n-----END FILE-----",
-    re.DOTALL,
-)
+PROMPT_VERSION = "v3"  # D56: nonce-delimited file blocks, replacing a fixed delimiter
+GATE_VERSION = "generator@1.1.0"  # D56: generate() no longer caches an empty-files result
 
 # R-GEN-003: frozen, versioned -- any substantive edit to this text, other
 # than this changelog note, MUST bump PROMPT_VERSION.
+#
+# D56: the fixed "-----BEGIN FILE:...-----"/"-----END FILE-----" delimiter
+# was found, by a real failure, to collide with itself: asked to
+# regenerate *this exact file*, a model reasonably wrote out this very
+# docstring's own worked example of the delimiter as a string literal
+# inside the new generator.py it produced -- and the old parser's regex
+# matched that inner, illustrative "-----END FILE-----" first, truncating
+# the real file well before its actual end. generator is the one
+# component whose own source legitimately contains this exact text, so
+# it is the one component where a fixed delimiter can never be made safe.
+# A fresh, random nonce per call closes this: it cannot collide with
+# anything a model writes, illustrative or otherwise, because it never
+# appears anywhere before this one call generates it.
 _SYSTEM_PROMPT = """You simulate exactly one thing: a cold-regen model call for ONE
 component in a spec-driven pipeline. You have no tools. The only facts
 you are allowed to use are the ones given to you in this turn's prompt
@@ -61,11 +70,17 @@ Hard rules:
   commentary, nothing else.
 
 Output format -- emit each file exactly like this, one block per file,
-nothing before the first block or after the last:
+nothing before the first block or after the last. {nonce} below is a
+one-time token for this call only -- copy it verbatim into every BEGIN
+and END marker; it will never match anything else, including any
+illustrative example you might otherwise be tempted to write out
+literally (if you are generating code that itself documents this exact
+delimiter format, describe the format in prose instead of reproducing
+this literal token sequence as a worked example):
 
------BEGIN FILE: <path relative to gen/{component_id}/>-----
+-----BEGIN FILE {nonce}: <path relative to gen/{component_id}/>-----
 <the complete, exact file content, verbatim>
------END FILE-----
+-----END FILE {nonce}-----
 """
 
 
@@ -116,8 +131,17 @@ def _build_prompt(bundle: Any, retry_feedback: list[str] | None) -> str:
     return "\n".join(sections)
 
 
-def _parse_files(text: str) -> dict[str, str]:
-    return {m.group("path").strip(): m.group("content") for m in _FILE_BLOCK_RE.finditer(text)}
+def _parse_files(text: str, nonce: str) -> dict[str, str]:
+    """D56 -- the delimiter is compiled fresh per call, keyed to that
+    call's own nonce, so it can never match an illustrative example of
+    the (differently-nonced, or un-nonced) format a model might
+    reasonably write out as part of generating this exact file."""
+    pattern = re.compile(
+        r"-----BEGIN FILE " + re.escape(nonce) + r": (?P<path>[^\n]+)-----\n"
+        r"(?P<content>.*?)\n-----END FILE " + re.escape(nonce) + r"-----",
+        re.DOTALL,
+    )
+    return {m.group("path").strip(): m.group("content") for m in pattern.finditer(text)}
 
 
 def _as_dict(response: Any) -> dict:
@@ -201,8 +225,10 @@ def generate(
         )
 
     prompt = _build_prompt(bundle, retry_feedback)
+    nonce = uuid.uuid4().hex
     raw_response = llm_endpoint.complete(
-        prompt, model, backend=llm_backend, system_prompt=_SYSTEM_PROMPT.format(component_id=bundle.component_id),
+        prompt, model, backend=llm_backend,
+        system_prompt=_SYSTEM_PROMPT.format(component_id=bundle.component_id, nonce=nonce),
     )
     response = _as_dict(raw_response)
 
@@ -213,19 +239,26 @@ def generate(
             refused=None, retry_feedback=retry_feedback,
         )
 
-    files = _parse_files(response.get("text") or "")
+    files = _parse_files(response.get("text") or "", nonce)
     result = GenerationResult(
         component_id=bundle.component_id, model=model, prompt_version=PROMPT_VERSION,
         cache_hit=False, files=files, model_call_error=None, refused=None,
         retry_feedback=retry_feedback,
     )
 
-    # R-GEN-006 -- write-through on success only.
-    cache_manager.put(
-        cache_key,
-        cache_manager.CachedResult(gate_type="generator", payload=result.to_dict(), stored_at=cache_manager.now_iso()),
-        repo_root=repo_root,
-    )
+    # R-GEN-006 -- write-through on success only. D56: a response that
+    # parsed to zero files is not a success -- GenerationResult.md
+    # requires exactly one of files (non-empty)/model_call_error/refused
+    # populated, and caching an empty-files result as if it were valid
+    # would permanently poison every future call for this exact bundle
+    # hash (found this way for real: an earlier call's degenerate empty
+    # result was cached and would have been silently replayed forever).
+    if files:
+        cache_manager.put(
+            cache_key,
+            cache_manager.CachedResult(gate_type="generator", payload=result.to_dict(), stored_at=cache_manager.now_iso()),
+            repo_root=repo_root,
+        )
     return result
 
 

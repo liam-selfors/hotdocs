@@ -109,3 +109,9 @@ See `constraints.md`.
   longer uses this component to decide whether to skip verification —
   that moved to the new `provenance-checker`, narrowing this
   component's role to pure cost-avoidance.
+- `D56`: `R-CACHE-007` now enumerates the exact required payload keys
+  for all six gate types — previously real, enforced validation logic
+  (`_REQUIRED_PAYLOAD_KEYS` in `cache_manager.py`) that no spec file
+  ever documented, found only once a real `generator` self-regeneration
+  candidate wrote a `put` payload missing `component_id`/`model` and
+  was correctly rejected by this component's own `put`.

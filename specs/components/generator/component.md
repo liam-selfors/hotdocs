@@ -137,3 +137,20 @@ See `constraints.md`.
 - `D55`: `R-GEN-013` — the prompt now includes `dependency_usage`
   (`R-ASSEMBLE-011`) as its own distinct section when present, the
   fix for `D54`'s failure. `PROMPT_VERSION` bumped to `v2`.
+- `D56`: a real retry (with `dependency_usage` in place) surfaced two
+  more gaps, both in this component, not the spec corpus it generates
+  against. First, `generator` is the one component whose own source
+  legitimately contains a literal instance of its file-transfer
+  delimiter — a model correctly reproducing that delimiter as a worked
+  example inside its own regenerated source collided with the fixed
+  marker text, truncating the real file at the illustrative example's
+  end. Fixed with a per-call random nonce embedded in both the
+  delimiter and the parsing regex, closing a class of bug unique to
+  this one self-referential component. Second, a response that parsed
+  to zero files was being cached as if valid, silently poisoning the
+  cache for every future call with that exact bundle hash; fixed by
+  caching only non-empty results. `PROMPT_VERSION` bumped to `v3`,
+  `GATE_VERSION` to `generator@1.1.0` (orphaning the two pre-existing
+  poisoned cache entries without needing manual deletion). See
+  `cache-manager`'s own `D56` bullet for a third, related gap this
+  same retry sequence found in that component's spec.

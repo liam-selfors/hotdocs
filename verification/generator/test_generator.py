@@ -8,14 +8,14 @@ package's own callable-backend convention (see conftest.py's docstring).
 
 import json
 
-from conftest import FakeBundle, MockBackend
+from conftest import FakeBundle, MockBackend, file_block
 import generator
 from generator import GATE_VERSION, PROMPT_VERSION, generate
 import cache_manager
 
 
 def test_ac_gen_001_cold_prompt_contains_exactly_cold_fields(repo_root):
-    backend = MockBackend([{"text": "-----BEGIN FILE: foo.py-----\nx = 1\n-----END FILE-----", "model_call_error": None}])
+    backend = MockBackend([file_block("foo.py", "x = 1")])
     bundle = FakeBundle()
     generate(bundle, "claude-sonnet-5", repo_root=repo_root, llm_backend=backend)
 
@@ -29,7 +29,7 @@ def test_ac_gen_001_cold_prompt_contains_exactly_cold_fields(repo_root):
 
 
 def test_ac_gen_002_hint_code_is_a_distinct_section(repo_root):
-    backend = MockBackend([{"text": "-----BEGIN FILE: foo.py-----\nx = 1\n-----END FILE-----", "model_call_error": None}])
+    backend = MockBackend([file_block("foo.py", "x = 1")])
     bundle = FakeBundle(hint_code={"foo.py": "x = 0"})
     generate(bundle, "claude-sonnet-5", repo_root=repo_root, llm_backend=backend)
 
@@ -80,7 +80,7 @@ def test_ac_gen_005_cache_hit_skips_the_model(repo_root):
 
 
 def test_ac_gen_006_successful_call_is_cached(repo_root):
-    backend = MockBackend([{"text": "-----BEGIN FILE: foo.py-----\nx = 1\n-----END FILE-----", "model_call_error": None}])
+    backend = MockBackend([file_block("foo.py", "x = 1")])
     bundle = FakeBundle()
     generate(bundle, "claude-sonnet-5", repo_root=repo_root, llm_backend=backend)
 
@@ -143,7 +143,7 @@ def test_ac_gen_012_timeout_classified_error_no_internal_retry(repo_root):
 
 
 def test_ac_gen_013_retry_feedback_is_bare_and_distinct(repo_root):
-    backend = MockBackend([{"text": "-----BEGIN FILE: foo.py-----\nx = 1\n-----END FILE-----", "model_call_error": None}])
+    backend = MockBackend([file_block("foo.py", "x = 1")])
     result = generate(FakeBundle(), "claude-sonnet-5", ["R-FOO-003"], repo_root=repo_root, llm_backend=backend)
 
     sent_prompt = backend.calls[0][0]
@@ -155,7 +155,7 @@ def test_ac_gen_013_retry_feedback_is_bare_and_distinct(repo_root):
 
 
 def test_ac_gen_014_dependency_usage_is_a_distinct_section(repo_root):
-    backend = MockBackend([{"text": "-----BEGIN FILE: foo.py-----\nx = 1\n-----END FILE-----", "model_call_error": None}])
+    backend = MockBackend([file_block("foo.py", "x = 1")])
     bundle = FakeBundle(dependency_usage={"comp-bar": "Importable as: `bar`.\n- `bar_get(key: str) -> str`"})
     generate(bundle, "claude-sonnet-5", repo_root=repo_root, llm_backend=backend)
 
