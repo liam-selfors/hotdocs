@@ -74,3 +74,6 @@ Full narrative per entry lives in its own `specs/decisions/D<N>.md`.
 - Renamed `component_doc_words`; added `R-LINT-026`/`027`.
 - `D13`: rewired onto `graph-query-engine`'s shared views.
 - `D70`–`D74`: added `R-LINT-028`–`030`.
+- `D77`: evaluated against `R-LINT-022`'s own crowding signal (four
+  dimensions over warn at once) and deliberately not split — one
+  cohesive component, not a hidden second responsibility.

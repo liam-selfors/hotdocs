@@ -437,8 +437,8 @@ cases.
 
 Sometimes the honest conclusion is that no precedent exists and no split
 is warranted: `spec-linter` crowding `generated_code_loc`,
-`requirement_count`, and `component_doc_words` together reflects one
-cohesive component with many genuinely independent, correlated rules —
+`requirement_count`, and `component_doc_words` together (`D77`) reflects
+one cohesive component with many genuinely independent, correlated rules —
 not a hidden second responsibility with some other component's shape to
 borrow. Splitting a single-pass structural linter into sub-checkers for
 no architectural reason would be the wrong response to this signal, not

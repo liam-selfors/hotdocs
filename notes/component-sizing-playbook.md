@@ -105,8 +105,8 @@ wearing a size-cap costume — split along that seam.
 
 If no — if the crowding reflects **one cohesive responsibility with
 many genuinely independent, correlated rules** (`spec-linter`'s own
-case: a structural linter whose rule count, generated code, and spec
-bundle all grow together because each new rule is a real, separate
+case, `D77`: a structural linter whose rule count, generated code, and
+spec bundle all grow together because each new rule is a real, separate
 check, not a second responsibility) — don't split. Splitting a
 single-pass component into sub-checkers for no architectural reason is
 the wrong response to this signal, not the right one. Accept the
