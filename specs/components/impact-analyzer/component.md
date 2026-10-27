@@ -110,3 +110,9 @@ None. The two originally recorded here are both resolved:
 ## Change log
 
 - Initial draft.
+- `D64`: `R-IMPACT-010` — defines "the prior commit" (merge-base with
+  the default branch), found missing only once a real `generate()`
+  candidate had nowhere to look it up and implemented no git
+  comparison at all. `BlastRadiusReport.md` now states `component_id`
+  is always the full `comp-<slug>` form explicitly, not just by
+  example.
