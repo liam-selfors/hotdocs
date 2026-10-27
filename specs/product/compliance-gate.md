@@ -12,14 +12,14 @@ owners: [pipeline-team]
 Secrets and license/similarity flags are compliance risk, not correctness
 risk — handled automatically (no mandatory human sign-off to merge), but
 never silently: every flag is recorded, surfaced in the review packet, and
-above a severity threshold, actively pushed to a standing channel (D7/D12).
+above a severity threshold, actively pushed to a standing channel.
 
 ## Scope
 
 In scope: `specs/`, `gen/`, and `verification/`, scanned pre-merge-gate and
 (where tooling allows) as early as pre-commit/pre-push. Out of scope:
 deployment-time config values and infra-as-code, which never enter the spec
-corpus at all (D12) and so aren't this capability's concern.
+corpus at all and so aren't this capability's concern.
 
 ## Capability scenario
 

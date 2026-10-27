@@ -44,17 +44,17 @@ directly — this component's job ends at writing a well-documented,
 directly-queryable shape, not building a second query layer on top of a
 database that already is one.
 
-**Since D32, also writes `AttemptRecord`s to `.hotdocs/attempts/`** — the
+**Since D19, also writes `AttemptRecord`s to `.hotdocs/attempts/`** — the
 full `GenerationResult`/`VerificationReport` for one component's one
 generation attempt per merge, taken as direct parameters the same way
 merge-level facts already are. A separate store from `TrackingRecord`,
 not a change to its deliberately flattened shape — this closes the gap
-`D31`'s retirement of best-of-k opened: a blocked merge commits no
+`D3`'s retirement of best-of-k opened: a blocked merge commits no
 provenance at all, so without this, a failed attempt's full diagnostic
 detail would exist only in `merge-orchestrator`'s process memory for one
 merge, then vanish.
 
-**Since D33, also exposes `last_requirement_failures`** — a pure,
+**Since D3, also exposes `last_requirement_failures`** — a pure,
 read-only convenience over `.hotdocs/attempts/` that tells a developer
 which `R-id`s a component's last attempt failed, so they can decide
 whether to pass them as `retry_feedback` on their next `hotdocs merge`
@@ -94,7 +94,7 @@ See `constraints.md`.
 
 - ~~Whether `merge-orchestrator` calling this component should be a hard
   requirement... or whether a failure to write a tracking record should
-  itself be surfaced somewhere visible...~~ — resolved (`D37`):
+  itself be surfaced somewhere visible...~~ — resolved (`D25`):
   best-effort, never silent, confirmed as both at once rather than a
   choice between them. The non-gating half was already settled by
   `R-MERGE-019`/`R-MERGE-021` and this component's own `R-TRACK-005` —
@@ -102,22 +102,22 @@ See `constraints.md`.
   visibility half: `merge-orchestrator` now catches a failed call and
   surfaces it as `MergeResult.tracking_write_error` — `{category,
   message}`, the same structured shape `llm-endpoint`'s
-  `model_call_error` already established (`D32`) for exactly this kind
+  `model_call_error` already established (`D20`) for exactly this kind
   of "degrade silently in function, never in visibility" requirement.
   Chosen over inventing a new channel (a stderr line, a sentinel file
   under `.hotdocs/`) because `MergeResult` is already the one place
   every merge attempt's outcome is reported, in both `--format=json`
   and `--format=text` — a second, parallel reporting path for one
   specific failure mode would be exactly the kind of unrequested
-  abstraction this corpus avoids (D18/D20). See `R-MERGE-019` and
+  abstraction this corpus avoids (D4/D6). See `R-MERGE-019` and
   `AC-MERGE-024` for the normative behavior; this component's own
   `R-TRACK-005` is unchanged.
 
 ## Change log
 
 - Initial draft.
-- `D37`: closed the best-effort/visibility open question —
+- `D25`: closed the best-effort/visibility open question —
   `merge-orchestrator`'s `R-MERGE-019` now owns the catch-and-surface
   behavior; nothing changes here.
-- `D39`: `TrackingRecord.components[].cache_hit` renamed
+- `D29`: `TrackingRecord.components[].cache_hit` renamed
   `provenance_hit` (`R-TRACK-002`).

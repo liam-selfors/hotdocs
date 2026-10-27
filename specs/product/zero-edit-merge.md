@@ -17,7 +17,7 @@ alone — no human ever hand-edits `gen/` to make a merge pass.
 
 In scope: component spec changes that pass lint and have complete acceptance
 criteria. Out of scope: `sealed` components and `.overrides.json`-pinned
-files, which are explicitly exempt from this capability's promise (D1/§8).
+files, which are explicitly exempt from this capability's promise (§8).
 
 ## Capability scenario
 

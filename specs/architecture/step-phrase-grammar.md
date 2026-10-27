@@ -13,11 +13,11 @@ depends_on: []
 The fixed Given/When/Then step grammar every `compiled`-kind acceptance
 criterion in the corpus is written against, and that `criterion-compiler`
 implements. Lives here, not inside `criterion-compiler/interface/`, because
-changing it is a corpus-wide, architecture-level decision (same governance
-weight as splitting a component, D2) — it's a breaking change to every
-`compiled` criterion in the corpus, not a routine edit to one component's
-own contract. Moved here from `criterion-compiler/interface/` during the
-D15 one-file-per-unit migration, which made the mismatch between "where
+changing it is a corpus-wide, architecture-level decision (the same
+governance weight as splitting a component) — it's a breaking change to
+every `compiled` criterion in the corpus, not a routine edit to one
+component's own contract. Moved here from `criterion-compiler/interface/`
+during the D1 one-file-per-unit migration, which made the mismatch between "where
 this content lived" and "what governance it actually needs" visible for
 the first time — a flat `interface.md` didn't force the question the way
 an explicit `interface/` directory, scoped to one component's own contract,
@@ -58,4 +58,4 @@ call) is expression evaluation and a compile error — see `criterion-compiler`'
 ## Change log
 
 - Initial draft, relocated here from `criterion-compiler/interface/` during
-  the D15 migration.
+  the D1 migration.

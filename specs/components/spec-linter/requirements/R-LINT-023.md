@@ -4,7 +4,7 @@
   under `requirements/` and `acceptance/` against a per-file word count
   (warn above 250, fail above 500), distinct from R-LINT-012's
   `component_doc_words` aggregate — naming the specific file, not just the
-  bundle total. D15's design intent is that each such file is one atomic,
+  bundle total. D1's design intent is that each such file is one atomic,
   single-purpose unit; a single file running long is a direct signal that
   assumption broke down for *that file*, which a bundle-wide aggregate
   alone cannot distinguish from "this component just has a lot of

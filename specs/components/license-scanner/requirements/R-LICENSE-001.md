@@ -31,7 +31,7 @@
   business holding a copy of copyrighted source merely to scan against it,
   and a precomputed hash set never needs to.
 
-  **Where the corpus lives** (`D67`): `VAR-LICENSE-CORPUS-PATH`, never
+  **Where the corpus lives** (`D51`): `VAR-LICENSE-CORPUS-PATH`, never
   `.hotdocs/` — `.hotdocs/` is gitignored and local-only
   (`SPEC_GUIDELINES.md` §1), and this corpus's content directly
   determines `blocked`, a gate's pass/fail decision, which that same

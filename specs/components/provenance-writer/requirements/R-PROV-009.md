@@ -5,7 +5,7 @@
   `secret_scan` its `ProvenanceInputs` carries, unchanged — the same
   "collects, never invents" discipline as every other field. It MUST
   NOT look anything up itself. Sourcing those fields from the matching
-  prior manifest, via `provenance-checker` (`D39`), is
+  prior manifest, via `provenance-checker` (`D29`), is
   `merge-orchestrator`'s job before this component is ever called —
   this requirement previously described that lookup as this
   component's own, pointed at `cache-manager`, which never held a

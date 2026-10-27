@@ -10,7 +10,7 @@ author_test(
 Not a pure function, same as `generator`'s `generate()` — this is the
 second component in the corpus whose job requires an external call.
 
-`repo_root` and `llm_backend` (`D73`, a real, pre-existing gap: every
+`repo_root` and `llm_backend` (`D57`, a real, pre-existing gap: every
 `AC-AUTHOR-*` criterion already required "an injected mock model," but
 this signature never actually declared the parameter that injects
 one) — `llm_backend`, passed straight through to `llm-endpoint`'s own

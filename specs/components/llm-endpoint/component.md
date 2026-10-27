@@ -23,7 +23,7 @@ call, a specific vendor's API.
 
 ## Rationale
 
-(D30.) Extracted once a real coupling was found, not invented
+(D18.) Extracted once a real coupling was found, not invented
 speculatively: `generator` and `test-author` each independently
 declared `uses_var: [VAR-ANTHROPIC-API-KEY]`, and `merge-orchestrator`'s
 `judge` wiring (`R-MERGE-004`) was "a direct call to the configured
@@ -39,7 +39,7 @@ identifier names.
 authenticating and dispatching one completion request; normalizing every
 backend's failure modes into one structured `model_call_error` vocabulary
 (`R-GEN-008`'s definition, now owned here, given real queryable shape by
-`D32`); writing a low-level, caller-agnostic call log of every dispatch
+`D20`); writing a low-level, caller-agnostic call log of every dispatch
 (`R-ENDPOINT-006`).
 
 **Out of scope, deliberately:** prompt construction and response parsing
@@ -47,14 +47,14 @@ for any specific task (what a *generation* prompt or a *judge* prompt
 looks like stays with each caller, the same way `prompt_version` is
 already tracked per-caller, not globally) — this component only knows
 "send this text to this model, return what came back." Also out of
-scope: retry-with-backoff (`R-ENDPOINT-004`, same posture `D21` already
+scope: retry-with-backoff (`R-ENDPOINT-004`, same posture `D7` already
 established for `generator`, now stated at the layer that actually
 touches the network).
 
 **v1 scope, named explicitly:** exactly one backend (Anthropic). Not
 because multi-vendor support isn't the point — it's the whole point of
 this component existing — but because this project's own
-anti-premature-abstraction stance (`D18`, `D20`) says build the seam, not
+anti-premature-abstraction stance says build the seam, not
 every implementation behind it, until a second vendor is actually needed.
 A second backend is an additive implementation behind the same
 resolve/dispatch split (`R-ENDPOINT-002`/`003`), not a rework.
@@ -95,29 +95,30 @@ open question.
 
 ## Change log
 
-- Initial draft (D30).
-- `D47`: first real `gen/llm-endpoint/` implementation — a hand-authored
+- Initial draft (D18).
+- `D33`: first real `gen/llm-endpoint/` implementation — a hand-authored
   bootstrap exception, structurally permanent rather than temporary
   (nothing could ever cold-regenerate the component every generation
   call dispatches through). `AnthropicBackend` dispatches via the
-  `claude` CLI's non-interactive mode (`D46`) rather than a
+  `claude` CLI's non-interactive mode (`D33`) rather than a
   from-scratch API client. `interface/library.md` gained a `backend`
   injection parameter, a pre-existing gap `AC-ENDPOINT-002`/`003`/`006`
   already implied.
-- `D51`: **self-hosted regeneration.** The real `generator` (`D50`),
-  dispatching through this exact `D47` implementation, cold-regenerated
+- **Self-hosted regeneration.** The real `generator`, dispatching
+  through this exact `D33` implementation, cold-regenerated
   `gen/llm-endpoint/` from this component's own current spec; the
   result passed every `AC-ENDPOINT-*` criterion and was swapped in,
-  replacing the hand-written version. Revises `D47`'s "nothing could
-  ever generate `llm-endpoint`" to the more precise claim: nothing could
-  generate the *first* working version — once one exists, it can author
-  its own successor, the same way a compiler can compile itself once a
-  first version exists by other means. `interface/library.md`'s
+  replacing the hand-written version. Revises the earlier "nothing
+  could ever generate `llm-endpoint`" framing to the more precise
+  claim: nothing could generate the *first* working version — once one
+  exists, it can author its own successor, the same way a compiler can
+  compile itself once a first version exists by other means.
+  `interface/library.md`'s
   `backend` parameter's exact shape (a plain callable vs. a
   `.complete()`-method object) is not fixed by this spec and changed in
   the self-hosted version; `verification/llm-endpoint/`'s own test
   suite was updated to match.
-- `D52`/`D53`: `R-ENDPOINT-004` gained a concrete 300-second timeout
+- `D34`/`D35`: `R-ENDPOINT-004` gained a concrete 300-second timeout
   floor (found by a real timeout regenerating `generator`'s own, larger
   bundle); `R-ENDPOINT-003` gained a structural requirement that every
   `claude`-CLI dispatch pass `--tools ""` and `--bare` (found by a real

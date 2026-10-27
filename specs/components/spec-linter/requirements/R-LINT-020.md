@@ -11,6 +11,6 @@
   becomes a join against `nodes.owner_component_id`. R-LINT-008/009's
   treatment is `R-LINT-021`'s, not this rule's.
 
-  Exception (D44): `nodes`/`edges` are component-level only, so
+  Exception (D13): `nodes`/`edges` are component-level only, so
   R-LINT-003/004 each keep one native residual check for `architecture`-
   doc `depends_on` (grep-confirmed, the one other doc_type with any).

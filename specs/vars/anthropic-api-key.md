@@ -10,14 +10,14 @@ owners: [pipeline-team]
 - **required:** yes
 - **type:** secret-ref
 - **sensitivity:** secret
-- **description:** Credential used by `llm-endpoint` (D30) to call
+- **description:** Credential used by `llm-endpoint` (D18) to call
   Anthropic's API on behalf of every caller that needs a model call
   (`generator`, `test-author`, `spec-completeness-assistant`,
   `merge-orchestrator`'s `judge` wiring) — none of which hold this
-  credential themselves. No example or default — forbidden for
-  `sensitivity: secret` (D12).
+  credential themselves. No example or default — forbidden for any
+  `sensitivity: secret` var.
 
-  **Resolution mechanism (`D46`):** a direct process-environment lookup
+  **Resolution mechanism (`D32`):** a direct process-environment lookup
   of the OS environment variable named exactly `ANTHROPIC_API_KEY` — the
   same variable name the Anthropic SDK itself already reads by default
   when no key is passed explicitly, so this is the credential already
@@ -26,7 +26,7 @@ owners: [pipeline-team]
   (`R-ENDPOINT-003`) MUST read it this way — a plain environment lookup,
   never a vault/secrets-manager indirection — v1's one backend needs no
   more than that, and inventing one would be exactly the premature
-  abstraction `D18`/`D20` already reject elsewhere in this corpus.
+  abstraction `D4`/`D6` already reject elsewhere in this corpus.
 
   **This is a real environment fact a caller MUST confirm for
   themselves, not something this spec can declare true on their

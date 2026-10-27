@@ -7,6 +7,7 @@
   produce a naturally time-ordered table with no separate index. This
   directory MUST be gitignored (`SPEC_GUIDELINES.md` §1) and MUST NOT be
   created under `specs/`, `gen/`, or `verification/` — it is local
-  developer-process state, not a spec artifact, same distinction D11/D13
-  already draw between the corpus and its build outputs, extended here to
-  a third category (observability) neither of those two is.
+  developer-process state, not a spec artifact, same distinction the
+  original brainstorm already draws between the corpus and its build
+  outputs, extended here to a third category (observability) neither of
+  those two is.

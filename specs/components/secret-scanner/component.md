@@ -21,15 +21,15 @@ required to clear a flag, but no result is ever silent.
 
 ## Rationale
 
-D12 established this scan's unconditional, no-sign-off posture,
-mirroring D7's for `license-scanner`.
+This scan's unconditional, no-sign-off posture mirrors
+`license-scanner`'s.
 
 ## Scope
 
 **In scope:** pattern- and entropy-based detection across all three
 directories; the merge-blocking decision (confidence-based); the
 severity-based notification path (risk-based, orthogonal to confidence —
-see the D7 addendum in `notes/initial-ideas.md`); cache-awareness; a
+see the corresponding addendum in `notes/initial-ideas.md`); cache-awareness; a
 lightweight pre-commit/pre-push invocation distinct from the full
 merge-gate run.
 
@@ -63,7 +63,7 @@ See `interface/data/`.
 
 See `acceptance/`.
 
-Every criterion is `kind: generated-test` (`D59`) — pattern and entropy
+Every criterion is `kind: generated-test` (`D43`) — pattern and entropy
 matching are deterministic and need no model or judgment, but none are
 actually written in the step-phrase grammar, so `kind: compiled` would
 not describe how they're really verified.
@@ -83,10 +83,10 @@ See `constraints.md`.
 ## Change log
 
 - Initial draft.
-- `D38`: added `notification_delivery_error`, mirroring
+- `D26`: added `notification_delivery_error`, mirroring
   `license-scanner`'s same fix.
-- `D69`/`D70`: `VAR-SECRET-PATTERNS-PATH` proactively declared before
+- `D53`: `VAR-SECRET-PATTERNS-PATH` proactively declared before
   the first real `generate()` attempt (mirroring `license-scanner`'s
-  `D67`); that attempt passed all 10 directly-testable `AC-SECRET-*`
+  `D51`); `D54`: that attempt passed all 10 directly-testable `AC-SECRET-*`
   criteria on the first real try. `gen/secret-scanner/
   secret_scanner.py` is now that candidate.

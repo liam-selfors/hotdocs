@@ -24,7 +24,7 @@
 }
 ```
 
-No `attempts`/`sample_index` fields — `D31` retired the best-of-k retry
+No `attempts`/`sample_index` fields — `D3` retired the best-of-k retry
 loop that gave either one meaning beyond "always 1"/"always 0."
 `model_call_error` and `verification` are **not both populated**: a
 component whose attempt never produced a candidate has `verification`
@@ -37,10 +37,10 @@ keyed by `P-id`, covering every capability whose `realizes`-set
 intersects this merge's blast radius — a distinct result category from
 `components`, never merged into any single component's own entry (per
 `constraints.md`'s "never conflated" rule). `tracking_write_error`
-(R-MERGE-019, `D37`) is `{category, message}` or `null`, mirroring
+(R-MERGE-019, `D25`) is `{category, message}` or `null`, mirroring
 `model_call_error`'s shape — set only if `merge-tracker` itself raised;
 it never affects `blocked`/`block_reasons`, per `R-TRACK-005`.
-`provenance_hit` (R-MERGE-003, `D39`) is `true` only when
+`provenance_hit` (R-MERGE-003, `D29`) is `true` only when
 `provenance-checker` reported a hit, meaning the other fields are
 copied from a committed `.provenance.json` rather than freshly
 computed — renamed from `cache_hit`, which never meant

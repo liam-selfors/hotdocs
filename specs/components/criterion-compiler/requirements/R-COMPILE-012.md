@@ -26,4 +26,4 @@
   `compile`'s own public surface had no way to serve that need without
   inventing a second, duplicate compilation path — exactly the
   "no new dispatch machinery" rule `R-SCENARIO-001` itself states
-  (`D75`).
+  (`D59`).

@@ -17,8 +17,8 @@
   already have" — the requirements themselves are already in the bundle
   via `requirements/`.
 
-  **Restores what `D31` mistakenly removed along with automatic retry
-  (`D33`).** `D31`'s actual point — no *automatic* loop deciding to
+  **Restores the feedback mechanism that was removed along with
+  automatic retry (`D3`).** `D3`'s actual point — no *automatic* loop deciding to
   retry on this component's behalf within one merge — never required
   removing the feedback mechanism itself; that was overreach. This
   component MUST NOT be the one deciding *whether* to use

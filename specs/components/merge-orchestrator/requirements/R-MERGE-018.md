@@ -15,7 +15,7 @@
   from the blocked attempt's own `MergeResult`, exactly which ones already
   passed and don't need attention.
 
-  Rationale: `specs/decisions/D21.md` (the same "rollback is a cache
-  hit, not a dedicated incident feature" posture D11 established for
-  reverts, applied here to moving forward through partial failure
-  rather than backward).
+  Rationale: `specs/decisions/D8.md` (the same "rollback is a cache
+  hit, not a dedicated incident feature" posture the original brainstorm
+  established for reverts, applied here to moving forward through
+  partial failure rather than backward).

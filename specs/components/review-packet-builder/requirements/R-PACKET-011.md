@@ -13,7 +13,7 @@
 
   This is an implementation requirement, not a behavioral one —
   R-PACKET-001 through 010 are unaffected. It is also why this
-  component's `depends_on` no longer lists those components (D26):
+  component's `depends_on` no longer lists those components (D13):
   they were never needed as live dependencies, only their
   already-written output was, and that output arrives through
   `provenance-writer`, which this component already depended on.

@@ -2,7 +2,7 @@
 
 **R-LINT-024** — A component's `Purpose` section MUST NOT cite a
   decision id (`D<N>`, bare or backtick-wrapped) — a fail-severity
-  finding, not a warning. `Purpose` MUST be dependent-safe (`D34`): what
+  finding, not a warning. `Purpose` MUST be dependent-safe (`D21`): what
   a unit does and why it exists, never how that design was arrived at.
   Any decision citation, historical justification, or cross-reference
   to the discussion that produced the current design belongs in a

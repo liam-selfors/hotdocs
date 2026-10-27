@@ -5,7 +5,7 @@ verify(component_id: str, repo_root: Path, judge=None, test_author=None) -> Veri
 ```
 
 `judge`/`test_author` are the glossary's "Injected `judge`/`test_author`
-callable shape" (`D82`) — a single-`bundle`-argument convention,
+callable shape" (`D65`) — a single-`bundle`-argument convention,
 **not** the same shape as `spec-linter`'s own `judge` parameter
 (`R-LINT-015`), which takes three positional arguments for a narrower
 task. Omit `judge` to run with every `llm-judge` criterion reporting

@@ -21,4 +21,4 @@
   class's own annotations — found only once a real self-regeneration
   candidate chose exactly this per-call dynamic-loading technique,
   omitted the registration step, and crashed for real loading
-  `cache-manager` (`D57`).
+  `cache-manager` (`D41`).

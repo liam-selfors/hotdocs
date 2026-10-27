@@ -23,17 +23,17 @@ outcome.
 
 ## Rationale
 
-D7 established this scan's unconditional, no-sign-off posture.
+The original brainstorm established this scan's unconditional, no-sign-off posture.
 
 ## Scope
 
 **In scope:** fingerprinting generated code; comparing against the
 reference corpus; the merge-blocking decision (confidence-based); the
 severity-based notification path (risk-based, orthogonal to confidence —
-see the D7 addendum in `notes/initial-ideas.md`); cache-awareness.
+see the addendum in `notes/initial-ideas.md`); cache-awareness.
 
 **Out of scope:** legal interpretation of a match (explicitly out of scope
-for an engineering component — D7); maintaining the reference corpus's
+for an engineering component); maintaining the reference corpus's
 content itself, including its per-entry `risk_tier` classifications
 (treated as an external input, versioned via `gate_version` like the
 signature database it is — assigning a license family's risk tier is
@@ -79,13 +79,13 @@ See `constraints.md`.
 ## Change log
 
 - Initial draft.
-- `D38`: added `notification_delivery_error` to distinguish a webhook
+- `D26`: added `notification_delivery_error` to distinguish a webhook
   call that was never due from one that was due and failed to deliver.
-- `D67`: new `VAR-LICENSE-CORPUS-PATH` — a real `generate()` candidate
+- `D51`: new `VAR-LICENSE-CORPUS-PATH` — a real `generate()` candidate
   defaulted the reference corpus's location to `.hotdocs/`, which
   `SPEC_GUIDELINES.md` forbids any gate decision from depending on.
   `R-LICENSE-001` now names the real location explicitly.
-- `D68`: a second retry, with that fix in place, passed all 8 directly
+- `D52`: a second retry, with that fix in place, passed all 8 directly
   testable `AC-LICENSE-*` criteria for real — first successful
   implementation. `gen/license-scanner/license_scanner.py` is now that
   candidate. See `verification/license-scanner/BOOTSTRAP.md`.

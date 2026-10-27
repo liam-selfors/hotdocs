@@ -5,7 +5,7 @@ run_capability_scenarios(blast_radius: list[str], repo_root: Path, judge=None, t
 ```
 
 `judge`/`test_author` are the glossary's "Injected `judge`/`test_author`
-callable shape" (`D82`) — the same single-`bundle`-argument convention
+callable shape" (`D65`) — the same single-`bundle`-argument convention
 `verifier-orchestrator`'s `verify()` uses, read duck-typed on the way
 out (a dict with `result`/`verdict`/`model_call_error`/`file` keys, or
 an object with the same attributes). `merge-orchestrator` wires the

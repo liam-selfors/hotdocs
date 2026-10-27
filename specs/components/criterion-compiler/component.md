@@ -19,7 +19,7 @@ step. Permanently sealed (`sealed: true`) — never agent-generated.
 
 ## Rationale
 
-The trust anchor for `compiled`-kind criteria (D5/D4): `compiled`
+The trust anchor for `compiled`-kind criteria: `compiled`
 criteria are the strongest tier of evidence specifically *because*
 nothing agent-generated sits between the criterion and the check — and
 that argument only holds if the compiler itself is not agent-generated.
@@ -52,11 +52,11 @@ own bugs. Resolved as `kind: generated-test` throughout (see
 `acceptance/`): an agent writes test code from this spec's prose,
 independent of — and with no access to — this component's hand-maintained
 implementation. The usual `generated-test` trust argument ("independent
-generation path, different model than the code under test") was framed in
-D5 for *generated* code under test; here the code under test is hand-written,
+generation path, different model than the code under test") was framed
+for *generated* code under test; here the code under test is hand-written,
 not generated, which if anything makes the test's independence from it
-*stronger*, not weaker — but this is a real gap in how D5 phrased that
-mechanism, worth a note back to `notes/initial-ideas.md` (flagged, not
+*stronger*, not weaker — but this is a real gap in how that argument was
+originally phrased, worth a note back to `notes/initial-ideas.md` (flagged, not
 silently resolved by just reusing the label).
 
 ## Definitions
@@ -107,14 +107,14 @@ See `constraints.md`.
   additive emitter, not a grammar rework — without adding any
   plugin/registry abstraction nobody has asked for yet.
 - ~~Where the published step-phrase grammar itself is versioned and
-  reviewed~~ — resolved, and since D15, physically relocated too:
+  reviewed~~ — resolved, and since `D1`, physically relocated too:
   `specs/architecture/` owns "cross-cutting tech decisions" by its own
   definition (`notes/initial-ideas.md` §4), and the grammar is exactly
   that — a corpus-wide structural decision, not a component behavior or a
   product capability. The detailed table now lives at
   `specs/architecture/step-phrase-grammar.md` itself (no longer just
   governed-there-while-living-in-`interface/`), carrying the same
-  governance weight as splitting a component (D2) — not a routine
+  governance weight as splitting a component — not a routine
   `criterion-compiler` spec edit.
 - ~~Exact boundary of "literal data" in R-COMPILE-007 — are template
   interpolations (e.g. referencing a previously-bound fixture name inside a
@@ -130,22 +130,22 @@ See `constraints.md`.
 ## Change log
 
 - Initial draft.
-- `D60`: first real implementation (`pipeline/criterion-compiler/
+- `D44`: first real implementation (`pipeline/criterion-compiler/
   criterion_compiler.py`), hand-authored per `sealed: true` — never a
-  `generator` candidate. Preceded by `D59`, which found every existing
+  `generator` candidate. Preceded by `D43`, which found every existing
   `kind: compiled` criterion corpus-wide was never actually written in
   the step-phrase grammar and reclassified them all to
   `generated-test`, leaving this component's own synthetic `widget`
   fixture (`verification/criterion-compiler/`) as its only real test
   subject — exactly what `constraints.md`'s characterization-coverage
   clause already anticipated.
-- `D75`: new `R-COMPILE-012` / `compile_criterion` — a public,
+- `D59`: new `R-COMPILE-012` / `compile_criterion` — a public,
   directory-scanning-free primitive `compile` itself now uses
   internally, exposed for a caller (`capability-scenario-verifier`)
   compiling criterion content outside any component's `acceptance/`.
-  Hand-authored directly, same as `D60` — never a `generator`
+  Hand-authored directly, same as `D44` — never a `generator`
   candidate.
-- `D79`: new `R-COMPILE-013` / `InterfaceSurface.module_name` — emitted
+- `D62`: new `R-COMPILE-013` / `InterfaceSurface.module_name` — emitted
   test code that references the target component's own functions or
   types now imports and qualifies them (`<module_name>.<name>`)
   instead of calling them as bare, unqualified globals. Found because
@@ -155,5 +155,5 @@ See `constraints.md`.
   this creates for any caller that runs emitted scaffolding
   (`verifier-orchestrator`'s `R-VERIFY-001`): the import search path
   must be scoped to `gen/<component>/` itself, not a broader ancestor.
-  Hand-authored directly, same as `D60`/`D75` — never a `generator`
+  Hand-authored directly, same as `D44`/`D59` — never a `generator`
   candidate.

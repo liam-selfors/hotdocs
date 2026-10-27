@@ -3,7 +3,7 @@
 **R-GQE-005** — The `component_provenance` view MUST return one row per
   component, read directly from `provenance-writer`'s already-written
   manifests, reading under the data contract `SPEC_GUIDELINES.md` §7
-  (the `.provenance.json` schema, including `provenance_hit` — `D39`):
+  (the `.provenance.json` schema, including `provenance_hit` — `D29`):
 
 ```sql
 CREATE OR REPLACE VIEW component_provenance AS
@@ -16,10 +16,10 @@ FROM read_json('{repo_root}/verification/*/.provenance.json', filename:=true);
 
   `{repo_root}` substitution is the same as `R-GQE-001`. `read_json`
   (unlike `read_text`) genuinely supports `filename:=true` — confirmed
-  by running this view, not assumed (`D43`).
+  by running this view, not assumed.
 
   **MUST degrade to an empty, correctly-shaped view — never an error —
-  when no `.provenance.json` files exist yet** (`D44`): `read_json`
+  when no `.provenance.json` files exist yet** (`D13`): `read_json`
   raises on a glob matching zero files, unlike `read_text`, and "no
   component has ever been cold-regenerated through a real pipeline" is
   this corpus's own actual, expected state today, not a fixture
@@ -29,7 +29,7 @@ FROM read_json('{repo_root}/verification/*/.provenance.json', filename:=true);
   none exists, so a query naming any of this view's columns still
   succeeds, just returns zero rows.
 
-  **A real consumer dependency, not an optional extra** (`D45`): once a
+  **A real consumer dependency, not an optional extra:** once a
   real `.provenance.json` exists, `read_json`'s auto-detection types
   `generated_at` as `TIMESTAMP WITH TIME ZONE` (it looks like an
   ISO-8601 timestamp), and materializing that type requires the `pytz`

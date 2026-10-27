@@ -5,5 +5,5 @@
   component with a `uses_var` reference to that declaration is included,
   tagged `transitive-var`, naming the changed variable. (A variable's
   declared type/required/sensitivity is itself the contract a component
-  depends on, per D12 — there is no reason to treat it more loosely than an
+  depends on — there is no reason to treat it more loosely than an
   interface change.)

@@ -29,7 +29,7 @@ scenario that failed:
 Keyed by `P-id` — one top-level entry per product capability whose
 `realizes`-set intersected the blast radius this run
 (`R-SCENARIO-001`/`002`), never one entry per component. `scenarios` is
-one entry **per capability scenario** (`D36` — moved off the single
+one entry **per capability scenario** (`D23` — moved off the single
 aggregate verdict `GoldenScenarioReport` used to have, the same
 per-criterion granularity `VerificationReport.criteria[]` already has),
 each carrying its own `id`, `kind`, and `result` (`pass`/`fail`/

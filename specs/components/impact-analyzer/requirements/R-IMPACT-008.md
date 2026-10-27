@@ -13,9 +13,9 @@
   MUST be included unconditionally whenever *any* file under that
   component's `interface/guarantees/` changed, tagged
   `transitive-guarantee` naming the upstream component — the same safe,
-  coarse default every other `interface/` file kind already has (D16).
+  coarse default every other `interface/` file kind already has (`D2`).
 
-  **`depends_on_guarantees`'s real frontmatter shape** (`D65`, found
+  **`depends_on_guarantees`'s real frontmatter shape** (`D49`, found
   missing from this bundle's own visible text, though already
   documented for humans in `SPEC_GUIDELINES.md` §2, which no
   `SpecBundle` ever includes): a flat list of bare `G-<comp>-NNN` id
@@ -33,7 +33,7 @@
   real residual risk this requirement does not eliminate — it is
   structurally impossible for a graph-reachability computation to verify
   a claim about what code *actually* relies on — which is exactly why
-  D16's capability-scenario gate (`capability-scenario-verifier`, called by
+  `D2`'s capability-scenario gate (`capability-scenario-verifier`, called by
   `merge-orchestrator` per R-MERGE-014) exists as a permanent backstop,
   not a transitional one, independent of how precise these declarations
   get.

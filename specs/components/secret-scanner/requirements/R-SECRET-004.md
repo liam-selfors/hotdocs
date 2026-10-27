@@ -5,9 +5,9 @@
   matched rule's `risk_tier` is `high` — mirroring `license-scanner`'s
   R-LICENSE-003 exactly, the same orthogonal block/severity split, not a
   second, independently-designed mechanism. Independent of the merge
-  outcome, including when a later merge attempt (`D31`) scans clean —
+  outcome, including when a later merge attempt (`D3`) scans clean —
   mirroring `license-scanner`'s `R-LICENSE-007` exactly: the original
-  flagged attempt's record (`D32`'s `.hotdocs/attempts/`) is never erased
+  flagged attempt's record (`D19`'s `.hotdocs/attempts/`) is never erased
   just because a subsequent attempt came back clean.
 
   The webhook call itself MUST be attempted at most once, with no

@@ -4,8 +4,9 @@ Covers: R-LINT-015
 Kind: llm-judge
 
 The one criterion in this component that is not `kind: compiled` or
-`generated-test` — by design, matching D5's own guidance that `llm-judge` is
-for qualities no test could capture even in principle. Detecting a
+`generated-test` — by design, matching the general guidance that
+`llm-judge` is for qualities no test could capture even in principle.
+Detecting a
 *structural* restatement (R-LINT-011) is mechanical; detecting that two
 differently-worded passages mean *conflicting* things is not.
 

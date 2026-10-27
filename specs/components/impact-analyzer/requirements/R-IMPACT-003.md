@@ -10,4 +10,4 @@
   interface changed. These three file kinds always propagate in full,
   unconditionally — unlike `interface/guarantees/`, there is no coherent
   notion of "a dependent that only cares about some of a component's types
-  or CLI surface" the way there is for behavioral guarantees (D16).
+  or CLI surface" the way there is for behavioral guarantees (`D2`).

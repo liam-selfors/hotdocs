@@ -6,7 +6,7 @@ hotdocs compile-criteria <component-id> [--target=pytest] [--out=<dir>] [--repo-
 
 - `<component-id>` — the component whose `acceptance/` directory to
   compile. (Previously took `<acceptance.md>` + `--interface=<interface.md>`
-  as explicit file paths; D15's one-file-per-unit layout made that
+  as explicit file paths; `D1`'s one-file-per-unit layout made that
   unnecessary — given a component id and `--repo-root`, both
   `acceptance/*.md` and `interface/` are at known, derivable paths.)
 - `--target` — emitted test-framework target. Default and only supported

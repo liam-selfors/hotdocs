@@ -20,11 +20,11 @@ parsing, file globbing, or text extraction.
 ## Rationale
 
 Extracted from `specs/architecture/graph-query-engine.md`'s own prose
-(`D44`) once that document's embedded SQL stopped being documentation
+(`D13`) once that document's embedded SQL stopped being documentation
 and started being the actual, unverified implementation — a spec
-describing `CREATE VIEW` statements that had never been run (`D43`
-found three of the six broken) is exactly the "spec says X, code does
-Y" gap `SPEC_GUIDELINES.md` §10 now warns against. This component
+describing `CREATE VIEW` statements that had never been run is
+exactly the "spec says X, code does Y" gap `SPEC_GUIDELINES.md` §10
+now warns against. This component
 makes the SQL a real, generated asset instead: `specs/architecture/
 graph-query-engine.md` keeps the *why* (extension choice, adoption
 history); this component owns the *what* (each view's exact
@@ -75,5 +75,5 @@ None.
 
 ## Change log
 
-- Initial draft (`D44`), extracted from
+- Initial draft (`D13`), extracted from
   `specs/architecture/graph-query-engine.md`.

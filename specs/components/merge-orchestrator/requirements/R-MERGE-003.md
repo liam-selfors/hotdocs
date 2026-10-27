@@ -1,7 +1,7 @@
 # R-MERGE-003
 
 **R-MERGE-003** — For each impacted, **non-sealed** component, MUST
-  check `provenance-checker` (`D39`) before doing anything else; a hit
+  check `provenance-checker` (`D29`) before doing anything else; a hit
   MUST short-circuit straight to using the returned
   `verification_report`/`license_scan`/`secret_scan` as this
   component's results, skipping R-MERGE-004 through R-MERGE-008

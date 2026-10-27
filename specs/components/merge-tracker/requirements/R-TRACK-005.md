@@ -4,7 +4,7 @@
   success a precondition for the merge's own success or failure, and
   `merge-orchestrator` MUST NOT block or alter a merge's outcome based on
   whether this component's write succeeds — `write_tracking_record` and
-  `write_attempt_record` (`R-TRACK-007`, `D32`) alike. A merge that
+  `write_attempt_record` (`R-TRACK-007`, `D19`) alike. A merge that
   passes every real gate but fails to write either kind of record is
   still a passed merge.
 

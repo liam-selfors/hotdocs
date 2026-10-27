@@ -13,4 +13,4 @@
   type only because the component and the artifact kind share a name
   by coincidence — not a pattern to copy here. A real candidate did
   exactly that, using `test_author@<version>` and crashing on its own
-  first cache write (`D72`).
+  first cache write (`D56`).

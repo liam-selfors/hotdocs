@@ -14,10 +14,10 @@
 }
 ```
 
-`spec_bundle_hash` (`R-GEN-017`, `D83`) echoes `bundle.spec_bundle_hash`.
+`spec_bundle_hash` (`R-GEN-017`, `D67`) echoes `bundle.spec_bundle_hash`.
 
-No `seed`/`sample_index` fields (`D31` retired best-of-k, no "which
-sample won" left to record). `retry_feedback` (`D33`) is a plain echo
+No `seed`/`sample_index` fields (`D3` retired best-of-k, no "which
+sample won" left to record). `retry_feedback` (`D3`) is a plain echo
 of whatever a caller supplied (`null` if nothing was) — an auditor
 needs to know whether an attempt was informed or blind.
 

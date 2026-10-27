@@ -13,5 +13,5 @@
   If this call itself raises or errors, that failure MUST be caught and
   surfaced as `MergeResult.tracking_write_error` (non-blocking, the same
   structured `{category, message}` shape `model_call_error` already
-  established, D32) — never silently swallowed, per the non-gating
+  established, D20) — never silently swallowed, per the non-gating
   posture above.

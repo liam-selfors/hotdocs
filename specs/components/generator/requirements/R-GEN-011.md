@@ -2,7 +2,7 @@
 
 **R-GEN-011** — This component MUST NOT implement its own retry-with-backoff
   logic around an `llm-endpoint` call — `llm-endpoint`'s own bounded-call
-  guarantee (`R-ENDPOINT-004`, D30) is the right source of truth for "how
+  guarantee (`R-ENDPOINT-004`, `D18`) is the right source of truth for "how
   long is reasonable," not a number this component invents, and not a
   loop this component adds on top. A single call either succeeds, or
   comes back as `model_call_error` (R-GEN-008) exactly once — there is no
@@ -22,7 +22,7 @@
 
   This was never the same thing as `merge-orchestrator`'s best-of-k
   retry loop, which used to retry *generation itself* on a verification
-  failure — `D31` retired that loop entirely, but this requirement was
+  failure — `D3` retired that loop entirely, but this requirement was
   always about a different layer (infrastructure-level call failures,
   before any code was ever produced to verify) and is unaffected by that
   retirement.

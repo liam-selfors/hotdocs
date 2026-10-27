@@ -22,7 +22,7 @@ residual risk — never the generated code itself.
 **In scope:** formatting already-computed results — verification,
 license/secret scan, provenance-hit status — into one reviewable
 document, read entirely from `provenance-writer`'s already-written manifests
-(`R-PACKET-011`, D26), which already collected all of it; no live
+(`R-PACKET-011`, D13), which already collected all of it; no live
 dependency on `verifier-orchestrator`, `license-scanner`,
 `secret-scanner`, or `cache-manager` is needed to do this.
 
@@ -64,6 +64,6 @@ None.
 ## Change log
 
 - Initial draft.
-- `D39`: `cache_hit_status` renamed `provenance_hit_status`
+- `D29`: `cache_hit_status` renamed `provenance_hit_status`
   (`R-PACKET-006`); `R-PACKET-011`'s source list drops `cache-manager`,
   which this field never actually came from.

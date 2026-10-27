@@ -11,7 +11,7 @@ interpret them, only forwards them; a backend rejecting an unsupported
 param is that backend's own concern, surfaced as `model_call_error`
 (`R-ENDPOINT-004`), not validated here.
 
-`backend` (added `D47`, the same injectable-callable pattern `spec-linter`'s
+`backend` (added `D33`, the same injectable-callable pattern `spec-linter`'s
 `judge` parameter and `verifier-orchestrator`'s `judge`/`test_author`
 parameters already establish) — omitted (the default), `complete()`
 resolves a real backend internally per `R-ENDPOINT-002`; a caller

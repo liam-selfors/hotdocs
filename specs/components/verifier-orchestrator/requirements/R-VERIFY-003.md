@@ -12,7 +12,7 @@
   bundle is necessarily narrower — no single component's
   `CriterionBundle` applies to a cross-component capability scenario —
   see the glossary's "Injected `judge`/`test_author` callable shape,"
-  `D82`.) Call shape and result handling otherwise follow the same
+  `D65`.) Call shape and result handling otherwise follow the same
   graceful-degradation posture `spec-linter`'s R-LINT-015 established,
   now a fourth instance. **This component's own behavior here is
   dispatch and recording, not judgment** — the judging happens inside

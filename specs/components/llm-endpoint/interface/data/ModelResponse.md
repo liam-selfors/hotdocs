@@ -28,9 +28,9 @@ of `R-ENDPOINT-004`'s four values (`network`/`auth`/`rate_limit`/
 `timeout`) — not a bare boolean, so `R-ENDPOINT-006`'s call log can
 actually answer "how many failures this month were rate-limits vs. auth
 errors," the question a flattened `true`/`false` could never answer
-(`D32`). `message` is a short, backend-agnostic description — never the
+(`D20`). `message` is a short, backend-agnostic description — never the
 raw vendor exception text or anything from `R-ENDPOINT-005`'s credential
-boundary. `backend` (added by `D32`) is still never a caller *input* —
+boundary. `backend` (added by `D20`) is still never a caller *input* —
 `R-ENDPOINT-002`'s resolution stays entirely internal to a `complete()`
 call — but is now recorded on the *output*, for the same observability
 reason `model_call_error` needs real structure: "which backend is

@@ -6,7 +6,7 @@
   `InterfaceSurface`) MUST import the target module by its
   `InterfaceSurface.module_name` and qualify every such reference with
   it (`<module_name>.<name>`) — never a bare, unqualified name relying
-  on a caller to have pre-populated globals (D79).
+  on a caller to have pre-populated globals (`D62`).
 
   A caller that *executes* the emitted file (any `compiled`-kind
   dispatch, e.g. `verifier-orchestrator`'s `R-VERIFY-001`) MUST run it

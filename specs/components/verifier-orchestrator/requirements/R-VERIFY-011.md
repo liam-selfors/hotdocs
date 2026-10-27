@@ -17,10 +17,10 @@
   `llm-judge` criteria), its expected/actual values, or any other content
   that could let a consumer reconstruct what a specific test checked.
 
-  This boundary predates, and outlives, `D31`'s retirement of automatic
+  This boundary predates, and outlives, `D3`'s retirement of automatic
   retry — it was never only about feeding that loop. `requirement_results`
   is a standalone requirement-level summary, useful to a human or review
-  packet on its own, and — since `D33` restored `retry_feedback` as a
+  packet on its own, and — since `D3` restored `retry_feedback` as a
   developer-supplied input (via `R-TRACK-008`) rather than an automatic
   one — also what a developer now reads to decide what to supply.
   Keeping it content-free regardless of who reads it protects

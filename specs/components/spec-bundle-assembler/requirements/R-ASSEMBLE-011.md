@@ -17,7 +17,7 @@
   expected state, not an error.
 
   **A `sealed` dependency's real code lives at its declared
-  `source_path`, never under `gen/<dependency>/`** (`D76`) — checked
+  `source_path`, never under `gen/<dependency>/`** (`D60`) — checked
   first, against that dependency's own `component.md` frontmatter,
   before falling back to the normal `gen/<dependency>/` location.
   Missing this distinction silently degraded every sealed dependency's
@@ -47,8 +47,8 @@
   dependents to regenerate again, which could change usage again), and
   it would let accumulated calling patterns steer a dependency's real
   behavior instead of its own normative `interface/` contract — the
-  same spec-drift failure mode `D42`–`D54` already spent real effort
-  catching elsewhere. If a dependent's real need reveals a dependency's
+  same spec-drift failure mode this corpus has already spent real
+  effort catching elsewhere. If a dependent's real need reveals a dependency's
   contract is genuinely missing something, that is a human-reviewed
   `interface/` spec change (flowing through `impact-analyzer`'s blast
   radius the normal way), never an input to a generation prompt.

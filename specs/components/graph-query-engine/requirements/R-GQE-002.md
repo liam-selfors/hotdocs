@@ -6,7 +6,7 @@
   `depends_on_guarantees`/`builds_on` as list-valued frontmatter
   fields, `supersedes` as scalar-valued) and §5 (`Covers:` as a
   body-text tag, never frontmatter — one per `component-acceptance`
-  file per D15, one per capability scenario heading in a product
+  file per D1, one per capability scenario heading in a product
   file):
 
 ```sql
@@ -87,9 +87,9 @@ FROM read_text('{repo_root}/specs/decisions/*.md');
   auto-detection, which silently DROPS a declared column from its
   result schema (a bind-time "column not found" error at the call
   site, not a null value) when that key is absent from every file in
-  the glob at once (`D44`) — true of `uses_var`/`depends_on_guarantees`
+  the glob at once (`D13`) — true of `uses_var`/`depends_on_guarantees`
   in sparse corpora such as `graph-query-engine`'s own test fixtures,
   where no component happens to use either field. The same reasoning
-  governs `supersedes`/`builds_on`'s two new arms (`D92`): neither is
+  governs `supersedes`/`builds_on`'s two new arms (`D74`): neither is
   present on more than a handful of decision records today, so
   `read_yaml_frontmatter` would silently drop either column outright.

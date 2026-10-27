@@ -8,7 +8,7 @@
 
   "From cache" here means: this component itself MUST check, before
   ever calling `test_author`, whether the glossary's "Criterion test
-  filename" (`D80`) already exists directly under
+  filename" (`D63`) already exists directly under
   `verification/<component>/generated-test/` for this criterion — never
   a separate, self-invented cache location or naming scheme (a content
   hash, a nested subdirectory) — and use it as-is if so. This is a

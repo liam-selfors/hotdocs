@@ -5,7 +5,7 @@
   or a sealed component's
   characterization-test verification (R-MERGE-015) failed, or either
   scanner reported a blocking flag — `LicenseScanResult.blocked` or
-  `SecretScanResult.flagged` (not the same field name, `D82`) — or
+  `SecretScanResult.flagged` (not the same field name, `D66`) — or
   capability-scenario verification (R-MERGE-014) failed — and MUST
   proceed otherwise.
 

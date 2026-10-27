@@ -11,7 +11,7 @@ hotdocs track feedback <component-id> [--repo-root=<dir>]
 - `--repo-root` — defaults to the current git repository root.
 - `--format` — `text` (human-readable, default) or `json`.
 
-`track feedback` (`R-TRACK-008`, `D33`) prints the named component's
+`track feedback` (`R-TRACK-008`, `D3`) prints the named component's
 most recent failing `R-id`s, comma-separated, ready to paste into
 `hotdocs merge --retry-feedback=<component-id>=...` — or nothing, if
 no failed attempt exists. It does not pass anything anywhere itself;

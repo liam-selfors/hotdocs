@@ -9,4 +9,4 @@ One row per `specs/decisions/*.md` file (`R-GQE-008`). Everything
 else about a decision (`status`, `supersedes`, `builds_on`) is a
 `nodes`/`edges` fact instead (`kind = 'decision'`, `edge_type IN
 ('supersedes', 'builds_on')`) — this view exists only for the one
-column with no home there (`D92`).
+column with no home there (`D74`).

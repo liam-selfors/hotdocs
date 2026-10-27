@@ -13,7 +13,7 @@ requires an external call. Side effects: in `cold` mode, writes
 reads through `cache-manager` but writes to neither destination
 (`R-GEN-016`).
 
-`repo_root` and `llm_backend` (added `D50`, two real, pre-existing
+`repo_root` and `llm_backend` (added to fill two real, pre-existing
 gaps) — `repo_root` locates `specs/components/<name>/component.md`'s
 `sealed`/`source_path` frontmatter and `gen/<component>/.overrides.json`
 for `R-GEN-009`'s precondition check, and the write target for

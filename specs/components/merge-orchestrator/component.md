@@ -20,8 +20,9 @@ commit.
 ## Rationale
 
 Flagged by `specs/architecture/pipeline-decomposition.md` as having a
-15-component fan-out past D2's warn threshold — a known, accepted
-tension, not something to resolve by artificially shrinking this list.
+15-component fan-out past the original brainstorm's warn threshold — a
+known, accepted tension, not something to resolve by artificially
+shrinking this list.
 
 ## Scope
 
@@ -74,26 +75,26 @@ See `constraints.md`.
 
 ## Open questions
 
-- ~~Exact value of `k`~~ — `D17` resolved this (default `k=2`,
-  diagnostic-guided retry); `D31` later retired the whole best-of-k
-  mechanism this question was about, superseding the answer along with
+- ~~Exact value of `k`~~ — `D3` resolved this (default `k=2`,
+  diagnostic-guided retry, later retired along with the whole best-of-k
+  mechanism this question was about), superseding the answer along with
   the question.
 - ~~Whether R-MERGE-008's parallelization is literal concurrency or just
   "no artificial sequential dependency"~~ — resolved by
-  `specs/decisions/D21.md` (the requirement constrains the *outcome*,
+  `specs/decisions/D8.md` (the requirement constrains the *outcome*,
   not the mechanism — `R-MERGE-017`).
 - ~~Whether R-MERGE-015's sealed-component path still participates in
-  R-MERGE-003's short-circuit~~ — resolved (`D37`, mechanism updated by
-  `D39`): it never does, unconditionally. See `R-MERGE-015`.
+  R-MERGE-003's short-circuit~~ — resolved (`D8`, mechanism updated by
+  `D29`): it never does, unconditionally. See `R-MERGE-015`.
 
 ## Change log
 
 - Initial draft.
-- `D37`: resolved the sealed-component cache-hit question
-  (`R-MERGE-015`) and added `tracking_write_error` visibility for a
-  failed `merge-tracker` call (`R-MERGE-019`, `AC-MERGE-024`).
-- `D39`: `R-MERGE-003` now checks `provenance-checker`, not
+- `D8`: resolved the sealed-component cache-hit question
+  (`R-MERGE-015`) and `D25` added `tracking_write_error` visibility for
+  a failed `merge-tracker` call (`R-MERGE-019`, `AC-MERGE-024`).
+- `D29`: `R-MERGE-003` now checks `provenance-checker`, not
   `cache-manager`; `depends_on` swaps accordingly. `cache_hit` renamed
   `provenance_hit`.
-- `D55`: `R-MERGE-023` — generation now sequenced in `depends_on` order
+- `D37`: `R-MERGE-023` — generation now sequenced in `depends_on` order
   within a blast radius, for `dependency_usage` (`R-ASSEMBLE-011`).

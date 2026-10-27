@@ -86,23 +86,23 @@ Rather than let every adopting component write its own
 `read_yaml_frontmatter()`/`read_text()`/`read_json()`/`UNNEST` calls,
 seven shared views are the one surface all of them query — `nodes`,
 `edges`, `component_docs`, `component_context`, `component_provenance`,
-`component_size`, `decision_lineage` (`D88`). Their exact definitions,
+`component_size`, `decision_lineage` (`D74`). Their exact definitions,
 generated SQL, and data contracts now live in their own component,
-`specs/components/graph-query-engine/` (`D44`) — this document keeps
+`specs/components/graph-query-engine/` (`D13`) — this document keeps
 the adoption history below, not a second copy of the SQL.
 
 Two of the six were promoted here from a single component's own
 private definition, by the same rule each time: `component_provenance`
 originally lived only in `corpus-graph-builder`'s spec (`R-GRAPH-009`)
-until `review-packet-builder` (`R-PACKET-011`, D26) needed the exact
+until `review-packet-builder` (`R-PACKET-011`, D13) needed the exact
 same manifest fields; `component_size` lived there too until
-`spec-linter` (`D42`) needed the same word count `rule_size_caps` had
+`spec-linter` (`D13`) needed the same word count `rule_size_caps` had
 been computing independently. A component MAY define additional views
 of its own for data no other component needs, but MUST NOT redefine
 these six — a second real consumer is the signal to promote a local
 view here, not leave two components maintaining their own copies.
 
-None of these six had ever actually been run before `D42`/`D43` found
+None of these six had ever actually been run before `D13` found
 and fixed three real bugs across them — `read_text`'s nonexistent
 `filename:=true` parameter (present in four of `nodes`'s seven
 branches, two of `edges`'s six, and `component_docs`), a missing
@@ -136,12 +136,12 @@ pointing back to this document, exactly as `R-IMPACT-009` does:
   status, sealed/override) and corpus-wide orphan rates (R-GRAPH-004/005)
   are joins and aggregates against `nodes`/`edges`/`component_provenance`/
   `component_size` — all four now shared here, none scoped to this
-  component alone (`D42` promoted the last one). Its JSON-writing role
+  component alone (`D13` promoted the last one). Its JSON-writing role
   is unchanged (R-GRAPH-006/008: `verification/corpus-graph.json` is
   still a committed, deterministic artifact — only the *construction*
   step, not the output format, moves onto this engine).
 - **`spec-linter`'s size-cap rule** (`rule_size_caps`/`R-LINT-012`,
-  `D42`) — `component_doc_words` is this view's `word_count`, queried
+  `D13`) — `component_doc_words` is this view's `word_count`, queried
   directly rather than recomputed by a second, independently-written
   Python loop. The one adopter that actually runs a query against this
   engine via a real `duckdb` dependency, rather than reimplementing
@@ -153,35 +153,35 @@ pointing back to this document, exactly as `R-IMPACT-009` does:
   intersects the blast radius" is a single query against `edges`, not a
   bespoke intersection written once for this call site. This logic
   originally lived in `merge-orchestrator` as `R-MERGE-020`; it moved
-  with the rest of the capability-scenario gate when D25 extracted
+  with the rest of the capability-scenario gate when D14 extracted
   `capability-scenario-verifier` (named `golden-scenario-verifier` at
-  the time; renamed by `D36`) out of `merge-orchestrator` to relieve
+  the time; renamed by `D23`) out of `merge-orchestrator` to relieve
   that component's fan-out/word-count caps.
 - **`review-packet-builder`** (`R-PACKET-011`) — every field it reports
   from `verifier-orchestrator`/`license-scanner`/`secret-scanner` is
   read via `component_provenance` instead of a live call into any of
   them, since `provenance-writer` (which it already depended on)
   already collected all of it. Dropped its `depends_on`
-  from 5 to 1 (D26).
+  from 5 to 1 (D13).
 - **`spec-linter`'s requirement-traceability rules**
   (`rule_forward_traceability`/R-LINT-008, `rule_backward_traceability`/
-  R-LINT-009, `R-LINT-021`, D27) — originally flagged below as a
+  R-LINT-009, `R-LINT-021`, D13) — originally flagged below as a
   distinct, deferred candidate because it appeared to need a second graph
   vocabulary (`R-id`/`AC-id`/`GS-id` nodes — `GS-id` renamed `CS-id` by
-  `D36`). Reading `spec_linter.py`'s actual implementation showed the
+  `D23`). Reading `spec_linter.py`'s actual implementation showed the
   real need is smaller: R-LINT-008 only counts `covers`-edges per
   requirement, R-LINT-009 only validates each edge's *target* against
   `nodes` — neither needs `AC-id`/`CS-id` as addressable nodes for its
-  own check to work. D27 adopted the fuller
+  own check to work. D13 adopted the fuller
   shape anyway (`requirement`/`acceptance`/`capability_scenario` all modeled
   as proper `nodes`, not just the minimum each rule strictly needs), for
   a complete graph rather than one trimmed to today's two consumers.
-- **`spec-bundle-assembler`** (`R-ASSEMBLE-010`, `D35`) — each
+- **`spec-bundle-assembler`** (`R-ASSEMBLE-010`, `D22`) — each
   dependency's `Purpose` text, handed to a dependent as
   `dependency_context`, is read via `component_context` rather than
   reaching into the dependency's `component.md` directly. A narrow,
   explicit exception to `R-ASSEMBLE-002`'s otherwise-correct "never
-  `component.md`" rule, scoped to exactly the one section `D34` made
+  `component.md`" rule, scoped to exactly the one section `D21` made
   dependent-safe by construction.
 
 ## What this document does not cover

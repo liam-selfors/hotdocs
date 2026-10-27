@@ -24,7 +24,7 @@ interface drift check.
 mechanism by its declared `kind`; running the interface drift check;
 aggregating mutation scores; producing one `VerificationReport`.
 
-**Out of scope:** the license/secret scans (separate components, D7/D12);
+**Out of scope:** the license/secret scans (separate components);
 *performing* an `llm-judge` evaluation or *authoring*
 `generated-test` code (this component dispatches to an injectable judge and
 an injectable `test_author` and records their results — it does not itself
@@ -35,7 +35,7 @@ reconsidered here. Giving this component (or `test-author`) the power to
 override that declaration at verification time was considered and
 explicitly rejected: it would make `kind:` advisory rather than normative,
 and would turn this component's own dispatch logic into a judgment call,
-breaking the determinism D13's cache-key validity and R-VERIFY-008's
+breaking the determinism cache-key validity and R-VERIFY-008's
 idempotency claim both depend on.
 
 ## Definitions
@@ -78,6 +78,6 @@ established for `judge`.
 ## Change log
 
 - Initial draft.
-- `D38`: added `failure_detail` (`R-VERIFY-012`) to `criteria[]` for
+- `D27`: added `failure_detail` (`R-VERIFY-012`) to `criteria[]` for
   `compiled`/`generated-test` failures, mirroring `llm-judge`'s
   `rationale`.

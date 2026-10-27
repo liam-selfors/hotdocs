@@ -27,7 +27,7 @@
 
   **Where the pattern database lives:** `VAR-SECRET-PATTERNS-PATH`,
   never `.hotdocs/` — mirroring `license-scanner`'s own
-  `VAR-LICENSE-CORPUS-PATH` fix exactly (`D69`; see `D67` for why
+  `VAR-LICENSE-CORPUS-PATH` fix exactly (`D53`; see `D51` for why
   `.hotdocs/` can never be the real answer for input that determines
   a gate's pass/fail decision). A missing or unreachable database MUST
   still produce a real, recorded result — the entropy heuristic alone

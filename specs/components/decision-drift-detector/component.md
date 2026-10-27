@@ -77,7 +77,7 @@ None.
 
 ## Change log
 
-- Initial draft (`D89`).
-- `D92`/`D93`: `R-DRIFT-001` rewired onto `edges` (decisions became
+- Initial draft (`D75`).
+- `D74`/`D75`: `R-DRIFT-001` rewired onto `edges` (decisions became
   graph-native, `decision_lineage` narrowed); `R-DRIFT-003` added
   pre-ratification impact analysis.

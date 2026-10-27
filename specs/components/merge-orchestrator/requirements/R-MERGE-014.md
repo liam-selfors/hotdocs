@@ -12,11 +12,11 @@
   (R-MERGE-011).
 
   This is the backstop for cross-component behavioral risk that no amount
-  of `interface/`-level diffing can rule out in principle (D16) — a
-  **permanent** gate, not superseded once `interface/guarantees/` (D16)
+  of `interface/`-level diffing can rule out in principle (D2) — a
+  **permanent** gate, not superseded once `interface/guarantees/` (D2)
   makes more of the contract explicit, because documentation of
   foreseeable guarantees can never be complete. The dispatch mechanics
   themselves (capability-intersection lookup, `kind`-based dispatch) are
   `capability-scenario-verifier`'s own job (`R-SCENARIO-001`/`002`,
-  D25) — this requirement is about *when* and *with what* it gets called,
+  D14) — this requirement is about *when* and *with what* it gets called,
   not how it runs.

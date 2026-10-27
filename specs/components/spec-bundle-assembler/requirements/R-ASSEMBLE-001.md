@@ -11,7 +11,7 @@
 
   **"The target's own `component.md`" excludes that file's own
   `## Rationale`, `## Open questions`, and `## Change log` sections**
-  (`D85`, measured: 15-60% of a real component.md's body, depending on
+  (`D69`, measured: 15-60% of a real component.md's body, depending on
   the component). `R-ASSEMBLE-002` already applies "a dependent needs
   the contract, not the internal rationale" to every *dependency* this
   bundle includes; this closes the one place that same principle was

@@ -11,7 +11,7 @@
   itself — not from `.hotdocs/attempts/`, not from any prior merge's
   `TrackingRecord`, not from anything else on disk. The decision to
   retry *with* feedback, and the feedback's content, belongs entirely
-  to the human (or script) initiating this call (`D33`) — reading
+  to the human (or script) initiating this call (`D3`) — reading
   `merge-tracker`'s `last_requirement_failures` (`R-TRACK-008`) to
   decide what to supply is something the caller does *before* calling
   `run_merge`, never something this component reaches for mid-merge.

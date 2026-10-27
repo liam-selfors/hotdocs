@@ -10,11 +10,11 @@ compile_criterion(criterion: ParsedCriterion, surface: InterfaceSurface | None =
 access, no model calls, no side effects beyond writing the files it's
 asked to write. (Previously `compile(acceptance_md: Path, interface_md:
 Path, target: str = "pytest")`, taking two explicit file paths; updated
-for D15's one-file-per-unit layout, where a component's `acceptance/`
+for `D1`'s one-file-per-unit layout, where a component's `acceptance/`
 and `interface/` are directories at known paths given its id, not
 individual files to pass in by hand.)
 
-`compile_criterion` (`R-COMPILE-012`, `D75`) is the lower-level
+`compile_criterion` (`R-COMPILE-012`, `D59`) is the lower-level
 primitive `compile` itself uses for each criterion it finds — exposed
 publicly for a caller compiling criterion content that doesn't live
 under any one component's `acceptance/` directory (e.g.
@@ -27,7 +27,7 @@ against), returns `{"status": "compiled", "source": <text>}` or
 `{"status": "error", "message": <text>}` — never raises, and never
 writes anything to disk itself.
 
-`InterfaceSurface.module_name` (`R-COMPILE-013`, `D79`) is the target
+`InterfaceSurface.module_name` (`R-COMPILE-013`, `D62`) is the target
 component's real importable module name (its underscored slug). Any
 emitted reference to a function or type resolved against the surface
 is qualified with it (`<module_name>.<name>`), and the emitted file

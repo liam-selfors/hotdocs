@@ -23,12 +23,12 @@ per-component: same dispatch mechanisms
 
 ## Rationale
 
-Covers `interface/guarantees/` too (D16) — the same reasoning
-`R-IMPACT-008` already states. Extracted from `merge-orchestrator` (D25)
+Covers `interface/guarantees/` too (`D2`) — the same reasoning
+`R-IMPACT-008` already states. Extracted from `merge-orchestrator` (`D14`)
 once that component's fan-out and spec-bundle-word caps crowded their
-ceilings simultaneously — a signal, D25 concluded, that this dispatch
+ceilings simultaneously — a signal that this dispatch
 logic had its own identity, not merely convenient placement. Renamed
-from "golden-scenario-verifier" (`D36`): "golden" named nothing about
+from "golden-scenario-verifier": "golden" named nothing about
 what this actually is — a capability-level, end-to-end analog of a
 component's own acceptance criteria, exactly mirroring "Acceptance
 Criterion" one scope level up.
@@ -68,7 +68,7 @@ See `interface/data/`.
 
 See `acceptance/`.
 
-All four criteria are `kind: generated-test` (`D59`) — dispatch-and-
+All four criteria are `kind: generated-test` (`D43`) — dispatch-and-
 aggregate logic, tested by mocking the dispatch mechanisms and
 asserting on call arguments/results, the same pattern
 `verifier-orchestrator` already established for coordination logic;
@@ -86,20 +86,20 @@ None — extracted whole from `merge-orchestrator`'s already-resolved
 
 ## Change log
 
-- Initial draft (extracted from `merge-orchestrator`, D25).
+- Initial draft (extracted from `merge-orchestrator`, `D14`).
 - Renamed from `golden-scenario-verifier`; `CapabilityScenarioReport`
   moved to per-scenario granularity with a shared `rationale` field
-  (`D36`).
-- `D75`/`D76`/`D77`/`D78`: first real implementation, via three real
-  `generate()` calls. `D75` added `criterion-compiler`'s
+  (`D23`).
+- `D59`/`D60`/`D61`: first real implementation, via three real
+  `generate()` calls. `D59` added `criterion-compiler`'s
   `compile_criterion` primitive and fixed the real capability-scenario
-  location; `D76` fixed sealed-dependency visibility in
-  `spec-bundle-assembler`; `D77` clarified that `realizes` edges are
+  location; `D60` fixed sealed-dependency visibility in
+  `spec-bundle-assembler`; `D61` clarified that `realizes` edges are
   per-component. A third retry, with all three fixes in place, passed
   all 3 `AC-SCENARIO-*` criteria. `gen/capability-scenario-verifier/
   capability_scenario_verifier.py` is now that candidate. See
   `verification/capability-scenario-verifier/BOOTSTRAP.md`.
-- `D84`: documented, not changed — the real candidate always
+- `D68`: documented, not changed — the real candidate always
   dispatches `generated-test` scenarios fresh, with no cache-file
   pre-check (`R-SCENARIO-001`), found undocumented by a pre-generation
   audit. Not a real inefficiency (`test_author`'s own cache-manager

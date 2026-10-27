@@ -4,6 +4,6 @@
   version constant (`PIPELINE_VERSION`, mirroring `generator`'s
   `PROMPT_VERSION`/`GATE_VERSION` pattern) — bumped whenever this
   component's own manifest-population logic changes meaningfully, never
-  computed from `ProvenanceInputs` or any other input (`D83`, found
+  computed from `ProvenanceInputs` or any other input (`D67`, found
   previously unsourced — `ProvenanceInputs` has no field it could come
   from).

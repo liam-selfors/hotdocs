@@ -10,9 +10,9 @@
   two exact shapes, and silently (by design, fail-to-empty) returns
   nothing for one it can't find there — found only once a real
   candidate chose a `src/` layout instead and would have silently
-  broken `dependency_usage` for every future dependent (`D62`). This
+  broken `dependency_usage` for every future dependent (`D46`). This
   is a cross-cutting output-format instruction the prompt always
-  includes, the same way the nonce-delimiter format is (`D56`) — never
+  includes, the same way the nonce-delimiter format is (`D38`) — never
   bundle content, and so not subject to `R-GEN-001`'s "constructed from
   exactly the bundle's fields" boundary, which governs *content*
   sections, not generator's own fixed scaffolding around them.

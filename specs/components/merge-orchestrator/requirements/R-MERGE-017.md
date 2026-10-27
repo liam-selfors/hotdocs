@@ -7,7 +7,7 @@
   processing of any other impacted component in the same merge attempt.
 
   This resolves the parallelization-mechanism question without forcing a
-  specific answer (rationale: `specs/decisions/D21.md`): whether
+  specific answer (rationale: `specs/decisions/D8.md`): whether
   components are processed sequentially or concurrently
   (R-MERGE-007/008's "MAY run in parallel") stays an implementation
   choice — this requirement constrains the *outcome*, not the

@@ -71,6 +71,6 @@ None. See `verification/spec-linter/BOOTSTRAP.md` for resolved history.
 Full narrative per entry lives in its own `specs/decisions/D<N>.md`.
 
 - Initial draft.
-- `D40`–`D42`: renamed `component_doc_words`; added `R-LINT-026`/`027`.
-- `D44`: rewired onto `graph-query-engine`'s shared views.
-- `D86`–`D92`: added `R-LINT-028`–`030`.
+- Renamed `component_doc_words`; added `R-LINT-026`/`027`.
+- `D13`: rewired onto `graph-query-engine`'s shared views.
+- `D70`–`D74`: added `R-LINT-028`–`030`.

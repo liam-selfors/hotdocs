@@ -10,7 +10,7 @@
   `test_author` for `generated-test`, `judge` for `llm-judge`) — no new
   dispatch machinery.
 
-  **Where a capability's own scenarios live** (`D75`, found missing
+  **Where a capability's own scenarios live** (`D59`, found missing
   from this bundle's own visible text): there is no `specs/capabilities/`
   directory anywhere in this corpus. A `P-<id>`'s capability scenarios
   are `### CS-<id>` sections embedded directly inside that capability's

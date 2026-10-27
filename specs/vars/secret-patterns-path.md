@@ -17,7 +17,7 @@ owners: [pipeline-team]
   `.hotdocs/` (gitignored, local-only, and `SPEC_GUIDELINES.md` §1
   forbids any gate's pass/fail decision from depending on anything
   there — the exact mistake a real generated candidate made for
-  `license-scanner` before this var pattern was established, `D67`).
+  `license-scanner` before this var pattern was established, `D51`).
   Absent means no pattern database is reachable; the scanner MUST
   still produce a real, recorded result (a clean one for the pattern-
   database-driven checks; entropy-based detection, which needs no

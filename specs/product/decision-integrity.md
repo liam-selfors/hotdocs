@@ -13,7 +13,7 @@ A decision record can be superseded by a later one, and a live spec
 file citing the superseded decision can go stale — still reflecting a
 conclusion the corpus itself has since reversed. The corpus can tell
 a developer which citations are candidates for that, so staleness is
-discoverable rather than silently accumulating (`D87`–`D89`).
+discoverable rather than silently accumulating (`D71`, `D75`).
 
 ## Scope
 

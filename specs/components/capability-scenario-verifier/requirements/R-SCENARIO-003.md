@@ -1,7 +1,7 @@
 # R-SCENARIO-003
 
 **R-SCENARIO-003** — **The `bundle` passed to `judge`/`test_author`**
-  (`D82`, found missing from this bundle's own visible text) MUST be
+  (`D65`, found missing from this bundle's own visible text) MUST be
   `{capability_id, scenario_id, covers, kind, gherkin, file}` — never
   a single component's `CriterionBundle`, since no one component owns
   a cross-component capability scenario. See the glossary's "Injected
@@ -11,7 +11,7 @@
 
   **`generated-test`-kind capability scenarios are ALWAYS dispatched
   fresh to `test_author`, never pre-checked against a cache file
-  first** (`D84`, a deliberate choice, found previously unstated):
+  first** (`D68`, a deliberate choice, found previously unstated):
   unlike `verifier-orchestrator`'s `R-VERIFY-002`, there is no
   `verification/<component>/` to anchor a cache-file path to — a
   capability scenario spans the whole assembled system, not one

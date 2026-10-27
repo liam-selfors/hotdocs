@@ -20,7 +20,7 @@ submitted to the real merge pipeline.
 
 ## Rationale
 
-The assist agent D1 describes but never names. This is the component
+The assist agent the original brainstorm describes but never names. This is the component
 `notes/metrics.md` already assumes exists (its "Completeness-agent
 confidence" and "Assist-agent acceptance rate" metrics predate this
 spec) but that, until now, had never actually been specced.
@@ -36,7 +36,7 @@ component's output is advisory only — it is never in `merge-orchestrator`'s
 dependency list, and it has no mechanism to block a merge. The actual gates
 (`spec-linter` at hard-fail severity, `verifier-orchestrator`, the
 compliance scans) are the only things that can do that; this component
-exists entirely on the feature-branch side of D1's cold-vs-hint split,
+exists entirely on the feature-branch side of the cold-vs-hint split,
 never the merge side. Also out of scope: **re-deciding anything a ratified
 spec already declares** — same boundary `verifier-orchestrator`/
 `test-author` observe for a criterion's `kind:`. This component may
@@ -69,8 +69,8 @@ checks), but R-ASSIST-004/005 — this component's actual reason to exist —
 are `llm-judge`. Unlike every coordination component specced so far
 (`verifier-orchestrator`, `merge-orchestrator`), this one's core value
 genuinely *is* judgment, not dispatch around it — a useful contrast case
-for D5's guidance rather than
-another confirmation of "prefer compiled."
+against the corpus's usual "prefer compiled" guidance rather than
+another confirmation of it.
 
 ## Non-functional constraints
 
@@ -83,5 +83,5 @@ None.
 ## Change log
 
 - Initial draft.
-- `D38`: defined `redundancy_flags`' populated-entry shape
+- `D28`: defined `redundancy_flags`' populated-entry shape
   (`{new_requirement, overlaps_with, rationale}`, `R-ASSIST-005`).

@@ -5,11 +5,11 @@
   `guarantee`, `requirement`, `acceptance`, `capability_scenario`),
   reading under the data contracts `SPEC_GUIDELINES.md` §2
   (frontmatter: `component`/`capability`/`var`/`decision` kinds) and
-  §3.4/D15 (unit-file-per-id: `guarantee`/`requirement`/`acceptance`
+  §3.4/D1 (unit-file-per-id: `guarantee`/`requirement`/`acceptance`
   kinds carry no frontmatter, identity is the filename) and §5
   (capability scenarios are `### CS-...` headings inside a product
   capability file, not a file of their own). `decision` rows are safe
-  via `read_yaml_frontmatter` despite `D44`'s sparse-column gotcha —
+  via `read_yaml_frontmatter` despite `D13`'s sparse-column gotcha —
   `id`/`title`/`status` are unconditionally required on every decision
   record, never absent corpus-wide the way `supersedes`/`builds_on`
   are (`R-GQE-002` extracts those via `read_text` + regex instead, for
@@ -51,7 +51,7 @@ FROM read_text('{repo_root}/specs/product/*.md');
   `{repo_root}` MUST be substituted with the caller's absolute repo
   root before execution (`R-GQE-007`) — this view's SQL is not valid on
   its own. `read_text` MUST NOT be called with `filename:=true` — it
-  has no such parameter and errors if given one (`D43`); it already
+  has no such parameter and errors if given one; it already
   returns `filename` unconditionally. `owner_component_id` MUST be
   `NULL` for `capability_scenario` rows — their parent is a capability,
   not a component; the `covers` edge (`R-GQE-002`) carries that

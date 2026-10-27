@@ -17,7 +17,7 @@
   tolerates this natively — confirmed by hand, not assumed): a corpus
   legitimately has no `specs/vars/*.md` or `specs/product/*.md` files
   yet in some states (`graph-query-engine`'s own sparse test fixtures,
-  `spec-linter`'s, D44), and that is expected state, not an error, the
+  `spec-linter`'s, `D13`), and that is expected state, not an error, the
   same posture `R-GQE-005` already requires for zero `.provenance.json`
   files. `load_views` MUST pre-check each such glob and substitute a
   typed, always-empty relation for that one call site when it has zero

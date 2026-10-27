@@ -13,7 +13,7 @@
   rules.
 
   This fallback is correctness-neutral regardless of project size: since
-  `D39`, a `cache-manager` hit or miss only ever affects whether a model
+  `D30`, a `cache-manager` hit or miss only ever affects whether a model
   gets called again, never whether verification is skipped (that
   question moved to `provenance-checker`, which never consults this
   store) — so a local-only backing carries no risk beyond its own

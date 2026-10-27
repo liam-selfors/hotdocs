@@ -11,8 +11,8 @@
   `nodes`/`edges`/`component_provenance`/`component_size`, all four
   named in `specs/architecture/graph-query-engine.md`'s "Query surface"
   section — `component_provenance` is shared with `review-packet-builder`
-  (R-PACKET-011, D26), `component_size` with `spec-linter`'s own
-  `rule_size_caps` (`R-LINT-012`, `D42`). Neither is redefined here;
+  (R-PACKET-011, `D13`), `component_size` with `spec-linter`'s own
+  `rule_size_caps` (`R-LINT-012`, `D13`). Neither is redefined here;
   this component MUST query the shared view, not maintain its own copy
   of either.
 

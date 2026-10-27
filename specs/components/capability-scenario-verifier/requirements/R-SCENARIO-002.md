@@ -9,7 +9,7 @@
   `R-SCENARIO-001`'s behavior is unchanged.
 
   **`realizes` edges are declared per-component, never per-capability**
-  (`D77`, found wrong twice in a row without this): the `realizes:`
+  (`D61`, found wrong twice in a row without this): the `realizes:`
   frontmatter field lives on a *component's* own `component.md` (e.g.
   `specs/components/cache-manager/component.md`'s `realizes:
   [P-ZERO-EDIT]`), naming the capabilities that component realizes —

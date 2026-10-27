@@ -11,5 +11,5 @@
   trusts some of a manifest's fields while re-deriving others; the one
   piece of nuance that kind of split would require (which specific
   criteria to trust) is exactly the complexity this component is
-  deliberately not taking on, per D18/D20's precedent against building
+  deliberately not taking on, per D4/D6's precedent against building
   machinery nothing has asked for yet.

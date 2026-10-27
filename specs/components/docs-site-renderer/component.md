@@ -18,7 +18,7 @@ computed, nothing more.
 
 ## Rationale
 
-D9 is the product decision describing the explorer this renders.
+The graph/docs explorer this renders was established as a product decision early on.
 
 ## Scope
 
@@ -51,7 +51,7 @@ rendered site.
 
 See `acceptance/`.
 
-All six criteria are `kind: generated-test` (`D59`) — rendering
+All six criteria are `kind: generated-test` (`D43`) — rendering
 already-computed data is pure, deterministic templating that needs no
 model or judgment, but none are actually written in the step-phrase
 grammar, so `kind: compiled` would not describe how they're really
@@ -68,7 +68,7 @@ None.
 ## Change log
 
 - Initial draft.
-- `D71`: first real implementation, passed all 6 `AC-DOCS-*` criteria
+- `D55`: first real implementation, passed all 6 `AC-DOCS-*` criteria
   on the first real `generate()` attempt. Found `.gitignore` had no
   `/dist/` entry at all — fixed there, not in this component's own
   (already-correct) code. See `verification/docs-site-renderer/

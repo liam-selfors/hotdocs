@@ -30,7 +30,7 @@ model sees not just a dependency's contract but what it's for.
 
 ## Rationale
 
-The cold-vs-hint split traces to D1.
+The cold-vs-hint split traces to the original brainstorm.
 
 **Out of scope:** calling any model (`generator`'s job); deciding *whether*
 to regenerate (`impact-analyzer`'s job); verifying anything.
@@ -82,22 +82,22 @@ See `constraints.md`.
 ## Change log
 
 - Initial draft.
-- `D49`: first real `gen/spec-bundle-assembler/` implementation — a
+- First real `gen/spec-bundle-assembler/` implementation — a
   hand-authored bootstrap exception, temporary like `cache-manager`.
   `depends_on` gained `comp-graph-query-engine` (R-ASSEMBLE-010 already
   required reading dependency `Purpose` text via its `component_context`
   view; the dependency was never declared).
-- `D55`: `R-ASSEMBLE-011` — `dependency_usage`, a new, third
+- `D37`: `R-ASSEMBLE-011` — `dependency_usage`, a new, third
   `dependency_*` field, mechanically introspected from a dependency's
   real `gen/` code (never its spec), the one-directional fix for
-  `D54`'s import-path failure.
-- `D76`: `_dependency_usage` now checks a sealed dependency's declared
+  `D46`'s import-path failure.
+- `D60`: `_dependency_usage` now checks a sealed dependency's declared
   `source_path` before falling back to `gen/<dependency>/` — every
   sealed dependency's usage card had been silently degrading to empty,
   indistinguishable from "no real code yet," found only once a real
   dependent needed real usage info for `criterion-compiler` for the
   first time.
-- `D85`: `R-ASSEMBLE-001` now excludes the target's own `## Rationale`/
+- `D69`: `R-ASSEMBLE-001` now excludes the target's own `## Rationale`/
   `## Open questions`/`## Change log` — the same "contract, not
   rationale" principle `R-ASSEMBLE-002` already applied to every
   dependency, found (via a prompt-efficiency audit) never applied to

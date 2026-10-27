@@ -10,7 +10,7 @@
 - **No gate skipped silently.** A provenance hit (R-MERGE-003) skips real
   work, but MUST be visible in `MergeResult` and the review packet.
 - **This component's own fan-out (15) is accepted, not a defect** — see
-  `D25` and `pipeline-decomposition.md`'s dedicated note.
+  `D15` and `pipeline-decomposition.md`'s dedicated note.
 - **Capability-scenario failure is its own result category, never
   conflated with a component's own verification result** (R-MERGE-014,
   `CapabilityScenarioReport`) — a cross-component finding and a

@@ -17,9 +17,4 @@ Given a decision record with status: deprecated that no other real
   decision's supersedes field names
 When the linter runs
 Then that record gets an R-LINT-029 finding
-
-Given a decision record with supersedes: D5 (inside the frozen D1-D14
-  range)
-When the linter runs
-Then no R-LINT-029 finding fires for that citation
 ```

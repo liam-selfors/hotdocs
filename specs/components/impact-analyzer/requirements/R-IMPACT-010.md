@@ -17,4 +17,4 @@
   own id shape, which can never work since every real caller (every
   `AC-IMPACT-*` criterion, `merge-orchestrator`'s `R-MERGE-002`) only
   ever supplies component-level ids, never a finer-grained one
-  (`D64`).
+  (`D48`).

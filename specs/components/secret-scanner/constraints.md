@@ -2,7 +2,7 @@
 
 - **Determinism (full-scan form).** Same corpus content and pattern
   database version MUST always produce the same result — required for
-  cache-key correctness (D13).
+  cache-key correctness (`D30`).
 - **No model calls.** Pure pattern/entropy matching.
 - **Never silent.** Per R-SECRET-003/009 — a clean result is recorded with
   the same rigor as a flagged one, and history is never collapsed to just

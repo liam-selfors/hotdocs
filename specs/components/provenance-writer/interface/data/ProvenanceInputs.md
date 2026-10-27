@@ -27,7 +27,7 @@ never reached verification, not only for one that did.
 
 `license_scan_result`/`secret_scan_result` are always populated
 regardless of generation outcome — both scans run unconditionally
-(`R-MERGE-008`, D7/D12) and don't depend on `generation_result` having
+(`R-MERGE-008`) and don't depend on `generation_result` having
 succeeded. This bundle previously listed a `cross_model_check` field
 (`CrossCheckResult` or `None`) from when `cross-model-divergence-checker`
 existed; removed along with that component (the second-model scope cut) —

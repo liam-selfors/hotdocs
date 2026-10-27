@@ -14,7 +14,7 @@ split.
   stripped) is the directory name used everywhere a path is built from
   it — `specs/components/<slug>/`, `gen/<slug>/`,
   `verification/<slug>/` — never the full `comp-<slug>` id. This was
-  never written down anywhere before `D61`, despite being load-bearing
+  never written down anywhere before `D45`, despite being load-bearing
   for every component that resolves a `gen/<component>/`-shaped path
   from a `component_id` it was handed — each one independently
   reimplemented the same strip-the-prefix logic, and a real generated
@@ -24,12 +24,12 @@ split.
   needs for one component: `component.md` + `requirements/` + `interface/` +
   `constraints.md` + depended-upon components' `interface/` directories +
   referenced `specs/vars/` declarations + `glossary.md` (deliberately
-  excluding `acceptance/`, to avoid overfitting to its own tests — D15).
+  excluding `acceptance/`, to avoid overfitting to its own tests — D1).
 - **Unit file** — a file under a component's `requirements/`, `interface/`
   (including `interface/data/`), or `acceptance/` directory, holding exactly
   one addressable thing (one requirement, one interface section, one
   criterion), identified by its filename, with no frontmatter of its own
-  (D15).
+  (D1).
 - **Blast radius** — the minimal set of components `impact-analyzer`
   determines need regeneration/re-verification for a given spec change.
 - **Gate** — one verification step in the pipeline (lint, a `kind`-specific
@@ -37,9 +37,9 @@ split.
   merge requires every applicable gate to pass.
 - **Cache hit** — a merge whose spec bundle hash exactly matches an
   already-verified prior state; restores prior artifacts instead of
-  re-running gates (D11).
+  re-running gates.
 - **Provenance manifest** — the `.provenance.json` file recording exactly how
-  a generated artifact was produced (D7).
+  a generated artifact was produced.
 - **Sealed component** — a component explicitly exempted from the cold-regen
   invariant, with its real code at `source_path` instead of under `gen/`.
   Used both for legacy code being wrapped and for permanently-hand-maintained
@@ -57,18 +57,18 @@ split.
   dependent that must *check for* a `generated-test` file before
   deciding whether to dispatch to `test_author` (`R-VERIFY-002`), is
   the first consumer, and this was never written down anywhere as a
-  shared contract before `D80` — two independent real candidates each
+  shared contract before `D63` — two independent real candidates each
   invented a different, incompatible filename/location scheme for the
   same check, since nothing bundle-visible stated the formula as a
   rule rather than one illustrative JSON example.
-- **Injected `judge`/`test_author` callable shape** (`D82`) — the
+- **Injected `judge`/`test_author` callable shape** (`D65`) — the
   single-argument convention a dependent (`verifier-orchestrator`,
   `capability-scenario-verifier`) calls these two injectable callables
   with: `judge(bundle) -> outcome` and `test_author(bundle) -> outcome`.
   `outcome` is read duck-typed, never required to be one exact type,
   confirmed by `capability-scenario-verifier`'s real code
   (`gen/capability-scenario-verifier/`, the only one of the two
-  actually built as of `D82`): for `judge`, a dict with a `result` or
+  actually built as of `D65`): for `judge`, a dict with a `result` or
   `verdict` key (plus optional `rationale`), or a bare scalar treated
   as the result directly; for `test_author`, a dict with
   `model_call_error`/`file` keys, or an object with those same
@@ -85,7 +85,7 @@ split.
   applies to a capability scenario), passes a narrower, purpose-built
   dict instead: `{capability_id, scenario_id, covers, kind, gherkin,
   file}` (its own `_bundle_for_scenario`, not yet named in any
-  bundle-visible spec file before `D82`).
+  bundle-visible spec file before `D65`).
 
   This is **not** the same pattern as `spec-linter`'s own `judge`
   parameter (`R-LINT-015`) — that one is a narrow, task-specific
@@ -93,7 +93,7 @@ split.
   str] | None`, unrelated in shape. An earlier version of
   `verifier-orchestrator`'s and `capability-scenario-verifier`'s own
   `interface/library.md` text incorrectly claimed the two were "the
-  same pattern" — corrected in `D82`, which found it had no basis in
+  same pattern" — corrected in `D65`, which found it had no basis in
   either component's real code.
 
   Neither `llm-endpoint.complete()` nor `test-author.author_test()` —
@@ -103,4 +103,4 @@ split.
   closure (`merge-orchestrator`, `R-MERGE-004`/`014`) must capture
   `model`/`llm_backend` itself and expose only the single-`bundle`-arg
   shape outward — this was never stated as a requirement anywhere
-  before `D82`.
+  before `D65`.

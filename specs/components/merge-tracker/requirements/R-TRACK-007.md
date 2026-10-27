@@ -9,8 +9,8 @@
   `write_tracking_record` already uses, extended to per-component detail
   instead of merge-level facts).
 
-  Written for both outcomes, success and failure — `D32` closes the gap
-  `D31` opened: a blocked merge commits no provenance at all
+  Written for both outcomes, success and failure — `D19` closes the gap
+  `D3` opened: a blocked merge commits no provenance at all
   (`R-MERGE-012`), so without this, a failed attempt's full diagnostic
   detail (why, not just that) would exist only in `merge-orchestrator`'s
   process memory for the duration of one merge, then vanish. This is a

@@ -1,12 +1,11 @@
 # R-GQE-008
 
 **R-GQE-008** — The `decision_lineage` view MUST return one row per
-  decision record: `id` and `last_ratified_commit` only (`D92`,
-  narrowed from an earlier five-column design, `D88` — `status`/
-  `supersedes`/`builds_on` moved into `nodes`/`edges` directly, the
-  single canonical home for anything graph-shaped; `last_ratified_commit`
-  has no equivalent column there and stays here, the one fact only
-  decision records carry):
+  decision record: `id` and `last_ratified_commit` only (`D74`) —
+  `status`/`supersedes`/`builds_on` live in `nodes`/`edges` directly,
+  the single canonical home for anything graph-shaped;
+  `last_ratified_commit` has no equivalent column there and stays
+  here, the one fact only decision records carry:
 
 ```sql
 CREATE OR REPLACE VIEW decision_lineage AS

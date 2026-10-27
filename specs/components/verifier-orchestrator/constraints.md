@@ -16,6 +16,6 @@
   005/010) is load-bearing for the multi-model coverage metric
   (`notes/metrics.md`) and must survive every aggregation step.
 - **Performance.** `compiled` and `generated-test` checks, together, SHOULD
-  complete in a time proportional to the component's own size caps (D2) —
+  complete in a time proportional to the component's own size caps (`D17`) —
   not independently bounded here, since it inherits whatever cost the
   underlying test execution has; no new budget is being set.

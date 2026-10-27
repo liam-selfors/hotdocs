@@ -1,8 +1,8 @@
 # Merge Tracker UI — Non-Functional Constraints
 
 - **No backend computation.** Static page, DuckDB-WASM in the browser —
-  same posture `docs-site-renderer` already established (D9), applied
-  here to a different data source. **Clarified by R-UI-006 (D26):** the
+  same posture `docs-site-renderer` already established, applied
+  here to a different data source. **Clarified by R-UI-006 (D16):** the
   local static-file server `serve` starts is not an exception to this —
   it serves literal file bytes only, computes nothing, and DuckDB-WASM
   still performs the actual query entirely client-side. This constraint

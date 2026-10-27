@@ -23,8 +23,8 @@ spec-authoring time); this component decides *how* to author one.
 
 ## Rationale
 
-The "independent generation path" D4/D5 require for that `kind` to be
-trustworthy. The injectable-callable invocation pattern mirrors the one
+The "independent generation path" a `generated-test` criterion requires
+for that `kind` to be trustworthy. The injectable-callable invocation pattern mirrors the one
 already established for `llm-judge`'s `judge` parameter.
 
 ## Scope
@@ -40,7 +40,7 @@ by `verifier-orchestrator` at verification time. This boundary was the
 explicit resolution of a design discussion about this component: giving it,
 or `verifier-orchestrator`, the power to override a ratified spec's declared
 `kind` would make that declaration advisory rather than normative, and would
-break `verifier-orchestrator`'s determinism (and therefore D13's cache-key
+break `verifier-orchestrator`'s determinism (and therefore cache-key
 validity) by folding a judgment call into what must stay pure dispatch.
 
 ## Definitions
@@ -63,7 +63,7 @@ See `interface/data/`.
 
 See `acceptance/`.
 
-All `kind: generated-test` (`D59`) — behavior around the external
+All `kind: generated-test` (`D43`) — behavior around the external
 model call is exercised via an injected mock model, same pattern
 `generator`'s own suite already established; `R-AUTHOR-002`/`006`'s
 pure path/data-safety checks need no model either, but none of these
@@ -81,8 +81,8 @@ None.
 ## Change log
 
 - Initial draft.
-- `D72`/`D73`/`D74`: first real implementation. `D72` fixed
-  `gate_version`'s required prefix; `D73` added the missing
+- `D56`/`D57`/`D58`: first real implementation. `D56` fixed
+  `gate_version`'s required prefix; `D57` added the missing
   `llm_backend` parameter to `interface/library.md`. A fourth real
   `generate()` call, with both in place, passed all 8 `AC-AUTHOR-*`
   criteria. `gen/test-author/test_author.py` is now that candidate.

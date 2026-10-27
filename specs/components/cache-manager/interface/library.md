@@ -10,7 +10,7 @@ backing-store error — it returns `Miss` (R-CACHE-004). `put` raises a
 schema-validation error (not a silent no-op) if `result`'s shape doesn't
 match what `cache_key.gate_version`'s gate type expects (R-CACHE-007).
 
-`repo_root` (added `D48`, the same pre-existing-gap pattern
+`repo_root` (added `D30`, the same pre-existing-gap pattern
 `llm-endpoint`'s `backend` parameter and `provenance-writer`'s
 `ProvenanceInputs` each already were) — resolves which repository's
 `.hotdocs/cache/` the local fallback (`R-CACHE-009`) reads/writes.

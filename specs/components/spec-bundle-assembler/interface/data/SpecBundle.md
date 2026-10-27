@@ -19,14 +19,14 @@
 `hint_code` is `null` in `cold` mode; in `hint` mode it holds the component's
 current `gen/<component>/` file contents, keyed by relative path.
 
-`dependency_context` (R-ASSEMBLE-010, D35) is deliberately a separate
+`dependency_context` (R-ASSEMBLE-010, D22) is deliberately a separate
 field from `dependency_interfaces`, not a richer shape for the same
 one — `dependency_interfaces` stays exactly what R-ASSEMBLE-002 already
 defines it as (the contract), and `dependency_context` is the one
 narrow exception on top of it (the dependency's `Purpose` text only).
 Keyed the same way, by `component_id`, for every id in `depends_on`.
 
-`dependency_usage` (R-ASSEMBLE-011, `D55`) is a third, independent field
+`dependency_usage` (R-ASSEMBLE-011, `D37`) is a third, independent field
 alongside the two above — mechanically introspected from a dependency's
 real `gen/<dependency>/` code (never from its spec, the reverse of every
 other `dependency_*` field), empty for a dependency with no real code

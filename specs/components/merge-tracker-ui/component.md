@@ -21,8 +21,8 @@ machine's tracking history, not a published site.
 ## Rationale
 
 `docs-site-renderer`'s output is a **CI build artifact**, published
-somewhere shared, rendering **committed** corpus state (D9). This
-component's data is **local-only, gitignored, per-developer** (D22) —
+somewhere shared, rendering **committed** corpus state. This
+component's data is **local-only, gitignored, per-developer** (D10) —
 it cannot be a CI artifact, because CI has no `.hotdocs/` to render.
 
 ## Scope
@@ -85,7 +85,7 @@ See `constraints.md`.
 - ~~Whether this component should eventually consume
   `specs/architecture/graph-query-engine.md`'s corpus graph too..., making
   this and `docs-site-renderer` converge into one UI...~~ — resolved
-  (`D37`): staying separate, by decision rather than by default. The
+  (`D10`): staying separate, by decision rather than by default. The
   Scope section above already rules this out ("any read of `specs/`,
   `corpus-graph.json`, or anything else committed" is out of scope) for
   the reason restated here: committed, CI-rendered data and local,
@@ -97,7 +97,7 @@ See `constraints.md`.
 ## Change log
 
 - Initial draft.
-- `D37`: closed the `docs-site-renderer` convergence question — staying
+- `D10`: closed the `docs-site-renderer` convergence question — staying
   separate is the decision, not a deferral.
-- `D39`: "cache hit" renamed "provenance hit" (`R-UI-002`), following
+- `D29`: "cache hit" renamed "provenance hit" (`R-UI-002`), following
   `TrackingRecord`'s own field rename.

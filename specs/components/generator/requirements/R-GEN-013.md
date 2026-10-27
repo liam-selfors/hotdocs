@@ -1,7 +1,7 @@
 # R-GEN-013
 
 **R-GEN-013** — When the bundle's `dependency_usage` field
-  (`R-ASSEMBLE-011`, `D55`) is non-empty for a dependency, the model
+  (`R-ASSEMBLE-011`, `D37`) is non-empty for a dependency, the model
   call MUST include it as its own clearly distinguished section —
   never merged with `dependency_interfaces`, never treated as
   equivalent to `acceptance/` content (it names real, importable

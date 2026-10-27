@@ -11,7 +11,7 @@ One subdirectory per component, flat namespace, no nesting:
     library.md
     data/           # one schema/type per file
   acceptance/       # one AC-id per file
-  constraints.md    # non-functional requirements — stays one file (D15)
+  constraints.md    # non-functional requirements — stays one file (D1)
 ```
 
 See `SPEC_GUIDELINES.md` §3.4 (anatomy) and §4 (sizing / when to split).
@@ -20,31 +20,32 @@ Specced in full depth so far:
 
 - **`spec-linter`** — the first one, deliberately: a component whose entire
   acceptance criteria set is `kind: compiled` except one deliberate
-  `llm-judge` exception (R-LINT-015), as a concrete test of D5's own
-  guidance. One of four components with a real implementation
+  `llm-judge` exception (R-LINT-015), as a concrete test of the
+  compiled-criterion trust argument's own guidance. One of four components
+  with a real implementation
   (`gen/spec-linter/` + `verification/spec-linter/`) — this one,
-  `graph-query-engine` (`D44`), and `llm-endpoint` (`D47`) hand-authored
+  `graph-query-engine` (`D13`), and `llm-endpoint` (`D33`) hand-authored
   once each, standing in for the `generator`/`criterion-compiler` this
   pipeline didn't have yet when the first two were built (`llm-endpoint`
   is a structurally permanent exception instead, not a temporary one —
-  see its own entry); `corpus-graph-builder` (`D45`) is the first to
+  see its own entry); `corpus-graph-builder` is the first to
   actually be produced by a real generation step instead, once a working
   stand-in for that pipeline existed. See
   `verification/spec-linter/BOOTSTRAP.md`.
   Grew well past its original scope as this corpus grew: its own graph-shaped
   rules (reference resolution, acyclicity, both traceability directions) now
   actually run as queries over `graph-query-engine`'s shared `nodes`/`edges`
-  views (`R-LINT-020`/`021`, D24/D27, real as of `D44` — previously claimed
+  views (`R-LINT-020`/`021`, real as of `D13` — previously claimed
   but never actually implemented) rather than bespoke traversal code, and it
   now also enforces `SPEC_GUIDELINES.md` §4's own decomposition-signal
-  guidance as a real finding (`R-LINT-022`, D28) plus three additional
+  guidance as a real finding (`R-LINT-022`, D15) plus three additional
   size-cap dimensions (`R-LINT-023`, `guarantee_count`, `acceptance_count`,
-  D29) — it is, by its own `R-LINT-022`, now one of the two components in
+  D17) — it is, by its own `R-LINT-022`, now one of the two components in
   this corpus actually crowding multiple size-cap dimensions at once.
 - **`graph-query-engine`** — all `kind: compiled`. Extracted from
-  `specs/architecture/graph-query-engine.md`'s own prose (`D44`) once that
+  `specs/architecture/graph-query-engine.md`'s own prose (`D13`) once that
   document's embedded SQL stopped being documentation and started being an
-  unverified implementation nobody had ever run — `D42`/`D43` found three
+  unverified implementation nobody had ever run — `D13` found three
   of its six views broken. Generates the six shared views
   (`nodes`/`edges`/`component_docs`/`component_context`/
   `component_provenance`/`component_size`) as a real `gen/graph-query-engine/
@@ -54,17 +55,17 @@ Specced in full depth so far:
   before `llm-endpoint`),
   the same honest exception `spec-linter` already established.
 - **`impact-analyzer`** — all `kind: compiled`. Pins down, as an executable
-  rule for the first time, the interface-vs-internal-change distinction D2
-  only ever stated as a sizing heuristic. Since D16, also computes a
+  rule for the first time, the interface-vs-internal-change distinction
+  was previously only ever stated as a sizing heuristic. Since D2, also computes a
   narrowed blast radius for behavioral guarantees specifically (opt-in via
   `depends_on_guarantees`) — types stay coarse and always propagate,
   guarantees can be precisely scoped per dependent.
 - **`cache-manager`** — all `kind: compiled`. Fail-closed on backing-store
-  errors (the D10 "tool must keep working" posture, applied to a new
-  subsystem). Since D16, exposes `interface/guarantees/G-CACHE-001.md` —
+  errors (the "tool must keep working" posture, applied to a new
+  subsystem). Since D2, exposes `interface/guarantees/G-CACHE-001.md` —
   the worked example behind the whole guarantee/narrowing mechanism, with
   `generator` as the real component declaring
-  `depends_on_guarantees: [G-CACHE-001]` against it. Since D39,
+  `depends_on_guarantees: [G-CACHE-001]` against it. Since D30,
   `VAR-CACHE-STORE-URL` is optional — a local `.hotdocs/cache/` fallback
   keeps this component's cost-avoidance benefit available even with no
   shared store configured — and this component no longer has any role
@@ -73,8 +74,9 @@ Specced in full depth so far:
   was being asked a question its own data could never answer.
 - **`criterion-compiler`** — the `sealed: true` component, all `kind:
   generated-test`. The one piece of this pipeline that is permanently
-  hand-maintained by design, never agent-generated (D5's circularity
-  argument: the compiler can't be the thing that verifies itself). Its
+  hand-maintained by design, never agent-generated (the compiled-criterion
+  trust argument's circularity point: the compiler can't be the thing that
+  verifies itself). Its
   parse+bind phase (grammar matching, `interface/` resolution) is formally
   target-independent (R-COMPILE-011); v1 ships one emitter (`pytest`), with
   any other `--target` rejected as a usage error rather than silently
@@ -85,7 +87,7 @@ Specced in full depth so far:
 - **`generator`** — the first component whose job genuinely requires a
   model call; mostly `kind: generated-test` (tested via an injected mock
   model), one `compiled` path-safety check. Single-shot by design, called
-  at most once per component per merge attempt — since `D31` retired
+  at most once per component per merge attempt — since `D3` retired
   `merge-orchestrator`'s best-of-k retry loop, there is no second call to
   make within one merge at all, not just no retry loop living here.
 - **`test-author`** — the second component whose job genuinely requires a
@@ -115,9 +117,9 @@ Specced in full depth so far:
   gate's already-produced result into one manifest; never invents a field.
   Found and fixed a real gap in `SPEC_GUIDELINES.md` §7's schema (a missing
   `secret_scan` field, even though `gate_versions` already expected a
-  `secret_scanner` entry) and gave D11's "provenance hit copies the prior
+  `secret_scanner` entry) and gave the "provenance hit copies the prior
   manifest forward" claim its first concrete mechanism.
-- **`provenance-checker`** — all `kind: compiled`. Extracted by D39 once
+- **`provenance-checker`** — all `kind: compiled`. Extracted by D29 once
   a real correctness gap surfaced: `merge-orchestrator` was treating any
   `cache-manager` hit as grounds to skip a non-sealed component's
   verification entirely, but `cache-manager` never recorded whether a
@@ -136,16 +138,16 @@ Specced in full depth so far:
   computed results; deliberately never includes the generated-code diff
   itself (principle 6). Originally depended directly on
   `verifier-orchestrator`/`license-scanner`/`secret-scanner`/
-  `cache-manager` for that data; since D26, reads all of it from
+  `cache-manager` for that data; since D13, reads all of it from
   `provenance-writer`'s already-written manifest via the shared
   `component_provenance` view instead — `depends_on` dropped from 5 to 1.
 - **`corpus-graph-builder`** — all `kind: compiled`. The single source of
-  the `corpus-graph.json` manifest D8's traceability matrix and D9's
+  the `corpus-graph.json` manifest the traceability matrix and
   docs-site-renderer both read — neither recomputes any part of it.
   **The first component in this corpus whose `gen/` code was actually
-  produced by a generation step** (`D45`), not hand-written: a real model
+  produced by a generation step**, not hand-written: a real model
   call, dispatched through a Claude Code subagent standing in for
-  `llm-endpoint` (no real one existed yet at the time — `D47` built one
+  `llm-endpoint` (no real one existed yet at the time — `D33` built one
   shortly after, see its own entry below), constructed from exactly this
   component's assembled `SpecBundle` and nothing else — the same
   cold-mode purity `R-GEN-001` requires of the real `generator`. Verified
@@ -158,18 +160,18 @@ Specced in full depth so far:
   materialize — invisible until a real `.provenance.json` existed to
   query (`R-GQE-005`).
 - **`docs-site-renderer`** — all `kind: compiled`. A pure function of
-  `corpus-graph.json`; its output is deliberately never committed (D9).
+  `corpus-graph.json`; its output is deliberately never committed.
 - **`merge-tracker`** — all `kind: compiled`. Writes one local-only,
   gitignored record per merge attempt — success or block — directly
-  queryable via DuckDB's `read_json`, no bespoke query layer (D22).
+  queryable via DuckDB's `read_json`, no bespoke query layer (D10).
   Depends only on `provenance-writer`, not `merge-orchestrator`, despite
   being called by it — reads already-written manifests from disk instead
   of depending on `merge-orchestrator`'s own `MergeResult` type, the same
   "need the caller's facts without depending on the caller" pattern
   `review-packet-builder` already established, used here specifically to
-  avoid a dependency cycle. Since D32, also writes a separate,
+  avoid a dependency cycle. Since D19, also writes a separate,
   full-detail `AttemptRecord` per component per merge attempt to
-  `.hotdocs/attempts/` — closing the gap D31's retired best-of-k loop
+  `.hotdocs/attempts/` — closing the gap D3's retired best-of-k loop
   opened (a blocked merge commits no provenance at all).
 - **`merge-tracker-ui`** — mostly `kind: compiled` (rendering is a pure
   function of already-written `TrackingRecord` data), one `generated-test`
@@ -182,88 +184,89 @@ Specced in full depth so far:
   component to wire up beyond showing status clearly.
 - **`merge-orchestrator`** — all `kind: compiled`, despite sequencing every
   model-calling, judgment-involving gate in the whole pipeline. Called
-  `generator` up to `k` times per component via a diagnostic-guided
-  best-of-k retry loop (D3/D17) until D31 retired that loop entirely —
+  `generator` up to `k` times per component via the old diagnostic-guided
+  best-of-k retry loop until it was retired (D3) entirely —
   now calls it exactly once per component per merge attempt, blocking
   immediately on failure rather than retrying with feedback; a human
-  reviewing D32's per-attempt record and re-running the merge is the
+  reviewing D19's per-attempt record and re-running the merge is the
   only recovery path left. Wires the real `test_author`/`judge`
-  callables into `verifier-orchestrator`'s call (since D30, `judge` is
+  callables into `verifier-orchestrator`'s call (since D18, `judge` is
   backed by `llm-endpoint`) — three responsibilities nothing had
   explicitly assigned before `generator`'s, `verifier-orchestrator`'s, and
-  the blast-radius/D16 threads each forced the question. Since D16, also
+  the blast-radius/D2 threads each forced the question. Since D2, also
   calls `capability-scenario-verifier` once every component has passed
   per-component verification; the capability-scenario dispatch logic itself
-  (and the capability-intersection lookup) lived here only until D25,
+  (and the capability-intersection lookup) lived here only until D14,
   once both this component's fan-out and its component-doc word count
   crowded their caps at once — it was extracted into
   `capability-scenario-verifier` as the cross-component analog of
   `verifier-orchestrator`'s own per-component dispatch; this component now
   only owns *when* and *with what* that gets called. Its real, measured
-  `fan_out` is 15 as of D30 (14 after D25's extraction, +1 for
-  `llm-endpoint`; D39 swapped `cache-manager` for `provenance-checker`
+  `fan_out` is 15 as of D18 (14 after D14's extraction, +1 for
+  `llm-endpoint`; D29 swapped `cache-manager` for `provenance-checker`
   without changing the count) — confirmed against the actual linter, together with
   `component_doc_words` the one component besides `spec-linter` whose
   `R-LINT-022` crowding finding is real, accepted, and explained rather
   than resolved — see `specs/architecture/pipeline-decomposition.md`'s
   dedicated note.
 
-- **`spec-completeness-assistant`** — the assist agent D1 describes but
-  never names, and that two `notes/metrics.md` metrics already assumed
-  existed before this spec did. Lives outside the merge pipeline entirely —
+- **`spec-completeness-assistant`** — the assist agent this methodology
+  always assumed but never named, and that two `notes/metrics.md` metrics
+  already assumed existed before this spec did. Lives outside the merge
+  pipeline entirely —
   never in `merge-orchestrator`'s dependency list, no mechanism to gate
   anything. The one component whose core value genuinely *is* judgment
   (`llm-judge` for completeness scoring and redundancy detection), not
   dispatch around it — a deliberate contrast to every coordination
-  component specced so far. Since D30, dispatches through `llm-endpoint`
+  component specced so far. Since D18, dispatches through `llm-endpoint`
   rather than holding a model credential itself.
 - **`capability-scenario-verifier`** — all `kind: compiled`. Extracted from
-  `merge-orchestrator` by D25: the cross-component analog of
+  `merge-orchestrator` by D14: the cross-component analog of
   `verifier-orchestrator`'s per-component dispatch, one scope level up —
   runs every product capability's capability scenarios whose `realizes`-set
   intersects a merge's blast radius, against the real assembled system.
   The permanent backstop for cross-component behavioral risk no
-  `interface/`-level diffing can rule out in principle (D16).
+  `interface/`-level diffing can rule out in principle (D2).
 - **`llm-endpoint`** — mostly `kind: compiled` (backend resolution,
   credential safety), one `generated-test` criterion for the actual
-  dispatched call. Added by D30 once `generator` and `test-author` were
+  dispatched call. Added by D18 once `generator` and `test-author` were
   each found independently coupled to `VAR-ANTHROPIC-API-KEY`, and
   `merge-orchestrator`'s `judge` wiring had no component behind it at
   all. The single vendor-agnostic transport every model call in the
   pipeline now dispatches through; v1 ships exactly one backend
-  (Anthropic) by design, not as an unfinished gap (D18/D20's
-  anti-premature-abstraction stance). Since D32, `model_call_error` is a
+  (Anthropic) by design, not as an unfinished gap (D4/D6's
+  anti-premature-abstraction stance). Since D20, `model_call_error` is a
   structured `{category, message}` object, not a boolean, and every
   call writes a caller-agnostic record to `.hotdocs/calls/`.
-  **A real `gen/llm-endpoint/` implementation since `D47`, self-hosted
-  since `D51`** — the fourth component with real code, originally hand-
+  **A real `gen/llm-endpoint/` implementation since `D33`, self-hosted
+  shortly after** — the fourth component with real code, originally hand-
   bootstrapped on the theory that nothing could cold-regenerate the
   component every generation call dispatches through. Once a real
-  `generator` existed (`D50`), that theory was tested directly: `D51`
-  used this exact hand-written implementation to cold-regenerate itself
+  `generator` existed, that theory was tested directly: this exact
+  hand-written implementation was used to cold-regenerate itself
   from its own current spec, verified the result against every
   `AC-ENDPOINT-*` criterion, and swapped it in — the first real
   self-hosted regeneration in this corpus, resolving the generator/
   llm-endpoint chicken-and-egg problem the same way a compiler
   bootstraps by compiling itself once a first version exists by other
   means. `AnthropicBackend` dispatches via the `claude` CLI's
-  non-interactive mode (`D46`) instead of a from-scratch API
+  non-interactive mode (`D32`) instead of a from-scratch API
   client; confirmed live exactly once per generation (real money,
-  `D46`'s billing finding applies), with the full test suite otherwise
+  `D32`'s billing finding applies), with the full test suite otherwise
   running on an injected mock backend at zero cost.
 
 **All 22 architecture components are now specced in full depth** (15
 original + `test-author` + `spec-completeness-assistant`, both added
 when earlier design discussions surfaced real gaps nothing owned yet,
-+ `capability-scenario-verifier` (D25) + `llm-endpoint` (D30) +
-`provenance-checker` (D39) + `graph-query-engine` (D44), each extracted
++ `capability-scenario-verifier` (D14) + `llm-endpoint` (D18) +
+`provenance-checker` (D29) + `graph-query-engine` (D13), each extracted
 from or added beneath `merge-orchestrator`/`spec-linter`/the
 architecture docs once a real coupling, crowding, or correctness
 signal — not speculation — justified it). The real linter
 (`gen/spec-linter/`) validates the entire corpus clean: 0 failures,
 24 warnings — all `component_doc_words`/`requirement_count`/
 `acceptance_count`/`generated_code_loc` near-misses, `merge-orchestrator`
-and `spec-linter`'s `R-LINT-022` crowding findings (D28), and seven
+and `spec-linter`'s `R-LINT-022` crowding findings (D15), and seven
 individual dense files caught by the per-file check (`R-LINT-023`,
-D29). None are hard-fail-severity; see `SPEC_GUIDELINES.md` §4 for what
+D17). None are hard-fail-severity; see `SPEC_GUIDELINES.md` §4 for what
 each warning dimension means and when (if ever) it calls for action.

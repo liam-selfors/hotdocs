@@ -20,10 +20,10 @@ regeneration and re-verification for that component.
 
 ## Rationale
 
-This is the mechanism behind the claim (`D11`) that a merge whose spec
+This is the mechanism behind the original claim that a merge whose spec
 state exactly matches an already-verified prior state can skip
 regeneration and re-verification entirely. That claim was previously
-implemented (`D39`) by asking `cache-manager` a question its own data
+implemented (`D29`) by asking `cache-manager` a question its own data
 could never answer: `cache-manager` records that a candidate was
 *produced*, not that it was ever *verified* — `verifier-orchestrator`
 never writes to it. A candidate that failed verification gets cached
@@ -75,7 +75,7 @@ See `interface/data/`.
 
 See `acceptance/`.
 
-Every criterion is `kind: generated-test` (`D59`) — reading a committed
+Every criterion is `kind: generated-test` (`D43`) — reading a committed
 file, comparing a hash, and reading one boolean var is pure,
 deterministic logic that needs no model or judgment, but none of this
 component's criteria are actually written in `specs/architecture/
@@ -92,10 +92,10 @@ None.
 
 ## Change log
 
-- Initial draft (`D39`).
-- `D63`: first real implementation, via three real `generate()`
-  retries (the first two found real, corpus-wide gaps — `D61`'s
-  `component_id`-to-slug mapping, `D62`'s output-layout requirement —
+- Initial draft (`D29`).
+- `D47`: first real implementation, via three real `generate()`
+  retries (the first two found real, corpus-wide gaps — `D45`'s
+  `component_id`-to-slug mapping, `D46`'s output-layout requirement —
   fixed in `generator`/`glossary.md`, not here). `gen/provenance-
   checker/` is now a real top-level package. See `verification/
   provenance-checker/BOOTSTRAP.md` for the full account.

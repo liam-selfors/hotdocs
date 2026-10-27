@@ -24,6 +24,6 @@ GROUP BY 1;
   `{repo_root}` substitution is the same as `R-GQE-001`. `trim()`
   without an explicit character set strips spaces only, not newlines —
   the `list_filter` MUST remain, to drop the spurious trailing empty
-  token every file's own trailing newline otherwise produces (`D42`).
+  token every file's own trailing newline otherwise produces (`D13`).
   The frontmatter-stripping `regexp_replace` MUST keep its `'s'` flag,
   for the same DOTALL reason as `R-GQE-004`.
