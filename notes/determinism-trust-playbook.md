@@ -1,7 +1,7 @@
 # Determinism & Trust Classification Playbook
 
 _Working notes. Non-normative. The single idea that actually resolved
-the `D39` cache/provenance investigation, generalized so the next
+the `D29` cache/provenance investigation, generalized so the next
 similar question doesn't need to re-derive it from scratch. Started:
 2026-10-26._
 
@@ -20,7 +20,7 @@ re-checking this costs anything but CPU time — no model call, no
 judgment, no non-reproducibility. A cache hit or miss here is **purely
 a cost optimization.** There is no correctness question to design
 around, because the real answer is always one cheap re-run away.
-`cache-manager`'s narrowed role (`D39`) lives entirely in this band and
+`cache-manager`'s narrowed role (`D29`) lives entirely in this band and
 the next one.
 
 **Band 2 — Non-deterministic authoring, but re-verifiable output.**
@@ -31,7 +31,7 @@ checked by Band 1 machinery immediately afterward. A stale or
 previously-failing cached candidate is **never silently dangerous**,
 because nothing trusts it without re-running the cheap check. This is
 why `R-GEN-006`/`R-AUTHOR-005` can cache unconditionally, right after
-any successful call, with no correctness cost — the real gap `D39`
+any successful call, with no correctness cost — the real gap `D29`
 found wasn't in this caching, it was in `merge-orchestrator` treating a
 Band-2 cache hit as license to skip the Band-1 re-check entirely.
 
@@ -54,7 +54,7 @@ is misdesigned, not a sign the variable is reusable.
    downstream (Bands 1/2) or doesn't (Band 3).
 2. **If Band 1 or 2: is anything currently treating a hit as skipping
    the re-check, not just skipping the expensive step?** This is
-   exactly the bug `D39` found — `cache-manager`'s hit was being used
+   exactly the bug `D29` found — `cache-manager`'s hit was being used
    to skip `verifier-orchestrator` entirely, not just to skip a
    redundant model call. Any mechanism that conflates "this was
    produced before" with "this was verified before" has reintroduced

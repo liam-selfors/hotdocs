@@ -31,12 +31,12 @@ BOOTSTRAP.md`:
 
 - `corpus-graph-builder/` — cold-generated once, from a mock-free, fully
   real `generator`/`llm-endpoint`/`cache-manager`/`spec-bundle-assembler`
-  chain (`specs/decisions/D45.md`).
+  chain.
 - `llm-endpoint/` itself, *twice over* — the real `generator`, dispatching
   through a real (then hand-written) `llm-endpoint`, cold-regenerated
-  `llm-endpoint` from its own current spec (`D51`), then again after two
+  `llm-endpoint` from its own current spec, then again after two
   spec corrections a real failure surfaced: a too-short timeout bound and
-  a missing structural tool-isolation requirement (`D52`/`D53`). Each
+  a missing structural tool-isolation requirement (`D34`/`D35`). Each
   result replaced the prior version only after passing every one of its
   own acceptance criteria — not because a generation attempt merely
   completed.
@@ -45,7 +45,7 @@ A `generator`-regenerating-itself attempt was also made (the deepest
 self-hosting case) — it produced a plausible five-file candidate that
 failed to import (an assumed dependency-module layout that didn't match
 `cache-manager`'s real one) and was correctly **not** swapped in
-(`D54`). `gen/generator/generator.py` is still the original hand-written
+(`D46`). `gen/generator/generator.py` is still the original hand-written
 file. See `notes/backlog.md` for the generalizable gap this exposed.
 
 Everything else under `specs/components/` is fully specced but has no

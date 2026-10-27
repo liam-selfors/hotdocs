@@ -3,9 +3,12 @@
 This document is the rulebook. Every authoring agent, generation agent, and
 linter invocation in this repository follows it. It states **what** is
 required; it does not re-derive **why** — the rationale and the decision
-history live in `notes/initial-ideas.md` (`D1`–`D14`, informal brainstorm)
-and `specs/decisions/` (`D15` onward, formal ADRs) and are cited here by
-number for traceability, not repeated.
+history live in `notes/initial-ideas.md` (`D1`–`D14`, informal brainstorm,
+its own frozen historical numbering) and `specs/decisions/` (the formal
+ADRs — renumbered `D1`–`D75` as of the 2026-10 MVP baseline reset; a bare
+`D<N>` citation below refers to `specs/decisions/D<N>.md` unless the
+surrounding text names `initial-ideas.md` explicitly) and are cited here
+by number for traceability, not repeated.
 
 Keywords **MUST**, **MUST NOT**, **SHOULD**, **SHOULD NOT**, and **MAY** are
 used per RFC 2119. This document is itself a spec of the methodology, so it
@@ -24,7 +27,7 @@ specs/
     <component>/
       component.md      # root: frontmatter + Purpose/Rationale/Scope/
                          # Definitions/Open questions/Change log +
-                         # pointers to the below (Rationale optional, D34)
+                         # pointers to the below (Rationale optional, D21)
       requirements/
         R-<comp>-NNN.md  # one Behavior requirement each
       interface/
@@ -34,7 +37,7 @@ specs/
           <TypeName>.md   # one schema/type each
         guarantees/
           G-<comp>-NNN.md # one behavioral/non-functional guarantee each,
-                          # that a *dependent* may rely on (D16) — optional,
+                          # that a *dependent* may rely on (D2) — optional,
                           # like cli.md/library.md
       acceptance/
         AC-<comp>-NNN.md  # one acceptance criterion each
@@ -53,13 +56,13 @@ tools/                 # hand-written repo-maintenance/authoring scripts —
                        # this document). Scaffolding convenience only.
 notes/                 # brainstorming — non-normative, not read by the pipeline
 .hotdocs/              # LOCAL ONLY, gitignored — merge-tracking records
-  tracking/            # (merge-tracker, D22) one record per merge attempt
-  attempts/            # (merge-tracker, D32) one record per per-component
+  tracking/            # (merge-tracker, D10) one record per merge attempt
+  attempts/            # (merge-tracker, D19) one record per per-component
                        # generation+verification attempt, full detail —
-                       # what D31's retired best-of-k loop used to fold
+                       # what D3's retired best-of-k loop used to fold
                        # into one provenance manifest, now the only place
                        # a blocked attempt's detail survives at all
-  calls/               # (llm-endpoint, D32) one record per model call,
+  calls/               # (llm-endpoint, D20) one record per model call,
                        # caller-agnostic, transport-level only
                        # All of the above: never committed, never read by
                        # any gate's pass/fail decision — purely observability.
@@ -77,10 +80,10 @@ notes/                 # brainstorming — non-normative, not read by the pipeli
   under `gen/<slug>/` — never nested deeper (e.g. a `src/` layout) and
   never a separately-installed distribution. This is load-bearing, not
   stylistic: `spec-bundle-assembler`'s `dependency_usage`
-  (`R-ASSEMBLE-011`, `D55`) only ever looks in those two exact
+  (`R-ASSEMBLE-011`, `D37`) only ever looks in those two exact
   locations, and silently (by design, fail-to-empty) returns nothing
   for a dependency it can't find there — found only once a real
-  generated candidate chose a `src/` layout instead (`D62`).
+  generated candidate chose a `src/` layout instead (`D46`).
 - Nothing under `gen/` or `verification/` is hand-edited, with exactly two
   declared exemptions — see §8.
 - `.hotdocs/` **MUST** be gitignored and **MUST NOT** be read by any gate's
@@ -160,7 +163,7 @@ optional).
 | `depends_on` | never (optional) | List of spec ids this one requires. Forms the dependency graph (D2). **(component `component.md` only)** |
 | `realizes` | condition: required unless `sealed: true` | List of `P-<id>`s this component contributes to. (D8) **(component `component.md` only)** |
 | `uses_var` | never (optional) | List of `VAR-<id>`s this component reads from `specs/vars/`. (D12) **(component `component.md` only)** |
-| `depends_on_guarantees` | never (optional) | List of `G-<comp>-NNN` ids — a **strictly opt-in narrowing** of which of a dependency's `interface/guarantees/` entries this component actually relies on. (D16) **(component `component.md` only)** |
+| `depends_on_guarantees` | never (optional) | List of `G-<comp>-NNN` ids — a **strictly opt-in narrowing** of which of a dependency's `interface/guarantees/` entries this component actually relies on. (D2) **(component `component.md` only)** |
 | `supersedes` | never (optional) | Prior spec id this one replaces. |
 | `builds_on` | never (optional) | List of prior `D<N>`s this decision's reasoning depends on, without replacing any of them. **(decision record only)** |
 | `model_pin` | never (optional); **inapplicable when `sealed: true`** | Per-spec override of the repo-wide canonical model. **MUST** be omitted (not filled with a placeholder) on a sealed component — there is no generation to pin. **(component `component.md` only)** |
@@ -177,7 +180,7 @@ optional).
 - Every `depends_on_guarantees` entry **MUST** resolve to a real `G-<comp>-NNN`
   id, **and** that id's owning component **MUST** already be listed in this
   component's own `depends_on` — referencing a guarantee of a component you
-  don't even depend on is meaningless, not just unresolved. (D16)
+  don't even depend on is meaningless, not just unresolved. (D2)
 - `sealed: true` **MUST** carry a `source_path`; `sealed: false` or absent
   **MUST NOT** carry one.
 - A `specs/vars/` declaration's own fields (`required`/`optional`, `type`,
@@ -232,7 +235,7 @@ section order:
 
 | Section | Rule |
 | --- | --- |
-| Purpose | One paragraph: what this unit does and why it exists — **dependent-safe** (D34): no decision citations (`D<N>`), no historical justification, no cross-references to how this design was arrived at. This is the one section a *dependent* may see as part of its own context (`notes/backlog.md`'s "context" idea, once built) — everything that would make it internal rationale instead of a clean description belongs in Rationale, not here. |
+| Purpose | One paragraph: what this unit does and why it exists — **dependent-safe** (D21): no decision citations (`D<N>`), no historical justification, no cross-references to how this design was arrived at. This is the one section a *dependent* may see as part of its own context (`notes/backlog.md`'s "context" idea, once built) — everything that would make it internal rationale instead of a clean description belongs in Rationale, not here. |
 | Rationale | Everything Purpose used to carry that isn't dependent-safe: decision citations, historical justification, cross-references to the discussion that produced this design. **Internal only** — never included in anything assembled for a dependent. Optional: a component whose Purpose genuinely needs no supporting history MAY omit this section entirely, rather than leave it empty for form's sake. |
 | Scope | Explicit in-scope / out-of-scope bullets. |
 | Definitions | Only deltas from `glossary.md`. |
@@ -255,7 +258,7 @@ frontmatter, no separate id field to keep in sync with it.
   a tracked assumption or an open question, never silently guess.
 
 **`interface/`** — the public contract (types, endpoints, events, CLI,
-*and* behavioral guarantees — D16 extended "the contract" to include the
+*and* behavioral guarantees — D2 extended "the contract" to include the
 last of these, not just type signatures), split by kind:
 - `interface/cli.md` — the CLI contract, if any.
 - `interface/library.md` — the library/function contract, if any.
@@ -265,7 +268,7 @@ last of these, not just type signatures), split by kind:
   (consistency, ordering, idempotency, error-handling semantics, latency
   bounds). Like a requirement, each uses RFC 2119 keywords and its
   filename is its id. **Not** a place for internal implementation
-  rationale — that stays in `requirements/`/`constraints.md`. (D16)
+  rationale — that stays in `requirements/`/`constraints.md`. (D2)
 
 A component need not have all four — e.g. a purely-library component may
 have no `cli.md`, and most components have no `guarantees/` at all (nothing
@@ -370,12 +373,12 @@ Below that bar, size caps are linter-enforced:
 | Public interface surface elements | 10 | 20 |
 | `depends_on` count (fan-out) | 7 | — (warn only) |
 | Dependents count (fan-in) | 10 | — (warn only) |
-| Guarantees (`G-id`s) per component (D29) | 5 | 10 |
-| Acceptance criteria (`AC-id`s) per component (D29) | 25 | 50 |
-| **Per-file** words, for any single file under `requirements/` or `acceptance/` (D29) — distinct from the component-docs row above, which is a whole-bundle aggregate | 250 | 500 |
-| **`Purpose` section** words (D35) — checks the "one paragraph" rule above mechanically; distinct from both rows above, scoped to one section, not a file or the bundle | 80 | 150 |
+| Guarantees (`G-id`s) per component (D17) | 5 | 10 |
+| Acceptance criteria (`AC-id`s) per component (D17) | 25 | 50 |
+| **Per-file** words, for any single file under `requirements/` or `acceptance/` (D17) — distinct from the component-docs row above, which is a whole-bundle aggregate | 250 | 500 |
+| **`Purpose` section** words (D22) — checks the "one paragraph" rule above mechanically; distinct from both rows above, scoped to one section, not a file or the bundle | 80 | 150 |
 
-The last three rows are a first pass (D29), calibrated against this
+The last three rows are a first pass (D17), calibrated against this
 corpus's own content at the time they were added rather than an a
 priori judgment — expect them to be revisited as more components
 exercise them. `guarantee_count` in particular had no cap at all
@@ -396,13 +399,13 @@ above crowd their ceilings **for the same component at the same time**,
 treat that as a sign the component owns a cross-cutting concern that has
 outgrown its placement, not as evidence the caps themselves are
 miscalibrated. This is enforced directly, not just described here: `spec-
-linter`'s `R-LINT-022` (`D28`) emits a distinct finding whenever it fires.
+linter`'s `R-LINT-022` (`D15`) emits a distinct finding whenever it fires.
 Two shapes of this have shown up in practice so far, not just one: a thin
 coordinator crowding fan-out together with component-doc words
-(`merge-orchestrator`, resolved by `D25`), and a self-contained component
+(`merge-orchestrator`, resolved by `D14`), and a self-contained component
 with no fan-out at all crowding component-doc words together with its own
 requirement/acceptance/generated-code counts instead (`spec-linter`
-itself, after `D29` added those dimensions — fan-out is irrelevant there;
+itself, after `D17` added those dimensions — fan-out is irrelevant there;
 the signal is still real). Fan-out measures how many neighbors a
 component calls; the count/words dimensions measure how much it owns
 directly. A thin coordinator runs fan-out high without the others; a
@@ -414,7 +417,7 @@ dimension's worth of cost at once.
 The fix is not automatically a bigger cap, but it is also not
 automatically a split — the signal means "look closely," not "extract
 something." Start by asking whether a structural precedent for a split
-already exists elsewhere in the corpus: `D25` extracted
+already exists elsewhere in the corpus: `D14` extracted
 `capability-scenario-verifier` out of `merge-orchestrator` once both caps
 crowded at once, because that logic was already the cross-component
 analog of `verifier-orchestrator`'s existing per-component dispatch — the
@@ -437,8 +440,8 @@ D2's "thin coordinator" shape, not this signal at all.
 
 See `notes/component-sizing-playbook.md` for the worked decision
 procedure and tightening toolbox this principle compresses — a
-step-by-step guide grounded in this corpus's own real cases (`D25`,
-`D29`, `D39`), not abstract advice.
+step-by-step guide grounded in this corpus's own real cases (`D14`,
+`D17`, `D29`), not abstract advice.
 
 ---
 
@@ -493,13 +496,13 @@ Run per merge, scoped to the components in the impact-analysis blast radius:
    `constraints.md` + depended-upon components' `interface/` + referenced
    `specs/vars/` declarations + `glossary` — deliberately excluding
    `acceptance/`, so the model doesn't overfit to its own tests). Exactly
-   one attempt per component per merge — no automatic retry (D1/D31: the
+   one attempt per component per merge — no automatic retry (D1/D3: the
    best-of-k retry this step used to run was retired; a failed attempt
    blocks the merge for that component, and a human re-running the merge,
-   after reviewing the per-attempt record D32 requires, is the only path
+   after reviewing the per-attempt record D19 requires, is the only path
    back to a fresh generation call). That re-run's one call MAY carry
    `retry_feedback` — the immediately preceding attempt's failing
-   requirements — but only if the human explicitly supplies it (D33);
+   requirements — but only if the human explicitly supplies it (D3);
    nothing computes or injects it automatically.
 3. **Per-criterion verification** — compiled / generated-test / llm-judge, per
    §5. Contract/property tests from `interface/`. A drift check that
@@ -518,8 +521,8 @@ Run per merge, scoped to the components in the impact-analysis blast radius:
    system. A failure blocks the merge the same way a per-component
    verification failure does. This is the backstop for cross-component
    behavioral risk that no amount of interface-level diffing can rule out
-   in principle (D16) — not a redundant check: `interface/guarantees/`
-   (D16) makes *foreseen* behavioral dependencies explicit and propagating,
+   in principle (D2) — not a redundant check: `interface/guarantees/`
+   (D2) makes *foreseen* behavioral dependencies explicit and propagating,
    this gate catches what wasn't foreseen.
 6. **Non-functional gates** where feasible (benchmarks, size budgets).
 7. **Review packet** — spec diff, changed requirements, regenerated
@@ -531,7 +534,7 @@ Run per merge, scoped to the components in the impact-analysis blast radius:
    `corpus-graph.json`) update atomically in one squashed commit.
 
 A merge whose spec bundle exactly matches an already-verified prior state
-**MUST** be treated as a provenance hit (`provenance-checker`, `D39`) —
+**MUST** be treated as a provenance hit (`provenance-checker`, `D29`) —
 its committed `.provenance.json` has a matching `spec_bundle_hash` and
 `gate_versions` — and restore the matching artifacts, skipping
 regeneration and re-verification, but **never** skipping the human
@@ -559,8 +562,8 @@ spec_bundle_hash    content hash of every spec file that fed generation
 model_pin           model id + version
 prompt_version      id of the frozen prompt template used
 retry_feedback      R-id list the caller supplied for this call, if any
-                    (R-GEN-012, D33) — null if the call was blind. No
-                    sample_index: D31 retired same-merge retry, so there
+                    (R-GEN-012, D3) — null if the call was blind. No
+                    sample_index: D3 retired same-merge retry, so there
                     is no "which sample" left to record, only whether
                     this one call was informed.
 pipeline_version    version of the generation pipeline itself
@@ -568,7 +571,7 @@ gate_versions       per-gate version map (compiler, license_scanner,
                      mutation_harness, secret_scanner, ...)
 provenance_hit      bool — if true, the fields below are copied from the
                      matching prior commit (via provenance-checker,
-                     D39), not freshly computed. Renamed from cache_hit,
+                     D29), not freshly computed. Renamed from cache_hit,
                      which never actually meant cache-manager had an
                      entry — that's a per-gate concern, e.g.
                      GenerationResult's own cache_hit field.
@@ -636,7 +639,7 @@ have exactly one canonical definition in the corpus. A second
 component needing the same fact MUST read or query that definition,
 never recompute it independently, however small the computation looks.
 This corpus has already been caught by exactly this gap once
-(`component_size`, `D42`): two independently-written algorithms for the
+(`component_size`, `D13`): two independently-written algorithms for the
 same word count, one of them never actually run, silently diverging
 from the other it was supposed to match.
 

@@ -1,10 +1,10 @@
 # Narrow Exception, Never Reopen the Boundary
 
 _Working notes. Non-normative. The same move, applied independently at
-least four times: `R-ASSEMBLE-010`'s `dependency_context` (`D35`),
-`D16`'s `depends_on_guarantees` narrowing, `failure_detail`'s exclusion
-from `requirement_results` (`D38`), and `VAR-TRUST-JUDGE-PROVENANCE`'s
-criterion-kind scoping (`D39`). Started: 2026-10-26._
+least four times: `R-ASSEMBLE-010`'s `dependency_context` (`D22`),
+`D2`'s `depends_on_guarantees` narrowing, `failure_detail`'s exclusion
+from `requirement_results` (`D27`), and `VAR-TRUST-JUDGE-PROVENANCE`'s
+criterion-kind scoping (`D29`). Started: 2026-10-26._
 
 ## The pattern
 
@@ -21,14 +21,14 @@ original, and leave the original's own meaning untouched.
   `dependency_context`, with its own requirement (`R-ASSEMBLE-010`)
   naming itself as the one explicit exception. `dependency_interfaces`
   stayed exactly what it always meant.
-- `D16`'s guarantee narrowing is the same move one level up: instead of
+- `D2`'s guarantee narrowing is the same move one level up: instead of
   loosening "a dependent's blast radius includes any change to a
   dependency's types," it added a second, narrower relationship
   (`depends_on_guarantees`) a dependent can opt into *in addition to*
   the coarse default, which stays available and unchanged.
 - `R-VERIFY-011`'s `requirement_results` is deliberately boolean-only,
   specifically to keep `generator`'s retry mechanism from ever seeing
-  acceptance-criterion content. Adding `failure_detail` (`D38`) didn't
+  acceptance-criterion content. Adding `failure_detail` (`D27`) didn't
   touch that boundary — the new field lives on `criteria[]`, explicitly
   barred from ever reaching `requirement_results` or `retry_feedback`.
 - `VAR-TRUST-JUDGE-PROVENANCE` doesn't loosen trust corpus-wide — it's
@@ -65,7 +65,7 @@ nothing about it changed.
 
 Two of this session's own cleanup efforts (`component_doc_words` vs. the
 `SpecBundle` type, and `cache_hit` meaning two different scopes before
-`D39`'s rename) both trace to the same root mistake: reusing a word for
+`D29`'s rename) both trace to the same root mistake: reusing a word for
 a narrower or broader concept than its existing meaning, rather than
 picking a more specific name. Before naming a new field or dimension,
 grep the corpus for the word you're about to reuse — if it already

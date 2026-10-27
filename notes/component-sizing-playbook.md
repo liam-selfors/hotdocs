@@ -17,7 +17,7 @@ linter says so. Either way, work through this in order.
 
 If **only** `fan_out` is crowding and nothing else, stop here — that's
 `D2`'s accepted "thin coordinator" shape (`merge-orchestrator` before
-`D25`), not this signal at all. A coordinator with wide fan-out and
+`D14`), not this signal at all. A coordinator with wide fan-out and
 little owned logic of its own is a different risk shape than a
 component doing too much, and `SPEC_GUIDELINES.md` §4 already says so
 explicitly. Nothing to decide.
@@ -28,9 +28,9 @@ If **two or more** dimensions are crowding together, continue.
 
 - **Fan-out + component-doc words together** — a coordinator whose own
   owned-logic has grown alongside its call count (`merge-orchestrator`
-  under `D25`, and again under `D39`). Go to Step 2.
+  under `D14`, and again under `D29`). Go to Step 2.
 - **Words/counts crowding with little or no fan-out** — a dense,
-  self-contained component (`spec-linter` under `D29`). Go to Step 3.
+  self-contained component (`spec-linter` under `D17`). Go to Step 3.
 - **Something else** — these two are the only shapes seen in this
   corpus so far. Don't force a non-matching case into one of them;
   reason from `SPEC_GUIDELINES.md` §4's underlying principle instead
@@ -41,11 +41,11 @@ If **two or more** dimensions are crowding together, continue.
 
 Ask: is there a sub-responsibility inside this component that is
 **structurally analogous to an already-specced component's pattern**,
-one scope level up or down from something that already exists? `D25`
+one scope level up or down from something that already exists? `D14`
 extracted `capability-scenario-verifier` because it was already the
 cross-component analog of `verifier-orchestrator`'s own per-component
 dispatch — the split mirrored a pattern already present, it wasn't
-invented from scratch. `D39` extracted `provenance-checker` the same
+invented from scratch. `D29` extracted `provenance-checker` the same
 way, once it was clear `cache-manager` was being asked a question
 (“was this ever verified”) that belonged to a different kind of check
 than the one it was actually built to answer (“was this already
@@ -55,10 +55,10 @@ produced”) — a real conceptual seam, not a cosmetic one.
 flat** — the coordinator still has to call the new component — the
 dimension that's supposed to move is `component_doc_words`.
 
-**But don't assume words will actually drop.** `D25`'s extraction did
+**But don't assume words will actually drop.** `D14`'s extraction did
 drop `component_doc_words` "well clear" of both thresholds — the
 capability-scenario dispatch logic moved out completely, taking its
-words with it. `D39`'s extraction did **not**: `provenance-checker`
+words with it. `D29`'s extraction did **not**: `provenance-checker`
 took the *mechanics* of the hit/miss check, but `merge-orchestrator`
 still had to document, in its own `R-MERGE-003`/`015`, *when* and *why*
 it calls the new component versus routing around it entirely for a
@@ -67,11 +67,11 @@ routing decision, not the extracted component's. An extraction relieves
 word pressure only for the words that actually left; words describing
 the coordinator's own remaining decision don't leave just because a
 mechanism moved. Check the actual number after extracting — don't
-assume the shape of `D25`'s outcome repeats.
+assume the shape of `D14`'s outcome repeats.
 
 **If no real precedent exists:** do not invent a split just to relieve
 the finding. A split with no structural precedent is premature
-abstraction wearing a size-cap excuse (`D18`/`D20`). Go to Step 4
+abstraction wearing a size-cap excuse (`D4`/`D6`). Go to Step 4
 (tightening) instead, and write down explicitly, in the component's own
 `Rationale` or the architecture doc, that a split was considered and
 rejected, and why — so a future reader doesn't have to re-litigate it
@@ -81,9 +81,9 @@ from the finding alone.
 
 Ask: can this component's behavior honestly be split into two
 different one-sentence "why does this exist" statements, each serving
-a materially different consumer or capability? If yes, that's `D2`'s
-actual non-negotiable trigger wearing a size-cap costume — split along
-that seam.
+a materially different consumer or capability? If yes, that's
+`D2`'s actual non-negotiable trigger (`SPEC_GUIDELINES.md` §4)
+wearing a size-cap costume — split along that seam.
 
 If no — if the crowding reflects **one cohesive responsibility with
 many genuinely independent, correlated rules** (`spec-linter`'s own
@@ -98,7 +98,7 @@ move on.
 ## Step 4: Tightening toolbox, cheapest first
 
 Everything here was actually used, in this order, trimming
-`merge-orchestrator` from 4170 back to 3991 words during `D39` without
+`merge-orchestrator` from 4170 back to 3991 words during `D29` without
 splitting anything further:
 
 1. **Cut restated reasoning, don't duplicate it.** If the same "why"
@@ -134,14 +134,14 @@ cap — not "it would take more effort," but there's no more restatement
 left to cut — that's the real signal to revisit Step 2/3, or, failing
 that, to flag the cap itself as miscalibrated for this case (rare; the
 last three size-cap rows are already documented as "a first pass...
-expect them to be revisited," `D29`). Don't split merely because
+expect them to be revisited," `D17`). Don't split merely because
 trimming is tedious.
 
 ## Step 5: Never split to relieve a number alone
 
-Every real split in this corpus (`D25`, `D39`) was grounded in an
+Every real split in this corpus (`D14`, `D29`) was grounded in an
 existing structural pattern the new component mirrored — never in the
-crowding finding by itself. Every accepted non-split (`D29`'s
+crowding finding by itself. Every accepted non-split (`D17`'s
 `spec-linter`, and any crowding case resolved by tightening instead) was
 grounded in an explicit cohesion argument, written down, not just a
 quiet decision to ignore the warning. Treat the finding as a prompt to

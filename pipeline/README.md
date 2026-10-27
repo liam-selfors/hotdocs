@@ -25,4 +25,4 @@ component's own `gen/` code (`generator.py`'s own `_SYSTEM_PROMPT`/
 `PROMPT_VERSION`, `llm-endpoint`'s model-resolution logic) rather than
 externalized into this directory, since no second caller or second
 model has yet needed it factored out — the same anti-premature-
-abstraction stance (`D18`/`D20`) this corpus applies everywhere else.
+abstraction stance (`D4`/`D6`) this corpus applies everywhere else.

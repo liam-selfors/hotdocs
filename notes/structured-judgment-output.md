@@ -11,14 +11,14 @@ come from judgment rather than a mechanical check, ask whether it has
 a place to record **why** — not as a nice-to-have, but because this
 corpus has now hit the same gap four times: `Finding` (`spec-linter`),
 `VerificationReport.criteria[]`, `CapabilityScenarioReport.scenarios[]`
-(`D36`), and `redundancy_flags` (`D38`, `spec-completeness-assistant`).
+(`D23`), and `redundancy_flags` (`D28`, `spec-completeness-assistant`).
 Every one of them needed a `rationale`-shaped field once a judgment
 case actually exercised them.
 
 ## The shape
 
 `{result, rationale}` (or the kind-appropriate equivalent — `failure_detail`
-for a `compiled`/`generated-test` failure, `D38`, is the same pattern
+for a `compiled`/`generated-test` failure, `D27`, is the same pattern
 applied to a different question: not "why did a judge decide this" but
 "what exactly failed"). The pairing is the reusable part, not the exact
 field names.
@@ -55,8 +55,8 @@ to record why it fired.
 3. If the container only ever holds entries that already fired
    (filtered, not a full enumeration)? → `rationale` mandatory.
 4. Don't invent a new container shape to unify this with an unrelated
-   field just because both have a `{result, rationale}` core — `D36`'s
-   analysis (bundled with the `D36` rename) explicitly rejected forcing
+   field just because both have a `{result, rationale}` core — `D23`'s
+   analysis explicitly rejected forcing
    `Finding`, `VerificationReport.criteria[]`, `CompletenessReport`, and
    `CapabilityScenarioReport.scenarios[]` into one universal type. Share
    the micro-shape; keep each container's own shape driven by its own

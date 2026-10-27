@@ -37,8 +37,7 @@ result — is no longer theoretical:
 - `corpus-graph-builder` — the first component actually **cold-generated**,
   not hand-written: a real model call, through a real `generator`
   dispatching through a real `llm-endpoint`, from exactly this
-  component's assembled spec bundle and nothing else (`specs/decisions/
-  D45.md`).
+  component's assembled spec bundle and nothing else.
 
 Once that real chain existed, the obvious next question was testable
 directly: can a bootstrapped component regenerate *itself*, resolving the
@@ -46,30 +45,31 @@ generator/llm-endpoint chicken-and-egg problem the way a compiler
 bootstraps by compiling itself once a first version exists by other
 means? **Yes** — `llm-endpoint` has cold-regenerated itself twice,
 through its own prior version, replacing it each time only because the
-result passed every one of its own acceptance criteria (`D51`; then
-`D52`/`D53`, after two real failures the process itself surfaced: a
+result passed every one of its own acceptance criteria (then
+`D34`/`D35`, after two real failures the process itself surfaced: a
 timeout bound too short for a larger component's spec bundle, and a
 genuine tool-access/repo-context contamination the fix had to close
 structurally, not just in a prompt). The same experiment attempted on
 `generator` itself produced a plausible candidate that failed to import
 — a real dependency-layout assumption two independently-generated
 components hadn't yet had to agree on — and was correctly **not** swapped
-in (`D54`). Both outcomes are the methodology working as intended: a
+in (`D46`). Both outcomes are the methodology working as intended: a
 generation attempt earns its place by passing verification, not by
 merely completing.
 
 `pipeline/` — the directory that would hold frozen prompts and model
 pins once they're shared by more than one caller — stays intentionally
-thin for now (`D18`/`D20`); `criterion-compiler`, the one deliberately
+thin for now (`D4`/`D6`); `criterion-compiler`, the one deliberately
 permanent gap in this chain, remains unbuilt by design (sealed,
 `specs/components/criterion-compiler/component.md` — trusting a
 `compiled` criterion requires the compiler that compiles it to never
 itself be agent-generated).
 
-Decisions are tracked as formal ADRs in `specs/decisions/` (`D15` onward,
-currently through `D54`); `notes/initial-ideas.md` holds the original
-brainstorm (`D1`–`D14`, informal) plus the full discussion behind every
-later decision.
+Decisions are tracked as formal ADRs in `specs/decisions/` (`D1`
+through `D75`, as of the 2026-10 MVP baseline reset); `notes/initial-ideas.md`
+holds the original brainstorm (its own frozen `D1`–`D30` historical
+numbering, informal) plus the full discussion behind many of the
+earlier decisions.
 
 ## Repository conventions
 

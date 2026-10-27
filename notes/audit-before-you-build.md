@@ -2,7 +2,7 @@
 
 _Working notes. Non-normative. The habit that turned a proposed new
 cache field (then a proposed digital-signature scheme) into zero new
-artifacts during the `D39` work — recorded so the next "we need a way
+artifacts during the `D29` work — recorded so the next "we need a way
 to prove X happened" conversation starts here instead of at "let's add
 a store for it." Started: 2026-10-26._
 
@@ -20,7 +20,7 @@ sitting somewhere**, committed, and merely not yet being read.
    `secret_scan` for every component, committed under the same
    discipline as the code it describes. If the fact you need is "was
    this exact spec state already verified," this file already answers
-   it — `provenance-checker` (`D39`) exists entirely because this step
+   it — `provenance-checker` (`D29`) exists entirely because this step
    was skipped the first time and a new mechanism was almost built
    instead.
 2. **The git commit ledger itself.** It is already an append-only,
@@ -38,7 +38,7 @@ sitting somewhere**, committed, and merely not yet being read.
    convenience (`hotdocs track feedback`) or a UI
    (`merge-tracker-ui`), and the *wrong* source for anything a pass/fail
    decision depends on — this was specifically ruled out as the home
-   for `D39`'s provenance check for exactly this reason.
+   for `D29`'s provenance check for exactly this reason.
 
 If none of these three already has the fact you need, *then* a new
 mechanism may genuinely be warranted — but by that point you'll know

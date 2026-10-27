@@ -11,14 +11,14 @@ Nothing here is normative. Nothing here is implemented.
 
 ---
 
-## A generating model can guess a dependency's import path wrong (`D54`)
+## A generating model can guess a dependency's import path wrong
 
 `SpecBundle.dependency_interfaces` (`R-ASSEMBLE-002`) gives a
 dependency's public contract — names, signatures, fields — but never
 says how that contract is organized into files or submodules, since no
 component's `interface/` spec has ever needed to say so before two
 independently-generated components actually needed to interoperate.
-`generator`'s own self-regeneration attempt (`D54`) assumed
+`generator`'s own self-regeneration attempt assumed
 `cache-manager` was a package with a `.data` submodule; the real one is
 a flat module — an import failure, caught before any acceptance
 criterion was even attempted. Not resolved: either a corpus-wide
@@ -26,78 +26,82 @@ module-layout convention, or having `spec-bundle-assembler` expose a
 dependency's actual public import path explicitly in the bundle. Will
 matter more as more components are generated and start depending on
 each other's generated code rather than hand-written code a human laid
-out once.
+out once. A later, related decision (`D46`) eventually fixed the
+same underlying gap class for a different candidate -- requiring a
+flat module or top-level package layout, never deeper -- which may
+already close this note out; worth checking before treating it as
+still open.
 
 ---
 
 ~~**The subagent-based model-call simulation isn't reproducible from a
-clean clone.**~~ **Resolved by `D47`.** The four `.claude/agents/*.md`
+clean clone.**~~ **Resolved by `D33`.** The four `.claude/agents/*.md`
 definitions (`generator`/`test-author`/`judge`/
 `spec-completeness-assistant`) are deleted outright rather than fixed
 in place — a real `gen/llm-endpoint/` implementation (dispatching via
-the `claude` CLI's non-interactive mode, `D45`/`D46`) replaces the
+the `claude` CLI's non-interactive mode) replaces the
 mechanism entirely, and a fresh clone now has a real, working component
 instead of a gap to reproduce. `generator`/`test-author`/
 `spec-completeness-assistant`/the `judge` callable themselves remain
-unimplemented — `D47` only builds the transport they'd dispatch
-through. See `specs/decisions/D47.md`.
+unimplemented — this decision only builds the transport they'd
+dispatch through. See `specs/decisions/D33.md`.
 
 ---
 
-## ~~A `context` property for component structure~~ — resolved, `D34`/`D35`
+## ~~A `context` property for component structure~~ — resolved
 
 Fully implemented: `component.md` gained a `Rationale` section so
-`Purpose` stays dependent-safe (`D34`, `R-LINT-024`); a new
+`Purpose` stays dependent-safe (`D21`, `R-LINT-024`); a new
 `component_context` view and `spec-bundle-assembler`'s
-`dependency_context` field (`D35`, `R-ASSEMBLE-010`) now hand every
+`dependency_context` field (`D22`, `R-ASSEMBLE-010`) now hand every
 dependency's `Purpose` text to a generating model alongside its
 `interface/` contract; `R-LINT-025` caps `Purpose`'s length
-mechanically. See `specs/decisions/D34.md` and `specs/decisions/D35.md`
+mechanically. See `specs/decisions/D21.md` and `specs/decisions/D22.md`
 for the full record.
 
 ---
 
-## ~~Four gaps found during the `D31`/`D32` corpus-wide audit~~ — all resolved, `D36`/`D38`
+## ~~Four gaps found during a corpus-wide audit~~ — all resolved
 
 ~~**`GoldenScenarioReport` has no `rationale` field.**~~ **Resolved by
-`D36`.** Capability scenarios (renamed from "golden scenarios") can be
+`D23`.** Capability scenarios (renamed from "golden scenarios") can be
 `llm-judge`-kind (`R-SCENARIO-001`), and `CapabilityScenarioReport` now
 carries a per-scenario `rationale` field alongside `result`, mirroring
 `VerificationReport.criteria[]`'s existing convention — plus the
 report moved from one aggregate verdict per capability to one entry
 per scenario, closing a second, deeper gap found during the same
-analysis. See `specs/decisions/D36.md`.
+analysis. See `specs/decisions/D23.md`.
 
 ~~**`license-scanner`/`secret-scanner`'s webhook notification has no
-failure path.**~~ **Resolved by `D38`.** Both schemas gained a
+failure path.**~~ **Resolved by `D26`.** Both schemas gained a
 `notification_delivery_error` field (`{category, message}` or `null`,
 mirroring `model_call_error`'s shape) — `notified` keeps meaning
 "was due," computed from preconditions alone; delivery outcome is this
 separate field's job. The webhook call itself is now explicitly a
 bounded, no-retry call, same posture `R-ENDPOINT-004` established for
-model calls. See `specs/decisions/D38.md`.
+model calls. See `specs/decisions/D26.md`.
 
 ~~**`compiled`-kind verification failures carry no underlying detail.**~~
-**Resolved by `D38`.** `VerificationReport.criteria[]` gained
+**Resolved by `D27`.** `VerificationReport.criteria[]` gained
 `failure_detail` (`{message, expected, actual}`, `R-VERIFY-012`) for a
 failing `compiled`/`generated-test` criterion, mirroring `llm-judge`'s
 `rationale` one `kind` family over. Deliberately excluded from
 `requirement_results` and `retry_feedback`, preserving the existing
-content boundaries. See `specs/decisions/D38.md`.
+content boundaries. See `specs/decisions/D27.md`.
 
 ~~**`spec-completeness-assistant`'s `redundancy_flags` has no defined
-shape.**~~ **Resolved by `D38`.** Defined as
+shape.**~~ **Resolved by `D28`.** Defined as
 `{new_requirement, overlaps_with, rationale}` (`R-ASSIST-005`), with
 `rationale` mandatory on every populated entry — there is no
 fired-but-unexplained state, since an entry exists only when a real
-judgment call actually flagged one. See `specs/decisions/D38.md`.
+judgment call actually flagged one. See `specs/decisions/D28.md`.
 
 ---
 
-## Three gaps found while settling `component_size` on DuckDB (`D42`)
+## Three gaps found while settling `component_size` on DuckDB
 
 ~~**`graph-query-engine.md`'s `nodes`/`edges`/`component_docs` views
-likely do not actually run.**~~ **Resolved by `D43`.** Confirmed and
+likely do not actually run.**~~ **Resolved.** Confirmed and
 fixed: `read_text(path, filename:=true)` errors (same bug
 `component_size` had), present in `nodes` (four of seven branches),
 `edges` (two branches), and `component_docs`. `read_yaml_frontmatter`'s
@@ -109,10 +113,10 @@ string without it rather than erroring — the equivalent Python
 (`_extract_purpose`) already had this right. All four views now run
 against real DuckDB (`yaml`/`duckpgq` extensions both install and load
 fine here) with every count cross-checked against an independent
-file-system count. See `specs/decisions/D43.md`.
+file-system count. See `specs/decisions/D13.md`.
 
 ~~**`R-LINT-003`/`004`/`008`/`009`/`018`/`020`/`021` claim an
-implementation that doesn't exist.**~~ **Resolved by `D44`.** All five
+implementation that doesn't exist.**~~ **Resolved.** All five
 rules now actually query `graph-query-engine`'s shared `nodes`/`edges`
 views (extracted as a real component in the same decision, out of
 `graph-query-engine.md`'s previously-unverified embedded SQL) rather
@@ -126,10 +130,10 @@ doc). Wiring this in also surfaced two new real bugs in
 zero-match glob, and its struct-column auto-detection silently
 dropping a field absent from every file in a glob at once — neither
 reachable until a second, sparser caller (`spec-linter`'s own test
-fixtures) actually exercised it. See `specs/decisions/D44.md`.
+fixtures) actually exercised it. See `specs/decisions/D13.md`.
 
 **`corpus-graph-builder`'s `R-GRAPH-003` has no defined mechanism for
-six of the eight size-cap dimensions.** `component_size` (`D42`) now
+six of the eight size-cap dimensions.** `component_size` (`D13`) now
 covers `component_doc_words`; `fan_out`/`fan_in` are cheap graph
 properties `nodes`/`edges` already expose. But `generated_code_loc`,
 `requirement_count`, `acceptance_count`, `interface_surface`, and

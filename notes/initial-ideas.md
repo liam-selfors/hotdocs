@@ -91,14 +91,14 @@ specs/
     <component>/
       component.md     # root: frontmatter (realizes: [P-id,...] — D8) +
                        # Purpose/Scope/Definitions/Open questions/Change log
-      requirements/    # one R-id per file (D15 — superseded the original
+      requirements/    # one R-id per file (D1 — superseded the original
                        # single-file spec.md Behavior section)
-      interface/       # cli.md / library.md / data/<Type>.md (D15 —
+      interface/       # cli.md / library.md / data/<Type>.md (D1 —
                        # superseded the original single-file interface.md)
-      acceptance/      # one AC-id per file, agent-checkable (D5) — (D15 —
+      acceptance/      # one AC-id per file, agent-checkable (D5) — (D1 —
                        # superseded the original single-file acceptance.md)
       constraints.md   # non-functional: perf, security, compatibility —
-                       # stays one file, see D15 for why
+                       # stays one file, see D1 for why
   decisions/          # ADR-style, append-only, immutable once ratified
   glossary.md         # canonical vocabulary; specs MUST use these terms
 SPEC_GUIDELINES.md    # the rules every authoring/generating agent follows
@@ -117,11 +117,11 @@ through Git LFS) — see D6. The rendered docs/graph-explorer site built from
 
 ## 5. Anatomy of a spec document
 
-**Since D15: this frontmatter lives only on a component's root file
+**Since D1: this frontmatter lives only on a component's root file
 (`component.md`), and the body's Behavior/Interfaces/Data/Acceptance
 criteria sections are pointers to `requirements/`/`interface/`/`acceptance/`
 directories, not the content itself** — `SPEC_GUIDELINES.md` §2–3.4 is the
-current, authoritative version; what follows is the original, pre-D15
+current, authoritative version; what follows is the original, pre-D1
 design, kept for history.
 
 **Frontmatter (YAML):** `id`, `title`, `status` (`draft` | `ratified` |
@@ -854,16 +854,22 @@ problem a glossary exists to prevent.
 ---
 
 **D15 onward are also formalized as real decision records in
-`specs/decisions/` (`D15.md` … `D30.md`), per `D25`-adjacent proposal
+`specs/decisions/`, per `D25`-adjacent proposal
 work on making this project's own methodology easier to navigate. This
 section remains the full discussion — the back-and-forth, the dead
 ends, the exact prose each decision was argued in — while each
 `specs/decisions/D<N>.md` file is the distilled, addressable Context/
 Decision/Consequences version meant to be linked from requirements
 instead of re-explained inline. Every decision from here on gets its
-record written at the time it's made, not appended here first.**
+record written at the time it's made, not appended here first. **Note:**
+the `D15`–`D30` numbers used as this section's own heading labels below
+are this document's original, historical numbering and were
+deliberately left unrenumbered when `specs/decisions/` itself was
+renumbered to the current `D1`–`D75` baseline — each heading below now
+carries its own parenthetical pointing at the real, current
+`specs/decisions/D<N>.md` file it corresponds to.**
 
-### D15 — One file per addressable unit, not one file per document type
+### D15 (`specs/decisions/D1.md`) — One file per addressable unit, not one file per document type
 
 Replaces the original four-flat-files component anatomy (§5) — `spec.md` /
 `interface.md` / `acceptance.md` / `constraints.md` — with:
@@ -928,7 +934,7 @@ directly (`spec-bundle-assembler`, `impact-analyzer`, `criterion-compiler`,
 `corpus-graph-builder`). See `SPEC_GUIDELINES.md` §1–§5 for the current,
 authoritative rules this produced.
 
-### D16 — Behavioral guarantees are part of the contract; golden scenarios are a permanent backstop, not a transitional one
+### D16 (`specs/decisions/D2.md`) — Behavioral guarantees are part of the contract; golden scenarios are a permanent backstop, not a transitional one
 
 Arose from a single thread of questions about `impact-analyzer`'s blast
 radius: should `transitive-var`/`transitive-capability` inclusion cascade
@@ -964,7 +970,7 @@ guarantee lived in `requirements/`, which dependents never even receive
 (`spec-bundle-assembler` only hands out `interface/`). **Fixed:** `interface/`
 gains a fourth kind, `interface/guarantees/G-<comp>-NNN.md` — one
 behavioral/non-functional guarantee per file, exactly the one-file-per-unit
-convention D15 already established, now extended to behavioral contract
+convention D1 already established, now extended to behavioral contract
 content, not just types. A change to a declared guarantee propagates via
 the ordinary `interface/` file-level mechanism `impact-analyzer` already
 has (generalized, per below) — no new propagation machinery needed, because
@@ -1004,7 +1010,7 @@ sits on top of it.
   in practice; since that component was removed (single-model scope cut,
   §14), `generator` — whose own cache-check/cache-write behavior
   (R-GEN-005/006) genuinely depends on the same consistency guarantee —
-  took over as the worked example instead, so D16's mechanism keeps a real
+  took over as the worked example instead, so D2's mechanism keeps a real
   consumer rather than only an abstract description.
 
 See `SPEC_GUIDELINES.md` §1–§3.4 and §6 step 5 for the current,
@@ -1012,7 +1018,7 @@ authoritative rules this produced.
 
 ---
 
-### D17 — Diagnostic-guided retry: feed best-of-k failed-requirement ids back, via graph topology, not test content
+### D17 (`specs/decisions/D3.md`) — Diagnostic-guided retry: feed best-of-k failed-requirement ids back, via graph topology, not test content
 
 Arose from the working-queue's item 6 (best-of-k's exact value), which
 turned into something more fundamental after a round of challenges to a
@@ -1097,7 +1103,7 @@ provenance-writer}/` for the current, authoritative rules this produced.
 
 ---
 
-### D18 — `criterion-compiler`: single fixed emit target for v1, formalized as a two-phase split
+### D18 (`specs/decisions/D4.md`) — `criterion-compiler`: single fixed emit target for v1, formalized as a two-phase split
 
 Resolved item 7 (canonical target test framework for emitted scaffolding).
 Single fixed target (`pytest`) for v1 is confirmed — no multi-target
@@ -1123,7 +1129,7 @@ See `specs/components/criterion-compiler/requirements/R-COMPILE-011.md` and
 
 ---
 
-### D19 — `spec_bundle_hash` stays raw bytes, permanently; cache-hit-rate concern moves to a lint rule, not the hash function
+### D19 (`specs/decisions/D5.md`) — `spec_bundle_hash` stays raw bytes, permanently; cache-hit-rate concern moves to a lint rule, not the hash function
 
 Resolved item 9 (`spec-bundle-assembler`'s open question: raw bytes vs. a
 normalized form for `spec_bundle_hash`). Raw bytes is confirmed as the
@@ -1137,7 +1143,7 @@ code fences. The open question's own example ("trailing whitespace
 stripped") is exactly the kind of normalization that could make two
 **meaningfully different** spec bundles hash identically — a correctness
 risk, not just a missed optimization, and precisely the kind of silent
-failure this methodology is built to avoid everywhere else (D5/D7/D12/D16's
+failure this methodology is built to avoid everywhere else (D5/D7/D12/D2's
 recurring "never silent").
 
 The cache-hit-rate concern itself is real and still gets addressed — just
@@ -1159,7 +1165,7 @@ the current, authoritative rule this produced.
 
 ---
 
-### D20 — Cross-step literal substitution: bare bound identifiers only, resolved at compile time; anything else is a compile error
+### D20 (`specs/decisions/D6.md`) — Cross-step literal substitution: bare bound identifiers only, resolved at compile time; anything else is a compile error
 
 Resolved `criterion-compiler`'s open question on the exact boundary of
 "literal data" (`R-COMPILE-007`) for cross-step fixture references —
@@ -1205,7 +1211,7 @@ authoritative rule this produced.
 
 ---
 
-### D21 — No custom retry/timeout logic in `generator`; re-running a blocked merge is the recovery mechanism, for free
+### D21 (`specs/decisions/D7.md`) — No custom retry/timeout logic in `generator`; re-running a blocked merge is the recovery mechanism, for free
 
 Resolved item 2 (`generator`'s model-API retry/timeout policy), which grew
 into something smaller than originally scoped once two observations
@@ -1243,7 +1249,7 @@ See `specs/components/generator/requirements/R-GEN-011.md` and
 `specs/components/merge-orchestrator/requirements/R-MERGE-017.md`/
 `R-MERGE-018.md` for the current, authoritative rules this produced.
 
-### D22 — DuckDB (`yaml` + `duckpgq` extensions) as the local graph-query engine; `impact-analyzer` rebuilt on it
+### D22 (`specs/decisions/D9.md` and `D10.md`) — DuckDB (`yaml` + `duckpgq` extensions) as the local graph-query engine; `impact-analyzer` rebuilt on it
 
 Grew out of designing how merge/generation tracking should be queryable
 (metrics, an eventual UI) into a broader realignment: `impact-analyzer`'s
@@ -1323,7 +1329,7 @@ rules this produced.
 
 ---
 
-### D23 — Cache eviction has no correctness dimension; license/secret reference data must come from a maintained external source, not a frozen spec snapshot
+### D23 (`specs/decisions/D11.md` and `D12.md`) — Cache eviction has no correctness dimension; license/secret reference data must come from a maintained external source, not a frozen spec snapshot
 
 Closes the last three items in the deferred-items queue, all the same
 shape: an exact tuning value or policy previously left as "an
@@ -1374,15 +1380,15 @@ current, authoritative rules this produced.
 
 ---
 
-### D24 — `nodes`/`edges`/`component_docs` promoted to named views; adopted by `spec-linter`, `corpus-graph-builder`, and `merge-orchestrator`'s R-MERGE-014
+### D24 (`specs/decisions/D13.md`) — `nodes`/`edges`/`component_docs` promoted to named views; adopted by `spec-linter`, `corpus-graph-builder`, and `merge-orchestrator`'s R-MERGE-014
 
-Closes out the "candidates, not adopted" list D22's own
+Closes out the "candidates, not adopted" list D9's own
 `graph-query-engine.md` had already named, and fixes a real gap found
 while writing up the corpus-graph data model for review: `R-IMPACT-009`'s
 original wording named three frontmatter sources for node loading but
 never said how guarantee nodes — the target side of a
 `depends_on_guarantees` edge — get enumerated at all, since guarantee
-files carry no frontmatter (D15) for `read_yaml_frontmatter()` to read.
+files carry no frontmatter (D1) for `read_yaml_frontmatter()` to read.
 
 - **`graph-query-engine.md` gains a "Query surface" section** naming
   three views as the one shared surface every adopting component queries,
@@ -1404,7 +1410,7 @@ files carry no frontmatter (D15) for `read_yaml_frontmatter()` to read.
   resolution), R-LINT-004 (acyclic `depends_on`), and R-LINT-018
   (`depends_on_guarantees` resolution) now query `nodes`/`edges` instead
   of independently-written traversal code, closing the sequencing
-  argument already named in D22: `spec-linter` validates this graph
+  argument already named in D9: `spec-linter` validates this graph
   *before* `impact-analyzer` trusts it (R-IMPACT-007), so one ingestion
   bug now surfaces in both places identically instead of two parsers
   silently disagreeing. Explicitly deferred, not folded in:
@@ -1447,20 +1453,20 @@ requirements/R-GRAPH-009.md`, and `specs/components/merge-orchestrator/
 requirements/R-MERGE-014.md` for the current, authoritative rules this
 produced.
 
-**Superseded by D25:** the `R-MERGE-020` this decision created moved,
+**Superseded by D14:** the `R-MERGE-020` this decision created moved,
 content and all, into `golden-scenario-verifier`'s own `R-GOLDEN-002`
-when D25 extracted that component out of `merge-orchestrator` — the id
+when D14 extracted that component out of `merge-orchestrator` — the id
 `R-MERGE-020` no longer exists. The `edges`-view query itself is
 unchanged, only which component owns it.
 
 ---
 
-### D25 — `golden-scenario-verifier` extracted from `merge-orchestrator`; a general decomposition lesson added to `SPEC_GUIDELINES.md` §4
+### D25 (`specs/decisions/D14.md`) — `golden-scenario-verifier` extracted from `merge-orchestrator`; a general decomposition lesson added to `SPEC_GUIDELINES.md` §4
 
-D24's `R-MERGE-020` addition pushed `merge-orchestrator`'s
+D13's `R-MERGE-020` addition pushed `merge-orchestrator`'s
 `spec_bundle_words` to 4074 — over D2's 4000 hard-fail cap, and the exact
 outcome `pipeline-decomposition.md`'s own "finding" section had already
-predicted after D22: fan-out (14, already at double the warn threshold)
+predicted after D9: fan-out (14, already at double the warn threshold)
 and word count crowding their ceilings *at the same time*, not just
 either alone. The question that prompted this decision: is that pairing
 a sign the caps are set too low, or a sign of a genuinely
@@ -1472,7 +1478,7 @@ gate (`R-MERGE-014`'s dispatch mechanics, `R-MERGE-020`'s
 capability-intersection lookup) is, structurally, the cross-component
 analog of what `verifier-orchestrator` already does per-component: same
 `criterion-compiler`/`test_author`/`judge` dispatch, one scope level up.
-It lived inside `merge-orchestrator` only because D16 added it to an
+It lived inside `merge-orchestrator` only because D2 added it to an
 existing sequencing step, not because it conceptually belongs there.
 Extracted into a new component, `golden-scenario-verifier`:
 
@@ -1509,16 +1515,16 @@ corpus — not to raise the cap, and not to expect fan-out itself to drop
 as proof the split worked.
 
 See `SPEC_GUIDELINES.md` §4, `specs/architecture/
-pipeline-decomposition.md`'s "Resolved (D25)" note, and
+pipeline-decomposition.md`'s "Resolved (D14)" note, and
 `specs/components/golden-scenario-verifier/` for the current,
 authoritative rules this produced.
 
 ---
 
-### D26 — `review-packet-builder`'s redundant fan-out dropped; `merge-tracker-ui`'s local-open question resolved to a trivial static-file server
+### D26 (`specs/decisions/D16.md`) — `review-packet-builder`'s redundant fan-out dropped; `merge-tracker-ui`'s local-open question resolved to a trivial static-file server
 
 Two small, unrelated loose ends closed together, both flagged during the
-warnings/next-steps review that followed D25.
+warnings/next-steps review that followed D14.
 
 - **`review-packet-builder`'s fan-out (5 → 1).** It depended directly on
   `verifier-orchestrator`, `license-scanner`, `secret-scanner`, and
@@ -1530,7 +1536,7 @@ warnings/next-steps review that followed D25.
   `R-PACKET-011` makes this explicit (read via `component_provenance`,
   never a live call), and `depends_on` drops to `[comp-provenance-writer]`
   alone. In the process, `component_provenance` (previously scoped to
-  `corpus-graph-builder` alone, D24) was promoted into
+  `corpus-graph-builder` alone, D13) was promoted into
   `graph-query-engine.md`'s shared "Query surface" section — the premise
   for keeping it local ("no other component needs this") stopped holding
   the moment a second consumer appeared, the same reasoning that already
@@ -1555,9 +1561,9 @@ current, authoritative rules this produced.
 
 ---
 
-### D27 — `spec-linter`'s requirement-traceability rules (R-LINT-008/009) adopted onto `nodes`/`edges`, closing D24's one deferred item
+### D27 (`specs/decisions/D13.md`) — `spec-linter`'s requirement-traceability rules (R-LINT-008/009) adopted onto `nodes`/`edges`, closing D13's one deferred item
 
-D24 deferred this because it looked like it needed a second graph
+D13 deferred this because it looked like it needed a second graph
 vocabulary (`R-id`/`AC-id` nodes, a `Covers:`-derived edge) separate from
 `nodes`/`edges`. Reading `spec_linter.py`'s actual
 `rule_forward_traceability`/`rule_backward_traceability` implementation
@@ -1568,7 +1574,7 @@ validated against known `R-id`/`P-id` nodes. Neither needs `AC-id` or
 `GS-id` as addressable nodes — golden scenarios in particular, living as
 inline `### GS-...` headings inside a product file rather than their own
 file, never have to be resolved as a node, only extracted as an edge
-*target value*. The real scope was smaller than D24 estimated.
+*target value*. The real scope was smaller than D13 estimated.
 
 Presented as a choice regardless of the smaller real scope — minimal
 extension (just enough for these two rules), full node modeling
@@ -1584,7 +1590,7 @@ completeness.
   a file's body rather than from a glob, since it has no file of its
   own).
 - **`edges`** gains `covers`: from each component-acceptance file's
-  single `Covers:` line (D15: the file *is* one criterion), and from
+  single `Covers:` line (D1: the file *is* one criterion), and from
   each golden scenario's `Covers:` line paired with the heading
   immediately above it inside its product file — the one branch flagged
   explicitly in `graph-query-engine.md` as genuinely harder than every
@@ -1602,7 +1608,8 @@ produced.
 
 ## 12. Open questions
 
-_None outstanding — Q9–Q13 from the review pass are now D10–D14; D15 was a
+_None outstanding — Q9–Q13 from the review pass are now D10–D14; D1 (this
+section's own `D15`) was a
 redesign triggered by resolving blast-radius item 3 from a later working
 session, not an open question left over from the original brainstorm._
 
@@ -1744,7 +1751,7 @@ re-add it once (and if) this mechanism is actually built, not before.
 
 ### Mechanical notes for reintroduction
 
-- `generator`'s `depends_on_guarantees: [G-CACHE-001]` (the D16 worked
+- `generator`'s `depends_on_guarantees: [G-CACHE-001]` (the D2 worked
   example) currently belongs to `generator`, not
   `cross-model-divergence-checker` — if the latter returns, it would
   likely want the same declaration for the same reason (its own concurrent
