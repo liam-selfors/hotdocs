@@ -39,7 +39,8 @@ change.
 | `merge-tracker-ui` | A local, per-developer static page (DuckDB-WASM, core `read_json` only — not `duckpgq`, which this component doesn't actually need) rendering `.hotdocs/tracking/` directly in the browser, opened via a trivial local static-file server (`hotdocs track ui serve`, R-UI-006, D16) rather than `file://` — removes CORS inconsistency across browsers. The server computes nothing; DuckDB-WASM still queries entirely client-side. Not a CI artifact like `docs-site-renderer` — a different data lifecycle (local-only vs. committed) genuinely requires a different one. Implements no retry action of its own; re-running the merge command already is the complete recovery path (`R-MERGE-018`). Fully specced. | `merge-tracker` |
 | `docs-site-renderer` | Pure renderer of `corpus-graph.json` into the interactive graph/docs site. Not committed; CI build artifact. Fully specced. | `corpus-graph-builder` |
 | `capability-scenario-verifier` | Runs the capability scenarios of every product capability whose `realizes`-set intersects a merge's blast radius, against the real assembled `gen/` output — the permanent backstop for cross-component behavioral risk `interface/guarantees/` can't fully rule out by documentation alone. Same dispatch mechanisms `verifier-orchestrator` already established (`criterion-compiler`/`test_author`/`judge`), one scope level up. Extracted from `merge-orchestrator` (D14) once that component's fan-out and word-count caps crowded simultaneously — see the finding below, now resolved rather than just flagged. Renamed from `golden-scenario-verifier` (D23) once "golden" turned out to communicate nothing about what this actually is. Fully specced. | `criterion-compiler`, `test-author` |
-| `merge-orchestrator` | Sequences the above per `SPEC_GUIDELINES.md` §6, parallelizing independent gates. Calls `generator` **exactly once** per cache-miss, non-sealed component per merge attempt — the old best-of-k retry loop (originally diagnostic-guided) was retired (D3): a failed attempt blocks the merge for that component immediately, with no second call, no seed variation, no `retry_feedback`. Re-running the merge (`R-MERGE-018`, unaffected) is now the only path back to a fresh generation attempt, deliberately gated behind a human looking at `D19`'s per-attempt record first. Also where the real `test_author`/`judge` callables get wired into `verifier-orchestrator`'s call — nothing upstream assigned that wiring either, until this component's spec made it explicit; since D18, `judge`'s real implementation is backed by `llm-endpoint`. **Since D2, calls `capability-scenario-verifier`** once every component has passed per-component verification, wiring the same real callables into that call — the dispatch logic itself moved out (D14); this component only owns *when* and *with what* it's called now. Fully specced — its real `fan_out` is 15 as of D18 (D29 swapped `cache-manager` for `provenance-checker` without changing the count), accepted for the same reason D14's note already gives: a thin coordinator calling one more leaf component doesn't change its risk shape. `component_doc_words` is now within single digits of the hard-fail cap (`D29`) — the finding below's prediction that this dimension would eventually need relief is no longer hypothetical; see that note for the current word budget. | everything above |
+| `merge-orchestrator` | Sequences the above per `SPEC_GUIDELINES.md` §6, parallelizing independent gates. Schedules a `component-gate-runner` call per cache-miss, non-sealed component per merge attempt, in `depends_on` order, running every component to completion before evaluating the block decision (no fail-fast). Also where the real `test_author`/`judge` callables get wired — nothing upstream assigned that wiring either, until this component's spec made it explicit; since D18, `judge`'s real implementation is backed by `llm-endpoint`; the same wired callables pass into every `component-gate-runner` call and the `capability-scenario-verifier` call alike (`D76`). **Since D2, calls `capability-scenario-verifier`** once every component has passed per-component verification — the dispatch logic itself moved out (D14); this component only owns *when* and *with what* it's called now. Fully specced — its real `fan_out` dropped to 9 under `D76`, which extracted `component-gate-runner` (the per-component provenance/generation/verification/scan/provenance-write gauntlet) out of this component a second time, the same fix `D14` applied once before once `component_doc_words` and `fan_out` crowded together again; see the finding below for the full history. | everything above |
+| `component-gate-runner` | Runs one impacted, non-sealed component through its full per-component gauntlet — provenance check, generation on a miss, verification dispatch, compliance scanning, provenance write — returning one `ComponentPipelineResult`. Extracted out of `merge-orchestrator` (`D76`) the second time that component's `fan_out` and `component_doc_words` crowded together; mirrors the same per-item-dispatcher shape `capability-scenario-verifier`'s own `D14` extraction already established. Calls `generator` **exactly once** per invocation — no automatic retry loop (`D3`) — and accepts already-wired `test_author`/`judge` callables from `merge-orchestrator` rather than constructing them itself. Fully specced, not yet regenerated. | `provenance-checker`, `spec-bundle-assembler`, `generator`, `verifier-orchestrator`, `license-scanner`, `secret-scanner`, `provenance-writer` |
 
 ## Advisory tooling (not part of the merge pipeline)
 
@@ -133,6 +134,31 @@ since nothing about this addition was crowding on its own terms, just
 dense. The next requirement-level addition to this component likely
 won't fit without either trimming elsewhere first or finally acting on
 this section's own long-flagged fan-out/word-count tension.
+
+**Resolved a second time (D76), the same way as D14, not a new
+pattern:** `component_doc_words` did cross the hard-fail cap (4014/4000)
+and `fan_out` was still at 15 — both dimensions crowding at once again,
+the identical signal `R-LINT-022` fired for before D14. The same
+per-item-dispatcher shape was available to borrow a second time:
+`R-MERGE-003/004/005/006/008/009/015` — the provenance-check through
+generation/verification/scanning/provenance-write gauntlet for one
+impacted component — was already self-contained, living in
+`merge-orchestrator` only because nothing had extracted it yet, not
+because it was conceptually a sequencing concern. Extracted as
+`component-gate-runner`. Unlike D14's extraction, where fan-out stayed
+flat on principle ("extraction doesn't shrink a coordinator's *call*
+count"), fan-out *did* drop here in practice — from 15 to 9 — because
+every one of the seven components `component-gate-runner` now calls
+(`provenance-checker`, `spec-bundle-assembler`, `generator`,
+`verifier-orchestrator`, `license-scanner`, `secret-scanner`,
+`provenance-writer`) had been a direct `merge-orchestrator` dependency
+used for nothing else; `merge-orchestrator` never needed to keep
+calling any of them directly once the gauntlet moved. This doesn't
+reopen this section's earlier "fan-out stays flat" observation — that
+was true of D14's extraction specifically, not a general law; whether
+fan-out drops after an extraction depends on whether the parent
+coordinator had any *other* reason to call the extracted component's
+own dependencies directly, which here it didn't.
 
 ## Sealed component, by design rather than by legacy debt
 

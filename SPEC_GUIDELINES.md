@@ -422,9 +422,18 @@ already exists elsewhere in the corpus: `D14` extracted
 crowded at once, because that logic was already the cross-component
 analog of `verifier-orchestrator`'s existing per-component dispatch — the
 split mirrored a pattern already present, it wasn't invented from
-scratch. Expect fan-out itself **not** to drop from such a split — the
-coordinator still has to call the new component — the dimension that
-should actually move is component-doc words.
+scratch. The dimension that should actually move is component-doc
+words — but don't assume fan-out's own fate either way without
+checking: `D14`'s extraction left it flat (`merge-orchestrator` had its
+own independent reasons to keep calling several of
+`capability-scenario-verifier`'s own dependencies directly), while
+`D76` — the same kind of extraction, applied to `merge-orchestrator` a
+second time, for `component-gate-runner` — saw it actually drop (every
+dependency the new component encapsulated had no other caller). Whether
+fan-out drops depends on whether the coordinator had a second reason to
+call the extracted dependencies directly, not on the extraction pattern
+itself. See `notes/component-sizing-playbook.md` for both worked
+cases.
 
 Sometimes the honest conclusion is that no precedent exists and no split
 is warranted: `spec-linter` crowding `generated_code_loc`,

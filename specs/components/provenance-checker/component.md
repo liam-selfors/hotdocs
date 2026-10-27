@@ -15,7 +15,7 @@ sealed: false
 
 Decides whether a component's already-committed `.provenance.json`
 proves it was already verified against the exact spec state a merge is
-currently checking — so `merge-orchestrator` can safely skip
+currently checking — so `component-gate-runner` can safely skip
 regeneration and re-verification for that component.
 
 ## Rationale

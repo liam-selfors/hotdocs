@@ -20,14 +20,15 @@ than propagated further.** `generation_result` is always populated —
 more than one populated, per that type's own contract) already carry
 whether a candidate exists at all. `verification_report` is `null`
 whenever `generation_result.files` is empty (nothing was ever produced to
-verify) and populated otherwise — this mirrors `MergeResult`'s own
-`model_call_error`/`verification` split (R-MERGE-005's closed gap), so
+verify) and populated otherwise — this mirrors `ComponentPipelineResult`'s
+own `model_call_error`/`verification` split (`component-gate-runner`'s
+`R-GATE-004`), so
 `provenance-writer` can write a coherent manifest for a component that
 never reached verification, not only for one that did.
 
 `license_scan_result`/`secret_scan_result` are always populated
 regardless of generation outcome — both scans run unconditionally
-(`R-MERGE-008`) and don't depend on `generation_result` having
+(`component-gate-runner`'s `R-GATE-005`) and don't depend on `generation_result` having
 succeeded. This bundle previously listed a `cross_model_check` field
 (`CrossCheckResult` or `None`) from when `cross-model-divergence-checker`
 existed; removed along with that component (the second-model scope cut) —

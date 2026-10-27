@@ -7,13 +7,15 @@ operation that goes through here — never an ordinary component spec edit.
 See `SPEC_GUIDELINES.md` §3.2.
 
 - **`pipeline-decomposition.md`** — the hotdocs pipeline tool's own
-  22-component decomposition and dependency graph. Documents a real,
+  24-component decomposition and dependency graph. Documents a real,
   deliberately-explained tension (`merge-orchestrator`'s fan-out exceeds
-  its own warn threshold) rather than silently patching it — D14 resolved
-  the word-count half of that tension by extraction once it actually hit
-  the hard-fail cap, and the fan-out half stays accepted-not-a-defect, by
-  design, as a thin coordinator's expected shape. See the file's own
-  "finding" section and its `Resolved (D14)` note for the full history.
+  its own warn threshold) rather than silently patching it — `D14` and
+  `D76` each resolved the word-count half of that tension by extraction
+  once it actually hit the hard-fail cap (twice, so far), and the
+  fan-out half stays accepted-not-a-defect, by design, as a thin
+  coordinator's expected shape. See the file's own "finding" section
+  and its `Resolved (D14)`/`Resolved a second time (D76)` notes for the
+  full history.
 - **`step-phrase-grammar.md`** — the fixed Given/When/Then step grammar
   every `compiled`-kind acceptance criterion is written against, and that
   `criterion-compiler` implements. A breaking change to every `compiled`

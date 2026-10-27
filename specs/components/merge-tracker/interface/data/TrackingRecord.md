@@ -30,8 +30,9 @@
 
 One file per record, filename-prefixed with `attempt_id` (R-TRACK-003) so
 glob ordering is chronological. `model_call_error: true` means the final
-attempt never reached verification (mirrors `MergeResult`'s own
-`model_call_error`/`verification` split, R-MERGE-005's closed gap) — in
+attempt never reached verification (mirrors `ComponentPipelineResult`'s
+own `model_call_error`/`verification` split, `component-gate-runner`'s
+`R-GATE-004`) — in
 that case `verification_overall` is `null`, not `"fail"`; those are
 different facts (never produced a candidate, vs. produced one and failed
 checking it). `license_flagged`/`secret_flagged` are booleans, not the

@@ -24,9 +24,9 @@ canonical schema; writing it to both required locations; the
 provenance-hit copy-forward behavior.
 
 **Out of scope:** deciding *whether* a component's result is a
-provenance hit (`provenance-checker`/`merge-orchestrator` already
+provenance hit (`provenance-checker`/`component-gate-runner` already
 decided that and supplied the already-sourced fields by the time this
-component runs, `D29`); running any gate itself.
+component runs, `D29`/`D76`); running any gate itself.
 
 ## Definitions
 

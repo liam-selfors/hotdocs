@@ -1,11 +1,12 @@
 # R-MERGE-014
 
 **R-MERGE-014** — Once every component in the blast radius has regenerated
-  and passed its own per-component verification (R-MERGE-004–009 for all
-  of them, not just one), MUST call `capability-scenario-verifier` with
-  the full blast-radius component-id set, wiring the same real `judge`
-  and `test_author` callables R-MERGE-004 wires into
-  `verifier-orchestrator`'s call, and incorporate its
+  and passed its own per-component verification (`component-gate-runner`'s
+  `R-GATE-001`–`006` for all of them, not just one), MUST call
+  `capability-scenario-verifier` with the full blast-radius component-id
+  set, wiring the same real `judge` and `test_author` callables this
+  component wires into every `component-gate-runner` call (`D76` — the
+  one wiring site for both), and incorporate its
   `CapabilityScenarioReport` into `MergeResult.capability_scenarios` (a
   distinct result category from any single component's own
   verification, never conflated with it) and the overall block decision

@@ -130,7 +130,7 @@ Specced in full depth so far:
   current `spec_bundle_hash`/`gate_versions`, gated additionally by
   `VAR-TRUST-JUDGE-PROVENANCE` for any component with an `llm-judge`
   criterion. Deliberately excluded from `sealed`-component routing
-  (`R-MERGE-003`/`015`): a sealed component's hash reflects only its
+  (`component-gate-runner`'s `R-GATE-001`/`007`): a sealed component's hash reflects only its
   spec, never its hand-maintained `source_path`, so trusting a hit there
   would mean never re-running the one check that could catch a human's
   own edit silently breaking something.
@@ -183,32 +183,45 @@ Specced in full depth so far:
   the complete recovery path (`R-MERGE-018`), so there is nothing for this
   component to wire up beyond showing status clearly.
 - **`merge-orchestrator`** — all `kind: compiled`, despite sequencing every
-  model-calling, judgment-involving gate in the whole pipeline. Called
-  `generator` up to `k` times per component via the old diagnostic-guided
-  best-of-k retry loop until it was retired (D3) entirely —
-  now calls it exactly once per component per merge attempt, blocking
-  immediately on failure rather than retrying with feedback; a human
-  reviewing D19's per-attempt record and re-running the merge is the
-  only recovery path left. Wires the real `test_author`/`judge`
-  callables into `verifier-orchestrator`'s call (since D18, `judge` is
-  backed by `llm-endpoint`) — three responsibilities nothing had
-  explicitly assigned before `generator`'s, `verifier-orchestrator`'s, and
-  the blast-radius/D2 threads each forced the question. Since D2, also
-  calls `capability-scenario-verifier` once every component has passed
-  per-component verification; the capability-scenario dispatch logic itself
-  (and the capability-intersection lookup) lived here only until D14,
-  once both this component's fan-out and its component-doc word count
-  crowded their caps at once — it was extracted into
+  model-calling, judgment-involving gate in the whole pipeline. Schedules
+  a `component-gate-runner` call per cache-miss, non-sealed component per
+  merge attempt (that component owns the old best-of-k-retired,
+  exactly-once `generator` call now, `D3`/`D76`) — a failed attempt
+  blocks the merge for that component immediately; a human reviewing
+  D19's per-attempt record and re-running the merge is the only recovery
+  path left. Wires the real `test_author`/`judge` callables — passed
+  into every `component-gate-runner` call and the
+  `capability-scenario-verifier` call alike, the one wiring site for both
+  (`D76`) — a responsibility nothing had explicitly assigned before
+  `generator`'s, `verifier-orchestrator`'s, and the blast-radius/D2
+  threads each forced the question. Since D2, also calls
+  `capability-scenario-verifier` once every component has passed
+  per-component verification; the capability-scenario dispatch logic
+  itself (and the capability-intersection lookup) lived here only until
+  D14, once both this component's fan-out and its component-doc word
+  count crowded their caps at once — it was extracted into
   `capability-scenario-verifier` as the cross-component analog of
   `verifier-orchestrator`'s own per-component dispatch; this component now
-  only owns *when* and *with what* that gets called. Its real, measured
-  `fan_out` is 15 as of D18 (14 after D14's extraction, +1 for
-  `llm-endpoint`; D29 swapped `cache-manager` for `provenance-checker`
-  without changing the count) — confirmed against the actual linter, together with
-  `component_doc_words` the one component besides `spec-linter` whose
-  `R-LINT-022` crowding finding is real, accepted, and explained rather
-  than resolved — see `specs/architecture/pipeline-decomposition.md`'s
-  dedicated note.
+  only owns *when* and *with what* that gets called. The same crowding
+  signal fired again later and was resolved the same way a second time
+  (`D76`): the per-component provenance/generation/verification/scan/
+  provenance-write gauntlet (`R-MERGE-003/004/005/006/008/009/015`)
+  extracted into `component-gate-runner`. Its real, measured `fan_out`
+  dropped to 9 as a result (from 15 as of D18: 14 after D14's
+  extraction, +1 for `llm-endpoint`) — every one of
+  `component-gate-runner`'s own seven dependencies had been a direct
+  `merge-orchestrator` dependency used for nothing else, so none needed
+  to stay one. See `specs/architecture/pipeline-decomposition.md`'s
+  dedicated note for the full crowding history.
+- **`component-gate-runner`** — all `kind: compiled`. Extracted from
+  `merge-orchestrator` by D76, the same fix D14 applied once before:
+  runs one impacted, non-sealed component through its provenance check,
+  generation on a miss, verification dispatch, compliance scanning, and
+  provenance write, returning one `ComponentPipelineResult`. Accepts
+  already-wired `test_author`/`judge` callables as parameters rather
+  than constructing them itself — `merge-orchestrator` remains the only
+  layer with a model identifier to capture, avoiding a second, duplicate
+  wiring site. Fully specced, not yet regenerated.
 
 - **`spec-completeness-assistant`** — the assist agent this methodology
   always assumed but never named, and that two `notes/metrics.md` metrics

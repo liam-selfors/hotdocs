@@ -6,7 +6,7 @@
   "dependent_decisions": ["D31"],
   "citing_files": [
     "specs/components/merge-orchestrator/component.md",
-    "specs/components/merge-orchestrator/requirements/R-MERGE-005.md"
+    "specs/components/merge-orchestrator/requirements/R-MERGE-010.md"
   ]
 }
 ```

@@ -26,8 +26,8 @@ call, a specific vendor's API.
 (D18.) Extracted once a real coupling was found, not invented
 speculatively: `generator` and `test-author` each independently
 declared `uses_var: [VAR-ANTHROPIC-API-KEY]`, and `merge-orchestrator`'s
-`judge` wiring (`R-MERGE-004`) was "a direct call to the configured
-model" with no component behind it at all. Swapping vendors meant
+`judge` wiring (now `R-MERGE-014`, `D76`) was "a direct call to the
+configured model" with no component behind it at all. Swapping vendors meant
 touching at least three places; `R-GEN-004` already treats the model
 *identifier* as a vendor-agnostic string parameter, but nothing
 previously owned the *mechanics* of actually calling whatever that

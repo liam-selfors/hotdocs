@@ -16,8 +16,8 @@
   pulled from anywhere else this component can reach (e.g. by
   re-deriving them from `acceptance/` files that happen to be on disk).
 - **Defense-in-depth on write paths.** R-GEN-009's sealed/pinned-override
-  check MUST be enforced here even though `merge-orchestrator`'s own
-  routing requirement (R-MERGE-015) means it should never call this
+  check MUST be enforced here even though `component-gate-runner`'s own
+  routing requirement (`R-GATE-007`) means it should never call this
   component for a sealed component's regeneration in the first place — a
   second, independent layer, not a redundant one to remove now that the
   primary layer is a real requirement rather than an assumption.

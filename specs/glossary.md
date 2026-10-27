@@ -100,7 +100,7 @@ split.
   the real functions a `judge`/`test_author` closure ultimately calls
   — match this single-argument shape themselves (both take a `model`
   parameter with no default, among others). Whoever constructs the
-  closure (`merge-orchestrator`, `R-MERGE-004`/`014`) must capture
+  closure (`merge-orchestrator`, `R-MERGE-014`, `D76`) must capture
   `model`/`llm_backend` itself and expose only the single-`bundle`-arg
   shape outward — this was never stated as a requirement anywhere
   before `D65`.

@@ -3,9 +3,10 @@
 **R-MERGE-022** — `run_merge` MAY optionally receive `retry_feedback`: a
   mapping of `component_id` to an `R-id` list, supplied by whoever is
   invoking this merge. For a component with an entry in that mapping,
-  the one `generator` call R-MERGE-005 makes for it MUST include that
-  `R-id` list as `retry_feedback` (R-GEN-012); every other component's
-  call MUST remain blind.
+  this component MUST pass that `R-id` list as `retry_feedback` into
+  its `component-gate-runner` call for it (`R-GATE-003`, which in turn
+  MUST include it as `retry_feedback` on the one `generator` call it
+  makes, R-GEN-012); every other component's call MUST remain blind.
 
   This component MUST NOT compute, derive, or default this mapping
   itself — not from `.hotdocs/attempts/`, not from any prior merge's

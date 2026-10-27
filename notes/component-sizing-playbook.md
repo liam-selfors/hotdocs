@@ -60,7 +60,8 @@ drop `component_doc_words` "well clear" of both thresholds — the
 capability-scenario dispatch logic moved out completely, taking its
 words with it. `D29`'s extraction did **not**: `provenance-checker`
 took the *mechanics* of the hit/miss check, but `merge-orchestrator`
-still had to document, in its own `R-MERGE-003`/`015`, *when* and *why*
+still had to document, in its own requirements (now `component-gate-
+runner`'s `R-GATE-001`/`007` after `D76` moved them), *when* and *why*
 it calls the new component versus routing around it entirely for a
 sealed component — reasoning that belongs to the coordinator's own
 routing decision, not the extracted component's. An extraction relieves
@@ -68,6 +69,23 @@ word pressure only for the words that actually left; words describing
 the coordinator's own remaining decision don't leave just because a
 mechanism moved. Check the actual number after extracting — don't
 assume the shape of `D14`'s outcome repeats.
+
+**Nor should you assume `fan_out` stays flat, either.** `D76` extracted
+`component-gate-runner` out of `merge-orchestrator` the same way `D14`
+did — but unlike `D14`, fan-out actually dropped, from 15 to 9. The
+difference: every one of the seven dependencies `component-gate-runner`
+now calls (`provenance-checker`, `spec-bundle-assembler`, `generator`,
+`verifier-orchestrator`, `license-scanner`, `secret-scanner`,
+`provenance-writer`) had been a direct `merge-orchestrator` dependency
+used for nothing but that one gauntlet — there was no other reason for
+`merge-orchestrator` to keep calling any of them directly. `D14`'s
+extraction didn't get this benefit because `merge-orchestrator` had
+(and still has) its own independent reasons to call several of
+`capability-scenario-verifier`'s own dependencies directly. Whether
+fan-out drops depends on whether the parent coordinator ever had a
+*second* reason to call the extracted component's dependencies, not on
+the extraction pattern itself — check both numbers after extracting,
+don't assume either one from precedent alone.
 
 **If no real precedent exists:** do not invent a split just to relieve
 the finding. A split with no structural precedent is premature

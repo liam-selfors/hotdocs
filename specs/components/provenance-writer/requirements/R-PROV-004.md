@@ -6,4 +6,5 @@
   `D29`: this field has never meant "`cache-manager` had an entry" (a
   per-gate concern, e.g. `GenerationResult.cache_hit`) — it means
   `provenance-checker` reported a hit for the whole component, a fact
-  only `merge-orchestrator` knows, since it's the one that asked.
+  only `component-gate-runner` knows, since it's the one that asked
+  (`D76`).

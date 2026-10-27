@@ -40,8 +40,8 @@ what it did for provenance.
 **Out of scope, deliberately (explains why `depends_on` excludes
 `verifier-orchestrator`):** any retry of its own. Exactly one candidate
 per call, ever — single-shot, stateless about prior attempts. `D3`
-retired the best-of-k retry loop; `merge-orchestrator` calls this once
-per component per merge attempt (`R-MERGE-005`), and a fresh human
+retired the best-of-k retry loop; `component-gate-runner` calls this
+once per component per invocation (`R-GATE-003`), and a fresh human
 merge attempt (`R-MERGE-018`) is the only path back for a failed one.
 Retry logic here would require depending on `verifier-orchestrator`,
 which nothing upstream says it does.
@@ -96,8 +96,8 @@ See `constraints.md`.
   directly, or whether `merge-orchestrator` should filter the write-set
   first~~ — resolved: both, as two independent layers. `generator` reads
   sealed/`.overrides.json` status directly as a precondition check, before
-  any model call (R-GEN-009, refined). `merge-orchestrator` gained its own
-  routing requirement (R-MERGE-015) to skip calling `generator` for a
+  any model call (R-GEN-009, refined). `component-gate-runner` gained its
+  own routing requirement (`R-GATE-007`) to skip calling `generator` for a
   sealed component in the first place — the primary, cost-aware path;
   `generator`'s own check is the independent backstop, not the only
   enforcement.

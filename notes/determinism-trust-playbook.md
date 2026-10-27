@@ -71,8 +71,9 @@ is misdesigned, not a sign the variable is reusable.
    reflects only its *spec*, never its `source_path` — any new
    mechanism trusting a hash match must explicitly exclude sealed
    components, or it will silently stop catching a human's own edit
-   breaking something (`R-MERGE-015`'s reasoning, almost reintroduced
-   by `provenance-checker` before this check was made explicit).
+   breaking something (`component-gate-runner`'s `R-GATE-007` reasoning,
+   almost reintroduced by `provenance-checker` before this check was
+   made explicit).
 
 ## Quick reference
 

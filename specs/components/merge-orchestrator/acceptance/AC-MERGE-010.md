@@ -4,7 +4,7 @@ Covers: R-MERGE-010
 Kind: generated-test
 
 ```gherkin
-Given provenance-writer has completed for every impacted component
+Given every impacted component's component-gate-runner call has completed
 When run_merge is called
 Then corpus-graph-builder and review-packet-builder are invoked exactly
   once each, not once per component
