@@ -1,7 +1,7 @@
 # Bootstrap Account: `docs-site-renderer`
 
 First real cold-generation of this component, via the self-hosted
-`gen/generator/generator.py` (`D58`), in a single real `generate()`
+`gen/generator/generator.py` (`D42`), in a single real `generate()`
 call that passed verification on the first try.
 
 A genuinely different kind of deliverable from every component built
@@ -16,7 +16,7 @@ a clean, correct reading of `R-DOCS-004`'s "pure function of the
 graph" requirement.
 
 One real gap found while building this component's own test suite
-(`D71`): `R-DOCS-005` requires the rendered output never be committed,
+(`D55`): `R-DOCS-005` requires the rendered output never be committed,
 and the CLI's own default output path is `dist/docs-site/` — but
 `.gitignore` had no `dist/` entry at all, anywhere in this repo. A
 careless `git add -A` after a local render could have committed it.

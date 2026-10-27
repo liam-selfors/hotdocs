@@ -1,7 +1,7 @@
 # Bootstrap Account: `license-scanner`
 
 First real cold-generation of this component, via the self-hosted
-`gen/generator/generator.py` (`D58`), through two real `generate()`
+`gen/generator/generator.py` (`D42`), through two real `generate()`
 calls.
 
 **Call 1** produced a genuinely well-reasoned candidate — correct
@@ -12,8 +12,8 @@ call — but defaulted its reference-corpus lookup path to
 gate's pass/fail decision from depending on `.hotdocs/` content
 (gitignored, local-only, observability-only) — and this corpus's
 content directly determines `blocked`. Real gap, same root cause as
-`D62`/`D65`: `SPEC_GUIDELINES.md` is never part of any `SpecBundle`.
-Fixed with a new `VAR-LICENSE-CORPUS-PATH` (`D67`). Not swapped in.
+`D46`/`D49`: `SPEC_GUIDELINES.md` is never part of any `SpecBundle`.
+Fixed with a new `VAR-LICENSE-CORPUS-PATH` (`D51`). Not swapped in.
 
 **Call 2**, with that fix in place, correctly reads the corpus path
 from `VAR-LICENSE-CORPUS-PATH` only, with no `.hotdocs/` fallback, and

@@ -31,13 +31,13 @@ without error — `load_views` not raising is not the same thing as
 **Every view's row/edge counts were cross-checked against an
 independent count computed a different way** (`pathlib`/`re` over the
 real file tree, not DuckDB) — not just "did the query run without
-error." This is the same discipline `D42`/`D43` already established:
+error." This is the same discipline `D13` already established:
 running SQL and getting a result back is not the same as the result
 being correct.
 
 **Two more bugs found only once this engine was wired into a second,
 sparser caller** (`spec-linter`'s own test suite, which builds minimal
-synthetic corpora rather than always using this repo's real one — D44):
+synthetic corpora rather than always using this repo's real one):
 
 - `read_yaml_frontmatter` raises when its glob matches zero files, the
   same way `read_json` already did for `component_provenance` — but for
@@ -65,7 +65,7 @@ synthetic corpora rather than always using this repo's real one — D44):
   switching it in.
 
 **One more bug found only once a real `.provenance.json` existed**
-(`corpus-graph-builder`'s own bootstrap, D45): `component_provenance`'s
+(`corpus-graph-builder`'s own bootstrap): `component_provenance`'s
 `read_json(..., *)` auto-detects a field that looks like an ISO-8601
 timestamp (`generated_at`) as `TIMESTAMP WITH TIME ZONE` rather than
 leaving it `VARCHAR` — and materializing that type requires the `pytz`
@@ -75,7 +75,7 @@ yet, so nothing had ever hit this path before. Tried pinning
 `generated_at`'s type via `read_json`'s own `columns` parameter first —
 confirmed, by hand, that `columns` forces a closed schema (same
 intersection-only behavior `edges`' `read_yaml_frontmatter` rewrite
-already found, `D44`), which would drop every other passthrough field
+already found, `D13`), which would drop every other passthrough field
 `component_provenance`'s own docstring promises. Accepted `pytz` as a
 real, declared runtime dependency instead (the simplest fix that doesn't
 fight DuckDB's type system for a two-package problem) — see

@@ -1,15 +1,15 @@
 # Bootstrap Account: `secret-scanner`
 
 First real cold-generation of this component, via the self-hosted
-`gen/generator/generator.py` (`D58`), in a single real `generate()`
+`gen/generator/generator.py` (`D42`), in a single real `generate()`
 call that passed verification on the first try.
 
-Before this attempt, `D69` proactively declared
+Before this attempt, `D53` proactively declared
 `VAR-SECRET-PATTERNS-PATH` — `secret-scanner`'s own spec explicitly
 mirrors `license-scanner`'s reference-corpus sourcing text
 (`R-SECRET-001` cites `R-LICENSE-001` by name), and a real
 `license-scanner` candidate had already defaulted to `.hotdocs/`
-before `VAR-LICENSE-CORPUS-PATH` existed to correct it (`D67`). Adding
+before `VAR-LICENSE-CORPUS-PATH` existed to correct it (`D51`). Adding
 the analogous var up front avoided spending a billed call to
 rediscover the identical, predictable gap.
 

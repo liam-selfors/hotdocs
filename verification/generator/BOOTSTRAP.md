@@ -7,7 +7,7 @@ cold-regenerating, so nothing could ever have cold-regenerated it first,
 even once this file makes real generation possible for everything else.
 
 **Two real, pre-existing interface gaps found while wiring this for
-real**, both fixed (`D50`):
+real**, both fixed:
 
 - `generate()` had no `repo_root` parameter, yet `R-GEN-009`'s
   sealed/pinned-override precondition check needs to read a component's
@@ -42,42 +42,43 @@ mechanism nothing here yet asks for.
 Verified entirely on an injected mock backend, at zero cost: all 10
 tests pass (one per `AC-GEN-*` criterion with a defined acceptance
 file — `R-GEN-007`/`010` have no corresponding `AC-GEN-*` file in this
-corpus, both superseded by `D31`'s retirement of the best-of-k retry
+corpus, both superseded by `D3`'s retirement of the best-of-k retry
 loop; nothing to test against). None of this component's own
 verification requires a real model call.
 
 The real end-to-end integration — a genuine cold-generation attempt
 against the real corpus, through this exact code — is the self-hosting
-experiment recorded in `specs/decisions/D51.md`, not repeated here.
+experiment this component's own decision history records, not repeated
+here.
 
 **This component was itself the target of a real self-regeneration
-attempt (`D54`)** — a well-architected five-file candidate came back,
+attempt** — a well-architected five-file candidate came back,
 but failed to import (it assumed `cache-manager` was a package with a
 `.data` submodule; the real one is a flat module) and was correctly
 rejected rather than swapped in. `gen/generator/generator.py` is still
-this file, unchanged. See `D54` for the full account and
-`notes/backlog.md` for the generalizable import-path gap it exposed.
+this file, unchanged. See `notes/backlog.md` for the generalizable
+import-path gap it exposed.
 
-**`D55` closes that gap, one-directionally.** `_build_prompt` now
+**`D37` closes that gap, one-directionally.** `_build_prompt` now
 includes `bundle.dependency_usage` (`R-ASSEMBLE-011`) as its own
 section (`R-GEN-013`) — real, introspected import facts about each
 dependency's current code, never anything about how *this* component's
 own dependents use it (that direction was considered and rejected, see
-`D55` for why). `PROMPT_VERSION` bumped to `v2` since the template text
+`D37` for why). `PROMPT_VERSION` bumped to `v2` since the template text
 changed.
 
-**`D56` and `D57` each found further real bugs** re-attempting the
-self-regeneration with `D55`'s fix in place: a self-referential
+**Two further real bugs** were found re-attempting the
+self-regeneration with that fix in place: a self-referential
 delimiter collision unique to this one component (fixed with a per-call
-nonce), a degenerate empty-files result silently poisoning the cache
-(fixed by caching only non-empty results), an undocumented
+nonce, `D38`), a degenerate empty-files result silently poisoning the cache
+(fixed by caching only non-empty results, `D39`), an undocumented
 `cache-manager` payload schema (documented in
-`interface/data/CachedResult.md`, `D56`/`D57`), and a real crash in one
+`interface/data/CachedResult.md`, `D40`), and a real crash in one
 candidate's dynamic dependency-loading technique that omitted
 registering the loaded module in `sys.modules` before running its code
-(documented as `R-GEN-014`, `D57`).
+(documented as `R-GEN-014`, `D41`).
 
-**`D58`: this file is no longer this component's installed code.** A
+**`D42`: this file is no longer this component's installed code.** A
 fourth real retry, with every fix above in place, produced a complete,
 537-line candidate that passed all 12 of this component's own
 `AC-GEN-*` criteria for real (including the new `AC-GEN-015`, which

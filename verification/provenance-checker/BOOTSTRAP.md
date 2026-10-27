@@ -1,12 +1,12 @@
 # Bootstrap Account: `provenance-checker`
 
 First real cold-generation of this component, via the self-hosted
-`gen/generator/generator.py` (`D58`), through three real retries.
+`gen/generator/generator.py` (`D42`), through three real retries.
 
 **Retry 1** produced a well-reasoned 3-file candidate that built
 `gen/<component_id>/.provenance.json` directly from the caller-supplied
 `component_id`, never stripping its `comp-` prefix — a real,
-previously-undocumented corpus-wide gap (`D61`): nothing anywhere
+previously-undocumented corpus-wide gap (`D45`): nothing anywhere
 stated that `gen/<component>/`-shaped paths use the bare slug, not the
 full `comp-<slug>` id. Confirmed by direct test: a real hit was
 reported as a miss. Fixed by documenting the convention in
@@ -21,7 +21,7 @@ looks for (only a flat module or a top-level package directly under
 own side: the fix (new `R-GEN-015`, a `generator.py` prompt addition)
 bumped `PROMPT_VERSION` but not `GATE_VERSION`, so a same-hash retry
 made right after landing the fix got a stale cache hit replaying the
-pre-fix candidate instead of a fresh call (`D62`'s own account).
+pre-fix candidate instead of a fresh call (`D46`'s own account).
 Neither candidate was swapped in.
 
 **Retry 3**, with both fixes (and the cache-key fix) in place,

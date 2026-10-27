@@ -2,7 +2,7 @@
 
 Generated tests (`compiled`, `generated-test`, and `llm-judge` outputs),
 contract/drift checks, and `corpus-graph.json` — the single generated
-manifest the D8 traceability matrix and the D9 graph/docs explorer both
+manifest the traceability matrix and the D9 graph/docs explorer both
 render from.
 
 See `SPEC_GUIDELINES.md` §6 (verification gates) and §7 (provenance).
@@ -20,10 +20,10 @@ run caught that reading the code alone would have missed.
   corpus (not a synthetic fixture — these views exist specifically to
   query the real thing).
 - `corpus-graph-builder/` — 8 tests. **Cold-generated, not hand-written**
-  (`D45`) — the fixture suite here still had to be hand-authored, since
+  — the fixture suite here still had to be hand-authored, since
   `test-author` doesn't exist yet either.
 - `llm-endpoint/` — 6 tests, all against an injected mock backend, zero
-  cost to re-run. **Self-hosted twice over** (`D51`, `D52`/`D53`) — this
+  cost to re-run. **Self-hosted twice over** (`D34`/`D35`) — this
   suite has been rewritten twice to match each regeneration's own,
   equally spec-conformant internal backend convention, since
   `interface/library.md` only ever fixes the public `complete()` call
@@ -37,7 +37,7 @@ run caught that reading the code alone would have missed.
 - `generator/` — 10 tests, all against an injected mock backend. Used in
   anger twice: once to regenerate `llm-endpoint` (twice), once to
   attempt regenerating itself — the one real generation attempt this
-  corpus has made that failed and was correctly rejected (`D54`).
+  corpus has made that failed and was correctly rejected.
 
 Run any one with `pytest` (not vendored into the repo — install into your
 own environment) — but run every suite as its **own, separate** `pytest`

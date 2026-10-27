@@ -5,7 +5,7 @@ Different from `spec-linter`'s and `graph-query-engine`'s own
 hand-written. It was produced by a real model call — the `generator`
 Claude Code subagent (`.claude/agents/generator.md`), standing in for
 `comp-generator` dispatching through `comp-llm-endpoint`, because
-neither of those exist yet (`D45`). The subagent was given exactly this
+neither of those exist yet. The subagent was given exactly this
 component's assembled `SpecBundle` (`spec`/`interface`/`constraints`/
 `dependency_interfaces`/`dependency_context`/`vars`/`glossary` — never
 `acceptance/`, never any other component's real `gen/` code) and nothing

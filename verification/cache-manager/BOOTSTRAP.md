@@ -26,7 +26,7 @@ anywhere in this component's own spec, so a richer "hit rate over time"
 metric (`notes/metrics.md`) is not yet implemented; flagged here, not
 silently claimed complete.
 
-**`repo_root` added to `get`/`put`** (`D48`) — the same pre-existing-gap
+**`repo_root` added to `get`/`put`** (`D30`) — the same pre-existing-gap
 pattern `llm-endpoint`'s `backend` parameter and `provenance-writer`'s
 `ProvenanceInputs` each already were; `interface/cli.md`'s own
 `--repo-root` flag implied it all along.

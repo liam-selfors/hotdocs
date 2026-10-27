@@ -13,7 +13,7 @@ explicitly here rather than left implicit.
 **Language:** Python 3, originally zero external dependencies (frontmatter
 is hand-parsed rather than using PyYAML) — specifically to keep this
 bootstrap trivially runnable. One dependency was added since: `duckdb`
-(`D42`), once `component_doc_words` moved from its own Python algorithm
+(`D13`), once `component_doc_words` moved from its own Python algorithm
 onto the shared `component_size` view `specs/architecture/
 graph-query-engine.md` already specified — a real external dependency is
 the honest cost of actually running a shared SQL definition rather than
@@ -80,10 +80,11 @@ for the run, not added to the repo.
   to restate the term's name, and false-negative on a sneaky redefinition
   that avoids doing so. This looks like a real candidate for `llm-judge`
   instead of `compiled` — which would mean `AC-LINT-011` was assigned the
-  wrong `kind` when `acceptance.md` was first written, a direct miss of D5's
-  own guidance by the same component that's supposed to demonstrate it.
+  wrong `kind` when `acceptance.md` was first written, a direct miss of the
+  kind-assignment guidance `SPEC_GUIDELINES.md` already gives, by the same
+  component that's supposed to demonstrate it.
 - **No canonical way to count "interface surface elements."**
-  `SPEC_GUIDELINES.md`'s D2 size-cap table names this dimension but
+  `SPEC_GUIDELINES.md`'s own size-cap table names this dimension but
   `interface.md` is free-form prose, not a machine-readable schema. What's
   implemented (counting top-level backtick-led bullets) is a rough
   approximation, not a specified algorithm. Either `interface.md` needs a
@@ -140,14 +141,15 @@ interface surface elements" and "R-LINT-011 may be mis-assigned `compiled`"
   `criterion-compiler` = 3 each, `cache-manager` = 6 (its `get`/`put` and
   `inspect`/`stats` pairs are two signatures each in one fenced block, which
   is exactly why "one per code block" would have undercounted it).
-- **R-LINT-011 split into two requirements**, matching D5's own guidance
-  about when `llm-judge` is warranted: R-LINT-011 stays `compiled` but now
+- **R-LINT-011 split into two requirements**, matching the kind-assignment
+  guidance `SPEC_GUIDELINES.md` already gives about when `llm-judge` is
+  warranted: R-LINT-011 stays `compiled` but now
   only fires on a *near-verbatim* restatement (token-overlap ratio ≥ 0.8) of
   the glossary's definition — genuinely mechanical, no judgment. A new
   R-LINT-015 (`llm-judge`) covers the case R-LINT-011 structurally cannot:
   different wording that still substantively *conflicts* with the glossary's
   meaning. With no model configured, R-LINT-015 reports `severity: skipped`
-  — never silently passing, never crashing — the same posture D10
+  — never silently passing, never crashing — the same posture already
   established for model-pin availability, applied a third time. A
   regression test (`test_ac_lint_011_old_fixture_now_routes_to_015_not_011`)
   confirms this bootstrap's *own original* R-LINT-011 fixture — which
@@ -160,12 +162,12 @@ in `test_ac_lint_015_conflict_detected_with_judge_configured`) — wiring a
 real model in is explicitly out of scope for a hand-authored CLI prototype,
 and would have been dishonest about what was actually validated here.
 
-## Note: D15 superseded the layout this document describes
+## Note: D1 superseded the layout this document describes
 
 Everything above describes the original four-flat-files component layout
 (`spec.md`/`interface.md`/`acceptance.md`/`constraints.md`) — accurate
-history, kept as-is rather than rewritten to pretend D15 existed at the
-time. D15 (see `notes/initial-ideas.md`) later replaced that layout with
+history, kept as-is rather than rewritten to pretend D1 existed at the
+time. D1 (`specs/decisions/D1.md`) later replaced that layout with
 one-file-per-unit (`component.md` + `requirements/` + `interface/` +
 `acceptance/` + `constraints.md`), which required a real rewrite of
 `gen/spec-linter/spec_linter.py` and this directory's test suite — not a
@@ -179,24 +181,24 @@ construction, but the general lesson ("validate against real, multi-author
 content, not only hand-built fixtures") was reapplied during the rewrite,
 not superseded by it.
 
-## Note: three more requirements added after D15
+## Note: three more requirements added after D1
 
-Three requirements were added after the D15 rewrite above, each a direct
+Three requirements were added after the D1 rewrite above, each a direct
 consequence of a later corpus-wide decision rather than anything found by
 further bootstrapping — no new lessons of the bootstrapping kind this
 document otherwise records, just listed here so this account doesn't go
 silent after R-LINT-016 while the real rule count keeps climbing.
 
-- **R-LINT-017** (D16) — a component's `interface/guarantees/G-*.md` file's
+- **R-LINT-017** (D2) — a component's `interface/guarantees/G-*.md` file's
   `#`-heading `G-id` must match its filename, the same identity check
   `rule_requirement_identity` already did for `R-id`s, extended to the new
-  guarantee-file kind D16 introduced.
-- **R-LINT-018** (D16) — `depends_on_guarantees` entries must resolve to a
+  guarantee-file kind D2 introduced.
+- **R-LINT-018** (D2) — `depends_on_guarantees` entries must resolve to a
   real `G-id` whose owning component is already in the dependent's own
   `depends_on` — referencing a guarantee of something you don't depend on
-  is meaningless, not just unresolved (see D16's narrowing-mechanism
-  write-up in `notes/initial-ideas.md`).
-- **R-LINT-019** (D19) — no line in any spec file (frontmatter included)
+  is meaningless, not just unresolved (see D2's own narrowing-mechanism
+  write-up, `specs/decisions/D2.md`).
+- **R-LINT-019** (D5) — no line in any spec file (frontmatter included)
   may end in trailing whitespace, so `spec_bundle_hash` can keep hashing
   raw bytes without an inconsequential whitespace edit forcing a cache
   miss. Unlike 017/018, this one scans every file `spec_bundle_hash` can

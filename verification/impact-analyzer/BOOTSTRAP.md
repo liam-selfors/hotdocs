@@ -1,10 +1,10 @@
 # Bootstrap Account: `impact-analyzer`
 
 First real cold-generation of this component, via the self-hosted
-`gen/generator/generator.py` (`D58`), through two real `generate()`
+`gen/generator/generator.py` (`D42`), through two real `generate()`
 calls and one real timeout tuning.
 
-**Call 1** timed out twice at `D52`'s 300-second floor; tested directly
+**Call 1** timed out twice at `D34`'s 300-second floor; tested directly
 with 600s, it completed in 437s. `impact-analyzer` is a meaningfully
 larger, more structurally complex component than any built before it —
 fixed by raising `ANTHROPIC_TIMEOUT_SECONDS` to 600 (still satisfying
@@ -18,7 +18,7 @@ by direct test against the real repo: `--changed comp-cache-manager`
 never propagated to any real dependent. Also found: its output used
 the bare slug as `component_id`, contradicting `BlastRadiusReport.md`'s
 own example. Neither issue was a candidate mistake alone — both were
-real, previously-unspecified corpus gaps (`D64`): "the prior commit"
+real, previously-unspecified corpus gaps (`D48`): "the prior commit"
 is now defined as the merge-base with the default branch;
 `BlastRadiusReport.md` now states the `comp-<slug>` output format
 explicitly. Not swapped in.
@@ -35,7 +35,7 @@ real flat list of bare `G-<comp>-NNN` strings (confirmed from
 documented, in `SPEC_GUIDELINES.md` §2 — which, like every other
 guideline-only fix this sequence has found, never reaches a generating
 model, since no `SpecBundle` includes it. Fixed by clarifying directly
-in `R-IMPACT-008.md` (`D65`). Not swapped in.
+in `R-IMPACT-008.md` (`D49`). Not swapped in.
 
 **Call 4**, with all three fixes in place, passed all 12 `AC-IMPACT-*`
 tests for real — including `AC-IMPACT-010`, specifically designed to

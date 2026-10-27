@@ -1,8 +1,8 @@
 # Bootstrap Account: `criterion-compiler`
 
 Permanently hand-authored, not a temporary bootstrap exception like
-`cache-manager`/`spec-bundle-assembler` were before `D50`/`D55`
-onward, and not even structurally-permanent-but-eventually-self-hosted
+`cache-manager`/`spec-bundle-assembler` were before becoming real,
+and not even structurally-permanent-but-eventually-self-hosted
 like `llm-endpoint`/`generator`: `criterion-compiler` MUST never be
 agent-generated, ever (`component.md`'s `sealed: true`, Purpose). The
 trust anchor for `compiled`-kind criteria only holds if the compiler
@@ -10,12 +10,12 @@ that compiles them was never itself a candidate this methodology's own
 verify-then-swap discipline had to approve.
 
 **The real, corpus-wide gap found immediately before this component
-was ever written (`D59`)**: every existing `kind: compiled` criterion
+was ever written (`D43`)**: every existing `kind: compiled` criterion
 across every already-built component -- 200 of 200, checked
 programmatically against the real grammar's six templates -- is
 written in ordinary prose, not the step-phrase grammar this component
 implements. None of them could have compiled. Reclassified to
-`generated-test` first; see `D59` for the full account. This
+`generated-test` first; see `D43` for the full account. This
 component's own test suite (below) therefore uses a synthetic
 `widget` fixture component, not any real corpus content -- exactly
 what `constraints.md`'s "characterization coverage" clause already
@@ -26,7 +26,7 @@ anticipated ("the hand-authored reference fixture suite... living in
 
 - **Scenario grouping.** A `compiled` criterion's gherkin block may
   hold more than one scenario (`AC-COMPILE-011`/`012`'s own real text
-  does this, even post-`D59`-reclassification, by structure). Resolved
+  does this, even post-`D43`-reclassification, by structure). Resolved
   as: one or more `Given` lines, exactly one `When` line, one or more
   `Then` lines, each scenario separated by a blank line. More than one
   scenario in a file compiles to `test_<id>_scenario_<n>` functions;
@@ -76,7 +76,7 @@ imports a model-calling dependency): all 12 tests pass, one per
 `AC-COMPILE-*` criterion, against the synthetic `widget` fixture in
 `conftest.py`.
 
-**`D75`: `compile_criterion`, a directory-scanning-free primitive.**
+**`D59`: `compile_criterion`, a directory-scanning-free primitive.**
 Building `capability-scenario-verifier` (which needs to compile
 `compiled`-kind criterion content that lives outside any component's
 `acceptance/` directory — a product-capability scenario, black-box
@@ -92,7 +92,7 @@ a step that never references a function/type compiles fine with no
 surface at all; one that does is still a located compile error, never
 silently skipped for lack of one (`AC-COMPILE-013`).
 
-**`D79`: emitted source never imported the target module.** Found
+**`D62`: emitted source never imported the target module.** Found
 while building `verifier-orchestrator`, whose job is to *execute*
 compiled scaffolding against real `gen/<component>/` code — something
 no test here had ever done before (every prior test checked emitted
