@@ -97,19 +97,34 @@ def test_ac_gqe_007_load_views_idempotent(con):
     assert before == after
 
 
-def test_ac_gqe_008_decision_lineage_reflects_real_d31_d17_supersession(con):
-    """D88 -- decision_lineage must surface the one real supersedes
-    relationship this corpus actually has (D87, formalized under D88)."""
+def test_ac_gqe_008_decision_lineage_has_last_ratified_commit(con):
+    """D92 -- decision_lineage is narrowed to id/last_ratified_commit
+    only; status/supersedes/builds_on moved to nodes/edges."""
     rows = con.execute(
-        "SELECT id, status, supersedes FROM decision_lineage WHERE id IN ('D17', 'D31')"
+        "SELECT last_ratified_commit FROM decision_lineage WHERE id = 'D31'"
+    ).fetchall()
+    assert rows[0][0] is not None and len(rows[0][0]) > 0
+
+
+def test_ac_gqe_009_decision_nodes_and_supersedes_edge(con):
+    """D92 -- decisions are kind='decision' nodes; supersedes is a
+    real edge, reflecting this corpus's one actual relationship
+    (D31 supersedes D17, formalized under D87)."""
+    rows = con.execute(
+        "SELECT id, status, kind FROM nodes WHERE id IN ('D17', 'D31') AND kind = 'decision'"
     ).fetchall()
     by_id = {r[0]: r for r in rows}
-    assert by_id["D31"][2] == "D17"  # supersedes column
-    assert by_id["D17"][1] == "deprecated"  # status column
+    assert by_id["D17"][1] == "deprecated"
+    assert by_id["D31"][1] == "ratified"
 
-
-def test_ac_gqe_008_supersedes_is_null_not_empty_string(con):
-    rows = con.execute(
-        "SELECT supersedes FROM decision_lineage WHERE id = 'D44'"
+    edge = con.execute(
+        "SELECT source_id, target_id FROM edges WHERE edge_type = 'supersedes' AND source_id = 'D31'"
     ).fetchall()
-    assert rows[0][0] is None
+    assert edge == [("D31", "D17")]
+
+
+def test_ac_gqe_009_no_supersedes_edge_for_unset_decisions(con):
+    rows = con.execute(
+        "SELECT * FROM edges WHERE edge_type = 'supersedes' AND source_id = 'D44'"
+    ).fetchall()
+    assert rows == []

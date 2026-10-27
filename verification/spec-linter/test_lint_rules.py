@@ -472,7 +472,10 @@ def test_ac_lint_028_glossary_citation_resolution(corpus_root):
     assert "A Made Up Term" in findings[0].message
 
 
-def _write_decision(root: Path, doc_id: str, status: str = "ratified", supersedes: str | None = None) -> None:
+def _write_decision(
+    root: Path, doc_id: str, status: str = "ratified",
+    supersedes: str | None = None, builds_on: list[str] | None = None,
+) -> None:
     decisions_dir = root / "specs" / "decisions"
     decisions_dir.mkdir(parents=True, exist_ok=True)
     frontmatter = (
@@ -481,6 +484,8 @@ def _write_decision(root: Path, doc_id: str, status: str = "ratified", supersede
     )
     if supersedes:
         frontmatter += f"supersedes: {supersedes}\n"
+    if builds_on:
+        frontmatter += f"builds_on: [{', '.join(builds_on)}]\n"
     frontmatter += f"last_ratified_commit: abc1234\n---\n\n# {doc_id}\n\nBody text.\n"
     (decisions_dir / f"{doc_id}.md").write_text(frontmatter, encoding="utf-8")
 
@@ -521,3 +526,16 @@ def test_ac_lint_029_frozen_range_exempt(corpus_root):
     _write_decision(corpus_root, "D900", supersedes="D5")
     report = run_lint(corpus_root)
     assert not has_finding(report, "R-LINT-029")
+
+
+def test_ac_lint_030_dangling_builds_on_citation(corpus_root):
+    """D91 -- builds_on: D<N> must resolve to a real decision file."""
+    _write_decision(corpus_root, "D900", builds_on=["D999"])
+    report = run_lint(corpus_root)
+    assert has_finding(report, "R-LINT-030")
+
+
+def test_ac_lint_030_frozen_range_exempt(corpus_root):
+    _write_decision(corpus_root, "D900", builds_on=["D5"])
+    report = run_lint(corpus_root)
+    assert not has_finding(report, "R-LINT-030")

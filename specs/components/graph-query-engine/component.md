@@ -61,7 +61,7 @@ See `interface/data/`.
 
 See `acceptance/`.
 
-All eight criteria are `kind: compiled` — each view's SQL and the
+All nine criteria are `kind: compiled` — each view's SQL and the
 loader's own behavior are fully deterministic, no model or judgment
 involved.
 

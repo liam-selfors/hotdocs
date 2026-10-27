@@ -1,9 +1,8 @@
 # R-LINT-021
 
 **R-LINT-021** — R-LINT-008 (forward traceability) and R-LINT-009
-  (backward traceability) MUST be implemented as queries over the
-  `nodes`/`edges` views named in `specs/architecture/
-  graph-query-engine.md`'s "Query surface" section — not
+  (backward traceability) MUST be implemented as queries over
+  `graph-query-engine`'s `nodes`/`edges` views — not
   independently-written traversal code.
 
   R-LINT-008 becomes: every `requirement` node MUST be the target of at

@@ -1,13 +1,19 @@
 # R-GQE-001
 
 **R-GQE-001** — The `nodes` view MUST return one row per spec id across
-  seven kinds (`component`, `capability`, `var`, `guarantee`,
-  `requirement`, `acceptance`, `capability_scenario`), reading under the
-  data contracts `SPEC_GUIDELINES.md` §2 (frontmatter: `component`/
-  `capability`/`var` kinds) and §3.4/D15 (unit-file-per-id: `guarantee`/
-  `requirement`/`acceptance` kinds carry no frontmatter, identity is the
-  filename) and §5 (capability scenarios are `### CS-...` headings
-  inside a product capability file, not a file of their own):
+  eight kinds (`component`, `capability`, `var`, `decision`,
+  `guarantee`, `requirement`, `acceptance`, `capability_scenario`),
+  reading under the data contracts `SPEC_GUIDELINES.md` §2
+  (frontmatter: `component`/`capability`/`var`/`decision` kinds) and
+  §3.4/D15 (unit-file-per-id: `guarantee`/`requirement`/`acceptance`
+  kinds carry no frontmatter, identity is the filename) and §5
+  (capability scenarios are `### CS-...` headings inside a product
+  capability file, not a file of their own). `decision` rows are safe
+  via `read_yaml_frontmatter` despite `D44`'s sparse-column gotcha —
+  `id`/`title`/`status` are unconditionally required on every decision
+  record, never absent corpus-wide the way `supersedes`/`builds_on`
+  are (`R-GQE-002` extracts those via `read_text` + regex instead, for
+  exactly that reason):
 
 ```sql
 CREATE OR REPLACE VIEW nodes AS
@@ -19,6 +25,9 @@ FROM read_yaml_frontmatter('{repo_root}/specs/product/*.md', filename:=true)
 UNION ALL
 SELECT id, title, status, 'var', NULL
 FROM read_yaml_frontmatter('{repo_root}/specs/vars/*.md', filename:=true)
+UNION ALL
+SELECT id, title, status, 'decision', NULL
+FROM read_yaml_frontmatter('{repo_root}/specs/decisions/*.md', filename:=true)
 UNION ALL
 SELECT
   regexp_extract(filename, '(G-[A-Za-z0-9-]+)\.md$', 1), NULL, NULL, 'guarantee',

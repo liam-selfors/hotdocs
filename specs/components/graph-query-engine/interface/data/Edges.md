@@ -1,9 +1,9 @@
 # `edges` (view)
 
 ```
-source_id  TEXT  -- a comp-id (depends_on/realizes/uses_var/depends_on_guarantees), or an AC-id/CS-id (covers)
+source_id  TEXT  -- a comp-id (depends_on/realizes/uses_var/depends_on_guarantees), an AC-id/CS-id (covers), or a D-id (supersedes/builds_on)
 target_id  TEXT  -- the id named in the frontmatter list entry, or the Covers: line's value
-edge_type  TEXT  -- one of: depends_on, realizes, uses_var, depends_on_guarantees, covers
+edge_type  TEXT  -- one of: depends_on, realizes, uses_var, depends_on_guarantees, covers, supersedes, builds_on
 ```
 
 One row per `(source_id, target_id, edge_type)` (`R-GQE-002`). A

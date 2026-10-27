@@ -8,5 +8,4 @@
   every `status: deprecated` record MUST be named by at least one
   other real decision's `supersedes` field — never a standalone edit.
 
-  MUST query `graph-query-engine`'s `decision_lineage` view, not an
-  independent scan.
+  Queries `nodes`/`edges`.

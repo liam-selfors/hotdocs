@@ -9,9 +9,7 @@
   under 2 seconds on reference hardware. R-LINT-015 (a model call) has
   its own separate, longer budget, uncounted against that figure.
 - **Mostly no network access, no model calls.** R-LINT-015 is the
-  single, intentional exception — `llm-judge` is for qualities no test
-  could capture, and "conflicts in meaning with the glossary" is
-  exactly that. **When no model is configured, it degrades to
+  single exception. **When no model is configured, it degrades to
   `skipped`, never silently passing and never crashing.**
 - **Idempotent on unchanged input,** for every rule's non-`skipped`
   results — running the linter twice against an unchanged bundle MUST

@@ -24,11 +24,10 @@ gate and the component everything else assumes has already run.
 *absence* on unit files; `depends_on`/`realizes`/`uses_var`/
 `depends_on_guarantees` resolution; dependency-graph acyclicity;
 `R-id`/`G-id` formation and RFC 2119 usage; requirement↔acceptance
-traceability; acceptance-criterion well-formedness; glossary
-conformance/citation resolution; `supersedes`/`deprecated`
-consistency; component size caps; `specs/vars/` secret-field safety;
-glossary singularity; no trailing whitespace
-anywhere in a spec file.
+traceability; acceptance-criterion well-formedness; glossary/
+`supersedes`/`builds_on` citation resolution; component size caps;
+`specs/vars/` secret-field safety; glossary singularity; no trailing
+whitespace anywhere in a spec file.
 
 **Out of scope:** generation; verifying generated code's actual
 behavior. **Mostly free of model calls and judgment** — only
@@ -74,4 +73,4 @@ Full narrative per entry lives in its own `specs/decisions/D<N>.md`.
 - Initial draft.
 - `D40`–`D42`: renamed `component_doc_words`; added `R-LINT-026`/`027`.
 - `D44`: rewired onto `graph-query-engine`'s shared views.
-- `D86`/`D87`: added `R-LINT-028`/`029`.
+- `D86`–`D92`: added `R-LINT-028`–`030`.
