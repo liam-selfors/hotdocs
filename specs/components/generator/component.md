@@ -21,41 +21,31 @@ exactly one candidate per invocation.
 ## Rationale
 
 `hint_code` is a feature-branch-only exception (D1). Declares
-`depends_on_guarantees: [G-CACHE-001]` — the D16 worked example:
-R-GEN-005/006's whole cache-check-before-call / cache-write-after-call
-behavior genuinely depends on `cache-manager`'s consistency guarantee: a
-`get` that returns a hit is trusted as authoritative with no locking of
-its own, which is only safe because concurrent writers for the same key
-are safe under last-write-wins (G-CACHE-001). It does *not* depend on
-`cache-manager`'s other properties (store-error fail-closed behavior,
-CLI inspection, etc.) in any way this component's own logic cares about
-— so a future change to *those* should not, and now will not, pull this
-component into an unrelated blast radius.
+`depends_on_guarantees: [G-CACHE-001]` (D16 worked example):
+R-GEN-005/006's cache-check/cache-write behavior trusts a `get` hit as
+authoritative with no locking of its own, safe only because concurrent
+writers are last-write-wins-safe (G-CACHE-001) — it does not depend on
+`cache-manager`'s other properties, so a change to those won't pull
+this component into an unrelated blast radius.
 
 ## Scope
 
 **In scope:** constructing the model call from a `SpecBundle`, a model
 identifier, and optionally `retry_feedback` (`R-GEN-012`, restored by
-`D33` after `D31` mistakenly dropped it); checking/populating the cache
-before/after calling a model; writing the result under
-`gen/<component>/`; recording what it did for provenance.
+`D33` after `D31` mistakenly dropped it); checking the cache before
+calling a model; in `cold` mode only, writing the result to
+`gen/<component>/` and to the cache (`R-GEN-016` — a `hint`-mode call
+reads the cache but never writes to either destination); recording
+what it did for provenance.
 
-**Out of scope, deliberately, and recorded here because the architecture
-doc's dependency list only shows `spec-bundle-assembler` and
-`cache-manager` — not `verifier-orchestrator`:** any retry of its own.
-This component produces **exactly one candidate per call, ever** —
-single-shot, stateless about prior attempts, with no notion of a retry
-sequence at all. `merge-orchestrator` calls this once per component per
-merge attempt (`R-MERGE-005`); since `D31` retired the best-of-k retry
-loop that used to call it again with different feedback on a
-verification failure, this component is never called a second time
-within one merge regardless of outcome — a fresh merge attempt (a human
-re-running `hotdocs merge`, `R-MERGE-018`) is the only path back to
-`generator` for a component whose one attempt failed. Putting any retry
-logic inside `generator` would still require it to depend on
-`verifier-orchestrator`, which nothing upstream of this spec says it
-does — the boundary stays explicit for the same reason it always was,
-even though there's no longer a loop on the other side of it to serve.
+**Out of scope, deliberately (explains why `depends_on` excludes
+`verifier-orchestrator`):** any retry of its own. Exactly one candidate
+per call, ever — single-shot, stateless about prior attempts. `D31`
+retired the best-of-k retry loop; `merge-orchestrator` calls this once
+per component per merge attempt (`R-MERGE-005`), and a fresh human
+merge attempt (`R-MERGE-018`) is the only path back for a failed one.
+Retry logic here would require depending on `verifier-orchestrator`,
+which nothing upstream says it does.
 
 ## Definitions
 
@@ -86,9 +76,9 @@ structural text/graph analysis. R-GEN-009 is a pure path-safety check with
 no model involved at all, and is `compiled` like everything in
 `spec-bundle-assembler`.
 
-Whether R-GEN-001–008 could instead be `compiled` depends on whether
-`criterion-compiler`'s step grammar grows mock/dependency-injection support
-— left as an open question there, not forced here.
+Whether R-GEN-001–008 could instead be `compiled` depends on
+`criterion-compiler`'s step grammar growing mock-injection support —
+an open question there, not forced here.
 
 ## Non-functional constraints
 
@@ -115,39 +105,26 @@ See `constraints.md`.
 
 ## Change log
 
+Full narrative for each entry lives in its own `specs/decisions/D<N>.md`
+— this log is a terse pointer index, not a restatement.
+
 - Initial draft.
-- `D50`: first real `gen/generator/` implementation — a hand-authored
-  bootstrap exception. `generate()` gained `repo_root`/`llm_backend`
-  params, two real pre-existing gaps; `cache-manager` gained
-  `generator` as a sixth `gate_type`, a third.
-- `D51`/`D53`: used to regenerate `llm-endpoint` from its own spec.
-  Gained a small `_as_dict()` adapter, since each self-hosted
-  regeneration of `llm-endpoint` returns a different concrete
-  `ModelResponse` shape.
-- `D54`: a real self-regeneration attempt failed to import (wrong
-  `cache-manager` layout assumption) and was correctly not swapped in.
-- `D55`: `R-GEN-013` — the prompt now includes `dependency_usage`
-  (`R-ASSEMBLE-011`) as its own distinct section when present, the
-  fix for `D54`'s failure. `PROMPT_VERSION` bumped to `v2`.
-- `D56`: a real retry surfaced a self-referential delimiter collision
-  unique to this component (fixed with a per-call nonce) and a
-  degenerate empty-files result silently poisoning the cache (fixed by
-  caching only non-empty results). `PROMPT_VERSION` → `v3`,
-  `GATE_VERSION` → `generator@1.1.0`. See `cache-manager`'s own `D56`
-  bullet for a third, related gap this same retry found there.
-- `D57`: a third retry produced a non-truncated candidate that crashed
-  loading `cache-manager`, because its dynamic per-call dependency
-  loader never registered the loaded module in `sys.modules` before
-  running its code. New `R-GEN-014` documents the safe technique;
-  `_SYSTEM_PROMPT` warns against it (`PROMPT_VERSION` → `v4`). Also:
-  `D56`'s cache-manager schema table lived only in `requirements/`,
-  invisible to any dependent (`R-ASSEMBLE-002`) — moved to
-  `interface/data/CachedResult.md`.
-- `D58`: a fourth retry, with `D56`/`D57`'s fixes in place, passed all
-  12 testable `AC-GEN-*` criteria for real — the first successful
-  self-hosted regeneration of this component. `gen/generator/
-  generator.py` is now that candidate; `verification/generator/` was
-  rewritten to match its conventions. `BOOTSTRAP.md` kept as history.
-- `D62`: `R-GEN-015` — a `src/`-layout candidate for a different
-  component silently defeated `dependency_usage`. Prompt now requires
-  a flat module or top-level package. `PROMPT_VERSION` → `v5`.
+- `D50`: first real `gen/generator/` implementation (hand-authored
+  bootstrap exception); `repo_root`/`llm_backend` params added.
+- `D51`/`D53`: used to regenerate `llm-endpoint`; gained `_as_dict()`.
+- `D54`: a self-regeneration attempt failed to import, not swapped in.
+- `D55`: `R-GEN-013`, `dependency_usage` added to the prompt
+  (`D54`'s fix). `PROMPT_VERSION` → `v2`.
+- `D56`: per-call nonce (delimiter collision fix); cache only
+  non-empty results. `PROMPT_VERSION` → `v3`, `GATE_VERSION` →
+  `generator@1.1.0`.
+- `D57`: `R-GEN-014`, `sys.modules` registration before `exec`.
+  `PROMPT_VERSION` → `v4`.
+- `D58`: fourth retry passed all testable `AC-GEN-*` criteria — first
+  successful self-hosted regeneration; swapped in.
+- `D62`: `R-GEN-015`, flat-module-or-package output required.
+  `PROMPT_VERSION` → `v5`.
+- `D81`: `R-GEN-016` — `hint`-mode calls wrote to `gen/` and the cache
+  like `cold` mode; since `spec_bundle_hash` excludes `hint_code`,
+  that could poison a later `cold` build's cache slot. Fixed: reads
+  the cache, writes to neither destination.

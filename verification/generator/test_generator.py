@@ -203,3 +203,50 @@ def test_ac_gen_015_two_repo_roots_in_one_process_do_not_collide(repo_root, tmp_
     cm_from_other_root = generator._load_cache_manager(other_root)
     assert not hasattr(cm_from_repo_root, "SANDBOX_MARKER")
     assert getattr(cm_from_other_root, "SANDBOX_MARKER", None) == "other_root"
+
+
+def test_ac_gen_017_hint_mode_never_writes_gen_or_cache(repo_root):
+    """R-GEN-016/D81 -- a hint-mode call must not write gen/<component>/
+    or the cache, even on a fresh (non-cache-hit) call."""
+    backend = MockBackend([file_block("foo.py", "x = 1")])
+    bundle = FakeBundle(hint_code={"foo.py": "x = 0"})
+    result = generate(bundle, "claude-sonnet-5", repo_root=repo_root, llm_backend=backend)
+
+    assert result.files == {"foo.py": "x = 1"}  # still returned to the caller
+    assert not (repo_root / "gen" / "foo").exists()  # never written to disk
+
+    cache_key = cache_manager.CacheKey(
+        spec_bundle_hash=bundle.spec_bundle_hash,
+        gate_inputs_hash=generator._compute_gate_inputs_hash(None),
+        gate_version=GATE_VERSION,
+        model_pin="claude-sonnet-5",
+    )
+    assert isinstance(cache_manager.get(cache_key, repo_root=repo_root), cache_manager.Miss)
+
+
+def test_ac_gen_017_hint_mode_still_reads_an_existing_cache_hit(repo_root):
+    """A cache hit from an earlier cold-mode call for this exact spec
+    state must still be returned in hint mode, with no model call and
+    gen/<component>/ left untouched."""
+    bundle = FakeBundle(hint_code={"foo.py": "x = 1"})
+    cache_key = cache_manager.CacheKey(
+        spec_bundle_hash=bundle.spec_bundle_hash,
+        gate_inputs_hash=generator._compute_gate_inputs_hash(None),
+        gate_version=GATE_VERSION,
+        model_pin="claude-sonnet-5",
+    )
+    cached_payload = {
+        "component_id": "comp-foo", "model": "claude-sonnet-5", "prompt_version": "v1",
+        "files": {"foo.py": "x = 1"},
+    }
+    cache_manager.put(
+        cache_key,
+        cache_manager.CachedResult(gate_type="generator", payload=cached_payload, stored_at=cache_manager.now_iso()),
+        repo_root=repo_root,
+    )
+
+    backend = MockBackend([])  # would IndexError if ever called
+    result = generate(bundle, "claude-sonnet-5", repo_root=repo_root, llm_backend=backend)
+    assert result.cache_hit is True
+    assert result.files == {"foo.py": "x = 1"}
+    assert not (repo_root / "gen" / "foo").exists()

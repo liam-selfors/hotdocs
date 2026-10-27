@@ -21,6 +21,6 @@ hotdocs generate <component-id> --model=<model-id> [--seed=<n>] \
 
 | Code | Meaning |
 | --- | --- |
-| `0` | A candidate was produced (from cache or a fresh model call) and written. |
+| `0` | A candidate was produced (from cache or a fresh model call); written to `gen/<component>/` and the cache in `cold` mode, written to neither in `hint` mode (`R-GEN-016`). |
 | `1` | Model-call error (R-GEN-008) — distinct from "produced code that later fails verification," which still exits `0` here. |
 | `2` | Usage error (unknown component id, missing `--model`). |

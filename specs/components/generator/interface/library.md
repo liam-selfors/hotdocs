@@ -8,8 +8,10 @@ generate(
 ```
 
 Not a pure function — this is the one component in the corpus whose job
-requires an external call. Side effects: writes `gen/<component>/`, reads
-and writes through `cache-manager`.
+requires an external call. Side effects: in `cold` mode, writes
+`gen/<component>/` and writes through `cache-manager`; in `hint` mode,
+reads through `cache-manager` but writes to neither destination
+(`R-GEN-016`).
 
 `repo_root` and `llm_backend` (added `D50`, two real, pre-existing
 gaps) — `repo_root` locates `specs/components/<name>/component.md`'s
