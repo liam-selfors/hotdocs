@@ -71,3 +71,23 @@ def test_ac_scenario_003_two_scenarios_each_named_with_own_result(repo_root):
     assert "rationale" not in scenarios_by_id["CS-MULTI-001"]
     assert scenarios_by_id["CS-MULTI-002"]["result"] == "fail"
     assert scenarios_by_id["CS-MULTI-002"]["rationale"] == "did not meet the bar"
+
+
+def test_ac_scenario_004_generated_test_dispatch_never_cache_short_circuited(repo_root):
+    """D84 -- no verification/<component>/-anchored cache file exists for
+    a capability scenario; test_author must be called on every dispatch."""
+    write_component(repo_root, "foo", realizes=["P-TEST"])
+    write_capability(
+        repo_root, "P-TEST",
+        scenario_block("CS-TEST-001", "P-TEST", "generated-test", "Given a thing\nWhen it happens\nThen it works"),
+    )
+
+    calls = []
+
+    def counting_test_author(bundle):
+        calls.append(bundle)
+        return {"model_call_error": None, "file": {"path": "x.py", "content": "def test_x():\n    assert True\n"}}
+
+    run_capability_scenarios(["comp-foo"], repo_root, test_author=counting_test_author)
+    run_capability_scenarios(["comp-foo"], repo_root, test_author=counting_test_author)
+    assert len(calls) == 2

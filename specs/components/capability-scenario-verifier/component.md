@@ -68,7 +68,7 @@ See `interface/data/`.
 
 See `acceptance/`.
 
-All three criteria are `kind: generated-test` (`D59`) — dispatch-and-
+All four criteria are `kind: generated-test` (`D59`) — dispatch-and-
 aggregate logic, tested by mocking the dispatch mechanisms and
 asserting on call arguments/results, the same pattern
 `verifier-orchestrator` already established for coordination logic;
@@ -99,3 +99,9 @@ None — extracted whole from `merge-orchestrator`'s already-resolved
   all 3 `AC-SCENARIO-*` criteria. `gen/capability-scenario-verifier/
   capability_scenario_verifier.py` is now that candidate. See
   `verification/capability-scenario-verifier/BOOTSTRAP.md`.
+- `D84`: documented, not changed — the real candidate always
+  dispatches `generated-test` scenarios fresh, with no cache-file
+  pre-check (`R-SCENARIO-001`), found undocumented by a pre-generation
+  audit. Not a real inefficiency (`test_author`'s own cache-manager
+  check already avoids a redundant model call); confirmed by a new
+  `AC-SCENARIO-004`.
