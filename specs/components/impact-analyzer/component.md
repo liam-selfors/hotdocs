@@ -97,9 +97,9 @@ None. The two originally recorded here are both resolved:
   in too. `D2` closes this two ways: (1) `interface/guarantees/` makes any
   *foreseen* behavioral dependency explicit and propagating, the same
   one-hop mechanism everything else uses — no cascading needed once the
-  guarantee itself is visible; (2) `capability-scenario-verifier`, run via
-  `hotdocs check-capability` once its realizing components pass
-  (`D89`), is the permanent backstop for whatever wasn't foreseen,
+  guarantee itself is visible; (2) `capability-scenario-verifier`, run
+  as part of `hotdocs build` once its realizing components pass
+  (`D89`/`D92`), is the permanent backstop for whatever wasn't foreseen,
   tested against the real regenerated system rather than guessed at here.
   Eager multi-hop cascading from every `transitive-var`/
   `transitive-capability` edge was rejected as the alternative — it would

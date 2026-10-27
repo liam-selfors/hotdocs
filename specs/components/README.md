@@ -164,45 +164,47 @@ Specced in full depth so far:
 - **`provenance-tracker`** — all `kind: compiled`. Renamed from
   `merge-tracker` (`D88`, once `merge-orchestrator`'s removal, `D87`,
   retired the per-merge-attempt log this component used to write — no
-  caller of `write_tracking_record` exists anymore). Now a live
-  provenance query: `check_readiness` (`hotdocs verify`) checks
-  `provenance-checker` for every component in scope and
-  `capability-scenario-verifier`'s own provenance (`D89`) for every
-  intersecting capability, reusing their real functions rather than
-  re-deriving hit/miss logic — no model calls, no live dependency on
-  `verifier-orchestrator`/`license-scanner`/`secret-scanner` either.
-  Still writes a separate, full-detail `AttemptRecord` per component
-  per `hotdocs generate` attempt to `.hotdocs/attempts/` (called by
-  `component-gate-runner`) — closing the gap D3's retired best-of-k
-  loop opened (a failed attempt commits no provenance at all) —
-  unchanged in role from before the rename.
+  caller of `write_tracking_record` exists anymore). Owns `hotdocs
+  build` (`D92`), replacing `hotdocs generate`/`check-capability`/
+  `verify` entirely: for every component in scope, calls
+  `component-gate-runner`'s `run_component_gates` (which checks its own
+  provenance and skips real work on a hit); for every intersecting
+  capability, calls `capability-scenario-verifier`'s
+  `run_capability_gates` the same way — sequenced in `depends_on`
+  order, never re-deriving either component's own hit/miss logic.
+  Reads `.hotdocs/attempts/` (written directly by `component-gate-runner`,
+  `R-GATE-008` — never through a call into this component, specifically
+  to avoid a two-node dependency cycle now that this component calls
+  `component-gate-runner` to trigger work) for `last_requirement_failures`,
+  a retry-feedback convenience.
 - **`provenance-tracker-ui`** — mostly `kind: compiled` (rendering is a
   pure function of its two inputs), one `generated-test` criterion for
   the client-side DuckDB-WASM graph query itself actually running in a
   real browser. Renamed from `merge-tracker-ui` (`D88`); now reads
   `corpus-graph-builder`'s committed `corpus-graph.json` for topology
-  alongside `provenance-tracker`'s local-only status data — a
-  deliberate reversal of this component's own prior "never reads
-  committed corpus state" boundary, once the concrete cross-referencing
-  need that boundary's own open question anticipated actually
-  surfaced. Implements no retry/generate action of its own: running
-  `hotdocs generate` (and then `hotdocs verify`) already is the
-  complete path, so there is nothing for this component to wire up
+  alongside local provenance status data — a deliberate reversal of
+  this component's own prior "never reads committed corpus state"
+  boundary, once the concrete cross-referencing need that boundary's
+  own open question anticipated actually surfaced. Implements no build
+  action of its own: as a static page (R-UI-001), it never calls
+  `check_readiness` directly — it re-runs its own client-side query
+  against current on-disk state, and running `hotdocs build` already is
+  the complete path, so there is nothing for this component to wire up
   beyond showing status clearly.
 - **`component-gate-runner`** — all `kind: compiled`. Extracted from
   `merge-orchestrator` by `D76` (the same fix `D14` applied once before
   for `capability-scenario-verifier`): runs one component through its
   provenance check, generation on a miss, verification dispatch,
   compliance scanning, and provenance write, producing one
-  `ComponentPipelineResult`. Has its own CLI, `hotdocs generate`
-  (`D86`/`D91` — this verb replaced `generator`'s own, now-retired one
-  rather than coining a second) — it wires its own `test_author`/
-  `judge` closures and writes `provenance-tracker`'s per-component
-  attempt record itself. A developer runs it directly, in `depends_on`
-  order across a multi-component change, then checks `hotdocs verify`
-  before committing (`D87` removed `merge-orchestrator` entirely — no
-  orchestrating component stands between the two commands anymore).
-  Fully specced, not yet regenerated.
+  `ComponentPipelineResult`. No CLI of its own (`D92`, after briefly
+  having one named `hotdocs generate`, `D86`/`D91`) — called internally
+  by `provenance-tracker`'s `hotdocs build`, once per component in
+  scope. Wires its own `test_author`/`judge` closures and writes its
+  own `AttemptRecord` directly to `.hotdocs/attempts/` (`D92` — never a
+  call into `provenance-tracker`'s own code for this, specifically to
+  avoid the dependency cycle that would otherwise create now that
+  `provenance-tracker` calls this component). Fully specced, not yet
+  regenerated.
 
 - **`spec-completeness-assistant`** — the assist agent this methodology
   always assumed but never named, and that two `notes/metrics.md` metrics
@@ -221,11 +223,12 @@ Specced in full depth so far:
   `realizes`-set intersects a scope, against the real assembled system.
   The permanent backstop for cross-component behavioral risk no
   `interface/`-level diffing can rule out in principle (D2). Since
-  `D89`, also owns its own provenance (`hotdocs check-capability`),
-  keyed on realizing components' actual current content rather than
-  their `spec_bundle_hash`es, to avoid reopening the exact blind spot
-  this component exists to close; `provenance-tracker`'s `hotdocs verify`
-  reads it the same uniform way it reads component provenance.
+  `D89`, also owns its own provenance, keyed on realizing components'
+  actual current content rather than their `spec_bundle_hash`es, to
+  avoid reopening the exact blind spot this component exists to close;
+  called internally by `provenance-tracker`'s `hotdocs build` (`D92`,
+  no standalone CLI of its own) the same uniform way it calls
+  `component-gate-runner`.
 - **`llm-endpoint`** — mostly `kind: compiled` (backend resolution,
   credential safety), one `generated-test` criterion for the actual
   dispatched call. Added by D18 once `generator` and `test-author` were

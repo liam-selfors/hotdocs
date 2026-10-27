@@ -14,6 +14,6 @@
   whether a developer even has it open, affects any provenance check's
   outcome — same boundary `provenance-tracker` itself observes (`D87`).
 - **Graceful on a node with no provenance at all.** A fresh checkout
-  with nothing yet `hotdocs generate`d MUST render a clear "not yet
+  with nothing yet `hotdocs build`-ed MUST render a clear "not yet
   attempted" state per node (R-UI-005), not an error — this is the
   common case for anyone just cloning the repo, not an edge case.

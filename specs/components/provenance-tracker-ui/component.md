@@ -17,7 +17,7 @@ capability, colored by current provenance status, navigable between a
 blast-radius view and a whole-corpus view, with per-node drill-down
 into `AttemptRecord` history and retry-feedback suggestions for
 anything currently failing. The visual answer to the same question
-`hotdocs verify` answers as an exit code.
+`hotdocs build` answers as an exit code.
 
 ## Rationale
 
@@ -45,8 +45,8 @@ blast-radius view (given a changed-ids set) and a whole-corpus view
 for any node currently failing or missing provenance (`R-UI-008`).
 
 **Out of scope:** a "retry"/"resume" action of its own (`R-UI-003`) —
-running `hotdocs generate`/`hotdocs verify` is already the complete
-path, a developer invokes it themselves, outside this UI; any write to
+running `hotdocs build` again is already the complete path, a
+developer invokes it themselves, outside this UI; any write to
 `specs/`, `gen/`, `verification/`, or `.hotdocs/` — this component only
 ever reads.
 

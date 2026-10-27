@@ -41,9 +41,8 @@ exactly the mechanisms `verifier-orchestrator` already established — no
 new dispatch machinery; producing one result per scenario, keyed by
 `P-id`; checking and writing its own provenance for one capability at a
 time, keyed on its realizing components' actual current content
-(`R-SCENARIO-004`, `D89`), exposed as `hotdocs check-capability` — a
-developer invokes this directly, the same posture `hotdocs generate`
-has for one component.
+(`R-SCENARIO-004`, `D89`) — called internally by `provenance-tracker`'s
+`hotdocs build` (`D92`), never invoked by a developer directly.
 
 **Out of scope:** deciding whether a merge should proceed (`D87` removed
 the component that used to decide that; `provenance-tracker`'s
@@ -115,9 +114,10 @@ None — extracted whole from `merge-orchestrator`'s already-resolved
   (`R-SCENARIO-004`, `CapabilityProvenanceCheckResult`), keyed on
   realizing components' actual current content rather than their
   `spec_bundle_hash`es — deliberately, to avoid reopening the blind
-  spot this component exists to close. Exposed as
-  `hotdocs check-capability`, a developer-invoked command now that
-  `merge-orchestrator`'s removal left nothing to dispatch this
-  automatically. `depends_on` gains `llm-endpoint` — this component
-  now wires its own `judge` closure, previously `merge-orchestrator`'s
-  job. Not yet regenerated with this addition.
+  spot this component exists to close. `depends_on` gains
+  `llm-endpoint` — this component now wires its own `judge` closure,
+  previously `merge-orchestrator`'s job. Not yet regenerated with this
+  addition.
+- `D92`: no longer has its own CLI (briefly `hotdocs check-capability`)
+  — called internally by `provenance-tracker`'s combined `hotdocs
+  build` instead.

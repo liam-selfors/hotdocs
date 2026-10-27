@@ -28,7 +28,7 @@
 
   **Requires the dependency to already have been (re)generated before
   the dependent's bundle is assembled** — a developer running
-  `hotdocs generate` across more than one component in the same change
+  `hotdocs build` across more than one component in the same change
   MUST do so in dependency order (dependencies before dependents),
   never an arbitrary or fully parallel order across an edge that
   crosses this boundary (`component-gate-runner`'s own

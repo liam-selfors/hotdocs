@@ -2,8 +2,14 @@
 
 **R-SCENARIO-004** — MUST expose `check_capability_provenance(capability_id,
   repo_root) -> CapabilityProvenanceCheckResult` and
-  `run_capability_gates(capability_id, repo_root, judge=None,
-  test_author=None) -> CapabilityProvenanceCheckResult` (`D89`).
+  `run_capability_gates(capability_id, repo_root, model, seed=0,
+  llm_backend=None) -> CapabilityProvenanceCheckResult` (`D89`/`D92`).
+  `model`/`seed`/`llm_backend` are this component's own parameters, not
+  already-wired `judge`/`test_author` callables — it wires those itself
+  internally (`R-SCENARIO-003`'s callable-shape contract), the same
+  posture `component-gate-runner`'s `R-GATE-002` holds, since nothing
+  calling this component wires anything on its behalf anymore
+  (`D92`).
 
   **The provenance key is a hash of every realizing component's actual
   current `gen/` content** (found via `R-SCENARIO-002`'s existing

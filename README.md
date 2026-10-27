@@ -24,15 +24,15 @@ provenance, and a DuckDB-backed query layer shared across several of them
 **There is no orchestrating "merge" component.** An earlier design had
 one (`merge-orchestrator`) automatically generate, verify, and scan
 every impacted component as part of attempting a merge; that design was
-deliberately reversed (`D86`/`D87`). A developer now drives the
-workflow directly: `hotdocs generate <component-id>` (provenance check,
-generate-on-miss, verify, scan, write provenance — one command per
-component, in dependency order), `hotdocs check-capability <P-id>` for
-any product capability whose realizing components changed, then
-`hotdocs verify` to confirm every component and capability in scope has
-current, passing provenance before committing directly. `provenance-tracker`
-(a live query, not a log of past attempts) and its interactive graph UI
-answer "is everything ready" at any point, for a given blast radius or
+deliberately reversed (`D86`/`D87`), then the resulting pieces
+consolidated into one command (`D92`). A developer now runs `hotdocs
+build [<component-id>] [--changed=...] --model=...` — provenance check,
+generate-on-miss, verify, scan, write provenance for every component in
+scope, then the same check-then-run for every product capability whose
+realizing components changed — and gets back one ready/not-ready
+verdict before committing directly. `provenance-tracker` (a live query,
+not a log of past attempts) and its interactive graph UI answer "is
+everything ready" at any point, for a given blast radius or
 the whole corpus.
 
 **Sixteen of those components have real code**, and the central claim
@@ -92,7 +92,7 @@ permanent gap in this chain, remains unbuilt by design (sealed,
 itself be agent-generated).
 
 Decisions are tracked as formal ADRs in `specs/decisions/` (`D1`
-through `D91` — `D1`–`D75` from the 2026-10 MVP baseline reset,
+through `D92` — `D1`–`D75` from the 2026-10 MVP baseline reset,
 `D76` onward recorded normally since); `notes/initial-ideas.md`
 holds the original brainstorm (its own frozen `D1`–`D30` historical
 numbering, informal) plus the full discussion behind many of the

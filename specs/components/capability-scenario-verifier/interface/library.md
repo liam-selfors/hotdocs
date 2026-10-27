@@ -8,10 +8,12 @@ run_capability_scenarios(blast_radius: list[str], repo_root: Path, judge=None, t
 callable shape" (`D65`) — the same single-`bundle`-argument convention
 `verifier-orchestrator`'s `verify()` uses, read duck-typed on the way
 out (a dict with `result`/`verdict`/`model_call_error`/`file` keys, or
-an object with the same attributes). A developer running
-`hotdocs check-capability` (`D89`) supplies these the same way
-`hotdocs generate` does for `component-gate-runner` — this component
-wires its own, no caller does it on its behalf. Omitting either
+an object with the same attributes). This component wires these
+itself, from the `model`/`seed`/`llm_backend` `run_capability_gates`
+receives — passed through unchanged by `provenance-tracker`'s
+`hotdocs build` (`D89`/`D92`), the same way `component-gate-runner`
+wires its own. No caller does the wiring on this component's behalf.
+Omitting either
 degrades the same way it does for `verifier-orchestrator`: an
 `llm-judge` scenario reports `skipped`; a `generated-test` scenario
 with nothing cached and no `test_author` configured reports `fail`.
