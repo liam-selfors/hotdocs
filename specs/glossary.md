@@ -61,3 +61,46 @@ split.
   invented a different, incompatible filename/location scheme for the
   same check, since nothing bundle-visible stated the formula as a
   rule rather than one illustrative JSON example.
+- **Injected `judge`/`test_author` callable shape** (`D82`) — the
+  single-argument convention a dependent (`verifier-orchestrator`,
+  `capability-scenario-verifier`) calls these two injectable callables
+  with: `judge(bundle) -> outcome` and `test_author(bundle) -> outcome`.
+  `outcome` is read duck-typed, never required to be one exact type,
+  confirmed by `capability-scenario-verifier`'s real code
+  (`gen/capability-scenario-verifier/`, the only one of the two
+  actually built as of `D82`): for `judge`, a dict with a `result` or
+  `verdict` key (plus optional `rationale`), or a bare scalar treated
+  as the result directly; for `test_author`, a dict with
+  `model_call_error`/`file` keys, or an object with those same
+  attributes (matching `test-author`'s own `TestAuthoringResult`,
+  `interface/data/TestAuthoringResult.md`).
+
+  `bundle` itself is **not** one universal shape — each dependent
+  passes the richest shape it actually has: `verifier-orchestrator`
+  passes the exact same `CriterionBundle` to both `judge` and
+  `test_author` (`R-VERIFY-003`/`009`) — the well-specified,
+  component-scoped shape `spec-bundle-assembler` already produces,
+  reused rather than duplicated. `capability-scenario-verifier`, which
+  operates cross-component (no single component's `CriterionBundle`
+  applies to a capability scenario), passes a narrower, purpose-built
+  dict instead: `{capability_id, scenario_id, covers, kind, gherkin,
+  file}` (its own `_bundle_for_scenario`, not yet named in any
+  bundle-visible spec file before `D82`).
+
+  This is **not** the same pattern as `spec-linter`'s own `judge`
+  parameter (`R-LINT-015`) — that one is a narrow, task-specific
+  `judge(term: str, local_text: str, glossary_text: str) -> tuple[bool,
+  str] | None`, unrelated in shape. An earlier version of
+  `verifier-orchestrator`'s and `capability-scenario-verifier`'s own
+  `interface/library.md` text incorrectly claimed the two were "the
+  same pattern" — corrected in `D82`, which found it had no basis in
+  either component's real code.
+
+  Neither `llm-endpoint.complete()` nor `test-author.author_test()` —
+  the real functions a `judge`/`test_author` closure ultimately calls
+  — match this single-argument shape themselves (both take a `model`
+  parameter with no default, among others). Whoever constructs the
+  closure (`merge-orchestrator`, `R-MERGE-004`/`014`) must capture
+  `model`/`llm_backend` itself and expose only the single-`bundle`-arg
+  shape outward — this was never stated as a requirement anywhere
+  before `D82`.

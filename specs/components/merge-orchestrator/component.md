@@ -26,26 +26,21 @@ tension, not something to resolve by artificially shrinking this list.
 ## Scope
 
 **In scope:** sequencing and parallelizing calls to every other
-component, in `depends_on` order (`R-MERGE-023`, `D55`); calling
-`generator` exactly once per cache-miss component per merge attempt
-(R-MERGE-005) — `D31` retired the best-of-k retry loop, so there's no
-retry *decision* left to own, only the one call and an immediate block
-on failure. That call MAY carry caller-supplied `retry_feedback`
-(`R-MERGE-022`, `D33`) — passed through for exactly the components
-named, never computed here. Since `D32`, also writes a per-attempt
-record (`R-MERGE-021`) via `merge-tracker` right after that call (and
-the verification call, if reached) concludes, so a human has full
-diagnostic detail before deciding whether to re-run or fix the spec
-first. Since D16: also calls `capability-scenario-verifier` once every
-component has passed verification (R-MERGE-014) — the dispatch itself
-moved there (D25), this component only owns *when* and *with what*
-it's called. Since D30, the real `test_author`/`judge` callables wired
-into both that call and `verifier-orchestrator`'s (R-MERGE-004) are
-backed by `llm-endpoint`. Also routes a sealed component away from
-generation (R-MERGE-015), and runs every impacted component to
-completion before evaluating block status (R-MERGE-017) — no
-fail-fast — making a blocked merge's re-run a complete, free recovery
-path (R-MERGE-018).
+component, in `depends_on` order (R-MERGE-023); calling `generator`
+exactly once per cache-miss component per merge attempt (R-MERGE-005,
+no retry decision to own — one call, immediate block on failure),
+optionally carrying caller-supplied `retry_feedback` (R-MERGE-022,
+passed through, never computed here); writing a per-attempt record
+(R-MERGE-021) via `merge-tracker` after that call and the verification
+call conclude; calling `capability-scenario-verifier` once every
+component has passed verification (R-MERGE-014 owns *when*/*with
+what*, not the dispatch mechanics, R-SCENARIO-001); wiring the real
+`test_author`/`judge` closures (backed by `test-author`/`llm-endpoint`,
+R-MERGE-004) into both that call and `verifier-orchestrator`'s; routing
+a sealed component away from generation (R-MERGE-015); running every
+impacted component to completion before evaluating block status
+(R-MERGE-017, no fail-fast) so a blocked merge's re-run is a complete,
+free recovery path (R-MERGE-018).
 
 **Out of scope:** any gate's own logic.
 

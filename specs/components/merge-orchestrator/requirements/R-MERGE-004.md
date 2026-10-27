@@ -12,3 +12,11 @@
   real implementations in production; nothing upstream of this requirement
   assigned who does that wiring, so it's stated explicitly here rather than
   left implicit.
+
+  **Neither real function matches the required single-`bundle`-argument
+  shape** (glossary's "Injected `judge`/`test_author` callable shape,"
+  `D82`): both `llm_endpoint.complete` and `test_author.author_test`
+  require a `model` argument with no default, among others. This
+  component MUST wrap each in a closure capturing `model`/`seed`/
+  `llm_backend`/`repo_root` itself — the only layer with a model
+  identifier to capture.

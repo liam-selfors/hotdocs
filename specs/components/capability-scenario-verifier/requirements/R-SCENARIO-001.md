@@ -46,3 +46,12 @@
   cross-component finding, never attributable to one component, and
   `merge-orchestrator` (`R-MERGE-011`) relies on that distinction to
   report it separately.
+
+  **The `bundle` passed to `judge`/`test_author`** (`D82`, found
+  missing from this bundle's own visible text) MUST be
+  `{capability_id, scenario_id, covers, kind, gherkin, file}` — never
+  a single component's `CriterionBundle`, since no one component's
+  owns a cross-component capability scenario. See the glossary's
+  "Injected `judge`/`test_author` callable shape" for the full
+  convention and how this differs from `verifier-orchestrator`'s own
+  (component-scoped `CriterionBundle`) choice.
