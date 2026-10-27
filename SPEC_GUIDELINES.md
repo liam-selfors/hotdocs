@@ -111,11 +111,12 @@ notes/                 # brainstorming — non-normative, not read by the pipeli
   `specs/glossary.md`. (Found while bootstrapping `spec-linter` — nothing
   previously said how to tell a real spec from a placeholder sitting in the
   same directory.)
-- **Why one file per unit, not one file per document type.** A component's
-  individually-addressed units — each requirement, each acceptance criterion,
-  each interface section — get their own file; narrative/frontmatter does
-  not. This replaced an earlier four-flat-files design (`spec.md` /
-  `interface.md` / `acceptance.md` / `constraints.md`) once it became clear
+- **Why one file per unit, not one file per document type (`D1`).** A
+  component's individually-addressed units — each requirement, each
+  acceptance criterion, each interface section — get their own file;
+  narrative/frontmatter does not. This replaced an earlier four-flat-files
+  design (`spec.md` / `interface.md` / `acceptance.md` / `constraints.md`)
+  once it became clear
   the flat-file version was both harder to hash precisely for blast-radius
   purposes (D2's "interface change vs. internal change" distinction needed
   section-level parsing to approximate) and inconsistent with itself (every
@@ -367,12 +368,12 @@ Below that bar, size caps are linter-enforced:
 
 | Dimension | Warn above | Hard fail above |
 | --- | --- | --- |
-| Generated code per component | 800 LOC | 1500 LOC |
-| Component docs (`component.md` + everything under `requirements/`, `interface/`, `acceptance/` + `constraints.md`) — `component_doc_words`. Deliberately **not** called "spec bundle": this is every doc under the component's own directory, broader than the `SpecBundle` type `spec-bundle-assembler` actually builds, which excludes `acceptance/` entirely (`R-ASSEMBLE-001`). The two used to share a name despite measuring different things — renamed to stop that collision, not to change what's counted. | 2000 words | 4000 words |
-| Requirements (`R-id`s) per component | 20 | 40 |
-| Public interface surface elements | 10 | 20 |
-| `depends_on` count (fan-out) | 7 | — (warn only) |
-| Dependents count (fan-in) | 10 | — (warn only) |
+| Generated code per component (`D79`) | 800 LOC | 1500 LOC |
+| Component docs (`component.md` + everything under `requirements/`, `interface/`, `acceptance/` + `constraints.md`) — `component_doc_words` (`D79`). Deliberately **not** called "spec bundle": this is every doc under the component's own directory, broader than the `SpecBundle` type `spec-bundle-assembler` actually builds, which excludes `acceptance/` entirely (`R-ASSEMBLE-001`). The two used to share a name despite measuring different things — renamed to stop that collision, not to change what's counted. | 2000 words | 4000 words |
+| Requirements (`R-id`s) per component (`D79`) | 20 | 40 |
+| Public interface surface elements (`D79`) | 10 | 20 |
+| `depends_on` count (fan-out) (`D79`) | 7 | — (warn only) |
+| Dependents count (fan-in) (`D79`) | 10 | — (warn only) |
 | Guarantees (`G-id`s) per component (D17) | 5 | 10 |
 | Acceptance criteria (`AC-id`s) per component (D17) | 25 | 50 |
 | **Per-file** words, for any single file under `requirements/` or `acceptance/` (D17) — distinct from the component-docs row above, which is a whole-bundle aggregate | 250 | 500 |
@@ -479,7 +480,7 @@ Rules:
 - Generated test code **MUST** live under `verification/`, never under
   `specs/`. (D4)
 - A `generated-test` criterion's mutation score **MUST** meet 80% (general) or
-  90% (freeform-derived) or the merge fails.
+  90% (freeform-derived) or the merge fails. (D80)
 - An `llm-judge` criterion **MUST** emit structured rationale alongside its
   verdict, for audit — the rationale is never itself a review gate.
 
@@ -556,7 +557,7 @@ gets called again, never whether verification is skipped (D13).
 
 A gate's `gate_version` **MUST** bump whenever its underlying detection logic
 changes (e.g. the license scanner's signature database), so neither a
-cache hit nor a provenance hit ever papers over a genuinely changed risk.
+cache hit nor a provenance hit ever papers over a genuinely changed risk. (D81)
 
 ---
 
