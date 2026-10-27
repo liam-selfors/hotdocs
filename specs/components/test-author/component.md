@@ -63,10 +63,12 @@ See `interface/data/`.
 
 See `acceptance/`.
 
-Mixed `kind`, mirroring `generator`'s own split: behavior around the
-external model call is `generated-test` (exercised via an injected mock
-model, same pattern `generator`'s own suite already established);
-R-AUTHOR-002 and R-AUTHOR-006 are pure path/data-safety checks, `compiled`.
+All `kind: generated-test` (`D59`) — behavior around the external
+model call is exercised via an injected mock model, same pattern
+`generator`'s own suite already established; `R-AUTHOR-002`/`006`'s
+pure path/data-safety checks need no model either, but none of these
+criteria are actually written in the step-phrase grammar, so
+`kind: compiled` would not describe how they're really verified.
 
 ## Non-functional constraints
 
@@ -79,3 +81,9 @@ None.
 ## Change log
 
 - Initial draft.
+- `D72`/`D73`/`D74`: first real implementation. `D72` fixed
+  `gate_version`'s required prefix; `D73` added the missing
+  `llm_backend` parameter to `interface/library.md`. A fourth real
+  `generate()` call, with both in place, passed all 8 `AC-AUTHOR-*`
+  criteria. `gen/test-author/test_author.py` is now that candidate.
+  See `verification/test-author/BOOTSTRAP.md` for the full account.

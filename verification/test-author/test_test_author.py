@@ -1,9 +1,11 @@
 """One test per AC-AUTHOR-* criterion in
 specs/components/test-author/acceptance/."""
 
+import dataclasses
+import hashlib
 import json
 
-from conftest import REPO_ROOT, MockBackend, fake_bundle
+from conftest import REPO_ROOT, MockBackend, fake_bundle, fake_bundle_dict
 import spec_bundle_assembler
 from test_author import GATE_VERSION, author_test
 
@@ -12,6 +14,16 @@ def file_block(content: str):
     def _build(prompt, model, **params):
         return {"text": content, "model_call_error": None}
     return _build
+
+
+def _criterion_hash(bundle_dict: dict) -> str:
+    canonical = json.dumps(bundle_dict, sort_keys=True, separators=(",", ":"))
+    return "sha256:" + hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def _gate_inputs_hash(seed: int = 0, prompt_version: str = "v1") -> str:
+    canonical = json.dumps({"seed": seed, "prompt_version": prompt_version}, sort_keys=True, separators=(",", ":"))
+    return "sha256:" + hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
 def test_ac_author_001_prompt_contains_every_bundle_field(repo_root):
@@ -41,7 +53,6 @@ def test_ac_author_002_real_criterion_bundle_carries_no_gen_content():
         "interface": bundle.interface,
         "glossary": bundle.glossary,
     }
-    real_gen_source = (REPO_ROOT / "gen" / "cache-manager" / "cache_manager.py").read_text(encoding="utf-8")
     # The real implementation's own distinguishing internals must not
     # appear anywhere in the bundle fields a model prompt would be built
     # from.
@@ -62,19 +73,14 @@ def test_ac_author_003_canonical_model_used_regardless_of_generator_model(repo_r
 
 
 def test_ac_author_004_cache_hit_skips_the_model(repo_root):
-    import cache_manager
     import sys
     sys.path.insert(0, str(repo_root / "gen" / "cache-manager"))
+    import cache_manager
 
-    bundle_dict = fake_bundle()
-    canonical = json.dumps(bundle_dict, sort_keys=True, separators=(",", ":"))
-    criterion_hash = "sha256:" + __import__("hashlib").sha256(canonical.encode("utf-8")).hexdigest()
-    gate_inputs = json.dumps({"seed": 0, "prompt_version": "v1"}, sort_keys=True, separators=(",", ":"))
-    gate_inputs_hash = "sha256:" + __import__("hashlib").sha256(gate_inputs.encode("utf-8")).hexdigest()
-
+    bundle_dict = fake_bundle_dict()
     cache_key = cache_manager.CacheKey(
-        spec_bundle_hash=criterion_hash,
-        gate_inputs_hash=gate_inputs_hash,
+        spec_bundle_hash=_criterion_hash(bundle_dict),
+        gate_inputs_hash=_gate_inputs_hash(),
         gate_version=GATE_VERSION,
         model_pin="claude-sonnet-5",
     )
@@ -93,27 +99,23 @@ def test_ac_author_004_cache_hit_skips_the_model(repo_root):
     )
 
     backend = MockBackend([])  # must never be called
-    result = author_test(bundle_dict, "claude-sonnet-5", repo_root=repo_root, llm_backend=backend)
+    result = author_test(fake_bundle(), "claude-sonnet-5", repo_root=repo_root, llm_backend=backend)
     assert result.cache_hit is True
     assert backend.calls == []
 
 
 def test_ac_author_005_successful_call_is_cached(repo_root):
-    import cache_manager
     import sys
     sys.path.insert(0, str(repo_root / "gen" / "cache-manager"))
+    import cache_manager
 
     backend = MockBackend([file_block("def test_x(): pass")])
-    bundle_dict = fake_bundle()
-    author_test(bundle_dict, "claude-sonnet-5", repo_root=repo_root, llm_backend=backend)
+    bundle_dict = fake_bundle_dict()
+    author_test(fake_bundle(), "claude-sonnet-5", repo_root=repo_root, llm_backend=backend)
 
-    canonical = json.dumps(bundle_dict, sort_keys=True, separators=(",", ":"))
-    criterion_hash = "sha256:" + __import__("hashlib").sha256(canonical.encode("utf-8")).hexdigest()
-    gate_inputs = json.dumps({"seed": 0, "prompt_version": "v1"}, sort_keys=True, separators=(",", ":"))
-    gate_inputs_hash = "sha256:" + __import__("hashlib").sha256(gate_inputs.encode("utf-8")).hexdigest()
     cache_key = cache_manager.CacheKey(
-        spec_bundle_hash=criterion_hash,
-        gate_inputs_hash=gate_inputs_hash,
+        spec_bundle_hash=_criterion_hash(bundle_dict),
+        gate_inputs_hash=_gate_inputs_hash(),
         gate_version=GATE_VERSION,
         model_pin="claude-sonnet-5",
     )
@@ -127,10 +129,10 @@ def test_ac_author_006_output_path_under_generated_test_dir(repo_root):
     bundle = fake_bundle()
     result = author_test(bundle, "claude-sonnet-5", repo_root=repo_root, llm_backend=backend)
 
-    assert result.file.path == "verification/foo/generated-test/test_ac_foo_003.py"
-    assert "gen/foo" not in result.file.path
-    assert "compiled" not in result.file.path
-    assert (repo_root / result.file.path).is_file()
+    assert result.file["path"] == "verification/foo/generated-test/test_ac_foo_003.py"
+    assert "gen/foo" not in result.file["path"]
+    assert "compiled" not in result.file["path"]
+    assert (repo_root / result.file["path"]).is_file()
 
 
 def test_ac_author_007_model_call_error_is_distinct(repo_root):
@@ -150,5 +152,5 @@ def test_ac_author_008_api_key_never_appears_in_output(repo_root, monkeypatch):
     bundle = fake_bundle()
     result = author_test(bundle, "claude-sonnet-5", repo_root=repo_root, llm_backend=backend)
 
-    serialized = json.dumps(result.to_dict())
+    serialized = json.dumps(dataclasses.asdict(result))
     assert "sk-super-secret-value" not in serialized
