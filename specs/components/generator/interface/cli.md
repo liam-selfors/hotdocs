@@ -1,26 +1,10 @@
 # CLI
 
-```
-hotdocs generate <component-id> --model=<model-id> [--seed=<n>] \
-  [--retry-feedback=<R-id>,...] [--repo-root=<dir>] [--format=json|text]
-```
-
-- `<component-id>` — target component.
-- `--model` — model identifier to call (R-GEN-004). Required — there is no
-  implicit default, even for "the canonical pin," to keep this component
-  honest about never hardcoding which model it calls.
-- `--seed` — sample seed/index (R-GEN-007). Default `0`.
-- `--retry-feedback` — comma-separated `R-id` list from a prior attempt in
-  the same retry sequence (R-GEN-010). Optional; omit on a sequence's first
-  attempt.
-- Bundle mode (`cold`/`hint`) is inherited from whatever `SpecBundle` is
-  passed in — this component does not itself choose a mode, it consumes
-  whatever `spec-bundle-assembler` produced.
-
-**Exit codes:**
-
-| Code | Meaning |
-| --- | --- |
-| `0` | A candidate was produced (from cache or a fresh model call); written to `gen/<component>/` and the cache in `cold` mode, written to neither in `hint` mode (`R-GEN-016`). |
-| `1` | Model-call error (R-GEN-008) — distinct from "produced code that later fails verification," which still exits `0` here. |
-| `2` | Usage error (unknown component id, missing `--model`). |
+None (`D91`). This component had its own standalone CLI once
+(`hotdocs generate <component-id> --model=...`, just the raw
+candidate-producing step); that verb now belongs to
+`component-gate-runner`'s full gauntlet (`hotdocs generate`, same
+name, different and broader scope) — nobody has a reason to call just
+this component's own narrower step directly, so this component no
+longer exposes one. `generate()` (`interface/library.md`) is called
+only internally now, by `component-gate-runner`.

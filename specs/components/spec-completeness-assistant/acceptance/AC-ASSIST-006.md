@@ -5,7 +5,7 @@ Kind: generated-test
 
 ```gherkin
 Given any CompletenessReport, however low its completeness_score
-When merge-orchestrator's own dependency list and gating logic are
-  inspected
-Then neither references this component in any way that could block a merge
+When provenance-tracker's check_readiness logic and every other
+  component's depends_on list are inspected
+Then none references this component in any way that could block a merge
 ```

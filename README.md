@@ -13,18 +13,32 @@ reviewing diffs of intent.
 ## Status
 
 The rules are formalized (`SPEC_GUIDELINES.md`), and the repository's own
-pipeline is itself the worked example: **22 components, fully specced**
+pipeline is itself the worked example: **23 components, fully specced**
 under `specs/components/` (component anatomy, requirements, interfaces,
 acceptance criteria, constraints — see `specs/architecture/
 pipeline-decomposition.md` for the full decomposition), covering lint,
 blast-radius analysis, generation, verification, compliance scanning,
-provenance, merge-tracking, and a DuckDB-backed query layer shared across
-several of them (`specs/architecture/graph-query-engine.md`).
+provenance, and a DuckDB-backed query layer shared across several of them
+(`specs/architecture/graph-query-engine.md`).
 
-**Seven of those components have real code**, and the central claim this
-repo exists to test — that a real generation pipeline can cold-regenerate
-a component from its spec, verified, with no human hand-writing the
-result — is no longer theoretical:
+**There is no orchestrating "merge" component.** An earlier design had
+one (`merge-orchestrator`) automatically generate, verify, and scan
+every impacted component as part of attempting a merge; that design was
+deliberately reversed (`D86`/`D87`). A developer now drives the
+workflow directly: `hotdocs generate <component-id>` (provenance check,
+generate-on-miss, verify, scan, write provenance — one command per
+component, in dependency order), `hotdocs check-capability <P-id>` for
+any product capability whose realizing components changed, then
+`hotdocs verify` to confirm every component and capability in scope has
+current, passing provenance before committing directly. `provenance-tracker`
+(a live query, not a log of past attempts) and its interactive graph UI
+answer "is everything ready" at any point, for a given blast radius or
+the whole corpus.
+
+**Sixteen of those components have real code**, and the central claim
+this repo exists to test — that a real generation pipeline can
+cold-regenerate a component from its spec, verified, with no human
+hand-writing the result — is no longer theoretical:
 
 - `spec-linter`, `graph-query-engine` — hand-authored bootstrap, standing
   in for the generator this pipeline didn't have yet when they were built.
@@ -34,10 +48,22 @@ result — is no longer theoretical:
 - `llm-endpoint`, `generator` — hand-authored, but *permanent* exceptions:
   each is what the other dispatches through, so neither could ever be
   produced the normal way *first*.
-- `corpus-graph-builder` — the first component actually **cold-generated**,
-  not hand-written: a real model call, through a real `generator`
-  dispatching through a real `llm-endpoint`, from exactly this
-  component's assembled spec bundle and nothing else.
+- `corpus-graph-builder`, `capability-scenario-verifier`,
+  `impact-analyzer`, `license-scanner`, `secret-scanner`,
+  `provenance-checker`, `docs-site-renderer`, `test-author`,
+  `verifier-orchestrator` — cold-generated, not hand-written: a real
+  model call, through a real `generator` dispatching through a real
+  `llm-endpoint`, from each component's own assembled spec bundle and
+  nothing else. `verifier-orchestrator` in particular took three real
+  generation attempts, each failure traced to a genuine, previously
+  undocumented spec gap (how a dependent locates a sealed sibling
+  module; interface-drift's exact scope; a result field's required
+  type) and fixed at that root cause before retrying — never patched
+  by hand.
+- `component-gate-runner` and `capability-scenario-verifier`'s own
+  provenance mechanism are fully specced but **not yet regenerated** —
+  the next real components this corpus's own methodology needs to
+  build for itself.
 
 Once that real chain existed, the obvious next question was testable
 directly: can a bootstrapped component regenerate *itself*, resolving the
@@ -66,7 +92,8 @@ permanent gap in this chain, remains unbuilt by design (sealed,
 itself be agent-generated).
 
 Decisions are tracked as formal ADRs in `specs/decisions/` (`D1`
-through `D75`, as of the 2026-10 MVP baseline reset); `notes/initial-ideas.md`
+through `D91` — `D1`–`D75` from the 2026-10 MVP baseline reset,
+`D76` onward recorded normally since); `notes/initial-ideas.md`
 holds the original brainstorm (its own frozen `D1`–`D30` historical
 numbering, informal) plus the full discussion behind many of the
 earlier decisions.

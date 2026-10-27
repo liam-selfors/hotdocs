@@ -27,11 +27,13 @@
   (`criterion-compiler`) for the first time.
 
   **Requires the dependency to already have been (re)generated before
-  the dependent's bundle is assembled** — whoever drives generation
-  across more than one component in the same pass MUST do so in
-  dependency order (dependencies before dependents), never an arbitrary
-  or fully parallel order across an edge that crosses this boundary
-  (`merge-orchestrator`'s own `R-MERGE-023`). `R-ASSEMBLE-006`'s
+  the dependent's bundle is assembled** — a developer running
+  `hotdocs generate` across more than one component in the same change
+  MUST do so in dependency order (dependencies before dependents),
+  never an arbitrary or fully parallel order across an edge that
+  crosses this boundary (`component-gate-runner`'s own
+  `interface/cli.md`, `D86`/`D91` — never automated, nothing sequences
+  `generate` calls on a developer's behalf). `R-ASSEMBLE-006`'s
   determinism requirement is unaffected, only widened in scope exactly
   as `R-ASSEMBLE-008`'s `hint_code` already treats `gen/` content as
   fair game for a component's own history — this is the same idea

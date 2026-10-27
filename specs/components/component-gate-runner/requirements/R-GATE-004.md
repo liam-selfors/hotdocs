@@ -8,6 +8,6 @@
   that failed verification — different facts for a human deciding, from
   `D19`'s per-attempt record, whether this looks like a transient
   failure worth a plain re-run or a genuine spec gap worth fixing
-  first. `merge-orchestrator` reads this result to decide the overall
-  merge block (`R-MERGE-011`); this component does not decide that
-  itself.
+  first. `provenance-tracker`'s `hotdocs verify` (`D87`/`D88`) reads
+  this component's own provenance to decide overall readiness; this
+  component does not decide that itself.

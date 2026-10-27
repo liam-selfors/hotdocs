@@ -30,15 +30,16 @@ sitting somewhere**, committed, and merely not yet being read.
    before landing here," the answer is: it couldn't be committed
    otherwise (`R-MERGE-011`), so the mere presence of a file *is* the
    proof, no new ledger required.
-3. **`merge-tracker`'s `.hotdocs/` records** (`tracking/`, `attempts/`,
-   `calls/`). These carry rich, already-written detail per attempt —
+3. **`provenance-tracker`'s `.hotdocs/` records** (`attempts/`, `calls/`
+   — `tracking/` removed, `D87`/`D88`, once nothing automated merges
+   anymore). These carry rich, already-written detail per attempt —
    but remember the one hard constraint before reaching for them:
    **`.hotdocs/` content MUST NEVER be a gate input** (`SPEC_GUIDELINES.md`
-   §1, `R-TRACK-005`). They're the right source for a human-facing
-   convenience (`hotdocs track feedback`) or a UI
-   (`merge-tracker-ui`), and the *wrong* source for anything a pass/fail
-   decision depends on — this was specifically ruled out as the home
-   for `D29`'s provenance check for exactly this reason.
+   §1). They're the right source for a human-facing convenience
+   (`hotdocs track feedback`) or a UI (`provenance-tracker-ui`), and the
+   *wrong* source for anything a pass/fail decision depends on — this
+   was specifically ruled out as the home for `D29`'s provenance check
+   for exactly this reason.
 
 If none of these three already has the fact you need, *then* a new
 mechanism may genuinely be warranted — but by that point you'll know

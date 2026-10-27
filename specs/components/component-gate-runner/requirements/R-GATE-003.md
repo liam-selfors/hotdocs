@@ -10,9 +10,10 @@
   `verifier-orchestrator`'s verdict on it was `fail` — the component is
   blocked (`R-GATE-004`) for this attempt, full stop. Nothing here
   re-calls `generator` a second time. That one call MAY carry
-  `retry_feedback` for this component (`R-MERGE-022`, `D3`) — but only
-  if `merge-orchestrator` passed one through from its own caller; this
-  component never derives or decides to include it on its own.
+  `retry_feedback` for this component (`D3`) — but only if the
+  developer invoking `hotdocs generate` supplied `--retry-feedback`
+  (`D86`); this component never derives or decides to include it on
+  its own.
 
   Rationale for removing the automatic loop while keeping the recovery
   path itself free, and for restoring `retry_feedback` as a

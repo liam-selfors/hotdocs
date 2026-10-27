@@ -44,8 +44,8 @@
   The whole report MUST be keyed by `P-id`, a distinct namespace from
   any single component's own verification result — this is a
   cross-component finding, never attributable to one component, and
-  `merge-orchestrator` (`R-MERGE-011`) relies on that distinction to
-  report it separately.
+  `provenance-tracker`'s `check_readiness` (`R-TRACK-010`) relies on
+  that distinction to report it separately.
 
   The exact `judge`/`test_author` callable contract (bundle shape,
   caching posture) is `R-SCENARIO-003`'s own job, not restated here.

@@ -13,8 +13,9 @@ owners: [pipeline-team]
 - **description:** Credential used by `llm-endpoint` (D18) to call
   Anthropic's API on behalf of every caller that needs a model call
   (`generator`, `test-author`, `spec-completeness-assistant`,
-  `merge-orchestrator`'s `judge` wiring) — none of which hold this
-  credential themselves. No example or default — forbidden for any
+  `component-gate-runner`'s and `capability-scenario-verifier`'s own
+  `judge` wiring) — none of which hold this credential themselves. No
+  example or default — forbidden for any
   `sensitivity: secret` var.
 
   **Resolution mechanism (`D32`):** a direct process-environment lookup

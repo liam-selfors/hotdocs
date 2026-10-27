@@ -3,7 +3,7 @@ id: comp-capability-scenario-verifier
 title: Capability Scenario Verifier
 status: draft
 owners: [pipeline-team]
-depends_on: [comp-criterion-compiler, comp-test-author]
+depends_on: [comp-criterion-compiler, comp-test-author, comp-llm-endpoint]
 realizes: [P-ZERO-EDIT, P-AMBIGUITY-GATE]
 sealed: false
 ---
@@ -39,14 +39,20 @@ Criterion" one scope level up.
 dispatching each capability scenario by its declared `kind` using
 exactly the mechanisms `verifier-orchestrator` already established — no
 new dispatch machinery; producing one result per scenario, keyed by
-`P-id`.
+`P-id`; checking and writing its own provenance for one capability at a
+time, keyed on its realizing components' actual current content
+(`R-SCENARIO-004`, `D89`), exposed as `hotdocs check-capability` — a
+developer invokes this directly, the same posture `hotdocs generate`
+has for one component.
 
-**Out of scope:** deciding whether a failure here blocks the merge
-(`merge-orchestrator`'s `R-MERGE-011` job, unchanged by this extraction);
-authoring capability scenarios themselves (a product-capability spec
-author's job, same as any other acceptance criterion); re-deciding a
-criterion's declared `kind` (fixed at spec-authoring time, same
-invariant `verifier-orchestrator` already honors).
+**Out of scope:** deciding whether a merge should proceed (`D87` removed
+the component that used to decide that; `provenance-tracker`'s
+`hotdocs verify`, `D88`, reads this component's provenance the same
+uniform way it reads a component's); authoring capability scenarios
+themselves (a product-capability spec author's job, same as any other
+acceptance criterion); re-deciding a criterion's declared `kind` (fixed
+at spec-authoring time, same invariant `verifier-orchestrator` already
+honors).
 
 ## Definitions
 
@@ -68,7 +74,7 @@ See `interface/data/`.
 
 See `acceptance/`.
 
-All four criteria are `kind: generated-test` (`D43`) — dispatch-and-
+All five criteria are `kind: generated-test` (`D43`) — dispatch-and-
 aggregate logic, tested by mocking the dispatch mechanisms and
 asserting on call arguments/results, the same pattern
 `verifier-orchestrator` already established for coordination logic;
@@ -105,3 +111,13 @@ None — extracted whole from `merge-orchestrator`'s already-resolved
   audit. Not a real inefficiency (`test_author`'s own cache-manager
   check already avoids a redundant model call); confirmed by a new
   `AC-SCENARIO-004`.
+- `D87`/`D89`: gained its own provenance mechanism
+  (`R-SCENARIO-004`, `CapabilityProvenanceCheckResult`), keyed on
+  realizing components' actual current content rather than their
+  `spec_bundle_hash`es — deliberately, to avoid reopening the blind
+  spot this component exists to close. Exposed as
+  `hotdocs check-capability`, a developer-invoked command now that
+  `merge-orchestrator`'s removal left nothing to dispatch this
+  automatically. `depends_on` gains `llm-endpoint` — this component
+  now wires its own `judge` closure, previously `merge-orchestrator`'s
+  job. Not yet regenerated with this addition.

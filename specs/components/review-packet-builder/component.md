@@ -3,7 +3,7 @@ id: comp-review-packet-builder
 title: Review Packet Builder
 status: draft
 owners: [pipeline-team]
-depends_on: [comp-provenance-writer]
+depends_on: [comp-provenance-tracker]
 realizes: [P-ZERO-EDIT, P-COMPLIANCE-GATE]
 sealed: false
 ---
@@ -20,11 +20,13 @@ residual risk — never the generated code itself.
 ## Scope
 
 **In scope:** formatting already-computed results — verification,
-license/secret scan, provenance-hit status — into one reviewable
-document, read entirely from `provenance-writer`'s already-written manifests
-(`R-PACKET-011`, D13), which already collected all of it; no live
-dependency on `verifier-orchestrator`, `license-scanner`,
-`secret-scanner`, or `cache-manager` is needed to do this.
+license/secret scan, provenance-hit status, and capability-scenario
+results — into one reviewable document, read entirely from
+`provenance-tracker`'s own `check_readiness` (`R-PACKET-011`, `D90`),
+which already assembles all of it, component and capability alike; no
+live dependency on `verifier-orchestrator`, `license-scanner`,
+`secret-scanner`, `provenance-checker`, or `capability-scenario-verifier`
+is needed to do this.
 
 **Out of scope:** computing any of those results itself; deciding whether
 the merge is allowed (gates already decided that; this component reports,
@@ -67,3 +69,10 @@ None.
 - `D29`: `cache_hit_status` renamed `provenance_hit_status`
   (`R-PACKET-006`); `R-PACKET-011`'s source list drops `cache-manager`,
   which this field never actually came from.
+- `D90`: `depends_on` swaps `provenance-writer` for `provenance-tracker`
+  directly — reads its `check_readiness` aggregate instead of the
+  `component_provenance` view over `provenance-writer`'s manifests.
+  `ReviewPacket` gains `capability_scenarios` (`R-PACKET-011`), closing
+  a real gap: the old `merge-orchestrator`'s own spec always assumed
+  this packet carried capability-scenario results, but nothing in this
+  component's own requirements ever actually added them.

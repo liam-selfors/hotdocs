@@ -127,3 +127,9 @@ Full narrative for each entry lives in its own `specs/decisions/D<N>.md`
   like `cold` mode; since `spec_bundle_hash` excludes `hint_code`,
   that could poison a later `cold` build's cache slot. Fixed: reads
   the cache, writes to neither destination.
+- `D91`: retired this component's own standalone CLI —
+  `component-gate-runner`'s `hotdocs generate` is the one developer-facing
+  verb now; `generate()` is called only internally. The real
+  `gen/generator/generator.py`'s own `main()`/CLI parsing code is not
+  yet removed — pending a future regeneration, same posture other
+  spec/implementation drift this corpus tracks already has.

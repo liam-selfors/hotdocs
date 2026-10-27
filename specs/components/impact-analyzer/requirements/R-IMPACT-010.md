@@ -15,6 +15,6 @@
   anywhere to look it up, implemented no git comparison at all —
   instead attempting to infer interface-vs-internal from `--changed`'s
   own id shape, which can never work since every real caller (every
-  `AC-IMPACT-*` criterion, `merge-orchestrator`'s `R-MERGE-002`) only
+  `AC-IMPACT-*` criterion, a developer's own `--changed` list) only
   ever supplies component-level ids, never a finer-grained one
   (`D48`).

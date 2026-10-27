@@ -44,6 +44,9 @@ aggregates the capability's own `scenarios` the same way
 `skipped` `llm-judge` scenario alone doesn't fail `overall`, a genuine
 `fail` does.
 
-Passed through unchanged into `MergeResult.capability_scenarios`
-(`merge-orchestrator`'s own data type) — this component returns the
-value, it does not write anything to disk itself.
+Embedded unchanged inside `CapabilityProvenanceCheckResult`
+(`R-SCENARIO-004`, `D89`) and, read from there, into
+`provenance-tracker`'s own `VerifyReport.capabilities` (`D88`) — this
+component returns the value as part of `run_capability_gates`'s own
+result; writing the committed provenance record is this component's
+own job (`R-SCENARIO-004`), not a separate caller's.

@@ -32,8 +32,9 @@ radius); producing a hint-mode preview; producing a judgment-based
 completeness assessment and a redundancy/overlap check.
 
 **Out of scope, and load-bearing, not incidental:** gating anything. This
-component's output is advisory only — it is never in `merge-orchestrator`'s
-dependency list, and it has no mechanism to block a merge. The actual gates
+component's output is advisory only — it is never read by
+`provenance-tracker`'s own checks or any other component's `depends_on`,
+and it has no mechanism to block a merge. The actual gates
 (`spec-linter` at hard-fail severity, `verifier-orchestrator`, the
 compliance scans) are the only things that can do that; this component
 exists entirely on the feature-branch side of the cold-vs-hint split,

@@ -161,85 +161,71 @@ Specced in full depth so far:
   query (`R-GQE-005`).
 - **`docs-site-renderer`** — all `kind: compiled`. A pure function of
   `corpus-graph.json`; its output is deliberately never committed.
-- **`merge-tracker`** — all `kind: compiled`. Writes one local-only,
-  gitignored record per merge attempt — success or block — directly
-  queryable via DuckDB's `read_json`, no bespoke query layer (D10).
-  Depends only on `provenance-writer`, not `merge-orchestrator`, despite
-  being called by it — reads already-written manifests from disk instead
-  of depending on `merge-orchestrator`'s own `MergeResult` type, the same
-  "need the caller's facts without depending on the caller" pattern
-  `review-packet-builder` already established, used here specifically to
-  avoid a dependency cycle. Since D19, also writes a separate,
-  full-detail `AttemptRecord` per component per merge attempt to
-  `.hotdocs/attempts/` — closing the gap D3's retired best-of-k loop
-  opened (a blocked merge commits no provenance at all).
-- **`merge-tracker-ui`** — mostly `kind: compiled` (rendering is a pure
-  function of already-written `TrackingRecord` data), one `generated-test`
-  criterion for the client-side DuckDB-WASM query itself actually running
-  in a real browser. Local-only, like `merge-tracker`'s own data — not a
-  CI artifact the way `docs-site-renderer`'s output is, a genuinely
-  different lifecycle for a genuinely different kind of data. Implements
-  no retry/resume action of its own: re-running `hotdocs merge` already is
-  the complete recovery path (`R-MERGE-018`), so there is nothing for this
-  component to wire up beyond showing status clearly.
-- **`merge-orchestrator`** — all `kind: compiled`, despite sequencing every
-  model-calling, judgment-involving gate in the whole pipeline. Schedules
-  a `component-gate-runner` call per cache-miss, non-sealed component per
-  merge attempt (that component owns the old best-of-k-retired,
-  exactly-once `generator` call now, `D3`/`D76`) — a failed attempt
-  blocks the merge for that component immediately; a human reviewing
-  D19's per-attempt record and re-running the merge is the only recovery
-  path left. Wires the real `test_author`/`judge` callables — passed
-  into every `component-gate-runner` call and the
-  `capability-scenario-verifier` call alike, the one wiring site for both
-  (`D76`) — a responsibility nothing had explicitly assigned before
-  `generator`'s, `verifier-orchestrator`'s, and the blast-radius/D2
-  threads each forced the question. Since D2, also calls
-  `capability-scenario-verifier` once every component has passed
-  per-component verification; the capability-scenario dispatch logic
-  itself (and the capability-intersection lookup) lived here only until
-  D14, once both this component's fan-out and its component-doc word
-  count crowded their caps at once — it was extracted into
-  `capability-scenario-verifier` as the cross-component analog of
-  `verifier-orchestrator`'s own per-component dispatch; this component now
-  only owns *when* and *with what* that gets called. The same crowding
-  signal fired again later and was resolved the same way a second time
-  (`D76`): the per-component provenance/generation/verification/scan/
-  provenance-write gauntlet (`R-MERGE-003/004/005/006/008/009/015`)
-  extracted into `component-gate-runner`. Its real, measured `fan_out`
-  dropped to 9 as a result (from 15 as of D18: 14 after D14's
-  extraction, +1 for `llm-endpoint`) — every one of
-  `component-gate-runner`'s own seven dependencies had been a direct
-  `merge-orchestrator` dependency used for nothing else, so none needed
-  to stay one. See `specs/architecture/pipeline-decomposition.md`'s
-  dedicated note for the full crowding history.
+- **`provenance-tracker`** — all `kind: compiled`. Renamed from
+  `merge-tracker` (`D88`, once `merge-orchestrator`'s removal, `D87`,
+  retired the per-merge-attempt log this component used to write — no
+  caller of `write_tracking_record` exists anymore). Now a live
+  provenance query: `check_readiness` (`hotdocs verify`) checks
+  `provenance-checker` for every component in scope and
+  `capability-scenario-verifier`'s own provenance (`D89`) for every
+  intersecting capability, reusing their real functions rather than
+  re-deriving hit/miss logic — no model calls, no live dependency on
+  `verifier-orchestrator`/`license-scanner`/`secret-scanner` either.
+  Still writes a separate, full-detail `AttemptRecord` per component
+  per `hotdocs generate` attempt to `.hotdocs/attempts/` (called by
+  `component-gate-runner`) — closing the gap D3's retired best-of-k
+  loop opened (a failed attempt commits no provenance at all) —
+  unchanged in role from before the rename.
+- **`provenance-tracker-ui`** — mostly `kind: compiled` (rendering is a
+  pure function of its two inputs), one `generated-test` criterion for
+  the client-side DuckDB-WASM graph query itself actually running in a
+  real browser. Renamed from `merge-tracker-ui` (`D88`); now reads
+  `corpus-graph-builder`'s committed `corpus-graph.json` for topology
+  alongside `provenance-tracker`'s local-only status data — a
+  deliberate reversal of this component's own prior "never reads
+  committed corpus state" boundary, once the concrete cross-referencing
+  need that boundary's own open question anticipated actually
+  surfaced. Implements no retry/generate action of its own: running
+  `hotdocs generate` (and then `hotdocs verify`) already is the
+  complete path, so there is nothing for this component to wire up
+  beyond showing status clearly.
 - **`component-gate-runner`** — all `kind: compiled`. Extracted from
-  `merge-orchestrator` by D76, the same fix D14 applied once before:
-  runs one impacted, non-sealed component through its provenance check,
-  generation on a miss, verification dispatch, compliance scanning, and
-  provenance write, returning one `ComponentPipelineResult`. Accepts
-  already-wired `test_author`/`judge` callables as parameters rather
-  than constructing them itself — `merge-orchestrator` remains the only
-  layer with a model identifier to capture, avoiding a second, duplicate
-  wiring site. Fully specced, not yet regenerated.
+  `merge-orchestrator` by `D76` (the same fix `D14` applied once before
+  for `capability-scenario-verifier`): runs one component through its
+  provenance check, generation on a miss, verification dispatch,
+  compliance scanning, and provenance write, producing one
+  `ComponentPipelineResult`. Has its own CLI, `hotdocs generate`
+  (`D86`/`D91` — this verb replaced `generator`'s own, now-retired one
+  rather than coining a second) — it wires its own `test_author`/
+  `judge` closures and writes `provenance-tracker`'s per-component
+  attempt record itself. A developer runs it directly, in `depends_on`
+  order across a multi-component change, then checks `hotdocs verify`
+  before committing (`D87` removed `merge-orchestrator` entirely — no
+  orchestrating component stands between the two commands anymore).
+  Fully specced, not yet regenerated.
 
 - **`spec-completeness-assistant`** — the assist agent this methodology
   always assumed but never named, and that two `notes/metrics.md` metrics
   already assumed existed before this spec did. Lives outside the merge
-  pipeline entirely —
-  never in `merge-orchestrator`'s dependency list, no mechanism to gate
-  anything. The one component whose core value genuinely *is* judgment
-  (`llm-judge` for completeness scoring and redundancy detection), not
-  dispatch around it — a deliberate contrast to every coordination
-  component specced so far. Since D18, dispatches through `llm-endpoint`
-  rather than holding a model credential itself.
+  workflow entirely — nothing reads this component's output as a
+  readiness input, no mechanism to gate anything. The one component
+  whose core value genuinely *is* judgment (`llm-judge` for
+  completeness scoring and redundancy detection), not dispatch around
+  it — a deliberate contrast to every coordination component specced
+  so far. Since D18, dispatches through `llm-endpoint` rather than
+  holding a model credential itself.
 - **`capability-scenario-verifier`** — all `kind: compiled`. Extracted from
-  `merge-orchestrator` by D14: the cross-component analog of
-  `verifier-orchestrator`'s per-component dispatch, one scope level up —
-  runs every product capability's capability scenarios whose `realizes`-set
-  intersects a merge's blast radius, against the real assembled system.
+  `merge-orchestrator` by D14 (since removed, `D87`): the cross-component
+  analog of `verifier-orchestrator`'s per-component dispatch, one scope
+  level up — runs every product capability's capability scenarios whose
+  `realizes`-set intersects a scope, against the real assembled system.
   The permanent backstop for cross-component behavioral risk no
-  `interface/`-level diffing can rule out in principle (D2).
+  `interface/`-level diffing can rule out in principle (D2). Since
+  `D89`, also owns its own provenance (`hotdocs check-capability`),
+  keyed on realizing components' actual current content rather than
+  their `spec_bundle_hash`es, to avoid reopening the exact blind spot
+  this component exists to close; `provenance-tracker`'s `hotdocs verify`
+  reads it the same uniform way it reads component provenance.
 - **`llm-endpoint`** — mostly `kind: compiled` (backend resolution,
   credential safety), one `generated-test` criterion for the actual
   dispatched call. Added by D18 once `generator` and `test-author` were
@@ -272,14 +258,17 @@ Specced in full depth so far:
 original + `test-author` + `spec-completeness-assistant`, both added
 when earlier design discussions surfaced real gaps nothing owned yet,
 + `capability-scenario-verifier` (D14) + `llm-endpoint` (D18) +
-`provenance-checker` (D29) + `graph-query-engine` (D13), each extracted
-from or added beneath `merge-orchestrator`/`spec-linter`/the
-architecture docs once a real coupling, crowding, or correctness
-signal — not speculation — justified it). The real linter
+`provenance-checker` (D29) + `graph-query-engine` (D13) +
+`component-gate-runner` (D76), each extracted from or added beneath
+`merge-orchestrator`/`spec-linter`/the architecture docs once a real
+coupling, crowding, or correctness signal — not speculation —
+justified it; `merge-orchestrator` itself was later removed entirely,
+`D87`, once checking what the rest of the corpus already produced
+turned out not to need an orchestrating component). The real linter
 (`gen/spec-linter/`) validates the entire corpus clean: 0 failures,
-24 warnings — all `component_doc_words`/`requirement_count`/
-`acceptance_count`/`generated_code_loc` near-misses, `merge-orchestrator`
-and `spec-linter`'s `R-LINT-022` crowding findings (D15), and seven
+33 warnings — all `component_doc_words`/`requirement_count`/
+`acceptance_count`/`generated_code_loc` near-misses, `component-gate-runner`
+and `spec-linter`'s `R-LINT-022` crowding findings (D15), and several
 individual dense files caught by the per-file check (`R-LINT-023`,
 D17). None are hard-fail-severity; see `SPEC_GUIDELINES.md` §4 for what
 each warning dimension means and when (if ever) it calls for action.

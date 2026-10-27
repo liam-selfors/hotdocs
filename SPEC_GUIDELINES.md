@@ -55,9 +55,8 @@ tools/                 # hand-written repo-maintenance/authoring scripts —
                        # generated, not gated, never read by any rule in
                        # this document). Scaffolding convenience only.
 notes/                 # brainstorming — non-normative, not read by the pipeline
-.hotdocs/              # LOCAL ONLY, gitignored — merge-tracking records
-  tracking/            # (merge-tracker, D10) one record per merge attempt
-  attempts/            # (merge-tracker, D19) one record per per-component
+.hotdocs/              # LOCAL ONLY, gitignored — provenance-tracking records
+  attempts/            # (provenance-tracker, D19) one record per per-component
                        # generation+verification attempt, full detail —
                        # what D3's retired best-of-k loop used to fold
                        # into one provenance manifest, now the only place
@@ -87,14 +86,14 @@ notes/                 # brainstorming — non-normative, not read by the pipeli
 - Nothing under `gen/` or `verification/` is hand-edited, with exactly two
   declared exemptions — see §8.
 - `.hotdocs/` **MUST** be gitignored and **MUST NOT** be read by any gate's
-  pass/fail decision — it is observability data about past merge attempts,
-  never an input to the current one. This is a correctness boundary, not
+  pass/fail decision — it is observability data about past `hotdocs generate`
+  attempts, never an input to any check. This is a correctness boundary, not
   just a storage convention: letting a gate's decision depend on local,
   uncommitted history would break every determinism/purity requirement
   elsewhere in this document (e.g. `impact-analyzer`'s R-IMPACT-006).
 - `tools/` is committed (unlike `.hotdocs/`) but otherwise occupies the
   same "outside the methodology" position: a script here **MUST NOT** be
-  invoked by `merge-orchestrator` or any gate, and **MUST NOT** write to
+  invoked by any gate, and **MUST NOT** write to
   `specs/`/`gen/`/`verification/` on a human's behalf without the human
   reviewing the result before committing — it may *create* new, empty
   scaffolding (directory structure, placeholder frontmatter), never
@@ -495,65 +494,82 @@ instance of.
 
 ## 6. Verification gates
 
-Run per merge, scoped to the components in the impact-analysis blast radius:
+**No component automates this sequence end to end (`D87`).** A developer
+drives it directly, in this order, for every component a spec change
+touches:
 
 1. **Spec lint** — structure, frontmatter, RFC 2119 usage, no open questions in
    ratified specs, glossary conformance, acyclic dependency graph, full
    traceability closure (every `R-id`, `realizes`, `uses_var`, `depends_on`,
-   `depends_on_guarantees` reference resolves), size caps.
-2. **Generation** — the pinned canonical model, cold, no prior code, from the
-   spec bundle (`component.md` + `requirements/` + `interface/` +
-   `constraints.md` + depended-upon components' `interface/` + referenced
-   `specs/vars/` declarations + `glossary` — deliberately excluding
-   `acceptance/`, so the model doesn't overfit to its own tests). Exactly
-   one attempt per component per merge — no automatic retry (D1/D3: the
-   best-of-k retry this step used to run was retired; a failed attempt
-   blocks the merge for that component, and a human re-running the merge,
-   after reviewing the per-attempt record D19 requires, is the only path
-   back to a fresh generation call). That re-run's one call MAY carry
-   `retry_feedback` — the immediately preceding attempt's failing
-   requirements — but only if the human explicitly supplies it (D3);
-   nothing computes or injects it automatically.
-3. **Per-criterion verification** — compiled / generated-test / llm-judge, per
-   §5. Contract/property tests from `interface/`. A drift check that
-   generated interfaces match `interface/`'s contract exactly.
-4. **License scan** and **secrets scan** — automated, unconditional. A flag
-   blocks the merge; the pipeline may retry generation without escalating to
-   a person. Every flag (clean or not, resolved or not) is written to the
-   provenance manifest and the review packet — never silent. A flag above a
-   severity threshold notifies a
-   standing compliance channel. (D7/D12)
-5. **Capability-scenario verification** — once every component in the blast
-   radius has regenerated and passed its own per-component verification
-   (steps 2–3), run the capability scenarios of every product capability whose
-   `realizes`-set intersects the blast radius, against the real, fully
-   assembled `gen/` output — not a prediction, the actual regenerated
-   system. A failure blocks the merge the same way a per-component
-   verification failure does. This is the backstop for cross-component
-   behavioral risk that no amount of interface-level diffing can rule out
-   in principle (D2) — not a redundant check: `interface/guarantees/`
-   (D2) makes *foreseen* behavioral dependencies explicit and propagating,
-   this gate catches what wasn't foreseen.
-6. **Non-functional gates** where feasible (benchmarks, size budgets).
-7. **Review packet** — spec diff, changed requirements, regenerated
-   components, verification results, residual risk, license/secret flags,
-   provenance-hit status, capability-scenario results, and any new/changed
-   `sealed`/override declarations. A human reviews this and the spec diff.
-   **No human review of generated code is required, of any kind.** (D5)
-8. **Merge** — `specs/`, `gen/`, and `verification/` (including
-   `corpus-graph.json`) update atomically in one squashed commit.
+   `depends_on_guarantees` reference resolves), size caps. Run directly;
+   nothing gates `hotdocs generate` on it, but there is no reason to
+   attempt generation against a spec that won't lint clean.
+2. **`hotdocs generate <component-id>`** (`component-gate-runner`, `D86`/
+   `D91`) — provenance check first (skip real work on a hit); on a
+   miss, the pinned model, cold, no prior code, from the spec bundle
+   (`component.md` + `requirements/` + `interface/` + `constraints.md`
+   + depended-upon components' `interface/` + referenced `specs/vars/`
+   declarations + `glossary` — deliberately excluding `acceptance/`, so
+   the model doesn't overfit to its own tests); per-criterion
+   verification (compiled / generated-test / llm-judge, per §5,
+   contract/property tests from `interface/`, the interface-drift
+   check); license and secret scans, unconditional (D7/D12); provenance
+   written last. Exactly one generation attempt per call — no
+   automatic retry (D1/D3: the best-of-k retry this step used to run
+   was retired). `--retry-feedback` (the immediately preceding
+   attempt's failing requirements) MAY be supplied on the next call
+   against an unchanged spec — this folds into the generation cache
+   key (`R-GEN-005`), so it is already a fresh attempt, with no
+   separate retry mechanism needed — but only if a human explicitly
+   supplies it (D3); nothing computes or injects it automatically. Run
+   this for every impacted component, in `depends_on` order across more
+   than one (`R-ASSEMBLE-011`).
+3. **`hotdocs check-capability <capability-id>`** (`capability-scenario-verifier`,
+   `D89`) — once every realizing component has passed step 2, run that
+   capability's scenarios against the real, fully assembled `gen/`
+   output — not a prediction, the actual regenerated system — and
+   write its own provenance, keyed on the realizing set's actual
+   current content (deliberately not their `spec_bundle_hash`es, so an
+   undeclared upstream change still invalidates it). This is the
+   backstop for cross-component behavioral risk that no amount of
+   interface-level diffing can rule out in principle (D2) — not a
+   redundant check: `interface/guarantees/` (D2) makes *foreseen*
+   behavioral dependencies explicit and propagating, this gate catches
+   what wasn't foreseen.
+4. **Non-functional gates** where feasible (benchmarks, size budgets).
+5. **`hotdocs verify [--changed=...]`** (`provenance-tracker`, `D88`) —
+   checks every component's and every intersecting capability's
+   current provenance across the given scope (or the whole corpus) and
+   reports one ready/not-ready verdict. This is the confirmation a
+   human reads before committing — it answers the question, it does
+   not enforce anything itself (`D87`): nothing requires it to run
+   before a commit, same posture `.hotdocs/`'s own non-gating rule
+   already states.
+6. **Review** — `review-packet-builder` assembles the same picture
+   `hotdocs verify` checked (spec diff, changed requirements,
+   regenerated components, verification results, residual risk,
+   license/secret flags, provenance-hit status, capability-scenario
+   results, any new/changed `sealed`/override declarations) into a
+   static, reviewable artifact, reading `provenance-tracker`'s own
+   aggregate (`D90`) rather than recomputing anything. A human reviews
+   this and the spec diff. **No human review of generated code is
+   required, of any kind.** (D5)
+7. **Commit** — `specs/`, `gen/`, and `verification/` (including
+   `corpus-graph.json`) update atomically, by the developer, in one
+   squashed commit — ordinary version control, not a component's own
+   action.
 
-A merge whose spec bundle exactly matches an already-verified prior state
-**MUST** be treated as a provenance hit (`provenance-checker`, `D29`) —
-its committed `.provenance.json` has a matching `spec_bundle_hash` and
-`gate_versions` — and restore the matching artifacts, skipping
-regeneration and re-verification, but **never** skipping the human
-spec-diff review. The non-spec-driven-change lane still re-runs
-asynchronously afterward as an environment-drift safety net. (D11)
-This is distinct from `cache-manager`'s own, narrower per-gate cache
-(cache key: `spec_bundle_hash`, `artifact/gate-inputs hash`,
-`gate_version`, `model_pin`), which only ever decides whether a model
-gets called again, never whether verification is skipped (D13).
+A component whose spec bundle exactly matches an already-verified prior
+state **MUST** be treated as a provenance hit (`provenance-checker`,
+`D29`) — its committed `.provenance.json` has a matching
+`spec_bundle_hash` and `gate_versions` — and `hotdocs generate` restores
+the matching artifacts, skipping regeneration and re-verification. The
+non-spec-driven-change lane still re-runs asynchronously afterward as an
+environment-drift safety net. (D11) This is distinct from
+`cache-manager`'s own, narrower per-gate cache (cache key:
+`spec_bundle_hash`, `artifact/gate-inputs hash`, `gate_version`,
+`model_pin`), which only ever decides whether a model gets called
+again, never whether verification is skipped (D13).
 
 A gate's `gate_version` **MUST** bump whenever its underlying detection logic
 changes (e.g. the license scanner's signature database), so neither a

@@ -149,14 +149,17 @@ Consumer tags: `[dev]` developer · `[stk]` stakeholder · `[agt]` system agent 
   Must be 0 for `ratified` specs; nonzero ⇒ spec bug. `[gate] [agt]`
 - **Hint-mode vs. cold-regen divergence** — how often the feature-branch preview
   differs materially from the final cold regen. `[agt] [dev]`
-- **Correction cycles per merge** — of a blocked merge later followed by a
-  passing one touching an overlapping component set, how many attempts it
-  took to go green (D10, `merge-tracker`). **Computed from `.hotdocs/tracking/`
-  via time-proximity + component-overlap between consecutive records, not an
-  explicit link** — `TrackingRecord` doesn't mark one attempt as "the retry
-  of" another (nothing at write time reliably knows that), so this is a
-  heuristic query over already-written records, not a guaranteed-precise
-  count. `[agt] [dev]`
+- **Correction cycles per component** — of a component that failed
+  `hotdocs generate` and later passed, how many attempts it took
+  (D10/`D88`, `provenance-tracker`). **Computed from `.hotdocs/attempts/`
+  via time-proximity between consecutive `AttemptRecord`s for the same
+  component, not an explicit link** — nothing at write time marks one
+  attempt as "the retry of" another, so this is a heuristic query over
+  already-written records, not a guaranteed-precise count. (Originally
+  defined against the now-removed `TrackingRecord`/`merge-tracker`
+  mechanism, `D87` retired that store — the metric's intent is
+  unchanged, its data source moved to the per-component attempt
+  history that already existed alongside it.) `[agt] [dev]`
 - **Blocked attempts resolved by a plain re-run vs. requiring a spec
   edit** — since `D3` retired automatic retry, every recovery from a
   blocked component is now a *separate* merge attempt, and the one
@@ -165,7 +168,7 @@ Consumer tags: `[dev]` developer · `[stk]` stakeholder · `[agt]` system agent 
   the failure was transient (bad luck, not a spec problem); recovery only
   after a `spec_bundle_hash` change means a human genuinely found and
   fixed something. Computed from `.hotdocs/attempts/` (`D19`) joined
-  against `merge-tracker`'s cross-merge sequence — a high rate of
+  against `provenance-tracker`'s per-component attempt sequence — a high rate of
   unchanged-spec-hash recovery is the generation-noise baseline to
   expect; a low rate (most recoveries require a spec edit) is a signal
   this corpus's specs are frequently underspecified, not that the

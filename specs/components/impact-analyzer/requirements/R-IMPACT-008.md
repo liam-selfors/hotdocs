@@ -33,7 +33,7 @@
   real residual risk this requirement does not eliminate — it is
   structurally impossible for a graph-reachability computation to verify
   a claim about what code *actually* relies on — which is exactly why
-  `D2`'s capability-scenario gate (`capability-scenario-verifier`, called by
-  `merge-orchestrator` per R-MERGE-014) exists as a permanent backstop,
-  not a transitional one, independent of how precise these declarations
-  get.
+  `D2`'s capability-scenario gate (`capability-scenario-verifier`, its
+  own provenance checked by `provenance-tracker`'s `hotdocs verify`,
+  `D89`) exists as a permanent backstop, not a transitional one,
+  independent of how precise these declarations get.

@@ -1,19 +1,30 @@
 # R-PACKET-011
 
 **R-PACKET-011** — Every field sourced from `verifier-orchestrator`,
-  `license-scanner`, or `secret-scanner` (R-PACKET-004, 005) MUST be
-  read via the `component_provenance` view named in
-  `specs/architecture/graph-query-engine.md`'s "Query surface" section
-  — directly from `provenance-writer`'s already-written manifests,
-  which already embed `verification_report`, `license_scan`,
-  `secret_scan`, and `provenance_hit` (`SPEC_GUIDELINES.md` §7) — not a
-  live call into any of those components. `provenance_hit` itself
-  (R-PACKET-006) is this same manifest field, never a live
-  `provenance-checker` call either.
+  `license-scanner`, `secret-scanner`, or `capability-scenario-verifier`
+  (R-PACKET-004, 005, and the capability-scenario section this
+  requirement adds) MUST be read via `provenance-tracker`'s own
+  `check_readiness` (`D90`) — its `VerifyReport.components`/
+  `capabilities` maps already carry `verification_report`,
+  `license_scan`, `secret_scan`, `provenance_hit`, and each
+  intersecting capability's own `CapabilityScenarioReport` — never a
+  live call into any of those components directly. `provenance_hit`
+  itself (R-PACKET-006) is this same `VerifyReport` field, never a
+  live `provenance-checker` call either.
+
+  **The review packet now includes a capability-scenario section** —
+  found missing entirely from this component's own prior scope, even
+  though the component this packet reports for always intended it
+  (`merge-orchestrator`'s old `R-MERGE-010`, before `D87` removed that
+  component, already assumed review packets carried this; nothing in
+  this component's own spec ever added the requirement to actually do
+  it). `provenance-tracker`'s uniform component/capability aggregation
+  (`D88`/`D89`) is what makes this straightforward now — one read
+  source instead of a second, bespoke one for capability results alone.
 
   This is an implementation requirement, not a behavioral one —
-  R-PACKET-001 through 010 are unaffected. It is also why this
-  component's `depends_on` no longer lists those components (D13):
-  they were never needed as live dependencies, only their
-  already-written output was, and that output arrives through
-  `provenance-writer`, which this component already depended on.
+  R-PACKET-001 through 010 are unaffected beyond gaining the new
+  capability-scenario section. It is also why this component's
+  `depends_on` lists only `provenance-tracker` (`D90`): no other
+  component's own output needs to be read directly, only
+  `provenance-tracker`'s already-assembled aggregate.

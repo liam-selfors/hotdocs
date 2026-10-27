@@ -24,5 +24,6 @@
   component MUST NOT be the one deciding *whether* to use
   `retry_feedback` on a given call, and MUST NOT derive it from
   anything on disk itself — that decision, and the R-id list itself,
-  come from whoever is invoking this merge/generation (`R-MERGE-022`),
-  never computed automatically in between.
+  come from whoever is invoking this generation call — a developer
+  running `hotdocs generate` with `--retry-feedback` (`D86`/`D91`) — never
+  computed automatically in between.

@@ -36,10 +36,10 @@ decision and live file that would be affected by altering it
 **Out of scope:** judging whether a flagged file is actually wrong —
 this surfaces candidates, never a correctness verdict, the same
 posture `spec-completeness-assistant` takes for its own judgment
-calls. Never wired into `merge-orchestrator`'s block decision — purely
-diagnostic, run on demand or periodically, not part of the merge
-pipeline (`specs/architecture/pipeline-decomposition.md`'s "Advisory
-tooling" table).
+calls. Never read by `provenance-tracker`'s own checks or any gate's
+block decision — purely diagnostic, run on demand or periodically, not
+part of the verification-gate workflow (`specs/architecture/
+pipeline-decomposition.md`'s "Advisory tooling" table).
 
 ## Definitions
 
