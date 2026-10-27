@@ -15,6 +15,17 @@
   `transitive-guarantee` naming the upstream component — the same safe,
   coarse default every other `interface/` file kind already has (D16).
 
+  **`depends_on_guarantees`'s real frontmatter shape** (`D65`, found
+  missing from this bundle's own visible text, though already
+  documented for humans in `SPEC_GUIDELINES.md` §2, which no
+  `SpecBundle` ever includes): a flat list of bare `G-<comp>-NNN` id
+  strings — e.g. `depends_on_guarantees: [G-CACHE-001]` — never a
+  nested structure naming the owning component per entry. A `G-id`'s
+  owning component is **never** parsed out of the id string itself
+  (ambiguous once a component's own slug contains hyphens); it MUST be
+  determined by which component's real `interface/guarantees/`
+  directory actually contains a file with that id.
+
   This narrowing is **strictly opt-in**: a dependent's own silence (no
   `depends_on_guarantees` declared) MUST NEVER be read as "this dependent
   relies on nothing here" — only an explicit, non-empty declaration
