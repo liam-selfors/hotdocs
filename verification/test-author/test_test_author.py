@@ -8,7 +8,6 @@ from conftest import REPO_ROOT, MockBackend, fake_bundle, fake_bundle_dict, file
 import spec_bundle_assembler
 from test_author import (
     GATE_VERSION,
-    DEPENDENCY_CONVENTION_INSTRUCTION,
     author_test,
     _criterion_content_hash as _criterion_hash,
     _gate_inputs_hash,
@@ -193,12 +192,21 @@ def test_ac_author_010_prompt_states_dependency_resolution_convention(repo_root)
     author_test(bundle, "claude-sonnet-5", repo_root=repo_root, llm_backend=backend)
 
     sent_prompt = backend.calls[0][0]
-    assert "statically importable" in sent_prompt
-    assert "<repo_root>/gen/<dependency-slug>/<module_name>.py" in sent_prompt
+    normalized = " ".join(backend.calls[0][0].split())
+    # Governs faking a DEPENDENCY -- never a claim about importing the
+    # component under test itself (D97).
+    assert "No dependency is statically importable" in normalized
+    assert "gen/<dependency-slug>/<module_name>.py" in normalized
+    # The component under test itself needs no custom loader at all.
+    assert "plain import statement" in normalized
+    assert "Never write a custom loader for the component under test itself" in normalized
+    # A fake dependency is always written flat, never as a package --
+    # closes the real __init__-as-a-module-name confusion D97 found.
+    assert "Always write the fake in the flat-module shape, never the package shape" in normalized
+    assert 'never a literal "__init__"' in normalized
     assert "sys.modules" in sent_prompt
     assert "exec_module" in sent_prompt
-    # The convention instruction's own worked snippet puts the
-    # registration assignment textually before the exec_module call --
-    # the one ordering this requirement exists to enforce.
+    # The worked snippet puts the registration assignment textually
+    # before the exec_module call -- the one ordering this requirement
+    # exists to enforce.
     assert sent_prompt.index("sys.modules[module_name] = module") < sent_prompt.index("exec_module(module)")
-    assert DEPENDENCY_CONVENTION_INSTRUCTION in sent_prompt

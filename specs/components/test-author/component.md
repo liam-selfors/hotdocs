@@ -100,3 +100,9 @@ None.
   `provenance-tracker` test authorings each guessed a different wrong
   strategy for faking a dependency. `PROMPT_VERSION` → `v3`. New
   `AC-AUTHOR-010`.
+- `D97`: `R-AUTHOR-010` narrowed in place (not superseded) — the
+  convention governs faking a *dependency* only, never importing the
+  component under test itself (always a plain import, no loader
+  needed); a fake dependency is always written in the flat-module
+  shape, never the package shape, closing a real `__init__`-as-a-
+  module-name confusion a retry surfaced. `PROMPT_VERSION` → `v4`.

@@ -120,3 +120,37 @@ not itself required by any requirement). The hand-maintained
 correct snippet ordering all appear in the real prompt sent. All 11
 test cases pass against the new candidate. Swapped in; round 2's
 candidate is not kept.
+
+## Round 4 (`D97`): narrowing round 3's own new instruction
+
+`provenance-tracker`'s own retry against round 3's candidate (forced by
+`D95`'s separate spec change, which touched every criterion's assembled
+bundle) got `AC-TRACK-004`/`007` passing cleanly, but surfaced two
+narrower problems with round 3's own new convention instruction:
+`AC-TRACK-008`'s authored test read the instruction's unqualified
+opening sentence as applying to importing the component under test
+itself, and — with no worked example for the package case — wrote its
+own ad hoc loader that got the path wrong; `AC-TRACK-009`'s authored
+test correctly limited the technique to a genuine dependency, but tried
+to fake it in the package shape (writing to `gen/<slug>/__init__.py`
+directly, with "__init__" standing in as a literal module name) since
+the prior worked snippet only ever demonstrated the flat-module case —
+landing on a path no real loader in this corpus checks.
+
+Fixed in the spec (`R-AUTHOR-010` narrowed in place, `D97`): the
+instruction now states explicitly that it governs faking a dependency
+only, explicitly tells the model the component under test itself needs
+a plain import and no custom loader at all, and narrows the
+fake-writing recipe to always the flat-module shape with `module_name`
+spelled out precisely. One real `generate()` call produced a candidate
+whose prompt correctly separates "import the component under test
+plainly, no loader" from the dependency-faking convention, and states
+the flat-only rule unambiguously. `PROMPT_VERSION` → `v4`; this round
+also drops the module-level `DEPENDENCY_CONVENTION_INSTRUCTION`
+constant in favor of inlining the text directly in `_build_prompt` — a
+reasonable representation choice, not itself required by any
+requirement, so the hand-maintained suite's `AC-AUTHOR-010` assertions
+were updated to check substrings of the real prompt text (normalized
+for incidental line-wrapping) rather than importing an exported
+constant. All 11 test cases pass against the new candidate. Swapped
+in; round 3's candidate is not kept.

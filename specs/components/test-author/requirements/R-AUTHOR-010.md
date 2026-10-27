@@ -4,18 +4,32 @@
   cross-cutting instruction, never bundle-derived content — the same
   category `generator`'s own `R-GEN-015` output-layout rule already
   established) a statement of this corpus's dependency-resolution
-  convention: no component in this corpus is statically importable by
-  another; a component's own code resolves each dependency dynamically,
-  at runtime, from `<repo_root>/gen/<dependency-slug>/<module_name>.py`
-  (a flat module) or `<dependency-slug>/__init__.py` (a package) —
-  never a name Python's own import system would find on `sys.path`
-  without that explicit file-path resolution, and never a name
+  convention, governing **how the component under test resolves its
+  own dependencies internally** — never how the test itself imports
+  the component under test, which is always a plain `import
+  <module_name>` / `from <module_name> import ...`, since the test
+  always runs with the component's own `gen/<component>/` directory on
+  `PYTHONPATH` and Python's own import system already resolves that
+  correctly whether the component is a flat module or a package. No
+  custom loader is ever needed for the component under test itself
+  (`D97`).
+
+  The instruction MUST state: no dependency is statically importable;
+  the component under test resolves each dependency dynamically, at
+  runtime, from `<repo_root>/gen/<dependency-slug>/<module_name>.py`
+  (flat) or `<dependency-slug>/__init__.py` (package) — never a name
   `sys.modules` injection or `unittest.mock.patch("<name>...")` can
-  intercept by itself. A test needing to fake a dependency's behavior
-  MUST instead write a fake module file at that exact real path, under
-  a fresh temporary `repo_root`, and pass that `repo_root` through to
-  the function under test, letting the component's own loader find it
-  naturally.
+  intercept by itself. If the test needs to fake a dependency's
+  behavior, it MUST write a fake module file under a fresh temporary
+  `repo_root` and pass that `repo_root` through to the function under
+  test, letting the component's own loader find it naturally —
+  **always as the flat-module shape** (`D97`): every real
+  dependency-resolving component in this corpus checks the flat path
+  first, so a fake written there is found regardless of which shape
+  the real, unfaked dependency happens to use elsewhere, and this
+  removes any ambiguity about imitating the package shape. `module_name`
+  is the dependency's own slug with hyphens replaced by underscores —
+  never a literal `"__init__"` or any other placeholder.
 
   The instruction MUST include the one correctness-critical step as a
   literal worked snippet, not prose alone: the freshly created module
@@ -36,3 +50,12 @@
   under test itself reproduced an *almost*-correct loader missing only
   the `sys.modules` pre-registration step, confirming prose alone
   (without the literal snippet) is not reliably sufficient.
+
+  **Further narrowed after a retry** (`D97`): a reasonable reading of
+  the first version of this instruction applied it to importing the
+  component under test too, producing a custom loader for the
+  component under test itself that got the package path wrong with no
+  worked example to follow; a fake dependency written to imitate the
+  package shape, also with no worked example, landed on a path no real
+  loader in this corpus checks at all. Both closed by narrowing scope
+  and the fake-is-always-flat rule above.

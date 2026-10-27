@@ -1,4 +1,5 @@
-"""Authors the test code for one `generated-test`-kind acceptance criterion."""
+"""Authors the test code for one generated-test acceptance criterion."""
+
 from __future__ import annotations
 
 import argparse
@@ -6,52 +7,15 @@ import hashlib
 import importlib.util
 import json
 import re
-import secrets
 import sys
+import uuid
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any
 
-PROMPT_VERSION = "v3"
-GATE_VERSION = "generated_test@1.0.0"
-
-DEPENDENCY_CONVENTION_INSTRUCTION = """No component in this corpus is statically importable by another. A
-component's own code resolves each dependency dynamically, at runtime,
-from `<repo_root>/gen/<dependency-slug>/<module_name>.py` (a flat module)
-or `<repo_root>/gen/<dependency-slug>/__init__.py` (a package) -- never a
-name Python's own import system would find on sys.path without that
-explicit file-path resolution, and never a name sys.modules injection or
-unittest.mock.patch("<name>...") can intercept by itself.
-
-If the test you are writing needs to fake a dependency's behavior, you
-MUST write a fake module file at that exact real path, under a fresh
-temporary repo_root, and pass that repo_root through to the function
-under test, letting the component's own loader find it naturally. Do
-not attempt to patch an import name directly -- the loader described
-above will never see it.
-
-The one correctness-critical step, as a literal worked example:
-
-    import importlib.util
-    import sys
-    from pathlib import Path
-
-    def install_fake_module(repo_root: Path, slug: str, module_name: str, source: str):
-        module_dir = repo_root / "gen" / slug
-        module_dir.mkdir(parents=True, exist_ok=True)
-        module_path = module_dir / f"{module_name}.py"
-        module_path.write_text(source)
-        spec = importlib.util.spec_from_file_location(module_name, module_path)
-        module = importlib.util.module_from_spec(spec)
-        sys.modules[module_name] = module  # MUST happen before exec_module below
-        spec.loader.exec_module(module)
-        return module
-
-The sys.modules registration MUST happen before exec_module is called:
-a dataclass's class body resolves its own module via
-sys.modules[__module__] while the class body executes, so a loader
-missing this step still looks correct but fails on any dependency whose
-own code defines a dataclass."""
+PROMPT_VERSION = "v4"
+GATE_TYPE = "generated_test"
+GATE_VERSION = f"{GATE_TYPE}@1.0.0"
 
 
 @dataclass
@@ -62,11 +26,35 @@ class TestAuthoringResult:
     seed: int
     prompt_version: str
     cache_hit: bool
-    file: Optional[Dict[str, str]]
-    model_call_error: Optional[Dict[str, Any]]
+    file: dict | None
+    model_call_error: dict | None
 
 
-def _slug(component_id: str) -> str:
+def _load_dependency(repo_root: Path, slug: str):
+    module_name = slug.replace("-", "_")
+    base = Path(repo_root) / "gen" / slug
+    flat_path = base / f"{module_name}.py"
+    pkg_path = base / "__init__.py"
+    if flat_path.is_file():
+        path = flat_path
+    elif pkg_path.is_file():
+        path = pkg_path
+    else:
+        raise ImportError(f"cannot resolve dependency {slug!r} under {base}")
+    spec = importlib.util.spec_from_file_location(module_name, path)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def _field(bundle: Any, name: str):
+    if hasattr(bundle, name):
+        return getattr(bundle, name)
+    return bundle[name]
+
+
+def _component_slug(component_id: str) -> str:
     return component_id[len("comp-"):] if component_id.startswith("comp-") else component_id
 
 
@@ -75,19 +63,19 @@ def _criterion_filename(criterion_id: str) -> str:
 
 
 def _hash_json(obj: Any) -> str:
-    encoded = json.dumps(obj, sort_keys=True, separators=(",", ":")).encode("utf-8")
-    return "sha256:" + hashlib.sha256(encoded).hexdigest()
+    data = json.dumps(obj, sort_keys=True).encode("utf-8")
+    return "sha256:" + hashlib.sha256(data).hexdigest()
 
 
-def _criterion_content_hash(bundle) -> str:
+def _criterion_content_hash(bundle: Any) -> str:
     return _hash_json({
-        "component_id": bundle.component_id,
-        "criterion_id": bundle.criterion_id,
-        "covers": bundle.covers,
-        "criterion_text": bundle.criterion_text,
-        "requirement_text": bundle.requirement_text,
-        "interface": bundle.interface,
-        "glossary": bundle.glossary,
+        "component_id": _field(bundle, "component_id"),
+        "criterion_id": _field(bundle, "criterion_id"),
+        "covers": _field(bundle, "covers"),
+        "criterion_text": _field(bundle, "criterion_text"),
+        "requirement_text": _field(bundle, "requirement_text"),
+        "interface": _field(bundle, "interface"),
+        "glossary": _field(bundle, "glossary"),
     })
 
 
@@ -95,78 +83,105 @@ def _gate_inputs_hash(seed: int) -> str:
     return _hash_json({"seed": seed, "prompt_version": PROMPT_VERSION})
 
 
-def _load_dependency(repo_root: Path, slug: str, module_name: str):
-    base = repo_root / "gen" / slug
-    flat = base / f"{module_name}.py"
-    pkg = base / "__init__.py"
-    if flat.is_file():
-        path = flat
-    elif pkg.is_file():
-        path = pkg
-    else:
-        raise ImportError(f"cannot find dependency module {module_name!r} for slug {slug!r} under {base}")
+def _build_prompt(bundle: Any, nonce: str) -> str:
+    component_id = _field(bundle, "component_id")
+    criterion_id = _field(bundle, "criterion_id")
+    covers = _field(bundle, "covers")
+    criterion_text = _field(bundle, "criterion_text")
+    requirement_text = _field(bundle, "requirement_text")
+    interface = _field(bundle, "interface")
+    glossary = _field(bundle, "glossary")
+    slug = _component_slug(component_id)
+    module_name = slug.replace("-", "_")
+
+    return f"""You are authoring an automated test for one acceptance criterion of a
+software component, from spec prose alone. You have no tool access and no
+file access of any kind. Produce your answer using only the content given
+in this prompt -- nothing invented or explored about the target
+component's real implementation.
+
+Target component: {component_id} (module name on PYTHONPATH: {module_name})
+
+Criterion under test: {criterion_id}
+Covers requirement: {covers}
+
+=== Criterion (Given/When/Then) ===
+{criterion_text}
+
+=== Covered requirement's own text ===
+{requirement_text}
+
+=== Target component's interface contract ===
+{interface}
+
+=== Glossary ===
+{glossary}
+
+=== Your task ===
+Write a single Python test file that exercises {component_id}'s public
+interface as described above, and asserts the criterion's Then clause.
+
+Import the component under test with a plain import statement, e.g.
+"import {module_name}" or "from {module_name} import ..." -- the test
+always runs with this component's own gen/{slug}/ directory on
+PYTHONPATH, so Python's own import system already resolves this
+correctly whether the component is a flat module or a package. Never
+write a custom loader for the component under test itself.
+
+=== Dependency-resolution convention (fixed, applies to every component
+in this corpus) ===
+No dependency is statically importable. The component under test resolves
+each of its own dependencies dynamically, at runtime, from
+"<repo_root>/gen/<dependency-slug>/<module_name>.py" (flat module shape)
+or "<repo_root>/gen/<dependency-slug>/__init__.py" (package shape) --
+never a name "sys.modules" injection or "unittest.mock.patch" by name can
+intercept by itself. "module_name" is the dependency's own slug with
+hyphens replaced by underscores -- never a literal "__init__" or any
+other placeholder.
+
+If your test needs to fake a dependency's behavior, write a fake module
+file under a fresh temporary repo_root and pass that repo_root through to
+the function under test, letting the component's own loader find it
+naturally. Always write the fake in the flat-module shape, never the
+package shape, regardless of which shape the real dependency happens to
+use elsewhere:
+
+    fake_dir = tmp_repo_root / "gen" / "<dependency-slug>"
+    fake_dir.mkdir(parents=True, exist_ok=True)
+    (fake_dir / "<module_name>.py").write_text(FAKE_SOURCE)
+
+The one correctness-critical step when the component under test loads a
+dependency module from a file path at runtime: the freshly created module
+object MUST be registered in sys.modules under its load-time name BEFORE
+exec_module is called on it, not after:
+
     spec = importlib.util.spec_from_file_location(module_name, path)
     module = importlib.util.module_from_spec(spec)
-    sys.modules[module_name] = module
+    sys.modules[module_name] = module   # before exec_module, not after
     spec.loader.exec_module(module)
-    return module
 
+Omitting that pre-registration step produces a plausible-looking loader
+that still fails on any dependency whose own code defines a dataclass,
+since a dataclass's class body resolves its own module via
+sys.modules[__module__] while executing.
 
-def _build_prompt(bundle, nonce: str) -> str:
-    return f"""You are authoring an automated test file for exactly one acceptance
-criterion in a spec-driven software pipeline. The test you write will be
-run, independently, to check whether the target component actually
-satisfies this criterion.
-
-You have NO tool access and NO file access of any kind. You cannot
-explore, read, or guess at the target component's real implementation.
-Produce your answer using only the material given below in this
-prompt -- nothing invented or explored about the target component's
-real implementation. The target component's actual source code has been
-deliberately withheld from you; you are given its public interface
-contract only.
-
-== Target component ==
-component_id: {bundle.component_id}
-
-== Criterion to test ==
-criterion_id: {bundle.criterion_id}
-covers: {bundle.covers}
-
-Criterion (Given/When/Then):
-{bundle.criterion_text}
-
-== Requirement text ({bundle.covers}) ==
-{bundle.requirement_text}
-
-== Target component interface (its public contract only) ==
-{bundle.interface}
-
-== Glossary ==
-{bundle.glossary}
-
-== Dependency-resolution convention for this corpus ==
-{DEPENDENCY_CONVENTION_INSTRUCTION}
-
-== Output format ==
-Produce exactly one test file that exercises the target component's
-public interface as described above and asserts the criterion's Then
-clause. Wrap its complete, exact content between these markers, with
-nothing else between them:
+=== Output format (required) ===
+Wrap your test file's complete, exact content exactly as:
 
 -----BEGIN FILE {nonce}-----
 <the complete, exact test file content, verbatim>
 -----END FILE {nonce}-----
 
-Output nothing else between those two marker lines. You may write brief
-commentary outside the markers if you wish, but the content between the
-markers must be the complete, exact file content and nothing more.
+Output nothing else outside those markers -- no markdown code fence, no
+narration, nothing before the first marker or after the last.
 """
 
 
-def _extract_file_content(text: str, nonce: str) -> Optional[str]:
+def _extract_file(text: str, nonce: str) -> str | None:
     pattern = re.compile(
-        r"-----BEGIN FILE " + re.escape(nonce) + r"-----\r?\n(.*?)\r?\n-----END FILE " + re.escape(nonce) + r"-----",
+        re.escape(f"-----BEGIN FILE {nonce}-----")
+        + r"\n(.*?)\n"
+        + re.escape(f"-----END FILE {nonce}-----"),
         re.DOTALL,
     )
     match = pattern.search(text)
@@ -176,17 +191,20 @@ def _extract_file_content(text: str, nonce: str) -> Optional[str]:
 
 
 def author_test(
-    bundle,
+    bundle: Any,
     model: str,
     seed: int = 0,
     *,
-    repo_root: Path = None,
+    repo_root: Path | None = None,
     llm_backend=None,
 ) -> TestAuthoringResult:
     repo_root = Path(repo_root) if repo_root is not None else Path.cwd()
 
-    cache_manager = _load_dependency(repo_root, "cache-manager", "cache_manager")
-    llm_endpoint = _load_dependency(repo_root, "llm-endpoint", "llm_endpoint")
+    cache_manager = _load_dependency(repo_root, "cache-manager")
+    llm_endpoint = _load_dependency(repo_root, "llm-endpoint")
+
+    component_id = _field(bundle, "component_id")
+    criterion_id = _field(bundle, "criterion_id")
 
     cache_key = cache_manager.CacheKey(
         spec_bundle_hash=_criterion_content_hash(bundle),
@@ -198,42 +216,39 @@ def author_test(
     cached = cache_manager.get(cache_key, repo_root=repo_root)
     if not isinstance(cached, cache_manager.Miss):
         payload = cached.payload
-        file_record = dict(payload["file"])
-        _write_file(repo_root, file_record)
         return TestAuthoringResult(
-            component_id=payload["component_id"],
-            criterion_id=payload["criterion_id"],
-            model=payload["model"],
+            component_id=component_id,
+            criterion_id=criterion_id,
+            model=model,
             seed=seed,
             prompt_version=PROMPT_VERSION,
             cache_hit=True,
-            file=file_record,
+            file=payload["file"],
             model_call_error=None,
         )
 
-    nonce = secrets.token_hex(16)
+    nonce = uuid.uuid4().hex
     prompt = _build_prompt(bundle, nonce)
-    response = llm_endpoint.complete(prompt, model, backend=llm_backend)
 
-    model_call_error = response.get("model_call_error")
-    if model_call_error:
+    response = llm_endpoint.complete(prompt, model, backend=llm_backend)
+    error = response.get("model_call_error")
+    if error:
         return TestAuthoringResult(
-            component_id=bundle.component_id,
-            criterion_id=bundle.criterion_id,
+            component_id=component_id,
+            criterion_id=criterion_id,
             model=model,
             seed=seed,
             prompt_version=PROMPT_VERSION,
             cache_hit=False,
             file=None,
-            model_call_error=dict(model_call_error),
+            model_call_error=error,
         )
 
-    text = response.get("text") or ""
-    content = _extract_file_content(text, nonce)
-    if content is None:
+    file_content = _extract_file(response.get("text") or "", nonce)
+    if file_content is None:
         return TestAuthoringResult(
-            component_id=bundle.component_id,
-            criterion_id=bundle.criterion_id,
+            component_id=component_id,
+            criterion_id=criterion_id,
             model=model,
             seed=seed,
             prompt_version=PROMPT_VERSION,
@@ -241,68 +256,63 @@ def author_test(
             file=None,
             model_call_error={
                 "category": "malformed_response",
-                "message": "no matching BEGIN/END FILE marker pair found in model response",
+                "message": "no BEGIN/END FILE marker pair found in model response",
             },
         )
 
-    rel_path = f"verification/{_slug(bundle.component_id)}/generated-test/{_criterion_filename(bundle.criterion_id)}"
-    file_record = {"path": rel_path, "content": content}
+    slug = _component_slug(component_id)
+    rel_path = f"verification/{slug}/generated-test/{_criterion_filename(criterion_id)}"
+    file_obj = {"path": rel_path, "content": file_content}
 
-    cached_result = cache_manager.CachedResult(
-        gate_type="generated_test",
-        payload={
-            "component_id": bundle.component_id,
-            "criterion_id": bundle.criterion_id,
-            "model": model,
-            "file": file_record,
-        },
-        stored_at=cache_manager.now_iso(),
+    payload = {
+        "component_id": component_id,
+        "criterion_id": criterion_id,
+        "model": model,
+        "file": file_obj,
+    }
+    cache_manager.put(
+        cache_key,
+        cache_manager.CachedResult(
+            gate_type=GATE_TYPE,
+            payload=payload,
+            stored_at=cache_manager.now_iso(),
+        ),
+        repo_root=repo_root,
     )
 
-    _write_file(repo_root, file_record)
-    cache_manager.put(cache_key, cached_result, repo_root=repo_root)
+    out_path = repo_root / rel_path
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(file_content)
 
     return TestAuthoringResult(
-        component_id=bundle.component_id,
-        criterion_id=bundle.criterion_id,
+        component_id=component_id,
+        criterion_id=criterion_id,
         model=model,
         seed=seed,
         prompt_version=PROMPT_VERSION,
         cache_hit=False,
-        file=file_record,
+        file=file_obj,
         model_call_error=None,
     )
 
 
-def _write_file(repo_root: Path, file_record: Dict[str, str]) -> None:
-    abs_path = repo_root / file_record["path"]
-    abs_path.parent.mkdir(parents=True, exist_ok=True)
-    abs_path.write_text(file_record["content"])
-
-
-def _parse_args(argv):
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="hotdocs author-test")
     parser.add_argument("component_id")
     parser.add_argument("criterion_id")
     parser.add_argument("--model", required=True)
     parser.add_argument("--seed", type=int, default=0)
-    parser.add_argument("--repo-root", default=None)
+    parser.add_argument("--repo-root", default=".")
     parser.add_argument("--format", choices=["json", "text"], default="text")
-    return parser.parse_args(argv)
+    args = parser.parse_args(argv)
 
-
-def main(argv=None) -> int:
-    argv = sys.argv[1:] if argv is None else argv
-    try:
-        args = _parse_args(argv)
-    except SystemExit as exc:
-        return exc.code if exc.code is not None else 2
-
-    repo_root = Path(args.repo_root) if args.repo_root else Path.cwd()
+    repo_root = Path(args.repo_root).resolve()
 
     try:
-        spec_bundle_assembler = _load_dependency(repo_root, "spec-bundle-assembler", "spec_bundle_assembler")
-        bundle = spec_bundle_assembler.assemble_criterion(args.component_id, args.criterion_id, repo_root)
+        spec_bundle_assembler = _load_dependency(repo_root, "spec-bundle-assembler")
+        bundle = spec_bundle_assembler.assemble_criterion(
+            args.component_id, args.criterion_id, repo_root
+        )
     except Exception as exc:
         print(f"usage error: {exc}", file=sys.stderr)
         return 2
