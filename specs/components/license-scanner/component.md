@@ -81,3 +81,7 @@ See `constraints.md`.
 - Initial draft.
 - `D38`: added `notification_delivery_error` to distinguish a webhook
   call that was never due from one that was due and failed to deliver.
+- `D67`: new `VAR-LICENSE-CORPUS-PATH` — a real `generate()` candidate
+  defaulted the reference corpus's location to `.hotdocs/`, which
+  `SPEC_GUIDELINES.md` forbids any gate decision from depending on.
+  `R-LICENSE-001` now names the real location explicitly.
