@@ -306,6 +306,44 @@ Single file, no frontmatter, no per-spec entry limit. (D14)
   that genuinely don't share vocabulary) — never a routine response to word
   count.
 
+**When to promote a fact here (the judgment call §4's component-sizing
+trigger makes for size, made explicit for shared vocabulary, `D86`):**
+a convention, naming formula, file-path pattern, or callable contract
+**MUST** be promoted to the glossary as soon as a second component's
+spec states it, relies on it, or would need to independently guess it
+— never left to live only in one component's own text (where a
+dependent's `SpecBundle` never sees it, `R-ASSEMBLE-002`) or only in
+real `gen/` code (where no spec ever sees it at all). This corpus has
+been caught by exactly this gap nine times (`D61`, `D62`, `D65`,
+`D67`, `D69`, `D76`, `D80`, `D82`, `D83`) — every time, independently
+by different components, because the fact was true and needed but
+never had anywhere a `SpecBundle` would surface it. §10's "single
+source of truth for computed facts" is the sibling discipline for
+*calculations*; this is the same discipline for *shared vocabulary and
+contracts* — a convention is not "computed," but it is exactly as
+unsafe to let two components independently reinvent.
+
+  Before writing a requirement that describes how your component uses
+  or constructs a fact belonging to *another* component's contract —
+  not your own component's purely internal behavior — check whether
+  `glossary.md` already names it. If it doesn't, and a second real
+  consumer now exists (this requirement, plus whichever component you
+  found the convention in originally), promote it there as part of the
+  same change, not as a follow-up. See `notes/audit-before-you-build.md`
+  for the analogous habit already established for *data that already
+  exists but isn't yet being read*; this is the same habit for
+  *conventions that already exist but aren't yet written down*.
+
+  A citation of an existing glossary entry **MUST** quote its bolded
+  header exactly (e.g. `` the glossary's "Criterion test filename" ``)
+  — `R-LINT-028` mechanically checks this resolves to a real entry,
+  the same way `R-LINT-026` already does for `D<N>` citations and
+  `R-LINT-027` already does for section-heading pointers. That check
+  catches citation drift (a renamed or removed term, a typo) once a
+  term is cited; it cannot detect a fact that should have been
+  promoted but wasn't — that half stays a judgment call, which is why
+  this paragraph, not a linter rule alone, is the actual fix.
+
 ---
 
 ## 4. Component sizing

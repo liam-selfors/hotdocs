@@ -446,3 +446,27 @@ def test_ac_lint_027_section_reference_resolution(corpus_root):
     findings = [f for f in report.findings if f.rule_id == "R-LINT-027"]
     assert len(findings) == 1
     assert "Nonexistent Heading" in findings[0].message
+
+
+def test_ac_lint_028_glossary_citation_resolution(corpus_root):
+    """D86 -- a 'the glossary's "<Term>"' citation must resolve to a
+    real bolded entry header in specs/glossary.md."""
+    glossary = corpus_root / "specs" / "glossary.md"
+    glossary.write_text(
+        glossary.read_text(encoding="utf-8")
+        + "- **A Real Test Term** — defined for this test.\n",
+        encoding="utf-8",
+    )
+    _patch(
+        _comp(corpus_root) / "requirements" / "R-FOO-001.md",
+        (
+            "The component MUST do the one thing it is specified to do.",
+            'The component MUST use the glossary\'s "A Real Test Term" '
+            'and never the glossary\'s "A Made Up Term".',
+        ),
+    )
+    report = run_lint(corpus_root)
+    assert has_finding(report, "R-LINT-028")
+    findings = [f for f in report.findings if f.rule_id == "R-LINT-028"]
+    assert len(findings) == 1
+    assert "A Made Up Term" in findings[0].message

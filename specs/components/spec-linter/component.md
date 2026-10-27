@@ -20,23 +20,22 @@ gate and the component everything else assumes has already run.
 
 ## Scope
 
-**In scope:** frontmatter completeness and typing on a component's root file,
-and frontmatter *absence* on every unit file (D15); cross-reference
-resolution (`depends_on` / `realizes` / `uses_var` / `depends_on_guarantees`,
-D16); dependency-graph acyclicity; `R-id`/`G-id` formation and RFC 2119
-usage; forward and backward traceability between requirements and
-acceptance criteria; acceptance-criterion well-formedness; glossary
-conformance; the D2 size caps; `specs/vars/` secret-field safety; glossary
-singularity (D14); no trailing whitespace anywhere in a spec file
-(R-LINT-019) — keeps `spec_bundle_hash` (`spec-bundle-assembler`) safely
-hashing raw bytes without a cosmetic-diff cache-hit cost.
+**In scope:** frontmatter completeness and typing on a component's root
+file, and frontmatter *absence* on every unit file; cross-reference
+resolution (`depends_on` / `realizes` / `uses_var` /
+`depends_on_guarantees`); dependency-graph acyclicity; `R-id`/`G-id`
+formation and RFC 2119 usage; forward and backward traceability
+between requirements and acceptance criteria; acceptance-criterion
+well-formedness; glossary conformance and citation resolution
+(`R-LINT-028`); component size caps; `specs/vars/` secret-field
+safety; glossary singularity; no trailing whitespace anywhere in a
+spec file (`R-LINT-019`, keeps `spec_bundle_hash` hashing raw bytes
+without a cosmetic-diff cache-hit cost).
 
 **Out of scope:** generation; verification of generated code's actual
-behavior. **Mostly free of model calls and judgment** — 18 of 19
-requirements are pure structural/textual checks; R-LINT-015 is a
-deliberate, narrow exception (see its entry and `constraints.md`) for the
-one case here that's genuinely about meaning, not structure, and D5 says
-that's when `llm-judge` is the right tool.
+behavior. **Mostly free of model calls and judgment** — only
+R-LINT-015 is a deliberate exception (see its entry and
+`constraints.md`), genuinely about meaning, not structure.
 
 ## Definitions
 
@@ -68,17 +67,13 @@ See `constraints.md`.
 
 ## Open questions
 
-_None — all four originally recorded here were resolved during the
-bootstrap implementation; `verification/spec-linter/BOOTSTRAP.md` has
-the full account (RFC 2119 keyword list, cycle-detection algorithm,
-word/LOC counting scope, interface-surface-element counting)._
+None. See `verification/spec-linter/BOOTSTRAP.md` for resolved history.
 
 ## Change log
 
+Full narrative per entry lives in its own `specs/decisions/D<N>.md`.
+
 - Initial draft.
-- `D40`–`D42`: `spec_bundle_words` renamed `component_doc_words`;
-  added `R-LINT-026`/`027`; `component_doc_words` now queries the
-  shared `component_size` view (first real `duckdb` dependency).
-- `D44`: `R-LINT-003`/`004`/`008`/`009`/`018` rewired onto
-  `graph-query-engine`'s shared `nodes`/`edges` views; `depends_on`
-  now `[comp-graph-query-engine]`.
+- `D40`–`D42`: renamed `component_doc_words`; added `R-LINT-026`/`027`.
+- `D44`: rewired onto `graph-query-engine`'s shared views.
+- `D86`: added `R-LINT-028`.
