@@ -174,6 +174,15 @@ def test_ac_gen_014_dependency_usage_is_a_distinct_section(repo_root):
     assert dep_iface_idx != dep_usage_idx
 
 
+def test_ac_gen_016_output_layout_instruction_is_present(repo_root):
+    backend = MockBackend([file_block("foo.py", "x = 1")])
+    generate(FakeBundle(), "claude-sonnet-5", repo_root=repo_root, llm_backend=backend)
+
+    sent_prompt = backend.calls[0][0]
+    assert "src/" in sent_prompt and "package" in sent_prompt
+    assert "dependency_usage" in sent_prompt
+
+
 def test_ac_gen_015_two_repo_roots_in_one_process_do_not_collide(repo_root, tmp_path_factory):
     """R-GEN-014/D57 -- a per-call dynamic dependency load from repo_root
     must not crash on a dataclass-defining dependency (the real bug a

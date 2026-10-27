@@ -117,23 +117,15 @@ See `constraints.md`.
 
 - Initial draft.
 - `D50`: first real `gen/generator/` implementation — a hand-authored
-  bootstrap exception, structurally permanent like `llm-endpoint`:
-  nothing could cold-regenerate the component that does the
-  cold-regenerating. `generate()` gained `repo_root`/`llm_backend`
-  parameters (`interface/library.md`), two real, pre-existing gaps.
-  `cache-manager`'s `gate_type` registry gained `generator` as a sixth
-  known type — also a real, pre-existing gap.
-- `D51`/`D53`: used in anger to regenerate `llm-endpoint` from its own
-  spec (`D51`, then again after `D52`/`D53`'s spec changes). Gained a
-  small `_as_dict()` adapter around `llm_endpoint.complete()`'s return
-  value — `interface/data/ModelResponse.md` only ever fixes a JSON
-  shape, not a Python type, and each self-hosted regeneration of
-  `llm-endpoint` has returned a different concrete one.
-- `D54`: a real attempt to regenerate this component itself failed to
-  import (assumed `cache-manager` was a package with a `.data`
-  submodule; it is a flat module) and was correctly not swapped in —
-  `gen/generator/generator.py` is unchanged. See `notes/backlog.md` for
-  the generalizable gap this exposed.
+  bootstrap exception. `generate()` gained `repo_root`/`llm_backend`
+  params, two real pre-existing gaps; `cache-manager` gained
+  `generator` as a sixth `gate_type`, a third.
+- `D51`/`D53`: used to regenerate `llm-endpoint` from its own spec.
+  Gained a small `_as_dict()` adapter, since each self-hosted
+  regeneration of `llm-endpoint` returns a different concrete
+  `ModelResponse` shape.
+- `D54`: a real self-regeneration attempt failed to import (wrong
+  `cache-manager` layout assumption) and was correctly not swapped in.
 - `D55`: `R-GEN-013` — the prompt now includes `dependency_usage`
   (`R-ASSEMBLE-011`) as its own distinct section when present, the
   fix for `D54`'s failure. `PROMPT_VERSION` bumped to `v2`.
@@ -156,3 +148,6 @@ See `constraints.md`.
   self-hosted regeneration of this component. `gen/generator/
   generator.py` is now that candidate; `verification/generator/` was
   rewritten to match its conventions. `BOOTSTRAP.md` kept as history.
+- `D62`: `R-GEN-015` — a `src/`-layout candidate for a different
+  component silently defeated `dependency_usage`. Prompt now requires
+  a flat module or top-level package. `PROMPT_VERSION` → `v5`.

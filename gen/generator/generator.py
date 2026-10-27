@@ -25,8 +25,10 @@ from typing import Any, Dict, List, Optional
 # R-GEN-003: the prompt template is frozen and versioned; bumped on any
 # change to its text or structure. v2 added dependency_usage (D55); v3
 # added the per-call nonce delimiter and non-empty-only caching (D56);
-# v4 added the explicit dynamic-import sys.modules warning (D57).
-PROMPT_VERSION = "v4"
+# v4 added the explicit dynamic-import sys.modules warning (D57); v5
+# added the flat-module/package output-layout instruction (R-GEN-015,
+# D62).
+PROMPT_VERSION = "v5"
 
 # R-GEN-005/006: the cache-key component identifying this gate's shape.
 # Bumped on D56 to orphan two pre-existing poisoned cache entries
@@ -68,6 +70,13 @@ own annotations at class-body-execution time.
 - Output only the files that belong under gen/<component>/ for the \
 target component -- no explanation, no commentary outside of file \
 content itself.
+- Lay out your output as either a flat <slug_with_underscores>.py \
+module or a <slug_with_underscores>/ package (with __init__.py) \
+directly under gen/<component>/ -- never a deeper layout (e.g. a src/ \
+subdirectory) and never a separately-installed distribution. This is \
+load-bearing, not stylistic: a future dependent's dependency_usage \
+only ever looks for your code in those two exact shapes, and silently \
+sees nothing there otherwise.
 
 For each file you produce, wrap its content exactly as instructed below."""
 

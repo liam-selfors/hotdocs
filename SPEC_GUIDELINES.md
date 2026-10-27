@@ -70,6 +70,17 @@ notes/                 # brainstorming — non-normative, not read by the pipeli
 - `gen/` and `verification/` **MUST** be committed on every branch. Large
   generated binary assets **MUST** go through Git LFS rather than a plain blob
   commit. (D6)
+- A component's real code under `gen/<slug>/` (`<slug>` per
+  `glossary.md`'s "Component id / component slug" entry) **MUST** be
+  either a flat `<slug_with_underscores>.py` module or a
+  `<slug_with_underscores>/` package (with `__init__.py`) directly
+  under `gen/<slug>/` — never nested deeper (e.g. a `src/` layout) and
+  never a separately-installed distribution. This is load-bearing, not
+  stylistic: `spec-bundle-assembler`'s `dependency_usage`
+  (`R-ASSEMBLE-011`, `D55`) only ever looks in those two exact
+  locations, and silently (by design, fail-to-empty) returns nothing
+  for a dependency it can't find there — found only once a real
+  generated candidate chose a `src/` layout instead (`D62`).
 - Nothing under `gen/` or `verification/` is hand-edited, with exactly two
   declared exemptions — see §8.
 - `.hotdocs/` **MUST** be gitignored and **MUST NOT** be read by any gate's
