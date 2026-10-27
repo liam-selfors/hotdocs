@@ -46,3 +46,18 @@ split.
   trust infrastructure (e.g. `criterion-compiler`) — not legacy debt alone.
 - **Pinned override** — the file-granularity version of the same exemption,
   declared in `gen/<component>/.overrides.json`.
+- **Criterion test filename** — the deterministic filename a criterion's
+  executable test file is always written/read under, for both
+  `kind: compiled` (`criterion-compiler`) and `kind: generated-test`
+  (`test-author`) output: `test_<criterion_id, lowercased, '-' -> '_'>.py`
+  (e.g. `AC-FOO-003` → `test_ac_foo_003.py`), directly under
+  `verification/<component>/<compiled|generated-test>/` — no further
+  nesting, no content hash or other suffix. Both producers already used
+  this exact formula independently; `verifier-orchestrator`, the
+  dependent that must *check for* a `generated-test` file before
+  deciding whether to dispatch to `test_author` (`R-VERIFY-002`), is
+  the first consumer, and this was never written down anywhere as a
+  shared contract before `D80` — two independent real candidates each
+  invented a different, incompatible filename/location scheme for the
+  same check, since nothing bundle-visible stated the formula as a
+  rule rather than one illustrative JSON example.
