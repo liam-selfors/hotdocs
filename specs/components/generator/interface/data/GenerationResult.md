@@ -3,6 +3,7 @@
 ```json
 {
   "component_id": "comp-foo",
+  "spec_bundle_hash": "sha256:...",
   "model": "claude-sonnet-5",
   "prompt_version": "v1",
   "cache_hit": false,
@@ -13,16 +14,12 @@
 }
 ```
 
-No `seed`/`sample_index` fields — `D31` retired the best-of-k retry loop
-that was their only reason to exist, and `generator` is still called at
-most once per component per merge attempt, so there is no "which sample
-won" left to record. `retry_feedback` itself came back under `D33`:
-`D31` mistakenly removed it along with the automatic loop, but it was
-never only useful for feeding that loop — it's restored here as a plain
-echo of whatever a caller supplied (`null` if nothing was), for the same
-audit reason it always existed: an auditor reconstructing why a given
-attempt looks the way it does needs to know whether it was informed or
-blind.
+`spec_bundle_hash` (`R-GEN-017`, `D83`) echoes `bundle.spec_bundle_hash`.
+
+No `seed`/`sample_index` fields (`D31` retired best-of-k, no "which
+sample won" left to record). `retry_feedback` (`D33`) is a plain echo
+of whatever a caller supplied (`null` if nothing was) — an auditor
+needs to know whether an attempt was informed or blind.
 
 Exactly one of `files` (non-empty), `model_call_error`, or `refused` is
 populated on any given result — never more than one, and `cache_hit` is

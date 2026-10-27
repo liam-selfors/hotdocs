@@ -250,3 +250,12 @@ def test_ac_gen_017_hint_mode_still_reads_an_existing_cache_hit(repo_root):
     assert result.cache_hit is True
     assert result.files == {"foo.py": "x = 1"}
     assert not (repo_root / "gen" / "foo").exists()
+
+
+def test_ac_gen_018_result_echoes_the_bundles_spec_bundle_hash(repo_root):
+    """R-GEN-017/D83 -- provenance-writer has no other way to learn the
+    spec_bundle_hash of what was generated."""
+    backend = MockBackend([file_block("foo.py", "x = 1")])
+    bundle = FakeBundle(spec_bundle_hash="sha256:distinctivevalue")
+    result = generate(bundle, "claude-sonnet-5", repo_root=repo_root, llm_backend=backend)
+    assert result.spec_bundle_hash == "sha256:distinctivevalue"

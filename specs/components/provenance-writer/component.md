@@ -67,3 +67,12 @@ None.
 - `D39`: `cache_hit` renamed `provenance_hit` throughout (`R-PROV-004`);
   `R-PROV-009`'s lookup is now the caller's job, not this component's —
   `cache-manager` never held a `VerificationReport` to look up.
+- `D83`: found via a pre-generation audit, before this component was
+  ever built: `pipeline_version` and `verification_run_id` had no
+  stated source anywhere. `R-PROV-012`/`013` fix this — the former is
+  this component's own version constant, the latter a deterministic
+  `"<slug>-attempt-<attempts>"`. Also found `R-PROV-002`'s claim that
+  `spec_bundle_hash` comes from `generator`'s `GenerationResult` was
+  false against that component's real schema at the time — fixed
+  there instead (`GenerationResult` gained the field, `R-GEN-017`),
+  since `provenance-writer` has no other dependency that could supply it.
