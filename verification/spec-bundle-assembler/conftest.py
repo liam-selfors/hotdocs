@@ -95,6 +95,10 @@ sealed: false
 
 A minimal component for exercising the assembler.
 
+## Rationale
+
+DISTINCTIVE-RATIONALE-TEXT-NOT-FOR-GENERATION.
+
 ## Scope
 
 In scope: everything. Out of scope: nothing.
@@ -125,9 +129,12 @@ See `constraints.md`.
 
 ## Open questions
 
+- DISTINCTIVE-OPEN-QUESTION-TEXT-NOT-FOR-GENERATION?
+
 ## Change log
 
 - Initial draft.
+- DISTINCTIVE-CHANGELOG-TEXT-NOT-FOR-GENERATION.
 """
 
 PRODUCT = """---

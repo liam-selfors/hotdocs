@@ -262,3 +262,14 @@ def test_dependency_usage_resolves_a_sealed_dependencys_real_source_path(corpus_
     usage = spec_bundle_assembler._dependency_usage(corpus_root, "qux")
     assert "Importable as: `qux` (module path `pipeline/qux/`)" in usage
     assert "qux_run() -> None" in usage
+
+
+def test_ac_assemble_012_target_rationale_open_questions_changelog_excluded(corpus_root):
+    """R-ASSEMBLE-001/D85 -- the target's own Rationale/Open questions/
+    Change log sections must not reach the model; Purpose/Scope must."""
+    bundle = assemble("comp-foo", corpus_root)
+    assert "A minimal component for exercising the assembler" in bundle.spec  # Purpose
+    assert "In scope: everything" in bundle.spec  # Scope
+    assert "DISTINCTIVE-RATIONALE-TEXT-NOT-FOR-GENERATION" not in bundle.spec
+    assert "DISTINCTIVE-OPEN-QUESTION-TEXT-NOT-FOR-GENERATION" not in bundle.spec
+    assert "DISTINCTIVE-CHANGELOG-TEXT-NOT-FOR-GENERATION" not in bundle.spec

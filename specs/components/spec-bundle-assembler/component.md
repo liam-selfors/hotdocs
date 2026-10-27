@@ -97,3 +97,8 @@ See `constraints.md`.
   indistinguishable from "no real code yet," found only once a real
   dependent needed real usage info for `criterion-compiler` for the
   first time.
+- `D85`: `R-ASSEMBLE-001` now excludes the target's own `## Rationale`/
+  `## Open questions`/`## Change log` — the same "contract, not
+  rationale" principle `R-ASSEMBLE-002` already applied to every
+  dependency, found (via a prompt-efficiency audit) never applied to
+  the target itself. Measured at 15-60% of a real component.md's body.
