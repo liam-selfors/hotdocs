@@ -140,3 +140,10 @@ None.
   depends on `component-gate-runner` for anything. The capability half
   of `D92` (check-then-run via `capability-scenario-verifier`) stands
   unreversed (`R-TRACK-010`).
+- `D95`: first real cold-generation found `last_requirement_failures`
+  guessing the wrong shape for `requirement_results` (a list of
+  per-requirement objects, not the real flat `R-id -> "pass"|"fail"`
+  mapping `verifier-orchestrator` actually produces) — nothing in this
+  component's own spec bundle stated it, since it correctly never
+  depends on `verifier-orchestrator` for the rest of that type.
+  `AttemptRecord.md`/`R-TRACK-008` now state the real shape directly.

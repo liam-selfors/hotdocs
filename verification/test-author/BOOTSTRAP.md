@@ -89,3 +89,34 @@ no-marker-pair response treated as a distinct failure with nothing
 cached or written). All 10 test cases (the original 8 `AC-AUTHOR-*`
 criteria plus 2 covering the new `AC-AUTHOR-009`) pass against the new
 candidate. Swapped in; the pre-fix candidate is not kept.
+
+## Round 3 (`D96`): dependency-resolution convention
+
+`provenance-tracker`'s own re-verification against the round-2
+candidate above still failed three of five `AC-TRACK-*` criteria, all
+for the same underlying reason despite round 2's protocol fix working
+correctly: nothing told the model that this corpus's components
+resolve each other dynamically at runtime, never via a name Python's
+own import system or `unittest.mock.patch` could find statically. One
+authored test guessed a nonexistent package-submodule import path;
+two assumed dependencies were patchable by name; the one that did
+correctly reproduce the real dynamic-loading shape for the component
+under test omitted the one correctness-critical `sys.modules`
+pre-registration step — the same specific pitfall this corpus's own
+real loaders (`generator`, `test-author` itself, `provenance-tracker`)
+already had to learn the hard way once each.
+
+Fixed in the spec (`R-AUTHOR-010`, `D96`): a fixed, always-included
+instruction stating the convention plus a literal worked snippet
+(prose alone already proved insufficient once). One real `generate()`
+call against the updated spec bundle produced a candidate whose prompt
+correctly includes the full convention text and worked snippet,
+verbatim, via a module-level `DEPENDENCY_CONVENTION_INSTRUCTION`
+constant. `PROMPT_VERSION` → `v3`; `file`/`model_call_error` are now
+plain dicts again (this round's own reasonable representation choice,
+not itself required by any requirement). The hand-maintained
+`AC-AUTHOR-*` suite was updated for the dict shape and gained
+`AC-AUTHOR-010`, asserting the convention text, path pattern, and
+correct snippet ordering all appear in the real prompt sent. All 11
+test cases pass against the new candidate. Swapped in; round 2's
+candidate is not kept.

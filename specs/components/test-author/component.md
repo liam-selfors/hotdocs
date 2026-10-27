@@ -93,3 +93,10 @@ None.
   `author_test` call (bootstrapping `provenance-tracker`) had to
   survive a genuine model response for the first time. `PROMPT_VERSION`
   → `v2`. New `AC-AUTHOR-009`.
+- `D96`: `R-AUTHOR-010` adds a fixed statement of this corpus's
+  dynamic, repo_root-relative dependency-resolution convention (with a
+  literal worked snippet, including the `sys.modules`
+  pre-registration step), found only once three of five real
+  `provenance-tracker` test authorings each guessed a different wrong
+  strategy for faking a dependency. `PROMPT_VERSION` → `v3`. New
+  `AC-AUTHOR-010`.

@@ -6,7 +6,13 @@ import json
 
 from conftest import REPO_ROOT, MockBackend, fake_bundle, fake_bundle_dict, file_block
 import spec_bundle_assembler
-from test_author import GATE_VERSION, author_test, _criterion_hash, _gate_inputs_hash
+from test_author import (
+    GATE_VERSION,
+    DEPENDENCY_CONVENTION_INSTRUCTION,
+    author_test,
+    _criterion_content_hash as _criterion_hash,
+    _gate_inputs_hash,
+)
 
 
 def test_ac_author_001_prompt_contains_every_bundle_field(repo_root):
@@ -112,10 +118,10 @@ def test_ac_author_006_output_path_under_generated_test_dir(repo_root):
     bundle = fake_bundle()
     result = author_test(bundle, "claude-sonnet-5", repo_root=repo_root, llm_backend=backend)
 
-    assert result.file.path == "verification/foo/generated-test/test_ac_foo_003.py"
-    assert "gen/foo" not in result.file.path
-    assert "compiled" not in result.file.path
-    assert (repo_root / result.file.path).is_file()
+    assert result.file["path"] == "verification/foo/generated-test/test_ac_foo_003.py"
+    assert "gen/foo" not in result.file["path"]
+    assert "compiled" not in result.file["path"]
+    assert (repo_root / result.file["path"]).is_file()
 
 
 def test_ac_author_007_model_call_error_is_distinct(repo_root):
@@ -123,8 +129,8 @@ def test_ac_author_007_model_call_error_is_distinct(repo_root):
     bundle = fake_bundle()
     result = author_test(bundle, "claude-sonnet-5", repo_root=repo_root, llm_backend=backend)
 
-    assert result.model_call_error.category == "network"
-    assert result.model_call_error.message == "boom"
+    assert result.model_call_error["category"] == "network"
+    assert result.model_call_error["message"] == "boom"
     assert result.file is None
     assert result.cache_hit is False
     assert not (repo_root / "verification" / "foo" / "generated-test").exists()
@@ -151,10 +157,10 @@ def test_ac_author_009_strips_fence_and_narration_around_markers(repo_root):
     result = author_test(bundle, "claude-sonnet-5", repo_root=repo_root, llm_backend=backend)
 
     assert result.model_call_error is None
-    assert result.file.content.strip() == "def test_x(): pass"
-    assert "```" not in result.file.content
-    assert "Sure, here is the test" not in result.file.content
-    assert "Let me know" not in result.file.content
+    assert result.file["content"].strip() == "def test_x(): pass"
+    assert "```" not in result.file["content"]
+    assert "Sure, here is the test" not in result.file["content"]
+    assert "Let me know" not in result.file["content"]
 
 
 def test_ac_author_009_no_marker_pair_is_a_distinct_failure(repo_root):
@@ -179,3 +185,20 @@ def test_ac_author_009_no_marker_pair_is_a_distinct_failure(repo_root):
         model_pin="claude-sonnet-5",
     )
     assert isinstance(cache_manager.get(cache_key, repo_root=repo_root), cache_manager.Miss)
+
+
+def test_ac_author_010_prompt_states_dependency_resolution_convention(repo_root):
+    backend = MockBackend([file_block("def test_x(): pass")])
+    bundle = fake_bundle()
+    author_test(bundle, "claude-sonnet-5", repo_root=repo_root, llm_backend=backend)
+
+    sent_prompt = backend.calls[0][0]
+    assert "statically importable" in sent_prompt
+    assert "<repo_root>/gen/<dependency-slug>/<module_name>.py" in sent_prompt
+    assert "sys.modules" in sent_prompt
+    assert "exec_module" in sent_prompt
+    # The convention instruction's own worked snippet puts the
+    # registration assignment textually before the exec_module call --
+    # the one ordering this requirement exists to enforce.
+    assert sent_prompt.index("sys.modules[module_name] = module") < sent_prompt.index("exec_module(module)")
+    assert DEPENDENCY_CONVENTION_INSTRUCTION in sent_prompt

@@ -1,65 +1,60 @@
-"""Authors a `generated-test`-kind acceptance criterion's test code from spec
-prose alone, via an injectable model backend. See specs/components/test-author/."""
+"""Authors the test code for one `generated-test`-kind acceptance criterion."""
+from __future__ import annotations
 
 import argparse
-import dataclasses
 import hashlib
 import importlib.util
 import json
+import re
+import secrets
 import sys
-import uuid
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-PROMPT_VERSION = "v2"
-
-# cache-manager's gate_type registry has no `test_author` entry: this prefix
-# names the artifact kind ("generated_test"), never this producing component.
+PROMPT_VERSION = "v3"
 GATE_VERSION = "generated_test@1.0.0"
 
+DEPENDENCY_CONVENTION_INSTRUCTION = """No component in this corpus is statically importable by another. A
+component's own code resolves each dependency dynamically, at runtime,
+from `<repo_root>/gen/<dependency-slug>/<module_name>.py` (a flat module)
+or `<repo_root>/gen/<dependency-slug>/__init__.py` (a package) -- never a
+name Python's own import system would find on sys.path without that
+explicit file-path resolution, and never a name sys.modules injection or
+unittest.mock.patch("<name>...") can intercept by itself.
 
-class AuthoringError(Exception):
-    pass
+If the test you are writing needs to fake a dependency's behavior, you
+MUST write a fake module file at that exact real path, under a fresh
+temporary repo_root, and pass that repo_root through to the function
+under test, letting the component's own loader find it naturally. Do
+not attempt to patch an import name directly -- the loader described
+above will never see it.
 
+The one correctness-critical step, as a literal worked example:
 
-def _load_module(repo_root: Path, slug: str, module_name: str):
-    if module_name in sys.modules:
-        return sys.modules[module_name]
-    comp_dir = Path(repo_root) / "gen" / slug
-    flat_path = comp_dir / f"{module_name}.py"
-    pkg_path = comp_dir / module_name / "__init__.py"
-    if flat_path.is_file():
-        source_path = flat_path
-    elif pkg_path.is_file():
-        source_path = pkg_path
-    else:
-        raise ImportError(
-            f"Cannot locate module '{module_name}' under {comp_dir} "
-            f"(looked for {flat_path} and {pkg_path})"
-        )
-    spec = importlib.util.spec_from_file_location(module_name, source_path)
-    module = importlib.util.module_from_spec(spec)
-    # Must be registered before exec_module: dataclasses defined in the
-    # loaded module resolve their own annotations via sys.modules[__module__]
-    # while their class body executes.
-    sys.modules[module_name] = module
-    spec.loader.exec_module(module)
-    return module
+    import importlib.util
+    import sys
+    from pathlib import Path
 
+    def install_fake_module(repo_root: Path, slug: str, module_name: str, source: str):
+        module_dir = repo_root / "gen" / slug
+        module_dir.mkdir(parents=True, exist_ok=True)
+        module_path = module_dir / f"{module_name}.py"
+        module_path.write_text(source)
+        spec = importlib.util.spec_from_file_location(module_name, module_path)
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[module_name] = module  # MUST happen before exec_module below
+        spec.loader.exec_module(module)
+        return module
 
-@dataclasses.dataclass
-class FileOutput:
-    path: str
-    content: str
-
-
-@dataclasses.dataclass
-class ModelCallError:
-    category: str
-    message: str
+The sys.modules registration MUST happen before exec_module is called:
+a dataclass's class body resolves its own module via
+sys.modules[__module__] while the class body executes, so a loader
+missing this step still looks correct but fails on any dependency whose
+own code defines a dataclass."""
 
 
-@dataclasses.dataclass
+@dataclass
 class TestAuthoringResult:
     component_id: str
     criterion_id: str
@@ -67,76 +62,25 @@ class TestAuthoringResult:
     seed: int
     prompt_version: str
     cache_hit: bool
-    file: Optional[FileOutput]
-    model_call_error: Optional[ModelCallError]
+    file: Optional[Dict[str, str]]
+    model_call_error: Optional[Dict[str, Any]]
 
 
-def _slug_for(component_id: str) -> str:
-    return component_id[len("comp-") :] if component_id.startswith("comp-") else component_id
+def _slug(component_id: str) -> str:
+    return component_id[len("comp-"):] if component_id.startswith("comp-") else component_id
 
 
-def _output_path(component_id: str, criterion_id: str) -> str:
-    slug = _slug_for(component_id)
-    filename = "test_" + criterion_id.lower().replace("-", "_") + ".py"
-    return f"verification/{slug}/generated-test/{filename}"
+def _criterion_filename(criterion_id: str) -> str:
+    return f"test_{criterion_id.lower().replace('-', '_')}.py"
 
 
-def _write_file(repo_root: Path, file_output: FileOutput) -> None:
-    full_path = Path(repo_root) / file_output.path
-    full_path.parent.mkdir(parents=True, exist_ok=True)
-    full_path.write_text(file_output.content, encoding="utf-8")
+def _hash_json(obj: Any) -> str:
+    encoded = json.dumps(obj, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return "sha256:" + hashlib.sha256(encoded).hexdigest()
 
 
-def _build_prompt(bundle: Any, nonce: str) -> str:
-    return f"""You are authoring an automated test for one acceptance criterion of a software component, based solely on the specification material given below.
-
-You have no tool access and no file access. You cannot inspect the target component's real implementation, run commands, browse any repository, or invent anything about how it is really built. Produce your answer using only the content given in this prompt.
-
-Component: {bundle.component_id}
-Criterion: {bundle.criterion_id}
-Covers requirement: {bundle.covers}
-
-## Criterion (Given/When/Then)
-
-{bundle.criterion_text}
-
-## Covered requirement text
-
-{bundle.requirement_text}
-
-## Target component interface
-
-{bundle.interface}
-
-## Glossary
-
-{bundle.glossary}
-
-Write a single Python test file that exercises the component's public interface as described above and asserts the criterion's Then clause.
-
-Wrap the complete, exact content of that test file -- and nothing else -- between these exact markers, with nothing before the BEGIN marker and nothing after the END marker (no narration, no markdown code fence):
-
------BEGIN FILE {nonce}-----
-<the complete, exact test file content, verbatim>
------END FILE {nonce}-----
-"""
-
-
-def _extract_file_content(text: str, nonce: str) -> Optional[str]:
-    begin_marker = f"-----BEGIN FILE {nonce}-----"
-    end_marker = f"-----END FILE {nonce}-----"
-    start = text.find(begin_marker)
-    if start == -1:
-        return None
-    start += len(begin_marker)
-    end = text.find(end_marker, start)
-    if end == -1:
-        return None
-    return text[start:end].strip("\n")
-
-
-def _criterion_hash(bundle: Any) -> str:
-    payload = {
+def _criterion_content_hash(bundle) -> str:
+    return _hash_json({
         "component_id": bundle.component_id,
         "criterion_id": bundle.criterion_id,
         "covers": bundle.covers,
@@ -144,30 +88,108 @@ def _criterion_hash(bundle: Any) -> str:
         "requirement_text": bundle.requirement_text,
         "interface": bundle.interface,
         "glossary": bundle.glossary,
-    }
-    digest = hashlib.sha256(json.dumps(payload, sort_keys=True).encode("utf-8")).hexdigest()
-    return f"sha256:{digest}"
+    })
 
 
 def _gate_inputs_hash(seed: int) -> str:
-    payload = {"seed": seed, "prompt_version": PROMPT_VERSION}
-    digest = hashlib.sha256(json.dumps(payload, sort_keys=True).encode("utf-8")).hexdigest()
-    return f"sha256:{digest}"
+    return _hash_json({"seed": seed, "prompt_version": PROMPT_VERSION})
+
+
+def _load_dependency(repo_root: Path, slug: str, module_name: str):
+    base = repo_root / "gen" / slug
+    flat = base / f"{module_name}.py"
+    pkg = base / "__init__.py"
+    if flat.is_file():
+        path = flat
+    elif pkg.is_file():
+        path = pkg
+    else:
+        raise ImportError(f"cannot find dependency module {module_name!r} for slug {slug!r} under {base}")
+    spec = importlib.util.spec_from_file_location(module_name, path)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def _build_prompt(bundle, nonce: str) -> str:
+    return f"""You are authoring an automated test file for exactly one acceptance
+criterion in a spec-driven software pipeline. The test you write will be
+run, independently, to check whether the target component actually
+satisfies this criterion.
+
+You have NO tool access and NO file access of any kind. You cannot
+explore, read, or guess at the target component's real implementation.
+Produce your answer using only the material given below in this
+prompt -- nothing invented or explored about the target component's
+real implementation. The target component's actual source code has been
+deliberately withheld from you; you are given its public interface
+contract only.
+
+== Target component ==
+component_id: {bundle.component_id}
+
+== Criterion to test ==
+criterion_id: {bundle.criterion_id}
+covers: {bundle.covers}
+
+Criterion (Given/When/Then):
+{bundle.criterion_text}
+
+== Requirement text ({bundle.covers}) ==
+{bundle.requirement_text}
+
+== Target component interface (its public contract only) ==
+{bundle.interface}
+
+== Glossary ==
+{bundle.glossary}
+
+== Dependency-resolution convention for this corpus ==
+{DEPENDENCY_CONVENTION_INSTRUCTION}
+
+== Output format ==
+Produce exactly one test file that exercises the target component's
+public interface as described above and asserts the criterion's Then
+clause. Wrap its complete, exact content between these markers, with
+nothing else between them:
+
+-----BEGIN FILE {nonce}-----
+<the complete, exact test file content, verbatim>
+-----END FILE {nonce}-----
+
+Output nothing else between those two marker lines. You may write brief
+commentary outside the markers if you wish, but the content between the
+markers must be the complete, exact file content and nothing more.
+"""
+
+
+def _extract_file_content(text: str, nonce: str) -> Optional[str]:
+    pattern = re.compile(
+        r"-----BEGIN FILE " + re.escape(nonce) + r"-----\r?\n(.*?)\r?\n-----END FILE " + re.escape(nonce) + r"-----",
+        re.DOTALL,
+    )
+    match = pattern.search(text)
+    if not match:
+        return None
+    return match.group(1)
 
 
 def author_test(
-    bundle: Any,
+    bundle,
     model: str,
     seed: int = 0,
     *,
-    repo_root: Optional[Path] = None,
+    repo_root: Path = None,
     llm_backend=None,
 ) -> TestAuthoringResult:
     repo_root = Path(repo_root) if repo_root is not None else Path.cwd()
-    cache_manager = _load_module(repo_root, "cache-manager", "cache_manager")
+
+    cache_manager = _load_dependency(repo_root, "cache-manager", "cache_manager")
+    llm_endpoint = _load_dependency(repo_root, "llm-endpoint", "llm_endpoint")
 
     cache_key = cache_manager.CacheKey(
-        spec_bundle_hash=_criterion_hash(bundle),
+        spec_bundle_hash=_criterion_content_hash(bundle),
         gate_inputs_hash=_gate_inputs_hash(seed),
         gate_version=GATE_VERSION,
         model_pin=model,
@@ -176,27 +198,25 @@ def author_test(
     cached = cache_manager.get(cache_key, repo_root=repo_root)
     if not isinstance(cached, cache_manager.Miss):
         payload = cached.payload
-        file_output = FileOutput(path=payload["file"]["path"], content=payload["file"]["content"])
-        _write_file(repo_root, file_output)
+        file_record = dict(payload["file"])
+        _write_file(repo_root, file_record)
         return TestAuthoringResult(
             component_id=payload["component_id"],
             criterion_id=payload["criterion_id"],
             model=payload["model"],
-            seed=payload.get("seed", seed),
-            prompt_version=payload.get("prompt_version", PROMPT_VERSION),
+            seed=seed,
+            prompt_version=PROMPT_VERSION,
             cache_hit=True,
-            file=file_output,
+            file=file_record,
             model_call_error=None,
         )
 
-    llm_endpoint = _load_module(repo_root, "llm-endpoint", "llm_endpoint")
-
-    nonce = uuid.uuid4().hex
+    nonce = secrets.token_hex(16)
     prompt = _build_prompt(bundle, nonce)
     response = llm_endpoint.complete(prompt, model, backend=llm_backend)
 
-    error = response.get("model_call_error")
-    if error:
+    model_call_error = response.get("model_call_error")
+    if model_call_error:
         return TestAuthoringResult(
             component_id=bundle.component_id,
             criterion_id=bundle.criterion_id,
@@ -205,13 +225,11 @@ def author_test(
             prompt_version=PROMPT_VERSION,
             cache_hit=False,
             file=None,
-            model_call_error=ModelCallError(
-                category=error.get("category", "unknown"),
-                message=error.get("message", ""),
-            ),
+            model_call_error=dict(model_call_error),
         )
 
-    content = _extract_file_content(response.get("text") or "", nonce)
+    text = response.get("text") or ""
+    content = _extract_file_content(text, nonce)
     if content is None:
         return TestAuthoringResult(
             component_id=bundle.component_id,
@@ -221,31 +239,28 @@ def author_test(
             prompt_version=PROMPT_VERSION,
             cache_hit=False,
             file=None,
-            model_call_error=ModelCallError(
-                category="malformed_response",
-                message="Response did not contain a matching BEGIN/END FILE marker pair.",
-            ),
+            model_call_error={
+                "category": "malformed_response",
+                "message": "no matching BEGIN/END FILE marker pair found in model response",
+            },
         )
 
-    file_output = FileOutput(path=_output_path(bundle.component_id, bundle.criterion_id), content=content)
-    _write_file(repo_root, file_output)
+    rel_path = f"verification/{_slug(bundle.component_id)}/generated-test/{_criterion_filename(bundle.criterion_id)}"
+    file_record = {"path": rel_path, "content": content}
 
-    cache_manager.put(
-        cache_key,
-        cache_manager.CachedResult(
-            gate_type="generated_test",
-            payload={
-                "component_id": bundle.component_id,
-                "criterion_id": bundle.criterion_id,
-                "model": model,
-                "seed": seed,
-                "prompt_version": PROMPT_VERSION,
-                "file": {"path": file_output.path, "content": file_output.content},
-            },
-            stored_at=cache_manager.now_iso(),
-        ),
-        repo_root=repo_root,
+    cached_result = cache_manager.CachedResult(
+        gate_type="generated_test",
+        payload={
+            "component_id": bundle.component_id,
+            "criterion_id": bundle.criterion_id,
+            "model": model,
+            "file": file_record,
+        },
+        stored_at=cache_manager.now_iso(),
     )
+
+    _write_file(repo_root, file_record)
+    cache_manager.put(cache_key, cached_result, repo_root=repo_root)
 
     return TestAuthoringResult(
         component_id=bundle.component_id,
@@ -254,17 +269,18 @@ def author_test(
         seed=seed,
         prompt_version=PROMPT_VERSION,
         cache_hit=False,
-        file=file_output,
+        file=file_record,
         model_call_error=None,
     )
 
 
-def _result_to_dict(result: TestAuthoringResult) -> Dict[str, Any]:
-    return dataclasses.asdict(result)
+def _write_file(repo_root: Path, file_record: Dict[str, str]) -> None:
+    abs_path = repo_root / file_record["path"]
+    abs_path.parent.mkdir(parents=True, exist_ok=True)
+    abs_path.write_text(file_record["content"])
 
 
-def main(argv=None) -> int:
-    argv = sys.argv[1:] if argv is None else argv
+def _parse_args(argv):
     parser = argparse.ArgumentParser(prog="hotdocs author-test")
     parser.add_argument("component_id")
     parser.add_argument("criterion_id")
@@ -272,16 +288,20 @@ def main(argv=None) -> int:
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--repo-root", default=None)
     parser.add_argument("--format", choices=["json", "text"], default="text")
+    return parser.parse_args(argv)
 
+
+def main(argv=None) -> int:
+    argv = sys.argv[1:] if argv is None else argv
     try:
-        args = parser.parse_args(argv)
+        args = _parse_args(argv)
     except SystemExit as exc:
-        return exc.code if isinstance(exc.code, int) else 2
+        return exc.code if exc.code is not None else 2
 
     repo_root = Path(args.repo_root) if args.repo_root else Path.cwd()
 
     try:
-        spec_bundle_assembler = _load_module(repo_root, "spec-bundle-assembler", "spec_bundle_assembler")
+        spec_bundle_assembler = _load_dependency(repo_root, "spec-bundle-assembler", "spec_bundle_assembler")
         bundle = spec_bundle_assembler.assemble_criterion(args.component_id, args.criterion_id, repo_root)
     except Exception as exc:
         print(f"usage error: {exc}", file=sys.stderr)
@@ -290,11 +310,11 @@ def main(argv=None) -> int:
     result = author_test(bundle, args.model, args.seed, repo_root=repo_root)
 
     if args.format == "json":
-        print(json.dumps(_result_to_dict(result), indent=2))
+        print(json.dumps(asdict(result)))
     elif result.model_call_error:
-        print(f"model call error: {result.model_call_error.category}: {result.model_call_error.message}", file=sys.stderr)
+        print(f"model call error: {result.model_call_error}", file=sys.stderr)
     else:
-        print(f"wrote {result.file.path} (cache_hit={result.cache_hit})")
+        print(f"wrote {result.file['path']} (cache_hit={result.cache_hit})")
 
     return 1 if result.model_call_error else 0
 
