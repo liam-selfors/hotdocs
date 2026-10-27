@@ -1,12 +1,15 @@
 """One test per AC-GEN-* criterion in
 specs/components/generator/acceptance/.
 
-Rewritten for D51 against the self-hosted gen/llm-endpoint/ package --
-MockBackend now returns plain (text, error) tuples, matching that
-package's own callable-backend convention (see conftest.py's docstring).
+Rewritten for D58 against the self-hosted gen/generator/ swap-in itself
+-- the nonce lives directly in the prompt (not a separate system_prompt
+parameter), dependencies are loaded dynamically from repo_root per call
+(R-GEN-014), and the cache payload's exact keys are
+component_id/model/prompt_version/files (see conftest.py's docstring).
 """
 
 import json
+import shutil
 
 from conftest import FakeBundle, MockBackend, file_block
 import generator
@@ -24,8 +27,8 @@ def test_ac_gen_001_cold_prompt_contains_exactly_cold_fields(repo_root):
     assert "FAKE INTERFACE TEXT" in sent_prompt
     assert "FAKE CONSTRAINTS TEXT" in sent_prompt
     assert "FAKE GLOSSARY TEXT" in sent_prompt
-    assert "HINT_CODE" not in sent_prompt
-    assert "RETRY_FEEDBACK" not in sent_prompt
+    assert "## HINT_CODE" not in sent_prompt
+    assert "## RETRY_FEEDBACK" not in sent_prompt
 
 
 def test_ac_gen_002_hint_code_is_a_distinct_section(repo_root):
@@ -34,14 +37,14 @@ def test_ac_gen_002_hint_code_is_a_distinct_section(repo_root):
     generate(bundle, "claude-sonnet-5", repo_root=repo_root, llm_backend=backend)
 
     sent_prompt = backend.calls[0][0]
-    assert "HINT_CODE:" in sent_prompt
-    assert json.dumps({"foo.py": "x = 0"}) in sent_prompt
+    assert "## HINT_CODE" in sent_prompt
+    assert '"foo.py"' in sent_prompt and '"x = 0"' in sent_prompt
 
 
 def test_ac_gen_003_prompt_version_matches_frozen_template(repo_root):
     backend = MockBackend([{"text": "", "model_call_error": None}])
     result = generate(FakeBundle(), "claude-sonnet-5", repo_root=repo_root, llm_backend=backend)
-    assert result.prompt_version == PROMPT_VERSION  # frozen, whatever it currently is (D55: "v2")
+    assert result.prompt_version == PROMPT_VERSION  # frozen, whatever it currently is (D57: "v4")
 
 
 def test_ac_gen_004_model_identifier_passed_through_unchanged(repo_root):
@@ -57,14 +60,13 @@ def test_ac_gen_005_cache_hit_skips_the_model(repo_root):
     bundle = FakeBundle()
     cache_key = cache_manager.CacheKey(
         spec_bundle_hash=bundle.spec_bundle_hash,
-        gate_inputs_hash=generator._gate_inputs_hash(None),
+        gate_inputs_hash=generator._compute_gate_inputs_hash(None),
         gate_version=GATE_VERSION,
         model_pin="claude-sonnet-5",
     )
     cached_payload = {
         "component_id": "comp-foo", "model": "claude-sonnet-5", "prompt_version": "v1",
-        "cache_hit": False, "files": {"foo.py": "x = 1"}, "model_call_error": None,
-        "refused": None, "retry_feedback": None,
+        "files": {"foo.py": "x = 1"},
     }
     cache_manager.put(
         cache_key,
@@ -86,13 +88,16 @@ def test_ac_gen_006_successful_call_is_cached(repo_root):
 
     cache_key = cache_manager.CacheKey(
         spec_bundle_hash=bundle.spec_bundle_hash,
-        gate_inputs_hash=generator._gate_inputs_hash(None),
+        gate_inputs_hash=generator._compute_gate_inputs_hash(None),
         gate_version=GATE_VERSION,
         model_pin="claude-sonnet-5",
     )
     stored = cache_manager.get(cache_key, repo_root=repo_root)
     assert isinstance(stored, cache_manager.CachedResult)
     assert stored.payload["files"] == {"foo.py": "x = 1"}
+    # D56 regression: the payload carries every key cache-manager's own
+    # schema requires for this gate type (interface/data/CachedResult.md).
+    assert set(stored.payload) >= {"component_id", "model", "prompt_version", "files"}
 
 
 def test_ac_gen_008_model_call_error_surfaces_cleanly(repo_root):
@@ -147,10 +152,11 @@ def test_ac_gen_013_retry_feedback_is_bare_and_distinct(repo_root):
     result = generate(FakeBundle(), "claude-sonnet-5", ["R-FOO-003"], repo_root=repo_root, llm_backend=backend)
 
     sent_prompt = backend.calls[0][0]
-    assert "RETRY_FEEDBACK:" in sent_prompt
-    assert json.dumps(["R-FOO-003"]) in sent_prompt
-    assert "Gherkin" not in sent_prompt
-    assert "rationale" not in sent_prompt.lower()
+    assert "## RETRY_FEEDBACK" in sent_prompt
+    assert "R-FOO-003" in sent_prompt
+    retry_section = sent_prompt[sent_prompt.index("## RETRY_FEEDBACK"):]
+    assert "Gherkin" not in retry_section
+    assert "rationale" not in retry_section.lower()
     assert result.retry_feedback == ["R-FOO-003"]
 
 
@@ -160,9 +166,31 @@ def test_ac_gen_014_dependency_usage_is_a_distinct_section(repo_root):
     generate(bundle, "claude-sonnet-5", repo_root=repo_root, llm_backend=backend)
 
     sent_prompt = backend.calls[0][0]
-    assert "DEPENDENCY USAGE" in sent_prompt
+    assert "## DEPENDENCY USAGE" in sent_prompt
     assert "bar_get(key: str) -> str" in sent_prompt
     # Still clearly separate from dependency_interfaces' own section.
     dep_iface_idx = sent_prompt.index("DEPENDENCY INTERFACES")
     dep_usage_idx = sent_prompt.index("DEPENDENCY USAGE")
     assert dep_iface_idx != dep_usage_idx
+
+
+def test_ac_gen_015_two_repo_roots_in_one_process_do_not_collide(repo_root, tmp_path_factory):
+    """R-GEN-014/D57 -- a per-call dynamic dependency load from repo_root
+    must not crash on a dataclass-defining dependency (the real bug a
+    prior self-regeneration candidate hit), and must not let the second
+    repo_root's call see the first one's cached module."""
+    other_root = tmp_path_factory.mktemp("other-repo")
+    shutil.copytree(repo_root / "gen" / "cache-manager", other_root / "gen" / "cache-manager")
+    shutil.copytree(repo_root / "gen" / "llm-endpoint", other_root / "gen" / "llm-endpoint")
+    marker_file = other_root / "gen" / "cache-manager" / "cache_manager.py"
+    marker_file.write_text(marker_file.read_text(encoding="utf-8") + "\nSANDBOX_MARKER = 'other_root'\n", encoding="utf-8")
+
+    backend_a = MockBackend([file_block("foo.py", "x = 1")])
+    backend_b = MockBackend([file_block("foo.py", "x = 2")])
+    generate(FakeBundle(component_id="comp-one"), "claude-sonnet-5", repo_root=repo_root, llm_backend=backend_a)
+    generate(FakeBundle(component_id="comp-two"), "claude-sonnet-5", repo_root=other_root, llm_backend=backend_b)
+
+    cm_from_repo_root = generator._load_cache_manager(repo_root)
+    cm_from_other_root = generator._load_cache_manager(other_root)
+    assert not hasattr(cm_from_repo_root, "SANDBOX_MARKER")
+    assert getattr(cm_from_other_root, "SANDBOX_MARKER", None) == "other_root"

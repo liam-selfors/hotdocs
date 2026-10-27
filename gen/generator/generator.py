@@ -1,96 +1,75 @@
-"""generator — bootstrap implementation.
+"""
+gen/comp-generator/generator.py
 
-HAND-AUTHORED BOOTSTRAP, structurally permanent like llm-endpoint (see
-verification/generator/BOOTSTRAP.md): nothing could cold-regenerate the
-component that does the cold-regenerating, even once this file itself
-makes that possible for everything else.
-
-Implements R-GEN-001..012: constructs a frozen, versioned prompt from
-exactly a SpecBundle's fields (never anything else -- R-GEN-001),
-dispatches through llm-endpoint (never holding a credential itself,
-R-GEN-004), checks/writes cache-manager around the call (R-GEN-005/006),
-enforces the sealed/pinned-override precondition before ever calling a
-model (R-GEN-009), and writes gen/<component>/ only on a real success.
+Implementation of the `generator` component: calls a pinned model to
+produce `gen/<component>/` from a `SpecBundle` -- cold, with no prior
+code (unless the bundle carries `hint_code`), exactly one candidate per
+invocation. See `specs/components/generator/` for the full spec this
+file implements.
 """
 
 from __future__ import annotations
 
+import argparse
+import hashlib
+import importlib.util
 import json
 import re
 import sys
 import uuid
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Dict, List, Optional
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "llm-endpoint"))
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "cache-manager"))
-import llm_endpoint  # noqa: E402
-import cache_manager  # noqa: E402
 
-PROMPT_VERSION = "v4"  # D57: warn against the sys.modules dynamic-import pitfall
-GATE_VERSION = "generator@1.1.0"  # D56: generate() no longer caches an empty-files result
+# R-GEN-003: the prompt template is frozen and versioned; bumped on any
+# change to its text or structure. v2 added dependency_usage (D55); v3
+# added the per-call nonce delimiter and non-empty-only caching (D56);
+# v4 added the explicit dynamic-import sys.modules warning (D57).
+PROMPT_VERSION = "v4"
 
-# R-GEN-003: frozen, versioned -- any substantive edit to this text, other
-# than this changelog note, MUST bump PROMPT_VERSION.
-#
-# D56: the fixed "-----BEGIN FILE:...-----"/"-----END FILE-----" delimiter
-# was found, by a real failure, to collide with itself: asked to
-# regenerate *this exact file*, a model reasonably wrote out this very
-# docstring's own worked example of the delimiter as a string literal
-# inside the new generator.py it produced -- and the old parser's regex
-# matched that inner, illustrative "-----END FILE-----" first, truncating
-# the real file well before its actual end. generator is the one
-# component whose own source legitimately contains this exact text, so
-# it is the one component where a fixed delimiter can never be made safe.
-# A fresh, random nonce per call closes this: it cannot collide with
-# anything a model writes, illustrative or otherwise, because it never
-# appears anywhere before this one call generates it.
-_SYSTEM_PROMPT = """You simulate exactly one thing: a cold-regen model call for ONE
-component in a spec-driven pipeline. You have no tools. The only facts
-you are allowed to use are the ones given to you in this turn's prompt
--- a SpecBundle (and, if present, hint_code and retry_feedback).
+# R-GEN-005/006: the cache-key component identifying this gate's shape.
+# Bumped on D56 to orphan two pre-existing poisoned cache entries
+# (empty-result responses that had been cached as if valid) without
+# needing manual deletion.
+GATE_VERSION = "generator@1.1.0"
 
-Hard rules:
-- Cold mode (no hint_code section below): construct your answer from
-  exactly the SPEC / INTERFACE / CONSTRAINTS / DEPENDENCY INTERFACES /
-  DEPENDENCY CONTEXT / VARS / GLOSSARY sections. Never assume or invent
-  anything about this component's "real" existing implementation,
-  including anything you might otherwise recall from training -- treat
-  this component as if it has never been implemented before.
-- Hint mode (a HINT_CODE section is present): you may use it as a
-  starting point for a revision, but keep it mentally distinct from the
-  cold spec fields.
-- If a RETRY_FEEDBACK section is present, it is a bare list of R-ids
-  that previously failed verification -- nothing else. Pay particular
-  attention to satisfying exactly those requirements correctly.
-- You will never be given this component's acceptance/ criteria -- do
-  not infer a specific test's shape from naming conventions.
-- Output only gen/<component_id>/ file contents -- no explanation, no
-  commentary, nothing else.
-- If you are generating `generator`'s own code and it dynamically
-  loads a dependency module from a file path per call (rather than a
-  static sys.path-relative-to-file import, R-GEN-014), you MUST
-  register the loaded module in sys.modules under its load-time name
-  BEFORE running its code (exec_module) -- omitting this crashes on
-  any dependency defining a dataclass, because dataclasses' internals
-  look up sys.modules[cls.__module__] to resolve its own annotations.
-  A real prior attempt chose exactly this technique, omitted this
-  step, and crashed for real loading cache-manager (D57).
 
-Output format -- emit each file exactly like this, one block per file,
-nothing before the first block or after the last. {nonce} below is a
-one-time token for this call only -- copy it verbatim into every BEGIN
-and END marker; it will never match anything else, including any
-illustrative example you might otherwise be tempted to write out
-literally (if you are generating code that itself documents this exact
-delimiter format, describe the format in prose instead of reproducing
-this literal token sequence as a worked example):
+_SYSTEM_PROMPT = """You are generating the complete source for one component \
+of a spec-driven pipeline, to be written under gen/<component>/, from the \
+SpecBundle content below.
 
------BEGIN FILE {nonce}: <path relative to gen/{component_id}/>-----
-<the complete, exact file content, verbatim>
------END FILE {nonce}-----
-"""
+Rules:
+- Construct your answer from exactly the SPEC / INTERFACE / CONSTRAINTS / \
+DEPENDENCY INTERFACES / DEPENDENCY CONTEXT / VARS / GLOSSARY sections \
+given below, plus DEPENDENCY USAGE and HINT_CODE / RETRY_FEEDBACK when \
+present. Never invent or assume anything about this component's "real" \
+prior implementation.
+- HINT_CODE, when present, is existing code -- a revision starting point \
+only. Keep it clearly distinct from the spec fields; never silently \
+merge it with them in a way that makes a later audit unable to tell \
+which parts of the prompt were "the spec" versus "the existing code."
+- RETRY_FEEDBACK, when present, is a bare list of R-ids that a prior \
+attempt failed to satisfy -- nothing else (no Gherkin text, no \
+rationale, no expected/actual values). Pay particular attention to \
+satisfying exactly those requirements correctly.
+- DEPENDENCY USAGE, when present for a dependency, names real, \
+importable symbols from that dependency's actual current code -- use it \
+to call the dependency correctly, distinct from DEPENDENCY INTERFACES \
+(the dependency's contract) and from acceptance-test content.
+- If your own generated code needs to dynamically load a dependency \
+module from a file path at runtime (rather than a static import \
+relative to its own file), you MUST register the loaded module object \
+in sys.modules under its load-time name BEFORE executing its code \
+(exec_module) -- never after, never omitted. Skipping this step crashes \
+on any dependency module that defines a dataclass, because dataclasses' \
+internals look up sys.modules[cls.__module__] to resolve the class's \
+own annotations at class-body-execution time.
+- Output only the files that belong under gen/<component>/ for the \
+target component -- no explanation, no commentary outside of file \
+content itself.
+
+For each file you produce, wrap its content exactly as instructed below."""
 
 
 @dataclass
@@ -101,184 +80,458 @@ class GenerationResult:
     model: str
     prompt_version: str
     cache_hit: bool
-    files: dict[str, str]
-    model_call_error: dict[str, str] | None
-    refused: str | None
-    retry_feedback: list[str] | None
-
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "component_id": self.component_id,
-            "model": self.model,
-            "prompt_version": self.prompt_version,
-            "cache_hit": self.cache_hit,
-            "files": self.files,
-            "model_call_error": self.model_call_error,
-            "refused": self.refused,
-            "retry_feedback": self.retry_feedback,
-        }
+    files: Dict[str, str]
+    model_call_error: Optional[dict]
+    refused: Optional[str]
+    retry_feedback: Optional[List[str]]
 
 
-def _build_prompt(bundle: Any, retry_feedback: list[str] | None) -> str:
-    """R-GEN-001/002/012 -- every section clearly, distinctly labeled."""
-    sections = [
-        f"SPEC:\n{bundle.spec}",
-        f"\nINTERFACE:\n{bundle.interface}",
-        f"\nCONSTRAINTS:\n{bundle.constraints}",
-        f"\nDEPENDENCY INTERFACES:\n{json.dumps(bundle.dependency_interfaces)}",
-        f"\nDEPENDENCY CONTEXT:\n{json.dumps(bundle.dependency_context)}",
-        f"\nDEPENDENCY USAGE (R-ASSEMBLE-011, real -- how to actually import "
-        f"and call each dependency's current code; empty for a dependency "
-        f"with none yet):\n{json.dumps(getattr(bundle, 'dependency_usage', {}))}",
-        f"\nVARS:\n{json.dumps(bundle.vars)}",
-        f"\nGLOSSARY:\n{bundle.glossary}",
-    ]
-    if bundle.hint_code:
-        sections.append(f"\nHINT_CODE:\n{json.dumps(bundle.hint_code)}")
-    if retry_feedback:
-        sections.append(f"\nRETRY_FEEDBACK:\n{json.dumps(list(retry_feedback))}")
-    return "\n".join(sections)
+# ---------------------------------------------------------------------------
+# R-GEN-014: dynamic, per-call dependency loading.
+#
+# Dependencies are resolved from the *actual* repo_root passed to generate()
+# on each call, rather than via a static sys.path-relative-to-__file__
+# import -- that would silently keep reusing the first call's module if
+# generate() is ever invoked more than once in the same process against two
+# different repo_root values (e.g. a verification harness staging an
+# untested candidate elsewhere while exercising it against real
+# dependencies). The loaded module MUST be registered in sys.modules under
+# its load-time name BEFORE exec_module runs its code -- omitting this
+# crashes on any dependency defining a dataclass, because dataclasses'
+# internals look up sys.modules[cls.__module__] to resolve the class's own
+# annotations (D57).
+# ---------------------------------------------------------------------------
 
 
-def _parse_files(text: str, nonce: str) -> dict[str, str]:
-    """D56 -- the delimiter is compiled fresh per call, keyed to that
-    call's own nonce, so it can never match an illustrative example of
-    the (differently-nonced, or un-nonced) format a model might
-    reasonably write out as part of generating this exact file."""
-    pattern = re.compile(
-        r"-----BEGIN FILE " + re.escape(nonce) + r": (?P<path>[^\n]+)-----\n"
-        r"(?P<content>.*?)\n-----END FILE " + re.escape(nonce) + r"-----",
-        re.DOTALL,
+def _load_module_from_repo(repo_root: Path, component_dir: str, module_name: str):
+    module_path = Path(repo_root) / "gen" / component_dir / f"{module_name}.py"
+    spec = importlib.util.spec_from_file_location(module_name, module_path)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"cannot load {module_name!r} from {module_path}")
+    module = importlib.util.module_from_spec(spec)
+    # Register BEFORE exec_module -- see R-GEN-014 / D57.
+    sys.modules[module_name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def _load_cache_manager(repo_root: Path):
+    return _load_module_from_repo(repo_root, "cache-manager", "cache_manager")
+
+
+def _load_llm_endpoint(repo_root: Path):
+    return _load_module_from_repo(repo_root, "llm-endpoint", "llm_endpoint")
+
+
+def _load_spec_bundle_assembler(repo_root: Path):
+    return _load_module_from_repo(
+        repo_root, "spec-bundle-assembler", "spec_bundle_assembler"
     )
-    return {m.group("path").strip(): m.group("content") for m in pattern.finditer(text)}
+
+
+# ---------------------------------------------------------------------------
+# R-GEN-009: precondition check -- sealed component / pinned override.
+# ---------------------------------------------------------------------------
+
+
+def _component_dir_name(component_id: str) -> str:
+    return component_id[len("comp-"):] if component_id.startswith("comp-") else component_id
+
+
+def _read_frontmatter(path: Path) -> dict:
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return {}
+    if not text.startswith("---"):
+        return {}
+    end = text.find("\n---", 3)
+    if end == -1:
+        return {}
+    fm_text = text[3:end].strip("\n")
+    result: dict = {}
+    for line in fm_text.splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or ":" not in line:
+            continue
+        key, _, value = line.partition(":")
+        key = key.strip()
+        value = value.strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+            value = value[1:-1]
+        if value.lower() == "true":
+            value = True
+        elif value.lower() == "false":
+            value = False
+        result[key] = value
+    return result
+
+
+def _check_precondition(repo_root: Path, component_id: str) -> Optional[str]:
+    """Returns a refusal reason string (R-GEN-009), or None if generation
+    may proceed. Resolved entirely before any model call is attempted."""
+
+    comp_dir = _component_dir_name(component_id)
+
+    component_md = Path(repo_root) / "specs" / "components" / comp_dir / "component.md"
+    if component_md.exists():
+        frontmatter = _read_frontmatter(component_md)
+        if frontmatter.get("sealed") is True:
+            return "sealed-component"
+
+    overrides_path = Path(repo_root) / "gen" / comp_dir / ".overrides.json"
+    if overrides_path.exists():
+        try:
+            overrides = json.loads(overrides_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            overrides = None
+        if overrides:
+            return "pinned-override"
+
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Cache key construction (R-GEN-005/006).
+# ---------------------------------------------------------------------------
+
+
+def _compute_gate_inputs_hash(retry_feedback: Optional[List[str]]) -> str:
+    """retry_feedback MUST be incorporated when present (R-GEN-012/D33) so
+    a blind call and a call carrying retry_feedback never collide in the
+    cache, even for the same spec_bundle_hash/model_pin. Deterministic for
+    both the present and absent case."""
+
+    material = json.dumps(sorted(retry_feedback) if retry_feedback else [], sort_keys=True)
+    return "sha256:" + hashlib.sha256(material.encode("utf-8")).hexdigest()
+
+
+# ---------------------------------------------------------------------------
+# Prompt construction (R-GEN-001/002/003/012/013).
+# ---------------------------------------------------------------------------
+
+
+def _make_nonce() -> str:
+    # D56: a per-call random nonce, embedded in both the delimiter this
+    # prompt asks the model to use and the regex that later parses it --
+    # closes the one self-referential class of bug unique to this
+    # component (its own source legitimately documents this delimiter
+    # convention as a worked example; a fixed marker text could collide
+    # with that and truncate the real file).
+    return uuid.uuid4().hex
+
+
+def _delimiter_instructions(nonce: str) -> str:
+    return (
+        "Wrap each file's content exactly as:\n\n"
+        f"-----BEGIN FILE {nonce}: <path relative to gen/<component>/>-----\n"
+        "<the complete, exact file content, verbatim>\n"
+        f"-----END FILE {nonce}-----\n\n"
+        f"Use exactly this nonce ({nonce}) on every BEGIN/END marker in "
+        "your response -- it is unique to this call. This lets the caller "
+        "reliably tell your real file output apart from any illustrative "
+        "example of this same delimiter format your own source might "
+        "legitimately need to describe in prose, since generator is the "
+        "one component whose own code documents this exact convention. "
+        "Do not reuse this nonce as a literal example elsewhere in your "
+        "output; if your generated code needs to describe this format, "
+        "describe it in prose instead of reproducing a literal worked "
+        "example of the marker text."
+    )
+
+
+def _build_prompt(bundle: Any, retry_feedback: Optional[List[str]], nonce: str) -> str:
+    parts: List[str] = [
+        _SYSTEM_PROMPT,
+        _delimiter_instructions(nonce),
+        f"PROMPT_VERSION: {PROMPT_VERSION}",
+        f"## component_id\n{bundle.component_id}",
+        f"## SPEC\n{bundle.spec}",
+        f"## INTERFACE\n{bundle.interface}",
+        f"## CONSTRAINTS\n{bundle.constraints}",
+        "## DEPENDENCY INTERFACES\n" + json.dumps(bundle.dependency_interfaces, indent=2),
+        "## DEPENDENCY CONTEXT\n" + json.dumps(bundle.dependency_context, indent=2),
+        "## VARS\n" + json.dumps(bundle.vars, indent=2),
+        f"## GLOSSARY\n{bundle.glossary}",
+    ]
+
+    # R-GEN-013: dependency_usage, its own distinct section, only when
+    # non-empty for a given dependency. Absence (an empty string for a
+    # dependency with no real code yet) is not an error or refusal.
+    nonempty_usage = {
+        dep: usage for dep, usage in (bundle.dependency_usage or {}).items() if usage
+    }
+    if nonempty_usage:
+        parts.append("## DEPENDENCY USAGE\n" + json.dumps(nonempty_usage, indent=2))
+
+    # R-GEN-002: hint_code, present only in hint mode, clearly distinguished
+    # from every cold spec field above -- never silently merged with them.
+    if bundle.hint_code:
+        parts.append(
+            "## HINT_CODE (existing code -- a revision starting point "
+            "only, NOT spec; distinct from every section above)\n"
+            + json.dumps(bundle.hint_code, indent=2)
+        )
+
+    # R-GEN-012: retry_feedback, bare R-id list only, its own section,
+    # never merged with or indistinguishable from the SpecBundle's own
+    # fields.
+    if retry_feedback:
+        parts.append(
+            "## RETRY_FEEDBACK (bare R-id list only -- a prior attempt "
+            "did not satisfy exactly these; no other content)\n"
+            + json.dumps(list(retry_feedback))
+        )
+
+    parts.append(
+        "Respond with each file wrapped in the delimiter format above, "
+        "one block per file, nothing before the first block or after "
+        "the last."
+    )
+
+    return "\n\n".join(parts)
+
+
+_FILE_BLOCK_TEMPLATE = (
+    r"-----BEGIN FILE {nonce}: (?P<path>.*?)-----\n"
+    r"(?P<content>.*?)"
+    r"\n-----END FILE {nonce}-----"
+)
+
+
+def _parse_files(text: str, nonce: str) -> Dict[str, str]:
+    pattern = re.compile(
+        _FILE_BLOCK_TEMPLATE.format(nonce=re.escape(nonce)), re.DOTALL
+    )
+    files: Dict[str, str] = {}
+    for match in pattern.finditer(text):
+        path = match.group("path").strip()
+        content = match.group("content")
+        if path:
+            files[path] = content
+    return files
 
 
 def _as_dict(response: Any) -> dict:
-    """llm-endpoint's own interface spec only ever shows `ModelResponse`
-    as a JSON object shape (interface/data/ModelResponse.md) -- not a
-    specific Python type. Each self-hosted regeneration of llm-endpoint
-    has returned a different concrete shape for it (a dataclass with
-    `.to_dict()`, D51; a plain dict, D53) -- all equally spec-conformant,
-    since the spec never pinned one. This adapter lets generator depend
-    on the actual JSON contract rather than whichever shape the
-    currently-installed llm-endpoint happens to return."""
+    """Adapter around llm-endpoint's complete() return value (D53) --
+    interface/data/ModelResponse.md only ever fixes a JSON shape, not a
+    Python type, and different regenerations of llm-endpoint have
+    returned different concrete ones."""
+
     if isinstance(response, dict):
         return response
-    if hasattr(response, "to_dict"):
-        return response.to_dict()
-    return vars(response)
+    if hasattr(response, "_asdict"):
+        return dict(response._asdict())
+    if hasattr(response, "__dict__"):
+        return dict(vars(response))
+    raise TypeError(f"unrecognized ModelResponse type: {type(response)!r}")
 
 
-def _gate_inputs_hash(retry_feedback: list[str] | None) -> str:
-    """R-GEN-005 -- MUST incorporate retry_feedback when present, so a
-    blind call and an informed one never collide in the cache."""
-    import hashlib
-    serialized = json.dumps(sorted(retry_feedback) if retry_feedback else [])
-    return "sha256:" + hashlib.sha256(serialized.encode("utf-8")).hexdigest()
+# ---------------------------------------------------------------------------
+# Writing gen/<component>/ (R-GEN-009, scope).
+# ---------------------------------------------------------------------------
 
 
-def _check_refusal(component_id: str, repo_root: Path) -> str | None:
-    """R-GEN-009 -- a precondition check, resolved before any model call.
-    Reads the real component.md frontmatter directly (never from the
-    bundle, which excludes frontmatter by construction, R-ASSEMBLE-001)
-    and gen/<component>/.overrides.json. Returns a reason string or None."""
-    bare_name = component_id[len("comp-"):] if component_id.startswith("comp-") else component_id
-    component_md = repo_root / "specs" / "components" / bare_name / "component.md"
-    if component_md.is_file():
-        text = component_md.read_text(encoding="utf-8")
-        if re.search(r"^sealed:\s*true", text, re.MULTILINE):
-            return "sealed-component"
-    overrides_path = repo_root / "gen" / bare_name / ".overrides.json"
-    if overrides_path.is_file():
-        try:
-            data = json.loads(overrides_path.read_text(encoding="utf-8"))
-        except json.JSONDecodeError:
-            data = None
-        if data:  # any non-empty overrides declaration refuses the whole component
-            return "pinned-override"
-    return None
+def _write_files(repo_root: Path, component_id: str, files: Dict[str, str]) -> None:
+    comp_dir = _component_dir_name(component_id)
+    base = (Path(repo_root) / "gen" / comp_dir).resolve()
+    base.mkdir(parents=True, exist_ok=True)
+    for rel_path, content in files.items():
+        target = (base / rel_path).resolve()
+        # Defense-in-depth: never write outside gen/<component>/ for the
+        # target component, regardless of what a file path in the model's
+        # response claims (R-GEN-009).
+        if target != base and base not in target.parents:
+            continue
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(content, encoding="utf-8")
+
+
+# ---------------------------------------------------------------------------
+# Public library entry point.
+# ---------------------------------------------------------------------------
 
 
 def generate(
     bundle: Any,
     model: str,
-    retry_feedback: list[str] | None = None,
+    retry_feedback: Optional[List[str]] = None,
     *,
-    repo_root: Path | None = None,
+    repo_root: Optional[Path] = None,
     llm_backend=None,
 ) -> GenerationResult:
-    repo_root = Path(repo_root) if repo_root is not None else Path.cwd()
+    """R-GEN-001..014. Produces exactly one candidate per call -- single-
+    shot, stateless about prior attempts, no retry logic of its own
+    (R-GEN-011)."""
 
-    refusal = _check_refusal(bundle.component_id, repo_root)
+    if repo_root is None:
+        repo_root = Path.cwd()
+    repo_root = Path(repo_root)
+
+    component_id = bundle.component_id
+    echoed_retry_feedback = list(retry_feedback) if retry_feedback else None
+
+    # R-GEN-009: precondition check, resolved before any model call.
+    refusal = _check_precondition(repo_root, component_id)
     if refusal is not None:
         return GenerationResult(
-            component_id=bundle.component_id, model=model, prompt_version=PROMPT_VERSION,
-            cache_hit=False, files={}, model_call_error=None, refused=refusal,
-            retry_feedback=retry_feedback,
+            component_id=component_id,
+            model=model,
+            prompt_version=PROMPT_VERSION,
+            cache_hit=False,
+            files={},
+            model_call_error=None,
+            refused=refusal,
+            retry_feedback=echoed_retry_feedback,
         )
 
+    cache_manager = _load_cache_manager(repo_root)
+
+    gate_inputs_hash = _compute_gate_inputs_hash(retry_feedback)
     cache_key = cache_manager.CacheKey(
         spec_bundle_hash=bundle.spec_bundle_hash,
-        gate_inputs_hash=_gate_inputs_hash(retry_feedback),
+        gate_inputs_hash=gate_inputs_hash,
         gate_version=GATE_VERSION,
         model_pin=model,
     )
+
+    # R-GEN-005: check the cache before calling any model.
     cached = cache_manager.get(cache_key, repo_root=repo_root)
-    if isinstance(cached, cache_manager.CachedResult):
+    if not isinstance(cached, cache_manager.Miss):
         payload = cached.payload
+        files = payload.get("files", {})
+        if files:
+            _write_files(repo_root, component_id, files)
         return GenerationResult(
-            component_id=payload["component_id"], model=payload["model"],
-            prompt_version=payload["prompt_version"], cache_hit=True,
-            files=payload["files"], model_call_error=None, refused=None,
-            retry_feedback=retry_feedback,
+            component_id=payload.get("component_id", component_id),
+            model=payload.get("model", model),
+            prompt_version=payload.get("prompt_version", PROMPT_VERSION),
+            cache_hit=True,
+            files=files,
+            model_call_error=None,
+            refused=None,
+            retry_feedback=echoed_retry_feedback,
         )
 
-    prompt = _build_prompt(bundle, retry_feedback)
-    nonce = uuid.uuid4().hex
-    raw_response = llm_endpoint.complete(
-        prompt, model, backend=llm_backend,
-        system_prompt=_SYSTEM_PROMPT.format(component_id=bundle.component_id, nonce=nonce),
-    )
+    llm_endpoint = _load_llm_endpoint(repo_root)
+
+    nonce = _make_nonce()
+    prompt = _build_prompt(bundle, retry_feedback, nonce)
+
+    # R-GEN-004: model is an explicit parameter, passed through unchanged.
+    # R-GEN-011: no retry-with-backoff logic here -- a single call either
+    # succeeds or comes back as a model_call_error exactly once.
+    raw_response = llm_endpoint.complete(prompt, model, backend=llm_backend)
     response = _as_dict(raw_response)
 
-    if response.get("model_call_error") is not None:
+    error = response.get("model_call_error")
+    if error:
+        # R-GEN-008: a model-call error is its own distinct failure mode,
+        # never conflated with "produced code that fails verification."
+        # No partial output -- gen/<component>/ is left untouched.
         return GenerationResult(
-            component_id=bundle.component_id, model=model, prompt_version=PROMPT_VERSION,
-            cache_hit=False, files={}, model_call_error=response["model_call_error"],
-            refused=None, retry_feedback=retry_feedback,
+            component_id=component_id,
+            model=model,
+            prompt_version=PROMPT_VERSION,
+            cache_hit=False,
+            files={},
+            model_call_error=error,
+            refused=None,
+            retry_feedback=echoed_retry_feedback,
         )
 
     files = _parse_files(response.get("text") or "", nonce)
-    result = GenerationResult(
-        component_id=bundle.component_id, model=model, prompt_version=PROMPT_VERSION,
-        cache_hit=False, files=files, model_call_error=None, refused=None,
-        retry_feedback=retry_feedback,
-    )
 
-    # R-GEN-006 -- write-through on success only. D56: a response that
-    # parsed to zero files is not a success -- GenerationResult.md
-    # requires exactly one of files (non-empty)/model_call_error/refused
-    # populated, and caching an empty-files result as if it were valid
-    # would permanently poison every future call for this exact bundle
-    # hash (found this way for real: an earlier call's degenerate empty
-    # result was cached and would have been silently replayed forever).
+    # R-GEN-006/D56: cache only non-empty results -- a response that
+    # parses to zero files must never poison the cache for every future
+    # call with this exact bundle hash.
     if files:
+        _write_files(repo_root, component_id, files)
+        payload = {
+            "component_id": component_id,
+            "model": model,
+            "prompt_version": PROMPT_VERSION,
+            "files": files,
+        }
         cache_manager.put(
             cache_key,
-            cache_manager.CachedResult(gate_type="generator", payload=result.to_dict(), stored_at=cache_manager.now_iso()),
+            cache_manager.CachedResult(
+                gate_type="generator",
+                payload=payload,
+                stored_at=cache_manager.now_iso(),
+            ),
             repo_root=repo_root,
         )
-    return result
+
+    return GenerationResult(
+        component_id=component_id,
+        model=model,
+        prompt_version=PROMPT_VERSION,
+        cache_hit=False,
+        files=files,
+        model_call_error=None,
+        refused=None,
+        retry_feedback=echoed_retry_feedback,
+    )
 
 
-def write_output(result: GenerationResult, repo_root: Path) -> None:
-    """Writes `gen/<component>/` only for a real success -- never a
-    partial tree on error (constraints.md)."""
-    if not result.files:
-        return
-    bare_name = result.component_id[len("comp-"):] if result.component_id.startswith("comp-") else result.component_id
-    target_dir = Path(repo_root) / "gen" / bare_name
-    for rel_path, content in result.files.items():
-        file_path = target_dir / rel_path
-        file_path.parent.mkdir(parents=True, exist_ok=True)
-        file_path.write_text(content, encoding="utf-8")
+# ---------------------------------------------------------------------------
+# CLI (interface/cli.md).
+# ---------------------------------------------------------------------------
+
+
+def _build_arg_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(prog="hotdocs generate")
+    parser.add_argument("component_id")
+    parser.add_argument("--model", required=True)
+    parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument("--retry-feedback", default=None)
+    parser.add_argument("--repo-root", default=None)
+    parser.add_argument("--format", choices=["json", "text"], default="text")
+    return parser
+
+
+def main(argv: Optional[List[str]] = None) -> int:
+    parser = _build_arg_parser()
+    try:
+        args = parser.parse_args(argv)
+    except SystemExit as exc:
+        code = exc.code if isinstance(exc.code, int) else 2
+        return 2 if code != 0 else 0
+
+    repo_root = Path(args.repo_root) if args.repo_root else Path.cwd()
+
+    try:
+        spec_bundle_assembler = _load_spec_bundle_assembler(repo_root)
+        bundle = spec_bundle_assembler.assemble(args.component_id, repo_root)
+    except Exception as exc:  # noqa: BLE001 - usage/precondition failure
+        print(f"usage error: {exc}", file=sys.stderr)
+        return 2
+
+    retry_feedback = (
+        [r.strip() for r in args.retry_feedback.split(",") if r.strip()]
+        if args.retry_feedback
+        else None
+    )
+
+    result = generate(bundle, args.model, retry_feedback, repo_root=repo_root)
+
+    if args.format == "json":
+        print(json.dumps(asdict(result), indent=2))
+    elif result.model_call_error is not None:
+        print(f"model_call_error: {result.model_call_error}")
+    elif result.refused is not None:
+        print(f"refused: {result.refused}")
+    else:
+        print(
+            f"generated {len(result.files)} file(s) for {result.component_id} "
+            f"(cache_hit={result.cache_hit})"
+        )
+
+    if result.model_call_error is not None:
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

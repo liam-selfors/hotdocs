@@ -137,34 +137,22 @@ See `constraints.md`.
 - `D55`: `R-GEN-013` — the prompt now includes `dependency_usage`
   (`R-ASSEMBLE-011`) as its own distinct section when present, the
   fix for `D54`'s failure. `PROMPT_VERSION` bumped to `v2`.
-- `D56`: a real retry (with `dependency_usage` in place) surfaced two
-  more gaps, both in this component, not the spec corpus it generates
-  against. First, `generator` is the one component whose own source
-  legitimately contains a literal instance of its file-transfer
-  delimiter — a model correctly reproducing that delimiter as a worked
-  example inside its own regenerated source collided with the fixed
-  marker text, truncating the real file at the illustrative example's
-  end. Fixed with a per-call random nonce embedded in both the
-  delimiter and the parsing regex, closing a class of bug unique to
-  this one self-referential component. Second, a response that parsed
-  to zero files was being cached as if valid, silently poisoning the
-  cache for every future call with that exact bundle hash; fixed by
-  caching only non-empty results. `PROMPT_VERSION` bumped to `v3`,
-  `GATE_VERSION` to `generator@1.1.0` (orphaning the two pre-existing
-  poisoned cache entries without needing manual deletion). See
-  `cache-manager`'s own `D56` bullet for a third, related gap this
-  same retry sequence found in that component's spec.
-- `D57`: a third real retry (with `D56`'s fixes in place) produced a
-  complete, non-truncated candidate that correctly imported
-  `cache-manager`/`llm-endpoint` — but chose to load them dynamically,
-  per call, from `repo_root` via `importlib`, and crashed for real
-  evaluating `cache-manager`'s dataclasses because it never registered
-  the loaded module in `sys.modules` before running its code. New
-  `R-GEN-014` documents the correct, safe technique; `_SYSTEM_PROMPT`
-  gained an explicit warning against this exact pitfall
-  (`PROMPT_VERSION` bumped to `v4`). Also found: the `D56` cache-
-  manager payload-schema table had been documented in
-  `requirements/R-CACHE-007.md`, which `R-ASSEMBLE-002` means a
-  dependent never actually sees — moved to `interface/data/
-  CachedResult.md` instead, the one place a cold-mode caller's
-  `dependency_interfaces` can actually surface it.
+- `D56`: a real retry surfaced a self-referential delimiter collision
+  unique to this component (fixed with a per-call nonce) and a
+  degenerate empty-files result silently poisoning the cache (fixed by
+  caching only non-empty results). `PROMPT_VERSION` → `v3`,
+  `GATE_VERSION` → `generator@1.1.0`. See `cache-manager`'s own `D56`
+  bullet for a third, related gap this same retry found there.
+- `D57`: a third retry produced a non-truncated candidate that crashed
+  loading `cache-manager`, because its dynamic per-call dependency
+  loader never registered the loaded module in `sys.modules` before
+  running its code. New `R-GEN-014` documents the safe technique;
+  `_SYSTEM_PROMPT` warns against it (`PROMPT_VERSION` → `v4`). Also:
+  `D56`'s cache-manager schema table lived only in `requirements/`,
+  invisible to any dependent (`R-ASSEMBLE-002`) — moved to
+  `interface/data/CachedResult.md`.
+- `D58`: a fourth retry, with `D56`/`D57`'s fixes in place, passed all
+  12 testable `AC-GEN-*` criteria for real — the first successful
+  self-hosted regeneration of this component. `gen/generator/
+  generator.py` is now that candidate; `verification/generator/` was
+  rewritten to match its conventions. `BOOTSTRAP.md` kept as history.

@@ -64,7 +64,30 @@ section (`R-GEN-013`) — real, introspected import facts about each
 dependency's current code, never anything about how *this* component's
 own dependents use it (that direction was considered and rejected, see
 `D55` for why). `PROMPT_VERSION` bumped to `v2` since the template text
-changed. A real re-attempt of `generator` regenerating itself, with
-this fix in place, is tracked as the natural next verification step —
-not done here, to keep this decision's own implementation verified on
-its own terms first.
+changed.
+
+**`D56` and `D57` each found further real bugs** re-attempting the
+self-regeneration with `D55`'s fix in place: a self-referential
+delimiter collision unique to this one component (fixed with a per-call
+nonce), a degenerate empty-files result silently poisoning the cache
+(fixed by caching only non-empty results), an undocumented
+`cache-manager` payload schema (documented in
+`interface/data/CachedResult.md`, `D56`/`D57`), and a real crash in one
+candidate's dynamic dependency-loading technique that omitted
+registering the loaded module in `sys.modules` before running its code
+(documented as `R-GEN-014`, `D57`).
+
+**`D58`: this file is no longer this component's installed code.** A
+fourth real retry, with every fix above in place, produced a complete,
+537-line candidate that passed all 12 of this component's own
+`AC-GEN-*` criteria for real (including the new `AC-GEN-015`, which
+specifically exercises the exact crash the previous attempt hit) — the
+first time this component's own self-regeneration has actually closed
+the loop. `gen/generator/generator.py` is now that candidate, not this
+hand-authored bootstrap; `verification/generator/conftest.py` and
+`test_generator.py` were rewritten to match its conventions (the nonce
+lives directly in the prompt, not a separate `system_prompt` parameter;
+dependencies load dynamically from `repo_root` per call rather than via
+a static `sys.path` entry). This file is kept as the historical record
+of how `generator` came to exist and what each real attempt against it
+found — not as a description of the code currently installed.
