@@ -33,8 +33,11 @@ PROMPT_VERSION = "v5"
 # R-GEN-005/006: the cache-key component identifying this gate's shape.
 # Bumped on D56 to orphan two pre-existing poisoned cache entries
 # (empty-result responses that had been cached as if valid) without
-# needing manual deletion.
-GATE_VERSION = "generator@1.1.0"
+# needing manual deletion. Bumped again on D62: GATE_VERSION MUST track
+# every PROMPT_VERSION change, not just ones that touch caching logic
+# itself -- missing this the first time let a stale, pre-fix candidate
+# replay from cache instead of triggering a fresh call.
+GATE_VERSION = "generator@1.2.0"
 
 
 _SYSTEM_PROMPT = """You are generating the complete source for one component \
