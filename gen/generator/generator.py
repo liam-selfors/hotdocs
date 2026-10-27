@@ -28,7 +28,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "cache-manager")
 import llm_endpoint  # noqa: E402
 import cache_manager  # noqa: E402
 
-PROMPT_VERSION = "v3"  # D56: nonce-delimited file blocks, replacing a fixed delimiter
+PROMPT_VERSION = "v4"  # D57: warn against the sys.modules dynamic-import pitfall
 GATE_VERSION = "generator@1.1.0"  # D56: generate() no longer caches an empty-files result
 
 # R-GEN-003: frozen, versioned -- any substantive edit to this text, other
@@ -68,6 +68,15 @@ Hard rules:
   not infer a specific test's shape from naming conventions.
 - Output only gen/<component_id>/ file contents -- no explanation, no
   commentary, nothing else.
+- If you are generating `generator`'s own code and it dynamically
+  loads a dependency module from a file path per call (rather than a
+  static sys.path-relative-to-file import, R-GEN-014), you MUST
+  register the loaded module in sys.modules under its load-time name
+  BEFORE running its code (exec_module) -- omitting this crashes on
+  any dependency defining a dataclass, because dataclasses' internals
+  look up sys.modules[cls.__module__] to resolve its own annotations.
+  A real prior attempt chose exactly this technique, omitted this
+  step, and crashed for real loading cache-manager (D57).
 
 Output format -- emit each file exactly like this, one block per file,
 nothing before the first block or after the last. {nonce} below is a

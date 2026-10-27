@@ -154,3 +154,17 @@ See `constraints.md`.
   poisoned cache entries without needing manual deletion). See
   `cache-manager`'s own `D56` bullet for a third, related gap this
   same retry sequence found in that component's spec.
+- `D57`: a third real retry (with `D56`'s fixes in place) produced a
+  complete, non-truncated candidate that correctly imported
+  `cache-manager`/`llm-endpoint` — but chose to load them dynamically,
+  per call, from `repo_root` via `importlib`, and crashed for real
+  evaluating `cache-manager`'s dataclasses because it never registered
+  the loaded module in `sys.modules` before running its code. New
+  `R-GEN-014` documents the correct, safe technique; `_SYSTEM_PROMPT`
+  gained an explicit warning against this exact pitfall
+  (`PROMPT_VERSION` bumped to `v4`). Also found: the `D56` cache-
+  manager payload-schema table had been documented in
+  `requirements/R-CACHE-007.md`, which `R-ASSEMBLE-002` means a
+  dependent never actually sees — moved to `interface/data/
+  CachedResult.md` instead, the one place a cold-mode caller's
+  `dependency_interfaces` can actually surface it.

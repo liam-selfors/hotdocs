@@ -115,3 +115,9 @@ See `constraints.md`.
   ever documented, found only once a real `generator` self-regeneration
   candidate wrote a `put` payload missing `component_id`/`model` and
   was correctly rejected by this component's own `put`.
+- `D57`: that same table, as placed by `D56`, lived only in
+  `requirements/R-CACHE-007.md` — invisible to any dependent, since
+  `R-ASSEMBLE-002` means a dependent's bundle only ever carries a
+  dependency's `interface/` content. Moved the real table to
+  `interface/data/CachedResult.md`; `R-CACHE-007` now just points to
+  it, restoring `SPEC_GUIDELINES.md` §10's one-definition rule.
