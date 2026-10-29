@@ -38,7 +38,7 @@ one ready/not-ready verdict before committing directly.
 interactive graph UI answer "is everything ready" at any point, for a
 given blast radius or the whole corpus.
 
-**Seventeen of those components have real code**, and the central claim
+**Eighteen of those components have real code**, and the central claim
 this repo exists to test — that a real generation pipeline can
 cold-regenerate a component from its spec, verified, with no human
 hand-writing the result — is no longer theoretical:
@@ -54,10 +54,11 @@ hand-writing the result — is no longer theoretical:
   `impact-analyzer`, `license-scanner`, `secret-scanner`,
   `provenance-checker`, `docs-site-renderer`, `test-author`,
   `verifier-orchestrator`, `spec-bundle-assembler`,
-  `provenance-tracker` — cold-generated, not hand-written: a real
-  model call, through a real `generator` dispatching through a real
-  `llm-endpoint`, from each component's own assembled spec bundle and
-  nothing else. `verifier-orchestrator` in particular took three real
+  `provenance-tracker`, `provenance-writer` — cold-generated, not
+  hand-written: a real model call, through a real `generator`
+  dispatching through a real `llm-endpoint`, from each component's own
+  assembled spec bundle and nothing else. `verifier-orchestrator` in
+  particular took three real
   generation attempts, each failure traced to a genuine, previously
   undocumented spec gap (how a dependent locates a sealed sibling
   module; interface-drift's exact scope; a result field's required
@@ -72,6 +73,12 @@ hand-writing the result — is no longer theoretical:
   mutation-score averaging bug, `test-author`'s own fake-arity alias
   resolution — and lands at 5 of 7, two documented known limitations,
   full account in `verification/provenance-tracker/BOOTSTRAP.md`.
+  `provenance-writer` took six rounds (`D128`–`D132`) but lands clean
+  at 17 of 17, `mutation_score=0.8` — every round's failure a single,
+  precisely diagnosed root cause (mutation testing itself caught a
+  real gap twice: an entirely untested CLI entry point, and a
+  `_to_jsonable` helper missing a data shape), full account in
+  `verification/provenance-writer/BOOTSTRAP.md`.
 - `component-gate-runner` and `capability-scenario-verifier`'s own
   provenance mechanism are fully specced but **not yet regenerated** —
   among the next real components this corpus's own methodology needs

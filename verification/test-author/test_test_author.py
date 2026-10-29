@@ -443,3 +443,15 @@ def test_ac_author_022_prompt_forbids_guessed_sys_modules_assertions(repo_root):
     assert "sys.modules" in sent_prompt
     assert "record" in normalized.lower()
     assert "guess" in normalized.lower()
+
+
+def test_ac_author_023_prompt_states_write_time_window_truncation(repo_root):
+    backend = MockBackend([file_block("def test_x(): pass")])
+    bundle = fake_bundle()
+    author_test(bundle, "claude-sonnet-5", repo_root=repo_root, llm_backend=backend)
+
+    sent_prompt = backend.calls[0][0]
+    normalized = " ".join(sent_prompt.split())
+    assert "truncat" in normalized.lower()
+    assert "precision" in normalized.lower()
+    assert "before" in normalized.lower() and "after" in normalized.lower()

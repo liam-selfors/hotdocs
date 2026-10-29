@@ -6,6 +6,5 @@
   one shape — this corpus's duck-typing convention (`D94`) means any
   component may return either shape in a given round.
 
-  Found when one `provenance-tracker` batch used dual access for one
-  criterion and bare attribute access for three others (`D112`) —
-  proof the model knows the pattern, just applies it inconsistently.
+  Found at `D112`: one `provenance-tracker` batch applied dual access
+  inconsistently, correctly for one criterion, bare for three others.

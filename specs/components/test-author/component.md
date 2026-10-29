@@ -81,14 +81,13 @@ Full accounts live in `verification/test-author/BOOTSTRAP.md`.
 
 - Initial draft; `D56`–`D58` first real implementation, 8/8
   `AC-AUTHOR-*`.
-- `D94`–`D126`: `R-AUTHOR-009`–`022`, full round-by-round account in
-  `BOOTSTRAP.md`. Nonce-delimited output, dynamic dependency
-  resolution, matching a dependency's real shape with a worked
-  example (`009`–`011`); synthetic fixtures genuinely
-  `spec-linter`-clean, incl. a mandatory self-check and never
-  `import yaml` (`012`–`015`, `D125`); tolerating a missing
-  `dependency_interfaces`, never forwarding `seed`, rejecting
-  malformed/wrong-arity output — aliases resolved to their target's
-  real arity, never skipped (`D126`) — incl. inside string literals,
-  dual access for the target's own return (`016`–`021`); never
-  asserting fake usage via a guessed `sys.modules` key (`022`).
+- `D94`–`D129`: `R-AUTHOR-009`–`023`, full round-by-round account in
+  `BOOTSTRAP.md`. Covers: nonce-delimited output; dynamic,
+  worked-example dependency resolution (`009`–`011`); lint-clean
+  synthetic fixtures, never `import yaml` (`012`–`015`); missing
+  `dependency_interfaces` tolerated, `seed` never forwarded,
+  malformed/wrong-arity output rejected incl. alias resolution and
+  string literals, dual access on the target's own return
+  (`016`–`021`); never asserting fake usage via a guessed
+  `sys.modules` key (`022`); write-time window truncation to the
+  field's own documented precision (`023`, `D129`).

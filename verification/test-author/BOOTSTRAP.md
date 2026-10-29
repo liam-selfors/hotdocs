@@ -531,3 +531,30 @@ legitimate wording drift (`statically import` phrasing,
 convention) — none of these were regressions, each confirmed by
 inspecting the real rendered prompt directly before loosening.
 27 of 27 cases pass directly. Swapped in.
+
+## Round 20 (`D129`): write-time window truncation
+
+First real cold-generation attempt for `provenance-writer` surfaced a
+genuine test-authoring gap in a shape this corpus hadn't exercised
+before: a wall-clock "own write time" field documented at whole-second
+precision (`generated_at`, ISO `%Y-%m-%dT%H:%M:%SZ`). The generated
+test (`AC-PROV-008`) captured its own `before`/`after` window bounds at
+full microsecond precision via plain `datetime.now(timezone.utc)`,
+then compared the truncated-to-the-second written value directly
+against them — a correctly implemented candidate fails this on almost
+every real run, since truncating down to the start of a second makes
+the written value numerically less than `before` whenever `before`'s
+own microseconds are nonzero. New `R-AUTHOR-023`: the prompt MUST
+instruct truncating `before`/`after` to the field's own documented
+precision before comparing. Regenerated directly against the real
+`REPO_ROOT` (`D58` bootstrap exception, same as every other round):
+28 of 28 hand-maintained cases pass, including a new
+`test_ac_author_023_...` proving the instruction is actually present
+in the rendered prompt — confirmed failing against the prior round's
+candidate first. Swapped in (this component's generate-only path
+already writes directly to the live repo as a side effect).
+
+Blast radius checked (`D99`): `capability-scenario-verifier` (4/4) and
+`verifier-orchestrator` (15/15) are the only already-built dependents;
+both pass unchanged. `component-gate-runner` is also a dependent but
+not yet built.

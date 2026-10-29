@@ -7,6 +7,6 @@
   confirm a fake ran, its own code MUST record its invocation and the
   test MUST assert against that record instead.
 
-  Found twice at different seeds, same symptom (`D123`): a redundant
+  Found at `D123`, twice at different seeds: a guessed
   `sys.modules["real_name"]` assertion failed once the loader
   (correctly) keyed under something else.

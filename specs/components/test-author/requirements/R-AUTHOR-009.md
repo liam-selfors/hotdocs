@@ -20,5 +20,4 @@
   nothing written to cache or disk, same posture `R-AUTHOR-007`
   states for a `model_call_error`.
 
-  Found only via a real, non-mocked call (`D94`) — mock-only
-  verification couldn't see it.
+  Found at `D94`, via a real, non-mocked call only.

@@ -20,6 +20,5 @@
   distinct failure (`fake_signature_mismatch`, naming the function
   and both arities). Skip what can't be parsed unambiguously.
 
-  Found once a fake hedged, aliased with the wrong arity (`D110`);
-  `D113`: recurred inside a string literal; `D126`: aliases detected
-  but never resolved.
+  Found at `D110`, `D113` (string-literal case), `D126` (unresolved
+  alias case).

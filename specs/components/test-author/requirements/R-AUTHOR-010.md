@@ -21,7 +21,5 @@
   `exec_module` — a dataclass's class body resolves
   `sys.modules[__module__]` while executing.
 
-  Found and narrowed across two rounds (`D96`/`D97`): guessed wrong
-  despite prose alone; a retry over-applied it to the component under
-  test too. Closed by the snippet and narrowing to faking a
-  *dependency* only.
+  Found/narrowed at `D96`/`D97` (prose alone guessed wrong; a retry
+  then over-applied it to the component under test too).

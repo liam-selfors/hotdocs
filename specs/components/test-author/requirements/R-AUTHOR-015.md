@@ -9,10 +9,9 @@
   necessary but not sufficient (`R-AUTHOR-020`).
 
   **MUST include the exact call as a literal worked snippet, not
-  prose** (`D117`): `lint(None, repo_root)` — `paths` first,
-  positionally `None`, never just one positional argument. Stating
-  the real signature in prose alone was not enough, even corrected
-  (`D116`).
+  prose** (`D117`, after `D116`): `lint(None, repo_root)` — `paths`
+  first, positionally `None`, never just one positional argument.
 
-  A standing safeguard (`D104`): every `R-AUTHOR-012`–`014` failure
-  surfaced as a confusing deep failure, not an immediate signal.
+  A standing safeguard (`D104`): an `R-AUTHOR-012`–`014` failure
+  otherwise surfaces as a confusing deep failure, not an immediate
+  signal.

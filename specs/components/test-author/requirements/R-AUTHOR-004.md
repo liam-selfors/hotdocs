@@ -10,7 +10,6 @@
   registry (`interface/data/CachedResult.md`) names the *kind of cached
   artifact*, not the producing component; it has no `test_author` entry
   at all. `generator`'s own `gate_version` happens to equal its gate
-  type only because the component and the artifact kind share a name
-  by coincidence — not a pattern to copy here. A real candidate did
-  exactly that, using `test_author@<version>` and crashing on its own
-  first cache write (`D56`).
+  type only by coincidence — not a pattern to copy. Found at `D56`:
+  a real candidate used `test_author@<version>` and crashed on its
+  own first cache write.

@@ -14,7 +14,4 @@
   never a bare list/string/number even if the test reads only one —
   the same "worked snippet beats prose" lesson `R-AUTHOR-010` applied.
 
-  Found once real dependencies had a criterion authored against them
-  for the first time (`D100`): three authorings each guessed a
-  dependency's real shape wrong, despite it being fully documented.
-  The identical mistake recurred twice more, unprompted (`D113`).
+  Found at `D100` (three wrong-shape guesses), recurred at `D113`.

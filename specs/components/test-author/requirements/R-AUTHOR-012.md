@@ -1,19 +1,19 @@
 # R-AUTHOR-012
 
 **R-AUTHOR-012** — The prompt MUST always include the frontmatter
-  fields `SPEC_GUIDELINES.md` requires on every frontmatter-bearing
-  document: `id`, `title`, `status`, `owners` always required,
-  `status` MUST be exactly one of `draft`/`ratified`/`deprecated`
-  (`D105`). Applies to **every** such document a fixture constructs —
-  `component.md`, `specs/vars/VAR-*.md`, `specs/decisions/D<N>.md`
-  (`D105`) — not a copy of the real corpus, since a
-  precondition-checking component needs a genuinely lint-clean
-  fixture to exercise anything past that check.
+  fields `SPEC_GUIDELINES.md` requires on every such document —
+  `id`, `title`, `status`, `owners` always required, `status` exactly
+  one of `draft`/`ratified`/`deprecated` (`D105`) — applying to
+  **every** frontmatter-bearing document a fixture constructs
+  (`component.md`, `specs/vars/VAR-*.md`, `specs/decisions/D<N>.md`),
+  not a copy of the real corpus: a precondition-checking component
+  needs a genuinely lint-clean fixture to exercise anything past
+  that check.
 
-  Also MUST state every `requirements/` file needs a matching
-  `acceptance/` file with a `Covers:` tag (`D105`, `R-LINT-008`), for
-  every component the fixture constructs, not just the target; and
-  `status: ratified` MUST also set a placeholder `last_ratified_commit`
+  Also MUST state: every `requirements/` file needs a matching
+  `acceptance/` file with a `Covers:` tag, for every fixture
+  component, not just the target (`D105`, `R-LINT-008`); and
+  `status: ratified` also sets a placeholder `last_ratified_commit`
   (`D107`, `R-LINT-002`).
 
   **MUST also state the opposite**: a unit file (`constraints.md`,
@@ -27,7 +27,5 @@
   own code, not yet stated for test-authoring): write/parse
   frontmatter as plain text instead.
 
-  Found only once a component depending on corpus-wide
-  lint-cleanliness had `generated-test` criteria authored against it
-  for the first time (`D102`): 6 of 13 authorings missed
-  `title`/`owners`. See `R-AUTHOR-013`–`015` for further rounds.
+  Found at `D102` (6 of 13 authorings missed `title`/`owners`); see
+  `R-AUTHOR-013`–`015` for further rounds.
