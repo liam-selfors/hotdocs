@@ -11,5 +11,8 @@ When write_attempt_record runs
 Then it writes the AttemptRecord from those parameters directly,
   never from a reference to component-gate-runner's own
   ComponentPipelineResult type — confirmed by this component's own
-  depends_on listing no dependency on comp-component-gate-runner at all
+  depends_on list specifically excluding comp-component-gate-runner
+  (this component may still list other real dependencies; the only
+  claim under test is that comp-component-gate-runner itself is not
+  one of them)
 ```

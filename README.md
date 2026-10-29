@@ -38,23 +38,23 @@ one ready/not-ready verdict before committing directly.
 interactive graph UI answer "is everything ready" at any point, for a
 given blast radius or the whole corpus.
 
-**Sixteen of those components have real code**, and the central claim
+**Seventeen of those components have real code**, and the central claim
 this repo exists to test — that a real generation pipeline can
 cold-regenerate a component from its spec, verified, with no human
 hand-writing the result — is no longer theoretical:
 
 - `spec-linter`, `graph-query-engine` — hand-authored bootstrap, standing
   in for the generator this pipeline didn't have yet when they were built.
-- `cache-manager`, `spec-bundle-assembler` — also hand-authored, but
-  temporary exceptions: nothing stops a real `generator` from
-  cold-regenerating either, later.
+- `cache-manager` — also hand-authored, but a temporary exception:
+  nothing stops a real `generator` from cold-regenerating it later.
 - `llm-endpoint`, `generator` — hand-authored, but *permanent* exceptions:
   each is what the other dispatches through, so neither could ever be
   produced the normal way *first*.
 - `corpus-graph-builder`, `capability-scenario-verifier`,
   `impact-analyzer`, `license-scanner`, `secret-scanner`,
   `provenance-checker`, `docs-site-renderer`, `test-author`,
-  `verifier-orchestrator` — cold-generated, not hand-written: a real
+  `verifier-orchestrator`, `spec-bundle-assembler`,
+  `provenance-tracker` — cold-generated, not hand-written: a real
   model call, through a real `generator` dispatching through a real
   `llm-endpoint`, from each component's own assembled spec bundle and
   nothing else. `verifier-orchestrator` in particular took three real
@@ -62,11 +62,20 @@ hand-writing the result — is no longer theoretical:
   undocumented spec gap (how a dependent locates a sealed sibling
   module; interface-drift's exact scope; a result field's required
   type) and fixed at that root cause before retrying — never patched
-  by hand.
+  by hand. `spec-bundle-assembler` closed its own "temporary
+  exception" the same way (`D100`–`D109`): 14 of 15 criteria pass, one
+  documented known limitation, full account in
+  `verification/spec-bundle-assembler/BOOTSTRAP.md`. `provenance-tracker`
+  took over thirty decisions to land (`D95`–`D127`), most of them
+  fixing real defects in its dependencies rather than itself —
+  `verifier-orchestrator`'s own `dependency_interfaces` gap and
+  mutation-score averaging bug, `test-author`'s own fake-arity alias
+  resolution — and lands at 5 of 7, two documented known limitations,
+  full account in `verification/provenance-tracker/BOOTSTRAP.md`.
 - `component-gate-runner` and `capability-scenario-verifier`'s own
   provenance mechanism are fully specced but **not yet regenerated** —
-  the next real components this corpus's own methodology needs to
-  build for itself.
+  among the next real components this corpus's own methodology needs
+  to build for itself.
 
 Once that real chain existed, the obvious next question was testable
 directly: can a bootstrapped component regenerate *itself*, resolving the

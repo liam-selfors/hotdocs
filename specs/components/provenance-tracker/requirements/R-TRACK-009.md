@@ -28,3 +28,15 @@
   with enough detail (which component, which check failed) for a
   human or `provenance-tracker-ui` to act on, never just a bare
   boolean.
+
+  **`impact-analyzer` MUST be loaded (imported/resolved) lazily, only
+  at the point it is actually called, never eagerly at the top of
+  `check_readiness` or in any setup step that runs regardless of
+  scope** (`D98`): given no `changed_ids`, `impact-analyzer`'s own
+  module is never loaded at all, not merely "called conditionally" —
+  a real candidate loaded it unconditionally twice in a row despite
+  this already being implied by *when* it is called, confirming that
+  distinguishing "loaded" from "called" needs to be stated directly,
+  not left to be inferred. `provenance-checker` is the one dependency
+  genuinely needed by every scope and MAY be loaded unconditionally.
+

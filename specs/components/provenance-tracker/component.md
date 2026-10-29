@@ -5,6 +5,7 @@ status: draft
 owners: [pipeline-team]
 depends_on: [comp-provenance-checker, comp-impact-analyzer, comp-capability-scenario-verifier]
 realizes: [P-MERGE-VISIBILITY]
+model_pin: claude-sonnet-5
 sealed: false
 ---
 
@@ -108,42 +109,44 @@ None.
 
 ## Change log
 
-- Initial draft, as `merge-tracker`.
-- `D25`: closed the best-effort/visibility open question for
-  `write_tracking_record` — superseded below.
-- `D29`: `TrackingRecord.components[].cache_hit` renamed
-  `provenance_hit` — superseded below.
-- `D86`: `write_attempt_record`'s caller changed from
-  `merge-orchestrator` to `component-gate-runner` — superseded below.
+- Initial draft, as `merge-tracker`. `D25`/`D29`/`D86` superseded below.
 - `D87`/`D88`: renamed `provenance-tracker`. `write_tracking_record`/
   `TrackingRecord`/`hotdocs track query` removed entirely. New:
   `check_readiness`/`VerifyReport` (`R-TRACK-009`/`010`), exposed as
   `hotdocs verify` — a read-only "will a merge pass" check.
-- `D92`: `check_readiness` now triggers work instead of only reporting
-  on it — calls `component-gate-runner`'s and
-  `capability-scenario-verifier`'s own gauntlets directly, exposed as
-  `hotdocs build`, replacing `hotdocs generate`/`check-capability`/
-  `verify` entirely. `depends_on` swaps `provenance-checker` for
-  `component-gate-runner` directly. `write_attempt_record` removed —
-  `component-gate-runner` writes `AttemptRecord`s itself now
-  (`R-GATE-008`), breaking what would otherwise have become a
-  dependency cycle; this component only reads them.
-- `D93`: reversed `D92`'s component half. `hotdocs generate` and
-  `hotdocs verify` are independently runnable commands again;
-  `check_readiness` goes back to a pure, read-only `provenance-checker`
-  check for components (`R-TRACK-009`), never triggering
-  `component-gate-runner`. `depends_on` swaps `component-gate-runner`
-  back for `provenance-checker`. `write_attempt_record`/
-  `last_requirement_failures` return (`R-TRACK-004`/`007`/`008`),
-  called by `component-gate-runner` directly — the cycle `D92` broke by
-  removing this call no longer exists, since this component no longer
-  depends on `component-gate-runner` for anything. The capability half
-  of `D92` (check-then-run via `capability-scenario-verifier`) stands
-  unreversed (`R-TRACK-010`).
-- `D95`: first real cold-generation found `last_requirement_failures`
-  guessing the wrong shape for `requirement_results` (a list of
-  per-requirement objects, not the real flat `R-id -> "pass"|"fail"`
-  mapping `verifier-orchestrator` actually produces) — nothing in this
-  component's own spec bundle stated it, since it correctly never
-  depends on `verifier-orchestrator` for the rest of that type.
-  `AttemptRecord.md`/`R-TRACK-008` now state the real shape directly.
+- `D92`/`D93`: `D92` briefly made `check_readiness` trigger work
+  (calling `component-gate-runner`/`capability-scenario-verifier`
+  directly, as `hotdocs build`); `D93` reversed the component half —
+  `hotdocs generate`/`verify` independently runnable again,
+  `check_readiness` back to a pure, read-only `provenance-checker`
+  check (`R-TRACK-009`), `depends_on` back to `provenance-checker`,
+  `write_attempt_record`/`last_requirement_failures` restored
+  (`R-TRACK-004`/`007`/`008`). The capability half (check-then-run via
+  `capability-scenario-verifier`) stands unreversed (`R-TRACK-010`).
+- `D95`–`D126`: real cold-generation bootstrap, full round-by-round
+  account in `BOOTSTRAP.md`. `last_requirement_failures`'s real
+  `requirement_results` shape stated directly (`D95`); lazy
+  dependency loading stated explicitly for both deps (`D98`); blast-
+  radius-before-committing workflow MUST (`D99`); `AttemptRecord`'s
+  in-memory shape stated (`D100`); dependency modules MUST resolve
+  `repo_root`-relative, never file-location-relative or cached by
+  name alone (`D111`, `R-TRACK-011`); dual dict-or-attribute access
+  reading any dependency's return value (`D121`, `R-TRACK-012`,
+  found only once accurate fakes first let this component's own code
+  actually run); the `realizes` edge computed by scanning every
+  component's own `component.md`, never a nonexistent reverse pointer
+  on the capability's own file (`D122`, mirroring
+  `capability-scenario-verifier`'s own internal convention).
+- `D127`: landed at 5/7 (`mutation_score=1.0`, union across all
+  generated-test criteria per `verifier-orchestrator`'s `D124` fix).
+  Two known limitations, confirmed via direct sandbox inspection
+  rather than accepted at face value: `AC-TRACK-009` — a failing
+  hit's `not_ready_reasons` message doesn't distinguish which of
+  `verification_report`/`license_scan`/`secret_scan` failed, nor
+  name the specific failing requirement id, though `ready=False` and
+  the component name are both correctly surfaced; `AC-TRACK-010` — a
+  test-authoring fixture bug, not a candidate bug (both failing
+  scenarios' `check_capability_provenance` fixture returns `hit=True`
+  unconditionally, so the check-then-run short-circuit the candidate
+  correctly takes means `run_capability_gates` and its injected
+  failure are never reached).

@@ -7,9 +7,15 @@
   `capability-scenario-verifier`'s `run_capability_gates`, on a
   capability miss — that cost is `capability-scenario-verifier`'s own,
   incurred inside its own real function call, not this component's.
-- **Never a gate input.** `hotdocs verify` answers a question; nothing
-  requires it to be run before a commit, and no component's own
-  pass/fail decision reads this component's output (`D87`).
+- **Never an automated gate input.** `hotdocs verify` answers a
+  question; no component's own pass/fail decision reads this
+  component's output, and nothing programmatically enforces that a
+  developer ran it before committing (`D87`). It is nonetheless a
+  stated workflow MUST, not merely optional, that a developer run it
+  — over the full blast radius of whatever was just regenerated, not
+  just the one component in isolation — before committing (`D99`);
+  this component enforces none of that itself, the same absence of
+  automation `D87` already describes.
 - **`AttemptRecord` is append-only, never mutated.** Once written, it
   MUST NOT be edited or deleted by this component — history is the
   entire value of this data.

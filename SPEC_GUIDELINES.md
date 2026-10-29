@@ -551,9 +551,17 @@ drives it directly:
    propagating, this gate catches what wasn't foreseen. `hotdocs
    verify` then reports one ready/not-ready verdict across everything
    it just checked — this is the confirmation a human reads before
-   committing; it does not enforce anything itself (`D87`), nothing
-   requires it to run before a commit, same posture `.hotdocs/`'s own
-   non-gating rule already states.
+   committing; it does not enforce anything itself (`D87`), the same
+   posture `.hotdocs/`'s own non-gating rule already states. **Running
+   it is nonetheless a stated MUST before any commit of a regenerated
+   component** (`D99`) — scoped to the full blast radius of every
+   component actually changed (`--changed=<id>...`, letting
+   `impact-analyzer` compute the transitive set, never hand-picked),
+   not just the one component a developer happened to just regenerate
+   in isolation. This is workflow discipline, not a new automated gate
+   — no component checks that a developer actually did this before a
+   commit lands, the same absence of enforcement `D87` already
+   describes — but it is no longer merely optional good practice.
 4. **Non-functional gates** where feasible (benchmarks, size budgets).
 5. **Review** — `review-packet-builder` assembles the same picture
    `hotdocs verify` checked (spec diff, changed requirements,
@@ -564,10 +572,11 @@ drives it directly:
    aggregate (`D90`) rather than recomputing anything. A human reviews
    this and the spec diff. **No human review of generated code is
    required, of any kind.** (D5)
-6. **Commit** — `specs/`, `gen/`, and `verification/` (including
-   `corpus-graph.json`) update atomically, by the developer, in one
-   squashed commit — ordinary version control, not a component's own
-   action.
+6. **Commit** — only after step 3's blast-radius-wide `hotdocs verify`
+   reports `ready: true` (`D99`): `specs/`, `gen/`, and `verification/`
+   (including `corpus-graph.json`) update atomically, by the developer,
+   in one squashed commit — ordinary version control, not a
+   component's own action.
 
 A component whose spec bundle exactly matches an already-verified prior
 state **MUST** be treated as a provenance hit (`provenance-checker`,
@@ -584,6 +593,20 @@ again, never whether verification is skipped (D13).
 A gate's `gate_version` **MUST** bump whenever its underlying detection logic
 changes (e.g. the license scanner's signature database), so neither a
 cache hit nor a provenance hit ever papers over a genuinely changed risk. (D81)
+
+**Responding to a real defect found through this process is always three
+steps, never one** (D36/D104): (1) diagnose the actual root cause —
+never accept a surface symptom (a crash, a wrong assertion) as the
+explanation; a rejected candidate is never hand-patched, the spec is
+fixed and the candidate regenerated through the real pipeline instead
+(D36). (2) Fix it in the spec, and add a structural safeguard that
+would catch a recurrence of the same class of mistake early and
+legibly — not just resolve the one instance found. (3) Scrub the
+existing, already-committed corpus for other live instances of the
+identical defect, not only the one that happened to surface first.
+Skipping straight to "this one test now passes" without the other two
+steps is exactly how the same defect reappears later, found the hard
+way again.
 
 ---
 

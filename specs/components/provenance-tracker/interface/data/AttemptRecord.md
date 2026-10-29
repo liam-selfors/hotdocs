@@ -31,3 +31,11 @@ per-requirement objects, never a nested status field. For example:
 Never mutated once written, append-only — a later, separate
 `hotdocs generate` attempt on the same component writes its own new
 file, never edits this one.
+
+**The `AttemptRecord` `write_attempt_record` returns in memory carries
+`generation`/`verification` in exactly this same JSON-equivalent plain
+form** (`D100`) — a dict matching this document's own shape precisely,
+never the original caller-supplied `GenerationResult`/`VerificationReport`
+object echoed back by reference. A caller needing the original object
+already has it, having passed it in; this field exists to describe
+what was recorded, not to hand back what was received.

@@ -25,6 +25,7 @@ def fake_bundle_dict(**overrides) -> dict:
         "requirement_text": "FAKE REQUIREMENT TEXT",
         "interface": "FAKE INTERFACE TEXT",
         "glossary": "FAKE GLOSSARY TEXT",
+        "dependency_interfaces": {},
     }
     base.update(overrides)
     return base
@@ -57,14 +58,30 @@ def file_block(content: str, wrapper: str = "{marked}"):
 
 
 class MockBackend:
+    """Deliberately strict (D110): the real AnthropicBackend forwards every
+    keyword argument verbatim into a CLI flag (R-ENDPOINT-001) and fails if
+    the backend CLI doesn't recognize it -- a silently permissive mock here
+    is exactly what let the seed-forwarding bug (D108) through every
+    AC-AUTHOR-* criterion invisibly. Any unexpected kwarg is now a hard
+    error, the same as the real backend's own failure mode, so a future
+    instance of this bug class is caught here instead of only surfacing in
+    a real bootstrap."""
+
     def __init__(self, results):
         self._results = list(results)
         self.calls = []
 
     def __call__(self, prompt, model, **params):
+        if params:
+            raise TypeError(
+                f"MockBackend received unexpected keyword argument(s) {sorted(params)} -- "
+                "the real backend forwards every kwarg verbatim into a CLI flag and fails "
+                "if it isn't recognized (R-ENDPOINT-001); author_test must pass only "
+                "prompt/model/backend to llm_endpoint.complete()."
+            )
         self.calls.append((prompt, model, params))
         result = self._results.pop(0)
-        return result(prompt, model, **params) if callable(result) else result
+        return result(prompt, model) if callable(result) else result
 
 
 @pytest.fixture

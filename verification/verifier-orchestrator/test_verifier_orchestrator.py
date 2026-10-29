@@ -3,7 +3,7 @@ specs/components/verifier-orchestrator/acceptance/."""
 
 from dataclasses import asdict
 
-from conftest import FOO_CODE_DRIFT, acceptance_md, write_foo
+from conftest import FOO_CODE_DRIFT, FOO_CODE_TWO_FUNCTIONS, acceptance_md, write_bar, write_foo
 from verifier_orchestrator import verify
 
 COMPILED_AC = acceptance_md(
@@ -145,6 +145,28 @@ def test_ac_verify_009_test_author_dispatched_with_exact_criterion_bundle(repo_r
     assert by_id["AC-FOO-002"]["result"] == "pass"
 
 
+def test_ac_verify_009_bundle_includes_real_dependency_interfaces(repo_root):
+    # D119: this component MUST pass exactly the CriterionBundle
+    # spec-bundle-assembler.assemble_criterion() returns, never a
+    # smaller, independently-built one -- dependency_interfaces must
+    # carry comp-bar's own real, documented interface text.
+    write_bar(repo_root)
+    write_foo(repo_root, extra_acceptance={"AC-FOO-002.md": GENTEST_AC}, depends_on=["comp-bar"])
+    calls = []
+
+    def test_author(bundle):
+        calls.append(bundle)
+        return {"model_call_error": None, "file": {"content": WORKING_TEST_SOURCE}}
+
+    verify("comp-foo", repo_root, test_author=test_author)
+    assert len(calls) == 1
+    bundle = calls[0]
+    get = (lambda k: bundle.get(k)) if isinstance(bundle, dict) else (lambda k: getattr(bundle, k))
+    dependency_interfaces = get("dependency_interfaces")
+    assert dependency_interfaces is not None
+    assert "do_bar_thing" in dependency_interfaces["comp-bar"]
+
+
 def test_ac_verify_010_no_cache_no_test_author_fails_not_skipped(repo_root):
     write_foo(repo_root, extra_acceptance={"AC-FOO-002.md": GENTEST_AC})
     report = verify("comp-foo", repo_root, test_author=None)
@@ -192,3 +214,53 @@ def test_ac_verify_013_failure_detail_has_expected_and_actual(repo_root):
     assert entry["result"] == "fail"
     assert entry["failure_detail"]["expected"] == 5
     assert entry["failure_detail"]["actual"] == 2
+
+
+def test_ac_verify_015_mutation_score_is_a_union_not_a_per_criterion_average(repo_root):
+    # D124: AC-FOO-002's own test only calls do_the_thing; a new
+    # AC-FOO-004's own test only calls double_it. Each function has
+    # its own mutable node the OTHER criterion's test cannot kill.
+    # Scored in isolation and averaged, this would be low; unioned
+    # across both criteria's tests, it must be high.
+    write_foo(
+        repo_root,
+        code=FOO_CODE_TWO_FUNCTIONS,
+        extra_acceptance={"AC-FOO-002.md": GENTEST_AC},
+    )
+    (repo_root / "specs" / "components" / "foo" / "requirements" / "R-FOO-004.md").write_text(
+        "# R-FOO-004\n\n**R-FOO-004** -- Foo MUST double its input.\n", encoding="utf-8"
+    )
+    double_ac = acceptance_md(
+        "AC-FOO-004", "R-FOO-004", "generated-test",
+        "Given the component\nWhen double_it runs\nThen it doubles the input",
+    )
+    (repo_root / "specs" / "components" / "foo" / "acceptance" / "AC-FOO-004.md").write_text(
+        double_ac, encoding="utf-8"
+    )
+
+    do_the_thing_test = (
+        "import sys\n"
+        "sys.path.insert(0, 'gen/foo')\n"
+        "from foo import do_the_thing\n\n"
+        "def test_adds_one():\n"
+        "    assert do_the_thing(1).value == 2\n"
+        "    assert do_the_thing(-1).value == 0\n"
+    )
+    double_it_test = (
+        "import sys\n"
+        "sys.path.insert(0, 'gen/foo')\n"
+        "from foo import double_it\n\n"
+        "def test_doubles():\n"
+        "    assert double_it(3) == 6\n"
+        "    assert double_it(-3) == 0\n"
+    )
+    gentest_dir = repo_root / "verification" / "foo" / "generated-test"
+    gentest_dir.mkdir(parents=True, exist_ok=True)
+    (gentest_dir / "test_ac_foo_002.py").write_text(do_the_thing_test, encoding="utf-8")
+    (gentest_dir / "test_ac_foo_004.py").write_text(double_it_test, encoding="utf-8")
+
+    report = verify("comp-foo", repo_root)
+    by_id = {c["id"]: c for c in report.criteria}
+    assert by_id["AC-FOO-002"]["result"] == "pass"
+    assert by_id["AC-FOO-004"]["result"] == "pass"
+    assert report.mutation_score > 0.75

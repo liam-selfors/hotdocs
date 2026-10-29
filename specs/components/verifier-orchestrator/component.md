@@ -3,8 +3,9 @@ id: comp-verifier-orchestrator
 title: Verifier Orchestrator
 status: draft
 owners: [pipeline-team]
-depends_on: [comp-criterion-compiler, comp-generator, comp-test-author]
+depends_on: [comp-criterion-compiler, comp-generator, comp-test-author, comp-spec-bundle-assembler]
 realizes: [P-ZERO-EDIT, P-AMBIGUITY-GATE]
+model_pin: claude-sonnet-5
 sealed: false
 ---
 
@@ -87,3 +88,28 @@ established for `judge`.
 - `D85`: `R-VERIFY-012` clarified that `failure_detail.expected`/
   `.actual` must be their original Python type, not a raw string,
   found by the same real candidate leaving them as unparsed text.
+- `D119`: `depends_on` gains `comp-spec-bundle-assembler` — the real
+  candidate had never implemented `R-VERIFY-009`'s own existing
+  "pass exactly the `CriterionBundle` spec-bundle-assembler produces"
+  requirement, instead building a second, independent, narrower
+  `CriterionBundle` with no `dependency_interfaces` at all. Found only
+  once every dependency-shape-guessing test-authoring failure this
+  session traced back to this one, silent gap. `R-VERIFY-009` now
+  states the prohibition explicitly. Cold-regenerated directly,
+  validated against the existing hand-maintained suite plus one new
+  test proving real dependency interface text now flows through.
+- `D120`: `R-VERIFY-013` — every dynamically loaded module MUST be
+  cached by `(repo_root, module_name)`, never `module_name` alone —
+  found once the regenerated candidate's own `load_component_module`
+  cached a bare module name across two different `repo_root`s in the
+  same pytest session, producing a stale-module regression on
+  `AC-VERIFY-004`/`005` despite the interface-drift check's own logic
+  being correct. The identical bug class `R-TRACK-011` already closed
+  for `provenance-tracker`. New `AC-VERIFY-014`.
+- `D124`: `R-VERIFY-006` — `mutation_score` is now a union across all
+  of a component's own `generated-test` criteria's tests, never an
+  average of per-criterion-isolated scores — found once a genuinely
+  multi-function component (`provenance-tracker`) scored near-zero
+  regardless of test quality, since no single criterion's test could
+  kill a mutant living in a sibling function it was never asked to
+  cover. New `AC-VERIFY-015`.

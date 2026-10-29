@@ -1,78 +1,119 @@
-"""spec-bundle-assembler — bootstrap implementation.
+"""Spec Bundle Assembler.
 
-HAND-AUTHORED BOOTSTRAP (sixth instance, temporary exception like
-cache-manager -- see verification/spec-bundle-assembler/BOOTSTRAP.md).
-
-Implements R-ASSEMBLE-001..010: assembles a component's SpecBundle (or
-a narrower CriterionBundle for test-author) from the real corpus,
-reusing spec-linter's own load_corpus() rather than re-parsing files
-independently (single source of truth, SPEC_GUIDELINES.md §10) and
-graph-query-engine's component_context view for R-ASSEMBLE-010's one
-narrow dependency-Purpose exception.
+Assembles a component's full generation input (``SpecBundle``) and the
+narrower per-criterion input (``CriterionBundle``) from the spec corpus.
+All corpus structure is read through ``spec_linter.load_corpus``'s returned
+``Corpus``/``Component`` objects (R-ASSEMBLE-012); dependency ``Purpose``
+text is read through ``graph_query_engine``'s ``component_context`` view
+(R-ASSEMBLE-010).
 """
 
 from __future__ import annotations
 
+import argparse
 import hashlib
+import importlib
+import importlib.util
+import inspect
 import json
 import re
+import subprocess
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, field, fields
 from pathlib import Path
 from typing import Any
 
-import duckdb
+__all__ = [
+    "SpecBundle",
+    "CriterionBundle",
+    "PreconditionFailure",
+    "UnknownComponentError",
+    "UnknownCriterionError",
+    "assemble",
+    "assemble_criterion",
+    "main",
+]
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "spec-linter"))
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "graph-query-engine"))
-import spec_linter  # noqa: E402
-import graph_query_engine  # noqa: E402
+_GEN_DIR = Path(__file__).resolve().parent.parent
 
-_COVERS_RE = re.compile(r"^Covers:\s*(\S+)", re.MULTILINE)
+MODES = ("cold", "hint")
+
+# Sections of the target's own component.md excluded from the bundle (R-ASSEMBLE-001).
+_EXCLUDED_TARGET_SECTIONS = {"rationale", "open questions", "change log", "changelog"}
+
+_HEADING_RE = re.compile(r"^(#{1,6})\s+(.*?)\s*#*\s*$")
+_IDENT_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 
 
-class PreconditionFailureError(Exception):
-    """R-ASSEMBLE-005 -- the corpus does not pass spec-linter cleanly at
-    hard-fail severity. Assembly refuses to produce a bundle at all,
-    rather than a partial one."""
+# ---------------------------------------------------------------------------
+# Errors
+# ---------------------------------------------------------------------------
+
+
+class PreconditionFailure(Exception):
+    """R-ASSEMBLE-005. Corpus does not pass spec-linter at hard-fail severity."""
+
+    def __init__(self, findings: list):
+        self.findings = list(findings)
+        super().__init__(
+            f"corpus is not lint-clean: {len(self.findings)} fail-severity finding(s)"
+        )
+
+
+class UnknownComponentError(ValueError):
+    """No component with the given id exists in the corpus."""
+
+
+class UnknownCriterionError(ValueError):
+    """No acceptance criterion with the given id exists on the component."""
+
+
+# ---------------------------------------------------------------------------
+# Data
+# ---------------------------------------------------------------------------
+
+
+class _Mapping:
+    """Dict-style read access on top of a dataclass."""
+
+    def to_dict(self) -> dict:
+        return {f.name: getattr(self, f.name) for f in fields(self)}
+
+    def __getitem__(self, key: str) -> Any:
+        if key not in self._field_names():
+            raise KeyError(key)
+        return getattr(self, key)
+
+    def __contains__(self, key: object) -> bool:
+        return key in self._field_names()
+
+    def get(self, key: str, default: Any = None) -> Any:
+        return getattr(self, key) if key in self._field_names() else default
+
+    def keys(self):
+        return [f.name for f in fields(self)]
+
+    def _field_names(self) -> set:
+        return {f.name for f in fields(self)}
 
 
 @dataclass
-class SpecBundle:
-    """Matches `interface/data/SpecBundle.md` exactly."""
-
+class SpecBundle(_Mapping):
     component_id: str
     spec_bundle_hash: str
     spec: str
     interface: str
     constraints: str
-    dependency_interfaces: dict[str, str]
-    dependency_context: dict[str, str]
-    dependency_usage: dict[str, str]
-    vars: dict[str, str]
-    glossary: str
-    hint_code: dict[str, str] | None
-
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "component_id": self.component_id,
-            "spec_bundle_hash": self.spec_bundle_hash,
-            "spec": self.spec,
-            "interface": self.interface,
-            "constraints": self.constraints,
-            "dependency_interfaces": self.dependency_interfaces,
-            "dependency_context": self.dependency_context,
-            "dependency_usage": self.dependency_usage,
-            "vars": self.vars,
-            "glossary": self.glossary,
-            "hint_code": self.hint_code,
-        }
+    dependency_interfaces: dict = field(default_factory=dict)
+    dependency_context: dict = field(default_factory=dict)
+    dependency_usage: dict = field(default_factory=dict)
+    vars: dict = field(default_factory=dict)
+    glossary: str = ""
+    hint_code: dict | None = None
 
 
 @dataclass
-class CriterionBundle:
-    """Matches `interface/data/CriterionBundle.md` exactly."""
-
+class CriterionBundle(_Mapping):
     component_id: str
     criterion_id: str
     covers: str
@@ -80,267 +121,572 @@ class CriterionBundle:
     requirement_text: str
     interface: str
     glossary: str
-
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "component_id": self.component_id,
-            "criterion_id": self.criterion_id,
-            "covers": self.covers,
-            "criterion_text": self.criterion_text,
-            "requirement_text": self.requirement_text,
-            "interface": self.interface,
-            "glossary": self.glossary,
-        }
+    dependency_interfaces: dict = field(default_factory=dict)
 
 
-def _check_lint_clean(repo_root: Path) -> None:
-    """R-ASSEMBLE-005, mirroring impact-analyzer's R-IMPACT-007."""
-    report = spec_linter.lint(None, repo_root)
-    if report.hard_failures:
-        raise PreconditionFailureError(
-            f"corpus has {report.hard_failures} hard-fail spec-linter "
-            f"finding(s); assembly refused (R-ASSEMBLE-005)"
-        )
+# ---------------------------------------------------------------------------
+# Dependency loading
+# ---------------------------------------------------------------------------
 
 
-def _component_spec_text(comp: "spec_linter.Component") -> str:
-    """R-ASSEMBLE-001's `spec` field: component.md body + requirements/."""
-    parts = [comp.root.body if comp.root else ""]
-    for rid in sorted(comp.requirements):
-        parts.append(f"### {rid}\n\n{comp.requirements[rid].body}")
-    return "\n\n".join(parts)
+def _exec_module_file(name: str, path: Path, is_package: bool):
+    spec = importlib.util.spec_from_file_location(
+        name,
+        str(path),
+        submodule_search_locations=[str(path.parent)] if is_package else None,
+    )
+    if spec is None or spec.loader is None:
+        raise ImportError(f"cannot load {path}")
+    module = importlib.util.module_from_spec(spec)
+    # Registered before exec_module: dataclasses resolve sys.modules[cls.__module__].
+    sys.modules[name] = module
+    try:
+        spec.loader.exec_module(module)
+    except BaseException:
+        sys.modules.pop(name, None)
+        raise
+    return module
 
 
-def _component_interface_text(comp: "spec_linter.Component") -> str:
-    """R-ASSEMBLE-002's `interface/` content -- cli.md, library.md,
-    interface/data/*.md, interface/guarantees/*.md. Never component.md,
-    requirements/, or constraints.md (that boundary is what makes this
-    function reusable for both the target's own interface, R-ASSEMBLE-001,
-    and each dependency's, R-ASSEMBLE-002 -- a dependent only ever gets
-    what this function returns, nothing more)."""
-    parts = []
-    if comp.interface_cli:
-        parts.append(f"### interface/cli.md\n\n{comp.interface_cli.body}")
-    if comp.interface_library:
-        parts.append(f"### interface/library.md\n\n{comp.interface_library.body}")
-    for name in sorted(comp.interface_data):
-        parts.append(f"### interface/data/{name}.md\n\n{comp.interface_data[name].body}")
-    for gid in sorted(comp.interface_guarantees):
-        parts.append(f"### interface/guarantees/{gid}.md\n\n{comp.interface_guarantees[gid].body}")
-    return "\n\n".join(parts)
-
-
-def _find_component_by_id(corpus: "spec_linter.Corpus", comp_id: str) -> "spec_linter.Component | None":
-    for comp in corpus.components.values():
-        if comp.root and comp.root.doc_id == comp_id:
-            return comp
+def _module_file_in(directory: Path, module_name: str) -> tuple[Path, bool] | None:
+    flat = directory / f"{module_name}.py"
+    if flat.is_file():
+        return flat, False
+    pkg = directory / module_name / "__init__.py"
+    if pkg.is_file():
+        return pkg, True
     return None
 
 
-def _dependency_context(con: duckdb.DuckDBPyConnection, comp_id: str) -> str:
-    """R-ASSEMBLE-010 -- read via the shared component_context view
-    (graph-query-engine), never directly from the dependency's
-    component.md by this component's own logic."""
-    row = con.execute(
-        "SELECT purpose FROM component_context WHERE component_id = ?", [comp_id]
-    ).fetchone()
-    return row[0] if row else ""
-
-
-def _dependency_real_code_dir(repo_root: Path, dep_bare_name: str) -> Path:
-    """Where a dependency's real, importable code actually lives.
-
-    D76: a *sealed* dependency's real code lives at its declared
-    `source_path` (`component.md` frontmatter), never under `gen/
-    <dep_bare_name>/` -- `criterion-compiler` is the first real sealed
-    component another real component (`capability-scenario-verifier`)
-    needed `dependency_usage` for, and this fell back to empty for it
-    every time, silently, exactly the fail-to-empty posture this
-    function already documents for a dependency with no real code --
-    indistinguishable, from a caller with no way to tell "sealed,
-    look elsewhere" from "doesn't exist yet." Checked first; falls
-    back to the normal `gen/<dep_bare_name>/` location otherwise."""
-    component_md = repo_root / "specs" / "components" / dep_bare_name / "component.md"
-    if component_md.is_file():
-        text = component_md.read_text(encoding="utf-8")
-        sealed_match = re.search(r"^sealed:\s*true", text, re.MULTILINE)
-        source_path_match = re.search(r"^source_path:\s*(\S+)", text, re.MULTILINE)
-        if sealed_match and source_path_match:
-            declared = source_path_match.group(1).strip().strip("\"'")
-            return repo_root / declared.rstrip("/")
-    return repo_root / "gen" / dep_bare_name
-
-
-def _dependency_usage(repo_root: Path, dep_bare_name: str) -> str:
-    """R-ASSEMBLE-011 -- a mechanically-derived usage card for a real
-    dependency, introspected from its already-verified real code (never
-    its spec, the reverse of every other dependency_* field). Empty
-    string for a dependency with no real code yet, or whose real code
-    fails to import/introspect for any reason -- the same fail-to-empty
-    posture R-GQE-005/R-CACHE-004 already take elsewhere in this corpus,
-    never a crash that blocks assembling the rest of the bundle."""
-    import importlib
-    import inspect
-
-    module_name = dep_bare_name.replace("-", "_")
-    gen_dir = _dependency_real_code_dir(repo_root, dep_bare_name)
-    if not gen_dir.is_dir():
-        return ""
-    if not (gen_dir / f"{module_name}.py").is_file() and not (gen_dir / module_name / "__init__.py").is_file():
-        return ""
-
-    gen_dir_str = str(gen_dir)
-    added_to_path = gen_dir_str not in sys.path
-    if added_to_path:
-        sys.path.insert(0, gen_dir_str)
+def _load_dependency(module_name: str, slug: str, repo_root: Path | None = None):
+    if module_name in sys.modules:
+        return sys.modules[module_name]
     try:
-        module = importlib.import_module(module_name)
-    except Exception:
+        return importlib.import_module(module_name)
+    except ImportError:
+        pass
+    candidates = [_GEN_DIR / slug]
+    if repo_root is not None:
+        candidates.append(Path(repo_root).resolve() / "gen" / slug)
+    for directory in candidates:
+        found = _module_file_in(directory, module_name)
+        if found is not None:
+            return _exec_module_file(module_name, found[0], found[1])
+    raise ImportError(f"cannot locate dependency module {module_name!r} ({slug})")
+
+
+def _deps(repo_root: Path):
+    # graph_query_engine first, so spec_linter's own import of it resolves.
+    gqe = _load_dependency("graph_query_engine", "graph-query-engine", repo_root)
+    linter = _load_dependency("spec_linter", "spec-linter", repo_root)
+    return linter, gqe
+
+
+# ---------------------------------------------------------------------------
+# Corpus helpers
+# ---------------------------------------------------------------------------
+
+
+def _slug(component_id: str) -> str:
+    return component_id[len("comp-"):] if component_id.startswith("comp-") else component_id
+
+
+def _frontmatter(comp) -> dict:
+    root = getattr(comp, "root", None)
+    return dict(getattr(root, "frontmatter", None) or {}) if root is not None else {}
+
+
+def _component_id(comp) -> str:
+    cid = _frontmatter(comp).get("id")
+    return str(cid) if cid else f"comp-{comp.name}"
+
+
+def _find_component(corpus, component_id: str):
+    for name in sorted(corpus.components):
+        comp = corpus.components[name]
+        if _component_id(comp) == component_id:
+            return comp
+    return corpus.components.get(_slug(component_id))
+
+
+def _as_list(value) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, str):
+        return [value]
+    return [str(v) for v in value]
+
+
+def _doc_text(doc) -> str:
+    if doc is None:
         return ""
-    finally:
-        if added_to_path:
-            sys.path.remove(gen_dir_str)
+    return (getattr(doc, "body", None) or "").strip()
 
-    public_names = getattr(module, "__all__", None)
-    if public_names is None:
-        public_names = [
-            name for name in dir(module)
-            if not name.startswith("_")
-            and (inspect.isfunction(getattr(module, name)) or inspect.isclass(getattr(module, name)))
-            and getattr(getattr(module, name), "__module__", None) == module.__name__
-        ]
 
-    try:
-        module_path_label = str(gen_dir.relative_to(repo_root))
-    except ValueError:
-        module_path_label = str(gen_dir)
-    lines = [f"Importable as: `{module_name}` (module path `{module_path_label}/`)."]
-    for name in sorted(public_names):
-        obj = getattr(module, name, None)
-        if obj is None:
-            continue
+def _rel(doc) -> str:
+    rel = getattr(doc, "rel_path", None) or str(getattr(doc, "path", ""))
+    return rel.replace("\\", "/")
+
+
+def _interface_label(doc) -> str:
+    rel = _rel(doc)
+    idx = rel.find("/interface/")
+    if idx >= 0:
+        return rel[idx + 1:]
+    if rel.startswith("interface/"):
+        return rel
+    return "interface/" + Path(rel).name
+
+
+def _render_interface(comp) -> str:
+    if comp is None:
+        return ""
+    docs = []
+    for doc in (comp.interface_cli, comp.interface_library):
+        if doc is not None:
+            docs.append(doc)
+    for group in (comp.interface_data, comp.interface_guarantees):
+        docs.extend(sorted((group or {}).values(), key=_interface_label))
+    return "\n\n".join(f"### {_interface_label(d)}\n\n{_doc_text(d)}" for d in docs)
+
+
+def _strip_target_sections(body: str) -> str:
+    out: list[str] = []
+    skipping: int | None = None
+    fence: str | None = None
+    for line in body.splitlines(keepends=True):
+        stripped = line.lstrip()
+        if fence is None and (stripped.startswith("```") or stripped.startswith("~~~")):
+            fence = stripped[:3]
+        elif fence is not None and stripped.startswith(fence):
+            fence = None
+        elif fence is None:
+            m = _HEADING_RE.match(line.rstrip("\n"))
+            if m:
+                level = len(m.group(1))
+                title = " ".join(m.group(2).strip().lower().split())
+                if skipping is not None and level <= skipping:
+                    skipping = None
+                if skipping is None and level == 2 and title in _EXCLUDED_TARGET_SECTIONS:
+                    skipping = level
+        if skipping is None:
+            out.append(line)
+    return "".join(out).strip()
+
+
+def _render_spec(comp) -> str:
+    parts = [_strip_target_sections(getattr(comp.root, "body", "") or "")]
+    reqs = comp.requirements or {}
+    for key in sorted(reqs):
+        doc = reqs[key]
+        header = getattr(doc, "doc_id", None) or Path(_rel(doc)).stem or key
+        parts.append(f"### {header}\n\n{_doc_text(doc)}")
+    return "\n\n".join(p for p in parts if p)
+
+
+def _read_text(path: Path) -> str:
+    return Path(path).read_text(encoding="utf-8")
+
+
+def _glossary(corpus, repo_root: Path) -> str:
+    path = repo_root / "specs" / "glossary.md"
+    if path.is_file():
+        return _read_text(path)
+    files = sorted(getattr(corpus, "glossary_files", None) or [], key=str)
+    return "\n\n".join(_read_text(Path(p)) for p in files)
+
+
+def _check_lint(linter, repo_root: Path) -> None:
+    report = linter.lint(None, repo_root)
+    failures = []
+    for f in getattr(report, "findings", None) or []:
+        severity = f.get("severity") if isinstance(f, dict) else getattr(f, "severity", None)
+        if severity == "fail":
+            failures.append(f)
+    if failures:
+        raise PreconditionFailure(failures)
+
+
+# ---------------------------------------------------------------------------
+# Graph views
+# ---------------------------------------------------------------------------
+
+
+def _graph(corpus, gqe, repo_root: Path):
+    con = getattr(corpus, "graph", None)
+    if con is None:
+        import duckdb
+
+        con = duckdb.connect()
         try:
-            signature = str(inspect.signature(obj))
-        except (TypeError, ValueError):
-            signature = ""
-        doc = inspect.getdoc(obj) or ""
-        first_line = doc.splitlines()[0] if doc else ""
-        lines.append(f"- `{name}{signature}` -- {first_line}".rstrip(" -"))
-    return "\n".join(lines)
+            con.execute("LOAD yaml")
+        except Exception:
+            con.execute("INSTALL yaml FROM community")
+            con.execute("LOAD yaml")
+    try:
+        con.execute("SELECT 1 FROM component_context LIMIT 0")
+        con.execute("SELECT 1 FROM edges LIMIT 0")
+    except Exception:
+        gqe.load_views(con, repo_root)
+    return con
 
 
-def _read_hint_code(repo_root: Path, bare_name: str) -> dict[str, str]:
-    """R-ASSEMBLE-008 -- the component's current gen/<component>/ content,
-    keyed by path relative to that directory."""
-    gen_dir = repo_root / "gen" / bare_name
-    if not gen_dir.is_dir():
-        return {}
-    result = {}
-    for path in sorted(gen_dir.rglob("*")):
-        if path.is_file():
-            try:
-                result[str(path.relative_to(gen_dir))] = path.read_text(encoding="utf-8")
-            except UnicodeDecodeError:
-                continue  # binary artifact (e.g. __pycache__) -- not spec-relevant content
+def _purpose(con, component_id: str) -> str:
+    row = con.execute(
+        "SELECT purpose FROM component_context WHERE component_id = ? LIMIT 1",
+        [component_id],
+    ).fetchone()
+    return (row[0] or "") if row else ""
+
+
+# ---------------------------------------------------------------------------
+# Referenced-type expansion (R-ASSEMBLE-013)
+# ---------------------------------------------------------------------------
+
+
+def _type_owner_index(corpus) -> dict[str, list]:
+    index: dict[str, list] = {}
+    for name in sorted(corpus.components):
+        comp = corpus.components[name]
+        seen: set[str] = set()
+        for doc in sorted((comp.interface_data or {}).values(), key=_interface_label):
+            path = Path(_rel(doc))
+            if path.suffix != ".md" or path.stem in seen:
+                continue
+            seen.add(path.stem)
+            index.setdefault(path.stem, []).append((comp, doc))
+    return index
+
+
+def _expand_referenced_types(dep, rendered: str, index: dict[str, list]) -> str:
+    owned = {Path(_rel(d)).stem for d in (dep.interface_data or {}).values()}
+    dep_id = _component_id(dep)
+    sections = []
+    for token in sorted(set(_IDENT_RE.findall(rendered))):
+        if token in owned:
+            continue
+        owners = index.get(token) or []
+        if len(owners) != 1:
+            continue  # unresolved or ambiguous: never guess
+        owner, doc = owners[0]
+        if owner is dep:
+            continue
+        sections.append(
+            f"### Referenced type `{token}` — owned by `{_component_id(owner)}` "
+            f"({_interface_label(doc)}), not by `{dep_id}`\n\n{_doc_text(doc)}"
+        )
+    if not sections:
+        return rendered
+    return "\n\n".join([rendered] + sections) if rendered else "\n\n".join(sections)
+
+
+def _dependency_interfaces(corpus, dep_ids: list[str]) -> dict[str, str]:
+    index = _type_owner_index(corpus)
+    result: dict[str, str] = {}
+    for dep_id in dep_ids:
+        dep = _find_component(corpus, dep_id)
+        if dep is None:
+            result[dep_id] = ""
+            continue
+        result[dep_id] = _expand_referenced_types(dep, _render_interface(dep), index)
     return result
 
 
-def _compute_hash(bundle_without_hash: dict[str, Any]) -> str:
-    """R-ASSEMBLE-006/007 -- a content hash of the assembled bundle,
-    deterministic (sorted keys, fixed separators) so the same corpus
-    bytes always produce the same hash."""
-    serialized = json.dumps(bundle_without_hash, sort_keys=True, separators=(",", ":"))
-    return "sha256:" + hashlib.sha256(serialized.encode("utf-8")).hexdigest()
+# ---------------------------------------------------------------------------
+# Usage cards (R-ASSEMBLE-011)
+# ---------------------------------------------------------------------------
+
+_usage_cache: dict[tuple, str] = {}
+
+
+def _locate_code(dep, repo_root: Path) -> tuple[str, Path, bool, Path] | None:
+    """Return (module_name, file, is_package, display_dir) for a dependency's real code."""
+    slug = dep.name
+    module_name = slug.replace("-", "_")
+    fm = _frontmatter(dep)
+    source_path = fm.get("source_path")
+    if source_path and (fm.get("sealed") or fm.get("status") == "sealed" or True):
+        sp = (repo_root / str(source_path)).resolve()
+        if sp.is_file() and sp.suffix == ".py":
+            if sp.name == "__init__.py":
+                return sp.parent.name, sp, True, sp.parent.parent
+            return sp.stem, sp, False, sp.parent
+        if sp.is_dir():
+            if (sp / "__init__.py").is_file():
+                return sp.name, sp / "__init__.py", True, sp.parent
+            found = _module_file_in(sp, module_name)
+            if found is not None:
+                return module_name, found[0], found[1], sp
+    gen_dir = repo_root / "gen" / slug
+    found = _module_file_in(gen_dir, module_name)
+    if found is not None:
+        return module_name, found[0], found[1], gen_dir
+    return None
+
+
+def _first_doc_line(obj) -> str:
+    doc = inspect.getdoc(obj)
+    if not doc:
+        return ""
+    return doc.strip().splitlines()[0].strip()
+
+
+def _usage_card(dep, repo_root: Path) -> str:
+    located = _locate_code(dep, repo_root)
+    if located is None:
+        return ""
+    module_name, path, is_package, display_dir = located
+    try:
+        key = (str(path), path.stat().st_mtime_ns, str(display_dir))
+    except OSError:
+        return ""
+    if key in _usage_cache:
+        return _usage_cache[key]
+
+    load_name = f"_hotdocs_usage__{module_name}"
+    try:
+        sys.modules.pop(load_name, None)
+        module = _exec_module_file(load_name, path, is_package)
+    except BaseException:
+        _usage_cache[key] = ""
+        return ""
+
+    explicit = getattr(module, "__all__", None)
+    if explicit is not None:
+        names = sorted(str(n) for n in explicit)
+    else:
+        names = sorted(n for n in vars(module) if not n.startswith("_"))
+
+    lines = []
+    for name in names:
+        obj = getattr(module, name, None)
+        if obj is None or not (inspect.isfunction(obj) or inspect.isclass(obj) or callable(obj)):
+            continue
+        if explicit is None and getattr(obj, "__module__", None) != module.__name__:
+            continue
+        try:
+            sig = str(inspect.signature(obj))
+        except (TypeError, ValueError):
+            sig = "(...)"
+        doc = _first_doc_line(obj)
+        lines.append(f"- `{name}{sig}`" + (f" -- {doc}" if doc else ""))
+
+    try:
+        shown = display_dir.resolve().relative_to(repo_root.resolve()).as_posix()
+    except ValueError:
+        shown = display_dir.as_posix()
+    header = f"Importable as: `{module_name}` (module path `{shown}/`)."
+    card = "\n".join([header] + lines)
+    _usage_cache[key] = card
+    return card
+
+
+# ---------------------------------------------------------------------------
+# hint_code (R-ASSEMBLE-008)
+# ---------------------------------------------------------------------------
+
+
+def _hint_code(slug: str, repo_root: Path) -> dict[str, str]:
+    root = repo_root / "gen" / slug
+    result: dict[str, str] = {}
+    if not root.is_dir():
+        return result
+    for path in sorted(root.rglob("*")):
+        if not path.is_file():
+            continue
+        rel = path.relative_to(root)
+        if "__pycache__" in rel.parts or path.suffix in (".pyc", ".pyo"):
+            continue
+        try:
+            result[rel.as_posix()] = path.read_text(encoding="utf-8")
+        except (UnicodeDecodeError, OSError):
+            continue
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Hashing
+# ---------------------------------------------------------------------------
+
+
+def _hash(payload: dict) -> str:
+    data = json.dumps(payload, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+    return "sha256:" + hashlib.sha256(data.encode("utf-8")).hexdigest()
+
+
+# ---------------------------------------------------------------------------
+# Public entry points
+# ---------------------------------------------------------------------------
 
 
 def assemble(component_id: str, repo_root: Path, mode: str = "cold") -> SpecBundle:
-    """R-ASSEMBLE-001..008. `component_id` is the comp-id (e.g.
-    "comp-foo"), matching interface/cli.md's own usage."""
-    repo_root = Path(repo_root)
-    _check_lint_clean(repo_root)
+    """Assemble one component's SpecBundle (R-ASSEMBLE-001..013)."""
+    if mode not in MODES:
+        raise ValueError(f"unknown mode {mode!r}; expected one of {MODES}")
+    repo_root = Path(repo_root).resolve()
+    linter, gqe = _deps(repo_root)
+    _check_lint(linter, repo_root)
+    corpus = linter.load_corpus(repo_root)
 
-    corpus = spec_linter.load_corpus(repo_root)
-    comp = _find_component_by_id(corpus, component_id)
+    comp = _find_component(corpus, component_id)
     if comp is None or comp.root is None:
-        raise ValueError(f"no component with id {component_id!r} found under {repo_root}")
+        raise UnknownComponentError(f"unknown component id: {component_id}")
+    fm = _frontmatter(comp)
+    dep_ids = _as_list(fm.get("depends_on"))
 
-    con = duckdb.connect()
-    con.execute("INSTALL yaml FROM community")
-    con.execute("LOAD yaml")
-    graph_query_engine.load_views(con, repo_root)
+    con = _graph(corpus, gqe, repo_root) if dep_ids else None
+    dependency_context = {d: _purpose(con, d) for d in dep_ids}
+    dependency_usage = {}
+    for d in dep_ids:
+        dep = _find_component(corpus, d)
+        dependency_usage[d] = _usage_card(dep, repo_root) if dep is not None else ""
 
-    dep_ids = comp.root.frontmatter.get("depends_on") or []
-    dependency_interfaces: dict[str, str] = {}
-    dependency_context: dict[str, str] = {}
-    dependency_usage: dict[str, str] = {}
-    for dep_id in dep_ids:
-        dep_comp = _find_component_by_id(corpus, dep_id)
-        if dep_comp is not None:
-            dependency_interfaces[dep_id] = _component_interface_text(dep_comp)
-            dependency_usage[dep_id] = _dependency_usage(repo_root, dep_comp.name)
-        else:
-            dependency_usage[dep_id] = ""
-        dependency_context[dep_id] = _dependency_context(con, dep_id)
+    var_contents: dict[str, str] = {}
+    for var_id in _as_list(fm.get("uses_var")):
+        doc = corpus.id_index.get(var_id)
+        if doc is not None:
+            var_contents[var_id] = _read_text(Path(doc.path))
 
-    var_ids = comp.root.frontmatter.get("uses_var") or []
-    variables: dict[str, str] = {}
-    for var_id in var_ids:
-        var_doc = corpus.id_index.get(var_id)
-        if var_doc is not None:
-            variables[var_id] = var_doc.body
-
-    glossary = (repo_root / "specs" / "glossary.md").read_text(encoding="utf-8")
-
-    bundle_fields = {
-        "component_id": component_id,
-        "spec": _component_spec_text(comp),
-        "interface": _component_interface_text(comp),
-        "constraints": comp.constraints.body if comp.constraints else "",
-        "dependency_interfaces": dependency_interfaces,
+    fields_: dict[str, Any] = {
+        "component_id": _component_id(comp),
+        "spec": _render_spec(comp),
+        "interface": _render_interface(comp),
+        "constraints": _doc_text(comp.constraints),
+        "dependency_interfaces": _dependency_interfaces(corpus, dep_ids),
         "dependency_context": dependency_context,
         "dependency_usage": dependency_usage,
-        "vars": variables,
-        "glossary": glossary,
-        "hint_code": None,
+        "vars": var_contents,
+        "glossary": _glossary(corpus, repo_root),
     }
+    # hint_code is excluded from the hash so cold/hint non-hint_code fields stay identical.
+    bundle_hash = _hash(fields_)
+    hint = _hint_code(comp.name, repo_root) if mode == "hint" else None
+    return SpecBundle(spec_bundle_hash=bundle_hash, hint_code=hint, **fields_)
 
-    if mode == "hint":
-        bundle_fields["hint_code"] = _read_hint_code(repo_root, comp.name)
 
-    spec_bundle_hash = _compute_hash({k: v for k, v in bundle_fields.items() if k != "hint_code"})
+def _find_doc(group: dict, wanted: str):
+    if wanted in group:
+        return group[wanted]
+    for key in sorted(group):
+        doc = group[key]
+        if getattr(doc, "doc_id", None) == wanted or Path(_rel(doc)).stem == wanted:
+            return doc
+    return None
 
-    return SpecBundle(spec_bundle_hash=spec_bundle_hash, **bundle_fields)
+
+def _covers(con, criterion_id: str, doc) -> str:
+    try:
+        row = con.execute(
+            "SELECT target_id FROM edges WHERE source_id = ? AND edge_type = 'covers' "
+            "ORDER BY target_id LIMIT 1",
+            [criterion_id],
+        ).fetchone()
+        if row and row[0]:
+            return str(row[0])
+    except Exception:
+        pass
+    m = re.search(r"Covers:?\**\s*`?([A-Za-z0-9-]+)`?", getattr(doc, "body", "") or "")
+    return m.group(1) if m else ""
 
 
 def assemble_criterion(component_id: str, criterion_id: str, repo_root: Path) -> CriterionBundle:
-    """R-ASSEMBLE-009 -- narrower than SpecBundle by construction, not a
-    variant of it: test-author's independence (R-AUTHOR-002) depends on
-    seeing less than generator sees, not the same bundle plus something."""
-    repo_root = Path(repo_root)
-    _check_lint_clean(repo_root)
+    """Assemble the narrower CriterionBundle for one acceptance criterion (R-ASSEMBLE-009)."""
+    repo_root = Path(repo_root).resolve()
+    linter, gqe = _deps(repo_root)
+    _check_lint(linter, repo_root)
+    corpus = linter.load_corpus(repo_root)
 
-    corpus = spec_linter.load_corpus(repo_root)
-    comp = _find_component_by_id(corpus, component_id)
-    if comp is None:
-        raise ValueError(f"no component with id {component_id!r} found under {repo_root}")
+    comp = _find_component(corpus, component_id)
+    if comp is None or comp.root is None:
+        raise UnknownComponentError(f"unknown component id: {component_id}")
+    crit = _find_doc(comp.acceptance or {}, criterion_id)
+    if crit is None:
+        raise UnknownCriterionError(f"unknown criterion id {criterion_id} on {component_id}")
 
-    criterion_doc = comp.acceptance.get(criterion_id)
-    if criterion_doc is None:
-        raise ValueError(f"no criterion {criterion_id!r} found for {component_id!r}")
+    con = _graph(corpus, gqe, repo_root)
+    covers = _covers(con, criterion_id, crit)
+    req = _find_doc(comp.requirements or {}, covers) if covers else None
+    if req is None and covers:
+        req = corpus.id_index.get(covers)
 
-    covers_match = _COVERS_RE.search(criterion_doc.body)
-    covers = covers_match.group(1) if covers_match else ""
-    requirement_doc = comp.requirements.get(covers)
-    requirement_text = requirement_doc.body if requirement_doc else ""
-
-    glossary = (repo_root / "specs" / "glossary.md").read_text(encoding="utf-8")
-
+    dep_ids = _as_list(_frontmatter(comp).get("depends_on"))
     return CriterionBundle(
-        component_id=component_id,
+        component_id=_component_id(comp),
         criterion_id=criterion_id,
         covers=covers,
-        criterion_text=criterion_doc.body,
-        requirement_text=requirement_text,
-        interface=_component_interface_text(comp),
-        glossary=glossary,
+        criterion_text=_doc_text(crit),
+        requirement_text=_doc_text(req),
+        interface=_render_interface(comp),
+        glossary=_glossary(corpus, repo_root),
+        dependency_interfaces=_dependency_interfaces(corpus, dep_ids),
     )
+
+
+# ---------------------------------------------------------------------------
+# CLI
+# ---------------------------------------------------------------------------
+
+
+def _default_repo_root() -> Path:
+    try:
+        out = subprocess.run(
+            ["git", "rev-parse", "--show-toplevel"],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        return Path(out.stdout.strip())
+    except Exception:
+        return Path.cwd()
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(prog="hotdocs assemble")
+    parser.add_argument("component_id")
+    parser.add_argument("--mode", default="cold")
+    parser.add_argument("--repo-root", default=None)
+    parser.add_argument("--format", default="text", choices=["json", "text"])
+    try:
+        args = parser.parse_args(argv)
+    except SystemExit as exc:
+        return int(exc.code or 0)
+
+    if args.mode not in MODES:
+        print(f"error: --mode must be one of {', '.join(MODES)}", file=sys.stderr)
+        return 2
+    repo_root = Path(args.repo_root) if args.repo_root else _default_repo_root()
+
+    try:
+        bundle = assemble(args.component_id, repo_root, mode=args.mode)
+    except PreconditionFailure as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        for f in exc.findings:
+            if isinstance(f, dict):
+                rule, file_, line, msg = f.get("rule_id"), f.get("file"), f.get("line"), f.get("message")
+            else:
+                rule, file_, line, msg = f.rule_id, f.file, f.line, f.message
+            print(f"  {file_}:{line}: {rule}: {msg}", file=sys.stderr)
+        return 1
+    except (UnknownComponentError, ValueError) as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+
+    if args.format == "json":
+        print(json.dumps(bundle.to_dict(), indent=2, ensure_ascii=False))
+    else:
+        print(f"component_id:     {bundle.component_id}")
+        print(f"mode:             {args.mode}")
+        print(f"spec_bundle_hash: {bundle.spec_bundle_hash}")
+        print(f"spec:             {len(bundle.spec)} chars")
+        print(f"interface:        {len(bundle.interface)} chars")
+        print(f"constraints:      {len(bundle.constraints)} chars")
+        print(f"dependencies:     {', '.join(bundle.dependency_interfaces) or '(none)'}")
+        print(f"vars:             {', '.join(bundle.vars) or '(none)'}")
+        print(f"glossary:         {len(bundle.glossary)} chars")
+        if bundle.hint_code is not None:
+            print(f"hint_code:        {len(bundle.hint_code)} file(s)")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

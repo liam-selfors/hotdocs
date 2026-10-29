@@ -13,3 +13,12 @@
   `generate` run, then vanish. `AttemptRecord` is the full-detail
   companion a human (or `provenance-tracker-ui`, `D88`) reads when a
   component's provenance check fails and they need to know why.
+
+  **The returned `AttemptRecord`'s own `generation`/`verification`
+  fields MUST be the same JSON-equivalent plain form written to disk**
+  (`D100`, `AttemptRecord.md`) — never the original
+  `GenerationResult`/`VerificationReport` object echoed back by
+  reference. A real candidate's test was found asserting attribute
+  access on the in-memory return value where the documented on-disk
+  shape (and the candidate's own, reasonable choice) is a plain dict —
+  this was never stated either way until now.

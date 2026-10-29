@@ -23,9 +23,9 @@ spec-authoring time); this component decides *how* to author one.
 
 ## Rationale
 
-The "independent generation path" a `generated-test` criterion requires
-for that `kind` to be trustworthy. The injectable-callable invocation pattern mirrors the one
-already established for `llm-judge`'s `judge` parameter.
+The "independent generation path" a `generated-test` criterion
+requires for that `kind` to be trustworthy. The injectable-callable
+pattern mirrors `llm-judge`'s own `judge` parameter.
 
 ## Scope
 
@@ -33,15 +33,12 @@ already established for `llm-judge`'s `judge` parameter.
 prose plus the target component's `interface/` content; model selection
 (the canonical model alone, R-AUTHOR-003); caching.
 
-**Out of scope, and deliberately so:** deciding whether a criterion needs a
+**Out of scope, deliberately:** deciding whether a criterion needs a
 test at all — that is the `kind:` tag in `acceptance/`, fixed at
-spec-authoring time and lint-checked (R-LINT-010), never re-decided here or
-by `verifier-orchestrator` at verification time. This boundary was the
-explicit resolution of a design discussion about this component: giving it,
-or `verifier-orchestrator`, the power to override a ratified spec's declared
-`kind` would make that declaration advisory rather than normative, and would
-break `verifier-orchestrator`'s determinism (and therefore cache-key
-validity) by folding a judgment call into what must stay pure dispatch.
+spec-authoring time and lint-checked (R-LINT-010), never re-decided
+here or by `verifier-orchestrator` at verification time, which would
+make a ratified spec's declared `kind` advisory, not normative, and
+break `verifier-orchestrator`'s determinism.
 
 ## Definitions
 
@@ -80,29 +77,18 @@ None.
 
 ## Change log
 
-- Initial draft.
-- `D56`/`D57`/`D58`: first real implementation. `D56` fixed
-  `gate_version`'s required prefix; `D57` added the missing
-  `llm_backend` parameter to `interface/library.md`. A fourth real
-  `generate()` call, with both in place, passed all 8 `AC-AUTHOR-*`
-  criteria. `gen/test-author/test_author.py` is now that candidate.
-  See `verification/test-author/BOOTSTRAP.md` for the full account.
-- `D94`: `R-AUTHOR-009` adds a nonce-delimited single-file output
-  protocol and an explicit no-tool-access instruction, mirroring
-  `generator`'s own `D38` fix — found only once a real, non-mocked
-  `author_test` call (bootstrapping `provenance-tracker`) had to
-  survive a genuine model response for the first time. `PROMPT_VERSION`
-  → `v2`. New `AC-AUTHOR-009`.
-- `D96`: `R-AUTHOR-010` adds a fixed statement of this corpus's
-  dynamic, repo_root-relative dependency-resolution convention (with a
-  literal worked snippet, including the `sys.modules`
-  pre-registration step), found only once three of five real
-  `provenance-tracker` test authorings each guessed a different wrong
-  strategy for faking a dependency. `PROMPT_VERSION` → `v3`. New
-  `AC-AUTHOR-010`.
-- `D97`: `R-AUTHOR-010` narrowed in place (not superseded) — the
-  convention governs faking a *dependency* only, never importing the
-  component under test itself (always a plain import, no loader
-  needed); a fake dependency is always written in the flat-module
-  shape, never the package shape, closing a real `__init__`-as-a-
-  module-name confusion a retry surfaced. `PROMPT_VERSION` → `v4`.
+Full accounts live in `verification/test-author/BOOTSTRAP.md`.
+
+- Initial draft; `D56`–`D58` first real implementation, 8/8
+  `AC-AUTHOR-*`.
+- `D94`–`D126`: `R-AUTHOR-009`–`022`, full round-by-round account in
+  `BOOTSTRAP.md`. Nonce-delimited output, dynamic dependency
+  resolution, matching a dependency's real shape with a worked
+  example (`009`–`011`); synthetic fixtures genuinely
+  `spec-linter`-clean, incl. a mandatory self-check and never
+  `import yaml` (`012`–`015`, `D125`); tolerating a missing
+  `dependency_interfaces`, never forwarding `seed`, rejecting
+  malformed/wrong-arity output — aliases resolved to their target's
+  real arity, never skipped (`D126`) — incl. inside string literals,
+  dual access for the target's own return (`016`–`021`); never
+  asserting fake usage via a guessed `sys.modules` key (`022`).

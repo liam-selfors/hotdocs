@@ -5,7 +5,7 @@ status: draft
 owners: [pipeline-team]
 depends_on: [comp-graph-query-engine, comp-spec-linter]
 realizes: [P-ZERO-EDIT]
-model_pin: claude-sonnet-5
+model_pin: claude-opus-5-5
 sealed: false
 ---
 
@@ -102,3 +102,46 @@ See `constraints.md`.
   rationale" principle `R-ASSEMBLE-002` already applied to every
   dependency, found (via a prompt-efficiency audit) never applied to
   the target itself. Measured at 15-60% of a real component.md's body.
+- `D100`: `R-ASSEMBLE-009`'s `CriterionBundle` gains
+  `dependency_interfaces`, the same content and the same
+  `R-ASSEMBLE-002` rule `SpecBundle.dependency_interfaces` already
+  follows — found only once a real `generated-test` authoring for a
+  component with real dependencies had no authoritative source for a
+  dependency's real call signature or return shape and guessed wrong,
+  despite that shape already being fully documented and already
+  available to `generator` via this exact mechanism. New
+  `AC-ASSEMBLE-013`. Purely additive — `assemble()`/`SpecBundle`
+  unchanged.
+- `D101`: `R-ASSEMBLE-012` — both functions MUST read corpus structure
+  exclusively through `spec-linter`'s own parsed `Corpus`/`Component`
+  objects, never by independently re-parsing frontmatter, and MUST NOT
+  introduce a new third-party dependency for anything a declared
+  dependency already provides. Found only once a real cold-generation
+  candidate reinvented frontmatter parsing with `PyYAML`, a package
+  this corpus has never installed. New `AC-ASSEMBLE-014`.
+- `D109`: cold-generated for the first time, closing the
+  `cache-manager`/`spec-bundle-assembler` "temporary exception" noted
+  above — `model_pin` moves to `claude-opus-5-5`. 11/14 criteria pass;
+  full arc and the three remaining known limitations documented in
+  `BOOTSTRAP.md`. The old hand-written `test_spec_bundle_assembler.py`
+  suite is retired, fully superseded by per-criterion `generated-test`
+  files (confirmed incompatible with the new candidate's own naming
+  — `PreconditionFailureError` renamed `PreconditionFailure` — and its
+  one test without a direct `AC-id` match, the sealed-dependency
+  `source_path` case, is covered inside the new `AC-ASSEMBLE-011`
+  fixture too).
+- `D114`: `R-ASSEMBLE-013` — `dependency_interfaces` now also
+  resolves, one level deep, any type a dependency's own interface
+  text names but doesn't itself own, searching the whole corpus for
+  its real owner (skipped on no match or more than one) — the
+  transitive-type gap deferred twice (`D110`, `D112`) until
+  `provenance-tracker`'s own bootstrap actually hit it. New
+  `AC-ASSEMBLE-015`.
+- `D118`: second cold-generation round lands at 14/15 (up from
+  `D109`'s 11/14); `D116`/`D117` closed two knock-on test-author gaps
+  along the way (a stale `spec-linter` interface doc, a self-check
+  needing a literal worked call). The one remaining failure,
+  `AC-ASSEMBLE-011`, traces to `graph-query-engine`'s own pre-existing
+  decision-nodes gap (confirmed via its own suite, predates this
+  session) — a known limitation, not chased here. `AC-ASSEMBLE-007`'s
+  prior known limitation no longer reproduces.
