@@ -77,3 +77,8 @@ None.
 
 - Initial draft (`D13`), extracted from
   `specs/architecture/graph-query-engine.md`.
+- `D135`: `interface/library.md` states the literal yaml extension
+  install incantation (`INSTALL yaml FROM community`, never a bare
+  `INSTALL yaml`) — found once a fresh caller (`decision-drift-
+  detector`) hit a real registry conflict that prose alone ("the
+  `yaml` community extension") didn't prevent.

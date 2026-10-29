@@ -38,7 +38,7 @@ one ready/not-ready verdict before committing directly.
 interactive graph UI answer "is everything ready" at any point, for a
 given blast radius or the whole corpus.
 
-**Eighteen of those components have real code**, and the central claim
+**Nineteen of those components have real code**, and the central claim
 this repo exists to test — that a real generation pipeline can
 cold-regenerate a component from its spec, verified, with no human
 hand-writing the result — is no longer theoretical:
@@ -54,8 +54,9 @@ hand-writing the result — is no longer theoretical:
   `impact-analyzer`, `license-scanner`, `secret-scanner`,
   `provenance-checker`, `docs-site-renderer`, `test-author`,
   `verifier-orchestrator`, `spec-bundle-assembler`,
-  `provenance-tracker`, `provenance-writer` — cold-generated, not
-  hand-written: a real model call, through a real `generator`
+  `provenance-tracker`, `provenance-writer`,
+  `decision-drift-detector` — cold-generated, not hand-written: a
+  real model call, through a real `generator`
   dispatching through a real `llm-endpoint`, from each component's own
   assembled spec bundle and nothing else. `verifier-orchestrator` in
   particular took three real
@@ -78,7 +79,15 @@ hand-writing the result — is no longer theoretical:
   precisely diagnosed root cause (mutation testing itself caught a
   real gap twice: an entirely untested CLI entry point, and a
   `_to_jsonable` helper missing a data shape), full account in
-  `verification/provenance-writer/BOOTSTRAP.md`.
+  `verification/provenance-writer/BOOTSTRAP.md`. `decision-drift-
+  detector` took eleven rounds (`D133`–`D137`) but lands clean at 5 of
+  5, `mutation_score=0.84` — its criteria were mis-declared `kind:
+  compiled` when `criterion-compiler`'s fixed step grammar can't
+  express the real git repos these tests genuinely need, and most
+  other rounds were either a real gap in a sibling component
+  (`graph-query-engine`'s own undocumented DuckDB extension
+  incantation) or thin scenario coverage rather than a true defect,
+  full account in `verification/decision-drift-detector/BOOTSTRAP.md`.
 - `component-gate-runner` and `capability-scenario-verifier`'s own
   provenance mechanism are fully specced but **not yet regenerated** —
   among the next real components this corpus's own methodology needs

@@ -1,7 +1,7 @@
 # AC-DRIFT-002
 
 Covers: R-DRIFT-002
-Kind: compiled
+Kind: generated-test
 
 ```gherkin
 Given a synthetic git repo with D17 marked deprecated and superseded

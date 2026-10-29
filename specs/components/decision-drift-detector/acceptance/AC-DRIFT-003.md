@@ -1,7 +1,7 @@
 # AC-DRIFT-003
 
 Covers: R-DRIFT-003
-Kind: compiled
+Kind: generated-test
 
 ```gherkin
 Given a decision superseded by a second, and a live spec file citing
