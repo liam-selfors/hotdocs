@@ -1246,6 +1246,27 @@ def rule_secret_field_safety(corpus: Corpus) -> list[Finding]:
     return findings
 
 
+def rule_cli_coverage(corpus: Corpus) -> list[Finding]:
+    """R-LINT-031 (D162). A component documenting a CLI MUST have a
+    requirement citing `interface/cli.md`, covered by a criterion. Warn
+    only until the already-built backlog is covered."""
+    findings = []
+    for comp in corpus.components.values():
+        if not comp.root or not comp.interface_cli:
+            continue
+        citing = {rid for rid, doc in comp.requirements.items() if "interface/cli.md" in doc.body}
+        covered = {rid for doc in comp.acceptance.values() for rid, _ in _collect_covers(doc)}
+        if not citing:
+            message = f"{comp.name} has interface/cli.md but no requirement cites it"
+        elif not citing & covered:
+            message = f"{comp.name}'s CLI requirement ({', '.join(sorted(citing))}) has no covering criterion"
+        else:
+            continue
+        findings.append(Finding("R-LINT-031", SEVERITY_WARN, comp.interface_cli.rel_path, 1,
+                                 message + " -- see SPEC_GUIDELINES.md section 5"))
+    return findings
+
+
 def rule_glossary_singularity(corpus: Corpus) -> list[Finding]:
     """R-LINT-014. Unaffected by D15."""
     findings = []
@@ -1311,6 +1332,7 @@ ALL_RULES = [
     rule_decision_citation_resolution,
     rule_section_reference_resolution,
     rule_secret_field_safety,
+    rule_cli_coverage,
     rule_glossary_singularity,
     rule_no_trailing_whitespace,
 ]

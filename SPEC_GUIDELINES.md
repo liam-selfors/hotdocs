@@ -482,6 +482,15 @@ Rules:
   90% (freeform-derived) or the merge fails. (D80)
 - An `llm-judge` criterion **MUST** emit structured rationale alongside its
   verdict, for audit — the rationale is never itself a review gate.
+- A component with an `interface/cli.md` **MUST** have a requirement that
+  cites `interface/cli.md` by that path and pins its argument parsing:
+  each flag's accepted forms (`--flag=value` and/or `--flag value`), what
+  a flag given with no value does, how a wrong subcommand or unknown
+  argument is handled, which flags pass through to the library call,
+  and every exit code. At least one criterion **MUST** cover it,
+  exercising each of those cases. A documented CLI with no such
+  requirement is untested code that mutation testing will find anyway,
+  one survivor at a time. (`R-LINT-031`, D162)
 
 See `notes/determinism-trust-playbook.md` for how this `kind` split
 drives caching/trust design elsewhere in the pipeline (only `llm-judge`

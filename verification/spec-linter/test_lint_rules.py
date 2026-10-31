@@ -539,3 +539,39 @@ def test_ac_lint_030_frozen_range_exempt(corpus_root):
     _write_decision(corpus_root, "D900", builds_on=["D5"])
     report = run_lint(corpus_root)
     assert not has_finding(report, "R-LINT-030")
+
+
+def _add_cli(root):
+    iface = _comp(root) / "interface"
+    (iface / "cli.md").write_text("# CLI\n\n```\nhotdocs foo [--x=<y>]\n```\n")
+
+
+def test_ac_lint_031_covered_cli_requirement_passes(corpus_root):
+    """D162 -- a CLI cited by a covered requirement draws no finding."""
+    _add_cli(corpus_root)
+    _patch(_comp(corpus_root) / "requirements" / "R-FOO-001.md",
+           ("specified to do.", "specified to do, per `interface/cli.md`."))
+    report = run_lint(corpus_root)
+    assert not has_finding(report, "R-LINT-031", severity="warn")
+
+
+def test_ac_lint_031_citing_requirement_without_criterion_warns(corpus_root):
+    _add_cli(corpus_root)
+    (_comp(corpus_root) / "requirements" / "R-FOO-002.md").write_text(
+        "# R-FOO-002\n\n**R-FOO-002** — `main` MUST implement `interface/cli.md`.\n"
+    )
+    report = run_lint(corpus_root)
+    assert has_finding(report, "R-LINT-031", severity="warn")
+    assert not has_finding(report, "R-LINT-031", severity="fail")
+
+
+def test_ac_lint_031_uncited_cli_warns(corpus_root):
+    _add_cli(corpus_root)
+    report = run_lint(corpus_root)
+    assert has_finding(report, "R-LINT-031", severity="warn")
+    assert not has_finding(report, "R-LINT-031", severity="fail")
+
+
+def test_ac_lint_031_no_cli_no_finding(corpus_root):
+    report = run_lint(corpus_root)
+    assert not has_finding(report, "R-LINT-031", severity="warn")

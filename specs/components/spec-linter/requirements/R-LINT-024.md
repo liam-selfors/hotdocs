@@ -6,7 +6,4 @@
   a unit does and why it exists, never how that design was arrived at.
   Any decision citation, historical justification, or cross-reference
   to the discussion that produced the current design belongs in a
-  `Rationale` section instead (`SPEC_GUIDELINES.md` §3.4) — this rule
-  exists specifically so that boundary is checked mechanically, not
-  left as an unenforced convention a future edit could casually
-  violate.
+  `Rationale` section instead (`SPEC_GUIDELINES.md` §3.4).

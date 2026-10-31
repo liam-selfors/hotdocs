@@ -27,12 +27,12 @@ gate and the component everything else assumes has already run.
 traceability; acceptance-criterion well-formedness; glossary/
 `supersedes`/`builds_on` citation resolution; component size caps;
 `specs/vars/` secret-field safety; glossary singularity; no trailing
-whitespace anywhere in a spec file.
+whitespace anywhere in a spec file; a documented CLI's requirement
+coverage.
 
 **Out of scope:** generation; verifying generated code's actual
 behavior. **Mostly free of model calls and judgment** — only
-R-LINT-015 is a deliberate exception, genuinely about meaning, not
-structure.
+R-LINT-015 is a deliberate exception, about meaning.
 
 ## Definitions
 
@@ -74,6 +74,7 @@ Full narrative per entry lives in its own `specs/decisions/D<N>.md`.
 - Renamed `component_doc_words`; added `R-LINT-026`/`027`.
 - `D13`: rewired onto `graph-query-engine`'s shared views.
 - `D70`–`D74`: added `R-LINT-028`–`030`.
+- `D162`: added `R-LINT-031` (CLI coverage, warn only).
 - `D77`: evaluated against `R-LINT-022`'s own crowding signal (four
   dimensions over warn at once) and deliberately not split — one
   cohesive component, not a hidden second responsibility.
