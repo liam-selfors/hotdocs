@@ -201,6 +201,8 @@ def test_ac_author_010_prompt_states_dependency_resolution_convention(repo_root)
         "statically import" in normalized
         or "statically importable" in normalized
         or "no static import" in normalized.lower()
+        or "static `import`" in normalized.lower()
+        or "static import statement" in normalized.lower()
     )
     assert "dependency" in normalized.lower()
     assert "repo_root>/gen/" in normalized or "gen/<dependency-slug>" in normalized
@@ -455,3 +457,22 @@ def test_ac_author_023_prompt_states_write_time_window_truncation(repo_root):
     assert "truncat" in normalized.lower()
     assert "precision" in normalized.lower()
     assert "before" in normalized.lower() and "after" in normalized.lower()
+
+
+def test_ac_author_024_prompt_states_file_based_invocation_log(repo_root):
+    """R-AUTHOR-024/D144 -- a first fix (D143) told tests to read a
+    fake's invocation back via sys.modules[module_name] under the
+    bare dependency name, which is itself the exact guessed-key
+    failure R-AUTHOR-022 already forbids (a correct candidate may key
+    sys.modules dynamically, per R-GEN-018). Confirming invocation
+    must instead use a file the test controls, never any in-process
+    sys.modules lookup."""
+    backend = MockBackend([file_block("def test_x(): pass")])
+    bundle = fake_bundle()
+    author_test(bundle, "claude-sonnet-5", repo_root=repo_root, llm_backend=backend)
+
+    sent_prompt = backend.calls[0][0]
+    normalized = " ".join(sent_prompt.split())
+    assert "file" in normalized.lower() and "invocation" in normalized.lower()
+    assert "sys.modules" in sent_prompt
+    assert "in-process" in normalized.lower() or "in process" in normalized.lower()

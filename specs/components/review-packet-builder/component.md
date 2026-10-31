@@ -5,6 +5,7 @@ status: draft
 owners: [pipeline-team]
 depends_on: [comp-provenance-tracker]
 realizes: [P-ZERO-EDIT, P-COMPLIANCE-GATE]
+model_pin: claude-sonnet-5
 sealed: false
 ---
 
@@ -52,8 +53,10 @@ See `interface/data/`.
 
 See `acceptance/`.
 
-All eleven criteria are `kind: compiled` — formatting already-computed
-results is pure, deterministic logic.
+All twelve criteria are `kind: generated-test` — real git-history
+scenarios (sealed/override transitions, CLI invocation, markdown
+rendering) need arbitrary setup code no fixed step grammar can
+express, not purely literal-value fixtures.
 
 ## Non-functional constraints
 
@@ -76,3 +79,22 @@ None.
   a real gap: the old `merge-orchestrator`'s own spec always assumed
   this packet carried capability-scenario results, but nothing in this
   component's own requirements ever actually added them.
+- `D140`/`141`: `spec_diff`'s base ref (merge-base with default
+  branch), `changed_ids`'s own semantics (never git-derived),
+  `residual_risk`/`compliance_flags` entry shapes, and
+  `regenerated_components`'s source (`provenance-tracker`'s own
+  `components` map, never `impact-analyzer` directly) all pinned down
+  with worked examples — real test-authoring rounds kept guessing
+  differently each time without them.
+- `D145`/`150`/`153`: `R-PACKET-012`, the CLI entry point
+  (`main`/`cli.md`) had zero coverage; its markdown rendering's own
+  structure is now normative — flat lines or bold labels, never a
+  nested per-entry sub-heading, after that ambiguity repeatedly broke
+  a generated test's own section-boundary parse.
+- `D147`/`148`/`149`/`151`/`152`: `sealed`-transition detection
+  landed on comparing each file against its own first commit in
+  `HEAD`'s history, independent of `R-PACKET-001`'s own PR diff-base
+  — three earlier, each-plausible-looking approaches (diff-status
+  letter, PR-diff-base existence, "doesn't exist implies unsealed")
+  each broke a different real git-history shape before this one held.
+- Landed (`D151`'s own retry, `mutation_score=0.82`): swapped in.

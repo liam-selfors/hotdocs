@@ -558,3 +558,40 @@ Blast radius checked (`D99`): `capability-scenario-verifier` (4/4) and
 `verifier-orchestrator` (15/15) are the only already-built dependents;
 both pass unchanged. `component-gate-runner` is also a dependent but
 not yet built.
+
+Round 21 (`D143`, superseded by `D144` below): bootstrapping
+`review-packet-builder` hit the identical failure shape on two
+independent criteria across different seeds — a generated test's
+fake correctly recorded its own invocation (per `R-AUTHOR-022`), but
+the test asserted against a stale, pre-call local reference to its
+own separate load of the fake module, never noticing the candidate's
+own loader (correctly, per `R-GEN-018`) `exec_module`s a fresh module
+object every call, replacing `sys.modules` and orphaning that earlier
+reference. `R-AUTHOR-024` first instructed reading the recorded
+invocation back through `sys.modules[module_name]` *after* the call
+under test returns, regenerated and swapped in, 28/28 hand cases
+passing — but this instruction itself guessed a bare `sys.modules`
+key, the exact failure `R-AUTHOR-022` already forbids; see round 22.
+
+Round 22 (`D144`): the very next `review-packet-builder` retry against
+round 21's fix regressed severely, 9 of 11 failing — every new fake's
+test read `sys.modules["provenance_tracker"]` (the bare name) after
+the call, but that round's real candidate keyed its loaded module
+under a unique, `repo_root`-qualified name instead
+(`_hotdocs_dep_<slug>_<module_name>_<id(repo_root)>`), exactly the
+dynamic keying `R-AUTHOR-022`/`R-GEN-018` already warn a test can
+never predict. `R-AUTHOR-024` rewritten (not superseded — never
+shipped anywhere else): confirming a fake's invocation MUST use a
+file-based log the test controls, never any in-process `sys.modules`
+lookup at all; `R-AUTHOR-022` cross-amended to the same effect.
+Regenerated again: 29 of 29 hand-maintained cases pass (one pre-
+existing phrasing-variance test, `AC-AUTHOR-010`, needed its own
+accepted-phrasing list widened — unrelated to this fix, just newly
+exposed by a different real wording this round). New
+`test_ac_author_024_prompt_states_file_based_invocation_log`
+confirmed to fail against the pre-`D143` baseline (missing
+"in-process"/"in process" wording) when loaded by explicit file path,
+bypassing `conftest.py`'s own `sys.path` precedence for the real
+installed module. Swapped in (generate-only path writes directly to
+the live repo). Blast radius re-checked: `capability-scenario-verifier`
+(4/4) and `verifier-orchestrator` (15/15) still pass unchanged.

@@ -183,6 +183,36 @@ def test_ac_gen_016_output_layout_instruction_is_present(repo_root):
     assert "dependency_usage" in sent_prompt
 
 
+def test_ac_gen_019_repo_root_relative_dependency_load_instruction_is_present(repo_root):
+    """R-GEN-018/D138 -- every candidate must be told, unconditionally,
+    that a dynamic dependency load (bare import, bare-named sys.modules
+    lookup, or __file__-relative path) must resolve from repo_root
+    instead -- found only after the identical bug recurred independently
+    in four separate components' own candidates."""
+    backend = MockBackend([file_block("foo.py", "x = 1")])
+    generate(FakeBundle(), "claude-sonnet-5", repo_root=repo_root, llm_backend=backend)
+
+    sent_prompt = backend.calls[0][0]
+    assert "repo_root" in sent_prompt
+    assert "import <module_name>" in sent_prompt
+    assert "sys.modules" in sent_prompt
+    assert "__file__" in sent_prompt
+
+
+def test_ac_gen_020_dual_access_on_dependency_return_value_instruction_is_present(repo_root):
+    """R-GEN-019/D139 -- every candidate must be told that dual
+    dict-or-attribute access applies to a dependency's own top-level
+    return value too, not only to values nested within it -- found
+    after a candidate applied the pattern correctly to nested entries
+    but not to the outer return value itself."""
+    backend = MockBackend([file_block("foo.py", "x = 1")])
+    generate(FakeBundle(), "claude-sonnet-5", repo_root=repo_root, llm_backend=backend)
+
+    sent_prompt = backend.calls[0][0]
+    assert "dual dict-or-attribute access" in sent_prompt
+    assert "top-level return value" in sent_prompt
+
+
 def test_ac_gen_015_two_repo_roots_in_one_process_do_not_collide(repo_root, tmp_path_factory):
     """R-GEN-014/D57 -- a per-call dynamic dependency load from repo_root
     must not crash on a dataclass-defining dependency (the real bug a

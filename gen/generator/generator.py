@@ -27,8 +27,11 @@ from typing import Any, Dict, List, Optional
 # added the per-call nonce delimiter and non-empty-only caching (D56);
 # v4 added the explicit dynamic-import sys.modules warning (D57); v5
 # added the flat-module/package output-layout instruction (R-GEN-015,
-# D62).
-PROMPT_VERSION = "v5"
+# D62); v6 added the always-included, repo_root-relative dependency-
+# loading instruction (R-GEN-018, D138); v7 added the always-included
+# dual dict-or-attribute access instruction for a dependency's own
+# top-level return value (R-GEN-019, D139).
+PROMPT_VERSION = "v7"
 
 # R-GEN-005/006: the cache-key component identifying this gate's shape.
 # Bumped on D56 to orphan two pre-existing poisoned cache entries
@@ -36,8 +39,9 @@ PROMPT_VERSION = "v5"
 # needing manual deletion. Bumped again on D62: GATE_VERSION MUST track
 # every PROMPT_VERSION change, not just ones that touch caching logic
 # itself -- missing this the first time let a stale, pre-fix candidate
-# replay from cache instead of triggering a fresh call.
-GATE_VERSION = "generator@1.2.0"
+# replay from cache instead of triggering a fresh call. Bumped again on
+# D138 and D139 for the same reason.
+GATE_VERSION = "generator@1.4.0"
 
 
 _SYSTEM_PROMPT = """You are generating the complete source for one component \
@@ -80,6 +84,24 @@ subdirectory) and never a separately-installed distribution. This is \
 load-bearing, not stylistic: a future dependent's dependency_usage \
 only ever looks for your code in those two exact shapes, and silently \
 sees nothing there otherwise.
+- If your own generated code dynamically loads a dependency module at \
+runtime -- by any means: a bare `import <module_name>` statement, a \
+`sys.modules` lookup keyed on that bare name, or resolving a file path \
+relative to your own `__file__` -- it MUST instead resolve that \
+dependency strictly from the `repo_root` parameter your own function \
+was actually called with: `<repo_root>/gen/<dep-slug>/<module_name>.py` \
+(flat) or `<repo_root>/gen/<dep-slug>/<module_name>/__init__.py` \
+(package). Never trust a bare-named `sys.modules` entry -- a different \
+`repo_root`'s earlier call in the same process may already have \
+populated it with the wrong module, which is exactly what makes a bare \
+`import <module_name>` dangerous even when it happens to work the \
+first time it runs.
+- Any value you read from a dependency call -- including the \
+dependency function's own top-level return value, not only values \
+nested within it -- MUST use dual dict-or-attribute access, never a \
+bare `.attr` access alone. A dependency may legitimately return either \
+a dict or an object; applying dual access only to nested entries and \
+not to the dependency's own outer return value is still a bug.
 
 For each file you produce, wrap its content exactly as instructed below."""
 

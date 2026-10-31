@@ -38,7 +38,7 @@ one ready/not-ready verdict before committing directly.
 interactive graph UI answer "is everything ready" at any point, for a
 given blast radius or the whole corpus.
 
-**Nineteen of those components have real code**, and the central claim
+**Twenty of those components have real code**, and the central claim
 this repo exists to test — that a real generation pipeline can
 cold-regenerate a component from its spec, verified, with no human
 hand-writing the result — is no longer theoretical:
@@ -55,7 +55,8 @@ hand-writing the result — is no longer theoretical:
   `provenance-checker`, `docs-site-renderer`, `test-author`,
   `verifier-orchestrator`, `spec-bundle-assembler`,
   `provenance-tracker`, `provenance-writer`,
-  `decision-drift-detector` — cold-generated, not hand-written: a
+  `decision-drift-detector`, `review-packet-builder` — cold-generated,
+  not hand-written: a
   real model call, through a real `generator`
   dispatching through a real `llm-endpoint`, from each component's own
   assembled spec bundle and nothing else. `verifier-orchestrator` in
@@ -88,10 +89,26 @@ hand-writing the result — is no longer theoretical:
   (`graph-query-engine`'s own undocumented DuckDB extension
   incantation) or thin scenario coverage rather than a true defect,
   full account in `verification/decision-drift-detector/BOOTSTRAP.md`.
-- `component-gate-runner` and `capability-scenario-verifier`'s own
-  provenance mechanism are fully specced but **not yet regenerated** —
-  among the next real components this corpus's own methodology needs
-  to build for itself.
+  `review-packet-builder` took the most real rounds of any component
+  this corpus has bootstrapped — roughly fifty, across sixteen
+  decisions (`D138`–`D153`) — lands clean at 12 of 12,
+  `mutation_score=0.82`. Most of that was one recurring defect
+  resurfacing in new shapes: detecting a genuine `sealed:` transition
+  correctly across every real git-history topology (a single commit,
+  a feature branch, several commits with no feature branch at all)
+  took four distinct corrections before one held for all of them —
+  comparing each file against its own first commit in `HEAD`'s
+  history, independent of the PR's own diff-base entirely — plus a
+  markdown-rendering ambiguity (a nested per-entry sub-heading is
+  indistinguishable from a section boundary to a generic parser) that
+  broke generated tests across several separate rounds before being
+  designed out. Full account in
+  `verification/review-packet-builder/BOOTSTRAP.md`.
+- `component-gate-runner`, `provenance-tracker-ui`, and
+  `spec-completeness-assistant` are fully specced but **not yet
+  regenerated** — the next real components this corpus's own
+  methodology needs to build for itself, now that every one of their
+  own dependencies exists.
 
 Once that real chain existed, the obvious next question was testable
 directly: can a bootstrapped component regenerate *itself*, resolving the

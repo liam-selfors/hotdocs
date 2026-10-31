@@ -6,11 +6,12 @@
   requirement adds) MUST be read via `provenance-tracker`'s own
   `check_readiness` (`D90`) — its `VerifyReport.components`/
   `capabilities` maps already carry `verification_report`,
-  `license_scan`, `secret_scan`, `provenance_hit`, and each
+  `license_scan`, `secret_scan`, and the real field named literally
+  `hit` (never `provenance_hit` — that's only this *packet's own*
+  output field name, `provenance_hit_status`, R-PACKET-006), and each
   intersecting capability's own `CapabilityScenarioReport` — never a
-  live call into any of those components directly. `provenance_hit`
-  itself (R-PACKET-006) is this same `VerifyReport` field, never a
-  live `provenance-checker` call either.
+  live call into any of those components directly, nor a live
+  `provenance-checker` call either.
 
   **The review packet now includes a capability-scenario section** —
   found missing entirely from this component's own prior scope, even
