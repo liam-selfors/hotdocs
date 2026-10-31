@@ -264,3 +264,56 @@ def test_ac_verify_015_mutation_score_is_a_union_not_a_per_criterion_average(rep
     assert by_id["AC-FOO-002"]["result"] == "pass"
     assert by_id["AC-FOO-004"]["result"] == "pass"
     assert report.mutation_score > 0.75
+
+
+FOO_CODE_LOOP = """from dataclasses import dataclass
+
+
+@dataclass
+class Thing:
+    value: int
+
+
+def do_the_thing(x):
+    i = 0
+    while i < x:
+        i = i + 1
+    return Thing(value=i + 1)
+"""
+
+
+def test_ac_verify_016_hanging_mutant_times_out_and_counts_killed(repo_root):
+    # D158: mutating the loop's `i + 1` into `i - 1` never terminates.
+    # Without a per-run timeout, verify() hangs forever on that mutant.
+    import time
+
+    write_foo(repo_root, code=FOO_CODE_LOOP, extra_acceptance={
+        "AC-FOO-001.md": COMPILED_AC,
+        "AC-FOO-002.md": GENTEST_AC,
+        "AC-FOO-003.md": JUDGE_AC,
+    })
+    loop_test = (
+        "import sys\n"
+        "sys.path.insert(0, 'gen/foo')\n"
+        "from foo import do_the_thing\n\n"
+        "def test_counts_up():\n"
+        "    assert do_the_thing(1).value == 2\n"
+        "    assert do_the_thing(3).value == 4\n"
+    )
+    gentest_dir = repo_root / "verification" / "foo" / "generated-test"
+    gentest_dir.mkdir(parents=True, exist_ok=True)
+    (gentest_dir / "test_ac_foo_002.py").write_text(loop_test, encoding="utf-8")
+
+    started = time.monotonic()
+    report = verify("comp-foo", repo_root)
+    elapsed = time.monotonic() - started
+
+    by_id = {c["id"]: c for c in report.criteria}
+    assert by_id["AC-FOO-002"]["result"] == "pass"
+    # R-VERIFY-006's four operators give exactly three mutants here
+    # (one comparison, two additions); all must count as killed,
+    # including the loop's `i - 1` hang (D158), and no numeric-constant
+    # mutant may appear (D159).
+    assert report.mutation_score == 1.0
+    assert report.overall == "pass"
+    assert elapsed < 60

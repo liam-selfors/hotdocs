@@ -92,3 +92,23 @@ component's own `generated-test` criteria's tests — a mutant counts
 as killed if *any* of them fails against it. The new fixture now
 scores above the bar with the same tests unchanged. 15 of 15 cases
 pass directly, including the new union-scoring test. Swapped in.
+
+Closed by `D158`/`D159`: bootstrapping `provenance-tracker-ui` stalled
+for forty-five minutes when one mutant turned a CLI parser's counting
+loop infinite, because no test run had a timeout. Every run now has
+one (10 seconds or ten times the unmutated suite's own time), and a
+timed-out mutant counts as killed. Regenerating to add it took three
+attempts, each surfacing a real gap rather than a candidate bug: the
+universal prompt line `D138` added ignored a sealed dependency's
+`source_path`, sending the candidate to look for `criterion-compiler`
+under `gen/`; running mutant tests with `cwd=repo_root` let a test's
+relative `sys.path` entry import the original module, so every mutant
+survived; and the mutation operator set had never been specified, so
+a candidate quietly added numeric constants. Each fixed at its source
+(`R-GEN-018`, `R-VERIFY-014`, `R-VERIFY-006`). 16 of 16 pass directly,
+including a new looping-mutant fixture confirmed to hang the prior
+implementation first. Before swapping in, the old and new gates were
+run against three already-landed components (`decision-drift-detector`,
+`provenance-writer`, `review-packet-builder`): identical verdicts and
+per-criterion results, mutation scores slightly higher under the new
+gate. Swapped in.

@@ -65,9 +65,8 @@ See `interface/data/`.
 See `acceptance/`.
 
 Mixed `kind`, and deliberately the opposite mix from most of this corpus:
-R-ASSIST-001–003 and R-ASSIST-006 are `compiled` (dispatch, path/data
-checks), but R-ASSIST-004/005 — this component's actual reason to exist —
-are `llm-judge`. Unlike every coordination component specced so far
+every criterion is a `generated-test` except R-ASSIST-004/005 — this
+component's actual reason to exist — which are `llm-judge`. Unlike every coordination component specced so far
 (`verifier-orchestrator`, `merge-orchestrator`), this one's core value
 genuinely *is* judgment, not dispatch around it — a useful contrast case
 against the corpus's usual "prefer compiled" guidance rather than
@@ -86,3 +85,8 @@ None.
 - Initial draft.
 - `D28`: defined `redundancy_flags`' populated-entry shape
   (`{new_requirement, overlaps_with, rationale}`, `R-ASSIST-005`).
+- `D155`–`D157`: hard-fail lint short-circuits; the dependency call
+  order and signature are pinned; no model means no model call at all.
+- `D160`: `R-ASSIST-009` covers the CLI; `R-ASSIST-010` pins the
+  model-call response contract. Cold-generated and landed
+  (`mutation_score` 0.81).

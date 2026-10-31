@@ -4,12 +4,15 @@ Covers: R-UI-002
 Kind: generated-test
 
 ```gherkin
-Given a VerifyReport where comp-foo is a passing hit and comp-bar is a
-  miss, and a CapabilityProvenanceCheckResult where P-ZERO-EDIT is a
-  failing hit
-When the page renders this scope
-Then comp-foo's node is styled as passing, comp-bar's node is styled as
-  missing, and P-ZERO-EDIT's node is styled as failing — each a direct
-  render of the report's own fields, not a recomputed or collapsed
-  status
+Given a faked provenance-tracker whose last_requirement_failures returns
+  [] and whose check_readiness returns: comp-foo hit with a passing
+  verification_report and unflagged scans; comp-bar hit with
+  verification_report.overall "fail"; comp-qux hit and passing but
+  license_scan.blocked true; and capability P-ZERO-EDIT whose
+  capability_scenario_report["P-ZERO-EDIT"].overall is "fail"
+When render_tracker_ui runs
+Then the returned snapshot's statuses are comp-foo "passing", comp-bar
+  "failing", comp-qux "failing", and P-ZERO-EDIT "failing", and each
+  node element's data-status attribute and status-<status> class match
+  its snapshot status
 ```

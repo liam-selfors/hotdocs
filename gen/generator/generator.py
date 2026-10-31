@@ -30,8 +30,9 @@ from typing import Any, Dict, List, Optional
 # D62); v6 added the always-included, repo_root-relative dependency-
 # loading instruction (R-GEN-018, D138); v7 added the always-included
 # dual dict-or-attribute access instruction for a dependency's own
-# top-level return value (R-GEN-019, D139).
-PROMPT_VERSION = "v7"
+# top-level return value (R-GEN-019, D139); v8 corrected v6's
+# instruction to honor a sealed dependency's own source_path (D159).
+PROMPT_VERSION = "v8"
 
 # R-GEN-005/006: the cache-key component identifying this gate's shape.
 # Bumped on D56 to orphan two pre-existing poisoned cache entries
@@ -40,8 +41,8 @@ PROMPT_VERSION = "v7"
 # every PROMPT_VERSION change, not just ones that touch caching logic
 # itself -- missing this the first time let a stale, pre-fix candidate
 # replay from cache instead of triggering a fresh call. Bumped again on
-# D138 and D139 for the same reason.
-GATE_VERSION = "generator@1.4.0"
+# D138, D139, and D159 for the same reason.
+GATE_VERSION = "generator@1.5.0"
 
 
 _SYSTEM_PROMPT = """You are generating the complete source for one component \
@@ -88,9 +89,11 @@ sees nothing there otherwise.
 runtime -- by any means: a bare `import <module_name>` statement, a \
 `sys.modules` lookup keyed on that bare name, or resolving a file path \
 relative to your own `__file__` -- it MUST instead resolve that \
-dependency strictly from the `repo_root` parameter your own function \
-was actually called with: `<repo_root>/gen/<dep-slug>/<module_name>.py` \
-(flat) or `<repo_root>/gen/<dep-slug>/<module_name>/__init__.py` \
+dependency from the `repo_root` parameter your own function was \
+actually called with, joined to the module path DEPENDENCY USAGE gives \
+for it: `gen/<dep-slug>/` for an ordinary dependency, or a sealed \
+dependency's own `source_path` (e.g. `pipeline/criterion-compiler/`), \
+holding `<module_name>.py` (flat) or `<module_name>/__init__.py` \
 (package). Never trust a bare-named `sys.modules` entry -- a different \
 `repo_root`'s earlier call in the same process may already have \
 populated it with the wrong module, which is exactly what makes a bare \

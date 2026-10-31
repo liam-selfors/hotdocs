@@ -179,20 +179,17 @@ Specced in full depth so far:
   write the file directly no longer exists, since this component
   doesn't call `component-gate-runner` for anything) for
   `last_requirement_failures`, a retry-feedback convenience.
-- **`provenance-tracker-ui`** — mostly `kind: compiled` (rendering is a
-  pure function of its two inputs), one `generated-test` criterion for
-  the client-side DuckDB-WASM graph query itself actually running in a
-  real browser. Renamed from `merge-tracker-ui` (`D88`); now reads
-  `corpus-graph-builder`'s committed `corpus-graph.json` for topology
-  alongside local provenance status data — a deliberate reversal of
-  this component's own prior "never reads committed corpus state"
-  boundary, once the concrete cross-referencing need that boundary's
-  own open question anticipated actually surfaced. Implements no
-  generate action of its own: as a static page (R-UI-001), it never
-  calls `check_readiness` directly — it re-runs its own client-side
-  query against current on-disk state, and running `hotdocs generate`
-  already is the complete recovery path, so there is nothing for this
-  component to wire up beyond showing status clearly.
+- **`provenance-tracker-ui`** — all `kind: generated-test`. Renamed from
+  `merge-tracker-ui` (`D88`); a build-time snapshot since `D154`: calls
+  `check_readiness` once in Python, reads `corpus-graph-builder`'s
+  committed `corpus-graph.json` for topology and `.hotdocs/attempts/`
+  for history, and writes one self-contained page with every datum
+  inlined, openable from `file://` with no server. The earlier
+  DuckDB-WASM design could not render `check_readiness`'s hit/miss
+  status client-side at all. Implements no generate action of its own:
+  running `hotdocs generate` already is the complete recovery path, so
+  there is nothing for this component to wire up beyond showing status
+  clearly.
 - **`component-gate-runner`** — all `kind: compiled`. Extracted from
   `merge-orchestrator` by `D76` (the same fix `D14` applied once before
   for `capability-scenario-verifier`): runs one component through its

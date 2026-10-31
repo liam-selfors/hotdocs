@@ -4,10 +4,12 @@ Covers: R-UI-003
 Kind: generated-test
 
 ```gherkin
-Given the rendered page's source and rendering logic
-When inspected for any control that invokes hotdocs generate, a shell
-  command, or any other side-effecting action
-Then none exists — the page only renders; the only way to act on a
-  failing node is the developer typing the command themselves, outside
-  this page
+Given a page rendered for a snapshot containing a failing component
+  with a non-empty retry_feedback
+When index.html is inspected
+Then it contains no <form element, no "hotdocs generate" inside any
+  executable script element (every script element except the
+  id="tracker-snapshot" JSON data block, whose not_ready_reasons are
+  copied verbatim from provenance-tracker and may name that command),
+  and no href attribute other than ones beginning with "#"
 ```

@@ -19,12 +19,7 @@
   sibling function, and being scored against it anyway as if it could
   is not a real quality signal.
 
-  **Found only once a genuinely multi-function component
-  (`provenance-tracker`, three behaviorally distinct entry points) had
-  its own real mutation score computed for the first time** (`D124`):
-  scored in isolation per criterion and averaged, the aggregate was
-  consistently near-zero across every real attempt regardless of test
-  quality — no single criterion's test could ever kill a mutant
-  outside its own narrow scope, so the average was structurally
-  depressed by the module's own shape, not by anything a better test
-  could fix.
+  **Exactly four mutation operators, one mutant per site** (`D159`):
+  a comparison swapped, `and`/`or` flipped, an arithmetic operator
+  swapped, a boolean constant negated. Never numeric constants or
+  anything else: the bar was calibrated against this set.

@@ -99,7 +99,7 @@ Full narrative for each entry lives in its own `specs/decisions/D<N>.md`
 - `D64`: `R-GEN-016` — `hint` mode no longer writes `gen/`/cache.
 - `D91`: retired this component's own CLI in favor of
   `component-gate-runner`'s `hotdocs generate`.
-- `D138`/`D139`: `R-GEN-018`/`019` — `repo_root`-relative dependency
-  loading and dual-access on a dependency's own top-level return
-  value, closing `R-TRACK-011`/`012`/`R-VERIFY-013`/`R-DRIFT-004`.
-  `PROMPT_VERSION` → `v7`, `GATE_VERSION` → `generator@1.4.0`.
+- `D138`/`D139`/`D159`: `R-GEN-018`/`019` — `repo_root`-relative
+  dependency loading (a sealed one at its `source_path`) and
+  dual-access on a dependency's top-level return. `v8`,
+  `generator@1.5.0`.

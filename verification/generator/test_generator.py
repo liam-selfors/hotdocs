@@ -197,6 +197,8 @@ def test_ac_gen_019_repo_root_relative_dependency_load_instruction_is_present(re
     assert "import <module_name>" in sent_prompt
     assert "sys.modules" in sent_prompt
     assert "__file__" in sent_prompt
+    # D159: a sealed dependency lives at its own source_path, not gen/.
+    assert "source_path" in sent_prompt
 
 
 def test_ac_gen_020_dual_access_on_dependency_return_value_instruction_is_present(repo_root):

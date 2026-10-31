@@ -1,8 +1,12 @@
 # CLI
 
 ```
-hotdocs assist --changed=<spec-id>... [--repo-root=<dir>] [--format=json|text]
+hotdocs assist --changed=<spec-id>... [--repo-root=<dir>] [--format=json|text] [--model=<model>]
 ```
+
+Every flag takes its value either as `--flag=value` or as the next
+argument (`--flag value`); a flag given last with no value is a usage
+error.
 
 **Exit codes:**
 

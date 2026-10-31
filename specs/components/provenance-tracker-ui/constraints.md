@@ -1,19 +1,19 @@
 # Provenance Tracker UI — Non-Functional Constraints
 
-- **No backend computation.** Static page, DuckDB-WASM in the browser —
-  same posture `docs-site-renderer` already established, applied here
-  to a graph-shaped data source. **Clarified by R-UI-006 (D16):** the
-  local static-file server `serve` starts is not an exception to this —
-  it serves literal file bytes only, computes nothing, and DuckDB-WASM
-  still performs every query entirely client-side.
-- **No network access from the rendered page.** Everything it queries
-  is local (`corpus-graph.json`, `.hotdocs/attempts/`, reached via
-  `serve`'s loopback server, R-UI-006); it MUST NOT fetch anything
-  remote.
-- **Never the gate.** Nothing about this component's rendering, or
-  whether a developer even has it open, affects any provenance check's
-  outcome — same boundary `provenance-tracker` itself observes (`D87`).
+- **All computation at build time, none at view time.** `render_tracker_ui`
+  does every read once, in Python; the written page only renders data
+  already inlined into it (`R-UI-001`, `D154`).
+- **No network access from the rendered page.** It fetches nothing,
+  local or remote, and references no external resource; it opens
+  directly from `file://` (`R-UI-006`).
+- **Never the gate.** Nothing about this component's output, or whether
+  a developer ever builds it, affects any provenance check's outcome —
+  the same boundary `provenance-tracker` itself observes (`D87`).
 - **Graceful on a node with no provenance at all.** A fresh checkout
   with nothing yet `hotdocs generate`-d MUST render a clear "not yet
-  attempted" state per node (R-UI-005), not an error — this is the
+  attempted" state per component (`R-UI-005`), not an error — the
   common case for anyone just cloning the repo, not an edge case.
+- **Deterministic.** The same `VerifyReport`, `corpus-graph.json`, and
+  `.hotdocs/attempts/` contents MUST produce a byte-identical
+  `index.html`: no timestamp, random id, or unordered iteration in the
+  output.

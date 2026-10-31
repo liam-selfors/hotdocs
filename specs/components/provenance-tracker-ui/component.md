@@ -5,6 +5,7 @@ status: draft
 owners: [pipeline-team]
 depends_on: [comp-provenance-tracker, comp-corpus-graph-builder]
 realizes: [P-MERGE-VISIBILITY]
+model_pin: claude-sonnet-5
 sealed: false
 ---
 
@@ -12,12 +13,13 @@ sealed: false
 
 ## Purpose
 
-An interactive graph view of corpus readiness: every component and
-capability, colored by current provenance status, navigable between a
-blast-radius view and a whole-corpus view, with per-node drill-down
-into `AttemptRecord` history and retry-feedback suggestions for
-anything currently failing. The visual answer to the same question
-`hotdocs verify` answers as an exit code.
+A static, self-contained page showing corpus readiness: every
+component and capability in scope, colored by current provenance
+status, for either a blast-radius or a whole-corpus view, with
+per-node drill-down into `AttemptRecord` history and retry-feedback
+suggestions for anything currently failing. The visual answer to the
+same question `hotdocs verify` answers as an exit code, snapshotted at
+build time.
 
 ## Rationale
 
@@ -35,20 +37,16 @@ question said would justify revisiting it has now actually surfaced.
 
 ## Scope
 
-**In scope:** rendering `corpus-graph-builder`'s graph as the topology
-layer (`R-UI-004`); querying `provenance-tracker`'s `check_readiness`
-for the currently-selected scope and coloring each node by its
-provenance status (`R-UI-002`); navigation/filtering between a
-blast-radius view (given a changed-ids set) and a whole-corpus view
-(`R-UI-007`); per-node drill-down showing `AttemptRecord` history and
-`last_requirement_failures`, surfaced as retry-feedback suggestions,
-for any node currently failing or missing provenance (`R-UI-008`).
+**In scope:** calling `provenance-tracker`'s `check_readiness` once per
+build for the chosen scope (`R-UI-007`); reading `corpus-graph.json`
+for topology (`R-UI-004`); mapping each node to a status (`R-UI-002`);
+attaching `AttemptRecord` history and `last_requirement_failures` as
+retry-feedback suggestions to failing or missing nodes (`R-UI-008`);
+writing one self-contained page (`R-UI-001`).
 
-**Out of scope:** a "retry"/"resume" action of its own (`R-UI-003`) —
-running `hotdocs generate` again is already the complete path, a
-developer invokes it themselves, outside this UI; any write to
-`specs/`, `gen/`, `verification/`, or `.hotdocs/` — this component only
-ever reads.
+**Out of scope:** a "generate" action of its own (`R-UI-003`) — a
+developer runs `hotdocs generate` themselves; any view-time query or
+server (`R-UI-006`); any write except the page itself.
 
 ## Definitions
 
@@ -70,10 +68,9 @@ See `interface/data/`.
 
 See `acceptance/`.
 
-Mixed `kind`: most are `compiled` (rendering/filtering logic, each a
-pure function of its inputs, same case `docs-site-renderer` already
-makes); one `generated-test` criterion checks that DuckDB-WASM's graph
-query actually runs correctly in a real browser environment.
+All `kind: generated-test` — every criterion needs a faked
+`provenance-tracker` and real files on disk, which no fixed step
+grammar can set up.
 
 ## Non-functional constraints
 
@@ -102,3 +99,12 @@ None.
   `hotdocs build` command now names `hotdocs generate` (the recovery
   action for a failing component) or `hotdocs verify` (the readiness
   query this UI visualizes), whichever it actually meant.
+- `D154`: rebuilt as a build-time snapshot — `check_readiness` called
+  once in Python, all data inlined into one `file://`-openable page.
+  DuckDB-WASM, `duckpgq`, and `hotdocs track ui serve` dropped; the
+  spec's static-page and render-`check_readiness` requirements could
+  not both hold. Build takes `--model`, passed through. New
+  `R-UI-009` (CLI).
+- `D161`: `AC-UI-003`'s no-generate-action check excludes the
+  `tracker-snapshot` data block; `R-UI-009` covers every CLI flag form.
+  Cold-generated and landed (`mutation_score` 0.95).

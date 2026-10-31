@@ -106,10 +106,8 @@ established for `judge`.
   `AC-VERIFY-004`/`005` despite the interface-drift check's own logic
   being correct. The identical bug class `R-TRACK-011` already closed
   for `provenance-tracker`. New `AC-VERIFY-014`.
-- `D124`: `R-VERIFY-006` — `mutation_score` is now a union across all
-  of a component's own `generated-test` criteria's tests, never an
-  average of per-criterion-isolated scores — found once a genuinely
-  multi-function component (`provenance-tracker`) scored near-zero
-  regardless of test quality, since no single criterion's test could
-  kill a mutant living in a sibling function it was never asked to
-  cover. New `AC-VERIFY-015`.
+- `D124`: `R-VERIFY-006` — `mutation_score` is a union across all of a
+  component's `generated-test` criteria, never a per-criterion average.
+  New `AC-VERIFY-015`.
+- `D158`: `R-VERIFY-014` — every test run gets a timeout; a timed-out
+  mutant counts as killed. New `AC-VERIFY-016`.

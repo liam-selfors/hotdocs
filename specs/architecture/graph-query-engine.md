@@ -186,15 +186,12 @@ pointing back to this document, exactly as `R-IMPACT-009` does:
 
 ## What this document does not cover
 
-The merge-tracking data store (`merge-tracker`/`merge-tracker-ui`,
-`P-MERGE-VISIBILITY`) also uses DuckDB, but as a query layer over
-durable, append-only `TrackingRecord` JSON on local disk
-(`.hotdocs/tracking/`), queried via core `read_json` — no `yaml` or
-`duckpgq` extension, no spec-corpus frontmatter involved. That's a
-different shape of problem (accumulating history across runs vs.
-recomputing a snapshot fresh every run) with a different persistence
-answer, specified in full in `specs/components/merge-tracker/` and
-`specs/components/merge-tracker-ui/`, not here.
+`P-MERGE-VISIBILITY`'s own component, `provenance-tracker-ui` (formerly
+`merge-tracker-ui`, `D88`), does not use DuckDB at all since `D154`: it
+calls `provenance-tracker`'s `check_readiness` in Python and reads
+`corpus-graph.json` and `.hotdocs/attempts/` as plain JSON at build
+time, specified in full in `specs/components/provenance-tracker-ui/`,
+not here.
 
 ## Change log
 

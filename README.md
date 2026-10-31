@@ -38,7 +38,7 @@ one ready/not-ready verdict before committing directly.
 interactive graph UI answer "is everything ready" at any point, for a
 given blast radius or the whole corpus.
 
-**Twenty of those components have real code**, and the central claim
+**Twenty-two of those components have real code**, and the central claim
 this repo exists to test — that a real generation pipeline can
 cold-regenerate a component from its spec, verified, with no human
 hand-writing the result — is no longer theoretical:
@@ -55,7 +55,8 @@ hand-writing the result — is no longer theoretical:
   `provenance-checker`, `docs-site-renderer`, `test-author`,
   `verifier-orchestrator`, `spec-bundle-assembler`,
   `provenance-tracker`, `provenance-writer`,
-  `decision-drift-detector`, `review-packet-builder` — cold-generated,
+  `decision-drift-detector`, `review-packet-builder`,
+  `spec-completeness-assistant`, `provenance-tracker-ui` — cold-generated,
   not hand-written: a
   real model call, through a real `generator`
   dispatching through a real `llm-endpoint`, from each component's own
@@ -104,10 +105,17 @@ hand-writing the result — is no longer theoretical:
   broke generated tests across several separate rounds before being
   designed out. Full account in
   `verification/review-packet-builder/BOOTSTRAP.md`.
-- `component-gate-runner`, `provenance-tracker-ui`, and
-  `spec-completeness-assistant` are fully specced but **not yet
-  regenerated** — the next real components this corpus's own
-  methodology needs to build for itself, now that every one of their
+  `spec-completeness-assistant` (`D155`–`D157`, `D160`) and
+  `provenance-tracker-ui` (`D154`, `D161`) both land clean, at
+  `mutation_score` 0.81 and 0.95. Building them also exposed a hang in
+  `verifier-orchestrator`'s own mutation gate — a mutant that never
+  terminated, with no timeout to stop it — fixed there first
+  (`D158`/`D159`). Each component's last gap was the same one three
+  earlier components had: an untested CLI. Full accounts in each
+  component's `BOOTSTRAP.md`.
+- `component-gate-runner` is fully specced but **not yet
+  regenerated** — the last real component this corpus's own
+  methodology needs to build for itself, now that every one of its
   own dependencies exists.
 
 Once that real chain existed, the obvious next question was testable
