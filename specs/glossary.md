@@ -20,6 +20,14 @@ split.
   reimplemented the same strip-the-prefix logic, and a real generated
   candidate (`provenance-checker`) got it wrong for exactly that
   reason, silently treating every real hit as a miss.
+- **Var environment name** (`D164`) — a `VAR-<NAME>` declaration's
+  runtime value is read from the process environment variable
+  `VAR_<NAME>`: the same id with every hyphen replaced by an underscore
+  (`VAR-LICENSE-CORPUS-PATH` is read as `VAR_LICENSE_CORPUS_PATH`).
+  Unset or empty means absent. No other source is consulted — not the
+  hyphenated name, not the declaration file under `specs/vars/`, which
+  never holds a value. The one exception is `VAR-ANTHROPIC-API-KEY`,
+  read as `ANTHROPIC_API_KEY`, as its own declaration states.
 - **Spec bundle** — the full set of files a generation or verification step
   needs for one component: `component.md` + `requirements/` + `interface/` +
   `constraints.md` + depended-upon components' `interface/` directories +

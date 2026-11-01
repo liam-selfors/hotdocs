@@ -317,3 +317,31 @@ def test_ac_verify_016_hanging_mutant_times_out_and_counts_killed(repo_root):
     assert report.mutation_score == 1.0
     assert report.overall == "pass"
     assert elapsed < 60
+
+
+def test_ac_verify_017_gate_version_readable_without_verify():
+    # D163: a provenance key names this gate's version without running it.
+    import verifier_orchestrator
+
+    assert verifier_orchestrator.GATE_VERSION == "verifier-orchestrator@2.0.0"
+
+
+def test_ac_verify_018_lettered_criterion_id_kept_exactly(repo_root):
+    # D163: AC-FOO-003b must never become AC-FOO-003B.
+    lettered = acceptance_md(
+        "AC-FOO-003b", "R-FOO-002", "generated-test",
+        "Given the component\nWhen do_the_thing runs\nThen it returns a value",
+    )
+    write_foo(repo_root, extra_acceptance={"AC-FOO-003b.md": lettered})
+    calls = []
+
+    def test_author(bundle):
+        calls.append(bundle)
+        return {"model_call_error": None, "file": {"content": WORKING_TEST_SOURCE}}
+
+    report = verify("comp-foo", repo_root, test_author=test_author)
+    ids = {c["id"] for c in report.criteria}
+    assert "AC-FOO-003b" in ids
+    assert "AC-FOO-003B" not in ids
+    get = lambda b, k: b.get(k) if isinstance(b, dict) else getattr(b, k)
+    assert [get(b, "criterion_id") for b in calls] == ["AC-FOO-003b"]

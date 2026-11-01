@@ -24,7 +24,12 @@ here. `notified` is `(flagged) OR (any match's risk_tier == "high")`, **and**
 severity split `license-scanner` uses (R-LICENSE-003), not a second,
 independently-designed mechanism. `notified` reflects whether a
 notification was **due**, from those preconditions alone — never
-whether it was actually delivered. `notification_delivery_error` is
+whether it was actually delivered. Each match's `file` is that file's path relative to `repo_root`, with
+`/` separators — in the precommit form too, relative to `--repo-root`.
+A path given to `scan_files` directly, with no `repo_root`, is reported
+exactly as given. `notification_delivery_error` is
 `{category, message}` or `null` (`category` one of `network`/`auth`/
-`timeout`), populated only when `notified` is `true` and the webhook
+`timeout`: `auth` for an HTTP 401 or 403, `timeout` for a call that
+timed out, `network` for every other failure, other HTTP statuses
+included), populated only when `notified` is `true` and the webhook
 call itself failed (`R-SECRET-004`); it never affects `flagged`.

@@ -80,13 +80,9 @@ See `constraints.md`.
 
 ## Change log
 
-Full narrative for each entry lives in its own `specs/decisions/D<N>.md`
-— this log is a terse pointer index, not a restatement.
-
 - Initial draft; first real hand-authored bootstrap implementation
   (`repo_root`/`llm_backend` params).
-- `D35`: regenerated `llm-endpoint`; gained `_as_dict()`. `D46`: a
-  self-regeneration attempt failed to import, not swapped in.
+- `D35`: gained `_as_dict()`.
 - `D37`: `R-GEN-013`, `dependency_usage` added. `PROMPT_VERSION` → `v2`.
 - `D38`/`D39`: per-call nonce; cache only non-empty results.
   `PROMPT_VERSION` → `v3`, `GATE_VERSION` → `generator@1.1.0`.
@@ -103,3 +99,5 @@ Full narrative for each entry lives in its own `specs/decisions/D<N>.md`
   dependency loading (a sealed one at its `source_path`) and
   dual-access on a dependency's top-level return. `v8`,
   `generator@1.5.0`.
+- `D165`: strips a redundant `<component>/` path prefix
+  (`R-GEN-015`); `GATE_VERSION` → `generator@1.6.0`.

@@ -2,6 +2,7 @@
 
 ```
 verify(component_id: str, repo_root: Path, judge=None, test_author=None) -> VerificationReport
+GATE_VERSION: str  # "verifier-orchestrator@2.0.0" (R-VERIFY-015)
 ```
 
 `judge`/`test_author` are the glossary's "Injected `judge`/`test_author`

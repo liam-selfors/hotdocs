@@ -82,32 +82,17 @@ established for `judge`.
 - `D27`: added `failure_detail` (`R-VERIFY-012`) to `criteria[]` for
   `compiled`/`generated-test` failures, mirroring `llm-judge`'s
   `rationale`.
-- `D84`: `R-VERIFY-004` clarified as one-directional — an extra,
-  undocumented public name is never drift on its own, found by a real
-  candidate's false-positive set-equality implementation.
-- `D85`: `R-VERIFY-012` clarified that `failure_detail.expected`/
-  `.actual` must be their original Python type, not a raw string,
-  found by the same real candidate leaving them as unparsed text.
-- `D119`: `depends_on` gains `comp-spec-bundle-assembler` — the real
-  candidate had never implemented `R-VERIFY-009`'s own existing
-  "pass exactly the `CriterionBundle` spec-bundle-assembler produces"
-  requirement, instead building a second, independent, narrower
-  `CriterionBundle` with no `dependency_interfaces` at all. Found only
-  once every dependency-shape-guessing test-authoring failure this
-  session traced back to this one, silent gap. `R-VERIFY-009` now
-  states the prohibition explicitly. Cold-regenerated directly,
-  validated against the existing hand-maintained suite plus one new
-  test proving real dependency interface text now flows through.
-- `D120`: `R-VERIFY-013` — every dynamically loaded module MUST be
-  cached by `(repo_root, module_name)`, never `module_name` alone —
-  found once the regenerated candidate's own `load_component_module`
-  cached a bare module name across two different `repo_root`s in the
-  same pytest session, producing a stale-module regression on
-  `AC-VERIFY-004`/`005` despite the interface-drift check's own logic
-  being correct. The identical bug class `R-TRACK-011` already closed
-  for `provenance-tracker`. New `AC-VERIFY-014`.
+- `D84`: `R-VERIFY-004` — interface drift is one-directional.
+- `D85`: `R-VERIFY-012` — `failure_detail.expected`/`.actual` keep
+  their original Python type.
+- `D119`: `R-VERIFY-009` — pass exactly the `CriterionBundle`
+  `spec-bundle-assembler` produces; `depends_on` gains it.
+- `D120`: `R-VERIFY-013` — cache loaded modules by `(repo_root,
+  module_name)`. New `AC-VERIFY-014`.
 - `D124`: `R-VERIFY-006` — `mutation_score` is a union across all of a
   component's `generated-test` criteria, never a per-criterion average.
   New `AC-VERIFY-015`.
 - `D158`: `R-VERIFY-014` — every test run gets a timeout; a timed-out
   mutant counts as killed. New `AC-VERIFY-016`.
+- `D163`: `R-VERIFY-015` exposes `GATE_VERSION`; `R-VERIFY-016` keeps
+  a lettered criterion id (`AC-FOO-003b`) exactly as written.

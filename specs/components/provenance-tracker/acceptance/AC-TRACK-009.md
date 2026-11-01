@@ -17,10 +17,21 @@ When check_readiness is called
 Then every component under specs/components/ is checked via
   provenance-checker, and the report's scope is whole-corpus
 
-Given a provenance-checker hit carrying a failing verification_report
-  or a blocking scan result
+Given a provenance-checker hit carrying a verification_report whose
+  requirement_results is {"R-FOO-001": "pass", "R-FOO-002": "fail"}
 When check_readiness is called
-Then that component is reported as not ready, with the specific
-  failure named, and no call is made to component-gate-runner to
-  attempt a fresh generation
+Then that component is reported as not ready, and its
+  not_ready_reasons entry contains the component id, "verification",
+  and "R-FOO-002", and no call is made to component-gate-runner
+
+Given a provenance-checker hit with a passing verification_report but
+  a license_scan whose blocked is true
+When check_readiness is called
+Then that component's not_ready_reasons entry contains "license_scan"
+
+Given a faked current_provenance_key returning spec_bundle_hash
+  "sha256:k1" and gate_versions {"verifier": "v@1"}
+When check_readiness is called
+Then check_provenance received exactly "sha256:k1" and
+  {"verifier": "v@1"} for every component it checked
 ```

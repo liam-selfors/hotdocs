@@ -1,8 +1,5 @@
-from __future__ import annotations
-
 import argparse
 import ast
-import dataclasses
 import importlib.util
 import inspect
 import json
@@ -14,544 +11,605 @@ import subprocess
 import sys
 import tempfile
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 
+GATE_VERSION = "verifier-orchestrator@2.0.0"
 
-MUTATION_SCORE_BAR = 0.8
+MUTATION_SCORE_THRESHOLD = 0.8
+BASELINE_TIMEOUT_FLOOR = 10.0
+
+_HEADING_RE = re.compile(r'^#\s*(AC-[\w-]+)', re.MULTILINE)
+_COVERS_RE = re.compile(r'Covers:\s*\**\s*(.+)', re.IGNORECASE)
+_KIND_RE = re.compile(r'Kind:\s*\**\s*`?(compiled|generated-test|llm-judge)`?', re.IGNORECASE)
+_RID_RE = re.compile(r'R-[A-Za-z0-9][\w-]*')
+_SIG_RE = re.compile(r'^([A-Za-z_][A-Za-z0-9_]*)\(([^)]*)\)(?:\s*->\s*.+)?\s*$')
+
+_MODULE_CACHE = {}
 
 
 @dataclass
 class VerificationReport:
     component_id: str
-    criteria: list = field(default_factory=list)
-    requirement_results: dict = field(default_factory=dict)
-    interface_drift: bool = False
-    mutation_score: float = 1.0
-    overall: str = "fail"
+    criteria: list
+    requirement_results: dict
+    interface_drift: bool
+    mutation_score: float
+    overall: str
 
+    def to_dict(self):
+        return {
+            "component_id": self.component_id,
+            "criteria": self.criteria,
+            "requirement_results": self.requirement_results,
+            "interface_drift": self.interface_drift,
+            "mutation_score": self.mutation_score,
+            "overall": self.overall,
+        }
 
-_MODULE_CACHE: dict = {}
+    def __getitem__(self, key):
+        return self.to_dict()[key]
+
+    def get(self, key, default=None):
+        return self.to_dict().get(key, default)
 
 
 def _get(obj, key, default=None):
+    if obj is None:
+        return default
     if isinstance(obj, dict):
         return obj.get(key, default)
     return getattr(obj, key, default)
 
 
-def _slug(component_id: str) -> str:
+def _slug(component_id):
     return component_id[len("comp-"):] if component_id.startswith("comp-") else component_id
 
 
-def _read_text(path: Path) -> str:
-    try:
-        return path.read_text()
-    except OSError:
-        return ""
-
-
-def _load_module(repo_root: Path, module_dir: Path, module_name: str):
-    key = (str(repo_root), module_name)
-    if key in _MODULE_CACHE:
-        return _MODULE_CACHE[key]
+# A module cached under its own module_name must still be keyed by repo_root too,
+# since two different repos may use the same component slug in the same process.
+def _load_module(repo_root, module_dir, module_name):
+    key = (str(Path(repo_root).resolve()), module_name)
+    cached = _MODULE_CACHE.get(key)
+    if cached is not None:
+        return cached
+    module_dir = Path(module_dir)
+    flat_file = module_dir / f"{module_name}.py"
     pkg_init = module_dir / module_name / "__init__.py"
-    if pkg_init.exists():
-        file_path = pkg_init
-        search_locations = [str(module_dir / module_name)]
+    if flat_file.is_file():
+        spec = importlib.util.spec_from_file_location(module_name, flat_file)
+    elif pkg_init.is_file():
+        spec = importlib.util.spec_from_file_location(
+            module_name, pkg_init, submodule_search_locations=[str(module_dir / module_name)]
+        )
     else:
-        file_path = module_dir / f"{module_name}.py"
-        search_locations = None
-    spec = importlib.util.spec_from_file_location(
-        module_name, file_path, submodule_search_locations=search_locations
-    )
+        raise FileNotFoundError(f"module '{module_name}' not found under {module_dir}")
     module = importlib.util.module_from_spec(spec)
-    # Must be registered before exec_module: dataclasses defined in the
-    # loaded module resolve sys.modules[cls.__module__] at class-body time.
+    # Must register before exec_module: dataclasses defined in the loaded module
+    # resolve sys.modules[cls.__module__] while their class body executes.
     sys.modules[module_name] = module
     spec.loader.exec_module(module)
     _MODULE_CACHE[key] = module
     return module
 
 
-def _load_criterion_compiler(repo_root: Path):
-    return _load_module(repo_root, repo_root / "pipeline" / "criterion-compiler", "criterion_compiler")
+def _load_component_module(repo_root, slug):
+    module_name = slug.replace("-", "_")
+    module_dir = Path(repo_root) / "gen" / slug
+    return _load_module(repo_root, module_dir, module_name)
 
 
-def _load_spec_bundle_assembler(repo_root: Path):
-    return _load_module(repo_root, repo_root / "gen" / "spec-bundle-assembler", "spec_bundle_assembler")
+def _load_criterion_compiler(repo_root):
+    module_dir = Path(repo_root) / "pipeline" / "criterion-compiler"
+    return _load_module(repo_root, module_dir, "criterion_compiler")
 
 
-_ID_RE = re.compile(r"\b(AC-[A-Za-z0-9]+-\d+)\b")
-_COVERS_RE = re.compile(r"(?i)covers\s*:\s*(R-[\w-]+)")
-_KIND_RE = re.compile(r"(?i)kind\s*:\s*(compiled|generated-test|llm-judge)")
+def _load_spec_bundle_assembler(repo_root):
+    module_dir = Path(repo_root) / "gen" / "spec-bundle-assembler"
+    return _load_module(repo_root, module_dir, "spec_bundle_assembler")
 
 
-def _parse_acceptance_file(path: Path) -> dict:
+def _parse_criterion_file(path):
     text = path.read_text()
-    plain = text.replace("*", "")
-    id_m = _ID_RE.search(plain) or _ID_RE.search(path.stem.upper())
-    covers_m = _COVERS_RE.search(plain)
-    kind_m = _KIND_RE.search(plain)
-    return {
-        "id": id_m.group(1) if id_m else path.stem.upper(),
-        "covers": covers_m.group(1) if covers_m else "",
-        "kind": kind_m.group(1).lower() if kind_m else "",
-    }
+    m = _HEADING_RE.search(text)
+    if not m:
+        raise ValueError(f"{path}: no '# AC-...' heading found")
+    criterion_id = m.group(1)
+    cm = _COVERS_RE.search(text)
+    if not cm:
+        raise ValueError(f"{path}: no 'Covers:' field found")
+    covers_raw = cm.group(1).strip().strip("`*").strip()
+    km = _KIND_RE.search(text)
+    if not km:
+        raise ValueError(f"{path}: no 'Kind:' field found")
+    kind = km.group(1).strip().lower()
+    return {"id": criterion_id, "covers": covers_raw, "kind": kind, "file": str(path)}
 
 
-def _criterion_test_filename(criterion_id: str) -> str:
-    return f"test_{criterion_id.lower().replace('-', '_')}.py"
+def _load_criteria(repo_root, slug):
+    acc_dir = Path(repo_root) / "specs" / "components" / slug / "acceptance"
+    files = sorted(acc_dir.glob("*.md"))
+    return [_parse_criterion_file(f) for f in files]
 
 
-def _run_pytest(test_paths, cwd: Path, pythonpath: Path, timeout: float) -> dict:
-    env = dict(os.environ)
+def _run_pytest(test_path, cwd, pythonpath, timeout):
+    env = os.environ.copy()
     env["PYTHONPATH"] = str(pythonpath)
-    cmd = [sys.executable, "-m", "pytest", "-q", "--tb=short"] + [str(p) for p in test_paths]
     start = time.monotonic()
     proc = subprocess.Popen(
-        cmd, cwd=str(cwd), env=env,
-        stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-        text=True, start_new_session=True,
+        [sys.executable, "-m", "pytest", str(test_path), "-q", "--no-header", "-p", "no:cacheprovider"],
+        cwd=str(cwd),
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        start_new_session=True,
     )
-    timed_out = False
     try:
-        out, _ = proc.communicate(timeout=timeout)
+        stdout, stderr = proc.communicate(timeout=timeout)
+        duration = time.monotonic() - start
+        return {
+            "passed": proc.returncode == 0,
+            "output": (stdout or "") + (stderr or ""),
+            "duration": duration,
+            "timed_out": False,
+        }
     except subprocess.TimeoutExpired:
-        timed_out = True
         try:
             os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
-        except ProcessLookupError:
+        except (ProcessLookupError, PermissionError, AttributeError, OSError):
+            proc.kill()
+        try:
+            proc.communicate(timeout=5)
+        except Exception:
             pass
-        out, _ = proc.communicate()
-    duration = time.monotonic() - start
-    passed = (not timed_out) and proc.returncode == 0
-    return {"passed": passed, "output": out or "", "timed_out": timed_out, "duration": duration}
+        return {"passed": False, "output": "", "duration": timeout, "timed_out": True}
 
 
-def _parse_failure_detail(output: str) -> dict:
-    message = ""
-    expected = None
-    actual = None
-    for line in output.splitlines():
-        s = line.strip()
-        if s.startswith("E "):
-            message = s[2:].strip()
-            m = re.match(r"assert\s+(.+?)\s*==\s*(.+)$", message)
-            if m:
-                try:
-                    actual = ast.literal_eval(m.group(1).strip())
-                    expected = ast.literal_eval(m.group(2).strip())
-                except Exception:
-                    pass
-            break
-    if not message:
-        lines = [l for l in output.splitlines() if l.strip()]
-        message = lines[-1].strip() if lines else "test failed"
+def _try_literal(text):
+    try:
+        return ast.literal_eval(text.strip())
+    except Exception:
+        return None
+
+
+def _parse_pytest_failure(output, timed_out, timeout):
+    if timed_out:
+        return {"message": f"test run timed out after {timeout:.1f}s", "expected": None, "actual": None}
+    e_lines = [ln.strip() for ln in output.splitlines() if re.match(r'^E\s', ln.strip())]
+    assert_line = next((ln for ln in e_lines if "assert" in ln), None)
+    chosen = assert_line or (e_lines[0] if e_lines else None)
+    message = "test failed"
+    expected = actual = None
+    if chosen:
+        content = re.sub(r'^E\s+', '', chosen).strip()
+        message = content
+        m = re.match(r'assert\s+(.+?)\s*(==|!=)\s*(.+)$', content)
+        if m:
+            left_raw, _op, right_raw = m.groups()
+            actual = _try_literal(left_raw)
+            expected = _try_literal(right_raw)
+    else:
+        tail = [ln for ln in output.splitlines() if ln.strip()]
+        if tail:
+            message = tail[-1].strip()
     return {"message": message, "expected": expected, "actual": actual}
 
 
-def _process_compiled(component_id, repo_root, gen_dir, criteria_meta, verification_dir):
-    compiled_ids = [c["id"] for c in criteria_meta if c["kind"] == "compiled"]
-    results = {}
-    if not compiled_ids:
-        return results
-    cc = _load_criterion_compiler(repo_root)
-    report = cc.compile(component_id, repo_root, target="pytest", out_dir=verification_dir / "compiled")
-    outputs = _get(report, "outputs", [])
-    by_id = {}
-    for out in outputs:
-        by_id[_get(out, "criterion_id")] = out
-    for cid in compiled_ids:
-        out = by_id.get(cid)
-        if out is None:
-            results[cid] = {
-                "result": "fail",
-                "failure_detail": {
-                    "message": "criterion-compiler produced no output for this criterion",
-                    "expected": None, "actual": None,
-                },
-            }
-            continue
-        status = _get(out, "status")
-        if status != "compiled":
-            results[cid] = {
-                "result": "fail",
-                "failure_detail": {
-                    "message": _get(out, "message") or "compile error",
-                    "expected": None, "actual": None,
-                },
-            }
-            continue
-        file_rel = _get(out, "file")
-        test_path = Path(file_rel)
-        if not test_path.is_absolute():
-            test_path = repo_root / test_path
-        # Import search path scoped to gen/<component>/ itself (R-VERIFY-001):
-        # a broader ancestor resolves the emitted `import <module_name>` as
-        # an empty implicit namespace package instead of the real module.
-        run = _run_pytest([test_path], cwd=gen_dir, pythonpath=gen_dir, timeout=10.0)
-        if run["passed"]:
-            results[cid] = {"result": "pass"}
-        else:
-            results[cid] = {"result": "fail", "failure_detail": _parse_failure_detail(run["output"])}
-    return results
+def _compile_criteria(repo_root, component_id):
+    criterion_compiler = _load_criterion_compiler(repo_root)
+    report = criterion_compiler.compile(component_id, repo_root)
+    outputs = _get(report, "outputs", []) or []
+    result = {}
+    for o in outputs:
+        cid = _get(o, "criterion_id")
+        if cid is not None:
+            result[cid] = o
+    return result
 
 
-def _process_generated_test(component_id, repo_root, gen_dir, criteria_meta, verification_dir, test_author, sba):
-    gt_meta = [c for c in criteria_meta if c["kind"] == "generated-test"]
-    results = {}
-    test_files = []
-    gen_test_dir = verification_dir / "generated-test"
-    for c in gt_meta:
-        cid = c["id"]
-        cache_path = gen_test_dir / _criterion_test_filename(cid)
-        test_authoring_meta = None
-        if cache_path.exists():
-            test_path = cache_path
-        elif test_author is not None:
-            bundle = sba.assemble_criterion(component_id, cid, repo_root)
-            outcome = test_author(bundle)
-            err = _get(outcome, "model_call_error")
-            if err:
-                msg = _get(err, "message")
-                if msg is None:
-                    msg = str(err)
-                results[cid] = {
-                    "result": "fail",
-                    "failure_detail": {"message": str(msg), "expected": None, "actual": None},
-                }
-                continue
-            file_info = _get(outcome, "file")
-            content = _get(file_info, "content")
-            if content is None:
-                results[cid] = {
-                    "result": "fail",
-                    "failure_detail": {
-                        "message": "test_author produced no file content",
-                        "expected": None, "actual": None,
-                    },
-                }
-                continue
-            gen_test_dir.mkdir(parents=True, exist_ok=True)
-            cache_path.write_text(content)
-            test_path = cache_path
-            test_authoring_meta = {
-                "model": _get(outcome, "model"),
-                "seed": _get(outcome, "seed"),
-                "prompt_version": _get(outcome, "prompt_version"),
-                "cache_hit": _get(outcome, "cache_hit"),
-            }
-        else:
-            results[cid] = {
-                "result": "fail",
-                "failure_detail": {
-                    "message": "no cached test and no test_author configured",
-                    "expected": None, "actual": None,
-                },
-            }
-            continue
-        run = _run_pytest([test_path], cwd=gen_dir, pythonpath=gen_dir, timeout=10.0)
-        entry = {"result": "pass"} if run["passed"] else {
-            "result": "fail", "failure_detail": _parse_failure_detail(run["output"])
+def _run_compiled_criterion(c, compile_outputs, gen_dir, repo_root, timeout):
+    entry = {"id": c["id"], "covers": c["covers"], "kind": "compiled"}
+    out = compile_outputs.get(c["id"])
+    if out is None:
+        entry["result"] = "fail"
+        entry["failure_detail"] = {
+            "message": f"criterion-compiler produced no output for {c['id']}",
+            "expected": None,
+            "actual": None,
         }
-        if test_authoring_meta is not None:
-            entry["test_authoring"] = test_authoring_meta
-        results[cid] = entry
-        test_files.append(test_path)
-    return results, test_files
+        return entry, None
+    status = _get(out, "status")
+    if status != "compiled":
+        entry["result"] = "fail"
+        entry["failure_detail"] = {
+            "message": _get(out, "message") or f"compilation failed for {c['id']}",
+            "expected": None,
+            "actual": None,
+        }
+        return entry, None
+    file_rel = _get(out, "file")
+    test_path = Path(repo_root) / file_rel
+    run = _run_pytest(test_path, cwd=gen_dir, pythonpath=gen_dir, timeout=timeout)
+    if run["passed"]:
+        entry["result"] = "pass"
+        return entry, run["duration"]
+    entry["result"] = "fail"
+    entry["failure_detail"] = _parse_pytest_failure(run["output"], run["timed_out"], timeout)
+    return entry, run["duration"]
 
 
-def _normalize_judge_result(raw) -> str:
-    if isinstance(raw, bool):
-        return "pass" if raw else "fail"
-    if isinstance(raw, str):
-        r = raw.strip().lower()
-        if r in ("pass", "passed", "true"):
+def _run_generated_test_criterion(c, component_id, slug, repo_root, gen_dir, test_author, timeout):
+    criterion_id = c["id"]
+    entry = {"id": criterion_id, "covers": c["covers"], "kind": "generated-test"}
+    test_dir = Path(repo_root) / "verification" / slug / "generated-test"
+    filename = f"test_{criterion_id.lower().replace('-', '_')}.py"
+    test_path = test_dir / filename
+    test_authoring = None
+
+    if not test_path.is_file():
+        if test_author is None:
+            entry["result"] = "fail"
+            entry["failure_detail"] = {
+                "message": "no cached test and no test_author configured",
+                "expected": None,
+                "actual": None,
+            }
+            return entry, None, None
+        assembler = _load_spec_bundle_assembler(repo_root)
+        bundle = assembler.assemble_criterion(component_id, criterion_id, repo_root)
+        outcome = test_author(bundle)
+        model_call_error = _get(outcome, "model_call_error")
+        test_authoring = {
+            "model": _get(outcome, "model"),
+            "seed": _get(outcome, "seed"),
+            "prompt_version": _get(outcome, "prompt_version"),
+            "cache_hit": _get(outcome, "cache_hit"),
+        }
+        if model_call_error:
+            entry["result"] = "fail"
+            entry["failure_detail"] = {
+                "message": str(model_call_error),
+                "expected": None,
+                "actual": None,
+            }
+            entry["test_authoring"] = test_authoring
+            return entry, None, None
+        file_info = _get(outcome, "file")
+        content = _get(file_info, "content") or ""
+        test_dir.mkdir(parents=True, exist_ok=True)
+        test_path.write_text(content)
+
+    run = _run_pytest(test_path, cwd=gen_dir, pythonpath=gen_dir, timeout=timeout)
+    if run["passed"]:
+        entry["result"] = "pass"
+    else:
+        entry["result"] = "fail"
+        entry["failure_detail"] = _parse_pytest_failure(run["output"], run["timed_out"], timeout)
+    if test_authoring is not None:
+        entry["test_authoring"] = test_authoring
+    return entry, test_path, run["duration"]
+
+
+def _normalize_result(value):
+    if isinstance(value, bool):
+        return "pass" if value else "fail"
+    if isinstance(value, str):
+        v = value.strip().lower()
+        if v in ("pass", "fail", "skipped"):
+            return v
+        if v in ("true", "yes"):
             return "pass"
-        if r in ("fail", "failed", "false"):
+        if v in ("false", "no"):
             return "fail"
     return "fail"
 
 
-def _interpret_judge_outcome(outcome):
-    if isinstance(outcome, dict):
-        if "result" in outcome:
-            raw = outcome.get("result")
-        elif "verdict" in outcome:
-            raw = outcome.get("verdict")
-        else:
-            raw = outcome
-        rationale = outcome.get("rationale")
-    elif hasattr(outcome, "result") or hasattr(outcome, "verdict"):
-        raw = getattr(outcome, "result", None)
-        if raw is None:
-            raw = getattr(outcome, "verdict", None)
-        rationale = getattr(outcome, "rationale", None)
-    else:
-        raw = outcome
-        rationale = None
-    return _normalize_judge_result(raw), rationale
+def _judge_outcome_to_result(outcome):
+    if isinstance(outcome, (bool, str, int, float)):
+        return _normalize_result(outcome), None
+    result = _get(outcome, "result")
+    if result is None:
+        result = _get(outcome, "verdict")
+    rationale = _get(outcome, "rationale")
+    return _normalize_result(result), rationale
 
 
-def _process_llm_judge(component_id, repo_root, criteria_meta, judge, sba):
-    lj_meta = [c for c in criteria_meta if c["kind"] == "llm-judge"]
-    results = {}
-    for c in lj_meta:
-        cid = c["id"]
-        if judge is None:
-            results[cid] = {"result": "skipped", "rationale": None}
-            continue
-        bundle = sba.assemble_criterion(component_id, cid, repo_root)
-        outcome = judge(bundle)
-        result, rationale = _interpret_judge_outcome(outcome)
-        results[cid] = {"result": result, "rationale": rationale}
-    return results
+def _run_llm_judge_criterion(c, component_id, repo_root, judge):
+    criterion_id = c["id"]
+    entry = {"id": criterion_id, "covers": c["covers"], "kind": "llm-judge"}
+    if judge is None:
+        entry["result"] = "skipped"
+        entry["rationale"] = None
+        return entry
+    assembler = _load_spec_bundle_assembler(repo_root)
+    bundle = assembler.assemble_criterion(component_id, criterion_id, repo_root)
+    outcome = judge(bundle)
+    result, rationale = _judge_outcome_to_result(outcome)
+    entry["result"] = result
+    entry["rationale"] = rationale
+    return entry
 
 
-_SIG_RE = re.compile(r"^([A-Za-z_]\w*)\(([^)]*)\)")
+def _project_requirement_results(criteria_entries):
+    by_req = {}
+    for entry in criteria_entries:
+        rids = _RID_RE.findall(entry.get("covers") or "")
+        result = entry.get("result")
+        for rid in rids:
+            by_req.setdefault(rid, []).append(result)
+    return {
+        rid: ("pass" if all(r == "pass" for r in results) else "fail")
+        for rid, results in by_req.items()
+    }
 
 
-def _parse_params(params_str: str) -> list:
-    tokens = []
-    current = ""
+def _split_params(params_str):
+    parts = []
     depth = 0
+    current = ""
     for ch in params_str:
-        if ch in "[(":
+        if ch in "([{":
             depth += 1
-        elif ch in "])":
+        elif ch in ")]}":
             depth -= 1
         if ch == "," and depth == 0:
-            tokens.append(current)
+            parts.append(current)
             current = ""
         else:
             current += ch
     if current.strip():
-        tokens.append(current)
-    params = []
-    for t in tokens:
-        t = t.strip()
-        if not t or t in ("*", "/"):
-            continue
-        t = t.lstrip("*")
-        name = t.split(":")[0].split("=")[0].strip()
-        if name:
-            params.append(name)
-    return params
+        parts.append(current)
+    return [p.strip() for p in parts if p.strip()]
 
 
-def _parse_library_signatures(text: str) -> dict:
-    sigs = {}
-    in_fence = False
-    for line in text.splitlines():
-        if line.strip().startswith("```"):
-            in_fence = not in_fence
+def _param_base_name(param):
+    p = param.strip().lstrip("*")
+    name = re.split(r'[:=]', p, 1)[0].strip()
+    return name
+
+
+def _extract_documented_callables(markdown_text):
+    callables = {}
+    in_code = False
+    for line in markdown_text.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("```"):
+            in_code = not in_code
             continue
-        if not in_fence:
+        if not in_code:
             continue
-        m = _SIG_RE.match(line.strip())
+        m = _SIG_RE.match(stripped)
         if m:
-            sigs[m.group(1)] = _parse_params(m.group(2))
-    return sigs
+            name, params_str = m.group(1), m.group(2)
+            params = [_param_base_name(p) for p in _split_params(params_str)]
+            params = [p for p in params if p]
+            callables[name] = params
+    return callables
 
 
-def _cli_has_commands(cli_text: str) -> bool:
-    in_fence = False
-    for line in cli_text.splitlines():
-        if line.strip().startswith("```"):
-            in_fence = not in_fence
-            continue
-        if in_fence and line.strip():
+def _check_interface_drift(repo_root, slug, component_module):
+    iface_dir = Path(repo_root) / "specs" / "components" / slug / "interface"
+    documented = {}
+    for fname in ("library.md", "cli.md"):
+        fpath = iface_dir / fname
+        if fpath.is_file():
+            documented.update(_extract_documented_callables(fpath.read_text()))
+    for name, params in documented.items():
+        target = getattr(component_module, name, None)
+        if target is None or not callable(target):
+            return True
+        try:
+            sig = inspect.signature(target)
+        except (TypeError, ValueError):
+            return True
+        real_params = list(sig.parameters.keys())
+        if real_params != params:
             return True
     return False
 
 
-def _real_params(func) -> list:
-    try:
-        sig = inspect.signature(func)
-    except (TypeError, ValueError):
-        return None
-    return [p.name for p in sig.parameters.values()]
-
-
-def _check_interface_drift(module, library_text: str, cli_text: str) -> bool:
-    drift = False
-    for name, params in _parse_library_signatures(library_text).items():
-        func = getattr(module, name, None)
-        if func is None or not callable(func):
-            drift = True
-            continue
-        real = _real_params(func)
-        if real is None or real != params:
-            drift = True
-    if _cli_has_commands(cli_text) and not callable(getattr(module, "main", None)):
-        drift = True
-    return drift
-
-
-_ARITH_SWAP = {ast.Add: ast.Sub, ast.Sub: ast.Add, ast.Mult: ast.Div, ast.Div: ast.Mult}
-_COMPARE_SWAP = {
+_CMP_SWAP = {
     ast.Eq: ast.NotEq, ast.NotEq: ast.Eq,
     ast.Lt: ast.GtE, ast.GtE: ast.Lt,
     ast.Gt: ast.LtE, ast.LtE: ast.Gt,
     ast.Is: ast.IsNot, ast.IsNot: ast.Is,
     ast.In: ast.NotIn, ast.NotIn: ast.In,
 }
+_BOOL_SWAP = {ast.And: ast.Or, ast.Or: ast.And}
+_ARITH_SWAP = {
+    ast.Add: ast.Sub, ast.Sub: ast.Add,
+    ast.Mult: ast.Div, ast.Div: ast.Mult,
+    ast.FloorDiv: ast.Mod, ast.Mod: ast.FloorDiv,
+}
 
 
-def _mutation_sites(tree) -> list:
+class _MutationTransformer(ast.NodeTransformer):
+    def __init__(self, target_index):
+        self.target_index = target_index
+        self.index = 0
+        self.applied = False
+
+    def _consume(self, node, build):
+        current = self.index
+        self.index += 1
+        if current == self.target_index:
+            self.applied = True
+            return build()
+        return node
+
+    def visit_Compare(self, node):
+        self.generic_visit(node)
+        if len(node.ops) == 1 and type(node.ops[0]) in _CMP_SWAP:
+            op_cls = _CMP_SWAP[type(node.ops[0])]
+
+            def build():
+                node.ops = [op_cls()]
+                return node
+
+            return self._consume(node, build)
+        return node
+
+    def visit_BoolOp(self, node):
+        self.generic_visit(node)
+        if type(node.op) in _BOOL_SWAP:
+            op_cls = _BOOL_SWAP[type(node.op)]
+
+            def build():
+                node.op = op_cls()
+                return node
+
+            return self._consume(node, build)
+        return node
+
+    def visit_BinOp(self, node):
+        self.generic_visit(node)
+        if type(node.op) in _ARITH_SWAP:
+            op_cls = _ARITH_SWAP[type(node.op)]
+
+            def build():
+                node.op = op_cls()
+                return node
+
+            return self._consume(node, build)
+        return node
+
+    def visit_Constant(self, node):
+        if isinstance(node.value, bool):
+            def build():
+                node.value = not node.value
+                return node
+
+            return self._consume(node, build)
+        return node
+
+
+def _count_mutation_sites(tree):
+    counter = _MutationTransformer(-1)
+    counter.visit(tree)
+    return counter.index
+
+
+def _mutant_is_killed(gen_dir, rel, idx, generated_test_files, timeout):
+    target_file = Path(gen_dir) / rel
+    source = target_file.read_text()
+    tree = ast.parse(source)
+    transformer = _MutationTransformer(idx)
+    mutated_tree = transformer.visit(tree)
+    if not transformer.applied:
+        return False
+    ast.fix_missing_locations(mutated_tree)
+    mutated_source = ast.unparse(mutated_tree)
+    with tempfile.TemporaryDirectory() as tmp:
+        sandbox = Path(tmp) / "sandbox"
+        shutil.copytree(gen_dir, sandbox)
+        (sandbox / rel).write_text(mutated_source)
+        for test_file in generated_test_files:
+            sandbox_test = sandbox / test_file.name
+            sandbox_test.write_text(test_file.read_text())
+            run = _run_pytest(sandbox_test, cwd=sandbox, pythonpath=sandbox, timeout=timeout)
+            sandbox_test.unlink()
+            if not run["passed"]:
+                return True
+    return False
+
+
+def _compute_mutation_score(gen_dir, generated_test_files, baseline_duration):
+    if not generated_test_files:
+        return 1.0
+    py_files = sorted(p for p in Path(gen_dir).rglob("*.py") if p.is_file())
     sites = []
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Compare) and any(type(op) in _COMPARE_SWAP for op in node.ops):
-            sites.append(node)
-        elif isinstance(node, ast.BoolOp):
-            sites.append(node)
-        elif isinstance(node, ast.BinOp) and type(node.op) in _ARITH_SWAP:
-            sites.append(node)
-        elif isinstance(node, ast.Constant) and isinstance(node.value, bool):
-            sites.append(node)
-    return sites
-
-
-def _apply_mutation(node) -> None:
-    if isinstance(node, ast.Compare):
-        node.ops = [_COMPARE_SWAP.get(type(op), type(op))() for op in node.ops]
-    elif isinstance(node, ast.BoolOp):
-        node.op = ast.Or() if isinstance(node.op, ast.And) else ast.And()
-    elif isinstance(node, ast.BinOp):
-        node.op = _ARITH_SWAP[type(node.op)]()
-    elif isinstance(node, ast.Constant):
-        node.value = not node.value
-
-
-def _module_target_files(gen_dir: Path, module_name: str) -> list:
-    pkg_dir = gen_dir / module_name
-    if (pkg_dir / "__init__.py").exists():
-        return sorted(pkg_dir.rglob("*.py"))
-    flat = gen_dir / f"{module_name}.py"
-    return [flat] if flat.exists() else []
-
-
-def _compute_mutation_score(gen_dir: Path, module_name: str, test_files: list, timeout: float) -> float:
-    targets = _module_target_files(gen_dir, module_name)
-    sites = []
-    for f in targets:
-        tree = ast.parse(f.read_text())
-        for i in range(len(_mutation_sites(tree))):
-            sites.append((f, i))
+    for py_file in py_files:
+        try:
+            tree = ast.parse(py_file.read_text())
+        except SyntaxError:
+            continue
+        rel = py_file.relative_to(gen_dir)
+        for i in range(_count_mutation_sites(tree)):
+            sites.append((rel, i))
     if not sites:
         return 1.0
+    timeout = max(BASELINE_TIMEOUT_FLOOR, 10.0 * baseline_duration)
     killed = 0
-    for f, idx in sites:
-        with tempfile.TemporaryDirectory() as tmp:
-            mutant_dir = Path(tmp) / "mutant"
-            shutil.copytree(gen_dir, mutant_dir)
-            rel = f.relative_to(gen_dir)
-            target_file = mutant_dir / rel
-            tree = ast.parse(f.read_text())
-            _apply_mutation(_mutation_sites(tree)[idx])
-            ast.fix_missing_locations(tree)
-            target_file.write_text(ast.unparse(tree))
-            # cwd and PYTHONPATH both point at the mutant copy, never
-            # repo_root, so a test's own relative sys.path entry resolves
-            # to the mutant instead of the original module (D159).
-            run = _run_pytest(test_files, cwd=mutant_dir, pythonpath=mutant_dir, timeout=timeout)
-            if run["timed_out"] or not run["passed"]:
-                killed += 1
+    for rel, idx in sites:
+        if _mutant_is_killed(gen_dir, rel, idx, generated_test_files, timeout):
+            killed += 1
     return killed / len(sites)
 
 
-def verify(component_id: str, repo_root: Path, judge=None, test_author=None) -> VerificationReport:
+def _compute_overall(criteria_entries, interface_drift, mutation_score, has_generated_test):
+    if interface_drift:
+        return "fail"
+    for entry in criteria_entries:
+        if entry["kind"] in ("compiled", "generated-test") and entry["result"] == "fail":
+            return "fail"
+        if entry["kind"] == "llm-judge" and entry["result"] == "fail":
+            return "fail"
+    if has_generated_test and mutation_score < MUTATION_SCORE_THRESHOLD:
+        return "fail"
+    return "pass"
+
+
+def verify(component_id, repo_root, judge=None, test_author=None):
     repo_root = Path(repo_root)
     slug = _slug(component_id)
+    criteria_specs = _load_criteria(repo_root, slug)
     gen_dir = repo_root / "gen" / slug
-    acceptance_dir = repo_root / "specs" / "components" / slug / "acceptance"
-    interface_dir = repo_root / "specs" / "components" / slug / "interface"
-    verification_dir = repo_root / "verification" / slug
 
-    criteria_meta = []
-    if acceptance_dir.exists():
-        for f in sorted(acceptance_dir.glob("*.md")):
-            criteria_meta.append(_parse_acceptance_file(f))
+    compiled_specs = [c for c in criteria_specs if c["kind"] == "compiled"]
+    compile_outputs = _compile_criteria(repo_root, component_id) if compiled_specs else {}
 
-    sba = _load_spec_bundle_assembler(repo_root)
+    criteria_entries = []
+    generated_test_files = []
+    generated_test_durations = []
 
-    compiled_results = _process_compiled(component_id, repo_root, gen_dir, criteria_meta, verification_dir)
-    gt_results, gt_test_files = _process_generated_test(
-        component_id, repo_root, gen_dir, criteria_meta, verification_dir, test_author, sba
-    )
-    lj_results = _process_llm_judge(component_id, repo_root, criteria_meta, judge, sba)
-
-    library_text = _read_text(interface_dir / "library.md")
-    cli_text = _read_text(interface_dir / "cli.md")
-    module_name = slug.replace("-", "_")
-    try:
-        module = _load_module(repo_root, gen_dir, module_name)
-        drift = _check_interface_drift(module, library_text, cli_text)
-    except Exception:
-        drift = True
-
-    if gt_test_files:
-        baseline = _run_pytest(gt_test_files, cwd=gen_dir, pythonpath=gen_dir, timeout=10.0)
-        timeout = max(10.0, 10.0 * baseline["duration"])
-        mutation_score = _compute_mutation_score(gen_dir, module_name, gt_test_files, timeout)
-    else:
-        mutation_score = 1.0
-
-    criteria_out = []
-    for c in criteria_meta:
-        cid, covers, kind = c["id"], c["covers"], c["kind"]
+    for c in criteria_specs:
+        kind = c["kind"]
         if kind == "compiled":
-            r = compiled_results.get(cid) or {
-                "result": "fail",
-                "failure_detail": {"message": "not evaluated", "expected": None, "actual": None},
-            }
+            entry, _duration = _run_compiled_criterion(
+                c, compile_outputs, gen_dir, repo_root, timeout=BASELINE_TIMEOUT_FLOOR
+            )
+            criteria_entries.append(entry)
         elif kind == "generated-test":
-            r = gt_results.get(cid) or {
-                "result": "fail",
-                "failure_detail": {"message": "not evaluated", "expected": None, "actual": None},
-            }
+            entry, test_path, duration = _run_generated_test_criterion(
+                c, component_id, slug, repo_root, gen_dir, test_author, timeout=BASELINE_TIMEOUT_FLOOR
+            )
+            criteria_entries.append(entry)
+            if test_path is not None:
+                generated_test_files.append(test_path)
+                if duration is not None:
+                    generated_test_durations.append(duration)
         elif kind == "llm-judge":
-            r = lj_results.get(cid) or {"result": "skipped", "rationale": None}
+            entry = _run_llm_judge_criterion(c, component_id, repo_root, judge)
+            criteria_entries.append(entry)
         else:
-            r = {
-                "result": "fail",
-                "failure_detail": {"message": f"unrecognized kind '{kind}'", "expected": None, "actual": None},
-            }
-        entry = {"id": cid, "covers": covers, "kind": kind}
-        entry.update(r)
-        criteria_out.append(entry)
+            raise ValueError(f"{c['id']}: unknown criterion kind '{kind}'")
 
-    requirement_pass = {}
-    for entry in criteria_out:
-        cover = entry.get("covers")
-        if not cover:
-            continue
-        ok = entry["result"] == "pass"
-        requirement_pass[cover] = requirement_pass.get(cover, True) and ok
-    requirement_results = {k: ("pass" if v else "fail") for k, v in requirement_pass.items()}
+    try:
+        component_module = _load_component_module(repo_root, slug)
+        interface_drift = _check_interface_drift(repo_root, slug, component_module)
+    except Exception:
+        interface_drift = True
 
-    has_generated_test = any(c["kind"] == "generated-test" for c in criteria_meta)
-    overall_fail = drift
-    for entry in criteria_out:
-        if entry["kind"] in ("compiled", "generated-test") and entry["result"] == "fail":
-            overall_fail = True
-        if entry["kind"] == "llm-judge" and entry["result"] == "fail":
-            overall_fail = True
-    if has_generated_test and mutation_score < MUTATION_SCORE_BAR:
-        overall_fail = True
+    baseline_duration = sum(generated_test_durations) if generated_test_durations else 0.0
+    mutation_score = _compute_mutation_score(gen_dir, generated_test_files, baseline_duration)
+
+    requirement_results = _project_requirement_results(criteria_entries)
+    overall = _compute_overall(
+        criteria_entries, interface_drift, mutation_score, bool(generated_test_files)
+    )
 
     return VerificationReport(
         component_id=component_id,
-        criteria=criteria_out,
+        criteria=criteria_entries,
         requirement_results=requirement_results,
-        interface_drift=drift,
+        interface_drift=interface_drift,
         mutation_score=mutation_score,
-        overall="fail" if overall_fail else "pass",
+        overall=overall,
     )
 
 
-def main(argv=None) -> int:
+def main(argv=None):
     parser = argparse.ArgumentParser(prog="hotdocs verify")
     parser.add_argument("component_id")
     parser.add_argument("--repo-root", default=".")
@@ -562,19 +620,22 @@ def main(argv=None) -> int:
         code = exc.code
         return code if isinstance(code, int) else 2
 
-    repo_root = Path(args.repo_root).resolve()
-    report = verify(args.component_id, repo_root)
+    try:
+        report = verify(args.component_id, Path(args.repo_root))
+    except Exception as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+
+    report_dict = report.to_dict()
 
     if args.format == "json":
-        print(json.dumps(dataclasses.asdict(report), indent=2))
+        print(json.dumps(report_dict, indent=2))
     else:
-        print(f"{report.component_id}: {report.overall}")
-        for c in report.criteria:
-            print(f"  {c['id']} [{c['kind']}] -> {c['result']}")
-        print(f"  interface_drift: {report.interface_drift}")
-        print(f"  mutation_score: {report.mutation_score}")
+        print(f"{report_dict['component_id']}: {report_dict['overall']}")
+        for c in report_dict["criteria"]:
+            print(f"  {_get(c, 'id')}: {_get(c, 'result')}")
 
-    return 0 if report.overall == "pass" else 1
+    return 0 if report_dict["overall"] == "pass" else 1
 
 
 if __name__ == "__main__":

@@ -1,23 +1,5 @@
-"""
-comp-license-scanner — deterministic k-gram license fingerprint scanner.
+"""License scanner: k-gram fingerprint scan of gen/<component>/ against a reference corpus."""
 
-Implements the behavior described by the SpecBundle for `comp-license-scanner`
-(requirements R-LICENSE-001..007, interface/cli.md, interface/library.md,
-interface/data/LicenseScanResult.md, constraints.md). This file is the
-generated implementation; it is not itself spec text.
-
-Public API:
-    scan(component_id: str, repo_root: Path) -> LicenseScanResult
-    main(argv=None) -> int                      # CLI entry point
-
-No model calls are made anywhere in this module (constraints.md: "No model
-calls" — same trust tier as spec-linter/impact-analyzer/cache-manager).
-"""
-
-from __future__ import annotations
-
-import argparse
-import dataclasses
 import hashlib
 import importlib.util
 import json
@@ -25,563 +7,337 @@ import os
 import re
 import socket
 import sys
-import types
 import urllib.error
 import urllib.request
-from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional
 
-__all__ = ["scan", "LicenseScanResult", "main"]
+_COMMENT_BLOCK_RE = re.compile(r"/\*.*?\*/", re.DOTALL)
+_TRIPLE_DQ_RE = re.compile(r'""".*?"""', re.DOTALL)
+_TRIPLE_SQ_RE = re.compile(r"'''.*?'''", re.DOTALL)
+_LINE_COMMENT_SLASH_RE = re.compile(r"//[^\n]*")
+_LINE_COMMENT_HASH_RE = re.compile(r"#[^\n]*")
+_TOKEN_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*|\d+")
+_WINDOW_SIZE = 9
 
-# ---------------------------------------------------------------------------
-# Constants (this component's own implementation choices, not spec-dictated
-# literal values beyond what R-LICENSE-001/005 pin down: 9-token windows and
-# "corpus version is part of gate_version").
-# ---------------------------------------------------------------------------
-
-SCANNER_NAME = "license_scanner"
-CODE_VERSION = "3.1"  # this scanner's own code version component
-DEFAULT_BLOCK_THRESHOLD = 0.70
-REPORTING_FLOOR = 0.30
-K_GRAM_SIZE = 9  # R-LICENSE-001: 9-token windows
-NO_MODEL_PIN = "none"  # constraints.md: no model calls are ever made
-WEBHOOK_TIMEOUT_SECONDS = 10
-
-VAR_CORPUS_PATH = "VAR-LICENSE-CORPUS-PATH"
-VAR_WEBHOOK_URL = "VAR-COMPLIANCE-WEBHOOK-URL"
+# Filters near-zero-overlap noise out of the reported matches list; strictly
+# below any realistic block_threshold so a flagged result always has matches.
+_REPORTING_FLOOR = 0.1
 
 
-# ---------------------------------------------------------------------------
-# Result shape (interface/data/LicenseScanResult.md)
-# ---------------------------------------------------------------------------
-
-
-@dataclass
-class LicenseScanResult:
-    component_id: str
-    gate_version: str
-    similarity_score: float
-    block_threshold: float
-    blocked: bool
-    matches: List[Dict[str, Any]] = field(default_factory=list)
-    notified: bool = False
-    notification_delivery_error: Optional[Dict[str, str]] = None
-    cache_hit: bool = False
-
-
-# ---------------------------------------------------------------------------
-# Dependency loading: comp-cache-manager
-#
-# cache-manager lives under gen/cache-manager/ (either a flat module
-# cache_manager.py or a package cache_manager/__init__.py). It is not a
-# static import target from this file's own location in general (the
-# dependency's repo_root may differ from this file's install location), so
-# it is located and loaded dynamically from the filesystem. The loaded
-# module is registered in sys.modules under its load-time name
-# ("cache_manager") BEFORE exec_module runs it, so any dataclasses it
-# defines can resolve sys.modules[cls.__module__] during class-body
-# execution.
-# ---------------------------------------------------------------------------
-
-
-def _try_load_module_from_dir(component_dir: Path, module_name: str):
-    if component_dir is None or not component_dir.exists():
-        return None
-    flat = component_dir / f"{module_name}.py"
-    pkg_init = component_dir / module_name / "__init__.py"
-    spec = None
-    if flat.is_file():
-        spec = importlib.util.spec_from_file_location(module_name, flat)
-    elif pkg_init.is_file():
-        spec = importlib.util.spec_from_file_location(
-            module_name,
-            pkg_init,
-            submodule_search_locations=[str(component_dir / module_name)],
-        )
-    if spec is None or spec.loader is None:
-        return None
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[module_name] = module  # MUST be registered before exec_module
-    try:
-        spec.loader.exec_module(module)
-    except Exception:
-        sys.modules.pop(module_name, None)
-        return None
-    return module
-
-
-def _load_cache_manager_module(repo_root: Optional[Path]):
-    if "cache_manager" in sys.modules:
-        return sys.modules["cache_manager"]
-
-    candidates: List[Path] = []
-    if repo_root is not None:
-        candidates.append(Path(repo_root) / "gen" / "cache-manager")
-
-    here = Path(__file__).resolve()
-    for parent in here.parents:
-        if parent.name == "gen":
-            candidates.append(parent / "cache-manager")
-            break
-
-    for candidate in candidates:
-        module = _try_load_module_from_dir(candidate, "cache_manager")
-        if module is not None:
-            return module
-    return None
-
-
-def _build_fallback_cache_manager():
-    """
-    Degenerate in-process stand-in used only if the real cache-manager
-    component cannot be located on disk. Keeps scan() functional (so a
-    missing dependency never turns into a crash or a skipped scan) while
-    still faithfully reporting cache_hit based on its own (process-local)
-    state.
-    """
-    ns = types.SimpleNamespace()
-
-    @dataclass
-    class CacheKey:
-        spec_bundle_hash: str
-        gate_inputs_hash: str
-        gate_version: str
-        model_pin: str
-
-    @dataclass
-    class CachedResult:
-        gate_type: str
-        payload: Dict[str, Any]
-        stored_at: str
-
-    class Miss:
-        pass
-
-    class SchemaValidationError(Exception):
-        pass
-
-    _store: Dict[Any, Any] = {}
-
-    def _key_tuple(key: "CacheKey"):
-        return (
-            key.spec_bundle_hash,
-            key.gate_inputs_hash,
-            key.gate_version,
-            key.model_pin,
-        )
-
-    def get(cache_key, *, repo_root=None):
-        return _store.get(_key_tuple(cache_key), Miss())
-
-    def put(cache_key, result, *, repo_root=None):
-        _store[_key_tuple(cache_key)] = result
-
-    def now_iso():
-        return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-
-    def stats(*, repo_root=None):
-        return {"hits": 0, "misses": 0}
-
-    ns.CacheKey = CacheKey
-    ns.CachedResult = CachedResult
-    ns.Miss = Miss
-    ns.SchemaValidationError = SchemaValidationError
-    ns.get = get
-    ns.put = put
-    ns.now_iso = now_iso
-    ns.stats = stats
-    return ns
-
-
-def _get_cache_manager(repo_root: Optional[Path]):
-    module = _load_cache_manager_module(repo_root)
-    if module is None:
-        module = _build_fallback_cache_manager()
-    return module
-
-
-# ---------------------------------------------------------------------------
-# Small helpers
-# ---------------------------------------------------------------------------
+def _dual_get(obj, key, default=None):
+    if isinstance(obj, dict):
+        return obj.get(key, default)
+    return getattr(obj, key, default)
 
 
 def _component_slug(component_id: str) -> str:
-    """comp-<slug> -> <slug> (glossary: 'Component id / component slug')."""
-    prefix = "comp-"
-    if component_id.startswith(prefix):
-        return component_id[len(prefix):]
+    if component_id.startswith("comp-"):
+        return component_id[len("comp-"):]
     return component_id
 
 
-def _env_var(var_name: str) -> Optional[str]:
-    key = var_name.replace("-", "_")
-    value = os.environ.get(key)
-    return value if value else None
-
-
-def _hash_dir(path: Optional[Path]) -> str:
-    """
-    Deterministic content hash of a directory tree (sorted relative paths +
-    file bytes). A missing/unreadable directory still produces a stable,
-    deterministic hash rather than erroring (consistent with this
-    component's fail-to-empty posture for missing external/local inputs).
-    """
-    h = hashlib.sha256()
-    try:
-        p = Path(path) if path is not None else None
-    except TypeError:
-        p = None
-    if p is not None and p.is_dir():
-        for f in sorted(p.rglob("*")):
-            if not f.is_file():
-                continue
-            rel = f.relative_to(p).as_posix()
-            h.update(rel.encode("utf-8"))
+def _read_component_files(component_dir: Path):
+    files = []
+    if not component_dir.is_dir():
+        return files
+    for path in sorted(component_dir.rglob("*")):
+        if path.is_file():
             try:
-                h.update(f.read_bytes())
+                text = path.read_text(encoding="utf-8", errors="ignore")
             except OSError:
                 continue
-    else:
-        h.update(b"<absent>")
+            rel = path.relative_to(component_dir).as_posix()
+            files.append((rel, text))
+    return files
+
+
+def _content_hash(files) -> str:
+    h = hashlib.sha256()
+    for rel, text in files:
+        h.update(rel.encode("utf-8"))
+        h.update(b"\x00")
+        h.update(text.encode("utf-8"))
+        h.update(b"\x00")
     return "sha256:" + h.hexdigest()
 
 
-def _now_iso() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+def _normalize_and_tokenize(text: str):
+    text = _COMMENT_BLOCK_RE.sub("", text)
+    text = _TRIPLE_DQ_RE.sub("", text)
+    text = _TRIPLE_SQ_RE.sub("", text)
+    text = _LINE_COMMENT_SLASH_RE.sub("", text)
+    text = _LINE_COMMENT_HASH_RE.sub("", text)
+    return [t.lower() for t in _TOKEN_RE.findall(text)]
 
 
-# ---------------------------------------------------------------------------
-# Reference corpus loading (R-LICENSE-001 / D67 / VAR-LICENSE-CORPUS-PATH)
-# ---------------------------------------------------------------------------
-
-
-def _load_corpus(repo_root: Path, corpus_path_str: Optional[str]) -> Optional[Dict[str, Any]]:
-    """
-    Loads the precomputed k-gram reference corpus from
-    VAR-LICENSE-CORPUS-PATH. A missing var, missing file, or unparsable
-    file all resolve to "no corpus" (None) — never an error, never a
-    silently-skipped scan: the caller treats None as "no matches possible,
-    similarity_score 0.0", which is still a real, recorded result.
-    """
-    if not corpus_path_str:
-        return None
-    p = Path(corpus_path_str)
-    if not p.is_absolute():
-        p = Path(repo_root) / p
-    try:
-        with open(p, "r", encoding="utf-8") as fh:
-            data = json.load(fh)
-    except Exception:
-        return None
-    if not isinstance(data, dict):
-        return None
-    entries = data.get("entries")
-    if not isinstance(entries, list):
-        return None
-    return data
-
-
-# ---------------------------------------------------------------------------
-# Normalization / tokenization / k-gram hashing (R-LICENSE-001)
-# ---------------------------------------------------------------------------
-
-_BLOCK_COMMENT_RE = re.compile(r"/\*.*?\*/", re.S)
-_TRIPLE_DQUOTE_RE = re.compile(r'""".*?"""', re.S)
-_TRIPLE_SQUOTE_RE = re.compile(r"'''.*?'''", re.S)
-_LINE_SLASH_COMMENT_RE = re.compile(r"//.*$")
-_LINE_HASH_COMMENT_RE = re.compile(r"#.*$")
-_TOKEN_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*|\d+")
-
-
-def _strip_comments(text: str) -> str:
-    text = _BLOCK_COMMENT_RE.sub(" ", text)
-    text = _TRIPLE_DQUOTE_RE.sub(" ", text)
-    text = _TRIPLE_SQUOTE_RE.sub(" ", text)
-    out_lines = []
-    for line in text.splitlines():
-        line = _LINE_SLASH_COMMENT_RE.sub("", line)
-        line = _LINE_HASH_COMMENT_RE.sub("", line)
-        out_lines.append(line)
-    return "\n".join(out_lines)
-
-
-def _tokenize(text: str) -> List[str]:
-    normalized = _strip_comments(text)
-    return [t.lower() for t in _TOKEN_RE.findall(normalized)]
-
-
-def _kgram_hashes(tokens: List[str], k: int) -> "set[str]":
-    hashes: "set[str]" = set()
-    n = len(tokens)
-    if n < k:
+def _window_hashes(tokens):
+    hashes = set()
+    if len(tokens) < _WINDOW_SIZE:
         return hashes
-    for i in range(n - k + 1):
-        window = "\x1f".join(tokens[i:i + k])
-        hashes.add(hashlib.sha256(window.encode("utf-8")).hexdigest())
+    for i in range(len(tokens) - _WINDOW_SIZE + 1):
+        joined = "\x1f".join(tokens[i:i + _WINDOW_SIZE])
+        hashes.add(hashlib.sha256(joined.encode("utf-8")).hexdigest())
     return hashes
 
 
-def _is_probably_binary(path: Path) -> bool:
-    try:
-        with open(path, "rb") as fh:
-            chunk = fh.read(2048)
-        return b"\x00" in chunk
-    except OSError:
-        return True
-
-
-def _document_kgram_hashes(gen_dir: Path) -> "set[str]":
-    all_hashes: "set[str]" = set()
-    if not gen_dir.is_dir():
-        return all_hashes
-    for f in sorted(gen_dir.rglob("*")):
-        if not f.is_file():
-            continue
-        if _is_probably_binary(f):
-            continue
-        try:
-            text = f.read_text(encoding="utf-8", errors="ignore")
-        except OSError:
-            continue
-        tokens = _tokenize(text)
-        all_hashes |= _kgram_hashes(tokens, K_GRAM_SIZE)
+def _component_hashes(files):
+    all_hashes = set()
+    for _rel, text in files:
+        all_hashes |= _window_hashes(_normalize_and_tokenize(text))
     return all_hashes
 
 
-def _score_against_corpus(doc_hashes: "set[str]", corpus: Optional[Dict[str, Any]]):
-    """
-    Returns (all_entry_matches, similarity_score) where similarity_score is
-    the best (max) per-entry score — a pure confidence number, independent
-    of which entry it came from or that entry's risk_tier (R-LICENSE-001 /
-    R-LICENSE-003 separation of concerns).
-    """
-    matches: List[Dict[str, Any]] = []
-    if not corpus or not doc_hashes:
-        return matches, 0.0
+def _load_corpus(repo_root: Path):
+    path_str = os.environ.get("VAR_LICENSE_CORPUS_PATH", "")
+    if not path_str:
+        return 0, 0.70, []
+    p = Path(path_str)
+    if not p.is_absolute():
+        p = Path(repo_root) / p
+    try:
+        raw = p.read_text(encoding="utf-8")
+        data = json.loads(raw)
+    except (OSError, ValueError):
+        return 0, 0.70, []
+    if not isinstance(data, dict) or not isinstance(data.get("entries"), list):
+        return 0, 0.70, []
+    corpus_version = data.get("corpus_version", 0)
+    block_threshold = data.get("block_threshold", 0.70)
+    entries = data.get("entries", [])
+    return corpus_version, block_threshold, entries
 
-    best = 0.0
-    for entry in corpus.get("entries", []) or []:
-        ref_hashes = set(entry.get("hashes", []) or [])
-        if ref_hashes and doc_hashes:
-            overlap = doc_hashes & ref_hashes
-            score = len(overlap) / len(doc_hashes)
-        else:
-            score = 0.0
-        matches.append(
-            {
-                "reference_id": entry.get("reference_id"),
-                "license_family": entry.get("license_family"),
-                "risk_tier": entry.get("risk_tier"),
-                "score": round(score, 6),
-            }
+
+def _load_cache_manager(repo_root: Path):
+    base = Path(repo_root) / "gen" / "cache-manager"
+    pkg_init = base / "__init__.py"
+    flat = base / "cache_manager.py"
+    module_name = "cache_manager"
+    if pkg_init.exists():
+        module_path = pkg_init
+        search_locations = [str(base)]
+    elif flat.exists():
+        module_path = flat
+        search_locations = None
+    else:
+        return None
+    try:
+        spec = importlib.util.spec_from_file_location(
+            module_name, module_path, submodule_search_locations=search_locations
         )
-        if score > best:
-            best = score
-    return matches, best
+        if spec is None or spec.loader is None:
+            return None
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[module_name] = module
+        spec.loader.exec_module(module)
+        return module
+    except Exception:
+        return None
 
 
-# ---------------------------------------------------------------------------
-# Notification (R-LICENSE-003)
-# ---------------------------------------------------------------------------
-
-
-def _send_webhook(url: str, payload: Dict[str, Any]) -> Optional[Dict[str, str]]:
-    """
-    At most one attempt, no retry-with-backoff. Any failure is caught and
-    returned as a {category, message} dict; never raised, never retried.
-    """
+def _send_webhook(url: str, payload: dict):
     try:
         data = json.dumps(payload).encode("utf-8")
         req = urllib.request.Request(
-            url,
-            data=data,
-            headers={"Content-Type": "application/json"},
-            method="POST",
+            url, data=data, headers={"Content-Type": "application/json"}, method="POST"
         )
-        urllib.request.urlopen(req, timeout=WEBHOOK_TIMEOUT_SECONDS)
+        urllib.request.urlopen(req, timeout=10)
         return None
-    except urllib.error.HTTPError as exc:
-        category = "auth" if exc.code in (401, 403) else "network"
-        return {"category": category, "message": str(exc)}
-    except urllib.error.URLError as exc:
-        reason = getattr(exc, "reason", None)
+    except urllib.error.HTTPError as e:
+        if e.code in (401, 403):
+            return {"category": "auth", "message": str(e)}
+        return {"category": "network", "message": str(e)}
+    except (socket.timeout, TimeoutError):
+        return {"category": "timeout", "message": "request timed out"}
+    except urllib.error.URLError as e:
+        reason = getattr(e, "reason", None)
         if isinstance(reason, (socket.timeout, TimeoutError)):
-            category = "timeout"
-        else:
-            category = "network"
-        return {"category": category, "message": str(exc)}
-    except (socket.timeout, TimeoutError) as exc:
-        return {"category": "timeout", "message": str(exc)}
-    except Exception as exc:  # noqa: BLE001 - deliberately broad, never raised onward
-        return {"category": "network", "message": str(exc)}
+            return {"category": "timeout", "message": str(e)}
+        return {"category": "network", "message": str(e)}
+    except Exception as e:
+        return {"category": "network", "message": str(e)}
 
 
-# ---------------------------------------------------------------------------
-# Cache payload <-> result conversion
-# ---------------------------------------------------------------------------
+def gate_version(repo_root: Path) -> str:
+    corpus_version, _block_threshold, _entries = _load_corpus(Path(repo_root))
+    return f"license_scanner@3.1.{corpus_version}"
 
 
-def _result_from_payload(payload: Dict[str, Any]) -> LicenseScanResult:
-    return LicenseScanResult(
-        component_id=payload.get("component_id"),
-        gate_version=payload.get("gate_version"),
-        similarity_score=payload.get("similarity_score", 0.0),
-        block_threshold=payload.get("block_threshold", DEFAULT_BLOCK_THRESHOLD),
-        blocked=payload.get("blocked", False),
-        matches=list(payload.get("matches") or []),
-        notified=payload.get("notified", False),
-        notification_delivery_error=payload.get("notification_delivery_error"),
-        cache_hit=payload.get("cache_hit", False),
-    )
-
-
-# ---------------------------------------------------------------------------
-# Public API
-# ---------------------------------------------------------------------------
-
-
-def scan(component_id: str, repo_root: Path) -> LicenseScanResult:
+def scan(component_id: str, repo_root: Path) -> dict:
     repo_root = Path(repo_root)
     slug = _component_slug(component_id)
-    gen_dir = repo_root / "gen" / slug
+    component_dir = repo_root / "gen" / slug
+    files = _read_component_files(component_dir)
 
-    corpus_path_str = _env_var(VAR_CORPUS_PATH)
-    corpus = _load_corpus(repo_root, corpus_path_str)
-    corpus_version = corpus.get("corpus_version", 0) if corpus else 0
-    block_threshold = (
-        corpus.get("block_threshold", DEFAULT_BLOCK_THRESHOLD)
-        if corpus
-        else DEFAULT_BLOCK_THRESHOLD
-    )
-    gate_version = f"{SCANNER_NAME}@{CODE_VERSION}.{corpus_version}"
+    corpus_version, block_threshold, entries = _load_corpus(repo_root)
+    gv = f"license_scanner@3.1.{corpus_version}"
 
-    gen_output_hash = _hash_dir(gen_dir)
-    spec_bundle_hash = _hash_dir(repo_root / "specs" / "components" / slug)
-    model_pin = NO_MODEL_PIN
+    # No spec bundle object is passed to scan(); the only deterministic input
+    # available is the scanned content itself, so it stands in for both hash
+    # fields. No model is involved, so model_pin is empty.
+    content_hash = _content_hash(files)
+    cache_key_fields = {
+        "spec_bundle_hash": content_hash,
+        "gate_inputs_hash": content_hash,
+        "gate_version": gv,
+        "model_pin": "",
+    }
 
-    cm = _get_cache_manager(repo_root)
-    cache_key = cm.CacheKey(
-        spec_bundle_hash=spec_bundle_hash,
-        gate_inputs_hash=gen_output_hash,
-        gate_version=gate_version,
-        model_pin=model_pin,
-    )
+    cache_manager = _load_cache_manager(repo_root)
+    cache_key = None
+    cached = None
+    if cache_manager is not None:
+        try:
+            cache_key = cache_manager.CacheKey(**cache_key_fields)
+            cached = cache_manager.get(cache_key, repo_root=repo_root)
+        except Exception:
+            cache_key = None
+            cached = None
 
-    cached = cm.get(cache_key, repo_root=repo_root)
-    if not isinstance(cached, cm.Miss):
-        payload = dict(cached.payload)
-        payload["cache_hit"] = True
-        return _result_from_payload(payload)
+    payload = _dual_get(cached, "payload", None) if cached is not None else None
+    if payload is not None:
+        if isinstance(payload, dict):
+            result = dict(payload)
+        else:
+            result = dict(vars(payload))
+        result["cache_hit"] = True
+        return result
 
-    # --- R-LICENSE-004 cache miss: perform the real scan ---
-    doc_hashes = _document_kgram_hashes(gen_dir)
-    all_matches, similarity_score = _score_against_corpus(doc_hashes, corpus)
+    component_hashes = _component_hashes(files)
+    scored_entries = []
+    for entry in entries:
+        entry_hashes = set(entry.get("hashes", []) or [])
+        if not component_hashes:
+            score = 0.0
+        else:
+            score = len(component_hashes & entry_hashes) / len(component_hashes)
+        scored_entries.append((entry, score))
+
+    similarity_score = max((score for _e, score in scored_entries), default=0.0)
     blocked = similarity_score >= block_threshold
 
-    reported_matches = [m for m in all_matches if m["score"] > REPORTING_FLOOR]
-    reported_matches.sort(key=lambda m: m["score"], reverse=True)
+    matches = []
+    for entry, score in sorted(scored_entries, key=lambda pair: pair[1], reverse=True):
+        if score > _REPORTING_FLOOR:
+            matches.append({
+                "reference_id": entry.get("reference_id"),
+                "license_family": entry.get("license_family"),
+                "risk_tier": entry.get("risk_tier"),
+                "score": score,
+            })
 
-    webhook_url = _env_var(VAR_WEBHOOK_URL)
-    due = blocked or any(m.get("risk_tier") == "high" for m in reported_matches)
+    webhook_url = os.environ.get("VAR_COMPLIANCE_WEBHOOK_URL", "")
+    due = blocked or any(m["risk_tier"] == "high" for m in matches)
     notified = bool(due and webhook_url)
 
-    notification_delivery_error: Optional[Dict[str, str]] = None
+    notification_delivery_error = None
     if notified:
-        notification_delivery_error = _send_webhook(
-            webhook_url,
-            {
-                "component_id": component_id,
-                "gate_version": gate_version,
-                "similarity_score": round(similarity_score, 6),
-                "block_threshold": block_threshold,
-                "blocked": blocked,
-                "matches": reported_matches,
-            },
-        )
+        notification_delivery_error = _send_webhook(webhook_url, {
+            "component_id": component_id,
+            "gate_version": gv,
+            "similarity_score": similarity_score,
+            "blocked": blocked,
+            "matches": matches,
+        })
 
-    result = LicenseScanResult(
-        component_id=component_id,
-        gate_version=gate_version,
-        similarity_score=round(similarity_score, 6),
-        block_threshold=block_threshold,
-        blocked=blocked,
-        matches=reported_matches,
-        notified=notified,
-        notification_delivery_error=notification_delivery_error,
-        cache_hit=False,
-    )
+    result = {
+        "component_id": component_id,
+        "gate_version": gv,
+        "similarity_score": similarity_score,
+        "block_threshold": block_threshold,
+        "blocked": blocked,
+        "matches": matches,
+        "notified": notified,
+        "notification_delivery_error": notification_delivery_error,
+        "cache_hit": False,
+    }
 
-    payload = dataclasses.asdict(result)
-    try:
-        cm.put(
-            cache_key,
-            cm.CachedResult(
+    if cache_manager is not None and cache_key is not None:
+        try:
+            cached_result = cache_manager.CachedResult(
                 gate_type="license_scanner",
-                payload=payload,
-                stored_at=cm.now_iso() if hasattr(cm, "now_iso") else _now_iso(),
-            ),
-            repo_root=repo_root,
-        )
-    except Exception:
-        # A caching failure must never affect the (already-computed,
-        # already-correct) scan result; it only means this result won't be
-        # reusable from cache next time.
-        pass
+                payload=dict(result),
+                stored_at=datetime.now(timezone.utc).isoformat(),
+            )
+            cache_manager.put(cache_key, cached_result, repo_root=repo_root)
+        except Exception:
+            pass
 
     return result
 
 
-# ---------------------------------------------------------------------------
-# CLI (interface/cli.md)
-# ---------------------------------------------------------------------------
-
-
-def _format_text(result: LicenseScanResult) -> str:
-    status = "FLAGGED" if result.blocked else "CLEAN"
+def _format_text(result: dict) -> str:
     lines = [
-        f"{status} {result.component_id} "
-        f"score={result.similarity_score} threshold={result.block_threshold} "
-        f"gate_version={result.gate_version} cache_hit={result.cache_hit}"
+        f"component_id: {result['component_id']}",
+        f"gate_version: {result['gate_version']}",
+        f"similarity_score: {result['similarity_score']}",
+        f"block_threshold: {result['block_threshold']}",
+        f"blocked: {result['blocked']}",
+        f"notified: {result['notified']}",
+        f"cache_hit: {result['cache_hit']}",
     ]
-    for m in result.matches:
-        lines.append(
-            f"  match: reference_id={m.get('reference_id')} "
-            f"license_family={m.get('license_family')} "
-            f"risk_tier={m.get('risk_tier')} score={m.get('score')}"
-        )
-    lines.append(f"notified={result.notified}")
-    if result.notification_delivery_error:
-        lines.append(f"notification_delivery_error={result.notification_delivery_error}")
+    if result["matches"]:
+        lines.append("matches:")
+        for m in result["matches"]:
+            lines.append(
+                f"  - reference_id={m['reference_id']} license_family={m['license_family']} "
+                f"risk_tier={m['risk_tier']} score={m['score']}"
+            )
+    if result["notification_delivery_error"]:
+        lines.append(f"notification_delivery_error: {result['notification_delivery_error']}")
     return "\n".join(lines)
 
 
-def main(argv: Optional[List[str]] = None) -> int:
-    parser = argparse.ArgumentParser(prog="hotdocs license-scan")
-    parser.add_argument("component_id")
-    parser.add_argument("--repo-root", default=".")
-    parser.add_argument("--format", choices=["json", "text"], default="text")
-
-    try:
-        args = parser.parse_args(argv)
-    except SystemExit as exc:
-        code = exc.code
-        return code if isinstance(code, int) else 2
-
-    try:
-        result = scan(args.component_id, Path(args.repo_root))
-    except Exception as exc:  # usage-level failure, not a scan-result failure
-        print(f"error: {exc}", file=sys.stderr)
+def main(argv) -> int:
+    if not argv:
+        sys.stderr.write("usage error: missing <component-id>\n")
         return 2
 
-    if args.format == "json":
-        print(json.dumps(dataclasses.asdict(result), indent=2, sort_keys=True))
+    component_id = argv[0]
+    if component_id.startswith("--"):
+        sys.stderr.write("usage error: missing <component-id>\n")
+        return 2
+
+    rest = argv[1:]
+    repo_root_value = "."
+    format_value = "text"
+    i = 0
+    while i < len(rest):
+        tok = rest[i]
+        if not tok.startswith("--"):
+            sys.stderr.write(f"usage error: unknown argument {tok!r}\n")
+            return 2
+        if "=" in tok:
+            flag, _, value = tok.partition("=")
+            i += 1
+        else:
+            flag = tok
+            if i + 1 >= len(rest):
+                sys.stderr.write(f"usage error: flag {flag!r} given with no value\n")
+                return 2
+            value = rest[i + 1]
+            i += 2
+        if flag == "--repo-root":
+            repo_root_value = value
+        elif flag == "--format":
+            format_value = value
+        else:
+            sys.stderr.write(f"usage error: unknown flag {flag!r}\n")
+            return 2
+
+    if format_value not in ("json", "text"):
+        sys.stderr.write(f"usage error: invalid --format {format_value!r}\n")
+        return 2
+
+    result = scan(component_id, Path(repo_root_value))
+
+    if format_value == "json":
+        print(json.dumps(result))
     else:
         print(_format_text(result))
 
-    return 1 if result.blocked else 0
+    return 1 if result["blocked"] else 0
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(main(sys.argv[1:]))

@@ -1,654 +1,536 @@
-"""
-Secret Scanner (comp-secret-scanner)
-
-Implements the behavior described in the SpecBundle for this component:
-
-  - R-SECRET-001: pattern-database + Shannon-entropy (>=4.0 bits/char)
-    detection across specs/, gen/, verification/.
-  - R-SECRET-002: any match blocks the merge (pure confidence call).
-  - R-SECRET-003/009: every scan result -- clean or flagged -- is a real,
-    recorded result; nothing is ever silently dropped or overwritten.
-  - R-SECRET-004: notification fires when (flagged) OR (any match's
-    risk_tier == "high"), independent of merge outcome; webhook call is
-    attempted at most once, never retried, failures recorded as
-    `notification_delivery_error`, never raised, never affecting `flagged`.
-  - R-SECRET-005/006: cache-manager-aware full scan, keyed on
-    (spec_bundle_hash, gate_inputs_hash, gate_version, model_pin), with the
-    pattern-database version folded into `gate_version`.
-  - R-SECRET-007: exactly one SecretScanResult per scan.
-  - R-SECRET-008: a separate, lightweight `scan_files` / `precommit` mode,
-    scoped to given files only, no cache-manager dependency.
-
-This file is the complete, from-scratch implementation for this component;
-no prior implementation or HINT_CODE was supplied for this generation.
-"""
+"""Secret scanner: pattern + entropy based secret detection (comp-secret-scanner)."""
 
 from __future__ import annotations
 
-import argparse
 import hashlib
 import importlib.util
 import json
 import math
 import os
 import re
+import socket
 import subprocess
 import sys
-from collections import Counter
-from dataclasses import dataclass, field
+import urllib.error
+import urllib.request
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional
 
-# --------------------------------------------------------------------------
-# Constants
-# --------------------------------------------------------------------------
+_ENTROPY_RUN_RE = re.compile(r"[A-Za-z0-9+/=_-]+")
+_MIN_RUN_LENGTH = 20
+_WINDOW_SIZE = 20
+_ENTROPY_THRESHOLD = 4.0
 
-ENTROPY_THRESHOLD = 4.0  # bits/char -- R-SECRET-001
-
-# Candidate substrings considered for the entropy heuristic: contiguous
-# runs of base64/hex-ish characters, long enough that ordinary prose /
-# identifiers rarely qualify.
-_ENTROPY_CANDIDATE_RE = re.compile(r"[A-Za-z0-9+/=_\-]{20,}")
-
-_ENTROPY_RULE_ID = "entropy-heuristic"
-_ENTROPY_RISK_TIER = "low"
-
-_GATE_NAME = "secret_scanner"
-_DEFAULT_PATTERN_DB_VERSION = "0.0.0"
-
-_SCAN_DIR_NAMES = ("specs", "gen", "verification")
+_SCAN_SUBDIRS = ("specs", "gen", "verification")
 
 
-# --------------------------------------------------------------------------
-# Data shapes
-# --------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# Dual dict-or-attribute access helper
+# ---------------------------------------------------------------------------
 
-@dataclass
-class SecretScanMatch:
-    rule_id: str
-    risk_tier: str
-    file: str
-    line: int
-    excerpt: str  # redacted/truncated -- never the full matched string
-
-    def to_dict(self) -> Dict[str, Any]:
-        return {
-            "rule_id": self.rule_id,
-            "risk_tier": self.risk_tier,
-            "file": self.file,
-            "line": self.line,
-            "excerpt": self.excerpt,
-        }
-
-    @staticmethod
-    def from_dict(d: Dict[str, Any]) -> "SecretScanMatch":
-        return SecretScanMatch(
-            rule_id=d.get("rule_id", "unknown"),
-            risk_tier=d.get("risk_tier", "low"),
-            file=d.get("file", ""),
-            line=int(d.get("line", 0) or 0),
-            excerpt=d.get("excerpt", ""),
-        )
+def _dget(obj, key, default=None):
+    if obj is None:
+        return default
+    if isinstance(obj, dict):
+        return obj.get(key, default)
+    return getattr(obj, key, default)
 
 
-@dataclass
-class SecretScanResult:
-    scope: str  # "full" | "precommit"
-    flagged: bool
-    matches: List[SecretScanMatch] = field(default_factory=list)
-    notified: bool = False
-    notification_delivery_error: Optional[Dict[str, str]] = None
-    cache_hit: bool = False
-    gate_version: Optional[str] = None  # only meaningful for scope == "full"
-
-    def to_dict(self) -> Dict[str, Any]:
-        d: Dict[str, Any] = {
-            "scope": self.scope,
-            "flagged": self.flagged,
-            "matches": [m.to_dict() for m in self.matches],
-            "notified": self.notified,
-            "notification_delivery_error": self.notification_delivery_error,
-            "cache_hit": self.cache_hit,
-        }
-        if self.gate_version is not None:
-            d["gate_version"] = self.gate_version
-        return d
-
-    @staticmethod
-    def from_payload(payload: Dict[str, Any], *, cache_hit: bool) -> "SecretScanResult":
-        matches = [SecretScanMatch.from_dict(m) for m in payload.get("matches", [])]
-        return SecretScanResult(
-            scope=payload.get("scope", "full"),
-            gate_version=payload.get("gate_version"),
-            flagged=bool(payload.get("flagged", False)),
-            matches=matches,
-            notified=bool(payload.get("notified", False)),
-            notification_delivery_error=payload.get("notification_delivery_error"),
-            cache_hit=cache_hit,
-        )
+def _payload_to_dict(payload):
+    if isinstance(payload, dict):
+        return dict(payload)
+    result = {}
+    for key in (
+        "scope",
+        "gate_version",
+        "flagged",
+        "matches",
+        "notified",
+        "notification_delivery_error",
+        "cache_hit",
+    ):
+        if hasattr(payload, key):
+            result[key] = getattr(payload, key)
+    return result
 
 
-# --------------------------------------------------------------------------
-# VAR lookup helper
-# --------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# Pattern database
+# ---------------------------------------------------------------------------
 
-def _var(name: str) -> Optional[str]:
-    """Look up a VAR-* declaration's value from the environment.
+def _load_pattern_db(base_dir):
+    raw_path = os.environ.get("VAR_SECRET_PATTERNS_PATH", "")
+    if not raw_path:
+        return "0.0.0", []
 
-    VAR names are hyphenated (e.g. VAR-SECRET-PATTERNS-PATH); environment
-    variable names can't contain hyphens, so the underscored form is the
-    primary lookup, with the literal hyphenated name as a fallback.
-    """
-    underscored = name.replace("-", "_")
-    val = os.environ.get(underscored)
-    if val is not None:
-        return val
-    return os.environ.get(name)
-
-
-# --------------------------------------------------------------------------
-# Pattern database (R-SECRET-001)
-# --------------------------------------------------------------------------
-
-def _load_pattern_db(path_str: Optional[str]) -> "tuple[str, list]":
-    """Load the externally-sourced pattern database.
-
-    A missing/unreachable/malformed database MUST NOT raise -- the scanner
-    still produces a real result, with entropy-only detection in effect
-    (R-SECRET-001).
-    """
-    if not path_str:
-        return _DEFAULT_PATTERN_DB_VERSION, []
+    p = Path(raw_path)
+    if not p.is_absolute():
+        p = Path(base_dir) / p
 
     try:
-        raw = Path(path_str).read_text(encoding="utf-8")
-        data = json.loads(raw)
-    except Exception:
-        return _DEFAULT_PATTERN_DB_VERSION, []
+        data = json.loads(p.read_text(encoding="utf-8"))
+    except (OSError, ValueError, UnicodeDecodeError):
+        return "0.0.0", []
 
-    if isinstance(data, dict):
-        version = str(data.get("version", _DEFAULT_PATTERN_DB_VERSION))
-        rules_raw = data.get("rules", [])
-    elif isinstance(data, list):
-        version = _DEFAULT_PATTERN_DB_VERSION
-        rules_raw = data
-    else:
-        return _DEFAULT_PATTERN_DB_VERSION, []
+    if not isinstance(data, dict):
+        return "0.0.0", []
 
-    rules: List[Dict[str, Any]] = []
+    version = data.get("version")
+    if not isinstance(version, str) or not version:
+        version = "0.0.0"
+
+    rules = []
+    rules_raw = data.get("rules")
     if isinstance(rules_raw, list):
-        for r in rules_raw:
-            if not isinstance(r, dict):
+        for entry in rules_raw:
+            if not isinstance(entry, dict):
                 continue
-            rule_id = r.get("rule_id")
-            risk_tier = r.get("risk_tier")
-            pattern_str = r.get("pattern", r.get("regex"))
-            if not rule_id or not risk_tier or not pattern_str:
+            rule_id = entry.get("rule_id")
+            risk_tier = entry.get("risk_tier")
+            pattern = entry.get("pattern")
+            if not isinstance(rule_id, str) or not isinstance(risk_tier, str) or not isinstance(pattern, str):
                 continue
             try:
-                compiled = re.compile(pattern_str)
+                compiled = re.compile(pattern)
             except re.error:
                 continue
-            rules.append({"rule_id": rule_id, "risk_tier": risk_tier, "pattern": compiled})
+            rules.append({"rule_id": rule_id, "risk_tier": risk_tier, "compiled": compiled})
 
     return version, rules
 
 
-# --------------------------------------------------------------------------
-# Detection
-# --------------------------------------------------------------------------
+def gate_version(repo_root) -> str:
+    version, _rules = _load_pattern_db(Path(repo_root))
+    return f"secret_scanner@{version}"
 
-def _shannon_entropy(s: str) -> float:
+
+# ---------------------------------------------------------------------------
+# Detection
+# ---------------------------------------------------------------------------
+
+def _shannon_entropy(s):
     if not s:
         return 0.0
-    counts = Counter(s)
+    counts = {}
+    for ch in s:
+        counts[ch] = counts.get(ch, 0) + 1
     length = len(s)
-    return -sum((c / length) * math.log2(c / length) for c in counts.values())
+    entropy = 0.0
+    for count in counts.values():
+        prob = count / length
+        entropy -= prob * math.log2(prob)
+    return entropy
 
 
-def _redact(s: str) -> str:
-    """Truncate/redact matched text -- never echo the full matched string."""
-    if len(s) <= 8:
-        return "*" * len(s)
-    return f"{s[:4]}...{s[-4:]}"
+def _pattern_matches(line, rules):
+    matches = []
+    for rule in rules:
+        for m in rule["compiled"].finditer(line):
+            matches.append((m.start(), m.end(), rule["rule_id"], rule["risk_tier"]))
+    return matches
 
 
-def _scan_text(text: str, rules: List[Dict[str, Any]]) -> "list[tuple[str, str, int, str]]":
-    """Returns a list of (rule_id, risk_tier, line_number, redacted_excerpt)."""
-    found: List["tuple[str, str, int, str]"] = []
+def _entropy_matches(line, excluded_spans):
+    matches = []
+    for run_match in _ENTROPY_RUN_RE.finditer(line):
+        start, end = run_match.span()
+        run = run_match.group(0)
+        if len(run) < _MIN_RUN_LENGTH:
+            continue
+        overlaps = any(start < es_end and end > es_start for es_start, es_end in excluded_spans)
+        if overlaps:
+            continue
+        found = False
+        for i in range(0, len(run) - _WINDOW_SIZE + 1):
+            window = run[i:i + _WINDOW_SIZE]
+            if _shannon_entropy(window) >= _ENTROPY_THRESHOLD:
+                found = True
+                break
+        if found:
+            matches.append((start, end, "entropy-heuristic", "low"))
+    return matches
+
+
+def _scan_line(line, rules):
+    pattern_matches = _pattern_matches(line, rules)
+    excluded_spans = [(s, e) for s, e, _rid, _tier in pattern_matches]
+    entropy_matches = _entropy_matches(line, excluded_spans)
+    return pattern_matches + entropy_matches
+
+
+def _scan_file_content(text, rules):
+    results = []
     for lineno, line in enumerate(text.splitlines(), start=1):
-        matched_spans: List["tuple[int, int]"] = []
-        for rule in rules:
-            for m in rule["pattern"].finditer(line):
-                found.append((rule["rule_id"], rule["risk_tier"], lineno, _redact(m.group(0))))
-                matched_spans.append((m.start(), m.end()))
-
-        for cand in _ENTROPY_CANDIDATE_RE.finditer(line):
-            start, end = cand.start(), cand.end()
-            overlaps = any(start < e and s_ < end for s_, e in matched_spans)
-            if overlaps:
-                continue
-            token = cand.group(0)
-            entropy = _shannon_entropy(token)
-            if entropy >= ENTROPY_THRESHOLD:
-                found.append((_ENTROPY_RULE_ID, _ENTROPY_RISK_TIER, lineno, _redact(token)))
-
-    return found
+        for _start, _end, rule_id, risk_tier in _scan_line(line, rules):
+            results.append({"rule_id": rule_id, "risk_tier": risk_tier, "line": lineno})
+    return results
 
 
-def _iter_files(root: Path):
-    if root.is_file():
-        yield root
-        return
-    if not root.exists():
-        return
-    for p in sorted(root.rglob("*")):
-        if p.is_file():
-            yield p
-
-
-def _read_text(p: Path) -> Optional[str]:
+def _read_text(path):
     try:
-        return p.read_text(encoding="utf-8", errors="replace")
-    except Exception:
+        data = path.read_bytes()
+    except OSError:
+        return None
+    try:
+        return data.decode("utf-8")
+    except UnicodeDecodeError:
         return None
 
 
-# --------------------------------------------------------------------------
-# Hashing (for cache-key construction -- R-SECRET-005)
-# --------------------------------------------------------------------------
-
-def _hash_tree(root: Path) -> str:
-    h = hashlib.sha256()
-    for f in _iter_files(root):
-        rel = f.relative_to(root).as_posix()
-        h.update(rel.encode("utf-8"))
-        try:
-            h.update(f.read_bytes())
-        except Exception:
-            pass
-    return h.hexdigest()
+def _walk_files(base):
+    for dirpath, dirnames, filenames in os.walk(base):
+        dirnames[:] = [d for d in dirnames if d != "__pycache__"]
+        for fname in filenames:
+            yield Path(dirpath) / fname
 
 
-def _hash_trees(roots: List[Path]) -> str:
-    h = hashlib.sha256()
-    for root in roots:
-        prefix = root.name
-        for f in _iter_files(root):
-            rel = f.relative_to(root).as_posix() if root.exists() and root.is_dir() else root.name
-            h.update(prefix.encode("utf-8"))
-            h.update(rel.encode("utf-8"))
-            try:
-                h.update(f.read_bytes())
-            except Exception:
-                pass
-    return h.hexdigest()
+def _iter_scan_dirs(repo_root):
+    for sub in _SCAN_SUBDIRS:
+        base = Path(repo_root) / sub
+        if not base.exists():
+            continue
+        for path in sorted(_walk_files(base), key=str):
+            yield path
 
 
-# --------------------------------------------------------------------------
-# cache-manager dependency loading
-#
-# comp-cache-manager is importable as `cache_manager`, living under
-# gen/cache-manager/ (module path has an underscore, the containing
-# directory has a hyphen). We first try a normal import (works if the
-# caller's environment already has gen/cache-manager on sys.path); if that
-# fails we locate the file ourselves and load it directly, registering it
-# in sys.modules BEFORE exec_module so its dataclasses can resolve their
-# own __module__ during class-body execution.
-# --------------------------------------------------------------------------
-
-def _load_module_from_file(module_name: str, file_path: Path):
-    spec = importlib.util.spec_from_file_location(module_name, file_path)
-    if spec is None or spec.loader is None:
-        return None
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[module_name] = module  # MUST happen before exec_module
-    spec.loader.exec_module(module)
-    return module
+def _scan_tree(repo_root, rules):
+    matches = []
+    for path in _iter_scan_dirs(repo_root):
+        text = _read_text(path)
+        if text is None:
+            continue
+        rel_str = str(path.relative_to(repo_root)).replace(os.sep, "/")
+        for match in _scan_file_content(text, rules):
+            match["file"] = rel_str
+            matches.append(match)
+    return matches
 
 
-def _load_cache_manager():
-    try:
-        import cache_manager  # type: ignore
-        return cache_manager
-    except ImportError:
-        pass
+# ---------------------------------------------------------------------------
+# Notification
+# ---------------------------------------------------------------------------
 
-    here = Path(__file__).resolve()
-    candidate_dirs: List[Path] = []
-
-    # Walk upward looking for a sibling "gen/cache-manager" directory.
-    for ancestor in here.parents:
-        d = ancestor / "gen" / "cache-manager"
-        if d.exists():
-            candidate_dirs.append(d)
-
-    # Also handle the case where this file itself lives under a "gen/"
-    # directory (gen/secret-scanner/secret_scanner.py) -- check the sibling
-    # "cache-manager" directory directly.
-    for ancestor in here.parents:
-        if ancestor.name == "gen":
-            d = ancestor / "cache-manager"
-            if d.exists() and d not in candidate_dirs:
-                candidate_dirs.append(d)
-            break
-
-    for d in candidate_dirs:
-        flat = d / "cache_manager.py"
-        if flat.exists():
-            module = _load_module_from_file("cache_manager", flat)
-            if module is not None:
-                return module
-        pkg_init = d / "cache_manager" / "__init__.py"
-        if pkg_init.exists():
-            module = _load_module_from_file("cache_manager", pkg_init)
-            if module is not None:
-                return module
-
-    raise ImportError("could not locate the cache_manager dependency module")
-
-
-# --------------------------------------------------------------------------
-# Webhook notification (R-SECRET-004)
-# --------------------------------------------------------------------------
-
-def _attempt_webhook(url: str, payload: Dict[str, Any]) -> Optional[Dict[str, str]]:
-    """Attempt the webhook call exactly once. Never raises; never retries.
-
-    Returns None on apparent success, or a {"category", "message"} dict on
-    failure. This never affects `flagged`.
-    """
-    import socket
-    import urllib.error
-    import urllib.request
-
-    try:
-        data = json.dumps(payload).encode("utf-8")
-        req = urllib.request.Request(
-            url, data=data, headers={"Content-Type": "application/json"}, method="POST"
-        )
-        with urllib.request.urlopen(req, timeout=5) as resp:
-            status = getattr(resp, "status", 200)
-            if status in (401, 403):
-                return {"category": "auth", "message": f"HTTP {status}"}
-        return None
-    except urllib.error.HTTPError as e:
-        if e.code in (401, 403):
-            return {"category": "auth", "message": str(e)}
-        return {"category": "network", "message": str(e)}
-    except (socket.timeout, TimeoutError):
-        return {"category": "timeout", "message": "timed out"}
-    except urllib.error.URLError as e:
-        reason = getattr(e, "reason", None)
-        if isinstance(reason, (socket.timeout, TimeoutError)):
-            return {"category": "timeout", "message": str(e)}
-        return {"category": "network", "message": str(e)}
-    except Exception as e:  # pragma: no cover - defensive catch-all
-        return {"category": "network", "message": str(e)}
-
-
-def _maybe_notify(flagged: bool, matches: List[SecretScanMatch]) -> "tuple[bool, Optional[Dict[str, str]]]":
-    webhook_url = _var("VAR-COMPLIANCE-WEBHOOK-URL")
-    due = flagged or any(m.risk_tier == "high" for m in matches)
-    notified = bool(due and webhook_url)
-    delivery_error = None
-    if notified:
-        delivery_error = _attempt_webhook(
-            webhook_url,
-            {
-                "component": "secret-scanner",
-                "flagged": flagged,
-                "matches": [m.to_dict() for m in matches],
-            },
-        )
-    return notified, delivery_error
-
-
-# --------------------------------------------------------------------------
-# Public library API
-# --------------------------------------------------------------------------
-
-def scan(repo_root: Path) -> SecretScanResult:
-    """Full, cache-aware scan of specs/, gen/, and verification/.
-
-    R-SECRET-001/002/003/004/005/006/007.
-    """
-    repo_root = Path(repo_root)
-
-    db_path = _var("VAR-SECRET-PATTERNS-PATH")
-    db_version, rules = _load_pattern_db(db_path)
-    gate_version = f"{_GATE_NAME}@{db_version}"
-    model_pin = "none"  # this gate makes no model calls
-
-    scan_roots = [repo_root / name for name in _SCAN_DIR_NAMES]
-
-    spec_bundle_hash = "sha256:" + _hash_tree(repo_root / "specs")
-    gen_output_hash = "sha256:" + _hash_trees(
-        [repo_root / "gen", repo_root / "verification"]
+def _send_webhook(url, payload):
+    data = json.dumps(payload).encode("utf-8")
+    req = urllib.request.Request(
+        url, data=data, headers={"Content-Type": "application/json"}, method="POST"
     )
+    try:
+        urllib.request.urlopen(req, timeout=10)
+        return None
+    except urllib.error.HTTPError as exc:
+        if exc.code in (401, 403):
+            return {"category": "auth", "message": str(exc)}
+        return {"category": "network", "message": str(exc)}
+    except socket.timeout:
+        return {"category": "timeout", "message": "request timed out"}
+    except urllib.error.URLError as exc:
+        reason = exc.reason
+        if isinstance(reason, socket.timeout):
+            return {"category": "timeout", "message": str(exc)}
+        return {"category": "network", "message": str(exc)}
+    except Exception as exc:  # noqa: BLE001 - must never raise out of scan()
+        return {"category": "network", "message": str(exc)}
+
+
+# ---------------------------------------------------------------------------
+# cache-manager dynamic loading
+# ---------------------------------------------------------------------------
+
+def _try_load_cache_manager(repo_root):
+    base = Path(repo_root) / "gen" / "cache-manager"
+    flat = base / "cache_manager.py"
+    pkg = base / "cache_manager" / "__init__.py"
+    if flat.is_file():
+        module_path = flat
+    elif pkg.is_file():
+        module_path = pkg
+    else:
+        return None
+
+    try:
+        spec = importlib.util.spec_from_file_location("cache_manager", module_path)
+        if spec is None or spec.loader is None:
+            return None
+        module = importlib.util.module_from_spec(spec)
+        sys.modules["cache_manager"] = module
+        spec.loader.exec_module(module)
+        return module
+    except Exception:
+        sys.modules.pop("cache_manager", None)
+        return None
+
+
+def _hash_dir(base):
+    h = hashlib.sha256()
+    if base.exists():
+        for path in sorted(_walk_files(base), key=lambda p: str(p)):
+            try:
+                data = path.read_bytes()
+            except OSError:
+                continue
+            rel = str(path.relative_to(base)).replace(os.sep, "/")
+            h.update(rel.encode("utf-8"))
+            h.update(b"\x00")
+            h.update(data)
+            h.update(b"\x00")
+    return "sha256:" + h.hexdigest()
+
+
+def _hash_combined(bases):
+    h = hashlib.sha256()
+    for base in bases:
+        h.update(_hash_dir(base).encode("utf-8"))
+    return "sha256:" + h.hexdigest()
+
+
+# ---------------------------------------------------------------------------
+# Public library API
+# ---------------------------------------------------------------------------
+
+def scan(repo_root) -> dict:
+    repo_root = Path(repo_root)
+    version, rules = _load_pattern_db(repo_root)
+    full_gate_version = f"secret_scanner@{version}"
 
     cache_module = None
     cache_key = None
     try:
-        cache_module = _load_cache_manager()
-        cache_key = cache_module.CacheKey(
-            spec_bundle_hash=spec_bundle_hash,
-            gate_inputs_hash=gen_output_hash,
-            gate_version=gate_version,
-            model_pin=model_pin,
-        )
+        cache_module = _try_load_cache_manager(repo_root)
     except Exception:
         cache_module = None
-        cache_key = None
 
-    if cache_module is not None and cache_key is not None:
+    if cache_module is not None:
         try:
-            cached = cache_module.get(cache_key, repo_root=repo_root)
-        except Exception:
-            cached = None
-        if cached is not None and not isinstance(cached, cache_module.Miss):
-            return SecretScanResult.from_payload(cached.payload, cache_hit=True)
-
-    matches: List[SecretScanMatch] = []
-    for root in scan_roots:
-        if not root.exists():
-            continue
-        for f in _iter_files(root):
-            text = _read_text(f)
-            if text is None:
-                continue
-            try:
-                rel = f.relative_to(repo_root).as_posix()
-            except ValueError:
-                rel = str(f)
-            for rule_id, risk_tier, lineno, excerpt in _scan_text(text, rules):
-                matches.append(
-                    SecretScanMatch(
-                        rule_id=rule_id,
-                        risk_tier=risk_tier,
-                        file=rel,
-                        line=lineno,
-                        excerpt=excerpt,
-                    )
-                )
-
-    flagged = len(matches) > 0  # R-SECRET-002: pure confidence determination
-    notified, delivery_error = _maybe_notify(flagged, matches)
-
-    result = SecretScanResult(
-        scope="full",
-        gate_version=gate_version,
-        flagged=flagged,
-        matches=matches,
-        notified=notified,
-        notification_delivery_error=delivery_error,
-        cache_hit=False,
-    )
-
-    if cache_module is not None and cache_key is not None:
-        try:
-            cache_module.put(
-                cache_key,
-                cache_module.CachedResult(
-                    gate_type=_GATE_NAME,
-                    payload=result.to_dict(),
-                    stored_at=cache_module.now_iso(),
-                ),
-                repo_root=repo_root,
+            spec_bundle_hash = _hash_dir(repo_root / "specs")
+            gate_inputs_hash = _hash_combined([repo_root / "gen", repo_root / "verification"])
+            cache_key = cache_module.CacheKey(
+                spec_bundle_hash=spec_bundle_hash,
+                gate_inputs_hash=gate_inputs_hash,
+                gate_version=full_gate_version,
+                model_pin="none",
             )
+            cached = cache_module.get(cache_key, repo_root=repo_root)
+            payload = _dget(cached, "payload")
+            if payload is not None:
+                result = _payload_to_dict(payload)
+                result["cache_hit"] = True
+                return result
         except Exception:
-            # Caching is best-effort; a failure to cache MUST NOT turn a
-            # real, computed result into a failure to produce one.
+            cache_key = None
+
+    matches = _scan_tree(repo_root, rules)
+    flagged = len(matches) > 0
+    has_high = any(m["risk_tier"] == "high" for m in matches)
+    webhook_url = os.environ.get("VAR_COMPLIANCE_WEBHOOK_URL", "")
+    notified = (flagged or has_high) and bool(webhook_url)
+
+    notification_delivery_error = None
+    if notified:
+        notification_delivery_error = _send_webhook(
+            webhook_url,
+            {
+                "scope": "full",
+                "gate_version": full_gate_version,
+                "flagged": flagged,
+                "matches": matches,
+            },
+        )
+
+    result = {
+        "scope": "full",
+        "gate_version": full_gate_version,
+        "flagged": flagged,
+        "matches": matches,
+        "notified": notified,
+        "notification_delivery_error": notification_delivery_error,
+        "cache_hit": False,
+    }
+
+    if cache_module is not None and cache_key is not None:
+        try:
+            stored_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+            cached_result = cache_module.CachedResult(
+                gate_type="secret_scanner",
+                payload={
+                    "scope": result["scope"],
+                    "gate_version": result["gate_version"],
+                    "flagged": result["flagged"],
+                    "matches": result["matches"],
+                    "notified": result["notified"],
+                    "notification_delivery_error": result["notification_delivery_error"],
+                    "cache_hit": False,
+                },
+                stored_at=stored_at,
+            )
+            cache_module.put(cache_key, cached_result, repo_root=repo_root)
+        except Exception:
             pass
 
     return result
 
 
-def scan_files(paths: List[Path]) -> SecretScanResult:
-    """Lightweight precommit/prepush scan -- R-SECRET-008.
+def scan_files(paths) -> dict:
+    version, rules = _load_pattern_db(Path.cwd())
+    full_gate_version = f"secret_scanner@{version}"
 
-    Scoped to the given files only; no cache-manager dependency, no
-    gate_version dependency.
-    """
-    db_path = _var("VAR-SECRET-PATTERNS-PATH")
-    _version, rules = _load_pattern_db(db_path)
-
-    matches: List[SecretScanMatch] = []
-    for p in paths:
-        p = Path(p)
-        if not p.exists() or not p.is_file():
-            continue
-        text = _read_text(p)
+    matches = []
+    for raw in paths:
+        path = Path(raw)
+        text = _read_text(path)
         if text is None:
             continue
-        for rule_id, risk_tier, lineno, excerpt in _scan_text(text, rules):
-            matches.append(
-                SecretScanMatch(
-                    rule_id=rule_id,
-                    risk_tier=risk_tier,
-                    file=str(p),
-                    line=lineno,
-                    excerpt=excerpt,
-                )
-            )
+        file_str = str(path).replace(os.sep, "/")
+        for match in _scan_file_content(text, rules):
+            match["file"] = file_str
+            matches.append(match)
 
     flagged = len(matches) > 0
-    notified, delivery_error = _maybe_notify(flagged, matches)
+    has_high = any(m["risk_tier"] == "high" for m in matches)
+    webhook_url = os.environ.get("VAR_COMPLIANCE_WEBHOOK_URL", "")
+    notified = (flagged or has_high) and bool(webhook_url)
 
-    return SecretScanResult(
-        scope="precommit",
-        gate_version=None,
-        flagged=flagged,
-        matches=matches,
-        notified=notified,
-        notification_delivery_error=delivery_error,
-        cache_hit=False,
-    )
+    notification_delivery_error = None
+    if notified:
+        notification_delivery_error = _send_webhook(
+            webhook_url,
+            {
+                "scope": "precommit",
+                "flagged": flagged,
+                "matches": matches,
+            },
+        )
+
+    return {
+        "scope": "precommit",
+        "gate_version": full_gate_version,
+        "flagged": flagged,
+        "matches": matches,
+        "notified": notified,
+        "notification_delivery_error": notification_delivery_error,
+        "cache_hit": False,
+    }
 
 
-# --------------------------------------------------------------------------
-# git helpers for the precommit CLI form
-# --------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# precommit default file discovery
+# ---------------------------------------------------------------------------
 
-def _git_pending_files(repo_root: Path) -> List[str]:
-    """Best-effort discovery of staged/pending files in the local git state.
-
-    Used only when `--files` is omitted on `precommit`. Any failure (no
-    git, no repo, git not on PATH) yields an empty file list rather than
-    raising -- a precommit hook must never crash the commit it's guarding.
-    """
-    attempts = [
+def _default_precommit_files(repo_root):
+    files = set()
+    commands = (
         ["git", "diff", "--name-only", "--diff-filter=ACMR", "HEAD"],
         ["git", "diff", "--cached", "--name-only", "--diff-filter=ACMR"],
-    ]
-    for cmd in attempts:
+    )
+    for command in commands:
         try:
             proc = subprocess.run(
-                cmd,
-                cwd=str(repo_root),
-                capture_output=True,
-                text=True,
-                timeout=5,
+                command, cwd=str(repo_root), capture_output=True, text=True, check=False
             )
-        except Exception:
-            continue
-        if proc.returncode == 0:
-            files = [line.strip() for line in proc.stdout.splitlines() if line.strip()]
-            if files:
-                return files
-    return []
+        except OSError:
+            return []
+        if proc.returncode != 0:
+            return []
+        for line in proc.stdout.splitlines():
+            line = line.strip()
+            if line:
+                files.add(line)
+    return sorted(files)
 
 
-# --------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
 # CLI
-# --------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
 
-def _build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="hotdocs secret-scan", add_help=True)
-    parser.add_argument("--repo-root", default=".")
-    parser.add_argument("--format", choices=["json", "text"], default="text")
-
-    sub = parser.add_subparsers(dest="mode")
-    precommit = sub.add_parser("precommit")
-    precommit.add_argument("--files", action="append", default=None)
-    precommit.add_argument("--repo-root", default=".")
-    precommit.add_argument("--format", choices=["json", "text"], default="text")
-
-    return parser
+def _usage_error(message):
+    print(f"usage error: {message}", file=sys.stderr)
 
 
-def _print_result(result: SecretScanResult, fmt: str) -> None:
-    if fmt == "json":
-        print(json.dumps(result.to_dict(), indent=2, sort_keys=True))
-        return
-
-    status = "FLAGGED" if result.flagged else "CLEAN"
-    print(f"{status} ({result.scope}) -- {len(result.matches)} match(es)")
-    for m in result.matches:
-        print(f"  [{m.risk_tier}] {m.rule_id} {m.file}:{m.line} {m.excerpt}")
-    if result.notified:
-        if result.notification_delivery_error:
-            print(f"notification: due, delivery failed ({result.notification_delivery_error})")
-        else:
-            print("notification: due, delivered")
+def _flag_value(args, i, name):
+    arg = args[i]
+    prefix = name + "="
+    if arg.startswith(prefix):
+        return arg[len(prefix):], i + 1, True
+    if i + 1 >= len(args):
+        return None, i + 1, False
+    return args[i + 1], i + 2, True
 
 
-def main(argv: Optional[List[str]] = None) -> int:
-    raw_argv = sys.argv[1:] if argv is None else list(argv)
+def main(argv) -> int:
+    args = list(argv)
+    if args and args[0] == "secret-scan":
+        args = args[1:]
 
-    # Tolerate being invoked either with or without the leading
-    # "secret-scan" token (the `hotdocs` dispatcher strips it; direct
-    # invocation of this module may not).
-    if raw_argv and raw_argv[0] == "secret-scan":
-        raw_argv = raw_argv[1:]
-
-    parser = _build_parser()
-    try:
-        ns = parser.parse_args(raw_argv)
-    except SystemExit as e:
-        code = e.code
-        return code if isinstance(code, int) else 2
-
-    repo_root = Path(getattr(ns, "repo_root", "."))
-    fmt = getattr(ns, "format", "text")
-
-    try:
-        if getattr(ns, "mode", None) == "precommit":
-            file_args = getattr(ns, "files", None)
-            if file_args:
-                paths = [Path(p) for p in file_args]
-            else:
-                paths = [repo_root / f for f in _git_pending_files(repo_root)]
-            result = scan_files(paths)
-        else:
-            result = scan(repo_root)
-    except Exception as e:
-        print(f"secret-scan: error: {e}", file=sys.stderr)
+    subcommand = "full"
+    if args and args[0] == "precommit":
+        subcommand = "precommit"
+        args = args[1:]
+    elif args and not args[0].startswith("-"):
+        _usage_error(f"unknown subcommand: {args[0]}")
         return 2
 
-    _print_result(result, fmt)
-    return 1 if result.flagged else 0
+    repo_root_raw = None
+    fmt = "text"
+    files = []
+
+    i = 0
+    while i < len(args):
+        arg = args[i]
+        if arg == "--repo-root" or arg.startswith("--repo-root="):
+            value, i, ok = _flag_value(args, i, "--repo-root")
+            if not ok:
+                _usage_error("--repo-root requires a value")
+                return 2
+            repo_root_raw = value
+        elif arg == "--format" or arg.startswith("--format="):
+            value, i, ok = _flag_value(args, i, "--format")
+            if not ok:
+                _usage_error("--format requires a value")
+                return 2
+            if value not in ("json", "text"):
+                _usage_error(f"invalid --format: {value}")
+                return 2
+            fmt = value
+        elif subcommand == "precommit" and (arg == "--files" or arg.startswith("--files=")):
+            value, i, ok = _flag_value(args, i, "--files")
+            if not ok:
+                _usage_error("--files requires a value")
+                return 2
+            files.append(value)
+        else:
+            _usage_error(f"unknown argument: {arg}")
+            return 2
+
+    repo_root = Path(repo_root_raw) if repo_root_raw else Path.cwd()
+
+    if subcommand == "full":
+        result = scan(repo_root)
+    else:
+        if not files:
+            files = _default_precommit_files(repo_root)
+        abs_paths = []
+        for raw in files:
+            p = Path(raw)
+            if not p.is_absolute():
+                p = repo_root / p
+            abs_paths.append(p)
+        result = scan_files(abs_paths)
+        for match in result["matches"]:
+            try:
+                rel = os.path.relpath(match["file"], str(repo_root))
+                match["file"] = rel.replace(os.sep, "/")
+            except ValueError:
+                pass
+
+    if fmt == "json":
+        print(json.dumps(result))
+    else:
+        print("FLAGGED" if result["flagged"] else "CLEAN")
+        for match in result["matches"]:
+            print(f"{match['file']}:{match['line']} {match['rule_id']} ({match['risk_tier']})")
+
+    return 1 if result["flagged"] else 0
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(main(sys.argv[1:]))

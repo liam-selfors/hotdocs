@@ -1,209 +1,209 @@
 import json
-import tempfile
 from pathlib import Path
 
 import provenance_tracker
 
 
-def _get(obj, key):
-    return obj[key] if isinstance(obj, dict) else getattr(obj, key)
+def _get(obj, key, default=None):
+    if isinstance(obj, dict):
+        return obj.get(key, default)
+    return getattr(obj, key, default)
 
 
-def _read_jsonl(path):
-    if not path.exists():
-        return []
-    lines = path.read_text(encoding="utf-8").splitlines()
-    return [json.loads(line) for line in lines if line.strip()]
+def _write_module(repo_root, dependency_slug, module_name, source):
+    module_dir = repo_root / "gen" / dependency_slug
+    module_dir.mkdir(parents=True, exist_ok=True)
+    module_path = module_dir / f"{module_name}.py"
+    module_path.write_text(source)
+    return module_path
 
 
-def _component_md(slug, comp_id):
-    return (
-        "---\n"
-        f"id: {comp_id}\n"
-        f"title: {slug}\n"
-        "status: draft\n"
-        "owners: [tester]\n"
-        "sealed: true\n"
-        f"source_path: legacy/{slug}.py\n"
-        "---\n"
-        "\n"
-        f"# {slug}\n"
-        "\n"
-        "Fixture component for AC-TRACK-011 isolation testing.\n"
-    )
+IMPACT_ANALYZER_TEMPLATE = r'''
+import json
+
+INVOCATION_LOG = __INVOCATION_LOG_PATH__
+IMPACTED_IDS = __IMPACTED_IDS__
 
 
-def _requirement_md(req_id):
-    return (
-        f"# {req_id}\n"
-        "\n"
-        "Fixture requirement for AC-TRACK-011 isolation testing.\n"
-    )
-
-
-def _acceptance_md(ac_id, req_id):
-    return (
-        f"# {ac_id}\n"
-        "\n"
-        f"Covers: {req_id}\n"
-        "Kind: llm-judge\n"
-        "\n"
-        "Fixture acceptance criterion satisfying Covers linkage for lint cleanliness.\n"
-    )
-
-
-def _build_component_fixture(repo_root, comp_id):
-    slug = comp_id[len("comp-"):]
-    base = repo_root / "specs" / "components" / slug
-    base.mkdir(parents=True, exist_ok=True)
-    (base / "component.md").write_text(_component_md(slug, comp_id), encoding="utf-8")
-
-    req_name = slug.upper().replace("-", "")
-    req_id = f"R-{req_name}-001"
-    ac_id = f"AC-{req_name}-001"
-
-    (base / "requirements").mkdir(parents=True, exist_ok=True)
-    (base / "requirements" / f"{req_id}.md").write_text(_requirement_md(req_id), encoding="utf-8")
-
-    (base / "acceptance").mkdir(parents=True, exist_ok=True)
-    (base / "acceptance" / f"{ac_id}.md").write_text(_acceptance_md(ac_id, req_id), encoding="utf-8")
-
-
-def _impact_analyzer_source(impacted_ids):
-    impacted = [{"component_id": cid, "reason": "direct", "via": None} for cid in impacted_ids]
-    return (
-        "import json\n"
-        "from pathlib import Path\n"
-        "\n"
-        "def compute_blast_radius(changed_ids, repo_root):\n"
-        "    log_path = Path(repo_root) / '_fake_impact_analyzer_calls.jsonl'\n"
-        "    with open(log_path, 'a', encoding='utf-8') as fh:\n"
-        "        fh.write(json.dumps({'changed_ids': list(changed_ids)}) + '\\n')\n"
-        "    return {'impacted': " + repr(impacted) + ", 'precondition_error': None}\n"
-    )
-
-
-def _provenance_checker_source():
-    return (
-        "import json\n"
-        "from pathlib import Path\n"
-        "\n"
-        "def check_provenance(component_id, spec_bundle_hash, gate_versions, repo_root):\n"
-        "    log_path = Path(repo_root) / '_fake_provenance_checker_calls.jsonl'\n"
-        "    with open(log_path, 'a', encoding='utf-8') as fh:\n"
-        "        fh.write(json.dumps({'component_id': component_id}) + '\\n')\n"
-        "    return {\n"
-        "        'hit': False,\n"
-        "        'verification_report': None,\n"
-        "        'license_scan': None,\n"
-        "        'secret_scan': None,\n"
-        "    }\n"
-    )
-
-
-def _capability_scenario_verifier_source():
-    return (
-        "def run_capability_scenarios(blast_radius, repo_root, judge=None, test_author=None):\n"
-        "    return {}\n"
-        "\n"
-        "def check_capability_provenance(capability_id, repo_root):\n"
-        "    return {'hit': False, 'capability_scenario_report': None}\n"
-        "\n"
-        "def run_capability_gates(capability_id, repo_root, judge=None, test_author=None):\n"
-        "    return {'hit': False, 'capability_scenario_report': None}\n"
-    )
-
-
-def _build_repo(repo_root, impacted_ids):
-    gen_dir = repo_root / "gen"
-
-    impact_dir = gen_dir / "impact-analyzer"
-    impact_dir.mkdir(parents=True, exist_ok=True)
-    (impact_dir / "impact_analyzer.py").write_text(
-        _impact_analyzer_source(impacted_ids), encoding="utf-8"
-    )
-
-    prov_dir = gen_dir / "provenance-checker"
-    prov_dir.mkdir(parents=True, exist_ok=True)
-    (prov_dir / "provenance_checker.py").write_text(
-        _provenance_checker_source(), encoding="utf-8"
-    )
-
-    cap_dir = gen_dir / "capability-scenario-verifier"
-    cap_dir.mkdir(parents=True, exist_ok=True)
-    (cap_dir / "capability_scenario_verifier.py").write_text(
-        _capability_scenario_verifier_source(), encoding="utf-8"
-    )
-
-    for comp_id in impacted_ids:
-        _build_component_fixture(repo_root, comp_id)
-
-
-def test_ac_track_011_check_readiness_isolates_repo_root_dependencies():
-    with tempfile.TemporaryDirectory() as tmp_a, tempfile.TemporaryDirectory() as tmp_b:
-        repo_a = Path(tmp_a)
-        repo_b = Path(tmp_b)
-        ids_a = ["comp-alpha-one", "comp-alpha-two"]
-        ids_b = ["comp-beta-one", "comp-beta-two"]
-        _build_repo(repo_a, ids_a)
-        _build_repo(repo_b, ids_b)
-
-        result_a = provenance_tracker.check_readiness(
-            repo_root=repo_a, changed_ids=["R-FAKE-CHANGE-A"], model=None, seed=0, llm_backend=None,
+def compute_blast_radius(changed_ids, repo_root):
+    with open(INVOCATION_LOG, "a") as f:
+        f.write(
+            json.dumps(
+                {"changed_ids": list(changed_ids), "repo_root": str(repo_root)}
+            )
+            + "\n"
         )
-        components_a = _get(result_a, "components")
-        assert set(components_a.keys()) == set(ids_a)
-        assert _get(result_a, "scope") == "blast-radius"
+    return {
+        "impacted": [
+            {"component_id": cid, "reason": "direct", "via": None}
+            for cid in IMPACTED_IDS
+        ],
+        "precondition_error": None,
+    }
+'''
 
-        result_b = provenance_tracker.check_readiness(
-            repo_root=repo_b, changed_ids=["R-FAKE-CHANGE-B"], model=None, seed=0, llm_backend=None,
+PROVENANCE_CHECKER_TEMPLATE = r'''
+import json
+
+INVOCATION_LOG = __INVOCATION_LOG_PATH__
+
+
+class ProvenanceKey:
+    def __init__(self, spec_bundle_hash, gate_versions):
+        self.spec_bundle_hash = spec_bundle_hash
+        self.gate_versions = gate_versions
+
+
+def current_provenance_key(component_id, repo_root):
+    with open(INVOCATION_LOG, "a") as f:
+        f.write(
+            json.dumps(
+                {
+                    "fn": "current_provenance_key",
+                    "component_id": component_id,
+                    "repo_root": str(repo_root),
+                }
+            )
+            + "\n"
         )
-        components_b = _get(result_b, "components")
-        assert set(components_b.keys()) == set(ids_b)
-        assert _get(result_b, "scope") == "blast-radius"
-
-        assert set(components_a.keys()) == set(ids_a)
-        assert set(components_a.keys()).isdisjoint(set(ids_b))
-        assert set(components_b.keys()).isdisjoint(set(ids_a))
-
-        pc_log_a = _read_jsonl(repo_a / "_fake_provenance_checker_calls.jsonl")
-        pc_log_b = _read_jsonl(repo_b / "_fake_provenance_checker_calls.jsonl")
-        assert {entry["component_id"] for entry in pc_log_a} == set(ids_a)
-        assert {entry["component_id"] for entry in pc_log_b} == set(ids_b)
-        assert len(pc_log_a) == len(ids_a)
-        assert len(pc_log_b) == len(ids_b)
-
-        ia_log_a = _read_jsonl(repo_a / "_fake_impact_analyzer_calls.jsonl")
-        ia_log_b = _read_jsonl(repo_b / "_fake_impact_analyzer_calls.jsonl")
-        assert len(ia_log_a) == 1
-        assert len(ia_log_b) == 1
+    return ProvenanceKey(
+        spec_bundle_hash="sha256:" + "a" * 64,
+        gate_versions={
+            "compiler": "criterion-compiler@1.0.0",
+            "generated_test": "generated_test@1.0.0",
+            "verifier": "verifier-orchestrator@2.0.0",
+            "license_scanner": "license_scanner@3.1.0",
+            "secret_scanner": "secret_scanner@0.0.0",
+        },
+    )
 
 
-def test_ac_track_011_check_readiness_isolates_repo_root_dependencies_reversed_order():
-    with tempfile.TemporaryDirectory() as tmp_c, tempfile.TemporaryDirectory() as tmp_d:
-        repo_c = Path(tmp_c)
-        repo_d = Path(tmp_d)
-        ids_c = ["comp-gamma-one", "comp-gamma-two"]
-        ids_d = ["comp-delta-one", "comp-delta-two"]
-        _build_repo(repo_c, ids_c)
-        _build_repo(repo_d, ids_d)
-
-        result_d = provenance_tracker.check_readiness(
-            repo_root=repo_d, changed_ids=["R-FAKE-CHANGE-D"], model=None, seed=0, llm_backend=None,
+def check_provenance(component_id, spec_bundle_hash, gate_versions, repo_root):
+    with open(INVOCATION_LOG, "a") as f:
+        f.write(
+            json.dumps(
+                {
+                    "fn": "check_provenance",
+                    "component_id": component_id,
+                    "repo_root": str(repo_root),
+                }
+            )
+            + "\n"
         )
-        components_d = _get(result_d, "components")
-        assert set(components_d.keys()) == set(ids_d)
+    return {
+        "hit": True,
+        "verification_report": {
+            "component_id": component_id,
+            "criteria": [],
+            "requirement_results": {},
+            "interface_drift": False,
+            "mutation_score": 1.0,
+            "overall": "pass",
+        },
+        "license_scan": {
+            "component_id": component_id,
+            "gate_version": "license_scanner@3.1.0",
+            "similarity_score": 0.0,
+            "block_threshold": 0.70,
+            "blocked": False,
+            "matches": [],
+            "notified": False,
+            "notification_delivery_error": None,
+            "cache_hit": False,
+        },
+        "secret_scan": {
+            "scope": "full",
+            "gate_version": "secret_scanner@2.0.0",
+            "flagged": False,
+            "matches": [],
+            "notified": False,
+            "notification_delivery_error": None,
+            "cache_hit": False,
+        },
+    }
+'''
 
-        result_c = provenance_tracker.check_readiness(
-            repo_root=repo_c, changed_ids=["R-FAKE-CHANGE-C"], model=None, seed=0, llm_backend=None,
+CAPABILITY_SCENARIO_VERIFIER_SOURCE = r'''
+def check_capability_provenance(capability_id, repo_root):
+    return {"hit": False, "capability_scenario_report": None}
+
+
+def run_capability_gates(capability_id, repo_root, judge=None, test_author=None):
+    return {"hit": False, "capability_scenario_report": None}
+'''
+
+
+def _setup_repo(repo_root, impacted_ids, impact_log_path, provenance_log_path):
+    impact_source = IMPACT_ANALYZER_TEMPLATE.replace(
+        "__INVOCATION_LOG_PATH__", repr(str(impact_log_path))
+    ).replace("__IMPACTED_IDS__", repr(list(impacted_ids)))
+    _write_module(repo_root, "impact-analyzer", "impact_analyzer", impact_source)
+
+    provenance_source = PROVENANCE_CHECKER_TEMPLATE.replace(
+        "__INVOCATION_LOG_PATH__", repr(str(provenance_log_path))
+    )
+    _write_module(repo_root, "provenance-checker", "provenance_checker", provenance_source)
+
+    _write_module(
+        repo_root,
+        "capability-scenario-verifier",
+        "capability_scenario_verifier",
+        CAPABILITY_SCENARIO_VERIFIER_SOURCE,
+    )
+
+
+def test_check_readiness_resolves_impact_analyzer_per_repo_root(tmp_path):
+    repo_a = tmp_path / "repo_a"
+    repo_b = tmp_path / "repo_b"
+    repo_a.mkdir()
+    repo_b.mkdir()
+
+    impact_log_a = repo_a / "impact_analyzer_invocations.log"
+    impact_log_b = repo_b / "impact_analyzer_invocations.log"
+    provenance_log_a = repo_a / "provenance_checker_invocations.log"
+    provenance_log_b = repo_b / "provenance_checker_invocations.log"
+
+    ids_a = ["comp-alpha-fixture", "comp-alpha2-fixture"]
+    ids_b = ["comp-beta-fixture", "comp-beta2-fixture"]
+
+    _setup_repo(repo_a, ids_a, impact_log_a, provenance_log_a)
+    _setup_repo(repo_b, ids_b, impact_log_b, provenance_log_b)
+
+    changed_ids = ["SPEC-FIXTURE-001"]
+
+    call_sequence = [
+        (repo_a, ids_a, ids_b),
+        (repo_b, ids_b, ids_a),
+        (repo_b, ids_b, ids_a),
+        (repo_a, ids_a, ids_b),
+    ]
+
+    for repo_root, expected_ids, other_ids in call_sequence:
+        result = provenance_tracker.check_readiness(
+            repo_root=repo_root, changed_ids=changed_ids
         )
-        components_c = _get(result_c, "components")
-        assert set(components_c.keys()) == set(ids_c)
+        components = _get(result, "components", {}) or {}
+        actual_ids = set(components.keys())
 
-        assert set(components_d.keys()).isdisjoint(set(ids_c))
-        assert set(components_c.keys()).isdisjoint(set(ids_d))
+        assert actual_ids == set(expected_ids), (
+            f"expected components {set(expected_ids)} for repo_root {repo_root}, "
+            f"got {actual_ids}"
+        )
+        for oid in other_ids:
+            assert oid not in actual_ids, (
+                f"result for repo_root {repo_root} leaked id {oid!r} from the "
+                f"other repo_root's fake"
+            )
 
-        pc_log_c = _read_jsonl(repo_c / "_fake_provenance_checker_calls.jsonl")
-        pc_log_d = _read_jsonl(repo_d / "_fake_provenance_checker_calls.jsonl")
-        assert {entry["component_id"] for entry in pc_log_c} == set(ids_c)
-        assert {entry["component_id"] for entry in pc_log_d} == set(ids_d)
+    for impact_log_path, repo_root in (
+        (impact_log_a, repo_a),
+        (impact_log_b, repo_b),
+    ):
+        lines = impact_log_path.read_text().strip().splitlines()
+        assert lines, f"expected at least one invocation recorded in {impact_log_path}"
+        for line in lines:
+            entry = json.loads(line)
+            assert entry["repo_root"] == str(repo_root), (
+                f"fake impact-analyzer at {impact_log_path} was invoked with "
+                f"repo_root {entry['repo_root']!r}, expected {str(repo_root)!r}"
+            )

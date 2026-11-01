@@ -291,3 +291,34 @@ def test_ac_gen_018_result_echoes_the_bundles_spec_bundle_hash(repo_root):
     bundle = FakeBundle(spec_bundle_hash="sha256:distinctivevalue")
     result = generate(bundle, "claude-sonnet-5", repo_root=repo_root, llm_backend=backend)
     assert result.spec_bundle_hash == "sha256:distinctivevalue"
+
+
+def test_ac_gen_021_redundant_component_prefix_is_stripped(repo_root):
+    """R-GEN-015/D165 -- a candidate restated its own directory
+    (`license-scanner/license_scanner.py`), landing the module one level
+    too deep where nothing could import it."""
+    from conftest import _NONCE_RE
+
+    def _three_files(prompt, model, **params):
+        nonce = _NONCE_RE.search(prompt).group("nonce")
+        blocks = [
+            ("foo-bar/foo_bar.py", "x = 1"),
+            ("gen/foo-bar/helpers/__init__.py", "y = 2"),
+            ("foo_bar_extra.py", "z = 3"),
+        ]
+        text = "\n".join(
+            f"-----BEGIN FILE {nonce}: {path}-----\n{body}\n-----END FILE {nonce}-----"
+            for path, body in blocks
+        )
+        return {"text": text, "model_call_error": None}
+
+    bundle = FakeBundle(component_id="comp-foo-bar")
+    result = generate(bundle, "claude-sonnet-5", repo_root=repo_root, llm_backend=MockBackend([_three_files]))
+
+    gen_dir = repo_root / "gen" / "foo-bar"
+    assert (gen_dir / "foo_bar.py").read_text() == "x = 1"
+    assert (gen_dir / "helpers" / "__init__.py").read_text() == "y = 2"
+    assert (gen_dir / "foo_bar_extra.py").read_text() == "z = 3"
+    assert not (gen_dir / "foo-bar").exists()
+    assert not (gen_dir / "gen").exists()
+    assert set(result.files) == {"foo_bar.py", "helpers/__init__.py", "foo_bar_extra.py"}

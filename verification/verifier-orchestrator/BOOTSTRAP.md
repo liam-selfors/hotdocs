@@ -112,3 +112,17 @@ run against three already-landed components (`decision-drift-detector`,
 `provenance-writer`, `review-packet-builder`): identical verdicts and
 per-criterion results, mutation scores slightly higher under the new
 gate. Swapped in.
+
+## `D163`: `GATE_VERSION` and lettered criterion ids
+
+A provenance key must name this gate's version without running it, so
+the module now exposes `GATE_VERSION` (`R-VERIFY-015`). The first
+`license-scanner` round against the prior gate then crashed inside
+`verify`: the criterion-id pattern could not match a lettered suffix,
+so `AC-LICENSE-003b` fell back to the uppercased file name,
+`AC-LICENSE-003B`, which `spec-bundle-assembler` rejected.
+`R-VERIFY-016` now takes the id exactly from the heading. Both new hand
+tests failed on the prior gate first. Regenerated in one attempt; 18
+of 18 pass. Old and new gates gave identical verdicts and mutation
+scores on `provenance-tracker-ui`, `spec-completeness-assistant`, and
+`decision-drift-detector`. Swapped in.

@@ -42,7 +42,7 @@ PROMPT_VERSION = "v8"
 # itself -- missing this the first time let a stale, pre-fix candidate
 # replay from cache instead of triggering a fresh call. Bumped again on
 # D138, D139, and D159 for the same reason.
-GATE_VERSION = "generator@1.5.0"
+GATE_VERSION = "generator@1.6.0"
 
 
 _SYSTEM_PROMPT = """You are generating the complete source for one component \
@@ -369,6 +369,21 @@ def _as_dict(response: Any) -> dict:
 # ---------------------------------------------------------------------------
 
 
+def _strip_redundant_prefix(files: Dict[str, str], component_id: str) -> Dict[str, str]:
+    """R-GEN-015 (D165): a model that restates the directory it is
+    already writing into (`<component>/x.py` or `gen/<component>/x.py`)
+    has that one leading prefix removed. No other path is rewritten."""
+    comp_dir = _component_dir_name(component_id)
+    out: Dict[str, str] = {}
+    for rel_path, content in files.items():
+        for prefix in (f"gen/{comp_dir}/", f"{comp_dir}/"):
+            if rel_path.startswith(prefix):
+                rel_path = rel_path[len(prefix):]
+                break
+        out[rel_path] = content
+    return out
+
+
 def _write_files(repo_root: Path, component_id: str, files: Dict[str, str]) -> None:
     comp_dir = _component_dir_name(component_id)
     base = (Path(repo_root) / "gen" / comp_dir).resolve()
@@ -477,7 +492,9 @@ def generate(
             retry_feedback=echoed_retry_feedback,
         )
 
-    files = _parse_files(response.get("text") or "", nonce)
+    files = _strip_redundant_prefix(
+        _parse_files(response.get("text") or "", nonce), component_id
+    )
 
     # R-GEN-006/D56: cache only non-empty results -- a response that
     # parses to zero files must never poison the cache for every future

@@ -9,8 +9,8 @@ check_readiness(
 
 The live provenance query (`R-TRACK-009`/`010`, `D88`/`D93`) — "would a
 merge pass right now." Omitting `changed_ids` checks the whole corpus.
-Every component is checked against `provenance-checker` only — a pure
-read, never a call to `component-gate-runner` (`D93`). Every
+Every component is checked against `provenance-checker` only, using
+its `current_provenance_key` — a pure read, never a call to `component-gate-runner` (`D93`). Every
 intersecting capability is checked-then-run against
 `capability-scenario-verifier`'s `run_capability_gates`, passing
 `model`/`seed`/`llm_backend` straight through unchanged (`D89`/`D92`).

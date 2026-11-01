@@ -3,7 +3,7 @@ id: comp-provenance-checker
 title: Provenance Checker
 status: draft
 owners: [pipeline-team]
-depends_on: []
+depends_on: [comp-spec-bundle-assembler, comp-criterion-compiler, comp-test-author, comp-verifier-orchestrator, comp-license-scanner, comp-secret-scanner]
 realizes: [P-ZERO-EDIT]
 uses_var: [VAR-TRUST-JUDGE-PROVENANCE]
 sealed: false
@@ -42,7 +42,8 @@ change.
 
 **In scope:** reading a component's committed `gen/<component>/
 .provenance.json`, comparing its `spec_bundle_hash` and `gate_versions`
-against the caller-supplied current ones, and — when they match —
+against the caller-supplied current ones (defined once, by
+`current_provenance_key`), and — when they match —
 deciding whether to honor that match given
 `VAR-TRUST-JUDGE-PROVENANCE` and whether the embedded
 `verification_report` includes any `llm-judge`-kind criterion.
@@ -99,3 +100,8 @@ None.
   fixed in `generator`/`glossary.md`, not here). `gen/provenance-
   checker/` is now a real top-level package. See `verification/
   provenance-checker/BOOTSTRAP.md` for the full account.
+- `D163`: gains `current_provenance_key`, the one definition of the
+  `spec_bundle_hash`/`gate_versions` a hit compares, so the writer of
+  `.provenance.json` and every checker of it agree. `R-PROVCHECK-006`
+  covers the CLI (`D162`), whose hash validation rejected every real
+  `sha256:`-prefixed hash.

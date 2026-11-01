@@ -1,323 +1,437 @@
 import json
+from pathlib import Path
 
 import provenance_tracker
 
+OWNER_EMAIL = "lselfors@gmail.com"
 
-def field(obj, name):
-    return obj[name] if isinstance(obj, dict) else getattr(obj, name)
+FRONTMATTER = """---
+id: {component_id}
+title: {title}
+status: draft
+owners: [{owner}]
+sealed: true
+source_path: tools/legacy/{slug}.py
+---
 
+# {title}
 
-def write_component(repo_root, component_id, status="draft"):
-    slug = component_id[len("comp-"):]
-    comp_dir = repo_root / "specs" / "components" / slug
-    comp_dir.mkdir(parents=True, exist_ok=True)
-    frontmatter = (
-        "---\n"
-        f"id: {component_id}\n"
-        f"title: {slug.replace('-', ' ').title()}\n"
-        f"status: {status}\n"
-        "owners: [lselfors]\n"
-        "sealed: true\n"
-        f"source_path: fake_src/{slug}.py\n"
-        "---\n\n"
-        f"# {component_id}\n\nSynthetic fixture component for testing.\n"
-    )
-    (comp_dir / "component.md").write_text(frontmatter)
+Fixture component for AC-TRACK-009 testing.
+"""
 
-
-def write_fake_module(repo_root, slug, source):
-    module_name = slug.replace("-", "_")
-    mod_dir = repo_root / "gen" / slug
-    mod_dir.mkdir(parents=True, exist_ok=True)
-    (mod_dir / f"{module_name}.py").write_text(source)
-
-
-def write_json(path, data):
-    path.write_text(json.dumps(data))
-
-
-FAKE_IMPACT_ANALYZER_SOURCE = '''
+PROVENANCE_CHECKER_TEMPLATE = """
 import json
-import os
+
+_CONFIG_PATH = "CONFIG_PATH_PLACEHOLDER"
+_CALLS_LOG = "CALLS_LOG_PLACEHOLDER"
 
 
-def compute_blast_radius(changed_ids, repo_root):
-    calls_path = os.path.join(str(repo_root), "_fake_impact_calls.json")
-    calls = []
-    if os.path.exists(calls_path):
-        with open(calls_path) as f:
-            calls = json.load(f)
-    calls.append(list(changed_ids))
-    with open(calls_path, "w") as f:
-        json.dump(calls, f)
+def _load_config():
+    with open(_CONFIG_PATH, encoding="utf-8") as f:
+        return json.load(f)
 
-    config_path = os.path.join(str(repo_root), "_fake_impact_config.json")
-    with open(config_path) as f:
-        config = json.load(f)
-    return {"impacted": config["impacted"], "precondition_error": None}
-'''
 
-FAKE_PROVENANCE_CHECKER_SOURCE = '''
-import json
-import os
+def _log_call(record):
+    with open(_CALLS_LOG, "a", encoding="utf-8") as f:
+        f.write(json.dumps(record) + "\\n")
+
+
+def current_provenance_key(component_id, repo_root):
+    config = _load_config()
+    entry = config["key"]
+    _log_call({"fn": "current_provenance_key", "component_id": component_id})
+    return {
+        "spec_bundle_hash": entry["spec_bundle_hash"],
+        "gate_versions": entry["gate_versions"],
+    }
 
 
 def check_provenance(component_id, spec_bundle_hash, gate_versions, repo_root):
-    calls_path = os.path.join(str(repo_root), "_fake_provenance_calls.json")
-    calls = []
-    if os.path.exists(calls_path):
-        with open(calls_path) as f:
-            calls = json.load(f)
-    calls.append(component_id)
-    with open(calls_path, "w") as f:
-        json.dump(calls, f)
-
-    config_path = os.path.join(str(repo_root), "_fake_provenance_config.json")
-    with open(config_path) as f:
-        config = json.load(f)
-    if component_id in config:
-        return config[component_id]
+    config = _load_config()
+    entry = config["components"][component_id]
+    _log_call({
+        "fn": "check_provenance",
+        "component_id": component_id,
+        "spec_bundle_hash": spec_bundle_hash,
+        "gate_versions": gate_versions,
+    })
     return {
-        "hit": False,
-        "verification_report": None,
-        "license_scan": None,
-        "secret_scan": None,
+        "hit": entry["hit"],
+        "verification_report": entry.get("verification_report"),
+        "license_scan": entry.get("license_scan"),
+        "secret_scan": entry.get("secret_scan"),
     }
-'''
+"""
 
-FAKE_CAPABILITY_SCENARIO_VERIFIER_SOURCE = '''
-def run_capability_gates(capability_id, repo_root, judge=None, test_author=None):
-    return {"hit": True, "capability_scenario_report": {}}
+IMPACT_ANALYZER_TEMPLATE = """
+import json
 
-
-def check_capability_provenance(capability_id, repo_root):
-    return {"hit": True, "capability_scenario_report": {}}
-'''
+_CALLS_LOG = "CALLS_LOG_PLACEHOLDER"
+_IMPACTED = IMPACTED_PLACEHOLDER
 
 
-def hit_result(component_id, overall="pass", requirement_results=None, blocked=False, flagged=False):
+def _log_call(record):
+    with open(_CALLS_LOG, "a", encoding="utf-8") as f:
+        f.write(json.dumps(record) + "\\n")
+
+
+def compute_blast_radius(changed_ids, repo_root):
+    _log_call({"fn": "compute_blast_radius", "changed_ids": list(changed_ids)})
+    return {"impacted": _IMPACTED, "precondition_error": None}
+"""
+
+GATE_RUNNER_TEMPLATE = """
+import json
+
+_CALLS_LOG = "CALLS_LOG_PLACEHOLDER"
+
+
+def _log_call(record):
+    with open(_CALLS_LOG, "a", encoding="utf-8") as f:
+        f.write(json.dumps(record) + "\\n")
+
+
+def __getattr__(name):
+    def _call(*args, **kwargs):
+        _log_call({"fn": name})
+        return {}
+    return _call
+"""
+
+CAPABILITY_VERIFIER_TEMPLATE = """
+def __getattr__(name):
+    def _call(*args, **kwargs):
+        return {}
+    return _call
+"""
+
+
+def _write(path: Path, content: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(content, encoding="utf-8")
+
+
+def _get(obj, key, default=None):
+    if isinstance(obj, dict):
+        return obj.get(key, default)
+    return getattr(obj, key, default)
+
+
+def _keys(mapping):
+    if isinstance(mapping, dict):
+        return set(mapping.keys())
+    return set(vars(mapping).keys())
+
+
+def _write_module(gen_dir: Path, dependency_slug: str, module_name: str, source: str) -> None:
+    _write(gen_dir / dependency_slug / f"{module_name}.py", source)
+
+
+def _write_component(repo_root: Path, slug: str, requirement_ids: list) -> None:
+    comp_dir = repo_root / "specs" / "components" / slug
+    component_id = f"comp-{slug}"
+    _write(
+        comp_dir / "component.md",
+        FRONTMATTER.format(component_id=component_id, title=slug.title(), owner=OWNER_EMAIL, slug=slug),
+    )
+    for requirement_id in requirement_ids:
+        _write(
+            comp_dir / "requirements" / f"{requirement_id}.md",
+            f"**{requirement_id}** -- MUST do the fixture thing for {component_id}.\n",
+        )
+        ac_id = "AC-" + requirement_id.split("-", 1)[1]
+        _write(
+            comp_dir / "acceptance" / f"{ac_id}.md",
+            f"# {ac_id}\n\nCovers: {requirement_id}\n\n"
+            f"Given the fixture precondition\n"
+            f"When the fixture action runs\n"
+            f"Then the fixture outcome holds\n",
+        )
+
+
+def _setup_provenance_checker(gen_dir: Path, config_path: Path, calls_log: Path, config: dict) -> None:
+    _write(config_path, json.dumps(config))
+    source = PROVENANCE_CHECKER_TEMPLATE.replace("CONFIG_PATH_PLACEHOLDER", str(config_path)).replace(
+        "CALLS_LOG_PLACEHOLDER", str(calls_log)
+    )
+    _write_module(gen_dir, "provenance-checker", "provenance_checker", source)
+
+
+def _setup_repo(tmp_path: Path, components: list, provenance_config: dict, impacted=None):
+    repo_root = tmp_path / "repo"
+    gen_dir = repo_root / "gen"
+
+    for slug, requirement_ids in components:
+        _write_component(repo_root, slug, requirement_ids)
+
+    provenance_calls_log = tmp_path / "provenance_calls.log"
+    provenance_config_path = tmp_path / "provenance_config.json"
+    _setup_provenance_checker(gen_dir, provenance_config_path, provenance_calls_log, provenance_config)
+
+    gate_runner_calls_log = tmp_path / "gate_runner_calls.log"
+    _write_module(
+        gen_dir,
+        "component-gate-runner",
+        "component_gate_runner",
+        GATE_RUNNER_TEMPLATE.replace("CALLS_LOG_PLACEHOLDER", str(gate_runner_calls_log)),
+    )
+
+    _write_module(
+        gen_dir,
+        "capability-scenario-verifier",
+        "capability_scenario_verifier",
+        CAPABILITY_VERIFIER_TEMPLATE,
+    )
+
+    if impacted is not None:
+        impact_calls_log = tmp_path / "impact_calls.log"
+        source = IMPACT_ANALYZER_TEMPLATE.replace("CALLS_LOG_PLACEHOLDER", str(impact_calls_log)).replace(
+            "IMPACTED_PLACEHOLDER", repr(impacted)
+        )
+        _write_module(gen_dir, "impact-analyzer", "impact_analyzer", source)
+
+    return repo_root, provenance_calls_log, gate_runner_calls_log
+
+
+def _read_calls(log_path: Path):
+    if not log_path.exists():
+        return []
+    lines = log_path.read_text(encoding="utf-8").splitlines()
+    return [json.loads(line) for line in lines if line.strip()]
+
+
+def _assert_no_calls(log_path: Path) -> None:
+    if log_path.exists():
+        assert log_path.read_text(encoding="utf-8") == ""
+
+
+def _passing_verification_report(component_id: str, requirement_id: str) -> dict:
+    ac_id = "AC-" + requirement_id.split("-", 1)[1]
     return {
-        "hit": True,
-        "verification_report": {
-            "component_id": component_id,
-            "criteria": [
-                {
-                    "id": "AC-" + component_id[len("comp-"):].upper() + "-001",
-                    "covers": "R-" + component_id[len("comp-"):].upper() + "-001",
-                    "kind": "compiled",
-                    "result": overall,
-                }
-            ],
-            "requirement_results": requirement_results
-            if requirement_results is not None
-            else {"R-" + component_id[len("comp-"):].upper() + "-001": overall},
-            "interface_drift": False,
-            "mutation_score": 1.0,
-            "overall": overall,
-        },
-        "license_scan": {
-            "component_id": component_id,
-            "gate_version": "license_scanner@3.1.0",
-            "similarity_score": 0.9 if blocked else 0.1,
-            "block_threshold": 0.7,
-            "blocked": blocked,
-            "matches": (
-                [{"reference_id": "ref-1", "license_family": "gpl-3.0", "risk_tier": "high", "score": 0.9}]
-                if blocked
-                else []
-            ),
-            "notified": blocked,
-            "notification_delivery_error": None,
-            "cache_hit": False,
-        },
-        "secret_scan": {
-            "scope": "full",
-            "gate_version": "secret_scanner@2.0.0",
-            "flagged": flagged,
-            "matches": [],
-            "notified": flagged,
-            "notification_delivery_error": None,
-            "cache_hit": False,
-        },
+        "component_id": component_id,
+        "criteria": [
+            {"id": ac_id, "covers": requirement_id, "kind": "compiled", "result": "pass"},
+        ],
+        "requirement_results": {requirement_id: "pass"},
+        "interface_drift": False,
+        "mutation_score": 1.0,
+        "overall": "pass",
     }
 
 
-def miss_result():
+def _clean_license_scan(component_id: str) -> dict:
     return {
-        "hit": False,
-        "verification_report": None,
-        "license_scan": None,
-        "secret_scan": None,
+        "component_id": component_id,
+        "gate_version": "license_scanner@3.1.0",
+        "similarity_score": 0.0,
+        "block_threshold": 0.70,
+        "blocked": False,
+        "matches": [],
+        "notified": False,
+        "notification_delivery_error": None,
+        "cache_hit": False,
     }
 
 
-def test_blast_radius_scope_reports_hit_and_miss_without_gate_runner(tmp_path):
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
+def _blocked_license_scan(component_id: str) -> dict:
+    return {
+        "component_id": component_id,
+        "gate_version": "license_scanner@3.1.0",
+        "similarity_score": 0.95,
+        "block_threshold": 0.70,
+        "blocked": True,
+        "matches": [
+            {"reference_id": "ref-123", "license_family": "gpl-3.0", "risk_tier": "high", "score": 0.95}
+        ],
+        "notified": True,
+        "notification_delivery_error": None,
+        "cache_hit": False,
+    }
 
-    write_component(repo_root, "comp-changed")
-    write_component(repo_root, "comp-hit")
-    write_component(repo_root, "comp-miss")
 
-    write_fake_module(repo_root, "impact-analyzer", FAKE_IMPACT_ANALYZER_SOURCE)
-    write_fake_module(repo_root, "provenance-checker", FAKE_PROVENANCE_CHECKER_SOURCE)
-    write_fake_module(
-        repo_root, "capability-scenario-verifier", FAKE_CAPABILITY_SCENARIO_VERIFIER_SOURCE
-    )
+def _clean_secret_scan() -> dict:
+    return {
+        "scope": "full",
+        "gate_version": "secret_scanner@2.0.0",
+        "flagged": False,
+        "matches": [],
+        "notified": False,
+        "notification_delivery_error": None,
+        "cache_hit": False,
+    }
 
-    write_json(
-        repo_root / "_fake_impact_config.json",
-        {
-            "impacted": [
-                {"component_id": "comp-hit", "reason": "direct", "via": None},
-                {
-                    "component_id": "comp-miss",
-                    "reason": "transitive-interface",
-                    "via": "comp-changed",
-                },
-            ]
+
+def test_blast_radius_scope_reports_two_components_and_skips_gate_runner(tmp_path):
+    provenance_config = {
+        "key": {"spec_bundle_hash": "sha256:" + "a" * 8, "gate_versions": {"verifier": "v@1"}},
+        "components": {
+            "comp-foo": {
+                "hit": True,
+                "verification_report": _passing_verification_report("comp-foo", "R-FOO-001"),
+                "license_scan": _clean_license_scan("comp-foo"),
+                "secret_scan": _clean_secret_scan(),
+            },
+            "comp-bar": {"hit": False},
         },
+    }
+    impacted = [
+        {"component_id": "comp-foo", "reason": "direct", "via": None},
+        {"component_id": "comp-bar", "reason": "transitive-interface", "via": "comp-foo"},
+    ]
+    repo_root, _, gate_log = _setup_repo(
+        tmp_path,
+        components=[("foo", ["R-FOO-001"]), ("bar", ["R-BAR-001"])],
+        provenance_config=provenance_config,
+        impacted=impacted,
     )
-    write_json(
-        repo_root / "_fake_provenance_config.json",
-        {
-            "comp-hit": hit_result("comp-hit", overall="pass"),
-            "comp-miss": miss_result(),
+
+    report = provenance_tracker.check_readiness(repo_root, changed_ids=["comp-foo"])
+
+    assert _get(report, "scope") == "blast-radius"
+    components_map = _get(report, "components")
+    assert _keys(components_map) == {"comp-foo", "comp-bar"}
+
+    reasons = _get(report, "not_ready_reasons")
+    assert any("comp-bar" in reason for reason in reasons)
+
+    _assert_no_calls(gate_log)
+
+
+def test_no_changed_ids_checks_whole_corpus(tmp_path):
+    provenance_config = {
+        "key": {"spec_bundle_hash": "sha256:" + "b" * 8, "gate_versions": {"verifier": "v@1"}},
+        "components": {
+            "comp-foo": {
+                "hit": True,
+                "verification_report": _passing_verification_report("comp-foo", "R-FOO-001"),
+                "license_scan": _clean_license_scan("comp-foo"),
+                "secret_scan": _clean_secret_scan(),
+            },
+            "comp-bar": {
+                "hit": True,
+                "verification_report": _passing_verification_report("comp-bar", "R-BAR-001"),
+                "license_scan": _clean_license_scan("comp-bar"),
+                "secret_scan": _clean_secret_scan(),
+            },
         },
+    }
+    repo_root, calls_log, gate_log = _setup_repo(
+        tmp_path,
+        components=[("foo", ["R-FOO-001"]), ("bar", ["R-BAR-001"])],
+        provenance_config=provenance_config,
     )
 
-    report = provenance_tracker.check_readiness(repo_root=repo_root, changed_ids=["comp-changed"])
+    report = provenance_tracker.check_readiness(repo_root)
 
-    assert field(report, "scope") == "blast-radius"
+    assert _get(report, "scope") == "whole-corpus"
 
-    components = field(report, "components")
-    assert set(components.keys()) == {"comp-hit", "comp-miss"}
+    calls = _read_calls(calls_log)
+    checked_ids = {call["component_id"] for call in calls if call["fn"] == "check_provenance"}
+    assert checked_ids == {"comp-foo", "comp-bar"}
 
-    not_ready_reasons = field(report, "not_ready_reasons")
-    assert any("comp-miss" in reason for reason in not_ready_reasons)
-
-    impact_calls_path = repo_root / "_fake_impact_calls.json"
-    assert impact_calls_path.exists()
-    with open(impact_calls_path) as f:
-        impact_calls = json.load(f)
-    assert impact_calls == [["comp-changed"]]
-
-    assert not (repo_root / "gen" / "component-gate-runner").exists()
+    _assert_no_calls(gate_log)
 
 
-def test_whole_corpus_scope_checks_every_component(tmp_path):
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-
-    write_component(repo_root, "comp-aaa")
-    write_component(repo_root, "comp-bbb")
-
-    write_fake_module(repo_root, "provenance-checker", FAKE_PROVENANCE_CHECKER_SOURCE)
-    write_fake_module(
-        repo_root, "capability-scenario-verifier", FAKE_CAPABILITY_SCENARIO_VERIFIER_SOURCE
-    )
-
-    write_json(
-        repo_root / "_fake_provenance_config.json",
-        {
-            "comp-aaa": hit_result("comp-aaa", overall="pass"),
-            "comp-bbb": hit_result("comp-bbb", overall="pass"),
+def test_failing_verification_report_marks_component_not_ready(tmp_path):
+    verification_report = {
+        "component_id": "comp-foo",
+        "criteria": [
+            {"id": "AC-FOO-001", "covers": "R-FOO-001", "kind": "compiled", "result": "pass"},
+            {
+                "id": "AC-FOO-002",
+                "covers": "R-FOO-002",
+                "kind": "compiled",
+                "result": "fail",
+                "failure_detail": {"message": "boom", "expected": 1, "actual": 2},
+            },
+        ],
+        "requirement_results": {"R-FOO-001": "pass", "R-FOO-002": "fail"},
+        "interface_drift": False,
+        "mutation_score": 0.5,
+        "overall": "fail",
+    }
+    provenance_config = {
+        "key": {"spec_bundle_hash": "sha256:" + "c" * 8, "gate_versions": {"verifier": "v@1"}},
+        "components": {
+            "comp-foo": {
+                "hit": True,
+                "verification_report": verification_report,
+                "license_scan": _clean_license_scan("comp-foo"),
+                "secret_scan": _clean_secret_scan(),
+            },
         },
+    }
+    repo_root, _, gate_log = _setup_repo(
+        tmp_path,
+        components=[("foo", ["R-FOO-001", "R-FOO-002"])],
+        provenance_config=provenance_config,
     )
 
-    report = provenance_tracker.check_readiness(repo_root=repo_root, changed_ids=None)
+    report = provenance_tracker.check_readiness(repo_root)
 
-    assert field(report, "scope") == "whole-corpus"
-
-    components = field(report, "components")
-    assert set(components.keys()) == {"comp-aaa", "comp-bbb"}
-
-    provenance_calls_path = repo_root / "_fake_provenance_calls.json"
-    assert provenance_calls_path.exists()
-    with open(provenance_calls_path) as f:
-        provenance_calls = json.load(f)
-    assert set(provenance_calls) == {"comp-aaa", "comp-bbb"}
-
-    assert not (repo_root / "gen" / "impact-analyzer").exists()
-    assert not (repo_root / "gen" / "component-gate-runner").exists()
-
-
-def test_failing_verification_report_marks_not_ready_without_gate_runner(tmp_path):
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-
-    write_component(repo_root, "comp-failcheck")
-
-    write_fake_module(repo_root, "provenance-checker", FAKE_PROVENANCE_CHECKER_SOURCE)
-    write_fake_module(
-        repo_root, "capability-scenario-verifier", FAKE_CAPABILITY_SCENARIO_VERIFIER_SOURCE
-    )
-
-    write_json(
-        repo_root / "_fake_provenance_config.json",
-        {
-            "comp-failcheck": hit_result(
-                "comp-failcheck",
-                overall="fail",
-                requirement_results={"R-FAILCHECK-001": "fail"},
-            )
-        },
-    )
-
-    report = provenance_tracker.check_readiness(repo_root=repo_root, changed_ids=None)
-
-    components = field(report, "components")
-    result = components["comp-failcheck"]
-    assert field(result, "hit") is True
-
-    assert field(report, "ready") is False
-
-    not_ready_reasons = field(report, "not_ready_reasons")
-    matching = [r for r in not_ready_reasons if "comp-failcheck" in r]
+    reasons = _get(report, "not_ready_reasons")
+    matching = [r for r in reasons if "comp-foo" in r and "verification" in r and "R-FOO-002" in r]
     assert matching
-    assert any("R-FAILCHECK-001" in r for r in matching)
 
-    assert not (repo_root / "gen" / "impact-analyzer").exists()
-    assert not (repo_root / "gen" / "component-gate-runner").exists()
+    _assert_no_calls(gate_log)
 
 
-def test_blocking_license_scan_marks_not_ready_without_gate_runner(tmp_path):
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-
-    write_component(repo_root, "comp-blockedscan")
-
-    write_fake_module(repo_root, "provenance-checker", FAKE_PROVENANCE_CHECKER_SOURCE)
-    write_fake_module(
-        repo_root, "capability-scenario-verifier", FAKE_CAPABILITY_SCENARIO_VERIFIER_SOURCE
-    )
-
-    write_json(
-        repo_root / "_fake_provenance_config.json",
-        {
-            "comp-blockedscan": hit_result(
-                "comp-blockedscan", overall="pass", blocked=True
-            )
+def test_blocked_license_scan_marks_component_not_ready(tmp_path):
+    provenance_config = {
+        "key": {"spec_bundle_hash": "sha256:" + "d" * 8, "gate_versions": {"verifier": "v@1"}},
+        "components": {
+            "comp-foo": {
+                "hit": True,
+                "verification_report": _passing_verification_report("comp-foo", "R-FOO-001"),
+                "license_scan": _blocked_license_scan("comp-foo"),
+                "secret_scan": _clean_secret_scan(),
+            },
         },
+    }
+    repo_root, _, gate_log = _setup_repo(
+        tmp_path,
+        components=[("foo", ["R-FOO-001"])],
+        provenance_config=provenance_config,
     )
 
-    report = provenance_tracker.check_readiness(repo_root=repo_root, changed_ids=None)
+    report = provenance_tracker.check_readiness(repo_root)
 
-    components = field(report, "components")
-    result = components["comp-blockedscan"]
-    assert field(result, "hit") is True
-    license_scan = field(result, "license_scan")
-    assert field(license_scan, "blocked") is True
-
-    assert field(report, "ready") is False
-
-    not_ready_reasons = field(report, "not_ready_reasons")
-    matching = [r for r in not_ready_reasons if "comp-blockedscan" in r]
+    reasons = _get(report, "not_ready_reasons")
+    matching = [r for r in reasons if "comp-foo" in r and "license_scan" in r]
     assert matching
-    assert any(
-        "license" in r.lower() or "scan" in r.lower() or "blocked" in r.lower()
-        for r in matching
+
+    _assert_no_calls(gate_log)
+
+
+def test_check_provenance_receives_key_unchanged_for_every_component(tmp_path):
+    provenance_config = {
+        "key": {"spec_bundle_hash": "sha256:k1", "gate_versions": {"verifier": "v@1"}},
+        "components": {
+            "comp-foo": {
+                "hit": True,
+                "verification_report": _passing_verification_report("comp-foo", "R-FOO-001"),
+                "license_scan": _clean_license_scan("comp-foo"),
+                "secret_scan": _clean_secret_scan(),
+            },
+            "comp-bar": {
+                "hit": True,
+                "verification_report": _passing_verification_report("comp-bar", "R-BAR-001"),
+                "license_scan": _clean_license_scan("comp-bar"),
+                "secret_scan": _clean_secret_scan(),
+            },
+        },
+    }
+    repo_root, calls_log, _ = _setup_repo(
+        tmp_path,
+        components=[("foo", ["R-FOO-001"]), ("bar", ["R-BAR-001"])],
+        provenance_config=provenance_config,
     )
 
-    assert not (repo_root / "gen" / "impact-analyzer").exists()
-    assert not (repo_root / "gen" / "component-gate-runner").exists()
+    provenance_tracker.check_readiness(repo_root)
+
+    calls = _read_calls(calls_log)
+    check_calls = [c for c in calls if c["fn"] == "check_provenance"]
+    assert len(check_calls) >= 2
+    for call in check_calls:
+        assert call["spec_bundle_hash"] == "sha256:k1"
+        assert call["gate_versions"] == {"verifier": "v@1"}

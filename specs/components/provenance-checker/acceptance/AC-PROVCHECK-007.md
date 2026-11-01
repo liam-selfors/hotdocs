@@ -4,7 +4,7 @@ Covers: R-PROVCHECK-001
 Kind: generated-test
 
 ```gherkin
-Given gen/comp-foo/.provenance.json exists with spec_bundle_hash H
+Given gen/foo/.provenance.json exists with spec_bundle_hash H
 When check_provenance is called for comp-foo with a caller-supplied
   spec_bundle_hash
 Then the comparison uses exactly the caller-supplied hash against the

@@ -41,3 +41,18 @@ back to environment-variable resolution when omitted (matching the
 spec's documented default exactly). Every required positional
 parameter matches; the addition only ever narrows nothing a caller
 already relies on.
+
+## `D163`: `current_provenance_key` and CLI coverage
+
+Regenerated to own the one definition of a provenance key
+(`R-PROVCHECK-005`): `spec-bundle-assembler`'s cold-mode bundle hash,
+plus each verifying gate's version, read without running any gate. The
+CLI is now covered (`R-PROVCHECK-006`, `D162`); writing that
+requirement exposed that the previous CLI accepted only a bare hex
+`--spec-bundle-hash`, rejecting every real `sha256:`-prefixed hash.
+Every criterion's fixture paths were also corrected from
+`gen/comp-foo/` to `gen/foo/`, per the glossary. Landed on the first
+round at 10 of 10, `mutation_score=0.91`, now a flat module rather than
+a package. Against this repository, `current_provenance_key` returns
+the same hash `assemble` does and all five gate versions; the
+hand-maintained suite still passes.

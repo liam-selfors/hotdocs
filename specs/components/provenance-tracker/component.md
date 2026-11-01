@@ -123,30 +123,11 @@ None.
   `write_attempt_record`/`last_requirement_failures` restored
   (`R-TRACK-004`/`007`/`008`). The capability half (check-then-run via
   `capability-scenario-verifier`) stands unreversed (`R-TRACK-010`).
-- `D95`–`D126`: real cold-generation bootstrap, full round-by-round
-  account in `BOOTSTRAP.md`. `last_requirement_failures`'s real
-  `requirement_results` shape stated directly (`D95`); lazy
-  dependency loading stated explicitly for both deps (`D98`); blast-
-  radius-before-committing workflow MUST (`D99`); `AttemptRecord`'s
-  in-memory shape stated (`D100`); dependency modules MUST resolve
-  `repo_root`-relative, never file-location-relative or cached by
-  name alone (`D111`, `R-TRACK-011`); dual dict-or-attribute access
-  reading any dependency's return value (`D121`, `R-TRACK-012`,
-  found only once accurate fakes first let this component's own code
-  actually run); the `realizes` edge computed by scanning every
-  component's own `component.md`, never a nonexistent reverse pointer
-  on the capability's own file (`D122`, mirroring
-  `capability-scenario-verifier`'s own internal convention).
-- `D127`: landed at 5/7 (`mutation_score=1.0`, union across all
-  generated-test criteria per `verifier-orchestrator`'s `D124` fix).
-  Two known limitations, confirmed via direct sandbox inspection
-  rather than accepted at face value: `AC-TRACK-009` — a failing
-  hit's `not_ready_reasons` message doesn't distinguish which of
-  `verification_report`/`license_scan`/`secret_scan` failed, nor
-  name the specific failing requirement id, though `ready=False` and
-  the component name are both correctly surfaced; `AC-TRACK-010` — a
-  test-authoring fixture bug, not a candidate bug (both failing
-  scenarios' `check_capability_provenance` fixture returns `hit=True`
-  unconditionally, so the check-then-run short-circuit the candidate
-  correctly takes means `run_capability_gates` and its injected
-  failure are never reached).
+- `D95`–`D127`: real cold-generation bootstrap, landed at 5/7 with two
+  known limitations; full account in `BOOTSTRAP.md`.
+- `D163`: the current provenance key comes from `provenance-checker`'s
+  `current_provenance_key`, replacing a privately computed hash that
+  could never match what `provenance-writer` records. Both `D127`
+  limitations closed in the spec: `not_ready_reasons` names the failing
+  check and requirement ids, and `AC-TRACK-010` states its fixture.
+  Regenerated and landed at 7/7, `mutation_score=1.0`.

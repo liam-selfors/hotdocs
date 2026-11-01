@@ -1,47 +1,79 @@
-import tempfile
-from pathlib import Path
-
 import provenance_tracker
 
 
-def _write(path: Path, content: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(content)
+def _get(obj, key, default=None):
+    if isinstance(obj, dict):
+        return obj.get(key, default)
+    return getattr(obj, key, default)
 
 
-IMPACT_ANALYZER_SRC = '''
-from pathlib import Path
+def _write_fixture_component(repo_root):
+    comp_dir = repo_root / "specs" / "components" / "foo"
+    (comp_dir / "requirements").mkdir(parents=True, exist_ok=True)
+    (comp_dir / "acceptance").mkdir(parents=True, exist_ok=True)
 
-def compute_blast_radius(changed_ids, repo_root):
-    marker = Path(repo_root) / "_impact_analyzer_calls.txt"
-    with open(marker, "a") as f:
-        f.write(",".join(changed_ids) + "\\n")
-    return {
-        "impacted": [
-            {"component_id": "comp-foo", "reason": "direct", "via": None},
-        ],
-        "precondition_error": None,
-    }
-'''
+    (comp_dir / "component.md").write_text(
+        "---\n"
+        "id: comp-foo\n"
+        "title: Foo Component\n"
+        "status: draft\n"
+        "owners: [lselfors@gmail.com]\n"
+        "sealed: true\n"
+        "source_path: vendor/foo/foo.py\n"
+        "---\n\n"
+        "# comp-foo\n"
+    )
 
-PROVENANCE_CHECKER_SRC = '''
-from pathlib import Path
+    (comp_dir / "requirements" / "R-FOO-001.md").write_text(
+        "# R-FOO-001\n\n"
+        "**R-FOO-001** -- Foo does something.\n"
+    )
+
+    (comp_dir / "acceptance" / "AC-FOO-001.md").write_text(
+        "# AC-FOO-001\n\n"
+        "Covers: R-FOO-001\n"
+        "Kind: compiled\n\n"
+        "Foo behaves correctly.\n"
+    )
+
+
+def _write_fake_provenance_checker(repo_root, log_path):
+    mod_dir = repo_root / "gen" / "provenance-checker"
+    mod_dir.mkdir(parents=True, exist_ok=True)
+    source = f'''
+class _ProvenanceKey:
+    def __init__(self, spec_bundle_hash, gate_versions):
+        self.spec_bundle_hash = spec_bundle_hash
+        self.gate_versions = gate_versions
+
+
+def current_provenance_key(component_id, repo_root):
+    return _ProvenanceKey(
+        "sha256:" + "a" * 64,
+        {{
+            "compiler": "criterion-compiler@1.0.0",
+            "generated_test": "generated_test@1.0.0",
+            "verifier": "verifier-orchestrator@1.0.0",
+            "license_scanner": "license_scanner@1.0.0",
+            "secret_scanner": "secret_scanner@1.0.0",
+        }},
+    )
+
 
 def check_provenance(component_id, spec_bundle_hash, gate_versions, repo_root):
-    marker = Path(repo_root) / "_provenance_checker_calls.txt"
-    with open(marker, "a") as f:
+    with open({str(log_path)!r}, "a") as f:
         f.write(component_id + "\\n")
-    return {
+    return {{
         "hit": True,
-        "verification_report": {
+        "verification_report": {{
             "component_id": component_id,
             "criteria": [],
-            "requirement_results": {"R-FOO-001": "pass"},
+            "requirement_results": {{}},
             "interface_drift": False,
             "mutation_score": 1.0,
             "overall": "pass",
-        },
-        "license_scan": {
+        }},
+        "license_scan": {{
             "component_id": component_id,
             "gate_version": "license_scanner@1.0.0",
             "similarity_score": 0.0,
@@ -51,8 +83,8 @@ def check_provenance(component_id, spec_bundle_hash, gate_versions, repo_root):
             "notified": False,
             "notification_delivery_error": None,
             "cache_hit": False,
-        },
-        "secret_scan": {
+        }},
+        "secret_scan": {{
             "scope": "full",
             "gate_version": "secret_scanner@1.0.0",
             "flagged": False,
@@ -60,123 +92,65 @@ def check_provenance(component_id, spec_bundle_hash, gate_versions, repo_root):
             "notified": False,
             "notification_delivery_error": None,
             "cache_hit": False,
-        },
-    }
+        }},
+    }}
 '''
+    (mod_dir / "provenance_checker.py").write_text(source)
 
-CAPABILITY_SCENARIO_VERIFIER_SRC = '''
-def run_capability_gates(capability_id, repo_root, judge=None, test_author=None):
-    return {"hit": True, "capability_scenario_report": {}}
 
-def check_capability_provenance(capability_id, repo_root):
-    return {"hit": True, "capability_scenario_report": {}}
-
-def run_capability_scenarios(blast_radius, repo_root, judge=None, test_author=None):
-    return {}
+def _write_fake_impact_analyzer(repo_root, log_path):
+    mod_dir = repo_root / "gen" / "impact-analyzer"
+    mod_dir.mkdir(parents=True, exist_ok=True)
+    source = f'''
+def compute_blast_radius(changed_ids, repo_root):
+    with open({str(log_path)!r}, "a") as f:
+        f.write(",".join(changed_ids) + "\\n")
+    return {{
+        "impacted": [
+            {{
+                "component_id": "comp-foo",
+                "reason": "direct",
+                "via": None,
+            }}
+        ],
+        "precondition_error": None,
+    }}
 '''
+    (mod_dir / "impact_analyzer.py").write_text(source)
 
 
-COMPONENT_MD = """---
-id: comp-foo
-title: Foo
-status: ratified
-owners: [lselfors]
-last_ratified_commit: 0000000000000000000000000000000000000
-sealed: true
-source_path: legacy/foo.py
----
+def test_check_readiness_reads_dict_shaped_dependency_results(tmp_path):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
 
-# Foo
+    _write_fixture_component(repo_root)
 
-A sealed, hand-maintained component used only as a fixture.
-"""
+    pc_log = tmp_path / "pc_invocations.log"
+    ia_log = tmp_path / "ia_invocations.log"
 
-REQUIREMENT_MD = """# R-FOO-001
+    _write_fake_provenance_checker(repo_root, pc_log)
+    _write_fake_impact_analyzer(repo_root, ia_log)
 
-**R-FOO-001** — Foo does something, for fixture purposes only.
-"""
-
-ACCEPTANCE_MD = """# AC-FOO-001
-
-Covers: R-FOO-001
-Kind: compiled
-
-```gherkin
-Given foo
-When bar
-Then baz
-```
-"""
-
-CONSTRAINTS_MD = """No additional constraints.
-"""
-
-
-def _build_repo_root(repo_root: Path) -> None:
-    comp_dir = repo_root / "specs" / "components" / "foo"
-    _write(comp_dir / "component.md", COMPONENT_MD)
-    _write(comp_dir / "requirements" / "R-FOO-001.md", REQUIREMENT_MD)
-    _write(comp_dir / "acceptance" / "AC-FOO-001.md", ACCEPTANCE_MD)
-    _write(comp_dir / "constraints.md", CONSTRAINTS_MD)
-
-    _write(
-        repo_root / "gen" / "impact-analyzer" / "impact_analyzer.py",
-        IMPACT_ANALYZER_SRC,
-    )
-    _write(
-        repo_root / "gen" / "provenance-checker" / "provenance_checker.py",
-        PROVENANCE_CHECKER_SRC,
-    )
-    _write(
-        repo_root
-        / "gen"
-        / "capability-scenario-verifier"
-        / "capability_scenario_verifier.py",
-        CAPABILITY_SCENARIO_VERIFIER_SRC,
+    report = provenance_tracker.check_readiness(
+        repo_root=repo_root,
+        changed_ids=["comp-foo"],
+        model=None,
+        seed=0,
+        llm_backend=None,
     )
 
+    assert _get(report, "scope") == "blast-radius"
 
-def test_check_readiness_reads_dict_shaped_dependency_results():
-    with tempfile.TemporaryDirectory() as tmp:
-        repo_root = Path(tmp)
-        _build_repo_root(repo_root)
+    components = _get(report, "components")
+    assert "comp-foo" in components
+    foo_result = components["comp-foo"]
+    assert _get(foo_result, "hit") is True
 
-        report = provenance_tracker.check_readiness(
-            repo_root, changed_ids=["comp-foo"]
-        )
+    assert _get(report, "ready") is True
+    assert _get(report, "not_ready_reasons") == []
 
-        scope = report["scope"] if isinstance(report, dict) else report.scope
-        ready = report["ready"] if isinstance(report, dict) else report.ready
-        components = (
-            report["components"]
-            if isinstance(report, dict)
-            else report.components
-        )
-        not_ready_reasons = (
-            report["not_ready_reasons"]
-            if isinstance(report, dict)
-            else report.not_ready_reasons
-        )
+    assert ia_log.exists()
+    assert ia_log.read_text().strip() == "comp-foo"
 
-        assert scope == "blast-radius"
-        assert not_ready_reasons == []
-        assert ready is True
-
-        assert "comp-foo" in components
-        foo_result = components["comp-foo"]
-        hit = (
-            foo_result["hit"]
-            if isinstance(foo_result, dict)
-            else foo_result.hit
-        )
-        assert hit is True
-
-        impact_calls = (
-            (repo_root / "_impact_analyzer_calls.txt").read_text().strip()
-        )
-        assert "comp-foo" in impact_calls
-
-        provenance_calls = (
-            (repo_root / "_provenance_checker_calls.txt").read_text().strip()
-        )
-        assert "comp-foo" in provenance_calls
+    assert pc_log.exists()
+    assert pc_log.read_text().strip() == "comp-foo"

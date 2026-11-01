@@ -6,8 +6,9 @@
   the working tree (not from any store), and compare both its own
   `spec_bundle_hash` field and every entry of its own `gate_versions`
   map against the supplied ones — a hit requires every value to match
-  exactly, not just `spec_bundle_hash`. This component never computes
-  either value itself — both are always caller-supplied, the same
+  exactly, not just `spec_bundle_hash`. `check_provenance` never computes
+  either value itself — both are always caller-supplied, obtained from
+  `current_provenance_key` (`R-PROVCHECK-005`), the same
   "gate version is part of the key, not metadata checked after" rule
   `R-CACHE-005` already established for a different store, applied
   here for the same reason: a stale manifest must not paper over a

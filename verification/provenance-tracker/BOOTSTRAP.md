@@ -164,3 +164,19 @@ Blast radius checked (`D99`): `component-gate-runner`,
 `provenance-tracker-ui`, and `review-packet-builder` all depend on
 `comp-provenance-tracker`, but none is yet built — nothing to
 re-verify.
+
+## `D163`: the canonical provenance key, and both known limitations closed
+
+Regenerated after an audit found this component computed its own
+`spec_bundle_hash`, different from the one `generator` and
+`provenance-writer` record, and always supplied `gate_versions` `{}`:
+no `.provenance.json` a real `hotdocs generate` wrote could ever have
+been a hit here. It now calls `provenance-checker`'s
+`current_provenance_key` (`R-TRACK-009`). The spec also now closes
+both `D127` known limitations: `not_ready_reasons` names the failing
+check and requirement ids, and `AC-TRACK-010` states that a
+`run_capability_gates` scenario needs a capability miss. Round 1 passed
+six of seven; the seventh failed on a fixture directory named
+`comp-widget`, resolved by reading each component's id from its
+frontmatter. Round 2 landed at 7 of 7, `mutation_score=1.0`, and the
+three previously failing tests in this directory pass.
