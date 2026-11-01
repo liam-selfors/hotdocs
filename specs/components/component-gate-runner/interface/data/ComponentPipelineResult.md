@@ -2,7 +2,10 @@
 
 ```json
 {
+  "component_id": "comp-foo",
   "provenance_hit": false,
+  "blocked": true,
+  "block_reason": "verification_failed",
   "model_call_error": null,
   "verification": { "...": "a VerificationReport" },
   "license_scan": { "...": "a LicenseScanResult" },
@@ -10,15 +13,22 @@
 }
 ```
 
-Unchanged in shape from the per-component entry `MergeResult.components`
-already carried before `D76` — this is that same shape, now named and
-owned here rather than defined inline inside `MergeResult`.
-`model_call_error` and `verification` are **not both populated**: a
-component whose attempt never produced a candidate has `verification`
-stay `null`; one that reached verification has `verification` populated
-(pass or fail) and `model_call_error` stays `null`. `provenance_hit`
-(`R-GATE-001`, `D29`) is `true` only when `provenance-checker` reported
-a hit, meaning the other fields are copied from a committed
-`.provenance.json` rather than freshly computed. `merge-orchestrator`
-collects one of these per impacted component into
-`MergeResult.components`, keyed by `component_id`, unchanged.
+`provenance_hit` (`R-GATE-001`) is `true` only on a short-circuiting
+hit; `verification`/`license_scan`/`secret_scan` are then copied from
+the `ProvenanceCheckResult`, `blocked` is `false`, and the other fields
+are `null`.
+
+Otherwise `blocked` (`R-GATE-004`) is `true` exactly when no passing
+candidate exists: `block_reason` is `"model_call_error"` when
+`generator` returned one (`model_call_error` copies it, `verification`
+is `null`), or `"verification_failed"` when a candidate was produced
+and `verification.overall` is not `"pass"`. A passing candidate has
+`blocked` `false` and `block_reason` `null`. `model_call_error` and
+`verification` are never both populated.
+
+`blocked` concerns generation and verification only.
+`license_scan.blocked` and `secret_scan.flagged` are reported as-is;
+whether they stop a merge is `provenance-tracker`'s readiness check,
+not this component's verdict.
+
+Returned as a dict with exactly these keys.

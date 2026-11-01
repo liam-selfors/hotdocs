@@ -7,13 +7,53 @@ run_component_gates(
 ) -> ComponentPipelineResult
 ```
 
-`model`/`seed`/`llm_backend` are this component's own parameters now
-(`D86`) — it wires the real `test_author`/`judge` closures itself
-(`R-GATE-002`), capturing them here rather than receiving
-already-wired callables from a caller. `retry_feedback` (`R-GATE-003`,
-`D3`) is this one component's own `R-id` list, supplied directly by
-whoever invokes this call — never derived or defaulted internally.
+`model`/`seed`/`llm_backend` are this component's own parameters
+(`D86`): it builds its own `test_author` and `judge` closures from
+them (`R-GATE-002`, `R-GATE-010`). `retry_feedback` (`R-GATE-003`,
+`D3`) is passed through to `generator` unchanged, never derived here.
 
-CLI: see `interface/cli.md`. Invoked directly by a developer
-(`hotdocs generate`, `D91`/`D93`) — no component calls this one on a
-developer's behalf (`D86`/`D87`/`D93`).
+Each dependency is loaded from `<repo_root>/gen/<slug>/`. On a
+non-sealed component, the calls are, in this order:
+
+1. `provenance-checker`'s `current_provenance_key(component_id,
+   repo_root)`, then `check_provenance(component_id,
+   key.spec_bundle_hash, key.gate_versions, repo_root)` — on a
+   short-circuiting hit (`R-GATE-001`), nothing below is called
+2. `spec-bundle-assembler`'s `assemble(component_id,
+   repo_root=repo_root, mode="cold")`
+3. `generator`'s `generate(bundle, model, retry_feedback,
+   repo_root=repo_root, llm_backend=llm_backend)`
+4. only if that result's `files` is non-empty: `verifier-orchestrator`'s
+   `verify(component_id, repo_root, judge=<judge closure>,
+   test_author=<test_author closure>)`
+5. `license-scanner`'s `scan(component_id, repo_root)`, then
+   `secret-scanner`'s `scan(repo_root)`
+6. `provenance-tracker`'s `write_attempt_record(component_id,
+   generation_result, verification_report_or_None,
+   key.spec_bundle_hash, repo_root)`
+7. only if step 3 produced files: `provenance-writer`'s
+   `write_provenance(component_id, inputs, repo_root)`, with
+   `ProvenanceInputs` as a plain dict `{component_id, generation_result,
+   verification_report, license_scan_result, secret_scan_result,
+   provenance_hit: false, attempts, gate_versions: key.gate_versions}`,
+   where `attempts` is the number of files in
+   `.hotdocs/attempts/<slug>/` after step 6
+
+The `test_author` closure calls `test-author`'s
+`author_test(criterion_bundle, model, seed=seed, repo_root=repo_root,
+llm_backend=llm_backend)`. The `judge` closure calls `llm-endpoint`'s
+`complete(prompt, model, backend=llm_backend)` (`R-GATE-010`).
+
+A sealed component (`R-GATE-007`) makes only steps 4 and 5, both
+closures still passed to `verify`.
+
+Each dependency module is loaded only when its first call is about to
+be made, never earlier — a path that never reaches a call never loads
+that module (the same rule `provenance-tracker`'s `R-TRACK-009` states).
+No dependency name beyond this list is used: in particular,
+`ProvenanceInputs` is a dict, never a class from `provenance-writer`.
+Any stand-in for these dependencies must provide each name this list
+gives. Results from every dependency are read with dual
+dict-or-attribute access.
+
+CLI: see `interface/cli.md`.

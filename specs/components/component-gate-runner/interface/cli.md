@@ -5,37 +5,31 @@ hotdocs generate <component-id> --model=<model-id> [--seed=<n>] \
   [--retry-feedback=<R-id>,...] [--repo-root=<dir>] [--format=json|text]
 ```
 
-`D91`/`D93` — this verb replaces `generator`'s own, narrower former CLI:
-nobody calls just the raw candidate-producing step directly anymore,
-only this component's full gauntlet, via this one command. `generator`
-itself is still the component owning the actual model-call mechanics
-(`R-GEN-*`), now an internal library call this component makes, not a
-separate thing a developer invokes. This stays a command in its own
-right, independent of `hotdocs verify` (`D93` reversed `D92`'s brief
-combination of the two) — a developer triggers generation by name, a
-deliberate and potentially expensive action, never as a side effect of
-checking readiness.
+The one command a developer uses to (re)generate a component, distinct
+from `hotdocs verify`'s read-only check (`D91`/`D93`). Run it across a
+multi-component change in `depends_on` order; this component does not
+sequence multiple calls itself (`R-ASSEMBLE-011`).
 
-- `<component-id>` — the component to run through its full gauntlet.
-- `--model` — model identifier to call (R-GATE-002). Required — no
-  implicit default.
-- `--seed` — sample seed/index. Default `0`.
-- `--retry-feedback` — comma-separated `R-id` list from a prior
-  `generate` attempt against this same component. Optional — folds
-  into `generator`'s own `gate_inputs_hash` (`R-GEN-005`), so calling
-  `generate` again against an unchanged spec but with different
-  `--retry-feedback` is already a cache miss, a fresh attempt, with no
-  separate retry mechanism needed.
-- A developer running this against more than one component in the
-  same spec change MUST run it in `depends_on` order — this component
-  does not sequence multiple calls itself (`R-ASSEMBLE-011`'s
-  `dependency_usage` needs each dependency's `gen/` content current
-  when a dependent's bundle is assembled).
+`main(argv)` receives `argv` beginning `["generate", <component-id>,
+...]`. Every flag takes its value either as `--flag=value` or as the
+next argument.
+
+- `<component-id>` — `comp-<slug>`; it must have a
+  `specs/components/<slug>/component.md` under `--repo-root`.
+- `--model` — required, no default (`R-GATE-002`).
+- `--seed` — integer, default `0`.
+- `--retry-feedback` — comma-separated `R-id`s, passed to
+  `run_component_gates` as a list; omitted means `None`.
+- `--repo-root` — default the current directory.
+- `--format` — `json` prints the `ComponentPipelineResult` as JSON;
+  `text` (default) prints the component id, `provenance hit` or the
+  `block_reason` (`passed` when not blocked), and each scan's
+  `blocked`/`flagged`.
 
 **Exit codes:**
 
 | Code | Meaning |
 | --- | --- |
-| `0` | The component's gauntlet concluded — provenance written, pass or fail recorded. Check the reported `ComponentPipelineResult` for the actual outcome. |
-| `1` | Model-call error (`model_call_error` populated) — distinct from "produced code that failed verification," which still exits `0`. |
-| `2` | Usage error (unknown component id, missing `--model`). |
+| `0` | The gauntlet concluded — a hit, a pass, or a verification failure alike. |
+| `1` | `block_reason` is `"model_call_error"`. |
+| `2` | Usage error: a missing `<component-id>` or `--model`, an unknown component, a non-integer `--seed`, an invalid `--format`, an unknown argument, a wrong first word, or a flag given last with no value. |

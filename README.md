@@ -38,7 +38,7 @@ one ready/not-ready verdict before committing directly.
 interactive graph UI answer "is everything ready" at any point, for a
 given blast radius or the whole corpus.
 
-**Twenty-two of those components have real code**, and the central claim
+**Twenty-three of those components have real code**, and the central claim
 this repo exists to test — that a real generation pipeline can
 cold-regenerate a component from its spec, verified, with no human
 hand-writing the result — is no longer theoretical:
@@ -56,7 +56,8 @@ hand-writing the result — is no longer theoretical:
   `verifier-orchestrator`, `spec-bundle-assembler`,
   `provenance-tracker`, `provenance-writer`,
   `decision-drift-detector`, `review-packet-builder`,
-  `spec-completeness-assistant`, `provenance-tracker-ui` — cold-generated,
+  `spec-completeness-assistant`, `provenance-tracker-ui`,
+  `component-gate-runner` — cold-generated,
   not hand-written: a
   real model call, through a real `generator`
   dispatching through a real `llm-endpoint`, from each component's own
@@ -74,8 +75,9 @@ hand-writing the result — is no longer theoretical:
   fixing real defects in its dependencies rather than itself —
   `verifier-orchestrator`'s own `dependency_interfaces` gap and
   mutation-score averaging bug, `test-author`'s own fake-arity alias
-  resolution — and lands at 5 of 7, two documented known limitations,
-  full account in `verification/provenance-tracker/BOOTSTRAP.md`.
+  resolution — and first landed at 5 of 7 with two known limitations,
+  both closed when it was regenerated for `D163` (7 of 7), full
+  account in `verification/provenance-tracker/BOOTSTRAP.md`.
   `provenance-writer` took six rounds (`D128`–`D132`) but lands clean
   at 17 of 17, `mutation_score=0.8` — every round's failure a single,
   precisely diagnosed root cause (mutation testing itself caught a
@@ -113,10 +115,18 @@ hand-writing the result — is no longer theoretical:
   (`D158`/`D159`). Each component's last gap was the same one three
   earlier components had: an untested CLI. Full accounts in each
   component's `BOOTSTRAP.md`.
-- `component-gate-runner` is fully specced but **not yet
-  regenerated** — the last real component this corpus's own
-  methodology needs to build for itself, now that every one of its
-  own dependencies exists.
+- `component-gate-runner`, the last unbuilt component, landed at 13 of
+  13 (`D166`). Auditing its spec before the first build found that
+  nothing `hotdocs generate` wrote could ever have satisfied `hotdocs
+  verify`: two components computed the provenance key differently.
+  `D163` gave the key one owner, `provenance-checker`, and regenerated
+  `verifier-orchestrator`, `license-scanner`, `secret-scanner`,
+  `provenance-checker`, and `provenance-tracker` against it. The first
+  real end-to-end `hotdocs generate`, on a throwaway copy, then found
+  `generator` had never put `spec_bundle_hash` on its result — a test
+  failure long filed as "pre-existing" (`D167`). Fixed, the round trip
+  holds: `generate` writes provenance that `verify`'s own check reports
+  as a hit, and a second `generate` short-circuits on it.
 
 Once that real chain existed, the obvious next question was testable
 directly: can a bootstrapped component regenerate *itself*, resolving the

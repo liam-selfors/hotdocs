@@ -595,3 +595,26 @@ bypassing `conftest.py`'s own `sys.path` precedence for the real
 installed module. Swapped in (generate-only path writes directly to
 the live repo). Blast radius re-checked: `capability-scenario-verifier`
 (4/4) and `verifier-orchestrator` (15/15) still pass unchanged.
+
+## `D166`: a fake's name shared by two dependencies
+
+`component-gate-runner`'s first round failed 11 of 13 criteria with
+`fake_signature_mismatch: scan` before any test ran. Its dependencies
+`license-scanner` (`scan(component_id, repo_root)`) and
+`secret-scanner` (`scan(repo_root)`) share a function name, and the
+fake-arity check keyed signatures by bare name, so one dependency's
+arity silently replaced the other's. `R-AUTHOR-020` already said to
+skip what is ambiguous; it now says a shared name matches if the fake
+fits any of the dependencies' arities.
+
+Regenerated directly per the `D58` exception. The first candidate was
+served twice from `generator`'s cache, since the spec had not changed
+between attempts; a third, informed by `--retry-feedback`, passed the
+new behavior. Three of its apparent failures were defects in this
+directory's own hand tests, fixed here: two checks required the plural
+words "hyphens" and "underscores" where a correct prompt said "every
+hyphen replaced by an underscore", and the new collision test reused
+one `repo_root` for three cases, so the last two were served from
+`test-author`'s cache instead of being validated. 32 of 32 pass;
+`verifier-orchestrator` and `capability-scenario-verifier` suites
+unchanged.

@@ -101,3 +101,5 @@ See `constraints.md`.
   `generator@1.5.0`.
 - `D165`: strips a redundant `<component>/` path prefix
   (`R-GEN-015`); `GATE_VERSION` → `generator@1.6.0`.
+- `D167`: `spec_bundle_hash` on every result; `hint` mode never
+  writes. `generator@1.7.0`.

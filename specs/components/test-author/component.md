@@ -65,13 +65,7 @@ None.
 
 ## Change log
 
-Full accounts live in `verification/test-author/BOOTSTRAP.md`.
-
 - Initial draft; `D56`–`D58` first implementation, 8/8 `AC-AUTHOR-*`.
-- `D94`–`D129`: `R-AUTHOR-009`–`023`, full account in `BOOTSTRAP.md`.
-  Nonce-delimited output; dynamic dependency resolution (`009`–`011`);
-  lint-clean fixtures, never `import yaml` (`012`–`015`); tolerant
-  missing `dependency_interfaces`, `seed` never forwarded, malformed
-  output rejected, dual access (`016`–`021`); fake invocation via a
-  file log, never `sys.modules` (`022`/`024`); write-time truncation
-  (`023`).
+- `D94`–`D129`: `R-AUTHOR-009`–`024`; full account in `BOOTSTRAP.md`.
+- `D166`: a fake's name shared by two dependencies matches either's
+  arity (`R-AUTHOR-020`).

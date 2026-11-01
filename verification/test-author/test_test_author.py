@@ -1,3 +1,4 @@
+import pytest
 """One test per AC-AUTHOR-* criterion in
 specs/components/test-author/acceptance/."""
 
@@ -213,8 +214,8 @@ def test_ac_author_010_prompt_states_dependency_resolution_convention(repo_root)
     # closes the real __init__-as-a-module-name confusion D97 found.
     assert "flat-module" in normalized or "flat module" in normalized
     assert "package" in normalized
-    assert ("hyphens" in normalized or "`-`" in normalized) and (
-        "underscores" in normalized or "`_`" in normalized
+    assert ("hyphen" in normalized or "`-`" in normalized) and (
+        "underscore" in normalized or "`_`" in normalized
     )
     assert "sys.modules" in sent_prompt
     assert "exec_module" in sent_prompt
@@ -476,3 +477,27 @@ def test_ac_author_024_prompt_states_file_based_invocation_log(repo_root):
     assert "file" in normalized.lower() and "invocation" in normalized.lower()
     assert "sys.modules" in sent_prompt
     assert "in-process" in normalized.lower() or "in process" in normalized.lower()
+
+
+@pytest.mark.parametrize("fake, ok", [
+    ("def scan(component_id, repo_root): pass", True),
+    ("def scan(repo_root): pass", True),
+    ("def scan(a, b, c): pass", False),
+])
+def test_ac_author_020_name_shared_by_two_dependencies_accepts_either_arity(repo_root, fake, ok):
+    """D166 -- license-scanner's scan(component_id, repo_root) and
+    secret-scanner's scan(repo_root) share a name; a fake of either
+    must be accepted, and a fake fitting neither still rejected."""
+    interfaces = {
+        "comp-license-scanner": "scan(component_id: str, repo_root: Path) -> LicenseScanResult",
+        "comp-secret-scanner": "scan(repo_root: Path) -> SecretScanResult",
+    }
+    # One fresh repo_root per case: a shared one would serve later cases
+    # from test-author's own cache without re-validating them.
+    backend = MockBackend([file_block(fake + "\ndef test_x(): pass")])
+    result = author_test(fake_bundle(dependency_interfaces=interfaces), "claude-sonnet-5",
+                         repo_root=repo_root, llm_backend=backend)
+    if ok:
+        assert _rf(result, "model_call_error") is None, fake
+    else:
+        assert _rf(result, "model_call_error")["category"] == "fake_signature_mismatch"

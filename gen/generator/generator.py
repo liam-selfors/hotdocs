@@ -42,7 +42,7 @@ PROMPT_VERSION = "v8"
 # itself -- missing this the first time let a stale, pre-fix candidate
 # replay from cache instead of triggering a fresh call. Bumped again on
 # D138, D139, and D159 for the same reason.
-GATE_VERSION = "generator@1.6.0"
+GATE_VERSION = "generator@1.7.0"
 
 
 _SYSTEM_PROMPT = """You are generating the complete source for one component \
@@ -114,6 +114,7 @@ class GenerationResult:
     """Matches `interface/data/GenerationResult.md` exactly."""
 
     component_id: str
+    spec_bundle_hash: str
     model: str
     prompt_version: str
     cache_hit: bool
@@ -428,6 +429,7 @@ def generate(
     if refusal is not None:
         return GenerationResult(
             component_id=component_id,
+            spec_bundle_hash=bundle.spec_bundle_hash,
             model=model,
             prompt_version=PROMPT_VERSION,
             cache_hit=False,
@@ -453,9 +455,11 @@ def generate(
         payload = cached.payload
         files = payload.get("files", {})
         if files:
-            _write_files(repo_root, component_id, files)
+            if not bundle.hint_code:  # R-GEN-016: hint mode never writes gen/
+                _write_files(repo_root, component_id, files)
         return GenerationResult(
             component_id=payload.get("component_id", component_id),
+            spec_bundle_hash=bundle.spec_bundle_hash,
             model=payload.get("model", model),
             prompt_version=payload.get("prompt_version", PROMPT_VERSION),
             cache_hit=True,
@@ -483,6 +487,7 @@ def generate(
         # No partial output -- gen/<component>/ is left untouched.
         return GenerationResult(
             component_id=component_id,
+            spec_bundle_hash=bundle.spec_bundle_hash,
             model=model,
             prompt_version=PROMPT_VERSION,
             cache_hit=False,
@@ -499,7 +504,8 @@ def generate(
     # R-GEN-006/D56: cache only non-empty results -- a response that
     # parses to zero files must never poison the cache for every future
     # call with this exact bundle hash.
-    if files:
+    # R-GEN-016/D81: a hint-mode preview never writes gen/ or the cache.
+    if files and not bundle.hint_code:
         _write_files(repo_root, component_id, files)
         payload = {
             "component_id": component_id,
@@ -519,6 +525,7 @@ def generate(
 
     return GenerationResult(
         component_id=component_id,
+        spec_bundle_hash=bundle.spec_bundle_hash,
         model=model,
         prompt_version=PROMPT_VERSION,
         cache_hit=False,

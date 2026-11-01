@@ -4,21 +4,13 @@ Covers: R-GATE-004
 Kind: generated-test
 
 ```gherkin
-Given a mock verifier-orchestrator that returns fail for the one
-  candidate generator produced
+Given a provenance miss and a faked generator returning a
+  model_call_error
 When run_component_gates is called
-Then the result is blocked with a reason indicating a failed
-  verification, not a model_call_error
+Then verify was never called and block_reason is "model_call_error"
 
-Given a mock generator that returns model_call_error on its one call
+Given a provenance miss, one generated file, and verify returning
+  overall "fail"
 When run_component_gates is called
-Then verifier-orchestrator is never invoked, and the result is blocked
-  with a reason indicating no candidate was ever produced, not a
-  failed verification
+Then block_reason is "verification_failed" and model_call_error is null
 ```
-
-Replaces the previous `AC-MERGE-006`, whose scenarios (`k=2`, "generator
-is called exactly twice") tested the best-of-k retry loop `D3` retired —
-left stale at the time, found while splitting this component out
-(`D76`). The distinguishing-reason behavior itself was already correct
-and unchanged; only the call-count framing was stale.

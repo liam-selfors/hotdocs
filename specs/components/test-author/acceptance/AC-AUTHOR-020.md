@@ -24,3 +24,11 @@ Given the same dependency_interfaces and a mock model whose response
 When author_test is called
 Then the result succeeds normally with no model_call_error
 ```
+
+```gherkin
+Given dependency_interfaces where one dependency exposes
+  scan(component_id, repo_root) and another exposes scan(repo_root)
+When a response's fake defines scan with two parameters, or with one
+Then it is accepted either way, and a fake scan with three parameters
+  is still rejected as fake_signature_mismatch
+```

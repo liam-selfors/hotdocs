@@ -1,13 +1,14 @@
 # R-GATE-001
 
-**R-GATE-001** — For a non-sealed component, MUST check
-  `provenance-checker` (`D29`) before doing anything else; a hit MUST
-  short-circuit straight to using the returned
-  `verification_report`/`license_scan`/`secret_scan` as this
-  component's results, skipping `R-GATE-002` through `R-GATE-005`
-  entirely — not running them and discarding the result. A sealed
-  component is never checked against `provenance-checker` at all —
-  `R-GATE-007` always runs for it directly, unconditionally. A miss
-  falls through to `R-GATE-002` onward normally; this component never
-  second-guesses `provenance-checker`'s verdict or re-derives it from
-  `cache-manager`.
+**R-GATE-001** — For a non-sealed component, MUST first obtain the
+  current provenance key from `provenance-checker`'s
+  `current_provenance_key` and pass it to `check_provenance`
+  (`D29`/`D163`) — never computing a hash or gate-version map itself.
+  A hit whose `verification_report.overall` is `"pass"` and whose
+  `license_scan.blocked` is not `true` MUST short-circuit: the result
+  copies the hit's three reports, and nothing else in
+  `interface/library.md`'s list is called — no generation,
+  verification, scan, or write. Any other result, including a hit
+  recording a failed attempt, proceeds as a miss, so a developer can
+  always re-run a failed `hotdocs generate`. A sealed component is never
+  checked (`R-GATE-007`).

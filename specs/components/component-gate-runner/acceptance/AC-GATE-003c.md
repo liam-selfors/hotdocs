@@ -4,9 +4,10 @@ Covers: R-GATE-003
 Kind: generated-test
 
 ```gherkin
-Given a mock generator that returns model_call_error on its one call
+Given a provenance miss and a faked generator returning empty files
+  and model_call_error {"category": "timeout", "message": "t"}
 When run_component_gates is called
-Then generator is called exactly once — never a second time — and the
-  result is blocked with a reason distinguishing "no candidate was ever
-  produced" from a verification failure
+Then generator was called exactly once, blocked is true with
+  block_reason "model_call_error", model_call_error is that error, and
+  verification is null
 ```

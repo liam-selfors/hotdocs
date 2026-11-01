@@ -5,20 +5,17 @@
   (`R-AUTHOR-015` is necessary but not sufficient).
 
   **Syntax check:** `ast.parse()` the extracted content first. A
-  `SyntaxError` MUST be a distinct authoring failure (new
-  `model_call_error` category `malformed_code`) — nothing written to
-  cache or disk, same posture as `R-AUTHOR-009`'s missing marker pair.
+  `SyntaxError` is a distinct failure (`model_call_error` category
+  `malformed_code`); nothing is cached or written (`R-AUTHOR-009`).
 
-  **Fake-arity check, best-effort:** for each `dep_id` in
-  `dependency_interfaces`, parse every `name(args) -> ReturnType`
-  signature from its text. Walk the test's top-level `FunctionDef`s,
-  simple `name = other_name` aliases **resolved to their target
-  function's own arity, never skipped as unresolvable** (`D126`),
-  and any string literal that itself parses as valid Python (`D113`);
-  for any name matching a real dependency function, compare parameter
-  counts (`*args`/`**kwargs` satisfy any). A mismatch MUST be a
-  distinct failure (`fake_signature_mismatch`, naming the function
-  and both arities). Skip what can't be parsed unambiguously.
-
-  Found at `D110`, `D113` (string-literal case), `D126` (unresolved
-  alias case).
+  **Fake-arity check, best-effort:** parse every `name(args) ->
+  ReturnType` signature from each `dependency_interfaces` entry. Walk
+  the test's top-level `FunctionDef`s, simple `name = other_name`
+  aliases resolved to their target's arity (`D126`), and string
+  literals that parse as Python (`D113`); for a name matching a
+  dependency function, compare parameter counts (`*args`/`**kwargs`
+  satisfy any). A name more than one dependency defines — two
+  dependencies each exposing `scan` — matches if it fits any of their
+  arities (`D166`). A mismatch is a distinct failure
+  (`fake_signature_mismatch`, naming the function and both arities).
+  Skip what can't be parsed unambiguously (`D110`).
