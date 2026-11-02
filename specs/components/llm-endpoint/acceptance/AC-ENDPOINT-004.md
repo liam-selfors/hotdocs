@@ -4,9 +4,15 @@ Covers: R-ENDPOINT-005
 Kind: generated-test
 
 ```gherkin
-Given a configured Anthropic credential and a backend call that fails
-When the resulting ModelResponse and any logged error text are
-  inspected
-Then the credential value does not appear anywhere in either — only the
-  model identifier actually used is present
+Given a credential in the environment variable a provider reads, and a
+  call to each provider that fails — including a vendor error body that
+  echoes the credential back
+When the resulting ModelResponse, the call log, and any
+  check_connection result are inspected
+Then the credential value appears in none of them — only the model
+  identifier actually used is present
+
+Given save_config is called with api_key_env set to the credential's
+  value instead of a variable name
+Then it refuses, and no file is written
 ```

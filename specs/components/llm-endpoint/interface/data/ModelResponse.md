@@ -3,7 +3,7 @@
 ```json
 {
   "text": "...",
-  "model": "claude-sonnet-5",
+  "model": "anthropic:claude-sonnet-5-5",
   "backend": "anthropic",
   "model_call_error": null
 }
@@ -30,8 +30,11 @@ actually answer "how many failures this month were rate-limits vs. auth
 errors," the question a flattened `true`/`false` could never answer
 (`D20`). `message` is a short, backend-agnostic description — never the
 raw vendor exception text or anything from `R-ENDPOINT-005`'s credential
-boundary. `backend` (added by `D20`) is still never a caller *input* —
-`R-ENDPOINT-002`'s resolution stays entirely internal to a `complete()`
-call — but is now recorded on the *output*, for the same observability
+boundary. `model` is the identifier exactly as the caller passed it, prefix
+included (`R-ENDPOINT-002`). `backend` (added by `D20`) is the provider
+name (`claude-cli`, `anthropic`, `openai`, `openai-compatible`,
+`gemini`, `ollama`; a mock's own name when injected). It is never a
+caller *input* — resolution stays internal to a `complete()` call — but
+is recorded on the *output*, for the same observability
 reason `model_call_error` needs real structure: "which backend is
 flaky" is a question only answerable if the fact is captured somewhere.

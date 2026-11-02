@@ -1,35 +1,23 @@
 # R-ENDPOINT-004
 
-**R-ENDPOINT-004** — MUST NOT implement retry-with-backoff around a
-  backend call, and MUST NOT configure a backend's SDK/HTTP client with
-  an unbounded wait — the same posture `D7`/`R-GEN-011` already
-  established for `generator`, now owned at the layer that actually
-  touches the network rather than restated by every caller. A call either
-  succeeds, or fails within its backend's own bounded timeout, reported
-  as a `model_call_error` object with a `category` field — exactly one
-  of `network`/`auth`/`rate_limit`/`timeout`, a real, queryable field
-  (`D20`; see `ModelResponse`), not just a classification named in prose
-  — exactly once, no internal attempt loop. Recovery from a
-  `model_call_error` stays
-  one layer up, same as before (re-running the merge, `R-MERGE-017`), not
-  this component's job.
+**R-ENDPOINT-004** — MUST NOT retry a provider call, and MUST NOT leave
+  one with an unbounded wait (`D7`/`R-GEN-011`, owned here at the layer
+  that touches the network). A call either succeeds, or fails within
+  its provider's bounded timeout as a `model_call_error` with a
+  `category` of exactly one of `network`/`auth`/`rate_limit`/`timeout`
+  (`D20`; see `ModelResponse`), exactly once.
 
-  **This promise is only as strong as each configured backend's own
-  bound.** v1's one backend (Anthropic) already has this property, which
-  is why `D7` could rely on it. A future backend (`R-ENDPOINT-003`)
-  MUST provide an equivalent bounded guarantee itself — if a vendor or a
-  self-hosted model has no such guarantee natively, that backend's own
-  implementation MUST impose one (e.g. a client-side timeout), so this
-  component's contract to every caller stays uniform regardless of which
-  backend is configured. Not resolved generically here, because no
-  second backend exists yet to resolve it against.
+  **The bound MUST be at least 300 seconds** (`D34`) for a completion:
+  a 120-second bound timed out `generator`'s larger bundle. Default 600;
+  `timeout_seconds` in `hotdocs.toml` MAY raise it, never lower it below
+  300. `check_connection` (`R-ENDPOINT-009`) is a probe, not a
+  completion, and takes its own short bound.
 
-  **The bound MUST be at least 300 seconds** (`D34`) — found by actually
-  running a real generation call, not assumed: a 120-second bound (the
-  self-hosted Anthropic backend's own first choice) was too short for
-  `generator`'s own, larger `SpecBundle` (three real dependencies), which
-  timed out with no candidate produced. A single prompt-completion call
-  for a realistically-sized component needs meaningfully more headroom
-  than a small one (`llm-endpoint`'s own, dependency-free bundle) does —
-  this is a floor other backends and future tuning MAY raise, never
-  lower.
+  **HTTP providers** map a reply to a category: 401 or 403 `auth`; 429
+  `rate_limit`; 408 or 504, and a socket timeout, `timeout`; any other
+  non-2xx status, a connection failure, an unreadable body, or a reply
+  with no text, `network`. `gemini` also maps a 400 whose body says the
+  API key is not valid to `auth`. The `message` is a short static
+  description: never the vendor's text, a header, or a credential
+  (`R-ENDPOINT-005`). A provider that needs a key and finds none in the
+  environment reports `auth` without making a call.

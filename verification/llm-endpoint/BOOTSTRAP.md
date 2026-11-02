@@ -107,3 +107,24 @@ wasn't in the original spec — the same kind of pre-existing gap
 of `R-ENDPOINT-001`'s own acceptance criteria already required an
 "injected mock backend," so the interface was always going to need
 this; it just hadn't been written down yet.
+
+## `D180`–`D183`: six providers
+
+Extended by hand, as a permanent exception (the generator dispatches
+through this component, so it cannot generate it). Developed in a
+scratch copy of the repository and ported into the live tree in one step
+once green, since every model call anywhere in the pipeline passes
+through this file. The nine original tests pass unchanged; 90 new ones
+(`test_providers.py`) cover each adapter's request and reply shape, the
+error mapping across all four HTTP providers (including a vendor that
+echoes the key in its error body), model-string parsing, configuration,
+and the setup helpers. The HTTP providers are tested by replacing
+`urllib.request.urlopen`, never by starting a server. A hand-rolled
+mutation check broke the implementation in 17 deliberate ways (a wrong
+header, a status code, a token parameter, the key check, the model echo)
+and the tests caught all 17; it also exposed one test that passed for
+the wrong reason, now fixed. A real call through `claude-cli` and the
+bare legacy path both returned correctly. No real call was made to the
+HTTP providers: no keys for them exist here, so their wire formats rest
+on the vendors' documentation (`D180` records what was and was not
+confirmed there).

@@ -5,7 +5,7 @@ status: draft
 owners: [pipeline-team]
 depends_on: []
 realizes: [P-ZERO-EDIT, P-AMBIGUITY-GATE]
-uses_var: [VAR-ANTHROPIC-API-KEY]
+uses_var: [VAR-ANTHROPIC-API-KEY, VAR-OPENAI-API-KEY, VAR-GEMINI-API-KEY, VAR-HOTDOCS-CONFIG]
 model_pin: claude-sonnet-5
 sealed: false
 ---
@@ -25,7 +25,7 @@ call, a specific vendor's API.
 
 (D18.) Extracted once a real coupling was found, not invented
 speculatively: `generator` and `test-author` each independently
-declared `uses_var: [VAR-ANTHROPIC-API-KEY]`, and `merge-orchestrator`'s
+declared `uses_var: [VAR-ANTHROPIC-API-KEY, VAR-OPENAI-API-KEY, VAR-GEMINI-API-KEY, VAR-HOTDOCS-CONFIG]`, and `merge-orchestrator`'s
 `judge` wiring (now `R-MERGE-014`, `D76`) was "a direct call to the
 configured model" with no component behind it at all. Swapping vendors meant
 touching at least three places; `R-GEN-004` already treats the model
@@ -35,8 +35,9 @@ identifier names.
 
 ## Scope
 
-**In scope:** resolving a model identifier to the right vendor backend;
-authenticating and dispatching one completion request; normalizing every
+**In scope:** resolving a model identifier to a provider; reading the
+optional configuration; authenticating and dispatching one completion
+request; normalizing every
 backend's failure modes into one structured `model_call_error` vocabulary
 (`R-GEN-008`'s definition, now owned here, given real queryable shape by
 `D20`); writing a low-level, caller-agnostic call log of every dispatch
@@ -51,13 +52,12 @@ scope: retry-with-backoff (`R-ENDPOINT-004`, same posture `D7` already
 established for `generator`, now stated at the layer that actually
 touches the network).
 
-**v1 scope, named explicitly:** exactly one backend (Anthropic). Not
-because multi-vendor support isn't the point — it's the whole point of
-this component existing — but because this project's own
-anti-premature-abstraction stance says build the seam, not
-every implementation behind it, until a second vendor is actually needed.
-A second backend is an additive implementation behind the same
-resolve/dispatch split (`R-ENDPOINT-002`/`003`), not a rework.
+**Providers, named explicitly:** `claude-cli`, `anthropic`, `openai`,
+`openai-compatible`, `gemini`, and `ollama` (`R-ENDPOINT-003`), chosen by
+the model string and an optional committed `hotdocs.toml` that never holds
+a secret (`R-ENDPOINT-007`). Further providers are additive adapters
+behind the same resolve/dispatch split. The setup helpers `hotdocs init`
+uses live here too (`R-ENDPOINT-009`), so the provider list has one owner.
 
 ## Definitions
 
@@ -90,48 +90,21 @@ See `constraints.md`.
 
 ## Open questions
 
-None — v1's single-backend scope is a deliberate decision (above), not an
-open question.
+- `ollama` silently truncates a prompt longer than its server's context
+  window unless `num_ctx` is passed; no default is set, since a safe
+  value depends on the model and the machine (`D182`).
 
 ## Change log
 
-- Initial draft (D18).
-- `D33`: first real `gen/llm-endpoint/` implementation — a hand-authored
-  bootstrap exception, structurally permanent rather than temporary
-  (nothing could ever cold-regenerate the component every generation
-  call dispatches through). `AnthropicBackend` dispatches via the
-  `claude` CLI's non-interactive mode (`D33`) rather than a
-  from-scratch API client. `interface/library.md` gained a `backend`
-  injection parameter, a pre-existing gap `AC-ENDPOINT-002`/`003`/`006`
-  already implied.
-- **Self-hosted regeneration (`D78`).** The real `generator`, dispatching
-  through this exact `D33` implementation, cold-regenerated
-  `gen/llm-endpoint/` from this component's own current spec; the
-  result passed every `AC-ENDPOINT-*` criterion and was swapped in,
-  replacing the hand-written version. Revises the earlier "nothing
-  could ever generate `llm-endpoint`" framing to the more precise
-  claim: nothing could generate the *first* working version — once one
-  exists, it can author its own successor, the same way a compiler can
-  compile itself once a first version exists by other means.
-  `interface/library.md`'s
-  `backend` parameter's exact shape (a plain callable vs. a
-  `.complete()`-method object) is not fixed by this spec and changed in
-  the self-hosted version; `verification/llm-endpoint/`'s own test
-  suite was updated to match.
-- `D34`/`D35`: `R-ENDPOINT-004` gained a concrete 300-second timeout
-  floor (found by a real timeout regenerating `generator`'s own, larger
-  bundle); `R-ENDPOINT-003` gained a structural requirement that every
-  `claude`-CLI dispatch pass `--tools ""` and `--bare` (found by a real
-  tool-access contamination during the timeout fix's own regeneration
-  attempt). A second self-hosted regeneration reflecting both landed as
-  `gen/llm-endpoint/llm_endpoint.py` — a third distinct `complete()`
-  return shape (a plain dict this time); `generator.py` gained an
-  `_as_dict()` adapter so it depends on the JSON contract rather than
-  any one version's Python shape.
-- `D82`: `AnthropicBackend` no longer hard-requires
-  `VAR-ANTHROPIC-API-KEY` — when absent, it dispatches with
-  `--safe-mode` instead of `--bare` (found by direct testing that
-  `--bare` unconditionally refuses any non-API-key credential, where
-  `--safe-mode` gives the same CLAUDE.md/hooks isolation without that
-  restriction) and lets whatever credential the CLI itself resolves
-  determine the outcome, rather than refusing early.
+- Initial draft (`D18`); `D33`: first implementation, a hand-authored
+  exception (nothing could generate the component every generation
+  dispatches through), dispatching via the `claude` command, with a
+  `backend` injection parameter.
+- `D34`/`D35`/`D52`: a 300-second timeout floor; `--tools ""` on every
+  `claude` call.
+- `D78`: self-hosted regeneration, later replaced by a hand-maintained
+  version; `D82`: `--safe-mode` when no API key is set.
+- `D180`–`D183`: multi-provider support. Providers `claude-cli`,
+  `anthropic`, `openai`, `openai-compatible`, `gemini`, `ollama`; model
+  strings `<provider>:<model>`; `hotdocs.toml`; setup helpers. The
+  `claude` command's response `backend` label becomes `claude-cli`.

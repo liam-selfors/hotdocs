@@ -14,3 +14,6 @@ See `SPEC_GUIDELINES.md` §3.3 and §9 (secrets).
   fallback when absent, `D30`)
 - **`VAR-COMPLIANCE-WEBHOOK-URL`** (non-secret, optional)
 - **`VAR-TRUST-JUDGE-PROVENANCE`** (non-secret, optional, `D29`)
+- **`VAR-OPENAI-API-KEY`**, **`VAR-GEMINI-API-KEY`** (secret, optional —
+  needed only for the `openai`/`gemini` provider, `D180`)
+- **`VAR-HOTDOCS-CONFIG`** (non-secret, optional — path of `hotdocs.toml`)

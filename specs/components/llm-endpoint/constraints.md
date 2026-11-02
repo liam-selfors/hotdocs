@@ -1,8 +1,8 @@
 # LLM Endpoint — Non-Functional Constraints
 
-- **Determinism of dispatch, not of the response.** Backend resolution
+- **Determinism of dispatch, not of the response.** Resolution
   (`R-ENDPOINT-002`) MUST be a deterministic function of the model
-  identifier; the backend's actual response content is explicitly not
+  identifier and the configuration; the backend's actual response content is explicitly not
   covered by that guarantee — same caveat `verifier-orchestrator`'s own
   constraints already state for `llm-judge`/`test_author` dispatch.
 - **Network access, deliberately.** This is one of the few components in
@@ -12,7 +12,9 @@
   anything, easier to audit now that network access is concentrated in
   one place instead of three.
 - **No retry-with-backoff, no unbounded wait.** See `R-ENDPOINT-004`.
-- **Credential never leaves this component.** See `R-ENDPOINT-005`.
+- **Credential never leaves this component, and never reaches a file.**
+  See `R-ENDPOINT-005`; `hotdocs.toml` names a variable, never holds a key.
+- **No new dependency.** The HTTP providers use the standard library only.
 - **Idempotent dispatch is not claimed.** Unlike every `compiled` rule
   elsewhere in this corpus, calling `complete()` twice with identical
   arguments MAY return different `text` — caching that result, if a

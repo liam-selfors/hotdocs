@@ -28,6 +28,14 @@ split.
   hyphenated name, not the declaration file under `specs/vars/`, which
   never holds a value. The one exception is `VAR-ANTHROPIC-API-KEY`,
   read as `ANTHROPIC_API_KEY`, as its own declaration states.
+- **Model string** (`D182`) — the identifier `llm-endpoint`'s `complete()`
+  takes, and what callers record as a model's identity: `<provider>:<model>`
+  (`anthropic:claude-sonnet-5`, `ollama:llama3.1:8b`) or a bare model name
+  that uses the provider `hotdocs.toml` configures. The prefix counts only
+  when it is one of `claude-cli`, `anthropic`, `openai`, `openai-compatible`,
+  `gemini`, or `ollama`, so the colon in an Ollama tag such as
+  `llama3.1:8b` is part of the model name. The provider receives only the
+  part after the prefix.
 - **Spec bundle** — the full set of files a generation or verification step
   needs for one component: `component.md` + `requirements/` + `interface/` +
   `constraints.md` + depended-upon components' `interface/` directories +

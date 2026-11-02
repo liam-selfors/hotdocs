@@ -4,11 +4,15 @@ Covers: R-ENDPOINT-003
 Kind: generated-test
 
 ```gherkin
-Given llm-endpoint configured with only its v1 backend (Anthropic) and
-  no other configuration
+Given no hotdocs.toml, and the claude command replaced by a recorder
 When complete() is called with model="claude-sonnet-5" and no
-  backend-selection parameter of any kind
-Then it dispatches successfully — confirming a caller only ever names a
-  model, never a backend; which backend implements a given identifier is
-  entirely this component's own internal detail
+  provider-selection parameter of any kind
+Then it dispatches through claude-cli, passing --tools "" and one of
+  --bare (ANTHROPIC_API_KEY set) or --safe-mode (not set)
+
+Given the model "anthropic:m", "openai:m", "gemini:m", "ollama:m" and
+  "openai-compatible:m" with a base_url configured
+When each is called with urllib.request.urlopen replaced by a recorder
+Then each dispatches over HTTP through its own adapter, with no
+  dependency beyond the standard library
 ```

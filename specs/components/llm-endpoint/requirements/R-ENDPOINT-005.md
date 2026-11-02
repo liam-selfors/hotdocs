@@ -1,13 +1,14 @@
 # R-ENDPOINT-005
 
-**R-ENDPOINT-005** — A backend credential (`VAR-ANTHROPIC-API-KEY` in v1)
-  MUST never appear in a `ModelResponse`, a log line, or an error
-  message — only the model identifier actually used is ever recorded.
-  Centralizes the guard `R-AUTHOR-008` previously stated for
-  `test-author` alone; now that the credential never reaches any caller
-  (`generator`, `test-author`, `spec-completeness-assistant`,
-  `component-gate-runner`'s and `capability-scenario-verifier`'s own
-  `judge` wiring) at all, it is structurally
-  unable to leak from any of them — a strictly stronger guarantee than
-  "must not appear in output," which only ever covered a component that
-  held the credential in the first place.
+**R-ENDPOINT-005** — A provider credential MUST never appear in a
+  `ModelResponse`, a log line, an error message, a URL, or
+  `hotdocs.toml`; only the model identifier is ever recorded. A key is
+  read only from the process environment variable `hotdocs.toml`'s
+  `api_key_env` names, else the provider's standard one
+  (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`: each vendor's
+  own name, not `VAR_<NAME>`). `claude-cli` reads none itself. The
+  credential never reaches any caller (`generator`, `test-author`,
+  `spec-completeness-assistant`, `component-gate-runner`'s and
+  `capability-scenario-verifier`'s `judge` wiring), so it is structurally
+  unable to leak from any of them: a stronger guarantee than "must not
+  appear in output".

@@ -10,8 +10,9 @@ owners: [pipeline-team]
 - **required:** no
 - **type:** secret-ref
 - **sensitivity:** secret
-- **description:** Credential used by `llm-endpoint` (D18) to call
-  Anthropic's API on behalf of every caller that needs a model call
+- **description:** Credential used by `llm-endpoint` (D18) for the
+  `claude-cli` provider (as the `claude` command's API key) and the
+  `anthropic` provider (the Messages API), on behalf of every caller that needs a model call
   (`generator`, `test-author`, `spec-completeness-assistant`,
   `component-gate-runner`'s and `capability-scenario-verifier`'s own
   `judge` wiring) — none of which hold this credential themselves. No
@@ -24,9 +25,9 @@ owners: [pipeline-team]
   when no key is passed explicitly, so this is the credential already
   present in any environment that has `claude`/the SDK configured at
   all, not a second, separately-provisioned secret. `llm-endpoint`
-  (`R-ENDPOINT-003`) MUST read it this way — a plain environment lookup,
-  never a vault/secrets-manager indirection — v1's one backend needs no
-  more than that, and inventing one would be exactly the premature
+  (`R-ENDPOINT-005`) MUST read it this way — a plain environment lookup,
+  never a vault/secrets-manager indirection — which needs no more than
+  that, and inventing one would be exactly the premature
   abstraction `D4`/`D6` already reject elsewhere in this corpus.
 
   **This is a real environment fact a caller MUST confirm for
