@@ -144,4 +144,8 @@ See `constraints.md`.
   `AC-ASSEMBLE-011`, traces to `graph-query-engine`'s own pre-existing
   decision-nodes gap (confirmed via its own suite, predates this
   session) — a known limitation, not chased here. `AC-ASSEMBLE-007`'s
-  prior known limitation no longer reproduces.
+  prior known limitation no longer reproduces. (`D177` corrected that
+  cause: the generated test's fixture had no frontmatter.)
+- `D177`: `AC-ASSEMBLE-011` states its fixture corpus must pass
+  `spec-linter`. Its generated test still fails (a `test-author`
+  weakness, recorded in `D177`); code and landed tests unchanged.

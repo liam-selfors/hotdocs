@@ -187,3 +187,21 @@ and predating this entire session. A known limitation in an
 already-stable, out-of-scope component, not chased here.
 `AC-ASSEMBLE-007`'s prior known limitation (`D109`) did not
 re-trigger this round.
+
+## `D177`: `AC-ASSEMBLE-011`'s real cause, and two failed attempts to fix it
+
+The failure recorded in `D118` as a `graph-query-engine` gap was a
+defect in the generated test itself: it builds each fixture
+`component.md` with `textwrap.dedent` over an f-string that interpolates
+a multi-line value, leaving `---` indented, so the file has no
+frontmatter and `lint()` fails. Repairing only that indentation in a
+scratch copy makes the test pass against the unchanged code.
+
+Two attempts to replace the test failed. A full regeneration (seed 11)
+failed 14 of 15 criteria: the new tests statically imported
+`spec_linter`. Authoring `AC-ASSEMBLE-011`'s test alone four times
+(seeds 41-44), after its criterion gained an exact fixture recipe,
+produced two collection errors from the same static import and two
+assertion failures. Nothing was swapped in. A fix belongs in
+`test-author`'s spec (never import a dependency by name; never `dedent`
+an interpolated multi-line value). Until then `AC-ASSEMBLE-011` fails.
