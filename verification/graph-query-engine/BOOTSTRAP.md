@@ -80,3 +80,26 @@ already found, `D13`), which would drop every other passthrough field
 real, declared runtime dependency instead (the simplest fix that doesn't
 fight DuckDB's type system for a two-package problem) — see
 `gen/corpus-graph-builder/pyproject.toml`.
+
+## `D176`: the decision views that were specced but never written
+
+`R-GQE-001`/`002`/`008` specify a `decision` node kind, `supersedes` and
+`builds_on` edges, and a `decision_lineage` view (`D74`/`D92`). None was
+in `views.sql`, which went unnoticed because the two tests that needed
+them sat in the suite as failures, filed as "pre-existing", and
+`spec-linter`'s `R-LINT-028`–`030`, specced to query them, were never
+built. All now exist, plus a zero-match guard for `specs/decisions/*.md`
+beside the `vars` and `product` ones.
+
+Implementing them found a defect in the spec's own SQL: matching
+`supersedes:` anywhere in a decision's text turned `D137`'s prose
+quotation of the field into a supersession no decision declares. A line
+anchor was tried first and proved insufficient (a body line can begin with
+a field name; a new test caught it). The decision arms now extract the
+frontmatter block, then match inside it; the edges agree exactly with an
+independent frontmatter parse of all 168 real decisions.
+
+Two tests were stale rather than the code: `test_ac_gqe_009` asserted a
+supersession (`D31` over `D17`) that commit `0fb1d53`'s renumbering
+removed from the real corpus, so it now builds a synthetic one; and
+`AC-GQE-008` described columns `R-GQE-008` had dropped. 13 of 13 pass.

@@ -1220,6 +1220,95 @@ def rule_section_reference_resolution(corpus: Corpus) -> list[Finding]:
     return findings
 
 
+# A glossary term starts alphanumerically, so a literal placeholder such as
+# the "<Term>" in R-LINT-028's own text is not a citation. One trailing
+# punctuation mark inside the closing quote (American quoting style) is not
+# part of the cited term.
+GLOSSARY_CITATION_RE = re.compile(r"the glossary's \"([A-Za-z0-9][^\"]*?)[,.;:]?\"")
+
+
+def rule_glossary_citation_resolution(corpus: Corpus) -> list[Finding]:
+    """R-LINT-028 (D86). Every the glossary's "<Term>" citation in a live
+    doc MUST resolve to a real bolded entry header in specs/glossary.md,
+    matched exactly after collapsing whitespace. Same mechanism as R-LINT-026/027: catches citation
+    drift, not a fact that should have been promoted but was not."""
+    headers = set()
+    for gpath in corpus.glossary_files:
+        if gpath.is_file():
+            for m in GLOSSARY_TERM_RE.finditer(gpath.read_text(encoding="utf-8")):
+                headers.add(" ".join(m.group(1).split()))
+    findings = []
+    for doc in corpus.docs:
+        if doc.doc_type == "decision":
+            continue
+        for m in GLOSSARY_CITATION_RE.finditer(doc.body):
+            term = " ".join(m.group(1).split())  # prose is hard-wrapped
+            if term not in headers:
+                line = doc.body.count("\n", 0, m.start()) + 1
+                findings.append(Finding("R-LINT-028", SEVERITY_FAIL, doc.rel_path, line,
+                                         f'the glossary has no "{term}" entry'))
+    return findings
+
+
+def _decision_number(decision_id: str) -> int | None:
+    m = re.fullmatch(r"D(\d+)", decision_id or "")
+    return int(m.group(1)) if m else None
+
+
+def _decision_rel_path(corpus: Corpus, decision_id: str) -> str:
+    doc = corpus.id_index.get(decision_id)
+    return doc.rel_path if doc else f"specs/decisions/{decision_id}.md"
+
+
+def rule_supersedes_consistency(corpus: Corpus) -> list[Finding]:
+    """R-LINT-029 (D71). (1) Every supersedes: D<N> resolves to a real
+    decision; (2) the superseded decision is status: deprecated; (3) every
+    status: deprecated decision is named by another real decision's
+    supersedes. Queries the shared nodes/edges views (R-LINT-021)."""
+    status = dict(corpus.graph.execute("SELECT id, status FROM nodes WHERE kind = 'decision'").fetchall())
+    edges = corpus.graph.execute(
+        "SELECT source_id, target_id FROM edges WHERE edge_type = 'supersedes' ORDER BY 1, 2").fetchall()
+    findings = []
+    superseded = set()
+    for source, target in edges:
+        rel = _decision_rel_path(corpus, source)
+        number = _decision_number(target)
+        if number is not None and number <= FROZEN_DECISION_MAX:
+            continue
+        if target not in status:
+            findings.append(Finding("R-LINT-029", SEVERITY_FAIL, rel, 1,
+                                     f"{source} supersedes {target}, which does not resolve to any decision"))
+            continue
+        if source in status:
+            superseded.add(target)
+        if status[target] != "deprecated":
+            findings.append(Finding("R-LINT-029", SEVERITY_FAIL, rel, 1,
+                                     f"{source} supersedes {target}, but {target} is status: "
+                                     f"{status[target]}, not deprecated"))
+    for decision_id in sorted(status):
+        if status[decision_id] == "deprecated" and decision_id not in superseded:
+            findings.append(Finding("R-LINT-029", SEVERITY_FAIL, _decision_rel_path(corpus, decision_id), 1,
+                                     f"{decision_id} is status: deprecated but no other decision supersedes it"))
+    return findings
+
+
+def rule_builds_on_resolution(corpus: Corpus) -> list[Finding]:
+    """R-LINT-030 (D91). Every builds_on entry resolves to a real decision
+    (D1-D14, never formalized as files, are exempt). Queries nodes/edges."""
+    known = {row[0] for row in corpus.graph.execute(
+        "SELECT id FROM nodes WHERE kind = 'decision'").fetchall()}
+    findings = []
+    for source, target in corpus.graph.execute(
+            "SELECT source_id, target_id FROM edges WHERE edge_type = 'builds_on' ORDER BY 1, 2").fetchall():
+        number = _decision_number(target)
+        if number is not None and number <= FROZEN_DECISION_MAX:
+            continue
+        if target not in known:
+            findings.append(Finding("R-LINT-030", SEVERITY_FAIL, _decision_rel_path(corpus, source), 1,
+                                     f"{source} builds_on {target}, which does not resolve to any decision"))
+    return findings
+
+
 def rule_secret_field_safety(corpus: Corpus) -> list[Finding]:
     """R-LINT-013.
 
@@ -1331,6 +1420,9 @@ ALL_RULES = [
     rule_purpose_length,
     rule_decision_citation_resolution,
     rule_section_reference_resolution,
+    rule_glossary_citation_resolution,
+    rule_supersedes_consistency,
+    rule_builds_on_resolution,
     rule_secret_field_safety,
     rule_cli_coverage,
     rule_glossary_singularity,

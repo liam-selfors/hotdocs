@@ -15,6 +15,5 @@
   results — running the linter twice against an unchanged bundle MUST
   produce byte-identical results for every `compiled` rule.
 - **Verification against real content, not only synthetic fixtures.**
-  The acceptance-criteria test suite SHOULD include checks against
-  actual, organically-authored spec content, not only single-violation
-  fixtures. See `verification/spec-linter/BOOTSTRAP.md`.
+  The test suite SHOULD include checks against organically-authored
+  spec content too. See `verification/spec-linter/BOOTSTRAP.md`.

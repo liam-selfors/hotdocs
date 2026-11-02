@@ -9,4 +9,10 @@ Given a live requirement citing the glossary's "Component id /
   "Nonexistent Made Up Term"
 When the linter runs
 Then only the second citation gets a R-LINT-028 finding
+
+Given a citation wrapped across two lines, one with a comma before the
+  closing quote, one in a different letter case, and one quoting
+  "<Term>"
+When the linter runs
+Then only the different-case citation gets a finding
 ```

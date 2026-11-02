@@ -75,6 +75,7 @@ Full narrative per entry lives in its own `specs/decisions/D<N>.md`.
 - `D13`: rewired onto `graph-query-engine`'s shared views.
 - `D70`–`D74`: added `R-LINT-028`–`030`.
 - `D162`: added `R-LINT-031` (CLI coverage, warn only).
-- `D77`: evaluated against `R-LINT-022`'s own crowding signal (four
-  dimensions over warn at once) and deliberately not split — one
-  cohesive component, not a hidden second responsibility.
+- `D77`: evaluated against `R-LINT-022`'s crowding signal and
+  deliberately not split.
+- `D176`: `R-LINT-028`–`030` implemented, found never to have been;
+  028 handles wrapped and punctuated citations.

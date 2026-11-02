@@ -12,6 +12,9 @@ UNION ALL
 SELECT id, title, status, 'var', NULL
 FROM read_yaml_frontmatter('{repo_root}/specs/vars/*.md', filename:=true)
 UNION ALL
+SELECT id, title, status, 'decision', NULL
+FROM read_yaml_frontmatter('{repo_root}/specs/decisions/*.md', filename:=true)
+UNION ALL
 SELECT
   regexp_extract(filename, '(G-[A-Za-z0-9-]+)\.md$', 1), NULL, NULL, 'guarantee',
   'comp-' || regexp_extract(filename, 'specs/components/([^/]+)/interface/guarantees/', 1)
@@ -80,7 +83,25 @@ FROM (
     content, '### (CS-[A-Za-z0-9-]+)\s*\nCovers:\s*(\S+)', ['cs_id', 'target']
   )) AS m
   FROM read_text('{repo_root}/specs/product/*.md')
-);
+)
+UNION ALL
+SELECT
+  regexp_extract(fm, '(?m)^id:\s*(\S+)', 1),
+  regexp_extract(fm, '(?m)^supersedes:\s*(\S+)', 1),
+  'supersedes'
+FROM (SELECT regexp_extract(content, '^---\n(.*?)\n---\n', 1, 's') AS fm
+  FROM read_text('{repo_root}/specs/decisions/*.md')) AS d
+WHERE regexp_extract(fm, '(?m)^supersedes:\s*(\S+)', 1) != ''
+UNION ALL
+SELECT
+  regexp_extract(fm, '(?m)^id:\s*(\S+)', 1),
+  UNNEST(list_filter(list_transform(
+    string_split(regexp_extract(fm, '(?m)^builds_on:\s*\[([^\]]*)\]', 1), ','),
+    lambda x: trim(x)
+  ), lambda x: x != '')),
+  'builds_on'
+FROM (SELECT regexp_extract(content, '^---\n(.*?)\n---\n', 1, 's') AS fm
+  FROM read_text('{repo_root}/specs/decisions/*.md')) AS d;
 
 ---
 
@@ -120,3 +141,13 @@ SELECT
   ))) AS word_count
 FROM read_text('{repo_root}/specs/components/*/**/*.md')
 GROUP BY 1;
+
+---
+
+CREATE OR REPLACE VIEW decision_lineage AS
+SELECT
+  regexp_extract(fm, '(?m)^id:\s*(\S+)', 1) AS id,
+  NULLIF(regexp_extract(fm, '(?m)^last_ratified_commit:\s*(\S+)', 1), '') AS last_ratified_commit
+FROM (SELECT regexp_extract(content, '^---\n(.*?)\n---\n', 1, 's') AS fm
+  FROM read_text('{repo_root}/specs/decisions/*.md')) AS d
+WHERE fm != '';

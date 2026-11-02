@@ -204,3 +204,26 @@ silent after R-LINT-016 while the real rule count keeps climbing.
   miss. Unlike 017/018, this one scans every file `spec_bundle_hash` can
   reach (`corpus.docs` plus `corpus.glossary_files`), not per-component
   content — the first rule in this corpus to need that scope.
+
+## `D176`: `R-LINT-028`–`030` implemented
+
+Specced since `D70`–`D74` and covered by tests since then, but never
+implemented: five tests had failed in this suite for the whole of that
+time. They depended on `graph-query-engine` exposing decisions, which it
+did not (see its own `BOOTSTRAP.md`); that was fixed first.
+
+`R-LINT-029`/`030` query `nodes`/`edges`; `R-LINT-028` scans citations
+natively, like `R-LINT-026`/`027`. Run over the real corpus the rules
+reported nothing genuine, but the first version of `R-LINT-028` reported
+five false findings: prose hard-wraps a citation across lines, and a
+comma can sit inside the closing quote, so the term is compared after
+collapsing whitespace and dropping one trailing `,.;:`; the literal
+`"<Term>"` placeholder in the rule's own text is not a citation. Because
+a clean report proves nothing about a rule that cannot fire, one test
+copies the real corpus, injects a dangling `builds_on`, an orphaned
+`deprecated`, and a `supersedes` of a ratified decision, and expects
+exactly those three findings. 59 of 59 pass.
+
+To stay under `R-LINT-012`'s 4000-word cap while adding behavior, backstory
+was trimmed from `R-LINT-015`, `018`, `020`–`022`, `024`, `025` and the
+constraints; no normative content was removed.

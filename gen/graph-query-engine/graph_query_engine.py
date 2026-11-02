@@ -5,8 +5,8 @@ gen/spec-linter/spec_linter.py already documents: no generator/
 criterion-compiler exists yet to have produced this the normal way.
 See verification/graph-query-engine/BOOTSTRAP.md.
 
-Implements R-GQE-007 (load_views) over the six views' SQL
-(R-GQE-001..006), generated verbatim into views.sql alongside this
+Implements R-GQE-007 (load_views) over the seven views' SQL
+(R-GQE-001..006, 008), generated verbatim into views.sql alongside this
 file — that file is the asset; this module is just the thin loader
 that substitutes {repo_root} and executes it.
 """
@@ -66,11 +66,16 @@ _FRONTMATTER_ZERO_MATCH_GUARDS: list[tuple[str, str, str]] = [
         "read_yaml_frontmatter('{repo_root}/specs/product/*.md', filename:=true)",
         "(SELECT NULL::VARCHAR AS id, NULL::VARCHAR AS title, NULL::VARCHAR AS status WHERE false)",
     ),
+    (
+        "specs/decisions/*.md",
+        "read_yaml_frontmatter('{repo_root}/specs/decisions/*.md', filename:=true)",
+        "(SELECT NULL::VARCHAR AS id, NULL::VARCHAR AS title, NULL::VARCHAR AS status WHERE false)",
+    ),
 ]
 
 
 def load_views(con: duckdb.DuckDBPyConnection, repo_root: Path) -> None:
-    """R-GQE-007. Creates (or replaces) all six views on `con`, scoped
+    """R-GQE-007. Creates (or replaces) all seven views on `con`, scoped
     to the corpus under `repo_root`. Idempotent — safe to call more
     than once on the same connection. Raises on the first statement
     that fails, rather than swallowing it — except component_provenance

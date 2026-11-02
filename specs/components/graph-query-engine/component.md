@@ -82,3 +82,7 @@ None.
   `INSTALL yaml`) — found once a fresh caller (`decision-drift-
   detector`) hit a real registry conflict that prose alone ("the
   `yaml` community extension") didn't prevent.
+- `D176`: `views.sql` brought up to `R-GQE-001`/`002`/`008` — the `decision`
+  node kind, the `supersedes`/`builds_on` edges, and `decision_lineage`
+  had never been implemented. Decision fields are read from the
+  frontmatter block only (a decision's prose quoted `supersedes:`).

@@ -10,9 +10,11 @@
 ```sql
 CREATE OR REPLACE VIEW decision_lineage AS
 SELECT
-  regexp_extract(content, 'id:\s*(\S+)', 1) AS id,
-  NULLIF(regexp_extract(content, 'last_ratified_commit:\s*(\S+)', 1), '') AS last_ratified_commit
-FROM read_text('{repo_root}/specs/decisions/*.md');
+  regexp_extract(fm, '(?m)^id:\s*(\S+)', 1) AS id,
+  NULLIF(regexp_extract(fm, '(?m)^last_ratified_commit:\s*(\S+)', 1), '') AS last_ratified_commit
+FROM (SELECT regexp_extract(content, '^---\n(.*?)\n---\n', 1, 's') AS fm
+  FROM read_text('{repo_root}/specs/decisions/*.md')) AS d
+WHERE fm != '';
 ```
 
   `R-LINT-029`/`030` MUST query `nodes`/`edges` for `status`/

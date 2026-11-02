@@ -12,5 +12,5 @@
   a non-resolving target looked like an `R-id`, a `P-id`, or neither.
 
   Implementation requirement, not behavioral. Exception: R-LINT-009's
-  line-reporting stays a native scan — `nodes`/`edges` don't map a
-  `CS-id` back to its owning `product` doc.
+  line-reporting stays a native scan (`nodes`/`edges` don't map a
+  `CS-id` to its `product` doc).

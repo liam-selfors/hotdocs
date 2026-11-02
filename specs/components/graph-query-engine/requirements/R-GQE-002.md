@@ -61,20 +61,22 @@ FROM (
 )
 UNION ALL
 SELECT
-  regexp_extract(content, 'id:\s*(\S+)', 1),
-  regexp_extract(content, 'supersedes:\s*(\S+)', 1),
+  regexp_extract(fm, '(?m)^id:\s*(\S+)', 1),
+  regexp_extract(fm, '(?m)^supersedes:\s*(\S+)', 1),
   'supersedes'
-FROM read_text('{repo_root}/specs/decisions/*.md')
-WHERE regexp_extract(content, 'supersedes:\s*(\S+)', 1) != ''
+FROM (SELECT regexp_extract(content, '^---\n(.*?)\n---\n', 1, 's') AS fm
+  FROM read_text('{repo_root}/specs/decisions/*.md')) AS d
+WHERE regexp_extract(fm, '(?m)^supersedes:\s*(\S+)', 1) != ''
 UNION ALL
 SELECT
-  regexp_extract(content, 'id:\s*(\S+)', 1),
+  regexp_extract(fm, '(?m)^id:\s*(\S+)', 1),
   UNNEST(list_filter(list_transform(
-    string_split(regexp_extract(content, 'builds_on:\s*\[([^\]]*)\]', 1), ','),
+    string_split(regexp_extract(fm, '(?m)^builds_on:\s*\[([^\]]*)\]', 1), ','),
     lambda x: trim(x)
   ), lambda x: x != '')),
   'builds_on'
-FROM read_text('{repo_root}/specs/decisions/*.md');
+FROM (SELECT regexp_extract(content, '^---\n(.*?)\n---\n', 1, 's') AS fm
+  FROM read_text('{repo_root}/specs/decisions/*.md')) AS d;
 ```
 
   `{repo_root}` substitution and the `read_text` `filename:=true`
@@ -93,3 +95,10 @@ FROM read_text('{repo_root}/specs/decisions/*.md');
   governs `supersedes`/`builds_on`'s two new arms (`D74`): neither is
   present on more than a handful of decision records today, so
   `read_yaml_frontmatter` would silently drop either column outright.
+
+  The decision arms MUST read only a record's frontmatter block, never
+  its whole text: a decision's prose can quote a field, and matching
+  anywhere turned `D137`'s quoted `supersedes: [D17]` into a
+  `supersedes` edge that no decision declares (`D176`). Each arm
+  extracts the block (`regexp_extract(content, '^---\n(.*?)\n---\n', 1,
+  's')`) first, then matches each field at a line start within it.

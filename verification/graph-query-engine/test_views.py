@@ -97,30 +97,94 @@ def test_ac_gqe_007_load_views_idempotent(con):
     assert before == after
 
 
+def _synthetic_corpus(tmp_path, decisions: dict[str, str]):
+    """A minimal corpus: one component (the component glob is the one
+    deliberately unguarded, R-GQE-007) plus the given decision files."""
+    comp = tmp_path / "specs" / "components" / "foo"
+    comp.mkdir(parents=True)
+    (comp / "component.md").write_text(
+        "---\nid: comp-foo\ntitle: Foo\nstatus: draft\nowners: [t]\n---\n\n# Foo\n\n## Purpose\n\nX.\n\n## Next\n"
+    )
+    dec = tmp_path / "specs" / "decisions"
+    dec.mkdir(parents=True)
+    for name, text in decisions.items():
+        (dec / f"{name}.md").write_text(text)
+    c = duckdb.connect()
+    c.execute("INSTALL yaml FROM community")
+    c.execute("LOAD yaml")
+    from graph_query_engine import load_views
+    load_views(c, tmp_path)
+    return c
+
+
+def _decision(did, status="ratified", extra="", body="Body.", commit="abc1234"):
+    commit_line = f"last_ratified_commit: {commit}\n" if commit else ""
+    return f"---\nid: {did}\ntitle: T {did}\nstatus: {status}\nowners: [t]\n{extra}{commit_line}---\n\n# {did}\n\n{body}\n"
+
+
 def test_ac_gqe_008_decision_lineage_has_last_ratified_commit(con):
-    """D92 -- decision_lineage is narrowed to id/last_ratified_commit
-    only; status/supersedes/builds_on moved to nodes/edges."""
+    """R-GQE-008 -- decision_lineage is id/last_ratified_commit only;
+    status/supersedes/builds_on live in nodes/edges. Real corpus."""
     rows = con.execute(
         "SELECT last_ratified_commit FROM decision_lineage WHERE id = 'D31'"
     ).fetchall()
     assert rows[0][0] is not None and len(rows[0][0]) > 0
+    cols = [c[0] for c in con.execute("SELECT * FROM decision_lineage LIMIT 0").description]
+    assert cols == ["id", "last_ratified_commit"]
 
 
-def test_ac_gqe_009_decision_nodes_and_supersedes_edge(con):
-    """D92 -- decisions are kind='decision' nodes; supersedes is a
-    real edge, reflecting this corpus's one actual relationship
-    (D31 supersedes D17, formalized under D87)."""
-    rows = con.execute(
-        "SELECT id, status, kind FROM nodes WHERE id IN ('D17', 'D31') AND kind = 'decision'"
-    ).fetchall()
-    by_id = {r[0]: r for r in rows}
-    assert by_id["D17"][1] == "deprecated"
-    assert by_id["D31"][1] == "ratified"
+def test_ac_gqe_008_missing_last_ratified_commit_is_null_not_empty(tmp_path):
+    c = _synthetic_corpus(tmp_path, {
+        "D1": _decision("D1", commit="abc1234"),
+        "D2": _decision("D2", commit=None, body="Prose quoting last_ratified_commit: deadbeef is not a field."),
+    })
+    rows = dict(c.execute("SELECT id, last_ratified_commit FROM decision_lineage").fetchall())
+    assert rows == {"D1": "abc1234", "D2": None}
 
-    edge = con.execute(
-        "SELECT source_id, target_id FROM edges WHERE edge_type = 'supersedes' AND source_id = 'D31'"
-    ).fetchall()
-    assert edge == [("D31", "D17")]
+
+def test_ac_gqe_009_decision_nodes_and_supersedes_edge(tmp_path):
+    """R-GQE-001/002 -- decisions are kind='decision' nodes and supersedes
+    is a real edge. Synthetic corpus: the real one has no supersession
+    (the 0fb1d53 renumbering reset it to zero deprecations; this test
+    once asserted the pre-renumbering D31-supersedes-D17 pair)."""
+    c = _synthetic_corpus(tmp_path, {
+        "D1": _decision("D1", status="deprecated"),
+        "D2": _decision("D2", extra="supersedes: D1\n"),
+    })
+    rows = c.execute("SELECT id, status, kind FROM nodes WHERE kind = 'decision' ORDER BY id").fetchall()
+    assert rows == [("D1", "deprecated", "decision"), ("D2", "ratified", "decision")]
+    assert c.execute("SELECT source_id, target_id FROM edges WHERE edge_type = 'supersedes'").fetchall() == [("D2", "D1")]
+
+
+def test_ac_gqe_010_prose_quoting_a_field_is_not_an_edge(tmp_path):
+    c = _synthetic_corpus(tmp_path, {
+        "D1": _decision("D1"),
+        "D2": _decision("D2", body="We write `supersedes: D1` and\nbuilds_on: [D1] in prose, but declare neither."),
+        "D3": _decision("D3", extra="builds_on: [D1, D2]\n"),
+    })
+    assert c.execute("SELECT * FROM edges WHERE edge_type IN ('supersedes', 'builds_on') AND source_id = 'D2'").fetchall() == []
+    assert c.execute("SELECT source_id, target_id FROM edges WHERE edge_type = 'builds_on' ORDER BY target_id").fetchall() == [("D3", "D1"), ("D3", "D2")]
+
+
+def test_ac_gqe_010_real_corpus_decision_edges_match_frontmatter(con):
+    """The view must agree with an independent frontmatter-only parse of
+    every real decision (D137 quotes `supersedes: [D17]` in prose)."""
+    expected_builds, expected_supersedes = set(), set()
+    for f in (REPO_ROOT / "specs/decisions").glob("D*.md"):
+        fm = re.match(r"---\n(.*?)\n---\n", f.read_text(), re.S).group(1)
+        did = re.search(r"^id:\s*(\S+)", fm, re.M).group(1)
+        m = re.search(r"^builds_on:\s*\[(.*?)\]", fm, re.M)
+        if m:
+            expected_builds |= {(did, x.strip()) for x in m.group(1).split(",") if x.strip()}
+        m = re.search(r"^supersedes:\s*(\S+)", fm, re.M)
+        if m:
+            expected_supersedes.add((did, m.group(1)))
+    got_builds = set(con.execute("SELECT source_id, target_id FROM edges WHERE edge_type = 'builds_on'").fetchall())
+    got_supersedes = set(con.execute("SELECT source_id, target_id FROM edges WHERE edge_type = 'supersedes'").fetchall())
+    assert got_builds == expected_builds
+    assert got_supersedes == expected_supersedes
+    n = con.execute("SELECT count(*) FROM nodes WHERE kind = 'decision'").fetchone()[0]
+    assert n == len(list((REPO_ROOT / "specs/decisions").glob("D*.md")))
 
 
 def test_ac_gqe_009_no_supersedes_edge_for_unset_decisions(con):

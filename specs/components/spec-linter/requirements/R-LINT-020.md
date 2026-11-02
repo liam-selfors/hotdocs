@@ -8,8 +8,8 @@
   that document's "Scope of adoption" section for the full rationale.
 
   Implementation requirement, not behavioral: R-LINT-018's second check
-  becomes a join against `nodes.owner_component_id`. R-LINT-008/009's
-  treatment is `R-LINT-021`'s, not this rule's.
+  is a join against `nodes.owner_component_id`. R-LINT-008/009 are
+  `R-LINT-021`'s.
 
   Exception (D13): `nodes`/`edges` are component-level only, so
   R-LINT-003/004 each keep one native residual check for `architecture`-

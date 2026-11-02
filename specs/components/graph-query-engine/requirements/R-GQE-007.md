@@ -1,7 +1,7 @@
 # R-GQE-007
 
 **R-GQE-007** — MUST expose a `load_views(con, repo_root)` call that
-  creates all six views (`R-GQE-001`–`006`) against a given DuckDB
+  creates all seven views (`R-GQE-001`–`006`, `R-GQE-008`) against a given DuckDB
   connection, substituting `repo_root` (an absolute path) for every
   `{repo_root}` placeholder in the generated SQL before executing each
   `CREATE VIEW` statement in dependency order (`component_context`
@@ -15,7 +15,7 @@
   `read_yaml_frontmatter` MUST NOT be allowed to raise merely because a
   glob it reads matches zero files (unlike `read_text`, which already
   tolerates this natively — confirmed by hand, not assumed): a corpus
-  legitimately has no `specs/vars/*.md` or `specs/product/*.md` files
+  legitimately has no `specs/vars/*.md`, `specs/product/*.md`, or `specs/decisions/*.md` files
   yet in some states (`graph-query-engine`'s own sparse test fixtures,
   `spec-linter`'s, `D13`), and that is expected state, not an error, the
   same posture `R-GQE-005` already requires for zero `.provenance.json`

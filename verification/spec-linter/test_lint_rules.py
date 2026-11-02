@@ -575,3 +575,86 @@ def test_ac_lint_031_uncited_cli_warns(corpus_root):
 def test_ac_lint_031_no_cli_no_finding(corpus_root):
     report = run_lint(corpus_root)
     assert not has_finding(report, "R-LINT-031", severity="warn")
+
+
+def _glossary_with(corpus_root, entry):
+    glossary = corpus_root / "specs" / "glossary.md"
+    glossary.write_text(glossary.read_text(encoding="utf-8") + entry, encoding="utf-8")
+
+
+def test_ac_lint_028_wrapped_and_punctuated_citations_resolve(corpus_root):
+    """Real prose hard-wraps a citation across lines and puts a comma
+    inside the closing quote; neither is drift (D176)."""
+    _glossary_with(corpus_root, "- **Wrapped Test Term** — defined for this test.\n")
+    _patch(
+        _comp(corpus_root) / "requirements" / "R-FOO-001.md",
+        (
+            "The component MUST do the one thing it is specified to do.",
+            'The component MUST follow the glossary\'s "Wrapped\n  Test Term," and also the glossary\'s "Wrapped Test Term".',
+        ),
+    )
+    assert not has_finding(run_lint(corpus_root), "R-LINT-028")
+
+
+def test_ac_lint_028_placeholder_is_not_a_citation(corpus_root):
+    _patch(
+        _comp(corpus_root) / "requirements" / "R-FOO-001.md",
+        (
+            "The component MUST do the one thing it is specified to do.",
+            'The component MUST do it; a rule cites the glossary\'s "<Term>" as a pattern.',
+        ),
+    )
+    assert not has_finding(run_lint(corpus_root), "R-LINT-028")
+
+
+def test_ac_lint_028_citation_is_case_exact(corpus_root):
+    _glossary_with(corpus_root, "- **Case Test Term** — defined for this test.\n")
+    _patch(
+        _comp(corpus_root) / "requirements" / "R-FOO-001.md",
+        (
+            "The component MUST do the one thing it is specified to do.",
+            'The component MUST use the glossary\'s "case test term".',
+        ),
+    )
+    assert has_finding(run_lint(corpus_root), "R-LINT-028")
+
+
+def test_ac_lint_029_prose_quoting_a_field_is_not_supersession(corpus_root):
+    """D137 quotes `supersedes: [D17]` in prose; that must not read as a
+    supersession (D176)."""
+    decisions_dir = corpus_root / "specs" / "decisions"
+    decisions_dir.mkdir(parents=True, exist_ok=True)
+    (decisions_dir / "D900.md").write_text(
+        "---\nid: D900\ntitle: Quotes a field\nstatus: ratified\nowners: [t]\n"
+        "last_ratified_commit: abc1234\n---\n\n# D900\n\nWe cite `supersedes: D901`\n"
+        "and, on its own line,\nbuilds_on: [D999]\nas examples.\n",
+        encoding="utf-8",
+    )
+    report = run_lint(corpus_root)
+    assert not has_finding(report, "R-LINT-029")
+    assert not has_finding(report, "R-LINT-030")
+
+
+def test_ac_lint_029_030_fire_on_a_mutated_copy_of_the_real_corpus(tmp_path):
+    """Zero findings on the real corpus proves nothing unless the rules can
+    fire there: copy it, break one thing per rule, expect one finding each."""
+    import shutil
+    from conftest import REPO_ROOT
+    root = tmp_path / "repo"
+    shutil.copytree(REPO_ROOT / "specs", root / "specs")
+    decisions = root / "specs" / "decisions"
+    d = decisions / "D50.md"
+    d.write_text(d.read_text(encoding="utf-8").replace("owners:", "builds_on: [D9999]\nowners:", 1), encoding="utf-8")
+    d = decisions / "D51.md"
+    d.write_text(d.read_text(encoding="utf-8").replace("status: ratified", "status: deprecated", 1), encoding="utf-8")
+    d = decisions / "D52.md"
+    d.write_text(d.read_text(encoding="utf-8").replace("owners:", "supersedes: D53\nowners:", 1), encoding="utf-8")
+    report = run_lint(root)
+    by_rule = {}
+    for f in report.findings:
+        by_rule.setdefault(f.rule_id, []).append(f.message)
+    assert len(by_rule.get("R-LINT-030", [])) == 1 and "D9999" in by_rule["R-LINT-030"][0]
+    msgs = by_rule.get("R-LINT-029", [])
+    assert any("D51" in m and "no other decision supersedes" in m for m in msgs)
+    assert any("D52 supersedes D53" in m and "not deprecated" in m for m in msgs)
+    assert len(msgs) == 2
