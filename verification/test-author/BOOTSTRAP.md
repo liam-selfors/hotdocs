@@ -618,3 +618,26 @@ one `repo_root` for three cases, so the last two were served from
 `test-author`'s cache instead of being validated. 32 of 32 pass;
 `verifier-orchestrator` and `capability-scenario-verifier` suites
 unchanged.
+
+## `D189`: the component under test's module was left to be guessed
+
+A scratch project outside this repository (a `semver` component whose
+function is `compare`) failed all five generated tests with
+`ModuleNotFoundError: No module named 'comp_semver'`. The generator had
+written `gen/semver/semver.py` correctly; `R-AUTHOR-010` defined
+`<module_name>` for a component's dependencies only, so the test author
+derived a name from the `component_id`. A `slugify` component passed
+only because its function name equalled its module name. `R-AUTHOR-025`
+now has the prompt name the module concretely (`import semver`), and
+`AC-AUTHOR-025` plus a hand test over two component ids cover it; the
+new tests fail on the previous implementation.
+
+Regenerated through the `D58` route, but inside a scratch copy of the
+repository: `generator`'s cold mode writes straight into `gen/`, and
+this component is every other component's verification dependency, so a
+rejected candidate must never touch the live tree. One attempt passed
+34 of 34 (32 prior plus 2 new). The candidate warns that the
+id-derived name is wrong, so my first version of the test, which
+forbade the prompt from mentioning `comp_semver` at all, was too
+literal; it now forbids only offering `import comp_semver`. To fit the
+4000-word cap, backstory was trimmed from `R-AUTHOR-009`–`015`.

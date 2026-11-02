@@ -69,3 +69,5 @@ None.
 - `D94`–`D129`: `R-AUTHOR-009`–`024`; full account in `BOOTSTRAP.md`.
 - `D166`: a fake's name shared by two dependencies matches either's
   arity (`R-AUTHOR-020`).
+- `D189`: `R-AUTHOR-025` — the prompt names the component under test's
+  module (`import foo_bar`); it was left to be guessed.

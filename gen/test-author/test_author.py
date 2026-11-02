@@ -1,3 +1,7 @@
+"""Authors generated-test code for one acceptance criterion, from spec prose alone."""
+from __future__ import annotations
+
+import argparse
 import ast
 import hashlib
 import importlib.util
@@ -5,17 +9,15 @@ import json
 import re
 import sys
 import uuid
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Any, Dict, Optional
 
 PROMPT_VERSION = "v1"
 GATE_VERSION = "generated_test@1.0.0"
 
-_MISSING = object()
 
-_SIG_RE = re.compile(r"([A-Za-z_][A-Za-z0-9_]*)\(([^)]*)\)\s*->\s*([^\n`]+)")
-
-
-def _dual_get(obj, key, default=None):
+def _get(obj, key, default=None):
     if obj is None:
         return default
     if isinstance(obj, dict):
@@ -23,106 +25,94 @@ def _dual_get(obj, key, default=None):
     return getattr(obj, key, default)
 
 
-def _slug(component_id):
-    if not component_id:
-        return ""
-    if component_id.startswith("comp-"):
-        return component_id[len("comp-"):]
-    return component_id
+@dataclass
+class TestAuthoringResult:
+    component_id: str
+    criterion_id: str
+    model: str
+    seed: int
+    prompt_version: str
+    cache_hit: bool
+    file: Optional[Dict[str, Any]]
+    model_call_error: Optional[Dict[str, Any]]
 
 
-def _load_dependency(repo_root, slug, module_name):
-    repo_root = Path(repo_root)
-    dep_dir = repo_root / "gen" / slug
-    flat_path = dep_dir / f"{module_name}.py"
-    pkg_init = dep_dir / module_name / "__init__.py"
+def _slug_and_module_name(component_id: str):
+    slug = component_id[len("comp-"):] if component_id.startswith("comp-") else component_id
+    return slug, slug.replace("-", "_")
+
+
+def _load_dependency_module(repo_root: Path, dep_slug: str, module_name: str):
+    base = Path(repo_root) / "gen" / dep_slug
+    flat_path = base / f"{module_name}.py"
+    pkg_path = base / module_name / "__init__.py"
 
     if flat_path.exists():
-        path = flat_path
-        submodule_locations = None
-    elif pkg_init.exists():
-        path = pkg_init
-        submodule_locations = [str(pkg_init.parent)]
+        module_path = flat_path
+    elif pkg_path.exists():
+        module_path = pkg_path
     else:
         raise ModuleNotFoundError(
-            f"dependency module '{module_name}' not found under {dep_dir}"
+            f"dependency module '{module_name}' not found under {base}"
         )
 
-    qualifier = hashlib.sha256(str(repo_root.resolve()).encode("utf-8")).hexdigest()[:12]
-    unique_name = f"_test_author_dep_{module_name}_{qualifier}"
-
-    spec = importlib.util.spec_from_file_location(
-        unique_name, path, submodule_search_locations=submodule_locations
-    )
+    spec = importlib.util.spec_from_file_location(module_name, module_path)
     module = importlib.util.module_from_spec(spec)
-    sys.modules[unique_name] = module
+    # Must register before exec_module: a dataclass's class body resolves
+    # sys.modules[__module__] while the class body itself is executing.
+    sys.modules[module_name] = module
     spec.loader.exec_module(module)
     return module
 
 
-def _criterion_hash(bundle):
-    dependency_interfaces = _dual_get(bundle, "dependency_interfaces") or {}
-    if not isinstance(dependency_interfaces, dict):
-        dependency_interfaces = {}
-    payload = {
-        "component_id": _dual_get(bundle, "component_id"),
-        "criterion_id": _dual_get(bundle, "criterion_id"),
-        "covers": _dual_get(bundle, "covers"),
-        "criterion_text": _dual_get(bundle, "criterion_text"),
-        "requirement_text": _dual_get(bundle, "requirement_text"),
-        "interface": _dual_get(bundle, "interface"),
-        "glossary": _dual_get(bundle, "glossary"),
-        "dependency_interfaces": dependency_interfaces,
-    }
-    encoded = json.dumps(payload, sort_keys=True, default=str).encode("utf-8")
-    return "sha256:" + hashlib.sha256(encoded).hexdigest()
+def _criterion_content_hash(bundle) -> str:
+    fields = {}
+    for key in (
+        "component_id",
+        "criterion_id",
+        "covers",
+        "criterion_text",
+        "requirement_text",
+        "interface",
+        "glossary",
+        "dependency_interfaces",
+    ):
+        fields[key] = _get(bundle, key)
+    canonical = json.dumps(fields, sort_keys=True, default=str)
+    return "sha256:" + hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
-def _gate_inputs_hash(seed, prompt_version):
-    encoded = json.dumps(
-        {"seed": seed, "prompt_version": prompt_version}, sort_keys=True
-    ).encode("utf-8")
-    return "sha256:" + hashlib.sha256(encoded).hexdigest()
+def _gate_inputs_hash(seed: int, prompt_version: str) -> str:
+    canonical = json.dumps({"seed": seed, "prompt_version": prompt_version}, sort_keys=True)
+    return "sha256:" + hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
-def _is_cache_hit(cached, cache_manager_mod):
-    if isinstance(cached, cache_manager_mod.Miss):
-        return False
-    payload = _dual_get(cached, "payload", _MISSING)
-    return payload is not _MISSING
+def _filename_for(criterion_id: str) -> str:
+    return "test_" + criterion_id.lower().replace("-", "_") + ".py"
 
 
-def _result(component_id, criterion_id, model, seed, cache_hit, file, model_call_error):
-    return {
-        "component_id": component_id,
-        "criterion_id": criterion_id,
-        "model": model,
-        "seed": seed,
-        "prompt_version": PROMPT_VERSION,
-        "cache_hit": cache_hit,
-        "file": file,
-        "model_call_error": model_call_error,
-    }
+def _write_file(repo_root: Path, slug: str, criterion_id: str, file_info) -> None:
+    path = repo_root / "verification" / slug / "generated-test" / _filename_for(criterion_id)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    content = _get(file_info, "content", "") or ""
+    path.write_text(content)
 
 
-def _extract_file(text, nonce):
+def _extract_file_content(text, nonce: str):
     if not text:
         return None
     pattern = re.compile(
-        r"-----BEGIN FILE "
-        + re.escape(nonce)
-        + r"-----\n(.*?)\n-----END FILE "
-        + re.escape(nonce)
-        + r"-----",
+        r"-----BEGIN FILE " + re.escape(nonce) + r"-----\n(.*?)\n-----END FILE "
+        + re.escape(nonce) + r"-----",
         re.DOTALL,
     )
-    match = pattern.search(text)
-    if not match:
+    m = pattern.search(text)
+    if not m:
         return None
-    return match.group(1)
+    return m.group(1)
 
 
-def _split_top_level(s):
+def _split_top_level(s: str):
     parts = []
     depth = 0
     current = ""
@@ -141,476 +131,526 @@ def _split_top_level(s):
     return parts
 
 
-def _parse_param_count(params_str):
-    params_str = params_str.strip()
-    if not params_str:
-        return 0, False
-    count = 0
-    flexible = False
-    for part in _split_top_level(params_str):
-        part = part.strip()
-        if not part or part == "*" or part == "/":
+def _parse_params_arity(params_str: str):
+    parts = _split_top_level(params_str)
+    required = 0
+    optional = 0
+    has_var = False
+    for p in parts:
+        p = p.strip()
+        if not p or p == "*":
             continue
-        if part.startswith("**") or part.startswith("*"):
-            flexible = True
+        if p.startswith("**") or p.startswith("*"):
+            has_var = True
             continue
-        count += 1
-    return count, flexible
+        if "=" in p:
+            optional += 1
+        else:
+            required += 1
+    return (required, required + optional, has_var)
 
 
-def _collect_dependency_signatures(dependency_interfaces):
-    registry = {}
+_SIG_RE = re.compile(r"\b([a-zA-Z_][a-zA-Z0-9_]*)\s*\(([^()]*)\)\s*->\s*[\w\[\], .|]+")
+
+
+def _extract_dependency_arities(dependency_interfaces):
+    result: Dict[str, list] = {}
     for _dep_id, text in (dependency_interfaces or {}).items():
-        if not isinstance(text, str):
+        if not text:
             continue
-        for match in _SIG_RE.finditer(text):
-            name, params, _ret = match.groups()
-            count, flexible = _parse_param_count(params)
-            registry.setdefault(name, []).append((count, flexible))
-    return registry
+        for m in _SIG_RE.finditer(text):
+            name, params = m.group(1), m.group(2)
+            result.setdefault(name, []).append(_parse_params_arity(params))
+    return result
 
 
-def _func_arity(args):
-    count = len(args.posonlyargs) + len(args.args) + len(args.kwonlyargs)
-    flexible = args.vararg is not None or args.kwarg is not None
-    return count, flexible
+def _arity_of_funcdef(node: ast.FunctionDef):
+    nargs = len(node.args.args) + len(node.args.kwonlyargs)
+    required_positional = len(node.args.args) - len(node.args.defaults)
+    required_kwonly = sum(1 for d in node.args.kw_defaults if d is None)
+    required = required_positional + required_kwonly
+    has_var = bool(node.args.vararg or node.args.kwarg)
+    return (required, nargs, has_var)
 
 
-def _collect_fake_arities(tree):
-    arities = {}
-    for node in tree.body:
-        if isinstance(node, ast.FunctionDef):
-            arities[node.name] = _func_arity(node.args)
-
+def _collect_function_arities(tree: ast.Module):
+    func_defs = {}
     aliases = {}
     for node in tree.body:
-        if (
-            isinstance(node, ast.Assign)
-            and len(node.targets) == 1
-            and isinstance(node.targets[0], ast.Name)
-            and isinstance(node.value, ast.Name)
-        ):
-            aliases[node.targets[0].id] = node.value.id
-    for alias, target in aliases.items():
-        if target in arities:
-            arities.setdefault(alias, arities[target])
+        if isinstance(node, ast.FunctionDef):
+            func_defs[node.name] = _arity_of_funcdef(node)
+        elif isinstance(node, ast.Assign):
+            if (
+                len(node.targets) == 1
+                and isinstance(node.targets[0], ast.Name)
+                and isinstance(node.value, ast.Name)
+            ):
+                aliases[node.targets[0].id] = node.value.id
 
     for node in ast.walk(tree):
         if isinstance(node, ast.Constant) and isinstance(node.value, str):
             try:
                 sub_tree = ast.parse(node.value)
-            except Exception:
+            except (SyntaxError, ValueError):
                 continue
-            for sub in sub_tree.body:
-                if isinstance(sub, ast.FunctionDef):
-                    arities.setdefault(sub.name, _func_arity(sub.args))
+            for sub_node in sub_tree.body:
+                if isinstance(sub_node, ast.FunctionDef) and sub_node.name not in func_defs:
+                    func_defs[sub_node.name] = _arity_of_funcdef(sub_node)
 
-    return arities
-
-
-def _check_fake_arity(code, dependency_interfaces):
-    dep_sigs = _collect_dependency_signatures(dependency_interfaces)
-    if not dep_sigs:
-        return None
-    try:
-        tree = ast.parse(code)
-    except SyntaxError:
-        return None
-
-    fake_arities = _collect_fake_arities(tree)
-    for name, (count, flexible) in fake_arities.items():
-        if name not in dep_sigs or flexible:
-            continue
-        candidates = dep_sigs[name]
-        if any(dep_flexible or dep_count == count for dep_count, dep_flexible in candidates):
-            continue
-        dep_desc = ", ".join(
-            "variadic" if dep_flexible else str(dep_count)
-            for dep_count, dep_flexible in candidates
-        )
-        return {
-            "category": "fake_signature_mismatch",
-            "message": (
-                f"fake '{name}' defines arity {count}, but the dependency's "
-                f"documented signature(s) for '{name}' require arity [{dep_desc}]"
-            ),
-        }
-    return None
+    resolved = dict(func_defs)
+    for alias, target in aliases.items():
+        seen = set()
+        t = target
+        while t in aliases and t not in seen:
+            seen.add(t)
+            t = aliases[t]
+        if t in func_defs and alias not in resolved:
+            resolved[alias] = func_defs[t]
+    return resolved
 
 
-def _build_prompt(bundle, nonce, dependency_interfaces):
-    component_id = _dual_get(bundle, "component_id", "")
-    criterion_id = _dual_get(bundle, "criterion_id", "")
-    covers = _dual_get(bundle, "covers", "")
-    criterion_text = _dual_get(bundle, "criterion_text", "")
-    requirement_text = _dual_get(bundle, "requirement_text", "")
-    interface_text = _dual_get(bundle, "interface", "")
-    glossary_text = _dual_get(bundle, "glossary", "")
+def _arity_matches_any(fake_arity, dep_arities_list):
+    f_req, f_max, f_var = fake_arity
+    for d_req, d_max, d_var in dep_arities_list:
+        if f_var or d_var:
+            return True
+        if f_req <= d_max and d_req <= f_max:
+            return True
+    return False
 
-    dep_sections = []
-    for dep_id, dep_interface in (dependency_interfaces or {}).items():
-        dep_sections.append(f"### Dependency `{dep_id}` interface contract\n\n{dep_interface}")
-    dep_block = "\n\n".join(dep_sections) if dep_sections else "(this component has no dependencies)"
 
-    return f"""You are authoring an automated test for one acceptance criterion of
-component `{component_id}`. You have NO tool access and NO file access.
-Answer using only the material given below in this prompt.
+def _check_fake_arity(tree: ast.Module, dependency_arities):
+    if not dependency_arities:
+        return []
+    resolved = _collect_function_arities(tree)
+    failures = []
+    for name, arity in resolved.items():
+        if name in dependency_arities:
+            if not _arity_matches_any(arity, dependency_arities[name]):
+                failures.append(
+                    {
+                        "function": name,
+                        "fake_arity": arity,
+                        "expected_arities": dependency_arities[name],
+                    }
+                )
+    return failures
+
+
+def _build_prompt(bundle, component_id: str, module_name: str, nonce: str) -> str:
+    criterion_id = _get(bundle, "criterion_id", "") or ""
+    covers = _get(bundle, "covers", "") or ""
+    criterion_text = _get(bundle, "criterion_text", "") or ""
+    requirement_text = _get(bundle, "requirement_text", "") or ""
+    interface_text = _get(bundle, "interface", "") or ""
+    glossary_text = _get(bundle, "glossary", "") or ""
+    dependency_interfaces = _get(bundle, "dependency_interfaces", {}) or {}
+
+    dep_parts = [
+        f"### Dependency `{dep_id}` interface\n\n{dep_iface}"
+        for dep_id, dep_iface in dependency_interfaces.items()
+    ]
+    dep_section = "\n\n".join(dep_parts) if dep_parts else "(this component has no dependencies)"
+
+    comp_id_underscored = component_id.replace("-", "_")
+
+    return f"""You are authoring a single Python test file for the acceptance criterion
+`{criterion_id}` of component `{component_id}`.
+
+You have NO tool access and NO file access. Answer using only the
+information given below in this message.
 
 ## Criterion under test
 
-Criterion id: {criterion_id}
-Covers requirement: {covers}
+Covers: {covers}
 
-Criterion text (Given/When/Then):
 {criterion_text}
 
-Covered requirement's own text:
+## Requirement text ({covers})
+
 {requirement_text}
 
-## Target component's public interface contract
-
-This is the ONLY authoritative description of the target component's
-behavior you may rely on. You have NOT been given, and MUST NOT assume
-anything about, the target component's actual `gen/<component>/` source
-code. Write the test strictly against this contract.
+## Target component's interface contract
 
 {interface_text}
-
-## Dependency interface contracts
-
-If the test needs to fake a dependency's behavior, each fake MUST match
-that dependency's real, documented call signature and return shape
-below EXACTLY -- never invent or simplify a signature or a return
-shape. Worked example: if a dependency's documented return type has
-named fields (e.g. a type with fields `text`, `model`, `backend`,
-`model_call_error`), your fake's return value MUST expose every one of
-those fields, even if this particular test only reads one of them --
-never return a bare list, string, or number instead.
-
-{dep_block}
 
 ## Glossary
 
 {glossary_text}
 
-## How the component under test resolves ITS OWN dependencies (read carefully)
+## Dependency interfaces
 
-This corpus's components are not a normal installed Python package. No
-dependency is statically importable by the component under test. The
-component under test resolves each of its own dependencies dynamically,
-at runtime, from a `repo_root` it is given, by loading:
+{dep_section}
 
-  `<repo_root>/gen/<dependency-slug>/<module_name>.py`           (flat module), or
-  `<repo_root>/gen/<dependency-slug>/<module_name>/__init__.py`  (package)
+Any fake you write for a dependency's behavior MUST match that
+dependency's real, documented call signature and return shape exactly,
+as given above -- never invented or simplified. Worked example: if a
+dependency's documented return type has named fields (for instance
+`{{"text": ..., "model": ..., "backend": ..., "model_call_error": ...}}`),
+your fake MUST expose every one of those fields on the object/dict it
+returns, never a bare list, string, or number -- even if the test you
+are writing only ever reads one of those fields.
 
-`<module_name>` is the dependency's slug with every hyphen replaced by
-an underscore (never the literal string `"__init__"`).
+## Importing the component under test
 
-This resolution is NEVER interceptable by a name-based `sys.modules`
-injection or by `mock.patch` from the test's side -- the loader keys
-the module it loads under whatever name it chooses internally, not
-under the dependency's plain module name, so patching
-`sys.modules["some_dependency"]` or `mock.patch("some_dependency.fn")`
-has no effect on what the component under test actually calls.
+The component under test's own module MUST be imported with the exact
+statement:
 
-To fake a dependency for this test, create a fresh, temporary
-`repo_root` directory for the test (e.g. via `tempfile.mkdtemp()` or
-`tmp_path`), and under it write the fake as a FLAT module file at
-`<temp_repo_root>/gen/<dependency-slug>/<module_name>.py` -- always
-flat-module shape for a synthetic fake, never a package, because every
-real loader checks the flat shape first. Then call the component under
-test's own function, passing that temporary directory as its
-`repo_root` argument.
+    import {module_name}
 
-This dynamic-loading convention applies ONLY to how the component
-under test resolves its OWN dependencies internally. It does NOT apply
-to how this test file itself imports the component under test -- the
-test imports the component under test with a plain, ordinary
-`import <module_name>` statement (the target component's own module is
-already importable in the test environment), never a custom loader.
+Never infer this from a function name, and never use the component id
+itself turned into an identifier (`{comp_id_underscored}` is wrong) --
+the correct module name is the component's slug (`comp-` stripped)
+with every hyphen replaced by an underscore: `{module_name}`. The
+component under test may be laid out as `{module_name}.py` or as a
+`{module_name}/` package; a plain `import {module_name}` works either
+way. Do NOT use any custom loader for this import -- a custom loader
+is only ever needed for the component's own dependencies, described
+next.
 
-If your test itself needs to dynamically load any module from a file
-path (which should only ever be a dependency fake you load back for
-inspection, never the component under test), the one correctness-
-critical step is this literal pattern -- register the module in
-`sys.modules` BEFORE calling `exec_module`, never after:
+## How the component under test resolves ITS OWN dependencies
 
-```python
-import importlib.util
-import sys
+This section describes only how `{module_name}` resolves ITS OWN
+dependencies internally -- never how you import `{module_name}` itself
+(always the plain `import {module_name}` above).
 
-spec = importlib.util.spec_from_file_location(module_name, module_path)
-module = importlib.util.module_from_spec(spec)
-sys.modules[module_name] = module  # MUST happen before exec_module
-spec.loader.exec_module(module)
-```
+No dependency is statically importable anywhere in this corpus. Every
+component resolves each of its own dependencies dynamically, at
+runtime, from:
 
-Skipping the `sys.modules` registration step, or doing it after
-`exec_module`, crashes on any loaded module that defines a dataclass,
-because a dataclass's class body resolves `sys.modules[cls.__module__]`
-while the class body itself is executing.
+    <repo_root>/gen/<dependency-slug>/<module_name>.py           (flat module)
+    <repo_root>/gen/<dependency-slug>/<module_name>/__init__.py  (package)
 
-## Building a synthetic fixture, if this criterion needs one
+where `<module_name>` is the dependency's own slug with every hyphen
+replaced by an underscore (never `"__init__"`). This resolution is
+never interceptable by name-based `sys.modules` injection or
+`mock.patch` -- a correct component does not look a dependency up by
+a fixed, guessable name.
 
-If this criterion needs a synthetic fixture component (a fake
-`component.md`, `requirements/`, `interface/`, `acceptance/`, or
-`specs/vars/VAR-*.md`, or `specs/decisions/D<N>.md` tree on disk):
+To fake a dependency for this test, write a fake module file on disk
+under a fresh temporary `repo_root`, laid out as a FLAT module
+(`<module_name>.py`) even if the real dependency ships as a package --
+every real loader in this corpus checks the flat shape first, so a
+flat fake is always found regardless of the real dependency's own
+layout.
 
-- Every frontmatter-bearing document in that fixture (`component.md`,
-  `specs/vars/VAR-*.md`, `specs/decisions/D<N>.md`) MUST carry the
-  frontmatter fields `id`, `title`, `status`, `owners`. `status` MUST
-  be exactly one of `draft`, `ratified`, or `deprecated`. If `status`
-  is `ratified`, also set a placeholder `last_ratified_commit` field.
-- The opposite also holds: a unit file (`constraints.md`, or anything
-  under `requirements/`, `interface/`, `acceptance/`) carries NO
-  frontmatter at all.
-- Every `requirements/` file in the fixture needs a matching
-  `acceptance/` file with a `Covers:` tag pointing back to it -- for
-  every fixture component you create, not only the target.
-- Any list-valued frontmatter field (`owners`, `depends_on`,
-  `realizes`, `uses_var`) MUST use YAML flow style, e.g. `[a, b]` --
-  never block style (a `-`-per-line list). This corpus's frontmatter
-  reader does not recognize block-style lists at all.
-- Default every synthetic fixture component to `sealed: true` with a
-  short, fake `source_path` that is NOT under `gen/` -- this exempts it
-  from `realizes` and the whole capability-linkage machinery. Only
-  supply a resolvable `realizes: [P-<id>]` if this specific criterion
-  genuinely concerns `realizes`/capability linkage.
-- Write and parse any frontmatter as plain text (e.g. simple line
-  splitting/string matching). NEVER `import yaml` or any other
-  not-already-installed third-party package in the test.
-- If this criterion depends on a precondition the target checks via
-  `spec-linter`, call `lint()` against the fixture FIRST and assert
-  zero hard-fail findings before exercising the real behavior under
-  test. Use exactly this call shape (positional `paths` first, as
-  `None`, then `repo_root`):
+If you (or the test you write) dynamically load any module from a
+file path at runtime, the one correctness-critical step is this
+literal pattern -- register the module in `sys.modules` BEFORE calling
+`exec_module`, never after:
 
-```python
-findings = lint(None, repo_root)
-```
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(module_name, module_path)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module  # MUST happen before exec_module
+    spec.loader.exec_module(module)
 
-## Reading values the target component returns
+Skipping this ordering crashes on any dependency module that defines a
+dataclass: a dataclass's class body resolves `sys.modules[__module__]`
+while the class body itself is still executing.
 
-Every field you read from a value the target component itself
-returns (not only from a dependency fake's data) MUST use dual
-dict-or-attribute access -- e.g. a small helper that tries `obj[key]`
-if `obj` is a dict, else `getattr(obj, key)` -- never a bare `.attr`
-access alone. Any component in this corpus may legitimately return
-either a dict or an object with attributes in a given call.
+## Reading values the target returns
+
+Every field you read from a value `{module_name}` itself returns --
+not only a faked dependency's data -- MUST use dual dict-or-attribute
+access, for example:
+
+    def _get(obj, key, default=None):
+        if isinstance(obj, dict):
+            return obj.get(key, default)
+        return getattr(obj, key, default)
+
+Never rely on a bare `.attr` access alone: this corpus's components
+may legitimately return either a dict or an object exposing the same
+fields, in any given round, including `{module_name}` itself.
 
 ## Confirming a fake was actually invoked
 
-NEVER assert that a fake was used by reaching into `sys.modules` under
-a guessed key -- real loaders key dynamically (often qualified by
-`repo_root` or a content hash), so any guessed key is unreliable and
-may not match. To confirm a fake ran, have the fake's own code APPEND
-an invocation record to a FILE at a path the test controls, and have
-the test read that file afterward -- never an in-process, module-level
-list, since the test cannot reliably re-locate the module object that
-would hold it.
+NEVER assert a fake was used by reaching into `sys.modules` under a
+guessed key. Real loaders key `sys.modules` dynamically (often
+`repo_root`- or hash-qualified), so any guessed key is unreliable and
+may fail even against a fully correct candidate. To confirm a fake
+ran, have the fake's own code APPEND its invocation record to a plain
+file under a path your test controls -- never an in-process,
+module-level list -- then have the test read that file back.
 
-## Comparing a recorded timestamp against a time window
+## Synthetic fixtures
 
-If this test asserts that some wall-clock "own write time" field falls
-within a `[before, after]` window, truncate `before` and `after` to
-the SAME precision the field's own documented format carries (e.g.
-whole seconds for a `%Y-%m-%dT%H:%M:%SZ`-style timestamp with no
-fractional digits) before comparing -- never compare a value that was
-truncated on write against microsecond-precision bounds directly.
+If this criterion requires constructing a synthetic fixture component
+(its own `component.md`, `requirements/`, `interface/`,
+`acceptance/`, a `specs/vars/VAR-*.md` file, or a
+`specs/decisions/D<N>.md` file) under a temporary repo root:
 
-## Output format (read carefully -- this is how your answer is extracted)
+- Every frontmatter-bearing document (`component.md`,
+  `specs/vars/VAR-*.md`, `specs/decisions/D<N>.md`) MUST carry `id`,
+  `title`, `status`, and `owners`; `status` MUST be exactly one of
+  `draft`, `ratified`, or `deprecated`.
+- Every `requirements/` file needs a matching `acceptance/` file with
+  a `Covers:` tag.
+- `status: ratified` also requires a placeholder
+  `last_ratified_commit` field.
+- A unit file (`constraints.md`, or anything under `requirements/`,
+  `interface/`, `acceptance/`) carries NO frontmatter at all.
+- Never `import yaml` or any other third-party package that is not
+  already installed -- write and parse frontmatter as plain text.
+- Any list-valued frontmatter field (`owners`, `depends_on`,
+  `realizes`, `uses_var`) MUST use YAML flow style, e.g. `[a, b]` --
+  never block style -- this corpus's frontmatter reader does not
+  recognize block style as a list.
+- The fixture component SHOULD default to `sealed: true` with a
+  short, fake `source_path` NOT under `gen/`, UNLESS this criterion
+  specifically concerns `realizes`/capability-linkage -- only then
+  supply a resolvable `P-<id>` in `realizes`. A sealed fixture is
+  exempt from `realizes`-related lint rules entirely.
+- If this criterion depends on a precondition the target checks
+  against `spec-linter`, call `lint()` against the fixture FIRST and
+  assert zero hard-fail findings, before exercising the real behavior
+  under test, using exactly this call:
 
-You have no tool or file access. Produce exactly one test file's
-content, and wrap it EXACTLY as follows, with no other text before,
-between, or after the markers besides the file content itself:
+      from spec_linter import lint
+      findings = lint(None, repo_root)
+
+  (`paths` first, positionally `None` -- never a single positional
+  argument.)
+
+## Timestamp comparisons
+
+If this test asserts a wall-clock "own write time" field falls within
+a `[before, after]` window, truncate `before` and `after` to the same
+precision the field's own documented format carries (e.g. whole
+seconds for a `%Y-%m-%dT%H:%M:%SZ` example with no fractional digits)
+-- never compare a value truncated on write against
+microsecond-precision bounds directly.
+
+## Output format
+
+Answer with exactly one test file. Wrap its content EXACTLY as:
 
 -----BEGIN FILE {nonce}-----
 <the complete, exact test file content, verbatim>
 -----END FILE {nonce}-----
 
-Do not include any narration, preamble, postamble, or Markdown code
-fences around these markers. Anything outside the markers is
-discarded.
+Nothing else may appear between those two marker lines except the
+test file's content. Do not wrap the markers themselves in a code
+fence. Do not add narration, preamble, or postamble outside the
+markers.
 """
 
 
-def author_test(bundle, model, seed=0, *, repo_root=None, llm_backend=None):
-    if repo_root is None:
-        repo_root = Path.cwd()
-    repo_root = Path(repo_root)
+def _error_to_dict(err):
+    if err is None:
+        return None
+    if isinstance(err, dict):
+        return err
+    return {"category": _get(err, "category"), "message": _get(err, "message")}
 
-    component_id = _dual_get(bundle, "component_id")
-    criterion_id = _dual_get(bundle, "criterion_id")
 
-    cache_manager_mod = _load_dependency(repo_root, "cache-manager", "cache_manager")
-    llm_endpoint_mod = _load_dependency(repo_root, "llm-endpoint", "llm_endpoint")
+def author_test(
+    bundle,
+    model: str,
+    seed: int = 0,
+    *,
+    repo_root: Optional[Path] = None,
+    llm_backend=None,
+) -> TestAuthoringResult:
+    repo_root = Path(repo_root) if repo_root is not None else Path.cwd()
 
-    criterion_hash = _criterion_hash(bundle)
+    component_id = _get(bundle, "component_id", "") or ""
+    criterion_id = _get(bundle, "criterion_id", "") or ""
+    dependency_interfaces = _get(bundle, "dependency_interfaces", {}) or {}
+
+    slug, module_name = _slug_and_module_name(component_id)
+
+    cache_manager = _load_dependency_module(repo_root, "cache-manager", "cache_manager")
+
+    criterion_content_hash = _criterion_content_hash(bundle)
     gate_inputs_hash = _gate_inputs_hash(seed, PROMPT_VERSION)
-
-    cache_key = cache_manager_mod.CacheKey(
-        spec_bundle_hash=criterion_hash,
+    cache_key = cache_manager.CacheKey(
+        spec_bundle_hash=criterion_content_hash,
         gate_inputs_hash=gate_inputs_hash,
         gate_version=GATE_VERSION,
         model_pin=model,
     )
 
-    cached = cache_manager_mod.get(cache_key, repo_root=repo_root)
-    if _is_cache_hit(cached, cache_manager_mod):
-        payload = _dual_get(cached, "payload", {})
-        file_info = _dual_get(payload, "file", {})
-        return _result(
-            component_id=_dual_get(payload, "component_id", component_id),
-            criterion_id=_dual_get(payload, "criterion_id", criterion_id),
-            model=_dual_get(payload, "model", model),
+    cached = cache_manager.get(cache_key, repo_root=repo_root)
+    if not isinstance(cached, cache_manager.Miss):
+        payload = _get(cached, "payload", {}) or {}
+        file_info = _get(payload, "file", {}) or {}
+        file_info = dict(file_info) if file_info else None
+        if file_info is not None:
+            _write_file(repo_root, slug, criterion_id, file_info)
+        return TestAuthoringResult(
+            component_id=component_id,
+            criterion_id=criterion_id,
+            model=model,
             seed=seed,
+            prompt_version=PROMPT_VERSION,
             cache_hit=True,
-            file={
-                "path": _dual_get(file_info, "path"),
-                "content": _dual_get(file_info, "content"),
-            },
+            file=file_info,
             model_call_error=None,
         )
 
-    dependency_interfaces = _dual_get(bundle, "dependency_interfaces") or {}
-    if not isinstance(dependency_interfaces, dict):
-        dependency_interfaces = {}
-
     nonce = uuid.uuid4().hex
-    prompt = _build_prompt(bundle, nonce, dependency_interfaces)
+    prompt = _build_prompt(bundle, component_id, module_name, nonce)
 
-    response = llm_endpoint_mod.complete(prompt=prompt, model=model, backend=llm_backend)
-    error = _dual_get(response, "model_call_error")
-    if error:
-        return _result(
-            component_id, criterion_id, model, seed, False, None,
-            {
-                "category": _dual_get(error, "category", "unknown"),
-                "message": _dual_get(error, "message", ""),
-            },
+    llm_endpoint = _load_dependency_module(repo_root, "llm-endpoint", "llm_endpoint")
+    response = llm_endpoint.complete(prompt, model, backend=llm_backend)
+
+    model_call_error = _error_to_dict(_get(response, "model_call_error"))
+    if model_call_error:
+        return TestAuthoringResult(
+            component_id=component_id,
+            criterion_id=criterion_id,
+            model=model,
+            seed=seed,
+            prompt_version=PROMPT_VERSION,
+            cache_hit=False,
+            file=None,
+            model_call_error=model_call_error,
         )
 
-    text = _dual_get(response, "text")
-    extracted = _extract_file(text, nonce)
-    if extracted is None:
-        return _result(
-            component_id, criterion_id, model, seed, False, None,
-            {
-                "category": "missing_markers",
-                "message": f"no BEGIN/END FILE markers found for nonce {nonce}",
+    text = _get(response, "text")
+    content = _extract_file_content(text, nonce)
+    if content is None:
+        return TestAuthoringResult(
+            component_id=component_id,
+            criterion_id=criterion_id,
+            model=model,
+            seed=seed,
+            prompt_version=PROMPT_VERSION,
+            cache_hit=False,
+            file=None,
+            model_call_error={
+                "category": "malformed_response",
+                "message": "no matching BEGIN/END FILE marker pair found in model response",
             },
         )
 
     try:
-        ast.parse(extracted)
+        tree = ast.parse(content)
     except SyntaxError as exc:
-        return _result(
-            component_id, criterion_id, model, seed, False, None,
-            {
+        return TestAuthoringResult(
+            component_id=component_id,
+            criterion_id=criterion_id,
+            model=model,
+            seed=seed,
+            prompt_version=PROMPT_VERSION,
+            cache_hit=False,
+            file=None,
+            model_call_error={
                 "category": "malformed_code",
                 "message": f"SyntaxError: {exc}",
             },
         )
 
-    arity_error = _check_fake_arity(extracted, dependency_interfaces)
-    if arity_error is not None:
-        return _result(component_id, criterion_id, model, seed, False, None, arity_error)
+    dependency_arities = _extract_dependency_arities(dependency_interfaces)
+    mismatches = _check_fake_arity(tree, dependency_arities)
+    if mismatches:
+        m = mismatches[0]
+        return TestAuthoringResult(
+            component_id=component_id,
+            criterion_id=criterion_id,
+            model=model,
+            seed=seed,
+            prompt_version=PROMPT_VERSION,
+            cache_hit=False,
+            file=None,
+            model_call_error={
+                "category": "fake_signature_mismatch",
+                "message": (
+                    f"function '{m['function']}' fake arity {m['fake_arity']} "
+                    f"does not match any documented arity {m['expected_arities']}"
+                ),
+            },
+        )
 
-    slug = _slug(component_id)
-    if criterion_id:
-        filename = f"test_{criterion_id.lower().replace('-', '_')}.py"
-    else:
-        filename = "test_unknown.py"
-    rel_path = f"verification/{slug}/generated-test/{filename}"
-    out_path = repo_root / "verification" / slug / "generated-test" / filename
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    out_path.write_text(extracted)
+    file_info = {
+        "path": f"verification/{slug}/generated-test/{_filename_for(criterion_id)}",
+        "content": content,
+    }
 
     payload = {
         "component_id": component_id,
         "criterion_id": criterion_id,
         "model": model,
-        "file": {"path": rel_path, "content": extracted},
+        "file": file_info,
     }
-    cached_result = cache_manager_mod.CachedResult(
+    cached_result = cache_manager.CachedResult(
         gate_type="generated_test",
         payload=payload,
-        stored_at=cache_manager_mod.now_iso(),
+        stored_at=cache_manager.now_iso(),
     )
-    cache_manager_mod.put(cache_key, cached_result, repo_root=repo_root)
+    cache_manager.put(cache_key, cached_result, repo_root=repo_root)
 
-    return _result(
-        component_id, criterion_id, model, seed, False,
-        {"path": rel_path, "content": extracted},
-        None,
+    _write_file(repo_root, slug, criterion_id, file_info)
+
+    return TestAuthoringResult(
+        component_id=component_id,
+        criterion_id=criterion_id,
+        model=model,
+        seed=seed,
+        prompt_version=PROMPT_VERSION,
+        cache_hit=False,
+        file=file_info,
+        model_call_error=None,
     )
 
 
-def _parse_cli_args(rest):
-    positional = []
-    options = {"model": None, "seed": 0, "repo_root": Path.cwd(), "format": "text"}
-    for arg in rest:
-        if arg.startswith("--model="):
-            options["model"] = arg.split("=", 1)[1]
-        elif arg.startswith("--seed="):
-            options["seed"] = int(arg.split("=", 1)[1])
-        elif arg.startswith("--repo-root="):
-            options["repo_root"] = Path(arg.split("=", 1)[1])
-        elif arg.startswith("--format="):
-            options["format"] = arg.split("=", 1)[1]
-        elif arg.startswith("--"):
-            raise ValueError(f"unknown option: {arg}")
-        else:
-            positional.append(arg)
-    return positional, options
+def _result_to_dict(result):
+    return {
+        "component_id": _get(result, "component_id"),
+        "criterion_id": _get(result, "criterion_id"),
+        "model": _get(result, "model"),
+        "seed": _get(result, "seed"),
+        "prompt_version": _get(result, "prompt_version"),
+        "cache_hit": _get(result, "cache_hit"),
+        "file": _get(result, "file"),
+        "model_call_error": _get(result, "model_call_error"),
+    }
 
 
-def main(argv=None):
-    argv = list(sys.argv[1:] if argv is None else argv)
-    usage = (
-        "usage: hotdocs author-test <component-id> <criterion-id> "
-        "--model=<model-id> [--seed=<n>] [--repo-root=<dir>] [--format=json|text]"
-    )
-    if not argv or argv[0] != "author-test":
-        print(usage, file=sys.stderr)
-        return 2
+def main(argv=None) -> int:
+    argv = sys.argv[1:] if argv is None else argv
+    parser = argparse.ArgumentParser(prog="hotdocs author-test")
+    parser.add_argument("component_id")
+    parser.add_argument("criterion_id")
+    parser.add_argument("--model", required=True)
+    parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument("--repo-root", default=".")
+    parser.add_argument("--format", choices=["json", "text"], default="text")
 
     try:
-        positional, options = _parse_cli_args(argv[1:])
-    except ValueError as exc:
-        print(str(exc), file=sys.stderr)
-        return 2
+        args = parser.parse_args(argv)
+    except SystemExit as exc:
+        return exc.code if exc.code is not None else 2
 
-    if len(positional) != 2 or options["model"] is None:
-        print(usage, file=sys.stderr)
-        return 2
-
-    component_id, criterion_id = positional
-    repo_root = options["repo_root"]
+    repo_root = Path(args.repo_root)
 
     try:
-        assembler_mod = _load_dependency(repo_root, "spec-bundle-assembler", "spec_bundle_assembler")
-        bundle = assembler_mod.assemble_criterion(component_id, criterion_id, repo_root)
+        spec_bundle_assembler = _load_dependency_module(
+            repo_root, "spec-bundle-assembler", "spec_bundle_assembler"
+        )
+        bundle = spec_bundle_assembler.assemble_criterion(
+            args.component_id, args.criterion_id, repo_root
+        )
     except Exception as exc:
-        print(str(exc), file=sys.stderr)
+        print(f"usage error: {exc}", file=sys.stderr)
         return 2
 
-    result = author_test(bundle, options["model"], options["seed"], repo_root=repo_root)
-    error = _dual_get(result, "model_call_error")
+    result = author_test(bundle, args.model, args.seed, repo_root=repo_root)
 
-    if options["format"] == "json":
-        print(json.dumps(result, indent=2))
+    model_call_error = _get(result, "model_call_error")
+
+    if args.format == "json":
+        print(json.dumps(_result_to_dict(result)))
     else:
-        if error:
-            print(
-                f"model call error: {_dual_get(error, 'category')}: "
-                f"{_dual_get(error, 'message')}"
-            )
+        if model_call_error:
+            print(f"model call error: {model_call_error}")
         else:
-            file_info = _dual_get(result, "file")
-            print(f"wrote {_dual_get(file_info, 'path')}")
+            file_info = _get(result, "file", {}) or {}
+            print(f"wrote {_get(file_info, 'path')}")
 
-    return 1 if error else 0
+    return 1 if model_call_error else 0
 
 
 if __name__ == "__main__":

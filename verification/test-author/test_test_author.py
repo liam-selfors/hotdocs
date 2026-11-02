@@ -501,3 +501,18 @@ def test_ac_author_020_name_shared_by_two_dependencies_accepts_either_arity(repo
         assert _rf(result, "model_call_error") is None, fake
     else:
         assert _rf(result, "model_call_error")["category"] == "fake_signature_mismatch"
+
+
+@pytest.mark.parametrize("component_id, module", [("comp-foo-bar", "foo_bar"), ("comp-semver", "semver")])
+def test_ac_author_025_prompt_names_the_component_under_tests_module(repo_root, component_id, module):
+    """D189 -- the component under test's module is its slug with hyphens
+    replaced by underscores. A real external project's five generated
+    tests all did `import comp_semver` because the prompt never said."""
+    backend = MockBackend([file_block("def test_x(): pass")])
+    author_test(fake_bundle(component_id=component_id), "claude-sonnet-5",
+                repo_root=repo_root, llm_backend=backend)
+    sent_prompt = backend.calls[0][0]
+    assert f"import {module}" in sent_prompt
+    # The prompt may warn that the id-derived name is wrong; it must never
+    # offer it as the import.
+    assert f"import comp_{module}" not in sent_prompt
