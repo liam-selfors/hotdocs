@@ -1,8 +1,6 @@
-import io
-import json
 import socket
 import urllib.error
-from unittest import mock
+import urllib.request
 
 import pytest
 
@@ -15,125 +13,97 @@ def _get(obj, key, default=None):
     return getattr(obj, key, default)
 
 
-def _make_repo(tmp_path):
-    repo_root = tmp_path / "repo"
-    (repo_root / "specs").mkdir(parents=True)
-    (repo_root / "gen").mkdir(parents=True)
-    (repo_root / "verification").mkdir(parents=True)
-
-    patterns = {
-        "version": "1.0.0",
-        "rules": [
-            {
-                "rule_id": "fake-high-secret",
-                "risk_tier": "high",
-                "pattern": "FAKETOKEN-[0-9]{6}",
-            }
-        ],
-    }
-    (repo_root / "patterns.json").write_text(json.dumps(patterns))
-    (repo_root / "specs" / "secret.txt").write_text("token = FAKETOKEN-123456\n")
-
-    return repo_root
+AWS_KEY_FIXTURE = 'AWS_ACCESS_KEY_ID = "AKIAIOSFODNN7EXAMPLE"\n'
 
 
-def _success_response():
-    cm = mock.MagicMock()
-    cm.__enter__.return_value = cm
-    cm.__exit__.return_value = False
-    cm.status = 200
-    return cm
-
-
-def _http_error(code):
-    return urllib.error.HTTPError(
-        url="https://example.invalid/webhook",
-        code=code,
-        msg="Error",
-        hdrs=None,
-        fp=io.BytesIO(b""),
-    )
-
-
-def test_network_error_sets_network_category_notified_and_flagged_unaffected(
-    tmp_path, monkeypatch
-):
-    repo_root = _make_repo(tmp_path)
-    monkeypatch.setenv("VAR_SECRET_PATTERNS_PATH", "patterns.json")
+@pytest.fixture
+def repo_with_high_risk_secret(tmp_path, monkeypatch):
+    secret_file = tmp_path / "secrets.txt"
+    secret_file.write_text(AWS_KEY_FIXTURE)
     monkeypatch.setenv("VAR_COMPLIANCE_WEBHOOK_URL", "https://example.invalid/webhook")
+    return tmp_path, secret_file
 
-    with mock.patch("urllib.request.urlopen", return_value=_success_response()):
-        baseline = secret_scanner.scan(repo_root)
-    baseline_flagged = _get(baseline, "flagged")
-    assert _get(baseline, "notified") is True
 
-    with mock.patch(
-        "urllib.request.urlopen",
-        side_effect=urllib.error.URLError("connection refused"),
-    ):
-        result = secret_scanner.scan(repo_root)
+def _assert_common(result, expected_category):
+    matches = _get(result, "matches")
+    assert matches, "expected the planted AWS key to produce a match"
+    assert any(
+        _get(m, "rule_id") == "AWS Access Key" and _get(m, "risk_tier") == "high"
+        for m in matches
+    ), "expected a high risk_tier match for the planted AWS key"
 
+    assert _get(result, "flagged") is True
     assert _get(result, "notified") is True
+
     error = _get(result, "notification_delivery_error")
     assert error is not None
-    assert _get(error, "category") == "network"
-    assert _get(result, "flagged") == baseline_flagged
+    assert _get(error, "category") == expected_category
+    assert _get(error, "message")
 
 
-def test_http_401_sets_auth_category(tmp_path, monkeypatch):
-    repo_root = _make_repo(tmp_path)
-    monkeypatch.setenv("VAR_SECRET_PATTERNS_PATH", "patterns.json")
-    monkeypatch.setenv("VAR_COMPLIANCE_WEBHOOK_URL", "https://example.invalid/webhook")
+def test_generic_network_error_yields_network_category(repo_with_high_risk_secret, monkeypatch):
+    repo_root, secret_file = repo_with_high_risk_secret
+    calls = []
 
-    with mock.patch("urllib.request.urlopen", return_value=_success_response()):
-        baseline = secret_scanner.scan(repo_root)
-    baseline_flagged = _get(baseline, "flagged")
+    def _raise(*args, **kwargs):
+        calls.append((args, kwargs))
+        raise urllib.error.URLError("connection refused")
 
-    with mock.patch("urllib.request.urlopen", side_effect=_http_error(401)):
-        result = secret_scanner.scan(repo_root)
+    monkeypatch.setattr(urllib.request, "urlopen", _raise)
 
-    assert _get(result, "notified") is True
-    error = _get(result, "notification_delivery_error")
-    assert error is not None
-    assert _get(error, "category") == "auth"
-    assert _get(result, "flagged") == baseline_flagged
+    result = secret_scanner.scan_files([secret_file], repo_root=repo_root)
+
+    _assert_common(result, "network")
+    assert len(calls) == 1
 
 
-def test_socket_timeout_sets_timeout_category(tmp_path, monkeypatch):
-    repo_root = _make_repo(tmp_path)
-    monkeypatch.setenv("VAR_SECRET_PATTERNS_PATH", "patterns.json")
-    monkeypatch.setenv("VAR_COMPLIANCE_WEBHOOK_URL", "https://example.invalid/webhook")
+def test_http_401_yields_auth_category(repo_with_high_risk_secret, monkeypatch):
+    repo_root, secret_file = repo_with_high_risk_secret
+    calls = []
 
-    with mock.patch("urllib.request.urlopen", return_value=_success_response()):
-        baseline = secret_scanner.scan(repo_root)
-    baseline_flagged = _get(baseline, "flagged")
+    def _raise(*args, **kwargs):
+        calls.append((args, kwargs))
+        raise urllib.error.HTTPError(
+            "https://example.invalid/webhook", 401, "Unauthorized", None, None
+        )
 
-    with mock.patch(
-        "urllib.request.urlopen", side_effect=socket.timeout("timed out")
-    ):
-        result = secret_scanner.scan(repo_root)
+    monkeypatch.setattr(urllib.request, "urlopen", _raise)
 
-    assert _get(result, "notified") is True
-    error = _get(result, "notification_delivery_error")
-    assert error is not None
-    assert _get(error, "category") == "timeout"
-    assert _get(result, "flagged") == baseline_flagged
+    result = secret_scanner.scan_files([secret_file], repo_root=repo_root)
+
+    _assert_common(result, "auth")
+    assert len(calls) == 1
 
 
-def test_http_500_sets_network_category(tmp_path, monkeypatch):
-    repo_root = _make_repo(tmp_path)
-    monkeypatch.setenv("VAR_SECRET_PATTERNS_PATH", "patterns.json")
-    monkeypatch.setenv("VAR_COMPLIANCE_WEBHOOK_URL", "https://example.invalid/webhook")
+def test_socket_timeout_yields_timeout_category(repo_with_high_risk_secret, monkeypatch):
+    repo_root, secret_file = repo_with_high_risk_secret
+    calls = []
 
-    with mock.patch("urllib.request.urlopen", return_value=_success_response()):
-        baseline = secret_scanner.scan(repo_root)
-    baseline_flagged = _get(baseline, "flagged")
+    def _raise(*args, **kwargs):
+        calls.append((args, kwargs))
+        raise socket.timeout("timed out")
 
-    with mock.patch("urllib.request.urlopen", side_effect=_http_error(500)):
-        result = secret_scanner.scan(repo_root)
+    monkeypatch.setattr(urllib.request, "urlopen", _raise)
 
-    assert _get(result, "notified") is True
-    error = _get(result, "notification_delivery_error")
-    assert error is not None
-    assert _get(error, "category") == "network"
-    assert _get(result, "flagged") == baseline_flagged
+    result = secret_scanner.scan_files([secret_file], repo_root=repo_root)
+
+    _assert_common(result, "timeout")
+    assert len(calls) == 1
+
+
+def test_http_500_yields_network_category(repo_with_high_risk_secret, monkeypatch):
+    repo_root, secret_file = repo_with_high_risk_secret
+    calls = []
+
+    def _raise(*args, **kwargs):
+        calls.append((args, kwargs))
+        raise urllib.error.HTTPError(
+            "https://example.invalid/webhook", 500, "Internal Server Error", None, None
+        )
+
+    monkeypatch.setattr(urllib.request, "urlopen", _raise)
+
+    result = secret_scanner.scan_files([secret_file], repo_root=repo_root)
+
+    _assert_common(result, "network")
+    assert len(calls) == 1

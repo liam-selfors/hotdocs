@@ -1,10 +1,11 @@
 # R-SECRET-008
 
-**R-SECRET-008** — The scanner MUST support a separate, lightweight
-  invocation mode — scoped only to the files touched by a pending commit or
-  push, not the whole corpus — for use as a pre-commit/pre-push hook,
-  distinct from the full merge-gate run ("as early as pre-commit/
-  pre-push where tooling allows"). This mode uses the same pattern database
-  and detection logic, just a narrower file set and no cache-manager
-  dependency (a pre-commit hook running before a commit even exists has
-  nothing stable to key a cache entry on).
+**R-SECRET-008** — The scanner MUST support a lightweight invocation
+  for a pre-commit/pre-push hook, scoped only to the given files, not
+  the whole repository, with no `cache-manager` dependency (nothing
+  stable exists yet to key a cache entry on). It uses the same engine,
+  plugin set, skip rules, and result shape as a full scan, with
+  `scope` `"precommit"`. When given a `repo_root`, it reports each
+  path relative to it and applies the allowlist (`R-SECRET-012`)
+  exactly as a full scan does; given none, it reports paths as given
+  and applies no allowlist.

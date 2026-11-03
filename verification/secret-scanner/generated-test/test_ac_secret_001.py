@@ -1,9 +1,4 @@
-import json
-import os
-import shutil
-import tempfile
-import unittest
-from pathlib import Path
+import pytest
 
 import secret_scanner
 
@@ -14,82 +9,128 @@ def _get(obj, key, default=None):
     return getattr(obj, key, default)
 
 
-def _write_pattern_db(repo_root, filename="secret-patterns.json"):
-    db = {
-        "version": "2.0.0",
-        "rules": [
-            {
-                "rule_id": "aws-access-key-id",
-                "risk_tier": "high",
-                "pattern": "AKIA[0-9A-Z]{16}",
-            }
-        ],
-    }
-    (repo_root / filename).write_text(json.dumps(db))
-    return filename
+AWS_KEY = "AKIAABCDEFGHIJKLMNOP"
+
+CACHE_MANAGER_STUB = '''\
+import dataclasses
 
 
-class SecretScanFullScanTest(unittest.TestCase):
-    def setUp(self):
-        self.repo_root = Path(tempfile.mkdtemp())
-        (self.repo_root / "specs").mkdir(parents=True, exist_ok=True)
-        (self.repo_root / "gen").mkdir(parents=True, exist_ok=True)
-        (self.repo_root / "verification").mkdir(parents=True, exist_ok=True)
-
-        self._saved_env = {}
-        for name in ("VAR_SECRET_PATTERNS_PATH", "VAR_COMPLIANCE_WEBHOOK_URL"):
-            self._saved_env[name] = os.environ.pop(name, None)
-
-    def tearDown(self):
-        shutil.rmtree(self.repo_root, ignore_errors=True)
-        for name, value in self._saved_env.items():
-            if value is None:
-                os.environ.pop(name, None)
-            else:
-                os.environ[name] = value
-
-    def test_file_with_known_api_key_shape_is_reported_in_matches(self):
-        pattern_file = _write_pattern_db(self.repo_root)
-        os.environ["VAR_SECRET_PATTERNS_PATH"] = pattern_file
-
-        gen_dir = self.repo_root / "gen" / "foo"
-        gen_dir.mkdir(parents=True, exist_ok=True)
-        (gen_dir / "config.py").write_text('API_KEY = "AKIAABCDEFGHIJKLMNOP"\n')
-
-        result = secret_scanner.scan(self.repo_root)
-
-        matches = _get(result, "matches")
-        matched_entry = None
-        for m in matches:
-            if _get(m, "file") == "gen/foo/config.py":
-                matched_entry = m
-                break
-
-        self.assertIsNotNone(
-            matched_entry,
-            f"expected gen/foo/config.py to be reported in matches, got: {matches}",
-        )
-        self.assertEqual(_get(matched_entry, "rule_id"), "aws-access-key-id")
-
-    def test_pycache_dir_and_non_utf8_file_are_skipped(self):
-        pattern_file = _write_pattern_db(self.repo_root)
-        os.environ["VAR_SECRET_PATTERNS_PATH"] = pattern_file
-
-        pycache_dir = self.repo_root / "gen" / "foo" / "__pycache__"
-        pycache_dir.mkdir(parents=True, exist_ok=True)
-        (pycache_dir / "x.txt").write_text("AKIAABCDEFGHIJKLMNOP\n")
-
-        foo_dir = self.repo_root / "gen" / "foo"
-        foo_dir.mkdir(parents=True, exist_ok=True)
-        (foo_dir / "blob.bin").write_bytes(
-            b"AKIAABCDEFGHIJKLMNOP" + b"\xff\xfe\x00\x01"
-        )
-
-        result = secret_scanner.scan(self.repo_root)
-
-        self.assertFalse(_get(result, "flagged"))
-        self.assertEqual(_get(result, "matches"), [])
+@dataclasses.dataclass
+class CacheKey:
+    spec_bundle_hash: str = None
+    gate_inputs_hash: str = None
+    gate_version: str = None
+    model_pin: str = None
 
 
-if __name__ == "__main__":
-    unittest.main()
+@dataclasses.dataclass
+class CachedResult:
+    gate_type: str = None
+    payload: object = None
+    stored_at: str = None
+
+
+class _Miss:
+    payload = None
+
+
+def get(cache_key, repo_root=None):
+    return _Miss()
+
+
+def put(cache_key, cached_result, repo_root=None):
+    pass
+'''
+
+
+def _write(path, content):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(content, encoding="utf-8")
+
+
+def _write_bytes(path, content):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(content)
+
+
+@pytest.fixture
+def repo_root(tmp_path, monkeypatch):
+    monkeypatch.delenv("VAR_COMPLIANCE_WEBHOOK_URL", raising=False)
+    cache_manager_dir = tmp_path / "gen" / "cache-manager"
+    cache_manager_dir.mkdir(parents=True)
+    (cache_manager_dir / "cache_manager.py").write_text(
+        CACHE_MANAGER_STUB, encoding="utf-8"
+    )
+    return tmp_path
+
+
+def test_single_match_in_gen(repo_root):
+    _write(repo_root / "gen" / "foo" / "config.py", 'K = "%s"\n' % AWS_KEY)
+
+    result = secret_scanner.scan(repo_root)
+
+    matches = _get(result, "matches")
+    assert len(matches) == 1
+    match = matches[0]
+    assert _get(match, "rule_id") == "AWS Access Key"
+    assert _get(match, "risk_tier") == "high"
+    assert _get(match, "file") == "gen/foo/config.py"
+    assert _get(match, "line") == 1
+    assert _get(result, "flagged") is True
+
+
+def test_whole_repository_scanned_no_exceptions(repo_root):
+    files = [
+        "README.md",
+        "notes/n.md",
+        "pipeline/p.py",
+        "tools/t.py",
+        "verification/secret-scanner/generated-test/test_x.py",
+    ]
+    for rel in files:
+        _write(repo_root / rel, 'secret = "%s"\n' % AWS_KEY)
+
+    result = secret_scanner.scan(repo_root)
+
+    matches = _get(result, "matches")
+    matched_by_file = {}
+    for m in matches:
+        matched_by_file.setdefault(_get(m, "file"), []).append(m)
+
+    for rel in files:
+        assert rel in matched_by_file
+        for m in matched_by_file[rel]:
+            assert _get(m, "rule_id") == "AWS Access Key"
+
+
+def test_skip_dirs_and_non_utf8_excluded(repo_root):
+    secret_line = 'secret = "%s"\n' % AWS_KEY
+    _write(repo_root / "gen" / "foo" / "__pycache__" / "x.txt", secret_line)
+    _write(repo_root / ".git" / "config", secret_line)
+    _write(repo_root / ".venv" / "lib" / "x.py", secret_line)
+    _write(repo_root / ".hotdocs" / "x.json", secret_line)
+    _write(repo_root / ".pytest_cache" / "x.txt", secret_line)
+    _write(repo_root / "node_modules" / "x.js", secret_line)
+    _write_bytes(
+        repo_root / "gen" / "foo" / "blob.bin",
+        b"\xff\xfe" + AWS_KEY.encode("ascii") + b"\x80\x81",
+    )
+
+    result = secret_scanner.scan(repo_root)
+
+    assert _get(result, "flagged") is False
+    assert _get(result, "matches") == []
+
+
+def test_benign_lines_not_flagged(repo_root):
+    content = (
+        "gate_version=GATE_VERSION\n"
+        '{"secret_scanner": "secret_scanner@0.0.0"}\n'
+        "see verification/spec-linter/BOOTSTRAP.md --retry-feedback=R-TRACK-009\n"
+    )
+    _write(repo_root / "gen" / "foo" / "ok.py", content)
+
+    result = secret_scanner.scan(repo_root)
+
+    assert _get(result, "flagged") is False
+    assert _get(result, "matches") == []

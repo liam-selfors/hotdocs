@@ -1,8 +1,38 @@
 import os
+import shutil
 import tempfile
+import unittest
 from pathlib import Path
 
 import secret_scanner
+
+
+CACHE_MANAGER_SOURCE = """
+import dataclasses
+
+
+@dataclasses.dataclass
+class CacheKey:
+    spec_bundle_hash: str
+    gate_inputs_hash: str
+    gate_version: str
+    model_pin: str
+
+
+@dataclasses.dataclass
+class CachedResult:
+    gate_type: str
+    payload: object
+    stored_at: str
+
+
+def get(cache_key, repo_root=None):
+    return None
+
+
+def put(cache_key, cached_result, repo_root=None):
+    pass
+"""
 
 
 def _get(obj, key, default=None):
@@ -11,110 +41,98 @@ def _get(obj, key, default=None):
     return getattr(obj, key, default)
 
 
-_CACHE_MANAGER_SOURCE = '''
-class CacheKey:
-    def __init__(self, spec_bundle_hash=None, gate_inputs_hash=None, gate_version=None, model_pin=None):
-        self.spec_bundle_hash = spec_bundle_hash
-        self.gate_inputs_hash = gate_inputs_hash
-        self.gate_version = gate_version
-        self.model_pin = model_pin
-
-
-class CachedResult:
-    def __init__(self, gate_type=None, payload=None, stored_at=None):
-        self.gate_type = gate_type
-        self.payload = payload
-        self.stored_at = stored_at
-
-
-def get(cache_key, *, repo_root=None):
-    return CachedResult(gate_type="secret_scanner", payload=None, stored_at=None)
-
-
-def put(cache_key, result, *, repo_root=None):
-    return None
-'''
-
-
-def _build_repo(tmp_dir):
-    repo_root = Path(tmp_dir)
-    (repo_root / "specs").mkdir(parents=True, exist_ok=True)
-    (repo_root / "gen").mkdir(parents=True, exist_ok=True)
-    (repo_root / "verification").mkdir(parents=True, exist_ok=True)
-
-    (repo_root / "specs" / "README.md").write_text(
-        "Fixture spec file with no secret-like content.\n", encoding="utf-8"
-    )
-    (repo_root / "verification" / "README.md").write_text(
-        "Fixture verification file with no secret-like content.\n", encoding="utf-8"
-    )
-
-    cache_manager_dir = repo_root / "gen" / "cache-manager"
-    cache_manager_dir.mkdir(parents=True, exist_ok=True)
-    (cache_manager_dir / "cache_manager.py").write_text(
-        _CACHE_MANAGER_SOURCE, encoding="utf-8"
-    )
-
-    patterns_path = repo_root / "patterns.json"
-    patterns_path.write_text(
-        '{"version": "1.0.0", "rules": []}', encoding="utf-8"
-    )
-
+def _make_repo(path_str):
+    repo_root = Path(path_str)
+    cache_dir = repo_root / "gen" / "cache-manager"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    (cache_dir / "cache_manager.py").write_text(CACHE_MANAGER_SOURCE)
     return repo_root
 
 
-def _assert_is_single_secret_scan_result(result):
-    assert result is not None
-    assert not isinstance(result, (list, tuple, set, dict is None and type(None) or ()))
-    assert not isinstance(result, (list, tuple, set))
+class ExactlyOneSecretScanResultTest(unittest.TestCase):
+    def setUp(self):
+        self._old_webhook = os.environ.pop("VAR_COMPLIANCE_WEBHOOK_URL", None)
+        self._tmp_dirs = []
 
-    scope = _get(result, "scope")
-    flagged = _get(result, "flagged")
-    matches = _get(result, "matches")
-    notified = _get(result, "notified")
-    notification_delivery_error = _get(result, "notification_delivery_error", "MISSING")
-    cache_hit = _get(result, "cache_hit", "MISSING")
+    def tearDown(self):
+        if self._old_webhook is not None:
+            os.environ["VAR_COMPLIANCE_WEBHOOK_URL"] = self._old_webhook
+        for d in self._tmp_dirs:
+            shutil.rmtree(d, ignore_errors=True)
 
-    assert scope == "full"
-    assert isinstance(flagged, bool)
-    assert isinstance(matches, list)
-    assert isinstance(notified, bool)
-    assert notification_delivery_error != "MISSING"
-    assert cache_hit != "MISSING"
-    assert isinstance(cache_hit, bool)
+    def _tmp_repo(self):
+        d = tempfile.mkdtemp()
+        self._tmp_dirs.append(d)
+        return _make_repo(d)
+
+    def test_clean_full_scan_produces_exactly_one_result(self):
+        repo_root = self._tmp_repo()
+        (repo_root / "readme.txt").write_text(
+            "hello world, this is a plain test repository with no secrets.\n"
+        )
+
+        result = secret_scanner.scan(repo_root)
+
+        self.assertNotIsInstance(result, (list, tuple, set))
+        self.assertTrue(hasattr(result, "to_dict"))
+
+        as_dict = result.to_dict()
+        self.assertIsInstance(as_dict, dict)
+
+        for key in (
+            "scope",
+            "gate_version",
+            "flagged",
+            "matches",
+            "allowed",
+            "unused_allowlist_entries",
+            "notified",
+            "notification_delivery_error",
+            "cache_hit",
+        ):
+            self.assertIn(key, as_dict)
+
+        self.assertEqual(_get(result, "scope"), "full")
+        self.assertIsInstance(_get(result, "matches"), list)
+        gate_version = _get(result, "gate_version")
+        self.assertIsInstance(gate_version, str)
+        self.assertTrue(len(gate_version) > 0)
+
+    def test_multi_file_flagged_full_scan_still_produces_exactly_one_result(self):
+        repo_root = self._tmp_repo()
+        (repo_root / "config_a.py").write_text(
+            'AWS_ACCESS_KEY = "AKIAIOSFODNN7EXAMPLE"\n'
+        )
+        (repo_root / "config_b.py").write_text(
+            'AWS_ACCESS_KEY = "AKIAIOSFODNN7EXAMPLE"\n'
+        )
+        (repo_root / "clean.txt").write_text("no secrets in here at all.\n")
+
+        result = secret_scanner.scan(repo_root)
+
+        # A single scan of a repo with multiple matching files must still
+        # yield one SecretScanResult object, not one per file.
+        self.assertNotIsInstance(result, (list, tuple, set))
+        self.assertTrue(hasattr(result, "to_dict"))
+
+        as_dict = result.to_dict()
+        self.assertIsInstance(as_dict, dict)
+
+        matches = _get(result, "matches")
+        self.assertIsInstance(matches, list)
+        self.assertTrue(_get(result, "flagged"))
+        self.assertGreaterEqual(len(matches), 2)
+
+        seen_files = set()
+        for match in matches:
+            self.assertIsNone(_get(match, "secret_hash"))
+            self.assertIsNone(_get(match, "secret_value"))
+            match_file = _get(match, "file")
+            self.assertIn(match_file, ("config_a.py", "config_b.py"))
+            seen_files.add(match_file)
+
+        self.assertEqual(seen_files, {"config_a.py", "config_b.py"})
 
 
-def test_full_scan_produces_exactly_one_secret_scan_result():
-    saved_patterns_var = os.environ.get("VAR_SECRET_PATTERNS_PATH")
-    saved_webhook_var = os.environ.get("VAR_COMPLIANCE_WEBHOOK_URL")
-    if "VAR_COMPLIANCE_WEBHOOK_URL" in os.environ:
-        del os.environ["VAR_COMPLIANCE_WEBHOOK_URL"]
-
-    try:
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            repo_root = _build_repo(tmp_dir)
-            os.environ["VAR_SECRET_PATTERNS_PATH"] = "patterns.json"
-
-            result = secret_scanner.scan(repo_root)
-            _assert_is_single_secret_scan_result(result)
-
-            # Repeat to confirm the "exactly one result per scan" invariant
-            # holds for any full scan, not just a single observed call.
-            result_again = secret_scanner.scan(repo_root)
-            _assert_is_single_secret_scan_result(result_again)
-
-            assert not isinstance(
-                (result, result_again), (list, tuple)
-            ) or True  # sanity: the tuple above is our own test grouping, not scan's output
-            assert not isinstance(result, (list, tuple, set))
-            assert not isinstance(result_again, (list, tuple, set))
-    finally:
-        if saved_patterns_var is None:
-            os.environ.pop("VAR_SECRET_PATTERNS_PATH", None)
-        else:
-            os.environ["VAR_SECRET_PATTERNS_PATH"] = saved_patterns_var
-
-        if saved_webhook_var is None:
-            os.environ.pop("VAR_COMPLIANCE_WEBHOOK_URL", None)
-        else:
-            os.environ["VAR_COMPLIANCE_WEBHOOK_URL"] = saved_webhook_var
+if __name__ == "__main__":
+    unittest.main()

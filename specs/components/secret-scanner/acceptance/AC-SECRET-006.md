@@ -4,8 +4,15 @@ Covers: R-SECRET-006
 Kind: generated-test
 
 ```gherkin
-Given a cached result under gate_version "secret_scanner@1.0.0" and the
-  pattern database is updated to "secret_scanner@2.0.0"
-When a full scan runs with the new gate_version
-Then the stale cache entry is not reused and a fresh scan is performed
+Given the installed detect-secrets package has version V
+  (importlib.metadata.version("detect-secrets"))
+When a full scan runs
+Then the result's gate_version is exactly
+  "secret_scanner@3.0.0+detect-secrets." followed by V
+
+Given a stand-in cache-manager already holding a result stored under
+  the same spec_bundle_hash and gate_inputs_hash but a different
+  gate_version
+When a full scan runs
+Then the stored result is not reused and a fresh scan is performed
 ```

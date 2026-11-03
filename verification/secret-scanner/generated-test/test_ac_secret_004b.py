@@ -1,5 +1,9 @@
-import json
+import os
+import shutil
+import tempfile
+import unittest
 import urllib.request
+from pathlib import Path
 
 import secret_scanner
 
@@ -10,90 +14,76 @@ def _get(obj, key, default=None):
     return getattr(obj, key, default)
 
 
-def test_low_risk_tier_blocking_match_still_notifies(tmp_path, monkeypatch):
-    repo_root = tmp_path / "repo"
-    (repo_root / "specs").mkdir(parents=True)
-    (repo_root / "gen" / "cache-manager").mkdir(parents=True)
-    (repo_root / "verification").mkdir(parents=True)
+class TestAcSecret004b(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.repo_root = Path(self.tmp)
+        foo_dir = self.repo_root / "gen" / "foo"
+        foo_dir.mkdir(parents=True)
+        (foo_dir / "h.py").write_text(
+            'sha = "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b"\n'
+        )
 
-    secret_value = "HIGHENTROPYSECRETVALUE1234567890"
+        self._old_webhook = os.environ.get("VAR_COMPLIANCE_WEBHOOK_URL")
+        os.environ["VAR_COMPLIANCE_WEBHOOK_URL"] = "https://example.invalid/hook"
 
-    patterns = {
-        "version": "1.0.0",
-        "rules": [
-            {
-                "rule_id": "generic-high-entropy",
-                "risk_tier": "low",
-                "pattern": secret_value,
-            }
-        ],
-    }
-    patterns_path = repo_root / "secret-patterns.json"
-    patterns_path.write_text(json.dumps(patterns), encoding="utf-8")
+        self._old_urlopen = urllib.request.urlopen
+        self.calls = []
 
-    leaky_file = repo_root / "specs" / "leaky.txt"
-    leaky_file.write_text("token = " + secret_value + "\n", encoding="utf-8")
+        def recorder(*args, **kwargs):
+            self.calls.append((args, kwargs))
 
-    cache_manager_src = (
-        "class CacheKey:\n"
-        "    def __init__(self, spec_bundle_hash, gate_inputs_hash, gate_version, model_pin):\n"
-        "        self.spec_bundle_hash = spec_bundle_hash\n"
-        "        self.gate_inputs_hash = gate_inputs_hash\n"
-        "        self.gate_version = gate_version\n"
-        "        self.model_pin = model_pin\n"
-        "\n"
-        "class CachedResult:\n"
-        "    def __init__(self, gate_type, payload, stored_at):\n"
-        "        self.gate_type = gate_type\n"
-        "        self.payload = payload\n"
-        "        self.stored_at = stored_at\n"
-        "\n"
-        "def get(cache_key, repo_root=None):\n"
-        "    return CachedResult(gate_type='secret_scanner', payload=None, stored_at='1970-01-01T00:00:00Z')\n"
-        "\n"
-        "def put(cache_key, result, repo_root=None):\n"
-        "    pass\n"
-    )
-    (repo_root / "gen" / "cache-manager" / "cache_manager.py").write_text(
-        cache_manager_src, encoding="utf-8"
-    )
+            class _Response:
+                status = 200
 
-    webhook_calls_log = tmp_path / "webhook_calls.log"
+                def __enter__(self):
+                    return self
 
-    def fake_urlopen(request, *args, **kwargs):
-        with open(webhook_calls_log, "a", encoding="utf-8") as fh:
-            fh.write("called\n")
+                def __exit__(self, exc_type, exc_val, exc_tb):
+                    return False
 
-        class _Resp:
-            status = 200
+                def read(self):
+                    return b"{}"
 
-            def read(self):
-                return b"{}"
+            return _Response()
 
-            def __enter__(self):
-                return self
+        urllib.request.urlopen = recorder
 
-            def __exit__(self, *exc):
-                return False
+    def tearDown(self):
+        urllib.request.urlopen = self._old_urlopen
+        if self._old_webhook is None:
+            os.environ.pop("VAR_COMPLIANCE_WEBHOOK_URL", None)
+        else:
+            os.environ["VAR_COMPLIANCE_WEBHOOK_URL"] = self._old_webhook
+        shutil.rmtree(self.tmp, ignore_errors=True)
 
-        return _Resp()
+    def test_low_risk_blocking_match_still_notifies_once(self):
+        result = secret_scanner.scan(self.repo_root)
 
-    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
-    monkeypatch.setenv("VAR_SECRET_PATTERNS_PATH", str(patterns_path))
-    monkeypatch.setenv(
-        "VAR_COMPLIANCE_WEBHOOK_URL", "https://compliance.example.invalid/webhook"
-    )
+        flagged = _get(result, "flagged")
+        matches = _get(result, "matches")
 
-    result = secret_scanner.scan(repo_root)
+        self.assertTrue(flagged)
+        self.assertIsNotNone(matches)
 
-    matches = _get(result, "matches", [])
-    assert len(matches) == 1
-    assert _get(matches[0], "risk_tier") == "low"
-    assert _get(matches[0], "file") == "specs/leaky.txt"
+        h_matches = [
+            m for m in matches
+            if _get(m, "file", "").replace("\\", "/") == "gen/foo/h.py"
+        ]
+        self.assertTrue(
+            len(h_matches) >= 1,
+            "expected at least one match for gen/foo/h.py, got: %r" % (matches,),
+        )
+        self.assertTrue(
+            any(_get(m, "risk_tier") == "low" for m in h_matches),
+            "expected a low risk_tier match for gen/foo/h.py, got: %r" % (h_matches,),
+        )
 
-    assert _get(result, "flagged") is True
-    assert _get(result, "notified") is True
-    assert _get(result, "notification_delivery_error") is None
+        self.assertEqual(
+            len(self.calls), 1,
+            "expected the compliance webhook recorder to be called exactly once",
+        )
 
-    assert webhook_calls_log.exists()
-    assert webhook_calls_log.read_text(encoding="utf-8").count("called") == 1
+
+if __name__ == "__main__":
+    unittest.main()

@@ -5,7 +5,7 @@ status: draft
 owners: [pipeline-team]
 depends_on: [comp-cache-manager]
 realizes: [P-COMPLIANCE-GATE]
-uses_var: [VAR-COMPLIANCE-WEBHOOK-URL, VAR-SECRET-PATTERNS-PATH]
+uses_var: [VAR-COMPLIANCE-WEBHOOK-URL]
 model_pin: claude-sonnet-5
 sealed: false
 ---
@@ -14,34 +14,34 @@ sealed: false
 
 ## Purpose
 
-Automated, unconditional scan of `specs/`, `gen/`, and `verification/`
-for secret-shaped strings (API-key/token patterns, high-entropy
-strings). Same trust shape as `license-scanner`: no human sign-off
-required to clear a flag, but no result is ever silent.
+Automated, unconditional scan of the entire repository for committed
+secrets, using the `detect-secrets` library as its detection engine.
+Same trust shape as `license-scanner`: no human sign-off required to
+clear a flag, but no result is ever silent.
 
 ## Rationale
 
-This scan's unconditional, no-sign-off posture mirrors
-`license-scanner`'s.
+Same unconditional, no-sign-off posture as `license-scanner`. Detection
+is a maintained library's, not this component's: a hand-built entropy
+check flagged ordinary identifiers yet could never match a random hex
+secret (`D168`).
+
+**Known gaps, accepted (`D168`):** the entropy detectors read quoted
+strings only, so an unquoted random token goes unseen; and
+`KeywordDetector`, the only plugin that catches a low-entropy password,
+is off because it flags any key containing a word like `secret`.
 
 ## Scope
 
-**In scope:** pattern- and entropy-based detection across all three
-directories; the merge-blocking decision (confidence-based); the
-severity-based notification path (risk-based, orthogonal to confidence —
-see the corresponding addendum in `notes/initial-ideas.md`); cache-awareness; a
-lightweight pre-commit/pre-push invocation distinct from the full
-merge-gate run.
+**In scope:** whole-repository detection; the merge-blocking decision
+(confidence-based); the notification path (risk-based, orthogonal to
+it); the allowlist for reviewed fixtures and public constants
+(`R-SECRET-012`) and the tool proposing its entries; caching; a
+pre-commit form.
 
-**Out of scope:** `spec-linter`'s R-LINT-013 (the narrow, structural check
-that a `specs/vars/` declaration with `sensitivity: secret` carries no
-`example`/`default` field) — that's a schema check on one document type;
-this component is a broader, textual scan across three whole directories
-for secret-*shaped* strings wherever they appear, including inside prose. The
-two are deliberately overlapping defense-in-depth, not redundant: R-LINT-013
-closes off the structural way a secret could enter a `vars/` declaration;
-this component catches the case someone pastes one into a spec's prose, a
-comment, or generated code anyway.
+**Out of scope:** `spec-linter`'s `R-LINT-013` (a structural check on
+`specs/vars/`; the two overlap on purpose), and whether a flagged scan
+stops a merge, which `provenance-tracker` decides.
 
 ## Definitions
 
@@ -63,10 +63,8 @@ See `interface/data/`.
 
 See `acceptance/`.
 
-Every criterion is `kind: generated-test` (`D43`) — pattern and entropy
-matching are deterministic and need no model or judgment, but none are
-actually written in the step-phrase grammar, so `kind: compiled` would
-not describe how they're really verified.
+Every criterion is `kind: generated-test` (`D43`): the checks are deterministic
+but not written in the step-phrase grammar.
 
 ## Non-functional constraints
 
@@ -74,19 +72,10 @@ See `constraints.md`.
 
 ## Open questions
 
-- ~~Exact pattern database (which key/token shapes, entropy threshold) is
-  an implementation detail not pinned down here~~ — resolved
-  (`R-SECRET-001`): entropy threshold 4.0 bits/char; the shape database is
-  sourced from a maintained external reference set, never hand-rolled and
-  frozen into this spec.
+None.
 
 ## Change log
 
 - Initial draft.
-- `D26`: added `notification_delivery_error`, mirroring
-  `license-scanner`'s same fix.
-- `D53`: `VAR-SECRET-PATTERNS-PATH` proactively declared before
-  the first real `generate()` attempt (mirroring `license-scanner`'s
-  `D51`); `D54`: that attempt passed all 10 directly-testable `AC-SECRET-*`
-  criteria on the first real try. `gen/secret-scanner/
-  secret_scanner.py` is now that candidate.
+- `D26`/`D53`/`D54`/`D163`/`D164`: notification errors, first generation, `gate_version`, CLI coverage.
+- `D168`: `detect-secrets`, whole-repository scope, the allowlist and `propose`.

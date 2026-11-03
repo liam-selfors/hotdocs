@@ -1,149 +1,175 @@
 import json
+import os
+import shutil
+import tempfile
+import unittest
+from pathlib import Path
 
 import secret_scanner
 
 
-FAKE_CACHE_MANAGER_SRC = r"""
+def _get(obj, key, default=None):
+    if isinstance(obj, dict):
+        return obj.get(key, default)
+    return getattr(obj, key, default)
+
+
+_FAKE_CACHE_MANAGER_SRC = '''
 import json
 import os
+from dataclasses import dataclass
+from typing import Any
 
 
-def _env(name):
-    return os.environ[name]
-
-
+@dataclass
 class CacheKey:
-    def __init__(self, spec_bundle_hash, gate_inputs_hash, gate_version, model_pin):
-        self.spec_bundle_hash = spec_bundle_hash
-        self.gate_inputs_hash = gate_inputs_hash
-        self.gate_version = gate_version
-        self.model_pin = model_pin
+    spec_bundle_hash: str
+    gate_inputs_hash: str
+    gate_version: str
+    model_pin: str
 
 
+@dataclass
 class CachedResult:
-    def __init__(self, gate_type, payload, stored_at):
-        self.gate_type = gate_type
-        self.payload = payload
-        self.stored_at = stored_at
+    gate_type: str
+    payload: Any
+    stored_at: str
 
 
 class Miss:
     pass
 
 
-def _get(obj, key, default=None):
-    if isinstance(obj, dict):
-        return obj.get(key, default)
-    return getattr(obj, key, default)
+def _store_file():
+    return os.environ["AC_SECRET_009_STORE_PATH"]
+
+
+def _log_file():
+    return os.environ["AC_SECRET_009_LOG_PATH"]
 
 
 def _key_str(cache_key):
     return "|".join([
-        str(_get(cache_key, "spec_bundle_hash")),
-        str(_get(cache_key, "gate_inputs_hash")),
-        str(_get(cache_key, "gate_version")),
-        str(_get(cache_key, "model_pin")),
+        cache_key.spec_bundle_hash,
+        cache_key.gate_inputs_hash,
+        cache_key.gate_version,
+        cache_key.model_pin,
     ])
 
 
 def _load_store():
-    path = _env("FAKE_CACHE_STORE_PATH")
+    path = _store_file()
     if os.path.exists(path):
-        with open(path) as f:
-            return json.load(f)
+        with open(path, "r") as handle:
+            return json.load(handle)
     return {}
 
 
 def _save_store(store):
-    path = _env("FAKE_CACHE_STORE_PATH")
-    with open(path, "w") as f:
-        json.dump(store, f)
+    with open(_store_file(), "w") as handle:
+        json.dump(store, handle)
+
+
+def _append_log(entry):
+    with open(_log_file(), "a") as handle:
+        handle.write(json.dumps(entry) + "\\n")
 
 
 def get(cache_key, *, repo_root=None):
     store = _load_store()
-    k = _key_str(cache_key)
-    if k in store:
-        entry = store[k]
-        return CachedResult(
-            gate_type=entry["gate_type"],
-            payload=entry["payload"],
-            stored_at=entry["stored_at"],
-        )
+    key = _key_str(cache_key)
+    _append_log({"op": "get", "key": key})
+    if key in store:
+        return CachedResult(**store[key])
     return Miss()
 
 
-def put(cache_key, result, *, repo_root=None):
+def put(cache_key, cached_result, *, repo_root=None):
     store = _load_store()
-    k = _key_str(cache_key)
-    store[k] = {
-        "gate_type": _get(result, "gate_type"),
-        "payload": _get(result, "payload"),
-        "stored_at": _get(result, "stored_at"),
+    key = _key_str(cache_key)
+    store[key] = {
+        "gate_type": cached_result.gate_type,
+        "payload": cached_result.payload,
+        "stored_at": cached_result.stored_at,
     }
     _save_store(store)
-    log_path = _env("FAKE_CACHE_PUT_LOG_PATH")
-    with open(log_path, "a") as f:
-        f.write(k + "\n")
-"""
+    _append_log({"op": "put", "key": key})
+'''
 
 
-def _get(obj, key, default=None):
-    if isinstance(obj, dict):
-        return obj.get(key, default)
-    return getattr(obj, key, default)
+class AcSecret009Test(unittest.TestCase):
+    def setUp(self):
+        self.tmp_dir = tempfile.mkdtemp()
+        self.repo_root = Path(self.tmp_dir) / "repo"
+        support_dir = Path(self.tmp_dir) / "support"
+        (self.repo_root / "gen" / "foo").mkdir(parents=True)
+        (self.repo_root / "gen" / "cache-manager").mkdir(parents=True)
+        support_dir.mkdir(parents=True)
+
+        self.store_path = support_dir / "store.json"
+        self.log_path = support_dir / "log.jsonl"
+
+        (self.repo_root / "gen" / "cache-manager" / "cache_manager.py").write_text(
+            _FAKE_CACHE_MANAGER_SRC
+        )
+
+        self.target_file = self.repo_root / "gen" / "foo" / "c.py"
+        self.target_file.write_text('K = "AKIAABCDEFGHIJKLMNOP"\n')
+
+        self._old_env = {}
+        for name, value in (
+            ("AC_SECRET_009_STORE_PATH", str(self.store_path)),
+            ("AC_SECRET_009_LOG_PATH", str(self.log_path)),
+        ):
+            self._old_env[name] = os.environ.get(name)
+            os.environ[name] = value
+
+    def tearDown(self):
+        for name, old_value in self._old_env.items():
+            if old_value is None:
+                os.environ.pop(name, None)
+            else:
+                os.environ[name] = old_value
+        shutil.rmtree(self.tmp_dir, ignore_errors=True)
+
+    def _read_log(self):
+        if not self.log_path.exists():
+            return []
+        lines = self.log_path.read_text().splitlines()
+        return [json.loads(line) for line in lines if line.strip()]
+
+    def test_flagged_result_survives_clean_rescan_under_its_own_key(self):
+        result1 = secret_scanner.scan(self.repo_root)
+        self.assertTrue(_get(result1, "flagged"))
+
+        self.target_file.write_text('K = "removed"\n')
+
+        result2 = secret_scanner.scan(self.repo_root)
+        self.assertFalse(_get(result2, "flagged"))
+
+        log_entries = self._read_log()
+        put_entries = [entry for entry in log_entries if entry["op"] == "put"]
+        self.assertEqual(len(put_entries), 2)
+        self.assertNotEqual(put_entries[0]["key"], put_entries[1]["key"])
+
+        self.assertTrue(self.store_path.exists())
+        store = json.loads(self.store_path.read_text())
+
+        first_key = put_entries[0]["key"]
+        second_key = put_entries[1]["key"]
+
+        self.assertIn(first_key, store)
+        self.assertIn(second_key, store)
+
+        first_entry = store[first_key]
+        second_entry = store[second_key]
+
+        self.assertEqual(_get(first_entry, "gate_type"), "secret_scanner")
+        self.assertTrue(_get(_get(first_entry, "payload"), "flagged"))
+
+        self.assertEqual(_get(second_entry, "gate_type"), "secret_scanner")
+        self.assertFalse(_get(_get(second_entry, "payload"), "flagged"))
 
 
-def test_ac_secret_009(tmp_path, monkeypatch):
-    repo_root = tmp_path / "repo"
-    (repo_root / "specs").mkdir(parents=True)
-    (repo_root / "gen").mkdir(parents=True)
-    (repo_root / "verification").mkdir(parents=True)
-
-    cache_manager_dir = repo_root / "gen" / "cache-manager"
-    cache_manager_dir.mkdir(parents=True)
-    (cache_manager_dir / "cache_manager.py").write_text(FAKE_CACHE_MANAGER_SRC)
-
-    patterns_path = tmp_path / "patterns.json"
-    patterns_path.write_text(json.dumps({
-        "version": "2.0.0",
-        "rules": [
-            {"rule_id": "aws-access-key-id", "risk_tier": "high", "pattern": "AKIA[0-9A-Z]{16}"},
-        ],
-    }))
-
-    store_path = tmp_path / "cache_store.json"
-    put_log_path = tmp_path / "put_log.txt"
-
-    monkeypatch.setenv("VAR_SECRET_PATTERNS_PATH", str(patterns_path))
-    monkeypatch.setenv("FAKE_CACHE_STORE_PATH", str(store_path))
-    monkeypatch.setenv("FAKE_CACHE_PUT_LOG_PATH", str(put_log_path))
-    monkeypatch.delenv("VAR_COMPLIANCE_WEBHOOK_URL", raising=False)
-
-    secret_file = repo_root / "gen" / "config.py"
-    secret_file.write_text('API_KEY = "AKIAABCDEFGHIJKLMNOP"\n')
-
-    result1 = secret_scanner.scan(repo_root)
-    assert _get(result1, "flagged") is True
-
-    secret_file.write_text('API_KEY = "REDACTED"\n')
-
-    result2 = secret_scanner.scan(repo_root)
-    assert _get(result2, "flagged") is False
-
-    assert put_log_path.exists()
-    log_lines = [line for line in put_log_path.read_text().splitlines() if line]
-    assert len(log_lines) == 2
-
-    first_key, second_key = log_lines[0], log_lines[1]
-    assert first_key != second_key
-
-    store = json.loads(store_path.read_text())
-    assert first_key in store
-    assert second_key in store
-
-    first_entry_payload = store[first_key]["payload"]
-    assert _get(first_entry_payload, "flagged") is True
-
-    second_entry_payload = store[second_key]["payload"]
-    assert _get(second_entry_payload, "flagged") is False
+if __name__ == "__main__":
+    unittest.main()

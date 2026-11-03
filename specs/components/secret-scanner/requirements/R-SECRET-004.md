@@ -1,18 +1,12 @@
 # R-SECRET-004
 
 **R-SECRET-004** — A notification to `VAR-COMPLIANCE-WEBHOOK-URL` MUST
-  fire when **either** a match blocked the merge (R-SECRET-002) **or** the
-  matched rule's `risk_tier` is `high` — mirroring `license-scanner`'s
-  R-LICENSE-003 exactly, the same orthogonal block/severity split, not a
-  second, independently-designed mechanism. Independent of the merge
-  outcome, including when a later merge attempt (`D3`) scans clean —
-  mirroring `license-scanner`'s `R-LICENSE-007` exactly: the original
-  flagged attempt's record (`D19`'s `.hotdocs/attempts/`) is never erased
-  just because a subsequent attempt came back clean.
-
-  The webhook call itself MUST be attempted at most once, with no
-  retry-with-backoff, mirroring `license-scanner`'s `R-LICENSE-003`
-  exactly: a failure (network, auth, or timeout) MUST be caught and
-  recorded as `notification_delivery_error` on the result, never
-  retried, never raised, and never allowed to affect `flagged`.
-  `notified` stays precondition-only, unaffected by delivery outcome.
+  fire when **either** a match blocked the merge (`R-SECRET-002`) **or**
+  a match's `risk_tier` is `high`, the same orthogonal block/severity
+  split as `license-scanner`'s `R-LICENSE-003`. It is independent of the
+  merge outcome: a later clean scan never erases the flagged attempt's
+  record (`D19`'s `.hotdocs/attempts/`, as `R-LICENSE-007`).
+  The webhook call is attempted at most once, with no retry: a failure
+  (network, auth, timeout) MUST be caught and recorded as
+  `notification_delivery_error`, never retried, never raised, never
+  affecting `flagged`. `notified` stays precondition-only.
