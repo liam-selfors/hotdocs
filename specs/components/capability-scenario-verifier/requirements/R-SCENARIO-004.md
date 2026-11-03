@@ -1,33 +1,25 @@
 # R-SCENARIO-004
 
 **R-SCENARIO-004** — MUST expose `check_capability_provenance(capability_id,
-  repo_root) -> CapabilityProvenanceCheckResult` and
-  `run_capability_gates(capability_id, repo_root, model, seed=0,
-  llm_backend=None) -> CapabilityProvenanceCheckResult` (`D89`/`D92`).
-  `model`/`seed`/`llm_backend` are this component's own parameters, not
-  already-wired `judge`/`test_author` callables — it wires those itself
-  internally (`R-SCENARIO-003`'s callable-shape contract), the same
-  posture `component-gate-runner`'s `R-GATE-002` holds, since nothing
-  calling this component wires anything on its behalf anymore
-  (`D92`).
+  repo_root)` and `run_capability_gates(capability_id, repo_root,
+  model=None, seed=0, llm_backend=None)`, each returning a
+  `CapabilityProvenanceCheckResult` (`D89`, `D92`, `D174`). An unknown
+  `capability_id` — no `specs/product/*.md` whose frontmatter `id` is it
+  — raises `UnknownCapabilityError` from both.
 
-  **The provenance key is a hash of every realizing component's actual
-  current `gen/` content** (found via `R-SCENARIO-002`'s existing
-  capability-intersection lookup, inverted to "every component whose
-  `realizes` includes this `P-id`") — deliberately **not** a hash of
-  their `spec_bundle_hash`es. A `spec_bundle_hash`-keyed check would
-  reopen the exact blind spot this component exists to close (`D2`): a
-  parent changing something undeclared and invisible to spec-level
-  hashing that a dependent silently relies on. Hashing actual content
-  invalidates on *any* real change anywhere in the realizing set,
-  whether or not blast-radius analysis or a declared
-  `depends_on_guarantees` edge would have flagged it.
+  `check_capability_provenance` is a pure read. It returns `hit` `true`
+  iff the committed record (`R-SCENARIO-006`) is a readable JSON object
+  whose `gate_version` and `content_hash` both equal the current ones,
+  and then carries the record's `capability_scenario_report`. Any other
+  case — no record, an unreadable one, a stale one — is `hit` `false`
+  with the report `null`. A recorded **failing** report is still a hit:
+  fixing the cause changes the content, and so the key.
 
-  `check_capability_provenance` reads the committed record at
-  `verification/capabilities/<capability_id>/.provenance.json` (if any)
-  and compares its recorded hash against the current one — a hit if
-  they match. `run_capability_gates` checks first; on a hit, returns it
-  unchanged (no scenarios re-run); on a miss, runs that capability's
-  scenarios (`R-SCENARIO-001`, scoped to just this one `P-id`'s
-  realizing components) and writes a fresh record before returning the
-  result.
+  `run_capability_gates` checks first. On a hit it returns that result
+  unchanged: no dependency loaded, no scenario run, nothing written,
+  and no `model` needed. On a miss with `model` `None` it raises
+  `ModelRequiredError` before loading, running, or writing anything.
+  Otherwise it runs the capability's scenarios (`R-SCENARIO-001`) with
+  the callables `R-SCENARIO-007` and `R-SCENARIO-008` build, writes the
+  fresh record, and returns `hit` `false` with the fresh report for just
+  this capability. A failing run is recorded exactly like a passing one.

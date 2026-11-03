@@ -1,25 +1,18 @@
 # R-SCENARIO-002
 
-**R-SCENARIO-002** — The capability-intersection lookup (`R-SCENARIO-001`)
-  MUST query the `edges` view (`specs/architecture/
-  graph-query-engine.md`), already shared by `impact-analyzer`/
-  `spec-linter`/`corpus-graph-builder`, not a bespoke intersection:
-  `SELECT DISTINCT target_id FROM edges WHERE edge_type = 'realizes' AND
-  source_id IN (<blast-radius ids>)`. Implementation requirement only —
-  `R-SCENARIO-001`'s behavior is unchanged.
+**R-SCENARIO-002** — The capability-intersection lookup
+  (`R-SCENARIO-001`) MUST be one query against the shared `edges` view
+  (`specs/architecture/graph-query-engine.md`), not a bespoke
+  intersection: `SELECT DISTINCT target_id FROM edges WHERE edge_type =
+  'realizes' AND source_id IN (<blast-radius ids>)`.
 
-  **`realizes` edges are declared per-component, never per-capability**
-  (`D61`, found wrong twice in a row without this): the `realizes:`
-  frontmatter field lives on a *component's* own `component.md` (e.g.
-  `specs/components/cache-manager/component.md`'s `realizes:
-  [P-ZERO-EDIT]`), naming the capabilities that component realizes —
-  `source_id` in the SQL above. No product-capability file
-  (`specs/product/<name>.md`) ever carries a `realizes:` field itself;
-  scanning capability files for one, as if the edge were declared
-  there, will always find nothing. Without `comp-graph-query-engine` as
-  a real dependency, building the equivalent `realizes` edge set
-  locally means scanning every `specs/components/*/component.md` for
-  its own `realizes:` list — the same direction `impact-analyzer`'s own
-  `R-IMPACT-005` already establishes for this exact field, just not
-  visible from this component's own bundle, which doesn't depend on
-  `impact-analyzer`.
+  **`realizes` is declared per component, never per capability**
+  (`D61`): it is the `realizes:` frontmatter field of a component's own
+  `component.md`. No `specs/product/<name>.md` carries one. Without
+  `graph-query-engine` as a dependency, the equivalent edge set is
+  built by scanning every `specs/components/*/component.md`.
+
+  A capability's **realizing set** is every component whose `realizes`
+  names it. A component's **code directory** is `gen/<slug>/`, or, when
+  it is `sealed: true`, its frontmatter `source_path`, both under
+  `repo_root`. Both are used by `R-SCENARIO-005` and `R-SCENARIO-006`.

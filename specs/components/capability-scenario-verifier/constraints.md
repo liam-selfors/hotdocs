@@ -14,3 +14,12 @@
   any component's `VerificationReport` — a cross-component finding and a
   single-component finding point a developer to different places to fix
   the problem.
+- **Never a pass without a run.** A `compiled` or `generated-test`
+  scenario passes only when its test actually ran and exited `0`
+  (`R-SCENARIO-005`); producing a test, or compiling one, is not a pass.
+- **A failure is recorded, never hidden.** A failing capability is
+  written to its record and returned like a passing one, and a recorded
+  failure is a hit until the code it was computed against changes.
+- **Fail closed on the key.** Any doubt about a record — absent,
+  unreadable, from another `gate_version`, or hashed over different
+  content — is a miss, never a hit.

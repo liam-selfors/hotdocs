@@ -46,3 +46,37 @@ signature (`verifier-orchestrator`, the component that would set this
 precedent, doesn't exist yet) — a single-argument `fn(bundle) ->
 result` callable. Verified against all 3 `AC-SCENARIO-*` criteria for
 real. Swapped in.
+
+## `D174`/`D175`: `run_capability_gates`, finally built — and scenarios actually run
+
+`R-SCENARIO-004` (`D89`) required `check_capability_provenance` and
+`run_capability_gates`; the module generated before it never had them,
+and its tests, which predated the requirement, kept passing. An audit
+before regenerating found more (`D174`): three conflicting signatures
+for one function, scenarios marked `pass` once a test was produced or
+compiled rather than run, a bundle `test-author` could not accept, and
+a capability with no scenarios reporting `pass`. The spec was rewritten
+first (`R-SCENARIO-005`–`008`, twelve criteria, `interface/cli.md`
+removed), then regenerated.
+
+Five build rounds, landing at 12 of 12, `mutation_score=0.84`:
+
+- **Round 1** passed 1 of 12. Eleven failures shared one cause: the
+  fixture rules lived in one criterion, but a test author sees only its
+  own criterion, the requirement it covers, and `interface/`. The rules
+  moved to `interface/library.md` ("Test fixtures").
+- **Round 2** passed 10 of 12. The candidate was right and two criteria
+  were impossible: a `compiled` capability scenario cannot pass (the
+  compiler asserts on a `result` that only a `When` step defines, and a
+  `When` cannot resolve with `surface=None`). The old hand tests had only
+  "passed" because compiling counted (`D175`). Two further rounds were
+  lost to backend errors, and one to the model quota.
+- **Round 4** passed 10 of 12: a fake `author_test` read `scenario_id`
+  where the real wiring passes `criterion_id`, and a fixed absolute path
+  in a criterion (`/tmp/escape.py`) was written by a mutant that disabled
+  the path guard, failing the next run. Both fixed in the spec/criteria.
+- **Round 5** landed.
+
+The obsolete hand-written `test_capability_scenario_verifier.py` was
+removed: it asserted the pre-`D174` behavior and failed two tests against
+the new module. `conftest.py` is reduced to the path setup.

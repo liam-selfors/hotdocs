@@ -4,15 +4,24 @@ Covers: R-SCENARIO-004
 Kind: generated-test
 
 ```gherkin
-Given P-ZERO-EDIT's realizing components' current gen/ content hashes
-  to a value matching the committed verification/capabilities/P-ZERO-EDIT/.provenance.json
+Given a committed record whose gate_version and content_hash both equal
+  the current ones, with a passing report, and fake test-author and
+  llm-endpoint modules that record every call
 When check_capability_provenance("P-ZERO-EDIT", repo_root) is called
-Then it reports a hit, and run_capability_gates does not re-run the
-  scenarios
+Then hit is true and capability_scenario_report is the record's report
 
-Given one realizing component's gen/ content has changed since that
-  committed record was written, even though no spec_bundle_hash changed
-When run_capability_gates("P-ZERO-EDIT", repo_root) is called
-Then check_capability_provenance reports a miss, the scenarios are
-  re-run, and a fresh record is written reflecting the new content hash
+Given the same state
+When run_capability_gates("P-ZERO-EDIT", repo_root, "m") is called
+Then the result equals the check result, no fake module was called, no
+  file under repo_root was written or modified, and a call with model
+  None behaves identically
+
+Given no record, a record that is not valid JSON, and a record with a
+  different gate_version
+When check_capability_provenance is called for each
+Then each gives hit false and capability_scenario_report null
+
+Given a capability_id no specs/product file declares
+When either function is called
+Then UnknownCapabilityError is raised
 ```

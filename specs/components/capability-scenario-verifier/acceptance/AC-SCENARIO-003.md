@@ -4,13 +4,20 @@ Covers: R-SCENARIO-001
 Kind: generated-test
 
 ```gherkin
-Given one product capability with two capability scenarios, one
-  compiled-kind that passes and one llm-judge-kind that fails with a
-  judge-provided rationale
-When run_capability_scenarios runs for that capability
-Then the report's scenarios array has two entries, each naming its own
-  result — the compiled entry with no rationale field, the llm-judge
-  entry with its rationale populated — confirming a capability with
-  more than one scenario doesn't collapse into a single aggregate
-  verdict with no way to tell which scenario produced it
+Given one capability with two scenarios: a generated-test one whose
+  fake test_author returns a passing test, and an llm-judge one whose
+  fake judge returns {"result": "fail", "rationale": "because"}
+When run_capability_scenarios runs for it
+Then scenarios has two entries; the generated-test entry has no
+  rationale field, the llm-judge entry has rationale "because", and
+  overall is "fail"
+
+Given a capability whose file declares no ### CS- scenario
+When run_capability_scenarios runs for it
+Then its overall is "fail" and its scenarios list is empty
+
+Given a capability whose only scenario is llm-judge and no judge is
+  supplied
+When run_capability_scenarios runs for it
+Then that entry's result is "skipped" and overall is "skipped"
 ```
