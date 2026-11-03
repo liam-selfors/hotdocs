@@ -1,7 +1,4 @@
 import json
-from pathlib import Path
-
-import pytest
 
 import provenance_checker
 
@@ -12,146 +9,95 @@ def _get(obj, key, default=None):
     return getattr(obj, key, default)
 
 
-def _snapshot(root: Path):
-    snap = {}
-    for p in sorted(root.rglob("*")):
-        if p.is_file():
-            st = p.stat()
-            snap[str(p.relative_to(root))] = (p.read_bytes(), st.st_mtime_ns)
-    return snap
-
-
-GATE_VERSIONS = {
-    "compiler": "criterion-compiler@1.0.0",
-    "generated_test": "generated_test@1.0.0",
-    "verifier": "verifier-orchestrator@2.0.0",
-    "license_scanner": "license_scanner@3.1.0",
-    "secret_scanner": "secret_scanner@0.0.0",
-}
-
-MATCHING_HASH = "sha256:" + "a" * 64
-MISMATCHED_HASH = "sha256:" + "b" * 64
-
-VERIFICATION_REPORT = {
-    "component_id": "comp-foo",
-    "criteria": [
-        {"id": "AC-FOO-001", "covers": "R-FOO-001", "kind": "compiled", "result": "pass"},
-    ],
-    "requirement_results": {"R-FOO-001": "pass"},
-    "interface_drift": False,
-    "mutation_score": 1.0,
-    "overall": "pass",
-}
-
-LICENSE_SCAN = {
-    "component_id": "comp-foo",
-    "gate_version": "license_scanner@3.1.0",
-    "similarity_score": 0.0,
-    "block_threshold": 0.70,
-    "blocked": False,
-    "matches": [],
-    "notified": False,
-    "notification_delivery_error": None,
-    "cache_hit": False,
-}
-
-SECRET_SCAN = {
-    "scope": "full",
-    "gate_version": "secret_scanner@0.0.0",
-    "flagged": False,
-    "matches": [],
-    "notified": False,
-    "notification_delivery_error": None,
-    "cache_hit": False,
-}
-
-
-@pytest.fixture
-def repo_with_provenance(tmp_path):
-    gen_dir = tmp_path / "gen" / "foo"
-    gen_dir.mkdir(parents=True)
-    provenance_path = gen_dir / ".provenance.json"
-    content = {
-        "spec_bundle_hash": MATCHING_HASH,
-        "gate_versions": GATE_VERSIONS,
-        "verification_report": VERIFICATION_REPORT,
-        "license_scan": LICENSE_SCAN,
-        "secret_scan": SECRET_SCAN,
+def _manifest(spec_bundle_hash, gate_versions):
+    return {
+        "spec_bundle_hash": spec_bundle_hash,
+        "model_pin": "claude-sonnet-5",
+        "prompt_version": "v1",
+        "retry_feedback": None,
+        "pipeline_version": "v1",
+        "gate_versions": gate_versions,
+        "provenance_hit": False,
+        "generated_at": "2026-01-01T00:00:00Z",
+        "verification_run_id": "run-123",
+        "verification_report": {
+            "component_id": "comp-foo",
+            "criteria": [],
+            "requirement_results": {},
+            "interface_drift": False,
+            "mutation_score": 1.0,
+            "overall": "pass",
+        },
+        "license_scan": {
+            "component_id": "comp-foo",
+            "gate_version": "license_scanner@3.1.0",
+            "evaluated": True,
+            "reason": None,
+            "similarity_score": 0.0,
+            "block_threshold": 0.7,
+            "blocked": False,
+            "matches": [],
+            "notified": False,
+            "notification_delivery_error": None,
+            "cache_hit": False,
+        },
+        "secret_scan": {
+            "scope": "full",
+            "gate_version": "secret_scanner@3.0.0+detect-secrets.1.5.0",
+            "flagged": False,
+            "matches": [],
+            "allowed": [],
+            "unused_allowlist_entries": [],
+            "notified": False,
+            "notification_delivery_error": None,
+            "cache_hit": False,
+        },
     }
-    provenance_path.write_text(json.dumps(content), encoding="utf-8")
-    return tmp_path, provenance_path
 
 
-def test_check_provenance_is_read_only_on_hit(repo_with_provenance):
-    repo_root, provenance_path = repo_with_provenance
+def _snapshot(repo_root):
+    snapshot = {}
+    for path in sorted(repo_root.rglob("*")):
+        if path.is_file():
+            rel = str(path.relative_to(repo_root))
+            snapshot[rel] = (path.read_bytes(), path.stat().st_mtime_ns)
+    return snapshot
 
-    before_bytes = provenance_path.read_bytes()
-    before_mtime_ns = provenance_path.stat().st_mtime_ns
-    before_snapshot = _snapshot(repo_root)
 
-    result = provenance_checker.check_provenance(
-        "comp-foo", MATCHING_HASH, GATE_VERSIONS, repo_root
+def test_check_provenance_is_read_only_on_hit_and_miss(tmp_path):
+    repo_root = tmp_path
+    matching_hash = "sha256:" + "a" * 64
+    gate_versions = {
+        "compiler": "criterion-compiler@1.0.0",
+        "generated_test": "generated_test@1.0.0",
+        "verifier": "verifier-orchestrator@2.0.0",
+        "license_scanner": "license_scanner@3.1.0",
+        "secret_scanner": "secret_scanner@0.0.0",
+    }
+    manifest_text = json.dumps(
+        _manifest(matching_hash, gate_versions), indent=2, sort_keys=True
     )
 
-    assert _get(result, "hit") is True
+    gen_dir = repo_root / "gen" / "foo"
+    gen_dir.mkdir(parents=True)
+    (gen_dir / ".provenance.json").write_text(manifest_text)
 
-    after_bytes = provenance_path.read_bytes()
-    after_mtime_ns = provenance_path.stat().st_mtime_ns
-    after_snapshot = _snapshot(repo_root)
+    verification_dir = repo_root / "verification" / "foo"
+    verification_dir.mkdir(parents=True)
+    (verification_dir / ".provenance.json").write_text(manifest_text)
 
-    assert after_bytes == before_bytes
-    assert after_mtime_ns == before_mtime_ns
-    assert after_snapshot == before_snapshot
-
-
-def test_check_provenance_is_read_only_on_miss(repo_with_provenance):
-    repo_root, provenance_path = repo_with_provenance
-
-    before_bytes = provenance_path.read_bytes()
-    before_mtime_ns = provenance_path.stat().st_mtime_ns
-    before_snapshot = _snapshot(repo_root)
-
-    result = provenance_checker.check_provenance(
-        "comp-foo", MISMATCHED_HASH, GATE_VERSIONS, repo_root
-    )
-
-    assert _get(result, "hit") is False
-    assert _get(result, "verification_report") is None
-    assert _get(result, "license_scan") is None
-    assert _get(result, "secret_scan") is None
-
-    after_bytes = provenance_path.read_bytes()
-    after_mtime_ns = provenance_path.stat().st_mtime_ns
-    after_snapshot = _snapshot(repo_root)
-
-    assert after_bytes == before_bytes
-    assert after_mtime_ns == before_mtime_ns
-    assert after_snapshot == before_snapshot
-
-
-def test_check_provenance_is_read_only_across_repeated_hit_and_miss_calls(
-    repo_with_provenance,
-):
-    repo_root, provenance_path = repo_with_provenance
-
-    before_bytes = provenance_path.read_bytes()
-    before_mtime_ns = provenance_path.stat().st_mtime_ns
-    before_snapshot = _snapshot(repo_root)
+    before = _snapshot(repo_root)
+    assert before
 
     hit_result = provenance_checker.check_provenance(
-        "comp-foo", MATCHING_HASH, GATE_VERSIONS, repo_root
+        "comp-foo", matching_hash, gate_versions, repo_root
     )
-    miss_result = provenance_checker.check_provenance(
-        "comp-foo", MISMATCHED_HASH, GATE_VERSIONS, repo_root
-    )
-
     assert _get(hit_result, "hit") is True
+    assert _snapshot(repo_root) == before
+
+    mismatched_hash = "sha256:" + "b" * 64
+    miss_result = provenance_checker.check_provenance(
+        "comp-foo", mismatched_hash, gate_versions, repo_root
+    )
     assert _get(miss_result, "hit") is False
-
-    after_bytes = provenance_path.read_bytes()
-    after_mtime_ns = provenance_path.stat().st_mtime_ns
-    after_snapshot = _snapshot(repo_root)
-
-    assert after_bytes == before_bytes
-    assert after_mtime_ns == before_mtime_ns
-    assert after_snapshot == before_snapshot
+    assert _snapshot(repo_root) == before

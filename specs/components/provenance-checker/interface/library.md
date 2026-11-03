@@ -3,6 +3,8 @@
 ```
 check_provenance(component_id: str, spec_bundle_hash: str, gate_versions: dict[str, str], repo_root: Path) -> ProvenanceCheckResult
 current_provenance_key(component_id: str, repo_root: Path) -> ProvenanceKey
+current_sealed_key(component_id: str, repo_root: Path) -> SealedKey | None
+check_sealed_provenance(component_id: str, repo_root: Path) -> SealedCheckResult
 ```
 
 `check_provenance` is a pure function of the working tree's current
@@ -26,3 +28,18 @@ and reads, in this order:
 
 Any stand-in for these dependencies must provide each name this list
 gives. No network access, no model call, no write.
+
+## Sealed components (`D170`)
+
+`current_sealed_key` is also the one test of whether a component is
+sealed: it returns `None` for a component that is not (`R-PROVCHECK-007`).
+Callers (`component-gate-runner`, `provenance-tracker`) route on it
+rather than reading `component.md` themselves. It reads
+`<repo_root>/specs/components/<slug>/component.md` and, for
+`verifier_version`, `verifier-orchestrator`'s `GATE_VERSION` from
+`<repo_root>/gen/verifier-orchestrator/`. `check_sealed_provenance`
+reads the sealed manifest (`provenance-writer`'s
+`interface/data/SealedProvenance.md`) and compares it to the current
+key (`R-PROVCHECK-008`). Both are read-only and make no network or
+model call. Any stand-in for `verifier-orchestrator` provides
+`GATE_VERSION`.

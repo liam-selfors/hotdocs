@@ -1,290 +1,15 @@
-import contextlib
-import io
 import json
-import os
-import textwrap
 from pathlib import Path
+
+import pytest
 
 import component_gate_runner
 
 
-def _component_md() -> str:
-    return textwrap.dedent("""\
-        ---
-        id: comp-foo
-        title: Foo
-        status: ratified
-        owners: [lselfors@gmail.com]
-        sealed: false
-        last_ratified_commit: "0000000"
-        ---
-
-        # comp-foo
-
-        Purpose: fixture component for AC-GATE-009.
-        """)
-
-
-def _provenance_checker_src() -> str:
-    return textwrap.dedent("""\
-        import json
-        import os
-
-
-        class _Key:
-            spec_bundle_hash = "sha256:deadbeef"
-            gate_versions = {
-                "compiler": "criterion-compiler@1.0.0",
-                "generated_test": "generated_test@1.0.0",
-                "verifier": "verifier-orchestrator@2.0.0",
-                "license_scanner": "license_scanner@3.1.0",
-                "secret_scanner": "secret_scanner@0.0.0",
-            }
-
-
-        def _log(record):
-            path = os.environ.get("GATE_TEST_CALL_LOG")
-            if path:
-                with open(path, "a") as f:
-                    f.write(json.dumps(record) + "\\n")
-
-
-        def current_provenance_key(component_id, repo_root):
-            _log({"dep": "provenance-checker.current_provenance_key"})
-            return _Key()
-
-
-        def check_provenance(component_id, spec_bundle_hash, gate_versions, repo_root):
-            _log({"dep": "provenance-checker.check_provenance"})
-            return {
-                "hit": False,
-                "verification_report": None,
-                "license_scan": None,
-                "secret_scan": None,
-            }
-        """)
-
-
-def _assembler_src() -> str:
-    return textwrap.dedent("""\
-        import json
-        import os
-
-
-        def _log(record):
-            path = os.environ.get("GATE_TEST_CALL_LOG")
-            if path:
-                with open(path, "a") as f:
-                    f.write(json.dumps(record) + "\\n")
-
-
-        def assemble(component_id, repo_root, mode="cold"):
-            _log({"dep": "spec-bundle-assembler.assemble"})
-            return {
-                "component_id": component_id,
-                "spec_bundle_hash": "sha256:deadbeef",
-                "spec": "spec text",
-                "interface": "interface text",
-                "constraints": "constraints text",
-                "dependency_interfaces": {},
-                "dependency_context": {},
-                "dependency_usage": {},
-                "vars": {},
-                "glossary": "glossary text",
-                "hint_code": None,
-            }
-        """)
-
-
-def _generator_src(mode: str) -> str:
-    if mode == "success":
-        return textwrap.dedent("""\
-            import json
-            import os
-
-
-            def _log(record):
-                path = os.environ.get("GATE_TEST_CALL_LOG")
-                if path:
-                    with open(path, "a") as f:
-                        f.write(json.dumps(record) + "\\n")
-
-
-            def generate(bundle, model, retry_feedback=None, *, repo_root=None, llm_backend=None):
-                _log({
-                    "dep": "generator.generate",
-                    "model": model,
-                    "retry_feedback": retry_feedback,
-                })
-                return {
-                    "component_id": "comp-foo",
-                    "spec_bundle_hash": "sha256:deadbeef",
-                    "model": model,
-                    "prompt_version": "v1",
-                    "cache_hit": False,
-                    "files": {"foo.py": "print('hi')"},
-                    "model_call_error": None,
-                    "refused": None,
-                    "retry_feedback": retry_feedback,
-                }
-            """)
-    return textwrap.dedent("""\
-        import json
-        import os
-
-
-        def _log(record):
-            path = os.environ.get("GATE_TEST_CALL_LOG")
-            if path:
-                with open(path, "a") as f:
-                    f.write(json.dumps(record) + "\\n")
-
-
-        def generate(bundle, model, retry_feedback=None, *, repo_root=None, llm_backend=None):
-            _log({
-                "dep": "generator.generate",
-                "model": model,
-                "retry_feedback": retry_feedback,
-            })
-            return {
-                "component_id": "comp-foo",
-                "spec_bundle_hash": "sha256:deadbeef",
-                "model": model,
-                "prompt_version": "v1",
-                "cache_hit": False,
-                "files": {},
-                "model_call_error": {"category": "network", "message": "boom"},
-                "refused": None,
-                "retry_feedback": retry_feedback,
-            }
-        """)
-
-
-def _verifier_src() -> str:
-    return textwrap.dedent("""\
-        import json
-        import os
-
-
-        def _log(record):
-            path = os.environ.get("GATE_TEST_CALL_LOG")
-            if path:
-                with open(path, "a") as f:
-                    f.write(json.dumps(record) + "\\n")
-
-
-        def verify(component_id, repo_root, judge=None, test_author=None):
-            _log({"dep": "verifier-orchestrator.verify"})
-            return {
-                "component_id": component_id,
-                "criteria": [],
-                "requirement_results": {},
-                "interface_drift": False,
-                "mutation_score": 1.0,
-                "overall": "pass",
-            }
-        """)
-
-
-def _license_scanner_src() -> str:
-    return textwrap.dedent("""\
-        import json
-        import os
-
-
-        def _log(record):
-            path = os.environ.get("GATE_TEST_CALL_LOG")
-            if path:
-                with open(path, "a") as f:
-                    f.write(json.dumps(record) + "\\n")
-
-
-        def scan(component_id, repo_root):
-            _log({"dep": "license-scanner.scan"})
-            return {
-                "component_id": component_id,
-                "gate_version": "license_scanner@3.1.0",
-                "similarity_score": 0.0,
-                "block_threshold": 0.70,
-                "blocked": False,
-                "matches": [],
-                "notified": False,
-                "notification_delivery_error": None,
-                "cache_hit": False,
-            }
-        """)
-
-
-def _secret_scanner_src() -> str:
-    return textwrap.dedent("""\
-        import json
-        import os
-
-
-        def _log(record):
-            path = os.environ.get("GATE_TEST_CALL_LOG")
-            if path:
-                with open(path, "a") as f:
-                    f.write(json.dumps(record) + "\\n")
-
-
-        def scan(repo_root):
-            _log({"dep": "secret-scanner.scan"})
-            return {
-                "scope": "full",
-                "gate_version": "secret_scanner@2.0.0",
-                "flagged": False,
-                "matches": [],
-                "notified": False,
-                "notification_delivery_error": None,
-                "cache_hit": False,
-            }
-        """)
-
-
-def _provenance_tracker_src() -> str:
-    return textwrap.dedent("""\
-        import json
-        import os
-
-
-        def _log(record):
-            path = os.environ.get("GATE_TEST_CALL_LOG")
-            if path:
-                with open(path, "a") as f:
-                    f.write(json.dumps(record) + "\\n")
-
-
-        def write_attempt_record(component_id, generation_result, verification_report, spec_bundle_hash, repo_root):
-            _log({"dep": "provenance-tracker.write_attempt_record"})
-            return {
-                "attempt_id": "2026-01-01T00:00:00Z-abc123",
-                "component_id": component_id,
-                "timestamp": "2026-01-01T00:00:00Z",
-                "spec_bundle_hash": spec_bundle_hash,
-                "generation": {},
-                "verification": None,
-            }
-        """)
-
-
-def _provenance_writer_src() -> str:
-    return textwrap.dedent("""\
-        import json
-        import os
-
-
-        def _log(record):
-            path = os.environ.get("GATE_TEST_CALL_LOG")
-            if path:
-                with open(path, "a") as f:
-                    f.write(json.dumps(record) + "\\n")
-
-
-        def write_provenance(component_id, inputs, repo_root):
-            _log({"dep": "provenance-writer.write_provenance"})
-            return None
-        """)
+def _get(obj, key, default=None):
+    if isinstance(obj, dict):
+        return obj.get(key, default)
+    return getattr(obj, key, default)
 
 
 def _write(path: Path, content: str) -> None:
@@ -292,111 +17,353 @@ def _write(path: Path, content: str) -> None:
     path.write_text(content)
 
 
-def _build_repo(repo_root: Path, generator_mode: str) -> Path:
-    _write(repo_root / "specs" / "components" / "foo" / "component.md", _component_md())
-    _write(repo_root / "gen" / "provenance-checker" / "provenance_checker.py", _provenance_checker_src())
-    _write(repo_root / "gen" / "spec-bundle-assembler" / "spec_bundle_assembler.py", _assembler_src())
-    _write(repo_root / "gen" / "generator" / "generator.py", _generator_src(generator_mode))
-    _write(repo_root / "gen" / "verifier-orchestrator" / "verifier_orchestrator.py", _verifier_src())
-    _write(repo_root / "gen" / "license-scanner" / "license_scanner.py", _license_scanner_src())
-    _write(repo_root / "gen" / "secret-scanner" / "secret_scanner.py", _secret_scanner_src())
-    _write(repo_root / "gen" / "provenance-tracker" / "provenance_tracker.py", _provenance_tracker_src())
-    _write(repo_root / "gen" / "provenance-writer" / "provenance_writer.py", _provenance_writer_src())
-    return repo_root
+def _write_component_fixture(repo_root: Path, slug: str = "foo") -> None:
+    content = (
+        "---\n"
+        f"id: comp-{slug}\n"
+        "title: Foo\n"
+        "status: draft\n"
+        "owners: [team-foo]\n"
+        "sealed: false\n"
+        "depends_on: []\n"
+        "---\n"
+        "\n"
+        "# Foo\n"
+        "\n"
+        "Purpose: test fixture for AC-GATE-009.\n"
+    )
+    _write(repo_root / "specs" / "components" / slug / "component.md", content)
 
 
-@contextlib.contextmanager
-def _call_log_env(path: Path):
-    old = os.environ.get("GATE_TEST_CALL_LOG")
-    os.environ["GATE_TEST_CALL_LOG"] = str(path)
-    try:
-        yield
-    finally:
-        if old is None:
-            os.environ.pop("GATE_TEST_CALL_LOG", None)
-        else:
-            os.environ["GATE_TEST_CALL_LOG"] = old
+def _module_header(call_log: Path) -> str:
+    return (
+        "import json\n\n"
+        f"CALL_LOG = {str(call_log)!r}\n\n"
+        "def _log(event):\n"
+        "    with open(CALL_LOG, 'a') as _f:\n"
+        "        _f.write(json.dumps(event) + chr(10))\n\n"
+    )
 
 
-def _run_main(argv):
-    buf = io.StringIO()
-    with contextlib.redirect_stdout(buf):
-        try:
-            result = component_gate_runner.main(argv)
-        except SystemExit as exc:
-            code = exc.code
-        else:
-            code = result
-    return code, buf.getvalue()
+PROVENANCE_CHECKER_BODY = '''
+class ProvenanceKey:
+    def __init__(self, spec_bundle_hash, gate_versions):
+        self.spec_bundle_hash = spec_bundle_hash
+        self.gate_versions = gate_versions
 
 
-def _read_call_log(path: Path):
-    if not path.exists():
+def current_sealed_key(component_id, repo_root):
+    _log({"fn": "current_sealed_key", "component_id": component_id})
+    return None
+
+
+def current_provenance_key(component_id, repo_root):
+    _log({"fn": "current_provenance_key", "component_id": component_id})
+    return ProvenanceKey(
+        spec_bundle_hash="sha256:" + "0" * 64,
+        gate_versions={
+            "compiler": "criterion-compiler@1.0.0",
+            "generated_test": "generated_test@1.0.0",
+            "verifier": "verifier-orchestrator@2.0.0",
+            "license_scanner": "license_scanner@3.1.0",
+            "secret_scanner": "secret_scanner@0.0.0",
+        },
+    )
+
+
+def check_provenance(component_id, spec_bundle_hash, gate_versions, repo_root):
+    _log({"fn": "check_provenance", "component_id": component_id})
+    return {
+        "hit": False,
+        "verification_report": None,
+        "license_scan": None,
+        "secret_scan": None,
+    }
+'''
+
+ASSEMBLER_BODY = '''
+def assemble(component_id, repo_root=None, mode="cold"):
+    _log({"fn": "assemble", "component_id": component_id, "mode": mode})
+    return {
+        "component_id": component_id,
+        "spec_bundle_hash": "sha256:" + "0" * 64,
+        "spec": "spec text",
+        "interface": "interface text",
+        "constraints": "",
+        "dependency_interfaces": {},
+        "dependency_context": {},
+        "dependency_usage": {},
+        "vars": {},
+        "glossary": "",
+        "hint_code": None,
+    }
+'''
+
+GENERATOR_BODY_SUCCESS = '''
+def _get(obj, key, default=None):
+    if isinstance(obj, dict):
+        return obj.get(key, default)
+    return getattr(obj, key, default)
+
+
+def generate(bundle, model, retry_feedback=None, *, repo_root=None, llm_backend=None):
+    _log({"fn": "generate", "model": model, "retry_feedback": retry_feedback})
+    return {
+        "component_id": _get(bundle, "component_id"),
+        "spec_bundle_hash": _get(bundle, "spec_bundle_hash"),
+        "model": model,
+        "prompt_version": "v1",
+        "cache_hit": False,
+        "files": {"foo.py": "print(1)\\n"},
+        "model_call_error": None,
+        "refused": None,
+        "retry_feedback": retry_feedback,
+    }
+'''
+
+GENERATOR_BODY_ERROR = '''
+def _get(obj, key, default=None):
+    if isinstance(obj, dict):
+        return obj.get(key, default)
+    return getattr(obj, key, default)
+
+
+def generate(bundle, model, retry_feedback=None, *, repo_root=None, llm_backend=None):
+    _log({"fn": "generate", "model": model, "retry_feedback": retry_feedback})
+    return {
+        "component_id": _get(bundle, "component_id"),
+        "spec_bundle_hash": _get(bundle, "spec_bundle_hash"),
+        "model": model,
+        "prompt_version": "v1",
+        "cache_hit": False,
+        "files": {},
+        "model_call_error": {"category": "network", "message": "boom"},
+        "refused": None,
+        "retry_feedback": retry_feedback,
+    }
+'''
+
+VERIFIER_BODY = '''
+def verify(component_id, repo_root, judge=None, test_author=None):
+    _log({"fn": "verify", "component_id": component_id})
+    return {
+        "component_id": component_id,
+        "criteria": [],
+        "requirement_results": {},
+        "interface_drift": False,
+        "mutation_score": 1.0,
+        "overall": "pass",
+    }
+'''
+
+LICENSE_BODY = '''
+def scan(component_id, repo_root):
+    _log({"fn": "license_scan", "component_id": component_id})
+    return {
+        "component_id": component_id,
+        "gate_version": "license_scanner@4.0.0-no-reference-corpus",
+        "evaluated": False,
+        "reason": "no-reference-corpus",
+        "similarity_score": None,
+        "block_threshold": None,
+        "blocked": False,
+        "matches": [],
+        "notified": False,
+        "notification_delivery_error": None,
+        "cache_hit": False,
+    }
+
+
+def gate_version(repo_root):
+    return "license_scanner@4.0.0-no-reference-corpus"
+'''
+
+SECRET_BODY = '''
+def scan(repo_root):
+    _log({"fn": "secret_scan"})
+    return {
+        "scope": "full",
+        "gate_version": "secret_scanner@fake",
+        "flagged": False,
+        "matches": [],
+        "allowed": [],
+        "unused_allowlist_entries": [],
+        "notified": False,
+        "notification_delivery_error": None,
+        "cache_hit": False,
+    }
+
+
+def gate_version(repo_root):
+    return "secret_scanner@fake"
+'''
+
+TRACKER_BODY = '''
+def write_attempt_record(component_id, generation_result, verification_report, spec_bundle_hash, repo_root):
+    _log({"fn": "write_attempt_record", "component_id": component_id})
+    return {
+        "attempt_id": "2026-01-01T00:00:00Z-aaaaaa",
+        "component_id": component_id,
+        "timestamp": "2026-01-01T00:00:00Z",
+        "spec_bundle_hash": spec_bundle_hash,
+        "generation": generation_result,
+        "verification": verification_report,
+    }
+'''
+
+WRITER_BODY = '''
+def write_provenance(component_id, inputs, repo_root):
+    _log({"fn": "write_provenance", "component_id": component_id})
+    return None
+'''
+
+
+def _write_fakes(repo_root: Path, call_log: Path, generation_mode: str = "success") -> None:
+    header = _module_header(call_log)
+
+    _write(
+        repo_root / "gen" / "provenance-checker" / "provenance_checker.py",
+        header + PROVENANCE_CHECKER_BODY,
+    )
+    _write(
+        repo_root / "gen" / "spec-bundle-assembler" / "spec_bundle_assembler.py",
+        header + ASSEMBLER_BODY,
+    )
+
+    generator_body = GENERATOR_BODY_SUCCESS if generation_mode == "success" else GENERATOR_BODY_ERROR
+    _write(repo_root / "gen" / "generator" / "generator.py", header + generator_body)
+
+    _write(
+        repo_root / "gen" / "verifier-orchestrator" / "verifier_orchestrator.py",
+        header + VERIFIER_BODY,
+    )
+    _write(
+        repo_root / "gen" / "license-scanner" / "license_scanner.py",
+        header + LICENSE_BODY,
+    )
+    _write(
+        repo_root / "gen" / "secret-scanner" / "secret_scanner.py",
+        header + SECRET_BODY,
+    )
+    _write(
+        repo_root / "gen" / "provenance-tracker" / "provenance_tracker.py",
+        header + TRACKER_BODY,
+    )
+    _write(
+        repo_root / "gen" / "provenance-writer" / "provenance_writer.py",
+        header + WRITER_BODY,
+    )
+
+
+def _read_log_entries(call_log: Path):
+    if not call_log.exists():
         return []
-    lines = [line for line in path.read_text().splitlines() if line.strip()]
-    return [json.loads(line) for line in lines]
+    lines = call_log.read_text().splitlines()
+    return [json.loads(line) for line in lines if line.strip()]
 
 
-def test_generate_json_pass_reports_unblocked_and_forwards_model_and_retry_feedback(tmp_path):
-    repo_root = _build_repo(tmp_path / "repo", "success")
-    call_log = tmp_path / "calls.jsonl"
-    with _call_log_env(call_log):
-        code, output = _run_main([
-            "generate", "comp-foo", "--model=m", "--seed=2",
+def test_generate_json_reports_not_blocked_and_calls_generator_with_model_and_retry_feedback(tmp_path, capsys):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    _write_component_fixture(repo_root, slug="foo")
+    call_log = tmp_path / "call_log.jsonl"
+    _write_fakes(repo_root, call_log, generation_mode="success")
+
+    rc = component_gate_runner.main(
+        [
+            "generate",
+            "comp-foo",
+            "--model=m",
+            "--seed=2",
             "--retry-feedback=R-FOO-001,R-FOO-002",
-            "--repo-root=" + str(repo_root), "--format=json",
-        ])
+            f"--repo-root={repo_root}",
+            "--format=json",
+        ]
+    )
 
-    assert code == 0
-    result = json.loads(output)
-    assert result["blocked"] is False
+    assert rc == 0
+    out = capsys.readouterr().out
+    result = json.loads(out)
+    assert _get(result, "blocked") is False
 
-    gen_calls = [c for c in _read_call_log(call_log) if c["dep"] == "generator.generate"]
-    assert len(gen_calls) == 1
-    assert gen_calls[0]["model"] == "m"
-    assert gen_calls[0]["retry_feedback"] == ["R-FOO-001", "R-FOO-002"]
-
-
-def test_generate_text_pass_with_space_separated_flags(tmp_path):
-    repo_root = _build_repo(tmp_path / "repo", "success")
-    call_log = tmp_path / "calls.jsonl"
-    with _call_log_env(call_log):
-        code, output = _run_main([
-            "generate", "comp-foo", "--model", "m",
-            "--repo-root", str(repo_root), "--format", "text",
-        ])
-
-    assert code == 0
-    assert "comp-foo" in output
-    assert "passed" in output
+    generate_calls = [e for e in _read_log_entries(call_log) if e.get("fn") == "generate"]
+    assert len(generate_calls) == 1
+    assert generate_calls[0]["model"] == "m"
+    assert generate_calls[0]["retry_feedback"] == ["R-FOO-001", "R-FOO-002"]
 
 
-def test_generate_model_call_error_exits_1(tmp_path):
-    repo_root = _build_repo(tmp_path / "repo", "error")
-    call_log = tmp_path / "calls.jsonl"
-    with _call_log_env(call_log):
-        code, _output = _run_main([
-            "generate", "comp-foo", "--model=m",
-            "--repo-root=" + str(repo_root), "--format=json",
-        ])
+def test_generate_text_reports_component_id_and_passed(tmp_path, capsys):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    _write_component_fixture(repo_root, slug="foo")
+    call_log = tmp_path / "call_log.jsonl"
+    _write_fakes(repo_root, call_log, generation_mode="success")
 
-    assert code == 1
+    rc = component_gate_runner.main(
+        [
+            "generate",
+            "comp-foo",
+            "--model",
+            "m",
+            "--repo-root",
+            str(repo_root),
+            "--format",
+            "text",
+        ]
+    )
+
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "comp-foo" in out
+    assert "passed" in out
 
 
-def test_generate_usage_errors_exit_2_before_calling_any_dependency(tmp_path):
-    repo_root = _build_repo(tmp_path / "repo", "success")
-    bad_argvs = [
-        ["generate", "comp-foo", "--repo-root=" + str(repo_root), "--format=json"],
-        ["generate", "comp-nope", "--model=m", "--repo-root=" + str(repo_root)],
-        ["generate", "comp-foo", "--model=m", "--seed=x", "--repo-root=" + str(repo_root)],
-        ["generate", "comp-foo", "--model=m", "--format=bogus", "--repo-root=" + str(repo_root)],
-        ["generate", "comp-foo", "--model=m", "--totally-unknown=1", "--repo-root=" + str(repo_root)],
-        ["build", "comp-foo", "--model=m"],
-        ["generate", "comp-foo", "--repo-root=" + str(repo_root), "--model"],
-    ]
-    for index, argv in enumerate(bad_argvs):
-        call_log = tmp_path / f"calls_{index}.jsonl"
-        with _call_log_env(call_log):
-            code, _output = _run_main(argv)
-        assert code == 2, f"expected exit 2 for argv={argv!r}, got {code!r}"
-        assert _read_call_log(call_log) == [], f"a dependency was called for argv={argv!r}"
+def test_generate_model_call_error_returns_exit_1(tmp_path, capsys):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    _write_component_fixture(repo_root, slug="foo")
+    call_log = tmp_path / "call_log.jsonl"
+    _write_fakes(repo_root, call_log, generation_mode="model_call_error")
+
+    rc = component_gate_runner.main(
+        [
+            "generate",
+            "comp-foo",
+            "--model=m",
+            f"--repo-root={repo_root}",
+        ]
+    )
+
+    assert rc == 1
+
+
+@pytest.fixture
+def usage_error_repo(tmp_path):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    _write_component_fixture(repo_root, slug="foo")
+    call_log = tmp_path / "call_log.jsonl"
+    _write_fakes(repo_root, call_log, generation_mode="success")
+    return repo_root, call_log
+
+
+USAGE_ERROR_CASES = [
+    lambda repo_root: ["generate", "comp-foo", f"--repo-root={repo_root}"],
+    lambda repo_root: ["generate", "comp-nope", "--model=m", f"--repo-root={repo_root}"],
+    lambda repo_root: ["generate", "comp-foo", "--model=m", "--seed=x", f"--repo-root={repo_root}"],
+    lambda repo_root: ["generate", "comp-foo", "--model=m", f"--repo-root={repo_root}", "--format=bogus"],
+    lambda repo_root: ["generate", "comp-foo", "--model=m", f"--repo-root={repo_root}", "--unknown-flag=1"],
+    lambda repo_root: ["build", "comp-foo", "--model=m"],
+    lambda repo_root: ["generate", "comp-foo", "--repo-root", str(repo_root), "--model"],
+]
+
+
+@pytest.mark.parametrize("make_argv", USAGE_ERROR_CASES)
+def test_generate_usage_errors_return_exit_2_without_calling_any_dependency(usage_error_repo, make_argv):
+    repo_root, call_log = usage_error_repo
+    argv = make_argv(repo_root)
+
+    rc = component_gate_runner.main(argv)
+
+    assert rc == 2
+    assert not call_log.exists() or call_log.read_text() == ""

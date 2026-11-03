@@ -1,12 +1,13 @@
 import json
-import os
-import pathlib
 import tempfile
+from pathlib import Path
+
+import pytest
 
 import provenance_writer
 
 
-EXPECTED_KEYS = {
+EXPECTED_SCHEMA_KEYS = {
     "spec_bundle_hash",
     "model_pin",
     "prompt_version",
@@ -22,37 +23,41 @@ EXPECTED_KEYS = {
 }
 
 
-def _build_inputs(component_id):
+def _build_inputs():
     generation_result = {
-        "component_id": component_id,
+        "component_id": "comp-widget-maker",
         "spec_bundle_hash": "sha256:" + "a" * 64,
         "model": "claude-sonnet-5",
         "prompt_version": "v1",
         "cache_hit": False,
-        "files": {"sample.py": "print('hello')\n"},
+        "files": {"widget_maker.py": "# generated code\n"},
         "model_call_error": None,
         "refused": None,
         "retry_feedback": None,
     }
+
     verification_report = {
-        "component_id": component_id,
+        "component_id": "comp-widget-maker",
         "criteria": [
             {
-                "id": "AC-SAMPLE-001",
-                "covers": "R-SAMPLE-001",
+                "id": "AC-WIDGET-MAKER-001",
+                "covers": "R-WIDGET-MAKER-001",
                 "kind": "compiled",
                 "result": "pass",
-            },
+            }
         ],
-        "requirement_results": {"R-SAMPLE-001": "pass"},
+        "requirement_results": {"R-WIDGET-MAKER-001": "pass"},
         "interface_drift": False,
-        "mutation_score": 1.0,
+        "mutation_score": 0.9,
         "overall": "pass",
     }
+
     license_scan_result = {
-        "component_id": component_id,
-        "gate_version": "license_scanner@3.1.0",
-        "similarity_score": 0.0,
+        "component_id": "comp-widget-maker",
+        "gate_version": "license_scanner@4.0.3",
+        "evaluated": True,
+        "reason": None,
+        "similarity_score": 0.1,
         "block_threshold": 0.70,
         "blocked": False,
         "matches": [],
@@ -60,48 +65,48 @@ def _build_inputs(component_id):
         "notification_delivery_error": None,
         "cache_hit": False,
     }
+
     secret_scan_result = {
         "scope": "full",
-        "gate_version": "secret_scanner@2.0.0",
+        "gate_version": "secret_scanner@3.0.0+detect-secrets.1.5.0",
         "flagged": False,
         "matches": [],
+        "allowed": [],
+        "unused_allowlist_entries": [],
         "notified": False,
         "notification_delivery_error": None,
         "cache_hit": False,
     }
-    return {
-        "component_id": component_id,
-        "generation_result": generation_result,
-        "verification_report": verification_report,
-        "license_scan_result": license_scan_result,
-        "secret_scan_result": secret_scan_result,
-        "provenance_hit": False,
-        "attempts": 1,
-        "gate_versions": {"compiler": "1.0.0", "license_scanner": "k-gram@1.0.0"},
-    }
+
+    return provenance_writer.ProvenanceInputs(
+        component_id="comp-widget-maker",
+        generation_result=generation_result,
+        verification_report=verification_report,
+        license_scan_result=license_scan_result,
+        secret_scan_result=secret_scan_result,
+        provenance_hit=False,
+        attempts=1,
+        gate_versions={"compiler": "1.0.0", "license_scanner": "k-gram@1.0.0"},
+    )
 
 
-def _find_provenance_manifests(repo_root):
-    # Glossary: a provenance manifest is always a `.provenance.json` file.
-    found = []
-    for dirpath, _dirnames, filenames in os.walk(repo_root):
-        for filename in filenames:
-            if filename.endswith(".provenance.json"):
-                found.append(os.path.join(dirpath, filename))
-    return found
+def test_written_provenance_file_is_valid_json_with_exact_schema_keys():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        repo_root = Path(tmpdir)
+        inputs = _build_inputs()
 
+        provenance_writer.write_provenance("comp-widget-maker", inputs, repo_root)
 
-def test_written_manifest_is_valid_json_with_exact_key_set():
-    component_id = "comp-sample"
-    inputs = _build_inputs(component_id)
-    repo_root = pathlib.Path(tempfile.mkdtemp())
+        gen_path = repo_root / "gen" / "widget-maker" / ".provenance.json"
+        verification_path = repo_root / "verification" / "widget-maker" / ".provenance.json"
 
-    provenance_writer.write_provenance(component_id, inputs, repo_root)
+        for manifest_path in (gen_path, verification_path):
+            assert manifest_path.is_file(), f"expected manifest at {manifest_path}"
 
-    manifest_paths = _find_provenance_manifests(repo_root)
-    assert manifest_paths, "expected at least one .provenance.json file to be written"
+            with open(manifest_path, "r", encoding="utf-8") as f:
+                raw_text = f.read()
 
-    for manifest_path in manifest_paths:
-        with open(manifest_path, "r", encoding="utf-8") as fh:
-            manifest = json.load(fh)
-        assert set(manifest.keys()) == EXPECTED_KEYS
+            parsed = json.loads(raw_text)
+
+            assert isinstance(parsed, dict)
+            assert set(parsed.keys()) == EXPECTED_SCHEMA_KEYS

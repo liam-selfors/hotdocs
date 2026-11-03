@@ -60,6 +60,17 @@ split.
   invariant, with its real code at `source_path` instead of under `gen/`.
   Used both for legacy code being wrapped and for permanently-hand-maintained
   trust infrastructure (e.g. `criterion-compiler`) — not legacy debt alone.
+- **Sealed provenance manifest** (`D170`) — the `.sealed-provenance.json`
+  file at a sealed component's `source_path`, the sealed counterpart of
+  the provenance manifest. It records who owns the component (its
+  `owners`), a hash of the exact source it describes, and the verdict of
+  the characterization-test run against that exact source. It is a
+  different file type from `.provenance.json` on purpose: a sealed
+  component's code is hand-maintained, so the fact to attest is not how
+  it was generated but who answers for it and that it still behaves as
+  characterized. A manifest that is absent, malformed, or describes
+  different source never counts as evidence. Schema:
+  `provenance-writer`'s `interface/data/SealedProvenance.md`.
 - **Pinned override** — the file-granularity version of the same exemption,
   declared in `gen/<component>/.overrides.json`.
 - **Criterion test filename** — the deterministic filename a criterion's

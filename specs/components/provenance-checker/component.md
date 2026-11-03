@@ -3,9 +3,10 @@ id: comp-provenance-checker
 title: Provenance Checker
 status: draft
 owners: [pipeline-team]
-depends_on: [comp-spec-bundle-assembler, comp-criterion-compiler, comp-test-author, comp-verifier-orchestrator, comp-license-scanner, comp-secret-scanner]
+depends_on: [comp-spec-bundle-assembler, comp-criterion-compiler, comp-test-author, comp-verifier-orchestrator, comp-license-scanner, comp-secret-scanner, comp-provenance-writer]
 realizes: [P-ZERO-EDIT]
 uses_var: [VAR-TRUST-JUDGE-PROVENANCE]
+model_pin: claude-sonnet-5
 sealed: false
 ---
 
@@ -47,6 +48,11 @@ against the caller-supplied current ones (defined once, by
 deciding whether to honor that match given
 `VAR-TRUST-JUDGE-PROVENANCE` and whether the embedded
 `verification_report` includes any `llm-judge`-kind criterion.
+
+Also, for a sealed component (`D170`): computing its current key — owners,
+a hash of its source, the verifier version — and deciding whether its
+sealed provenance manifest (`provenance-writer`'s schema) is valid and
+current.
 
 **Out of scope:** computing the current `spec_bundle_hash`
 (`spec-bundle-assembler`'s job); writing or modifying `.provenance.json`
@@ -105,3 +111,7 @@ None.
   `.provenance.json` and every checker of it agree. `R-PROVCHECK-006`
   covers the CLI (`D162`), whose hash validation rejected every real
   `sha256:`-prefixed hash.
+- `D170`: `current_sealed_key`/`check_sealed_provenance` — the sealed
+  counterpart (`R-PROVCHECK-007`/`008`); depends on `provenance-writer`
+  for the manifest schema.
+  Regenerated and landed at 13/13, `mutation_score` 0.91.

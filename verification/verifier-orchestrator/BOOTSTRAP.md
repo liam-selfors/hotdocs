@@ -126,3 +126,33 @@ tests failed on the prior gate first. Regenerated in one attempt; 18
 of 18 pass. Old and new gates gave identical verdicts and mutation
 scores on `provenance-tracker-ui`, `spec-completeness-assistant`, and
 `decision-drift-detector`. Swapped in.
+
+## `D190`: `hotdocs verify-component`, and two things the spec left to chance
+
+`hotdocs verify` was claimed by this component and by
+`provenance-tracker`'s readiness check; a single entry point cannot
+route one verb to two programs. The command is now `hotdocs
+verify-component <component-id>`, covered by `R-VERIFY-018`,
+`AC-VERIFY-021`, and `verification/verifier-orchestrator/test_cli.py`
+(a separate file, so the main suite is untouched). Writing the
+requirement also fixed an inconsistency: an unknown component exited `1`,
+a failed verdict, where every other CLI here returns `2`, a usage error.
+
+Regenerated in a scratch copy of the repository, never the live tree:
+other agents' verification runs through this file. Three attempts, two
+gaps, both about the shape of `verify`'s return value, which nothing had
+pinned because one earlier generation happened to return an object:
+
+- Attempt 1 returned a plain dict; 19 of 29 hand tests failed on
+  `report.criteria`.
+- Attempt 2 returned an object, but made each `criteria` entry a
+  `CriterionResult` object; 12 failed on `c["result"]`.
+- `interface/library.md` now pins an object with attribute access and
+  `to_dict()`, whose `criteria` entries and `requirement_results` are
+  plain dicts. Attempt 3 passed all 29, including the sealed-component
+  tests (`AC-VERIFY-019`/`020`) written for `D171`.
+
+Before landing, the old and new gates were run on three landed
+components: identical verdicts and mutation scores. `GATE_VERSION` is
+unchanged (`verifier-orchestrator@2.0.0`): verification behavior did not
+move, only the command name, the usage message, and one exit code.

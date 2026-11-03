@@ -35,3 +35,15 @@ using no name beyond its list.
 ## Round 2
 
 13 of 13, `mutation_score=0.88`. Swapped in.
+
+## `D170`: the sealed path writes a sealed manifest
+
+`R-GATE-007` rewritten: a component is sealed when `provenance-checker`'s
+`current_sealed_key` returns a key (this component no longer reads
+`component.md`); it re-runs the characterization tests, runs both scans,
+and then always writes a sealed provenance manifest through
+`provenance-writer`'s `write_sealed_provenance`, passing or failing, so
+the owner and the verdict are on file. Regenerated; the first run was
+cut off by the model backend's usage limit (no result), and the second
+landed at 13 of 13 criteria with `mutation_score` 0.94, no spec change
+between them. Its suite is now 33 tests.

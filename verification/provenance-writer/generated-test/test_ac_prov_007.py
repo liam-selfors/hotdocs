@@ -1,58 +1,25 @@
 import json
-import os
-import tempfile
-from pathlib import Path
 
 import provenance_writer
 
 
-def field(obj, name, default=None):
+def _get(obj, key, default=None):
     if isinstance(obj, dict):
-        return obj.get(name, default)
-    return getattr(obj, name, default)
+        return obj.get(key, default)
+    return getattr(obj, key, default)
 
 
-def _find_manifest_files(repo_root):
-    found = []
-    for dirpath, _dirnames, filenames in os.walk(repo_root):
-        for filename in filenames:
-            if not filename.endswith(".json"):
-                continue
-            path = Path(dirpath) / filename
-            try:
-                data = json.loads(path.read_text())
-            except (json.JSONDecodeError, UnicodeDecodeError):
-                continue
-            if isinstance(data, dict) and "license_scan" in data and "secret_scan" in data:
-                found.append((path, data))
-    return found
+def _make_inputs(**fields):
+    cls = getattr(provenance_writer, "ProvenanceInputs", None)
+    if cls is not None:
+        return cls(**fields)
+    return dict(fields)
 
 
-def test_ac_prov_007_clean_scans_both_present_in_manifest():
-    repo_root = Path(tempfile.mkdtemp(prefix="hotdocs-prov-007-"))
-    component_id = "comp-widget"
-
-    license_scan_result = {
-        "component_id": component_id,
-        "gate_version": "license_scanner@3.1.0",
-        "similarity_score": 0.05,
-        "block_threshold": 0.70,
-        "blocked": False,
-        "matches": [],
-        "notified": False,
-        "notification_delivery_error": None,
-        "cache_hit": False,
-    }
-
-    secret_scan_result = {
-        "scope": "full",
-        "gate_version": "secret_scanner@2.0.0",
-        "flagged": False,
-        "matches": [],
-        "notified": False,
-        "notification_delivery_error": None,
-        "cache_hit": False,
-    }
+def test_clean_license_and_secret_scans_always_populated(tmp_path):
+    component_id = "comp-fixture-clean-scans"
+    slug = component_id[len("comp-"):]
+    repo_root = tmp_path
 
     generation_result = {
         "component_id": component_id,
@@ -66,35 +33,67 @@ def test_ac_prov_007_clean_scans_both_present_in_manifest():
         "retry_feedback": None,
     }
 
-    inputs = {
+    license_scan_result = {
         "component_id": component_id,
-        "generation_result": generation_result,
-        "verification_report": None,
-        "license_scan_result": license_scan_result,
-        "secret_scan_result": secret_scan_result,
-        "provenance_hit": False,
-        "attempts": 1,
-        "gate_versions": {
-            "compiler": "1.0.0",
-            "license_scanner": "license_scanner@3.1.0",
-            "secret_scanner": "secret_scanner@2.0.0",
-        },
+        "gate_version": "license_scanner@4.0.3",
+        "evaluated": True,
+        "reason": None,
+        "similarity_score": 0.0,
+        "block_threshold": 0.70,
+        "blocked": False,
+        "matches": [],
+        "notified": False,
+        "notification_delivery_error": None,
+        "cache_hit": False,
     }
 
-    result = provenance_writer.write_provenance(component_id, inputs, repo_root)
-    assert result is None
+    secret_scan_result = {
+        "scope": "full",
+        "gate_version": "secret_scanner@3.0.0+detect-secrets.1.5.0",
+        "flagged": False,
+        "matches": [],
+        "allowed": [],
+        "unused_allowlist_entries": [],
+        "notified": False,
+        "notification_delivery_error": None,
+        "cache_hit": False,
+    }
 
-    manifests = _find_manifest_files(repo_root)
-    assert manifests, "write_provenance did not write any manifest file containing both scan fields"
+    inputs = _make_inputs(
+        component_id=component_id,
+        generation_result=generation_result,
+        verification_report=None,
+        license_scan_result=license_scan_result,
+        secret_scan_result=secret_scan_result,
+        provenance_hit=False,
+        attempts=1,
+        gate_versions={
+            "license_scanner": "license_scanner@4.0.3",
+            "secret_scanner": "secret_scanner@3.0.0+detect-secrets.1.5.0",
+        },
+    )
 
-    for path, manifest in manifests:
-        license_scan = field(manifest, "license_scan")
-        secret_scan = field(manifest, "secret_scan")
+    provenance_writer.write_provenance(component_id, inputs, repo_root)
 
-        assert license_scan is not None, f"license_scan missing/null in manifest at {path}"
-        assert secret_scan is not None, f"secret_scan missing/null in manifest at {path}"
+    gen_manifest_path = repo_root / "gen" / slug / ".provenance.json"
+    verification_manifest_path = repo_root / "verification" / slug / ".provenance.json"
 
-        assert field(license_scan, "blocked") is False
-        assert field(license_scan, "matches") == []
-        assert field(secret_scan, "flagged") is False
-        assert field(secret_scan, "matches") == []
+    assert gen_manifest_path.is_file()
+    assert verification_manifest_path.is_file()
+
+    for manifest_path in (gen_manifest_path, verification_manifest_path):
+        with open(manifest_path, "r", encoding="utf-8") as fh:
+            manifest = json.load(fh)
+
+        license_scan = _get(manifest, "license_scan")
+        secret_scan = _get(manifest, "secret_scan")
+
+        assert license_scan is not None
+        assert secret_scan is not None
+
+        assert _get(license_scan, "evaluated") is True
+        assert _get(license_scan, "blocked") is False
+        assert _get(license_scan, "matches") == []
+
+        assert _get(secret_scan, "flagged") is False
+        assert _get(secret_scan, "matches") == []

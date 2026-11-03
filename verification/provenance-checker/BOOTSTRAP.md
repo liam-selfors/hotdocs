@@ -56,3 +56,37 @@ round at 10 of 10, `mutation_score=0.91`, now a flat module rather than
 a package. Against this repository, `current_provenance_key` returns
 the same hash `assemble` does and all five gate versions; the
 hand-maintained suite still passes.
+
+## `D170`: sealed keys and the sealed manifest check
+
+Regenerated to add the sealed counterpart of the provenance key:
+`current_sealed_key` (the one test of whether a component is sealed,
+and its owners, source hash, and verifier version) and
+`check_sealed_provenance` (is the sealed manifest valid and current;
+`R-PROVCHECK-007`/`008`). Five rounds, landing at 13 of 13 criteria,
+`mutation_score=0.91`. The new requirements passed from the second
+round; the rest was spec precision:
+
+- Two criteria snapshotted the repository to prove the check wrote
+  nothing and tripped on the `__pycache__` that importing a faked
+  dependency creates (the third time this session). The criterion now
+  excludes it by name.
+- A miss returned `null` for every manifest-derived field, where the
+  data document said they were copied "when the manifest is valid". The
+  candidate had the better reading — a manifest that is not a current,
+  passing hit is not evidence — and the document now says so.
+- `AC-PROVCHECK-004`/`005` never set `VAR_TRUST_JUDGE_PROVENANCE`, so a
+  test assumed absent meant false; the declaration makes absent mean
+  true. Both now name the environment variable.
+- Mutation testing, with every criterion passing, found the manifest
+  validator's per-field type checks untested (0.74): the new
+  `AC-PROVCHECK-013` changes one field at a time through wrong types and
+  malformed values.
+
+The older hand-written `test_provenance_checker.py` read results as
+attributes (`result.hit`); the candidate, like its dependents, treats a
+result as a dict or an object, so the suite now reads fields through a
+dual-access helper rather than being deleted. 99 of 99 pass. Against the
+real repository the checker returns `criterion-compiler`'s key,
+`None` for every other component, and `manifest_missing` until a
+manifest exists.

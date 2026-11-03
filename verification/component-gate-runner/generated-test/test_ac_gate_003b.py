@@ -1,196 +1,274 @@
-"""AC-GATE-003b: generator called exactly once (no retry loop) on a
-provenance miss whose sole candidate fails verification; blocked is
-True with block_reason "verification_failed"."""
-
-import json
-import os
+import pathlib
+import shutil
 import tempfile
-from pathlib import Path
+import textwrap
+import unittest
 
-import component_gate_runner
 
-
-def _get(obj, key):
+def _get(obj, key, default=None):
     if isinstance(obj, dict):
-        return obj[key]
-    return getattr(obj, key)
+        return obj.get(key, default)
+    return getattr(obj, key, default)
 
 
-def _write(path: Path, content: str) -> None:
+def _write(path, content):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content)
 
 
-PROVENANCE_CHECKER_SRC = '''
-class _ProvenanceKey:
-    def __init__(self, spec_bundle_hash, gate_versions):
-        self.spec_bundle_hash = spec_bundle_hash
-        self.gate_versions = gate_versions
+def _install_fake(repo_root, slug, module_name, source):
+    module_dir = repo_root / "gen" / slug
+    module_dir.mkdir(parents=True, exist_ok=True)
+    (module_dir / (module_name + ".py")).write_text(source)
 
 
-def current_provenance_key(component_id, repo_root):
-    return _ProvenanceKey(
-        spec_bundle_hash="sha256:" + "a" * 64,
-        gate_versions={
-            "compiler": "criterion-compiler@1.0.0",
-            "generated_test": "generated_test@1.0.0",
-            "verifier": "verifier-orchestrator@2.0.0",
-            "license_scanner": "license_scanner@3.1.0",
-            "secret_scanner": "secret_scanner@0.0.0",
-        },
-    )
+LOGGER_SNIPPET = textwrap.dedent('''
+    import pathlib as _pathlib
 
 
-def check_provenance(component_id, spec_bundle_hash, gate_versions, repo_root):
-    return {
-        "hit": False,
-        "verification_report": None,
-        "license_scan": None,
-        "secret_scan": None,
-    }
-'''
-
-SPEC_BUNDLE_ASSEMBLER_SRC = '''
-def assemble(component_id, repo_root, mode="cold"):
-    return {
-        "component_id": component_id,
-        "spec_bundle_hash": "sha256:" + "a" * 64,
-        "spec": "spec text",
-        "interface": "interface text",
-        "constraints": "constraints text",
-        "dependency_interfaces": {},
-        "dependency_context": {},
-        "dependency_usage": {},
-        "vars": {},
-        "glossary": "glossary text",
-        "hint_code": None,
-    }
-'''
-
-GENERATOR_SRC = '''
-import json
-import os
+    def _log(repo_root, name, **fields):
+        path = _pathlib.Path(repo_root) / "_calls.log"
+        with open(path, "a") as f:
+            f.write(name + " " + repr(fields) + "\\n")
+''')
 
 
-def generate(bundle, model, retry_feedback=None, *, repo_root=None, llm_backend=None):
-    log_path = os.environ["AC_GATE_003B_GENERATOR_CALL_LOG"]
-    with open(log_path, "a") as f:
-        f.write(json.dumps({"model": model, "retry_feedback": retry_feedback}) + "\\n")
-    return {
-        "component_id": "comp-widget",
-        "spec_bundle_hash": "sha256:" + "a" * 64,
-        "model": model,
-        "prompt_version": "v1",
-        "cache_hit": False,
-        "files": {"widget.py": "# generated candidate"},
-        "model_call_error": None,
-        "refused": None,
-        "retry_feedback": retry_feedback,
-    }
-'''
+class RunComponentGatesVerificationFailedTest(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="hotdocs-gate-")
+        self.repo_root = pathlib.Path(self.tmp)
+        self.component_id = "comp-foo"
+        self.slug = "foo"
+        self._write_fixture_component()
+        self._install_fakes()
 
-VERIFIER_ORCHESTRATOR_SRC = '''
-def verify(component_id, repo_root, judge=None, test_author=None):
-    return {
-        "component_id": component_id,
-        "criteria": [
-            {"id": "AC-FOO-001", "covers": "R-FOO-001", "kind": "compiled", "result": "pass"},
-            {"id": "AC-FOO-002", "covers": "R-FOO-002", "kind": "compiled", "result": "fail",
-             "failure_detail": {"message": "check failed", "expected": True, "actual": False}},
-        ],
-        "requirement_results": {"R-FOO-001": "pass", "R-FOO-002": "fail"},
-        "interface_drift": False,
-        "mutation_score": 0.5,
-        "overall": "fail",
-    }
-'''
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
 
-LICENSE_SCANNER_SRC = '''
-def scan(component_id, repo_root):
-    return {
-        "component_id": component_id,
-        "gate_version": "license_scanner@3.1.0",
-        "similarity_score": 0.0,
-        "block_threshold": 0.70,
-        "blocked": False,
-        "matches": [],
-        "notified": False,
-        "notification_delivery_error": None,
-        "cache_hit": False,
-    }
-'''
+    def _write_fixture_component(self):
+        component_md = textwrap.dedent('''\
+            ---
+            id: comp-foo
+            title: Foo
+            status: draft
+            owners: [test-team]
+            sealed: false
+            ---
 
-SECRET_SCANNER_SRC = '''
-def scan(repo_root):
-    return {
-        "scope": "full",
-        "gate_version": "secret_scanner@0.0.0",
-        "flagged": False,
-        "matches": [],
-        "notified": False,
-        "notification_delivery_error": None,
-        "cache_hit": False,
-    }
-'''
+            # Foo
 
-PROVENANCE_TRACKER_SRC = '''
-import os
+            ## Purpose
+
+            A fixture component for AC-GATE-003b.
+            ''')
+        _write(self.repo_root / "specs" / "components" / self.slug / "component.md", component_md)
+
+    def _install_fakes(self):
+        provenance_checker_src = LOGGER_SNIPPET + textwrap.dedent('''
+            def current_sealed_key(component_id, repo_root):
+                _log(repo_root, "current_sealed_key")
+                return None
 
 
-def write_attempt_record(component_id, generation_result, verification_report, spec_bundle_hash, repo_root):
-    slug = component_id[len("comp-"):] if component_id.startswith("comp-") else component_id
-    attempts_dir = os.path.join(str(repo_root), ".hotdocs", "attempts", slug)
-    os.makedirs(attempts_dir, exist_ok=True)
-    existing = len(os.listdir(attempts_dir))
-    record_path = os.path.join(attempts_dir, "attempt-%d.json" % existing)
-    with open(record_path, "w") as f:
-        f.write("{}")
-    return {
-        "attempt_id": "attempt-%d" % existing,
-        "component_id": component_id,
-        "timestamp": "2026-01-01T00:00:00Z",
-        "spec_bundle_hash": spec_bundle_hash,
-        "generation": generation_result,
-        "verification": verification_report,
-    }
-'''
-
-PROVENANCE_WRITER_SRC = '''
-def write_provenance(component_id, inputs, repo_root):
-    return None
-'''
+            class _Key:
+                spec_bundle_hash = "sha256:" + "0" * 64
+                gate_versions = {
+                    "compiler": "criterion-compiler@1.0.0",
+                    "generated_test": "generated_test@1.0.0",
+                    "verifier": "verifier-orchestrator@2.0.0",
+                    "license_scanner": "license_scanner@3.1.0",
+                    "secret_scanner": "secret_scanner@0.0.0",
+                }
 
 
-def test_ac_gate_003b_generator_called_once_on_verification_failure():
-    with tempfile.TemporaryDirectory() as repo_root_str:
-        repo_root = Path(repo_root_str)
+            def current_provenance_key(component_id, repo_root):
+                _log(repo_root, "current_provenance_key")
+                return _Key()
 
-        _write(repo_root / "gen" / "provenance-checker" / "provenance_checker.py", PROVENANCE_CHECKER_SRC)
-        _write(repo_root / "gen" / "spec-bundle-assembler" / "spec_bundle_assembler.py", SPEC_BUNDLE_ASSEMBLER_SRC)
-        _write(repo_root / "gen" / "generator" / "generator.py", GENERATOR_SRC)
-        _write(repo_root / "gen" / "verifier-orchestrator" / "verifier_orchestrator.py", VERIFIER_ORCHESTRATOR_SRC)
-        _write(repo_root / "gen" / "license-scanner" / "license_scanner.py", LICENSE_SCANNER_SRC)
-        _write(repo_root / "gen" / "secret-scanner" / "secret_scanner.py", SECRET_SCANNER_SRC)
-        _write(repo_root / "gen" / "provenance-tracker" / "provenance_tracker.py", PROVENANCE_TRACKER_SRC)
-        _write(repo_root / "gen" / "provenance-writer" / "provenance_writer.py", PROVENANCE_WRITER_SRC)
 
-        call_log_path = repo_root / "generator_calls.jsonl"
-        os.environ["AC_GATE_003B_GENERATOR_CALL_LOG"] = str(call_log_path)
-        try:
-            result = component_gate_runner.run_component_gates(
-                "comp-widget", repo_root, "fake-model-1",
-            )
-        finally:
-            del os.environ["AC_GATE_003B_GENERATOR_CALL_LOG"]
+            def check_provenance(component_id, spec_bundle_hash, gate_versions, repo_root):
+                _log(repo_root, "check_provenance")
+                return {
+                    "hit": False,
+                    "verification_report": None,
+                    "license_scan": None,
+                    "secret_scan": None,
+                }
+        ''')
+        _install_fake(self.repo_root, "provenance-checker", "provenance_checker", provenance_checker_src)
 
-        assert call_log_path.exists(), "generator fake was never invoked"
-        call_lines = call_log_path.read_text().strip().splitlines()
-        assert len(call_lines) == 1, (
-            "generator must be called exactly once per non-sealed miss; got %d calls"
-            % len(call_lines)
+        assembler_src = LOGGER_SNIPPET + textwrap.dedent('''
+            def assemble(component_id, repo_root, mode="cold"):
+                _log(repo_root, "assemble")
+                return {
+                    "component_id": component_id,
+                    "spec_bundle_hash": "sha256:" + "0" * 64,
+                    "spec": "",
+                    "interface": "",
+                    "constraints": "",
+                    "dependency_interfaces": {},
+                    "dependency_context": {},
+                    "dependency_usage": {},
+                    "vars": {},
+                    "glossary": "",
+                    "hint_code": None,
+                }
+        ''')
+        _install_fake(self.repo_root, "spec-bundle-assembler", "spec_bundle_assembler", assembler_src)
+
+        generator_src = LOGGER_SNIPPET + textwrap.dedent('''
+            def generate(bundle, model, retry_feedback=None, *, repo_root=None, llm_backend=None):
+                _log(repo_root, "generate", retry_feedback=retry_feedback)
+                if isinstance(bundle, dict):
+                    component_id = bundle["component_id"]
+                else:
+                    component_id = bundle.component_id
+                return {
+                    "component_id": component_id,
+                    "spec_bundle_hash": "sha256:" + "0" * 64,
+                    "model": model,
+                    "prompt_version": "v1",
+                    "cache_hit": False,
+                    "files": {"foo.py": "# generated\\n"},
+                    "model_call_error": None,
+                    "refused": None,
+                    "retry_feedback": retry_feedback,
+                }
+        ''')
+        _install_fake(self.repo_root, "generator", "generator", generator_src)
+
+        verifier_src = LOGGER_SNIPPET + textwrap.dedent('''
+            GATE_VERSION = "verifier-orchestrator@2.0.0"
+
+
+            def verify(component_id, repo_root, judge=None, test_author=None):
+                _log(repo_root, "verify")
+                return {
+                    "component_id": component_id,
+                    "criteria": [
+                        {"id": "AC-FOO-001", "covers": "R-FOO-001", "kind": "compiled", "result": "pass"},
+                        {
+                            "id": "AC-FOO-002",
+                            "covers": "R-FOO-002",
+                            "kind": "compiled",
+                            "result": "fail",
+                            "failure_detail": {
+                                "message": "requirement not satisfied",
+                                "expected": True,
+                                "actual": False,
+                            },
+                        },
+                    ],
+                    "requirement_results": {"R-FOO-001": "pass", "R-FOO-002": "fail"},
+                    "interface_drift": False,
+                    "mutation_score": 0.5,
+                    "overall": "fail",
+                }
+        ''')
+        _install_fake(self.repo_root, "verifier-orchestrator", "verifier_orchestrator", verifier_src)
+
+        license_src = LOGGER_SNIPPET + textwrap.dedent('''
+            def gate_version(repo_root):
+                return "license_scanner@4.0.0"
+
+
+            def scan(component_id, repo_root):
+                _log(repo_root, "license_scan")
+                return {
+                    "component_id": component_id,
+                    "gate_version": "license_scanner@4.0.0",
+                    "evaluated": False,
+                    "reason": "no-reference-corpus",
+                    "similarity_score": None,
+                    "block_threshold": None,
+                    "blocked": False,
+                    "matches": [],
+                    "notified": False,
+                    "notification_delivery_error": None,
+                    "cache_hit": False,
+                }
+        ''')
+        _install_fake(self.repo_root, "license-scanner", "license_scanner", license_src)
+
+        secret_src = LOGGER_SNIPPET + textwrap.dedent('''
+            def gate_version(repo_root):
+                return "secret_scanner@3.0.0"
+
+
+            def scan(repo_root):
+                _log(repo_root, "secret_scan")
+                return {
+                    "scope": "full",
+                    "gate_version": "secret_scanner@3.0.0",
+                    "flagged": False,
+                    "matches": [],
+                    "allowed": [],
+                    "unused_allowlist_entries": [],
+                    "notified": False,
+                    "notification_delivery_error": None,
+                    "cache_hit": False,
+                }
+        ''')
+        _install_fake(self.repo_root, "secret-scanner", "secret_scanner", secret_src)
+
+        tracker_src = LOGGER_SNIPPET + textwrap.dedent('''
+            import json as _json
+
+
+            def write_attempt_record(component_id, generation_result, verification_report, spec_bundle_hash, repo_root):
+                _log(repo_root, "write_attempt_record")
+                if component_id.startswith("comp-"):
+                    slug = component_id[len("comp-"):]
+                else:
+                    slug = component_id
+                attempts_dir = _pathlib.Path(repo_root) / ".hotdocs" / "attempts" / slug
+                attempts_dir.mkdir(parents=True, exist_ok=True)
+                record = {
+                    "attempt_id": "2026-01-01T00:00:00Z-aaaaaa",
+                    "component_id": component_id,
+                    "timestamp": "2026-01-01T00:00:00Z",
+                    "spec_bundle_hash": spec_bundle_hash,
+                    "generation": generation_result,
+                    "verification": verification_report,
+                }
+                (attempts_dir / "attempt-0001.json").write_text(_json.dumps(record))
+                return record
+        ''')
+        _install_fake(self.repo_root, "provenance-tracker", "provenance_tracker", tracker_src)
+
+        writer_src = LOGGER_SNIPPET + textwrap.dedent('''
+            def write_provenance(component_id, inputs, repo_root):
+                _log(repo_root, "write_provenance")
+
+
+            def write_sealed_provenance(component_id, inputs, repo_root):
+                _log(repo_root, "write_sealed_provenance")
+        ''')
+        _install_fake(self.repo_root, "provenance-writer", "provenance_writer", writer_src)
+
+    def _calls(self):
+        log_path = self.repo_root / "_calls.log"
+        if not log_path.exists():
+            return []
+        return log_path.read_text().splitlines()
+
+    def test_verification_failure_blocks_after_single_generator_call(self):
+        import component_gate_runner
+
+        result = component_gate_runner.run_component_gates(
+            self.component_id,
+            self.repo_root,
+            model="claude-sonnet-5",
         )
-        call_record = json.loads(call_lines[0])
-        assert call_record["retry_feedback"] is None
 
-        assert _get(result, "blocked") is True
-        assert _get(result, "block_reason") == "verification_failed"
+        calls = self._calls()
+        generate_calls = [line for line in calls if line.startswith("generate ")]
+        self.assertEqual(len(generate_calls), 1)
+        self.assertIn("'retry_feedback': None", generate_calls[0])
+
+        self.assertTrue(_get(result, "blocked"))
+        self.assertEqual(_get(result, "block_reason"), "verification_failed")
+
+
+if __name__ == "__main__":
+    unittest.main()

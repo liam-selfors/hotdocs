@@ -3,6 +3,11 @@
 Covers: R-PROV-014
 Kind: generated-test
 
+A manifest is read from its exact path,
+`<repo_root>/gen/<slug>/.provenance.json` (and its copy under
+`verification/<slug>/`), never by a glob: `.provenance.json` is a hidden
+file, which a pattern such as `*.provenance.json` does not match.
+
 ```gherkin
 Given a plain dict-shaped ProvenanceInputs (not a ProvenanceInputs
   instance), with every field a real-shaped value

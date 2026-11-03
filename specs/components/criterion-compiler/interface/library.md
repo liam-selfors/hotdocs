@@ -1,18 +1,15 @@
 # Library
 
 ```
-compile(component_id: str, repo_root: Path, target: str = "pytest") -> CompileReport
+compile(component_id: str, repo_root: Path, target: str = "pytest", out_dir: Path | None = None) -> CompileReport
 
 compile_criterion(criterion: ParsedCriterion, surface: InterfaceSurface | None = None) -> dict
 ```
 
 `compile` is a pure function over corpus state at `repo_root` — no network
 access, no model calls, no side effects beyond writing the files it's
-asked to write. (Previously `compile(acceptance_md: Path, interface_md:
-Path, target: str = "pytest")`, taking two explicit file paths; updated
-for `D1`'s one-file-per-unit layout, where a component's `acceptance/`
-and `interface/` are directories at known paths given its id, not
-individual files to pass in by hand.)
+asked to write. `out_dir` (the CLI's `--out`) is where compiled test files are
+written, default `verification/<slug>/compiled/`.
 
 `compile_criterion` (`R-COMPILE-012`, `D59`) is the lower-level
 primitive `compile` itself uses for each criterion it finds — exposed

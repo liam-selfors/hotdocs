@@ -3,47 +3,45 @@ import json
 import provenance_writer
 
 
-def test_provenance_hit_writes_three_fields_verbatim_without_lookup(tmp_path):
+def test_provenance_hit_writes_report_and_scans_verbatim_without_lookup(tmp_path):
     repo_root = tmp_path
-
-    # Sanity check: no dependency scaffolding exists under repo_root at all.
-    # If this component performed its own lookup via any dependency's
-    # dynamic loader (gen/<dep>/<dep_module>.py), there is nothing here for
-    # it to find -- so a successful write below is proof no lookup happened.
-    assert list(repo_root.iterdir()) == []
+    component_id = "comp-prov-hit-sample"
+    slug = "prov-hit-sample"
 
     generation_result = {
-        "component_id": "comp-target-widget",
+        "component_id": component_id,
         "spec_bundle_hash": "sha256:" + "a" * 64,
         "model": "claude-sonnet-5",
         "prompt_version": "v1",
         "cache_hit": True,
-        "files": {"widget.py": "x = 1\n"},
+        "files": {"sample.py": "print('hello')\n"},
         "model_call_error": None,
         "refused": None,
         "retry_feedback": None,
     }
 
     verification_report = {
-        "component_id": "comp-target-widget",
+        "component_id": component_id,
         "criteria": [
             {
-                "id": "AC-WIDGET-001",
-                "covers": "R-WIDGET-001",
+                "id": "AC-PROV-HIT-001",
+                "covers": "R-PROV-HIT-001",
                 "kind": "compiled",
                 "result": "pass",
-            },
+            }
         ],
-        "requirement_results": {"R-WIDGET-001": "pass"},
+        "requirement_results": {"R-PROV-HIT-001": "pass"},
         "interface_drift": False,
         "mutation_score": 0.92,
         "overall": "pass",
     }
 
     license_scan_result = {
-        "component_id": "comp-target-widget",
-        "gate_version": "license_scanner@3.1.0",
-        "similarity_score": 0.1,
+        "component_id": component_id,
+        "gate_version": "license_scanner@4.0.3",
+        "evaluated": True,
+        "reason": None,
+        "similarity_score": 0.12,
         "block_threshold": 0.70,
         "blocked": False,
         "matches": [],
@@ -54,42 +52,51 @@ def test_provenance_hit_writes_three_fields_verbatim_without_lookup(tmp_path):
 
     secret_scan_result = {
         "scope": "full",
-        "gate_version": "secret_scanner@2.0.0",
+        "gate_version": "secret_scanner@3.0.0+detect-secrets.1.5.0",
         "flagged": False,
         "matches": [],
+        "allowed": [],
+        "unused_allowlist_entries": [],
         "notified": False,
         "notification_delivery_error": None,
         "cache_hit": True,
     }
 
+    gate_versions = {
+        "compiler": "1.0.0",
+        "license_scanner": "license_scanner@4.0.3",
+        "secret_scanner": "secret_scanner@3.0.0+detect-secrets.1.5.0",
+    }
+
     inputs = provenance_writer.ProvenanceInputs(
-        component_id="comp-target-widget",
+        component_id=component_id,
         generation_result=generation_result,
         verification_report=verification_report,
         license_scan_result=license_scan_result,
         secret_scan_result=secret_scan_result,
         provenance_hit=True,
         attempts=1,
-        gate_versions={"compiler": "1.0.0", "license_scanner": "k-gram@1.0.0"},
+        gate_versions=gate_versions,
     )
 
-    provenance_writer.write_provenance("comp-target-widget", inputs, repo_root)
+    # No gen/cache-manager, gen/verifier-orchestrator, gen/license-scanner,
+    # gen/secret-scanner, or gen/provenance-checker exists anywhere under
+    # repo_root: if write_provenance tried to look any of these three
+    # fields up itself, the dynamic dependency loader would find nothing
+    # and raise, rather than silently succeeding below.
+    provenance_writer.write_provenance(component_id, inputs, repo_root)
 
-    manifests = []
-    for path in repo_root.rglob("*.json"):
-        with open(path) as f:
-            data = json.load(f)
-        if isinstance(data, dict) and "provenance_hit" in data:
-            manifests.append(data)
+    gen_manifest_path = repo_root / "gen" / slug / ".provenance.json"
+    verif_manifest_path = repo_root / "verification" / slug / ".provenance.json"
 
-    # cli.md: "Manifest written to both required locations."
-    assert len(manifests) == 2
+    assert gen_manifest_path.is_file()
+    assert verif_manifest_path.is_file()
 
-    for manifest in manifests:
-        assert manifest["provenance_hit"] is True
-        # The three fields must be written verbatim -- byte-for-byte equal
-        # to what the caller supplied, with no lookup or transformation
-        # performed by this component itself.
+    gen_manifest = json.loads(gen_manifest_path.read_text())
+    verif_manifest = json.loads(verif_manifest_path.read_text())
+
+    for manifest in (gen_manifest, verif_manifest):
         assert manifest["verification_report"] == verification_report
         assert manifest["license_scan"] == license_scan_result
         assert manifest["secret_scan"] == secret_scan_result
+        assert manifest["provenance_hit"] is True

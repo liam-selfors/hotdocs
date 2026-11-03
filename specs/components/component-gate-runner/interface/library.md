@@ -12,8 +12,13 @@ run_component_gates(
 them (`R-GATE-002`, `R-GATE-010`). `retry_feedback` (`R-GATE-003`,
 `D3`) is passed through to `generator` unchanged, never derived here.
 
-Each dependency is loaded from `<repo_root>/gen/<slug>/`. On a
-non-sealed component, the calls are, in this order:
+Each dependency is loaded from `<repo_root>/gen/<slug>/`. The first
+call, for every component, is `provenance-checker`'s
+`current_sealed_key(component_id, repo_root)`: a non-`None` result means
+the component is sealed and only the sealed calls below are made
+(`D170`); `None` means every call in the next list, whose own first call
+is `current_provenance_key`. On a non-sealed component, the calls are,
+in this order:
 
 1. `provenance-checker`'s `current_provenance_key(component_id,
    repo_root)`, then `check_provenance(component_id,
@@ -44,8 +49,19 @@ The `test_author` closure calls `test-author`'s
 llm_backend=llm_backend)`. The `judge` closure calls `llm-endpoint`'s
 `complete(prompt, model, backend=llm_backend)` (`R-GATE-010`).
 
-A sealed component (`R-GATE-007`) makes only steps 4 and 5, both
-closures still passed to `verify`.
+A sealed component (`R-GATE-007`) makes exactly these calls, in this
+order, passing both closures to `verify`:
+
+1. `verifier-orchestrator`'s `verify(component_id, repo_root,
+   judge=<judge closure>, test_author=<test_author closure>)`
+2. `license-scanner`'s `scan(component_id, repo_root)`, then
+   `secret-scanner`'s `scan(repo_root)`
+3. `provenance-writer`'s `write_sealed_provenance(component_id,
+   inputs, repo_root)`, with `inputs` a plain dict `{component_id,
+   owners, source_path, source_hash, verifier_version,
+   verification_report}`: `owners`, `source_path`, `source_hash`, and
+   `verifier_version` are the `SealedKey`'s, `component_id` is the
+   argument, and `verification_report` is the report from call 1
 
 Each dependency module is loaded only when its first call is about to
 be made, never earlier — a path that never reaches a call never loads

@@ -345,3 +345,120 @@ def test_ac_verify_018_lettered_criterion_id_kept_exactly(repo_root):
     assert "AC-FOO-003B" not in ids
     get = lambda b, k: b.get(k) if isinstance(b, dict) else getattr(b, k)
     assert [get(b, "criterion_id") for b in calls] == ["AC-FOO-003b"]
+
+
+def _write_sealed_foo(repo_root, tests):
+    """D171 -- a sealed foo: code at pipeline/foo/, nothing under gen/foo/,
+    three generated-test criteria, and `tests` as verification/foo/test_foo.py."""
+    from conftest import FOO_COMPONENT_MD_TEMPLATE
+    import shutil
+
+    write_foo(repo_root)
+    shutil.rmtree(repo_root / "gen" / "foo")
+    comp = repo_root / "specs" / "components" / "foo"
+    for f in (comp / "acceptance").glob("*.md"):
+        f.unlink()
+    (comp / "component.md").write_text(
+        FOO_COMPONENT_MD_TEMPLATE.format(depends_on="")
+        .replace("realizes: [P-FOO]\n", "")
+        .replace("sealed: false", "sealed: true\nsource_path: pipeline/foo/"),
+        encoding="utf-8",
+    )
+    for n, r in (("001", "R-FOO-001"), ("002", "R-FOO-002"), ("003", "R-FOO-003")):
+        (comp / "acceptance" / f"AC-FOO-{n}.md").write_text(
+            acceptance_md(f"AC-FOO-{n}", r, "generated-test", "Given x\nWhen y\nThen z"), encoding="utf-8"
+        )
+    src = repo_root / "pipeline" / "foo"
+    src.mkdir(parents=True)
+    (src / "foo.py").write_text(
+        "from dataclasses import dataclass\n\n@dataclass\nclass Thing:\n    value: int\n\n"
+        "def do_the_thing(x):\n    return Thing(value=x + 1)\n",
+        encoding="utf-8",
+    )
+    vdir = repo_root / "verification" / "foo"
+    vdir.mkdir(parents=True)
+    (vdir / "test_foo.py").write_text(
+        "import sys\nfrom pathlib import Path\n"
+        "sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'pipeline' / 'foo'))\n"
+        "from foo import do_the_thing\n\n" + tests,
+        encoding="utf-8",
+    )
+
+
+SEALED_TESTS = (
+    "def test_ac_foo_001_returns_value():\n    assert do_the_thing(1).value == 2\n\n"
+    "def test_ac_foo_001_other():\n    assert do_the_thing(2).value == 3\n\n"
+    "def test_ac_foo_002_fails():\n    assert do_the_thing(1).value == 99\n\n"
+    "def test_ac_foo_0031_not_for_003():\n    assert True\n"
+)
+
+
+def test_ac_verify_019_sealed_component_verified_at_source_path(repo_root):
+    _write_sealed_foo(repo_root, SEALED_TESTS)
+    report = verify("comp-foo", repo_root)
+    by_id = {c["id"]: c for c in report.criteria}
+    assert by_id["AC-FOO-001"]["result"] == "pass"
+    assert by_id["AC-FOO-002"]["result"] == "fail"
+    assert "failure_detail" in by_id["AC-FOO-002"]
+    assert report.interface_drift is False
+    assert report.mutation_score is None
+    assert report.overall == "fail"
+    # 0031 must not count for AC-FOO-003; AC-FOO-003 has no test of its own.
+    assert by_id["AC-FOO-003"]["result"] == "fail"
+    assert by_id["AC-FOO-003"]["failure_detail"]["message"] == "no characterization test"
+
+
+def test_ac_verify_019_sealed_component_passes_and_ignores_manifest_and_pycache(repo_root):
+    tests = SEALED_TESTS.replace("== 99", "== 2") + (
+        "def test_ac_foo_003_ok():\n    assert do_the_thing(0).value == 1\n"
+    )
+    _write_sealed_foo(repo_root, tests)
+    (repo_root / "pipeline" / "foo" / ".sealed-provenance.json").write_text("{}", encoding="utf-8")
+    (repo_root / "pipeline" / "foo" / "__pycache__").mkdir()
+    (repo_root / "pipeline" / "foo" / "__pycache__" / "x.pyc").write_bytes(b"\x00\x01")
+    report = verify("comp-foo", repo_root)
+    assert [c["result"] for c in report.criteria] == ["pass", "pass", "pass"]
+    assert report.overall == "pass"
+
+
+def test_ac_verify_019_missing_source_path_is_a_hard_failure(repo_root):
+    import shutil
+
+    _write_sealed_foo(repo_root, SEALED_TESTS.replace("== 99", "== 2"))
+    shutil.rmtree(repo_root / "pipeline" / "foo")
+    assert verify("comp-foo", repo_root).overall == "fail"
+
+
+FOO_CODE_PINNED_SWAPS = '''def do_the_thing(x):
+    return x
+
+
+def g(a, b):
+    if a < b:
+        return 1
+    return 0
+
+
+def h(a, b):
+    return a // b
+
+
+def m(k, d):
+    return k in d
+'''
+
+
+def test_ac_verify_020_mutation_operator_swaps_are_pinned(repo_root):
+    # D172: exactly three mutation sites here (`<`, `//`, `in`), one killed by
+    # the cached test. A gate that drops `//` or `in` from its swap table, or
+    # pairs `<` differently, enumerates other sites and scores differently.
+    write_foo(repo_root, code=FOO_CODE_PINNED_SWAPS, extra_acceptance={"AC-FOO-002.md": GENTEST_AC})
+    gentest_dir = repo_root / "verification" / "foo" / "generated-test"
+    gentest_dir.mkdir(parents=True, exist_ok=True)
+    (gentest_dir / "test_ac_foo_002.py").write_text(
+        "import sys\nsys.path.insert(0, 'gen/foo')\nfrom foo import g\n\n"
+        "def test_g():\n    assert g(1, 2) == 1\n    assert g(2, 1) == 0\n",
+        encoding="utf-8",
+    )
+    report = verify("comp-foo", repo_root)
+    assert abs(report.mutation_score - 1 / 3) < 1e-9

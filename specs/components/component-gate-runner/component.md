@@ -38,7 +38,8 @@ and `judge` closures (`R-GATE-002`, `R-GATE-003`, `R-GATE-010`);
 reporting a block and why (`R-GATE-004`); running both scans
 (`R-GATE-005`); recording the attempt and, when a candidate was
 produced, its provenance (`R-GATE-008`, `R-GATE-006`); routing a sealed
-component straight to re-verification (`R-GATE-007`); and the
+component straight to re-verification and recording its sealed
+provenance (`R-GATE-007`); and the
 `hotdocs generate` CLI (`R-GATE-009`).
 
 **Out of scope:** deciding merge readiness — `provenance-tracker`'s
@@ -74,9 +75,7 @@ See `constraints.md`.
 
 ## Open questions
 
-- A sealed component never receives a `.provenance.json` here
-  (`R-GATE-007`), so `provenance-tracker`'s whole-corpus check reports
-  it not ready indefinitely. Recorded in `D166`, not yet resolved.
+None.
 
 ## Change log
 
@@ -89,3 +88,7 @@ See `constraints.md`.
   `block_reason` in the result, the exact dependency call list, the
   judge contract (`R-GATE-010`), CLI coverage (`R-GATE-009`).
   Cold-generated and landed at 13/13, `mutation_score` 0.88.
+- `D170`: a sealed component now ends with a sealed provenance
+  manifest written through `provenance-writer` (`R-GATE-007`);
+  sealedness comes from `provenance-checker`'s `current_sealed_key`.
+  Regenerated and landed at 13/13, `mutation_score` 0.94.

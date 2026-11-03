@@ -114,3 +114,31 @@ rather than leaving it to recur a fourth time.
 Blast radius checked (`D99`): `corpus-graph-builder` is the only
 already-built dependent; its own suite (8/8) passes unchanged.
 `component-gate-runner` is also a dependent but not yet built.
+
+## `D170`/`D173`: the sealed provenance manifest
+
+Regenerated to add `write_sealed_provenance` and the `SealedProvenance`
+schema it owns (`R-PROV-018`/`019`): a sealed component's own provenance
+file, defining its ownership. Eight rounds, landing at 20 of 20
+criteria, `mutation_score=0.87`. The sealed requirements themselves
+passed on the first round; the rest were gaps the new code exposed:
+
+- Two older criteria let test authors guess. `AC-PROV-014`'s test
+  found manifests with `glob("*.provenance.json")`, which never matches
+  a hidden `.provenance.json` (and the same glob then broke
+  `AC-PROV-004`, so the rule moved into `interface/library.md`).
+  `AC-PROV-015` named no missing field, and my first fix called a null
+  `verification_report` optional, which was wrong: the data document
+  makes it null only when nothing was generated, so a null report beside
+  generated files is missing input.
+- `interface/cli.md` never said what `main` receives. The dispatcher
+  keeps these verb words, so it is `["provenance", "write", ...]`.
+- Two rounds were lost to the model backend's usage limit, not the spec.
+- With every criterion passing, mutation testing scored 0.67: the sealed
+  validator's per-field type checks and older uncovered behavior
+  (rewriting an existing manifest, the `--repo-root <dir>` form, an
+  object with a method) had no tests. `AC-PROV-020`/`021` and extensions
+  of `AC-PROV-015`/`016` cover them, and the criteria-entry `result`
+  rule is now stated.
+
+56 of 56 tests pass in this directory.

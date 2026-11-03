@@ -7,6 +7,8 @@ Every scenario in this component's criteria builds a repo_root with
 `specs/components/foo/component.md` (id `comp-foo`) and a faked module
 under `gen/<slug>/` for each dependency `interface/library.md` lists,
 each appending one line per call to a shared invocation log file.
+Every faked provenance-checker also defines `current_sealed_key`,
+returning `None` unless a scenario says otherwise.
 
 ```gherkin
 Given a faked provenance-checker whose current_provenance_key returns

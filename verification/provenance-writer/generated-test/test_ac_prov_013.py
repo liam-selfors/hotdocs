@@ -3,108 +3,91 @@ import json
 import provenance_writer
 
 
-def _build_generation_result():
-    return {
+def _make_inputs():
+    generation_result = {
         "component_id": "comp-foo",
         "spec_bundle_hash": "sha256:" + "0" * 64,
         "model": "claude-sonnet-5",
         "prompt_version": "v1",
         "cache_hit": False,
-        "files": {"spec_linter.py": "# generated content"},
+        "files": {},
         "model_call_error": None,
-        "refused": None,
+        "refused": "sealed-component",
         "retry_feedback": None,
     }
-
-
-def _build_verification_report():
-    return {
+    license_scan_result = {
         "component_id": "comp-foo",
-        "criteria": [
-            {"id": "AC-FOO-001", "covers": "R-FOO-001", "kind": "compiled", "result": "pass"},
-        ],
-        "requirement_results": {"R-FOO-001": "pass"},
-        "interface_drift": False,
-        "mutation_score": 1.0,
-        "overall": "pass",
-    }
-
-
-def _build_license_scan_result():
-    return {
-        "component_id": "comp-foo",
-        "gate_version": "license_scanner@3.1.0",
-        "similarity_score": 0.0,
-        "block_threshold": 0.70,
+        "gate_version": "license_scanner@4.0.0-no-reference-corpus",
+        "evaluated": False,
+        "reason": "no-reference-corpus",
+        "similarity_score": None,
+        "block_threshold": None,
         "blocked": False,
         "matches": [],
         "notified": False,
         "notification_delivery_error": None,
         "cache_hit": False,
     }
-
-
-def _build_secret_scan_result():
-    return {
+    secret_scan_result = {
         "scope": "full",
-        "gate_version": "secret_scanner@2.0.0",
+        "gate_version": "secret_scanner@3.0.0+detect-secrets.1.5.0",
         "flagged": False,
         "matches": [],
+        "allowed": [],
+        "unused_allowlist_entries": [],
         "notified": False,
         "notification_delivery_error": None,
         "cache_hit": False,
     }
-
-
-def _build_inputs():
     return provenance_writer.ProvenanceInputs(
         component_id="comp-foo",
-        generation_result=_build_generation_result(),
-        verification_report=_build_verification_report(),
-        license_scan_result=_build_license_scan_result(),
-        secret_scan_result=_build_secret_scan_result(),
+        generation_result=generation_result,
+        verification_report=None,
+        license_scan_result=license_scan_result,
+        secret_scan_result=secret_scan_result,
         provenance_hit=False,
         attempts=2,
         gate_versions={"compiler": "1.0.0", "license_scanner": "k-gram@1.0.0"},
     )
 
 
-def _collect_manifests(repo_root):
-    manifests = []
-    for path in repo_root.rglob(".provenance.json"):
-        with open(path, "r", encoding="utf-8") as f:
-            manifests.append(json.load(f))
-    return manifests
+def _read_manifest(repo_root):
+    manifest_path = repo_root / "gen" / "foo" / ".provenance.json"
+    with open(manifest_path, "r", encoding="utf-8") as f:
+        return json.load(f)
 
 
-def test_verification_run_id_is_slug_attempt_construction(tmp_path):
+def _get(obj, key, default=None):
+    if isinstance(obj, dict):
+        return obj.get(key, default)
+    return getattr(obj, key, default)
+
+
+def test_verification_run_id_matches_slug_attempt_formula(tmp_path):
     repo_root = tmp_path / "repo1"
     repo_root.mkdir()
 
-    inputs = _build_inputs()
+    provenance_writer.write_provenance("comp-foo", _make_inputs(), repo_root)
 
-    provenance_writer.write_provenance("comp-foo", inputs, repo_root)
-
-    manifests = _collect_manifests(repo_root)
-    assert len(manifests) == 2
-
-    run_ids = {m["verification_run_id"] for m in manifests}
-    assert run_ids == {"foo-attempt-2"}
+    manifest = _read_manifest(repo_root)
+    assert _get(manifest, "verification_run_id") == "foo-attempt-2"
 
 
-def test_verification_run_id_identical_across_repeated_runs(tmp_path):
+def test_verification_run_id_is_deterministic_across_runs(tmp_path):
     repo_root_a = tmp_path / "repo_a"
     repo_root_a.mkdir()
     repo_root_b = tmp_path / "repo_b"
     repo_root_b.mkdir()
 
-    inputs = _build_inputs()
+    inputs = _make_inputs()
 
     provenance_writer.write_provenance("comp-foo", inputs, repo_root_a)
     provenance_writer.write_provenance("comp-foo", inputs, repo_root_b)
 
-    run_ids_a = {m["verification_run_id"] for m in _collect_manifests(repo_root_a)}
-    run_ids_b = {m["verification_run_id"] for m in _collect_manifests(repo_root_b)}
+    manifest_a = _read_manifest(repo_root_a)
+    manifest_b = _read_manifest(repo_root_b)
 
-    assert len(run_ids_a) == 1
-    assert run_ids_a == run_ids_b
+    run_id_a = _get(manifest_a, "verification_run_id")
+    run_id_b = _get(manifest_b, "verification_run_id")
+
+    assert run_id_a == run_id_b == "foo-attempt-2"

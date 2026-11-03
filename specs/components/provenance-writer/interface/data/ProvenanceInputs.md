@@ -20,7 +20,9 @@ than propagated further.** `generation_result` is always populated —
 more than one populated, per that type's own contract) already carry
 whether a candidate exists at all. `verification_report` is `null`
 whenever `generation_result.files` is empty (nothing was ever produced to
-verify) and populated otherwise — this mirrors `ComponentPipelineResult`'s
+verify) and populated otherwise; a `null` report alongside non-empty `files` is
+a missing upstream result, so `write_provenance` raises `MissingInputError`
+(`R-PROV-014`'s `inputs` shapes apply), never writing a manifest for it — this mirrors `ComponentPipelineResult`'s
 own `model_call_error`/`verification` split (`component-gate-runner`'s
 `R-GATE-004`), so
 `provenance-writer` can write a coherent manifest for a component that

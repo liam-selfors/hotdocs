@@ -5,13 +5,6 @@
   a JSON-encoded `ProvenanceInputs` from stdin. Exit `0` once
   `write_provenance` succeeds; exit `1` on `MissingInputError` (a
   required upstream result was absent); exit `2` on any usage error —
-  wrong/missing positional arguments, an unrecognized `--` flag, or
-  malformed JSON on stdin.
-
-  Found via mutation testing, not a behavioral test failure (`D130`):
-  every acceptance criterion exercises `write_provenance`/
-  `build_manifest` directly as a library call, none through `main()`
-  itself — `interface/cli.md` documents the CLI but, until now, no
-  requirement or acceptance criterion ever covered it, leaving its
-  argument-parsing and exit-code branches permanently unexercised
-  regardless of candidate quality.
+  wrong/missing positional arguments, an unrecognized `--` flag, a
+  `--repo-root` with no value, or malformed JSON on stdin. Found by
+  mutation testing, since no criterion had covered the CLI (`D130`).

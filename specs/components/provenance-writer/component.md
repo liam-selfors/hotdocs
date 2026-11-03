@@ -5,6 +5,7 @@ status: draft
 owners: [pipeline-team]
 depends_on: [comp-generator, comp-verifier-orchestrator, comp-license-scanner, comp-secret-scanner, comp-cache-manager]
 realizes: [P-ZERO-EDIT, P-COMPLIANCE-GATE]
+model_pin: claude-sonnet-5
 sealed: false
 ---
 
@@ -21,7 +22,9 @@ collects, never invents.
 
 **In scope:** collecting each dependency's reported output into the one
 canonical schema; writing it to both required locations; the
-provenance-hit copy-forward behavior.
+provenance-hit copy-forward behavior. Also the sealed
+counterpart: writing a sealed component's ownership and verification
+manifest (`R-PROV-018`/`019`), whose schema this component owns.
 
 **Out of scope:** deciding *whether* a component's result is a
 provenance hit (`provenance-checker`/`component-gate-runner` already
@@ -98,3 +101,6 @@ None.
   `interface/data/` type (`cache-manager`'s `CachedResult`,
   `license-scanner`'s `LicenseScanResult`). Full account in
   `BOOTSTRAP.md`.
+- `D170`: `write_sealed_provenance` and the `SealedProvenance` schema
+  (`R-PROV-018`/`019`): a sealed component's own provenance file.
+  Regenerated and landed at 20/20, `mutation_score` 0.87.

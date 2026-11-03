@@ -4,6 +4,14 @@
 hotdocs provenance write <component-id> [--repo-root=<dir>]
 ```
 
+`main(argv)` receives `argv` beginning exactly `["provenance", "write",
+<component-id>, ...]`, the verb words kept (`D184`'s dispatcher strips
+none). `argv` not beginning `["provenance", "write"]` is a usage error.
+`--repo-root` defaults to the current directory and takes its value as
+`--repo-root=<dir>` or as the next argument; `--repo-root` given last with
+no value, any other `--` flag, or a second positional argument is a usage
+error.
+
 **Exit codes:**
 
 | Code | Meaning |

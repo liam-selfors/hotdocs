@@ -16,6 +16,8 @@
 }
 ```
 
+`mutation_score` is `null` for a sealed component (`R-VERIFY-017`).
+
 `result` is one of `pass` / `fail` / `skipped` — mirroring `spec-linter`'s
 `severity` vocabulary (R-LINT-015's schema addition) rather than inventing a
 second one for the same concept. `test_authoring` is present only on

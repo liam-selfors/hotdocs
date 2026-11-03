@@ -79,20 +79,18 @@ established for `judge`.
 ## Change log
 
 - Initial draft.
-- `D27`: added `failure_detail` (`R-VERIFY-012`) to `criteria[]` for
-  `compiled`/`generated-test` failures, mirroring `llm-judge`'s
-  `rationale`.
-- `D84`: `R-VERIFY-004` — interface drift is one-directional.
-- `D85`: `R-VERIFY-012` — `failure_detail.expected`/`.actual` keep
-  their original Python type.
-- `D119`: `R-VERIFY-009` — pass exactly the `CriterionBundle`
-  `spec-bundle-assembler` produces; `depends_on` gains it.
-- `D120`: `R-VERIFY-013` — cache loaded modules by `(repo_root,
-  module_name)`. New `AC-VERIFY-014`.
-- `D124`: `R-VERIFY-006` — `mutation_score` is a union across all of a
-  component's `generated-test` criteria, never a per-criterion average.
-  New `AC-VERIFY-015`.
-- `D158`: `R-VERIFY-014` — every test run gets a timeout; a timed-out
-  mutant counts as killed. New `AC-VERIFY-016`.
+- `D27`–`D124`: `failure_detail` on failing criteria (`R-VERIFY-012`);
+  one-directional interface drift (`R-VERIFY-004`); the exact
+  `CriterionBundle` (`R-VERIFY-009`); modules cached per `repo_root`
+  (`R-VERIFY-013`); `mutation_score` a union (`R-VERIFY-006`).
+- `D158`: `R-VERIFY-014` — every test run times out; a timed-out mutant
+  counts as killed.
 - `D163`: `R-VERIFY-015` exposes `GATE_VERSION`; `R-VERIFY-016` keeps
   a lettered criterion id (`AC-FOO-003b`) exactly as written.
+- `D171`: `R-VERIFY-017` — sealed components are verified at
+  `source_path` by their characterization tests; `verify` had no
+  sealed support before. New `AC-VERIFY-019`.
+- `D172`: `R-VERIFY-006` pins the exact operator swaps; a
+  regeneration had silently changed the mutation bar.
+- `D190`: CLI renamed `hotdocs verify-component` (`R-VERIFY-018`);
+  `verify` returns an object, not a dict.

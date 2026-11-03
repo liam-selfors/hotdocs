@@ -14,8 +14,8 @@ title: Foo
 status: draft
 owners: [test-team]
 depends_on: [{depends_on}]
-sealed: true
-source_path: fixtures/foo.py
+realizes: [P-FOO]
+sealed: false
 ---
 
 # Foo
@@ -73,6 +73,35 @@ _BASELINE_ACCEPTANCE = {
         "```gherkin\nGiven the component\nWhen read\nThen it reads well\n```\n",
 }
 
+FOO_PRODUCT_MD = """---
+id: P-FOO
+title: Foo capability
+status: draft
+owners: [test-team]
+---
+
+# Foo capability
+
+## Purpose
+
+A minimal capability for the verifier's fixture component to realize.
+
+## Scope
+
+Fixture only.
+
+## Capability scenario
+
+### CS-FOO-001
+Covers: P-FOO
+Kind: generated-test
+
+```gherkin
+Given a fixture
+When it is verified
+Then it passes
+```
+"""
 FOO_LIBRARY_MD = "# Library\n\n```\ndo_the_thing(x) -> Thing\n```\n"
 
 FOO_R001 = "# R-FOO-001\n\n**R-FOO-001** — Foo MUST add one to its input.\n"
@@ -141,6 +170,9 @@ def write_foo(
     (comp_dir / "acceptance").mkdir(parents=True, exist_ok=True)
     component_md = FOO_COMPONENT_MD_TEMPLATE.format(depends_on=", ".join(depends_on or []))
     (comp_dir / "component.md").write_text(component_md, encoding="utf-8")
+    product_dir = repo_root / "specs" / "product"
+    product_dir.mkdir(parents=True, exist_ok=True)
+    (product_dir / "foo.md").write_text(FOO_PRODUCT_MD, encoding="utf-8")
     (comp_dir / "interface" / "library.md").write_text(FOO_LIBRARY_MD, encoding="utf-8")
     (comp_dir / "requirements" / "R-FOO-001.md").write_text(FOO_R001, encoding="utf-8")
     (comp_dir / "requirements" / "R-FOO-002.md").write_text(FOO_R002, encoding="utf-8")

@@ -657,6 +657,17 @@ secret_scan         result (secret-scanner) — missing from an earlier draft
 This is the evidence trail for incident debugging (is this a spec bug or a
 generation bug?) and doubles as an SBOM/SLSA-style attestation.
 
+A **sealed** component (§8) has no generation to record, so it carries a
+different file instead, `.sealed-provenance.json` at its `source_path`
+(`D170`). It names the component's `owners`, a hash of the source files
+it describes, the verifier version, and the outcome of the
+characterization-test run against exactly that source. It is validated
+field by field and fails closed: a manifest that is missing, malformed,
+for different source, or for different owners is no evidence at all, so
+the component is not ready until `hotdocs generate` re-runs its
+characterization tests and rewrites it. Its schema is
+`provenance-writer`'s `interface/data/SealedProvenance.md`.
+
 Before designing any new mechanism to record or prove a fact happened,
 check whether this manifest (or the commit ledger it rides on) already
 carries it — see `notes/audit-before-you-build.md`.
@@ -672,7 +683,9 @@ The component's spec says only "matches existing behavior; do not
 regenerate." Its code lives at `source_path`, **MUST NOT** be under `gen/`.
 Exempt from `realizes` and the cold-regen invariant. **MUST** have
 characterization tests in `verification/<component>/` the normal way —
-wrapping legacy code in traceability doesn't require rewriting it.
+wrapping legacy code in traceability doesn't require rewriting it. Its
+ownership and its last verification are recorded in a sealed provenance
+manifest at `source_path` (§7).
 
 **Pinned overrides** (file granularity). Declared in
 `gen/<component>/.overrides.json` — exempted file paths, rationale, owner.
