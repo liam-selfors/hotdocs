@@ -1,0 +1,3 @@
+# R-INIT-007
+
+**R-INIT-007** — `main` MUST implement `interface/cli.md` exactly. Its usage errors, all exit `2` before anything is written, are: an unknown flag, a flag given last with no value, a second positional argument, a `--provider` that is not a key of `PROVIDERS` (the message lists the keys), an `--api-key-env` that is not a valid environment-variable name (letters, digits, `_`, not starting with a digit; the message does not repeat the value, so a key pasted by mistake is never echoed or stored), `--base-url` or `--api-key-env` with `claude-cli`, a `--provider` whose `suggested_model` is empty given without `--model`, and one with `needs_base_url` given without `--base-url` (`D162`).

@@ -26,3 +26,8 @@ __pycache__/
 # deployed to a docs host, never committed. Found missing from this file
 # entirely while building this component's own test suite (D71).
 /dist/
+
+# Packaging output from `pip install -e` (pyproject.toml): setuptools writes
+# `tools/hotdocs.egg-info/` and may leave `build/`; never committed.
+*.egg-info/
+/build/

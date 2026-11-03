@@ -1,0 +1,3 @@
+# R-CLI-002
+
+**R-CLI-002** — For every row but `init`, the repo root MUST be taken from `--repo-root` (as `--repo-root=<v>` or `--repo-root <v>`) among the arguments after the verb words, else the current directory, and used absolute to locate the component. When the argument is absent, `--repo-root=<root>` MUST be appended to the forwarded tokens; when present, the tokens are forwarded unchanged. While the component runs, `VAR_HOTDOCS_CONFIG` MUST be set to `<repo root>/hotdocs.toml` if that file exists and the variable is unset, and restored afterwards, since `llm-endpoint` otherwise looks for its configuration in the current directory, which is not necessarily the project.

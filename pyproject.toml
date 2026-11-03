@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "hotdocs"
+version = "0.1.0"
+description = "Spec-driven agentic development: specs in, verified code out."
+requires-python = ">=3.10"
+dependencies = [
+    "detect-secrets==1.5.0",
+    "duckdb==2.0.0",
+    "pytest>=8",
+    "pytz",
+]
+
+[project.scripts]
+hotdocs = "hotdocs_entry:main"
+
+# The tool's components live in the hyphenated directories under gen/ and
+# pipeline/; they are DATA found by path (and copied into a project by
+# `hotdocs init`), not importable packages. Only the tiny entry module is.
+[tool.setuptools]
+py-modules = ["hotdocs_entry"]
+
+[tool.setuptools.package-dir]
+"" = "tools"
