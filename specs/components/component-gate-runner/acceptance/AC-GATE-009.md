@@ -17,9 +17,17 @@ When main(["generate", "comp-foo", "--model", "m", "--repo-root",
   "<repo_root>", "--format", "text"]) runs
 Then it returns 0 and prints text containing "comp-foo" and "passed"
 
-Given a faked generator returning a model_call_error
+Given a faked generator returning model_call_error {"category":
+  "empty_response", "message": "no files"}
 When main runs generate for comp-foo with --model=m
-Then it returns 1
+Then it returns 1 and prints text containing
+  "model_call_error: empty_response: no files"
+
+Given a faked license scan with evaluated false and reason
+  "no-reference-corpus"
+When main runs generate for comp-foo with --model=m
+Then it prints text containing
+  "license_scan not evaluated: no-reference-corpus"
 
 Given no --model, or the component id "comp-nope" with no spec
   directory, or --seed=x, or --format=bogus, or an unknown argument,

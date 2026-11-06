@@ -21,10 +21,16 @@ next argument.
 - `--retry-feedback` — comma-separated `R-id`s, passed to
   `run_component_gates` as a list; omitted means `None`.
 - `--repo-root` — default the current directory.
-- `--format` — `json` prints the `ComponentPipelineResult` as JSON;
+- `--format` — `json` prints the `ComponentPipelineResult` as JSON,
+  converting each nested value recursively: an object with `to_dict()`
+  through it, a dataclass via `dataclasses.asdict`, any other object
+  via `vars()`;
   `text` (default) prints the component id, `provenance hit` or the
   `block_reason` (`passed` when not blocked), and each scan's
-  `blocked`/`flagged`.
+  `blocked`/`flagged`; then `model_call_error: <category>: <message>`
+  when one is set, and `license_scan not evaluated: <reason>` when the
+  license scan's `evaluated` is false (read with dual dict-or-attribute
+  access).
 
 **Exit codes:**
 

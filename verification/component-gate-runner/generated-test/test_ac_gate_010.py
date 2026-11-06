@@ -1,25 +1,26 @@
 import json
+import os
 
 import pytest
 
-import component_gate_runner
+
+def _get(obj, key, default=None):
+    if isinstance(obj, dict):
+        return obj.get(key, default)
+    return getattr(obj, key, default)
 
 
-def _read_jsonl(path):
-    if not path.exists():
-        return []
-    return [
-        json.loads(line)
-        for line in path.read_text(encoding="utf-8").splitlines()
-        if line.strip()
-    ]
-
-
-_PROVENANCE_CHECKER = '''
-class ProvenanceKey:
-    def __init__(self, spec_bundle_hash, gate_versions):
-        self.spec_bundle_hash = spec_bundle_hash
-        self.gate_versions = gate_versions
+_PROVENANCE_CHECKER_SRC = r"""
+class _Key:
+    def __init__(self):
+        self.spec_bundle_hash = "sha256:" + "0" * 64
+        self.gate_versions = {
+            "compiler": "criterion-compiler@1.0.0",
+            "generated_test": "generated_test@1.0.0",
+            "verifier": "verifier-orchestrator@2.0.0",
+            "license_scanner": "license_scanner@1.0.0",
+            "secret_scanner": "secret_scanner@1.0.0",
+        }
 
 
 def current_sealed_key(component_id, repo_root):
@@ -27,16 +28,7 @@ def current_sealed_key(component_id, repo_root):
 
 
 def current_provenance_key(component_id, repo_root):
-    return ProvenanceKey(
-        spec_bundle_hash="sha256:" + "0" * 64,
-        gate_versions={
-            "compiler": "criterion-compiler@1.0.0",
-            "generated_test": "generated_test@1.0.0",
-            "verifier": "verifier-orchestrator@2.0.0",
-            "license_scanner": "license_scanner@3.1.0",
-            "secret_scanner": "secret_scanner@0.0.0",
-        },
-    )
+    return _Key()
 
 
 def check_provenance(component_id, spec_bundle_hash, gate_versions, repo_root):
@@ -46,58 +38,45 @@ def check_provenance(component_id, spec_bundle_hash, gate_versions, repo_root):
         "license_scan": None,
         "secret_scan": None,
     }
-'''
+"""
 
-
-_SPEC_BUNDLE_ASSEMBLER = '''
+_SPEC_BUNDLE_ASSEMBLER_SRC = r"""
 def assemble(component_id, repo_root, mode="cold"):
     return {
         "component_id": component_id,
         "spec_bundle_hash": "sha256:" + "0" * 64,
-        "spec": "fixture spec text",
-        "interface": "fixture interface text",
+        "spec": "spec text",
+        "interface": "iface text",
         "constraints": "",
         "dependency_interfaces": {},
         "dependency_context": {},
         "dependency_usage": {},
         "vars": {},
-        "glossary": "",
+        "glossary": "glossary text",
         "hint_code": None,
     }
-'''
+"""
 
-
-_GENERATOR = '''
+_GENERATOR_SRC = r"""
 def generate(bundle, model, retry_feedback=None, *, repo_root=None, llm_backend=None):
-    if isinstance(bundle, dict):
-        component_id = bundle["component_id"]
-        spec_bundle_hash = bundle["spec_bundle_hash"]
-    else:
-        component_id = bundle.component_id
-        spec_bundle_hash = bundle.spec_bundle_hash
     return {
-        "component_id": component_id,
-        "spec_bundle_hash": spec_bundle_hash,
+        "component_id": "comp-foo",
+        "spec_bundle_hash": "sha256:" + "0" * 64,
         "model": model,
         "prompt_version": "v1",
         "cache_hit": False,
-        "files": {"foo.py": "MARKER_SOURCE\\n"},
+        "files": {"foo.py": "MARKER_SOURCE\n"},
         "model_call_error": None,
         "refused": None,
         "retry_feedback": retry_feedback,
     }
-'''
+"""
 
-
-_VERIFIER_ORCHESTRATOR = '''
+_VERIFIER_ORCHESTRATOR_SRC = r"""
 import json
 import os
 
-
-def _get(obj, key, default=None):
-    if isinstance(obj, dict):
-        return obj.get(key, default)
-    return getattr(obj, key, default)
+GATE_VERSION = "verifier-orchestrator@2.0.0"
 
 
 def verify(component_id, repo_root, judge=None, test_author=None):
@@ -110,19 +89,20 @@ def verify(component_id, repo_root, judge=None, test_author=None):
         "interface": "MARKER_IFACE",
         "glossary": "",
     }
+
     outcome = judge(bundle)
 
-    log_path = os.environ.get("HOTDOCS_TEST_JUDGE_LOG")
-    if log_path:
-        record = {
-            "result": _get(outcome, "result"),
-            "rationale": _get(outcome, "rationale"),
-        }
-        with open(log_path, "a", encoding="utf-8") as f:
-            f.write(json.dumps(record) + "\\n")
+    if isinstance(outcome, dict):
+        result = outcome.get("result")
+        rationale = outcome.get("rationale")
+    else:
+        result = getattr(outcome, "result", None)
+        rationale = getattr(outcome, "rationale", None)
 
-    result = _get(outcome, "result")
-    criterion_result = "pass" if result == "pass" else "fail"
+    with open(os.environ["JUDGE_RECORD_PATH"], "w", encoding="utf-8") as f:
+        json.dump({"result": result, "rationale": rationale}, f)
+
+    criterion_result = result if result in ("pass", "fail") else "fail"
 
     return {
         "component_id": component_id,
@@ -132,7 +112,7 @@ def verify(component_id, repo_root, judge=None, test_author=None):
                 "covers": "R-FOO-001",
                 "kind": "llm-judge",
                 "result": criterion_result,
-                "rationale": _get(outcome, "rationale"),
+                "rationale": rationale,
             }
         ],
         "requirement_results": {"R-FOO-001": criterion_result},
@@ -140,14 +120,13 @@ def verify(component_id, repo_root, judge=None, test_author=None):
         "mutation_score": None,
         "overall": criterion_result,
     }
-'''
+"""
 
-
-_LICENSE_SCANNER = '''
+_LICENSE_SCANNER_SRC = r"""
 def scan(component_id, repo_root):
     return {
         "component_id": component_id,
-        "gate_version": "license_scanner@4.0.0",
+        "gate_version": "license_scanner@1.0.0",
         "evaluated": False,
         "reason": "no-reference-corpus",
         "similarity_score": None,
@@ -161,15 +140,14 @@ def scan(component_id, repo_root):
 
 
 def gate_version(repo_root):
-    return "license_scanner@4.0.0"
-'''
+    return "license_scanner@1.0.0"
+"""
 
-
-_SECRET_SCANNER = '''
+_SECRET_SCANNER_SRC = r"""
 def scan(repo_root):
     return {
         "scope": "full",
-        "gate_version": "secret_scanner@3.0.0",
+        "gate_version": "secret_scanner@1.0.0",
         "flagged": False,
         "matches": [],
         "allowed": [],
@@ -181,11 +159,10 @@ def scan(repo_root):
 
 
 def gate_version(repo_root):
-    return "secret_scanner@3.0.0"
-'''
+    return "secret_scanner@1.0.0"
+"""
 
-
-_PROVENANCE_TRACKER = '''
+_PROVENANCE_TRACKER_SRC = r"""
 from pathlib import Path
 
 
@@ -194,47 +171,47 @@ def write_attempt_record(component_id, generation_result, verification_report, s
     attempts_dir = Path(repo_root) / ".hotdocs" / "attempts" / slug
     attempts_dir.mkdir(parents=True, exist_ok=True)
     (attempts_dir / "attempt-0001.json").write_text("{}", encoding="utf-8")
+
     return {
-        "attempt_id": "2026-01-01T00:00:00Z-abc123",
+        "attempt_id": "2026-01-01T00:00:00Z-aaaaaa",
         "component_id": component_id,
         "timestamp": "2026-01-01T00:00:00Z",
         "spec_bundle_hash": spec_bundle_hash,
-        "generation": generation_result,
-        "verification": verification_report,
+        "generation": generation_result if isinstance(generation_result, dict) else {},
+        "verification": verification_report if isinstance(verification_report, dict) else None,
     }
-'''
+"""
 
-
-_PROVENANCE_WRITER = '''
+_PROVENANCE_WRITER_SRC = r"""
 def write_provenance(component_id, inputs, repo_root):
     return None
 
 
 def write_sealed_provenance(component_id, inputs, repo_root):
     return None
-'''
+"""
 
-
-_LLM_ENDPOINT = '''
+_LLM_ENDPOINT_SRC = r"""
 import json
 import os
 
 
 def complete(prompt, model, *, backend=None, **params):
-    log_path = os.environ.get("HOTDOCS_TEST_COMPLETE_LOG")
-    if log_path:
-        with open(log_path, "a", encoding="utf-8") as f:
-            f.write(json.dumps({"prompt": prompt, "model": model}) + "\\n")
+    log_path = os.environ["LLM_CALL_LOG"]
+    with open(log_path, "a", encoding="utf-8") as f:
+        f.write(prompt)
+        f.write("\n===CALL-END===\n")
 
-    mode = os.environ.get("HOTDOCS_TEST_COMPLETE_MODE", "pass_fenced")
+    mode = os.environ.get("LLM_RESPONSE_MODE", "ok")
 
     if mode == "model_call_error":
         return {
             "text": None,
             "model": model,
             "backend": "mock",
-            "model_call_error": {"category": "network", "message": "simulated failure"},
+            "model_call_error": {"category": "network", "message": "boom"},
         }
+
     if mode == "not_json":
         return {
             "text": "not json",
@@ -242,79 +219,96 @@ def complete(prompt, model, *, backend=None, **params):
             "backend": "mock",
             "model_call_error": None,
         }
+
     if mode == "bad_result":
         return {
-            "text": \'```json\\n{"result": "maybe"}\\n```\',
+            "text": json.dumps({"result": "maybe"}),
             "model": model,
             "backend": "mock",
             "model_call_error": None,
         }
 
     return {
-        "text": \'```json\\n{"result": "pass", "rationale": "ok"}\\n```\',
+        "text": "```json\n" + json.dumps({"result": "pass", "rationale": "ok"}) + "\n```",
         "model": model,
         "backend": "mock",
         "model_call_error": None,
     }
-'''
+"""
 
 
-def _write_module(repo_root, slug, module_name, source):
-    mod_dir = repo_root / "gen" / slug
-    mod_dir.mkdir(parents=True, exist_ok=True)
-    (mod_dir / f"{module_name}.py").write_text(source, encoding="utf-8")
+def _write_dependency(repo_root, slug_dir, module_name, content):
+    path = repo_root / "gen" / slug_dir / (module_name + ".py")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(content, encoding="utf-8")
 
 
-def _setup_repo(tmp_path):
-    repo_root = tmp_path / "repo"
-    foo_dir = repo_root / "gen" / "foo"
-    foo_dir.mkdir(parents=True)
-    (foo_dir / "foo.py").write_text("MARKER_SOURCE\n", encoding="utf-8")
+def _setup_repo(tmp_path, response_mode):
+    repo_root = tmp_path
+    call_log = repo_root / "llm_calls.log"
+    record_path = repo_root / "judge_outcome.json"
 
-    _write_module(repo_root, "provenance-checker", "provenance_checker", _PROVENANCE_CHECKER)
-    _write_module(repo_root, "spec-bundle-assembler", "spec_bundle_assembler", _SPEC_BUNDLE_ASSEMBLER)
-    _write_module(repo_root, "generator", "generator", _GENERATOR)
-    _write_module(repo_root, "verifier-orchestrator", "verifier_orchestrator", _VERIFIER_ORCHESTRATOR)
-    _write_module(repo_root, "license-scanner", "license_scanner", _LICENSE_SCANNER)
-    _write_module(repo_root, "secret-scanner", "secret_scanner", _SECRET_SCANNER)
-    _write_module(repo_root, "provenance-tracker", "provenance_tracker", _PROVENANCE_TRACKER)
-    _write_module(repo_root, "provenance-writer", "provenance_writer", _PROVENANCE_WRITER)
-    _write_module(repo_root, "llm-endpoint", "llm_endpoint", _LLM_ENDPOINT)
-    return repo_root
+    os.environ["LLM_CALL_LOG"] = str(call_log)
+    os.environ["LLM_RESPONSE_MODE"] = response_mode
+    os.environ["JUDGE_RECORD_PATH"] = str(record_path)
 
+    (repo_root / "gen" / "foo").mkdir(parents=True)
+    (repo_root / "gen" / "foo" / "foo.py").write_text("MARKER_SOURCE\n", encoding="utf-8")
 
-def _run_pipeline(tmp_path, monkeypatch, complete_mode):
-    repo_root = _setup_repo(tmp_path)
-    judge_log = tmp_path / "judge_log.jsonl"
-    complete_log = tmp_path / "complete_log.jsonl"
-    monkeypatch.setenv("HOTDOCS_TEST_JUDGE_LOG", str(judge_log))
-    monkeypatch.setenv("HOTDOCS_TEST_COMPLETE_LOG", str(complete_log))
-    monkeypatch.setenv("HOTDOCS_TEST_COMPLETE_MODE", complete_mode)
+    _write_dependency(repo_root, "provenance-checker", "provenance_checker", _PROVENANCE_CHECKER_SRC)
+    _write_dependency(repo_root, "spec-bundle-assembler", "spec_bundle_assembler", _SPEC_BUNDLE_ASSEMBLER_SRC)
+    _write_dependency(repo_root, "generator", "generator", _GENERATOR_SRC)
+    _write_dependency(repo_root, "verifier-orchestrator", "verifier_orchestrator", _VERIFIER_ORCHESTRATOR_SRC)
+    _write_dependency(repo_root, "license-scanner", "license_scanner", _LICENSE_SCANNER_SRC)
+    _write_dependency(repo_root, "secret-scanner", "secret_scanner", _SECRET_SCANNER_SRC)
+    _write_dependency(repo_root, "provenance-tracker", "provenance_tracker", _PROVENANCE_TRACKER_SRC)
+    _write_dependency(repo_root, "provenance-writer", "provenance_writer", _PROVENANCE_WRITER_SRC)
+    _write_dependency(repo_root, "llm-endpoint", "llm_endpoint", _LLM_ENDPOINT_SRC)
 
-    component_gate_runner.run_component_gates("comp-foo", repo_root, "mock-model")
-
-    return _read_jsonl(judge_log), _read_jsonl(complete_log)
+    return repo_root, call_log, record_path
 
 
-def test_judge_calls_complete_once_with_markers_and_records_pass(tmp_path, monkeypatch):
-    judge_records, complete_records = _run_pipeline(tmp_path, monkeypatch, "pass_fenced")
+def _run(tmp_path, response_mode):
+    repo_root, call_log, record_path = _setup_repo(tmp_path, response_mode)
 
-    assert len(complete_records) == 1
-    prompt = complete_records[0]["prompt"]
+    import component_gate_runner
+
+    result = component_gate_runner.run_component_gates(
+        "comp-foo",
+        repo_root,
+        model="mock-model-1",
+        seed=0,
+        llm_backend=None,
+        retry_feedback=None,
+    )
+
+    call_log_text = call_log.read_text(encoding="utf-8") if call_log.exists() else ""
+    outcome = json.loads(record_path.read_text(encoding="utf-8"))
+    return result, call_log_text, outcome
+
+
+def test_judge_single_complete_call_with_all_markers_and_pass_outcome(tmp_path):
+    result, call_log_text, outcome = _run(tmp_path, "ok")
+
+    calls = [c for c in call_log_text.split("===CALL-END===") if c.strip()]
+    assert len(calls) == 1
+
+    prompt = calls[0]
     for marker in ("MARKER_SOURCE", "MARKER_CRIT", "MARKER_REQ", "MARKER_IFACE"):
         assert marker in prompt
 
-    assert len(judge_records) == 1
-    outcome = judge_records[0]
     assert outcome["result"] == "pass"
     assert outcome["rationale"] == "ok"
 
+    assert _get(result, "component_id") == "comp-foo"
+    assert _get(result, "provenance_hit") is False
 
-@pytest.mark.parametrize("complete_mode", ["model_call_error", "not_json", "bad_result"])
-def test_judge_unavailable_never_passes(tmp_path, monkeypatch, complete_mode):
-    judge_records, _ = _run_pipeline(tmp_path, monkeypatch, complete_mode)
 
-    assert len(judge_records) == 1
-    outcome = judge_records[0]
+@pytest.mark.parametrize("response_mode", ["model_call_error", "not_json", "bad_result"])
+def test_judge_unavailable_on_bad_response(tmp_path, response_mode):
+    result, call_log_text, outcome = _run(tmp_path, response_mode)
+
     assert outcome["result"] == "fail"
     assert outcome["rationale"].startswith("judge unavailable")
+
+    assert _get(result, "component_id") == "comp-foo"
