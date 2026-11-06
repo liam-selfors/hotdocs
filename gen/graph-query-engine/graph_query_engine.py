@@ -50,12 +50,17 @@ WHERE false;
 # legitimately have no specs/vars/ (and, hypothetically, no specs/
 # product/) yet — the same "expected state, not an error" shape as
 # component_provenance above, just for a different pair of call sites.
-# `specs/components/*/component.md` is deliberately NOT guarded here: a
-# corpus with zero components never occurs (there is no corpus without
-# at least the component whose spec is being linted), and the same
-# literal call text is shared with component_docs's JOIN ... USING
-# (filename), which a 3-column id/title/status fallback would break.
+# `specs/components/*/component.md` is guarded too: a project fresh from
+# `hotdocs init` has no components yet. Its fallback also carries
+# `filename`, because the same literal call text is shared with
+# component_docs's JOIN ... USING (filename).
 _FRONTMATTER_ZERO_MATCH_GUARDS: list[tuple[str, str, str]] = [
+    (
+        "specs/components/*/component.md",
+        "read_yaml_frontmatter('{repo_root}/specs/components/*/component.md', filename:=true)",
+        "(SELECT NULL::VARCHAR AS id, NULL::VARCHAR AS title, NULL::VARCHAR AS status,"
+        " NULL::VARCHAR AS filename WHERE false)",
+    ),
     (
         "specs/vars/*.md",
         "read_yaml_frontmatter('{repo_root}/specs/vars/*.md', filename:=true)",

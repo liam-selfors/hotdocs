@@ -501,6 +501,24 @@ def generate(
         _parse_files(response.get("text") or "", nonce), component_id
     )
 
+    # R-GEN-008: a response with no file blocks produced no candidate, so
+    # it is reported as a model-call error rather than an empty success.
+    if not files:
+        return GenerationResult(
+            component_id=component_id,
+            spec_bundle_hash=bundle.spec_bundle_hash,
+            model=model,
+            prompt_version=PROMPT_VERSION,
+            cache_hit=False,
+            files={},
+            model_call_error={
+                "category": "empty_response",
+                "message": "the model's response held no file blocks",
+            },
+            refused=None,
+            retry_feedback=echoed_retry_feedback,
+        )
+
     # R-GEN-006/D56: cache only non-empty results -- a response that
     # parses to zero files must never poison the cache for every future
     # call with this exact bundle hash.

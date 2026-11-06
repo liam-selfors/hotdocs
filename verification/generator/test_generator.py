@@ -108,6 +108,22 @@ def test_ac_gen_008_model_call_error_surfaces_cleanly(repo_root):
     assert result.cache_hit is False
 
 
+def test_ac_gen_008_empty_response_is_a_model_call_error(repo_root):
+    backend = MockBackend([{"text": "I cannot help with that.", "model_call_error": None}])
+    bundle = FakeBundle()
+    result = generate(bundle, "claude-sonnet-5", repo_root=repo_root, llm_backend=backend)
+    assert result.model_call_error["category"] == "empty_response"
+    assert result.files == {}
+    assert not (repo_root / "gen" / "foo").exists()
+    cache_key = cache_manager.CacheKey(
+        spec_bundle_hash=bundle.spec_bundle_hash,
+        gate_inputs_hash=generator._compute_gate_inputs_hash(None),
+        gate_version=GATE_VERSION,
+        model_pin="claude-sonnet-5",
+    )
+    assert not isinstance(cache_manager.get(cache_key, repo_root=repo_root), cache_manager.CachedResult)
+
+
 def test_ac_gen_009_sealed_and_override_refuse_before_any_call(repo_root):
     sealed_dir = repo_root / "specs" / "components" / "sealed-thing"
     sealed_dir.mkdir(parents=True)

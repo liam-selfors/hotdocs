@@ -6,6 +6,10 @@ Kind: generated-test
 ```gherkin
 Given a mock model that raises a network error
 When generate is called
-Then the resulting GenerationResult has a non-null model_call_error, an
-  empty files field, and cache_hit is false
+Then model_call_error is non-null, files is empty, and cache_hit is false
+
+Given a mock model whose text holds no file blocks
+When generate is called
+Then model_call_error has category "empty_response", files is empty,
+  and nothing is written or cached
 ```
