@@ -12,8 +12,10 @@ reviewing diffs of intent.
 
 ## Status
 
+To try it on a project of your own, see `QUICKSTART.md`.
+
 The rules are formalized (`SPEC_GUIDELINES.md`), and the repository's own
-pipeline is itself the worked example: **23 components, fully specced**
+pipeline is itself the worked example: **25 components, fully specced**
 under `specs/components/` (component anatomy, requirements, interfaces,
 acceptance criteria, constraints — see `specs/architecture/
 pipeline-decomposition.md` for the full decomposition), covering lint,
@@ -38,7 +40,7 @@ one ready/not-ready verdict before committing directly.
 interactive graph UI answer "is everything ready" at any point, for a
 given blast radius or the whole corpus.
 
-**Twenty-three of those components have real code**, and the central claim
+**All twenty-five have real code**, and the central claim
 this repo exists to test — that a real generation pipeline can
 cold-regenerate a component from its spec, verified, with no human
 hand-writing the result — is no longer theoretical:
@@ -57,7 +59,7 @@ hand-writing the result — is no longer theoretical:
   `provenance-tracker`, `provenance-writer`,
   `decision-drift-detector`, `review-packet-builder`,
   `spec-completeness-assistant`, `provenance-tracker-ui`,
-  `component-gate-runner` — cold-generated,
+  `component-gate-runner`, `hotdocs-cli`, `hotdocs-init` — cold-generated,
   not hand-written: a
   real model call, through a real `generator`
   dispatching through a real `llm-endpoint`, from each component's own

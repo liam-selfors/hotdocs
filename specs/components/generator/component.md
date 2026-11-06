@@ -37,8 +37,8 @@ neither); recording provenance.
 
 **Out of scope (why `depends_on` excludes `verifier-orchestrator`):**
 any retry of its own — exactly one candidate per call, single-shot.
-`D3` retired the best-of-k loop; a fresh human merge attempt
-(`R-MERGE-018`) is the only path back for a failed one.
+`D3` retired the best-of-k loop; a human re-running
+`hotdocs generate` is the only path back for a failed one.
 
 ## Definitions
 

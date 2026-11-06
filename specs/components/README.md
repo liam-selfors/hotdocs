@@ -257,19 +257,21 @@ Specced in full depth so far:
   `D32`'s billing finding applies), with the full test suite otherwise
   running on an injected mock backend at zero cost.
 
-**All 22 architecture components are now specced in full depth** (15
+**All 25 components are now specced in full depth** (15
 original + `test-author` + `spec-completeness-assistant`, both added
 when earlier design discussions surfaced real gaps nothing owned yet,
 + `capability-scenario-verifier` (D14) + `llm-endpoint` (D18) +
 `provenance-checker` (D29) + `graph-query-engine` (D13) +
-`component-gate-runner` (D76), each extracted from or added beneath
+`component-gate-runner` (D76) + `decision-drift-detector` +
+`hotdocs-cli` and `hotdocs-init` (D184, D185, the installable `hotdocs`
+command and project setup), each extracted from or added beneath
 `merge-orchestrator`/`spec-linter`/the architecture docs once a real
 coupling, crowding, or correctness signal — not speculation —
 justified it; `merge-orchestrator` itself was later removed entirely,
 `D87`, once checking what the rest of the corpus already produced
 turned out not to need an orchestrating component). The real linter
 (`gen/spec-linter/`) validates the entire corpus clean: 0 failures,
-33 warnings — all `component_doc_words`/`requirement_count`/
+51 warnings — all `component_doc_words`/`requirement_count`/
 `acceptance_count`/`generated_code_loc` near-misses, `component-gate-runner`
 and `spec-linter`'s `R-LINT-022` crowding findings (D15), and several
 individual dense files caught by the per-file check (`R-LINT-023`,

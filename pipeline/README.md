@@ -9,15 +9,13 @@ live here are removed from the active scope for now, see
 
 See `SPEC_GUIDELINES.md` §6 (verification gates).
 
-## Still empty — on purpose, for two different reasons
+## Mostly empty — on purpose
 
-This directory holds `criterion-compiler/`'s own `source_path` (sealed,
-by permanent design — trusting a `compiled` criterion requires the
-compiler that compiles it to never itself be agent-generated,
-`specs/components/criterion-compiler/component.md`). No file exists
-there yet: `criterion-compiler` remains unbuilt, the one real gap left
-in the generation chain this repo's own methodology now actually
-exercises.
+This directory holds `criterion-compiler/`, its own `source_path`
+(sealed, by permanent design — trusting a `compiled` criterion requires
+the compiler that compiles it to never itself be agent-generated,
+`specs/components/criterion-compiler/component.md`). It is hand-written;
+see `verification/criterion-compiler/BOOTSTRAP.md`.
 
 Everything else that would normally live here — frozen prompts, model
 pins, retry policy — is real, but currently lives inline in each real
