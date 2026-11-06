@@ -8,22 +8,29 @@
   `hashed_secret`, and `reason`:
 
   - `file` — a repo-relative path of `A-Z a-z 0-9 _ . / -` only, with no
-    leading `/` and no `..` segment: never a pattern;
+    leading `/` or `..` segment: never a pattern;
   - `type` — a finding's `rule_id`;
   - `hashed_secret` — `"sha1:"` plus 40 lowercase hex digits, the SHA-1
     of the secret;
-  - `reason` — `"planted-fixture"`, honored only for a `file` under
-    `verification/` or `specs/`, or `"public-constant"`, honored only for
+  - `reason` — `"planted-fixture"`, valid only for a `file` under
+    `verification/` or `specs/`, or `"public-constant"`, valid only for
     `type` `"Hex High Entropy String"`.
 
   A finding is suppressed iff some entry matches its `file`, type, and
-  `"sha1:"` plus its secret's SHA-1, all exactly. A suppressed finding is
-  listed in `allowed`; an entry matching no finding, in
-  `unused_allowlist_entries`, which never blocks.
+  `"sha1:"` plus its secret's SHA-1, all exactly, and is then listed in
+  `allowed`; an entry matching nothing goes in `unused_allowlist_entries`
+  and never blocks.
 
-  **Fail closed.** An absent file allows nothing. A file that exists but
-  is not valid JSON, has any other key, or has any entry breaking a rule
-  above invalidates the **whole** allowlist: no entry is honored, every
-  finding is reported, and one extra match is added with `rule_id`
+  **Sealed.** An otherwise valid file with no entries needs no seal; one with entries is honored only if
+  `sha256:` plus the SHA-256 hex of its exact bytes equals the
+  `allowlist_sha256` frontmatter value of the highest-numbered
+  `specs/decisions/D<N>.md` that is `ratified` and has that key. With no
+  such decision or another hash it is invalid (below): an edit is inert
+  until a new decision records its hash (`D195`).
+
+  **Fail closed.** An absent file allows nothing. A file that is not
+  valid JSON, has any other key, has any entry breaking a rule above, or
+  is unsealed invalidates the **whole** allowlist: no entry is honored,
+  every finding is reported, and one extra match is added with `rule_id`
   `"allowlist-invalid"`, `risk_tier` `"high"`, `file`
   `".secret-allowlist.json"`, `line` `1` (`D168`).

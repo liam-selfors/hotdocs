@@ -5,7 +5,8 @@ Kind: generated-test
 
 Setup for each scenario: `verification/foo/test_x.py` and `gen/foo/c.py`
 both holding `K = "AKIAABCDEFGHIJKLMNOP"`, an otherwise valid allowlist for
-`test_x.py`, then the one corruption named. Each expects: flagged true,
+`test_x.py`, sealed as in AC-SECRET-014, then the one corruption named
+(re-sealed, so only the corruption invalidates it). Each expects: flagged true,
 **both** AWS findings in matches, and one extra match with rule_id
 "allowlist-invalid", risk_tier "high", file ".secret-allowlist.json",
 line 1.
@@ -19,7 +20,7 @@ Given an entry whose hashed_secret lacks the "sha1:" prefix
 Given an entry whose file is "../x.py", "/etc/x", or "verification/*.py"
 Given an entry with reason "planted-fixture" and file "gen/foo/c.py"
 Given an entry with reason "public-constant" and type "AWS Access Key"
-Given a second, otherwise valid entry beside a corrupt one
+Given a second, valid entry beside a corrupt one
 When a full scan runs
 Then the expectations above hold for each
 

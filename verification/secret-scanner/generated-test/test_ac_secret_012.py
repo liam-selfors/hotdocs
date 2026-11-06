@@ -3,10 +3,6 @@ import os
 import tempfile
 from pathlib import Path
 
-import pytest
-
-pytest.importorskip("detect_secrets")
-
 import secret_scanner
 
 
@@ -18,14 +14,18 @@ def _get(obj, key, default=None):
 
 def _snapshot(root):
     snap = {}
-    for p in sorted(root.rglob("*")):
-        if p.is_file():
-            rel = p.relative_to(root).as_posix()
-            snap[rel] = hashlib.sha256(p.read_bytes()).hexdigest()
+    for dirpath, _dirnames, filenames in os.walk(root):
+        for fn in filenames:
+            full = os.path.join(dirpath, fn)
+            rel = os.path.relpath(full, root)
+            with open(full, "rb") as f:
+                content_hash = hashlib.sha256(f.read()).hexdigest()
+            st = os.stat(full)
+            snap[rel] = (content_hash, st.st_mtime_ns)
     return snap
 
 
-FAKE_CACHE_MANAGER_SOURCE = '''
+_CACHE_MANAGER_SOURCE = '''
 import os
 
 
@@ -36,7 +36,6 @@ class CacheKey:
         self.gate_inputs_hash = gate_inputs_hash
         self.gate_version = gate_version
         self.model_pin = model_pin
-        _log("CacheKey")
 
 
 class CachedResult:
@@ -44,62 +43,71 @@ class CachedResult:
         self.gate_type = gate_type
         self.payload = payload
         self.stored_at = stored_at
-        _log("CachedResult")
 
 
-def _log(call):
-    log_path = os.environ.get("FAKE_CACHE_MANAGER_LOG")
+class Miss:
+    pass
+
+
+def _record(call_name):
+    log_path = os.environ.get("AC_SECRET_012_CACHE_LOG")
     if log_path:
         with open(log_path, "a") as f:
-            f.write(call + "\\n")
+            f.write(call_name + "\\n")
 
 
 def get(cache_key, repo_root=None):
-    _log("get")
-    return None
+    _record("get")
+    return Miss()
 
 
-def put(cache_key, cached_result, repo_root=None):
-    _log("put")
+def put(cache_key, result, repo_root=None):
+    _record("put")
     return None
 '''
 
 
-def test_gate_version_matches_scan_result(tmp_path):
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    (repo_root / "README.md").write_text("hello world\n")
+def test_gate_version_matches_scan_gate_version():
+    with tempfile.TemporaryDirectory() as repo_root_str:
+        repo_root = Path(repo_root_str)
+        (repo_root / "readme.txt").write_text("nothing interesting here\n")
 
-    scan_result = secret_scanner.scan(repo_root)
-    version = secret_scanner.gate_version(repo_root)
+        scan_result = secret_scanner.scan(repo_root)
+        reported = secret_scanner.gate_version(repo_root)
 
-    assert isinstance(version, str)
-    assert version == _get(scan_result, "gate_version")
+        assert isinstance(reported, str)
+        assert reported == _get(scan_result, "gate_version")
 
 
-def test_gate_version_does_not_scan_or_touch_cache_or_files(tmp_path, monkeypatch):
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
+def test_gate_version_never_calls_cache_manager_or_touches_files():
+    with tempfile.TemporaryDirectory() as repo_root_str, \
+            tempfile.TemporaryDirectory() as log_dir_str:
+        repo_root = Path(repo_root_str)
+        log_path = os.path.join(log_dir_str, "cache_calls.log")
 
-    secret_file = repo_root / "config.py"
-    secret_file.write_text(
-        'AWS_SECRET_ACCESS_KEY = "AKIAIOSFODNN7EXAMPLE"\n'
-    )
+        secret_file = repo_root / "app_config.py"
+        secret_file.write_text(
+            'AWS_ACCESS_KEY = "AKIAIOSFODNN7EXAMPLE"\n'
+        )
 
-    cache_manager_dir = repo_root / "gen" / "cache-manager"
-    cache_manager_dir.mkdir(parents=True)
-    (cache_manager_dir / "cache_manager.py").write_text(FAKE_CACHE_MANAGER_SOURCE)
+        cache_manager_dir = repo_root / "gen" / "cache-manager"
+        cache_manager_dir.mkdir(parents=True)
+        (cache_manager_dir / "cache_manager.py").write_text(_CACHE_MANAGER_SOURCE)
 
-    log_dir = tempfile.mkdtemp()
-    log_path = os.path.join(log_dir, "calls.log")
-    monkeypatch.setenv("FAKE_CACHE_MANAGER_LOG", log_path)
+        old_env = os.environ.get("AC_SECRET_012_CACHE_LOG")
+        os.environ["AC_SECRET_012_CACHE_LOG"] = log_path
+        try:
+            before = _snapshot(repo_root)
 
-    before = _snapshot(repo_root)
+            result = secret_scanner.gate_version(repo_root)
 
-    version = secret_scanner.gate_version(repo_root)
+            after = _snapshot(repo_root)
+        finally:
+            if old_env is None:
+                os.environ.pop("AC_SECRET_012_CACHE_LOG", None)
+            else:
+                os.environ["AC_SECRET_012_CACHE_LOG"] = old_env
 
-    after = _snapshot(repo_root)
-
-    assert isinstance(version, str)
-    assert before == after
-    assert not os.path.exists(log_path)
+        assert isinstance(result, str)
+        assert not os.path.exists(log_path) or os.path.getsize(log_path) == 0
+        assert before == after

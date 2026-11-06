@@ -1,7 +1,5 @@
-import os
 import shutil
 import tempfile
-import unittest
 import urllib.request
 from pathlib import Path
 
@@ -14,76 +12,55 @@ def _get(obj, key, default=None):
     return getattr(obj, key, default)
 
 
-class TestAcSecret004b(unittest.TestCase):
-    def setUp(self):
-        self.tmp = tempfile.mkdtemp()
-        self.repo_root = Path(self.tmp)
-        foo_dir = self.repo_root / "gen" / "foo"
+class _FakeWebhookResponse:
+    status = 200
+
+    def read(self):
+        return b"OK"
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        return False
+
+
+def test_ac_secret_004b_low_tier_blocking_match_still_notifies(monkeypatch):
+    repo_root = Path(tempfile.mkdtemp(prefix="hotdocs-ac-secret-004b-"))
+    try:
+        foo_dir = repo_root / "gen" / "foo"
         foo_dir.mkdir(parents=True)
         (foo_dir / "h.py").write_text(
             'sha = "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b"\n'
         )
 
-        self._old_webhook = os.environ.get("VAR_COMPLIANCE_WEBHOOK_URL")
-        os.environ["VAR_COMPLIANCE_WEBHOOK_URL"] = "https://example.invalid/hook"
+        monkeypatch.setenv(
+            "VAR_COMPLIANCE_WEBHOOK_URL", "https://example.invalid/webhook"
+        )
 
-        self._old_urlopen = urllib.request.urlopen
-        self.calls = []
+        calls = []
 
-        def recorder(*args, **kwargs):
-            self.calls.append((args, kwargs))
+        def fake_urlopen(*args, **kwargs):
+            calls.append((args, kwargs))
+            return _FakeWebhookResponse()
 
-            class _Response:
-                status = 200
+        monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
 
-                def __enter__(self):
-                    return self
+        result = secret_scanner.scan(repo_root)
 
-                def __exit__(self, exc_type, exc_val, exc_tb):
-                    return False
+        assert _get(result, "flagged") is True
 
-                def read(self):
-                    return b"{}"
-
-            return _Response()
-
-        urllib.request.urlopen = recorder
-
-    def tearDown(self):
-        urllib.request.urlopen = self._old_urlopen
-        if self._old_webhook is None:
-            os.environ.pop("VAR_COMPLIANCE_WEBHOOK_URL", None)
-        else:
-            os.environ["VAR_COMPLIANCE_WEBHOOK_URL"] = self._old_webhook
-        shutil.rmtree(self.tmp, ignore_errors=True)
-
-    def test_low_risk_blocking_match_still_notifies_once(self):
-        result = secret_scanner.scan(self.repo_root)
-
-        flagged = _get(result, "flagged")
-        matches = _get(result, "matches")
-
-        self.assertTrue(flagged)
-        self.assertIsNotNone(matches)
-
-        h_matches = [
-            m for m in matches
-            if _get(m, "file", "").replace("\\", "/") == "gen/foo/h.py"
+        matches = _get(result, "matches") or []
+        target_matches = [
+            m
+            for m in matches
+            if str(_get(m, "file", "")).replace("\\", "/") == "gen/foo/h.py"
         ]
-        self.assertTrue(
-            len(h_matches) >= 1,
-            "expected at least one match for gen/foo/h.py, got: %r" % (matches,),
+        assert target_matches, (
+            "expected at least one match for gen/foo/h.py, got matches=%r" % matches
         )
-        self.assertTrue(
-            any(_get(m, "risk_tier") == "low" for m in h_matches),
-            "expected a low risk_tier match for gen/foo/h.py, got: %r" % (h_matches,),
-        )
+        assert all(_get(m, "risk_tier") == "low" for m in target_matches)
 
-        self.assertEqual(
-            len(self.calls), 1,
-            "expected the compliance webhook recorder to be called exactly once",
-        )
-
-
-if __name__ == "__main__":
-    unittest.main()
+        assert len(calls) == 1
+    finally:
+        shutil.rmtree(repo_root, ignore_errors=True)

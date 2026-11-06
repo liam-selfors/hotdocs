@@ -1,7 +1,6 @@
-import shutil
-import tempfile
-import unittest
-from pathlib import Path
+import json
+
+import pytest
 
 import secret_scanner
 
@@ -12,63 +11,122 @@ def _get(obj, key, default=None):
     return getattr(obj, key, default)
 
 
-class TestAcSecret003(unittest.TestCase):
-    """AC-SECRET-003 / R-SECRET-003: a clean full scan still yields a
-    complete SecretScanResult record, not an omitted/empty one."""
+_CACHE_MANAGER_SOURCE = '''
+import json
+import os
 
-    def setUp(self):
-        self.repo_root = Path(tempfile.mkdtemp(prefix="ac_secret_003_"))
-        (self.repo_root / "clean_module.py").write_text(
-            "def add(a, b):\n    return a + b\n"
+
+class CacheKey:
+    def __init__(self, spec_bundle_hash=None, gate_inputs_hash=None,
+                 gate_version=None, model_pin=None):
+        self.spec_bundle_hash = spec_bundle_hash
+        self.gate_inputs_hash = gate_inputs_hash
+        self.gate_version = gate_version
+        self.model_pin = model_pin
+
+
+class CachedResult:
+    def __init__(self, gate_type=None, payload=None, stored_at=None):
+        self.gate_type = gate_type
+        self.payload = payload
+        self.stored_at = stored_at
+
+
+class Miss:
+    payload = None
+
+
+def _log_path():
+    return os.environ.get("SECRET_SCANNER_AC003_CALL_LOG")
+
+
+def get(cache_key, repo_root=None):
+    return Miss()
+
+
+def put(cache_key, cached_result, repo_root=None):
+    log_path = _log_path()
+    if not log_path:
+        return
+    record = {
+        "gate_type": getattr(cached_result, "gate_type", None),
+        "payload": getattr(cached_result, "payload", None),
+    }
+    with open(log_path, "a") as handle:
+        handle.write(json.dumps(record) + "\\n")
+'''
+
+
+def test_clean_full_scan_still_records_result(tmp_path, monkeypatch):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+
+    cache_manager_dir = repo_root / "gen" / "cache-manager"
+    cache_manager_dir.mkdir(parents=True)
+    (cache_manager_dir / "cache_manager.py").write_text(_CACHE_MANAGER_SOURCE)
+
+    (repo_root / ".secret-allowlist.json").write_text(
+        json.dumps({"version": 1, "entries": []})
+    )
+
+    src_dir = repo_root / "src"
+    src_dir.mkdir()
+    (src_dir / "app.py").write_text(
+        "def add(left, right):\n    return left + right\n"
+    )
+
+    call_log = tmp_path / "cache_manager_calls.jsonl"
+    monkeypatch.setenv("SECRET_SCANNER_AC003_CALL_LOG", str(call_log))
+
+    result = secret_scanner.scan(repo_root)
+
+    assert _get(result, "flagged") is False
+    matches = _get(result, "matches")
+    assert matches == []
+
+    as_dict = result.to_dict()
+
+    for required_key in (
+        "scope",
+        "gate_version",
+        "flagged",
+        "matches",
+        "allowed",
+        "unused_allowlist_entries",
+        "notified",
+        "notification_delivery_error",
+        "cache_hit",
+    ):
+        assert required_key in as_dict, (
+            "a clean SecretScanResult must still carry every field of the "
+            "record, not just an absence of flags"
         )
-        (self.repo_root / "README.md").write_text(
-            "This is a clean fixture repository with no secrets.\n"
+
+    assert as_dict["scope"] == "full"
+    assert as_dict["flagged"] is False
+    assert as_dict["matches"] == []
+    assert as_dict["gate_version"]
+    assert as_dict["notified"] is False
+
+    assert call_log.exists(), (
+        "secret_scanner.scan did not forward the clean result onward via "
+        "cache-manager's put -- a clean outcome must still be recorded, "
+        "never silently dropped"
+    )
+    lines = [line for line in call_log.read_text().splitlines() if line.strip()]
+    assert len(lines) == 1, (
+        "expected exactly one put() call recording the fresh, clean scan "
+        "result"
+    )
+
+    record = json.loads(lines[0])
+    assert record["gate_type"] == "secret_scanner"
+
+    payload = record["payload"]
+    for required_payload_key in ("scope", "gate_version", "flagged", "matches"):
+        assert required_payload_key in payload, (
+            "the recorded payload for a clean outcome must still satisfy "
+            "the secret_scanner CachedResult payload schema"
         )
-
-    def tearDown(self):
-        shutil.rmtree(self.repo_root, ignore_errors=True)
-
-    def test_clean_full_scan_still_produces_full_result_record(self):
-        result = secret_scanner.scan(self.repo_root)
-
-        # A clean outcome MUST still be a real, present result object -
-        # never None or otherwise omitted.
-        self.assertIsNotNone(result)
-
-        self.assertFalse(_get(result, "flagged"))
-        self.assertEqual(_get(result, "matches"), [])
-
-        self.assertTrue(hasattr(result, "to_dict"))
-        payload = result.to_dict()
-        self.assertIsInstance(payload, dict)
-
-        required_keys = (
-            "scope",
-            "gate_version",
-            "flagged",
-            "matches",
-            "allowed",
-            "unused_allowlist_entries",
-            "notified",
-            "notification_delivery_error",
-            "cache_hit",
-        )
-        for key in required_keys:
-            self.assertIn(
-                key,
-                payload,
-                "clean SecretScanResult.to_dict() must still carry %r; "
-                "absence of a flag must not mean absence of a record" % key,
-            )
-
-        self.assertEqual(payload["scope"], "full")
-        self.assertTrue(payload["gate_version"])
-        self.assertFalse(payload["flagged"])
-        self.assertEqual(payload["matches"], [])
-        self.assertFalse(payload["notified"])
-        self.assertIsNone(payload["notification_delivery_error"])
-        self.assertFalse(payload["cache_hit"])
-
-
-if __name__ == "__main__":
-    unittest.main()
+    assert payload["flagged"] is False
+    assert payload["matches"] == []

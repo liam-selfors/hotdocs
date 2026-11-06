@@ -15,8 +15,7 @@ Then matches holds exactly one entry: rule_id "AWS Access Key",
 Given the same key in README.md, notes/n.md, pipeline/p.py, tools/t.py,
   and verification/secret-scanner/generated-test/test_x.py
 When a full scan runs
-Then each of those five files has a match: the whole repository is
-  scanned, with no per-directory or per-component exception
+Then each of those five files has a match
 ```
 
 ```gherkin

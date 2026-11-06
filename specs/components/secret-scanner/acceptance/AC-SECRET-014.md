@@ -4,7 +4,9 @@ Covers: R-SECRET-012
 Kind: generated-test
 
 Scenarios write `.secret-allowlist.json` themselves, `hashed_secret` being
-`"sha1:" + hashlib.sha1(secret.encode("utf-8")).hexdigest()`.
+`"sha1:" + hashlib.sha1(secret.encode("utf-8")).hexdigest()`, and seal it
+with `specs/decisions/D1.md` (`status: ratified`, `allowlist_sha256:
+sha256:<hex of the file>`).
 
 ```gherkin
 Given verification/foo/test_x.py holding K = "AKIAABCDEFGHIJKLMNOP" and

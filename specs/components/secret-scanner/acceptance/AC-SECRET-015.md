@@ -3,7 +3,7 @@
 Covers: R-SECRET-012
 Kind: generated-test
 
-Setup: `AC-SECRET-014`'s first scenario, plus the change named.
+Setup: `AC-SECRET-014`'s first scenario (sealed again after each change), plus the change named.
 
 ```gherkin
 Given the line changed to K = "AKIAZZZZYYYYXXXXWWWW"

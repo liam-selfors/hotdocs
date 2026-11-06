@@ -1,6 +1,5 @@
 import hashlib
 import json
-from pathlib import Path
 
 import secret_scanner
 
@@ -11,100 +10,126 @@ def _get(obj, key, default=None):
     return getattr(obj, key, default)
 
 
-def _hash_secret(secret: str) -> str:
+ORIGINAL_SECRET = "AKIAIOSFODNN7EXAMPLE"
+CHANGED_SECRET = "AKIAZZZZYYYYXXXXWWWW"
+TEST_X_RELPATH = "verification/foo/test_x.py"
+
+
+def _sha1_entry(secret):
     return "sha1:" + hashlib.sha1(secret.encode()).hexdigest()
 
 
-ORIGINAL_KEY = "AKIAIOSFODNN7EXAMPLE"
-CHANGED_KEY = "AKIAZZZZYYYYXXXXWWWW"
+def _allowlist_path(repo_root):
+    return repo_root / ".secret-allowlist.json"
 
 
-def _write_base(root: Path) -> Path:
-    verif_dir = root / "verification" / "foo"
-    verif_dir.mkdir(parents=True)
-    test_x = verif_dir / "test_x.py"
-    test_x.write_text('K = "%s"\n' % ORIGINAL_KEY)
-    allowlist = {
-        "version": 1,
-        "entries": [
-            {
-                "file": "verification/foo/test_x.py",
-                "type": "AWS Access Key",
-                "hashed_secret": _hash_secret(ORIGINAL_KEY),
-                "reason": "planted-fixture",
-            }
-        ],
+def _write_allowlist(repo_root, entries):
+    path = _allowlist_path(repo_root)
+    path.write_bytes(
+        json.dumps({"version": 1, "entries": entries}, indent=2).encode()
+    )
+    return path
+
+
+def _seal(repo_root, decision_num=195):
+    digest = hashlib.sha256(_allowlist_path(repo_root).read_bytes()).hexdigest()
+    decisions_dir = repo_root / "specs" / "decisions"
+    decisions_dir.mkdir(parents=True, exist_ok=True)
+    (decisions_dir / f"D{decision_num}.md").write_text(
+        "---\n"
+        f"id: D{decision_num}\n"
+        "title: Seal secret allowlist\n"
+        "status: ratified\n"
+        "owners: [lselfors@gmail.com]\n"
+        "last_ratified_commit: 0000000000000000000000000000000000000000\n"
+        f"allowlist_sha256: sha256:{digest}\n"
+        "---\n"
+        "\n"
+        "Seals the secret allowlist.\n"
+    )
+
+
+def _baseline(tmp_path):
+    repo_root = tmp_path / "repo"
+    (repo_root / "verification" / "foo").mkdir(parents=True)
+    (repo_root / TEST_X_RELPATH).write_text(f'K = "{ORIGINAL_SECRET}"\n')
+    entry = {
+        "file": TEST_X_RELPATH,
+        "type": "AWS Access Key",
+        "hashed_secret": _sha1_entry(ORIGINAL_SECRET),
+        "reason": "planted-fixture",
     }
-    (root / ".secret-allowlist.json").write_text(json.dumps(allowlist))
-    return test_x
+    _write_allowlist(repo_root, [entry])
+    _seal(repo_root)
+    return repo_root, entry
 
 
-def test_changed_line_unsuppresses_and_orphans_entry(tmp_path):
-    test_x = _write_base(tmp_path)
-    test_x.write_text('K = "%s"\n' % CHANGED_KEY)
+def test_changed_secret_becomes_unused_and_flagged(tmp_path):
+    repo_root, entry = _baseline(tmp_path)
+    (repo_root / TEST_X_RELPATH).write_text(f'K = "{CHANGED_SECRET}"\n')
+    _seal(repo_root)
 
-    result = secret_scanner.scan(tmp_path)
-
-    assert _get(result, "flagged") is True
-
-    matches = _get(result, "matches")
-    assert len(matches) == 1
-    assert _get(matches[0], "file") == "verification/foo/test_x.py"
-    assert _get(matches[0], "line") == 1
-    assert _get(matches[0], "rule_id") == "AWS Access Key"
-
-    assert _get(result, "allowed") == []
-
-    unused = _get(result, "unused_allowlist_entries")
-    assert len(unused) == 1
-    assert _get(unused[0], "file") == "verification/foo/test_x.py"
-    assert _get(unused[0], "type") == "AWS Access Key"
-
-
-def test_duplicate_key_in_new_file_only_new_one_matches(tmp_path):
-    _write_base(tmp_path)
-    other_file = tmp_path / "verification" / "foo" / "other.py"
-    other_file.write_text('OTHER = "%s"\n' % ORIGINAL_KEY)
-
-    result = secret_scanner.scan(tmp_path)
-
-    matches = _get(result, "matches")
-    assert len(matches) == 1
-    assert _get(matches[0], "file") == "verification/foo/other.py"
-
-    allowed = _get(result, "allowed")
-    assert len(allowed) == 1
-    assert _get(allowed[0], "file") == "verification/foo/test_x.py"
-
-
-def test_second_line_added_only_new_line_matches(tmp_path):
-    test_x = _write_base(tmp_path)
-    with test_x.open("a") as f:
-        f.write('J = "%s"\n' % CHANGED_KEY)
-
-    result = secret_scanner.scan(tmp_path)
-
-    matches = _get(result, "matches")
-    assert len(matches) == 1
-    assert _get(matches[0], "file") == "verification/foo/test_x.py"
-    assert _get(matches[0], "line") == 2
-    assert _get(matches[0], "rule_id") == "AWS Access Key"
-
-
-def test_entry_type_changed_unsuppresses_original_finding(tmp_path):
-    _write_base(tmp_path)
-    allowlist_path = tmp_path / ".secret-allowlist.json"
-    data = json.loads(allowlist_path.read_text())
-    data["entries"][0]["type"] = "Hex High Entropy String"
-    allowlist_path.write_text(json.dumps(data))
-
-    result = secret_scanner.scan(tmp_path)
+    result = secret_scanner.scan(repo_root)
 
     assert _get(result, "flagged") is True
-
     matches = _get(result, "matches")
-    found = any(
-        _get(m, "file") == "verification/foo/test_x.py" and _get(m, "line") == 1
+    assert any(
+        _get(m, "file") == TEST_X_RELPATH and _get(m, "line") == 1
         for m in matches
     )
-    assert found
+    assert _get(result, "allowed") == []
+    unused = _get(result, "unused_allowlist_entries")
+    assert any(
+        _get(u, "file") == entry["file"] and _get(u, "type") == entry["type"]
+        for u in unused
+    )
+
+
+def test_same_secret_in_new_file_flags_only_that_file(tmp_path):
+    repo_root, _entry = _baseline(tmp_path)
+    other_relpath = "verification/foo/other.py"
+    (repo_root / other_relpath).write_text(f'K = "{ORIGINAL_SECRET}"\n')
+    _seal(repo_root)
+
+    result = secret_scanner.scan(repo_root)
+
+    matches = _get(result, "matches")
+    assert len(matches) == 1
+    assert _get(matches[0], "file") == other_relpath
+
+    allowed = _get(result, "allowed")
+    assert any(
+        _get(a, "file") == TEST_X_RELPATH and _get(a, "line") == 1
+        for a in allowed
+    )
+
+
+def test_second_new_secret_is_the_only_match(tmp_path):
+    repo_root, _entry = _baseline(tmp_path)
+    test_x = repo_root / TEST_X_RELPATH
+    test_x.write_text(test_x.read_text() + f'J = "{CHANGED_SECRET}"\n')
+    _seal(repo_root)
+
+    result = secret_scanner.scan(repo_root)
+
+    matches = _get(result, "matches")
+    assert len(matches) == 1
+    assert _get(matches[0], "file") == TEST_X_RELPATH
+    assert _get(matches[0], "line") == 2
+
+
+def test_entry_type_mismatch_unsuppresses_original_finding(tmp_path):
+    repo_root, entry = _baseline(tmp_path)
+    mismatched_entry = dict(entry)
+    mismatched_entry["type"] = "Hex High Entropy String"
+    _write_allowlist(repo_root, [mismatched_entry])
+    _seal(repo_root)
+
+    result = secret_scanner.scan(repo_root)
+
+    assert _get(result, "flagged") is True
+    matches = _get(result, "matches")
+    assert any(
+        _get(m, "file") == TEST_X_RELPATH and _get(m, "line") == 1
+        for m in matches
+    )

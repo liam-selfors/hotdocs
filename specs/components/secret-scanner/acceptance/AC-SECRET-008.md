@@ -7,5 +7,5 @@ Kind: generated-test
 Given a set of files passed via --files, not yet committed
 When hotdocs secret-scan precommit runs against them
 Then matching is performed against only those files, with no cache-manager
-  lookup attempted
+  lookup attempted; an allowlist used here is valid (fixtures under `verification/`), sealed per AC-SECRET-014
 ```

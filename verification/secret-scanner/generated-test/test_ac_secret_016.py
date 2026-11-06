@@ -1,18 +1,14 @@
-import contextlib
 import hashlib
 import json
-import os
-import shutil
-import tempfile
-from pathlib import Path
+import textwrap
 
 import pytest
 
 import secret_scanner
 
 
-SECRET = "AKIAABCDEFGHIJKLMNOP"
-SECRET_HASH = hashlib.sha1(SECRET.encode()).hexdigest()
+AWS_SECRET = "AKIAABCDEFGHIJKLMNOP"
+AWS_SECRET_LITERAL = "AKIAZZZZYYYYXXXXWWWW"
 
 
 def _get(obj, key, default=None):
@@ -21,196 +17,219 @@ def _get(obj, key, default=None):
     return getattr(obj, key, default)
 
 
-def _valid_entry():
+def _sha1_prefixed(secret):
+    return "sha1:" + hashlib.sha1(secret.encode("utf-8")).hexdigest()
+
+
+def _base_valid_entry():
     return {
         "file": "verification/foo/test_x.py",
         "type": "AWS Access Key",
-        "hashed_secret": "sha1:" + SECRET_HASH,
+        "hashed_secret": _sha1_prefixed(AWS_SECRET),
         "reason": "planted-fixture",
     }
 
 
-def _make_repo():
-    repo_root = Path(tempfile.mkdtemp(prefix="secret-scan-ac016-"))
-    (repo_root / "gen" / "foo").mkdir(parents=True)
+def _entries_json(obj):
+    return json.dumps(obj, indent=2).encode("utf-8")
+
+
+def _make_repo(tmp_path):
+    repo_root = tmp_path / "repo"
     (repo_root / "verification" / "foo").mkdir(parents=True)
-    content = 'K = "%s"\n' % SECRET
-    (repo_root / "gen" / "foo" / "c.py").write_text(content)
-    (repo_root / "verification" / "foo" / "test_x.py").write_text(content)
+    (repo_root / "gen" / "foo").mkdir(parents=True)
+    (repo_root / "verification" / "foo" / "test_x.py").write_text(
+        'K = "%s"\n' % AWS_SECRET, encoding="utf-8"
+    )
+    (repo_root / "gen" / "foo" / "c.py").write_text(
+        'K = "%s"\n' % AWS_SECRET, encoding="utf-8"
+    )
     return repo_root
 
 
-def _write_allowlist(repo_root, obj_or_raw):
-    path = repo_root / ".secret-allowlist.json"
-    if isinstance(obj_or_raw, str):
-        path.write_text(obj_or_raw)
-    else:
-        path.write_text(json.dumps(obj_or_raw))
+def _write_allowlist_sealed(repo_root, content_bytes):
+    allowlist_path = repo_root / ".secret-allowlist.json"
+    allowlist_path.write_bytes(content_bytes)
+    digest = hashlib.sha256(content_bytes).hexdigest()
+    decisions_dir = repo_root / "specs" / "decisions"
+    decisions_dir.mkdir(parents=True, exist_ok=True)
+    decision_path = decisions_dir / "D1.md"
+    body = textwrap.dedent(
+        """\
+        ---
+        id: D1
+        title: Seal secret allowlist
+        status: ratified
+        owners: [lselfors@gmail.com]
+        last_ratified_commit: %s
+        allowlist_sha256: sha256:%s
+        ---
+
+        Seals the secret allowlist for AC-SECRET-016 fixtures.
+        """
+    ) % ("0" * 40, digest)
+    decision_path.write_text(body, encoding="utf-8")
 
 
-def _find(matches, rule_id, file, line=None):
-    for m in matches:
-        if _get(m, "rule_id") == rule_id and _get(m, "file") == file:
-            if line is None or _get(m, "line") == line:
-                return m
-    return None
-
-
-@contextlib.contextmanager
-def _no_webhook_env():
-    saved = os.environ.pop("VAR_COMPLIANCE_WEBHOOK_URL", None)
-    try:
-        yield
-    finally:
-        if saved is not None:
-            os.environ["VAR_COMPLIANCE_WEBHOOK_URL"] = saved
-
-
-def _assert_common_invariants(result):
-    flagged = _get(result, "flagged")
+def _assert_common(result):
+    assert _get(result, "flagged") is True
     matches = _get(result, "matches")
-    assert flagged is True
 
-    aws_gen = _find(matches, "AWS Access Key", "gen/foo/c.py", 1)
-    assert aws_gen is not None, "expected AWS Access Key match for gen/foo/c.py"
+    def _has(rule_id, file_, risk_tier=None, line=None):
+        for m in matches:
+            if _get(m, "rule_id") != rule_id or _get(m, "file") != file_:
+                continue
+            if risk_tier is not None and _get(m, "risk_tier") != risk_tier:
+                continue
+            if line is not None and _get(m, "line") != line:
+                continue
+            return True
+        return False
 
-    aws_ver = _find(matches, "AWS Access Key", "verification/foo/test_x.py", 1)
-    assert aws_ver is not None, (
-        "expected AWS Access Key match for verification/foo/test_x.py"
+    assert _has("AWS Access Key", "verification/foo/test_x.py", "high", 1)
+    assert _has("AWS Access Key", "gen/foo/c.py", "high", 1)
+    assert _has("allowlist-invalid", ".secret-allowlist.json", "high", 1)
+
+
+CORRUPTIONS = {}
+
+
+def _reg(name):
+    def deco(fn):
+        CORRUPTIONS[name] = fn
+        return fn
+
+    return deco
+
+
+@_reg("invalid_json")
+def _c_invalid_json():
+    return b'{"version": 1, "entries": [ this is not json'
+
+
+@_reg("top_level_extra_key")
+def _c_top_level_extra_key():
+    return _entries_json(
+        {"version": 1, "entries": [_base_valid_entry()], "extra": "x"}
     )
 
-    invalid = _find(matches, "allowlist-invalid", ".secret-allowlist.json", 1)
-    assert invalid is not None, "expected allowlist-invalid match"
-    assert _get(invalid, "risk_tier") == "high"
+
+@_reg("version_2")
+def _c_version_2():
+    return _entries_json({"version": 2, "entries": [_base_valid_entry()]})
 
 
-def _build_corruptions():
-    cases = []
+@_reg("entry_extra_key")
+def _c_entry_extra_key():
+    e = _base_valid_entry()
+    e["note"] = "hi"
+    return _entries_json({"version": 1, "entries": [e]})
 
-    cases.append(("not_valid_json", "{this is not json"))
 
-    cases.append((
-        "extra_top_level_key",
-        {"version": 1, "entries": [_valid_entry()], "extra": "x"},
-    ))
+@_reg("entry_missing_key")
+def _c_entry_missing_key():
+    e = _base_valid_entry()
+    del e["reason"]
+    return _entries_json({"version": 1, "entries": [e]})
 
-    cases.append((
-        "version_2",
-        {"version": 2, "entries": [_valid_entry()]},
-    ))
 
-    entry = _valid_entry()
-    entry["note"] = "unexpected"
-    cases.append(("entry_extra_key", {"version": 1, "entries": [entry]}))
+@_reg("entry_reason_other")
+def _c_entry_reason_other():
+    e = _base_valid_entry()
+    e["reason"] = "other"
+    return _entries_json({"version": 1, "entries": [e]})
 
-    entry = _valid_entry()
-    del entry["reason"]
-    cases.append(("entry_missing_key", {"version": 1, "entries": [entry]}))
 
-    entry = _valid_entry()
-    entry["reason"] = "other"
-    cases.append(("entry_reason_other", {"version": 1, "entries": [entry]}))
+@_reg("entry_hash_no_prefix")
+def _c_entry_hash_no_prefix():
+    e = _base_valid_entry()
+    e["hashed_secret"] = hashlib.sha1(AWS_SECRET.encode("utf-8")).hexdigest()
+    return _entries_json({"version": 1, "entries": [e]})
 
-    entry = _valid_entry()
-    entry["hashed_secret"] = SECRET_HASH
-    cases.append(("entry_hash_no_prefix", {"version": 1, "entries": [entry]}))
 
-    for bad_file in ("../x.py", "/etc/x", "verification/*.py"):
-        entry = _valid_entry()
-        entry["file"] = bad_file
-        label = "entry_bad_file_" + bad_file.replace("/", "_").replace(
-            ".", "_"
-        ).replace("*", "star")
-        cases.append((label, {"version": 1, "entries": [entry]}))
+@_reg("entry_file_dotdot")
+def _c_entry_file_dotdot():
+    e = _base_valid_entry()
+    e["file"] = "../x.py"
+    return _entries_json({"version": 1, "entries": [e]})
 
-    entry = _valid_entry()
-    entry["file"] = "gen/foo/c.py"
-    entry["reason"] = "planted-fixture"
-    cases.append((
-        "planted_fixture_outside_verification_or_specs",
-        {"version": 1, "entries": [entry]},
-    ))
 
-    entry = _valid_entry()
-    entry["reason"] = "public-constant"
-    entry["type"] = "AWS Access Key"
-    cases.append((
-        "public_constant_with_wrong_type",
-        {"version": 1, "entries": [entry]},
-    ))
+@_reg("entry_file_absolute")
+def _c_entry_file_absolute():
+    e = _base_valid_entry()
+    e["file"] = "/etc/x"
+    return _entries_json({"version": 1, "entries": [e]})
 
-    corrupt_entry = _valid_entry()
-    corrupt_entry["reason"] = "other"
-    second_entry = {
-        "file": "specs/bar.py",
-        "type": "Hex High Entropy String",
-        "hashed_secret": "sha1:" + hashlib.sha1(b"unrelated").hexdigest(),
-        "reason": "public-constant",
+
+@_reg("entry_file_pattern")
+def _c_entry_file_pattern():
+    e = _base_valid_entry()
+    e["file"] = "verification/*.py"
+    return _entries_json({"version": 1, "entries": [e]})
+
+
+@_reg("entry_planted_fixture_wrong_location")
+def _c_entry_planted_fixture_wrong_location():
+    e = {
+        "file": "gen/foo/c.py",
+        "type": "AWS Access Key",
+        "hashed_secret": _sha1_prefixed(AWS_SECRET),
+        "reason": "planted-fixture",
     }
-    cases.append((
-        "second_valid_entry_beside_corrupt_one",
-        {"version": 1, "entries": [corrupt_entry, second_entry]},
-    ))
-
-    return cases
+    return _entries_json({"version": 1, "entries": [e]})
 
 
-_CASES = _build_corruptions()
+@_reg("entry_public_constant_wrong_type")
+def _c_entry_public_constant_wrong_type():
+    e = _base_valid_entry()
+    e["reason"] = "public-constant"
+    return _entries_json({"version": 1, "entries": [e]})
 
 
-@pytest.mark.parametrize(
-    "name,allowlist_obj", _CASES, ids=[c[0] for c in _CASES]
-)
-def test_corrupt_allowlist_invalidates_whole_file(name, allowlist_obj):
-    repo_root = _make_repo()
-    try:
-        with _no_webhook_env():
-            _write_allowlist(repo_root, allowlist_obj)
-            result = secret_scanner.scan(repo_root)
-            _assert_common_invariants(result)
-    finally:
-        shutil.rmtree(repo_root, ignore_errors=True)
+@_reg("second_valid_entry_beside_corrupt")
+def _c_second_valid_entry_beside_corrupt():
+    good = _base_valid_entry()
+    corrupt = _base_valid_entry()
+    corrupt["file"] = "verification/foo/other.py"
+    corrupt["reason"] = "other"
+    return _entries_json({"version": 1, "entries": [good, corrupt]})
 
 
-def test_extra_key_with_aws_value_also_flags_allowlist_file_itself():
-    repo_root = _make_repo()
-    try:
-        with _no_webhook_env():
-            entry = _valid_entry()
-            allowlist_obj = {
-                "version": 1,
-                "entries": [entry],
-                "decoy": "AKIAZZZZYYYYXXXXWWWW",
-            }
-            _write_allowlist(repo_root, allowlist_obj)
-            result = secret_scanner.scan(repo_root)
-            _assert_common_invariants(result)
+@pytest.mark.parametrize("name", sorted(CORRUPTIONS))
+def test_corrupted_allowlist_invalidates(tmp_path, name):
+    repo_root = _make_repo(tmp_path)
+    content = CORRUPTIONS[name]()
+    _write_allowlist_sealed(repo_root, content)
 
-            matches = _get(result, "matches")
-            allowlist_self_match = _find(
-                matches, "AWS Access Key", ".secret-allowlist.json"
-            )
-            assert allowlist_self_match is not None, (
-                "expected the allowlist file itself to be scanned and "
-                "flagged for its own planted AWS-like value"
-            )
-    finally:
-        shutil.rmtree(repo_root, ignore_errors=True)
+    result = secret_scanner.scan(repo_root)
+
+    _assert_common(result)
 
 
-def test_no_allowlist_file_allows_nothing():
-    repo_root = _make_repo()
-    try:
-        with _no_webhook_env():
-            result = secret_scanner.scan(repo_root)
+def test_entry_extra_key_with_embedded_secret_scans_allowlist_itself(tmp_path):
+    repo_root = _make_repo(tmp_path)
+    e = _base_valid_entry()
+    e["note"] = AWS_SECRET_LITERAL
+    content = _entries_json({"version": 1, "entries": [e]})
+    _write_allowlist_sealed(repo_root, content)
 
-            assert _get(result, "flagged") is True
-            matches = _get(result, "matches")
-            assert (
-                _find(matches, "allowlist-invalid", ".secret-allowlist.json")
-                is None
-            )
-            allowed = _get(result, "allowed", [])
-            assert len(allowed) == 0
-    finally:
-        shutil.rmtree(repo_root, ignore_errors=True)
+    result = secret_scanner.scan(repo_root)
+
+    _assert_common(result)
+    matches = _get(result, "matches")
+    assert any(
+        _get(m, "rule_id") == "AWS Access Key"
+        and _get(m, "file") == ".secret-allowlist.json"
+        for m in matches
+    )
+
+
+def test_no_allowlist_file_allows_nothing(tmp_path):
+    repo_root = _make_repo(tmp_path)
+
+    result = secret_scanner.scan(repo_root)
+
+    assert _get(result, "flagged") is True
+    matches = _get(result, "matches")
+    assert not any(_get(m, "rule_id") == "allowlist-invalid" for m in matches)
+    assert _get(result, "allowed") == []

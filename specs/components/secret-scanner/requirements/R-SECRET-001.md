@@ -1,13 +1,11 @@
 # R-SECRET-001
 
 **R-SECRET-001** — A full scan MUST check every text file under
-  `repo_root` — the whole repository, with no per-directory or
-  per-component exceptions — using the `detect-secrets` library
-  (`interface/library.md`), never a detector of this component's own
-  (`D168`). Only these are skipped: any directory named `.git`,
-  `__pycache__`, `.pytest_cache`, `.venv`, `.hotdocs`, or
-  `node_modules`, anywhere in the tree, and any file that does not
-  decode as UTF-8.
+  `repo_root`, with no per-directory or per-component exceptions, using
+  the `detect-secrets` library (`interface/library.md`), never a
+  detector of its own (`D168`). Only these are skipped: any directory
+  named `.git`, `__pycache__`, `.pytest_cache`, `.venv`, `.hotdocs`, or
+  `node_modules`, and any file that does not decode as UTF-8.
 
   The scan runs every plugin the installed library provides except
   `KeywordDetector` and `IPPublicDetector`, each with its own default

@@ -15,9 +15,9 @@ Then allowlist.entries holds exactly two entries — verification/foo/t.py
   {file "gen/foo/c.py", line 1, rule_id "AWS Access Key"}; and no
   .secret-allowlist.json was created
 
-Given a valid allowlist already covering t.py's key
+Given a valid, sealed allowlist already covering t.py's key
 When propose(repo_root) is called
-Then that entry appears once, and no duplicate is added
+Then that entry appears once
 
 Given an invalid allowlist
 When propose(repo_root) is called
@@ -25,6 +25,6 @@ Then AllowlistInvalidError is raised
 
 Given the first scenario's repository
 When main(["propose", "--repo-root=<repo_root>"]) runs
-Then it returns 1 and prints JSON with those two keys; with gen/foo/c.py
+Then it returns 1 and prints JSON with those two keys; with c.py
   removed it returns 0
 ```

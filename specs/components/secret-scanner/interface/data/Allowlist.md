@@ -16,9 +16,10 @@
 }
 ```
 
-It holds only a SHA-1 of a secret a person has reviewed and judged a
-deliberate fixture or public constant. The `sha1:` prefix stops the
-hex-entropy detector flagging the list itself.
+It holds only SHA-1s of secrets a person judged deliberate fixtures or
+public constants; the `sha1:` prefix stops the hex detector flagging the
+list. A decision with `allowlist_sha256: sha256:<hex>` in its
+frontmatter seals it (`R-SECRET-012`, `D195`).
 
 `propose(repo_root)` returns (`R-SECRET-013`):
 

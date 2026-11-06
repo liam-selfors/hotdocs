@@ -8,5 +8,5 @@
   a hex-entropy finding. Findings that cannot be allowlisted, such as a
   secret in `gen/`, are returned as `ineligible`, each with `file`,
   `line`, `rule_id`. Entries sort by `file`, `type`, `hashed_secret`. An
-  invalid current allowlist raises rather than being proposed over. A
-  person reads the proposal and commits it.
+  invalid (including unsealed) allowlist raises rather than being
+  proposed over.
