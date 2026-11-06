@@ -1,12 +1,10 @@
-import contextlib
 import hashlib
-import io
 import json
 import os
 import re
+import tempfile
 import unittest
 from pathlib import Path
-from tempfile import TemporaryDirectory
 
 import license_scanner
 
@@ -17,99 +15,125 @@ def _get(obj, key, default=None):
     return getattr(obj, key, default)
 
 
+def _write_fake_cache_manager(repo_root):
+    cache_dir = repo_root / "gen" / "cache-manager"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    (cache_dir / "cache_manager.py").write_text(
+        '''
+from dataclasses import dataclass
+from typing import Any
+
+
+@dataclass
+class CacheKey:
+    spec_bundle_hash: str
+    gate_inputs_hash: str
+    gate_version: str
+    model_pin: str
+
+
+@dataclass
+class CachedResult:
+    gate_type: str
+    payload: Any
+    stored_at: str
+
+
+def get(cache_key, *, repo_root=None):
+    return {"gate_type": None, "payload": None, "stored_at": None}
+
+
+def put(cache_key, result, *, repo_root=None):
+    pass
+''',
+        encoding="utf-8",
+    )
+
+
+_TOKEN_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*|\d+")
+
+
 def _tokenize(text):
-    text = re.sub(r'/\*.*?\*/', ' ', text, flags=re.S)
-    text = re.sub(r'""".*?"""', ' ', text, flags=re.S)
-    text = re.sub(r"'''.*?'''", ' ', text, flags=re.S)
-    text = re.sub(r'//.*', '', text)
-    text = re.sub(r'#.*', '', text)
-    tokens = re.findall(r'[A-Za-z_][A-Za-z0-9_]*|\d+', text)
-    return [t.lower() for t in tokens]
+    text = re.sub(r"/\*.*?\*/", " ", text, flags=re.DOTALL)
+    text = re.sub(r'""".*?"""', " ", text, flags=re.DOTALL)
+    text = re.sub(r"'''.*?'''", " ", text, flags=re.DOTALL)
+    text = re.sub(r"//.*", "", text)
+    text = re.sub(r"#.*", "", text)
+    return [tok.lower() for tok in _TOKEN_RE.findall(text)]
 
 
-def _window_hashes(tokens, n=9):
+def _window_hashes(tokens, size=9):
     hashes = []
-    for i in range(len(tokens) - n + 1):
-        window = tokens[i:i + n]
-        joined = '\x1f'.join(window)
-        hashes.append(hashlib.sha256(joined.encode('utf-8')).hexdigest())
+    for i in range(len(tokens) - size + 1):
+        window = "\x1f".join(tokens[i:i + size])
+        hashes.append(hashlib.sha256(window.encode("utf-8")).hexdigest())
     return hashes
 
 
-class AcLicense001Test(unittest.TestCase):
-    def setUp(self):
-        self._tmp = TemporaryDirectory()
-        self.repo_root = Path(self._tmp.name)
-        self._env_backup = dict(os.environ)
-        os.environ.pop('VAR_COMPLIANCE_WEBHOOK_URL', None)
-
-    def tearDown(self):
-        os.environ.clear()
-        os.environ.update(self._env_backup)
-        self._tmp.cleanup()
-
-    def _write(self, rel_path, content):
-        path = self.repo_root / rel_path
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(content)
-        return path
-
+class TestACLicense001(unittest.TestCase):
     def test_similarity_at_block_threshold_blocks_merge(self):
-        # Ten distinct identifier tokens -> exactly two overlapping 9-token
-        # windows, so a corpus holding both windows' hashes yields a
-        # similarity_score of 1.0 (>= any configured block_threshold).
-        source_text = "alpha beta gamma delta epsilon zeta eta theta iota kappa\n"
-        self._write('gen/widget/widget.py', source_text)
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            _write_fake_cache_manager(repo_root)
 
-        tokens = _tokenize(source_text)
-        hashes = _window_hashes(tokens, 9)
-        self.assertEqual(len(hashes), 2)
+            component_id = "comp-widget"
+            slug = "widget"
+            component_dir = repo_root / "gen" / slug
+            component_dir.mkdir(parents=True, exist_ok=True)
 
-        corpus = {
-            "corpus_version": 1,
-            "block_threshold": 0.70,
-            "entries": [
-                {
-                    "reference_id": "ref-001",
-                    "license_family": "GPL",
-                    "risk_tier": "high",
-                    "hashes": hashes,
-                }
-            ],
-        }
-        self._write('license-corpus.json', json.dumps(corpus))
-        os.environ['VAR_LICENSE_CORPUS_PATH'] = 'license-corpus.json'
+            source_text = (
+                "# a line comment that must be stripped\n"
+                "alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu\n"
+            )
+            (component_dir / "widget.py").write_text(source_text, encoding="utf-8")
 
-        result = license_scanner.scan('comp-widget', self.repo_root)
+            tokens = _tokenize(source_text)
+            window_hashes = sorted(set(_window_hashes(tokens, 9)))
+            self.assertTrue(len(window_hashes) > 0)
 
-        similarity_score = _get(result, 'similarity_score')
-        block_threshold = _get(result, 'block_threshold')
-        blocked = _get(result, 'blocked')
+            corpus = {
+                "corpus_version": 7,
+                "block_threshold": 0.5,
+                "entries": [
+                    {
+                        "reference_id": "ref-001",
+                        "license_family": "gpl-3.0",
+                        "risk_tier": "high",
+                        "hashes": window_hashes,
+                    }
+                ],
+            }
+            corpus_path = repo_root / "corpus.json"
+            corpus_path.write_text(json.dumps(corpus), encoding="utf-8")
 
-        self.assertIsNotNone(similarity_score)
-        self.assertIsNotNone(block_threshold)
-        self.assertGreaterEqual(similarity_score, block_threshold)
-        self.assertIs(blocked, True)
-
-        matches = _get(result, 'matches') or []
-        self.assertTrue(len(matches) > 0)
-        self.assertEqual(_get(matches[0], 'reference_id'), 'ref-001')
-
-        argv = ['comp-widget', '--repo-root=' + str(self.repo_root), '--format=json']
-        stdout = io.StringIO()
-        exit_code = None
-        with contextlib.redirect_stdout(stdout):
+            old_env = os.environ.get("VAR_LICENSE_CORPUS_PATH")
+            os.environ["VAR_LICENSE_CORPUS_PATH"] = str(corpus_path)
             try:
-                ret = license_scanner.main(argv)
-            except SystemExit as exc:
-                exit_code = exc.code
-            else:
-                exit_code = ret
+                result = license_scanner.scan(component_id, repo_root)
+            finally:
+                if old_env is None:
+                    os.environ.pop("VAR_LICENSE_CORPUS_PATH", None)
+                else:
+                    os.environ["VAR_LICENSE_CORPUS_PATH"] = old_env
 
-        self.assertEqual(exit_code, 1)
-        printed = json.loads(stdout.getvalue())
-        self.assertIs(_get(printed, 'blocked'), True)
+            self.assertTrue(_get(result, "evaluated"))
+            self.assertIsNone(_get(result, "reason"))
+
+            similarity_score = _get(result, "similarity_score")
+            block_threshold = _get(result, "block_threshold")
+            self.assertIsNotNone(similarity_score)
+            self.assertIsNotNone(block_threshold)
+            self.assertGreaterEqual(similarity_score, block_threshold)
+
+            self.assertTrue(_get(result, "blocked"))
+
+            matches = _get(result, "matches")
+            self.assertTrue(matches)
+            match0 = matches[0]
+            self.assertEqual(_get(match0, "reference_id"), "ref-001")
+            self.assertEqual(_get(match0, "license_family"), "gpl-3.0")
+            self.assertEqual(_get(match0, "risk_tier"), "high")
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     unittest.main()

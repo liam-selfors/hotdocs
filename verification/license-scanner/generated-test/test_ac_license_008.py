@@ -1,10 +1,6 @@
 import hashlib
 import json
-import os
-import shutil
-import tempfile
-import unittest
-from pathlib import Path
+import textwrap
 
 import license_scanner
 
@@ -15,111 +11,104 @@ def _get(obj, key, default=None):
     return getattr(obj, key, default)
 
 
-_FAKE_CACHE_MANAGER_SOURCE = '''
-from dataclasses import dataclass
+def _window_hash(tokens):
+    joined = "\x1f".join(tokens)
+    return hashlib.sha256(joined.encode("utf-8")).hexdigest()
 
 
-@dataclass
-class CacheKey:
-    spec_bundle_hash: str
-    gate_inputs_hash: str
-    gate_version: str
-    model_pin: str
+def _write_fake_cache_manager(repo_root):
+    cache_dir = repo_root / "gen" / "cache-manager"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    (cache_dir / "cache_manager.py").write_text(
+        textwrap.dedent(
+            """
+            class CacheKey:
+                def __init__(self, spec_bundle_hash, gate_inputs_hash, gate_version, model_pin):
+                    self.spec_bundle_hash = spec_bundle_hash
+                    self.gate_inputs_hash = gate_inputs_hash
+                    self.gate_version = gate_version
+                    self.model_pin = model_pin
+
+            class CachedResult:
+                def __init__(self, gate_type, payload, stored_at):
+                    self.gate_type = gate_type
+                    self.payload = payload
+                    self.stored_at = stored_at
+
+            def get(cache_key, *, repo_root=None):
+                return None
+
+            def put(cache_key, result, *, repo_root=None):
+                return None
+            """
+        ),
+        encoding="utf-8",
+    )
 
 
-@dataclass
-class CachedResult:
-    gate_type: str
-    payload: dict
-    stored_at: str
+def test_eight_token_run_does_not_match_nine_token_window(tmp_path, monkeypatch):
+    repo_root = tmp_path
+    _write_fake_cache_manager(repo_root)
 
+    reference_tokens = [
+        "alpha", "bravo", "charlie", "delta", "echo",
+        "foxtrot", "golf", "hotel", "india",
+    ]
+    assert len(reference_tokens) == 9
+    reference_hash = _window_hash(reference_tokens)
 
-class Miss:
-    pass
+    corpus = {
+        "corpus_version": 1,
+        "block_threshold": 0.70,
+        "entries": [
+            {
+                "reference_id": "ref-001",
+                "license_family": "MIT",
+                "risk_tier": "low",
+                "hashes": [reference_hash],
+            }
+        ],
+    }
+    corpus_path = repo_root / "corpus.json"
+    corpus_path.write_text(json.dumps(corpus), encoding="utf-8")
+    monkeypatch.setenv("VAR_LICENSE_CORPUS_PATH", str(corpus_path))
 
+    # Negative case: "zulu alpha bravo charlie delta echo foxtrot golf
+    # hotel yankee" shares the 8-token run "alpha..hotel" with the
+    # reference's 9-token window ("alpha..india"), but its own two
+    # 9-token windows each substitute a different 9th token (zulu at the
+    # front, yankee at the back) for the reference's "india" -- so
+    # neither window hash can equal the corpus entry's hash.
+    neg_dir = repo_root / "gen" / "license-neg"
+    neg_dir.mkdir(parents=True)
+    (neg_dir / "sample.py").write_text(
+        "zulu alpha bravo charlie delta echo foxtrot golf hotel yankee",
+        encoding="utf-8",
+    )
 
-def get(cache_key, *, repo_root=None):
-    return Miss()
+    neg_result = license_scanner.scan("comp-license-neg", repo_root)
 
+    assert _get(neg_result, "evaluated") is True
+    assert _get(neg_result, "similarity_score") == 0.0
+    assert _get(neg_result, "blocked") is False
+    assert _get(neg_result, "matches") == []
 
-def put(cache_key, result, *, repo_root=None):
-    return None
-'''
+    # Positive control: exactly the 9 reference tokens and nothing else,
+    # forming exactly one 9-token window identical to the corpus entry's
+    # hashed window. Together with the negative case above, this shows
+    # the window size is exactly 9 -- an 8-token overlap alone never
+    # matches, but the full 9-token run does.
+    pos_dir = repo_root / "gen" / "license-pos"
+    pos_dir.mkdir(parents=True)
+    (pos_dir / "sample.py").write_text(
+        " ".join(reference_tokens),
+        encoding="utf-8",
+    )
 
+    pos_result = license_scanner.scan("comp-license-pos", repo_root)
 
-class AcLicense008Test(unittest.TestCase):
-    def setUp(self):
-        self.repo_root = tempfile.mkdtemp(prefix="hotdocs-ac-license-008-")
-        self._prev_corpus_path = os.environ.get("VAR_LICENSE_CORPUS_PATH")
-
-    def tearDown(self):
-        shutil.rmtree(self.repo_root, ignore_errors=True)
-        if self._prev_corpus_path is None:
-            os.environ.pop("VAR_LICENSE_CORPUS_PATH", None)
-        else:
-            os.environ["VAR_LICENSE_CORPUS_PATH"] = self._prev_corpus_path
-
-    def test_shared_eight_token_run_contributes_no_matching_window_hash(self):
-        component_slug = "sample-component"
-        component_id = "comp-" + component_slug
-
-        component_dir = os.path.join(self.repo_root, "gen", component_slug)
-        os.makedirs(component_dir, exist_ok=True)
-
-        # 10 tokens -> exactly two 9-token windows, neither equal to the
-        # reference window below (shifted by one position each way), while
-        # tokens[1:9] ("alpha".."hotel") are the same 8-token run as the
-        # reference window's first 8 tokens.
-        gen_source = "zulu alpha bravo charlie delta echo foxtrot golf hotel yankee\n"
-        with open(os.path.join(component_dir, "main.py"), "w", encoding="utf-8") as f:
-            f.write(gen_source)
-
-        reference_tokens = [
-            "alpha", "bravo", "charlie", "delta",
-            "echo", "foxtrot", "golf", "hotel", "india",
-        ]
-        reference_hash = hashlib.sha256(
-            "\x1f".join(reference_tokens).encode("utf-8")
-        ).hexdigest()
-
-        corpus = {
-            "corpus_version": 1,
-            "block_threshold": 0.70,
-            "entries": [
-                {
-                    "reference_id": "ref-ac-license-008",
-                    "license_family": "test-family",
-                    "risk_tier": "low",
-                    "hashes": [reference_hash],
-                }
-            ],
-        }
-        corpus_dir = os.path.join(self.repo_root, "corpus")
-        os.makedirs(corpus_dir, exist_ok=True)
-        corpus_path = os.path.join(corpus_dir, "license_corpus.json")
-        with open(corpus_path, "w", encoding="utf-8") as f:
-            json.dump(corpus, f)
-        os.environ["VAR_LICENSE_CORPUS_PATH"] = corpus_path
-
-        cache_manager_dir = os.path.join(self.repo_root, "gen", "cache-manager")
-        os.makedirs(cache_manager_dir, exist_ok=True)
-        with open(
-            os.path.join(cache_manager_dir, "cache_manager.py"), "w", encoding="utf-8"
-        ) as f:
-            f.write(_FAKE_CACHE_MANAGER_SOURCE)
-
-        result = license_scanner.scan(component_id, Path(self.repo_root))
-
-        similarity_score = _get(result, "similarity_score")
-        blocked = _get(result, "blocked")
-        matches = _get(result, "matches", [])
-        cache_hit = _get(result, "cache_hit")
-
-        self.assertEqual(similarity_score, 0.0)
-        self.assertFalse(blocked)
-        self.assertFalse(cache_hit)
-        self.assertEqual(list(matches), [])
-
-
-if __name__ == "__main__":
-    unittest.main()
+    assert _get(pos_result, "evaluated") is True
+    assert _get(pos_result, "similarity_score") == 1.0
+    assert _get(pos_result, "blocked") is True
+    matches = _get(pos_result, "matches")
+    assert any(_get(m, "reference_id") == "ref-001" for m in matches)

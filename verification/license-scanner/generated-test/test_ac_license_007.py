@@ -1,21 +1,8 @@
-"""Test for AC-LICENSE-007 against comp-license-scanner.
-
-Scope note: comp-license-scanner's own documented interface never
-mentions `.hotdocs/attempts/` (R-LICENSE-007's actual preservation
-mechanism lives in a different, undocumented-here component). The
-only persistence this component's contract exposes is its
-cache-manager interaction, so that is what this test exercises: a
-flagged attempt and a later clean retry must land in two distinct,
-non-colliding cache entries rather than one overwriting the other.
-"""
-
 import hashlib
 import json
 import os
-import sys
+import pathlib
 import tempfile
-import unittest
-from pathlib import Path
 
 import license_scanner
 
@@ -26,10 +13,13 @@ def _get(obj, key, default=None):
     return getattr(obj, key, default)
 
 
-FAKE_CACHE_MANAGER_SOURCE = """
+_CACHE_MANAGER_TEMPLATE = '''
 import dataclasses
 import json
 import os
+
+STORE_PATH = __STORE_PATH__
+LOG_PATH = __LOG_PATH__
 
 
 @dataclasses.dataclass
@@ -43,7 +33,7 @@ class CacheKey:
 @dataclasses.dataclass
 class CachedResult:
     gate_type: str
-    payload: object
+    payload: dict
     stored_at: str
 
 
@@ -51,184 +41,161 @@ class Miss:
     pass
 
 
-_STORE_PATH = os.environ["FAKE_CACHE_STORE_PATH"]
+def _field(obj, name, default=None):
+    if isinstance(obj, dict):
+        return obj.get(name, default)
+    return getattr(obj, name, default)
 
 
-def _read_store():
-    if not os.path.exists(_STORE_PATH):
-        return []
-    with open(_STORE_PATH, "r") as f:
-        return json.load(f)
+def _load_store():
+    if os.path.exists(STORE_PATH):
+        with open(STORE_PATH, "r") as f:
+            return json.load(f)
+    return {}
 
 
-def _write_store(entries):
-    with open(_STORE_PATH, "w") as f:
-        json.dump(entries, f)
+def _save_store(store):
+    with open(STORE_PATH, "w") as f:
+        json.dump(store, f)
 
 
-def _key_list(cache_key):
-    return [
-        cache_key.spec_bundle_hash,
-        cache_key.gate_inputs_hash,
-        cache_key.gate_version,
-        cache_key.model_pin,
-    ]
+def _key_str(cache_key):
+    return "|".join([
+        str(_field(cache_key, "spec_bundle_hash")),
+        str(_field(cache_key, "gate_inputs_hash")),
+        str(_field(cache_key, "gate_version")),
+        str(_field(cache_key, "model_pin")),
+    ])
+
+
+def _log(event, key_str):
+    with open(LOG_PATH, "a") as f:
+        f.write(event + ":" + key_str + "\\n")
 
 
 def get(cache_key, *, repo_root=None):
-    entries = _read_store()
-    kl = _key_list(cache_key)
-    for entry in entries:
-        if entry["key"] == kl:
-            return CachedResult(
-                gate_type=entry["gate_type"],
-                payload=entry["payload"],
-                stored_at=entry["stored_at"],
-            )
-    return Miss()
+    store = _load_store()
+    k = _key_str(cache_key)
+    _log("get", k)
+    entry = store.get(k)
+    if entry is None:
+        return Miss()
+    return CachedResult(
+        gate_type=entry["gate_type"],
+        payload=entry["payload"],
+        stored_at=entry["stored_at"],
+    )
 
 
 def put(cache_key, result, *, repo_root=None):
-    entries = _read_store()
-    kl = _key_list(cache_key)
-    entries = [e for e in entries if e["key"] != kl]
-    entries.append(
-        {
-            "key": kl,
-            "gate_type": result.gate_type,
-            "payload": result.payload,
-            "stored_at": result.stored_at,
-        }
-    )
-    _write_store(entries)
-"""
+    store = _load_store()
+    k = _key_str(cache_key)
+    store[k] = {
+        "gate_type": _field(result, "gate_type"),
+        "payload": _field(result, "payload"),
+        "stored_at": _field(result, "stored_at"),
+    }
+    _save_store(store)
+    _log("put", k)
+'''
 
 
-class LicenseScannerPreservesFlaggedAttemptTest(unittest.TestCase):
-    def setUp(self):
-        self._tmp = tempfile.TemporaryDirectory()
-        self.repo_root = Path(self._tmp.name)
+def test_flagged_sample_preserved_alongside_clean_retry():
+    with tempfile.TemporaryDirectory() as tmp:
+        repo_root = pathlib.Path(tmp)
 
-        cache_manager_dir = self.repo_root / "gen" / "cache-manager"
+        cache_manager_dir = repo_root / "gen" / "cache-manager"
         cache_manager_dir.mkdir(parents=True)
-        (cache_manager_dir / "cache_manager.py").write_text(
-            FAKE_CACHE_MANAGER_SOURCE
+        store_path = repo_root / "cache_store.json"
+        log_path = repo_root / "cache_invocations.log"
+
+        module_source = _CACHE_MANAGER_TEMPLATE.replace(
+            "__STORE_PATH__", repr(str(store_path))
+        ).replace(
+            "__LOG_PATH__", repr(str(log_path))
         )
+        (cache_manager_dir / "cache_manager.py").write_text(module_source)
 
-        self.store_path = self.repo_root / "fake_cache_store.json"
-        self.corpus_path = self.repo_root / "license-corpus.json"
-
-        self.flagged_tokens = [
-            "alpha",
-            "beta",
-            "gamma",
-            "delta",
-            "epsilon",
-            "zeta",
-            "eta",
-            "theta",
-            "iota",
+        flagged_tokens = [
+            "alpha", "beta", "gamma", "delta", "epsilon",
+            "zeta", "eta", "theta", "iota",
         ]
-        window = "\x1f".join(self.flagged_tokens)
-        flagged_hash = hashlib.sha256(window.encode("utf-8")).hexdigest()
+        clean_tokens = [
+            "uno", "dos", "tres", "cuatro", "cinco",
+            "seis", "siete", "ocho", "nueve",
+        ]
+        flagged_window_hash = hashlib.sha256(
+            "\x1f".join(flagged_tokens).encode("utf-8")
+        ).hexdigest()
 
         corpus = {
-            "corpus_version": 3,
-            "block_threshold": 0.70,
+            "corpus_version": 1,
+            "block_threshold": 0.5,
             "entries": [
                 {
                     "reference_id": "ref-001",
                     "license_family": "GPL",
                     "risk_tier": "high",
-                    "hashes": [flagged_hash],
+                    "hashes": [flagged_window_hash],
                 }
             ],
         }
-        self.corpus_path.write_text(json.dumps(corpus))
+        corpus_path = repo_root / "license_corpus.json"
+        corpus_path.write_text(json.dumps(corpus))
 
-        self.widget_dir = self.repo_root / "gen" / "widget"
-        self.widget_dir.mkdir(parents=True)
-        self.widget_file = self.widget_dir / "widget.py"
-        self.widget_file.write_text(" ".join(self.flagged_tokens) + "\n")
+        gen_dir = repo_root / "gen" / "sample"
+        gen_dir.mkdir(parents=True)
+        target_file = gen_dir / "sample.py"
 
-        env_updates = {
-            "VAR_LICENSE_CORPUS_PATH": str(self.corpus_path),
-            "FAKE_CACHE_STORE_PATH": str(self.store_path),
-        }
-        self._old_env = {}
-        for key, value in env_updates.items():
-            self._old_env[key] = os.environ.get(key)
-            os.environ[key] = value
-        for absent_key in ("VAR_COMPLIANCE_WEBHOOK_URL",):
-            self._old_env.setdefault(absent_key, os.environ.get(absent_key))
-            os.environ.pop(absent_key, None)
+        old_env = os.environ.get("VAR_LICENSE_CORPUS_PATH")
+        os.environ["VAR_LICENSE_CORPUS_PATH"] = str(corpus_path)
+        try:
+            target_file.write_text(" ".join(flagged_tokens) + "\n")
+            flagged_result = license_scanner.scan("comp-sample", repo_root)
 
-    def tearDown(self):
-        for key, old_value in self._old_env.items():
-            if old_value is None:
-                os.environ.pop(key, None)
+            target_file.write_text(" ".join(clean_tokens) + "\n")
+            clean_result = license_scanner.scan("comp-sample", repo_root)
+        finally:
+            if old_env is None:
+                os.environ.pop("VAR_LICENSE_CORPUS_PATH", None)
             else:
-                os.environ[key] = old_value
-        sys.modules.pop("cache_manager", None)
-        self._tmp.cleanup()
+                os.environ["VAR_LICENSE_CORPUS_PATH"] = old_env
 
-    def test_flagged_attempt_preserved_after_clean_retry(self):
-        flagged_result = license_scanner.scan("comp-widget", self.repo_root)
+        assert _get(flagged_result, "evaluated") is True
+        assert _get(clean_result, "evaluated") is True
+        assert _get(flagged_result, "blocked") is True
+        assert _get(clean_result, "blocked") is False
+        assert len(_get(flagged_result, "matches")) >= 1
 
-        self.assertTrue(_get(flagged_result, "blocked"))
-        self.assertGreaterEqual(_get(flagged_result, "similarity_score"), 0.70)
-        flagged_matches = _get(flagged_result, "matches") or []
-        self.assertTrue(
-            any(_get(m, "reference_id") == "ref-001" for m in flagged_matches)
+        assert log_path.exists(), "fake cache-manager was never invoked"
+        put_keys = []
+        for line in log_path.read_text().splitlines():
+            if line.startswith("put:"):
+                put_keys.append(line[len("put:"):])
+
+        assert len(put_keys) >= 2, "expected two separate cache writes, one per attempt"
+        first_put_key = put_keys[0]
+        second_put_key = put_keys[1]
+
+        assert first_put_key != second_put_key, (
+            "the flagged attempt and the clean retry must not collapse onto "
+            "the same cache key, or the retry's write would overwrite the "
+            "flagged attempt's record"
         )
 
-        clean_tokens = [
-            "red",
-            "green",
-            "blue",
-            "purple",
-            "orange",
-            "yellow",
-            "black",
-            "white",
-            "gray",
-            "pink",
-        ]
-        self.widget_file.write_text(" ".join(clean_tokens) + "\n")
+        final_store = json.loads(store_path.read_text())
 
-        clean_result = license_scanner.scan("comp-widget", self.repo_root)
-        self.assertFalse(_get(clean_result, "blocked"))
-
-        self.assertTrue(self.store_path.exists())
-        entries = json.loads(self.store_path.read_text())
-
-        payloads = [entry["payload"] for entry in entries]
-        blocked_payloads = [p for p in payloads if _get(p, "blocked") is True]
-        clean_payloads = [p for p in payloads if _get(p, "blocked") is False]
-
-        self.assertEqual(
-            len(blocked_payloads),
-            1,
-            "the original flagged result must still be present, exactly once",
+        assert first_put_key in final_store, (
+            "the original flagged result is missing from the record"
         )
-        self.assertEqual(
-            len(clean_payloads),
-            1,
-            "the clean retry result must also be present",
+        assert second_put_key in final_store, (
+            "the clean retry result is missing from the record"
         )
 
-        preserved_flagged = blocked_payloads[0]
-        self.assertEqual(_get(preserved_flagged, "component_id"), "comp-widget")
-        self.assertGreaterEqual(_get(preserved_flagged, "similarity_score"), 0.70)
-        preserved_matches = _get(preserved_flagged, "matches") or []
-        self.assertTrue(
-            any(_get(m, "reference_id") == "ref-001" for m in preserved_matches),
-            "the flagged entry's own matches must not have been erased or overwritten",
+        flagged_payload = final_store[first_put_key]["payload"]
+        clean_payload = final_store[second_put_key]["payload"]
+
+        assert _get(flagged_payload, "blocked") is True, (
+            "the original flagged result was overwritten or erased"
         )
-
-        preserved_clean = clean_payloads[0]
-        self.assertEqual(_get(preserved_clean, "component_id"), "comp-widget")
-
-
-if __name__ == "__main__":
-    unittest.main()
+        assert _get(clean_payload, "blocked") is False

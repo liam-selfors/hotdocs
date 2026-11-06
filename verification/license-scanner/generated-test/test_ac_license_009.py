@@ -2,6 +2,8 @@ import hashlib
 import json
 import socket
 
+import pytest
+
 import license_scanner
 
 
@@ -11,64 +13,61 @@ def _get(obj, key, default=None):
     return getattr(obj, key, default)
 
 
-def _window_hash(tokens):
-    return hashlib.sha256("\x1f".join(tokens).encode("utf-8")).hexdigest()
-
-
-def _unused_port():
-    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    s.bind(("127.0.0.1", 0))
-    port = s.getsockname()[1]
-    s.close()
+def _closed_port():
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.bind(("127.0.0.1", 0))
+    port = sock.getsockname()[1]
+    sock.close()
     return port
 
 
-_CACHE_MANAGER_SOURCE = """
-from dataclasses import dataclass
+def _write_cache_manager_fake(repo_root):
+    cache_dir = repo_root / "gen" / "cache-manager"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    (cache_dir / "cache_manager.py").write_text(
+        "class CacheKey:\n"
+        "    def __init__(self, spec_bundle_hash, gate_inputs_hash, gate_version, model_pin):\n"
+        "        self.spec_bundle_hash = spec_bundle_hash\n"
+        "        self.gate_inputs_hash = gate_inputs_hash\n"
+        "        self.gate_version = gate_version\n"
+        "        self.model_pin = model_pin\n"
+        "\n"
+        "\n"
+        "class CachedResult:\n"
+        "    def __init__(self, gate_type, payload, stored_at):\n"
+        "        self.gate_type = gate_type\n"
+        "        self.payload = payload\n"
+        "        self.stored_at = stored_at\n"
+        "\n"
+        "\n"
+        "def get(cache_key, *, repo_root=None):\n"
+        "    return None\n"
+        "\n"
+        "\n"
+        "def put(cache_key, result, *, repo_root=None):\n"
+        "    return None\n"
+    )
 
 
-@dataclass
-class CacheKey:
-    spec_bundle_hash: str
-    gate_inputs_hash: str
-    gate_version: str
-    model_pin: str
-
-
-@dataclass
-class CachedResult:
-    gate_type: str
-    payload: object
-    stored_at: str
-
-
-def get(cache_key, *, repo_root=None):
-    return {"payload": None}
-
-
-def put(cache_key, result, *, repo_root=None):
-    pass
-"""
-
-
-def test_ac_license_009(tmp_path, monkeypatch):
+def test_ac_license_009_network_failure_during_high_risk_notification(tmp_path, monkeypatch):
     repo_root = tmp_path
+    _write_cache_manager_fake(repo_root)
 
-    cache_manager_dir = repo_root / "gen" / "cache-manager"
-    cache_manager_dir.mkdir(parents=True)
-    (cache_manager_dir / "cache_manager.py").write_text(_CACHE_MANAGER_SOURCE)
-
-    scanned_slug = "target-app"
-    scanned_dir = repo_root / "gen" / scanned_slug
-    scanned_dir.mkdir(parents=True)
-
-    source_tokens = [
-        "foo", "bar", "baz", "qux", "quux",
-        "corge", "grault", "garply", "waldo",
+    # Ten distinct tokens produce exactly two overlapping 9-token windows
+    # (window A = tokens[0:9], window B = tokens[1:10]); only window A's
+    # hash is seeded into the corpus, giving a similarity_score of 1/2,
+    # which stays below the 0.70 block threshold while still surfacing a
+    # high-risk match.
+    tokens = [
+        "alpha_one", "bravo_two", "charlie_three", "delta_four", "echo_five",
+        "foxtrot_six", "golf_seven", "hotel_eight", "india_nine", "juliet_ten",
     ]
-    (scanned_dir / "app.py").write_text("\n".join(source_tokens) + "\n")
+    window_a = tokens[0:9]
+    hash_a = hashlib.sha256("\x1f".join(window_a).encode("utf-8")).hexdigest()
 
-    entry_hash = _window_hash(source_tokens)
+    target_dir = repo_root / "gen" / "fixture-target"
+    target_dir.mkdir(parents=True, exist_ok=True)
+    (target_dir / "fixture_target.py").write_text(" ".join(tokens) + "\n")
 
     corpus = {
         "corpus_version": 1,
@@ -76,47 +75,45 @@ def test_ac_license_009(tmp_path, monkeypatch):
         "entries": [
             {
                 "reference_id": "ref-001",
-                "license_family": "GPL",
+                "license_family": "GPL-3.0",
                 "risk_tier": "high",
-                "hashes": [entry_hash],
+                "hashes": [hash_a],
             }
         ],
     }
-    (repo_root / "corpus.json").write_text(json.dumps(corpus))
+    corpus_path = repo_root / "corpus.json"
+    corpus_path.write_text(json.dumps(corpus))
+
+    # A port nobody is listening on, guaranteeing the webhook call itself
+    # raises a real network error (connection refused) rather than relying
+    # on any particular HTTP library being mocked.
+    port = _closed_port()
+    webhook_url = "http://127.0.0.1:%d/compliance-hook" % port
 
     monkeypatch.setenv("VAR_LICENSE_CORPUS_PATH", "corpus.json")
+    monkeypatch.setenv("VAR_COMPLIANCE_WEBHOOK_URL", webhook_url)
 
-    unreachable_port = _unused_port()
-    monkeypatch.setenv(
-        "VAR_COMPLIANCE_WEBHOOK_URL",
-        "http://127.0.0.1:%d/webhook" % unreachable_port,
-    )
+    result = license_scanner.scan("comp-fixture-target", repo_root)
 
-    result = license_scanner.scan("comp-target-app", repo_root)
+    assert _get(result, "evaluated") is True
+    assert _get(result, "similarity_score") == pytest.approx(0.5)
+    assert _get(result, "block_threshold") == pytest.approx(0.70)
 
-    similarity_score = _get(result, "similarity_score")
-    block_threshold = _get(result, "block_threshold")
     blocked = _get(result, "blocked")
-    notified = _get(result, "notified")
-    delivery_error = _get(result, "notification_delivery_error")
+    assert blocked is False
+
     matches = _get(result, "matches")
+    assert any(_get(m, "risk_tier") == "high" for m in matches)
 
-    assert similarity_score == 1.0
-    assert block_threshold == 0.70
+    # notified is due purely to the high-risk match, independent of the
+    # (false) blocked outcome, and independent of webhook delivery success.
+    assert _get(result, "notified") is True
 
-    found_high_risk_match = any(
-        _get(match, "reference_id") == "ref-001"
-        and _get(match, "risk_tier") == "high"
-        for match in matches
-    )
-    assert found_high_risk_match
-
-    assert notified is True
-
+    delivery_error = _get(result, "notification_delivery_error")
     assert delivery_error is not None
     assert _get(delivery_error, "category") == "network"
-    message = _get(delivery_error, "message")
-    assert isinstance(message, str) and message
+    assert _get(delivery_error, "message")
 
-    # blocked reflects confidence only; a failed webhook call must not alter it.
-    assert blocked is True
+    # blocked must remain exactly what similarity_score/block_threshold
+    # dictate, unaffected by the webhook delivery failure.
+    assert _get(result, "blocked") is False

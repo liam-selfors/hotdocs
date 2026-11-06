@@ -17,9 +17,10 @@ sealed: false
 Automated, unconditional scan of `gen/<component>/` against a reference
 corpus of known-licensed-code fingerprints. No human sign-off is
 required to clear a flag — a match blocks the merge the same way a
-failed test does — but no result, clean or flagged, is ever silent:
-every scan result is written to the provenance manifest regardless of
-outcome.
+failed test does — but no result is ever silent: every scan result is
+written to the provenance manifest regardless of outcome, and a scan
+that had no corpus to compare against says it evaluated nothing rather
+than reporting a clean pass.
 
 ## Rationale
 
@@ -60,9 +61,9 @@ See `interface/data/`.
 
 See `acceptance/`.
 
-Every criterion is `kind: compiled` — k-gram fingerprint hashing and
-threshold comparison are deterministic; nothing here needs a model or
-judgment.
+Every criterion is `kind: generated-test`: fingerprint hashing and
+threshold comparison are deterministic and need no model, but none is
+written in the step-phrase grammar.
 
 ## Non-functional constraints
 
@@ -89,3 +90,7 @@ See `constraints.md`.
   testable `AC-LICENSE-*` criteria for real — first successful
   implementation. `gen/license-scanner/license_scanner.py` is now that
   candidate. See `verification/license-scanner/BOOTSTRAP.md`.
+- `D163`/`D164`/`D165`: `gate_version`, CLI coverage, test-environment facts.
+- `D193`: honest gate — `evaluated`/`reason` on every result; no corpus
+  is a visible, non-blocking `not evaluated`; a configured but unusable
+  corpus fails closed. `gate_version` is now `license_scanner@4.0.x`.

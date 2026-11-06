@@ -1,27 +1,17 @@
 import hashlib
 import json
 import re
-from pathlib import Path
-
-import pytest
 
 import license_scanner
 
 
-TOKEN_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*|\d+")
-
-
-def _strip_comments(text):
+def _tokenize(text):
     text = re.sub(r"/\*.*?\*/", "", text, flags=re.DOTALL)
     text = re.sub(r'""".*?"""', "", text, flags=re.DOTALL)
     text = re.sub(r"'''.*?'''", "", text, flags=re.DOTALL)
-    text = re.sub(r"//[^\n]*", "", text)
-    text = re.sub(r"#[^\n]*", "", text)
-    return text
-
-
-def _tokenize(text):
-    return [t.lower() for t in TOKEN_RE.findall(_strip_comments(text))]
+    text = re.sub(r"//.*", "", text)
+    text = re.sub(r"#.*", "", text)
+    return [tok.lower() for tok in re.findall(r"[A-Za-z_][A-Za-z0-9_]*|\d+", text)]
 
 
 def _window_hashes(text):
@@ -34,104 +24,143 @@ def _window_hashes(text):
     return hashes
 
 
-SOURCE_TEXT = (
-    "def calculate_total_price(base_amount, tax_rate_percent, discount_value):\n"
-    "    adjusted_amount = base_amount * tax_rate_percent\n"
-    "    final_price_value = adjusted_amount - discount_value\n"
-    "    return final_price_value\n"
-    "\n"
-    "def apply_discount_schedule(original_price, discount_schedule_id, customer_tier_level):\n"
-    "    computed_discount_amount = original_price * discount_schedule_id\n"
-    "    return computed_discount_amount - customer_tier_level\n"
+FOO_SOURCE = (
+    "def foo_bar_baz(alpha, beta, gamma, delta):\n"
+    "    result = alpha + beta + gamma + delta\n"
+    "    other = result * 2\n"
+    "    final = other - 1\n"
+    "    return final\n"
 )
 
 
-def _write_component_source(repo_root):
-    foo_dir = repo_root / "gen" / "foo"
-    foo_dir.mkdir(parents=True, exist_ok=True)
-    (foo_dir / "app.py").write_text(SOURCE_TEXT, encoding="utf-8")
+def _write_component(repo_root, source=FOO_SOURCE):
+    comp_dir = repo_root / "gen" / "foo"
+    comp_dir.mkdir(parents=True, exist_ok=True)
+    (comp_dir / "main.py").write_text(source)
 
 
-def _write_corpus(repo_root, filename, hashes, block_threshold=0.70):
-    corpus = {
-        "corpus_version": 3,
+def _write_corpus(path, entries, corpus_version=1, block_threshold=0.70):
+    path.write_text(json.dumps({
+        "corpus_version": corpus_version,
         "block_threshold": block_threshold,
-        "entries": [
-            {
-                "reference_id": "ref-001",
-                "license_family": "GPL",
-                "risk_tier": "high",
-                "hashes": sorted(hashes),
-            }
-        ],
-    }
-    corpus_path = repo_root / filename
-    corpus_path.write_text(json.dumps(corpus), encoding="utf-8")
-    return corpus_path
+        "entries": entries,
+    }))
 
 
-@pytest.fixture(autouse=True)
-def _clean_webhook_env(monkeypatch):
-    monkeypatch.delenv("VAR_COMPLIANCE_WEBHOOK_URL", raising=False)
+def test_no_shared_kgrams_json_and_text(tmp_path, monkeypatch, capsys):
+    repo_root = tmp_path / "repo"
+    _write_component(repo_root)
 
-
-def test_clean_scan_reports_not_blocked_in_json_and_text(tmp_path, monkeypatch, capsys):
-    repo_root = tmp_path / "clean_repo"
-    repo_root.mkdir()
-    _write_component_source(repo_root)
-
-    non_matching_hashes = {"f" * 64, "e" * 64}
-    corpus_path = _write_corpus(repo_root, "corpus.json", non_matching_hashes)
+    corpus_path = tmp_path / "corpus.json"
+    _write_corpus(corpus_path, [
+        {
+            "reference_id": "ref-001",
+            "license_family": "GPL",
+            "risk_tier": "high",
+            "hashes": ["0" * 64, "1" * 64, "2" * 64],
+        }
+    ])
     monkeypatch.setenv("VAR_LICENSE_CORPUS_PATH", str(corpus_path))
 
-    exit_code = license_scanner.main(
+    rc_json = license_scanner.main(
         ["comp-foo", f"--repo-root={repo_root}", "--format=json"]
     )
-    captured = capsys.readouterr()
-    assert exit_code == 0
-    result = json.loads(captured.out.strip())
+    out_json = capsys.readouterr().out
+    assert rc_json == 0
+    result = json.loads(out_json)
     assert result["blocked"] is False
 
-    exit_code_text = license_scanner.main(
+    rc_text = license_scanner.main(
         ["comp-foo", "--repo-root", str(repo_root), "--format", "text"]
     )
-    captured_text = capsys.readouterr()
-    assert exit_code_text == 0
-    assert "similarity_score" in captured_text.out
+    out_text = capsys.readouterr().out
+    assert rc_text == 0
+    assert "similarity_score" in out_text
 
 
-def test_verbatim_copy_at_or_above_threshold_blocks(tmp_path, monkeypatch):
-    repo_root = tmp_path / "blocked_repo"
-    repo_root.mkdir()
-    _write_component_source(repo_root)
+def test_verbatim_match_blocks(tmp_path, monkeypatch):
+    repo_root = tmp_path / "repo"
+    _write_component(repo_root)
 
-    matching_hashes = _window_hashes(SOURCE_TEXT)
-    assert matching_hashes, "fixture source text must produce at least one window"
+    all_hashes = sorted(_window_hashes(FOO_SOURCE))
+    assert all_hashes
 
-    corpus_path = _write_corpus(repo_root, "corpus.json", matching_hashes)
+    corpus_path = tmp_path / "corpus.json"
+    _write_corpus(corpus_path, [
+        {
+            "reference_id": "ref-002",
+            "license_family": "GPL",
+            "risk_tier": "high",
+            "hashes": all_hashes,
+        }
+    ], block_threshold=0.70)
     monkeypatch.setenv("VAR_LICENSE_CORPUS_PATH", str(corpus_path))
 
-    exit_code = license_scanner.main(
+    rc = license_scanner.main(
         ["comp-foo", f"--repo-root={repo_root}", "--format=json"]
     )
-    assert exit_code == 1
+    assert rc == 1
 
 
-def test_usage_errors_return_2(tmp_path, monkeypatch):
-    repo_root = tmp_path / "usage_repo"
-    repo_root.mkdir()
+def test_unset_corpus_not_evaluated(tmp_path, monkeypatch, capsys):
+    repo_root = tmp_path / "repo"
+    _write_component(repo_root)
+    monkeypatch.delenv("VAR_LICENSE_CORPUS_PATH", raising=False)
 
-    bad_argvs = [
-        # missing <component-id>
-        [f"--repo-root={repo_root}", "--format=json"],
-        # invalid --format value
-        ["comp-foo", f"--repo-root={repo_root}", "--format=bogus"],
-        # unknown argument
-        ["comp-foo", f"--repo-root={repo_root}", "--totally-unknown-flag"],
-        # --repo-root given last with no value
-        ["comp-foo", "--repo-root"],
-    ]
+    rc_text = license_scanner.main(
+        ["comp-foo", f"--repo-root={repo_root}", "--format=text"]
+    )
+    out_text = capsys.readouterr().out
+    assert rc_text == 0
+    assert "NOT EVALUATED: no-reference-corpus" in out_text
 
-    for argv in bad_argvs:
-        exit_code = license_scanner.main(argv)
-        assert exit_code == 2, f"expected usage error (2) for argv={argv!r}, got {exit_code!r}"
+    rc_json = license_scanner.main(
+        ["comp-foo", f"--repo-root={repo_root}", "--format=json"]
+    )
+    out_json = capsys.readouterr().out
+    assert rc_json == 0
+    result = json.loads(out_json)
+    assert result["evaluated"] is False
+
+
+def test_missing_corpus_file_unreadable(tmp_path, monkeypatch, capsys):
+    repo_root = tmp_path / "repo"
+    _write_component(repo_root)
+
+    missing_corpus_path = tmp_path / "does_not_exist_corpus.json"
+    monkeypatch.setenv("VAR_LICENSE_CORPUS_PATH", str(missing_corpus_path))
+
+    rc = license_scanner.main(
+        ["comp-foo", f"--repo-root={repo_root}", "--format=text"]
+    )
+    out = capsys.readouterr().out
+    assert rc == 1
+    assert "NOT EVALUATED: corpus-unreadable" in out
+
+
+def test_usage_error_missing_component_id():
+    rc = license_scanner.main([])
+    assert rc == 2
+
+
+def test_usage_error_bad_format(tmp_path):
+    repo_root = tmp_path / "repo"
+    _write_component(repo_root)
+    rc = license_scanner.main(
+        ["comp-foo", f"--repo-root={repo_root}", "--format=bogus"]
+    )
+    assert rc == 2
+
+
+def test_usage_error_unknown_argument(tmp_path):
+    repo_root = tmp_path / "repo"
+    _write_component(repo_root)
+    rc = license_scanner.main(
+        ["comp-foo", f"--repo-root={repo_root}", "--format=text", "--unknown-flag"]
+    )
+    assert rc == 2
+
+
+def test_usage_error_repo_root_missing_value():
+    rc = license_scanner.main(["comp-foo", "--repo-root"])
+    assert rc == 2

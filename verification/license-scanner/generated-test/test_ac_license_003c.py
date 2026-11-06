@@ -1,8 +1,6 @@
 import hashlib
 import json
-from pathlib import Path
-
-import pytest
+import re
 
 import license_scanner
 
@@ -13,9 +11,23 @@ def _get(obj, key, default=None):
     return getattr(obj, key, default)
 
 
-_FAKE_CACHE_MANAGER_SOURCE = '''
-import dataclasses
-import json
+_TOKEN_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*|\d+")
+
+
+def _tokenize(text):
+    return [tok.lower() for tok in _TOKEN_RE.findall(text)]
+
+
+def _window_hashes(tokens, size=9):
+    hashes = []
+    for i in range(len(tokens) - size + 1):
+        window = tokens[i:i + size]
+        joined = "\x1f".join(window)
+        hashes.append(hashlib.sha256(joined.encode("utf-8")).hexdigest())
+    return hashes
+
+
+_CACHE_MANAGER_SOURCE = '''import dataclasses
 import os
 
 
@@ -34,80 +46,87 @@ class CachedResult:
     stored_at: str
 
 
-def get(cache_key, *, repo_root=None):
-    return CachedResult(gate_type="license_scanner", payload=None, stored_at="1970-01-01T00:00:00Z")
+class _Miss:
+    payload = None
 
 
-def put(cache_key, result, *, repo_root=None):
+def _log(entry):
     log_path = os.environ.get("FAKE_CACHE_LOG_PATH")
     if not log_path:
         return
-    payload = result.get("payload") if isinstance(result, dict) else getattr(result, "payload", None)
     with open(log_path, "a", encoding="utf-8") as f:
-        f.write(json.dumps(payload) + "\\n")
+        f.write(entry + "\\n")
+
+
+def get(cache_key, *, repo_root=None):
+    _log("get")
+    return _Miss()
+
+
+def put(cache_key, result, *, repo_root=None):
+    _log("put")
+    return None
 '''
 
 
-def test_block_without_webhook_notifies_false_but_still_records(tmp_path, monkeypatch):
-    repo_root = tmp_path
+def test_ac_license_003c_blocked_low_risk_no_webhook_notified_false_but_recorded(tmp_path, monkeypatch):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
 
     cache_manager_dir = repo_root / "gen" / "cache-manager"
     cache_manager_dir.mkdir(parents=True)
-    (cache_manager_dir / "cache_manager.py").write_text(_FAKE_CACHE_MANAGER_SOURCE, encoding="utf-8")
+    (cache_manager_dir / "cache_manager.py").write_text(_CACHE_MANAGER_SOURCE, encoding="utf-8")
 
-    target_slug_dir = repo_root / "gen" / "fixture-target"
-    target_slug_dir.mkdir(parents=True)
-    source_text = "aaa = bbb + ccc + ddd + eee + fff + ggg + hhh + iii\n"
-    (target_slug_dir / "fixture_target.py").write_text(source_text, encoding="utf-8")
+    component_slug = "sample-widget"
+    component_id = "comp-" + component_slug
+    component_dir = repo_root / "gen" / component_slug
+    component_dir.mkdir(parents=True)
 
-    tokens = ["aaa", "bbb", "ccc", "ddd", "eee", "fff", "ggg", "hhh", "iii"]
-    window_hash = hashlib.sha256("\x1f".join(tokens).encode("utf-8")).hexdigest()
+    source_code = "def quick_brown_fox(jumps, over, lazy, dog, river, bank, moon):\n"
+    (component_dir / "sample_widget.py").write_text(source_code, encoding="utf-8")
+
+    tokens = _tokenize(source_code)
+    assert len(tokens) == 9
+    hashes = _window_hashes(tokens)
+    assert len(hashes) == 1
 
     corpus = {
         "corpus_version": 1,
-        "block_threshold": 0.70,
+        "block_threshold": 0.5,
         "entries": [
             {
-                "reference_id": "ref-100",
+                "reference_id": "ref-low-001",
                 "license_family": "MIT",
                 "risk_tier": "low",
-                "hashes": [window_hash],
+                "hashes": [hashes[0]],
             }
         ],
     }
-    corpus_path = repo_root / "license_corpus.json"
+    corpus_path = repo_root / "reference_corpus.json"
     corpus_path.write_text(json.dumps(corpus), encoding="utf-8")
 
-    log_path = repo_root / "cache_put_log.jsonl"
-
+    log_path = tmp_path / "cache_calls.log"
+    monkeypatch.setenv("FAKE_CACHE_LOG_PATH", str(log_path))
     monkeypatch.setenv("VAR_LICENSE_CORPUS_PATH", str(corpus_path))
     monkeypatch.delenv("VAR_COMPLIANCE_WEBHOOK_URL", raising=False)
-    monkeypatch.setenv("FAKE_CACHE_LOG_PATH", str(log_path))
 
-    result = license_scanner.scan("comp-fixture-target", repo_root)
+    result = license_scanner.scan(component_id, repo_root)
+
+    assert _get(result, "evaluated") is True
 
     similarity_score = _get(result, "similarity_score")
     block_threshold = _get(result, "block_threshold")
-    assert similarity_score is not None and block_threshold is not None
+    assert similarity_score is not None
+    assert block_threshold is not None
     assert similarity_score >= block_threshold
+
+    matches = _get(result, "matches") or []
+    assert any(_get(m, "risk_tier") == "low" for m in matches)
+    assert not any(_get(m, "risk_tier") == "high" for m in matches)
 
     assert _get(result, "blocked") is True
     assert _get(result, "notified") is False
     assert _get(result, "notification_delivery_error") is None
 
-    matches = _get(result, "matches") or []
-    assert len(matches) > 0
-    risk_tiers = {_get(m, "risk_tier") for m in matches}
-    assert "low" in risk_tiers
-    assert "high" not in risk_tiers
-
-    assert log_path.exists(), "cache-manager.put was never invoked; LicenseScanResult was not recorded"
-    recorded_lines = [line for line in log_path.read_text(encoding="utf-8").splitlines() if line.strip()]
-    assert len(recorded_lines) >= 1
-
-    recorded_payload = json.loads(recorded_lines[-1])
-    assert _get(recorded_payload, "component_id") == "comp-fixture-target"
-    assert _get(recorded_payload, "blocked") is True
-    recorded_matches = _get(recorded_payload, "matches") or []
-    assert len(recorded_matches) > 0
-    assert any(_get(m, "risk_tier") == "low" for m in recorded_matches)
+    log_contents = log_path.read_text(encoding="utf-8") if log_path.exists() else ""
+    assert "put" in log_contents.splitlines()

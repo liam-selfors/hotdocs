@@ -1,9 +1,6 @@
 import json
-import os
-import tempfile
-import textwrap
-import unittest
-from pathlib import Path
+
+import license_scanner
 
 
 def _get(obj, key, default=None):
@@ -12,10 +9,51 @@ def _get(obj, key, default=None):
     return getattr(obj, key, default)
 
 
-CACHE_MANAGER_SOURCE = r"""
-import dataclasses
+def test_clean_scan_result_is_fully_recorded_not_omitted(tmp_path, monkeypatch):
+    component_id = "comp-widget-maker"
+
+    widget_dir = tmp_path / "gen" / "widget-maker"
+    widget_dir.mkdir(parents=True)
+    (widget_dir / "widget_maker.py").write_text(
+        "def compute_widget_price(base_cost, markup_percentage, tax_rate, discount_amount):\n"
+        "    adjusted_cost = base_cost + (base_cost * markup_percentage)\n"
+        "    taxed_cost = adjusted_cost + (adjusted_cost * tax_rate)\n"
+        "    final_price = taxed_cost - discount_amount\n"
+        "    return final_price\n"
+        "\n"
+        "\n"
+        "def format_widget_label(widget_name, widget_color, widget_size):\n"
+        "    return widget_name + \"_\" + widget_color + \"_\" + widget_size\n"
+    )
+
+    corpus_path = tmp_path / "license_corpus.json"
+    corpus_path.write_text(
+        json.dumps(
+            {
+                "corpus_version": 1,
+                "block_threshold": 0.7,
+                "entries": [
+                    {
+                        "reference_id": "ref-001",
+                        "license_family": "GPL",
+                        "risk_tier": "high",
+                        # deliberately impossible to match any real SHA-256 digest
+                        "hashes": ["0" * 64],
+                    }
+                ],
+            }
+        )
+    )
+
+    monkeypatch.setenv("VAR_LICENSE_CORPUS_PATH", str(corpus_path))
+    monkeypatch.delenv("VAR_COMPLIANCE_WEBHOOK_URL", raising=False)
+
+    log_path = tmp_path / "cache_calls.log"
+
+    fake_cache_src = f'''import dataclasses
 import json
-import os
+
+LOG_PATH = {str(log_path)!r}
 
 
 @dataclasses.dataclass
@@ -33,138 +71,87 @@ class CachedResult:
     stored_at: str
 
 
+def _pget(obj, key, default=None):
+    if isinstance(obj, dict):
+        return obj.get(key, default)
+    return getattr(obj, key, default)
+
+
 def get(cache_key, *, repo_root=None):
-    # Always a miss: payload is null, forcing a fresh scan.
-    return {"gate_type": None, "payload": None, "stored_at": None}
+    with open(LOG_PATH, "a") as f:
+        f.write(json.dumps({{"call": "get"}}) + "\\n")
+    return {{"payload": None}}
 
 
 def put(cache_key, result, *, repo_root=None):
-    log_path = os.environ["TEST_CACHE_PUT_LOG"]
-    record = {"gate_type": result.gate_type, "payload": result.payload}
-    with open(log_path, "a", encoding="utf-8") as f:
-        f.write(json.dumps(record) + "\n")
-"""
+    gate_type = _pget(result, "gate_type")
+    payload = _pget(result, "payload")
+    if isinstance(payload, dict):
+        has_matches_key = "matches" in payload
+        has_blocked_key = "blocked" in payload
+    else:
+        has_matches_key = hasattr(payload, "matches")
+        has_blocked_key = hasattr(payload, "blocked")
+    record = {{
+        "call": "put",
+        "gate_type": gate_type,
+        "component_id": _pget(payload, "component_id"),
+        "gate_version": _pget(payload, "gate_version"),
+        "evaluated": _pget(payload, "evaluated"),
+        "similarity_score": _pget(payload, "similarity_score"),
+        "block_threshold": _pget(payload, "block_threshold"),
+        "blocked": _pget(payload, "blocked"),
+        "matches": _pget(payload, "matches"),
+        "has_matches_key": has_matches_key,
+        "has_blocked_key": has_blocked_key,
+    }}
+    with open(LOG_PATH, "a") as f:
+        f.write(json.dumps(record) + "\\n")
+'''
 
+    cache_dir = tmp_path / "gen" / "cache-manager"
+    cache_dir.mkdir(parents=True)
+    (cache_dir / "cache_manager.py").write_text(fake_cache_src)
 
-class AcLicense002Test(unittest.TestCase):
-    def setUp(self):
-        self._tmp = tempfile.TemporaryDirectory()
-        self.addCleanup(self._tmp.cleanup)
-        self.repo_root = Path(self._tmp.name)
+    result = license_scanner.scan(component_id, tmp_path)
 
-        # Clean, non-matching generated content for the scanned component.
-        widget_dir = self.repo_root / "gen" / "widget"
-        widget_dir.mkdir(parents=True)
-        (widget_dir / "main.py").write_text(
-            textwrap.dedent(
-                """
-                def add(a, b):
-                    return a + b
+    assert result is not None
 
+    assert _get(result, "component_id") == component_id
+    assert _get(result, "evaluated") is True
+    assert _get(result, "reason") is None
 
-                def subtract(a, b):
-                    return a - b
-                """
-            ),
-            encoding="utf-8",
-        )
+    score = _get(result, "similarity_score")
+    assert isinstance(score, (int, float))
+    assert score == 0.0
 
-        # Reference corpus whose single hash cannot match the clean content
-        # above (it is not derived from any real 9-token window of it).
-        corpus_dir = self.repo_root / "corpus"
-        corpus_dir.mkdir(parents=True)
-        corpus_path = corpus_dir / "reference.json"
-        corpus_path.write_text(
-            json.dumps(
-                {
-                    "corpus_version": 7,
-                    "block_threshold": 0.70,
-                    "entries": [
-                        {
-                            "reference_id": "ref-999",
-                            "license_family": "mit",
-                            "risk_tier": "low",
-                            "hashes": ["f" * 64],
-                        }
-                    ],
-                }
-            ),
-            encoding="utf-8",
-        )
+    assert _get(result, "block_threshold") == 0.7
+    assert _get(result, "blocked") is False
+    assert _get(result, "matches") == []
+    assert _get(result, "notified") is False
+    assert _get(result, "notification_delivery_error") is None
+    assert _get(result, "cache_hit") is False
 
-        # Fake cache-manager dependency, loaded by the target at runtime
-        # from gen/cache-manager/cache_manager.py (flat module), per its
-        # own documented dynamic-loading contract.
-        cache_manager_dir = self.repo_root / "gen" / "cache-manager"
-        cache_manager_dir.mkdir(parents=True)
-        (cache_manager_dir / "cache_manager.py").write_text(
-            CACHE_MANAGER_SOURCE, encoding="utf-8"
-        )
+    gate_version = _get(result, "gate_version")
+    assert gate_version.startswith("license_scanner@4.0.1+")
 
-        self._put_log = self.repo_root / "cache_put_log.jsonl"
-        self._put_log.write_text("", encoding="utf-8")
+    assert log_path.exists(), "cache-manager fake was never invoked; no record was made"
+    records = [json.loads(line) for line in log_path.read_text().splitlines() if line.strip()]
+    put_calls = [rec for rec in records if rec.get("call") == "put"]
+    assert len(put_calls) == 1, "expected exactly one put() call recording the clean scan result"
 
-        self._old_env = {}
-        for key, value in {
-            "VAR_LICENSE_CORPUS_PATH": str(Path("corpus") / "reference.json"),
-            "TEST_CACHE_PUT_LOG": str(self._put_log),
-        }.items():
-            self._old_env[key] = os.environ.get(key)
-            os.environ[key] = value
-        # Ensure notification is not accidentally triggered by an
-        # inherited webhook configuration from the outer environment.
-        self._old_env["VAR_COMPLIANCE_WEBHOOK_URL"] = os.environ.pop(
-            "VAR_COMPLIANCE_WEBHOOK_URL", None
-        )
-        self.addCleanup(self._restore_env)
+    record = put_calls[0]
+    assert record["gate_type"] == "license_scanner"
+    assert record["component_id"] == component_id
+    assert record["gate_version"] == gate_version
+    assert record["evaluated"] is True
+    assert record["similarity_score"] == 0.0
+    assert record["block_threshold"] == 0.7
 
-    def _restore_env(self):
-        for key, old_value in self._old_env.items():
-            if old_value is None:
-                os.environ.pop(key, None)
-            else:
-                os.environ[key] = old_value
-
-    def test_clean_scan_result_is_still_recorded_not_omitted(self):
-        import license_scanner
-
-        result = license_scanner.scan("comp-widget", self.repo_root)
-
-        self.assertIsNotNone(result)
-        self.assertEqual(_get(result, "component_id"), "comp-widget")
-        self.assertEqual(_get(result, "gate_version"), "license_scanner@3.1.7")
-        self.assertEqual(_get(result, "similarity_score"), 0.0)
-        self.assertEqual(_get(result, "block_threshold"), 0.70)
-        self.assertEqual(_get(result, "blocked"), False)
-        self.assertEqual(_get(result, "matches"), [])
-        self.assertEqual(_get(result, "notified"), False)
-        self.assertIsNone(_get(result, "notification_delivery_error"))
-        self.assertEqual(_get(result, "cache_hit"), False)
-
-        # A clean result must still flow through the exact same recording
-        # path ("after a fresh scan, put(...)") that a flagged result
-        # would use -- never silently skipped because nothing was flagged.
-        log_lines = self._put_log.read_text(encoding="utf-8").strip().splitlines()
-        self.assertEqual(len(log_lines), 1)
-
-        recorded = json.loads(log_lines[0])
-        self.assertEqual(recorded["gate_type"], "license_scanner")
-
-        payload = recorded["payload"]
-        self.assertIsNotNone(payload)
-        for field in (
-            "component_id",
-            "gate_version",
-            "similarity_score",
-            "block_threshold",
-            "blocked",
-            "matches",
-            "notified",
-            "notification_delivery_error",
-            "cache_hit",
-        ):
-            self.assertEqual(_get(payload, field), _get(result, field), field)
-
-
-if __name__ == "__main__":
-    unittest.main()
+    # The whole point of R-LICENSE-002: a clean result's "blocked" and
+    # "matches" keys must be explicitly present in the cached/recorded
+    # payload, not dropped because there was nothing to flag.
+    assert record["has_blocked_key"] is True
+    assert record["blocked"] is False
+    assert record["has_matches_key"] is True
+    assert record["matches"] == []

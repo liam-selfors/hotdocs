@@ -7,7 +7,7 @@
     "compiler": "criterion-compiler@1.0.0",
     "generated_test": "generated_test@1.0.0",
     "verifier": "verifier-orchestrator@2.0.0",
-    "license_scanner": "license_scanner@3.1.0",
+    "license_scanner": "license_scanner@4.0.3+9f2c41ab07de",
     "secret_scanner": "secret_scanner@0.0.0"
   }
 }

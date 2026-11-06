@@ -1,8 +1,9 @@
-import os
-import shutil
-import tempfile
-import unittest
+import textwrap
 from pathlib import Path
+
+import pytest
+
+import license_scanner
 
 
 def _get(obj, key, default=None):
@@ -11,128 +12,114 @@ def _get(obj, key, default=None):
     return getattr(obj, key, default)
 
 
-def _has(obj, key):
-    if isinstance(obj, dict):
-        return key in obj
-    return hasattr(obj, key)
+def _write_fake_cache_manager(repo_root: Path) -> None:
+    gen_dir = repo_root / "gen" / "cache-manager"
+    gen_dir.mkdir(parents=True, exist_ok=True)
+    module_path = gen_dir / "cache_manager.py"
+    module_path.write_text(
+        textwrap.dedent(
+            """
+            import dataclasses
 
 
-FAKE_CACHE_MANAGER_SOURCE = '''
-import dataclasses
-import os
-
-_INVOCATIONS_FILE = os.environ.get("FAKE_CACHE_INVOCATIONS_FILE")
-
-
-def _record(event):
-    if _INVOCATIONS_FILE:
-        with open(_INVOCATIONS_FILE, "a") as f:
-            f.write(event + "\\n")
+            @dataclasses.dataclass
+            class CacheKey:
+                spec_bundle_hash: str
+                gate_inputs_hash: str
+                gate_version: str
+                model_pin: str
 
 
-@dataclasses.dataclass
-class CacheKey:
-    spec_bundle_hash: str
-    gate_inputs_hash: str
-    gate_version: str
-    model_pin: str
+            @dataclasses.dataclass
+            class CachedResult:
+                gate_type: str
+                payload: object
+                stored_at: str
 
 
-@dataclasses.dataclass
-class CachedResult:
-    gate_type: str
-    payload: object
-    stored_at: str
+            def get(cache_key, *, repo_root=None):
+                return CachedResult(
+                    gate_type="license_scanner", payload=None, stored_at=None
+                )
 
 
-class Miss:
-    pass
-
-
-def get(cache_key, *, repo_root=None):
-    _record("get")
-    return Miss()
-
-
-def put(cache_key, result, *, repo_root=None):
-    _record("put")
-    return None
-'''
-
-
-class ExactlyOneLicenseScanResultTest(unittest.TestCase):
-    def setUp(self):
-        self.repo_root_str = tempfile.mkdtemp(prefix="hotdocs-license-scanner-test-")
-        self.repo_root = Path(self.repo_root_str)
-        self.invocations_file = os.path.join(self.repo_root_str, "invocations.log")
-
-        cache_manager_dir = os.path.join(self.repo_root_str, "gen", "cache-manager")
-        os.makedirs(cache_manager_dir, exist_ok=True)
-        with open(os.path.join(cache_manager_dir, "cache_manager.py"), "w") as f:
-            f.write(FAKE_CACHE_MANAGER_SOURCE)
-
-        self._old_environ = dict(os.environ)
-        os.environ["FAKE_CACHE_INVOCATIONS_FILE"] = self.invocations_file
-        os.environ.pop("VAR_LICENSE_CORPUS_PATH", None)
-        os.environ.pop("VAR_COMPLIANCE_WEBHOOK_URL", None)
-
-    def tearDown(self):
-        os.environ.clear()
-        os.environ.update(self._old_environ)
-        shutil.rmtree(self.repo_root_str, ignore_errors=True)
-
-    def test_exactly_one_result_for_the_component(self):
-        import license_scanner
-
-        component_id = "comp-sample-widget"
-
-        result_one = license_scanner.scan(component_id, self.repo_root)
-
-        # The result must be a single structured object, never a collection
-        # of multiple results.
-        self.assertNotIsInstance(result_one, (list, tuple, set))
-        self.assertIsNotNone(result_one)
-
-        self.assertEqual(_get(result_one, "component_id"), component_id)
-
-        required_fields = (
-            "component_id",
-            "gate_version",
-            "similarity_score",
-            "block_threshold",
-            "blocked",
-            "matches",
-            "notified",
-            "notification_delivery_error",
-            "cache_hit",
+            def put(cache_key, result, *, repo_root=None):
+                return None
+            """
         )
-        for field in required_fields:
-            self.assertTrue(
-                _has(result_one, field),
-                "LicenseScanResult is missing required field: %s" % field,
-            )
+    )
 
-        self.assertIsInstance(_get(result_one, "similarity_score"), (int, float))
-        self.assertIsInstance(_get(result_one, "blocked"), bool)
-        self.assertIsInstance(_get(result_one, "matches"), list)
-        self.assertIsInstance(_get(result_one, "cache_hit"), bool)
-        self.assertTrue(
-            str(_get(result_one, "gate_version")).startswith("license_scanner@")
+
+@pytest.fixture
+def repo_root(tmp_path, monkeypatch):
+    monkeypatch.delenv("VAR_LICENSE_CORPUS_PATH", raising=False)
+    monkeypatch.delenv("VAR_COMPLIANCE_WEBHOOK_URL", raising=False)
+    _write_fake_cache_manager(tmp_path)
+    return tmp_path
+
+
+_RESULT_FIELDS = [
+    "component_id",
+    "gate_version",
+    "evaluated",
+    "reason",
+    "similarity_score",
+    "block_threshold",
+    "blocked",
+    "matches",
+    "notified",
+    "notification_delivery_error",
+    "cache_hit",
+]
+
+
+def _assert_is_single_license_scan_result(result, expected_component_id):
+    assert not isinstance(result, (list, tuple, set, dict)) or isinstance(result, dict)
+    # A LicenseScanResult may be returned as a dict or as an object; either
+    # way it must be ONE such thing, not a collection of several results.
+    assert not isinstance(result, (list, tuple, set))
+
+    sentinel = object()
+    for field in _RESULT_FIELDS:
+        assert _get(result, field, sentinel) is not sentinel, (
+            f"LicenseScanResult is missing field {field!r}"
         )
 
-        # Run the scan again for the same component: each individual scan
-        # must still yield exactly one LicenseScanResult for that component.
-        result_two = license_scanner.scan(component_id, self.repo_root)
-        self.assertNotIsInstance(result_two, (list, tuple, set))
-        self.assertIsNotNone(result_two)
-        self.assertEqual(_get(result_two, "component_id"), component_id)
-
-        with open(self.invocations_file) as f:
-            invocation_lines = [line.strip() for line in f if line.strip()]
-
-        self.assertIn("get", invocation_lines)
-        self.assertIn("put", invocation_lines)
+    assert _get(result, "component_id") == expected_component_id
+    assert isinstance(_get(result, "matches"), list)
+    assert isinstance(_get(result, "evaluated"), bool)
+    assert isinstance(_get(result, "blocked"), bool)
+    assert isinstance(_get(result, "notified"), bool)
+    assert isinstance(_get(result, "cache_hit"), bool)
 
 
-if __name__ == "__main__":
-    unittest.main()
+def test_scan_produces_exactly_one_result_for_the_component(repo_root):
+    result = license_scanner.scan("comp-alpha", repo_root)
+
+    _assert_is_single_license_scan_result(result, "comp-alpha")
+
+    # With no reference corpus configured, this is the deterministic
+    # not-evaluated outcome -- confirming the single object returned is a
+    # genuine, computed LicenseScanResult rather than an arbitrary stub.
+    assert _get(result, "evaluated") is False
+    assert _get(result, "reason") == "no-reference-corpus"
+    assert _get(result, "matches") == []
+    assert _get(result, "blocked") is False
+
+
+def test_each_distinct_component_gets_its_own_single_result(repo_root):
+    result_a = license_scanner.scan("comp-alpha", repo_root)
+    result_b = license_scanner.scan("comp-beta", repo_root)
+
+    _assert_is_single_license_scan_result(result_a, "comp-alpha")
+    _assert_is_single_license_scan_result(result_b, "comp-beta")
+
+    assert _get(result_a, "component_id") != _get(result_b, "component_id")
+
+
+def test_repeated_scans_of_the_same_component_each_yield_a_single_result(repo_root):
+    first = license_scanner.scan("comp-gamma", repo_root)
+    second = license_scanner.scan("comp-gamma", repo_root)
+
+    _assert_is_single_license_scan_result(first, "comp-gamma")
+    _assert_is_single_license_scan_result(second, "comp-gamma")

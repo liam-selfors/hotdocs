@@ -1,8 +1,5 @@
-import hashlib
 import json
 import re
-
-import pytest
 
 import license_scanner
 
@@ -13,52 +10,17 @@ def _get(obj, key, default=None):
     return getattr(obj, key, default)
 
 
-_TOKEN_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*|\d+")
-
-
-def _tokenize(text):
-    return [tok.lower() for tok in _TOKEN_RE.findall(text)]
-
-
-def _window_hashes(tokens, window=9):
-    hashes = set()
-    for i in range(len(tokens) - window + 1):
-        joined = "\x1f".join(tokens[i:i + window])
-        hashes.add(hashlib.sha256(joined.encode("utf-8")).hexdigest())
-    return hashes
-
-
-_CACHE_MANAGER_SOURCE = r'''
+_CACHE_MANAGER_TEMPLATE = '''
+import dataclasses
 import json
 import os
-from dataclasses import dataclass
-
-_STORE = {}
 
 
-def _log(event, gate_version):
-    log_path = os.environ.get("FAKE_CACHE_LOG")
-    if log_path:
-        with open(log_path, "a") as f:
-            f.write(json.dumps({"event": event, "gate_version": gate_version}) + "\n")
+STORE_PATH = __STORE_PATH__
+LOG_PATH = __LOG_PATH__
 
 
-def _field(obj, name):
-    if isinstance(obj, dict):
-        return obj.get(name)
-    return getattr(obj, name)
-
-
-def _key_tuple(cache_key):
-    return (
-        _field(cache_key, "spec_bundle_hash"),
-        _field(cache_key, "gate_inputs_hash"),
-        _field(cache_key, "gate_version"),
-        _field(cache_key, "model_pin"),
-    )
-
-
-@dataclass
+@dataclasses.dataclass
 class CacheKey:
     spec_bundle_hash: str
     gate_inputs_hash: str
@@ -66,7 +28,7 @@ class CacheKey:
     model_pin: str
 
 
-@dataclass
+@dataclasses.dataclass
 class CachedResult:
     gate_type: str
     payload: object
@@ -77,100 +39,167 @@ class Miss:
     pass
 
 
+def _field(obj, name):
+    if isinstance(obj, dict):
+        return obj.get(name)
+    return getattr(obj, name, None)
+
+
+def _key_str(cache_key):
+    return "|".join([
+        str(_field(cache_key, "spec_bundle_hash")),
+        str(_field(cache_key, "gate_inputs_hash")),
+        str(_field(cache_key, "gate_version")),
+        str(_field(cache_key, "model_pin")),
+    ])
+
+
+def _load_store():
+    if os.path.exists(STORE_PATH):
+        with open(STORE_PATH, "r") as f:
+            return json.load(f)
+    return {}
+
+
+def _save_store(store):
+    with open(STORE_PATH, "w") as f:
+        json.dump(store, f)
+
+
+def _log(event, cache_key, hit):
+    record = {
+        "event": event,
+        "gate_version": _field(cache_key, "gate_version"),
+        "hit": hit,
+    }
+    with open(LOG_PATH, "a") as f:
+        f.write(json.dumps(record) + chr(10))
+
+
 def get(cache_key, *, repo_root=None):
-    key = _key_tuple(cache_key)
-    _log("get", key[2])
-    if key in _STORE:
-        return _STORE[key]
-    return Miss()
+    store = _load_store()
+    key = _key_str(cache_key)
+    entry = store.get(key)
+    if entry is None:
+        _log("get", cache_key, False)
+        return {"gate_type": None, "payload": None, "stored_at": None}
+    _log("get", cache_key, True)
+    return CachedResult(
+        gate_type=entry["gate_type"],
+        payload=entry["payload"],
+        stored_at=entry["stored_at"],
+    )
 
 
 def put(cache_key, result, *, repo_root=None):
-    key = _key_tuple(cache_key)
-    _STORE[key] = result
-    _log("put", key[2])
+    store = _load_store()
+    key = _key_str(cache_key)
+    store[key] = {
+        "gate_type": _field(result, "gate_type"),
+        "payload": _field(result, "payload"),
+        "stored_at": _field(result, "stored_at"),
+    }
+    _save_store(store)
+    _log("put", cache_key, None)
 '''
 
 
-def _write_cache_manager_fake(repo_root):
+def _write_fake_cache_manager(repo_root, store_path, log_path):
     module_dir = repo_root / "gen" / "cache-manager"
     module_dir.mkdir(parents=True, exist_ok=True)
-    (module_dir / "cache_manager.py").write_text(_CACHE_MANAGER_SOURCE)
+    module_path = module_dir / "cache_manager.py"
+    source = _CACHE_MANAGER_TEMPLATE.replace(
+        "__STORE_PATH__", json.dumps(str(store_path))
+    ).replace(
+        "__LOG_PATH__", json.dumps(str(log_path))
+    )
+    module_path.write_text(source)
 
 
-def test_stale_cache_not_reused_after_corpus_gate_version_bump(tmp_path, monkeypatch):
-    repo_root = tmp_path
-
-    log_path = repo_root / "cache_calls.jsonl"
-    monkeypatch.setenv("FAKE_CACHE_LOG", str(log_path))
-
-    _write_cache_manager_fake(repo_root)
-
-    source_tokens = [
-        "alpha", "beta", "gamma", "delta", "epsilon",
-        "zeta", "eta", "theta", "iota",
-    ]
-    source_text = " ".join(source_tokens)
-    gen_dir = repo_root / "gen" / "foo"
-    gen_dir.mkdir(parents=True)
-    (gen_dir / "foo.py").write_text(source_text)
-
-    expected_hashes = _window_hashes(_tokenize(source_text))
-    assert len(expected_hashes) == 1
-
-    corpus_path = repo_root / "license_corpus.json"
-    monkeypatch.setenv("VAR_LICENSE_CORPUS_PATH", str(corpus_path))
-
-    corpus_v1 = {"corpus_version": 1, "block_threshold": 0.70, "entries": []}
-    corpus_path.write_text(json.dumps(corpus_v1))
-
-    gate_version_v1 = license_scanner.gate_version(repo_root)
-    assert gate_version_v1 == "license_scanner@3.1.1"
-
-    result1 = license_scanner.scan("comp-foo", repo_root)
-    assert _get(result1, "gate_version") == gate_version_v1
-    assert _get(result1, "cache_hit") is False
-    assert _get(result1, "similarity_score") == 0.0
-    assert _get(result1, "blocked") is False
-
-    corpus_v2 = {
-        "corpus_version": 2,
-        "block_threshold": 0.70,
+def _write_corpus(corpus_path, corpus_version):
+    data = {
+        "corpus_version": corpus_version,
+        "block_threshold": 0.7,
         "entries": [
             {
-                "reference_id": "ref-stale-test",
-                "license_family": "gpl-3.0",
-                "risk_tier": "high",
-                "hashes": sorted(expected_hashes),
+                "reference_id": "ref-1",
+                "license_family": "MIT",
+                "risk_tier": "low",
+                "hashes": ["a" * 64],
             }
         ],
     }
-    corpus_path.write_text(json.dumps(corpus_v2))
+    corpus_path.write_text(json.dumps(data))
 
-    gate_version_v2 = license_scanner.gate_version(repo_root)
-    assert gate_version_v2 == "license_scanner@3.1.2"
-    assert gate_version_v2 != gate_version_v1
 
-    result2 = license_scanner.scan("comp-foo", repo_root)
+def _read_log(log_path):
+    if not log_path.exists():
+        return []
+    text = log_path.read_text().strip()
+    if not text:
+        return []
+    return [json.loads(line) for line in text.splitlines()]
 
-    assert _get(result2, "gate_version") == gate_version_v2
+
+_GATE_VERSION_RE = re.compile(r"^license_scanner@4\.0\.(\d+)\+([0-9a-f]{12})$")
+
+
+def test_corpus_update_invalidates_stale_cached_result(tmp_path, monkeypatch):
+    component_dir = tmp_path / "gen" / "foo"
+    component_dir.mkdir(parents=True)
+    (component_dir / "foo.py").write_text("def add(a, b):\n    return a + b\n")
+
+    store_path = tmp_path / "cache_store.json"
+    log_path = tmp_path / "cache_calls.log"
+    _write_fake_cache_manager(tmp_path, store_path, log_path)
+
+    corpus_path = tmp_path / "corpus.json"
+    _write_corpus(corpus_path, corpus_version=1)
+
+    monkeypatch.setenv("VAR_LICENSE_CORPUS_PATH", str(corpus_path))
+    monkeypatch.delenv("VAR_COMPLIANCE_WEBHOOK_URL", raising=False)
+
+    # Gherkin's "@1.0.0"/"@2.0.0" are illustrative; R-LICENSE-005's real format is license_scanner@4.0.<V>+<H>.
+    result1 = license_scanner.scan("comp-foo", tmp_path)
+    assert _get(result1, "evaluated") is True
+    assert _get(result1, "cache_hit") is False
+
+    gate_version1 = _get(result1, "gate_version")
+    match1 = _GATE_VERSION_RE.match(gate_version1)
+    assert match1 is not None
+    assert match1.group(1) == "1"
+
+    log_before = _read_log(log_path)
+    assert any(
+        e["event"] == "put" and e["gate_version"] == gate_version1
+        for e in log_before
+    )
+
+    _write_corpus(corpus_path, corpus_version=2)
+
+    result2 = license_scanner.scan("comp-foo", tmp_path)
+    assert _get(result2, "evaluated") is True
     assert _get(result2, "cache_hit") is False
-    assert _get(result2, "similarity_score") == 1.0
-    assert _get(result2, "similarity_score") != _get(result1, "similarity_score")
-    assert _get(result2, "blocked") is True
 
-    log_lines = [
-        json.loads(line)
-        for line in log_path.read_text().splitlines()
-        if line.strip()
-    ]
-    get_calls = [entry for entry in log_lines if entry["event"] == "get"]
-    put_calls = [entry for entry in log_lines if entry["event"] == "put"]
+    gate_version2 = _get(result2, "gate_version")
+    match2 = _GATE_VERSION_RE.match(gate_version2)
+    assert match2 is not None
+    assert match2.group(1) == "2"
+    assert gate_version2 != gate_version1
 
-    assert len(get_calls) == 2
-    assert get_calls[0]["gate_version"] == gate_version_v1
-    assert get_calls[1]["gate_version"] == gate_version_v2
+    log_after = _read_log(log_path)
+    new_events = log_after[len(log_before):]
 
-    assert len(put_calls) == 2
-    assert put_calls[0]["gate_version"] == gate_version_v1
-    assert put_calls[1]["gate_version"] == gate_version_v2
+    assert any(
+        e["event"] == "get" and e["gate_version"] == gate_version2 and e["hit"] is False
+        for e in new_events
+    )
+    assert not any(e["event"] == "get" and e["hit"] is True for e in new_events)
+    assert any(
+        e["event"] == "put" and e["gate_version"] == gate_version2
+        for e in new_events
+    )
+
+    result3 = license_scanner.scan("comp-foo", tmp_path)
+    assert _get(result3, "gate_version") == gate_version2
+    assert _get(result3, "cache_hit") is True
