@@ -1,114 +1,6 @@
 import json
-from pathlib import Path
 
 import provenance_tracker
-
-OWNER_EMAIL = "lselfors@gmail.com"
-
-FRONTMATTER = """---
-id: {component_id}
-title: {title}
-status: draft
-owners: [{owner}]
-sealed: true
-source_path: tools/legacy/{slug}.py
----
-
-# {title}
-
-Fixture component for AC-TRACK-009 testing.
-"""
-
-PROVENANCE_CHECKER_TEMPLATE = """
-import json
-
-_CONFIG_PATH = "CONFIG_PATH_PLACEHOLDER"
-_CALLS_LOG = "CALLS_LOG_PLACEHOLDER"
-
-
-def _load_config():
-    with open(_CONFIG_PATH, encoding="utf-8") as f:
-        return json.load(f)
-
-
-def _log_call(record):
-    with open(_CALLS_LOG, "a", encoding="utf-8") as f:
-        f.write(json.dumps(record) + "\\n")
-
-
-def current_provenance_key(component_id, repo_root):
-    config = _load_config()
-    entry = config["key"]
-    _log_call({"fn": "current_provenance_key", "component_id": component_id})
-    return {
-        "spec_bundle_hash": entry["spec_bundle_hash"],
-        "gate_versions": entry["gate_versions"],
-    }
-
-
-def check_provenance(component_id, spec_bundle_hash, gate_versions, repo_root):
-    config = _load_config()
-    entry = config["components"][component_id]
-    _log_call({
-        "fn": "check_provenance",
-        "component_id": component_id,
-        "spec_bundle_hash": spec_bundle_hash,
-        "gate_versions": gate_versions,
-    })
-    return {
-        "hit": entry["hit"],
-        "verification_report": entry.get("verification_report"),
-        "license_scan": entry.get("license_scan"),
-        "secret_scan": entry.get("secret_scan"),
-    }
-"""
-
-IMPACT_ANALYZER_TEMPLATE = """
-import json
-
-_CALLS_LOG = "CALLS_LOG_PLACEHOLDER"
-_IMPACTED = IMPACTED_PLACEHOLDER
-
-
-def _log_call(record):
-    with open(_CALLS_LOG, "a", encoding="utf-8") as f:
-        f.write(json.dumps(record) + "\\n")
-
-
-def compute_blast_radius(changed_ids, repo_root):
-    _log_call({"fn": "compute_blast_radius", "changed_ids": list(changed_ids)})
-    return {"impacted": _IMPACTED, "precondition_error": None}
-"""
-
-GATE_RUNNER_TEMPLATE = """
-import json
-
-_CALLS_LOG = "CALLS_LOG_PLACEHOLDER"
-
-
-def _log_call(record):
-    with open(_CALLS_LOG, "a", encoding="utf-8") as f:
-        f.write(json.dumps(record) + "\\n")
-
-
-def __getattr__(name):
-    def _call(*args, **kwargs):
-        _log_call({"fn": name})
-        return {}
-    return _call
-"""
-
-CAPABILITY_VERIFIER_TEMPLATE = """
-def __getattr__(name):
-    def _call(*args, **kwargs):
-        return {}
-    return _call
-"""
-
-
-def _write(path: Path, content: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(content, encoding="utf-8")
 
 
 def _get(obj, key, default=None):
@@ -117,113 +9,149 @@ def _get(obj, key, default=None):
     return getattr(obj, key, default)
 
 
-def _keys(mapping):
-    if isinstance(mapping, dict):
-        return set(mapping.keys())
-    return set(vars(mapping).keys())
+# component-gate-runner is never written to disk anywhere in this file.
+# R-TRACK-009 forbids check_readiness from ever calling it; since every
+# dependency in this corpus is resolved by loading
+# <repo_root>/gen/<slug>/<module>.py at the point of use, a correct
+# implementation that (incorrectly) tried to call it would fail with a
+# missing-module error, failing the test. Its absence is the proof.
+
+IMPACT_ANALYZER_SRC = '''
+import json
+from pathlib import Path
 
 
-def _write_module(gen_dir: Path, dependency_slug: str, module_name: str, source: str) -> None:
-    _write(gen_dir / dependency_slug / f"{module_name}.py", source)
+def compute_blast_radius(changed_ids, repo_root):
+    repo_root = Path(repo_root)
+    with open(repo_root / "ia_calls.log", "a") as f:
+        f.write(json.dumps({"changed_ids": list(changed_ids)}) + "\\n")
+    with open(repo_root / "ia_config.json") as f:
+        return json.load(f)
+'''
+
+PROVENANCE_CHECKER_SRC = '''
+import json
+from pathlib import Path
 
 
-def _write_component(repo_root: Path, slug: str, requirement_ids: list) -> None:
+class _ProvenanceKey:
+    def __init__(self, spec_bundle_hash, gate_versions):
+        self.spec_bundle_hash = spec_bundle_hash
+        self.gate_versions = gate_versions
+
+
+class _SealedKey:
+    def __init__(self, owners, source_path, source_hash, verifier_version):
+        self.owners = owners
+        self.source_path = source_path
+        self.source_hash = source_hash
+        self.verifier_version = verifier_version
+
+
+def _config(repo_root):
+    with open(Path(repo_root) / "pc_config.json") as f:
+        return json.load(f)
+
+
+def _log(repo_root, record):
+    with open(Path(repo_root) / "pc_calls.log", "a") as f:
+        f.write(json.dumps(record) + "\\n")
+
+
+def current_sealed_key(component_id, repo_root):
+    _log(repo_root, {"fn": "current_sealed_key", "component_id": component_id})
+    cfg = _config(repo_root)
+    sealed = cfg.get("sealed", {}).get(component_id)
+    if sealed is None:
+        return None
+    return _SealedKey(**sealed)
+
+
+def current_provenance_key(component_id, repo_root):
+    _log(repo_root, {"fn": "current_provenance_key", "component_id": component_id})
+    cfg = _config(repo_root)
+    pk = cfg["provenance_key"]
+    return _ProvenanceKey(pk["spec_bundle_hash"], pk["gate_versions"])
+
+
+def check_provenance(component_id, spec_bundle_hash, gate_versions, repo_root):
+    _log(repo_root, {
+        "fn": "check_provenance",
+        "component_id": component_id,
+        "spec_bundle_hash": spec_bundle_hash,
+        "gate_versions": gate_versions,
+    })
+    cfg = _config(repo_root)
+    return cfg["results"][component_id]
+
+
+def check_sealed_provenance(component_id, repo_root):
+    _log(repo_root, {"fn": "check_sealed_provenance", "component_id": component_id})
+    cfg = _config(repo_root)
+    return cfg["sealed_results"][component_id]
+'''
+
+
+def _write_dependency(repo_root, slug, module_name, source):
+    mod_dir = repo_root / "gen" / slug
+    mod_dir.mkdir(parents=True, exist_ok=True)
+    (mod_dir / f"{module_name}.py").write_text(source)
+
+
+def _write_component(repo_root, slug, component_id):
     comp_dir = repo_root / "specs" / "components" / slug
-    component_id = f"comp-{slug}"
-    _write(
-        comp_dir / "component.md",
-        FRONTMATTER.format(component_id=component_id, title=slug.title(), owner=OWNER_EMAIL, slug=slug),
+    comp_dir.mkdir(parents=True, exist_ok=True)
+    (comp_dir / "component.md").write_text(
+        "---\n"
+        f"id: {component_id}\n"
+        f"title: {component_id}\n"
+        "status: draft\n"
+        "owners: [team-a]\n"
+        "sealed: false\n"
+        "realizes: []\n"
+        "---\n\n"
+        f"# {component_id}\n\nFixture component.\n"
     )
-    for requirement_id in requirement_ids:
-        _write(
-            comp_dir / "requirements" / f"{requirement_id}.md",
-            f"**{requirement_id}** -- MUST do the fixture thing for {component_id}.\n",
-        )
-        ac_id = "AC-" + requirement_id.split("-", 1)[1]
-        _write(
-            comp_dir / "acceptance" / f"{ac_id}.md",
-            f"# {ac_id}\n\nCovers: {requirement_id}\n\n"
-            f"Given the fixture precondition\n"
-            f"When the fixture action runs\n"
-            f"Then the fixture outcome holds\n",
-        )
+    gen_dir = repo_root / "gen" / slug
+    gen_dir.mkdir(parents=True, exist_ok=True)
+    (gen_dir / "placeholder.txt").write_text("fixture generated code\n")
 
 
-def _setup_provenance_checker(gen_dir: Path, config_path: Path, calls_log: Path, config: dict) -> None:
-    _write(config_path, json.dumps(config))
-    source = PROVENANCE_CHECKER_TEMPLATE.replace("CONFIG_PATH_PLACEHOLDER", str(config_path)).replace(
-        "CALLS_LOG_PLACEHOLDER", str(calls_log)
-    )
-    _write_module(gen_dir, "provenance-checker", "provenance_checker", source)
+def _write_pc_config(repo_root, results, provenance_key, sealed=None, sealed_results=None):
+    config = {
+        "sealed": sealed or {},
+        "provenance_key": provenance_key,
+        "results": results,
+        "sealed_results": sealed_results or {},
+    }
+    (repo_root / "pc_config.json").write_text(json.dumps(config))
 
 
-def _setup_repo(tmp_path: Path, components: list, provenance_config: dict, impacted=None):
-    repo_root = tmp_path / "repo"
-    gen_dir = repo_root / "gen"
-
-    for slug, requirement_ids in components:
-        _write_component(repo_root, slug, requirement_ids)
-
-    provenance_calls_log = tmp_path / "provenance_calls.log"
-    provenance_config_path = tmp_path / "provenance_config.json"
-    _setup_provenance_checker(gen_dir, provenance_config_path, provenance_calls_log, provenance_config)
-
-    gate_runner_calls_log = tmp_path / "gate_runner_calls.log"
-    _write_module(
-        gen_dir,
-        "component-gate-runner",
-        "component_gate_runner",
-        GATE_RUNNER_TEMPLATE.replace("CALLS_LOG_PLACEHOLDER", str(gate_runner_calls_log)),
-    )
-
-    _write_module(
-        gen_dir,
-        "capability-scenario-verifier",
-        "capability_scenario_verifier",
-        CAPABILITY_VERIFIER_TEMPLATE,
-    )
-
-    if impacted is not None:
-        impact_calls_log = tmp_path / "impact_calls.log"
-        source = IMPACT_ANALYZER_TEMPLATE.replace("CALLS_LOG_PLACEHOLDER", str(impact_calls_log)).replace(
-            "IMPACTED_PLACEHOLDER", repr(impacted)
-        )
-        _write_module(gen_dir, "impact-analyzer", "impact_analyzer", source)
-
-    return repo_root, provenance_calls_log, gate_runner_calls_log
+def _write_ia_config(repo_root, impacted):
+    config = {"impacted": impacted, "precondition_error": None}
+    (repo_root / "ia_config.json").write_text(json.dumps(config))
 
 
-def _read_calls(log_path: Path):
-    if not log_path.exists():
-        return []
-    lines = log_path.read_text(encoding="utf-8").splitlines()
-    return [json.loads(line) for line in lines if line.strip()]
-
-
-def _assert_no_calls(log_path: Path) -> None:
-    if log_path.exists():
-        assert log_path.read_text(encoding="utf-8") == ""
-
-
-def _passing_verification_report(component_id: str, requirement_id: str) -> dict:
-    ac_id = "AC-" + requirement_id.split("-", 1)[1]
+def _passing_report(component_id):
     return {
         "component_id": component_id,
         "criteria": [
-            {"id": ac_id, "covers": requirement_id, "kind": "compiled", "result": "pass"},
+            {"id": "AC-FOO-001", "covers": "R-FOO-001", "kind": "compiled", "result": "pass"},
         ],
-        "requirement_results": {requirement_id: "pass"},
+        "requirement_results": {"R-FOO-001": "pass"},
         "interface_drift": False,
-        "mutation_score": 1.0,
+        "mutation_score": 0.9,
         "overall": "pass",
     }
 
 
-def _clean_license_scan(component_id: str) -> dict:
+def _clean_license(component_id):
     return {
         "component_id": component_id,
-        "gate_version": "license_scanner@3.1.0",
-        "similarity_score": 0.0,
+        "gate_version": "license_scanner@4.0.3+9f2c41ab07de",
+        "evaluated": True,
+        "reason": None,
+        "similarity_score": 0.1,
         "block_threshold": 0.70,
         "blocked": False,
         "matches": [],
@@ -233,108 +161,118 @@ def _clean_license_scan(component_id: str) -> dict:
     }
 
 
-def _blocked_license_scan(component_id: str) -> dict:
-    return {
-        "component_id": component_id,
-        "gate_version": "license_scanner@3.1.0",
-        "similarity_score": 0.95,
-        "block_threshold": 0.70,
-        "blocked": True,
-        "matches": [
-            {"reference_id": "ref-123", "license_family": "gpl-3.0", "risk_tier": "high", "score": 0.95}
-        ],
-        "notified": True,
-        "notification_delivery_error": None,
-        "cache_hit": False,
-    }
-
-
-def _clean_secret_scan() -> dict:
+def _clean_secret():
     return {
         "scope": "full",
-        "gate_version": "secret_scanner@2.0.0",
+        "gate_version": "secret_scanner@3.1.0+detect-secrets.1.5.0",
         "flagged": False,
         "matches": [],
+        "allowed": [],
+        "unused_allowlist_entries": [],
         "notified": False,
         "notification_delivery_error": None,
         "cache_hit": False,
     }
 
 
-def test_blast_radius_scope_reports_two_components_and_skips_gate_runner(tmp_path):
-    provenance_config = {
-        "key": {"spec_bundle_hash": "sha256:" + "a" * 8, "gate_versions": {"verifier": "v@1"}},
-        "components": {
-            "comp-foo": {
-                "hit": True,
-                "verification_report": _passing_verification_report("comp-foo", "R-FOO-001"),
-                "license_scan": _clean_license_scan("comp-foo"),
-                "secret_scan": _clean_secret_scan(),
-            },
-            "comp-bar": {"hit": False},
-        },
-    }
-    impacted = [
+def test_blast_radius_hit_and_miss(tmp_path):
+    repo_root = tmp_path
+    _write_dependency(repo_root, "impact-analyzer", "impact_analyzer", IMPACT_ANALYZER_SRC)
+    _write_dependency(repo_root, "provenance-checker", "provenance_checker", PROVENANCE_CHECKER_SRC)
+    _write_component(repo_root, "foo", "comp-foo")
+    _write_component(repo_root, "bar", "comp-bar")
+
+    _write_ia_config(repo_root, [
         {"component_id": "comp-foo", "reason": "direct", "via": None},
         {"component_id": "comp-bar", "reason": "transitive-interface", "via": "comp-foo"},
-    ]
-    repo_root, _, gate_log = _setup_repo(
-        tmp_path,
-        components=[("foo", ["R-FOO-001"]), ("bar", ["R-BAR-001"])],
-        provenance_config=provenance_config,
-        impacted=impacted,
+    ])
+
+    foo_result = {
+        "hit": True,
+        "verification_report": _passing_report("comp-foo"),
+        "license_scan": _clean_license("comp-foo"),
+        "secret_scan": _clean_secret(),
+    }
+    bar_result = {
+        "hit": False,
+        "verification_report": None,
+        "license_scan": None,
+        "secret_scan": None,
+    }
+    _write_pc_config(
+        repo_root,
+        results={"comp-foo": foo_result, "comp-bar": bar_result},
+        provenance_key={"spec_bundle_hash": "sha256:abc123", "gate_versions": {"verifier": "v@1"}},
     )
 
-    report = provenance_tracker.check_readiness(repo_root, changed_ids=["comp-foo"])
+    report = provenance_tracker.check_readiness(repo_root, changed_ids=["comp-changed"])
 
     assert _get(report, "scope") == "blast-radius"
-    components_map = _get(report, "components")
-    assert _keys(components_map) == {"comp-foo", "comp-bar"}
+    components = _get(report, "components")
+    assert set(components.keys()) == {"comp-foo", "comp-bar"}
+    assert _get(components["comp-foo"], "hit") is True
+    assert _get(components["comp-bar"], "hit") is False
 
     reasons = _get(report, "not_ready_reasons")
-    assert any("comp-bar" in reason for reason in reasons)
+    assert any("comp-bar" in reason for reason in reasons), reasons
 
-    _assert_no_calls(gate_log)
+    ia_calls = (repo_root / "ia_calls.log").read_text().strip().splitlines()
+    assert json.loads(ia_calls[0])["changed_ids"] == ["comp-changed"]
 
 
-def test_no_changed_ids_checks_whole_corpus(tmp_path):
-    provenance_config = {
-        "key": {"spec_bundle_hash": "sha256:" + "b" * 8, "gate_versions": {"verifier": "v@1"}},
-        "components": {
-            "comp-foo": {
-                "hit": True,
-                "verification_report": _passing_verification_report("comp-foo", "R-FOO-001"),
-                "license_scan": _clean_license_scan("comp-foo"),
-                "secret_scan": _clean_secret_scan(),
-            },
-            "comp-bar": {
-                "hit": True,
-                "verification_report": _passing_verification_report("comp-bar", "R-BAR-001"),
-                "license_scan": _clean_license_scan("comp-bar"),
-                "secret_scan": _clean_secret_scan(),
-            },
-        },
+def test_whole_corpus_scope(tmp_path):
+    repo_root = tmp_path
+    _write_dependency(repo_root, "provenance-checker", "provenance_checker", PROVENANCE_CHECKER_SRC)
+    _write_component(repo_root, "alpha", "comp-alpha")
+    _write_component(repo_root, "beta", "comp-beta")
+
+    alpha_result = {
+        "hit": True,
+        "verification_report": _passing_report("comp-alpha"),
+        "license_scan": _clean_license("comp-alpha"),
+        "secret_scan": _clean_secret(),
     }
-    repo_root, calls_log, gate_log = _setup_repo(
-        tmp_path,
-        components=[("foo", ["R-FOO-001"]), ("bar", ["R-BAR-001"])],
-        provenance_config=provenance_config,
+    beta_result = {
+        "hit": True,
+        "verification_report": _passing_report("comp-beta"),
+        "license_scan": _clean_license("comp-beta"),
+        "secret_scan": _clean_secret(),
+    }
+    _write_pc_config(
+        repo_root,
+        results={"comp-alpha": alpha_result, "comp-beta": beta_result},
+        provenance_key={"spec_bundle_hash": "sha256:def456", "gate_versions": {"verifier": "v@1"}},
     )
 
+    # No impact-analyzer module is written to disk at all: given no
+    # changed_ids, D98 requires it never be loaded, so any attempt to
+    # load it here would raise and fail this test.
     report = provenance_tracker.check_readiness(repo_root)
 
     assert _get(report, "scope") == "whole-corpus"
 
-    calls = _read_calls(calls_log)
-    checked_ids = {call["component_id"] for call in calls if call["fn"] == "check_provenance"}
-    assert checked_ids == {"comp-foo", "comp-bar"}
+    calls_log_path = repo_root / "pc_calls.log"
+    assert calls_log_path.exists()
+    checked_ids = set()
+    for line in calls_log_path.read_text().strip().splitlines():
+        record = json.loads(line)
+        if "component_id" in record:
+            checked_ids.add(record["component_id"])
+    assert checked_ids == {"comp-alpha", "comp-beta"}
 
-    _assert_no_calls(gate_log)
 
+def test_failing_verification_report(tmp_path):
+    repo_root = tmp_path
+    _write_dependency(repo_root, "impact-analyzer", "impact_analyzer", IMPACT_ANALYZER_SRC)
+    _write_dependency(repo_root, "provenance-checker", "provenance_checker", PROVENANCE_CHECKER_SRC)
+    _write_component(repo_root, "target", "comp-target")
 
-def test_failing_verification_report_marks_component_not_ready(tmp_path):
-    verification_report = {
-        "component_id": "comp-foo",
+    _write_ia_config(repo_root, [
+        {"component_id": "comp-target", "reason": "direct", "via": None},
+    ])
+
+    failing_report = {
+        "component_id": "comp-target",
         "criteria": [
             {"id": "AC-FOO-001", "covers": "R-FOO-001", "kind": "compiled", "result": "pass"},
             {
@@ -342,7 +280,7 @@ def test_failing_verification_report_marks_component_not_ready(tmp_path):
                 "covers": "R-FOO-002",
                 "kind": "compiled",
                 "result": "fail",
-                "failure_detail": {"message": "boom", "expected": 1, "actual": 2},
+                "failure_detail": {"message": "x failed", "expected": 1, "actual": 2},
             },
         ],
         "requirement_results": {"R-FOO-001": "pass", "R-FOO-002": "fail"},
@@ -350,88 +288,110 @@ def test_failing_verification_report_marks_component_not_ready(tmp_path):
         "mutation_score": 0.5,
         "overall": "fail",
     }
-    provenance_config = {
-        "key": {"spec_bundle_hash": "sha256:" + "c" * 8, "gate_versions": {"verifier": "v@1"}},
-        "components": {
-            "comp-foo": {
-                "hit": True,
-                "verification_report": verification_report,
-                "license_scan": _clean_license_scan("comp-foo"),
-                "secret_scan": _clean_secret_scan(),
-            },
-        },
+    target_result = {
+        "hit": True,
+        "verification_report": failing_report,
+        "license_scan": _clean_license("comp-target"),
+        "secret_scan": _clean_secret(),
     }
-    repo_root, _, gate_log = _setup_repo(
-        tmp_path,
-        components=[("foo", ["R-FOO-001", "R-FOO-002"])],
-        provenance_config=provenance_config,
+    _write_pc_config(
+        repo_root,
+        results={"comp-target": target_result},
+        provenance_key={"spec_bundle_hash": "sha256:ghi789", "gate_versions": {"verifier": "v@1"}},
     )
 
-    report = provenance_tracker.check_readiness(repo_root)
+    report = provenance_tracker.check_readiness(repo_root, changed_ids=["comp-changed"])
 
     reasons = _get(report, "not_ready_reasons")
-    matching = [r for r in reasons if "comp-foo" in r and "verification" in r and "R-FOO-002" in r]
-    assert matching
+    matching = [
+        r for r in reasons
+        if "comp-target" in r and "verification" in r and "R-FOO-002" in r
+    ]
+    assert matching, reasons
 
-    _assert_no_calls(gate_log)
 
+def test_blocked_license_scan(tmp_path):
+    repo_root = tmp_path
+    _write_dependency(repo_root, "impact-analyzer", "impact_analyzer", IMPACT_ANALYZER_SRC)
+    _write_dependency(repo_root, "provenance-checker", "provenance_checker", PROVENANCE_CHECKER_SRC)
+    _write_component(repo_root, "target2", "comp-target2")
 
-def test_blocked_license_scan_marks_component_not_ready(tmp_path):
-    provenance_config = {
-        "key": {"spec_bundle_hash": "sha256:" + "d" * 8, "gate_versions": {"verifier": "v@1"}},
-        "components": {
-            "comp-foo": {
-                "hit": True,
-                "verification_report": _passing_verification_report("comp-foo", "R-FOO-001"),
-                "license_scan": _blocked_license_scan("comp-foo"),
-                "secret_scan": _clean_secret_scan(),
-            },
-        },
+    _write_ia_config(repo_root, [
+        {"component_id": "comp-target2", "reason": "direct", "via": None},
+    ])
+
+    blocked_license = {
+        "component_id": "comp-target2",
+        "gate_version": "license_scanner@4.0.3+9f2c41ab07de",
+        "evaluated": True,
+        "reason": None,
+        "similarity_score": 0.9,
+        "block_threshold": 0.70,
+        "blocked": True,
+        "matches": [
+            {"reference_id": "ref-123", "license_family": "gpl-3.0", "risk_tier": "high", "score": 0.9},
+        ],
+        "notified": True,
+        "notification_delivery_error": None,
+        "cache_hit": False,
     }
-    repo_root, _, gate_log = _setup_repo(
-        tmp_path,
-        components=[("foo", ["R-FOO-001"])],
-        provenance_config=provenance_config,
+    target_result = {
+        "hit": True,
+        "verification_report": _passing_report("comp-target2"),
+        "license_scan": blocked_license,
+        "secret_scan": _clean_secret(),
+    }
+    _write_pc_config(
+        repo_root,
+        results={"comp-target2": target_result},
+        provenance_key={"spec_bundle_hash": "sha256:jkl012", "gate_versions": {"verifier": "v@1"}},
     )
 
-    report = provenance_tracker.check_readiness(repo_root)
+    report = provenance_tracker.check_readiness(repo_root, changed_ids=["comp-changed"])
 
     reasons = _get(report, "not_ready_reasons")
-    matching = [r for r in reasons if "comp-foo" in r and "license_scan" in r]
-    assert matching
-
-    _assert_no_calls(gate_log)
+    matching = [r for r in reasons if "comp-target2" in r and "license_scan" in r]
+    assert matching, reasons
 
 
-def test_check_provenance_receives_key_unchanged_for_every_component(tmp_path):
-    provenance_config = {
-        "key": {"spec_bundle_hash": "sha256:k1", "gate_versions": {"verifier": "v@1"}},
-        "components": {
-            "comp-foo": {
-                "hit": True,
-                "verification_report": _passing_verification_report("comp-foo", "R-FOO-001"),
-                "license_scan": _clean_license_scan("comp-foo"),
-                "secret_scan": _clean_secret_scan(),
-            },
-            "comp-bar": {
-                "hit": True,
-                "verification_report": _passing_verification_report("comp-bar", "R-BAR-001"),
-                "license_scan": _clean_license_scan("comp-bar"),
-                "secret_scan": _clean_secret_scan(),
-            },
-        },
+def test_provenance_key_forwarded_unchanged(tmp_path):
+    repo_root = tmp_path
+    _write_dependency(repo_root, "impact-analyzer", "impact_analyzer", IMPACT_ANALYZER_SRC)
+    _write_dependency(repo_root, "provenance-checker", "provenance_checker", PROVENANCE_CHECKER_SRC)
+    _write_component(repo_root, "a", "comp-a")
+    _write_component(repo_root, "b", "comp-b")
+
+    _write_ia_config(repo_root, [
+        {"component_id": "comp-a", "reason": "direct", "via": None},
+        {"component_id": "comp-b", "reason": "transitive-interface", "via": "comp-a"},
+    ])
+
+    a_result = {
+        "hit": True,
+        "verification_report": _passing_report("comp-a"),
+        "license_scan": _clean_license("comp-a"),
+        "secret_scan": _clean_secret(),
     }
-    repo_root, calls_log, _ = _setup_repo(
-        tmp_path,
-        components=[("foo", ["R-FOO-001"]), ("bar", ["R-BAR-001"])],
-        provenance_config=provenance_config,
+    b_result = {
+        "hit": True,
+        "verification_report": _passing_report("comp-b"),
+        "license_scan": _clean_license("comp-b"),
+        "secret_scan": _clean_secret(),
+    }
+    _write_pc_config(
+        repo_root,
+        results={"comp-a": a_result, "comp-b": b_result},
+        provenance_key={"spec_bundle_hash": "sha256:k1", "gate_versions": {"verifier": "v@1"}},
     )
 
-    provenance_tracker.check_readiness(repo_root)
+    provenance_tracker.check_readiness(repo_root, changed_ids=["comp-changed"])
 
-    calls = _read_calls(calls_log)
-    check_calls = [c for c in calls if c["fn"] == "check_provenance"]
-    assert len(check_calls) >= 2
-    for call in check_calls:
+    calls = [
+        json.loads(line)
+        for line in (repo_root / "pc_calls.log").read_text().strip().splitlines()
+    ]
+    check_provenance_calls = [c for c in calls if c["fn"] == "check_provenance"]
+    assert len(check_provenance_calls) == 2
+    for call in check_provenance_calls:
         assert call["spec_bundle_hash"] == "sha256:k1"
         assert call["gate_versions"] == {"verifier": "v@1"}

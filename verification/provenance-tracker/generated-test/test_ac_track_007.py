@@ -1,8 +1,10 @@
 import json
-import tempfile
+from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 
 import duckdb
+import pytest
 
 import provenance_tracker
 
@@ -13,78 +15,107 @@ def _get(obj, key, default=None):
     return getattr(obj, key, default)
 
 
-def test_write_attempt_record_generation_failure_has_no_verification():
-    with tempfile.TemporaryDirectory() as tmp:
-        repo_root = Path(tmp)
-        component_id = "comp-foo"
-        spec_bundle_hash = "sha256:" + "a" * 64
+@dataclass
+class ModelCallError:
+    category: str
+    message: str
 
-        generation_result = {
-            "component_id": component_id,
-            "model": "gpt-5",
-            "seed": 0,
-            "candidate_files": [],
-            "model_call_error": {
-                "category": "timeout",
-                "message": "model call timed out after 120s",
-            },
-        }
 
-        record = provenance_tracker.write_attempt_record(
-            component_id,
-            generation_result,
-            None,
-            spec_bundle_hash,
-            repo_root,
-        )
+@dataclass
+class GenerationResult:
+    component_id: str
+    model_call_error: ModelCallError | None
+    candidate: str | None
+    retries: int
 
-        generation_field = _get(record, "generation")
-        verification_field = _get(record, "verification")
 
-        assert verification_field is None
-        assert isinstance(generation_field, dict)
-        model_call_error_field = _get(generation_field, "model_call_error")
-        assert isinstance(model_call_error_field, dict)
-        assert _get(model_call_error_field, "category") == "timeout"
-        assert _get(model_call_error_field, "message") == "model call timed out after 120s"
+def test_write_attempt_record_generation_failure_no_verification(tmp_path: Path):
+    repo_root = tmp_path
+    component_id = "comp-foo"
+    spec_bundle_hash = "sha256:" + "a" * 64
 
-        attempts_dir = repo_root / ".hotdocs" / "attempts" / component_id
-        assert attempts_dir.is_dir()
+    generation_result = GenerationResult(
+        component_id=component_id,
+        model_call_error=ModelCallError(category="network", message="timeout"),
+        candidate=None,
+        retries=2,
+    )
 
-        written_files = sorted(p for p in attempts_dir.glob("*") if p.is_file())
-        assert len(written_files) == 1
-        attempt_file = written_files[0]
+    before = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    record = provenance_tracker.write_attempt_record(
+        component_id, generation_result, None, spec_bundle_hash, repo_root
+    )
+    after = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
-        with open(attempt_file, "r", encoding="utf-8") as f:
-            on_disk = json.load(f)
+    attempts_dir = repo_root / ".hotdocs" / "attempts" / component_id
+    assert attempts_dir.is_dir()
 
-        assert on_disk["component_id"] == component_id
-        assert on_disk["spec_bundle_hash"] == spec_bundle_hash
-        assert on_disk["verification"] is None
-        assert isinstance(on_disk["generation"], dict)
-        assert on_disk["generation"]["model_call_error"]["category"] == "timeout"
-        assert on_disk["generation"]["model_call_error"]["message"] == (
-            "model call timed out after 120s"
-        )
+    written_files = list(attempts_dir.iterdir())
+    assert len(written_files) == 1
+    attempt_file = written_files[0]
 
-        rows = duckdb.sql(
-            "SELECT component_id, spec_bundle_hash, verification, generation "
-            f"FROM read_json('{attempt_file.as_posix()}')"
-        ).fetchall()
+    file_data = json.loads(attempt_file.read_text())
 
-        assert len(rows) == 1
-        (
-            queried_component_id,
-            queried_spec_bundle_hash,
-            queried_verification,
-            queried_generation,
-        ) = rows[0]
+    assert file_data["component_id"] == component_id
+    assert file_data["spec_bundle_hash"] == spec_bundle_hash
+    assert before <= file_data["timestamp"] <= after
+    assert file_data["verification"] is None
 
-        assert queried_component_id == component_id
-        assert queried_spec_bundle_hash == spec_bundle_hash
-        assert queried_verification is None
-        assert queried_generation is not None
-        assert queried_generation["model_call_error"]["category"] == "timeout"
-        assert queried_generation["model_call_error"]["message"] == (
-            "model call timed out after 120s"
-        )
+    generation_written = file_data["generation"]
+    assert generation_written["component_id"] == component_id
+    assert generation_written["candidate"] is None
+    assert generation_written["retries"] == 2
+    assert generation_written["model_call_error"] == {
+        "category": "network",
+        "message": "timeout",
+    }
+
+    attempt_id = file_data["attempt_id"]
+    assert isinstance(attempt_id, str) and len(attempt_id) > 0
+    assert attempt_file.name.startswith(attempt_id)
+
+    record_generation = _get(record, "generation")
+    record_verification = _get(record, "verification")
+    record_component_id = _get(record, "component_id")
+    record_spec_bundle_hash = _get(record, "spec_bundle_hash")
+    record_timestamp = _get(record, "timestamp")
+    record_attempt_id = _get(record, "attempt_id")
+
+    assert record_component_id == component_id
+    assert record_spec_bundle_hash == spec_bundle_hash
+    assert record_timestamp == file_data["timestamp"]
+    assert record_attempt_id == attempt_id
+    assert record_verification is None
+
+    assert record_generation == generation_written
+    assert record_generation is not generation_result
+    assert not isinstance(record_generation, GenerationResult)
+
+    generation_result.retries = 999
+    assert _get(record, "generation")["retries"] == 2
+
+    rel = duckdb.read_json(str(attempt_file))
+    columns = rel.columns
+    for expected_col in (
+        "attempt_id",
+        "component_id",
+        "timestamp",
+        "spec_bundle_hash",
+        "generation",
+        "verification",
+    ):
+        assert expected_col in columns
+
+    rows = rel.fetchall()
+    assert len(rows) == 1
+    row = dict(zip(columns, rows[0]))
+
+    assert row["component_id"] == component_id
+    assert row["spec_bundle_hash"] == spec_bundle_hash
+    assert row["verification"] is None
+
+    duck_generation = row["generation"]
+    assert duck_generation["retries"] == 2
+    assert duck_generation["candidate"] is None
+    assert duck_generation["model_call_error"]["category"] == "network"
+    assert duck_generation["model_call_error"]["message"] == "timeout"

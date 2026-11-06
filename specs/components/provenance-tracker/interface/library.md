@@ -9,16 +9,19 @@ check_readiness(
 
 The live provenance query (`R-TRACK-009`/`010`, `D88`/`D93`) — "would a
 merge pass right now." Omitting `changed_ids` checks the whole corpus.
-Every component is checked against `provenance-checker` only, using
-its `current_provenance_key` — a pure read, never a call to `component-gate-runner` (`D93`). Every
-intersecting capability is checked-then-run against
-`capability-scenario-verifier`'s `run_capability_gates`, passing
-`model`/`seed`/`llm_backend` straight through unchanged (`D89`/`D92`).
-`model` is optional here, unlike `component-gate-runner`'s own
-`run_component_gates` — it is only consulted if some capability in
-scope is a provenance miss and needs a fresh scenario run; a miss
-encountered with `model` still `None` is reported as a usage error, not
-silently skipped.
+Every component is checked against `provenance-checker` only: first its
+`current_sealed_key`, whose `None` means a generated component, checked
+with `current_provenance_key` and `check_provenance`, and whose key means
+a sealed one, checked with `check_sealed_provenance` (`D170`). Any stand-in
+for `provenance-checker` must provide all four names, `current_sealed_key`
+returning `None` for a component that is not sealed. It is a pure read, never a call to `component-gate-runner` (`D93`). Every
+intersecting capability is first checked with
+`capability-scenario-verifier`'s `check_capability_provenance`; only a
+miss is run with `run_capability_gates`, passing `model`/`seed`/
+`llm_backend` straight through unchanged (`R-TRACK-010`). `model` is
+optional here, unlike `component-gate-runner`'s `run_component_gates`:
+it is only consulted for such a miss, and a miss with `model` still
+`None` raises `ValueError`, never silently skipped.
 
 ```
 write_attempt_record(

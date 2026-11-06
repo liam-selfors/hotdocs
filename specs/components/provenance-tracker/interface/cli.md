@@ -6,33 +6,29 @@ hotdocs verify [--changed=<spec-id>...] [--model=<model-id>] [--seed=<n>] \
 hotdocs track feedback <component-id> [--repo-root=<dir>]
 ```
 
-`hotdocs verify` (`R-TRACK-009`/`010`, `D88`/`D93`) is the canonical
-"will a merge pass" command — omitting `--changed` checks the whole
-corpus, supplying it checks just that blast radius. Every component in
-scope is only ever checked against `provenance-checker`, read-only —
-this command never triggers `component-gate-runner` (`D93`); every
-intersecting capability is checked-then-run against
-`capability-scenario-verifier` (`D89`/`D92`, unreversed by `D93`),
-since that never produces new source code. `--model` is required only
-when some capability in scope actually needs a fresh run; a scope
-that's already fully current never needs it — supplying it when
-nothing needs it is harmless. Exit `0` means `ready` is `true`; exit
-`1` means at least one component or capability in scope is not ready,
-with `not_ready_reasons` printed (`--format=text`, the default) or
-available as structured data (`--format=json`). This command confirms
-readiness; it does not gate anything itself — nothing requires it to
-be run before a commit (`D87`).
+`main(argv)` receives `argv` beginning `["verify", ...]` or `["track",
+"feedback", ...]`; every flag takes its value as `--flag=value` or as the
+next argument, and `--changed` may repeat. `main` calls `check_readiness`
+and `last_requirement_failures` through this module's own global names,
+so a test may replace them.
 
-`track feedback` (`R-TRACK-008`, `D3`) prints the named component's
-most recent failing `R-id`s, comma-separated, ready to paste into
-`hotdocs generate <component-id> --retry-feedback=...` (`D86`/`D93`) —
-or nothing, if no failed attempt exists. It does not pass anything
-anywhere itself; it only answers "what would I pass," leaving whether
-to pass it to the developer running the command.
+`hotdocs verify` (`R-TRACK-009`/`010`, `D88`/`D93`) answers "will a merge
+pass": without `--changed` it checks the whole corpus, with it that blast
+radius. Components are only checked against `provenance-checker`,
+read-only, never triggering `component-gate-runner` (`D93`); intersecting
+capabilities are checked-then-run against `capability-scenario-verifier`
+(`D89`/`D92`). `--model` is needed only when a capability needs a fresh
+run. `--format=text` (default) prints `ready` or `not ready` and then each
+`not_ready_reasons` entry on its own line; `--format=json` prints the
+result as JSON, converted as `R-TRACK-007` converts its inputs. Nothing requires running it before a commit (`D87`).
 
-There is no `hotdocs track write` CLI command — `write_attempt_record`
-is invoked by `component-gate-runner` directly, never run standalone by
-a human.
+`track feedback` (`R-TRACK-008`, `D3`) prints the named component's most
+recent failing `R-id`s, comma-separated, ready for `hotdocs generate
+<component-id> --retry-feedback=...` (`D86`/`D93`), or nothing if no
+failed attempt exists.
+
+There is no `hotdocs track write`: `component-gate-runner` calls
+`write_attempt_record` directly.
 
 **Exit codes (`hotdocs verify`):**
 
@@ -40,11 +36,11 @@ a human.
 | --- | --- |
 | `0` | Ready — every item in scope has current, passing provenance. |
 | `1` | Not ready — see `not_ready_reasons`. |
-| `2` | Usage error (e.g. a capability in scope needs a fresh run and `--model` was not supplied). |
+| `2` | Usage error: an unknown argument, a non-integer `--seed`, an invalid `--format`, a flag given last with no value, or a capability in scope that needs a fresh run without `--model`. |
 
 **Exit codes (`hotdocs track feedback`):**
 
 | Code | Meaning |
 | --- | --- |
 | `0` | Ran (output may be empty if no failed attempt exists). |
-| `2` | Usage error. |
+| `2` | Usage error: no `<component-id>`, an unknown argument, or a first word other than `verify` or `track feedback`. |

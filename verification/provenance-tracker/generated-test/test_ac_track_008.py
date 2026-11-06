@@ -4,10 +4,7 @@ import provenance_tracker
 def test_last_requirement_failures_returns_failing_r_ids(tmp_path):
     repo_root = tmp_path
 
-    # verification is non-null, so model_call_error must be null (AttemptRecord.md invariant)
-    generation_result = {
-        "model_call_error": None,
-    }
+    generation_result = {"model_call_error": None}
     verification_report = {
         "component_id": "comp-foo",
         "criteria": [
@@ -17,25 +14,20 @@ def test_last_requirement_failures_returns_failing_r_ids(tmp_path):
                 "covers": "R-FOO-002",
                 "kind": "compiled",
                 "result": "fail",
-                "failure_detail": {
-                    "message": "result.foo equals 5 failed",
-                    "expected": 5,
-                    "actual": 3,
-                },
+                "failure_detail": {"message": "boom", "expected": 1, "actual": 2},
             },
         ],
         "requirement_results": {"R-FOO-001": "pass", "R-FOO-002": "fail"},
         "interface_drift": False,
-        "mutation_score": 1.0,
+        "mutation_score": 0.9,
         "overall": "fail",
     }
-    spec_bundle_hash = "sha256:" + "a" * 64
 
     provenance_tracker.write_attempt_record(
         "comp-foo",
         generation_result,
         verification_report,
-        spec_bundle_hash,
+        "sha256:" + "a" * 64,
         repo_root,
     )
 

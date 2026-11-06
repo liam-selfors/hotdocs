@@ -12,6 +12,7 @@ dependencies = [
     "duckdb==2.0.0",
     "pytest>=8",
     "pytz",
+    "PyYAML",
 ]
 
 [project.scripts]

@@ -6,7 +6,9 @@ Kind: generated-test
 Every scenario that exercises `run_capability_gates` fakes
 `check_capability_provenance` to return `hit` false for that
 capability; a hit short-circuits before `run_capability_gates` is
-ever called (`R-TRACK-010`).
+ever called (`R-TRACK-010`). A faked provenance-checker provides
+current_sealed_key (returning None), current_provenance_key,
+check_provenance, and check_sealed_provenance.
 
 ```gherkin
 Given every component in scope is a provenance-checker hit with a
@@ -24,6 +26,6 @@ Then ready is false and not_ready_reasons names that capability,
 Given an intersecting capability that is a provenance miss and model
   is None
 When check_readiness is called
-Then it reports a usage error for that capability rather than skipping
-  it or running run_capability_gates without a model
+Then it raises ValueError, without skipping the capability or calling
+  run_capability_gates
 ```

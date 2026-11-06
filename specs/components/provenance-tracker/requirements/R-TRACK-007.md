@@ -18,7 +18,7 @@
   fields MUST be the same JSON-equivalent plain form written to disk**
   (`D100`, `AttemptRecord.md`) — never the original
   `GenerationResult`/`VerificationReport` object echoed back by
-  reference. A real candidate's test was found asserting attribute
-  access on the in-memory return value where the documented on-disk
-  shape (and the candidate's own, reasonable choice) is a plain dict —
-  this was never stated either way until now.
+  reference. Each input may be a dict, a dataclass, or any object
+  with attributes (the real `GenerationResult` is a dataclass), and is
+  converted recursively to plain JSON values before writing: a
+  dataclass via `dataclasses.asdict`, another object via its `vars()`.

@@ -3,6 +3,10 @@
 Covers: R-TRACK-009
 Kind: generated-test
 
+Any faked provenance-checker provides current_sealed_key (returning None,
+so every component here is generated), current_provenance_key,
+check_provenance, and check_sealed_provenance (`interface/library.md`).
+
 ```gherkin
 Given changed_ids naming one changed component, impact-analyzer
   reporting a blast radius of two components, and provenance-checker
