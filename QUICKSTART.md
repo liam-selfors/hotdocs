@@ -1,11 +1,5 @@
 # Quickstart
 
-> **Status:** steps 1 and 4 were run as written. Steps 2, 3, 5 and 6 follow
-> the `hotdocs-cli` component's spec and had **not** been run end to end when
-> this was written, because the model backend hit its usage limit
-> mid-build. Delete this note once `hotdocs init --example`, `lint`,
-> `generate comp-slugify` and `verify` have been run from a fresh install.
-
 hotdocs turns written specs into verified Python code: you write what a
 component must do and how to check it, `hotdocs generate` has a model write
 the code and its tests, and `hotdocs verify` says whether everything is
@@ -37,7 +31,10 @@ hotdocs init --example
 tool into `gen/` and `pipeline/` (recorded in `.hotdocs-tool.json`), and asks
 which model provider to use. It tests the connection, never asks for an API
 key, and stores only the *name* of the environment variable that holds it in
-`hotdocs.toml`. `--example` adds a tiny `slugify` component to start from.
+`hotdocs.toml`. `--example` adds a tiny `slugify` component to start from. It also writes
+`.secret-allowlist.json`, sealed by `specs/decisions/D1.md`: the secret
+scanner honors the list only while its hash matches a ratified decision, so
+changing it means writing a new decision with the new hash.
 Run it again any time; it never overwrites. `hotdocs init --reconfigure`
 changes only the provider.
 
@@ -80,8 +77,3 @@ the spec: a missing detail, or an example that contradicts a requirement.
 Fix it there. `hotdocs track feedback comp-<name>` lists the failing
 requirement ids from the last attempt, and `--retry-feedback=R-...` passes
 them to the next `generate`.
-
-## 6. Known issues
-
-- `hotdocs lint` fails on a project with no components yet, so start from
-  `--example` or add a component first.
