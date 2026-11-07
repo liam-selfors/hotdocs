@@ -1,298 +1,256 @@
+import importlib.metadata
 import os
-import sys
-import subprocess
-from pathlib import Path
-
-import pytest
+import stat
+import textwrap
+import unittest.mock as mock
 
 import hotdocs_init
 
 
-pytestmark = pytest.mark.skipif(
-    sys.version_info < (3, 10),
-    reason="host Python below the floor R-INIT-003 assumes is already met",
-)
+_LLM_ENDPOINT_TEMPLATE = textwrap.dedent('''
+import json
+import os
 
-
-_LLM_ENDPOINT_FAKE = '''
 PROVIDERS = {
-    "claude-cli": {
-        "default_base_url": None,
-        "default_api_key_env": None,
-        "needs_base_url": False,
-        "suggested_model": "claude-sonnet-5",
-    },
-    "ollama": {
-        "default_base_url": "http://localhost:11434",
-        "default_api_key_env": None,
-        "needs_base_url": False,
-        "suggested_model": "llama3.1:8b",
-    },
+    "claude-cli": {"default_base_url": None, "default_api_key_env": None,
+                   "needs_base_url": False, "suggested_model": "claude-sonnet-5"},
+    "ollama": {"default_base_url": "http://localhost:11434", "default_api_key_env": None,
+               "needs_base_url": False, "suggested_model": "llama3.1:8b"},
 }
+
+LOG_PATH = __LOG_PATH__
+
+
+def _log(name, info):
+    with open(LOG_PATH, "a") as f:
+        f.write(name + " " + repr(info))
+        f.write(chr(10))
 
 
 def detect_providers(env=None, probe_ollama=True):
-    results = []
-    for name, info in PROVIDERS.items():
-        results.append({
-            "provider": name,
-            "available": True,
-            "reason": None,
-            "suggested_model": info["suggested_model"],
-            "api_key_env": info["default_api_key_env"],
-        })
-    return results
+    _log("detect_providers", {"env": env, "probe_ollama": probe_ollama})
+    return [
+        {"provider": p, "available": True, "reason": None,
+         "suggested_model": cfg["suggested_model"], "api_key_env": cfg["default_api_key_env"]}
+        for p, cfg in PROVIDERS.items()
+    ]
 
 
 def check_connection(provider, model, base_url=None, api_key_env=None, timeout_seconds=30):
+    _log("check_connection", {"provider": provider, "model": model})
     if provider not in PROVIDERS:
-        raise ValueError("unknown provider: " + str(provider))
+        raise ValueError("unknown provider: " + provider)
+    if PROVIDERS[provider]["needs_base_url"] and not base_url:
+        raise ValueError("base_url required")
     return {"ok": True, "error": None}
 
 
 def save_config(config_path, provider, model, base_url=None, api_key_env=None, timeout_seconds=None):
-    config_path = str(config_path)
-    existing = ""
-    try:
-        with open(config_path, "r", encoding="utf-8") as f:
-            existing = f.read()
-    except FileNotFoundError:
-        existing = ""
-    lines = []
-    in_llm = False
-    for line in existing.splitlines():
-        stripped = line.strip()
-        if stripped == "[llm]":
-            in_llm = True
-            continue
-        if in_llm and stripped.startswith("[") and stripped != "[llm]":
-            in_llm = False
-        if not in_llm:
-            lines.append(line)
-    lines.append("[llm]")
-    lines.append("provider = \\"" + provider + "\\"")
-    lines.append("model = \\"" + model + "\\"")
-    if base_url is not None:
-        lines.append("base_url = \\"" + base_url + "\\"")
-    if api_key_env is not None:
-        lines.append("api_key_env = \\"" + api_key_env + "\\"")
-    if timeout_seconds is not None:
-        lines.append("timeout_seconds = " + str(timeout_seconds))
-    with open(config_path, "w", encoding="utf-8") as f:
-        f.write("\\n".join(lines) + "\\n")
+    _log("save_config", {"config_path": str(config_path), "provider": provider, "model": model})
+    data = {"provider": provider, "model": model, "base_url": base_url,
+            "api_key_env": api_key_env, "timeout_seconds": timeout_seconds}
+    existing = {}
+    if os.path.exists(config_path):
+        try:
+            with open(config_path, "r") as f:
+                existing = json.load(f)
+        except Exception:
+            existing = {}
+    existing["llm"] = data
+    with open(config_path, "w") as f:
+        json.dump(existing, f)
 
 
 def load_config(config_path=None):
-    if config_path is None:
+    _log("load_config", {"config_path": str(config_path) if config_path else None})
+    if config_path is None or not os.path.exists(config_path):
         return None
-    config_path = str(config_path)
-    try:
-        with open(config_path, "r", encoding="utf-8") as f:
-            text = f.read()
-    except FileNotFoundError:
-        return None
-    if "[llm]" not in text:
-        return None
-    result = {
-        "provider": None,
-        "model": None,
-        "base_url": None,
-        "api_key_env": None,
-        "timeout_seconds": None,
-    }
-    in_llm = False
-    for line in text.splitlines():
-        stripped = line.strip()
-        if stripped == "[llm]":
-            in_llm = True
-            continue
-        if stripped.startswith("[") and stripped != "[llm]":
-            in_llm = False
-            continue
-        if in_llm and "=" in stripped:
-            key, _, value = stripped.partition("=")
-            key = key.strip()
-            value = value.strip().strip('"')
-            if key == "timeout_seconds":
-                try:
-                    value = int(value)
-                except ValueError:
-                    pass
-            if key in result:
-                result[key] = value
-    return result
-'''
+    with open(config_path, "r") as f:
+        try:
+            existing = json.load(f)
+        except Exception:
+            return None
+    return existing.get("llm")
+''')
 
 
-_CRITERION_COMPILER_FAKE = (
-    "def compile_criterion(*args, **kwargs):\n"
-    "    raise NotImplementedError('fake criterion-compiler stub')\n"
-)
+def _make_tool_root(base_dir, requirements_lines, log_path):
+    tool_root = base_dir / "tool_root"
+    tool_root.mkdir(parents=True, exist_ok=True)
 
-_SLUGIFY_EXAMPLE_FAKE = "# Slugify Example\n\nFixture placeholder content.\n"
+    (tool_root / "requirements.txt").write_text("\n".join(requirements_lines) + "\n")
 
+    llm_endpoint_dir = tool_root / "gen" / "llm-endpoint"
+    llm_endpoint_dir.mkdir(parents=True, exist_ok=True)
+    source = _LLM_ENDPOINT_TEMPLATE.replace("__LOG_PATH__", repr(str(log_path)))
+    (llm_endpoint_dir / "llm_endpoint.py").write_text(source)
 
-def _build_tool_root(base: Path, requirement_lines):
-    tool_root = base / "tool_root"
-    (tool_root / "gen" / "llm-endpoint").mkdir(parents=True)
-    (tool_root / "gen" / "llm-endpoint" / "llm_endpoint.py").write_text(
-        _LLM_ENDPOINT_FAKE, encoding="utf-8"
+    compiler_dir = tool_root / "pipeline" / "criterion-compiler"
+    compiler_dir.mkdir(parents=True, exist_ok=True)
+    (compiler_dir / "criterion_compiler.py").write_text(
+        "# stub criterion-compiler, vendored only, never imported by this test\n"
     )
-    (tool_root / "pipeline" / "criterion-compiler").mkdir(parents=True)
-    (tool_root / "pipeline" / "criterion-compiler" / "criterion_compiler.py").write_text(
-        _CRITERION_COMPILER_FAKE, encoding="utf-8"
-    )
-    (tool_root / "examples" / "slugify" / "specs" / "product").mkdir(parents=True)
-    (tool_root / "examples" / "slugify" / "specs" / "product" / "slugs.md").write_text(
-        _SLUGIFY_EXAMPLE_FAKE, encoding="utf-8"
-    )
-    (tool_root / "requirements.txt").write_text(
-        "\n".join(requirement_lines) + "\n", encoding="utf-8"
-    )
+
+    slugify_dir = tool_root / "examples" / "slugify" / "specs" / "product"
+    slugify_dir.mkdir(parents=True, exist_ok=True)
+    (slugify_dir / "slugs.md").write_text("# slugify example spec stub\n")
+
     return tool_root
 
 
-def _path_env(*dirs):
-    return {"PATH": os.pathsep.join(str(d) for d in dirs)}
-
-
-def _forbid_commands(monkeypatch):
-    def _fail(*args, **kwargs):
-        raise AssertionError(
-            "R-INIT-003 forbids running a command while checking/reporting prerequisites: "
-            + repr(args) + " " + repr(kwargs)
-        )
-
-    monkeypatch.setattr(subprocess, "run", _fail)
-    monkeypatch.setattr(subprocess, "Popen", _fail)
+def _make_path_env(tmp_path, name, include_claude):
+    path_dir = tmp_path / name
+    path_dir.mkdir(parents=True, exist_ok=True)
+    if include_claude:
+        claude_path = path_dir / "claude"
+        claude_path.write_text("#!/bin/sh\necho claude\n")
+        mode = claude_path.stat().st_mode
+        claude_path.chmod(mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH)
+    return {"PATH": str(path_dir)}
 
 
 def _assert_consecutive(lines, first, second):
-    for i in range(len(lines) - 1):
-        if lines[i] == first and lines[i + 1] == second:
-            return
-    raise AssertionError(
-        "expected consecutive lines %r / %r in %r" % (first, second, lines)
+    assert first in lines, "expected %r in output lines: %r" % (first, lines)
+    idx = lines.index(first)
+    assert idx + 1 < len(lines), "expected a line after %r" % (first,)
+    assert lines[idx + 1] == second, "expected %r right after %r, got %r" % (
+        second, first, lines[idx + 1])
+
+
+def test_missing_requirements_package_returns_3_and_reports_fix_no_command_run(tmp_path):
+    log_path = tmp_path / "calls1.log"
+    tool_root = _make_tool_root(
+        tmp_path,
+        ["pytest==9.2.0", "no-such-pkg-xyz==1.0"],
+        log_path,
     )
-
-
-def _blank_input(prompt=""):
-    return ""
-
-
-def test_missing_requirement_reports_but_setup_continues(tmp_path, monkeypatch):
-    tool_root = _build_tool_root(tmp_path, ["pytest==9.2.0", "no-such-pkg-xyz==1.0"])
-    project_dir = tmp_path / "project"
-    project_dir.mkdir()
-
-    _forbid_commands(monkeypatch)
-
-    empty_bin = tmp_path / "empty_bin"
-    empty_bin.mkdir()
-    env = _path_env(empty_bin)
+    tool_root_str = str(tool_root)
+    project_dir = tmp_path / "project1"
+    env = _make_path_env(tmp_path, "path1", include_claude=False)
 
     output_lines = []
-    argv = [str(project_dir), "--provider", "ollama", "--yes", "--no-test"]
+    argv = [
+        str(project_dir),
+        "--provider", "ollama",
+        "--model", "llama3.1:8b",
+        "--no-test",
+        "--yes",
+    ]
 
-    code = hotdocs_init.main(
-        argv,
-        tool_root=str(tool_root),
-        input_fn=_blank_input,
-        output_fn=output_lines.append,
-        env=env,
-        cwd=str(project_dir),
-    )
+    with mock.patch("subprocess.run", side_effect=AssertionError("no command should run")), \
+         mock.patch("subprocess.Popen", side_effect=AssertionError("no command should run")), \
+         mock.patch("subprocess.call", side_effect=AssertionError("no command should run")), \
+         mock.patch("subprocess.check_call", side_effect=AssertionError("no command should run")), \
+         mock.patch("subprocess.check_output", side_effect=AssertionError("no command should run")), \
+         mock.patch("os.system", side_effect=AssertionError("no command should run")):
+        rc = hotdocs_init.main(
+            argv,
+            tool_root=tool_root_str,
+            input_fn=lambda prompt: "y",
+            output_fn=output_lines.append,
+            env=env,
+        )
 
-    assert code == 3
-    assert any(project_dir.iterdir()), (
-        "expected the skeleton to be created and the tool vendored despite the missing prerequisite"
-    )
+    assert rc == 3
 
-    fix_line = "  fix: pip install -r " + str(tool_root) + "/requirements.txt"
+    fix_line = "  fix: pip install -r " + tool_root_str + "/requirements.txt"
     _assert_consecutive(output_lines, "missing: no-such-pkg-xyz==1.0", fix_line)
+
     assert "missing: pytest==9.2.0" not in output_lines
-    assert "missing: Python 3.10 or newer" not in output_lines
+
+    assert project_dir.exists()
+    assert (project_dir / "gen" / "llm-endpoint" / "llm_endpoint.py").exists()
+    assert (project_dir / "pipeline" / "criterion-compiler" / "criterion_compiler.py").exists()
 
 
-def test_claude_cli_missing_from_path(tmp_path, monkeypatch):
-    tool_root = _build_tool_root(tmp_path, ["pytest==9.2.0"])
-    project_dir = tmp_path / "project_a"
-    project_dir.mkdir()
-
-    _forbid_commands(monkeypatch)
-
-    empty_bin = tmp_path / "empty_bin_a"
-    empty_bin.mkdir()
-    env = _path_env(empty_bin)
+def test_claude_cli_missing_on_path_returns_3_with_consecutive_lines(tmp_path):
+    installed_version = importlib.metadata.version("pytest")
+    log_path = tmp_path / "calls2a.log"
+    tool_root = _make_tool_root(
+        tmp_path,
+        ["pytest==" + installed_version],
+        log_path,
+    )
+    project_dir = tmp_path / "project2a"
+    env = _make_path_env(tmp_path, "path2a", include_claude=False)
 
     output_lines = []
-    argv = [str(project_dir), "--provider", "claude-cli", "--yes", "--no-test"]
-
-    code = hotdocs_init.main(
+    argv = [
+        str(project_dir),
+        "--provider", "claude-cli",
+        "--model", "claude-sonnet-5",
+        "--no-test",
+        "--yes",
+    ]
+    rc = hotdocs_init.main(
         argv,
         tool_root=str(tool_root),
-        input_fn=_blank_input,
+        input_fn=lambda prompt: "y",
         output_fn=output_lines.append,
         env=env,
-        cwd=str(project_dir),
     )
 
-    assert code == 3
+    assert rc == 3
     _assert_consecutive(
         output_lines, "missing: claude on PATH", "  fix: install Claude Code and sign in"
     )
 
 
-def test_claude_cli_present_on_path(tmp_path, monkeypatch):
-    tool_root = _build_tool_root(tmp_path, ["pytest==9.2.0"])
-    project_dir = tmp_path / "project_b"
-    project_dir.mkdir()
-
-    _forbid_commands(monkeypatch)
-
-    bin_with_claude = tmp_path / "bin_with_claude"
-    bin_with_claude.mkdir()
-    (bin_with_claude / "claude").write_text("fake claude executable\n", encoding="utf-8")
-    env = _path_env(bin_with_claude)
+def test_claude_cli_present_on_path_returns_0(tmp_path):
+    installed_version = importlib.metadata.version("pytest")
+    log_path = tmp_path / "calls2b.log"
+    tool_root = _make_tool_root(
+        tmp_path,
+        ["pytest==" + installed_version],
+        log_path,
+    )
+    project_dir = tmp_path / "project2b"
+    env = _make_path_env(tmp_path, "path2b", include_claude=True)
 
     output_lines = []
-    argv = [str(project_dir), "--provider", "claude-cli", "--yes", "--no-test"]
-
-    code = hotdocs_init.main(
+    argv = [
+        str(project_dir),
+        "--provider", "claude-cli",
+        "--model", "claude-sonnet-5",
+        "--no-test",
+        "--yes",
+    ]
+    rc = hotdocs_init.main(
         argv,
         tool_root=str(tool_root),
-        input_fn=_blank_input,
+        input_fn=lambda prompt: "y",
         output_fn=output_lines.append,
         env=env,
-        cwd=str(project_dir),
     )
 
-    assert code == 0
-    assert "missing: claude on PATH" not in output_lines
+    assert rc == 0
 
 
-def test_ollama_provider_skips_claude_check(tmp_path, monkeypatch):
-    tool_root = _build_tool_root(tmp_path, ["pytest==9.2.0"])
-    project_dir = tmp_path / "project_c"
-    project_dir.mkdir()
-
-    _forbid_commands(monkeypatch)
-
-    empty_bin = tmp_path / "empty_bin_c"
-    empty_bin.mkdir()
-    env = _path_env(empty_bin)
+def test_provider_ollama_no_claude_on_path_returns_0(tmp_path):
+    installed_version = importlib.metadata.version("pytest")
+    log_path = tmp_path / "calls2c.log"
+    tool_root = _make_tool_root(
+        tmp_path,
+        ["pytest==" + installed_version],
+        log_path,
+    )
+    project_dir = tmp_path / "project2c"
+    env = _make_path_env(tmp_path, "path2c", include_claude=False)
 
     output_lines = []
-    argv = [str(project_dir), "--provider", "ollama", "--yes", "--no-test"]
-
-    code = hotdocs_init.main(
+    argv = [
+        str(project_dir),
+        "--provider", "ollama",
+        "--model", "llama3.1:8b",
+        "--no-test",
+        "--yes",
+    ]
+    rc = hotdocs_init.main(
         argv,
         tool_root=str(tool_root),
-        input_fn=_blank_input,
+        input_fn=lambda prompt: "y",
         output_fn=output_lines.append,
         env=env,
-        cwd=str(project_dir),
     )
 
-    assert code == 0
-    assert "missing: claude on PATH" not in output_lines
+    assert rc == 0

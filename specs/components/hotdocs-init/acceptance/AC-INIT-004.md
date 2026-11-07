@@ -23,9 +23,9 @@ When init runs interactively, choosing it, then answering "" (asked again), "m",
 Then the model and base URL were each asked twice, and save_config received model "m",
   base_url "http://h/v1", and no api_key_env keyword
 
-Given the provider "claude-cli"
+Given the provider "claude-cli" and env PATH holding an executable "claude" file
 When init runs interactively with empty answers
-Then no base URL and no API-key question was asked
+Then no base URL and no API-key question was asked, and it returns 0
 
 Given a tool root with no gen/llm-endpoint
 When init runs with --yes

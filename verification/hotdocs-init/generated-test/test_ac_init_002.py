@@ -1,266 +1,311 @@
 import json
 import os
+from importlib.metadata import version as _pkg_version
 from pathlib import Path
-
-import pytest
 
 import hotdocs_init
 
 
-LLM_ENDPOINT_TEMPLATE = '''import json
+LLM_ENDPOINT_TEMPLATE = '''
 import os
+from pathlib import Path
 
 LOG_PATH = __LOG_PATH__
 
 
-def _log(name, **kwargs):
-    entry = {"name": name}
-    entry.update(kwargs)
-    with open(LOG_PATH, "a", encoding="utf-8") as f:
-        f.write(json.dumps(entry) + "\\n")
+def _log(name):
+    with open(LOG_PATH, "a") as f:
+        f.write(name + "\\n")
 
 
 PROVIDERS = {
-    "anthropic": {
-        "default_base_url": None,
-        "default_api_key_env": "ANTHROPIC_API_KEY",
-        "needs_base_url": False,
-        "suggested_model": "claude-sonnet-5",
-    },
+    "anthropic": {"default_base_url": None, "default_api_key_env": "ANTHROPIC_API_KEY", "needs_base_url": False, "suggested_model": "claude-sonnet-5"},
+    "openai": {"default_base_url": "https://api.openai.com/v1", "default_api_key_env": "OPENAI_API_KEY", "needs_base_url": False, "suggested_model": "gpt-4o"},
+    "openai-compatible": {"default_base_url": None, "default_api_key_env": None, "needs_base_url": True, "suggested_model": ""},
+    "gemini": {"default_base_url": None, "default_api_key_env": "GEMINI_API_KEY", "needs_base_url": False, "suggested_model": "gemini-2.0-flash"},
+    "ollama": {"default_base_url": "http://localhost:11434", "default_api_key_env": None, "needs_base_url": False, "suggested_model": "llama3.1:8b"},
+    "claude-cli": {"default_base_url": None, "default_api_key_env": None, "needs_base_url": False, "suggested_model": "claude-sonnet-5"},
 }
 
 
 def detect_providers(env=None, probe_ollama=True):
     _log("detect_providers")
-    return [
-        {
-            "provider": "anthropic",
-            "available": True,
-            "reason": "fake",
-            "suggested_model": "claude-sonnet-5",
-            "api_key_env": "ANTHROPIC_API_KEY",
-        }
-    ]
+    result = []
+    for name, info in PROVIDERS.items():
+        available = name == "ollama"
+        result.append({
+            "provider": name,
+            "available": available,
+            "reason": "fake-available" if available else "fake-unavailable",
+            "suggested_model": info["suggested_model"],
+            "api_key_env": info["default_api_key_env"],
+        })
+    return result
 
 
 def check_connection(provider, model, base_url=None, api_key_env=None, timeout_seconds=30):
     _log("check_connection")
+    if provider not in PROVIDERS:
+        raise ValueError("unknown provider: " + str(provider))
+    if PROVIDERS[provider]["needs_base_url"] and not base_url:
+        raise ValueError("base_url required for " + str(provider))
     return {"ok": True, "error": None}
+
+
+def _parse_llm_section(text):
+    lines = text.splitlines()
+    start = None
+    for i, line in enumerate(lines):
+        if line.strip() == "[llm]":
+            start = i
+            break
+    if start is None:
+        return None, lines, None, None
+    end = len(lines)
+    for i in range(start + 1, len(lines)):
+        if lines[i].strip().startswith("["):
+            end = i
+            break
+    data = {}
+    for line in lines[start + 1:end]:
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        data[key.strip()] = value.strip().strip('"')
+    return data, lines, start, end
 
 
 def save_config(config_path, provider, model, base_url=None, api_key_env=None, timeout_seconds=None):
     _log("save_config")
-    existing = ""
-    if os.path.exists(config_path):
-        with open(config_path, "r", encoding="utf-8") as f:
-            existing = f.read()
-    with open(config_path, "w", encoding="utf-8") as f:
-        f.write(existing)
-        f.write("\\n[llm]\\n")
-        f.write("provider = \\"" + provider + "\\"\\n")
-        f.write("model = \\"" + model + "\\"\\n")
+    if provider not in PROVIDERS:
+        raise ValueError("unknown provider: " + str(provider))
+    path = Path(config_path)
+    text = path.read_text() if path.exists() else ""
+    _, lines, start, end = _parse_llm_section(text)
+    section = ["[llm]", 'provider = "' + provider + '"', 'model = "' + model + '"']
+    if base_url is not None:
+        section.append('base_url = "' + base_url + '"')
+    if api_key_env is not None:
+        section.append('api_key_env = "' + api_key_env + '"')
+    if timeout_seconds is not None:
+        section.append("timeout_seconds = " + str(int(timeout_seconds)))
+    if start is None:
+        new_lines = lines + ([""] if lines else []) + section
+    else:
+        new_lines = lines[:start] + section + lines[end:]
+    path.write_text("\\n".join(new_lines) + "\\n")
 
 
 def load_config(config_path=None):
     _log("load_config")
-    return None
+    path = Path(config_path) if config_path is not None else Path("hotdocs.toml")
+    if not path.exists():
+        return None
+    data, _lines, start, _end = _parse_llm_section(path.read_text())
+    if start is None:
+        return None
+    timeout = data.get("timeout_seconds")
+    return {
+        "provider": data.get("provider"),
+        "model": data.get("model"),
+        "base_url": data.get("base_url"),
+        "api_key_env": data.get("api_key_env"),
+        "timeout_seconds": int(timeout) if timeout else None,
+    }
 '''
 
 
-def _write_tool_root(root: Path, log_path: Path) -> None:
-    (root / "gen" / "a-b").mkdir(parents=True)
-    (root / "gen" / "a-b" / "a_b.py").write_text(
-        "A_B_MARKER = 'a-b-module-source'\n", encoding="utf-8"
+def _write(path: Path, content: str):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(content)
+
+
+def _make_tool_root(base: Path, log_path: Path) -> Path:
+    tool_root = base / "tool_root"
+    tool_root.mkdir(parents=True)
+
+    llm_endpoint_src = LLM_ENDPOINT_TEMPLATE.replace(
+        "__LOG_PATH__", repr(str(log_path))
+    )
+    _write(tool_root / "gen" / "llm-endpoint" / "llm_endpoint.py", llm_endpoint_src)
+
+    _write(tool_root / "gen" / "a-b" / "a_b.py", "MARKER = 'a-b'\n")
+
+    pycache_dir = tool_root / "gen" / "c" / "__pycache__"
+    pycache_dir.mkdir(parents=True)
+    (pycache_dir / "x.pyc").write_bytes(b"\x00\x01fakebytecode")
+
+    _write(
+        tool_root / "pipeline" / "criterion-compiler" / "criterion_compiler.py",
+        "MARKER = 'criterion-compiler'\n",
     )
 
-    (root / "gen" / "c" / "__pycache__").mkdir(parents=True)
-    (root / "gen" / "c" / "__pycache__" / "x.pyc").write_bytes(b"\x00fake-stale-bytecode")
+    pytest_version = _pkg_version("pytest")
+    _write(tool_root / "requirements.txt", "pytest==%s\n" % pytest_version)
 
-    llm_dir = root / "gen" / "llm-endpoint"
-    llm_dir.mkdir(parents=True)
-    source = LLM_ENDPOINT_TEMPLATE.replace("__LOG_PATH__", json.dumps(str(log_path)))
-    (llm_dir / "llm_endpoint.py").write_text(source, encoding="utf-8")
-
-    pipeline_dir = root / "pipeline" / "criterion-compiler"
-    pipeline_dir.mkdir(parents=True)
-    (pipeline_dir / "criterion_compiler.py").write_text(
-        "CRITERION_COMPILER_MARKER = 'criterion-compiler-source'\n", encoding="utf-8"
-    )
+    return tool_root
 
 
-def _assert_no_pycache(root: Path) -> None:
+def _walk_pycache_dirs(root: Path):
+    found = []
     for dirpath, dirnames, _filenames in os.walk(root):
-        assert "__pycache__" not in dirnames, "found __pycache__ under {}".format(dirpath)
+        if "__pycache__" in dirnames:
+            found.append(os.path.join(dirpath, "__pycache__"))
+    return found
 
 
-def test_init_vendors_tool_and_skips_on_second_run(tmp_path):
-    tool_root = tmp_path / "tool_root"
-    tool_root.mkdir()
+def _snapshot(root: Path):
+    dirs = set()
+    files = {}
+    for dirpath, _dirnames, filenames in os.walk(root):
+        rel_dir = Path(dirpath).relative_to(root)
+        if str(rel_dir) != ".":
+            dirs.add(str(rel_dir))
+        for name in filenames:
+            p = Path(dirpath) / name
+            rel = p.relative_to(root)
+            files[str(rel)] = p.read_bytes()
+    return dirs, files
+
+
+def _noop_input(_prompt):
+    return ""
+
+
+def test_ac_init_002_first_run_vendors_then_second_run_skips(tmp_path):
     log_path = tmp_path / "llm_endpoint_calls.log"
-    _write_tool_root(tool_root, log_path)
+    tool_root = _make_tool_root(tmp_path / "tool", log_path)
 
-    project_dir = tmp_path / "project"
-    project_dir.mkdir()
+    project = tmp_path / "project"
+    project.mkdir()
 
-    messages = []
-
-    def output_fn(msg):
-        messages.append(str(msg))
-
-    def input_fn(prompt=""):
-        return ""
-
-    argv = [
-        str(project_dir),
-        "--provider", "anthropic",
-        "--model", "claude-sonnet-5",
-        "--no-test",
-        "--yes",
-    ]
-
-    rc = hotdocs_init.main(
-        argv,
-        tool_root=str(tool_root),
-        input_fn=input_fn,
-        output_fn=output_fn,
+    outputs1 = []
+    ret1 = hotdocs_init.main(
+        [str(project), "--yes"],
+        tool_root=tool_root,
+        input_fn=_noop_input,
+        output_fn=outputs1.append,
         env={},
-        cwd=str(project_dir),
     )
 
-    assert rc == 0
+    assert ret1 in (0, 3)
 
-    copied_a_b = project_dir / "gen" / "a-b" / "a_b.py"
-    copied_cc = project_dir / "pipeline" / "criterion-compiler" / "criterion_compiler.py"
+    copied_a_b = project / "gen" / "a-b" / "a_b.py"
+    copied_cc = project / "pipeline" / "criterion-compiler" / "criterion_compiler.py"
+    copied_llm = project / "gen" / "llm-endpoint" / "llm_endpoint.py"
 
-    assert copied_a_b.exists()
+    assert copied_a_b.is_file()
     assert not copied_a_b.is_symlink()
-    assert copied_a_b.read_text(encoding="utf-8") == (
-        tool_root / "gen" / "a-b" / "a_b.py"
-    ).read_text(encoding="utf-8")
+    assert copied_a_b.read_text() == (tool_root / "gen" / "a-b" / "a_b.py").read_text()
 
-    assert copied_cc.exists()
+    assert copied_cc.is_file()
     assert not copied_cc.is_symlink()
-    assert copied_cc.read_text(encoding="utf-8") == (
+    assert copied_cc.read_text() == (
         tool_root / "pipeline" / "criterion-compiler" / "criterion_compiler.py"
-    ).read_text(encoding="utf-8")
+    ).read_text()
 
-    _assert_no_pycache(project_dir)
+    assert copied_llm.is_file()
 
-    assert log_path.exists()
-    log_lines = log_path.read_text(encoding="utf-8").strip().splitlines()
-    assert len(log_lines) >= 1
+    assert _walk_pycache_dirs(project) == []
 
-    stamp_path = project_dir / ".hotdocs-tool.json"
-    assert stamp_path.exists()
-    stamp = json.loads(stamp_path.read_text(encoding="utf-8"))
+    assert log_path.is_file()
+    assert log_path.read_text() != ""
+
+    stamp_path = project / ".hotdocs-tool.json"
+    assert stamp_path.is_file()
+    stamp = json.loads(stamp_path.read_text())
 
     assert stamp["tool_version"] == "0.1.0"
-    assert stamp["vendored"] == sorted(stamp["vendored"])
     assert stamp["vendored"] == [
         "gen/a-b",
         "gen/c",
         "gen/llm-endpoint",
         "pipeline/criterion-compiler",
     ]
-    assert isinstance(stamp["content_hash"], str)
-    assert stamp["content_hash"].startswith("sha256:")
 
-    first_stamp_bytes = stamp_path.read_bytes()
-    first_a_b_mtime_ns = copied_a_b.stat().st_mtime_ns
-    first_cc_mtime_ns = copied_cc.stat().st_mtime_ns
+    content_hash = stamp["content_hash"]
+    assert content_hash.startswith("sha256:")
+    assert len(content_hash) > len("sha256:")
 
-    messages.clear()
+    assert _walk_pycache_dirs(project) == []
 
-    rc2 = hotdocs_init.main(
-        argv,
-        tool_root=str(tool_root),
-        input_fn=input_fn,
-        output_fn=output_fn,
+    stamp_bytes_before = stamp_path.read_bytes()
+
+    # corrupt a vendored file so a recopy on the next run would be detectable
+    copied_a_b.write_text("CORRUPTED\n")
+
+    outputs2 = []
+    ret2 = hotdocs_init.main(
+        [str(project), "--yes"],
+        tool_root=tool_root,
+        input_fn=_noop_input,
+        output_fn=outputs2.append,
         env={},
-        cwd=str(project_dir),
     )
 
-    assert rc2 == 0
+    assert ret2 in (0, 3)
 
-    joined_messages = "\n".join(messages)
-    for vendored_path in stamp["vendored"]:
-        assert vendored_path in joined_messages
-    assert "skip" in joined_messages.lower()
+    joined_output2 = "\n".join(str(o) for o in outputs2)
+    assert "skip" in joined_output2.lower()
+    assert "gen/a-b" in joined_output2
+    assert "gen/c" in joined_output2
+    assert "gen/llm-endpoint" in joined_output2
+    assert "pipeline/criterion-compiler" in joined_output2
 
-    assert stamp_path.read_bytes() == first_stamp_bytes
-    assert copied_a_b.stat().st_mtime_ns == first_a_b_mtime_ns
-    assert copied_cc.stat().st_mtime_ns == first_cc_mtime_ns
+    # not recopied: the corruption survives
+    assert copied_a_b.read_text() == "CORRUPTED\n"
 
-    _assert_no_pycache(project_dir)
+    # existing stamp left untouched, byte for byte
+    assert stamp_path.read_bytes() == stamp_bytes_before
+
+    assert _walk_pycache_dirs(project) == []
 
 
-def test_init_refuses_when_target_has_untracked_vendor_path(tmp_path, capsys):
-    tool_root = tmp_path / "tool_root_b"
-    tool_root.mkdir()
-    log_path = tmp_path / "llm_endpoint_calls_b.log"
-    _write_tool_root(tool_root, log_path)
+def test_ac_init_002_collision_names_path_and_writes_nothing(tmp_path, capsys):
+    log_path = tmp_path / "llm_endpoint_calls.log"
+    tool_root = _make_tool_root(tmp_path / "tool", log_path)
 
-    project_dir = tmp_path / "project_b"
-    project_dir.mkdir()
-    existing = project_dir / "gen" / "a-b"
-    existing.mkdir(parents=True)
-    marker = existing / "preexisting.txt"
-    marker.write_text("do not touch\n", encoding="utf-8")
+    project = tmp_path / "project"
+    (project / "gen" / "a-b").mkdir(parents=True)
+    (project / "gen" / "a-b" / "preexisting.txt").write_text("already here\n")
 
-    before_listing = sorted(str(p.relative_to(project_dir)) for p in project_dir.rglob("*"))
+    before = _snapshot(project)
 
-    def input_fn(prompt=""):
-        return ""
-
-    rc = hotdocs_init.main(
-        [str(project_dir)],
-        tool_root=str(tool_root),
-        input_fn=input_fn,
-        output_fn=lambda msg: None,
+    ret = hotdocs_init.main(
+        [str(project), "--yes"],
+        tool_root=tool_root,
+        input_fn=_noop_input,
+        output_fn=lambda *_a, **_k: None,
         env={},
-        cwd=str(project_dir),
     )
 
     captured = capsys.readouterr()
 
-    assert rc == 1
+    assert ret == 1
     assert "gen/a-b" in captured.err
 
-    after_listing = sorted(str(p.relative_to(project_dir)) for p in project_dir.rglob("*"))
-    assert before_listing == after_listing
-    assert marker.read_text(encoding="utf-8") == "do not touch\n"
-    assert not (project_dir / ".hotdocs-tool.json").exists()
+    after = _snapshot(project)
+    assert after == before
+    assert not (project / ".hotdocs-tool.json").exists()
 
 
-def test_init_refuses_when_target_is_tool_root_itself(tmp_path, capsys):
-    tool_root = tmp_path / "tool_root_c"
-    tool_root.mkdir()
-    log_path = tmp_path / "llm_endpoint_calls_c.log"
-    _write_tool_root(tool_root, log_path)
+def test_ac_init_002_target_is_tool_root_writes_nothing(tmp_path):
+    log_path = tmp_path / "llm_endpoint_calls.log"
+    tool_root = _make_tool_root(tmp_path / "tool", log_path)
 
-    def snapshot():
-        contents = {}
-        for p in sorted(tool_root.rglob("*")):
-            if p.is_file():
-                contents[str(p.relative_to(tool_root))] = p.read_bytes()
-        return contents
+    before = _snapshot(tool_root)
 
-    before = snapshot()
-
-    def input_fn(prompt=""):
-        return ""
-
-    rc = hotdocs_init.main(
-        [str(tool_root)],
-        tool_root=str(tool_root),
-        input_fn=input_fn,
-        output_fn=lambda msg: None,
+    ret = hotdocs_init.main(
+        [str(tool_root), "--yes"],
+        tool_root=tool_root,
+        input_fn=_noop_input,
+        output_fn=lambda *_a, **_k: None,
         env={},
-        cwd=str(tool_root),
     )
 
-    assert rc == 1
+    assert ret == 1
 
-    after = snapshot()
-    assert before == after
+    after = _snapshot(tool_root)
+    assert after == before
     assert not (tool_root / ".hotdocs-tool.json").exists()

@@ -10,7 +10,7 @@ Then it prints "connection ok", saves via save_config(<dir>/hotdocs.toml, "opena
   with no base_url and no timeout_seconds keyword, and asks nothing
 
 Given check_connection returns {ok false, error {category "auth", message "bad"}}
-When init runs interactively and the answer to "Save anyway? [y/N]" is "n", then in another run "y"
+When init runs interactively and the answer to "Save anyway? [y/N]" is "n", then in another run in a fresh directory and tool root "y"
 Then it printed "connection failed: auth: bad", and saved only in the second run
 
 Given check_connection raises ValueError("no base_url")

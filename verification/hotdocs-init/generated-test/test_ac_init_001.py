@@ -1,119 +1,88 @@
+"""Acceptance test for AC-INIT-001 / R-INIT-001."""
 import json
+import os
+import time
+from importlib.metadata import version as _pkg_version
 from pathlib import Path
+
+import pytest
 
 import hotdocs_init
 
 
-LLM_ENDPOINT_FAKE_TEMPLATE = '''\
-import json as _json
-
-_LOG_PATH = __LOG_PATH_LITERAL__
+def _no_input(prompt):
+    raise AssertionError(f"unexpected prompt: {prompt!r}")
 
 
-def _log(name, args, kwargs):
-    with open(_LOG_PATH, "a", encoding="utf-8") as fh:
-        fh.write(_json.dumps({"name": name, "args": list(args), "kwargs": kwargs}) + "\\n")
-
-
-PROVIDERS = {
-    "anthropic": {
-        "default_base_url": None,
-        "default_api_key_env": "ANTHROPIC_API_KEY",
-        "needs_base_url": False,
-        "suggested_model": "claude-sonnet-5",
-    },
-    "openai-compatible": {
-        "default_base_url": None,
-        "default_api_key_env": None,
-        "needs_base_url": True,
-        "suggested_model": "",
-    },
-}
-
-
-def detect_providers(env=None, probe_ollama=True):
-    _log("detect_providers", (), {"env": env, "probe_ollama": probe_ollama})
-    return [
-        {
-            "provider": "anthropic",
-            "available": False,
-            "reason": "no key configured",
-            "suggested_model": "claude-sonnet-5",
-            "api_key_env": "ANTHROPIC_API_KEY",
-        }
-    ]
-
-
-def check_connection(provider, model, base_url=None, api_key_env=None, timeout_seconds=30):
-    _log(
-        "check_connection",
-        (provider, model),
-        {"base_url": base_url, "api_key_env": api_key_env, "timeout_seconds": timeout_seconds},
+def _write_fake_llm_endpoint(gen_dir: Path, log_path: Path) -> None:
+    module_dir = gen_dir / "llm-endpoint"
+    module_dir.mkdir(parents=True, exist_ok=True)
+    log_path_literal = json.dumps(str(log_path))
+    code = (
+        "import json\n"
+        "\n"
+        "LOG_PATH = " + log_path_literal + "\n"
+        "\n"
+        "PROVIDERS = {\n"
+        "    'anthropic': {\n"
+        "        'default_base_url': None,\n"
+        "        'default_api_key_env': 'ANTHROPIC_API_KEY',\n"
+        "        'needs_base_url': False,\n"
+        "        'suggested_model': 'claude-sonnet-5',\n"
+        "    },\n"
+        "}\n"
+        "\n"
+        "\n"
+        "def _log(call):\n"
+        "    with open(LOG_PATH, 'a') as f:\n"
+        "        f.write(json.dumps({'call': call}) + chr(10))\n"
+        "\n"
+        "\n"
+        "def detect_providers(env=None, probe_ollama=True):\n"
+        "    _log('detect_providers')\n"
+        "    return [{\n"
+        "        'provider': 'anthropic',\n"
+        "        'available': True,\n"
+        "        'reason': None,\n"
+        "        'suggested_model': 'claude-sonnet-5',\n"
+        "        'api_key_env': 'ANTHROPIC_API_KEY',\n"
+        "    }]\n"
+        "\n"
+        "\n"
+        "def check_connection(provider, model, base_url=None, api_key_env=None, timeout_seconds=30):\n"
+        "    _log('check_connection')\n"
+        "    return {'ok': True, 'error': None}\n"
+        "\n"
+        "\n"
+        "def save_config(config_path, provider, model, base_url=None, api_key_env=None, timeout_seconds=None):\n"
+        "    _log('save_config')\n"
+        "    with open(config_path, 'a') as f:\n"
+        "        f.write(chr(10) + '[llm]' + chr(10) + 'provider = ' + repr(provider) + chr(10))\n"
+        "\n"
+        "\n"
+        "def load_config(config_path=None):\n"
+        "    _log('load_config')\n"
+        "    return None\n"
     )
-    if provider not in PROVIDERS:
-        raise ValueError("unknown provider: %s" % provider)
-    if PROVIDERS[provider]["needs_base_url"] and not base_url:
-        raise ValueError("base_url required for %s" % provider)
-    return {"ok": False, "error": {"category": "network", "message": "fake backend: no network in tests"}}
+    (module_dir / "llm_endpoint.py").write_text(code)
 
 
-def save_config(config_path, provider, model, base_url=None, api_key_env=None, timeout_seconds=None):
-    _log(
-        "save_config",
-        (str(config_path), provider, model),
-        {"base_url": base_url, "api_key_env": api_key_env, "timeout_seconds": timeout_seconds},
-    )
-    if provider not in PROVIDERS:
-        raise ValueError("unknown provider: %s" % provider)
+def _write_fake_tool_root(root: Path, log_path: Path) -> None:
+    _write_fake_llm_endpoint(root / "gen", log_path)
+
+    cc_path = root / "pipeline" / "criterion-compiler" / "criterion_compiler.py"
+    cc_path.parent.mkdir(parents=True, exist_ok=True)
+    cc_path.write_text("def compile(*args, **kwargs):\n    pass\n")
+
+    slugs_path = root / "examples" / "slugify" / "specs" / "product" / "slugs.md"
+    slugs_path.parent.mkdir(parents=True, exist_ok=True)
+    slugs_path.write_text("# Slugs\n\nExample product spec for the slugify example.\n")
+
+    pytest_version = _pkg_version("pytest")
+    (root / "requirements.txt").write_text(f"pytest=={pytest_version}\n")
 
 
-def load_config(config_path=None):
-    _log("load_config", (), {"config_path": str(config_path) if config_path else None})
-    return None
-'''
-
-
-def make_fake_tool_root(base_dir: Path, log_path: Path) -> Path:
-    tool_root = base_dir / "tool_root"
-    tool_root.mkdir()
-
-    llm_dir = tool_root / "gen" / "llm-endpoint"
-    llm_dir.mkdir(parents=True)
-    content = LLM_ENDPOINT_FAKE_TEMPLATE.replace(
-        "__LOG_PATH_LITERAL__", json.dumps(str(log_path))
-    )
-    (llm_dir / "llm_endpoint.py").write_text(content, encoding="utf-8")
-
-    cc_dir = tool_root / "pipeline" / "criterion-compiler"
-    cc_dir.mkdir(parents=True)
-    (cc_dir / "criterion_compiler.py").write_text(
-        "def compile_criterion(*args, **kwargs):\n    raise NotImplementedError\n",
-        encoding="utf-8",
-    )
-
-    slugify_dir = tool_root / "examples" / "slugify" / "specs" / "product"
-    slugify_dir.mkdir(parents=True)
-    (slugify_dir / "slugs.md").write_text(
-        "# Slugs\n\nExample product spec for the slugify example.\n",
-        encoding="utf-8",
-    )
-
-    (tool_root / "requirements.txt").write_text("pytest\n", encoding="utf-8")
-
-    return tool_root
-
-
-def _snapshot(root: Path):
-    snap = {}
-    for p in sorted(root.rglob("*")):
-        if p.is_file():
-            rel = p.relative_to(root).as_posix()
-            st = p.stat()
-            snap[rel] = (p.read_bytes(), st.st_mtime_ns)
-    return snap
-
-
-DIRS = [
+EXPECTED_DIRS = [
     "specs/product",
     "specs/components",
     "specs/decisions",
@@ -122,94 +91,128 @@ DIRS = [
     "verification",
 ]
 
-GITKEEPS = [
-    "specs/product/.gitkeep",
-    "specs/components/.gitkeep",
-    "specs/decisions/.gitkeep",
-    "verification/.gitkeep",
+EXPECTED_GITKEEP_DIRS = [
+    "specs/product",
+    "specs/components",
+    "specs/decisions",
+    "verification",
 ]
-
-SINGLES = [
-    "specs/glossary.md",
-    ".secret-allowlist.json",
-    ".gitignore",
-]
-
-ALL_CREATED = DIRS + GITKEEPS + SINGLES
 
 GITIGNORE_LINES = ["/.hotdocs/", "__pycache__/", "*.pyc", ".venv/"]
 
 
-def test_init_creates_structure_then_is_idempotent(tmp_path):
+def test_init_creates_structure_and_is_idempotent(tmp_path):
     project_dir = tmp_path / "project"
     project_dir.mkdir()
-    log_path = tmp_path / "llm_calls.log"
-    tool_root = make_fake_tool_root(tmp_path, log_path)
+    tool_root = tmp_path / "tool_root"
+    tool_root.mkdir()
+    log_path = tmp_path / "calls.log"
+    _write_fake_tool_root(tool_root, log_path)
 
-    lines_first = []
+    lines = []
+    exit_code = hotdocs_init.main(
+        [str(project_dir), "--yes"],
+        tool_root=tool_root,
+        input_fn=_no_input,
+        output_fn=lines.append,
+        env={},
+    )
+    assert exit_code not in (1, 2)
+
+    for d in EXPECTED_DIRS:
+        assert (project_dir / d).is_dir()
+
+    gitkeep_paths = []
+    for d in EXPECTED_GITKEEP_DIRS:
+        gitkeep = project_dir / d / ".gitkeep"
+        assert gitkeep.is_file()
+        assert gitkeep.read_bytes() == b""
+        gitkeep_paths.append(f"{d}/.gitkeep")
+
+    glossary_path = project_dir / "specs" / "glossary.md"
+    assert glossary_path.is_file()
+    assert glossary_path.read_text().startswith("# Glossary")
+
+    allowlist_path = project_dir / ".secret-allowlist.json"
+    assert allowlist_path.is_file()
+
+    gitignore_path = project_dir / ".gitignore"
+    assert gitignore_path.is_file()
+    gitignore_lines = gitignore_path.read_text().splitlines()
+    for required in GITIGNORE_LINES:
+        assert gitignore_lines.count(required) == 1
+
+    expected_paths = (
+        EXPECTED_DIRS
+        + gitkeep_paths
+        + ["specs/glossary.md", ".secret-allowlist.json", ".gitignore"]
+    )
+    for path in expected_paths:
+        assert f"{path}: created" in lines
+
+    before_files = {}
+    for root, _dirs, files in os.walk(project_dir):
+        for name in files:
+            p = Path(root) / name
+            st = p.stat()
+            before_files[p] = (p.read_bytes(), st.st_mtime)
+
+    time.sleep(1.1)
+
+    lines2 = []
     hotdocs_init.main(
         [str(project_dir), "--yes"],
         tool_root=tool_root,
-        output_fn=lines_first.append,
+        input_fn=_no_input,
+        output_fn=lines2.append,
+        env={},
     )
 
-    for rel in DIRS:
-        assert (project_dir / rel).is_dir()
+    after_files = set()
+    for root, _dirs, files in os.walk(project_dir):
+        for name in files:
+            after_files.add(Path(root) / name)
+    assert after_files == set(before_files.keys())
 
-    for rel in GITKEEPS:
-        p = project_dir / rel
-        assert p.is_file()
-        assert p.read_bytes() == b""
+    for p, (content, mtime) in before_files.items():
+        assert p.read_bytes() == content
+        assert p.stat().st_mtime == mtime
 
-    glossary_text = (project_dir / "specs" / "glossary.md").read_text(encoding="utf-8")
-    assert glossary_text.startswith("# Glossary")
-
-    allowlist = json.loads((project_dir / ".secret-allowlist.json").read_text(encoding="utf-8"))
-    assert allowlist == {"version": 1, "entries": []}
-
-    gitignore_text_lines = (project_dir / ".gitignore").read_text(encoding="utf-8").splitlines()
-    for expected in GITIGNORE_LINES:
-        assert gitignore_text_lines.count(expected) == 1
-
-    for rel in ALL_CREATED:
-        assert lines_first.count(f"{rel}: created") == 1
-
-    snapshot_before = _snapshot(project_dir)
-
-    lines_second = []
-    hotdocs_init.main(
-        [str(project_dir), "--yes"],
-        tool_root=tool_root,
-        output_fn=lines_second.append,
-    )
-
-    snapshot_after = _snapshot(project_dir)
-    assert snapshot_after == snapshot_before
-
-    for rel in ALL_CREATED:
-        assert lines_second.count(f"{rel}: skipped (exists)") == 1
+    for path in expected_paths:
+        assert f"{path}: skipped (exists)" in lines2
 
 
-def test_init_does_not_clobber_existing_glossary_or_duplicate_gitignore_line(tmp_path):
+def test_init_preserves_existing_glossary_and_gitignore(tmp_path):
     project_dir = tmp_path / "project"
     project_dir.mkdir()
-    (project_dir / "specs").mkdir()
-    (project_dir / "specs" / "glossary.md").write_text("mine", encoding="utf-8")
-    (project_dir / ".gitignore").write_text("/.hotdocs/\n", encoding="utf-8")
+    tool_root = tmp_path / "tool_root"
+    tool_root.mkdir()
+    log_path = tmp_path / "calls.log"
+    _write_fake_tool_root(tool_root, log_path)
 
-    log_path = tmp_path / "llm_calls.log"
-    tool_root = make_fake_tool_root(tmp_path, log_path)
+    specs_dir = project_dir / "specs"
+    specs_dir.mkdir()
+    glossary_path = specs_dir / "glossary.md"
+    glossary_path.write_text("mine")
+
+    gitignore_path = project_dir / ".gitignore"
+    gitignore_path.write_text("/.hotdocs/\n")
 
     lines = []
     hotdocs_init.main(
         [str(project_dir), "--yes"],
         tool_root=tool_root,
+        input_fn=_no_input,
         output_fn=lines.append,
+        env={},
     )
 
-    assert (project_dir / "specs" / "glossary.md").read_text(encoding="utf-8") == "mine"
+    assert glossary_path.read_text() == "mine"
 
-    gitignore_text_lines = (project_dir / ".gitignore").read_text(encoding="utf-8").splitlines()
-    assert gitignore_text_lines.count("/.hotdocs/") == 1
-    for expected in ["__pycache__/", "*.pyc", ".venv/"]:
-        assert gitignore_text_lines.count(expected) == 1
+    gitignore_lines = gitignore_path.read_text().splitlines()
+    assert gitignore_lines.count("/.hotdocs/") == 1
+    for required in ["__pycache__/", "*.pyc", ".venv/"]:
+        assert gitignore_lines.count(required) == 1
+
+    assert "specs/glossary.md: skipped (exists)" in lines
+    assert ".gitignore: skipped (exists)" in lines

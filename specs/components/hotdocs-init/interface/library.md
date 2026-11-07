@@ -7,8 +7,12 @@ main(argv, *, tool_root, input_fn=None, output_fn=None, env=None, cwd=None) -> i
 `argv` is everything after the word `init`. `input_fn` defaults to `input`,
 `output_fn` to `print`, `env` to `os.environ`, `cwd` to the current
 directory. Normal messages go to `output_fn`, errors to `sys.stderr`.
+Each question is passed to `input_fn` as its text plus one trailing space,
+e.g. `"Save anyway? [y/N] "`.
 `tool_root` is the tool's own repository: the source of everything `init`
-vendors, holding `gen/`, `pipeline/`, `examples/`, and `requirements.txt`.
+vendors (`gen/`, `pipeline/`; `examples/slugify/` only with `--example`,
+to the project root, never under `examples/`), plus `requirements.txt`,
+which `init` only reads (`R-INIT-003`) and never copies.
 
 ## llm-endpoint
 
@@ -40,5 +44,5 @@ names are used, read with dual dict-or-attribute access:
 A **fake tool root** holds `gen/<slug>/<module>.py` fakes for a few slugs,
 among them `llm-endpoint` (fakes of the five names above that also log each
 call to a file outside both the project and the tool root, so a log never counts as a change to either), `pipeline/criterion-compiler/criterion_compiler.py`,
-`examples/slugify/specs/product/slugs.md`, and a `requirements.txt` of
-importable packages. A test embeds no secret-shaped string.
+`examples/slugify/specs/product/slugs.md`, and a `requirements.txt` whose only line is
+`pytest==` plus `importlib.metadata.version("pytest")` (so nothing is missing). A test embeds no secret-shaped string.

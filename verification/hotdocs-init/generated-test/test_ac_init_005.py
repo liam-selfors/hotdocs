@@ -1,322 +1,242 @@
+import importlib.metadata
 import json
 from pathlib import Path
-
-import pytest
 
 import hotdocs_init
 
 
-def _build_fake_llm_endpoint_source(log_path: Path, control_path: Path) -> str:
-    log_literal = repr(str(log_path))
-    control_literal = repr(str(control_path))
-    return f'''import json
-
-_LOG_PATH = {log_literal}
-_CONTROL_PATH = {control_literal}
-
-_UNSET = object()
-
-PROVIDERS = {{
-    "openai": {{
-        "default_base_url": None,
-        "default_api_key_env": "OPENAI_API_KEY",
-        "needs_base_url": False,
-        "suggested_model": "gpt-4",
-    }},
-}}
-
-
-def _log(event):
-    with open(_LOG_PATH, "a") as f:
-        print(json.dumps(event), file=f)
-
-
-def _control():
-    try:
-        with open(_CONTROL_PATH) as f:
-            return json.load(f)
-    except FileNotFoundError:
-        return {{}}
-
-
-def detect_providers(env=None, probe_ollama=True):
-    _log({{
-        "call": "detect_providers",
-        "env_keys": sorted((env or {{}}).keys()),
-        "probe_ollama": probe_ollama,
-    }})
-    return [
-        {{
-            "provider": "openai",
-            "available": True,
-            "reason": "",
-            "suggested_model": "gpt-4",
-            "api_key_env": "OPENAI_API_KEY",
-        }}
-    ]
-
-
-def check_connection(provider, model, base_url=None, api_key_env=None, timeout_seconds=30):
-    _log({{
-        "call": "check_connection",
-        "provider": provider,
-        "model": model,
-        "base_url": base_url,
-        "api_key_env": api_key_env,
-        "timeout_seconds": timeout_seconds,
-    }})
-    ctrl = _control()
-    cc = ctrl.get("check_connection", {{}})
-    if cc.get("raise"):
-        raise ValueError(cc["raise"])
-    return cc.get("result", {{"ok": True, "error": None}})
-
-
-def save_config(config_path, provider, model, base_url=_UNSET, api_key_env=_UNSET, timeout_seconds=_UNSET):
-    _log({{
-        "call": "save_config",
-        "config_path": str(config_path),
-        "provider": provider,
-        "model": model,
-        "base_url_passed": base_url is not _UNSET,
-        "base_url": None if base_url is _UNSET else base_url,
-        "api_key_env_passed": api_key_env is not _UNSET,
-        "api_key_env": None if api_key_env is _UNSET else api_key_env,
-        "timeout_seconds_passed": timeout_seconds is not _UNSET,
-        "timeout_seconds": None if timeout_seconds is _UNSET else timeout_seconds,
-    }})
-    ctrl = _control()
-    sc = ctrl.get("save_config", {{}})
-    if sc.get("raise"):
-        raise ValueError(sc["raise"])
-    return None
-
-
-def load_config(config_path=None):
-    _log({{
-        "call": "load_config",
-        "config_path": str(config_path) if config_path else None,
-    }})
-    return None
-'''
-
-
-def _build_tool_root(tmp_path, log_path, control_path):
-    tool_root = tmp_path / "tool_root"
-    (tool_root / "gen" / "llm-endpoint").mkdir(parents=True)
-    (tool_root / "gen" / "llm-endpoint" / "llm_endpoint.py").write_text(
-        _build_fake_llm_endpoint_source(log_path, control_path)
+def _make_tool_root(root: Path) -> Path:
+    (root / "gen").mkdir(parents=True, exist_ok=True)
+    (root / "pipeline" / "criterion-compiler").mkdir(parents=True, exist_ok=True)
+    (root / "pipeline" / "criterion-compiler" / "criterion_compiler.py").write_text(
+        "def compile(*a, **kw):\n    return None\n"
     )
-    (tool_root / "pipeline" / "criterion-compiler").mkdir(parents=True)
-    (tool_root / "pipeline" / "criterion-compiler" / "criterion_compiler.py").write_text(
-        "def compile_criterion(*args, **kwargs):\n    return None\n"
+    (root / "examples" / "slugify" / "specs" / "product").mkdir(parents=True, exist_ok=True)
+    (root / "examples" / "slugify" / "specs" / "product" / "slugs.md").write_text("# slugs\n")
+    version = importlib.metadata.version("pytest")
+    (root / "requirements.txt").write_text(f"pytest=={version}\n")
+    return root
+
+
+def _write_fake_llm_endpoint(tool_root, log_path, check_connection_mode, save_config_mode, detect_result=None):
+    mod_dir = tool_root / "gen" / "llm-endpoint"
+    mod_dir.mkdir(parents=True, exist_ok=True)
+
+    cc_bodies = {
+        "ok": "return {'ok': True, 'error': None}",
+        "auth_fail": "return {'ok': False, 'error': {'category': 'auth', 'message': 'bad'}}",
+        "raise_invalid": "raise ValueError('no base_url')",
+    }
+    sc_bodies = {
+        "ok": "return None",
+        "raise": "raise ValueError('nope')",
+    }
+    detect_result = detect_result if detect_result is not None else []
+
+    source = (
+        "import json\n"
+        "\n"
+        f"LOG_PATH = {str(log_path)!r}\n"
+        "\n"
+        "def _log(name, args, kwargs):\n"
+        "    with open(LOG_PATH, 'a') as f:\n"
+        "        f.write(json.dumps({'call': name, 'args': [str(a) for a in args],"
+        " 'kwargs': {k: str(v) for k, v in kwargs.items()}}) + '\\n')\n"
+        "\n"
+        "PROVIDERS = {\n"
+        "    'openai': {'default_base_url': None, 'default_api_key_env': 'OPENAI_API_KEY',"
+        " 'needs_base_url': False, 'suggested_model': 'gpt-4o-mini'},\n"
+        "    'openai-compatible': {'default_base_url': None, 'default_api_key_env': None,"
+        " 'needs_base_url': True, 'suggested_model': ''},\n"
+        "}\n"
+        "\n"
+        "def detect_providers(env=None, probe_ollama=True):\n"
+        "    _log('detect_providers', (), {'probe_ollama': probe_ollama})\n"
+        f"    return {detect_result!r}\n"
+        "\n"
+        "def check_connection(*args, **kwargs):\n"
+        "    _log('check_connection', args, kwargs)\n"
+        f"    {cc_bodies[check_connection_mode]}\n"
+        "\n"
+        "def save_config(*args, **kwargs):\n"
+        "    _log('save_config', args, kwargs)\n"
+        f"    {sc_bodies[save_config_mode]}\n"
+        "\n"
+        "def load_config(config_path=None):\n"
+        "    _log('load_config', (), {'config_path': str(config_path)})\n"
+        "    return None\n"
     )
-    (tool_root / "examples" / "slugify" / "specs" / "product").mkdir(parents=True)
-    (tool_root / "examples" / "slugify" / "specs" / "product" / "slugs.md").write_text(
-        "# fake slugify example fixture\n"
-    )
-    (tool_root / "requirements.txt").write_text("pytest\n")
-    return tool_root
+    (mod_dir / "llm_endpoint.py").write_text(source)
 
 
-def _set_control(control_path, data):
-    control_path.write_text(json.dumps(data))
-
-
-def _read_calls(log_path):
+def _read_log(log_path: Path):
     if not log_path.exists():
         return []
     return [json.loads(line) for line in log_path.read_text().splitlines() if line.strip()]
 
 
-def _make_input_fn(save_answers):
-    answers = list(save_answers)
-    calls = []
-
-    def input_fn(prompt=""):
-        calls.append(prompt)
-        if "save anyway" in str(prompt).lower():
-            return answers.pop(0)
+def _make_input_fn(log, save_answer):
+    def input_fn(prompt):
+        log.append(prompt)
+        if prompt == "Save anyway? [y/N] ":
+            return save_answer
+        lower = prompt.lower()
+        if "provider" in lower:
+            return "openai"
+        if "model" in lower:
+            return "m"
+        if "key" in lower or "env" in lower:
+            return "MY_KEY"
         return ""
 
-    return input_fn, calls
+    return input_fn
 
 
-def _make_output_fn():
-    lines = []
-
-    def output_fn(*args, **kwargs):
-        sep = kwargs.get("sep", " ")
-        lines.append(sep.join(str(a) for a in args))
-
-    return output_fn, lines
+def _refusing_input_fn(prompt):
+    raise AssertionError(f"init asked an unexpected question: {prompt!r}")
 
 
-def _run_main(tool_root, argv, cwd, input_fn, output_fn, env=None):
-    return hotdocs_init.main(
-        list(argv),
-        tool_root=tool_root,
-        input_fn=input_fn,
-        output_fn=output_fn,
-        env={} if env is None else env,
-        cwd=cwd,
-    )
-
-
-def test_successful_connection_saves_without_asking(tmp_path):
-    log_path = tmp_path / "calls.log"
-    control_path = tmp_path / "control.json"
-    _set_control(control_path, {"check_connection": {"result": {"ok": True, "error": None}}})
-    tool_root = _build_tool_root(tmp_path, log_path, control_path)
-
+def test_successful_connection_prints_ok_and_saves_without_asking(tmp_path):
+    tool_root = _make_tool_root(tmp_path / "tool_root")
+    log_path = tmp_path / "log.jsonl"
+    _write_fake_llm_endpoint(tool_root, log_path, "ok", "ok")
     project_dir = tmp_path / "project"
     project_dir.mkdir()
+    outputs = []
 
-    input_fn, input_calls = _make_input_fn(save_answers=[])
-    output_fn, outputs = _make_output_fn()
-
-    _run_main(
-        tool_root,
-        ["--provider", "openai", "--model", "m", "--api-key-env", "MY_KEY"],
-        project_dir,
-        input_fn,
-        output_fn,
+    hotdocs_init.main(
+        [str(project_dir), "--provider", "openai", "--model", "m", "--api-key-env", "MY_KEY"],
+        tool_root=tool_root,
+        input_fn=_refusing_input_fn,
+        output_fn=outputs.append,
     )
 
-    assert "connection ok" in outputs
-    assert input_calls == []
+    assert any("connection ok" in m for m in outputs)
 
-    calls = _read_calls(log_path)
+    calls = _read_log(log_path)
     save_calls = [c for c in calls if c["call"] == "save_config"]
     assert len(save_calls) == 1
-    save_call = save_calls[0]
-    assert save_call["config_path"] == str(project_dir / "hotdocs.toml")
-    assert save_call["provider"] == "openai"
-    assert save_call["model"] == "m"
-    assert save_call["api_key_env_passed"] is True
-    assert save_call["api_key_env"] == "MY_KEY"
-    assert save_call["base_url_passed"] is False
-    assert save_call["timeout_seconds_passed"] is False
+    call = save_calls[0]
+    expected_path = str(project_dir / "hotdocs.toml")
+    assert call["args"][0] == expected_path
+    assert call["args"][1] == "openai"
+    assert call["args"][2] == "m"
+    assert call["kwargs"].get("api_key_env") == "MY_KEY"
+    assert "base_url" not in call["kwargs"]
+    assert "timeout_seconds" not in call["kwargs"]
 
 
-def test_interactive_failure_asks_and_respects_answer(tmp_path):
-    log_path = tmp_path / "calls.log"
-    control_path = tmp_path / "control.json"
-    _set_control(
-        control_path,
-        {"check_connection": {"result": {"ok": False, "error": {"category": "auth", "message": "bad"}}}},
+def test_failed_connection_asks_before_saving_and_only_saves_on_yes(tmp_path):
+    tool_root_1 = _make_tool_root(tmp_path / "tool_root_1")
+    log_1 = tmp_path / "log1.jsonl"
+    _write_fake_llm_endpoint(
+        tool_root_1,
+        log_1,
+        "auth_fail",
+        "ok",
+        detect_result=[
+            {"provider": "openai", "available": True, "reason": "ok", "suggested_model": "m", "api_key_env": "MY_KEY"}
+        ],
     )
-    tool_root = _build_tool_root(tmp_path, log_path, control_path)
+    project_1 = tmp_path / "project_1"
+    project_1.mkdir()
+    outputs_1 = []
+    prompts_1 = []
 
-    no_dir = tmp_path / "project_no"
-    no_dir.mkdir()
-    yes_dir = tmp_path / "project_yes"
-    yes_dir.mkdir()
+    hotdocs_init.main(
+        [str(project_1), "--model", "m", "--api-key-env", "MY_KEY"],
+        tool_root=tool_root_1,
+        input_fn=_make_input_fn(prompts_1, save_answer="n"),
+        output_fn=outputs_1.append,
+    )
 
-    before_no = len(_read_calls(log_path))
-    input_fn_no, _ = _make_input_fn(save_answers=["n"])
-    output_fn_no, outputs_no = _make_output_fn()
-    _run_main(tool_root, [], no_dir, input_fn_no, output_fn_no)
-    assert "connection failed: auth: bad" in outputs_no
-    calls_no = _read_calls(log_path)[before_no:]
-    assert not any(c["call"] == "save_config" for c in calls_no)
+    assert any("connection failed: auth: bad" in m for m in outputs_1)
+    assert "Save anyway? [y/N] " in prompts_1
+    calls_1 = _read_log(log_1)
+    assert not [c for c in calls_1 if c["call"] == "save_config"]
 
-    before_yes = len(_read_calls(log_path))
-    input_fn_yes, _ = _make_input_fn(save_answers=["y"])
-    output_fn_yes, outputs_yes = _make_output_fn()
-    _run_main(tool_root, [], yes_dir, input_fn_yes, output_fn_yes)
-    assert "connection failed: auth: bad" in outputs_yes
-    calls_yes = _read_calls(log_path)[before_yes:]
-    assert any(c["call"] == "save_config" for c in calls_yes)
+    tool_root_2 = _make_tool_root(tmp_path / "tool_root_2")
+    log_2 = tmp_path / "log2.jsonl"
+    _write_fake_llm_endpoint(
+        tool_root_2,
+        log_2,
+        "auth_fail",
+        "ok",
+        detect_result=[
+            {"provider": "openai", "available": True, "reason": "ok", "suggested_model": "m", "api_key_env": "MY_KEY"}
+        ],
+    )
+    project_2 = tmp_path / "project_2"
+    project_2.mkdir()
+    outputs_2 = []
+    prompts_2 = []
+
+    hotdocs_init.main(
+        [str(project_2), "--model", "m", "--api-key-env", "MY_KEY"],
+        tool_root=tool_root_2,
+        input_fn=_make_input_fn(prompts_2, save_answer="y"),
+        output_fn=outputs_2.append,
+    )
+
+    assert any("connection failed: auth: bad" in m for m in outputs_2)
+    assert "Save anyway? [y/N] " in prompts_2
+    calls_2 = _read_log(log_2)
+    assert len([c for c in calls_2 if c["call"] == "save_config"]) == 1
 
 
-def test_check_connection_value_error_reported_as_invalid(tmp_path):
-    log_path = tmp_path / "calls.log"
-    control_path = tmp_path / "control.json"
-    _set_control(control_path, {"check_connection": {"raise": "no base_url"}})
-    tool_root = _build_tool_root(tmp_path, log_path, control_path)
-
+def test_check_connection_value_error_prints_invalid(tmp_path):
+    tool_root = _make_tool_root(tmp_path / "tool_root")
+    log_path = tmp_path / "log.jsonl"
+    _write_fake_llm_endpoint(tool_root, log_path, "raise_invalid", "ok")
     project_dir = tmp_path / "project"
     project_dir.mkdir()
+    outputs = []
 
-    input_fn, _ = _make_input_fn(save_answers=[])
-    output_fn, outputs = _make_output_fn()
-
-    _run_main(
-        tool_root,
-        ["--provider", "openai", "--model", "m", "--api-key-env", "MY_KEY"],
-        project_dir,
-        input_fn,
-        output_fn,
+    hotdocs_init.main(
+        [str(project_dir), "--provider", "openai", "--model", "m", "--api-key-env", "MY_KEY"],
+        tool_root=tool_root,
+        input_fn=_refusing_input_fn,
+        output_fn=outputs.append,
     )
 
-    assert "connection failed: invalid: no base_url" in outputs
+    assert any("connection failed: invalid: no base_url" in m for m in outputs)
 
 
-def test_save_config_failure_reported_and_exit_code_unchanged(tmp_path, capsys):
-    log_path = tmp_path / "calls.log"
-    control_path = tmp_path / "control.json"
-    _set_control(control_path, {"check_connection": {"result": {"ok": True, "error": None}}})
-    tool_root = _build_tool_root(tmp_path, log_path, control_path)
+def test_save_config_value_error_is_reported_to_stderr_and_does_not_change_exit_code(tmp_path, capsys):
+    tool_root = _make_tool_root(tmp_path / "tool_root")
+    log_path = tmp_path / "log.jsonl"
+    _write_fake_llm_endpoint(tool_root, log_path, "ok", "raise")
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    outputs = []
 
-    baseline_dir = tmp_path / "baseline"
-    baseline_dir.mkdir()
-    failing_dir = tmp_path / "failing"
-    failing_dir.mkdir()
-
-    input_fn_base, _ = _make_input_fn(save_answers=[])
-    output_fn_base, _ = _make_output_fn()
-    exit_baseline = _run_main(
-        tool_root,
-        ["--provider", "openai", "--model", "m", "--api-key-env", "MY_KEY"],
-        baseline_dir,
-        input_fn_base,
-        output_fn_base,
-    )
-    capsys.readouterr()
-
-    _set_control(
-        control_path,
-        {
-            "check_connection": {"result": {"ok": True, "error": None}},
-            "save_config": {"raise": "nope"},
-        },
+    exit_code = hotdocs_init.main(
+        [str(project_dir), "--provider", "openai", "--model", "m", "--api-key-env", "MY_KEY"],
+        tool_root=tool_root,
+        input_fn=_refusing_input_fn,
+        output_fn=outputs.append,
     )
 
-    input_fn_fail, _ = _make_input_fn(save_answers=[])
-    output_fn_fail, _ = _make_output_fn()
-    exit_failing = _run_main(
-        tool_root,
-        ["--provider", "openai", "--model", "m", "--api-key-env", "MY_KEY"],
-        failing_dir,
-        input_fn_fail,
-        output_fn_fail,
-    )
     captured = capsys.readouterr()
-
     assert "could not save: nope" in captured.err
-    assert exit_failing == exit_baseline
+    assert any("connection ok" in m for m in outputs)
+    assert exit_code == 0
 
 
-def test_no_test_skips_check_connection(tmp_path):
-    log_path = tmp_path / "calls.log"
-    control_path = tmp_path / "control.json"
-    _set_control(control_path, {"check_connection": {"result": {"ok": True, "error": None}}})
-    tool_root = _build_tool_root(tmp_path, log_path, control_path)
-
+def test_no_test_flag_skips_check_connection(tmp_path):
+    tool_root = _make_tool_root(tmp_path / "tool_root")
+    log_path = tmp_path / "log.jsonl"
+    _write_fake_llm_endpoint(tool_root, log_path, "ok", "ok")
     project_dir = tmp_path / "project"
     project_dir.mkdir()
+    outputs = []
 
-    input_fn, _ = _make_input_fn(save_answers=[])
-    output_fn, _ = _make_output_fn()
-
-    _run_main(
-        tool_root,
-        ["--provider", "openai", "--model", "m", "--api-key-env", "MY_KEY", "--no-test"],
-        project_dir,
-        input_fn,
-        output_fn,
+    hotdocs_init.main(
+        [str(project_dir), "--no-test", "--provider", "openai", "--model", "m", "--api-key-env", "MY_KEY"],
+        tool_root=tool_root,
+        input_fn=_refusing_input_fn,
+        output_fn=outputs.append,
     )
 
-    calls = _read_calls(log_path)
-    assert not any(c["call"] == "check_connection" for c in calls)
+    calls = _read_log(log_path)
+    assert not [c for c in calls if c["call"] == "check_connection"]
