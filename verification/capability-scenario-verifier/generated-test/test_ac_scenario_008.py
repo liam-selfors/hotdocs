@@ -1,213 +1,214 @@
+from pathlib import Path
+
+import pytest
+
 import capability_scenario_verifier
 
 
-def _get(obj, key, default=None):
-    if isinstance(obj, dict):
-        return obj.get(key, default)
-    return getattr(obj, key, default)
+def _get(obj, name):
+    try:
+        return obj[name]
+    except (TypeError, KeyError):
+        return getattr(obj, name)
 
 
-CAPABILITY_ID = "P-X"
-SCENARIO_ID = "CS-X-001"
-COMPONENT_ID = "comp-foo"
-COMPONENT_SLUG = "foo"
-
-
-def _write_fixture_repo(repo_root, code_files=None):
-    components_dir = repo_root / "specs" / "components" / COMPONENT_SLUG
-    components_dir.mkdir(parents=True, exist_ok=True)
-    (components_dir / "component.md").write_text(
-        "---\n"
-        f"id: {COMPONENT_ID}\n"
-        "title: Foo Component\n"
-        "status: draft\n"
-        "owners: [lselfors@gmail.com]\n"
-        f"realizes: [{CAPABILITY_ID}]\n"
-        "sealed: false\n"
-        "---\n\n"
-        "# Foo Component\n\n"
-        "A fixture component used by AC-SCENARIO-008's tests.\n",
-        encoding="utf-8",
-    )
-
-    product_dir = repo_root / "specs" / "product"
-    product_dir.mkdir(parents=True, exist_ok=True)
-    (product_dir / "foo.md").write_text(
-        "---\n"
-        f"id: {CAPABILITY_ID}\n"
-        "title: Foo Capability\n"
-        "status: draft\n"
-        "owners: [lselfors@gmail.com]\n"
-        "---\n\n"
-        "# Foo Capability\n\n"
-        f"### {SCENARIO_ID}\n\n"
-        f"Covers: {CAPABILITY_ID}\n"
-        "Kind: generated-test\n\n"
-        "```gherkin\n"
-        "Given a thing\n"
-        "When it runs\n"
-        "Then it works\n"
-        "```\n",
-        encoding="utf-8",
-    )
-
-    gen_dir = repo_root / "gen" / COMPONENT_SLUG
-    gen_dir.mkdir(parents=True, exist_ok=True)
-    for rel_path, content in (code_files or {}).items():
-        target = gen_dir / rel_path
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(content, encoding="utf-8")
-
-
-def _make_test_author(outcome):
-    def _fake(bundle):
-        return outcome
-
-    return _fake
-
-
-def _find_scenario(report, scenario_id):
-    cap = _get(report, CAPABILITY_ID)
-    scenarios = _get(cap, "scenarios")
+def _find_scenario(scenarios, scenario_id):
     for scenario in scenarios:
         if _get(scenario, "id") == scenario_id:
-            return cap, scenario
-    raise AssertionError(f"scenario {scenario_id} not found in report: {report!r}")
+            return scenario
+    raise AssertionError(f"scenario {scenario_id} not found in {scenarios!r}")
 
 
-def test_generated_test_failure_fails_scenario_and_writes_file(tmp_path):
-    repo_root = tmp_path
-    _write_fixture_repo(repo_root)
+def _write(path: Path, content: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(content)
 
-    rel_path = f"verification/capabilities/{CAPABILITY_ID}/generated-test/test_cs_x_001.py"
-    outcome = {
-        "model_call_error": None,
-        "file": {"path": rel_path, "content": "def test_x():\n    assert False\n"},
-    }
+
+def _write_component(repo_root, slug, comp_id, realizes):
+    content = (
+        "---\n"
+        f"id: {comp_id}\n"
+        f"title: Fixture component {slug}\n"
+        "status: draft\n"
+        "owners: [fixture-owner]\n"
+        f"realizes: [{', '.join(realizes)}]\n"
+        "sealed: false\n"
+        "---\n"
+        "\n"
+        "Synthetic fixture component for AC-SCENARIO-008.\n"
+    )
+    _write(repo_root / "specs" / "components" / slug / "component.md", content)
+
+
+def _write_capability(repo_root, name, cap_id, scenarios):
+    lines = [
+        "---",
+        f"id: {cap_id}",
+        f"title: Fixture capability {cap_id}",
+        "status: draft",
+        "owners: [fixture-owner]",
+        "---",
+        "",
+    ]
+    for scenario_id, kind in scenarios:
+        lines += [
+            f"### {scenario_id}",
+            "",
+            f"Covers: {cap_id}",
+            f"Kind: {kind}",
+            "",
+            "```gherkin",
+            "Given a scenario fixture",
+            "When run_capability_scenarios runs",
+            "Then the scenario is decided by running its test",
+            "```",
+            "",
+        ]
+    _write(repo_root / "specs" / "product" / f"{name}.md", "\n".join(lines))
+
+
+@pytest.fixture
+def repo(tmp_path):
+    _write_component(tmp_path, "one", "comp-one", ["P-ONE"])
+    _write_component(tmp_path, "two", "comp-two", ["P-TWO"])
+    _write_component(tmp_path, "three", "comp-three", ["P-THREE"])
+    _write_component(tmp_path, "foo", "comp-foo", ["P-FOUR"])
+
+    _write(tmp_path / "gen" / "one" / "one_mod.py", "def noop():\n    return None\n")
+    _write(tmp_path / "gen" / "two" / "two_mod.py", "def noop():\n    return None\n")
+    _write(tmp_path / "gen" / "three" / "three_mod.py", "def noop():\n    return None\n")
+    _write(tmp_path / "gen" / "foo" / "foo_mod.py", "def value():\n    return 7\n")
+
+    _write_capability(tmp_path, "one", "P-ONE", [("CS-ONE-001", "generated-test")])
+    _write_capability(
+        tmp_path,
+        "two",
+        "P-TWO",
+        [
+            ("CS-TWO-001", "generated-test"),
+            ("CS-TWO-002", "generated-test"),
+            ("CS-TWO-003", "generated-test"),
+        ],
+    )
+    _write_capability(
+        tmp_path,
+        "three",
+        "P-THREE",
+        [("CS-THREE-001", "generated-test"), ("CS-THREE-002", "generated-test")],
+    )
+    _write_capability(tmp_path, "four", "P-FOUR", [("CS-FOUR-001", "generated-test")])
+
+    return tmp_path
+
+
+def test_failing_generated_test_fails_and_file_is_written(repo):
+    def fake_test_author(bundle):
+        return {
+            "model_call_error": None,
+            "file": {
+                "path": "verification/capabilities/P-ONE/generated-test/test_cs_one_001.py",
+                "content": "def test_x():\n    assert False\n",
+            },
+        }
 
     report = capability_scenario_verifier.run_capability_scenarios(
-        [COMPONENT_ID], repo_root, judge=None, test_author=_make_test_author(outcome)
+        ["comp-one"], repo, test_author=fake_test_author
     )
 
-    cap, scenario = _find_scenario(report, SCENARIO_ID)
+    cap = _get(report, "P-ONE")
     assert _get(cap, "overall") == "fail"
+    scenario = _find_scenario(_get(cap, "scenarios"), "CS-ONE-001")
     assert _get(scenario, "result") == "fail"
-    assert (repo_root / rel_path).exists()
+
+    written = (
+        repo
+        / "verification"
+        / "capabilities"
+        / "P-ONE"
+        / "generated-test"
+        / "test_cs_one_001.py"
+    )
+    assert written.is_file()
+    assert written.read_text() == "def test_x():\n    assert False\n"
 
 
-def test_generated_test_dotdot_path_fails_and_writes_nothing(tmp_path):
-    repo_root = tmp_path
-    _write_fixture_repo(repo_root)
+def test_bad_returned_paths_fail_and_write_nothing(repo, tmp_path_factory):
+    outside_dir = tmp_path_factory.mktemp("outside")
+    bad_abs_path = str(outside_dir / "escape.py")
 
-    bad_path = "../escape.py"
-    outcome = {
-        "model_call_error": None,
-        "file": {"path": bad_path, "content": "def test_x():\n    assert True\n"},
+    paths = {
+        "CS-TWO-001": "../escape.py",
+        "CS-TWO-002": bad_abs_path,
+        "CS-TWO-003": "notverification/x.py",
     }
 
-    report = capability_scenario_verifier.run_capability_scenarios(
-        [COMPONENT_ID], repo_root, judge=None, test_author=_make_test_author(outcome)
-    )
-
-    _cap, scenario = _find_scenario(report, SCENARIO_ID)
-    assert _get(scenario, "result") == "fail"
-    assert not (repo_root.parent / "escape.py").exists()
-    assert not (repo_root / "escape.py").exists()
-
-
-def test_generated_test_absolute_path_fails_and_writes_nothing(tmp_path, tmp_path_factory):
-    repo_root = tmp_path
-    _write_fixture_repo(repo_root)
-
-    other_dir = tmp_path_factory.mktemp("escape-target")
-    bad_path = str(other_dir / "escape.py")
-    outcome = {
-        "model_call_error": None,
-        "file": {"path": bad_path, "content": "def test_x():\n    assert True\n"},
-    }
+    def fake_test_author(bundle):
+        scenario_id = _get(bundle, "scenario_id")
+        return {
+            "model_call_error": None,
+            "file": {
+                "path": paths[scenario_id],
+                "content": "def test_x():\n    assert True\n",
+            },
+        }
 
     report = capability_scenario_verifier.run_capability_scenarios(
-        [COMPONENT_ID], repo_root, judge=None, test_author=_make_test_author(outcome)
+        ["comp-two"], repo, test_author=fake_test_author
     )
 
-    _cap, scenario = _find_scenario(report, SCENARIO_ID)
-    assert _get(scenario, "result") == "fail"
-    assert not (other_dir / "escape.py").exists()
+    cap = _get(report, "P-TWO")
+    scenarios = _get(cap, "scenarios")
+    for scenario_id in paths:
+        scenario = _find_scenario(scenarios, scenario_id)
+        assert _get(scenario, "result") == "fail"
+
+    assert not (repo.parent / "escape.py").exists()
+    assert not Path(bad_abs_path).exists()
+    assert not (repo / "notverification" / "x.py").exists()
 
 
-def test_generated_test_outside_verification_path_fails_and_writes_nothing(tmp_path):
-    repo_root = tmp_path
-    _write_fixture_repo(repo_root)
-
-    bad_path = "notverification/x.py"
-    outcome = {
-        "model_call_error": None,
-        "file": {"path": bad_path, "content": "def test_x():\n    assert True\n"},
-    }
+def test_model_call_error_or_no_file_fails(repo):
+    def fake_test_author(bundle):
+        scenario_id = _get(bundle, "scenario_id")
+        if scenario_id == "CS-THREE-001":
+            return {
+                "model_call_error": {"category": "network", "message": "boom"},
+                "file": None,
+            }
+        return {"model_call_error": None, "file": None}
 
     report = capability_scenario_verifier.run_capability_scenarios(
-        [COMPONENT_ID], repo_root, judge=None, test_author=_make_test_author(outcome)
+        ["comp-three"], repo, test_author=fake_test_author
     )
 
-    _cap, scenario = _find_scenario(report, SCENARIO_ID)
-    assert _get(scenario, "result") == "fail"
-    assert not (repo_root / "notverification" / "x.py").exists()
+    cap = _get(report, "P-THREE")
+    scenarios = _get(cap, "scenarios")
+    for scenario_id in ("CS-THREE-001", "CS-THREE-002"):
+        scenario = _find_scenario(scenarios, scenario_id)
+        assert _get(scenario, "result") == "fail"
 
 
-def test_generated_test_model_call_error_fails(tmp_path):
-    repo_root = tmp_path
-    _write_fixture_repo(repo_root)
-
-    outcome = {
-        "model_call_error": {"category": "network", "message": "boom"},
-        "file": None,
-    }
+def test_realizing_component_code_dir_is_on_pythonpath_for_pass(repo):
+    def fake_test_author(bundle):
+        return {
+            "model_call_error": None,
+            "file": {
+                "path": "verification/capabilities/P-FOUR/generated-test/test_cs_four_001.py",
+                "content": (
+                    "import foo_mod\n"
+                    "\n"
+                    "\n"
+                    "def test_x():\n"
+                    "    assert foo_mod.value() == 7\n"
+                ),
+            },
+        }
 
     report = capability_scenario_verifier.run_capability_scenarios(
-        [COMPONENT_ID], repo_root, judge=None, test_author=_make_test_author(outcome)
+        ["comp-foo"], repo, test_author=fake_test_author
     )
 
-    _cap, scenario = _find_scenario(report, SCENARIO_ID)
-    assert _get(scenario, "result") == "fail"
-
-
-def test_generated_test_no_file_fails(tmp_path):
-    repo_root = tmp_path
-    _write_fixture_repo(repo_root)
-
-    outcome = {"model_call_error": None, "file": None}
-
-    report = capability_scenario_verifier.run_capability_scenarios(
-        [COMPONENT_ID], repo_root, judge=None, test_author=_make_test_author(outcome)
-    )
-
-    _cap, scenario = _find_scenario(report, SCENARIO_ID)
-    assert _get(scenario, "result") == "fail"
-
-
-def test_generated_test_runs_with_realizing_component_on_pythonpath(tmp_path):
-    repo_root = tmp_path
-    _write_fixture_repo(
-        repo_root, code_files={"foo_mod.py": "def value():\n    return 7\n"}
-    )
-
-    rel_path = f"verification/capabilities/{CAPABILITY_ID}/generated-test/test_cs_x_001.py"
-    outcome = {
-        "model_call_error": None,
-        "file": {
-            "path": rel_path,
-            "content": (
-                "def test_x():\n"
-                "    import foo_mod\n"
-                "    assert foo_mod.value() == 7\n"
-            ),
-        },
-    }
-
-    report = capability_scenario_verifier.run_capability_scenarios(
-        [COMPONENT_ID], repo_root, judge=None, test_author=_make_test_author(outcome)
-    )
-
-    cap, scenario = _find_scenario(report, SCENARIO_ID)
-    assert _get(scenario, "result") == "pass"
+    cap = _get(report, "P-FOUR")
     assert _get(cap, "overall") == "pass"
+    scenario = _find_scenario(_get(cap, "scenarios"), "CS-FOUR-001")
+    assert _get(scenario, "result") == "pass"

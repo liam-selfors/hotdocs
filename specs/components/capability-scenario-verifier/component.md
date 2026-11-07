@@ -89,10 +89,9 @@ None — extracted whole from `merge-orchestrator`'s already-resolved
 - `D87`–`D93`: own provenance mechanism (`R-SCENARIO-004`), keyed on
   realizing components' actual content; no CLI; wires its own closures.
 - `D174`: specified `check_capability_provenance`/`run_capability_gates`,
-  never built until now. Scenarios are now actually run
-  (`R-SCENARIO-005`; they used to pass once a test was merely produced),
-  the key also covers the capability's own scenarios, the closures are
-  specified (`R-SCENARIO-007`/`008`), and `interface/cli.md` — which
-  said only "None" — is removed.
+  never built until now. Scenarios are actually run (`R-SCENARIO-005`),
+  the key covers the capability's own scenarios, the closures are
+  specified (`R-SCENARIO-007`/`008`), and `interface/cli.md` is removed.
 - `D175`: cold-generated and landed at 12/12, `mutation_score` 0.84. A
   `compiled` capability scenario cannot pass with `surface=None`.
+- `D198`: the test author's bundle names the realizing modules.

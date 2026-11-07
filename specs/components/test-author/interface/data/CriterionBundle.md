@@ -11,19 +11,16 @@
   "glossary": "<specs/glossary.md body>",
   "dependency_interfaces": {
     "comp-bar": "<comp-bar's own interface/ content>"
-  }
+  },
+  "module_names": ["foo"]
 }
 ```
 
-Assembled by `spec-bundle-assembler` (a new library entry point alongside
-`assemble()`, narrower in scope and never including `gen/<component>/`
-content, per R-AUTHOR-002). `dependency_interfaces` (`D100`) is keyed by
-every id in the target component's own `depends_on`, each value that
-dependency's full `interface/` content — the same content and the same
-`R-ASSEMBLE-002` rule `SpecBundle.dependency_interfaces` already
-follows. This is a third party's already-public, already-documented
-contract, never the target's own implementation, so it does not reopen
-`R-AUTHOR-002`'s independence boundary; without it, a test faking a
-dependency's behavior has no authoritative source for that
-dependency's real call signature or return shape and must guess
-(`D100`).
+Assembled by `spec-bundle-assembler`'s narrow entry point, never with
+`gen/<component>/` content (`R-AUTHOR-002`). `dependency_interfaces`
+(`D100`) is keyed by every id in the target's `depends_on`, each value
+that dependency's full `interface/` content (`R-ASSEMBLE-002`): a
+public contract, so a fake can match the real signature and return
+shape instead of guessing. `module_names` is optional and read with a
+default, since the assembler's bundles do not carry it
+(`R-AUTHOR-026`).

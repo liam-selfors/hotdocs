@@ -1,30 +1,39 @@
 import json
+import textwrap
 
 import pytest
 
 import capability_scenario_verifier
 
 
-COMPONENT_MD = """---
+def _get(obj, key):
+    if isinstance(obj, dict):
+        return obj.get(key)
+    return getattr(obj, key, None)
+
+
+FOO_COMPONENT_MD = """---
 id: comp-foo
-title: Foo Component
+title: Foo
 status: draft
-owners: [lselfors@gmail.com]
+owners: [qa]
 realizes: [P-X]
 sealed: false
 ---
 
-# Foo Component
+# Foo
+
+A fixture component realizing P-X.
 """
 
-CAPABILITY_MD = """---
+CAPABILITY_X_MD = """---
 id: P-X
-title: Foo Capability
+title: Capability X
 status: draft
-owners: [lselfors@gmail.com]
+owners: [qa]
 ---
 
-# Foo Capability
+# Capability X
 
 ### CS-X-001
 
@@ -32,100 +41,88 @@ Covers: P-X
 Kind: llm-judge
 
 ```gherkin
-Given a widget MARKER_GHERKIN exists
-When it is examined
-Then it behaves correctly
+Given MARKER_GHERKIN is present in the scenario
+When the capability gate runs
+Then the scenario is judged
 ```
 """
 
 FOO_SOURCE = """# MARKER_SOURCE
 def foo():
-    return True
+    pass
 """
 
-
-def _get(obj, key, default=None):
-    if isinstance(obj, dict):
-        return obj.get(key, default)
-    return getattr(obj, key, default)
+SENTINEL_BACKEND = "sentinel-backend-7e862b1d"
 
 
-class _Sentinel:
-    pass
+def _llm_endpoint_source(record_path, response_text, response_error):
+    return textwrap.dedent(
+        """
+        import json
 
-
-def _write_fake_llm_endpoint(repo_root, calls_log, response_text, response_error):
-    gen_dir = repo_root / "gen" / "llm-endpoint"
-    gen_dir.mkdir(parents=True, exist_ok=True)
-    module_source = (
-        "import json\n"
-        "\n"
-        f"_CALLS_LOG = {str(calls_log)!r}\n"
-        f"_RESPONSE_TEXT = {response_text!r}\n"
-        f"_RESPONSE_ERROR = {response_error!r}\n"
-        "\n"
-        "def complete(prompt, model, *, backend=None, **params):\n"
-        "    record = {\"prompt\": prompt, \"model\": model, \"backend_id\": id(backend)}\n"
-        "    with open(_CALLS_LOG, \"a\") as f:\n"
-        "        f.write(json.dumps(record) + \"\\n\")\n"
-        "    return {\n"
-        "        \"text\": _RESPONSE_TEXT,\n"
-        "        \"model\": model,\n"
-        "        \"backend\": backend,\n"
-        "        \"model_call_error\": _RESPONSE_ERROR,\n"
-        "    }\n"
+        def complete(prompt, model, backend=None, **params):
+            with open({record_path!r}, "a") as f:
+                f.write(json.dumps({{"prompt": prompt, "model": model, "backend": backend}}) + "\\n")
+            return {{"text": {response_text!r}, "model_call_error": {response_error!r}}}
+        """
+    ).format(
+        record_path=str(record_path),
+        response_text=response_text,
+        response_error=response_error,
     )
-    (gen_dir / "llm_endpoint.py").write_text(module_source)
 
 
-def _build_repo(tmp_path, calls_log, response_text, response_error):
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-
+def _build_repo(repo_root, record_path, response_text, response_error):
     component_dir = repo_root / "specs" / "components" / "foo"
     component_dir.mkdir(parents=True)
-    (component_dir / "component.md").write_text(COMPONENT_MD)
+    (component_dir / "component.md").write_text(FOO_COMPONENT_MD)
+
+    gen_dir = repo_root / "gen" / "foo"
+    gen_dir.mkdir(parents=True)
+    (gen_dir / "foo.py").write_text(FOO_SOURCE)
 
     product_dir = repo_root / "specs" / "product"
     product_dir.mkdir(parents=True)
-    (product_dir / "foo.md").write_text(CAPABILITY_MD)
+    (product_dir / "capability-x.md").write_text(CAPABILITY_X_MD)
 
-    foo_dir = repo_root / "gen" / "foo"
-    foo_dir.mkdir(parents=True)
-    (foo_dir / "foo.py").write_text(FOO_SOURCE)
-
-    _write_fake_llm_endpoint(repo_root, calls_log, response_text, response_error)
-
-    return repo_root
-
-
-def test_run_capability_gates_dispatches_judge_and_returns_pass(tmp_path):
-    sentinel_backend = _Sentinel()
-    calls_log = tmp_path / "calls.jsonl"
-
-    response_text = "```json\n" + json.dumps({"result": "pass", "rationale": "ok"}) + "\n```"
-    repo_root = _build_repo(tmp_path, calls_log, response_text, None)
-
-    result = capability_scenario_verifier.run_capability_gates(
-        "P-X", repo_root, "m", llm_backend=sentinel_backend
+    endpoint_dir = repo_root / "gen" / "llm-endpoint"
+    endpoint_dir.mkdir(parents=True)
+    (endpoint_dir / "llm_endpoint.py").write_text(
+        _llm_endpoint_source(record_path, response_text, response_error)
     )
 
-    assert calls_log.exists()
-    lines = calls_log.read_text().strip().splitlines()
-    assert len(lines) == 1
 
-    record = json.loads(lines[0])
-    assert record["model"] == "m"
-    assert record["backend_id"] == id(sentinel_backend)
-    assert "MARKER_SOURCE" in record["prompt"]
-    assert "MARKER_GHERKIN" in record["prompt"]
-
+def _scenario_for(result, scenario_id="CS-X-001"):
     report = _get(result, "capability_scenario_report")
-    px_report = _get(report, "P-X")
-    scenarios = _get(px_report, "scenarios")
-    assert len(scenarios) == 1
-    scenario = scenarios[0]
-    assert _get(scenario, "id") == "CS-X-001"
+    px = _get(report, "P-X")
+    scenarios = _get(px, "scenarios")
+    return next(s for s in scenarios if _get(s, "id") == scenario_id)
+
+
+def test_llm_judge_scenario_dispatches_once_and_passes(tmp_path):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    record_path = tmp_path / "calls.jsonl"
+    _build_repo(
+        repo_root,
+        record_path,
+        response_text='```json\n{"result": "pass", "rationale": "ok"}\n```',
+        response_error=None,
+    )
+
+    result = capability_scenario_verifier.run_capability_gates(
+        "P-X", repo_root, "m", llm_backend=SENTINEL_BACKEND,
+    )
+
+    calls = [json.loads(line) for line in record_path.read_text().splitlines()]
+    assert len(calls) == 1
+    call = calls[0]
+    assert call["model"] == "m"
+    assert call["backend"] == SENTINEL_BACKEND
+    assert "MARKER_SOURCE" in call["prompt"]
+    assert "MARKER_GHERKIN" in call["prompt"]
+
+    scenario = _scenario_for(result)
     assert _get(scenario, "result") == "pass"
     assert _get(scenario, "rationale") == "ok"
 
@@ -133,28 +130,25 @@ def test_run_capability_gates_dispatches_judge_and_returns_pass(tmp_path):
 @pytest.mark.parametrize(
     "response_text,response_error",
     [
-        (None, {"category": "network", "message": "boom"}),
+        (None, {"category": "rate_limit", "message": "429 from backend"}),
         ("not json", None),
-        (json.dumps({"result": "maybe"}), None),
+        ('```json\n{"result": "maybe"}\n```', None),
     ],
-    ids=["model_call_error", "unparseable_text", "invalid_result"],
+    ids=["model_call_error", "unparseable_text", "invalid_result_value"],
 )
-def test_run_capability_gates_judge_failure_modes_yield_fail(
+def test_llm_judge_scenario_fails_when_judge_unavailable(
     tmp_path, response_text, response_error
 ):
-    sentinel_backend = _Sentinel()
-    calls_log = tmp_path / "calls.jsonl"
-    repo_root = _build_repo(tmp_path, calls_log, response_text, response_error)
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    record_path = tmp_path / "calls.jsonl"
+    _build_repo(repo_root, record_path, response_text, response_error)
 
     result = capability_scenario_verifier.run_capability_gates(
-        "P-X", repo_root, "m", llm_backend=sentinel_backend
+        "P-X", repo_root, "m", llm_backend=SENTINEL_BACKEND,
     )
 
-    report = _get(result, "capability_scenario_report")
-    px_report = _get(report, "P-X")
-    scenarios = _get(px_report, "scenarios")
-    assert len(scenarios) == 1
-    scenario = scenarios[0]
+    scenario = _scenario_for(result)
     assert _get(scenario, "result") == "fail"
     rationale = _get(scenario, "rationale")
     assert rationale.startswith("judge unavailable")

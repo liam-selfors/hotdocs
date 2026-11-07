@@ -641,3 +641,21 @@ id-derived name is wrong, so my first version of the test, which
 forbade the prompt from mentioning `comp_semver` at all, was too
 literal; it now forbids only offering `import comp_semver`. To fit the
 4000-word cap, backstory was trimmed from `R-AUTHOR-009`–`015`.
+
+## `D198`: capability scenarios named no importable module
+
+`capability-scenario-verifier` passes `component_id`
+`capabilities/<P-id>`, from which `R-AUTHOR-025` derived
+`import capabilities/P_SLUGS`, so every capability scenario failed.
+`R-AUTHOR-026` adds an optional `module_names` to the bundle; when
+non-empty, those modules are named instead. Two new hand tests (dict
+and attribute bundles, plus the empty-list fallback) fail on the
+previous implementation.
+
+Regenerated through the `D58` route in a scratch copy of the
+repository. The first candidate passed the new tests but dropped the
+prompt's "no custom loader" instruction for the component under test,
+which `R-AUTHOR-010` only implied in a parenthesis; it now says it
+outright. The second candidate passed 37 of 37, with
+`verifier-orchestrator` (29) and `capability-scenario-verifier` (34)
+unchanged.

@@ -18,4 +18,6 @@
     `specs/components/<slug>/interface/`, in sorted path order;
   - `glossary`: the text of `specs/glossary.md`, or `""` if absent;
   - `dependency_interfaces`: `{}` — a capability test uses the real
-    assembled system, never fakes.
+    assembled system, never fakes;
+  - `module_names`: each realizing component's slug with hyphens as
+    underscores, in id order (`D198`).

@@ -1,126 +1,106 @@
-import dataclasses
-import json
-
-import capability_scenario_verifier
+import capability_scenario_verifier as csv
 
 
-COMPONENT_MD = """---
+FRONTMATTER_COMPONENT = """---
 id: comp-widget
 title: Widget
-status: draft
+status: ratified
 owners: [lselfors@gmail.com]
+realizes: [P-FOO]
 sealed: true
-source_path: pipeline/widget/
-realizes: [P-WIDGET]
+source_path: vendor/widget/
+last_ratified_commit: 0000000
 ---
 
-# Widget
-
-Purpose: fixture component for AC-SCENARIO-004.
+Widget component.
 """
 
-CAPABILITY_MD = """---
-id: P-WIDGET
-title: Widget Capability
-status: draft
+FRONTMATTER_PRODUCT = """---
+id: P-FOO
+title: Foo capability
+status: ratified
 owners: [lselfors@gmail.com]
+last_ratified_commit: 0000000
 ---
 
-# Widget Capability
+### CS-FOO-001
 
-### CS-WIDGET-001
-
-Covers: P-WIDGET
+Covers: P-FOO
 Kind: generated-test
 
 ```gherkin
-Given a widget exists
-When the widget is used
-Then the widget behaves correctly
+Given a widget
+When it is used
+Then it works
 ```
 """
 
+FAKE_FILE = {
+    "path": "verification/capabilities/P-FOO/generated-test/test_cs_foo_001.py",
+    "content": "def test_x():\n    assert True\n",
+}
 
-def _build_repo(tmp_path):
+
+def build_repo(tmp_path):
     repo_root = tmp_path / "repo"
     component_dir = repo_root / "specs" / "components" / "widget"
     component_dir.mkdir(parents=True)
-    (component_dir / "component.md").write_text(COMPONENT_MD)
+    (component_dir / "component.md").write_text(FRONTMATTER_COMPONENT)
 
     product_dir = repo_root / "specs" / "product"
     product_dir.mkdir(parents=True)
-    (product_dir / "widget.md").write_text(CAPABILITY_MD)
+    (product_dir / "foo.md").write_text(FRONTMATTER_PRODUCT)
 
     return repo_root
 
 
-def _get(obj, key, default=None):
+def get(obj, key):
     if isinstance(obj, dict):
-        return obj.get(key, default)
-    return getattr(obj, key, default)
+        return obj[key]
+    return getattr(obj, key)
 
 
-def _bundle_keys(bundle):
+def bundle_key_set(bundle):
     if isinstance(bundle, dict):
         return set(bundle.keys())
-    if dataclasses.is_dataclass(bundle):
-        return {f.name for f in dataclasses.fields(bundle)}
     return set(vars(bundle).keys())
 
 
-def _scenario_result(report, capability_id, scenario_id):
-    capability = _get(report, capability_id)
-    scenarios = _get(capability, "scenarios")
-    for scenario in scenarios:
-        if _get(scenario, "id") == scenario_id:
-            return _get(scenario, "result")
-    raise AssertionError(f"scenario {scenario_id} not found in report")
+def find_scenario(report, capability_id, scenario_id):
+    capability = get(report, capability_id)
+    for scenario in get(capability, "scenarios"):
+        if get(scenario, "id") == scenario_id:
+            return scenario
+    raise AssertionError(f"scenario {scenario_id} not found in report for {capability_id}")
 
 
-def _fake_outcome():
-    return {
-        "model_call_error": None,
-        "file": {
-            "path": "verification/capabilities/P-WIDGET/generated-test/test_cs_widget_001.py",
-            "content": "def test_x():\n    assert True\n",
-        },
-    }
-
-
-def test_generated_test_dispatched_fresh_on_every_call_no_cache_short_circuit(tmp_path):
-    repo_root = _build_repo(tmp_path)
-    log_path = tmp_path / "invocations.log"
+def test_generated_test_scenario_dispatches_fresh_on_every_call(tmp_path):
+    repo_root = build_repo(tmp_path)
+    invocations = []
 
     def fake_test_author(bundle):
-        with open(log_path, "a") as f:
-            f.write("invoked\n")
-        return _fake_outcome()
+        invocations.append(get(bundle, "scenario_id"))
+        return {"model_call_error": None, "file": dict(FAKE_FILE)}
 
-    capability_scenario_verifier.run_capability_scenarios(
-        ["comp-widget"], repo_root, test_author=fake_test_author
-    )
-    capability_scenario_verifier.run_capability_scenarios(
-        ["comp-widget"], repo_root, test_author=fake_test_author
-    )
+    csv.run_capability_scenarios(["comp-widget"], repo_root, test_author=fake_test_author)
+    csv.run_capability_scenarios(["comp-widget"], repo_root, test_author=fake_test_author)
 
-    invocations = log_path.read_text().splitlines()
-    assert len(invocations) == 2
+    assert invocations == ["CS-FOO-001", "CS-FOO-001"]
 
 
-def test_bundle_keys_are_exactly_the_required_six(tmp_path):
-    repo_root = _build_repo(tmp_path)
-    bundle_keys_path = tmp_path / "bundle_keys.json"
+def test_bundle_passed_to_test_author_has_exact_keys(tmp_path):
+    repo_root = build_repo(tmp_path)
+    received = []
 
     def fake_test_author(bundle):
-        bundle_keys_path.write_text(json.dumps(sorted(_bundle_keys(bundle))))
-        return _fake_outcome()
+        received.append(bundle)
+        return {"model_call_error": None, "file": dict(FAKE_FILE)}
 
-    capability_scenario_verifier.run_capability_scenarios(
-        ["comp-widget"], repo_root, test_author=fake_test_author
-    )
+    csv.run_capability_scenarios(["comp-widget"], repo_root, test_author=fake_test_author)
 
-    recorded_keys = set(json.loads(bundle_keys_path.read_text()))
-    assert recorded_keys == {
+    assert len(received) == 1
+    bundle = received[0]
+    assert bundle_key_set(bundle) == {
         "capability_id",
         "scenario_id",
         "covers",
@@ -128,14 +108,15 @@ def test_bundle_keys_are_exactly_the_required_six(tmp_path):
         "gherkin",
         "file",
     }
+    assert get(bundle, "capability_id") == "P-FOO"
+    assert get(bundle, "scenario_id") == "CS-FOO-001"
+    assert get(bundle, "kind") == "generated-test"
 
 
-def test_missing_test_author_fails_generated_test_scenario(tmp_path):
-    repo_root = _build_repo(tmp_path)
+def test_generated_test_scenario_fails_without_test_author(tmp_path):
+    repo_root = build_repo(tmp_path)
 
-    report = capability_scenario_verifier.run_capability_scenarios(
-        ["comp-widget"], repo_root
-    )
+    report = csv.run_capability_scenarios(["comp-widget"], repo_root)
 
-    result = _scenario_result(report, "P-WIDGET", "CS-WIDGET-001")
-    assert result == "fail"
+    scenario = find_scenario(report, "P-FOO", "CS-FOO-001")
+    assert get(scenario, "result") == "fail"

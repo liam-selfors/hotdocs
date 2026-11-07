@@ -7,80 +7,71 @@ def _get(obj, key, default=None):
     return getattr(obj, key, default)
 
 
-def _keys(obj):
-    if isinstance(obj, dict):
-        return list(obj.keys())
-    if hasattr(obj, "__dict__"):
-        return list(vars(obj).keys())
-    return []
-
-
-COMPONENT_MD = """---
-id: comp-{slug}
-title: {title}
-status: draft
-owners: [lselfors@gmail.com]
-realizes: [P-WIDGET]
-sealed: false
----
-
-# {title}
-
-Purpose: a fixture component for AC-SCENARIO-001.
-"""
-
-CAPABILITY_MD = """---
-id: P-WIDGET
-title: Widget Capability
-status: draft
-owners: [lselfors@gmail.com]
----
-
-# Widget Capability
-
-### CS-WIDGET-001
-
-Covers: P-WIDGET
-Kind: generated-test
-
-```gherkin
-Given a widget
-When it is used
-Then it works
-```
-"""
-
-
 def _write(path, content):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content)
 
 
-def test_generated_test_scenario_keyed_by_capability_id(tmp_path):
-    repo_root = tmp_path / "repo"
+def _component_md(component_id, capability_id):
+    return (
+        "---\n"
+        f"id: {component_id}\n"
+        f"title: {component_id} Component\n"
+        "status: draft\n"
+        "owners: [spec-owner]\n"
+        f"realizes: [{capability_id}]\n"
+        "sealed: false\n"
+        "---\n\n"
+        f"# {component_id} Component\n"
+    )
+
+
+def _capability_md(capability_id):
+    return (
+        "---\n"
+        f"id: {capability_id}\n"
+        "title: Widget Capability\n"
+        "status: draft\n"
+        "owners: [spec-owner]\n"
+        "---\n\n"
+        "# Widget Capability\n\n"
+        "### CS-WIDGET-001\n\n"
+        f"Covers: {capability_id}\n"
+        "Kind: generated-test\n\n"
+        "```gherkin\n"
+        "Given a widget\n"
+        "When it is used\n"
+        "Then it works\n"
+        "```\n"
+    )
+
+
+def test_scenario_result_keyed_by_capability_not_component(tmp_path):
+    repo_root = tmp_path
 
     _write(
-        repo_root / "specs" / "components" / "alpha" / "component.md",
-        COMPONENT_MD.format(slug="alpha", title="Alpha Component"),
+        repo_root / "specs/components/alpha/component.md",
+        _component_md("comp-alpha", "P-WIDGET"),
     )
-    _write(
-        repo_root / "specs" / "components" / "beta" / "component.md",
-        COMPONENT_MD.format(slug="beta", title="Beta Component"),
-    )
-    _write(repo_root / "gen" / "alpha" / "alpha.py", "# fixture component code\n")
-    _write(repo_root / "gen" / "beta" / "beta.py", "# fixture component code\n")
-    _write(repo_root / "specs" / "product" / "widget.md", CAPABILITY_MD)
+    _write(repo_root / "gen/alpha/alpha.py", "def noop():\n    pass\n")
 
-    call_log = tmp_path / "test_author_calls.log"
+    _write(
+        repo_root / "specs/components/beta/component.md",
+        _component_md("comp-beta", "P-WIDGET"),
+    )
+    _write(repo_root / "gen/beta/beta.py", "def noop():\n    pass\n")
+
+    _write(repo_root / "specs/product/widget.md", _capability_md("P-WIDGET"))
+
+    calls = []
 
     def fake_test_author(bundle):
-        with open(call_log, "a") as f:
-            f.write(str(_get(bundle, "scenario_id", "")) + "\n")
+        calls.append(_get(bundle, "scenario_id"))
         return {
             "model_call_error": None,
             "file": {
                 "path": "verification/capabilities/P-WIDGET/generated-test/test_cs_widget_001.py",
-                "content": "def test_x():\n    assert True\n",
+                "content": "def test_cs_widget_001():\n    assert True\n",
             },
         }
 
@@ -88,21 +79,25 @@ def test_generated_test_scenario_keyed_by_capability_id(tmp_path):
         ["comp-alpha", "comp-beta"], repo_root, test_author=fake_test_author
     )
 
-    assert call_log.exists()
-    assert "CS-WIDGET-001" in call_log.read_text()
+    assert isinstance(report, dict)
+    assert set(report.keys()) == {"P-WIDGET"}
 
-    keys = _keys(report)
-    assert "P-WIDGET" in keys
-    assert "comp-alpha" not in keys
-    assert "comp-beta" not in keys
+    widget = report["P-WIDGET"]
+    assert _get(widget, "overall") == "pass"
 
-    capability_entry = _get(report, "P-WIDGET")
-    assert _get(capability_entry, "overall") == "pass"
-
-    scenarios = _get(capability_entry, "scenarios")
+    scenarios = _get(widget, "scenarios")
     assert len(scenarios) == 1
 
     scenario = scenarios[0]
     assert _get(scenario, "id") == "CS-WIDGET-001"
     assert _get(scenario, "kind") == "generated-test"
     assert _get(scenario, "result") == "pass"
+
+    assert calls == ["CS-WIDGET-001"]
+
+    written = (
+        repo_root
+        / "verification/capabilities/P-WIDGET/generated-test/test_cs_widget_001.py"
+    )
+    assert written.exists()
+    assert "assert True" in written.read_text()

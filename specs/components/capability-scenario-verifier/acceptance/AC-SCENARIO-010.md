@@ -16,6 +16,6 @@ Then author_test was called once with model "m", seed 3, repo_root, and
   "capabilities/P-X", criterion_id "CS-X-001", covers P-X,
   criterion_text the scenario's gherkin, requirement_text containing the
   capability file's text, glossary "GLOSS", dependency_interfaces {},
-  and interface containing "## comp-bar", "BAR_IFACE", "## comp-foo",
+  module_names ["bar", "foo"], and interface containing "## comp-bar", "BAR_IFACE", "## comp-foo",
   and "FOO_IFACE" in that order
 ```

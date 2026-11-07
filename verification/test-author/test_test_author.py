@@ -516,3 +516,24 @@ def test_ac_author_025_prompt_names_the_component_under_tests_module(repo_root, 
     # The prompt may warn that the id-derived name is wrong; it must never
     # offer it as the import.
     assert f"import comp_{module}" not in sent_prompt
+
+
+@pytest.mark.parametrize("as_dict", [False, True])
+def test_ac_author_026_explicit_module_names_replace_the_derived_one(repo_root, as_dict):
+    """D198 -- a capability scenario's component_id names no module, so
+    the caller passes the realizing components' modules."""
+    make = fake_bundle_dict if as_dict else fake_bundle
+    backend = MockBackend([file_block("def test_x(): pass")])
+    author_test(make(component_id="capabilities/P-SLUGS", module_names=["slugify", "url_tools"]),
+                "claude-sonnet-5", repo_root=repo_root, llm_backend=backend)
+    sent_prompt = backend.calls[0][0]
+    assert "import slugify" in sent_prompt
+    assert "import url_tools" in sent_prompt
+    assert "import capabilities" not in sent_prompt
+
+
+def test_ac_author_026_empty_module_names_falls_back_to_the_slug(repo_root):
+    backend = MockBackend([file_block("def test_x(): pass")])
+    author_test(fake_bundle(component_id="comp-semver", module_names=[]), "claude-sonnet-5",
+                repo_root=repo_root, llm_backend=backend)
+    assert "import semver" in backend.calls[0][0]

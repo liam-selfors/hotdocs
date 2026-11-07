@@ -1,10 +1,10 @@
 # R-AUTHOR-010
 
 **R-AUTHOR-010** — The prompt MUST always state this corpus's
-  dependency-resolution convention — how the component under test
-  resolves its OWN dependencies internally, never how the test
-  imports the component under test itself (always a plain
-  `import <module_name>`, no custom loader, `D97`).
+  dependency-resolution convention: how the component under test
+  resolves its OWN dependencies. It MUST also say, in those words, that
+  the component under test itself needs no custom loader: a plain
+  `import <module_name>` (`D97`).
 
   MUST state: no dependency is statically importable; resolution is
   dynamic, at runtime, from

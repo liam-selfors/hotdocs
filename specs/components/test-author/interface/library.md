@@ -7,13 +7,6 @@ author_test(
 ) -> TestAuthoringResult
 ```
 
-Not a pure function, same as `generator`'s `generate()` — this is the
-second component in the corpus whose job requires an external call.
-
-`repo_root` and `llm_backend` (`D57`, a real, pre-existing gap: every
-`AC-AUTHOR-*` criterion already required "an injected mock model," but
-this signature never actually declared the parameter that injects
-one) — `llm_backend`, passed straight through to `llm-endpoint`'s own
-`backend` parameter, is how every one of those criteria's mock model
-is actually wired in, mirroring `generator`'s own `llm_backend`
-exactly, same name, same seam, not a second one.
+Not a pure function: like `generator`'s `generate()`, it makes an
+external call. `llm_backend` is passed straight to `llm-endpoint`'s
+`backend` parameter, the seam every `AC-AUTHOR-*` mock uses (`D57`).

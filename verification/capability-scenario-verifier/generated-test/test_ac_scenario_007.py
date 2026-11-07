@@ -1,11 +1,12 @@
 import json
-import textwrap
 from pathlib import Path
 
-import capability_scenario_verifier
+import capability_scenario_verifier as csv
 
 
-MODEL_NAME = "fake-model"
+def _write(path: Path, content: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(content, encoding="utf-8")
 
 
 def _get(obj, key, default=None):
@@ -14,232 +15,171 @@ def _get(obj, key, default=None):
     return getattr(obj, key, default)
 
 
-def _build_repo(root: Path) -> None:
-    (root / "specs" / "product").mkdir(parents=True)
-    (root / "specs" / "components" / "widget").mkdir(parents=True)
-    (root / "specs" / "components" / "gadget").mkdir(parents=True)
-    (root / "gen" / "widget").mkdir(parents=True)
-    (root / "gen" / "gadget").mkdir(parents=True)
-    (root / "gen" / "test-author").mkdir(parents=True)
-    (root / "gen" / "llm-endpoint").mkdir(parents=True)
+COMPONENT_MD_CACHE_MANAGER = """---
+id: comp-cache-manager
+title: Cache Manager
+status: ratified
+owners: [qa]
+last_ratified_commit: 0000000
+realizes: [P-ZERO-EDIT]
+sealed: false
+---
 
-    capability_md = textwrap.dedent(
-        """\
-        ---
-        id: P-ALPHA
-        title: Alpha Capability
-        status: draft
-        owners: [team-alpha]
-        ---
+A cache manager component that realizes P-ZERO-EDIT.
+"""
 
-        # Alpha Capability
+COMPONENT_MD_OTHER = """---
+id: comp-other
+title: Other
+status: ratified
+owners: [qa]
+last_ratified_commit: 0000000
+realizes: []
+sealed: false
+---
 
-        ### CS-ALPHA-001
+A component that realizes nothing.
+"""
 
-        Covers: P-ALPHA
-        Kind: generated-test
+PRODUCT_MD = """---
+id: P-ZERO-EDIT
+title: Zero Edit
+status: ratified
+owners: [qa]
+last_ratified_commit: 0000000
+---
 
-        ```gherkin
-        Given a widget
-        When it is used
-        Then it works
-        ```
-        """
-    )
-    (root / "specs" / "product" / "alpha.md").write_text(capability_md, encoding="utf-8")
+### CS-ZERO-EDIT-001
 
-    widget_component_md = textwrap.dedent(
-        """\
-        ---
-        id: comp-widget
-        title: Widget
-        status: draft
-        owners: [team-alpha]
-        realizes: [P-ALPHA]
-        sealed: false
-        ---
+Covers: P-ZERO-EDIT
+Kind: generated-test
 
-        # Widget
+```gherkin
+Given a thing
+When nothing changes
+Then it stays the same
+```
+"""
 
-        Purpose: a widget component that realizes P-ALPHA.
-        """
-    )
-    (root / "specs" / "components" / "widget" / "component.md").write_text(
-        widget_component_md, encoding="utf-8"
-    )
-
-    gadget_component_md = textwrap.dedent(
-        """\
-        ---
-        id: comp-gadget
-        title: Gadget
-        status: draft
-        owners: [team-alpha]
-        realizes: []
-        sealed: false
-        ---
-
-        # Gadget
-
-        Purpose: a gadget component that does not realize P-ALPHA.
-        """
-    )
-    (root / "specs" / "components" / "gadget" / "component.md").write_text(
-        gadget_component_md, encoding="utf-8"
-    )
-
-    (root / "gen" / "widget" / "widget.py").write_bytes(b"def widget():\n    return 1\n")
-    (root / "gen" / "gadget" / "gadget.py").write_bytes(b"def gadget():\n    return 2\n")
-
-    fake_test_author = (
-        r"""import json
+TEST_AUTHOR_MODULE_TEMPLATE = '''
 from pathlib import Path
 
+CALLS_LOG = Path(r"{calls_log}")
 
-def author_test(bundle, model, seed=0, repo_root=None, llm_backend=None):
-    log_path = Path(repo_root) / "author_calls.log"
-    with open(log_path, "a", encoding="utf-8") as f:
-        f.write(json.dumps({"criterion_id": bundle["criterion_id"]}) + "\n")
-    criterion_id = bundle["criterion_id"]
-    fname = "test_" + criterion_id.lower().replace("-", "_") + ".py"
-    return {
+
+def author_test(bundle, model, seed=0, *, repo_root=None, llm_backend=None):
+    with open(CALLS_LOG, "a", encoding="utf-8") as f:
+        f.write(bundle["criterion_id"] + "\\n")
+    slug = bundle["criterion_id"].lower().replace("-", "_")
+    return {{
         "model_call_error": None,
-        "file": {
-            "path": "verification/capabilities/P-ALPHA/generated-test/" + fname,
-            "content": "def test_x():\n    assert True\n",
-        },
-    }
+        "file": {{
+            "path": "verification/capabilities/P-ZERO-EDIT/generated-test/test_" + slug + ".py",
+            "content": "def test_x():\\n    assert True\\n",
+        }},
+    }}
+'''
+
+LLM_ENDPOINT_MODULE = """
+def complete(prompt, model, *, backend=None, **params):
+    return {"text": "ok", "model": model, "backend": "fake", "model_call_error": None}
 """
+
+
+def _build_repo(tmp_path: Path) -> Path:
+    repo_root = tmp_path / "repo"
+    calls_log = repo_root / "_test_author_calls.log"
+
+    _write(repo_root / "specs" / "product" / "zero-edit.md", PRODUCT_MD)
+    _write(
+        repo_root / "specs" / "components" / "cache-manager" / "component.md",
+        COMPONENT_MD_CACHE_MANAGER,
     )
-    (root / "gen" / "test-author" / "test_author.py").write_text(fake_test_author, encoding="utf-8")
-
-    fake_llm_endpoint = (
-        r"""def complete(prompt, model, backend=None, **params):
-    return {"text": "ok", "model_call_error": None}
-"""
+    _write(
+        repo_root / "specs" / "components" / "other" / "component.md",
+        COMPONENT_MD_OTHER,
     )
-    (root / "gen" / "llm-endpoint" / "llm_endpoint.py").write_text(
-        fake_llm_endpoint, encoding="utf-8"
+    _write(repo_root / "gen" / "cache-manager" / "cache_manager.py", "def noop():\n    return 1\n")
+    _write(repo_root / "gen" / "other" / "other.py", "def noop():\n    return 2\n")
+    _write(
+        repo_root / "gen" / "test-author" / "test_author.py",
+        TEST_AUTHOR_MODULE_TEMPLATE.format(calls_log=str(calls_log)),
     )
+    _write(repo_root / "gen" / "llm-endpoint" / "llm_endpoint.py", LLM_ENDPOINT_MODULE)
+
+    return repo_root
 
 
-def _run_gates(repo_root: Path, model: str = MODEL_NAME, seed: int = 0):
-    return capability_scenario_verifier.run_capability_gates(
-        "P-ALPHA", repo_root, model=model, seed=seed
-    )
-
-
-def _check(repo_root: Path):
-    return capability_scenario_verifier.check_capability_provenance("P-ALPHA", repo_root)
-
-
-def _read_record(repo_root: Path) -> dict:
-    record_path = repo_root / "verification" / "capabilities" / "P-ALPHA" / ".provenance.json"
-    return json.loads(record_path.read_text(encoding="utf-8"))
-
-
-def _author_call_count(repo_root: Path) -> int:
-    log_path = repo_root / "author_calls.log"
-    if not log_path.exists():
+def _call_count(repo_root: Path) -> int:
+    log = repo_root / "_test_author_calls.log"
+    if not log.exists():
         return 0
-    return len(log_path.read_text(encoding="utf-8").splitlines())
+    return len([line for line in log.read_text(encoding="utf-8").splitlines() if line])
 
 
-def _flip_last_byte(path: Path) -> bytes:
-    original = path.read_bytes()
-    path.write_bytes(original[:-1] + bytes([original[-1] ^ 0xFF]))
-    return original
+def _read_provenance(repo_root: Path) -> dict:
+    path = repo_root / "verification" / "capabilities" / "P-ZERO-EDIT" / ".provenance.json"
+    return json.loads(path.read_text(encoding="utf-8"))
 
 
-def test_realizing_component_code_byte_change_breaks_hit(tmp_path):
-    _build_repo(tmp_path)
+def test_provenance_hash_tracks_realizing_code_and_own_spec_but_not_others(tmp_path):
+    repo_root = _build_repo(tmp_path)
 
-    first = _run_gates(tmp_path)
-    assert _get(first, "hit") is False
+    first_result = csv.run_capability_gates(
+        "P-ZERO-EDIT", repo_root, model="anthropic:claude-sonnet-5", seed=0, llm_backend=None
+    )
+    assert _get(first_result, "hit") is False
 
-    baseline = _check(tmp_path)
-    assert _get(baseline, "hit") is True
-    assert _get(baseline, "capability_scenario_report") is not None
+    baseline_check = csv.check_capability_provenance("P-ZERO-EDIT", repo_root)
+    assert _get(baseline_check, "hit") is True
 
-    widget_path = tmp_path / "gen" / "widget" / "widget.py"
-    original = _flip_last_byte(widget_path)
+    baseline_record = _read_provenance(repo_root)
+    baseline_hash = baseline_record["content_hash"]
+    calls_after_first_run = _call_count(repo_root)
+    assert calls_after_first_run >= 1
 
-    changed = _check(tmp_path)
-    assert _get(changed, "hit") is False
-    assert _get(changed, "capability_scenario_report") is None
+    # 1. One byte changed under a realizing component's code directory, no spec touched.
+    code_file = repo_root / "gen" / "cache-manager" / "cache_manager.py"
+    original_code = code_file.read_text(encoding="utf-8")
+    code_file.write_text(original_code + "#", encoding="utf-8")
 
-    widget_path.write_bytes(original)
-    restored = _check(tmp_path)
-    assert _get(restored, "hit") is True
+    check_after_code_change = csv.check_capability_provenance("P-ZERO-EDIT", repo_root)
+    assert _get(check_after_code_change, "hit") is False
 
+    code_file.write_text(original_code, encoding="utf-8")
+    assert _get(csv.check_capability_provenance("P-ZERO-EDIT", repo_root), "hit") is True
 
-def test_capability_spec_file_change_breaks_hit(tmp_path):
-    _build_repo(tmp_path)
+    # 2. The capability's own specs/product file changes.
+    product_file = repo_root / "specs" / "product" / "zero-edit.md"
+    original_product = product_file.read_text(encoding="utf-8")
+    product_file.write_text(original_product + "\n<!-- edited -->\n", encoding="utf-8")
 
-    first = _run_gates(tmp_path)
-    assert _get(first, "hit") is False
+    check_after_spec_change = csv.check_capability_provenance("P-ZERO-EDIT", repo_root)
+    assert _get(check_after_spec_change, "hit") is False
 
-    baseline = _check(tmp_path)
-    assert _get(baseline, "hit") is True
+    product_file.write_text(original_product, encoding="utf-8")
+    assert _get(csv.check_capability_provenance("P-ZERO-EDIT", repo_root), "hit") is True
 
-    spec_path = tmp_path / "specs" / "product" / "alpha.md"
-    original = spec_path.read_bytes()
-    spec_path.write_bytes(original + b"\n<!-- edited -->\n")
+    # 3a. A file in a non-realizing component changes: no effect.
+    other_file = repo_root / "gen" / "other" / "other.py"
+    other_file.write_text(other_file.read_text(encoding="utf-8") + "#", encoding="utf-8")
+    assert _get(csv.check_capability_provenance("P-ZERO-EDIT", repo_root), "hit") is True
 
-    changed = _check(tmp_path)
-    assert _get(changed, "hit") is False
-    assert _get(changed, "capability_scenario_report") is None
+    # 3b. A __pycache__ file appears in a realizing component's code directory: no effect.
+    pycache_file = repo_root / "gen" / "cache-manager" / "__pycache__" / "cache_manager.cpython-311.pyc"
+    _write(pycache_file, "not real bytecode")
+    assert _get(csv.check_capability_provenance("P-ZERO-EDIT", repo_root), "hit") is True
 
-    spec_path.write_bytes(original)
-    restored = _check(tmp_path)
-    assert _get(restored, "hit") is True
+    # 4. Re-apply the first change and run the gates: scenarios re-run, hash changes.
+    code_file.write_text(original_code + "#", encoding="utf-8")
 
+    second_result = csv.run_capability_gates(
+        "P-ZERO-EDIT", repo_root, model="anthropic:claude-sonnet-5", seed=0, llm_backend=None
+    )
+    assert _get(second_result, "hit") is False
 
-def test_unrelated_component_and_pycache_changes_keep_hit(tmp_path):
-    _build_repo(tmp_path)
+    calls_after_second_run = _call_count(repo_root)
+    assert calls_after_second_run > calls_after_first_run
 
-    first = _run_gates(tmp_path)
-    assert _get(first, "hit") is False
-
-    baseline = _check(tmp_path)
-    assert _get(baseline, "hit") is True
-
-    gadget_path = tmp_path / "gen" / "gadget" / "gadget.py"
-    _flip_last_byte(gadget_path)
-
-    after_unrelated = _check(tmp_path)
-    assert _get(after_unrelated, "hit") is True
-    assert _get(after_unrelated, "capability_scenario_report") is not None
-
-    pycache_dir = tmp_path / "gen" / "widget" / "__pycache__"
-    pycache_dir.mkdir()
-    (pycache_dir / "widget.cpython-311.pyc").write_bytes(b"\x00\x01\x02binary-garbage")
-
-    after_pycache = _check(tmp_path)
-    assert _get(after_pycache, "hit") is True
-    assert _get(after_pycache, "capability_scenario_report") is not None
-
-
-def test_run_capability_gates_rehashes_after_code_change(tmp_path):
-    _build_repo(tmp_path)
-
-    first = _run_gates(tmp_path)
-    assert _get(first, "hit") is False
-    calls_after_first = _author_call_count(tmp_path)
-    assert calls_after_first >= 1
-
-    record_before = _read_record(tmp_path)
-    content_hash_before = record_before["content_hash"]
-
-    widget_path = tmp_path / "gen" / "widget" / "widget.py"
-    _flip_last_byte(widget_path)
-
-    second = _run_gates(tmp_path)
-    assert _get(second, "hit") is False
-
-    calls_after_second = _author_call_count(tmp_path)
-    assert calls_after_second > calls_after_first
-
-    record_after = _read_record(tmp_path)
-    content_hash_after = record_after["content_hash"]
-    assert content_hash_after != content_hash_before
+    second_record = _read_provenance(repo_root)
+    assert second_record["content_hash"] != baseline_hash
