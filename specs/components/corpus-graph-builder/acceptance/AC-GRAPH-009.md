@@ -4,12 +4,10 @@ Covers: R-GRAPH-009
 Kind: generated-test
 
 ```gherkin
-Given comp-foo has a provenance manifest at
-  verification/comp-foo/.provenance.json with license_scan.flagged: true,
-  and no other change to comp-foo's spec bundle
-When corpus-graph-builder runs
-Then comp-foo's node in verification/corpus-graph.json carries that flag
-  — read via the component_provenance view directly over the manifest
-  already written by provenance-writer, with no separate call into
-  license-scanner's own output
+Given comp-a with verification/a/.provenance.json holding
+  {"license_scan": {"blocked": true, "findings": ["GPL-3.0 in x.c"]},
+  "verification_report": {"overall": "pass"}}, and no gen/license-scanner/
+When build_corpus_graph runs
+Then comp-a's provenance["license_scan"] is exactly {"blocked": true,
+  "findings": ["GPL-3.0 in x.c"]}
 ```

@@ -91,10 +91,6 @@ them to the next `generate`.
   `cache-manager`, `spec-linter`, `graph-query-engine`) are hand-written
   and tested, not generated from their specs; the rest are generated and
   verified like yours.
-- `hotdocs corpus-graph build` does not work yet in a project with a
-  generated component, so neither do `hotdocs track ui build` and
-  `hotdocs docs-site build`, which read its output. `lint`, `generate`,
-  `verify` and `track feedback` are unaffected.
 - `hotdocs assist` and `hotdocs review-packet build` do not yet find the
   tool's components from a project; they work only inside the tool's own
   checkout until they are regenerated.

@@ -28,9 +28,11 @@ single source both read from, never two independently-computed copies.
 **In scope:** building the node/edge graph (products, components, vars);
 attaching per-node status (verification, provenance, size-vs-caps,
 sealed/override); computing orphan-capability, orphan-component, and
-orphan-var rates as aggregate fields.
+orphan-var rates as aggregate fields; the `hotdocs corpus-graph build`
+command.
 
-**Out of scope:** rendering anything visual (`docs-site-renderer`'s job);
+**Out of scope:** deciding when to rebuild (CI runs the command on
+every merge to `main`); rendering anything visual (`docs-site-renderer`'s job);
 computing verification or provenance itself (consumes what
 `verifier-orchestrator`/`provenance-writer` already produced).
 
@@ -54,8 +56,8 @@ See `interface/data/`.
 
 See `acceptance/`.
 
-All nine criteria are `kind: compiled` — graph-walking and aggregation
-over already-computed data; nothing here needs a model or judgment.
+All ten are generated tests over small synthetic corpora, run against
+the real `graph-query-engine`.
 
 ## Non-functional constraints
 
@@ -75,3 +77,7 @@ None.
   declared — same drift `D13` found and fixed for `spec-linter`). First
   real `gen/corpus-graph-builder/` implementation, produced by a real
   generation step rather than hand-written.
+- `D200`: acceptance criteria made concrete; nodes and provenance read
+  as the manifest's own JSON; `graph-query-engine` loaded by path
+  (`R-GRAPH-010`, `D199`); `R-GRAPH-007` now the CLI, the CI cadence
+  moved to scope.

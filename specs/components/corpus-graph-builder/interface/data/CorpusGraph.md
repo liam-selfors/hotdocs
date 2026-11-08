@@ -6,8 +6,8 @@
     "P-ZERO-EDIT": { "type": "capability" },
     "comp-foo": {
       "type": "component",
-      "verification": { "...": "a VerificationReport" },
-      "provenance": { "...": "a provenance manifest" },
+      "verification": { "...": "the manifest's verification_report" },
+      "provenance": { "...": "the manifest's other top-level fields" },
       "size_status": "ok",
       "sealed": false,
       "pinned_overrides": []
@@ -26,3 +26,24 @@
   }
 }
 ```
+
+`nodes` is keyed by id and holds only components, capabilities and
+vars (never requirements, criteria or decisions). `edges` holds only
+the three kinds shown, sorted by `from`, then `to`, then `kind`.
+
+A component node's `verification` and `provenance` come from
+`verification/<slug>/.provenance.json` read with `json.load`, so every
+value is the file's own JSON (`generated_at` stays the string written
+there): `verification` is its `verification_report`, `provenance` every
+other top-level key. With no manifest both are `null`. `size_status` is
+`"ok"` when the component's `component_size` word count is at most
+`4000`, `"over"` above it, `"unknown"` with no row. `sealed` is the
+frontmatter's `sealed` (absent is `false`). `pinned_overrides` is the
+JSON list in `gen/<slug>/.overrides.json`, else `[]` (no file, or not a
+list).
+
+Each rate is a count divided by a total, `0.0` when the total is `0`:
+capabilities with no incoming `realizes` edge over all capabilities;
+vars with no incoming `uses_var` edge over all vars; components with
+neither an incoming `depends_on` edge nor an outgoing `realizes` edge
+over all components.

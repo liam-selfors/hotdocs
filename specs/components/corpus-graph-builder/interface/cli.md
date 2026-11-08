@@ -4,10 +4,15 @@
 hotdocs corpus-graph build [--repo-root=<dir>]
 ```
 
+`main` receives the tokens from `build` on: `main(["build",
+"--repo-root=/x"])`. `--repo-root <dir>` is accepted too; the default is
+the current directory. On success it writes the file and prints its
+path.
+
 **Exit codes:**
 
 | Code | Meaning |
 | --- | --- |
 | `0` | `verification/corpus-graph.json` written. |
-| `1` | A required upstream result was missing. |
-| `2` | Usage error. |
+| `1` | Building failed, e.g. a `.provenance.json` that is not valid JSON. |
+| `2` | Usage error: no `build`, another word, or an unknown argument. |

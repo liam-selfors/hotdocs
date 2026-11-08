@@ -33,7 +33,72 @@
     {
       "from": "comp-capability-scenario-verifier",
       "kind": "depends_on",
+      "to": "comp-llm-endpoint"
+    },
+    {
+      "from": "comp-capability-scenario-verifier",
+      "kind": "depends_on",
       "to": "comp-test-author"
+    },
+    {
+      "from": "comp-component-gate-runner",
+      "kind": "realizes",
+      "to": "P-COMPLIANCE-GATE"
+    },
+    {
+      "from": "comp-component-gate-runner",
+      "kind": "realizes",
+      "to": "P-ZERO-EDIT"
+    },
+    {
+      "from": "comp-component-gate-runner",
+      "kind": "depends_on",
+      "to": "comp-generator"
+    },
+    {
+      "from": "comp-component-gate-runner",
+      "kind": "depends_on",
+      "to": "comp-license-scanner"
+    },
+    {
+      "from": "comp-component-gate-runner",
+      "kind": "depends_on",
+      "to": "comp-llm-endpoint"
+    },
+    {
+      "from": "comp-component-gate-runner",
+      "kind": "depends_on",
+      "to": "comp-provenance-checker"
+    },
+    {
+      "from": "comp-component-gate-runner",
+      "kind": "depends_on",
+      "to": "comp-provenance-tracker"
+    },
+    {
+      "from": "comp-component-gate-runner",
+      "kind": "depends_on",
+      "to": "comp-provenance-writer"
+    },
+    {
+      "from": "comp-component-gate-runner",
+      "kind": "depends_on",
+      "to": "comp-secret-scanner"
+    },
+    {
+      "from": "comp-component-gate-runner",
+      "kind": "depends_on",
+      "to": "comp-spec-bundle-assembler"
+    },
+    {
+      "from": "comp-component-gate-runner",
+      "kind": "depends_on",
+      "to": "comp-test-author"
+    },
+    {
+      "from": "comp-component-gate-runner",
+      "kind": "depends_on",
+      "to": "comp-verifier-orchestrator"
     },
     {
       "from": "comp-corpus-graph-builder",
@@ -71,6 +136,16 @@
       "to": "P-ZERO-EDIT"
     },
     {
+      "from": "comp-decision-drift-detector",
+      "kind": "realizes",
+      "to": "P-DECISION-INTEGRITY"
+    },
+    {
+      "from": "comp-decision-drift-detector",
+      "kind": "depends_on",
+      "to": "comp-graph-query-engine"
+    },
+    {
       "from": "comp-docs-site-renderer",
       "kind": "realizes",
       "to": "P-AMBIGUITY-GATE"
@@ -106,6 +181,26 @@
       "to": "P-ZERO-EDIT"
     },
     {
+      "from": "comp-hotdocs-cli",
+      "kind": "realizes",
+      "to": "P-ZERO-EDIT"
+    },
+    {
+      "from": "comp-hotdocs-cli",
+      "kind": "depends_on",
+      "to": "comp-llm-endpoint"
+    },
+    {
+      "from": "comp-hotdocs-init",
+      "kind": "realizes",
+      "to": "P-ZERO-EDIT"
+    },
+    {
+      "from": "comp-hotdocs-init",
+      "kind": "depends_on",
+      "to": "comp-llm-endpoint"
+    },
+    {
       "from": "comp-impact-analyzer",
       "kind": "realizes",
       "to": "P-ZERO-EDIT"
@@ -124,6 +219,11 @@
       "from": "comp-license-scanner",
       "kind": "uses_var",
       "to": "VAR-COMPLIANCE-WEBHOOK-URL"
+    },
+    {
+      "from": "comp-license-scanner",
+      "kind": "uses_var",
+      "to": "VAR-LICENSE-CORPUS-PATH"
     },
     {
       "from": "comp-license-scanner",
@@ -146,119 +246,19 @@
       "to": "VAR-ANTHROPIC-API-KEY"
     },
     {
-      "from": "comp-merge-orchestrator",
-      "kind": "realizes",
-      "to": "P-AMBIGUITY-GATE"
+      "from": "comp-llm-endpoint",
+      "kind": "uses_var",
+      "to": "VAR-GEMINI-API-KEY"
     },
     {
-      "from": "comp-merge-orchestrator",
-      "kind": "realizes",
-      "to": "P-COMPLIANCE-GATE"
+      "from": "comp-llm-endpoint",
+      "kind": "uses_var",
+      "to": "VAR-HOTDOCS-CONFIG"
     },
     {
-      "from": "comp-merge-orchestrator",
-      "kind": "realizes",
-      "to": "P-MERGE-VISIBILITY"
-    },
-    {
-      "from": "comp-merge-orchestrator",
-      "kind": "realizes",
-      "to": "P-ZERO-EDIT"
-    },
-    {
-      "from": "comp-merge-orchestrator",
-      "kind": "depends_on",
-      "to": "comp-capability-scenario-verifier"
-    },
-    {
-      "from": "comp-merge-orchestrator",
-      "kind": "depends_on",
-      "to": "comp-corpus-graph-builder"
-    },
-    {
-      "from": "comp-merge-orchestrator",
-      "kind": "depends_on",
-      "to": "comp-generator"
-    },
-    {
-      "from": "comp-merge-orchestrator",
-      "kind": "depends_on",
-      "to": "comp-impact-analyzer"
-    },
-    {
-      "from": "comp-merge-orchestrator",
-      "kind": "depends_on",
-      "to": "comp-license-scanner"
-    },
-    {
-      "from": "comp-merge-orchestrator",
-      "kind": "depends_on",
-      "to": "comp-llm-endpoint"
-    },
-    {
-      "from": "comp-merge-orchestrator",
-      "kind": "depends_on",
-      "to": "comp-merge-tracker"
-    },
-    {
-      "from": "comp-merge-orchestrator",
-      "kind": "depends_on",
-      "to": "comp-provenance-checker"
-    },
-    {
-      "from": "comp-merge-orchestrator",
-      "kind": "depends_on",
-      "to": "comp-provenance-writer"
-    },
-    {
-      "from": "comp-merge-orchestrator",
-      "kind": "depends_on",
-      "to": "comp-review-packet-builder"
-    },
-    {
-      "from": "comp-merge-orchestrator",
-      "kind": "depends_on",
-      "to": "comp-secret-scanner"
-    },
-    {
-      "from": "comp-merge-orchestrator",
-      "kind": "depends_on",
-      "to": "comp-spec-bundle-assembler"
-    },
-    {
-      "from": "comp-merge-orchestrator",
-      "kind": "depends_on",
-      "to": "comp-spec-linter"
-    },
-    {
-      "from": "comp-merge-orchestrator",
-      "kind": "depends_on",
-      "to": "comp-test-author"
-    },
-    {
-      "from": "comp-merge-orchestrator",
-      "kind": "depends_on",
-      "to": "comp-verifier-orchestrator"
-    },
-    {
-      "from": "comp-merge-tracker",
-      "kind": "realizes",
-      "to": "P-MERGE-VISIBILITY"
-    },
-    {
-      "from": "comp-merge-tracker",
-      "kind": "depends_on",
-      "to": "comp-provenance-writer"
-    },
-    {
-      "from": "comp-merge-tracker-ui",
-      "kind": "realizes",
-      "to": "P-MERGE-VISIBILITY"
-    },
-    {
-      "from": "comp-merge-tracker-ui",
-      "kind": "depends_on",
-      "to": "comp-merge-tracker"
+      "from": "comp-llm-endpoint",
+      "kind": "uses_var",
+      "to": "VAR-OPENAI-API-KEY"
     },
     {
       "from": "comp-provenance-checker",
@@ -269,6 +269,76 @@
       "from": "comp-provenance-checker",
       "kind": "uses_var",
       "to": "VAR-TRUST-JUDGE-PROVENANCE"
+    },
+    {
+      "from": "comp-provenance-checker",
+      "kind": "depends_on",
+      "to": "comp-criterion-compiler"
+    },
+    {
+      "from": "comp-provenance-checker",
+      "kind": "depends_on",
+      "to": "comp-license-scanner"
+    },
+    {
+      "from": "comp-provenance-checker",
+      "kind": "depends_on",
+      "to": "comp-provenance-writer"
+    },
+    {
+      "from": "comp-provenance-checker",
+      "kind": "depends_on",
+      "to": "comp-secret-scanner"
+    },
+    {
+      "from": "comp-provenance-checker",
+      "kind": "depends_on",
+      "to": "comp-spec-bundle-assembler"
+    },
+    {
+      "from": "comp-provenance-checker",
+      "kind": "depends_on",
+      "to": "comp-test-author"
+    },
+    {
+      "from": "comp-provenance-checker",
+      "kind": "depends_on",
+      "to": "comp-verifier-orchestrator"
+    },
+    {
+      "from": "comp-provenance-tracker",
+      "kind": "realizes",
+      "to": "P-MERGE-VISIBILITY"
+    },
+    {
+      "from": "comp-provenance-tracker",
+      "kind": "depends_on",
+      "to": "comp-capability-scenario-verifier"
+    },
+    {
+      "from": "comp-provenance-tracker",
+      "kind": "depends_on",
+      "to": "comp-impact-analyzer"
+    },
+    {
+      "from": "comp-provenance-tracker",
+      "kind": "depends_on",
+      "to": "comp-provenance-checker"
+    },
+    {
+      "from": "comp-provenance-tracker-ui",
+      "kind": "realizes",
+      "to": "P-MERGE-VISIBILITY"
+    },
+    {
+      "from": "comp-provenance-tracker-ui",
+      "kind": "depends_on",
+      "to": "comp-corpus-graph-builder"
+    },
+    {
+      "from": "comp-provenance-tracker-ui",
+      "kind": "depends_on",
+      "to": "comp-provenance-tracker"
     },
     {
       "from": "comp-provenance-writer",
@@ -318,7 +388,7 @@
     {
       "from": "comp-review-packet-builder",
       "kind": "depends_on",
-      "to": "comp-provenance-writer"
+      "to": "comp-provenance-tracker"
     },
     {
       "from": "comp-secret-scanner",
@@ -438,6 +508,11 @@
     {
       "from": "comp-verifier-orchestrator",
       "kind": "depends_on",
+      "to": "comp-spec-bundle-assembler"
+    },
+    {
+      "from": "comp-verifier-orchestrator",
+      "kind": "depends_on",
       "to": "comp-test-author"
     }
   ],
@@ -446,6 +521,9 @@
       "type": "capability"
     },
     "P-COMPLIANCE-GATE": {
+      "type": "capability"
+    },
+    "P-DECISION-INTEGRITY": {
       "type": "capability"
     },
     "P-MERGE-VISIBILITY": {
@@ -463,12 +541,24 @@
     "VAR-COMPLIANCE-WEBHOOK-URL": {
       "type": "var"
     },
+    "VAR-GEMINI-API-KEY": {
+      "type": "var"
+    },
+    "VAR-HOTDOCS-CONFIG": {
+      "type": "var"
+    },
+    "VAR-LICENSE-CORPUS-PATH": {
+      "type": "var"
+    },
+    "VAR-OPENAI-API-KEY": {
+      "type": "var"
+    },
     "VAR-TRUST-JUDGE-PROVENANCE": {
       "type": "var"
     },
     "comp-cache-manager": {
       "pinned_overrides": [],
-      "provenance": {},
+      "provenance": null,
       "sealed": false,
       "size_status": "ok",
       "type": "component",
@@ -476,7 +566,15 @@
     },
     "comp-capability-scenario-verifier": {
       "pinned_overrides": [],
-      "provenance": {},
+      "provenance": null,
+      "sealed": false,
+      "size_status": "ok",
+      "type": "component",
+      "verification": null
+    },
+    "comp-component-gate-runner": {
+      "pinned_overrides": [],
+      "provenance": null,
       "sealed": false,
       "size_status": "ok",
       "type": "component",
@@ -484,7 +582,7 @@
     },
     "comp-corpus-graph-builder": {
       "pinned_overrides": [],
-      "provenance": {},
+      "provenance": null,
       "sealed": false,
       "size_status": "ok",
       "type": "component",
@@ -492,15 +590,23 @@
     },
     "comp-criterion-compiler": {
       "pinned_overrides": [],
-      "provenance": {},
+      "provenance": null,
       "sealed": true,
+      "size_status": "ok",
+      "type": "component",
+      "verification": null
+    },
+    "comp-decision-drift-detector": {
+      "pinned_overrides": [],
+      "provenance": null,
+      "sealed": false,
       "size_status": "ok",
       "type": "component",
       "verification": null
     },
     "comp-docs-site-renderer": {
       "pinned_overrides": [],
-      "provenance": {},
+      "provenance": null,
       "sealed": false,
       "size_status": "ok",
       "type": "component",
@@ -508,7 +614,7 @@
     },
     "comp-generator": {
       "pinned_overrides": [],
-      "provenance": {},
+      "provenance": null,
       "sealed": false,
       "size_status": "ok",
       "type": "component",
@@ -516,7 +622,23 @@
     },
     "comp-graph-query-engine": {
       "pinned_overrides": [],
-      "provenance": {},
+      "provenance": null,
+      "sealed": false,
+      "size_status": "ok",
+      "type": "component",
+      "verification": null
+    },
+    "comp-hotdocs-cli": {
+      "pinned_overrides": [],
+      "provenance": null,
+      "sealed": false,
+      "size_status": "ok",
+      "type": "component",
+      "verification": null
+    },
+    "comp-hotdocs-init": {
+      "pinned_overrides": [],
+      "provenance": null,
       "sealed": false,
       "size_status": "ok",
       "type": "component",
@@ -524,7 +646,7 @@
     },
     "comp-impact-analyzer": {
       "pinned_overrides": [],
-      "provenance": {},
+      "provenance": null,
       "sealed": false,
       "size_status": "ok",
       "type": "component",
@@ -532,7 +654,7 @@
     },
     "comp-license-scanner": {
       "pinned_overrides": [],
-      "provenance": {},
+      "provenance": null,
       "sealed": false,
       "size_status": "ok",
       "type": "component",
@@ -540,31 +662,7 @@
     },
     "comp-llm-endpoint": {
       "pinned_overrides": [],
-      "provenance": {},
-      "sealed": false,
-      "size_status": "ok",
-      "type": "component",
-      "verification": null
-    },
-    "comp-merge-orchestrator": {
-      "pinned_overrides": [],
-      "provenance": {},
-      "sealed": false,
-      "size_status": "ok",
-      "type": "component",
-      "verification": null
-    },
-    "comp-merge-tracker": {
-      "pinned_overrides": [],
-      "provenance": {},
-      "sealed": false,
-      "size_status": "ok",
-      "type": "component",
-      "verification": null
-    },
-    "comp-merge-tracker-ui": {
-      "pinned_overrides": [],
-      "provenance": {},
+      "provenance": null,
       "sealed": false,
       "size_status": "ok",
       "type": "component",
@@ -572,7 +670,23 @@
     },
     "comp-provenance-checker": {
       "pinned_overrides": [],
-      "provenance": {},
+      "provenance": null,
+      "sealed": false,
+      "size_status": "ok",
+      "type": "component",
+      "verification": null
+    },
+    "comp-provenance-tracker": {
+      "pinned_overrides": [],
+      "provenance": null,
+      "sealed": false,
+      "size_status": "ok",
+      "type": "component",
+      "verification": null
+    },
+    "comp-provenance-tracker-ui": {
+      "pinned_overrides": [],
+      "provenance": null,
       "sealed": false,
       "size_status": "ok",
       "type": "component",
@@ -580,7 +694,7 @@
     },
     "comp-provenance-writer": {
       "pinned_overrides": [],
-      "provenance": {},
+      "provenance": null,
       "sealed": false,
       "size_status": "ok",
       "type": "component",
@@ -588,7 +702,7 @@
     },
     "comp-review-packet-builder": {
       "pinned_overrides": [],
-      "provenance": {},
+      "provenance": null,
       "sealed": false,
       "size_status": "ok",
       "type": "component",
@@ -596,7 +710,7 @@
     },
     "comp-secret-scanner": {
       "pinned_overrides": [],
-      "provenance": {},
+      "provenance": null,
       "sealed": false,
       "size_status": "ok",
       "type": "component",
@@ -604,7 +718,7 @@
     },
     "comp-spec-bundle-assembler": {
       "pinned_overrides": [],
-      "provenance": {},
+      "provenance": null,
       "sealed": false,
       "size_status": "ok",
       "type": "component",
@@ -612,7 +726,7 @@
     },
     "comp-spec-completeness-assistant": {
       "pinned_overrides": [],
-      "provenance": {},
+      "provenance": null,
       "sealed": false,
       "size_status": "ok",
       "type": "component",
@@ -620,7 +734,7 @@
     },
     "comp-spec-linter": {
       "pinned_overrides": [],
-      "provenance": {},
+      "provenance": null,
       "sealed": false,
       "size_status": "ok",
       "type": "component",
@@ -628,7 +742,7 @@
     },
     "comp-test-author": {
       "pinned_overrides": [],
-      "provenance": {},
+      "provenance": null,
       "sealed": false,
       "size_status": "ok",
       "type": "component",
@@ -636,7 +750,7 @@
     },
     "comp-verifier-orchestrator": {
       "pinned_overrides": [],
-      "provenance": {},
+      "provenance": null,
       "sealed": false,
       "size_status": "ok",
       "type": "component",
