@@ -1,7 +1,8 @@
 # R-ASSIST-009
 
 **R-ASSIST-009** — `main(argv)` MUST implement `interface/cli.md`
-  exactly, with `argv` beginning `["assist", ...]`: `--changed`
+  exactly, with `argv` the tokens after `assist` (`hotdocs-cli`
+  strips the verb): `--changed`
   (repeatable or comma-separated, required), `--repo-root` (default the
   current directory), `--format=json|text` (default `text`), and
   `--model` (omitted means degraded mode; given, its value is passed to

@@ -13,8 +13,8 @@ no credential of its own. `llm_backend` is passed straight through to
 `generator` and `llm-endpoint` unchanged, the same injection point
 every other model-calling component in this corpus exposes (`D156`).
 
-Each dependency is loaded from `<repo_root>/gen/<slug>/`, or from the
-tool root's when absent (`D199`), and called in
+Each dependency is one flat module file, `<repo_root>/gen/<slug>/<module>.py`,
+or the tool root's when that directory is absent (`R-ASSIST-011`), called in
 this order, stopping early per `R-ASSIST-001`:
 
 1. `spec-linter`'s `lint(paths, repo_root)`

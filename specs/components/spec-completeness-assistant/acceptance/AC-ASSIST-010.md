@@ -29,6 +29,12 @@ Given the completeness response is {"completeness_score": 0.6,
 When assist runs with model="fake-model"
 Then completeness_score and completeness_rationale are both null
 
+Given the completeness response is {"completeness_rationale": "x"}, or
+  {"completeness_score": true, "completeness_rationale": "x"}, or the
+  empty string
+When assist runs with model="fake-model"
+Then completeness_score and completeness_rationale are both null
+
 Given the completeness response's completeness_score is 1.7
 When assist runs with model="fake-model"
 Then completeness_score is 1.0

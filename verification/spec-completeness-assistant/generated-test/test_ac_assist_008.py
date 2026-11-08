@@ -1,193 +1,118 @@
 import hashlib
-import json
 import os
+import tempfile
 from pathlib import Path
 
 import spec_completeness_assistant
 
 
-_MISSING = object()
-
-
-def _get(obj, key, default=None):
+def _get_field(obj, name):
     if isinstance(obj, dict):
-        return obj.get(key, default)
-    return getattr(obj, key, default)
+        return obj.get(name)
+    return getattr(obj, name, None)
 
 
-def _snapshot(root: Path):
+def _has_field(obj, name):
+    if isinstance(obj, dict):
+        return name in obj
+    return hasattr(obj, name)
+
+
+def _write_fake_dependencies(repo_root: Path):
+    linter_dir = repo_root / "gen" / "spec-linter"
+    linter_dir.mkdir(parents=True, exist_ok=True)
+    (linter_dir / "spec_linter.py").write_text(
+        "def lint(paths, repo_root, strict=False, judge=None):\n"
+        "    return {\n"
+        "        'findings': [],\n"
+        "        'summary': {'hard_failures': 0, 'warnings': 0, 'skipped': 0},\n"
+        "    }\n"
+    )
+
+    impact_dir = repo_root / "gen" / "impact-analyzer"
+    impact_dir.mkdir(parents=True, exist_ok=True)
+    (impact_dir / "impact_analyzer.py").write_text(
+        "def compute_blast_radius(changed_ids, repo_root):\n"
+        "    return {\n"
+        "        'impacted': [\n"
+        "            {'component_id': 'comp-foo', 'reason': 'direct', 'via': None},\n"
+        "        ],\n"
+        "        'precondition_error': None,\n"
+        "    }\n"
+    )
+
+    assembler_dir = repo_root / "gen" / "spec-bundle-assembler"
+    assembler_dir.mkdir(parents=True, exist_ok=True)
+    (assembler_dir / "spec_bundle_assembler.py").write_text(
+        "def assemble(component_id, repo_root, mode='cold'):\n"
+        "    return {\n"
+        "        'component_id': component_id,\n"
+        "        'spec_bundle_hash': 'sha256:fake',\n"
+        "        'spec': 'fake spec text',\n"
+        "        'interface': 'fake interface text',\n"
+        "        'constraints': 'fake constraints text',\n"
+        "        'dependency_interfaces': {},\n"
+        "        'dependency_context': {},\n"
+        "        'dependency_usage': {},\n"
+        "        'vars': {},\n"
+        "        'glossary': 'fake glossary text',\n"
+        "        'hint_code': {'spec_completeness_assistant.py': '# fake hint code'},\n"
+        "    }\n"
+    )
+
+
+def _snapshot(repo_root: Path):
     snap = {}
-    for dirpath, dirnames, filenames in os.walk(root):
-        dirnames[:] = [d for d in dirnames if d != "__pycache__"]
-        for fname in filenames:
-            fpath = Path(dirpath) / fname
-            rel = str(fpath.relative_to(root))
-            snap[rel] = hashlib.sha256(fpath.read_bytes()).hexdigest()
+    for root, dirs, files in os.walk(repo_root):
+        dirs[:] = [d for d in dirs if d != "__pycache__"]
+        for fname in files:
+            full = Path(root) / fname
+            rel = str(full.relative_to(repo_root))
+            snap[rel] = hashlib.sha256(full.read_bytes()).hexdigest()
     return snap
 
 
-FAKE_SPEC_LINTER_TEMPLATE = """
-import json
+def test_ac_assist_008_report_fields_and_no_filesystem_mutation():
+    with tempfile.TemporaryDirectory() as tmp:
+        repo_root = Path(tmp)
+        _write_fake_dependencies(repo_root)
 
-LOG_FILE = __LOG_FILE__
+        before_snapshot = _snapshot(repo_root)
 
+        report = spec_completeness_assistant.assist(["R-FOO-003"], repo_root)
 
-def _record(call):
-    with open(LOG_FILE, "a") as f:
-        f.write(json.dumps(call) + "\\n")
+        after_snapshot = _snapshot(repo_root)
 
-
-def lint(paths, repo_root, strict=False, judge=None):
-    _record({"module": "spec-linter", "repo_root": str(repo_root)})
-    return {
-        "findings": [],
-        "summary": {"hard_failures": 0, "warnings": 0, "skipped": 0},
-    }
-"""
-
-
-FAKE_IMPACT_ANALYZER_TEMPLATE = """
-import json
-
-LOG_FILE = __LOG_FILE__
-
-
-def _record(call):
-    with open(LOG_FILE, "a") as f:
-        f.write(json.dumps(call) + "\\n")
-
-
-def compute_blast_radius(changed_ids, repo_root):
-    _record({
-        "module": "impact-analyzer",
-        "changed_ids": list(changed_ids),
-        "repo_root": str(repo_root),
-    })
-    return {
-        "impacted": [
-            {"component_id": "comp-foo", "reason": "direct", "via": None}
-        ],
-        "precondition_error": None,
-    }
-"""
-
-
-FAKE_SPEC_BUNDLE_ASSEMBLER_TEMPLATE = """
-import json
-
-LOG_FILE = __LOG_FILE__
-
-
-def _record(call):
-    with open(LOG_FILE, "a") as f:
-        f.write(json.dumps(call) + "\\n")
-
-
-def assemble(component_id, repo_root, mode="cold"):
-    _record({
-        "module": "spec-bundle-assembler",
-        "component_id": component_id,
-        "mode": mode,
-        "repo_root": str(repo_root),
-    })
-    hint_code = None
-    if mode == "hint":
-        hint_code = {"spec_bundle_assembler.py": "# fake hint code"}
-    return {
-        "component_id": component_id,
-        "spec_bundle_hash": "sha256:deadbeefdeadbeef",
-        "spec": "fake spec body for " + component_id,
-        "interface": "fake interface body",
-        "constraints": "fake constraints body",
-        "dependency_interfaces": {},
-        "dependency_context": {},
-        "dependency_usage": {},
-        "vars": {},
-        "glossary": "fake glossary body",
-        "hint_code": hint_code,
-    }
-"""
-
-
-def _write_fake_dependency(repo_root: Path, slug: str, module_basename: str, template: str, log_file: Path):
-    module_dir = repo_root / "gen" / slug
-    module_dir.mkdir(parents=True, exist_ok=True)
-    source = template.replace("__LOG_FILE__", repr(str(log_file)))
-    (module_dir / (module_basename + ".py")).write_text(source)
-
-
-def test_assist_exposes_decision_fields_and_leaves_repo_root_unchanged(tmp_path):
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-
-    log_dir = tmp_path / "logs"
-    log_dir.mkdir()
-    log_file = log_dir / "invocations.log"
-
-    _write_fake_dependency(
-        repo_root, "spec-linter", "spec_linter", FAKE_SPEC_LINTER_TEMPLATE, log_file
-    )
-    _write_fake_dependency(
-        repo_root,
-        "impact-analyzer",
-        "impact_analyzer",
-        FAKE_IMPACT_ANALYZER_TEMPLATE,
-        log_file,
-    )
-    _write_fake_dependency(
-        repo_root,
-        "spec-bundle-assembler",
-        "spec_bundle_assembler",
-        FAKE_SPEC_BUNDLE_ASSEMBLER_TEMPLATE,
-        log_file,
-    )
-
-    snapshot_before = _snapshot(repo_root)
-
-    report = spec_completeness_assistant.assist(["R-FOO-003"], repo_root)
-
-    snapshot_after = _snapshot(repo_root)
-    assert snapshot_after == snapshot_before, (
-        "repo_root's files must be unchanged (ignoring __pycache__) after assist() runs"
-    )
-
-    for field in (
-        "lint_findings",
-        "predicted_blast_radius",
-        "hint_previews",
-        "completeness_score",
-        "completeness_rationale",
-        "redundancy_flags",
-        "degraded",
-    ):
-        assert _get(report, field, _MISSING) is not _MISSING, (
-            f"CompletenessReport is missing field {field!r} needed by a calling "
-            "tool to record an accept/override decision"
+        assert after_snapshot == before_snapshot, (
+            "repo_root's files must be unchanged after assist() runs "
+            "(ignoring __pycache__)"
         )
 
-    assert _get(report, "degraded") == True  # noqa: E712
-    assert _get(report, "completeness_score") is None
-    assert _get(report, "completeness_rationale") in (None, "")
-    assert _get(report, "redundancy_flags") in (None, [])
-    assert _get(report, "lint_findings") == []
-    assert _get(report, "predicted_blast_radius") == ["comp-foo"]
+        for field_name in (
+            "lint_findings",
+            "predicted_blast_radius",
+            "hint_previews",
+            "completeness_score",
+            "completeness_rationale",
+            "redundancy_flags",
+            "degraded",
+        ):
+            assert _has_field(report, field_name), (
+                f"CompletenessReport must expose '{field_name}' "
+                "(never silently omitted)"
+            )
 
-    hint_previews = _get(report, "hint_previews")
-    assert hint_previews is not None
-    assert _get(hint_previews, "comp-foo", _MISSING) is not _MISSING
-    assert _get(hint_previews, "comp-foo")
+        assert _get_field(report, "lint_findings") == []
 
-    if log_file.exists():
-        calls = [json.loads(line) for line in log_file.read_text().splitlines() if line.strip()]
-    else:
-        calls = []
+        predicted_blast_radius = _get_field(report, "predicted_blast_radius")
+        assert list(predicted_blast_radius) == ["comp-foo"]
 
-    modules_called = {call["module"] for call in calls}
-    assert "spec-linter" in modules_called
-    assert "impact-analyzer" in modules_called
-    assert "spec-bundle-assembler" in modules_called
+        hint_previews = _get_field(report, "hint_previews")
+        for component_id in predicted_blast_radius:
+            assert component_id in hint_previews
+            assert hint_previews[component_id] is not None
 
-    assemble_calls = [c for c in calls if c["module"] == "spec-bundle-assembler"]
-    assert any(
-        c["component_id"] == "comp-foo" and c["mode"] == "hint" for c in assemble_calls
-    )
+        assert _get_field(report, "degraded") is True
+        assert _get_field(report, "completeness_score") is None
+        assert _get_field(report, "completeness_rationale") is None
+        assert not _get_field(report, "redundancy_flags")

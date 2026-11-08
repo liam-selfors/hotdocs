@@ -1,236 +1,196 @@
-import pathlib
-import sys
-
-import pytest
-
 import spec_completeness_assistant
 
 
-_MISSING = object()
+def _get(obj, name):
+    return obj.get(name) if isinstance(obj, dict) else getattr(obj, name, None)
 
 
-def _get(obj, key, default=_MISSING):
+def _has(obj, name):
     if isinstance(obj, dict):
-        return obj.get(key, default)
-    return getattr(obj, key, default)
+        return name in obj
+    return hasattr(obj, name)
 
 
-def _public_names(obj):
-    if isinstance(obj, dict):
-        return set(obj.keys())
-    return {name for name in dir(obj) if not name.startswith("_")}
+LINTER_SRC_TEMPLATE = """LOG_FILE = "__LOG_FILE__"
 
 
-BLOCKING_NAMES = {
-    "block",
-    "blocks",
-    "blocking",
-    "blocks_merge",
-    "merge_block",
-    "fail",
-    "fails",
-    "failed",
-    "should_fail",
-    "should_block",
-    "is_blocking",
-    "abort",
-    "gate",
-    "gated",
-    "check_readiness",
-    "exit",
-    "sys_exit",
-    "raise_error",
-    "raise_for_status",
-}
-
-
-GLOSSARY_TEXT = """# Glossary
-
-No corpus-specific terms are needed for this fixture.
-"""
-
-COMPONENT_MD = """---
-id: comp-foo
-title: Foo Component
-status: draft
-owners: [lselfors@gmail.com]
-sealed: true
-source_path: /fake/src/foo.py
-depends_on: []
----
-
-# Foo Component
-
-## Purpose
-
-A fixture component used only to exercise
-comp-spec-completeness-assistant's assist() function. It does not
-depend on comp-spec-completeness-assistant.
-"""
-
-REQUIREMENT_MD = """# R-FOO-001
-
-**R-FOO-001** — Foo MUST do the fixture thing.
-"""
-
-ACCEPTANCE_MD = """# AC-FOO-001
-
-Covers: R-FOO-001
-
-```gherkin
-Given foo
-When foo runs
-Then foo does the fixture thing
-```
-"""
-
-
-SPEC_LINTER_SRC = '''
 def lint(paths, repo_root, strict=False, judge=None):
-    with open(LOG_PATH_TOKEN, "a", encoding="utf-8") as fh:
-        fh.write("lint-called")
+    with open(LOG_FILE, "a") as f:
+        f.write("lint\\n")
     return {
         "findings": [],
         "summary": {"hard_failures": 0, "warnings": 0, "skipped": 0},
     }
-'''
+"""
 
-IMPACT_ANALYZER_SRC = '''
+IMPACT_SRC_TEMPLATE = """LOG_FILE = "__LOG_FILE__"
+
+
 def compute_blast_radius(changed_ids, repo_root):
-    with open(LOG_PATH_TOKEN, "a", encoding="utf-8") as fh:
-        fh.write("impact-called")
+    with open(LOG_FILE, "a") as f:
+        f.write("compute_blast_radius\\n")
     return {
         "impacted": [
             {"component_id": "comp-foo", "reason": "direct", "via": None},
         ],
         "precondition_error": None,
     }
-'''
+"""
 
-SPEC_BUNDLE_ASSEMBLER_SRC = '''
+ASSEMBLER_SRC_TEMPLATE = """LOG_FILE = "__LOG_FILE__"
+
+
 def assemble(component_id, repo_root, mode="cold"):
-    with open(LOG_PATH_TOKEN, "a", encoding="utf-8") as fh:
-        fh.write("assemble-called:" + str(mode))
+    with open(LOG_FILE, "a") as f:
+        f.write("assemble:" + component_id + ":" + mode + "\\n")
     return {
         "component_id": component_id,
-        "spec_bundle_hash": "sha256:fake",
-        "spec": "fake spec text",
-        "interface": "fake interface text",
-        "constraints": "",
+        "spec_bundle_hash": "sha256:deadbeef",
+        "spec": "# Foo\\n\\nFoo MUST do a foo thing.\\n",
+        "interface": "# CLI\\n\\nNone.\\n",
+        "constraints": "No additional constraints.\\n",
         "dependency_interfaces": {},
         "dependency_context": {},
         "dependency_usage": {},
         "vars": {},
-        "glossary": "fake glossary text",
-        "hint_code": {"foo.py": "# fake code"} if mode == "hint" else None,
+        "glossary": "",
+        "hint_code": {"spec_linter.py": "# placeholder\\n"} if mode == "hint" else None,
     }
 
 
 def assemble_criterion(component_id, criterion_id, repo_root):
-    with open(LOG_PATH_TOKEN, "a", encoding="utf-8") as fh:
-        fh.write("assemble_criterion-called")
+    with open(LOG_FILE, "a") as f:
+        f.write("assemble_criterion:" + component_id + ":" + criterion_id + "\\n")
     return {
         "component_id": component_id,
         "criterion_id": criterion_id,
-        "covers": "R-FAKE-001",
-        "criterion_text": "fake criterion text",
-        "requirement_text": "fake requirement text",
-        "interface": "fake interface text",
-        "glossary": "fake glossary text",
+        "covers": "R-FOO-001",
+        "criterion_text": "",
+        "requirement_text": "",
+        "interface": "",
+        "glossary": "",
     }
-'''
+"""
 
 
-def _write_fake_dependency(path, source_template, log_path):
-    source = source_template.replace("LOG_PATH_TOKEN", repr(str(log_path)))
-    path.write_text(source, encoding="utf-8")
-
-
-def test_assist_returns_report_without_raising_or_gating(tmp_path, monkeypatch):
+def test_assist_output_is_advisory_only_and_never_gates(tmp_path, monkeypatch):
     repo_root = tmp_path / "repo"
-    components_dir = repo_root / "specs" / "components" / "foo"
-    requirements_dir = components_dir / "requirements"
-    acceptance_dir = components_dir / "acceptance"
-    requirements_dir.mkdir(parents=True, exist_ok=True)
-    acceptance_dir.mkdir(parents=True, exist_ok=True)
+    repo_root.mkdir()
 
-    (repo_root / "specs" / "glossary.md").write_text(GLOSSARY_TEXT, encoding="utf-8")
-    (components_dir / "component.md").write_text(COMPONENT_MD, encoding="utf-8")
-    (requirements_dir / "R-FOO-001.md").write_text(REQUIREMENT_MD, encoding="utf-8")
-    (acceptance_dir / "AC-FOO-001.md").write_text(ACCEPTANCE_MD, encoding="utf-8")
+    comp_dir = repo_root / "specs" / "components" / "foo"
+    (comp_dir / "requirements").mkdir(parents=True)
+    (comp_dir / "interface").mkdir(parents=True)
+    (comp_dir / "acceptance").mkdir(parents=True)
 
-    gen_linter_dir = repo_root / "gen" / "spec-linter"
-    gen_impact_dir = repo_root / "gen" / "impact-analyzer"
-    gen_assembler_dir = repo_root / "gen" / "spec-bundle-assembler"
-    for d in (gen_linter_dir, gen_impact_dir, gen_assembler_dir):
-        d.mkdir(parents=True, exist_ok=True)
-
-    logs_dir = tmp_path / "logs"
-    logs_dir.mkdir(parents=True, exist_ok=True)
-    log_linter = logs_dir / "spec_linter.log"
-    log_impact = logs_dir / "impact_analyzer.log"
-    log_assembler = logs_dir / "spec_bundle_assembler.log"
-
-    _write_fake_dependency(gen_linter_dir / "spec_linter.py", SPEC_LINTER_SRC, log_linter)
-    _write_fake_dependency(
-        gen_impact_dir / "impact_analyzer.py", IMPACT_ANALYZER_SRC, log_impact
-    )
-    _write_fake_dependency(
-        gen_assembler_dir / "spec_bundle_assembler.py",
-        SPEC_BUNDLE_ASSEMBLER_SRC,
-        log_assembler,
+    (comp_dir / "component.md").write_text(
+        "---\n"
+        "id: comp-foo\n"
+        "title: Foo Component\n"
+        "status: ratified\n"
+        "owners: [alice]\n"
+        "sealed: true\n"
+        "source_path: legacy/foo.py\n"
+        "last_ratified_commit: 0000000\n"
+        "depends_on: [comp-bar]\n"
+        "---\n\n"
+        "# Foo\n\n"
+        "Purpose: a fixture component unrelated to the assistant under test.\n"
     )
 
-    def _no_exit(code=0):
-        raise AssertionError(
-            "assist() invoked sys.exit(%r); it must never exit anything" % (code,)
-        )
+    (comp_dir / "requirements" / "R-FOO-001.md").write_text(
+        "# R-FOO-001\n\n"
+        "Foo MUST do a foo thing.\n"
+    )
 
+    (comp_dir / "acceptance" / "AC-FOO-001.md").write_text(
+        "Covers: R-FOO-001\n"
+        "Kind: generated-test\n\n"
+        "```gherkin\n"
+        "Given foo\n"
+        "When foo happens\n"
+        "Then foo is done\n"
+        "```\n"
+    )
+
+    (comp_dir / "interface" / "cli.md").write_text(
+        "# CLI\n\nNone.\n"
+    )
+
+    (comp_dir / "constraints.md").write_text(
+        "No additional constraints.\n"
+    )
+
+    log_file = tmp_path / "invocations.log"
+
+    gen_dir = repo_root / "gen"
+
+    linter_dir = gen_dir / "spec-linter"
+    linter_dir.mkdir(parents=True)
+    (linter_dir / "spec_linter.py").write_text(
+        LINTER_SRC_TEMPLATE.replace("__LOG_FILE__", str(log_file))
+    )
+
+    impact_dir = gen_dir / "impact-analyzer"
+    impact_dir.mkdir(parents=True)
+    (impact_dir / "impact_analyzer.py").write_text(
+        IMPACT_SRC_TEMPLATE.replace("__LOG_FILE__", str(log_file))
+    )
+
+    assembler_dir = gen_dir / "spec-bundle-assembler"
+    assembler_dir.mkdir(parents=True)
+    (assembler_dir / "spec_bundle_assembler.py").write_text(
+        ASSEMBLER_SRC_TEMPLATE.replace("__LOG_FILE__", str(log_file))
+    )
+
+    def _no_exit(*args, **kwargs):
+        raise AssertionError("assist() must never call sys.exit")
+
+    import sys
     monkeypatch.setattr(sys, "exit", _no_exit)
 
-    changed_ids = ["comp-foo"]
-
-    try:
-        report = spec_completeness_assistant.assist(changed_ids, pathlib.Path(repo_root))
-    except BaseException as exc:
-        pytest.fail("assist() raised unexpectedly: %r" % (exc,))
+    report = spec_completeness_assistant.assist(["R-FOO-001"], repo_root)
 
     assert report is not None
 
-    for field in (
-        "lint_findings",
-        "predicted_blast_radius",
-        "hint_previews",
-        "completeness_score",
-        "completeness_rationale",
-        "redundancy_flags",
-        "degraded",
-    ):
-        assert _get(report, field) is not _MISSING, (
-            "CompletenessReport is missing field %r" % (field,)
-        )
+    assert log_file.exists()
+    log_contents = log_file.read_text()
+    assert "lint" in log_contents
+    assert "compute_blast_radius" in log_contents
+    assert "assemble:comp-foo:hint" in log_contents
 
-    assert _get(report, "degraded") is True
-
-    assert not _get(report, "completeness_score")
-    assert not _get(report, "completeness_rationale")
-    assert not _get(report, "redundancy_flags")
-
-    assert _get(report, "lint_findings") == []
-
-    blast_radius = _get(report, "predicted_blast_radius")
-    assert "comp-foo" in blast_radius
-
+    lint_findings = _get(report, "lint_findings")
+    predicted_blast_radius = _get(report, "predicted_blast_radius")
     hint_previews = _get(report, "hint_previews")
-    assert _get(hint_previews, "comp-foo", _MISSING) is not _MISSING
+    completeness_score = _get(report, "completeness_score")
+    completeness_rationale = _get(report, "completeness_rationale")
+    redundancy_flags = _get(report, "redundancy_flags")
+    degraded = _get(report, "degraded")
 
-    report_names = _public_names(report)
-    offending = report_names & BLOCKING_NAMES
-    assert not offending, (
-        "CompletenessReport exposes field/method(s) that could gate or "
-        "block something: %r" % (offending,)
-    )
+    assert lint_findings == []
+    assert predicted_blast_radius == ["comp-foo"]
+    assert isinstance(hint_previews, dict)
+    assert degraded is True
+    assert completeness_score is None
+    assert completeness_rationale is None
+    assert redundancy_flags in (None, [])
 
-    assert log_linter.exists() and log_linter.read_text(encoding="utf-8") != ""
-    assert log_impact.exists() and log_impact.read_text(encoding="utf-8") != ""
-    assert log_assembler.exists() and log_assembler.read_text(encoding="utf-8") != ""
+    blocking_names = [
+        "block",
+        "fail",
+        "exit",
+        "abort",
+        "gate",
+        "should_fail",
+        "should_block",
+        "is_blocking",
+        "blocking",
+        "hard_fail",
+        "raise_error",
+        "halt",
+        "raise_for_status",
+    ]
+    for name in blocking_names:
+        assert not _has(report, name), (
+            "CompletenessReport must not expose field or method '%s' "
+            "that could block, fail, or exit anything" % name
+        )

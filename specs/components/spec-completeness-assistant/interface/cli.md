@@ -4,6 +4,7 @@
 hotdocs assist --changed=<spec-id>... [--repo-root=<dir>] [--format=json|text] [--model=<model>]
 ```
 
+`main` receives the tokens after `assist`: `main(["--changed=R-FOO-001"])`.
 Every flag takes its value either as `--flag=value` or as the next
 argument (`--flag value`); a flag given last with no value is a usage
 error.

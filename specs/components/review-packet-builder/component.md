@@ -98,3 +98,6 @@ None.
   letter, PR-diff-base existence, "doesn't exist implies unsealed")
   each broke a different real git-history shape before this one held.
 - Landed (`D151`'s own retry, `mutation_score=0.82`): swapped in.
+- `D201`: `R-PACKET-013` covers the tool-root fallback (`D199`); the
+  CLI's `--flag value` form and the markdown's remaining fields are
+  covered.

@@ -91,6 +91,8 @@ them to the next `generate`.
   `cache-manager`, `spec-linter`, `graph-query-engine`) are hand-written
   and tested, not generated from their specs; the rest are generated and
   verified like yours.
-- `hotdocs assist` and `hotdocs review-packet build` do not yet find the
-  tool's components from a project; they work only inside the tool's own
-  checkout until they are regenerated.
+- `hotdocs review-packet build` does not yet find the tool's components
+  from a project; it works only inside the tool's own checkout until it is
+  regenerated.
+- `hotdocs assist` and `hotdocs impact` need a git repository with a
+  `main` or `master` branch.

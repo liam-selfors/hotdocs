@@ -1,4 +1,9 @@
+import os
+import tempfile
+import shutil
 from pathlib import Path
+
+import spec_completeness_assistant
 
 
 def _get(obj, key, default=None):
@@ -7,150 +12,154 @@ def _get(obj, key, default=None):
     return getattr(obj, key, default)
 
 
-def _has_key(obj, key):
-    if isinstance(obj, dict):
-        return key in obj
-    return hasattr(obj, key)
-
-
-def _write(path: Path, content: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(content)
-
-
-def test_ac_assist_007_degraded_mode_no_model(tmp_path):
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-
-    log_path = repo_root / "call_log.jsonl"
-    log_path_repr = repr(str(log_path))
-
-    # Fake spec-linter: returns one "warn" finding.
-    _write(
-        repo_root / "gen" / "spec-linter" / "spec_linter.py",
-        '''
+SPEC_LINTER_MODULE = '''
 def lint(paths, repo_root, strict=False, judge=None):
     return {
         "findings": [
             {
-                "rule_id": "R-LINT-010",
+                "rule_id": "R-LINT-321",
                 "severity": "warn",
                 "file": "specs/components/foo/component.md",
-                "line": 5,
-                "message": "fixture warn finding",
-                "rationale": None,
+                "line": 3,
+                "message": "fake warn finding for AC-ASSIST-007",
             }
         ],
         "summary": {"hard_failures": 0, "warnings": 1, "skipped": 0},
     }
-''',
-    )
+'''
 
-    # Fake impact-analyzer: blast radius is comp-foo.
-    _write(
-        repo_root / "gen" / "impact-analyzer" / "impact_analyzer.py",
-        '''
+IMPACT_ANALYZER_MODULE = '''
 def compute_blast_radius(changed_ids, repo_root):
     return {
         "impacted": [
-            {"component_id": "comp-foo", "reason": "direct", "via": None}
+            {
+                "component_id": "comp-foo",
+                "reason": "direct",
+                "via": None,
+            }
         ],
         "precondition_error": None,
     }
-''',
-    )
+'''
 
-    # Fake spec-bundle-assembler: returns a hint-mode SpecBundle for comp-foo.
-    _write(
-        repo_root / "gen" / "spec-bundle-assembler" / "spec_bundle_assembler.py",
-        '''
+SPEC_BUNDLE_ASSEMBLER_MODULE = '''
 def assemble(component_id, repo_root, mode="cold"):
     return {
         "component_id": component_id,
-        "spec_bundle_hash": "sha256:fixture",
-        "spec": "fixture spec text",
-        "interface": "fixture interface text",
-        "constraints": "fixture constraints text",
+        "spec_bundle_hash": "sha256:fakehash",
+        "spec": "fake spec body",
+        "interface": "fake interface body",
+        "constraints": "fake constraints body",
         "dependency_interfaces": {},
         "dependency_context": {},
         "dependency_usage": {},
         "vars": {},
-        "glossary": "fixture glossary text",
-        "hint_code": ({"fixture.py": "fixture code"} if mode == "hint" else None),
+        "glossary": "fake glossary body",
+        "hint_code": {"fake_file.py": "fake content"} if mode == "hint" else None,
     }
-''',
-    )
 
-    # Fake generator: MUST NOT be called when no model is configured.
-    _write(
-        repo_root / "gen" / "generator" / "generator.py",
-        f'''
-import json
 
-_LOG_PATH = {log_path_repr}
+def assemble_criterion(component_id, criterion_id, repo_root):
+    raise NotImplementedError("not used by this test")
+'''
+
+GENERATOR_MODULE = '''
+import os
 
 
 def generate(bundle, model, retry_feedback=None, *, repo_root=None, llm_backend=None):
-    with open(_LOG_PATH, "a") as f:
-        f.write(json.dumps({{"caller": "generator"}}) + "\\n")
-    return {{
-        "component_id": "comp-foo",
-        "spec_bundle_hash": "sha256:fixture",
+    log_path = os.environ["ASSIST_TEST_CALL_LOG"]
+    with open(log_path, "a") as f:
+        f.write("generator.generate called\\n")
+    component_id = bundle.get("component_id") if isinstance(bundle, dict) else getattr(bundle, "component_id", None)
+    return {
+        "component_id": component_id,
+        "spec_bundle_hash": "sha256:fakehash",
         "model": model,
         "prompt_version": "v1",
         "cache_hit": False,
-        "files": {{"fixture.py": "fixture"}},
+        "files": {"fake_file.py": "fake content"},
         "model_call_error": None,
         "refused": None,
         "retry_feedback": retry_feedback,
-    }}
-''',
-    )
+    }
+'''
 
-    # Fake llm-endpoint: MUST NOT be called when no model is configured.
-    _write(
-        repo_root / "gen" / "llm-endpoint" / "llm_endpoint.py",
-        f'''
-import json
-
-_LOG_PATH = {log_path_repr}
+LLM_ENDPOINT_MODULE = '''
+import os
 
 
 def complete(prompt, model, *, backend=None, **params):
-    with open(_LOG_PATH, "a") as f:
-        f.write(json.dumps({{"caller": "llm-endpoint"}}) + "\\n")
-    return {{
-        "text": "fixture response",
+    log_path = os.environ["ASSIST_TEST_CALL_LOG"]
+    with open(log_path, "a") as f:
+        f.write("llm_endpoint.complete called\\n")
+    return {
+        "text": "fake model output",
         "model": model,
-        "backend": "fixture-backend",
+        "backend": "mock",
         "model_call_error": None,
-    }}
-''',
-    )
+    }
+'''
 
-    import spec_completeness_assistant
 
-    report = spec_completeness_assistant.assist(["comp-foo"], repo_root)
+def _write_dependency(repo_root: Path, slug: str, module_name: str, content: str):
+    dep_dir = repo_root / "gen" / slug
+    dep_dir.mkdir(parents=True, exist_ok=True)
+    (dep_dir / f"{module_name}.py").write_text(content)
 
-    lint_findings = _get(report, "lint_findings")
-    assert len(lint_findings) == 1
-    finding = lint_findings[0]
-    assert _get(finding, "rule_id") == "R-LINT-010"
-    assert _get(finding, "severity") == "warn"
-    assert _get(finding, "file") == "specs/components/foo/component.md"
-    assert _get(finding, "line") == 5
-    assert _get(finding, "message") == "fixture warn finding"
 
-    assert _get(report, "predicted_blast_radius") == ["comp-foo"]
+def test_ac_assist_007_no_model_configured_skips_all_model_calls():
+    tmp_dir = tempfile.mkdtemp(prefix="ac_assist_007_")
+    try:
+        repo_root = Path(tmp_dir) / "repo"
+        repo_root.mkdir(parents=True)
 
-    hint_previews = _get(report, "hint_previews")
-    assert _has_key(hint_previews, "comp-foo")
+        _write_dependency(repo_root, "spec-linter", "spec_linter", SPEC_LINTER_MODULE)
+        _write_dependency(repo_root, "impact-analyzer", "impact_analyzer", IMPACT_ANALYZER_MODULE)
+        _write_dependency(
+            repo_root,
+            "spec-bundle-assembler",
+            "spec_bundle_assembler",
+            SPEC_BUNDLE_ASSEMBLER_MODULE,
+        )
+        _write_dependency(repo_root, "generator", "generator", GENERATOR_MODULE)
+        _write_dependency(repo_root, "llm-endpoint", "llm_endpoint", LLM_ENDPOINT_MODULE)
 
-    assert _get(report, "degraded") is True
-    assert _get(report, "completeness_score") is None
-    assert _get(report, "completeness_rationale") is None
-    assert _get(report, "redundancy_flags") == []
+        log_path = Path(tmp_dir) / "call_log.txt"
+        os.environ["ASSIST_TEST_CALL_LOG"] = str(log_path)
 
-    if log_path.exists():
-        calls = [line for line in log_path.read_text().splitlines() if line.strip()]
-        assert calls == []
+        try:
+            report = spec_completeness_assistant.assist(["R-FOO-001"], repo_root)
+        finally:
+            os.environ.pop("ASSIST_TEST_CALL_LOG", None)
+
+        lint_findings = _get(report, "lint_findings")
+        assert isinstance(lint_findings, list)
+        assert len(lint_findings) == 1
+        finding = lint_findings[0]
+        assert _get(finding, "severity") == "warn"
+        assert _get(finding, "rule_id") == "R-LINT-321"
+        assert _get(finding, "message") == "fake warn finding for AC-ASSIST-007"
+
+        predicted_blast_radius = _get(report, "predicted_blast_radius")
+        assert predicted_blast_radius == ["comp-foo"]
+
+        hint_previews = _get(report, "hint_previews")
+        assert isinstance(hint_previews, dict)
+        assert "comp-foo" in hint_previews
+        assert hint_previews["comp-foo"] is not None
+
+        assert _get(report, "degraded") is True
+        assert _get(report, "completeness_score") is None
+        assert _get(report, "completeness_rationale") is None
+        assert _get(report, "redundancy_flags") == []
+
+        if log_path.exists():
+            log_contents = log_path.read_text()
+        else:
+            log_contents = ""
+        assert "llm_endpoint.complete called" not in log_contents
+        assert "generator.generate called" not in log_contents
+        assert log_contents == ""
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)

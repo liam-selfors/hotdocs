@@ -12,7 +12,8 @@
 
   A response wrapped in a Markdown code fence is unwrapped first. A
   `completeness_score` outside 0.0–1.0 is clamped to that range; a
-  completeness response missing either field, or with an empty
+  completeness response missing either field, with a score that is not
+  a number (a boolean is not), or with an empty
   `completeness_rationale`, does not parse as that shape. A
   redundancy entry missing any of its three fields, or with an empty
   one, is dropped (`R-ASSIST-005`). If a call returns a

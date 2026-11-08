@@ -6,7 +6,8 @@
   packet is built, exit `1` when a required upstream result was
   missing, exit `2` on any usage error (no subcommand, no `--changed`,
   an invalid `--format`). `--format=json` MUST print the packet as
-  JSON; the default/`--format=markdown` MUST print the human-readable
+  `json.dumps(packet, indent=2, sort_keys=True)`, and every JSON value
+  in the markdown is dumped with `sort_keys=True`; the default/`--format=markdown` MUST print the human-readable
   rendering actually posted on a PR.
 
   Found via mutation testing, not a behavioral test failure (same

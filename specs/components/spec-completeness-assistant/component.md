@@ -90,3 +90,5 @@ None.
 - `D160`: `R-ASSIST-009` covers the CLI; `R-ASSIST-010` pins the
   model-call response contract. Cold-generated and landed
   (`mutation_score` 0.81).
+- `D201`: `R-ASSIST-011` covers the tool-root fallback (`D199`);
+  dependencies are flat modules; more response-parsing cases.

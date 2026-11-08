@@ -1,199 +1,195 @@
 import json
-import textwrap
+
+import spec_completeness_assistant
 
 
-def _write_module(repo_root, dep_slug, module_name, source):
-    mod_dir = repo_root / "gen" / dep_slug
-    mod_dir.mkdir(parents=True, exist_ok=True)
-    (mod_dir / f"{module_name}.py").write_text(source, encoding="utf-8")
-
-
-def _get(obj, key, default=None):
+def _get(obj, name):
     if isinstance(obj, dict):
-        return obj.get(key, default)
-    return getattr(obj, key, default)
+        return obj.get(name)
+    return getattr(obj, name, None)
+
+
+SPEC_LINTER_SRC = '''
+import json
+import os
+
+
+def lint(paths, repo_root, strict=False, judge=None):
+    log_path = os.environ["ASSIST_TEST_LOG"]
+    with open(log_path, "a") as f:
+        f.write(json.dumps({"module": "spec-linter", "func": "lint"}) + "\\n")
+    return {"findings": [], "summary": {"hard_failures": 0, "warnings": 0, "skipped": 0}}
+'''
+
+IMPACT_ANALYZER_SRC = '''
+import json
+import os
+
+
+def compute_blast_radius(changed_ids, repo_root):
+    log_path = os.environ["ASSIST_TEST_LOG"]
+    with open(log_path, "a") as f:
+        f.write(json.dumps({
+            "module": "impact-analyzer",
+            "func": "compute_blast_radius",
+            "changed_ids": list(changed_ids),
+        }) + "\\n")
+    return {
+        "impacted": [{"component_id": "comp-foo", "reason": "direct", "via": None}],
+        "precondition_error": None,
+    }
+'''
+
+ASSEMBLER_SRC = '''
+import json
+import os
+
+
+def assemble(component_id, repo_root, mode="cold"):
+    log_path = os.environ["ASSIST_TEST_LOG"]
+    spec_bundle_hash = "sha256:fakehash-" + component_id
+    with open(log_path, "a") as f:
+        f.write(json.dumps({
+            "module": "spec-bundle-assembler",
+            "func": "assemble",
+            "component_id": component_id,
+            "mode": mode,
+            "spec_bundle_hash": spec_bundle_hash,
+        }) + "\\n")
+    return {
+        "component_id": component_id,
+        "spec_bundle_hash": spec_bundle_hash,
+        "spec": "",
+        "interface": "",
+        "constraints": "",
+        "dependency_interfaces": {},
+        "dependency_context": {},
+        "dependency_usage": {},
+        "vars": {},
+        "glossary": "",
+        "hint_code": {"spec_completeness_assistant.py": "# fake hint code"} if mode == "hint" else None,
+    }
+
+
+def assemble_criterion(component_id, criterion_id, repo_root):
+    raise NotImplementedError
+'''
+
+GENERATOR_SRC = '''
+import json
+import os
+
+
+def generate(bundle, model, retry_feedback=None, *, repo_root=None, llm_backend=None):
+    log_path = os.environ["ASSIST_TEST_LOG"]
+    component_id = bundle.get("component_id") if isinstance(bundle, dict) else getattr(bundle, "component_id", None)
+    spec_bundle_hash = bundle.get("spec_bundle_hash") if isinstance(bundle, dict) else getattr(bundle, "spec_bundle_hash", None)
+    with open(log_path, "a") as f:
+        f.write(json.dumps({
+            "module": "generator",
+            "func": "generate",
+            "component_id": component_id,
+            "spec_bundle_hash": spec_bundle_hash,
+            "model": model,
+        }) + "\\n")
+    return {
+        "component_id": component_id,
+        "spec_bundle_hash": spec_bundle_hash,
+        "model": model,
+        "prompt_version": "v1",
+        "cache_hit": False,
+        "files": {"spec_completeness_assistant.py": "# fake generated content"},
+        "model_call_error": None,
+        "refused": None,
+        "retry_feedback": retry_feedback,
+    }
+'''
+
+LLM_ENDPOINT_SRC = '''
+import json
+import os
+
+
+def complete(prompt, model, *, backend=None, **params):
+    log_path = os.environ["ASSIST_TEST_LOG"]
+    with open(log_path, "a") as f:
+        f.write(json.dumps({"module": "llm-endpoint", "func": "complete", "model": model}) + "\\n")
+    text = json.dumps({"score": 0.9, "rationale": "fake rationale", "flags": []})
+    return {"text": text, "model": model, "backend": "fake-backend", "model_call_error": None}
+'''
+
+
+def _write_fake_deps(repo_root):
+    deps = {
+        "spec-linter": ("spec_linter.py", SPEC_LINTER_SRC),
+        "impact-analyzer": ("impact_analyzer.py", IMPACT_ANALYZER_SRC),
+        "spec-bundle-assembler": ("spec_bundle_assembler.py", ASSEMBLER_SRC),
+        "generator": ("generator.py", GENERATOR_SRC),
+        "llm-endpoint": ("llm_endpoint.py", LLM_ENDPOINT_SRC),
+    }
+    for slug, (filename, src) in deps.items():
+        mod_dir = repo_root / "gen" / slug
+        mod_dir.mkdir(parents=True, exist_ok=True)
+        (mod_dir / filename).write_text(src)
 
 
 def _read_log(log_path):
     if not log_path.exists():
         return []
-    lines = log_path.read_text(encoding="utf-8").splitlines()
+    lines = log_path.read_text().splitlines()
     return [json.loads(line) for line in lines if line.strip()]
 
 
-def _build_fixture(repo_root, log_path):
-    log_literal = repr(str(log_path))
-
-    spec_linter_src = textwrap.dedent(f"""
-        import json
-
-        LOG_PATH = {log_literal}
-
-        def _log(record):
-            with open(LOG_PATH, "a", encoding="utf-8") as f:
-                f.write(json.dumps(record) + "\\n")
-
-        def lint(paths, repo_root, strict=False, judge=None):
-            _log({{"dep": "spec-linter", "fn": "lint"}})
-            return {{"findings": [], "summary": {{"hard_failures": 0, "warnings": 0, "skipped": 0}}}}
-    """)
-    _write_module(repo_root, "spec-linter", "spec_linter", spec_linter_src)
-
-    impact_analyzer_src = textwrap.dedent(f"""
-        import json
-
-        LOG_PATH = {log_literal}
-
-        def _log(record):
-            with open(LOG_PATH, "a", encoding="utf-8") as f:
-                f.write(json.dumps(record) + "\\n")
-
-        def compute_blast_radius(changed_ids, repo_root):
-            _log({{"dep": "impact-analyzer", "fn": "compute_blast_radius"}})
-            return {{
-                "impacted": [{{"component_id": "comp-foo", "reason": "direct", "via": None}}],
-                "precondition_error": None,
-            }}
-    """)
-    _write_module(repo_root, "impact-analyzer", "impact_analyzer", impact_analyzer_src)
-
-    spec_bundle_assembler_src = textwrap.dedent(f"""
-        import json
-
-        LOG_PATH = {log_literal}
-
-        def _log(record):
-            with open(LOG_PATH, "a", encoding="utf-8") as f:
-                f.write(json.dumps(record) + "\\n")
-
-        def assemble(component_id, repo_root=None, mode="cold"):
-            _log({{"dep": "spec-bundle-assembler", "fn": "assemble", "component_id": component_id, "mode": mode}})
-            return {{
-                "component_id": component_id,
-                "spec_bundle_hash": "sha256:fake",
-                "spec": "spec text",
-                "interface": "interface text",
-                "constraints": "constraints text",
-                "dependency_interfaces": {{}},
-                "dependency_context": {{}},
-                "dependency_usage": {{}},
-                "vars": {{}},
-                "glossary": "glossary text",
-                "hint_code": {{"fake.py": "fake content"}} if mode == "hint" else None,
-            }}
-    """)
-    _write_module(repo_root, "spec-bundle-assembler", "spec_bundle_assembler", spec_bundle_assembler_src)
-
-    generator_src = textwrap.dedent(f"""
-        import json
-
-        LOG_PATH = {log_literal}
-
-        def _log(record):
-            with open(LOG_PATH, "a", encoding="utf-8") as f:
-                f.write(json.dumps(record) + "\\n")
-
-        def _cid(bundle):
-            if isinstance(bundle, dict):
-                return bundle.get("component_id")
-            return getattr(bundle, "component_id", None)
-
-        def _hash(bundle):
-            if isinstance(bundle, dict):
-                return bundle.get("spec_bundle_hash")
-            return getattr(bundle, "spec_bundle_hash", None)
-
-        def generate(bundle, model, retry_feedback=None, *, repo_root=None, llm_backend=None):
-            cid = _cid(bundle)
-            _log({{"dep": "generator", "fn": "generate", "component_id": cid, "model": model}})
-            return {{
-                "component_id": cid,
-                "spec_bundle_hash": _hash(bundle),
-                "model": model,
-                "prompt_version": "v1",
-                "cache_hit": False,
-                "files": {{"fake.py": "fake generated content"}},
-                "model_call_error": None,
-                "refused": None,
-                "retry_feedback": retry_feedback,
-            }}
-    """)
-    _write_module(repo_root, "generator", "generator", generator_src)
-
-    llm_endpoint_src = textwrap.dedent(f"""
-        import json
-
-        LOG_PATH = {log_literal}
-
-        def _log(record):
-            with open(LOG_PATH, "a", encoding="utf-8") as f:
-                f.write(json.dumps(record) + "\\n")
-
-        def complete(prompt, model, *, backend=None, **params):
-            _log({{"dep": "llm-endpoint", "fn": "complete", "model": model}})
-            return {{
-                "text": json.dumps({{
-                    "completeness_score": 0.9,
-                    "completeness_rationale": "fake rationale",
-                    "redundancy_flags": [],
-                }}),
-                "model": model,
-                "backend": backend or "fake-backend",
-                "model_call_error": None,
-            }}
-    """)
-    _write_module(repo_root, "llm-endpoint", "llm_endpoint", llm_endpoint_src)
-
-
-def test_ac_assist_003(tmp_path):
-    import spec_completeness_assistant as target
-
+def test_hint_preview_with_model_calls_generate(tmp_path, monkeypatch):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
-    log_path = repo_root / "calls.log"
+    _write_fake_deps(repo_root)
 
-    _build_fixture(repo_root, log_path)
+    log_path = tmp_path / "log.jsonl"
+    monkeypatch.setenv("ASSIST_TEST_LOG", str(log_path))
 
-    changed_ids = ["comp-foo"]
-
-    # --- Scenario 1: model configured ---
-    report = target.assist(changed_ids, repo_root, model="fake-model")
+    report = spec_completeness_assistant.assist(
+        ["R-FOO-001"], repo_root, model="fake-model"
+    )
 
     hint_previews = _get(report, "hint_previews")
+    assert isinstance(hint_previews, dict)
     assert set(hint_previews.keys()) == {"comp-foo"}
 
-    log_entries = _read_log(log_path)
+    entries = _read_log(log_path)
 
-    assemble_calls = [
-        e for e in log_entries if e.get("dep") == "spec-bundle-assembler" and e.get("fn") == "assemble"
-    ]
-    assert len(assemble_calls) == 1
-    assert assemble_calls[0]["component_id"] == "comp-foo"
-    assert assemble_calls[0]["mode"] == "hint"
-    assert all(e["mode"] != "cold" for e in assemble_calls)
+    assemble_entries = [e for e in entries if e["module"] == "spec-bundle-assembler"]
+    assert len(assemble_entries) == 1
+    assert assemble_entries[0]["component_id"] == "comp-foo"
+    assert assemble_entries[0]["mode"] == "hint"
+    assert all(e["mode"] != "cold" for e in assemble_entries)
 
-    generate_calls = [e for e in log_entries if e.get("dep") == "generator" and e.get("fn") == "generate"]
-    assert len(generate_calls) == 1
-    assert generate_calls[0]["component_id"] == "comp-foo"
+    generate_entries = [e for e in entries if e["module"] == "generator"]
+    assert len(generate_entries) == 1
+    assert generate_entries[0]["component_id"] == "comp-foo"
+    assert generate_entries[0]["spec_bundle_hash"] == assemble_entries[0]["spec_bundle_hash"]
 
-    # Reset the log for the second scenario.
-    log_path.write_text("", encoding="utf-8")
 
-    # --- Scenario 2: no model configured ---
-    report_no_model = target.assist(changed_ids, repo_root)
+def test_hint_preview_without_model_skips_generate(tmp_path, monkeypatch):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    _write_fake_deps(repo_root)
 
-    hint_previews_no_model = _get(report_no_model, "hint_previews")
-    assert set(hint_previews_no_model.keys()) == {"comp-foo"}
+    log_path = tmp_path / "log.jsonl"
+    monkeypatch.setenv("ASSIST_TEST_LOG", str(log_path))
 
-    log_entries_no_model = _read_log(log_path)
+    report = spec_completeness_assistant.assist(["R-FOO-001"], repo_root)
 
-    assemble_calls_no_model = [
-        e for e in log_entries_no_model if e.get("dep") == "spec-bundle-assembler" and e.get("fn") == "assemble"
-    ]
-    assert len(assemble_calls_no_model) == 1
-    assert assemble_calls_no_model[0]["mode"] == "hint"
+    hint_previews = _get(report, "hint_previews")
+    assert isinstance(hint_previews, dict)
+    assert set(hint_previews.keys()) == {"comp-foo"}
 
-    generate_calls_no_model = [
-        e for e in log_entries_no_model if e.get("dep") == "generator" and e.get("fn") == "generate"
-    ]
-    assert generate_calls_no_model == []
+    entries = _read_log(log_path)
+
+    assemble_entries = [e for e in entries if e["module"] == "spec-bundle-assembler"]
+    assert len(assemble_entries) == 1
+    assert assemble_entries[0]["component_id"] == "comp-foo"
+    assert assemble_entries[0]["mode"] == "hint"
+
+    generate_entries = [e for e in entries if e["module"] == "generator"]
+    assert len(generate_entries) == 0

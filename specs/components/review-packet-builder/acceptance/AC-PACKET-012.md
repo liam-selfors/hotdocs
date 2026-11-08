@@ -26,7 +26,9 @@ Then it returns 0 and the printed markdown rendering contains, under
   (e.g. the flagged file/package name, not merely the word "blocked"),
   the secret flag's own detail content (not merely the word "flagged"),
   the residual-risk message, the capability scenario id, the sealed
-  component id, and the pinned-override component id -- never a
+  component id, the pinned-override component id, the spec diff text,
+  "R-FOO-001", the regenerated component id, and its provenance hit
+  status -- never a
   generic placeholder standing in for any of them, and never a
   boolean status word standing in for the real flagged detail
 
@@ -41,8 +43,17 @@ Then its License Scan, Secret Scan, and Capability Scenarios
   Verification Results still renders real content for the one
   regenerated component
 
+Given the first scenario's repo
+When main(["review-packet", "build", "--changed", "R-FOO-001",
+  "--changed", "comp-foo", "--repo-root", "<that repo>", "--format",
+  "json"]) runs
+Then it returns 0 and the printed JSON's changed_requirements is
+  ["R-FOO-001"]
+
 Given argv ["review-packet", "build", "--repo-root=<a real repo>"]
-  with no --changed at all
+  with no --changed at all, or ["review-packet", "serve",
+  "--changed=R-FOO-001"], or ["review-packet"], or one ending in a bare
+  "--changed", "--repo-root" or "--format"
 When main(argv) runs
 Then it returns 2
 
@@ -55,4 +66,10 @@ Given argv ["review-packet", "build", "--changed=R-FOO-001",
   "--repo-root=<a repo whose provenance-tracker raises UsageError>"]
 When main(argv) runs
 Then it returns 1
+
+Given the first scenario's repo, whose one verification result is
+  {"z": 1, "a": 2}
+When main runs once with --format=json and once with no --format
+Then in each printed output the text "a" appears before "z" within
+  that result
 ```

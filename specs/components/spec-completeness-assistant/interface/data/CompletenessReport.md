@@ -19,7 +19,8 @@
 `lint_findings` entries are exactly `spec-linter`'s own `Finding` shape
 (`interface/data/LintReport.md`'s `findings[]`, bundle-visible via
 `depends_on`) — passed through unchanged, never restated or
-summarized here.
+summarized here: a finding that is a dict stays that dict, with no key
+added (no `rationale` when lint gave none) or removed.
 
 `completeness_score`, `completeness_rationale`, and `redundancy_flags` are
 `null`/empty with `degraded: true` when no model was configured
