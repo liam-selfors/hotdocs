@@ -1,479 +1,332 @@
-"""Tests for AC-GATE-004 (component-gate-runner): block_reason distinguishes
-model_call_error (no candidate produced, verify never called) from
-verification_failed (a candidate was produced and failed)."""
-
-import os
+import tempfile
+import unittest
 from pathlib import Path
-
-import pytest
 
 import component_gate_runner
 
 
-def _get(obj, key, default=None):
-    if isinstance(obj, dict):
-        return obj.get(key, default)
-    return getattr(obj, key, default)
+def _dual_get(value, key, default=None):
+    if isinstance(value, dict):
+        return value.get(key, default)
+    return getattr(value, key, default)
 
 
-def _write_module(repo_root, dep_slug, module_name, content):
-    path = repo_root / "gen" / dep_slug / (module_name + ".py")
+def _write(path, content):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content)
 
 
-_PROVENANCE_CHECKER_MODULE = """
-import os
-from dataclasses import dataclass
+def _build_component_fixture(repo_root, component_id="comp-foo", slug="foo"):
+    comp_dir = repo_root / "specs" / "components" / slug
+    _write(comp_dir / "component.md", f"""---
+id: {component_id}
+title: Foo Component
+status: draft
+owners: [alice]
+sealed: true
+source_path: fixtures/{slug}/
+---
 
-LOG_PATH = os.environ["GATE_TEST_LOG_PATH"]
+# {component_id}
+
+## Purpose
+
+Fixture component for AC-GATE-004.
+""")
+    _write(comp_dir / "requirements" / "R-FOO-001.md", """# R-FOO-001
+
+Foo must do a thing.
+""")
+    _write(comp_dir / "acceptance" / "AC-FOO-001.md", """# AC-FOO-001
+
+Covers: R-FOO-001
+Kind: compiled
+
+```gherkin
+Given foo
+When bar
+Then baz
+```
+""")
 
 
-def _log(entry):
-    with open(LOG_PATH, "a") as f:
-        f.write(entry + "\\n")
-
-
-@dataclass
-class ProvenanceKey:
-    spec_bundle_hash: str
-    gate_versions: dict
-
-
-@dataclass
-class ProvenanceCheckResult:
-    hit: bool
-    verification_report: object = None
-    license_scan: object = None
-    secret_scan: object = None
-
-
+def _write_provenance_checker_fake(repo_root, slug):
+    module_path = repo_root / "gen" / "provenance-checker" / "provenance_checker.py"
+    _write(module_path, """
 def current_sealed_key(component_id, repo_root):
-    _log("provenance_checker.current_sealed_key")
     return None
 
 
+class _ProvenanceKey:
+    spec_bundle_hash = "sha256:" + "a" * 64
+    gate_versions = {
+        "compiler": "criterion_compiler@1.0.0",
+        "generated_test": "generated_test@1.0.0",
+        "verifier": "verifier_orchestrator@2.0.0",
+        "license_scanner": "license_scanner@4.0.0",
+        "secret_scanner": "secret_scanner@0.0.0",
+    }
+
+
 def current_provenance_key(component_id, repo_root):
-    _log("provenance_checker.current_provenance_key")
-    return ProvenanceKey(
-        spec_bundle_hash="sha256:" + "a" * 64,
-        gate_versions={
-            "compiler": "criterion-compiler@1.0.0",
-            "generated_test": "generated_test@1.0.0",
-            "verifier": "verifier-orchestrator@2.0.0",
-            "license_scanner": "license_scanner@4.0.0-no-reference-corpus",
-            "secret_scanner": "secret_scanner@3.1.0+detect-secrets.1.5.0",
-        },
-    )
+    return _ProvenanceKey()
 
 
 def check_provenance(component_id, spec_bundle_hash, gate_versions, repo_root):
-    _log("provenance_checker.check_provenance")
-    return ProvenanceCheckResult(hit=False)
-"""
+    return {
+        "hit": False,
+        "verification_report": None,
+        "license_scan": None,
+        "secret_scan": None,
+    }
+""")
 
 
-_SPEC_BUNDLE_ASSEMBLER_MODULE = """
-import os
-from dataclasses import dataclass, field
+def _write_spec_bundle_assembler_fake(repo_root):
+    module_path = repo_root / "gen" / "spec-bundle-assembler" / "spec_bundle_assembler.py"
+    _write(module_path, """
+def assemble(component_id, repo_root=None, mode="cold"):
+    return {
+        "component_id": component_id,
+        "spec_bundle_hash": "sha256:" + "a" * 64,
+        "spec": "fixture spec",
+        "interface": "fixture interface",
+        "constraints": "",
+        "dependency_interfaces": {},
+        "dependency_context": {},
+        "dependency_usage": {},
+        "vars": {},
+        "glossary": "",
+        "hint_code": None,
+    }
+""")
 
-LOG_PATH = os.environ["GATE_TEST_LOG_PATH"]
+
+def _write_generator_fake(repo_root, log_path, files, model_call_error):
+    module_path = repo_root / "gen" / "generator" / "generator.py"
+    files_repr = repr(files)
+    model_call_error_repr = repr(model_call_error)
+    log_path_repr = repr(str(log_path))
+    _write(module_path, f"""
+LOG_PATH = {log_path_repr}
 
 
-def _log(entry):
+def generate(bundle, model, retry_feedback=None, *, repo_root=None, llm_backend=None):
     with open(LOG_PATH, "a") as f:
-        f.write(entry + "\\n")
+        f.write("generator.generate\\n")
+    return {{
+        "component_id": "comp-foo",
+        "spec_bundle_hash": "sha256:" + "a" * 64,
+        "model": model,
+        "prompt_version": "v1",
+        "cache_hit": False,
+        "files": {files_repr},
+        "model_call_error": {model_call_error_repr},
+        "refused": None,
+        "retry_feedback": retry_feedback,
+    }}
+""")
 
 
-@dataclass
-class SpecBundle:
-    component_id: str
-    spec_bundle_hash: str
-    spec: str = ""
-    interface: str = ""
-    constraints: str = ""
-    dependency_interfaces: dict = field(default_factory=dict)
-    dependency_context: dict = field(default_factory=dict)
-    dependency_usage: dict = field(default_factory=dict)
-    vars: dict = field(default_factory=dict)
-    glossary: str = ""
-    hint_code: object = None
+def _write_verifier_orchestrator_fake(repo_root, log_path, overall):
+    module_path = repo_root / "gen" / "verifier-orchestrator" / "verifier_orchestrator.py"
+    overall_repr = repr(overall)
+    log_path_repr = repr(str(log_path))
+    _write(module_path, f"""
+LOG_PATH = {log_path_repr}
+
+GATE_VERSION = "verifier-orchestrator@2.0.0"
 
 
-def assemble(component_id, repo_root, mode="cold"):
-    _log("spec_bundle_assembler.assemble")
-    return SpecBundle(component_id=component_id, spec_bundle_hash="sha256:" + "a" * 64)
-"""
+class _VerificationReport:
+    def __init__(self):
+        self.component_id = "comp-foo"
+        self.criteria = [
+            {{"id": "AC-FOO-001", "covers": "R-FOO-001", "kind": "compiled", "result": {overall_repr!r} if False else ({overall_repr} if False else "fail")}},
+        ]
+        self.requirement_results = {{"R-FOO-001": "fail"}}
+        self.interface_drift = False
+        self.mutation_score = 0.5
+        self.overall = {overall_repr}
+
+    def to_dict(self):
+        return {{
+            "component_id": self.component_id,
+            "criteria": self.criteria,
+            "requirement_results": self.requirement_results,
+            "interface_drift": self.interface_drift,
+            "mutation_score": self.mutation_score,
+            "overall": self.overall,
+        }}
 
 
-_LICENSE_SCANNER_MODULE = """
-import os
-from dataclasses import dataclass, field
-
-LOG_PATH = os.environ["GATE_TEST_LOG_PATH"]
-
-
-def _log(entry):
+def verify(component_id, repo_root, judge=None, test_author=None):
     with open(LOG_PATH, "a") as f:
-        f.write(entry + "\\n")
+        f.write("verifier_orchestrator.verify\\n")
+    return _VerificationReport()
+""")
 
 
-@dataclass
-class LicenseScanResult:
-    component_id: str
-    gate_version: str
-    evaluated: bool
-    reason: object
-    similarity_score: object
-    block_threshold: object
-    blocked: bool
-    matches: list
-    notified: bool
-    notification_delivery_error: object
-    cache_hit: bool
-
-
+def _write_license_scanner_fake(repo_root):
+    module_path = repo_root / "gen" / "license-scanner" / "license_scanner.py"
+    _write(module_path, """
 def scan(component_id, repo_root):
-    _log("license_scanner.scan")
-    return LicenseScanResult(
-        component_id=component_id,
-        gate_version="license_scanner@4.0.0-no-reference-corpus",
-        evaluated=False,
-        reason="no-reference-corpus",
-        similarity_score=None,
-        block_threshold=None,
-        blocked=False,
-        matches=[],
-        notified=False,
-        notification_delivery_error=None,
-        cache_hit=False,
-    )
+    return {
+        "component_id": component_id,
+        "gate_version": "license_scanner@4.0.0-no-reference-corpus",
+        "evaluated": False,
+        "reason": "no-reference-corpus",
+        "similarity_score": None,
+        "block_threshold": None,
+        "blocked": False,
+        "matches": [],
+        "notified": False,
+        "notification_delivery_error": None,
+        "cache_hit": False,
+    }
 
 
 def gate_version(repo_root):
     return "license_scanner@4.0.0-no-reference-corpus"
-"""
+""")
 
 
-_SECRET_SCANNER_MODULE = """
-import os
-from dataclasses import dataclass, field
-
-LOG_PATH = os.environ["GATE_TEST_LOG_PATH"]
-
-
-def _log(entry):
-    with open(LOG_PATH, "a") as f:
-        f.write(entry + "\\n")
-
-
-@dataclass
-class SecretScanResult:
-    scope: str
-    gate_version: str
-    flagged: bool
-    matches: list
-    allowed: list
-    unused_allowlist_entries: list
-    notified: bool
-    notification_delivery_error: object
-    cache_hit: bool
-
-
+def _write_secret_scanner_fake(repo_root):
+    module_path = repo_root / "gen" / "secret-scanner" / "secret_scanner.py"
+    _write(module_path, """
 def scan(repo_root):
-    _log("secret_scanner.scan")
-    return SecretScanResult(
-        scope="full",
-        gate_version="secret_scanner@3.1.0+detect-secrets.1.5.0",
-        flagged=False,
-        matches=[],
-        allowed=[],
-        unused_allowlist_entries=[],
-        notified=False,
-        notification_delivery_error=None,
-        cache_hit=False,
-    )
+    return {
+        "scope": "full",
+        "gate_version": "secret_scanner@3.1.0+detect-secrets.1.5.0",
+        "flagged": False,
+        "matches": [],
+        "allowed": [],
+        "unused_allowlist_entries": [],
+        "notified": False,
+        "notification_delivery_error": None,
+        "cache_hit": False,
+    }
 
 
 def gate_version(repo_root):
     return "secret_scanner@3.1.0+detect-secrets.1.5.0"
-"""
+""")
 
 
-_PROVENANCE_TRACKER_MODULE = """
-import os
-from dataclasses import dataclass
-
-LOG_PATH = os.environ["GATE_TEST_LOG_PATH"]
-
-
-def _log(entry):
-    with open(LOG_PATH, "a") as f:
-        f.write(entry + "\\n")
-
-
-@dataclass
-class AttemptRecord:
-    attempt_id: str
-    component_id: str
-    timestamp: str
-    spec_bundle_hash: str
-    generation: dict
-    verification: object
+def _write_provenance_tracker_fake(repo_root, log_path):
+    module_path = repo_root / "gen" / "provenance-tracker" / "provenance_tracker.py"
+    log_path_repr = repr(str(log_path))
+    _write(module_path, f"""
+LOG_PATH = {log_path_repr}
 
 
 def write_attempt_record(component_id, generation_result, verification_report, spec_bundle_hash, repo_root):
-    _log("provenance_tracker.write_attempt_record")
-    return AttemptRecord(
-        attempt_id="2026-01-01T00:00:00Z-abcdef",
-        component_id=component_id,
-        timestamp="2026-01-01T00:00:00Z",
-        spec_bundle_hash=spec_bundle_hash,
-        generation={},
-        verification=None,
-    )
-"""
-
-
-_PROVENANCE_WRITER_MODULE = """
-import os
-
-LOG_PATH = os.environ["GATE_TEST_LOG_PATH"]
-
-
-def _log(entry):
     with open(LOG_PATH, "a") as f:
-        f.write(entry + "\\n")
+        f.write("provenance_tracker.write_attempt_record\\n")
+    return {{
+        "attempt_id": "2026-01-01T00:00:00Z-aaaaaa",
+        "component_id": component_id,
+        "timestamp": "2026-01-01T00:00:00Z",
+        "spec_bundle_hash": spec_bundle_hash,
+        "generation": generation_result,
+        "verification": verification_report,
+    }}
+""")
+
+
+def _write_provenance_writer_fake(repo_root, log_path):
+    module_path = repo_root / "gen" / "provenance-writer" / "provenance_writer.py"
+    log_path_repr = repr(str(log_path))
+    _write(module_path, f"""
+LOG_PATH = {log_path_repr}
 
 
 def write_provenance(component_id, inputs, repo_root):
-    _log("provenance_writer.write_provenance")
+    with open(LOG_PATH, "a") as f:
+        f.write("provenance_writer.write_provenance\\n")
     return None
+""")
 
 
-def write_sealed_provenance(component_id, inputs, repo_root):
-    _log("provenance_writer.write_sealed_provenance")
-    return None
-"""
+class ACGate004Test(unittest.TestCase):
+    def test_model_call_error_skips_verify(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            repo_root = tmp_path / "repo"
+            repo_root.mkdir()
+            log_path = tmp_path / "invocations.log"
+            log_path.write_text("")
+
+            _build_component_fixture(repo_root, component_id="comp-foo", slug="foo")
+            _write_provenance_checker_fake(repo_root, "foo")
+            _write_spec_bundle_assembler_fake(repo_root)
+            _write_generator_fake(
+                repo_root,
+                log_path,
+                files={},
+                model_call_error={"category": "network", "message": "connection refused"},
+            )
+            _write_verifier_orchestrator_fake(repo_root, log_path, overall="pass")
+            _write_license_scanner_fake(repo_root)
+            _write_secret_scanner_fake(repo_root)
+            _write_provenance_tracker_fake(repo_root, log_path)
+            _write_provenance_writer_fake(repo_root, log_path)
+
+            result = component_gate_runner.run_component_gates(
+                "comp-foo",
+                repo_root,
+                model="fake-model-1",
+                seed=0,
+                llm_backend=None,
+                retry_feedback=None,
+            )
+
+            self.assertEqual(_dual_get(result, "block_reason"), "model_call_error")
+            self.assertTrue(_dual_get(result, "blocked"))
+
+            log_contents = log_path.read_text()
+            self.assertNotIn("verifier_orchestrator.verify", log_contents)
+            self.assertIn("generator.generate", log_contents)
+
+    def test_verification_failure_sets_block_reason(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            repo_root = tmp_path / "repo"
+            repo_root.mkdir()
+            log_path = tmp_path / "invocations.log"
+            log_path.write_text("")
+
+            _build_component_fixture(repo_root, component_id="comp-foo", slug="foo")
+            _write_provenance_checker_fake(repo_root, "foo")
+            _write_spec_bundle_assembler_fake(repo_root)
+            _write_generator_fake(
+                repo_root,
+                log_path,
+                files={"foo.py": "print('hello')"},
+                model_call_error=None,
+            )
+            _write_verifier_orchestrator_fake(repo_root, log_path, overall="fail")
+            _write_license_scanner_fake(repo_root)
+            _write_secret_scanner_fake(repo_root)
+            _write_provenance_tracker_fake(repo_root, log_path)
+            _write_provenance_writer_fake(repo_root, log_path)
+
+            result = component_gate_runner.run_component_gates(
+                "comp-foo",
+                repo_root,
+                model="fake-model-2",
+                seed=0,
+                llm_backend=None,
+                retry_feedback=None,
+            )
+
+            self.assertEqual(_dual_get(result, "block_reason"), "verification_failed")
+            self.assertIsNone(_dual_get(result, "model_call_error"))
+            self.assertTrue(_dual_get(result, "blocked"))
+
+            log_contents = log_path.read_text()
+            self.assertIn("verifier_orchestrator.verify", log_contents)
 
 
-_GENERATOR_MODULE_MODEL_CALL_ERROR = """
-import os
-from dataclasses import dataclass
-
-LOG_PATH = os.environ["GATE_TEST_LOG_PATH"]
-
-
-def _log(entry):
-    with open(LOG_PATH, "a") as f:
-        f.write(entry + "\\n")
-
-
-@dataclass
-class GenerationResult:
-    component_id: str
-    spec_bundle_hash: str
-    model: str
-    prompt_version: str
-    cache_hit: bool
-    files: dict
-    model_call_error: object
-    refused: object
-    retry_feedback: object
-
-
-def generate(bundle, model, retry_feedback=None, *, repo_root=None, llm_backend=None):
-    _log("generator.generate")
-    return GenerationResult(
-        component_id="comp-foo",
-        spec_bundle_hash="sha256:" + "a" * 64,
-        model=model,
-        prompt_version="v1",
-        cache_hit=False,
-        files={},
-        model_call_error={"category": "network", "message": "connection refused"},
-        refused=None,
-        retry_feedback=retry_feedback,
-    )
-"""
-
-
-_GENERATOR_MODULE_ONE_FILE = """
-import os
-from dataclasses import dataclass
-
-LOG_PATH = os.environ["GATE_TEST_LOG_PATH"]
-
-
-def _log(entry):
-    with open(LOG_PATH, "a") as f:
-        f.write(entry + "\\n")
-
-
-@dataclass
-class GenerationResult:
-    component_id: str
-    spec_bundle_hash: str
-    model: str
-    prompt_version: str
-    cache_hit: bool
-    files: dict
-    model_call_error: object
-    refused: object
-    retry_feedback: object
-
-
-def generate(bundle, model, retry_feedback=None, *, repo_root=None, llm_backend=None):
-    _log("generator.generate")
-    return GenerationResult(
-        component_id="comp-foo",
-        spec_bundle_hash="sha256:" + "a" * 64,
-        model=model,
-        prompt_version="v1",
-        cache_hit=False,
-        files={"foo.py": "print(1)\\n"},
-        model_call_error=None,
-        refused=None,
-        retry_feedback=retry_feedback,
-    )
-"""
-
-
-_VERIFIER_ORCHESTRATOR_MODULE_LOG_ONLY = """
-import os
-from dataclasses import dataclass, field
-
-LOG_PATH = os.environ["GATE_TEST_LOG_PATH"]
-GATE_VERSION = "verifier-orchestrator@2.0.0"
-
-
-def _log(entry):
-    with open(LOG_PATH, "a") as f:
-        f.write(entry + "\\n")
-
-
-@dataclass
-class VerificationReport:
-    component_id: str
-    criteria: list = field(default_factory=list)
-    requirement_results: dict = field(default_factory=dict)
-    interface_drift: bool = False
-    mutation_score: object = None
-    overall: str = "pass"
-
-
-def verify(component_id, repo_root, judge=None, test_author=None):
-    _log("verifier_orchestrator.verify")
-    return VerificationReport(component_id=component_id, overall="pass")
-"""
-
-
-_VERIFIER_ORCHESTRATOR_MODULE_FAIL = """
-import os
-from dataclasses import dataclass, field
-
-LOG_PATH = os.environ["GATE_TEST_LOG_PATH"]
-GATE_VERSION = "verifier-orchestrator@2.0.0"
-
-
-def _log(entry):
-    with open(LOG_PATH, "a") as f:
-        f.write(entry + "\\n")
-
-
-@dataclass
-class VerificationReport:
-    component_id: str
-    criteria: list = field(default_factory=list)
-    requirement_results: dict = field(default_factory=dict)
-    interface_drift: bool = False
-    mutation_score: object = None
-    overall: str = "fail"
-
-
-def verify(component_id, repo_root, judge=None, test_author=None):
-    _log("verifier_orchestrator.verify")
-    return VerificationReport(
-        component_id=component_id,
-        criteria=[
-            {
-                "id": "AC-FOO-001",
-                "covers": "R-FOO-001",
-                "kind": "compiled",
-                "result": "fail",
-                "failure_detail": {"message": "assertion failed", "expected": 1, "actual": 2},
-            }
-        ],
-        requirement_results={"R-FOO-001": "fail"},
-        interface_drift=False,
-        mutation_score=0.5,
-        overall="fail",
-    )
-"""
-
-
-def _write_common_modules(repo_root):
-    _write_module(repo_root, "provenance-checker", "provenance_checker", _PROVENANCE_CHECKER_MODULE)
-    _write_module(repo_root, "spec-bundle-assembler", "spec_bundle_assembler", _SPEC_BUNDLE_ASSEMBLER_MODULE)
-    _write_module(repo_root, "license-scanner", "license_scanner", _LICENSE_SCANNER_MODULE)
-    _write_module(repo_root, "secret-scanner", "secret_scanner", _SECRET_SCANNER_MODULE)
-    _write_module(repo_root, "provenance-tracker", "provenance_tracker", _PROVENANCE_TRACKER_MODULE)
-    _write_module(repo_root, "provenance-writer", "provenance_writer", _PROVENANCE_WRITER_MODULE)
-
-
-def test_model_call_error_blocks_before_verify_is_called(tmp_path, monkeypatch):
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    log_path = tmp_path / "calls.log"
-    monkeypatch.setenv("GATE_TEST_LOG_PATH", str(log_path))
-
-    _write_common_modules(repo_root)
-    _write_module(repo_root, "generator", "generator", _GENERATOR_MODULE_MODEL_CALL_ERROR)
-    _write_module(
-        repo_root, "verifier-orchestrator", "verifier_orchestrator", _VERIFIER_ORCHESTRATOR_MODULE_LOG_ONLY
-    )
-
-    result = component_gate_runner.run_component_gates(
-        component_id="comp-foo",
-        repo_root=repo_root,
-        model="claude-sonnet-5",
-        seed=0,
-        llm_backend=None,
-        retry_feedback=None,
-    )
-
-    log_lines = log_path.read_text().splitlines() if log_path.exists() else []
-    assert "verifier_orchestrator.verify" not in log_lines
-
-    assert _get(result, "block_reason") == "model_call_error"
-    assert _get(result, "blocked") is True
-    assert _get(result, "verification") is None
-
-
-def test_verification_failure_sets_block_reason(tmp_path, monkeypatch):
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    log_path = tmp_path / "calls.log"
-    monkeypatch.setenv("GATE_TEST_LOG_PATH", str(log_path))
-
-    _write_common_modules(repo_root)
-    _write_module(repo_root, "generator", "generator", _GENERATOR_MODULE_ONE_FILE)
-    _write_module(
-        repo_root, "verifier-orchestrator", "verifier_orchestrator", _VERIFIER_ORCHESTRATOR_MODULE_FAIL
-    )
-
-    result = component_gate_runner.run_component_gates(
-        component_id="comp-foo",
-        repo_root=repo_root,
-        model="claude-sonnet-5",
-        seed=0,
-        llm_backend=None,
-        retry_feedback=None,
-    )
-
-    log_lines = log_path.read_text().splitlines() if log_path.exists() else []
-    assert "verifier_orchestrator.verify" in log_lines
-
-    assert _get(result, "block_reason") == "verification_failed"
-    assert _get(result, "model_call_error") is None
-    assert _get(result, "blocked") is True
+if __name__ == "__main__":
+    unittest.main()

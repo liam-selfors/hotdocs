@@ -15,7 +15,7 @@ call.
 passes to `check_provenance`, and that `component-gate-runner` passes
 to `provenance-writer` (`R-PROVCHECK-005`, `D163`). It loads each
 dependency from `<repo_root>/gen/<slug>/`, or for the sealed
-`criterion-compiler` from its `source_path`, `pipeline/criterion-compiler/`,
+`criterion-compiler` from its `source_path`, `pipeline/criterion-compiler/`, each, or from the tool root's when absent (`D199`),
 and reads, in this order:
 
 1. `spec-bundle-assembler`'s `assemble(component_id, repo_root=...,

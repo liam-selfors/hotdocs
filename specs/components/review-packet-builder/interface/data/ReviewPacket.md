@@ -13,7 +13,7 @@
     "secret_scan": []
   },
   "provenance_hit_status": { "comp-foo": false },
-  "capability_scenarios": { "P-ZERO-EDIT": { "...": "a CapabilityScenarioReport" } },
+  "capability_scenarios": { "P-ZERO-EDIT": { "P-ZERO-EDIT": { "overall": "pass", "scenarios": [] } } },
   "exemption_changes": { "sealed": ["comp-foo"], "pinned_overrides": [] },
   "residual_risk": [
     { "component_id": "comp-foo", "message": "mutation_score 0.92 < 1.0 despite overall=pass" }
@@ -37,7 +37,8 @@ shape) — never the `specs/components/<slug>/component.md` or
 
 `capability_scenarios` (`R-PACKET-011`, `D90`) is every product
 capability whose `realizes`-set intersects `regenerated_components`,
-keyed by `P-id` — read from `provenance-tracker`'s `VerifyReport.capabilities`,
+keyed by `P-id`, each value that capability's `capability_scenario_report`
+exactly as read (itself keyed by `P-id`, never unwrapped) — read from `provenance-tracker`'s `VerifyReport.capabilities`,
 never a live `capability-scenario-verifier` call. A distinct section
 from `verification_results`, never conflated with it — a cross-component
 finding and a single-component one point a reviewer to different

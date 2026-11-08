@@ -4,18 +4,18 @@ Covers: R-INIT-002
 Kind: generated-test
 
 ```gherkin
-Given a fake tool root (with llm-endpoint, as in the fixtures) that also holds gen/a-b/a_b.py, gen/c/__pycache__/x.pyc, and pipeline/criterion-compiler/criterion_compiler.py
+Given a fake tool root (with llm-endpoint, as in the fixtures) that also holds gen/a-b/a_b.py
 When init runs on an empty directory
-Then gen/a-b/a_b.py and pipeline/criterion-compiler/criterion_compiler.py are copies, no __pycache__ exists anywhere under the project (copied or created by loading llm-endpoint),
-  and .hotdocs-tool.json holds tool_version "0.1.0", a sorted vendored list of those paths, and a content_hash starting "sha256:"
+Then <dir>/gen is an empty directory, no pipeline directory exists,
+  and .hotdocs-tool.json parses to exactly {"tool_version": "0.1.0"}
 
 Given the second run
 When init runs again
-Then vendored paths are reported skipped and not recopied
+Then .hotdocs-tool.json has the same bytes and modification time
 
-Given a target already holding gen/a-b/ and no stamp
+Given a target whose gen/ already holds a-b/ (the fake tool root's slug) and gen/mine/
 When init runs
-Then it exits 1 naming "gen/a-b", and nothing at all was written
+Then it exits 1 naming "gen/a-b" and not "gen/mine", and nothing at all was written
 
 Given the target is the tool root itself
 When init runs

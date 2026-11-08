@@ -31,8 +31,10 @@ from typing import Any, Dict, List, Optional
 # loading instruction (R-GEN-018, D138); v7 added the always-included
 # dual dict-or-attribute access instruction for a dependency's own
 # top-level return value (R-GEN-019, D139); v8 corrected v6's
-# instruction to honor a sealed dependency's own source_path (D159).
-PROMPT_VERSION = "v8"
+# instruction to honor a sealed dependency's own source_path (D159); v9
+# added the tool-root fallback for a dependency absent under repo_root
+# (D199).
+PROMPT_VERSION = "v9"
 
 # R-GEN-005/006: the cache-key component identifying this gate's shape.
 # Bumped on D56 to orphan two pre-existing poisoned cache entries
@@ -42,7 +44,7 @@ PROMPT_VERSION = "v8"
 # itself -- missing this the first time let a stale, pre-fix candidate
 # replay from cache instead of triggering a fresh call. Bumped again on
 # D138, D139, and D159 for the same reason.
-GATE_VERSION = "generator@1.7.0"
+GATE_VERSION = "generator@1.8.0"
 
 
 _SYSTEM_PROMPT = """You are generating the complete source for one component \
@@ -94,7 +96,12 @@ actually called with, joined to the module path DEPENDENCY USAGE gives \
 for it: `gen/<dep-slug>/` for an ordinary dependency, or a sealed \
 dependency's own `source_path` (e.g. `pipeline/criterion-compiler/`), \
 holding `<module_name>.py` (flat) or `<module_name>/__init__.py` \
-(package). Never trust a bare-named `sys.modules` entry -- a different \
+(package). Only when that directory does not exist under `repo_root`, \
+fall back to the same path under the tool root: the parent of the \
+nearest directory named `gen` above your own module's `__file__` \
+(a project holds only its own components; the tool's stay in the \
+tool). `repo_root` always wins when it has the directory, so a test's \
+fake planted there is never bypassed. Never trust a bare-named `sys.modules` entry -- a different \
 `repo_root`'s earlier call in the same process may already have \
 populated it with the wrong module, which is exactly what makes a bare \
 `import <module_name>` dangerous even when it happens to work the \
@@ -141,8 +148,20 @@ class GenerationResult:
 # ---------------------------------------------------------------------------
 
 
+def _tool_root() -> Path:
+    # D199: the parent of the nearest `gen` directory above this file.
+    for parent in Path(__file__).resolve().parents:
+        if parent.name == "gen":
+            return parent.parent
+    raise ImportError("generator is not under a gen/ directory")
+
+
 def _load_module_from_repo(repo_root: Path, component_dir: str, module_name: str):
-    module_path = Path(repo_root) / "gen" / component_dir / f"{module_name}.py"
+    # D199: repo_root first, so a test's fake wins; else the tool's own.
+    base = Path(repo_root) / "gen" / component_dir
+    if not base.is_dir():
+        base = _tool_root() / "gen" / component_dir
+    module_path = base / f"{module_name}.py"
     spec = importlib.util.spec_from_file_location(module_name, module_path)
     if spec is None or spec.loader is None:
         raise ImportError(f"cannot load {module_name!r} from {module_path}")

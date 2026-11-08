@@ -9,7 +9,7 @@ gate_version(repo_root: Path) -> str
 put on its result for the same `repo_root` and environment, without
 scanning anything or touching `cache-manager` (`R-LICENSE-008`).
 
-`scan` loads `cache-manager` from `<repo_root>/gen/cache-manager/` and
+`scan` loads `cache-manager` from `<repo_root>/gen/cache-manager/`, or from the tool root's when absent (`D199`), and
 uses exactly four of its names: `CacheKey(spec_bundle_hash=...,
 gate_inputs_hash=..., gate_version=..., model_pin=...)` to build the
 key; `get(cache_key, repo_root=...)`; `CachedResult(gate_type="license_scanner",

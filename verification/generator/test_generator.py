@@ -338,3 +338,14 @@ def test_ac_gen_021_redundant_component_prefix_is_stripped(repo_root):
     assert not (gen_dir / "foo-bar").exists()
     assert not (gen_dir / "gen").exists()
     assert set(result.files) == {"foo_bar.py", "helpers/__init__.py", "foo_bar_extra.py"}
+
+
+def test_ac_gen_019_dependencies_fall_back_to_the_tool_root(tmp_path, monkeypatch):
+    """D199 -- a project holds only its own components; with no gen/ under
+    repo_root, cache-manager and llm-endpoint come from the tool's own gen/."""
+    monkeypatch.delenv("VAR_CACHE_STORE_URL", raising=False)
+    backend = MockBackend([file_block("foo.py", "x = 1")])
+    result = generate(FakeBundle(), "claude-sonnet-5", repo_root=tmp_path, llm_backend=backend)
+    assert result.model_call_error is None
+    assert (tmp_path / "gen" / "foo" / "foo.py").read_text().strip() == "x = 1"
+    assert "tool root" in backend.calls[0][0]

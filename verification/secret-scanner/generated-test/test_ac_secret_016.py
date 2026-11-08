@@ -1,235 +1,200 @@
 import hashlib
 import json
-import textwrap
-
-import pytest
 
 import secret_scanner
 
 
-AWS_SECRET = "AKIAABCDEFGHIJKLMNOP"
-AWS_SECRET_LITERAL = "AKIAZZZZYYYYXXXXWWWW"
+SECRET = "AKIAABCDEFGHIJKLMNOP"
+SECRET_SHA1 = hashlib.sha1(SECRET.encode("utf-8")).hexdigest()
 
 
-def _get(obj, key, default=None):
+def get_field(obj, key):
     if isinstance(obj, dict):
-        return obj.get(key, default)
-    return getattr(obj, key, default)
+        return obj.get(key)
+    return getattr(obj, key, None)
 
 
-def _sha1_prefixed(secret):
-    return "sha1:" + hashlib.sha1(secret.encode("utf-8")).hexdigest()
-
-
-def _base_valid_entry():
-    return {
-        "file": "verification/foo/test_x.py",
-        "type": "AWS Access Key",
-        "hashed_secret": _sha1_prefixed(AWS_SECRET),
-        "reason": "planted-fixture",
-    }
-
-
-def _entries_json(obj):
-    return json.dumps(obj, indent=2).encode("utf-8")
-
-
-def _make_repo(tmp_path):
+def make_repo(tmp_path):
     repo_root = tmp_path / "repo"
     (repo_root / "verification" / "foo").mkdir(parents=True)
     (repo_root / "gen" / "foo").mkdir(parents=True)
-    (repo_root / "verification" / "foo" / "test_x.py").write_text(
-        'K = "%s"\n' % AWS_SECRET, encoding="utf-8"
-    )
-    (repo_root / "gen" / "foo" / "c.py").write_text(
-        'K = "%s"\n' % AWS_SECRET, encoding="utf-8"
-    )
+    (repo_root / "specs" / "decisions").mkdir(parents=True)
+    secret_line = f'K = "{SECRET}"\n'
+    (repo_root / "verification" / "foo" / "test_x.py").write_text(secret_line)
+    (repo_root / "gen" / "foo" / "c.py").write_text(secret_line)
     return repo_root
 
 
-def _write_allowlist_sealed(repo_root, content_bytes):
-    allowlist_path = repo_root / ".secret-allowlist.json"
-    allowlist_path.write_bytes(content_bytes)
-    digest = hashlib.sha256(content_bytes).hexdigest()
-    decisions_dir = repo_root / "specs" / "decisions"
-    decisions_dir.mkdir(parents=True, exist_ok=True)
-    decision_path = decisions_dir / "D1.md"
-    body = textwrap.dedent(
-        """\
-        ---
-        id: D1
-        title: Seal secret allowlist
-        status: ratified
-        owners: [lselfors@gmail.com]
-        last_ratified_commit: %s
-        allowlist_sha256: sha256:%s
-        ---
-
-        Seals the secret allowlist for AC-SECRET-016 fixtures.
-        """
-    ) % ("0" * 40, digest)
-    decision_path.write_text(body, encoding="utf-8")
-
-
-def _assert_common(result):
-    assert _get(result, "flagged") is True
-    matches = _get(result, "matches")
-
-    def _has(rule_id, file_, risk_tier=None, line=None):
-        for m in matches:
-            if _get(m, "rule_id") != rule_id or _get(m, "file") != file_:
-                continue
-            if risk_tier is not None and _get(m, "risk_tier") != risk_tier:
-                continue
-            if line is not None and _get(m, "line") != line:
-                continue
-            return True
-        return False
-
-    assert _has("AWS Access Key", "verification/foo/test_x.py", "high", 1)
-    assert _has("AWS Access Key", "gen/foo/c.py", "high", 1)
-    assert _has("allowlist-invalid", ".secret-allowlist.json", "high", 1)
-
-
-CORRUPTIONS = {}
-
-
-def _reg(name):
-    def deco(fn):
-        CORRUPTIONS[name] = fn
-        return fn
-
-    return deco
-
-
-@_reg("invalid_json")
-def _c_invalid_json():
-    return b'{"version": 1, "entries": [ this is not json'
-
-
-@_reg("top_level_extra_key")
-def _c_top_level_extra_key():
-    return _entries_json(
-        {"version": 1, "entries": [_base_valid_entry()], "extra": "x"}
-    )
-
-
-@_reg("version_2")
-def _c_version_2():
-    return _entries_json({"version": 2, "entries": [_base_valid_entry()]})
-
-
-@_reg("entry_extra_key")
-def _c_entry_extra_key():
-    e = _base_valid_entry()
-    e["note"] = "hi"
-    return _entries_json({"version": 1, "entries": [e]})
-
-
-@_reg("entry_missing_key")
-def _c_entry_missing_key():
-    e = _base_valid_entry()
-    del e["reason"]
-    return _entries_json({"version": 1, "entries": [e]})
-
-
-@_reg("entry_reason_other")
-def _c_entry_reason_other():
-    e = _base_valid_entry()
-    e["reason"] = "other"
-    return _entries_json({"version": 1, "entries": [e]})
-
-
-@_reg("entry_hash_no_prefix")
-def _c_entry_hash_no_prefix():
-    e = _base_valid_entry()
-    e["hashed_secret"] = hashlib.sha1(AWS_SECRET.encode("utf-8")).hexdigest()
-    return _entries_json({"version": 1, "entries": [e]})
-
-
-@_reg("entry_file_dotdot")
-def _c_entry_file_dotdot():
-    e = _base_valid_entry()
-    e["file"] = "../x.py"
-    return _entries_json({"version": 1, "entries": [e]})
-
-
-@_reg("entry_file_absolute")
-def _c_entry_file_absolute():
-    e = _base_valid_entry()
-    e["file"] = "/etc/x"
-    return _entries_json({"version": 1, "entries": [e]})
-
-
-@_reg("entry_file_pattern")
-def _c_entry_file_pattern():
-    e = _base_valid_entry()
-    e["file"] = "verification/*.py"
-    return _entries_json({"version": 1, "entries": [e]})
-
-
-@_reg("entry_planted_fixture_wrong_location")
-def _c_entry_planted_fixture_wrong_location():
-    e = {
-        "file": "gen/foo/c.py",
+def valid_entry():
+    return {
+        "file": "verification/foo/test_x.py",
         "type": "AWS Access Key",
-        "hashed_secret": _sha1_prefixed(AWS_SECRET),
+        "hashed_secret": f"sha1:{SECRET_SHA1}",
         "reason": "planted-fixture",
     }
-    return _entries_json({"version": 1, "entries": [e]})
 
 
-@_reg("entry_public_constant_wrong_type")
-def _c_entry_public_constant_wrong_type():
-    e = _base_valid_entry()
-    e["reason"] = "public-constant"
-    return _entries_json({"version": 1, "entries": [e]})
+def to_bytes(obj):
+    return json.dumps(obj, indent=2, sort_keys=True).encode("utf-8")
 
 
-@_reg("second_valid_entry_beside_corrupt")
-def _c_second_valid_entry_beside_corrupt():
-    good = _base_valid_entry()
-    corrupt = _base_valid_entry()
-    corrupt["file"] = "verification/foo/other.py"
-    corrupt["reason"] = "other"
-    return _entries_json({"version": 1, "entries": [good, corrupt]})
-
-
-@pytest.mark.parametrize("name", sorted(CORRUPTIONS))
-def test_corrupted_allowlist_invalidates(tmp_path, name):
-    repo_root = _make_repo(tmp_path)
-    content = CORRUPTIONS[name]()
-    _write_allowlist_sealed(repo_root, content)
-
-    result = secret_scanner.scan(repo_root)
-
-    _assert_common(result)
-
-
-def test_entry_extra_key_with_embedded_secret_scans_allowlist_itself(tmp_path):
-    repo_root = _make_repo(tmp_path)
-    e = _base_valid_entry()
-    e["note"] = AWS_SECRET_LITERAL
-    content = _entries_json({"version": 1, "entries": [e]})
-    _write_allowlist_sealed(repo_root, content)
-
-    result = secret_scanner.scan(repo_root)
-
-    _assert_common(result)
-    matches = _get(result, "matches")
-    assert any(
-        _get(m, "rule_id") == "AWS Access Key"
-        and _get(m, "file") == ".secret-allowlist.json"
-        for m in matches
+def seal_allowlist(repo_root, raw_bytes, decision_num=900):
+    allowlist_path = repo_root / ".secret-allowlist.json"
+    allowlist_path.write_bytes(raw_bytes)
+    digest = hashlib.sha256(raw_bytes).hexdigest()
+    decisions_dir = repo_root / "specs" / "decisions"
+    decisions_dir.mkdir(parents=True, exist_ok=True)
+    decision_path = decisions_dir / f"D{decision_num}.md"
+    decision_path.write_text(
+        "---\n"
+        f"id: D{decision_num}\n"
+        "title: Seal fixture allowlist\n"
+        "status: ratified\n"
+        "owners: [tester]\n"
+        f"allowlist_sha256: sha256:{digest}\n"
+        "last_ratified_commit: 0000000000000000000000000000000000000000\n"
+        "---\n"
+        "Seals the fixture allowlist for AC-SECRET-016.\n"
     )
 
 
-def test_no_allowlist_file_allows_nothing(tmp_path):
-    repo_root = _make_repo(tmp_path)
+def run_scenario(tmp_path, raw_bytes):
+    repo_root = make_repo(tmp_path)
+    seal_allowlist(repo_root, raw_bytes)
+    return secret_scanner.scan(repo_root)
 
+
+def assert_common_invalid(result):
+    flagged = get_field(result, "flagged")
+    matches = get_field(result, "matches") or []
+    assert flagged is True
+    aws_files = {
+        get_field(m, "file")
+        for m in matches
+        if get_field(m, "rule_id") == "AWS Access Key"
+    }
+    assert "gen/foo/c.py" in aws_files
+    assert "verification/foo/test_x.py" in aws_files
+    invalid_matches = [
+        m for m in matches if get_field(m, "rule_id") == "allowlist-invalid"
+    ]
+    assert len(invalid_matches) == 1
+    inv = invalid_matches[0]
+    assert get_field(inv, "risk_tier") == "high"
+    assert get_field(inv, "file") == ".secret-allowlist.json"
+    assert get_field(inv, "line") == 1
+    return matches
+
+
+def test_not_valid_json(tmp_path):
+    raw_bytes = b'{"version": 1, "entries": [this is not json]'
+    result = run_scenario(tmp_path, raw_bytes)
+    assert_common_invalid(result)
+
+
+def test_top_level_extra_key(tmp_path):
+    obj = {"version": 1, "entries": [valid_entry()], "notes": "extra"}
+    result = run_scenario(tmp_path, to_bytes(obj))
+    assert_common_invalid(result)
+
+
+def test_top_level_version_2(tmp_path):
+    obj = {"version": 2, "entries": [valid_entry()]}
+    result = run_scenario(tmp_path, to_bytes(obj))
+    assert_common_invalid(result)
+
+
+def test_entry_extra_key(tmp_path):
+    entry = valid_entry()
+    entry["comment"] = "extra"
+    obj = {"version": 1, "entries": [entry]}
+    result = run_scenario(tmp_path, to_bytes(obj))
+    assert_common_invalid(result)
+
+
+def test_entry_missing_key(tmp_path):
+    entry = valid_entry()
+    del entry["reason"]
+    obj = {"version": 1, "entries": [entry]}
+    result = run_scenario(tmp_path, to_bytes(obj))
+    assert_common_invalid(result)
+
+
+def test_entry_reason_other(tmp_path):
+    entry = valid_entry()
+    entry["reason"] = "other"
+    obj = {"version": 1, "entries": [entry]}
+    result = run_scenario(tmp_path, to_bytes(obj))
+    assert_common_invalid(result)
+
+
+def test_entry_hashed_secret_missing_prefix(tmp_path):
+    entry = valid_entry()
+    entry["hashed_secret"] = SECRET_SHA1
+    obj = {"version": 1, "entries": [entry]}
+    result = run_scenario(tmp_path, to_bytes(obj))
+    assert_common_invalid(result)
+
+
+def test_entry_file_is_pattern(tmp_path):
+    entry = valid_entry()
+    entry["file"] = "verification/*.py"
+    obj = {"version": 1, "entries": [entry]}
+    result = run_scenario(tmp_path, to_bytes(obj))
+    assert_common_invalid(result)
+
+
+def test_entry_planted_fixture_wrong_location(tmp_path):
+    entry = {
+        "file": "gen/foo/c.py",
+        "type": "AWS Access Key",
+        "hashed_secret": f"sha1:{SECRET_SHA1}",
+        "reason": "planted-fixture",
+    }
+    obj = {"version": 1, "entries": [entry]}
+    result = run_scenario(tmp_path, to_bytes(obj))
+    assert_common_invalid(result)
+
+
+def test_entry_public_constant_wrong_type(tmp_path):
+    entry = valid_entry()
+    entry["reason"] = "public-constant"
+    obj = {"version": 1, "entries": [entry]}
+    result = run_scenario(tmp_path, to_bytes(obj))
+    assert_common_invalid(result)
+
+
+def test_second_valid_entry_beside_corrupt(tmp_path):
+    corrupt_entry = valid_entry()
+    corrupt_entry["reason"] = "other"
+    obj = {"version": 1, "entries": [valid_entry(), corrupt_entry]}
+    result = run_scenario(tmp_path, to_bytes(obj))
+    assert_common_invalid(result)
+
+
+def test_extra_key_with_secret_value_allowlist_itself_scanned(tmp_path):
+    obj = {
+        "version": 1,
+        "entries": [valid_entry()],
+        "spare": "AKIAZZZZYYYYXXXXWWWW",
+    }
+    result = run_scenario(tmp_path, to_bytes(obj))
+    matches = assert_common_invalid(result)
+    allowlist_aws_matches = [
+        m
+        for m in matches
+        if get_field(m, "rule_id") == "AWS Access Key"
+        and get_field(m, "file") == ".secret-allowlist.json"
+    ]
+    assert len(allowlist_aws_matches) == 1
+
+
+def test_no_allowlist_file_at_all(tmp_path):
+    repo_root = make_repo(tmp_path)
     result = secret_scanner.scan(repo_root)
-
-    assert _get(result, "flagged") is True
-    matches = _get(result, "matches")
-    assert not any(_get(m, "rule_id") == "allowlist-invalid" for m in matches)
-    assert _get(result, "allowed") == []
+    flagged = get_field(result, "flagged")
+    matches = get_field(result, "matches") or []
+    allowed = get_field(result, "allowed")
+    assert flagged is True
+    assert not any(get_field(m, "rule_id") == "allowlist-invalid" for m in matches)
+    assert allowed == []

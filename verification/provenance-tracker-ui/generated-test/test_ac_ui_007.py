@@ -1,45 +1,49 @@
 import json
+import shutil
+import tempfile
+import unittest
+from pathlib import Path
 
 import provenance_tracker_ui
 
 
-def _get(obj, key, default=None):
-    if isinstance(obj, dict):
-        return obj.get(key, default)
-    return getattr(obj, key, default)
-
-
-FAKE_PROVENANCE_TRACKER_TEMPLATE = '''
+FAKE_PROVENANCE_TRACKER_SOURCE = '''
 import json
 
-LOG_FILE = "__LOG_FILE_PATH__"
+_LOG_PATH = {log_path}
 
 
 def check_readiness(repo_root, changed_ids=None, model=None, seed=0, llm_backend=None):
-    with open(LOG_FILE, "a") as f:
+    with open(_LOG_PATH, "a") as f:
         f.write(json.dumps(changed_ids) + "\\n")
+
     scope = "blast-radius" if changed_ids else "whole-corpus"
-    return {
+
+    verification_report = {{
+        "component_id": "comp-foo",
+        "criteria": [],
+        "requirement_results": {{}},
+        "interface_drift": False,
+        "mutation_score": None,
+        "overall": "pass",
+    }}
+
+    components = {{
+        "comp-foo": {{
+            "hit": True,
+            "verification_report": verification_report,
+            "license_scan": {{"blocked": False}},
+            "secret_scan": {{"flagged": False}},
+        }}
+    }}
+
+    return {{
         "scope": scope,
         "ready": True,
-        "components": {
-            "comp-foo": {
-                "hit": True,
-                "verification_report": {
-                    "component_id": "comp-foo",
-                    "criteria": [],
-                    "requirement_results": {},
-                    "interface_drift": False,
-                    "mutation_score": 1.0,
-                    "overall": "pass",
-                },
-                "license_scan": {"blocked": False},
-                "secret_scan": {"flagged": False},
-            }
-        },
-        "capabilities": {},
+        "components": components,
+        "capabilities": {{}},
         "not_ready_reasons": [],
-    }
+    }}
 
 
 def last_requirement_failures(component_id, repo_root):
@@ -47,66 +51,77 @@ def last_requirement_failures(component_id, repo_root):
 '''
 
 
-def test_ac_ui_007(tmp_path):
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
+class TestAC_UI_007(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.repo_root = Path(self.tmp) / "repo"
+        self.repo_root.mkdir()
+        self.log_path = Path(self.tmp) / "calls.jsonl"
 
-    verification_dir = repo_root / "verification"
-    verification_dir.mkdir()
-    corpus_graph = {
-        "nodes": {
-            "comp-foo": {
-                "type": "component",
-                "verification": {},
-                "provenance": {},
-                "size_status": "ok",
-                "sealed": True,
-                "pinned_overrides": [],
-            }
-        },
-        "edges": [],
-        "aggregates": {
-            "orphan_capability_rate": 0.0,
-            "orphan_component_rate": 0.0,
-            "orphan_var_rate": 0.0,
-        },
-    }
-    (verification_dir / "corpus-graph.json").write_text(json.dumps(corpus_graph))
+        dep_dir = self.repo_root / "gen" / "provenance-tracker"
+        dep_dir.mkdir(parents=True)
+        module_path = dep_dir / "provenance_tracker.py"
+        module_path.write_text(
+            FAKE_PROVENANCE_TRACKER_SOURCE.format(log_path=repr(str(self.log_path)))
+        )
 
-    log_file = tmp_path / "check_readiness_calls.log"
+        verification_dir = self.repo_root / "verification"
+        verification_dir.mkdir(parents=True)
+        corpus_graph = {
+            "nodes": {
+                "comp-foo": {
+                    "type": "component",
+                    "verification": None,
+                    "provenance": None,
+                    "size_status": "ok",
+                    "sealed": True,
+                    "pinned_overrides": [],
+                }
+            },
+            "edges": [],
+            "aggregates": {
+                "orphan_capability_rate": 0.0,
+                "orphan_component_rate": 0.0,
+                "orphan_var_rate": 0.0,
+            },
+        }
+        (verification_dir / "corpus-graph.json").write_text(json.dumps(corpus_graph))
 
-    dep_dir = repo_root / "gen" / "provenance-tracker"
-    dep_dir.mkdir(parents=True)
-    escaped_log_path = str(log_file).replace("\\", "\\\\")
-    source = FAKE_PROVENANCE_TRACKER_TEMPLATE.replace(
-        "__LOG_FILE_PATH__", escaped_log_path
-    )
-    (dep_dir / "provenance_tracker.py").write_text(source)
+        self.out_dir_1 = Path(self.tmp) / "out1"
+        self.out_dir_2 = Path(self.tmp) / "out2"
 
-    out_dir_1 = tmp_path / "out1"
-    out_dir_2 = tmp_path / "out2"
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
 
-    snapshot_1 = provenance_tracker_ui.render_tracker_ui(
-        out_dir_1, repo_root, changed_ids=["comp-foo"]
-    )
-    snapshot_2 = provenance_tracker_ui.render_tracker_ui(
-        out_dir_2, repo_root, changed_ids=None
-    )
+    def _field(self, value, key):
+        return value.get(key) if isinstance(value, dict) else getattr(value, key, None)
 
-    assert log_file.exists()
-    lines = log_file.read_text().splitlines()
-    assert len(lines) == 2
-    assert json.loads(lines[0]) == ["comp-foo"]
-    assert json.loads(lines[1]) is None
+    def test_two_scopes_call_check_readiness_fresh_each_time(self):
+        snapshot_blast = provenance_tracker_ui.render_tracker_ui(
+            self.out_dir_1, self.repo_root, changed_ids=["comp-foo"]
+        )
+        snapshot_whole = provenance_tracker_ui.render_tracker_ui(
+            self.out_dir_2, self.repo_root, changed_ids=None
+        )
 
-    assert _get(snapshot_1, "scope") == "blast-radius"
-    assert _get(snapshot_1, "changed_ids") == ["comp-foo"]
-    assert _get(snapshot_2, "scope") == "whole-corpus"
-    assert _get(snapshot_2, "changed_ids") is None
+        self.assertTrue(self.log_path.exists())
+        with open(self.log_path, "r") as f:
+            lines = [json.loads(line) for line in f if line.strip()]
 
-    page_1 = (out_dir_1 / "index.html").read_text()
-    page_2 = (out_dir_2 / "index.html").read_text()
+        self.assertEqual(len(lines), 2)
+        self.assertEqual(lines[0], ["comp-foo"])
+        self.assertIsNone(lines[1])
 
-    assert "blast-radius" in page_1
-    assert "comp-foo" in page_1
-    assert "whole-corpus" in page_2
+        self.assertEqual(self._field(snapshot_blast, "scope"), "blast-radius")
+        self.assertEqual(self._field(snapshot_whole, "scope"), "whole-corpus")
+
+        html_blast = (self.out_dir_1 / "index.html").read_text()
+        html_whole = (self.out_dir_2 / "index.html").read_text()
+
+        self.assertIn("blast-radius", html_blast)
+        self.assertIn("comp-foo", html_blast)
+        self.assertIn("whole-corpus", html_whole)
+
+
+if __name__ == "__main__":
+    unittest.main()

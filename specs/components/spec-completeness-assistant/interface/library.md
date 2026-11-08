@@ -13,7 +13,8 @@ no credential of its own. `llm_backend` is passed straight through to
 `generator` and `llm-endpoint` unchanged, the same injection point
 every other model-calling component in this corpus exposes (`D156`).
 
-Each dependency is loaded from `<repo_root>/gen/<slug>/` and called in
+Each dependency is loaded from `<repo_root>/gen/<slug>/`, or from the
+tool root's when absent (`D199`), and called in
 this order, stopping early per `R-ASSIST-001`:
 
 1. `spec-linter`'s `lint(paths, repo_root)`
@@ -27,4 +28,5 @@ this order, stopping early per `R-ASSIST-001`:
    then redundancy — each response parsed per `R-ASSIST-010`
 
 Any stand-in for these dependencies must provide each function this
-list names.
+list names, with the full parameter list of its real signature (a
+`lint` stand-in takes `(paths, repo_root, strict=False, judge=None)`).

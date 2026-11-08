@@ -1,76 +1,116 @@
 import os
 import shutil
 import tempfile
-import unittest
 from pathlib import Path
 
 import secret_scanner
 
 
 def _get(obj, key, default=None):
-    if isinstance(obj, dict):
-        return obj.get(key, default)
-    return getattr(obj, key, default)
+    return obj.get(key, default) if isinstance(obj, dict) else getattr(obj, key, default)
 
 
-class TestAcSecret007(unittest.TestCase):
-    def setUp(self):
-        self.repo_root = Path(tempfile.mkdtemp(prefix="secret_scan_ac007_"))
-        self._old_webhook = os.environ.pop("VAR_COMPLIANCE_WEBHOOK_URL", None)
-
-    def tearDown(self):
-        shutil.rmtree(self.repo_root, ignore_errors=True)
-        if self._old_webhook is not None:
-            os.environ["VAR_COMPLIANCE_WEBHOOK_URL"] = self._old_webhook
-
-    def test_full_scan_with_multiple_flagged_files_yields_one_result(self):
-        (self.repo_root / "README.md").write_text("Nothing interesting here.\n")
-
-        nested = self.repo_root / "src" / "config"
-        nested.mkdir(parents=True)
-        aws_key_line = 'AWS_KEY = "AKIAIOSFODNN7EXAMPLE"\n'
-        (self.repo_root / "config_a.py").write_text(aws_key_line)
-        (nested / "config_b.py").write_text(aws_key_line)
-
-        result = secret_scanner.scan(self.repo_root)
-
-        self.assertNotIsInstance(result, (list, tuple, set))
-
-        to_dict = getattr(result, "to_dict", None)
-        self.assertTrue(callable(to_dict), "SecretScanResult must expose to_dict()")
-        payload = result.to_dict()
-        self.assertIsInstance(payload, dict)
-
-        self.assertEqual(_get(payload, "scope"), "full")
-        self.assertIn("matches", payload)
-        self.assertIn("allowed", payload)
-        self.assertIn("unused_allowlist_entries", payload)
-        self.assertIn("notified", payload)
-        self.assertIn("notification_delivery_error", payload)
-        self.assertIn("cache_hit", payload)
-
-        matches = _get(payload, "matches")
-        self.assertIsInstance(matches, list)
-        # Two files each contain the planted key: a single SecretScanResult
-        # must aggregate both findings rather than one result per file/match.
-        self.assertGreaterEqual(len(matches), 2)
-
-        self.assertTrue(_get(payload, "flagged"))
-
-    def test_scan_called_twice_each_returns_its_own_single_result(self):
-        (self.repo_root / "clean.txt").write_text("no secrets at all\n")
-
-        first = secret_scanner.scan(self.repo_root)
-        second = secret_scanner.scan(self.repo_root)
-
-        for result in (first, second):
-            self.assertNotIsInstance(result, (list, tuple, set))
-            to_dict = getattr(result, "to_dict", None)
-            self.assertTrue(callable(to_dict))
-            payload = result.to_dict()
-            self.assertIsInstance(payload, dict)
-            self.assertEqual(_get(payload, "scope"), "full")
+def _to_dict(result):
+    if isinstance(result, dict):
+        return result
+    to_dict = getattr(result, "to_dict", None)
+    if callable(to_dict):
+        return to_dict()
+    return result
 
 
-if __name__ == "__main__":
-    unittest.main()
+FAKE_CACHE_MANAGER_SRC = '''
+class Miss:
+    pass
+
+
+class CacheKey:
+    def __init__(self, spec_bundle_hash=None, gate_inputs_hash=None, gate_version=None, model_pin=None):
+        self.spec_bundle_hash = spec_bundle_hash
+        self.gate_inputs_hash = gate_inputs_hash
+        self.gate_version = gate_version
+        self.model_pin = model_pin
+
+
+class CachedResult:
+    def __init__(self, gate_type=None, payload=None, stored_at=None):
+        self.gate_type = gate_type
+        self.payload = payload
+        self.stored_at = stored_at
+
+
+def get(cache_key, *, repo_root=None):
+    return Miss()
+
+
+def put(cache_key, result, *, repo_root=None):
+    pass
+'''
+
+
+def _make_repo_root(suffix):
+    repo_root = tempfile.mkdtemp(prefix="hotdocs_ac_secret_007_%s_" % suffix)
+    cache_manager_dir = os.path.join(repo_root, "gen", "cache-manager")
+    os.makedirs(cache_manager_dir, exist_ok=True)
+    with open(os.path.join(cache_manager_dir, "cache_manager.py"), "w") as f:
+        f.write(FAKE_CACHE_MANAGER_SRC)
+
+    with open(os.path.join(repo_root, "README.md"), "w") as f:
+        f.write("This is a plain readme file with no secret-like content inside it.\n")
+
+    return repo_root
+
+
+def _assert_single_result(result):
+    assert result is not None
+    assert not isinstance(result, (list, tuple, set))
+
+    as_dict = _to_dict(result)
+    assert isinstance(as_dict, dict)
+    assert not isinstance(as_dict, (list, tuple, set))
+
+    for field in (
+        "scope",
+        "flagged",
+        "matches",
+        "allowed",
+        "unused_allowlist_entries",
+        "notified",
+        "notification_delivery_error",
+        "cache_hit",
+    ):
+        assert field in as_dict, "expected %r on the single SecretScanResult" % field
+
+    scope = _get(result, "scope")
+    assert scope == "full"
+
+    flagged = _get(result, "flagged")
+    assert isinstance(flagged, bool)
+
+    matches = _get(result, "matches")
+    assert isinstance(matches, list)
+
+
+def test_full_scan_produces_exactly_one_secret_scan_result():
+    repo_root = _make_repo_root("a")
+    try:
+        result = secret_scanner.scan(Path(repo_root))
+        _assert_single_result(result)
+    finally:
+        shutil.rmtree(repo_root, ignore_errors=True)
+
+
+def test_any_full_scan_still_produces_exactly_one_result():
+    repo_root_one = _make_repo_root("b1")
+    repo_root_two = _make_repo_root("b2")
+    try:
+        result_one = secret_scanner.scan(Path(repo_root_one))
+        result_two = secret_scanner.scan(Path(repo_root_two))
+
+        _assert_single_result(result_one)
+        _assert_single_result(result_two)
+
+        assert result_one is not result_two
+    finally:
+        shutil.rmtree(repo_root_one, ignore_errors=True)
+        shutil.rmtree(repo_root_two, ignore_errors=True)

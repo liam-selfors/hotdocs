@@ -156,3 +156,27 @@ Before landing, the old and new gates were run on three landed
 components: identical verdicts and mutation scores. `GATE_VERSION` is
 unchanged (`verifier-orchestrator@2.0.0`): verification behavior did not
 move, only the command name, the usage message, and one exit code.
+
+## `D199`: the tool's components stay in the tool
+
+`spec-bundle-assembler` and `criterion-compiler` are loaded from
+`<repo_root>` when present and otherwise from the tool's own tree, so a
+project needs no copy of either. A new hand test verifies a component
+in a `repo_root` holding neither; it fails on the previous
+implementation.
+
+Regenerated in a scratch copy, three attempts:
+
+- Attempt 1 failed six tests. Four were not its fault: my first version
+  of `spec-linter`'s new `R-LINT-032` took any `gen/` parent for the
+  tool, and `spec-bundle-assembler` reuses a `spec_linter` imported for
+  an earlier test's scratch tree. The rule now applies only to a
+  project holding `.hotdocs-tool.json`. The other two were a sealed
+  component's handling.
+- Attempt 2 raised on a missing sealed `source_path` and returned a
+  report `dataclasses.asdict` rejects. `R-VERIFY-017` now says a missing
+  `source_path` makes `overall` `fail`, never an exception, and
+  `interface/library.md` that the report is a dataclass.
+- Attempt 3 passed all 30 hand tests and the 7 CLI tests. On
+  `hotdocs-cli` and `decision-drift-detector` the old and new gates gave
+  identical verdicts.

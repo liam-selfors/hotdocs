@@ -1,5 +1,6 @@
-"""Decides whether a committed .provenance.json proves prior verification
-against a caller-supplied current spec-bundle-hash / gate-versions key."""
+"""Decides whether a committed .provenance.json proves an exact spec state."""
+
+from __future__ import annotations
 
 import hashlib
 import importlib.util
@@ -7,14 +8,35 @@ import json
 import os
 import re
 import sys
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
+
+
+# ---------------------------------------------------------------------------
+# Data types
+# ---------------------------------------------------------------------------
+
+@dataclass
+class ProvenanceCheckResult:
+    hit: bool
+    verification_report: Any
+    license_scan: Any
+    secret_scan: Any
+
+    def to_dict(self) -> dict:
+        return {
+            "hit": self.hit,
+            "verification_report": self.verification_report,
+            "license_scan": self.license_scan,
+            "secret_scan": self.secret_scan,
+        }
 
 
 @dataclass
 class ProvenanceKey:
     spec_bundle_hash: str
-    gate_versions: dict = field(default_factory=dict)
+    gate_versions: dict
 
 
 @dataclass
@@ -25,37 +47,9 @@ class SealedKey:
     verifier_version: str
 
 
-_COMPONENT_ID_CLI_RE = re.compile(r"^(comp-)?[a-z0-9]+(-[a-z0-9]+)*$")
-_SPEC_HASH_RE = re.compile(r"^sha256:[0-9a-f]+$")
-
-_SEALED_FRONTMATTER_SEALED_TRUE = "true"
-
-_COMPONENT_ID_RE = re.compile(r"^comp-[a-z0-9]+(-[a-z0-9]+)*$")
-_OWNER_RE = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
-_SOURCE_PATH_RE = re.compile(
-    r"^[A-Za-z0-9_][A-Za-z0-9_.-]*(/[A-Za-z0-9_][A-Za-z0-9_.-]*)*/?$"
-)
-_SOURCE_HASH_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
-_VERIFIER_VERSION_RE = re.compile(r"^verifier-orchestrator@[0-9]+\.[0-9]+\.[0-9]+$")
-_WRITTEN_AT_RE = re.compile(
-    r"^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"
-)
-
-_SEALED_KEYS = {
-    "kind", "version", "component_id", "owners", "source_path",
-    "source_hash", "verifier_version", "characterization", "written_at",
-}
-_CHAR_KEYS = {"overall", "criteria_passed", "criteria_total"}
-
-_SEALED_REASONS = (
-    "not_sealed", "manifest_missing", "manifest_invalid", "component_mismatch",
-    "source_changed", "owners_changed", "verifier_changed", "characterization_failed",
-)
-
-
-def _slug(component_id):
-    return component_id[len("comp-"):] if component_id.startswith("comp-") else component_id
-
+# ---------------------------------------------------------------------------
+# Small helpers
+# ---------------------------------------------------------------------------
 
 def _get(obj, key, default=None):
     if isinstance(obj, dict):
@@ -63,21 +57,42 @@ def _get(obj, key, default=None):
     return getattr(obj, key, default)
 
 
-def _load_dependency(repo_root, dep_relpath, module_name):
-    base = Path(repo_root) / dep_relpath
+def _slug(component_id: str) -> str:
+    if component_id.startswith("comp-"):
+        return component_id[len("comp-"):]
+    return component_id
+
+
+def _full_id(component_id: str) -> str:
+    return f"comp-{_slug(component_id)}"
+
+
+def _tool_root() -> Path:
+    here = Path(__file__).resolve()
+    for parent in here.parents:
+        if parent.name == "gen":
+            return parent.parent
+    raise RuntimeError("could not determine tool root: no ancestor directory named 'gen'")
+
+
+def _load_module(module_name: str, dep_dir_rel: str, repo_root: Path):
+    repo_base = Path(repo_root) / dep_dir_rel
+    tool_base = _tool_root() / dep_dir_rel
+    base = repo_base if repo_base.is_dir() else tool_base
+
     pkg_init = base / module_name / "__init__.py"
-    flat = base / (module_name + ".py")
-    if pkg_init.exists():
-        file_path = pkg_init
+    flat = base / f"{module_name}.py"
+    if pkg_init.is_file():
+        path = pkg_init
         search_locations = [str(base / module_name)]
-    elif flat.exists():
-        file_path = flat
+    elif flat.is_file():
+        path = flat
         search_locations = None
     else:
-        raise ImportError(f"cannot locate module {module_name!r} under {base}")
+        raise ModuleNotFoundError(f"cannot locate module '{module_name}' under '{base}'")
 
     spec = importlib.util.spec_from_file_location(
-        module_name, file_path, submodule_search_locations=search_locations
+        module_name, path, submodule_search_locations=search_locations
     )
     module = importlib.util.module_from_spec(spec)
     sys.modules[module_name] = module
@@ -85,185 +100,191 @@ def _load_dependency(repo_root, dep_relpath, module_name):
     return module
 
 
-def _trust_judge_provenance():
-    raw = os.environ.get("VAR_TRUST_JUDGE_PROVENANCE")
-    if raw is None or raw.strip() == "":
+def _trust_judge_provenance() -> bool:
+    val = os.environ.get("VAR_TRUST_JUDGE_PROVENANCE")
+    if val is None or val == "":
         return True
-    return raw.strip().lower() != "false"
+    return val.strip().lower() != "false"
 
 
-def _has_llm_judge(verification_report):
-    if verification_report is None:
-        return False
-    criteria = _get(verification_report, "criteria")
-    if not criteria:
-        return False
-    for criterion in criteria:
-        if _get(criterion, "kind") == "llm-judge":
-            return True
-    return False
+# ---------------------------------------------------------------------------
+# check_provenance / current_provenance_key
+# ---------------------------------------------------------------------------
 
-
-def current_provenance_key(component_id, repo_root):
-    repo_root = Path(repo_root)
-
-    assembler = _load_dependency(repo_root, "gen/spec-bundle-assembler", "spec_bundle_assembler")
-    bundle = assembler.assemble(component_id, repo_root=repo_root, mode="cold")
-    spec_bundle_hash = _get(bundle, "spec_bundle_hash")
-
-    criterion_compiler = _load_dependency(repo_root, "pipeline/criterion-compiler", "criterion_compiler")
-    compiler_version = getattr(criterion_compiler, "GATE_VERSION", None)
-
-    test_author = _load_dependency(repo_root, "gen/test-author", "test_author")
-    generated_test_version = getattr(test_author, "GATE_VERSION", None)
-
-    verifier_orchestrator = _load_dependency(repo_root, "gen/verifier-orchestrator", "verifier_orchestrator")
-    verifier_version = getattr(verifier_orchestrator, "GATE_VERSION", None)
-
-    license_scanner = _load_dependency(repo_root, "gen/license-scanner", "license_scanner")
-    license_version = license_scanner.gate_version(repo_root)
-
-    secret_scanner = _load_dependency(repo_root, "gen/secret-scanner", "secret_scanner")
-    secret_version = secret_scanner.gate_version(repo_root)
-
-    return ProvenanceKey(
-        spec_bundle_hash=spec_bundle_hash,
-        gate_versions={
-            "compiler": compiler_version,
-            "generated_test": generated_test_version,
-            "verifier": verifier_version,
-            "license_scanner": license_version,
-            "secret_scanner": secret_version,
-        },
-    )
-
-
-def check_provenance(component_id, spec_bundle_hash, gate_versions, repo_root):
+def check_provenance(
+    component_id: str,
+    spec_bundle_hash: str,
+    gate_versions: dict,
+    repo_root: Path,
+) -> ProvenanceCheckResult:
     repo_root = Path(repo_root)
     slug = _slug(component_id)
     manifest_path = repo_root / "gen" / slug / ".provenance.json"
 
-    miss = {"hit": False, "verification_report": None, "license_scan": None, "secret_scan": None}
+    miss = ProvenanceCheckResult(
+        hit=False, verification_report=None, license_scan=None, secret_scan=None
+    )
 
-    if not manifest_path.exists():
+    if not manifest_path.is_file():
         return miss
 
     try:
-        with open(manifest_path, "r", encoding="utf-8") as f:
-            manifest = json.load(f)
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return miss
 
-    manifest_hash = _get(manifest, "spec_bundle_hash")
-    manifest_gate_versions = _get(manifest, "gate_versions")
-
-    if manifest_hash != spec_bundle_hash:
+    if not isinstance(manifest, dict):
         return miss
 
-    if not isinstance(manifest_gate_versions, dict):
+    if manifest.get("spec_bundle_hash") != spec_bundle_hash:
+        return miss
+    if manifest.get("gate_versions") != gate_versions:
         return miss
 
-    if manifest_gate_versions != gate_versions:
+    verification_report = manifest.get("verification_report")
+    has_llm_judge = False
+    if isinstance(verification_report, dict):
+        for criterion in verification_report.get("criteria") or []:
+            if isinstance(criterion, dict) and criterion.get("kind") == "llm-judge":
+                has_llm_judge = True
+                break
+
+    if has_llm_judge and not _trust_judge_provenance():
         return miss
 
-    verification_report = _get(manifest, "verification_report")
-    license_scan = _get(manifest, "license_scan")
-    secret_scan = _get(manifest, "secret_scan")
+    return ProvenanceCheckResult(
+        hit=True,
+        verification_report=verification_report,
+        license_scan=manifest.get("license_scan"),
+        secret_scan=manifest.get("secret_scan"),
+    )
 
-    if _has_llm_judge(verification_report) and not _trust_judge_provenance():
-        return miss
 
-    return {
-        "hit": True,
-        "verification_report": verification_report,
-        "license_scan": license_scan,
-        "secret_scan": secret_scan,
+def current_provenance_key(component_id: str, repo_root: Path) -> ProvenanceKey:
+    repo_root = Path(repo_root)
+
+    assembler = _load_module("spec_bundle_assembler", "gen/spec-bundle-assembler/", repo_root)
+    bundle = assembler.assemble(component_id, repo_root=repo_root, mode="cold")
+    spec_bundle_hash = _get(bundle, "spec_bundle_hash")
+
+    compiler = _load_module("criterion_compiler", "pipeline/criterion-compiler/", repo_root)
+    test_author_mod = _load_module("test_author", "gen/test-author/", repo_root)
+    verifier_mod = _load_module("verifier_orchestrator", "gen/verifier-orchestrator/", repo_root)
+    license_mod = _load_module("license_scanner", "gen/license-scanner/", repo_root)
+    secret_mod = _load_module("secret_scanner", "gen/secret-scanner/", repo_root)
+
+    gate_versions = {
+        "compiler": compiler.GATE_VERSION,
+        "generated_test": test_author_mod.GATE_VERSION,
+        "verifier": verifier_mod.GATE_VERSION,
+        "license_scanner": license_mod.gate_version(repo_root),
+        "secret_scanner": secret_mod.gate_version(repo_root),
     }
 
+    return ProvenanceKey(spec_bundle_hash=spec_bundle_hash, gate_versions=gate_versions)
 
-def _parse_frontmatter(text):
+
+# ---------------------------------------------------------------------------
+# Sealed components
+# ---------------------------------------------------------------------------
+
+_OWNER_RE = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
+_SOURCE_PATH_RE = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_.-]*(/[A-Za-z0-9_][A-Za-z0-9_.-]*)*/?$")
+_COMPONENT_ID_RE = re.compile(r"^comp-[a-z0-9]+(-[a-z0-9]+)*$")
+_SOURCE_HASH_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
+_VERIFIER_VERSION_RE = re.compile(r"^verifier-orchestrator@[0-9]+\.[0-9]+\.[0-9]+$")
+_WRITTEN_AT_RE = re.compile(r"^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$")
+_MANIFEST_KEYS = {
+    "kind", "version", "component_id", "owners", "source_path",
+    "source_hash", "verifier_version", "characterization", "written_at",
+}
+_CHAR_KEYS = {"overall", "criteria_passed", "criteria_total"}
+
+
+def _read_frontmatter(path: Path) -> dict:
+    text = path.read_text(encoding="utf-8")
     lines = text.splitlines()
     if not lines or lines[0].strip() != "---":
-        return None
+        return {}
     result = {}
-    i = 1
-    while i < len(lines) and lines[i].strip() != "---":
-        line = lines[i]
+    for line in lines[1:]:
+        if line.strip() == "---":
+            break
         if ":" in line:
             key, _, value = line.partition(":")
             result[key.strip()] = value.strip()
-        i += 1
     return result
 
 
-def _parse_owners(raw):
+def _parse_owners(raw: str) -> list:
     raw = raw.strip()
-    if raw.startswith("[") and raw.endswith("]"):
-        inner = raw[1:-1]
-        return [item.strip() for item in inner.split(",") if item.strip()]
-    return [raw] if raw else []
+    if not (raw.startswith("[") and raw.endswith("]")):
+        raise ValueError(f"invalid owners frontmatter: {raw!r}")
+    inner = raw[1:-1].strip()
+    if not inner:
+        raise ValueError("owners list must be non-empty")
+    owners = [o.strip() for o in inner.split(",")]
+    for owner in owners:
+        if not _OWNER_RE.match(owner):
+            raise ValueError(f"invalid owner: {owner!r}")
+    return owners
 
 
-def _hash_source_dir(source_dir):
+def _validate_source_path(raw: str) -> None:
+    raw = raw.strip()
+    if not _SOURCE_PATH_RE.match(raw):
+        raise ValueError(f"invalid source_path: {raw!r}")
+    if raw.split("/")[0] == "gen":
+        raise ValueError("source_path must not begin with 'gen'")
+
+
+def _hash_source(source_dir: Path) -> str:
     digest = hashlib.sha256()
-    if source_dir.exists():
+    if source_dir.is_dir():
         files = []
-        for path in source_dir.rglob("*"):
-            if path.is_dir():
+        for candidate in source_dir.rglob("*"):
+            if candidate.is_dir():
                 continue
-            rel = path.relative_to(source_dir)
+            rel = candidate.relative_to(source_dir)
             if "__pycache__" in rel.parts:
                 continue
-            if path.name == ".sealed-provenance.json":
+            if candidate.name == ".sealed-provenance.json":
                 continue
-            files.append(path)
+            files.append(candidate)
         files.sort(key=lambda p: p.relative_to(source_dir).as_posix())
-        for path in files:
-            rel_posix = path.relative_to(source_dir).as_posix()
-            digest.update(rel_posix.encode("utf-8"))
+        for f in files:
+            rel = f.relative_to(source_dir).as_posix()
+            digest.update(rel.encode("utf-8"))
             digest.update(b"\x00")
-            digest.update(path.read_bytes())
+            digest.update(f.read_bytes())
             digest.update(b"\x00")
     return "sha256:" + digest.hexdigest()
 
 
-def current_sealed_key(component_id, repo_root):
+def current_sealed_key(component_id: str, repo_root: Path) -> SealedKey | None:
     repo_root = Path(repo_root)
     slug = _slug(component_id)
     component_md = repo_root / "specs" / "components" / slug / "component.md"
-    if not component_md.exists():
+    if not component_md.is_file():
         return None
 
-    text = component_md.read_text(encoding="utf-8")
-    frontmatter = _parse_frontmatter(text)
-    if frontmatter is None:
-        return None
-
-    sealed_value = frontmatter.get("sealed", "").strip().lower()
-    if sealed_value != _SEALED_FRONTMATTER_SEALED_TRUE:
+    frontmatter = _read_frontmatter(component_md)
+    if frontmatter.get("sealed") != "true":
         return None
 
     owners_raw = frontmatter.get("owners")
     source_path_raw = frontmatter.get("source_path")
     if owners_raw is None or source_path_raw is None:
-        raise ValueError(
-            f"sealed component {component_id!r} is missing owners or source_path in frontmatter"
-        )
+        raise ValueError(f"sealed component {component_id!r} missing owners or source_path")
 
     owners = _parse_owners(owners_raw)
-    if not owners or not all(_OWNER_RE.match(owner) for owner in owners):
-        raise ValueError(f"sealed component {component_id!r} has invalid owners: {owners_raw!r}")
-
     source_path = source_path_raw.strip()
-    if not _SOURCE_PATH_RE.match(source_path) or source_path.split("/")[0] == "gen":
-        raise ValueError(
-            f"sealed component {component_id!r} has invalid source_path: {source_path_raw!r}"
-        )
+    _validate_source_path(source_path)
 
-    verifier_orchestrator = _load_dependency(repo_root, "gen/verifier-orchestrator", "verifier_orchestrator")
-    verifier_version = getattr(verifier_orchestrator, "GATE_VERSION", None)
+    source_hash = _hash_source(repo_root / source_path)
 
-    source_hash = _hash_source_dir(repo_root / source_path)
+    verifier_mod = _load_module("verifier_orchestrator", "gen/verifier-orchestrator/", repo_root)
+    verifier_version = verifier_mod.GATE_VERSION
 
     return SealedKey(
         owners=owners,
@@ -273,46 +294,44 @@ def current_sealed_key(component_id, repo_root):
     )
 
 
-def _is_int_not_bool(value):
+def _is_int_not_bool(value) -> bool:
     return isinstance(value, int) and not isinstance(value, bool)
 
 
-def _is_valid_sealed_manifest(manifest):
-    if not isinstance(manifest, dict):
+def _validate_sealed_manifest(doc) -> bool:
+    if not isinstance(doc, dict) or set(doc.keys()) != _MANIFEST_KEYS:
         return False
-    if set(manifest.keys()) != _SEALED_KEYS:
+    if doc.get("kind") != "sealed-provenance":
         return False
-    if manifest.get("kind") != "sealed-provenance":
-        return False
-    if not _is_int_not_bool(manifest.get("version")) or manifest.get("version") != 1:
+    if not (_is_int_not_bool(doc.get("version")) and doc.get("version") == 1):
         return False
 
-    component_id_value = manifest.get("component_id")
-    if not isinstance(component_id_value, str) or not _COMPONENT_ID_RE.match(component_id_value):
+    component_id = doc.get("component_id")
+    if not isinstance(component_id, str) or not _COMPONENT_ID_RE.match(component_id):
         return False
 
-    owners = manifest.get("owners")
+    owners = doc.get("owners")
     if not isinstance(owners, list) or not owners:
         return False
     for owner in owners:
         if not isinstance(owner, str) or not _OWNER_RE.match(owner):
             return False
 
-    source_path = manifest.get("source_path")
+    source_path = doc.get("source_path")
     if not isinstance(source_path, str) or not _SOURCE_PATH_RE.match(source_path):
         return False
     if source_path.split("/")[0] == "gen":
         return False
 
-    source_hash = manifest.get("source_hash")
+    source_hash = doc.get("source_hash")
     if not isinstance(source_hash, str) or not _SOURCE_HASH_RE.match(source_hash):
         return False
 
-    verifier_version = manifest.get("verifier_version")
+    verifier_version = doc.get("verifier_version")
     if not isinstance(verifier_version, str) or not _VERIFIER_VERSION_RE.match(verifier_version):
         return False
 
-    characterization = manifest.get("characterization")
+    characterization = doc.get("characterization")
     if not isinstance(characterization, dict) or set(characterization.keys()) != _CHAR_KEYS:
         return False
     overall = characterization.get("overall")
@@ -320,120 +339,135 @@ def _is_valid_sealed_manifest(manifest):
         return False
     passed = characterization.get("criteria_passed")
     total = characterization.get("criteria_total")
-    if not _is_int_not_bool(passed) or not _is_int_not_bool(total):
+    if not (_is_int_not_bool(passed) and _is_int_not_bool(total)):
         return False
     if not (0 <= passed <= total):
         return False
     if overall == "pass" and not (total >= 1 and passed == total):
         return False
 
-    written_at = manifest.get("written_at")
+    written_at = doc.get("written_at")
     if not isinstance(written_at, str) or not _WRITTEN_AT_RE.match(written_at):
         return False
 
     return True
 
 
-def _sealed_result(reason):
-    return {
-        "hit": reason is None,
-        "sealed": reason != "not_sealed",
-        "reason": reason,
-        "verification_report": None,
-        "license_scan": None,
-        "secret_scan": None,
-        "owners": None,
-        "source_hash": None,
-        "written_at": None,
-    }
-
-
-def check_sealed_provenance(component_id, repo_root):
+def check_sealed_provenance(component_id: str, repo_root: Path) -> dict:
     repo_root = Path(repo_root)
 
     key = current_sealed_key(component_id, repo_root)
     if key is None:
-        return _sealed_result("not_sealed")
+        return {
+            "hit": False,
+            "sealed": False,
+            "reason": "not_sealed",
+            "verification_report": None,
+            "license_scan": None,
+            "secret_scan": None,
+            "owners": None,
+            "source_hash": None,
+            "written_at": None,
+        }
 
-    source_path = key.source_path
-    manifest_path = repo_root / source_path / ".sealed-provenance.json"
-    if not manifest_path.exists():
-        return _sealed_result("manifest_missing")
+    def _miss(reason: str) -> dict:
+        return {
+            "hit": False,
+            "sealed": True,
+            "reason": reason,
+            "verification_report": None,
+            "license_scan": None,
+            "secret_scan": None,
+            "owners": None,
+            "source_hash": None,
+            "written_at": None,
+        }
+
+    manifest_path = repo_root / key.source_path / ".sealed-provenance.json"
+    if not manifest_path.is_file():
+        return _miss("manifest_missing")
 
     try:
-        with open(manifest_path, "r", encoding="utf-8") as f:
-            manifest = json.load(f)
+        doc = json.loads(manifest_path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
-        return _sealed_result("manifest_invalid")
+        return _miss("manifest_invalid")
 
-    if not _is_valid_sealed_manifest(manifest):
-        return _sealed_result("manifest_invalid")
+    if not _validate_sealed_manifest(doc):
+        return _miss("manifest_invalid")
 
-    normalized_component_id = (
-        component_id if component_id.startswith("comp-") else "comp-" + component_id
-    )
-    if manifest.get("component_id") != normalized_component_id or manifest.get("source_path") != source_path:
-        return _sealed_result("component_mismatch")
+    expected_component_id = _full_id(component_id)
+    if doc["component_id"] != expected_component_id or doc["source_path"] != key.source_path:
+        return _miss("component_mismatch")
 
-    if manifest.get("source_hash") != key.source_hash:
-        return _sealed_result("source_changed")
+    if doc["source_hash"] != key.source_hash:
+        return _miss("source_changed")
 
-    if manifest.get("owners") != key.owners:
-        return _sealed_result("owners_changed")
+    if doc["owners"] != key.owners:
+        return _miss("owners_changed")
 
-    if manifest.get("verifier_version") != key.verifier_version:
-        return _sealed_result("verifier_changed")
+    if doc["verifier_version"] != key.verifier_version:
+        return _miss("verifier_changed")
 
-    characterization = manifest.get("characterization") or {}
-    if characterization.get("overall") != "pass":
-        return _sealed_result("characterization_failed")
+    characterization = doc["characterization"]
+    if characterization["overall"] != "pass":
+        return _miss("characterization_failed")
 
     return {
         "hit": True,
         "sealed": True,
         "reason": None,
-        "verification_report": {"overall": characterization.get("overall")},
+        "verification_report": {"overall": characterization["overall"]},
         "license_scan": None,
         "secret_scan": None,
-        "owners": manifest.get("owners"),
-        "source_hash": manifest.get("source_hash"),
-        "written_at": manifest.get("written_at"),
+        "owners": doc["owners"],
+        "source_hash": doc["source_hash"],
+        "written_at": doc["written_at"],
     }
 
 
-def _usage_error():
-    print("usage: hotdocs provenance check <component-id> --spec-bundle-hash=<h> "
-          "--gate-versions=<json> [--repo-root=<dir>] [--format=json|text]", file=sys.stderr)
+# ---------------------------------------------------------------------------
+# CLI
+# ---------------------------------------------------------------------------
+
+_COMPONENT_ID_CLI_RE = re.compile(r"^(comp-)?[a-z0-9]+(-[a-z0-9]+)*$")
+_SPEC_HASH_CLI_RE = re.compile(r"^sha256:[0-9a-f]+$")
+
+
+def _usage_error(message: str = "usage error") -> int:
+    print(message, file=sys.stderr)
     return 2
 
 
-def main(argv=None):
+def main(argv: list | None = None) -> int:
     if argv is None:
         argv = sys.argv[1:]
-    args = list(argv)
+    argv = list(argv)
 
-    if not args or args[0] != "check":
-        return _usage_error()
-    args = args[1:]
+    if not argv or argv[0] != "check":
+        return _usage_error("expected 'check' subcommand")
 
-    positionals = []
+    args = argv[1:]
+
+    component_id = None
     spec_bundle_hash = None
     gate_versions_raw = None
-    repo_root_raw = None
-    format_raw = None
+    repo_root_raw = "."
+    fmt = "text"
 
     i = 0
-    while i < len(args):
-        arg = args[i]
-        if arg.startswith("--"):
-            if "=" in arg:
-                key, _, value = arg.partition("=")
+    n = len(args)
+    while i < n:
+        token = args[i]
+        if token.startswith("--"):
+            if "=" in token:
+                key, _, value = token.partition("=")
             else:
-                key = arg
-                if i + 1 >= len(args):
-                    return _usage_error()
+                key = token
+                if i + 1 >= n:
+                    return _usage_error(f"flag {key!r} given with no value")
                 value = args[i + 1]
                 i += 1
+
             if key == "--spec-bundle-hash":
                 spec_bundle_hash = value
             elif key == "--gate-versions":
@@ -441,49 +475,48 @@ def main(argv=None):
             elif key == "--repo-root":
                 repo_root_raw = value
             elif key == "--format":
-                format_raw = value
+                fmt = value
             else:
-                return _usage_error()
+                return _usage_error(f"unknown argument: {key}")
         else:
-            positionals.append(arg)
+            if component_id is None:
+                component_id = token
+            else:
+                return _usage_error(f"unexpected argument: {token}")
         i += 1
 
-    if len(positionals) != 1:
-        return _usage_error()
-    component_id = positionals[0]
+    if component_id is None:
+        return _usage_error("missing <component-id>")
+    if spec_bundle_hash is None:
+        return _usage_error("missing --spec-bundle-hash")
+    if gate_versions_raw is None:
+        return _usage_error("missing --gate-versions")
 
     if not _COMPONENT_ID_CLI_RE.match(component_id):
-        return _usage_error()
+        return _usage_error(f"invalid <component-id>: {component_id!r}")
 
-    if spec_bundle_hash is None or gate_versions_raw is None:
-        return _usage_error()
-
-    if not _SPEC_HASH_RE.match(spec_bundle_hash):
-        return _usage_error()
+    if not _SPEC_HASH_CLI_RE.match(spec_bundle_hash):
+        return _usage_error(f"invalid --spec-bundle-hash: {spec_bundle_hash!r}")
 
     try:
         gate_versions = json.loads(gate_versions_raw)
     except ValueError:
-        return _usage_error()
+        return _usage_error("invalid --gate-versions: not valid JSON")
 
     if not isinstance(gate_versions, dict) or not all(
         isinstance(k, str) and isinstance(v, str) for k, v in gate_versions.items()
     ):
-        return _usage_error()
+        return _usage_error("invalid --gate-versions: must be a JSON object of strings")
 
-    fmt = format_raw if format_raw is not None else "text"
     if fmt not in ("json", "text"):
-        return _usage_error()
+        return _usage_error(f"invalid --format: {fmt!r}")
 
-    repo_root = Path(repo_root_raw) if repo_root_raw else Path.cwd()
-
-    result = check_provenance(component_id, spec_bundle_hash, gate_versions, repo_root)
-    hit = _get(result, "hit")
+    result = check_provenance(component_id, spec_bundle_hash, gate_versions, Path(repo_root_raw))
 
     if fmt == "json":
-        print(json.dumps(result))
+        print(json.dumps(result.to_dict()))
     else:
-        print(f"{'hit' if hit else 'miss'} {component_id}")
+        print(f"{'hit' if result.hit else 'miss'} {component_id}")
 
     return 0
 

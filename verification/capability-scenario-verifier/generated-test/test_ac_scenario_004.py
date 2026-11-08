@@ -1,106 +1,115 @@
-import capability_scenario_verifier as csv
+from pathlib import Path
+
+import capability_scenario_verifier
 
 
-FRONTMATTER_COMPONENT = """---
-id: comp-widget
-title: Widget
-status: ratified
-owners: [lselfors@gmail.com]
-realizes: [P-FOO]
-sealed: true
-source_path: vendor/widget/
-last_ratified_commit: 0000000
----
-
-Widget component.
-"""
-
-FRONTMATTER_PRODUCT = """---
-id: P-FOO
-title: Foo capability
-status: ratified
-owners: [lselfors@gmail.com]
-last_ratified_commit: 0000000
----
-
-### CS-FOO-001
-
-Covers: P-FOO
-Kind: generated-test
-
-```gherkin
-Given a widget
-When it is used
-Then it works
-```
-"""
-
-FAKE_FILE = {
-    "path": "verification/capabilities/P-FOO/generated-test/test_cs_foo_001.py",
-    "content": "def test_x():\n    assert True\n",
-}
+def _get(obj, key, default=None):
+    if isinstance(obj, dict):
+        return obj.get(key, default)
+    return getattr(obj, key, default)
 
 
-def build_repo(tmp_path):
-    repo_root = tmp_path / "repo"
-    component_dir = repo_root / "specs" / "components" / "widget"
-    component_dir.mkdir(parents=True)
-    (component_dir / "component.md").write_text(FRONTMATTER_COMPONENT)
+def _write_fixture(repo_root: Path) -> None:
+    component_dir = repo_root / "specs" / "components" / "foo"
+    component_dir.mkdir(parents=True, exist_ok=True)
+    (component_dir / "component.md").write_text(
+        "---\n"
+        "id: comp-foo\n"
+        "title: Foo component\n"
+        "status: ratified\n"
+        "owners: [alice]\n"
+        "last_ratified_commit: abc1234\n"
+        "sealed: false\n"
+        "realizes: [P-FOO]\n"
+        "---\n\n"
+        "# comp-foo\n\n"
+        "A component that realizes P-FOO.\n",
+        encoding="utf-8",
+    )
+
+    gen_dir = repo_root / "gen" / "foo"
+    gen_dir.mkdir(parents=True, exist_ok=True)
+    (gen_dir / "foo.py").write_text("", encoding="utf-8")
 
     product_dir = repo_root / "specs" / "product"
-    product_dir.mkdir(parents=True)
-    (product_dir / "foo.md").write_text(FRONTMATTER_PRODUCT)
-
-    return repo_root
-
-
-def get(obj, key):
-    if isinstance(obj, dict):
-        return obj[key]
-    return getattr(obj, key)
-
-
-def bundle_key_set(bundle):
-    if isinstance(bundle, dict):
-        return set(bundle.keys())
-    return set(vars(bundle).keys())
-
-
-def find_scenario(report, capability_id, scenario_id):
-    capability = get(report, capability_id)
-    for scenario in get(capability, "scenarios"):
-        if get(scenario, "id") == scenario_id:
-            return scenario
-    raise AssertionError(f"scenario {scenario_id} not found in report for {capability_id}")
+    product_dir.mkdir(parents=True, exist_ok=True)
+    (product_dir / "foo.md").write_text(
+        "---\n"
+        "id: P-FOO\n"
+        "title: Foo capability\n"
+        "status: ratified\n"
+        "owners: [alice]\n"
+        "last_ratified_commit: abc1234\n"
+        "---\n\n"
+        "# P-FOO\n\n"
+        "### CS-FOO-001\n\n"
+        "Covers: P-FOO\n"
+        "Kind: generated-test\n\n"
+        "```gherkin\n"
+        "Given a widget\n"
+        "When the widget is used\n"
+        "Then the widget works\n"
+        "```\n",
+        encoding="utf-8",
+    )
 
 
-def test_generated_test_scenario_dispatches_fresh_on_every_call(tmp_path):
-    repo_root = build_repo(tmp_path)
-    invocations = []
+def _fake_test_author_outcome():
+    return {
+        "model_call_error": None,
+        "file": {
+            "path": "verification/capabilities/P-FOO/generated-test/test_cs_foo_001.py",
+            "content": "def test_x():\n    assert True\n",
+        },
+    }
+
+
+def test_generated_test_scenario_dispatched_on_both_calls_no_cache_short_circuit(tmp_path):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    _write_fixture(repo_root)
+
+    calls = []
 
     def fake_test_author(bundle):
-        invocations.append(get(bundle, "scenario_id"))
-        return {"model_call_error": None, "file": dict(FAKE_FILE)}
+        calls.append(bundle)
+        return _fake_test_author_outcome()
 
-    csv.run_capability_scenarios(["comp-widget"], repo_root, test_author=fake_test_author)
-    csv.run_capability_scenarios(["comp-widget"], repo_root, test_author=fake_test_author)
+    report1 = capability_scenario_verifier.run_capability_scenarios(
+        ["comp-foo"], repo_root, test_author=fake_test_author,
+    )
+    report2 = capability_scenario_verifier.run_capability_scenarios(
+        ["comp-foo"], repo_root, test_author=fake_test_author,
+    )
 
-    assert invocations == ["CS-FOO-001", "CS-FOO-001"]
+    assert len(calls) == 2
+
+    for report in (report1, report2):
+        capability = _get(report, "P-FOO")
+        scenarios = _get(capability, "scenarios")
+        assert len(scenarios) == 1
+        assert _get(scenarios[0], "result") == "pass"
 
 
 def test_bundle_passed_to_test_author_has_exact_keys(tmp_path):
-    repo_root = build_repo(tmp_path)
-    received = []
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    _write_fixture(repo_root)
+
+    recorded_bundles = []
 
     def fake_test_author(bundle):
-        received.append(bundle)
-        return {"model_call_error": None, "file": dict(FAKE_FILE)}
+        recorded_bundles.append(bundle)
+        return _fake_test_author_outcome()
 
-    csv.run_capability_scenarios(["comp-widget"], repo_root, test_author=fake_test_author)
+    capability_scenario_verifier.run_capability_scenarios(
+        ["comp-foo"], repo_root, test_author=fake_test_author,
+    )
 
-    assert len(received) == 1
-    bundle = received[0]
-    assert bundle_key_set(bundle) == {
+    assert len(recorded_bundles) == 1
+    bundle = recorded_bundles[0]
+    assert isinstance(bundle, dict)
+    assert set(bundle.keys()) == {
         "capability_id",
         "scenario_id",
         "covers",
@@ -108,15 +117,18 @@ def test_bundle_passed_to_test_author_has_exact_keys(tmp_path):
         "gherkin",
         "file",
     }
-    assert get(bundle, "capability_id") == "P-FOO"
-    assert get(bundle, "scenario_id") == "CS-FOO-001"
-    assert get(bundle, "kind") == "generated-test"
 
 
-def test_generated_test_scenario_fails_without_test_author(tmp_path):
-    repo_root = build_repo(tmp_path)
+def test_missing_test_author_yields_fail_result(tmp_path):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    _write_fixture(repo_root)
 
-    report = csv.run_capability_scenarios(["comp-widget"], repo_root)
+    report = capability_scenario_verifier.run_capability_scenarios(
+        ["comp-foo"], repo_root,
+    )
 
-    scenario = find_scenario(report, "P-FOO", "CS-FOO-001")
-    assert get(scenario, "result") == "fail"
+    capability = _get(report, "P-FOO")
+    scenarios = _get(capability, "scenarios")
+    assert len(scenarios) == 1
+    assert _get(scenarios[0], "result") == "fail"

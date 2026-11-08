@@ -1,19 +1,11 @@
 # Spec Linter — Non-Functional Constraints
 
-- **Determinism, for every rule except R-LINT-015.** The same spec
-  bundle, byte-for-byte, MUST always produce the same result — an
-  `llm-judge` evaluation isn't guaranteed reproducible the way a
-  `compiled` check is, so its result is excluded from the cache-key
-  contribution the other rules make.
-- **Performance.** The `compiled` rules, together, MUST complete in
-  under 2 seconds on reference hardware. R-LINT-015 (a model call) has
-  its own separate, longer budget, uncounted against that figure.
-- **Mostly no network access, no model calls.** R-LINT-015 is the
-  single exception. **When no model is configured, it degrades to
-  `skipped`, never silently passing and never crashing.**
-- **Idempotent on unchanged input,** for every rule's non-`skipped`
-  results — running the linter twice against an unchanged bundle MUST
-  produce byte-identical results for every `compiled` rule.
-- **Verification against real content, not only synthetic fixtures.**
-  The test suite SHOULD include checks against organically-authored
-  spec content too. See `verification/spec-linter/BOOTSTRAP.md`.
+- **Determinism.** The same spec bundle, byte for byte, MUST produce the
+  same result for every rule but the `llm-judge` R-LINT-015, which is
+  excluded from the cache-key contribution.
+- **Performance.** The `compiled` rules together MUST finish in under 2
+  seconds on reference hardware; R-LINT-015 has its own budget.
+- **No network, no model calls,** except R-LINT-015, which with no model
+  configured is `skipped`, never a silent pass or a crash.
+- **Tested on real content,** not only synthetic fixtures (see
+  `verification/spec-linter/BOOTSTRAP.md`).

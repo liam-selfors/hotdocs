@@ -6,9 +6,9 @@ Kind: generated-test
 ```gherkin
 Given an empty directory and a fake tool root
 When main(["<dir>", "--yes"]) is called
-Then the six directories exist, the four .gitkeep files are empty, specs/glossary.md starts with "# Glossary",
+Then the five directories exist, the four .gitkeep files are empty, specs/glossary.md starts with "# Glossary",
   .secret-allowlist.json exists, .gitignore holds
-  each of the four lines once, and output_fn received a line exactly equal to "<path>: created" for each of the six directories, the four .gitkeep files, specs/glossary.md, .secret-allowlist.json, and .gitignore
+  each of the four lines once, and output_fn received a line exactly equal to "<path>: created" for each of the five directories, the four .gitkeep files, specs/glossary.md, .secret-allowlist.json, and .gitignore
 
 Given main(["<dir>", "--yes"]) is called a second time
 When it finishes

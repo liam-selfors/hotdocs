@@ -27,14 +27,9 @@
 }
 ```
 
-`rule_id` always corresponds to an `R-LINT-NNN` id — the filename of a file
-under `requirements/` — this is how a reviewer traces a reported finding
-back to the requirement that produced it.
+`rule_id` is the `R-LINT-NNN` requirement that produced the finding.
 
-- `severity` is one of `fail` / `warn` / `skipped`. `skipped` exists only
-  for `kind: llm-judge` rules when no model is configured (R-LINT-015
-  currently) — visible degradation, never conflated with a pass.
-- `rationale` (optional, string) is present when the finding came from an
-  `llm-judge` evaluation that actually ran, per `SPEC_GUIDELINES.md` §5's
-  requirement that `llm-judge` criteria emit structured rationale. Absent or
-  `null` for every other `severity`/`rule_id` combination.
+- `severity` is `fail`, `warn` or `skipped`; `skipped` only for an
+  `llm-judge` rule with no model configured (R-LINT-015), never a pass.
+- `rationale` (optional) is present only when an `llm-judge` evaluation
+  ran (`SPEC_GUIDELINES.md` §5).

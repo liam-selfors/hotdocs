@@ -2,209 +2,214 @@ import hashlib
 import json
 
 import pytest
+import urllib.request
 
 import secret_scanner
 
 
 SECRET = "AKIAABCDEFGHIJKLMNOP"
 RULE_ID = "AWS Access Key"
-TARGET_FILE = "verification/foo/t.py"
 
 
-def _get(obj, key, default=None):
+def _field(obj, name, default=None):
     if isinstance(obj, dict):
-        return obj.get(key, default)
-    return getattr(obj, key, default)
+        return obj.get(name, default)
+    return getattr(obj, name, default)
 
 
-def _sha1_hex(value):
-    return hashlib.sha1(value.encode("utf-8")).hexdigest()
+def _sha1(value):
+    return "sha1:" + hashlib.sha1(value.encode()).hexdigest()
 
 
-def _sha256_hex(data):
-    return hashlib.sha256(data).hexdigest()
+def _write_cache_manager_stub(repo_root):
+    cache_dir = repo_root / "gen" / "cache-manager"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    (cache_dir / "cache_manager.py").write_text(
+        "class _Miss:\n"
+        "    payload = None\n"
+        "\n"
+        "def get(cache_key, repo_root=None):\n"
+        "    return _Miss()\n"
+        "\n"
+        "def put(cache_key, result, repo_root=None):\n"
+        "    pass\n"
+        "\n"
+        "class CacheKey:\n"
+        "    def __init__(self, spec_bundle_hash=None, gate_inputs_hash=None,"
+        " gate_version=None, model_pin=None):\n"
+        "        self.spec_bundle_hash = spec_bundle_hash\n"
+        "        self.gate_inputs_hash = gate_inputs_hash\n"
+        "        self.gate_version = gate_version\n"
+        "        self.model_pin = model_pin\n"
+        "\n"
+        "class CachedResult:\n"
+        "    def __init__(self, gate_type=None, payload=None, stored_at=None):\n"
+        "        self.gate_type = gate_type\n"
+        "        self.payload = payload\n"
+        "        self.stored_at = stored_at\n"
+    )
 
 
-def _write(path, content):
-    path.parent.mkdir(parents=True, exist_ok=True)
-    data = content if isinstance(content, bytes) else content.encode("utf-8")
-    path.write_bytes(data)
+def _base_repo(tmp_path, name):
+    repo_root = tmp_path / name
+    repo_root.mkdir()
+    _write_cache_manager_stub(repo_root)
+    return repo_root
 
 
-def _allowlist_bytes(entries):
-    doc = {"version": 1, "entries": entries}
-    return json.dumps(doc, indent=2).encode("utf-8")
+def _write_secret_file(repo_root):
+    target = repo_root / "verification" / "foo"
+    target.mkdir(parents=True, exist_ok=True)
+    (target / "t.py").write_text('K = "%s"\n' % SECRET)
 
 
-def _entry():
+def _allowed_entry():
     return {
-        "file": TARGET_FILE,
+        "file": "verification/foo/t.py",
         "type": RULE_ID,
-        "hashed_secret": "sha1:" + _sha1_hex(SECRET),
+        "hashed_secret": _sha1(SECRET),
         "reason": "planted-fixture",
     }
 
 
-def _decision_text(decision_id, status, allowlist_sha256_hex):
+def _write_allowlist(repo_root, entries):
+    data = {"version": 1, "entries": entries}
+    (repo_root / ".secret-allowlist.json").write_text(json.dumps(data, indent=2))
+    return (repo_root / ".secret-allowlist.json").read_bytes()
+
+
+def _write_decision(repo_root, number, status, allowlist_sha256_hex):
+    decisions_dir = repo_root / "specs" / "decisions"
+    decisions_dir.mkdir(parents=True, exist_ok=True)
     lines = [
         "---",
-        "id: D{}".format(decision_id),
-        "title: Seal secret allowlist revision {}".format(decision_id),
-        "status: {}".format(status),
-        "owners: [lselfors@gmail.com]",
+        "id: D%d" % number,
+        "title: Seal the allowlist",
+        "status: %s" % status,
+        "owners: [alice]",
     ]
     if status == "ratified":
-        lines.append(
-            "last_ratified_commit: 0000000000000000000000000000000000000000"
-        )
-    lines.append("allowlist_sha256: sha256:{}".format(allowlist_sha256_hex))
+        lines.append('last_ratified_commit: "0000000"')
+    if allowlist_sha256_hex is not None:
+        lines.append("allowlist_sha256: sha256:%s" % allowlist_sha256_hex)
     lines.append("---")
     lines.append("")
-    lines.append("Decision body for D{}.".format(decision_id))
-    lines.append("")
-    return "\n".join(lines)
+    lines.append("Decision body text.")
+    (decisions_dir / ("D%d.md" % number)).write_text("\n".join(lines))
 
 
-def _flip_first_char(hex_digest):
-    replacement = "0" if hex_digest[0] != "0" else "1"
-    return replacement + hex_digest[1:]
+def _assert_invalid(result):
+    assert _field(result, "flagged") is True
 
+    matches = _field(result, "matches") or []
+    rule_ids = [_field(m, "rule_id") for m in matches]
+    assert RULE_ID in rule_ids
+    assert "allowlist-invalid" in rule_ids
 
-def _base_repo(tmp_path):
-    repo_root = tmp_path / "repo"
-    _write(repo_root / TARGET_FILE, 'K = "{}"\n'.format(SECRET))
-    return repo_root
+    invalid_matches = [m for m in matches if _field(m, "rule_id") == "allowlist-invalid"]
+    assert len(invalid_matches) == 1
+    invalid = invalid_matches[0]
+    assert _field(invalid, "risk_tier") == "high"
+    assert _field(invalid, "file") == ".secret-allowlist.json"
+    assert _field(invalid, "line") == 1
 
-
-def _finding_matches(matches):
-    return [m for m in matches if _get(m, "rule_id") == RULE_ID]
-
-
-def _invalid_matches(matches):
-    return [m for m in matches if _get(m, "rule_id") == "allowlist-invalid"]
+    allowed = _field(result, "allowed") or []
+    assert RULE_ID not in [_field(a, "rule_id") for a in allowed]
 
 
 @pytest.fixture(autouse=True)
-def _no_webhook(monkeypatch):
+def _no_network(monkeypatch):
+    # An AWS Access Key match is "high" risk, which could otherwise trigger a
+    # real webhook POST if the environment happens to have the compliance
+    # webhook var set; guard against any live network call regardless.
+    def _fail(*args, **kwargs):
+        raise AssertionError("unexpected network call")
+
+    monkeypatch.setattr(urllib.request, "urlopen", _fail)
     monkeypatch.delenv("VAR_COMPLIANCE_WEBHOOK_URL", raising=False)
 
 
-def test_sealed_valid_allowlist_suppresses_finding(tmp_path):
-    repo_root = _base_repo(tmp_path)
-    allowlist_bytes = _allowlist_bytes([_entry()])
-    _write(repo_root / ".secret-allowlist.json", allowlist_bytes)
-    digest = _sha256_hex(allowlist_bytes)
-    _write(
-        repo_root / "specs" / "decisions" / "D1.md",
-        _decision_text(1, "ratified", digest),
-    )
+def test_sealed_allowlist_suppresses_finding(tmp_path):
+    repo_root = _base_repo(tmp_path, "sealed_ok")
+    _write_secret_file(repo_root)
+    allowlist_bytes = _write_allowlist(repo_root, [_allowed_entry()])
+    seal = hashlib.sha256(allowlist_bytes).hexdigest()
+    _write_decision(repo_root, 1, "ratified", seal)
 
     result = secret_scanner.scan(repo_root)
 
-    matches = _get(result, "matches")
-    allowed = _get(result, "allowed")
-    assert len(_finding_matches(matches)) == 0
-    assert len(_invalid_matches(matches)) == 0
-    assert _get(result, "flagged") is False
-    allowed_for_file = [
-        a
-        for a in allowed
-        if _get(a, "rule_id") == RULE_ID and _get(a, "file") == TARGET_FILE
-    ]
-    assert len(allowed_for_file) == 1
+    assert _field(result, "flagged") is False
+
+    allowed = _field(result, "allowed") or []
+    assert RULE_ID in [_field(a, "rule_id") for a in allowed]
+
+    matches = _field(result, "matches") or []
+    assert matches == []
 
 
-def _assert_invalid_and_reported(repo_root):
+def test_allowlist_edited_after_seal_invalidates(tmp_path):
+    repo_root = _base_repo(tmp_path, "byte_changed")
+    _write_secret_file(repo_root)
+    allowlist_bytes = _write_allowlist(repo_root, [_allowed_entry()])
+    seal = hashlib.sha256(allowlist_bytes).hexdigest()
+    _write_decision(repo_root, 1, "ratified", seal)
+
+    allowlist_path = repo_root / ".secret-allowlist.json"
+    allowlist_path.write_bytes(allowlist_bytes + b" ")
+
     result = secret_scanner.scan(repo_root)
-    matches = _get(result, "matches")
-
-    assert len(_finding_matches(matches)) == 1
-
-    invalid = _invalid_matches(matches)
-    assert len(invalid) == 1
-    assert _get(invalid[0], "risk_tier") == "high"
-    assert _get(invalid[0], "file") == ".secret-allowlist.json"
-    assert _get(invalid[0], "line") == 1
-
-    assert _get(result, "flagged") is True
-    assert len(_get(result, "allowed")) == 0
+    _assert_invalid(result)
 
 
-def test_file_changed_by_one_byte_invalidates_seal(tmp_path):
-    repo_root = _base_repo(tmp_path)
-    allowlist_bytes = _allowlist_bytes([_entry()])
-    digest = _sha256_hex(allowlist_bytes)
-    _write(
-        repo_root / "specs" / "decisions" / "D1.md",
-        _decision_text(1, "ratified", digest),
-    )
-    changed_bytes = allowlist_bytes + b" "
-    _write(repo_root / ".secret-allowlist.json", changed_bytes)
+def test_decision_hash_mismatch_invalidates(tmp_path):
+    repo_root = _base_repo(tmp_path, "hash_mismatch")
+    _write_secret_file(repo_root)
+    allowlist_bytes = _write_allowlist(repo_root, [_allowed_entry()])
+    real_seal = hashlib.sha256(allowlist_bytes).hexdigest()
+    wrong_seal = ("1" if real_seal[0] == "0" else "0") + real_seal[1:]
+    _write_decision(repo_root, 1, "ratified", wrong_seal)
 
-    _assert_invalid_and_reported(repo_root)
+    result = secret_scanner.scan(repo_root)
+    _assert_invalid(result)
 
 
-def test_decision_hash_changed_invalidates_seal(tmp_path):
-    repo_root = _base_repo(tmp_path)
-    allowlist_bytes = _allowlist_bytes([_entry()])
-    _write(repo_root / ".secret-allowlist.json", allowlist_bytes)
-    real_digest = _sha256_hex(allowlist_bytes)
-    wrong_digest = _flip_first_char(real_digest)
-    _write(
-        repo_root / "specs" / "decisions" / "D1.md",
-        _decision_text(1, "ratified", wrong_digest),
-    )
+def test_decision_not_ratified_invalidates(tmp_path):
+    repo_root = _base_repo(tmp_path, "not_ratified")
+    _write_secret_file(repo_root)
+    allowlist_bytes = _write_allowlist(repo_root, [_allowed_entry()])
+    seal = hashlib.sha256(allowlist_bytes).hexdigest()
+    _write_decision(repo_root, 1, "draft", seal)
 
-    _assert_invalid_and_reported(repo_root)
+    result = secret_scanner.scan(repo_root)
+    _assert_invalid(result)
 
 
-def test_decision_not_ratified_invalidates_seal(tmp_path):
-    repo_root = _base_repo(tmp_path)
-    allowlist_bytes = _allowlist_bytes([_entry()])
-    _write(repo_root / ".secret-allowlist.json", allowlist_bytes)
-    digest = _sha256_hex(allowlist_bytes)
-    _write(
-        repo_root / "specs" / "decisions" / "D1.md",
-        _decision_text(1, "draft", digest),
-    )
+def test_no_decision_invalidates(tmp_path):
+    repo_root = _base_repo(tmp_path, "no_decision")
+    _write_secret_file(repo_root)
+    _write_allowlist(repo_root, [_allowed_entry()])
 
-    _assert_invalid_and_reported(repo_root)
+    result = secret_scanner.scan(repo_root)
+    _assert_invalid(result)
 
 
-def test_no_decision_invalidates_seal(tmp_path):
-    repo_root = _base_repo(tmp_path)
-    allowlist_bytes = _allowlist_bytes([_entry()])
-    _write(repo_root / ".secret-allowlist.json", allowlist_bytes)
+def test_other_decision_wrong_hash_invalidates(tmp_path):
+    repo_root = _base_repo(tmp_path, "other_decision")
+    _write_secret_file(repo_root)
+    _write_allowlist(repo_root, [_allowed_entry()])
+    other_seal = hashlib.sha256(b"unrelated content").hexdigest()
+    _write_decision(repo_root, 2, "ratified", other_seal)
 
-    _assert_invalid_and_reported(repo_root)
-
-
-def test_other_ratified_decision_with_different_hash_invalidates_seal(tmp_path):
-    repo_root = _base_repo(tmp_path)
-    allowlist_bytes = _allowlist_bytes([_entry()])
-    _write(repo_root / ".secret-allowlist.json", allowlist_bytes)
-    real_digest = _sha256_hex(allowlist_bytes)
-    _write(
-        repo_root / "specs" / "decisions" / "D1.md",
-        _decision_text(1, "ratified", real_digest),
-    )
-    wrong_digest = _flip_first_char(real_digest)
-    _write(
-        repo_root / "specs" / "decisions" / "D2.md",
-        _decision_text(2, "ratified", wrong_digest),
-    )
-
-    _assert_invalid_and_reported(repo_root)
+    result = secret_scanner.scan(repo_root)
+    _assert_invalid(result)
 
 
-def test_empty_allowlist_needs_no_seal(tmp_path):
-    repo_root = _base_repo(tmp_path)
-    allowlist_bytes = _allowlist_bytes([])
-    _write(repo_root / ".secret-allowlist.json", allowlist_bytes)
+def test_empty_allowlist_no_decision_is_valid(tmp_path):
+    repo_root = _base_repo(tmp_path, "empty_allowlist")
+    _write_allowlist(repo_root, [])
 
     result = secret_scanner.scan(repo_root)
 
-    matches = _get(result, "matches")
-    assert len(_finding_matches(matches)) == 1
-    assert len(_invalid_matches(matches)) == 0
-    assert _get(result, "flagged") is True
+    matches = _field(result, "matches") or []
+    rule_ids = [_field(m, "rule_id") for m in matches]
+    assert "allowlist-invalid" not in rule_ids

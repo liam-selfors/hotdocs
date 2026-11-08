@@ -19,4 +19,10 @@ Given two projects whose "lint" fakes differ, called one after the other in one 
 When main routes "lint" in each
 Then each call reaches its own project's fake (compare which fake ran, not
   the tokens it received, which always end with the `--repo-root` token)
+
+Given a project with no gen/spec-linter and a fake tool root whose "lint" fake
+  logs to the project's calls.log
+When main(["lint"], tool_root=<fake tool root>, cwd=<project>) is called
+Then the tool root's fake ran and the exit code is 7; and once the project has
+  its own "lint" fake, the project's fake runs instead
 ```

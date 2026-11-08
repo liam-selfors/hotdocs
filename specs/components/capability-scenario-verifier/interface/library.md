@@ -24,8 +24,9 @@ A developer never invokes this component directly: it has no CLI
 
 ## Dependencies
 
-Each is loaded lazily, at its first use, from `repo_root` — never by a
-bare `import`, never relative to this file — as a flat `<module>.py` or
+Each is loaded lazily, at its first use, from `repo_root`, or from the
+tool root when the directory shown is absent there (`D199`); never by a
+bare `import`; as a flat `<module>.py` or
 a `<module>/__init__.py` package under the directory shown, and its
 results are read with dual dict-or-attribute access. No name beyond
 these is used.

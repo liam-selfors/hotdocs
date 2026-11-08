@@ -18,7 +18,8 @@ pip install -e .
 ```
 
 The editable install matters: the tool's components are files in this
-checkout, which `hotdocs init` copies into each project.
+checkout, and every project uses them from here. Updating the checkout
+(`git pull`) updates the tool for all your projects.
 
 ## 2. Create a project
 
@@ -27,14 +28,17 @@ mkdir myproject && cd myproject
 hotdocs init --example
 ```
 
-`init` creates `specs/`, `gen/`, `verification/`, `pipeline/`, copies the
-tool into `gen/` and `pipeline/` (recorded in `.hotdocs-tool.json`), and asks
-which model provider to use. It tests the connection, never asks for an API
+`init` creates `specs/`, `gen/` and `verification/`, records the tool
+version in `.hotdocs-tool.json`, and asks which model provider to use. Your
+`gen/` holds only your own components; the tool's stay in the tool, so a
+component of yours may not reuse one of the tool's names (`hotdocs lint`
+says so). It tests the connection, never asks for an API
 key, and stores only the *name* of the environment variable that holds it in
-`hotdocs.toml`. `--example` adds a tiny `slugify` component to start from. It also writes
-`.secret-allowlist.json`, sealed by `specs/decisions/D1.md`: the secret
-scanner honors the list only while its hash matches a ratified decision, so
-changing it means writing a new decision with the new hash.
+`hotdocs.toml`. `--example` adds a tiny `slugify` component to start from. It also writes an
+empty `.secret-allowlist.json`. To allow a flagged string that is not a
+secret, add it to that file and record the file's hash in a ratified
+decision (`allowlist_sha256` in its frontmatter): the scanner honors a
+non-empty list only while its hash matches.
 Run it again any time; it never overwrites. `hotdocs init --reconfigure`
 changes only the provider.
 
@@ -77,3 +81,20 @@ the spec: a missing detail, or an example that contradicts a requirement.
 Fix it there. `hotdocs track feedback comp-<name>` lists the failing
 requirement ids from the last attempt, and `--retry-feedback=R-...` passes
 them to the next `generate`.
+
+## 6. Known limits
+
+- The secret scan finds API keys, tokens and other high-entropy or
+  provider-shaped strings, not ordinary passwords: a low-entropy value like
+  `password = "hunter2"` passes. Keep passwords out of the repository.
+- Five of the tool's own components (`generator`, `llm-endpoint`,
+  `cache-manager`, `spec-linter`, `graph-query-engine`) are hand-written
+  and tested, not generated from their specs; the rest are generated and
+  verified like yours.
+- `hotdocs corpus-graph build` does not work yet in a project with a
+  generated component, so neither do `hotdocs track ui build` and
+  `hotdocs docs-site build`, which read its output. `lint`, `generate`,
+  `verify` and `track feedback` are unaffected.
+- `hotdocs assist` and `hotdocs review-packet build` do not yet find the
+  tool's components from a project; they work only inside the tool's own
+  checkout until they are regenerated.

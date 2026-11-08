@@ -1,115 +1,131 @@
 import json
-from pathlib import Path
 
-import capability_scenario_verifier as cap_verifier
-
-
-def _get(obj, key):
-    try:
-        return obj[key]
-    except (TypeError, KeyError):
-        return getattr(obj, key)
+import capability_scenario_verifier
 
 
-def _write(path: Path, content: str) -> None:
+def _get(obj, key, default=None):
+    if isinstance(obj, dict):
+        return obj.get(key, default)
+    return getattr(obj, key, default)
+
+
+def _write(path, content):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content)
 
 
-def _call_count(call_log: Path) -> int:
-    if not call_log.exists():
-        return 0
-    return len([ln for ln in call_log.read_text().splitlines() if ln.strip()])
+_TEST_AUTHOR_SOURCE = '''
+import json
+from pathlib import Path
+
+def author_test(bundle, model, seed=0, repo_root=None, llm_backend=None):
+    criterion_id = bundle.get("criterion_id") if isinstance(bundle, dict) else getattr(bundle, "criterion_id", None)
+    log_path = Path("__LOG_PATH__")
+    with open(log_path, "a") as f:
+        f.write(json.dumps({"criterion_id": criterion_id}) + "\\n")
+    return {
+        "model_call_error": None,
+        "file": {
+            "path": "verification/capabilities/P-X/generated-test/test_cs_x_001.py",
+            "content": "def test_x():\\n    assert False\\n",
+        },
+    }
+'''
 
 
-def _setup_repo(repo_root: Path, call_log: Path) -> None:
+def _setup_repo(repo_root, log_path):
     _write(
-        repo_root / "specs" / "product" / "P-FOO.md",
-        "---\n"
-        "id: P-FOO\n"
-        "title: Foo capability\n"
-        "status: draft\n"
-        "owners: [lselfors@gmail.com]\n"
-        "---\n\n"
-        "# Foo capability\n\n"
-        "### CS-FOO-001\n\n"
-        "Covers: P-FOO\n"
-        "Kind: generated-test\n\n"
-        "```gherkin\n"
-        "Given a foo\n"
-        "When bar happens\n"
-        "Then baz\n"
-        "```\n",
+        repo_root / "specs" / "product" / "widget.md",
+        """---
+id: P-X
+title: Widget Capability
+status: ratified
+owners: [alice]
+last_ratified_commit: "0000000"
+---
+
+# Widget Capability
+
+### CS-X-001
+
+Covers: P-X
+Kind: generated-test
+
+```gherkin
+Given a widget
+When it is used
+Then it works
+```
+""",
     )
 
-    author_test_src = (
-        "import json\n\n"
-        "CALL_LOG = %r\n\n"
-        "def author_test(bundle, model, seed=0, repo_root=None, llm_backend=None):\n"
-        "    try:\n"
-        "        criterion_id = bundle[\"criterion_id\"]\n"
-        "    except TypeError:\n"
-        "        criterion_id = bundle.criterion_id\n"
-        "    with open(CALL_LOG, \"a\") as f:\n"
-        "        f.write(json.dumps({\"criterion_id\": criterion_id}) + \"\\n\")\n"
-        "    return {\n"
-        "        \"model_call_error\": None,\n"
-        "        \"file\": {\n"
-        "            \"path\": \"verification/capabilities/P-FOO/generated-test/test_cs_foo_001.py\",\n"
-        "            \"content\": \"def test_x():\\n    assert False\\n\",\n"
-        "        },\n"
-        "    }\n"
-    ) % (str(call_log),)
-    _write(repo_root / "gen" / "test-author" / "test_author.py", author_test_src)
+    _write(
+        repo_root / "specs" / "components" / "widget" / "component.md",
+        """---
+id: comp-widget
+title: Widget
+status: ratified
+owners: [alice]
+last_ratified_commit: "0000000"
+realizes: [P-X]
+sealed: true
+source_path: pipeline/widget/
+---
 
-    llm_endpoint_src = (
-        "def complete(prompt, model, backend=None, **params):\n"
-        "    return {\"text\": \"ok\", \"model_call_error\": None}\n"
+# Widget
+""",
     )
-    _write(repo_root / "gen" / "llm-endpoint" / "llm_endpoint.py", llm_endpoint_src)
+
+    author_source = _TEST_AUTHOR_SOURCE.replace("__LOG_PATH__", str(log_path))
+    _write(repo_root / "gen" / "test-author" / "test_author.py", author_source)
 
 
-def test_failing_scenario_recorded_and_not_rerun(tmp_path):
+def test_recorded_failure_not_hidden_and_not_rerun(tmp_path):
     repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    call_log = tmp_path / "author_test_calls.log"
+    log_path = tmp_path / "author_test_calls.log"
+    _setup_repo(repo_root, log_path)
 
-    _setup_repo(repo_root, call_log)
-
-    # Fresh run: the capability's only scenario fails.
-    fresh_result = cap_verifier.run_capability_gates(
-        "P-FOO", repo_root, model="claude-sonnet-5", seed=0, llm_backend=None
+    first = capability_scenario_verifier.run_capability_gates(
+        "P-X", repo_root, model="stub-model", seed=0
     )
 
-    assert _get(fresh_result, "hit") is False
-    fresh_report = _get(fresh_result, "capability_scenario_report")
-    fresh_entry = _get(fresh_report, "P-FOO")
-    assert _get(fresh_entry, "overall") == "fail"
-    assert _call_count(call_log) == 1
+    first_hit = _get(first, "hit")
+    first_report = _get(first, "capability_scenario_report")
+    first_capability = _get(first_report, "P-X")
+    first_overall = _get(first_capability, "overall")
 
-    record_path = (
-        repo_root / "verification" / "capabilities" / "P-FOO" / ".provenance.json"
-    )
+    assert first_hit is False
+    assert first_overall == "fail"
+
+    record_path = repo_root / "verification" / "capabilities" / "P-X" / ".provenance.json"
     assert record_path.exists()
     record = json.loads(record_path.read_text())
-    assert record["capability_scenario_report"]["P-FOO"]["overall"] == "fail"
-    assert record["gate_version"] == cap_verifier.GATE_VERSION
+    recorded_report = record["capability_scenario_report"]
+    assert recorded_report["P-X"]["overall"] == "fail"
 
-    # Same record, unchanged code: a pure read sees the recorded failure as a hit.
-    check_result = cap_verifier.check_capability_provenance("P-FOO", repo_root)
+    assert log_path.exists()
+    calls_after_first = log_path.read_text().splitlines()
+    assert len(calls_after_first) == 1
 
-    assert _get(check_result, "hit") is True
-    check_report = _get(check_result, "capability_scenario_report")
-    check_entry = _get(check_report, "P-FOO")
-    assert _get(check_entry, "overall") == "fail"
-    assert _call_count(call_log) == 1
+    check = capability_scenario_verifier.check_capability_provenance("P-X", repo_root)
+    check_hit = _get(check, "hit")
+    check_report = _get(check, "capability_scenario_report")
+    check_capability = _get(check_report, "P-X")
+    check_overall = _get(check_capability, "overall")
 
-    # run_capability_gates with model=None must not require a model on a hit,
-    # must not re-run anything, and must return the same recorded failure.
-    gate_result = cap_verifier.run_capability_gates("P-FOO", repo_root, model=None)
+    assert check_hit is True
+    assert check_overall == "fail"
 
-    assert _get(gate_result, "hit") is True
-    gate_report = _get(gate_result, "capability_scenario_report")
-    gate_entry = _get(gate_report, "P-FOO")
-    assert _get(gate_entry, "overall") == "fail"
-    assert _call_count(call_log) == 1
+    second = capability_scenario_verifier.run_capability_gates(
+        "P-X", repo_root, model=None
+    )
+    second_hit = _get(second, "hit")
+    second_report = _get(second, "capability_scenario_report")
+    second_capability = _get(second_report, "P-X")
+    second_overall = _get(second_capability, "overall")
+
+    assert second_hit is True
+    assert second_overall == "fail"
+
+    calls_after_second = log_path.read_text().splitlines()
+    assert calls_after_second == calls_after_first

@@ -79,3 +79,5 @@ Full narrative per entry lives in its own `specs/decisions/D<N>.md`.
   deliberately not split.
 - `D176`: `R-LINT-028`–`030` implemented, found never to have been;
   028 handles wrapped and punctuated citations.
+- `D199`: `R-LINT-032`, a project component may not reuse a tool
+  component's slug.

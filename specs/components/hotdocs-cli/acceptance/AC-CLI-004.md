@@ -16,7 +16,8 @@ Given main(["frobnicate"])
 When called
 Then it returns 2 and stderr holds "unknown verb: frobnicate" and the verb list
 
-Given a project with no gen/spec-linter, then one whose fake has no main
-When main(["lint"]) is called
-Then each returns 2; the first message names "gen/spec-linter/spec_linter.py" and "hotdocs init"
+Given a project and an empty fake tool root, neither with gen/spec-linter,
+  then a project whose fake has no main
+When main(["lint"], tool_root=<fake tool root>) is called
+Then each returns 2; the first message names "gen/spec-linter/spec_linter.py"
 ```

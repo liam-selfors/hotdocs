@@ -1,295 +1,259 @@
+import os
 import shutil
 import tempfile
-import unittest
+import textwrap
 from pathlib import Path
 
 import component_gate_runner
 
 
-def _get(obj, key, default=None):
+def _get(obj, name):
     if isinstance(obj, dict):
-        return obj.get(key, default)
-    return getattr(obj, key, default)
+        return obj.get(name)
+    return getattr(obj, name, None)
 
 
-class TestACGate003a(unittest.TestCase):
-    def setUp(self):
-        self.repo_root = Path(tempfile.mkdtemp())
-        self.addCleanup(shutil.rmtree, self.repo_root, ignore_errors=True)
-        self.generator_call_log = self.repo_root / "generator_calls.log"
+def _write_module(repo_root, dependency_slug, module_name, content):
+    module_dir = os.path.join(str(repo_root), "gen", dependency_slug)
+    os.makedirs(module_dir, exist_ok=True)
+    with open(os.path.join(module_dir, module_name + ".py"), "w") as f:
+        f.write(content)
 
-        self._write_fixture_component()
-        self._write_fake_dependencies()
 
-    def _write_fixture_component(self):
-        comp_dir = self.repo_root / "specs" / "components" / "foo"
-        comp_dir.mkdir(parents=True)
-        (comp_dir / "component.md").write_text(
-            "---\n"
-            "id: comp-foo\n"
-            "title: Foo\n"
-            "status: draft\n"
-            "owners: [test-team]\n"
-            "sealed: false\n"
-            "---\n\n"
-            "# Foo\n\n"
-            "Purpose: test fixture for AC-GATE-003a.\n"
+def test_ac_gate_003a_generator_called_once_on_miss_with_passing_verification():
+    repo_root_dir = tempfile.mkdtemp(prefix="ac-gate-003a-repo-")
+    log_dir = tempfile.mkdtemp(prefix="ac-gate-003a-log-")
+    log_path = os.path.join(log_dir, "generator_calls.log")
+
+    try:
+        repo_root = Path(repo_root_dir)
+
+        provenance_checker_src = textwrap.dedent(
+            """
+            class ProvenanceKey:
+                def __init__(self, spec_bundle_hash, gate_versions):
+                    self.spec_bundle_hash = spec_bundle_hash
+                    self.gate_versions = gate_versions
+
+            def current_sealed_key(component_id, repo_root):
+                return None
+
+            def current_provenance_key(component_id, repo_root):
+                return ProvenanceKey(
+                    spec_bundle_hash="sha256:" + "0" * 64,
+                    gate_versions={
+                        "compiler": "criterion-compiler@1.0.0",
+                        "generated_test": "generated_test@1.0.0",
+                        "verifier": "verifier-orchestrator@2.0.0",
+                        "license_scanner": "license_scanner@4.0.0-no-reference-corpus",
+                        "secret_scanner": "secret_scanner@3.1.0+detect-secrets.1.5.0",
+                    },
+                )
+
+            def check_provenance(component_id, spec_bundle_hash, gate_versions, repo_root):
+                return {
+                    "hit": False,
+                    "verification_report": None,
+                    "license_scan": None,
+                    "secret_scan": None,
+                }
+
+            def check_sealed_provenance(component_id, repo_root):
+                return {
+                    "hit": False,
+                    "sealed": False,
+                    "reason": "not_sealed",
+                    "verification_report": None,
+                    "license_scan": None,
+                    "secret_scan": None,
+                    "owners": None,
+                    "source_hash": None,
+                    "written_at": None,
+                }
+            """
         )
+        _write_module(repo_root, "provenance-checker", "provenance_checker", provenance_checker_src)
 
-    def _write_module(self, dep_slug, module_name, content):
-        dep_dir = self.repo_root / "gen" / dep_slug
-        dep_dir.mkdir(parents=True, exist_ok=True)
-        (dep_dir / f"{module_name}.py").write_text(content)
-
-    def _write_fake_dependencies(self):
-        self._write_module(
-            "provenance-checker",
-            "provenance_checker",
-            '''
-class ProvenanceKey:
-    def __init__(self, spec_bundle_hash, gate_versions):
-        self.spec_bundle_hash = spec_bundle_hash
-        self.gate_versions = gate_versions
-
-
-class ProvenanceCheckResult:
-    def __init__(self, hit):
-        self.hit = hit
-        self.verification_report = None
-        self.license_scan = None
-        self.secret_scan = None
-
-
-def current_sealed_key(component_id, repo_root):
-    return None
-
-
-def current_provenance_key(component_id, repo_root):
-    return ProvenanceKey(
-        spec_bundle_hash="sha256:" + "0" * 64,
-        gate_versions={
-            "compiler": "criterion-compiler@1.0.0",
-            "generated_test": "generated_test@1.0.0",
-            "verifier": "verifier-orchestrator@2.0.0",
-            "license_scanner": "license_scanner@4.0.3+9f2c41ab07de",
-            "secret_scanner": "secret_scanner@0.0.0",
-        },
-    )
-
-
-def check_provenance(component_id, spec_bundle_hash, gate_versions, repo_root):
-    return ProvenanceCheckResult(hit=False)
-''',
+        spec_bundle_assembler_src = textwrap.dedent(
+            """
+            def assemble(component_id, repo_root=None, mode="cold"):
+                return {
+                    "component_id": component_id,
+                    "spec_bundle_hash": "sha256:" + "0" * 64,
+                    "spec": "fake spec",
+                    "interface": "fake interface",
+                    "constraints": "",
+                    "dependency_interfaces": {},
+                    "dependency_context": {},
+                    "dependency_usage": {},
+                    "vars": {},
+                    "glossary": "",
+                    "hint_code": None,
+                }
+            """
         )
+        _write_module(repo_root, "spec-bundle-assembler", "spec_bundle_assembler", spec_bundle_assembler_src)
 
-        self._write_module(
-            "spec-bundle-assembler",
-            "spec_bundle_assembler",
-            '''
-class SpecBundle:
-    def __init__(self, component_id, spec_bundle_hash):
-        self.component_id = component_id
-        self.spec_bundle_hash = spec_bundle_hash
-        self.spec = ""
-        self.interface = ""
-        self.constraints = ""
-        self.dependency_interfaces = {}
-        self.dependency_context = {}
-        self.dependency_usage = {}
-        self.vars = {}
-        self.glossary = ""
-        self.hint_code = None
+        generator_src = textwrap.dedent(
+            """
+            import os
 
+            def generate(bundle, model, retry_feedback=None, *, repo_root=None, llm_backend=None):
+                log_path = os.environ["AC_GATE_003A_GENERATOR_LOG"]
+                with open(log_path, "a") as f:
+                    f.write("called\\n")
 
-def assemble(component_id, repo_root, mode="cold"):
-    return SpecBundle(component_id, "sha256:" + "0" * 64)
-''',
+                if isinstance(bundle, dict):
+                    component_id = bundle.get("component_id")
+                    spec_bundle_hash = bundle.get("spec_bundle_hash")
+                else:
+                    component_id = getattr(bundle, "component_id", None)
+                    spec_bundle_hash = getattr(bundle, "spec_bundle_hash", None)
+
+                return {
+                    "component_id": component_id,
+                    "spec_bundle_hash": spec_bundle_hash,
+                    "model": model,
+                    "prompt_version": "v1",
+                    "cache_hit": False,
+                    "files": {"foo.py": "# generated content"},
+                    "model_call_error": None,
+                    "refused": None,
+                    "retry_feedback": retry_feedback,
+                }
+            """
         )
+        _write_module(repo_root, "generator", "generator", generator_src)
 
-        generator_log_path = str(self.generator_call_log)
-        self._write_module(
-            "generator",
-            "generator",
-            f'''
-GENERATOR_CALL_LOG = {generator_log_path!r}
+        verifier_orchestrator_src = textwrap.dedent(
+            """
+            GATE_VERSION = "verifier-orchestrator@2.0.0"
 
-
-class GenerationResult:
-    def __init__(self, component_id, spec_bundle_hash, model, prompt_version,
-                 cache_hit, files, model_call_error, refused, retry_feedback):
-        self.component_id = component_id
-        self.spec_bundle_hash = spec_bundle_hash
-        self.model = model
-        self.prompt_version = prompt_version
-        self.cache_hit = cache_hit
-        self.files = files
-        self.model_call_error = model_call_error
-        self.refused = refused
-        self.retry_feedback = retry_feedback
-
-
-def generate(bundle, model, retry_feedback=None, *, repo_root=None, llm_backend=None):
-    with open(GENERATOR_CALL_LOG, "a") as f:
-        f.write("call\\n")
-    return GenerationResult(
-        component_id=bundle.component_id,
-        spec_bundle_hash=bundle.spec_bundle_hash,
-        model=model,
-        prompt_version="v1",
-        cache_hit=False,
-        files={{"foo.py": "# generated content"}},
-        model_call_error=None,
-        refused=None,
-        retry_feedback=retry_feedback,
-    )
-''',
+            def verify(component_id, repo_root, judge=None, test_author=None):
+                return {
+                    "component_id": component_id,
+                    "criteria": [
+                        {"id": "AC-FOO-001", "covers": "R-FOO-001", "kind": "compiled", "result": "pass"},
+                    ],
+                    "requirement_results": {"R-FOO-001": "pass"},
+                    "interface_drift": False,
+                    "mutation_score": 1.0,
+                    "overall": "pass",
+                }
+            """
         )
+        _write_module(repo_root, "verifier-orchestrator", "verifier_orchestrator", verifier_orchestrator_src)
 
-        self._write_module(
-            "verifier-orchestrator",
-            "verifier_orchestrator",
-            '''
-GATE_VERSION = "verifier-orchestrator@2.0.0"
+        license_scanner_src = textwrap.dedent(
+            """
+            def scan(component_id, repo_root):
+                return {
+                    "component_id": component_id,
+                    "gate_version": "license_scanner@4.0.0-no-reference-corpus",
+                    "evaluated": False,
+                    "reason": "no-reference-corpus",
+                    "similarity_score": None,
+                    "block_threshold": None,
+                    "blocked": False,
+                    "matches": [],
+                    "notified": False,
+                    "notification_delivery_error": None,
+                    "cache_hit": False,
+                }
 
-
-class VerificationReport:
-    def __init__(self, component_id):
-        self.component_id = component_id
-        self.criteria = [
-            {"id": "AC-FOO-001", "covers": "R-FOO-001", "kind": "compiled", "result": "pass"}
-        ]
-        self.requirement_results = {"R-FOO-001": "pass"}
-        self.interface_drift = False
-        self.mutation_score = 1.0
-        self.overall = "pass"
-
-    def to_dict(self):
-        return dict(self.__dict__)
-
-
-def verify(component_id, repo_root, judge=None, test_author=None):
-    return VerificationReport(component_id)
-''',
+            def gate_version(repo_root):
+                return "license_scanner@4.0.0-no-reference-corpus"
+            """
         )
+        _write_module(repo_root, "license-scanner", "license_scanner", license_scanner_src)
 
-        self._write_module(
-            "license-scanner",
-            "license_scanner",
-            '''
-def gate_version(repo_root):
-    return "license_scanner@4.0.0-no-reference-corpus"
+        secret_scanner_src = textwrap.dedent(
+            """
+            def scan(repo_root):
+                return {
+                    "scope": "full",
+                    "gate_version": "secret_scanner@3.1.0+detect-secrets.1.5.0",
+                    "flagged": False,
+                    "matches": [],
+                    "allowed": [],
+                    "unused_allowlist_entries": [],
+                    "notified": False,
+                    "notification_delivery_error": None,
+                    "cache_hit": False,
+                }
 
-
-class LicenseScanResult:
-    def __init__(self, component_id):
-        self.component_id = component_id
-        self.gate_version = gate_version(None)
-        self.evaluated = False
-        self.reason = "no-reference-corpus"
-        self.similarity_score = None
-        self.block_threshold = None
-        self.blocked = False
-        self.matches = []
-        self.notified = False
-        self.notification_delivery_error = None
-        self.cache_hit = False
-
-    def to_dict(self):
-        return dict(self.__dict__)
-
-
-def scan(component_id, repo_root):
-    return LicenseScanResult(component_id)
-''',
+            def gate_version(repo_root):
+                return "secret_scanner@3.1.0+detect-secrets.1.5.0"
+            """
         )
+        _write_module(repo_root, "secret-scanner", "secret_scanner", secret_scanner_src)
 
-        self._write_module(
-            "secret-scanner",
-            "secret_scanner",
-            '''
-def gate_version(repo_root):
-    return "secret_scanner@3.1.0+detect-secrets.1.5.0"
+        provenance_tracker_src = textwrap.dedent(
+            """
+            import json
+            import os
 
+            def write_attempt_record(component_id, generation_result, verification_report, spec_bundle_hash, repo_root):
+                slug = component_id[len("comp-"):] if component_id.startswith("comp-") else component_id
+                attempts_dir = os.path.join(str(repo_root), ".hotdocs", "attempts", slug)
+                os.makedirs(attempts_dir, exist_ok=True)
+                attempt_id = "20260101T000000Z-aaaaaa"
+                record = {
+                    "attempt_id": attempt_id,
+                    "component_id": component_id,
+                    "timestamp": "2026-01-01T00:00:00Z",
+                    "spec_bundle_hash": spec_bundle_hash,
+                    "generation": generation_result,
+                    "verification": verification_report,
+                }
+                with open(os.path.join(attempts_dir, attempt_id + ".json"), "w") as f:
+                    json.dump(record, f)
+                return record
 
-class SecretScanResult:
-    def __init__(self):
-        self.scope = "full"
-        self.gate_version = gate_version(None)
-        self.flagged = False
-        self.matches = []
-        self.allowed = []
-        self.unused_allowlist_entries = []
-        self.notified = False
-        self.notification_delivery_error = None
-        self.cache_hit = False
-
-    def to_dict(self):
-        return dict(self.__dict__)
-
-
-def scan(repo_root):
-    return SecretScanResult()
-''',
+            def last_requirement_failures(component_id, repo_root):
+                return []
+            """
         )
+        _write_module(repo_root, "provenance-tracker", "provenance_tracker", provenance_tracker_src)
 
-        self._write_module(
-            "provenance-tracker",
-            "provenance_tracker",
-            '''
-from pathlib import Path
+        provenance_writer_src = textwrap.dedent(
+            """
+            def write_provenance(component_id, inputs, repo_root):
+                return None
 
-
-class AttemptRecord:
-    def __init__(self, **kwargs):
-        self.__dict__.update(kwargs)
-
-
-def write_attempt_record(component_id, generation_result, verification_report,
-                          spec_bundle_hash, repo_root):
-    slug = component_id[len("comp-"):] if component_id.startswith("comp-") else component_id
-    attempts_dir = Path(repo_root) / ".hotdocs" / "attempts" / slug
-    attempts_dir.mkdir(parents=True, exist_ok=True)
-    (attempts_dir / "attempt-1.json").write_text("{}")
-    return AttemptRecord(
-        attempt_id="attempt-1",
-        component_id=component_id,
-        timestamp="2026-01-01T00:00:00Z",
-        spec_bundle_hash=spec_bundle_hash,
-        generation=generation_result,
-        verification=verification_report,
-    )
-''',
+            def write_sealed_provenance(component_id, inputs, repo_root):
+                return None
+            """
         )
+        _write_module(repo_root, "provenance-writer", "provenance_writer", provenance_writer_src)
 
-        self._write_module(
-            "provenance-writer",
-            "provenance_writer",
-            '''
-def write_provenance(component_id, inputs, repo_root):
-    return None
+        os.environ["AC_GATE_003A_GENERATOR_LOG"] = log_path
+        try:
+            result = component_gate_runner.run_component_gates(
+                component_id="comp-foo",
+                repo_root=repo_root,
+                model="fake-model-1",
+                seed=0,
+                llm_backend=None,
+                retry_feedback=None,
+            )
+        finally:
+            del os.environ["AC_GATE_003A_GENERATOR_LOG"]
 
-
-def write_sealed_provenance(component_id, inputs, repo_root):
-    return None
-''',
-        )
-
-    def test_non_sealed_miss_one_file_pass(self):
-        result = component_gate_runner.run_component_gates(
-            "comp-foo", self.repo_root, model="claude-sonnet-5", seed=0,
-        )
-
-        self.assertTrue(self.generator_call_log.exists())
-        calls = self.generator_call_log.read_text().splitlines()
-        self.assertEqual(len(calls), 1)
-
-        self.assertFalse(_get(result, "blocked"))
-        self.assertIsNone(_get(result, "block_reason"))
-        self.assertIsNone(_get(result, "model_call_error"))
-
+        blocked = _get(result, "blocked")
+        block_reason = _get(result, "block_reason")
+        model_call_error = _get(result, "model_call_error")
         verification = _get(result, "verification")
-        self.assertEqual(_get(verification, "overall"), "pass")
+        overall = _get(verification, "overall")
 
+        assert blocked is False
+        assert block_reason is None
+        assert model_call_error is None
+        assert overall == "pass"
 
-if __name__ == "__main__":
-    unittest.main()
+        with open(log_path) as f:
+            calls = [line for line in f.read().splitlines() if line.strip()]
+        assert len(calls) == 1
+    finally:
+        shutil.rmtree(repo_root_dir, ignore_errors=True)
+        shutil.rmtree(log_dir, ignore_errors=True)

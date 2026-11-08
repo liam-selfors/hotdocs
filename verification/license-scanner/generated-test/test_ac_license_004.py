@@ -1,172 +1,152 @@
 import json
-import textwrap
+import os
+import tempfile
 from pathlib import Path
-
-import pytest
 
 import license_scanner
 
 
-def _get(obj, key, default=None):
+def _field(obj, name):
     if isinstance(obj, dict):
-        return obj.get(key, default)
-    return getattr(obj, key, default)
+        return obj.get(name)
+    return getattr(obj, name, None)
 
 
-FIXTURE_COMPONENT_ID = "comp-license-fixture"
-FIXTURE_SLUG = "license-fixture"
+def test_ac_license_004_cache_hit_returns_cached_result_without_rescan():
+    with tempfile.TemporaryDirectory() as repo_root_str:
+        repo_root = Path(repo_root_str)
+        cache_manager_dir = repo_root / "gen" / "cache-manager"
+        cache_manager_dir.mkdir(parents=True)
+        log_path = repo_root / "fake_cache_manager.log"
 
-CACHED_PAYLOAD = {
-    "component_id": FIXTURE_COMPONENT_ID,
-    "gate_version": "license_scanner@4.0.3+9f2c41ab07de",
-    "evaluated": True,
-    "reason": None,
-    "similarity_score": 0.55,
-    "block_threshold": 0.70,
-    "blocked": False,
-    "matches": [
-        {
-            "reference_id": "ref-123",
-            "license_family": "gpl-3.0",
-            "risk_tier": "high",
-            "score": 0.55,
-        }
-    ],
-    "notified": True,
-    "notification_delivery_error": None,
-    "cache_hit": True,
-}
+        saved_corpus_var = os.environ.pop("VAR_LICENSE_CORPUS_PATH", None)
+        os.environ["FAKE_CACHE_MANAGER_LOG"] = str(log_path)
+        try:
+            component_id = "comp-license-scanner-ac004-fixture"
 
-FAKE_CACHE_MANAGER_SOURCE = textwrap.dedent("""
-    import dataclasses
-    import json
-    from pathlib import Path
+            # No corpus configured -> deterministic, documented gate_version
+            # string, computed without touching cache-manager or scanning
+            # anything (per interface/library.md's gate_version contract).
+            expected_gate_version = license_scanner.gate_version(repo_root)
+            assert expected_gate_version == "license_scanner@4.0.0-no-reference-corpus"
 
-    @dataclasses.dataclass
-    class CacheKey:
-        spec_bundle_hash: str
-        gate_inputs_hash: str
-        gate_version: str
-        model_pin: str
+            # A payload that a fresh "no-reference-corpus" scan could never
+            # produce (evaluated=True, a concrete similarity_score, a match)
+            # so that returning it verbatim proves the cached result was
+            # reused rather than recomputed.
+            cached_payload = {
+                "component_id": component_id,
+                "gate_version": expected_gate_version,
+                "evaluated": True,
+                "reason": None,
+                "similarity_score": 0.9999,
+                "block_threshold": 0.70,
+                "blocked": True,
+                "matches": [
+                    {
+                        "reference_id": "ref-ac004-impossible",
+                        "license_family": "gpl-3.0",
+                        "risk_tier": "high",
+                        "score": 0.9999,
+                    }
+                ],
+                "notified": True,
+                "notification_delivery_error": None,
+                "cache_hit": False,
+            }
 
-    @dataclasses.dataclass
-    class CachedResult:
-        gate_type: str
-        payload: dict
-        stored_at: str
+            fake_module_source = (
+                "import dataclasses\n"
+                "import json\n"
+                "import os\n"
+                "\n"
+                "@dataclasses.dataclass\n"
+                "class CacheKey:\n"
+                "    spec_bundle_hash: str\n"
+                "    gate_inputs_hash: str\n"
+                "    gate_version: str\n"
+                "    model_pin: str\n"
+                "\n"
+                "@dataclasses.dataclass\n"
+                "class CachedResult:\n"
+                "    gate_type: str\n"
+                "    payload: object\n"
+                "    stored_at: str\n"
+                "\n"
+                "_LOG_PATH = os.environ['FAKE_CACHE_MANAGER_LOG']\n"
+                "_CACHED_PAYLOAD = " + repr(cached_payload) + "\n"
+                "\n"
+                "def _append_log(record):\n"
+                "    with open(_LOG_PATH, 'a', encoding='utf-8') as fh:\n"
+                "        fh.write(json.dumps(record) + chr(10))\n"
+                "\n"
+                "def get(cache_key, *, repo_root=None):\n"
+                "    _append_log({'op': 'get', 'key': dataclasses.asdict(cache_key)})\n"
+                "    return CachedResult(\n"
+                "        gate_type='license_scanner',\n"
+                "        payload=dict(_CACHED_PAYLOAD),\n"
+                "        stored_at='2026-01-01T00:00:00Z',\n"
+                "    )\n"
+                "\n"
+                "def put(cache_key, result, *, repo_root=None):\n"
+                "    _append_log({'op': 'put', 'key': dataclasses.asdict(cache_key)})\n"
+            )
 
-    class Miss:
-        pass
+            (cache_manager_dir / "cache_manager.py").write_text(
+                fake_module_source, encoding="utf-8"
+            )
 
-    _CACHED_PAYLOAD = __CACHED_PAYLOAD_REPR__
+            result = license_scanner.scan(component_id, repo_root)
 
-    def _log(event):
-        log_path = Path(__file__).parent / "invocations.log"
-        with open(log_path, "a") as f:
-            f.write(json.dumps({"event": event}) + "\\n")
+            assert result is not None
 
-    def get(cache_key, *, repo_root=None):
-        _log("get")
-        return CachedResult(
-            gate_type="license_scanner",
-            payload=dict(_CACHED_PAYLOAD),
-            stored_at="2026-01-01T00:00:00Z",
-        )
+            assert log_path.exists(), "cache-manager's get() was never invoked"
+            log_lines = [
+                json.loads(line)
+                for line in log_path.read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ]
 
-    def put(cache_key, result, *, repo_root=None):
-        _log("put")
-""").replace("__CACHED_PAYLOAD_REPR__", repr(CACHED_PAYLOAD))
+            get_calls = [entry for entry in log_lines if entry["op"] == "get"]
+            put_calls = [entry for entry in log_lines if entry["op"] == "put"]
 
+            assert len(get_calls) == 1, "expected exactly one cache-manager lookup"
+            assert put_calls == [], (
+                "a cache hit must not be followed by a put (no rescan was performed)"
+            )
 
-def _write(path: Path, content: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(content)
+            used_key = get_calls[0]["key"]
+            assert set(used_key.keys()) == {
+                "spec_bundle_hash",
+                "gate_inputs_hash",
+                "gate_version",
+                "model_pin",
+            }, "cache key must use cache-manager's own canonical field names"
+            assert used_key["gate_version"] == expected_gate_version
+            assert isinstance(used_key["spec_bundle_hash"], str) and used_key["spec_bundle_hash"]
+            assert isinstance(used_key["gate_inputs_hash"], str) and used_key["gate_inputs_hash"]
+            assert isinstance(used_key["model_pin"], str) and used_key["model_pin"]
 
+            assert _field(result, "cache_hit") is True
+            assert _field(result, "component_id") == component_id
+            assert _field(result, "gate_version") == expected_gate_version
+            assert _field(result, "evaluated") is True
+            assert _field(result, "reason") is None
+            assert _field(result, "similarity_score") == 0.9999
+            assert _field(result, "block_threshold") == 0.70
+            assert _field(result, "blocked") is True
 
-def _write_fixture_component(repo_root: Path) -> None:
-    component_dir = repo_root / "specs" / "components" / FIXTURE_SLUG
-    _write(
-        component_dir / "component.md",
-        textwrap.dedent(f"""\
-            ---
-            id: {FIXTURE_COMPONENT_ID}
-            title: License Fixture Component
-            status: draft
-            owners: [lselfors@gmail.com]
-            sealed: true
-            source_path: fake-source/{FIXTURE_SLUG}
-            ---
+            matches = _field(result, "matches")
+            assert matches is not None and len(matches) == 1
+            match = matches[0]
+            assert _field(match, "reference_id") == "ref-ac004-impossible"
+            assert _field(match, "license_family") == "gpl-3.0"
+            assert _field(match, "risk_tier") == "high"
+            assert _field(match, "score") == 0.9999
 
-            # License Fixture Component
-
-            Synthetic sealed fixture, present only to give AC-LICENSE-004's
-            test a minimal valid spec bundle to scan.
-            """),
-    )
-    _write(
-        component_dir / "requirements" / "R-FIXTURE-001.md",
-        textwrap.dedent("""\
-            # R-FIXTURE-001
-
-            **R-FIXTURE-001** — Fixture requirement, present only so this
-            synthetic component has a minimal valid spec bundle.
-            """),
-    )
-    _write(
-        component_dir / "acceptance" / "AC-FIXTURE-001.md",
-        textwrap.dedent("""\
-            Covers: R-FIXTURE-001
-
-            # AC-FIXTURE-001
-
-            ```gherkin
-            Given the fixture component exists
-            When nothing is evaluated
-            Then this file only exists to satisfy spec-bundle structure
-            ```
-            """),
-    )
-
-
-def _write_fake_cache_manager(repo_root: Path) -> Path:
-    cache_manager_dir = repo_root / "gen" / "cache-manager"
-    cache_manager_dir.mkdir(parents=True, exist_ok=True)
-    (cache_manager_dir / "cache_manager.py").write_text(FAKE_CACHE_MANAGER_SOURCE)
-    return cache_manager_dir / "invocations.log"
-
-
-def test_cache_hit_returns_cached_result_without_rescan(tmp_path, monkeypatch):
-    # Unset: a fresh scan here would deterministically yield evaluated=False
-    # (reason "no-reference-corpus"), the opposite of the cached payload's
-    # evaluated=True -- so an evaluated=True result below can only have come
-    # from the cache, never from an actual rescan.
-    monkeypatch.delenv("VAR_LICENSE_CORPUS_PATH", raising=False)
-
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    _write_fixture_component(repo_root)
-    invocation_log = _write_fake_cache_manager(repo_root)
-
-    result = license_scanner.scan(FIXTURE_COMPONENT_ID, repo_root)
-
-    assert _get(result, "component_id") == FIXTURE_COMPONENT_ID
-    assert _get(result, "evaluated") is True
-    assert _get(result, "reason") is None
-    assert _get(result, "similarity_score") == 0.55
-    assert _get(result, "block_threshold") == 0.70
-    assert _get(result, "blocked") is False
-    assert _get(result, "gate_version") == "license_scanner@4.0.3+9f2c41ab07de"
-
-    matches = _get(result, "matches")
-    assert len(matches) == 1
-    assert _get(matches[0], "reference_id") == "ref-123"
-    assert _get(matches[0], "risk_tier") == "high"
-
-    assert invocation_log.exists(), "cache-manager fake's get() was never invoked"
-    events = [
-        json.loads(line)["event"]
-        for line in invocation_log.read_text().splitlines()
-        if line.strip()
-    ]
-    assert "get" in events
-    assert "put" not in events
+            assert _field(result, "notified") is True
+            assert _field(result, "notification_delivery_error") is None
+        finally:
+            os.environ.pop("FAKE_CACHE_MANAGER_LOG", None)
+            if saved_corpus_var is not None:
+                os.environ["VAR_LICENSE_CORPUS_PATH"] = saved_corpus_var

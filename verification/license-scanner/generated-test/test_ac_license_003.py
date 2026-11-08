@@ -1,118 +1,104 @@
 import hashlib
 import json
+import os
+import tempfile
 from pathlib import Path
 
-
-def _get(obj, key, default=None):
-    if isinstance(obj, dict):
-        return obj.get(key, default)
-    return getattr(obj, key, default)
+import license_scanner
 
 
 def _window_hash(tokens):
-    window = "\x1f".join(tokens)
-    return hashlib.sha256(window.encode("utf-8")).hexdigest()
+    joined = "\x1f".join(tokens)
+    return hashlib.sha256(joined.encode("utf-8")).hexdigest()
 
 
-CACHE_MANAGER_SOURCE = '''
-import dataclasses
+def _field(obj, name):
+    return obj.get(name) if isinstance(obj, dict) else getattr(obj, name, None)
 
 
-@dataclasses.dataclass
-class CacheKey:
-    spec_bundle_hash: str
-    gate_inputs_hash: str
-    gate_version: str
-    model_pin: str
-
-
-@dataclasses.dataclass
-class CachedResult:
-    gate_type: str
-    payload: object
-    stored_at: str
-
-
-_LOG_PATH = {log_path!r}
-
-
-def _log(event):
-    with open(_LOG_PATH, "a") as f:
-        f.write(event + "\\n")
-
-
-def get(cache_key, *, repo_root=None):
-    _log("get")
-    return None
-
-
-def put(cache_key, result, *, repo_root=None):
-    _log("put")
-'''
-
-
-def test_notified_true_when_blocked_against_low_risk_entry(tmp_path, monkeypatch):
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-
+def _write_fake_cache_manager(repo_root):
     cache_manager_dir = repo_root / "gen" / "cache-manager"
-    cache_manager_dir.mkdir(parents=True)
-    log_path = tmp_path / "cache_manager_calls.log"
+    cache_manager_dir.mkdir(parents=True, exist_ok=True)
     (cache_manager_dir / "cache_manager.py").write_text(
-        CACHE_MANAGER_SOURCE.format(log_path=str(log_path))
+        "from dataclasses import dataclass\n"
+        "from typing import Any\n"
+        "\n"
+        "\n"
+        "@dataclass\n"
+        "class CacheKey:\n"
+        "    spec_bundle_hash: str\n"
+        "    gate_inputs_hash: str\n"
+        "    gate_version: str\n"
+        "    model_pin: str\n"
+        "\n"
+        "\n"
+        "@dataclass\n"
+        "class CachedResult:\n"
+        "    gate_type: str\n"
+        "    payload: Any\n"
+        "    stored_at: str\n"
+        "\n"
+        "\n"
+        "class Miss:\n"
+        "    pass\n"
+        "\n"
+        "\n"
+        "def get(cache_key, *, repo_root=None):\n"
+        "    return Miss()\n"
+        "\n"
+        "\n"
+        "def put(cache_key, result, *, repo_root=None):\n"
+        "    pass\n"
     )
 
-    component_dir = repo_root / "gen" / "sample-app"
-    component_dir.mkdir(parents=True)
+
+def test_ac_license_003_notified_true_on_block_with_low_risk_tier():
     tokens = [
         "alpha", "beta", "gamma", "delta", "epsilon",
         "zeta", "eta", "theta", "iota",
     ]
-    source_text = " = ".join(tokens) + "\n"
-    (component_dir / "sample_app.py").write_text(source_text)
-
     window_hash = _window_hash(tokens)
 
-    corpus = {
-        "corpus_version": 1,
-        "block_threshold": 0.5,
-        "entries": [
-            {
-                "reference_id": "ref-low-1",
-                "license_family": "mit",
-                "risk_tier": "low",
-                "hashes": [window_hash],
-            }
-        ],
-    }
-    corpus_path = repo_root / "license-corpus.json"
-    corpus_path.write_text(json.dumps(corpus))
+    with tempfile.TemporaryDirectory() as tmp:
+        repo_root = Path(tmp)
+        _write_fake_cache_manager(repo_root)
 
-    monkeypatch.setenv("VAR_LICENSE_CORPUS_PATH", str(corpus_path))
-    monkeypatch.setenv("VAR_COMPLIANCE_WEBHOOK_URL", "http://127.0.0.1:1/webhook")
+        target_dir = repo_root / "gen" / "target"
+        target_dir.mkdir(parents=True, exist_ok=True)
+        (target_dir / "main.py").write_text(" ".join(tokens) + "\n")
 
-    import license_scanner
+        corpus = {
+            "corpus_version": 1,
+            "block_threshold": 0.5,
+            "entries": [
+                {
+                    "reference_id": "ref-low-1",
+                    "license_family": "mit",
+                    "risk_tier": "low",
+                    "hashes": [window_hash],
+                }
+            ],
+        }
+        corpus_path = repo_root / "license-corpus.json"
+        corpus_path.write_text(json.dumps(corpus))
 
-    result = license_scanner.scan("comp-sample-app", repo_root)
+        old_environ = dict(os.environ)
+        try:
+            os.environ["VAR_LICENSE_CORPUS_PATH"] = str(corpus_path)
+            os.environ["VAR_COMPLIANCE_WEBHOOK_URL"] = "https://example.invalid/webhook"
 
-    assert _get(result, "evaluated") is True
+            result = license_scanner.scan("comp-target", repo_root)
+        finally:
+            os.environ.clear()
+            os.environ.update(old_environ)
 
-    similarity_score = _get(result, "similarity_score")
-    block_threshold = _get(result, "block_threshold")
-    assert similarity_score is not None
-    assert block_threshold is not None
-    assert similarity_score >= block_threshold
+        assert _field(result, "evaluated") is True
+        assert _field(result, "blocked") is True
 
-    assert _get(result, "blocked") is True
+        matches = _field(result, "matches") or []
+        assert len(matches) >= 1
+        risk_tiers = {_field(m, "risk_tier") for m in matches}
+        assert risk_tiers == {"low"}
+        assert "high" not in risk_tiers
 
-    matches = _get(result, "matches")
-    assert matches
-    risk_tiers = {_get(m, "risk_tier") for m in matches}
-    assert "low" in risk_tiers
-    assert "high" not in risk_tiers
-
-    assert _get(result, "notified") is True
-
-    if log_path.exists():
-        log_contents = log_path.read_text()
-        assert "get" in log_contents
+        assert _field(result, "notified") is True

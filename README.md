@@ -12,7 +12,9 @@ reviewing diffs of intent.
 
 ## Status
 
-To try it on a project of your own, see `QUICKSTART.md`.
+To try it on a project of your own, see `QUICKSTART.md`. A project holds
+only its own components; the tool's stay in this checkout, and every
+project uses them from here (`D199`).
 
 The rules are formalized (`SPEC_GUIDELINES.md`), and the repository's own
 pipeline is itself the worked example: **25 components, fully specced**

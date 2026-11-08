@@ -1,105 +1,132 @@
-import urllib.request
+import os
+import shutil
+import tempfile
+import unittest
+import unittest.mock
+from pathlib import Path
 
 import secret_scanner
 
 
-def _get(obj, key, default=None):
+def _field(obj, name, default=None):
     if isinstance(obj, dict):
-        return obj.get(key, default)
-    return getattr(obj, key, default)
-
-
-AWS_KEY_LINE = 'AWS_KEY = "AKIAIOSFODNN7EXAMPLE"\n'
-
-
-def _write(path, content):
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(content)
+        return obj.get(name, default)
+    return getattr(obj, name, default)
 
 
 class _FakeResponse:
     status = 200
-    code = 200
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        return False
 
     def getcode(self):
         return 200
 
     def read(self):
-        return b"{}"
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *exc_info):
-        return False
+        return b""
 
 
-class _Recorder:
-    def __init__(self):
-        self.calls = []
-
-    def __call__(self, *args, **kwargs):
-        self.calls.append((args, kwargs))
-        return _FakeResponse()
+AWS_ACCESS_KEY_LINE = 'AWS_ACCESS_KEY_ID = "AKIAIOSFODNN7EXAMPLE"\n'
+CLEAN_LINE = 'AWS_ACCESS_KEY_ID = ""\n'
+WEBHOOK_VAR = "VAR_COMPLIANCE_WEBHOOK_URL"
 
 
-def test_notification_sent_for_high_risk_match_independent_of_later_clean_retry(
-    tmp_path, monkeypatch
-):
-    monkeypatch.setenv("VAR_COMPLIANCE_WEBHOOK_URL", "https://example.invalid/hook")
-    recorder = _Recorder()
-    monkeypatch.setattr(urllib.request, "urlopen", recorder)
+class SecretScannerNotificationTest(unittest.TestCase):
+    def setUp(self):
+        self._prior_webhook = os.environ.get(WEBHOOK_VAR)
+        self._tmpdir = tempfile.mkdtemp(prefix="secret-scan-ac004-")
 
-    repo_root = tmp_path / "repo"
-    secret_file = repo_root / "config.py"
-    _write(secret_file, AWS_KEY_LINE)
+    def tearDown(self):
+        shutil.rmtree(self._tmpdir, ignore_errors=True)
+        if self._prior_webhook is None:
+            os.environ.pop(WEBHOOK_VAR, None)
+        else:
+            os.environ[WEBHOOK_VAR] = self._prior_webhook
 
-    result1 = secret_scanner.scan_files([secret_file], repo_root=repo_root)
+    def test_high_risk_match_notifies_independent_of_later_clean_retry(self):
+        os.environ[WEBHOOK_VAR] = "https://compliance.example.invalid/webhook"
+        repo_root = Path(self._tmpdir)
+        target_file = repo_root / "config.py"
+        target_file.write_text(AWS_ACCESS_KEY_LINE)
 
-    assert _get(result1, "flagged") is True
-    assert _get(result1, "notified") is True
-    assert len(recorder.calls) == 1
+        calls = []
 
-    _write(secret_file, "# now clean, no secret here\n")
-    result2 = secret_scanner.scan_files([secret_file], repo_root=repo_root)
+        def _fake_urlopen(*args, **kwargs):
+            calls.append((args, kwargs))
+            return _FakeResponse()
 
-    assert _get(result2, "flagged") is False
-    assert _get(result2, "notified") is False
-    assert len(recorder.calls) == 1
-    assert _get(result1, "notified") is True
+        with unittest.mock.patch("urllib.request.urlopen", side_effect=_fake_urlopen):
+            result = secret_scanner.scan_files([target_file], repo_root=repo_root)
+
+        flagged = _field(result, "flagged")
+        notified = _field(result, "notified")
+        matches = _field(result, "matches") or []
+
+        self.assertTrue(flagged)
+        self.assertTrue(notified)
+        self.assertEqual(len(calls), 1)
+
+        risk_tiers = [_field(m, "risk_tier") for m in matches]
+        self.assertIn("high", risk_tiers)
+
+        # a later retry that scans clean never un-notifies the earlier call
+        target_file.write_text(CLEAN_LINE)
+
+        with unittest.mock.patch("urllib.request.urlopen", side_effect=_fake_urlopen):
+            result2 = secret_scanner.scan_files([target_file], repo_root=repo_root)
+
+        self.assertFalse(_field(result2, "flagged"))
+        self.assertFalse(_field(result2, "notified"))
+        # the first call's notification remains the only recorded webhook delivery
+        self.assertEqual(len(calls), 1)
+
+    def test_no_match_never_calls_urlopen_and_not_notified(self):
+        os.environ[WEBHOOK_VAR] = "https://compliance.example.invalid/webhook"
+        repo_root = Path(self._tmpdir)
+        target_file = repo_root / "clean.py"
+        target_file.write_text("x = 1\n")
+
+        calls = []
+
+        def _fake_urlopen(*args, **kwargs):
+            calls.append((args, kwargs))
+            return _FakeResponse()
+
+        with unittest.mock.patch(
+            "urllib.request.urlopen", side_effect=_fake_urlopen
+        ) as mock_urlopen:
+            result = secret_scanner.scan_files([target_file], repo_root=repo_root)
+
+            self.assertFalse(_field(result, "notified"))
+            mock_urlopen.assert_not_called()
+        self.assertEqual(len(calls), 0)
+
+    def test_webhook_unset_high_risk_match_flags_but_does_not_notify(self):
+        os.environ.pop(WEBHOOK_VAR, None)
+        repo_root = Path(self._tmpdir)
+        target_file = repo_root / "config.py"
+        target_file.write_text(AWS_ACCESS_KEY_LINE)
+
+        calls = []
+
+        def _fake_urlopen(*args, **kwargs):
+            calls.append((args, kwargs))
+            return _FakeResponse()
+
+        with unittest.mock.patch(
+            "urllib.request.urlopen", side_effect=_fake_urlopen
+        ) as mock_urlopen:
+            result = secret_scanner.scan_files([target_file], repo_root=repo_root)
+
+            self.assertTrue(_field(result, "flagged"))
+            self.assertFalse(_field(result, "notified"))
+            mock_urlopen.assert_not_called()
+        self.assertEqual(len(calls), 0)
 
 
-def test_no_match_at_all_means_no_notification_and_no_webhook_call(
-    tmp_path, monkeypatch
-):
-    monkeypatch.setenv("VAR_COMPLIANCE_WEBHOOK_URL", "https://example.invalid/hook")
-    recorder = _Recorder()
-    monkeypatch.setattr(urllib.request, "urlopen", recorder)
-
-    repo_root = tmp_path / "repo"
-    clean_file = repo_root / "clean.py"
-    _write(clean_file, "x = 1\n")
-
-    result = secret_scanner.scan_files([clean_file], repo_root=repo_root)
-
-    assert _get(result, "flagged") is False
-    assert _get(result, "notified") is False
-    assert recorder.calls == []
-
-
-def test_webhook_unset_means_flagged_true_but_not_notified_and_no_webhook_call(
-    tmp_path, monkeypatch
-):
-    monkeypatch.delenv("VAR_COMPLIANCE_WEBHOOK_URL", raising=False)
-    recorder = _Recorder()
-    monkeypatch.setattr(urllib.request, "urlopen", recorder)
-
-    repo_root = tmp_path / "repo"
-    secret_file = repo_root / "config.py"
-    _write(secret_file, AWS_KEY_LINE)
-
-    result = secret_scanner.scan_files([secret_file], repo_root=repo_root)
-
-    assert _get(result, "flagged") is True
-    assert _get(result, "notified") is False
-    assert recorder.calls == []
+if __name__ == "__main__":
+    unittest.main()

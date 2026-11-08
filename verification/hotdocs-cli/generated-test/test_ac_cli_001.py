@@ -1,5 +1,4 @@
 import json
-from pathlib import Path
 
 import hotdocs_cli
 
@@ -28,174 +27,144 @@ ROWS = [
 ]
 
 
-def _marker_path(markers_dir: Path, dir_rel: str, module_name: str) -> Path:
-    safe = f"{dir_rel}__{module_name}".replace("/", "_").replace(".", "_")
-    return markers_dir / f"{safe}.marker"
-
-
-def _write_fake_module(gen_root: Path, dir_rel: str, module_name: str,
-                        calls_log: Path, marker_path: Path) -> None:
-    full_dir = gen_root / dir_rel
-    if "." in module_name:
-        pkg, sub = module_name.split(".", 1)
-        pkg_dir = full_dir / pkg
-        pkg_dir.mkdir(parents=True, exist_ok=True)
-        init_file = pkg_dir / "__init__.py"
-        if not init_file.exists():
-            init_file.write_text("")
-        target = pkg_dir / f"{sub}.py"
-    else:
-        full_dir.mkdir(parents=True, exist_ok=True)
-        target = full_dir / f"{module_name}.py"
-
-    calls_log_literal = repr(str(calls_log))
-    marker_literal = repr(str(marker_path))
-    source = (
+def _fake_source(log_path, marker=None, exit_code=7):
+    write_expr = "json.dumps(argv)" if marker is None else repr(marker)
+    return (
         "import json\n\n"
         "def main(argv):\n"
-        f"    with open({calls_log_literal}, 'a') as f:\n"
-        "        f.write(json.dumps(argv) + '\\n')\n"
-        f"    with open({marker_literal}, 'a') as f:\n"
-        "        f.write('1\\n')\n"
-        "    return 7\n"
-    )
-    target.write_text(source)
+        "    with open(%r, 'a') as f:\n"
+        "        f.write(%s + '\\n')\n"
+        "    return %d\n"
+    ) % (str(log_path), write_expr, exit_code)
 
 
-def _read_lines(path: Path):
-    if not path.exists():
-        return []
-    return path.read_text().splitlines()
+def _write_fake_file(path, log_path, marker=None, exit_code=7):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(_fake_source(log_path, marker=marker, exit_code=exit_code))
 
 
-def _marker_count(path: Path) -> int:
-    return len(_read_lines(path))
+def _write_row_fake(project, dir_rel, module, log_path):
+    base = project / dir_rel
+    if "." in module:
+        pkg, sub = module.split(".", 1)
+        pkg_dir = base / pkg
+        pkg_dir.mkdir(parents=True, exist_ok=True)
+        (pkg_dir / "__init__.py").write_text("")
+        _write_fake_file(pkg_dir / f"{sub}.py", log_path)
+    else:
+        _write_fake_file(base / f"{module}.py", log_path)
 
 
-def test_dispatch_strips_and_routes_every_row(tmp_path):
+def _log_path(project, dir_rel):
+    return project / dir_rel / "calls.log"
+
+
+def _line_count(path):
+    return len(path.read_text().splitlines()) if path.exists() else 0
+
+
+def test_dispatch_strip_and_longest_prefix(tmp_path):
     project = tmp_path / "project"
     project.mkdir()
-    calls_log = project / "calls.log"
-    markers_dir = project / "markers"
-    markers_dir.mkdir()
 
-    unique_pairs = []
-    seen = set()
-    for _, dir_rel, module_name, _ in ROWS:
-        key = (dir_rel, module_name)
-        if key not in seen:
-            seen.add(key)
-            unique_pairs.append(key)
+    log_paths = {}
+    for words, dir_rel, module, strip in ROWS:
+        log_paths[dir_rel] = _log_path(project, dir_rel)
 
-    for dir_rel, module_name in unique_pairs:
-        marker_path = _marker_path(markers_dir, dir_rel, module_name)
-        _write_fake_module(project, dir_rel, module_name, calls_log, marker_path)
+    for words, dir_rel, module, strip in ROWS:
+        _write_row_fake(project, dir_rel, module, log_paths[dir_rel])
 
-    for words, dir_rel, module_name, strip in ROWS:
-        target_key = (dir_rel, module_name)
-        before_markers = {
-            k: _marker_count(_marker_path(markers_dir, *k)) for k in unique_pairs
-        }
-        before_calls = _read_lines(calls_log)
+    for words, dir_rel, module, strip in ROWS:
+        before_counts = {d: _line_count(p) for d, p in log_paths.items()}
 
         argv = list(words) + ["x", "--flag", f"--repo-root={project}"]
-        code = hotdocs_cli.main(argv)
+        exit_code = hotdocs_cli.main(argv, cwd=str(project))
 
-        after_markers = {
-            k: _marker_count(_marker_path(markers_dir, *k)) for k in unique_pairs
-        }
-        after_calls = _read_lines(calls_log)
+        assert exit_code == 7, f"row {words!r} expected exit code 7, got {exit_code!r}"
 
-        assert code == 7
-
-        for k in unique_pairs:
-            expected_delta = 1 if k == target_key else 0
-            assert after_markers[k] == before_markers[k] + expected_delta, (
-                f"verb {words!r} marker mismatch for {k}: "
-                f"before={before_markers[k]} after={after_markers[k]}"
+        after_counts = {d: _line_count(p) for d, p in log_paths.items()}
+        for d in log_paths:
+            expected_delta = 1 if d == dir_rel else 0
+            actual_delta = after_counts[d] - before_counts[d]
+            assert actual_delta == expected_delta, (
+                f"row {words!r}: expected only {dir_rel!r} to receive one new "
+                f"call, but {d!r} changed by {actual_delta}"
             )
 
-        assert len(after_calls) == len(before_calls) + 1
+        last_line = log_paths[dir_rel].read_text().splitlines()[-1]
+        got_tokens = json.loads(last_line)
         expected_tokens = argv[strip:]
-        assert json.loads(after_calls[-1]) == expected_tokens
+        assert got_tokens == expected_tokens, (
+            f"row {words!r}: expected tokens {expected_tokens!r}, got {got_tokens!r}"
+        )
 
 
-def test_system_exit_codes_are_caught_and_translated(tmp_path):
-    project = tmp_path / "project2"
+def test_system_exit_codes(tmp_path):
+    project = tmp_path / "project"
     project.mkdir()
-    gen_dir = project / "gen" / "spec-linter"
-    gen_dir.mkdir(parents=True)
-    state_path = project / "state.txt"
-    module_path = gen_dir / "spec_linter.py"
+    fake_path = project / "gen" / "spec-linter" / "spec_linter.py"
+    fake_path.parent.mkdir(parents=True)
 
-    state_literal = repr(str(state_path))
-    source = (
-        "import os\n\n"
-        f"_STATE = {state_literal}\n\n"
-        "def main(argv):\n"
-        "    n = 0\n"
-        "    if os.path.exists(_STATE):\n"
-        "        n = int(open(_STATE).read().strip())\n"
-        "    with open(_STATE, 'w') as f:\n"
-        "        f.write(str(n + 1))\n"
-        "    if n == 0:\n"
-        "        raise SystemExit(3)\n"
-        "    elif n == 1:\n"
-        "        raise SystemExit(None)\n"
-        "    else:\n"
-        "        raise SystemExit('boom')\n"
-    )
-    module_path.write_text(source)
+    fake_path.write_text("def main(argv):\n    raise SystemExit(3)\n")
+    assert hotdocs_cli.main(["lint", "ignored"], cwd=str(project)) == 3
 
-    argv = ["lint", "x", "--flag", f"--repo-root={project}"]
+    fake_path.write_text("def main(argv):\n    raise SystemExit(None)\n")
+    assert hotdocs_cli.main(["lint", "ignored"], cwd=str(project)) == 0
 
-    code1 = hotdocs_cli.main(argv)
-    code2 = hotdocs_cli.main(argv)
-    code3 = hotdocs_cli.main(argv)
-
-    assert code1 == 3
-    assert code2 == 0
-    assert code3 == 1
+    fake_path.write_text("def main(argv):\n    raise SystemExit('boom')\n")
+    assert hotdocs_cli.main(["lint", "ignored"], cwd=str(project)) == 1
 
 
-def test_fresh_module_per_repo_root_does_not_leak_between_projects(tmp_path):
-    project_a = tmp_path / "proj_a"
-    project_b = tmp_path / "proj_b"
+def test_routes_to_correct_project(tmp_path):
+    project_a = tmp_path / "project_a"
+    project_b = tmp_path / "project_b"
     project_a.mkdir()
     project_b.mkdir()
 
     log_a = project_a / "calls.log"
     log_b = project_b / "calls.log"
 
-    gen_a = project_a / "gen" / "spec-linter"
-    gen_a.mkdir(parents=True)
-    log_a_literal = repr(str(log_a))
-    (gen_a / "spec_linter.py").write_text(
-        "import json\n\n"
-        "def main(argv):\n"
-        f"    with open({log_a_literal}, 'a') as f:\n"
-        "        f.write(json.dumps(argv) + '\\n')\n"
-        "    return 11\n"
+    _write_fake_file(
+        project_a / "gen" / "spec-linter" / "spec_linter.py", log_a, marker="fake-one"
+    )
+    _write_fake_file(
+        project_b / "gen" / "spec-linter" / "spec_linter.py", log_b, marker="fake-two"
     )
 
-    gen_b = project_b / "gen" / "spec-linter"
-    gen_b.mkdir(parents=True)
-    log_b_literal = repr(str(log_b))
-    (gen_b / "spec_linter.py").write_text(
-        "import json\n\n"
-        "def main(argv):\n"
-        f"    with open({log_b_literal}, 'a') as f:\n"
-        "        f.write(json.dumps(argv) + '\\n')\n"
-        "    return 55\n"
+    hotdocs_cli.main(["lint", "x", f"--repo-root={project_a}"], cwd=str(project_a))
+    hotdocs_cli.main(["lint", "x", f"--repo-root={project_b}"], cwd=str(project_b))
+
+    assert log_a.read_text().splitlines() == ["fake-one"]
+    assert log_b.read_text().splitlines() == ["fake-two"]
+
+
+def test_tool_root_fallback_then_project_override(tmp_path):
+    project = tmp_path / "project"
+    project.mkdir()
+    tool_root = tmp_path / "toolroot"
+    tool_root.mkdir()
+
+    project_log = project / "calls.log"
+
+    _write_fake_file(
+        tool_root / "gen" / "spec-linter" / "spec_linter.py",
+        project_log,
+        marker="toolroot-fake",
     )
 
-    argv_a = ["lint", "x", f"--repo-root={project_a}"]
-    argv_b = ["lint", "x", f"--repo-root={project_b}"]
+    assert not (project / "gen" / "spec-linter").exists()
 
-    code_a = hotdocs_cli.main(argv_a)
-    code_b = hotdocs_cli.main(argv_b)
+    exit_code = hotdocs_cli.main(["lint"], tool_root=str(tool_root), cwd=str(project))
+    assert exit_code == 7
+    assert project_log.read_text().splitlines() == ["toolroot-fake"]
 
-    assert code_a == 11
-    assert code_b == 55
-    assert _read_lines(log_a) == [json.dumps(argv_a[1:])]
-    assert _read_lines(log_b) == [json.dumps(argv_b[1:])]
+    _write_fake_file(
+        project / "gen" / "spec-linter" / "spec_linter.py",
+        project_log,
+        marker="project-fake",
+        exit_code=42,
+    )
+
+    exit_code = hotdocs_cli.main(["lint"], tool_root=str(tool_root), cwd=str(project))
+    assert exit_code == 42
+    assert project_log.read_text().splitlines() == ["toolroot-fake", "project-fake"]

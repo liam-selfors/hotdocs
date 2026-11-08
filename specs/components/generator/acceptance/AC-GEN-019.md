@@ -9,5 +9,10 @@ Given a cold-mode SpecBundle and a mock model that records what it
 When generate is called with that bundle
 Then the mock model's recorded input instructs it that any dynamic
   dependency load must resolve from repo_root, never via a bare
-  import, a sys.modules lookup, or a __file__-relative path
+  import, a sys.modules lookup, or a __file__-relative path, falling
+  back to the tool root only when the directory is absent there
+
+Given a repo_root with no gen/ directory and a mock model
+When generate is called
+Then it completes, loading its own dependencies from the tool root
 ```

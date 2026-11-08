@@ -1,34 +1,33 @@
 import json
-import os
+import shutil
 import tempfile
 import unittest
 from pathlib import Path
 
-
-def _get(obj, key, default=None):
-    if isinstance(obj, dict):
-        return obj.get(key, default)
-    return getattr(obj, key, default)
+import component_gate_runner
 
 
-SENTINEL_BUNDLE_MARKER = "sentinel-bundle-6f91ab"
-SENTINEL_BACKEND = "sentinel-backend-c9d4f1"
+BUNDLE_SENTINEL_MARKER = "bundle-sentinel-ac-gate-002a"
 
 
-PROVENANCE_CHECKER_SOURCE = """
+class SentinelBackend:
+    marker = "backend-sentinel-ac-gate-002a"
+
+
+PROVENANCE_CHECKER_SRC = '''\
 def current_sealed_key(component_id, repo_root):
     return None
 
 
-class _ProvenanceKey:
+class ProvenanceKey:
     def __init__(self, spec_bundle_hash, gate_versions):
         self.spec_bundle_hash = spec_bundle_hash
         self.gate_versions = gate_versions
 
 
 def current_provenance_key(component_id, repo_root):
-    return _ProvenanceKey(
-        spec_bundle_hash="sha256:" + "a" * 64,
+    return ProvenanceKey(
+        spec_bundle_hash="sha256:" + "1" * 64,
         gate_versions={
             "compiler": "criterion-compiler@1.0.0",
             "generated_test": "generated_test@1.0.0",
@@ -46,103 +45,132 @@ def check_provenance(component_id, spec_bundle_hash, gate_versions, repo_root):
         "license_scan": None,
         "secret_scan": None,
     }
+'''
 
 
-def check_sealed_provenance(component_id, repo_root):
-    return {
-        "hit": False,
-        "sealed": False,
-        "reason": "not_sealed",
-        "verification_report": None,
-        "license_scan": None,
-        "secret_scan": None,
-        "owners": None,
-        "source_hash": None,
-        "written_at": None,
-    }
-"""
-
-
-SPEC_BUNDLE_ASSEMBLER_SOURCE = """
-def assemble(component_id, repo_root=None, mode="cold"):
+SPEC_BUNDLE_ASSEMBLER_SRC = '''\
+def assemble(component_id, repo_root, mode="cold"):
     return {
         "component_id": component_id,
-        "spec_bundle_hash": "sha256:" + "b" * 64,
-        "spec": "spec body",
-        "interface": "interface body",
-        "constraints": "constraints body",
+        "spec_bundle_hash": "sha256:" + "2" * 64,
+        "spec": "spec text",
+        "interface": "interface text",
+        "constraints": "",
         "dependency_interfaces": {},
         "dependency_context": {},
         "dependency_usage": {},
         "vars": {},
-        "glossary": "glossary body",
+        "glossary": "glossary text",
         "hint_code": None,
     }
+'''
 
 
-def assemble_criterion(component_id, criterion_id, repo_root=None):
-    return {
-        "component_id": component_id,
-        "criterion_id": criterion_id,
-        "covers": "R-FOO-001",
-        "criterion_text": "criterion text",
-        "requirement_text": "requirement text",
-        "interface": "interface content",
-        "glossary": "glossary content",
-    }
-"""
-
-
-GENERATOR_SOURCE = """
+GENERATOR_SRC = '''\
 def generate(bundle, model, retry_feedback=None, *, repo_root=None, llm_backend=None):
-    component_id = bundle.get("component_id") if isinstance(bundle, dict) else getattr(bundle, "component_id", None)
-    spec_bundle_hash = bundle.get("spec_bundle_hash") if isinstance(bundle, dict) else getattr(bundle, "spec_bundle_hash", None)
     return {
-        "component_id": component_id,
-        "spec_bundle_hash": spec_bundle_hash,
+        "component_id": "comp-foo",
+        "spec_bundle_hash": "sha256:" + "2" * 64,
         "model": model,
         "prompt_version": "v1",
         "cache_hit": False,
-        "files": {"foo.py": "print('hi')\\n"},
+        "files": {"foo.py": "# generated\\n"},
         "model_call_error": None,
         "refused": None,
         "retry_feedback": retry_feedback,
     }
-"""
+'''
 
 
-VERIFIER_ORCHESTRATOR_SOURCE = """
+VERIFIER_ORCHESTRATOR_SRC = '''\
 GATE_VERSION = "verifier-orchestrator@2.0.0"
 
-_SENTINEL_BUNDLE = {"__sentinel_marker__": "%s"}
+
+class _SentinelBundle:
+    sentinel_marker = "__BUNDLE_MARKER__"
 
 
 def verify(component_id, repo_root, judge=None, test_author=None):
+    bundle = _SentinelBundle()
+    test_author(bundle)
+
     criterion_bundle = {
         "component_id": component_id,
-        "criterion_id": "AC-FOO-001",
-        "covers": "R-FOO-001",
-        "criterion_text": "Given a thing. When done. Then verified.",
-        "requirement_text": "The component MUST do the thing.",
-        "interface": "interface content",
-        "glossary": "glossary content",
+        "criterion_id": "AC-FOO-003",
+        "covers": "R-FOO-003",
+        "criterion_text": "Given ... When ... Then ...",
+        "requirement_text": "requirement text",
+        "interface": "interface text",
+        "glossary": "glossary text",
     }
-    test_author(_SENTINEL_BUNDLE)
     judge(criterion_bundle)
+
     return {
         "component_id": component_id,
-        "criteria": [
-            {"id": "AC-FOO-001", "covers": "R-FOO-001", "kind": "generated-test", "result": "pass"},
-        ],
-        "requirement_results": {"R-FOO-001": "pass"},
+        "criteria": [],
+        "requirement_results": {},
         "interface_drift": False,
-        "mutation_score": 0.9,
+        "mutation_score": 1.0,
         "overall": "pass",
     }
-""" % (SENTINEL_BUNDLE_MARKER,)
+'''
 
 
-LICENSE_SCANNER_SOURCE = """
+TEST_AUTHOR_SRC = '''\
+import json
+
+LOG_PATH = __LOG_PATH__
+
+
+def author_test(bundle, model, seed=0, *, repo_root=None, llm_backend=None):
+    bundle_marker = getattr(bundle, "sentinel_marker", None)
+    backend_marker = getattr(llm_backend, "marker", None)
+    with open(LOG_PATH, "a") as f:
+        f.write(json.dumps({
+            "bundle_marker": bundle_marker,
+            "model": model,
+            "seed": seed,
+            "backend_marker": backend_marker,
+        }) + "\\n")
+    return {
+        "component_id": "comp-foo",
+        "criterion_id": "AC-FOO-003",
+        "model": model,
+        "seed": seed,
+        "prompt_version": "v1",
+        "cache_hit": False,
+        "file": {
+            "path": "verification/foo/generated-test/test_ac_foo_003.py",
+            "content": "# test",
+        },
+        "model_call_error": None,
+    }
+'''
+
+
+LLM_ENDPOINT_SRC = '''\
+import json
+
+LOG_PATH = __LOG_PATH__
+
+
+def complete(prompt, model, *, backend=None, **params):
+    backend_marker = getattr(backend, "marker", None)
+    with open(LOG_PATH, "a") as f:
+        f.write(json.dumps({
+            "model": model,
+            "backend_marker": backend_marker,
+        }) + "\\n")
+    return {
+        "text": "ok",
+        "model": model,
+        "backend": "mock",
+        "model_call_error": None,
+    }
+'''
+
+
+LICENSE_SCANNER_SRC = '''\
 def scan(component_id, repo_root):
     return {
         "component_id": component_id,
@@ -161,10 +189,10 @@ def scan(component_id, repo_root):
 
 def gate_version(repo_root):
     return "license_scanner@4.0.0-no-reference-corpus"
-"""
+'''
 
 
-SECRET_SCANNER_SOURCE = """
+SECRET_SCANNER_SRC = '''\
 def scan(repo_root):
     return {
         "scope": "full",
@@ -181,161 +209,114 @@ def scan(repo_root):
 
 def gate_version(repo_root):
     return "secret_scanner@3.1.0+detect-secrets.1.5.0"
-"""
+'''
 
 
-PROVENANCE_TRACKER_SOURCE = """
-from pathlib import Path
+PROVENANCE_TRACKER_SRC = '''\
+import os
 
 
 def write_attempt_record(component_id, generation_result, verification_report, spec_bundle_hash, repo_root):
     slug = component_id[len("comp-"):] if component_id.startswith("comp-") else component_id
-    attempts_dir = Path(repo_root) / ".hotdocs" / "attempts" / slug
-    attempts_dir.mkdir(parents=True, exist_ok=True)
-    (attempts_dir / "attempt-0001.json").write_text("{}")
+    attempts_dir = os.path.join(str(repo_root), ".hotdocs", "attempts", slug)
+    os.makedirs(attempts_dir, exist_ok=True)
+    with open(os.path.join(attempts_dir, "attempt-0001.json"), "w") as f:
+        f.write("{}")
     return {
         "attempt_id": "2026-01-01T00:00:00Z-aaaaaa",
         "component_id": component_id,
         "timestamp": "2026-01-01T00:00:00Z",
         "spec_bundle_hash": spec_bundle_hash,
-        "generation": generation_result if isinstance(generation_result, dict) else {},
-        "verification": verification_report if isinstance(verification_report, dict) else verification_report,
+        "generation": generation_result,
+        "verification": verification_report,
     }
+'''
 
 
-def last_requirement_failures(component_id, repo_root):
-    return []
-"""
-
-
-PROVENANCE_WRITER_SOURCE = """
+PROVENANCE_WRITER_SRC = '''\
 def write_provenance(component_id, inputs, repo_root):
     return None
 
 
 def write_sealed_provenance(component_id, inputs, repo_root):
     return None
-"""
+'''
 
 
-TEST_AUTHOR_SOURCE = """
-import json
-import os
+def _write_module(repo_root, slug, module_name, source):
+    mod_dir = repo_root / "gen" / slug
+    mod_dir.mkdir(parents=True, exist_ok=True)
+    (mod_dir / (module_name + ".py")).write_text(source)
 
 
-def author_test(bundle, model, seed=0, *, repo_root=None, llm_backend=None):
-    log_path = os.environ["GATE_TEST_LOG"]
-    record = {
-        "event": "author_test",
-        "bundle": bundle,
-        "model": model,
-        "seed": seed,
-        "llm_backend": llm_backend,
-    }
-    with open(log_path, "a") as f:
-        f.write(json.dumps(record) + "\\n")
-    return {
-        "component_id": "comp-foo",
-        "criterion_id": "AC-FOO-001",
-        "model": model,
-        "seed": seed,
-        "prompt_version": "v1",
-        "cache_hit": False,
-        "file": {
-            "path": "verification/foo/generated-test/test_ac_foo_001.py",
-            "content": "def test_x():\\n    assert True\\n",
-        },
-        "model_call_error": None,
-    }
-"""
-
-
-LLM_ENDPOINT_SOURCE = """
-import json
-import os
-
-
-def complete(prompt, model, *, backend=None, **params):
-    log_path = os.environ["GATE_TEST_LOG"]
-    record = {
-        "event": "complete",
-        "model": model,
-        "backend": backend,
-    }
-    with open(log_path, "a") as f:
-        f.write(json.dumps(record) + "\\n")
-    return {
-        "text": json.dumps({"result": "pass", "rationale": "ok"}),
-        "model": model,
-        "backend": "mock",
-        "model_call_error": None,
-    }
-"""
-
-
-_FAKE_MODULES = [
-    ("provenance-checker", "provenance_checker", PROVENANCE_CHECKER_SOURCE),
-    ("spec-bundle-assembler", "spec_bundle_assembler", SPEC_BUNDLE_ASSEMBLER_SOURCE),
-    ("generator", "generator", GENERATOR_SOURCE),
-    ("verifier-orchestrator", "verifier_orchestrator", VERIFIER_ORCHESTRATOR_SOURCE),
-    ("license-scanner", "license_scanner", LICENSE_SCANNER_SOURCE),
-    ("secret-scanner", "secret_scanner", SECRET_SCANNER_SOURCE),
-    ("provenance-tracker", "provenance_tracker", PROVENANCE_TRACKER_SOURCE),
-    ("provenance-writer", "provenance_writer", PROVENANCE_WRITER_SOURCE),
-    ("test-author", "test_author", TEST_AUTHOR_SOURCE),
-    ("llm-endpoint", "llm_endpoint", LLM_ENDPOINT_SOURCE),
-]
-
-
-class RunComponentGatesSentinelWiringTest(unittest.TestCase):
+class ACGate002aRunComponentGatesTest(unittest.TestCase):
     def setUp(self):
-        self._tmpdir = tempfile.TemporaryDirectory()
-        self.repo_root = Path(self._tmpdir.name)
-        self.log_path = self.repo_root / "call_log.jsonl"
-        os.environ["GATE_TEST_LOG"] = str(self.log_path)
+        self.tmp_dir = tempfile.mkdtemp()
+        self.repo_root = Path(self.tmp_dir) / "repo"
+        self.repo_root.mkdir()
+        log_dir = Path(self.tmp_dir) / "logs"
+        log_dir.mkdir()
+        self.test_author_log = log_dir / "test_author_calls.jsonl"
+        self.llm_endpoint_log = log_dir / "llm_endpoint_calls.jsonl"
 
-        for dep_slug, module_name, source in _FAKE_MODULES:
-            mod_dir = self.repo_root / "gen" / dep_slug
-            mod_dir.mkdir(parents=True, exist_ok=True)
-            (mod_dir / (module_name + ".py")).write_text(source)
-
-    def tearDown(self):
-        os.environ.pop("GATE_TEST_LOG", None)
-        self._tmpdir.cleanup()
-
-    def _read_log(self):
-        records = []
-        if self.log_path.exists():
-            for line in self.log_path.read_text().splitlines():
-                line = line.strip()
-                if line:
-                    records.append(json.loads(line))
-        return records
-
-    def test_wires_sentinel_bundle_model_seed_and_backend_through(self):
-        import component_gate_runner
-
-        result = component_gate_runner.run_component_gates(
-            "comp-foo", self.repo_root, "m", seed=3, llm_backend=SENTINEL_BACKEND,
+        verifier_src = VERIFIER_ORCHESTRATOR_SRC.replace(
+            "__BUNDLE_MARKER__", BUNDLE_SENTINEL_MARKER
+        )
+        test_author_src = TEST_AUTHOR_SRC.replace(
+            "__LOG_PATH__", repr(str(self.test_author_log))
+        )
+        llm_endpoint_src = LLM_ENDPOINT_SRC.replace(
+            "__LOG_PATH__", repr(str(self.llm_endpoint_log))
         )
 
-        self.assertEqual(_get(result, "component_id"), "comp-foo")
+        _write_module(self.repo_root, "provenance-checker", "provenance_checker", PROVENANCE_CHECKER_SRC)
+        _write_module(self.repo_root, "spec-bundle-assembler", "spec_bundle_assembler", SPEC_BUNDLE_ASSEMBLER_SRC)
+        _write_module(self.repo_root, "generator", "generator", GENERATOR_SRC)
+        _write_module(self.repo_root, "verifier-orchestrator", "verifier_orchestrator", verifier_src)
+        _write_module(self.repo_root, "test-author", "test_author", test_author_src)
+        _write_module(self.repo_root, "llm-endpoint", "llm_endpoint", llm_endpoint_src)
+        _write_module(self.repo_root, "license-scanner", "license_scanner", LICENSE_SCANNER_SRC)
+        _write_module(self.repo_root, "secret-scanner", "secret_scanner", SECRET_SCANNER_SRC)
+        _write_module(self.repo_root, "provenance-tracker", "provenance_tracker", PROVENANCE_TRACKER_SRC)
+        _write_module(self.repo_root, "provenance-writer", "provenance_writer", PROVENANCE_WRITER_SRC)
 
-        records = self._read_log()
-        author_records = [r for r in records if r.get("event") == "author_test"]
-        complete_records = [r for r in records if r.get("event") == "complete"]
+        self.sentinel_backend = SentinelBackend()
 
-        self.assertEqual(len(author_records), 1)
-        author_record = author_records[0]
-        self.assertEqual(author_record["bundle"], {"__sentinel_marker__": SENTINEL_BUNDLE_MARKER})
-        self.assertEqual(author_record["model"], "m")
-        self.assertEqual(author_record["seed"], 3)
-        self.assertEqual(author_record["llm_backend"], SENTINEL_BACKEND)
+    def tearDown(self):
+        shutil.rmtree(self.tmp_dir, ignore_errors=True)
 
-        self.assertEqual(len(complete_records), 1)
-        complete_record = complete_records[0]
-        self.assertEqual(complete_record["model"], "m")
-        self.assertEqual(complete_record["backend"], SENTINEL_BACKEND)
+    def test_closures_forward_model_seed_and_backend(self):
+        component_gate_runner.run_component_gates(
+            "comp-foo",
+            self.repo_root,
+            "m",
+            seed=3,
+            llm_backend=self.sentinel_backend,
+        )
+
+        self.assertTrue(self.test_author_log.exists())
+        ta_lines = [
+            json.loads(line)
+            for line in self.test_author_log.read_text().splitlines()
+            if line.strip()
+        ]
+        self.assertEqual(len(ta_lines), 1)
+        ta_call = ta_lines[0]
+        self.assertEqual(ta_call["bundle_marker"], BUNDLE_SENTINEL_MARKER)
+        self.assertEqual(ta_call["model"], "m")
+        self.assertEqual(ta_call["seed"], 3)
+        self.assertEqual(ta_call["backend_marker"], SentinelBackend.marker)
+
+        self.assertTrue(self.llm_endpoint_log.exists())
+        le_lines = [
+            json.loads(line)
+            for line in self.llm_endpoint_log.read_text().splitlines()
+            if line.strip()
+        ]
+        self.assertEqual(len(le_lines), 1)
+        le_call = le_lines[0]
+        self.assertEqual(le_call["model"], "m")
+        self.assertEqual(le_call["backend_marker"], SentinelBackend.marker)
 
 
 if __name__ == "__main__":

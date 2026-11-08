@@ -15,5 +15,5 @@ Then the next steps do not mention "comp-slugify"
 
 Given an initialised project and main(["<dir>","--reconfigure","--provider","openai","--model","m","--no-test"])
 When it runs
-Then only hotdocs.toml changed; and on a directory with no gen/llm-endpoint/llm_endpoint.py it returns 1
+Then only hotdocs.toml changed; and with a tool root holding no gen/llm-endpoint/llm_endpoint.py it returns 1
 ```

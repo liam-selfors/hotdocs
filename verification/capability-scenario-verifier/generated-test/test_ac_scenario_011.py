@@ -1,154 +1,157 @@
 import json
 import textwrap
+from pathlib import Path
 
 import pytest
 
 import capability_scenario_verifier
 
+SENTINEL_BACKEND = "SENTINEL-BACKEND-CS-X-001"
+PASS_TEXT = "```json\n{\"result\": \"pass\", \"rationale\": \"ok\"}\n```"
 
-def _get(obj, key):
+
+def _dual(obj, key, default=None):
     if isinstance(obj, dict):
-        return obj.get(key)
-    return getattr(obj, key, None)
+        return obj.get(key, default)
+    return getattr(obj, key, default)
 
 
-FOO_COMPONENT_MD = """---
-id: comp-foo
-title: Foo
-status: draft
-owners: [qa]
-realizes: [P-X]
-sealed: false
----
-
-# Foo
-
-A fixture component realizing P-X.
-"""
-
-CAPABILITY_X_MD = """---
-id: P-X
-title: Capability X
-status: draft
-owners: [qa]
----
-
-# Capability X
-
-### CS-X-001
-
-Covers: P-X
-Kind: llm-judge
-
-```gherkin
-Given MARKER_GHERKIN is present in the scenario
-When the capability gate runs
-Then the scenario is judged
-```
-"""
-
-FOO_SOURCE = """# MARKER_SOURCE
-def foo():
-    pass
-"""
-
-SENTINEL_BACKEND = "sentinel-backend-7e862b1d"
+def _write(path: Path, content: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(content)
 
 
-def _llm_endpoint_source(record_path, response_text, response_error):
-    return textwrap.dedent(
-        """
-        import json
-
-        def complete(prompt, model, backend=None, **params):
-            with open({record_path!r}, "a") as f:
-                f.write(json.dumps({{"prompt": prompt, "model": model, "backend": backend}}) + "\\n")
-            return {{"text": {response_text!r}, "model_call_error": {response_error!r}}}
-        """
-    ).format(
-        record_path=str(record_path),
-        response_text=response_text,
-        response_error=response_error,
-    )
-
-
-def _build_repo(repo_root, record_path, response_text, response_error):
-    component_dir = repo_root / "specs" / "components" / "foo"
-    component_dir.mkdir(parents=True)
-    (component_dir / "component.md").write_text(FOO_COMPONENT_MD)
-
-    gen_dir = repo_root / "gen" / "foo"
-    gen_dir.mkdir(parents=True)
-    (gen_dir / "foo.py").write_text(FOO_SOURCE)
-
-    product_dir = repo_root / "specs" / "product"
-    product_dir.mkdir(parents=True)
-    (product_dir / "capability-x.md").write_text(CAPABILITY_X_MD)
-
-    endpoint_dir = repo_root / "gen" / "llm-endpoint"
-    endpoint_dir.mkdir(parents=True)
-    (endpoint_dir / "llm_endpoint.py").write_text(
-        _llm_endpoint_source(record_path, response_text, response_error)
-    )
-
-
-def _scenario_for(result, scenario_id="CS-X-001"):
-    report = _get(result, "capability_scenario_report")
-    px = _get(report, "P-X")
-    scenarios = _get(px, "scenarios")
-    return next(s for s in scenarios if _get(s, "id") == scenario_id)
-
-
-def test_llm_judge_scenario_dispatches_once_and_passes(tmp_path):
+def _build_repo(tmp_path: Path, *, error=None, text=None) -> Path:
     repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    record_path = tmp_path / "calls.jsonl"
-    _build_repo(
-        repo_root,
-        record_path,
-        response_text='```json\n{"result": "pass", "rationale": "ok"}\n```',
-        response_error=None,
+
+    _write(
+        repo_root / "specs" / "product" / "foo.md",
+        textwrap.dedent(
+            """\
+            ---
+            id: P-X
+            title: Foo Capability
+            status: ratified
+            owners: [alice]
+            last_ratified_commit: 0000000000000000000000000000000000000000
+            ---
+
+            # P-X
+
+            A fake product capability used for AC-SCENARIO-011.
+
+            ### CS-X-001
+
+            Covers: P-X
+            Kind: llm-judge
+
+            ```gherkin
+            Given MARKER_GHERKIN
+            When something happens
+            Then something else happens
+            ```
+            """
+        ),
     )
+
+    _write(
+        repo_root / "specs" / "components" / "foo" / "component.md",
+        textwrap.dedent(
+            """\
+            ---
+            id: comp-foo
+            title: Foo Component
+            status: ratified
+            owners: [alice]
+            sealed: false
+            realizes: [P-X]
+            last_ratified_commit: 0000000000000000000000000000000000000000
+            ---
+
+            # Foo Component
+
+            A fake realizing component used for AC-SCENARIO-011.
+            """
+        ),
+    )
+
+    _write(
+        repo_root / "gen" / "foo" / "foo.py",
+        "# MARKER_SOURCE\ndef foo():\n    pass\n",
+    )
+
+    response_dict = {"text": text, "model_call_error": error}
+
+    module_src = (
+        "import json\n"
+        "import os\n"
+        "\n"
+        "CALL_LOG = os.path.join(os.path.dirname(__file__), \"call_log.jsonl\")\n"
+        "\n"
+        "\n"
+        "def complete(prompt, model, *, backend=None, **params):\n"
+        "    with open(CALL_LOG, \"a\") as f:\n"
+        "        f.write(json.dumps({\"prompt\": prompt, \"model\": model, \"backend\": backend}) + \"\\n\")\n"
+        "    return " + repr(response_dict) + "\n"
+    )
+
+    _write(repo_root / "gen" / "llm-endpoint" / "llm_endpoint.py", module_src)
+
+    return repo_root
+
+
+def _scenario_result(result, capability_id, scenario_id):
+    report = _dual(result, "capability_scenario_report")
+    capability_entry = _dual(report, capability_id)
+    scenarios = _dual(capability_entry, "scenarios")
+    for scenario in scenarios:
+        if _dual(scenario, "id") == scenario_id:
+            return scenario
+    raise AssertionError(
+        "scenario %s not found in report for %s" % (scenario_id, capability_id)
+    )
+
+
+def test_llm_judge_pass_dispatches_single_call_and_records_result(tmp_path):
+    repo_root = _build_repo(tmp_path, text=PASS_TEXT)
 
     result = capability_scenario_verifier.run_capability_gates(
-        "P-X", repo_root, "m", llm_backend=SENTINEL_BACKEND,
+        "P-X", repo_root, "m", llm_backend=SENTINEL_BACKEND
     )
 
-    calls = [json.loads(line) for line in record_path.read_text().splitlines()]
-    assert len(calls) == 1
-    call = calls[0]
-    assert call["model"] == "m"
-    assert call["backend"] == SENTINEL_BACKEND
-    assert "MARKER_SOURCE" in call["prompt"]
-    assert "MARKER_GHERKIN" in call["prompt"]
+    call_log_path = repo_root / "gen" / "llm-endpoint" / "call_log.jsonl"
+    lines = call_log_path.read_text().strip().splitlines()
+    assert len(lines) == 1
 
-    scenario = _scenario_for(result)
-    assert _get(scenario, "result") == "pass"
-    assert _get(scenario, "rationale") == "ok"
+    record = json.loads(lines[0])
+    assert record["model"] == "m"
+    assert record["backend"] == SENTINEL_BACKEND
+    assert "MARKER_SOURCE" in record["prompt"]
+    assert "MARKER_GHERKIN" in record["prompt"]
+
+    scenario = _scenario_result(result, "P-X", "CS-X-001")
+    assert _dual(scenario, "result") == "pass"
+    assert _dual(scenario, "rationale") == "ok"
 
 
 @pytest.mark.parametrize(
-    "response_text,response_error",
+    "error,text",
     [
-        (None, {"category": "rate_limit", "message": "429 from backend"}),
-        ("not json", None),
-        ('```json\n{"result": "maybe"}\n```', None),
+        ({"category": "network", "message": "boom"}, None),
+        (None, "not json"),
+        (None, json.dumps({"result": "maybe"})),
     ],
     ids=["model_call_error", "unparseable_text", "invalid_result_value"],
 )
-def test_llm_judge_scenario_fails_when_judge_unavailable(
-    tmp_path, response_text, response_error
-):
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    record_path = tmp_path / "calls.jsonl"
-    _build_repo(repo_root, record_path, response_text, response_error)
+def test_llm_judge_failure_modes_never_pass(tmp_path, error, text):
+    repo_root = _build_repo(tmp_path, error=error, text=text)
 
     result = capability_scenario_verifier.run_capability_gates(
-        "P-X", repo_root, "m", llm_backend=SENTINEL_BACKEND,
+        "P-X", repo_root, "m", llm_backend=SENTINEL_BACKEND
     )
 
-    scenario = _scenario_for(result)
-    assert _get(scenario, "result") == "fail"
-    rationale = _get(scenario, "rationale")
+    scenario = _scenario_result(result, "P-X", "CS-X-001")
+    assert _dual(scenario, "result") == "fail"
+    rationale = _dual(scenario, "rationale")
+    assert rationale is not None
     assert rationale.startswith("judge unavailable")

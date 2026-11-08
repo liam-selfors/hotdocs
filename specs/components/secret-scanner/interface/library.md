@@ -39,14 +39,12 @@ with no fallback detector: if it cannot be imported, the call raises
 
 ## cache-manager
 
-`scan` loads `cache-manager` from `<repo_root>/gen/cache-manager/` and
+`scan` loads `cache-manager` from `<repo_root>/gen/cache-manager/`, or from the tool root's when absent (`D199`), and
 uses exactly four of its names: `CacheKey(spec_bundle_hash=...,
 gate_inputs_hash=..., gate_version=..., model_pin=...)`;
 `get(cache_key, repo_root=...)`; `CachedResult(gate_type="secret_scanner",
-payload=<the result's fields as a dict>, stored_at=<a UTC ISO-8601
-string from this component's own clock>)`; and `put(cache_key,
-cached_result, repo_root=...)` after a fresh scan; a stand-in provides
-all four. A `get` result is a hit only
+payload=<the result's fields as a dict>, stored_at=<UTC ISO-8601>)`, `stored_at` computed by `scan` itself; and `put(cache_key,
+cached_result, repo_root=...)` after a fresh scan. A `get` result is a hit only
 if its `payload` (read with dual dict-or-attribute access) is non-null.
 `cache-manager` being unloadable means no lookup, never a failed scan.
 

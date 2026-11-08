@@ -4,8 +4,8 @@
 HAND-AUTHORED REPO TOOL, not a spec-driven component (SPEC_GUIDELINES.md
 §1's `tools/` entry). It does one thing: load the `hotdocs-cli`
 component's module by path from this repository's `gen/hotdocs-cli/` and
-hand it `argv`, passing this repository as the `tool_root` that
-`hotdocs init` vendors from. Needs an editable install
+hand it `argv`, passing this repository as the `tool_root` every
+project's components fall back to (D199). Needs an editable install
 (`pip install -e <repo>`), since the components are data in this tree.
 """
 

@@ -12,7 +12,7 @@ the specific unit file (`component.md`, one `requirements/R-*.md`, one
 `acceptance/AC-*.md`) that actually owns the content being tested.
 """
 
-from conftest import run_lint, has_finding
+from conftest import REPO_ROOT, run_lint, has_finding
 
 
 def _comp(root, name="foo"):
@@ -658,3 +658,32 @@ def test_ac_lint_029_030_fire_on_a_mutated_copy_of_the_real_corpus(tmp_path):
     assert any("D51" in m and "no other decision supersedes" in m for m in msgs)
     assert any("D52 supersedes D53" in m and "not deprecated" in m for m in msgs)
     assert len(msgs) == 2
+
+
+def test_ac_lint_032_project_component_reusing_a_tool_slug_fails(corpus_root):
+    """D199 -- a project's copy of a tool component's slug would shadow the
+    tool's own, since loaders try repo_root before the tool root."""
+    import shutil
+    shutil.copytree(_comp(corpus_root), _comp(corpus_root, "cache-manager"))
+    root_md = _comp(corpus_root, "cache-manager") / "component.md"
+    root_md.write_text(root_md.read_text().replace("comp-foo", "comp-cache-manager"))
+    (corpus_root / ".hotdocs-tool.json").write_text('{"tool_version": "0.1.0"}\n')
+    report = run_lint(corpus_root)
+    hits = [f for f in report.findings if f.rule_id == "R-LINT-032"]
+    assert [f.severity for f in hits] == ["fail"]
+    assert "cache-manager" in hits[0].message
+
+
+def test_ac_lint_032_no_finding_without_a_clash(corpus_root):
+    (corpus_root / ".hotdocs-tool.json").write_text('{"tool_version": "0.1.0"}\n')
+    assert not has_finding(run_lint(corpus_root), "R-LINT-032")
+
+
+def test_ac_lint_032_only_projects_made_by_init_are_checked(corpus_root):
+    import shutil
+    shutil.copytree(_comp(corpus_root), _comp(corpus_root, "cache-manager"))
+    assert not has_finding(run_lint(corpus_root), "R-LINT-032")
+
+
+def test_ac_lint_032_the_tool_itself_is_exempt():
+    assert not has_finding(run_lint(REPO_ROOT), "R-LINT-032")

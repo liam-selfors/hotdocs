@@ -9,7 +9,7 @@ When main routes "lint" to each, from a project given with `cwd=<project>`
 Then the exit codes are 0 and 7 (the tokens the fakes received are not asserted here)
 
 Given main(["frobnicate"]), main(["--version"]), and a verb whose component file is missing (`cwd=<project>` again, with no
-  fake for that verb)
+  fake for that verb in the project or in an empty fake tool root passed as `tool_root`)
 When each is called
 Then the exit codes are 2, 0, and 2
 ```

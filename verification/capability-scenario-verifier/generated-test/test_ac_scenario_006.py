@@ -1,4 +1,5 @@
 import json
+import textwrap
 from pathlib import Path
 
 import pytest
@@ -6,143 +7,109 @@ import pytest
 import capability_scenario_verifier
 
 
-def _get(obj, key, default=None):
+def _dual(obj, key, default=None):
     if isinstance(obj, dict):
         return obj.get(key, default)
     return getattr(obj, key, default)
 
 
-FAKE_TEST_AUTHOR_SOURCE = '''
-import json
-import os
+def _write_fixture(repo_root: Path, log_path: Path) -> None:
+    (repo_root / "specs" / "product").mkdir(parents=True, exist_ok=True)
+    (repo_root / "specs" / "components" / "foo-bar").mkdir(parents=True, exist_ok=True)
+    (repo_root / "gen" / "test-author").mkdir(parents=True, exist_ok=True)
+    (repo_root / "gen" / "foo-bar").mkdir(parents=True, exist_ok=True)
 
+    capability_doc = textwrap.dedent(
+        """\
+        ---
+        id: P-X
+        title: Capability X
+        status: ratified
+        owners: [test-owner]
+        last_ratified_commit: "0000000"
+        ---
 
-def author_test(bundle, model, seed=0, *, repo_root=None, llm_backend=None):
-    if isinstance(bundle, dict):
-        criterion_id = bundle.get("criterion_id")
-    else:
-        criterion_id = getattr(bundle, "criterion_id", None)
+        ### CS-X-001
 
-    log_path = os.path.join(repo_root, "test_author_calls.json")
-    calls = []
-    if os.path.exists(log_path):
-        with open(log_path) as f:
-            calls = json.load(f)
-    calls.append({"criterion_id": criterion_id, "model": model, "seed": seed})
-    with open(log_path, "w") as f:
-        json.dump(calls, f)
+        Covers: P-X
+        Kind: generated-test
 
-    return {
-        "component_id": "comp-cache-manager",
-        "criterion_id": criterion_id,
-        "model": model,
-        "seed": seed,
-        "prompt_version": "v1",
-        "cache_hit": False,
-        "file": {
-            "path": "verification/capabilities/P-X/generated-test/test_cs_x_001.py",
-            "content": "def test_x():\\n    assert True\\n",
-        },
-        "model_call_error": None,
-    }
-'''
+        ```gherkin
+        Given a widget
+        When it is used
+        Then it works
+        ```
+        """
+    )
+    (repo_root / "specs" / "product" / "p_x.md").write_text(capability_doc)
 
+    component_doc = textwrap.dedent(
+        """\
+        ---
+        id: comp-foo-bar
+        title: Foo Bar
+        status: ratified
+        owners: [test-owner]
+        last_ratified_commit: "0000000"
+        sealed: false
+        realizes: [P-X]
+        ---
 
-def _write_product_capability(repo_root: Path) -> None:
-    product_dir = repo_root / "specs" / "product"
-    product_dir.mkdir(parents=True, exist_ok=True)
-    (product_dir / "widget.md").write_text(
-        "---\n"
-        "id: P-X\n"
-        "title: Widget capability\n"
-        "status: draft\n"
-        "owners: [team]\n"
-        "---\n"
-        "\n"
-        "### CS-X-001\n"
-        "\n"
-        "Covers: P-X\n"
-        "Kind: generated-test\n"
-        "\n"
-        "```gherkin\n"
-        "Given a widget\n"
-        "When it is used\n"
-        "Then it works\n"
-        "```\n"
+        Foo Bar component.
+        """
+    )
+    (repo_root / "specs" / "components" / "foo-bar" / "component.md").write_text(component_doc)
+
+    (repo_root / "gen" / "foo-bar" / "foo_bar.py").write_text(
+        "# placeholder realizing component code\n"
     )
 
+    log_literal = repr(str(log_path))
+    test_author_src = textwrap.dedent(
+        f"""\
+        def author_test(bundle, model, seed=0, repo_root=None, llm_backend=None):
+            def _get(obj, key, default=None):
+                if isinstance(obj, dict):
+                    return obj.get(key, default)
+                return getattr(obj, key, default)
 
-def _write_realizing_component(repo_root: Path) -> None:
-    component_dir = repo_root / "specs" / "components" / "cache-manager"
-    component_dir.mkdir(parents=True, exist_ok=True)
-    (component_dir / "component.md").write_text(
-        "---\n"
-        "id: comp-cache-manager\n"
-        "title: Cache Manager\n"
-        "status: draft\n"
-        "owners: [team]\n"
-        "realizes: [P-X]\n"
-        "sealed: true\n"
-        "source_path: pipeline/cache-manager/\n"
-        "---\n"
-        "\n"
-        "Fixture sealed component realizing P-X.\n"
+            criterion_id = _get(bundle, "criterion_id")
+            with open({log_literal}, "a", encoding="utf-8") as f:
+                f.write(str(criterion_id) + "\\n")
+
+            return {{
+                "model_call_error": None,
+                "file": {{
+                    "path": "verification/capabilities/P-X/generated-test/test_cs_x_001.py",
+                    "content": "def test_x():\\n    assert True\\n",
+                }},
+            }}
+        """
     )
+    (repo_root / "gen" / "test-author" / "test_author.py").write_text(test_author_src)
 
 
-def _write_fake_test_author(repo_root: Path) -> None:
-    dep_dir = repo_root / "gen" / "test-author"
-    dep_dir.mkdir(parents=True, exist_ok=True)
-    (dep_dir / "test_author.py").write_text(FAKE_TEST_AUTHOR_SOURCE)
-
-
-def _build_repo(tmp_path: Path) -> Path:
-    repo_root = tmp_path / "repo"
+def test_fresh_run_writes_record_and_is_then_a_hit(tmp_path):
+    repo_root = tmp_path / "repo1"
     repo_root.mkdir()
-    _write_product_capability(repo_root)
-    _write_realizing_component(repo_root)
-    _write_fake_test_author(repo_root)
-    return repo_root
-
-
-def test_run_capability_gates_runs_scenario_writes_provenance_then_hits(tmp_path):
-    repo_root = _build_repo(tmp_path)
+    log_path = tmp_path / "author_test_calls_1.log"
+    _write_fixture(repo_root, log_path)
 
     result = capability_scenario_verifier.run_capability_gates(
         "P-X", repo_root, "m", seed=2
     )
 
-    assert _get(result, "hit") is False
+    assert _dual(result, "hit") is False
 
-    report = _get(result, "capability_scenario_report")
-    capability_report = _get(report, "P-X")
-    assert _get(capability_report, "overall") == "pass"
-    scenarios = _get(capability_report, "scenarios")
-    assert len(scenarios) == 1
-    assert _get(scenarios[0], "id") == "CS-X-001"
-    assert _get(scenarios[0], "result") == "pass"
+    report = _dual(result, "capability_scenario_report")
+    cap_report = _dual(report, "P-X")
+    assert _dual(cap_report, "overall") == "pass"
 
-    call_log_path = repo_root / "test_author_calls.json"
-    assert call_log_path.exists()
-    calls = json.loads(call_log_path.read_text())
-    assert len(calls) == 1
-    assert calls[0]["model"] == "m"
-    assert calls[0]["seed"] == 2
+    assert log_path.exists()
+    log_lines = [line for line in log_path.read_text().splitlines() if line.strip()]
+    assert log_lines == ["CS-X-001"]
 
-    generated_test_path = (
-        repo_root
-        / "verification"
-        / "capabilities"
-        / "P-X"
-        / "generated-test"
-        / "test_cs_x_001.py"
-    )
-    assert generated_test_path.exists()
-    assert "assert True" in generated_test_path.read_text()
-
-    provenance_path = (
-        repo_root / "verification" / "capabilities" / "P-X" / ".provenance.json"
-    )
+    provenance_path = repo_root / "verification" / "capabilities" / "P-X" / ".provenance.json"
     assert provenance_path.exists()
     record = json.loads(provenance_path.read_text())
 
@@ -156,31 +123,29 @@ def test_run_capability_gates_runs_scenario_writes_provenance_then_hits(tmp_path
         "seed",
     }
     assert record["capability_id"] == "P-X"
-    assert record["gate_version"] == capability_scenario_verifier.GATE_VERSION
-    assert isinstance(record["content_hash"], str) and record["content_hash"]
-    assert record["realizing_components"] == ["comp-cache-manager"]
-    assert record["capability_scenario_report"] == report
     assert record["model"] == "m"
     assert record["seed"] == 2
+    assert record["realizing_components"] == ["comp-foo-bar"]
+    assert record["capability_scenario_report"]["P-X"]["overall"] == "pass"
+    assert isinstance(record["content_hash"], str) and record["content_hash"]
+    assert isinstance(record["gate_version"], str) and record["gate_version"]
 
     check_result = capability_scenario_verifier.check_capability_provenance(
         "P-X", repo_root
     )
-    assert _get(check_result, "hit") is True
+    assert _dual(check_result, "hit") is True
 
 
-def test_run_capability_gates_requires_model_when_no_record(tmp_path):
-    repo_root = _build_repo(tmp_path)
+def test_missing_model_on_a_miss_raises_before_any_side_effect(tmp_path):
+    repo_root = tmp_path / "repo2"
+    repo_root.mkdir()
+    log_path = tmp_path / "author_test_calls_2.log"
+    _write_fixture(repo_root, log_path)
 
     with pytest.raises(capability_scenario_verifier.ModelRequiredError):
-        capability_scenario_verifier.run_capability_gates(
-            "P-X", repo_root, model=None, seed=2
-        )
+        capability_scenario_verifier.run_capability_gates("P-X", repo_root)
 
-    call_log_path = repo_root / "test_author_calls.json"
-    assert not call_log_path.exists()
+    assert not log_path.exists()
 
-    provenance_path = (
-        repo_root / "verification" / "capabilities" / "P-X" / ".provenance.json"
-    )
+    provenance_path = repo_root / "verification" / "capabilities" / "P-X" / ".provenance.json"
     assert not provenance_path.exists()

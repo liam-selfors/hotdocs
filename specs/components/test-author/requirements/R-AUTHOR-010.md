@@ -9,16 +9,13 @@
   MUST state: no dependency is statically importable; resolution is
   dynamic, at runtime, from
   `<repo_root>/gen/<dependency-slug>/<module_name>.py` (flat) or
-  `.../<module_name>/__init__.py` (package) — never interceptable by
+  `.../<module_name>/__init__.py` (package), else the tool's own copy
+  (`D199`), so omitting one never makes it missing — never interceptable by
   name-based `sys.modules` injection or `mock.patch`. To fake a
   dependency, write a fake module file under a fresh temporary
   `repo_root` — **always flat-module shape** (`D97`): every real
   loader checks flat first. `module_name` is the slug with hyphens
   replaced by underscores, never `"__init__"`.
 
-  MUST include the one correctness-critical step as a literal worked
-  snippet: register the module in `sys.modules` **before**
-  `exec_module` — a dataclass's class body resolves
-  `sys.modules[__module__]` while executing.
-
-  (`D96`/`D97`)
+  MUST include a literal snippet registering the module in
+  `sys.modules` **before** `exec_module`, which a dataclass needs (`D96`).

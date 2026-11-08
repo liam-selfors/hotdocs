@@ -1,54 +1,53 @@
-import json
+from pathlib import Path
 
 import hotdocs_cli
 
 
-def _write_fake(dest_dir, module_name, return_code, calls_log):
-    dest_dir.mkdir(parents=True, exist_ok=True)
-    module_path = dest_dir / f"{module_name}.py"
+def _write_fake_component(project, dir_parts, module_name, calls_log, return_code):
+    component_dir = Path(project)
+    for part in dir_parts:
+        component_dir = component_dir / part
+    component_dir.mkdir(parents=True, exist_ok=True)
+    module_path = component_dir / f"{module_name}.py"
     module_path.write_text(
-        "import json\n"
-        "\n"
+        "import json\n\n"
         "def main(argv):\n"
-        f"    with open({str(calls_log)!r}, 'a') as fh:\n"
-        "        fh.write(json.dumps(argv) + '\\n')\n"
+        f"    with open({str(calls_log)!r}, \"a\") as handle:\n"
+        "        handle.write(json.dumps(argv) + \"\\n\")\n"
         f"    return {return_code}\n"
     )
-    return module_path
 
 
-def test_lint_routes_to_each_fake_and_returns_its_code(tmp_path):
-    project_zero = tmp_path / "proj_zero"
+def test_main_routes_lint_to_each_fake(tmp_path):
+    project_zero = tmp_path / "project-zero"
     project_zero.mkdir()
-    _write_fake(
-        project_zero / "gen" / "spec-linter",
-        "spec_linter",
-        0,
-        project_zero / "calls.log",
+    calls_log_zero = project_zero / "calls.log"
+    _write_fake_component(
+        project_zero, ("gen", "spec-linter"), "spec_linter", calls_log_zero, 0
     )
-    exit_code_zero = hotdocs_cli.main(["lint", "foo"], cwd=str(project_zero))
-    assert exit_code_zero == 0
+    assert hotdocs_cli.main(["lint"], cwd=str(project_zero)) == 0
 
-    project_seven = tmp_path / "proj_seven"
+    project_seven = tmp_path / "project-seven"
     project_seven.mkdir()
-    _write_fake(
-        project_seven / "gen" / "spec-linter",
-        "spec_linter",
-        7,
-        project_seven / "calls.log",
+    calls_log_seven = project_seven / "calls.log"
+    _write_fake_component(
+        project_seven, ("gen", "spec-linter"), "spec_linter", calls_log_seven, 7
     )
-    exit_code_seven = hotdocs_cli.main(["lint", "foo"], cwd=str(project_seven))
-    assert exit_code_seven == 7
+    assert hotdocs_cli.main(["lint"], cwd=str(project_seven)) == 7
 
 
-def test_unknown_verb_version_and_missing_component_file(tmp_path):
-    project = tmp_path / "proj_other"
+def test_main_exit_codes_for_unknown_verb_version_and_missing_component(tmp_path):
+    project = tmp_path / "project"
     project.mkdir()
 
-    unknown_verb_code = hotdocs_cli.main(["frobnicate"], cwd=str(project))
-    version_code = hotdocs_cli.main(["--version"], cwd=str(project))
-    missing_component_code = hotdocs_cli.main(["impact", "foo"], cwd=str(project))
+    assert hotdocs_cli.main(["frobnicate"], cwd=str(project)) == 2
+    assert hotdocs_cli.main(["--version"], cwd=str(project)) == 0
 
-    assert unknown_verb_code == 2
-    assert version_code == 0
-    assert missing_component_code == 2
+    empty_tool_root = tmp_path / "empty-tool-root"
+    empty_tool_root.mkdir()
+    assert (
+        hotdocs_cli.main(
+            ["impact"], cwd=str(project), tool_root=str(empty_tool_root)
+        )
+        == 2
+    )

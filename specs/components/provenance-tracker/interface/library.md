@@ -1,5 +1,8 @@
 # Library
 
+One module file, `provenance_tracker.py`, never a package: `hotdocs-cli`
+loads it by that path.
+
 ```
 check_readiness(
     repo_root: Path, changed_ids: list[str] | None = None,

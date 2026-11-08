@@ -1,118 +1,89 @@
 import json
 import os
-import tempfile
-import unittest
 from pathlib import Path
 
 import hotdocs_cli
 
 
-FAKE_LINT_SOURCE_PLAIN = """\
-import json
-
-def main(argv):
-    with open({calls_log!r}, "a") as f:
-        f.write(json.dumps(argv) + "\\n")
-    return 7
-"""
-
-FAKE_LINT_SOURCE_ENV = """\
-import json
-import os
-
-def main(argv):
-    record = {{"argv": argv, "env_var": os.environ.get("VAR_HOTDOCS_CONFIG")}}
-    with open({calls_log!r}, "a") as f:
-        f.write(json.dumps(record) + "\\n")
-    return 7
-"""
+def _write_fake_lint(project: Path, calls_log: Path) -> None:
+    lint_dir = project / "gen" / "spec-linter"
+    lint_dir.mkdir(parents=True, exist_ok=True)
+    (lint_dir / "spec_linter.py").write_text(
+        "import json\n"
+        "import os\n"
+        "\n"
+        "def main(argv):\n"
+        f"    with open({str(calls_log)!r}, 'a') as f:\n"
+        "        f.write(json.dumps({\n"
+        "            'argv': argv,\n"
+        "            'var_hotdocs_config': os.environ.get('VAR_HOTDOCS_CONFIG'),\n"
+        "        }) + '\\n')\n"
+        "    return 7\n"
+    )
 
 
-def _write_fake_lint(project, calls_log, record_env=False):
-    gen_dir = Path(project) / "gen" / "spec-linter"
-    gen_dir.mkdir(parents=True, exist_ok=True)
-    template = FAKE_LINT_SOURCE_ENV if record_env else FAKE_LINT_SOURCE_PLAIN
-    source = template.format(calls_log=str(calls_log))
-    (gen_dir / "spec_linter.py").write_text(source)
+def _read_calls(calls_log: Path):
+    if not calls_log.exists():
+        return []
+    return [json.loads(line) for line in calls_log.read_text().splitlines() if line]
 
 
-def _read_log_lines(calls_log):
-    with open(calls_log) as f:
-        return [json.loads(line) for line in f if line.strip()]
+def test_repo_root_appended_when_absent(tmp_path):
+    project = (tmp_path / "project").resolve()
+    project.mkdir()
+    calls_log = project / "calls.log"
+    _write_fake_lint(project, calls_log)
+
+    rc = hotdocs_cli.main(["lint", "a.md"], cwd=str(project))
+
+    assert rc == 7
+    calls = _read_calls(calls_log)
+    assert len(calls) == 1
+    assert calls[0]["argv"] == ["a.md", f"--repo-root={project}"]
 
 
-class TestAcCli002(unittest.TestCase):
-    def test_default_repo_root_is_appended_from_cwd(self):
-        with tempfile.TemporaryDirectory() as project:
-            calls_log = Path(project) / "calls.log"
-            _write_fake_lint(project, calls_log, record_env=False)
+def test_explicit_repo_root_forwarded_unchanged(tmp_path):
+    project = (tmp_path / "project").resolve()
+    project.mkdir()
+    calls_log = project / "calls.log"
+    _write_fake_lint(project, calls_log)
+    project_str = str(project)
 
-            rc = hotdocs_cli.main(["lint", "a.md"], cwd=str(project))
+    rc1 = hotdocs_cli.main(["lint", "--repo-root", project_str, "a.md"])
+    rc2 = hotdocs_cli.main(["lint", f"--repo-root={project_str}"])
 
-            self.assertEqual(rc, 7)
-            lines = _read_log_lines(calls_log)
-            self.assertEqual(len(lines), 1)
-            expected_repo_root = os.path.abspath(str(project))
-            self.assertEqual(
-                lines[0],
-                ["a.md", "--repo-root={}".format(expected_repo_root)],
-            )
-
-    def test_explicit_repo_root_forwarded_unchanged(self):
-        with tempfile.TemporaryDirectory() as project, tempfile.TemporaryDirectory() as elsewhere:
-            calls_log = Path(project) / "calls.log"
-            _write_fake_lint(project, calls_log, record_env=False)
-
-            rc1 = hotdocs_cli.main(
-                ["lint", "--repo-root", str(project), "a.md"], cwd=str(elsewhere)
-            )
-            self.assertEqual(rc1, 7)
-
-            rc2 = hotdocs_cli.main(
-                ["lint", "--repo-root={}".format(project)], cwd=str(elsewhere)
-            )
-            self.assertEqual(rc2, 7)
-
-            lines = _read_log_lines(calls_log)
-            self.assertEqual(len(lines), 2)
-            self.assertEqual(lines[0], ["--repo-root", str(project), "a.md"])
-            self.assertEqual(lines[1], ["--repo-root={}".format(project)])
-
-    def test_var_hotdocs_config_set_and_restored(self):
-        original = os.environ.pop("VAR_HOTDOCS_CONFIG", None)
-        try:
-            with tempfile.TemporaryDirectory() as project, tempfile.TemporaryDirectory() as elsewhere:
-                (Path(project) / "hotdocs.toml").write_text("")
-                calls_log = Path(project) / "calls.log"
-                _write_fake_lint(project, calls_log, record_env=True)
-
-                self.assertIsNone(os.environ.get("VAR_HOTDOCS_CONFIG"))
-                rc1 = hotdocs_cli.main(
-                    ["lint", "--repo-root", str(project)], cwd=str(elsewhere)
-                )
-                self.assertEqual(rc1, 7)
-                self.assertIsNone(os.environ.get("VAR_HOTDOCS_CONFIG"))
-
-                os.environ["VAR_HOTDOCS_CONFIG"] = "/x"
-                rc2 = hotdocs_cli.main(
-                    ["lint", "--repo-root", str(project)], cwd=str(elsewhere)
-                )
-                self.assertEqual(rc2, 7)
-                self.assertEqual(os.environ.get("VAR_HOTDOCS_CONFIG"), "/x")
-
-                lines = _read_log_lines(calls_log)
-                self.assertEqual(len(lines), 2)
-                expected_config_path = os.path.join(
-                    os.path.abspath(str(project)), "hotdocs.toml"
-                )
-                self.assertEqual(lines[0]["env_var"], expected_config_path)
-                self.assertEqual(lines[1]["env_var"], "/x")
-        finally:
-            if original is None:
-                os.environ.pop("VAR_HOTDOCS_CONFIG", None)
-            else:
-                os.environ["VAR_HOTDOCS_CONFIG"] = original
+    assert rc1 == 7
+    assert rc2 == 7
+    calls = _read_calls(calls_log)
+    assert len(calls) == 2
+    assert calls[0]["argv"] == ["--repo-root", project_str, "a.md"]
+    assert calls[1]["argv"] == [f"--repo-root={project_str}"]
 
 
-if __name__ == "__main__":
-    unittest.main()
+def test_var_hotdocs_config_set_and_restored(tmp_path, monkeypatch):
+    project = (tmp_path / "project").resolve()
+    project.mkdir()
+    (project / "hotdocs.toml").write_text('[llm]\nprovider = "anthropic"\n')
+    calls_log = project / "calls.log"
+    _write_fake_lint(project, calls_log)
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    project_str = str(project)
+
+    monkeypatch.delenv("VAR_HOTDOCS_CONFIG", raising=False)
+
+    rc1 = hotdocs_cli.main(["lint", "--repo-root", project_str], cwd=str(elsewhere))
+    assert rc1 == 7
+    assert os.environ.get("VAR_HOTDOCS_CONFIG") is None
+
+    monkeypatch.setenv("VAR_HOTDOCS_CONFIG", "/x")
+
+    rc2 = hotdocs_cli.main(["lint", "--repo-root", project_str], cwd=str(elsewhere))
+    assert rc2 == 7
+    assert os.environ.get("VAR_HOTDOCS_CONFIG") == "/x"
+
+    calls = _read_calls(calls_log)
+    assert len(calls) == 2
+    expected_config_path = str(project / "hotdocs.toml")
+    assert calls[0]["var_hotdocs_config"] == expected_config_path
+    assert calls[1]["var_hotdocs_config"] == "/x"

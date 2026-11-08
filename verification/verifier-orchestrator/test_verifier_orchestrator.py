@@ -462,3 +462,18 @@ def test_ac_verify_020_mutation_operator_swaps_are_pinned(repo_root):
     )
     report = verify("comp-foo", repo_root)
     assert abs(report.mutation_score - 1 / 3) < 1e-9
+
+
+def test_d199_tool_components_fall_back_to_the_tool_root(repo_root):
+    """D199 -- a project holds only its own components: with no
+    criterion-compiler or spec-bundle-assembler under repo_root, verify
+    loads the tool's own copies."""
+    import shutil
+    shutil.rmtree(repo_root / "pipeline")
+    for slug in ("spec-bundle-assembler", "spec-linter", "graph-query-engine",
+                 "test-author", "cache-manager", "llm-endpoint"):
+        shutil.rmtree(repo_root / "gen" / slug)
+    write_foo(repo_root, extra_acceptance={"AC-FOO-001.md": COMPILED_AC})
+    report = verify("comp-foo", repo_root)
+    by_id = {c["id"]: c for c in report.criteria}
+    assert by_id["AC-FOO-001"]["result"] == "pass"

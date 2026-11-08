@@ -1,50 +1,90 @@
 import contextlib
 import io
-import json
+import tempfile
+import textwrap
+from pathlib import Path
 
 import secret_scanner
 
 
-def _get(obj, key, default=None):
+def _get_field(obj, name):
     if isinstance(obj, dict):
-        return obj.get(key, default)
-    return getattr(obj, key, default)
+        return obj.get(name)
+    return getattr(obj, name, None)
+
+
+def _write_fake_cache_manager(repo_root: Path) -> None:
+    cache_manager_dir = repo_root / "gen" / "cache-manager"
+    cache_manager_dir.mkdir(parents=True, exist_ok=True)
+    module_path = cache_manager_dir / "cache_manager.py"
+    module_path.write_text(
+        textwrap.dedent(
+            '''
+            from dataclasses import dataclass
+
+
+            @dataclass
+            class CacheKey:
+                spec_bundle_hash: str
+                gate_inputs_hash: str
+                gate_version: str
+                model_pin: str
+
+
+            @dataclass
+            class CachedResult:
+                gate_type: str
+                payload: dict
+                stored_at: str
+
+
+            class Miss:
+                pass
+
+
+            def get(cache_key, *, repo_root=None):
+                return Miss()
+
+
+            def put(cache_key, result, *, repo_root=None):
+                return None
+            '''
+        )
+    )
 
 
 def _run_main(argv):
-    buf = io.StringIO()
-    code = None
     try:
-        with contextlib.redirect_stdout(buf):
-            code = secret_scanner.main(argv)
+        result = secret_scanner.main(argv)
     except SystemExit as exc:
-        code = exc.code
-    if code is None:
-        code = 0
-    return code, buf.getvalue()
+        return exc.code
+    return result
 
 
-def test_full_scan_with_match_flags_true_and_blocks_merge(tmp_path, monkeypatch):
-    monkeypatch.delenv("VAR_COMPLIANCE_WEBHOOK_URL", raising=False)
+def test_full_scan_with_match_flags_and_blocks_merge():
+    with tempfile.TemporaryDirectory() as tmp:
+        repo_root = Path(tmp)
+        _write_fake_cache_manager(repo_root)
 
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    (repo_root / ".secret-allowlist.json").write_text(
-        json.dumps({"version": 1, "entries": []})
-    )
-    (repo_root / "config.py").write_text(
-        'aws_access_key_id = "AKIAIOSFODNN7EXAMPLE"\n'
-    )
+        secret_file = repo_root / "config.py"
+        secret_file.write_text('aws_access_key_id = "AKIAIOSFODNN7EXAMPLE"\n')
 
-    result = secret_scanner.scan(repo_root)
+        result = secret_scanner.scan(repo_root)
 
-    assert _get(result, "flagged") is True
-    matches = _get(result, "matches")
-    assert matches
-    assert len(matches) >= 1
+        flagged = _get_field(result, "flagged")
+        matches = _get_field(result, "matches")
 
-    exit_code, _ = _run_main(
-        ["--repo-root=" + str(repo_root), "--format=json"]
-    )
+        assert flagged is True
+        assert isinstance(matches, list)
+        assert len(matches) >= 1
 
-    assert exit_code == 1
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            exit_code = _run_main(
+                ["--repo-root=" + str(repo_root), "--format=text"]
+            )
+
+        output = buf.getvalue()
+
+        assert exit_code == 1
+        assert "FLAGGED" in output

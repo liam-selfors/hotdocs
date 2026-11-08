@@ -1,145 +1,202 @@
 import json
-import re
+import shutil
+import tempfile
+import unittest
+from html.parser import HTMLParser
+from pathlib import Path
 
-import provenance_tracker_ui as target
-
-
-def _get(obj, key, default=None):
-    if isinstance(obj, dict):
-        return obj.get(key, default)
-    return getattr(obj, key, default)
+import provenance_tracker_ui
 
 
-FAKE_PROVENANCE_TRACKER_TEMPLATE = '''from pathlib import Path
-
-CALL_LOG = Path(r"__CALL_LOG_PATH__")
-
-
+FAKE_PROVENANCE_TRACKER_SOURCE = '''
 def check_readiness(repo_root, changed_ids=None, model=None, seed=0, llm_backend=None):
-    with CALL_LOG.open("a", encoding="utf-8") as fh:
-        fh.write("check_readiness\\n")
-    scope = "blast-radius" if changed_ids else "whole-corpus"
     return {
-        "scope": scope,
+        "scope": "whole-corpus" if changed_ids is None else "blast-radius",
         "ready": False,
         "components": {
             "comp-foo": {
                 "hit": True,
-                "verification_report": {"overall": "fail"},
+                "verification_report": {
+                    "component_id": "comp-foo",
+                    "criteria": [],
+                    "requirement_results": {"R-FOO-002": "fail"},
+                    "interface_drift": False,
+                    "mutation_score": 0.5,
+                    "overall": "fail",
+                },
                 "license_scan": {"blocked": False},
                 "secret_scan": {"flagged": False},
             }
         },
         "capabilities": {},
         "not_ready_reasons": [
-            "comp-foo: no provenance for current spec state - run hotdocs generate comp-foo"
+            "comp-foo: verification failed -- run hotdocs generate comp-foo"
         ],
     }
 
 
 def last_requirement_failures(component_id, repo_root):
-    with CALL_LOG.open("a", encoding="utf-8") as fh:
-        fh.write("last_requirement_failures:" + str(component_id) + "\\n")
     return ["R-FOO-002"]
 '''
 
 
-def _write_fake_provenance_tracker(repo_root, call_log_path):
-    dep_dir = repo_root / "gen" / "provenance-tracker"
-    dep_dir.mkdir(parents=True, exist_ok=True)
-    source = FAKE_PROVENANCE_TRACKER_TEMPLATE.replace(
-        "__CALL_LOG_PATH__", str(call_log_path)
-    )
-    (dep_dir / "provenance_tracker.py").write_text(source, encoding="utf-8")
+class PageParser(HTMLParser):
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.forms = []
+        self.hrefs = []
+        self.scripts = []
+        self._in_script = False
+        self._current_script_attrs = None
+        self._current_script_content = []
+
+    def handle_starttag(self, tag, attrs):
+        attrs_dict = dict(attrs)
+        if tag == "form":
+            self.forms.append(attrs_dict)
+        if "href" in attrs_dict and attrs_dict["href"] is not None:
+            self.hrefs.append(attrs_dict["href"])
+        if tag == "script":
+            self._in_script = True
+            self._current_script_attrs = attrs_dict
+            self._current_script_content = []
+
+    def handle_endtag(self, tag):
+        if tag == "script" and self._in_script:
+            self.scripts.append(
+                (self._current_script_attrs, "".join(self._current_script_content))
+            )
+            self._in_script = False
+            self._current_script_attrs = None
+            self._current_script_content = []
+
+    def handle_data(self, data):
+        if self._in_script:
+            self._current_script_content.append(data)
 
 
-def _write_corpus_graph(repo_root):
-    verification_dir = repo_root / "verification"
-    verification_dir.mkdir(parents=True, exist_ok=True)
-    corpus_graph = {
-        "nodes": {
-            "comp-foo": {
-                "type": "component",
-                "verification": None,
-                "provenance": None,
-                "size_status": "ok",
-                "sealed": True,
-                "pinned_overrides": [],
-            }
-        },
-        "edges": [],
-        "aggregates": {
-            "orphan_capability_rate": 0.0,
-            "orphan_component_rate": 0.0,
-            "orphan_var_rate": 0.0,
-        },
-    }
-    (verification_dir / "corpus-graph.json").write_text(
-        json.dumps(corpus_graph), encoding="utf-8"
-    )
+def _get(value, key):
+    if isinstance(value, dict):
+        return value.get(key)
+    return getattr(value, key, None)
 
 
-def test_ac_ui_003_no_generate_action_surfaces_for_failing_component(tmp_path):
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    out_dir = tmp_path / "out"
-    call_log_path = tmp_path / "call_log.txt"
+class TestACUI003NoGenerateActionInPage(unittest.TestCase):
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp()
+        self.repo_root = Path(self.tmpdir) / "repo"
+        self.out_dir = Path(self.tmpdir) / "out"
 
-    _write_corpus_graph(repo_root)
-    _write_fake_provenance_tracker(repo_root, call_log_path)
-
-    snapshot = target.render_tracker_ui(
-        out_dir=out_dir,
-        repo_root=repo_root,
-        changed_ids=None,
-        model="fake-model",
-        seed=0,
-        llm_backend=None,
-    )
-
-    # Confirm the fake dependency actually ran, so the assertions below
-    # exercise the real failing+retry_feedback scenario, not a no-op.
-    assert call_log_path.exists()
-    log_contents = call_log_path.read_text(encoding="utf-8")
-    assert "check_readiness" in log_contents
-    assert "last_requirement_failures:comp-foo" in log_contents
-
-    nodes = _get(snapshot, "nodes")
-    comp_foo_node = next(n for n in nodes if _get(n, "id") == "comp-foo")
-    assert _get(comp_foo_node, "status") == "failing"
-    retry_feedback = _get(comp_foo_node, "retry_feedback")
-    assert retry_feedback == ["R-FOO-002"]
-
-    index_html_path = out_dir / "index.html"
-    assert index_html_path.exists()
-    html = index_html_path.read_text(encoding="utf-8")
-
-    # No <form> anywhere on the page.
-    assert re.search(r"<form\b", html, re.IGNORECASE) is None
-
-    # No href attribute other than ones beginning with "#".
-    for href_value in re.findall(
-        r'href\s*=\s*["\']([^"\']*)["\']', html, re.IGNORECASE
-    ):
-        assert href_value.startswith("#"), f"href leaves the page: {href_value!r}"
-
-    # Every <script> except the tracker-snapshot JSON data block must not
-    # contain the literal recovery command as executable script text.
-    found_snapshot_block = False
-    for attrs, body in re.findall(
-        r"<script\b([^>]*)>(.*?)</script>", html, re.IGNORECASE | re.DOTALL
-    ):
-        is_snapshot_block = (
-            re.search(r'id\s*=\s*["\']tracker-snapshot["\']', attrs, re.IGNORECASE)
-            is not None
+        dep_dir = self.repo_root / "gen" / "provenance-tracker"
+        dep_dir.mkdir(parents=True)
+        (dep_dir / "provenance_tracker.py").write_text(
+            FAKE_PROVENANCE_TRACKER_SOURCE, encoding="utf-8"
         )
-        if is_snapshot_block:
-            found_snapshot_block = True
-            parsed = json.loads(body)
-            reasons = _get(parsed, "not_ready_reasons")
-            assert reasons
-            assert any("hotdocs generate" in reason for reason in reasons)
-            continue
-        assert "hotdocs generate" not in body.lower()
 
-    assert found_snapshot_block, "expected a script#tracker-snapshot JSON data block"
+        verification_dir = self.repo_root / "verification"
+        verification_dir.mkdir(parents=True)
+        corpus_graph = {
+            "nodes": {
+                "comp-foo": {
+                    "type": "component",
+                    "verification": {
+                        "component_id": "comp-foo",
+                        "criteria": [],
+                        "requirement_results": {"R-FOO-002": "fail"},
+                        "interface_drift": False,
+                        "mutation_score": 0.5,
+                        "overall": "fail",
+                    },
+                    "provenance": {},
+                    "size_status": "ok",
+                    "sealed": False,
+                    "pinned_overrides": [],
+                }
+            },
+            "edges": [],
+            "aggregates": {
+                "orphan_capability_rate": 0.0,
+                "orphan_component_rate": 0.0,
+                "orphan_var_rate": 0.0,
+            },
+        }
+        (verification_dir / "corpus-graph.json").write_text(
+            json.dumps(corpus_graph), encoding="utf-8"
+        )
+
+    def tearDown(self):
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def test_no_form_no_generate_script_no_external_href(self):
+        snapshot = provenance_tracker_ui.render_tracker_ui(
+            self.out_dir,
+            self.repo_root,
+            changed_ids=None,
+            model=None,
+            seed=0,
+            llm_backend=None,
+        )
+
+        nodes = _get(snapshot, "nodes")
+        self.assertIsNotNone(nodes, "snapshot must expose nodes")
+
+        foo_node = None
+        for node in nodes:
+            if _get(node, "id") == "comp-foo":
+                foo_node = node
+                break
+        self.assertIsNotNone(foo_node, "expected comp-foo node in snapshot")
+
+        status = _get(foo_node, "status")
+        retry_feedback = _get(foo_node, "retry_feedback")
+        self.assertEqual(status, "failing")
+        self.assertTrue(
+            retry_feedback, "expected non-empty retry_feedback for the failing component"
+        )
+
+        index_path = self.out_dir / "index.html"
+        self.assertTrue(index_path.exists(), "render_tracker_ui must write index.html")
+        html_text = index_path.read_text(encoding="utf-8")
+
+        parser = PageParser()
+        parser.feed(html_text)
+
+        self.assertEqual(parser.forms, [], "page must contain no <form> element")
+
+        for href in parser.hrefs:
+            self.assertTrue(
+                href.startswith("#"),
+                "href %r must begin with '#'" % (href,),
+            )
+
+        self.assertTrue(parser.scripts, "page must contain at least one <script> element")
+
+        found_snapshot_block = False
+        for attrs, content in parser.scripts:
+            script_id = attrs.get("id")
+            if script_id == "tracker-snapshot":
+                found_snapshot_block = True
+                data = json.loads(content.strip())
+                reasons = data.get("not_ready_reasons", [])
+                joined = " ".join(reasons)
+                self.assertIn(
+                    "hotdocs generate",
+                    joined,
+                    "the data block's not_ready_reasons should carry the verbatim "
+                    "retry command for this fixture",
+                )
+                continue
+            self.assertNotIn(
+                "hotdocs generate",
+                content,
+                "no executable script element may contain 'hotdocs generate'",
+            )
+
+        self.assertTrue(
+            found_snapshot_block,
+            "expected an id=\"tracker-snapshot\" script data block in the page",
+        )
+
+
+if __name__ == "__main__":
+    unittest.main()

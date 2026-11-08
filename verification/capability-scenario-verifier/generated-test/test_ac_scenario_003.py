@@ -1,110 +1,84 @@
-import pathlib
-
 import capability_scenario_verifier
 
 
-_MISSING = object()
-
-
-def _get(obj, key, default=_MISSING):
+def _get(obj, key):
     if isinstance(obj, dict):
-        if key in obj:
-            return obj[key]
-    elif hasattr(obj, key):
-        return getattr(obj, key)
-    if default is _MISSING:
-        raise AssertionError(f"missing field {key!r} on {obj!r}")
-    return default
+        return obj.get(key)
+    return getattr(obj, key, None)
 
 
-def _has(obj, key):
-    if isinstance(obj, dict):
-        return key in obj
-    return hasattr(obj, key)
+def _write_fixture(tmp_path, capability_id, capability_name, capability_body, slug):
+    repo_root = tmp_path / "repo"
 
+    product_dir = repo_root / "specs" / "product"
+    product_dir.mkdir(parents=True)
+    (product_dir / f"{capability_name}.md").write_text(capability_body)
 
-def _find_by_kind(scenarios, kind):
-    for entry in scenarios:
-        if _get(entry, "kind") == kind:
-            return entry
-    raise AssertionError(f"no scenario entry with kind={kind!r} in {scenarios!r}")
+    comp_dir = repo_root / "specs" / "components" / slug
+    comp_dir.mkdir(parents=True)
+    component_id = f"comp-{slug}"
+    component_md = f"""---
+id: {component_id}
+title: Fixture Component {slug}
+status: ratified
+owners: [team-test]
+realizes: [{capability_id}]
+sealed: false
+last_ratified_commit: 0000000
+---
 
+Fixture component realizing {capability_id}.
+"""
+    (comp_dir / "component.md").write_text(component_md)
 
-def _write(path: pathlib.Path, content: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(content)
-
-
-def _write_component(repo_root, comp_id, slug, realizes):
-    realizes_str = "[" + ", ".join(realizes) + "]"
-    content = (
-        "---\n"
-        f"id: {comp_id}\n"
-        f"title: {comp_id} component\n"
-        "status: draft\n"
-        "owners: [test-owner]\n"
-        "sealed: false\n"
-        f"realizes: {realizes_str}\n"
-        "---\n"
-        "\n"
-        f"{comp_id} component body.\n"
-    )
-    _write(repo_root / "specs" / "components" / slug / "component.md", content)
     module_name = slug.replace("-", "_")
-    _write(repo_root / "gen" / slug / f"{module_name}.py", "def noop():\n    pass\n")
+    gen_dir = repo_root / "gen" / slug
+    gen_dir.mkdir(parents=True)
+    (gen_dir / f"{module_name}.py").write_text("def run():\n    pass\n")
+
+    return repo_root, component_id
 
 
-def _write_capability(repo_root, name, cap_id, body):
-    content = (
-        "---\n"
-        f"id: {cap_id}\n"
-        f"title: {cap_id} capability\n"
-        "status: draft\n"
-        "owners: [test-owner]\n"
-        "---\n"
-        "\n"
-        f"{body}\n"
-    )
-    _write(repo_root / "specs" / "product" / f"{name}.md", content)
+def test_generated_test_and_llm_judge_scenarios(tmp_path):
+    capability_body = """---
+id: P-ALPHA
+title: Alpha Capability
+status: ratified
+owners: [team-test]
+last_ratified_commit: 0000000
+---
 
+### CS-ALPHA-001
 
-def test_generated_test_and_llm_judge_scenarios_mix_to_fail(tmp_path):
-    repo_root = tmp_path
-    _write_component(repo_root, "comp-widget1", "widget1", realizes=["P-FOO"])
-    _write_capability(
-        repo_root,
-        "foo",
-        "P-FOO",
-        body=(
-            "### CS-FOO-001\n"
-            "\n"
-            "Covers: P-FOO\n"
-            "Kind: generated-test\n"
-            "\n"
-            "```gherkin\n"
-            "Given a widget\n"
-            "When it is used\n"
-            "Then it works\n"
-            "```\n"
-            "\n"
-            "### CS-FOO-002\n"
-            "\n"
-            "Covers: P-FOO\n"
-            "Kind: llm-judge\n"
-            "\n"
-            "```gherkin\n"
-            "Given a widget\n"
-            "When it is judged\n"
-            "Then it is acceptable\n"
-            "```\n"
-        ),
+Covers: P-ALPHA
+Kind: generated-test
+
+```gherkin
+Given a widget
+When it is used
+Then it works
+```
+
+### CS-ALPHA-002
+
+Covers: P-ALPHA
+Kind: llm-judge
+
+```gherkin
+Given a widget
+When it is judged
+Then it is judged
+```
+"""
+    repo_root, component_id = _write_fixture(
+        tmp_path, "P-ALPHA", "alpha", capability_body, "alpha-comp"
     )
 
     def fake_test_author(bundle):
         return {
             "model_call_error": None,
             "file": {
-                "path": "verification/capabilities/P-FOO/generated-test/test_cs_foo_001.py",
+                "path": "verification/capabilities/P-ALPHA/generated-test/test_cs_alpha_001.py",
                 "content": "def test_x():\n    assert True\n",
             },
         }
@@ -113,70 +87,95 @@ def test_generated_test_and_llm_judge_scenarios_mix_to_fail(tmp_path):
         return {"result": "fail", "rationale": "because"}
 
     report = capability_scenario_verifier.run_capability_scenarios(
-        ["comp-widget1"], repo_root, judge=fake_judge, test_author=fake_test_author
+        [component_id], repo_root, judge=fake_judge, test_author=fake_test_author
     )
 
-    cap = _get(report, "P-FOO")
-    scenarios = _get(cap, "scenarios")
+    entry = _get(report, "P-ALPHA")
+    assert entry is not None
+
+    scenarios = _get(entry, "scenarios")
     assert len(scenarios) == 2
 
-    generated_entry = _find_by_kind(scenarios, "generated-test")
-    assert _get(generated_entry, "id") == "CS-FOO-001"
-    assert _get(generated_entry, "result") == "pass"
-    assert not _has(generated_entry, "rationale")
+    generated_entries = [s for s in scenarios if _get(s, "kind") == "generated-test"]
+    judge_entries = [s for s in scenarios if _get(s, "kind") == "llm-judge"]
+    assert len(generated_entries) == 1
+    assert len(judge_entries) == 1
 
-    judge_entry = _find_by_kind(scenarios, "llm-judge")
-    assert _get(judge_entry, "id") == "CS-FOO-002"
-    assert _get(judge_entry, "result") == "fail"
+    gen_entry = generated_entries[0]
+    judge_entry = judge_entries[0]
+
+    if isinstance(gen_entry, dict):
+        assert "rationale" not in gen_entry
+    else:
+        assert not hasattr(gen_entry, "rationale")
+
+    assert _get(gen_entry, "result") == "pass"
     assert _get(judge_entry, "rationale") == "because"
+    assert _get(judge_entry, "result") == "fail"
+    assert _get(entry, "overall") == "fail"
 
-    assert _get(cap, "overall") == "fail"
 
+def test_capability_with_no_cs_scenario(tmp_path):
+    capability_body = """---
+id: P-BETA
+title: Beta Capability
+status: ratified
+owners: [team-test]
+last_ratified_commit: 0000000
+---
 
-def test_capability_with_no_declared_scenario_fails_with_empty_list(tmp_path):
-    repo_root = tmp_path
-    _write_component(repo_root, "comp-widget2", "widget2", realizes=["P-BAR"])
-    _write_capability(
-        repo_root,
-        "bar",
-        "P-BAR",
-        body="Bar capability has no scenarios declared yet.\n",
+No scenarios declared for this capability.
+"""
+    repo_root, component_id = _write_fixture(
+        tmp_path, "P-BETA", "beta", capability_body, "beta-comp"
     )
 
-    report = capability_scenario_verifier.run_capability_scenarios(["comp-widget2"], repo_root)
-
-    cap = _get(report, "P-BAR")
-    assert _get(cap, "overall") == "fail"
-    assert list(_get(cap, "scenarios")) == []
-
-
-def test_llm_judge_only_scenario_without_judge_is_skipped(tmp_path):
-    repo_root = tmp_path
-    _write_component(repo_root, "comp-widget3", "widget3", realizes=["P-BAZ"])
-    _write_capability(
-        repo_root,
-        "baz",
-        "P-BAZ",
-        body=(
-            "### CS-BAZ-001\n"
-            "\n"
-            "Covers: P-BAZ\n"
-            "Kind: llm-judge\n"
-            "\n"
-            "```gherkin\n"
-            "Given a widget\n"
-            "When it is judged\n"
-            "Then it is acceptable\n"
-            "```\n"
-        ),
+    report = capability_scenario_verifier.run_capability_scenarios(
+        [component_id], repo_root
     )
 
-    report = capability_scenario_verifier.run_capability_scenarios(["comp-widget3"], repo_root)
+    entry = _get(report, "P-BETA")
+    assert entry is not None
+    assert _get(entry, "overall") == "fail"
 
-    cap = _get(report, "P-BAZ")
-    scenarios = _get(cap, "scenarios")
+    scenarios = _get(entry, "scenarios")
+    assert len(scenarios) == 0
+
+
+def test_llm_judge_scenario_without_judge_is_skipped(tmp_path):
+    capability_body = """---
+id: P-GAMMA
+title: Gamma Capability
+status: ratified
+owners: [team-test]
+last_ratified_commit: 0000000
+---
+
+### CS-GAMMA-001
+
+Covers: P-GAMMA
+Kind: llm-judge
+
+```gherkin
+Given a thing
+When it is judged
+Then it is judged
+```
+"""
+    repo_root, component_id = _write_fixture(
+        tmp_path, "P-GAMMA", "gamma", capability_body, "gamma-comp"
+    )
+
+    report = capability_scenario_verifier.run_capability_scenarios(
+        [component_id], repo_root
+    )
+
+    entry = _get(report, "P-GAMMA")
+    assert entry is not None
+
+    scenarios = _get(entry, "scenarios")
     assert len(scenarios) == 1
-    entry = scenarios[0]
-    assert _get(entry, "id") == "CS-BAZ-001"
-    assert _get(entry, "result") == "skipped"
-    assert _get(cap, "overall") == "skipped"
+
+    scenario_entry = scenarios[0]
+    assert _get(scenario_entry, "result") == "skipped"
+    assert _get(entry, "overall") == "skipped"

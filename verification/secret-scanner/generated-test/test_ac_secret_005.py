@@ -1,27 +1,10 @@
 import json
-import os
-import shutil
-import tempfile
-import unittest
 from pathlib import Path
 
 import secret_scanner
 
 
-def _get(obj, key, default=None):
-    if isinstance(obj, dict):
-        return obj.get(key, default)
-    return getattr(obj, key, default)
-
-
-_STALE_MATCH = {
-    "rule_id": "AWS Access Key",
-    "risk_tier": "high",
-    "file": "nonexistent/stale.py",
-    "line": 7,
-}
-
-_FAKE_CACHE_MANAGER_SRC = '''
+_FAKE_CACHE_MANAGER_SOURCE = '''
 import json
 import os
 from dataclasses import dataclass
@@ -43,111 +26,101 @@ class CachedResult:
     stored_at: str
 
 
-_STORED_PAYLOAD = {
-    "scope": "full",
-    "gate_version": "secret_scanner@3.1.0+detect-secrets.1.5.0",
-    "flagged": True,
-    "matches": [
-        {
-            "rule_id": "AWS Access Key",
-            "risk_tier": "high",
-            "file": "nonexistent/stale.py",
-            "line": 7,
-        }
-    ],
-    "allowed": [],
-    "unused_allowlist_entries": [],
-    "notified": False,
-    "notification_delivery_error": None,
-    "cache_hit": False,
-}
+class Miss:
+    pass
 
 
 def _log(event):
-    path = os.environ["AC_SECRET_005_CALL_LOG"]
-    with open(path, "a") as f:
-        f.write(json.dumps(event) + "\\n")
+    path = os.environ.get("FAKE_CACHE_MANAGER_LOG")
+    if path:
+        with open(path, "a", encoding="utf-8") as fh:
+            fh.write(event + "\\n")
+
+
+def _payload():
+    raw = os.environ.get("FAKE_CACHE_PAYLOAD_JSON")
+    return json.loads(raw) if raw else None
 
 
 def get(cache_key, *, repo_root=None):
-    _log({"op": "get"})
+    _log("get")
     return CachedResult(
         gate_type="secret_scanner",
-        payload=dict(_STORED_PAYLOAD),
+        payload=_payload(),
         stored_at="2026-01-01T00:00:00Z",
     )
 
 
 def put(cache_key, result, *, repo_root=None):
-    _log({"op": "put"})
+    _log("put")
+    return None
 '''
 
 
-class TestAcSecret005(unittest.TestCase):
-    def setUp(self):
-        self.repo_root = Path(tempfile.mkdtemp())
-        self.addCleanup(shutil.rmtree, self.repo_root, ignore_errors=True)
-
-        log_dir = Path(tempfile.mkdtemp())
-        self.addCleanup(shutil.rmtree, log_dir, ignore_errors=True)
-        self.call_log = log_dir / "calls.jsonl"
-
-        self._old_env = os.environ.get("AC_SECRET_005_CALL_LOG")
-        os.environ["AC_SECRET_005_CALL_LOG"] = str(self.call_log)
-        self.addCleanup(self._restore_env)
-
-        specs_dir = self.repo_root / "specs"
-        specs_dir.mkdir(parents=True)
-        (specs_dir / "overview.md").write_text("Nothing secret in here.\n")
-
-        src_dir = self.repo_root / "src"
-        src_dir.mkdir(parents=True)
-        (src_dir / "app.py").write_text(
-            "def greet():\n    return 'hello'\n"
-        )
-
-        cache_dir = self.repo_root / "gen" / "cache-manager"
-        cache_dir.mkdir(parents=True)
-        (cache_dir / "cache_manager.py").write_text(_FAKE_CACHE_MANAGER_SRC)
-
-    def _restore_env(self):
-        if self._old_env is None:
-            os.environ.pop("AC_SECRET_005_CALL_LOG", None)
-        else:
-            os.environ["AC_SECRET_005_CALL_LOG"] = self._old_env
-
-    def _read_call_log(self):
-        if not self.call_log.exists():
-            return []
-        return [
-            json.loads(line)
-            for line in self.call_log.read_text().splitlines()
-            if line.strip()
-        ]
-
-    def test_cache_hit_returns_cached_matches_without_calling_put(self):
-        result = secret_scanner.scan(self.repo_root)
-
-        calls = self._read_call_log()
-        get_calls = [c for c in calls if c["op"] == "get"]
-        put_calls = [c for c in calls if c["op"] == "put"]
-
-        self.assertEqual(len(get_calls), 1)
-        self.assertEqual(len(put_calls), 0)
-
-        self.assertTrue(_get(result, "cache_hit"))
-
-        matches = _get(result, "matches")
-        self.assertEqual(matches, [dict(_STALE_MATCH)])
-
-        # A fresh scan of src/app.py (no secrets) would never have
-        # produced this match, confirming the cached result -- not a
-        # rescan of the current files -- is what was returned.
-        self.assertNotEqual(
-            {m["file"] for m in matches},
-            {"src/app.py"},
-        )
+def _field(obj, name):
+    if isinstance(obj, dict):
+        return obj.get(name)
+    return getattr(obj, name, None)
 
 
-if __name__ == "__main__":
-    unittest.main()
+def test_full_scan_cache_hit_returns_cached_matches_and_skips_put(tmp_path, monkeypatch):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+
+    specs_file = repo_root / "specs" / "README.md"
+    specs_file.parent.mkdir(parents=True, exist_ok=True)
+    specs_file.write_text("# nothing secret here\n", encoding="utf-8")
+
+    src_file = repo_root / "src" / "app.py"
+    src_file.parent.mkdir(parents=True, exist_ok=True)
+    src_file.write_text("print('hello world')\n", encoding="utf-8")
+
+    allowlist_file = repo_root / ".secret-allowlist.json"
+    allowlist_file.write_text(
+        json.dumps({"version": 1, "entries": []}),
+        encoding="utf-8",
+    )
+
+    cache_manager_dir = repo_root / "gen" / "cache-manager"
+    cache_manager_dir.mkdir(parents=True, exist_ok=True)
+    (cache_manager_dir / "cache_manager.py").write_text(
+        _FAKE_CACHE_MANAGER_SOURCE, encoding="utf-8"
+    )
+
+    log_path = tmp_path / "cache_manager_calls.log"
+
+    cached_matches = [
+        {
+            "rule_id": "Cached-Only-Rule",
+            "risk_tier": "high",
+            "file": "nonexistent/cached/path.py",
+            "line": 7,
+        }
+    ]
+    cached_payload = {
+        "scope": "full",
+        "gate_version": "secret_scanner@9.9.9+detect-secrets.1.5.0",
+        "flagged": True,
+        "matches": cached_matches,
+        "allowed": [],
+        "unused_allowlist_entries": [],
+        "notified": False,
+        "notification_delivery_error": None,
+        "cache_hit": False,
+    }
+
+    monkeypatch.setenv("FAKE_CACHE_MANAGER_LOG", str(log_path))
+    monkeypatch.setenv("FAKE_CACHE_PAYLOAD_JSON", json.dumps(cached_payload))
+
+    result = secret_scanner.scan(repo_root)
+
+    assert _field(result, "cache_hit") is True
+    assert _field(result, "matches") == cached_matches
+
+    if log_path.exists():
+        calls = log_path.read_text(encoding="utf-8").splitlines()
+    else:
+        calls = []
+
+    assert "get" in calls
+    assert "put" not in calls

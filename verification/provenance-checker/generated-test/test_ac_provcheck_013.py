@@ -1,4 +1,3 @@
-"""AC-PROVCHECK-013 — check_sealed_provenance manifest validity (R-PROVCHECK-008)."""
 import json
 
 import pytest
@@ -6,132 +5,143 @@ import pytest
 import provenance_checker
 
 
-def _get(obj, key, default=None):
-    if isinstance(obj, dict):
-        return obj.get(key, default)
-    return getattr(obj, key, default)
+COMPONENT_ID = "comp-foo"
+NOT_SEALED_COMPONENT_ID = "comp-bar"
 
 
-SEALED_SLUG = "sealed-foo"
-SEALED_ID = "comp-sealed-foo"
-SOURCE_PATH = "pipeline/sealed-foo/"
-
-UNSEALED_SLUG = "plain-foo"
-UNSEALED_ID = "comp-plain-foo"
+def _get(value, key):
+    if isinstance(value, dict):
+        return value.get(key)
+    return getattr(value, key, None)
 
 
-def _write_verifier_orchestrator(root):
-    mod_dir = root / "gen" / "verifier-orchestrator"
-    mod_dir.mkdir(parents=True)
-    (mod_dir / "verifier_orchestrator.py").write_text(
-        'GATE_VERSION = "verifier-orchestrator@2.0.0"\n'
-    )
+def _write(path, content):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(content, encoding="utf-8")
 
 
-def _write_sealed_component(root):
-    comp_dir = root / "specs" / "components" / SEALED_SLUG
-    comp_dir.mkdir(parents=True)
-    (comp_dir / "component.md").write_text(
+def _setup_repo(tmp_path):
+    repo_root = tmp_path / "repo"
+
+    _write(repo_root / "specs" / "components" / "foo" / "component.md", (
         "---\n"
-        f"id: {SEALED_ID}\n"
-        "title: Sealed Foo\n"
+        "id: comp-foo\n"
+        "title: Foo\n"
         "status: ratified\n"
         "owners: [pipeline-team]\n"
         "sealed: true\n"
-        f"source_path: {SOURCE_PATH}\n"
-        "depends_on: []\n"
-        'last_ratified_commit: "0000000"\n'
-        "---\n\n"
-        "# Sealed Foo\n\n"
-        "Purpose: test fixture for sealed provenance checking.\n"
-    )
-    src_dir = root / SOURCE_PATH
-    src_dir.mkdir(parents=True)
-    (src_dir / "foo.py").write_text("def foo():\n    return 1\n")
-
-
-def _write_unsealed_component(root):
-    comp_dir = root / "specs" / "components" / UNSEALED_SLUG
-    comp_dir.mkdir(parents=True)
-    (comp_dir / "component.md").write_text(
+        "source_path: fixture-src/\n"
+        "last_ratified_commit: 0000000000000000000000000000000000000\n"
         "---\n"
-        f"id: {UNSEALED_ID}\n"
-        "title: Plain Foo\n"
-        "status: draft\n"
+        "\n"
+        "# Foo\n"
+        "\n"
+        "## Purpose\n"
+        "\n"
+        "A sealed fixture component for AC-PROVCHECK-013.\n"
+    ))
+
+    _write(repo_root / "specs" / "components" / "bar" / "component.md", (
+        "---\n"
+        "id: comp-bar\n"
+        "title: Bar\n"
+        "status: ratified\n"
         "owners: [pipeline-team]\n"
         "sealed: false\n"
-        "depends_on: []\n"
-        "---\n\n"
-        "# Plain Foo\n\n"
-        "Purpose: not a sealed component.\n"
+        "last_ratified_commit: 0000000000000000000000000000000000000\n"
+        "---\n"
+        "\n"
+        "# Bar\n"
+        "\n"
+        "## Purpose\n"
+        "\n"
+        "A not-sealed fixture component for AC-PROVCHECK-013.\n"
+    ))
+
+    _write(
+        repo_root / "gen" / "verifier-orchestrator" / "verifier_orchestrator.py",
+        'GATE_VERSION = "verifier-orchestrator@2.0.0"\n',
     )
 
+    _write(
+        repo_root / "fixture-src" / "main.py",
+        "def hello():\n    return 1\n",
+    )
 
-@pytest.fixture
-def repo_root(tmp_path):
-    root = tmp_path / "repo"
-    root.mkdir()
-    _write_verifier_orchestrator(root)
-    _write_sealed_component(root)
-    return root
+    return repo_root
 
 
-@pytest.fixture
-def valid_manifest(repo_root):
-    key = provenance_checker.current_sealed_key(SEALED_ID, repo_root)
+def _manifest_path(repo_root):
+    return repo_root / "fixture-src" / ".sealed-provenance.json"
+
+
+def _write_manifest(repo_root, content):
+    _write(_manifest_path(repo_root), content)
+
+
+def _valid_manifest_dict(repo_root):
+    # source_hash's exact algorithm is the target's own; read it back from
+    # the real key rather than guessing, so the fixture manifest is genuinely current.
+    key = provenance_checker.current_sealed_key(COMPONENT_ID, repo_root)
     assert key is not None
     return {
         "kind": "sealed-provenance",
         "version": 1,
-        "component_id": SEALED_ID,
+        "component_id": COMPONENT_ID,
         "owners": list(_get(key, "owners")),
         "source_path": _get(key, "source_path"),
         "source_hash": _get(key, "source_hash"),
         "verifier_version": _get(key, "verifier_version"),
-        "characterization": {
-            "overall": "pass",
-            "criteria_passed": 3,
-            "criteria_total": 3,
-        },
+        "characterization": {"overall": "pass", "criteria_passed": 3, "criteria_total": 3},
         "written_at": "2026-11-02T00:00:00Z",
     }
 
 
-def _write_manifest_text(root, text):
-    path = root / SOURCE_PATH / ".sealed-provenance.json"
-    path.write_text(text)
+def _check(repo_root, component_id=COMPONENT_ID):
+    return provenance_checker.check_sealed_provenance(component_id, repo_root)
 
 
-def _write_manifest(root, manifest_obj):
-    _write_manifest_text(root, json.dumps(manifest_obj))
+def test_valid_current_manifest_is_a_hit(tmp_path):
+    repo_root = _setup_repo(tmp_path)
+    manifest = _valid_manifest_dict(repo_root)
+    _write_manifest(repo_root, json.dumps(manifest))
+
+    result = _check(repo_root)
+
+    assert _get(result, "reason") is None
+    assert _get(result, "hit") is True
+    assert _get(result, "sealed") is True
+    assert _get(result, "license_scan") is None
+    assert _get(result, "secret_scan") is None
 
 
-def _assert_miss(result, reason):
-    assert _get(result, "reason") == reason
+NOT_OBJECT_MANIFESTS = [
+    json.dumps([1, 2, 3]),
+    json.dumps(5),
+    json.dumps("a string"),
+    json.dumps(None),
+]
+
+
+@pytest.mark.parametrize("raw", NOT_OBJECT_MANIFESTS)
+def test_manifest_not_an_object_is_invalid(tmp_path, raw):
+    repo_root = _setup_repo(tmp_path)
+    _write_manifest(repo_root, raw)
+
+    result = _check(repo_root)
+
+    assert _get(result, "reason") == "manifest_invalid"
     assert _get(result, "hit") is False
     assert _get(result, "sealed") is True
     assert _get(result, "verification_report") is None
     assert _get(result, "owners") is None
     assert _get(result, "source_hash") is None
     assert _get(result, "written_at") is None
+    assert _get(result, "license_scan") is None
+    assert _get(result, "secret_scan") is None
 
 
-def test_baseline_valid_manifest_is_a_hit(repo_root, valid_manifest):
-    _write_manifest(repo_root, valid_manifest)
-    result = provenance_checker.check_sealed_provenance(SEALED_ID, repo_root)
-    assert _get(result, "hit") is True
-    assert _get(result, "reason") is None
-    assert _get(result, "sealed") is True
-
-
-@pytest.mark.parametrize("raw", ["[]", "5", '"a string"', "null"])
-def test_manifest_not_an_object_is_invalid(repo_root, valid_manifest, raw):
-    _write_manifest_text(repo_root, raw)
-    result = provenance_checker.check_sealed_provenance(SEALED_ID, repo_root)
-    _assert_miss(result, "manifest_invalid")
-
-
-FIELD_INVALID_CASES = [
+TOP_LEVEL_INVALID_CASES = [
     ("kind", "sealed"),
     ("kind", 5),
     ("version", 2),
@@ -164,58 +174,91 @@ FIELD_INVALID_CASES = [
 ]
 
 
-@pytest.mark.parametrize("field,value", FIELD_INVALID_CASES)
-def test_single_field_mutation_is_invalid(repo_root, valid_manifest, field, value):
-    manifest = dict(valid_manifest)
+@pytest.mark.parametrize("field,value", TOP_LEVEL_INVALID_CASES)
+def test_top_level_field_invalid_value_is_manifest_invalid(tmp_path, field, value):
+    repo_root = _setup_repo(tmp_path)
+    manifest = _valid_manifest_dict(repo_root)
     manifest[field] = value
-    _write_manifest(repo_root, manifest)
-    result = provenance_checker.check_sealed_provenance(SEALED_ID, repo_root)
-    _assert_miss(result, "manifest_invalid")
+    _write_manifest(repo_root, json.dumps(manifest))
+
+    result = _check(repo_root)
+
+    assert _get(result, "reason") == "manifest_invalid"
+    assert _get(result, "hit") is False
+    assert _get(result, "sealed") is True
+    assert _get(result, "verification_report") is None
+    assert _get(result, "owners") is None
+    assert _get(result, "source_hash") is None
+    assert _get(result, "written_at") is None
+    assert _get(result, "license_scan") is None
+    assert _get(result, "secret_scan") is None
 
 
 CHARACTERIZATION_INVALID_CASES = [
-    [],
+    [1, 2, 3],
     {"overall": "pass", "criteria_passed": 3},
     {"overall": "pass", "criteria_passed": 3, "criteria_total": 3, "extra": 1},
     {"overall": "ok", "criteria_passed": 3, "criteria_total": 3},
     {"overall": 5, "criteria_passed": 3, "criteria_total": 3},
-    {"overall": "pass", "criteria_passed": "2", "criteria_total": 3},
-    {"overall": "pass", "criteria_passed": True, "criteria_total": 3},
-    {"overall": "pass", "criteria_passed": 3, "criteria_total": -1},
-    {"overall": "pass", "criteria_passed": 3, "criteria_total": 2},
+    {"overall": "fail", "criteria_passed": "2", "criteria_total": 3},
+    {"overall": "fail", "criteria_passed": True, "criteria_total": 3},
+    {"overall": "fail", "criteria_passed": 0, "criteria_total": -1},
+    {"overall": "fail", "criteria_passed": 3, "criteria_total": 2},
     {"overall": "pass", "criteria_passed": 0, "criteria_total": 0},
 ]
 
 
 @pytest.mark.parametrize("characterization", CHARACTERIZATION_INVALID_CASES)
-def test_characterization_mutation_is_invalid(repo_root, valid_manifest, characterization):
-    manifest = dict(valid_manifest)
+def test_characterization_invalid_is_manifest_invalid(tmp_path, characterization):
+    repo_root = _setup_repo(tmp_path)
+    manifest = _valid_manifest_dict(repo_root)
     manifest["characterization"] = characterization
-    _write_manifest(repo_root, manifest)
-    result = provenance_checker.check_sealed_provenance(SEALED_ID, repo_root)
-    _assert_miss(result, "manifest_invalid")
+    _write_manifest(repo_root, json.dumps(manifest))
+
+    result = _check(repo_root)
+
+    assert _get(result, "reason") == "manifest_invalid"
+    assert _get(result, "hit") is False
+    assert _get(result, "sealed") is True
+    assert _get(result, "verification_report") is None
+    assert _get(result, "owners") is None
+    assert _get(result, "source_hash") is None
+    assert _get(result, "written_at") is None
+    assert _get(result, "license_scan") is None
+    assert _get(result, "secret_scan") is None
 
 
-@pytest.mark.parametrize(
-    "characterization",
-    [
-        {"overall": "fail", "criteria_passed": 0, "criteria_total": 2},
-        {"overall": "fail", "criteria_passed": 0, "criteria_total": 0},
-    ],
-)
-def test_failed_characterization_is_characterization_failed(
-    repo_root, valid_manifest, characterization
-):
-    manifest = dict(valid_manifest)
+CHARACTERIZATION_FAILED_CASES = [
+    {"overall": "fail", "criteria_passed": 0, "criteria_total": 2},
+    {"overall": "fail", "criteria_passed": 0, "criteria_total": 0},
+]
+
+
+@pytest.mark.parametrize("characterization", CHARACTERIZATION_FAILED_CASES)
+def test_valid_manifest_with_failed_characterization(tmp_path, characterization):
+    repo_root = _setup_repo(tmp_path)
+    manifest = _valid_manifest_dict(repo_root)
     manifest["characterization"] = characterization
-    _write_manifest(repo_root, manifest)
-    result = provenance_checker.check_sealed_provenance(SEALED_ID, repo_root)
-    _assert_miss(result, "characterization_failed")
+    _write_manifest(repo_root, json.dumps(manifest))
+
+    result = _check(repo_root)
+
+    assert _get(result, "reason") == "characterization_failed"
+    assert _get(result, "hit") is False
+    assert _get(result, "sealed") is True
+    assert _get(result, "verification_report") is None
+    assert _get(result, "owners") is None
+    assert _get(result, "source_hash") is None
+    assert _get(result, "written_at") is None
+    assert _get(result, "license_scan") is None
+    assert _get(result, "secret_scan") is None
 
 
-def test_not_sealed_component(repo_root):
-    _write_unsealed_component(repo_root)
-    result = provenance_checker.check_sealed_provenance(UNSEALED_ID, repo_root)
+def test_not_sealed_component_reports_not_sealed(tmp_path):
+    repo_root = _setup_repo(tmp_path)
+
+    result = _check(repo_root, component_id=NOT_SEALED_COMPONENT_ID)
+
     assert _get(result, "reason") == "not_sealed"
     assert _get(result, "sealed") is False
     assert _get(result, "hit") is False
@@ -223,3 +266,5 @@ def test_not_sealed_component(repo_root):
     assert _get(result, "owners") is None
     assert _get(result, "source_hash") is None
     assert _get(result, "written_at") is None
+    assert _get(result, "license_scan") is None
+    assert _get(result, "secret_scan") is None

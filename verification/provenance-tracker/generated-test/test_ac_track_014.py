@@ -1,12 +1,15 @@
 import json
 
+import pytest
+
 import provenance_tracker
 
 
-def test_verify_not_ready_with_changed_passes_through_args(monkeypatch, capsys, tmp_path):
+def _patch_check_readiness(monkeypatch, responses):
     calls = []
+    queue = list(responses)
 
-    def fake_check_readiness(repo_root, changed_ids=None, model=None, seed=0, llm_backend=None):
+    def fake(repo_root, changed_ids=None, model=None, seed=0, llm_backend=None):
         calls.append(
             {
                 "repo_root": repo_root,
@@ -16,17 +19,42 @@ def test_verify_not_ready_with_changed_passes_through_args(monkeypatch, capsys, 
                 "llm_backend": llm_backend,
             }
         )
-        return {
-            "scope": "blast-radius",
-            "ready": False,
-            "components": {"comp-a": {"hit": False}},
-            "capabilities": {},
-            "not_ready_reasons": ["comp-a: provenance miss"],
-        }
+        return queue.pop(0)
 
-    monkeypatch.setattr(provenance_tracker, "check_readiness", fake_check_readiness)
+    monkeypatch.setattr(provenance_tracker, "check_readiness", fake)
+    return calls
 
-    rc = provenance_tracker.main(
+
+def _patch_last_requirement_failures(monkeypatch, responses):
+    calls = []
+    queue = list(responses)
+
+    def fake(component_id, repo_root):
+        calls.append({"component_id": component_id, "repo_root": repo_root})
+        return queue.pop(0)
+
+    monkeypatch.setattr(provenance_tracker, "last_requirement_failures", fake)
+    return calls
+
+
+def test_verify_not_ready_with_changed_ids_model_and_seed(monkeypatch, tmp_path, capsys):
+    repo_root = tmp_path
+
+    readiness_calls = _patch_check_readiness(
+        monkeypatch,
+        [
+            {
+                "scope": "blast-radius",
+                "ready": False,
+                "components": {"comp-a": {"hit": False}},
+                "capabilities": {},
+                "not_ready_reasons": ["comp-a: provenance miss"],
+            }
+        ],
+    )
+    feedback_calls = _patch_last_requirement_failures(monkeypatch, [])
+
+    exit_code = provenance_tracker.main(
         [
             "verify",
             "--changed",
@@ -35,108 +63,94 @@ def test_verify_not_ready_with_changed_passes_through_args(monkeypatch, capsys, 
             "--model=m",
             "--seed",
             "3",
-            f"--repo-root={tmp_path}",
+            f"--repo-root={repo_root}",
         ]
     )
 
     out = capsys.readouterr().out
 
-    assert rc == 1
+    assert exit_code == 1
     assert "not ready" in out
     assert "comp-a: provenance miss" in out
-    assert len(calls) == 1
-    assert calls[0]["changed_ids"] == ["comp-a", "comp-b"]
-    assert calls[0]["model"] == "m"
-    assert calls[0]["seed"] == 3
+    assert len(readiness_calls) == 1
+    assert readiness_calls[0]["changed_ids"] == ["comp-a", "comp-b"]
+    assert readiness_calls[0]["model"] == "m"
+    assert readiness_calls[0]["seed"] == 3
+    assert len(feedback_calls) == 0
 
 
-def test_verify_ready_json_with_no_changed(monkeypatch, capsys, tmp_path):
-    calls = []
+def test_verify_ready_json_no_changed_ids(monkeypatch, tmp_path, capsys):
+    repo_root = tmp_path
 
-    def fake_check_readiness(repo_root, changed_ids=None, model=None, seed=0, llm_backend=None):
-        calls.append({"changed_ids": changed_ids})
-        return {
-            "scope": "whole-corpus",
-            "ready": True,
-            "components": {},
-            "capabilities": {},
-            "not_ready_reasons": [],
-        }
+    readiness_calls = _patch_check_readiness(
+        monkeypatch,
+        [
+            {
+                "scope": "whole-corpus",
+                "ready": True,
+                "components": {},
+                "capabilities": {},
+                "not_ready_reasons": [],
+            }
+        ],
+    )
+    feedback_calls = _patch_last_requirement_failures(monkeypatch, [])
 
-    monkeypatch.setattr(provenance_tracker, "check_readiness", fake_check_readiness)
-
-    rc = provenance_tracker.main(
-        ["verify", "--format=json", "--repo-root", str(tmp_path)]
+    exit_code = provenance_tracker.main(
+        ["verify", "--format=json", "--repo-root", str(repo_root)]
     )
 
     out = capsys.readouterr().out
-    data = json.loads(out)
+    payload = json.loads(out)
 
-    assert rc == 0
-    ready = data.get("ready") if isinstance(data, dict) else getattr(data, "ready", None)
-    assert ready is True
-    assert len(calls) == 1
-    assert calls[0]["changed_ids"] in (None, [])
+    assert exit_code == 0
+    assert payload.get("ready") is True
+    assert len(readiness_calls) == 1
+    assert not readiness_calls[0]["changed_ids"]
+    assert len(feedback_calls) == 0
 
 
-def test_track_feedback_prints_failures_then_nothing(monkeypatch, capsys):
-    calls = []
-    results = [["R-A-001", "R-A-002"], []]
-
-    def fake_last_requirement_failures(component_id, repo_root):
-        calls.append({"component_id": component_id, "repo_root": repo_root})
-        return results.pop(0)
-
-    monkeypatch.setattr(
-        provenance_tracker, "last_requirement_failures", fake_last_requirement_failures
+def test_track_feedback_sequential_calls(monkeypatch, capsys):
+    feedback_calls = _patch_last_requirement_failures(
+        monkeypatch,
+        [
+            ["R-A-001", "R-A-002"],
+            [],
+        ],
     )
+    readiness_calls = _patch_check_readiness(monkeypatch, [])
 
-    rc1 = provenance_tracker.main(["track", "feedback", "comp-a"])
-    out1 = capsys.readouterr().out
-    assert rc1 == 0
-    assert out1.strip() == "R-A-001,R-A-002"
+    exit_code_1 = provenance_tracker.main(["track", "feedback", "comp-a"])
+    out_1 = capsys.readouterr().out
 
-    rc2 = provenance_tracker.main(["track", "feedback", "comp-a"])
-    out2 = capsys.readouterr().out
-    assert rc2 == 0
-    assert out2.strip() == ""
+    exit_code_2 = provenance_tracker.main(["track", "feedback", "comp-a"])
+    out_2 = capsys.readouterr().out
 
-    assert len(calls) == 2
-    assert calls[0]["component_id"] == "comp-a"
-    assert calls[1]["component_id"] == "comp-a"
+    assert exit_code_1 == 0
+    assert out_1.strip() == "R-A-001,R-A-002"
+    assert exit_code_2 == 0
+    assert out_2.strip() == ""
+    assert len(feedback_calls) == 2
+    assert len(readiness_calls) == 0
 
 
-def test_usage_errors_return_2_and_never_call_fakes(monkeypatch, capsys):
-    check_calls = []
-    feedback_calls = []
-
-    def fake_check_readiness(*args, **kwargs):
-        check_calls.append((args, kwargs))
-        return {"ready": True, "not_ready_reasons": []}
-
-    def fake_last_requirement_failures(*args, **kwargs):
-        feedback_calls.append((args, kwargs))
-        return []
-
-    monkeypatch.setattr(provenance_tracker, "check_readiness", fake_check_readiness)
-    monkeypatch.setattr(
-        provenance_tracker, "last_requirement_failures", fake_last_requirement_failures
-    )
-
-    bad_argvs = [
+@pytest.mark.parametrize(
+    "argv",
+    [
         ["verify", "--seed=x"],
         ["verify", "--format=bogus"],
         ["verify", "--bogus"],
         ["verify", "--model"],
         ["track", "feedback"],
         ["build"],
-    ]
+    ],
+)
+def test_usage_errors_never_call_fakes(monkeypatch, argv):
+    readiness_calls = _patch_check_readiness(monkeypatch, [])
+    feedback_calls = _patch_last_requirement_failures(monkeypatch, [])
 
-    for argv in bad_argvs:
-        rc = provenance_tracker.main(argv)
-        assert rc == 2, f"expected exit code 2 for {argv!r}, got {rc!r}"
+    exit_code = provenance_tracker.main(argv)
 
-    capsys.readouterr()
-
-    assert check_calls == []
-    assert feedback_calls == []
+    assert exit_code == 2
+    assert len(readiness_calls) == 0
+    assert len(feedback_calls) == 0

@@ -1,5 +1,3 @@
-import json
-
 import pytest
 
 import provenance_tracker
@@ -11,29 +9,12 @@ def _get(obj, key, default=None):
     return getattr(obj, key, default)
 
 
-def _write(path, content):
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(content)
-
-
-_PROVENANCE_CHECKER_TEMPLATE = '''
-import json
-
-LOG_PATH = __LOG_PATH__
-
-
-def _log(event):
-    with open(LOG_PATH, "a") as f:
-        f.write(json.dumps(event) + "\\n")
-
-
+_PROVENANCE_CHECKER_MODULE = '''
 def current_sealed_key(component_id, repo_root):
-    _log({"fn": "current_sealed_key", "component_id": component_id})
     return None
 
 
 def current_provenance_key(component_id, repo_root):
-    _log({"fn": "current_provenance_key", "component_id": component_id})
     return {
         "spec_bundle_hash": "sha256:" + "0" * 64,
         "gate_versions": {
@@ -47,7 +28,6 @@ def current_provenance_key(component_id, repo_root):
 
 
 def check_provenance(component_id, spec_bundle_hash, gate_versions, repo_root):
-    _log({"fn": "check_provenance", "component_id": component_id})
     return {
         "hit": True,
         "verification_report": {
@@ -69,7 +49,7 @@ def check_provenance(component_id, spec_bundle_hash, gate_versions, repo_root):
             "matches": [],
             "notified": False,
             "notification_delivery_error": None,
-            "cache_hit": False,
+            "cache_hit": True,
         },
         "secret_scan": {
             "scope": "full",
@@ -80,58 +60,41 @@ def check_provenance(component_id, spec_bundle_hash, gate_versions, repo_root):
             "unused_allowlist_entries": [],
             "notified": False,
             "notification_delivery_error": None,
-            "cache_hit": False,
+            "cache_hit": True,
         },
     }
 
 
 def check_sealed_provenance(component_id, repo_root):
-    _log({"fn": "check_sealed_provenance", "component_id": component_id})
-    return {
-        "hit": True,
-        "sealed": True,
-        "reason": None,
-        "verification_report": {"overall": "pass"},
-        "license_scan": None,
-        "secret_scan": None,
-        "owners": ["pipeline-team"],
-        "source_hash": "sha256:" + "0" * 64,
-        "written_at": "2026-01-01T00:00:00Z",
-    }
+    raise AssertionError(
+        "check_sealed_provenance must not be called when current_sealed_key returns None"
+    )
 '''
 
 
 _CAPABILITY_VERIFIER_TEMPLATE = '''
-import json
-
-LOG_PATH = __LOG_PATH__
-
-
-def _log(event):
-    with open(LOG_PATH, "a") as f:
-        f.write(json.dumps(event) + "\\n")
+_OUTCOMES = __OUTCOMES__
+_CHECK_LOG = __CHECK_LOG__
+_GATES_LOG = __GATES_LOG__
 
 
 def check_capability_provenance(capability_id, repo_root):
-    _log({"fn": "check_capability_provenance", "capability_id": capability_id})
+    with open(_CHECK_LOG, "a", encoding="utf-8") as f:
+        f.write(capability_id + "\\n")
     return {"hit": False, "capability_scenario_report": None}
 
 
 def run_capability_gates(capability_id, repo_root, model=None, seed=0, llm_backend=None):
-    _log({
-        "fn": "run_capability_gates",
-        "capability_id": capability_id,
-        "model": model,
-        "seed": seed,
-    })
-    overall = __OVERALL__
+    with open(_GATES_LOG, "a", encoding="utf-8") as f:
+        f.write(capability_id + "\\n")
+    overall = _OUTCOMES[capability_id]
     return {
         "hit": False,
         "capability_scenario_report": {
             capability_id: {
                 "overall": overall,
                 "scenarios": [
-                    {"id": "CS-FOO-001", "kind": "generated-test", "result": overall},
+                    {"id": capability_id + "-001", "kind": "generated-test", "result": overall}
                 ],
             }
         },
@@ -139,128 +102,132 @@ def run_capability_gates(capability_id, repo_root, model=None, seed=0, llm_backe
 '''
 
 
-_COMPONENT_MD = """---
-id: comp-foo
-title: Foo Component
-status: draft
-owners: [team-foo]
-sealed: false
-realizes: [P-FOO]
----
-
-# Foo Component
-
-A fixture component that realizes P-FOO.
-"""
+def _write_provenance_checker(repo_root):
+    mod_dir = repo_root / "gen" / "provenance-checker"
+    mod_dir.mkdir(parents=True, exist_ok=True)
+    (mod_dir / "provenance_checker.py").write_text(_PROVENANCE_CHECKER_MODULE)
 
 
-_CAPABILITY_MD = """---
-id: P-FOO
-title: Foo Capability
-status: draft
-owners: [team-foo]
----
-
-# Foo Capability
-
-### CS-FOO-001
-
-Covers: P-FOO
-Kind: generated-test
-
-```gherkin
-Given a foo
-When it is tested
-Then it passes
-```
-"""
+def _write_capability_verifier(repo_root, outcomes, check_log, gates_log):
+    mod_dir = repo_root / "gen" / "capability-scenario-verifier"
+    mod_dir.mkdir(parents=True, exist_ok=True)
+    content = (
+        _CAPABILITY_VERIFIER_TEMPLATE.replace("__OUTCOMES__", repr(outcomes))
+        .replace("__CHECK_LOG__", repr(str(check_log)))
+        .replace("__GATES_LOG__", repr(str(gates_log)))
+    )
+    (mod_dir / "capability_scenario_verifier.py").write_text(content)
 
 
-def _build_repo(tmp_path, log_path, overall):
+def _write_component(repo_root, slug, comp_id, realizes_id):
+    comp_dir = repo_root / "specs" / "components" / slug
+    comp_dir.mkdir(parents=True, exist_ok=True)
+    (comp_dir / "component.md").write_text(
+        "---\n"
+        f"id: {comp_id}\n"
+        f"title: {slug.capitalize()}\n"
+        "status: ratified\n"
+        "owners: [alice]\n"
+        "last_ratified_commit: 0000000\n"
+        "sealed: false\n"
+        f"realizes: [{realizes_id}]\n"
+        "---\n\n"
+        f"{slug.capitalize()} component.\n"
+    )
+
+
+def _write_capability_spec(repo_root, name, cap_id, cs_id):
+    prod_dir = repo_root / "specs" / "product"
+    prod_dir.mkdir(parents=True, exist_ok=True)
+    (prod_dir / f"{name}.md").write_text(
+        "---\n"
+        f"id: {cap_id}\n"
+        f"title: {name.capitalize()} Capability\n"
+        "status: ratified\n"
+        "owners: [alice]\n"
+        "last_ratified_commit: 0000000\n"
+        "---\n\n"
+        f"### {cs_id}\n\n"
+        f"Covers: {cap_id}\n"
+        "Kind: generated-test\n\n"
+        "```gherkin\n"
+        f"Given {name}\n"
+        f"When {name} runs\n"
+        f"Then {name} passes\n"
+        "```\n"
+    )
+
+
+def _build_two_capability_repo(tmp_path):
     repo_root = tmp_path / "repo"
-    _write(repo_root / "specs" / "components" / "foo" / "component.md", _COMPONENT_MD)
-    _write(repo_root / "specs" / "product" / "p-foo.md", _CAPABILITY_MD)
-
-    provenance_checker_src = _PROVENANCE_CHECKER_TEMPLATE.replace(
-        "__LOG_PATH__", json.dumps(str(log_path))
-    )
-    _write(
-        repo_root / "gen" / "provenance-checker" / "provenance_checker.py",
-        provenance_checker_src,
-    )
-
-    capability_verifier_src = _CAPABILITY_VERIFIER_TEMPLATE.replace(
-        "__LOG_PATH__", json.dumps(str(log_path))
-    ).replace("__OVERALL__", json.dumps(overall))
-    _write(
-        repo_root
-        / "gen"
-        / "capability-scenario-verifier"
-        / "capability_scenario_verifier.py",
-        capability_verifier_src,
-    )
+    _write_component(repo_root, "alpha", "comp-alpha", "P-ALPHA")
+    _write_component(repo_root, "beta", "comp-beta", "P-BETA")
+    _write_capability_spec(repo_root, "p-alpha", "P-ALPHA", "CS-ALPHA-001")
+    _write_capability_spec(repo_root, "p-beta", "P-BETA", "CS-BETA-001")
+    _write_provenance_checker(repo_root)
     return repo_root
 
 
-def _read_log(log_path):
-    if not log_path.exists():
-        return []
-    return [json.loads(line) for line in log_path.read_text().splitlines() if line.strip()]
+def _build_single_capability_repo(tmp_path):
+    repo_root = tmp_path / "repo"
+    _write_component(repo_root, "alpha", "comp-alpha", "P-ALPHA")
+    _write_capability_spec(repo_root, "p-alpha", "P-ALPHA", "CS-ALPHA-001")
+    _write_provenance_checker(repo_root)
+    return repo_root
 
 
-def test_all_components_and_capabilities_passing_means_ready(tmp_path):
-    log_path = tmp_path / "log.jsonl"
-    repo_root = _build_repo(tmp_path, log_path, overall="pass")
-
-    report = provenance_tracker.check_readiness(
-        repo_root, changed_ids=None, model="claude-sonnet-5", seed=0, llm_backend=None,
+def test_all_components_and_capabilities_pass(tmp_path):
+    repo_root = _build_two_capability_repo(tmp_path)
+    check_log = tmp_path / "check.log"
+    gates_log = tmp_path / "gates.log"
+    _write_capability_verifier(
+        repo_root,
+        {"P-ALPHA": "pass", "P-BETA": "pass"},
+        check_log,
+        gates_log,
     )
+
+    report = provenance_tracker.check_readiness(repo_root, model="test-model")
 
     assert _get(report, "ready") is True
     assert list(_get(report, "not_ready_reasons")) == []
 
-    components = _get(report, "components")
-    foo_result = components["comp-foo"]
-    assert _get(foo_result, "hit") is True
-    assert _get(_get(foo_result, "verification_report"), "overall") == "pass"
-
-    events = _read_log(log_path)
-    assert any(e["fn"] == "check_provenance" and e["component_id"] == "comp-foo" for e in events)
-    assert any(e["fn"] == "check_capability_provenance" and e["capability_id"] == "P-FOO" for e in events)
-    gate_events = [e for e in events if e["fn"] == "run_capability_gates"]
-    assert len(gate_events) == 1
-    assert gate_events[0]["capability_id"] == "P-FOO"
-    assert gate_events[0]["model"] == "claude-sonnet-5"
-    assert gate_events[0]["seed"] == 0
+    gates_called = gates_log.read_text().splitlines() if gates_log.exists() else []
+    assert sorted(gates_called) == ["P-ALPHA", "P-BETA"]
 
 
-def test_failing_capability_makes_not_ready_despite_passing_components(tmp_path):
-    log_path = tmp_path / "log.jsonl"
-    repo_root = _build_repo(tmp_path, log_path, overall="fail")
-
-    report = provenance_tracker.check_readiness(
-        repo_root, changed_ids=None, model="claude-sonnet-5", seed=0, llm_backend=None,
+def test_one_failing_capability_gate_makes_not_ready_despite_passing_components(tmp_path):
+    repo_root = _build_two_capability_repo(tmp_path)
+    check_log = tmp_path / "check.log"
+    gates_log = tmp_path / "gates.log"
+    _write_capability_verifier(
+        repo_root,
+        {"P-ALPHA": "pass", "P-BETA": "fail"},
+        check_log,
+        gates_log,
     )
+
+    report = provenance_tracker.check_readiness(repo_root, model="test-model")
 
     assert _get(report, "ready") is False
     reasons = list(_get(report, "not_ready_reasons"))
-    assert any("P-FOO" in reason for reason in reasons)
+    assert any("P-BETA" in reason for reason in reasons)
 
     components = _get(report, "components")
-    for result in components.values():
-        verification_report = _get(result, "verification_report")
-        assert _get(verification_report, "overall") == "pass"
+    for comp_id in ("comp-alpha", "comp-beta"):
+        comp_result = _get(components, comp_id)
+        assert _get(comp_result, "hit") is True
 
 
 def test_capability_miss_with_no_model_raises_without_running_gates(tmp_path):
-    log_path = tmp_path / "log.jsonl"
-    repo_root = _build_repo(tmp_path, log_path, overall="pass")
+    repo_root = _build_single_capability_repo(tmp_path)
+    check_log = tmp_path / "check.log"
+    gates_log = tmp_path / "gates.log"
+    _write_capability_verifier(repo_root, {}, check_log, gates_log)
 
     with pytest.raises(ValueError):
-        provenance_tracker.check_readiness(
-            repo_root, changed_ids=None, model=None, seed=0, llm_backend=None,
-        )
+        provenance_tracker.check_readiness(repo_root, model=None)
 
-    events = _read_log(log_path)
-    assert any(e["fn"] == "check_capability_provenance" and e["capability_id"] == "P-FOO" for e in events)
-    assert not any(e["fn"] == "run_capability_gates" for e in events)
+    assert check_log.exists()
+    assert "P-ALPHA" in check_log.read_text().splitlines()
+    assert not gates_log.exists() or gates_log.read_text() == ""

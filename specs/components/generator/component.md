@@ -80,21 +80,8 @@ See `constraints.md`.
 
 ## Change log
 
-- Initial draft; first real hand-authored bootstrap implementation
-  (`repo_root`/`llm_backend` params).
-- `D35`: gained `_as_dict()`.
-- `D37`: `R-GEN-013`, `dependency_usage` added. `PROMPT_VERSION` → `v2`.
-- `D38`/`D39`: per-call nonce; cache only non-empty results.
-  `PROMPT_VERSION` → `v3`, `GATE_VERSION` → `generator@1.1.0`.
-- `D41`: `R-GEN-014`, `sys.modules` registration before `exec`.
-  `PROMPT_VERSION` → `v4`.
-- `D42`: fourth retry passed every testable `AC-GEN-*` criterion —
-  first successful self-hosted regeneration; swapped in.
-- `D46`: `R-GEN-015`, flat-module-or-package output required.
-  `PROMPT_VERSION` → `v5`.
-- `D64`: `R-GEN-016` — `hint` mode no longer writes `gen/`/cache.
-- `D91`: retired this component's own CLI in favor of
-  `component-gate-runner`'s `hotdocs generate`.
+- `D35`–`D91`: early history (nonce, caching, `sys.modules`, output
+  layout, `hint` mode, CLI retired); see the decisions.
 - `D138`/`D139`/`D159`: `R-GEN-018`/`019` — `repo_root`-relative
   dependency loading (a sealed one at its `source_path`) and
   dual-access on a dependency's top-level return. `v8`,
@@ -103,3 +90,4 @@ See `constraints.md`.
   (`R-GEN-015`); `GATE_VERSION` → `generator@1.6.0`.
 - `D167`: `spec_bundle_hash` on every result; `hint` mode never
   writes. `generator@1.7.0`.
+- `D199`: dependencies fall back to the tool root. `v9`.

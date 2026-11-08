@@ -1,49 +1,89 @@
+import os
+import shutil
+import tempfile
 import textwrap
-import urllib.request
+from pathlib import Path
 
 import secret_scanner
 
 
-def _get(obj, key, default=None):
-    if isinstance(obj, dict):
-        return obj.get(key, default)
-    return getattr(obj, key, default)
-
-
-def test_clean_scan_notified_false(tmp_path, monkeypatch):
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-
-    (repo_root / "README.md").write_text(
-        "This is a plain readme with no secrets in it.\n",
-        encoding="utf-8",
-    )
-    (repo_root / "app.py").write_text(
+def _write_fake_cache_manager(gen_dir: Path) -> None:
+    cache_manager_dir = gen_dir / "cache-manager"
+    cache_manager_dir.mkdir(parents=True, exist_ok=True)
+    module_path = cache_manager_dir / "cache_manager.py"
+    module_path.write_text(
         textwrap.dedent(
             """
-            def greet(name):
-                return "hello " + name
+            from dataclasses import dataclass
+            from typing import Any
+
+
+            @dataclass
+            class CacheKey:
+                spec_bundle_hash: str
+                gate_inputs_hash: str
+                gate_version: str
+                model_pin: str
+
+
+            @dataclass
+            class CachedResult:
+                gate_type: str
+                payload: Any
+                stored_at: str
+
+
+            class Miss:
+                pass
+
+
+            def get(cache_key, *, repo_root=None):
+                return Miss()
+
+
+            def put(cache_key, result, *, repo_root=None):
+                return None
             """
-        ),
-        encoding="utf-8",
+        )
     )
 
-    # Configure the webhook so a false "notified" result is proven to come
-    # from the absence of any match, not from the webhook being unconfigured.
-    monkeypatch.setenv("VAR_COMPLIANCE_WEBHOOK_URL", "https://example.invalid/webhook")
 
-    call_log = tmp_path / "urlopen_calls.log"
+def _field(value, name):
+    return value.get(name) if isinstance(value, dict) else getattr(value, name, None)
 
-    def fake_urlopen(*args, **kwargs):
-        with open(call_log, "a", encoding="utf-8") as f:
-            f.write("called\n")
-        raise AssertionError("urlopen should not be called for a clean scan")
 
-    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+def test_clean_scan_has_notified_false():
+    repo_root = Path(tempfile.mkdtemp(prefix="secscan_repo_"))
+    saved_webhook_var = os.environ.get("VAR_COMPLIANCE_WEBHOOK_URL")
+    try:
+        if "VAR_COMPLIANCE_WEBHOOK_URL" in os.environ:
+            del os.environ["VAR_COMPLIANCE_WEBHOOK_URL"]
 
-    result = secret_scanner.scan(repo_root)
+        gen_dir = repo_root / "gen"
+        _write_fake_cache_manager(gen_dir)
 
-    assert _get(result, "matches") == []
-    assert _get(result, "flagged") is False
-    assert _get(result, "notified") is False
-    assert not call_log.exists()
+        (repo_root / "README.md").write_text(
+            "This project documentation contains no secrets at all.\n"
+        )
+        (repo_root / "notes.txt").write_text(
+            "Just a plain text file with ordinary, unremarkable words.\n"
+        )
+
+        result = secret_scanner.scan(repo_root)
+
+        matches = _field(result, "matches")
+        flagged = _field(result, "flagged")
+        notified = _field(result, "notified")
+        notification_delivery_error = _field(result, "notification_delivery_error")
+
+        assert matches is not None
+        assert len(matches) == 0
+        assert flagged is False
+        assert notified is False
+        assert notification_delivery_error is None
+    finally:
+        if saved_webhook_var is None:
+            os.environ.pop("VAR_COMPLIANCE_WEBHOOK_URL", None)
+        else:
+            os.environ["VAR_COMPLIANCE_WEBHOOK_URL"] = saved_webhook_var
+        shutil.rmtree(repo_root, ignore_errors=True)

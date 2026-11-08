@@ -537,3 +537,13 @@ def test_ac_author_026_empty_module_names_falls_back_to_the_slug(repo_root):
     author_test(fake_bundle(component_id="comp-semver", module_names=[]), "claude-sonnet-5",
                 repo_root=repo_root, llm_backend=backend)
     assert "import semver" in backend.calls[0][0]
+
+
+def test_d199_dependencies_fall_back_to_the_tool_root(tmp_path, monkeypatch):
+    """D199 -- a project holds only its own components; with no gen/ under
+    repo_root, cache-manager and llm-endpoint come from the tool's own gen/."""
+    monkeypatch.delenv("VAR_CACHE_STORE_URL", raising=False)
+    backend = MockBackend([file_block("def test_x(): pass")])
+    result = author_test(fake_bundle(), "claude-sonnet-5", repo_root=tmp_path, llm_backend=backend)
+    assert _rf(result, "model_call_error") is None
+    assert _rf(result, "file") is not None

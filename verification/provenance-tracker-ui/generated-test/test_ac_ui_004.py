@@ -1,81 +1,86 @@
 import json
+import os
+import textwrap
 from pathlib import Path
+
+import pytest
 
 import provenance_tracker_ui
 
 
-FAKE_PROVENANCE_TRACKER_SOURCE = '''
-def check_readiness(repo_root, changed_ids=None, model=None, seed=0, llm_backend=None):
-    return {
-        "scope": "whole-corpus",
-        "ready": False,
-        "components": {
-            "comp-foo": {
-                "hit": True,
-                "verification_report": {
-                    "component_id": "comp-foo",
-                    "criteria": [],
-                    "requirement_results": {},
-                    "interface_drift": False,
-                    "mutation_score": 1.0,
-                    "overall": "pass",
+FAKE_PROVENANCE_TRACKER_SOURCE = textwrap.dedent(
+    """
+    def check_readiness(repo_root, changed_ids=None, model=None, seed=0, llm_backend=None):
+        return {
+            "scope": "whole-corpus" if changed_ids is None else "blast-radius",
+            "ready": False,
+            "components": {
+                "comp-foo": {
+                    "hit": True,
+                    "verification_report": {
+                        "component_id": "comp-foo",
+                        "criteria": [],
+                        "requirement_results": {},
+                        "interface_drift": False,
+                        "mutation_score": 1.0,
+                        "overall": "pass",
+                    },
+                    "license_scan": {"blocked": False},
+                    "secret_scan": {"flagged": False},
                 },
-                "license_scan": {"blocked": False},
-                "secret_scan": {"flagged": False},
+                "comp-bar": {
+                    "hit": False,
+                    "verification_report": None,
+                    "license_scan": None,
+                    "secret_scan": None,
+                },
             },
-            "comp-bar": {
-                "hit": False,
-                "verification_report": None,
-                "license_scan": None,
-                "secret_scan": None,
+            "capabilities": {
+                "P-ZERO-EDIT": {
+                    "hit": True,
+                    "capability_scenario_report": {
+                        "P-ZERO-EDIT": {"overall": "pass", "scenarios": []}
+                    },
+                },
             },
-        },
-        "capabilities": {
-            "P-ZERO-EDIT": {
-                "hit": True,
-                "capability_scenario_report": {"overall": "pass"},
-            },
-        },
-        "not_ready_reasons": ["comp-bar: missing provenance"],
-    }
+            "not_ready_reasons": ["comp-bar: no provenance for current spec state"],
+        }
 
 
-def last_requirement_failures(component_id, repo_root):
-    return []
-'''
+    def last_requirement_failures(component_id, repo_root):
+        return []
+    """
+)
 
 
-def _get(obj, key, default=None):
+def _field(obj, name):
     if isinstance(obj, dict):
-        return obj.get(key, default)
-    return getattr(obj, key, default)
+        return obj.get(name)
+    return getattr(obj, name, None)
 
 
-def _snapshot_tree(*roots):
-    state = {}
-    for root in roots:
-        root = Path(root)
-        if not root.exists():
-            continue
-        for path in root.rglob("*"):
-            if path.is_dir():
-                continue
-            if "__pycache__" in path.parts:
-                continue
-            resolved = str(path.resolve())
-            stat = path.stat()
-            state[resolved] = (stat.st_size, stat.st_mtime_ns)
-    return state
+def _snapshot_tree(root: Path):
+    snap = {}
+    if not root.exists():
+        return snap
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = [d for d in dirnames if d != "__pycache__"]
+        for filename in filenames:
+            p = Path(dirpath) / filename
+            snap[p] = (p.stat().st_size, p.read_bytes())
+    return snap
 
 
-def test_tracker_ui_edges_filtered_and_only_index_html_written(tmp_path):
+def test_ac_ui_004_edges_and_single_write(tmp_path):
     repo_root = tmp_path / "repo"
-    out_dir = tmp_path / "out"
     repo_root.mkdir()
-    out_dir.mkdir()
+
+    gen_dir = repo_root / "gen" / "provenance-tracker"
+    gen_dir.mkdir(parents=True)
+    (gen_dir / "provenance_tracker.py").write_text(FAKE_PROVENANCE_TRACKER_SOURCE)
 
     verification_dir = repo_root / "verification"
-    verification_dir.mkdir()
+    verification_dir.mkdir(parents=True)
     corpus_graph = {
         "nodes": {
             "comp-foo": {
@@ -83,7 +88,7 @@ def test_tracker_ui_edges_filtered_and_only_index_html_written(tmp_path):
                 "verification": None,
                 "provenance": None,
                 "size_status": "ok",
-                "sealed": True,
+                "sealed": False,
                 "pinned_overrides": [],
             },
             "comp-bar": {
@@ -91,7 +96,7 @@ def test_tracker_ui_edges_filtered_and_only_index_html_written(tmp_path):
                 "verification": None,
                 "provenance": None,
                 "size_status": "ok",
-                "sealed": True,
+                "sealed": False,
                 "pinned_overrides": [],
             },
             "P-ZERO-EDIT": {"type": "capability"},
@@ -110,34 +115,37 @@ def test_tracker_ui_edges_filtered_and_only_index_html_written(tmp_path):
     }
     (verification_dir / "corpus-graph.json").write_text(json.dumps(corpus_graph))
 
-    tracker_dir = repo_root / "gen" / "provenance-tracker"
-    tracker_dir.mkdir(parents=True)
-    (tracker_dir / "provenance_tracker.py").write_text(FAKE_PROVENANCE_TRACKER_SOURCE)
+    out_dir = repo_root / ".hotdocs" / "ui"
 
-    before = _snapshot_tree(repo_root, out_dir)
+    before = _snapshot_tree(repo_root)
 
-    snapshot = provenance_tracker_ui.render_tracker_ui(out_dir=out_dir, repo_root=repo_root)
+    snapshot = provenance_tracker_ui.render_tracker_ui(
+        out_dir=out_dir, repo_root=repo_root
+    )
 
-    after = _snapshot_tree(repo_root, out_dir)
+    after = _snapshot_tree(repo_root)
 
-    edges = _get(snapshot, "edges")
+    edges = _field(snapshot, "edges")
+    assert edges is not None
     edge_tuples = {
-        (_get(edge, "from"), _get(edge, "to"), _get(edge, "kind"))
-        for edge in edges
+        (_field(e, "from"), _field(e, "to"), _field(e, "kind")) for e in edges
     }
-    expected_edges = {
+
+    assert edge_tuples == {
         ("comp-foo", "comp-bar", "depends_on"),
         ("comp-foo", "P-ZERO-EDIT", "realizes"),
     }
-    assert edge_tuples == expected_edges
     assert ("comp-foo", "VAR-FOO-URL", "uses_var") not in edge_tuples
 
-    index_html = out_dir / "index.html"
-    added = set(after) - set(before)
-    removed = set(before) - set(after)
-    changed = {p for p in (set(after) & set(before)) if after[p] != before[p]}
-    all_diffs = added | removed | changed
+    before_paths = set(before)
+    after_paths = set(after)
 
-    assert all_diffs == {str(index_html.resolve())}
-    assert index_html.is_file()
-    assert index_html.stat().st_size > 0
+    removed = before_paths - after_paths
+    added = after_paths - before_paths
+    changed = {
+        p for p in (before_paths & after_paths) if before[p] != after[p]
+    }
+
+    assert removed == set()
+    assert changed == set()
+    assert added == {out_dir / "index.html"}

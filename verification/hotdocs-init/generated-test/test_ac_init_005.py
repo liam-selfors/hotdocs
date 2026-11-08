@@ -5,238 +5,305 @@ from pathlib import Path
 import hotdocs_init
 
 
-def _make_tool_root(root: Path) -> Path:
-    (root / "gen").mkdir(parents=True, exist_ok=True)
-    (root / "pipeline" / "criterion-compiler").mkdir(parents=True, exist_ok=True)
-    (root / "pipeline" / "criterion-compiler" / "criterion_compiler.py").write_text(
-        "def compile(*a, **kw):\n    return None\n"
-    )
-    (root / "examples" / "slugify" / "specs" / "product").mkdir(parents=True, exist_ok=True)
-    (root / "examples" / "slugify" / "specs" / "product" / "slugs.md").write_text("# slugs\n")
-    version = importlib.metadata.version("pytest")
-    (root / "requirements.txt").write_text(f"pytest=={version}\n")
-    return root
+FAKE_LLM_ENDPOINT_SOURCE = '''
+import json
+import os
+
+PROVIDERS = {
+    "openai": {
+        "default_base_url": None,
+        "default_api_key_env": "OPENAI_API_KEY",
+        "needs_base_url": False,
+        "suggested_model": "m",
+    },
+}
 
 
-def _write_fake_llm_endpoint(tool_root, log_path, check_connection_mode, save_config_mode, detect_result=None):
-    mod_dir = tool_root / "gen" / "llm-endpoint"
-    mod_dir.mkdir(parents=True, exist_ok=True)
+def _control():
+    with open(os.environ["HOTDOCS_TEST_CONTROL"]) as f:
+        return json.load(f)
 
-    cc_bodies = {
-        "ok": "return {'ok': True, 'error': None}",
-        "auth_fail": "return {'ok': False, 'error': {'category': 'auth', 'message': 'bad'}}",
-        "raise_invalid": "raise ValueError('no base_url')",
+
+def _log(entry):
+    with open(os.environ["HOTDOCS_TEST_LOG"], "a") as f:
+        f.write(json.dumps(entry) + "\\n")
+
+
+def detect_providers(env=None, probe_ollama=True):
+    _log({"call": "detect_providers"})
+    return [
+        {
+            "provider": "openai",
+            "available": True,
+            "reason": "ok",
+            "suggested_model": "m",
+            "api_key_env": "MY_KEY",
+        }
+    ]
+
+
+def check_connection(provider, model, base_url=None, api_key_env=None, timeout_seconds=30):
+    _log({
+        "call": "check_connection",
+        "provider": provider,
+        "model": model,
+        "base_url": base_url,
+        "api_key_env": api_key_env,
+        "timeout_seconds": timeout_seconds,
+    })
+    c = _control()["check_connection"]
+    if "raise" in c:
+        raise ValueError(c["raise"])
+    return {"ok": c["ok"], "error": c.get("error")}
+
+
+def save_config(config_path, provider, model, *args, **kwargs):
+    if args:
+        raise TypeError("save_config takes no extra positional args")
+    entry = {
+        "call": "save_config",
+        "config_path": str(config_path),
+        "provider": provider,
+        "model": model,
+        "kwargs": sorted(kwargs.keys()),
+        "values": dict(kwargs),
     }
-    sc_bodies = {
-        "ok": "return None",
-        "raise": "raise ValueError('nope')",
-    }
-    detect_result = detect_result if detect_result is not None else []
+    _log(entry)
+    c = _control()["save_config"]
+    if "raise" in c:
+        raise ValueError(c["raise"])
+    return None
 
-    source = (
-        "import json\n"
-        "\n"
-        f"LOG_PATH = {str(log_path)!r}\n"
-        "\n"
-        "def _log(name, args, kwargs):\n"
-        "    with open(LOG_PATH, 'a') as f:\n"
-        "        f.write(json.dumps({'call': name, 'args': [str(a) for a in args],"
-        " 'kwargs': {k: str(v) for k, v in kwargs.items()}}) + '\\n')\n"
-        "\n"
-        "PROVIDERS = {\n"
-        "    'openai': {'default_base_url': None, 'default_api_key_env': 'OPENAI_API_KEY',"
-        " 'needs_base_url': False, 'suggested_model': 'gpt-4o-mini'},\n"
-        "    'openai-compatible': {'default_base_url': None, 'default_api_key_env': None,"
-        " 'needs_base_url': True, 'suggested_model': ''},\n"
-        "}\n"
-        "\n"
-        "def detect_providers(env=None, probe_ollama=True):\n"
-        "    _log('detect_providers', (), {'probe_ollama': probe_ollama})\n"
-        f"    return {detect_result!r}\n"
-        "\n"
-        "def check_connection(*args, **kwargs):\n"
-        "    _log('check_connection', args, kwargs)\n"
-        f"    {cc_bodies[check_connection_mode]}\n"
-        "\n"
-        "def save_config(*args, **kwargs):\n"
-        "    _log('save_config', args, kwargs)\n"
-        f"    {sc_bodies[save_config_mode]}\n"
-        "\n"
-        "def load_config(config_path=None):\n"
-        "    _log('load_config', (), {'config_path': str(config_path)})\n"
-        "    return None\n"
+
+def load_config(config_path=None):
+    return None
+'''
+
+
+def _no_input(prompt):
+    raise AssertionError(f"unexpected prompt: {prompt!r}")
+
+
+def make_tool_root(path):
+    path.mkdir(parents=True, exist_ok=True)
+
+    gen_dir = path / "gen" / "llm-endpoint"
+    gen_dir.mkdir(parents=True, exist_ok=True)
+    (gen_dir / "llm_endpoint.py").write_text(FAKE_LLM_ENDPOINT_SOURCE)
+
+    slugify_dir = path / "examples" / "slugify" / "specs" / "product"
+    slugify_dir.mkdir(parents=True, exist_ok=True)
+    (slugify_dir / "slugs.md").write_text("# slugs\n\nFixture content.\n")
+
+    pytest_version = importlib.metadata.version("pytest")
+    (path / "requirements.txt").write_text(f"pytest=={pytest_version}")
+
+    return path
+
+
+def _write_control(path, check_connection_behavior, save_config_behavior):
+    path.write_text(json.dumps({
+        "check_connection": check_connection_behavior,
+        "save_config": save_config_behavior,
+    }))
+
+
+def test_ac_init_005_success_prints_ok_and_saves_without_unset_keywords(tmp_path, monkeypatch):
+    harness = tmp_path / "harness"
+    harness.mkdir()
+    log_path = harness / "log.jsonl"
+    log_path.write_text("")
+    control_path = harness / "control.json"
+    _write_control(control_path, {"ok": True, "error": None}, {"ok": True})
+
+    tool_root = make_tool_root(tmp_path / "tool_root")
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+
+    monkeypatch.setenv("HOTDOCS_TEST_CONTROL", str(control_path))
+    monkeypatch.setenv("HOTDOCS_TEST_LOG", str(log_path))
+
+    outputs = []
+    hotdocs_init.main(
+        ["--provider", "openai", "--model", "m", "--api-key-env", "MY_KEY"],
+        tool_root=str(tool_root),
+        input_fn=_no_input,
+        output_fn=outputs.append,
+        env={},
+        cwd=str(project_dir),
     )
-    (mod_dir / "llm_endpoint.py").write_text(source)
+
+    assert any("connection ok" in line for line in outputs)
+
+    entries = [json.loads(l) for l in log_path.read_text().splitlines() if l.strip()]
+    save_entries = [e for e in entries if e["call"] == "save_config"]
+    assert len(save_entries) == 1
+    save = save_entries[0]
+    assert Path(save["config_path"]) == project_dir / "hotdocs.toml"
+    assert save["provider"] == "openai"
+    assert save["model"] == "m"
+    assert save["kwargs"] == ["api_key_env"]
+    assert save["values"]["api_key_env"] == "MY_KEY"
 
 
-def _read_log(log_path: Path):
-    if not log_path.exists():
-        return []
-    return [json.loads(line) for line in log_path.read_text().splitlines() if line.strip()]
+def test_ac_init_005_interactive_failure_save_anyway_prompt(tmp_path, monkeypatch):
+    harness = tmp_path / "harness"
+    harness.mkdir()
 
+    log1 = harness / "log1.jsonl"
+    log1.write_text("")
+    control1 = harness / "control1.json"
+    _write_control(control1, {"ok": False, "error": {"category": "auth", "message": "bad"}}, {"ok": True})
 
-def _make_input_fn(log, save_answer):
-    def input_fn(prompt):
-        log.append(prompt)
+    tool_root1 = make_tool_root(tmp_path / "tool_root1")
+    project1 = tmp_path / "project1"
+    project1.mkdir()
+
+    monkeypatch.setenv("HOTDOCS_TEST_CONTROL", str(control1))
+    monkeypatch.setenv("HOTDOCS_TEST_LOG", str(log1))
+
+    outputs1 = []
+
+    def input_fn_1(prompt):
         if prompt == "Save anyway? [y/N] ":
-            return save_answer
-        lower = prompt.lower()
-        if "provider" in lower:
-            return "openai"
-        if "model" in lower:
-            return "m"
-        if "key" in lower or "env" in lower:
-            return "MY_KEY"
+            return "n"
+        # "" accepts whichever bracketed default the wizard offers for any other prompt
         return ""
 
-    return input_fn
+    hotdocs_init.main(
+        [],
+        tool_root=str(tool_root1),
+        input_fn=input_fn_1,
+        output_fn=outputs1.append,
+        env={},
+        cwd=str(project1),
+    )
+
+    assert any("connection failed: auth: bad" in line for line in outputs1)
+    entries1 = [json.loads(l) for l in log1.read_text().splitlines() if l.strip()]
+    assert not any(e["call"] == "save_config" for e in entries1)
+
+    log2 = harness / "log2.jsonl"
+    log2.write_text("")
+    control2 = harness / "control2.json"
+    _write_control(control2, {"ok": False, "error": {"category": "auth", "message": "bad"}}, {"ok": True})
+
+    tool_root2 = make_tool_root(tmp_path / "tool_root2")
+    project2 = tmp_path / "project2"
+    project2.mkdir()
+
+    monkeypatch.setenv("HOTDOCS_TEST_CONTROL", str(control2))
+    monkeypatch.setenv("HOTDOCS_TEST_LOG", str(log2))
+
+    outputs2 = []
+
+    def input_fn_2(prompt):
+        if prompt == "Save anyway? [y/N] ":
+            return "y"
+        return ""
+
+    hotdocs_init.main(
+        [],
+        tool_root=str(tool_root2),
+        input_fn=input_fn_2,
+        output_fn=outputs2.append,
+        env={},
+        cwd=str(project2),
+    )
+
+    assert any("connection failed: auth: bad" in line for line in outputs2)
+    entries2 = [json.loads(l) for l in log2.read_text().splitlines() if l.strip()]
+    assert any(e["call"] == "save_config" for e in entries2)
 
 
-def _refusing_input_fn(prompt):
-    raise AssertionError(f"init asked an unexpected question: {prompt!r}")
+def test_ac_init_005_check_connection_value_error_is_invalid(tmp_path, monkeypatch):
+    harness = tmp_path / "harness"
+    harness.mkdir()
+    log_path = harness / "log.jsonl"
+    log_path.write_text("")
+    control_path = harness / "control.json"
+    _write_control(control_path, {"raise": "no base_url"}, {"ok": True})
 
-
-def test_successful_connection_prints_ok_and_saves_without_asking(tmp_path):
-    tool_root = _make_tool_root(tmp_path / "tool_root")
-    log_path = tmp_path / "log.jsonl"
-    _write_fake_llm_endpoint(tool_root, log_path, "ok", "ok")
+    tool_root = make_tool_root(tmp_path / "tool_root")
     project_dir = tmp_path / "project"
     project_dir.mkdir()
+
+    monkeypatch.setenv("HOTDOCS_TEST_CONTROL", str(control_path))
+    monkeypatch.setenv("HOTDOCS_TEST_LOG", str(log_path))
+
     outputs = []
-
     hotdocs_init.main(
-        [str(project_dir), "--provider", "openai", "--model", "m", "--api-key-env", "MY_KEY"],
-        tool_root=tool_root,
-        input_fn=_refusing_input_fn,
+        ["--provider", "openai", "--model", "m", "--api-key-env", "MY_KEY"],
+        tool_root=str(tool_root),
+        input_fn=_no_input,
         output_fn=outputs.append,
+        env={},
+        cwd=str(project_dir),
     )
 
-    assert any("connection ok" in m for m in outputs)
-
-    calls = _read_log(log_path)
-    save_calls = [c for c in calls if c["call"] == "save_config"]
-    assert len(save_calls) == 1
-    call = save_calls[0]
-    expected_path = str(project_dir / "hotdocs.toml")
-    assert call["args"][0] == expected_path
-    assert call["args"][1] == "openai"
-    assert call["args"][2] == "m"
-    assert call["kwargs"].get("api_key_env") == "MY_KEY"
-    assert "base_url" not in call["kwargs"]
-    assert "timeout_seconds" not in call["kwargs"]
+    assert any("connection failed: invalid: no base_url" in line for line in outputs)
 
 
-def test_failed_connection_asks_before_saving_and_only_saves_on_yes(tmp_path):
-    tool_root_1 = _make_tool_root(tmp_path / "tool_root_1")
-    log_1 = tmp_path / "log1.jsonl"
-    _write_fake_llm_endpoint(
-        tool_root_1,
-        log_1,
-        "auth_fail",
-        "ok",
-        detect_result=[
-            {"provider": "openai", "available": True, "reason": "ok", "suggested_model": "m", "api_key_env": "MY_KEY"}
-        ],
-    )
-    project_1 = tmp_path / "project_1"
-    project_1.mkdir()
-    outputs_1 = []
-    prompts_1 = []
+def test_ac_init_005_save_config_value_error_does_not_change_exit_code(tmp_path, monkeypatch, capsys):
+    def run(save_behavior, subdir):
+        harness = tmp_path / f"harness_{subdir}"
+        harness.mkdir()
+        log_path = harness / "log.jsonl"
+        log_path.write_text("")
+        control_path = harness / "control.json"
+        _write_control(control_path, {"ok": True, "error": None}, save_behavior)
 
-    hotdocs_init.main(
-        [str(project_1), "--model", "m", "--api-key-env", "MY_KEY"],
-        tool_root=tool_root_1,
-        input_fn=_make_input_fn(prompts_1, save_answer="n"),
-        output_fn=outputs_1.append,
-    )
+        tool_root = make_tool_root(tmp_path / f"tool_{subdir}")
+        project_dir = tmp_path / f"project_{subdir}"
+        project_dir.mkdir()
 
-    assert any("connection failed: auth: bad" in m for m in outputs_1)
-    assert "Save anyway? [y/N] " in prompts_1
-    calls_1 = _read_log(log_1)
-    assert not [c for c in calls_1 if c["call"] == "save_config"]
+        monkeypatch.setenv("HOTDOCS_TEST_CONTROL", str(control_path))
+        monkeypatch.setenv("HOTDOCS_TEST_LOG", str(log_path))
 
-    tool_root_2 = _make_tool_root(tmp_path / "tool_root_2")
-    log_2 = tmp_path / "log2.jsonl"
-    _write_fake_llm_endpoint(
-        tool_root_2,
-        log_2,
-        "auth_fail",
-        "ok",
-        detect_result=[
-            {"provider": "openai", "available": True, "reason": "ok", "suggested_model": "m", "api_key_env": "MY_KEY"}
-        ],
-    )
-    project_2 = tmp_path / "project_2"
-    project_2.mkdir()
-    outputs_2 = []
-    prompts_2 = []
+        outputs = []
+        code = hotdocs_init.main(
+            ["--provider", "openai", "--model", "m", "--api-key-env", "MY_KEY"],
+            tool_root=str(tool_root),
+            input_fn=_no_input,
+            output_fn=outputs.append,
+            env={},
+            cwd=str(project_dir),
+        )
+        return code
 
-    hotdocs_init.main(
-        [str(project_2), "--model", "m", "--api-key-env", "MY_KEY"],
-        tool_root=tool_root_2,
-        input_fn=_make_input_fn(prompts_2, save_answer="y"),
-        output_fn=outputs_2.append,
-    )
+    baseline_code = run({"ok": True}, "baseline")
+    capsys.readouterr()
 
-    assert any("connection failed: auth: bad" in m for m in outputs_2)
-    assert "Save anyway? [y/N] " in prompts_2
-    calls_2 = _read_log(log_2)
-    assert len([c for c in calls_2 if c["call"] == "save_config"]) == 1
+    fail_code = run({"raise": "nope"}, "fail")
+    stderr = capsys.readouterr().err
+
+    assert "could not save: nope" in stderr
+    assert fail_code == baseline_code
 
 
-def test_check_connection_value_error_prints_invalid(tmp_path):
-    tool_root = _make_tool_root(tmp_path / "tool_root")
-    log_path = tmp_path / "log.jsonl"
-    _write_fake_llm_endpoint(tool_root, log_path, "raise_invalid", "ok")
+def test_ac_init_005_no_test_skips_check_connection(tmp_path, monkeypatch):
+    harness = tmp_path / "harness"
+    harness.mkdir()
+    log_path = harness / "log.jsonl"
+    log_path.write_text("")
+    control_path = harness / "control.json"
+    _write_control(control_path, {"ok": True, "error": None}, {"ok": True})
+
+    tool_root = make_tool_root(tmp_path / "tool_root")
     project_dir = tmp_path / "project"
     project_dir.mkdir()
-    outputs = []
+
+    monkeypatch.setenv("HOTDOCS_TEST_CONTROL", str(control_path))
+    monkeypatch.setenv("HOTDOCS_TEST_LOG", str(log_path))
 
     hotdocs_init.main(
-        [str(project_dir), "--provider", "openai", "--model", "m", "--api-key-env", "MY_KEY"],
-        tool_root=tool_root,
-        input_fn=_refusing_input_fn,
-        output_fn=outputs.append,
+        ["--provider", "openai", "--model", "m", "--api-key-env", "MY_KEY", "--no-test"],
+        tool_root=str(tool_root),
+        input_fn=_no_input,
+        output_fn=lambda msg: None,
+        env={},
+        cwd=str(project_dir),
     )
 
-    assert any("connection failed: invalid: no base_url" in m for m in outputs)
-
-
-def test_save_config_value_error_is_reported_to_stderr_and_does_not_change_exit_code(tmp_path, capsys):
-    tool_root = _make_tool_root(tmp_path / "tool_root")
-    log_path = tmp_path / "log.jsonl"
-    _write_fake_llm_endpoint(tool_root, log_path, "ok", "raise")
-    project_dir = tmp_path / "project"
-    project_dir.mkdir()
-    outputs = []
-
-    exit_code = hotdocs_init.main(
-        [str(project_dir), "--provider", "openai", "--model", "m", "--api-key-env", "MY_KEY"],
-        tool_root=tool_root,
-        input_fn=_refusing_input_fn,
-        output_fn=outputs.append,
-    )
-
-    captured = capsys.readouterr()
-    assert "could not save: nope" in captured.err
-    assert any("connection ok" in m for m in outputs)
-    assert exit_code == 0
-
-
-def test_no_test_flag_skips_check_connection(tmp_path):
-    tool_root = _make_tool_root(tmp_path / "tool_root")
-    log_path = tmp_path / "log.jsonl"
-    _write_fake_llm_endpoint(tool_root, log_path, "ok", "ok")
-    project_dir = tmp_path / "project"
-    project_dir.mkdir()
-    outputs = []
-
-    hotdocs_init.main(
-        [str(project_dir), "--no-test", "--provider", "openai", "--model", "m", "--api-key-env", "MY_KEY"],
-        tool_root=tool_root,
-        input_fn=_refusing_input_fn,
-        output_fn=outputs.append,
-    )
-
-    calls = _read_log(log_path)
-    assert not [c for c in calls if c["call"] == "check_connection"]
+    entries = [json.loads(l) for l in log_path.read_text().splitlines() if l.strip()]
+    assert not any(e["call"] == "check_connection" for e in entries)

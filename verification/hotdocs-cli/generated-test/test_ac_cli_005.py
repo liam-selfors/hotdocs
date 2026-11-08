@@ -1,109 +1,93 @@
 import json
 import os
-import shutil
-import tempfile
-import unittest
+from pathlib import Path
 
 import hotdocs_cli
 
 
-FAKE_INIT_TEMPLATE = '''
+def _write_fake_init(tool_root: Path, log_path: Path) -> None:
+    init_dir = tool_root / "gen" / "hotdocs-init"
+    init_dir.mkdir(parents=True)
+
+    template = '''
 import json
 
-LOG_PATH = "__LOG_PATH__"
+LOG_PATH = __LOG_PATH__
 
 
 def main(argv, **kwargs):
     record = {
         "argv": list(argv),
-        "kwargs_keys": sorted(kwargs.keys()),
-        "tool_root": str(kwargs.get("tool_root")),
-        "cwd": str(kwargs.get("cwd")),
-        "env": dict(kwargs.get("env")) if kwargs.get("env") is not None else None,
+        "keys": sorted(kwargs.keys()),
+        "tool_root": kwargs.get("tool_root"),
         "input_fn_id": id(kwargs.get("input_fn")),
         "output_fn_id": id(kwargs.get("output_fn")),
+        "env": dict(kwargs.get("env")) if kwargs.get("env") is not None else None,
+        "cwd": kwargs.get("cwd"),
     }
-    with open(LOG_PATH, "a") as f:
-        f.write(json.dumps(record) + "\\n")
+    with open(LOG_PATH, "a") as fh:
+        fh.write(json.dumps(record) + "\\n")
     return 7
 '''
+    source = template.replace("__LOG_PATH__", repr(str(log_path)))
+    (init_dir / "hotdocs_init.py").write_text(source)
 
 
-class AcCli005Test(unittest.TestCase):
-    def setUp(self):
-        self.tmp = tempfile.mkdtemp()
-        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+def test_init_explicit_keywords_route_to_tool_root_fake(tmp_path):
+    tool_root = tmp_path / "tool_root"
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    log_path = tmp_path / "calls.log"
+    _write_fake_init(tool_root, log_path)
 
-        self.tool_root = os.path.join(self.tmp, "tool_root")
-        self.project_dir = os.path.join(self.tmp, "project")
-        os.makedirs(os.path.join(self.tool_root, "gen", "hotdocs-init"))
-        os.makedirs(self.project_dir)
+    def f(prompt=""):
+        return "unused"
 
-        self.log_path = os.path.join(self.tmp, "calls.log")
+    def g(*args, **kwargs):
+        return None
 
-        fake_path = os.path.join(
-            self.tool_root, "gen", "hotdocs-init", "hotdocs_init.py"
-        )
-        content = FAKE_INIT_TEMPLATE.replace(
-            '"__LOG_PATH__"', json.dumps(self.log_path)
-        )
-        with open(fake_path, "w") as f:
-            f.write(content)
+    env = {"CUSTOM_VAR": "value"}
 
-    def _read_log(self):
-        with open(self.log_path) as f:
-            return [json.loads(line) for line in f if line.strip()]
+    exit_code = hotdocs_cli.main(
+        ["init", "dir", "--yes"],
+        tool_root=str(tool_root),
+        input_fn=f,
+        output_fn=g,
+        env=env,
+        cwd=str(project_dir),
+    )
 
-    def test_init_with_all_keywords_given(self):
-        def f(prompt=""):
-            return ""
+    assert exit_code == 7
 
-        def g(*args, **kwargs):
-            pass
+    lines = log_path.read_text().strip().splitlines()
+    assert len(lines) == 1
+    record = json.loads(lines[0])
 
-        env = {"FAKE_VAR": "1"}
-
-        rc = hotdocs_cli.main(
-            ["init", "dir", "--yes"],
-            tool_root=self.tool_root,
-            input_fn=f,
-            output_fn=g,
-            env=env,
-            cwd=self.project_dir,
-        )
-
-        records = self._read_log()
-        self.assertEqual(len(records), 1)
-        record = records[0]
-
-        self.assertEqual(record["argv"], ["dir", "--yes"])
-        self.assertEqual(
-            record["kwargs_keys"],
-            sorted(["tool_root", "input_fn", "output_fn", "env", "cwd"]),
-        )
-        self.assertEqual(record["tool_root"], str(self.tool_root))
-        self.assertEqual(record["cwd"], str(self.project_dir))
-        self.assertEqual(record["env"], env)
-        self.assertEqual(record["input_fn_id"], id(f))
-        self.assertEqual(record["output_fn_id"], id(g))
-
-        self.assertEqual(rc, 7)
-
-    def test_init_with_no_optional_keywords_given(self):
-        rc = hotdocs_cli.main(["init"], tool_root=self.tool_root)
-
-        records = self._read_log()
-        self.assertEqual(len(records), 1)
-        record = records[0]
-
-        self.assertEqual(record["argv"], [])
-        self.assertEqual(record["input_fn_id"], id(input))
-        self.assertEqual(record["output_fn_id"], id(print))
-        self.assertEqual(record["env"], dict(os.environ))
-        self.assertEqual(record["cwd"], os.getcwd())
-
-        self.assertEqual(rc, 7)
+    assert record["argv"] == ["dir", "--yes"]
+    assert record["keys"] == sorted(["tool_root", "input_fn", "output_fn", "env", "cwd"])
+    assert record["tool_root"] == str(tool_root)
+    assert record["input_fn_id"] == id(f)
+    assert record["output_fn_id"] == id(g)
+    assert record["env"] == env
+    assert record["cwd"] == str(project_dir)
 
 
-if __name__ == "__main__":
-    unittest.main()
+def test_init_defaults_filled_in_when_keywords_omitted(tmp_path):
+    tool_root = tmp_path / "tool_root"
+    log_path = tmp_path / "calls.log"
+    _write_fake_init(tool_root, log_path)
+
+    exit_code = hotdocs_cli.main(["init"], tool_root=str(tool_root))
+
+    assert exit_code == 7
+
+    lines = log_path.read_text().strip().splitlines()
+    assert len(lines) == 1
+    record = json.loads(lines[0])
+
+    assert record["argv"] == []
+    assert record["keys"] == sorted(["tool_root", "input_fn", "output_fn", "env", "cwd"])
+    assert record["input_fn_id"] == id(input)
+    assert record["output_fn_id"] == id(print)
+    assert record["env"] == dict(os.environ)
+    assert record["cwd"] == os.getcwd()

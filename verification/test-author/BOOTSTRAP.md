@@ -659,3 +659,18 @@ which `R-AUTHOR-010` only implied in a parenthesis; it now says it
 outright. The second candidate passed 37 of 37, with
 `verifier-orchestrator` (29) and `capability-scenario-verifier` (34)
 unchanged.
+
+## `D199`: the tool's components stay in the tool
+
+A project no longer holds copies of the tool's components, so
+`cache-manager` and `llm-endpoint` are loaded from `<repo_root>/gen/`
+when present and otherwise from the tool's own `gen/`. `R-AUTHOR-010`
+also tells test authors that leaving a dependency out of `repo_root`
+no longer makes it missing. A new hand test runs `author_test` against
+an empty `repo_root`; it fails on the previous implementation.
+
+Regenerated through the `D58` route in a scratch copy. The first
+candidate split `c: dict[str, str]` into two parameters in the
+fake-arity check; `R-AUTHOR-020` now says a comma inside brackets never
+splits one. The second passed 38 of 38, with `verifier-orchestrator`
+and `capability-scenario-verifier` unchanged.

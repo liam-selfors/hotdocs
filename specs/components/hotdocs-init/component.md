@@ -13,26 +13,24 @@ sealed: false
 
 ## Purpose
 
-Sets up a new project for the tool: the directory skeleton, the tool itself,
-a check of what the machine still needs, and the choice and test of a
+Sets up a new project for the tool: the directory skeleton, a check of what the machine still needs, and the choice and test of a
 language-model provider.
 
 ## Rationale
 
-The tool could not run on any project but its own, because components load
-each other from `<repo_root>/gen/<slug>/`. For now `init` therefore copies
-("vendors") the tool into the project (`D184`). It was first specified inside
+A project needs a known layout and a working provider before anything else
+runs. `init` once copied the tool into each project (`D184`); components
+now fall back to the tool's own `gen/` (`D199`), so it copies nothing. It was first specified inside
 `hotdocs-cli`, but one generated module covering both routing and setup was
 too large for a single model response (`D185`).
 
 ## Scope
 
-**In scope:** the project skeleton, vendoring, the prerequisite report, the
+**In scope:** the project skeleton, the prerequisite report, the
 provider step, and the `--example` project.
 
 **Out of scope:** routing (`hotdocs-cli` calls this component's `main`);
-installing anything (this component prints the command and never runs it);
-upgrading a vendored tool.
+installing anything (this component prints the command and never runs it).
 
 ## Definitions
 
@@ -66,3 +64,5 @@ None.
 ## Change log
 
 - `D184`: initial design, inside `hotdocs-cli`. `D185`: split out.
+- `D197`: seeds a sealed allowlist. `D199`: copies nothing from the tool;
+  the allowlist starts empty.

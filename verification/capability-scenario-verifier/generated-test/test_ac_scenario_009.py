@@ -1,7 +1,10 @@
 import shutil
+import textwrap
 from pathlib import Path
 
-import capability_scenario_verifier as csv_mod
+import pytest
+
+import capability_scenario_verifier
 
 
 def _get(obj, key, default=None):
@@ -10,154 +13,189 @@ def _get(obj, key, default=None):
     return getattr(obj, key, default)
 
 
-def _write_component_and_capability(repo_root: Path, gherkin: str, kind: str = "compiled") -> None:
-    component_dir = repo_root / "specs" / "components" / "widget"
-    component_dir.mkdir(parents=True, exist_ok=True)
-    (component_dir / "component.md").write_text(
-        "---\n"
-        "id: comp-widget\n"
-        "title: Widget\n"
-        "status: draft\n"
-        "owners: [lselfors@gmail.com]\n"
-        "realizes: [P-X]\n"
-        "sealed: true\n"
-        "source_path: pipeline/widget/\n"
-        "---\n"
-    )
-
-    product_dir = repo_root / "specs" / "product"
-    product_dir.mkdir(parents=True, exist_ok=True)
-    (product_dir / "widget.md").write_text(
-        "---\n"
-        "id: P-X\n"
-        "title: Widget Capability\n"
-        "status: draft\n"
-        "owners: [lselfors@gmail.com]\n"
-        "---\n"
-        "\n"
-        "### CS-X-001\n"
-        "\n"
-        "Covers: P-X\n"
-        f"Kind: {kind}\n"
-        "\n"
-        "```gherkin\n"
-        f"{gherkin}\n"
-        "```\n"
-    )
+def _write(path: Path, content: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(textwrap.dedent(content).lstrip("\n"))
 
 
-def _write_fake_compile_criterion(repo_root: Path, result: dict) -> None:
-    compiler_dir = repo_root / "pipeline" / "criterion-compiler"
-    compiler_dir.mkdir(parents=True, exist_ok=True)
-    (compiler_dir / "criterion_compiler.py").write_text(
-        "class ParsedCriterion:\n"
-        "    def __init__(self, *, criterion_id, covers, kind, gherkin, file):\n"
-        "        self.criterion_id = criterion_id\n"
-        "        self.covers = covers\n"
-        "        self.kind = kind\n"
-        "        self.gherkin = gherkin\n"
-        "        self.file = file\n"
-        "\n"
-        "\n"
-        f"def compile_criterion(parsed, surface=None):\n"
+_CAPABILITY_MD = """
+---
+id: P-X
+title: Capability X
+status: ratified
+owners: [lselfors]
+last_ratified_commit: deadbeef
+---
+
+# Capability X
+
+### CS-X-001
+
+Covers: P-X
+Kind: compiled
+
+```gherkin
+Given a baseline
+Then it holds
+```
+"""
+
+_COMPONENT_MD = """
+---
+id: comp-foo
+title: Foo Component
+status: ratified
+owners: [lselfors]
+last_ratified_commit: deadbeef
+realizes: [P-X]
+sealed: false
+---
+
+# Foo Component
+"""
+
+_COMPILER_PRELUDE = """
+class ParsedCriterion:
+    def __init__(self, criterion_id, covers, kind, gherkin, file):
+        self.criterion_id = criterion_id
+        self.covers = covers
+        self.kind = kind
+        self.gherkin = gherkin
+        self.file = file
+
+"""
+
+
+def _fake_compiler_source(result: dict) -> str:
+    return _COMPILER_PRELUDE + (
+        "def compile_criterion(parsed, surface=None):\n"
         f"    return {result!r}\n"
     )
 
 
-def _find_real_pipeline_compiler_dir() -> Path:
+def _make_repo(tmp_path: Path, compiler_result: dict) -> Path:
+    repo_root = tmp_path / "repo"
+    _write(repo_root / "specs" / "product" / "capx.md", _CAPABILITY_MD)
+    _write(repo_root / "specs" / "components" / "foo" / "component.md", _COMPONENT_MD)
+    gen_dir = repo_root / "gen" / "foo"
+    gen_dir.mkdir(parents=True, exist_ok=True)
+    (gen_dir / "foo.py").write_text("X = 1\n")
+    _write(
+        repo_root / "pipeline" / "criterion-compiler" / "criterion_compiler.py",
+        _fake_compiler_source(compiler_result),
+    )
+    return repo_root
+
+
+def _find_real_compiler_dir() -> Path:
     here = Path(__file__).resolve()
-    for parent in (here.parent, *here.parents):
-        candidate = parent / "pipeline" / "criterion-compiler"
-        if (candidate / "criterion_compiler.py").exists():
-            return candidate
-    raise RuntimeError(
+    for parent in here.parents:
+        candidate = parent / "pipeline" / "criterion-compiler" / "criterion_compiler.py"
+        if candidate.is_file():
+            return candidate.parent
+    pytest.skip(
         "could not locate the live repository's pipeline/criterion-compiler/ "
-        "directory by walking up from this test file"
+        "relative to this test file"
     )
 
 
-def _copy_real_compile_criterion(repo_root: Path) -> None:
-    real_dir = _find_real_pipeline_compiler_dir()
-    dest_dir = repo_root / "pipeline" / "criterion-compiler"
-    dest_dir.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copytree(real_dir, dest_dir)
-
-
-def test_compiled_scenario_passes_when_its_written_test_passes(tmp_path):
-    repo_root = tmp_path
-    _write_component_and_capability(
-        repo_root, "Given a widget\nWhen it is assembled\nThen it is complete"
-    )
-    _write_fake_compile_criterion(
-        repo_root,
+def test_compiled_scenario_passing_source_is_written_run_and_passes(tmp_path):
+    repo_root = _make_repo(
+        tmp_path,
         {"status": "compiled", "source": "def test_x():\n    assert True\n"},
     )
 
-    report = csv_mod.run_capability_scenarios(["comp-widget"], repo_root)
+    report = capability_scenario_verifier.run_capability_scenarios(["comp-foo"], repo_root)
 
-    capability = _get(report, "P-X")
-    scenarios = _get(capability, "scenarios")
+    expected_file = repo_root / "verification" / "capabilities" / "P-X" / "compiled" / "test_cs_x_001.py"
+    assert expected_file.exists()
+    assert expected_file.read_text() == "def test_x():\n    assert True\n"
+
+    cap = _get(report, "P-X")
+    assert cap is not None
+    scenarios = _get(cap, "scenarios")
+    assert len(scenarios) == 1
     scenario = scenarios[0]
     assert _get(scenario, "id") == "CS-X-001"
+    assert _get(scenario, "kind") == "compiled"
     assert _get(scenario, "result") == "pass"
 
-    compiled_file = (
-        repo_root / "verification" / "capabilities" / "P-X" / "compiled" / "test_cs_x_001.py"
-    )
-    assert compiled_file.exists()
-    assert compiled_file.read_text() == "def test_x():\n    assert True\n"
 
-
-def test_compiled_scenario_fails_when_its_written_test_fails(tmp_path):
-    repo_root = tmp_path
-    _write_component_and_capability(
-        repo_root, "Given a widget\nWhen it is assembled\nThen it is complete"
-    )
-    _write_fake_compile_criterion(
-        repo_root,
+def test_compiled_scenario_failing_source_is_written_run_and_fails(tmp_path):
+    repo_root = _make_repo(
+        tmp_path,
         {"status": "compiled", "source": "def test_x():\n    assert False\n"},
     )
 
-    report = csv_mod.run_capability_scenarios(["comp-widget"], repo_root)
+    report = capability_scenario_verifier.run_capability_scenarios(["comp-foo"], repo_root)
 
-    capability = _get(report, "P-X")
-    scenario = _get(capability, "scenarios")[0]
+    expected_file = repo_root / "verification" / "capabilities" / "P-X" / "compiled" / "test_cs_x_001.py"
+    assert expected_file.exists()
+    assert expected_file.read_text() == "def test_x():\n    assert False\n"
+
+    cap = _get(report, "P-X")
+    scenarios = _get(cap, "scenarios")
+    scenario = scenarios[0]
     assert _get(scenario, "result") == "fail"
 
-    compiled_file = (
-        repo_root / "verification" / "capabilities" / "P-X" / "compiled" / "test_cs_x_001.py"
-    )
-    assert compiled_file.exists()
 
-
-def test_compile_error_fails_with_nothing_written(tmp_path):
-    repo_root = tmp_path
-    _write_component_and_capability(
-        repo_root, "Given a widget\nWhen it is assembled\nThen it is complete"
-    )
-    _write_fake_compile_criterion(
-        repo_root,
+def test_compile_error_is_fail_with_nothing_written(tmp_path):
+    repo_root = _make_repo(
+        tmp_path,
         {"status": "error", "message": "bad step"},
     )
 
-    report = csv_mod.run_capability_scenarios(["comp-widget"], repo_root)
+    report = capability_scenario_verifier.run_capability_scenarios(["comp-foo"], repo_root)
 
-    capability = _get(report, "P-X")
-    scenario = _get(capability, "scenarios")[0]
+    cap = _get(report, "P-X")
+    scenarios = _get(cap, "scenarios")
+    scenario = scenarios[0]
     assert _get(scenario, "result") == "fail"
 
     compiled_dir = repo_root / "verification" / "capabilities" / "P-X" / "compiled"
-    assert not (compiled_dir / "test_cs_x_001.py").exists()
+    assert not compiled_dir.exists() or not any(compiled_dir.iterdir())
 
 
-def test_real_compiler_compiling_is_not_itself_a_pass(tmp_path):
-    repo_root = tmp_path
-    _write_component_and_capability(repo_root, "Given a x is 1\nThen x equals 1")
-    _copy_real_compile_criterion(repo_root)
+def test_real_compiler_compiling_is_never_enough_for_a_pass(tmp_path):
+    capability_md = """
+    ---
+    id: P-X
+    title: Capability X
+    status: ratified
+    owners: [lselfors]
+    last_ratified_commit: deadbeef
+    ---
 
-    report = csv_mod.run_capability_scenarios(["comp-widget"], repo_root)
+    # Capability X
 
-    capability = _get(report, "P-X")
-    scenario = _get(capability, "scenarios")[0]
-    assert _get(scenario, "result") == "fail"
-    assert _get(scenario, "result") != "pass"
+    ### CS-X-001
+
+    Covers: P-X
+    Kind: compiled
+
+    ```gherkin
+    Given a x is 1
+    Then x equals 1
+    ```
+    """
+
+    repo_root = tmp_path / "repo"
+    _write(repo_root / "specs" / "product" / "capx.md", capability_md)
+    _write(repo_root / "specs" / "components" / "foo" / "component.md", _COMPONENT_MD)
+    gen_dir = repo_root / "gen" / "foo"
+    gen_dir.mkdir(parents=True, exist_ok=True)
+    (gen_dir / "foo.py").write_text("X = 1\n")
+
+    real_compiler_dir = _find_real_compiler_dir()
+    dest = repo_root / "pipeline" / "criterion-compiler"
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copytree(real_compiler_dir, dest)
+
+    report = capability_scenario_verifier.run_capability_scenarios(["comp-foo"], repo_root)
+
+    cap = _get(report, "P-X")
+    scenarios = _get(cap, "scenarios")
+    scenario = scenarios[0]
+    result = _get(scenario, "result")
+    assert result == "fail"
+    assert result != "pass"

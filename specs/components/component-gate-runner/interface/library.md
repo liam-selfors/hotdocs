@@ -12,7 +12,7 @@ run_component_gates(
 them (`R-GATE-002`, `R-GATE-010`). `retry_feedback` (`R-GATE-003`,
 `D3`) is passed through to `generator` unchanged, never derived here.
 
-Each dependency is loaded from `<repo_root>/gen/<slug>/`. The first
+Each dependency is loaded from `<repo_root>/gen/<slug>/`, or from the tool root's when absent (`D199`). The first
 call, for every component, is `provenance-checker`'s
 `current_sealed_key(component_id, repo_root)`: a non-`None` result means
 the component is sealed and only the sealed calls below are made

@@ -1,132 +1,104 @@
 import json
-
-import pytest
+import os
+import shutil
+import tempfile
+import unittest
+from pathlib import Path
 
 import secret_scanner
 
 
-def _get(obj, key, default=None):
-    if isinstance(obj, dict):
-        return obj.get(key, default)
-    return getattr(obj, key, default)
-
-
-_CACHE_MANAGER_SOURCE = '''
+FAKE_CACHE_MANAGER_SOURCE = '''
 import json
 import os
+from dataclasses import dataclass
 
 
+@dataclass
 class CacheKey:
-    def __init__(self, spec_bundle_hash=None, gate_inputs_hash=None,
-                 gate_version=None, model_pin=None):
-        self.spec_bundle_hash = spec_bundle_hash
-        self.gate_inputs_hash = gate_inputs_hash
-        self.gate_version = gate_version
-        self.model_pin = model_pin
+    spec_bundle_hash: str
+    gate_inputs_hash: str
+    gate_version: str
+    model_pin: str
 
 
+@dataclass
 class CachedResult:
-    def __init__(self, gate_type=None, payload=None, stored_at=None):
-        self.gate_type = gate_type
-        self.payload = payload
-        self.stored_at = stored_at
+    gate_type: str
+    payload: dict
+    stored_at: str
 
 
 class Miss:
-    payload = None
-
-
-def _log_path():
-    return os.environ.get("SECRET_SCANNER_AC003_CALL_LOG")
+    pass
 
 
 def get(cache_key, repo_root=None):
     return Miss()
 
 
-def put(cache_key, cached_result, repo_root=None):
-    log_path = _log_path()
+def put(cache_key, result, repo_root=None):
+    log_path = os.environ.get("AC_SECRET_003_LOG_PATH")
     if not log_path:
         return
-    record = {
-        "gate_type": getattr(cached_result, "gate_type", None),
-        "payload": getattr(cached_result, "payload", None),
-    }
+    gate_type = result.gate_type if hasattr(result, "gate_type") else result.get("gate_type")
+    payload = result.payload if hasattr(result, "payload") else result.get("payload")
     with open(log_path, "a") as handle:
-        handle.write(json.dumps(record) + "\\n")
+        handle.write(json.dumps({"gate_type": gate_type, "payload": payload}) + "\\n")
 '''
 
 
-def test_clean_full_scan_still_records_result(tmp_path, monkeypatch):
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
+def _field(value, key):
+    if isinstance(value, dict):
+        return value.get(key)
+    return getattr(value, key, None)
 
-    cache_manager_dir = repo_root / "gen" / "cache-manager"
-    cache_manager_dir.mkdir(parents=True)
-    (cache_manager_dir / "cache_manager.py").write_text(_CACHE_MANAGER_SOURCE)
 
-    (repo_root / ".secret-allowlist.json").write_text(
-        json.dumps({"version": 1, "entries": []})
-    )
-
-    src_dir = repo_root / "src"
-    src_dir.mkdir()
-    (src_dir / "app.py").write_text(
-        "def add(left, right):\n    return left + right\n"
-    )
-
-    call_log = tmp_path / "cache_manager_calls.jsonl"
-    monkeypatch.setenv("SECRET_SCANNER_AC003_CALL_LOG", str(call_log))
-
-    result = secret_scanner.scan(repo_root)
-
-    assert _get(result, "flagged") is False
-    matches = _get(result, "matches")
-    assert matches == []
-
-    as_dict = result.to_dict()
-
-    for required_key in (
-        "scope",
-        "gate_version",
-        "flagged",
-        "matches",
-        "allowed",
-        "unused_allowlist_entries",
-        "notified",
-        "notification_delivery_error",
-        "cache_hit",
-    ):
-        assert required_key in as_dict, (
-            "a clean SecretScanResult must still carry every field of the "
-            "record, not just an absence of flags"
+class AcSecret003Test(unittest.TestCase):
+    def setUp(self):
+        self.repo_root = Path(tempfile.mkdtemp(prefix="ac_secret_003_repo_"))
+        (self.repo_root / "README.md").write_text(
+            "This repository contains no secret material of any kind.\n"
         )
 
-    assert as_dict["scope"] == "full"
-    assert as_dict["flagged"] is False
-    assert as_dict["matches"] == []
-    assert as_dict["gate_version"]
-    assert as_dict["notified"] is False
+        cache_manager_dir = self.repo_root / "gen" / "cache-manager"
+        cache_manager_dir.mkdir(parents=True)
+        (cache_manager_dir / "cache_manager.py").write_text(FAKE_CACHE_MANAGER_SOURCE)
 
-    assert call_log.exists(), (
-        "secret_scanner.scan did not forward the clean result onward via "
-        "cache-manager's put -- a clean outcome must still be recorded, "
-        "never silently dropped"
-    )
-    lines = [line for line in call_log.read_text().splitlines() if line.strip()]
-    assert len(lines) == 1, (
-        "expected exactly one put() call recording the fresh, clean scan "
-        "result"
-    )
+        self._log_dir = tempfile.mkdtemp(prefix="ac_secret_003_log_")
+        self.log_path = Path(self._log_dir) / "put_calls.jsonl"
+        self._prev_log_env = os.environ.get("AC_SECRET_003_LOG_PATH")
+        os.environ["AC_SECRET_003_LOG_PATH"] = str(self.log_path)
 
-    record = json.loads(lines[0])
-    assert record["gate_type"] == "secret_scanner"
+    def tearDown(self):
+        shutil.rmtree(self.repo_root, ignore_errors=True)
+        shutil.rmtree(self._log_dir, ignore_errors=True)
+        if self._prev_log_env is None:
+            os.environ.pop("AC_SECRET_003_LOG_PATH", None)
+        else:
+            os.environ["AC_SECRET_003_LOG_PATH"] = self._prev_log_env
 
-    payload = record["payload"]
-    for required_payload_key in ("scope", "gate_version", "flagged", "matches"):
-        assert required_payload_key in payload, (
-            "the recorded payload for a clean outcome must still satisfy "
-            "the secret_scanner CachedResult payload schema"
-        )
-    assert payload["flagged"] is False
-    assert payload["matches"] == []
+    def test_clean_full_scan_is_still_recorded(self):
+        result = secret_scanner.scan(self.repo_root)
+
+        self.assertIsNotNone(result)
+        self.assertEqual(_field(result, "scope"), "full")
+        self.assertEqual(_field(result, "flagged"), False)
+        self.assertEqual(_field(result, "matches"), [])
+
+        self.assertTrue(self.log_path.exists())
+        lines = [line for line in self.log_path.read_text().splitlines() if line.strip()]
+        self.assertEqual(len(lines), 1)
+
+        record = json.loads(lines[0])
+        self.assertEqual(_field(record, "gate_type"), "secret_scanner")
+
+        payload = record["payload"]
+        self.assertEqual(_field(payload, "scope"), "full")
+        self.assertEqual(_field(payload, "flagged"), False)
+        self.assertEqual(_field(payload, "matches"), [])
+        self.assertIsNotNone(_field(payload, "gate_version"))
+
+
+if __name__ == "__main__":
+    unittest.main()

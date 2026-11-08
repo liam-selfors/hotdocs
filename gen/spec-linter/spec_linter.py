@@ -1356,6 +1356,32 @@ def rule_cli_coverage(corpus: Corpus) -> list[Finding]:
     return findings
 
 
+def _tool_root() -> Path | None:
+    for parent in Path(__file__).resolve().parents:
+        if parent.name == "gen":
+            return parent.parent
+    return None
+
+
+def rule_tool_slug_shadowing(corpus: Corpus) -> list[Finding]:
+    """R-LINT-032 (D199). A project's components fall back to the tool's
+    own gen/ only when absent from the project, so a project component
+    reusing a tool component's slug would shadow the tool's."""
+    # Only a project made by `hotdocs init` is checked: the tool's own
+    # checkout, a build sandbox, or a test's scratch tree never is.
+    tool_root = _tool_root()
+    if tool_root is None or not (Path(corpus.repo_root) / ".hotdocs-tool.json").is_file():
+        return []
+    tool_slugs = {p.name for p in (tool_root / "gen").iterdir() if p.is_dir()}
+    findings = []
+    for comp in corpus.components.values():
+        if comp.root and comp.name in tool_slugs:
+            findings.append(Finding("R-LINT-032", SEVERITY_FAIL, comp.root.rel_path, 1,
+                                     f"component slug '{comp.name}' is also a tool component's; "
+                                     "the project's copy would shadow the tool's (D199)"))
+    return findings
+
+
 def rule_glossary_singularity(corpus: Corpus) -> list[Finding]:
     """R-LINT-014. Unaffected by D15."""
     findings = []
@@ -1425,6 +1451,7 @@ ALL_RULES = [
     rule_builds_on_resolution,
     rule_secret_field_safety,
     rule_cli_coverage,
+    rule_tool_slug_shadowing,
     rule_glossary_singularity,
     rule_no_trailing_whitespace,
 ]

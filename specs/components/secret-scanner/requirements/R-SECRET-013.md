@@ -6,7 +6,7 @@
   entry covers that can validly be allowlisted — `"planted-fixture"` for
   a file under `verification/` or `specs/`, else `"public-constant"` for
   a hex-entropy finding. Findings that cannot be allowlisted, such as a
-  secret in `gen/`, are returned as `ineligible`, each with `file`,
+  secret in `gen/`, go in `ineligible`, each with `file`,
   `line`, `rule_id`. Entries sort by `file`, `type`, `hashed_secret`. An
-  invalid (including unsealed) allowlist raises rather than being
+  invalid allowlist (an empty one needs no seal) raises, never
   proposed over.
