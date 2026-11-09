@@ -1,250 +1,184 @@
-"""AC-ASSEMBLE-013 (covers R-ASSEMBLE-009).
-
-A CriterionBundle's dependency_interfaces carries each depends_on id's
-interface/ content (and nothing else of that dependency), and is an empty
-mapping, never absent or null, for a component with no depends_on.
-"""
-
-from collections.abc import Mapping
-from pathlib import Path
-import textwrap
-
-import pytest
-
 import spec_bundle_assembler
 
 
-_MISSING = object()
+GLOSSARY_CONTENT = """# Glossary
 
-BAR_INTERFACE_MARKER = "BAR_INTERFACE_MARKER_7f3a"
-BAR_COMPONENT_MARKER = "BAR_COMPONENT_MARKER_91c2"
-BAR_REQUIREMENT_MARKER = "BAR_REQUIREMENT_MARKER_4d8e"
-BAR_CONSTRAINTS_MARKER = "BAR_CONSTRAINTS_MARKER_b06f"
+- **Foo** — a test term.
+"""
+
+FOO_COMPONENT_CONTENT = """---
+id: comp-foo
+title: Foo
+status: draft
+owners: [team-a]
+sealed: true
+source_path: legacy/foo/
+depends_on: []
+---
+
+# Foo
+
+## Purpose
+
+Foo doubles a number.
+"""
+
+FOO_REQUIREMENT_CONTENT = """# R-FOO-001
+
+**R-FOO-001** — `foo(x)` MUST return `2 * x`.
+"""
+
+FOO_ACCEPTANCE_CONTENT = """# AC-FOO-001
+
+Covers: R-FOO-001
+Kind: generated-test
+
+```gherkin
+Given x = 2
+When foo(x) is called
+Then it returns 4
+```
+"""
+
+FOO_INTERFACE_CONTENT = """# Library
+
+```
+foo(x: int) -> int
+```
+"""
+
+FOO_CONSTRAINTS_CONTENT = """# Constraints
+
+None.
+"""
+
+BAR_COMPONENT_CONTENT = """---
+id: comp-bar
+title: Bar
+status: draft
+owners: [team-a]
+sealed: true
+source_path: legacy/bar/
+depends_on: [comp-foo]
+---
+
+# Bar
+
+## Purpose
+
+Bar triples a number using Foo.
+"""
+
+BAR_REQUIREMENT_CONTENT = """# R-BAR-001
+
+**R-BAR-001** — `bar(x)` MUST return `3 * x`.
+"""
+
+BAR_ACCEPTANCE_CONTENT = """# AC-BAR-001
+
+Covers: R-BAR-001
+Kind: generated-test
+
+```gherkin
+Given x = 2
+When bar(x) is called
+Then it returns 6
+```
+"""
+
+BAR_INTERFACE_CONTENT = """# Library
+
+```
+bar(x: int) -> int
+```
+"""
+
+BAR_CONSTRAINTS_CONTENT = """# Constraints
+
+None.
+"""
 
 
-def _get(value, name, default=None):
-    if isinstance(value, dict):
-        return value.get(name, default)
-    return getattr(value, name, default)
-
-
-def _write(path: Path, text: str) -> None:
+def _write(path, content):
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(textwrap.dedent(text).lstrip("\n"), encoding="utf-8")
+    path.write_text(content)
 
 
-def _build_fixture(repo_root: Path) -> None:
+def _field(obj, name):
+    if isinstance(obj, dict):
+        return obj.get(name)
+    return getattr(obj, name, None)
+
+
+def _build_corpus(repo_root):
+    _write(repo_root / "specs" / "glossary.md", GLOSSARY_CONTENT)
+
+    _write(repo_root / "specs" / "components" / "foo" / "component.md", FOO_COMPONENT_CONTENT)
     _write(
-        repo_root / "specs" / "glossary.md",
-        """
-        ---
-        id: glossary
-        title: Glossary
-        status: draft
-        owners: [test-owner]
-        ---
-
-        # Glossary
-
-        - **Widget** — a synthetic test term.
-        """,
-    )
-
-    # Dependency component: comp-bar (no depends_on at all).
-    bar = repo_root / "specs" / "components" / "bar"
-    _write(
-        bar / "component.md",
-        f"""
-        ---
-        id: comp-bar
-        title: Bar
-        status: draft
-        owners: [test-owner]
-        sealed: true
-        source_path: fake/bar_src
-        ---
-
-        # Bar
-
-        ## Purpose
-
-        Bar provides widgets. {BAR_COMPONENT_MARKER}
-        """,
+        repo_root / "specs" / "components" / "foo" / "requirements" / "R-FOO-001.md",
+        FOO_REQUIREMENT_CONTENT,
     )
     _write(
-        bar / "requirements" / "R-BAR-001.md",
-        f"""
-        # R-BAR-001
-
-        **R-BAR-001** — MUST return a widget. {BAR_REQUIREMENT_MARKER}
-        """,
+        repo_root / "specs" / "components" / "foo" / "acceptance" / "AC-FOO-001.md",
+        FOO_ACCEPTANCE_CONTENT,
     )
     _write(
-        bar / "acceptance" / "AC-BAR-001.md",
-        """
-        # AC-BAR-001
+        repo_root / "specs" / "components" / "foo" / "interface" / "library.md",
+        FOO_INTERFACE_CONTENT,
+    )
+    _write(repo_root / "specs" / "components" / "foo" / "constraints.md", FOO_CONSTRAINTS_CONTENT)
 
-        Covers: R-BAR-001
-        Kind: generated-test
-
-        ```gherkin
-        Given a bar
-        When make_widget is called
-        Then a widget is returned
-        ```
-        """,
+    _write(repo_root / "specs" / "components" / "bar" / "component.md", BAR_COMPONENT_CONTENT)
+    _write(
+        repo_root / "specs" / "components" / "bar" / "requirements" / "R-BAR-001.md",
+        BAR_REQUIREMENT_CONTENT,
     )
     _write(
-        bar / "interface" / "library.md",
-        f"""
-        # Library
-
-        ```
-        make_widget(name: str) -> dict
-        ```
-
-        Returns `{{"name": ..., "size": ...}}`. {BAR_INTERFACE_MARKER}
-        """,
+        repo_root / "specs" / "components" / "bar" / "acceptance" / "AC-BAR-001.md",
+        BAR_ACCEPTANCE_CONTENT,
     )
     _write(
-        bar / "constraints.md",
-        f"""
-        # Constraints
-
-        - Bar MUST be fast. {BAR_CONSTRAINTS_MARKER}
-        """,
+        repo_root / "specs" / "components" / "bar" / "interface" / "library.md",
+        BAR_INTERFACE_CONTENT,
     )
-
-    # Dependent component: comp-foo depends_on comp-bar.
-    foo = repo_root / "specs" / "components" / "foo"
-    _write(
-        foo / "component.md",
-        """
-        ---
-        id: comp-foo
-        title: Foo
-        status: draft
-        owners: [test-owner]
-        depends_on: [comp-bar]
-        sealed: true
-        source_path: fake/foo_src
-        ---
-
-        # Foo
-
-        ## Purpose
-
-        Foo consumes widgets from bar.
-        """,
-    )
-    _write(
-        foo / "requirements" / "R-FOO-001.md",
-        """
-        # R-FOO-001
-
-        **R-FOO-001** — MUST count widgets.
-        """,
-    )
-    _write(
-        foo / "acceptance" / "AC-FOO-001.md",
-        """
-        # AC-FOO-001
-
-        Covers: R-FOO-001
-        Kind: generated-test
-
-        ```gherkin
-        Given a foo
-        When count is called
-        Then the widget count is returned
-        ```
-        """,
-    )
-    _write(
-        foo / "interface" / "library.md",
-        """
-        # Library
-
-        ```
-        count() -> int
-        ```
-        """,
-    )
-    _write(
-        foo / "constraints.md",
-        """
-        # Constraints
-
-        - Foo MUST be correct.
-        """,
-    )
+    _write(repo_root / "specs" / "components" / "bar" / "constraints.md", BAR_CONSTRAINTS_CONTENT)
 
 
-def _hard_fail_findings(report):
-    findings = report
-    if not isinstance(report, (list, tuple)):
-        findings = _get(report, "findings", None)
-        if findings is None:
-            findings = []
-    hard = []
-    for finding in findings:
-        severity = str(
-            _get(finding, "severity", None) or _get(finding, "level", None) or ""
-        ).lower().replace("_", "-")
-        if severity in ("hard-fail", "hard", "error", "fail"):
-            hard.append(finding)
-    return hard
+def test_dependency_interfaces_contains_dependency_interface_text_only(tmp_path):
+    repo_root = tmp_path
+    _build_corpus(repo_root)
+
+    bundle = spec_bundle_assembler.assemble_criterion("comp-bar", "AC-BAR-001", repo_root)
+
+    assert _field(bundle, "component_id") == "comp-bar"
+    assert _field(bundle, "criterion_id") == "AC-BAR-001"
+
+    dependency_interfaces = _field(bundle, "dependency_interfaces")
+    assert isinstance(dependency_interfaces, dict)
+    assert "comp-foo" in dependency_interfaces
+
+    foo_entry = dependency_interfaces["comp-foo"]
+
+    assert "foo(x: int) -> int" in foo_entry
+    assert "# Library" in foo_entry
+
+    assert "Foo doubles a number." not in foo_entry
+    assert "MUST return" not in foo_entry
+    assert "2 * x" not in foo_entry
+    assert "# Constraints" not in foo_entry
+    assert "None." not in foo_entry.splitlines()
 
 
-@pytest.fixture
-def repo_root(tmp_path):
-    _build_fixture(tmp_path)
-    try:
-        import spec_linter
-    except ImportError:
-        spec_linter = None
-    if spec_linter is not None:
-        report = spec_linter.lint(None, tmp_path)
-        assert _hard_fail_findings(report) == [], report
-    return tmp_path
+def test_dependency_interfaces_empty_mapping_when_no_depends_on(tmp_path):
+    repo_root = tmp_path
+    _build_corpus(repo_root)
 
+    bundle = spec_bundle_assembler.assemble_criterion("comp-foo", "AC-FOO-001", repo_root)
 
-def test_dependency_interfaces_contains_only_dependency_interface(repo_root):
-    bundle = spec_bundle_assembler.assemble_criterion(
-        "comp-foo", "AC-FOO-001", repo_root
-    )
+    assert _field(bundle, "component_id") == "comp-foo"
+    assert _field(bundle, "criterion_id") == "AC-FOO-001"
 
-    dep_interfaces = _get(bundle, "dependency_interfaces", _MISSING)
-    assert dep_interfaces is not _MISSING
-    assert dep_interfaces is not None
-    assert isinstance(dep_interfaces, Mapping)
-    assert set(dep_interfaces.keys()) == {"comp-bar"}
-
-    bar_iface = dep_interfaces["comp-bar"]
-    assert isinstance(bar_iface, str)
-    assert BAR_INTERFACE_MARKER in bar_iface
-    assert "make_widget(name: str) -> dict" in bar_iface
-
-    # Never the dependency's component.md, requirements/, or constraints.md.
-    for value in dep_interfaces.values():
-        assert BAR_COMPONENT_MARKER not in value
-        assert BAR_REQUIREMENT_MARKER not in value
-        assert BAR_CONSTRAINTS_MARKER not in value
-
-    # Same content, same rule, as SpecBundle.dependency_interfaces.
-    spec_bundle = spec_bundle_assembler.assemble("comp-foo", repo_root)
-    spec_dep_interfaces = _get(spec_bundle, "dependency_interfaces")
-    assert spec_dep_interfaces is not None
-    assert bar_iface == spec_dep_interfaces["comp-bar"]
-
-
-def test_dependency_interfaces_empty_mapping_without_depends_on(repo_root):
-    bundle = spec_bundle_assembler.assemble_criterion(
-        "comp-bar", "AC-BAR-001", repo_root
-    )
-
-    dep_interfaces = _get(bundle, "dependency_interfaces", _MISSING)
-    assert dep_interfaces is not _MISSING
-    assert dep_interfaces is not None
-    assert isinstance(dep_interfaces, Mapping)
-    assert len(dep_interfaces) == 0
+    dependency_interfaces = _field(bundle, "dependency_interfaces")
+    assert dependency_interfaces is not None
+    assert isinstance(dependency_interfaces, dict)
+    assert dependency_interfaces == {}

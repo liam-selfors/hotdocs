@@ -18,3 +18,9 @@
   question moved to `provenance-checker`, which never consults this
   store) — so a local-only backing carries no risk beyond its own
   (single-machine) hit rate.
+
+  The store URL is read from the environment variable
+  `VAR_CACHE_STORE_URL`. No client for a shared store exists yet, so
+  when it is set to any non-empty value, `get` MUST return `Miss` and
+  `put` MUST validate the result (`R-CACHE-007`) and then store nothing:
+  the unreachable-store case of `R-CACHE-004`, never a crash.

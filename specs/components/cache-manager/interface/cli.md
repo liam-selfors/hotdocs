@@ -1,19 +1,25 @@
 # CLI
 
 ```
-hotdocs cache inspect --spec-bundle-hash=<h> --gate-inputs-hash=<h> \
-  --gate-version=<v> --model-pin=<p> [--repo-root=<dir>]
-hotdocs cache stats [--repo-root=<dir>]
+python -m cache_manager inspect --spec-bundle-hash=<h> --gate-inputs-hash=<h> --gate-version=<v> --model-pin=<p> [--repo-root=<dir>]
+python -m cache_manager stats [--repo-root=<dir>]
 ```
 
-- `inspect` — reports hit/miss for the given key; on hit, prints the stored
-  result's provenance-relevant fields (not the full payload).
-- `stats` — aggregate hit/miss counts, feeding the corpus-wide "cache hit
-  rate" metric (`notes/metrics.md`, Generation phase).
+`main(argv: list[str] | None = None) -> int` takes the tokens after
+`python -m cache_manager` (no `hotdocs` verb routes here) and returns the
+exit code. Each flag also takes the space form (`--model-pin <p>`).
+`--repo-root` defaults to the current directory. Output is one line of
+JSON on stdout:
+
+- `inspect` — `{"result": "miss"}`, or on a hit
+  `{"result": "hit", "gate_type": <t>, "stored_at": <ts>}`; never the
+  payload.
+- `stats` — `{"entry_count": <n>}`, the number of entries the local store
+  currently holds (`0` when `VAR_CACHE_STORE_URL` is set).
 
 **Exit codes:**
 
 | Code | Meaning |
 | --- | --- |
-| `0` | Command completed (a reported "miss" is still exit `0` — it's an answer, not a failure). |
-| `2` | Usage error (malformed key component, unreachable store counted as a `Miss`/empty stats, not an exit-2 error — per R-CACHE-004). |
+| `0` | Command completed; a miss is an answer, not a failure. |
+| `2` | Usage error: no subcommand, an unknown one, or a missing or unknown flag. |

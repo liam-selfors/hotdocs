@@ -15,21 +15,20 @@ source_path: pipeline/criterion-compiler/
 
 Deterministically compiles `kind: compiled` Given/When/Then acceptance
 criteria into executable test scaffolding, with no model involved at any
-step. Permanently sealed (`sealed: true`) — never agent-generated.
+step. Sealed (`sealed: true`): the pipeline never regenerates or swaps it.
 
 ## Rationale
 
-The trust anchor for `compiled`-kind criteria: `compiled`
-criteria are the strongest tier of evidence specifically *because*
-nothing agent-generated sits between the criterion and the check — and
-that argument only holds if the compiler itself is not agent-generated.
-Sealed as a deliberate, permanent design choice, not legacy debt being
-wrapped (§8's original framing for `sealed`): if this component lived
-under `gen/`, trusting a `compiled` criterion would mean trusting an
-agent-generated compiler to correctly compile agent-generated tests for
-agent-generated code — a circularity `compiled` exists specifically to
-avoid. See `specs/architecture/pipeline-decomposition.md` for the fuller
-rationale.
+The trust anchor for `compiled`-kind criteria: they are the strongest
+tier of evidence because nothing model-driven runs between the criterion
+and the check. Its code is generated from this spec like every other
+component's, but it is sealed. `generator` refuses it, and a person
+installs each version only after it passes its generated tests and the
+hand-maintained characterization suite in
+`verification/criterion-compiler/`, which is also the only thing
+`verifier-orchestrator` runs to verify it (`D206`). The trust rests on
+that human-written suite and on the person installing the version, not
+on who wrote the code. See `specs/architecture/pipeline-decomposition.md`.
 
 ## Scope
 
@@ -45,19 +44,10 @@ grammar is intentionally small and fixed, not open English, precisely so this
 component never needs a model call (see Non-functional constraints).
 
 **A circularity this component's own acceptance criteria must resolve:**
-nothing in this spec's Acceptance Criteria section can itself be
-`kind: compiled` — that would mean using the compiler to verify the compiler,
-which proves nothing about whether the compiler is correct independent of its
-own bugs. Resolved as `kind: generated-test` throughout (see
-`acceptance/`): an agent writes test code from this spec's prose,
-independent of — and with no access to — this component's hand-maintained
-implementation. The usual `generated-test` trust argument ("independent
-generation path, different model than the code under test") was framed
-for *generated* code under test; here the code under test is hand-written,
-not generated, which if anything makes the test's independence from it
-*stronger*, not weaker — but this is a real gap in how that argument was
-originally phrased, worth a note back to `notes/initial-ideas.md` (flagged, not
-silently resolved by just reusing the label).
+none of them can be `kind: compiled`, since using the compiler to verify
+the compiler proves nothing about its own bugs. All are
+`kind: generated-test`, written by an agent from this spec's prose with no
+access to the implementation.
 
 ## Definitions
 
@@ -79,14 +69,10 @@ Purpose above for why.
 
 ## Acceptance criteria
 
-See `acceptance/`. All `kind: generated-test`, not `compiled` — using the
-compiler to verify the compiler would prove nothing about correctness
-independent of the compiler's own bugs (see Purpose above). An agent writes
-these tests from this prose, with no access to the hand-maintained
-implementation at `pipeline/criterion-compiler/` — the same independence
-argument `generated-test` normally makes between an agent's test and an
-agent's *generated* code, just applied here between an agent's test and a
-*human's* code, which is at least as independent.
+See `acceptance/`. All `kind: generated-test`, not `compiled` (see Scope).
+Sealed verification runs the hand-maintained characterization suite
+(`verification/criterion-compiler/test_*.py`), which a person writes and
+no generated version ever touches.
 
 ## Non-functional constraints
 
@@ -161,3 +147,6 @@ See `constraints.md`.
   import convention any direct dependent MUST use to locate this
   sealed component, found once a real `verifier-orchestrator`
   candidate used a static top-level import instead and failed.
+- `D206`: generated from this spec and installed at `source_path` with
+  `--sealed-install`, replacing the hand-written implementation. Still
+  sealed; the characterization suite stays hand-maintained.

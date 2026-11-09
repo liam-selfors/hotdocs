@@ -15,13 +15,15 @@ def test_ac_cache_001_miss_on_unstored_key(repo_root):
 
 
 def test_ac_cache_002_key_serialization_is_byte_identical(repo_root):
-    k1 = CacheKey("sha256:x", "sha256:y", "compiler@1.0.0", "claude-sonnet-5")
+    """R-CACHE-002 -- the key is its four fields, however a caller builds
+    it: a put under one construction is a hit under the other."""
+    k1 = CacheKey("sha256:x", "sha256:y", "license_scanner@1.0.0", "claude-sonnet-5")
     k2 = CacheKey(
-        model_pin="claude-sonnet-5", gate_version="compiler@1.0.0",
+        model_pin="claude-sonnet-5", gate_version="license_scanner@1.0.0",
         gate_inputs_hash="sha256:y", spec_bundle_hash="sha256:x",
     )
-    assert k1.serialized() == k2.serialized()
-    assert k1.digest() == k2.digest()
+    put(k1, make_license_result(), repo_root=repo_root)
+    assert isinstance(get(k2, repo_root=repo_root), CachedResult)
 
 
 def test_ac_cache_003_concurrent_identical_writes_not_corrupted(repo_root):

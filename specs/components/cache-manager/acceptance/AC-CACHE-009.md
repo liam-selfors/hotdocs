@@ -4,11 +4,13 @@ Covers: R-CACHE-003
 Kind: generated-test
 
 ```gherkin
-Given two concurrent put calls for the same cache key with two different,
-  independently-valid result payloads (the case G-CACHE-001 permits for a
-  gate whose own constraints.md scopes determinism narrowly)
-When both complete
-Then a subsequent get for that key returns exactly one of the two
-  payloads, whole and byte-identical to one of the writes — never a
-  merge of both, never a partial write of either
+Given two valid generator results for the same key, built under
+  gate_version "generator@1.0.0" with gate_type "generator", whose
+  payloads have the same required keys and differ only in files:
+  {"a.py": "A"} versus {"b.py": "B"}
+When two threads put them concurrently, repeated over 20 trials with a
+  fresh repo_root each
+Then after each trial get returns a CachedResult whose payload equals
+  one of the two payloads exactly, never one with both a.py and b.py
+  in files and never a missing or truncated entry
 ```

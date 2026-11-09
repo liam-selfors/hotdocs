@@ -20,10 +20,8 @@ FROM read_json('{repo_root}/verification/*/.provenance.json', filename:=true);
 
   **MUST degrade to an empty, correctly-shaped view — never an error —
   when no `.provenance.json` files exist yet** (`D13`): `read_json`
-  raises on a glob matching zero files, unlike `read_text`, and "no
-  component has ever been cold-regenerated through a real pipeline" is
-  this corpus's own actual, expected state today, not a fixture
-  artifact. `load_views` (`R-GQE-007`) MUST check for at least one
+  raises on a glob matching zero files, unlike `read_text`, and a new
+  project has no manifests yet. `load_views` (`R-GQE-007`) MUST check for at least one
   matching file first and fall back to an explicitly-typed empty
   `SELECT ... WHERE false` (`SPEC_GUIDELINES.md` §7's field list) when
   none exists, so a query naming any of this view's columns still

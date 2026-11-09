@@ -1,286 +1,184 @@
-"""AC-ASSEMBLE-007 — spec_bundle_hash is present and reproducible from the
-bundle's own contents (covers R-ASSEMBLE-007)."""
-
-import dataclasses
 import hashlib
-import importlib.util
-import json
-import re
-import sys
-import textwrap
-from pathlib import Path
-
-import pytest
 
 import spec_bundle_assembler
 
 
-COMPONENT_ID = "comp-hash-fixture"
-COMPONENT_SLUG = "hash-fixture"
+def _get(bundle, name):
+    return bundle.get(name) if isinstance(bundle, dict) else getattr(bundle, name, None)
 
 
-def _get(value, name, default=None):
-    if isinstance(value, dict):
-        return value.get(name, default)
-    return getattr(value, name, default)
-
-
-def _write(path, content):
+def _write(root, rel_path, content):
+    path = root / rel_path
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(textwrap.dedent(content).lstrip("\n"), encoding="utf-8")
+    path.write_text(content, encoding="utf-8")
 
 
-def _build_fixture(repo_root):
-    specs = repo_root / "specs"
+def _build_corpus(repo_root):
     _write(
-        specs / "glossary.md",
-        """
-        ---
-        id: glossary
-        title: Glossary
-        status: draft
-        owners: [fixture-owner]
-        ---
-
-        # Glossary
-
-        - **Widget** — a fixture-only term used by the hash fixture.
-        """,
+        repo_root,
+        "specs/glossary.md",
+        "# Glossary\n\n- **Foo** — a test term.\n",
     )
 
-    comp_dir = specs / "components" / COMPONENT_SLUG
     _write(
-        comp_dir / "component.md",
-        f"""
-        ---
-        id: {COMPONENT_ID}
-        title: Hash Fixture
-        status: draft
-        owners: [fixture-owner]
-        sealed: true
-        source_path: legacy/hash_fixture.py
-        depends_on: []
-        ---
-
-        # Hash Fixture
-
-        ## Purpose
-
-        A synthetic component used only to exercise spec bundle hashing.
-        """,
+        repo_root,
+        "specs/components/foo/component.md",
+        "---\n"
+        "id: comp-foo\n"
+        "title: Foo\n"
+        "status: draft\n"
+        "owners: [team-a]\n"
+        "sealed: true\n"
+        "source_path: legacy/foo/\n"
+        "depends_on: []\n"
+        "---\n"
+        "\n"
+        "# Foo\n"
+        "\n"
+        "## Purpose\n"
+        "\n"
+        "Foo doubles a number.\n",
     )
     _write(
-        comp_dir / "requirements" / "R-HASHFIX-001.md",
-        """
-        # R-HASHFIX-001
-
-        **R-HASHFIX-001** — The fixture MUST return a widget when asked.
-        """,
+        repo_root,
+        "specs/components/foo/requirements/R-FOO-001.md",
+        "# R-FOO-001\n\n**R-FOO-001** — `foo(x)` MUST return `2 * x`.\n",
     )
     _write(
-        comp_dir / "acceptance" / "AC-HASHFIX-001.md",
-        """
-        # AC-HASHFIX-001
-
-        Covers: R-HASHFIX-001
-        Kind: generated-test
-
-        ```gherkin
-        Given a request for a widget
-        When the fixture is asked
-        Then it returns a widget
-        ```
-        """,
+        repo_root,
+        "specs/components/foo/acceptance/AC-FOO-001.md",
+        "# AC-FOO-001\n"
+        "\n"
+        "Covers: R-FOO-001\n"
+        "Kind: generated-test\n"
+        "\n"
+        "```gherkin\n"
+        "Given x = 2\n"
+        "When foo(x) is called\n"
+        "Then it returns 4\n"
+        "```\n",
     )
     _write(
-        comp_dir / "interface" / "library.md",
-        """
-        # Library
-
-        ```
-        get_widget() -> str
-        ```
-        """,
+        repo_root,
+        "specs/components/foo/interface/library.md",
+        "# Library\n\n```\nfoo(x: int) -> int\n```\n",
     )
     _write(
-        comp_dir / "constraints.md",
-        """
-        # Constraints
+        repo_root,
+        "specs/components/foo/constraints.md",
+        "# Constraints\n\nNone.\n",
+    )
+    _write(repo_root, "legacy/foo/foo.py", "def foo(x): return 2 * x\n")
 
-        - No network access.
-        """,
+    _write(
+        repo_root,
+        "specs/components/bar/component.md",
+        "---\n"
+        "id: comp-bar\n"
+        "title: Bar\n"
+        "status: draft\n"
+        "owners: [team-a]\n"
+        "sealed: true\n"
+        "source_path: legacy/bar/\n"
+        "depends_on: [comp-foo]\n"
+        "---\n"
+        "\n"
+        "# Bar\n"
+        "\n"
+        "## Purpose\n"
+        "\n"
+        "Bar uses Foo.\n",
+    )
+    _write(
+        repo_root,
+        "specs/components/bar/requirements/R-BAR-001.md",
+        "# R-BAR-001\n\n**R-BAR-001** — `bar(x)` MUST return `foo(x) + 1`.\n",
+    )
+    _write(
+        repo_root,
+        "specs/components/bar/acceptance/AC-BAR-001.md",
+        "# AC-BAR-001\n"
+        "\n"
+        "Covers: R-BAR-001\n"
+        "Kind: generated-test\n"
+        "\n"
+        "```gherkin\n"
+        "Given x = 2\n"
+        "When bar(x) is called\n"
+        "Then it returns 5\n"
+        "```\n",
+    )
+    _write(
+        repo_root,
+        "specs/components/bar/interface/library.md",
+        "# Library\n\n```\nbar(x: int) -> int\n```\n",
+    )
+    _write(
+        repo_root,
+        "specs/components/bar/constraints.md",
+        "# Constraints\n\nNone.\n",
+    )
+    _write(repo_root, "legacy/bar/bar.py", "def bar(x): return foo(x) + 1\n")
+
+
+_HASHED_PATHS = [
+    "legacy/foo/foo.py",
+    "specs/components/bar/component.md",
+    "specs/components/bar/constraints.md",
+    "specs/components/bar/interface/library.md",
+    "specs/components/bar/requirements/R-BAR-001.md",
+    "specs/components/foo/component.md",
+    "specs/components/foo/interface/library.md",
+    "specs/glossary.md",
+]
+
+
+def _expected_hash(repo_root, mode):
+    stream = mode.encode("utf-8") + b"\x00"
+    for rel in sorted(set(_HASHED_PATHS)):
+        data = (repo_root / rel).read_bytes()
+        stream += rel.encode("utf-8") + b"\x00" + data + b"\x00"
+    return "sha256:" + hashlib.sha256(stream).hexdigest()
+
+
+def test_spec_bundle_hash_matches_defined_stream(tmp_path):
+    repo_root = tmp_path
+    _build_corpus(repo_root)
+
+    bundle = spec_bundle_assembler.assemble("comp-bar", repo_root, mode="cold")
+    actual_hash = _get(bundle, "spec_bundle_hash")
+
+    assert actual_hash == _expected_hash(repo_root, "cold")
+
+
+def test_spec_bundle_hash_unchanged_by_dependency_provenance_manifest(tmp_path):
+    repo_root = tmp_path
+    _build_corpus(repo_root)
+
+    bundle_before = spec_bundle_assembler.assemble("comp-bar", repo_root, mode="cold")
+    hash_before = _get(bundle_before, "spec_bundle_hash")
+
+    _write(repo_root, "legacy/foo/.provenance.json", '{"anything": "goes"}')
+
+    bundle_after = spec_bundle_assembler.assemble("comp-bar", repo_root, mode="cold")
+    hash_after = _get(bundle_after, "spec_bundle_hash")
+
+    assert hash_after == hash_before
+
+
+def test_spec_bundle_hash_changes_when_dependency_code_changes(tmp_path):
+    repo_root = tmp_path
+    _build_corpus(repo_root)
+
+    bundle_before = spec_bundle_assembler.assemble("comp-bar", repo_root, mode="cold")
+    hash_before = _get(bundle_before, "spec_bundle_hash")
+
+    foo_py = repo_root / "legacy/foo/foo.py"
+    foo_py.write_text(
+        foo_py.read_text(encoding="utf-8") + "\n# extra line\n", encoding="utf-8"
     )
 
+    bundle_after = spec_bundle_assembler.assemble("comp-bar", repo_root, mode="cold")
+    hash_after = _get(bundle_after, "spec_bundle_hash")
 
-def _load_lint():
-    try:
-        import spec_linter  # noqa: F401
-
-        return spec_linter.lint
-    except ImportError:
-        pass
-    # Fall back to the real repo's gen/spec-linter/, located relative to the
-    # component under test's own module file (gen/<slug>/<module>.py).
-    module_file = Path(spec_bundle_assembler.__file__).resolve()
-    candidates = []
-    for parent in module_file.parents:
-        candidates.append(parent / "gen" / "spec-linter" / "spec_linter.py")
-        candidates.append(
-            parent / "gen" / "spec-linter" / "spec_linter" / "__init__.py"
-        )
-    for module_path in candidates:
-        if module_path.is_file():
-            spec = importlib.util.spec_from_file_location(
-                "spec_linter", module_path
-            )
-            module = importlib.util.module_from_spec(spec)
-            sys.modules["spec_linter"] = module
-            spec.loader.exec_module(module)
-            return module.lint
-    pytest.fail("could not locate spec_linter.lint to check the lint precondition")
-
-
-_HARD_FAIL_VALUES = {"hard-fail", "hard_fail", "hardfail", "hard", "error", "fail"}
-
-
-def _hard_fail_findings(report):
-    if isinstance(report, (list, tuple)):
-        findings = list(report)
-    else:
-        findings = _get(report, "findings", None)
-        if findings is None:
-            findings = _get(report, "hard_fails", None) or []
-            return list(findings)
-        findings = list(findings)
-    hard = []
-    for finding in findings:
-        for key in ("severity", "level", "kind"):
-            value = _get(finding, key, None)
-            if value is None:
-                continue
-            value = getattr(value, "value", value)
-            if str(value).lower() in _HARD_FAIL_VALUES:
-                hard.append(finding)
-                break
-    return hard
-
-
-def _bundle_to_dict(bundle):
-    if isinstance(bundle, dict):
-        return dict(bundle)
-    if dataclasses.is_dataclass(bundle):
-        return dataclasses.asdict(bundle)
-    for method in ("to_dict", "model_dump", "dict", "_asdict"):
-        fn = getattr(bundle, method, None)
-        if callable(fn):
-            try:
-                result = fn()
-            except TypeError:
-                continue
-            if isinstance(result, dict):
-                return dict(result)
-    return dict(vars(bundle))
-
-
-def _jsonable(value):
-    if isinstance(value, Path):
-        return str(value)
-    if dataclasses.is_dataclass(value) and not isinstance(value, type):
-        return _jsonable(dataclasses.asdict(value))
-    if isinstance(value, dict):
-        return {str(k): _jsonable(v) for k, v in value.items()}
-    if isinstance(value, (list, tuple)):
-        return [_jsonable(v) for v in value]
-    return value
-
-
-def _strip_prefix(digest):
-    digest = str(digest)
-    return digest.split(":", 1)[1] if ":" in digest else digest
-
-
-def _candidate_digests(bundle_dict):
-    """Plausible canonical recomputations of the bundle's own content hash."""
-    base = _jsonable(bundle_dict)
-    payloads = []
-
-    without_hash = {k: v for k, v in base.items() if k != "spec_bundle_hash"}
-    payloads.append(without_hash)
-    payloads.append({**without_hash, "spec_bundle_hash": None})
-    payloads.append({**without_hash, "spec_bundle_hash": ""})
-    without_hash_hint = {k: v for k, v in without_hash.items() if k != "hint_code"}
-    payloads.append(without_hash_hint)
-
-    digests = set()
-    for payload in payloads:
-        for dumps_kwargs in (
-            {"sort_keys": True, "separators": (",", ":")},
-            {"sort_keys": True, "separators": (",", ":"), "ensure_ascii": False},
-            {"sort_keys": True},
-            {"sort_keys": True, "ensure_ascii": False},
-            {"sort_keys": True, "indent": 2},
-            {"sort_keys": True, "indent": 2, "ensure_ascii": False},
-        ):
-            text = json.dumps(payload, **dumps_kwargs)
-            digests.add(hashlib.sha256(text.encode("utf-8")).hexdigest())
-    return digests
-
-
-@pytest.fixture
-def repo_root(tmp_path):
-    _build_fixture(tmp_path)
-    lint = _load_lint()
-    report = lint(None, tmp_path)
-    hard = _hard_fail_findings(report)
-    assert hard == [], f"fixture corpus is not lint-clean: {hard!r}"
-    return tmp_path
-
-
-def test_spec_bundle_hash_present_and_reproducible(repo_root):
-    bundle = spec_bundle_assembler.assemble(COMPONENT_ID, repo_root)
-
-    assert _get(bundle, "component_id") == COMPONENT_ID
-
-    spec_bundle_hash = _get(bundle, "spec_bundle_hash")
-    assert spec_bundle_hash, "spec_bundle_hash must be present and non-empty"
-    assert isinstance(spec_bundle_hash, str)
-    assert re.fullmatch(r"(sha256:)?[0-9a-f]{64}", spec_bundle_hash), (
-        f"spec_bundle_hash is not a sha256 content hash: {spec_bundle_hash!r}"
-    )
-
-    bundle_dict = _bundle_to_dict(bundle)
-    recomputed = _candidate_digests(bundle_dict)
-    assert _strip_prefix(spec_bundle_hash) in recomputed, (
-        "recomputing spec_bundle_hash from the bundle's own contents did not "
-        f"reproduce {spec_bundle_hash!r}"
-    )
-
-
-def test_spec_bundle_hash_stable_across_reassembly(repo_root):
-    first = spec_bundle_assembler.assemble(COMPONENT_ID, repo_root)
-    second = spec_bundle_assembler.assemble(COMPONENT_ID, repo_root)
-
-    first_hash = _get(first, "spec_bundle_hash")
-    second_hash = _get(second, "spec_bundle_hash")
-    assert first_hash
-    assert first_hash == second_hash
-
-
-def test_spec_bundle_hash_tracks_bundle_contents(repo_root):
-    before = spec_bundle_assembler.assemble(COMPONENT_ID, repo_root)
-    before_hash = _get(before, "spec_bundle_hash")
-
-    constraints = (
-        repo_root / "specs" / "components" / COMPONENT_SLUG / "constraints.md"
-    )
-    constraints.write_text(
-        constraints.read_text(encoding="utf-8") + "- No disk writes.\n",
-        encoding="utf-8",
-    )
-
-    after = spec_bundle_assembler.assemble(COMPONENT_ID, repo_root)
-    after_hash = _get(after, "spec_bundle_hash")
-
-    assert after_hash
-    assert after_hash != before_hash
-    assert _strip_prefix(after_hash) in _candidate_digests(_bundle_to_dict(after))
+    assert hash_after != hash_before

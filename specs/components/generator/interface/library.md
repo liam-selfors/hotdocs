@@ -13,14 +13,19 @@ requires an external call. Side effects: in `cold` mode, writes
 reads through `cache-manager` but writes to neither destination
 (`R-GEN-016`).
 
-`repo_root` and `llm_backend` (added to fill two real, pre-existing
-gaps) — `repo_root` locates `specs/components/<name>/component.md`'s
-`sealed`/`source_path` frontmatter and `gen/<component>/.overrides.json`
-for `R-GEN-009`'s precondition check, and the write target for
-`gen/<component>/` itself; `bundle` alone never carried this (its
-`spec` field excludes frontmatter by construction, `R-ASSEMBLE-001`),
-so there was never a way to resolve either from the bundle alone.
-`llm_backend`, passed straight through to `llm-endpoint`'s own
-`backend` parameter, is how `AC-GEN-001`–`013`'s "injected mock model"
-is actually wired in — every one of this component's own
-`generated-test` criteria already required one.
+`repo_root` locates `component.md`'s `sealed`/`source_path` and
+`gen/<component>/.overrides.json` for `R-GEN-009`, and is where
+`gen/<component>/` is written. `llm_backend` goes straight to
+`llm-endpoint`'s `backend` parameter: the criteria's injected mock model.
+
+```
+GATE_VERSION = "generator@2.0.0"
+PROMPT_VERSION = "v10"
+```
+
+The cache key (`R-GEN-005`) is `cache-manager`'s `CacheKey` with
+`spec_bundle_hash` the bundle's, `gate_version` `GATE_VERSION`,
+`model_pin` the `model` argument, and `gate_inputs_hash` `"sha256:"`
+plus the SHA-256 hex digest of
+`json.dumps(sorted(retry_feedback or []), sort_keys=True)` encoded as
+UTF-8. Every result's `prompt_version` is `PROMPT_VERSION`.

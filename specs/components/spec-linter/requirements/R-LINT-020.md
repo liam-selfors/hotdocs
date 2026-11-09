@@ -4,8 +4,7 @@
   `depends_on`), and R-LINT-018 (`depends_on_guarantees` resolution) MUST
   be implemented as queries over the `nodes`/`edges` views named in
   `specs/architecture/graph-query-engine.md`'s "Query surface" section —
-  not independently-written frontmatter parsing or traversal code. See
-  that document's "Scope of adoption" section for the full rationale.
+  not independently-written frontmatter parsing or traversal code.
 
   Implementation requirement, not behavioral: R-LINT-018's second check
   is a join against `nodes.owner_component_id`. R-LINT-008/009 are

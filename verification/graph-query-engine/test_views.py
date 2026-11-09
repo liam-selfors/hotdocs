@@ -64,29 +64,43 @@ def test_ac_gqe_004_component_context_multiline_purpose(con):
     assert "\n" in purpose.strip()  # genuinely multi-line, not truncated to one line
 
 
-def test_ac_gqe_005_component_provenance_degrades_empty(con):
-    # This repo has no real pipeline runs yet (no generator exists) --
-    # confirms the degrade-to-empty path (R-GQE-005), not a live file.
-    assert not any(REPO_ROOT.glob("verification/*/.provenance.json"))
-    n = con.execute("SELECT count(*) FROM component_provenance").fetchone()[0]
-    assert n == 0
-    # The view must still have every documented column, queryable, just empty.
-    cols = {d[0] for d in con.execute("DESCRIBE component_provenance").fetchall()}
+def test_ac_gqe_005_component_provenance_degrades_empty(tmp_path):
+    """R-GQE-005 -- a corpus with no .provenance.json at all (a new
+    project) still gets a queryable, correctly-shaped, empty view."""
+    c = _synthetic_corpus(tmp_path, {})
+    assert c.execute("SELECT count(*) FROM component_provenance").fetchone()[0] == 0
+    cols = {d[0] for d in c.execute("DESCRIBE component_provenance").fetchall()}
     assert {"component_id", "verification_report", "license_scan", "secret_scan", "provenance_hit"} <= cols
 
 
-def test_ac_gqe_006_component_size_matches_spec_linter(con):
-    sys_path_added = str(REPO_ROOT / "gen" / "spec-linter")
-    import sys
-    if sys_path_added not in sys.path:
-        sys.path.insert(0, sys_path_added)
-    import spec_linter
-    corpus = spec_linter.load_corpus(REPO_ROOT)
-    expected = spec_linter._size_measurements(corpus)
-    rows = con.execute("SELECT component_id, word_count FROM component_size").fetchall()
-    actual = dict(rows)
-    for name, dims in expected.items():
-        assert actual.get(name) == dims["component_doc_words"], name
+def test_ac_gqe_005_component_provenance_reads_a_manifest(tmp_path):
+    """R-GQE-005 -- one row per verification/<slug>/.provenance.json,
+    keyed comp-<slug>."""
+    manifest = tmp_path / "verification" / "foo" / ".provenance.json"
+    manifest.parent.mkdir(parents=True)
+    manifest.write_text(
+        '{"spec_bundle_hash": "sha256:00", "model_pin": "m", "prompt_version": "v1",'
+        ' "retry_feedback": null, "pipeline_version": "v1", "gate_versions": {},'
+        ' "provenance_hit": false, "generated_at": "2026-01-01T00:00:00Z",'
+        ' "verification_run_id": "r", "verification_report": {"overall": "pass"},'
+        ' "license_scan": {}, "secret_scan": {}}'
+    )
+    c = _synthetic_corpus(tmp_path, {})
+    rows = c.execute("SELECT component_id, provenance_hit FROM component_provenance").fetchall()
+    assert rows == [("comp-foo", False)]
+
+
+def test_ac_gqe_006_component_size_counts_words_after_frontmatter(con):
+    """R-GQE-006 -- word_count is every whitespace-separated word in a
+    component's .md files, frontmatter excluded, computed here
+    independently of spec-linter (which reads this same view, D13)."""
+    expected = {}
+    for path in (REPO_ROOT / "specs" / "components").glob("*/**/*.md"):
+        name = path.relative_to(REPO_ROOT / "specs" / "components").parts[0]
+        text = re.sub(r"^---\n.*?\n---\n", "", path.read_text(encoding="utf-8"), count=1, flags=re.S)
+        expected[name] = expected.get(name, 0) + len(text.split())
+    actual = dict(con.execute("SELECT component_id, word_count FROM component_size").fetchall())
+    assert actual == expected
 
 
 def test_ac_gqe_007_load_views_idempotent(con):

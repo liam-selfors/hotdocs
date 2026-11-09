@@ -10,6 +10,5 @@ Given one requirement file over 500 words and a second requirement file
 When the linter runs
 Then the first file gets a fail-severity R-LINT-023 finding naming its
   own word count, the second file gets no R-LINT-023 finding, and
-  R-LINT-012's component_doc_words check does not fire — confirming the two
-  rules catch genuinely different things
+  R-LINT-012's component_doc_words check does not fire
 ```

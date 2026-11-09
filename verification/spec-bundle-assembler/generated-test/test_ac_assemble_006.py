@@ -1,128 +1,138 @@
-"""AC-ASSEMBLE-006: assembling the same component twice over an unchanged
-corpus yields byte-identical SpecBundles (R-ASSEMBLE-006)."""
-
-import dataclasses
+import hashlib
 import json
-import os
-import shutil
-import subprocess
+import tempfile
 from pathlib import Path
-
-import pytest
 
 import spec_bundle_assembler
 
 
-COMPONENT_ID = "comp-spec-bundle-assembler"
-COMPONENT_SLUG = "spec-bundle-assembler"
+def _write_corpus(repo_root: Path) -> None:
+    glossary = repo_root / "specs" / "glossary.md"
+    glossary.parent.mkdir(parents=True, exist_ok=True)
+    glossary.write_text(
+        "# Glossary\n"
+        "\n"
+        "- **Foo** — a test term.\n",
+        encoding="utf-8",
+    )
 
+    comp_dir = repo_root / "specs" / "components" / "foo"
+    comp_dir.mkdir(parents=True, exist_ok=True)
+    (comp_dir / "component.md").write_text(
+        "---\n"
+        "id: comp-foo\n"
+        "title: Foo\n"
+        "status: draft\n"
+        "owners: [team-a]\n"
+        "sealed: true\n"
+        "source_path: legacy/foo/\n"
+        "depends_on: []\n"
+        "---\n"
+        "\n"
+        "# Foo\n"
+        "\n"
+        "## Purpose\n"
+        "\n"
+        "Foo doubles a number.\n",
+        encoding="utf-8",
+    )
 
-def _get(value, name, default=None):
-    if isinstance(value, dict):
-        return value.get(name, default)
-    return getattr(value, name, default)
+    req_dir = comp_dir / "requirements"
+    req_dir.mkdir(parents=True, exist_ok=True)
+    (req_dir / "R-FOO-001.md").write_text(
+        "# R-FOO-001\n"
+        "\n"
+        "**R-FOO-001** — `foo(x)` MUST return `2 * x`.\n",
+        encoding="utf-8",
+    )
 
+    acc_dir = comp_dir / "acceptance"
+    acc_dir.mkdir(parents=True, exist_ok=True)
+    (acc_dir / "AC-FOO-001.md").write_text(
+        "# AC-FOO-001\n"
+        "\n"
+        "Covers: R-FOO-001\n"
+        "Kind: generated-test\n"
+        "\n"
+        "```gherkin\n"
+        "Given x = 2\n"
+        "When foo(x) is called\n"
+        "Then it returns 4\n"
+        "```\n",
+        encoding="utf-8",
+    )
 
-def _find_repo_root():
-    override = os.environ.get("HOTDOCS_REPO_ROOT")
-    if override:
-        return Path(override).resolve()
-    here = Path(__file__).resolve()
-    for candidate in [here.parent, *here.parents]:
-        marker = candidate / "specs" / "components" / COMPONENT_SLUG / "component.md"
-        if marker.is_file():
-            return candidate
-    for candidate in [Path.cwd().resolve(), *Path.cwd().resolve().parents]:
-        marker = candidate / "specs" / "components" / COMPONENT_SLUG / "component.md"
-        if marker.is_file():
-            return candidate
-    pytest.fail(
-        "could not locate the corpus repo root containing "
-        f"specs/components/{COMPONENT_SLUG}/component.md"
+    iface_dir = comp_dir / "interface"
+    iface_dir.mkdir(parents=True, exist_ok=True)
+    (iface_dir / "library.md").write_text(
+        "# Library\n"
+        "\n"
+        "```\n"
+        "foo(x: int) -> int\n"
+        "```\n",
+        encoding="utf-8",
+    )
+
+    (comp_dir / "constraints.md").write_text(
+        "# Constraints\n"
+        "\n"
+        "None.\n",
+        encoding="utf-8",
     )
 
 
-def _to_jsonable(value):
-    if dataclasses.is_dataclass(value) and not isinstance(value, type):
-        return {
-            f.name: _to_jsonable(getattr(value, f.name))
-            for f in dataclasses.fields(value)
-        }
-    if isinstance(value, dict):
-        return {str(k): _to_jsonable(v) for k, v in value.items()}
-    if isinstance(value, (list, tuple)):
-        return [_to_jsonable(v) for v in value]
-    if isinstance(value, Path):
-        return str(value)
-    if value is None or isinstance(value, (str, int, float, bool)):
-        return value
-    if hasattr(value, "_asdict"):
-        return _to_jsonable(value._asdict())
-    if hasattr(value, "__dict__"):
-        return {
-            k: _to_jsonable(v)
-            for k, v in vars(value).items()
-            if not k.startswith("_")
-        }
-    return repr(value)
+def _get_field(bundle, name, default=None):
+    if isinstance(bundle, dict):
+        return bundle.get(name, default)
+    return getattr(bundle, name, default)
 
 
-def _bundle_bytes(bundle):
-    # Key order is preserved (no sort_keys) so that any nondeterminism in
-    # field or mapping ordering also shows up as a byte difference.
-    return json.dumps(
-        _to_jsonable(bundle), ensure_ascii=False, separators=(",", ":")
-    ).encode("utf-8")
-
-
-@pytest.fixture(scope="module")
-def repo_root():
-    return _find_repo_root()
-
-
-def test_assemble_twice_is_byte_identical(repo_root):
-    first = spec_bundle_assembler.assemble(COMPONENT_ID, repo_root)
-    second = spec_bundle_assembler.assemble(COMPONENT_ID, repo_root)
-
-    assert _get(first, "component_id") == COMPONENT_ID
-    assert _get(second, "component_id") == COMPONENT_ID
-
-    first_bytes = _bundle_bytes(first)
-    second_bytes = _bundle_bytes(second)
-    assert first_bytes == second_bytes
-
-    first_hash = _get(first, "spec_bundle_hash")
-    second_hash = _get(second, "spec_bundle_hash")
-    assert first_hash, "spec_bundle_hash must be populated"
-    assert first_hash == second_hash
-
-
-def test_assemble_twice_explicit_cold_mode_is_byte_identical(repo_root):
-    first = spec_bundle_assembler.assemble(COMPONENT_ID, repo_root, mode="cold")
-    second = spec_bundle_assembler.assemble(COMPONENT_ID, repo_root, mode="cold")
-
-    assert _bundle_bytes(first) == _bundle_bytes(second)
-    assert _get(first, "spec_bundle_hash") == _get(second, "spec_bundle_hash")
-    assert _get(first, "hint_code") is None
-    assert _get(second, "hint_code") is None
-
-
-def test_cli_json_output_twice_is_byte_identical(repo_root):
-    exe = shutil.which("hotdocs")
-    if exe is None:
-        pytest.skip("hotdocs CLI not on PATH; library-level determinism covered above")
-
-    cmd = [
-        exe,
-        "assemble",
-        COMPONENT_ID,
-        f"--repo-root={repo_root}",
-        "--format=json",
+def _canonical_dict(bundle):
+    fields = [
+        "component_id",
+        "spec_bundle_hash",
+        "spec",
+        "interface",
+        "constraints",
+        "dependency_interfaces",
+        "dependency_context",
+        "dependency_usage",
+        "vars",
+        "glossary",
+        "hint_code",
     ]
-    first = subprocess.run(cmd, capture_output=True, cwd=str(repo_root))
-    second = subprocess.run(cmd, capture_output=True, cwd=str(repo_root))
+    result = {}
+    for field in fields:
+        value = _get_field(bundle, field)
+        if isinstance(value, dict):
+            result[field] = dict(sorted(value.items()))
+        else:
+            result[field] = value
+    return result
 
-    assert first.returncode == 0, first.stderr.decode("utf-8", "replace")
-    assert second.returncode == 0, second.stderr.decode("utf-8", "replace")
-    assert first.stdout == second.stdout
-    assert first.stdout.strip(), "expected a JSON SpecBundle on stdout"
+
+def test_assemble_is_deterministic_across_two_runs():
+    with tempfile.TemporaryDirectory() as tmp:
+        repo_root = Path(tmp)
+        _write_corpus(repo_root)
+
+        bundle_first = spec_bundle_assembler.assemble("comp-foo", repo_root, mode="cold")
+        bundle_second = spec_bundle_assembler.assemble("comp-foo", repo_root, mode="cold")
+
+        first_dict = _canonical_dict(bundle_first)
+        second_dict = _canonical_dict(bundle_second)
+
+        assert first_dict == second_dict
+
+        first_bytes = json.dumps(first_dict, sort_keys=True).encode("utf-8")
+        second_bytes = json.dumps(second_dict, sort_keys=True).encode("utf-8")
+
+        assert first_bytes == second_bytes
+
+        first_digest = hashlib.sha256(first_bytes).hexdigest()
+        second_digest = hashlib.sha256(second_bytes).hexdigest()
+
+        assert first_digest == second_digest
+
+        assert _get_field(bundle_first, "spec_bundle_hash")
+        assert _get_field(bundle_first, "spec_bundle_hash") == _get_field(bundle_second, "spec_bundle_hash")

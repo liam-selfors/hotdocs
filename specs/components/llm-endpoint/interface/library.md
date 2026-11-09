@@ -2,7 +2,18 @@
 
 ```
 complete(prompt: str, model: str, *, backend=None, **params) -> ModelResponse
+parse_model(model: str) -> tuple[str | None, str]
+resolve_provider(model: str, config: dict | None = None) -> dict
+DEFAULT_TIMEOUT_SECONDS = 600
 ```
+
+`complete` returns a plain dict with exactly `ModelResponse`'s keys.
+`parse_model` splits an identifier into `(provider, model)`, the provider
+`None` for a bare name (`R-ENDPOINT-002`). `resolve_provider` returns
+`{provider, model, base_url, api_key_env, timeout_seconds}` for an
+identifier under `config` (`load_config`'s shape, or `None`), filling a
+provider's defaults from `PROVIDERS` and `DEFAULT_TIMEOUT_SECONDS`; both
+raise `ModelResolutionError` exactly where `R-ENDPOINT-002` says.
 
 Not a pure function: it reaches a network (or the `claude` command).
 `model` is `<provider>:<model>` or a bare name (`R-ENDPOINT-002`).

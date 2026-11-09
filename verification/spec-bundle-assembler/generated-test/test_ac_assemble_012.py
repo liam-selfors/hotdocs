@@ -1,176 +1,119 @@
-"""AC-ASSEMBLE-012 — cold-mode SpecBundle.spec excludes the target's own
-Rationale, Open questions, and Change log sections, but keeps Purpose and
-Scope (R-ASSEMBLE-001)."""
+import pathlib
 
-from pathlib import Path
+import pytest
 
 import spec_bundle_assembler
 
 
-COMPONENT_ID = "comp-fixture-widget"
-COMPONENT_SLUG = "fixture-widget"
-
-PURPOSE_TOKEN = "PURPOSE_MARKER_qz81vx"
-SCOPE_TOKEN = "SCOPE_MARKER_mt47kd"
-RATIONALE_TOKEN = "RATIONALE_MARKER_wb93fj"
-OPEN_QUESTIONS_TOKEN = "OPENQUESTIONS_MARKER_hn26pc"
-CHANGE_LOG_TOKEN = "CHANGELOG_MARKER_ry58tl"
+PURPOSE_MARKER = "PURPOSE_MARKER_ALPHA_7321"
+SCOPE_MARKER = "SCOPE_MARKER_BETA_8842"
+RATIONALE_MARKER = "RATIONALE_MARKER_GAMMA_1193"
+OPENQ_MARKER = "OPENQ_MARKER_DELTA_5567"
+CHANGELOG_MARKER = "CHANGELOG_MARKER_EPSILON_9924"
 
 
-def _get(value, name, default=None):
-    if isinstance(value, dict):
-        return value.get(name, default)
-    return getattr(value, name, default)
+def _field(obj, name):
+    return obj.get(name) if isinstance(obj, dict) else getattr(obj, name, None)
 
 
-def _write(path: Path, text: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text, encoding="utf-8")
-
-
-def _build_fixture(repo_root: Path) -> None:
-    _write(
-        repo_root / "specs" / "glossary.md",
-        "---\n"
-        "id: glossary\n"
-        "title: Glossary\n"
-        "status: draft\n"
-        "owners: [fixture-owner]\n"
-        "---\n"
-        "\n"
+def _build_corpus(repo_root: pathlib.Path) -> None:
+    specs_dir = repo_root / "specs"
+    specs_dir.mkdir(parents=True)
+    (specs_dir / "glossary.md").write_text(
         "# Glossary\n"
         "\n"
-        "- **Widget** — a fixture-only term used by this test.\n",
+        "- **Foo** — a test term.\n"
     )
 
-    comp_dir = repo_root / "specs" / "components" / COMPONENT_SLUG
-    _write(
-        comp_dir / "component.md",
+    comp_dir = specs_dir / "components" / "foo"
+    comp_dir.mkdir(parents=True)
+
+    (comp_dir / "component.md").write_text(
         "---\n"
-        f"id: {COMPONENT_ID}\n"
-        "title: Fixture widget\n"
+        "id: comp-foo\n"
+        "title: Foo\n"
         "status: draft\n"
-        "owners: [fixture-owner]\n"
+        "owners: [team-a]\n"
         "sealed: true\n"
-        "source_path: fake/fixture_widget_src\n"
+        "source_path: legacy/foo/\n"
         "depends_on: []\n"
         "---\n"
         "\n"
-        "# Fixture widget\n"
+        "# Foo\n"
         "\n"
         "## Purpose\n"
         "\n"
-        f"The widget exists to demonstrate {PURPOSE_TOKEN} behavior.\n"
+        f"Foo doubles a number. {PURPOSE_MARKER}.\n"
         "\n"
         "## Scope\n"
         "\n"
-        f"In scope: {SCOPE_TOKEN} handling of widgets.\n"
-        "\n"
-        "## Definitions\n"
-        "\n"
-        "No deltas beyond the glossary.\n"
+        f"Foo only handles integer doubling. {SCOPE_MARKER}.\n"
         "\n"
         "## Rationale\n"
         "\n"
-        f"We chose this design because of {RATIONALE_TOKEN} considerations.\n"
-        "\n"
-        "## Behavior\n"
-        "\n"
-        "See `requirements/`.\n"
-        "\n"
-        "## Interfaces\n"
-        "\n"
-        "See `interface/`.\n"
-        "\n"
-        "## Data\n"
-        "\n"
-        "None.\n"
-        "\n"
-        "## Acceptance criteria\n"
-        "\n"
-        "See `acceptance/`.\n"
-        "\n"
-        "## Non-functional constraints\n"
-        "\n"
-        "See `constraints.md`.\n"
+        f"This design was chosen for historical reasons. {RATIONALE_MARKER}.\n"
         "\n"
         "## Open questions\n"
         "\n"
-        f"- Should we revisit {OPEN_QUESTIONS_TOKEN} later?\n"
+        f"Should Foo support floats? {OPENQ_MARKER}.\n"
         "\n"
         "## Change log\n"
         "\n"
-        f"- Initial draft, {CHANGE_LOG_TOKEN}.\n",
+        f"- 2024-01-01: initial version. {CHANGELOG_MARKER}.\n"
     )
-    _write(
-        comp_dir / "requirements" / "R-FIXTURE-001.md",
-        "# R-FIXTURE-001\n"
+
+    requirements_dir = comp_dir / "requirements"
+    requirements_dir.mkdir()
+    (requirements_dir / "R-FOO-001.md").write_text(
+        "# R-FOO-001\n"
         "\n"
-        "**R-FIXTURE-001** — The widget MUST return the string `ok` when "
-        "called.\n",
+        "**R-FOO-001** — `foo(x)` MUST return `2 * x`.\n"
     )
-    _write(
-        comp_dir / "acceptance" / "AC-FIXTURE-001.md",
-        "# AC-FIXTURE-001\n"
+
+    acceptance_dir = comp_dir / "acceptance"
+    acceptance_dir.mkdir()
+    (acceptance_dir / "AC-FOO-001.md").write_text(
+        "# AC-FOO-001\n"
         "\n"
-        "Covers: R-FIXTURE-001\n"
+        "Covers: R-FOO-001\n"
         "Kind: generated-test\n"
         "\n"
         "```gherkin\n"
-        "Given a widget\n"
-        "When it is called\n"
-        "Then it returns ok\n"
-        "```\n",
+        "Given x = 2\n"
+        "When foo(x) is called\n"
+        "Then it returns 4\n"
+        "```\n"
     )
-    _write(
-        comp_dir / "interface" / "library.md",
+
+    interface_dir = comp_dir / "interface"
+    interface_dir.mkdir()
+    (interface_dir / "library.md").write_text(
         "# Library\n"
         "\n"
         "```\n"
-        "widget() -> str\n"
-        "```\n",
+        "foo(x: int) -> int\n"
+        "```\n"
     )
-    _write(
-        comp_dir / "constraints.md",
+
+    (comp_dir / "constraints.md").write_text(
         "# Constraints\n"
         "\n"
-        "- No network access.\n",
+        "None.\n"
     )
 
 
-def _assert_lint_clean_if_available(repo_root: Path) -> None:
-    try:
-        from spec_linter import lint  # type: ignore
-    except ImportError:
-        return
-    report = lint(None, repo_root)
-    findings = _get(report, "findings", None)
-    if findings is None:
-        findings = report if isinstance(report, (list, tuple)) else []
-    hard = []
-    for f in findings:
-        severity = _get(f, "severity", None) or _get(f, "level", None)
-        if str(severity).lower() in ("hard", "hard-fail", "hard_fail", "error"):
-            hard.append(f)
-    assert hard == [], f"fixture is not lint-clean: {hard!r}"
+def test_cold_spec_includes_purpose_scope_excludes_rationale_openq_changelog(tmp_path):
+    repo_root = tmp_path
+    _build_corpus(repo_root)
 
+    bundle = spec_bundle_assembler.assemble("comp-foo", repo_root, mode="cold")
 
-def test_ac_assemble_012_cold_spec_excludes_rationale_open_questions_change_log(
-    tmp_path,
-):
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    _build_fixture(repo_root)
-    _assert_lint_clean_if_available(repo_root)
+    spec_text = _field(bundle, "spec")
+    assert spec_text is not None
 
-    bundle = spec_bundle_assembler.assemble(COMPONENT_ID, repo_root, mode="cold")
+    assert PURPOSE_MARKER in spec_text
+    assert SCOPE_MARKER in spec_text
 
-    spec = _get(bundle, "spec")
-    assert isinstance(spec, str), f"spec field missing or not a string: {spec!r}"
-
-    assert PURPOSE_TOKEN in spec, "Purpose text missing from spec"
-    assert SCOPE_TOKEN in spec, "Scope text missing from spec"
-
-    assert RATIONALE_TOKEN not in spec, "Rationale text leaked into spec"
-    assert OPEN_QUESTIONS_TOKEN not in spec, "Open questions text leaked into spec"
-    assert CHANGE_LOG_TOKEN not in spec, "Change log text leaked into spec"
+    assert RATIONALE_MARKER not in spec_text
+    assert OPENQ_MARKER not in spec_text
+    assert CHANGELOG_MARKER not in spec_text

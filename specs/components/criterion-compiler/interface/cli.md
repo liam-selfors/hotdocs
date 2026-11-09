@@ -4,11 +4,12 @@
 hotdocs compile-criteria <component-id> [--target=pytest] [--out=<dir>] [--repo-root=<dir>]
 ```
 
+`main(argv: list[str] | None = None) -> int` gets the tokens after
+`compile-criteria` (`hotdocs-cli` strips the verb) and returns the exit
+code.
+
 - `<component-id>` — the component whose `acceptance/` directory to
-  compile. (Previously took `<acceptance.md>` + `--interface=<interface.md>`
-  as explicit file paths; `D1`'s one-file-per-unit layout made that
-  unnecessary — given a component id and `--repo-root`, both
-  `acceptance/*.md` and `interface/` are at known, derivable paths.)
+  compile.
 - `--target` — emitted test-framework target. Default and only supported
   value for v1: `pytest` (Python). `--target` affects only the emit phase
   of compilation, never parsing or interface-resolution (R-COMPILE-011);

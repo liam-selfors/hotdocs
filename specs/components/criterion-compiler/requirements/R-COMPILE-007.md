@@ -22,14 +22,8 @@
   too) — never a silent fallback to treating it as a literal string.
 
   Anything beyond a bare identifier in a leaf position — an operator
-  (`foo + 1`), field or index access (`foo.id`), string concatenation, or
-  a function-like call — crosses into expression evaluation and MUST be a
-  specific, located compile error, never a silent best-effort evaluation
-  attempt. This is a deliberate scope limit, not an oversight: field/index
-  access into an already-bound literal *would* still be compile-time-only
-  and therefore no less safe, but allowing it would mean extending the
-  step-phrase grammar itself (`specs/architecture/step-phrase-grammar.md`,
-  governance weight on par with `notes/initial-ideas.md`'s own D2) for a
-  need nothing in this corpus has
-  actually raised yet. An author needing a bound value's field elsewhere
-  MUST bind that field's value directly in its own `Given` step instead.
+  (`foo + 1`), field or index access (`foo.id`), concatenation, or a
+  call — is expression evaluation and MUST be a specific, located compile
+  error, never a best-effort evaluation. An author needing a bound value's
+  field binds that value in its own `Given` step; allowing field access
+  would mean extending the step-phrase grammar.

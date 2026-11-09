@@ -384,9 +384,25 @@ corpus's own content at the time they were added rather than an a
 priori judgment — expect them to be revisited as more components
 exercise them. `guarantee_count` in particular had no cap at all
 before: the interface-surface-elements row deliberately excludes
-`interface/guarantees/` (a promise, not a callable surface element — see
-`_count_interface_surface`'s own docstring), which meant an unbounded
-number of guarantee files could previously accumulate with zero signal.
+`interface/guarantees/` (a promise, not a callable surface element),
+which meant an unbounded number of guarantee files could previously
+accumulate with zero signal.
+
+**How each dimension is measured** (`D211`), per component directory
+`specs/components/<c>/`:
+
+- `generated_code_loc`: lines of every `*.py` file under `gen/<c>/`,
+  recursively, that are neither blank nor, once stripped, start with `#`.
+- `component_doc_words`: the `component_size` view's `word_count`.
+- `requirement_count`, `guarantee_count`, `acceptance_count`: the number
+  of `R-*.md`, `interface/guarantees/G-*.md` and `AC-*.md` files.
+- `interface_surface`: one per non-blank line of the first fenced block
+  in `interface/cli.md` (a line ending in `\` joins the next), plus one
+  per line of the first fenced block in `interface/library.md` matching
+  `^\w+\(.*\)\s*(->|:)` after the same joining, plus one per file in
+  `interface/data/`. Guarantees never count.
+- `fan_out`: entries in `depends_on`. `fan_in`: components whose
+  `depends_on` names this one.
 
 Components are a **flat namespace** — no nesting. `architecture/` is the only
 place subsystem grouping is expressed.

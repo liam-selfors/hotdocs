@@ -15,6 +15,13 @@ from conftest import FakeBundle, MockBackend, file_block
 import generator
 from generator import GATE_VERSION, PROMPT_VERSION, generate
 import cache_manager
+import hashlib
+
+
+def _gate_inputs_hash(retry_feedback):
+    """The formula interface/library.md states (R-GEN-005, D209)."""
+    material = json.dumps(sorted(retry_feedback or []), sort_keys=True)
+    return "sha256:" + hashlib.sha256(material.encode("utf-8")).hexdigest()
 
 
 def test_ac_gen_001_cold_prompt_contains_exactly_cold_fields(repo_root):
@@ -60,7 +67,7 @@ def test_ac_gen_005_cache_hit_skips_the_model(repo_root):
     bundle = FakeBundle()
     cache_key = cache_manager.CacheKey(
         spec_bundle_hash=bundle.spec_bundle_hash,
-        gate_inputs_hash=generator._compute_gate_inputs_hash(None),
+        gate_inputs_hash=_gate_inputs_hash(None),
         gate_version=GATE_VERSION,
         model_pin="claude-sonnet-5",
     )
@@ -88,7 +95,7 @@ def test_ac_gen_006_successful_call_is_cached(repo_root):
 
     cache_key = cache_manager.CacheKey(
         spec_bundle_hash=bundle.spec_bundle_hash,
-        gate_inputs_hash=generator._compute_gate_inputs_hash(None),
+        gate_inputs_hash=_gate_inputs_hash(None),
         gate_version=GATE_VERSION,
         model_pin="claude-sonnet-5",
     )
@@ -117,7 +124,7 @@ def test_ac_gen_008_empty_response_is_a_model_call_error(repo_root):
     assert not (repo_root / "gen" / "foo").exists()
     cache_key = cache_manager.CacheKey(
         spec_bundle_hash=bundle.spec_bundle_hash,
-        gate_inputs_hash=generator._compute_gate_inputs_hash(None),
+        gate_inputs_hash=_gate_inputs_hash(None),
         gate_version=GATE_VERSION,
         model_pin="claude-sonnet-5",
     )
@@ -239,18 +246,28 @@ def test_ac_gen_015_two_repo_roots_in_one_process_do_not_collide(repo_root, tmp_
     other_root = tmp_path_factory.mktemp("other-repo")
     shutil.copytree(repo_root / "gen" / "cache-manager", other_root / "gen" / "cache-manager")
     shutil.copytree(repo_root / "gen" / "llm-endpoint", other_root / "gen" / "llm-endpoint")
-    marker_file = other_root / "gen" / "cache-manager" / "cache_manager.py"
-    marker_file.write_text(marker_file.read_text(encoding="utf-8") + "\nSANDBOX_MARKER = 'other_root'\n", encoding="utf-8")
+    # other_root's cache-manager records each put() to a file, so the test
+    # observes which root's copy each call loaded without a private loader.
+    marker = other_root / "puts.log"
+    cm_file = other_root / "gen" / "cache-manager" / "cache_manager.py"
+    cm_file.write_text(cm_file.read_text(encoding="utf-8") + f"""
+
+_real_put = put
+def put(cache_key, result, *, repo_root=None):
+    with open({str(marker)!r}, "a", encoding="utf-8") as fh:
+        fh.write(str(result.payload.get("component_id")) + "\\n")
+    return _real_put(cache_key, result, repo_root=repo_root)
+""", encoding="utf-8")
 
     backend_a = MockBackend([file_block("foo.py", "x = 1")])
     backend_b = MockBackend([file_block("foo.py", "x = 2")])
     generate(FakeBundle(component_id="comp-one"), "claude-sonnet-5", repo_root=repo_root, llm_backend=backend_a)
+    assert not marker.exists()  # repo_root's own cache-manager, not other_root's
     generate(FakeBundle(component_id="comp-two"), "claude-sonnet-5", repo_root=other_root, llm_backend=backend_b)
-
-    cm_from_repo_root = generator._load_cache_manager(repo_root)
-    cm_from_other_root = generator._load_cache_manager(other_root)
-    assert not hasattr(cm_from_repo_root, "SANDBOX_MARKER")
-    assert getattr(cm_from_other_root, "SANDBOX_MARKER", None) == "other_root"
+    assert marker.read_text(encoding="utf-8").split() == ["comp-two"]
+    generate(FakeBundle(component_id="comp-three"), "claude-sonnet-5", repo_root=repo_root,
+             llm_backend=MockBackend([file_block("foo.py", "x = 3")]))
+    assert marker.read_text(encoding="utf-8").split() == ["comp-two"]  # no cached-module leak back
 
 
 def test_ac_gen_017_hint_mode_never_writes_gen_or_cache(repo_root):
@@ -265,7 +282,7 @@ def test_ac_gen_017_hint_mode_never_writes_gen_or_cache(repo_root):
 
     cache_key = cache_manager.CacheKey(
         spec_bundle_hash=bundle.spec_bundle_hash,
-        gate_inputs_hash=generator._compute_gate_inputs_hash(None),
+        gate_inputs_hash=_gate_inputs_hash(None),
         gate_version=GATE_VERSION,
         model_pin="claude-sonnet-5",
     )
@@ -279,7 +296,7 @@ def test_ac_gen_017_hint_mode_still_reads_an_existing_cache_hit(repo_root):
     bundle = FakeBundle(hint_code={"foo.py": "x = 1"})
     cache_key = cache_manager.CacheKey(
         spec_bundle_hash=bundle.spec_bundle_hash,
-        gate_inputs_hash=generator._compute_gate_inputs_hash(None),
+        gate_inputs_hash=_gate_inputs_hash(None),
         gate_version=GATE_VERSION,
         model_pin="claude-sonnet-5",
     )

@@ -55,8 +55,8 @@ See `interface/data/`.
 
 See `acceptance/`.
 
-Every criterion is `kind: compiled` — reading, concatenating, and hashing
-files is pure, deterministic logic; nothing here needs a model or judgment.
+Every criterion is `kind: generated-test`, over the synthetic corpus the
+"Test fixtures" section of the library interface defines.
 
 ## Non-functional constraints
 
@@ -81,71 +81,18 @@ See `constraints.md`.
 
 ## Change log
 
-- Initial draft.
-- First real `gen/spec-bundle-assembler/` implementation — a
-  hand-authored bootstrap exception, temporary like `cache-manager`.
-  `depends_on` gained `comp-graph-query-engine` (R-ASSEMBLE-010 already
-  required reading dependency `Purpose` text via its `component_context`
-  view; the dependency was never declared).
-- `D37`: `R-ASSEMBLE-011` — `dependency_usage`, a new, third
-  `dependency_*` field, mechanically introspected from a dependency's
-  real `gen/` code (never its spec), the one-directional fix for
-  `D46`'s import-path failure.
-- `D60`: `_dependency_usage` now checks a sealed dependency's declared
-  `source_path` before falling back to `gen/<dependency>/` — every
-  sealed dependency's usage card had been silently degrading to empty,
-  indistinguishable from "no real code yet," found only once a real
-  dependent needed real usage info for `criterion-compiler` for the
-  first time.
-- `D69`: `R-ASSEMBLE-001` now excludes the target's own `## Rationale`/
-  `## Open questions`/`## Change log` — the same "contract, not
-  rationale" principle `R-ASSEMBLE-002` already applied to every
-  dependency, found (via a prompt-efficiency audit) never applied to
-  the target itself. Measured at 15-60% of a real component.md's body.
-- `D100`: `R-ASSEMBLE-009`'s `CriterionBundle` gains
-  `dependency_interfaces`, the same content and the same
-  `R-ASSEMBLE-002` rule `SpecBundle.dependency_interfaces` already
-  follows — found only once a real `generated-test` authoring for a
-  component with real dependencies had no authoritative source for a
-  dependency's real call signature or return shape and guessed wrong,
-  despite that shape already being fully documented and already
-  available to `generator` via this exact mechanism. New
-  `AC-ASSEMBLE-013`. Purely additive — `assemble()`/`SpecBundle`
-  unchanged.
-- `D101`: `R-ASSEMBLE-012` — both functions MUST read corpus structure
-  exclusively through `spec-linter`'s own parsed `Corpus`/`Component`
-  objects, never by independently re-parsing frontmatter, and MUST NOT
-  introduce a new third-party dependency for anything a declared
-  dependency already provides. Found only once a real cold-generation
-  candidate reinvented frontmatter parsing with `PyYAML`, a package
-  this corpus has never installed. New `AC-ASSEMBLE-014`.
-- `D109`: cold-generated for the first time, closing the
-  `cache-manager`/`spec-bundle-assembler` "temporary exception" noted
-  above — `model_pin` moves to `claude-opus-5-5`. 11/14 criteria pass;
-  full arc and the three remaining known limitations documented in
-  `BOOTSTRAP.md`. The old hand-written `test_spec_bundle_assembler.py`
-  suite is retired, fully superseded by per-criterion `generated-test`
-  files (confirmed incompatible with the new candidate's own naming
-  — `PreconditionFailureError` renamed `PreconditionFailure` — and its
-  one test without a direct `AC-id` match, the sealed-dependency
-  `source_path` case, is covered inside the new `AC-ASSEMBLE-011`
-  fixture too).
-- `D114`: `R-ASSEMBLE-013` — `dependency_interfaces` now also
-  resolves, one level deep, any type a dependency's own interface
-  text names but doesn't itself own, searching the whole corpus for
-  its real owner (skipped on no match or more than one) — the
-  transitive-type gap deferred twice (`D110`, `D112`) until
-  `provenance-tracker`'s own bootstrap actually hit it. New
-  `AC-ASSEMBLE-015`.
-- `D118`: second cold-generation round lands at 14/15 (up from
-  `D109`'s 11/14); `D116`/`D117` closed two knock-on test-author gaps
-  along the way (a stale `spec-linter` interface doc, a self-check
-  needing a literal worked call). The one remaining failure,
-  `AC-ASSEMBLE-011`, traces to `graph-query-engine`'s own pre-existing
-  decision-nodes gap (confirmed via its own suite, predates this
-  session) — a known limitation, not chased here. `AC-ASSEMBLE-007`'s
-  prior known limitation no longer reproduces. (`D177` corrected that
-  cause: the generated test's fixture had no frontmatter.)
-- `D177`: `AC-ASSEMBLE-011` states its fixture corpus must pass
-  `spec-linter`. Its generated test still fails (a `test-author`
-  weakness, recorded in `D177`); code and landed tests unchanged.
+Each decision holds its full rationale.
+
+- Initial draft; first implementation hand-written, `depends_on` gains
+  `comp-graph-query-engine`.
+- `D37`: `dependency_usage` (`R-ASSEMBLE-011`). `D60`: a sealed
+  dependency's card reads its `source_path`.
+- `D69`: the target's own Rationale, Open questions and Change log are
+  excluded (`R-ASSEMBLE-001`).
+- `D100`: `CriterionBundle.dependency_interfaces`. `D101`: corpus
+  structure comes only from `spec-linter` (`R-ASSEMBLE-012`).
+- `D109`, `D118`: cold-generated; the hand-written suite retired.
+  `D114`: one level of transitive types (`R-ASSEMBLE-013`).
+- `D177`: `AC-ASSEMBLE-011`'s failure traced to its test's fixture.
+- `D207`: the synthetic corpus every criterion uses is stated once, in
+  the library interface.

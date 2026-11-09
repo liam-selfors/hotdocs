@@ -1,92 +1,86 @@
-"""Regression tests for `_count_interface_surface` (the R-LINT-012
-"interface surface elements" dimension), run against this repository's own
-real `interface/` directories rather than synthetic fixtures — deliberately,
-since the counting algorithm itself was only designed after surveying the
-real, independently-authored files already in the corpus. Hand-verified
-expected counts are recorded here as the actual check, not just asserted
-blind.
+"""Regression tests for R-LINT-012's `interface_surface` dimension, as
+SPEC_GUIDELINES.md §4 defines it ("How each dimension is measured", D211),
+run against this repository's own real `interface/` directories.
 
-REWRITTEN for D15: a component's interface is now `interface/cli.md` +
-`interface/library.md` + one file per `interface/data/*.md`, not a single
-`interface.md` with `## CLI`/`## Library`/`## Data: ...` headings —
-`_count_interface_surface` takes a `Component` aggregate, not one `Doc`.
+Only the public `lint()` is used. A count is visible only once it crosses
+the warn threshold (10), so each test copies a real component's
+`interface/` into a minimal lint-clean corpus, adds `PAD` extra data
+files (one element each), and reads the reported count back. Hand-checked
+expected counts are recorded per component.
 """
 
+import re
+import shutil
 from pathlib import Path
 
 from conftest import REPO_ROOT, spec_linter
 
+PAD = 10
 
-def _load_component_interface(name: str) -> spec_linter.Component:
-    comp_dir = REPO_ROOT / "specs" / "components" / name
+COMPONENT_MD = """---
+id: comp-probe
+title: Probe
+status: draft
+owners: [team-a]
+sealed: true
+source_path: legacy/probe/
+depends_on: []
+---
 
-    def load(rel: str) -> spec_linter.Doc | None:
-        path = comp_dir / rel
-        if not path.exists():
-            return None
-        text = path.read_text(encoding="utf-8")
-        _, body, _ = spec_linter._parse_frontmatter(text)
-        return spec_linter.Doc(
-            path=path, rel_path=str(path.relative_to(REPO_ROOT)), doc_id=None,
-            frontmatter={}, body=body, doc_type="component-interface-cli", component=name,
-        )
+# Probe
 
-    interface_data = {}
-    data_dir = comp_dir / "interface" / "data"
-    if data_dir.is_dir():
-        for p in sorted(data_dir.glob("*.md")):
-            text = p.read_text(encoding="utf-8")
-            _, body, _ = spec_linter._parse_frontmatter(text)
-            interface_data[p.stem] = spec_linter.Doc(
-                path=p, rel_path=str(p.relative_to(REPO_ROOT)), doc_id=None,
-                frontmatter={}, body=body, doc_type="component-interface-data", component=name,
-            )
+## Purpose
 
-    return spec_linter.Component(
-        name=name, root=None, requirements={},
-        interface_cli=load("interface/cli.md"),
-        interface_library=load("interface/library.md"),
-        interface_data=interface_data,
-        interface_guarantees={},
-        acceptance={}, constraints=None,
-    )
+Probe holds a copied interface.
+"""
 
 
-def test_spec_linter_interface_surface_is_three():
-    # 1 CLI invocation + 1 Library function + 1 Data file (`LintReport`).
-    assert spec_linter._count_interface_surface(_load_component_interface("spec-linter")) == 3
+def _surface(tmp_path: Path, component: str) -> int:
+    comp = tmp_path / "specs" / "components" / "probe"
+    (comp / "requirements").mkdir(parents=True)
+    (comp / "acceptance").mkdir()
+    (tmp_path / "specs" / "glossary.md").write_text("# Glossary\n\n- **Probe** — a test term.\n", encoding="utf-8")
+    (comp / "component.md").write_text(COMPONENT_MD, encoding="utf-8")
+    (comp / "constraints.md").write_text("# Constraints\n\nNone.\n", encoding="utf-8")
+    (comp / "requirements" / "R-PROBE-001.md").write_text(
+        "# R-PROBE-001\n\n**R-PROBE-001** — Probe MUST exist.\n", encoding="utf-8")
+    (comp / "acceptance" / "AC-PROBE-001.md").write_text(
+        "# AC-PROBE-001\n\nCovers: R-PROBE-001\nKind: generated-test\n\n"
+        "```gherkin\nGiven a probe\nWhen it runs\nThen it exists\n```\n", encoding="utf-8")
+    shutil.copytree(REPO_ROOT / "specs" / "components" / component / "interface", comp / "interface",
+                    ignore=shutil.ignore_patterns("guarantees"))
+    data = comp / "interface" / "data"
+    data.mkdir(exist_ok=True)
+    for i in range(PAD):
+        (data / f"Pad{i:02d}.md").write_text(f"# `Pad{i:02d}`\n\nPadding.\n", encoding="utf-8")
+
+    report = spec_linter.lint(None, tmp_path)
+    findings = report["findings"] if isinstance(report, dict) else report.findings
+    for f in findings:
+        get = (lambda k: f[k]) if isinstance(f, dict) else (lambda k: getattr(f, k))
+        if get("rule_id") == "R-LINT-012" and "probe" in get("file") and "interface_surface" in get("message"):
+            return int(re.search(r"interface_surface\D*?(\d+)", get("message")).group(1)) - PAD
+    raise AssertionError("no interface_surface finding; the padded count did not cross the threshold")
 
 
-def test_impact_analyzer_interface_surface_is_three():
-    # 1 CLI invocation + 1 Library function + 1 Data file (`BlastRadiusReport`).
-    assert spec_linter._count_interface_surface(_load_component_interface("impact-analyzer")) == 3
+def test_spec_linter_interface_surface_is_five(tmp_path):
+    # 1 CLI invocation + 2 Library functions (lint, load_corpus) + 2 Data files.
+    assert _surface(tmp_path, "spec-linter") == 5
 
 
-def test_cache_manager_interface_surface_is_six():
-    # 2 CLI subcommands (inspect, stats) + 2 Library functions (get, put) +
-    # 2 Data files (CacheKey, CachedResult) — the component whose
-    # multi-entity blocks is exactly why "one per fenced code block" (an
-    # earlier, simpler candidate algorithm) would have undercounted.
-    assert spec_linter._count_interface_surface(_load_component_interface("cache-manager")) == 6
+def test_impact_analyzer_interface_surface_is_three(tmp_path):
+    # 1 CLI invocation + 1 Library function + 1 Data file (BlastRadiusReport).
+    assert _surface(tmp_path, "impact-analyzer") == 3
 
 
-def test_criterion_compiler_interface_surface_is_four():
-    # 1 CLI invocation (wrapped across two physical lines via a trailing
-    # backslash — must be joined, not double-counted) + 2 Library functions
-    # (`compile`, and `compile_criterion` added by D75) + 1 Data file
-    # (`CompileReport`). The step grammar lives at specs/architecture/
-    # step-phrase-grammar.md now (D15), not under this component's
-    # interface/ at all, so it was never a candidate for double-counting
-    # here even before that move — but it's worth noting the relocation
-    # makes that structurally obvious rather than a parsing nicety.
-    assert spec_linter._count_interface_surface(_load_component_interface("criterion-compiler")) == 4
+def test_cache_manager_interface_surface_is_eight(tmp_path):
+    # 2 CLI subcommands + 4 Library functions (get, put, now_iso, stats; the
+    # `class` lines are not function signatures) + 2 Data files.
+    assert _surface(tmp_path, "cache-manager") == 8
 
 
-def test_all_four_real_components_stay_well_under_the_hard_cap():
-    # Sanity check tying this back to D2's actual size-cap table (20 hard
-    # fail) — none of the real components specced so far are anywhere near
-    # it, which is itself a useful signal that the components are
-    # reasonably scoped.
-    for component in ("spec-linter", "impact-analyzer", "cache-manager", "criterion-compiler"):
-        count = spec_linter._count_interface_surface(_load_component_interface(component))
-        assert count <= 20, f"{component}: {count} interface surface elements"
+def test_criterion_compiler_interface_surface_is_four(tmp_path):
+    # 1 CLI invocation wrapped across two lines with a trailing backslash
+    # (joined, not double-counted) + 2 Library functions (compile,
+    # compile_criterion; GATE_VERSION is not a signature) + 1 Data file.
+    assert _surface(tmp_path, "criterion-compiler") == 4

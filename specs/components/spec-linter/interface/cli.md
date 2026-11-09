@@ -4,18 +4,21 @@
 hotdocs lint [<path>...] [--format=json|text] [--strict] [--repo-root=<dir>]
 ```
 
-- `<path>...` — one or more files or directories under `specs/` to lint.
-  Defaults to the whole `specs/` tree.
-- `--format` — `text` (human-readable, default) or `json` (the `LintReport`
-  schema below).
-- `--strict` — treat `warn`-severity findings as failures too.
-- `--repo-root` — repository root, for resolving the corpus and
-  `specs/glossary.md`. Defaults to the current git repository root.
+`main(argv: list[str] | None = None) -> int` gets the tokens after `lint`
+(`hotdocs-cli` strips the verb) and returns the exit code; `python -m
+spec_linter` passes `sys.argv[1:]`.
+
+- `<path>...` — files or directories under `specs/` to lint; default the
+  whole `specs/` tree.
+- `--format` — `text` (default) or `json` (a `LintReport`).
+- `--strict` — `warn` findings count as failures too.
+- `--repo-root` — the repository root; default the current git
+  repository's.
 
 **Exit codes:**
 
 | Code | Meaning |
 | --- | --- |
-| `0` | No `fail`-severity findings (warnings and `skipped` findings may be present, even under `--strict` — `skipped` is never promoted to a failure; it means "not evaluated," not "passed" or "violated"). |
+| `0` | No `fail`-severity findings (`skipped` never fails). |
 | `1` | ≥1 `fail`-severity finding. |
 | `2` | Usage error (bad arguments, unreadable path). |

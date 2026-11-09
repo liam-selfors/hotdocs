@@ -121,3 +121,5 @@ See `constraints.md`.
   ever carries a dependency's `interface/` content. Moved the real
   table to `interface/data/CachedResult.md`; `R-CACHE-007` now just
   points to it, restoring `SPEC_GUIDELINES.md` §10's one-definition rule.
+- `D212`: the CLI, `stats`, and a set `VAR_CACHE_STORE_URL` pinned to
+  exact, tested behavior.

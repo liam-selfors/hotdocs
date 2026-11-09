@@ -205,3 +205,24 @@ produced two collection errors from the same static import and two
 assertion failures. Nothing was swapped in. A fix belongs in
 `test-author`'s spec (never import a dependency by name; never `dedent`
 an interpolated multi-line value). Until then `AC-ASSEMBLE-011` fails.
+
+## Round: exact hash, `Implements:`, stated fixture (`D207`, `D210`)
+
+Regenerated with `tools/bootstrap_component.py` after four spec rounds.
+Seed 50 failed 14 of 15 criteria because each test guessed a lint-clean
+corpus; `D207` states the fixture once. Seed 51 reached 11 of 16: the
+criteria asserted exact text layouts the spec never fixed, and
+`AC-ASSEMBLE-008` contradicted the new hash rule. Seed 52 reached 14 of
+16: `R-ASSEMBLE-011`'s sealed-code fallback disagreed with the hash
+rule, and `AC-ASSEMBLE-014` expected a static import of `spec_linter`.
+Seed 53 passed every criterion at mutation score 1.0. The bootstrap
+script's new consumer-surface gate refused it on a false positive of its
+own (a set named `needed` in the script), so after that heuristic was
+fixed the verified sandbox was swapped in with the script's `_swap_in`.
+
+In place, all 23 generated tests pass, and the `spec_bundle_hash` of all
+25 components matches an independent implementation of `R-ASSEMBLE-007`.
+`AC-ASSEMBLE-011` passes, closing the failure `D177` recorded. This
+version carries no manifest: it was generated under the old hash
+formula, so it is regenerated once more, with provenance, after
+`graph-query-engine` and `spec-linter`, whose code its bundle reads.

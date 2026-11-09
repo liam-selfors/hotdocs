@@ -60,11 +60,7 @@ See `interface/data/`.
 
 See `acceptance/`.
 
-Mixed `kind`: R-GEN-001–008, 010, 011 use an injected mock model
-(`generated-test`, since exercising them means asserting on a mocked
-call). R-GEN-009 is a pure path check, `compiled` like
-`spec-bundle-assembler`. Whether 001–008 could become `compiled`
-depends on `criterion-compiler` growing mock-injection support.
+All `generated-test`, with an injected mock model.
 
 ## Non-functional constraints
 
@@ -91,3 +87,5 @@ See `constraints.md`.
 - `D167`: `spec_bundle_hash` on every result; `hint` mode never
   writes. `generator@1.7.0`.
 - `D199`: dependencies fall back to the tool root. `v9`.
+- `D209`: the cache key, `GATE_VERSION` and `PROMPT_VERSION` stated
+  exactly.

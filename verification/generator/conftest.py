@@ -69,6 +69,20 @@ class FakeBundle:
     glossary: str = "FAKE GLOSSARY TEXT"
     hint_code: dict | None = None
 
+    # A real SpecBundle also reads as a read-only mapping (spec-bundle-
+    # assembler's SpecBundle.md, D209), so a generator may use either.
+    def __getitem__(self, key):
+        try:
+            return getattr(self, key)
+        except AttributeError:
+            raise KeyError(key) from None
+
+    def get(self, key, default=None):
+        return getattr(self, key, default)
+
+    def __contains__(self, key):
+        return hasattr(self, key)
+
 
 @pytest.fixture
 def repo_root(tmp_path, monkeypatch):

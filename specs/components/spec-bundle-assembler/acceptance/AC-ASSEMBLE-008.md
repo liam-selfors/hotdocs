@@ -6,6 +6,8 @@ Kind: generated-test
 ```gherkin
 Given a component with existing gen/<component>/ content
 When assemble runs in hint mode for that component
-Then hint_code contains that content, keyed by relative path, and every
-  other field matches what cold mode would have produced
+Then hint_code contains that content, keyed by relative path, every
+  other field except spec_bundle_hash matches what cold mode produces,
+  and spec_bundle_hash differs from cold mode's, since R-ASSEMBLE-007
+  hashes the mode and gen/<component>/ in hint mode
 ```

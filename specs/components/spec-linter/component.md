@@ -20,15 +20,8 @@ gate and the component everything else assumes has already run.
 
 ## Scope
 
-**In scope:** frontmatter completeness/typing on a root file, and its
-*absence* on unit files; `depends_on`/`realizes`/`uses_var`/
-`depends_on_guarantees` resolution; dependency-graph acyclicity;
-`R-id`/`G-id` formation and RFC 2119 usage; requirement↔acceptance
-traceability; acceptance-criterion well-formedness; glossary/
-`supersedes`/`builds_on` citation resolution; component size caps;
-`specs/vars/` secret-field safety; glossary singularity; no trailing
-whitespace anywhere in a spec file; a documented CLI's requirement
-coverage.
+**In scope:** every rule in `requirements/`, and loading the corpus
+for the components that read it (the `Corpus` data document).
 
 **Out of scope:** generation; verifying generated code's actual
 behavior. **Mostly free of model calls and judgment** — only
@@ -54,9 +47,8 @@ See `interface/data/`.
 
 See `acceptance/`.
 
-Every criterion below is `kind: compiled` except R-LINT-015's
-(`llm-judge`) — deterministic, rule-based logic over spec text needs
-neither a second model nor a judgment call.
+All `generated-test`, except the two `llm-judge` criteria for
+R-LINT-015's meaning check.
 
 ## Non-functional constraints
 
@@ -81,3 +73,4 @@ Full narrative per entry lives in its own `specs/decisions/D<N>.md`.
   028 handles wrapped and punctuated citations.
 - `D199`: `R-LINT-032`, a project component may not reuse a tool
   component's slug.
+- `D208`: `load_corpus` and `Corpus` specified.

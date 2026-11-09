@@ -5,9 +5,7 @@
   reproducible. What MUST be deterministic: a **cache hit** (R-GEN-005)
   always returns byte-identical output for the same key — that's the
   property the cache-key correctness design actually depends on, not "the
-  model always says the same thing." (`R-GEN-007`, about recording which
-  `seed`/sample won, was retired along with best-of-k under `D3` — no
-  seed variation exists once there is only ever one call per merge.)
+  model always says the same thing."
 - **`retry_feedback`'s content boundary is load-bearing, not cosmetic.**
   `R-GEN-012` (`D3`) restricts `retry_feedback` to a bare
   `R-id` list — this MUST hold at every layer that touches it here, not
