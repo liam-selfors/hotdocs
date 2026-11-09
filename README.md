@@ -76,6 +76,11 @@ from the 2026-10 baseline reset, the rest recorded as they were made).
 `notes/initial-ideas.md` holds the original brainstorm, with its own
 informal numbering.
 
+## License
+
+Apache-2.0 (`LICENSE`, `D202`). Generated code in your project is yours;
+the license covers the tool.
+
 ## Repository layout
 
 See `SPEC_GUIDELINES.md` for the enforceable rules. In brief:
