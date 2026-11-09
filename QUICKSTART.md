@@ -29,18 +29,22 @@ hotdocs init --example
 ```
 
 `init` creates `specs/`, `gen/` and `verification/`, records the tool
-version in `.hotdocs-tool.json`, and asks which model provider to use. Your
-`gen/` holds only your own components; the tool's stay in the tool, so a
-component of yours may not reuse one of the tool's names (`hotdocs lint`
-says so). It tests the connection, never asks for an API
-key, and stores only the *name* of the environment variable that holds it in
-`hotdocs.toml`. `--example` adds a tiny `slugify` component to start from. It also writes an
-empty `.secret-allowlist.json`. To allow a flagged string that is not a
-secret, add it to that file and record the file's hash in a ratified
-decision (`allowlist_sha256` in its frontmatter): the scanner honors a
-non-empty list only while its hash matches.
-Run it again any time; it never overwrites. `hotdocs init --reconfigure`
-changes only the provider.
+version in `.hotdocs-tool.json`, and asks which model provider to use
+(`--provider claude-cli --yes` skips the questions). It tests the
+connection, never asks for an API key, and stores only the *name* of the
+environment variable that holds it in `hotdocs.toml`. `--example` adds a
+tiny `slugify` component to start from.
+
+Your `gen/` holds only your own components; the tool's stay in the tool, so
+a component of yours may not reuse one of the tool's names (`hotdocs lint`
+says so). `init` also writes an empty `.secret-allowlist.json`. To allow a
+flagged string that is not a secret, add it to that file and record the
+file's hash in a ratified decision (`allowlist_sha256` in its frontmatter):
+the scanner honors a non-empty list only while its hash matches.
+
+Run `init` again any time; it never overwrites. `hotdocs init --reconfigure`
+changes only the provider. Make the project a git repository with a `main`
+branch: `hotdocs impact` and `hotdocs assist` diff against it.
 
 ## 3. Generate and verify
 
@@ -52,6 +56,13 @@ hotdocs verify                  # is everything ready?
 
 `generate` writes `gen/slugify/` and `verification/slugify/`. Never edit
 `gen/` by hand: change the spec and generate again.
+
+Other commands you will reach for: `hotdocs impact --changed=comp-slugify`
+(what a spec change touches), `hotdocs assist --changed=comp-slugify
+--model=...` (a model's review of the change: lint findings, blast radius,
+a completeness score), `hotdocs track ui build` (a readiness page) and
+`hotdocs docs-site build` (a browsable site of the specs). `hotdocs` alone
+lists every verb.
 
 ## 4. Write your own component
 
@@ -87,10 +98,10 @@ them to the next `generate`.
 - The secret scan finds API keys, tokens and other high-entropy or
   provider-shaped strings, not ordinary passwords: a low-entropy value like
   `password = "hunter2"` passes. Keep passwords out of the repository.
-- Five of the tool's own components (`generator`, `llm-endpoint`,
-  `cache-manager`, `spec-linter`, `graph-query-engine`) are hand-written
-  and tested, not generated from their specs; the rest are generated and
-  verified like yours.
+- Six of the tool's own components (`generator`, `llm-endpoint`,
+  `cache-manager`, `spec-linter`, `graph-query-engine` and the sealed
+  `criterion-compiler`) are hand-written and tested, not generated from
+  their specs; the rest are generated and verified like yours.
 - `hotdocs review-packet build` does not yet find the tool's components
   from a project; it works only inside the tool's own checkout until it is
   regenerated.

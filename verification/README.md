@@ -1,51 +1,30 @@
 # Verification
 
-Generated tests (`compiled`, `generated-test`, and `llm-judge` outputs),
-contract/drift checks, and `corpus-graph.json` — the single generated
-manifest the traceability matrix and the D9 graph/docs explorer both
-render from.
+One directory per component, plus `corpus-graph.json`, the manifest that
+`hotdocs track ui build` and `hotdocs docs-site build` render from
+(`hotdocs corpus-graph build` writes it).
 
-See `SPEC_GUIDELINES.md` §6 (verification gates) and §7 (provenance).
+Each `verification/<slug>/` holds:
 
-## Seven real test suites, one per real component
+- `generated-test/` — one test file per acceptance criterion, written by
+  `test-author` when the component was generated;
+- `.provenance.json` — the manifest `hotdocs generate` writes: spec hash,
+  model, verification report, mutation score;
+- `BOOTSTRAP.md` — the account of how the component first landed: what was
+  ambiguous, what was decided, which spec gaps each failed round exposed;
+- for the hand-written components, a hand-written test suite instead of
+  `generated-test/`.
 
-Each directory below has its own `BOOTSTRAP.md` with the full, honest
-account: what was ambiguous, what was decided, and — for every one of
-them — at least one real bug a synthetic fixture or a real end-to-end
-run caught that reading the code alone would have missed.
+Run a suite with `pytest`, one directory per invocation, with the component's
+`gen/` directory on `PYTHONPATH`:
 
-- `spec-linter/` — 42 tests. `criterion-compiler` doesn't exist to have
-  compiled these the normal way.
-- `graph-query-engine/` — 7 tests, run against this repo's own real
-  corpus (not a synthetic fixture — these views exist specifically to
-  query the real thing).
-- `corpus-graph-builder/` — 8 tests. **Cold-generated, not hand-written**
-  — the fixture suite here still had to be hand-authored, since
-  `test-author` doesn't exist yet either.
-- `llm-endpoint/` — 6 tests, all against an injected mock backend, zero
-  cost to re-run. **Self-hosted twice over** (`D34`/`D35`) — this
-  suite has been rewritten twice to match each regeneration's own,
-  equally spec-conformant internal backend convention, since
-  `interface/library.md` only ever fixes the public `complete()` call
-  shape, never a Python return type.
-- `cache-manager/` — 10 tests, including eight real concurrent writer
-  threads that caught a genuine race condition no amount of reading the
-  code would have found.
-- `spec-bundle-assembler/` — 10 tests against a synthetic
-  dependency-pair fixture, plus a direct smoke test against this repo's
-  own real corpus.
-- `generator/` — 10 tests, all against an injected mock backend. Used in
-  anger twice: once to regenerate `llm-endpoint` (twice), once to
-  attempt regenerating itself — the one real generation attempt this
-  corpus has made that failed and was correctly rejected.
+```
+cd verification/<slug> && PYTHONPATH=../../gen/<slug> pytest
+```
 
-Run any one with `pytest` (not vendored into the repo — install into your
-own environment) — but run every suite as its **own, separate** `pytest`
-invocation, never two or more together in one command. Each directory's
-bare-named `conftest.py` collides with any other's in Python's own
-module cache the moment both are collected in the same run — a known,
-accepted quirk of non-package test directories (confirmed directly:
-every pairwise combination collides the same way), not a bug in any one
-suite. See any `BOOTSTRAP.md` for the full note.
+Never run two directories in one `pytest` command: each has a bare-named
+`conftest.py`, and Python's module cache makes any two collide. This is a
+known quirk of non-package test directories, not a bug in any one suite.
 
-Everything else fills in as the corresponding components get real code.
+`hotdocs verify` runs the same tests, plus mutation testing, interface drift
+and the compliance scans, and reports one ready/not-ready verdict.

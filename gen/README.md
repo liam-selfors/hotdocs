@@ -1,54 +1,24 @@
 # Generated Code
 
-Regenerable output of the pipeline. Committed on every branch (large binary
-assets go through Git LFS). Never hand-edited, with exactly two declared,
-tracked exemptions — `sealed` components and file-level pinned overrides.
+The tool's own components, one directory per component, named by slug
+(`gen/<slug>/`). A project made by `hotdocs init` has its own `gen/` for its
+own components and uses these from the tool's checkout (`D199`).
 
-See `SPEC_GUIDELINES.md` §1 (commit policy) and §8 (exemptions).
+Committed on every branch and never hand-edited: a component is changed by
+editing its spec and running `hotdocs generate`, and the result replaces this
+directory only after every acceptance criterion passes. The two declared
+exemptions, `sealed` components and file-level pinned overrides
+(`.overrides.json`), are in `SPEC_GUIDELINES.md` §8.
 
-## Real code exists for seven components so far
+Five directories are hand-written and tested rather than generated:
+`generator` and `llm-endpoint` (each runs through the other, so neither could
+be generated first) and `spec-linter`, `graph-query-engine` and
+`cache-manager` (built before the generator existed). Everything else here
+was produced by `generator` from its component's spec bundle and verified by
+`verifier-orchestrator`; the manifest in `verification/<slug>/.provenance.json`
+records which spec hash and model produced it.
 
-Two distinct categories, not one undifferentiated "bootstrap" bucket:
-
-**Hand-authored bootstrap exceptions** — stood in for a real `generator`
-before one existed, each documented in its own `verification/<component>/
-BOOTSTRAP.md`:
-
-- `spec-linter/` — the first, and the tool every spec change in this repo
-  is actually re-validated against before it's committed.
-- `graph-query-engine/` — the shared DuckDB query layer several other
-  components (including `spec-linter`'s own graph-shaped rules) query
-  instead of each writing independent frontmatter parsing.
-- `cache-manager/`, `spec-bundle-assembler/` — `generator`'s own
-  dependencies; temporary exceptions, not permanent ones.
-- `llm-endpoint/` — a *permanent* exception: it's the component every real
-  generation call dispatches through, so nothing could ever cold-regenerate
-  it first, even once a real `generator` exists.
-- `generator/` — also permanent, for the same reason in reverse: it's the
-  component that does the cold-regenerating.
-
-**Really generated — produced by the real `generator`, not hand-written:**
-
-- `corpus-graph-builder/` — cold-generated once, from a mock-free, fully
-  real `generator`/`llm-endpoint`/`cache-manager`/`spec-bundle-assembler`
-  chain.
-- `llm-endpoint/` itself, *twice over* — the real `generator`, dispatching
-  through a real (then hand-written) `llm-endpoint`, cold-regenerated
-  `llm-endpoint` from its own current spec, then again after two
-  spec corrections a real failure surfaced: a too-short timeout bound and
-  a missing structural tool-isolation requirement (`D34`/`D35`). Each
-  result replaced the prior version only after passing every one of its
-  own acceptance criteria — not because a generation attempt merely
-  completed.
-
-A `generator`-regenerating-itself attempt was also made (the deepest
-self-hosting case) — it produced a plausible five-file candidate that
-failed to import (an assumed dependency-module layout that didn't match
-`cache-manager`'s real one) and was correctly **not** swapped in
-(`D46`). `gen/generator/generator.py` is still the original hand-written
-file. See `notes/backlog.md` for the generalizable gap this exposed.
-
-Everything else under `specs/components/` is fully specced but has no
-real code yet — most of it genuinely needs a model call this corpus has
-no automated pipeline for yet (only manually-orchestrated `generate()`
-calls made during this methodology's own bring-up).
+Each component is a flat module file or a package found by path, not an
+installed Python package. `hotdocs-cli` loads a verb's module by file; a
+component loads a dependency from `<repo_root>/gen/<slug>/`, falling back to
+the same path under the tool root.

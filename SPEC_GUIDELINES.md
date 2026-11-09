@@ -5,7 +5,8 @@ linter invocation in this repository follows it. It states **what** is
 required; it does not re-derive **why** — the rationale and the decision
 history live in `notes/initial-ideas.md` (`D1`–`D14`, informal brainstorm,
 its own frozen historical numbering) and `specs/decisions/` (the formal
-ADRs — renumbered `D1`–`D75` as of the 2026-10 MVP baseline reset; a bare
+ADRs — `D1`–`D75` renumbered at the 2026-10 baseline reset, `D76` onward
+recorded as made; a bare
 `D<N>` citation below refers to `specs/decisions/D<N>.md` unless the
 surrounding text names `initial-ideas.md` explicitly) and are cited here
 by number for traceability, not repeated.
