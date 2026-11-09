@@ -15,12 +15,13 @@
   `read_yaml_frontmatter` MUST NOT be allowed to raise merely because a
   glob it reads matches zero files (unlike `read_text`, which already
   tolerates this natively — confirmed by hand, not assumed): a corpus
-  legitimately has no `specs/vars/*.md`, `specs/product/*.md`, or `specs/decisions/*.md` files
-  yet in some states (`graph-query-engine`'s own sparse test fixtures,
+  legitimately has no `specs/vars/*.md`, `specs/product/*.md`,
+  `specs/decisions/*.md` or `specs/components/*/component.md` files yet in
+  some states (a project `hotdocs init` set up without `--example` has no
+  component at all) (`graph-query-engine`'s own sparse test fixtures,
   `spec-linter`'s, `D13`), and that is expected state, not an error, the
   same posture `R-GQE-005` already requires for zero `.provenance.json`
   files. `load_views` MUST pre-check each such glob and substitute a
   typed, always-empty relation for that one call site when it has zero
   matches, rather than letting the bind-time error propagate.
-  `specs/components/*/component.md` is deliberately exempt from this
-  guard — no corpus is ever linted with zero components in it.
+  Every view then still exists and returns zero rows.

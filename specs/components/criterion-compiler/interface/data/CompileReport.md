@@ -27,8 +27,11 @@
 
 `compile` returns a `CompileReport` dataclass with attributes `outputs`
 (dicts as above), `gate_version` and `summary` (a dict). An error's
-`message` quotes the offending step text or name, and contains `does not
-match any recognized template` for an unmatched step, `unresolved
+`message` begins `line <n>: `, `<n>` the offending step's 1-based line
+in its acceptance file (for `compile_criterion`, in its `gherkin`), then
+quotes the offending name, or the step as written with its
+keyword (`step 'When a wizard appears' does not match any recognized
+template`) for an unmatched step, `unresolved
 reference '<name>'` for an identifier no earlier `Given` binds, `does not
 resolve` for a name the interface lacks, and `is not a literal`
 for an expression, plus `field/index access` when it is one.

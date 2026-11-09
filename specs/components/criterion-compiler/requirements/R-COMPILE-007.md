@@ -13,7 +13,8 @@
   substitution, not evaluation, when it exactly matches a fixture name
   bound by an earlier `Given` step in the same criterion. The compiler
   resolves it at **compile time** to that fixture's own already-known
-  literal value, by simple lookup — never by runtime computation, which is
+  literal value, by simple lookup, so the emitted code holds the literal
+  itself (`["u1", {"owner": "u1"}]`), never the fixture's name — never by runtime computation, which is
   the actual property that keeps this safe under R-COMPILE-007's intent.
   A bare identifier that does not match any fixture bound earlier in the
   same criterion MUST be a compile error (the same unresolved-reference

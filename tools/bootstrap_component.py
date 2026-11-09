@@ -259,13 +259,25 @@ def _build_sandbox(component_id: str) -> Path:
     # CriterionBundle for test_author), regardless of the target's own
     # depends_on -- found only once a target with zero spec-level dependency
     # on it (decision-drift-detector) first had a generated-test criterion.
-    needed = set(_depends_on_slugs(component_id)) | {"cache-manager", "llm-endpoint", "spec-bundle-assembler"}
+    infra = {"cache-manager", "llm-endpoint", "spec-bundle-assembler"}
+    needed = set(_depends_on_slugs(component_id)) | infra
+    for infra_slug in infra:
+        # the machinery's own dependencies: an in-sandbox copy of the
+        # assembler resolves its tool root to the sandbox itself (D213)
+        needed |= set(_depends_on_slugs(f"comp-{infra_slug}"))
     # Never the target itself: its old code beside the candidate would be
     # tested instead of the candidate whenever their shapes differ (an old
     # flat module shadows a new package). While the target is absent, the
     # machinery loads the real repo's copy through the tool-root fallback
     # (D199); once the candidate is written, it uses the candidate.
-    needed.discard(slug)
+    # ...unless the machinery itself needs it (spec-linter, graph-query-
+    # engine) to assemble the bundle; run() then clears it right before
+    # generation, so the candidate is still never tested beside old code.
+    infra_deps = set()
+    for infra_slug in infra:
+        infra_deps |= set(_depends_on_slugs(f"comp-{infra_slug}"))
+    if slug not in infra_deps:
+        needed.discard(slug)
     for dep_slug in sorted(needed):
         real_dep_dir = REAL_REPO / "gen" / dep_slug
         if real_dep_dir.is_dir() and not (sandbox / "gen" / dep_slug).exists():
@@ -388,27 +400,50 @@ def _write_sealed_provenance(component_id: str) -> bool:
 
 
 def run(component_id: str, model: str, seed: int, retry_feedback: list[str] | None, keep_sandbox: bool,
-        hand_suite: bool = False, sealed_install: bool = False) -> int:
+        hand_suite: bool = False, sealed_install: bool = False, resume: Path | None = None) -> int:
     code_rel = None
     if sealed_install:
         code_rel = _sealed_source_path(component_id)
         if not code_rel:
             print("FAIL: --sealed-install needs a sealed: true component with a source_path.")
             return 2
-    sandbox = _build_sandbox(component_id)
-    if sealed_install:
-        _unseal_in_sandbox(component_id, sandbox)
+    if resume is not None:
+        # A kept sandbox from an earlier run of the same component, model
+        # and seed: generation and test authoring hit that run's caches, so
+        # what lands (and what provenance records) is that run's work.
+        sandbox = Path(resume)
+    else:
+        sandbox = _build_sandbox(component_id)
+        if sealed_install:
+            _unseal_in_sandbox(component_id, sandbox)
     print(f"sandbox: {sandbox}")
 
     bundle = spec_bundle_assembler.assemble(component_id, repo_root=sandbox, mode="cold")
     print(f"spec_bundle_hash: {_get(bundle, 'spec_bundle_hash')}")
 
+    # Never generate beside the target's old code (see _build_sandbox).
+    shutil.rmtree(sandbox / "gen" / _slug(component_id), ignore_errors=True)
     result = generator.generate(bundle, model, retry_feedback, repo_root=sandbox, llm_backend=None)
+    # Forget every module this process loaded from the sandbox before the
+    # candidate existed (e.g. the old graph-query-engine that spec-linter
+    # imported by name), so later loads see the candidate, not stale code.
+    sandbox_real = str(sandbox.resolve())
+    for name, mod in list(sys.modules.items()):
+        mod_file = getattr(mod, "__file__", None)
+        if mod_file and str(Path(mod_file).resolve()).startswith(sandbox_real):
+            del sys.modules[name]
     print(f"generate: cache_hit={_get(result, 'cache_hit')} model_call_error={_get(result, 'model_call_error')} refused={_get(result, 'refused')}")
     print(f"files: {list((_get(result, 'files') or {}).keys())}")
 
     if _get(result, "model_call_error") or _get(result, "refused"):
         print("FAIL: generation itself did not produce a candidate -- nothing to verify, nothing swapped.")
+        print(f"Sandbox kept at {sandbox} for inspection.")
+        return 1
+
+    # Cheap and decisive, so before the long verification: a candidate
+    # that lacks names its consumers use (or does not import) is rejected.
+    if not _consumer_surface_ok(component_id, sandbox / "gen" / _slug(component_id)):
+        print("FAIL: the candidate lacks names other components use -- nothing swapped.")
         print(f"Sandbox kept at {sandbox} for inspection.")
         return 1
 
@@ -430,11 +465,6 @@ def run(component_id: str, model: str, seed: int, retry_feedback: list[str] | No
     passed = report.overall == "pass" and not _get(license_result, 'blocked')
     if not passed:
         print(f"FAIL: not swapped in -- real gen/{_slug(component_id)}/ and verification/ left untouched.")
-        print(f"Sandbox kept at {sandbox} for inspection.")
-        return 1
-
-    if not _consumer_surface_ok(component_id, sandbox / "gen" / _slug(component_id)):
-        print("FAIL: the candidate lacks names other components use -- nothing swapped.")
         print(f"Sandbox kept at {sandbox} for inspection.")
         return 1
 
@@ -463,6 +493,9 @@ def main(argv=None) -> int:
     parser.add_argument("--keep-sandbox", action="store_true", help="never delete the sandbox, pass or fail")
     parser.add_argument("--hand-suite", action="store_true",
                         help="also require verification/<slug>/test_*.py (hand-maintained) to pass against the candidate before swapping")
+    parser.add_argument("--resume-sandbox", default=None,
+                        help="rerun the full pipeline in a kept sandbox (same component, model and seed); "
+                             "generation and test authoring come from its caches")
     parser.add_argument("--sealed-install", action="store_true",
                         help="for a sealed component: generate it unsealed in the sandbox, require its hand-maintained "
                              "characterization suite too, and install the result at its source_path")
@@ -470,7 +503,8 @@ def main(argv=None) -> int:
 
     retry_feedback = args.retry_feedback.split(",") if args.retry_feedback else None
     return run(args.component_id, args.model, args.seed, retry_feedback, args.keep_sandbox,
-               hand_suite=args.hand_suite, sealed_install=args.sealed_install)
+               hand_suite=args.hand_suite, sealed_install=args.sealed_install,
+               resume=Path(args.resume_sandbox) if args.resume_sandbox else None)
 
 
 if __name__ == "__main__":

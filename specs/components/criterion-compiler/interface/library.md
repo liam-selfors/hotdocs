@@ -30,7 +30,16 @@ an optional `InterfaceSurface` (omit it for content black-box against
 more than one component, which has no single surface to resolve
 against), returns `{"status": "compiled", "source": <text>}` or
 `{"status": "error", "message": <text>}` — never raises, and never
-writes anything to disk itself.
+writes anything to disk itself. With no surface, only steps naming no
+function, endpoint or type compile (`a <fixture-name> is <literal>`,
+`<result-path> equals <literal>`); any other is an error naming it.
+
+`compile` reads a component's `InterfaceSurface` from its `interface/`:
+each line of a plain fenced block in `library.md` that starts
+`name(params)` (no `def`) declares function `name`, with the parameter
+names before any `:` or `=`; each `interface/data/*.md` whose heading is
+``# `Type` `` declares `Type`, its fields the keys of the file's first
+`json` example.
 
 `InterfaceSurface.module_name` (`R-COMPILE-013`, `D62`) is the target
 component's real importable module name (its underscored slug). Any

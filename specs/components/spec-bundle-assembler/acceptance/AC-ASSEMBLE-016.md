@@ -10,10 +10,9 @@ Given the library's test fixture, plus specs/architecture/rules.md (the
   comp-foo's interface/library.md gaining the line
   Implements: `specs/architecture/rules.md`
 When assemble and assemble_criterion run for comp-foo
-Then each bundle's interface contains the line
-  "## Implements: specs/architecture/rules.md", and after it that file's
-  full text, which ends the interface once trailing whitespace is
-  stripped
+Then each bundle's interface contains
+  "\n## Implements: specs/architecture/rules.md\n\n" immediately
+  followed by that file's full text, and nothing but whitespace after it
 
 Given the line names `specs/architecture/missing.md` instead
 When assemble runs for comp-foo

@@ -115,38 +115,15 @@ See `constraints.md`.
 
 ## Change log
 
+Each decision holds its full rationale.
+
 - Initial draft.
-- `D44`: first real implementation (`pipeline/criterion-compiler/
-  criterion_compiler.py`), hand-authored per `sealed: true` — never a
-  `generator` candidate. Preceded by `D43`, which found every existing
-  `kind: compiled` criterion corpus-wide was never actually written in
-  the step-phrase grammar and reclassified them all to
-  `generated-test`, leaving this component's own synthetic `widget`
-  fixture (`verification/criterion-compiler/`) as its only real test
-  subject — exactly what `constraints.md`'s characterization-coverage
-  clause already anticipated.
-- `D59`: new `R-COMPILE-012` / `compile_criterion` — a public,
-  directory-scanning-free primitive `compile` itself now uses
-  internally, exposed for a caller (`capability-scenario-verifier`)
-  compiling criterion content outside any component's `acceptance/`.
-  Hand-authored directly, same as `D44` — never a `generator`
-  candidate.
-- `D62`: new `R-COMPILE-013` / `InterfaceSurface.module_name` — emitted
-  test code that references the target component's own functions or
-  types now imports and qualifies them (`<module_name>.<name>`)
-  instead of calling them as bare, unqualified globals. Found because
-  none of this component's own prior tests ever *executed* emitted
-  output against real target code — only checked its content. Also
-  documents, for the first time, the execution-environment contract
-  this creates for any caller that runs emitted scaffolding
-  (`verifier-orchestrator`'s `R-VERIFY-001`): the import search path
-  must be scoped to `gen/<component>/` itself, not a broader ancestor.
-  Hand-authored directly, same as `D44`/`D59` — never a `generator`
-  candidate.
-- `D83`: `R-COMPILE-014` — backfilled the lazy, `repo_root`-relative
-  import convention any direct dependent MUST use to locate this
-  sealed component, found once a real `verifier-orchestrator`
-  candidate used a static top-level import instead and failed.
+- `D43`: every prose `compiled` criterion reclassified. `D44`: first
+  implementation, hand-written. `D59`: `compile_criterion`. `D62`: emitted
+  code imports and qualifies the target module. `D83`: dependents load
+  this component lazily from `repo_root`.
 - `D206`: generated from this spec and installed at `source_path` with
-  `--sealed-install`, replacing the hand-written implementation. Still
-  sealed; the characterization suite stays hand-maintained.
+  `--sealed-install`; still sealed, the characterization suite still
+  hand-maintained. `D214`: exact grammar forms and located errors.
+- `D217`: how the interface surface is read, and substitution's emitted
+  form.

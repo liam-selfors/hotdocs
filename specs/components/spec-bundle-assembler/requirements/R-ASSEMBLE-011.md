@@ -2,10 +2,11 @@
 
 **R-ASSEMBLE-011** — For each id in the component's `depends_on`, the
   bundle MUST also include a mechanically-derived usage card as
-  `dependency_usage[id]`: that dependency's real, currently-importable
-  module path, and — for each public top-level symbol its real
-  `gen/<dependency>/` code actually defines — its signature and the
-  first line of its docstring. No model call; derived by introspecting
+  `dependency_usage[id]`: that dependency's module name and the
+  directory it is loaded from, relative to `repo_root` with a trailing
+  `/` (`gen/bar/`, or a sealed dependency's `source_path`), and — for each
+  public top-level callable its real code defines — its name, its
+  `inspect.signature` text, and the first line of its docstring. No model call; derived by introspecting
   the dependency's own real, already-verified code (`inspect`-level
   facts: callable, signature, docstring — never source text, never
   anything from `acceptance/`).

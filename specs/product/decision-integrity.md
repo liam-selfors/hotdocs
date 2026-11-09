@@ -29,7 +29,7 @@ ambiguity gate.
 
 ### CS-DECISION-INTEGRITY-001
 Covers: P-DECISION-INTEGRITY
-Kind: compiled
+Kind: generated-test
 
 ```gherkin
 Given a decision record superseded by a later one, and a live spec

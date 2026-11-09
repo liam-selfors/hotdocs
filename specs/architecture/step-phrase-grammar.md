@@ -45,6 +45,17 @@ function/endpoint/type/field not declared in the target component's
 unresolved reference or unmatched text — never a silent skip or a
 best-effort guess (`criterion-compiler`'s `R-COMPILE-001`/`002`).
 
+**Exact forms** (`D214`). `<fixture-name>` is an identifier
+(`[A-Za-z_][A-Za-z0-9_]*`); `<Type>` is one starting with a capital.
+`<function-or-endpoint>` is an identifier that may contain dots. A
+`<literal>` is a JSON value (string, number, `true`/`false`/`null`,
+object, array) in which a bare fixture name may stand for any scalar
+value. `<args>` is one such literal: an object becomes keyword arguments
+(`with {"text": payload}` compiles to `f(text=<payload's literal>)`), an
+array becomes positional arguments, and any other value a single
+positional argument. A `<result-path>` is an identifier with optional
+`.field` and `[index]` parts, asserted as `result.<result-path>`.
+
 Literal values are JSON-like scalars, strings, or object/array literals only
 — never expressions. A fixture name referenced in a later step (e.g. a
 `Given`-bound variable used in a `When` step's args) resolves to the literal
