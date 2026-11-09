@@ -1,109 +1,14 @@
-import dataclasses
-import os
+import json
+import shutil
 import subprocess
 import tempfile
+import unittest
 from pathlib import Path
 
 import review_packet_builder
 
 
-OLD_SENTINEL = "SENTINEL_LINE_OLD_a1b2c3d4"
-NEW_SENTINEL = "SENTINEL_LINE_NEW_e5f6g7h8"
-OLD_VALUE = "old-value-a1b2c3d4"
-NEW_VALUE = "new-value-e5f6g7h8"
-EXTRA_NEW = "extra-new-function-e5f6g7h8"
-
-DIFF_FINGERPRINTS = [OLD_SENTINEL, NEW_SENTINEL, OLD_VALUE, NEW_VALUE, EXTRA_NEW]
-
-
-def _git(repo_root, *args):
-    subprocess.run(
-        ["git", *args],
-        cwd=str(repo_root),
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-
-
-def _write(path: Path, content: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(content)
-
-
-def _build_fixture_repo(repo_root: Path) -> None:
-    _git(repo_root, "init", "-q")
-    _git(repo_root, "config", "user.email", "lselfors@gmail.com")
-    _git(repo_root, "config", "user.name", "Test Author")
-
-    component_md = """---
-id: comp-foo
-title: Foo Fixture Component
-status: draft
-owners: [lselfors@gmail.com]
-sealed: false
-depends_on: []
----
-
-# comp-foo
-
-Fixture component used to exercise review-packet-builder's handling of a
-substantial generated-code change.
-"""
-    requirement_md = """# R-FOO-001
-
-**R-FOO-001** -- `foo()` MUST return a non-empty string.
-"""
-    acceptance_md = """# AC-FOO-001
-
-Covers: R-FOO-001
-Kind: compiled
-
-```gherkin
-Given foo()
-When it is called
-Then it returns a non-empty string
-```
-"""
-    interface_md = """# Library
-
-```
-foo() -> str
-```
-"""
-
-    _write(repo_root / "specs/components/foo/component.md", component_md)
-    _write(repo_root / "specs/components/foo/requirements/R-FOO-001.md", requirement_md)
-    _write(repo_root / "specs/components/foo/acceptance/AC-FOO-001.md", acceptance_md)
-    _write(repo_root / "specs/components/foo/interface/library.md", interface_md)
-
-    old_gen = f"""# fixture generated code for comp-foo
-# {OLD_SENTINEL}
-def foo():
-    return "{OLD_VALUE}"
-"""
-    _write(repo_root / "gen/foo/foo.py", old_gen)
-
-    _git(repo_root, "add", "-A")
-    _git(repo_root, "-c", "commit.gpgsign=false", "commit", "-q", "-m", "initial generation of comp-foo")
-
-    new_gen = f"""# fixture generated code for comp-foo, substantially regenerated
-# {NEW_SENTINEL}
-def foo():
-    return "{NEW_VALUE}"
-
-
-def foo_helper():
-    return "{EXTRA_NEW}"
-"""
-    _write(repo_root / "gen/foo/foo.py", new_gen)
-
-    _git(repo_root, "add", "-A")
-    _git(repo_root, "-c", "commit.gpgsign=false", "commit", "-q", "-m", "substantial regeneration of comp-foo")
-
-
-def _write_fake_provenance_tracker(repo_root: Path) -> None:
-    module_src = '''
+FAKE_PROVENANCE_TRACKER_SOURCE = """
 def check_readiness(repo_root, changed_ids=None, model=None, seed=0, llm_backend=None):
     return {
         "scope": "blast-radius",
@@ -114,103 +19,184 @@ def check_readiness(repo_root, changed_ids=None, model=None, seed=0, llm_backend
                 "verification_report": {
                     "component_id": "comp-foo",
                     "criteria": [
-                        {
-                            "id": "AC-FOO-001",
-                            "covers": "R-FOO-001",
-                            "kind": "compiled",
-                            "result": "pass",
-                        }
+                        {"id": "AC-FOO-001", "covers": "R-FOO-001", "kind": "compiled", "result": "pass"}
                     ],
                     "requirement_results": {"R-FOO-001": "pass"},
                     "interface_drift": False,
                     "mutation_score": 1.0,
-                    "overall": "pass",
+                    "overall": "pass"
                 },
-                "license_scan": {
-                    "component_id": "comp-foo",
-                    "blocked": False,
-                    "findings": [],
-                },
-                "secret_scan": {
-                    "component_id": "comp-foo",
-                    "flagged": False,
-                    "findings": [],
-                },
+                "license_scan": {"blocked": False},
+                "secret_scan": {"flagged": False}
             }
         },
         "capabilities": {},
-        "not_ready_reasons": [],
-    }
-
-
-def write_attempt_record(component_id, generation_result, verification_report, spec_bundle_hash, repo_root):
-    return {
-        "attempt_id": "2026-01-01T00:00:00Z-000000",
-        "component_id": component_id,
-        "timestamp": "2026-01-01T00:00:00Z",
-        "spec_bundle_hash": spec_bundle_hash,
-        "generation": generation_result,
-        "verification": verification_report,
+        "not_ready_reasons": []
     }
 
 
 def last_requirement_failures(component_id, repo_root):
     return []
-'''
-    _write(repo_root / "gen/provenance-tracker/provenance_tracker.py", module_src)
+"""
+
+COMPONENT_MD = """---
+id: comp-foo
+title: Foo
+status: ratified
+owners: [alice]
+last_ratified_commit: 0000000000000000000000000000000000000
+sealed: false
+---
+
+# Foo
+
+A synthetic component used only to exercise review-packet-builder.
+"""
+
+REQUIREMENT_MD = """# R-FOO-001
+
+**R-FOO-001** -- Foo MUST return a constant placeholder value for testing purposes.
+"""
+
+ACCEPTANCE_MD = """# AC-FOO-001
+
+Covers: R-FOO-001
+
+```gherkin
+Given foo
+When foo runs
+Then foo returns the placeholder value
+```
+"""
+
+ORIGINAL_GENERATED_CODE = """def foo():
+    # OLDLINE_MARKER_8e21cb_1
+    return "old-value-1"
 
 
-def _get(obj, key, default=None):
+def helper_one():
+    # OLDLINE_MARKER_8e21cb_2
+    return "old-value-2"
+
+
+def helper_two():
+    # OLDLINE_MARKER_8e21cb_3
+    return "old-value-3"
+"""
+
+CHANGED_GENERATED_CODE = """def foo():
+    # NEWLINE_MARKER_4f9a21_1
+    return "new-value-1"
+
+
+def helper_one():
+    # NEWLINE_MARKER_4f9a21_2
+    return "new-value-2"
+
+
+def helper_two():
+    # NEWLINE_MARKER_4f9a21_3
+    return "new-value-3"
+
+
+def helper_three():
+    # NEWLINE_MARKER_4f9a21_4
+    return "new-value-4"
+
+
+def helper_four():
+    # NEWLINE_MARKER_4f9a21_5
+    return "new-value-5"
+"""
+
+
+def dual_get(obj, name, default=None):
     if isinstance(obj, dict):
-        return obj.get(key, default)
-    return getattr(obj, key, default)
+        return obj.get(name, default)
+    return getattr(obj, name, default)
 
 
-def _iter_children(obj):
-    if dataclasses.is_dataclass(obj) and not isinstance(obj, type):
-        for field in dataclasses.fields(obj):
-            yield getattr(obj, field.name)
-    elif isinstance(obj, dict):
-        for value in obj.values():
-            yield value
-    elif isinstance(obj, (list, tuple, set)):
-        for value in obj:
-            yield value
-    elif hasattr(obj, "__dict__"):
-        for value in vars(obj).values():
-            yield value
+def run_git(repo_root, *args):
+    subprocess.run(
+        ["git", "-C", str(repo_root), *args],
+        check=True, capture_output=True, text=True,
+    )
 
 
-def _collect_strings(obj, acc):
-    if isinstance(obj, str):
-        acc.append(obj)
-        return
-    if obj is None or isinstance(obj, (int, float, bool)):
-        return
-    for child in _iter_children(obj):
-        _collect_strings(child, acc)
+class BuildReviewPacketExcludesGeneratedCodeDiffTest(unittest.TestCase):
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp()
+        self.repo_root = Path(self.tmpdir)
+
+        run_git(self.repo_root, "init")
+        run_git(self.repo_root, "config", "user.email", "test@example.com")
+        run_git(self.repo_root, "config", "user.name", "Test")
+
+        tracker_dir = self.repo_root / "gen" / "provenance-tracker"
+        tracker_dir.mkdir(parents=True)
+        (tracker_dir / "provenance_tracker.py").write_text(FAKE_PROVENANCE_TRACKER_SOURCE)
+
+        comp_dir = self.repo_root / "specs" / "components" / "foo"
+        (comp_dir / "requirements").mkdir(parents=True)
+        (comp_dir / "acceptance").mkdir(parents=True)
+        (comp_dir / "component.md").write_text(COMPONENT_MD)
+        (comp_dir / "requirements" / "R-FOO-001.md").write_text(REQUIREMENT_MD)
+        (comp_dir / "acceptance" / "AC-FOO-001.md").write_text(ACCEPTANCE_MD)
+
+        gen_foo_dir = self.repo_root / "gen" / "foo"
+        gen_foo_dir.mkdir(parents=True)
+        self.gen_foo_file = gen_foo_dir / "foo.py"
+        self.gen_foo_file.write_text(ORIGINAL_GENERATED_CODE)
+
+        run_git(self.repo_root, "add", "-A")
+        run_git(self.repo_root, "commit", "-m", "initial commit")
+
+        # Substantial regeneration of comp-foo's generated code.
+        self.gen_foo_file.write_text(CHANGED_GENERATED_CODE)
+        run_git(self.repo_root, "add", "-A")
+        run_git(self.repo_root, "commit", "-m", "regenerate comp-foo substantially")
+
+        diff_proc = subprocess.run(
+            ["git", "-C", str(self.repo_root), "diff", "HEAD~1", "HEAD", "--", "gen/foo/foo.py"],
+            check=True, capture_output=True, text=True,
+        )
+        self.generated_code_diff = diff_proc.stdout
+        self.assertIn("NEWLINE_MARKER_4f9a21", self.generated_code_diff)
+        self.assertIn("OLDLINE_MARKER_8e21cb", self.generated_code_diff)
+
+    def tearDown(self):
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def test_packet_contains_no_generated_code_diff_content(self):
+        packet = review_packet_builder.build_review_packet(["comp-foo"], self.repo_root)
+
+        field_names = (
+            "spec_diff",
+            "changed_requirements",
+            "regenerated_components",
+            "verification_results",
+            "compliance_flags",
+            "provenance_hit_status",
+            "capability_scenarios",
+            "exemption_changes",
+            "residual_risk",
+        )
+        fields = {name: dual_get(packet, name) for name in field_names}
+
+        serialized = json.dumps(fields, default=str)
+
+        self.assertNotIn(self.generated_code_diff, serialized)
+        self.assertNotIn("NEWLINE_MARKER_4f9a21", serialized)
+        self.assertNotIn("OLDLINE_MARKER_8e21cb", serialized)
+
+        checked_diff_line = False
+        for line in self.generated_code_diff.splitlines():
+            stripped = line.strip()
+            if stripped.startswith(("+", "-")) and len(stripped) > 3:
+                checked_diff_line = True
+                self.assertNotIn(stripped, serialized)
+        self.assertTrue(checked_diff_line)
 
 
-def test_packet_excludes_generated_code_diff_for_substantially_changed_component():
-    with tempfile.TemporaryDirectory() as tmp:
-        repo_root = Path(tmp)
-        _build_fixture_repo(repo_root)
-        _write_fake_provenance_tracker(repo_root)
-
-        packet = review_packet_builder.build_review_packet(["comp-foo"], repo_root)
-
-        regenerated = _get(packet, "regenerated_components", [])
-        assert "comp-foo" in regenerated
-
-        verification_results = _get(packet, "verification_results", {})
-        comp_foo_report = _get(verification_results, "comp-foo", {})
-        assert _get(comp_foo_report, "overall") == "pass"
-
-        strings = []
-        _collect_strings(packet, strings)
-        blob = "\n".join(strings)
-
-        for fingerprint in DIFF_FINGERPRINTS:
-            assert fingerprint not in blob, (
-                f"generated-code diff content {fingerprint!r} leaked into the review packet"
-            )
+if __name__ == "__main__":
+    unittest.main()

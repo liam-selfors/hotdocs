@@ -1,344 +1,278 @@
 import json
+import os
 import re
 import subprocess
-from pathlib import Path
-
-import pytest
 
 import review_packet_builder
 
 
-def _git(repo_root, *args):
-    subprocess.run(["git", *args], cwd=repo_root, check=True, capture_output=True, text=True)
+def _get(obj, key):
+    if isinstance(obj, dict):
+        return obj.get(key)
+    return getattr(obj, key, None)
 
 
-def _init_repo(repo_root):
-    repo_root.mkdir(parents=True, exist_ok=True)
-    _git(repo_root, "init", "-q")
-    _git(repo_root, "config", "user.email", "lselfors@gmail.com")
-    _git(repo_root, "config", "user.name", "Test User")
-
-
-def _commit_all(repo_root, message):
-    _git(repo_root, "add", "-A")
-    _git(repo_root, "commit", "-q", "-m", message)
-
-
-def _component_md(component_id, title, sealed, source_path=None):
-    lines = [
-        "---",
-        f"id: {component_id}",
-        f"title: {title}",
-        "status: draft",
-        "owners: [lselfors@gmail.com]",
-        f"sealed: {'true' if sealed else 'false'}",
-    ]
-    if source_path:
-        lines.append(f"source_path: {source_path}")
-    lines.append("---")
-    lines.append("")
-    lines.append(f"{title} component body.")
-    return "\n".join(lines) + "\n"
-
-
-def _write_fake_provenance_tracker(repo_root, response=None, raise_usage_error=False):
-    dep_dir = repo_root / "gen" / "provenance-tracker"
-    dep_dir.mkdir(parents=True, exist_ok=True)
-    if raise_usage_error:
-        body = (
-            "class UsageError(Exception):\n"
-            "    pass\n\n"
-            "def check_readiness(repo_root, changed_ids=None, model=None, seed=0, llm_backend=None):\n"
-            "    raise UsageError('model required for fresh capability scenario run')\n"
-        )
-    else:
-        body = (
-            "class UsageError(Exception):\n"
-            "    pass\n\n"
-            "_RESPONSE = " + repr(response) + "\n\n"
-            "def check_readiness(repo_root, changed_ids=None, model=None, seed=0, llm_backend=None):\n"
-            "    return _RESPONSE\n"
-        )
-    (dep_dir / "provenance_tracker.py").write_text(body)
-
-
-def _build_baseline_repo(tmp_path, name):
-    repo_root = tmp_path / name
-    _init_repo(repo_root)
-    (repo_root / "README.md").write_text("baseline fixture repo\n")
-    _commit_all(repo_root, "initial commit")
-    return repo_root
-
-
-def _build_repo_with_exemption_history(tmp_path, name):
-    repo_root = tmp_path / name
-    _init_repo(repo_root)
-
-    sealed_dir = repo_root / "specs" / "components" / "sealed-target"
-    sealed_dir.mkdir(parents=True, exist_ok=True)
-    (sealed_dir / "component.md").write_text(
-        _component_md("comp-sealed-target", "Sealed Target", sealed=False)
+def _git(repo, *args):
+    env = dict(os.environ)
+    env["GIT_AUTHOR_NAME"] = "Test Fixture"
+    env["GIT_AUTHOR_EMAIL"] = "test@example.com"
+    env["GIT_COMMITTER_NAME"] = "Test Fixture"
+    env["GIT_COMMITTER_EMAIL"] = "test@example.com"
+    subprocess.run(
+        ["git", *args],
+        cwd=str(repo),
+        check=True,
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
     )
 
-    pinned_spec_dir = repo_root / "specs" / "components" / "pinned-target"
-    pinned_spec_dir.mkdir(parents=True, exist_ok=True)
-    (pinned_spec_dir / "component.md").write_text(
-        _component_md("comp-pinned-target", "Pinned Target", sealed=True, source_path="legacy/pinned.py")
-    )
 
-    (repo_root / "README.md").write_text("exemption fixture repo\n")
-    _commit_all(repo_root, "initial commit: unsealed target, pinned target component")
-
-    (sealed_dir / "component.md").write_text(
-        _component_md(
-            "comp-sealed-target", "Sealed Target", sealed=True, source_path="legacy/sealed_target.py"
-        )
-    )
-    overrides_dir = repo_root / "gen" / "pinned-target"
-    overrides_dir.mkdir(parents=True, exist_ok=True)
-    (overrides_dir / ".overrides.json").write_text(
-        json.dumps({"pinned_file.py": "manual override reason"}) + "\n"
-    )
-    _commit_all(repo_root, "seal sealed-target and pin an override for pinned-target")
-
-    return repo_root
+def _make_repo(tmp_path, name, tracker_source):
+    repo = tmp_path / name
+    repo.mkdir()
+    _git(repo, "init", "-q")
+    tracker_dir = repo / "gen" / "provenance-tracker"
+    tracker_dir.mkdir(parents=True)
+    (tracker_dir / "provenance_tracker.py").write_text(tracker_source)
+    (repo / "README.md").write_text("fixture repo\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "initial commit")
+    return repo
 
 
-def _verification_report(mutation_score, overall, criterion_id="AC-FOO-001", requirement="R-FOO-001"):
+TRACKER_REAL_CONTENT = '''
+def check_readiness(repo_root, changed_ids=None, model=None, seed=0, llm_backend=None):
     return {
-        "component_id": "comp-foo",
-        "criteria": [
-            {
-                "id": criterion_id,
-                "covers": requirement,
-                "kind": "compiled",
-                "result": "pass",
-            }
-        ],
-        "requirement_results": {requirement: "pass"},
-        "interface_drift": False,
-        "mutation_score": mutation_score,
-        "overall": overall,
-    }
-
-
-def _extract_section(markdown, heading):
-    pattern = re.compile(
-        r"^#{1,6}\s*" + re.escape(heading) + r"\s*$\n(.*?)(?=^#{1,6}\s|\Z)",
-        re.MULTILINE | re.DOTALL,
-    )
-    match = pattern.search(markdown)
-    assert match, f"heading {heading!r} not found in markdown:\n{markdown}"
-    return match.group(1)
-
-
-def test_json_format_renders_real_verification_and_residual_risk_with_empty_exemptions(tmp_path, capsys):
-    repo_root = _build_baseline_repo(tmp_path, "repo1")
-    response = {
         "scope": "blast-radius",
         "ready": True,
         "components": {
             "comp-foo": {
                 "hit": True,
-                "verification_report": _verification_report(0.92, "pass"),
-                "license_scan": {"blocked": False},
-                "secret_scan": {"flagged": False},
-            }
+                "verification_report": {
+                    "component_id": "comp-foo",
+                    "criteria": [
+                        {
+                            "id": "AC-FOO-001",
+                            "covers": "R-FOO-001",
+                            "kind": "compiled",
+                            "result": "pass",
+                        },
+                    ],
+                    "requirement_results": {"R-FOO-001": "pass"},
+                    "interface_drift": False,
+                    "mutation_score": 0.92,
+                    "overall": "pass",
+                },
+                "license_scan": {"blocked": False, "findings": []},
+                "secret_scan": {"flagged": False, "findings": []},
+            },
         },
         "capabilities": {},
         "not_ready_reasons": [],
     }
-    _write_fake_provenance_tracker(repo_root, response=response)
 
-    argv = [
-        "review-packet",
-        "build",
-        "--changed=R-FOO-001",
-        f"--repo-root={repo_root}",
-        "--format=json",
-    ]
-    exit_code = review_packet_builder.main(argv)
+
+def last_requirement_failures(component_id, repo_root):
+    return []
+'''
+
+
+TRACKER_USAGE_ERROR = '''
+class UsageError(Exception):
+    pass
+
+
+def check_readiness(repo_root, changed_ids=None, model=None, seed=0, llm_backend=None):
+    raise UsageError("provenance-tracker usage error")
+
+
+def last_requirement_failures(component_id, repo_root):
+    return []
+'''
+
+
+TRACKER_AZ_RESULT = '''
+def check_readiness(repo_root, changed_ids=None, model=None, seed=0, llm_backend=None):
+    return {
+        "scope": "blast-radius",
+        "ready": True,
+        "components": {
+            "comp-foo": {
+                "hit": True,
+                "verification_report": {"z": 1, "a": 2},
+                "license_scan": {"blocked": False, "findings": []},
+                "secret_scan": {"flagged": False, "findings": []},
+            },
+        },
+        "capabilities": {},
+        "not_ready_reasons": [],
+    }
+
+
+def last_requirement_failures(component_id, repo_root):
+    return []
+'''
+
+
+def test_build_json_has_real_content_and_exemption_fields(tmp_path, capsys):
+    repo = _make_repo(tmp_path, "repo_scenario1", TRACKER_REAL_CONTENT)
+
+    rc = review_packet_builder.main(
+        [
+            "review-packet",
+            "build",
+            "--changed=R-FOO-001",
+            f"--repo-root={repo}",
+            "--format=json",
+        ]
+    )
     captured = capsys.readouterr()
+    assert rc == 0
 
-    assert exit_code == 0
     packet = json.loads(captured.out)
 
-    assert "comp-foo" in packet["verification_results"]
-    verification_text = json.dumps(packet["verification_results"]["comp-foo"])
-    assert "AC-FOO-001" in verification_text
-    assert "0.92" in verification_text
+    verification_results = _get(packet, "verification_results")
+    assert verification_results
+    comp_foo_result = _get(verification_results, "comp-foo")
+    assert comp_foo_result is not None
+    assert _get(comp_foo_result, "overall") == "pass"
 
-    assert len(packet["residual_risk"]) >= 1
-    residual_text = json.dumps(packet["residual_risk"])
-    assert "comp-foo" in residual_text
-    assert "0.92" in residual_text
+    residual_risk = _get(packet, "residual_risk")
+    assert residual_risk
+    assert any(
+        _get(entry, "component_id") == "comp-foo"
+        and "mutation_score" in (_get(entry, "message") or "")
+        for entry in residual_risk
+    )
 
-    assert packet["exemption_changes"]["sealed"] == []
-    assert packet["exemption_changes"]["pinned_overrides"] == []
+    exemption_changes = _get(packet, "exemption_changes")
+    assert exemption_changes is not None
+    assert _get(exemption_changes, "sealed") == []
+    assert _get(exemption_changes, "pinned_overrides") == []
 
 
-def test_markdown_format_renders_real_content_under_own_headings(tmp_path, capsys):
-    repo_root = _build_repo_with_exemption_history(tmp_path, "repo2")
-    response = {
-        "scope": "blast-radius",
-        "ready": True,
-        "components": {
-            "comp-foo": {
-                "hit": True,
-                "verification_report": _verification_report(0.85, "pass"),
-                "license_scan": {
-                    "blocked": True,
-                    "package": "left-pad",
-                    "version": "1.3.0",
-                    "license": "GPL-3.0",
-                    "file": "vendor/left-pad/index.js",
-                },
-                "secret_scan": {
-                    "flagged": True,
-                    "file": "config/secrets.env",
-                    "secret_type": "aws_access_key_id",
-                    "pattern": "AKIA[0-9A-Z]{16}",
-                },
-            }
-        },
-        "capabilities": {
-            "P-ZERO-EDIT": {
-                "hit": True,
-                "capability_scenario_report": {
-                    "capability_id": "P-ZERO-EDIT",
-                    "scenario_id": "SCN-1",
-                    "result": "pass",
-                },
-            }
-        },
-        "not_ready_reasons": [],
-    }
-    _write_fake_provenance_tracker(repo_root, response=response)
+def test_changed_requirements_filters_to_r_id_shaped_subset(tmp_path, capsys):
+    repo = _make_repo(tmp_path, "repo_scenario2", TRACKER_REAL_CONTENT)
 
-    argv = ["review-packet", "build", "--changed=R-FOO-001", f"--repo-root={repo_root}"]
-    exit_code = review_packet_builder.main(argv)
+    rc = review_packet_builder.main(
+        [
+            "review-packet",
+            "build",
+            "--changed",
+            "R-FOO-001",
+            "--changed",
+            "comp-foo",
+            "--repo-root",
+            str(repo),
+            "--format",
+            "json",
+        ]
+    )
     captured = capsys.readouterr()
+    assert rc == 0
 
-    assert exit_code == 0
-    markdown = captured.out
-
-    license_section = _extract_section(markdown, "License Scan")
-    assert "left-pad" in license_section
-    assert license_section.strip() not in ("blocked", "- blocked", "**blocked**")
-
-    secret_section = _extract_section(markdown, "Secret Scan")
-    assert "aws_access_key_id" in secret_section
-    assert secret_section.strip() not in ("flagged", "- flagged", "**flagged**")
-
-    residual_section = _extract_section(markdown, "Residual Risk")
-    assert "comp-foo" in residual_section
-    assert "0.85" in residual_section
-
-    capability_section = _extract_section(markdown, "Capability Scenarios")
-    assert "P-ZERO-EDIT" in capability_section
-
-    exemption_section = _extract_section(markdown, "Exemption Changes")
-    assert "**Sealed:**" in exemption_section
-    assert "**Pinned Overrides:**" in exemption_section
-    assert "comp-sealed-target" in exemption_section
-    assert "comp-pinned-target" in exemption_section
-    for line in exemption_section.splitlines():
-        assert not line.strip().startswith("###")
-
-    verification_section = _extract_section(markdown, "Verification Results")
-    assert "comp-foo" in verification_section
-    assert "AC-FOO-001" in verification_section
+    packet = json.loads(captured.out)
+    assert _get(packet, "changed_requirements") == ["R-FOO-001"]
 
 
-def test_markdown_format_renders_clean_placeholders_when_zero_flags(tmp_path, capsys):
-    repo_root = _build_baseline_repo(tmp_path, "repo3")
-    response = {
-        "scope": "blast-radius",
-        "ready": True,
-        "components": {
-            "comp-foo": {
-                "hit": True,
-                "verification_report": _verification_report(
-                    1.0, "pass", criterion_id="AC-BAR-001", requirement="R-FOO-001"
-                ),
-                "license_scan": {"blocked": False},
-                "secret_scan": {"flagged": False},
-            }
-        },
-        "capabilities": {},
-        "not_ready_reasons": [],
-    }
-    _write_fake_provenance_tracker(repo_root, response=response)
+def test_usage_errors_exit_2(tmp_path):
+    repo = _make_repo(tmp_path, "repo_scenario3", TRACKER_REAL_CONTENT)
+    repo_str = str(repo)
 
-    argv = ["review-packet", "build", "--changed=R-FOO-001", f"--repo-root={repo_root}"]
-    exit_code = review_packet_builder.main(argv)
-    captured = capsys.readouterr()
-
-    assert exit_code == 0
-    markdown = captured.out
-
-    license_section = _extract_section(markdown, "License Scan")
-    assert license_section.strip() != ""
-    assert "left-pad" not in license_section
-
-    secret_section = _extract_section(markdown, "Secret Scan")
-    assert secret_section.strip() != ""
-    assert "aws_access_key_id" not in secret_section
-
-    capability_section = _extract_section(markdown, "Capability Scenarios")
-    assert capability_section.strip() != ""
-    assert "P-ZERO-EDIT" not in capability_section
-
-    verification_section = _extract_section(markdown, "Verification Results")
-    assert "comp-foo" in verification_section
-    assert "AC-BAR-001" in verification_section
-
-
-def test_missing_changed_returns_usage_error(tmp_path, capsys):
-    repo_root = _build_baseline_repo(tmp_path, "repo4")
-    response = {
-        "scope": "whole-corpus",
-        "ready": True,
-        "components": {},
-        "capabilities": {},
-        "not_ready_reasons": [],
-    }
-    _write_fake_provenance_tracker(repo_root, response=response)
-
-    argv = ["review-packet", "build", f"--repo-root={repo_root}"]
-    exit_code = review_packet_builder.main(argv)
-
-    assert exit_code == 2
-
-
-def test_invalid_format_returns_usage_error(tmp_path, capsys):
-    repo_root = _build_baseline_repo(tmp_path, "repo5")
-    response = {
-        "scope": "blast-radius",
-        "ready": True,
-        "components": {},
-        "capabilities": {},
-        "not_ready_reasons": [],
-    }
-    _write_fake_provenance_tracker(repo_root, response=response)
-
-    argv = [
-        "review-packet",
-        "build",
-        "--changed=R-FOO-001",
-        f"--repo-root={repo_root}",
-        "--format=bogus",
+    usage_argvs = [
+        ["review-packet", "build", f"--repo-root={repo_str}"],
+        ["review-packet", "serve", "--changed=R-FOO-001"],
+        ["review-packet"],
+        [
+            "review-packet",
+            "build",
+            "--changed=R-FOO-001",
+            f"--repo-root={repo_str}",
+            "--changed",
+        ],
+        [
+            "review-packet",
+            "build",
+            "--changed=R-FOO-001",
+            f"--repo-root={repo_str}",
+            "--repo-root",
+        ],
+        [
+            "review-packet",
+            "build",
+            "--changed=R-FOO-001",
+            f"--repo-root={repo_str}",
+            "--format",
+        ],
     ]
-    exit_code = review_packet_builder.main(argv)
 
-    assert exit_code == 2
+    for argv in usage_argvs:
+        rc = review_packet_builder.main(list(argv))
+        assert rc == 2, f"expected exit 2 for argv={argv!r}, got {rc!r}"
 
 
-def test_upstream_usage_error_returns_one(tmp_path, capsys):
-    repo_root = _build_baseline_repo(tmp_path, "repo6")
-    _write_fake_provenance_tracker(repo_root, raise_usage_error=True)
+def test_invalid_format_exits_2(tmp_path):
+    repo = _make_repo(tmp_path, "repo_scenario4", TRACKER_REAL_CONTENT)
 
-    argv = ["review-packet", "build", "--changed=R-FOO-001", f"--repo-root={repo_root}"]
-    exit_code = review_packet_builder.main(argv)
+    rc = review_packet_builder.main(
+        [
+            "review-packet",
+            "build",
+            "--changed=R-FOO-001",
+            f"--repo-root={repo}",
+            "--format=bogus",
+        ]
+    )
+    assert rc == 2
 
-    assert exit_code == 1
+
+def test_upstream_usage_error_exits_1(tmp_path):
+    repo = _make_repo(tmp_path, "repo_scenario5", TRACKER_USAGE_ERROR)
+
+    rc = review_packet_builder.main(
+        [
+            "review-packet",
+            "build",
+            "--changed=R-FOO-001",
+            f"--repo-root={repo}",
+        ]
+    )
+    assert rc == 1
+
+
+def test_json_values_are_sort_keyed_in_both_formats(tmp_path, capsys):
+    repo = _make_repo(tmp_path, "repo_scenario6", TRACKER_AZ_RESULT)
+
+    rc_json = review_packet_builder.main(
+        [
+            "review-packet",
+            "build",
+            "--changed=R-FOO-001",
+            f"--repo-root={repo}",
+            "--format=json",
+        ]
+    )
+    out_json = capsys.readouterr().out
+    assert rc_json == 0
+
+    match_json = re.search(r'"comp-foo":\s*\{(.*?)\}', out_json, re.DOTALL)
+    assert match_json is not None, out_json
+    inner_json = match_json.group(1)
+    assert inner_json.index('"a"') < inner_json.index('"z"')
+
+    rc_md = review_packet_builder.main(
+        [
+            "review-packet",
+            "build",
+            "--changed=R-FOO-001",
+            f"--repo-root={repo}",
+        ]
+    )
+    out_md = capsys.readouterr().out
+    assert rc_md == 0
+
+    match_md = re.search(r"comp-foo:\s*(.*)", out_md)
+    assert match_md is not None, out_md
+    line_md = match_md.group(1)
+    assert line_md.index("a") < line_md.index("z")

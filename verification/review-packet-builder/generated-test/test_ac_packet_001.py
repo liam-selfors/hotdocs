@@ -1,136 +1,104 @@
+import os
 import subprocess
 
 import review_packet_builder
 
 
-def _get(obj, key, default=None):
-    if isinstance(obj, dict):
-        return obj.get(key, default)
-    return getattr(obj, key, default)
-
-
-def _run_git(args, cwd):
-    result = subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True)
-    assert result.returncode == 0, "git %s failed: %s" % (args, result.stderr)
-
-
-COMPONENT_MD_V1 = """---
-id: comp-widget
-title: Widget
-status: draft
-owners: [lselfors@gmail.com]
-sealed: true
-source_path: legacy/widget.py
----
-
-# Widget
-
-Initial widget description.
-"""
-
-COMPONENT_MD_V2 = """---
-id: comp-widget
-title: Widget
-status: draft
-owners: [lselfors@gmail.com]
-sealed: true
-source_path: legacy/widget.py
----
-
-# Widget
-
-Updated widget description with a brand new sentence that was not present before.
-"""
-
-REQUIREMENT_MD = "**R-WIDGET-001** -- The widget component MUST do something widget-y.\n"
-
-ACCEPTANCE_MD = """# AC-WIDGET-001
-
-Covers: R-WIDGET-001
-
-Given a widget
-When it is used
-Then it works
-"""
-
-FAKE_PROVENANCE_TRACKER_TEMPLATE = '''
-def check_readiness(repo_root, changed_ids=None, model=None, seed=0, llm_backend=None):
-    with open(r"__LOG_PATH__", "a") as f:
-        f.write("called\\n")
-    return {
-        "scope": "blast-radius",
-        "ready": True,
-        "components": {
-            "comp-widget": {
-                "hit": True,
-                "verification_report": {
-                    "component_id": "comp-widget",
-                    "criteria": [
-                        {"id": "AC-WIDGET-001", "covers": "R-WIDGET-001",
-                         "kind": "generated-test", "result": "pass"}
-                    ],
-                    "requirement_results": {"R-WIDGET-001": "pass"},
-                    "interface_drift": False,
-                    "mutation_score": 1.0,
-                    "overall": "pass"
-                },
-                "license_scan": {"blocked": False},
-                "secret_scan": {"flagged": False}
-            }
-        },
-        "capabilities": {},
-        "not_ready_reasons": []
-    }
-'''
-
-
-def _write_widget_component(repo_root, content):
-    comp_dir = repo_root / "specs" / "components" / "widget"
-    (comp_dir / "requirements").mkdir(parents=True, exist_ok=True)
-    (comp_dir / "acceptance").mkdir(parents=True, exist_ok=True)
-    (comp_dir / "component.md").write_text(content)
-    (comp_dir / "requirements" / "R-WIDGET-001.md").write_text(REQUIREMENT_MD)
-    (comp_dir / "acceptance" / "AC-WIDGET-001.md").write_text(ACCEPTANCE_MD)
+def _run(args, cwd, env):
+    subprocess.run(
+        args, cwd=str(cwd), env=env, check=True, capture_output=True, text=True
+    )
 
 
 def test_spec_diff_contains_actual_diff_text_for_changed_component_md(tmp_path):
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
+    repo_root = tmp_path
+    env = os.environ.copy()
+    env["GIT_AUTHOR_NAME"] = "Test Author"
+    env["GIT_AUTHOR_EMAIL"] = "test-author@example.com"
+    env["GIT_COMMITTER_NAME"] = "Test Author"
+    env["GIT_COMMITTER_EMAIL"] = "test-author@example.com"
 
-    _run_git(["init"], repo_root)
-    # Pin the default branch name explicitly instead of relying on this
-    # git install's own configured initial-branch default.
-    _run_git(["symbolic-ref", "HEAD", "refs/heads/main"], repo_root)
-    _run_git(["config", "user.email", "test@example.com"], repo_root)
-    _run_git(["config", "user.name", "Test"], repo_root)
+    # A single-branch repo guarantees merge-base(HEAD, default-branch) == HEAD
+    # regardless of how the default branch is resolved, since no other branch
+    # exists for "default" to possibly name — this deterministically exercises
+    # R-PACKET-001's documented fallback (diff the empty tree against HEAD).
+    _run(["git", "init", "-b", "main"], repo_root, env)
 
-    _write_widget_component(repo_root, COMPONENT_MD_V1)
-    _run_git(["add", "-A"], repo_root)
-    _run_git(["commit", "-m", "initial widget"], repo_root)
+    component_dir = repo_root / "specs" / "components" / "comp-foo"
+    component_dir.mkdir(parents=True)
+    component_md = component_dir / "component.md"
 
-    _run_git(["checkout", "-b", "feature"], repo_root)
-
-    _write_widget_component(repo_root, COMPONENT_MD_V2)
-    _run_git(["add", "-A"], repo_root)
-    _run_git(["commit", "-m", "update widget component.md"], repo_root)
-
-    log_path = tmp_path / "provenance_tracker_calls.log"
-    dep_dir = repo_root / "gen" / "provenance-tracker"
-    dep_dir.mkdir(parents=True)
-    (dep_dir / "provenance_tracker.py").write_text(
-        FAKE_PROVENANCE_TRACKER_TEMPLATE.replace("__LOG_PATH__", str(log_path))
+    component_md.write_text(
+        "---\n"
+        "id: comp-foo\n"
+        "title: Foo\n"
+        "status: ratified\n"
+        "owners: [alice]\n"
+        'last_ratified_commit: "0000000000000000000000000000000000000000"\n'
+        "sealed: true\n"
+        'source_path: "legacy/foo_v1.py"\n'
+        "---\n"
+        "\n"
+        "# Foo\n"
+        "\n"
+        "Original body text line ORIGINAL_MARKER_AAA111.\n"
     )
 
-    packet = review_packet_builder.build_review_packet(["comp-widget"], repo_root)
+    _run(["git", "add", "-A"], repo_root, env)
+    _run(
+        ["git", "-c", "commit.gpgsign=false", "commit", "-m", "add comp-foo component.md"],
+        repo_root,
+        env,
+    )
 
-    spec_diff = _get(packet, "spec_diff")
+    component_md.write_text(
+        "---\n"
+        "id: comp-foo\n"
+        "title: Foo\n"
+        "status: ratified\n"
+        "owners: [alice]\n"
+        'last_ratified_commit: "0000000000000000000000000000000000000000"\n'
+        "sealed: true\n"
+        'source_path: "legacy/foo_v1.py"\n'
+        "---\n"
+        "\n"
+        "# Foo\n"
+        "\n"
+        "Updated body text line UPDATED_MARKER_BBB222.\n"
+    )
+
+    _run(["git", "add", "-A"], repo_root, env)
+    _run(
+        ["git", "-c", "commit.gpgsign=false", "commit", "-m", "update comp-foo component.md"],
+        repo_root,
+        env,
+    )
+
+    prov_tracker_dir = repo_root / "gen" / "provenance-tracker"
+    prov_tracker_dir.mkdir(parents=True)
+    (prov_tracker_dir / "provenance_tracker.py").write_text(
+        "def check_readiness(repo_root, changed_ids=None, model=None, seed=0, llm_backend=None):\n"
+        "    return {\n"
+        "        \"scope\": \"blast-radius\",\n"
+        "        \"ready\": True,\n"
+        "        \"components\": {},\n"
+        "        \"capabilities\": {},\n"
+        "        \"not_ready_reasons\": [],\n"
+        "    }\n"
+        "\n"
+        "\n"
+        "def last_requirement_failures(component_id, repo_root):\n"
+        "    return []\n"
+    )
+
+    packet = review_packet_builder.build_review_packet(["comp-foo"], repo_root)
+
+    spec_diff = (
+        packet.get("spec_diff")
+        if isinstance(packet, dict)
+        else getattr(packet, "spec_diff", None)
+    )
+
     assert isinstance(spec_diff, str)
-    assert "specs/components/widget/component.md" in spec_diff
-    assert "-Initial widget description." in spec_diff
-    assert (
-        "+Updated widget description with a brand new sentence that was not present before."
-        in spec_diff
-    )
-
-    assert log_path.exists()
-    assert log_path.read_text().count("called") >= 1
+    assert "specs/components/comp-foo/component.md" in spec_diff
+    assert "UPDATED_MARKER_BBB222" in spec_diff

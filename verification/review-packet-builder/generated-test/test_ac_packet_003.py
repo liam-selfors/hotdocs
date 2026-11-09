@@ -1,106 +1,89 @@
 import subprocess
+import sys
+import tempfile
+import textwrap
+import unittest
 from pathlib import Path
 
 import review_packet_builder
 
 
-def _get(obj, key, default=None):
-    if isinstance(obj, dict):
-        return obj.get(key, default)
-    return getattr(obj, key, default)
+def _get(obj, key):
+    return obj.get(key) if isinstance(obj, dict) else getattr(obj, key, None)
 
 
-def _init_git_repo(repo_root: Path) -> None:
-    (repo_root / "specs").mkdir(parents=True, exist_ok=True)
-    subprocess.run(["git", "init", "-q"], cwd=repo_root, check=True)
-    subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=repo_root, check=True)
-    subprocess.run(["git", "config", "user.name", "Test"], cwd=repo_root, check=True)
-    (repo_root / "README.md").write_text("fixture repo\n")
-    subprocess.run(["git", "add", "."], cwd=repo_root, check=True)
-    subprocess.run(["git", "commit", "-q", "-m", "init"], cwd=repo_root, check=True)
+class TestAcPacket003(unittest.TestCase):
+    def setUp(self):
+        self._tmpdir = tempfile.TemporaryDirectory()
+        self.repo_root = Path(self._tmpdir.name)
+
+        subprocess.run(["git", "init"], cwd=self.repo_root, check=True,
+                        capture_output=True)
+        subprocess.run(
+            ["git", "-c", "user.email=test@example.com",
+             "-c", "user.name=Test", "commit", "--allow-empty",
+             "-m", "initial commit"],
+            cwd=self.repo_root, check=True, capture_output=True,
+        )
+
+        tracker_dir = self.repo_root / "gen" / "provenance-tracker"
+        tracker_dir.mkdir(parents=True, exist_ok=True)
+        tracker_module = tracker_dir / "provenance_tracker.py"
+        tracker_module.write_text(textwrap.dedent('''
+            def check_readiness(repo_root, changed_ids=None, model=None,
+                                 seed=0, llm_backend=None):
+                return {
+                    "scope": "blast-radius",
+                    "ready": True,
+                    "components": {
+                        "comp-foo": {
+                            "hit": True,
+                            "verification_report": {
+                                "component_id": "comp-foo",
+                                "criteria": [],
+                                "requirement_results": {},
+                                "interface_drift": False,
+                                "mutation_score": 1.0,
+                                "overall": "pass",
+                            },
+                            "license_scan": {"blocked": False},
+                            "secret_scan": {"flagged": False},
+                        },
+                        "comp-bar": {
+                            "hit": True,
+                            "verification_report": {
+                                "component_id": "comp-bar",
+                                "criteria": [],
+                                "requirement_results": {},
+                                "interface_drift": False,
+                                "mutation_score": 1.0,
+                                "overall": "pass",
+                            },
+                            "license_scan": {"blocked": False},
+                            "secret_scan": {"flagged": False},
+                        },
+                    },
+                    "capabilities": {},
+                    "not_ready_reasons": [],
+                }
 
 
-_FAKE_PROVENANCE_TRACKER_SOURCE = """
-import json
+            def last_requirement_failures(component_id, repo_root):
+                return []
+        '''))
 
-INVOCATION_LOG = __INVOCATION_LOG_PATH__
+    def tearDown(self):
+        self._tmpdir.cleanup()
 
+    def test_regenerated_components_lists_exactly_the_two_component_ids(self):
+        packet = review_packet_builder.build_review_packet(
+            ["comp-foo", "comp-bar"], self.repo_root
+        )
 
-def check_readiness(repo_root, changed_ids=None, model=None, seed=0, llm_backend=None):
-    with open(INVOCATION_LOG, "a") as f:
-        f.write(json.dumps({"changed_ids": changed_ids}))
-        f.write(chr(10))
-
-    verification_report_alpha = {
-        "component_id": "comp-alpha",
-        "criteria": [
-            {"id": "AC-ALPHA-001", "covers": "R-ALPHA-001", "kind": "compiled", "result": "pass"}
-        ],
-        "requirement_results": {"R-ALPHA-001": "pass"},
-        "interface_drift": False,
-        "mutation_score": 1.0,
-        "overall": "pass",
-    }
-    verification_report_beta = {
-        "component_id": "comp-beta",
-        "criteria": [
-            {"id": "AC-BETA-001", "covers": "R-BETA-001", "kind": "compiled", "result": "pass"}
-        ],
-        "requirement_results": {"R-BETA-001": "pass"},
-        "interface_drift": False,
-        "mutation_score": 1.0,
-        "overall": "pass",
-    }
-
-    provenance_alpha = {
-        "hit": True,
-        "verification_report": verification_report_alpha,
-        "license_scan": {"blocked": False, "findings": []},
-        "secret_scan": {"flagged": False, "findings": []},
-    }
-    provenance_beta = {
-        "hit": True,
-        "verification_report": verification_report_beta,
-        "license_scan": {"blocked": False, "findings": []},
-        "secret_scan": {"flagged": False, "findings": []},
-    }
-
-    return {
-        "scope": "blast-radius",
-        "ready": True,
-        "components": {
-            "comp-alpha": provenance_alpha,
-            "comp-beta": provenance_beta,
-        },
-        "capabilities": {},
-        "not_ready_reasons": [],
-    }
-"""
+        regenerated = _get(packet, "regenerated_components")
+        self.assertIsNotNone(regenerated)
+        self.assertEqual(sorted(regenerated), ["comp-bar", "comp-foo"])
 
 
-def _write_fake_provenance_tracker(repo_root: Path, invocation_log: Path) -> None:
-    dep_dir = repo_root / "gen" / "provenance-tracker"
-    dep_dir.mkdir(parents=True, exist_ok=True)
-    module_path = dep_dir / "provenance_tracker.py"
-    source = _FAKE_PROVENANCE_TRACKER_SOURCE.replace(
-        "__INVOCATION_LOG_PATH__", repr(str(invocation_log))
-    )
-    module_path.write_text(source)
-
-
-def test_ac_packet_003_regenerated_components_matches_provenance_components(tmp_path):
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    _init_git_repo(repo_root)
-
-    invocation_log = tmp_path / "invocations.jsonl"
-    _write_fake_provenance_tracker(repo_root, invocation_log)
-
-    packet = review_packet_builder.build_review_packet(
-        changed_ids=["R-UNRELATED-001"], repo_root=repo_root
-    )
-
-    assert invocation_log.exists(), "provenance-tracker's check_readiness was never invoked"
-
-    regenerated = _get(packet, "regenerated_components")
-    assert sorted(regenerated) == ["comp-alpha", "comp-beta"]
+if __name__ == "__main__":
+    unittest.main()

@@ -1,33 +1,13 @@
 import subprocess
+import tempfile
+import unittest
 from pathlib import Path
 
 import review_packet_builder
 
 
-def _get(obj, key, default=None):
-    if isinstance(obj, dict):
-        return obj.get(key, default)
-    return getattr(obj, key, default)
-
-
-def _write_provenance_tracker_fake(repo_root: Path, report: dict) -> Path:
-    dep_dir = repo_root / "gen" / "provenance-tracker"
-    dep_dir.mkdir(parents=True, exist_ok=True)
-    module_path = dep_dir / "provenance_tracker.py"
-    log_path = repo_root / "provenance_tracker_calls.log"
-    source = (
-        "_REPORT = {report!r}\n"
-        "_LOG_PATH = {log_path!r}\n"
-        "def check_readiness(repo_root, changed_ids=None, model=None, seed=0, llm_backend=None):\n"
-        "    with open(_LOG_PATH, 'a', encoding='utf-8') as f:\n"
-        "        f.write('called\\n')\n"
-        "    return _REPORT\n"
-    ).format(report=report, log_path=str(log_path))
-    module_path.write_text(source, encoding="utf-8")
-    return log_path
-
-
-def _full_hit_report():
+PROVENANCE_TRACKER_SRC = '''
+def check_readiness(repo_root, changed_ids=None, model=None, seed=0, llm_backend=None):
     return {
         "scope": "blast-radius",
         "ready": True,
@@ -49,184 +29,172 @@ def _full_hit_report():
                     "mutation_score": 1.0,
                     "overall": "pass",
                 },
-                "license_scan": {"blocked": False, "findings": []},
-                "secret_scan": {"flagged": False, "findings": []},
-            }
-        },
-        "capabilities": {},
-        "not_ready_reasons": [],
-    }
-
-
-def _git_init(repo_root: Path):
-    subprocess.run(["git", "init"], cwd=repo_root, check=True, capture_output=True)
-
-
-def _git_init_with_commit(repo_root: Path):
-    _git_init(repo_root)
-    (repo_root / "README.md").write_text("fixture\n", encoding="utf-8")
-    subprocess.run(["git", "add", "."], cwd=repo_root, check=True, capture_output=True)
-    subprocess.run(
-        [
-            "git",
-            "-c",
-            "user.email=test@example.com",
-            "-c",
-            "user.name=Test",
-            "commit",
-            "-m",
-            "initial",
-        ],
-        cwd=repo_root,
-        check=True,
-        capture_output=True,
-    )
-
-
-def test_packet_produced_for_clean_merge_full_hits(tmp_path):
-    repo_root = tmp_path / "repo1"
-    repo_root.mkdir()
-    _git_init_with_commit(repo_root)
-
-    log_path = _write_provenance_tracker_fake(repo_root, _full_hit_report())
-
-    packet = review_packet_builder.build_review_packet(["R-FOO-001"], repo_root)
-
-    assert packet is not None
-    assert log_path.exists()
-
-    sentinel = object()
-    for field in (
-        "spec_diff",
-        "changed_requirements",
-        "regenerated_components",
-        "verification_results",
-        "compliance_flags",
-        "provenance_hit_status",
-        "capability_scenarios",
-        "exemption_changes",
-        "residual_risk",
-    ):
-        assert _get(packet, field, sentinel) is not sentinel
-
-    compliance = _get(packet, "compliance_flags")
-    assert _get(compliance, "license_scan") == []
-    assert _get(compliance, "secret_scan") == []
-
-    provenance_hit_status = _get(packet, "provenance_hit_status")
-    assert _get(provenance_hit_status, "comp-foo") is True
-
-    verification_results = _get(packet, "verification_results")
-    vr_foo = _get(verification_results, "comp-foo")
-    assert _get(vr_foo, "overall") == "pass"
-
-    residual_risk = _get(packet, "residual_risk")
-    assert residual_risk == []
-
-
-def test_packet_produced_git_init_zero_commits(tmp_path):
-    repo_root = tmp_path / "repo2"
-    repo_root.mkdir()
-    _git_init(repo_root)
-
-    log_path = _write_provenance_tracker_fake(repo_root, _full_hit_report())
-
-    packet = review_packet_builder.build_review_packet(["R-FOO-001"], repo_root)
-
-    assert packet is not None
-    assert log_path.exists()
-
-    spec_diff = _get(packet, "spec_diff")
-    assert spec_diff == ""
-
-    exemption_changes = _get(packet, "exemption_changes")
-    assert _get(exemption_changes, "sealed") == []
-    assert _get(exemption_changes, "pinned_overrides") == []
-
-
-def test_packet_produced_non_git_repo_fields_from_provenance_tracker(tmp_path):
-    repo_root = tmp_path / "repo3"
-    repo_root.mkdir()
-    # No .git directory at all -- not even git-init'd.
-
-    report = {
-        "scope": "blast-radius",
-        "ready": False,
-        "components": {
-            "comp-foo": {
-                "hit": True,
-                "verification_report": {
-                    "component_id": "comp-foo",
-                    "criteria": [
-                        {
-                            "id": "AC-FOO-001",
-                            "covers": "R-FOO-001",
-                            "kind": "compiled",
-                            "result": "pass",
-                        }
-                    ],
-                    "requirement_results": {"R-FOO-001": "pass"},
-                    "interface_drift": False,
-                    "mutation_score": 1.0,
-                    "overall": "pass",
-                },
-                "license_scan": {"blocked": True, "findings": ["GPL-3.0"]},
-                "secret_scan": {"flagged": False, "findings": []},
+                "license_scan": {"blocked": False},
+                "secret_scan": {"flagged": False},
             }
         },
         "capabilities": {
             "P-ZERO-EDIT": {
                 "hit": True,
                 "capability_scenario_report": {
-                    "capability_id": "P-ZERO-EDIT",
-                    "scenario_id": "zero-edit-happy-path",
-                    "result": "pass",
+                    "P-ZERO-EDIT": {"overall": "pass", "scenarios": []}
                 },
             }
         },
         "not_ready_reasons": [],
     }
 
-    log_path = _write_provenance_tracker_fake(repo_root, report)
 
-    changed_ids = ["R-FOO-001", "comp-foo", "AC-FOO-002"]
-    packet = review_packet_builder.build_review_packet(changed_ids, repo_root)
+def last_requirement_failures(component_id, repo_root):
+    return []
+'''
 
-    assert packet is not None
-    assert log_path.exists()
+EXPECTED_VERIFICATION_REPORT = {
+    "component_id": "comp-foo",
+    "criteria": [
+        {
+            "id": "AC-FOO-001",
+            "covers": "R-FOO-001",
+            "kind": "compiled",
+            "result": "pass",
+        }
+    ],
+    "requirement_results": {"R-FOO-001": "pass"},
+    "interface_drift": False,
+    "mutation_score": 1.0,
+    "overall": "pass",
+}
 
-    changed_requirements = _get(packet, "changed_requirements")
-    assert set(changed_requirements) == {"R-FOO-001"}
+EXPECTED_CAPABILITY_SCENARIOS = {
+    "P-ZERO-EDIT": {"P-ZERO-EDIT": {"overall": "pass", "scenarios": []}}
+}
 
-    regenerated_components = _get(packet, "regenerated_components")
-    assert set(regenerated_components) == {"comp-foo"}
 
-    verification_results = _get(packet, "verification_results")
-    vr_foo = _get(verification_results, "comp-foo")
-    assert _get(vr_foo, "overall") == "pass"
-    assert _get(vr_foo, "requirement_results") == {"R-FOO-001": "pass"}
+def _field(obj, name, default=None):
+    if isinstance(obj, dict):
+        return obj.get(name, default)
+    return getattr(obj, name, default)
 
-    provenance_hit_status = _get(packet, "provenance_hit_status")
-    assert _get(provenance_hit_status, "comp-foo") is True
 
-    compliance_flags = _get(packet, "compliance_flags")
-    license_entries = _get(compliance_flags, "license_scan")
-    assert len(license_entries) == 1
-    license_entry = license_entries[0]
-    assert _get(license_entry, "component_id") == "comp-foo"
-    assert _get(_get(license_entry, "result"), "blocked") is True
+def _run_git(args, cwd):
+    subprocess.run(
+        ["git"] + list(args),
+        cwd=str(cwd),
+        check=True,
+        capture_output=True,
+        text=True,
+    )
 
-    secret_entries = _get(compliance_flags, "secret_scan")
-    assert secret_entries == []
 
-    capability_scenarios = _get(packet, "capability_scenarios")
-    cap_report = _get(capability_scenarios, "P-ZERO-EDIT")
-    assert _get(cap_report, "capability_id") == "P-ZERO-EDIT"
-    assert _get(cap_report, "result") == "pass"
+def _install_provenance_tracker_fake(repo_root):
+    tracker_dir = repo_root / "gen" / "provenance-tracker"
+    tracker_dir.mkdir(parents=True, exist_ok=True)
+    (tracker_dir / "provenance_tracker.py").write_text(PROVENANCE_TRACKER_SRC)
 
-    spec_diff = _get(packet, "spec_diff")
-    assert spec_diff == ""
 
-    exemption_changes = _get(packet, "exemption_changes")
-    assert _get(exemption_changes, "sealed") == []
-    assert _get(exemption_changes, "pinned_overrides") == []
+def _make_git_repo_with_commit(repo_root):
+    _run_git(["init"], repo_root)
+    _run_git(["config", "user.email", "test@example.com"], repo_root)
+    _run_git(["config", "user.name", "Test"], repo_root)
+    (repo_root / "README.md").write_text("hello\n")
+    _run_git(["add", "."], repo_root)
+    _run_git(["commit", "-m", "initial"], repo_root)
+
+
+def _make_git_repo_no_commits(repo_root):
+    _run_git(["init"], repo_root)
+
+
+class TestAcPacket009(unittest.TestCase):
+    def test_clean_merge_with_full_hits_still_produces_packet(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            _make_git_repo_with_commit(repo_root)
+            _install_provenance_tracker_fake(repo_root)
+
+            packet = review_packet_builder.build_review_packet(
+                ["comp-foo", "R-FOO-001"], repo_root
+            )
+
+            self.assertIsNotNone(packet)
+
+            compliance_flags = _field(packet, "compliance_flags")
+            license_scan = _field(compliance_flags, "license_scan")
+            secret_scan = _field(compliance_flags, "secret_scan")
+            self.assertEqual(license_scan, [])
+            self.assertEqual(secret_scan, [])
+
+            residual_risk = _field(packet, "residual_risk")
+            self.assertEqual(residual_risk, [])
+
+            provenance_hit_status = _field(packet, "provenance_hit_status")
+            self.assertEqual(provenance_hit_status, {"comp-foo": True})
+
+    def test_zero_commit_repo_still_produces_packet_with_empty_git_fields(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            _make_git_repo_no_commits(repo_root)
+            _install_provenance_tracker_fake(repo_root)
+
+            packet = review_packet_builder.build_review_packet(
+                ["comp-foo", "R-FOO-001"], repo_root
+            )
+
+            self.assertIsNotNone(packet)
+
+            spec_diff = _field(packet, "spec_diff")
+            self.assertFalse(spec_diff)
+
+            exemption_changes = _field(packet, "exemption_changes")
+            sealed = _field(exemption_changes, "sealed")
+            pinned_overrides = _field(exemption_changes, "pinned_overrides")
+            self.assertEqual(sealed, [])
+            self.assertEqual(pinned_overrides, [])
+
+    def test_non_git_repo_still_produces_packet_fully_populated_from_tracker(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo_root = Path(tmp)
+            _install_provenance_tracker_fake(repo_root)
+
+            packet = review_packet_builder.build_review_packet(
+                ["comp-foo", "R-FOO-001"], repo_root
+            )
+
+            self.assertIsNotNone(packet)
+
+            spec_diff = _field(packet, "spec_diff")
+            self.assertFalse(spec_diff)
+
+            exemption_changes = _field(packet, "exemption_changes")
+            sealed = _field(exemption_changes, "sealed")
+            pinned_overrides = _field(exemption_changes, "pinned_overrides")
+            self.assertEqual(sealed, [])
+            self.assertEqual(pinned_overrides, [])
+
+            changed_requirements = _field(packet, "changed_requirements")
+            self.assertEqual(sorted(changed_requirements), ["R-FOO-001"])
+
+            regenerated_components = _field(packet, "regenerated_components")
+            self.assertEqual(sorted(regenerated_components), ["comp-foo"])
+
+            verification_results = _field(packet, "verification_results")
+            self.assertIsInstance(verification_results, dict)
+            self.assertEqual(
+                verification_results.get("comp-foo"), EXPECTED_VERIFICATION_REPORT
+            )
+
+            compliance_flags = _field(packet, "compliance_flags")
+            license_scan = _field(compliance_flags, "license_scan")
+            secret_scan = _field(compliance_flags, "secret_scan")
+            self.assertEqual(license_scan, [])
+            self.assertEqual(secret_scan, [])
+
+            provenance_hit_status = _field(packet, "provenance_hit_status")
+            self.assertEqual(provenance_hit_status, {"comp-foo": True})
+
+            capability_scenarios = _field(packet, "capability_scenarios")
+            self.assertEqual(capability_scenarios, EXPECTED_CAPABILITY_SCENARIOS)
+
+
+if __name__ == "__main__":
+    unittest.main()

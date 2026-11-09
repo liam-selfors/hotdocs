@@ -1,3 +1,7 @@
+"""Review packet builder: formats already-computed provenance-tracker
+results into the human-reviewable document posted on a PR."""
+
+import dataclasses
 import importlib.util
 import json
 import re
@@ -6,11 +10,6 @@ import sys
 from pathlib import Path
 
 EMPTY_TREE_HASH = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
-
-_R_ID_RE = re.compile(r"^R-[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*-\d+$")
-_COMPONENT_MD_RE = re.compile(r"^specs/components/([^/]+)/component\.md$")
-_OVERRIDES_RE = re.compile(r"^gen/([^/]+)/\.overrides\.json$")
-_SEALED_RE = re.compile(r"^sealed\s*:\s*[\"']?(true|false)[\"']?\s*$", re.IGNORECASE)
 
 
 def _get(obj, key, default=None):
@@ -21,14 +20,52 @@ def _get(obj, key, default=None):
     return getattr(obj, key, default)
 
 
-def _run_git(args, repo_root):
+def _to_jsonable(value):
+    if isinstance(value, dict):
+        return {k: _to_jsonable(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_to_jsonable(v) for v in value]
+    if isinstance(value, (str, int, float, bool)) or value is None:
+        return value
+    if dataclasses.is_dataclass(value):
+        return _to_jsonable(dataclasses.asdict(value))
+    if hasattr(value, "__dict__"):
+        return _to_jsonable(vars(value))
+    return str(value)
+
+
+def _tool_root():
+    here = Path(__file__).resolve()
+    for parent in here.parents:
+        if parent.name == "gen":
+            return parent.parent
+    raise RuntimeError("no 'gen' ancestor directory found above review_packet_builder module")
+
+
+def _load_module_from_path(name, path):
+    spec = importlib.util.spec_from_file_location(name, path)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def _load_provenance_tracker(repo_root):
+    candidate_dir = Path(repo_root) / "gen" / "provenance-tracker"
+    if not candidate_dir.is_dir():
+        candidate_dir = _tool_root() / "gen" / "provenance-tracker"
+    module_path = candidate_dir / "provenance_tracker.py"
+    if not module_path.is_file():
+        raise FileNotFoundError(f"provenance_tracker module not found at {module_path}")
+    return _load_module_from_path("provenance_tracker", module_path)
+
+
+def _git_run(repo_root, args):
     try:
         result = subprocess.run(
-            ["git"] + list(args),
-            cwd=str(repo_root),
+            ["git", "-C", str(repo_root)] + args,
             capture_output=True,
             text=True,
-            timeout=30,
         )
     except Exception:
         return None
@@ -37,317 +74,255 @@ def _run_git(args, repo_root):
     return result.stdout
 
 
-def _head(repo_root):
-    out = _run_git(["rev-parse", "HEAD"], repo_root)
-    if out is None:
-        return None
-    out = out.strip()
-    return out or None
+def _pr_diff_base(repo_root):
+    head_out = _git_run(repo_root, ["rev-parse", "HEAD"])
+    if head_out is None:
+        return None, None
+    head = head_out.strip()
+    default_ref_out = _git_run(repo_root, ["symbolic-ref", "--short", "refs/remotes/origin/HEAD"])
+    default_ref = default_ref_out.strip() if default_ref_out else head
+    merge_base_out = _git_run(repo_root, ["merge-base", head, default_ref])
+    merge_base = merge_base_out.strip() if merge_base_out else None
+    if merge_base is None or merge_base == head:
+        base = EMPTY_TREE_HASH
+    else:
+        base = merge_base
+    return head, base
 
 
-def _default_branch(repo_root):
-    out = _run_git(["symbolic-ref", "refs/remotes/origin/HEAD"], repo_root)
-    if out:
-        ref = out.strip()
-        parts = ref.split("/")
-        if len(parts) >= 3:
-            candidate = "/".join(parts[2:])
-            if _run_git(["rev-parse", "--verify", candidate], repo_root) is not None:
-                return candidate
-    for candidate in ("main", "master", "origin/main", "origin/master"):
-        if _run_git(["rev-parse", "--verify", candidate], repo_root) is not None:
-            return candidate
-    return None
-
-
-def _pr_base(repo_root, head):
-    default_branch = _default_branch(repo_root)
-    if default_branch is not None:
-        merge_base_out = _run_git(["merge-base", head, default_branch], repo_root)
-        if merge_base_out:
-            merge_base = merge_base_out.strip()
-            if merge_base and merge_base != head:
-                return merge_base
-    return EMPTY_TREE_HASH
-
-
-def _spec_diff(repo_root):
-    head = _head(repo_root)
+def _compute_spec_diff(repo_root):
+    head, base = _pr_diff_base(repo_root)
     if head is None:
         return ""
-    base = _pr_base(repo_root, head)
-    diff = _run_git(["diff", base, head, "--", "specs/"], repo_root)
+    diff = _git_run(repo_root, ["diff", base, head, "--", "specs/"])
     return diff if diff is not None else ""
 
 
-def _file_first_commit(repo_root, path):
-    out = _run_git(["log", "--follow", "--format=%H", "--", path], repo_root)
-    if not out:
-        return None
-    hashes = [h for h in out.strip().splitlines() if h]
-    if not hashes:
-        return None
-    return hashes[-1]
-
-
-def _git_show(repo_root, rev, path):
-    return _run_git(["show", "{}:{}".format(rev, path)], repo_root)
-
-
-def _is_sealed(content):
+def _parse_sealed(content):
     if not content:
         return False
-    in_frontmatter = False
-    for line in content.splitlines():
-        stripped = line.strip()
-        if stripped == "---":
-            if not in_frontmatter:
-                in_frontmatter = True
-                continue
+    lines = content.splitlines()
+    if not lines or lines[0].strip() != "---":
+        return False
+    for line in lines[1:]:
+        if line.strip() == "---":
             break
-        if in_frontmatter:
-            m = _SEALED_RE.match(stripped)
-            if m:
-                return m.group(1).lower() == "true"
+        m = re.match(r"^sealed\s*:\s*(true|false)\s*$", line.strip(), re.IGNORECASE)
+        if m:
+            return m.group(1).lower() == "true"
     return False
 
 
-def _exemption_changes(repo_root):
-    head = _head(repo_root)
-    if head is None:
-        return {"sealed": [], "pinned_overrides": []}
-    base = _pr_base(repo_root, head)
-    diff_out = _run_git(["diff", "--name-only", base, head], repo_root)
-    diff_paths = [p for p in diff_out.strip().splitlines() if p] if diff_out else []
+def _is_sealed_transition(repo_root, head, path):
+    log_out = _git_run(repo_root, ["log", "--follow", "--format=%H", head, "--", path])
+    if not log_out:
+        return False
+    commits = [c for c in log_out.splitlines() if c]
+    if not commits:
+        return False
+    first_commit = commits[-1]
+    first_content = _git_run(repo_root, ["show", f"{first_commit}:{path}"])
+    head_content = _git_run(repo_root, ["show", f"{head}:{path}"])
+    return (not _parse_sealed(first_content)) and _parse_sealed(head_content)
 
+
+def _file_exists_at_rev(repo_root, rev, path):
+    return _git_run(repo_root, ["cat-file", "-e", f"{rev}:{path}"]) is not None
+
+
+def _compute_exemption_changes(repo_root):
     sealed = []
     pinned_overrides = []
-    for path in diff_paths:
-        m = _COMPONENT_MD_RE.match(path)
+    head, base = _pr_diff_base(repo_root)
+    if head is None:
+        return {"sealed": sealed, "pinned_overrides": pinned_overrides}
+    diff_names_out = _git_run(repo_root, ["diff", "--name-only", base, head])
+    if diff_names_out is None:
+        return {"sealed": sealed, "pinned_overrides": pinned_overrides}
+    for path in diff_names_out.splitlines():
+        path = path.strip()
+        if not path:
+            continue
+        m = re.match(r"^specs/components/([^/]+)/component\.md$", path)
         if m:
             slug = m.group(1)
-            first_commit = _file_first_commit(repo_root, path)
-            if first_commit is None:
-                continue
-            sealed_first = _is_sealed(_git_show(repo_root, first_commit, path))
-            sealed_head = _is_sealed(_git_show(repo_root, head, path))
-            if not sealed_first and sealed_head:
-                sealed.append("comp-{}".format(slug))
+            if _is_sealed_transition(repo_root, head, path):
+                sealed.append(f"comp-{slug}")
             continue
-        m2 = _OVERRIDES_RE.match(path)
-        if m2:
-            slug = m2.group(1)
-            exists_head = _git_show(repo_root, head, path) is not None
-            exists_base = _git_show(repo_root, base, path) is not None
-            if exists_head and not exists_base:
-                pinned_overrides.append("comp-{}".format(slug))
-
-    return {"sealed": sealed, "pinned_overrides": pinned_overrides}
-
-
-def _load_provenance_tracker(repo_root):
-    base = Path(repo_root) / "gen" / "provenance-tracker"
-    flat_path = base / "provenance_tracker.py"
-    pkg_path = base / "provenance_tracker" / "__init__.py"
-
-    if flat_path.is_file():
-        module_path = flat_path
-        search_locations = None
-    elif pkg_path.is_file():
-        module_path = pkg_path
-        search_locations = [str(pkg_path.parent)]
-    else:
-        raise ImportError(
-            "provenance_tracker module not found under {}".format(base)
-        )
-
-    module_name = "provenance_tracker"
-    spec = importlib.util.spec_from_file_location(
-        module_name, module_path, submodule_search_locations=search_locations
-    )
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[module_name] = module
-    spec.loader.exec_module(module)
-    return module
+        m = re.match(r"^gen/([^/]+)/\.overrides\.json$", path)
+        if m:
+            slug = m.group(1)
+            if _file_exists_at_rev(repo_root, head, path) and not _file_exists_at_rev(repo_root, base, path):
+                pinned_overrides.append(f"comp-{slug}")
+    return {"sealed": sorted(sealed), "pinned_overrides": sorted(pinned_overrides)}
 
 
 def build_review_packet(changed_ids, repo_root):
     repo_root = Path(repo_root)
-
-    spec_diff = _spec_diff(repo_root)
-    changed_requirements = [i for i in changed_ids if _R_ID_RE.match(i)]
-    exemption_changes = _exemption_changes(repo_root)
-
-    pt_module = _load_provenance_tracker(repo_root)
-    report = pt_module.check_readiness(repo_root=repo_root, changed_ids=list(changed_ids))
+    tracker = _load_provenance_tracker(repo_root)
+    report = tracker.check_readiness(repo_root, changed_ids=list(changed_ids))
 
     components = _get(report, "components", {}) or {}
     capabilities = _get(report, "capabilities", {}) or {}
 
-    regenerated_components = list(components.keys())
+    changed_requirements = [cid for cid in changed_ids if isinstance(cid, str) and cid.startswith("R-")]
 
     verification_results = {}
-    license_flags = []
-    secret_flags = []
+    license_scan_flags = []
+    secret_scan_flags = []
     provenance_hit_status = {}
     residual_risk = []
 
-    for comp_id, comp_entry in components.items():
-        verification_report = _get(comp_entry, "verification_report")
-        verification_results[comp_id] = verification_report
+    for component_id, comp_result in components.items():
+        verification_report_raw = _get(comp_result, "verification_report")
+        verification_results[component_id] = _to_jsonable(verification_report_raw)
 
-        license_scan = _get(comp_entry, "license_scan")
-        if license_scan is not None and _get(license_scan, "blocked") is True:
-            license_flags.append({"component_id": comp_id, "result": license_scan})
+        license_scan_raw = _get(comp_result, "license_scan")
+        if license_scan_raw is not None and _get(license_scan_raw, "blocked") is True:
+            license_scan_flags.append({
+                "component_id": component_id,
+                "result": _to_jsonable(license_scan_raw),
+            })
 
-        secret_scan = _get(comp_entry, "secret_scan")
-        if secret_scan is not None and _get(secret_scan, "flagged") is True:
-            secret_flags.append({"component_id": comp_id, "result": secret_scan})
+        secret_scan_raw = _get(comp_result, "secret_scan")
+        if secret_scan_raw is not None and _get(secret_scan_raw, "flagged") is True:
+            secret_scan_flags.append({
+                "component_id": component_id,
+                "result": _to_jsonable(secret_scan_raw),
+            })
 
-        provenance_hit_status[comp_id] = bool(_get(comp_entry, "hit"))
+        provenance_hit_status[component_id] = _get(comp_result, "hit")
 
-        if verification_report is not None:
-            overall = _get(verification_report, "overall")
-            mutation_score = _get(verification_report, "mutation_score")
-            if (
-                overall == "pass"
-                and isinstance(mutation_score, (int, float))
-                and mutation_score < 1.0
-            ):
-                residual_risk.append(
-                    {
-                        "component_id": comp_id,
-                        "message": "mutation_score {} < 1.0 despite overall=pass".format(
-                            mutation_score
-                        ),
-                    }
-                )
+        if verification_report_raw is not None:
+            overall = _get(verification_report_raw, "overall")
+            mutation_score = _get(verification_report_raw, "mutation_score")
+            if overall == "pass" and mutation_score is not None and mutation_score < 1.0:
+                residual_risk.append({
+                    "component_id": component_id,
+                    "message": f"mutation_score {mutation_score} < 1.0 despite overall=pass",
+                })
 
     capability_scenarios = {}
-    for cap_id, cap_entry in capabilities.items():
-        capability_scenarios[cap_id] = _get(cap_entry, "capability_scenario_report")
+    for capability_id, cap_result in capabilities.items():
+        capability_scenarios[capability_id] = _to_jsonable(_get(cap_result, "capability_scenario_report"))
+
+    license_scan_flags.sort(key=lambda e: e["component_id"])
+    secret_scan_flags.sort(key=lambda e: e["component_id"])
+    residual_risk.sort(key=lambda e: e["component_id"])
 
     return {
-        "spec_diff": spec_diff,
+        "spec_diff": _compute_spec_diff(repo_root),
         "changed_requirements": changed_requirements,
-        "regenerated_components": regenerated_components,
+        "regenerated_components": sorted(components.keys()),
         "verification_results": verification_results,
         "compliance_flags": {
-            "license_scan": license_flags,
-            "secret_scan": secret_flags,
+            "license_scan": license_scan_flags,
+            "secret_scan": secret_scan_flags,
         },
         "provenance_hit_status": provenance_hit_status,
         "capability_scenarios": capability_scenarios,
-        "exemption_changes": exemption_changes,
+        "exemption_changes": _compute_exemption_changes(repo_root),
         "residual_risk": residual_risk,
     }
 
 
-def _json_inline(value):
-    return json.dumps(value, sort_keys=True)
+def _render_list_section(lines, items, formatter):
+    if items:
+        for item in items:
+            lines.append(f"- {formatter(item)}")
+    else:
+        lines.append("(none)")
 
 
-def render_markdown(packet):
+def _render_markdown(packet):
     lines = []
-    lines.append("# Review Packet")
-    lines.append("")
 
     lines.append("## Spec Diff")
-    spec_diff = packet["spec_diff"]
-    if spec_diff:
+    lines.append("")
+    spec_diff = packet.get("spec_diff", "")
+    if spec_diff.strip():
         lines.append("```diff")
         lines.append(spec_diff.rstrip("\n"))
         lines.append("```")
     else:
-        lines.append("(no diff)")
+        lines.append("(no changes)")
     lines.append("")
 
     lines.append("## Changed Requirements")
-    changed_requirements = packet["changed_requirements"]
-    if changed_requirements:
-        for r in changed_requirements:
-            lines.append("- {}".format(r))
-    else:
-        lines.append("(none)")
+    lines.append("")
+    _render_list_section(lines, packet.get("changed_requirements", []), lambda r: r)
     lines.append("")
 
     lines.append("## Regenerated Components")
-    regenerated_components = packet["regenerated_components"]
-    if regenerated_components:
-        for c in regenerated_components:
-            lines.append("- {}".format(c))
-    else:
-        lines.append("(none)")
+    lines.append("")
+    _render_list_section(lines, packet.get("regenerated_components", []), lambda c: c)
     lines.append("")
 
     lines.append("## Verification Results")
-    verification_results = packet["verification_results"]
-    if verification_results:
-        for comp_id, report in verification_results.items():
-            lines.append("- {}: {}".format(comp_id, _json_inline(report)))
-    else:
-        lines.append("(none)")
     lines.append("")
-
-    lines.append("## Capability Scenarios")
-    capability_scenarios = packet["capability_scenarios"]
-    if capability_scenarios:
-        for cap_id, report in capability_scenarios.items():
-            lines.append("- {}: {}".format(cap_id, _json_inline(report)))
-    else:
-        lines.append("(none)")
-    lines.append("")
-
-    lines.append("## Compliance Flags")
-    compliance_flags = packet["compliance_flags"]
-    lines.append("### License Scan")
-    license_scan = compliance_flags["license_scan"]
-    if license_scan:
-        for entry in license_scan:
-            lines.append(
-                "- {}: {}".format(entry["component_id"], _json_inline(entry["result"]))
-            )
-    else:
-        lines.append("(none)")
-    lines.append("### Secret Scan")
-    secret_scan = compliance_flags["secret_scan"]
-    if secret_scan:
-        for entry in secret_scan:
-            lines.append(
-                "- {}: {}".format(entry["component_id"], _json_inline(entry["result"]))
-            )
-    else:
-        lines.append("(none)")
-    lines.append("")
-
-    lines.append("## Provenance Hit Status")
-    provenance_hit_status = packet["provenance_hit_status"]
-    if provenance_hit_status:
-        for comp_id, hit in provenance_hit_status.items():
-            lines.append("- {}: {}".format(comp_id, "hit" if hit else "miss"))
-    else:
-        lines.append("(none)")
-    lines.append("")
-
-    lines.append("## Exemption Changes")
-    exemption_changes = packet["exemption_changes"]
-    sealed = exemption_changes["sealed"]
-    pinned_overrides = exemption_changes["pinned_overrides"]
-    lines.append("**Sealed:** {}".format(", ".join(sealed) if sealed else "(none)"))
-    lines.append(
-        "**Pinned Overrides:** {}".format(
-            ", ".join(pinned_overrides) if pinned_overrides else "(none)"
-        )
+    verification_results = packet.get("verification_results", {})
+    _render_list_section(
+        lines,
+        sorted(verification_results.keys()),
+        lambda cid: f"{cid}: {json.dumps(verification_results[cid], sort_keys=True)}",
     )
     lines.append("")
 
+    lines.append("## Compliance Flags")
+    lines.append("")
+    lines.append("### License Scan")
+    lines.append("")
+    license_scan = packet.get("compliance_flags", {}).get("license_scan", [])
+    _render_list_section(
+        lines, license_scan,
+        lambda e: f"{e['component_id']}: {json.dumps(e['result'], sort_keys=True)}",
+    )
+    lines.append("")
+    lines.append("### Secret Scan")
+    lines.append("")
+    secret_scan = packet.get("compliance_flags", {}).get("secret_scan", [])
+    _render_list_section(
+        lines, secret_scan,
+        lambda e: f"{e['component_id']}: {json.dumps(e['result'], sort_keys=True)}",
+    )
+    lines.append("")
+
+    lines.append("## Provenance Hit Status")
+    lines.append("")
+    provenance_hit_status = packet.get("provenance_hit_status", {})
+    _render_list_section(
+        lines,
+        sorted(provenance_hit_status.keys()),
+        lambda cid: f"{cid}: {json.dumps(provenance_hit_status[cid], sort_keys=True)}",
+    )
+    lines.append("")
+
+    lines.append("## Capability Scenarios")
+    lines.append("")
+    capability_scenarios = packet.get("capability_scenarios", {})
+    _render_list_section(
+        lines,
+        sorted(capability_scenarios.keys()),
+        lambda pid: f"{pid}: {json.dumps(capability_scenarios[pid], sort_keys=True)}",
+    )
+    lines.append("")
+
+    lines.append("## Exemption Changes")
+    lines.append("")
+    exemption_changes = packet.get("exemption_changes", {})
+    sealed = exemption_changes.get("sealed", [])
+    pinned_overrides = exemption_changes.get("pinned_overrides", [])
+    lines.append(f"**Sealed:** {json.dumps(sealed, sort_keys=True)}")
+    lines.append(f"**Pinned Overrides:** {json.dumps(pinned_overrides, sort_keys=True)}")
+    lines.append("")
+
     lines.append("## Residual Risk")
-    residual_risk = packet["residual_risk"]
-    if residual_risk:
-        for entry in residual_risk:
-            lines.append("- {}: {}".format(entry["component_id"], entry["message"]))
-    else:
-        lines.append("(none)")
+    lines.append("")
+    residual_risk = packet.get("residual_risk", [])
+    _render_list_section(
+        lines, residual_risk,
+        lambda e: f"{e['component_id']}: {e['message']}",
+    )
 
     return "\n".join(lines) + "\n"
 
@@ -357,46 +332,57 @@ def main(argv=None):
         argv = sys.argv[1:]
 
     if len(argv) < 2 or argv[0] != "review-packet" or argv[1] != "build":
-        sys.stderr.write(
-            "usage: hotdocs review-packet build --changed=<spec-id>... "
-            "[--repo-root=<dir>] [--format=markdown|json]\n"
-        )
         return 2
 
+    rest = argv[2:]
     changed_ids = []
-    repo_root = "."
+    repo_root = Path(".")
     fmt = "markdown"
 
-    for arg in argv[2:]:
+    i = 0
+    while i < len(rest):
+        arg = rest[i]
         if arg.startswith("--changed="):
-            value = arg[len("--changed="):]
-            changed_ids.extend([v for v in value.split(",") if v])
+            changed_ids.append(arg[len("--changed="):])
+            i += 1
+        elif arg == "--changed":
+            if i + 1 >= len(rest):
+                return 2
+            changed_ids.append(rest[i + 1])
+            i += 2
         elif arg.startswith("--repo-root="):
-            repo_root = arg[len("--repo-root="):]
+            repo_root = Path(arg[len("--repo-root="):])
+            i += 1
+        elif arg == "--repo-root":
+            if i + 1 >= len(rest):
+                return 2
+            repo_root = Path(rest[i + 1])
+            i += 2
         elif arg.startswith("--format="):
             fmt = arg[len("--format="):]
+            i += 1
+        elif arg == "--format":
+            if i + 1 >= len(rest):
+                return 2
+            fmt = rest[i + 1]
+            i += 2
         else:
-            sys.stderr.write("usage error: unrecognized argument '{}'\n".format(arg))
             return 2
 
     if not changed_ids:
-        sys.stderr.write("usage error: --changed is required\n")
         return 2
-
     if fmt not in ("markdown", "json"):
-        sys.stderr.write("usage error: invalid --format '{}'\n".format(fmt))
         return 2
 
     try:
-        packet = build_review_packet(changed_ids, Path(repo_root))
-    except Exception as exc:
-        sys.stderr.write("error: a required upstream result was missing: {}\n".format(exc))
+        packet = build_review_packet(changed_ids, repo_root)
+    except Exception:
         return 1
 
     if fmt == "json":
-        print(json.dumps(packet, indent=2))
+        print(json.dumps(packet, indent=2, sort_keys=True))
     else:
-        print(render_markdown(packet), end="")
+        print(_render_markdown(packet))
 
     return 0
 

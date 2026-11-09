@@ -53,7 +53,7 @@ See `interface/data/`.
 
 See `acceptance/`.
 
-All twelve criteria are `kind: generated-test` — real git-history
+All fourteen criteria are `kind: generated-test` — real git-history
 scenarios (sealed/override transitions, CLI invocation, markdown
 rendering) need arbitrary setup code no fixed step grammar can
 express, not purely literal-value fixtures.
