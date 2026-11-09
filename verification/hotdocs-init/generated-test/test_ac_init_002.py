@@ -1,204 +1,220 @@
 import importlib.metadata
 import json
-import os
-from pathlib import Path
 
 import hotdocs_init
 
+_LLM_ENDPOINT_TEMPLATE = r'''import json
 
-def _write_fake_llm_endpoint(path, log_path):
-    content = (
-        "import json\n"
-        "from pathlib import Path\n\n"
-        "LOG_PATH = " + repr(str(log_path)) + "\n\n\n"
-        "def _log(name):\n"
-        "    with open(LOG_PATH, \"a\", encoding=\"utf-8\") as f:\n"
-        "        f.write(name + \"\\n\")\n\n\n"
-        "PROVIDERS = {\n"
-        "    \"openai-compatible\": {\n"
-        "        \"default_base_url\": None,\n"
-        "        \"default_api_key_env\": None,\n"
-        "        \"needs_base_url\": True,\n"
-        "        \"suggested_model\": \"\",\n"
-        "    },\n"
-        "}\n\n\n"
-        "def detect_providers(env=None, probe_ollama=True):\n"
-        "    _log(\"detect_providers\")\n"
-        "    return []\n\n\n"
-        "def check_connection(provider, model, base_url=None, api_key_env=None, timeout_seconds=30):\n"
-        "    _log(\"check_connection\")\n"
-        "    return {\"ok\": True, \"error\": None}\n\n\n"
-        "def save_config(config_path, provider, model, base_url=None, api_key_env=None, timeout_seconds=None):\n"
-        "    _log(\"save_config\")\n"
-        "    Path(config_path).write_text(\"[llm]\\n\", encoding=\"utf-8\")\n\n\n"
-        "def load_config(config_path=None):\n"
-        "    _log(\"load_config\")\n"
-        "    return None\n"
-    )
-    path.write_text(content, encoding="utf-8")
+LOG_PATH = __LOG_PATH__
 
 
-def _make_fake_tool_root(base, log_path):
-    tool_root = base / "tool_root"
-    (tool_root / "gen" / "llm-endpoint").mkdir(parents=True)
-    _write_fake_llm_endpoint(
-        tool_root / "gen" / "llm-endpoint" / "llm_endpoint.py", log_path
-    )
+def _log(entry):
+    with open(LOG_PATH, "a") as f:
+        f.write(json.dumps(entry) + "\n")
 
-    (tool_root / "gen" / "a-b").mkdir(parents=True)
-    (tool_root / "gen" / "a-b" / "a_b.py").write_text(
-        "# fake a-b module\n", encoding="utf-8"
-    )
 
-    (tool_root / "examples" / "slugify" / "specs" / "product").mkdir(parents=True)
-    (tool_root / "examples" / "slugify" / "specs" / "product" / "slugs.md").write_text(
-        "# Slugs\n\nFake example fixture content.\n", encoding="utf-8"
-    )
+PROVIDERS = {
+    "fake-provider": {
+        "default_base_url": None,
+        "default_api_key_env": "FAKE_API_KEY",
+        "needs_base_url": False,
+        "suggested_model": "fake-model",
+    }
+}
+
+
+def detect_providers(env=None, probe_ollama=True):
+    _log({"fn": "detect_providers"})
+    return [
+        {
+            "provider": "fake-provider",
+            "available": True,
+            "reason": "fake",
+            "suggested_model": "fake-model",
+            "api_key_env": "FAKE_API_KEY",
+        }
+    ]
+
+
+def check_connection(provider, model, base_url=None, api_key_env=None, timeout_seconds=30):
+    _log({"fn": "check_connection"})
+    if provider not in PROVIDERS:
+        raise ValueError("unknown provider: " + str(provider))
+    return {"ok": True, "error": None}
+
+
+def save_config(config_path, provider, model, base_url=None, api_key_env=None, timeout_seconds=None):
+    _log({"fn": "save_config"})
+    import re
+    content = ""
+    try:
+        with open(config_path, "r") as f:
+            content = f.read()
+    except OSError:
+        content = ""
+    content = re.sub(r"\[llm\].*?(?=\n\[|\Z)", "", content, flags=re.S)
+    content = content.rstrip() + "\n\n[llm]\n"
+    content += "provider = " + json.dumps(provider) + "\n"
+    content += "model = " + json.dumps(model) + "\n"
+    if base_url is not None:
+        content += "base_url = " + json.dumps(base_url) + "\n"
+    if api_key_env is not None:
+        content += "api_key_env = " + json.dumps(api_key_env) + "\n"
+    if timeout_seconds is not None:
+        content += "timeout_seconds = " + str(timeout_seconds) + "\n"
+    with open(config_path, "w") as f:
+        f.write(content)
+
+
+def load_config(config_path=None):
+    _log({"fn": "load_config"})
+    return None
+'''
+
+
+def _build_fake_tool_root(tool_root, log_path):
+    tool_root.mkdir(parents=True)
+    gen_dir = tool_root / "gen"
+    gen_dir.mkdir()
+
+    llm_endpoint_dir = gen_dir / "llm-endpoint"
+    llm_endpoint_dir.mkdir()
+    content = _LLM_ENDPOINT_TEMPLATE.replace("__LOG_PATH__", json.dumps(str(log_path)))
+    (llm_endpoint_dir / "llm_endpoint.py").write_text(content)
+
+    a_b_dir = gen_dir / "a-b"
+    a_b_dir.mkdir()
+    (a_b_dir / "a_b.py").write_text("placeholder = True\n")
 
     pytest_version = importlib.metadata.version("pytest")
-    (tool_root / "requirements.txt").write_text(
-        "pytest==" + pytest_version + "\n", encoding="utf-8"
-    )
+    (tool_root / "requirements.txt").write_text("pytest==" + pytest_version + "\n")
 
     return tool_root
 
 
 def _snapshot(root):
-    entries = set()
-    for dirpath, dirnames, filenames in os.walk(root):
-        for name in dirnames + filenames:
-            entries.add(os.path.relpath(os.path.join(dirpath, name), root))
-    return entries
+    result = {}
+    for p in sorted(root.rglob("*")):
+        rel = str(p.relative_to(root))
+        if p.is_dir():
+            result[rel] = ("dir", None)
+        else:
+            result[rel] = ("file", p.read_bytes())
+    return result
 
 
-def _assert_no_pycache(root):
-    for dirpath, dirnames, filenames in os.walk(root):
-        assert "__pycache__" not in dirnames
+def test_init_on_empty_directory_writes_tool_json_and_is_idempotent(tmp_path):
+    tool_root = _build_fake_tool_root(tmp_path / "toolroot", tmp_path / "log.jsonl")
+    target_dir = tmp_path / "project"
+    target_dir.mkdir()
 
+    def _answer_yes(prompt):
+        return "y"
 
-def _no_input(prompt):
-    raise AssertionError("init should not prompt before refusing")
+    argv = [
+        str(target_dir),
+        "--provider", "fake-provider",
+        "--model", "fake-model",
+        "--no-test",
+        "--yes",
+    ]
 
-
-def _permissive_input(prompt):
-    return ""
-
-
-def test_fresh_init_creates_empty_gen_and_marker_then_rerun_is_idempotent(tmp_path):
-    log_path = tmp_path / "llm_calls.log"
-    tool_root = _make_fake_tool_root(tmp_path, log_path)
-    target = tmp_path / "project"
-    target.mkdir()
-
-    exit_code_1 = hotdocs_init.main(
-        [str(target), "--yes", "--no-test"],
-        tool_root=tool_root,
-        input_fn=_permissive_input,
-        output_fn=lambda msg: None,
+    hotdocs_init.main(
+        argv,
+        tool_root=str(tool_root),
+        input_fn=_answer_yes,
+        output_fn=lambda *a, **k: None,
         env={},
-        cwd=str(target),
+        cwd=str(target_dir),
     )
 
-    gen_dir = target / "gen"
+    gen_dir = target_dir / "gen"
     assert gen_dir.is_dir()
-    assert os.listdir(gen_dir) == []
-    assert not (target / "pipeline").exists()
+    assert list(gen_dir.iterdir()) == []
 
-    marker_path = target / ".hotdocs-tool.json"
-    assert marker_path.is_file()
-    with open(marker_path, "r", encoding="utf-8") as f:
-        marker = json.load(f)
-    assert marker == {"tool_version": "0.1.0"}
-    assert exit_code_1 in (0, 3)
+    entries = {p.name for p in target_dir.iterdir()}
+    assert "gen" in entries
+    assert ".hotdocs-tool.json" in entries
+    assert entries - {"gen", ".hotdocs-tool.json"}
 
-    first_bytes = marker_path.read_bytes()
-    first_mtime = marker_path.stat().st_mtime
+    assert not (target_dir / "pipeline").exists()
 
-    exit_code_2 = hotdocs_init.main(
-        [str(target), "--yes", "--no-test"],
-        tool_root=tool_root,
-        input_fn=_permissive_input,
-        output_fn=lambda msg: None,
+    tool_json_path = target_dir / ".hotdocs-tool.json"
+    data = json.loads(tool_json_path.read_bytes())
+    assert data == {"tool_version": "0.1.0"}
+
+    bytes_before = tool_json_path.read_bytes()
+    stat_before = tool_json_path.stat()
+
+    hotdocs_init.main(
+        argv,
+        tool_root=str(tool_root),
+        input_fn=_answer_yes,
+        output_fn=lambda *a, **k: None,
         env={},
-        cwd=str(target),
+        cwd=str(target_dir),
     )
 
-    second_bytes = marker_path.read_bytes()
-    second_mtime = marker_path.stat().st_mtime
-    assert second_bytes == first_bytes
-    assert second_mtime == first_mtime
-
-    assert gen_dir.is_dir()
-    assert os.listdir(gen_dir) == []
-    assert exit_code_2 in (0, 3)
+    bytes_after = tool_json_path.read_bytes()
+    stat_after = tool_json_path.stat()
+    assert bytes_after == bytes_before
+    assert stat_after.st_mtime_ns == stat_before.st_mtime_ns
 
 
-def test_gen_collision_refuses_names_colliding_dir_only_and_writes_nothing(
-    tmp_path, capsys
-):
-    log_path = tmp_path / "llm_calls.log"
-    tool_root = _make_fake_tool_root(tmp_path, log_path)
+def test_gen_name_collision_with_tool_refuses_and_writes_nothing(tmp_path, capsys):
+    tool_root = _build_fake_tool_root(tmp_path / "toolroot", tmp_path / "log.jsonl")
+    log_path = tmp_path / "log.jsonl"
 
-    target = tmp_path / "project"
-    (target / "gen" / "a-b").mkdir(parents=True)
-    (target / "gen" / "a-b" / "placeholder.txt").write_text(
-        "existing\n", encoding="utf-8"
-    )
-    (target / "gen" / "mine").mkdir(parents=True)
-    (target / "gen" / "mine" / "placeholder.txt").write_text(
-        "mine\n", encoding="utf-8"
-    )
+    target_dir = tmp_path / "project"
+    target_dir.mkdir()
+    gen_dir = target_dir / "gen"
+    gen_dir.mkdir()
+    (gen_dir / "a-b").mkdir()
+    (gen_dir / "a-b" / "placeholder.py").write_text("x = 1\n")
+    (gen_dir / "mine").mkdir()
+    (gen_dir / "mine" / "placeholder.py").write_text("y = 2\n")
 
-    before = _snapshot(target)
+    before = _snapshot(target_dir)
 
-    exit_code = hotdocs_init.main(
-        [str(target), "--yes", "--no-test"],
-        tool_root=tool_root,
-        input_fn=_no_input,
-        output_fn=lambda msg: None,
+    def _fail_input(prompt):
+        raise AssertionError("must not prompt before refusing: " + prompt)
+
+    ret = hotdocs_init.main(
+        [str(target_dir)],
+        tool_root=str(tool_root),
+        input_fn=_fail_input,
+        output_fn=lambda *a, **k: None,
         env={},
-        cwd=str(target),
+        cwd=str(target_dir),
     )
 
-    stderr_text = capsys.readouterr().err
-
-    assert exit_code == 1
-    assert "gen/a-b" in stderr_text
-    assert "gen/mine" not in stderr_text
-
-    after = _snapshot(target)
-    assert after == before
-
-    assert not (target / ".hotdocs-tool.json").exists()
-    assert not (target / "hotdocs.toml").exists()
+    captured = capsys.readouterr()
+    assert ret == 1
+    assert "gen/a-b" in captured.err
+    assert "gen/mine" not in captured.err
+    assert _snapshot(target_dir) == before
     assert not log_path.exists()
-
-    _assert_no_pycache(target)
-    _assert_no_pycache(tool_root)
 
 
 def test_target_is_tool_root_refuses_and_writes_nothing(tmp_path):
-    log_path = tmp_path / "llm_calls.log"
-    tool_root = _make_fake_tool_root(tmp_path, log_path)
-
+    tool_root = _build_fake_tool_root(tmp_path / "toolroot", tmp_path / "log.jsonl")
+    log_path = tmp_path / "log.jsonl"
     before = _snapshot(tool_root)
 
-    exit_code = hotdocs_init.main(
-        [str(tool_root), "--yes", "--no-test"],
-        tool_root=tool_root,
-        input_fn=_no_input,
-        output_fn=lambda msg: None,
+    def _fail_input(prompt):
+        raise AssertionError("must not prompt before refusing: " + prompt)
+
+    ret = hotdocs_init.main(
+        [str(tool_root)],
+        tool_root=str(tool_root),
+        input_fn=_fail_input,
+        output_fn=lambda *a, **k: None,
         env={},
         cwd=str(tool_root),
     )
 
-    assert exit_code == 1
-
-    after = _snapshot(tool_root)
-    assert after == before
-
-    assert not (tool_root / ".hotdocs-tool.json").exists()
-    assert not (tool_root / "hotdocs.toml").exists()
+    assert ret == 1
+    assert _snapshot(tool_root) == before
     assert not log_path.exists()
-
-    _assert_no_pycache(tool_root)
+    # importing llm-endpoint creates __pycache__; refusal must precede that import.
+    assert not (tool_root / "gen" / "llm-endpoint" / "__pycache__").exists()

@@ -49,9 +49,9 @@ def _slug(component_id: str) -> str:
 
 
 def _direct_depends_on_slugs(component_id: str) -> list[str]:
-    """Reads the one `depends_on: [comp-a, comp-b]` frontmatter line directly
-    -- no PyYAML in this venv, and the only shape this ever takes in this
-    corpus (SPEC_GUIDELINES.md) is a flat bracketed list on one line."""
+    """Reads the one `depends_on: [comp-a, comp-b]` frontmatter line directly:
+    the only shape it ever takes in this corpus (SPEC_GUIDELINES.md) is a flat
+    bracketed list on one line, so no YAML parser is needed."""
     slug = _slug(component_id)
     text = (REAL_REPO / "specs" / "components" / slug / "component.md").read_text(encoding="utf-8")
     for line in text.splitlines():

@@ -6,7 +6,8 @@ Kind: generated-test
 ```gherkin
 Given a fake tool root (with llm-endpoint, as in the fixtures) that also holds gen/a-b/a_b.py
 When init runs on an empty directory
-Then <dir>/gen is an empty directory, no pipeline directory exists,
+Then <dir>/gen is an empty directory (the other entries R-INIT-001
+  writes exist beside it), no pipeline directory exists,
   and .hotdocs-tool.json parses to exactly {"tool_version": "0.1.0"}
 
 Given the second run

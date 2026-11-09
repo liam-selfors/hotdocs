@@ -1,20 +1,28 @@
+import json
+import os
 import importlib.metadata
 from pathlib import Path
-
-import pytest
 
 import hotdocs_init
 
 
-FAKE_LLM_ENDPOINT_TEMPLATE = '''
-import json as _json
+def _build_tool_root(base_dir: Path, log_path: Path) -> Path:
+    tool_root = base_dir / "tool_root"
+    tool_root.mkdir(parents=True)
 
-_LOG_PATH = %(log_path)r
+    llm_endpoint_dir = tool_root / "gen" / "llm-endpoint"
+    llm_endpoint_dir.mkdir(parents=True)
+
+    fake_module = """
+import json
+from pathlib import Path
+
+LOG_PATH = __LOG_PATH__
 
 
-def _log(call):
-    with open(_LOG_PATH, "a") as f:
-        f.write(_json.dumps(call) + "\\n")
+def _log(name):
+    with open(LOG_PATH, "a", encoding="utf-8") as f:
+        f.write(name + "\\n")
 
 
 PROVIDERS = {
@@ -24,16 +32,46 @@ PROVIDERS = {
         "needs_base_url": False,
         "suggested_model": "claude-sonnet-5",
     },
+    "openai": {
+        "default_base_url": None,
+        "default_api_key_env": "OPENAI_API_KEY",
+        "needs_base_url": False,
+        "suggested_model": "gpt-4o",
+    },
+    "openai-compatible": {
+        "default_base_url": None,
+        "default_api_key_env": "OPENAI_API_KEY",
+        "needs_base_url": True,
+        "suggested_model": "",
+    },
+    "gemini": {
+        "default_base_url": None,
+        "default_api_key_env": "GEMINI_API_KEY",
+        "needs_base_url": False,
+        "suggested_model": "gemini-2.0-flash",
+    },
+    "ollama": {
+        "default_base_url": "http://localhost:11434",
+        "default_api_key_env": None,
+        "needs_base_url": False,
+        "suggested_model": "llama3.1:8b",
+    },
+    "claude-cli": {
+        "default_base_url": None,
+        "default_api_key_env": None,
+        "needs_base_url": False,
+        "suggested_model": "claude-sonnet-5",
+    },
 }
 
 
 def detect_providers(env=None, probe_ollama=True):
-    _log({"fn": "detect_providers"})
+    _log("detect_providers")
     return [
         {
             "provider": "anthropic",
-            "available": True,
-            "reason": None,
+            "available": False,
+            "reason": "no api key set",
             "suggested_model": "claude-sonnet-5",
             "api_key_env": "ANTHROPIC_API_KEY",
         }
@@ -41,168 +79,167 @@ def detect_providers(env=None, probe_ollama=True):
 
 
 def check_connection(provider, model, base_url=None, api_key_env=None, timeout_seconds=30):
-    _log({"fn": "check_connection", "provider": provider, "model": model})
+    _log("check_connection")
+    if provider not in PROVIDERS:
+        raise ValueError("unknown provider: " + str(provider))
+    if PROVIDERS[provider]["needs_base_url"] and not base_url:
+        raise ValueError("base_url required for provider: " + str(provider))
     return {"ok": True, "error": None}
 
 
 def save_config(config_path, provider, model, base_url=None, api_key_env=None, timeout_seconds=None):
-    _log({"fn": "save_config", "provider": provider, "model": model})
-    existing = ""
-    try:
-        with open(config_path, "r") as f:
-            existing = f.read()
-    except FileNotFoundError:
-        pass
-    with open(config_path, "w") as f:
-        f.write(existing + "\\n[llm]\\n")
+    _log("save_config")
+    path = Path(config_path)
+    kept_lines = []
+    if path.exists():
+        skip = False
+        for line in path.read_text(encoding="utf-8").splitlines():
+            stripped = line.strip()
+            if stripped == "[llm]":
+                skip = True
+                continue
+            if skip and stripped.startswith("["):
+                skip = False
+            if not skip:
+                kept_lines.append(line)
+    kept_lines.append("[llm]")
+    kept_lines.append("provider = " + json.dumps(provider))
+    kept_lines.append("model = " + json.dumps(model))
+    path.write_text("\\n".join(kept_lines) + "\\n", encoding="utf-8")
 
 
 def load_config(config_path=None):
-    _log({"fn": "load_config"})
+    _log("load_config")
     return None
-'''
+"""
+    fake_module = fake_module.replace("__LOG_PATH__", json.dumps(str(log_path)))
+    (llm_endpoint_dir / "llm_endpoint.py").write_text(fake_module, encoding="utf-8")
 
-
-def _write(path: Path, content: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(content)
-
-
-def _make_fake_tool_root(tmp_path: Path, log_path: Path) -> Path:
-    tool_root = tmp_path / "fake_tool_root"
-    tool_root.mkdir()
+    slugify_dir = tool_root / "examples" / "slugify" / "specs" / "product"
+    slugify_dir.mkdir(parents=True)
+    (slugify_dir / "slugs.md").write_text("# Slugs\n\nExample slug list.\n", encoding="utf-8")
 
     pytest_version = importlib.metadata.version("pytest")
-    _write(tool_root / "requirements.txt", "pytest==" + pytest_version + "\n")
-
-    _write(
-        tool_root / "examples" / "slugify" / "specs" / "product" / "slugs.md",
-        "# Slugs\n\nExample slugify product spec.\n",
+    (tool_root / "requirements.txt").write_text(
+        "pytest==" + pytest_version + "\n", encoding="utf-8"
     )
-
-    fake_module_content = FAKE_LLM_ENDPOINT_TEMPLATE % {"log_path": str(log_path)}
-    _write(tool_root / "gen" / "llm-endpoint" / "llm_endpoint.py", fake_module_content)
 
     return tool_root
 
 
 def _snapshot(root: Path):
     snap = {}
-    for p in sorted(root.rglob("*")):
-        if p.is_file():
-            rel = p.relative_to(root).as_posix()
-            snap[rel] = (p.read_bytes(), p.stat().st_mtime_ns)
+    for dirpath, dirnames, filenames in os.walk(root):
+        rel_dir = os.path.relpath(dirpath, root)
+        snap[("dir", rel_dir)] = os.stat(dirpath).st_mtime_ns
+        for fn in filenames:
+            full = os.path.join(dirpath, fn)
+            rel = os.path.relpath(full, root)
+            snap[("file", rel)] = (Path(full).read_bytes(), os.stat(full).st_mtime_ns)
     return snap
 
 
-def _no_prompt_input_fn(prompt):
+def _yes_input(prompt):
     return "y"
 
 
-EXPECTED_DIRS = [
-    "specs/product",
-    "specs/components",
-    "specs/decisions",
-    "gen",
-    "verification",
+_EXPECTED_DIRS = ["specs/product", "specs/components", "specs/decisions", "gen", "verification"]
+_EXPECTED_GITKEEPS = [
+    "specs/product/.gitkeep",
+    "specs/components/.gitkeep",
+    "specs/decisions/.gitkeep",
+    "verification/.gitkeep",
 ]
+_EXPECTED_OTHERS = ["specs/glossary.md", ".secret-allowlist.json", ".gitignore"]
+_EXPECTED_CREATED_PATHS = _EXPECTED_DIRS + _EXPECTED_GITKEEPS + _EXPECTED_OTHERS
 
-EXPECTED_GITKEEP_DIRS = [
-    "specs/product",
-    "specs/components",
-    "specs/decisions",
-    "verification",
-]
-
-EXPECTED_OTHER_FILES = [
-    "specs/glossary.md",
-    ".secret-allowlist.json",
-    ".gitignore",
-]
-
-GITIGNORE_LINES = ["/.hotdocs/", "__pycache__/", "*.pyc", ".venv/"]
+_GITIGNORE_LINES = ["/.hotdocs/", "__pycache__/", "*.pyc", ".venv/"]
 
 
-def test_init_creates_structure_then_is_idempotent(tmp_path):
-    log_path = tmp_path / "fake_dep_log.jsonl"
-    tool_root = _make_fake_tool_root(tmp_path, log_path)
+def test_init_creates_structure_and_second_run_is_noop(tmp_path):
+    log_path = tmp_path / "logs" / "llm_endpoint_calls.log"
+    log_path.parent.mkdir(parents=True)
+    tool_root = _build_tool_root(tmp_path, log_path)
 
     project_dir = tmp_path / "project"
     project_dir.mkdir()
 
-    first_outputs = []
+    env = {"PATH": os.environ.get("PATH", "")}
+
+    outputs_first = []
     hotdocs_init.main(
         [str(project_dir), "--yes"],
-        tool_root=tool_root,
-        input_fn=_no_prompt_input_fn,
-        output_fn=first_outputs.append,
-        env={},
+        tool_root=str(tool_root),
+        input_fn=_yes_input,
+        output_fn=outputs_first.append,
+        env=env,
     )
 
-    for d in EXPECTED_DIRS:
-        assert (project_dir / d).is_dir()
+    for rel in _EXPECTED_DIRS:
+        assert (project_dir / rel).is_dir()
 
-    for d in EXPECTED_GITKEEP_DIRS:
-        gitkeep = project_dir / d / ".gitkeep"
-        assert gitkeep.is_file()
-        assert gitkeep.read_bytes() == b""
+    for rel in _EXPECTED_GITKEEPS:
+        gitkeep_path = project_dir / rel
+        assert gitkeep_path.is_file()
+        assert gitkeep_path.read_text(encoding="utf-8") == ""
 
-    glossary_text = (project_dir / "specs" / "glossary.md").read_text()
+    glossary_text = (project_dir / "specs" / "glossary.md").read_text(encoding="utf-8")
     assert glossary_text.startswith("# Glossary")
 
     assert (project_dir / ".secret-allowlist.json").is_file()
 
-    gitignore_lines = (project_dir / ".gitignore").read_text().splitlines()
-    for line in GITIGNORE_LINES:
+    gitignore_lines = (project_dir / ".gitignore").read_text(encoding="utf-8").splitlines()
+    for line in _GITIGNORE_LINES:
         assert gitignore_lines.count(line) == 1
 
-    expected_created_paths = list(EXPECTED_DIRS)
-    expected_created_paths += [f"{d}/.gitkeep" for d in EXPECTED_GITKEEP_DIRS]
-    expected_created_paths += EXPECTED_OTHER_FILES
+    for rel in _EXPECTED_CREATED_PATHS:
+        assert (rel + ": created") in outputs_first
 
-    for path in expected_created_paths:
-        assert f"{path}: created" in first_outputs
+    snapshot_before_second_run = _snapshot(project_dir)
 
-    before = _snapshot(project_dir)
-
-    second_outputs = []
+    outputs_second = []
     hotdocs_init.main(
         [str(project_dir), "--yes"],
-        tool_root=tool_root,
-        input_fn=_no_prompt_input_fn,
-        output_fn=second_outputs.append,
-        env={},
+        tool_root=str(tool_root),
+        input_fn=_yes_input,
+        output_fn=outputs_second.append,
+        env=env,
     )
 
-    after = _snapshot(project_dir)
-    assert before == after
+    snapshot_after_second_run = _snapshot(project_dir)
+    assert snapshot_after_second_run == snapshot_before_second_run
 
-    for path in expected_created_paths:
-        assert f"{path}: skipped (exists)" in second_outputs
+    for rel in _EXPECTED_CREATED_PATHS:
+        assert (rel + ": skipped (exists)") in outputs_second
 
 
-def test_init_preserves_existing_glossary_and_merges_gitignore(tmp_path):
-    log_path = tmp_path / "fake_dep_log_2.jsonl"
-    tool_root = _make_fake_tool_root(tmp_path, log_path)
+def test_init_preserves_existing_files_and_dedupes_gitignore(tmp_path):
+    log_path = tmp_path / "logs" / "llm_endpoint_calls.log"
+    log_path.parent.mkdir(parents=True)
+    tool_root = _build_tool_root(tmp_path, log_path)
 
-    project_dir = tmp_path / "project2"
+    project_dir = tmp_path / "project"
     project_dir.mkdir()
-    (project_dir / "specs").mkdir()
-    _write(project_dir / "specs" / "glossary.md", "mine")
-    _write(project_dir / ".gitignore", "/.hotdocs/\n")
+
+    specs_dir = project_dir / "specs"
+    specs_dir.mkdir()
+    (specs_dir / "glossary.md").write_text("mine", encoding="utf-8")
+    (project_dir / ".gitignore").write_text("/.hotdocs/\n", encoding="utf-8")
+
+    env = {"PATH": os.environ.get("PATH", "")}
 
     outputs = []
     hotdocs_init.main(
         [str(project_dir), "--yes"],
-        tool_root=tool_root,
-        input_fn=_no_prompt_input_fn,
+        tool_root=str(tool_root),
+        input_fn=_yes_input,
         output_fn=outputs.append,
-        env={},
+        env=env,
     )
 
-    assert (project_dir / "specs" / "glossary.md").read_text() == "mine"
+    assert (specs_dir / "glossary.md").read_text(encoding="utf-8") == "mine"
 
-    gitignore_lines = (project_dir / ".gitignore").read_text().splitlines()
+    gitignore_lines = (project_dir / ".gitignore").read_text(encoding="utf-8").splitlines()
     assert gitignore_lines.count("/.hotdocs/") == 1
     for line in ["__pycache__/", "*.pyc", ".venv/"]:
         assert gitignore_lines.count(line) == 1

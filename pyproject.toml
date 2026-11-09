@@ -6,17 +6,19 @@ build-backend = "setuptools.build_meta"
 name = "hotdocs"
 version = "0.1.0"
 description = "Spec-driven agentic development: specs in, verified code out."
-requires-python = ">=3.10"
-dependencies = [
-    "detect-secrets==1.5.0",
-    "duckdb==2.0.0",
-    "pytest>=8",
-    "pytz",
-    "PyYAML",
-]
+license = {text = "Apache-2.0"}
+# llm-endpoint reads hotdocs.toml with the standard library's tomllib (3.11+).
+requires-python = ">=3.11"
+# requirements.txt is the one list of dependencies: `pip install -e .`
+# installs it, and `hotdocs init` checks a project's environment against
+# it (R-INIT-003). D203.
+dynamic = ["dependencies"]
 
 [project.scripts]
 hotdocs = "hotdocs_entry:main"
+
+[tool.setuptools.dynamic]
+dependencies = {file = ["requirements.txt"]}
 
 # The tool's components live in the hyphenated directories under gen/ and
 # pipeline/; they are DATA found by path (a project's components fall back to

@@ -13,7 +13,12 @@ Given no --example
 When init runs
 Then the next steps do not mention "comp-slugify"
 
-Given an initialised project and main(["<dir>","--reconfigure","--provider","openai","--model","m","--no-test"])
+Given an initialised project (a directory a previous init run set up, so
+  .hotdocs-tool.json and hotdocs.toml exist) and main(["<dir>","--reconfigure","--provider","openai","--model","m","--no-test"])
 When it runs
 Then only hotdocs.toml changed; and with a tool root holding no gen/llm-endpoint/llm_endpoint.py it returns 1
+
+Given a directory holding only specs/ and main(["<dir>","--reconfigure","--provider","openai","--model","m","--no-test"])
+When it runs
+Then it returns 1 and writes nothing
 ```

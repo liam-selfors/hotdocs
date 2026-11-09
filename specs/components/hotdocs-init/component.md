@@ -66,3 +66,5 @@ None.
 - `D184`: initial design, inside `hotdocs-cli`. `D185`: split out.
 - `D197`: seeds a sealed allowlist. `D199`: copies nothing from the tool;
   the allowlist starts empty.
+- `D203`: the Python floor is 3.11. `D205`: `.hotdocs-tool.json` marks
+  an initialised project.

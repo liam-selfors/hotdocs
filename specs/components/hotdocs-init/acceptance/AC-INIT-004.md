@@ -33,5 +33,7 @@ Then output_fn received "provider not configured: gen/llm-endpoint is missing", 
 
 Given <dir>/hotdocs.toml already exists
 When init runs
-Then the provider step is skipped with a message and hotdocs.toml is unchanged
+Then the provider step is skipped with a message, save_config is never
+  called, and hotdocs.toml is unchanged (R-INIT-003 may still read it
+  with load_config)
 ```

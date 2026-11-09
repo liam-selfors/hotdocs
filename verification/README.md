@@ -15,8 +15,9 @@ Each `verification/<slug>/` holds:
 - for the hand-written components, a hand-written test suite instead of
   `generated-test/`.
 
-Run a suite with `pytest`, one directory per invocation, with the component's
-`gen/` directory on `PYTHONPATH`:
+Run a suite with the checkout's `.venv` active (the one environment, `D203`;
+`pytest` is in `requirements.txt`), one directory per invocation, with the
+component's `gen/` directory on `PYTHONPATH`:
 
 ```
 cd verification/<slug> && PYTHONPATH=../../gen/<slug> pytest

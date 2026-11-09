@@ -7,7 +7,7 @@ ready. Python projects only.
 
 ## 1. Install
 
-You need Python 3.10 or newer and a model provider: the `claude` command
+You need Python 3.11 or newer and a model provider: the `claude` command
 signed in, or an API key in an environment variable (Anthropic, OpenAI,
 Gemini, any OpenAI-compatible server, or a local Ollama).
 
@@ -17,9 +17,13 @@ python3 -m venv .venv && . .venv/bin/activate
 pip install -e .
 ```
 
-The editable install matters: the tool's components are files in this
-checkout, and every project uses them from here. Updating the checkout
-(`git pull`) updates the tool for all your projects.
+This is the one environment hotdocs uses. The editable install matters:
+the tool's components are files in this checkout, and every project uses
+them from here. Updating the checkout (`git pull`) updates the tool for all
+your projects. Keep this environment active in every project (or put its
+`bin/` on `PATH`); a project has no environment of its own. Dependencies
+are pinned in `requirements.txt`, the list `pip install -e .` installs and
+`hotdocs init` checks.
 
 ## 2. Create a project
 
@@ -102,8 +106,5 @@ them to the next `generate`.
   `cache-manager`, `spec-linter`, `graph-query-engine` and the sealed
   `criterion-compiler`) are hand-written and tested, not generated from
   their specs; the rest are generated and verified like yours.
-- `hotdocs review-packet build` does not yet find the tool's components
-  from a project; it works only inside the tool's own checkout until it is
-  regenerated.
 - `hotdocs assist` and `hotdocs impact` need a git repository with a
   `main` or `master` branch.

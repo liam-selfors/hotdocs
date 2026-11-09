@@ -7,7 +7,9 @@ Kind: generated-test
 Given main(["--bogus"]), main(["--provider"]), main(["a","b"]),
   main(["--provider","nope"]), and main(["--provider=openai","--model"])
 When each is called
-Then each returns 2, nothing is written, and the "nope" message lists the PROVIDERS keys
+Then each returns 2, nothing is written under <dir> (a __pycache__ that
+  importing llm-endpoint leaves under the tool root is not a write to
+  <dir>), and the "nope" message lists the PROVIDERS keys
 
 Given main(["--provider","openai","--api-key-env","sk-abc123"]) and "--api-key-env 9X"
 When called

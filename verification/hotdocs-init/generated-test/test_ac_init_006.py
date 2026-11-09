@@ -1,282 +1,313 @@
 import importlib.metadata
-import os
-import shutil
-from pathlib import Path
+import json
 
 import hotdocs_init
 
 
-def _llm_endpoint_source(log_path):
-    return f"""
-LOG_PATH = {repr(str(log_path))}
+LLM_ENDPOINT_TEMPLATE = '''
+import json
+import pathlib
 
-
-def _log(name):
-    with open(LOG_PATH, "a") as f:
-        f.write(name + "\\n")
-
-
-PROVIDERS = {{
-    "openai": {{
+PROVIDERS = {
+    "openai": {
         "default_base_url": None,
         "default_api_key_env": "OPENAI_API_KEY",
         "needs_base_url": False,
-        "suggested_model": "gpt-4",
-    }},
-}}
+        "suggested_model": "gpt-4o-mini",
+    },
+    "openai-compatible": {
+        "default_base_url": None,
+        "default_api_key_env": None,
+        "needs_base_url": True,
+        "suggested_model": "",
+    },
+}
+
+_LOG_PATH = "__LOG_PATH__"
+
+
+def _log(name, info):
+    with open(_LOG_PATH, "a") as f:
+        f.write(json.dumps({"call": name, "info": info}, default=str) + "\\n")
 
 
 def detect_providers(env=None, probe_ollama=True):
-    _log("detect_providers")
+    _log("detect_providers", {"env": env, "probe_ollama": probe_ollama})
     return [
-        {{
+        {
             "provider": "openai",
             "available": True,
-            "reason": "ok",
-            "suggested_model": "gpt-4",
+            "reason": None,
+            "suggested_model": "gpt-4o-mini",
             "api_key_env": "OPENAI_API_KEY",
-        }}
+        }
     ]
 
 
 def check_connection(provider, model, base_url=None, api_key_env=None, timeout_seconds=30):
-    _log("check_connection")
+    _log("check_connection", {"provider": provider, "model": model})
     if provider not in PROVIDERS:
         raise ValueError("unknown provider: " + str(provider))
-    return {{"ok": True, "error": None}}
+    return {"ok": True, "error": None}
 
 
 def save_config(config_path, provider, model, base_url=None, api_key_env=None, timeout_seconds=None):
-    _log("save_config")
-    path = config_path
-    try:
-        with open(path, "r") as f:
-            content = f.read()
-    except FileNotFoundError:
-        content = ""
-    lines = content.splitlines(keepends=True)
-    out = []
+    _log("save_config", {"config_path": str(config_path), "provider": provider, "model": model})
+    path = pathlib.Path(config_path)
+    existing = path.read_text() if path.exists() else ""
+    kept = []
     in_llm = False
-    for line in lines:
+    for line in existing.splitlines():
         stripped = line.strip()
-        if stripped.startswith("[") and stripped.endswith("]"):
-            in_llm = (stripped == "[llm]")
-            if in_llm:
-                continue
-            out.append(line)
+        if stripped == "[llm]":
+            in_llm = True
             continue
-        if in_llm:
-            continue
-        out.append(line)
-    out.append("[llm]\\n")
-    out.append('provider = "' + str(provider) + '"\\n')
-    out.append('model = "' + str(model) + '"\\n')
+        if in_llm and stripped.startswith("[") and stripped != "[llm]":
+            in_llm = False
+        if not in_llm:
+            kept.append(line)
+    lines = list(kept)
+    lines.append("[llm]")
+    lines.append('provider = "' + provider + '"')
+    lines.append('model = "' + model + '"')
     if base_url is not None:
-        out.append('base_url = "' + str(base_url) + '"\\n')
+        lines.append('base_url = "' + base_url + '"')
     if api_key_env is not None:
-        out.append('api_key_env = "' + str(api_key_env) + '"\\n')
+        lines.append('api_key_env = "' + api_key_env + '"')
     if timeout_seconds is not None:
-        out.append('timeout_seconds = ' + str(timeout_seconds) + '\\n')
-    with open(path, "w") as f:
-        f.writelines(out)
+        lines.append("timeout_seconds = " + str(timeout_seconds))
+    path.write_text("\\n".join(lines) + "\\n")
 
 
 def load_config(config_path=None):
-    _log("load_config")
+    _log("load_config", {"config_path": str(config_path) if config_path else None})
     if config_path is None:
         return None
-    try:
-        with open(config_path, "r") as f:
-            content = f.read()
-    except FileNotFoundError:
+    path = pathlib.Path(config_path)
+    if not path.exists():
         return None
-    if "[llm]" not in content:
+    text = path.read_text()
+    if "[llm]" not in text:
         return None
-    result = {{
+    result = {
         "provider": None,
         "model": None,
         "base_url": None,
         "api_key_env": None,
         "timeout_seconds": None,
-    }}
+    }
     in_llm = False
-    for line in content.splitlines():
+    for line in text.splitlines():
         stripped = line.strip()
         if stripped == "[llm]":
             in_llm = True
             continue
-        if stripped.startswith("[") and stripped.endswith("]"):
-            in_llm = False
-            continue
+        if in_llm and stripped.startswith("[") and stripped != "[llm]":
+            break
         if in_llm and "=" in stripped:
             key, _, value = stripped.partition("=")
             key = key.strip()
             value = value.strip().strip('"')
             if key == "timeout_seconds":
-                try:
-                    value = int(value)
-                except ValueError:
-                    pass
-            if key in result:
-                result[key] = value
+                result[key] = int(value) if value else None
+            else:
+                result[key] = value if value else None
     return result
-"""
+'''
 
 
-def _make_tool_root(tmp_path, log_path, name, include_llm_endpoint=True):
-    tool_root = tmp_path / name
-    gen_dir = tool_root / "gen"
-    gen_dir.mkdir(parents=True)
+def write_fake_llm_endpoint(dest_path, log_path):
+    content = LLM_ENDPOINT_TEMPLATE.replace(
+        "__LOG_PATH__", str(log_path).replace("\\", "\\\\")
+    )
+    dest_path.write_text(content)
+
+
+def build_fake_tool_root(tool_root, log_path, include_llm_endpoint=True):
+    tool_root.mkdir(parents=True, exist_ok=True)
     if include_llm_endpoint:
-        module_dir = gen_dir / "llm-endpoint"
-        module_dir.mkdir(parents=True)
-        (module_dir / "llm_endpoint.py").write_text(_llm_endpoint_source(log_path))
-
-    pytest_version = importlib.metadata.version("pytest")
-    (tool_root / "requirements.txt").write_text("pytest==" + pytest_version + "\n")
-
+        llm_dir = tool_root / "gen" / "llm-endpoint"
+        llm_dir.mkdir(parents=True, exist_ok=True)
+        write_fake_llm_endpoint(llm_dir / "llm_endpoint.py", log_path)
     example_dir = tool_root / "examples" / "slugify" / "specs" / "product"
-    example_dir.mkdir(parents=True)
-    (example_dir / "slugs.md").write_text("EXAMPLE SLUGS CONTENT\n")
-
+    example_dir.mkdir(parents=True, exist_ok=True)
+    (example_dir / "slugs.md").write_text(
+        '# Example slugs\n\nslugify("Hello World") -> "hello-world"\n'
+    )
+    requirements_version = importlib.metadata.version("pytest")
+    (tool_root / "requirements.txt").write_text(
+        "pytest==" + requirements_version + "\n"
+    )
     return tool_root
 
 
-def _run(argv, tool_root, cwd):
-    output_lines = []
-
-    def output_fn(*args, **kwargs):
-        output_lines.append(" ".join(str(a) for a in args))
-
-    def input_fn(prompt=""):
-        return "y"
-
-    rc = hotdocs_init.main(
-        argv,
-        tool_root=str(tool_root),
-        input_fn=input_fn,
-        output_fn=output_fn,
-        env={"PATH": os.environ.get("PATH", "")},
-        cwd=str(cwd),
-    )
-    return rc, "\n".join(output_lines)
-
-
-def _snapshot(root):
+def snapshot(root):
     result = {}
-    for path in sorted(Path(root).rglob("*")):
+    for path in root.rglob("*"):
         if path.is_file():
-            rel = str(path.relative_to(root))
-            result[rel] = path.read_bytes()
+            result[str(path.relative_to(root))] = path.read_bytes()
     return result
 
 
-def test_example_copies_slugs_never_overwrites_and_next_steps(tmp_path):
-    log_path = tmp_path / "llm_calls_1.log"
-    tool_root = _make_tool_root(tmp_path, log_path, "tool_root_1")
+def changed_paths(before, after):
+    changed = set()
+    for key in before.keys() | after.keys():
+        if before.get(key) != after.get(key):
+            changed.add(key)
+    return changed
 
-    project_dir = tmp_path / "project_fresh"
+
+def read_log(log_path):
+    if not log_path.exists():
+        return []
+    records = []
+    for line in log_path.read_text().splitlines():
+        if line.strip():
+            records.append(json.loads(line))
+    return records
+
+
+def test_example_copies_slugs_and_ends_with_full_next_steps(tmp_path):
+    tool_root = build_fake_tool_root(tmp_path / "tool_root", tmp_path / "calls.log")
+    project_dir = tmp_path / "project"
     project_dir.mkdir()
-    rc, out_text = _run(
+
+    outputs = []
+    hotdocs_init.main(
         [str(project_dir), "--example", "--yes"],
-        tool_root=tool_root,
-        cwd=project_dir,
+        tool_root=str(tool_root),
+        input_fn=lambda prompt: "",
+        output_fn=outputs.append,
+        env={},
     )
-    assert rc == 0
 
     slugs_path = project_dir / "specs" / "product" / "slugs.md"
+    example_path = tool_root / "examples" / "slugify" / "specs" / "product" / "slugs.md"
     assert slugs_path.exists()
-    example_content = (
-        tool_root / "examples" / "slugify" / "specs" / "product" / "slugs.md"
-    ).read_text()
-    assert slugs_path.read_text() == example_content
+    assert slugs_path.read_text() == example_path.read_text()
     assert not (project_dir / "examples").exists()
 
-    lint_idx = out_text.find("hotdocs lint")
-    generate_idx = out_text.find("hotdocs generate comp-slugify")
-    verify_idx = out_text.find("hotdocs verify")
-    quickstart_idx = out_text.find("QUICKSTART.md")
-    assert lint_idx != -1
-    assert generate_idx != -1
-    assert verify_idx != -1
-    assert quickstart_idx != -1
-    assert lint_idx < generate_idx < verify_idx < quickstart_idx
+    full_output = "\n".join(outputs)
+    idx_lint = full_output.find("hotdocs lint")
+    idx_generate = full_output.find("hotdocs generate comp-slugify")
+    idx_verify = full_output.find("hotdocs verify")
+    idx_quickstart = full_output.find("QUICKSTART.md")
+    assert idx_lint != -1
+    assert idx_generate != -1
+    assert idx_verify != -1
+    assert idx_quickstart != -1
+    assert idx_lint < idx_generate < idx_verify < idx_quickstart
 
-    non_empty_lines = [line for line in out_text.splitlines() if line.strip()]
-    assert non_empty_lines, "expected some output"
-    assert "QUICKSTART.md" in non_empty_lines[-1]
 
-    project_dir2 = tmp_path / "project_preexisting"
-    (project_dir2 / "specs" / "product").mkdir(parents=True)
-    sentinel = "PRE-EXISTING SLUGS CONTENT\n"
-    (project_dir2 / "specs" / "product" / "slugs.md").write_text(sentinel)
+def test_example_never_overwrites_existing_file(tmp_path):
+    tool_root = build_fake_tool_root(tmp_path / "tool_root", tmp_path / "calls.log")
+    project_dir = tmp_path / "project"
+    (project_dir / "specs" / "product").mkdir(parents=True)
+    custom_content = "custom pre-existing content\n"
+    (project_dir / "specs" / "product" / "slugs.md").write_text(custom_content)
 
-    rc2, _ = _run(
-        [str(project_dir2), "--example", "--yes"],
-        tool_root=tool_root,
-        cwd=project_dir2,
+    outputs = []
+    hotdocs_init.main(
+        [str(project_dir), "--example", "--yes"],
+        tool_root=str(tool_root),
+        input_fn=lambda prompt: "",
+        output_fn=outputs.append,
+        env={},
     )
-    assert rc2 == 0
-    assert (project_dir2 / "specs" / "product" / "slugs.md").read_text() == sentinel
+
+    assert (
+        project_dir / "specs" / "product" / "slugs.md"
+    ).read_text() == custom_content
 
 
 def test_no_example_next_steps_omit_comp_slugify(tmp_path):
-    log_path = tmp_path / "llm_calls_2.log"
-    tool_root = _make_tool_root(tmp_path, log_path, "tool_root_2")
-
-    project_dir = tmp_path / "project_no_example"
+    tool_root = build_fake_tool_root(tmp_path / "tool_root", tmp_path / "calls.log")
+    project_dir = tmp_path / "project"
     project_dir.mkdir()
-    rc, out_text = _run(
+
+    outputs = []
+    hotdocs_init.main(
         [str(project_dir), "--yes"],
-        tool_root=tool_root,
-        cwd=project_dir,
+        tool_root=str(tool_root),
+        input_fn=lambda prompt: "",
+        output_fn=outputs.append,
+        env={},
     )
-    assert rc == 0
-    assert "comp-slugify" not in out_text
+
+    full_output = "\n".join(outputs)
+    assert "comp-slugify" not in full_output
 
 
-def test_reconfigure_only_touches_hotdocs_toml_and_fails_without_llm_endpoint(tmp_path):
-    log_path = tmp_path / "llm_calls_3.log"
-    tool_root = _make_tool_root(tmp_path, log_path, "tool_root_3")
-
-    project_dir = tmp_path / "project_init"
+def test_reconfigure_changes_only_hotdocs_toml(tmp_path):
+    log_path = tmp_path / "calls.log"
+    tool_root = build_fake_tool_root(tmp_path / "tool_root", log_path)
+    project_dir = tmp_path / "project"
     project_dir.mkdir()
+    (project_dir / ".hotdocs-tool.json").write_text('{"version": "1"}\n')
+    (project_dir / "hotdocs.toml").write_text('[project]\nname = "demo"\n')
+    specs_dir = project_dir / "specs"
+    specs_dir.mkdir()
+    (specs_dir / "note.md").write_text("unrelated content\n")
 
-    rc, _ = _run(
-        [str(project_dir), "--yes", "--no-test"],
-        tool_root=tool_root,
-        cwd=project_dir,
-    )
-    assert rc == 0
+    before = snapshot(project_dir)
 
-    project_dir_missing = tmp_path / "project_init_missing"
-    shutil.copytree(project_dir, project_dir_missing)
-
-    snapshot_before = _snapshot(project_dir)
-
-    rc2, _ = _run(
+    hotdocs_init.main(
         [str(project_dir), "--reconfigure", "--provider", "openai", "--model", "m", "--no-test"],
-        tool_root=tool_root,
-        cwd=project_dir,
-    )
-    assert rc2 == 0
-
-    snapshot_after = _snapshot(project_dir)
-
-    changed = set()
-    for key in set(snapshot_before) | set(snapshot_after):
-        if snapshot_before.get(key) != snapshot_after.get(key):
-            changed.add(key)
-    assert changed == {"hotdocs.toml"}
-
-    log_path_missing = tmp_path / "llm_calls_missing.log"
-    tool_root_missing = _make_tool_root(
-        tmp_path, log_path_missing, "tool_root_missing", include_llm_endpoint=False
+        tool_root=str(tool_root),
+        input_fn=lambda prompt: "",
+        output_fn=lambda *a, **k: None,
+        env={},
     )
 
-    rc3, _ = _run(
-        [str(project_dir_missing), "--reconfigure", "--provider", "openai", "--model", "m", "--no-test"],
-        tool_root=tool_root_missing,
-        cwd=project_dir_missing,
+    after = snapshot(project_dir)
+    assert changed_paths(before, after) == {"hotdocs.toml"}
+
+    records = read_log(log_path)
+    save_calls = [r for r in records if r.get("call") == "save_config"]
+    assert any(
+        r["info"].get("provider") == "openai" and r["info"].get("model") == "m"
+        for r in save_calls
     )
-    assert rc3 == 1
+
+
+def test_reconfigure_fails_without_llm_endpoint_module(tmp_path):
+    tool_root_missing = build_fake_tool_root(
+        tmp_path / "tool_root_missing",
+        tmp_path / "calls_missing.log",
+        include_llm_endpoint=False,
+    )
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    (project_dir / ".hotdocs-tool.json").write_text('{"version": "1"}\n')
+    (project_dir / "hotdocs.toml").write_text('[project]\nname = "demo"\n')
+
+    result = hotdocs_init.main(
+        [str(project_dir), "--reconfigure", "--provider", "openai", "--model", "m", "--no-test"],
+        tool_root=str(tool_root_missing),
+        input_fn=lambda prompt: "",
+        output_fn=lambda *a, **k: None,
+        env={},
+    )
+
+    assert result == 1
+
+
+def test_reconfigure_on_uninitialised_project_returns_1_and_writes_nothing(tmp_path):
+    tool_root = build_fake_tool_root(tmp_path / "tool_root", tmp_path / "calls.log")
+    project_dir = tmp_path / "project"
+    (project_dir / "specs").mkdir(parents=True)
+    (project_dir / "specs" / "placeholder.md").write_text("x\n")
+
+    before = snapshot(project_dir)
+
+    result = hotdocs_init.main(
+        [str(project_dir), "--reconfigure", "--provider", "openai", "--model", "m", "--no-test"],
+        tool_root=str(tool_root),
+        input_fn=lambda prompt: "",
+        output_fn=lambda *a, **k: None,
+        env={},
+    )
+
+    after = snapshot(project_dir)
+    assert result == 1
+    assert before == after
