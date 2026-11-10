@@ -25,7 +25,9 @@ under any one component's `acceptance/` directory (e.g.
 `capability-scenario-verifier`'s product-capability scenarios). No
 directory scanning, no file I/O: given an already-parsed
 `ParsedCriterion` (a dataclass in this module, fields `criterion_id`,
-`covers`, `kind`, `gherkin`, `file`, built by keyword) and
+`covers`, `kind`, `gherkin`, `file`, built by keyword; `gherkin` holds
+the steps themselves, the ```` ```gherkin ```` fence lines already
+removed, its first line being line 1) and
 an optional `InterfaceSurface` (omit it for content black-box against
 more than one component, which has no single surface to resolve
 against), returns `{"status": "compiled", "source": <text>}` or

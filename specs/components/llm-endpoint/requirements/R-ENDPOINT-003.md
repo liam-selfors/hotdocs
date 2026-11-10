@@ -23,5 +23,5 @@
   is every text block of every `assistant` message, in order, joined with
   nothing between them** (`D225`): a long reply spans several messages,
   and plain output keeps only the last. A `result` line with `is_error`
-  true is a failure; output that is not that stream is the reply as
-  printed.
+  true is a failure; output that is not that stream is the reply
+  unchanged, never stripped.
