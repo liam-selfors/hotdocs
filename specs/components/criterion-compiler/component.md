@@ -80,38 +80,9 @@ See `constraints.md`.
 
 ## Open questions
 
-- ~~Canonical target test framework/language for emitted scaffolding — is a
-  single fixed target acceptable for v1, or does multi-target emission need
-  to be designed in now?~~ — resolved: single fixed target (`pytest`) for
-  v1, confirmed (R-COMPILE-011); no multi-target machinery designed in now.
-  Safe to defer because the grammar (`specs/architecture/
-  step-phrase-grammar.md`) was already written in target-independent terms
-  — each template's "compiles to" column describes a bound fact ("a call to
-  the named function," "an equality assertion on `result.<path>`"), never
-  pytest syntax specifically. R-COMPILE-011 makes that separation a formal
-  requirement (parse+bind vs. emit) so a future second target is an
-  additive emitter, not a grammar rework — without adding any
-  plugin/registry abstraction nobody has asked for yet.
-- ~~Where the published step-phrase grammar itself is versioned and
-  reviewed~~ — resolved, and since `D1`, physically relocated too:
-  `specs/architecture/` owns "cross-cutting tech decisions" by its own
-  definition (`notes/initial-ideas.md` §4), and the grammar is exactly
-  that — a corpus-wide structural decision, not a component behavior or a
-  product capability. The detailed table now lives at
-  `specs/architecture/step-phrase-grammar.md` itself (no longer just
-  governed-there-while-living-in-`interface/`), carrying the same
-  governance weight as splitting a component — not a routine
-  `criterion-compiler` spec edit.
-- ~~Exact boundary of "literal data" in R-COMPILE-007 — are template
-  interpolations (e.g. referencing a previously-bound fixture name inside a
-  later step) literal, or does that cross into expression evaluation?~~ —
-  resolved directly in `R-COMPILE-007`: a bare identifier in a leaf
-  position, resolved at compile time to a fixture bound earlier in the
-  same criterion, is substitution; anything more (operators, field/index
-  access, concatenation, calls) is evaluation and a compile error.
-  Deliberately doesn't extend the step-phrase grammar itself (field/index
-  access would still be compile-time-safe, but nothing has asked for it
-  yet) — see `R-COMPILE-007` for the full reasoning.
+None. The three earlier ones were resolved by `R-COMPILE-011` (one
+`pytest` target), the grammar's move to `specs/architecture/`, and
+`R-COMPILE-007` (where literal substitution ends).
 
 ## Change log
 
@@ -126,4 +97,4 @@ Each decision holds its full rationale.
   `--sealed-install`; still sealed, the characterization suite still
   hand-maintained. `D214`: exact grammar forms and located errors.
 - `D217`: how the interface surface is read, and substitution's emitted
-  form.
+  form. `D219`: emitted literals. `D226`: `AC-COMPILE-016`.

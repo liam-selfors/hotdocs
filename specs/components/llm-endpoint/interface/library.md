@@ -83,4 +83,5 @@ invalid `hotdocs.toml`, and nothing else: an exception an injected
 failures are (`HTTPError` 401 or 403 `auth`, 429 `rate_limit`, 408 or
 504 or any timeout `timeout`, anything else `network`), with `text`
 `null` and no retry. `load_config`'s message for an entry whose name
-suggests a secret contains `must never hold a secret`.
+suggests a secret contains `must never hold a secret`; the refusal of an
+`api_key_env` that holds a key's value contains `never the key itself`.

@@ -47,7 +47,8 @@ best-effort guess (`criterion-compiler`'s `R-COMPILE-001`/`002`).
 
 **Exact forms** (`D214`). `<fixture-name>` is an identifier
 (`[A-Za-z_][A-Za-z0-9_]*`); `<Type>` is one starting with a capital.
-`<function-or-endpoint>` is an identifier that may contain dots. A
+`<function-or-endpoint>` is an identifier that may contain dots, and
+resolves only to a function declared under exactly that name. A
 `<literal>` is a JSON value (string, number, `true`/`false`/`null`,
 object, array) in which a bare fixture name may stand for any scalar
 value. `<args>` is one such literal: an object becomes keyword arguments

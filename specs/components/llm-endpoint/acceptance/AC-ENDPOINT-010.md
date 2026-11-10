@@ -14,8 +14,8 @@ Given the Ollama probe's urlopen answering
 When detect_providers runs
 Then ollama is available, and the probe waited at most about a second
 
-Given check_connection("openai", "m") with urlopen returning a normal
-  reply, then raising HTTP 401
+Given OPENAI_API_KEY set, and check_connection("openai", "m") with
+  urlopen returning a normal reply, then raising HTTP 401
 Then the results are {ok: true, error: null} and {ok: false, error:
   {category: "auth", ...}}; no call-log record is written; and an
   unknown provider raises ValueError
