@@ -23,25 +23,14 @@ call, a specific vendor's API.
 
 ## Rationale
 
-(D18.) Extracted once a real coupling was found, not invented
-speculatively: `generator` and `test-author` each independently
-declared `uses_var: [VAR-ANTHROPIC-API-KEY, VAR-OPENAI-API-KEY, VAR-GEMINI-API-KEY, VAR-HOTDOCS-CONFIG]`, and `merge-orchestrator`'s
-`judge` wiring (now `R-MERGE-014`, `D76`) was "a direct call to the
-configured model" with no component behind it at all. Swapping vendors meant
-touching at least three places; `R-GEN-004` already treats the model
-*identifier* as a vendor-agnostic string parameter, but nothing
-previously owned the *mechanics* of actually calling whatever that
-identifier names.
+Callers each knew how to reach a vendor until this component took the
+mechanics over, so the model identifier stays a plain string everywhere
+else (`D18`).
 
 ## Scope
 
-**In scope:** resolving a model identifier to a provider; reading the
-optional configuration; authenticating and dispatching one completion
-request; normalizing every
-backend's failure modes into one structured `model_call_error` vocabulary
-(`R-GEN-008`'s definition, now owned here, given real queryable shape by
-`D20`); writing a low-level, caller-agnostic call log of every dispatch
-(`R-ENDPOINT-006`).
+**In scope:** every rule in `requirements/`, for the six providers and
+the setup helpers `hotdocs init` uses.
 
 **Out of scope, deliberately:** prompt construction and response parsing
 for any specific task (what a *generation* prompt or a *judge* prompt
@@ -51,13 +40,6 @@ already tracked per-caller, not globally) — this component only knows
 scope: retry-with-backoff (`R-ENDPOINT-004`, same posture `D7` already
 established for `generator`, now stated at the layer that actually
 touches the network).
-
-**Providers, named explicitly:** `claude-cli`, `anthropic`, `openai`,
-`openai-compatible`, `gemini`, and `ollama` (`R-ENDPOINT-003`), chosen by
-the model string and an optional committed `hotdocs.toml` that never holds
-a secret (`R-ENDPOINT-007`). Further providers are additive adapters
-behind the same resolve/dispatch split. The setup helpers `hotdocs init`
-uses live here too (`R-ENDPOINT-009`), so the provider list has one owner.
 
 ## Definitions
 

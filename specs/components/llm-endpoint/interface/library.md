@@ -28,6 +28,15 @@ caller supplying a callable `backend(prompt, model, **params) ->
 ModelResponse` bypasses resolution, for testing dispatch,
 classification, and logging against a mock, never a real call.
 
+`PROVIDERS` holds exactly (`default_base_url`, `default_api_key_env`,
+`suggested_model`): `claude-cli` (none, none, `claude-sonnet-5`),
+`anthropic` (`https://api.anthropic.com`, `ANTHROPIC_API_KEY`,
+`claude-sonnet-5`), `openai` (`https://api.openai.com/v1`,
+`OPENAI_API_KEY`, `gpt-6-astra`), `openai-compatible` (none, none, `""`),
+`gemini` (`https://generativelanguage.googleapis.com`, `GEMINI_API_KEY`,
+`gemini-4-argon`), `ollama` (`http://localhost:11434`, none, `llama3.2`);
+`needs_base_url` is true only for `openai-compatible`. None is `None`.
+
 ## Setup helpers (`R-ENDPOINT-007`, `R-ENDPOINT-009`)
 
 ```

@@ -39,7 +39,9 @@ Emitted code writes a literal as Python source: a string or number as
 `True`/`False`/`None`, an object as `{"k": v, ...}` and an array as
 `[a, b]`, each joined by `, ` and keys by `: `.
 
-`compile` reads a component's `InterfaceSurface` from its `interface/`:
+`InterfaceSurface` is a dataclass, every field defaulted:
+`functions` (name to parameter names, `{}`), `types` (name to field
+names, `{}`), `module_name` (`""`). `compile` reads one from `interface/`:
 each line of a plain fenced block in `library.md` that starts
 `name(params)` (no `def`) declares function `name`, with the parameter
 names before any `:` or `=`; each `interface/data/*.md` whose heading is

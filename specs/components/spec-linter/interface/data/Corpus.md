@@ -1,15 +1,14 @@
 # `Corpus`
 
-`load_corpus(repo_root: Path) -> Corpus` is public: `spec-bundle-assembler`
-and `impact-analyzer` read the corpus only through it. Dataclasses, fields
-in this order:
+`spec-bundle-assembler` and `impact-analyzer` read the corpus only
+through `load_corpus`. Dataclasses, fields in this order:
 
 - `Doc(path, rel_path, doc_id, frontmatter, body, doc_type, component=None, has_frontmatter=False)`
 - `Component(name, root, requirements, interface_cli, interface_library, interface_data, interface_guarantees, acceptance, constraints)`
 - `Corpus(repo_root, docs, components, id_index, glossary_defs, glossary_files, graph)`
 
-Each `specs/**/*.md` file, by sorted path, is one `Doc` (`rel_path`
-relative to `repo_root`), except `specs/glossary.md`, `README.md` files
+Each `specs/**/*.md` file, by sorted path, is one `Doc` (`path`
+absolute, `rel_path` relative), except `specs/glossary.md`, `README.md` files
 and unlisted paths. `doc_type` under `specs/components/<c>/`:
 `component.md` `component-root`, `requirements/R-*.md`
 `component-requirement`, `interface/cli.md` and `library.md`
@@ -30,5 +29,5 @@ frontmatter `id`.
 `interface_guarantees` by `doc_id`; `interface_data` by stem. `id_index`
 maps the `doc_id` of root, product, architecture, var and decision docs.
 `glossary_defs` maps each lowercased `**term**` to its text;
-`glossary_files` lists `specs/glossary*.md`. `graph` is a DuckDB
+`glossary_files` lists absolute `specs/glossary*.md` paths. `graph` is a DuckDB
 connection with `yaml` loaded and `graph-query-engine`'s views.

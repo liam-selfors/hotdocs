@@ -344,6 +344,9 @@ unsafe to let two components independently reinvent.
   exists but isn't yet being read*; this is the same habit for
   *conventions that already exist but aren't yet written down*.
 
+  A glossary entry is a line starting `- **<Term>**` (a list item whose
+  bolded text is the entry's header), its definition following on that
+  line and any continuation lines until the next such item (`D241`).
   A citation of an existing glossary entry **MUST** quote its bolded
   header exactly (e.g. `` the glossary's "Criterion test filename" ``)
   — `R-LINT-028` mechanically checks this resolves to a real entry,

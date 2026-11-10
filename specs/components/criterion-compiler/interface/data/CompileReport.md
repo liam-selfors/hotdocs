@@ -28,7 +28,7 @@
 
 `compile` returns a `CompileReport` dataclass with attributes `outputs`
 (dicts as above), `gate_version` and `summary` (a dict). An entry's `file` is the emitted test for `compiled`, the acceptance
-file for `error`, both repo-relative. An error's
+file for `error`: relative to `repo_root`, or absolute when outside it. An error's
 `message` begins `line <n>: `, `<n>` the offending step's 1-based line
 in its acceptance file (for `compile_criterion`, in its `gherkin`), then
 quotes the offending name, or the step as written with its

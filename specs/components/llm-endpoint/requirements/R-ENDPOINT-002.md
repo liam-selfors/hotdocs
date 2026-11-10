@@ -17,10 +17,8 @@
   immediately with a specific usage error (`ModelResolutionError`):
   never a silent fallback to whichever provider happens to be
   configured, and never conflated with `model_call_error`
-  (`R-ENDPOINT-004`). It is a caller/configuration mistake, caught
-  before any call is attempted.
+  (`R-ENDPOINT-004`), and raised before any call.
 
   The provider receives only the part after the prefix, but the
   returned `ModelResponse.model` MUST be the identifier exactly as the
-  caller passed it: that string is what callers record as the model's
-  identity in provenance.
+  caller passed it, as callers record it in provenance.

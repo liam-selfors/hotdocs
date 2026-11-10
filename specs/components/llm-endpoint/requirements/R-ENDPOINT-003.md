@@ -13,13 +13,9 @@
 
   **When `claude-cli` dispatches via the `claude` command's
   non-interactive mode (`D33`), it MUST pass `--tools ""` on every call**
-  (`D35`): without it the command keeps its tool access
-  (`Read`/`Bash`/etc.) despite instructions, a real `R-GEN-001`
-  cold-mode purity violation caught live. **It MUST also pass `--bare`
+  (`D35`), or the command keeps its tools. **It MUST also pass `--bare`
   when `ANTHROPIC_API_KEY` is set, or `--safe-mode` when it is not**
-  (`D82`): both suppress CLAUDE.md/hooks/plugin discovery, but `--bare`
-  refuses any non-API-key credential, which would shut out a
-  subscription login. It MUST NOT check for a credential and refuse
+  (`D82`), since `--bare` refuses a subscription login. It MUST NOT check for a credential and refuse
   early; it dispatches and classifies what the command reports
   (`R-ENDPOINT-004`).
 

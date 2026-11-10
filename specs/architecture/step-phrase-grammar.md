@@ -45,6 +45,15 @@ function/endpoint/type/field not declared in the target component's
 unresolved reference or unmatched text — never a silent skip or a
 best-effort guess (`criterion-compiler`'s `R-COMPILE-001`/`002`).
 
+**Where the steps are** (`D235`). A criterion's steps are the lines of
+the first fenced block opened by a line ```` ```gherkin ```` in its
+acceptance file; the fence lines themselves are never steps, and a step's
+line number is its line in the file. A line that starts, after leading
+whitespace, with `Given`, `When` or `Then` and a space begins a step; any
+other non-blank line continues the current step, joined to it by one
+space; a blank line ends it. A `Given` that follows a `Then` begins a new
+scenario. `And` and `But` are not keywords.
+
 **Exact forms** (`D214`). `<fixture-name>` is an identifier
 (`[A-Za-z_][A-Za-z0-9_]*`); `<Type>` is one starting with a capital.
 `<function-or-endpoint>` is an identifier that may contain dots, and
