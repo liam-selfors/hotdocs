@@ -63,7 +63,9 @@ object, array) in which a bare fixture name may stand for any scalar
 value. `<args>` is one such literal: an object becomes keyword arguments
 (`with {"text": payload}` compiles to `f(text=<payload's literal>)`), an
 array becomes positional arguments, and any other value a single
-positional argument. A `<result-path>` is an identifier with optional
+positional argument. `a <Type> with ...` binds the constructed value to the type's
+snake_case name (`Thing` to `thing`, `WidgetSpec` to `widget_spec`) for
+later steps; there is no `a <name> is a <Type>` form. A `<result-path>` is an identifier with optional
 `.field` and `[index]` parts, asserted as `result.<result-path>`.
 
 Literal values are JSON-like scalars, strings, or object/array literals only

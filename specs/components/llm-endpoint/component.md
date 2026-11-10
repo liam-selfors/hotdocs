@@ -32,14 +32,8 @@ else (`D18`).
 **In scope:** every rule in `requirements/`, for the six providers and
 the setup helpers `hotdocs init` uses.
 
-**Out of scope, deliberately:** prompt construction and response parsing
-for any specific task (what a *generation* prompt or a *judge* prompt
-looks like stays with each caller, the same way `prompt_version` is
-already tracked per-caller, not globally) — this component only knows
-"send this text to this model, return what came back." Also out of
-scope: retry-with-backoff (`R-ENDPOINT-004`, same posture `D7` already
-established for `generator`, now stated at the layer that actually
-touches the network).
+**Out of scope:** building or parsing any task's prompt, which each
+caller owns, and retrying (`R-ENDPOINT-004`).
 
 ## Definitions
 

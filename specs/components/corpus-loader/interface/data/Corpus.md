@@ -24,8 +24,10 @@ directly in `specs/product|architecture|vars|decisions/` are `product`,
 
 Frontmatter is a `---` block opening line 1: `[a, b]` a list of stripped
 strings, `true`/`false` booleans, else a string with any surrounding
-`"` or `'` removed (`title: "Quoted"` gives `Quoted`). `body` is the
-lines after the closing `---` joined by `\n`, or the whole text.
+`"` or `'` removed (`title: "Quoted"` gives `Quoted`). `body` is `"\n".join(lines[k:])`, where `lines` is the file's
+text split by `str.splitlines()` and `k` the index after the closing
+`---`, so it has no trailing newline; with no block it is the whole
+text unchanged.
 `doc_id` is the file stem for requirements, criteria and guarantees, else
 frontmatter `id`.
 

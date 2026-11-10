@@ -14,7 +14,8 @@
 
   Discovery: the file `VAR-HOTDOCS-CONFIG` names (a missing file is an
   error), else `hotdocs.toml` in the current directory, else none.
-  `load_config` returns the validated table, `None` when there is none,
+  `load_config` returns the validated table, `None` when there is no file or
+  it has no `[llm]` table,
   and raises `ValueError` naming the problem otherwise. An unknown entry
   is invalid; an entry whose name suggests a secret (`api_key`, `token`,
   `password`...) is rejected with a message saying so. `api_key_env`
