@@ -249,7 +249,10 @@ def test_ac_gen_015_two_repo_roots_in_one_process_do_not_collide(repo_root, tmp_
     # other_root's cache-manager records each put() to a file, so the test
     # observes which root's copy each call loaded without a private loader.
     marker = other_root / "puts.log"
-    cm_file = other_root / "gen" / "cache-manager" / "cache_manager.py"
+    cm_dir = other_root / "gen" / "cache-manager"
+    cm_file = cm_dir / "cache_manager.py"
+    if not cm_file.is_file():  # a package-shaped cache-manager
+        cm_file = cm_dir / "cache_manager" / "__init__.py"
     cm_file.write_text(cm_file.read_text(encoding="utf-8") + f"""
 
 _real_put = put

@@ -1,68 +1,61 @@
 import ast
-import os
-import unittest
+from pathlib import Path
+
+import spec_bundle_assembler
 
 
-class TestAssembleAC014(unittest.TestCase):
-    def test_no_yaml_markdown_deps_and_uses_load_corpus(self):
-        import spec_bundle_assembler
+FORBIDDEN_IMPORTS = {"yaml", "ruamel", "markdown", "mistune", "frontmatter", "commonmark"}
 
-        module_file = spec_bundle_assembler.__file__
-        py_files = []
-        if os.path.basename(module_file) == "__init__.py":
-            package_dir = os.path.dirname(module_file)
-            for dirpath, _dirnames, filenames in os.walk(package_dir):
-                for filename in filenames:
-                    if filename.endswith(".py"):
-                        py_files.append(os.path.join(dirpath, filename))
-        else:
-            py_files.append(module_file)
 
-        self.assertTrue(py_files, "found no .py files for spec_bundle_assembler")
+def _module_py_files():
+    module_file = Path(spec_bundle_assembler.__file__).resolve()
+    if module_file.name == "__init__.py":
+        package_dir = module_file.parent
+        return sorted(package_dir.rglob("*.py"))
+    return [module_file]
 
-        banned_roots = {
-            "yaml",
-            "ruamel",
-            "markdown",
-            "mistune",
-            "frontmatter",
-            "commonmark",
-        }
-        found_load_corpus_call = False
 
-        for py_file in py_files:
-            with open(py_file, "r", encoding="utf-8") as f:
-                source = f.read()
-            tree = ast.parse(source, filename=py_file)
+def _imported_top_level_names(tree):
+    names = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                names.add(alias.name.split(".")[0])
+        elif isinstance(node, ast.ImportFrom):
+            if node.module:
+                names.add(node.module.split(".")[0])
+    return names
 
-            for node in ast.walk(tree):
-                if isinstance(node, ast.Import):
-                    for alias in node.names:
-                        root = alias.name.split(".")[0]
-                        self.assertNotIn(
-                            root,
-                            banned_roots,
-                            "%s imports banned module %r" % (py_file, alias.name),
-                        )
-                elif isinstance(node, ast.ImportFrom):
-                    if node.module:
-                        root = node.module.split(".")[0]
-                        self.assertNotIn(
-                            root,
-                            banned_roots,
-                            "%s imports from banned module %r" % (py_file, node.module),
-                        )
-                elif isinstance(node, ast.Call):
-                    func = node.func
-                    if isinstance(func, ast.Attribute) and func.attr == "load_corpus":
-                        found_load_corpus_call = True
 
-        self.assertTrue(
-            found_load_corpus_call,
-            "no .py file under spec_bundle_assembler contains a call to a "
-            "load_corpus attribute",
+def _has_load_corpus_attribute_call(tree):
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call):
+            func = node.func
+            if isinstance(func, ast.Attribute) and func.attr == "load_corpus":
+                return True
+    return False
+
+
+def test_module_files_avoid_markup_deps_and_call_load_corpus_via_attribute():
+    py_files = _module_py_files()
+    assert py_files, "expected at least one .py file for the module under test"
+
+    found_load_corpus_call = False
+
+    for py_file in py_files:
+        source = py_file.read_text()
+        tree = ast.parse(source, filename=str(py_file))
+
+        imported = _imported_top_level_names(tree)
+        forbidden_hit = imported & FORBIDDEN_IMPORTS
+        assert not forbidden_hit, (
+            f"{py_file} imports forbidden third-party module(s): {forbidden_hit}"
         )
 
+        if _has_load_corpus_attribute_call(tree):
+            found_load_corpus_call = True
 
-if __name__ == "__main__":
-    unittest.main()
+    assert found_load_corpus_call, (
+        "expected at least one call of the form <something>.load_corpus(...) "
+        "across the module under test's .py files"
+    )

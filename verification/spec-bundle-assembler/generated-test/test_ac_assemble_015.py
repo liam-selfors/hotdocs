@@ -1,29 +1,54 @@
+import sys
+from pathlib import Path
+
 import spec_bundle_assembler
 
 
-def _write(path, content):
+def _write(path: Path, content: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content)
 
 
+def _get(obj, key):
+    return obj.get(key) if isinstance(obj, dict) else getattr(obj, key, None)
+
+
+def _assert_lint_clean(repo_root: Path) -> None:
+    import importlib.util
+
+    gen = next(p for p in Path(spec_bundle_assembler.__file__).resolve().parents if p.name == "gen")
+    base = gen / "spec-linter"
+    path = base / "spec_linter.py" if (base / "spec_linter.py").is_file() else base / "spec_linter" / "__init__.py"
+    spec = importlib.util.spec_from_file_location("spec_linter", path)
+    spec_linter = importlib.util.module_from_spec(spec)
+    sys.modules["spec_linter"] = spec_linter
+    spec.loader.exec_module(spec_linter)
+    assert spec_linter.lint(None, repo_root).hard_failures == 0
+
+
+def _write_glossary(repo_root: Path) -> None:
+    _write(
+        repo_root / "specs" / "glossary.md",
+        "# Glossary\n\n- **Foo** — a test term.\n",
+    )
+
+
 def _write_component(
-    repo_root,
-    slug,
-    title,
-    depends_on,
-    req_id,
-    req_text,
-    ac_id,
-    gherkin,
-    interface_library,
-    interface_data=None,
-):
+    repo_root: Path,
+    slug: str,
+    comp_id: str,
+    title: str,
+    depends_on: list,
+    interface_library_body: str,
+    data_files: dict,
+    purpose: str,
+) -> str:
     comp_dir = repo_root / "specs" / "components" / slug
     depends_str = "[]" if not depends_on else "[" + ", ".join(depends_on) + "]"
     _write(
         comp_dir / "component.md",
         f"""---
-id: comp-{slug}
+id: {comp_id}
 title: {title}
 status: draft
 owners: [team-a]
@@ -36,15 +61,14 @@ depends_on: {depends_str}
 
 ## Purpose
 
-{title} is a test fixture component.
+{purpose}
 """,
     )
+    req_id = f"R-{slug.upper()}-001"
+    ac_id = f"AC-{slug.upper()}-001"
     _write(
         comp_dir / "requirements" / f"{req_id}.md",
-        f"""# {req_id}
-
-**{req_id}** — {req_text}
-""",
+        f"# {req_id}\n\n**{req_id}** — `{slug}_op()` MUST succeed.\n",
     )
     _write(
         comp_dir / "acceptance" / f"{ac_id}.md",
@@ -54,169 +78,162 @@ Covers: {req_id}
 Kind: generated-test
 
 ```gherkin
-{gherkin}
+Given nothing
+When {slug}_op() is called
+Then it succeeds
 ```
 """,
     )
-    _write(comp_dir / "interface" / "library.md", interface_library)
+    _write(comp_dir / "interface" / "library.md", interface_library_body)
+    for name, body in data_files.items():
+        _write(comp_dir / "interface" / "data" / f"{name}.md", body)
     _write(comp_dir / "constraints.md", "# Constraints\n\nNone.\n")
-    if interface_data:
-        for name, content in interface_data.items():
-            _write(comp_dir / "interface" / "data" / f"{name}.md", content)
+    return ac_id
 
 
-def _write_glossary(repo_root):
-    _write(
-        repo_root / "specs" / "glossary.md",
-        "# Glossary\n\n- **Foo** — a test term.\n",
-    )
+_BAR_LIBRARY = "# Library\n\n```\nmake_widget() -> Widget\n```\n"
+_WIDGET_DATA = "# Widget\n\n```\nWidget(name: str)\n```\n\nA widget has a name.\n"
 
 
-def _write_target(repo_root):
+def test_resolves_unowned_type_from_other_owning_component(tmp_path: Path) -> None:
+    repo_root = tmp_path
+    _write_glossary(repo_root)
+
     _write_component(
+        repo_root,
+        "bar",
+        "comp-bar",
+        "Bar",
+        [],
+        _BAR_LIBRARY,
+        {},
+        "Bar provides widgets.",
+    )
+    _write_component(
+        repo_root,
+        "baz",
+        "comp-baz",
+        "Baz",
+        [],
+        "# Library\n\n```\nbaz_op() -> None\n```\n",
+        {"Widget": _WIDGET_DATA},
+        "Baz owns the Widget type.",
+    )
+    target_ac_id = _write_component(
         repo_root,
         "target",
+        "comp-target",
         "Target",
-        depends_on=["comp-bar"],
-        req_id="R-TARGET-001",
-        req_text="`use_bar()` MUST call comp-bar's `do_bar` function.",
-        ac_id="AC-TARGET-001",
-        gherkin="Given a target component\nWhen use_bar is called\nThen do_bar is invoked",
-        interface_library="# Library\n\n```\nuse_bar() -> None\n```\n",
+        ["comp-bar"],
+        "# Library\n\n```\ntarget_op() -> None\n```\n",
+        {},
+        "Target uses Bar.",
     )
 
+    _assert_lint_clean(repo_root)
 
-def _get(value, key):
-    return value.get(key) if isinstance(value, dict) else getattr(value, key, None)
+    bar_standalone = spec_bundle_assembler.assemble_criterion("comp-bar", "AC-BAR-001", repo_root)
+    bar_own_interface = _get(bar_standalone, "interface")
 
+    bundle = spec_bundle_assembler.assemble_criterion("comp-target", target_ac_id, repo_root)
+    dependency_interfaces = _get(bundle, "dependency_interfaces")
+    bar_entry = dependency_interfaces["comp-bar"]
 
-def test_resolves_unowned_type_to_its_real_owner(tmp_path):
-    repo_root = tmp_path
-    _write_glossary(repo_root)
-    _write_target(repo_root)
-
-    bar_interface = "# Library\n\n```\ndo_bar(w: Widget) -> None\n```\n"
-    _write_component(
-        repo_root,
-        "bar",
-        "Bar",
-        depends_on=[],
-        req_id="R-BAR-001",
-        req_text="`do_bar(w)` MUST process the given widget.",
-        ac_id="AC-BAR-001",
-        gherkin="Given a widget w\nWhen do_bar(w) is called\nThen w is processed",
-        interface_library=bar_interface,
-    )
-
-    widget_doc = "# `Widget`\n\nA widget type with fields `name` and `size`.\n"
-    _write_component(
-        repo_root,
-        "baz",
-        "Baz",
-        depends_on=[],
-        req_id="R-BAZ-001",
-        req_text="`baz()` MUST exist.",
-        ac_id="AC-BAZ-001",
-        gherkin="Given nothing\nWhen baz() is called\nThen it succeeds",
-        interface_library="# Library\n\n```\nbaz() -> None\n```\n",
-        interface_data={"Widget": widget_doc},
-    )
-
-    bundle = spec_bundle_assembler.assemble_criterion(
-        "comp-target", "AC-TARGET-001", repo_root
-    )
-
-    dep_interfaces = _get(bundle, "dependency_interfaces")
-    assert dep_interfaces is not None
-    bar_entry = dep_interfaces["comp-bar"]
-
-    assert bar_interface in bar_entry
-    assert "fields `name` and `size`" in bar_entry
+    assert bar_own_interface in bar_entry
+    assert "A widget has a name." in bar_entry
     assert "comp-baz" in bar_entry
-    assert "Widget" in bar_entry
+    assert bar_entry != bar_own_interface
 
 
-def test_unresolved_type_is_skipped_silently(tmp_path):
+def test_unresolved_type_leaves_dependency_interface_unchanged(tmp_path: Path) -> None:
     repo_root = tmp_path
     _write_glossary(repo_root)
-    _write_target(repo_root)
 
-    bar_interface = "# Library\n\n```\ndo_bar(g: Gadget) -> None\n```\n"
     _write_component(
         repo_root,
         "bar",
+        "comp-bar",
         "Bar",
-        depends_on=[],
-        req_id="R-BAR-001",
-        req_text="`do_bar(g)` MUST process the given gadget.",
-        ac_id="AC-BAR-001",
-        gherkin="Given a gadget g\nWhen do_bar(g) is called\nThen g is processed",
-        interface_library=bar_interface,
+        [],
+        _BAR_LIBRARY,
+        {},
+        "Bar provides widgets.",
+    )
+    target_ac_id = _write_component(
+        repo_root,
+        "target",
+        "comp-target",
+        "Target",
+        ["comp-bar"],
+        "# Library\n\n```\ntarget_op() -> None\n```\n",
+        {},
+        "Target uses Bar.",
     )
 
-    bundle = spec_bundle_assembler.assemble_criterion(
-        "comp-target", "AC-TARGET-001", repo_root
-    )
+    _assert_lint_clean(repo_root)
 
-    dep_interfaces = _get(bundle, "dependency_interfaces")
-    assert dep_interfaces is not None
-    bar_entry = dep_interfaces["comp-bar"]
+    bar_standalone = spec_bundle_assembler.assemble_criterion("comp-bar", "AC-BAR-001", repo_root)
+    bar_own_interface = _get(bar_standalone, "interface")
 
-    assert bar_interface in bar_entry
-    assert bar_entry.count("Gadget") == 1
+    bundle = spec_bundle_assembler.assemble_criterion("comp-target", target_ac_id, repo_root)
+    dependency_interfaces = _get(bundle, "dependency_interfaces")
+    bar_entry = dependency_interfaces["comp-bar"]
+
+    assert bar_entry == bar_own_interface
 
 
-def test_ambiguous_type_is_skipped_silently(tmp_path):
+def test_ambiguous_type_leaves_dependency_interface_unchanged(tmp_path: Path) -> None:
     repo_root = tmp_path
     _write_glossary(repo_root)
-    _write_target(repo_root)
 
-    bar_interface = "# Library\n\n```\ndo_bar(s: Sprocket) -> None\n```\n"
     _write_component(
         repo_root,
         "bar",
+        "comp-bar",
         "Bar",
-        depends_on=[],
-        req_id="R-BAR-001",
-        req_text="`do_bar(s)` MUST process the given sprocket.",
-        ac_id="AC-BAR-001",
-        gherkin="Given a sprocket s\nWhen do_bar(s) is called\nThen s is processed",
-        interface_library=bar_interface,
+        [],
+        _BAR_LIBRARY,
+        {},
+        "Bar provides widgets.",
     )
-
     _write_component(
         repo_root,
         "baz",
+        "comp-baz",
         "Baz",
-        depends_on=[],
-        req_id="R-BAZ-001",
-        req_text="`baz()` MUST exist.",
-        ac_id="AC-BAZ-001",
-        gherkin="Given nothing\nWhen baz() is called\nThen it succeeds",
-        interface_library="# Library\n\n```\nbaz() -> None\n```\n",
-        interface_data={"Sprocket": "# `Sprocket`\n\nBaz's version of Sprocket.\n"},
+        [],
+        "# Library\n\n```\nbaz_op() -> None\n```\n",
+        {"Widget": _WIDGET_DATA},
+        "Baz owns the Widget type.",
     )
-
     _write_component(
         repo_root,
         "qux",
+        "comp-qux",
         "Qux",
-        depends_on=[],
-        req_id="R-QUX-001",
-        req_text="`qux()` MUST exist.",
-        ac_id="AC-QUX-001",
-        gherkin="Given nothing\nWhen qux() is called\nThen it succeeds",
-        interface_library="# Library\n\n```\nqux() -> None\n```\n",
-        interface_data={"Sprocket": "# `Sprocket`\n\nQux's version of Sprocket.\n"},
+        [],
+        "# Library\n\n```\nqux_op() -> None\n```\n",
+        {"Widget": "# Widget\n\n```\nWidget(label: str)\n```\n\nA different widget definition.\n"},
+        "Qux also claims the Widget type.",
+    )
+    target_ac_id = _write_component(
+        repo_root,
+        "target",
+        "comp-target",
+        "Target",
+        ["comp-bar"],
+        "# Library\n\n```\ntarget_op() -> None\n```\n",
+        {},
+        "Target uses Bar.",
     )
 
-    bundle = spec_bundle_assembler.assemble_criterion(
-        "comp-target", "AC-TARGET-001", repo_root
-    )
+    _assert_lint_clean(repo_root)
 
-    dep_interfaces = _get(bundle, "dependency_interfaces")
-    assert dep_interfaces is not None
-    bar_entry = dep_interfaces["comp-bar"]
+    bar_standalone = spec_bundle_assembler.assemble_criterion("comp-bar", "AC-BAR-001", repo_root)
+    bar_own_interface = _get(bar_standalone, "interface")
 
-    assert bar_interface in bar_entry
-    assert bar_entry.count("Sprocket") == 1
+    bundle = spec_bundle_assembler.assemble_criterion("comp-target", target_ac_id, repo_root)
+    dependency_interfaces = _get(bundle, "dependency_interfaces")
+    bar_entry = dependency_interfaces["comp-bar"]
+
+    assert bar_entry == bar_own_interface

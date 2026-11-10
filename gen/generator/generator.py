@@ -161,8 +161,14 @@ def _load_module_from_repo(repo_root: Path, component_dir: str, module_name: str
     base = Path(repo_root) / "gen" / component_dir
     if not base.is_dir():
         base = _tool_root() / "gen" / component_dir
+    # Flat module first, else a package (R-GEN-014).
     module_path = base / f"{module_name}.py"
-    spec = importlib.util.spec_from_file_location(module_name, module_path)
+    search_locations = None
+    if not module_path.is_file() and (base / module_name / "__init__.py").is_file():
+        module_path = base / module_name / "__init__.py"
+        search_locations = [str(base / module_name)]
+    spec = importlib.util.spec_from_file_location(module_name, module_path,
+                                                  submodule_search_locations=search_locations)
     if spec is None or spec.loader is None:
         raise ImportError(f"cannot load {module_name!r} from {module_path}")
     module = importlib.util.module_from_spec(spec)

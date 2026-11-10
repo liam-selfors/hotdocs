@@ -1,127 +1,122 @@
 import hashlib
+import importlib.util
+import sys
+import tempfile
+from pathlib import Path
 
 import spec_bundle_assembler
 
 
-def _get(bundle, name):
-    return bundle.get(name) if isinstance(bundle, dict) else getattr(bundle, name, None)
-
-
-def _write(root, rel_path, content):
-    path = root / rel_path
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(content, encoding="utf-8")
-
-
-def _build_corpus(repo_root):
-    _write(
-        repo_root,
-        "specs/glossary.md",
-        "# Glossary\n\n- **Foo** — a test term.\n",
+def _write_fixture(repo_root: Path) -> None:
+    (repo_root / "specs").mkdir(parents=True, exist_ok=True)
+    (repo_root / "specs" / "glossary.md").write_text(
+        "# Glossary\n\n- **Foo** — a test term.\n"
     )
 
-    _write(
-        repo_root,
-        "specs/components/foo/component.md",
-        "---\n"
-        "id: comp-foo\n"
-        "title: Foo\n"
-        "status: draft\n"
-        "owners: [team-a]\n"
-        "sealed: true\n"
-        "source_path: legacy/foo/\n"
-        "depends_on: []\n"
-        "---\n"
-        "\n"
-        "# Foo\n"
-        "\n"
-        "## Purpose\n"
-        "\n"
-        "Foo doubles a number.\n",
-    )
-    _write(
-        repo_root,
-        "specs/components/foo/requirements/R-FOO-001.md",
-        "# R-FOO-001\n\n**R-FOO-001** — `foo(x)` MUST return `2 * x`.\n",
-    )
-    _write(
-        repo_root,
-        "specs/components/foo/acceptance/AC-FOO-001.md",
-        "# AC-FOO-001\n"
-        "\n"
-        "Covers: R-FOO-001\n"
-        "Kind: generated-test\n"
-        "\n"
-        "```gherkin\n"
-        "Given x = 2\n"
-        "When foo(x) is called\n"
-        "Then it returns 4\n"
-        "```\n",
-    )
-    _write(
-        repo_root,
-        "specs/components/foo/interface/library.md",
-        "# Library\n\n```\nfoo(x: int) -> int\n```\n",
-    )
-    _write(
-        repo_root,
-        "specs/components/foo/constraints.md",
-        "# Constraints\n\nNone.\n",
-    )
-    _write(repo_root, "legacy/foo/foo.py", "def foo(x): return 2 * x\n")
+    foo_dir = repo_root / "specs" / "components" / "foo"
+    (foo_dir / "requirements").mkdir(parents=True, exist_ok=True)
+    (foo_dir / "acceptance").mkdir(parents=True, exist_ok=True)
+    (foo_dir / "interface").mkdir(parents=True, exist_ok=True)
 
-    _write(
-        repo_root,
-        "specs/components/bar/component.md",
-        "---\n"
-        "id: comp-bar\n"
-        "title: Bar\n"
-        "status: draft\n"
-        "owners: [team-a]\n"
-        "sealed: true\n"
-        "source_path: legacy/bar/\n"
-        "depends_on: [comp-foo]\n"
-        "---\n"
-        "\n"
-        "# Bar\n"
-        "\n"
-        "## Purpose\n"
-        "\n"
-        "Bar uses Foo.\n",
+    (foo_dir / "component.md").write_text(
+        """---
+id: comp-foo
+title: Foo
+status: draft
+owners: [team-a]
+sealed: true
+source_path: legacy/foo/
+depends_on: []
+---
+
+# Foo
+
+## Purpose
+
+Foo doubles a number.
+"""
     )
-    _write(
-        repo_root,
-        "specs/components/bar/requirements/R-BAR-001.md",
-        "# R-BAR-001\n\n**R-BAR-001** — `bar(x)` MUST return `foo(x) + 1`.\n",
+    (foo_dir / "requirements" / "R-FOO-001.md").write_text(
+        "# R-FOO-001\n\n**R-FOO-001** — `foo(x)` MUST return `2 * x`.\n"
     )
-    _write(
-        repo_root,
-        "specs/components/bar/acceptance/AC-BAR-001.md",
-        "# AC-BAR-001\n"
-        "\n"
-        "Covers: R-BAR-001\n"
-        "Kind: generated-test\n"
-        "\n"
-        "```gherkin\n"
-        "Given x = 2\n"
-        "When bar(x) is called\n"
-        "Then it returns 5\n"
-        "```\n",
+    (foo_dir / "acceptance" / "AC-FOO-001.md").write_text(
+        """# AC-FOO-001
+
+Covers: R-FOO-001
+Kind: generated-test
+
+```gherkin
+Given x = 2
+When foo(x) is called
+Then it returns 4
+```
+"""
     )
-    _write(
-        repo_root,
-        "specs/components/bar/interface/library.md",
-        "# Library\n\n```\nbar(x: int) -> int\n```\n",
+    (foo_dir / "interface" / "library.md").write_text(
+        """# Library
+
+```
+foo(x: int) -> int
+```
+"""
     )
-    _write(
-        repo_root,
-        "specs/components/bar/constraints.md",
-        "# Constraints\n\nNone.\n",
+    (foo_dir / "constraints.md").write_text("# Constraints\n\nNone.\n")
+
+    bar_dir = repo_root / "specs" / "components" / "bar"
+    (bar_dir / "requirements").mkdir(parents=True, exist_ok=True)
+    (bar_dir / "acceptance").mkdir(parents=True, exist_ok=True)
+    (bar_dir / "interface").mkdir(parents=True, exist_ok=True)
+
+    (bar_dir / "component.md").write_text(
+        """---
+id: comp-bar
+title: Bar
+status: draft
+owners: [team-a]
+sealed: true
+source_path: legacy/bar/
+depends_on: [comp-foo]
+---
+
+# Bar
+
+## Purpose
+
+Bar uses Foo.
+"""
     )
-    _write(repo_root, "legacy/bar/bar.py", "def bar(x): return foo(x) + 1\n")
+    (bar_dir / "requirements" / "R-BAR-001.md").write_text(
+        "# R-BAR-001\n\n**R-BAR-001** — `bar(x)` MUST call `foo(x)`.\n"
+    )
+    (bar_dir / "acceptance" / "AC-BAR-001.md").write_text(
+        """# AC-BAR-001
+
+Covers: R-BAR-001
+Kind: generated-test
+
+```gherkin
+Given x = 2
+When bar(x) is called
+Then it calls foo(x)
+```
+"""
+    )
+    (bar_dir / "interface" / "library.md").write_text(
+        """# Library
+
+```
+bar(x: int) -> int
+```
+"""
+    )
+    (bar_dir / "constraints.md").write_text("# Constraints\n\nNone.\n")
+
+    legacy_foo = repo_root / "legacy" / "foo"
+    legacy_foo.mkdir(parents=True, exist_ok=True)
+    (legacy_foo / "foo.py").write_text("def foo(x): return 2 * x\n")
 
 
-_HASHED_PATHS = [
+_BUNDLE_RELATIVE_PATHS = [
     "legacy/foo/foo.py",
     "specs/components/bar/component.md",
     "specs/components/bar/constraints.md",
@@ -133,52 +128,64 @@ _HASHED_PATHS = [
 ]
 
 
-def _expected_hash(repo_root, mode):
+def _expected_hash(repo_root: Path, mode: str) -> str:
     stream = mode.encode("utf-8") + b"\x00"
-    for rel in sorted(set(_HASHED_PATHS)):
+    for rel in sorted(set(_BUNDLE_RELATIVE_PATHS)):
         data = (repo_root / rel).read_bytes()
         stream += rel.encode("utf-8") + b"\x00" + data + b"\x00"
     return "sha256:" + hashlib.sha256(stream).hexdigest()
 
 
-def test_spec_bundle_hash_matches_defined_stream(tmp_path):
-    repo_root = tmp_path
-    _build_corpus(repo_root)
-
-    bundle = spec_bundle_assembler.assemble("comp-bar", repo_root, mode="cold")
-    actual_hash = _get(bundle, "spec_bundle_hash")
-
-    assert actual_hash == _expected_hash(repo_root, "cold")
-
-
-def test_spec_bundle_hash_unchanged_by_dependency_provenance_manifest(tmp_path):
-    repo_root = tmp_path
-    _build_corpus(repo_root)
-
-    bundle_before = spec_bundle_assembler.assemble("comp-bar", repo_root, mode="cold")
-    hash_before = _get(bundle_before, "spec_bundle_hash")
-
-    _write(repo_root, "legacy/foo/.provenance.json", '{"anything": "goes"}')
-
-    bundle_after = spec_bundle_assembler.assemble("comp-bar", repo_root, mode="cold")
-    hash_after = _get(bundle_after, "spec_bundle_hash")
-
-    assert hash_after == hash_before
-
-
-def test_spec_bundle_hash_changes_when_dependency_code_changes(tmp_path):
-    repo_root = tmp_path
-    _build_corpus(repo_root)
-
-    bundle_before = spec_bundle_assembler.assemble("comp-bar", repo_root, mode="cold")
-    hash_before = _get(bundle_before, "spec_bundle_hash")
-
-    foo_py = repo_root / "legacy/foo/foo.py"
-    foo_py.write_text(
-        foo_py.read_text(encoding="utf-8") + "\n# extra line\n", encoding="utf-8"
+def _bundle_hash(bundle):
+    return (
+        bundle.get("spec_bundle_hash")
+        if isinstance(bundle, dict)
+        else getattr(bundle, "spec_bundle_hash", None)
     )
 
-    bundle_after = spec_bundle_assembler.assemble("comp-bar", repo_root, mode="cold")
-    hash_after = _get(bundle_after, "spec_bundle_hash")
 
-    assert hash_after != hash_before
+def test_spec_bundle_hash_matches_defined_stream_and_reacts_to_code_changes():
+    with tempfile.TemporaryDirectory() as tmp:
+        repo_root = Path(tmp)
+        _write_fixture(repo_root)
+
+        gen = next(
+            p
+            for p in Path(spec_bundle_assembler.__file__).resolve().parents
+            if p.name == "gen"
+        )
+        base = gen / "spec-linter"
+        path = (
+            base / "spec_linter.py"
+            if (base / "spec_linter.py").is_file()
+            else base / "spec_linter" / "__init__.py"
+        )
+        spec = importlib.util.spec_from_file_location("spec_linter", path)
+        spec_linter = importlib.util.module_from_spec(spec)
+        sys.modules["spec_linter"] = spec_linter
+        spec.loader.exec_module(spec_linter)
+        assert spec_linter.lint(None, repo_root).hard_failures == 0
+
+        bundle = spec_bundle_assembler.assemble("comp-bar", repo_root, mode="cold")
+        actual_hash = _bundle_hash(bundle)
+        assert actual_hash == _expected_hash(repo_root, "cold")
+
+        (repo_root / "legacy" / "foo" / ".provenance.json").write_text(
+            '{"anything": true}'
+        )
+        bundle_after_provenance = spec_bundle_assembler.assemble(
+            "comp-bar", repo_root, mode="cold"
+        )
+        hash_after_provenance = _bundle_hash(bundle_after_provenance)
+        assert hash_after_provenance == actual_hash
+
+        foo_py = repo_root / "legacy" / "foo" / "foo.py"
+        with foo_py.open("a") as handle:
+            handle.write("# a trailing comment line\n")
+
+        bundle_after_edit = spec_bundle_assembler.assemble(
+            "comp-bar", repo_root, mode="cold"
+        )
+        hash_after_edit = _bundle_hash(bundle_after_edit)
+        assert hash_after_edit != actual_hash
+        assert hash_after_edit == _expected_hash(repo_root, "cold")

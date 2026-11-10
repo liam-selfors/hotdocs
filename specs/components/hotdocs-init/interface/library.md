@@ -16,7 +16,8 @@ e.g. `"Save anyway? [y/N] "`.
 
 ## llm-endpoint
 
-Loaded from `<tool_root>/gen/llm-endpoint/llm_endpoint.py`. Exactly these
+Loaded from `<tool_root>/gen/llm-endpoint/llm_endpoint.py`, or when that
+file is absent the package `llm_endpoint/__init__.py` there. Exactly these
 names are used, read with dual dict-or-attribute access:
 
 - `PROVIDERS` — `{provider: {default_base_url, default_api_key_env,

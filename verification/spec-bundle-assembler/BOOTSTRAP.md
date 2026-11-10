@@ -226,3 +226,16 @@ In place, all 23 generated tests pass, and the `spec_bundle_hash` of all
 version carries no manifest: it was generated under the old hash
 formula, so it is regenerated once more, with provenance, after
 `graph-query-engine` and `spec-linter`, whose code its bundle reads.
+
+## Round: tool-root fallback, with provenance (`D213`, `D215`, `D218`)
+
+Seed 53 looked for its own dependencies only under `repo_root` (`D213`).
+Seeds 54 to 59 each failed one to seven criteria, and every failure was
+traced to the spec or to `test-author`, never accepted as a re-roll
+alone: an ambiguous card path and `Implements:` layout (`D215`), a
+fixture-section instruction that lost to `test-author`'s own lint step,
+and a lint-report check written two ways. Seed 60 passed every criterion
+at mutation score 1.0 and was swapped in with a manifest that reads back
+as a provenance hit. In place, all tests pass, all 25 hashes match an
+independent implementation of `R-ASSEMBLE-007`, and a project holding no
+tool component assembles its bundle through the fallback.

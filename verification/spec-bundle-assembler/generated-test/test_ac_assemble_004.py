@@ -1,11 +1,15 @@
+import importlib.util
 import sys
-import tempfile
 from pathlib import Path
+
+import pytest
 
 import spec_bundle_assembler
 
+GLOSSARY_CONTENT = """# Glossary
 
-GLOSSARY_CONTENT = "# Glossary\n\n- **Foo** \u2014 a test term.\n"
+- **Foo** — a test term.
+"""
 
 COMPONENT_MD = """---
 id: comp-foo
@@ -24,7 +28,10 @@ depends_on: []
 Foo doubles a number.
 """
 
-REQUIREMENT_MD = "# R-FOO-001\n\n**R-FOO-001** \u2014 `foo(x)` MUST return `2 * x`.\n"
+REQUIREMENT_MD = """# R-FOO-001
+
+**R-FOO-001** — `foo(x)` MUST return `2 * x`.
+"""
 
 ACCEPTANCE_MD = """# AC-FOO-001
 
@@ -38,60 +45,79 @@ Then it returns 4
 ```
 """
 
-INTERFACE_LIBRARY_MD = "# Library\n\n```\nfoo(x: int) -> int\n```\n"
+INTERFACE_LIBRARY_MD = """# Library
 
-CONSTRAINTS_MD = "# Constraints\n\nNone.\n"
+```
+foo(x: int) -> int
+```
+"""
 
-LEGACY_FOO_PY = "def foo(x):\n    return 2 * x\n"
+CONSTRAINTS_MD = """# Constraints
+
+None.
+"""
 
 
-def _get_field(obj, name):
-    return obj.get(name) if isinstance(obj, dict) else getattr(obj, name, None)
+def _build_repo(repo_root: Path) -> None:
+    (repo_root / "specs").mkdir(parents=True)
+    (repo_root / "specs" / "glossary.md").write_text(GLOSSARY_CONTENT)
 
-
-def _build_corpus(repo_root: Path) -> None:
-    specs = repo_root / "specs"
-    comp_root = specs / "components" / "foo"
-
-    (specs).mkdir(parents=True, exist_ok=True)
-    (specs / "glossary.md").write_text(GLOSSARY_CONTENT)
-
-    (comp_root).mkdir(parents=True, exist_ok=True)
+    comp_root = repo_root / "specs" / "components" / "foo"
+    comp_root.mkdir(parents=True)
     (comp_root / "component.md").write_text(COMPONENT_MD)
 
-    (comp_root / "requirements").mkdir(parents=True, exist_ok=True)
+    (comp_root / "requirements").mkdir()
     (comp_root / "requirements" / "R-FOO-001.md").write_text(REQUIREMENT_MD)
 
-    (comp_root / "acceptance").mkdir(parents=True, exist_ok=True)
+    (comp_root / "acceptance").mkdir()
     (comp_root / "acceptance" / "AC-FOO-001.md").write_text(ACCEPTANCE_MD)
 
-    (comp_root / "interface").mkdir(parents=True, exist_ok=True)
+    (comp_root / "interface").mkdir()
     (comp_root / "interface" / "library.md").write_text(INTERFACE_LIBRARY_MD)
 
     (comp_root / "constraints.md").write_text(CONSTRAINTS_MD)
 
-    legacy_foo = repo_root / "legacy" / "foo"
-    legacy_foo.mkdir(parents=True, exist_ok=True)
-    (legacy_foo / "foo.py").write_text(LEGACY_FOO_PY)
+
+def _load_spec_linter():
+    gen = next(
+        p
+        for p in Path(spec_bundle_assembler.__file__).resolve().parents
+        if p.name == "gen"
+    )
+    base = gen / "spec-linter"
+    path = (
+        base / "spec_linter.py"
+        if (base / "spec_linter.py").is_file()
+        else base / "spec_linter" / "__init__.py"
+    )
+    spec = importlib.util.spec_from_file_location("spec_linter", path)
+    spec_linter = importlib.util.module_from_spec(spec)
+    sys.modules["spec_linter"] = spec_linter
+    spec.loader.exec_module(spec_linter)
+    return spec_linter
 
 
-def test_glossary_field_equals_current_glossary_md_content_exactly():
-    with tempfile.TemporaryDirectory() as tmp:
-        repo_root = Path(tmp)
-        _build_corpus(repo_root)
+def test_assemble_glossary_field_matches_glossary_md_exactly(tmp_path):
+    repo_root = tmp_path / "repo"
+    _build_repo(repo_root)
 
-        bundle = spec_bundle_assembler.assemble("comp-foo", repo_root)
+    spec_linter = _load_spec_linter()
+    report = spec_linter.lint(None, repo_root)
+    assert report.hard_failures == 0
 
-        glossary_field = _get_field(bundle, "glossary")
+    bundle = spec_bundle_assembler.assemble("comp-foo", repo_root, mode="cold")
 
-        assert glossary_field is not None
-        assert isinstance(glossary_field, str)
-        assert glossary_field == GLOSSARY_CONTENT
+    glossary_field = (
+        bundle.get("glossary")
+        if isinstance(bundle, dict)
+        else getattr(bundle, "glossary", None)
+    )
 
-        current_glossary_on_disk = (repo_root / "specs" / "glossary.md").read_text()
-        assert glossary_field == current_glossary_on_disk
+    on_disk_glossary = (repo_root / "specs" / "glossary.md").read_text()
+
+    assert glossary_field == on_disk_glossary
+    assert glossary_field == GLOSSARY_CONTENT
 
 
 if __name__ == "__main__":
-    test_glossary_field_equals_current_glossary_md_content_exactly()
-    print("OK")
+    raise SystemExit(pytest.main([__file__]))

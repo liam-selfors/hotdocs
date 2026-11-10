@@ -1,0 +1,373 @@
+{
+  "spec_bundle_hash": "sha256:0634be5f567feec87f4d4be21c5d01952883a8ca10a712bb8180501ed18232d4",
+  "model_pin": "claude-sonnet-5",
+  "prompt_version": "v9",
+  "retry_feedback": null,
+  "pipeline_version": "provenance-writer@1.0.0",
+  "gate_versions": {
+    "compiler": "criterion-compiler@1.0.0",
+    "generated_test": "generated_test@1.0.0",
+    "verifier": "verifier-orchestrator@2.0.0",
+    "license_scanner": "license_scanner@4.0.0-no-reference-corpus",
+    "secret_scanner": "secret_scanner@3.1.0+detect-secrets.1.5.0"
+  },
+  "provenance_hit": false,
+  "generated_at": "2026-11-10T03:10:20Z",
+  "verification_run_id": "spec-bundle-assembler-attempt-1",
+  "verification_report": {
+    "component_id": "comp-spec-bundle-assembler",
+    "criteria": [
+      {
+        "id": "AC-ASSEMBLE-001",
+        "covers": "R-ASSEMBLE-001",
+        "kind": "generated-test",
+        "result": "pass",
+        "test_authoring": {
+          "model": "claude-sonnet-5",
+          "seed": 60,
+          "prompt_version": "v1",
+          "cache_hit": false
+        }
+      },
+      {
+        "id": "AC-ASSEMBLE-002",
+        "covers": "R-ASSEMBLE-002",
+        "kind": "generated-test",
+        "result": "pass",
+        "test_authoring": {
+          "model": "claude-sonnet-5",
+          "seed": 60,
+          "prompt_version": "v1",
+          "cache_hit": false
+        }
+      },
+      {
+        "id": "AC-ASSEMBLE-003",
+        "covers": "R-ASSEMBLE-003",
+        "kind": "generated-test",
+        "result": "pass",
+        "test_authoring": {
+          "model": "claude-sonnet-5",
+          "seed": 60,
+          "prompt_version": "v1",
+          "cache_hit": false
+        }
+      },
+      {
+        "id": "AC-ASSEMBLE-004",
+        "covers": "R-ASSEMBLE-004",
+        "kind": "generated-test",
+        "result": "pass",
+        "test_authoring": {
+          "model": "claude-sonnet-5",
+          "seed": 60,
+          "prompt_version": "v1",
+          "cache_hit": false
+        }
+      },
+      {
+        "id": "AC-ASSEMBLE-005",
+        "covers": "R-ASSEMBLE-005",
+        "kind": "generated-test",
+        "result": "pass",
+        "test_authoring": {
+          "model": "claude-sonnet-5",
+          "seed": 60,
+          "prompt_version": "v1",
+          "cache_hit": false
+        }
+      },
+      {
+        "id": "AC-ASSEMBLE-006",
+        "covers": "R-ASSEMBLE-006",
+        "kind": "generated-test",
+        "result": "pass",
+        "test_authoring": {
+          "model": "claude-sonnet-5",
+          "seed": 60,
+          "prompt_version": "v1",
+          "cache_hit": false
+        }
+      },
+      {
+        "id": "AC-ASSEMBLE-007",
+        "covers": "R-ASSEMBLE-007",
+        "kind": "generated-test",
+        "result": "pass",
+        "test_authoring": {
+          "model": "claude-sonnet-5",
+          "seed": 60,
+          "prompt_version": "v1",
+          "cache_hit": false
+        }
+      },
+      {
+        "id": "AC-ASSEMBLE-008",
+        "covers": "R-ASSEMBLE-008",
+        "kind": "generated-test",
+        "result": "pass",
+        "test_authoring": {
+          "model": "claude-sonnet-5",
+          "seed": 60,
+          "prompt_version": "v1",
+          "cache_hit": false
+        }
+      },
+      {
+        "id": "AC-ASSEMBLE-009",
+        "covers": "R-ASSEMBLE-009",
+        "kind": "generated-test",
+        "result": "pass",
+        "test_authoring": {
+          "model": "claude-sonnet-5",
+          "seed": 60,
+          "prompt_version": "v1",
+          "cache_hit": false
+        }
+      },
+      {
+        "id": "AC-ASSEMBLE-010",
+        "covers": "R-ASSEMBLE-010",
+        "kind": "generated-test",
+        "result": "pass",
+        "test_authoring": {
+          "model": "claude-sonnet-5",
+          "seed": 60,
+          "prompt_version": "v1",
+          "cache_hit": false
+        }
+      },
+      {
+        "id": "AC-ASSEMBLE-011",
+        "covers": "R-ASSEMBLE-011",
+        "kind": "generated-test",
+        "result": "pass",
+        "test_authoring": {
+          "model": "claude-sonnet-5",
+          "seed": 60,
+          "prompt_version": "v1",
+          "cache_hit": false
+        }
+      },
+      {
+        "id": "AC-ASSEMBLE-012",
+        "covers": "R-ASSEMBLE-001",
+        "kind": "generated-test",
+        "result": "pass",
+        "test_authoring": {
+          "model": "claude-sonnet-5",
+          "seed": 60,
+          "prompt_version": "v1",
+          "cache_hit": false
+        }
+      },
+      {
+        "id": "AC-ASSEMBLE-013",
+        "covers": "R-ASSEMBLE-009",
+        "kind": "generated-test",
+        "result": "pass",
+        "test_authoring": {
+          "model": "claude-sonnet-5",
+          "seed": 60,
+          "prompt_version": "v1",
+          "cache_hit": false
+        }
+      },
+      {
+        "id": "AC-ASSEMBLE-014",
+        "covers": "R-ASSEMBLE-012",
+        "kind": "generated-test",
+        "result": "pass",
+        "test_authoring": {
+          "model": "claude-sonnet-5",
+          "seed": 60,
+          "prompt_version": "v1",
+          "cache_hit": false
+        }
+      },
+      {
+        "id": "AC-ASSEMBLE-015",
+        "covers": "R-ASSEMBLE-013",
+        "kind": "generated-test",
+        "result": "pass",
+        "test_authoring": {
+          "model": "claude-sonnet-5",
+          "seed": 60,
+          "prompt_version": "v1",
+          "cache_hit": false
+        }
+      },
+      {
+        "id": "AC-ASSEMBLE-016",
+        "covers": "R-ASSEMBLE-014",
+        "kind": "generated-test",
+        "result": "pass",
+        "test_authoring": {
+          "model": "claude-sonnet-5",
+          "seed": 60,
+          "prompt_version": "v1",
+          "cache_hit": false
+        }
+      },
+      {
+        "id": "AC-ASSEMBLE-017",
+        "covers": "R-ASSEMBLE-015",
+        "kind": "generated-test",
+        "result": "pass",
+        "test_authoring": {
+          "model": "claude-sonnet-5",
+          "seed": 60,
+          "prompt_version": "v1",
+          "cache_hit": false
+        }
+      }
+    ],
+    "requirement_results": {
+      "R-ASSEMBLE-001": "pass",
+      "R-ASSEMBLE-002": "pass",
+      "R-ASSEMBLE-003": "pass",
+      "R-ASSEMBLE-004": "pass",
+      "R-ASSEMBLE-005": "pass",
+      "R-ASSEMBLE-006": "pass",
+      "R-ASSEMBLE-007": "pass",
+      "R-ASSEMBLE-008": "pass",
+      "R-ASSEMBLE-009": "pass",
+      "R-ASSEMBLE-010": "pass",
+      "R-ASSEMBLE-011": "pass",
+      "R-ASSEMBLE-012": "pass",
+      "R-ASSEMBLE-013": "pass",
+      "R-ASSEMBLE-014": "pass",
+      "R-ASSEMBLE-015": "pass"
+    },
+    "interface_drift": false,
+    "mutation_score": 1.0,
+    "overall": "pass"
+  },
+  "license_scan": {
+    "component_id": "comp-spec-bundle-assembler",
+    "gate_version": "license_scanner@4.0.0-no-reference-corpus",
+    "evaluated": false,
+    "reason": "no-reference-corpus",
+    "similarity_score": null,
+    "block_threshold": null,
+    "blocked": false,
+    "matches": [],
+    "notified": false,
+    "notification_delivery_error": null,
+    "cache_hit": false
+  },
+  "secret_scan": {
+    "scope": "full",
+    "gate_version": "secret_scanner@3.1.0+detect-secrets.1.5.0",
+    "flagged": true,
+    "matches": [
+      {
+        "rule_id": "AWS Access Key",
+        "risk_tier": "high",
+        "file": "specs/components/secret-scanner/acceptance/AC-SECRET-001.md",
+        "line": 10
+      },
+      {
+        "rule_id": "Hex High Entropy String",
+        "risk_tier": "low",
+        "file": "specs/components/secret-scanner/acceptance/AC-SECRET-004b.md",
+        "line": 8
+      },
+      {
+        "rule_id": "AWS Access Key",
+        "risk_tier": "high",
+        "file": "specs/components/secret-scanner/acceptance/AC-SECRET-008.md",
+        "line": 7
+      },
+      {
+        "rule_id": "AWS Access Key",
+        "risk_tier": "high",
+        "file": "specs/components/secret-scanner/acceptance/AC-SECRET-008.md",
+        "line": 9
+      },
+      {
+        "rule_id": "AWS Access Key",
+        "risk_tier": "high",
+        "file": "specs/components/secret-scanner/acceptance/AC-SECRET-009.md",
+        "line": 7
+      },
+      {
+        "rule_id": "Base64 High Entropy String",
+        "risk_tier": "low",
+        "file": "specs/components/secret-scanner/acceptance/AC-SECRET-010.md",
+        "line": 8
+      },
+      {
+        "rule_id": "Hex High Entropy String",
+        "risk_tier": "low",
+        "file": "specs/components/secret-scanner/acceptance/AC-SECRET-010.md",
+        "line": 9
+      },
+      {
+        "rule_id": "AWS Access Key",
+        "risk_tier": "high",
+        "file": "specs/components/secret-scanner/acceptance/AC-SECRET-013.md",
+        "line": 11
+      },
+      {
+        "rule_id": "AWS Access Key",
+        "risk_tier": "high",
+        "file": "specs/components/secret-scanner/acceptance/AC-SECRET-014.md",
+        "line": 12
+      },
+      {
+        "rule_id": "Hex High Entropy String",
+        "risk_tier": "low",
+        "file": "specs/components/secret-scanner/acceptance/AC-SECRET-014.md",
+        "line": 23
+      },
+      {
+        "rule_id": "AWS Access Key",
+        "risk_tier": "high",
+        "file": "specs/components/secret-scanner/acceptance/AC-SECRET-015.md",
+        "line": 9
+      },
+      {
+        "rule_id": "AWS Access Key",
+        "risk_tier": "high",
+        "file": "specs/components/secret-scanner/acceptance/AC-SECRET-016.md",
+        "line": 7
+      },
+      {
+        "rule_id": "AWS Access Key",
+        "risk_tier": "high",
+        "file": "specs/components/secret-scanner/acceptance/AC-SECRET-016.md",
+        "line": 27
+      },
+      {
+        "rule_id": "AWS Access Key",
+        "risk_tier": "high",
+        "file": "specs/components/secret-scanner/acceptance/AC-SECRET-017.md",
+        "line": 7
+      },
+      {
+        "rule_id": "Hex High Entropy String",
+        "risk_tier": "low",
+        "file": "specs/components/secret-scanner/acceptance/AC-SECRET-017.md",
+        "line": 8
+      },
+      {
+        "rule_id": "AWS Access Key",
+        "risk_tier": "high",
+        "file": "specs/components/secret-scanner/acceptance/AC-SECRET-017.md",
+        "line": 9
+      },
+      {
+        "rule_id": "AWS Access Key",
+        "risk_tier": "high",
+        "file": "specs/components/secret-scanner/acceptance/AC-SECRET-018.md",
+        "line": 7
+      }
+    ],
+    "allowed": [],
+    "unused_allowlist_entries": [],
+    "notified": false,
+    "notification_delivery_error": null,
+    "cache_hit": false
+  }
+}
