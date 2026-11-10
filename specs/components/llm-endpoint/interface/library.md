@@ -55,11 +55,17 @@ command's backend had before there were several providers.
 
 ## HTTP, the call log, and config messages
 
+Discovery reads the environment variable `VAR_HOTDOCS_CONFIG` and the
+current directory, so a test of resolution unsets the one and changes to
+a fresh directory, as each criterion's Given states.
+
 Every HTTP request, the Ollama probe included, is
 `urllib.request.urlopen(request, timeout=<seconds>)`, looked up on the
 `urllib.request` module when the call is made (never imported by name,
 so replacing `urllib.request.urlopen` reaches every call). The reply is
-used only as a context manager and through `.read()`. An error status
+used only as a context manager and through `.read()`. Headers go into
+`urllib.request.Request`, which stores names capitalized (`X-api-key`),
+so a recorded request's headers are read case-insensitively. An error status
 arrives as `urllib.error.HTTPError` (its `code` and `read()`), a timeout
 as `socket.timeout`, `TimeoutError` or a `URLError` wrapping one, and any
 other failure as `URLError` or `OSError`. The Ollama probe requests
@@ -72,5 +78,9 @@ on success, `text_present` a boolean, or `{"timestamp", "model",
 "backend", "model_call_error"}` on failure; `timestamp` is ISO 8601 UTC.
 
 `complete()` raises `ModelResolutionError`, never `ValueError`, for an
-invalid `hotdocs.toml`. `load_config`'s message for an entry whose name
+invalid `hotdocs.toml`, and nothing else: an exception an injected
+`backend` raises is returned as `model_call_error`, classified as HTTP
+failures are (`HTTPError` 401 or 403 `auth`, 429 `rate_limit`, 408 or
+504 or any timeout `timeout`, anything else `network`), with `text`
+`null` and no retry. `load_config`'s message for an entry whose name
 suggests a secret contains `must never hold a secret`.

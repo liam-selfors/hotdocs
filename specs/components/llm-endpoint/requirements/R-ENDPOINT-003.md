@@ -22,3 +22,10 @@
   subscription login. It MUST NOT check for a credential and refuse
   early; it dispatches and classifies what the command reports
   (`R-ENDPOINT-004`).
+
+  **It MUST pass `--output-format stream-json --verbose`, and the reply
+  is every text block of every `assistant` message, in order, joined with
+  nothing between them** (`D225`): a long reply spans several messages,
+  and plain output keeps only the last. A `result` line with `is_error`
+  true is a failure; output that is not that stream is the reply as
+  printed.

@@ -12,7 +12,8 @@ Then it dispatches through claude-cli, passing --tools "" and one of
 
 Given the model "anthropic:m", "openai:m", "gemini:m", "ollama:m" and
   "openai-compatible:m" with a base_url configured
-When each is called with urllib.request.urlopen replaced by a recorder
+When each is called with urllib.request.urlopen replaced by a recorder,
+  and ANTHROPIC_API_KEY, OPENAI_API_KEY and GEMINI_API_KEY set
 Then each dispatches over HTTP through its own adapter, with no
   dependency beyond the standard library
 ```

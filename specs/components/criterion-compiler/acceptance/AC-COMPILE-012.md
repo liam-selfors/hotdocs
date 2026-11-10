@@ -9,9 +9,9 @@ Given a criterion with a Given step binding a fixture "user_id" to "u1",
   user_id as a whole value and nested inside an object literal (e.g.
   {"owner": user_id})
 When compile-criteria runs
-Then compilation succeeds and both positions are resolved to the literal
-  "u1" in the emitted test, with no runtime lookup or evaluation in the
-  generated code
+Then compilation succeeds, and the emitted call line holds "u1" in both
+  positions and never the name user_id; the Given step's own binding
+  line, user_id = "u1", remains, as the grammar binds a local
 
 Given a criterion whose step contains "user_id + 1" (an operator applied
   to a bound fixture) in a literal position

@@ -419,6 +419,39 @@ def _load_config_for_complete() -> Optional[Dict[str, Any]]:
 # ---------------------------------------------------------------------------
 
 
+
+def _join_stream_text(stdout: Optional[str]) -> Tuple[Optional[str], bool]:
+    """`claude --output-format stream-json` prints one JSON object per
+    line. The reply is every text block of every `assistant` message, in
+    order, joined with nothing between them; the final `result` line says
+    whether the call failed. Output that is not that stream (a stand-in
+    printing plain text) is the reply itself (D225)."""
+    if stdout is None:
+        return None, False
+    parts: List[str] = []
+    saw_stream = False
+    failed = False
+    for line in stdout.splitlines():
+        line = line.strip()
+        if not line.startswith("{"):
+            continue
+        try:
+            event = json.loads(line)
+        except ValueError:
+            continue
+        if not isinstance(event, dict) or "type" not in event:
+            continue
+        saw_stream = True
+        if event["type"] == "assistant":
+            for block in (event.get("message") or {}).get("content") or []:
+                if isinstance(block, dict) and block.get("type") == "text":
+                    parts.append(block.get("text") or "")
+        elif event["type"] == "result" and event.get("is_error"):
+            failed = True
+    if not saw_stream:
+        return stdout, False
+    return "".join(parts), failed
+
 class ClaudeCliBackend:
     """Dispatches a completion via the `claude` CLI's non-interactive mode
     (D45/D46), authenticating via `VAR-ANTHROPIC-API-KEY`
@@ -454,6 +487,12 @@ class ClaudeCliBackend:
             "--tools",
             "",
             isolation_flag,
+            # Every assistant message, not just the last: a reply longer
+            # than one message continues in another, and plain --print
+            # output keeps only the final one (D225).
+            "--output-format",
+            "stream-json",
+            "--verbose",
         ]
         for key, value in params.items():
             if value is None:
@@ -482,18 +521,19 @@ class ClaudeCliBackend:
                 model, self.name, "network", "failed to invoke backend CLI"
             )
 
-        if completed.returncode != 0:
+        text, failed = _join_stream_text(completed.stdout)
+        if completed.returncode != 0 or failed:
             return _make_response(
                 text=None,
                 model=model,
                 backend=self.name,
                 model_call_error=self._classify_failure(
-                    completed.returncode, completed.stderr, completed.stdout
+                    completed.returncode or 1, completed.stderr, completed.stdout
                 ),
             )
 
         return _make_response(
-            text=completed.stdout,
+            text=text,
             model=model,
             backend=self.name,
             model_call_error=None,

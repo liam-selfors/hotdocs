@@ -96,15 +96,11 @@ See `constraints.md`.
 
 ## Change log
 
-- Initial draft (`D18`); `D33`: first implementation, a hand-authored
-  exception (nothing could generate the component every generation
-  dispatches through), dispatching via the `claude` command, with a
-  `backend` injection parameter.
-- `D34`/`D35`/`D52`: a 300-second timeout floor; `--tools ""` on every
-  `claude` call.
-- `D78`: self-hosted regeneration, later replaced by a hand-maintained
-  version; `D82`: `--safe-mode` when no API key is set.
-- `D180`–`D183`: multi-provider support. Providers `claude-cli`,
-  `anthropic`, `openai`, `openai-compatible`, `gemini`, `ollama`; model
-  strings `<provider>:<model>`; `hotdocs.toml`; setup helpers. The
-  `claude` command's response `backend` label becomes `claude-cli`.
+Each decision holds its full rationale.
+
+- `D18`, `D33`: first, hand-written implementation through the `claude`
+  command. `D34`/`D35`/`D52`: timeout floor, `--tools ""`. `D82`:
+  `--safe-mode` without an API key.
+- `D180`–`D183`: the six providers, `hotdocs.toml`, setup helpers.
+- `D209`, `D220`, `D221`, `D223`, `D224`: the interface stated exactly for
+  generation from this spec. `D225`: the `claude` command's whole reply.

@@ -12,3 +12,7 @@
   `capability-scenario-verifier`'s `judge` wiring), so it is structurally
   unable to leak from any of them: a stronger guarantee than "must not
   appear in output".
+
+  For `anthropic`, `openai` and `gemini` a missing key MUST be an `auth`
+  `model_call_error` returned without any network call;
+  `openai-compatible` and `ollama` send a key only when one is present.
