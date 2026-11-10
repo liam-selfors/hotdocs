@@ -55,16 +55,15 @@ command's backend had before there were several providers.
 
 ## HTTP, the call log, and config messages
 
-Discovery reads the environment variable `VAR_HOTDOCS_CONFIG` and the
-current directory, so a test of resolution unsets the one and changes to
-a fresh directory, as each criterion's Given states.
+Discovery reads `VAR_HOTDOCS_CONFIG` and the current directory; a
+resolution test unsets the one and uses a fresh other.
 
 Every HTTP request, the Ollama probe included, is
 `urllib.request.urlopen(request, timeout=<seconds>)`, looked up on the
 `urllib.request` module when the call is made (never imported by name,
 so replacing `urllib.request.urlopen` reaches every call). The reply is
 used only as a context manager and through `.read()`. Headers go into
-`urllib.request.Request`, which stores names capitalized (`X-api-key`),
+`urllib.request.Request`, which stores names capitalized (`X-api-key`, `User-agent`),
 so a recorded request's headers are read case-insensitively. An error status
 arrives as `urllib.error.HTTPError` (its `code` and `read()`), a timeout
 as `socket.timeout`, `TimeoutError` or a `URLError` wrapping one, and any
@@ -83,5 +82,5 @@ invalid `hotdocs.toml`, and nothing else: an exception an injected
 failures are (`HTTPError` 401 or 403 `auth`, 429 `rate_limit`, 408 or
 504 or any timeout `timeout`, anything else `network`), with `text`
 `null` and no retry. `load_config`'s message for an entry whose name
-suggests a secret contains `must never hold a secret`; the refusal of an
-`api_key_env` that holds a key's value contains `never the key itself`.
+suggests a secret contains `must never hold a secret`; every refusal of an
+`api_key_env` value contains `never the key itself`.

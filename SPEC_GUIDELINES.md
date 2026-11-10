@@ -403,6 +403,12 @@ accumulate with zero signal.
   `interface/data/`. Guarantees never count.
 - `fan_out`: entries in `depends_on`. `fan_in`: components whose
   `depends_on` names this one.
+- Per-file words (`R-LINT-023`, `requirements/` and `acceptance/` files)
+  and `Purpose` words: the number of whitespace-separated tokens
+  (Python's `str.split()`) of the file's text after any frontmatter, or of
+  the `Purpose` section's text between its heading line and the next
+  `##` heading. Code blocks and headings count like any other text.
+  (`D231`)
 
 Components are a **flat namespace** — no nesting. `architecture/` is the only
 place subsystem grouping is expressed.
@@ -491,6 +497,12 @@ Rules:
 - Every criterion, of any `kind`, **MUST** carry a `Covers:` tag referencing a
   real `R-<id>` (component) or `P-<id>` (product capability) — never a
   dangling reference.
+  An acceptance file's tag is its first `Covers:` followed by the id;
+  any later `Covers:` in the file is prose or an example, never a
+  reference (`D232`). A capability scenario's is the `Covers:` line
+  directly under its `### CS-...` heading. The `kind` is the line
+  `Kind: <kind>` (capital K, one of the three values below) that
+  follows the tag, never a frontmatter field (`D234`).
 - Prefer `compiled`, then `generated-test`; reach for `llm-judge` only when no
   test could capture the criterion even in principle. (D5)
 - Generated test code **MUST** live under `verification/`, never under
@@ -507,7 +519,8 @@ Rules:
   and every exit code. At least one criterion **MUST** cover it,
   exercising each of those cases. A documented CLI with no such
   requirement is untested code that mutation testing will find anyway,
-  one survivor at a time. (`R-LINT-031`, D162)
+  one survivor at a time. (`R-LINT-031`, D162) Its finding is reported
+  on the component's `interface/cli.md`, at line 1.
 
 See `notes/determinism-trust-playbook.md` for how this `kind` split
 drives caching/trust design elsewhere in the pipeline (only `llm-judge`

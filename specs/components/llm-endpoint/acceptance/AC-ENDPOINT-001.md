@@ -7,7 +7,8 @@ Kind: generated-test
 Given VAR_HOTDOCS_CONFIG unset, no hotdocs.toml in the current
   directory, and a model identifier "gpt-5" that no provider's
   naming rule matches
-When complete() is called with it
+When complete() is called with it and no backend (an injected backend
+  bypasses resolution)
 Then it fails immediately with a specific usage error, before any
   call is attempted — never a silent fallback to a default provider,
   and never reported as model_call_error
