@@ -1,6 +1,6 @@
-# R-LINT-029
+# R-CITE-004
 
-**R-LINT-029** — `supersedes`/`status: deprecated` consistency
+**R-CITE-004** — `supersedes`/`status: deprecated` consistency
   (`D71`): (1) every `supersedes: D<N>` MUST resolve
   to a real `specs/decisions/D<N>.md`; (2) when it resolves, that file's `status` MUST be
   `deprecated` — `supersedes` means full replacement; (3) the inverse:

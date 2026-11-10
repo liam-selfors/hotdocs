@@ -349,9 +349,9 @@ unsafe to let two components independently reinvent.
   line and any continuation lines until the next such item (`D241`).
   A citation of an existing glossary entry **MUST** quote its bolded
   header exactly (e.g. `` the glossary's "Criterion test filename" ``)
-  — `R-LINT-028` mechanically checks this resolves to a real entry,
-  the same way `R-LINT-026` already does for `D<N>` citations and
-  `R-LINT-027` already does for section-heading pointers. That check
+  — `R-CITE-003` mechanically checks this resolves to a real entry,
+  the same way `R-CITE-001` already does for `D<N>` citations and
+  `R-CITE-002` already does for section-heading pointers. That check
   catches citation drift (a renamed or removed term, a typo) once a
   term is cited; it cannot detect a fact that should have been
   promoted but wasn't — that half stays a judgment call, which is why
@@ -406,7 +406,7 @@ accumulate with zero signal.
   `interface/data/`. Guarantees never count.
 - `fan_out`: entries in `depends_on`. `fan_in`: components whose
   `depends_on` names this one.
-- Per-file words (`R-LINT-023`, `requirements/` and `acceptance/` files)
+- Per-file words (`R-SIZE-003`, `requirements/` and `acceptance/` files)
   and `Purpose` words: the number of whitespace-separated tokens
   (Python's `str.split()`) of the file's text after any frontmatter, or of
   the `Purpose` section's text between its heading line and the next
@@ -425,7 +425,7 @@ above crowd their ceilings **for the same component at the same time**,
 treat that as a sign the component owns a cross-cutting concern that has
 outgrown its placement, not as evidence the caps themselves are
 miscalibrated. This is enforced directly, not just described here: `spec-
-linter`'s `R-LINT-022` (`D15`) emits a distinct finding whenever it fires.
+linter`'s `R-SIZE-002` (`D15`) emits a distinct finding whenever it fires.
 Two shapes of this have shown up in practice so far, not just one: a thin
 coordinator crowding fan-out together with component-doc words
 (`merge-orchestrator`, resolved by `D14`), and a self-contained component

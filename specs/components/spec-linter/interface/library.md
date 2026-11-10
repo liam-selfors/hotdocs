@@ -10,4 +10,9 @@ access, no model calls, no side effects. `paths=None` lints the whole
 corpus. `judge` is optional, for `R-LINT-015`'s model-backed check;
 omitted, it reports `skipped` rather than running or crashing.
 
+`load_corpus` is `corpus-loader`'s, re-exported unchanged; `lint` and both
+checkers load their corpus through it. `corpus-loader`, `citation-checker`
+and `size-checker` load from `<repo_root>/gen/<slug>/`, or the same path
+under the tool root (`D199`).
+
 Implements: `SPEC_GUIDELINES.md`, `specs/architecture/graph-query-engine.md`

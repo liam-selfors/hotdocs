@@ -1,7 +1,9 @@
 # `Corpus`
 
+`spec-linter`, `citation-checker`, `size-checker`,
 `spec-bundle-assembler` and `impact-analyzer` read the corpus only
-through `load_corpus`. Dataclasses, fields in this order:
+through `load_corpus` (the last two by way of `spec-linter`, which
+re-exports it). Dataclasses, fields in this order:
 
 - `Doc(path, rel_path, doc_id, frontmatter, body, doc_type, component=None, has_frontmatter=False)`
 - `Component(name, root, requirements, interface_cli, interface_library, interface_data, interface_guarantees, acceptance, constraints)`

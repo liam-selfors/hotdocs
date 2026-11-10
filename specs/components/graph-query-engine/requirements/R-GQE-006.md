@@ -1,7 +1,7 @@
 # R-GQE-006
 
 **R-GQE-006** — The `component_size` view MUST return one row per
-  component, the word count `spec-linter`'s `R-LINT-012`
+  component, the word count `spec-linter`'s `R-SIZE-001`
   (`component_doc_words`) measures, reading under the data contract
   `SPEC_GUIDELINES.md` §4 (the size-cap table's own definition: every
   doc under a component's directory):

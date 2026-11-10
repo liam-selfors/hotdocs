@@ -25,7 +25,7 @@ component's `gen/` content and provenance explicitly, before checking
 Extracted from the since-removed `merge-orchestrator` (`D76`), then made
 a developer-invoked command in its own right (`D86`, `D93`): generating
 code is a deliberate, potentially expensive action a developer triggers
-by name, distinct from `hotdocs verify`'s read-only check. `R-LINT-022`
+by name, distinct from `hotdocs verify`'s read-only check. `R-SIZE-002`
 fires here (`fan_out` crowding `component_doc_words`) and is accepted:
 wiring its own dependencies is genuinely this component's job.
 

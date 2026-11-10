@@ -38,9 +38,9 @@ Specced in full depth so far:
   views (`R-LINT-020`/`021`, real as of `D13` — previously claimed
   but never actually implemented) rather than bespoke traversal code, and it
   now also enforces `SPEC_GUIDELINES.md` §4's own decomposition-signal
-  guidance as a real finding (`R-LINT-022`, D15) plus three additional
-  size-cap dimensions (`R-LINT-023`, `guarantee_count`, `acceptance_count`,
-  D17) — it is, by its own `R-LINT-022`, now one of the two components in
+  guidance as a real finding (`R-SIZE-002`, D15) plus three additional
+  size-cap dimensions (`R-SIZE-003`, `guarantee_count`, `acceptance_count`,
+  D17) — it is, by its own `R-SIZE-002`, now one of the two components in
   this corpus actually crowding multiple size-cap dimensions at once.
 - **`graph-query-engine`** — all `kind: compiled`. Extracted from
   `specs/architecture/graph-query-engine.md`'s own prose (`D13`) once that
@@ -273,7 +273,7 @@ turned out not to need an orchestrating component). The real linter
 (`gen/spec-linter/`) validates the entire corpus clean: 0 failures,
 51 warnings — all `component_doc_words`/`requirement_count`/
 `acceptance_count`/`generated_code_loc` near-misses, `component-gate-runner`
-and `spec-linter`'s `R-LINT-022` crowding findings (D15), and several
-individual dense files caught by the per-file check (`R-LINT-023`,
+and `spec-linter`'s `R-SIZE-002` crowding findings (D15), and several
+individual dense files caught by the per-file check (`R-SIZE-003`,
 D17). None are hard-fail-severity; see `SPEC_GUIDELINES.md` §4 for what
 each warning dimension means and when (if ever) it calls for action.

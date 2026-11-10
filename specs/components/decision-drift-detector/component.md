@@ -22,7 +22,7 @@ before altering or superseding a decision, what would be affected.
 ## Scope
 
 **In scope:** resolving every `D<N>` citation in every live (non-
-decision) spec file, the same citation shape `R-LINT-026` already
+decision) spec file, the same citation shape `R-CITE-001` already
 validates for existence; for each, querying `graph-query-engine`'s
 `edges` for whether it has been superseded; for a superseded
 citation, comparing the citing file's own last commit touching it

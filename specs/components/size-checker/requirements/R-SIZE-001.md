@@ -1,6 +1,6 @@
-# R-LINT-012
+# R-SIZE-001
 
-**R-LINT-012** — The linter MUST compute the eight `SPEC_GUIDELINES.md`
+**R-SIZE-001** — The linter MUST compute the eight `SPEC_GUIDELINES.md`
   §4 size-cap dimensions per component (`generated_code_loc`,
   `component_doc_words`, `requirement_count`, `interface_surface`,
   `fan_out`, `fan_in`, and — since `D17` — `guarantee_count`,

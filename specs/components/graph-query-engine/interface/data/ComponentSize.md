@@ -6,7 +6,7 @@ word_count    BIGINT
 ```
 
 One row per component (`R-GQE-006`) — `component_doc_words`
-(`R-LINT-012`) read from this view, not recomputed. `component_id`'s
+(`R-SIZE-001`) read from this view, not recomputed. `component_id`'s
 bare-name format (unlike every other view's `comp-`-prefixed ids) is
 inherited unchanged from `spec-linter`'s own existing lookup key
 (`D13`) — a pre-existing inconsistency, not introduced here, and not

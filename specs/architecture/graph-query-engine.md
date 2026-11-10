@@ -140,7 +140,7 @@ pointing back to this document, exactly as `R-IMPACT-009` does:
   is unchanged (R-GRAPH-006/008: `verification/corpus-graph.json` is
   still a committed, deterministic artifact — only the *construction*
   step, not the output format, moves onto this engine).
-- **`spec-linter`'s size-cap rule** (`rule_size_caps`/`R-LINT-012`,
+- **`spec-linter`'s size-cap rule** (`rule_size_caps`/`R-SIZE-001`,
   `D13`) — `component_doc_words` is this view's `word_count`, queried
   directly rather than recomputed by a second, independently-written
   Python loop. The one adopter that actually runs a query against this

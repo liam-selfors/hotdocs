@@ -116,7 +116,7 @@ dependency, not a word-count-pressure symptom — `merge-orchestrator`
 already owned wiring the real `judge` callable (`R-MERGE-004`), and
 `llm-endpoint` is simply the component that now exists behind that
 wiring where none did before. `component_doc_words` is unaffected (the
-wording changed, not the amount), so `R-LINT-022`'s crowding check
+wording changed, not the amount), so `R-SIZE-002`'s crowding check
 (`D15`) still sees exactly the two dimensions it already saw at 14 —
 confirming this addition doesn't reopen the question D14 already
 resolved, it's just one more call a thin coordinator makes.
@@ -137,7 +137,7 @@ this section's own long-flagged fan-out/word-count tension.
 **Resolved a second time (D76), the same way as D14, not a new
 pattern:** `component_doc_words` did cross the hard-fail cap (4014/4000)
 and `fan_out` was still at 15 — both dimensions crowding at once again,
-the identical signal `R-LINT-022` fired for before D14. The same
+the identical signal `R-SIZE-002` fired for before D14. The same
 per-item-dispatcher shape was available to borrow a second time:
 `R-MERGE-003/004/005/006/008/009/015` — the provenance-check through
 generation/verification/scanning/provenance-write gauntlet for one
@@ -173,7 +173,7 @@ behalf anymore.
 **`D87` removed `merge-orchestrator` entirely** — a different kind of
 change from everything above, worth distinguishing clearly: every
 other entry in this section was a response to the size-cap signal
-(`R-LINT-022`) firing, each time relieving it by extracting a cohesive
+(`R-SIZE-002`) firing, each time relieving it by extracting a cohesive
 sub-responsibility into its own component. `D87` wasn't a response to
 that signal at all — by the time it happened, `merge-orchestrator`'s
 only remaining job (a provenance check per impacted component, `D86`)
