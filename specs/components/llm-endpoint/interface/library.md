@@ -52,3 +52,25 @@ raised by `complete()` for `R-ENDPOINT-002`'s failures.
 `resolve_backend_name(model)` is kept only for compatibility: it returns
 `"anthropic"` for a bare `claude-*` name, the label the `claude`
 command's backend had before there were several providers.
+
+## HTTP, the call log, and config messages
+
+Every HTTP request, the Ollama probe included, is
+`urllib.request.urlopen(request, timeout=<seconds>)`, looked up on the
+`urllib.request` module when the call is made (never imported by name,
+so replacing `urllib.request.urlopen` reaches every call). The reply is
+used only as a context manager and through `.read()`. An error status
+arrives as `urllib.error.HTTPError` (its `code` and `read()`), a timeout
+as `socket.timeout`, `TimeoutError` or a `URLError` wrapping one, and any
+other failure as `URLError` or `OSError`. The Ollama probe requests
+`<base_url>/api/tags` with a 1-second timeout and counts as available
+whenever `urlopen` returns.
+
+Each `complete()` call writes one JSON file under `.hotdocs/calls/` in
+the current directory: `{"timestamp", "model", "backend", "text_present"}`
+on success, `text_present` a boolean, or `{"timestamp", "model",
+"backend", "model_call_error"}` on failure; `timestamp` is ISO 8601 UTC.
+
+`complete()` raises `ModelResolutionError`, never `ValueError`, for an
+invalid `hotdocs.toml`. `load_config`'s message for an entry whose name
+suggests a secret contains `must never hold a secret`.

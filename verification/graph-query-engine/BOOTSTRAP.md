@@ -103,3 +103,15 @@ Two tests were stale rather than the code: `test_ac_gqe_009` asserted a
 supersession (`D31` over `D17`) that commit `0fb1d53`'s renumbering
 removed from the real corpus, so it now builds a synthetic one; and
 `AC-GQE-008` described columns `R-GQE-008` had dropped. 13 of 13 pass.
+
+## Round: generated from its spec, with provenance (`D216`)
+
+Cold-generated with `tools/bootstrap_component.py`, replacing the
+hand-written version and its `views.sql` (the views now live in the
+module). Seed 11 passed every criterion at mutation 1.0 and the
+hand-maintained suite, with a manifest that reads back as a provenance
+hit. Earlier seeds found a corpus with no components unguarded and two
+prose criteria still marked `compiled` (`D216`); seed 10's 0.5 came from
+a candidate with only two mutation sites, one of them equivalent. Lint
+over the whole corpus reports the same findings as before, apart from
+those the spec edits of this round changed.

@@ -13,7 +13,8 @@
       "criterion_id": "AC-LINT-999",
       "covers": "R-LINT-999",
       "status": "error",
-      "message": "step 'When a wizard appears' does not match any recognized template"
+      "file": "specs/components/spec-linter/acceptance/AC-LINT-999.md",
+      "message": "line 7: step 'When a wizard appears' does not match any recognized template"
     }
   ],
   "gate_version": "criterion-compiler@1.0.0",
@@ -26,7 +27,8 @@
 ```
 
 `compile` returns a `CompileReport` dataclass with attributes `outputs`
-(dicts as above), `gate_version` and `summary` (a dict). An error's
+(dicts as above), `gate_version` and `summary` (a dict). An entry's `file` is the emitted test for `compiled`, the acceptance
+file for `error`, both repo-relative. An error's
 `message` begins `line <n>: `, `<n>` the offending step's 1-based line
 in its acceptance file (for `compile_criterion`, in its `gherkin`), then
 quotes the offending name, or the step as written with its
