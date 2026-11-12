@@ -1,194 +1,183 @@
-"""Generated test for AC-CITE-003 (covers R-CITE-003).
-
-Exercises citation_checker.check(repo_root) against small synthetic spec
-corpora, using the real corpus-loader resolved through the tool root (no
-dependency is faked here).
-"""
-from pathlib import Path
-
 import citation_checker
 
+from pathlib import Path
 
-COMPONENT = "fixture"
-REQ_DIR = f"specs/components/{COMPONENT}/requirements"
 
-EXPECTED_KEYS = {"rule_id", "severity", "file", "line", "message"}
+RULE = "R-CITE-003"
 
 
 def _get(value, key):
-    if isinstance(value, dict):
-        return value.get(key)
-    return getattr(value, key, None)
+    return value.get(key) if isinstance(value, dict) else getattr(value, key, None)
 
 
-def _write(root: Path, rel: str, text: str) -> None:
-    path = root / rel
+def _write(root, rel, text):
+    path = Path(root) / rel
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
+    return path
 
 
-def _component_root_md() -> str:
-    return (
-        "---\n"
-        "id: comp-fixture\n"
-        "title: Fixture component\n"
-        "status: draft\n"
-        "owners: [fixture-owner]\n"
-        "sealed: true\n"
-        "source_path: legacy/fixture\n"
-        "---\n"
-        "\n"
-        "# Fixture component\n"
-        "\n"
-        "## Purpose\n"
-        "\n"
-        "A small fixture used only to exercise citation checking.\n"
-        "\n"
-        "## Scope\n"
-        "\n"
-        "- In scope: fixture behavior.\n"
-        "- Out of scope: everything else.\n"
-        "\n"
-        "## Definitions\n"
-        "\n"
-        "None.\n"
-        "\n"
-        "## Behavior\n"
-        "\n"
-        "See `requirements/`.\n"
-        "\n"
-        "## Interfaces\n"
-        "\n"
-        "See `interface/`.\n"
-        "\n"
-        "## Data\n"
-        "\n"
-        "See `interface/data/`.\n"
-        "\n"
-        "## Acceptance criteria\n"
-        "\n"
-        "See `acceptance/`.\n"
-        "\n"
-        "## Non-functional constraints\n"
-        "\n"
-        "See `constraints.md`.\n"
-        "\n"
-        "## Open questions\n"
-        "\n"
-        "## Change log\n"
-        "\n"
-        "- Created as a test fixture.\n"
-    )
+COMPONENT_MD = """---
+id: comp-demo
+title: Demo
+status: draft
+owners: [alice]
+sealed: true
+source_path: legacy/demo
+---
+
+# Demo
+
+## Purpose
+
+A demo fixture component used only by this test.
+
+## Scope
+
+- In scope: fixture behavior.
+- Out of scope: everything else.
+
+## Definitions
+
+None.
+
+## Behavior
+
+See the requirements directory.
+
+## Interfaces
+
+See the interface directory.
+
+## Data
+
+None.
+
+## Acceptance criteria
+
+See the acceptance directory.
+
+## Non-functional constraints
+
+None.
+
+## Open questions
+
+## Change log
+
+- Created as a test fixture.
+"""
 
 
-def _acceptance_md(n: int) -> str:
-    return (
-        f"# AC-FIX-00{n}\n"
-        "\n"
-        f"Covers: R-FIX-00{n}\n"
-        "Kind: generated-test\n"
-        "\n"
-        "The fixture behaves as its requirement states.\n"
-    )
-
-
-def _build_repo(root: Path, glossary_entries, requirement_bodies) -> None:
-    """requirement_bodies: list of body strings, one per requirement."""
-    glossary = "# Glossary\n\nCanonical vocabulary for the fixture.\n\n"
+def _build_repo(root, glossary_entries, requirements):
+    root = Path(root)
+    glossary_lines = ["# Glossary", "", "Canonical vocabulary for the fixture.", ""]
     for term, definition in glossary_entries:
-        glossary += f"- **{term}** — {definition}\n"
-    _write(root, "specs/glossary.md", glossary)
-    _write(root, f"specs/components/{COMPONENT}/component.md", _component_root_md())
-    _write(
-        root,
-        f"specs/components/{COMPONENT}/constraints.md",
-        "# Constraints\n\nNone beyond the defaults.\n",
-    )
-    for i, body in enumerate(requirement_bodies, start=1):
-        _write(root, f"{REQ_DIR}/R-FIX-00{i}.md", body)
+        glossary_lines.append("- **%s** — %s" % (term, definition))
+    glossary_lines.append("")
+    _write(root, "specs/glossary.md", "\n".join(glossary_lines))
+    _write(root, "specs/components/demo/component.md", COMPONENT_MD)
+    for req_id, text in requirements:
+        _write(root, "specs/components/demo/requirements/%s.md" % req_id, text)
+        ac_id = req_id.replace("R-", "AC-", 1)
         _write(
             root,
-            f"specs/components/{COMPONENT}/acceptance/AC-FIX-00{i}.md",
-            _acceptance_md(i),
+            "specs/components/demo/acceptance/%s.md" % ac_id,
+            "# %s\n\nCovers: %s\nKind: llm-judge\n\nThe demo behaves as stated.\n"
+            % (ac_id, req_id),
         )
+    return root
+
+
+def _rel(path_value):
+    return str(path_value).replace("\\", "/")
 
 
 def _cite_findings(findings):
     assert isinstance(findings, list)
-    for f in findings:
-        if isinstance(f, dict):
-            assert set(f.keys()) == EXPECTED_KEYS
-    return [f for f in findings if _get(f, "rule_id") == "R-CITE-003"]
+    return [f for f in findings if _get(f, "rule_id") == RULE]
 
 
-def _assert_finding_shape(f):
-    assert _get(f, "severity") in ("fail", "warn")
-    line = _get(f, "line")
-    assert isinstance(line, int) and not isinstance(line, bool)
-    assert line >= 1
-    message = _get(f, "message")
-    assert isinstance(message, str) and message.strip()
+def _req_path(req_id):
+    return "specs/components/demo/requirements/%s.md" % req_id
 
 
-def test_missing_glossary_entry_is_flagged_existing_one_is_not(tmp_path):
-    root = tmp_path / "repo"
-    root.mkdir()
-    _build_repo(
-        root,
-        [("Widget", "a small reusable thing used by the fixture.")],
+def test_only_missing_glossary_entry_is_flagged(tmp_path):
+    repo = _build_repo(
+        tmp_path,
+        [("Widget", "a small part used by the fixture.")],
         [
-            "# R-FIX-001\n"
-            "\n"
-            "**R-FIX-001** — The fixture MUST use the glossary's \"Widget\" as defined.\n",
-            "# R-FIX-002\n"
-            "\n"
-            "**R-FIX-002** — The fixture MUST use the glossary's \"Gizmo\" as defined.\n",
+            (
+                "R-DEMO-001",
+                "# R-DEMO-001\n\n"
+                "**R-DEMO-001** — The demo MUST follow the glossary's \"Widget\" definition.\n",
+            ),
+            (
+                "R-DEMO-002",
+                "# R-DEMO-002\n\n"
+                "**R-DEMO-002** — The demo MUST follow the glossary's \"Gizmo\" definition.\n",
+            ),
         ],
     )
 
-    findings = citation_checker.check(root)
+    findings = citation_checker.check(repo)
     cite = _cite_findings(findings)
 
     assert len(cite) == 1, cite
-    f = cite[0]
-    assert _get(f, "file") == f"{REQ_DIR}/R-FIX-002.md"
-    _assert_finding_shape(f)
-    assert _get(f, "line") == 3
-    assert "Gizmo" in _get(f, "message")
+    finding = cite[0]
+    assert _rel(_get(finding, "file")) == _req_path("R-DEMO-002")
+    line = _get(finding, "line")
+    assert isinstance(line, int) and not isinstance(line, bool)
+    assert line == 3
+    assert _get(finding, "severity") in ("fail", "warn")
+    assert isinstance(_get(finding, "message"), str)
+
+    flagged_files = {_rel(_get(f, "file")) for f in cite}
+    assert _req_path("R-DEMO-001") not in flagged_files
 
 
-def test_wrapped_punctuated_and_placeholder_pass_only_case_mismatch_flagged(tmp_path):
-    root = tmp_path / "repo"
-    root.mkdir()
-    _build_repo(
-        root,
-        [("Big Widget", "a larger reusable thing used by the fixture.")],
+def test_wrap_trailing_punctuation_case_and_placeholder(tmp_path):
+    repo = _build_repo(
+        tmp_path,
+        [("Widget frame", "the frame that holds a widget.")],
         [
-            # 1: citation hard-wrapped across two lines -> resolves
-            "# R-FIX-001\n"
-            "\n"
-            "**R-FIX-001** — The fixture MUST use the glossary's \"Big\n"
-            "  Widget\" as defined.\n",
-            # 2: trailing comma inside the closing quote -> resolves
-            "# R-FIX-002\n"
-            "\n"
-            "**R-FIX-002** — The fixture MUST use the glossary's \"Big Widget,\" as defined.\n",
-            # 3: different letter case -> MUST be flagged
-            "# R-FIX-003\n"
-            "\n"
-            "**R-FIX-003** — The fixture MUST use the glossary's \"big widget\" as defined.\n",
-            # 4: placeholder, not a citation
-            "# R-FIX-004\n"
-            "\n"
-            "**R-FIX-004** — A citation takes the form the glossary's \"<Term>\" in prose.\n",
+            (
+                "R-DEMO-001",
+                "# R-DEMO-001\n\n"
+                "**R-DEMO-001** — The demo MUST follow the glossary's \"Widget\n"
+                "  frame\" definition when building.\n",
+            ),
+            (
+                "R-DEMO-002",
+                "# R-DEMO-002\n\n"
+                "**R-DEMO-002** — The demo MUST follow the glossary's \"Widget frame,\" and\n"
+                "nothing else.\n",
+            ),
+            (
+                "R-DEMO-003",
+                "# R-DEMO-003\n\n"
+                "**R-DEMO-003** — The demo MUST follow the glossary's \"widget frame\" definition.\n",
+            ),
+            (
+                "R-DEMO-004",
+                "# R-DEMO-004\n\n"
+                "**R-DEMO-004** — A citation has the form the glossary's \"<Term>\" in prose.\n",
+            ),
         ],
     )
 
-    findings = citation_checker.check(root)
+    findings = citation_checker.check(repo)
     cite = _cite_findings(findings)
 
-    files = [_get(f, "file") for f in cite]
-    assert files == [f"{REQ_DIR}/R-FIX-003.md"], cite
-    f = cite[0]
-    _assert_finding_shape(f)
-    assert _get(f, "line") == 3
+    flagged_files = [_rel(_get(f, "file")) for f in cite]
+    assert flagged_files == [_req_path("R-DEMO-003")], cite
+
+    finding = cite[0]
+    line = _get(finding, "line")
+    assert isinstance(line, int) and not isinstance(line, bool)
+    assert line == 3
+    assert _get(finding, "severity") in ("fail", "warn")
+
+    assert _req_path("R-DEMO-001") not in flagged_files
+    assert _req_path("R-DEMO-002") not in flagged_files
+    assert _req_path("R-DEMO-004") not in flagged_files

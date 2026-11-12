@@ -1,24 +1,13 @@
-"""AC-CITE-004 — covers R-CITE-004.
-
-supersedes / status: deprecated consistency for decision records:
-(1) every `supersedes: D<N>` must resolve to a real specs/decisions/D<N>.md;
-(2) when it resolves, that record's status must be `deprecated`;
-(3) every `status: deprecated` record must be named by at least one other
-    real decision's `supersedes` field.
-"""
-
+import os
 from pathlib import Path
 
 import citation_checker
 
 
-RULE = "R-CITE-004"
-
-
-def _field(value, name):
+def _get(value, key):
     if isinstance(value, dict):
-        return value.get(name)
-    return getattr(value, name, None)
+        return value.get(key)
+    return getattr(value, key, None)
 
 
 def _write(path: Path, text: str) -> None:
@@ -30,9 +19,9 @@ def _decision(repo_root: Path, num: int, status: str, supersedes=None) -> None:
     lines = [
         "---",
         f"id: D{num}",
-        f"title: Decision number {num}",
+        f"title: Synthetic decision number {num}",
         f"status: {status}",
-        "owners: [alice]",
+        "owners: [test-owner]",
     ]
     if status == "ratified":
         lines.append("last_ratified_commit: 0000000000000000000000000000000000000000")
@@ -40,7 +29,7 @@ def _decision(repo_root: Path, num: int, status: str, supersedes=None) -> None:
         lines.append(f"supersedes: {supersedes}")
     lines.append("---")
     lines.append("")
-    lines.append(f"# Decision number {num}")
+    lines.append(f"# Synthetic decision {num}")
     lines.append("")
     lines.append("A synthetic decision record used only as a test fixture.")
     lines.append("")
@@ -50,98 +39,123 @@ def _decision(repo_root: Path, num: int, status: str, supersedes=None) -> None:
 def _make_repo(tmp_path: Path) -> Path:
     repo_root = tmp_path / "repo"
     (repo_root / "specs" / "decisions").mkdir(parents=True, exist_ok=True)
-    _write(repo_root / "specs" / "glossary.md", "# Glossary\n\nNo entries.\n")
+    _write(
+        repo_root / "specs" / "glossary.md",
+        "# Glossary\n\n- **Synthetic term** — a term used only by this fixture.\n",
+    )
     return repo_root
 
 
-def _check(repo_root: Path):
-    findings = citation_checker.check(repo_root)
-    assert isinstance(findings, list)
-    for f in findings:
-        assert _field(f, "rule_id") is not None
-        line = _field(f, "line")
-        assert isinstance(line, int) and not isinstance(line, bool)
-        assert _field(f, "severity") in ("fail", "warn")
-        assert isinstance(_field(f, "file"), str)
-        assert isinstance(_field(f, "message"), str)
-    return findings
+def _norm(path_value) -> str:
+    return str(path_value).replace("\\", "/")
 
 
 def _cite4(findings):
-    return [f for f in findings if _field(f, "rule_id") == RULE]
+    assert isinstance(findings, list)
+    return [f for f in findings if _get(f, "rule_id") == "R-CITE-004"]
 
 
-def _files(findings):
-    return [str(_field(f, "file")).replace("\\", "/") for f in findings]
+def _for_file(findings, rel):
+    return [f for f in findings if _norm(_get(f, "file")) == rel]
+
+
+def _check_shape(finding):
+    assert _get(finding, "severity") in ("fail", "warn")
+    line = _get(finding, "line")
+    assert isinstance(line, int) and not isinstance(line, bool)
+    assert line >= 1
+    assert isinstance(_get(finding, "message"), str)
+    assert _get(finding, "message")
+    assert not os.path.isabs(_norm(_get(finding, "file")))
 
 
 def test_supersedes_nonexistent_decision_is_flagged(tmp_path):
     repo_root = _make_repo(tmp_path)
-    _decision(repo_root, 1, "ratified", supersedes="D99")
+    _decision(repo_root, 100, "draft", supersedes="D150")
 
-    findings = _cite4(_check(repo_root))
+    findings = _cite4(citation_checker.check(repo_root))
+    mine = _for_file(findings, "specs/decisions/D100.md")
+    assert len(mine) >= 1, findings
+    for f in mine:
+        _check_shape(f)
 
-    assert "specs/decisions/D1.md" in _files(findings), findings
 
-
-def test_supersedes_still_ratified_decision_is_flagged_on_superseding_record(tmp_path):
+def test_supersedes_still_ratified_decision_is_flagged_naming_it(tmp_path):
     repo_root = _make_repo(tmp_path)
-    _decision(repo_root, 2, "ratified")
-    _decision(repo_root, 3, "ratified", supersedes="D2")
+    _decision(repo_root, 101, "draft", supersedes="D102")
+    _decision(repo_root, 102, "ratified")
 
-    findings = _cite4(_check(repo_root))
+    findings = _cite4(citation_checker.check(repo_root))
+    mine = _for_file(findings, "specs/decisions/D101.md")
+    assert len(mine) >= 1, findings
+    for f in mine:
+        _check_shape(f)
+    assert any("D102" in (_get(f, "message") or "") for f in mine), mine
 
-    on_d3 = [f for f in findings if _files([f])[0] == "specs/decisions/D3.md"]
-    assert on_d3, findings
-    assert any("D2" in str(_field(f, "message")) for f in on_d3), on_d3
 
-
-def test_deprecated_record_not_named_by_any_supersedes_is_flagged(tmp_path):
+def test_supersedes_draft_decision_is_flagged_naming_it(tmp_path):
     repo_root = _make_repo(tmp_path)
-    _decision(repo_root, 4, "deprecated")
-    _decision(repo_root, 7, "ratified")
+    _decision(repo_root, 110, "draft", supersedes="D111")
+    _decision(repo_root, 111, "draft")
 
-    findings = _cite4(_check(repo_root))
-    files = _files(findings)
+    findings = _cite4(citation_checker.check(repo_root))
+    mine = _for_file(findings, "specs/decisions/D110.md")
+    assert len(mine) >= 1, findings
+    assert any("D111" in (_get(f, "message") or "") for f in mine), mine
 
-    assert "specs/decisions/D4.md" in files, findings
-    assert "specs/decisions/D7.md" not in files, findings
+
+def test_orphan_deprecated_decision_is_flagged(tmp_path):
+    repo_root = _make_repo(tmp_path)
+    _decision(repo_root, 103, "deprecated")
+    _decision(repo_root, 120, "draft")
+
+    findings = _cite4(citation_checker.check(repo_root))
+    mine = _for_file(findings, "specs/decisions/D103.md")
+    assert len(mine) >= 1, findings
+    for f in mine:
+        _check_shape(f)
+    assert _for_file(findings, "specs/decisions/D120.md") == []
 
 
 def test_consistent_supersession_produces_no_finding(tmp_path):
     repo_root = _make_repo(tmp_path)
-    _decision(repo_root, 5, "deprecated")
-    _decision(repo_root, 6, "ratified", supersedes="D5")
-    _decision(repo_root, 8, "ratified")
+    _decision(repo_root, 104, "draft", supersedes="D105")
+    _decision(repo_root, 105, "deprecated")
 
-    findings = _cite4(_check(repo_root))
+    findings = _cite4(citation_checker.check(repo_root))
+    assert _for_file(findings, "specs/decisions/D104.md") == [], findings
+    assert _for_file(findings, "specs/decisions/D105.md") == [], findings
 
-    assert findings == [], findings
 
-
-def test_mixed_corpus_flags_exactly_the_inconsistent_records_in_path_order(tmp_path):
+def test_supersedes_of_informal_d1_to_d14_is_exempt(tmp_path):
     repo_root = _make_repo(tmp_path)
-    # (1) dangling supersedes
-    _decision(repo_root, 1, "ratified", supersedes="D99")
-    # (2) supersedes a still-ratified record
-    _decision(repo_root, 2, "ratified")
-    _decision(repo_root, 3, "ratified", supersedes="D2")
-    # (3) deprecated with nobody superseding it
-    _decision(repo_root, 4, "deprecated")
-    # consistent pair
-    _decision(repo_root, 5, "deprecated")
-    _decision(repo_root, 6, "ratified", supersedes="D5")
+    _decision(repo_root, 106, "draft", supersedes="D3")
 
-    findings = _cite4(_check(repo_root))
-    files = _files(findings)
+    findings = _cite4(citation_checker.check(repo_root))
+    assert _for_file(findings, "specs/decisions/D106.md") == [], findings
 
-    assert "specs/decisions/D1.md" in files, findings
-    assert "specs/decisions/D3.md" in files, findings
-    assert "specs/decisions/D4.md" in files, findings
-    assert "specs/decisions/D5.md" not in files, findings
-    assert "specs/decisions/D6.md" not in files, findings
 
-    d3 = [f for f in findings if _files([f])[0] == "specs/decisions/D3.md"]
-    assert any("D2" in str(_field(f, "message")) for f in d3), d3
+def test_all_three_cases_together_flag_only_offending_records(tmp_path):
+    repo_root = _make_repo(tmp_path)
+    _decision(repo_root, 100, "draft", supersedes="D150")
+    _decision(repo_root, 101, "draft", supersedes="D102")
+    _decision(repo_root, 102, "ratified")
+    _decision(repo_root, 103, "deprecated")
+    _decision(repo_root, 104, "draft", supersedes="D105")
+    _decision(repo_root, 105, "deprecated")
 
-    assert files == sorted(files), files
+    findings = _cite4(citation_checker.check(repo_root))
+
+    assert len(_for_file(findings, "specs/decisions/D100.md")) >= 1, findings
+    d101 = _for_file(findings, "specs/decisions/D101.md")
+    assert len(d101) >= 1, findings
+    assert any("D102" in (_get(f, "message") or "") for f in d101), d101
+    assert len(_for_file(findings, "specs/decisions/D103.md")) >= 1, findings
+    assert _for_file(findings, "specs/decisions/D104.md") == [], findings
+    assert _for_file(findings, "specs/decisions/D105.md") == [], findings
+
+    for f in findings:
+        _check_shape(f)
+
+    files_in_order = [_norm(_get(f, "file")) for f in findings]
+    assert files_in_order == sorted(files_in_order), files_in_order

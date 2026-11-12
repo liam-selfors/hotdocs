@@ -1,20 +1,15 @@
-"""AC-CITE-001 (covers R-CITE-001).
-
-Given a live component.md citing a decision number with no corresponding
-specs/decisions/ file, and a second citing D7, one of D1-D14, never
-formalized as files, when check(repo_root) runs, then only the first
-citation gets a R-CITE-001 finding.
-"""
-
+import sys
 from pathlib import Path
+
+import pytest
 
 import citation_checker
 
 
-def _field(value, name):
+def _get(value, key):
     if isinstance(value, dict):
-        return value.get(name)
-    return getattr(value, name, None)
+        return value.get(key)
+    return getattr(value, key, None)
 
 
 def _write(path: Path, text: str) -> None:
@@ -27,18 +22,15 @@ def _component_md(slug: str, rationale: str) -> str:
         "---\n"
         f"id: comp-{slug}\n"
         f"title: {slug.capitalize()} component\n"
-        "status: ratified\n"
+        "status: draft\n"
         "owners: [alice]\n"
         "sealed: true\n"
         f"source_path: legacy/{slug}\n"
-        "last_ratified_commit: 0000000000000000000000000000000000000000\n"
         "---\n"
-        "\n"
-        f"# {slug.capitalize()}\n"
         "\n"
         "## Purpose\n"
         "\n"
-        f"The {slug} component matches existing behavior; do not regenerate.\n"
+        f"The {slug} component does a small, well-described job.\n"
         "\n"
         "## Rationale\n"
         "\n"
@@ -46,7 +38,7 @@ def _component_md(slug: str, rationale: str) -> str:
         "\n"
         "## Scope\n"
         "\n"
-        "- In scope: existing behavior.\n"
+        "- In scope: its own job.\n"
         "- Out of scope: everything else.\n"
         "\n"
         "## Definitions\n"
@@ -81,15 +73,18 @@ def _component_md(slug: str, rationale: str) -> str:
     )
 
 
-def _build_fixture(repo_root: Path) -> None:
+@pytest.fixture
+def repo_root(tmp_path):
+    root = tmp_path / "repo"
+    root.mkdir()
+
     _write(
-        repo_root / "specs" / "glossary.md",
-        "# Glossary\n\n- **Widget** — a thing used in this fixture.\n",
+        root / "specs" / "glossary.md",
+        "# Glossary\n\n- **Widget** — a small thing used only in this fixture.\n",
     )
-    # One real, formalized decision record, so specs/decisions/ exists and
-    # is non-empty; neither D500 nor D7 has a file here.
+
     _write(
-        repo_root / "specs" / "decisions" / "D100.md",
+        root / "specs" / "decisions" / "D100.md",
         "---\n"
         "id: D100\n"
         "title: A real formal decision\n"
@@ -100,65 +95,77 @@ def _build_fixture(repo_root: Path) -> None:
         "\n"
         "# A real formal decision\n"
         "\n"
-        "Something was decided.\n",
+        "This decision exists as a file.\n",
     )
+
     _write(
-        repo_root / "notes" / "initial-ideas.md",
-        "# Initial ideas\n\n- D7 — an informal brainstorm decision.\n",
+        root / "notes" / "initial-ideas.md",
+        "# Initial ideas\n\n## D7\n\nAn informal brainstorm decision, never formalized.\n",
     )
-    # First live component: cites a decision number with no file.
+
+    # First: cites a decision number with no corresponding specs/decisions/ file.
     _write(
-        repo_root / "specs" / "components" / "alpha" / "component.md",
+        root / "specs" / "components" / "alpha" / "component.md",
         _component_md(
             "alpha",
-            "This design follows `D500`, which was never written down.",
+            "This design was chosen per D9999, which settled the question.",
         ),
     )
-    # Second live component: cites D7, one of D1-D14, never formalized.
+
+    # Second: cites D7, one of the informal D1-D14 never formalized as files.
     _write(
-        repo_root / "specs" / "components" / "beta" / "component.md",
+        root / "specs" / "components" / "beta" / "component.md",
         _component_md(
             "beta",
-            "This design follows `D7` from `notes/initial-ideas.md`.",
+            "This design follows `notes/initial-ideas.md`'s D7, an informal "
+            "brainstorm decision from the original notes.",
         ),
     )
 
-
-def _norm(p) -> str:
-    return str(p).replace("\\", "/") if p is not None else ""
+    return root
 
 
-def test_ac_cite_001_only_unformalized_non_d1_d14_citation_flagged(tmp_path):
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    _build_fixture(repo_root)
-
+def test_only_unresolved_decision_citation_gets_r_cite_001(repo_root):
     findings = citation_checker.check(repo_root)
+
     assert isinstance(findings, list)
 
-    cite_001 = [f for f in findings if _field(f, "rule_id") == "R-CITE-001"]
+    cite_001 = [f for f in findings if _get(f, "rule_id") == "R-CITE-001"]
 
     alpha_rel = "specs/components/alpha/component.md"
     beta_rel = "specs/components/beta/component.md"
 
-    alpha_findings = [f for f in cite_001 if _norm(_field(f, "file")) == alpha_rel]
-    beta_findings = [f for f in cite_001 if _norm(_field(f, "file")) == beta_rel]
+    def _norm(p):
+        return str(p).replace("\\", "/") if p is not None else None
 
-    assert len(alpha_findings) == 1, (
-        f"expected exactly one R-CITE-001 finding for {alpha_rel}, got {cite_001!r}"
-    )
-    assert beta_findings == [], (
-        f"expected no R-CITE-001 finding for the D7 citation in {beta_rel}, "
-        f"got {beta_findings!r}"
-    )
-    assert len(cite_001) == 1, (
-        f"expected exactly one R-CITE-001 finding overall, got {cite_001!r}"
-    )
+    alpha_findings = [f for f in cite_001 if _norm(_get(f, "file")) == alpha_rel]
+    beta_findings = [f for f in cite_001 if _norm(_get(f, "file")) == beta_rel]
+
+    # The first citation (no corresponding decision file) is flagged.
+    assert len(alpha_findings) == 1, findings
+
+    # The second citation (D7, an informal D1-D14 decision) is not flagged.
+    assert beta_findings == [], findings
+
+    # Only the first citation gets a R-CITE-001 finding at all.
+    assert len(cite_001) == 1, findings
 
     finding = alpha_findings[0]
-    assert _field(finding, "severity") in ("fail", "warn")
-    line = _field(finding, "line")
+    assert _get(finding, "severity") in ("fail", "warn")
+    line = _get(finding, "line")
     assert isinstance(line, int) and not isinstance(line, bool)
     assert line >= 1
-    message = _field(finding, "message")
+    message = _get(finding, "message")
     assert isinstance(message, str) and message
+
+
+def test_findings_have_exact_documented_fields(repo_root):
+    findings = citation_checker.check(repo_root)
+    for f in findings:
+        if isinstance(f, dict):
+            assert set(f.keys()) == {"rule_id", "severity", "file", "line", "message"}
+        assert _get(f, "severity") in ("fail", "warn")
+        assert isinstance(_get(f, "line"), int)
+        file_value = _get(f, "file")
+        assert file_value is not None
+        assert not Path(str(file_value)).is_absolute()

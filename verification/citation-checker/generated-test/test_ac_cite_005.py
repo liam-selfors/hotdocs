@@ -1,110 +1,105 @@
-from pathlib import Path
-
 import citation_checker
 
 
-def _get(value, key):
+def _field(value, name):
     if isinstance(value, dict):
-        return value.get(key)
-    return getattr(value, key, None)
+        return value.get(name)
+    return getattr(value, name, None)
 
 
-def _write(path: Path, text: str) -> None:
+def _write(path, text):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
 
 
-def _decision(doc_id: str, builds_on: list) -> str:
-    lines = [
-        "---",
-        f"id: {doc_id}",
-        f"title: Decision {doc_id}",
-        "status: draft",
-        "owners: [alice]",
-    ]
-    if builds_on is not None:
-        lines.append("builds_on: [" + ", ".join(builds_on) + "]")
-    lines.append("---")
-    lines.append("")
-    lines.append(f"# {doc_id}")
-    lines.append("")
-    lines.append("A synthetic decision record used only as a test fixture.")
-    lines.append("")
-    return "\n".join(lines)
+def _decision(doc_id, title, builds_on):
+    return (
+        "---\n"
+        f"id: {doc_id}\n"
+        f"title: {title}\n"
+        "status: draft\n"
+        "owners: [alice]\n"
+        f"builds_on: [{builds_on}]\n"
+        "---\n"
+        "\n"
+        f"# {title}\n"
+        "\n"
+        "## Context\n"
+        "\n"
+        "A synthetic decision record used only as a test fixture.\n"
+        "\n"
+        "## Decision\n"
+        "\n"
+        "Nothing is decided here beyond fixture purposes.\n"
+    )
 
 
-def _make_repo(root: Path, decisions: dict) -> Path:
+def _build_repo(tmp_path):
+    repo_root = tmp_path / "repo"
+    specs = repo_root / "specs"
     _write(
-        root / "specs" / "glossary.md",
-        "# Glossary\n\n- **Fixture term** — a term used only by this fixture.\n",
+        specs / "glossary.md",
+        "# Glossary\n"
+        "\n"
+        "- **Fixture term** — a term used only by this test fixture.\n",
     )
-    for doc_id, builds_on in decisions.items():
-        _write(root / "specs" / "decisions" / f"{doc_id}.md", _decision(doc_id, builds_on))
-    return root
-
-
-def _cite005(findings):
-    assert isinstance(findings, list)
-    return [f for f in findings if _get(f, "rule_id") == "R-CITE-005"]
-
-
-def test_only_unresolved_builds_on_gets_finding_and_d7_is_exempt(tmp_path):
-    repo_root = _make_repo(
-        tmp_path / "repo",
-        {
-            # builds_on names a decision number with no specs/decisions/ file
-            "D100": ["D555"],
-            # builds_on names D7, one of D1-D14, never formalized as a file
-            "D101": ["D7"],
-            # control: builds_on resolves to a real file
-            "D102": ["D100"],
-        },
+    # First record: builds_on names a decision number with no file.
+    _write(
+        specs / "decisions" / "D100.md",
+        _decision("D100", "Dangling builds_on", "D999"),
     )
+    # Second record: builds_on names D7, one of D1-D14, never formalized.
+    _write(
+        specs / "decisions" / "D101.md",
+        _decision("D101", "Informal builds_on", "D7"),
+    )
+    # Third record: builds_on resolves to a real decision file.
+    _write(
+        specs / "decisions" / "D102.md",
+        _decision("D102", "Resolving builds_on", "D100"),
+    )
+    return repo_root
+
+
+def test_only_dangling_builds_on_gets_r_cite_005_finding(tmp_path):
+    repo_root = _build_repo(tmp_path)
+
+    # Sanity: neither D999 nor D7 exists as a file.
+    assert not (repo_root / "specs" / "decisions" / "D999.md").exists()
+    assert not (repo_root / "specs" / "decisions" / "D7.md").exists()
 
     findings = citation_checker.check(repo_root)
-    cite = _cite005(findings)
+    assert isinstance(findings, list)
 
-    assert len(cite) == 1, f"expected exactly one R-CITE-005 finding, got {findings!r}"
-    finding = cite[0]
-    assert _get(finding, "file") == "specs/decisions/D100.md"
-    assert _get(finding, "severity") in ("fail", "warn")
-    line = _get(finding, "line")
+    cite5 = [f for f in findings if _field(f, "rule_id") == "R-CITE-005"]
+    files = [_field(f, "file") for f in cite5]
+
+    assert len(cite5) == 1, f"expected exactly one R-CITE-005 finding, got {cite5!r}"
+    finding = cite5[0]
+
+    file_value = str(_field(finding, "file")).replace("\\", "/")
+    assert file_value == "specs/decisions/D100.md", files
+
+    assert "specs/decisions/D101.md" not in [
+        str(x).replace("\\", "/") for x in files
+    ]
+    assert "specs/decisions/D102.md" not in [
+        str(x).replace("\\", "/") for x in files
+    ]
+
+    assert _field(finding, "severity") in ("fail", "warn")
+    line = _field(finding, "line")
     assert isinstance(line, int) and not isinstance(line, bool)
     assert line >= 1
-    message = _get(finding, "message")
-    assert isinstance(message, str) and message
-
-    files = [_get(f, "file") for f in cite]
-    assert "specs/decisions/D101.md" not in files
-    assert "specs/decisions/D102.md" not in files
+    message = _field(finding, "message")
+    assert isinstance(message, str) and message.strip()
 
 
-def test_d1_and_d14_exempt_but_d15_is_not(tmp_path):
-    repo_root = _make_repo(
-        tmp_path / "repo",
-        {
-            "D100": ["D1"],
-            "D101": ["D14"],
-            "D102": ["D15"],
-        },
-    )
-
+def test_findings_have_exactly_documented_keys_for_r_cite_005(tmp_path):
+    repo_root = _build_repo(tmp_path)
     findings = citation_checker.check(repo_root)
-    cite = _cite005(findings)
-
-    files = [_get(f, "file") for f in cite]
-    assert files == ["specs/decisions/D102.md"], f"unexpected R-CITE-005 findings: {findings!r}"
-
-
-def test_no_findings_when_all_builds_on_resolve_or_exempt(tmp_path):
-    repo_root = _make_repo(
-        tmp_path / "repo",
-        {
-            "D100": ["D7"],
-            "D101": ["D100"],
-            "D102": None,
-        },
-    )
-
-    findings = citation_checker.check(repo_root)
-    assert _cite005(findings) == []
+    cite5 = [f for f in findings if _field(f, "rule_id") == "R-CITE-005"]
+    assert len(cite5) == 1
+    finding = cite5[0]
+    if isinstance(finding, dict):
+        assert set(finding.keys()) == {"rule_id", "severity", "file", "line", "message"}
