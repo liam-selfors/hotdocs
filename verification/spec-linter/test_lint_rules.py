@@ -225,8 +225,8 @@ def test_ac_lint_012_generated_code_over_hard_cap(corpus_root):
     gen_dir.mkdir(parents=True)
     (gen_dir / "big.py").write_text("\n".join(f"x{i} = {i}" for i in range(1600)))
     report = run_lint(corpus_root)
-    assert has_finding(report, "R-LINT-012")
-    assert any("generated_code_loc" in f.message for f in report.findings if f.rule_id == "R-LINT-012")
+    assert has_finding(report, "R-SIZE-001")
+    assert any("generated_code_loc" in f.message for f in report.findings if f.rule_id == "R-SIZE-001")
 
 
 def test_ac_lint_022_fires_on_two_crowded_dimensions(corpus_root):
@@ -236,8 +236,8 @@ def test_ac_lint_022_fires_on_two_crowded_dimensions(corpus_root):
     requirement = _comp(corpus_root) / "requirements" / "R-FOO-001.md"
     requirement.write_text(requirement.read_text() + "\n\n" + " ".join(["word"] * 2100))
     report = run_lint(corpus_root)
-    assert has_finding(report, "R-LINT-022", severity="warn")
-    finding = next(f for f in report.findings if f.rule_id == "R-LINT-022")
+    assert has_finding(report, "R-SIZE-002", severity="warn")
+    finding = next(f for f in report.findings if f.rule_id == "R-SIZE-002")
     assert "generated_code_loc" in finding.message and "component_doc_words" in finding.message
 
 
@@ -246,22 +246,22 @@ def test_ac_lint_022_does_not_fire_on_one_crowded_dimension(corpus_root):
     gen_dir.mkdir(parents=True)
     (gen_dir / "big.py").write_text("\n".join(f"x{i} = {i}" for i in range(900)))
     report = run_lint(corpus_root)
-    assert not has_finding(report, "R-LINT-022", severity="warn")
+    assert not has_finding(report, "R-SIZE-002", severity="warn")
 
 
 def test_ac_lint_023_fires_on_long_requirement_file(corpus_root):
     requirement = _comp(corpus_root) / "requirements" / "R-FOO-001.md"
     requirement.write_text(requirement.read_text() + "\n\n" + " ".join(["word"] * 520))
     report = run_lint(corpus_root)
-    assert has_finding(report, "R-LINT-023", severity="fail")
-    finding = next(f for f in report.findings if f.rule_id == "R-LINT-023")
+    assert has_finding(report, "R-SIZE-003", severity="fail")
+    finding = next(f for f in report.findings if f.rule_id == "R-SIZE-003")
     assert "R-FOO-001" in finding.file
 
 
 def test_ac_lint_023_does_not_fire_on_short_file(corpus_root):
     report = run_lint(corpus_root)
-    assert not has_finding(report, "R-LINT-023", severity="fail")
-    assert not has_finding(report, "R-LINT-023", severity="warn")
+    assert not has_finding(report, "R-SIZE-003", severity="fail")
+    assert not has_finding(report, "R-SIZE-003", severity="warn")
 
 
 def test_guarantee_count_cap(corpus_root):
@@ -270,8 +270,8 @@ def test_guarantee_count_cap(corpus_root):
     for i in range(1, 12):
         (guarantees_dir / f"G-FOO-{i:03d}.md").write_text(f"# G-FOO-{i:03d}\n\nSome guarantee text.\n")
     report = run_lint(corpus_root)
-    assert has_finding(report, "R-LINT-012", severity="fail")
-    assert any("guarantee_count" in f.message for f in report.findings if f.rule_id == "R-LINT-012")
+    assert has_finding(report, "R-SIZE-001", severity="fail")
+    assert any("guarantee_count" in f.message for f in report.findings if f.rule_id == "R-SIZE-001")
 
 
 def test_acceptance_count_cap(corpus_root):
@@ -282,8 +282,8 @@ def test_acceptance_count_cap(corpus_root):
             "```gherkin\nGiven a thing\nWhen it happens\nThen it works\n```\n"
         )
     report = run_lint(corpus_root)
-    assert has_finding(report, "R-LINT-012", severity="fail")
-    assert any("acceptance_count" in f.message for f in report.findings if f.rule_id == "R-LINT-012")
+    assert has_finding(report, "R-SIZE-001", severity="fail")
+    assert any("acceptance_count" in f.message for f in report.findings if f.rule_id == "R-SIZE-001")
 
 
 def test_ac_lint_013_secret_var_with_default(corpus_root):
@@ -401,13 +401,13 @@ def test_ac_lint_025_long_purpose(corpus_root):
         ("A minimal component for exercising the linter.", long_purpose),
     )
     report = run_lint(corpus_root)
-    assert has_finding(report, "R-LINT-025")
+    assert has_finding(report, "R-SIZE-004")
     assert not has_finding(report, "R-LINT-024")
 
 
 def test_ac_lint_025_short_purpose_does_not_fire(corpus_root):
     report = run_lint(corpus_root)
-    assert not has_finding(report, "R-LINT-025")
+    assert not has_finding(report, "R-SIZE-004")
 
 
 def test_ac_lint_026_dangling_decision_citation(corpus_root):
@@ -416,7 +416,7 @@ def test_ac_lint_026_dangling_decision_citation(corpus_root):
         ("In scope: everything. Out of scope: nothing.", "In scope: everything (D500). Out of scope: nothing."),
     )
     report = run_lint(corpus_root)
-    assert has_finding(report, "R-LINT-026")
+    assert has_finding(report, "R-CITE-001")
 
 
 def test_ac_lint_026_frozen_decision_does_not_fire(corpus_root):
@@ -425,7 +425,7 @@ def test_ac_lint_026_frozen_decision_does_not_fire(corpus_root):
         ("In scope: everything. Out of scope: nothing.", "In scope: everything (D5). Out of scope: nothing."),
     )
     report = run_lint(corpus_root)
-    assert not has_finding(report, "R-LINT-026")
+    assert not has_finding(report, "R-CITE-001")
 
 
 def test_ac_lint_027_section_reference_resolution(corpus_root):
@@ -442,8 +442,8 @@ def test_ac_lint_027_section_reference_resolution(corpus_root):
         ),
     )
     report = run_lint(corpus_root)
-    assert has_finding(report, "R-LINT-027")
-    findings = [f for f in report.findings if f.rule_id == "R-LINT-027"]
+    assert has_finding(report, "R-CITE-002")
+    findings = [f for f in report.findings if f.rule_id == "R-CITE-002"]
     assert len(findings) == 1
     assert "Nonexistent Heading" in findings[0].message
 
@@ -466,8 +466,8 @@ def test_ac_lint_028_glossary_citation_resolution(corpus_root):
         ),
     )
     report = run_lint(corpus_root)
-    assert has_finding(report, "R-LINT-028")
-    findings = [f for f in report.findings if f.rule_id == "R-LINT-028"]
+    assert has_finding(report, "R-CITE-003")
+    findings = [f for f in report.findings if f.rule_id == "R-CITE-003"]
     assert len(findings) == 1
     assert "A Made Up Term" in findings[0].message
 
@@ -494,7 +494,7 @@ def test_ac_lint_029_dangling_supersedes_citation(corpus_root):
     """D87 -- supersedes: D<N> must resolve to a real decision file."""
     _write_decision(corpus_root, "D900", supersedes="D999")
     report = run_lint(corpus_root)
-    assert has_finding(report, "R-LINT-029")
+    assert has_finding(report, "R-CITE-004")
 
 
 def test_ac_lint_029_superseded_decision_not_deprecated(corpus_root):
@@ -503,7 +503,7 @@ def test_ac_lint_029_superseded_decision_not_deprecated(corpus_root):
     _write_decision(corpus_root, "D900", supersedes="D901")
     _write_decision(corpus_root, "D901", status="ratified")
     report = run_lint(corpus_root)
-    findings = [f for f in report.findings if f.rule_id == "R-LINT-029"]
+    findings = [f for f in report.findings if f.rule_id == "R-CITE-004"]
     assert any("D901" in f.message for f in findings)
 
 
@@ -512,33 +512,33 @@ def test_ac_lint_029_deprecated_with_no_superseder_fires(corpus_root):
     must fire -- deprecation is never a standalone edit."""
     _write_decision(corpus_root, "D900", status="deprecated")
     report = run_lint(corpus_root)
-    assert has_finding(report, "R-LINT-029")
+    assert has_finding(report, "R-CITE-004")
 
 
 def test_ac_lint_029_consistent_pair_does_not_fire(corpus_root):
     _write_decision(corpus_root, "D900", supersedes="D901")
     _write_decision(corpus_root, "D901", status="deprecated")
     report = run_lint(corpus_root)
-    assert not has_finding(report, "R-LINT-029")
+    assert not has_finding(report, "R-CITE-004")
 
 
 def test_ac_lint_029_frozen_range_exempt(corpus_root):
     _write_decision(corpus_root, "D900", supersedes="D5")
     report = run_lint(corpus_root)
-    assert not has_finding(report, "R-LINT-029")
+    assert not has_finding(report, "R-CITE-004")
 
 
 def test_ac_lint_030_dangling_builds_on_citation(corpus_root):
     """D91 -- builds_on: D<N> must resolve to a real decision file."""
     _write_decision(corpus_root, "D900", builds_on=["D999"])
     report = run_lint(corpus_root)
-    assert has_finding(report, "R-LINT-030")
+    assert has_finding(report, "R-CITE-005")
 
 
 def test_ac_lint_030_frozen_range_exempt(corpus_root):
     _write_decision(corpus_root, "D900", builds_on=["D5"])
     report = run_lint(corpus_root)
-    assert not has_finding(report, "R-LINT-030")
+    assert not has_finding(report, "R-CITE-005")
 
 
 def _add_cli(root):
@@ -593,7 +593,7 @@ def test_ac_lint_028_wrapped_and_punctuated_citations_resolve(corpus_root):
             'The component MUST follow the glossary\'s "Wrapped\n  Test Term," and also the glossary\'s "Wrapped Test Term".',
         ),
     )
-    assert not has_finding(run_lint(corpus_root), "R-LINT-028")
+    assert not has_finding(run_lint(corpus_root), "R-CITE-003")
 
 
 def test_ac_lint_028_placeholder_is_not_a_citation(corpus_root):
@@ -604,7 +604,7 @@ def test_ac_lint_028_placeholder_is_not_a_citation(corpus_root):
             'The component MUST do it; a rule cites the glossary\'s "<Term>" as a pattern.',
         ),
     )
-    assert not has_finding(run_lint(corpus_root), "R-LINT-028")
+    assert not has_finding(run_lint(corpus_root), "R-CITE-003")
 
 
 def test_ac_lint_028_citation_is_case_exact(corpus_root):
@@ -616,7 +616,7 @@ def test_ac_lint_028_citation_is_case_exact(corpus_root):
             'The component MUST use the glossary\'s "case test term".',
         ),
     )
-    assert has_finding(run_lint(corpus_root), "R-LINT-028")
+    assert has_finding(run_lint(corpus_root), "R-CITE-003")
 
 
 def test_ac_lint_029_prose_quoting_a_field_is_not_supersession(corpus_root):
@@ -631,8 +631,8 @@ def test_ac_lint_029_prose_quoting_a_field_is_not_supersession(corpus_root):
         encoding="utf-8",
     )
     report = run_lint(corpus_root)
-    assert not has_finding(report, "R-LINT-029")
-    assert not has_finding(report, "R-LINT-030")
+    assert not has_finding(report, "R-CITE-004")
+    assert not has_finding(report, "R-CITE-005")
 
 
 def test_ac_lint_029_030_fire_on_a_mutated_copy_of_the_real_corpus(tmp_path):
@@ -653,8 +653,8 @@ def test_ac_lint_029_030_fire_on_a_mutated_copy_of_the_real_corpus(tmp_path):
     by_rule = {}
     for f in report.findings:
         by_rule.setdefault(f.rule_id, []).append(f.message)
-    assert len(by_rule.get("R-LINT-030", [])) == 1 and "D9999" in by_rule["R-LINT-030"][0]
-    msgs = by_rule.get("R-LINT-029", [])
+    assert len(by_rule.get("R-CITE-005", [])) == 1 and "D9999" in by_rule["R-CITE-005"][0]
+    msgs = by_rule.get("R-CITE-004", [])
     assert any("D51" in m and "no other decision supersedes" in m for m in msgs)
     assert any("D52 supersedes D53" in m and "not deprecated" in m for m in msgs)
     assert len(msgs) == 2

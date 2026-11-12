@@ -1,4 +1,4 @@
-"""Regression tests for R-LINT-012's `interface_surface` dimension, as
+"""Regression tests for R-SIZE-001's `interface_surface` dimension, as
 SPEC_GUIDELINES.md §4 defines it ("How each dimension is measured", D211),
 run against this repository's own real `interface/` directories.
 
@@ -58,7 +58,7 @@ def _surface(tmp_path: Path, component: str) -> int:
     findings = report["findings"] if isinstance(report, dict) else report.findings
     for f in findings:
         get = (lambda k: f[k]) if isinstance(f, dict) else (lambda k: getattr(f, k))
-        if get("rule_id") == "R-LINT-012" and "probe" in get("file") and "interface_surface" in get("message"):
+        if get("rule_id") == "R-SIZE-001" and "probe" in get("file") and "interface_surface" in get("message"):
             return int(re.search(r"interface_surface\D*?(\d+)", get("message")).group(1)) - PAD
     raise AssertionError("no interface_surface finding; the padded count did not cross the threshold")
 
