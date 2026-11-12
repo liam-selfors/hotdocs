@@ -654,11 +654,11 @@ def test_ac_lint_029_030_fire_on_a_mutated_copy_of_the_real_corpus(tmp_path):
     for f in report.findings:
         by_rule.setdefault(f.rule_id, []).append(f.message)
     assert len(by_rule.get("R-CITE-005", [])) == 1 and "D9999" in by_rule["R-CITE-005"][0]
-    msgs = by_rule.get("R-CITE-004", [])
-    # Message wording is not specified; each finding names its decisions.
-    assert any("D51" in m and "D52" not in m for m in msgs)
-    assert any("D52" in m and "D53" in m for m in msgs)
-    assert len(msgs) == 2
+    # Message wording is not specified: check the file each finding is on
+    # and, for the bad supersedes, that the message names its target.
+    cite4 = [f for f in report.findings if f.rule_id == "R-CITE-004"]
+    assert sorted(f.file for f in cite4) == ["specs/decisions/D51.md", "specs/decisions/D52.md"]
+    assert "D53" in next(f.message for f in cite4 if f.file.endswith("D52.md"))
 
 
 def test_ac_lint_032_project_component_reusing_a_tool_slug_fails(corpus_root):
