@@ -1,5 +1,7 @@
 import hashlib
 import json
+import os
+import sys
 from pathlib import Path
 
 import pytest
@@ -7,146 +9,233 @@ import pytest
 import license_scanner
 
 
-# A fake cache-manager that matches lookups by gate_version alone: the test
-# cannot predict the spec_bundle_hash/gate_inputs_hash/model_pin the real
-# license-scanner builds, but gate_version is exactly what R-LICENSE-005 is
-# about, so that is the only field this stand-in needs to key on.
-CACHE_MANAGER_SOURCE = r'''
+NOT_EVALUATED_GV = "license_scanner@4.0.0-no-reference-corpus"
+SEEDED_EVALUATED_SCORE = 0.987
+SEEDED_REFERENCE_ID = "ref-seeded-only-never-in-real-corpus"
+
+
+def _field(value, name):
+    if isinstance(value, dict):
+        return value.get(name)
+    return getattr(value, name, None)
+
+
+FAKE_CACHE_MANAGER_TEMPLATE = r'''
+import dataclasses
+import datetime
 import json
-from pathlib import Path
+import os
+
+SEED_PATH = __SEED_PATH__
+LOG_PATH = __LOG_PATH__
+STORE_PATH = __STORE_PATH__
 
 
+@dataclasses.dataclass
 class CacheKey:
-    def __init__(self, spec_bundle_hash, gate_inputs_hash, gate_version, model_pin):
-        self.spec_bundle_hash = spec_bundle_hash
-        self.gate_inputs_hash = gate_inputs_hash
-        self.gate_version = gate_version
-        self.model_pin = model_pin
+    spec_bundle_hash: str
+    gate_inputs_hash: str
+    gate_version: str
+    model_pin: str
 
 
+@dataclasses.dataclass
 class CachedResult:
-    def __init__(self, gate_type, payload, stored_at):
-        self.gate_type = gate_type
-        self.payload = payload
-        self.stored_at = stored_at
+    gate_type: str
+    payload: dict
+    stored_at: str
 
 
 class Miss:
+    def __eq__(self, other):
+        return isinstance(other, Miss)
+
+    def __hash__(self):
+        return hash("Miss")
+
+
+class SchemaValidationError(ValueError):
     pass
 
 
-_HERE = Path(__file__).resolve()
-_REPO_ROOT = _HERE.parent.parent.parent
-_LOG_PATH = _REPO_ROOT / "cache_calls.jsonl"
-_SEED_PATH = _REPO_ROOT / "cache_seed.json"
+_KNOWN = {
+    "generator": ["component_id", "model", "prompt_version", "files"],
+    "compiler": ["outputs", "gate_version", "summary"],
+    "generated_test": ["component_id", "criterion_id", "model", "file"],
+    "llm_judge": ["result", "rationale"],
+    "license_scanner": ["component_id", "gate_version", "similarity_score", "blocked", "matches"],
+    "secret_scanner": ["scope", "gate_version", "flagged", "matches"],
+}
 
 
-def _log(action, gate_version):
-    with open(_LOG_PATH, "a") as f:
-        f.write(json.dumps({"action": action, "gate_version": gate_version}) + "\n")
+def _acc(obj, name):
+    if isinstance(obj, dict):
+        return obj.get(name)
+    return getattr(obj, name, None)
 
 
-def _load_store():
-    store = {}
-    if _SEED_PATH.exists():
-        with open(_SEED_PATH) as f:
-            raw = json.load(f)
-        for gv, entry in raw.items():
-            store[gv] = CachedResult(
-                gate_type=entry["gate_type"],
-                payload=entry["payload"],
-                stored_at=entry["stored_at"],
-            )
-    return store
+def _log(record):
+    with open(LOG_PATH, "a", encoding="utf-8") as fh:
+        fh.write(json.dumps(record, default=str) + "\n")
 
 
-_STORE = _load_store()
+def _load(path):
+    if not os.path.exists(path):
+        return []
+    with open(path, "r", encoding="utf-8") as fh:
+        return json.load(fh)
+
+
+def _key_dict(cache_key):
+    return {
+        "spec_bundle_hash": _acc(cache_key, "spec_bundle_hash"),
+        "gate_inputs_hash": _acc(cache_key, "gate_inputs_hash"),
+        "gate_version": _acc(cache_key, "gate_version"),
+        "model_pin": _acc(cache_key, "model_pin"),
+    }
 
 
 def get(cache_key, *, repo_root=None):
-    _log("get", cache_key.gate_version)
-    gv = cache_key.gate_version
-    if gv in _STORE:
-        return _STORE[gv]
+    kd = _key_dict(cache_key)
+    _log({"op": "get", "key": kd})
+    # Seeded entries stand for "a result stored for gen/foo/'s content" under
+    # a given gate_version: they match any key carrying that gate_version.
+    for seed in _load(SEED_PATH):
+        if seed["gate_version"] == kd["gate_version"]:
+            _log({"op": "hit", "key": kd, "source": "seed"})
+            return CachedResult(
+                gate_type="license_scanner",
+                payload=dict(seed["payload"]),
+                stored_at=seed["stored_at"],
+            )
+    for entry in _load(STORE_PATH):
+        if entry["key"] == kd:
+            _log({"op": "hit", "key": kd, "source": "store"})
+            return CachedResult(
+                gate_type=entry["gate_type"],
+                payload=dict(entry["payload"]),
+                stored_at=entry["stored_at"],
+            )
+    _log({"op": "miss", "key": kd})
     return Miss()
 
 
 def put(cache_key, result, *, repo_root=None):
-    _log("put", cache_key.gate_version)
-    _STORE[cache_key.gate_version] = result
+    kd = _key_dict(cache_key)
+    gate_type = _acc(result, "gate_type")
+    payload = _acc(result, "payload")
+    stored_at = _acc(result, "stored_at")
+    _log({"op": "put", "key": kd, "gate_type": gate_type})
+    key_type = (kd["gate_version"] or "").split("@", 1)[0]
+    if gate_type not in _KNOWN or gate_type != key_type:
+        raise SchemaValidationError("gate_type mismatch: %r vs %r" % (gate_type, key_type))
+    if not isinstance(payload, dict):
+        raise SchemaValidationError("payload must be a dict")
+    missing = [k for k in _KNOWN[gate_type] if k not in payload]
+    if missing:
+        raise SchemaValidationError("missing payload keys: %r" % (missing,))
+    store = _load(STORE_PATH)
+    store = [e for e in store if e["key"] != kd]
+    store.append({
+        "key": kd,
+        "gate_type": gate_type,
+        "payload": json.loads(json.dumps(payload, default=str)),
+        "stored_at": stored_at,
+    })
+    with open(STORE_PATH, "w", encoding="utf-8") as fh:
+        json.dump(store, fh)
+
+
+def now_iso():
+    return datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def stats(*, repo_root=None):
+    return {"entry_count": len(_load(STORE_PATH))}
 '''
 
 
-def _install_fake_cache_manager(repo_root):
-    cache_dir = repo_root / "gen" / "cache-manager"
-    cache_dir.mkdir(parents=True, exist_ok=True)
-    (cache_dir / "cache_manager.py").write_text(CACHE_MANAGER_SOURCE, encoding="utf-8")
+COMPONENT_SOURCE = '''\
+def compute_widget_total(alpha_values, beta_scale, gamma_offset):
+    running_total = 0
+    for item_value in alpha_values:
+        running_total = running_total + item_value * beta_scale + gamma_offset
+    return running_total
 
 
-def _seed_cache(repo_root, seed):
-    seed_path = repo_root / "cache_seed.json"
-    seed_path.write_text(json.dumps(seed), encoding="utf-8")
+class WidgetAccumulator:
+    def __init__(self, initial_amount, step_size):
+        self.current_amount = initial_amount
+        self.step_size = step_size
+
+    def advance_once(self, multiplier_value):
+        self.current_amount = self.current_amount + self.step_size * multiplier_value
+        return self.current_amount
+'''
 
 
-def _read_log(repo_root):
-    log_path = repo_root / "cache_calls.jsonl"
-    if not log_path.exists():
-        return []
-    lines = log_path.read_text(encoding="utf-8").splitlines()
-    return [json.loads(line) for line in lines if line.strip()]
+def _make_repo(tmp_path, seeds):
+    repo_root = tmp_path / "repo"
+    state_dir = tmp_path / "fake_state"
+    state_dir.mkdir(parents=True, exist_ok=True)
+    seed_path = state_dir / "seeds.json"
+    log_path = state_dir / "calls.log"
+    store_path = state_dir / "store.json"
+    seed_path.write_text(json.dumps(seeds), encoding="utf-8")
 
+    cm_dir = repo_root / "gen" / "cache-manager"
+    cm_dir.mkdir(parents=True, exist_ok=True)
+    fake_src = (
+        FAKE_CACHE_MANAGER_TEMPLATE
+        .replace("__SEED_PATH__", repr(str(seed_path)))
+        .replace("__LOG_PATH__", repr(str(log_path)))
+        .replace("__STORE_PATH__", repr(str(store_path)))
+    )
+    (cm_dir / "cache_manager.py").write_text(fake_src, encoding="utf-8")
 
-def _write_foo_component(repo_root):
     foo_dir = repo_root / "gen" / "foo"
     foo_dir.mkdir(parents=True, exist_ok=True)
-    (foo_dir / "foo.py").write_text(
-        "def greet(name):\n"
-        "    message = 'hello ' + name\n"
-        "    return message\n"
-        "\n"
-        "def farewell(name):\n"
-        "    message = 'bye ' + name\n"
-        "    return message\n",
+    (foo_dir / "foo.py").write_text(COMPONENT_SOURCE, encoding="utf-8")
+
+    spec_dir = repo_root / "specs" / "components" / "foo"
+    spec_dir.mkdir(parents=True, exist_ok=True)
+    (spec_dir / "component.md").write_text(
+        "---\n"
+        "id: comp-foo\n"
+        "title: Foo\n"
+        "status: draft\n"
+        "owners: [alice]\n"
+        "---\n\n"
+        "# Foo\n\nA synthetic component used as license-scan input.\n",
         encoding="utf-8",
     )
+    return repo_root, log_path
 
 
-def _write_corpus(repo_root, filename, corpus_version, entries):
-    corpus_obj = {
-        "corpus_version": corpus_version,
-        "block_threshold": 0.7,
+def _write_corpus(path, entries):
+    corpus = {
+        "corpus_version": 0,
+        "block_threshold": 0.70,
         "entries": entries,
     }
-    corpus_path = repo_root / filename
-    corpus_bytes = json.dumps(corpus_obj, indent=2).encode("utf-8")
-    corpus_path.write_bytes(corpus_bytes)
-    return corpus_path, corpus_bytes
+    data = json.dumps(corpus, indent=2).encode("utf-8")
+    path.write_bytes(data)
+    return hashlib.sha256(data).hexdigest()[:12]
 
 
-def _field(obj, name):
-    return obj.get(name) if isinstance(obj, dict) else getattr(obj, name, None)
+def _entry(ref_id, digit):
+    return {
+        "reference_id": ref_id,
+        "license_family": "MIT",
+        "risk_tier": "low",
+        "hashes": [digit * 64],
+    }
 
 
-def test_corpus_becomes_available_fresh_result_not_cached_value(tmp_path, monkeypatch):
-    repo_root = tmp_path
-    _install_fake_cache_manager(repo_root)
-    _write_foo_component(repo_root)
-
-    entries = [
-        {
-            "reference_id": "ref-aaa",
-            "license_family": "MIT",
-            "risk_tier": "low",
-            "hashes": ["0" * 64],
-        }
-    ]
-    corpus_path, corpus_bytes = _write_corpus(repo_root, "corpus.json", 0, entries)
-    corpus_hash = hashlib.sha256(corpus_bytes).hexdigest()[:12]
-    expected_gate_version = "license_scanner@4.0.0+" + corpus_hash
-
-    stale_payload = {
+def _not_evaluated_payload():
+    return {
         "component_id": "comp-foo",
-        "gate_version": "license_scanner@4.0.0-no-reference-corpus",
+        "gate_version": NOT_EVALUATED_GV,
         "evaluated": False,
         "reason": "no-reference-corpus",
         "similarity_score": None,
@@ -155,169 +244,167 @@ def test_corpus_becomes_available_fresh_result_not_cached_value(tmp_path, monkey
         "matches": [],
         "notified": False,
         "notification_delivery_error": None,
-        "cache_hit": True,
+        "cache_hit": False,
     }
-    _seed_cache(
-        repo_root,
-        {
-            "license_scanner@4.0.0-no-reference-corpus": {
-                "gate_type": "license_scanner",
-                "payload": stale_payload,
-                "stored_at": "2026-01-01T00:00:00Z",
-            }
-        },
-    )
-
-    monkeypatch.setenv("VAR_LICENSE_CORPUS_PATH", str(corpus_path))
-
-    result = license_scanner.scan("comp-foo", repo_root)
-
-    evaluated = _field(result, "evaluated")
-    gate_version = _field(result, "gate_version")
-    cache_hit = _field(result, "cache_hit")
-
-    assert evaluated is True
-    assert gate_version == expected_gate_version
-    assert cache_hit is False
-
-    calls = _read_log(repo_root)
-    get_calls = [c for c in calls if c["action"] == "get"]
-    put_calls = [c for c in calls if c["action"] == "put"]
-    assert any(c["gate_version"] == expected_gate_version for c in get_calls)
-    assert any(c["gate_version"] == expected_gate_version for c in put_calls)
 
 
-def test_variable_unset_after_evaluated_cache_entry_not_reused(tmp_path, monkeypatch):
-    repo_root = tmp_path
-    _install_fake_cache_manager(repo_root)
-    _write_foo_component(repo_root)
-
-    entries = [
-        {
-            "reference_id": "ref-bbb",
-            "license_family": "Apache-2.0",
-            "risk_tier": "medium",
-            "hashes": ["1" * 64],
-        }
-    ]
-    corpus_path, corpus_bytes = _write_corpus(repo_root, "corpus2.json", 0, entries)
-    corpus_hash = hashlib.sha256(corpus_bytes).hexdigest()[:12]
-    evaluated_gate_version = "license_scanner@4.0.0+" + corpus_hash
-
-    evaluated_payload = {
+def _evaluated_payload(gv):
+    return {
         "component_id": "comp-foo",
-        "gate_version": evaluated_gate_version,
+        "gate_version": gv,
         "evaluated": True,
         "reason": None,
-        "similarity_score": 0.0,
-        "block_threshold": 0.7,
-        "blocked": False,
-        "matches": [],
+        "similarity_score": SEEDED_EVALUATED_SCORE,
+        "block_threshold": 0.70,
+        "blocked": True,
+        "matches": [
+            {
+                "reference_id": SEEDED_REFERENCE_ID,
+                "license_family": "gpl-3.0",
+                "risk_tier": "high",
+                "score": SEEDED_EVALUATED_SCORE,
+            }
+        ],
         "notified": False,
         "notification_delivery_error": None,
-        "cache_hit": True,
+        "cache_hit": False,
     }
-    _seed_cache(
-        repo_root,
-        {
-            evaluated_gate_version: {
-                "gate_type": "license_scanner",
-                "payload": evaluated_payload,
-                "stored_at": "2026-01-01T00:00:00Z",
-            }
-        },
-    )
 
-    monkeypatch.delenv("VAR_LICENSE_CORPUS_PATH", raising=False)
+
+def _read_log(log_path):
+    if not log_path.exists():
+        return []
+    return [json.loads(line) for line in log_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+
+
+def _match_ref_ids(result):
+    matches = _field(result, "matches") or []
+    return [_field(m, "reference_id") for m in matches]
+
+
+@pytest.fixture
+def clean_env(monkeypatch, tmp_path):
+    for name in (
+        "VAR_LICENSE_CORPUS_PATH",
+        "VAR_COMPLIANCE_WEBHOOK_URL",
+        "VAR_CACHE_STORE_URL",
+    ):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.chdir(tmp_path)
+    return monkeypatch
+
+
+def test_not_evaluated_cache_entry_not_reused_once_corpus_configured(tmp_path, clean_env):
+    seeds = [
+        {
+            "gate_version": NOT_EVALUATED_GV,
+            "payload": _not_evaluated_payload(),
+            "stored_at": "2026-01-01T00:00:00Z",
+        }
+    ]
+    repo_root, log_path = _make_repo(tmp_path, seeds)
+
+    corpus_path = tmp_path / "corpus.json"
+    h = _write_corpus(corpus_path, [_entry("ref-001", "a")])
+    clean_env.setenv("VAR_LICENSE_CORPUS_PATH", str(corpus_path))
+    expected_gv = "license_scanner@4.0.0+" + h
+
+    assert license_scanner.gate_version(repo_root) == expected_gv
 
     result = license_scanner.scan("comp-foo", repo_root)
 
-    evaluated = _field(result, "evaluated")
-    reason = _field(result, "reason")
-    gate_version = _field(result, "gate_version")
-    cache_hit = _field(result, "cache_hit")
+    assert _field(result, "evaluated") is True
+    assert _field(result, "gate_version") == expected_gv
+    assert _field(result, "reason") is None
+    assert not _field(result, "cache_hit")
+    assert _field(result, "similarity_score") is not None
+    assert _field(result, "block_threshold") is not None
 
-    assert evaluated is False
-    assert reason == "no-reference-corpus"
-    assert gate_version == "license_scanner@4.0.0-no-reference-corpus"
-    assert cache_hit is False
-
-    calls = _read_log(repo_root)
-    get_calls = [c for c in calls if c["action"] == "get"]
-    assert any(
-        c["gate_version"] == "license_scanner@4.0.0-no-reference-corpus"
-        for c in get_calls
-    )
+    log = _read_log(log_path)
+    gets = [r for r in log if r["op"] == "get"]
+    hits = [r for r in log if r["op"] == "hit"]
+    puts = [r for r in log if r["op"] == "put"]
+    assert gets, "scan never consulted the stand-in cache-manager"
+    assert any(g["key"]["gate_version"] == expected_gv for g in gets)
+    assert all(g["key"]["gate_version"] != NOT_EVALUATED_GV for g in gets)
+    assert not hits
+    assert all(p["key"]["gate_version"] == expected_gv for p in puts)
 
 
-def test_corpus_content_change_without_version_bump_not_reused(tmp_path, monkeypatch):
-    repo_root = tmp_path
-    _install_fake_cache_manager(repo_root)
-    _write_foo_component(repo_root)
+def test_evaluated_cache_entry_not_reused_once_corpus_unset(tmp_path, clean_env):
+    corpus_path = tmp_path / "corpus.json"
+    h = _write_corpus(corpus_path, [_entry("ref-001", "a")])
+    evaluated_gv = "license_scanner@4.0.0+" + h
 
-    initial_entries = [
+    seeds = [
         {
-            "reference_id": "ref-ccc",
-            "license_family": "BSD-3-Clause",
-            "risk_tier": "low",
-            "hashes": ["2" * 64],
+            "gate_version": evaluated_gv,
+            "payload": _evaluated_payload(evaluated_gv),
+            "stored_at": "2026-01-01T00:00:00Z",
         }
     ]
-    corpus_path, corpus_bytes = _write_corpus(
-        repo_root, "corpus3.json", 2, initial_entries
-    )
-    initial_hash = hashlib.sha256(corpus_bytes).hexdigest()[:12]
-    initial_gate_version = "license_scanner@4.0.2+" + initial_hash
+    repo_root, log_path = _make_repo(tmp_path, seeds)
 
-    evaluated_payload = {
-        "component_id": "comp-foo",
-        "gate_version": initial_gate_version,
-        "evaluated": True,
-        "reason": None,
-        "similarity_score": 0.0,
-        "block_threshold": 0.7,
-        "blocked": False,
-        "matches": [],
-        "notified": False,
-        "notification_delivery_error": None,
-        "cache_hit": True,
-    }
-    _seed_cache(
-        repo_root,
-        {
-            initial_gate_version: {
-                "gate_type": "license_scanner",
-                "payload": evaluated_payload,
-                "stored_at": "2026-01-01T00:00:00Z",
-            }
-        },
-    )
+    clean_env.delenv("VAR_LICENSE_CORPUS_PATH", raising=False)
 
-    updated_entries = initial_entries + [
-        {
-            "reference_id": "ref-ddd",
-            "license_family": "BSD-3-Clause",
-            "risk_tier": "low",
-            "hashes": ["3" * 64],
-        }
-    ]
-    corpus_path, corpus_bytes = _write_corpus(
-        repo_root, "corpus3.json", 2, updated_entries
-    )
-    updated_hash = hashlib.sha256(corpus_bytes).hexdigest()[:12]
-    updated_gate_version = "license_scanner@4.0.2+" + updated_hash
-    assert updated_gate_version != initial_gate_version
-
-    monkeypatch.setenv("VAR_LICENSE_CORPUS_PATH", str(corpus_path))
+    assert license_scanner.gate_version(repo_root) == NOT_EVALUATED_GV
 
     result = license_scanner.scan("comp-foo", repo_root)
 
-    gate_version = _field(result, "gate_version")
-    cache_hit = _field(result, "cache_hit")
+    assert _field(result, "evaluated") is False
+    assert _field(result, "reason") == "no-reference-corpus"
+    assert _field(result, "gate_version") == NOT_EVALUATED_GV
+    assert not _field(result, "cache_hit")
+    assert _field(result, "similarity_score") is None
+    assert _field(result, "block_threshold") is None
+    assert list(_field(result, "matches") or []) == []
+    assert _field(result, "blocked") is False
+    assert SEEDED_REFERENCE_ID not in _match_ref_ids(result)
 
-    assert gate_version == updated_gate_version
-    assert cache_hit is False
+    log = _read_log(log_path)
+    gets = [r for r in log if r["op"] == "get"]
+    hits = [r for r in log if r["op"] == "hit"]
+    puts = [r for r in log if r["op"] == "put"]
+    assert all(g["key"]["gate_version"] != evaluated_gv for g in gets)
+    assert not hits
+    assert all(p["key"]["gate_version"] != evaluated_gv for p in puts)
 
-    calls = _read_log(repo_root)
-    get_calls = [c for c in calls if c["action"] == "get"]
-    assert any(c["gate_version"] == updated_gate_version for c in get_calls)
+
+def test_corpus_entry_added_without_version_bump_invalidates_cache(tmp_path, clean_env):
+    corpus_path = tmp_path / "corpus.json"
+    h_old = _write_corpus(corpus_path, [_entry("ref-001", "a")])
+    old_gv = "license_scanner@4.0.0+" + h_old
+
+    seeds = [
+        {
+            "gate_version": old_gv,
+            "payload": _evaluated_payload(old_gv),
+            "stored_at": "2026-01-01T00:00:00Z",
+        }
+    ]
+    repo_root, log_path = _make_repo(tmp_path, seeds)
+
+    h_new = _write_corpus(corpus_path, [_entry("ref-001", "a"), _entry("ref-002", "b")])
+    assert h_new != h_old
+    new_gv = "license_scanner@4.0.0+" + h_new
+    clean_env.setenv("VAR_LICENSE_CORPUS_PATH", str(corpus_path))
+
+    assert license_scanner.gate_version(repo_root) == new_gv
+
+    result = license_scanner.scan("comp-foo", repo_root)
+
+    assert _field(result, "evaluated") is True
+    assert _field(result, "gate_version") == new_gv
+    assert not _field(result, "cache_hit")
+    assert _field(result, "similarity_score") != SEEDED_EVALUATED_SCORE
+    assert SEEDED_REFERENCE_ID not in _match_ref_ids(result)
+
+    log = _read_log(log_path)
+    gets = [r for r in log if r["op"] == "get"]
+    hits = [r for r in log if r["op"] == "hit"]
+    puts = [r for r in log if r["op"] == "put"]
+    assert gets, "scan never consulted the stand-in cache-manager"
+    assert any(g["key"]["gate_version"] == new_gv for g in gets)
+    assert all(g["key"]["gate_version"] != old_gv for g in gets)
+    assert not hits
+    assert all(p["key"]["gate_version"] == new_gv for p in puts)

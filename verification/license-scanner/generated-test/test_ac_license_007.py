@@ -1,27 +1,120 @@
 import hashlib
 import json
-import os
-import tempfile
-import unittest
+import re
 from pathlib import Path
 
+import pytest
 
-def get_field(obj, name, default=None):
-    if isinstance(obj, dict):
-        return obj.get(name, default)
-    return getattr(obj, name, default)
+import license_scanner
 
 
-FAKE_CACHE_MANAGER_SOURCE = r"""
-import dataclasses
+COMPONENT_ID = "comp-sample-widget"
+COMPONENT_SLUG = "sample-widget"
+
+
+def _field(value, name):
+    if isinstance(value, dict):
+        return value.get(name)
+    return getattr(value, name, None)
+
+
+def _snapshot(result):
+    names = [
+        "component_id",
+        "gate_version",
+        "evaluated",
+        "reason",
+        "similarity_score",
+        "block_threshold",
+        "blocked",
+        "matches",
+        "notified",
+        "notification_delivery_error",
+        "cache_hit",
+    ]
+    snap = {}
+    for n in names:
+        v = _field(result, n)
+        if n == "matches" and v is not None:
+            normalized = []
+            for m in v:
+                normalized.append(
+                    {
+                        "reference_id": _field(m, "reference_id"),
+                        "license_family": _field(m, "license_family"),
+                        "risk_tier": _field(m, "risk_tier"),
+                        "score": _field(m, "score"),
+                    }
+                )
+            v = normalized
+        snap[n] = v
+    return snap
+
+
+def _tokens(text):
+    return [t.lower() for t in re.findall(r"[A-Za-z_][A-Za-z0-9_]*|\d+", text)]
+
+
+def _window_hashes(text):
+    toks = _tokens(text)
+    out = []
+    for i in range(len(toks) - 8):
+        window = "\x1f".join(toks[i : i + 9])
+        out.append(hashlib.sha256(window.encode("utf-8")).hexdigest())
+    return out
+
+
+# Comment-free, docstring-free source so the stripping rules never matter.
+FLAGGED_SOURCE = (
+    "def alpha_reticulate(bravo_items, charlie_limit):\n"
+    "    delta_total = 0\n"
+    "    for echo_item in bravo_items:\n"
+    "        foxtrot_weight = echo_item.golf_value * 17\n"
+    "        if foxtrot_weight > charlie_limit:\n"
+    "            hotel_overflow = foxtrot_weight - charlie_limit\n"
+    "            delta_total = delta_total + hotel_overflow\n"
+    "        else:\n"
+    "            delta_total = delta_total + india_baseline(foxtrot_weight, 42)\n"
+    "    return juliet_finalize(delta_total, kilo_mode=3)\n"
+    "\n"
+    "def india_baseline(lima_value, mike_factor):\n"
+    "    november_result = lima_value * mike_factor + 99\n"
+    "    return oscar_clamp(november_result, papa_low=1, quebec_high=1000)\n"
+)
+
+CLEAN_SOURCE = (
+    "def zebra_compose(yak_parts, xylo_sep):\n"
+    "    wombat_buffer = []\n"
+    "    for vulture_piece in yak_parts:\n"
+    "        wombat_buffer.append(umbra_render(vulture_piece))\n"
+    "    return xylo_sep.join(wombat_buffer)\n"
+    "\n"
+    "def umbra_render(tapir_node):\n"
+    "    if tapir_node is None:\n"
+    "        return sable_default\n"
+    "    return raven_format(tapir_node, quill_width=8, pelican_pad=5)\n"
+)
+
+
+FAKE_CACHE_MANAGER = r'''
 import json
-import os
+from dataclasses import dataclass
+from pathlib import Path
 
-STORE_PATH = os.environ["FAKE_CACHE_STORE_PATH"]
-LOG_PATH = os.environ["FAKE_CACHE_LOG_PATH"]
+_LOG_PATH = Path(__LOG_PATH__)
+_STORE_PATH = Path(__STORE_PATH__)
+
+_REQUIRED = {
+    "generator": ["component_id", "model", "prompt_version", "files"],
+    "compiler": ["outputs", "gate_version", "summary"],
+    "generated_test": ["component_id", "criterion_id", "model", "file"],
+    "llm_judge": ["result", "rationale"],
+    "license_scanner": ["component_id", "gate_version", "similarity_score", "blocked", "matches"],
+    "secret_scanner": ["scope", "gate_version", "flagged", "matches"],
+}
 
 
-@dataclasses.dataclass
+@dataclass
 class CacheKey:
     spec_bundle_hash: str
     gate_inputs_hash: str
@@ -29,7 +122,7 @@ class CacheKey:
     model_pin: str
 
 
-@dataclasses.dataclass
+@dataclass
 class CachedResult:
     gate_type: str
     payload: dict
@@ -37,40 +130,55 @@ class CachedResult:
 
 
 class Miss:
+    def __eq__(self, other):
+        return isinstance(other, Miss)
+
+    def __hash__(self):
+        return 0
+
+    def __repr__(self):
+        return "Miss()"
+
+
+class SchemaValidationError(ValueError):
     pass
 
 
+def _log(record):
+    with open(_LOG_PATH, "a", encoding="utf-8") as fh:
+        fh.write(json.dumps(record, default=str) + "\n")
+
+
 def _key_str(cache_key):
-    return "|".join([
-        cache_key.spec_bundle_hash,
-        cache_key.gate_inputs_hash,
-        cache_key.gate_version,
-        cache_key.model_pin,
-    ])
+    return json.dumps(
+        [
+            cache_key.spec_bundle_hash,
+            cache_key.gate_inputs_hash,
+            cache_key.gate_version,
+            cache_key.model_pin,
+        ],
+        default=str,
+    )
 
 
 def _load_store():
-    if os.path.exists(STORE_PATH):
-        with open(STORE_PATH, "r") as f:
-            return json.load(f)
+    if _STORE_PATH.exists():
+        return json.loads(_STORE_PATH.read_text(encoding="utf-8"))
     return {}
 
 
 def _save_store(store):
-    with open(STORE_PATH, "w") as f:
-        json.dump(store, f)
-
-
-def _log(op, key):
-    with open(LOG_PATH, "a") as f:
-        f.write(json.dumps({"op": op, "key": key}) + "\n")
+    tmp = _STORE_PATH.with_suffix(".tmp")
+    tmp.write_text(json.dumps(store, default=str), encoding="utf-8")
+    tmp.replace(_STORE_PATH)
 
 
 def get(cache_key, *, repo_root=None):
-    store = _load_store()
     k = _key_str(cache_key)
-    _log("get", k)
-    if k in store:
+    store = _load_store()
+    hit = k in store
+    _log({"op": "get", "key": k, "hit": hit})
+    if hit:
         entry = store[k]
         return CachedResult(
             gate_type=entry["gate_type"],
@@ -81,154 +189,148 @@ def get(cache_key, *, repo_root=None):
 
 
 def put(cache_key, result, *, repo_root=None):
-    store = _load_store()
+    gate_type = str(cache_key.gate_version).split("@", 1)[0]
+    if result.gate_type != gate_type:
+        raise SchemaValidationError("gate_type mismatch")
+    if gate_type not in _REQUIRED:
+        raise SchemaValidationError("unknown gate type")
+    payload = result.payload
+    if not isinstance(payload, dict):
+        raise SchemaValidationError("payload not a dict")
+    for req in _REQUIRED[gate_type]:
+        if req not in payload:
+            raise SchemaValidationError("missing key " + req)
+    payload_copy = json.loads(json.dumps(payload, default=str))
     k = _key_str(cache_key)
+    store = _load_store()
     store[k] = {
         "gate_type": result.gate_type,
-        "payload": result.payload,
+        "payload": payload_copy,
         "stored_at": result.stored_at,
     }
     _save_store(store)
-    _log("put", k)
-"""
+    _log({"op": "put", "key": k, "payload": payload_copy})
 
 
-def sha256_window(tokens):
-    return hashlib.sha256("\x1f".join(tokens).encode("utf-8")).hexdigest()
+def now_iso():
+    _log({"op": "now_iso"})
+    import datetime
+    return datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-FLAGGED_TOKENS = ["alpha", "beta", "gamma", "delta", "epsilon", "zeta", "eta", "theta", "iota"]
-CLEAN_TOKENS = ["zebra", "yolk", "xray", "wobble", "vortex", "umbra", "tango", "sierra", "romeo"]
+def stats(*, repo_root=None):
+    return {"entry_count": len(_load_store())}
+'''
 
 
-class TestACLicense007(unittest.TestCase):
-    def setUp(self):
-        self._saved_env = {}
-        for key in ("VAR_LICENSE_CORPUS_PATH", "FAKE_CACHE_STORE_PATH", "FAKE_CACHE_LOG_PATH"):
-            self._saved_env[key] = os.environ.get(key)
+def _write_fake_cache_manager(repo_root, log_path, store_path):
+    dep_dir = repo_root / "gen" / "cache-manager"
+    dep_dir.mkdir(parents=True, exist_ok=True)
+    content = FAKE_CACHE_MANAGER.replace("__LOG_PATH__", repr(str(log_path))).replace(
+        "__STORE_PATH__", repr(str(store_path))
+    )
+    (dep_dir / "cache_manager.py").write_text(content, encoding="utf-8")
 
-    def tearDown(self):
-        for key, value in self._saved_env.items():
-            if value is None:
-                os.environ.pop(key, None)
-            else:
-                os.environ[key] = value
 
-    def test_flagged_attempt_preserved_when_retry_scans_clean(self):
-        with tempfile.TemporaryDirectory() as repo_root_str, \
-             tempfile.TemporaryDirectory() as side_dir_str:
+def _read_log(log_path):
+    if not log_path.exists():
+        return []
+    records = []
+    for line in log_path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if line:
+            records.append(json.loads(line))
+    return records
 
-            repo_root = Path(repo_root_str)
-            side_dir = Path(side_dir_str)
 
-            cache_manager_dir = repo_root / "gen" / "cache-manager"
-            cache_manager_dir.mkdir(parents=True)
-            (cache_manager_dir / "cache_manager.py").write_text(FAKE_CACHE_MANAGER_SOURCE)
+def _write_component_source(repo_root, text):
+    comp_dir = repo_root / "gen" / COMPONENT_SLUG
+    comp_dir.mkdir(parents=True, exist_ok=True)
+    for existing in comp_dir.glob("*.py"):
+        existing.unlink()
+    (comp_dir / "sample_widget.py").write_text(text, encoding="utf-8")
 
-            component_dir = repo_root / "gen" / "widget"
-            component_dir.mkdir(parents=True)
-            source_file = component_dir / "widget.py"
-            source_file.write_text(" ".join(FLAGGED_TOKENS))
 
-            flagged_hash = sha256_window(FLAGGED_TOKENS)
-            corpus = {
-                "corpus_version": 1,
-                "block_threshold": 0.70,
-                "entries": [
-                    {
-                        "reference_id": "ref-100",
-                        "license_family": "GPL-3.0",
-                        "risk_tier": "high",
-                        "hashes": [flagged_hash],
-                    }
-                ],
+def test_ac_license_007_flagged_result_survives_clean_retry(tmp_path, monkeypatch):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    logs_dir = tmp_path / "logs"
+    logs_dir.mkdir()
+    log_path = logs_dir / "cache_calls.jsonl"
+    store_path = logs_dir / "cache_store.json"
+
+    _write_fake_cache_manager(repo_root, log_path, store_path)
+
+    flagged_hashes = sorted(set(_window_hashes(FLAGGED_SOURCE)))
+    clean_hashes = set(_window_hashes(CLEAN_SOURCE))
+    assert len(flagged_hashes) > 0
+    assert len(clean_hashes) > 0
+    assert clean_hashes.isdisjoint(flagged_hashes)
+
+    corpus = {
+        "corpus_version": 3,
+        "block_threshold": 0.70,
+        "entries": [
+            {
+                "reference_id": "ref-001",
+                "license_family": "GPL",
+                "risk_tier": "high",
+                "hashes": flagged_hashes,
             }
-            corpus_path = side_dir / "corpus.json"
-            corpus_path.write_text(json.dumps(corpus))
+        ],
+    }
+    corpus_path = repo_root / "corpus.json"
+    corpus_path.write_text(json.dumps(corpus), encoding="utf-8")
 
-            store_path = side_dir / "store.json"
-            log_path = side_dir / "log.jsonl"
+    monkeypatch.setenv("VAR_LICENSE_CORPUS_PATH", str(corpus_path))
+    monkeypatch.delenv("VAR_COMPLIANCE_WEBHOOK_URL", raising=False)
+    monkeypatch.delenv("VAR_CACHE_STORE_URL", raising=False)
+    monkeypatch.chdir(repo_root)
 
-            os.environ["VAR_LICENSE_CORPUS_PATH"] = str(corpus_path)
-            os.environ["FAKE_CACHE_STORE_PATH"] = str(store_path)
-            os.environ["FAKE_CACHE_LOG_PATH"] = str(log_path)
+    # First generation sample: scans flagged.
+    _write_component_source(repo_root, FLAGGED_SOURCE)
+    flagged = license_scanner.scan(COMPONENT_ID, repo_root)
 
-            import license_scanner
+    assert _field(flagged, "evaluated") is True
+    assert _field(flagged, "blocked") is True
+    assert _field(flagged, "similarity_score") >= _field(flagged, "block_threshold")
+    assert len(_field(flagged, "matches") or []) >= 1
+    flagged_snapshot = _snapshot(flagged)
 
-            component_id = "comp-widget"
+    # Retried sample: scans clean.
+    _write_component_source(repo_root, CLEAN_SOURCE)
+    clean = license_scanner.scan(COMPONENT_ID, repo_root)
 
-            result1 = license_scanner.scan(component_id, repo_root)
-            evaluated1 = get_field(result1, "evaluated")
-            blocked1 = get_field(result1, "blocked")
-            score1 = get_field(result1, "similarity_score")
+    assert _field(clean, "evaluated") is True
+    assert _field(clean, "blocked") is False
+    assert _field(clean, "similarity_score") < _field(clean, "block_threshold")
 
-            self.assertTrue(evaluated1)
-            self.assertTrue(blocked1)
-            self.assertEqual(score1, 1.0)
+    # Retry is not a re-read of the flagged entry: it was a fresh scan.
+    assert _field(clean, "cache_hit") is False
 
-            source_file.write_text(" ".join(CLEAN_TOKENS))
+    # The original flagged result is still intact after the clean retry —
+    # never overwritten or mutated into the clean one.
+    assert _snapshot(flagged) == flagged_snapshot
+    assert _field(flagged, "blocked") is True
+    assert clean is not flagged
 
-            result2 = license_scanner.scan(component_id, repo_root)
-            evaluated2 = get_field(result2, "evaluated")
-            blocked2 = get_field(result2, "blocked")
-            score2 = get_field(result2, "similarity_score")
+    # Both results are present side by side in the record the scanner wrote.
+    records = _read_log(log_path)
+    puts = [r for r in records if r.get("op") == "put"]
+    assert len(puts) >= 2, records
+    put_blocked_values = [r["payload"].get("blocked") for r in puts]
+    assert True in put_blocked_values
+    assert False in put_blocked_values
 
-            self.assertTrue(evaluated2)
-            self.assertFalse(blocked2)
-            self.assertEqual(score2, 0.0)
+    store = json.loads(store_path.read_text(encoding="utf-8"))
+    stored_blocked = [entry["payload"].get("blocked") for entry in store.values()]
+    assert True in stored_blocked, store
+    assert False in stored_blocked, store
 
-            self.assertTrue(store_path.exists())
-            with open(store_path) as f:
-                store = json.load(f)
+    flagged_keys = [k for k, e in store.items() if e["payload"].get("blocked") is True]
+    clean_keys = [k for k, e in store.items() if e["payload"].get("blocked") is False]
+    assert set(flagged_keys).isdisjoint(clean_keys)
 
-            license_entries = [
-                entry for entry in store.values()
-                if get_field(entry, "gate_type") == "license_scanner"
-            ]
-            self.assertEqual(
-                len(license_entries), 2,
-                "expected two distinct cache-manager records (flagged and clean), "
-                "got %r" % (license_entries,)
-            )
-
-            flagged_payloads = [
-                get_field(entry, "payload") for entry in license_entries
-                if get_field(get_field(entry, "payload"), "blocked") is True
-            ]
-            clean_payloads = [
-                get_field(entry, "payload") for entry in license_entries
-                if get_field(get_field(entry, "payload"), "blocked") is False
-            ]
-
-            self.assertEqual(
-                len(flagged_payloads), 1,
-                "the original flagged LicenseScanResult must still be present in the record"
-            )
-            self.assertEqual(
-                len(clean_payloads), 1,
-                "the clean LicenseScanResult from the retried scan must be present in the record"
-            )
-
-            flagged_payload = flagged_payloads[0]
-            self.assertEqual(get_field(flagged_payload, "component_id"), component_id)
-            self.assertTrue(get_field(flagged_payload, "matches"))
-
-            self.assertTrue(log_path.exists())
-            with open(log_path) as f:
-                log_lines = [json.loads(line) for line in f if line.strip()]
-
-            put_ops = [entry for entry in log_lines if get_field(entry, "op") == "put"]
-            self.assertGreaterEqual(
-                len(put_ops), 2,
-                "the fake cache-manager's put() must have been invoked for both attempts"
-            )
-            self.assertNotEqual(
-                get_field(put_ops[0], "key"),
-                get_field(put_ops[-1], "key"),
-                "the retried clean attempt must not reuse (and thereby overwrite) "
-                "the original flagged attempt's cache key"
-            )
-
-
-if __name__ == "__main__":
-    unittest.main()
+    for entry in store.values():
+        assert entry["gate_type"] == "license_scanner"
+        assert entry["payload"].get("component_id") == COMPONENT_ID

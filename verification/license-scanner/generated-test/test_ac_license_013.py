@@ -1,4 +1,7 @@
 import json
+import os
+import sys
+import urllib.request
 from pathlib import Path
 
 import pytest
@@ -6,12 +9,34 @@ import pytest
 import license_scanner
 
 
-_CACHE_MANAGER_SOURCE = '''
-from dataclasses import dataclass
-from typing import Any, Optional
+VALID_ENTRY = {
+    "reference_id": "ref-001",
+    "license_family": "GPL",
+    "risk_tier": "high",
+    "hashes": ["0" * 64],
+}
 
 
-@dataclass
+def _f(value, name):
+    if isinstance(value, dict):
+        return value.get(name)
+    return getattr(value, name, None)
+
+
+FAKE_CACHE_MANAGER_TEMPLATE = '''
+import dataclasses
+import datetime
+import json
+
+_LOG_PATH = {log_path!r}
+
+
+def _log(record):
+    with open(_LOG_PATH, "a", encoding="utf-8") as fh:
+        fh.write(json.dumps(record) + "\\n")
+
+
+@dataclasses.dataclass
 class CacheKey:
     spec_bundle_hash: str
     gate_inputs_hash: str
@@ -19,166 +44,234 @@ class CacheKey:
     model_pin: str
 
 
-@dataclass
+@dataclasses.dataclass
 class CachedResult:
     gate_type: str
-    payload: Any
+    payload: dict
     stored_at: str
 
 
 class Miss:
+    def __eq__(self, other):
+        return isinstance(other, Miss)
+
+    def __hash__(self):
+        return hash("Miss")
+
+
+class SchemaValidationError(ValueError):
     pass
 
 
 def get(cache_key, *, repo_root=None):
+    _log({{"call": "get", "gate_version": getattr(cache_key, "gate_version", None)}})
     return Miss()
 
 
 def put(cache_key, result, *, repo_root=None):
+    _log({{"call": "put", "gate_version": getattr(cache_key, "gate_version", None)}})
     return None
+
+
+def now_iso():
+    return datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def stats(*, repo_root=None):
+    return {{"entry_count": 0}}
 '''
 
 
-def _write_cache_manager(repo_root: Path) -> None:
-    cache_dir = repo_root / "gen" / "cache-manager"
-    cache_dir.mkdir(parents=True, exist_ok=True)
-    (cache_dir / "cache_manager.py").write_text(_CACHE_MANAGER_SOURCE, encoding="utf-8")
-
-
-def _write_component_stub(repo_root: Path, component_id: str) -> None:
-    slug = component_id[len("comp-"):] if component_id.startswith("comp-") else component_id
-    comp_dir = repo_root / "gen" / slug
-    comp_dir.mkdir(parents=True, exist_ok=True)
-    module_name = slug.replace("-", "_")
-    (comp_dir / f"{module_name}.py").write_text("x = 1\n", encoding="utf-8")
-
-
-def _get_field(value, name):
-    if isinstance(value, dict):
-        return value.get(name)
-    return getattr(value, name, None)
-
-
-def _setup_repo(tmp_path, component_id="comp-foo"):
+def _make_repo(tmp_path):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
-    _write_cache_manager(repo_root)
-    _write_component_stub(repo_root, component_id)
+    # A component source so the scanner has something to look at, should it look.
+    comp_dir = repo_root / "gen" / "foo"
+    comp_dir.mkdir(parents=True)
+    (comp_dir / "foo.py").write_text(
+        "def add(a, b):\n    total = a + b\n    return total\n\n"
+        "def mul(a, b):\n    product = a * b\n    return product\n",
+        encoding="utf-8",
+    )
+    # Fake cache-manager (flat module shape) so no real cache state leaks in.
+    cm_dir = repo_root / "gen" / "cache-manager"
+    cm_dir.mkdir(parents=True)
+    log_path = tmp_path / "cache_manager_calls.log"
+    (cm_dir / "cache_manager.py").write_text(
+        FAKE_CACHE_MANAGER_TEMPLATE.format(log_path=str(log_path)),
+        encoding="utf-8",
+    )
     return repo_root
 
 
-def test_corpus_unreadable_fails_closed(tmp_path, monkeypatch):
-    repo_root = _setup_repo(tmp_path)
-    missing_corpus = repo_root / "no-such-corpus.json"
-    monkeypatch.setenv("VAR_LICENSE_CORPUS_PATH", str(missing_corpus))
+@pytest.fixture
+def repo_root(tmp_path, monkeypatch):
+    root = _make_repo(tmp_path)
+    monkeypatch.chdir(root)
     monkeypatch.delenv("VAR_COMPLIANCE_WEBHOOK_URL", raising=False)
+    monkeypatch.delenv("VAR_CACHE_STORE_URL", raising=False)
+    monkeypatch.delenv("VAR_LICENSE_CORPUS_PATH", raising=False)
+    return root
+
+
+def test_missing_corpus_file_is_unreadable_and_blocks(repo_root, tmp_path, monkeypatch):
+    missing = tmp_path / "does-not-exist" / "corpus.json"
+    assert not missing.exists()
+    monkeypatch.setenv("VAR_LICENSE_CORPUS_PATH", str(missing))
 
     result = license_scanner.scan("comp-foo", repo_root)
 
-    assert _get_field(result, "evaluated") is False
-    assert _get_field(result, "reason") == "corpus-unreadable"
-    assert _get_field(result, "blocked") is True
-    assert _get_field(result, "similarity_score") is None
-    assert _get_field(result, "gate_version") == "license_scanner@4.0.0-corpus-unreadable"
+    assert _f(result, "evaluated") is False
+    assert _f(result, "reason") == "corpus-unreadable"
+    assert _f(result, "blocked") is True
+    assert _f(result, "similarity_score") is None
+    assert _f(result, "gate_version") == "license_scanner@4.0.0-corpus-unreadable"
 
 
-_INVALID_CORPORA = {
-    "not_json": "this is not valid json {{{",
-    "json_list": json.dumps([{"reference_id": "r1", "risk_tier": "high", "hashes": ["abc"]}]),
-    "no_entries_key": json.dumps({"corpus_version": 1}),
-    "bad_corpus_version": json.dumps({
-        "corpus_version": "x",
-        "entries": [{"reference_id": "r1", "risk_tier": "high", "hashes": ["abc"]}],
-    }),
-    "block_threshold_zero": json.dumps({
-        "block_threshold": 0,
-        "entries": [{"reference_id": "r1", "risk_tier": "high", "hashes": ["abc"]}],
-    }),
-    "block_threshold_too_high": json.dumps({
-        "block_threshold": 1.5,
-        "entries": [{"reference_id": "r1", "risk_tier": "high", "hashes": ["abc"]}],
-    }),
-    "hashes_not_list": json.dumps({
-        "entries": [{"reference_id": "r1", "risk_tier": "high", "hashes": "abc"}],
-    }),
-    "bad_risk_tier": json.dumps({
-        "entries": [{"reference_id": "r1", "risk_tier": "severe", "hashes": ["abc"]}],
-    }),
-}
+def _invalid_corpora():
+    return [
+        ("not-json", "{this is not json"),
+        ("json-list", json.dumps([VALID_ENTRY])),
+        ("no-entries-list", json.dumps({"corpus_version": 1, "block_threshold": 0.7})),
+        (
+            "corpus-version-x",
+            json.dumps({"corpus_version": "x", "entries": [VALID_ENTRY]}),
+        ),
+        (
+            "block-threshold-0",
+            json.dumps({"corpus_version": 1, "block_threshold": 0, "entries": [VALID_ENTRY]}),
+        ),
+        (
+            "block-threshold-1.5",
+            json.dumps({"corpus_version": 1, "block_threshold": 1.5, "entries": [VALID_ENTRY]}),
+        ),
+        (
+            "hashes-not-list",
+            json.dumps(
+                {
+                    "corpus_version": 1,
+                    "entries": [dict(VALID_ENTRY, hashes="0" * 64)],
+                }
+            ),
+        ),
+        (
+            "risk-tier-severe",
+            json.dumps(
+                {
+                    "corpus_version": 1,
+                    "entries": [dict(VALID_ENTRY, risk_tier="severe")],
+                }
+            ),
+        ),
+    ]
 
 
-@pytest.mark.parametrize("case_name", sorted(_INVALID_CORPORA.keys()))
-def test_corpus_invalid_fails_closed(tmp_path, monkeypatch, case_name):
-    repo_root = _setup_repo(tmp_path)
-    corpus_path = repo_root / f"corpus-{case_name}.json"
-    corpus_path.write_text(_INVALID_CORPORA[case_name], encoding="utf-8")
-    monkeypatch.setenv("VAR_LICENSE_CORPUS_PATH", str(corpus_path))
-    monkeypatch.delenv("VAR_COMPLIANCE_WEBHOOK_URL", raising=False)
+@pytest.mark.parametrize(
+    "label,content",
+    _invalid_corpora(),
+    ids=[c[0] for c in _invalid_corpora()],
+)
+def test_invalid_corpus_blocks(repo_root, tmp_path, monkeypatch, label, content):
+    corpus = tmp_path / ("corpus-" + label + ".json")
+    corpus.write_text(content, encoding="utf-8")
+    monkeypatch.setenv("VAR_LICENSE_CORPUS_PATH", str(corpus))
 
     result = license_scanner.scan("comp-foo", repo_root)
 
-    assert _get_field(result, "evaluated") is False
-    assert _get_field(result, "reason") == "corpus-invalid"
-    assert _get_field(result, "blocked") is True
-    assert _get_field(result, "gate_version") == "license_scanner@4.0.0-corpus-invalid"
+    assert _f(result, "evaluated") is False, label
+    assert _f(result, "reason") == "corpus-invalid", label
+    assert _f(result, "blocked") is True, label
+    assert _f(result, "gate_version") == "license_scanner@4.0.0-corpus-invalid", label
 
 
-def test_notifies_webhook_on_unreadable_corpus_block(tmp_path, monkeypatch):
-    repo_root = _setup_repo(tmp_path)
-    missing_corpus = repo_root / "no-such-corpus.json"
-    monkeypatch.setenv("VAR_LICENSE_CORPUS_PATH", str(missing_corpus))
-    monkeypatch.setenv("VAR_COMPLIANCE_WEBHOOK_URL", "https://example.invalid/webhook")
+class _FakeResponse:
+    status = 200
 
-    log_path = tmp_path / "webhook-calls.log"
+    def read(self, *args, **kwargs):
+        return b"{}"
 
-    class _FakeResponse:
-        def __enter__(self):
-            return self
+    def getcode(self):
+        return 200
 
-        def __exit__(self, exc_type, exc, tb):
-            return False
+    def close(self):
+        pass
 
-        def read(self):
-            return b"{}"
+    def __enter__(self):
+        return self
 
-        def close(self):
-            pass
+    def __exit__(self, *exc):
+        return False
 
-    def _extract_data(args, kwargs):
+
+def _extract_body(args, kwargs):
+    req = args[0] if args else kwargs.get("url")
+    data = None
+    if req is not None and not isinstance(req, str):
+        data = getattr(req, "data", None)
+    if data is None:
         data = kwargs.get("data")
-        if data is not None:
-            return data
-        for arg in args:
-            candidate = getattr(arg, "data", None)
-            if candidate is not None:
-                return candidate
-            if isinstance(arg, (bytes, bytearray)):
-                return arg
-        return None
+    if data is None and len(args) > 1:
+        data = args[1]
+    if data is None:
+        return ""
+    if isinstance(data, (bytes, bytearray)):
+        return bytes(data).decode("utf-8", errors="replace")
+    return str(data)
 
-    def _recorder(*args, **kwargs):
-        data = _extract_data(args, kwargs)
-        with open(log_path, "a", encoding="utf-8") as f:
-            if isinstance(data, (bytes, bytearray)):
-                f.write(data.decode("utf-8"))
-            else:
-                f.write(str(data))
-            f.write("\n")
+
+def _walk(obj):
+    yield obj
+    if isinstance(obj, dict):
+        for v in obj.values():
+            yield from _walk(v)
+    elif isinstance(obj, list):
+        for v in obj:
+            yield from _walk(v)
+
+
+def test_unreadable_corpus_notifies_webhook(repo_root, tmp_path, monkeypatch):
+    missing = tmp_path / "nope" / "corpus.json"
+    monkeypatch.setenv("VAR_LICENSE_CORPUS_PATH", str(missing))
+    monkeypatch.setenv("VAR_COMPLIANCE_WEBHOOK_URL", "https://webhook.example.invalid/hook")
+
+    calls = []
+
+    def recorder(*args, **kwargs):
+        calls.append(_extract_body(args, kwargs))
         return _FakeResponse()
 
-    import urllib.request
-    monkeypatch.setattr(urllib.request, "urlopen", _recorder)
+    monkeypatch.setattr(urllib.request, "urlopen", recorder)
 
     result = license_scanner.scan("comp-foo", repo_root)
 
-    assert _get_field(result, "evaluated") is False
-    assert _get_field(result, "blocked") is True
-    assert _get_field(result, "notified") is True
+    assert _f(result, "evaluated") is False
+    assert _f(result, "reason") == "corpus-unreadable"
+    assert _f(result, "blocked") is True
+    assert _f(result, "notified") is True
 
-    assert log_path.exists()
-    logged_lines = [line for line in log_path.read_text(encoding="utf-8").splitlines() if line.strip()]
-    assert logged_lines, "expected the recorder to have been invoked with a payload"
-    payload = json.loads(logged_lines[0])
+    assert calls, "webhook recorder was never called"
 
-    assert _get_field(payload, "evaluated") is False
-    assert _get_field(payload, "reason") == "corpus-unreadable"
+    found = False
+    for body in calls:
+        try:
+            parsed = json.loads(body)
+        except (ValueError, TypeError):
+            parsed = None
+        if parsed is not None:
+            nodes = list(_walk(parsed))
+            has_eval_false = any(
+                isinstance(n, dict) and "evaluated" in n and n["evaluated"] is False
+                for n in nodes
+            )
+            has_reason = any(n == "corpus-unreadable" for n in nodes)
+            if has_eval_false and has_reason:
+                found = True
+                break
+        else:
+            compact = body.replace(" ", "").lower()
+            if "corpus-unreadable" in body and (
+                '"evaluated":false' in compact or "evaluated=false" in compact
+            ):
+                found = True
+                break
+    assert found, "no webhook payload carried evaluated false and the reason: %r" % (calls,)

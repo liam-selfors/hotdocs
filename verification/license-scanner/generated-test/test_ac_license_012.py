@@ -1,151 +1,180 @@
 import hashlib
 import json
-import os
-import shutil
-import tempfile
-import unittest
+import textwrap
 from pathlib import Path
+
+import pytest
 
 import license_scanner
 
 
-CACHE_MANAGER_MODULE_SOURCE = """
-import dataclasses
+FAKE_CACHE_MANAGER = textwrap.dedent(
+    '''
+    from dataclasses import dataclass, field
+    from typing import Any
 
 
-@dataclasses.dataclass
-class CacheKey:
-    spec_bundle_hash: str
-    gate_inputs_hash: str
-    gate_version: str
-    model_pin: str
+    class SchemaValidationError(ValueError):
+        pass
 
 
-@dataclasses.dataclass
-class CachedResult:
-    gate_type: str
-    payload: dict
-    stored_at: str
+    class Miss:
+        def __eq__(self, other):
+            return isinstance(other, Miss)
+
+        def __hash__(self):
+            return hash("Miss")
 
 
-class Miss:
-    pass
+    @dataclass
+    class CacheKey:
+        spec_bundle_hash: str
+        gate_inputs_hash: str
+        gate_version: str
+        model_pin: str
 
 
-def get(cache_key, *, repo_root=None):
-    return Miss()
+    @dataclass
+    class CachedResult:
+        gate_type: str
+        payload: Any
+        stored_at: str
 
 
-def put(cache_key, result, *, repo_root=None):
-    return None
-"""
+    def get(cache_key, *, repo_root=None):
+        return Miss()
 
 
-def _get(value, name):
+    def put(cache_key, result, *, repo_root=None):
+        return None
+
+
+    def now_iso():
+        import datetime
+        return datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+    def stats(*, repo_root=None):
+        return {"entry_count": 0}
+    '''
+)
+
+
+FOO_SOURCE = textwrap.dedent(
+    '''
+    def compute_total(items, multiplier):
+        total = 0
+        for item in items:
+            total = total + item * multiplier
+        return total
+
+
+    def describe_widget(name, color, size, weight):
+        label = name + color
+        return label, size, weight
+    '''
+)
+
+
+def _field(value, name):
     if isinstance(value, dict):
         return value.get(name)
     return getattr(value, name, None)
 
 
-class LicenseScanAcLicense012Test(unittest.TestCase):
-    def setUp(self):
-        self._saved_env = dict(os.environ)
-        self._tmp_dirs = []
-
-    def tearDown(self):
-        os.environ.clear()
-        os.environ.update(self._saved_env)
-        for d in self._tmp_dirs:
-            shutil.rmtree(d, ignore_errors=True)
-
-    def _make_repo_root(self):
-        repo_root = Path(tempfile.mkdtemp())
-        self._tmp_dirs.append(str(repo_root))
-        gen_dir = repo_root / "gen" / "foo"
-        gen_dir.mkdir(parents=True)
-        (gen_dir / "main.py").write_text(
-            "def alpha(beta, gamma, delta, epsilon, zeta, eta, theta, iota, kappa):\n"
-            "    return beta\n"
-        )
-        cache_dir = repo_root / "gen" / "cache-manager"
-        cache_dir.mkdir(parents=True)
-        (cache_dir / "cache_manager.py").write_text(CACHE_MANAGER_MODULE_SOURCE)
-        return repo_root
-
-    def test_no_corpus_configured(self):
-        os.environ.pop("VAR_LICENSE_CORPUS_PATH", None)
-        repo_root = self._make_repo_root()
-
-        result = license_scanner.scan("comp-foo", repo_root)
-
-        self.assertEqual(_get(result, "evaluated"), False)
-        self.assertEqual(_get(result, "reason"), "no-reference-corpus")
-        self.assertIsNone(_get(result, "similarity_score"))
-        self.assertIsNone(_get(result, "block_threshold"))
-        self.assertEqual(_get(result, "matches"), [])
-        self.assertEqual(_get(result, "blocked"), False)
-        self.assertEqual(
-            _get(result, "gate_version"),
-            "license_scanner@4.0.0-no-reference-corpus",
-        )
-
-    def test_corpus_with_empty_entries_is_invalid(self):
-        repo_root = self._make_repo_root()
-        corpus_path = repo_root / "corpus.json"
-        corpus_path.write_text(json.dumps({
-            "corpus_version": 1,
-            "block_threshold": 0.7,
-            "entries": [],
-        }))
-        os.environ["VAR_LICENSE_CORPUS_PATH"] = str(corpus_path)
-
-        result = license_scanner.scan("comp-foo", repo_root)
-
-        self.assertEqual(_get(result, "evaluated"), False)
-        self.assertEqual(_get(result, "reason"), "corpus-invalid")
-        self.assertEqual(_get(result, "blocked"), True)
-        self.assertIsNone(_get(result, "similarity_score"))
-        self.assertIsNone(_get(result, "block_threshold"))
-        self.assertEqual(_get(result, "matches"), [])
-
-    def test_valid_corpus_with_no_shared_windows(self):
-        repo_root = self._make_repo_root()
-        corpus_path = repo_root / "corpus.json"
-        unrelated_hash = hashlib.sha256(
-            b"unrelated-reference-window-content-that-does-not-appear-anywhere"
-        ).hexdigest()
-        corpus_version = 3
-        corpus_content = {
-            "corpus_version": corpus_version,
-            "block_threshold": 0.7,
-            "entries": [
-                {
-                    "reference_id": "ref-001",
-                    "license_family": "GPL",
-                    "risk_tier": "high",
-                    "hashes": [unrelated_hash],
-                }
-            ],
-        }
-        corpus_bytes = json.dumps(corpus_content).encode("utf-8")
-        corpus_path.write_bytes(corpus_bytes)
-        os.environ["VAR_LICENSE_CORPUS_PATH"] = str(corpus_path)
-
-        expected_digest = hashlib.sha256(corpus_bytes).hexdigest()[:12]
-        expected_gate_version = (
-            "license_scanner@4.0." + str(corpus_version) + "+" + expected_digest
-        )
-
-        result = license_scanner.scan("comp-foo", repo_root)
-
-        self.assertEqual(_get(result, "evaluated"), True)
-        self.assertIsNone(_get(result, "reason"))
-        similarity_score = _get(result, "similarity_score")
-        self.assertIsNotNone(similarity_score)
-        self.assertEqual(similarity_score, 0.0)
-        self.assertEqual(_get(result, "blocked"), False)
-        self.assertEqual(_get(result, "gate_version"), expected_gate_version)
+def _make_repo(tmp_path: Path) -> Path:
+    repo_root = tmp_path / "repo"
+    foo_dir = repo_root / "gen" / "foo"
+    foo_dir.mkdir(parents=True)
+    (foo_dir / "foo.py").write_text(FOO_SOURCE, encoding="utf-8")
+    cm_dir = repo_root / "gen" / "cache-manager"
+    cm_dir.mkdir(parents=True)
+    (cm_dir / "cache_manager.py").write_text(FAKE_CACHE_MANAGER, encoding="utf-8")
+    return repo_root
 
 
-if __name__ == "__main__":
-    unittest.main()
+@pytest.fixture
+def clean_env(monkeypatch, tmp_path):
+    for name in (
+        "VAR_LICENSE_CORPUS_PATH",
+        "VAR_COMPLIANCE_WEBHOOK_URL",
+        "VAR_CACHE_STORE_URL",
+    ):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.chdir(tmp_path)
+    return monkeypatch
+
+
+def _unrelated_hash() -> str:
+    tokens = ["zzqx%d" % i for i in range(9)]
+    return hashlib.sha256("\x1f".join(tokens).encode("utf-8")).hexdigest()
+
+
+def test_unset_corpus_is_not_evaluated_and_not_blocked(clean_env, tmp_path):
+    repo_root = _make_repo(tmp_path)
+    clean_env.delenv("VAR_LICENSE_CORPUS_PATH", raising=False)
+
+    result = license_scanner.scan("comp-foo", repo_root)
+
+    assert _field(result, "evaluated") is False
+    assert _field(result, "reason") == "no-reference-corpus"
+    assert _field(result, "similarity_score") is None
+    assert _field(result, "block_threshold") is None
+    matches = _field(result, "matches")
+    assert matches is not None
+    assert list(matches) == []
+    assert _field(result, "blocked") is False
+    assert _field(result, "gate_version") == "license_scanner@4.0.0-no-reference-corpus"
+
+
+def test_empty_entries_corpus_is_invalid_and_blocked(clean_env, tmp_path):
+    repo_root = _make_repo(tmp_path)
+    corpus_path = tmp_path / "corpus_empty.json"
+    corpus_path.write_text(
+        json.dumps({"corpus_version": 2, "block_threshold": 0.7, "entries": []}),
+        encoding="utf-8",
+    )
+    clean_env.setenv("VAR_LICENSE_CORPUS_PATH", str(corpus_path))
+
+    result = license_scanner.scan("comp-foo", repo_root)
+
+    assert _field(result, "evaluated") is False
+    assert _field(result, "reason") == "corpus-invalid"
+    assert _field(result, "blocked") is True
+    assert _field(result, "similarity_score") is None
+    assert _field(result, "block_threshold") is None
+    matches = _field(result, "matches")
+    assert matches is not None
+    assert list(matches) == []
+
+
+def test_valid_corpus_with_no_shared_windows_is_evaluated_clean(clean_env, tmp_path):
+    repo_root = _make_repo(tmp_path)
+    corpus = {
+        "corpus_version": 7,
+        "block_threshold": 0.7,
+        "entries": [
+            {
+                "reference_id": "ref-001",
+                "license_family": "GPL",
+                "risk_tier": "low",
+                "hashes": [_unrelated_hash()],
+            }
+        ],
+    }
+    corpus_bytes = json.dumps(corpus).encode("utf-8")
+    corpus_path = tmp_path / "corpus_valid.json"
+    corpus_path.write_bytes(corpus_bytes)
+    clean_env.setenv("VAR_LICENSE_CORPUS_PATH", str(corpus_path))
+
+    result = license_scanner.scan("comp-foo", repo_root)
+
+    assert _field(result, "evaluated") is True
+    assert _field(result, "reason") is None
+    score = _field(result, "similarity_score")
+    assert score is not None
+    assert isinstance(score, (int, float)) and not isinstance(score, bool)
+    assert score == 0.0
+    assert _field(result, "blocked") is False
+    expected_digest = hashlib.sha256(corpus_bytes).hexdigest()[:12]
+    assert _field(result, "gate_version") == "license_scanner@4.0.7+" + expected_digest

@@ -1,14 +1,44 @@
+"""AC-LICENSE-003b (covers R-LICENSE-003).
+
+Given a similarity score below the block threshold against a reference
+entry with risk_tier "high", and VAR-COMPLIANCE-WEBHOOK-URL configured,
+when license-scan runs, then blocked is false but notified is true.
+"""
+
 import hashlib
+import http.server
 import json
-import os
-import tempfile
+import threading
 from pathlib import Path
+
+import pytest
 
 import license_scanner
 
 
-CACHE_MANAGER_SOURCE = '''
+COMPONENT_ID = "comp-foo"
+COMPONENT_SLUG = "foo"
+
+
+def _field(value, name, default=None):
+    if isinstance(value, dict):
+        return value.get(name, default)
+    return getattr(value, name, default)
+
+
+def _window_hashes(tokens, size=9):
+    out = []
+    for i in range(len(tokens) - size + 1):
+        joined = "\x1f".join(tokens[i:i + size])
+        out.append(hashlib.sha256(joined.encode("utf-8")).hexdigest())
+    return out
+
+
+FAKE_CACHE_MANAGER = '''
 import dataclasses
+import datetime
+import json
+import os
 
 
 @dataclasses.dataclass
@@ -26,102 +56,184 @@ class CachedResult:
     stored_at: str
 
 
+class Miss:
+    def __eq__(self, other):
+        return isinstance(other, Miss)
+
+    def __hash__(self):
+        return hash("Miss")
+
+
+class SchemaValidationError(ValueError):
+    pass
+
+
+_LOG = {log_path!r}
+
+
+def _record(entry):
+    with open(_LOG, "a", encoding="utf-8") as fh:
+        fh.write(json.dumps(entry) + "\\n")
+
+
 def get(cache_key, *, repo_root=None):
-    return None
+    _record({{"call": "get"}})
+    return Miss()
 
 
 def put(cache_key, result, *, repo_root=None):
+    _record({{"call": "put"}})
     return None
+
+
+def now_iso():
+    return datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def stats(*, repo_root=None):
+    return {{"entry_count": 0}}
 '''
 
 
-def _field(obj, name):
-    return obj.get(name) if isinstance(obj, dict) else getattr(obj, name, None)
+def _make_handler(log_path):
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def _handle(self):
+            length = int(self.headers.get("Content-Length") or 0)
+            if length:
+                self.rfile.read(length)
+            with open(log_path, "a", encoding="utf-8") as fh:
+                fh.write(json.dumps({"method": self.command, "path": self.path}) + "\n")
+            body = b"{}"
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def do_POST(self):
+            self._handle()
+
+        def do_PUT(self):
+            self._handle()
+
+        def do_GET(self):
+            self._handle()
+
+        def log_message(self, *args, **kwargs):
+            return
+
+    return Handler
 
 
-def _window_hash(tokens):
-    joined = "\x1f".join(tokens)
-    return hashlib.sha256(joined.encode("utf-8")).hexdigest()
+@pytest.fixture
+def webhook_server(tmp_path):
+    log_path = tmp_path / "webhook_calls.log"
+    log_path.write_text("", encoding="utf-8")
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), _make_handler(str(log_path)))
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield "http://127.0.0.1:%d/hook" % server.server_address[1], log_path
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
 
 
-def test_below_block_threshold_high_risk_entry_notifies_without_blocking():
-    with tempfile.TemporaryDirectory() as tmp:
-        repo_root = Path(tmp)
+def _build_repo(tmp_path):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
 
-        cache_manager_dir = repo_root / "gen" / "cache-manager"
-        cache_manager_dir.mkdir(parents=True)
-        (cache_manager_dir / "cache_manager.py").write_text(CACHE_MANAGER_SOURCE)
+    # Component source: 30 distinct identifier tokens -> 22 distinct 9-token windows.
+    tokens = ["v_%03d" % i for i in range(30)]
+    comp_dir = repo_root / "gen" / COMPONENT_SLUG
+    comp_dir.mkdir(parents=True)
+    (comp_dir / "foo.py").write_text("\n".join(tokens) + "\n", encoding="utf-8")
 
-        component_id = "comp-sample-widget"
-        component_slug = component_id.replace("comp-", "", 1)
+    windows = _window_hashes(tokens)
+    assert len(set(windows)) == 22
 
-        tokens = [f"token{i}" for i in range(18)]
-        source_text = " ".join(tokens) + "\n"
+    # Entry contains 16 of 22 windows -> score ~0.727, below a 0.95 threshold.
+    unrelated = _window_hashes(["zz_%03d" % i for i in range(20)])
+    corpus = {
+        "corpus_version": 1,
+        "block_threshold": 0.95,
+        "entries": [
+            {
+                "reference_id": "ref-high-001",
+                "license_family": "GPL",
+                "risk_tier": "high",
+                "hashes": windows[:16] + unrelated,
+            }
+        ],
+    }
+    corpus_path = repo_root / "corpus.json"
+    corpus_path.write_text(json.dumps(corpus), encoding="utf-8")
 
-        windows = [tokens[i:i + 9] for i in range(len(tokens) - 8)]
-        window_hashes = [_window_hash(w) for w in windows]
-        assert len(window_hashes) == 10
-        assert len(set(window_hashes)) == 10
+    cache_log = tmp_path / "cache_calls.log"
+    cache_dir = repo_root / "gen" / "cache-manager"
+    cache_dir.mkdir(parents=True)
+    (cache_dir / "cache_manager.py").write_text(
+        FAKE_CACHE_MANAGER.format(log_path=str(cache_log)), encoding="utf-8"
+    )
 
-        matched_hashes = window_hashes[:3]
+    return repo_root, corpus_path
 
-        # license-scanner compares against the component's own generated
-        # source, which per the glossary's gen/<slug>/ convention lives here.
-        target_dir = repo_root / "gen" / component_slug
-        target_dir.mkdir(parents=True)
-        (target_dir / "main.py").write_text(source_text)
 
-        corpus = {
-            "corpus_version": 1,
-            "block_threshold": 0.7,
-            "entries": [
-                {
-                    "reference_id": "ref-high-1",
-                    "license_family": "gpl-3.0",
-                    "risk_tier": "high",
-                    "hashes": matched_hashes,
-                }
-            ],
-        }
-        corpus_path = repo_root / "license-corpus.json"
-        corpus_path.write_text(json.dumps(corpus))
+def test_below_threshold_high_risk_match_notifies_without_blocking(
+    tmp_path, monkeypatch, webhook_server
+):
+    webhook_url, webhook_log = webhook_server
+    repo_root, corpus_path = _build_repo(tmp_path)
 
-        env_backup = {
-            "VAR_LICENSE_CORPUS_PATH": os.environ.get("VAR_LICENSE_CORPUS_PATH"),
-            "VAR_COMPLIANCE_WEBHOOK_URL": os.environ.get("VAR_COMPLIANCE_WEBHOOK_URL"),
-        }
-        os.environ["VAR_LICENSE_CORPUS_PATH"] = str(corpus_path)
-        os.environ["VAR_COMPLIANCE_WEBHOOK_URL"] = "http://127.0.0.1:1/webhook"
+    monkeypatch.chdir(repo_root)
+    monkeypatch.delenv("VAR_CACHE_STORE_URL", raising=False)
+    monkeypatch.setenv("VAR_LICENSE_CORPUS_PATH", str(corpus_path))
+    monkeypatch.setenv("VAR_COMPLIANCE_WEBHOOK_URL", webhook_url)
 
-        try:
-            result = license_scanner.scan(component_id, repo_root)
-        finally:
-            for key, value in env_backup.items():
-                if value is None:
-                    os.environ.pop(key, None)
-                else:
-                    os.environ[key] = value
+    result = license_scanner.scan(COMPONENT_ID, repo_root)
 
-        evaluated = _field(result, "evaluated")
-        reason = _field(result, "reason")
-        similarity_score = _field(result, "similarity_score")
-        block_threshold = _field(result, "block_threshold")
-        blocked = _field(result, "blocked")
-        notified = _field(result, "notified")
-        matches = _field(result, "matches")
+    assert _field(result, "evaluated") is True
+    assert _field(result, "reason") is None
 
-        assert evaluated is True
-        assert reason is None
-        assert block_threshold == 0.7
-        assert similarity_score is not None
-        assert abs(similarity_score - 0.3) < 1e-9
-        assert similarity_score < block_threshold
+    score = _field(result, "similarity_score")
+    threshold = _field(result, "block_threshold")
+    assert score is not None and threshold is not None
+    assert float(threshold) == pytest.approx(0.95)
+    assert 0 < float(score) < float(threshold)
+    assert float(score) == pytest.approx(16 / 22, abs=1e-6)
 
-        assert blocked is False
-        assert notified is True
+    matches = _field(result, "matches") or []
+    assert len(matches) >= 1
+    assert any(_field(m, "risk_tier") == "high" for m in matches)
+    assert any(_field(m, "reference_id") == "ref-high-001" for m in matches)
 
-        high_risk_match_present = False
-        for match in matches or []:
-            if _field(match, "risk_tier") == "high":
-                high_risk_match_present = True
-        assert high_risk_match_present
+    # The core of the criterion: not blocked, yet notified.
+    assert _field(result, "blocked") is False
+    assert _field(result, "notified") is True
+
+    # Webhook attempted at most once (no retry-with-backoff).
+    calls = [ln for ln in webhook_log.read_text(encoding="utf-8").splitlines() if ln.strip()]
+    assert len(calls) <= 1
+
+
+def test_cli_exit_code_reflects_not_blocked_while_notified(
+    tmp_path, monkeypatch, webhook_server, capsys
+):
+    webhook_url, _ = webhook_server
+    repo_root, corpus_path = _build_repo(tmp_path)
+
+    monkeypatch.chdir(repo_root)
+    monkeypatch.delenv("VAR_CACHE_STORE_URL", raising=False)
+    monkeypatch.setenv("VAR_LICENSE_CORPUS_PATH", str(corpus_path))
+    monkeypatch.setenv("VAR_COMPLIANCE_WEBHOOK_URL", webhook_url)
+
+    code = license_scanner.main(
+        [COMPONENT_ID, "--repo-root=%s" % repo_root, "--format=json"]
+    )
+    out = capsys.readouterr().out
+    assert code == 0
+
+    payload = json.loads(out)
+    assert payload.get("blocked") is False
+    assert payload.get("notified") is True
