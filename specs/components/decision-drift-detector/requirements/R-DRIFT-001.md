@@ -12,7 +12,8 @@
 
   **Edge direction, literally** (`interface/data/Edges.md`): for a
   `supersedes` edge, `source_id` is the newer decision (the one whose
-  own frontmatter carries `supersedes: [...]`), `target_id` is the
+  own frontmatter carries the scalar line `supersedes: D17`, a single
+  id, never a list), `target_id` is the
   older, cited one — e.g. `('D31', 'D17', 'supersedes')` when `D31`
   supersedes `D17`, never the reverse.
 
