@@ -16,5 +16,6 @@
 
   Default bases: `https://api.anthropic.com`,
   `https://api.openai.com/v1`, `https://generativelanguage.googleapis.com`,
-  `http://localhost:11434`. An `openai-compatible` `base_url` includes
+  `http://localhost:11434`. A `gemini` model written `models/<name>` is
+  sent as `<name>`. An `openai-compatible` `base_url` includes
   its version prefix (e.g. `http://localhost:8000/v1`).

@@ -14,5 +14,6 @@
   appear in output".
 
   For `anthropic`, `openai` and `gemini` a missing key MUST be an `auth`
-  `model_call_error` returned without any network call;
+  `model_call_error` returned without any network call, its message
+  naming the missing variable;
   `openai-compatible` and `ollama` send a key only when one is present.

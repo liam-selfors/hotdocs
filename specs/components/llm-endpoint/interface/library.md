@@ -56,7 +56,8 @@ directory when missing and replaces only its `[llm]` table.
 `detect_providers` returns, per
 provider, `{provider, available, reason, suggested_model,
 api_key_env}`; given `env`, only that dict supplies keys and `PATH`.
-`check_connection` returns `{ok, error}`, `error` being `None` or
+`check_connection` sends one prompt, with `max_tokens=1024` except to
+`claude-cli`, and returns `{ok, error}`, `error` being `None` or
 `{category, message}`; an unknown provider, or `openai-compatible`
 without a `base_url`, raises `ValueError`. `ModelResolutionError` is
 raised by `complete()` for `R-ENDPOINT-002`'s failures.

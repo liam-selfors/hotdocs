@@ -7,7 +7,7 @@
   [llm]
   provider = "openai"            # required: a name from R-ENDPOINT-003
   model = "gpt-6-astra"          # required: the model setup chose
-  base_url = ""                  # optional; required for openai-compatible
+  base_url = ""                  # optional http(s) URL; required for openai-compatible
   api_key_env = "OPENAI_API_KEY" # optional: the NAME of the variable
   timeout_seconds = 600          # optional; at least 300
   ```
