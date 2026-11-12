@@ -51,7 +51,9 @@ check_connection(provider: str, model: str, base_url: str | None = None,
 
 `load_config` returns `{provider, model, base_url, api_key_env,
 timeout_seconds}` (unset entries `None`), or `None`; it raises
-`ValueError` for an invalid file. `detect_providers` returns, per
+`ValueError` for an invalid file. `save_config` creates the file's
+directory when missing and replaces only its `[llm]` table.
+`detect_providers` returns, per
 provider, `{provider, available, reason, suggested_model,
 api_key_env}`; given `env`, only that dict supplies keys and `PATH`.
 `check_connection` returns `{ok, error}`, `error` being `None` or
