@@ -1,32 +1,33 @@
 import hashlib
 import json
-import os
-import shutil
-import tempfile
-import unittest
+import sys
+import urllib.request
 from pathlib import Path
-from unittest.mock import patch
+
+import pytest
 
 import secret_scanner
 
 
-def _get(value, key, default=None):
-    if isinstance(value, dict):
-        return value.get(key, default)
-    return getattr(value, key, default)
+# Literals are assembled at runtime so this test file itself never holds a
+# contiguous credential-shaped or high-entropy literal.
+AWS_KEY = "AKIA" + "ABCDEFGHIJKLMNOP"
+UNUSED_AWS_KEY = "AKIA" + "QRSTUVWXYZABCDEF"
+# The git empty-tree object id (4b825dc6...4904) is the SHA-1 of "tree 0\0".
+EMPTY_TREE = hashlib.sha1(b"tree 0\x00").hexdigest()
+
+PLANTED_REL = "verification/foo/test_x.py"
+GEN_REL = "gen/foo/g.py"
 
 
-def _write(path: Path, content: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(content, encoding="utf-8")
-
-
-def _sha1_hash(secret: str) -> str:
-    return "sha1:" + hashlib.sha1(secret.encode("utf-8")).hexdigest()
-
-
-FAKE_CACHE_MANAGER_SOURCE = """
+FAKE_CACHE_MANAGER = '''
+import datetime
 from dataclasses import dataclass
+from typing import Any
+
+
+class SchemaValidationError(ValueError):
+    pass
 
 
 @dataclass
@@ -40,12 +41,16 @@ class CacheKey:
 @dataclass
 class CachedResult:
     gate_type: str
-    payload: dict
+    payload: Any
     stored_at: str
 
 
 class Miss:
-    pass
+    def __eq__(self, other):
+        return isinstance(other, Miss)
+
+    def __hash__(self):
+        return 0
 
 
 def get(cache_key, *, repo_root=None):
@@ -54,172 +59,202 @@ def get(cache_key, *, repo_root=None):
 
 def put(cache_key, result, *, repo_root=None):
     return None
-"""
 
 
-def _write_fake_cache_manager(repo_root: Path) -> None:
-    _write(repo_root / "gen" / "cache-manager" / "cache_manager.py", FAKE_CACHE_MANAGER_SOURCE)
+def now_iso():
+    return datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def _write_allowlist_and_seal(repo_root: Path, entries: list) -> None:
-    allowlist_obj = {"version": 1, "entries": entries}
-    allowlist_bytes = json.dumps(allowlist_obj, indent=2).encode("utf-8")
-    allowlist_path = repo_root / ".secret-allowlist.json"
-    allowlist_path.parent.mkdir(parents=True, exist_ok=True)
-    allowlist_path.write_bytes(allowlist_bytes)
+def stats(*, repo_root=None):
+    return {"entry_count": 0}
 
-    digest = hashlib.sha256(allowlist_bytes).hexdigest()
+
+def main(argv=None):
+    return 0
+'''
+
+
+def _field(value, key):
+    if isinstance(value, dict):
+        return value.get(key)
+    return getattr(value, key, None)
+
+
+def _sha1_ref(value):
+    return "sha1:" + hashlib.sha1(value.encode("utf-8")).hexdigest()
+
+
+def _write(path, text):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(text.encode("utf-8"))
+
+
+def _make_repo(tmp_path, name="repo"):
+    repo_root = tmp_path / name
+    repo_root.mkdir(parents=True)
+    _write(repo_root / "gen" / "cache-manager" / "cache_manager.py", FAKE_CACHE_MANAGER)
+    return repo_root
+
+
+def _write_sealed_allowlist(repo_root, entries):
+    doc = {"version": 1, "entries": entries}
+    data = (json.dumps(doc, indent=2) + "\n").encode("utf-8")
+    (repo_root / ".secret-allowlist.json").write_bytes(data)
+    digest = hashlib.sha256(data).hexdigest()
     decision = (
         "---\n"
         "id: D1\n"
-        "title: Seal secret allowlist\n"
+        "title: Ratify the allowlist\n"
         "status: ratified\n"
-        "owners: [spec-owner]\n"
-        "last_ratified_commit: 0000000000000000000000000000000000000000\n"
+        "owners: [tester]\n"
+        "last_ratified_commit: placeholder\n"
         "allowlist_sha256: sha256:" + digest + "\n"
         "---\n"
         "\n"
-        "Seals the secret allowlist for AC-SECRET-014.\n"
+        "# D1\n"
+        "\n"
+        "Records the hash of the reviewed allowlist.\n"
     )
     _write(repo_root / "specs" / "decisions" / "D1.md", decision)
 
 
-class AcSecret014Test(unittest.TestCase):
-    def setUp(self):
-        self._tmp_dirs = []
-        # Constructed from pieces so this file's own raw text never contains
-        # a contiguous secret-shaped literal (this file is itself scanned).
-        self.aws_secret = "AKIA" + "ABCDEFGHIJKLMNOP"
-        self.hex_secret = "4b825dc642cb6eb9a060" + "e54bf8d69288fbee4904"
-
-    def tearDown(self):
-        for d in self._tmp_dirs:
-            shutil.rmtree(d, ignore_errors=True)
-
-    def _make_repo(self) -> Path:
-        d = tempfile.mkdtemp()
-        self._tmp_dirs.append(d)
-        return Path(d)
-
-    def test_scenario_1_planted_fixture_suppressed_and_no_notification(self):
-        repo_root = self._make_repo()
-        _write_fake_cache_manager(repo_root)
-        _write(
-            repo_root / "verification" / "foo" / "test_x.py",
-            'K = "' + self.aws_secret + '"\n',
-        )
-        entries = [
+def _build_first_scenario_repo(tmp_path, name="repo"):
+    repo_root = _make_repo(tmp_path, name)
+    _write(repo_root / PLANTED_REL, 'K = "' + AWS_KEY + '"\n')
+    _write_sealed_allowlist(
+        repo_root,
+        [
             {
-                "file": "verification/foo/test_x.py",
+                "file": PLANTED_REL,
                 "type": "AWS Access Key",
-                "hashed_secret": _sha1_hash(self.aws_secret),
+                "hashed_secret": _sha1_ref(AWS_KEY),
                 "reason": "planted-fixture",
             }
-        ]
-        _write_allowlist_and_seal(repo_root, entries)
+        ],
+    )
+    return repo_root
 
-        recorder_calls = []
 
-        def fake_urlopen(*args, **kwargs):
-            recorder_calls.append((args, kwargs))
-            return None
+@pytest.fixture
+def recorder(monkeypatch, tmp_path):
+    calls = []
 
-        with patch.dict(
-            os.environ, {"VAR_COMPLIANCE_WEBHOOK_URL": "https://example.invalid/webhook"}
-        ):
-            with patch("urllib.request.urlopen", fake_urlopen):
-                result = secret_scanner.scan(repo_root)
+    class _Resp:
+        status = 200
 
-        flagged = _get(result, "flagged")
-        matches = _get(result, "matches")
-        allowed = _get(result, "allowed")
-        notified = _get(result, "notified")
+        def read(self, *a, **k):
+            return b""
 
-        self.assertFalse(flagged)
-        self.assertEqual(matches, [])
-        self.assertEqual(len(allowed), 1)
-        entry = allowed[0]
-        self.assertEqual(_get(entry, "rule_id"), "AWS Access Key")
-        self.assertEqual(_get(entry, "file"), "verification/foo/test_x.py")
-        self.assertEqual(_get(entry, "line"), 1)
-        self.assertFalse(notified)
-        self.assertEqual(recorder_calls, [])
+        def getcode(self):
+            return 200
 
-    def test_scenario_2_public_constant_suppressed(self):
-        repo_root = self._make_repo()
-        _write_fake_cache_manager(repo_root)
-        _write(
-            repo_root / "gen" / "foo" / "g.py",
-            'EMPTY = "' + self.hex_secret + '"\n',
-        )
-        entries = [
+        def close(self):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+    def _record(*args, **kwargs):
+        calls.append((args, kwargs))
+        return _Resp()
+
+    monkeypatch.setattr(urllib.request, "urlopen", _record)
+    if hasattr(secret_scanner, "urlopen"):
+        monkeypatch.setattr(secret_scanner, "urlopen", _record)
+    monkeypatch.setattr(sys, "dont_write_bytecode", True)
+    monkeypatch.delenv("VAR_CACHE_STORE_URL", raising=False)
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir(parents=True, exist_ok=True)
+    monkeypatch.chdir(elsewhere)
+    return calls
+
+
+def test_exact_entry_suppresses_planted_fixture_without_notification(tmp_path, monkeypatch, recorder):
+    repo_root = _build_first_scenario_repo(tmp_path)
+    monkeypatch.setenv("VAR_COMPLIANCE_WEBHOOK_URL", "http://127.0.0.1:9/compliance")
+
+    result = secret_scanner.scan(repo_root)
+
+    assert _field(result, "flagged") is False
+    matches = _field(result, "matches")
+    assert list(matches or []) == []
+    allowed = list(_field(result, "allowed") or [])
+    assert len(allowed) == 1, allowed
+    entry = allowed[0]
+    assert _field(entry, "rule_id") == "AWS Access Key"
+    assert _field(entry, "file") == PLANTED_REL
+    assert _field(entry, "line") == 1
+    assert _field(result, "notified") is False
+    assert recorder == []
+
+
+def test_public_constant_entry_suppresses_hex_string(tmp_path, monkeypatch, recorder):
+    monkeypatch.delenv("VAR_COMPLIANCE_WEBHOOK_URL", raising=False)
+    repo_root = _make_repo(tmp_path)
+    _write(repo_root / GEN_REL, 'EMPTY = "' + EMPTY_TREE + '"\n')
+    _write_sealed_allowlist(
+        repo_root,
+        [
             {
-                "file": "gen/foo/g.py",
+                "file": GEN_REL,
                 "type": "Hex High Entropy String",
-                "hashed_secret": _sha1_hash(self.hex_secret),
+                "hashed_secret": _sha1_ref(EMPTY_TREE),
                 "reason": "public-constant",
             }
-        ]
-        _write_allowlist_and_seal(repo_root, entries)
+        ],
+    )
 
-        result = secret_scanner.scan(repo_root)
+    result = secret_scanner.scan(repo_root)
 
-        flagged = _get(result, "flagged")
-        allowed = _get(result, "allowed")
+    assert _field(result, "flagged") is False
+    allowed = list(_field(result, "allowed") or [])
+    assert any(
+        _field(a, "rule_id") == "Hex High Entropy String"
+        and _field(a, "file") == GEN_REL
+        and _field(a, "line") == 1
+        for a in allowed
+    ), allowed
 
-        self.assertFalse(flagged)
-        self.assertEqual(len(allowed), 1)
-        entry = allowed[0]
-        self.assertEqual(_get(entry, "rule_id"), "Hex High Entropy String")
-        self.assertEqual(_get(entry, "file"), "gen/foo/g.py")
 
-    def test_scenario_3_unused_entry_does_not_block(self):
-        repo_root = self._make_repo()
-        _write_fake_cache_manager(repo_root)
-        entries = [
+def test_entry_matching_nothing_is_reported_unused(tmp_path, monkeypatch, recorder):
+    monkeypatch.delenv("VAR_COMPLIANCE_WEBHOOK_URL", raising=False)
+    repo_root = _make_repo(tmp_path)
+    unused_file = "verification/foo/old.py"
+    _write_sealed_allowlist(
+        repo_root,
+        [
             {
-                "file": "verification/foo/old.py",
-                "type": "Hex High Entropy String",
-                "hashed_secret": _sha1_hash("some-value-that-matches-nothing"),
-                "reason": "public-constant",
-            }
-        ]
-        _write_allowlist_and_seal(repo_root, entries)
-
-        result = secret_scanner.scan(repo_root)
-
-        flagged = _get(result, "flagged")
-        allowed = _get(result, "allowed")
-        unused = _get(result, "unused_allowlist_entries")
-
-        self.assertFalse(flagged)
-        self.assertEqual(allowed, [])
-        self.assertEqual(len(unused), 1)
-        unused_entry = unused[0]
-        self.assertEqual(_get(unused_entry, "file"), "verification/foo/old.py")
-        self.assertEqual(_get(unused_entry, "type"), "Hex High Entropy String")
-
-    def test_scenario_4_scan_files_repo_root_affects_suppression(self):
-        repo_root = self._make_repo()
-        _write_fake_cache_manager(repo_root)
-        file_path = repo_root / "verification" / "foo" / "test_x.py"
-        _write(file_path, 'K = "' + self.aws_secret + '"\n')
-        entries = [
-            {
-                "file": "verification/foo/test_x.py",
+                "file": unused_file,
                 "type": "AWS Access Key",
-                "hashed_secret": _sha1_hash(self.aws_secret),
+                "hashed_secret": _sha1_ref(UNUSED_AWS_KEY),
                 "reason": "planted-fixture",
             }
-        ]
-        _write_allowlist_and_seal(repo_root, entries)
+        ],
+    )
 
-        with_root = secret_scanner.scan_files([file_path], repo_root=repo_root)
-        without_root = secret_scanner.scan_files([file_path])
+    result = secret_scanner.scan(repo_root)
 
-        self.assertFalse(_get(with_root, "flagged"))
-        self.assertTrue(_get(without_root, "flagged"))
+    assert _field(result, "flagged") is False
+    assert list(_field(result, "allowed") or []) == []
+    unused = list(_field(result, "unused_allowlist_entries") or [])
+    assert any(
+        _field(u, "file") == unused_file and _field(u, "type") == "AWS Access Key"
+        for u in unused
+    ), unused
 
 
-if __name__ == "__main__":
-    unittest.main()
+def test_scan_files_honors_allowlist_only_with_repo_root(tmp_path, monkeypatch, recorder):
+    monkeypatch.delenv("VAR_COMPLIANCE_WEBHOOK_URL", raising=False)
+    repo_root = _build_first_scenario_repo(tmp_path)
+    planted = repo_root / PLANTED_REL
+
+    with_root = secret_scanner.scan_files([planted], repo_root=repo_root)
+    assert _field(with_root, "flagged") is False
+
+    without_root = secret_scanner.scan_files([planted])
+    assert _field(without_root, "flagged") is True
+    matches = list(_field(without_root, "matches") or [])
+    assert any(_field(m, "rule_id") == "AWS Access Key" for m in matches), matches

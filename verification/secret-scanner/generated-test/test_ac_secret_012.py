@@ -1,71 +1,97 @@
+import hashlib
+import json
 import os
-import shutil
-import tempfile
-import textwrap
-import unittest
+import urllib.request
 from pathlib import Path
+
+import pytest
 
 import secret_scanner
 
 
-CACHE_MANAGER_SOURCE = textwrap.dedent(r'''
-    import dataclasses
-    import os
+LOG_ENV = "SECRET_SCANNER_AC012_CACHE_LOG"
+URLOPEN_LOG_ENV = "SECRET_SCANNER_AC012_URLOPEN_LOG"
 
 
-    @dataclasses.dataclass
-    class CacheKey:
-        spec_bundle_hash: str
-        gate_inputs_hash: str
-        gate_version: str
-        model_pin: str
+FAKE_CACHE_MANAGER_SOURCE = '''\
+import json
+import os
+import time
+from dataclasses import dataclass
+from typing import Any
 
 
-    @dataclasses.dataclass
-    class CachedResult:
-        gate_type: str
-        payload: dict
-        stored_at: str
+def _record(name):
+    path = os.environ.get("SECRET_SCANNER_AC012_CACHE_LOG")
+    if not path:
+        return
+    with open(path, "a", encoding="utf-8") as fh:
+        fh.write(json.dumps({"call": name}) + "\\n")
 
 
-    class Miss:
-        pass
+@dataclass
+class CacheKey:
+    spec_bundle_hash: str
+    gate_inputs_hash: str
+    gate_version: str
+    model_pin: str
+
+    def __post_init__(self):
+        _record("CacheKey")
 
 
-    def _log(event):
-        path = os.environ.get("STANDIN_CALL_LOG")
-        if path:
-            with open(path, "a") as f:
-                f.write(event + "\n")
+@dataclass
+class CachedResult:
+    gate_type: str
+    payload: Any
+    stored_at: str
+
+    def __post_init__(self):
+        _record("CachedResult")
 
 
-    def get(cache_key, repo_root=None):
-        _log("get")
-        return Miss()
+class Miss:
+    def __init__(self):
+        _record("Miss")
+
+    def __eq__(self, other):
+        return isinstance(other, Miss)
+
+    def __hash__(self):
+        return 0
+
+    def __repr__(self):
+        return "Miss()"
 
 
-    def put(cache_key, result, repo_root=None):
-        _log("put")
-        return None
-    ''')
+class SchemaValidationError(ValueError):
+    pass
 
 
-def _write_cache_manager_standin(repo_root):
-    cache_dir = os.path.join(str(repo_root), "gen", "cache-manager")
-    os.makedirs(cache_dir, exist_ok=True)
-    with open(os.path.join(cache_dir, "cache_manager.py"), "w") as f:
-        f.write(CACHE_MANAGER_SOURCE)
+def get(cache_key, *, repo_root=None):
+    _record("get")
+    return Miss()
 
 
-def _snapshot(repo_root):
-    snapshot = {}
-    for dirpath, _dirnames, filenames in os.walk(str(repo_root)):
-        for name in filenames:
-            full = os.path.join(dirpath, name)
-            rel = os.path.relpath(full, str(repo_root))
-            with open(full, "rb") as f:
-                snapshot[rel] = f.read()
-    return snapshot
+def put(cache_key, result, *, repo_root=None):
+    _record("put")
+    return None
+
+
+def now_iso():
+    _record("now_iso")
+    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+
+def stats(*, repo_root=None):
+    _record("stats")
+    return {"entry_count": 0}
+
+
+def main(argv=None):
+    _record("main")
+    return 0
+'''
 
 
 def _field(value, name):
@@ -74,61 +100,120 @@ def _field(value, name):
     return getattr(value, name, None)
 
 
-class GateVersionMatchesScanTest(unittest.TestCase):
-    def setUp(self):
-        self.repo_root = Path(tempfile.mkdtemp(prefix="secret-scanner-ac012-"))
-        _write_cache_manager_standin(self.repo_root)
-        self._old_log = os.environ.get("STANDIN_CALL_LOG")
-        os.environ.pop("STANDIN_CALL_LOG", None)
-
-    def tearDown(self):
-        shutil.rmtree(str(self.repo_root), ignore_errors=True)
-        if self._old_log is None:
-            os.environ.pop("STANDIN_CALL_LOG", None)
-        else:
-            os.environ["STANDIN_CALL_LOG"] = self._old_log
-
-    def test_gate_version_matches_scan_result(self):
-        version_from_gate = secret_scanner.gate_version(self.repo_root)
-        scan_result = secret_scanner.scan(self.repo_root)
-        version_from_scan = _field(scan_result, "gate_version")
-
-        self.assertIsInstance(version_from_gate, str)
-        self.assertEqual(version_from_gate, version_from_scan)
+def _planted_secret():
+    # Built at runtime so this test file itself carries no literal key.
+    return "AKIA" + "IOSFODNN7" + "EXAMPLE"
 
 
-class GateVersionDoesNotScanOrTouchCacheTest(unittest.TestCase):
-    def setUp(self):
-        self.repo_root = Path(tempfile.mkdtemp(prefix="secret-scanner-ac012-"))
-        _write_cache_manager_standin(self.repo_root)
-
-        secret_file = os.path.join(str(self.repo_root), "config.py")
-        with open(secret_file, "w") as f:
-            f.write('AWS_KEY = "AKIAIOSFODNN7EXAMPLE"\n')
-
-        log_dir = tempfile.mkdtemp(prefix="secret-scanner-ac012-log-")
-        self.addCleanup(shutil.rmtree, log_dir, ignore_errors=True)
-        self.call_log_path = os.path.join(log_dir, "calls.log")
-
-        self._old_log = os.environ.get("STANDIN_CALL_LOG")
-        os.environ["STANDIN_CALL_LOG"] = self.call_log_path
-
-    def tearDown(self):
-        shutil.rmtree(str(self.repo_root), ignore_errors=True)
-        if self._old_log is None:
-            os.environ.pop("STANDIN_CALL_LOG", None)
-        else:
-            os.environ["STANDIN_CALL_LOG"] = self._old_log
-
-    def test_gate_version_is_pure_and_skips_cache(self):
-        before = _snapshot(self.repo_root)
-        result = secret_scanner.gate_version(self.repo_root)
-        after = _snapshot(self.repo_root)
-
-        self.assertIsInstance(result, str)
-        self.assertFalse(os.path.exists(self.call_log_path))
-        self.assertEqual(before, after)
+def _make_repo(base: Path, with_secret: bool) -> Path:
+    repo_root = base / "repo"
+    repo_root.mkdir(parents=True, exist_ok=True)
+    fake_dir = repo_root / "gen" / "cache-manager"
+    fake_dir.mkdir(parents=True, exist_ok=True)
+    (fake_dir / "cache_manager.py").write_text(FAKE_CACHE_MANAGER_SOURCE, encoding="utf-8")
+    (repo_root / "README.md").write_text("Nothing secret here.\n", encoding="utf-8")
+    if with_secret:
+        src_dir = repo_root / "gen" / "foo"
+        src_dir.mkdir(parents=True, exist_ok=True)
+        (src_dir / "config.py").write_text(
+            'AWS_ACCESS_KEY_ID = "' + _planted_secret() + '"\n', encoding="utf-8"
+        )
+    return repo_root
 
 
-if __name__ == "__main__":
-    unittest.main()
+def _read_log(path: Path):
+    if not path.exists():
+        return []
+    lines = [ln for ln in path.read_text(encoding="utf-8").splitlines() if ln.strip()]
+    return [json.loads(ln) for ln in lines]
+
+
+def _snapshot(root: Path):
+    dirs = set()
+    files = {}
+    for current, dirnames, filenames in os.walk(root):
+        cur = Path(current)
+        for d in dirnames:
+            dirs.add((cur / d).relative_to(root).as_posix())
+        for f in filenames:
+            p = cur / f
+            rel = p.relative_to(root).as_posix()
+            st = p.stat()
+            files[rel] = (
+                st.st_size,
+                st.st_mtime_ns,
+                hashlib.sha256(p.read_bytes()).hexdigest(),
+            )
+    return dirs, files
+
+
+@pytest.fixture
+def isolated_env(tmp_path, monkeypatch):
+    log_dir = tmp_path / "logs"
+    log_dir.mkdir()
+    cache_log = log_dir / "cache_calls.jsonl"
+    urlopen_log = log_dir / "urlopen_calls.jsonl"
+    monkeypatch.setenv(LOG_ENV, str(cache_log))
+    monkeypatch.setenv(URLOPEN_LOG_ENV, str(urlopen_log))
+    monkeypatch.delenv("VAR_COMPLIANCE_WEBHOOK_URL", raising=False)
+    monkeypatch.delenv("VAR_CACHE_STORE_URL", raising=False)
+
+    def _fake_urlopen(*args, **kwargs):
+        with open(os.environ[URLOPEN_LOG_ENV], "a", encoding="utf-8") as fh:
+            fh.write(json.dumps({"call": "urlopen"}) + "\n")
+        raise OSError("network disabled in test")
+
+    monkeypatch.setattr(urllib.request, "urlopen", _fake_urlopen)
+    work = tmp_path / "work"
+    work.mkdir()
+    return {"base": work, "cache_log": cache_log, "urlopen_log": urlopen_log}
+
+
+@pytest.mark.parametrize("with_secret", [False, True])
+def test_gate_version_matches_scan_result_gate_version(isolated_env, with_secret):
+    repo_root = _make_repo(isolated_env["base"], with_secret)
+
+    before = secret_scanner.gate_version(repo_root)
+    result = secret_scanner.scan(repo_root)
+    after = secret_scanner.gate_version(repo_root)
+
+    scan_gate_version = _field(result, "gate_version")
+    assert isinstance(before, str)
+    assert before, "gate_version must not be empty"
+    assert scan_gate_version == before
+    assert after == before
+
+    # Sanity: the stand-in cache-manager is actually what scan wired to,
+    # so the "never called" assertion elsewhere is meaningful.
+    calls = [rec.get("call") for rec in _read_log(isolated_env["cache_log"])]
+    assert "get" in calls, "scan did not consult the stand-in cache-manager: %r" % calls
+
+
+def test_gate_version_does_not_call_cache_manager_or_write(isolated_env):
+    repo_root = _make_repo(isolated_env["base"], with_secret=True)
+    cache_log = isolated_env["cache_log"]
+    assert not cache_log.exists()
+
+    dirs_before, files_before = _snapshot(repo_root)
+
+    version = secret_scanner.gate_version(repo_root)
+
+    assert isinstance(version, str)
+    assert version, "gate_version must not be empty"
+
+    calls = _read_log(cache_log)
+    assert calls == [], "gate_version called the cache-manager stand-in: %r" % calls
+
+    dirs_after, files_after = _snapshot(repo_root)
+    assert dirs_after == dirs_before, "directories under repo_root changed: added=%r removed=%r" % (
+        sorted(dirs_after - dirs_before),
+        sorted(dirs_before - dirs_after),
+    )
+    assert set(files_after) == set(files_before), "files under repo_root added/removed: added=%r removed=%r" % (
+        sorted(set(files_after) - set(files_before)),
+        sorted(set(files_before) - set(files_after)),
+    )
+    changed = sorted(k for k in files_before if files_before[k] != files_after[k])
+    assert changed == [], "files under repo_root changed: %r" % changed
+
+    assert not isolated_env["urlopen_log"].exists(), "gate_version attempted a network call"

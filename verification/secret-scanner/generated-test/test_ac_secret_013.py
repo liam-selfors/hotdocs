@@ -1,151 +1,232 @@
-import contextlib
-import io
 import json
 import os
 import shutil
 import subprocess
-import tempfile
-import unittest
+import sys
+import urllib.request
 from pathlib import Path
+
+import pytest
 
 import secret_scanner
 
 
-FAKE_CACHE_MANAGER_SRC = '''
+# Built by concatenation so this test file itself never holds the literal key.
+PLANTED_KEY = "AKIA" + "ABCDEFGHIJKLMNOP"
+
+
+FAKE_CACHE_MANAGER = '''\
+import datetime
+from dataclasses import dataclass
+
+
+class SchemaValidationError(ValueError):
+    pass
+
+
+@dataclass
 class CacheKey:
-    def __init__(self, spec_bundle_hash=None, gate_inputs_hash=None, gate_version=None, model_pin=None):
-        self.spec_bundle_hash = spec_bundle_hash
-        self.gate_inputs_hash = gate_inputs_hash
-        self.gate_version = gate_version
-        self.model_pin = model_pin
+    spec_bundle_hash: str
+    gate_inputs_hash: str
+    gate_version: str
+    model_pin: str
 
 
+@dataclass
 class CachedResult:
-    def __init__(self, gate_type=None, payload=None, stored_at=None):
-        self.gate_type = gate_type
-        self.payload = payload
-        self.stored_at = stored_at
+    gate_type: str
+    payload: dict
+    stored_at: str
 
 
-def get(cache_key, repo_root=None):
+class Miss:
+    def __eq__(self, other):
+        return isinstance(other, Miss)
+
+    def __hash__(self):
+        return 0
+
+
+def get(cache_key, *, repo_root=None):
+    return Miss()
+
+
+def put(cache_key, result, *, repo_root=None):
     return None
 
 
-def put(cache_key, result, repo_root=None):
-    pass
+def now_iso():
+    now = datetime.datetime.now(datetime.timezone.utc)
+    return now.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def stats(*, repo_root=None):
+    return {"entry_count": 0}
+
+
+def main(argv=None):
+    return 0
 '''
 
-AKIA_KEY_LINE = 'K = "AKIAABCDEFGHIJKLMNOP"\n'
+
+class _FakeResponse:
+    status = 200
+
+    def read(self, *args, **kwargs):
+        return b""
+
+    def getcode(self):
+        return 200
+
+    def close(self):
+        pass
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
 
 
-def _write_fake_cache_manager(repo_root):
-    cache_dir = Path(repo_root) / "gen" / "cache-manager"
-    cache_dir.mkdir(parents=True, exist_ok=True)
-    (cache_dir / "cache_manager.py").write_text(FAKE_CACHE_MANAGER_SRC)
+def _fake_urlopen(*args, **kwargs):
+    return _FakeResponse()
 
 
-def _run_git(args, cwd):
-    subprocess.run(["git"] + args, cwd=str(cwd), check=True, capture_output=True)
+@pytest.fixture(autouse=True)
+def _isolate(monkeypatch):
+    monkeypatch.delenv("VAR_COMPLIANCE_WEBHOOK_URL", raising=False)
+    monkeypatch.delenv("VAR_CACHE_STORE_URL", raising=False)
+    for name in ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setattr(urllib.request, "urlopen", _fake_urlopen)
+    monkeypatch.setattr(sys, "dont_write_bytecode", True)
 
 
-class TestACSecret013(unittest.TestCase):
-    def setUp(self):
-        self._saved_webhook_var = os.environ.pop("VAR_COMPLIANCE_WEBHOOK_URL", None)
-        self.tmp = tempfile.mkdtemp()
-        self.repo_root = Path(self.tmp) / "repo"
-        self.repo_root.mkdir()
-        _write_fake_cache_manager(self.repo_root)
-
-    def tearDown(self):
-        shutil.rmtree(self.tmp, ignore_errors=True)
-        if self._saved_webhook_var is not None:
-            os.environ["VAR_COMPLIANCE_WEBHOOK_URL"] = self._saved_webhook_var
-
-    def test_full_scan_clean_repo_returns_0_and_json_not_flagged(self):
-        buf = io.StringIO()
-        with contextlib.redirect_stdout(buf):
-            code = secret_scanner.main(
-                ["--repo-root=" + str(self.repo_root), "--format=json"]
-            )
-        self.assertEqual(code, 0)
-        result = json.loads(buf.getvalue())
-        flagged = result.get("flagged") if isinstance(result, dict) else getattr(result, "flagged", None)
-        self.assertFalse(flagged)
-
-    def test_full_scan_with_secret_returns_1_and_text_flagged(self):
-        gen_foo = self.repo_root / "gen" / "foo"
-        gen_foo.mkdir(parents=True, exist_ok=True)
-        (gen_foo / "c.py").write_text(AKIA_KEY_LINE)
-
-        buf = io.StringIO()
-        with contextlib.redirect_stdout(buf):
-            code = secret_scanner.main(
-                ["--repo-root", str(self.repo_root), "--format", "text"]
-            )
-        self.assertEqual(code, 1)
-        self.assertIn("FLAGGED", buf.getvalue())
-
-    def test_precommit_repeated_files_flag(self):
-        clean_file = self.repo_root / "clean.py"
-        clean_file.write_text("y = 2\n")
-        secret_file = self.repo_root / "secret.py"
-        secret_file.write_text(AKIA_KEY_LINE)
-
-        buf = io.StringIO()
-        with contextlib.redirect_stdout(buf):
-            code_with_secret = secret_scanner.main(
-                ["precommit", "--files", str(clean_file), "--files=" + str(secret_file)]
-            )
-        self.assertEqual(code_with_secret, 1)
-
-        buf2 = io.StringIO()
-        with contextlib.redirect_stdout(buf2):
-            code_clean_only = secret_scanner.main(
-                ["precommit", "--files=" + str(clean_file)]
-            )
-        self.assertEqual(code_clean_only, 0)
-
-    def test_precommit_git_default_discovery_returns_1(self):
-        git_repo = Path(self.tmp) / "gitrepo"
-        git_repo.mkdir()
-        _run_git(["init"], git_repo)
-
-        clean_file = git_repo / "clean.py"
-        clean_file.write_text("z = 3\n")
-        _run_git(["add", "clean.py"], git_repo)
-        _run_git(
-            [
-                "-c", "user.email=test@example.com",
-                "-c", "user.name=Test",
-                "commit", "-m", "init",
-            ],
-            git_repo,
-        )
-
-        secret_file = git_repo / "secret.py"
-        secret_file.write_text(AKIA_KEY_LINE)
-        _run_git(["add", "secret.py"], git_repo)
-
-        buf = io.StringIO()
-        with contextlib.redirect_stdout(buf):
-            code = secret_scanner.main(["precommit", "--repo-root", str(git_repo)])
-        self.assertEqual(code, 1)
-
-    def test_usage_errors_return_2(self):
-        bad_argvs = [
-            ["--format=bogus"],
-            ["--this-flag-does-not-exist"],
-            ["not-a-real-subcommand"],
-            ["--repo-root"],
-            ["propose", "--format=json"],
-        ]
-        for argv in bad_argvs:
-            buf = io.StringIO()
-            err = io.StringIO()
-            with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(err):
-                code = secret_scanner.main(list(argv))
-            self.assertEqual(code, 2, "expected exit 2 for argv=%r" % (argv,))
+def _make_repo(base: Path) -> Path:
+    repo_root = base / "repo"
+    (repo_root / "gen" / "cache-manager").mkdir(parents=True)
+    (repo_root / "gen" / "cache-manager" / "cache_manager.py").write_text(
+        FAKE_CACHE_MANAGER, encoding="utf-8"
+    )
+    (repo_root / "gen" / "foo").mkdir(parents=True)
+    (repo_root / "gen" / "foo" / "a.py").write_text("X = 1\n", encoding="utf-8")
+    return repo_root
 
 
-if __name__ == "__main__":
-    unittest.main()
+def _field(value, name):
+    return value.get(name) if isinstance(value, dict) else getattr(value, name, None)
+
+
+def test_full_scan_clean_json_returns_0_and_not_flagged(tmp_path, monkeypatch, capsys):
+    repo_root = _make_repo(tmp_path)
+    monkeypatch.chdir(repo_root)
+    capsys.readouterr()
+
+    code = secret_scanner.main([f"--repo-root={repo_root}", "--format=json"])
+    out = capsys.readouterr().out
+
+    assert code == 0, out
+    payload = json.loads(out.strip())
+    assert _field(payload, "flagged") is False
+
+
+def test_full_scan_flagged_text_returns_1_and_prints_flagged(tmp_path, monkeypatch, capsys):
+    repo_root = _make_repo(tmp_path)
+    (repo_root / "gen" / "foo" / "c.py").write_text(
+        f'K = "{PLANTED_KEY}"\n', encoding="utf-8"
+    )
+    monkeypatch.chdir(repo_root)
+    capsys.readouterr()
+
+    code = secret_scanner.main(
+        ["--repo-root", str(repo_root), "--format", "text"]
+    )
+    out = capsys.readouterr().out
+
+    assert code == 1, out
+    assert "FLAGGED" in out
+
+
+def test_precommit_repeatable_files(tmp_path, monkeypatch, capsys):
+    repo_root = _make_repo(tmp_path)
+    clean = repo_root / "gen" / "foo" / "clean.py"
+    clean.write_text("Y = 2\n", encoding="utf-8")
+    dirty = repo_root / "gen" / "foo" / "c.py"
+    dirty.write_text(f'K = "{PLANTED_KEY}"\n', encoding="utf-8")
+    monkeypatch.chdir(repo_root)
+    capsys.readouterr()
+
+    first = secret_scanner.main(
+        ["precommit", "--files", str(clean), f"--files={dirty}"]
+    )
+    first_out = capsys.readouterr().out
+    assert first == 1, first_out
+
+    second = secret_scanner.main(["precommit", f"--files={clean}"])
+    second_out = capsys.readouterr().out
+    assert second == 0, second_out
+
+
+def _git(repo_root: Path, *args: str) -> None:
+    subprocess.run(
+        [
+            "git",
+            "-c", "user.name=ac-test",
+            "-c", "user.email=ac-test@example.invalid",
+            "-c", "commit.gpgsign=false",
+            "-c", "core.hooksPath=/dev/null",
+            *args,
+        ],
+        cwd=str(repo_root),
+        check=True,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+
+
+@pytest.mark.skipif(shutil.which("git") is None, reason="git not available")
+def test_precommit_default_files_from_git_staged(tmp_path, monkeypatch, capsys):
+    repo_root = tmp_path / "gitrepo"
+    repo_root.mkdir()
+    _git(repo_root, "init", "-q")
+    (repo_root / "clean.py").write_text("Z = 3\n", encoding="utf-8")
+    _git(repo_root, "add", "clean.py")
+    _git(repo_root, "commit", "-q", "--no-verify", "-m", "init")
+
+    staged = repo_root / "staged.py"
+    staged.write_text(f'K = "{PLANTED_KEY}"\n', encoding="utf-8")
+    _git(repo_root, "add", "staged.py")
+
+    monkeypatch.chdir(repo_root)
+    capsys.readouterr()
+
+    code = secret_scanner.main(["precommit", "--repo-root", str(repo_root)])
+    out = capsys.readouterr().out
+    assert code == 1, out
+
+
+@pytest.mark.parametrize(
+    "argv_builder",
+    [
+        lambda root: [f"--repo-root={root}", "--format=bogus"],
+        lambda root: [f"--repo-root={root}", "--no-such-flag"],
+        lambda root: ["no-such-subcommand", f"--repo-root={root}"],
+        lambda root: ["--repo-root"],
+        lambda root: ["propose", "--format=json"],
+    ],
+    ids=[
+        "invalid-format",
+        "unknown-argument",
+        "unknown-subcommand",
+        "repo-root-last-without-value",
+        "propose-with-format",
+    ],
+)
+def test_usage_errors_return_2(tmp_path, monkeypatch, capsys, argv_builder):
+    repo_root = _make_repo(tmp_path)
+    monkeypatch.chdir(repo_root)
+    capsys.readouterr()
+
+    code = secret_scanner.main(argv_builder(str(repo_root)))
+    captured = capsys.readouterr()
+    assert code == 2, (captured.out, captured.err)

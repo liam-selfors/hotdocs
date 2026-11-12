@@ -1,77 +1,33 @@
 import hashlib
 import json
 import os
-import shutil
-import tempfile
+import urllib.request
 from pathlib import Path
+
+import pytest
 
 import secret_scanner
 
 
-def _write(path: Path, content: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(content, encoding="utf-8")
+LOG_ENV = "SECRET_SCAN_AC008_CACHE_LOG"
+
+FIXTURE_SECRET = "AKIAABCDEFGHIJKLMNOP"
+LIVE_SECRET = "AKIAZZZZYYYYXXXXWWWW"
 
 
-def _field(obj, name):
-    if isinstance(obj, dict):
-        return obj.get(name)
-    return getattr(obj, name, None)
-
-
-def test_ac_secret_008():
-    repo_root = Path(tempfile.mkdtemp(prefix="ac_secret_008_repo_"))
-    log_dir = Path(tempfile.mkdtemp(prefix="ac_secret_008_log_"))
-    log_path = log_dir / "cache_calls.log"
-    env_var = "AC_SECRET_008_CACHE_LOG"
-    old_env = os.environ.get(env_var)
-    os.environ[env_var] = str(log_path)
-
-    try:
-        allowlisted_secret = "AKIAABCDEFGHIJKLMNOP"
-        flagged_secret = "AKIAZZZZYYYYXXXXWWWW"
-
-        allowlisted_path = repo_root / "verification" / "foo" / "t.py"
-        _write(allowlisted_path, 'K = "%s"\n' % allowlisted_secret)
-
-        flagged_path = repo_root / "src" / "c.py"
-        _write(flagged_path, 'C = "%s"\n' % flagged_secret)
-
-        hashed_secret = hashlib.sha1(allowlisted_secret.encode("utf-8")).hexdigest()
-        allowlist_doc = {
-            "version": 1,
-            "entries": [
-                {
-                    "file": "verification/foo/t.py",
-                    "type": "AWS Access Key",
-                    "hashed_secret": "sha1:" + hashed_secret,
-                    "reason": "planted-fixture",
-                }
-            ],
-        }
-        allowlist_path = repo_root / ".secret-allowlist.json"
-        allowlist_bytes = json.dumps(allowlist_doc, indent=2).encode("utf-8")
-        allowlist_path.parent.mkdir(parents=True, exist_ok=True)
-        allowlist_path.write_bytes(allowlist_bytes)
-
-        allowlist_sha256 = hashlib.sha256(allowlist_bytes).hexdigest()
-
-        decision_content = (
-            "---\n"
-            "id: D9001\n"
-            "title: Seal allowlist for AC-SECRET-008 test fixture\n"
-            "status: ratified\n"
-            "owners: [lselfors]\n"
-            "last_ratified_commit: 0000000000000000000000000000000000000000\n"
-            "allowlist_sha256: sha256:%s\n"
-            "---\n\n"
-            "Seals the allowlist used by this test fixture.\n" % allowlist_sha256
-        )
-        _write(repo_root / "specs" / "decisions" / "D9001.md", decision_content)
-
-        cache_manager_module = '''
+CACHE_MANAGER_STANDIN = '''
+import json
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from typing import Any
+
+
+def _record(name):
+    path = os.environ.get("SECRET_SCAN_AC008_CACHE_LOG")
+    if not path:
+        return
+    with open(path, "a", encoding="utf-8") as fh:
+        fh.write(json.dumps({"call": name}) + "\\n")
 
 
 @dataclass
@@ -81,61 +37,150 @@ class CacheKey:
     gate_version: str
     model_pin: str
 
+    def __post_init__(self):
+        _record("CacheKey")
+
 
 @dataclass
 class CachedResult:
     gate_type: str
-    payload: dict
+    payload: Any
     stored_at: str
+
+    def __post_init__(self):
+        _record("CachedResult")
 
 
 class Miss:
+    def __eq__(self, other):
+        return isinstance(other, Miss)
+
+    def __hash__(self):
+        return 0
+
+
+class SchemaValidationError(ValueError):
     pass
 
 
-def _log_path():
-    return os.environ["AC_SECRET_008_CACHE_LOG"]
-
-
 def get(cache_key, *, repo_root=None):
-    with open(_log_path(), "a", encoding="utf-8") as f:
-        f.write("get\\n")
+    _record("get")
     return Miss()
 
 
 def put(cache_key, result, *, repo_root=None):
-    with open(_log_path(), "a", encoding="utf-8") as f:
-        f.write("put\\n")
+    _record("put")
+    return None
+
+
+def now_iso():
+    _record("now_iso")
+    import datetime
+    return datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def stats(*, repo_root=None):
+    _record("stats")
+    return {"entry_count": 0}
 '''
-        _write(repo_root / "gen" / "cache-manager" / "cache_manager.py", cache_manager_module)
 
-        result = secret_scanner.scan_files(
-            [allowlisted_path, flagged_path], repo_root=repo_root
-        )
 
-        scope = _field(result, "scope")
-        matches = _field(result, "matches")
-        allowed = _field(result, "allowed")
+def _field(value, name, default=None):
+    if isinstance(value, dict):
+        return value.get(name, default)
+    return getattr(value, name, default)
 
-        assert scope == "precommit"
 
-        assert matches is not None
-        match_files = [_field(m, "file") for m in matches]
-        assert match_files == ["src/c.py"]
+def _build_repo(repo_root: Path) -> None:
+    # Allowlisted fixture file
+    fixture = repo_root / "verification" / "foo" / "t.py"
+    fixture.parent.mkdir(parents=True, exist_ok=True)
+    fixture.write_text('K = "' + FIXTURE_SECRET + '"\n', encoding="utf-8")
 
-        assert allowed is not None
-        allowed_files = [_field(a, "file") for a in allowed]
-        assert "verification/foo/t.py" in allowed_files
+    # Live, non-allowlisted file
+    live = repo_root / "src" / "c.py"
+    live.parent.mkdir(parents=True, exist_ok=True)
+    live.write_text('C = "' + LIVE_SECRET + '"\n', encoding="utf-8")
 
-        if log_path.exists():
-            recorded = log_path.read_text(encoding="utf-8")
-        else:
-            recorded = ""
-        assert recorded == ""
-    finally:
-        if old_env is None:
-            os.environ.pop(env_var, None)
-        else:
-            os.environ[env_var] = old_env
-        shutil.rmtree(repo_root, ignore_errors=True)
-        shutil.rmtree(log_dir, ignore_errors=True)
+    # Allowlist
+    allowlist = {
+        "version": 1,
+        "entries": [
+            {
+                "file": "verification/foo/t.py",
+                "type": "AWS Access Key",
+                "hashed_secret": "sha1:"
+                + hashlib.sha1(FIXTURE_SECRET.encode("utf-8")).hexdigest(),
+                "reason": "planted-fixture",
+            }
+        ],
+    }
+    allowlist_bytes = (json.dumps(allowlist, indent=2) + "\n").encode("utf-8")
+    (repo_root / ".secret-allowlist.json").write_bytes(allowlist_bytes)
+
+    # Seal: a decision carrying allowlist_sha256 of the exact allowlist bytes
+    seal = hashlib.sha256(allowlist_bytes).hexdigest()
+    decisions = repo_root / "specs" / "decisions"
+    decisions.mkdir(parents=True, exist_ok=True)
+    (decisions / "D1.md").write_text(
+        "---\n"
+        "id: D1\n"
+        "title: Seal the secret allowlist\n"
+        "status: ratified\n"
+        "owners: [alice]\n"
+        "last_ratified_commit: 0000000\n"
+        "allowlist_sha256: sha256:" + seal + "\n"
+        "---\n"
+        "\n"
+        "Seals the current `.secret-allowlist.json`.\n",
+        encoding="utf-8",
+    )
+
+    # Recording cache-manager stand-in (flat module form)
+    cm_dir = repo_root / "gen" / "cache-manager"
+    cm_dir.mkdir(parents=True, exist_ok=True)
+    (cm_dir / "cache_manager.py").write_text(CACHE_MANAGER_STANDIN, encoding="utf-8")
+
+
+def test_ac_secret_008_precommit_scoped_allowlisted_no_cache(tmp_path, monkeypatch):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    _build_repo(repo_root)
+
+    log_path = tmp_path / "cache_calls.log"
+    monkeypatch.setenv(LOG_ENV, str(log_path))
+    monkeypatch.delenv("VAR_COMPLIANCE_WEBHOOK_URL", raising=False)
+
+    webhook_calls = []
+
+    def _fake_urlopen(*args, **kwargs):
+        webhook_calls.append((args, kwargs))
+        raise AssertionError("webhook must not be called in this test")
+
+    monkeypatch.setattr(urllib.request, "urlopen", _fake_urlopen)
+
+    paths = [
+        repo_root / "verification" / "foo" / "t.py",
+        repo_root / "src" / "c.py",
+    ]
+
+    result = secret_scanner.scan_files(paths, repo_root=repo_root)
+
+    assert _field(result, "scope") == "precommit"
+
+    matches = _field(result, "matches") or []
+    match_files = [_field(m, "file") for m in matches]
+    assert match_files, "expected at least one match for src/c.py"
+    assert all(f == "src/c.py" for f in match_files), match_files
+
+    allowed = _field(result, "allowed") or []
+    allowed_files = [_field(a, "file") for a in allowed]
+    assert "verification/foo/t.py" in allowed_files, allowed_files
+
+    assert _field(result, "flagged") is True
+    assert _field(result, "cache_hit") in (False, None)
+
+    recorded = ""
+    if log_path.exists():
+        recorded = log_path.read_text(encoding="utf-8").strip()
+    assert recorded == "", "cache-manager stand-in recorded calls: " + recorded

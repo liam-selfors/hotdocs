@@ -1,202 +1,253 @@
+"""AC-SECRET-015 (covers R-SECRET-012): a finding is suppressed only by an
+exact allowlist entry (same file, same type, same hashed secret) and by
+nothing else.
+
+Every secret-shaped value below is assembled at runtime from short pieces,
+so this file never carries a literal that a detector would flag.
+"""
+
 import hashlib
 import json
-import shutil
-import tempfile
-import unittest
+import sys
+import urllib.request
 from pathlib import Path
+
+import pytest
 
 import secret_scanner
 
 
-ORIGINAL_SECRET = "AKIAQQQQRRRRSSSSTTTT"
-CHANGED_SECRET = "AKIAZZZZYYYYXXXXWWWW"
+AWS_TYPE = "AWS Access Key"
+HEX_TYPE = "Hex High Entropy String"
+FIXTURE_FILE = "verification/foo/test_x.py"
+OTHER_FILE = "verification/foo/other.py"
+ALLOWLIST_NAME = ".secret-allowlist.json"
+ORIGINAL_LINE = 3
 
 
-def _get(value, key):
-    if isinstance(value, dict):
-        return value.get(key)
-    return getattr(value, key, None)
+def _original_key():
+    return "AKIA" + "R7TQ" + "2MXV" + "9KPB" + "4WNE"
 
 
-def _sha1_prefixed(secret):
-    return "sha1:" + hashlib.sha1(secret.encode("utf-8")).hexdigest()
+def _changed_key():
+    return "AKIA" + "ZZZZ" + "YYYY" + "XXXX" + "WWWW"
 
 
-def _sha256_file(path):
-    return "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()
+FAKE_CACHE_MANAGER = '''\
+"""Stand-in cache-manager: every lookup is a miss, every put is a no-op."""
+import datetime
+from dataclasses import dataclass
+from typing import Any
 
 
-def _matches_under(matches, prefix):
-    relevant = []
-    for match in matches:
-        file_value = _get(match, "file")
-        if file_value and file_value.startswith(prefix):
-            relevant.append(match)
-    return relevant
+@dataclass
+class CacheKey:
+    spec_bundle_hash: str
+    gate_inputs_hash: str
+    gate_version: str
+    model_pin: str
 
 
-def _write_cache_manager_stub(repo_root):
-    cache_dir = repo_root / "gen" / "cache-manager"
-    cache_dir.mkdir(parents=True, exist_ok=True)
-    (cache_dir / "cache_manager.py").write_text(
-        "class Miss:\n"
-        "    pass\n"
-        "\n"
-        "class CacheKey:\n"
-        "    def __init__(self, spec_bundle_hash=None, gate_inputs_hash=None,"
-        " gate_version=None, model_pin=None):\n"
-        "        self.spec_bundle_hash = spec_bundle_hash\n"
-        "        self.gate_inputs_hash = gate_inputs_hash\n"
-        "        self.gate_version = gate_version\n"
-        "        self.model_pin = model_pin\n"
-        "\n"
-        "class CachedResult:\n"
-        "    def __init__(self, gate_type=None, payload=None, stored_at=None):\n"
-        "        self.gate_type = gate_type\n"
-        "        self.payload = payload\n"
-        "        self.stored_at = stored_at\n"
-        "\n"
-        "def get(cache_key, repo_root=None):\n"
-        "    return Miss()\n"
-        "\n"
-        "def put(cache_key, result, repo_root=None):\n"
-        "    pass\n"
-    )
+@dataclass
+class CachedResult:
+    gate_type: str
+    payload: Any
+    stored_at: str
 
 
-def _write_decision(repo_root, decision_id, allowlist_sha256):
-    decisions_dir = repo_root / "specs" / "decisions"
-    decisions_dir.mkdir(parents=True, exist_ok=True)
-    content = (
+class Miss:
+    def __eq__(self, other):
+        return isinstance(other, Miss)
+
+    def __hash__(self):
+        return 0
+
+
+class SchemaValidationError(ValueError):
+    pass
+
+
+def get(cache_key, *, repo_root=None):
+    return Miss()
+
+
+def put(cache_key, result, *, repo_root=None):
+    return None
+
+
+def now_iso():
+    return datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def stats(*, repo_root=None):
+    return {"entry_count": 0}
+'''
+
+
+def _field(obj, name):
+    if isinstance(obj, dict):
+        return obj.get(name)
+    return getattr(obj, name, None)
+
+
+def _sha1(value):
+    return hashlib.sha1(value.encode("utf-8")).hexdigest()
+
+
+def _write(path, text):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+
+
+def _fixture_source(extra_lines=()):
+    lines = ["import os", "", 'K = "' + _original_key() + '"']
+    lines.extend(extra_lines)
+    return "\n".join(lines) + "\n"
+
+
+def _entry(entry_type=AWS_TYPE, file=FIXTURE_FILE, secret=None):
+    return {
+        "file": file,
+        "type": entry_type,
+        "hashed_secret": "sha1:" + _sha1(secret if secret is not None else _original_key()),
+        "reason": "planted-fixture",
+    }
+
+
+def _write_allowlist(repo_root, entries):
+    data = {"version": 1, "entries": entries}
+    raw = (json.dumps(data, indent=2) + "\n").encode("utf-8")
+    (repo_root / ALLOWLIST_NAME).write_bytes(raw)
+    return raw
+
+
+def _seal(repo_root, number):
+    raw = (repo_root / ALLOWLIST_NAME).read_bytes()
+    digest = hashlib.sha256(raw).hexdigest()
+    text = (
         "---\n"
-        "id: D{0}\n"
-        "title: Seal allowlist fixture {0}\n"
+        "id: D" + str(number) + "\n"
+        "title: Seal the secret allowlist\n"
         "status: ratified\n"
-        "owners: [lselfors]\n"
-        "last_ratified_commit: 0000000000000000000000000000000000000000\n"
-        "allowlist_sha256: {1}\n"
+        "owners: [secret-scan-tests]\n"
+        "last_ratified_commit: placeholder\n"
+        "allowlist_sha256: sha256:" + digest + "\n"
         "---\n"
         "\n"
-        "Seals `.secret-allowlist.json` for an AC-SECRET-015 fixture.\n"
-    ).format(decision_id, allowlist_sha256)
-    (decisions_dir / "D{0}.md".format(decision_id)).write_text(content)
-
-
-def _reseal(repo_root, allowlist_path, decision_id):
-    digest = _sha256_file(allowlist_path)
-    _write_decision(repo_root, decision_id, digest)
+        "Records the hash of the current secret allowlist.\n"
+    )
+    _write(repo_root / "specs" / "decisions" / ("D" + str(number) + ".md"), text)
 
 
 def _build_baseline(repo_root):
-    _write_cache_manager_stub(repo_root)
-
-    verif_dir = repo_root / "verification" / "foo"
-    verif_dir.mkdir(parents=True, exist_ok=True)
-    (verif_dir / "test_x.py").write_text('K = "{0}"\n'.format(ORIGINAL_SECRET))
-
-    allowlist_path = repo_root / ".secret-allowlist.json"
-    allowlist = {
-        "version": 1,
-        "entries": [
-            {
-                "file": "verification/foo/test_x.py",
-                "type": "AWS Access Key",
-                "hashed_secret": _sha1_prefixed(ORIGINAL_SECRET),
-                "reason": "planted-fixture",
-            }
-        ],
-    }
-    allowlist_path.write_text(json.dumps(allowlist, indent=2))
-
-    _reseal(repo_root, allowlist_path, 900)
-    return allowlist_path
+    """AC-SECRET-014's first scenario: one planted key, allowlisted, sealed."""
+    repo_root.mkdir(parents=True, exist_ok=True)
+    _write(repo_root / "gen" / "cache-manager" / "cache_manager.py", FAKE_CACHE_MANAGER)
+    _write(repo_root / FIXTURE_FILE, _fixture_source())
+    _write_allowlist(repo_root, [_entry()])
+    _seal(repo_root, 1)
 
 
-class ACSecret015Test(unittest.TestCase):
-    def _make_repo(self):
-        repo_root = Path(tempfile.mkdtemp())
-        self.addCleanup(shutil.rmtree, repo_root, ignore_errors=True)
-        _build_baseline(repo_root)
-        return repo_root
+@pytest.fixture
+def repo_root(tmp_path, monkeypatch):
+    root = tmp_path / "repo"
+    monkeypatch.delenv("VAR_COMPLIANCE_WEBHOOK_URL", raising=False)
+    monkeypatch.delenv("VAR_CACHE_STORE_URL", raising=False)
+    monkeypatch.setattr(sys, "dont_write_bytecode", True)
 
-    def test_changed_secret_value_is_flagged_and_entry_becomes_unused(self):
-        repo_root = self._make_repo()
-        test_x = repo_root / "verification" / "foo" / "test_x.py"
-        test_x.write_text('K = "{0}"\n'.format(CHANGED_SECRET))
+    def _no_network(*args, **kwargs):
+        raise AssertionError("no webhook call is expected in this test")
 
-        result = secret_scanner.scan(repo_root)
-
-        self.assertTrue(_get(result, "flagged"))
-
-        matches = _get(result, "matches")
-        relevant = _matches_under(matches, "verification/")
-        self.assertEqual(len(relevant), 1)
-        self.assertEqual(_get(relevant[0], "file"), "verification/foo/test_x.py")
-        self.assertEqual(_get(relevant[0], "line"), 1)
-
-        allowed = _get(result, "allowed")
-        self.assertEqual(allowed, [])
-
-        unused = _get(result, "unused_allowlist_entries")
-        self.assertEqual(len(unused), 1)
-        self.assertEqual(_get(unused[0], "file"), "verification/foo/test_x.py")
-        self.assertEqual(_get(unused[0], "type"), "AWS Access Key")
-
-    def test_same_secret_in_new_file_is_flagged_while_original_stays_allowed(self):
-        repo_root = self._make_repo()
-        other = repo_root / "verification" / "foo" / "other.py"
-        other.write_text('OTHER = "{0}"\n'.format(ORIGINAL_SECRET))
-
-        result = secret_scanner.scan(repo_root)
-
-        matches = _get(result, "matches")
-        relevant = _matches_under(matches, "verification/")
-        self.assertEqual(len(relevant), 1)
-        self.assertEqual(_get(relevant[0], "file"), "verification/foo/other.py")
-        self.assertEqual(_get(relevant[0], "rule_id"), "AWS Access Key")
-
-        allowed = _get(result, "allowed")
-        self.assertEqual(len(allowed), 1)
-        self.assertEqual(_get(allowed[0], "file"), "verification/foo/test_x.py")
-
-    def test_new_unlisted_line_is_flagged_alone(self):
-        repo_root = self._make_repo()
-        test_x = repo_root / "verification" / "foo" / "test_x.py"
-        with test_x.open("a") as handle:
-            handle.write('J = "{0}"\n'.format(CHANGED_SECRET))
-
-        result = secret_scanner.scan(repo_root)
-
-        matches = _get(result, "matches")
-        relevant = _matches_under(matches, "verification/")
-        self.assertEqual(len(relevant), 1)
-        self.assertEqual(_get(relevant[0], "file"), "verification/foo/test_x.py")
-        self.assertEqual(_get(relevant[0], "line"), 2)
-
-    def test_entry_type_change_lets_original_finding_through(self):
-        repo_root = self._make_repo()
-        allowlist_path = repo_root / ".secret-allowlist.json"
-        allowlist = json.loads(allowlist_path.read_text())
-        allowlist["entries"][0]["type"] = "Hex High Entropy String"
-        allowlist_path.write_text(json.dumps(allowlist, indent=2))
-        _reseal(repo_root, allowlist_path, 901)
-
-        result = secret_scanner.scan(repo_root)
-
-        self.assertTrue(_get(result, "flagged"))
-
-        matches = _get(result, "matches")
-        found = False
-        for match in matches:
-            if (
-                _get(match, "file") == "verification/foo/test_x.py"
-                and _get(match, "line") == 1
-                and _get(match, "rule_id") == "AWS Access Key"
-            ):
-                found = True
-                break
-        self.assertTrue(found)
+    monkeypatch.setattr(urllib.request, "urlopen", _no_network)
+    _build_baseline(root)
+    monkeypatch.chdir(root)
+    return root
 
 
-if __name__ == "__main__":
-    unittest.main()
+def _run(repo_root):
+    result = secret_scanner.scan(Path(repo_root))
+    matches = list(_field(result, "matches") or [])
+    allowed = list(_field(result, "allowed") or [])
+    unused = list(_field(result, "unused_allowlist_entries") or [])
+    return result, matches, allowed, unused
+
+
+def _key(item):
+    line = _field(item, "line")
+    return (
+        _field(item, "rule_id"),
+        _field(item, "file"),
+        int(line) if line is not None else None,
+    )
+
+
+def _assert_allowlist_valid(matches):
+    invalid = [m for m in matches if _field(m, "rule_id") == "allowlist-invalid"]
+    assert invalid == [], "the resealed allowlist must stay valid, got %r" % (invalid,)
+
+
+def test_baseline_fixture_is_clean_and_allowed(repo_root):
+    result, matches, allowed, unused = _run(repo_root)
+    assert matches == [], matches
+    assert _field(result, "flagged") is False
+    assert [_key(a) for a in allowed] == [(AWS_TYPE, FIXTURE_FILE, ORIGINAL_LINE)]
+    assert unused == []
+
+
+def test_changed_secret_on_allowlisted_line_is_flagged(repo_root):
+    _write(
+        repo_root / FIXTURE_FILE,
+        "import os\n\nK = \"" + _changed_key() + "\"\n",
+    )
+    _seal(repo_root, 2)
+
+    result, matches, allowed, unused = _run(repo_root)
+
+    _assert_allowlist_valid(matches)
+    assert _field(result, "flagged") is True
+    assert [_key(m) for m in matches] == [(AWS_TYPE, FIXTURE_FILE, ORIGINAL_LINE)]
+    assert allowed == []
+    unused_pairs = [(_field(u, "file"), _field(u, "type")) for u in unused]
+    assert (FIXTURE_FILE, AWS_TYPE) in unused_pairs, unused
+
+
+def test_same_secret_in_another_file_is_flagged(repo_root):
+    _write(repo_root / OTHER_FILE, 'K = "' + _original_key() + '"\n')
+    _seal(repo_root, 2)
+
+    result, matches, allowed, unused = _run(repo_root)
+
+    _assert_allowlist_valid(matches)
+    assert _field(result, "flagged") is True
+    assert len(matches) == 1, matches
+    assert _field(matches[0], "file") == OTHER_FILE
+    assert _field(matches[0], "rule_id") == AWS_TYPE
+    assert (AWS_TYPE, FIXTURE_FILE, ORIGINAL_LINE) in [_key(a) for a in allowed]
+
+
+def test_new_secret_in_allowlisted_file_is_flagged(repo_root):
+    _write(
+        repo_root / FIXTURE_FILE,
+        _fixture_source(extra_lines=['J = "' + _changed_key() + '"']),
+    )
+    _seal(repo_root, 2)
+
+    result, matches, allowed, unused = _run(repo_root)
+
+    _assert_allowlist_valid(matches)
+    assert _field(result, "flagged") is True
+    assert [_key(m) for m in matches] == [(AWS_TYPE, FIXTURE_FILE, ORIGINAL_LINE + 1)]
+    assert (AWS_TYPE, FIXTURE_FILE, ORIGINAL_LINE) in [_key(a) for a in allowed]
+
+
+def test_entry_with_different_type_does_not_suppress(repo_root):
+    _write_allowlist(repo_root, [_entry(entry_type=HEX_TYPE)])
+    _seal(repo_root, 2)
+
+    result, matches, allowed, unused = _run(repo_root)
+
+    _assert_allowlist_valid(matches)
+    assert _field(result, "flagged") is True
+    original = (AWS_TYPE, FIXTURE_FILE, ORIGINAL_LINE)
+    assert original in [_key(m) for m in matches], matches
+    assert original not in [_key(a) for a in allowed], allowed

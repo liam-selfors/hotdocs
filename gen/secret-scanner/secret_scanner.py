@@ -1,5 +1,12 @@
-from __future__ import annotations
+"""secret-scanner: whole-repository committed-secret detection.
 
+Detection is delegated entirely to the ``detect-secrets`` library; this
+module only selects files, applies the sealed allowlist, builds the
+``SecretScanResult``, consults ``cache-manager`` for full scans, and fires
+the compliance webhook.
+"""
+
+import dataclasses
 import hashlib
 import importlib.metadata
 import importlib.util
@@ -11,713 +18,553 @@ import subprocess
 import sys
 import urllib.error
 import urllib.request
-from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Optional
 
-SKIP_DIRS = {".git", "__pycache__", ".pytest_cache", ".venv", ".hotdocs", "node_modules"}
-LOW_RISK_TYPES = {"Base64 High Entropy String", "Hex High Entropy String"}
-EXCLUDED_PLUGINS = {"KeywordDetector", "IPPublicDetector"}
+SCANNER_VERSION = "3.1.0"
+GATE_TYPE = "secret_scanner"
+ALLOWLIST_NAME = ".secret-allowlist.json"
+SKIP_DIRS = frozenset(
+    {".git", "__pycache__", ".pytest_cache", ".venv", ".hotdocs", "node_modules"}
+)
+EXCLUDED_PLUGINS = frozenset({"KeywordDetector", "IPPublicDetector"})
+HEX_TYPE = "Hex High Entropy String"
+LOW_RISK_TYPES = frozenset({"Base64 High Entropy String", HEX_TYPE})
+WEBHOOK_ENV = "VAR_COMPLIANCE_WEBHOOK_URL"
+WEBHOOK_TIMEOUT = 10
 
-_FILE_RE = re.compile(r"^[A-Za-z0-9_./-]+$")
-_HASH_RE = re.compile(r"^sha1:[0-9a-f]{40}$")
-_DECISION_RE = re.compile(r"^D(\d+)\.md$")
+_FILE_RE = re.compile(r"[A-Za-z0-9_./-]+")
+_HASH_RE = re.compile(r"sha1:[0-9a-f]{40}")
+_DECISION_RE = re.compile(r"D(\d+)\.md")
+_DOC_KEYS = frozenset({"version", "entries"})
+_ENTRY_KEYS = frozenset({"file", "type", "hashed_secret", "reason"})
+_FIXTURE_ROOTS = ("verification/", "specs/")
 
 
 class AllowlistInvalidError(Exception):
-    pass
+    """Raised by ``propose`` when the allowlist is invalid or unsealed."""
 
 
-def _dual_get(obj: Any, key: str, default: Any = None) -> Any:
-    if isinstance(obj, dict):
-        return obj.get(key, default)
-    return getattr(obj, key, default)
-
-
-@dataclass
+@dataclasses.dataclass
 class SecretScanResult:
     scope: str
-    gate_version: "str | None"
+    gate_version: str
     flagged: bool
     matches: list
     allowed: list
     unused_allowlist_entries: list
     notified: bool
-    notification_delivery_error: "dict | None"
+    notification_delivery_error: Optional[dict]
     cache_hit: bool
 
     def to_dict(self) -> dict:
-        return {
-            "scope": self.scope,
-            "gate_version": self.gate_version,
-            "flagged": self.flagged,
-            "matches": self.matches,
-            "allowed": self.allowed,
-            "unused_allowlist_entries": self.unused_allowlist_entries,
-            "notified": self.notified,
-            "notification_delivery_error": self.notification_delivery_error,
-            "cache_hit": self.cache_hit,
-        }
+        return dataclasses.asdict(self)
 
 
-@dataclass
-class AllowlistProposal:
-    allowlist: dict
-    ineligible: list
+class AllowlistProposal(dict):
+    """``{"allowlist": {...}, "ineligible": [...]}``, also readable by attribute."""
+
+    @property
+    def allowlist(self) -> dict:
+        return self["allowlist"]
+
+    @property
+    def ineligible(self) -> list:
+        return self["ineligible"]
 
     def to_dict(self) -> dict:
-        return {"allowlist": self.allowlist, "ineligible": self.ineligible}
+        return dict(self)
 
 
-# ---------------------------------------------------------------------------
-# Dependency loading (cache-manager)
-# ---------------------------------------------------------------------------
-
-def _tool_root() -> "Path | None":
-    p = Path(__file__).resolve()
-    for parent in p.parents:
-        if parent.name == "gen":
-            return parent.parent
-    return None
+# ---------------------------------------------------------------- versioning
 
 
-def _load_module_from_dir(dep_dir: Path, module_name: str):
-    flat = dep_dir / f"{module_name}.py"
-    pkg_dir = dep_dir / module_name
-    pkg_init = pkg_dir / "__init__.py"
-    if flat.is_file():
-        spec = importlib.util.spec_from_file_location(module_name, str(flat))
-    elif pkg_init.is_file():
-        spec = importlib.util.spec_from_file_location(
-            module_name, str(pkg_init), submodule_search_locations=[str(pkg_dir)]
-        )
-    else:
+def gate_version(repo_root: Path) -> str:
+    """The gate version ``scan(repo_root)`` reports; scans and writes nothing."""
+    library_version = importlib.metadata.version("detect-secrets")
+    return f"{GATE_TYPE}@{SCANNER_VERSION}+detect-secrets.{library_version}"
+
+
+# ---------------------------------------------------------------- file selection
+
+
+def _read_text(path: Path):
+    """Return the file's bytes if it is a UTF-8 text file, else ``None``."""
+    if not path.is_file():
         return None
-    if spec is None or spec.loader is None:
-        return None
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[module_name] = module
-    spec.loader.exec_module(module)
-    return module
-
-
-def _load_cache_manager(repo_root: Path):
-    module_name = "cache_manager"
-    dep_slug = "cache-manager"
+    data = path.read_bytes()
     try:
-        repo_dep_dir = Path(repo_root) / "gen" / dep_slug
-        if repo_dep_dir.is_dir():
-            return _load_module_from_dir(repo_dep_dir, module_name)
-        tool_root = _tool_root()
-        if tool_root is not None:
-            tool_dep_dir = tool_root / "gen" / dep_slug
-            if tool_dep_dir.is_dir():
-                return _load_module_from_dir(tool_dep_dir, module_name)
-    except Exception:
+        data.decode("utf-8")
+    except UnicodeDecodeError:
         return None
-    return None
+    return data
 
 
-# ---------------------------------------------------------------------------
-# File enumeration / hashing
-# ---------------------------------------------------------------------------
-
-def _iter_text_files(repo_root: Path):
-    for root, dirs, fnames in os.walk(repo_root):
-        dirs[:] = sorted(d for d in dirs if d not in SKIP_DIRS)
-        for fname in sorted(fnames):
-            fpath = Path(root) / fname
-            try:
-                content = fpath.read_bytes()
-                content.decode("utf-8")
-            except (UnicodeDecodeError, OSError):
-                continue
-            relpath = fpath.relative_to(repo_root).as_posix()
-            yield relpath, content, fpath
+def _collect_tree(root: Path) -> list:
+    """Every scannable file under ``root`` as ``(relative_posix, path, bytes)``."""
+    files = []
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = sorted(d for d in dirnames if d not in SKIP_DIRS)
+        for name in sorted(filenames):
+            path = Path(dirpath) / name
+            data = _read_text(path)
+            if data is not None:
+                files.append((Path(os.path.relpath(path, root)).as_posix(), path, data))
+    return files
 
 
-def _hash_file_set(entries) -> str:
-    h = hashlib.sha256()
-    for relpath, content in sorted(entries, key=lambda x: x[0]):
-        h.update(relpath.encode("utf-8"))
-        h.update(b"\x00")
-        h.update(content)
-        h.update(b"\x00")
-    return "sha256:" + h.hexdigest()
+def _file_set_hash(files) -> str:
+    digest = hashlib.sha256()
+    for rel, _path, data in sorted(files, key=lambda item: item[0]):
+        rel_bytes = rel.encode("utf-8")
+        digest.update(len(rel_bytes).to_bytes(8, "big"))
+        digest.update(rel_bytes)
+        digest.update(len(data).to_bytes(8, "big"))
+        digest.update(data)
+    return "sha256:" + digest.hexdigest()
 
 
-def _now_iso() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+# ---------------------------------------------------------------- detection
 
 
-# ---------------------------------------------------------------------------
-# detect-secrets integration
-# ---------------------------------------------------------------------------
-
-def _gate_version_string() -> str:
-    v = importlib.metadata.version("detect-secrets")
-    return f"secret_scanner@3.1.0+detect-secrets.{v}"
-
-
-def _plugin_names() -> list:
+def _detect(files) -> list:
+    """Run detect-secrets over ``(reported_path, path)`` pairs."""
+    import detect_secrets
     from detect_secrets.core.plugins.util import get_mapping_from_secret_type_to_class
-
-    mapping = get_mapping_from_secret_type_to_class()
-    names = set()
-    for cls in mapping.values():
-        name = cls.__name__
-        if name in EXCLUDED_PLUGINS:
-            continue
-        names.add(name)
-    return sorted(names)
-
-
-def _risk_tier(rule_id: str) -> str:
-    return "low" if rule_id in LOW_RISK_TYPES else "high"
-
-
-def _detect_secrets_findings(file_specs) -> list:
-    from detect_secrets import SecretsCollection
     from detect_secrets.settings import transient_settings
 
-    config = {"plugins_used": [{"name": n} for n in _plugin_names()], "filters_used": []}
-    collection = SecretsCollection()
-    path_to_report = {}
-    with transient_settings(config):
-        for report_path, abspath in file_specs:
-            path_str = str(abspath)
-            path_to_report[path_str] = report_path
-            collection.scan_file(path_str)
-
+    names = sorted(
+        {cls.__name__ for cls in get_mapping_from_secret_type_to_class().values()}
+        - EXCLUDED_PLUGINS
+    )
+    config = {"plugins_used": [{"name": name} for name in names], "filters_used": []}
     findings = []
-    for filename, secret in collection:
-        report_path = path_to_report.get(filename, filename)
-        rule_id = secret.type
-        findings.append(
-            {
-                "file": report_path,
-                "line": secret.line_number,
-                "rule_id": rule_id,
-                "risk_tier": _risk_tier(rule_id),
-                "secret_hash": secret.secret_hash,
-            }
-        )
+    with transient_settings(config):
+        for reported, path in files:
+            collection = detect_secrets.SecretsCollection()
+            collection.scan_file(str(path))
+            for _filename, secret in collection:
+                findings.append(
+                    {
+                        "file": reported,
+                        "line": secret.line_number,
+                        "rule_id": secret.type,
+                        "secret_hash": secret.secret_hash,
+                    }
+                )
     return findings
 
 
-# ---------------------------------------------------------------------------
-# Allowlist
-# ---------------------------------------------------------------------------
-
-def _is_valid_relpath(p: str) -> bool:
-    if not _FILE_RE.match(p):
-        return False
-    if p.startswith("/"):
-        return False
-    if ".." in p.split("/"):
-        return False
-    return True
+# ---------------------------------------------------------------- allowlist
 
 
-def _validate_entry(entry) -> bool:
-    if not isinstance(entry, dict):
+def _valid_entry(entry) -> bool:
+    if not isinstance(entry, dict) or set(entry) != _ENTRY_KEYS:
         return False
-    if set(entry.keys()) != {"file", "type", "hashed_secret", "reason"}:
-        return False
-    file_ = entry["file"]
-    type_ = entry["type"]
+    file = entry["file"]
+    kind = entry["type"]
     hashed = entry["hashed_secret"]
     reason = entry["reason"]
-    if not isinstance(file_, str) or not _is_valid_relpath(file_):
+    if not (
+        isinstance(file, str)
+        and _FILE_RE.fullmatch(file)
+        and not file.startswith("/")
+        and ".." not in file.split("/")
+    ):
         return False
-    if not isinstance(type_, str):
-        return False
-    if not isinstance(hashed, str) or not _HASH_RE.match(hashed):
+    if not (isinstance(kind, str) and isinstance(hashed, str) and _HASH_RE.fullmatch(hashed)):
         return False
     if reason == "planted-fixture":
-        if not (file_.startswith("verification/") or file_.startswith("specs/")):
-            return False
-    elif reason == "public-constant":
-        if type_ != "Hex High Entropy String":
-            return False
-    else:
-        return False
-    return True
+        return file.startswith(_FIXTURE_ROOTS)
+    return reason == "public-constant" and kind == HEX_TYPE
 
 
-def _parse_frontmatter(text: str) -> dict:
-    if not text.startswith("---"):
-        return {}
-    parts = text.split("---", 2)
-    if len(parts) < 3:
-        return {}
-    result = {}
-    for line in parts[1].splitlines():
-        line = line.strip()
-        if not line or line.startswith("#"):
-            continue
-        if ":" in line:
-            key, _, value = line.partition(":")
-            result[key.strip()] = value.strip()
-    return result
+def _valid_document(doc) -> bool:
+    return (
+        isinstance(doc, dict)
+        and set(doc) == _DOC_KEYS
+        and type(doc["version"]) is int
+        and doc["version"] == 1
+        and isinstance(doc["entries"], list)
+        and all(_valid_entry(entry) for entry in doc["entries"])
+    )
 
 
-def _find_seal_hash(repo_root: Path) -> "str | None":
-    decisions_dir = repo_root / "specs" / "decisions"
-    if not decisions_dir.is_dir():
-        return None
-    best_n = -1
-    best_hash = None
-    for entry in decisions_dir.iterdir():
-        m = _DECISION_RE.match(entry.name)
-        if not m:
-            continue
-        n = int(m.group(1))
-        try:
-            text = entry.read_text(encoding="utf-8")
-        except (UnicodeDecodeError, OSError):
-            continue
-        fm = _parse_frontmatter(text)
-        if fm.get("status") != "ratified":
-            continue
-        if "allowlist_sha256" not in fm:
-            continue
-        if n > best_n:
-            best_n = n
-            best_hash = fm["allowlist_sha256"]
-    return best_hash
+def _frontmatter(text: str) -> dict:
+    lines = text.splitlines()
+    fields = {}
+    if not lines or lines[0].strip() != "---":
+        return fields
+    for line in lines[1:]:
+        if line.strip() == "---":
+            break
+        key, sep, value = line.partition(":")
+        if sep:
+            fields[key.strip()] = value.strip().strip("\"'")
+    return fields
+
+
+def _seal(repo_root: Path):
+    """``allowlist_sha256`` of the highest-numbered ratified decision carrying it."""
+    decisions = repo_root / "specs" / "decisions"
+    numbered = []
+    if decisions.is_dir():
+        for path in decisions.iterdir():
+            match = _DECISION_RE.fullmatch(path.name)
+            if match:
+                numbered.append((int(match.group(1)), path))
+    for _number, path in sorted(numbered, reverse=True):
+        fields = _frontmatter(path.read_text(encoding="utf-8", errors="replace"))
+        if fields.get("status") == "ratified" and "allowlist_sha256" in fields:
+            return fields["allowlist_sha256"]
+    return None
 
 
 def _load_allowlist(repo_root: Path):
-    path = repo_root / ".secret-allowlist.json"
-    if not path.exists():
+    """The one shared loader: ``(valid, entries)``."""
+    path = repo_root / ALLOWLIST_NAME
+    if not path.is_file():
         return True, []
+    raw = path.read_bytes()
     try:
-        raw = path.read_bytes()
-    except OSError:
-        return True, []
-    try:
-        data = json.loads(raw.decode("utf-8"))
-    except (UnicodeDecodeError, ValueError):
+        doc = json.loads(raw.decode("utf-8"))
+    except ValueError:
         return False, []
-    if not isinstance(data, dict) or set(data.keys()) != {"version", "entries"}:
+    if not _valid_document(doc):
         return False, []
-    version = data.get("version")
-    if type(version) is not int or version != 1:
+    if doc["entries"] and "sha256:" + hashlib.sha256(raw).hexdigest() != _seal(repo_root):
         return False, []
-    entries = data.get("entries")
-    if not isinstance(entries, list):
-        return False, []
-    for entry in entries:
-        if not _validate_entry(entry):
-            return False, []
-    if entries:
-        seal_hash = _find_seal_hash(repo_root)
-        actual_hash = "sha256:" + hashlib.sha256(raw).hexdigest()
-        if seal_hash != actual_hash:
-            return False, []
-    return True, entries
+    return True, doc["entries"]
 
 
-def _apply_allowlist(findings, valid, entries):
-    used = set()
+# ---------------------------------------------------------------- notification
+
+
+def _delivery_category(exc: Exception) -> str:
+    if isinstance(exc, urllib.error.HTTPError) and exc.code in (401, 403):
+        return "auth"
+    timeouts = (socket.timeout, TimeoutError)
+    if isinstance(exc, timeouts) or isinstance(getattr(exc, "reason", None), timeouts):
+        return "timeout"
+    return "network"
+
+
+def _notify(url: str, body: dict):
+    """POST once; return ``None`` or a ``{category, message}`` delivery error."""
+    try:
+        request = urllib.request.Request(
+            url,
+            data=json.dumps(body).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        response = urllib.request.urlopen(request, timeout=WEBHOOK_TIMEOUT)
+        getattr(response, "close", lambda: None)()
+    except Exception as exc:
+        return {"category": _delivery_category(exc), "message": str(exc)}
+    return None
+
+
+# ---------------------------------------------------------------- evaluation
+
+
+def _sort_key(item: dict):
+    return (item["file"], item["line"], item["rule_id"])
+
+
+def _evaluate(scope: str, files, allowlist, version: str) -> SecretScanResult:
+    valid, entries = allowlist
+    used = [False] * len(entries)
     matches = []
     allowed = []
-    for f in findings:
-        key = (f["file"], f["rule_id"], "sha1:" + f["secret_hash"])
-        matched_idx = None
-        if valid:
-            for idx, e in enumerate(entries):
-                if (e["file"], e["type"], e["hashed_secret"]) == key:
-                    matched_idx = idx
-                    break
-        if matched_idx is not None:
-            used.add(matched_idx)
-            allowed.append({"rule_id": f["rule_id"], "file": f["file"], "line": f["line"]})
+    for finding in _detect([(rel, path) for rel, path, _data in files]):
+        hashed = "sha1:" + finding["secret_hash"]
+        hits = [
+            index
+            for index, entry in enumerate(entries)
+            if entry["file"] == finding["file"]
+            and entry["type"] == finding["rule_id"]
+            and entry["hashed_secret"] == hashed
+        ]
+        for index in hits:
+            used[index] = True
+        if hits:
+            allowed.append(
+                {"rule_id": finding["rule_id"], "file": finding["file"], "line": finding["line"]}
+            )
         else:
             matches.append(
                 {
-                    "rule_id": f["rule_id"],
-                    "risk_tier": f["risk_tier"],
-                    "file": f["file"],
-                    "line": f["line"],
+                    "rule_id": finding["rule_id"],
+                    "risk_tier": "low" if finding["rule_id"] in LOW_RISK_TYPES else "high",
+                    "file": finding["file"],
+                    "line": finding["line"],
                 }
             )
-
-    unused = []
-    if valid:
-        for idx, e in enumerate(entries):
-            if idx not in used:
-                unused.append({"file": e["file"], "type": e["type"]})
-    else:
+    if not valid:
         matches.append(
-            {
-                "rule_id": "allowlist-invalid",
-                "risk_tier": "high",
-                "file": ".secret-allowlist.json",
-                "line": 1,
-            }
+            {"rule_id": "allowlist-invalid", "risk_tier": "high", "file": ALLOWLIST_NAME, "line": 1}
         )
-
-    matches.sort(key=lambda m: (m["file"], m["line"], m["rule_id"]))
-    allowed.sort(key=lambda m: (m["file"], m["line"], m["rule_id"]))
-    unused.sort(key=lambda e: (e["file"], e["type"]))
-    return matches, allowed, unused
-
-
-# ---------------------------------------------------------------------------
-# Notification
-# ---------------------------------------------------------------------------
-
-def _maybe_notify(matches):
-    webhook_url = os.environ.get("VAR_COMPLIANCE_WEBHOOK_URL")
-    flagged = len(matches) > 0
-    has_high = any(m["risk_tier"] == "high" for m in matches)
-    due = flagged or has_high
-    notified = bool(due and webhook_url)
-    notification_delivery_error = None
-    if notified:
-        try:
-            body = json.dumps({"matches": matches, "flagged": flagged}).encode("utf-8")
-            req = urllib.request.Request(
-                webhook_url,
-                data=body,
-                headers={"Content-Type": "application/json"},
-                method="POST",
-            )
-            urllib.request.urlopen(req, timeout=10)
-        except urllib.error.HTTPError as e:
-            category = "auth" if e.code in (401, 403) else "network"
-            notification_delivery_error = {"category": category, "message": str(e)}
-        except (socket.timeout, TimeoutError) as e:
-            notification_delivery_error = {"category": "timeout", "message": str(e)}
-        except Exception as e:
-            notification_delivery_error = {"category": "network", "message": str(e)}
-    return notified, notification_delivery_error
-
-
-def _result_from_payload(payload, cache_hit: bool) -> SecretScanResult:
-    return SecretScanResult(
-        scope=_dual_get(payload, "scope", "full"),
-        gate_version=_dual_get(payload, "gate_version"),
-        flagged=_dual_get(payload, "flagged", False),
-        matches=_dual_get(payload, "matches", []),
-        allowed=_dual_get(payload, "allowed", []),
-        unused_allowlist_entries=_dual_get(payload, "unused_allowlist_entries", []),
-        notified=_dual_get(payload, "notified", False),
-        notification_delivery_error=_dual_get(payload, "notification_delivery_error"),
-        cache_hit=cache_hit,
-    )
-
-
-# ---------------------------------------------------------------------------
-# Public API
-# ---------------------------------------------------------------------------
-
-def gate_version(repo_root) -> str:
-    return _gate_version_string()
-
-
-def scan(repo_root) -> SecretScanResult:
-    repo_root = Path(repo_root).resolve()
-    all_entries = list(_iter_text_files(repo_root))
-    spec_entries = [(r, c) for r, c, _ in all_entries if r.startswith("specs/")]
-    other_entries = [(r, c) for r, c, _ in all_entries if not r.startswith("specs/")]
-    spec_bundle_hash = _hash_file_set(spec_entries)
-    gate_inputs_hash = _hash_file_set(other_entries)
-    gv = _gate_version_string()
-    model_pin = "none"
-
-    cache_manager = None
-    try:
-        cache_manager = _load_cache_manager(repo_root)
-    except Exception:
-        cache_manager = None
-
-    cache_key = None
-    if cache_manager is not None:
-        try:
-            cache_key = cache_manager.CacheKey(
-                spec_bundle_hash=spec_bundle_hash,
-                gate_inputs_hash=gate_inputs_hash,
-                gate_version=gv,
-                model_pin=model_pin,
-            )
-            cached = cache_manager.get(cache_key, repo_root=repo_root)
-        except Exception:
-            cached = None
-        if cached is not None:
-            payload = _dual_get(cached, "payload")
-            if payload is not None:
-                return _result_from_payload(payload, cache_hit=True)
-
-    valid, alist_entries = _load_allowlist(repo_root)
-    file_specs = [(r, abspath) for r, c, abspath in all_entries]
-    findings = _detect_secrets_findings(file_specs)
-    matches, allowed, unused = _apply_allowlist(findings, valid, alist_entries)
-    flagged = len(matches) > 0
-    notified, notif_error = _maybe_notify(matches)
-
+    matches.sort(key=_sort_key)
+    allowed.sort(key=_sort_key)
+    unused = [
+        {"file": entry["file"], "type": entry["type"]}
+        for entry, was_used in zip(entries, used)
+        if not was_used
+    ]
+    flagged = bool(matches)
+    url = os.environ.get(WEBHOOK_ENV) or ""
+    # Every high-risk match is a match, so "flagged or any high match" is "flagged".
+    notified = flagged and bool(url)
     result = SecretScanResult(
-        scope="full",
-        gate_version=gv,
+        scope=scope,
+        gate_version=version,
         flagged=flagged,
         matches=matches,
         allowed=allowed,
         unused_allowlist_entries=unused,
         notified=notified,
-        notification_delivery_error=notif_error,
+        notification_delivery_error=None,
         cache_hit=False,
     )
-
-    if cache_manager is not None and cache_key is not None:
-        try:
-            cached_result = cache_manager.CachedResult(
-                gate_type="secret_scanner",
-                payload=result.to_dict(),
-                stored_at=_now_iso(),
-            )
-            cache_manager.put(cache_key, cached_result, repo_root=repo_root)
-        except Exception:
-            pass
-
+    if notified:
+        result.notification_delivery_error = _notify(url, result.to_dict())
     return result
 
 
-def scan_files(paths, repo_root=None) -> SecretScanResult:
-    gv = _gate_version_string()
-    resolved_repo_root = Path(repo_root).resolve() if repo_root is not None else None
-
-    resolved = []
-    for p in paths:
-        p = Path(p)
-        if resolved_repo_root is not None and not p.is_absolute():
-            abspath = resolved_repo_root / p
-        else:
-            abspath = p
-        if resolved_repo_root is not None:
-            try:
-                report_path = abspath.resolve().relative_to(resolved_repo_root).as_posix()
-            except ValueError:
-                report_path = abspath.as_posix()
-        else:
-            report_path = str(p)
-        resolved.append((report_path, abspath))
-
-    filtered = []
-    for report_path, abspath in resolved:
-        parts = Path(report_path).parts if resolved_repo_root is not None else abspath.parts
-        if any(part in SKIP_DIRS for part in parts):
-            continue
-        try:
-            content = abspath.read_bytes()
-            content.decode("utf-8")
-        except (UnicodeDecodeError, OSError):
-            continue
-        filtered.append((report_path, abspath))
-
-    valid, alist_entries = True, []
-    if resolved_repo_root is not None:
-        valid, alist_entries = _load_allowlist(resolved_repo_root)
-
-    findings = _detect_secrets_findings(filtered)
-    matches, allowed, unused = _apply_allowlist(findings, valid, alist_entries)
-    flagged = len(matches) > 0
-    notified, notif_error = _maybe_notify(matches)
-
-    return SecretScanResult(
-        scope="precommit",
-        gate_version=gv,
-        flagged=flagged,
-        matches=matches,
-        allowed=allowed,
-        unused_allowlist_entries=unused,
-        notified=notified,
-        notification_delivery_error=notif_error,
-        cache_hit=False,
-    )
+# ---------------------------------------------------------------- cache-manager
 
 
-def propose(repo_root) -> AllowlistProposal:
-    repo_root = Path(repo_root).resolve()
-    valid, entries = _load_allowlist(repo_root)
-    if not valid:
-        raise AllowlistInvalidError("the current .secret-allowlist.json is invalid")
-
-    file_specs = [(r, abspath) for r, c, abspath in _iter_text_files(repo_root)]
-    findings = _detect_secrets_findings(file_specs)
-
-    covered = {(e["file"], e["type"], e["hashed_secret"]) for e in entries}
-
-    new_entries = []
-    ineligible = []
-    seen_new = set()
-    for f in findings:
-        hashed = "sha1:" + f["secret_hash"]
-        key = (f["file"], f["rule_id"], hashed)
-        if key in covered:
-            continue
-        file_ = f["file"]
-        rule_id = f["rule_id"]
-        if file_.startswith("verification/") or file_.startswith("specs/"):
-            reason = "planted-fixture"
-        elif rule_id == "Hex High Entropy String":
-            reason = "public-constant"
-        else:
-            ineligible.append({"file": file_, "line": f["line"], "rule_id": rule_id})
-            continue
-        if key in seen_new:
-            continue
-        seen_new.add(key)
-        new_entries.append(
-            {"file": file_, "type": rule_id, "hashed_secret": hashed, "reason": reason}
-        )
-
-    all_entries = list(entries) + new_entries
-    all_entries.sort(key=lambda e: (e["file"], e["type"], e["hashed_secret"]))
-    ineligible.sort(key=lambda e: (e["file"], e["line"], e["rule_id"]))
-
-    return AllowlistProposal(
-        allowlist={"version": 1, "entries": all_entries},
-        ineligible=ineligible,
-    )
+def _field(obj, name: str):
+    if isinstance(obj, dict):
+        return obj.get(name)
+    return getattr(obj, name, None)
 
 
-# ---------------------------------------------------------------------------
-# CLI
-# ---------------------------------------------------------------------------
+def _dependency_dir(repo_root: Path, slug: str) -> Path:
+    local = repo_root / "gen" / slug
+    if local.is_dir():
+        return local
+    for parent in Path(os.path.abspath(__file__)).parents:
+        if parent.name == "gen":
+            return parent.parent / "gen" / slug
+    return local
 
-def _git_diff_files(repo_root: Path) -> list:
+
+def _load_cache_manager(repo_root: Path):
+    directory = _dependency_dir(repo_root, "cache-manager")
+    flat = directory / "cache_manager.py"
+    package = directory / "cache_manager" / "__init__.py"
     try:
-        out1 = subprocess.run(
-            ["git", "diff", "--name-only", "--diff-filter=ACMR", "HEAD"],
-            cwd=str(repo_root),
-            capture_output=True,
-            text=True,
-            check=True,
+        if flat.is_file():
+            target, search = flat, None
+        elif package.is_file():
+            target, search = package, [str(package.parent)]
+        else:
+            return None
+        digest = hashlib.sha256(str(target).encode("utf-8")).hexdigest()[:16]
+        name = f"_secret_scanner_dep_cache_manager_{digest}"
+        spec = importlib.util.spec_from_file_location(
+            name, target, submodule_search_locations=search
         )
-        out2 = subprocess.run(
-            ["git", "diff", "--cached", "--name-only", "--diff-filter=ACMR"],
-            cwd=str(repo_root),
-            capture_output=True,
-            text=True,
-            check=True,
-        )
-    except (OSError, subprocess.CalledProcessError):
-        return []
-    files = set(out1.stdout.splitlines()) | set(out2.stdout.splitlines())
-    return sorted(f for f in files if f)
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[name] = module
+        spec.loader.exec_module(module)
+        return module
+    except Exception:
+        return None
 
 
-def _print_result(result, fmt: str) -> None:
+def _from_payload(payload) -> SecretScanResult:
+    return SecretScanResult(
+        scope=_field(payload, "scope"),
+        gate_version=_field(payload, "gate_version"),
+        flagged=_field(payload, "flagged"),
+        matches=list(_field(payload, "matches") or []),
+        allowed=list(_field(payload, "allowed") or []),
+        unused_allowlist_entries=list(_field(payload, "unused_allowlist_entries") or []),
+        notified=_field(payload, "notified"),
+        notification_delivery_error=_field(payload, "notification_delivery_error"),
+        cache_hit=True,
+    )
+
+
+def _utc_now() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+# ---------------------------------------------------------------- public API
+
+
+def scan(repo_root: Path) -> SecretScanResult:
+    """Full, cache-aware scan of every text file under ``repo_root``."""
+    root = Path(repo_root)
+    version = gate_version(root)
+    files = _collect_tree(root)
+    cache = _load_cache_manager(root)
+    key = None
+    if cache is not None:
+        try:
+            key = cache.CacheKey(
+                spec_bundle_hash=_file_set_hash([f for f in files if f[0].startswith("specs/")]),
+                gate_inputs_hash=_file_set_hash(
+                    [f for f in files if not f[0].startswith("specs/")]
+                ),
+                gate_version=version,
+                model_pin="none",
+            )
+            payload = _field(cache.get(key, repo_root=root), "payload")
+            if payload is not None:
+                return _from_payload(payload)
+        except Exception:
+            pass
+    result = _evaluate("full", files, _load_allowlist(root), version)
+    if key is not None:
+        try:
+            cache.put(
+                key,
+                cache.CachedResult(
+                    gate_type=GATE_TYPE, payload=result.to_dict(), stored_at=_utc_now()
+                ),
+                repo_root=root,
+            )
+        except Exception:
+            pass
+    return result
+
+
+def scan_files(paths: list, repo_root: Optional[Path] = None) -> SecretScanResult:
+    """Pre-commit form: only the given files, no cache-manager."""
+    root = None if repo_root is None else Path(repo_root)
+    selected = {}
+    for given in paths:
+        if root is None:
+            path = Path(given)
+            reported = os.fspath(given)
+        else:
+            path = root / given
+            reported = Path(os.path.relpath(path, root)).as_posix()
+        if SKIP_DIRS.intersection(Path(reported).parts[:-1]):
+            continue
+        data = _read_text(path)
+        if data is not None:
+            selected[reported] = (reported, path, data)
+    allowlist = (True, []) if root is None else _load_allowlist(root)
+    return _evaluate("precommit", list(selected.values()), allowlist, gate_version(root))
+
+
+def propose(repo_root: Path) -> AllowlistProposal:
+    """A complete allowlist covering every eligible finding; writes nothing."""
+    root = Path(repo_root)
+    valid, entries = _load_allowlist(root)
+    if not valid:
+        raise AllowlistInvalidError(f"{ALLOWLIST_NAME} is invalid or unsealed")
+    covered = {(entry["file"], entry["type"], entry["hashed_secret"]) for entry in entries}
+    proposed = [dict(entry) for entry in entries]
+    ineligible = []
+    for finding in _detect([(rel, path) for rel, path, _data in _collect_tree(root)]):
+        hashed = "sha1:" + finding["secret_hash"]
+        if (finding["file"], finding["rule_id"], hashed) in covered:
+            continue
+        for reason in ("planted-fixture", "public-constant"):
+            entry = {
+                "file": finding["file"],
+                "type": finding["rule_id"],
+                "hashed_secret": hashed,
+                "reason": reason,
+            }
+            if _valid_entry(entry):
+                proposed.append(entry)
+                break
+        else:
+            ineligible.append(
+                {"file": finding["file"], "line": finding["line"], "rule_id": finding["rule_id"]}
+            )
+    proposed.sort(key=lambda entry: (entry["file"], entry["type"], entry["hashed_secret"]))
+    ineligible.sort(key=_sort_key)
+    return AllowlistProposal(
+        allowlist={"version": 1, "entries": proposed}, ineligible=ineligible
+    )
+
+
+# ---------------------------------------------------------------- CLI
+
+_MODE_FLAGS = {
+    "full": ("--repo-root", "--format"),
+    "precommit": ("--files", "--repo-root", "--format"),
+    "propose": ("--repo-root",),
+}
+
+
+def _usage(message: str) -> int:
+    print(f"secret-scan: usage error: {message}", file=sys.stderr)
+    return 2
+
+
+def _git_changed_files(root: Path) -> list:
+    commands = (
+        ["git", "diff", "--name-only", "--diff-filter=ACMR", "HEAD"],
+        ["git", "diff", "--cached", "--name-only", "--diff-filter=ACMR"],
+    )
+    names = set()
+    for command in commands:
+        try:
+            proc = subprocess.run(command, cwd=root, capture_output=True, text=True)
+        except OSError:
+            continue
+        if proc.returncode == 0:
+            names.update(line for line in proc.stdout.splitlines() if line)
+    return sorted(names)
+
+
+def _emit(result: SecretScanResult, fmt: str) -> int:
     if fmt == "json":
-        d = result.to_dict() if hasattr(result, "to_dict") else result
-        print(json.dumps(d, indent=2))
+        print(json.dumps(result.to_dict(), indent=2))
     else:
-        flagged = _dual_get(result, "flagged", False)
-        print("FLAGGED" if flagged else "CLEAN")
-        for m in _dual_get(result, "matches", []):
-            file_ = _dual_get(m, "file")
-            line = _dual_get(m, "line")
-            rule_id = _dual_get(m, "rule_id")
-            risk_tier = _dual_get(m, "risk_tier")
-            print(f"{file_}:{line} {rule_id} [{risk_tier}]")
+        print("FLAGGED" if result.flagged else "CLEAN")
+        for match in result.matches:
+            print(f"{match['file']}:{match['line']}: {match['rule_id']} ({match['risk_tier']})")
+    return 1 if result.flagged else 0
 
 
-def _take_flag_value(args, i, flag_name):
-    arg = args[i]
-    if "=" in arg:
-        value = arg.split("=", 1)[1]
-        if value == "":
-            return None, i, True
-        return value, i + 1, False
-    if i + 1 >= len(args):
-        return None, i, True
-    return args[i + 1], i + 2, False
-
-
-def main(argv) -> int:
+def main(argv: list) -> int:
     args = list(argv)
-
-    if args and args[0] == "secret-scan":
+    if args[:1] == ["secret-scan"]:
         args = args[1:]
-
-    subcommand = "scan"
-    if args and args[0] in ("precommit", "propose"):
-        subcommand = args[0]
-        args = args[1:]
-    elif args and not args[0].startswith("--"):
-        print(f"usage error: unknown subcommand {args[0]!r}", file=sys.stderr)
-        return 2
-
-    repo_root_val = None
-    fmt = None
+    mode = "full"
+    if args[:1] in (["precommit"], ["propose"]):
+        mode = args.pop(0)
+    options = {"--repo-root": ".", "--format": "text"}
     files = []
-    i = 0
-    while i < len(args):
-        arg = args[i]
-        if arg == "--repo-root" or arg.startswith("--repo-root="):
-            value, i, err = _take_flag_value(args, i, "--repo-root")
-            if err:
-                print("usage error: --repo-root requires a value", file=sys.stderr)
-                return 2
-            repo_root_val = value
-        elif arg == "--format" or arg.startswith("--format="):
-            if subcommand == "propose":
-                print("usage error: propose accepts no --format", file=sys.stderr)
-                return 2
-            value, i, err = _take_flag_value(args, i, "--format")
-            if err:
-                print("usage error: --format requires a value", file=sys.stderr)
-                return 2
-            if value not in ("json", "text"):
-                print(f"usage error: invalid --format {value!r}", file=sys.stderr)
-                return 2
-            fmt = value
-        elif arg == "--files" or arg.startswith("--files="):
-            if subcommand != "precommit":
-                print("usage error: --files is only valid for precommit", file=sys.stderr)
-                return 2
-            value, i, err = _take_flag_value(args, i, "--files")
-            if err:
-                print("usage error: --files requires a value", file=sys.stderr)
-                return 2
+    index = 0
+    while index < len(args):
+        name, sep, value = args[index].partition("=")
+        if name not in _MODE_FLAGS[mode]:
+            return _usage(f"unknown argument {args[index]!r}")
+        if not sep:
+            if index + 1 == len(args):
+                return _usage(f"{name} requires a value")
+            index += 1
+            value = args[index]
+        index += 1
+        if name == "--files":
             files.append(value)
         else:
-            print(f"usage error: unknown argument {arg!r}", file=sys.stderr)
-            return 2
-
-    repo_root_path = Path(repo_root_val) if repo_root_val is not None else Path.cwd()
-    if fmt is None:
-        fmt = "text"
-
-    if subcommand == "propose":
+            options[name] = value
+    if options["--format"] not in ("json", "text"):
+        return _usage(f"invalid --format {options['--format']!r}")
+    root = Path(options["--repo-root"])
+    if mode == "propose":
         try:
-            proposal = propose(repo_root_path)
-        except AllowlistInvalidError as e:
-            print(f"usage error: {e}", file=sys.stderr)
+            proposal = propose(root)
+        except AllowlistInvalidError as exc:
+            print(f"secret-scan: {exc}", file=sys.stderr)
             return 2
         print(json.dumps(proposal.to_dict(), indent=2))
         return 1 if proposal.ineligible else 0
-
-    if subcommand == "precommit":
-        if not files:
-            files = _git_diff_files(repo_root_path)
-        resolved_paths = []
-        for f in files:
-            fp = Path(f)
-            if not fp.is_absolute():
-                fp = repo_root_path / fp
-            resolved_paths.append(fp)
-        result = scan_files(resolved_paths, repo_root=repo_root_path)
+    if mode == "precommit":
+        result = scan_files(files or _git_changed_files(root), repo_root=root)
     else:
-        result = scan(repo_root_path)
-
-    _print_result(result, fmt)
-    flagged = _dual_get(result, "flagged", False)
-    return 1 if flagged else 0
-
-
-if __name__ == "__main__":
-    sys.exit(main(sys.argv[1:]))
+        result = scan(root)
+    return _emit(result, options["--format"])
