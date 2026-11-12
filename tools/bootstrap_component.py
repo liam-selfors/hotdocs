@@ -169,8 +169,13 @@ def _consumer_names(slug: str) -> dict[str, list[str]]:
 def _consumer_surface_ok(component_id: str, code_dir: Path) -> bool:
     slug = _slug(component_id)
     module_name = slug.replace("-", "_")
+    wanted = _consumer_names(slug)
+    # hasattr, not dir(): a module-level __getattr__ (PEP 562) may supply a
+    # name lazily, e.g. spec-linter re-exporting corpus-loader's load_corpus.
     proc = subprocess.run(
-        [sys.executable, "-c", f"import json, {module_name} as m; print(json.dumps(dir(m)))"],
+        [sys.executable, "-c",
+         f"import json, sys, {module_name} as m; "
+         "print(json.dumps([n for n in sys.argv[1:] if hasattr(m, n)]))", *sorted(wanted)],
         cwd=code_dir, env={**__import__("os").environ, "PYTHONPATH": str(code_dir)},
         capture_output=True, text=True,
     )
@@ -178,7 +183,7 @@ def _consumer_surface_ok(component_id: str, code_dir: Path) -> bool:
         print(f"consumer surface: candidate does not import:\n{proc.stderr[-2000:]}")
         return False
     have = set(__import__("json").loads(proc.stdout.strip().splitlines()[-1]))
-    missing = {n: sorted(set(w)) for n, w in _consumer_names(slug).items() if n not in have}
+    missing = {n: sorted(set(w)) for n, w in wanted.items() if n not in have}
     if missing:
         for n, where in sorted(missing.items()):
             print(f"consumer surface: missing {n} (used in {', '.join(where[:3])})")
