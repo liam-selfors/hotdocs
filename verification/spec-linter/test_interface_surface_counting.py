@@ -63,9 +63,10 @@ def _surface(tmp_path: Path, component: str) -> int:
     raise AssertionError("no interface_surface finding; the padded count did not cross the threshold")
 
 
-def test_spec_linter_interface_surface_is_five(tmp_path):
-    # 1 CLI invocation + 2 Library functions (lint, load_corpus) + 2 Data files.
-    assert _surface(tmp_path, "spec-linter") == 5
+def test_spec_linter_interface_surface_is_four(tmp_path):
+    # 1 CLI invocation + 2 Library functions (lint, load_corpus) + 1 Data file
+    # (LintReport; Corpus moved to corpus-loader, D242).
+    assert _surface(tmp_path, "spec-linter") == 4
 
 
 def test_impact_analyzer_interface_surface_is_three(tmp_path):
