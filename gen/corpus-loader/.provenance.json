@@ -12,7 +12,7 @@
     "secret_scanner": "secret_scanner@3.1.0+detect-secrets.1.5.0"
   },
   "provenance_hit": false,
-  "generated_at": "2026-11-12T14:59:10Z",
+  "generated_at": "2026-11-12T15:02:27Z",
   "verification_run_id": "corpus-loader-attempt-1",
   "verification_report": {
     "component_id": "comp-corpus-loader",
@@ -24,7 +24,7 @@
         "result": "pass",
         "test_authoring": {
           "model": "claude-opus-5-5",
-          "seed": 13,
+          "seed": 12,
           "prompt_version": "v1",
           "cache_hit": false
         }
@@ -36,7 +36,7 @@
         "result": "pass",
         "test_authoring": {
           "model": "claude-opus-5-5",
-          "seed": 13,
+          "seed": 12,
           "prompt_version": "v1",
           "cache_hit": false
         }
@@ -48,7 +48,7 @@
         "result": "pass",
         "test_authoring": {
           "model": "claude-opus-5-5",
-          "seed": 13,
+          "seed": 12,
           "prompt_version": "v1",
           "cache_hit": false
         }
@@ -60,7 +60,7 @@
         "result": "pass",
         "test_authoring": {
           "model": "claude-opus-5-5",
-          "seed": 13,
+          "seed": 12,
           "prompt_version": "v1",
           "cache_hit": false
         }

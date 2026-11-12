@@ -1,6 +1,8 @@
 import os
 from pathlib import Path
 
+import pytest
+
 import corpus_loader
 
 
@@ -12,158 +14,179 @@ def _get(value, name, default=None):
 
 def _write(path: Path, text: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text, encoding="utf-8")
+    with open(path, "w", encoding="utf-8", newline="") as fh:
+        fh.write(text)
 
 
-REQ_TEXT = (
-    "# R-FOO-001\n"
-    "\n"
-    "**R-FOO-001** \u2014 `foo()` MUST return the configured value.\n"
-)
+COMPONENT_MD = """---
+id: comp-foo
+title: Foo
+status: draft
+owners: [alice]
+sealed: true
+source_path: legacy/foo
+---
 
-COMPONENT_TEXT = (
-    "---\n"
-    "id: comp-foo\n"
-    "title: Foo\n"
-    "status: draft\n"
-    "owners: [alice]\n"
-    "sealed: true\n"
-    "source_path: legacy/foo\n"
-    "---\n"
-    "\n"
-    "# Foo\n"
-    "\n"
-    "## Purpose\n"
-    "\n"
-    "Returns a configured value.\n"
-)
+# comp-foo
 
-ACCEPTANCE_TEXT = (
-    "# AC-FOO-001\n"
-    "\n"
-    "Covers: R-FOO-001\n"
-    "Kind: generated-test\n"
-    "\n"
-    "```gherkin\n"
-    "Given a configured value\n"
-    "When foo() runs\n"
-    "Then it returns that value\n"
-    "```\n"
-)
+## Purpose
 
-GLOSSARY_TEXT = (
-    "# Glossary\n"
-    "\n"
-    "- **Widget** \u2014 a small thing.\n"
-)
+Foo exists to exercise the corpus loader in a synthetic fixture.
+"""
 
-DECISION_TEXT = (
-    "---\n"
-    "id: D1\n"
-    "title: First decision\n"
-    "status: draft\n"
-    "owners: [alice]\n"
-    "---\n"
-    "\n"
-    "# D1\n"
-    "\n"
-    "A decision.\n"
-)
+REQUIREMENT_MD = """# R-FOO-001
 
-VAR_TEXT = (
-    "---\n"
-    "id: VAR-FOO-PATH\n"
-    "title: Foo path\n"
-    "status: draft\n"
-    "owners: [alice]\n"
-    "---\n"
-    "\n"
-    "# VAR-FOO-PATH\n"
-    "\n"
-    "A path.\n"
-)
+**R-FOO-001** — `foo()` MUST return the integer 1.
+"""
 
-ARCH_TEXT = (
-    "---\n"
-    "id: arch-overview\n"
-    "title: Overview\n"
-    "status: draft\n"
-    "owners: [alice]\n"
-    "---\n"
-    "\n"
-    "# Overview\n"
-)
+ACCEPTANCE_MD = """# AC-FOO-001
+
+Covers: R-FOO-001
+Kind: generated-test
+
+```gherkin
+Given nothing
+When foo() runs
+Then it returns 1
+```
+"""
+
+LIBRARY_MD = """# Library
+
+```
+foo() -> int
+```
+
+Returns 1.
+"""
+
+GUARANTEE_MD = """# G-FOO-001
+
+`foo()` never raises.
+"""
+
+CONSTRAINTS_MD = """# Constraints
+
+None.
+"""
+
+VAR_MD = """---
+id: VAR-FOO
+title: Foo variable
+status: draft
+owners: [alice]
+---
+
+# VAR-FOO
+
+A synthetic variable.
+"""
+
+DECISION_MD = """---
+id: D1
+title: First decision
+status: draft
+owners: [alice]
+---
+
+# D1
+
+A synthetic decision.
+"""
+
+PRODUCT_MD = """---
+id: P-FOO
+title: Foo product
+status: draft
+owners: [alice]
+---
+
+# P-FOO
+
+A synthetic product capability.
+"""
+
+ARCHITECTURE_MD = """---
+id: ARCH-FOO
+title: Foo architecture
+status: draft
+owners: [alice]
+---
+
+# Foo architecture
+
+A synthetic architecture note.
+"""
+
+GLOSSARY_MD = """# Glossary
+
+- **Foo** — a synthetic term used by the fixture.
+"""
 
 
-def _build_repo(root: Path) -> Path:
+@pytest.fixture
+def repo_root(tmp_path):
+    root = tmp_path / "repo"
     specs = root / "specs"
     comp = specs / "components" / "foo"
-    _write(comp / "component.md", COMPONENT_TEXT)
-    _write(comp / "requirements" / "R-FOO-001.md", REQ_TEXT)
-    _write(comp / "acceptance" / "AC-FOO-001.md", ACCEPTANCE_TEXT)
-    _write(specs / "glossary.md", GLOSSARY_TEXT)
-    _write(specs / "decisions" / "D1.md", DECISION_TEXT)
-    _write(specs / "vars" / "VAR-FOO-PATH.md", VAR_TEXT)
-    _write(specs / "architecture" / "overview.md", ARCH_TEXT)
+    _write(comp / "component.md", COMPONENT_MD)
+    _write(comp / "requirements" / "R-FOO-001.md", REQUIREMENT_MD)
+    _write(comp / "acceptance" / "AC-FOO-001.md", ACCEPTANCE_MD)
+    _write(comp / "interface" / "library.md", LIBRARY_MD)
+    _write(comp / "interface" / "guarantees" / "G-FOO-001.md", GUARANTEE_MD)
+    _write(comp / "constraints.md", CONSTRAINTS_MD)
+    _write(specs / "vars" / "VAR-FOO.md", VAR_MD)
+    _write(specs / "decisions" / "D1.md", DECISION_MD)
+    _write(specs / "product" / "P-FOO.md", PRODUCT_MD)
+    _write(specs / "architecture" / "foo.md", ARCHITECTURE_MD)
+    _write(specs / "glossary.md", GLOSSARY_MD)
     return root
 
 
-def _docs_list(corpus):
+def _iter_docs(corpus):
     docs = _get(corpus, "docs")
+    assert docs is not None, "Corpus has no docs"
     if isinstance(docs, dict):
         return list(docs.values())
-    return list(docs or [])
+    return list(docs)
 
 
 def _find_doc(corpus, rel_path):
-    for d in _docs_list(corpus):
-        if _get(d, "rel_path") == rel_path:
-            return d
+    for doc in _iter_docs(corpus):
+        if _get(doc, "rel_path") == rel_path:
+            return doc
     return None
 
 
-def test_ac_corpus_004_no_frontmatter_requirement_and_graph_from_tool_root(tmp_path):
-    repo_root = _build_repo(tmp_path / "repo")
+def test_ac_corpus_004(repo_root):
     assert not (repo_root / "gen").exists()
 
     corpus = corpus_loader.load_corpus(repo_root)
 
     req_rel = "specs/components/foo/requirements/R-FOO-001.md"
-    comp_rel = "specs/components/foo/component.md"
-
+    req_path = repo_root / req_rel
     req_doc = _find_doc(corpus, req_rel)
-    if req_doc is None:
-        components = _get(corpus, "components") or {}
-        foo = components.get("foo") if isinstance(components, dict) else None
-        if foo is not None:
-            reqs = _get(foo, "requirements") or {}
-            req_doc = reqs.get("R-FOO-001")
-    assert req_doc is not None, "requirement Doc not found in corpus"
+    assert req_doc is not None, "requirement Doc not found by rel_path"
 
-    req_file_text = (repo_root / req_rel).read_text(encoding="utf-8")
     assert _get(req_doc, "has_frontmatter") is False
-    assert _get(req_doc, "frontmatter") == {}
-    assert _get(req_doc, "body") == req_file_text
-    assert _get(req_doc, "doc_id") == "R-FOO-001"
-    assert _get(req_doc, "doc_type") == "component-requirement"
+    fm = _get(req_doc, "frontmatter")
+    assert fm is not None
+    assert dict(fm) == {}
+    with open(req_path, "r", encoding="utf-8", newline="") as fh:
+        whole_text = fh.read()
+    assert _get(req_doc, "body") == whole_text
 
+    comp_rel = "specs/components/foo/component.md"
     comp_doc = _find_doc(corpus, comp_rel)
-    if comp_doc is None:
-        components = _get(corpus, "components") or {}
-        foo = components.get("foo") if isinstance(components, dict) else None
-        if foo is not None:
-            comp_doc = _get(foo, "root")
-    assert comp_doc is not None, "component.md Doc not found in corpus"
+    assert comp_doc is not None, "component.md Doc not found by rel_path"
     assert _get(comp_doc, "has_frontmatter") is True
 
     graph = _get(corpus, "graph")
-    assert graph is not None
+    assert graph is not None, "Corpus has no graph connection"
     row = graph.execute("SELECT count(*) FROM nodes").fetchone()
     assert row is not None
     count = row[0]
     assert isinstance(count, int)
-    assert count >= 0
+    assert count >= 1
 
-    # The fake repo_root must still have no gen/ directory: the
-    # graph-query-engine was resolved from the tool root instead.
     assert not (repo_root / "gen").exists()

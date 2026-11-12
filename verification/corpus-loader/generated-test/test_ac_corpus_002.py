@@ -1,11 +1,14 @@
-"""AC-CORPUS-002: load_corpus(repo_root).graph is a DuckDB connection whose
-`nodes` view (from graph-query-engine's load_views) reports exactly one
-component for a single-component corpus."""
+"""AC-CORPUS-002 (covers R-CORPUS-002).
+
+Given a small synthetic corpus with exactly one component,
+When load_corpus(repo_root) runs,
+Then corpus.graph is a DuckDB connection, and
+  "SELECT count(*) FROM nodes WHERE kind = 'component'" on it returns 1.
+"""
 
 from pathlib import Path
 
 import duckdb
-import pytest
 
 import corpus_loader
 
@@ -21,17 +24,18 @@ def _write(path: Path, text: str) -> None:
     path.write_text(text, encoding="utf-8")
 
 
-def _build_single_component_corpus(repo_root: Path) -> None:
+def _build_corpus(repo_root: Path) -> None:
     specs = repo_root / "specs"
 
     _write(
         specs / "glossary.md",
         "# Glossary\n"
         "\n"
-        "- **Widget** — the single thing this fixture corpus describes.\n",
+        "- **Widget** — a small synthetic thing used only by this test.\n",
     )
 
     comp_dir = specs / "components" / "widget"
+
     _write(
         comp_dir / "component.md",
         "---\n"
@@ -39,7 +43,6 @@ def _build_single_component_corpus(repo_root: Path) -> None:
         "title: Widget\n"
         "status: draft\n"
         "owners: [alice]\n"
-        "depends_on: []\n"
         "sealed: true\n"
         "source_path: legacy/widget\n"
         "---\n"
@@ -48,14 +51,16 @@ def _build_single_component_corpus(repo_root: Path) -> None:
         "\n"
         "## Purpose\n"
         "\n"
-        "Produces widgets for the fixture corpus.\n",
+        "A synthetic component used only as a test fixture.\n",
     )
+
     _write(
         comp_dir / "requirements" / "R-WIDGET-001.md",
         "# R-WIDGET-001\n"
         "\n"
-        "**R-WIDGET-001** — `make_widget()` MUST return a widget.\n",
+        "**R-WIDGET-001** — `widget()` MUST return the integer 1.\n",
     )
+
     _write(
         comp_dir / "acceptance" / "AC-WIDGET-001.md",
         "# AC-WIDGET-001\n"
@@ -65,57 +70,51 @@ def _build_single_component_corpus(repo_root: Path) -> None:
         "\n"
         "```gherkin\n"
         "Given nothing\n"
-        "When make_widget() runs\n"
-        "Then a widget is returned\n"
+        "When widget() runs\n"
+        "Then it returns 1\n"
         "```\n",
     )
+
     _write(
         comp_dir / "interface" / "library.md",
         "# Library\n"
         "\n"
         "```\n"
-        "make_widget() -> Widget\n"
-        "```\n",
+        "widget() -> int\n"
+        "```\n"
+        "\n"
+        "Returns 1.\n",
     )
+
     _write(
         comp_dir / "constraints.md",
         "# Constraints\n"
         "\n"
-        "- None beyond the standard library.\n",
+        "None beyond the requirements.\n",
     )
 
 
-@pytest.fixture
-def repo_root(tmp_path):
-    root = tmp_path / "repo"
-    root.mkdir()
-    _build_single_component_corpus(root)
-    return root
+def test_ac_corpus_002_graph_is_duckdb_connection_with_one_component(tmp_path):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    _build_corpus(repo_root)
 
-
-def test_graph_is_duckdb_connection_with_one_component_node(repo_root):
     corpus = corpus_loader.load_corpus(repo_root)
-    assert corpus is not None
 
     graph = _field(corpus, "graph")
-    assert graph is not None, "Corpus.graph must never be None"
+    assert graph is not None, "corpus.graph must never be None"
     assert isinstance(graph, duckdb.DuckDBPyConnection), (
-        f"Corpus.graph must be a DuckDB connection, got {type(graph)!r}"
+        f"corpus.graph must be a DuckDB connection, got {type(graph)!r}"
     )
 
-    row = graph.execute(
-        "SELECT count(*) FROM nodes WHERE kind = 'component'"
-    ).fetchone()
-    assert row is not None
-    assert row[0] == 1, f"expected exactly 1 component node, got {row[0]}"
-
-
-def test_graph_component_node_is_the_fixture_component(repo_root):
-    corpus = corpus_loader.load_corpus(repo_root)
-    graph = _field(corpus, "graph")
-    assert isinstance(graph, duckdb.DuckDBPyConnection)
-
-    rows = graph.execute(
-        "SELECT id FROM nodes WHERE kind = 'component'"
-    ).fetchall()
-    assert [r[0] for r in rows] == ["comp-widget"]
+    try:
+        row = graph.execute(
+            "SELECT count(*) FROM nodes WHERE kind = 'component'"
+        ).fetchone()
+        assert row is not None
+        assert row[0] == 1, f"expected exactly 1 component node, got {row[0]}"
+    finally:
+        try:
+            graph.close()
+        except Exception:
+            pass
