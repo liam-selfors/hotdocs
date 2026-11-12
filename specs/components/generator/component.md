@@ -6,7 +6,7 @@ owners: [pipeline-team]
 depends_on: [comp-spec-bundle-assembler, comp-cache-manager, comp-llm-endpoint]
 depends_on_guarantees: [G-CACHE-001]
 realizes: [P-ZERO-EDIT]
-model_pin: claude-sonnet-5
+model_pin: claude-opus-5-5
 sealed: false
 ---
 

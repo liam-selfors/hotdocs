@@ -5,7 +5,7 @@ status: draft
 owners: [pipeline-team]
 depends_on: [comp-provenance-tracker]
 realizes: [P-ZERO-EDIT, P-COMPLIANCE-GATE]
-model_pin: claude-sonnet-5
+model_pin: claude-opus-5-5
 sealed: false
 ---
 

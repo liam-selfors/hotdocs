@@ -6,7 +6,7 @@ owners: [pipeline-team]
 depends_on: [comp-spec-bundle-assembler, comp-criterion-compiler, comp-test-author, comp-verifier-orchestrator, comp-license-scanner, comp-secret-scanner, comp-provenance-writer]
 realizes: [P-ZERO-EDIT]
 uses_var: [VAR-TRUST-JUDGE-PROVENANCE]
-model_pin: claude-sonnet-5
+model_pin: claude-opus-5-5
 sealed: false
 ---
 

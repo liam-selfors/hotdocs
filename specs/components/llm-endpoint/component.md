@@ -6,7 +6,7 @@ owners: [pipeline-team]
 depends_on: []
 realizes: [P-ZERO-EDIT, P-AMBIGUITY-GATE]
 uses_var: [VAR-ANTHROPIC-API-KEY, VAR-OPENAI-API-KEY, VAR-GEMINI-API-KEY, VAR-HOTDOCS-CONFIG]
-model_pin: claude-sonnet-5
+model_pin: claude-opus-5-5
 sealed: false
 ---
 

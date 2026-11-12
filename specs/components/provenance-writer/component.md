@@ -5,7 +5,7 @@ status: draft
 owners: [pipeline-team]
 depends_on: [comp-generator, comp-verifier-orchestrator, comp-license-scanner, comp-secret-scanner, comp-cache-manager]
 realizes: [P-ZERO-EDIT, P-COMPLIANCE-GATE]
-model_pin: claude-sonnet-5
+model_pin: claude-opus-5-5
 sealed: false
 ---
 

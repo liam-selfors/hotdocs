@@ -6,7 +6,7 @@ owners: [pipeline-team]
 depends_on: []
 realizes: [P-ZERO-EDIT]
 uses_var: [VAR-CACHE-STORE-URL]
-model_pin: claude-sonnet-5
+model_pin: claude-opus-5-5
 sealed: false
 ---
 

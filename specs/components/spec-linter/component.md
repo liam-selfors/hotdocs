@@ -5,7 +5,7 @@ status: draft
 owners: [pipeline-team]
 depends_on: [comp-graph-query-engine, comp-corpus-loader, comp-citation-checker, comp-size-checker]
 realizes: [P-AMBIGUITY-GATE]
-model_pin: claude-sonnet-5
+model_pin: claude-opus-5-5
 sealed: false
 ---
 

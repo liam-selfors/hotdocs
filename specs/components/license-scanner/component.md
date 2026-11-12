@@ -6,7 +6,7 @@ owners: [pipeline-team]
 depends_on: [comp-cache-manager]
 realizes: [P-COMPLIANCE-GATE]
 uses_var: [VAR-COMPLIANCE-WEBHOOK-URL, VAR-LICENSE-CORPUS-PATH]
-model_pin: claude-sonnet-5
+model_pin: claude-opus-5-5
 sealed: false
 ---
 
