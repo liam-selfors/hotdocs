@@ -1,327 +1,349 @@
+import json
+import os
+import shutil
 import subprocess
 from pathlib import Path
 
-
-GQE_MODULE_SOURCE = '''\
-import subprocess
-from pathlib import Path
-
-
-def _parse_frontmatter_text(text):
-    if not text.startswith("---"):
-        return {}
-    parts = text.split("---", 2)
-    if len(parts) < 3:
-        return {}
-    result = {}
-    for line in parts[1].splitlines():
-        line = line.strip()
-        if not line or ":" not in line:
-            continue
-        key, _, value = line.partition(":")
-        key = key.strip()
-        value = value.strip()
-        if value.startswith("[") and value.endswith("]"):
-            inner = value[1:-1].strip()
-            value = [item.strip() for item in inner.split(",")] if inner else []
-        elif value.startswith('"') and value.endswith('"'):
-            value = value[1:-1]
-        result[key] = value
-    return result
-
-
-def _parse_frontmatter(path):
-    return _parse_frontmatter_text(path.read_text())
-
-
-def _last_ratified_commit(repo_root, path):
-    rel = path.relative_to(repo_root)
-    log = subprocess.run(
-        ["git", "log", "--format=%H", "--reverse", "--", str(rel)],
-        cwd=str(repo_root),
-        capture_output=True,
-        text=True,
-    )
-    commits = [c for c in log.stdout.strip().splitlines() if c]
-    for commit in commits:
-        show = subprocess.run(
-            ["git", "show", "{}:{}".format(commit, rel)],
-            cwd=str(repo_root),
-            capture_output=True,
-            text=True,
-        )
-        if show.returncode != 0:
-            continue
-        frontmatter = _parse_frontmatter_text(show.stdout)
-        if frontmatter.get("status") == "ratified":
-            return commit
-    return None
-
-
-def load_views(con, repo_root):
-    repo_root = Path(repo_root)
-
-    with open(repo_root / ".gqe-invocations.log", "a") as log_file:
-        log_file.write("load_views called\\n")
-
-    decisions_dir = repo_root / "specs" / "decisions"
-    edges_rows = []
-    lineage_rows = []
-    nodes_rows = []
-
-    if decisions_dir.is_dir():
-        for path in sorted(decisions_dir.glob("D*.md")):
-            frontmatter = _parse_frontmatter(path)
-            decision_id = frontmatter.get("id")
-            if not decision_id:
-                continue
-            status = frontmatter.get("status")
-            for target in frontmatter.get("supersedes") or []:
-                edges_rows.append((decision_id, target, "supersedes"))
-            for target in frontmatter.get("builds_on") or []:
-                edges_rows.append((decision_id, target, "builds_on"))
-            last_commit = _last_ratified_commit(repo_root, path)
-            lineage_rows.append((decision_id, last_commit))
-            nodes_rows.append(
-                (decision_id, frontmatter.get("title"), status, "decision", None)
-            )
-
-    for view_name in (
-        "edges",
-        "decision_lineage",
-        "nodes",
-        "component_docs",
-        "component_context",
-        "component_provenance",
-        "component_size",
-    ):
-        con.execute(f"DROP VIEW IF EXISTS {view_name}")
-        con.execute(f"DROP TABLE IF EXISTS _{view_name}_data")
-
-    con.execute(
-        "CREATE TABLE _edges_data (source_id VARCHAR, target_id VARCHAR, edge_type VARCHAR)"
-    )
-    if edges_rows:
-        con.executemany("INSERT INTO _edges_data VALUES (?, ?, ?)", edges_rows)
-    con.execute("CREATE VIEW edges AS SELECT * FROM _edges_data")
-
-    con.execute(
-        "CREATE TABLE _decision_lineage_data (id VARCHAR, last_ratified_commit VARCHAR)"
-    )
-    if lineage_rows:
-        con.executemany("INSERT INTO _decision_lineage_data VALUES (?, ?)", lineage_rows)
-    con.execute("CREATE VIEW decision_lineage AS SELECT * FROM _decision_lineage_data")
-
-    con.execute(
-        "CREATE TABLE _nodes_data (id VARCHAR, title VARCHAR, status VARCHAR, "
-        "kind VARCHAR, owner_component_id VARCHAR)"
-    )
-    if nodes_rows:
-        con.executemany("INSERT INTO _nodes_data VALUES (?, ?, ?, ?, ?)", nodes_rows)
-    con.execute("CREATE VIEW nodes AS SELECT * FROM _nodes_data")
-
-    con.execute(
-        "CREATE TABLE _component_docs_data (id VARCHAR, title VARCHAR, status VARCHAR, body VARCHAR)"
-    )
-    con.execute("CREATE VIEW component_docs AS SELECT * FROM _component_docs_data")
-
-    con.execute("CREATE TABLE _component_context_data (component_id VARCHAR, purpose VARCHAR)")
-    con.execute("CREATE VIEW component_context AS SELECT * FROM _component_context_data")
-
-    con.execute(
-        "CREATE TABLE _component_provenance_data (component_id VARCHAR, provenance_hit BOOLEAN)"
-    )
-    con.execute(
-        "CREATE VIEW component_provenance AS SELECT * FROM _component_provenance_data"
-    )
-
-    con.execute("CREATE TABLE _component_size_data (component_id VARCHAR, word_count BIGINT)")
-    con.execute("CREATE VIEW component_size AS SELECT * FROM _component_size_data")
-'''
-
-
-COMPONENT_MD_TEMPLATE = """\
----
-id: comp-{slug}
-title: {slug}
-status: ratified
-owners: [alice]
-sealed: true
-source_path: legacy/{slug}
-last_ratified_commit: "0000000"
----
-
-# {slug}
-
-## Purpose
-
-Synthetic fixture component for drift detection testing.
-"""
-
-D17_RATIFIED = """\
----
-id: D17
-title: Original decision
-status: ratified
-owners: [alice]
-last_ratified_commit: "0000000"
----
-
-# D17
-
-Original decision text.
-"""
-
-D17_DEPRECATED = """\
----
-id: D17
-title: Original decision
-status: deprecated
-owners: [alice]
-last_ratified_commit: "0000000"
----
-
-# D17
-
-Original decision text.
-"""
-
-D31_SUPERSEDES_D17 = """\
----
-id: D31
-title: Superseding decision D31
-status: ratified
-owners: [alice]
-supersedes: [D17]
-last_ratified_commit: "0000000"
----
-
-# D31
-
-Supersedes D17.
-"""
-
-D32_SUPERSEDES_D17 = """\
----
-id: D32
-title: Superseding decision D32
-status: ratified
-owners: [alice]
-supersedes: [D17]
-last_ratified_commit: "0000000"
----
-
-# D32
-
-Supersedes D17.
-"""
-
-
-def _run_git(repo_root, *args):
-    result = subprocess.run(
-        ["git", *args], cwd=str(repo_root), capture_output=True, text=True
-    )
-    assert result.returncode == 0, result.stderr
-    return result.stdout.strip()
-
-
-def _init_repo(repo_root):
-    repo_root.mkdir(parents=True, exist_ok=True)
-    _run_git(repo_root, "init", "-q")
-    _run_git(repo_root, "config", "user.email", "test@example.com")
-    _run_git(repo_root, "config", "user.name", "Test")
-
-
-def _write(path, content):
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(content)
-
-
-def _commit_all(repo_root, message):
-    _run_git(repo_root, "add", "-A")
-    _run_git(repo_root, "commit", "-q", "-m", message)
-    return _run_git(repo_root, "rev-parse", "HEAD")
-
-
-def _install_fake_graph_query_engine(repo_root):
-    dep_dir = repo_root / "gen" / "graph-query-engine"
-    dep_dir.mkdir(parents=True, exist_ok=True)
-    (dep_dir / "graph_query_engine.py").write_text(GQE_MODULE_SOURCE)
-
-
-def _dual_get(value, key, default=None):
-    if isinstance(value, dict):
-        return value.get(key, default)
-    return getattr(value, key, default)
-
-
-def _setup_repo_with_d17_citation(repo_root, component_slug, req_id, ac_id):
-    _init_repo(repo_root)
-    _install_fake_graph_query_engine(repo_root)
-
-    component_dir = repo_root / "specs" / "components" / component_slug
-    _write(
-        component_dir / "component.md",
-        COMPONENT_MD_TEMPLATE.format(slug=component_slug),
-    )
-    _write(
-        component_dir / "requirements" / f"{req_id}.md",
-        f"# {req_id}\n\nThis requirement follows decision D17.\n",
-    )
-    _write(
-        component_dir / "acceptance" / f"{ac_id}.md",
-        f"# {ac_id}\n\nCovers: {req_id}\n",
-    )
-    _write(repo_root / "specs" / "decisions" / "D17.md", D17_RATIFIED)
-
-    _commit_all(repo_root, "initial: add component citing D17")
-
-    return f"specs/components/{component_slug}/requirements/{req_id}.md"
-
+import pytest
 
 import decision_drift_detector
 
 
-def test_single_superseder_recorded_as_superseded_by(tmp_path):
-    repo_root = tmp_path / "repo"
-    rel_path = _setup_repo_with_d17_citation(repo_root, "foo", "R-FOO-001", "AC-FOO-001")
+REQ_REL = "specs/components/foo/requirements/R-FOO-001.md"
 
-    _write(repo_root / "specs" / "decisions" / "D17.md", D17_DEPRECATED)
-    _write(repo_root / "specs" / "decisions" / "D31.md", D31_SUPERSEDES_D17)
-    _commit_all(repo_root, "deprecate D17, ratify D31 as its superseder")
-
-    report = decision_drift_detector.find_decision_drift(repo_root)
-    entries = _dual_get(report, "entries", [])
-
-    matching = [e for e in entries if _dual_get(e, "file") == rel_path]
-
-    assert len(matching) == 1
-    entry = matching[0]
-    assert _dual_get(entry, "cited_decision") == "D17"
-    assert _dual_get(entry, "superseded_by") == "D31"
-
-    invocation_log = repo_root / ".gqe-invocations.log"
-    assert invocation_log.exists()
-    assert invocation_log.read_text().strip() != ""
+pytestmark = pytest.mark.skipif(shutil.which("git") is None, reason="git is required")
 
 
-def test_multiple_superseders_picks_latest_ratified(tmp_path):
-    repo_root = tmp_path / "repo"
-    rel_path = _setup_repo_with_d17_citation(repo_root, "foo2", "R-FOO2-001", "AC-FOO2-001")
+# ---------------------------------------------------------------------------
+# Generic helpers
+# ---------------------------------------------------------------------------
 
-    _write(repo_root / "specs" / "decisions" / "D17.md", D17_DEPRECATED)
-    _write(repo_root / "specs" / "decisions" / "D31.md", D31_SUPERSEDES_D17)
-    _commit_all(repo_root, "deprecate D17, ratify D31 as a superseder")
+def _get(obj, key):
+    if isinstance(obj, dict):
+        return obj.get(key)
+    return getattr(obj, key, None)
 
-    _write(repo_root / "specs" / "decisions" / "D32.md", D32_SUPERSEDES_D17)
-    _commit_all(repo_root, "ratify D32, a later superseder of D17")
 
-    report = decision_drift_detector.find_decision_drift(repo_root)
-    entries = _dual_get(report, "entries", [])
+def _git_env(date=None):
+    env = dict(os.environ)
+    for k in ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY"):
+        env.pop(k, None)
+    env["GIT_AUTHOR_NAME"] = "Test Author"
+    env["GIT_AUTHOR_EMAIL"] = "test@example.com"
+    env["GIT_COMMITTER_NAME"] = "Test Author"
+    env["GIT_COMMITTER_EMAIL"] = "test@example.com"
+    if date is not None:
+        env["GIT_AUTHOR_DATE"] = date
+        env["GIT_COMMITTER_DATE"] = date
+    return env
 
-    matching = [e for e in entries if _dual_get(e, "file") == rel_path]
 
-    assert len(matching) == 1
-    entry = matching[0]
-    assert _dual_get(entry, "cited_decision") == "D17"
-    assert _dual_get(entry, "superseded_by") == "D32"
+def _git(repo, *args, date=None):
+    res = subprocess.run(
+        ["git", "-c", "commit.gpgsign=false", "-c", "user.name=Test Author",
+         "-c", "user.email=test@example.com", *args],
+        cwd=str(repo),
+        env=_git_env(date),
+        capture_output=True,
+        text=True,
+    )
+    assert res.returncode == 0, "git %r failed: %s %s" % (args, res.stdout, res.stderr)
+    return res.stdout.strip()
+
+
+def _commit(repo, message, day):
+    date = "2024-01-%02dT12:00:00 +0000" % day
+    _git(repo, "add", "-A", "specs")
+    _git(repo, "commit", "-q", "-m", message, date=date)
+    return _git(repo, "rev-parse", "HEAD")
+
+
+def _write(path, text):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+
+
+def _norm_file(value, repo_root):
+    if value is None:
+        return None
+    p = Path(str(value))
+    if p.is_absolute():
+        try:
+            p = p.resolve().relative_to(Path(repo_root).resolve())
+        except (ValueError, OSError):
+            pass
+    return str(p).replace("\\", "/").lstrip("./") if str(p).startswith("./") else str(p).replace("\\", "/")
+
+
+# ---------------------------------------------------------------------------
+# Fixture corpus
+# ---------------------------------------------------------------------------
+
+COMPONENT_MD = """---
+id: comp-foo
+title: Foo
+status: ratified
+owners: [alice]
+sealed: true
+source_path: legacy/foo
+last_ratified_commit: 0000000
+---
+
+# Foo
+
+## Purpose
+
+Does foo things for the synthetic fixture.
+"""
+
+REQ_MD = """# R-FOO-001
+
+**R-FOO-001** — MUST do the thing exactly as decided in D17.
+"""
+
+AC_MD = """# AC-FOO-001
+
+Covers: R-FOO-001
+Kind: generated-test
+
+```gherkin
+Given a foo
+When the thing runs
+Then the thing is done
+```
+"""
+
+
+def _decision_md(did, title, status, supersedes=None):
+    lines = [
+        "---",
+        "id: %s" % did,
+        "title: %s" % title,
+        "status: %s" % status,
+        "owners: [alice]",
+        "last_ratified_commit: 0000000",
+    ]
+    if supersedes is not None:
+        lines.append("supersedes: %s" % supersedes)
+    lines.append("---")
+    lines.append("")
+    lines.append("# %s — %s" % (did, title))
+    lines.append("")
+    lines.append("Decision body text.")
+    lines.append("")
+    return "\n".join(lines)
+
+
+def _base_corpus(repo):
+    _write(repo / "specs/components/foo/component.md", COMPONENT_MD)
+    _write(repo / REQ_REL, REQ_MD)
+    _write(repo / "specs/components/foo/acceptance/AC-FOO-001.md", AC_MD)
+    _write(repo / "specs/decisions/D17.md", _decision_md("D17", "Original choice", "ratified"))
+
+
+# ---------------------------------------------------------------------------
+# Fake graph-query-engine (flat module under <repo_root>/gen/graph-query-engine/)
+# ---------------------------------------------------------------------------
+
+_FAKE_BODY = r'''
+
+def _lit(value, typ):
+    if value is None:
+        return "CAST(NULL AS " + typ + ")"
+    if isinstance(value, bool):
+        return "TRUE" if value else "FALSE"
+    if isinstance(value, (int, float)):
+        return "CAST(" + str(value) + " AS " + typ + ")"
+    return "CAST('" + str(value).replace("'", "''") + "' AS " + typ + ")"
+
+
+def _view(con, name, cols, rows):
+    head = (
+        "SELECT "
+        + ", ".join(_lit(None, t) + ' AS "' + c + '"' for c, t in cols)
+        + " FROM (SELECT 1) AS _empty WHERE FALSE"
+    )
+    parts = [head]
+    for row in rows:
+        parts.append(
+            "SELECT "
+            + ", ".join(_lit(v, t) + ' AS "' + c + '"' for (c, t), v in zip(cols, row))
+        )
+    con.execute('CREATE OR REPLACE VIEW "' + name + '" AS ' + " UNION ALL ".join(parts))
+
+
+def load_views(con, repo_root):
+    with open(_LOG, "a", encoding="utf-8") as fh:
+        fh.write(json.dumps({"repo_root": str(repo_root)}) + "\n")
+    _view(con, "nodes",
+          [("id", "VARCHAR"), ("title", "VARCHAR"), ("status", "VARCHAR"),
+           ("kind", "VARCHAR"), ("owner_component_id", "VARCHAR")],
+          _DATA["nodes"])
+    _view(con, "edges",
+          [("source_id", "VARCHAR"), ("target_id", "VARCHAR"), ("edge_type", "VARCHAR")],
+          _DATA["edges"])
+    _view(con, "component_docs",
+          [("id", "VARCHAR"), ("title", "VARCHAR"), ("status", "VARCHAR"), ("body", "VARCHAR")],
+          _DATA["component_docs"])
+    _view(con, "component_context",
+          [("component_id", "VARCHAR"), ("purpose", "VARCHAR")],
+          _DATA["component_context"])
+    _view(con, "component_provenance",
+          [("component_id", "VARCHAR"), ("spec_bundle_hash", "VARCHAR"),
+           ("verification_report", "STRUCT(passed BOOLEAN)"),
+           ("license_scan", "STRUCT(passed BOOLEAN)"),
+           ("secret_scan", "STRUCT(passed BOOLEAN)"),
+           ("provenance_hit", "BOOLEAN")],
+          _DATA["component_provenance"])
+    _view(con, "component_size",
+          [("component_id", "VARCHAR"), ("word_count", "BIGINT")],
+          _DATA["component_size"])
+    _view(con, "decision_lineage",
+          [("id", "VARCHAR"), ("last_ratified_commit", "VARCHAR")],
+          _DATA["decision_lineage"])
+'''
+
+
+def _install_fake_gqe(repo, log_path, decisions, edges, lineage):
+    nodes = [
+        ["comp-foo", "Foo", "ratified", "component", None],
+        ["R-FOO-001", None, None, "requirement", "comp-foo"],
+        ["AC-FOO-001", None, None, "acceptance", "comp-foo"],
+    ]
+    for did, title, status in decisions:
+        nodes.append([did, title, status, "decision", None])
+    all_edges = [["AC-FOO-001", "R-FOO-001", "covers"]] + [list(e) for e in edges]
+    data = {
+        "nodes": nodes,
+        "edges": all_edges,
+        "component_docs": [["comp-foo", "Foo", "ratified", COMPONENT_MD]],
+        "component_context": [["comp-foo", "Does foo things for the synthetic fixture."]],
+        "component_provenance": [],
+        "component_size": [["foo", len(COMPONENT_MD.split())]],
+        "decision_lineage": [list(r) for r in lineage],
+    }
+    source = (
+        "import json\n\n"
+        "_DATA = json.loads(" + repr(json.dumps(data)) + ")\n"
+        "_LOG = " + repr(str(log_path)) + "\n"
+        + _FAKE_BODY
+    )
+    fake = repo / "gen" / "graph-query-engine" / "graph_query_engine.py"
+    _write(fake, source)
+    return fake
+
+
+def _entries(report):
+    entries = _get(report, "entries")
+    assert entries is not None, "DriftReport has no 'entries'"
+    return list(entries)
+
+
+def _entries_for_file(entries, repo):
+    out = []
+    for e in entries:
+        f = _norm_file(_get(e, "file"), repo)
+        if f == REQ_REL:
+            out.append(e)
+    return out
+
+
+def _assert_fake_used(log_path):
+    assert log_path.exists(), "fake graph_query_engine.load_views was never called"
+    lines = [l for l in log_path.read_text(encoding="utf-8").splitlines() if l.strip()]
+    assert len(lines) >= 1
+
+
+# ---------------------------------------------------------------------------
+# Scenario 1: D17 superseded by D31 in a later commit
+# ---------------------------------------------------------------------------
+
+def test_single_superseder_produces_one_entry(tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-q")
+
+    _base_corpus(repo)
+    c1 = _commit(repo, "initial corpus citing D17", 1)
+
+    _write(repo / "specs/decisions/D17.md", _decision_md("D17", "Original choice", "deprecated"))
+    _write(repo / "specs/decisions/D31.md",
+           _decision_md("D31", "Replacement choice", "ratified", supersedes="D17"))
+    c2 = _commit(repo, "ratify D31 superseding D17", 2)
+
+    log_path = tmp_path / "gqe_calls.log"
+    _install_fake_gqe(
+        repo,
+        log_path,
+        decisions=[("D17", "Original choice", "deprecated"),
+                   ("D31", "Replacement choice", "ratified")],
+        edges=[("D31", "D17", "supersedes")],
+        lineage=[("D17", c1), ("D31", c2)],
+    )
+
+    report = decision_drift_detector.find_decision_drift(repo)
+
+    _assert_fake_used(log_path)
+
+    entries = _entries(report)
+    for_file = _entries_for_file(entries, repo)
+    assert len(for_file) == 1, "expected exactly one entry for %s, got %r" % (REQ_REL, entries)
+
+    entry = for_file[0]
+    assert _get(entry, "cited_decision") == "D17"
+    assert _get(entry, "superseded_by") == "D31"
+
+
+# ---------------------------------------------------------------------------
+# Scenario 2: D17 superseded by D31 then D32 (D32's commit descends from D31's)
+# ---------------------------------------------------------------------------
+
+def test_latest_ratified_superseder_wins(tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-q")
+
+    _base_corpus(repo)
+    c1 = _commit(repo, "initial corpus citing D17", 1)
+
+    _write(repo / "specs/decisions/D17.md", _decision_md("D17", "Original choice", "deprecated"))
+    _write(repo / "specs/decisions/D31.md",
+           _decision_md("D31", "First replacement", "ratified", supersedes="D17"))
+    c2 = _commit(repo, "ratify D31 superseding D17", 2)
+
+    _write(repo / "specs/decisions/D32.md",
+           _decision_md("D32", "Second replacement", "ratified", supersedes="D17"))
+    c3 = _commit(repo, "ratify D32 superseding D17", 3)
+
+    # Sanity: D32's ratification commit is a descendant of D31's.
+    res = subprocess.run(
+        ["git", "merge-base", "--is-ancestor", c2, c3],
+        cwd=str(repo), env=_git_env(), capture_output=True, text=True,
+    )
+    assert res.returncode == 0
+
+    log_path = tmp_path / "gqe_calls.log"
+    _install_fake_gqe(
+        repo,
+        log_path,
+        decisions=[("D17", "Original choice", "deprecated"),
+                   ("D31", "First replacement", "ratified"),
+                   ("D32", "Second replacement", "ratified")],
+        edges=[("D31", "D17", "supersedes"), ("D32", "D17", "supersedes")],
+        lineage=[("D17", c1), ("D31", c2), ("D32", c3)],
+    )
+
+    report = decision_drift_detector.find_decision_drift(repo)
+
+    _assert_fake_used(log_path)
+
+    entries = _entries(report)
+    citing_d17 = [
+        e for e in _entries_for_file(entries, repo)
+        if _get(e, "cited_decision") == "D17"
+    ]
+    assert len(citing_d17) == 1, "expected exactly one D17 entry for %s, got %r" % (REQ_REL, entries)
+
+    entry = citing_d17[0]
+    assert _get(entry, "superseded_by") == "D32"
+    assert _get(entry, "superseded_by") != "D31"
