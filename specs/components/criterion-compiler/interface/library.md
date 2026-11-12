@@ -49,7 +49,7 @@ each line of a plain fenced block in `library.md` that starts
 `name(params)` (no `def`) declares function `name`, with the parameter
 names before any `:` or `=`; each `interface/data/*.md` whose heading is
 ``# `Type` `` declares `Type`, its fields the keys of the file's first
-`json` example.
+`json` example when that parses as a JSON object, else none.
 
 `InterfaceSurface.module_name` (`R-COMPILE-013`, `D62`) is the target
 component's real importable module name (its underscored slug). Any
