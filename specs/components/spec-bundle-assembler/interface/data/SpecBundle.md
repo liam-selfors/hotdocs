@@ -22,7 +22,9 @@ current `gen/<component>/` file contents, keyed by relative path.
 A dataclass with these fields in this order (the four dicts default to
 `{}`, `glossary` to `""`, `hint_code` to `None`) that also reads as a
 read-only mapping: `bundle["spec"]` and `bundle.get("spec")` work.
-`interface` ends with any documents `R-ASSEMBLE-014` appends.
+Each text field joins its documents' bodies, each stripped, empty ones
+dropped, with one blank line between. `interface` ends with any
+documents `R-ASSEMBLE-014` appends.
 `dependency_context` (`R-ASSEMBLE-010`) holds each dependency's `Purpose`
 only. `dependency_usage` (`R-ASSEMBLE-011`) is introspected from a
 dependency's real code, `""` when it has none, and nothing flows the

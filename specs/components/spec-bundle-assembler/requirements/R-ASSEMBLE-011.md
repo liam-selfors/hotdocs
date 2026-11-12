@@ -5,8 +5,10 @@
   `dependency_usage[id]`: that dependency's module name and the
   directory it is loaded from, relative to `repo_root` with a trailing
   `/` (`gen/bar/`, or a sealed dependency's `source_path`), and — for each
-  public top-level callable its real code defines — its name, its
-  `inspect.signature` text, and the first line of its docstring. No model call; derived by introspecting
+  public top-level function or class its real module defines, by sorted
+  name — its name, its `inspect.signature` text, and the first line of
+  its docstring; one whose signature `inspect` cannot read (an exception
+  class, say) is left out. No model call; derived by introspecting
   the dependency's own real, already-verified code (`inspect`-level
   facts: callable, signature, docstring — never source text, never
   anything from `acceptance/`).
@@ -28,11 +30,7 @@
   (`D86`, `D91`, `D93`).
 
   **Deliberately one-directional — a dependency's bundle MUST NOT
-  include anything about how its dependents use it.** Feeding real
-  call-site usage back toward a dependency being regenerated was
-  considered and rejected: it would reintroduce a cycle into what
-  `depends_on` otherwise keeps acyclic (a dependency's regeneration
-  could invalidate the very usage it was just shaped around, forcing
-  dependents to regenerate again, which could change usage again), and would let calling patterns steer a dependency's behavior instead of
-  its `interface/` contract. A missing contract is an `interface/` spec
-  change, never a prompt input.
+  include anything about how its dependents use it.** Feeding call-site
+  usage back would reintroduce a cycle `depends_on` keeps out and let
+  calling patterns steer behavior instead of `interface/`. A missing
+  contract is an `interface/` change, never a prompt input.
