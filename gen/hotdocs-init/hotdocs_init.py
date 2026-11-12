@@ -1,5 +1,14 @@
+"""hotdocs init: set up a new project for the tool.
+
+Creates the project skeleton, reports missing prerequisites (never installs
+anything), and chooses and tests a language-model provider through the
+tool's own ``llm-endpoint`` component, loaded from ``tool_root``.
+"""
+from __future__ import annotations
+
 import importlib.metadata
 import importlib.util
+import itertools
 import json
 import os
 import re
@@ -9,489 +18,399 @@ from pathlib import Path
 
 TOOL_VERSION = "0.1.0"
 
-GITIGNORE_LINES = ["/.hotdocs/", "__pycache__/", "*.pyc", ".venv/"]
+_VALUE_FLAGS = ("--provider", "--model", "--base-url", "--api-key-env")
+_BOOL_FLAGS = ("--example", "--reconfigure", "--no-test", "--yes")
+_ENV_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 
-GLOSSARY_CONTENT = (
-    b"# Glossary\n\n"
-    b"This glossary defines the terms used across this project's specs.\n"
+_DIRS = ("specs/product", "specs/components", "specs/decisions", "gen", "verification")
+_GITKEEP_DIRS = ("specs/product", "specs/components", "specs/decisions", "verification")
+_IGNORE_LINES = ("/.hotdocs/", "__pycache__/", "*.pyc", ".venv/")
+_GLOSSARY = (
+    "# Glossary\n"
+    "\n"
+    "Canonical vocabulary for this project's specs: every spec uses these terms as defined here.\n"
+)
+_ENDPOINT_MISSING = "provider not configured: gen/llm-endpoint is missing"
+_USAGE = (
+    "usage: hotdocs init [<dir>] [--example] [--reconfigure] [--provider <name>] "
+    "[--model <name>] [--base-url <url>] [--api-key-env <NAME>] [--no-test] [--yes]"
 )
 
-ALLOWLIST_CONTENT = (json.dumps({"version": 1, "entries": []}, indent=2) + "\n").encode("utf-8")
-
-BOOL_FLAGS = {"--example", "--reconfigure", "--no-test", "--yes"}
-VALUE_FLAGS = {"--provider", "--model", "--base-url", "--api-key-env"}
-
-ENV_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+_load_counter = itertools.count()
 
 
-class UsageError(Exception):
+class _UsageError(Exception):
     pass
 
 
-def _get(obj, key, default=None):
+def _get(obj, key):
+    """Read ``key`` from a dict or as an attribute."""
     if isinstance(obj, dict):
-        return obj.get(key, default)
-    return getattr(obj, key, default)
+        return obj.get(key)
+    return getattr(obj, key, None)
 
 
-class _Args:
-    def __init__(self):
-        self.dir = None
-        self.example = False
-        self.reconfigure = False
-        self.provider = None
-        self.model = None
-        self.base_url = None
-        self.api_key_env = None
-        self.no_test = False
-        self.yes = False
+def _err(message):
+    print(message, file=sys.stderr)
 
 
-def _parse_args(argv):
-    args = _Args()
+def _usage(exc):
+    _err(f"hotdocs init: {exc}")
+    _err(_USAGE)
+    return 2
+
+
+# ---------------------------------------------------------------- arguments
+
+
+def _parse(argv):
+    values, flags, positional = {}, set(), []
+    args = list(argv)
     i = 0
-    n = len(argv)
-    while i < n:
-        tok = argv[i]
-        if tok.startswith("--"):
-            if "=" in tok:
-                flag, _, val = tok.partition("=")
-            else:
-                flag, val = tok, None
-            if flag in BOOL_FLAGS:
-                setattr(args, flag[2:].replace("-", "_"), True)
+    while i < len(args):
+        arg = args[i]
+        i += 1
+        name, eq, value = arg.partition("=")
+        if arg in _BOOL_FLAGS:
+            flags.add(arg)
+        elif name in _VALUE_FLAGS:
+            if not eq:
+                if i >= len(args):
+                    raise _UsageError(f"{name} needs a value")
+                value = args[i]
                 i += 1
-                continue
-            if flag in VALUE_FLAGS:
-                if val is None:
-                    if i + 1 >= n:
-                        raise UsageError(f"{flag} requires a value")
-                    val = argv[i + 1]
-                    i += 2
-                else:
-                    i += 1
-                setattr(args, flag[2:].replace("-", "_"), val)
-                continue
-            raise UsageError(f"unknown flag: {flag}")
+            values[name] = value
+        elif arg.startswith("-"):
+            raise _UsageError(f"unknown flag: {name}")
+        elif positional:
+            raise _UsageError("only one <dir> argument is allowed")
         else:
-            if args.dir is not None:
-                raise UsageError(f"unexpected argument: {tok}")
-            args.dir = tok
-            i += 1
-    return args
+            positional.append(arg)
+    env_name = values.get("--api-key-env")
+    if env_name is not None and not _ENV_NAME.fullmatch(env_name):
+        raise _UsageError(
+            "--api-key-env takes the NAME of an environment variable (letters, digits, _, "
+            "not starting with a digit), never the key itself"
+        )
+    if values.get("--provider") == "claude-cli" and (
+        "--base-url" in values or "--api-key-env" in values
+    ):
+        raise _UsageError("--base-url and --api-key-env do not apply to claude-cli")
+    return values, flags, positional
 
 
-def _validate_syntax(args):
-    if args.api_key_env is not None and not ENV_NAME_RE.match(args.api_key_env):
-        raise UsageError("invalid --api-key-env name")
-    if args.provider == "claude-cli" and (args.base_url is not None or args.api_key_env is not None):
-        raise UsageError("--base-url and --api-key-env are not valid with claude-cli")
+def _check_provider_flags(values, providers):
+    provider = values["--provider"]
+    if provider not in providers:
+        raise _UsageError("unknown --provider; choose one of: " + ", ".join(providers))
+    spec = providers[provider]
+    if not _get(spec, "suggested_model") and not values.get("--model"):
+        raise _UsageError(f"--provider {provider} needs --model")
+    if _get(spec, "needs_base_url") and not values.get("--base-url"):
+        raise _UsageError(f"--provider {provider} needs --base-url")
 
 
-def _validate_with_providers(args, providers):
-    if args.provider is None:
-        return
-    if args.provider not in providers:
-        keys = ", ".join(sorted(providers.keys()))
-        raise UsageError(f"--provider must be one of: {keys}")
-    info = providers[args.provider]
-    suggested = _get(info, "suggested_model")
-    needs_base = _get(info, "needs_base_url")
-    if not suggested and args.model is None:
-        raise UsageError(f"--provider {args.provider} requires --model")
-    if needs_base and args.base_url is None:
-        raise UsageError(f"--provider {args.provider} requires --base-url")
+# ---------------------------------------------------------------- refusal
 
 
-def _refusal_check(dir_path, tool_root_path):
-    messages = []
-    if dir_path.resolve() == tool_root_path.resolve():
-        messages.append(f"refusing: {dir_path} is the tool's own repository")
-        return messages
-    dir_gen = dir_path / "gen"
-    tool_gen = tool_root_path / "gen"
-    if dir_gen.is_dir() and tool_gen.is_dir():
-        dir_names = {p.name for p in dir_gen.iterdir() if p.is_dir()}
-        tool_names = {p.name for p in tool_gen.iterdir() if p.is_dir()}
-        for name in sorted(dir_names & tool_names):
-            messages.append(f"refusing: gen/{name} would shadow the tool's own component")
-    return messages
+def _refusal(target, tool_root):
+    if target.resolve() == tool_root.resolve():
+        return [f"refusing: {target} is the tool's own repository; init a separate project directory"]
+    project_gen = target / "gen"
+    clashes = sorted(
+        child.name
+        for child in (project_gen.iterdir() if project_gen.is_dir() else ())
+        if child.is_dir() and (tool_root / "gen" / child.name).is_dir()
+    )
+    if clashes:
+        return ["refusing: these project components would shadow the tool's own:"] + [
+            f"  gen/{name}" for name in clashes
+        ]
+    return []
 
 
-def _load_llm_endpoint(tool_root_path):
-    mod_path = tool_root_path / "gen" / "llm-endpoint" / "llm_endpoint.py"
-    if not mod_path.exists():
+# ---------------------------------------------------------------- llm-endpoint
+
+
+def _load_endpoint(tool_root):
+    base = tool_root / "gen" / "llm-endpoint"
+    flat = base / "llm_endpoint.py"
+    package = base / "llm_endpoint" / "__init__.py"
+    if flat.is_file():
+        path, locations = flat, None
+    elif package.is_file():
+        path, locations = package, [str(package.parent)]
+    else:
         return None
-    spec = importlib.util.spec_from_file_location("llm_endpoint", mod_path)
+    name = f"_hotdocs_init_llm_endpoint_{next(_load_counter)}"
+    spec = importlib.util.spec_from_file_location(name, path, submodule_search_locations=locations)
     module = importlib.util.module_from_spec(spec)
-    sys.modules["llm_endpoint"] = module
-    spec.loader.exec_module(module)
+    sys.modules[name] = module
+    previous = sys.dont_write_bytecode
+    sys.dont_write_bytecode = True
+    try:
+        spec.loader.exec_module(module)
+    finally:
+        sys.dont_write_bytecode = previous
     return module
 
 
-def _ensure_dir(path, rel, output_fn):
-    if path.exists():
+# ---------------------------------------------------------------- skeleton
+
+
+def _create_file(target, rel, data, output_fn):
+    dest = target / rel
+    if dest.exists():
         output_fn(f"{rel}: skipped (exists)")
-    else:
-        path.mkdir(parents=True, exist_ok=True)
-        output_fn(f"{rel}: created")
-
-
-def _ensure_file(path, rel, content_bytes, output_fn):
-    if path.exists():
-        output_fn(f"{rel}: skipped (exists)")
-    else:
-        path.write_bytes(content_bytes)
-        output_fn(f"{rel}: created")
-
-
-def _setup_gitignore(dir_path, output_fn):
-    path = dir_path / ".gitignore"
-    if path.exists():
-        content = path.read_text()
-        lines = content.splitlines()
-        to_add = [line for line in GITIGNORE_LINES if line not in lines]
-        if to_add:
-            needs_newline = content != "" and not content.endswith("\n")
-            with path.open("a") as f:
-                if needs_newline:
-                    f.write("\n")
-                for line in to_add:
-                    f.write(line + "\n")
-        output_fn(".gitignore: skipped (exists)")
-    else:
-        path.write_text("\n".join(GITIGNORE_LINES) + "\n")
-        output_fn(".gitignore: created")
-
-
-def _setup_skeleton(dir_path, output_fn):
-    dir_names = ["specs/product", "specs/components", "specs/decisions", "gen", "verification"]
-    for d in dir_names:
-        _ensure_dir(dir_path / d, d, output_fn)
-
-    gitkeep_dirs = ["specs/product", "specs/components", "specs/decisions", "verification"]
-    for d in gitkeep_dirs:
-        rel = f"{d}/.gitkeep"
-        _ensure_file(dir_path / d / ".gitkeep", rel, b"", output_fn)
-
-    _ensure_file(dir_path / "specs" / "glossary.md", "specs/glossary.md", GLOSSARY_CONTENT, output_fn)
-    _ensure_file(dir_path / ".secret-allowlist.json", ".secret-allowlist.json", ALLOWLIST_CONTENT, output_fn)
-    _setup_gitignore(dir_path, output_fn)
-
-
-def _write_tool_marker(dir_path):
-    path = dir_path / ".hotdocs-tool.json"
-    if not path.exists():
-        path.write_text(json.dumps({"tool_version": TOOL_VERSION}, indent=2) + "\n")
-
-
-def _copy_example(tool_root_path, dir_path):
-    src_root = tool_root_path / "examples" / "slugify"
-    if not src_root.exists():
         return
-    for src in sorted(src_root.rglob("*")):
-        if src.is_dir():
-            continue
-        rel = src.relative_to(src_root)
-        dest = dir_path / rel
-        if dest.exists():
-            continue
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        dest.write_bytes(src.read_bytes())
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    dest.write_bytes(data)
+    output_fn(f"{rel}: created")
 
 
-def _detect(llm_endpoint_mod, env, env_given):
-    if env_given:
-        return llm_endpoint_mod.detect_providers(env=env)
-    return llm_endpoint_mod.detect_providers()
+def _gitignore(target, output_fn):
+    path = target / ".gitignore"
+    existed = path.exists()
+    text = path.read_text(encoding="utf-8") if existed else ""
+    present = text.splitlines()
+    add = [line for line in _IGNORE_LINES if line not in present]
+    if add:
+        prefix = "\n" if text and not text.endswith("\n") else ""
+        with open(path, "a", encoding="utf-8", newline="") as handle:
+            handle.write(prefix + "\n".join(add) + "\n")
+    output_fn(f".gitignore: {'skipped (exists)' if existed else 'created'}")
 
 
-def _test_connection(llm_endpoint_mod, provider, model, base_url, api_key_env, output_fn):
-    try:
-        result = llm_endpoint_mod.check_connection(provider, model, base_url=base_url, api_key_env=api_key_env)
-    except ValueError as e:
-        output_fn(f"connection failed: invalid: {e}")
-        return False
-    ok = _get(result, "ok")
-    if ok:
-        output_fn("connection ok")
-        return True
-    err = _get(result, "error")
-    category = _get(err, "category")
-    message = _get(err, "message")
-    output_fn(f"connection failed: {category}: {message}")
-    return False
+def _skeleton(target, output_fn):
+    for rel in _DIRS:
+        path = target / rel
+        if path.exists():
+            output_fn(f"{rel}: skipped (exists)")
+        else:
+            path.mkdir(parents=True)
+            output_fn(f"{rel}: created")
+    for rel in _GITKEEP_DIRS:
+        _create_file(target, f"{rel}/.gitkeep", b"", output_fn)
+    _create_file(target, "specs/glossary.md", _GLOSSARY.encode("utf-8"), output_fn)
+    allowlist = json.dumps({"version": 1, "entries": []}, indent=2) + "\n"
+    _create_file(target, ".secret-allowlist.json", allowlist.encode("utf-8"), output_fn)
+    _gitignore(target, output_fn)
+    marker = json.dumps({"tool_version": TOOL_VERSION}, indent=2) + "\n"
+    _create_file(target, ".hotdocs-tool.json", marker.encode("utf-8"), output_fn)
+
+
+def _copy_example(tool_root, target, output_fn):
+    source = tool_root / "examples" / "slugify"
+    for path in sorted(p for p in source.rglob("*") if p.is_file()):
+        rel = path.relative_to(source).as_posix()
+        _create_file(target, rel, path.read_bytes(), output_fn)
+
+
+# ---------------------------------------------------------------- provider
+
+
+def _ask(input_fn, question):
+    return input_fn(question + " ").strip()
+
+
+def _ask_value(input_fn, label, default, required):
+    question = f"{label} [{default}]:" if default else f"{label}:"
+    value = None
+    while value is None:
+        value = _ask(input_fn, question) or default or (None if required else "")
+    return value or None
 
 
 def _ask_provider(detected, providers, input_fn, output_fn):
-    output_fn("Available providers:")
-    for i, p in enumerate(detected, 1):
-        name = _get(p, "provider")
-        available = _get(p, "available")
-        reason = _get(p, "reason")
-        status = "available" if available else f"unavailable ({reason})"
-        output_fn(f"  {i}. {name} - {status}")
-
-    name_to_entry = {_get(p, "provider"): p for p in detected}
-    available_names = [_get(p, "provider") for p in detected if _get(p, "available")]
-    default_name = available_names[0] if available_names else _get(detected[0], "provider")
-
-    while True:
-        answer = input_fn(f"Provider [{default_name}]:" + " ").strip()
-        if answer == "":
-            chosen = default_name
-            break
-        if answer in name_to_entry:
-            chosen = answer
-            break
-        try:
-            idx = int(answer)
-        except ValueError:
-            idx = None
-        if idx is not None and 1 <= idx <= len(detected):
-            chosen = _get(detected[idx - 1], "provider")
-            break
-        output_fn(f"unrecognised provider: {answer}")
-
-    info = providers[chosen]
-    chosen_entry = name_to_entry.get(chosen)
-    suggested_model = (_get(chosen_entry, "suggested_model") if chosen_entry else None) or _get(info, "suggested_model")
-
-    while True:
-        prompt = f"Model [{suggested_model}]:" if suggested_model else "Model:"
-        answer = input_fn(prompt + " ").strip()
-        if answer:
-            model = answer
-            break
-        if suggested_model:
-            model = suggested_model
-            break
-        output_fn("a model is required")
-
-    base_url = None
-    if _get(info, "needs_base_url"):
-        default_base = _get(info, "default_base_url")
-        while True:
-            prompt = f"Base URL [{default_base}]:" if default_base else "Base URL:"
-            answer = input_fn(prompt + " ").strip()
-            if answer:
-                base_url = answer
-                break
-            if default_base:
-                base_url = default_base
-                break
-            output_fn("a base URL is required")
-
-    api_key_env = None
-    if chosen != "claude-cli":
-        default_key_env = _get(info, "default_api_key_env")
-        prompt = f"API key environment variable [{default_key_env}]:" if default_key_env else "API key environment variable:"
-        answer = input_fn(prompt + " ").strip()
-        api_key_env = answer if answer else default_key_env
-
-    return chosen, model, base_url, api_key_env
+    names = [_get(entry, "provider") for entry in detected]
+    output_fn("Providers:")
+    for number, entry in enumerate(detected, 1):
+        status = "available" if _get(entry, "available") else "not available"
+        output_fn(f"  {number}. {_get(entry, 'provider')} ({status}: {_get(entry, 'reason')})")
+    available = [name for name, entry in zip(names, detected) if _get(entry, "available")]
+    default = (available or names)[0]
+    choices = {"": default}
+    choices.update({str(number): name for number, name in enumerate(names, 1)})
+    choices.update({name: name for name in names})
+    answer = None
+    while answer not in choices:
+        answer = _ask(input_fn, f"Provider [{default}]:")
+    provider = choices[answer]
+    entry = detected[names.index(provider)]
+    spec = providers[provider]
+    model = _ask_value(input_fn, "Model", _get(entry, "suggested_model"), True)
+    base_url = (
+        _ask_value(input_fn, "Base URL", _get(spec, "default_base_url"), True)
+        if _get(spec, "needs_base_url")
+        else None
+    )
+    api_key_env = (
+        _ask_value(
+            input_fn,
+            "API key environment variable NAME (not the key)",
+            _get(spec, "default_api_key_env"),
+            False,
+        )
+        if provider != "claude-cli"
+        else None
+    )
+    return provider, model, base_url, api_key_env
 
 
-def _run_provider_step(dir_path, args, llm_endpoint_mod, env, env_given, input_fn, output_fn):
-    if llm_endpoint_mod is None:
-        output_fn("provider not configured: gen/llm-endpoint is missing")
-        return None, True
-
-    providers = llm_endpoint_mod.PROVIDERS
-
-    provider = model = base_url = api_key_env = None
-    interactive = False
-
-    if args.provider is not None:
-        provider = args.provider
-        info = providers[provider]
-        model = args.model if args.model is not None else _get(info, "suggested_model")
-        if _get(info, "needs_base_url"):
-            base_url = args.base_url if args.base_url is not None else _get(info, "default_base_url")
-        if provider != "claude-cli":
-            api_key_env = args.api_key_env if args.api_key_env is not None else _get(info, "default_api_key_env")
-    elif args.yes:
-        detected = _detect(llm_endpoint_mod, env, env_given)
-        available = [p for p in detected if _get(p, "available")]
-        if not available:
-            output_fn("no provider available: nothing configured")
-            return None, False
-        chosen = available[0]
-        provider = _get(chosen, "provider")
-        info = providers[provider]
-        model = _get(chosen, "suggested_model") or _get(info, "suggested_model")
-        if _get(info, "needs_base_url"):
-            base_url = _get(info, "default_base_url")
-        if provider != "claude-cli":
-            api_key_env = _get(chosen, "api_key_env")
-    else:
-        interactive = True
-        detected = _detect(llm_endpoint_mod, env, env_given)
-        if not detected:
-            output_fn("no provider available: nothing configured")
-            return None, False
-        provider, model, base_url, api_key_env = _ask_provider(detected, providers, input_fn, output_fn)
-
-    if not args.no_test:
-        ok = _test_connection(llm_endpoint_mod, provider, model, base_url, api_key_env, output_fn)
-    else:
-        ok = True
-
-    if not ok:
-        if interactive:
-            answer = input_fn("Save anyway? [y/N] ").strip().lower()
-            save_anyway = answer == "y"
-        else:
-            output_fn("warning: saving despite failed connection test")
-            save_anyway = True
-        if not save_anyway:
-            return provider, False
-
-    kwargs = {}
-    if base_url:
-        kwargs["base_url"] = base_url
-    if api_key_env:
-        kwargs["api_key_env"] = api_key_env
-
+def _connection_ok(endpoint, provider, model, kwargs, output_fn):
     try:
-        llm_endpoint_mod.save_config(dir_path / "hotdocs.toml", provider, model, **kwargs)
-    except ValueError as e:
-        print(f"could not save: {e}", file=sys.stderr)
-        return provider, True
+        result = _get(endpoint, "check_connection")(provider, model, **kwargs)
+    except ValueError as exc:
+        output_fn(f"connection failed: invalid: {exc}")
+        return False
+    if _get(result, "ok"):
+        output_fn("connection ok")
+        return True
+    error = _get(result, "error")
+    output_fn(f"connection failed: {_get(error, 'category')}: {_get(error, 'message')}")
+    return False
 
+
+def _provider_step(endpoint, values, flags, toml, input_fn, output_fn, detect_kwargs):
+    """Choose, test and save a provider. Returns (provider chosen, save failed)."""
+    providers = _get(endpoint, "PROVIDERS")
+    interactive = "--provider" not in values and "--yes" not in flags
+    if "--provider" in values:
+        provider = values["--provider"]
+        spec = providers[provider]
+        model = values.get("--model") or _get(spec, "suggested_model")
+        base_url = values.get("--base-url")
+        api_key_env = values.get("--api-key-env") or _get(spec, "default_api_key_env")
+    else:
+        detected = list(_get(endpoint, "detect_providers")(**detect_kwargs))
+        if interactive:
+            provider, model, base_url, api_key_env = _ask_provider(
+                detected, providers, input_fn, output_fn
+            )
+        else:
+            available = [entry for entry in detected if _get(entry, "available")]
+            if not available:
+                output_fn("no provider is available: nothing saved")
+                return None, False
+            entry = available[0]
+            provider = _get(entry, "provider")
+            spec = providers[provider]
+            model = _get(entry, "suggested_model")
+            base_url = _get(spec, "default_base_url") if _get(spec, "needs_base_url") else None
+            api_key_env = _get(spec, "default_api_key_env")
+    kwargs = {
+        key: value
+        for key, value in (("base_url", base_url), ("api_key_env", api_key_env))
+        if value
+    }
+    if "--no-test" not in flags and not _connection_ok(endpoint, provider, model, kwargs, output_fn):
+        if interactive:
+            if _ask(input_fn, "Save anyway? [y/N]").lower() not in ("y", "yes"):
+                output_fn("nothing saved")
+                return provider, False
+        else:
+            output_fn("warning: the connection test failed; saving anyway")
+    try:
+        _get(endpoint, "save_config")(toml, provider, model, **kwargs)
+    except ValueError as exc:
+        _err(f"could not save: {exc}")
+        return provider, True
+    output_fn(f"saved provider {provider} to hotdocs.toml")
     return provider, False
 
 
-def _check_prereqs(tool_root_arg, tool_root_path, final_provider, env, output_fn):
-    missing = []
+# ---------------------------------------------------------------- prerequisites
 
+
+def _prerequisites(tool_root, provider, env, output_fn):
+    missing = []
     if sys.version_info < (3, 11):
         missing.append(("Python 3.11 or newer", "install Python 3.11 or newer"))
-
-    req_file = tool_root_path / "requirements.txt"
-    if req_file.exists():
-        for raw_line in req_file.read_text().splitlines():
-            line = raw_line.strip()
-            if not line or line.startswith("#"):
-                continue
-            name = line.split("==")[0].strip()
+    requirements = f"{tool_root}/requirements.txt"
+    for line in Path(requirements).read_text(encoding="utf-8").splitlines():
+        name, sep, _ = line.strip().partition("==")
+        if sep:
             try:
-                importlib.metadata.version(name)
+                importlib.metadata.version(name.strip())
             except importlib.metadata.PackageNotFoundError:
-                missing.append((line, f"pip install -r {tool_root_arg}/requirements.txt"))
-
-    if final_provider == "claude-cli":
-        if shutil.which("claude", path=env.get("PATH")) is None:
-            missing.append(("claude on PATH", "install Claude Code and sign in"))
-
-    for item, fix in missing:
-        output_fn(f"missing: {item}")
+                missing.append((line.strip(), f"pip install -r {requirements}"))
+    if provider == "claude-cli" and shutil.which("claude", path=env.get("PATH")) is None:
+        missing.append(("claude on PATH", "install Claude Code and sign in"))
+    for what, fix in missing:
+        output_fn(f"missing: {what}")
         output_fn(f"  fix: {fix}")
+    return bool(missing)
 
-    return missing
 
-
-def _print_next_steps(args, output_fn):
+def _next_steps(example, output_fn):
     output_fn("Next steps:")
     output_fn("  hotdocs lint")
-    if args.example:
+    if example:
         output_fn("  hotdocs generate comp-slugify")
     output_fn("  hotdocs verify")
-    output_fn("  QUICKSTART.md")
+    output_fn("  read QUICKSTART.md")
 
 
-def _do_reconfigure(dir_path, tool_root_arg, tool_root_path, args, llm_endpoint_mod, env, env_given, input_fn, output_fn):
-    marker = dir_path / ".hotdocs-tool.json"
-    if not marker.exists():
-        print(f"not an initialized project: {dir_path} has no .hotdocs-tool.json", file=sys.stderr)
-        return 1
-
-    if llm_endpoint_mod is None:
-        print("provider not configured: gen/llm-endpoint is missing", file=sys.stderr)
-        return 1
-
-    provider, failed = _run_provider_step(dir_path, args, llm_endpoint_mod, env, env_given, input_fn, output_fn)
-    if failed:
-        return 1
-
-    missing = _check_prereqs(tool_root_arg, tool_root_path, provider, env, output_fn)
-    _print_next_steps(args, output_fn)
-    return 3 if missing else 0
+# ---------------------------------------------------------------- entry point
 
 
-def main(argv, *, tool_root, input_fn=None, output_fn=None, env=None, cwd=None):
-    if input_fn is None:
-        input_fn = input
-    if output_fn is None:
-        output_fn = print
-
-    env_given = env is not None
-    if env is None:
-        env = os.environ
-
-    base_cwd = Path(cwd) if cwd is not None else Path.cwd()
-    tool_root_arg = tool_root
-    tool_root_path = Path(tool_root)
+def main(argv, *, tool_root, input_fn=None, output_fn=None, env=None, cwd=None) -> int:
+    input_fn = input_fn or input
+    output_fn = output_fn or print
+    detect_kwargs = {"env": env} if env is not None else {}
+    env = env if env is not None else os.environ
+    cwd = cwd if cwd is not None else os.getcwd()
 
     try:
-        args = _parse_args(argv)
-        _validate_syntax(args)
-    except UsageError as e:
-        print(str(e), file=sys.stderr)
-        return 2
+        values, flags, positional = _parse(argv)
+    except _UsageError as exc:
+        return _usage(exc)
 
-    dir_arg = args.dir if args.dir is not None else "."
-    dir_path = Path(dir_arg)
-    if not dir_path.is_absolute():
-        dir_path = base_cwd / dir_path
+    tool = Path(tool_root)
+    target = Path(cwd) / (positional[0] if positional else ".")
 
-    refusal_messages = _refusal_check(dir_path, tool_root_path)
-    if refusal_messages:
-        for m in refusal_messages:
-            print(m, file=sys.stderr)
+    refusal = _refusal(target, tool)
+    if refusal:
+        for line in refusal:
+            _err(line)
         return 1
 
-    llm_endpoint_mod = _load_llm_endpoint(tool_root_path)
-    providers = llm_endpoint_mod.PROVIDERS if llm_endpoint_mod is not None else None
-
-    if providers is not None:
+    endpoint = _load_endpoint(tool)
+    if endpoint is not None and "--provider" in values:
         try:
-            _validate_with_providers(args, providers)
-        except UsageError as e:
-            print(str(e), file=sys.stderr)
-            return 2
+            _check_provider_flags(values, _get(endpoint, "PROVIDERS"))
+        except _UsageError as exc:
+            return _usage(exc)
 
-    if args.reconfigure:
-        return _do_reconfigure(
-            dir_path, tool_root_arg, tool_root_path, args, llm_endpoint_mod, env, env_given, input_fn, output_fn
-        )
+    toml = target / "hotdocs.toml"
 
-    dir_path.mkdir(parents=True, exist_ok=True)
-    _setup_skeleton(dir_path, output_fn)
-    _write_tool_marker(dir_path)
+    if "--reconfigure" in flags:
+        if not (target / ".hotdocs-tool.json").is_file():
+            _err(f"not an initialised project: {target} has no .hotdocs-tool.json; run hotdocs init first")
+            return 1
+        if endpoint is None:
+            _err(_ENDPOINT_MISSING)
+            return 1
+        _, failed = _provider_step(endpoint, values, flags, toml, input_fn, output_fn, detect_kwargs)
+        return 1 if failed else 0
 
-    if args.example:
-        _copy_example(tool_root_path, dir_path)
+    target.mkdir(parents=True, exist_ok=True)
+    _skeleton(target, output_fn)
+    if "--example" in flags:
+        _copy_example(tool, target, output_fn)
 
-    config_path = dir_path / "hotdocs.toml"
-    final_provider = None
-
-    if config_path.exists():
-        output_fn("hotdocs.toml: kept (exists)")
-        if llm_endpoint_mod is not None:
-            try:
-                existing = llm_endpoint_mod.load_config(config_path)
-            except ValueError:
-                existing = None
-            if existing is not None:
-                final_provider = _get(existing, "provider")
+    if toml.exists():
+        output_fn("hotdocs.toml: skipped (exists)")
+        config = _get(endpoint, "load_config")(toml) if endpoint is not None else None
+        provider = _get(config, "provider")
+    elif endpoint is None:
+        output_fn(_ENDPOINT_MISSING)
+        provider = None
     else:
-        final_provider, _failed = _run_provider_step(
-            dir_path, args, llm_endpoint_mod, env, env_given, input_fn, output_fn
+        provider, _ = _provider_step(
+            endpoint, values, flags, toml, input_fn, output_fn, detect_kwargs
         )
 
-    missing = _check_prereqs(tool_root_arg, tool_root_path, final_provider, env, output_fn)
-
-    _print_next_steps(args, output_fn)
-
+    missing = _prerequisites(tool_root, provider, env, output_fn)
+    _next_steps("--example" in flags, output_fn)
     return 3 if missing else 0
