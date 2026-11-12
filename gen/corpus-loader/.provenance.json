@@ -1,7 +1,7 @@
 {
-  "spec_bundle_hash": "sha256:ecbaafc4f142f790c34f194eff5f1be4cea68d867ab7e3747f6c299994e017d7",
-  "model_pin": "claude-sonnet-5",
-  "prompt_version": "v9",
+  "spec_bundle_hash": "sha256:456b32a4e550029226fddc218185e2eaffe61077ee512f169d12ccde20198b79",
+  "model_pin": "claude-opus-5-5",
+  "prompt_version": "v9.1",
   "retry_feedback": null,
   "pipeline_version": "provenance-writer@1.0.0",
   "gate_versions": {
@@ -12,7 +12,7 @@
     "secret_scanner": "secret_scanner@3.1.0+detect-secrets.1.5.0"
   },
   "provenance_hit": false,
-  "generated_at": "2026-11-10T16:52:54Z",
+  "generated_at": "2026-11-12T14:59:10Z",
   "verification_run_id": "corpus-loader-attempt-1",
   "verification_report": {
     "component_id": "comp-corpus-loader",
@@ -23,8 +23,8 @@
         "kind": "generated-test",
         "result": "pass",
         "test_authoring": {
-          "model": "claude-sonnet-5",
-          "seed": 7,
+          "model": "claude-opus-5-5",
+          "seed": 13,
           "prompt_version": "v1",
           "cache_hit": false
         }
@@ -35,8 +35,8 @@
         "kind": "generated-test",
         "result": "pass",
         "test_authoring": {
-          "model": "claude-sonnet-5",
-          "seed": 7,
+          "model": "claude-opus-5-5",
+          "seed": 13,
           "prompt_version": "v1",
           "cache_hit": false
         }
@@ -47,8 +47,20 @@
         "kind": "generated-test",
         "result": "pass",
         "test_authoring": {
-          "model": "claude-sonnet-5",
-          "seed": 7,
+          "model": "claude-opus-5-5",
+          "seed": 13,
+          "prompt_version": "v1",
+          "cache_hit": false
+        }
+      },
+      {
+        "id": "AC-CORPUS-004",
+        "covers": "R-CORPUS-001",
+        "kind": "generated-test",
+        "result": "pass",
+        "test_authoring": {
+          "model": "claude-opus-5-5",
+          "seed": 13,
           "prompt_version": "v1",
           "cache_hit": false
         }
@@ -59,7 +71,7 @@
       "R-CORPUS-002": "pass"
     },
     "interface_drift": false,
-    "mutation_score": 0.8441558441558441,
+    "mutation_score": 1.0,
     "overall": "pass"
   },
   "license_scan": {

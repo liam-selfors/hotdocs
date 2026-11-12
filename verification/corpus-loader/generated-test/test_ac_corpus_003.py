@@ -1,168 +1,223 @@
-import tempfile
+import sys
 from pathlib import Path
 
 import corpus_loader
 
 
-def _field(obj, name):
+def _get(obj, key, default=None):
+    if obj is None:
+        return default
     if isinstance(obj, dict):
-        return obj.get(name)
-    return getattr(obj, name, None)
+        return obj.get(key, default)
+    return getattr(obj, key, default)
 
 
-def _write(path: Path, content: str) -> None:
+def _write(path: Path, text: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(content)
+    path.write_text(text, encoding="utf-8")
 
 
-def _setup_repo(repo_root: Path) -> None:
-    # Fake dependency: comp-graph-query-engine, flat module shape.
-    _write(
-        repo_root / "gen" / "graph-query-engine" / "graph_query_engine.py",
-        "def load_views(con, repo_root):\n"
-        "    return None\n",
-    )
+def _build_fixture(repo_root: Path) -> None:
+    specs = repo_root / "specs"
 
     _write(
-        repo_root / "specs" / "product" / "P-X.md",
+        specs / "product" / "P-X.md",
         "---\n"
         "id: P-X\n"
         "title: Product X\n"
         "status: draft\n"
         "owners: [alice]\n"
         "---\n"
-        "Product body text.\n",
+        "\n"
+        "# P-X\n"
+        "\n"
+        "Product body.\n",
     )
-
     _write(
-        repo_root / "specs" / "architecture" / "a.md",
+        specs / "architecture" / "a.md",
         "---\n"
-        "id: A-ONE\n"
-        "title: Architecture One\n"
+        "id: A-ARCH\n"
+        "title: Architecture A\n"
         "status: draft\n"
         "owners: [alice]\n"
         "---\n"
-        "Architecture body text.\n",
+        "\n"
+        "# Architecture A\n"
+        "\n"
+        "Architecture body.\n",
     )
-
     _write(
-        repo_root / "specs" / "vars" / "v.md",
+        specs / "vars" / "v.md",
         "---\n"
         "id: VAR-V\n"
         "title: Var V\n"
         "status: draft\n"
         "owners: [alice]\n"
         "---\n"
-        "Var body text.\n",
+        "\n"
+        "# VAR-V\n"
+        "\n"
+        "Var body.\n",
     )
-
     _write(
-        repo_root / "specs" / "decisions" / "D1.md",
+        specs / "decisions" / "D1.md",
         "---\n"
         "id: D1\n"
-        "title: Decision One\n"
+        "title: Decision one\n"
         "status: draft\n"
         "owners: [alice]\n"
         "---\n"
-        "Decision body text.\n",
+        "\n"
+        "# D1\n"
+        "\n"
+        "Decision body.\n",
     )
 
-    _write(
-        repo_root
-        / "specs"
-        / "components"
-        / "foo"
-        / "interface"
-        / "guarantees"
-        / "G-FOO-001.md",
-        "Guarantee text for G-FOO-001.\n",
-    )
+    for sub in ("product", "architecture", "vars", "decisions"):
+        _write(specs / sub / "README.md", "# Readme\n\nNot a doc.\n")
 
+    comp = specs / "components" / "foo"
     _write(
-        repo_root / "specs" / "components" / "foo" / "interface" / "cli.md",
-        "CLI interface text.\n",
-    )
-
-    _write(
-        repo_root / "specs" / "components" / "foo" / "component.md",
+        comp / "component.md",
         "---\n"
         "id: comp-foo\n"
-        "tags: []\n"
-        "flag: false\n"
         'title: "Quoted"\n'
-        "depends_on: [comp-a, comp-b]\n"
         "status: draft\n"
         "owners: [alice]\n"
+        "tags: []\n"
+        "flag: false\n"
+        "depends_on: [comp-a, comp-b]\n"
         "sealed: true\n"
-        "source_path: fake/foo-source\n"
+        "source_path: legacy/foo\n"
         "---\n"
-        "Foo component body.\n",
+        "\n"
+        "# foo\n"
+        "\n"
+        "## Purpose\n"
+        "\n"
+        "Foo purpose.\n",
+    )
+    _write(
+        comp / "interface" / "guarantees" / "G-FOO-001.md",
+        "# G-FOO-001\n\nFoo guarantees something.\n",
+    )
+    _write(
+        comp / "interface" / "cli.md",
+        "# CLI\n\n```\nfoo --help\n```\n",
     )
 
     _write(
-        repo_root / "specs" / "glossary.md",
+        specs / "glossary.md",
         "# Glossary\n"
         "\n"
+        "Intro text.\n"
+        "\n"
         "- **Gadget** — a tool\n"
-        "used for tests.\n"
+        "  used for tests.\n"
         "- **Widget** — a part.\n",
     )
 
+    # Fake graph-query-engine dependency (flat module shape) so the
+    # real views are not required to understand this minimal corpus.
+    _write(
+        repo_root / "gen" / "graph-query-engine" / "graph_query_engine.py",
+        "def load_views(con, repo_root):\n"
+        "    return None\n",
+    )
 
-def test_ac_corpus_003():
-    with tempfile.TemporaryDirectory() as tmp:
-        repo_root = Path(tmp)
-        _setup_repo(repo_root)
 
-        corpus = corpus_loader.load_corpus(repo_root)
+def _docs_list(corpus):
+    docs = _get(corpus, "docs")
+    if docs is None:
+        return []
+    if isinstance(docs, dict):
+        return list(docs.values())
+    return list(docs)
 
-        docs = _field(corpus, "docs")
-        docs_by_rel = {}
-        for d in docs:
-            rel = _field(d, "rel_path")
-            docs_by_rel[rel] = d
 
-        product_doc = docs_by_rel["specs/product/P-X.md"]
-        architecture_doc = docs_by_rel["specs/architecture/a.md"]
-        var_doc = docs_by_rel["specs/vars/v.md"]
-        decision_doc = docs_by_rel["specs/decisions/D1.md"]
-        guarantee_doc = docs_by_rel[
-            "specs/components/foo/interface/guarantees/G-FOO-001.md"
-        ]
-        cli_doc = docs_by_rel["specs/components/foo/interface/cli.md"]
+def _doc_by_rel(docs, rel):
+    for d in docs:
+        rp = _get(d, "rel_path")
+        if rp is not None and str(rp).replace("\\", "/") == rel:
+            return d
+    return None
 
-        assert _field(product_doc, "doc_type") == "product"
-        assert _field(architecture_doc, "doc_type") == "architecture"
-        assert _field(var_doc, "doc_type") == "var"
-        assert _field(decision_doc, "doc_type") == "decision"
-        assert (
-            _field(guarantee_doc, "doc_type")
-            == "component-interface-guarantee"
+
+def test_ac_corpus_003(tmp_path):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    _build_fixture(repo_root)
+
+    corpus = corpus_loader.load_corpus(repo_root)
+    assert corpus is not None
+
+    docs = _docs_list(corpus)
+    assert docs, "expected at least one Doc"
+
+    expected_types = {
+        "specs/product/P-X.md": "product",
+        "specs/architecture/a.md": "architecture",
+        "specs/vars/v.md": "var",
+        "specs/decisions/D1.md": "decision",
+        "specs/components/foo/interface/guarantees/G-FOO-001.md": "component-interface-guarantee",
+        "specs/components/foo/interface/cli.md": "component-interface-cli",
+    }
+    for rel, dtype in expected_types.items():
+        doc = _doc_by_rel(docs, rel)
+        assert doc is not None, f"no Doc for {rel}"
+        assert _get(doc, "doc_type") == dtype, (
+            f"{rel}: doc_type {_get(doc, 'doc_type')!r} != {dtype!r}"
         )
-        assert _field(cli_doc, "doc_type") == "component-interface-cli"
 
-        components = _field(corpus, "components")
-        foo_component = _field(components, "foo")
-        assert foo_component is not None
+    # No Doc for any README.md
+    for d in docs:
+        rp = str(_get(d, "rel_path") or "").replace("\\", "/")
+        assert not rp.endswith("README.md"), f"README made a Doc: {rp}"
+        p = _get(d, "path")
+        if p is not None:
+            assert Path(p).name != "README.md", f"README made a Doc: {p}"
 
-        interface_guarantees = _field(foo_component, "interface_guarantees")
-        assert _field(interface_guarantees, "G-FOO-001") is not None
+    # interface_guarantees keyed by "G-FOO-001"
+    components = _get(corpus, "components")
+    assert components is not None
+    foo = components.get("foo") if isinstance(components, dict) else None
+    assert foo is not None, "components has no 'foo' entry"
+    guarantees = _get(foo, "interface_guarantees")
+    assert guarantees is not None
+    assert "G-FOO-001" in guarantees
+    assert set(guarantees.keys()) == {"G-FOO-001"}
 
-        foo_root_doc = _field(foo_component, "root")
-        frontmatter = _field(foo_root_doc, "frontmatter")
+    # Frontmatter values of component.md
+    root_doc = _doc_by_rel(docs, "specs/components/foo/component.md")
+    assert root_doc is not None, "no Doc for component.md"
+    fm = _get(root_doc, "frontmatter")
+    assert fm is not None
+    tags = fm.get("tags") if isinstance(fm, dict) else getattr(fm, "tags", None)
+    flag = fm.get("flag") if isinstance(fm, dict) else getattr(fm, "flag", None)
+    title = fm.get("title") if isinstance(fm, dict) else getattr(fm, "title", None)
+    depends_on = (
+        fm.get("depends_on") if isinstance(fm, dict) else getattr(fm, "depends_on", None)
+    )
+    assert tags == [], f"tags: {tags!r}"
+    assert flag is False, f"flag: {flag!r}"
+    assert title == "Quoted", f"title: {title!r}"
+    assert depends_on == ["comp-a", "comp-b"], f"depends_on: {depends_on!r}"
 
-        assert _field(frontmatter, "tags") == []
-        assert _field(frontmatter, "flag") is False
-        assert _field(frontmatter, "title") == "Quoted"
-        assert _field(frontmatter, "depends_on") == ["comp-a", "comp-b"]
+    # id_index holds the four frontmatter ids
+    id_index = _get(corpus, "id_index")
+    assert id_index is not None
+    for doc_id in ("P-X", "A-ARCH", "VAR-V", "D1"):
+        assert doc_id in id_index, f"id_index missing {doc_id}"
 
-        id_index = _field(corpus, "id_index")
-        for expected_id in ("P-X", "A-ONE", "VAR-V", "D1"):
-            assert expected_id in id_index
-
-        glossary_defs = _field(corpus, "glossary_defs")
-        assert "gadget" in glossary_defs
-        gadget_text = _field(glossary_defs, "gadget")
-        assert "a tool" in gadget_text
-        assert "used for tests." in gadget_text
-        assert "widget" in glossary_defs
+    # Glossary definitions
+    glossary_defs = _get(corpus, "glossary_defs")
+    assert glossary_defs is not None
+    assert "gadget" in glossary_defs
+    assert "widget" in glossary_defs
+    gadget = glossary_defs["gadget"]
+    assert isinstance(gadget, str)
+    assert gadget.startswith("a tool"), f"gadget def: {gadget!r}"
+    assert "a tool" in gadget
+    assert "used for tests." in gadget
+    assert "Widget" not in gadget
+    assert "a part." not in gadget
