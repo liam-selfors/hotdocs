@@ -480,9 +480,11 @@ def run(component_id: str, model: str, seed: int, retry_feedback: list[str] | No
 
     _swap_in(component_id, sandbox, code_rel)
     if sealed_install:
-        _write_sealed_provenance(component_id)
+        provenance_ok = _write_sealed_provenance(component_id)
     else:
-        _write_provenance(component_id, bundle, result, report, license_result, secret_result)
+        provenance_ok = _write_provenance(component_id, bundle, result, report, license_result, secret_result)
+    if not provenance_ok:
+        print("PROVENANCE MISS: swapped in, but its provenance does not check -- fix before committing.")
     print(f"PASS: swapped into real {code_rel or 'gen/' + _slug(component_id)}/ and verification/{_slug(component_id)}/.")
     if not keep_sandbox:
         shutil.rmtree(sandbox, ignore_errors=True)
