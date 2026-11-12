@@ -1,7 +1,7 @@
 {
-  "spec_bundle_hash": "sha256:53436089196f1c61ee3282c75b3659f4c861c93dce6e3fc04a7891d64f2d2226",
-  "model_pin": "claude-sonnet-5",
-  "prompt_version": "v9",
+  "spec_bundle_hash": "sha256:ddb1d770dfd104aa9870845b11ad719dce7b8e757ee2a0d082676d9fc871251d",
+  "model_pin": "claude-opus-5-5",
+  "prompt_version": "v9.1",
   "retry_feedback": null,
   "pipeline_version": "provenance-writer@1.0.0",
   "gate_versions": {
@@ -12,7 +12,7 @@
     "secret_scanner": "secret_scanner@3.1.0+detect-secrets.1.5.0"
   },
   "provenance_hit": false,
-  "generated_at": "2026-11-09T20:18:18Z",
+  "generated_at": "2026-11-12T14:42:14Z",
   "verification_run_id": "cache-manager-attempt-1",
   "verification_report": {
     "component_id": "comp-cache-manager",
@@ -21,73 +21,145 @@
         "id": "AC-CACHE-001",
         "covers": "R-CACHE-001",
         "kind": "generated-test",
-        "result": "pass"
+        "result": "pass",
+        "test_authoring": {
+          "model": "claude-opus-5-5",
+          "seed": 10,
+          "prompt_version": "v1",
+          "cache_hit": false
+        }
       },
       {
         "id": "AC-CACHE-002",
         "covers": "R-CACHE-002",
         "kind": "generated-test",
-        "result": "pass"
+        "result": "pass",
+        "test_authoring": {
+          "model": "claude-opus-5-5",
+          "seed": 10,
+          "prompt_version": "v1",
+          "cache_hit": false
+        }
       },
       {
         "id": "AC-CACHE-003",
         "covers": "R-CACHE-003",
         "kind": "generated-test",
-        "result": "pass"
+        "result": "pass",
+        "test_authoring": {
+          "model": "claude-opus-5-5",
+          "seed": 10,
+          "prompt_version": "v1",
+          "cache_hit": false
+        }
       },
       {
         "id": "AC-CACHE-004",
         "covers": "R-CACHE-004",
         "kind": "generated-test",
-        "result": "pass"
+        "result": "pass",
+        "test_authoring": {
+          "model": "claude-opus-5-5",
+          "seed": 10,
+          "prompt_version": "v1",
+          "cache_hit": false
+        }
       },
       {
         "id": "AC-CACHE-005",
         "covers": "R-CACHE-005",
         "kind": "generated-test",
-        "result": "pass"
+        "result": "pass",
+        "test_authoring": {
+          "model": "claude-opus-5-5",
+          "seed": 10,
+          "prompt_version": "v1",
+          "cache_hit": false
+        }
       },
       {
         "id": "AC-CACHE-006",
         "covers": "R-CACHE-006",
         "kind": "generated-test",
-        "result": "pass"
+        "result": "pass",
+        "test_authoring": {
+          "model": "claude-opus-5-5",
+          "seed": 10,
+          "prompt_version": "v1",
+          "cache_hit": false
+        }
       },
       {
         "id": "AC-CACHE-007",
         "covers": "R-CACHE-007",
         "kind": "generated-test",
-        "result": "pass"
+        "result": "pass",
+        "test_authoring": {
+          "model": "claude-opus-5-5",
+          "seed": 10,
+          "prompt_version": "v1",
+          "cache_hit": false
+        }
       },
       {
         "id": "AC-CACHE-008",
         "covers": "R-CACHE-008",
         "kind": "generated-test",
-        "result": "pass"
+        "result": "pass",
+        "test_authoring": {
+          "model": "claude-opus-5-5",
+          "seed": 10,
+          "prompt_version": "v1",
+          "cache_hit": false
+        }
       },
       {
         "id": "AC-CACHE-009",
         "covers": "R-CACHE-003",
         "kind": "generated-test",
-        "result": "pass"
+        "result": "pass",
+        "test_authoring": {
+          "model": "claude-opus-5-5",
+          "seed": 10,
+          "prompt_version": "v1",
+          "cache_hit": false
+        }
       },
       {
         "id": "AC-CACHE-010",
         "covers": "R-CACHE-009",
         "kind": "generated-test",
-        "result": "pass"
+        "result": "pass",
+        "test_authoring": {
+          "model": "claude-opus-5-5",
+          "seed": 10,
+          "prompt_version": "v1",
+          "cache_hit": false
+        }
       },
       {
         "id": "AC-CACHE-011",
         "covers": "R-CACHE-006",
         "kind": "generated-test",
-        "result": "pass"
+        "result": "pass",
+        "test_authoring": {
+          "model": "claude-opus-5-5",
+          "seed": 10,
+          "prompt_version": "v1",
+          "cache_hit": false
+        }
       },
       {
         "id": "AC-CACHE-012",
         "covers": "R-CACHE-009",
         "kind": "generated-test",
-        "result": "pass"
+        "result": "pass",
+        "test_authoring": {
+          "model": "claude-opus-5-5",
+          "seed": 10,
+          "prompt_version": "v1",
+          "cache_hit": false
+        }
       }
     ],
     "requirement_results": {
@@ -102,7 +174,7 @@
       "R-CACHE-009": "pass"
     },
     "interface_drift": false,
-    "mutation_score": 0.8928571428571429,
+    "mutation_score": 1.0,
     "overall": "pass"
   },
   "license_scan": {
@@ -230,6 +302,6 @@
     "unused_allowlist_entries": [],
     "notified": false,
     "notification_delivery_error": null,
-    "cache_hit": true
+    "cache_hit": false
   }
 }

@@ -7,5 +7,7 @@ Kind: generated-test
 Given a repo root with a real spec corpus
 When load_views runs and nodes is queried
 Then the row count per kind matches an independent file-system count
-  for every one of the seven kinds, never counting a README.md
+  for every one of the seven kinds, never counting the README.md in
+  specs/product/, specs/vars/ or specs/decisions/ (no other directory of
+  the corpus holds one)
 ```

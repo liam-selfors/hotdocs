@@ -4,9 +4,9 @@ Covers: R-COMPILE-010
 Kind: generated-test
 
 ```gherkin
-Given two versions of the compiler where the step grammar has changed
-  between them
-When each version compiles the same component's acceptance/ and interface/
-  content
-Then CompileReport.gate_version differs between the two runs
+Given a component compiled once, reporting the module's GATE_VERSION
+When the module's GATE_VERSION attribute is replaced by
+  "criterion-compiler@1.1.0" and the same component is compiled again
+Then the second CompileReport.gate_version is
+  "criterion-compiler@1.1.0", differing from the first
 ```

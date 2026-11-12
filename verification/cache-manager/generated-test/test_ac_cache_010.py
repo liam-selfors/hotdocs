@@ -1,8 +1,8 @@
 import os
-import tempfile
 import shutil
-import unittest
 from pathlib import Path
+
+import pytest
 
 import cache_manager
 
@@ -13,77 +13,129 @@ def _field(value, name):
     return getattr(value, name, None)
 
 
-class TestAcCache010(unittest.TestCase):
-    def setUp(self):
-        self._prior_store_url = os.environ.pop("VAR_CACHE_STORE_URL", None)
-        self.repo_root = Path(tempfile.mkdtemp())
+def _make_key(suffix="a"):
+    return cache_manager.CacheKey(
+        spec_bundle_hash="sha256:" + ("1" * 63) + suffix,
+        gate_inputs_hash="sha256:" + ("2" * 63) + suffix,
+        gate_version="license_scanner@4.0.3+9f2c41ab07de",
+        model_pin="claude-sonnet-5",
+    )
 
-    def tearDown(self):
-        if self._prior_store_url is not None:
-            os.environ["VAR_CACHE_STORE_URL"] = self._prior_store_url
-        shutil.rmtree(self.repo_root, ignore_errors=True)
 
-    def test_put_then_get_round_trips_via_local_hotdocs_cache(self):
-        self.assertNotIn("VAR_CACHE_STORE_URL", os.environ)
-
-        cache_key = cache_manager.CacheKey(
-            spec_bundle_hash="sha256:" + "a" * 64,
-            gate_inputs_hash="sha256:" + "b" * 64,
-            gate_version="license_scanner@4.0.3+9f2c41ab07de",
-            model_pin="claude-sonnet-5",
-        )
-
-        stored_at = cache_manager.now_iso()
-        payload = {
-            "component_id": "comp-cache-manager",
+def _make_result():
+    return cache_manager.CachedResult(
+        gate_type="license_scanner",
+        payload={
+            "component_id": "comp-example",
             "gate_version": "license_scanner@4.0.3+9f2c41ab07de",
-            "similarity_score": 0.01,
+            "similarity_score": 0.12,
             "blocked": False,
             "matches": [],
-        }
-        result = cache_manager.CachedResult(
-            gate_type="license_scanner",
-            payload=payload,
-            stored_at=stored_at,
-        )
-
-        # No distinct code path is used for the local-fallback case: the
-        # same call shapes are used as would be used with a store URL set.
-        cache_manager.put(cache_key, result, repo_root=self.repo_root)
-
-        hotdocs_cache_dir = self.repo_root / ".hotdocs" / "cache"
-        self.assertTrue(
-            hotdocs_cache_dir.is_dir(),
-            "put() with VAR_CACHE_STORE_URL absent MUST create .hotdocs/cache/",
-        )
-        written_files = [p for p in hotdocs_cache_dir.rglob("*") if p.is_file()]
-        self.assertGreater(
-            len(written_files),
-            0,
-            "put() MUST persist at least one file under .hotdocs/cache/",
-        )
-
-        retrieved = cache_manager.get(cache_key, repo_root=self.repo_root)
-
-        self.assertFalse(
-            isinstance(retrieved, cache_manager.Miss),
-            "get() for a key just put() MUST NOT report a miss",
-        )
-        self.assertEqual(_field(retrieved, "gate_type"), "license_scanner")
-        self.assertEqual(_field(retrieved, "payload"), payload)
-        self.assertEqual(_field(retrieved, "stored_at"), stored_at)
-
-        # Confirm the value truly came back from disk, not merely from an
-        # in-process cache: remove the on-disk store and verify the next
-        # get() for the same key now reports a miss.
-        shutil.rmtree(hotdocs_cache_dir)
-        post_delete = cache_manager.get(cache_key, repo_root=self.repo_root)
-        self.assertTrue(
-            isinstance(post_delete, cache_manager.Miss),
-            "with .hotdocs/cache/ removed, get() MUST report Miss, proving "
-            "the prior hit was read back from that on-disk store",
-        )
+        },
+        stored_at=cache_manager.now_iso(),
+    )
 
 
-if __name__ == "__main__":
-    unittest.main()
+def _cache_files(repo_root):
+    cache_dir = Path(repo_root) / ".hotdocs" / "cache"
+    if not cache_dir.is_dir():
+        return []
+    return [p for p in cache_dir.rglob("*") if p.is_file()]
+
+
+def _assert_hit_matches(got, expected):
+    assert got is not None
+    assert not isinstance(got, cache_manager.Miss), "expected a hit, got Miss"
+    assert _field(got, "gate_type") == expected.gate_type
+    assert _field(got, "payload") == expected.payload
+    assert _field(got, "stored_at") == expected.stored_at
+
+
+def _set_store_absent(monkeypatch, mode):
+    if mode == "unset":
+        monkeypatch.delenv("VAR_CACHE_STORE_URL", raising=False)
+    else:
+        monkeypatch.setenv("VAR_CACHE_STORE_URL", "")
+
+
+@pytest.mark.parametrize("mode", ["unset", "empty"])
+def test_put_then_get_round_trips_through_local_store(tmp_path, monkeypatch, mode):
+    _set_store_absent(monkeypatch, mode)
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+
+    key = _make_key()
+    result = _make_result()
+
+    before = cache_manager.get(key, repo_root=repo_root)
+    assert isinstance(before, cache_manager.Miss)
+
+    ret = cache_manager.put(key, result, repo_root=repo_root)
+    assert ret is None
+
+    files = _cache_files(repo_root)
+    assert files, "put must persist the entry under <repo_root>/.hotdocs/cache/"
+
+    got = cache_manager.get(key, repo_root=repo_root)
+    _assert_hit_matches(got, result)
+
+    stats = cache_manager.stats(repo_root=repo_root)
+    entry_count = _field(stats, "entry_count")
+    assert isinstance(entry_count, int)
+    assert entry_count >= 1
+
+
+def test_hit_is_read_back_from_disk_not_process_memory(tmp_path, monkeypatch):
+    monkeypatch.delenv("VAR_CACHE_STORE_URL", raising=False)
+    repo_a = tmp_path / "repo_a"
+    repo_b = tmp_path / "repo_b"
+    repo_c = tmp_path / "repo_c"
+    for d in (repo_a, repo_b, repo_c):
+        d.mkdir()
+
+    key = _make_key("b")
+    result = _make_result()
+    cache_manager.put(key, result, repo_root=repo_a)
+    assert _cache_files(repo_a)
+
+    # A different repo that never had a put, and whose disk store is empty,
+    # must not see the entry.
+    assert isinstance(cache_manager.get(key, repo_root=repo_c), cache_manager.Miss)
+
+    # Copying only the on-disk .hotdocs/cache/ into a fresh repo must be
+    # sufficient for a hit there: the data lives in the files.
+    shutil.copytree(repo_a / ".hotdocs" / "cache", repo_b / ".hotdocs" / "cache")
+    got = cache_manager.get(key, repo_root=repo_b)
+    _assert_hit_matches(got, result)
+
+
+def test_default_repo_root_uses_cwd_without_distinct_caller_path(tmp_path, monkeypatch):
+    monkeypatch.delenv("VAR_CACHE_STORE_URL", raising=False)
+    repo_root = tmp_path / "cwd_repo"
+    repo_root.mkdir()
+    monkeypatch.chdir(repo_root)
+
+    key = _make_key("c")
+    result = _make_result()
+
+    # Same call shape a caller would use with a shared store configured:
+    # no backing-specific argument at all.
+    cache_manager.put(key, result)
+    got = cache_manager.get(key)
+    _assert_hit_matches(got, result)
+
+    assert _cache_files(repo_root), "default repo_root must resolve to the cwd's .hotdocs/cache/"
+
+
+def test_distinct_keys_do_not_collide_in_local_store(tmp_path, monkeypatch):
+    monkeypatch.delenv("VAR_CACHE_STORE_URL", raising=False)
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+
+    key1 = _make_key("d")
+    key2 = _make_key("e")
+    result = _make_result()
+
+    cache_manager.put(key1, result, repo_root=repo_root)
+    _assert_hit_matches(cache_manager.get(key1, repo_root=repo_root), result)
+    assert isinstance(cache_manager.get(key2, repo_root=repo_root), cache_manager.Miss)

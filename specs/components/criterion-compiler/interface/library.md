@@ -9,7 +9,8 @@ GATE_VERSION: str  # exactly "criterion-compiler@1.0.0"
 ```
 
 `GATE_VERSION` is a module-level constant, also the `gate_version` in
-every `CompileReport`. `provenance-checker` reads it into every
+every `CompileReport`, read from the module when the report is built, so
+replacing the module attribute changes the next report. `provenance-checker` reads it into every
 component's provenance key, so it changes only when compiled output
 would change.
 
