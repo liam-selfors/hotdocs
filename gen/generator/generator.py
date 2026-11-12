@@ -34,7 +34,7 @@ from typing import Any, Dict, List, Optional
 # instruction to honor a sealed dependency's own source_path (D159); v9
 # added the tool-root fallback for a dependency absent under repo_root
 # (D199).
-PROMPT_VERSION = "v9"
+PROMPT_VERSION = "v9.1"  # D252: no behavior beyond the spec
 
 # R-GEN-005/006: the cache-key component identifying this gate's shape.
 # Bumped on D56 to orphan two pre-existing poisoned cache entries
@@ -44,7 +44,7 @@ PROMPT_VERSION = "v9"
 # itself -- missing this the first time let a stale, pre-fix candidate
 # replay from cache instead of triggering a fresh call. Bumped again on
 # D138, D139, and D159 for the same reason.
-GATE_VERSION = "generator@1.8.0"
+GATE_VERSION = "generator@1.9.0"
 
 
 _SYSTEM_PROMPT = """You are generating the complete source for one component \
@@ -57,6 +57,11 @@ DEPENDENCY INTERFACES / DEPENDENCY CONTEXT / VARS / GLOSSARY sections \
 given below, plus DEPENDENCY USAGE and HINT_CODE / RETRY_FEEDBACK when \
 present. Never invent or assume anything about this component's "real" \
 prior implementation.
+- Implement exactly what the spec requires and nothing more: no \
+validation, fallback, option, or error path that the SPEC, INTERFACE and \
+CONSTRAINTS do not call for. Every branch you write must be one the \
+spec's acceptance criteria can reach; code beyond the spec is untested \
+and is rejected by mutation testing.
 - HINT_CODE, when present, is existing code -- a revision starting point \
 only. Keep it clearly distinct from the spec fields; never silently \
 merge it with them in a way that makes a later audit unable to tell \
