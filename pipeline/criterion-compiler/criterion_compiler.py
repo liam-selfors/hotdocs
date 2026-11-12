@@ -1,59 +1,21 @@
-"""criterion-compiler -- sealed, permanently hand-authored.
+"""Criterion compiler: deterministic compilation of `kind: compiled`
+Given/When/Then acceptance criteria into pytest test code.
 
-Deterministically compiles `kind: compiled` Given/When/Then acceptance
-criteria into executable pytest scaffolding, with no model involved at
-any step (R-COMPILE-008). See specs/components/criterion-compiler/ for
-the full spec; specs/architecture/step-phrase-grammar.md for the fixed
-step vocabulary this implements.
-
-Never agent-generated (component.md: sealed: true) -- the trust anchor
-for `compiled`-kind criteria only holds if the compiler itself is not
-agent-generated. See verification/criterion-compiler/BOOTSTRAP.md for
-every underspecified design choice this file had to resolve on its own.
+No model, agent or network access is involved at any stage: the work is
+grammar parsing, interface binding, and deterministic code emission,
+structured as two phases (parse+bind, then emit) per R-COMPILE-011.
 """
-
-from __future__ import annotations
 
 import argparse
 import json
 import re
+import subprocess
 import sys
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Optional
 
 GATE_VERSION = "criterion-compiler@1.0.0"
-SUPPORTED_TARGETS = {"pytest"}
-
-
-class CompileError(Exception):
-    """A specific, located compile error -- never a silent skip or a
-    best-effort guess (R-COMPILE-001/002/007)."""
-
-    def __init__(self, message: str, file: str = "", line: int = 0):
-        super().__init__(message)
-        self.message = message
-        self.file = file
-        self.line = line
-
-
-@dataclass
-class CompileReport:
-    outputs: list[dict]
-    gate_version: str
-    summary: dict
-
-    def to_dict(self) -> dict:
-        return {"outputs": self.outputs, "gate_version": self.gate_version, "summary": self.summary}
-
-
-# ---------------------------------------------------------------------------
-# acceptance/*.md parsing -- Covers:, Kind:, and the gherkin block.
-# ---------------------------------------------------------------------------
-
-_COVERS_RE = re.compile(r"^Covers:\s*(\S+)", re.MULTILINE)
-_KIND_RE = re.compile(r"^Kind:\s*(\S+)", re.MULTILINE)
-_GHERKIN_RE = re.compile(r"```gherkin\n(.*?)\n```", re.DOTALL)
 
 
 @dataclass
@@ -65,702 +27,590 @@ class ParsedCriterion:
     file: str
 
 
-def _parse_criterion_file(path: Path) -> ParsedCriterion:
-    text = path.read_text(encoding="utf-8")
-    covers_m = _COVERS_RE.search(text)
-    kind_m = _KIND_RE.search(text)
-    gherkin_m = _GHERKIN_RE.search(text)
-    return ParsedCriterion(
-        criterion_id=path.stem,
-        covers=covers_m.group(1) if covers_m else "",
-        kind=kind_m.group(1) if kind_m else "",
-        gherkin=gherkin_m.group(1) if gherkin_m else "",
-        file=path.name,
-    )
-
-
-# ---------------------------------------------------------------------------
-# Gherkin -> scenarios -> steps.
-#
-# A `compiled` criterion's gherkin block holds one or more scenarios,
-# each a contiguous run of one-or-more Given lines, exactly one When
-# line, and one-or-more Then lines -- scenarios separated by a blank
-# line (BOOTSTRAP.md "Scenario grouping"). A step's text may wrap
-# across physical lines (indentation continuation); a continuation
-# line is any non-blank line not itself starting a new Given/When/Then.
-# ---------------------------------------------------------------------------
-
-_STEP_KEYWORD_RE = re.compile(r"^(Given|When|Then)\s+(.*)$")
-
-
-@dataclass
-class Step:
-    keyword: str  # "Given" | "When" | "Then"
-    text: str
-    line: int
-
-
-@dataclass
-class Scenario:
-    steps: list[Step]
-
-
-def _split_scenarios(gherkin: str, start_line: int) -> list[Scenario]:
-    lines = gherkin.split("\n")
-    raw_steps: list[Step] = []
-    current: Step | None = None
-    for offset, raw_line in enumerate(lines):
-        lineno = start_line + offset
-        stripped = raw_line.strip()
-        m = _STEP_KEYWORD_RE.match(stripped)
-        if m:
-            if current is not None:
-                raw_steps.append(current)
-            current = Step(keyword=m.group(1), text=m.group(2), line=lineno)
-        elif not stripped:
-            if current is not None:
-                raw_steps.append(current)
-                current = None
-        elif current is not None:
-            current.text += " " + stripped
-    if current is not None:
-        raw_steps.append(current)
-
-    scenarios: list[Scenario] = []
-    bucket: list[Step] = []
-    for step in raw_steps:
-        if step.keyword == "Given" and bucket and bucket[-1].keyword in ("Then",):
-            scenarios.append(Scenario(steps=bucket))
-            bucket = []
-        bucket.append(step)
-    if bucket:
-        scenarios.append(Scenario(steps=bucket))
-    return scenarios
-
-
-# ---------------------------------------------------------------------------
-# interface/ resolution (R-COMPILE-002).
-#
-# library.md's fenced code block: one function signature per
-# non-blank line, `name(params) -> ReturnType`. interface/data/<Type>.md:
-# the `# `Type`` heading names a Type; its JSON example's top-level keys
-# are its fields (BOOTSTRAP.md "Interface resolution").
-# ---------------------------------------------------------------------------
-
-_FUNC_SIG_RE = re.compile(r"^([A-Za-z_][A-Za-z0-9_.]*)\s*\(([^)]*)\)")
-_TYPE_HEADING_RE = re.compile(r"^#\s*`([A-Za-z_][A-Za-z0-9_]*)`")
-_JSON_BLOCK_RE = re.compile(r"```json\n(.*?)\n```", re.DOTALL)
-
-
 @dataclass
 class InterfaceSurface:
-    functions: dict[str, list[str]] = field(default_factory=dict)  # name -> param names
-    types: dict[str, list[str]] = field(default_factory=dict)  # Type -> field names
-    module_name: str = ""  # the target component's real importable module name, if known (D79)
+    functions: dict = field(default_factory=dict)
+    types: dict = field(default_factory=dict)
+    module_name: str = ""
 
 
-def _load_interface_surface(repo_root: Path, component_slug: str) -> InterfaceSurface:
-    surface = InterfaceSurface(module_name=component_slug.replace("-", "_"))
-    iface_dir = repo_root / "specs" / "components" / component_slug / "interface"
-    library_md = iface_dir / "library.md"
-    if library_md.is_file():
-        for block in re.findall(r"```\n(.*?)\n```", library_md.read_text(encoding="utf-8"), re.DOTALL):
-            for line in block.splitlines():
-                m = _FUNC_SIG_RE.match(line.strip())
-                if m:
-                    name = m.group(1)
-                    params_raw = m.group(2)
-                    params = []
-                    for part in params_raw.split(","):
-                        part = part.strip().lstrip("*")
-                        if not part or part == "":
-                            continue
-                        pname = part.split(":")[0].split("=")[0].strip()
-                        if pname:
-                            params.append(pname)
-                    surface.functions[name] = params
+@dataclass
+class CompileReport:
+    outputs: list
+    gate_version: str
+    summary: dict
 
-    data_dir = iface_dir / "data"
-    if data_dir.is_dir():
-        for data_file in data_dir.glob("*.md"):
-            text = data_file.read_text(encoding="utf-8")
-            type_m = _TYPE_HEADING_RE.search(text)
-            if not type_m:
-                continue
-            type_name = type_m.group(1)
-            json_m = _JSON_BLOCK_RE.search(text)
-            fields: list[str] = []
-            if json_m:
-                try:
-                    example = json.loads(json_m.group(1))
-                    if isinstance(example, dict):
-                        fields = list(example.keys())
-                except json.JSONDecodeError:
-                    fields = []
-            surface.types[type_name] = fields
-    return surface
+
+class _CompileError(Exception):
+    pass
+
+
+class _Var:
+    """A reference to a value constructed by a `Given a <Type> with ...` step."""
+
+    def __init__(self, name):
+        self.name = name
 
 
 # ---------------------------------------------------------------------------
-# Literal / identifier parsing (R-COMPILE-007/012).
-#
-# A literal is a JSON scalar/string/object/array, or a bare identifier
-# in a leaf position (resolved at compile time against earlier-bound
-# fixtures, R-COMPILE-007). Anything else left over after parsing the
-# longest valid literal/identifier prefix -- an operator, field/index
-# access, concatenation, a call -- is an expression and a compile error.
+# Grammar
 # ---------------------------------------------------------------------------
 
-_IDENT_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
-_WS_RE = re.compile(r"\s*")
+_IDENT = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+_ACCESS = re.compile(
+    r"[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*|\[[^\[\]]*\])+"
+)
+_KEYWORD = re.compile(r"(Given|When|Then) ")
+_TYPE_STEP = re.compile(r"a ([A-Z][A-Za-z0-9_]*) with\s+(.+)")
+_FIXTURE_STEP = re.compile(r"a ([A-Za-z_][A-Za-z0-9_]*) is\s+(.+)")
+_INVOKE_STEP = re.compile(
+    r"([A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*) is invoked with\s+(.+)"
+)
+_CLIENT_STEP = re.compile(r"the client calls ([A-Z]+) (\S+) with\s+(.+)")
+_FINDING_STEP = re.compile(
+    r"the (.+?) contains a ([A-Za-z]+)-severity finding for rule (\S+)"
+)
+_EQUALS_STEP = re.compile(
+    r"([A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*|\[-?\d+\])*) equals\s+(.+)"
+)
+_FIELD = re.compile(r"([A-Za-z_][A-Za-z0-9_]*)\s*:")
+_CONSTANTS = {"true": True, "false": False, "null": None}
+_DECODER = json.JSONDecoder()
 
-
-class _LiteralParser:
-    def __init__(self, text: str, bound: set[str], file: str, line: int):
-        self.text = text
-        self.pos = 0
-        self.bound = bound
-        self.file = file
-        self.line = line
-
-    def _skip_ws(self) -> None:
-        m = _WS_RE.match(self.text, self.pos)
-        if m:
-            self.pos = m.end()
-
-    def parse_value(self) -> Any:
-        self._skip_ws()
-        if self.pos >= len(self.text):
-            raise CompileError("expected a literal value, found nothing", self.file, self.line)
-        ch = self.text[self.pos]
-        if ch == '"':
-            return self._parse_string()
-        if ch == "{":
-            return self._parse_object()
-        if ch == "[":
-            return self._parse_array()
-        if ch == "-" or ch.isdigit():
-            return self._parse_number()
-        if self.text[self.pos:self.pos + 4] == "true":
-            self.pos += 4
-            return True
-        if self.text[self.pos:self.pos + 5] == "false":
-            self.pos += 5
-            return False
-        if self.text[self.pos:self.pos + 4] == "null":
-            self.pos += 4
-            return None
-        m = _IDENT_RE.match(self.text, self.pos)
-        if m:
-            name = m.group(0)
-            self.pos = m.end()
-            if name not in self.bound:
-                raise CompileError(
-                    f"unresolved reference '{name}' -- not bound by any earlier Given step in this criterion",
-                    self.file, self.line,
-                )
-            return _FixtureRef(name)
-        raise CompileError(f"text does not start with a recognized literal: {self.text[self.pos:]!r}", self.file, self.line)
-
-    def _parse_string(self) -> str:
-        start = self.pos
-        self.pos += 1
-        out = []
-        while self.pos < len(self.text):
-            ch = self.text[self.pos]
-            if ch == "\\" and self.pos + 1 < len(self.text):
-                out.append(self.text[self.pos + 1])
-                self.pos += 2
-                continue
-            if ch == '"':
-                self.pos += 1
-                return "".join(out)
-            out.append(ch)
-            self.pos += 1
-        raise CompileError("unterminated string literal", self.file, self.line)
-
-    def _parse_number(self) -> Any:
-        m = re.match(r"-?\d+(\.\d+)?", self.text[self.pos:])
-        if not m:
-            raise CompileError("invalid number literal", self.file, self.line)
-        raw = m.group(0)
-        self.pos += len(raw)
-        return float(raw) if "." in raw else int(raw)
-
-    def _parse_object(self) -> dict:
-        self.pos += 1  # {
-        obj: dict[str, Any] = {}
-        self._skip_ws()
-        if self.pos < len(self.text) and self.text[self.pos] == "}":
-            self.pos += 1
-            return obj
-        while True:
-            self._skip_ws()
-            if self.pos >= len(self.text) or self.text[self.pos] != '"':
-                raise CompileError("expected a quoted object key", self.file, self.line)
-            key = self._parse_string()
-            self._skip_ws()
-            if self.pos >= len(self.text) or self.text[self.pos] != ":":
-                raise CompileError("expected ':' after object key", self.file, self.line)
-            self.pos += 1
-            self._skip_ws()
-            obj[key] = self.parse_value()
-            self._skip_ws()
-            if self.pos < len(self.text) and self.text[self.pos] == ",":
-                self.pos += 1
-                continue
-            if self.pos < len(self.text) and self.text[self.pos] == "}":
-                self.pos += 1
-                return obj
-            raise CompileError("expected ',' or '}' in object literal", self.file, self.line)
-
-    def _parse_array(self) -> list:
-        self.pos += 1  # [
-        arr: list[Any] = []
-        self._skip_ws()
-        if self.pos < len(self.text) and self.text[self.pos] == "]":
-            self.pos += 1
-            return arr
-        while True:
-            self._skip_ws()
-            arr.append(self.parse_value())
-            self._skip_ws()
-            if self.pos < len(self.text) and self.text[self.pos] == ",":
-                self.pos += 1
-                continue
-            if self.pos < len(self.text) and self.text[self.pos] == "]":
-                self.pos += 1
-                return arr
-            raise CompileError("expected ',' or ']' in array literal", self.file, self.line)
-
-    def parse_whole(self) -> Any:
-        """Parses one literal/identifier value and requires it to consume
-        the entire (trimmed) input -- any leftover text is an expression
-        (operator, field/index access, concatenation, call), never a
-        silently-ignored suffix."""
-        value = self.parse_value()
-        self._skip_ws()
-        if self.pos < len(self.text):
-            leftover = self.text[self.pos:]
-            if leftover.startswith("."):
-                raise CompileError(
-                    f"field/index access ({leftover!r}) is not a literal -- "
-                    "bind the needed field directly in its own Given step instead",
-                    self.file, self.line,
-                )
-            raise CompileError(
-                f"{self.text.strip()!r} is not a literal (expression evaluation is not permitted)",
-                self.file, self.line,
-            )
-        return value
-
-
-@dataclass(frozen=True)
-class _FixtureRef:
-    name: str
-
-
-@dataclass(frozen=True)
-class _RawSource:
-    """Already-rendered Python source (a type constructor call), spliced
-    verbatim rather than re-rendered as a JSON literal."""
-
-    text: str
-
-
-def _parse_literal(text: str, bound: set[str], file: str, line: int) -> Any:
-    return _LiteralParser(text.strip(), bound, file, line).parse_whole()
-
-
-def _literal_to_py(value: Any, resolve: dict[str, Any] | None = None) -> str:
-    """Renders a parsed literal (which may contain nested _FixtureRef
-    leaves) as Python source text. A fixture reference is inlined as
-    its own already-known literal value -- a real compile-time
-    substitution, never a variable name left for Python's own runtime
-    lookup to resolve (AC-COMPILE-012: "no runtime lookup ... in the
-    generated code")."""
-    resolve = resolve or {}
-    if isinstance(value, _FixtureRef):
-        return _literal_to_py(resolve[value.name], resolve)
-    if isinstance(value, _RawSource):
-        return value.text
-    if isinstance(value, dict):
-        return "{" + ", ".join(f"{json.dumps(k)}: {_literal_to_py(v, resolve)}" for k, v in value.items()) + "}"
-    if isinstance(value, list):
-        return "[" + ", ".join(_literal_to_py(v, resolve) for v in value) + "]"
-    return json.dumps(value)
-
-
-# ---------------------------------------------------------------------------
-# Step matching against the fixed grammar (R-COMPILE-001).
-# ---------------------------------------------------------------------------
-
-_GIVEN_SIMPLE_RE = re.compile(r"^a\s+([A-Za-z_][A-Za-z0-9_]*)\s+is\s+(.+)$")
-_GIVEN_TYPE_RE = re.compile(r"^a\s+([A-Z][A-Za-z0-9_]*)\s+with\s+(.+)$")
-_WHEN_INVOKE_RE = re.compile(r"^([A-Za-z_][A-Za-z0-9_.]*)\s+is\s+invoked\s+with\s+(.+)$")
-_WHEN_HTTP_RE = re.compile(r"^the\s+client\s+calls\s+(\w+)\s+(\S+)\s+with\s+(.+)$")
-_THEN_EQUALS_RE = re.compile(r"^([A-Za-z_][A-Za-z0-9_.\[\]]*)\s+equals\s+(.+)$")
-_THEN_FINDING_RE = re.compile(
-    r"^the\s+(\w+)\s+contains\s+a\s+(\w+)-severity\s+finding\s+for\s+rule\s+([\w\-]+)$"
+_KIND_RE = re.compile(
+    r"^[ \t>*_|\-]*`?Kind`?[*_` \t]*[:|][*_` \t|]*([A-Za-z0-9][\w.\-]*)",
+    re.MULTILINE | re.IGNORECASE,
+)
+_COVERS_RE = re.compile(
+    r"^[ \t>*_|\-]*`?Covers`?[*_` \t]*[:|][*_` \t|]*([A-Za-z0-9][\w.\-]*)",
+    re.MULTILINE | re.IGNORECASE,
 )
 
 
-def _snake(name: str) -> str:
-    return re.sub(r"(?<!^)(?=[A-Z])", "_", name).lower()
-
-
-class _ScenarioCompiler:
-    def __init__(self, surface: InterfaceSurface, file: str):
-        self.surface = surface
-        self.file = file
-        self.bound_values: dict[str, Any] = {}  # fixture name -> resolved literal value (or _RawSource)
-        self.bound_names: set[str] = set()
-        self.setup_lines: list[str] = []
-        self.exercise_line: str | None = None
-        self.assert_lines: list[str] = []
-        self._type_counts: dict[str, int] = {}
-        self.needs_import = False  # True once a step references the target module's own name (D79)
-
-    def _bind(self, hint: str) -> str:
-        count = self._type_counts.get(hint, 0) + 1
-        self._type_counts[hint] = count
-        return hint if count == 1 else f"{hint}_{count}"
-
-    def _qualify(self, name: str) -> str:
-        """D79 -- a resolved function/type name must be reachable in the
-        emitted test's own namespace. Qualifying with the target
-        module's real name (and importing it, see _emit_pytest) is
-        simpler and safer than rewriting the call site later to inject
-        a bare top-level import -- it also matches exactly how a human
-        reading `specs/components/<slug>/interface/library.md`'s own
-        signature would actually call it for real."""
-        if self.surface.module_name:
-            self.needs_import = True
-            return f"{self.surface.module_name}.{name}"
-        return name
-
-    def compile_step(self, step: Step) -> None:
-        text = step.text.strip()
-        if step.keyword == "Given":
-            self._compile_given(text, step.line)
-        elif step.keyword == "When":
-            self._compile_when(text, step.line)
-        elif step.keyword == "Then":
-            self._compile_then(text, step.line)
-
-    def _compile_given(self, text: str, line: int) -> None:
-        m = _GIVEN_SIMPLE_RE.match(text)
-        if m:
-            fixture_name, literal_text = m.group(1), m.group(2)
-            value = _parse_literal(literal_text, self.bound_names, self.file, line)
-            self.bound_names.add(fixture_name)
-            self.bound_values[fixture_name] = value
-            self.setup_lines.append(f"{fixture_name} = {_literal_to_py(value, self.bound_values)}")
-            return
-
-        m = _GIVEN_TYPE_RE.match(text)
-        if m:
-            type_name, fields_text = m.group(1), m.group(2)
-            if type_name not in self.surface.types:
-                raise CompileError(
-                    f"'{type_name}' does not resolve to any declared type in this component's interface/",
-                    self.file, line,
-                )
-            declared_fields = set(self.surface.types[type_name])
-            kwargs: dict[str, Any] = {}
-            for part in _split_top_level_commas(fields_text):
-                field_name, _, literal_text = part.partition(":")
-                field_name = field_name.strip()
-                if declared_fields and field_name not in declared_fields:
-                    raise CompileError(
-                        f"'{field_name}' does not resolve to any declared field of '{type_name}'",
-                        self.file, line,
-                    )
-                kwargs[field_name] = _parse_literal(literal_text, self.bound_names, self.file, line)
-            fixture_name = self._bind(_snake(type_name))
-            kwargs_src = ", ".join(f"{k}={_literal_to_py(v, self.bound_values)}" for k, v in kwargs.items())
-            self.bound_names.add(fixture_name)
-            qualified_type = self._qualify(type_name)
-            self.bound_values[fixture_name] = _RawSource(f"{qualified_type}({kwargs_src})")
-            self.setup_lines.append(f"{fixture_name} = {qualified_type}({kwargs_src})")
-            return
-
-        raise CompileError(
-            f"step 'Given {text}' does not match any recognized template in the step grammar",
-            self.file, line,
-        )
-
-    def _compile_when(self, text: str, line: int) -> None:
-        m = _WHEN_INVOKE_RE.match(text)
-        if m:
-            func_name, args_text = m.group(1), m.group(2)
-            if func_name not in self.surface.functions:
-                raise CompileError(
-                    f"'{func_name}' does not resolve to any declared function in this component's interface/",
-                    self.file, line,
-                )
-            args_value = _parse_literal(args_text, self.bound_names, self.file, line)
-            if isinstance(args_value, dict):
-                call_args = ", ".join(f"{k}={_literal_to_py(v, self.bound_values)}" for k, v in args_value.items())
-            elif isinstance(args_value, list):
-                call_args = ", ".join(_literal_to_py(v, self.bound_values) for v in args_value)
-            else:
-                call_args = _literal_to_py(args_value, self.bound_values)
-            self.exercise_line = f"result = {self._qualify(func_name)}({call_args})"
-            return
-
-        m = _WHEN_HTTP_RE.match(text)
-        if m:
-            method, path, args_text = m.group(1), m.group(2), m.group(3)
-            endpoint_name = f"{method.upper()} {path}"
-            if endpoint_name not in self.surface.functions:
-                raise CompileError(
-                    f"'{endpoint_name}' does not resolve to any declared endpoint in this component's interface/",
-                    self.file, line,
-                )
-            args_value = _parse_literal(args_text, self.bound_names, self.file, line)
-            self.exercise_line = (
-                f"result = client.{method.lower()}({_literal_to_py(path, self.bound_values)}, "
-                f"{_literal_to_py(args_value, self.bound_values)})"
-            )
-            return
-
-        raise CompileError(
-            f"step 'When {text}' does not match any recognized template in the step grammar",
-            self.file, line,
-        )
-
-    def _compile_then(self, text: str, line: int) -> None:
-        m = _THEN_EQUALS_RE.match(text)
-        if m:
-            result_path, literal_text = m.group(1), m.group(2)
-            value = _parse_literal(literal_text, self.bound_names, self.file, line)
-            self.assert_lines.append(f"assert result.{result_path} == {_literal_to_py(value, self.bound_values)}")
-            return
-
-        m = _THEN_FINDING_RE.match(text)
-        if m:
-            artifact, severity, rule_id = m.group(1), m.group(2), m.group(3)
-            self.assert_lines.append(
-                f"assert any(f.rule_id == {rule_id!r} and f.severity == {severity!r} "
-                f"for f in {artifact}.findings)"
-            )
-            return
-
-        raise CompileError(
-            f"step 'Then {text}' does not match any recognized template in the step grammar",
-            self.file, line,
-        )
-
-
-def _split_top_level_commas(text: str) -> list[str]:
-    """Splits a 'field: literal, field: literal' list on commas that are
-    not nested inside a {}/[]/"" literal."""
-    parts: list[str] = []
+def _slot_end(text, start, stop):
+    """End index of the value slot beginning at `start` (for error quoting)."""
     depth = 0
-    in_string = False
-    current = []
-    i = 0
-    while i < len(text):
+    i = start
+    n = len(text)
+    while i < n:
         ch = text[i]
-        if in_string:
-            current.append(ch)
-            if ch == "\\" and i + 1 < len(text):
-                current.append(text[i + 1])
-                i += 2
-                continue
-            if ch == '"':
-                in_string = False
-            i += 1
-            continue
         if ch == '"':
-            in_string = True
-            current.append(ch)
-        elif ch in "{[":
+            i += 1
+            while i < n and text[i] != '"':
+                i += 2 if text[i] == "\\" else 1
+        elif ch in "([{":
             depth += 1
-            current.append(ch)
-        elif ch in "}]":
+        elif ch in ")]}":
+            if depth == 0:
+                return i
             depth -= 1
-            current.append(ch)
-        elif ch == "," and depth == 0:
-            parts.append("".join(current))
-            current = []
-        else:
-            current.append(ch)
+        elif depth == 0 and ch in stop:
+            return i
         i += 1
-    if current:
-        parts.append("".join(current))
-    return [p for p in parts if p.strip()]
+    return n
+
+
+class _Literal:
+    """Parses JSON-like literal data; a bare identifier in a leaf position is
+    substituted, at compile time, by the value an earlier `Given` bound."""
+
+    def __init__(self, text, line, bindings):
+        self.text = text
+        self.line = line
+        self.bindings = bindings
+        self.pos = 0
+
+    def _ws(self):
+        while self.pos < len(self.text) and self.text[self.pos].isspace():
+            self.pos += 1
+
+    def _peek(self):
+        return self.text[self.pos:self.pos + 1]
+
+    def _malformed(self):
+        raise _CompileError(
+            f"line {self.line}: '{self.text.strip()}' is not a literal"
+        )
+
+    def _expression(self, start, stop):
+        expr = self.text[start:_slot_end(self.text, start, stop)].strip()
+        detail = ": field/index access" if _ACCESS.fullmatch(expr) else ""
+        raise _CompileError(f"line {self.line}: '{expr}' is not a literal{detail}")
+
+    def value(self, stop):
+        self._ws()
+        start = self.pos
+        if start >= len(self.text) or self.text[start] in stop:
+            self._malformed()
+        ch = self.text[start]
+        name = None
+        node = None
+        if ch == "{":
+            node = self._object()
+        elif ch == "[":
+            node = self._array()
+        elif ch == '"' or ch == "-" or ch.isdigit():
+            try:
+                node, self.pos = _DECODER.raw_decode(self.text, start)
+            except ValueError:
+                self._expression(start, stop)
+        else:
+            match = _IDENT.match(self.text, start)
+            if match is None:
+                self._expression(start, stop)
+            name = match.group()
+            self.pos = match.end()
+        self._ws()
+        if self.pos < len(self.text) and self.text[self.pos] not in stop:
+            self._expression(start, stop)
+        if name is None:
+            return node
+        if name in _CONSTANTS:
+            return _CONSTANTS[name]
+        if name not in self.bindings:
+            raise _CompileError(f"line {self.line}: unresolved reference '{name}'")
+        return self.bindings[name]
+
+    def _object(self):
+        self.pos += 1
+        result = {}
+        self._ws()
+        if self._peek() == "}":
+            self.pos += 1
+            return result
+        while True:
+            self._ws()
+            if self._peek() != '"':
+                self._malformed()
+            try:
+                key, self.pos = _DECODER.raw_decode(self.text, self.pos)
+            except ValueError:
+                self._malformed()
+            self._ws()
+            if self._peek() != ":":
+                self._malformed()
+            self.pos += 1
+            result[key] = self.value(",}")
+            if self._peek() == ",":
+                self.pos += 1
+                continue
+            if self._peek() == "}":
+                self.pos += 1
+                return result
+            self._malformed()
+
+    def _array(self):
+        self.pos += 1
+        items = []
+        self._ws()
+        if self._peek() == "]":
+            self.pos += 1
+            return items
+        while True:
+            items.append(self.value(",]"))
+            if self._peek() == ",":
+                self.pos += 1
+                continue
+            if self._peek() == "]":
+                self.pos += 1
+                return items
+            self._malformed()
+
+
+def _snake(name):
+    s = re.sub(r"([A-Z]+)([A-Z][a-z])", r"\1_\2", name)
+    return re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", s).lower()
 
 
 # ---------------------------------------------------------------------------
-# pytest emission (R-COMPILE-011 -- emit phase, target-specific).
+# Phase 1: parse + bind (target-independent)
 # ---------------------------------------------------------------------------
 
-def _emit_pytest(criterion: ParsedCriterion, scenarios: list[Scenario], surface: InterfaceSurface) -> str:
-    compiled_scenarios: list[tuple[str, _ScenarioCompiler]] = []
-    any_needs_import = False
-    for idx, scenario in enumerate(scenarios, start=1):
-        compiler = _ScenarioCompiler(surface, criterion.file)
-        for step in scenario.steps:
-            compiler.compile_step(step)
-        suffix = "" if len(scenarios) == 1 else f"_scenario_{idx}"
-        func_name = f"test_{criterion.criterion_id.lower().replace('-', '_')}{suffix}"
-        compiled_scenarios.append((func_name, compiler))
-        any_needs_import = any_needs_import or compiler.needs_import
 
-    lines = [
-        "# Generated by criterion-compiler -- do not edit by hand.",
-        f"# Covers: {criterion.covers}",
-    ]
-    if any_needs_import and surface.module_name:
-        # D79: a resolved function/type call is qualified with the target
-        # module's own name (_ScenarioCompiler._qualify) -- it must
-        # therefore be importable in the emitted file's own namespace,
-        # never assumed to already be a bare global in scope.
-        lines.append(f"import {surface.module_name}")
-    lines.append("")
-
-    for func_name, compiler in compiled_scenarios:
-        lines.append(f"def {func_name}():")
-        lines.append(f"    \"\"\"Covers: {criterion.covers}\"\"\"")
-        for setup in compiler.setup_lines:
-            lines.append(f"    {setup}")
-        if compiler.exercise_line:
-            lines.append(f"    {compiler.exercise_line}")
-        for assertion in compiler.assert_lines:
-            lines.append(f"    {assertion}")
-        lines.append("")
-    return "\n".join(lines) + "\n"
-
-
-# ---------------------------------------------------------------------------
-# Public library entry point (R-COMPILE-*, interface/library.md).
-# ---------------------------------------------------------------------------
-
-def compile_criterion(
-    criterion: ParsedCriterion, surface: InterfaceSurface | None = None
-) -> dict:
-    """Compiles one already-parsed `compiled`-kind criterion directly,
-    with no directory scanning and no file I/O -- the primitive `compile`
-    (below) uses internally for each criterion it finds under a
-    component's `acceptance/`, and that any other real caller needing to
-    compile a single criterion whose content doesn't live under a
-    component's `acceptance/` directory can call directly.
-
-    `surface=None` is a real, valid input, not just "component has no
-    interface yet" (that case already existed): a criterion that is
-    black-box against more than one component -- a product-capability
-    scenario, never scoped to one component's own `interface/` contract
-    -- has no single surface to resolve against at all. Every step
-    referencing a function/type still either matches the fixed grammar
-    and resolves (literal-only steps, e.g. `Given a foo is "x"`, never
-    need a surface) or is a located compile error (R-COMPILE-002's own
-    discipline, unchanged) -- never silently skipped for lack of one.
-
-    Returns `{"status": "compiled", "source": <text>}` or
-    `{"status": "error", "message": <text>}` -- never raises.
-    """
-    try:
-        scenarios = _split_scenarios(criterion.gherkin, start_line=1)
-        if not scenarios:
-            raise CompileError("no Given/When/Then steps found in gherkin block", criterion.file, 1)
-        source = _emit_pytest(criterion, scenarios, surface or InterfaceSurface())
-    except CompileError as exc:
-        return {"status": "error", "message": exc.message}
-    return {"status": "compiled", "source": source}
-
-
-def compile(component_id: str, repo_root: Path, target: str = "pytest", out_dir: Path | None = None) -> CompileReport:
-    if target not in SUPPORTED_TARGETS:
-        raise ValueError(f"unsupported --target {target!r}")
-
-    repo_root = Path(repo_root)
-    slug = component_id[len("comp-"):] if component_id.startswith("comp-") else component_id
-    acceptance_dir = repo_root / "specs" / "components" / slug / "acceptance"
-
-    outputs: list[dict] = []
-    compiled_count = 0
-    error_count = 0
-    skipped_count = 0
-
-    surface: InterfaceSurface | None = None
-
-    out_dir = Path(out_dir) if out_dir is not None else repo_root / "verification" / slug / "compiled"
-
-    for path in sorted(acceptance_dir.glob("*.md")) if acceptance_dir.is_dir() else []:
-        criterion = _parse_criterion_file(path)
-        if criterion.kind != "compiled":
-            skipped_count += 1
+def _split_steps(gherkin):
+    steps = []
+    current = None
+    for number, raw in enumerate(gherkin.splitlines(), 1):
+        stripped = raw.strip()
+        if not stripped:
+            current = None
             continue
+        match = _KEYWORD.match(raw.lstrip())
+        if match:
+            current = [number, match.group(1), raw.lstrip()[match.end():].strip()]
+            steps.append(current)
+        elif current is None:
+            current = [number, None, stripped]
+            steps.append(current)
+        else:
+            current[2] += " " + stripped
+    return steps
 
-        if surface is None:
-            surface = _load_interface_surface(repo_root, slug)
 
-        result = compile_criterion(criterion, surface)
-        if result["status"] == "error":
-            error_count += 1
-            outputs.append({
-                "criterion_id": criterion.criterion_id,
-                "covers": criterion.covers,
-                "status": "error",
-                "message": result["message"],
-            })
-            continue
+def _unresolved(line, what, name):
+    raise _CompileError(f"line {line}: {what} '{name}' does not resolve")
 
-        source = result["source"]
-        out_file = out_dir / f"test_{criterion.criterion_id.lower().replace('-', '_')}.py"
-        # R-COMPILE-009: idempotent -- never touch an unchanged file.
-        if not out_file.is_file() or out_file.read_text(encoding="utf-8") != source:
-            out_file.parent.mkdir(parents=True, exist_ok=True)
-            out_file.write_text(source, encoding="utf-8")
-        compiled_count += 1
-        try:
-            file_label = str(out_file.relative_to(repo_root))
-        except ValueError:
-            file_label = str(out_file)
-        outputs.append({
-            "criterion_id": criterion.criterion_id,
-            "covers": criterion.covers,
-            "status": "compiled",
-            "file": file_label,
-        })
 
-    return CompileReport(
-        outputs=outputs,
-        gate_version=GATE_VERSION,
-        summary={
-            "compiled": compiled_count,
-            "errors": error_count,
-            "skipped_non_compiled_kind": skipped_count,
-        },
+def _bind_construct(line, text, match, surface, bindings):
+    type_name, fields_text = match.groups()
+    if surface is None or type_name not in surface.types:
+        _unresolved(line, "type", type_name)
+    declared = surface.types[type_name]
+    parser = _Literal(fields_text, line, bindings)
+    fields = []
+    while True:
+        parser._ws()
+        field_match = _FIELD.match(fields_text, parser.pos)
+        if field_match is None:
+            raise _CompileError(
+                f"line {line}: step 'Given {text}' does not match any recognized template"
+            )
+        name = field_match.group(1)
+        if name not in declared:
+            raise _CompileError(
+                f"line {line}: field '{name}' of type '{type_name}' does not resolve"
+            )
+        parser.pos = field_match.end()
+        fields.append((name, parser.value(",")))
+        if parser.pos >= len(fields_text):
+            break
+        parser.pos += 1
+    var = _snake(type_name)
+    bindings[var] = _Var(var)
+    return ("construct", var, type_name, fields)
+
+
+def _bind_step(line, keyword, text, surface, bindings):
+    if keyword == "Given":
+        match = _TYPE_STEP.fullmatch(text)
+        if match:
+            return _bind_construct(line, text, match, surface, bindings)
+        match = _FIXTURE_STEP.fullmatch(text)
+        if match:
+            node = _Literal(match.group(2), line, bindings).value("")
+            bindings[match.group(1)] = node
+            return ("fixture", match.group(1), node)
+    elif keyword == "When":
+        match = _INVOKE_STEP.fullmatch(text)
+        if match:
+            name, args_text = match.groups()
+            if surface is None or name not in surface.functions:
+                _unresolved(line, "function", name)
+            node = _Literal(args_text, line, bindings).value("")
+            form = {"{": "kwargs", "[": "positional"}.get(args_text[0], "single")
+            return ("invoke", name, form, node)
+        match = _CLIENT_STEP.fullmatch(text)
+        if match:
+            _unresolved(line, "endpoint", f"{match.group(1)} {match.group(2)}")
+    elif keyword == "Then":
+        match = _FINDING_STEP.fullmatch(text)
+        if match:
+            return ("finding", match.group(2), match.group(3))
+        match = _EQUALS_STEP.fullmatch(text)
+        if match:
+            node = _Literal(match.group(2), line, bindings).value("")
+            return ("equals", match.group(1), node)
+    written = f"{keyword} {text}" if keyword else text
+    raise _CompileError(
+        f"line {line}: step '{written}' does not match any recognized template"
     )
 
 
+def _parse_and_bind(criterion, surface):
+    bindings = {}
+    return [
+        _bind_step(line, keyword, text, surface, bindings)
+        for line, keyword, text in _split_steps(criterion.gherkin)
+    ]
+
+
 # ---------------------------------------------------------------------------
-# CLI (interface/cli.md).
+# Phase 2: emit (one emitter per --target)
 # ---------------------------------------------------------------------------
 
-def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(prog="hotdocs compile-criteria", add_help=True)
+_FIELD_HELPER = '''def _field(obj, *names):
+    for name in names:
+        if isinstance(obj, dict) and name in obj:
+            return obj[name]
+        if not isinstance(obj, dict) and hasattr(obj, name):
+            return getattr(obj, name)
+    return None'''
+
+
+def _render(node):
+    if isinstance(node, bool):
+        return "True" if node else "False"
+    if node is None:
+        return "None"
+    if isinstance(node, _Var):
+        return node.name
+    if isinstance(node, dict):
+        return "{" + ", ".join(
+            f"{json.dumps(k)}: {_render(v)}" for k, v in node.items()
+        ) + "}"
+    if isinstance(node, list):
+        return "[" + ", ".join(_render(v) for v in node) + "]"
+    return json.dumps(node)
+
+
+def _render_args(form, node):
+    if form == "kwargs":
+        return ", ".join(f"{k}={_render(v)}" for k, v in node.items())
+    if form == "positional":
+        return ", ".join(_render(v) for v in node)
+    return _render(node)
+
+
+def _test_name(criterion_id):
+    return "test_" + criterion_id.lower().replace("-", "_")
+
+
+def _emit_pytest(criterion, steps, module_name):
+    prefix = f"{module_name}." if module_name else ""
+    body = []
+    needs_module = False
+    needs_helper = False
+    for step in steps:
+        tag = step[0]
+        if tag == "fixture":
+            body.append(f"{step[1]} = {_render(step[2])}")
+        elif tag == "construct":
+            _, var, type_name, fields = step
+            args = ", ".join(f"{name}={_render(value)}" for name, value in fields)
+            body.append(f"{var} = {prefix}{type_name}({args})")
+            needs_module = True
+        elif tag == "invoke":
+            _, name, form, node = step
+            body.append(f"result = {prefix}{name}({_render_args(form, node)})")
+            needs_module = True
+        elif tag == "equals":
+            body.append(f"assert result.{step[1]} == {_render(step[2])}")
+        else:
+            _, severity, rule = step
+            body.append(
+                "assert any(_field(finding, \"severity\") == "
+                f"{json.dumps(severity)} and _field(finding, \"rule_id\", \"rule\") == "
+                f"{json.dumps(rule)} for finding in (result if isinstance(result, list) "
+                "else _field(result, \"findings\")))"
+            )
+            needs_helper = True
+    lines = [f"# Covers: {criterion.covers}"]
+    if needs_module and module_name:
+        lines.append(f"import {module_name}")
+    if needs_helper:
+        lines += ["", "", _FIELD_HELPER]
+    lines += ["", "", f"def {_test_name(criterion.criterion_id)}():"]
+    lines += ["    " + line for line in (body or ["pass"])]
+    return "\n".join(lines) + "\n"
+
+
+_EMITTERS = {"pytest": _emit_pytest}
+
+
+# ---------------------------------------------------------------------------
+# Public primitive
+# ---------------------------------------------------------------------------
+
+
+def compile_criterion(criterion: ParsedCriterion, surface: Optional[InterfaceSurface] = None) -> dict:
+    try:
+        steps = _parse_and_bind(criterion, surface)
+    except _CompileError as exc:
+        return {"status": "error", "message": str(exc)}
+    module_name = surface.module_name if surface is not None else ""
+    return {"status": "compiled", "source": _EMITTERS["pytest"](criterion, steps, module_name)}
+
+
+# ---------------------------------------------------------------------------
+# Corpus reading
+# ---------------------------------------------------------------------------
+
+
+def _slug(component_id):
+    return component_id[len("comp-"):] if component_id.startswith("comp-") else component_id
+
+
+def _fenced_block(lines, opener):
+    for index, line in enumerate(lines):
+        if line.strip() == opener:
+            body = []
+            for inner in lines[index + 1:]:
+                if inner.strip().startswith("```"):
+                    break
+                body.append(inner)
+            return index + 1, body
+    return 0, []
+
+
+def _split_top(text):
+    parts = []
+    depth = 0
+    current = ""
+    for ch in text:
+        if ch in "([{":
+            depth += 1
+        elif ch in ")]}":
+            depth -= 1
+        if ch == "," and depth == 0:
+            parts.append(current)
+            current = ""
+        else:
+            current += ch
+    parts.append(current)
+    return parts
+
+
+def _signature(line):
+    match = re.match(r"([A-Za-z_][A-Za-z0-9_.]*)\(", line)
+    if match is None:
+        return None
+    depth = 0
+    end = len(line)
+    for index in range(match.end() - 1, len(line)):
+        ch = line[index]
+        if ch in "([{":
+            depth += 1
+        elif ch in ")]}":
+            depth -= 1
+            if depth == 0:
+                end = index
+                break
+    names = [re.split(r"[:=]", part, 1)[0].strip() for part in _split_top(line[match.end():end])]
+    return match.group(1), [name for name in names if name]
+
+
+def _read_surface(interface_dir, module_name):
+    functions = {}
+    library = interface_dir / "library.md"
+    if library.is_file():
+        in_fence = False
+        plain = False
+        for line in library.read_text(encoding="utf-8").splitlines():
+            stripped = line.strip()
+            if stripped.startswith("```"):
+                plain = not in_fence and stripped == "```"
+                in_fence = not in_fence
+                continue
+            if plain:
+                parsed = _signature(line)
+                if parsed:
+                    functions[parsed[0]] = parsed[1]
+    types = {}
+    for path in sorted((interface_dir / "data").glob("*.md")):
+        lines = path.read_text(encoding="utf-8").splitlines()
+        heading = next((line for line in lines if line.startswith("# ")), "")
+        match = re.fullmatch(r"# `([A-Za-z_][A-Za-z0-9_]*)`\s*", heading)
+        if match:
+            try:
+                example = json.loads("\n".join(_fenced_block(lines, "```json")[1]))
+            except ValueError:
+                example = None
+            types[match.group(1)] = list(example) if isinstance(example, dict) else []
+    return InterfaceSurface(functions=functions, types=types, module_name=module_name)
+
+
+def _display(path, repo_root):
+    full = Path(path).resolve()
+    try:
+        return full.relative_to(Path(repo_root).resolve()).as_posix()
+    except ValueError:
+        return str(full)
+
+
+def _first(regex, text):
+    match = regex.search(text)
+    return match.group(1) if match else ""
+
+
+def compile(component_id: str, repo_root: Path, target: str = "pytest", out_dir: Optional[Path] = None) -> CompileReport:
+    if target not in _EMITTERS:
+        raise ValueError(f"unsupported --target value '{target}' (supported: pytest)")
+    repo_root = Path(repo_root)
+    slug = _slug(component_id)
+    component_dir = repo_root / "specs" / "components" / slug
+    surface = _read_surface(component_dir / "interface", slug.replace("-", "_"))
+    out = Path(out_dir) if out_dir is not None else repo_root / "verification" / slug / "compiled"
+    outputs = []
+    summary = {"compiled": 0, "errors": 0, "skipped_non_compiled_kind": 0}
+    for path in sorted((component_dir / "acceptance").glob("*.md")):
+        text = path.read_text(encoding="utf-8")
+        kind = _first(_KIND_RE, text)
+        if kind != "compiled":
+            summary["skipped_non_compiled_kind"] += 1
+            continue
+        offset, body = _fenced_block(text.splitlines(), "```gherkin")
+        criterion = ParsedCriterion(
+            criterion_id=path.stem,
+            covers=_first(_COVERS_RE, text),
+            kind=kind,
+            gherkin="\n".join(body),
+            file=_display(path, repo_root),
+        )
+        result = compile_criterion(criterion, surface)
+        entry = {"criterion_id": criterion.criterion_id, "covers": criterion.covers}
+        if result["status"] == "compiled":
+            target_file = out / (_test_name(criterion.criterion_id) + ".py")
+            data = result["source"].encode("utf-8")
+            if not target_file.exists() or target_file.read_bytes() != data:
+                target_file.parent.mkdir(parents=True, exist_ok=True)
+                target_file.write_bytes(data)
+            entry.update(status="compiled", file=_display(target_file, repo_root))
+            summary["compiled"] += 1
+        else:
+            message = re.sub(
+                r"^line (\d+): ",
+                lambda m: f"line {int(m.group(1)) + offset}: ",
+                result["message"],
+                count=1,
+            )
+            entry.update(status="error", file=criterion.file, message=message)
+            summary["errors"] += 1
+        outputs.append(entry)
+    return CompileReport(outputs=outputs, gate_version=GATE_VERSION, summary=summary)
+
+
+# ---------------------------------------------------------------------------
+# CLI
+# ---------------------------------------------------------------------------
+
+
+def _git_root():
+    completed = subprocess.run(
+        ["git", "rev-parse", "--show-toplevel"],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    return Path(completed.stdout.strip())
+
+
+def main(argv: Optional[list] = None) -> int:
+    parser = argparse.ArgumentParser(prog="hotdocs compile-criteria")
     parser.add_argument("component_id")
     parser.add_argument("--target", default="pytest")
-    parser.add_argument("--out", default=None)
-    parser.add_argument("--repo-root", default=None)
-
+    parser.add_argument("--out")
+    parser.add_argument("--repo-root")
     try:
         args = parser.parse_args(argv)
     except SystemExit as exc:
-        return exc.code if isinstance(exc.code, int) else 2
-
-    if args.target not in SUPPORTED_TARGETS:
-        print(f"usage error: unsupported --target {args.target!r}", file=sys.stderr)
+        return exc.code
+    if args.target not in _EMITTERS:
+        print(
+            f"error: unsupported --target value '{args.target}' (supported: pytest)",
+            file=sys.stderr,
+        )
         return 2
-
-    repo_root = Path(args.repo_root) if args.repo_root else Path.cwd()
-    out_dir = Path(args.out) if args.out else None
-    report = compile(args.component_id, repo_root, target=args.target, out_dir=out_dir)
-    print(json.dumps(report.to_dict(), indent=2))
+    repo_root = Path(args.repo_root) if args.repo_root else _git_root()
+    if not (repo_root / "specs" / "components" / _slug(args.component_id)).is_dir():
+        print(f"error: unknown component id '{args.component_id}'", file=sys.stderr)
+        return 2
+    report = compile(
+        args.component_id,
+        repo_root,
+        args.target,
+        Path(args.out) if args.out else None,
+    )
+    print(json.dumps(asdict(report), indent=2))
     return 1 if report.summary["errors"] else 0
 
 

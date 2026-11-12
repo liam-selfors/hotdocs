@@ -308,3 +308,52 @@ def test_ac_compile_015_lazy_resolution_against_the_real_repo():
         sys.path.insert(0, str(real_repo_root / "pipeline" / "criterion-compiler"))
         sys.modules.pop(module_name, None)
         importlib.import_module(module_name)
+
+
+_AC016_LIBRARY_MD = "# Library\n\n```\nmake(value) -> Result\n```\n"
+_AC016_THING_MD = '# `Thing`\n\n```json\n{"name": "x", "size": 1}\n```\n'
+
+
+def test_ac_compile_016_literals_and_type_construction(repo_root):
+    bindings = {
+        "N": ("n", "3", "3"),
+        "F": ("f", "2.5", "2.5"),
+        "E": ("e", "1e3", "1000.0"),
+        "T": ("t", "true", "True"),
+        "B": ("b", "false", "False"),
+        "Z": ("z", "null", "None"),
+        "S": ("s", '"say \\"hi\\""', '"say \\"hi\\""'),
+        "L": ("l", '[1, [2, 3], {"k": null}]', '[1, [2, 3], {"k": None}]'),
+    }
+    criteria = {
+        f"AC-WID-016{key}": ("R-WID-016", "compiled",
+                             f"Given a {name} is {literal}\n"
+                             f"When make is invoked with [{name}]\n"
+                             f"Then value equals {literal}")
+        for key, (name, literal, _python) in bindings.items()
+    }
+    criteria["AC-WID-016X"] = ("R-WID-016", "compiled",
+                               'Given a Thing with name: "a", size: 2\nThen size equals 2')
+    criteria["AC-WID-016Y"] = ("R-WID-016", "compiled",
+                               'Given a Thing with colour: "red"\nThen colour equals "red"')
+    write_component(repo_root, "widget", criteria, library_md=_AC016_LIBRARY_MD,
+                    data_files={"Thing.md": _AC016_THING_MD,
+                                "Result.md": '# `Result`\n\n```json\n{"value": 1}\n```\n'})
+    report = compile("widget", repo_root)
+    by_id = {o["criterion_id"]: o for o in report.outputs}
+
+    for key, (_name, _literal, python) in bindings.items():
+        out = by_id[f"AC-WID-016{key}"]
+        assert out["status"] == "compiled", out
+        source = (repo_root / out["file"]).read_text(encoding="utf-8")
+        call = next(line for line in source.splitlines() if "make(" in line)
+        assert f"make({python})" in call, call
+
+    built = by_id["AC-WID-016X"]
+    assert built["status"] == "compiled", built
+    source = (repo_root / built["file"]).read_text(encoding="utf-8")
+    assert "Thing(" in source and "name=" in source and "size=" in source
+
+    bad = by_id["AC-WID-016Y"]
+    assert bad["status"] == "error"
+    assert "colour" in bad["message"]

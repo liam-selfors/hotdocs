@@ -1,0 +1,17 @@
+{
+  "kind": "sealed-provenance",
+  "version": 1,
+  "component_id": "comp-criterion-compiler",
+  "owners": [
+    "pipeline-team"
+  ],
+  "source_path": "pipeline/criterion-compiler/",
+  "source_hash": "sha256:33dc9c4d15b803350829fee5d3d6260002cfdc0ed4bcd8cc045d21fb839c6785",
+  "verifier_version": "verifier-orchestrator@2.0.0",
+  "characterization": {
+    "overall": "pass",
+    "criteria_passed": 16,
+    "criteria_total": 16
+  },
+  "written_at": "2026-11-12T21:05:58Z"
+}
