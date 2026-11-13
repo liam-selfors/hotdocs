@@ -14,8 +14,8 @@
   name-based `sys.modules` injection or `mock.patch`. To fake a
   dependency, write a fake module file under a fresh temporary
   `repo_root` — **always flat-module shape** (`D97`): every real
-  loader checks flat first. `module_name` is the slug with hyphens
-  replaced by underscores, never `"__init__"`.
+  loader checks flat first. `module_name` is, in those words, "the slug with hyphens
+  replaced by underscores", never `"__init__"`.
 
   MUST include a literal snippet with the line
   `sys.modules[module_name] = module` **before**
