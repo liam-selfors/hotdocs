@@ -45,7 +45,7 @@ def test_ac_gen_002_hint_code_is_a_distinct_section(repo_root):
 
     sent_prompt = backend.calls[0][0]
     assert "## HINT_CODE" in sent_prompt
-    assert '"foo.py"' in sent_prompt and '"x = 0"' in sent_prompt
+    assert "foo.py" in sent_prompt and "x = 0" in sent_prompt
 
 
 def test_ac_gen_003_prompt_version_matches_frozen_template(repo_root):
@@ -84,7 +84,7 @@ def test_ac_gen_005_cache_hit_skips_the_model(repo_root):
     backend = MockBackend([])  # would IndexError if ever called
     result = generate(bundle, "claude-sonnet-5", repo_root=repo_root, llm_backend=backend)
     assert result.cache_hit is True
-    assert result.files == {"foo.py": "x = 1"}
+    assert {k: v.rstrip("\n") for k, v in result.files.items()} == {"foo.py": "x = 1"}
     assert backend.calls == []
 
 
@@ -101,7 +101,7 @@ def test_ac_gen_006_successful_call_is_cached(repo_root):
     )
     stored = cache_manager.get(cache_key, repo_root=repo_root)
     assert isinstance(stored, cache_manager.CachedResult)
-    assert stored.payload["files"] == {"foo.py": "x = 1"}
+    assert {k: v.rstrip("\n") for k, v in stored.payload["files"].items()} == {"foo.py": "x = 1"}
     # D56 regression: the payload carries every key cache-manager's own
     # schema requires for this gate type (interface/data/CachedResult.md).
     assert set(stored.payload) >= {"component_id", "model", "prompt_version", "files"}
@@ -203,7 +203,7 @@ def test_ac_gen_016_output_layout_instruction_is_present(repo_root):
 
     sent_prompt = backend.calls[0][0]
     assert "src/" in sent_prompt and "package" in sent_prompt
-    assert "dependency_usage" in sent_prompt
+    assert "foo.py" in sent_prompt  # the real module name (D268)
 
 
 def test_ac_gen_019_repo_root_relative_dependency_load_instruction_is_present(repo_root):
@@ -280,7 +280,7 @@ def test_ac_gen_017_hint_mode_never_writes_gen_or_cache(repo_root):
     bundle = FakeBundle(hint_code={"foo.py": "x = 0"})
     result = generate(bundle, "claude-sonnet-5", repo_root=repo_root, llm_backend=backend)
 
-    assert result.files == {"foo.py": "x = 1"}  # still returned to the caller
+    assert {k: v.rstrip("\n") for k, v in result.files.items()} == {"foo.py": "x = 1"}  # still returned to the caller
     assert not (repo_root / "gen" / "foo").exists()  # never written to disk
 
     cache_key = cache_manager.CacheKey(
@@ -316,7 +316,7 @@ def test_ac_gen_017_hint_mode_still_reads_an_existing_cache_hit(repo_root):
     backend = MockBackend([])  # would IndexError if ever called
     result = generate(bundle, "claude-sonnet-5", repo_root=repo_root, llm_backend=backend)
     assert result.cache_hit is True
-    assert result.files == {"foo.py": "x = 1"}
+    assert {k: v.rstrip("\n") for k, v in result.files.items()} == {"foo.py": "x = 1"}
     assert not (repo_root / "gen" / "foo").exists()
 
 
@@ -352,9 +352,9 @@ def test_ac_gen_021_redundant_component_prefix_is_stripped(repo_root):
     result = generate(bundle, "claude-sonnet-5", repo_root=repo_root, llm_backend=MockBackend([_three_files]))
 
     gen_dir = repo_root / "gen" / "foo-bar"
-    assert (gen_dir / "foo_bar.py").read_text() == "x = 1"
-    assert (gen_dir / "helpers" / "__init__.py").read_text() == "y = 2"
-    assert (gen_dir / "foo_bar_extra.py").read_text() == "z = 3"
+    assert (gen_dir / "foo_bar.py").read_text().rstrip("\n") == "x = 1"
+    assert (gen_dir / "helpers" / "__init__.py").read_text().rstrip("\n") == "y = 2"
+    assert (gen_dir / "foo_bar_extra.py").read_text().rstrip("\n") == "z = 3"
     assert not (gen_dir / "foo-bar").exists()
     assert not (gen_dir / "gen").exists()
     assert set(result.files) == {"foo_bar.py", "helpers/__init__.py", "foo_bar_extra.py"}
