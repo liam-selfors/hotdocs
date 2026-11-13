@@ -8,7 +8,14 @@
   `spec-bundle-assembler`'s `dependency_usage` (`R-ASSEMBLE-011`) only
   looks in those two shapes (`D46`). This is fixed scaffolding the
   prompt always includes, like the nonce-delimiter format (`D38`), not
-  bundle content.
+  bundle content. It names the real module, e.g. `widget_maker.py` or
+  `widget_maker/` for `comp-widget-maker`.
+
+  The reply wraps each file exactly as a line
+  `-----BEGIN FILE <nonce>: <path>-----`, the file's content, then a
+  line `-----END FILE <nonce>-----`, `<path>` relative to
+  `gen/<component>/` and `<nonce>` a fresh `uuid.uuid4().hex` per call
+  that the prompt states; text outside the blocks is ignored.
 
   Before writing, generator MUST also strip one redundant leading
   `gen/<component>/` or `<component>/` from any returned file path —

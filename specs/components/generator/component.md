@@ -68,24 +68,6 @@ See `constraints.md`.
 
 ## Open questions
 
-- ~~Retry/timeout policy for model errors~~ — resolved (R-GEN-011): no
-  custom retry; a merge re-run (R-MERGE-017) is the retry.
-- ~~Whether `.overrides.json` is read here or filtered upstream~~ —
-  resolved: both. `generator` checks it directly (R-GEN-009) as the
-  backstop; `R-GATE-007` is the primary skip-path.
-
 ## Change log
 
-- `D35`–`D91`: early history (nonce, caching, `sys.modules`, output
-  layout, `hint` mode, CLI retired); see the decisions.
-- `D138`/`D139`/`D159`: `R-GEN-018`/`019` — `repo_root`-relative
-  dependency loading (a sealed one at its `source_path`) and
-  dual-access on a dependency's top-level return. `v8`,
-  `generator@1.5.0`.
-- `D165`: strips a redundant `<component>/` path prefix
-  (`R-GEN-015`); `GATE_VERSION` → `generator@1.6.0`.
-- `D167`: `spec_bundle_hash` on every result; `hint` mode never
-  writes. `generator@1.7.0`.
-- `D199`: dependencies fall back to the tool root. `v9`.
-- `D209`: the cache key, `GATE_VERSION` and `PROMPT_VERSION` stated
-  exactly.
+- `D35`–`D209`: see the decisions; `D268` states the reply format.
