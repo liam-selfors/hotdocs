@@ -28,4 +28,6 @@ sealed verification (`R-VERIFY-017`): a sealed one runs only its
 characterization tests, never its compiled or generated ones. An
 unsealed fixture component lints clean only with `realizes: [P-<ID>]`
 naming a capability file the fixture also writes under `specs/product/`
-(`R-LINT-006`).
+(`R-LINT-006`). Name fixture functions other than `foo`:
+`spec-bundle-assembler`'s interface text declares `foo(x)`, which
+`test-author`'s fake-arity check (`R-AUTHOR-020`) would match.
