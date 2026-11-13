@@ -65,8 +65,4 @@ None.
 
 ## Change log
 
-- Initial draft; `D56`–`D58` first implementation, 8/8 `AC-AUTHOR-*`.
-- `D94`–`D129`: `R-AUTHOR-009`–`024`; full account in `BOOTSTRAP.md`.
-- `D166`: a shared fake name matches either dependency's arity.
-- `D189`: `R-AUTHOR-025` names the module under test.
-- `D198`: `R-AUTHOR-026`, optional `module_names`. `D199`: tool root.
+See the decisions, `D56` onward; `D269` adds the reply format to `interface/`.

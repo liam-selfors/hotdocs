@@ -10,3 +10,6 @@ author_test(
 Not a pure function: like `generator`'s `generate()`, it makes an
 external call. `llm_backend` is passed straight to `llm-endpoint`'s
 `backend` parameter, the seam every `AC-AUTHOR-*` mock uses (`D57`).
+A mock replies `-----BEGIN FILE <n>-----`, the file, then
+`-----END FILE <n>-----`, `<n>` the `secrets.token_hex(16)` nonce read
+from the prompt.
