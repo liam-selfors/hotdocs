@@ -25,4 +25,7 @@ and the sealed `criterion-compiler` from
 root (`D199`); a test plants a fake dependency at that path. A fixture
 component under test is never `sealed`, unless its criterion concerns
 sealed verification (`R-VERIFY-017`): a sealed one runs only its
-characterization tests, never its compiled or generated ones.
+characterization tests, never its compiled or generated ones. An
+unsealed fixture component lints clean only with `realizes: [P-<ID>]`
+naming a capability file the fixture also writes under `specs/product/`
+(`R-LINT-006`).
