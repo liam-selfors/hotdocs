@@ -134,6 +134,7 @@ _ALIASES = {
 _NOT_CONSUMER_NAMES = {
     "llm-endpoint": {"ParsedCriterion", "author_test", "compile_criterion", "main"},
     "criterion-compiler": {"author_test", "complete"},
+    "test-author": {"ParsedCriterion", "compile_criterion", "complete"},
 }
 
 
