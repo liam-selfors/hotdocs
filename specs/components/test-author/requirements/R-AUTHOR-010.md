@@ -17,5 +17,6 @@
   loader checks flat first. `module_name` is the slug with hyphens
   replaced by underscores, never `"__init__"`.
 
-  MUST include a literal snippet registering the module in
-  `sys.modules` **before** `exec_module`, which a dataclass needs (`D96`).
+  MUST include a literal snippet with the line
+  `sys.modules[module_name] = module` **before**
+  `spec.loader.exec_module(module)`, which a dataclass needs (`D96`).
