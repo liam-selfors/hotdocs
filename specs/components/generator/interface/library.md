@@ -18,6 +18,12 @@ reads through `cache-manager` but writes to neither destination
 `gen/<component>/` is written. `llm_backend` goes straight to
 `llm-endpoint`'s `backend` parameter: the criteria's injected mock model.
 
+The model's reply, a mock's included, wraps each file as a line
+`-----BEGIN FILE <nonce>: <path>-----`, the file's content, then a line
+`-----END FILE <nonce>-----`: `<path>` relative to `gen/<component>/`,
+`<nonce>` the fresh `uuid.uuid4().hex` the prompt states for this call.
+Text outside the blocks is ignored.
+
 ```
 GATE_VERSION = "generator@2.0.0"
 PROMPT_VERSION = "v10"
