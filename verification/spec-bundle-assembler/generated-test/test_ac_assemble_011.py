@@ -1,265 +1,218 @@
-import sys
-import inspect
 import importlib.util
-import tempfile
+import inspect
+import sys
 from pathlib import Path
 
 import spec_bundle_assembler
 
 
-def _field(bundle, name):
-    if isinstance(bundle, dict):
-        return bundle.get(name)
-    return getattr(bundle, name, None)
+def _get(value, key, default=None):
+    if isinstance(value, dict):
+        return value.get(key, default)
+    getter = getattr(value, "get", None)
+    if callable(getter) and not hasattr(type(value), key):
+        try:
+            return getter(key, default)
+        except Exception:
+            pass
+    return getattr(value, key, default)
 
 
-def test_dependency_usage_introspects_real_dependency_code():
-    with tempfile.TemporaryDirectory() as tmp:
-        repo_root = Path(tmp)
+def _write(path: Path, text: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
 
-        (repo_root / "specs").mkdir(parents=True)
-        (repo_root / "specs" / "glossary.md").write_text(
-"""# Glossary
 
-- **Foo** — a test term.
-"""
-        )
+GLOSSARY = "# Glossary\n\n- **Foo** — a test term.\n"
 
-        foo_dir = repo_root / "specs" / "components" / "foo"
-        (foo_dir / "requirements").mkdir(parents=True)
-        (foo_dir / "acceptance").mkdir(parents=True)
-        (foo_dir / "interface").mkdir(parents=True)
 
-        (foo_dir / "component.md").write_text(
-"""---
-id: comp-foo
-title: Foo
-status: draft
-owners: [team-a]
-sealed: true
-source_path: legacy/foo/
-depends_on: [comp-bar, comp-baz]
----
+def _component_md(comp_id: str, title: str, source_path: str, depends_on: str, purpose: str) -> str:
+    return (
+        "---\n"
+        f"id: {comp_id}\n"
+        f"title: {title}\n"
+        "status: draft\n"
+        "owners: [team-a]\n"
+        "sealed: true\n"
+        f"source_path: {source_path}\n"
+        f"depends_on: {depends_on}\n"
+        "---\n"
+        "\n"
+        f"# {title}\n"
+        "\n"
+        "## Purpose\n"
+        "\n"
+        f"{purpose}\n"
+    )
 
-# Foo
 
-## Purpose
+def _requirement_md(rid: str, sentence: str) -> str:
+    return f"# {rid}\n\n**{rid}** — {sentence}\n"
 
-Foo uses bar and baz.
-"""
-        )
 
-        (foo_dir / "requirements" / "R-FOO-001.md").write_text(
-"""# R-FOO-001
+def _acceptance_md(acid: str, rid: str, given: str, when: str, then: str) -> str:
+    return (
+        f"# {acid}\n"
+        "\n"
+        f"Covers: {rid}\n"
+        "Kind: generated-test\n"
+        "\n"
+        "```gherkin\n"
+        f"Given {given}\n"
+        f"When {when}\n"
+        f"Then {then}\n"
+        "```\n"
+    )
 
-**R-FOO-001** — `foo(x)` MUST return `2 * x`.
-"""
-        )
 
-        (foo_dir / "acceptance" / "AC-FOO-001.md").write_text(
-'''# AC-FOO-001
+def _library_md(signature: str) -> str:
+    return f"# Library\n\n```\n{signature}\n```\n"
 
-Covers: R-FOO-001
-Kind: generated-test
 
-```gherkin
-Given x = 2
-When foo(x) is called
-Then it returns 4
-```
-'''
-        )
+CONSTRAINTS = "# Constraints\n\nNone.\n"
 
-        (foo_dir / "interface" / "library.md").write_text(
-'''# Library
 
-```
-foo(x: int) -> int
-```
-'''
-        )
+BAR_SOURCE = (
+    '"""Bar module."""\n'
+    "\n"
+    "\n"
+    "def bar_get(key: str) -> str:\n"
+    '    """Return the value stored under key.\n'
+    "\n"
+    "    A longer explanation that must not be required in the card.\n"
+    '    """\n'
+    "    return key\n"
+)
 
-        (foo_dir / "constraints.md").write_text(
-"""# Constraints
+FOO_SOURCE = (
+    '"""Foo module."""\n'
+    "\n"
+    "\n"
+    "def foo(x: int) -> int:\n"
+    '    """Double x."""\n'
+    "    return 2 * x\n"
+)
 
-None.
-"""
-        )
 
-        bar_dir = repo_root / "specs" / "components" / "bar"
-        (bar_dir / "requirements").mkdir(parents=True)
-        (bar_dir / "acceptance").mkdir(parents=True)
-        (bar_dir / "interface").mkdir(parents=True)
+def _build_corpus(repo_root: Path) -> None:
+    specs = repo_root / "specs"
+    _write(specs / "glossary.md", GLOSSARY)
 
-        (bar_dir / "component.md").write_text(
-"""---
-id: comp-bar
-title: Bar
-status: draft
-owners: [team-a]
-sealed: true
-source_path: legacy/bar/
-depends_on: []
----
+    # comp-foo: the dependent
+    foo = specs / "components" / "foo"
+    _write(
+        foo / "component.md",
+        _component_md("comp-foo", "Foo", "legacy/foo/", "[comp-bar, comp-baz]", "Foo doubles a number."),
+    )
+    _write(foo / "requirements" / "R-FOO-001.md", _requirement_md("R-FOO-001", "`foo(x)` MUST return `2 * x`."))
+    _write(
+        foo / "acceptance" / "AC-FOO-001.md",
+        _acceptance_md("AC-FOO-001", "R-FOO-001", "x = 2", "foo(x) is called", "it returns 4"),
+    )
+    _write(foo / "interface" / "library.md", _library_md("foo(x: int) -> int"))
+    _write(foo / "constraints.md", CONSTRAINTS)
 
-# Bar
+    # comp-bar: sealed dependency with real code under legacy/bar/
+    bar = specs / "components" / "bar"
+    _write(
+        bar / "component.md",
+        _component_md("comp-bar", "Bar", "legacy/bar/", "[]", "Bar looks up a value by key."),
+    )
+    _write(
+        bar / "requirements" / "R-BAR-001.md",
+        _requirement_md("R-BAR-001", "`bar_get(key)` MUST return `key`."),
+    )
+    _write(
+        bar / "acceptance" / "AC-BAR-001.md",
+        _acceptance_md("AC-BAR-001", "R-BAR-001", 'key = "a"', "bar_get(key) is called", 'it returns "a"'),
+    )
+    _write(bar / "interface" / "library.md", _library_md("bar_get(key: str) -> str"))
+    _write(bar / "constraints.md", CONSTRAINTS)
 
-## Purpose
+    # comp-baz: sealed dependency with no real code at all
+    baz = specs / "components" / "baz"
+    _write(
+        baz / "component.md",
+        _component_md("comp-baz", "Baz", "legacy/baz/", "[]", "Baz echoes a string."),
+    )
+    _write(
+        baz / "requirements" / "R-BAZ-001.md",
+        _requirement_md("R-BAZ-001", "`baz(s)` MUST return `s`."),
+    )
+    _write(
+        baz / "acceptance" / "AC-BAZ-001.md",
+        _acceptance_md("AC-BAZ-001", "R-BAZ-001", 's = "a"', "baz(s) is called", 'it returns "a"'),
+    )
+    _write(baz / "interface" / "library.md", _library_md("baz(s: str) -> str"))
+    _write(baz / "constraints.md", CONSTRAINTS)
 
-Bar gets values by key.
-"""
-        )
+    # Real code for sealed components lives at source_path, never gen/.
+    _write(repo_root / "legacy" / "foo" / "foo.py", FOO_SOURCE)
+    _write(repo_root / "legacy" / "bar" / "bar.py", BAR_SOURCE)
+    # Deliberately nothing under legacy/baz/.
 
-        (bar_dir / "requirements" / "R-BAR-001.md").write_text(
-"""# R-BAR-001
 
-**R-BAR-001** — `bar_get(key)` MUST return the value for `key`.
-"""
-        )
+def _load_spec_linter():
+    gen = next(p for p in Path(spec_bundle_assembler.__file__).resolve().parents if p.name == "gen")
+    base = gen / "spec-linter"
+    path = base / "spec_linter.py" if (base / "spec_linter.py").is_file() else base / "spec_linter" / "__init__.py"
+    spec = importlib.util.spec_from_file_location("spec_linter", path)
+    spec_linter = importlib.util.module_from_spec(spec)
+    sys.modules["spec_linter"] = spec_linter
+    spec.loader.exec_module(spec_linter)
+    return spec_linter
 
-        (bar_dir / "acceptance" / "AC-BAR-001.md").write_text(
-'''# AC-BAR-001
 
-Covers: R-BAR-001
-Kind: generated-test
+def _load_bar_probe(repo_root: Path):
+    module_name = "_ac_assemble_011_bar_probe"
+    module_path = repo_root / "legacy" / "bar" / "bar.py"
+    spec = importlib.util.spec_from_file_location(module_name, module_path)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module  # register BEFORE exec_module
+    try:
+        spec.loader.exec_module(module)
+    finally:
+        sys.modules.pop(module_name, None)
+    return module
 
-```gherkin
-Given key = "k"
-When bar_get(key) is called
-Then it returns "k"
-```
-'''
-        )
 
-        (bar_dir / "interface" / "library.md").write_text(
-'''# Library
+def test_ac_assemble_011_dependency_usage_cards(tmp_path):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    _build_corpus(repo_root)
 
-```
-bar_get(key: str) -> str
-```
-'''
-        )
+    spec_linter = _load_spec_linter()
+    report = spec_linter.lint(None, repo_root)
+    hard_failures = _get(report, "hard_failures")
+    if hard_failures is None:
+        summary = _get(report, "summary") or {}
+        hard_failures = _get(summary, "hard_failures")
+    assert hard_failures == 0, f"fixture corpus is not lint-clean: {_get(report, 'findings')}"
 
-        (bar_dir / "constraints.md").write_text(
-"""# Constraints
+    probe = _load_bar_probe(repo_root)
+    expected_signature = str(inspect.signature(probe.bar_get))
+    expected_doc_first_line = inspect.getdoc(probe.bar_get).splitlines()[0].strip()
+    assert expected_signature == "(key: str) -> str"
+    assert expected_doc_first_line == "Return the value stored under key."
 
-None.
-"""
-        )
+    bundle = spec_bundle_assembler.assemble("comp-foo", repo_root)
 
-        baz_dir = repo_root / "specs" / "components" / "baz"
-        (baz_dir / "requirements").mkdir(parents=True)
-        (baz_dir / "acceptance").mkdir(parents=True)
-        (baz_dir / "interface").mkdir(parents=True)
+    usage = _get(bundle, "dependency_usage")
+    assert usage is not None, "bundle has no dependency_usage"
+    usage_bar = usage.get("comp-bar") if isinstance(usage, dict) else _get(usage, "comp-bar")
+    usage_baz_present = ("comp-baz" in usage) if hasattr(usage, "__contains__") else False
 
-        (baz_dir / "component.md").write_text(
-"""---
-id: comp-baz
-title: Baz
-status: draft
-owners: [team-a]
-sealed: true
-source_path: legacy/baz/
-depends_on: []
----
+    assert isinstance(usage_bar, str), f"dependency_usage['comp-bar'] is not text: {usage_bar!r}"
+    assert "bar" in usage_bar
+    assert "legacy/bar/" in usage_bar, usage_bar
+    assert "bar_get" in usage_bar, usage_bar
+    assert expected_signature in usage_bar, usage_bar
+    assert expected_doc_first_line in usage_bar, usage_bar
+    # Introspection-level facts only: never the function body's source text.
+    assert "return key" not in usage_bar, usage_bar
+    # A sealed dependency's card is built from source_path, never gen/.
+    assert "gen/bar/" not in usage_bar, usage_bar
 
-# Baz
-
-## Purpose
-
-Baz is a spec-only dependency with no real code yet.
-"""
-        )
-
-        (baz_dir / "requirements" / "R-BAZ-001.md").write_text(
-"""# R-BAZ-001
-
-**R-BAZ-001** — `baz()` MUST exist as a placeholder.
-"""
-        )
-
-        (baz_dir / "acceptance" / "AC-BAZ-001.md").write_text(
-'''# AC-BAZ-001
-
-Covers: R-BAZ-001
-Kind: generated-test
-
-```gherkin
-Given nothing
-When baz is considered
-Then it is a placeholder
-```
-'''
-        )
-
-        (baz_dir / "interface" / "library.md").write_text(
-'''# Library
-
-```
-baz() -> None
-```
-'''
-        )
-
-        (baz_dir / "constraints.md").write_text(
-"""# Constraints
-
-None.
-"""
-        )
-
-        bar_code_dir = repo_root / "legacy" / "bar"
-        bar_code_dir.mkdir(parents=True)
-        (bar_code_dir / "bar.py").write_text(
-'''def bar_get(key: str) -> str:
-    """Get a value by key.
-
-    Looks up the stored value for the given key.
-    """
-    return key
-'''
-        )
-
-        # comp-baz deliberately has no file under legacy/baz/ at all.
-
-        gen = next(
-            p for p in Path(spec_bundle_assembler.__file__).resolve().parents
-            if p.name == "gen"
-        )
-        base = gen / "spec-linter"
-        linter_path = (
-            base / "spec_linter.py"
-            if (base / "spec_linter.py").is_file()
-            else base / "spec_linter" / "__init__.py"
-        )
-        spec = importlib.util.spec_from_file_location("spec_linter", linter_path)
-        spec_linter = importlib.util.module_from_spec(spec)
-        sys.modules["spec_linter"] = spec_linter
-        spec.loader.exec_module(spec_linter)
-        assert spec_linter.lint(None, repo_root).hard_failures == 0
-
-        bundle = spec_bundle_assembler.assemble("comp-foo", repo_root, mode="cold")
-
-        dependency_usage = _field(bundle, "dependency_usage")
-        assert dependency_usage is not None
-
-        usage_bar = dependency_usage["comp-bar"]
-
-        def _bar_get_reference(key: str) -> str:
-            """Get a value by key.
-
-            Looks up the stored value for the given key.
-            """
-            return key
-
-        expected_signature = str(inspect.signature(_bar_get_reference))
-        expected_docstring_first_line = _bar_get_reference.__doc__.splitlines()[0].strip()
-
-        assert "bar" in usage_bar
-        assert "legacy/bar/" in usage_bar
-        assert "bar_get" in usage_bar
-        assert expected_signature in usage_bar
-        assert expected_docstring_first_line in usage_bar
-
-        usage_baz = dependency_usage["comp-baz"]
-        assert usage_baz == ""
+    assert usage_baz_present, "dependency_usage has no entry for comp-baz"
+    usage_baz = usage.get("comp-baz") if isinstance(usage, dict) else _get(usage, "comp-baz")
+    assert usage_baz == "", f"dependency_usage['comp-baz'] should be an empty string, got {usage_baz!r}"

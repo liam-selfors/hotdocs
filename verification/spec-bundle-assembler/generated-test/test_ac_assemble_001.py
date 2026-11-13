@@ -1,86 +1,73 @@
+import dataclasses
 import importlib.util
 import sys
-import tempfile
 from pathlib import Path
+
+import pytest
 
 import spec_bundle_assembler
 
 
-def _write(path: Path, content: str) -> None:
+COMPONENT_MD = """---
+id: comp-foo
+title: Foo
+status: draft
+owners: [team-a]
+sealed: true
+source_path: legacy/foo/
+depends_on: []
+---
+
+# Foo
+
+## Purpose
+
+Foo doubles a number.
+"""
+
+GLOSSARY_MD = """# Glossary
+
+- **Foo** — a test term.
+"""
+
+REQUIREMENT_MD = "# R-FOO-001\n\n**R-FOO-001** — `foo(x)` MUST return `2 * x`.\n"
+
+ACCEPTANCE_MD = """# AC-FOO-001
+
+Covers: R-FOO-001
+Kind: generated-test
+
+```gherkin
+Given x = 2
+When foo(x) is called
+Then it returns 4
+```
+"""
+
+LIBRARY_MD = "# Library\n\n```\nfoo(x: int) -> int\n```\n"
+
+CONSTRAINTS_MD = "# Constraints\n\nNone.\n"
+
+
+def _write(path: Path, text: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(content)
+    path.write_text(text, encoding="utf-8")
 
 
-def _build_fixture(repo_root: Path) -> None:
-    _write(
-        repo_root / "specs" / "glossary.md",
-        "# Glossary\n"
-        "\n"
-        "- **Foo** — a test term.\n",
-    )
-
-    _write(
-        repo_root / "specs" / "components" / "foo" / "component.md",
-        "---\n"
-        "id: comp-foo\n"
-        "title: Foo\n"
-        "status: draft\n"
-        "owners: [team-a]\n"
-        "sealed: true\n"
-        "source_path: legacy/foo/\n"
-        "depends_on: []\n"
-        "---\n"
-        "\n"
-        "# Foo\n"
-        "\n"
-        "## Purpose\n"
-        "\n"
-        "Foo doubles a number.\n",
-    )
-
-    _write(
-        repo_root / "specs" / "components" / "foo" / "requirements" / "R-FOO-001.md",
-        "# R-FOO-001\n"
-        "\n"
-        "**R-FOO-001** — `foo(x)` MUST return `2 * x`.\n",
-    )
-
-    _write(
-        repo_root / "specs" / "components" / "foo" / "acceptance" / "AC-FOO-001.md",
-        "# AC-FOO-001\n"
-        "\n"
-        "Covers: R-FOO-001\n"
-        "Kind: generated-test\n"
-        "\n"
-        "```gherkin\n"
-        "Given x = 2\n"
-        "When foo(x) is called\n"
-        "Then it returns 4\n"
-        "```\n",
-    )
-
-    _write(
-        repo_root / "specs" / "components" / "foo" / "interface" / "library.md",
-        "# Library\n"
-        "\n"
-        "```\n"
-        "foo(x: int) -> int\n"
-        "```\n",
-    )
-
-    _write(
-        repo_root / "specs" / "components" / "foo" / "constraints.md",
-        "# Constraints\n"
-        "\n"
-        "None.\n",
-    )
+def _build_corpus(repo_root: Path) -> None:
+    _write(repo_root / "specs" / "glossary.md", GLOSSARY_MD)
+    comp = repo_root / "specs" / "components" / "foo"
+    _write(comp / "component.md", COMPONENT_MD)
+    _write(comp / "requirements" / "R-FOO-001.md", REQUIREMENT_MD)
+    _write(comp / "acceptance" / "AC-FOO-001.md", ACCEPTANCE_MD)
+    _write(comp / "interface" / "library.md", LIBRARY_MD)
+    _write(comp / "constraints.md", CONSTRAINTS_MD)
+    _write(repo_root / "legacy" / "foo" / "foo.py", "def foo(x):\n    return 2 * x\n")
 
 
 def _load_spec_linter():
     gen = next(
-        p
-        for p in Path(spec_bundle_assembler.__file__).resolve().parents
-        if p.name == "gen"
+        p for p in Path(spec_bundle_assembler.__file__).resolve().parents if p.name == "gen"
     )
     base = gen / "spec-linter"
     path = (
@@ -95,75 +82,86 @@ def _load_spec_linter():
     return spec_linter
 
 
-def _field(value, name):
-    return value.get(name) if isinstance(value, dict) else getattr(value, name, None)
+def _get(value, key):
+    if isinstance(value, dict):
+        return value.get(key)
+    return getattr(value, key, None)
 
 
-def _collect_strings(value, out):
+def _field_names(bundle):
+    if isinstance(bundle, dict):
+        return list(bundle.keys())
+    if dataclasses.is_dataclass(bundle):
+        return [f.name for f in dataclasses.fields(bundle)]
+    keys = getattr(bundle, "keys", None)
+    if callable(keys):
+        return list(keys())
+    return [n for n in vars(bundle).keys() if not n.startswith("_")]
+
+
+def _flatten_strings(value):
+    out = []
+    if value is None:
+        return out
     if isinstance(value, str):
         out.append(value)
     elif isinstance(value, dict):
-        for v in value.values():
-            _collect_strings(v, out)
+        for k, v in value.items():
+            out.append(str(k))
+            out.extend(_flatten_strings(v))
     elif isinstance(value, (list, tuple, set)):
         for v in value:
-            _collect_strings(v, out)
+            out.extend(_flatten_strings(v))
+    else:
+        out.append(str(value))
+    return out
 
 
-def test_cold_bundle_excludes_acceptance_content():
-    with tempfile.TemporaryDirectory() as tmp:
-        repo_root = Path(tmp)
-        _build_fixture(repo_root)
+@pytest.fixture
+def repo_root(tmp_path):
+    root = tmp_path / "repo"
+    root.mkdir()
+    _build_corpus(root)
+    return root
 
-        spec_linter = _load_spec_linter()
-        report = spec_linter.lint(None, repo_root)
-        hard_failures = _field(report, "hard_failures")
-        assert hard_failures == 0
 
-        bundle = spec_bundle_assembler.assemble("comp-foo", repo_root, mode="cold")
+def test_cold_bundle_includes_spec_interface_constraints_and_excludes_acceptance(repo_root):
+    spec_linter = _load_spec_linter()
+    report = spec_linter.lint(None, repo_root)
+    hard = report.get("hard_failures") if isinstance(report, dict) else getattr(report, "hard_failures", None)
+    assert hard == 0, f"fixture is not lint-clean: {report}"
 
-        spec_text = _field(bundle, "spec")
-        interface_text = _field(bundle, "interface")
-        constraints_text = _field(bundle, "constraints")
+    bundle = spec_bundle_assembler.assemble("comp-foo", repo_root, mode="cold")
+    assert bundle is not None
 
-        assert spec_text is not None
-        assert interface_text is not None
-        assert constraints_text is not None
+    assert _get(bundle, "component_id") == "comp-foo"
 
-        assert "Foo doubles a number." in spec_text
-        assert "2 * x" in spec_text
-        assert "foo(x: int) -> int" in interface_text
-        assert "None." in constraints_text
+    spec_text = _get(bundle, "spec")
+    assert isinstance(spec_text, str)
+    assert "Foo doubles a number." in spec_text
+    assert "R-FOO-001" in spec_text
+    assert "MUST return" in spec_text
 
-        forbidden_snippets = [
-            "Given x = 2",
-            "foo(x) is called",
-            "Then it returns 4",
-            "AC-FOO-001",
-            "gherkin",
-            "Kind: generated-test",
-        ]
+    interface_text = _get(bundle, "interface")
+    assert isinstance(interface_text, str)
+    assert "foo(x: int) -> int" in interface_text
 
-        bundle_field_names = [
-            "component_id",
-            "spec_bundle_hash",
-            "spec",
-            "interface",
-            "constraints",
-            "dependency_interfaces",
-            "dependency_context",
-            "dependency_usage",
-            "vars",
-            "glossary",
-            "hint_code",
-        ]
+    constraints_text = _get(bundle, "constraints")
+    assert isinstance(constraints_text, str)
+    assert "None." in constraints_text
 
-        all_strings = []
-        for field_name in bundle_field_names:
-            _collect_strings(_field(bundle, field_name), all_strings)
+    assert _get(bundle, "hint_code") is None
 
-        for snippet in forbidden_snippets:
-            for text in all_strings:
-                assert snippet not in text
+    names = _field_names(bundle)
+    assert names, "bundle exposes no fields"
+    for name in names:
+        assert "acceptance" not in name.lower(), f"bundle has acceptance-derived field {name!r}"
+        assert "criteri" not in name.lower(), f"bundle has criterion-derived field {name!r}"
 
-        assert _field(bundle, "hint_code") is None
+    acceptance_markers = ["AC-FOO-001", "Given x = 2", "Then it returns 4", "Kind: generated-test", "Covers: R-FOO-001"]
+    for name in names:
+        for text in _flatten_strings(_get(bundle, name)):
+            for marker in acceptance_markers:
+                assert marker not in text, (
+                    f"field {name!r} contains acceptance/ content {marker!r}"
+                )
