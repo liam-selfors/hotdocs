@@ -471,7 +471,8 @@ def test_d199_tool_components_fall_back_to_the_tool_root(repo_root):
     import shutil
     shutil.rmtree(repo_root / "pipeline")
     for slug in ("spec-bundle-assembler", "spec-linter", "graph-query-engine",
-                 "test-author", "cache-manager", "llm-endpoint"):
+                 "test-author", "cache-manager", "llm-endpoint",
+                 "corpus-loader", "citation-checker", "size-checker"):
         shutil.rmtree(repo_root / "gen" / slug)
     write_foo(repo_root, extra_acceptance={"AC-FOO-001.md": COMPILED_AC})
     report = verify("comp-foo", repo_root)

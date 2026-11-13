@@ -18,3 +18,11 @@ three-argument `judge` (`R-LINT-015`). Omit `judge` to run with every `llm-judge
 lacking a cached test (R-VERIFY-009) — **but omitting it degrades
 differently**: a `generated-test` criterion with nothing cached and no
 `test_author` configured reports `fail`, not `skipped` (R-VERIFY-010).
+
+It loads `spec-bundle-assembler` from `<repo_root>/gen/spec-bundle-assembler/`
+and the sealed `criterion-compiler` from
+`<repo_root>/pipeline/criterion-compiler/`, either else from the tool
+root (`D199`); a test plants a fake dependency at that path. A fixture
+component under test is never `sealed`, unless its criterion concerns
+sealed verification (`R-VERIFY-017`): a sealed one runs only its
+characterization tests, never its compiled or generated ones.

@@ -71,26 +71,6 @@ See `constraints.md`.
 
 ## Open questions
 
-None. The gap this spec originally surfaced — which component authors
-`generated-test` code — is resolved: `test-author`, invoked via the
-`test_author` injectable callable (R-VERIFY-009), the same pattern already
-established for `judge`.
-
 ## Change log
 
-- Initial draft.
-- `D27`–`D124`: `failure_detail` on failing criteria (`R-VERIFY-012`);
-  one-directional interface drift (`R-VERIFY-004`); the exact
-  `CriterionBundle` (`R-VERIFY-009`); modules cached per `repo_root`
-  (`R-VERIFY-013`); `mutation_score` a union (`R-VERIFY-006`).
-- `D158`: `R-VERIFY-014` — every test run times out; a timed-out mutant
-  counts as killed.
-- `D163`: `R-VERIFY-015` exposes `GATE_VERSION`; `R-VERIFY-016` keeps
-  a lettered criterion id (`AC-FOO-003b`) exactly as written.
-- `D171`: `R-VERIFY-017` — sealed components are verified at
-  `source_path` by their characterization tests; `verify` had no
-  sealed support before. New `AC-VERIFY-019`.
-- `D172`: `R-VERIFY-006` pins the exact operator swaps; a
-  regeneration had silently changed the mutation bar.
-- `D190`: CLI renamed `hotdocs verify-component` (`R-VERIFY-018`);
-  `verify` returns an object, not a dict.
+See the decisions, `D27` onward; `D274` adds fixture guidance to `interface/`.
