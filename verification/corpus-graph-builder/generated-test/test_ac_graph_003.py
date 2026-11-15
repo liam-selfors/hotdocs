@@ -1,91 +1,143 @@
 import json
-import tempfile
 from pathlib import Path
 
 import corpus_graph_builder
 
 
-def _get(obj, key, default=None):
-    if isinstance(obj, dict):
-        return obj.get(key, default)
-    return getattr(obj, key, default)
+def field(value, name):
+    return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def _write_component(repo_root, slug, title, sealed, extra_body=""):
-    comp_dir = repo_root / "specs" / "components" / slug
-    comp_dir.mkdir(parents=True, exist_ok=True)
-    sealed_literal = "true" if sealed else "false"
-    frontmatter = (
-        "---\n"
-        f"id: comp-{slug}\n"
-        f"title: {title}\n"
-        "status: draft\n"
-        "owners: [alice]\n"
-        "depends_on: []\n"
-        "realizes: []\n"
-        "uses_var: []\n"
-        f"sealed: {sealed_literal}\n"
-    )
+def _write(path: Path, text: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+
+
+def _component_md(slug, sealed, body, depends_on="[]", realizes="[]", uses_var="[]"):
+    lines = [
+        "---",
+        f"id: comp-{slug}",
+        f"title: Component {slug.upper()}",
+        "status: draft",
+        "owners: [team-a]",
+        f"depends_on: {depends_on}",
+        f"realizes: {realizes}",
+        f"uses_var: {uses_var}",
+        f"sealed: {'true' if sealed else 'false'}",
+    ]
     if sealed:
-        frontmatter += f"source_path: legacy/{slug}/\n"
-    frontmatter += "---\n\n"
-    body = extra_body if extra_body else f"Purpose text for comp-{slug}.\n"
-    (comp_dir / "component.md").write_text(frontmatter + body, encoding="utf-8")
+        lines.append(f"source_path: legacy/{slug}/")
+    lines.append("---")
+    return "\n".join(lines) + "\n" + body
 
 
-def test_component_nodes_carry_verification_provenance_size_sealed_overrides():
-    with tempfile.TemporaryDirectory() as tmp:
-        repo_root = Path(tmp)
+def _build_fixture(repo_root: Path) -> None:
+    specs = repo_root / "specs"
 
-        _write_component(repo_root, "a", "Comp A", sealed=True)
-        _write_component(repo_root, "b", "Comp B", sealed=False)
-        big_body = " ".join(["word"] * 4001) + "\n"
-        _write_component(repo_root, "big", "Comp Big", sealed=True, extra_body=big_body)
+    # Capability, var and decision so every view has files to read.
+    _write(
+        specs / "product" / "x.md",
+        "---\nid: P-X\ntitle: Capability X\nstatus: draft\nowners: [team-a]\n---\n"
+        "# Capability X\n\nA capability.\n",
+    )
+    _write(
+        specs / "vars" / "y.md",
+        "---\nid: VAR-Y\ntitle: Var Y\nstatus: draft\nowners: [team-a]\n---\n"
+        "# Var Y\n\nA var.\n",
+    )
+    _write(
+        specs / "decisions" / "D1.md",
+        "---\nid: D1\ntitle: Decision one\nstatus: draft\nowners: [team-a]\n---\n"
+        "# D1\n\nA decision.\n",
+    )
 
-        overrides_dir = repo_root / "gen" / "a"
-        overrides_dir.mkdir(parents=True, exist_ok=True)
-        (overrides_dir / ".overrides.json").write_text(
-            json.dumps(["x.py"]), encoding="utf-8"
-        )
+    # comp-a: sealed, small body, with a requirement and its criterion.
+    _write(
+        specs / "components" / "a" / "component.md",
+        _component_md(
+            "a",
+            sealed=True,
+            body="# Component A\n\n## Purpose\n\nA small sealed component.\n",
+        ),
+    )
+    _write(
+        specs / "components" / "a" / "requirements" / "R-A-001.md",
+        "**R-A-001** — The component MUST do a thing.\n",
+    )
+    _write(
+        specs / "components" / "a" / "acceptance" / "AC-A-001.md",
+        "# AC-A-001\n\nCovers: R-A-001\nKind: generated-test\n\n"
+        "```gherkin\nGiven a thing\nWhen it runs\nThen it works\n```\n",
+    )
 
-        provenance_dir = repo_root / "verification" / "a"
-        provenance_dir.mkdir(parents=True, exist_ok=True)
-        manifest = {
-            "spec_bundle_hash": "sha256:abc",
-            "generated_at": "2026-11-08T00:19:53Z",
-            "verification_report": {"component_id": "comp-a", "overall": "pass"},
-        }
-        (provenance_dir / ".provenance.json").write_text(
-            json.dumps(manifest), encoding="utf-8"
-        )
+    # comp-b: unsealed, no manifest, no overrides.
+    _write(
+        specs / "components" / "b" / "component.md",
+        _component_md(
+            "b",
+            sealed=False,
+            body="# Component B\n\n## Purpose\n\nA small component.\n",
+            realizes="[P-X]",
+            uses_var="[VAR-Y]",
+        ),
+    )
 
-        graph = corpus_graph_builder.build_corpus_graph(repo_root)
+    # comp-big: body is the word "word" 4001 times.
+    _write(
+        specs / "components" / "big" / "component.md",
+        _component_md(
+            "big",
+            sealed=False,
+            body=" ".join(["word"] * 4001) + "\n",
+        ),
+    )
 
-        graph_dict = graph.to_dict()
-        nodes = _get(graph_dict, "nodes")
+    # comp-a's pinned overrides and provenance manifest.
+    _write(repo_root / "gen" / "a" / ".overrides.json", json.dumps(["x.py"]))
+    _write(
+        repo_root / "verification" / "a" / ".provenance.json",
+        json.dumps(
+            {
+                "spec_bundle_hash": "sha256:abc",
+                "generated_at": "2026-11-08T00:19:53Z",
+                "verification_report": {
+                    "component_id": "comp-a",
+                    "overall": "pass",
+                },
+            }
+        ),
+    )
 
-        comp_a = nodes["comp-a"]
-        assert _get(comp_a, "verification") == {
-            "component_id": "comp-a",
-            "overall": "pass",
-        }
-        assert _get(comp_a, "provenance") == {
-            "spec_bundle_hash": "sha256:abc",
-            "generated_at": "2026-11-08T00:19:53Z",
-        }
-        assert _get(comp_a, "size_status") == "ok"
-        assert _get(comp_a, "sealed") is True
-        assert _get(comp_a, "pinned_overrides") == ["x.py"]
 
-        comp_b = nodes["comp-b"]
-        assert _get(comp_b, "verification") is None
-        assert _get(comp_b, "provenance") is None
-        assert _get(comp_b, "sealed") is False
-        assert _get(comp_b, "pinned_overrides") == []
+def test_component_nodes_carry_verification_provenance_size_sealed_overrides(tmp_path):
+    repo_root = tmp_path
+    _build_fixture(repo_root)
 
-        comp_big = nodes["comp-big"]
-        assert _get(comp_big, "size_status") == "over"
+    graph = corpus_graph_builder.build_corpus_graph(repo_root)
 
-        raw_bytes = graph.to_json_bytes()
-        assert isinstance(raw_bytes, bytes)
-        json.loads(raw_bytes.decode("utf-8"))
+    nodes = field(graph, "nodes")
+
+    node_a = nodes["comp-a"]
+    assert field(node_a, "verification") == {
+        "component_id": "comp-a",
+        "overall": "pass",
+    }
+    assert field(node_a, "provenance") == {
+        "spec_bundle_hash": "sha256:abc",
+        "generated_at": "2026-11-08T00:19:53Z",
+    }
+    assert field(node_a, "size_status") == "ok"
+    assert field(node_a, "sealed") is True
+    assert list(field(node_a, "pinned_overrides")) == ["x.py"]
+
+    node_b = nodes["comp-b"]
+    assert field(node_b, "verification") is None
+    assert field(node_b, "provenance") is None
+    assert field(node_b, "sealed") is False
+    assert list(field(node_b, "pinned_overrides")) == []
+
+    node_big = nodes["comp-big"]
+    assert field(node_big, "size_status") == "over"
+
+    data = graph.to_json_bytes()
+    assert isinstance(data, (bytes, bytearray))

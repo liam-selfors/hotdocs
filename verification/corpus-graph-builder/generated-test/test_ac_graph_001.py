@@ -1,127 +1,136 @@
-import tempfile
-from pathlib import Path
-
-import pytest
-
 import corpus_graph_builder
 
+from pathlib import Path
 
-def _write(path: Path, content: str) -> None:
+
+def field(value, name):
+    return value[name] if isinstance(value, dict) else getattr(value, name)
+
+
+def _write(path: Path, text: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(content, encoding="utf-8")
+    path.write_text(text, encoding="utf-8")
 
 
-def _get(obj, name):
-    if isinstance(obj, dict):
-        return obj.get(name)
-    return getattr(obj, name, None)
+def _component(repo_root: Path, slug: str) -> None:
+    _write(
+        repo_root / "specs" / "components" / slug / "component.md",
+        "---\n"
+        f"id: comp-{slug}\n"
+        f"title: Component {slug.upper()}\n"
+        "status: draft\n"
+        "owners: [test-team]\n"
+        "depends_on: []\n"
+        "realizes: []\n"
+        "uses_var: []\n"
+        "sealed: true\n"
+        f"source_path: legacy/{slug}/\n"
+        "---\n"
+        "\n"
+        f"# Component {slug}\n"
+        "\n"
+        "## Purpose\n"
+        "\n"
+        f"A synthetic test component named {slug}.\n",
+    )
+
+
+def _capability(repo_root: Path, name: str, cap_id: str) -> None:
+    _write(
+        repo_root / "specs" / "product" / f"{name}.md",
+        "---\n"
+        f"id: {cap_id}\n"
+        f"title: Capability {name}\n"
+        "status: draft\n"
+        "owners: [test-team]\n"
+        "---\n"
+        "\n"
+        f"# Capability {name}\n"
+        "\n"
+        "A synthetic capability.\n",
+    )
 
 
 def _build_corpus(repo_root: Path) -> None:
-    _write(
-        repo_root / "specs" / "product" / "p-one.md",
-        "---\n"
-        "id: P-ONE\n"
-        "title: Capability One\n"
-        "status: draft\n"
-        "owners: [alice]\n"
-        "---\n\n"
-        "Capability one body.\n",
-    )
-    _write(
-        repo_root / "specs" / "product" / "p-two.md",
-        "---\n"
-        "id: P-TWO\n"
-        "title: Capability Two\n"
-        "status: draft\n"
-        "owners: [alice]\n"
-        "---\n\n"
-        "Capability two body.\n",
-    )
+    _capability(repo_root, "one", "P-ONE")
+    _capability(repo_root, "two", "P-TWO")
 
     for slug in ("a", "b", "c"):
-        _write(
-            repo_root / "specs" / "components" / slug / "component.md",
-            "---\n"
-            f"id: comp-{slug}\n"
-            f"title: Component {slug.upper()}\n"
-            "status: draft\n"
-            "owners: [alice]\n"
-            "depends_on: []\n"
-            "realizes: []\n"
-            "uses_var: []\n"
-            "sealed: true\n"
-            f"source_path: fake/{slug}/\n"
-            "---\n\n"
-            f"## Purpose\n\nComponent {slug} purpose text.\n",
-        )
+        _component(repo_root, slug)
 
     _write(
-        repo_root / "specs" / "components" / "a" / "requirements" / "R-A-001.md",
-        "# R-A-001\n\n"
-        "**R-A-001** \u2014 A placeholder requirement for component a.\n",
-    )
-    _write(
-        repo_root / "specs" / "components" / "a" / "acceptance" / "AC-A-001.md",
-        "# AC-A-001\n\n"
-        "Covers: R-A-001\n\n"
-        "```gherkin\n"
-        "Given a thing\n"
-        "When it happens\n"
-        "Then it works\n"
-        "```\n",
-    )
-
-    _write(
-        repo_root / "specs" / "vars" / "one.md",
+        repo_root / "specs" / "vars" / "VAR-ONE.md",
         "---\n"
         "id: VAR-ONE\n"
-        "title: Var One\n"
+        "title: Var one\n"
         "status: draft\n"
-        "owners: [alice]\n"
-        "---\n\n"
-        "Var one body.\n",
+        "owners: [test-team]\n"
+        "---\n"
+        "\n"
+        "# VAR-ONE\n"
+        "\n"
+        "A synthetic var declaration.\n",
     )
 
     _write(
         repo_root / "specs" / "decisions" / "D1.md",
         "---\n"
         "id: D1\n"
-        "title: Decision One\n"
+        "title: Decision one\n"
         "status: draft\n"
-        "owners: [alice]\n"
-        "---\n\n"
-        "Decision one body.\n",
+        "owners: [test-team]\n"
+        "---\n"
+        "\n"
+        "# D1\n"
+        "\n"
+        "A synthetic decision.\n",
+    )
+
+    _write(
+        repo_root / "specs" / "components" / "a" / "requirements" / "R-A-001.md",
+        "**R-A-001** — Component a MUST do its one thing.\n",
+    )
+    _write(
+        repo_root / "specs" / "components" / "a" / "acceptance" / "AC-A-001.md",
+        "# AC-A-001\n"
+        "\n"
+        "Covers: R-A-001\n"
+        "Kind: generated-test\n"
+        "\n"
+        "```gherkin\n"
+        "Given component a\n"
+        "When it runs\n"
+        "Then it does its one thing\n"
+        "```\n",
     )
 
 
-def test_build_corpus_graph_has_exactly_the_expected_nodes_and_types():
-    with tempfile.TemporaryDirectory() as tmp:
-        repo_root = Path(tmp)
-        _build_corpus(repo_root)
+def test_ac_graph_001_nodes_are_capabilities_components_and_vars(tmp_path):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    _build_corpus(repo_root)
 
-        graph = corpus_graph_builder.build_corpus_graph(repo_root)
+    graph = corpus_graph_builder.build_corpus_graph(repo_root)
 
-        nodes = _get(graph, "nodes")
-        assert nodes is not None
+    nodes = field(graph, "nodes")
+    keys = set(nodes.keys())
+    assert keys == {"P-ONE", "P-TWO", "comp-a", "comp-b", "comp-c", "VAR-ONE"}, keys
+    assert len(nodes) == 6
 
-        assert set(nodes.keys()) == {
-            "P-ONE",
-            "P-TWO",
-            "comp-a",
-            "comp-b",
-            "comp-c",
-            "VAR-ONE",
-        }
+    expected_types = {
+        "P-ONE": "capability",
+        "P-TWO": "capability",
+        "comp-a": "component",
+        "comp-b": "component",
+        "comp-c": "component",
+        "VAR-ONE": "var",
+    }
+    for node_id, expected_type in expected_types.items():
+        assert field(nodes[node_id], "type") == expected_type, (
+            node_id,
+            field(nodes[node_id], "type"),
+        )
 
-        expected_types = {
-            "P-ONE": "capability",
-            "P-TWO": "capability",
-            "comp-a": "component",
-            "comp-b": "component",
-            "comp-c": "component",
-            "VAR-ONE": "var",
-        }
-        for node_id, expected_type in expected_types.items():
-            node = nodes[node_id]
-            assert _get(node, "type") == expected_type
+    # Requirements, criteria and decisions never appear as nodes.
+    for excluded in ("D1", "R-A-001", "AC-A-001"):
+        assert excluded not in nodes

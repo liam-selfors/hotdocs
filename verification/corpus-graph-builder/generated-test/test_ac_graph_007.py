@@ -1,89 +1,133 @@
+import importlib
 import json
 from pathlib import Path
 
 import pytest
 
 import corpus_graph_builder
-from corpus_graph_builder import cli
 
 
-def _write_component_a(repo_root: Path) -> None:
+def _cli():
+    return importlib.import_module("corpus_graph_builder.cli")
+
+
+def _write(path: Path, text: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+
+
+def _make_corpus(repo_root: Path) -> None:
     comp_dir = repo_root / "specs" / "components" / "a"
-    comp_dir.mkdir(parents=True, exist_ok=True)
-    (comp_dir / "component.md").write_text(
+    _write(
+        comp_dir / "component.md",
         "---\n"
         "id: comp-a\n"
         "title: Component A\n"
         "status: draft\n"
-        "owners: [alice]\n"
-        "sealed: true\n"
-        "source_path: legacy/a/\n"
+        "owners: [test-team]\n"
         "depends_on: []\n"
         "realizes: []\n"
         "uses_var: []\n"
+        "sealed: true\n"
+        "source_path: legacy/a/\n"
         "---\n"
         "\n"
         "# Component A\n"
         "\n"
         "## Purpose\n"
         "\n"
-        "Does something simple for testing.\n",
-        encoding="utf-8",
+        "A tiny fixture component.\n",
+    )
+    _write(
+        comp_dir / "requirements" / "R-A-001.md",
+        "**R-A-001** — The component MUST exist.\n",
+    )
+    _write(
+        comp_dir / "acceptance" / "AC-A-001.md",
+        "# AC-A-001\n"
+        "\n"
+        "Covers: R-A-001\n"
+        "Kind: generated-test\n"
+        "\n"
+        "```gherkin\n"
+        "Given a thing\n"
+        "When it runs\n"
+        "Then it works\n"
+        "```\n",
     )
 
 
-def _assert_prints_path(printed: str, expected_path: Path, cwd: Path) -> None:
-    lines = [line for line in printed.strip().splitlines() if line.strip()]
-    assert lines, "expected main() to print the written path"
-    printed_path = Path(lines[-1].strip())
-    if not printed_path.is_absolute():
-        printed_path = cwd / printed_path
-    assert printed_path.resolve() == expected_path.resolve()
+def _call(argv):
+    main = _cli().main
+    try:
+        return main(argv)
+    except BaseException as exc:  # includes SystemExit
+        pytest.fail(f"main({argv!r}) raised {type(exc).__name__}: {exc!r}")
 
 
-def test_build_succeeds_with_each_repo_root_form(tmp_path, capsys, monkeypatch):
+def _assert_printed_path(out: str, repo_root: Path, expected: Path) -> None:
+    lines = [ln.strip() for ln in out.splitlines() if ln.strip()]
+    assert lines, "expected the written path to be printed"
+    assert any("corpus-graph.json" in ln for ln in lines), out
+    matched = False
+    for ln in lines:
+        if "corpus-graph.json" not in ln:
+            continue
+        p = Path(ln)
+        if not p.is_absolute():
+            p = repo_root / p
+        if p.resolve() == expected.resolve():
+            matched = True
+            break
+    assert matched, f"printed output {out!r} does not name {expected}"
+
+
+def _assert_written(expected: Path) -> None:
+    assert expected.is_file(), f"{expected} was not written"
+    data = json.loads(expected.read_text(encoding="utf-8"))
+    nodes = data["nodes"]
+    assert "comp-a" in nodes
+
+
+def test_build_variants_return_0_write_and_print(tmp_path, capsys, monkeypatch):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
-    _write_component_a(repo_root)
+    _make_corpus(repo_root)
+    expected = repo_root / "verification" / "corpus-graph.json"
 
-    expected_path = repo_root / "verification" / "corpus-graph.json"
-    original_cwd = Path.cwd()
-
-    rc = cli.main(["build", "--repo-root=" + str(repo_root)])
+    # --repo-root=<dir>
+    capsys.readouterr()
+    rc = _call(["build", f"--repo-root={repo_root}"])
+    out = capsys.readouterr().out
     assert rc == 0
-    assert expected_path.is_file()
-    data = json.loads(expected_path.read_text(encoding="utf-8"))
-    assert "nodes" in data
-    assert "edges" in data
-    assert "aggregates" in data
-    _assert_prints_path(capsys.readouterr().out, expected_path, original_cwd)
+    _assert_written(expected)
+    _assert_printed_path(out, repo_root, expected)
 
-    expected_path.unlink()
-
-    rc = cli.main(["build", "--repo-root", str(repo_root)])
+    # --repo-root <dir>
+    expected.unlink()
+    rc = _call(["build", "--repo-root", str(repo_root)])
+    out = capsys.readouterr().out
     assert rc == 0
-    assert expected_path.is_file()
-    _assert_prints_path(capsys.readouterr().out, expected_path, original_cwd)
+    _assert_written(expected)
+    _assert_printed_path(out, repo_root, expected)
 
-    expected_path.unlink()
-
+    # default: current directory
+    expected.unlink()
     monkeypatch.chdir(repo_root)
-    rc = cli.main(["build"])
+    rc = _call(["build"])
+    out = capsys.readouterr().out
     assert rc == 0
-    assert expected_path.is_file()
-    _assert_prints_path(capsys.readouterr().out, expected_path, repo_root)
+    _assert_written(expected)
+    _assert_printed_path(out, repo_root, expected)
 
 
-def test_build_returns_1_on_invalid_provenance_json(tmp_path):
+def test_invalid_provenance_json_returns_1(tmp_path):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
-    _write_component_a(repo_root)
+    _make_corpus(repo_root)
+    _write(repo_root / "verification" / "a" / ".provenance.json", "{not json")
 
-    verification_a = repo_root / "verification" / "a"
-    verification_a.mkdir(parents=True, exist_ok=True)
-    (verification_a / ".provenance.json").write_text("{not json", encoding="utf-8")
-
-    rc = cli.main(["build", "--repo-root=" + str(repo_root)])
+    rc = _call(["build", f"--repo-root={repo_root}"])
     assert rc == 1
 
 
@@ -96,6 +140,11 @@ def test_build_returns_1_on_invalid_provenance_json(tmp_path):
         ["build", "--repo-root"],
     ],
 )
-def test_usage_errors_return_2_without_raising(argv):
-    rc = cli.main(argv)
+def test_usage_errors_return_2_without_raising(tmp_path, monkeypatch, argv):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    _make_corpus(repo_root)
+    monkeypatch.chdir(repo_root)
+
+    rc = _call(list(argv))
     assert rc == 2

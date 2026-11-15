@@ -1,70 +1,62 @@
-import shutil
 import sys
-import tempfile
-import unittest
 from pathlib import Path
 
+import pytest
 
-def _get(obj, key, default=None):
-    if isinstance(obj, dict):
-        return obj.get(key, default)
-    return getattr(obj, key, default)
+import corpus_graph_builder
 
 
-class TestACGraph010(unittest.TestCase):
-    def setUp(self):
-        self._tmpdir = tempfile.mkdtemp()
-        self.repo_root = Path(self._tmpdir)
-
-        comp_dir = self.repo_root / "specs" / "components" / "a"
-        comp_dir.mkdir(parents=True)
-        (comp_dir / "component.md").write_text(
-            "---\n"
-            "id: comp-a\n"
-            "title: Component A\n"
-            "status: ratified\n"
-            "owners: [alice]\n"
-            "last_ratified_commit: 0000000000000000000000000000000000000000\n"
-            "depends_on: []\n"
-            "realizes: []\n"
-            "uses_var: []\n"
-            "sealed: true\n"
-            "source_path: vendor/comp-a/\n"
-            "---\n"
-            "# Component A\n\n"
-            "## Purpose\n\n"
-            "A test component used only to exercise the corpus graph builder.\n",
-            encoding="utf-8",
-        )
-
-        self._removed_path_entries = [
-            entry for entry in sys.path if "graph-query-engine" in entry
-        ]
-        for entry in self._removed_path_entries:
-            sys.path.remove(entry)
-        self._popped_module = sys.modules.pop("graph_query_engine", None)
-
-    def tearDown(self):
-        for entry in self._removed_path_entries:
-            if entry not in sys.path:
-                sys.path.append(entry)
-        if self._popped_module is not None:
-            sys.modules["graph_query_engine"] = self._popped_module
-        else:
-            sys.modules.pop("graph_query_engine", None)
-        shutil.rmtree(self._tmpdir, ignore_errors=True)
-
-    def test_build_corpus_graph_includes_comp_a_without_gen_directory(self):
-        self.assertFalse((self.repo_root / "gen").exists())
-
-        import corpus_graph_builder
-
-        graph = corpus_graph_builder.build_corpus_graph(self.repo_root)
-
-        nodes = _get(graph, "nodes")
-        self.assertIsNotNone(nodes)
-        self.assertIn("comp-a", nodes)
+def field(value, name):
+    return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-if __name__ == "__main__":
-    unittest.main()
+COMPONENT_MD = """---
+id: comp-a
+title: Component A
+status: draft
+owners: [test-team]
+depends_on: []
+realizes: []
+uses_var: []
+sealed: true
+source_path: legacy/a/
+---
+
+# Component A
+
+## Purpose
+
+A synthetic component used to check that the graph builder loads its
+query engine by file path.
+"""
+
+
+def _write_corpus(repo_root: Path) -> None:
+    comp_dir = repo_root / "specs" / "components" / "a"
+    comp_dir.mkdir(parents=True)
+    (comp_dir / "component.md").write_text(COMPONENT_MD, encoding="utf-8")
+
+
+def test_build_corpus_graph_loads_query_engine_by_file_path(tmp_path, monkeypatch):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    _write_corpus(repo_root)
+    assert not (repo_root / "gen").exists()
+
+    # Strip every sys.path entry naming graph-query-engine, so a bare
+    # `import graph_query_engine` could not succeed.
+    stripped = [
+        entry
+        for entry in sys.path
+        if "graph-query-engine" not in str(entry)
+    ]
+    monkeypatch.setattr(sys, "path", stripped)
+    monkeypatch.delitem(sys.modules, "graph_query_engine", raising=False)
+
+    assert not any("graph-query-engine" in str(entry) for entry in sys.path)
+    assert "graph_query_engine" not in sys.modules
+
+    graph = corpus_graph_builder.build_corpus_graph(repo_root)
+
+    nodes = field(graph, "nodes")
+    assert "comp-a" in nodes

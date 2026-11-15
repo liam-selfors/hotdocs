@@ -1,13 +1,18 @@
-"""Builds verification/corpus-graph.json from the corpus + provenance state."""
-from __future__ import annotations
+"""Corpus Graph Builder: builds verification/corpus-graph.json."""
 
 import importlib.util
 import json
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from types import ModuleType
-from typing import Any
+
+import duckdb
+
+__all__ = ["CorpusGraph", "build_corpus_graph", "write_corpus_graph"]
+
+_NODE_KINDS = ("capability", "component", "var")
+_EDGE_KINDS = ("depends_on", "realizes", "uses_var")
+_SIZE_CAP = 4000
 
 
 @dataclass
@@ -16,74 +21,80 @@ class CorpusGraph:
     edges: list
     aggregates: dict
 
-    def to_dict(self) -> dict:
+    def to_dict(self):
         return {
             "nodes": self.nodes,
             "edges": self.edges,
             "aggregates": self.aggregates,
         }
 
-    def to_json_bytes(self) -> bytes:
+    def to_json_bytes(self):
         text = json.dumps(self.to_dict(), sort_keys=True, indent=2, ensure_ascii=True)
         return (text + "\n").encode("utf-8")
 
 
-def _tool_root() -> Path:
-    here = Path(__file__).resolve()
-    for parent in here.parents:
+def _tool_root():
+    for parent in Path(__file__).resolve().parents:
         if parent.name == "gen":
             return parent.parent
-    raise RuntimeError("could not locate tool root above corpus_graph_builder")
 
 
-def _load_module_from_dir(base: Path, module_name: str) -> ModuleType | None:
-    flat = base / f"{module_name}.py"
-    pkg_init = base / module_name / "__init__.py"
-    if flat.is_file():
-        path = flat
-        submodule_search_locations = None
-    elif pkg_init.is_file():
-        path = pkg_init
-        submodule_search_locations = [str(path.parent)]
-    else:
-        return None
-
+def _load_graph_query_engine(repo_root):
+    module_dir = repo_root / "gen" / "graph-query-engine"
+    if not module_dir.is_dir():
+        module_dir = _tool_root() / "gen" / "graph-query-engine"
     spec = importlib.util.spec_from_file_location(
-        module_name, path, submodule_search_locations=submodule_search_locations
+        "graph_query_engine", str(module_dir / "graph_query_engine.py")
     )
-    if spec is None or spec.loader is None:
-        return None
     module = importlib.util.module_from_spec(spec)
-    sys.modules[module_name] = module
+    sys.modules["graph_query_engine"] = module
     spec.loader.exec_module(module)
     return module
 
 
-def _resolve_dependency_dir(repo_root: Path, dep_dir_name: str) -> Path:
-    candidate = repo_root / "gen" / dep_dir_name
-    if candidate.is_dir():
-        return candidate
-    return _tool_root() / "gen" / dep_dir_name
+def _sealed(repo_root, slug):
+    path = repo_root / "specs" / "components" / slug / "component.md"
+    lines = path.read_text(encoding="utf-8").splitlines()
+    for line in lines[1:]:
+        if line.strip() == "---":
+            break
+        key, _, value = line.partition(":")
+        if key.strip() == "sealed":
+            return value.strip() == "true"
+    return False
 
 
-def _load_graph_query_engine(repo_root: Path) -> ModuleType:
-    base = _resolve_dependency_dir(repo_root, "graph-query-engine")
-    module = _load_module_from_dir(base, "graph_query_engine")
-    if module is None:
-        raise ImportError(f"graph_query_engine not found under {base}")
-    return module
+def _manifest(repo_root, slug):
+    path = repo_root / "verification" / slug / ".provenance.json"
+    if not path.is_file():
+        return None, None
+    with open(path, "r", encoding="utf-8") as handle:
+        data = json.load(handle)
+    verification = data.get("verification_report")
+    provenance = {k: v for k, v in data.items() if k != "verification_report"}
+    return verification, provenance
 
 
-def _read_json_file(path: Path) -> Any:
-    with open(path, "r", encoding="utf-8") as f:
-        return json.load(f)
+def _overrides(repo_root, slug):
+    path = repo_root / "gen" / slug / ".overrides.json"
+    if not path.is_file():
+        return []
+    with open(path, "r", encoding="utf-8") as handle:
+        data = json.load(handle)
+    if isinstance(data, list):
+        return data
+    return []
 
 
-def build_corpus_graph(repo_root: Path) -> CorpusGraph:
+def _rate(count, total):
+    if total == 0:
+        return 0.0
+    return count / total
+
+
+def build_corpus_graph(repo_root):
     repo_root = Path(repo_root)
     gqe = _load_graph_query_engine(repo_root)
-
-    import duckdb
 
     con = duckdb.connect(":memory:")
     try:
@@ -92,129 +103,77 @@ def build_corpus_graph(repo_root: Path) -> CorpusGraph:
         except Exception:
             pass
         con.execute("LOAD yaml")
-
         gqe.load_views(con, repo_root)
 
         node_rows = con.execute(
-            "SELECT id, kind FROM nodes WHERE kind IN ('component', 'capability', 'var')"
+            "SELECT id, kind FROM nodes WHERE kind IN ('capability', 'component', 'var')"
         ).fetchall()
-
         edge_rows = con.execute(
             "SELECT source_id, target_id, edge_type FROM edges "
             "WHERE edge_type IN ('depends_on', 'realizes', 'uses_var')"
         ).fetchall()
-
         size_rows = con.execute(
             "SELECT component_id, word_count FROM component_size"
         ).fetchall()
-        size_map = {row[0]: row[1] for row in size_rows}
-
-        docs_result = con.execute("SELECT * FROM component_docs")
-        doc_cols = [d[0] for d in docs_result.description]
-        docs_rows = docs_result.fetchall()
-        sealed_map: dict[str, bool] = {}
-        for row in docs_rows:
-            row_dict = dict(zip(doc_cols, row))
-            comp_id = row_dict.get("id")
-            if comp_id is None:
-                continue
-            sealed_map[comp_id] = bool(row_dict.get("sealed")) if row_dict.get("sealed") else False
     finally:
         con.close()
 
-    nodes: dict = {}
-    for node_id, kind in node_rows:
-        if kind == "capability":
-            nodes[node_id] = {"type": "capability"}
-        elif kind == "var":
-            nodes[node_id] = {"type": "var"}
-        elif kind == "component":
-            slug = node_id[len("comp-"):] if node_id.startswith("comp-") else node_id
+    sizes = {str(cid): wc for cid, wc in size_rows}
 
-            manifest_path = repo_root / "verification" / slug / ".provenance.json"
-            verification = None
-            provenance = None
-            if manifest_path.is_file():
-                manifest = _read_json_file(manifest_path)
-                if not isinstance(manifest, dict):
-                    manifest = {}
-                verification = manifest.get("verification_report")
-                provenance = {k: v for k, v in manifest.items() if k != "verification_report"}
+    edge_set = sorted({(str(s), str(t), str(k)) for s, t, k in edge_rows})
+    edges = [{"from": s, "to": t, "kind": k} for s, t, k in edge_set]
 
-            word_count = size_map.get(slug)
-            if word_count is None:
-                size_status = "unknown"
-            elif word_count <= 4000:
-                size_status = "ok"
+    nodes = {}
+    capabilities = []
+    components = []
+    variables = []
+    for node_id, kind in sorted((str(i), str(k)) for i, k in node_rows):
+        if kind == "component":
+            slug = node_id[len("comp-"):]
+            verification, provenance = _manifest(repo_root, slug)
+            if slug in sizes:
+                size_status = "ok" if sizes[slug] <= _SIZE_CAP else "over"
             else:
-                size_status = "over"
-
-            sealed = sealed_map.get(node_id, False)
-
-            pinned_overrides: list = []
-            overrides_path = repo_root / "gen" / slug / ".overrides.json"
-            if overrides_path.is_file():
-                try:
-                    data = _read_json_file(overrides_path)
-                except (json.JSONDecodeError, OSError):
-                    data = None
-                if isinstance(data, list):
-                    pinned_overrides = data
-
+                size_status = "unknown"
             nodes[node_id] = {
                 "type": "component",
                 "verification": verification,
                 "provenance": provenance,
                 "size_status": size_status,
-                "sealed": sealed,
-                "pinned_overrides": pinned_overrides,
+                "sealed": _sealed(repo_root, slug),
+                "pinned_overrides": _overrides(repo_root, slug),
             }
+            components.append(node_id)
+        elif kind == "capability":
+            nodes[node_id] = {"type": "capability"}
+            capabilities.append(node_id)
+        else:
+            nodes[node_id] = {"type": "var"}
+            variables.append(node_id)
 
-    edges = [
-        {"from": source_id, "to": target_id, "kind": edge_type}
-        for source_id, target_id, edge_type in edge_rows
-    ]
-    edges.sort(key=lambda e: (e["from"], e["to"], e["kind"]))
+    realized = {e["to"] for e in edges if e["kind"] == "realizes"}
+    used_vars = {e["to"] for e in edges if e["kind"] == "uses_var"}
+    depended_on = {e["to"] for e in edges if e["kind"] == "depends_on"}
+    realizers = {e["from"] for e in edges if e["kind"] == "realizes"}
 
-    capability_ids = {node_id for node_id, kind in node_rows if kind == "capability"}
-    var_ids = {node_id for node_id, kind in node_rows if kind == "var"}
-    component_ids = {node_id for node_id, kind in node_rows if kind == "component"}
-
-    realizes_targets = {e["to"] for e in edges if e["kind"] == "realizes"}
-    realizes_sources = {e["from"] for e in edges if e["kind"] == "realizes"}
-    uses_var_targets = {e["to"] for e in edges if e["kind"] == "uses_var"}
-    depends_on_targets = {e["to"] for e in edges if e["kind"] == "depends_on"}
-
-    orphan_capabilities = sum(1 for c in capability_ids if c not in realizes_targets)
-    orphan_capability_rate = (
-        orphan_capabilities / len(capability_ids) if capability_ids else 0.0
-    )
-
-    orphan_vars = sum(1 for v in var_ids if v not in uses_var_targets)
-    orphan_var_rate = orphan_vars / len(var_ids) if var_ids else 0.0
-
-    orphan_components = sum(
-        1
-        for c in component_ids
-        if c not in depends_on_targets and c not in realizes_sources
-    )
-    orphan_component_rate = (
-        orphan_components / len(component_ids) if component_ids else 0.0
+    orphan_caps = sum(1 for c in capabilities if c not in realized)
+    orphan_vars = sum(1 for v in variables if v not in used_vars)
+    orphan_comps = sum(
+        1 for c in components if c not in depended_on and c not in realizers
     )
 
     aggregates = {
-        "orphan_capability_rate": orphan_capability_rate,
-        "orphan_component_rate": orphan_component_rate,
-        "orphan_var_rate": orphan_var_rate,
+        "orphan_capability_rate": _rate(orphan_caps, len(capabilities)),
+        "orphan_component_rate": _rate(orphan_comps, len(components)),
+        "orphan_var_rate": _rate(orphan_vars, len(variables)),
     }
 
     return CorpusGraph(nodes=nodes, edges=edges, aggregates=aggregates)
 
 
-def write_corpus_graph(graph: CorpusGraph, repo_root: Path) -> Path:
-    repo_root = Path(repo_root)
-    out_dir = repo_root / "verification"
+def write_corpus_graph(graph, repo_root):
+    out_dir = Path(repo_root) / "verification"
     out_dir.mkdir(parents=True, exist_ok=True)
-    out_path = out_dir / "corpus-graph.json"
-    out_path.write_bytes(graph.to_json_bytes())
-    return out_path
+    path = out_dir / "corpus-graph.json"
+    path.write_bytes(graph.to_json_bytes())
+    return path
