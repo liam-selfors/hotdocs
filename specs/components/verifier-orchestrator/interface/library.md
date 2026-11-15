@@ -31,3 +31,5 @@ naming a capability file the fixture also writes under `specs/product/`
 (`R-LINT-006`). Name fixture functions other than `foo`:
 `spec-bundle-assembler`'s interface text declares `foo(x)`, which
 `test-author`'s fake-arity check (`R-AUTHOR-020`) would match.
+
+Implements: `specs/architecture/step-phrase-grammar.md`
