@@ -18,3 +18,8 @@ size from `size_status`; exemptions from `sealed` and
 `pinned_overrides`; owners from `owners`. A field that is `null` or
 empty shows as absent, never as an error. Every value written into a
 page is HTML-escaped.
+
+The DAG view (`R-DOCS-001`) holds one element per node, linking to its
+detail page, and one per edge, with no coordinates: a script embedded in
+the page lays them out and filters them in the browser, so the Python
+code computes no layout.
