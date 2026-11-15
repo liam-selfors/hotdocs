@@ -12,15 +12,20 @@ SAMPLE_GRAPH = {
         "P-ZERO-EDIT": {"type": "capability"},
         "comp-foo": {
             "type": "component",
+            # CorpusGraph.md's shape (D286): verification is the manifest's
+            # verification_report, documents the component's spec files.
             "verification": {
-                "requirements": [{"id": "R-FOO-001", "status": "pass"}],
-                "acceptance": [{"id": "AC-FOO-001", "kind": "generated-test", "result": "pass"}],
+                "criteria": [{"id": "AC-FOO-001", "covers": "R-FOO-001",
+                              "kind": "generated-test", "result": "pass"}],
+                "requirement_results": {"R-FOO-001": "pass"},
+                "overall": "pass",
             },
             "provenance": {"model_pin": "claude-sonnet-5", "prompt_version": "v3"},
             "size_status": "ok",
             "sealed": False,
             "pinned_overrides": [],
-            "owners": ["pipeline-team", "cross_model_divergence_check"],
+            "owners": ["pipeline-team"],
+            "documents": {"component.md": "# Foo\n\nFoo does a thing."},
         },
         "VAR-FOO-URL": {"type": "var"},
     },
