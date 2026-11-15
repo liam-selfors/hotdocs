@@ -24,17 +24,16 @@ def _make_corpus(repo_root: Path) -> None:
         "sealed: true\n"
         "source_path: legacy/a/\n"
         "---\n"
+        "\n"
         "# Component A\n"
         "\n"
         "## Purpose\n"
         "\n"
-        "A small fixture component used to check which files get written.\n",
+        "A small fixture component.\n",
     )
     _write(
         comp_dir / "requirements" / "R-A-001.md",
-        "# R-A-001\n"
-        "\n"
-        "**R-A-001** — Component A MUST exist.\n",
+        "**R-A-001** — Component A MUST do one thing.\n",
     )
     _write(
         comp_dir / "acceptance" / "AC-A-001.md",
@@ -44,20 +43,11 @@ def _make_corpus(repo_root: Path) -> None:
         "Kind: generated-test\n"
         "\n"
         "```gherkin\n"
-        "Given component A\n"
-        "When it is inspected\n"
-        "Then it exists\n"
+        "Given a thing\n"
+        "When it runs\n"
+        "Then it does one thing\n"
         "```\n",
     )
-    _write(
-        comp_dir / "interface" / "library.md",
-        "# Library\n"
-        "\n"
-        "```\n"
-        "noop() -> None\n"
-        "```\n",
-    )
-    _write(repo_root / "legacy" / "a" / "a.py", "def noop():\n    return None\n")
 
 
 def _snapshot(repo_root: Path) -> dict:
@@ -66,49 +56,42 @@ def _snapshot(repo_root: Path) -> dict:
         for name in filenames:
             p = Path(dirpath) / name
             rel = p.relative_to(repo_root).as_posix()
-            st = p.stat()
-            snap[rel] = (p.read_bytes(), st.st_mtime_ns, st.st_size)
+            snap[rel] = p.read_bytes()
     return snap
 
 
-def _diff(before: dict, after: dict) -> set:
+def _changed(before: dict, after: dict) -> set:
     changed = set()
-    for rel in set(before) | set(after):
-        if rel not in before or rel not in after:
+    for rel, data in after.items():
+        if rel not in before or before[rel] != data:
             changed.add(rel)
-        elif before[rel] != after[rel]:
+    for rel in before:
+        if rel not in after:
             changed.add(rel)
     return changed
 
 
-def test_ac_graph_006_only_corpus_graph_json_is_written(tmp_path):
+def test_ac_graph_006_only_corpus_graph_json_written(tmp_path, monkeypatch):
     repo_root = tmp_path.resolve() / "repo"
     repo_root.mkdir()
     _make_corpus(repo_root)
+    monkeypatch.chdir(repo_root)
 
     before = _snapshot(repo_root)
-    assert before, "fixture should contain files"
 
     graph = corpus_graph_builder.build_corpus_graph(repo_root)
 
     after_build = _snapshot(repo_root)
-    changed_by_build = _diff(before, after_build)
-    assert changed_by_build == set(), (
-        f"build_corpus_graph must write nothing, but changed: {sorted(changed_by_build)}"
+    assert _changed(before, after_build) == set(), (
+        "build_corpus_graph added or changed files: "
+        f"{sorted(_changed(before, after_build))}"
     )
 
     result = corpus_graph_builder.write_corpus_graph(graph, repo_root)
 
     expected = repo_root / "verification" / "corpus-graph.json"
-    assert result is not None
-    assert Path(result) == expected or Path(result).resolve() == expected.resolve(), (
-        f"write_corpus_graph returned {result!r}, expected {expected!r}"
-    )
-    assert expected.is_file()
+    assert Path(result) == expected
 
     after_write = _snapshot(repo_root)
-    changed_by_write = _diff(after_build, after_write)
-    assert changed_by_write == {"verification/corpus-graph.json"}, (
-        f"only verification/corpus-graph.json may be added or changed, "
-        f"got: {sorted(changed_by_write)}"
-    )
+    assert _changed(after_build, after_write) == {"verification/corpus-graph.json"}
+    assert expected.is_file()

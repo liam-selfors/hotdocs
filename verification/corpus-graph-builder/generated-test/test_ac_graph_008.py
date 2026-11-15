@@ -4,45 +4,46 @@ from pathlib import Path
 import corpus_graph_builder
 
 
+def field(value, name):
+    return value[name] if isinstance(value, dict) else getattr(value, name)
+
+
 GENERATED_AT = "2026-11-08T00:19:53Z"
 
 
-def _component_md(slug, depends_on):
-    deps = "[" + ", ".join(depends_on) + "]"
-    return (
+def _write(path: Path, text: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+
+
+def _component(repo_root: Path, slug: str, depends_on: str) -> None:
+    upper = slug.upper()
+    base = repo_root / "specs" / "components" / slug
+    _write(
+        base / "component.md",
         "---\n"
         f"id: comp-{slug}\n"
-        f"title: Component {slug.upper()}\n"
+        f"title: Component {upper}\n"
         "status: draft\n"
-        "owners: [test-team]\n"
-        f"depends_on: {deps}\n"
+        "owners: [pipeline-team]\n"
+        f"depends_on: {depends_on}\n"
         "realizes: []\n"
         "uses_var: []\n"
         "sealed: true\n"
         f"source_path: legacy/{slug}/\n"
         "---\n"
-        "\n"
         f"# comp-{slug}\n"
         "\n"
         "## Purpose\n"
         "\n"
-        f"A small synthetic component named {slug} used as a test fixture.\n"
+        f"A small fixture component named {slug}.\n",
     )
-
-
-def _write_component(repo_root, slug, depends_on):
-    upper = slug.upper()
-    comp_dir = repo_root / "specs" / "components" / slug
-    (comp_dir / "requirements").mkdir(parents=True, exist_ok=True)
-    (comp_dir / "acceptance").mkdir(parents=True, exist_ok=True)
-    (comp_dir / "component.md").write_text(
-        _component_md(slug, depends_on), encoding="utf-8"
+    _write(
+        base / "requirements" / f"R-{upper}-001.md",
+        f"**R-{upper}-001** — The component MUST do one thing.\n",
     )
-    (comp_dir / "requirements" / f"R-{upper}-001.md").write_text(
-        f"**R-{upper}-001** — The component MUST do one small thing.\n",
-        encoding="utf-8",
-    )
-    (comp_dir / "acceptance" / f"AC-{upper}-001.md").write_text(
+    _write(
+        base / "acceptance" / f"AC-{upper}-001.md",
         f"# AC-{upper}-001\n"
         "\n"
         f"Covers: R-{upper}-001\n"
@@ -51,31 +52,28 @@ def _write_component(repo_root, slug, depends_on):
         "```gherkin\n"
         "Given an input\n"
         "When the component runs\n"
-        "Then it does the small thing\n"
+        "Then it does one thing\n"
         "```\n",
-        encoding="utf-8",
     )
 
 
-def _build_fixture(repo_root):
-    _write_component(repo_root, "a", [])
-    _write_component(repo_root, "b", ["comp-a"])
-    manifest_dir = repo_root / "verification" / "a"
-    manifest_dir.mkdir(parents=True, exist_ok=True)
-    (manifest_dir / ".provenance.json").write_text(
-        json.dumps(
-            {
-                "generated_at": GENERATED_AT,
-                "verification_report": {"overall": "pass"},
-            }
-        ),
-        encoding="utf-8",
+def _make_fixture(repo_root: Path) -> None:
+    _component(repo_root, "a", "[]")
+    _component(repo_root, "b", "[comp-a]")
+    manifest = {
+        "generated_at": GENERATED_AT,
+        "verification_report": {"overall": "pass"},
+    }
+    _write(
+        repo_root / "verification" / "a" / ".provenance.json",
+        json.dumps(manifest),
     )
 
 
 def test_ac_graph_008_graph_is_deterministic_and_plain_json(tmp_path):
-    repo_root = Path(tmp_path)
-    _build_fixture(repo_root)
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    _make_fixture(repo_root)
 
     graph1 = corpus_graph_builder.build_corpus_graph(repo_root)
     graph2 = corpus_graph_builder.build_corpus_graph(repo_root)
@@ -101,9 +99,10 @@ def test_ac_graph_008_graph_is_deterministic_and_plain_json(tmp_path):
     assert written1 == written2
 
     for raw in (bytes1, bytes2, written1, written2):
-        data = json.loads(raw.decode("utf-8"))
-        node = data["nodes"]["comp-a"]
+        loaded = json.loads(raw)
+        node = loaded["nodes"]["comp-a"]
         provenance = node["provenance"]
+        assert isinstance(provenance, dict)
         assert isinstance(provenance["generated_at"], str)
         assert provenance["generated_at"] == GENERATED_AT
         assert node["verification"] == {"overall": "pass"}

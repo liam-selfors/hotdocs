@@ -9,87 +9,66 @@ def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def _write(path: Path, text: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text, encoding="utf-8")
+def _flow(items):
+    return "[" + ", ".join(items) + "]"
 
 
-def _component(repo_root: Path, slug: str, depends_on=(), realizes=(), uses_var=()):
-    def flow(items):
-        return "[" + ", ".join(items) + "]"
-
-    upper = slug.upper()
-    _write(
-        repo_root / "specs" / "components" / slug / "component.md",
+def _write_component(repo_root: Path, slug: str, depends_on=(), realizes=(), uses_var=()):
+    comp_dir = repo_root / "specs" / "components" / slug
+    comp_dir.mkdir(parents=True, exist_ok=True)
+    text = (
         "---\n"
         f"id: comp-{slug}\n"
-        f"title: Component {upper}\n"
+        f"title: Component {slug}\n"
         "status: draft\n"
-        f"owners: [team-{slug}]\n"
-        f"depends_on: {flow(depends_on)}\n"
-        f"realizes: {flow(realizes)}\n"
-        f"uses_var: {flow(uses_var)}\n"
-        "sealed: false\n"
+        "owners: [pipeline-team]\n"
+        f"depends_on: {_flow(depends_on)}\n"
+        f"realizes: {_flow(realizes)}\n"
+        f"uses_var: {_flow(uses_var)}\n"
+        "sealed: true\n"
+        f"source_path: legacy/{slug}/\n"
         "---\n"
         "\n"
-        f"# Component {upper}\n"
+        f"# comp-{slug}\n"
         "\n"
         "## Purpose\n"
         "\n"
-        f"Does the work of component {slug}.\n",
+        f"A small synthetic fixture component named {slug}.\n"
     )
-    _write(
-        repo_root / "specs" / "components" / slug / "requirements" / f"R-{upper}-001.md",
-        f"**R-{upper}-001** — The component MUST do its work.\n",
-    )
-    _write(
-        repo_root / "specs" / "components" / slug / "acceptance" / f"AC-{upper}-001.md",
-        f"# AC-{upper}-001\n"
-        "\n"
-        f"Covers: R-{upper}-001\n"
-        "Kind: llm-judge\n"
-        "\n"
-        "```gherkin\n"
-        "Given the component exists\n"
-        "When it runs\n"
-        "Then it does its work\n"
-        "```\n",
-    )
+    (comp_dir / "component.md").write_text(text, encoding="utf-8")
 
 
-def _capability(repo_root: Path, name: str):
-    _write(
-        repo_root / "specs" / "product" / f"{name.lower()}.md",
+def _write_capability(repo_root: Path, name: str):
+    prod_dir = repo_root / "specs" / "product"
+    prod_dir.mkdir(parents=True, exist_ok=True)
+    text = (
         "---\n"
         f"id: P-{name.upper()}\n"
         f"title: Capability {name}\n"
         "status: draft\n"
-        "owners: [product-team]\n"
+        "owners: [pipeline-team]\n"
         "---\n"
         "\n"
-        f"# Capability {name}\n"
+        f"# P-{name.upper()}\n"
         "\n"
-        "A capability.\n",
+        "A synthetic fixture capability.\n"
     )
-
-
-def _aggregates(graph):
-    return field(graph, "aggregates")
+    (prod_dir / f"{name.lower()}.md").write_text(text, encoding="utf-8")
 
 
 def test_orphan_rates_computed_for_mixed_corpus(tmp_path):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
 
-    _capability(repo_root, "ONE")
-    _capability(repo_root, "TWO")
-    _component(repo_root, "a", realizes=["P-ONE"])
-    _component(repo_root, "b")
-    _component(repo_root, "c", depends_on=["comp-b"])
+    _write_capability(repo_root, "one")
+    _write_capability(repo_root, "two")
+    _write_component(repo_root, "a", realizes=["P-ONE"])
+    _write_component(repo_root, "b")
+    _write_component(repo_root, "c", depends_on=["comp-b"])
 
     graph = corpus_graph_builder.build_corpus_graph(repo_root)
+    aggregates = field(graph, "aggregates")
 
-    aggregates = _aggregates(graph)
     cap_rate = field(aggregates, "orphan_capability_rate")
     comp_rate = field(aggregates, "orphan_component_rate")
 
@@ -98,7 +77,7 @@ def test_orphan_rates_computed_for_mixed_corpus(tmp_path):
     assert cap_rate == pytest.approx(0.5)
     assert comp_rate == pytest.approx(1 / 3)
 
-    # The serialized form carries the same computed values.
+    # The same computed values appear in the serialized shape.
     as_dict = graph.to_dict()
     assert as_dict["aggregates"]["orphan_capability_rate"] == pytest.approx(0.5)
     assert as_dict["aggregates"]["orphan_component_rate"] == pytest.approx(1 / 3)
@@ -108,13 +87,12 @@ def test_orphan_capability_rate_zero_with_no_capabilities(tmp_path):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
 
-    _component(repo_root, "solo")
+    _write_component(repo_root, "solo")
 
     graph = corpus_graph_builder.build_corpus_graph(repo_root)
+    aggregates = field(graph, "aggregates")
 
-    aggregates = _aggregates(graph)
     cap_rate = field(aggregates, "orphan_capability_rate")
-
     assert isinstance(cap_rate, (int, float)) and not isinstance(cap_rate, bool)
     assert cap_rate == 0.0
 
