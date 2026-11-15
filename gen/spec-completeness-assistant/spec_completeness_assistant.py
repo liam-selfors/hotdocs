@@ -1,441 +1,300 @@
-from __future__ import annotations
+"""Spec Completeness Assistant (comp-spec-completeness-assistant).
+
+Advisory only (R-ASSIST-006): nothing here can block a merge. The report is
+returned to the caller and never fed into any gate.
+
+R-ASSIST-008: every suggestion in a ``CompletenessReport`` is addressable by
+a stable id (a lint finding's ``rule_id``, a component id in
+``predicted_blast_radius``/``hint_previews``, a redundancy flag's
+``new_requirement``/``overlaps_with`` R-ids), which is the hook a UI/tooling
+layer uses to record a developer's accepted/overridden response. Capturing
+and storing that response is out of scope here.
+"""
 
 import dataclasses
 import importlib.util
 import json
+import re
 import sys
 from pathlib import Path
 
+_REDUNDANCY_KEYS = ("new_requirement", "overlaps_with", "rationale")
+_FLAGS = ("--changed", "--repo-root", "--format", "--model")
+_FENCE = re.compile(r"^```[^\n]*\n(.*?)\n?```$", re.DOTALL)
 
-# ---------------------------------------------------------------------------
-# Data shapes
-# ---------------------------------------------------------------------------
 
 @dataclasses.dataclass
 class CompletenessReport:
     lint_findings: list
     predicted_blast_radius: list
     hint_previews: dict
-    completeness_score: "float | None"
-    completeness_rationale: "str | None"
+    completeness_score: float | None
+    completeness_rationale: str | None
     redundancy_flags: list
     degraded: bool
 
+    def __getitem__(self, key):
+        return getattr(self, key)
 
-class _UsageError(Exception):
-    pass
+    def get(self, key, default=None):
+        return getattr(self, key, default)
 
+    def to_dict(self):
+        return {f.name: getattr(self, f.name) for f in dataclasses.fields(self)}
 
-# ---------------------------------------------------------------------------
-# Dual dict-or-attribute access
-# ---------------------------------------------------------------------------
 
 def _get(obj, key, default=None):
-    if obj is None:
-        return default
     if isinstance(obj, dict):
         return obj.get(key, default)
     return getattr(obj, key, default)
 
 
-def _asdict_safe(obj):
-    if obj is None:
-        return None
-    if isinstance(obj, dict):
-        return {k: _asdict_safe(v) for k, v in obj.items()}
-    if isinstance(obj, (list, tuple)):
-        return [_asdict_safe(v) for v in obj]
-    if dataclasses.is_dataclass(obj) and not isinstance(obj, type):
-        return {
-            f.name: _asdict_safe(getattr(obj, f.name))
-            for f in dataclasses.fields(obj)
-        }
-    return obj
-
-
-def _finding_to_dict(f):
-    if isinstance(f, dict):
-        return dict(f)
-    if dataclasses.is_dataclass(f) and not isinstance(f, type):
-        return dataclasses.asdict(f)
-    d = {}
-    for field in ("rule_id", "severity", "file", "line", "message", "rationale"):
-        if hasattr(f, field):
-            d[field] = getattr(f, field)
-    return d
-
-
-# ---------------------------------------------------------------------------
-# Dependency loading (R-ASSIST-011)
-# ---------------------------------------------------------------------------
-
-_LOADED_MODULES = {}
-
-
 def _tool_root():
-    here = Path(__file__).resolve()
-    for parent in here.parents:
-        if parent.name == "gen":
-            return parent.parent
-    raise RuntimeError(
-        "spec-completeness-assistant: could not locate tool root "
-        "(no ancestor directory named 'gen')"
-    )
+    gen = next(p for p in Path(__file__).resolve().parents if p.name == "gen")
+    return gen.parent
 
 
-def _dependency_dir(repo_root, slug):
-    repo_root = Path(repo_root)
-    candidate = repo_root / "gen" / slug
-    if candidate.is_dir():
-        return candidate
-    return _tool_root() / "gen" / slug
-
-
-def _load_dependency(repo_root, slug, module_name):
-    dep_dir = _dependency_dir(repo_root, slug)
-    flat_path = dep_dir / f"{module_name}.py"
-    pkg_init = dep_dir / module_name / "__init__.py"
-
-    if flat_path.is_file():
-        load_path = flat_path
-        submodule_locations = None
-    elif pkg_init.is_file():
-        load_path = pkg_init
-        submodule_locations = [str(pkg_init.parent)]
+def _load(slug, module_name, repo_root):
+    base = Path(repo_root) / "gen" / slug
+    if not base.is_dir():
+        base = _tool_root() / "gen" / slug
+    flat = base / f"{module_name}.py"
+    if flat.is_file():
+        spec = importlib.util.spec_from_file_location(module_name, flat)
     else:
-        raise ImportError(
-            f"could not locate dependency module {module_name!r} for "
-            f"{slug!r} under {dep_dir}"
-        )
-
-    cache_key = str(load_path.resolve())
-    cached = _LOADED_MODULES.get(cache_key)
-    if cached is not None:
-        return cached
-
-    reg_name = f"_hotdocs_dep_{slug.replace('-', '_')}__{abs(hash(cache_key))}"
-    if submodule_locations is not None:
+        pkg = base / module_name
         spec = importlib.util.spec_from_file_location(
-            reg_name, str(load_path), submodule_search_locations=submodule_locations
+            module_name, pkg / "__init__.py", submodule_search_locations=[str(pkg)]
         )
-    else:
-        spec = importlib.util.spec_from_file_location(reg_name, str(load_path))
     module = importlib.util.module_from_spec(spec)
-    sys.modules[reg_name] = module
+    sys.modules[module_name] = module
     spec.loader.exec_module(module)
-    _LOADED_MODULES[cache_key] = module
     return module
 
 
-# ---------------------------------------------------------------------------
-# Model-response parsing (R-ASSIST-010)
-# ---------------------------------------------------------------------------
-
-def _unwrap_code_fence(text):
-    text = text.strip()
-    if text.startswith("```"):
-        lines = text.split("\n")
-        if lines and lines[0].startswith("```"):
-            lines = lines[1:]
-        if lines and lines[-1].strip() == "```":
-            lines = lines[:-1]
-        text = "\n".join(lines)
-    return text.strip()
+def _render_findings(findings):
+    return "\n".join(
+        f"- [{_get(f, 'severity')}] {_get(f, 'rule_id')} "
+        f"{_get(f, 'file')}:{_get(f, 'line')}: {_get(f, 'message')}"
+        for f in findings
+    )
 
 
-def _parse_completeness(text):
-    if not text:
-        return None, None
-    try:
-        data = json.loads(_unwrap_code_fence(text))
-    except (json.JSONDecodeError, TypeError, ValueError):
-        return None, None
-    if not isinstance(data, dict):
-        return None, None
-    if "completeness_score" not in data or "completeness_rationale" not in data:
-        return None, None
-    score = data["completeness_score"]
-    if isinstance(score, bool) or not isinstance(score, (int, float)):
-        return None, None
-    rationale = data["completeness_rationale"]
-    if not isinstance(rationale, str) or rationale == "":
-        return None, None
-    score = max(0.0, min(1.0, float(score)))
-    return score, rationale
-
-
-def _parse_redundancy(text):
-    if not text:
-        return []
-    try:
-        data = json.loads(_unwrap_code_fence(text))
-    except (json.JSONDecodeError, TypeError, ValueError):
-        return []
-    if not isinstance(data, dict):
-        return []
-    flags = data.get("redundancy_flags")
-    if not isinstance(flags, list):
-        return []
-    result = []
-    for entry in flags:
-        if not isinstance(entry, dict):
-            continue
-        new_req = entry.get("new_requirement")
-        overlaps = entry.get("overlaps_with")
-        rationale = entry.get("rationale")
-        if not isinstance(new_req, str) or not new_req:
-            continue
-        if not isinstance(overlaps, str) or not overlaps:
-            continue
-        if not isinstance(rationale, str) or not rationale:
-            continue
-        result.append(
-            {
-                "new_requirement": new_req,
-                "overlaps_with": overlaps,
-                "rationale": rationale,
-            }
+def _render_bundles(bundles):
+    parts = []
+    for cid, bundle in bundles.items():
+        parts.append(
+            f"### {cid}\n\n#### SPEC\n{_get(bundle, 'spec')}\n\n"
+            f"#### INTERFACE\n{_get(bundle, 'interface')}\n\n"
+            f"#### DEPENDENCY INTERFACES\n"
+            f"{json.dumps(_get(bundle, 'dependency_interfaces'), indent=2)}\n\n"
+            f"#### GLOSSARY\n{_get(bundle, 'glossary')}"
         )
-    return result
+    return "\n\n".join(parts)
 
 
-def _build_completeness_prompt(changed_ids, predicted_blast_radius, lint_findings, hint_previews):
+def _completeness_prompt(changed_ids, findings, radius, bundles):
     return (
-        "You are assessing the completeness of a draft spec change before "
-        "it is submitted to the real merge pipeline.\n\n"
-        f"Changed requirement ids: {json.dumps(list(changed_ids))}\n"
-        f"Predicted blast radius (impacted components): "
-        f"{json.dumps(predicted_blast_radius)}\n"
-        f"Lint findings against the draft: {json.dumps(lint_findings, default=str)}\n"
-        f"Hint-mode previews for impacted components: "
-        f"{json.dumps(hint_previews, default=str)}\n\n"
-        "Judge completeness considering: (1) whether the touched "
-        "requirements have present, non-trivial acceptance criteria; "
-        "(2) whether a dependent's interface/ content looks like it "
-        "needs a matching update that was not made; (3) whether the "
-        "change's Definitions entries conflict with the glossary (build "
-        "on, rather than re-detect, the glossary-conformance lint "
-        "findings above).\n\n"
-        "Respond with ONLY JSON of exactly this shape, no surrounding "
-        "prose:\n"
-        '{"completeness_score": 0.0, "completeness_rationale": "..."}'
+        "You are assessing whether a draft spec change is complete.\n"
+        f"Changed spec ids: {', '.join(changed_ids)}\n"
+        f"Predicted blast radius: {', '.join(radius)}\n\n"
+        "spec-linter findings (including any R-LINT-011/R-LINT-015 glossary "
+        "findings; surface them, do not re-detect them):\n"
+        f"{_render_findings(findings)}\n\n"
+        "Judge: whether touched requirements have present, non-trivial "
+        "acceptance criteria; whether a dependent's interface/ content looks "
+        "like it needs a matching update that was not made; whether the "
+        "change's Definitions entries conflict with the glossary.\n\n"
+        "Impacted components' hint-mode spec bundles:\n\n"
+        f"{_render_bundles(bundles)}\n\n"
+        "Reply with only a JSON object of exactly this shape:\n"
+        '{"completeness_score": <number 0.0-1.0>, '
+        '"completeness_rationale": "<structured rationale>"}\n'
     )
 
 
-def _build_redundancy_prompt(changed_ids, predicted_blast_radius, hint_previews):
+def _redundancy_prompt(changed_ids, bundles):
     return (
-        "You are checking whether a draft spec change restates behavior "
-        "already specified elsewhere in the corpus (semantic overlap, not "
-        "structural duplication).\n\n"
-        f"Changed requirement ids: {json.dumps(list(changed_ids))}\n"
-        f"Predicted blast radius (impacted components): "
-        f"{json.dumps(predicted_blast_radius)}\n"
-        f"Hint-mode previews for impacted components: "
-        f"{json.dumps(hint_previews, default=str)}\n\n"
-        "For each changed requirement id that restates behavior already "
-        "specified by a different, pre-existing requirement, report an "
-        "overlap. Only include entries for a real judgment call that "
-        "actually fired.\n\n"
-        "Respond with ONLY JSON of exactly this shape, no surrounding "
-        "prose:\n"
-        '{"redundancy_flags": [{"new_requirement": "R-id", '
-        '"overlaps_with": "R-id", "rationale": "..."}]}'
+        "You are checking a draft spec change for redundancy: does any changed "
+        "requirement restate behavior already specified elsewhere in the "
+        "corpus, even if worded differently?\n"
+        f"Changed requirement ids: {', '.join(changed_ids)}\n\n"
+        "Corpus context (impacted components' hint-mode spec bundles):\n\n"
+        f"{_render_bundles(bundles)}\n\n"
+        "Reply with only a JSON object of exactly this shape, listing only "
+        "real overlaps (an empty list when there are none):\n"
+        '{"redundancy_flags": [{"new_requirement": "<changed R-id>", '
+        '"overlaps_with": "<pre-existing R-id>", "rationale": "<why>"}]}\n'
     )
 
 
-# ---------------------------------------------------------------------------
-# Library entry point
-# ---------------------------------------------------------------------------
+def _complete_json(llm, prompt, model, llm_backend):
+    response = llm.complete(prompt, model, backend=llm_backend)
+    if _get(response, "model_call_error"):
+        return None
+    text = _get(response, "text").strip()
+    match = _FENCE.match(text)
+    if match:
+        text = match.group(1)
+    try:
+        data = json.loads(text)
+    except ValueError:
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def _is_number(value):
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+def _nonempty_str(value):
+    return isinstance(value, str) and bool(value.strip())
+
 
 def assist(changed_ids, repo_root, model=None, *, llm_backend=None):
     repo_root = Path(repo_root)
     degraded = model is None
 
-    spec_linter = _load_dependency(repo_root, "spec-linter", "spec_linter")
+    spec_linter = _load("spec-linter", "spec_linter", repo_root)
     lint_report = spec_linter.lint(None, repo_root)
-    raw_findings = _get(lint_report, "findings", []) or []
-    lint_findings = [_finding_to_dict(f) for f in raw_findings]
-    has_hard_fail = any(_get(f, "severity") == "fail" for f in raw_findings)
+    findings = list(_get(lint_report, "findings"))
+    if any(_get(f, "severity") == "fail" for f in findings):
+        return CompletenessReport(findings, [], {}, None, None, [], degraded)
 
-    if has_hard_fail:
-        return CompletenessReport(
-            lint_findings=lint_findings,
-            predicted_blast_radius=[],
-            hint_previews={},
-            completeness_score=None,
-            completeness_rationale=None,
-            redundancy_flags=[],
-            degraded=degraded,
-        )
+    impact_analyzer = _load("impact-analyzer", "impact_analyzer", repo_root)
+    blast = impact_analyzer.compute_blast_radius(list(changed_ids), repo_root)
+    radius = [_get(entry, "component_id") for entry in _get(blast, "impacted")]
 
-    impact_analyzer = _load_dependency(repo_root, "impact-analyzer", "impact_analyzer")
-    blast_report = impact_analyzer.compute_blast_radius(list(changed_ids), repo_root)
-    impacted = _get(blast_report, "impacted", []) or []
-    predicted_blast_radius = [_get(entry, "component_id") for entry in impacted]
-
-    spec_bundle_assembler = _load_dependency(
-        repo_root, "spec-bundle-assembler", "spec_bundle_assembler"
-    )
-    generator = None
-    if model is not None:
-        generator = _load_dependency(repo_root, "generator", "generator")
-
-    hint_previews = {}
-    for component_id in predicted_blast_radius:
-        bundle = spec_bundle_assembler.assemble(component_id, repo_root=repo_root, mode="hint")
-        if model is not None:
-            gen_result = generator.generate(
+    assembler = _load("spec-bundle-assembler", "spec_bundle_assembler", repo_root)
+    generator = None if degraded else _load("generator", "generator", repo_root)
+    bundles = {}
+    previews = {}
+    for cid in radius:
+        bundle = assembler.assemble(cid, repo_root=repo_root, mode="hint")
+        bundles[cid] = bundle
+        previews[cid] = bundle
+        if generator is not None:
+            previews[cid] = generator.generate(
                 bundle, model, None, repo_root=repo_root, llm_backend=llm_backend
             )
-            hint_previews[component_id] = _asdict_safe(gen_result)
-        else:
-            hint_previews[component_id] = _asdict_safe(bundle)
 
-    completeness_score = None
-    completeness_rationale = None
-    redundancy_flags = []
+    score = None
+    rationale = None
+    flags = []
+    if not degraded:
+        llm = _load("llm-endpoint", "llm_endpoint", repo_root)
 
-    if model is not None:
-        llm_endpoint = _load_dependency(repo_root, "llm-endpoint", "llm_endpoint")
-
-        completeness_prompt = _build_completeness_prompt(
-            changed_ids, predicted_blast_radius, lint_findings, hint_previews
+        data = _complete_json(
+            llm, _completeness_prompt(changed_ids, findings, radius, bundles),
+            model, llm_backend,
         )
-        response1 = llm_endpoint.complete(completeness_prompt, model, backend=llm_backend)
-        if _get(response1, "model_call_error") is None:
-            completeness_score, completeness_rationale = _parse_completeness(
-                _get(response1, "text")
-            )
+        if data is not None:
+            raw_score = data.get("completeness_score")
+            raw_rationale = data.get("completeness_rationale")
+            if _is_number(raw_score) and _nonempty_str(raw_rationale):
+                score = min(1.0, max(0.0, float(raw_score)))
+                rationale = raw_rationale
 
-        redundancy_prompt = _build_redundancy_prompt(
-            changed_ids, predicted_blast_radius, hint_previews
+        data = _complete_json(
+            llm, _redundancy_prompt(changed_ids, bundles), model, llm_backend
         )
-        response2 = llm_endpoint.complete(redundancy_prompt, model, backend=llm_backend)
-        if _get(response2, "model_call_error") is None:
-            redundancy_flags = _parse_redundancy(_get(response2, "text"))
+        raw_flags = data.get("redundancy_flags") if data is not None else None
+        if isinstance(raw_flags, list):
+            flags = [
+                {k: entry[k] for k in _REDUNDANCY_KEYS}
+                for entry in raw_flags
+                if isinstance(entry, dict)
+                and all(_nonempty_str(entry.get(k)) for k in _REDUNDANCY_KEYS)
+            ]
 
     return CompletenessReport(
-        lint_findings=lint_findings,
-        predicted_blast_radius=predicted_blast_radius,
-        hint_previews=hint_previews,
-        completeness_score=completeness_score,
-        completeness_rationale=completeness_rationale,
-        redundancy_flags=redundancy_flags,
-        degraded=degraded,
+        findings, radius, previews, score, rationale, flags, degraded
     )
 
 
-# ---------------------------------------------------------------------------
-# CLI (R-ASSIST-009)
-# ---------------------------------------------------------------------------
-
-_KNOWN_FLAGS = ("--changed", "--repo-root", "--format", "--model")
-
-
-def _parse_args(argv):
-    changed_ids = []
-    repo_root = None
-    fmt = "text"
-    model = None
-    seen_changed = False
-
-    i = 0
-    n = len(argv)
-
-    while i < n:
-        arg = argv[i]
-        flag = None
-        value = None
-
-        if "=" in arg:
-            candidate_flag = arg.split("=", 1)[0]
-            if candidate_flag in _KNOWN_FLAGS:
-                flag = candidate_flag
-                value = arg.split("=", 1)[1]
-                i += 1
-
-        if flag is None:
-            flag = arg
-            if flag not in _KNOWN_FLAGS:
-                raise _UsageError(f"unknown argument {arg!r}")
-            if i + 1 >= n:
-                raise _UsageError(f"{flag} requires a value")
-            value = argv[i + 1]
-            i += 2
-
-        if flag == "--changed":
-            parts = [p.strip() for p in value.split(",") if p.strip()]
-            changed_ids.extend(parts)
-            seen_changed = True
-        elif flag == "--repo-root":
-            repo_root = value
-        elif flag == "--format":
-            fmt = value
-        elif flag == "--model":
-            model = value
-
-    if not seen_changed or not changed_ids:
-        raise _UsageError("--changed is required")
-    if fmt not in ("json", "text"):
-        raise _UsageError(f"invalid --format: {fmt!r}")
-
-    return changed_ids, repo_root, fmt, model
+def _jsonable(obj):
+    to_json = getattr(obj, "to_json", None)
+    if callable(to_json):
+        value = to_json()
+        return json.loads(value) if isinstance(value, str) else value
+    if dataclasses.is_dataclass(obj):
+        return dataclasses.asdict(obj)
+    return vars(obj)
 
 
 def _render_text(report):
     lines = ["Lint findings:"]
-    if report.lint_findings:
-        for f in report.lint_findings:
-            rule_id = f.get("rule_id")
-            severity = f.get("severity")
-            message = f.get("message")
-            lines.append(f"  - {rule_id} [{severity}] {message}")
-    else:
-        lines.append("  (none)")
-
-    lines.append("")
+    for f in report.lint_findings:
+        lines.append(
+            f"  [{_get(f, 'severity')}] {_get(f, 'rule_id')} "
+            f"{_get(f, 'file')}:{_get(f, 'line')}: {_get(f, 'message')}"
+        )
     lines.append("Predicted blast radius:")
-    if report.predicted_blast_radius:
-        for component_id in report.predicted_blast_radius:
-            lines.append(f"  - {component_id}")
-    else:
-        lines.append("  (none)")
-
+    for cid in report.predicted_blast_radius:
+        lines.append(f"  {cid}")
     if report.completeness_score is not None:
-        lines.append("")
         lines.append(f"Completeness score: {report.completeness_score}")
-        if report.completeness_rationale:
-            lines.append(f"Completeness rationale: {report.completeness_rationale}")
-
-    if report.degraded:
-        lines.append("")
-        lines.append("(degraded: no model configured)")
-
+        lines.append(f"  {report.completeness_rationale}")
+    lines.append("Redundancy flags:")
+    for flag in report.redundancy_flags:
+        lines.append(
+            f"  {flag['new_requirement']} overlaps {flag['overlaps_with']}: "
+            f"{flag['rationale']}"
+        )
+    lines.append(f"Degraded: {str(report.degraded).lower()}")
     return "\n".join(lines)
 
 
-def main(argv=None):
-    if argv is None:
-        argv = sys.argv[1:]
+def _usage(message):
+    print(f"hotdocs assist: {message}", file=sys.stderr)
+    print(
+        "usage: hotdocs assist --changed=<spec-id>... [--repo-root=<dir>] "
+        "[--format=json|text] [--model=<model>]",
+        file=sys.stderr,
+    )
+    return 2
 
-    try:
-        changed_ids, repo_root_str, fmt, model = _parse_args(argv)
-    except _UsageError as exc:
-        print(f"error: {exc}", file=sys.stderr)
-        return 2
 
-    repo_root = Path(repo_root_str) if repo_root_str else Path.cwd()
+def main(argv):
+    changed = []
+    repo_root = Path.cwd()
+    fmt = "text"
+    model = None
+    i = 0
+    while i < len(argv):
+        token = argv[i]
+        flag, eq, value = token.partition("=")
+        if flag not in _FLAGS:
+            return _usage(f"unknown argument: {token}")
+        if not eq:
+            if i + 1 >= len(argv):
+                return _usage(f"{flag} requires a value")
+            i += 1
+            value = argv[i]
+        if flag == "--changed":
+            changed.extend(part.strip() for part in value.split(",") if part.strip())
+        elif flag == "--repo-root":
+            repo_root = Path(value)
+        elif flag == "--format":
+            fmt = value
+        else:
+            model = value
+        i += 1
 
-    report = assist(changed_ids, repo_root, model=model)
+    if not changed:
+        return _usage("--changed is required")
+    if fmt not in ("json", "text"):
+        return _usage(f"invalid --format: {fmt}")
 
+    report = assist(changed, repo_root, model)
     if fmt == "json":
-        print(json.dumps(dataclasses.asdict(report), indent=2, default=str))
+        print(json.dumps(report.to_dict(), default=_jsonable, indent=2))
     else:
         print(_render_text(report))
-
-    has_hard_fail = any(f.get("severity") == "fail" for f in report.lint_findings)
-    return 1 if has_hard_fail else 0
+    if any(_get(f, "severity") == "fail" for f in report.lint_findings):
+        return 1
+    return 0
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(main(sys.argv[1:]))

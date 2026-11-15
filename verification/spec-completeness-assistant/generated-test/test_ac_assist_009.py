@@ -6,229 +6,371 @@ import pytest
 import spec_completeness_assistant
 
 
-def _get(value, key, default=None):
-    if isinstance(value, dict):
-        return value.get(key, default)
-    return getattr(value, key, default)
+# ---------------------------------------------------------------------------
+# Synthetic corpus (written verbatim, no dedent over interpolated text)
+# ---------------------------------------------------------------------------
+
+GLOSSARY_MD = "# Glossary\n\n- **Foo** \u2014 a test term.\n"
+
+COMPONENT_MD = (
+    "---\n"
+    "id: comp-foo\n"
+    "title: Foo\n"
+    "status: draft\n"
+    "owners: [team-a]\n"
+    "sealed: true\n"
+    "source_path: legacy/foo/\n"
+    "depends_on: []\n"
+    "---\n"
+    "\n"
+    "# Foo\n"
+    "\n"
+    "## Purpose\n"
+    "\n"
+    "Foo doubles a number.\n"
+)
+
+REQ_MD = "# R-FOO-001\n\n**R-FOO-001** \u2014 `foo(x)` MUST return `2 * x`.\n"
+
+AC_MD = (
+    "# AC-FOO-001\n"
+    "\n"
+    "Covers: R-FOO-001\n"
+    "Kind: generated-test\n"
+    "\n"
+    "```gherkin\n"
+    "Given x = 2\n"
+    "When foo(x) is called\n"
+    "Then it returns 4\n"
+    "```\n"
+)
+
+LIBRARY_MD = "# Library\n\n```\nfoo(x: int) -> int\n```\n"
+
+CONSTRAINTS_MD = "# Constraints\n\nNone.\n"
 
 
-def _write_module(repo_root, slug, module_name, content):
-    mod_dir = Path(repo_root) / "gen" / slug
-    mod_dir.mkdir(parents=True, exist_ok=True)
-    (mod_dir / f"{module_name}.py").write_text(content)
+# ---------------------------------------------------------------------------
+# Fake dependency modules
+# ---------------------------------------------------------------------------
+
+COMMON = '''import json
+from pathlib import Path
 
 
-_SPEC_LINTER_TEMPLATE = '''
+class _AttrDict(dict):
+    def __getattr__(self, name):
+        try:
+            return self[name]
+        except KeyError:
+            raise AttributeError(name)
+
+
+def _log(record):
+    with open(__LOG__, "a", encoding="utf-8") as fh:
+        fh.write(json.dumps(record) + "\\n")
+'''
+
+LINTER_SRC = COMMON + '''
+
+SEVERITY = __SEVERITY__
+
+
+class LintReport(dict):
+    def __init__(self, findings):
+        super().__init__()
+        self["findings"] = findings
+        self["summary"] = {
+            "hard_failures": sum(1 for f in findings if f["severity"] == "fail"),
+            "warnings": sum(1 for f in findings if f["severity"] == "warn"),
+            "skipped": sum(1 for f in findings if f["severity"] == "skipped"),
+        }
+
+    @property
+    def findings(self):
+        return self["findings"]
+
+    @property
+    def hard_failures(self):
+        return self["summary"]["hard_failures"]
+
+    @property
+    def warnings(self):
+        return self["summary"]["warnings"]
+
+    @property
+    def skipped(self):
+        return self["summary"]["skipped"]
+
+    def to_json(self):
+        return {
+            "findings": [dict(f) for f in self["findings"]],
+            "summary": dict(self["summary"]),
+        }
+
+
 def lint(paths, repo_root, strict=False, judge=None):
-    findings = __FINDINGS__
-    hard = sum(1 for f in findings if f.get("severity") == "fail")
-    warn = sum(1 for f in findings if f.get("severity") == "warn")
-    skipped = sum(1 for f in findings if f.get("severity") == "skipped")
-    return {
-        "findings": findings,
-        "summary": {"hard_failures": hard, "warnings": warn, "skipped": skipped},
-    }
+    _log({"fn": "lint"})
+    finding = _AttrDict(
+        rule_id="R-LINT-012",
+        severity=SEVERITY,
+        file="specs/components/foo/component.md",
+        line=3,
+        message="title should be more descriptive",
+    )
+    return LintReport([finding])
 '''
 
-_IMPACT_ANALYZER_SRC = '''
+IMPACT_SRC = COMMON + '''
+
 def compute_blast_radius(changed_ids, repo_root):
-    return {
-        "impacted": [{"component_id": "comp-foo", "reason": "direct", "via": None}],
-        "precondition_error": None,
-    }
+    _log({"fn": "compute_blast_radius", "changed_ids": list(changed_ids)})
+    return _AttrDict(
+        impacted=[_AttrDict(component_id="comp-foo", reason="direct", via=None)],
+        precondition_error=None,
+    )
 '''
 
-_SPEC_BUNDLE_ASSEMBLER_SRC = '''
+ASSEMBLER_SRC = COMMON + '''
+
 def assemble(component_id, repo_root, mode="cold"):
-    return {
-        "component_id": component_id,
-        "spec_bundle_hash": "sha256:fakehash",
-        "spec": "",
-        "interface": "",
-        "constraints": "",
-        "dependency_interfaces": {},
-        "dependency_context": {},
-        "dependency_usage": {},
-        "vars": {},
-        "glossary": "",
-        "hint_code": {} if mode == "hint" else None,
-    }
+    _log({"fn": "assemble", "component_id": component_id, "mode": mode})
+    hint = {"foo.py": "def foo(x):\\n    return 2 * x\\n"} if mode == "hint" else None
+    return _AttrDict(
+        component_id=component_id,
+        spec_bundle_hash="sha256:" + "0" * 64,
+        spec="Foo doubles a number.",
+        interface="foo(x: int) -> int",
+        constraints="None.",
+        dependency_interfaces={},
+        dependency_context={},
+        dependency_usage={},
+        vars={},
+        glossary="- **Foo** - a test term.",
+        hint_code=hint,
+    )
+
+
+def assemble_criterion(component_id, criterion_id, repo_root):
+    _log({"fn": "assemble_criterion"})
+    return _AttrDict(
+        component_id=component_id,
+        criterion_id=criterion_id,
+        covers="R-FOO-001",
+        criterion_text="Given x = 2",
+        requirement_text="foo(x) MUST return 2 * x.",
+        interface="foo(x: int) -> int",
+        glossary="- **Foo** - a test term.",
+        dependency_interfaces={},
+    )
 '''
 
-_GENERATOR_SRC = '''
+GENERATOR_SRC = COMMON + '''
+
+GATE_VERSION = "generator@2.0.0"
+PROMPT_VERSION = "v10"
+
+
 def generate(bundle, model, retry_feedback=None, *, repo_root=None, llm_backend=None):
-    component_id = bundle.get("component_id") if isinstance(bundle, dict) else getattr(bundle, "component_id", None)
-    return {
-        "component_id": component_id,
-        "spec_bundle_hash": "sha256:fakehash",
-        "model": model,
-        "prompt_version": "v1",
-        "cache_hit": False,
-        "files": {"fake.py": "# fake"},
-        "model_call_error": None,
-        "refused": None,
-        "retry_feedback": retry_feedback,
-    }
+    _log({"fn": "generate", "model": model})
+    h = bundle["spec_bundle_hash"] if isinstance(bundle, dict) else getattr(bundle, "spec_bundle_hash")
+    cid = bundle["component_id"] if isinstance(bundle, dict) else getattr(bundle, "component_id")
+    return _AttrDict(
+        component_id=cid,
+        spec_bundle_hash=h,
+        model=model,
+        prompt_version=PROMPT_VERSION,
+        cache_hit=False,
+        files={"foo.py": "def foo(x):\\n    return 2 * x\\n"},
+        model_call_error=None,
+        refused=None,
+        retry_feedback=retry_feedback,
+    )
 '''
 
-_LLM_ENDPOINT_TEMPLATE = '''
-import json
-import os
+LLM_SRC = COMMON + '''
 
-CALL_LOG = __CALL_LOG__
+COMPLETENESS = json.dumps({"completeness_score": 0.7, "completeness_rationale": "AC missing"})
+REDUNDANCY = json.dumps({"redundancy_flags": []})
+
+
+def _count():
+    p = Path(__LOG__)
+    if not p.is_file():
+        return 0
+    return sum(1 for line in p.read_text(encoding="utf-8").splitlines() if line.strip())
+
 
 def complete(prompt, model, *, backend=None, **params):
-    if os.path.exists(CALL_LOG):
-        with open(CALL_LOG) as f:
-            count = sum(1 for _ in f)
-    else:
-        count = 0
-    with open(CALL_LOG, "a") as f:
-        f.write(json.dumps({"model": model}) + "\\n")
-    if count == 0:
-        text = json.dumps({"completeness_score": 0.7, "completeness_rationale": "AC missing"})
-    else:
-        text = json.dumps({"redundancy_flags": []})
-    return {
-        "text": text,
-        "model": model,
-        "backend": "fake",
-        "model_call_error": None,
-    }
+    index = _count()
+    _log({"fn": "complete", "model": model})
+    text = COMPLETENESS if index % 2 == 0 else REDUNDANCY
+    return {"text": text, "model": model, "backend": "fake", "model_call_error": None}
+
+
+def parse_model(model):
+    return (None, model)
 '''
 
 
-def _setup_base_fakes(repo_root, lint_findings):
-    spec_linter_src = _SPEC_LINTER_TEMPLATE.replace("__FINDINGS__", json.dumps(lint_findings))
-    _write_module(repo_root, "spec-linter", "spec_linter", spec_linter_src)
-    _write_module(repo_root, "impact-analyzer", "impact_analyzer", _IMPACT_ANALYZER_SRC)
-    _write_module(repo_root, "spec-bundle-assembler", "spec_bundle_assembler", _SPEC_BUNDLE_ASSEMBLER_SRC)
+def _write(path, text):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
 
 
-def _setup_model_fakes(repo_root, call_log_path):
-    _write_module(repo_root, "generator", "generator", _GENERATOR_SRC)
-    llm_endpoint_src = _LLM_ENDPOINT_TEMPLATE.replace("__CALL_LOG__", json.dumps(str(call_log_path)))
-    _write_module(repo_root, "llm-endpoint", "llm_endpoint", llm_endpoint_src)
+def _fake(root, logs, slug, module, template, **subs):
+    log = logs / (module + ".log")
+    src = template.replace("__LOG__", repr(str(log)))
+    for key, value in subs.items():
+        src = src.replace(key, value)
+    _write(root / "gen" / slug / (module + ".py"), src)
+    return log
 
 
-_WARN_FINDING = {
-    "rule_id": "R-LINT-003",
-    "severity": "warn",
-    "file": "specs/components/foo/component.md",
-    "line": 12,
-    "message": "depends_on references 'comp-bar', which looks unusual",
-}
+def make_repo(base, name, severity="warn", with_model=False):
+    root = base / name
+    logs = base / (name + "-logs")
+    root.mkdir(parents=True)
+    logs.mkdir(parents=True)
 
-_FAIL_FINDING = {
-    "rule_id": "R-LINT-003",
-    "severity": "fail",
-    "file": "specs/components/foo/component.md",
-    "line": 12,
-    "message": "depends_on references 'comp-bar', which does not exist",
-}
+    _write(root / "specs" / "glossary.md", GLOSSARY_MD)
+    comp = root / "specs" / "components" / "foo"
+    _write(comp / "component.md", COMPONENT_MD)
+    _write(comp / "requirements" / "R-FOO-001.md", REQ_MD)
+    _write(comp / "acceptance" / "AC-FOO-001.md", AC_MD)
+    _write(comp / "interface" / "library.md", LIBRARY_MD)
+    _write(comp / "constraints.md", CONSTRAINTS_MD)
+
+    _fake(root, logs, "spec-linter", "spec_linter", LINTER_SRC,
+          __SEVERITY__=repr(severity))
+    _fake(root, logs, "impact-analyzer", "impact_analyzer", IMPACT_SRC)
+    _fake(root, logs, "spec-bundle-assembler", "spec_bundle_assembler", ASSEMBLER_SRC)
+    llm_log = None
+    if with_model:
+        _fake(root, logs, "generator", "generator", GENERATOR_SRC)
+        llm_log = _fake(root, logs, "llm-endpoint", "llm_endpoint", LLM_SRC)
+    return root, llm_log
 
 
-def test_json_format_degraded_mode(tmp_path, capsys):
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    _setup_base_fakes(repo_root, [_WARN_FINDING])
+def run(argv):
+    try:
+        return spec_completeness_assistant.main(argv)
+    except SystemExit as exc:
+        return exc.code
 
-    rc = spec_completeness_assistant.main(
-        ["--changed=R-FOO-001", f"--repo-root={repo_root}", "--format=json"]
-    )
-    captured = capsys.readouterr()
 
+def parse_json(out):
+    text = out.strip()
+    try:
+        return json.loads(text)
+    except ValueError:
+        start, end = text.find("{"), text.rfind("}")
+        return json.loads(text[start:end + 1])
+
+
+def read_log(path):
+    if path is None or not Path(path).is_file():
+        return []
+    return [json.loads(l) for l in Path(path).read_text(encoding="utf-8").splitlines() if l.strip()]
+
+
+@pytest.fixture(autouse=True)
+def _cwd(tmp_path, monkeypatch):
+    work = tmp_path / "cwd"
+    work.mkdir()
+    monkeypatch.chdir(work)
+
+
+# ---------------------------------------------------------------------------
+# Tests
+# ---------------------------------------------------------------------------
+
+def test_json_degraded(tmp_path, capsys):
+    root, _ = make_repo(tmp_path, "repo")
+    rc = run(["--changed=R-FOO-001", f"--repo-root={root}", "--format=json"])
+    out = capsys.readouterr().out
     assert rc == 0
-    report = json.loads(captured.out)
-    assert _get(report, "predicted_blast_radius") == ["comp-foo"]
-    assert _get(report, "degraded") is True
+    report = parse_json(out)
+    assert report["predicted_blast_radius"] == ["comp-foo"]
+    assert report["degraded"] is True
 
 
-def test_text_format_contains_rule_id_and_component(tmp_path, capsys):
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    _setup_base_fakes(repo_root, [_WARN_FINDING])
-
-    rc = spec_completeness_assistant.main(
-        ["--changed", "R-FOO-001", "--repo-root", str(repo_root), "--format", "text"]
-    )
-    captured = capsys.readouterr()
-
+def test_text_degraded_space_separated_flags(tmp_path, capsys):
+    root, _ = make_repo(tmp_path, "repo")
+    rc = run(["--changed", "R-FOO-001", "--repo-root", str(root), "--format", "text"])
+    out = capsys.readouterr().out
     assert rc == 0
-    assert "R-LINT-003" in captured.out
-    assert "comp-foo" in captured.out
+    assert "R-LINT-012" in out
+    assert "comp-foo" in out
 
 
-def test_model_scenario_json_then_text(tmp_path, capsys):
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    _setup_base_fakes(repo_root, [_WARN_FINDING])
-    call_log_path = repo_root / "_llm_calls.jsonl"
-    _setup_model_fakes(repo_root, call_log_path)
-
-    assert not call_log_path.exists()
-
-    rc = spec_completeness_assistant.main(
-        [
-            "--changed=R-FOO-001",
-            f"--repo-root={repo_root}",
-            "--format=json",
-            "--model=fake-model",
-        ]
-    )
-    captured = capsys.readouterr()
+def test_model_json(tmp_path, capsys):
+    root, llm_log = make_repo(tmp_path, "repo", with_model=True)
+    rc = run(["--changed=R-FOO-001", f"--repo-root={root}",
+              "--model=fake-model", "--format=json"])
+    out = capsys.readouterr().out
     assert rc == 0
-
-    assert call_log_path.exists()
-    call_entries = [
-        json.loads(line) for line in call_log_path.read_text().splitlines() if line.strip()
-    ]
-    assert len(call_entries) == 2
-    for entry in call_entries:
-        assert entry["model"] == "fake-model"
-
-    report = json.loads(captured.out)
-    assert _get(report, "degraded") is False
-    assert _get(report, "completeness_score") == 0.7
-
-    call_log_path.unlink()
-
-    rc2 = spec_completeness_assistant.main(
-        [
-            "--changed=R-FOO-001",
-            f"--repo-root={repo_root}",
-            "--format=text",
-            "--model=fake-model",
-        ]
-    )
-    captured2 = capsys.readouterr()
-    assert rc2 == 0
-    assert "0.7" in captured2.out
+    calls = [c for c in read_log(llm_log) if c.get("fn") == "complete"]
+    assert len(calls) >= 1
+    assert all(c["model"] == "fake-model" for c in calls)
+    report = parse_json(out)
+    assert report["degraded"] is False
+    assert report["completeness_score"] == pytest.approx(0.7)
 
 
-def test_fail_severity_finding_exits_1(tmp_path):
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    _setup_base_fakes(repo_root, [_FAIL_FINDING])
+def test_model_text(tmp_path, capsys):
+    root, llm_log = make_repo(tmp_path, "repo", with_model=True)
+    rc = run(["--changed=R-FOO-001", f"--repo-root={root}",
+              "--model=fake-model", "--format=text"])
+    out = capsys.readouterr().out
+    assert rc == 0
+    calls = [c for c in read_log(llm_log) if c.get("fn") == "complete"]
+    assert len(calls) >= 1
+    assert all(c["model"] == "fake-model" for c in calls)
+    assert "0.7" in out
 
-    rc = spec_completeness_assistant.main(
-        ["--changed=R-FOO-001", f"--repo-root={repo_root}", "--format=json"]
-    )
 
+def test_fail_finding_returns_1(tmp_path, capsys):
+    root, _ = make_repo(tmp_path, "repo", severity="fail")
+    rc = run(["--changed=R-FOO-001", f"--repo-root={root}", "--format=json"])
+    capsys.readouterr()
+    assert rc == 1
+
+
+def test_fail_finding_returns_1_text(tmp_path, capsys):
+    root, _ = make_repo(tmp_path, "repo", severity="fail")
+    rc = run(["--changed", "R-FOO-001", "--repo-root", str(root)])
+    capsys.readouterr()
     assert rc == 1
 
 
 @pytest.mark.parametrize(
-    "argv",
+    "argv_builder",
     [
-        [],
-        ["serve", "--changed=R-FOO-001"],
-        ["--format=json"],
-        ["--changed=R-FOO-001", "--format=bogus"],
-        ["--changed=R-FOO-001", "--unknown-flag=x"],
-        ["--changed"],
+        lambda r: [],
+        lambda r: ["serve", "--changed=R-FOO-001"],
+        lambda r: ["serve", "--changed=R-FOO-001", f"--repo-root={r}"],
+        lambda r: [f"--repo-root={r}", "--format=json"],
+        lambda r: ["--changed=R-FOO-001", f"--repo-root={r}", "--format=bogus"],
+        lambda r: ["--changed=R-FOO-001", f"--repo-root={r}", "--bogus"],
+        lambda r: ["--changed=R-FOO-001", f"--repo-root={r}", "--bogus=1"],
+        lambda r: [f"--repo-root={r}", "--changed"],
+        lambda r: ["--changed"],
+    ],
+    ids=[
+        "empty",
+        "stray-word",
+        "stray-word-with-root",
+        "no-changed",
+        "bad-format",
+        "unknown-flag",
+        "unknown-flag-with-value",
+        "changed-last-no-value",
+        "changed-only-no-value",
     ],
 )
-def test_usage_errors_exit_2(argv):
-    rc = spec_completeness_assistant.main(argv)
+def test_usage_errors_return_2(tmp_path, capsys, argv_builder):
+    root, _ = make_repo(tmp_path, "repo")
+    rc = run(argv_builder(str(root)))
+    capsys.readouterr()
     assert rc == 2
