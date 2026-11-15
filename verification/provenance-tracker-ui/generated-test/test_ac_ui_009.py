@@ -1,243 +1,303 @@
 import json
+from pathlib import Path
 
 import pytest
 
 import provenance_tracker_ui
 
 
-FAKE_PROVENANCE_TRACKER_TEMPLATE = '''
-import json as _json
-from pathlib import Path as _Path
+FAKE_TRACKER_TEMPLATE = '''
+import json
+from pathlib import Path
+
+_LOG_PATH = {log_path!r}
+_RAISE = {raise_value_error!r}
 
 
-class UsageError(Exception):
-    pass
+def _log(record):
+    with open(_LOG_PATH, "a", encoding="utf-8") as fh:
+        fh.write(json.dumps(record) + "\\n")
 
 
-_LOG_PATH = _Path({log_path!r})
-_RAISE_USAGE_ERROR = {raise_usage_error!r}
+def _passing_result(component_id):
+    return {{
+        "hit": True,
+        "verification_report": {{
+            "component_id": component_id,
+            "criteria": [],
+            "requirement_results": {{}},
+            "interface_drift": False,
+            "mutation_score": 1.0,
+            "overall": "pass",
+        }},
+        "license_scan": {{"blocked": False, "findings": []}},
+        "secret_scan": {{"flagged": False, "findings": []}},
+    }}
 
 
 def check_readiness(repo_root, changed_ids=None, model=None, seed=0, llm_backend=None):
-    _LOG_PATH.write_text(_json.dumps({{
-        "changed_ids": changed_ids,
+    _log({{
+        "fn": "check_readiness",
+        "repo_root": str(repo_root),
+        "changed_ids": None if changed_ids is None else list(changed_ids),
         "model": model,
         "seed": seed,
-    }}))
-    if _RAISE_USAGE_ERROR:
-        raise UsageError("fake capability miss, no model given")
-    ids = changed_ids if changed_ids else ["comp-foo", "comp-bar"]
-    components = {{}}
-    for cid in ids:
-        components[cid] = {{
-            "hit": True,
-            "verification_report": {{
-                "component_id": cid,
-                "criteria": [],
-                "requirement_results": {{}},
-                "interface_drift": False,
-                "mutation_score": 1.0,
-                "overall": "pass",
-            }},
-            "license_scan": {{"blocked": False}},
-            "secret_scan": {{"flagged": False}},
-        }}
+    }})
+    if _RAISE:
+        raise ValueError("P-FAKE: capability needs a fresh run but no model was given")
     return {{
-        "scope": "blast-radius" if changed_ids else "whole-corpus",
+        "scope": "blast-radius" if changed_ids is not None else "whole-corpus",
         "ready": True,
-        "components": components,
+        "components": {{
+            "comp-bar": _passing_result("comp-bar"),
+            "comp-foo": _passing_result("comp-foo"),
+        }},
         "capabilities": {{}},
         "not_ready_reasons": [],
     }}
 
 
 def last_requirement_failures(component_id, repo_root):
+    _log({{
+        "fn": "last_requirement_failures",
+        "component_id": component_id,
+        "repo_root": str(repo_root),
+    }})
     return []
 '''
 
 
-CORPUS_GRAPH = {
-    "nodes": {
-        "comp-foo": {
-            "type": "component",
-            "verification": None,
-            "provenance": None,
-            "size_status": "ok",
-            "sealed": True,
-            "pinned_overrides": [],
+def _component_node(slug):
+    return {
+        "type": "component",
+        "verification": None,
+        "provenance": None,
+        "size_status": "ok",
+        "sealed": True,
+        "pinned_overrides": [],
+        "owners": ["test-team"],
+        "documents": {"component.md": "---\nid: comp-%s\n---\n" % slug},
+    }
+
+
+def _corpus_graph():
+    return {
+        "nodes": {
+            "comp-bar": _component_node("bar"),
+            "comp-foo": _component_node("foo"),
         },
-        "comp-bar": {
-            "type": "component",
-            "verification": None,
-            "provenance": None,
-            "size_status": "ok",
-            "sealed": True,
-            "pinned_overrides": [],
+        "edges": [
+            {"from": "comp-foo", "to": "comp-bar", "kind": "depends_on"},
+        ],
+        "aggregates": {
+            "orphan_capability_rate": 0.0,
+            "orphan_component_rate": 0.0,
+            "orphan_var_rate": 0.0,
         },
-    },
-    "edges": [],
-    "aggregates": {
-        "orphan_capability_rate": 0.0,
-        "orphan_component_rate": 0.0,
-        "orphan_var_rate": 0.0,
-    },
-}
+    }
 
 
-def _write_fake_provenance_tracker(repo_root, log_path, raise_usage_error=False):
-    dep_dir = repo_root / "gen" / "provenance-tracker"
-    dep_dir.mkdir(parents=True, exist_ok=True)
-    content = FAKE_PROVENANCE_TRACKER_TEMPLATE.format(
-        log_path=str(log_path),
-        raise_usage_error=raise_usage_error,
-    )
-    (dep_dir / "provenance_tracker.py").write_text(content)
-
-
-def _make_repo_root(
-    tmp_path,
-    name,
-    log_path,
-    raise_usage_error=False,
-    write_corpus_graph=True,
-    corpus_graph_text=None,
-):
+def _make_repo(tmp_path, name="repo", raise_value_error=False, corpus="valid"):
     repo_root = tmp_path / name
-    repo_root.mkdir(parents=True, exist_ok=True)
-    if write_corpus_graph:
-        verification_dir = repo_root / "verification"
-        verification_dir.mkdir(parents=True, exist_ok=True)
-        if corpus_graph_text is None:
-            corpus_graph_text = json.dumps(CORPUS_GRAPH)
-        (verification_dir / "corpus-graph.json").write_text(corpus_graph_text)
-    _write_fake_provenance_tracker(repo_root, log_path, raise_usage_error=raise_usage_error)
-    return repo_root
-
-
-def test_build_with_comma_separated_changed_prints_index_and_passes_changed_ids(tmp_path, capsys):
-    log_path = tmp_path / "log1.json"
-    repo_root = _make_repo_root(tmp_path, "repo1", log_path)
-    out_dir = tmp_path / "out1"
-
-    rc = provenance_tracker_ui.main([
-        "track", "ui", "build",
-        f"--repo-root={repo_root}",
-        f"--out={out_dir}",
-        "--changed=comp-foo,comp-bar",
-    ])
-
-    captured = capsys.readouterr()
-    expected_index = out_dir / "index.html"
-    assert rc == 0
-    assert str(expected_index) in captured.out
-    assert expected_index.exists()
-    log_data = json.loads(log_path.read_text())
-    assert log_data["changed_ids"] == ["comp-foo", "comp-bar"]
-
-
-def test_build_with_space_separated_flags_passes_model_and_seed(tmp_path):
-    log_path = tmp_path / "log2.json"
-    repo_root = _make_repo_root(tmp_path, "repo2", log_path)
-    out_dir = tmp_path / "out2"
-
-    rc = provenance_tracker_ui.main([
-        "track", "ui", "build",
-        "--repo-root", str(repo_root),
-        "--out", str(out_dir),
-        "--changed", "comp-foo",
-        "--model", "fake-model",
-        "--seed", "3",
-    ])
-
-    assert rc == 0
-    index_path = out_dir / "index.html"
-    assert index_path.exists()
-    log_data = json.loads(log_path.read_text())
-    assert log_data["changed_ids"] == ["comp-foo"]
-    assert log_data["model"] == "fake-model"
-    assert log_data["seed"] == 3
-
-
-def test_build_without_out_defaults_to_hotdocs_ui_directory(tmp_path):
-    log_path = tmp_path / "log3.json"
-    repo_root = _make_repo_root(tmp_path, "repo3", log_path)
-
-    rc = provenance_tracker_ui.main([
-        "track", "ui", "build",
-        f"--repo-root={repo_root}",
-        "--changed=comp-foo",
-    ])
-
-    assert rc == 0
-    default_index = repo_root / ".hotdocs" / "ui" / "index.html"
-    assert default_index.exists()
-
-
-def test_build_invalid_corpus_graph_json_returns_1(tmp_path):
-    log_path = tmp_path / "log4.json"
-    repo_root = _make_repo_root(
-        tmp_path, "repo4", log_path, corpus_graph_text="{not valid json"
+    repo_root.mkdir(parents=True)
+    log_path = tmp_path / (name + "-tracker-log.jsonl")
+    fake_dir = repo_root / "gen" / "provenance-tracker"
+    fake_dir.mkdir(parents=True)
+    (fake_dir / "provenance_tracker.py").write_text(
+        FAKE_TRACKER_TEMPLATE.format(
+            log_path=str(log_path), raise_value_error=bool(raise_value_error)
+        ),
+        encoding="utf-8",
     )
-    out_dir = tmp_path / "out4"
+    if corpus is not None:
+        verification = repo_root / "verification"
+        verification.mkdir(parents=True)
+        graph_path = verification / "corpus-graph.json"
+        if corpus == "valid":
+            graph_path.write_text(
+                json.dumps(_corpus_graph(), sort_keys=True, indent=2) + "\n",
+                encoding="utf-8",
+            )
+        elif corpus == "invalid":
+            graph_path.write_text("{ this is not: valid json ,,, ", encoding="utf-8")
+    return repo_root, log_path
 
-    rc = provenance_tracker_ui.main([
-        "track", "ui", "build",
-        f"--repo-root={repo_root}",
-        f"--out={out_dir}",
-    ])
 
+def _readiness_calls(log_path):
+    if not log_path.exists():
+        return []
+    calls = []
+    for line in log_path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        rec = json.loads(line)
+        if rec.get("fn") == "check_readiness":
+            calls.append(rec)
+    return calls
+
+
+def _printed_paths(out_text):
+    paths = []
+    for line in out_text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            paths.append(Path(line).resolve())
+        except Exception:
+            continue
+    return paths
+
+
+def test_build_equals_form_comma_separated_changed(tmp_path, capsys):
+    repo_root, log_path = _make_repo(tmp_path)
+    out_dir = tmp_path / "out1"
+    rc = provenance_tracker_ui.main(
+        [
+            "track",
+            "ui",
+            "build",
+            "--repo-root=%s" % repo_root,
+            "--out=%s" % out_dir,
+            "--changed=comp-foo,comp-bar",
+        ]
+    )
+    captured = capsys.readouterr()
+    assert rc == 0
+    index = out_dir / "index.html"
+    assert index.is_file()
+    assert index.resolve() in _printed_paths(captured.out), captured.out
+    calls = _readiness_calls(log_path)
+    assert calls, "faked check_readiness was never called"
+    assert calls[-1]["changed_ids"] == ["comp-foo", "comp-bar"]
+
+
+def test_build_space_form_with_model_and_seed(tmp_path, capsys):
+    repo_root, log_path = _make_repo(tmp_path)
+    out_dir = tmp_path / "out2"
+    rc = provenance_tracker_ui.main(
+        [
+            "track",
+            "ui",
+            "build",
+            "--repo-root",
+            str(repo_root),
+            "--out",
+            str(out_dir),
+            "--changed",
+            "comp-foo",
+            "--model",
+            "fake-model",
+            "--seed",
+            "3",
+        ]
+    )
+    capsys.readouterr()
+    assert rc == 0
+    assert (out_dir / "index.html").is_file()
+    calls = _readiness_calls(log_path)
+    assert calls, "faked check_readiness was never called"
+    last = calls[-1]
+    assert last["changed_ids"] == ["comp-foo"]
+    assert last["model"] == "fake-model"
+    assert last["seed"] == 3
+
+
+def test_build_default_out_dir(tmp_path, capsys):
+    repo_root, _log_path = _make_repo(tmp_path)
+    rc = provenance_tracker_ui.main(
+        ["track", "ui", "build", "--repo-root=%s" % repo_root]
+    )
+    capsys.readouterr()
+    assert rc == 0
+    assert (repo_root / ".hotdocs" / "ui" / "index.html").is_file()
+
+
+def test_build_invalid_corpus_graph_json_returns_1(tmp_path, capsys):
+    repo_root, _log_path = _make_repo(tmp_path, corpus="invalid")
+    out_dir = tmp_path / "out-invalid"
+    rc = provenance_tracker_ui.main(
+        [
+            "track",
+            "ui",
+            "build",
+            "--repo-root=%s" % repo_root,
+            "--out=%s" % out_dir,
+        ]
+    )
+    capsys.readouterr()
     assert rc == 1
 
 
-def test_build_missing_corpus_graph_returns_2(tmp_path):
-    log_path = tmp_path / "log5a.json"
-    repo_root = _make_repo_root(tmp_path, "repo5a", log_path, write_corpus_graph=False)
-    out_dir = tmp_path / "out5a"
-
-    rc = provenance_tracker_ui.main([
-        "track", "ui", "build",
-        f"--repo-root={repo_root}",
-        f"--out={out_dir}",
-    ])
-
+def test_build_missing_corpus_graph_returns_2(tmp_path, capsys):
+    repo_root, _log_path = _make_repo(tmp_path, corpus=None)
+    out_dir = tmp_path / "out-missing"
+    rc = provenance_tracker_ui.main(
+        [
+            "track",
+            "ui",
+            "build",
+            "--repo-root=%s" % repo_root,
+            "--out=%s" % out_dir,
+        ]
+    )
+    capsys.readouterr()
     assert rc == 2
 
 
-def test_build_dependency_usage_error_returns_2(tmp_path):
-    log_path = tmp_path / "log5b.json"
-    repo_root = _make_repo_root(tmp_path, "repo5b", log_path, raise_usage_error=True)
-    out_dir = tmp_path / "out5b"
-
-    rc = provenance_tracker_ui.main([
-        "track", "ui", "build",
-        f"--repo-root={repo_root}",
-        f"--out={out_dir}",
-    ])
-
+def test_build_check_readiness_value_error_returns_2(tmp_path, capsys):
+    repo_root, _log_path = _make_repo(tmp_path, raise_value_error=True)
+    out_dir = tmp_path / "out-valueerror"
+    rc = provenance_tracker_ui.main(
+        [
+            "track",
+            "ui",
+            "build",
+            "--repo-root=%s" % repo_root,
+            "--out=%s" % out_dir,
+        ]
+    )
+    capsys.readouterr()
     assert rc == 2
 
 
-def test_build_unknown_argument_returns_2(tmp_path):
-    log_path = tmp_path / "log5c.json"
-    repo_root = _make_repo_root(tmp_path, "repo5c", log_path)
-    out_dir = tmp_path / "out5c"
-
-    rc = provenance_tracker_ui.main([
-        "track", "ui", "build",
-        f"--repo-root={repo_root}",
-        f"--out={out_dir}",
-        "--bogus-flag=1",
-    ])
-
+def test_build_unknown_argument_returns_2(tmp_path, capsys):
+    repo_root, _log_path = _make_repo(tmp_path)
+    out_dir = tmp_path / "out-unknown"
+    rc = provenance_tracker_ui.main(
+        [
+            "track",
+            "ui",
+            "build",
+            "--repo-root=%s" % repo_root,
+            "--out=%s" % out_dir,
+            "--no-such-flag=1",
+        ]
+    )
+    capsys.readouterr()
     assert rc == 2
 
 
-def test_serve_subcommand_returns_2():
+def test_serve_returns_2(tmp_path, capsys):
+    repo_root, _log_path = _make_repo(tmp_path)
     rc = provenance_tracker_ui.main(["track", "ui", "serve"])
+    capsys.readouterr()
     assert rc == 2
 
 
-@pytest.mark.parametrize("flag", ["--changed", "--repo-root", "--out", "--model", "--seed"])
-def test_flag_as_last_argument_with_no_value_returns_2(flag):
-    rc = provenance_tracker_ui.main(["track", "ui", "build", flag])
+@pytest.mark.parametrize(
+    "flag", ["--changed", "--repo-root", "--out", "--model", "--seed"]
+)
+def test_flag_last_with_no_value_returns_2(tmp_path, capsys, flag):
+    repo_root, _log_path = _make_repo(tmp_path)
+    out_dir = tmp_path / "out-novalue"
+    argv = ["track", "ui", "build"]
+    if flag != "--repo-root":
+        argv.append("--repo-root=%s" % repo_root)
+    if flag != "--out":
+        argv.append("--out=%s" % out_dir)
+    argv.append(flag)
+    rc = provenance_tracker_ui.main(argv)
+    capsys.readouterr()
     assert rc == 2

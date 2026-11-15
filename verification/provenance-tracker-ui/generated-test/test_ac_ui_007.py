@@ -1,46 +1,42 @@
 import json
-import shutil
-import tempfile
-import unittest
 from pathlib import Path
 
 import provenance_tracker_ui
 
 
-FAKE_PROVENANCE_TRACKER_SOURCE = '''
-import json
+def field(value, name):
+    return value[name] if isinstance(value, dict) else getattr(value, name)
 
-_LOG_PATH = {log_path}
+
+FAKE_TEMPLATE = '''
+import json
+from pathlib import Path
+
+_LOG_PATH = Path({log_path!r})
 
 
 def check_readiness(repo_root, changed_ids=None, model=None, seed=0, llm_backend=None):
-    with open(_LOG_PATH, "a") as f:
-        f.write(json.dumps(changed_ids) + "\\n")
-
+    with open(_LOG_PATH, "a", encoding="utf-8") as fh:
+        fh.write(json.dumps(changed_ids if changed_ids is None else list(changed_ids)) + "\\n")
     scope = "blast-radius" if changed_ids else "whole-corpus"
-
-    verification_report = {{
-        "component_id": "comp-foo",
-        "criteria": [],
-        "requirement_results": {{}},
-        "interface_drift": False,
-        "mutation_score": None,
-        "overall": "pass",
-    }}
-
-    components = {{
-        "comp-foo": {{
-            "hit": True,
-            "verification_report": verification_report,
-            "license_scan": {{"blocked": False}},
-            "secret_scan": {{"flagged": False}},
-        }}
-    }}
-
     return {{
         "scope": scope,
         "ready": True,
-        "components": components,
+        "components": {{
+            "comp-bar": {{
+                "hit": True,
+                "verification_report": {{
+                    "component_id": "comp-bar",
+                    "criteria": [],
+                    "requirement_results": {{}},
+                    "interface_drift": False,
+                    "mutation_score": None,
+                    "overall": "pass",
+                }},
+                "license_scan": {{"blocked": False}},
+                "secret_scan": {{"flagged": False}},
+            }}
+        }},
         "capabilities": {{}},
         "not_ready_reasons": [],
     }}
@@ -51,77 +47,75 @@ def last_requirement_failures(component_id, repo_root):
 '''
 
 
-class TestAC_UI_007(unittest.TestCase):
-    def setUp(self):
-        self.tmp = tempfile.mkdtemp()
-        self.repo_root = Path(self.tmp) / "repo"
-        self.repo_root.mkdir()
-        self.log_path = Path(self.tmp) / "calls.jsonl"
+def _setup_repo(tmp_path):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    log_path = tmp_path / "check_readiness_calls.log"
 
-        dep_dir = self.repo_root / "gen" / "provenance-tracker"
-        dep_dir.mkdir(parents=True)
-        module_path = dep_dir / "provenance_tracker.py"
-        module_path.write_text(
-            FAKE_PROVENANCE_TRACKER_SOURCE.format(log_path=repr(str(self.log_path)))
-        )
+    fake_dir = repo_root / "gen" / "provenance-tracker"
+    fake_dir.mkdir(parents=True)
+    (fake_dir / "provenance_tracker.py").write_text(
+        FAKE_TEMPLATE.format(log_path=str(log_path)), encoding="utf-8"
+    )
 
-        verification_dir = self.repo_root / "verification"
-        verification_dir.mkdir(parents=True)
-        corpus_graph = {
-            "nodes": {
-                "comp-foo": {
-                    "type": "component",
-                    "verification": None,
-                    "provenance": None,
-                    "size_status": "ok",
-                    "sealed": True,
-                    "pinned_overrides": [],
-                }
-            },
-            "edges": [],
-            "aggregates": {
-                "orphan_capability_rate": 0.0,
-                "orphan_component_rate": 0.0,
-                "orphan_var_rate": 0.0,
-            },
-        }
-        (verification_dir / "corpus-graph.json").write_text(json.dumps(corpus_graph))
-
-        self.out_dir_1 = Path(self.tmp) / "out1"
-        self.out_dir_2 = Path(self.tmp) / "out2"
-
-    def tearDown(self):
-        shutil.rmtree(self.tmp, ignore_errors=True)
-
-    def _field(self, value, key):
-        return value.get(key) if isinstance(value, dict) else getattr(value, key, None)
-
-    def test_two_scopes_call_check_readiness_fresh_each_time(self):
-        snapshot_blast = provenance_tracker_ui.render_tracker_ui(
-            self.out_dir_1, self.repo_root, changed_ids=["comp-foo"]
-        )
-        snapshot_whole = provenance_tracker_ui.render_tracker_ui(
-            self.out_dir_2, self.repo_root, changed_ids=None
-        )
-
-        self.assertTrue(self.log_path.exists())
-        with open(self.log_path, "r") as f:
-            lines = [json.loads(line) for line in f if line.strip()]
-
-        self.assertEqual(len(lines), 2)
-        self.assertEqual(lines[0], ["comp-foo"])
-        self.assertIsNone(lines[1])
-
-        self.assertEqual(self._field(snapshot_blast, "scope"), "blast-radius")
-        self.assertEqual(self._field(snapshot_whole, "scope"), "whole-corpus")
-
-        html_blast = (self.out_dir_1 / "index.html").read_text()
-        html_whole = (self.out_dir_2 / "index.html").read_text()
-
-        self.assertIn("blast-radius", html_blast)
-        self.assertIn("comp-foo", html_blast)
-        self.assertIn("whole-corpus", html_whole)
+    verification = repo_root / "verification"
+    verification.mkdir()
+    graph = {
+        "nodes": {
+            "comp-bar": {
+                "type": "component",
+                "verification": None,
+                "provenance": None,
+                "size_status": "unknown",
+                "sealed": True,
+                "pinned_overrides": [],
+                "owners": ["test-team"],
+                "documents": {},
+            }
+        },
+        "edges": [],
+        "aggregates": {
+            "orphan_capability_rate": 0.0,
+            "orphan_component_rate": 0.0,
+            "orphan_var_rate": 0.0,
+        },
+    }
+    (verification / "corpus-graph.json").write_text(
+        json.dumps(graph, sort_keys=True, indent=2) + "\n", encoding="utf-8"
+    )
+    return repo_root, log_path
 
 
-if __name__ == "__main__":
-    unittest.main()
+def test_each_build_calls_check_readiness_afresh_and_states_scope(tmp_path):
+    repo_root, log_path = _setup_repo(tmp_path)
+
+    out_first = tmp_path / "out-first"
+    out_second = tmp_path / "out-second"
+
+    snap_first = provenance_tracker_ui.render_tracker_ui(
+        out_first, repo_root, changed_ids=["comp-foo"]
+    )
+    first_html = (Path(out_first) / "index.html").read_text(encoding="utf-8")
+
+    snap_second = provenance_tracker_ui.render_tracker_ui(out_second, repo_root)
+    second_html = (Path(out_second) / "index.html").read_text(encoding="utf-8")
+
+    # Log shows exactly two calls: ["comp-foo"] then null.
+    assert log_path.exists(), "faked check_readiness was never called"
+    lines = [ln for ln in log_path.read_text(encoding="utf-8").splitlines() if ln.strip()]
+    assert len(lines) == 2, f"expected exactly two check_readiness calls, got {lines!r}"
+    assert json.loads(lines[0]) == ["comp-foo"]
+    assert json.loads(lines[1]) is None
+
+    # First page: blast-radius scope together with its changed_ids.
+    assert "blast-radius" in first_html
+    assert "comp-foo" in first_html
+
+    # Second page: whole-corpus scope.
+    assert "whole-corpus" in second_html
+
+    # Returned snapshots agree with the pages they inlined.
+    assert field(snap_first, "scope") == "blast-radius"
+    assert list(field(snap_first, "changed_ids")) == ["comp-foo"]
+    assert field(snap_second, "scope") == "whole-corpus"
+    assert field(snap_second, "changed_ids") is None
