@@ -58,20 +58,21 @@ The everyday commands:
 ## Status
 
 This repository is the worked example: the tool is built from its own
-specs. All 25 components under `specs/components/` have real code, and 19 of
-them are generated from their specs the same way a project's are. Five are
-hand-written: `generator` and `llm-endpoint` (each is what the other runs
-through, so neither could be generated first), and `spec-linter`,
-`graph-query-engine` and `cache-manager` (built before the generator
-existed). The last, `criterion-compiler`, is hand-written and sealed by
-design (trusting a compiled criterion means its compiler is never
-generated) and lives in `pipeline/`.
+specs. Every one of the 28 components under `specs/components/` is
+generated from its spec on `claude-opus-5-5` and verified the same way a
+project's are, each with a provenance manifest that `hotdocs verify` checks.
+The hand-written versions that bootstrapped the chain (`generator`,
+`llm-endpoint`, `spec-linter`, `graph-query-engine`, `cache-manager`) were
+used to generate their own replacements, then swapped out once those passed.
+`criterion-compiler` is generated too but stays sealed (`D206`): it lives in
+`pipeline/` and is checked against hand-maintained characterization tests,
+since trusting a compiled criterion means trusting its compiler.
 
 `QUICKSTART.md` §6 lists the known limits of this release.
 `notes/bootstrap-history.md` tells how each component first landed;
 `verification/<slug>/BOOTSTRAP.md` has each one's full account.
 
-Decisions are ADRs in `specs/decisions/`, `D1` through `D205` (`D1`–`D75`
+Decisions are ADRs in `specs/decisions/`, `D1` through `D291` (`D1`–`D75`
 from the 2026-10 baseline reset, the rest recorded as they were made).
 `notes/initial-ideas.md` holds the original brainstorm, with its own
 informal numbering.

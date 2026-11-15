@@ -134,3 +134,21 @@ permanent gap in this chain, remains unbuilt by design (sealed,
 `specs/components/criterion-compiler/component.md` — trusting a
 `compiled` criterion requires the compiler that compiles it to never
 itself be agent-generated).
+
+## Full regeneration on Opus (2026-11, `D206`–`D291`)
+
+Every component, including the five that had stayed hand-written and the
+sealed `criterion-compiler`, was then regenerated from its spec on
+`claude-opus-5-5` with provenance, the hand-written versions orchestrating
+until their own replacements passed and were swapped in. Each landing was
+also checked against the version it replaced on the real repo or in a live
+run. Most failures traced to the spec, not the model, and each got a
+decision: behavior a criterion expected but no requirement stated, rules a
+criterion's test author could not see (the step grammar, the lint rules,
+reply formats), and a few contradictions between components. Along the way
+the verifier gained real mutation testing in the repo itself (`D280`: a hand
+suite's `conftest.py` had been importing the original module ahead of every
+mutant) and a defined bar for freeform-derived criteria (`D287`), and
+`spec-linter` was split into `corpus-loader`, `citation-checker` and
+`size-checker` (`D242`). `verification/<slug>/BOOTSTRAP.md` keeps each
+component's earlier hand-written history.

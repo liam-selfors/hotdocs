@@ -102,9 +102,10 @@ them to the next `generate`.
 - The secret scan finds API keys, tokens and other high-entropy or
   provider-shaped strings, not ordinary passwords: a low-entropy value like
   `password = "hunter2"` passes. Keep passwords out of the repository.
-- Six of the tool's own components (`generator`, `llm-endpoint`,
-  `cache-manager`, `spec-linter`, `graph-query-engine` and the sealed
-  `criterion-compiler`) are hand-written and tested, not generated from
-  their specs; the rest are generated and verified like yours.
+- With the `claude-cli` provider, a large component's reply can outgrow
+  the command's defaults. Set `CLAUDE_CODE_MAX_OUTPUT_TOKENS=128000` and
+  bound thinking with `MAX_THINKING_TOKENS` (the tool's own rebuild used
+  `32000`) so the whole reply fits: a file the reply cuts off before its
+  end marker is dropped, and verification then fails for its absence.
 - `hotdocs assist` and `hotdocs impact` need a git repository with a
   `main` or `master` branch.
