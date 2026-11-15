@@ -16,4 +16,5 @@ content from `documents`; each `R-id` and its live status from
 results from `verification.criteria`; provenance from `provenance`;
 size from `size_status`; exemptions from `sealed` and
 `pinned_overrides`; owners from `owners`. A field that is `null` or
-empty shows as absent, never as an error.
+empty shows as absent, never as an error. Every value written into a
+page is HTML-escaped.
