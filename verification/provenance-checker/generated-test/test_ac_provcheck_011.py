@@ -1,132 +1,141 @@
 import hashlib
+from pathlib import Path
 
 import pytest
 
 import provenance_checker
 
 
-def _get(obj, name):
-    return obj.get(name) if isinstance(obj, dict) else getattr(obj, name, None)
+def field(value, name):
+    return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def _write_component_md(
-    root,
-    owners=("pipeline-team", "alice"),
-    source_path="pipeline/foo/",
-    sealed=True,
-    include_owners=True,
-    include_source_path=True,
-):
-    comp_dir = root / "specs" / "components" / "foo"
-    comp_dir.mkdir(parents=True, exist_ok=True)
-    lines = [
-        "---",
-        "id: comp-foo",
-        "title: Foo",
-        "status: ratified",
-        "last_ratified_commit: 0000000000000000000000000000000000000000",
-    ]
-    if include_owners:
-        owners_str = "[" + ", ".join(owners) + "]"
-        lines.append(f"owners: {owners_str}")
-    lines.append(f"sealed: {'true' if sealed else 'false'}")
-    if include_source_path:
-        lines.append(f"source_path: {source_path}")
+def _write(path: Path, data):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if isinstance(data, str):
+        data = data.encode("utf-8")
+    path.write_bytes(data)
+
+
+def _component_md(slug, frontmatter_lines):
+    lines = ["---", f"id: comp-{slug}", f"title: {slug.capitalize()}", "status: draft"]
+    lines.extend(frontmatter_lines)
+    lines.append("depends_on: []")
     lines.append("---")
-    lines.append("")
-    (comp_dir / "component.md").write_text("\n".join(lines))
+    body = "\n".join(lines) + "\n\n# " + slug.capitalize() + "\n\n## Purpose\n\nA test component.\n"
+    return body
 
 
-def _write_source_files(root, a_content="A=1\n", b_content="B=2\n"):
-    pf = root / "pipeline" / "foo"
-    pf.mkdir(parents=True, exist_ok=True)
-    (pf / "a.py").write_text(a_content)
-    sub = pf / "sub"
-    sub.mkdir(parents=True, exist_ok=True)
-    (sub / "b.py").write_text(b_content)
-
-
-def _write_verifier_orchestrator(root):
-    d = root / "gen" / "verifier-orchestrator"
-    d.mkdir(parents=True, exist_ok=True)
-    (d / "verifier_orchestrator.py").write_text(
-        'GATE_VERSION = "verifier-orchestrator@2.0.0"\n'
+def _plant_verifier(repo_root: Path):
+    _write(
+        repo_root / "gen" / "verifier-orchestrator" / "verifier_orchestrator.py",
+        'GATE_VERSION = "verifier-orchestrator@2.0.0"\n',
     )
 
 
-def test_sealed_key_fields_and_hash_stability(tmp_path):
-    _write_component_md(tmp_path)
-    _write_source_files(tmp_path)
-    _write_verifier_orchestrator(tmp_path)
+def _build_foo(repo_root: Path):
+    _write(
+        repo_root / "specs" / "components" / "foo" / "component.md",
+        _component_md(
+            "foo",
+            [
+                "owners: [pipeline-team, alice]",
+                "sealed: true",
+                "source_path: pipeline/foo/",
+            ],
+        ),
+    )
+    _write(repo_root / "pipeline" / "foo" / "a.py", "A=1\n")
+    _write(repo_root / "pipeline" / "foo" / "sub" / "b.py", "B=2\n")
+    _plant_verifier(repo_root)
 
-    key = provenance_checker.current_sealed_key("comp-foo", tmp_path)
 
-    owners = _get(key, "owners")
-    source_path = _get(key, "source_path")
-    verifier_version = _get(key, "verifier_version")
-    source_hash = _get(key, "source_hash")
+def _expected_hash(entries):
+    h = hashlib.sha256()
+    for rel, content in entries:
+        h.update(rel.encode("utf-8"))
+        h.update(b"\x00")
+        h.update(content)
+        h.update(b"\x00")
+    return "sha256:" + h.hexdigest()
 
-    assert owners == ["pipeline-team", "alice"]
-    assert source_path == "pipeline/foo/"
-    assert verifier_version == "verifier-orchestrator@2.0.0"
 
-    expected_hash = "sha256:" + hashlib.sha256(
-        b"a.py" + b"\x00" + b"A=1\n" + b"\x00"
-        + b"sub/b.py" + b"\x00" + b"B=2\n" + b"\x00"
-    ).hexdigest()
-    assert source_hash == expected_hash
+def test_sealed_key_fields_and_hash_behaviour(tmp_path):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    _build_foo(repo_root)
 
-    pycache = tmp_path / "pipeline" / "foo" / "__pycache__"
-    pycache.mkdir()
-    (pycache / "x.pyc").write_bytes(b"\x00\x01binary-noise")
-    (tmp_path / "pipeline" / "foo" / ".sealed-provenance.json").write_text(
-        '{"any": "content"}'
+    key = provenance_checker.current_sealed_key("comp-foo", repo_root)
+    assert key is not None
+    assert list(field(key, "owners")) == ["pipeline-team", "alice"]
+    assert field(key, "source_path") == "pipeline/foo/"
+    assert field(key, "verifier_version") == "verifier-orchestrator@2.0.0"
+
+    expected = _expected_hash([("a.py", b"A=1\n"), ("sub/b.py", b"B=2\n")])
+    first_hash = field(key, "source_hash")
+    assert first_hash == expected
+
+    # Excluded entries never affect the hash.
+    _write(repo_root / "pipeline" / "foo" / "__pycache__" / "x.pyc", b"\x00\x01garbage-bytes")
+    _write(repo_root / "pipeline" / "foo" / ".sealed-provenance.json", '{"anything": true}\n')
+
+    key2 = provenance_checker.current_sealed_key("comp-foo", repo_root)
+    assert key2 is not None
+    assert field(key2, "source_hash") == first_hash
+
+    # A content change changes the hash.
+    _write(repo_root / "pipeline" / "foo" / "a.py", "A=2\n")
+    key3 = provenance_checker.current_sealed_key("comp-foo", repo_root)
+    assert key3 is not None
+    assert field(key3, "source_hash") != first_hash
+    assert field(key3, "source_hash") == _expected_hash(
+        [("a.py", b"A=2\n"), ("sub/b.py", b"B=2\n")]
     )
 
-    key2 = provenance_checker.current_sealed_key("comp-foo", tmp_path)
-    source_hash2 = _get(key2, "source_hash")
-    assert source_hash2 == source_hash
 
-    (tmp_path / "pipeline" / "foo" / "a.py").write_text("A=2\n")
+def test_not_sealed_or_missing_component_returns_none(tmp_path):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    _plant_verifier(repo_root)
 
-    key3 = provenance_checker.current_sealed_key("comp-foo", tmp_path)
-    source_hash3 = _get(key3, "source_hash")
-    assert source_hash3 != source_hash
+    _write(
+        repo_root / "specs" / "components" / "bar" / "component.md",
+        _component_md(
+            "bar",
+            [
+                "owners: [pipeline-team]",
+                "sealed: false",
+                "source_path: pipeline/bar/",
+            ],
+        ),
+    )
+    _write(repo_root / "pipeline" / "bar" / "bar.py", "X=1\n")
 
-
-def test_not_sealed_returns_none(tmp_path):
-    _write_component_md(tmp_path, sealed=False)
-    _write_source_files(tmp_path)
-    _write_verifier_orchestrator(tmp_path)
-
-    assert provenance_checker.current_sealed_key("comp-foo", tmp_path) is None
-
-
-def test_missing_component_md_returns_none(tmp_path):
-    _write_verifier_orchestrator(tmp_path)
-
-    assert provenance_checker.current_sealed_key("comp-foo", tmp_path) is None
+    assert provenance_checker.current_sealed_key("comp-bar", repo_root) is None
+    # comp-baz has no component.md at all.
+    assert provenance_checker.current_sealed_key("comp-baz", repo_root) is None
 
 
 @pytest.mark.parametrize(
-    "include_owners, owners, include_source_path",
+    "slug,lines",
     [
-        (False, (), True),
-        (True, ("Alice",), True),
-        (True, ("pipeline-team",), False),
+        ("noowners", ["sealed: true", "source_path: pipeline/noowners/"]),
+        (
+            "badowners",
+            ["owners: [Alice]", "sealed: true", "source_path: pipeline/badowners/"],
+        ),
+        ("nosrc", ["owners: [pipeline-team]", "sealed: true"]),
     ],
 )
-def test_invalid_frontmatter_raises_value_error(
-    tmp_path, include_owners, owners, include_source_path
-):
-    _write_component_md(
-        tmp_path,
-        owners=owners,
-        include_owners=include_owners,
-        include_source_path=include_source_path,
+def test_invalid_sealed_frontmatter_raises_value_error(tmp_path, slug, lines):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    _plant_verifier(repo_root)
+    _write(
+        repo_root / "specs" / "components" / slug / "component.md",
+        _component_md(slug, lines),
     )
-    _write_source_files(tmp_path)
-    _write_verifier_orchestrator(tmp_path)
+    _write(repo_root / "pipeline" / slug / "m.py", "M=1\n")
 
     with pytest.raises(ValueError):
-        provenance_checker.current_sealed_key("comp-foo", tmp_path)
+        provenance_checker.current_sealed_key(f"comp-{slug}", repo_root)

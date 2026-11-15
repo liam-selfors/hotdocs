@@ -1,29 +1,28 @@
 import json
-import os
-import tempfile
 from pathlib import Path
 
 import provenance_checker
 
 
-def _field(value, name):
+def field(value, name, default=None):
     if isinstance(value, dict):
-        return value.get(name)
-    return getattr(value, name, None)
+        return value.get(name, default)
+    return getattr(value, name, default)
 
 
-def test_llm_judge_criterion_with_trust_judge_false_is_a_miss():
-    spec_bundle_hash = "sha256:" + "a" * 64
+SPEC_BUNDLE_HASH = "sha256:" + "ab" * 32
 
-    gate_versions = {
-        "compiler": "criterion-compiler@1.0.0",
-        "generated_test": "generated_test@1.0.0",
-        "verifier": "verifier-orchestrator@2.0.0",
-        "license_scanner": "license_scanner@4.0.0-no-reference-corpus",
-        "secret_scanner": "secret_scanner@3.1.0+detect-secrets.1.5.0",
-    }
+GATE_VERSIONS = {
+    "compiler": "criterion-compiler@1.0.0",
+    "generated_test": "generated_test@1.0.0",
+    "verifier": "verifier-orchestrator@2.0.0",
+    "license_scanner": "license_scanner@4.0.0-no-reference-corpus",
+    "secret_scanner": "secret_scanner@3.1.0+detect-secrets.1.5.0",
+}
 
-    verification_report = {
+
+def _verification_report():
+    return {
         "component_id": "comp-foo",
         "criteria": [
             {
@@ -37,18 +36,20 @@ def test_llm_judge_criterion_with_trust_judge_false_is_a_miss():
                 "covers": "R-FOO-002",
                 "kind": "llm-judge",
                 "result": "pass",
-                "rationale": "looks fine",
+                "rationale": "The implementation satisfies the requirement.",
             },
         ],
         "requirement_results": {"R-FOO-001": "pass", "R-FOO-002": "pass"},
         "interface_drift": False,
-        "mutation_score": 0.92,
+        "mutation_score": 0.9,
         "overall": "pass",
     }
 
-    license_scan = {
+
+def _license_scan():
+    return {
         "component_id": "comp-foo",
-        "gate_version": "license_scanner@4.0.0-no-reference-corpus",
+        "gate_version": GATE_VERSIONS["license_scanner"],
         "evaluated": False,
         "reason": "no-reference-corpus",
         "similarity_score": None,
@@ -60,9 +61,11 @@ def test_llm_judge_criterion_with_trust_judge_false_is_a_miss():
         "cache_hit": False,
     }
 
-    secret_scan = {
+
+def _secret_scan():
+    return {
         "scope": "full",
-        "gate_version": "secret_scanner@3.1.0+detect-secrets.1.5.0",
+        "gate_version": GATE_VERSIONS["secret_scanner"],
         "flagged": False,
         "matches": [],
         "allowed": [],
@@ -72,36 +75,49 @@ def test_llm_judge_criterion_with_trust_judge_false_is_a_miss():
         "cache_hit": False,
     }
 
-    manifest = {
-        "spec_bundle_hash": spec_bundle_hash,
+
+def _manifest():
+    return {
+        "spec_bundle_hash": SPEC_BUNDLE_HASH,
         "model_pin": "claude-sonnet-5",
         "prompt_version": "v1",
         "retry_feedback": None,
         "pipeline_version": "v1",
-        "gate_versions": gate_versions,
+        "gate_versions": dict(GATE_VERSIONS),
         "provenance_hit": False,
         "generated_at": "2026-01-01T00:00:00Z",
         "verification_run_id": "run-123",
-        "verification_report": verification_report,
-        "license_scan": license_scan,
-        "secret_scan": secret_scan,
+        "verification_report": _verification_report(),
+        "license_scan": _license_scan(),
+        "secret_scan": _secret_scan(),
     }
 
-    with tempfile.TemporaryDirectory() as tmp:
-        repo_root = Path(tmp)
-        foo_dir = repo_root / "gen" / "foo"
-        foo_dir.mkdir(parents=True)
-        (foo_dir / ".provenance.json").write_text(json.dumps(manifest))
 
-        os.environ["VAR_TRUST_JUDGE_PROVENANCE"] = "false"
-        try:
-            result = provenance_checker.check_provenance(
-                "comp-foo",
-                spec_bundle_hash,
-                gate_versions,
-                repo_root,
-            )
-        finally:
-            os.environ.pop("VAR_TRUST_JUDGE_PROVENANCE", None)
+def _write_manifest(repo_root: Path):
+    for sub in ("gen", "verification"):
+        d = repo_root / sub / "foo"
+        d.mkdir(parents=True, exist_ok=True)
+        (d / ".provenance.json").write_text(
+            json.dumps(_manifest(), indent=2), encoding="utf-8"
+        )
 
-    assert _field(result, "hit") is False
+
+def test_llm_judge_criterion_without_trust_is_a_miss(tmp_path, monkeypatch):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    _write_manifest(repo_root)
+
+    monkeypatch.setenv("VAR_TRUST_JUDGE_PROVENANCE", "false")
+    try:
+        result = provenance_checker.check_provenance(
+            "comp-foo", SPEC_BUNDLE_HASH, dict(GATE_VERSIONS), repo_root
+        )
+    finally:
+        monkeypatch.delenv("VAR_TRUST_JUDGE_PROVENANCE", raising=False)
+
+    assert field(result, "hit") is False
+
+    # A miss is definitive: nothing from the manifest is passed through.
+    assert field(result, "verification_report") is None
+    assert field(result, "license_scan") is None
+    assert field(result, "secret_scan") is None
