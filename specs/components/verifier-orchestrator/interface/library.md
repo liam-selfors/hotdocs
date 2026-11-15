@@ -32,6 +32,7 @@ naming a capability file the fixture also writes under `specs/product/`
 `spec-bundle-assembler`'s interface text declares `foo(x)`, which
 `test-author`'s fake-arity check (`R-AUTHOR-020`) would match. Every
 fixture criterion has at least one Given, one When and one Then step
-(`R-LINT-010`).
+(`R-LINT-010`). `verify` checks no precondition against `spec-linter`,
+so a test does not lint its fixture (`R-AUTHOR-015`).
 
 Implements: `specs/architecture/step-phrase-grammar.md`, `SPEC_GUIDELINES.md`
