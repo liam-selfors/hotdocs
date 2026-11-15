@@ -13,8 +13,8 @@ straight through, then writes one self-contained `out_dir/index.html`
 (`R-UI-001`) and returns the `TrackerSnapshot` it inlined
 (`interface/data/TrackerSnapshot.md`). `changed_ids` omitted means the
 whole-corpus view; present means the blast-radius view (`R-UI-007`).
-`provenance-tracker`'s own `UsageError` (a capability provenance miss
-with no `model`) propagates unchanged.
+The `ValueError` `provenance-tracker`'s `check_readiness` raises for a
+capability provenance miss with no `model` propagates unchanged.
 
 Topology comes from `<repo_root>/verification/corpus-graph.json`
 (`corpus-graph-builder`'s committed output); attempt history from

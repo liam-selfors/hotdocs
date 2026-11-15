@@ -29,4 +29,4 @@ Prints the path of the written `index.html`, which opens directly from
 | --- | --- |
 | `0` | Page written — including when `.hotdocs/attempts/` is empty or missing (`R-UI-005`). |
 | `1` | A file that exists failed to parse as JSON (`corpus-graph.json`, or an `AttemptRecord`). |
-| `2` | Usage error — bad arguments, a missing `corpus-graph.json`, or `provenance-tracker`'s own `UsageError` (a capability miss with no `--model`). |
+| `2` | Usage error — bad arguments, a missing `corpus-graph.json`, or the `ValueError` `provenance-tracker`'s `check_readiness` raises for a capability miss with no `--model`. |

@@ -28,7 +28,7 @@ When main runs build
 Then it returns 1
 
 Given no verification/corpus-graph.json, or a faked check_readiness
-  that raises the fake module's own UsageError, or an unknown argument
+  that raises ValueError, or an unknown argument
 When main runs build
 Then it returns 2
 
