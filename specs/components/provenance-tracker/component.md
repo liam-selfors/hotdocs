@@ -109,25 +109,4 @@ None.
 
 ## Change log
 
-- Initial draft, as `merge-tracker`. `D25`/`D29`/`D86` superseded below.
-- `D87`/`D88`: renamed `provenance-tracker`. `write_tracking_record`/
-  `TrackingRecord`/`hotdocs track query` removed entirely. New:
-  `check_readiness`/`VerifyReport` (`R-TRACK-009`/`010`), exposed as
-  `hotdocs verify` — a read-only "will a merge pass" check.
-- `D92`/`D93`: `D92` briefly made `check_readiness` trigger work
-  (calling `component-gate-runner`/`capability-scenario-verifier`
-  directly, as `hotdocs build`); `D93` reversed the component half —
-  `hotdocs generate`/`verify` independently runnable again,
-  `check_readiness` back to a pure, read-only `provenance-checker`
-  check (`R-TRACK-009`), `depends_on` back to `provenance-checker`,
-  `write_attempt_record`/`last_requirement_failures` restored
-  (`R-TRACK-004`/`007`/`008`). The capability half (check-then-run via
-  `capability-scenario-verifier`) stands unreversed (`R-TRACK-010`).
-- `D95`–`D127`: real cold-generation bootstrap, landed at 5/7 with two
-  known limitations; full account in `BOOTSTRAP.md`.
-- `D163`: the current provenance key comes from `provenance-checker`'s
-  `current_provenance_key`, replacing a privately computed hash that
-  could never match what `provenance-writer` records. Both `D127`
-  limitations closed in the spec: `not_ready_reasons` names the failing
-  check and requirement ids, and `AC-TRACK-010` states its fixture.
-  Regenerated and landed at 7/7, `mutation_score=1.0`.
+See the decisions, `D25` onward; `D292` makes usage errors print their reason.

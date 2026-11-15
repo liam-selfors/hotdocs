@@ -44,3 +44,6 @@ There is no `hotdocs track write`: `component-gate-runner` calls
 | --- | --- |
 | `0` | Ran (output may be empty if no failed attempt exists). |
 | `2` | Usage error: no `<component-id>`, an unknown argument, or a first word other than `verify` or `track feedback`. |
+
+Every usage error, for either command, prints one line naming its cause
+to stderr before exiting `2`, never a traceback.
