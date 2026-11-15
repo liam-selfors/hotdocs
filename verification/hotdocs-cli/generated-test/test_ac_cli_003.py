@@ -1,133 +1,178 @@
-"""Acceptance test for AC-CLI-003 (R-CLI-003): --model injection for model=required rows."""
-
 import json
-import textwrap
+import os
 from pathlib import Path
+
+import pytest
 
 import hotdocs_cli
 
 
-def _write(path, content):
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(content)
+COMPONENT_FAKE = '''\
+import json
+
+_LOG = {log!r}
 
 
-def _write_fake_llm_endpoint(project, behavior):
-    content = textwrap.dedent(f'''
-        from pathlib import Path
+def main(argv):
+    with open(_LOG, "a", encoding="utf-8") as fh:
+        fh.write(json.dumps(list(argv)) + "\\n")
+    return 7
+'''
 
-        _CALL_MARKER_FILE = Path(r"{project}") / "llm_load_config_called.marker"
+LLM_ENDPOINT_FAKE = '''\
+import json
 
-        def load_config(config_path=None):
-            behavior = {behavior!r}
-            if behavior == "config":
-                return {{
-                    "provider": "claude-cli",
-                    "model": "sonnet",
-                    "base_url": None,
-                    "api_key_env": None,
-                    "timeout_seconds": None,
-                }}
-            if behavior == "none-then-error":
-                if _CALL_MARKER_FILE.exists():
-                    raise ValueError("bad")
-                _CALL_MARKER_FILE.write_text("called-once")
-                return None
-            raise AssertionError("unreachable behavior: " + behavior)
-    ''')
-    _write(project / "gen" / "llm-endpoint" / "llm_endpoint.py", content)
+_BEHAVIOR = {behavior!r}
 
 
-def _write_fake_component(project, dir_name, module_name, log_name="calls.log"):
-    content = textwrap.dedent(f'''
-        import json
-        from pathlib import Path
+def load_config(config_path=None):
+    with open(_BEHAVIOR, "r", encoding="utf-8") as fh:
+        behavior = json.load(fh)
+    mode = behavior["mode"]
+    if mode == "raise":
+        raise ValueError(behavior["message"])
+    if mode == "none":
+        return None
+    return {{
+        "provider": behavior["provider"],
+        "model": behavior["model"],
+        "base_url": None,
+        "api_key_env": None,
+        "timeout_seconds": None,
+    }}
+'''
 
-        _LOG = Path(r"{project}") / "{log_name}"
-
-        def main(argv):
-            with open(_LOG, "a") as f:
-                f.write(json.dumps(list(argv)) + "\\n")
-            return 7
-    ''')
-    _write(project / "gen" / dir_name / f"{module_name}.py", content)
-
-
-def _read_calls(log_path):
-    if not log_path.exists():
-        return []
-    return [json.loads(line) for line in log_path.read_text().splitlines() if line]
-
-
-def test_model_required_appends_model_last(tmp_path):
-    project = tmp_path.resolve()
-    _write_fake_llm_endpoint(project, "config")
-    _write_fake_component(project, "component-gate-runner", "component_gate_runner")
-    _write_fake_component(project, "test-author", "test_author")
-
-    rc1 = hotdocs_cli.main(["generate", "comp-x"], cwd=str(project))
-    rc2 = hotdocs_cli.main(["author-test", "comp-x", "AC-X-1"], cwd=str(project))
-
-    assert rc1 == 7
-    assert rc2 == 7
-
-    calls = _read_calls(project / "calls.log")
-    assert calls == [
-        ["generate", "comp-x", f"--repo-root={project}", "--model=claude-cli:sonnet"],
-        ["author-test", "comp-x", "AC-X-1", f"--repo-root={project}", "--model=claude-cli:sonnet"],
-    ]
+ROWS = [
+    ("gen/component-gate-runner", "component_gate_runner"),
+    ("gen/test-author", "test_author"),
+    ("gen/provenance-tracker", "provenance_tracker"),
+    ("gen/spec-linter", "spec_linter"),
+    ("gen/spec-completeness-assistant", "spec_completeness_assistant"),
+]
 
 
-def test_explicit_model_not_duplicated(tmp_path):
-    project = tmp_path.resolve()
-    _write_fake_llm_endpoint(project, "config")
-    _write_fake_component(project, "component-gate-runner", "component_gate_runner")
-
-    hotdocs_cli.main(["generate", "comp-x", "--model", "m"], cwd=str(project))
-    hotdocs_cli.main(["generate", "comp-x", "--model=m"], cwd=str(project))
-
-    calls = _read_calls(project / "calls.log")
-    assert calls == [
-        ["generate", "comp-x", "--model", "m", f"--repo-root={project}"],
-        ["generate", "comp-x", "--model=m", f"--repo-root={project}"],
-    ]
+def _set_behavior(project, mode, message=None):
+    data = {"mode": mode, "provider": "claude-cli", "model": "sonnet"}
+    if message is not None:
+        data["message"] = message
+    (project / "llm_behavior.json").write_text(json.dumps(data), encoding="utf-8")
 
 
-def test_load_config_none_then_value_error(tmp_path, capsys):
-    project = tmp_path.resolve()
-    _write_fake_llm_endpoint(project, "none-then-error")
-    _write_fake_component(project, "component-gate-runner", "component_gate_runner")
+def _make_project(base):
+    project = (base / "project")
+    project.mkdir(parents=True)
+    project = project.resolve()
+    tool_root = (base / "tool")
+    tool_root.mkdir(parents=True)
+    tool_root = tool_root.resolve()
 
-    rc1 = hotdocs_cli.main(["generate", "comp-x"], cwd=str(project))
-    rc2 = hotdocs_cli.main(["generate", "comp-x"], cwd=str(project))
+    log = project / "calls.log"
+    for rel_dir, module in ROWS:
+        d = project / rel_dir
+        d.mkdir(parents=True, exist_ok=True)
+        (d / f"{module}.py").write_text(
+            COMPONENT_FAKE.format(log=str(log)), encoding="utf-8"
+        )
 
-    assert rc1 == 7
-    assert rc2 == 7
+    llm_dir = project / "gen" / "llm-endpoint"
+    llm_dir.mkdir(parents=True, exist_ok=True)
+    (llm_dir / "llm_endpoint.py").write_text(
+        LLM_ENDPOINT_FAKE.format(behavior=str(project / "llm_behavior.json")),
+        encoding="utf-8",
+    )
+    (project / "hotdocs.toml").write_text(
+        '[llm]\nprovider = "claude-cli"\nmodel = "sonnet"\n', encoding="utf-8"
+    )
+    _set_behavior(project, "config")
+    return project, tool_root
 
-    calls = _read_calls(project / "calls.log")
-    assert calls == [
-        ["generate", "comp-x", f"--repo-root={project}"],
-        ["generate", "comp-x", f"--repo-root={project}"],
-    ]
 
+def _env():
+    env = dict(os.environ)
+    env.pop("VAR_HOTDOCS_CONFIG", None)
+    return env
+
+
+def _no_input(*args, **kwargs):
+    raise AssertionError("input_fn must not be called")
+
+
+def _run(project, tool_root, argv):
+    log = project / "calls.log"
+    if log.exists():
+        log.unlink()
+    code = hotdocs_cli.main(
+        list(argv),
+        tool_root=tool_root,
+        input_fn=_no_input,
+        output_fn=lambda *a, **k: None,
+        env=_env(),
+        cwd=project,
+    )
+    assert log.exists(), f"fake component was not invoked for {argv!r}"
+    lines = [ln for ln in log.read_text(encoding="utf-8").splitlines() if ln.strip()]
+    assert len(lines) == 1, f"expected exactly one invocation, got {lines!r}"
+    return code, json.loads(lines[0])
+
+
+def _has_model(tokens):
+    return any(t == "--model" or t.startswith("--model=") for t in tokens)
+
+
+def test_model_injected_last_for_required_rows(tmp_path):
+    project, tool_root = _make_project(tmp_path)
+    repo_token = f"--repo-root={project}"
+
+    for argv in (["generate", "comp-x"], ["author-test", "comp-x", "AC-X-1"]):
+        code, forwarded = _run(project, tool_root, argv)
+        assert code == 7
+        assert forwarded == argv + [repo_token, "--model=claude-cli:sonnet"]
+        assert forwarded[-1] == "--model=claude-cli:sonnet"
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["generate", "comp-x", "--model", "m"],
+        ["generate", "comp-x", "--model=m"],
+    ],
+)
+def test_explicit_model_passes_unchanged(tmp_path, argv):
+    project, tool_root = _make_project(tmp_path)
+    repo_token = f"--repo-root={project}"
+
+    code, forwarded = _run(project, tool_root, argv)
+    assert code == 7
+    assert forwarded == argv + [repo_token]
+    model_tokens = [t for t in forwarded if t == "--model" or t.startswith("--model=")]
+    assert len(model_tokens) == 1
+
+
+def test_none_or_invalid_config_injects_nothing(tmp_path, capsys):
+    project, tool_root = _make_project(tmp_path)
+    repo_token = f"--repo-root={project}"
+    expected = ["generate", "comp-x", repo_token]
+
+    _set_behavior(project, "none")
+    capsys.readouterr()
+    code, forwarded = _run(project, tool_root, ["generate", "comp-x"])
+    capsys.readouterr()
+    assert code == 7
+    assert forwarded == expected
+
+    _set_behavior(project, "raise", message="bad")
+    code, forwarded = _run(project, tool_root, ["generate", "comp-x"])
     captured = capsys.readouterr()
+    assert code == 7
+    assert forwarded == expected
     assert "bad" in captured.err
 
 
-def test_model_no_rows_never_get_model(tmp_path):
-    project = tmp_path.resolve()
-    _write_fake_llm_endpoint(project, "config")
-    _write_fake_component(project, "provenance-tracker", "provenance_tracker")
-    _write_fake_component(project, "spec-linter", "spec_linter")
-    _write_fake_component(project, "spec-completeness-assistant", "spec_completeness_assistant")
+def test_model_never_injected_for_no_rows(tmp_path):
+    project, tool_root = _make_project(tmp_path)
+    _set_behavior(project, "config")
 
-    hotdocs_cli.main(["verify"], cwd=str(project))
-    hotdocs_cli.main(["lint"], cwd=str(project))
-    hotdocs_cli.main(["assist"], cwd=str(project))
-
-    calls = _read_calls(project / "calls.log")
-    assert len(calls) == 3
-    for call in calls:
-        assert not any(
-            token == "--model" or token.startswith("--model=") for token in call
-        )
+    for argv in (["verify"], ["lint"], ["assist"]):
+        code, forwarded = _run(project, tool_root, argv)
+        assert code == 7
+        assert not _has_model(forwarded), f"{argv!r} forwarded {forwarded!r}"

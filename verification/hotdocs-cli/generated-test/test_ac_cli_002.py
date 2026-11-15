@@ -2,88 +2,161 @@ import json
 import os
 from pathlib import Path
 
+import pytest
+
 import hotdocs_cli
 
 
-def _write_fake_lint(project: Path, calls_log: Path) -> None:
-    lint_dir = project / "gen" / "spec-linter"
-    lint_dir.mkdir(parents=True, exist_ok=True)
-    (lint_dir / "spec_linter.py").write_text(
-        "import json\n"
-        "import os\n"
-        "\n"
-        "def main(argv):\n"
-        f"    with open({str(calls_log)!r}, 'a') as f:\n"
-        "        f.write(json.dumps({\n"
-        "            'argv': argv,\n"
-        "            'var_hotdocs_config': os.environ.get('VAR_HOTDOCS_CONFIG'),\n"
-        "        }) + '\\n')\n"
-        "    return 7\n"
-    )
+VAR = "VAR_HOTDOCS_CONFIG"
 
 
-def _read_calls(calls_log: Path):
-    if not calls_log.exists():
+def _write_fake_lint(project: Path, env_log: Path = None) -> Path:
+    """Write a fake spec-linter at <project>/gen/spec-linter/spec_linter.py.
+
+    Its main(argv) appends json.dumps(argv) to <project>/calls.log and
+    returns 7. When env_log is given, it also appends
+    json.dumps(os.environ.get("VAR_HOTDOCS_CONFIG")) to env_log.
+    """
+    calls_log = project / "calls.log"
+    fake_dir = project / "gen" / "spec-linter"
+    fake_dir.mkdir(parents=True, exist_ok=True)
+    lines = [
+        "import json",
+        "import os",
+        "",
+        "CALLS_LOG = " + repr(str(calls_log)),
+        "ENV_LOG = " + repr(str(env_log) if env_log is not None else None),
+        "",
+        "",
+        "def main(argv):",
+        "    with open(CALLS_LOG, 'a', encoding='utf-8') as fh:",
+        "        fh.write(json.dumps(list(argv)) + '\\n')",
+        "    if ENV_LOG is not None:",
+        "        with open(ENV_LOG, 'a', encoding='utf-8') as fh:",
+        "            fh.write(json.dumps(os.environ.get('VAR_HOTDOCS_CONFIG')) + '\\n')",
+        "    return 7",
+        "",
+    ]
+    (fake_dir / "spec_linter.py").write_text("\n".join(lines), encoding="utf-8")
+    return calls_log
+
+
+def _read_lines(path: Path):
+    if not path.exists():
         return []
-    return [json.loads(line) for line in calls_log.read_text().splitlines() if line]
+    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
 
 
-def test_repo_root_appended_when_absent(tmp_path):
-    project = (tmp_path / "project").resolve()
+def _same_path(a, b) -> bool:
+    return Path(a).resolve() == Path(b).resolve()
+
+
+@pytest.fixture
+def dirs(tmp_path):
+    project = tmp_path / "project"
     project.mkdir()
-    calls_log = project / "calls.log"
-    _write_fake_lint(project, calls_log)
-
-    rc = hotdocs_cli.main(["lint", "a.md"], cwd=str(project))
-
-    assert rc == 7
-    calls = _read_calls(calls_log)
-    assert len(calls) == 1
-    assert calls[0]["argv"] == ["a.md", f"--repo-root={project}"]
-
-
-def test_explicit_repo_root_forwarded_unchanged(tmp_path):
-    project = (tmp_path / "project").resolve()
-    project.mkdir()
-    calls_log = project / "calls.log"
-    _write_fake_lint(project, calls_log)
-    project_str = str(project)
-
-    rc1 = hotdocs_cli.main(["lint", "--repo-root", project_str, "a.md"])
-    rc2 = hotdocs_cli.main(["lint", f"--repo-root={project_str}"])
-
-    assert rc1 == 7
-    assert rc2 == 7
-    calls = _read_calls(calls_log)
-    assert len(calls) == 2
-    assert calls[0]["argv"] == ["--repo-root", project_str, "a.md"]
-    assert calls[1]["argv"] == [f"--repo-root={project_str}"]
-
-
-def test_var_hotdocs_config_set_and_restored(tmp_path, monkeypatch):
-    project = (tmp_path / "project").resolve()
-    project.mkdir()
-    (project / "hotdocs.toml").write_text('[llm]\nprovider = "anthropic"\n')
-    calls_log = project / "calls.log"
-    _write_fake_lint(project, calls_log)
+    tool_root = tmp_path / "toolroot"
+    (tool_root / "gen").mkdir(parents=True)
     elsewhere = tmp_path / "elsewhere"
     elsewhere.mkdir()
-    project_str = str(project)
+    return project, tool_root, elsewhere
 
-    monkeypatch.delenv("VAR_HOTDOCS_CONFIG", raising=False)
 
-    rc1 = hotdocs_cli.main(["lint", "--repo-root", project_str], cwd=str(elsewhere))
-    assert rc1 == 7
-    assert os.environ.get("VAR_HOTDOCS_CONFIG") is None
+def _quiet(*args, **kwargs):
+    return None
 
-    monkeypatch.setenv("VAR_HOTDOCS_CONFIG", "/x")
 
-    rc2 = hotdocs_cli.main(["lint", "--repo-root", project_str], cwd=str(elsewhere))
-    assert rc2 == 7
-    assert os.environ.get("VAR_HOTDOCS_CONFIG") == "/x"
+def test_repo_root_appended_when_absent(dirs, monkeypatch):
+    project, tool_root, _ = dirs
+    calls_log = _write_fake_lint(project)
+    monkeypatch.chdir(project)
 
-    calls = _read_calls(calls_log)
-    assert len(calls) == 2
-    expected_config_path = str(project / "hotdocs.toml")
-    assert calls[0]["var_hotdocs_config"] == expected_config_path
-    assert calls[1]["var_hotdocs_config"] == "/x"
+    rc = hotdocs_cli.main(
+        ["lint", "a.md"], tool_root=tool_root, output_fn=_quiet, cwd=project
+    )
+    assert rc == 7
+
+    calls = _read_lines(calls_log)
+    assert len(calls) == 1
+    received = calls[0]
+    assert len(received) == 2, received
+    assert received[0] == "a.md"
+    token = received[1]
+    assert token.startswith("--repo-root="), received
+    value = token[len("--repo-root="):]
+    assert Path(value).is_absolute(), value
+    assert _same_path(value, project)
+    # No other --repo-root token was added.
+    assert sum(1 for t in received if t.startswith("--repo-root")) == 1
+
+
+def test_repo_root_separate_token_forwarded_unchanged(dirs, monkeypatch):
+    project, tool_root, _ = dirs
+    calls_log = _write_fake_lint(project)
+    monkeypatch.chdir(project)
+
+    given = ["--repo-root", str(project), "a.md"]
+    rc = hotdocs_cli.main(
+        ["lint"] + given, tool_root=tool_root, output_fn=_quiet, cwd=project
+    )
+    assert rc == 7
+
+    calls = _read_lines(calls_log)
+    assert calls == [given]
+
+
+def test_repo_root_equals_form_forwarded_unchanged(dirs, monkeypatch):
+    project, tool_root, _ = dirs
+    calls_log = _write_fake_lint(project)
+    monkeypatch.chdir(project)
+
+    given = ["--repo-root=" + str(project)]
+    rc = hotdocs_cli.main(
+        ["lint"] + given, tool_root=tool_root, output_fn=_quiet, cwd=project
+    )
+    assert rc == 7
+
+    calls = _read_lines(calls_log)
+    assert calls == [given]
+
+
+def test_hotdocs_config_var_set_and_restored(dirs, monkeypatch):
+    project, tool_root, elsewhere = dirs
+    (project / "hotdocs.toml").write_text(
+        '[llm]\nprovider = "ollama"\nmodel = "llama3.2"\n', encoding="utf-8"
+    )
+    env_log = project / "env.log"
+    _write_fake_lint(project, env_log=env_log)
+    monkeypatch.chdir(elsewhere)
+
+    # First: variable unset.
+    monkeypatch.delenv(VAR, raising=False)
+    rc = hotdocs_cli.main(
+        ["lint", "--repo-root", str(project)],
+        tool_root=tool_root,
+        output_fn=_quiet,
+        cwd=elsewhere,
+    )
+    assert rc == 7
+    seen = _read_lines(env_log)
+    assert len(seen) == 1
+    assert seen[0] is not None, "fake did not see VAR_HOTDOCS_CONFIG set"
+    assert _same_path(seen[0], project / "hotdocs.toml"), seen[0]
+    assert VAR not in os.environ, "VAR_HOTDOCS_CONFIG was not restored to unset"
+
+    # Second: variable already set to "/x" — left as-is.
+    monkeypatch.setenv(VAR, "/x")
+    rc = hotdocs_cli.main(
+        ["lint", "--repo-root", str(project)],
+        tool_root=tool_root,
+        output_fn=_quiet,
+        cwd=elsewhere,
+    )
+    assert rc == 7
+    seen = _read_lines(env_log)
+    assert len(seen) == 2
+    assert seen[1] == "/x"
+    assert os.environ.get(VAR) == "/x"
+
+    monkeypatch.delenv(VAR, raising=False)
+    assert VAR not in os.environ
