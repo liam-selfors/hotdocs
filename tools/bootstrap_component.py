@@ -178,7 +178,12 @@ def _consumer_surface_ok(component_id: str, code_dir: Path) -> bool:
     proc = subprocess.run(
         [sys.executable, "-c",
          f"import json, sys, {module_name} as m; "
-         "print(json.dumps([n for n in sys.argv[1:] if hasattr(m, n)]))", *sorted(wanted)],
+         "import importlib\n"
+         "def has(n):\n"
+         "    if hasattr(m, n): return True\n"
+         "    try: importlib.import_module(m.__name__ + '.' + n); return True\n"  # a package's submodule, e.g. corpus_graph_builder.cli
+         "    except Exception: return False\n"
+         "print(json.dumps([n for n in sys.argv[1:] if has(n)]))", *sorted(wanted)],
         cwd=code_dir, env={**__import__("os").environ, "PYTHONPATH": str(code_dir)},
         capture_output=True, text=True,
     )
