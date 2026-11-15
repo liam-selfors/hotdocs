@@ -1,5 +1,5 @@
-import json
 import copy
+import json
 from pathlib import Path
 
 import pytest
@@ -7,7 +7,7 @@ import pytest
 import provenance_checker
 
 
-H = "sha256:" + "0123456789abcdef" * 4
+H = "sha256:" + "ab" * 32
 
 GATE_VERSIONS = {
     "compiler": "criterion-compiler@1.0.0",
@@ -15,6 +15,44 @@ GATE_VERSIONS = {
     "verifier": "verifier-orchestrator@2.0.0",
     "license_scanner": "license_scanner@4.0.0-no-reference-corpus",
     "secret_scanner": "secret_scanner@3.1.0+detect-secrets.1.5.0",
+}
+
+VERIFICATION_REPORT = {
+    "component_id": "comp-foo",
+    "criteria": [
+        {"id": "AC-FOO-001", "covers": "R-FOO-001", "kind": "generated-test", "result": "pass"},
+        {"id": "AC-FOO-002", "covers": "R-FOO-002", "kind": "compiled", "result": "pass"},
+    ],
+    "requirement_results": {"R-FOO-001": "pass", "R-FOO-002": "pass"},
+    "interface_drift": False,
+    "mutation_score": 0.87,
+    "overall": "pass",
+}
+
+LICENSE_SCAN = {
+    "component_id": "comp-foo",
+    "gate_version": "license_scanner@4.0.0-no-reference-corpus",
+    "evaluated": False,
+    "reason": "no-reference-corpus",
+    "similarity_score": None,
+    "block_threshold": None,
+    "blocked": False,
+    "matches": [],
+    "notified": False,
+    "notification_delivery_error": None,
+    "cache_hit": False,
+}
+
+SECRET_SCAN = {
+    "scope": "full",
+    "gate_version": "secret_scanner@3.1.0+detect-secrets.1.5.0",
+    "flagged": False,
+    "matches": [],
+    "allowed": [],
+    "unused_allowlist_entries": [],
+    "notified": False,
+    "notification_delivery_error": None,
+    "cache_hit": False,
 }
 
 
@@ -27,8 +65,10 @@ def as_plain(value):
         return value
     if hasattr(value, "to_dict"):
         return value.to_dict()
-    if hasattr(value, "__dict__"):
-        return dict(vars(value))
+    import dataclasses
+
+    if dataclasses.is_dataclass(value):
+        return dataclasses.asdict(value)
     return value
 
 
@@ -37,239 +77,99 @@ def _write(path: Path, text: str) -> None:
     path.write_text(text, encoding="utf-8")
 
 
-def _write_corpus(repo_root: Path) -> None:
-    _write(
-        repo_root / "specs" / "glossary.md",
-        "# Glossary\n\n- **Foo** — a test term.\n",
+ASSEMBLER_FAKE = '''import dataclasses
+
+
+@dataclasses.dataclass
+class SpecBundle:
+    component_id: str
+    spec_bundle_hash: str
+    spec: str
+    interface: str
+    constraints: str
+    dependency_interfaces: dict = dataclasses.field(default_factory=dict)
+    dependency_context: dict = dataclasses.field(default_factory=dict)
+    dependency_usage: dict = dataclasses.field(default_factory=dict)
+    vars: dict = dataclasses.field(default_factory=dict)
+    glossary: str = ""
+    hint_code: object = None
+
+    def __getitem__(self, key):
+        return getattr(self, key)
+
+    def get(self, key, default=None):
+        return getattr(self, key, default)
+
+
+def assemble(component_id, repo_root, mode="cold"):
+    return SpecBundle(
+        component_id=component_id,
+        spec_bundle_hash="''' + H + '''",
+        spec="Foo doubles a number.",
+        interface="foo(x: int) -> int",
+        constraints="None.",
     )
-    _write(
-        repo_root / "specs" / "product" / "P-FOO.md",
-        "---\n"
-        "id: P-FOO\n"
-        "title: Foo capability\n"
-        "status: draft\n"
-        "owners: [team-a]\n"
-        "---\n"
-        "\n"
-        "# Foo capability\n"
-        "\n"
-        "Doubling numbers.\n",
-    )
+
+
+def assemble_criterion(component_id, criterion_id, repo_root):
+    raise NotImplementedError
+'''
+
+COMPILER_FAKE = 'GATE_VERSION = "criterion-compiler@1.0.0"\n'
+TEST_AUTHOR_FAKE = 'GATE_VERSION = "generated_test@1.0.0"\n'
+VERIFIER_FAKE = 'GATE_VERSION = "verifier-orchestrator@2.0.0"\n'
+LICENSE_FAKE = (
+    "def gate_version(repo_root):\n"
+    "    return \"license_scanner@4.0.0-no-reference-corpus\"\n"
+)
+SECRET_FAKE = (
+    "def gate_version(repo_root):\n"
+    "    return \"secret_scanner@3.1.0+detect-secrets.1.5.0\"\n"
+)
+
+COMPONENT_MD = """---
+id: comp-foo
+title: Foo
+status: draft
+owners: [team-a]
+depends_on: []
+---
+
+# Foo
+
+## Purpose
+
+Foo doubles a number.
+"""
+
+
+def _build_repo(repo_root: Path) -> dict:
+    # Minimal spec corpus for comp-foo (no llm-judge criteria at all).
+    _write(repo_root / "specs" / "glossary.md", "# Glossary\n\n- **Foo** \u2014 a test term.\n")
     comp = repo_root / "specs" / "components" / "foo"
-    _write(
-        comp / "component.md",
-        "---\n"
-        "id: comp-foo\n"
-        "title: Foo\n"
-        "status: draft\n"
-        "owners: [team-a]\n"
-        "realizes: [P-FOO]\n"
-        "depends_on: []\n"
-        "---\n"
-        "\n"
-        "# Foo\n"
-        "\n"
-        "## Purpose\n"
-        "\n"
-        "Foo doubles a number.\n",
-    )
+    _write(comp / "component.md", COMPONENT_MD)
     _write(
         comp / "requirements" / "R-FOO-001.md",
-        "# R-FOO-001\n\n**R-FOO-001** — `foo(x)` MUST return `2 * x`.\n",
+        "# R-FOO-001\n\n**R-FOO-001** \u2014 `foo(x)` MUST return `2 * x`.\n",
     )
     _write(
         comp / "acceptance" / "AC-FOO-001.md",
-        "# AC-FOO-001\n"
-        "\n"
-        "Covers: R-FOO-001\n"
-        "Kind: generated-test\n"
-        "\n"
-        "```gherkin\n"
-        "Given x = 2\n"
-        "When foo(x) is called\n"
-        "Then it returns 4\n"
-        "```\n",
+        "# AC-FOO-001\n\nCovers: R-FOO-001\nKind: generated-test\n\n"
+        "```gherkin\nGiven x = 2\nWhen foo(x) is called\nThen it returns 4\n```\n",
     )
-    _write(
-        comp / "interface" / "library.md",
-        "# Library\n\n```\nfoo(x: int) -> int\n```\n",
-    )
+    _write(comp / "interface" / "library.md", "# Library\n\n```\nfoo(x: int) -> int\n```\n")
     _write(comp / "constraints.md", "# Constraints\n\nNone.\n")
 
+    # Stand-in dependencies, so any current-key derivation agrees with H.
+    _write(repo_root / "gen" / "spec-bundle-assembler" / "spec_bundle_assembler.py", ASSEMBLER_FAKE)
+    _write(repo_root / "gen" / "criterion-compiler" / "criterion_compiler.py", COMPILER_FAKE)
+    _write(repo_root / "pipeline" / "criterion-compiler" / "criterion_compiler.py", COMPILER_FAKE)
+    _write(repo_root / "gen" / "test-author" / "test_author.py", TEST_AUTHOR_FAKE)
+    _write(repo_root / "gen" / "verifier-orchestrator" / "verifier_orchestrator.py", VERIFIER_FAKE)
+    _write(repo_root / "gen" / "license-scanner" / "license_scanner.py", LICENSE_FAKE)
+    _write(repo_root / "gen" / "secret-scanner" / "secret_scanner.py", SECRET_FAKE)
 
-def _write_fake_dependencies(repo_root: Path) -> None:
-    gen = repo_root / "gen"
-    _write(
-        gen / "spec-bundle-assembler" / "spec_bundle_assembler.py",
-        "from dataclasses import dataclass, field, fields\n"
-        "\n"
-        "\n"
-        "@dataclass\n"
-        "class SpecBundle:\n"
-        "    component_id: str\n"
-        "    spec_bundle_hash: str\n"
-        "    spec: str\n"
-        "    interface: str\n"
-        "    constraints: str\n"
-        "    dependency_interfaces: dict = field(default_factory=dict)\n"
-        "    dependency_context: dict = field(default_factory=dict)\n"
-        "    dependency_usage: dict = field(default_factory=dict)\n"
-        "    vars: dict = field(default_factory=dict)\n"
-        "    glossary: str = \"\"\n"
-        "    hint_code: object = None\n"
-        "\n"
-        "    def __getitem__(self, key):\n"
-        "        if key not in {f.name for f in fields(self)}:\n"
-        "            raise KeyError(key)\n"
-        "        return getattr(self, key)\n"
-        "\n"
-        "    def get(self, key, default=None):\n"
-        "        try:\n"
-        "            return self[key]\n"
-        "        except KeyError:\n"
-        "            return default\n"
-        "\n"
-        "    def keys(self):\n"
-        "        return [f.name for f in fields(self)]\n"
-        "\n"
-        "\n"
-        "@dataclass\n"
-        "class CriterionBundle:\n"
-        "    component_id: str\n"
-        "    criterion_id: str\n"
-        "    covers: str\n"
-        "    criterion_text: str\n"
-        "    requirement_text: str\n"
-        "    interface: str\n"
-        "    glossary: str\n"
-        "    dependency_interfaces: dict = field(default_factory=dict)\n"
-        "\n"
-        "    def __getitem__(self, key):\n"
-        "        return getattr(self, key)\n"
-        "\n"
-        "    def get(self, key, default=None):\n"
-        "        return getattr(self, key, default)\n"
-        "\n"
-        "\n"
-        f"_HASH = {H!r}\n"
-        "\n"
-        "\n"
-        "def assemble(component_id, repo_root, mode=\"cold\"):\n"
-        "    return SpecBundle(\n"
-        "        component_id=component_id,\n"
-        "        spec_bundle_hash=_HASH,\n"
-        "        spec=\"Foo doubles a number.\",\n"
-        "        interface=\"foo(x: int) -> int\",\n"
-        "        constraints=\"None.\",\n"
-        "        glossary=\"- **Foo** — a test term.\",\n"
-        "        hint_code=None,\n"
-        "    )\n"
-        "\n"
-        "\n"
-        "def assemble_criterion(component_id, criterion_id, repo_root):\n"
-        "    return CriterionBundle(\n"
-        "        component_id=component_id,\n"
-        "        criterion_id=criterion_id,\n"
-        "        covers=\"R-FOO-001\",\n"
-        "        criterion_text=\"\",\n"
-        "        requirement_text=\"\",\n"
-        "        interface=\"\",\n"
-        "        glossary=\"\",\n"
-        "    )\n",
-    )
-    compiler_src = 'GATE_VERSION = "criterion-compiler@1.0.0"\n'
-    _write(gen / "criterion-compiler" / "criterion_compiler.py", compiler_src)
-    _write(
-        repo_root / "pipeline" / "criterion-compiler" / "criterion_compiler.py",
-        compiler_src,
-    )
-    _write(
-        gen / "test-author" / "test_author.py",
-        'GATE_VERSION = "generated_test@1.0.0"\n',
-    )
-    _write(
-        gen / "verifier-orchestrator" / "verifier_orchestrator.py",
-        'GATE_VERSION = "verifier-orchestrator@2.0.0"\n',
-    )
-    _write(
-        gen / "license-scanner" / "license_scanner.py",
-        "def gate_version(repo_root):\n"
-        '    return "license_scanner@4.0.0-no-reference-corpus"\n',
-    )
-    _write(
-        gen / "secret-scanner" / "secret_scanner.py",
-        "def gate_version(repo_root):\n"
-        '    return "secret_scanner@3.1.0+detect-secrets.1.5.0"\n',
-    )
-
-
-def _manifest() -> dict:
-    verification_report = {
-        "component_id": "comp-foo",
-        "criteria": [
-            {
-                "id": "AC-FOO-001",
-                "covers": "R-FOO-001",
-                "kind": "generated-test",
-                "result": "pass",
-                "test_authoring": {
-                    "model": "claude-sonnet-5",
-                    "seed": 0,
-                    "prompt_version": "v1",
-                    "cache_hit": False,
-                },
-            },
-            {
-                "id": "AC-FOO-002",
-                "covers": "R-FOO-002",
-                "kind": "compiled",
-                "result": "fail",
-                "failure_detail": {
-                    "message": "result.foo equals 5 failed",
-                    "expected": 5,
-                    "actual": 3,
-                },
-            },
-        ],
-        "requirement_results": {"R-FOO-001": "pass", "R-FOO-002": "fail"},
-        "interface_drift": False,
-        "mutation_score": 0.87,
-        "overall": "fail",
-    }
-    license_scan = {
-        "component_id": "comp-foo",
-        "gate_version": "license_scanner@4.0.0-no-reference-corpus",
-        "evaluated": False,
-        "reason": "no-reference-corpus",
-        "similarity_score": None,
-        "block_threshold": None,
-        "blocked": False,
-        "matches": [],
-        "notified": False,
-        "notification_delivery_error": None,
-        "cache_hit": True,
-    }
-    secret_scan = {
-        "scope": "full",
-        "gate_version": "secret_scanner@3.1.0+detect-secrets.1.5.0",
-        "flagged": True,
-        "matches": [
-            {
-                "rule_id": "AWS Access Key",
-                "risk_tier": "high",
-                "file": "gen/foo/config.py",
-                "line": 12,
-            }
-        ],
-        "allowed": [
-            {"rule_id": "Hex High Entropy String", "file": "verification/foo/test_x.py", "line": 3}
-        ],
-        "unused_allowlist_entries": [],
-        "notified": False,
-        "notification_delivery_error": None,
-        "cache_hit": False,
-    }
-    return {
+    manifest = {
         "spec_bundle_hash": H,
         "model_pin": "claude-sonnet-5",
         "prompt_version": "v1",
@@ -279,41 +179,48 @@ def _manifest() -> dict:
         "provenance_hit": False,
         "generated_at": "2026-11-01T00:00:00Z",
         "verification_run_id": "run-123",
-        "verification_report": verification_report,
-        "license_scan": license_scan,
-        "secret_scan": secret_scan,
+        "verification_report": copy.deepcopy(VERIFICATION_REPORT),
+        "license_scan": copy.deepcopy(LICENSE_SCAN),
+        "secret_scan": copy.deepcopy(SECRET_SCAN),
     }
-
-
-def test_ac_provcheck_001_hash_match_without_llm_judge_is_verbatim_hit(tmp_path, monkeypatch):
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    _write_corpus(repo_root)
-    _write_fake_dependencies(repo_root)
-
-    manifest = _manifest()
-    # No llm-judge-kind criterion anywhere in the committed report.
-    assert all(c["kind"] != "llm-judge" for c in manifest["verification_report"]["criteria"])
-    committed = copy.deepcopy(manifest)
-
-    text = json.dumps(manifest, indent=2, sort_keys=True)
+    text = json.dumps(manifest, indent=2)
     _write(repo_root / "gen" / "foo" / ".provenance.json", text)
     _write(repo_root / "verification" / "foo" / ".provenance.json", text)
+    _write(repo_root / "gen" / "foo" / "foo.py", "def foo(x):\n    return 2 * x\n")
+    return manifest
 
-    # The trust variable only governs llm-judge criteria; with none present,
-    # a hash match is honored unconditionally, even when it is false.
-    monkeypatch.setenv("VAR_TRUST_JUDGE_PROVENANCE", "false")
+
+@pytest.mark.parametrize("trust_var", [None, "false", "true"])
+def test_hash_match_without_llm_judge_is_verbatim_hit(tmp_path, monkeypatch, trust_var):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    manifest = _build_repo(repo_root)
+
+    # The variable governs only llm-judge criteria; with none present the
+    # hit is honored unconditionally, whatever it resolves to.
+    if trust_var is None:
+        monkeypatch.delenv("VAR_TRUST_JUDGE_PROVENANCE", raising=False)
+    else:
+        monkeypatch.setenv("VAR_TRUST_JUDGE_PROVENANCE", trust_var)
     monkeypatch.chdir(repo_root)
+
+    # Sanity: the committed manifest truly has no llm-judge-kind criteria.
+    assert all(c["kind"] != "llm-judge" for c in manifest["verification_report"]["criteria"])
 
     result = provenance_checker.check_provenance(
         "comp-foo", H, dict(GATE_VERSIONS), repo_root
     )
 
     assert field(result, "hit") is True
+
+    committed = json.loads(
+        (repo_root / "gen" / "foo" / ".provenance.json").read_text(encoding="utf-8")
+    )
     assert as_plain(field(result, "verification_report")) == committed["verification_report"]
     assert as_plain(field(result, "license_scan")) == committed["license_scan"]
     assert as_plain(field(result, "secret_scan")) == committed["secret_scan"]
 
-    # The committed manifest itself is untouched by the check.
-    on_disk = json.loads((repo_root / "gen" / "foo" / ".provenance.json").read_text(encoding="utf-8"))
-    assert on_disk == committed
+    # Verbatim, never recomputed or summarized: exactly the original values.
+    assert as_plain(field(result, "verification_report")) == VERIFICATION_REPORT
+    assert as_plain(field(result, "license_scan")) == LICENSE_SCAN
+    assert as_plain(field(result, "secret_scan")) == SECRET_SCAN

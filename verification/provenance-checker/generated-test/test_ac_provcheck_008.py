@@ -13,16 +13,69 @@ from pathlib import Path
 import provenance_checker
 
 
-H = "sha256:" + "0123456789abcdef" * 4
+H = "sha256:" + "ab" * 32
 
 
 def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def _write_manifest(repo_root: Path, gate_versions: dict) -> Path:
-    manifest = {
-        "spec_bundle_hash": H,
+def _write(path: Path, text: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+
+
+def _write_spec_corpus(repo_root: Path) -> None:
+    _write(
+        repo_root / "specs" / "glossary.md",
+        "# Glossary\n\n- **Foo** — a test term.\n",
+    )
+    comp = repo_root / "specs" / "components" / "foo"
+    _write(
+        comp / "component.md",
+        "---\n"
+        "id: comp-foo\n"
+        "title: Foo\n"
+        "status: draft\n"
+        "owners: [team-a]\n"
+        "sealed: true\n"
+        "source_path: legacy/foo/\n"
+        "depends_on: []\n"
+        "---\n"
+        "\n"
+        "# Foo\n"
+        "\n"
+        "## Purpose\n"
+        "\n"
+        "Foo doubles a number.\n",
+    )
+    _write(
+        comp / "requirements" / "R-FOO-001.md",
+        "# R-FOO-001\n\n**R-FOO-001** — `foo(x)` MUST return `2 * x`.\n",
+    )
+    _write(
+        comp / "acceptance" / "AC-FOO-001.md",
+        "# AC-FOO-001\n"
+        "\n"
+        "Covers: R-FOO-001\n"
+        "Kind: generated-test\n"
+        "\n"
+        "```gherkin\n"
+        "Given x = 2\n"
+        "When foo(x) is called\n"
+        "Then it returns 4\n"
+        "```\n",
+    )
+    _write(
+        comp / "interface" / "library.md",
+        "# Library\n\n```\nfoo(x: int) -> int\n```\n",
+    )
+    _write(comp / "constraints.md", "# Constraints\n\nNone.\n")
+
+
+def _manifest(spec_bundle_hash: str, gate_versions: dict) -> dict:
+    return {
+        "spec_bundle_hash": spec_bundle_hash,
         "model_pin": "claude-sonnet-5",
         "prompt_version": "v1",
         "retry_feedback": None,
@@ -37,7 +90,7 @@ def _write_manifest(repo_root: Path, gate_versions: dict) -> Path:
                 {
                     "id": "AC-FOO-001",
                     "covers": "R-FOO-001",
-                    "kind": "compiled",
+                    "kind": "generated-test",
                     "result": "pass",
                 }
             ],
@@ -71,35 +124,33 @@ def _write_manifest(repo_root: Path, gate_versions: dict) -> Path:
             "cache_hit": False,
         },
     }
-    path = repo_root / "gen" / "foo" / ".provenance.json"
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
-    return path
 
 
-def test_gate_version_mismatch_is_a_miss_even_when_hash_matches(tmp_path, monkeypatch):
+def test_gate_version_mismatch_is_miss_even_when_spec_bundle_hash_matches(
+    tmp_path, monkeypatch
+):
     monkeypatch.delenv("VAR_TRUST_JUDGE_PROVENANCE", raising=False)
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
-    _write_manifest(repo_root, {"license_scanner": "1.0.0"})
+    _write_spec_corpus(repo_root)
+
+    manifest = _manifest(H, {"license_scanner": "1.0.0"})
+    text = json.dumps(manifest, indent=2)
+    _write(repo_root / "gen" / "foo" / ".provenance.json", text)
+    _write(repo_root / "verification" / "foo" / ".provenance.json", text)
 
     result = provenance_checker.check_provenance(
-        "comp-foo", H, {"license_scanner": "2.0.0"}, repo_root
+        "comp-foo",
+        H,
+        {"license_scanner": "2.0.0"},
+        repo_root,
     )
 
+    # spec_bundle_hash matches the manifest exactly...
+    on_disk = json.loads(
+        (repo_root / "gen" / "foo" / ".provenance.json").read_text(encoding="utf-8")
+    )
+    assert on_disk["spec_bundle_hash"] == H
+
+    # ...but the gate version differs, so this must be a miss.
     assert field(result, "hit") is False
-
-
-def test_control_same_manifest_with_matching_gate_versions_is_a_hit(tmp_path, monkeypatch):
-    # Control: proves the manifest above is found and its spec_bundle_hash
-    # matches, so the miss in the main test is due to gate_versions alone.
-    monkeypatch.delenv("VAR_TRUST_JUDGE_PROVENANCE", raising=False)
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    _write_manifest(repo_root, {"license_scanner": "1.0.0"})
-
-    result = provenance_checker.check_provenance(
-        "comp-foo", H, {"license_scanner": "1.0.0"}, repo_root
-    )
-
-    assert field(result, "hit") is True

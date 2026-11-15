@@ -1,5 +1,5 @@
 {
-  "spec_bundle_hash": "sha256:6ef10c672dbc95317b1d7020ef54e7b40f3b247932bc3a297305b4ac3a5acd3c",
+  "spec_bundle_hash": "sha256:2c89fcec8303c5adec157ba4958ab75d7f2960d1cfb127029d701f35fc8769a3",
   "model_pin": "claude-opus-5-5",
   "prompt_version": "v10",
   "retry_feedback": null,
@@ -12,7 +12,7 @@
     "secret_scanner": "secret_scanner@3.1.0+detect-secrets.1.5.0"
   },
   "provenance_hit": false,
-  "generated_at": "2026-11-15T19:44:06Z",
+  "generated_at": "2026-11-15T23:12:12Z",
   "verification_run_id": "provenance-checker-attempt-1",
   "verification_report": {
     "component_id": "comp-provenance-checker",
@@ -24,7 +24,7 @@
         "result": "pass",
         "test_authoring": {
           "model": "claude-opus-5-5",
-          "seed": 1,
+          "seed": 2,
           "prompt_version": "v1",
           "cache_hit": false
         }
@@ -36,7 +36,7 @@
         "result": "pass",
         "test_authoring": {
           "model": "claude-opus-5-5",
-          "seed": 1,
+          "seed": 2,
           "prompt_version": "v1",
           "cache_hit": false
         }
@@ -48,7 +48,7 @@
         "result": "pass",
         "test_authoring": {
           "model": "claude-opus-5-5",
-          "seed": 1,
+          "seed": 2,
           "prompt_version": "v1",
           "cache_hit": false
         }
@@ -60,7 +60,7 @@
         "result": "pass",
         "test_authoring": {
           "model": "claude-opus-5-5",
-          "seed": 1,
+          "seed": 2,
           "prompt_version": "v1",
           "cache_hit": false
         }
@@ -72,7 +72,7 @@
         "result": "pass",
         "test_authoring": {
           "model": "claude-opus-5-5",
-          "seed": 1,
+          "seed": 2,
           "prompt_version": "v1",
           "cache_hit": false
         }
@@ -84,7 +84,7 @@
         "result": "pass",
         "test_authoring": {
           "model": "claude-opus-5-5",
-          "seed": 1,
+          "seed": 2,
           "prompt_version": "v1",
           "cache_hit": false
         }
@@ -96,7 +96,7 @@
         "result": "pass",
         "test_authoring": {
           "model": "claude-opus-5-5",
-          "seed": 1,
+          "seed": 2,
           "prompt_version": "v1",
           "cache_hit": false
         }
@@ -108,7 +108,7 @@
         "result": "pass",
         "test_authoring": {
           "model": "claude-opus-5-5",
-          "seed": 1,
+          "seed": 2,
           "prompt_version": "v1",
           "cache_hit": false
         }
@@ -120,7 +120,7 @@
         "result": "pass",
         "test_authoring": {
           "model": "claude-opus-5-5",
-          "seed": 1,
+          "seed": 2,
           "prompt_version": "v1",
           "cache_hit": false
         }
@@ -132,7 +132,7 @@
         "result": "pass",
         "test_authoring": {
           "model": "claude-opus-5-5",
-          "seed": 1,
+          "seed": 2,
           "prompt_version": "v1",
           "cache_hit": false
         }
@@ -144,7 +144,7 @@
         "result": "pass",
         "test_authoring": {
           "model": "claude-opus-5-5",
-          "seed": 1,
+          "seed": 2,
           "prompt_version": "v1",
           "cache_hit": false
         }
@@ -156,7 +156,7 @@
         "result": "pass",
         "test_authoring": {
           "model": "claude-opus-5-5",
-          "seed": 1,
+          "seed": 2,
           "prompt_version": "v1",
           "cache_hit": false
         }
@@ -168,7 +168,7 @@
         "result": "pass",
         "test_authoring": {
           "model": "claude-opus-5-5",
-          "seed": 1,
+          "seed": 2,
           "prompt_version": "v1",
           "cache_hit": false
         }
@@ -185,7 +185,7 @@
       "R-PROVCHECK-008": "pass"
     },
     "interface_drift": false,
-    "mutation_score": 0.9292929292929293,
+    "mutation_score": 0.8804347826086957,
     "overall": "pass"
   },
   "license_scan": {
@@ -311,32 +311,20 @@
       {
         "rule_id": "Hex High Entropy String",
         "risk_tier": "low",
-        "file": "verification/provenance-checker/generated-test/test_ac_provcheck_001.py",
-        "line": 10
-      },
-      {
-        "rule_id": "Hex High Entropy String",
-        "risk_tier": "low",
         "file": "verification/provenance-checker/generated-test/test_ac_provcheck_003.py",
-        "line": 19
-      },
-      {
-        "rule_id": "Hex High Entropy String",
-        "risk_tier": "low",
-        "file": "verification/provenance-checker/generated-test/test_ac_provcheck_008.py",
-        "line": 16
+        "line": 26
       },
       {
         "rule_id": "Hex High Entropy String",
         "risk_tier": "low",
         "file": "verification/provenance-checker/generated-test/test_ac_provcheck_013.py",
-        "line": 18
+        "line": 24
       },
       {
         "rule_id": "Hex High Entropy String",
         "risk_tier": "low",
         "file": "verification/provenance-checker/generated-test/test_ac_provcheck_013.py",
-        "line": 231
+        "line": 25
       }
     ],
     "allowed": [],

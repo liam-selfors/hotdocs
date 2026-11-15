@@ -1,4 +1,3 @@
-import copy
 import hashlib
 import json
 from pathlib import Path
@@ -8,289 +7,298 @@ import pytest
 import provenance_checker
 
 
-COMPONENT_ID = "comp-foo"
 OWNERS = ["pipeline-team", "alice"]
 SOURCE_PATH = "pipeline/foo/"
 VERIFIER_VERSION = "verifier-orchestrator@2.0.0"
 WRITTEN_AT = "2026-11-02T00:00:00Z"
-DUMMY_HASH = "sha256:" + "0" * 64
 
 
 def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-SEALED_COMPONENT_MD = """---
-id: comp-foo
-title: Foo
-status: draft
-owners: [pipeline-team, alice]
-sealed: true
-source_path: pipeline/foo/
-depends_on: []
----
-
-# Foo
-
-## Purpose
-
-Foo doubles a number.
-"""
-
-UNSEALED_COMPONENT_MD = """---
-id: comp-foo
-title: Foo
-status: draft
-owners: [pipeline-team, alice]
-depends_on: []
----
-
-# Foo
-
-## Purpose
-
-Foo doubles a number.
-"""
-
-FAKE_VERIFIER = '''GATE_VERSION = "verifier-orchestrator@2.0.0"
+def _component_md(sealed: bool) -> str:
+    lines = [
+        "---",
+        "id: comp-foo",
+        "title: Foo",
+        "status: draft",
+        "owners: [pipeline-team, alice]",
+    ]
+    if sealed:
+        lines.append("sealed: true")
+        lines.append("source_path: pipeline/foo/")
+    else:
+        lines.append("sealed: false")
+    lines.append("depends_on: []")
+    lines.append("---")
+    lines.append("")
+    lines.append("# Foo")
+    lines.append("")
+    lines.append("## Purpose")
+    lines.append("")
+    lines.append("Foo doubles a number.")
+    lines.append("")
+    return "\n".join(lines)
 
 
-def verify(component_id, repo_root, judge=None, test_author=None):
-    raise AssertionError("verify must not be called by check_sealed_provenance")
-'''
-
-ACCEPTANCE_MD = """# AC-FOO-001
-
-Covers: R-FOO-001
-Kind: generated-test
-
-```gherkin
-Given x = 2
-When foo(x) is called
-Then it returns 4
-```
-"""
+FAKE_VERIFIER = (
+    'GATE_VERSION = "verifier-orchestrator@2.0.0"\n'
+    "\n"
+    "\n"
+    "def verify(component_id, repo_root, judge=None, test_author=None):\n"
+    '    raise NotImplementedError("fake verifier-orchestrator: verify not used")\n'
+)
 
 
-def write(path, text):
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text, encoding="utf-8")
-
-
-def build_repo(tmp_path, sealed=True):
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    write(repo_root / "specs" / "glossary.md", "# Glossary\n\n- **Foo** \u2014 a test term.\n")
-    comp = repo_root / "specs" / "components" / "foo"
-    write(comp / "component.md", SEALED_COMPONENT_MD if sealed else UNSEALED_COMPONENT_MD)
-    write(
-        comp / "requirements" / "R-FOO-001.md",
-        "# R-FOO-001\n\n**R-FOO-001** \u2014 `foo(x)` MUST return `2 * x`.\n",
+def make_repo(root: Path, sealed: bool = True) -> Path:
+    root.mkdir(parents=True, exist_ok=True)
+    (root / "specs").mkdir(parents=True, exist_ok=True)
+    (root / "specs" / "glossary.md").write_text(
+        "# Glossary\n\n- **Foo** — a test term.\n", encoding="utf-8"
     )
-    write(comp / "acceptance" / "AC-FOO-001.md", ACCEPTANCE_MD)
-    write(comp / "interface" / "library.md", "# Library\n\n```\nfoo(x: int) -> int\n```\n")
-    write(comp / "constraints.md", "# Constraints\n\nNone.\n")
-    write(repo_root / "pipeline" / "foo" / "foo.py", "def foo(x):\n    return 2 * x\n")
-    write(
-        repo_root / "gen" / "verifier-orchestrator" / "verifier_orchestrator.py",
-        FAKE_VERIFIER,
+    comp_dir = root / "specs" / "components" / "foo"
+    comp_dir.mkdir(parents=True, exist_ok=True)
+    (comp_dir / "component.md").write_text(_component_md(sealed), encoding="utf-8")
+
+    src = root / "pipeline" / "foo"
+    src.mkdir(parents=True, exist_ok=True)
+    (src / "foo.py").write_text(
+        "def double(x):\n    return 2 * x\n", encoding="utf-8"
     )
-    return repo_root
+
+    vo = root / "gen" / "verifier-orchestrator"
+    vo.mkdir(parents=True, exist_ok=True)
+    (vo / "verifier_orchestrator.py").write_text(FAKE_VERIFIER, encoding="utf-8")
+    return root
 
 
-def valid_manifest(source_hash):
+def valid_manifest(source_hash: str) -> dict:
     return {
         "kind": "sealed-provenance",
         "version": 1,
-        "component_id": COMPONENT_ID,
+        "component_id": "comp-foo",
         "owners": list(OWNERS),
         "source_path": SOURCE_PATH,
         "source_hash": source_hash,
         "verifier_version": VERIFIER_VERSION,
-        "characterization": {"overall": "pass", "criteria_passed": 2, "criteria_total": 2},
+        "characterization": {
+            "overall": "pass",
+            "criteria_passed": 2,
+            "criteria_total": 2,
+        },
         "written_at": WRITTEN_AT,
     }
 
 
-def manifest_path(repo_root):
-    return repo_root / "pipeline" / "foo" / ".sealed-provenance.json"
+def manifest_path(root: Path) -> Path:
+    return root / "pipeline" / "foo" / ".sealed-provenance.json"
 
 
-def snapshot(root):
+def snapshot(root: Path) -> dict:
     out = {}
     for p in sorted(root.rglob("*")):
         rel = p.relative_to(root)
         if "__pycache__" in rel.parts:
             continue
-        if p.is_dir():
-            out[rel.as_posix() + "/"] = None
+        if p.is_file():
+            out[rel.as_posix()] = ("file", p.read_bytes())
+        elif p.is_dir():
+            out[rel.as_posix()] = ("dir", None)
         else:
-            out[rel.as_posix()] = p.read_bytes()
+            out[rel.as_posix()] = ("other", None)
     return out
 
 
-def current_hash(repo_root):
-    key = provenance_checker.current_sealed_key(COMPONENT_ID, repo_root)
-    assert key is not None
-    h = field(key, "source_hash")
-    assert isinstance(h, str) and h.startswith("sha256:")
+def different_hash(current: str) -> str:
+    h = "sha256:" + hashlib.sha256(b"entirely different content").hexdigest()
+    if h == current:
+        h = "sha256:" + hashlib.sha256(b"yet other content").hexdigest()
+    assert h != current
     return h
 
 
-def run_check(repo_root):
+# Each mutator takes (manifest_dict, current_hash) and returns the text to
+# write, or None to write no manifest at all.
+def _json(m):
+    return json.dumps(m)
+
+
+def m_valid(m, h):
+    return _json(m)
+
+
+def m_missing(m, h):
+    return None
+
+
+def m_not_json(m, h):
+    return "{this is not json"
+
+
+def m_extra_key(m, h):
+    m["extra"] = "x"
+    return _json(m)
+
+
+def m_lacks_key(m, h):
+    del m["written_at"]
+    return _json(m)
+
+
+def m_version_true(m, h):
+    m["version"] = True
+    return _json(m)
+
+
+def m_short_hash(m, h):
+    m["source_hash"] = "sha256:abc"
+    return _json(m)
+
+
+def m_owner_capital(m, h):
+    m["owners"] = ["pipeline-team", "Alice"]
+    return _json(m)
+
+
+def m_pass_partial(m, h):
+    m["characterization"] = {"overall": "pass", "criteria_passed": 1, "criteria_total": 2}
+    return _json(m)
+
+
+def m_component_bar(m, h):
+    m["component_id"] = "comp-bar"
+    return _json(m)
+
+
+def m_other_path(m, h):
+    m["source_path"] = "pipeline/other/"
+    return _json(m)
+
+
+def m_source_changed(m, h):
+    m["source_hash"] = different_hash(h)
+    return _json(m)
+
+
+def m_owners_subset(m, h):
+    m["owners"] = ["pipeline-team"]
+    return _json(m)
+
+
+def m_owners_reordered(m, h):
+    m["owners"] = ["alice", "pipeline-team"]
+    return _json(m)
+
+
+def m_verifier_old(m, h):
+    m["verifier_version"] = "verifier-orchestrator@1.0.0"
+    return _json(m)
+
+
+def m_char_fail(m, h):
+    m["characterization"] = {"overall": "fail", "criteria_passed": 1, "criteria_total": 2}
+    return _json(m)
+
+
+MISS_SCENARIOS = [
+    ("missing", m_missing, "manifest_missing"),
+    ("not_json", m_not_json, "manifest_invalid"),
+    ("extra_key", m_extra_key, "manifest_invalid"),
+    ("lacks_key", m_lacks_key, "manifest_invalid"),
+    ("version_true", m_version_true, "manifest_invalid"),
+    ("short_hash", m_short_hash, "manifest_invalid"),
+    ("owner_capital", m_owner_capital, "manifest_invalid"),
+    ("pass_partial", m_pass_partial, "manifest_invalid"),
+    ("component_bar", m_component_bar, "component_mismatch"),
+    ("other_path", m_other_path, "component_mismatch"),
+    ("source_changed", m_source_changed, "source_changed"),
+    ("owners_subset", m_owners_subset, "owners_changed"),
+    ("owners_reordered", m_owners_reordered, "owners_changed"),
+    ("verifier_old", m_verifier_old, "verifier_changed"),
+    ("characterization_failed", m_char_fail, "characterization_failed"),
+]
+
+
+def _setup_sealed(tmp_path: Path, mutator):
+    repo_root = make_repo(tmp_path / "repo", sealed=True)
+    key = provenance_checker.current_sealed_key("comp-foo", repo_root)
+    assert key is not None
+    current_hash = field(key, "source_hash")
+    text = mutator(valid_manifest(current_hash), current_hash)
+    if text is not None:
+        manifest_path(repo_root).write_text(text, encoding="utf-8")
+    return repo_root, current_hash
+
+
+def _vr_overall(vr):
+    if isinstance(vr, dict):
+        return vr
+    return {"overall": getattr(vr, "overall")}
+
+
+def test_valid_current_manifest_is_a_hit(tmp_path):
+    repo_root, current_hash = _setup_sealed(tmp_path, m_valid)
     before = snapshot(repo_root)
-    result = provenance_checker.check_sealed_provenance(COMPONENT_ID, repo_root)
-    after = snapshot(repo_root)
-    assert after == before, "check_sealed_provenance modified files under repo_root"
-    return result
 
-
-def assert_miss(result, reason, sealed=True):
-    assert field(result, "reason") == reason
-    assert field(result, "hit") is False
-    assert field(result, "sealed") is sealed
-    for name in ("verification_report", "owners", "source_hash", "written_at",
-                 "license_scan", "secret_scan"):
-        assert field(result, name) is None, name
-
-
-# ---------------------------------------------------------------- valid hit
-
-def test_valid_current_manifest_is_hit(tmp_path):
-    repo_root = build_repo(tmp_path)
-    source_hash = current_hash(repo_root)
-    manifest_path(repo_root).write_text(json.dumps(valid_manifest(source_hash)), encoding="utf-8")
-
-    result = run_check(repo_root)
+    result = provenance_checker.check_sealed_provenance("comp-foo", repo_root)
 
     assert field(result, "hit") is True
     assert field(result, "reason") is None
     assert field(result, "sealed") is True
-    assert field(result, "verification_report") == {"overall": "pass"}
-    assert field(result, "owners") == OWNERS
+    assert _vr_overall(field(result, "verification_report")) == {"overall": "pass"}
+    assert list(field(result, "owners")) == OWNERS
     assert field(result, "written_at") == WRITTEN_AT
+    assert field(result, "source_hash") == current_hash
     assert field(result, "license_scan") is None
     assert field(result, "secret_scan") is None
 
-
-# ---------------------------------------------------------------- missing
-
-def test_manifest_missing(tmp_path):
-    repo_root = build_repo(tmp_path)
-    assert not manifest_path(repo_root).exists()
-    result = run_check(repo_root)
-    assert_miss(result, "manifest_missing")
+    assert snapshot(repo_root) == before
 
 
-# ---------------------------------------------------------------- mutations
+@pytest.mark.parametrize(
+    "mutator,expected_reason",
+    [(m, r) for _, m, r in MISS_SCENARIOS],
+    ids=[i for i, _, _ in MISS_SCENARIOS],
+)
+def test_sealed_miss_reasons(tmp_path, mutator, expected_reason):
+    repo_root, _ = _setup_sealed(tmp_path, mutator)
+    before = snapshot(repo_root)
 
-def _not_json(m):
-    return "{this is not json"
+    result = provenance_checker.check_sealed_provenance("comp-foo", repo_root)
 
+    assert field(result, "reason") == expected_reason
+    assert field(result, "hit") is False
+    assert field(result, "sealed") is True
+    assert field(result, "verification_report") is None
+    assert field(result, "owners") is None
+    assert field(result, "source_hash") is None
+    assert field(result, "written_at") is None
+    assert field(result, "license_scan") is None
+    assert field(result, "secret_scan") is None
 
-def _extra_key(m):
-    m["extra"] = "x"
-    return m
-
-
-def _lacks_key(m):
-    del m["written_at"]
-    return m
-
-
-def _version_true(m):
-    m["version"] = True
-    return m
-
-
-def _short_hash(m):
-    m["source_hash"] = "sha256:abc"
-    return m
+    assert snapshot(repo_root) == before
 
 
-def _owner_upper(m):
-    m["owners"] = ["pipeline-team", "Alice"]
-    return m
+def test_not_sealed_component(tmp_path):
+    repo_root = make_repo(tmp_path / "repo", sealed=False)
+    assert provenance_checker.current_sealed_key("comp-foo", repo_root) is None
+    # A manifest lying around does not make an unsealed component sealed.
+    manifest_path(repo_root).write_text(
+        json.dumps(valid_manifest("sha256:" + "0" * 64)), encoding="utf-8"
+    )
+    before = snapshot(repo_root)
 
+    result = provenance_checker.check_sealed_provenance("comp-foo", repo_root)
 
-def _pass_partial(m):
-    m["characterization"] = {"overall": "pass", "criteria_passed": 1, "criteria_total": 2}
-    return m
+    assert field(result, "reason") == "not_sealed"
+    assert field(result, "hit") is False
+    assert field(result, "sealed") is False
+    assert field(result, "verification_report") is None
+    assert field(result, "owners") is None
+    assert field(result, "source_hash") is None
+    assert field(result, "written_at") is None
+    assert field(result, "license_scan") is None
+    assert field(result, "secret_scan") is None
 
-
-def _component_bar(m):
-    m["component_id"] = "comp-bar"
-    return m
-
-
-def _other_path(m):
-    m["source_path"] = "pipeline/other/"
-    return m
-
-
-def _different_hash(m):
-    m["source_hash"] = "sha256:" + hashlib.sha256(b"different content entirely").hexdigest()
-    return m
-
-
-def _owners_subset(m):
-    m["owners"] = ["pipeline-team"]
-    return m
-
-
-def _owners_reordered(m):
-    m["owners"] = ["alice", "pipeline-team"]
-    return m
-
-
-def _old_verifier(m):
-    m["verifier_version"] = "verifier-orchestrator@1.0.0"
-    return m
-
-
-def _char_failed(m):
-    m["characterization"] = {"overall": "fail", "criteria_passed": 1, "criteria_total": 2}
-    return m
-
-
-SCENARIOS = [
-    ("not_json", _not_json, "manifest_invalid"),
-    ("extra_key", _extra_key, "manifest_invalid"),
-    ("lacks_key", _lacks_key, "manifest_invalid"),
-    ("version_true", _version_true, "manifest_invalid"),
-    ("short_hash", _short_hash, "manifest_invalid"),
-    ("owner_upper", _owner_upper, "manifest_invalid"),
-    ("pass_partial", _pass_partial, "manifest_invalid"),
-    ("component_bar", _component_bar, "component_mismatch"),
-    ("other_path", _other_path, "component_mismatch"),
-    ("different_hash", _different_hash, "source_changed"),
-    ("owners_subset", _owners_subset, "owners_changed"),
-    ("owners_reordered", _owners_reordered, "owners_changed"),
-    ("old_verifier", _old_verifier, "verifier_changed"),
-    ("char_failed", _char_failed, "characterization_failed"),
-]
-
-
-@pytest.mark.parametrize("name,mutate,reason", SCENARIOS, ids=[s[0] for s in SCENARIOS])
-def test_manifest_miss_reasons(tmp_path, name, mutate, reason):
-    repo_root = build_repo(tmp_path)
-    source_hash = current_hash(repo_root)
-    content = mutate(copy.deepcopy(valid_manifest(source_hash)))
-    text = content if isinstance(content, str) else json.dumps(content)
-    manifest_path(repo_root).write_text(text, encoding="utf-8")
-
-    result = run_check(repo_root)
-
-    assert_miss(result, reason)
-
-
-# ---------------------------------------------------------------- not sealed
-
-def test_not_sealed(tmp_path):
-    repo_root = build_repo(tmp_path, sealed=False)
-    assert provenance_checker.current_sealed_key(COMPONENT_ID, repo_root) is None
-    manifest_path(repo_root).write_text(json.dumps(valid_manifest(DUMMY_HASH)), encoding="utf-8")
-
-    result = run_check(repo_root)
-
-    assert_miss(result, "not_sealed", sealed=False)
+    assert snapshot(repo_root) == before

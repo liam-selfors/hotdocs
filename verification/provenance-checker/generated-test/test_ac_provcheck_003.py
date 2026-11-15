@@ -1,3 +1,10 @@
+"""AC-PROVCHECK-003: an absent gen/<slug>/.provenance.json is a definitive miss.
+
+Given gen/foo/.provenance.json does not exist
+When check_provenance is called for comp-foo with any spec_bundle_hash
+Then the result's hit is false
+"""
+
 import json
 from pathlib import Path
 
@@ -11,14 +18,13 @@ GATE_VERSIONS = {
     "generated_test": "generated_test@1.0.0",
     "verifier": "verifier-orchestrator@2.0.0",
     "license_scanner": "license_scanner@4.0.0-no-reference-corpus",
-    "secret_scanner": "secret_scanner@3.1.0+detect-secrets.1.5.0",
+    "secret_scanner": "secret_scanner@0.0.0",
 }
 
-SPEC_BUNDLE_HASHES = [
+HASHES = [
     "sha256:" + "0" * 64,
     "sha256:" + "0123456789abcdef" * 4,
     "sha256:abc",
-    "sha256:" + "f" * 64,
 ]
 
 
@@ -26,57 +32,51 @@ def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def _write(path: Path, text: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text, encoding="utf-8")
+COMPONENT_MD = """---
+id: comp-foo
+title: Foo
+status: draft
+owners: [team-a]
+sealed: true
+source_path: legacy/foo/
+depends_on: []
+---
+
+# Foo
+
+## Purpose
+
+Foo doubles a number.
+"""
 
 
-def _build_corpus(repo_root: Path) -> None:
-    _write(
-        repo_root / "specs" / "glossary.md",
-        "# Glossary\n\n- **Foo** — a test term.\n",
+def _write_fixture(repo_root: Path) -> None:
+    (repo_root / "specs").mkdir(parents=True, exist_ok=True)
+    (repo_root / "specs" / "glossary.md").write_text(
+        "# Glossary\n\n- **Foo** — a test term.\n"
     )
     comp = repo_root / "specs" / "components" / "foo"
-    _write(
-        comp / "component.md",
-        "---\n"
-        "id: comp-foo\n"
-        "title: Foo\n"
-        "status: draft\n"
-        "owners: [team-a]\n"
-        "sealed: true\n"
-        "source_path: legacy/foo/\n"
-        "depends_on: []\n"
-        "---\n"
-        "\n"
-        "# Foo\n"
-        "\n"
-        "## Purpose\n"
-        "\n"
-        "Foo doubles a number.\n",
+    (comp / "requirements").mkdir(parents=True, exist_ok=True)
+    (comp / "acceptance").mkdir(parents=True, exist_ok=True)
+    (comp / "interface").mkdir(parents=True, exist_ok=True)
+    (comp / "component.md").write_text(COMPONENT_MD)
+    (comp / "requirements" / "R-FOO-001.md").write_text(
+        "# R-FOO-001\n\n**R-FOO-001** — `foo(x)` MUST return `2 * x`.\n"
     )
-    _write(
-        comp / "requirements" / "R-FOO-001.md",
-        "# R-FOO-001\n\n**R-FOO-001** — `foo(x)` MUST return `2 * x`.\n",
-    )
-    _write(
-        comp / "acceptance" / "AC-FOO-001.md",
-        "# AC-FOO-001\n"
-        "\n"
+    (comp / "acceptance" / "AC-FOO-001.md").write_text(
+        "# AC-FOO-001\n\n"
         "Covers: R-FOO-001\n"
-        "Kind: generated-test\n"
-        "\n"
+        "Kind: generated-test\n\n"
         "```gherkin\n"
         "Given x = 2\n"
         "When foo(x) is called\n"
         "Then it returns 4\n"
-        "```\n",
+        "```\n"
     )
-    _write(
-        comp / "interface" / "library.md",
-        "# Library\n\n```\nfoo(x: int) -> int\n```\n",
+    (comp / "interface" / "library.md").write_text(
+        "# Library\n\n```\nfoo(x: int) -> int\n```\n"
     )
-    _write(comp / "constraints.md", "# Constraints\n\nNone.\n")
+    (comp / "constraints.md").write_text("# Constraints\n\nNone.\n")
 
 
 def _matching_manifest(spec_bundle_hash: str) -> dict:
@@ -91,15 +91,22 @@ def _matching_manifest(spec_bundle_hash: str) -> dict:
         "generated_at": "2026-01-01T00:00:00Z",
         "verification_run_id": "run-123",
         "verification_report": {
-            "component_id": "comp-bar",
-            "criteria": [],
-            "requirement_results": {},
+            "component_id": "comp-foo",
+            "criteria": [
+                {
+                    "id": "AC-FOO-001",
+                    "covers": "R-FOO-001",
+                    "kind": "generated-test",
+                    "result": "pass",
+                }
+            ],
+            "requirement_results": {"R-FOO-001": "pass"},
             "interface_drift": False,
-            "mutation_score": None,
+            "mutation_score": 0.9,
             "overall": "pass",
         },
         "license_scan": {
-            "component_id": "comp-bar",
+            "component_id": "comp-foo",
             "gate_version": GATE_VERSIONS["license_scanner"],
             "evaluated": False,
             "reason": "no-reference-corpus",
@@ -127,56 +134,64 @@ def _matching_manifest(spec_bundle_hash: str) -> dict:
 
 def _assert_definitive_miss(result):
     assert field(result, "hit") is False
-    # A miss is never partial: no manifest-derived field is populated.
+    # A miss is never partial: nothing from any manifest is carried.
     assert field(result, "verification_report") is None
     assert field(result, "license_scan") is None
     assert field(result, "secret_scan") is None
 
 
-@pytest.mark.parametrize("spec_bundle_hash", SPEC_BUNDLE_HASHES)
-@pytest.mark.parametrize("gen_dir_exists", [False, True])
-def test_missing_provenance_manifest_is_a_miss(
-    tmp_path, monkeypatch, spec_bundle_hash, gen_dir_exists
-):
+@pytest.fixture(autouse=True)
+def _clean_env(monkeypatch):
     monkeypatch.delenv("VAR_TRUST_JUDGE_PROVENANCE", raising=False)
+
+
+@pytest.mark.parametrize("spec_bundle_hash", HASHES)
+def test_no_gen_directory_is_miss(tmp_path, spec_bundle_hash):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
-    _build_corpus(repo_root)
-
-    gen_foo = repo_root / "gen" / "foo"
-    if gen_dir_exists:
-        gen_foo.mkdir(parents=True)
-        # Unrelated file present, but no manifest.
-        _write(gen_foo / "foo.py", "def foo(x):\n    return 2 * x\n")
-
-    manifest_path = gen_foo / ".provenance.json"
-    assert not manifest_path.exists()
+    _write_fixture(repo_root)
+    assert not (repo_root / "gen" / "foo" / ".provenance.json").exists()
 
     result = provenance_checker.check_provenance(
         "comp-foo", spec_bundle_hash, dict(GATE_VERSIONS), repo_root
     )
 
     _assert_definitive_miss(result)
-    # Read-only: the checker must not create the manifest.
-    assert not manifest_path.exists()
 
 
-@pytest.mark.parametrize("spec_bundle_hash", SPEC_BUNDLE_HASHES)
-def test_missing_manifest_is_a_miss_even_when_other_components_have_matching_ones(
-    tmp_path, monkeypatch, spec_bundle_hash
-):
-    monkeypatch.delenv("VAR_TRUST_JUDGE_PROVENANCE", raising=False)
+@pytest.mark.parametrize("spec_bundle_hash", HASHES)
+def test_gen_directory_without_manifest_is_miss(tmp_path, spec_bundle_hash):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
-    _build_corpus(repo_root)
+    _write_fixture(repo_root)
+    gen_foo = repo_root / "gen" / "foo"
+    gen_foo.mkdir(parents=True)
+    (gen_foo / "foo.py").write_text("def foo(x):\n    return 2 * x\n")
+    assert not (gen_foo / ".provenance.json").exists()
 
-    # Another component's manifest matches the supplied hash and gate versions
-    # exactly; it must not be consulted for comp-foo.
-    _write(
-        repo_root / "gen" / "bar" / ".provenance.json",
-        json.dumps(_matching_manifest(spec_bundle_hash), indent=2),
+    result = provenance_checker.check_provenance(
+        "comp-foo", spec_bundle_hash, dict(GATE_VERSIONS), repo_root
     )
 
+    _assert_definitive_miss(result)
+
+
+@pytest.mark.parametrize("spec_bundle_hash", HASHES)
+def test_matching_manifests_elsewhere_do_not_substitute(tmp_path, spec_bundle_hash):
+    """Only gen/foo/.provenance.json counts; matching manifests at other
+    locations (verification/foo/, or a wrongly unstripped gen/comp-foo/)
+    must not turn the absent one into a hit."""
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    _write_fixture(repo_root)
+    (repo_root / "gen" / "foo").mkdir(parents=True)
+    manifest = json.dumps(_matching_manifest(spec_bundle_hash), indent=2)
+    for decoy_dir in (
+        repo_root / "verification" / "foo",
+        repo_root / "gen" / "comp-foo",
+    ):
+        decoy_dir.mkdir(parents=True, exist_ok=True)
+        (decoy_dir / ".provenance.json").write_text(manifest)
     assert not (repo_root / "gen" / "foo" / ".provenance.json").exists()
 
     result = provenance_checker.check_provenance(
