@@ -456,7 +456,20 @@ def run(component_id: str, model: str, seed: int, retry_feedback: list[str] | No
     def test_author_closure(crit_bundle):
         return test_author.author_test(crit_bundle, model, seed=seed, repo_root=sandbox, llm_backend=None)
 
-    report = verifier_orchestrator.verify(component_id, repo_root=sandbox, judge=None, test_author=test_author_closure)
+    # A verifier-orchestrator candidate's own tests call verify(), which runs
+    # mutation testing, so a single test can take 20 s. The verifier doing
+    # the checking is the previous one, whose 10 s limit on unmutated runs
+    # predates D276 (300 s) and also made its mutation baseline time out,
+    # scoring every mutant killed. Apply D276's limit while it checks its
+    # successor; DEFAULT_TEST_TIMEOUT is read at call time.
+    saved_timeout = getattr(verifier_orchestrator, "DEFAULT_TEST_TIMEOUT", None)
+    if component_id == "comp-verifier-orchestrator" and saved_timeout is not None:
+        verifier_orchestrator.DEFAULT_TEST_TIMEOUT = max(saved_timeout, 300.0)
+    try:
+        report = verifier_orchestrator.verify(component_id, repo_root=sandbox, judge=None, test_author=test_author_closure)
+    finally:
+        if saved_timeout is not None:
+            verifier_orchestrator.DEFAULT_TEST_TIMEOUT = saved_timeout
     print(f"verify: overall={report.overall} interface_drift={report.interface_drift} mutation_score={report.mutation_score}")
     for entry in report.criteria:
         print(f"  {entry}")
