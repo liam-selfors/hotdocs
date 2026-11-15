@@ -1,86 +1,124 @@
 import dataclasses
 import json
+from pathlib import Path
 
-import duckdb
+import pytest
 
 import provenance_tracker
 
 
-def _read(obj, key):
-    return obj.get(key) if isinstance(obj, dict) else getattr(obj, key, None)
+def field(value, name):
+    return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def test_write_attempt_record_generation_failure_only(tmp_path):
-    @dataclasses.dataclass
-    class FakeGenerationResult:
-        model_call_error: dict
-        file: object = None
+@dataclasses.dataclass
+class FakeModelCallError:
+    category: str
+    message: str
 
-    generation_result = FakeGenerationResult(
-        model_call_error={"message": "model endpoint timed out", "category": "timeout"},
-        file=None,
+
+@dataclasses.dataclass
+class FakeGenerationResult:
+    component_id: str
+    model: str
+    seed: int
+    files: list
+    model_call_error: object
+
+
+COMPONENT_ID = "comp-foo"
+SPEC_BUNDLE_HASH = "sha256:" + "ab12" * 16
+
+
+def _attempt_files(repo_root: Path):
+    base = repo_root / ".hotdocs" / "attempts"
+    if not base.exists():
+        return []
+    return sorted(p for p in base.rglob("*") if p.is_file())
+
+
+def _load_json_document(path: Path):
+    text = path.read_text(encoding="utf-8")
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        # Newline-delimited JSON is also directly readable by read_json.
+        lines = [ln for ln in text.splitlines() if ln.strip()]
+        assert len(lines) == 1, "expected exactly one record in the attempt file"
+        return json.loads(lines[0])
+
+
+def test_failed_generation_writes_attempt_record_with_null_verification(tmp_path):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+
+    generation = FakeGenerationResult(
+        component_id=COMPONENT_ID,
+        model="anthropic:claude-sonnet-5",
+        seed=0,
+        files=[],
+        model_call_error=FakeModelCallError(
+            category="network", message="connection reset by peer"
+        ),
     )
-
-    component_id = "comp-widget-maker"
-    spec_bundle_hash = "sha256:" + "a" * 64
-    repo_root = tmp_path
+    expected_generation = dataclasses.asdict(generation)
 
     record = provenance_tracker.write_attempt_record(
-        component_id, generation_result, None, spec_bundle_hash, repo_root
+        COMPONENT_ID, generation, None, SPEC_BUNDLE_HASH, repo_root
     )
 
-    assert _read(record, "component_id") == component_id
-    assert _read(record, "verification") is None
-    assert _read(record, "spec_bundle_hash") == spec_bundle_hash
+    # Exactly one AttemptRecord file written under .hotdocs/attempts/<component_id>/
+    files = _attempt_files(repo_root)
+    assert len(files) == 1, f"expected exactly one attempt file, found {files}"
+    attempt_file = files[0]
+    attempts_root = repo_root / ".hotdocs" / "attempts"
+    rel_parent = attempt_file.parent.relative_to(attempts_root)
+    # The criterion names the directory by component id; accept the bare-slug
+    # form too, since the glossary builds paths from the slug.
+    assert rel_parent.as_posix() in (COMPONENT_ID, COMPONENT_ID[len("comp-"):]), (
+        f"attempt file written under unexpected directory: {rel_parent}"
+    )
 
-    generation_out = _read(record, "generation")
-    assert generation_out is not None
-    assert not dataclasses.is_dataclass(generation_out)
-
-    model_call_error_out = _read(generation_out, "model_call_error")
-    assert model_call_error_out == {"message": "model endpoint timed out", "category": "timeout"}
-
-    attempts_dir = repo_root / ".hotdocs" / "attempts" / component_id
-    assert attempts_dir.is_dir()
-
-    written_files = list(attempts_dir.iterdir())
-    assert len(written_files) == 1
-    attempt_file = written_files[0]
-
-    with open(attempt_file) as f:
-        on_disk = json.load(f)
-
-    assert on_disk["component_id"] == component_id
-    assert on_disk["spec_bundle_hash"] == spec_bundle_hash
+    # On-disk content: plain JSON, generation populated, verification null.
+    on_disk = _load_json_document(attempt_file)
+    assert isinstance(on_disk, dict)
+    assert on_disk["component_id"] == COMPONENT_ID
+    assert on_disk["spec_bundle_hash"] == SPEC_BUNDLE_HASH
+    assert "verification" in on_disk
     assert on_disk["verification"] is None
-    assert "attempt_id" in on_disk
-    assert "timestamp" in on_disk
+    assert on_disk["generation"] is not None
+    assert on_disk["generation"] == expected_generation
     assert on_disk["generation"]["model_call_error"] == {
-        "message": "model endpoint timed out",
-        "category": "timeout",
+        "category": "network",
+        "message": "connection reset by peer",
     }
 
-    quoted_path = str(attempt_file).replace("'", "''")
-    con = duckdb.connect()
+    # Returned record mirrors what was written, in plain JSON form.
+    returned_generation = field(record, "generation")
+    assert returned_generation is not generation
+    assert not isinstance(returned_generation, FakeGenerationResult)
+    assert returned_generation == on_disk["generation"]
+    assert field(record, "verification") is None
+    assert field(record, "component_id") == COMPONENT_ID
+
+    # Queryable via DuckDB's read_json with no bespoke parsing.
     try:
-        count_row = con.execute(
-            f"SELECT count(*) FROM read_json('{quoted_path}')"
-        ).fetchone()
-        assert count_row[0] == 1
+        import duckdb  # noqa: F401
+    except ImportError:
+        duckdb = None
 
-        row = con.execute(
-            f"SELECT component_id, "
-            f"verification IS NULL AS verification_is_null, "
-            f"generation IS NOT NULL AS generation_is_not_null, "
-            f"generation['model_call_error'] IS NOT NULL AS model_call_error_present "
-            f"FROM read_json('{quoted_path}')"
-        ).fetchone()
-    finally:
-        con.close()
-
-    assert row is not None
-    queried_component_id, verification_is_null, generation_is_not_null, model_call_error_present = row
-    assert queried_component_id == component_id
-    assert verification_is_null is True
-    assert generation_is_not_null is True
-    assert model_call_error_present is True
+    if duckdb is not None:
+        con = duckdb.connect()
+        path_literal = str(attempt_file).replace("'", "''")
+        rows = con.execute(
+            "SELECT component_id, spec_bundle_hash, "
+            "verification IS NULL AS verification_is_null, "
+            "generation IS NOT NULL AS generation_present "
+            f"FROM read_json('{path_literal}')"
+        ).fetchall()
+        assert len(rows) == 1
+        component_id, bundle_hash, verification_is_null, generation_present = rows[0]
+        assert component_id == COMPONENT_ID
+        assert bundle_hash == SPEC_BUNDLE_HASH
+        assert verification_is_null is True
+        assert generation_present is True

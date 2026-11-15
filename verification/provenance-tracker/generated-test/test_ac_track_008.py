@@ -1,42 +1,65 @@
-import json
-import tempfile
-from pathlib import Path
-
 import provenance_tracker
 
+from pathlib import Path
 
-def test_last_requirement_failures_returns_failing_ids():
-    with tempfile.TemporaryDirectory() as tmp:
-        repo_root = Path(tmp)
-        attempts_dir = repo_root / ".hotdocs" / "attempts" / "comp-foo"
-        attempts_dir.mkdir(parents=True)
 
-        attempt_id = "2026-10-25T14:32:01Z-a1b2c3"
-        record = {
-            "attempt_id": attempt_id,
-            "component_id": "comp-foo",
-            "timestamp": "2026-10-25T14:32:01Z",
-            "spec_bundle_hash": "sha256:" + "0" * 64,
-            "generation": {
-                "model_call_error": None,
-                "file": {"path": "gen/foo/foo.py", "content": "x = 1\n"},
-            },
-            "verification": {
-                "component_id": "comp-foo",
-                "criteria": [],
-                "requirement_results": {
-                    "R-FOO-001": "pass",
-                    "R-FOO-002": "fail",
+def _generation_result():
+    # A successful generation: no model_call_error, so verification is non-null.
+    return {
+        "component_id": "comp-foo",
+        "model_call_error": None,
+        "model": "anthropic:claude-sonnet-5",
+        "seed": 0,
+        "files": [
+            {"path": "gen/foo/foo.py", "content": "def f():\n    return 1\n"}
+        ],
+    }
+
+
+def _verification_report():
+    return {
+        "component_id": "comp-foo",
+        "criteria": [
+            {"id": "AC-FOO-001", "covers": "R-FOO-001", "kind": "compiled", "result": "pass"},
+            {
+                "id": "AC-FOO-002",
+                "covers": "R-FOO-002",
+                "kind": "compiled",
+                "result": "fail",
+                "failure_detail": {
+                    "message": "result.foo equals 5 failed",
+                    "expected": 5,
+                    "actual": 3,
                 },
-                "interface_drift": False,
-                "mutation_score": 1.0,
-                "overall": "fail",
             },
-        }
+        ],
+        "requirement_results": {"R-FOO-001": "pass", "R-FOO-002": "fail"},
+        "interface_drift": False,
+        "mutation_score": 0.9,
+        "overall": "fail",
+    }
 
-        record_path = attempts_dir / f"{attempt_id}.json"
-        record_path.write_text(json.dumps(record), encoding="utf-8")
 
-        result = provenance_tracker.last_requirement_failures("comp-foo", repo_root)
+def test_last_requirement_failures_returns_exactly_failing_rids(tmp_path):
+    repo_root = Path(tmp_path)
 
-        assert result == ["R-FOO-002"]
+    # Given comp-foo's most recent AttemptRecord with a non-null verification
+    # whose requirement_results is {"R-FOO-001": "pass", "R-FOO-002": "fail"},
+    # written via this component's own write_attempt_record.
+    provenance_tracker.write_attempt_record(
+        "comp-foo",
+        _generation_result(),
+        _verification_report(),
+        "sha256:" + "ab" * 32,
+        repo_root,
+    )
+
+    attempts_dir = repo_root / ".hotdocs" / "attempts"
+    assert attempts_dir.is_dir()
+
+    # When last_requirement_failures("comp-foo", repo_root) is called
+    result = provenance_tracker.last_requirement_failures("comp-foo", repo_root)
+
+    # Then it returns exactly ["R-FOO-002"]
+    assert isinstance(result, list)
+    assert result == ["R-FOO-002"]
