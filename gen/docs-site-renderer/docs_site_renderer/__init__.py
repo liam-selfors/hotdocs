@@ -1,9 +1,11 @@
-"""Docs Site Renderer.
+"""Docs site renderer.
 
-Renders a ``CorpusGraph`` (the contents of ``verification/corpus-graph.json``)
-into a static, interactive graph/docs explorer. Pure presentation: nothing is
-read or computed beyond what the graph already holds.
+Renders ``verification/corpus-graph.json`` (``corpus-graph-builder``'s
+``CorpusGraph``) into a static, interactive graph/docs explorer. This is a
+pure presentation layer: every value shown comes from the graph alone, and
+the in-browser script does the DAG layout and filtering.
 """
+from __future__ import annotations
 
 import html
 import json
@@ -12,135 +14,126 @@ from urllib.parse import quote
 
 __all__ = ["render_docs_site"]
 
+
 _ABSENT = '<span class="absent">absent</span>'
 
-_STYLE = """
+_CSS = """
 body { font-family: system-ui, sans-serif; margin: 1.5rem; color: #222; }
-h1, h2, h3 { font-weight: 600; }
-table.kv { border-collapse: collapse; margin: 0.25rem 0; }
-table.kv th, table.kv td { border: 1px solid #ccc; padding: 0.2rem 0.5rem;
-  text-align: left; vertical-align: top; }
-pre { background: #f6f6f6; padding: 0.75rem; overflow-x: auto;
-  white-space: pre-wrap; }
+nav a { margin-right: 1rem; }
+pre { background: #f6f8fa; padding: 0.75rem; overflow-x: auto; white-space: pre-wrap; }
+table { border-collapse: collapse; }
+td, th { border: 1px solid #ccc; padding: 0.25rem 0.5rem; text-align: left; }
 .absent { color: #888; font-style: italic; }
-.size { padding: 0.1rem 0.5rem; border-radius: 0.25rem; color: #fff; }
+.size { padding: 0.1rem 0.4rem; border-radius: 3px; color: #fff; }
 .size-ok { background: #2e7d32; }
 .size-over { background: #c62828; }
 .size-unknown { background: #757575; }
-#dag-canvas { border: 1px solid #ddd; display: block; margin: 0.5rem 0; }
-#dag-canvas .edge-line { stroke: #999; stroke-width: 1.5; }
-#dag-canvas .kind-depends_on { stroke: #1565c0; }
-#dag-canvas .kind-realizes { stroke: #2e7d32; }
-#dag-canvas .kind-uses_var { stroke: #ef6c00; }
-#dag-canvas circle { fill: #fff; stroke: #333; stroke-width: 1.5; }
-#dag-canvas .type-capability circle { fill: #c8e6c9; }
-#dag-canvas .type-component circle { fill: #bbdefb; }
-#dag-canvas .type-var circle { fill: #ffe0b2; }
-#dag-canvas text { font-size: 12px; }
+#dag line { stroke: #999; stroke-width: 1; }
+#dag line.edge-depends_on { stroke: #1565c0; }
+#dag line.edge-realizes { stroke: #2e7d32; }
+#dag line.edge-uses_var { stroke: #ef6c00; }
+#dag circle { fill: #fff; stroke: #333; stroke-width: 1.5; }
+#dag circle.type-capability { fill: #c8e6c9; }
+#dag circle.type-component { fill: #bbdefb; }
+#dag circle.type-var { fill: #ffe0b2; }
+#dag text { font-size: 11px; }
 """
 
 _DAG_SCRIPT = """
 (function () {
-  var svgNS = "http://www.w3.org/2000/svg";
-  var nodeEls = Array.prototype.slice.call(document.querySelectorAll("#dag-nodes .node"));
-  var edgeEls = Array.prototype.slice.call(document.querySelectorAll("#dag-edges .edge"));
-  var svg = document.getElementById("dag-canvas");
-  var search = document.getElementById("dag-search");
-  var columns = {capability: 0, component: 1, "var": 2};
-  var counts = {};
+  var ns = "http://www.w3.org/2000/svg";
+  var svg = document.getElementById("dag");
+  var nodeEls = Array.prototype.slice.call(document.querySelectorAll("#nodes li.node"));
+  var edgeEls = Array.prototype.slice.call(document.querySelectorAll("#edges li.edge"));
+  var cols = { capability: 0, component: 1, "var": 2 };
+  var rows = [0, 0, 0, 0];
   var pos = {};
   var shapes = {};
   var lines = [];
-  var maxRows = 0;
-  nodeEls.forEach(function (el) {
-    var type = el.getAttribute("data-type");
-    var col = Object.prototype.hasOwnProperty.call(columns, type) ? columns[type] : 3;
-    var row = counts[col] || 0;
-    counts[col] = row + 1;
-    if (row + 1 > maxRows) { maxRows = row + 1; }
-    pos[el.getAttribute("data-id")] = {x: 40 + col * 300, y: 30 + row * 40};
+  nodeEls.forEach(function (li) {
+    var id = li.getAttribute("data-id");
+    var t = li.getAttribute("data-type");
+    var c = Object.prototype.hasOwnProperty.call(cols, t) ? cols[t] : 3;
+    pos[id] = { x: 40 + c * 280, y: 30 + rows[c] * 28 };
+    rows[c] += 1;
   });
-  svg.setAttribute("width", 1240);
-  svg.setAttribute("height", 60 + maxRows * 40);
-  edgeEls.forEach(function (el) {
-    var a = pos[el.getAttribute("data-from")];
-    var b = pos[el.getAttribute("data-to")];
+  svg.setAttribute("width", String(4 * 280 + 40));
+  svg.setAttribute("height", String(40 + Math.max.apply(null, rows) * 28));
+  edgeEls.forEach(function (li) {
+    var from = li.getAttribute("data-from");
+    var to = li.getAttribute("data-to");
+    var a = pos[from];
+    var b = pos[to];
     if (!a || !b) { return; }
-    var line = document.createElementNS(svgNS, "line");
-    line.setAttribute("x1", a.x);
-    line.setAttribute("y1", a.y);
-    line.setAttribute("x2", b.x);
-    line.setAttribute("y2", b.y);
-    line.setAttribute("class", "edge-line kind-" + el.getAttribute("data-kind"));
-    svg.appendChild(line);
-    lines.push({line: line, from: el.getAttribute("data-from"), to: el.getAttribute("data-to")});
+    var l = document.createElementNS(ns, "line");
+    l.setAttribute("x1", a.x); l.setAttribute("y1", a.y);
+    l.setAttribute("x2", b.x); l.setAttribute("y2", b.y);
+    l.setAttribute("class", "edge-" + li.getAttribute("data-kind"));
+    svg.appendChild(l);
+    lines.push({ el: l, li: li, from: from, to: to });
   });
-  nodeEls.forEach(function (el) {
-    var id = el.getAttribute("data-id");
+  nodeEls.forEach(function (li) {
+    var id = li.getAttribute("data-id");
     var p = pos[id];
-    var link = document.createElementNS(svgNS, "a");
-    link.setAttribute("href", el.querySelector("a").getAttribute("href"));
-    link.setAttribute("class", "type-" + el.getAttribute("data-type"));
-    var circle = document.createElementNS(svgNS, "circle");
-    circle.setAttribute("cx", p.x);
-    circle.setAttribute("cy", p.y);
-    circle.setAttribute("r", 8);
-    var text = document.createElementNS(svgNS, "text");
-    text.setAttribute("x", p.x + 12);
-    text.setAttribute("y", p.y + 4);
+    var link = document.createElementNS(ns, "a");
+    link.setAttribute("href", li.querySelector("a").getAttribute("href"));
+    var circ = document.createElementNS(ns, "circle");
+    circ.setAttribute("cx", p.x); circ.setAttribute("cy", p.y); circ.setAttribute("r", 7);
+    circ.setAttribute("class", "type-" + li.getAttribute("data-type"));
+    var text = document.createElementNS(ns, "text");
+    text.setAttribute("x", p.x + 11); text.setAttribute("y", p.y + 4);
     text.textContent = id;
-    link.appendChild(circle);
+    link.appendChild(circ);
     link.appendChild(text);
     svg.appendChild(link);
     shapes[id] = link;
   });
-  search.addEventListener("input", function () {
-    var q = search.value.toLowerCase();
-    var visible = {};
-    nodeEls.forEach(function (el) {
-      var id = el.getAttribute("data-id");
-      var show = id.toLowerCase().indexOf(q) !== -1;
-      visible[id] = show;
-      el.style.display = show ? "" : "none";
+  document.getElementById("search").addEventListener("input", function (e) {
+    var q = e.target.value.toLowerCase();
+    var vis = {};
+    nodeEls.forEach(function (li) {
+      var id = li.getAttribute("data-id");
+      var show = id.toLowerCase().indexOf(q) >= 0;
+      vis[id] = show;
+      li.style.display = show ? "" : "none";
       shapes[id].style.display = show ? "" : "none";
     });
-    lines.forEach(function (l) {
-      l.line.style.display = (visible[l.from] && visible[l.to]) ? "" : "none";
+    edgeEls.forEach(function (li) {
+      var show = vis[li.getAttribute("data-from")] && vis[li.getAttribute("data-to")];
+      li.style.display = show ? "" : "none";
     });
-    edgeEls.forEach(function (el) {
-      var show = visible[el.getAttribute("data-from")] || visible[el.getAttribute("data-to")];
-      el.style.display = show ? "" : "none";
+    lines.forEach(function (ln) {
+      ln.el.style.display = (vis[ln.from] && vis[ln.to]) ? "" : "none";
     });
   });
 })();
 """
 
 
-def _field(obj, key):
-    """Dual dict-or-attribute access."""
+def _get(obj, key):
+    """Read ``key`` from a dict or an attribute-bearing object."""
     if isinstance(obj, dict):
         return obj.get(key)
     return getattr(obj, key, None)
 
 
-def _esc(value):
+def _esc(value) -> str:
     return html.escape(str(value), quote=True)
 
 
-def _is_absent(value):
-    return value is None or (isinstance(value, (str, list, dict)) and not value)
+def _is_absent(value) -> bool:
+    return value is None or (isinstance(value, (str, list, tuple, dict)) and len(value) == 0)
 
 
-def _render_value(value):
+def _render_value(value) -> str:
     if _is_absent(value):
         return _ABSENT
     if isinstance(value, dict):
-        rows = "".join(
-            f"<tr><th>{_esc(k)}</th><td>{_render_value(v)}</td></tr>"
-            for k, v in value.items()
+        items = "".join(
+            f"<dt>{_esc(k)}</dt><dd>{_render_value(v)}</dd>" for k, v in value.items()
         )
-        return f'<table class="kv">{rows}</table>'
-    if isinstance(value, list):
+        return f"<dl>{items}</dl>"
+    if isinstance(value, (list, tuple)):
         items = "".join(f"<li>{_render_value(v)}</li>" for v in value)
         return f"<ul>{items}</ul>"
     if isinstance(value, str):
@@ -148,144 +141,145 @@ def _render_value(value):
     return _esc(json.dumps(value))
 
 
-def _page(title, body, prefix):
+def _node_href(node_id, prefix: str) -> str:
+    return f"{prefix}nodes/{quote(str(node_id), safe='')}.html"
+
+
+def _page(title: str, body: str, prefix: str) -> str:
     return (
         "<!DOCTYPE html>\n"
         '<html lang="en">\n<head>\n<meta charset="utf-8">\n'
-        f"<title>{_esc(title)}</title>\n"
-        f"<style>{_STYLE}</style>\n"
-        "</head>\n<body>\n"
-        f'<nav><a href="{prefix}index.html">Graph &amp; corpus health</a></nav>\n'
-        f"{body}\n"
-        "</body>\n</html>\n"
+        f"<title>{_esc(title)}</title>\n<style>{_CSS}</style>\n</head>\n<body>\n"
+        f'<nav><a href="{prefix}index.html">Graph</a>'
+        f'<a href="{prefix}dashboard.html">Corpus health</a></nav>\n'
+        f"<h1>{_esc(title)}</h1>\n{body}\n</body>\n</html>\n"
     )
 
 
-def _href(node_id):
-    return "nodes/" + quote(str(node_id), safe="") + ".html"
+def _size_badge(status) -> str:
+    return f'<span class="size size-{_esc(status)}">{_render_value(status)}</span>'
 
 
-def _render_criteria(criteria):
-    if isinstance(criteria, dict):
-        items = sorted(criteria.items())
-    else:
-        items = [(_field(c, "id"), c) for c in (criteria or [])]
-    groups = {}
-    for cid, c in items:
-        groups.setdefault(str(_field(c, "kind")), []).append((cid, c))
-    parts = []
-    for kind in sorted(groups):
-        rows = "".join(
-            f"<tr><th>{_render_value(cid)}</th><td>{_render_value(c)}</td></tr>"
-            for cid, c in groups[kind]
-        )
-        parts.append(
-            f'<h3>kind: {_esc(kind)}</h3><table class="kv">{rows}</table>'
-        )
-    return "".join(parts) or _ABSENT
-
-
-def _component_body(node):
-    verification = _field(node, "verification")
-    documents = _field(node, "documents")
-    size = _field(node, "size_status")
-    docs_html = "".join(
-        f'<section class="document"><h3>{_esc(path)}</h3>'
-        f"<pre>{_esc(text)}</pre></section>"
-        for path, text in sorted((documents or {}).items())
-    ) or _ABSENT
-    return (
-        "<h2>Documents</h2>\n"
-        f"{docs_html}\n"
-        "<h2>Requirements</h2>\n"
-        f'<div class="requirements">'
-        f"{_render_value(_field(verification, 'requirement_results'))}</div>\n"
-        "<h2>Acceptance criteria</h2>\n"
-        f'<div class="criteria">{_render_criteria(_field(verification, "criteria"))}</div>\n'
-        "<h2>Provenance</h2>\n"
-        f'<div class="provenance">{_render_value(_field(node, "provenance"))}</div>\n'
-        "<h2>Size</h2>\n"
-        f'<p><span class="size size-{_esc(size)}">{_render_value(size)}</span></p>\n'
-        "<h2>Exemptions</h2>\n"
-        f'<p>Sealed: <span class="sealed">{_render_value(_field(node, "sealed"))}</span></p>\n'
-        f'<div class="pinned-overrides">Pinned overrides: '
-        f'{_render_value(_field(node, "pinned_overrides"))}</div>\n'
-        "<h2>Owners</h2>\n"
-        f'<div class="owners">{_render_value(_field(node, "owners"))}</div>\n'
-    )
-
-
-def _detail_page(node_id, node):
-    node_type = _field(node, "type")
-    body = (
-        f"<h1>{_esc(node_id)}</h1>\n"
-        f'<p>Type: <span class="node-type">{_render_value(node_type)}</span></p>\n'
-    )
-    if node_type == "component":
-        body += _component_body(node)
-    return _page(str(node_id), body, "../")
-
-
-def _index_page(nodes, edges, aggregates):
+def _render_index(nodes: dict, edges) -> str:
     node_items = "".join(
-        f'<li class="node" data-id="{_esc(node_id)}" '
-        f'data-type="{_esc(_field(node, "type"))}">'
-        f'<a href="{_esc(_href(node_id))}">{_esc(node_id)}</a> '
-        f'<span class="node-type">({_esc(_field(node, "type"))})</span></li>\n'
-        for node_id, node in sorted(nodes.items())
+        f'<li class="node" data-id="{_esc(node_id)}" data-type="{_esc(_get(node, "type"))}">'
+        f'<a href="{_esc(_node_href(node_id, ""))}">{_esc(node_id)}</a> '
+        f"({_esc(_get(node, 'type'))})</li>\n"
+        for node_id, node in nodes
     )
     edge_items = "".join(
-        f'<li class="edge" data-from="{_esc(_field(e, "from"))}" '
-        f'data-to="{_esc(_field(e, "to"))}" data-kind="{_esc(_field(e, "kind"))}">'
-        f'{_esc(_field(e, "from"))} &rarr; {_esc(_field(e, "to"))} '
-        f'({_esc(_field(e, "kind"))})</li>\n'
-        for e in edges
+        f'<li class="edge" data-from="{_esc(_get(edge, "from"))}" '
+        f'data-to="{_esc(_get(edge, "to"))}" data-kind="{_esc(_get(edge, "kind"))}">'
+        f"{_esc(_get(edge, 'from'))} &rarr; {_esc(_get(edge, 'to'))} "
+        f"({_esc(_get(edge, 'kind'))})</li>\n"
+        for edge in edges
     )
-    size_counts = {}
-    for _node_id, node in sorted(nodes.items()):
-        if _field(node, "type") == "component":
-            key = str(_field(node, "size_status"))
-            size_counts[key] = size_counts.get(key, 0) + 1
-    size_rows = "".join(
-        f'<tr><th><span class="size size-{_esc(k)}">{_esc(k)}</span></th>'
-        f"<td>{_esc(v)}</td></tr>"
-        for k, v in sorted(size_counts.items())
-    )
-    size_html = f'<table class="kv">{size_rows}</table>' if size_rows else _ABSENT
     body = (
-        "<h1>Corpus graph</h1>\n"
-        '<section id="dag">\n'
-        '<input id="dag-search" type="search" placeholder="Search nodes">\n'
-        '<svg id="dag-canvas" xmlns="http://www.w3.org/2000/svg"></svg>\n'
-        "<h2>Nodes</h2>\n"
-        f'<ul id="dag-nodes">\n{node_items}</ul>\n'
-        "<h2>Edges</h2>\n"
-        f'<ul id="dag-edges">\n{edge_items}</ul>\n'
-        "</section>\n"
-        '<section id="health">\n'
-        "<h1>Corpus health</h1>\n"
-        "<h2>Aggregates</h2>\n"
-        f'<div class="aggregates">{_render_value(aggregates)}</div>\n'
-        "<h2>Size-cap distribution</h2>\n"
-        f'<div class="size-distribution">{size_html}</div>\n'
-        "</section>\n"
+        '<input id="search" type="search" placeholder="Search nodes">\n'
+        '<svg id="dag" xmlns="http://www.w3.org/2000/svg"></svg>\n'
+        f'<h2>Nodes</h2>\n<ul id="nodes">\n{node_items}</ul>\n'
+        f'<h2>Edges</h2>\n<ul id="edges">\n{edge_items}</ul>\n'
         f"<script>{_DAG_SCRIPT}</script>"
     )
     return _page("Corpus graph", body, "")
 
 
-def render_docs_site(graph, out_dir):
-    """Render ``graph`` (a CorpusGraph or its dict shape) into ``out_dir``."""
+def _render_documents(documents) -> str:
+    if _is_absent(documents):
+        return _ABSENT
+    return "".join(
+        f"<section><h3>{_esc(path)}</h3><pre>{_esc(text)}</pre></section>\n"
+        for path, text in documents.items()
+    )
+
+
+def _render_criteria(criteria) -> str:
+    if _is_absent(criteria):
+        return _ABSENT
+    if isinstance(criteria, dict):
+        entries = list(criteria.items())
+    else:
+        entries = [(None, value) for value in criteria]
+    groups: dict = {}
+    for key, value in entries:
+        groups.setdefault(_get(value, "kind"), []).append((key, value))
+    parts = []
+    for kind, members in groups.items():
+        items = "".join(
+            "<li>"
+            + ("" if key is None else f"<strong>{_esc(key)}</strong> ")
+            + _render_value(value)
+            + "</li>"
+            for key, value in members
+        )
+        parts.append(f"<h3>Kind: {_render_value(kind)}</h3>\n<ul>{items}</ul>\n")
+    return "".join(parts)
+
+
+def _render_component(node_id, node) -> str:
+    verification = _get(node, "verification")
+    body = (
+        f"<p>Type: {_render_value(_get(node, 'type'))}</p>\n"
+        f"<h2>Documents</h2>\n{_render_documents(_get(node, 'documents'))}\n"
+        "<h2>Requirements</h2>\n"
+        f"{_render_value(_get(verification, 'requirement_results'))}\n"
+        "<h2>Acceptance criteria</h2>\n"
+        f"{_render_criteria(_get(verification, 'criteria'))}\n"
+        f"<h2>Provenance</h2>\n{_render_value(_get(node, 'provenance'))}\n"
+        f"<h2>Size</h2>\n<p>{_size_badge(_get(node, 'size_status'))}</p>\n"
+        "<h2>Exemptions</h2>\n"
+        f"<p>Sealed: {_render_value(_get(node, 'sealed'))}</p>\n"
+        f"<p>Pinned overrides: {_render_value(_get(node, 'pinned_overrides'))}</p>\n"
+        f"<h2>Owners</h2>\n{_render_value(_get(node, 'owners'))}\n"
+    )
+    return _page(str(node_id), body, "../")
+
+
+def _render_plain_node(node_id, node) -> str:
+    body = f"<p>Type: {_render_value(_get(node, 'type'))}</p>\n"
+    return _page(str(node_id), body, "../")
+
+
+def _render_dashboard(nodes: list, aggregates) -> str:
+    if _is_absent(aggregates):
+        agg_html = _ABSENT
+    else:
+        rows = "".join(
+            f"<tr><th>{_esc(k)}</th><td>{_render_value(v)}</td></tr>\n"
+            for k, v in aggregates.items()
+        )
+        agg_html = f"<table>\n{rows}</table>"
+    size_rows = "".join(
+        f'<tr><td><a href="{_esc(_node_href(node_id, ""))}">{_esc(node_id)}</a></td>'
+        f"<td>{_size_badge(_get(node, 'size_status'))}</td></tr>\n"
+        for node_id, node in nodes
+        if _get(node, "type") == "component"
+    )
+    body = (
+        f"<h2>Aggregates</h2>\n{agg_html}\n"
+        "<h2>Component size status</h2>\n"
+        f"<table>\n<tr><th>Component</th><th>Size</th></tr>\n{size_rows}</table>\n"
+    )
+    return _page("Corpus health", body, "")
+
+
+def render_docs_site(graph, out_dir: Path) -> None:
+    """Render ``graph`` (a ``CorpusGraph`` or its dict form) into ``out_dir``."""
     out_dir = Path(out_dir)
-    nodes = _field(graph, "nodes") or {}
-    edges = _field(graph, "edges") or []
-    aggregates = _field(graph, "aggregates")
+    nodes = sorted((_get(graph, "nodes") or {}).items(), key=lambda item: str(item[0]))
+    edges = _get(graph, "edges") or []
+    aggregates = _get(graph, "aggregates")
+
     nodes_dir = out_dir / "nodes"
     nodes_dir.mkdir(parents=True, exist_ok=True)
-    (out_dir / "index.html").write_text(
-        _index_page(nodes, edges, aggregates), encoding="utf-8"
+
+    (out_dir / "index.html").write_text(_render_index(nodes, edges), encoding="utf-8")
+    (out_dir / "dashboard.html").write_text(
+        _render_dashboard(nodes, aggregates), encoding="utf-8"
     )
-    for node_id, node in sorted(nodes.items()):
-        (nodes_dir / f"{node_id}.html").write_text(
-            _detail_page(node_id, node), encoding="utf-8"
-        )
+    for node_id, node in nodes:
+        if _get(node, "type") == "component":
+            page = _render_component(node_id, node)
+        else:
+            page = _render_plain_node(node_id, node)
+        (nodes_dir / f"{node_id}.html").write_text(page, encoding="utf-8")

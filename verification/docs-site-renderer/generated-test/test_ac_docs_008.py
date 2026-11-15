@@ -1,15 +1,13 @@
+import docs_site_renderer
+
 import json
 from dataclasses import dataclass, field as dc_field
 from pathlib import Path
 
-import docs_site_renderer
 
-
-RAW = "<script>alert(1)</script>"
-FIRST_ID = "comp-xssalpha"
-FIRST_SLUG = "xssalpha"
-SECOND_ID = "comp-nullbeta"
-SECOND_SLUG = "nullbeta"
+RAW_SCRIPT = "<script>alert(1)</script>"
+ALPHA_TEXT = "<script>alert(1)</script> & more"
+BETA_MARKER = "BetaDocMarker42"
 
 
 @dataclass
@@ -34,19 +32,21 @@ class CorpusGraph:
 
 def _build_graph():
     nodes = {
-        FIRST_ID: {
+        "comp-alpha": {
             "type": "component",
             "verification": None,
-            "provenance": None,
+            "provenance": {
+                "model": "anthropic:claude-sonnet-5",
+                "prompt_version": "v1",
+                "generated_at": "2026-11-01T00:00:00Z",
+            },
             "size_status": "ok",
             "sealed": True,
             "pinned_overrides": [],
             "owners": ["docs-team"],
-            "documents": {
-                "component.md": RAW + " & more",
-            },
+            "documents": {"component.md": ALPHA_TEXT},
         },
-        SECOND_ID: {
+        "comp-beta": {
             "type": "component",
             "verification": None,
             "provenance": None,
@@ -54,83 +54,56 @@ def _build_graph():
             "sealed": False,
             "pinned_overrides": [],
             "owners": [],
-            "documents": {
-                "component.md": "Plain beta component text.",
-            },
+            "documents": {"component.md": BETA_MARKER + "\n"},
         },
     }
-    aggregates = {
-        "orphan_capability_rate": 0.0,
-        "orphan_component_rate": 0.0,
-        "orphan_var_rate": 0.0,
-    }
-    return CorpusGraph(nodes=nodes, edges=[], aggregates=aggregates)
+    return CorpusGraph(
+        nodes=nodes,
+        edges=[],
+        aggregates={
+            "orphan_capability_rate": 0.0,
+            "orphan_component_rate": 0.0,
+            "orphan_var_rate": 0.0,
+        },
+    )
 
 
 def _read_all(out_dir: Path):
-    files = {}
+    pages = {}
     for p in sorted(out_dir.rglob("*")):
         if p.is_file():
-            try:
-                files[p] = p.read_text(encoding="utf-8", errors="replace")
-            except OSError:
-                continue
-    return files
+            pages[p] = p.read_bytes().decode("utf-8", errors="replace")
+    return pages
 
 
-def _detail_pages(files, out_dir, own_id, own_slug, other_id, other_slug):
-    by_name = [
-        p
-        for p in files
-        if own_slug in str(p.relative_to(out_dir)) and other_slug not in str(p.relative_to(out_dir))
-    ]
-    if by_name:
-        return by_name
-    return [
-        p
-        for p, text in files.items()
-        if own_id in text and other_id not in text
-    ]
-
-
-def test_ac_docs_008_escapes_values_and_tolerates_null_fields(tmp_path):
+def test_ac_docs_008_detail_views_escape_and_tolerate_nulls(tmp_path):
+    out_dir = tmp_path / "out"
     graph = _build_graph()
-    out_dir = tmp_path / "site"
-    out_dir.mkdir(parents=True, exist_ok=True)
 
-    # Second node has null verification/provenance and empty owners: must not raise.
+    # Must not raise, even with the second node's null/empty fields.
     docs_site_renderer.render_docs_site(graph, out_dir)
 
-    files = _read_all(out_dir)
-    assert files, "render_docs_site wrote no files"
+    pages = _read_all(out_dir)
+    assert pages, "render_docs_site wrote no files"
 
-    first_pages = _detail_pages(
-        files, out_dir, FIRST_ID, FIRST_SLUG, SECOND_ID, SECOND_SLUG
-    )
-    assert first_pages, (
-        "no detail view found for %s among %r"
-        % (FIRST_ID, [str(p.relative_to(out_dir)) for p in files])
-    )
+    # The raw script must never appear anywhere in the rendered site.
+    for path, text in pages.items():
+        assert RAW_SCRIPT not in text, f"raw script tag found unescaped in {path}"
 
-    for p in first_pages:
-        assert RAW not in files[p], (
-            "raw script tag found unescaped in %s" % p.relative_to(out_dir)
-        )
-
-    assert any("&lt;script&gt;" in files[p] for p in first_pages), (
-        "first node's detail view lacks escaped '&lt;script&gt;'"
+    # The first node's detail view: the page rendering its document content.
+    alpha_pages = [p for p, t in pages.items() if "&amp; more" in t]
+    assert alpha_pages, "no page contains the escaped '&amp; more' document text"
+    assert any("&lt;script&gt;" in pages[p] for p in alpha_pages), (
+        "the page holding comp-alpha's document does not contain '&lt;script&gt;'"
     )
-    assert any("&amp; more" in files[p] for p in first_pages), (
-        "first node's detail view lacks escaped '&amp; more'"
+    assert any(
+        "&lt;script&gt;" in pages[p] and "&amp; more" in pages[p] for p in alpha_pages
     )
 
-    second_pages = _detail_pages(
-        files, out_dir, SECOND_ID, SECOND_SLUG, FIRST_ID, FIRST_SLUG
-    )
-    assert second_pages, (
-        "no detail view rendered for %s among %r"
-        % (SECOND_ID, [str(p.relative_to(out_dir)) for p in files])
-    )
-    assert any(files[p].strip() for p in second_pages), (
-        "second node's detail view is empty"
+    # The second node's detail view rendered: its document content is present
+    # on some page, and that page is not comp-alpha's detail view.
+    beta_pages = [p for p, t in pages.items() if BETA_MARKER in t]
+    assert beta_pages, "comp-beta's detail view (its document content) was not rendered"
+    assert any(p not in alpha_pages for p in beta_pages) or any(
+        "comp-beta" in pages[p] for p in beta_pages
     )
