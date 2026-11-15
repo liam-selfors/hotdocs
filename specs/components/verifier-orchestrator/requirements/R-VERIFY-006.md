@@ -2,8 +2,9 @@
 
 **R-VERIFY-006** — For `generated-test`-kind criteria, this component MUST
   compute and report the mutation score, and the overall verdict MUST be
-  `fail` if it falls below the published bar (80% general / 90%
-  freeform-derived, `SPEC_GUIDELINES.md` §5).
+  `fail` if it falls below 0.8, or 0.9 when a `generated-test` criterion
+  is freeform-derived, written with no Given/When/Then block
+  (`SPEC_GUIDELINES.md` §5, `D80`).
 
   **A single score for the whole component, a union across all of its
   own `generated-test` criteria's test files — never an average of
