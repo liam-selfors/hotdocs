@@ -11,7 +11,7 @@ def field(value, name):
 
 NODE_IDS = ["P-ZERO-EDIT", "comp-bar", "comp-foo", "comp-qux"]
 
-EXPECTED_STATUSES = {
+EXPECTED = {
     "comp-foo": "passing",
     "comp-bar": "failing",
     "comp-qux": "failing",
@@ -23,38 +23,35 @@ FAKE_TRACKER_TEMPLATE = r'''
 import json
 from pathlib import Path
 
-_LOG = __LOG_PATH__
+_LOG = Path(__LOG_PATH__)
 
 
-def _log(record):
+def _log(entry):
     with open(_LOG, "a", encoding="utf-8") as fh:
-        fh.write(json.dumps(record) + "\n")
+        fh.write(json.dumps(entry) + "\n")
 
 
-def _verification_report(component_id, overall, requirement_results):
+def _verification_report(component_id, r_id, overall):
+    result = "pass" if overall == "pass" else "fail"
     return {
         "component_id": component_id,
         "criteria": [
-            {
-                "id": "AC-" + component_id[len("comp-"):].upper() + "-001",
-                "covers": list(requirement_results)[0],
-                "kind": "compiled",
-                "result": "pass" if overall == "pass" else "fail",
-            }
+            {"id": "AC-" + r_id[2:], "covers": r_id, "kind": "compiled", "result": result}
         ],
-        "requirement_results": dict(requirement_results),
+        "requirement_results": {r_id: result},
         "interface_drift": False,
         "mutation_score": 0.9,
         "overall": overall,
     }
 
 
-def _license_scan(blocked):
-    return {"blocked": blocked, "findings": []}
-
-
-def _secret_scan(flagged):
-    return {"flagged": flagged, "findings": []}
+def _hit(component_id, r_id, overall, license_blocked=False, secret_flagged=False):
+    return {
+        "hit": True,
+        "verification_report": _verification_report(component_id, r_id, overall),
+        "license_scan": {"blocked": license_blocked, "findings": []},
+        "secret_scan": {"flagged": secret_flagged, "findings": []},
+    }
 
 
 def check_readiness(repo_root, changed_ids=None, model=None, seed=0, llm_backend=None):
@@ -64,36 +61,14 @@ def check_readiness(repo_root, changed_ids=None, model=None, seed=0, llm_backend
         "changed_ids": changed_ids,
         "model": model,
         "seed": seed,
-        "llm_backend_is_none": llm_backend is None,
     })
     return {
         "scope": "blast-radius" if changed_ids is not None else "whole-corpus",
         "ready": False,
         "components": {
-            "comp-foo": {
-                "hit": True,
-                "verification_report": _verification_report(
-                    "comp-foo", "pass", {"R-FOO-001": "pass"}
-                ),
-                "license_scan": _license_scan(False),
-                "secret_scan": _secret_scan(False),
-            },
-            "comp-bar": {
-                "hit": True,
-                "verification_report": _verification_report(
-                    "comp-bar", "fail", {"R-BAR-001": "fail"}
-                ),
-                "license_scan": _license_scan(False),
-                "secret_scan": _secret_scan(False),
-            },
-            "comp-qux": {
-                "hit": True,
-                "verification_report": _verification_report(
-                    "comp-qux", "pass", {"R-QUX-001": "pass"}
-                ),
-                "license_scan": _license_scan(True),
-                "secret_scan": _secret_scan(False),
-            },
+            "comp-foo": _hit("comp-foo", "R-FOO-001", "pass"),
+            "comp-bar": _hit("comp-bar", "R-BAR-001", "fail"),
+            "comp-qux": _hit("comp-qux", "R-QUX-001", "pass", license_blocked=True),
         },
         "capabilities": {
             "P-ZERO-EDIT": {
@@ -112,44 +87,47 @@ def check_readiness(repo_root, changed_ids=None, model=None, seed=0, llm_backend
 
 
 def last_requirement_failures(component_id, repo_root):
-    _log({
-        "fn": "last_requirement_failures",
-        "component_id": component_id,
-        "repo_root": str(repo_root),
-    })
+    _log({"fn": "last_requirement_failures", "component_id": component_id})
     return []
 
 
 def write_attempt_record(component_id, generation_result, verification_report,
                          spec_bundle_hash, repo_root):
     raise AssertionError("write_attempt_record must not be called by the UI")
-
-
-def main(argv=None):
-    return 2
 '''
 
 
-def _component_graph_node(component_id):
+def _component_graph_node():
     return {
         "type": "component",
         "verification": None,
         "provenance": None,
         "size_status": "ok",
-        "sealed": True,
+        "sealed": False,
         "pinned_overrides": [],
         "owners": ["test-team"],
-        "documents": {"component.md": "---\nid: " + component_id + "\n---\n"},
+        "documents": {},
     }
 
 
-def _write_corpus_graph(repo_root):
+def _build_repo(tmp_path):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    log_path = tmp_path / "tracker_calls.jsonl"
+
+    fake_dir = repo_root / "gen" / "provenance-tracker"
+    fake_dir.mkdir(parents=True)
+    (fake_dir / "provenance_tracker.py").write_text(
+        FAKE_TRACKER_TEMPLATE.replace("__LOG_PATH__", repr(str(log_path))),
+        encoding="utf-8",
+    )
+
     graph = {
         "nodes": {
             "P-ZERO-EDIT": {"type": "capability"},
-            "comp-bar": _component_graph_node("comp-bar"),
-            "comp-foo": _component_graph_node("comp-foo"),
-            "comp-qux": _component_graph_node("comp-qux"),
+            "comp-bar": _component_graph_node(),
+            "comp-foo": _component_graph_node(),
+            "comp-qux": _component_graph_node(),
         },
         "edges": [
             {"from": "comp-foo", "to": "P-ZERO-EDIT", "kind": "realizes"},
@@ -160,19 +138,12 @@ def _write_corpus_graph(repo_root):
             "orphan_var_rate": 0.0,
         },
     }
-    path = repo_root / "verification" / "corpus-graph.json"
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        json.dumps(graph, sort_keys=True, indent=2, ensure_ascii=True) + "\n",
-        encoding="utf-8",
+    vdir = repo_root / "verification"
+    vdir.mkdir()
+    (vdir / "corpus-graph.json").write_text(
+        json.dumps(graph, sort_keys=True, indent=2) + "\n", encoding="utf-8"
     )
-
-
-def _write_fake_tracker(repo_root, log_path):
-    fake_dir = repo_root / "gen" / "provenance-tracker"
-    fake_dir.mkdir(parents=True, exist_ok=True)
-    source = FAKE_TRACKER_TEMPLATE.replace("__LOG_PATH__", repr(str(log_path)))
-    (fake_dir / "provenance_tracker.py").write_text(source, encoding="utf-8")
+    return repo_root, log_path
 
 
 VOID_TAGS = {
@@ -182,88 +153,61 @@ VOID_TAGS = {
 
 
 class _StatusElementCollector(HTMLParser):
-    """Collects every element carrying a data-status attribute, with its
-    attributes and its full text content."""
-
     def __init__(self):
         super().__init__(convert_charrefs=True)
-        self.stack = []
-        self.elements = []
-        self._raw_text_depth = 0
-
-    def _open(self, tag, attrs, self_closing):
-        attr_dict = {}
-        for name, value in attrs:
-            attr_dict[name.lower()] = value if value is not None else ""
-        record = {"tag": tag, "attrs": attr_dict, "text": []}
-        if "data-status" in attr_dict:
-            self.elements.append(record)
-        if tag in VOID_TAGS or self_closing:
-            return
-        self.stack.append(record)
-        if tag in ("script", "style"):
-            self._raw_text_depth += 1
+        self.stack = []  # list of (tag, record_or_None)
+        self.records = []
 
     def handle_starttag(self, tag, attrs):
-        self._open(tag.lower(), attrs, False)
+        attr_map = {k: (v if v is not None else "") for k, v in attrs}
+        record = None
+        if "data-status" in attr_map:
+            record = {"tag": tag, "attrs": attr_map, "text": []}
+            self.records.append(record)
+        if tag in VOID_TAGS:
+            return
+        self.stack.append((tag, record))
 
     def handle_startendtag(self, tag, attrs):
-        self._open(tag.lower(), attrs, True)
+        attr_map = {k: (v if v is not None else "") for k, v in attrs}
+        if "data-status" in attr_map:
+            self.records.append({"tag": tag, "attrs": attr_map, "text": []})
 
     def handle_endtag(self, tag):
-        tag = tag.lower()
         for i in range(len(self.stack) - 1, -1, -1):
-            if self.stack[i]["tag"] == tag:
-                for rec in self.stack[i:]:
-                    if rec["tag"] in ("script", "style"):
-                        self._raw_text_depth -= 1
+            if self.stack[i][0] == tag:
                 del self.stack[i:]
                 return
 
     def handle_data(self, data):
-        if self._raw_text_depth:
-            return
-        for rec in self.stack:
-            rec["text"].append(data)
+        for _, record in self.stack:
+            if record is not None:
+                record["text"].append(data)
 
 
-_ID_PREFIXES = ("#", "node-", "node_", "node:")
-
-
-def _attr_node_id(attrs):
-    for name, value in attrs.items():
-        if name in ("class", "data-status", "style"):
+def _ids_by_attr(record):
+    found = set()
+    for name, value in record["attrs"].items():
+        if name in ("class", "data-status"):
             continue
-        candidate = value.strip()
-        if candidate in NODE_IDS:
-            return candidate
-        for prefix in _ID_PREFIXES:
-            if candidate.startswith(prefix) and candidate[len(prefix):] in NODE_IDS:
-                return candidate[len(prefix):]
-    return None
+        for node_id in NODE_IDS:
+            if value == node_id or value.endswith(node_id):
+                found.add(node_id)
+    return found
 
 
-def _text_node_id(text):
-    present = [nid for nid in NODE_IDS if nid in text]
-    if len(present) == 1:
-        return present[0]
-    return None
+def _ids_by_text(record):
+    text = "".join(record["text"])
+    return {node_id for node_id in NODE_IDS if node_id in text}
 
 
-def test_ac_ui_002_statuses_map_report_fields_and_mark_node_elements(tmp_path):
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
+def test_ac_ui_002_statuses_map_directly_and_render_matching_attributes(tmp_path):
+    repo_root, log_path = _build_repo(tmp_path)
     out_dir = tmp_path / "out"
-    out_dir.mkdir()
-    log_path = tmp_path / "fake_tracker_calls.jsonl"
-
-    _write_fake_tracker(repo_root, log_path)
-    _write_corpus_graph(repo_root)
 
     snapshot = provenance_tracker_ui.render_tracker_ui(out_dir, repo_root)
 
-    # The fake provenance-tracker was the one consulted.
-    assert log_path.exists(), "fake provenance-tracker was never invoked"
+    # The faked provenance-tracker was actually consulted, exactly once.
     calls = [
         json.loads(line)
         for line in log_path.read_text(encoding="utf-8").splitlines()
@@ -272,44 +216,43 @@ def test_ac_ui_002_statuses_map_report_fields_and_mark_node_elements(tmp_path):
     readiness_calls = [c for c in calls if c["fn"] == "check_readiness"]
     assert len(readiness_calls) == 1
 
-    # Snapshot statuses are the direct mapping of the VerifyReport fields.
+    # Snapshot statuses.
     nodes = field(snapshot, "nodes")
     statuses = {field(n, "id"): field(n, "status") for n in nodes}
-    assert statuses == EXPECTED_STATUSES
+    assert set(statuses) == set(EXPECTED)
+    for node_id, expected_status in EXPECTED.items():
+        assert statuses[node_id] == expected_status, (node_id, statuses[node_id])
 
-    # Each node element's data-status and status-<status> class match.
-    index_html = out_dir / "index.html"
-    assert index_html.is_file()
-    html = index_html.read_text(encoding="utf-8")
+    # Rendered page: each node element's data-status and status-<status> class.
+    index = Path(out_dir) / "index.html"
+    assert index.is_file()
+    html = index.read_text(encoding="utf-8")
 
-    collector = _StatusElementCollector()
-    collector.feed(html)
-    collector.close()
+    parser = _StatusElementCollector()
+    parser.feed(html)
+    parser.close()
+    records = parser.records
+    assert records, "no element carrying a data-status attribute was rendered"
 
-    assert collector.elements, "no element carries a data-status attribute"
+    use_attrs = any(_ids_by_attr(r) for r in records)
+    by_node = {node_id: [] for node_id in NODE_IDS}
+    for record in records:
+        if use_attrs:
+            ids = _ids_by_attr(record)
+        else:
+            ids = _ids_by_text(record)
+            if len(ids) != 1:
+                continue
+        for node_id in ids:
+            by_node[node_id].append(record)
 
-    matched = {nid: [] for nid in NODE_IDS}
-    for el in collector.elements:
-        nid = _attr_node_id(el["attrs"])
-        if nid is None:
-            nid = _text_node_id("".join(el["text"]))
-        if nid is not None:
-            matched[nid].append(el)
-
-    for nid, expected_status in EXPECTED_STATUSES.items():
-        elements = matched[nid]
-        assert elements, "no node element with data-status found for %s" % nid
-        for el in elements:
-            assert el["attrs"]["data-status"] == expected_status, (
-                "%s: data-status %r != %r"
-                % (nid, el["attrs"]["data-status"], expected_status)
+    for node_id in NODE_IDS:
+        elements = by_node[node_id]
+        assert elements, "no node element with data-status found for %s" % node_id
+        snapshot_status = statuses[node_id]
+        for element in elements:
+            assert element["attrs"]["data-status"] == snapshot_status, (
+                node_id, element["attrs"]
             )
-            classes = el["attrs"].get("class", "").split()
-            assert "status-" + expected_status in classes, (
-                "%s: class %r lacks status-%s" % (nid, classes, expected_status)
-            )
-            for other in ("passing", "failing", "missing", "not-attempted"):
-                if other != expected_status:
-                    assert "status-" + other not in classes, (
-                        "%s: unexpected class status-%s" % (nid, other)
-                    )
+            classes = element["attrs"].get("class", "").split()
+            assert "status-" + snapshot_status in classes, (node_id, element["attrs"])

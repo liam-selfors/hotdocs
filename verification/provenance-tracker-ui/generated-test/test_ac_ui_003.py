@@ -1,19 +1,13 @@
-import provenance_tracker_ui
-
 import json
 import re
 from html.parser import HTMLParser
 from pathlib import Path
 
+import provenance_tracker_ui
+
 
 def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
-
-
-FAILING_REASON = (
-    "comp-bar: verification failed for current spec state \u2014 "
-    "run hotdocs generate comp-bar --retry-feedback=R-BAR-002"
-)
 
 
 FAKE_TRACKER_TEMPLATE = '''
@@ -28,126 +22,141 @@ def _log(record):
         fh.write(json.dumps(record) + "\\n")
 
 
-def _verification_report(component_id, overall, requirement_results):
-    criteria = []
-    for i, (rid, res) in enumerate(sorted(requirement_results.items()), start=1):
-        crit = {{
-            "id": "AC-" + rid[2:],
-            "covers": rid,
-            "kind": "compiled",
-            "result": res,
-        }}
-        if res == "fail":
-            crit["failure_detail"] = {{"message": "check failed", "expected": 1, "actual": 0}}
-        criteria.append(crit)
-    return {{
-        "component_id": component_id,
-        "criteria": criteria,
-        "requirement_results": dict(requirement_results),
-        "interface_drift": False,
-        "mutation_score": 0.9,
-        "overall": overall,
-    }}
-
-
 def check_readiness(repo_root, changed_ids=None, model=None, seed=0, llm_backend=None):
-    _log({{
-        "fn": "check_readiness",
-        "repo_root": str(repo_root),
-        "changed_ids": changed_ids,
-        "model": model,
-        "seed": seed,
-    }})
+    _log({{"fn": "check_readiness", "changed_ids": changed_ids, "model": model, "seed": seed}})
     return {{
         "scope": "blast-radius" if changed_ids is not None else "whole-corpus",
         "ready": False,
         "components": {{
-            "comp-bar": {{
+            "comp-foo": {{
                 "hit": True,
-                "verification_report": _verification_report(
-                    "comp-bar", "fail", {{"R-BAR-001": "pass", "R-BAR-002": "fail"}}
-                ),
+                "verification_report": {{
+                    "component_id": "comp-foo",
+                    "criteria": [
+                        {{"id": "AC-FOO-001", "covers": "R-FOO-001", "kind": "compiled", "result": "pass"}}
+                    ],
+                    "requirement_results": {{"R-FOO-001": "pass"}},
+                    "interface_drift": False,
+                    "mutation_score": None,
+                    "overall": "pass",
+                }},
                 "license_scan": {{"blocked": False, "findings": []}},
                 "secret_scan": {{"flagged": False, "findings": []}},
             }},
-            "comp-foo": {{
+            "comp-bar": {{
                 "hit": True,
-                "verification_report": _verification_report(
-                    "comp-foo", "pass", {{"R-FOO-001": "pass"}}
-                ),
+                "verification_report": {{
+                    "component_id": "comp-bar",
+                    "criteria": [
+                        {{"id": "AC-BAR-001", "covers": "R-BAR-001", "kind": "compiled", "result": "pass"}},
+                        {{"id": "AC-BAR-002", "covers": "R-BAR-002", "kind": "compiled", "result": "fail",
+                          "failure_detail": {{"message": "value equals 5 failed", "expected": 5, "actual": 3}}}}
+                    ],
+                    "requirement_results": {{"R-BAR-001": "pass", "R-BAR-002": "fail"}},
+                    "interface_drift": False,
+                    "mutation_score": None,
+                    "overall": "fail",
+                }},
                 "license_scan": {{"blocked": False, "findings": []}},
                 "secret_scan": {{"flagged": False, "findings": []}},
             }},
         }},
         "capabilities": {{}},
-        "not_ready_reasons": [{reason!r}],
+        "not_ready_reasons": [
+            "comp-bar: verification failed for current spec state - run hotdocs generate comp-bar --retry-feedback=R-BAR-002"
+        ],
     }}
 
 
 def last_requirement_failures(component_id, repo_root):
-    _log({{
-        "fn": "last_requirement_failures",
-        "component_id": component_id,
-        "repo_root": str(repo_root),
-    }})
+    _log({{"fn": "last_requirement_failures", "component_id": component_id}})
     if component_id == "comp-bar":
         return ["R-BAR-002"]
     return []
-
-
-def write_attempt_record(component_id, generation_result, verification_report,
-                         spec_bundle_hash, repo_root):
-    raise AssertionError("write_attempt_record must not be called by the UI")
 '''
 
 
-def _component_node(slug, overall):
-    return {
-        "type": "component",
-        "verification": {
-            "component_id": "comp-" + slug,
-            "criteria": [],
-            "requirement_results": {},
-            "interface_drift": False,
-            "mutation_score": 0.9,
-            "overall": overall,
-        },
-        "provenance": {"gate_version": "component_gate_runner@1.0.0"},
-        "size_status": "ok",
-        "sealed": False,
-        "pinned_overrides": [],
-        "owners": ["pipeline-team"],
-        "documents": {"component.md": "---\nid: comp-" + slug + "\n---\n"},
-    }
+class _PageScanner(HTMLParser):
+    def __init__(self):
+        super().__init__()
+        self.hrefs = []
+        self.form_tags = 0
+        self.scripts = []  # list of (id, text)
+        self._in_script = False
+        self._script_id = None
+        self._script_buf = []
+
+    def _attrs(self, tag, attrs):
+        if tag == "form":
+            self.form_tags += 1
+        for name, value in attrs:
+            if name.lower() == "href":
+                self.hrefs.append(value)
+
+    def handle_starttag(self, tag, attrs):
+        tag = tag.lower()
+        self._attrs(tag, attrs)
+        if tag == "script":
+            self._in_script = True
+            self._script_id = dict(attrs).get("id")
+            self._script_buf = []
+
+    def handle_startendtag(self, tag, attrs):
+        tag = tag.lower()
+        self._attrs(tag, attrs)
+        if tag == "script":
+            self.scripts.append((dict(attrs).get("id"), ""))
+
+    def handle_endtag(self, tag):
+        if tag.lower() == "script" and self._in_script:
+            self.scripts.append((self._script_id, "".join(self._script_buf)))
+            self._in_script = False
+            self._script_id = None
+            self._script_buf = []
+
+    def handle_data(self, data):
+        if self._in_script:
+            self._script_buf.append(data)
 
 
-def _build_fixture(tmp_path):
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    log_path = tmp_path / "tracker_calls.jsonl"
-
+def _write_fixture(repo_root: Path, log_path: Path):
     fake_dir = repo_root / "gen" / "provenance-tracker"
     fake_dir.mkdir(parents=True)
     (fake_dir / "provenance_tracker.py").write_text(
-        FAKE_TRACKER_TEMPLATE.format(log_path=str(log_path), reason=FAILING_REASON),
-        encoding="utf-8",
+        FAKE_TRACKER_TEMPLATE.format(log_path=str(log_path)), encoding="utf-8"
     )
 
     graph = {
         "nodes": {
-            "comp-bar": _component_node("bar", "fail"),
-            "comp-foo": _component_node("foo", "pass"),
+            "comp-bar": {
+                "type": "component",
+                "verification": None,
+                "provenance": None,
+                "size_status": "ok",
+                "sealed": True,
+                "pinned_overrides": [],
+                "owners": ["pipeline-team"],
+                "documents": {},
+            },
+            "comp-foo": {
+                "type": "component",
+                "verification": None,
+                "provenance": None,
+                "size_status": "ok",
+                "sealed": True,
+                "pinned_overrides": [],
+                "owners": ["pipeline-team"],
+                "documents": {},
+            },
         },
-        "edges": [
-            {"from": "comp-foo", "to": "comp-bar", "kind": "depends_on"},
-        ],
+        "edges": [{"from": "comp-bar", "to": "comp-foo", "kind": "depends_on"}],
         "aggregates": {
             "orphan_capability_rate": 0.0,
-            "orphan_component_rate": 0.5,
+            "orphan_component_rate": 0.0,
             "orphan_var_rate": 0.0,
         },
     }
-    (repo_root / "verification").mkdir()
+    (repo_root / "verification").mkdir(parents=True)
     (repo_root / "verification" / "corpus-graph.json").write_text(
         json.dumps(graph, sort_keys=True, indent=2) + "\n", encoding="utf-8"
     )
@@ -155,13 +164,13 @@ def _build_fixture(tmp_path):
     attempts_dir = repo_root / ".hotdocs" / "attempts" / "comp-bar"
     attempts_dir.mkdir(parents=True)
     attempt = {
-        "attempt_id": "20261025T143201Z-a1b2c3",
+        "attempt_id": "2026-10-25T14:32:01Z-a1b2c3",
         "component_id": "comp-bar",
         "timestamp": "2026-10-25T14:32:01Z",
-        "spec_bundle_hash": "sha256:abc123",
+        "spec_bundle_hash": "sha256:abc",
         "generation": {
             "component_id": "comp-bar",
-            "spec_bundle_hash": "sha256:abc123",
+            "spec_bundle_hash": "sha256:abc",
             "model": "claude-sonnet-5",
             "prompt_version": "v1",
             "cache_hit": False,
@@ -174,77 +183,34 @@ def _build_fixture(tmp_path):
             "component_id": "comp-bar",
             "criteria": [
                 {"id": "AC-BAR-001", "covers": "R-BAR-001", "kind": "compiled", "result": "pass"},
-                {"id": "AC-BAR-002", "covers": "R-BAR-002", "kind": "compiled", "result": "fail",
-                 "failure_detail": {"message": "check failed", "expected": 1, "actual": 0}},
+                {"id": "AC-BAR-002", "covers": "R-BAR-002", "kind": "compiled", "result": "fail"},
             ],
             "requirement_results": {"R-BAR-001": "pass", "R-BAR-002": "fail"},
             "interface_drift": False,
-            "mutation_score": 0.8,
+            "mutation_score": None,
             "overall": "fail",
         },
     }
-    (attempts_dir / "20261025T143201Z-a1b2c3.json").write_text(
+    (attempts_dir / "2026-10-25T14-32-01Z-a1b2c3.json").write_text(
         json.dumps(attempt, indent=2), encoding="utf-8"
     )
 
-    return repo_root, log_path
 
-
-class _PageParser(HTMLParser):
-    def __init__(self):
-        super().__init__(convert_charrefs=True)
-        self.tags = []  # (tag, attrs dict)
-        self.scripts = []  # (attrs dict, content)
-        self._in_script = False
-        self._script_attrs = None
-        self._script_chunks = []
-
-    def _record(self, tag, attrs):
-        self.tags.append((tag.lower(), {k.lower(): v for k, v in attrs}))
-
-    def handle_starttag(self, tag, attrs):
-        self._record(tag, attrs)
-        if tag.lower() == "script":
-            self._in_script = True
-            self._script_attrs = {k.lower(): v for k, v in attrs}
-            self._script_chunks = []
-
-    def handle_startendtag(self, tag, attrs):
-        self._record(tag, attrs)
-        if tag.lower() == "script":
-            self.scripts.append(({k.lower(): v for k, v in attrs}, ""))
-
-    def handle_data(self, data):
-        if self._in_script:
-            self._script_chunks.append(data)
-
-    def handle_endtag(self, tag):
-        if tag.lower() == "script" and self._in_script:
-            self.scripts.append((self._script_attrs, "".join(self._script_chunks)))
-            self._in_script = False
-            self._script_attrs = None
-            self._script_chunks = []
-
-    def close(self):
-        super().close()
-        if self._in_script:
-            self.scripts.append((self._script_attrs, "".join(self._script_chunks)))
-            self._in_script = False
-
-
-def test_ac_ui_003_page_has_no_generate_action(tmp_path):
-    repo_root, log_path = _build_fixture(tmp_path)
+def test_page_has_no_form_no_generate_script_no_external_href(tmp_path):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    log_path = tmp_path / "fake_tracker_log.jsonl"
+    _write_fixture(repo_root, log_path)
     out_dir = tmp_path / "out"
     out_dir.mkdir()
 
     snapshot = provenance_tracker_ui.render_tracker_ui(out_dir, repo_root)
 
-    # Given: the fake tracker was used, and the snapshot holds a failing
-    # component with a non-empty retry_feedback.
-    assert log_path.exists(), "fake provenance-tracker was never invoked"
-    calls = [json.loads(line) for line in log_path.read_text(encoding="utf-8").splitlines() if line.strip()]
-    assert any(c["fn"] == "check_readiness" for c in calls)
+    # The fake provenance-tracker was really used.
+    records = [json.loads(line) for line in log_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    assert len([r for r in records if r["fn"] == "check_readiness"]) == 1
 
+    # Given: the snapshot contains a failing component with non-empty retry_feedback.
     nodes = field(snapshot, "nodes")
     by_id = {field(n, "id"): n for n in nodes}
     assert "comp-bar" in by_id
@@ -252,41 +218,25 @@ def test_ac_ui_003_page_has_no_generate_action(tmp_path):
     assert field(bar, "status") == "failing"
     assert list(field(bar, "retry_feedback")) == ["R-BAR-002"]
 
-    index = Path(out_dir) / "index.html"
+    index = out_dir / "index.html"
     assert index.is_file()
-    html = index.read_text(encoding="utf-8")
+    html_text = index.read_text(encoding="utf-8")
 
-    parser = _PageParser()
-    parser.feed(html)
-    parser.close()
+    # No <form element anywhere.
+    assert re.search(r"<form\b", html_text, re.IGNORECASE) is None
+    scanner = _PageScanner()
+    scanner.feed(html_text)
+    scanner.close()
+    assert scanner.form_tags == 0
 
-    # No <form element.
-    form_tags = [t for t, _ in parser.tags if t == "form"]
-    assert form_tags == [], "page contains a <form> element"
-
-    snapshot_blocks = [content for attrs, content in parser.scripts
-                       if (attrs or {}).get("id") == "tracker-snapshot"]
-    remaining = html
-    for content in snapshot_blocks:
-        if content:
-            remaining = remaining.replace(content, "", 1)
-    assert not re.search(r"<\s*form\b", remaining, re.IGNORECASE), (
-        "page contains a <form element outside the tracker-snapshot data block"
-    )
-
-    # No "hotdocs generate" in any executable script element.
-    for attrs, content in parser.scripts:
-        if (attrs or {}).get("id") == "tracker-snapshot":
+    # No "hotdocs generate" in any executable script (every script except tracker-snapshot).
+    for script_id, text in scanner.scripts:
+        if script_id == "tracker-snapshot":
             continue
-        assert "hotdocs generate" not in content, (
-            "an executable script element contains 'hotdocs generate': attrs=%r" % (attrs,)
+        assert "hotdocs generate" not in text, (
+            f"script element id={script_id!r} contains 'hotdocs generate'"
         )
 
-    # No href attribute other than ones beginning with "#".
-    for tag, attrs in parser.tags:
-        for name in ("href", "xlink:href"):
-            if name in attrs:
-                value = attrs[name] if attrs[name] is not None else ""
-                assert value.strip().startswith("#"), (
-                    "<%s> has %s=%r, which leaves the page" % (tag, name, value)
-                )
+    # Every href attribute begins with "#".
+    for href in scanner.hrefs:
+        assert href is not None and href.startswith("#"), f"href leaves the page: {href!r}"

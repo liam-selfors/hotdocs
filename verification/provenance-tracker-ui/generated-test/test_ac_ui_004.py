@@ -10,83 +10,104 @@ def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def edge_triple(edge):
-    if isinstance(edge, dict):
-        return (edge["from"], edge["to"], edge["kind"])
-    src = getattr(edge, "from", None)
-    if src is None:
-        src = getattr(edge, "from_")
-    return (src, getattr(edge, "to"), getattr(edge, "kind"))
-
-
-FAKE_TRACKER = '''
+FAKE_TRACKER_TEMPLATE = '''
 import json
 from pathlib import Path
 
-_LOG = Path(__LOG_PATH__)
+_LOG = Path({log_path!r})
 
 
-def _log(entry):
+def _log(record):
     with open(_LOG, "a", encoding="utf-8") as fh:
-        fh.write(json.dumps(entry) + "\\n")
+        fh.write(json.dumps(record) + "\\n")
 
 
 def check_readiness(repo_root, changed_ids=None, model=None, seed=0, llm_backend=None):
-    _log({"fn": "check_readiness", "changed_ids": changed_ids, "model": model, "seed": seed})
-    passing_report = {
-        "component_id": "comp-foo",
-        "criteria": [
-            {"id": "AC-FOO-001", "covers": "R-FOO-001", "kind": "compiled", "result": "pass"}
-        ],
-        "requirement_results": {"R-FOO-001": "pass"},
-        "interface_drift": False,
-        "mutation_score": 0.9,
-        "overall": "pass",
-    }
-    return {
+    _log({{"fn": "check_readiness", "changed_ids": changed_ids, "model": model, "seed": seed}})
+    return {{
         "scope": "blast-radius" if changed_ids is not None else "whole-corpus",
         "ready": False,
-        "components": {
-            "comp-foo": {
+        "components": {{
+            "comp-foo": {{
                 "hit": True,
-                "verification_report": passing_report,
-                "license_scan": {"blocked": False, "findings": []},
-                "secret_scan": {"flagged": False, "findings": []},
-            },
-            "comp-bar": {
-                "hit": False,
-                "verification_report": None,
-                "license_scan": None,
-                "secret_scan": None,
-            },
-        },
-        "capabilities": {
-            "P-ZERO-EDIT": {
+                "verification_report": {{
+                    "component_id": "comp-foo",
+                    "criteria": [],
+                    "requirement_results": {{"R-FOO-001": "pass"}},
+                    "interface_drift": False,
+                    "mutation_score": 0.9,
+                    "overall": "pass",
+                }},
+                "license_scan": {{"blocked": False, "findings": []}},
+                "secret_scan": {{"flagged": False, "findings": []}},
+            }},
+            "comp-bar": {{
                 "hit": True,
-                "capability_scenario_report": {
-                    "P-ZERO-EDIT": {"overall": "pass", "scenarios": []}
-                },
-            }
-        },
-        "not_ready_reasons": [
-            "comp-bar: no provenance for current spec state \\u2014 run hotdocs generate comp-bar"
-        ],
-    }
+                "verification_report": {{
+                    "component_id": "comp-bar",
+                    "criteria": [],
+                    "requirement_results": {{"R-BAR-001": "pass", "R-BAR-002": "fail"}},
+                    "interface_drift": False,
+                    "mutation_score": 0.5,
+                    "overall": "fail",
+                }},
+                "license_scan": {{"blocked": False, "findings": []}},
+                "secret_scan": {{"flagged": False, "findings": []}},
+            }},
+        }},
+        "capabilities": {{
+            "P-ZERO-EDIT": {{
+                "hit": True,
+                "capability_scenario_report": {{
+                    "P-ZERO-EDIT": {{"overall": "pass", "scenarios": []}}
+                }},
+            }},
+        }},
+        "not_ready_reasons": ["comp-bar: verification failed"],
+    }}
 
 
 def last_requirement_failures(component_id, repo_root):
-    _log({"fn": "last_requirement_failures", "component_id": component_id})
+    _log({{"fn": "last_requirement_failures", "component_id": component_id}})
+    if component_id == "comp-bar":
+        return ["R-BAR-002"]
     return []
 '''
 
 
-def _build_repo(repo_root: Path, log_path: Path):
+def _snapshot_files(*roots):
+    state = {}
+    for root in roots:
+        root = Path(root)
+        if not root.exists():
+            continue
+        for dirpath, dirnames, filenames in os.walk(root):
+            dirnames[:] = [d for d in dirnames if d != "__pycache__"]
+            if "__pycache__" in Path(dirpath).parts:
+                continue
+            for name in filenames:
+                p = Path(dirpath) / name
+                st = p.stat()
+                digest = hashlib.sha256(p.read_bytes()).hexdigest()
+                state[str(p.resolve())] = (st.st_mtime_ns, st.st_size, digest)
+    return state
+
+
+def test_ac_ui_004_edges_filtered_and_only_index_html_written(tmp_path):
+    repo_root = tmp_path / "repo"
+    out_dir = tmp_path / "out"
+    log_path = tmp_path / "calls.log"
+    repo_root.mkdir()
+    out_dir.mkdir()
+
+    # Fake provenance-tracker, flat-module shape.
     fake_dir = repo_root / "gen" / "provenance-tracker"
     fake_dir.mkdir(parents=True)
     (fake_dir / "provenance_tracker.py").write_text(
-        FAKE_TRACKER.replace("__LOG_PATH__", repr(str(log_path))), encoding="utf-8"
+        FAKE_TRACKER_TEMPLATE.format(log_path=str(log_path)), encoding="utf-8"
     )
 
+    # Committed topology.
     graph = {
         "nodes": {
             "P-ZERO-EDIT": {"type": "capability"},
@@ -95,7 +116,7 @@ def _build_repo(repo_root: Path, log_path: Path):
                 "type": "component",
                 "verification": None,
                 "provenance": None,
-                "size_status": "unknown",
+                "size_status": "ok",
                 "sealed": False,
                 "pinned_overrides": [],
                 "owners": ["pipeline-team"],
@@ -105,7 +126,7 @@ def _build_repo(repo_root: Path, log_path: Path):
                 "type": "component",
                 "verification": None,
                 "provenance": None,
-                "size_status": "unknown",
+                "size_status": "ok",
                 "sealed": False,
                 "pinned_overrides": [],
                 "owners": ["pipeline-team"],
@@ -123,81 +144,41 @@ def _build_repo(repo_root: Path, log_path: Path):
             "orphan_var_rate": 0.0,
         },
     }
-    ver = repo_root / "verification"
-    ver.mkdir(parents=True)
-    (ver / "corpus-graph.json").write_text(
+    (repo_root / "verification").mkdir()
+    (repo_root / "verification" / "corpus-graph.json").write_text(
         json.dumps(graph, sort_keys=True, indent=2) + "\n", encoding="utf-8"
     )
 
-
-def _snapshot_tree(root: Path):
-    files = {}
-    dirs = set()
-    if not root.exists():
-        return files, dirs
-    for dirpath, dirnames, filenames in os.walk(root):
-        dirnames[:] = [d for d in dirnames if d != "__pycache__"]
-        dp = Path(dirpath)
-        for d in dirnames:
-            dirs.add(str((dp / d).relative_to(root)))
-        for name in filenames:
-            p = dp / name
-            st = p.stat()
-            files[str(p.relative_to(root))] = (
-                st.st_mtime_ns,
-                st.st_size,
-                hashlib.sha256(p.read_bytes()).hexdigest(),
-            )
-    return files, dirs
-
-
-def _changed(before, after):
-    changed = set()
-    for k, v in after.items():
-        if k not in before or before[k] != v:
-            changed.add(k)
-    for k in before:
-        if k not in after:
-            changed.add(k)
-    return changed
-
-
-def test_ac_ui_004_edges_and_writes(tmp_path):
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    out_dir = tmp_path / "out"
-    log_path = tmp_path / "fake_log.jsonl"
-
-    _build_repo(repo_root, log_path)
-
-    repo_files_before, repo_dirs_before = _snapshot_tree(repo_root)
-    out_files_before, _ = _snapshot_tree(out_dir)
+    before = _snapshot_files(repo_root, out_dir)
 
     snapshot = provenance_tracker_ui.render_tracker_ui(out_dir, repo_root)
 
-    # The fake tracker was actually used.
-    assert log_path.exists()
+    after = _snapshot_files(repo_root, out_dir)
+
+    # The faked provenance-tracker was the one used.
+    assert log_path.exists(), "faked provenance-tracker was never invoked"
     calls = [json.loads(line) for line in log_path.read_text(encoding="utf-8").splitlines() if line.strip()]
     assert sum(1 for c in calls if c["fn"] == "check_readiness") == 1
 
-    # Nodes are exactly the report's keys.
-    node_ids = sorted(field(n, "id") for n in field(snapshot, "nodes"))
-    assert node_ids == ["P-ZERO-EDIT", "comp-bar", "comp-foo"]
-
-    # Edges: exactly depends_on and realizes, never uses_var to VAR-FOO-URL.
-    edges = sorted(edge_triple(e) for e in field(snapshot, "edges"))
-    assert edges == sorted([
+    # Edges: exactly depends_on and realizes, never the uses_var edge.
+    edges = field(snapshot, "edges")
+    edge_tuples = [
+        (field(e, "from"), field(e, "to"), field(e, "kind")) for e in edges
+    ]
+    assert len(edge_tuples) == 2, edge_tuples
+    assert set(edge_tuples) == {
         ("comp-foo", "comp-bar", "depends_on"),
         ("comp-foo", "P-ZERO-EDIT", "realizes"),
-    ])
-    assert all(e[2] != "uses_var" for e in edges)
-    assert all(e[1] != "VAR-FOO-URL" for e in edges)
+    }
+    assert not any(t[2] == "uses_var" or t[1] == "VAR-FOO-URL" for t in edge_tuples)
 
-    # Writes: only out_dir/index.html anywhere under repo_root or out_dir.
-    repo_files_after, repo_dirs_after = _snapshot_tree(repo_root)
-    out_files_after, _ = _snapshot_tree(out_dir)
-
-    assert _changed(repo_files_before, repo_files_after) == set()
-    assert repo_dirs_after == repo_dirs_before
-    assert _changed(out_files_before, out_files_after) == {"index.html"}
+    # Only out_dir/index.html created or changed (ignoring __pycache__).
+    index_path = str((out_dir / "index.html").resolve())
+    created = set(after) - set(before)
+    removed = set(before) - set(after)
+    changed = {p for p in set(before) & set(after) if before[p] != after[p]}
+    touched = created | removed | changed
+    assert touched == {index_path}, (
+        f"created={sorted(created)} removed={sorted(removed)} changed={sorted(changed)}"
+    )
     assert (out_dir / "index.html").is_file()
