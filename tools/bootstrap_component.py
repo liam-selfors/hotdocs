@@ -140,6 +140,66 @@ _NOT_CONSUMER_NAMES = {
 }
 
 
+def _names_used_in(text: str, slug: str) -> list[str]:
+    """Every `<alias>.<name>` in one file's text for component `slug`, with
+    aliases found as `_consumer_names` describes."""
+    module_name = slug.replace("-", "_")
+    aliases = set(_ALIASES.get(slug, [module_name]))
+    assign = re.compile(r"^\s*(\w+)\s*(?:,\s*\w+\s*)?=(?!=)(.*)$", re.M)
+    for lhs, rhs in assign.findall(text):
+        loads = re.search(r"_load\w*\(|import_module\(|module_from_spec\(|exec_module\(", rhs)
+        names_it = re.search(r"[\"']%s[\"'/]|[\"']%s[\"']|_load_%s\b" % (re.escape(slug), re.escape(module_name), re.escape(module_name)), rhs)
+        if loads and names_it:
+            aliases.add(lhs)
+    pattern = re.compile(r"(?<![\w.])(?:%s)\.([A-Za-z_]\w*)" % "|".join(map(re.escape, sorted(aliases))))
+    return [n for n in pattern.findall(text)
+            if n not in ("py", "md") and not n.startswith("__") and n not in _NOT_CONSUMER_NAMES.get(slug, ())]
+
+
+def _provided(module_name: str, code_dir: Path, names) -> set[str] | None:
+    """The subset of `names` the module at `code_dir` provides, as an
+    attribute or a package submodule; None when it does not import."""
+    proc = subprocess.run(
+        [sys.executable, "-c",
+         f"import json, sys, {module_name} as m; "
+         "import importlib\n"
+         "def has(n):\n"
+         "    if hasattr(m, n): return True\n"
+         "    try: importlib.import_module(m.__name__ + '.' + n); return True\n"
+         "    except Exception: return False\n"
+         "print(json.dumps([n for n in sys.argv[1:] if has(n)]))", *sorted(names)],
+        cwd=code_dir, env={**__import__("os").environ, "PYTHONPATH": str(code_dir)},
+        capture_output=True, text=True,
+    )
+    if proc.returncode != 0:
+        return None
+    return set(__import__("json").loads(proc.stdout.strip().splitlines()[-1]))
+
+
+def _dependency_surface_ok(component_id: str, code_dir: Path) -> bool:
+    """The reverse of _consumer_surface_ok: every `<dep>.<name>` the
+    candidate uses must exist in that dependency's real code (D288)."""
+    ok = True
+    texts = [p.read_text(encoding="utf-8", errors="replace")
+             for p in code_dir.rglob("*.py") if "__pycache__" not in p.parts]
+    for dep in _direct_depends_on_slugs(component_id):
+        used = sorted({n for t in texts for n in _names_used_in(t, dep)})
+        if not used:
+            continue
+        source = _sealed_source_path("comp-" + dep)
+        dep_dir = REAL_REPO / (source.rstrip("/") if source else f"gen/{dep}")
+        have = _provided(dep.replace("-", "_"), dep_dir, used)
+        if have is None:
+            continue
+        for name in used:
+            if name not in have:
+                print(f"dependency surface: {dep} has no {name}, which the candidate uses")
+                ok = False
+    if ok:
+        print("dependency surface: ok")
+    return ok
+
+
 def _consumer_names(slug: str) -> dict[str, list[str]]:
     """Every `<alias>.<name>` other real gen/ modules and tools/ reference,
     mapped to where; the surface a swapped-in candidate must keep. An alias
@@ -457,6 +517,10 @@ def run(component_id: str, model: str, seed: int, retry_feedback: list[str] | No
     # that lacks names its consumers use (or does not import) is rejected.
     if not _consumer_surface_ok(component_id, sandbox / "gen" / _slug(component_id)):
         print("FAIL: the candidate lacks names other components use -- nothing swapped.")
+        print(f"Sandbox kept at {sandbox} for inspection.")
+        return 1
+    if not _dependency_surface_ok(component_id, sandbox / "gen" / _slug(component_id)):
+        print("FAIL: the candidate uses names its dependencies lack -- nothing swapped.")
         print(f"Sandbox kept at {sandbox} for inspection.")
         return 1
 
