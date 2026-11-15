@@ -135,6 +135,8 @@ _NOT_CONSUMER_NAMES = {
     "llm-endpoint": {"ParsedCriterion", "author_test", "compile_criterion", "main"},
     "criterion-compiler": {"author_test", "complete"},
     "test-author": {"ParsedCriterion", "compile_criterion", "complete"},
+    # The bootstrap's own timeout adjustment, read with a getattr fallback.
+    "verifier-orchestrator": {"DEFAULT_TEST_TIMEOUT"},
 }
 
 
