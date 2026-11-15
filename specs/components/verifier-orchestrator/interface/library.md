@@ -30,6 +30,8 @@ unsealed fixture component lints clean only with `realizes: [P-<ID>]`
 naming a capability file the fixture also writes under `specs/product/`
 (`R-LINT-006`). Name fixture functions other than `foo`:
 `spec-bundle-assembler`'s interface text declares `foo(x)`, which
-`test-author`'s fake-arity check (`R-AUTHOR-020`) would match.
+`test-author`'s fake-arity check (`R-AUTHOR-020`) would match. Every
+fixture criterion has at least one Given, one When and one Then step
+(`R-LINT-010`).
 
 Implements: `specs/architecture/step-phrase-grammar.md`, `SPEC_GUIDELINES.md`
