@@ -1,3 +1,4 @@
+import copy
 import json
 from pathlib import Path
 
@@ -6,178 +7,192 @@ import pytest
 import provenance_writer
 
 
-VALID_SOURCE_HASH = "sha256:" + ("ab01" * 16)
+VALID_HASH = "sha256:" + "0123456789abcdef" * 4
+EXISTING_CONTENT = b'{"existing": true}\n'
 
 
-def valid_inputs():
+def field(value, name):
+    return value[name] if isinstance(value, dict) else getattr(value, name)
+
+
+def _report(overall="pass", results=("pass",)):
+    criteria = []
+    req = {}
+    for i, r in enumerate(results, start=1):
+        cid = "AC-FOO-%03d" % i
+        rid = "R-FOO-%03d" % i
+        criteria.append({"id": cid, "covers": rid, "kind": "compiled", "result": r})
+        req[rid] = "pass" if r == "pass" else "fail"
+    return {
+        "component_id": "comp-foo",
+        "criteria": criteria,
+        "requirement_results": req,
+        "interface_drift": False,
+        "mutation_score": None,
+        "overall": overall,
+    }
+
+
+def _valid_inputs():
     return {
         "component_id": "comp-foo",
         "owners": ["pipeline-team"],
         "source_path": "pipeline/foo/",
-        "source_hash": VALID_SOURCE_HASH,
+        "source_hash": VALID_HASH,
         "verifier_version": "verifier-orchestrator@2.0.0",
-        "verification_report": {
-            "overall": "pass",
-            "criteria": [
-                {"id": "AC-FOO-001", "covers": "R-FOO-001", "kind": "compiled", "result": "pass"},
-            ],
-        },
+        "verification_report": _report(),
     }
 
 
-def assert_nothing_written(repo_root):
-    assert list(Path(repo_root).rglob(".sealed-provenance.json")) == []
+def _prepare_repo(repo_root: Path):
+    d = repo_root / "pipeline" / "foo"
+    d.mkdir(parents=True, exist_ok=True)
+    (d / ".sealed-provenance.json").write_bytes(EXISTING_CONTENT)
 
 
-def call_and_expect_invalid(component_id, inputs, repo_root):
+def _snapshot(repo_root: Path):
+    return {
+        str(p.relative_to(repo_root)): p.read_bytes()
+        for p in sorted(repo_root.rglob("*"))
+        if p.is_file()
+    }
+
+
+def _assert_rejected(component_id, inputs, repo_root: Path):
+    _prepare_repo(repo_root)
+    before = _snapshot(repo_root)
     with pytest.raises(provenance_writer.InvalidSealedInputError):
         provenance_writer.write_sealed_provenance(component_id, inputs, repo_root)
-    assert_nothing_written(repo_root)
+    after = _snapshot(repo_root)
+    assert after == before
+    assert (
+        repo_root / "pipeline" / "foo" / ".sealed-provenance.json"
+    ).read_bytes() == EXISTING_CONTENT
 
 
-def read_manifest(repo_root, source_path):
-    manifest_path = Path(repo_root) / source_path.rstrip("/") / ".sealed-provenance.json"
-    with open(manifest_path, "r", encoding="utf-8") as f:
-        return json.load(f)
+# --- Not a mapping/object at all -------------------------------------------
+
+@pytest.mark.parametrize("bad", [None, [], ["comp-foo"], "comp-foo"],
+                         ids=["none", "empty-list", "list", "string"])
+def test_non_mapping_inputs_rejected(tmp_path, bad):
+    _assert_rejected("comp-foo", bad, tmp_path)
 
 
-def test_inputs_not_a_mapping_at_all(tmp_path):
-    for i, bad in enumerate((None, ["a", "b"], "not-a-mapping")):
-        repo_root = tmp_path / f"notmap_{i}"
-        repo_root.mkdir()
-        call_and_expect_invalid("comp-foo", bad, repo_root)
+# --- Each field missing in turn --------------------------------------------
+
+@pytest.mark.parametrize("missing", [
+    "component_id", "owners", "source_path", "source_hash",
+    "verifier_version", "verification_report",
+])
+def test_missing_field_rejected(tmp_path, missing):
+    inputs = _valid_inputs()
+    del inputs[missing]
+    _assert_rejected("comp-foo", inputs, tmp_path)
 
 
-def test_missing_each_required_field(tmp_path):
-    fields = [
-        "component_id",
-        "owners",
-        "source_path",
-        "source_hash",
-        "verifier_version",
-        "verification_report",
+# --- One field changed to a bad value ---------------------------------------
+
+BAD_FIELD_VALUES = [
+    ("component_id", 5),
+    ("component_id", "Comp-foo"),
+    ("component_id", "foo"),
+    ("owners", "pipeline-team"),
+    ("owners", []),
+    ("owners", [5]),
+    ("owners", ["pipeline-team", ""]),
+    ("owners", ["Pipeline"]),
+    ("source_path", 5),
+    ("source_path", "a b/"),
+    ("source_path", "../x/"),
+    ("source_path", "gen/foo/"),
+    ("source_path", "/abs/"),
+    ("source_hash", 5),
+    ("source_hash", "sha256:" + "a" * 63),
+    ("source_hash", "sha256:" + "ABCDEF0123456789" * 4),
+    ("source_hash", "sha1:" + "a" * 64),
+    ("verifier_version", 5),
+    ("verifier_version", "verifier-orchestrator@2"),
+    ("verifier_version", "other@2.0.0"),
+]
+
+
+@pytest.mark.parametrize(
+    "name,value", BAD_FIELD_VALUES,
+    ids=["%s-%d" % (n, i) for i, (n, _v) in enumerate(BAD_FIELD_VALUES)],
+)
+def test_bad_field_value_rejected(tmp_path, name, value):
+    inputs = _valid_inputs()
+    inputs[name] = value
+    component_id = value if name == "component_id" else "comp-foo"
+    _assert_rejected(component_id, inputs, tmp_path)
+
+
+# --- Bad verification reports ----------------------------------------------
+
+def _bad_reports():
+    r_ok = _report()
+    r_ok["overall"] = "ok"
+    r_five = _report()
+    r_five["overall"] = 5
+    r_criteria_not_list = _report()
+    r_criteria_not_list["criteria"] = "AC-FOO-001"
+    r_no_result = _report(results=("pass", "pass"))
+    del r_no_result["criteria"][1]["result"]
+    r_pass_with_skipped = _report(overall="pass", results=("pass", "skipped"))
+    return [
+        ("none", None),
+        ("list", [copy.deepcopy(_report())]),
+        ("overall-ok", r_ok),
+        ("overall-5", r_five),
+        ("criteria-not-list", r_criteria_not_list),
+        ("entry-without-result", r_no_result),
+        ("pass-with-skipped", r_pass_with_skipped),
     ]
-    for i, field in enumerate(fields):
-        repo_root = tmp_path / f"missing_{i}"
-        repo_root.mkdir()
-        inputs = valid_inputs()
-        del inputs[field]
-        call_and_expect_invalid("comp-foo", inputs, repo_root)
 
 
-def test_component_id_invalid_values(tmp_path):
-    for i, bad in enumerate((5, "Comp-foo", "foo")):
-        repo_root = tmp_path / f"cid_{i}"
-        repo_root.mkdir()
-        inputs = valid_inputs()
-        inputs["component_id"] = bad
-        call_and_expect_invalid(bad, inputs, repo_root)
+@pytest.mark.parametrize("report", [r for _i, r in _bad_reports()],
+                         ids=[i for i, _r in _bad_reports()])
+def test_bad_verification_report_rejected(tmp_path, report):
+    inputs = _valid_inputs()
+    inputs["verification_report"] = report
+    _assert_rejected("comp-foo", inputs, tmp_path)
 
 
-def test_owners_invalid_values(tmp_path):
-    bad_values = ("pipeline-team", [], [5], ["pipeline-team", ""], ["Pipeline"])
-    for i, bad in enumerate(bad_values):
-        repo_root = tmp_path / f"owners_{i}"
-        repo_root.mkdir()
-        inputs = valid_inputs()
-        inputs["owners"] = bad
-        call_and_expect_invalid(inputs["component_id"], inputs, repo_root)
+# --- Valid "fail" reports are written ---------------------------------------
+
+def _read_manifest(repo_root: Path, rel_dir: str):
+    path = repo_root / rel_dir / ".sealed-provenance.json"
+    assert path.is_file(), "manifest not written at %s" % path
+    return json.loads(path.read_text(encoding="utf-8"))
 
 
-def test_source_path_invalid_values(tmp_path):
-    bad_values = (5, "a b/", "../x/", "gen/foo/", "/abs/")
-    for i, bad in enumerate(bad_values):
-        repo_root = tmp_path / f"sp_{i}"
-        repo_root.mkdir()
-        inputs = valid_inputs()
-        inputs["source_path"] = bad
-        call_and_expect_invalid(inputs["component_id"], inputs, repo_root)
+@pytest.mark.parametrize(
+    "results,expected_passed",
+    [
+        (("fail", "fail", "fail"), 0),
+        (("pass", "skipped", "skipped", "fail"), 1),
+    ],
+    ids=["all-fail", "with-skipped"],
+)
+def test_fail_report_is_written(tmp_path, results, expected_passed):
+    (tmp_path / "pipeline" / "foo").mkdir(parents=True)
+    inputs = _valid_inputs()
+    inputs["verification_report"] = _report(overall="fail", results=results)
+    provenance_writer.write_sealed_provenance("comp-foo", inputs, tmp_path)
+    manifest = _read_manifest(tmp_path, "pipeline/foo")
+    characterization = manifest["characterization"]
+    assert characterization["overall"] == "fail"
+    assert characterization["criteria_passed"] == expected_passed
+    assert type(characterization["criteria_passed"]) is int
+    assert characterization["criteria_total"] == len(results)
 
 
-def test_source_hash_invalid_values(tmp_path):
-    bad_values = (
-        5,
-        "sha256:" + ("a" * 63),
-        "sha256:" + ("A" * 64),
-        "sha1:" + ("a" * 64),
-    )
-    for i, bad in enumerate(bad_values):
-        repo_root = tmp_path / f"sh_{i}"
-        repo_root.mkdir()
-        inputs = valid_inputs()
-        inputs["source_hash"] = bad
-        call_and_expect_invalid(inputs["component_id"], inputs, repo_root)
+# --- No trailing slash is written unchanged ---------------------------------
 
-
-def test_verifier_version_invalid_values(tmp_path):
-    bad_values = (5, "verifier-orchestrator@2", "other@2.0.0")
-    for i, bad in enumerate(bad_values):
-        repo_root = tmp_path / f"vv_{i}"
-        repo_root.mkdir()
-        inputs = valid_inputs()
-        inputs["verifier_version"] = bad
-        call_and_expect_invalid(inputs["component_id"], inputs, repo_root)
-
-
-def test_verification_report_invalid_values(tmp_path):
-    bad_values = (
-        None,
-        ["not", "a", "mapping"],
-        {"overall": "ok", "criteria": [{"result": "pass"}]},
-        {"overall": 5, "criteria": [{"result": "pass"}]},
-        {"overall": "pass", "criteria": "nope"},
-        {"overall": "pass", "criteria": [{"id": "AC-X-001"}]},
-        {"overall": "pass", "criteria": [{"result": "pass"}, {"result": "skipped"}]},
-    )
-    for i, bad in enumerate(bad_values):
-        repo_root = tmp_path / f"vr_{i}"
-        repo_root.mkdir()
-        inputs = valid_inputs()
-        inputs["verification_report"] = bad
-        call_and_expect_invalid(inputs["component_id"], inputs, repo_root)
-
-
-def test_report_fail_all_fail_is_written(tmp_path):
-    repo_root = tmp_path / "fail_all"
-    repo_root.mkdir()
-    inputs = valid_inputs()
-    inputs["verification_report"] = {
-        "overall": "fail",
-        "criteria": [{"result": "fail"}, {"result": "fail"}],
-    }
-    provenance_writer.write_sealed_provenance(inputs["component_id"], inputs, repo_root)
-    manifest = read_manifest(repo_root, inputs["source_path"])
-    assert manifest["characterization"]["overall"] == "fail"
-    assert manifest["characterization"]["criteria_passed"] == 0
-    assert manifest["characterization"]["criteria_total"] == 2
-
-
-def test_report_fail_with_skipped_entries_is_written(tmp_path):
-    repo_root = tmp_path / "fail_skipped"
-    repo_root.mkdir()
-    inputs = valid_inputs()
-    inputs["verification_report"] = {
-        "overall": "fail",
-        "criteria": [
-            {"result": "pass"},
-            {"result": "skipped"},
-            {"result": "fail"},
-        ],
-    }
-    provenance_writer.write_sealed_provenance(inputs["component_id"], inputs, repo_root)
-    manifest = read_manifest(repo_root, inputs["source_path"])
-    assert manifest["characterization"]["overall"] == "fail"
-    assert manifest["characterization"]["criteria_passed"] == 1
-    assert manifest["characterization"]["criteria_total"] == 3
-
-
-def test_source_path_no_trailing_slash_written_unchanged(tmp_path):
-    repo_root = tmp_path / "no_slash"
-    repo_root.mkdir()
-    inputs = valid_inputs()
+def test_source_path_without_trailing_slash_written_unchanged(tmp_path):
+    (tmp_path / "pipeline" / "foo").mkdir(parents=True)
+    inputs = _valid_inputs()
     inputs["source_path"] = "pipeline/foo"
-    provenance_writer.write_sealed_provenance(inputs["component_id"], inputs, repo_root)
-    manifest_path = repo_root / "pipeline" / "foo" / ".sealed-provenance.json"
-    assert manifest_path.is_file()
-    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    provenance_writer.write_sealed_provenance("comp-foo", inputs, tmp_path)
+    manifest = _read_manifest(tmp_path, "pipeline/foo")
     assert manifest["source_path"] == "pipeline/foo"

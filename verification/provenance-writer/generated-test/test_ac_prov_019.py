@@ -1,113 +1,173 @@
+import copy
 import json
+from pathlib import Path
 
 import pytest
 
 import provenance_writer
 
 
-EXISTING_MANIFEST = {
-    "kind": "sealed-provenance",
-    "version": 1,
-    "component_id": "comp-foo",
-    "owners": ["pipeline-team"],
-    "source_path": "pipeline/foo/",
-    "source_hash": "sha256:" + "ab01" * 16,
-    "verifier_version": "verifier-orchestrator@1.0.0",
-    "characterization": {"overall": "pass", "criteria_passed": 2, "criteria_total": 2},
-    "written_at": "2026-01-01T00:00:00Z",
-}
+VALID_HASH = "sha256:" + "0123456789abcdef" * 4
+VALID_VERIFIER = "verifier-orchestrator@2.0.0"
 
 
-def _make_report(results, overall="pass"):
-    criteria = [
-        {
-            "id": "AC-FOO-%03d" % i,
-            "covers": "R-FOO-%03d" % i,
-            "kind": "compiled",
-            "result": result,
-        }
-        for i, result in enumerate(results, start=1)
-    ]
+def _report(criteria_results=("pass",), overall="pass"):
+    criteria = []
+    for i, result in enumerate(criteria_results, start=1):
+        criteria.append(
+            {
+                "id": "AC-FOO-%03d" % i,
+                "covers": "R-FOO-%03d" % i,
+                "kind": "compiled",
+                "result": result,
+            }
+        )
     return {
         "component_id": "comp-foo",
         "criteria": criteria,
-        "requirement_results": {c["covers"]: c["result"] for c in criteria},
+        "requirement_results": {
+            c["covers"]: ("pass" if c["result"] == "pass" else "fail")
+            for c in criteria
+        },
         "interface_drift": False,
-        "mutation_score": 1.0,
+        "mutation_score": None,
         "overall": overall,
     }
 
 
-def _valid_inputs():
+def _base_inputs():
     return {
         "component_id": "comp-foo",
         "owners": ["pipeline-team"],
         "source_path": "pipeline/foo/",
-        "source_hash": "sha256:" + "0123456789abcdef" * 4,
-        "verifier_version": "verifier-orchestrator@2.0.0",
-        "verification_report": _make_report(["pass", "pass", "pass"]),
+        "source_hash": VALID_HASH,
+        "verifier_version": VALID_VERIFIER,
+        "verification_report": _report(("pass", "pass")),
     }
 
 
-def _seed_existing_manifest(repo_root):
-    target_dir = repo_root / "pipeline" / "foo"
-    target_dir.mkdir(parents=True, exist_ok=True)
-    target = target_dir / ".sealed-provenance.json"
-    data = json.dumps(EXISTING_MANIFEST, indent=2).encode("utf-8")
-    target.write_bytes(data)
-    return target, data
+def _existing_manifest_bytes():
+    doc = {
+        "kind": "sealed-provenance",
+        "version": 1,
+        "component_id": "comp-foo",
+        "owners": ["pipeline-team"],
+        "source_path": "pipeline/foo/",
+        "source_hash": VALID_HASH,
+        "verifier_version": VALID_VERIFIER,
+        "characterization": {
+            "overall": "pass",
+            "criteria_passed": 2,
+            "criteria_total": 2,
+        },
+        "written_at": "2026-11-02T00:00:00Z",
+    }
+    return (json.dumps(doc, indent=2, sort_keys=True) + "\n").encode("utf-8")
 
 
-MUTATIONS = [
-    ("source_path_escape", lambda i: i.update(source_path="../escape/")),
-    ("source_path_gen", lambda i: i.update(source_path="gen/foo/")),
-    ("source_path_abs", lambda i: i.update(source_path="/abs/path/")),
-    ("owners_empty", lambda i: i.update(owners=[])),
-    ("owner_bad_format", lambda i: i.update(owners=["Alice"])),
-    ("source_hash_bad", lambda i: i.update(source_hash="sha256:abc")),
-    ("verifier_version_bad", lambda i: i.update(verifier_version="v2")),
-    ("criteria_empty", lambda i: i.update(verification_report=_make_report([]))),
-    ("source_hash_missing", lambda i: i.pop("source_hash")),
+def _with(key, value):
+    def mutate(inputs):
+        inputs[key] = value
+        return inputs
+
+    return mutate
+
+
+def _without(key):
+    def mutate(inputs):
+        del inputs[key]
+        return inputs
+
+    return mutate
+
+
+def _empty_criteria(inputs):
+    inputs["verification_report"] = _report(())
+    inputs["verification_report"]["criteria"] = []
+    inputs["verification_report"]["requirement_results"] = {}
+    return inputs
+
+
+def _identity(inputs):
+    return inputs
+
+
+# (case id, inputs mutation, component_id argument)
+CASES = [
+    ("source_path_escape", _with("source_path", "../escape/"), "comp-foo"),
+    ("source_path_gen", _with("source_path", "gen/foo/"), "comp-foo"),
+    ("source_path_absolute", _with("source_path", "/abs/path/"), "comp-foo"),
+    ("owners_empty", _with("owners", []), "comp-foo"),
+    ("owner_uppercase", _with("owners", ["Alice"]), "comp-foo"),
+    ("source_hash_short", _with("source_hash", "sha256:abc"), "comp-foo"),
+    ("verifier_version_bad", _with("verifier_version", "v2"), "comp-foo"),
+    ("report_criteria_empty", _empty_criteria, "comp-foo"),
+    ("component_id_mismatch", _identity, "comp-bar"),
+    ("source_hash_missing", _without("source_hash"), "comp-foo"),
 ]
 
 
-@pytest.mark.parametrize("name, mutate", MUTATIONS, ids=[m[0] for m in MUTATIONS])
-def test_invalid_input_rejected_and_existing_manifest_unchanged(tmp_path, name, mutate):
-    repo_root = tmp_path
-    manifest_path, original_bytes = _seed_existing_manifest(repo_root)
+@pytest.fixture
+def repo_with_manifest(tmp_path):
+    # Nest the repo one level down so "../escape/" stays inside tmp_path.
+    repo_root = tmp_path / "repo"
+    manifest_dir = repo_root / "pipeline" / "foo"
+    manifest_dir.mkdir(parents=True)
+    manifest = manifest_dir / ".sealed-provenance.json"
+    original = _existing_manifest_bytes()
+    manifest.write_bytes(original)
+    return tmp_path, repo_root, manifest, original
 
-    inputs = _valid_inputs()
-    mutate(inputs)
+
+@pytest.mark.parametrize(
+    "case_id,mutate,component_arg", CASES, ids=[c[0] for c in CASES]
+)
+def test_invalid_sealed_inputs_raise_and_leave_manifest_untouched(
+    repo_with_manifest, case_id, mutate, component_arg
+):
+    tmp_root, repo_root, manifest, original = repo_with_manifest
+    inputs = mutate(copy.deepcopy(_base_inputs()))
+
+    with pytest.raises(provenance_writer.InvalidSealedInputError):
+        provenance_writer.write_sealed_provenance(component_arg, inputs, repo_root)
+
+    assert manifest.exists()
+    assert manifest.read_bytes() == original
+
+    # Nothing written at the escape target or under gen/.
+    assert not (tmp_root / "escape" / ".sealed-provenance.json").exists()
+    assert not (repo_root / "gen" / "foo" / ".sealed-provenance.json").exists()
+
+
+def test_overall_pass_with_failing_entry_raises_and_writes_nothing(tmp_path):
+    repo_root = tmp_path / "repo"
+    (repo_root / "pipeline" / "foo").mkdir(parents=True)
+
+    inputs = _base_inputs()
+    inputs["verification_report"] = _report(("pass", "fail"), overall="pass")
 
     with pytest.raises(provenance_writer.InvalidSealedInputError):
         provenance_writer.write_sealed_provenance("comp-foo", inputs, repo_root)
 
-    assert manifest_path.read_bytes() == original_bytes
+    assert not (repo_root / "pipeline" / "foo" / ".sealed-provenance.json").exists()
+    written = [p for p in repo_root.rglob("*") if p.is_file()]
+    assert written == []
 
 
-def test_component_id_mismatch_rejected_and_existing_manifest_unchanged(tmp_path):
-    repo_root = tmp_path
-    manifest_path, original_bytes = _seed_existing_manifest(repo_root)
+def test_control_valid_inputs_are_accepted(tmp_path):
+    # Guards against the invalid cases passing vacuously: the unmodified
+    # base inputs must be valid and produce a manifest.
+    repo_root = tmp_path / "repo"
+    (repo_root / "pipeline" / "foo").mkdir(parents=True)
 
-    inputs = _valid_inputs()
+    provenance_writer.write_sealed_provenance("comp-foo", _base_inputs(), repo_root)
 
-    with pytest.raises(provenance_writer.InvalidSealedInputError):
-        provenance_writer.write_sealed_provenance("comp-bar", inputs, repo_root)
-
-    assert manifest_path.read_bytes() == original_bytes
-
-
-def test_overall_pass_with_failing_criterion_rejected_and_no_file_written(tmp_path):
-    repo_root = tmp_path
-    target = repo_root / "pipeline" / "bar" / ".sealed-provenance.json"
-    assert not target.exists()
-
-    inputs = _valid_inputs()
-    inputs["component_id"] = "comp-bar"
-    inputs["source_path"] = "pipeline/bar/"
-    inputs["verification_report"] = _make_report(["pass", "fail"], overall="pass")
-
-    with pytest.raises(provenance_writer.InvalidSealedInputError):
-        provenance_writer.write_sealed_provenance("comp-bar", inputs, repo_root)
-
-    assert not target.exists()
+    manifest = repo_root / "pipeline" / "foo" / ".sealed-provenance.json"
+    assert manifest.exists()
+    doc = json.loads(manifest.read_text(encoding="utf-8"))
+    assert doc["component_id"] == "comp-foo"
+    assert doc["characterization"] == {
+        "overall": "pass",
+        "criteria_passed": 2,
+        "criteria_total": 2,
+    }

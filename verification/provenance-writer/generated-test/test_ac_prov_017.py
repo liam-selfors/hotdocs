@@ -2,55 +2,64 @@ import dataclasses
 import json
 from pathlib import Path
 
-import pytest
-
 import provenance_writer
 
 
-def _get(obj, key, default=None):
-    if isinstance(obj, dict):
-        return obj.get(key, default)
-    return getattr(obj, key, default)
+COMPONENT_ID = "comp-widget-maker"
+SLUG = "widget-maker"
+
+DOCUMENTED_FIELDS = (
+    "component_id",
+    "generation_result",
+    "verification_report",
+    "license_scan_result",
+    "secret_scan_result",
+    "provenance_hit",
+    "attempts",
+    "gate_versions",
+)
 
 
-def _build_inputs():
-    component_id = "comp-foo"
-
-    generation_result = {
-        "component_id": component_id,
-        "spec_bundle_hash": "sha256:" + ("0123456789abcdef" * 4),
+def _generation_result():
+    return {
+        "component_id": COMPONENT_ID,
+        "spec_bundle_hash": "sha256:" + "a" * 64,
         "model": "claude-sonnet-5",
-        "prompt_version": "v1",
+        "prompt_version": "v10",
         "cache_hit": False,
-        "files": {"foo.py": "print('hello')\n"},
+        "files": {"widget_maker.py": "def make_widget(x):\n    return x\n"},
         "model_call_error": None,
         "refused": None,
         "retry_feedback": None,
     }
 
-    verification_report = {
-        "component_id": component_id,
+
+def _verification_report():
+    return {
+        "component_id": COMPONENT_ID,
         "criteria": [
             {
-                "id": "AC-FOO-001",
-                "covers": "R-FOO-001",
+                "id": "AC-WIDGET-001",
+                "covers": "R-WIDGET-001",
                 "kind": "compiled",
                 "result": "pass",
             }
         ],
-        "requirement_results": {"R-FOO-001": "pass"},
+        "requirement_results": {"R-WIDGET-001": "pass"},
         "interface_drift": False,
-        "mutation_score": 0.92,
+        "mutation_score": 0.9,
         "overall": "pass",
     }
 
-    license_scan_result = {
-        "component_id": component_id,
-        "gate_version": "license_scanner@4.0.3",
-        "evaluated": True,
-        "reason": None,
-        "similarity_score": 0.1,
-        "block_threshold": 0.70,
+
+def _license_scan_result():
+    return {
+        "component_id": COMPONENT_ID,
+        "gate_version": "license_scanner@4.0.0-no-reference-corpus",
+        "evaluated": False,
+        "reason": "no-reference-corpus",
+        "similarity_score": None,
+        "block_threshold": None,
         "blocked": False,
         "matches": [],
         "notified": False,
@@ -58,9 +67,11 @@ def _build_inputs():
         "cache_hit": False,
     }
 
-    secret_scan_result = {
+
+def _secret_scan_result():
+    return {
         "scope": "full",
-        "gate_version": "secret_scanner@3.0.0+detect-secrets.1.5.0",
+        "gate_version": "secret_scanner@3.1.0+detect-secrets.1.5.0",
         "flagged": False,
         "matches": [],
         "allowed": [],
@@ -70,58 +81,59 @@ def _build_inputs():
         "cache_hit": False,
     }
 
-    return provenance_writer.ProvenanceInputs(
-        component_id=component_id,
-        generation_result=generation_result,
-        verification_report=verification_report,
-        license_scan_result=license_scan_result,
-        secret_scan_result=secret_scan_result,
+
+def _build_inputs():
+    cls = provenance_writer.ProvenanceInputs
+    return cls(
+        component_id=COMPONENT_ID,
+        generation_result=_generation_result(),
+        verification_report=_verification_report(),
+        license_scan_result=_license_scan_result(),
+        secret_scan_result=_secret_scan_result(),
         provenance_hit=False,
         attempts=1,
         gate_versions={"compiler": "1.0.0", "license_scanner": "k-gram@1.0.0"},
     )
 
 
-def test_provenance_inputs_is_a_real_dataclass():
+def test_provenance_inputs_is_a_real_dataclass_constructible_by_keyword():
     assert hasattr(provenance_writer, "ProvenanceInputs")
     cls = provenance_writer.ProvenanceInputs
+    assert isinstance(cls, type)
     assert dataclasses.is_dataclass(cls)
 
-    inputs = _build_inputs()
-    assert dataclasses.is_dataclass(inputs)
-
     field_names = {f.name for f in dataclasses.fields(cls)}
-    for required in (
-        "component_id",
-        "generation_result",
-        "verification_report",
-        "license_scan_result",
-        "secret_scan_result",
-        "provenance_hit",
-        "attempts",
-        "gate_versions",
-    ):
-        assert required in field_names
+    for name in DOCUMENTED_FIELDS:
+        assert name in field_names, f"missing documented field {name!r}"
 
-    assert _get(inputs, "component_id") == "comp-foo"
-    assert _get(inputs, "provenance_hit") is False
-    assert _get(inputs, "attempts") == 1
-
-
-def test_write_provenance_writes_manifest_without_raising(tmp_path):
     inputs = _build_inputs()
-    repo_root = tmp_path
+    assert isinstance(inputs, cls)
+    assert dataclasses.is_dataclass(inputs)
+    assert inputs.component_id == COMPONENT_ID
+    assert inputs.provenance_hit is False
+    assert inputs.attempts == 1
+    assert inputs.gate_versions == {
+        "compiler": "1.0.0",
+        "license_scanner": "k-gram@1.0.0",
+    }
 
-    provenance_writer.write_provenance("comp-foo", inputs, repo_root)
 
-    gen_manifest = repo_root / "gen" / "foo" / ".provenance.json"
-    verification_manifest = repo_root / "verification" / "foo" / ".provenance.json"
+def test_write_provenance_accepts_dataclass_inputs_and_writes_manifest(tmp_path):
+    repo_root = Path(tmp_path)
+    inputs = _build_inputs()
 
-    assert gen_manifest.exists()
-    assert verification_manifest.exists()
+    # Must not raise.
+    result = provenance_writer.write_provenance(COMPONENT_ID, inputs, repo_root)
+    assert result is None
 
-    gen_payload = json.loads(gen_manifest.read_text())
-    verification_payload = json.loads(verification_manifest.read_text())
+    gen_manifest = repo_root / "gen" / SLUG / ".provenance.json"
+    verification_manifest = repo_root / "verification" / SLUG / ".provenance.json"
 
-    assert isinstance(gen_payload, dict)
-    assert isinstance(verification_payload, dict)
+    assert gen_manifest.is_file(), f"expected manifest at {gen_manifest}"
+    assert verification_manifest.is_file(), (
+        f"expected manifest at {verification_manifest}"
+    )
+
+    for path in (gen_manifest, verification_manifest):
+        data = json.loads(path.read_text(encoding="utf-8"))
+        assert isinstance(data, dict)

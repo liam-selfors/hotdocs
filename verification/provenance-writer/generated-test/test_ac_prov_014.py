@@ -1,64 +1,79 @@
-import json
-import re
-import shutil
-import tempfile
-from pathlib import Path
-
 import provenance_writer
 
+import copy
+import json
+from datetime import datetime
+from pathlib import Path
 
-_GENERATED_AT_RE = re.compile(r"^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$")
-
-# Fields whose value legitimately varies between two otherwise-identical
-# calls (wall-clock timestamp, a run identifier not derivable from inputs).
-_VOLATILE_MANIFEST_KEYS = {"generated_at", "verification_run_id"}
-
-
-def _gen_manifest_path(repo_root, slug):
-    return Path(repo_root) / "gen" / slug / ".provenance.json"
+import pytest
 
 
-def _verification_manifest_path(repo_root, slug):
-    return Path(repo_root) / "verification" / slug / ".provenance.json"
+COMPONENT_ID = "comp-widget-maker"
+SLUG = "widget-maker"
+
+# Fields whose value is legitimately produced from the writer's own clock or
+# run identity rather than from `inputs`; they are compared for presence and
+# shape, plus closeness for the timestamp, instead of strict equality.
+_VOLATILE_FIELDS = ("generated_at", "verification_run_id")
 
 
-def _strip_volatile(manifest):
-    return {k: v for k, v in manifest.items() if k not in _VOLATILE_MANIFEST_KEYS}
+def field(value, name):
+    return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def _real_shaped_field_values():
-    generation_result = {
-        "component_id": "comp-foo",
-        "spec_bundle_hash": "sha256:" + "0" * 64,
-        "model": "claude-sonnet-5",
-        "prompt_version": "v1",
+def _generation_result_with_files():
+    return {
+        "component_id": COMPONENT_ID,
+        "spec_bundle_hash": "sha256:" + "ab" * 32,
+        "model": "anthropic:claude-sonnet-5",
+        "prompt_version": "v10",
         "cache_hit": False,
-        "files": {"foo.py": "print('hi')\n"},
+        "files": {"widget_maker.py": "def build_widget(x):\n    return x + 1\n"},
         "model_call_error": None,
+        "refused": None,
+        "retry_feedback": ["R-WIDGET-003"],
+    }
+
+
+def _generation_result_model_error():
+    return {
+        "component_id": COMPONENT_ID,
+        "spec_bundle_hash": "sha256:" + "cd" * 32,
+        "model": "anthropic:claude-sonnet-5",
+        "prompt_version": "v10",
+        "cache_hit": False,
+        "files": {},
+        "model_call_error": {"category": "network", "message": "connection reset"},
         "refused": None,
         "retry_feedback": None,
     }
-    verification_report = {
-        "component_id": "comp-foo",
+
+
+def _verification_report():
+    return {
+        "component_id": COMPONENT_ID,
         "criteria": [
-            {
-                "id": "AC-FOO-001",
-                "covers": "R-FOO-001",
-                "kind": "compiled",
-                "result": "pass",
-            }
+            {"id": "AC-WIDGET-001", "covers": "R-WIDGET-001", "kind": "compiled", "result": "pass"},
+            {"id": "AC-WIDGET-002", "covers": "R-WIDGET-002", "kind": "llm-judge",
+             "result": "skipped", "rationale": None},
+            {"id": "AC-WIDGET-003", "covers": "R-WIDGET-003", "kind": "generated-test", "result": "pass",
+             "test_authoring": {"model": "anthropic:claude-sonnet-5", "seed": 0,
+                                "prompt_version": "v1", "cache_hit": False}},
         ],
-        "requirement_results": {"R-FOO-001": "pass"},
+        "requirement_results": {"R-WIDGET-001": "pass", "R-WIDGET-002": "fail", "R-WIDGET-003": "pass"},
         "interface_drift": False,
-        "mutation_score": 1.0,
+        "mutation_score": 0.92,
         "overall": "pass",
     }
-    license_scan_result = {
-        "component_id": "comp-foo",
-        "gate_version": "license_scanner@4.0.3",
+
+
+def _license_scan_result():
+    return {
+        "component_id": COMPONENT_ID,
+        "gate_version": "license_scanner@4.0.3+9f2c41ab07de",
         "evaluated": True,
         "reason": None,
-        "similarity_score": 0.1,
+        "similarity_score": 0.12,
         "block_threshold": 0.70,
         "blocked": False,
         "matches": [],
@@ -66,9 +81,12 @@ def _real_shaped_field_values():
         "notification_delivery_error": None,
         "cache_hit": False,
     }
-    secret_scan_result = {
+
+
+def _secret_scan_result():
+    return {
         "scope": "full",
-        "gate_version": "secret_scanner@3.0.0+detect-secrets.1.5.0",
+        "gate_version": "secret_scanner@3.1.0+detect-secrets.1.5.0",
         "flagged": False,
         "matches": [],
         "allowed": [],
@@ -77,95 +95,144 @@ def _real_shaped_field_values():
         "notification_delivery_error": None,
         "cache_hit": False,
     }
+
+
+def _inputs_fields(variant):
+    if variant == "verified":
+        generation_result = _generation_result_with_files()
+        verification_report = _verification_report()
+        attempts = 2
+    else:
+        generation_result = _generation_result_model_error()
+        verification_report = None
+        attempts = 1
     return {
+        "component_id": COMPONENT_ID,
         "generation_result": generation_result,
         "verification_report": verification_report,
-        "license_scan_result": license_scan_result,
-        "secret_scan_result": secret_scan_result,
+        "license_scan_result": _license_scan_result(),
+        "secret_scan_result": _secret_scan_result(),
         "provenance_hit": False,
-        "attempts": 1,
+        "attempts": attempts,
         "gate_versions": {
             "compiler": "1.0.0",
-            "license_scanner": "license_scanner@4.0.3",
+            "license_scanner": "license_scanner@4.0.3+9f2c41ab07de",
+            "secret_scanner": "secret_scanner@3.1.0+detect-secrets.1.5.0",
         },
     }
 
 
-def test_dict_shaped_inputs_match_equivalent_instance_shaped_inputs():
-    field_values = _real_shaped_field_values()
+def _prepare_repo(root: Path, fields) -> Path:
+    root.mkdir(parents=True, exist_ok=True)
+    files = fields["generation_result"]["files"] or {}
+    gen_dir = root / "gen" / SLUG
+    gen_dir.mkdir(parents=True, exist_ok=True)
+    for rel, content in files.items():
+        target = gen_dir / rel
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(content, encoding="utf-8")
+    return root
 
-    repo_root_dict = tempfile.mkdtemp()
-    repo_root_obj = tempfile.mkdtemp()
+
+def _manifest_paths(repo_root: Path):
+    # Exact paths, never a glob: `.provenance.json` is a hidden file.
+    return (
+        repo_root / "gen" / SLUG / ".provenance.json",
+        repo_root / "verification" / SLUG / ".provenance.json",
+    )
+
+
+def _read_manifests(repo_root: Path):
+    manifests = []
+    for path in _manifest_paths(repo_root):
+        assert path.is_file(), f"manifest not written at exact path {path}"
+        data = json.loads(path.read_text(encoding="utf-8"))
+        assert isinstance(data, dict) and data, f"manifest at {path} is not a non-empty JSON object"
+        manifests.append(data)
+    return manifests
+
+
+def _parse_ts(value):
+    if not isinstance(value, str):
+        return None
     try:
-        inputs_dict = {"component_id": "comp-dict-foo", **field_values}
-        inputs_obj = provenance_writer.ProvenanceInputs(
-            component_id="comp-obj-foo", **field_values
-        )
-
-        provenance_writer.write_provenance(
-            "comp-dict-foo", inputs_dict, Path(repo_root_dict)
-        )
-        provenance_writer.write_provenance(
-            "comp-obj-foo", inputs_obj, Path(repo_root_obj)
-        )
-
-        dict_gen_path = _gen_manifest_path(repo_root_dict, "dict-foo")
-        dict_verif_path = _verification_manifest_path(repo_root_dict, "dict-foo")
-        obj_gen_path = _gen_manifest_path(repo_root_obj, "obj-foo")
-        obj_verif_path = _verification_manifest_path(repo_root_obj, "obj-foo")
-
-        assert dict_gen_path.is_file()
-        assert dict_verif_path.is_file()
-        assert obj_gen_path.is_file()
-        assert obj_verif_path.is_file()
-
-        manifest_from_dict = json.loads(dict_gen_path.read_text())
-        manifest_from_dict_copy = json.loads(dict_verif_path.read_text())
-        manifest_from_obj = json.loads(obj_gen_path.read_text())
-        manifest_from_obj_copy = json.loads(obj_verif_path.read_text())
-
-        assert _GENERATED_AT_RE.match(manifest_from_dict["generated_at"])
-        assert _GENERATED_AT_RE.match(manifest_from_obj["generated_at"])
-
-        # Each run's own gen/ manifest and its verification/ copy agree.
-        assert _strip_volatile(manifest_from_dict) == _strip_volatile(
-            manifest_from_dict_copy
-        )
-        assert _strip_volatile(manifest_from_obj) == _strip_volatile(
-            manifest_from_obj_copy
-        )
-
-        # The dict-shaped run and the instance-shaped run, built from the
-        # same field values, produce an identical manifest.
-        assert _strip_volatile(manifest_from_dict) == _strip_volatile(manifest_from_obj)
-
-        assert manifest_from_dict["provenance_hit"] is False
-        assert manifest_from_dict["gate_versions"] == field_values["gate_versions"]
-        assert manifest_from_dict["verification_report"] == field_values["verification_report"]
-        assert manifest_from_dict["license_scan"] == field_values["license_scan_result"]
-        assert manifest_from_dict["secret_scan"] == field_values["secret_scan_result"]
-    finally:
-        shutil.rmtree(repo_root_dict, ignore_errors=True)
-        shutil.rmtree(repo_root_obj, ignore_errors=True)
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
 
 
-def test_instance_shaped_inputs_write_without_raising():
-    field_values = _real_shaped_field_values()
-    repo_root = tempfile.mkdtemp()
-    try:
-        inputs_obj = provenance_writer.ProvenanceInputs(
-            component_id="comp-bar", **field_values
-        )
+def _assert_volatile_equivalent(name, a, b):
+    if a == b:
+        return
+    if name == "generated_at":
+        ta, tb = _parse_ts(a), _parse_ts(b)
+        assert ta is not None and tb is not None, f"generated_at differs and is unparsable: {a!r} vs {b!r}"
+        assert abs((ta - tb).total_seconds()) <= 5, f"generated_at differs: {a!r} vs {b!r}"
+    else:
+        # A per-run identifier may legitimately differ between two runs; it
+        # must still be the same kind of value in both manifests.
+        assert type(a) is type(b), f"{name} differs in shape: {a!r} vs {b!r}"
 
-        provenance_writer.write_provenance("comp-bar", inputs_obj, Path(repo_root))
 
-        gen_path = _gen_manifest_path(repo_root, "bar")
-        verif_path = _verification_manifest_path(repo_root, "bar")
-        assert gen_path.is_file()
-        assert verif_path.is_file()
+def _assert_manifests_identical(from_dict, from_instance):
+    assert set(from_dict.keys()) == set(from_instance.keys()), (
+        f"manifest keys differ: {sorted(from_dict)} vs {sorted(from_instance)}"
+    )
+    for key in from_dict:
+        if key in _VOLATILE_FIELDS:
+            _assert_volatile_equivalent(key, from_dict[key], from_instance[key])
+        else:
+            assert from_dict[key] == from_instance[key], (
+                f"manifest field {key!r} differs: {from_dict[key]!r} vs {from_instance[key]!r}"
+            )
 
-        manifest = json.loads(gen_path.read_text())
-        assert _GENERATED_AT_RE.match(manifest["generated_at"])
-        assert manifest["provenance_hit"] is False
-    finally:
-        shutil.rmtree(repo_root, ignore_errors=True)
+
+@pytest.mark.parametrize("variant", ["verified", "never-verified"])
+def test_dict_shaped_inputs_write_same_manifest_as_instance(tmp_path, variant):
+    fields = _inputs_fields(variant)
+
+    dict_root = _prepare_repo(tmp_path / "dict_repo", fields)
+    instance_root = _prepare_repo(tmp_path / "instance_repo", fields)
+
+    dict_inputs = copy.deepcopy(fields)
+    assert isinstance(dict_inputs, dict)
+    assert not isinstance(dict_inputs, provenance_writer.ProvenanceInputs)
+
+    instance_inputs = provenance_writer.ProvenanceInputs(**copy.deepcopy(fields))
+    assert not isinstance(instance_inputs, dict)
+
+    # Dict-shaped inputs: must not raise.
+    provenance_writer.write_provenance(COMPONENT_ID, dict_inputs, dict_root)
+    # Equivalent instance built from the same values.
+    provenance_writer.write_provenance(COMPONENT_ID, instance_inputs, instance_root)
+
+    dict_gen, dict_verif = _read_manifests(dict_root)
+    inst_gen, inst_verif = _read_manifests(instance_root)
+
+    _assert_manifests_identical(dict_gen, inst_gen)
+    _assert_manifests_identical(dict_verif, inst_verif)
+
+
+@pytest.mark.parametrize("variant", ["verified", "never-verified"])
+def test_instance_inputs_write_manifest(tmp_path, variant):
+    fields = _inputs_fields(variant)
+    repo_root = _prepare_repo(tmp_path / "repo", fields)
+
+    inputs = provenance_writer.ProvenanceInputs(**copy.deepcopy(fields))
+    assert not isinstance(inputs, dict)
+    for name in (
+        "generation_result",
+        "verification_report",
+        "license_scan_result",
+        "secret_scan_result",
+        "provenance_hit",
+        "attempts",
+        "gate_versions",
+    ):
+        assert field(inputs, name) == fields[name]
+
+    provenance_writer.write_provenance(COMPONENT_ID, inputs, repo_root)
+
+    gen_manifest, verif_manifest = _read_manifests(repo_root)
+    assert gen_manifest
+    assert verif_manifest

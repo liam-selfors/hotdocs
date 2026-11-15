@@ -1,12 +1,13 @@
+import dataclasses
 import json
-import tempfile
-import unittest
 from pathlib import Path
 
 import provenance_writer
 
 
-EXPECTED_TOP_LEVEL_KEYS = {
+# SPEC_GUIDELINES.md §7's provenance manifest field list (reproduced in
+# provenance-writer's interface/data provenance manifest document).
+EXPECTED_KEYS = {
     "spec_bundle_hash",
     "model_pin",
     "prompt_version",
@@ -21,133 +22,137 @@ EXPECTED_TOP_LEVEL_KEYS = {
     "secret_scan",
 }
 
-
-def _get(obj, key, default=None):
-    if isinstance(obj, dict):
-        return obj.get(key, default)
-    return getattr(obj, key, default)
+COMPONENT_ID = "comp-prov-sample"
+SLUG = "prov-sample"
 
 
-class TestProvenanceManifestTopLevelKeys(unittest.TestCase):
-    def setUp(self):
-        self._tmp = tempfile.TemporaryDirectory()
-        self.repo_root = Path(self._tmp.name)
-        self.component_id = "comp-foo"
-        self.slug = "foo"
+def _field(value, name):
+    return value[name] if isinstance(value, dict) else getattr(value, name)
 
-        # Pre-create the directories a real pipeline run would already have
-        # produced (generator output dir, verification output dir).
-        (self.repo_root / "gen" / self.slug).mkdir(parents=True, exist_ok=True)
-        (self.repo_root / "verification" / self.slug).mkdir(
-            parents=True, exist_ok=True
-        )
 
-    def tearDown(self):
-        self._tmp.cleanup()
+def _generation_result():
+    return {
+        "component_id": COMPONENT_ID,
+        "spec_bundle_hash": "sha256:" + "a" * 64,
+        "model": "claude-sonnet-5",
+        "prompt_version": "v10",
+        "cache_hit": False,
+        "files": {"prov_sample.py": "def compute_widget(x):\n    return x\n"},
+        "model_call_error": None,
+        "refused": None,
+        "retry_feedback": None,
+    }
 
-    def _build_inputs(self):
-        generation_result = {
-            "component_id": self.component_id,
-            "spec_bundle_hash": "sha256:" + "0" * 64,
-            "model": "claude-sonnet-5",
-            "prompt_version": "v1",
-            "cache_hit": False,
-            "files": {"foo.py": "print('hi')\n"},
-            "model_call_error": None,
-            "refused": None,
-            "retry_feedback": None,
-        }
 
-        verification_report = {
-            "component_id": self.component_id,
-            "criteria": [
-                {
-                    "id": "AC-FOO-001",
-                    "covers": "R-FOO-001",
-                    "kind": "compiled",
-                    "result": "pass",
-                }
-            ],
-            "requirement_results": {"R-FOO-001": "pass"},
-            "interface_drift": False,
-            "mutation_score": 0.92,
-            "overall": "pass",
-        }
+def _verification_report():
+    return {
+        "component_id": COMPONENT_ID,
+        "criteria": [
+            {
+                "id": "AC-PROV-SAMPLE-001",
+                "covers": "R-PROV-SAMPLE-001",
+                "kind": "compiled",
+                "result": "pass",
+            }
+        ],
+        "requirement_results": {"R-PROV-SAMPLE-001": "pass"},
+        "interface_drift": False,
+        "mutation_score": 0.9,
+        "overall": "pass",
+    }
 
-        license_scan_result = {
-            "component_id": self.component_id,
-            "gate_version": "license_scanner@4.0.3",
-            "evaluated": True,
-            "reason": None,
-            "similarity_score": 0.1,
-            "block_threshold": 0.70,
-            "blocked": False,
-            "matches": [],
-            "notified": False,
-            "notification_delivery_error": None,
-            "cache_hit": False,
-        }
 
-        secret_scan_result = {
-            "scope": "full",
-            "gate_version": "secret_scanner@3.0.0+detect-secrets.1.5.0",
-            "flagged": False,
-            "matches": [],
-            "allowed": [],
-            "unused_allowlist_entries": [],
-            "notified": False,
-            "notification_delivery_error": None,
-            "cache_hit": False,
-        }
+def _license_scan_result():
+    return {
+        "component_id": COMPONENT_ID,
+        "gate_version": "license_scanner@4.0.0-no-reference-corpus",
+        "evaluated": False,
+        "reason": "no-reference-corpus",
+        "similarity_score": None,
+        "block_threshold": None,
+        "blocked": False,
+        "matches": [],
+        "notified": False,
+        "notification_delivery_error": None,
+        "cache_hit": False,
+    }
 
-        gate_versions = {
+
+def _secret_scan_result():
+    return {
+        "scope": "full",
+        "gate_version": "secret_scanner@3.1.0+detect-secrets.1.5.0",
+        "flagged": False,
+        "matches": [],
+        "allowed": [],
+        "unused_allowlist_entries": [],
+        "notified": False,
+        "notification_delivery_error": None,
+        "cache_hit": False,
+    }
+
+
+def _inputs_fields():
+    return {
+        "component_id": COMPONENT_ID,
+        "generation_result": _generation_result(),
+        "verification_report": _verification_report(),
+        "license_scan_result": _license_scan_result(),
+        "secret_scan_result": _secret_scan_result(),
+        "provenance_hit": False,
+        "attempts": 1,
+        "gate_versions": {
             "compiler": "1.0.0",
-            "license_scanner": "license_scanner@4.0.3",
-            "secret_scanner": "secret_scanner@3.0.0+detect-secrets.1.5.0",
-        }
-
-        return provenance_writer.ProvenanceInputs(
-            component_id=self.component_id,
-            generation_result=generation_result,
-            verification_report=verification_report,
-            license_scan_result=license_scan_result,
-            secret_scan_result=secret_scan_result,
-            provenance_hit=False,
-            attempts=1,
-            gate_versions=gate_versions,
-        )
-
-    def test_manifest_top_level_keys_exactly_match_spec(self):
-        inputs = self._build_inputs()
-
-        provenance_writer.write_provenance(
-            self.component_id, inputs, self.repo_root
-        )
-
-        gen_manifest_path = (
-            self.repo_root / "gen" / self.slug / ".provenance.json"
-        )
-        verification_manifest_path = (
-            self.repo_root / "verification" / self.slug / ".provenance.json"
-        )
-
-        for manifest_path in (gen_manifest_path, verification_manifest_path):
-            self.assertTrue(
-                manifest_path.is_file(),
-                f"expected manifest to be written at {manifest_path}",
-            )
-            with open(manifest_path, "r", encoding="utf-8") as f:
-                manifest = json.load(f)
-
-            self.assertIsInstance(manifest, dict)
-            self.assertEqual(
-                set(manifest.keys()),
-                EXPECTED_TOP_LEVEL_KEYS,
-                f"manifest at {manifest_path} has keys "
-                f"{sorted(manifest.keys())}, expected exactly "
-                f"{sorted(EXPECTED_TOP_LEVEL_KEYS)}",
-            )
+            "license_scanner": "license_scanner@4.0.0-no-reference-corpus",
+        },
+    }
 
 
-if __name__ == "__main__":
-    unittest.main()
+def _build_inputs():
+    fields = _inputs_fields()
+    cls = getattr(provenance_writer, "ProvenanceInputs", None)
+    if isinstance(cls, type):
+        if dataclasses.is_dataclass(cls):
+            names = {f.name for f in dataclasses.fields(cls)}
+            return cls(**{k: v for k, v in fields.items() if k in names})
+        try:
+            return cls(**fields)
+        except TypeError:
+            return fields
+    return fields
+
+
+def _read_manifest(path: Path):
+    assert path.is_file(), f"expected manifest at {path}"
+    data = json.loads(path.read_text(encoding="utf-8"))
+    assert isinstance(data, dict), f"manifest at {path} is not a JSON object"
+    return data
+
+
+def test_ac_prov_001_manifest_top_level_keys_match_spec_guidelines_section_7(tmp_path):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    gen_dir = repo_root / "gen" / SLUG
+    gen_dir.mkdir(parents=True)
+    (gen_dir / "prov_sample.py").write_text(
+        "def compute_widget(x):\n    return x\n", encoding="utf-8"
+    )
+
+    inputs = _build_inputs()
+
+    result = provenance_writer.write_provenance(COMPONENT_ID, inputs, repo_root)
+    assert result is None
+
+    gen_manifest = _read_manifest(repo_root / "gen" / SLUG / ".provenance.json")
+    ver_manifest = _read_manifest(
+        repo_root / "verification" / SLUG / ".provenance.json"
+    )
+
+    for label, manifest in (("gen", gen_manifest), ("verification", ver_manifest)):
+        keys = set(manifest.keys())
+        extra = keys - EXPECTED_KEYS
+        missing = EXPECTED_KEYS - keys
+        assert not extra, f"{label} manifest has extra keys: {sorted(extra)}"
+        assert not missing, f"{label} manifest is missing keys: {sorted(missing)}"
+        assert keys == EXPECTED_KEYS
+        assert len(manifest) == len(EXPECTED_KEYS)

@@ -1,93 +1,143 @@
 import json
+from pathlib import Path
+
+import pytest
 
 import provenance_writer
 
 
-def _make_inputs():
-    generation_result = {
-        "component_id": "comp-foo",
-        "spec_bundle_hash": "sha256:" + "0" * 64,
-        "model": "claude-sonnet-5",
-        "prompt_version": "v1",
-        "cache_hit": False,
-        "files": {},
-        "model_call_error": None,
-        "refused": "sealed-component",
-        "retry_feedback": None,
-    }
-    license_scan_result = {
-        "component_id": "comp-foo",
-        "gate_version": "license_scanner@4.0.0-no-reference-corpus",
-        "evaluated": False,
-        "reason": "no-reference-corpus",
-        "similarity_score": None,
-        "block_threshold": None,
-        "blocked": False,
-        "matches": [],
-        "notified": False,
-        "notification_delivery_error": None,
-        "cache_hit": False,
-    }
-    secret_scan_result = {
-        "scope": "full",
-        "gate_version": "secret_scanner@3.0.0+detect-secrets.1.5.0",
-        "flagged": False,
-        "matches": [],
-        "allowed": [],
-        "unused_allowlist_entries": [],
-        "notified": False,
-        "notification_delivery_error": None,
-        "cache_hit": False,
-    }
-    return provenance_writer.ProvenanceInputs(
+class _AttrDict(dict):
+    """A plain dict that also supports attribute access and to_dict(),
+    so it reads as either a JSON-shaped dict or a dataclass-like object."""
+
+    def __getattr__(self, name):
+        try:
+            return self[name]
+        except KeyError as exc:
+            raise AttributeError(name) from exc
+
+    def to_dict(self):
+        return json.loads(json.dumps(self))
+
+
+def _field(value, name):
+    return value[name] if isinstance(value, dict) else getattr(value, name)
+
+
+def _generation_result():
+    return _AttrDict(
         component_id="comp-foo",
-        generation_result=generation_result,
-        verification_report=None,
-        license_scan_result=license_scan_result,
-        secret_scan_result=secret_scan_result,
+        spec_bundle_hash="sha256:" + "a" * 64,
+        model="claude-sonnet-5",
+        prompt_version="v10",
+        cache_hit=False,
+        files={"foo_module.py": "def bar(x):\n    return x\n"},
+        model_call_error=None,
+        refused=None,
+        retry_feedback=None,
+    )
+
+
+def _verification_report():
+    return _AttrDict(
+        component_id="comp-foo",
+        criteria=[
+            {
+                "id": "AC-FOO-001",
+                "covers": "R-FOO-001",
+                "kind": "compiled",
+                "result": "pass",
+            }
+        ],
+        requirement_results={"R-FOO-001": "pass"},
+        interface_drift=False,
+        mutation_score=0.9,
+        overall="pass",
+    )
+
+
+def _license_scan_result():
+    return _AttrDict(
+        component_id="comp-foo",
+        gate_version="license_scanner@4.0.0-no-reference-corpus",
+        evaluated=False,
+        reason="no-reference-corpus",
+        similarity_score=None,
+        block_threshold=None,
+        blocked=False,
+        matches=[],
+        notified=False,
+        notification_delivery_error=None,
+        cache_hit=False,
+    )
+
+
+def _secret_scan_result():
+    return _AttrDict(
+        scope="full",
+        gate_version="secret_scanner@3.1.0+detect-secrets.1.5.0",
+        flagged=False,
+        matches=[],
+        allowed=[],
+        unused_allowlist_entries=[],
+        notified=False,
+        notification_delivery_error=None,
+        cache_hit=False,
+    )
+
+
+def _make_inputs():
+    fields = dict(
+        component_id="comp-foo",
+        generation_result=_generation_result(),
+        verification_report=_verification_report(),
+        license_scan_result=_license_scan_result(),
+        secret_scan_result=_secret_scan_result(),
         provenance_hit=False,
         attempts=2,
         gate_versions={"compiler": "1.0.0", "license_scanner": "k-gram@1.0.0"},
     )
+    cls = getattr(provenance_writer, "ProvenanceInputs", None)
+    if cls is not None and callable(cls):
+        try:
+            return cls(**fields)
+        except TypeError:
+            pass
+    return fields
 
 
-def _read_manifest(repo_root):
-    manifest_path = repo_root / "gen" / "foo" / ".provenance.json"
-    with open(manifest_path, "r", encoding="utf-8") as f:
-        return json.load(f)
+def _manifest_paths(repo_root: Path):
+    return [
+        repo_root / "gen" / "foo" / ".provenance.json",
+        repo_root / "verification" / "foo" / ".provenance.json",
+    ]
 
 
-def _get(obj, key, default=None):
-    if isinstance(obj, dict):
-        return obj.get(key, default)
-    return getattr(obj, key, default)
+def _run(repo_root: Path, inputs):
+    repo_root.mkdir(parents=True, exist_ok=True)
+    provenance_writer.write_provenance("comp-foo", inputs, repo_root)
+    manifests = []
+    for path in _manifest_paths(repo_root):
+        assert path.is_file(), f"expected manifest at {path}"
+        manifests.append(json.loads(path.read_text(encoding="utf-8")))
+    return manifests
 
 
-def test_verification_run_id_matches_slug_attempt_formula(tmp_path):
-    repo_root = tmp_path / "repo1"
-    repo_root.mkdir()
-
-    provenance_writer.write_provenance("comp-foo", _make_inputs(), repo_root)
-
-    manifest = _read_manifest(repo_root)
-    assert _get(manifest, "verification_run_id") == "foo-attempt-2"
-
-
-def test_verification_run_id_is_deterministic_across_runs(tmp_path):
-    repo_root_a = tmp_path / "repo_a"
-    repo_root_a.mkdir()
-    repo_root_b = tmp_path / "repo_b"
-    repo_root_b.mkdir()
-
+def test_ac_prov_013_verification_run_id_is_deterministic(tmp_path):
     inputs = _make_inputs()
 
-    provenance_writer.write_provenance("comp-foo", inputs, repo_root_a)
-    provenance_writer.write_provenance("comp-foo", inputs, repo_root_b)
+    # First run: verification_run_id is "<slug>-attempt-<attempts>".
+    first = _run(tmp_path / "run1", inputs)
+    for manifest in first:
+        assert _field(manifest, "verification_run_id") == "foo-attempt-2"
 
-    manifest_a = _read_manifest(repo_root_a)
-    manifest_b = _read_manifest(repo_root_b)
+    # Second run with the exact same inputs: identical verification_run_id.
+    second = _run(tmp_path / "run2", inputs)
+    for a, b in zip(first, second):
+        assert _field(a, "verification_run_id") == _field(b, "verification_run_id")
+        assert _field(b, "verification_run_id") == "foo-attempt-2"
 
-    run_id_a = _get(manifest_a, "verification_run_id")
-    run_id_b = _get(manifest_b, "verification_run_id")
-
-    assert run_id_a == run_id_b == "foo-attempt-2"
+    # Re-running into the same repo_root also yields the same id.
+    third = _run(tmp_path / "run1", inputs)
+    for a, c in zip(first, third):
+        assert _field(a, "verification_run_id") == _field(c, "verification_run_id")
