@@ -10,7 +10,9 @@
       "provenance": { "...": "the manifest's other top-level fields" },
       "size_status": "ok",
       "sealed": false,
-      "pinned_overrides": []
+      "pinned_overrides": [],
+      "owners": ["pipeline-team"],
+      "documents": { "component.md": "<its text>", "requirements/R-FOO-001.md": "<its text>" }
     },
     "VAR-FOO-URL": { "type": "var" }
   },
@@ -40,7 +42,10 @@ other top-level key. With no manifest both are `null`. `size_status` is
 `4000`, `"over"` above it, `"unknown"` with no row. `sealed` is the
 frontmatter's `sealed` (absent is `false`). `pinned_overrides` is the
 JSON list in `gen/<slug>/.overrides.json`, else `[]` (no file, or not a
-list).
+list). `owners` is the frontmatter's `owners` list (absent is `[]`).
+`documents` maps each `.md` file under `specs/components/<slug>/`, by its
+path relative to that directory with `/` separators, to its whole text,
+keys sorted.
 
 Each rate is a count divided by a total, `0.0` when the total is `0`:
 capabilities with no incoming `realizes` edge over all capabilities;
