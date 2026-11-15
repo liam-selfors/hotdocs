@@ -1,9 +1,8 @@
-"""Verifier orchestrator: runs every verification gate for one component."""
-
+"""Verifier orchestrator: runs every applicable verification gate against one
+component's code and produces a single structured VerificationReport."""
 from __future__ import annotations
 
 import ast
-import dataclasses
 import importlib.util
 import inspect
 import json
@@ -15,18 +14,19 @@ import subprocess
 import sys
 import tempfile
 import time
+from collections.abc import Mapping
+from dataclasses import dataclass
 from pathlib import Path
 
 GATE_VERSION = "verifier-orchestrator@2.0.0"
 
-MUTATION_BAR = 0.9
-UNMUTATED_TIMEOUT = 300
-USAGE = (
+_UNMUTATED_TIMEOUT = 300
+_USAGE = (
     "usage: hotdocs verify-component <component-id> "
     "[--repo-root=<dir>] [--format=json|text]"
 )
 
-_CMP_SWAP = {
+_SWAPS = {
     ast.Eq: ast.NotEq,
     ast.NotEq: ast.Eq,
     ast.Lt: ast.GtE,
@@ -37,8 +37,8 @@ _CMP_SWAP = {
     ast.IsNot: ast.Is,
     ast.In: ast.NotIn,
     ast.NotIn: ast.In,
-}
-_BIN_SWAP = {
+    ast.And: ast.Or,
+    ast.Or: ast.And,
     ast.Add: ast.Sub,
     ast.Sub: ast.Add,
     ast.Mult: ast.Div,
@@ -48,7 +48,7 @@ _BIN_SWAP = {
 }
 
 
-@dataclasses.dataclass
+@dataclass
 class VerificationReport:
     component_id: str
     criteria: list
@@ -58,470 +58,451 @@ class VerificationReport:
     overall: str
 
     def to_dict(self):
-        return dataclasses.asdict(self)
+        return {
+            "component_id": self.component_id,
+            "criteria": [dict(c) for c in self.criteria],
+            "requirement_results": dict(self.requirement_results),
+            "interface_drift": self.interface_drift,
+            "mutation_score": self.mutation_score,
+            "overall": self.overall,
+        }
 
 
 def _get(obj, key, default=None):
-    if isinstance(obj, dict):
+    if isinstance(obj, Mapping):
         return obj.get(key, default)
     return getattr(obj, key, default)
 
 
-# --- module loading -------------------------------------------------------
+# ---------------------------------------------------------------- loading
 
 
 def _tool_root():
-    here = Path(__file__).resolve()
-    return next(p for p in here.parents if p.name == "gen").parent
+    return next(p for p in Path(__file__).resolve().parents if p.name == "gen").parent
 
 
-def _load_module(base, name):
-    flat = base / f"{name}.py"
-    if flat.is_file():
-        spec = importlib.util.spec_from_file_location(name, flat)
-    else:
-        pkg = base / name
-        spec = importlib.util.spec_from_file_location(
-            name, pkg / "__init__.py", submodule_search_locations=[str(pkg)]
-        )
+def _load_module(base_dir, module_name):
+    path = base_dir / f"{module_name}.py"
+    locations = None
+    if not path.is_file():
+        path = base_dir / module_name / "__init__.py"
+        locations = [str(path.parent)]
+    spec = importlib.util.spec_from_file_location(
+        module_name, path, submodule_search_locations=locations
+    )
     module = importlib.util.module_from_spec(spec)
-    sys.modules[name] = module
+    sys.modules[module_name] = module
     spec.loader.exec_module(module)
     return module
 
 
-def _load_dependency(loaded, repo_root, rel_dir, name):
-    key = (str(repo_root), name)
-    if key not in loaded:
-        base = Path(repo_root) / rel_dir
-        if not base.is_dir():
-            base = _tool_root() / rel_dir
-        loaded[key] = _load_module(base, name)
-    return loaded[key]
+def _load_dependency(repo_root, rel, module_name):
+    base = repo_root / rel
+    if not base.is_dir():
+        base = _tool_root() / rel
+    return _load_module(base, module_name)
 
 
-def _load_candidate(code_dir, name):
-    try:
-        return _load_module(code_dir, name)
-    except Exception:
-        return None
+# ---------------------------------------------------------------- parsing
 
 
-# --- spec reading ---------------------------------------------------------
+def _parse_criteria(acceptance_dir):
+    parsed = []
+    for path in sorted(acceptance_dir.glob("AC-*.md")):
+        text = path.read_text(encoding="utf-8")
+        covers = re.search(r"Covers: *(\S+)", text)
+        parsed.append(
+            {
+                "id": re.search(r"^# +(AC-\S+)", text, re.M).group(1),
+                "covers": covers.group(1),
+                "kind": re.search(r"^Kind: *(\S+)", text[covers.end():], re.M).group(1),
+                "freeform": re.search(r"^```gherkin\s*$", text, re.M) is None,
+            }
+        )
+    return parsed
 
 
-def _frontmatter(path):
-    text = path.read_text() if path.is_file() else ""
-    m = re.match(r"---\n(.*?)\n---", text, re.S)
-    body = m.group(1) if m else ""
-    fields = {}
-    for line in body.splitlines():
-        key, _, value = line.partition(":")
-        fields[key.strip()] = value.strip()
-    return fields
-
-
-def _criteria(acc_dir):
-    out = []
-    for path in sorted(acc_dir.glob("AC-*.md")):
-        text = path.read_text()
-        cid = re.search(r"^#\s+(AC-\S+)", text, re.M).group(1)
-        covers = re.search(r"Covers:\s*([RP]-[A-Za-z0-9-]+)", text).group(1)
-        kind = re.search(r"^Kind:\s*(\S+)", text, re.M).group(1)
-        out.append((cid, covers, kind))
-    return out
-
-
-def _test_base(criterion_id):
-    return "test_" + criterion_id.lower().replace("-", "_")
-
-
-# --- interface drift ------------------------------------------------------
-
-
-def _plain_blocks(text):
-    blocks, current, fence = [], None, None
-    for line in text.splitlines():
-        m = re.match(r"\s*(`{3,})\s*(\S*)", line)
-        if fence is None:
-            if m:
-                fence = m.group(1)
-                current = [] if m.group(2) == "" else None
-        elif m and m.group(1) == fence and m.group(2) == "":
-            if current is not None:
-                blocks.append(current)
-            fence = None
-        elif current is not None:
-            current.append(line)
-    return blocks
-
-
-def _parse_signature(text):
-    name, _, rest = text.partition("(")
-    depth, params, part = 1, [], ""
+def _param_names(rest):
+    pieces, depth, piece = [], 0, ""
     for ch in rest:
         if ch in "([{":
             depth += 1
         elif ch in ")]}":
+            if depth == 0:
+                break
             depth -= 1
-        if depth == 0:
-            break
-        if ch == "," and depth == 1:
-            params.append(part)
-            part = ""
+        elif ch == "," and depth == 0:
+            pieces.append(piece)
+            piece = ""
+            continue
+        piece += ch
+    pieces.append(piece)
+    matches = (re.match(r"\s*\**([A-Za-z_]\w*)", p) for p in pieces)
+    return [m.group(1) for m in matches if m]
+
+
+def _documented_callables(text):
+    found, buf, plain = [], None, None
+    for line in text.splitlines():
+        s = line.strip()
+        if s.startswith("```"):
+            plain = (s == "```") if plain is None else None
+            continue
+        if not plain:
+            continue
+        if buf is None:
+            if not re.match(r"[A-Za-z_]\w*\(", s):
+                continue
+            buf = s
         else:
-            part += ch
-    params.append(part)
-    names = [p.split(":")[0].split("=")[0].strip().lstrip("*") for p in params]
-    return name.strip(), [n for n in names if n not in ("", "/")]
-
-
-def _signatures(lines):
-    sigs, buf = [], ""
-    for line in lines:
-        if buf or re.match(r"\w+\(", line):
-            buf = f"{buf} {line.strip()}" if buf else line.strip()
-            if buf.count("(") == buf.count(")"):
-                sigs.append(_parse_signature(buf))
-                buf = ""
-    return sigs
-
-
-def _documented_callables(interface_dir):
-    found = []
-    for filename in ("library.md", "cli.md"):
-        path = interface_dir / filename
-        if path.is_file():
-            for block in _plain_blocks(path.read_text()):
-                found.extend(_signatures(block))
+            buf += " " + s
+        if buf.count("(") > buf.count(")"):
+            continue
+        name, rest = buf.split("(", 1)
+        found.append((name, _param_names(rest)))
+        buf = None
     return found
 
 
-def _drift(module, documented):
+def _interface_drift(spec_dir, code_dir, module_name):
+    documented = []
+    for name in ("library.md", "cli.md"):
+        path = spec_dir / "interface" / name
+        if path.is_file():
+            documented += _documented_callables(path.read_text(encoding="utf-8"))
+    try:
+        module = _load_module(code_dir, module_name)
+    except Exception:
+        return True
     for name, params in documented:
         obj = getattr(module, name, None)
-        try:
-            actual = list(inspect.signature(obj).parameters)
-        except (TypeError, ValueError):
-            return True
-        if actual != params:
+        if not callable(obj) or list(inspect.signature(obj).parameters) != params:
             return True
     return False
 
 
-# --- test execution -------------------------------------------------------
+# ---------------------------------------------------------------- running
 
 
-def _pytest(targets, cwd, pythonpath, timeout, *extra):
-    env = dict(os.environ, PYTHONPATH=str(pythonpath))
-    cmd = [
-        sys.executable, "-m", "pytest", "-vv", "-p", "no:cacheprovider",
-        *extra, *[str(t) for t in targets],
-    ]
+def _pytest(args, pythonpath, cwd, timeout, extra):
+    env = dict(os.environ, PYTHONPATH=str(pythonpath), PYTHONDONTWRITEBYTECODE="1")
+    command = [sys.executable, "-m", "pytest", "-vv", "-p", "no:cacheprovider", "-rfE"]
     start = time.monotonic()
     proc = subprocess.Popen(
-        cmd, cwd=str(cwd), env=env, stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT, text=True, start_new_session=True,
+        command + extra + [str(a) for a in args],
+        cwd=str(cwd),
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        start_new_session=True,
     )
     try:
         output, _ = proc.communicate(timeout=timeout)
-        code = proc.returncode
     except subprocess.TimeoutExpired:
         os.killpg(proc.pid, signal.SIGKILL)
-        output, _ = proc.communicate()
-        code = None
-    return code, output, time.monotonic() - start
-
-
-def _literal(node):
-    try:
-        return ast.literal_eval(node)
-    except Exception:
-        return None
+        proc.communicate()
+        return None, "", time.monotonic() - start
+    return proc.returncode, output, time.monotonic() - start
 
 
 def _compared(expr):
     try:
         node = ast.parse(expr, mode="eval").body
-    except SyntaxError:
-        return None, None
-    if not (isinstance(node, ast.Compare) and len(node.ops) == 1):
-        return None, None
-    left, right = node.left, node.comparators[0]
-    if isinstance(node.ops[0], (ast.In, ast.NotIn)):
-        return _literal(left), _literal(right)
-    return _literal(right), _literal(left)
+        if isinstance(node, ast.Compare) and len(node.ops) == 1 and isinstance(
+            node.ops[0], (ast.Eq, ast.In)
+        ):
+            left = ast.literal_eval(node.left)
+            right = ast.literal_eval(node.comparators[0])
+            if isinstance(node.ops[0], ast.In):
+                return left, right
+            return right, left
+    except Exception:
+        pass
+    return None, None
 
 
 def _failure_detail(output):
-    errors = [line[1:].strip() for line in output.splitlines() if line.startswith("E ")]
-    for text in errors:
-        m = re.match(r"(?:AssertionError: )?assert (.+)$", text)
+    lines = output.splitlines()
+    summary = [l for l in lines if l.startswith(("FAILED ", "ERROR "))]
+    if summary:
+        message = summary[0].split(" - ", 1)[-1]
+    else:
+        message = next((l.strip() for l in reversed(lines) if l.strip()), "")
+    message = message.removeprefix("AssertionError: ")
+    expected = actual = None
+    for line in lines:
+        m = re.match(r"E\s+(?:AssertionError: )?assert (.+)$", line)
         if m:
             expected, actual = _compared(m.group(1))
-            return {"message": text, "expected": expected, "actual": actual}
-    lines = errors or [line for line in output.splitlines() if line.strip()]
-    return {"message": lines[-1].strip(), "expected": None, "actual": None}
+            break
+    return {"message": message, "expected": expected, "actual": actual}
 
 
-def _fail(entry, message):
-    entry["result"] = "fail"
-    entry["failure_detail"] = {"message": message, "expected": None, "actual": None}
+def _fail(message):
+    return {
+        "result": "fail",
+        "failure_detail": {"message": message, "expected": None, "actual": None},
+    }
 
 
-def _record(entry, code, output):
+def _run_check(args, code_dir, cwd):
+    code, output, _ = _pytest(args, code_dir, cwd, _UNMUTATED_TIMEOUT, [])
     if code == 0:
-        entry["result"] = "pass"
-    elif code is None:
-        _fail(entry, f"timed out after {UNMUTATED_TIMEOUT} seconds")
-    else:
-        entry["result"] = "fail"
-        entry["failure_detail"] = _failure_detail(output)
+        return {"result": "pass"}
+    if code is None:
+        return _fail(f"timed out after {_UNMUTATED_TIMEOUT} seconds")
+    return {"result": "fail", "failure_detail": _failure_detail(output)}
 
 
-def _char_tests(ver_dir):
-    return [
-        (path, node.name)
-        for path in sorted(ver_dir.glob("test_*.py"))
-        for node in ast.parse(path.read_text()).body
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
-    ]
-
-
-# --- llm-judge ------------------------------------------------------------
+# ---------------------------------------------------------------- dispatch
 
 
 def _judge(judge, bundle_for, criterion_id):
     if judge is None:
-        return "skipped", None
+        return {"result": "skipped", "rationale": None}
     bundle = bundle_for(criterion_id)
     try:
         outcome = judge(bundle)
     except Exception as exc:
-        return "skipped", str(exc)
-    if outcome is None or isinstance(outcome, (bool, str)):
-        value, rationale = outcome, None
-    else:
-        value = _get(outcome, "result")
-        if value is None:
-            value = _get(outcome, "verdict")
+        return {"result": "skipped", "rationale": str(exc)}
+    if isinstance(outcome, Mapping) or hasattr(outcome, "result") or hasattr(outcome, "verdict"):
+        value = _get(outcome, "result", _get(outcome, "verdict"))
         rationale = _get(outcome, "rationale")
+    else:
+        value, rationale = outcome, None
     if value is True or value == "pass":
-        return "pass", rationale
-    if value is False or value == "fail":
-        return "fail", rationale
-    return "skipped", rationale
+        result = "pass"
+    elif value is None or value == "skipped":
+        result = "skipped"
+    else:
+        result = "fail"
+    return {"result": result, "rationale": rationale}
 
 
-# --- mutation testing -----------------------------------------------------
+def _generated_test(criterion_id, cached, author_dir, test_author, bundle_for):
+    if cached.is_file():
+        return cached, None, None
+    if test_author is None:
+        return None, None, "no cached test and no test_author configured"
+    outcome = test_author(bundle_for(criterion_id))
+    authoring = {
+        key: _get(outcome, key) for key in ("model", "seed", "prompt_version", "cache_hit")
+    }
+    error = _get(outcome, "model_call_error")
+    if error:
+        return None, authoring, f"test_author model call error: {error}"
+    path = author_dir / cached.name
+    path.write_text(_get(_get(outcome, "file"), "content"), encoding="utf-8")
+    return path, authoring, None
+
+
+def _characterization_tests(verification_dir):
+    tests = []
+    for path in sorted(verification_dir.glob("test_*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        tests += [(path, n.name) for n in tree.body if isinstance(n, ast.FunctionDef)]
+    return tests
+
+
+def _characterize(tests, criterion_id, code_dir, cwd):
+    prefix = "test_" + criterion_id.lower().replace("-", "_")
+    node_ids = [
+        f"{path}::{name}"
+        for path, name in tests
+        if name == prefix or name.startswith(prefix + "_")
+    ]
+    if not node_ids:
+        return _fail("no characterization test")
+    return _run_check(node_ids, code_dir, cwd)
+
+
+# ---------------------------------------------------------------- mutation
 
 
 def _sites(tree):
-    sites = []
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Compare) and len(node.ops) == 1:
-            sites.append(node)
-        elif isinstance(node, ast.BoolOp):
-            sites.append(node)
-        elif isinstance(node, ast.BinOp) and type(node.op) in _BIN_SWAP:
-            sites.append(node)
-        elif isinstance(node, ast.Constant) and isinstance(node.value, bool):
-            sites.append(node)
-    return sites
+    return [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Compare) and len(node.ops) == 1
+        or isinstance(node, (ast.BoolOp, ast.BinOp)) and type(node.op) in _SWAPS
+        or isinstance(node, ast.Constant) and isinstance(node.value, bool)
+    ]
 
 
-def _mutant(source, index):
-    tree = ast.parse(source)
-    node = _sites(tree)[index]
+def _mutate(node):
     if isinstance(node, ast.Compare):
-        node.ops = [_CMP_SWAP[type(node.ops[0])]()]
-    elif isinstance(node, ast.BoolOp):
-        node.op = ast.Or() if isinstance(node.op, ast.And) else ast.And()
-    elif isinstance(node, ast.BinOp):
-        node.op = _BIN_SWAP[type(node.op)]()
-    else:
+        node.ops = [_SWAPS[type(node.ops[0])]()]
+    elif isinstance(node, ast.Constant):
         node.value = not node.value
-    return ast.unparse(tree)
+    else:
+        node.op = _SWAPS[type(node.op)]()
 
 
-def _mutation_score(code_dir, test_files, baseline):
-    timeout = max(2.0, 10 * baseline)
-    killed = total = 0
-    for source in sorted(code_dir.rglob("*.py")):
-        text = source.read_text()
-        for index in range(len(_sites(ast.parse(text)))):
-            total += 1
-            with tempfile.TemporaryDirectory() as tmp:
-                copy = Path(tmp) / code_dir.name
-                shutil.copytree(
-                    code_dir, copy, ignore=shutil.ignore_patterns("__pycache__")
-                )
-                (copy / source.relative_to(code_dir)).write_text(_mutant(text, index))
-                code, _, _ = _pytest(test_files, copy, copy, timeout, "--noconftest")
-            killed += code != 0
-    return killed / total if total else 1.0
+def _mutants(source):
+    for index in range(len(_sites(ast.parse(source)))):
+        tree = ast.parse(source)
+        _mutate(_sites(tree)[index])
+        yield ast.unparse(tree)
 
 
-# --- orchestration --------------------------------------------------------
+def _mutation_score(code_dir, tests):
+    with tempfile.TemporaryDirectory() as tmp:
+        copy = Path(tmp) / code_dir.name
+        shutil.copytree(code_dir, copy, ignore=shutil.ignore_patterns("__pycache__"))
+        mutants = []
+        for path in sorted(copy.rglob("*.py")):
+            source = path.read_text(encoding="utf-8")
+            mutants += [(path, source, mutant) for mutant in _mutants(source)]
+        killed = 0
+        if tests:
+            _, _, elapsed = _pytest(tests, copy, copy, _UNMUTATED_TIMEOUT, ["--noconftest"])
+            timeout = max(2.0, 10 * elapsed)
+            for path, source, mutant in mutants:
+                path.write_text(mutant, encoding="utf-8")
+                code, _, _ = _pytest(tests, copy, copy, timeout, ["--noconftest", "-x"])
+                killed += code != 0
+                path.write_text(source, encoding="utf-8")
+    return killed / len(mutants) if mutants else 1.0
+
+
+# ---------------------------------------------------------------- verify
 
 
 def verify(component_id: str, repo_root: Path, judge=None, test_author=None) -> VerificationReport:
-    root = Path(repo_root).resolve()
+    repo_root = Path(repo_root).resolve()
     slug = component_id.removeprefix("comp-")
     module_name = slug.replace("-", "_")
-    spec_dir = root / "specs" / "components" / slug
-    ver_dir = root / "verification" / slug
-    fm = _frontmatter(spec_dir / "component.md")
-    sealed = fm.get("sealed") == "true"
-    code_dir = root / fm["source_path"] if sealed else root / "gen" / slug
-    loaded = {}
+    spec_dir = repo_root / "specs" / "components" / slug
+    verification_dir = repo_root / "verification" / slug
+    front = (spec_dir / "component.md").read_text(encoding="utf-8").split("\n---", 1)[0]
+    sealed = re.search(r"^sealed: *true *$", front, re.M) is not None
+    if sealed:
+        code_dir = repo_root / re.search(r"^source_path: *(\S+)", front, re.M).group(1)
+    else:
+        code_dir = repo_root / "gen" / slug
+
+    modules = {}
+
+    def dependency(rel, name):
+        key = (repo_root, name)
+        if key not in modules:
+            modules[key] = _load_dependency(repo_root, rel, name)
+        return modules[key]
 
     def bundle_for(criterion_id):
-        sba = _load_dependency(
-            loaded, repo_root, "gen/spec-bundle-assembler", "spec_bundle_assembler"
-        )
-        return sba.assemble_criterion(component_id, criterion_id, repo_root)
+        assembler = dependency("gen/spec-bundle-assembler", "spec_bundle_assembler")
+        return assembler.assemble_criterion(component_id, criterion_id, repo_root)
 
-    parsed = _criteria(spec_dir / "acceptance")
+    parsed = _parse_criteria(spec_dir / "acceptance")
+    drift = _interface_drift(spec_dir, code_dir, module_name)
 
-    compiled = {}
-    if not sealed and any(kind == "compiled" for _, _, kind in parsed):
-        cc = _load_dependency(
-            loaded, repo_root, "pipeline/criterion-compiler", "criterion_compiler"
-        )
-        report = cc.compile(component_id, repo_root)
-        compiled = {_get(o, "criterion_id"): o for o in _get(report, "outputs")}
+    outputs = {}
+    if not sealed and any(c["kind"] == "compiled" for c in parsed):
+        compiler = dependency("pipeline/criterion-compiler", "criterion_compiler")
+        report = compiler.compile(component_id, repo_root)
+        outputs = {_get(o, "criterion_id"): o for o in _get(report, "outputs")}
+    characterization = _characterization_tests(verification_dir) if sealed else []
 
-    char_tests = _char_tests(ver_dir) if sealed else []
-
-    criteria, passing_files, baseline = [], [], 0.0
-    for cid, covers, kind in parsed:
-        entry = {"id": cid, "covers": covers, "kind": kind}
-        if kind == "llm-judge":
-            entry["result"], entry["rationale"] = _judge(judge, bundle_for, cid)
-        elif sealed:
-            base = _test_base(cid)
-            targets = [
-                f"{path}::{name}"
-                for path, name in char_tests
-                if name == base or name.startswith(base + "_")
-            ]
-            if targets:
-                code, output, _ = _pytest(targets, root, code_dir, UNMUTATED_TIMEOUT)
-                _record(entry, code, output)
+    criteria = []
+    generated_tests = []
+    with tempfile.TemporaryDirectory() as author_dir:
+        for c in parsed:
+            entry = {"id": c["id"], "covers": c["covers"], "kind": c["kind"]}
+            if c["kind"] == "llm-judge":
+                entry.update(_judge(judge, bundle_for, c["id"]))
+            elif sealed:
+                entry.update(_characterize(characterization, c["id"], code_dir, repo_root))
+            elif c["kind"] == "compiled":
+                output = outputs.get(c["id"], {"message": "no compiled output"})
+                if _get(output, "status") == "compiled":
+                    entry.update(_run_check([repo_root / _get(output, "file")], code_dir, repo_root))
+                else:
+                    entry.update(_fail(_get(output, "message")))
             else:
-                _fail(entry, "no characterization test")
-        elif kind == "compiled":
-            out = compiled.get(cid)
-            if _get(out, "status") == "compiled":
-                test_file = root / _get(out, "file")
-                code, output, _ = _pytest([test_file], root, code_dir, UNMUTATED_TIMEOUT)
-                _record(entry, code, output)
-            else:
-                _fail(entry, str(_get(out, "message", "criterion-compiler produced no output")))
-        else:
-            test_file = ver_dir / "generated-test" / (_test_base(cid) + ".py")
-            authoring = None
-            if not test_file.is_file() and test_author is not None:
-                outcome = test_author(bundle_for(cid))
-                authoring = {
-                    key: _get(outcome, key)
-                    for key in ("model", "seed", "prompt_version", "cache_hit")
-                }
-                error = _get(outcome, "model_call_error")
-                if error is None:
-                    test_file.parent.mkdir(parents=True, exist_ok=True)
-                    test_file.write_text(_get(_get(outcome, "file"), "content"))
-            if test_file.is_file():
-                code, output, duration = _pytest(
-                    [test_file], root, code_dir, UNMUTATED_TIMEOUT
+                cached = verification_dir / "generated-test" / (
+                    "test_" + c["id"].lower().replace("-", "_") + ".py"
                 )
-                _record(entry, code, output)
-                if code == 0:
-                    passing_files.append(test_file)
-                    baseline += duration
-            elif authoring is None:
-                _fail(entry, "no cached test and no test_author configured")
-            else:
-                _fail(entry, f"test_author model_call_error: {error}")
-            if authoring is not None:
-                entry["test_authoring"] = authoring
-        criteria.append(entry)
+                path, authoring, error = _generated_test(
+                    c["id"], cached, Path(author_dir), test_author, bundle_for
+                )
+                if path is None:
+                    entry.update(_fail(error))
+                else:
+                    generated_tests.append(path)
+                    entry.update(_run_check([path], code_dir, repo_root))
+                if authoring is not None:
+                    entry["test_authoring"] = authoring
+            criteria.append(entry)
 
-    module = _load_candidate(code_dir, module_name)
-    drift = _drift(module, _documented_callables(spec_dir / "interface"))
+        generated = [c for c in parsed if c["kind"] == "generated-test"]
+        score = None
+        if generated and not sealed:
+            score = _mutation_score(code_dir, generated_tests)
 
-    mutation_score = None
-    if not sealed and any(kind == "generated-test" for _, _, kind in parsed):
-        mutation_score = (
-            _mutation_score(code_dir, passing_files, baseline) if passing_files else 0.0
+    threshold = 0.9 if any(c["freeform"] for c in generated) else 0.8
+
+    requirement_results = {}
+    for entry in criteria:
+        prior = requirement_results.get(entry["covers"], "pass")
+        requirement_results[entry["covers"]] = (
+            "pass" if prior == "pass" and entry["result"] == "pass" else "fail"
         )
 
-    covering = {}
-    for c in criteria:
-        covering.setdefault(c["covers"], []).append(c["result"])
-    declared = {p.stem for p in (spec_dir / "requirements").glob("R-*.md")}
-    requirement_results = {
-        rid: "pass"
-        if covering.get(rid) and all(r == "pass" for r in covering[rid])
-        else "fail"
-        for rid in sorted(declared | covering.keys())
-    }
-
-    failed = any(c["result"] == "fail" for c in criteria)
-    below_bar = mutation_score is not None and mutation_score < MUTATION_BAR
-    missing_source = sealed and not code_dir.is_dir()
-    overall = "fail" if failed or drift or below_bar or missing_source else "pass"
-
+    failed = (
+        drift
+        or any(entry["result"] == "fail" for entry in criteria)
+        or (score is not None and score < threshold)
+    )
     return VerificationReport(
         component_id=component_id,
         criteria=criteria,
-        requirement_results=requirement_results,
+        requirement_results=dict(sorted(requirement_results.items())),
         interface_drift=drift,
-        mutation_score=mutation_score,
-        overall=overall,
+        mutation_score=score,
+        overall="fail" if failed else "pass",
     )
 
 
-# --- CLI ------------------------------------------------------------------
+# ---------------------------------------------------------------- CLI
 
 
 def _usage():
-    print(USAGE, file=sys.stderr)
+    print(_USAGE, file=sys.stderr)
     return 2
 
 
 def main(argv):
     args = list(argv)
-    opts = {"--repo-root": ".", "--format": "text"}
-    positional = []
+    component_id = None
+    values = {"--repo-root": ".", "--format": "text"}
     i = 0
     while i < len(args):
-        name, eq, value = args[i].partition("=")
-        if name in opts:
-            if not eq:
-                i += 1
-                if i == len(args):
-                    return _usage()
-                value = args[i]
-            opts[name] = value
-        elif positional or args[i].startswith("-"):
-            return _usage()
+        arg = args[i]
+        flag, eq, value = arg.partition("=")
+        if flag in values and eq:
+            values[flag] = value
+        elif arg in values and i + 1 < len(args):
+            values[arg] = args[i + 1]
+            i += 1
+        elif component_id is None and not arg.startswith("-"):
+            component_id = arg
         else:
-            positional.append(args[i])
+            return _usage()
         i += 1
-    if not positional or opts["--format"] not in ("json", "text"):
+    if component_id is None or values["--format"] not in ("json", "text"):
         return _usage()
-    component_id = positional[0]
-    repo_root = Path(opts["--repo-root"])
+    repo_root = Path(values["--repo-root"])
     slug = component_id.removeprefix("comp-")
     if not (repo_root / "specs" / "components" / slug / "component.md").is_file():
         return _usage()
     report = verify(component_id, repo_root)
-    if opts["--format"] == "json":
-        print(json.dumps(report.to_dict(), indent=2))
+    if values["--format"] == "json":
+        print(json.dumps(report.to_dict(), indent=2, default=str))
     else:
         print(f"{report.component_id}: {report.overall}")
-        for c in report.criteria:
-            print(f"  {c['id']}: {c['result']}")
+        for entry in report.criteria:
+            print(f"  {entry['id']}: {entry['result']}")
     return 0 if report.overall == "pass" else 1

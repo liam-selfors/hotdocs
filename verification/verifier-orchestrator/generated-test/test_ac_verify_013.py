@@ -1,3 +1,12 @@
+"""AC-VERIFY-013 (Covers: R-VERIFY-012).
+
+Given a compiled criterion whose compiled assertion checks result.foo
+  equals 5, and the generated code under test returns 3
+When verify_component runs
+Then that criterion's result is fail, its failure_detail.expected is 5,
+  and its failure_detail.actual is 3
+"""
+
 import verifier_orchestrator
 
 from pathlib import Path
@@ -18,65 +27,101 @@ GLOSSARY = """# Glossary
 """
 
 PRODUCT = """---
-id: P-GIZMO
-title: Gizmo capability
+id: P-GAUGE
+title: Gauge capability
 status: draft
 owners: [team-a]
 ---
 
-# Gizmo capability
+# Gauge capability
 
 ## Purpose
 
-Gizmos compute values from a seed.
+Report a gauge reading.
 
 ## Scope
 
-- In scope: computing a value from a seed.
+- In scope: reporting a reading.
+- Out of scope: everything else.
 
 ## Capability scenarios
 
-### CS-GIZMO-001
+### CS-GAUGE-001
 
-Covers: P-GIZMO
-Kind: llm-judge
+Covers: P-GAUGE
+Kind: compiled
 
 ```gherkin
-Given a gizmo system
-When a value is computed
-Then the value is reported
+Given a sample is 7
+When read_level is invoked with sample
+Then foo equals 5
 ```
 """
 
 COMPONENT = """---
-id: comp-gizmo
-title: Gizmo
+id: comp-gauge
+title: Gauge
 status: draft
 owners: [team-a]
-realizes: [P-GIZMO]
+realizes: [P-GAUGE]
 depends_on: []
 ---
 
-# Gizmo
+# Gauge
 
 ## Purpose
 
-Gizmo computes a value object from a seed.
+Gauge reports a reading.
+
+## Scope
+
+- In scope: reporting a reading.
+- Out of scope: everything else.
+
+## Definitions
+
+None.
+
+## Behavior
+
+See `requirements/`.
+
+## Interfaces
+
+See `interface/`.
+
+## Data
+
+See `interface/data/`.
+
+## Acceptance criteria
+
+See `acceptance/`.
+
+## Non-functional constraints
+
+See `constraints.md`.
+
+## Open questions
+
+## Change log
+
+- Initial draft.
 """
 
-REQUIREMENT = """# R-GIZMO-001
+REQUIREMENT = """# R-GAUGE-001
 
-**R-GIZMO-001** — `compute_value(seed)` MUST return an object whose `foo` is 5.
+**R-GAUGE-001** — `read_level(x)` MUST return an object whose `foo` field is `5`.
 """
 
-ACCEPTANCE = """# AC-GIZMO-001
+ACCEPTANCE = """# AC-GAUGE-001
 
-Covers: R-GIZMO-001
+Covers: R-GAUGE-001
 Kind: compiled
 
 ```gherkin
-Given a seed is 1
-When compute_value is invoked with seed
+Given a sample is 7
+When read_level is invoked with sample
 Then foo equals 5
 ```
 """
@@ -84,7 +129,7 @@ Then foo equals 5
 LIBRARY = """# Library
 
 ```
-compute_value(seed: int) -> object
+read_level(x: int) -> object
 ```
 """
 
@@ -96,21 +141,21 @@ None.
 GENERATED_CODE = """from types import SimpleNamespace
 
 
-def compute_value(seed):
+def read_level(x):
     return SimpleNamespace(foo=3)
 """
 
 
 def _build_fixture(repo_root: Path) -> None:
     _write(repo_root / "specs" / "glossary.md", GLOSSARY)
-    _write(repo_root / "specs" / "product" / "gizmo.md", PRODUCT)
-    comp = repo_root / "specs" / "components" / "gizmo"
+    _write(repo_root / "specs" / "product" / "gauge.md", PRODUCT)
+    comp = repo_root / "specs" / "components" / "gauge"
     _write(comp / "component.md", COMPONENT)
-    _write(comp / "requirements" / "R-GIZMO-001.md", REQUIREMENT)
-    _write(comp / "acceptance" / "AC-GIZMO-001.md", ACCEPTANCE)
+    _write(comp / "requirements" / "R-GAUGE-001.md", REQUIREMENT)
+    _write(comp / "acceptance" / "AC-GAUGE-001.md", ACCEPTANCE)
     _write(comp / "interface" / "library.md", LIBRARY)
     _write(comp / "constraints.md", CONSTRAINTS)
-    _write(repo_root / "gen" / "gizmo" / "gizmo.py", GENERATED_CODE)
+    _write(repo_root / "gen" / "gauge" / "gauge.py", GENERATED_CODE)
 
 
 def test_compiled_failure_carries_typed_expected_and_actual(tmp_path):
@@ -118,31 +163,27 @@ def test_compiled_failure_carries_typed_expected_and_actual(tmp_path):
     repo_root.mkdir()
     _build_fixture(repo_root)
 
-    report = verifier_orchestrator.verify("comp-gizmo", repo_root)
+    report = verifier_orchestrator.verify("comp-gauge", repo_root)
 
     criteria = field(report, "criteria")
-    matching = [c for c in criteria if field(c, "id") == "AC-GIZMO-001"]
-    assert len(matching) == 1, f"criterion AC-GIZMO-001 not found in {criteria!r}"
-    criterion = matching[0]
+    matches = [c for c in criteria if field(c, "id") == "AC-GAUGE-001"]
+    assert len(matches) == 1, f"criterion AC-GAUGE-001 not found in {criteria!r}"
+    criterion = matches[0]
 
-    assert field(criterion, "kind") == "compiled"
-    assert field(criterion, "result") == "fail", criterion
+    assert field(criterion, "result") == "fail", f"unexpected criterion entry: {criterion!r}"
 
-    detail = field(criterion, "failure_detail")
-    assert detail is not None, criterion
+    failure_detail = field(criterion, "failure_detail")
+    assert failure_detail is not None, f"missing failure_detail: {criterion!r}"
 
-    expected = field(detail, "expected")
-    actual = field(detail, "actual")
+    expected = field(failure_detail, "expected")
+    actual = field(failure_detail, "actual")
 
-    assert expected == 5, detail
+    # Values must be their original Python type (ints), not pytest's rendered text.
+    assert expected == 5, f"failure_detail.expected was {expected!r}"
     assert isinstance(expected, int) and not isinstance(expected, bool), (
-        f"expected must be the original int, got {type(expected).__name__}: {expected!r}"
+        f"failure_detail.expected has type {type(expected).__name__}"
     )
-
-    assert actual == 3, detail
+    assert actual == 3, f"failure_detail.actual was {actual!r}"
     assert isinstance(actual, int) and not isinstance(actual, bool), (
-        f"actual must be the original int, got {type(actual).__name__}: {actual!r}"
+        f"failure_detail.actual has type {type(actual).__name__}"
     )
-
-    message = field(detail, "message")
-    assert isinstance(message, str) and message.strip(), detail

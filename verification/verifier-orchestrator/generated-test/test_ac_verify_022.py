@@ -7,204 +7,154 @@ def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-GLOSSARY = (
-    "# Glossary\n"
-    "\n"
-    "- **Bump** \u2014 a test term.\n"
-)
-
-PRODUCT = (
-    "---\n"
-    "id: P-BAR\n"
-    "title: Bar capability\n"
-    "status: draft\n"
-    "owners: [team-a]\n"
-    "---\n"
-    "\n"
-    "# Bar capability\n"
-    "\n"
-    "## Purpose\n"
-    "\n"
-    "Bar bumps a number by one.\n"
-    "\n"
-    "## Scope\n"
-    "\n"
-    "- In scope: bumping a number.\n"
-    "- Out of scope: everything else.\n"
-)
-
-COMPONENT = (
-    "---\n"
-    "id: comp-bar\n"
-    "title: Bar\n"
-    "status: draft\n"
-    "owners: [team-a]\n"
-    "depends_on: []\n"
-    "realizes: [P-BAR]\n"
-    "---\n"
-    "\n"
-    "# Bar\n"
-    "\n"
-    "## Purpose\n"
-    "\n"
-    "Bar bumps a number by one.\n"
-    "\n"
-    "## Scope\n"
-    "\n"
-    "- In scope: bumping a number.\n"
-    "- Out of scope: everything else.\n"
-    "\n"
-    "## Definitions\n"
-    "\n"
-    "None.\n"
-    "\n"
-    "## Behavior\n"
-    "\n"
-    "See `requirements/`.\n"
-    "\n"
-    "## Interfaces\n"
-    "\n"
-    "See `interface/`.\n"
-    "\n"
-    "## Data\n"
-    "\n"
-    "See `interface/data/`.\n"
-    "\n"
-    "## Acceptance criteria\n"
-    "\n"
-    "See `acceptance/`.\n"
-    "\n"
-    "## Non-functional constraints\n"
-    "\n"
-    "See `constraints.md`.\n"
-    "\n"
-    "## Open questions\n"
-    "\n"
-    "## Change log\n"
-    "\n"
-    "- Initial draft.\n"
-)
-
-REQUIREMENT = (
-    "# R-BAR-001\n"
-    "\n"
-    "**R-BAR-001** \u2014 `bump(x)` MUST return `x + 1`.\n"
-)
-
-ACCEPTANCE = (
-    "# AC-BAR-001\n"
-    "\n"
-    "Covers: R-BAR-001\n"
-    "Kind: generated-test\n"
-    "\n"
-    "```gherkin\n"
-    "Given x = 2\n"
-    "When bump(x) is called\n"
-    "Then it returns 3\n"
-    "```\n"
-)
-
-LIBRARY = (
-    "# Library\n"
-    "\n"
-    "```\n"
-    "bump(x: int) -> int\n"
-    "```\n"
-)
-
-CONSTRAINTS = (
-    "# Constraints\n"
-    "\n"
-    "None.\n"
-)
-
-GEN_MODULE = (
-    "def bump(x):\n"
-    "    return x + 1\n"
-)
-
-GENERATED_TEST = (
-    "import sys\n"
-    "\n"
-    "sys.path.insert(0, \"gen/bar\")\n"
-    "\n"
-    "import bar\n"
-    "\n"
-    "\n"
-    "def test_bump_increments():\n"
-    "    assert bar.bump(2) == 3\n"
-    "    assert bar.bump(10) == 11\n"
-    "    assert bar.bump(-1) == 0\n"
-    "    assert bar.bump(0) == 1\n"
-    "    assert type(bar.bump(2)) is int\n"
-)
-
-TEST_REL_PATH = "verification/bar/generated-test/test_ac_bar_001.py"
-
-
-def write(path: Path, text: str):
+def _write(path: Path, text: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
 
 
-def build_fixture(repo_root: Path):
-    write(repo_root / "specs" / "glossary.md", GLOSSARY)
-    write(repo_root / "specs" / "product" / "P-BAR.md", PRODUCT)
-    comp = repo_root / "specs" / "components" / "bar"
-    write(comp / "component.md", COMPONENT)
-    write(comp / "requirements" / "R-BAR-001.md", REQUIREMENT)
-    write(comp / "acceptance" / "AC-BAR-001.md", ACCEPTANCE)
-    write(comp / "interface" / "library.md", LIBRARY)
-    write(comp / "constraints.md", CONSTRAINTS)
+GENERATED_TEST = (
+    "import widget\n"
+    "\n"
+    "\n"
+    "def test_triple_values():\n"
+    "    assert widget.triple(0) == 0\n"
+    "    assert widget.triple(1) == 3\n"
+    "    assert widget.triple(2) == 6\n"
+    "    assert widget.triple(3) == 9\n"
+    "    assert widget.triple(7) == 21\n"
+    "    assert widget.triple(-4) == -12\n"
+    "    assert type(widget.triple(2)) is int\n"
+)
 
-    gen_dir = (repo_root / "gen" / "bar").resolve()
-    write(gen_dir / "bar.py", GEN_MODULE)
+GENERATED_TEST_REL = "verification/widget/generated-test/test_ac_widget_001.py"
 
-    # Hand-written conftest above the generated tests: puts the ABSOLUTE
-    # path of the original gen/bar/ first on sys.path and imports the
-    # original module. If it ran during a mutant's test run, the test
-    # would exercise the unmutated original and every mutant would survive.
-    conftest = (
-        "import sys\n"
-        "\n"
-        "sys.path.insert(0, " + repr(str(gen_dir)) + ")\n"
-        "\n"
-        "import bar  # noqa: F401\n"
+
+def _build_fixture(repo_root: Path) -> None:
+    _write(
+        repo_root / "specs" / "glossary.md",
+        "# Glossary\n\n- **Foo** — a test term.\n",
     )
-    write(repo_root / "verification" / "bar" / "conftest.py", conftest)
 
-    # The cached generated test for AC-BAR-001.
-    write(repo_root / TEST_REL_PATH, GENERATED_TEST)
+    _write(
+        repo_root / "specs" / "product" / "widget-capability.md",
+        "---\n"
+        "id: P-WIDGET\n"
+        "title: Widget capability\n"
+        "status: draft\n"
+        "owners: [team-a]\n"
+        "---\n"
+        "\n"
+        "# Widget capability\n"
+        "\n"
+        "## Purpose\n"
+        "\n"
+        "The system can triple a number.\n"
+        "\n"
+        "## Scope\n"
+        "\n"
+        "- In scope: tripling integers.\n"
+        "\n"
+        "## Capability scenarios\n"
+        "\n"
+        "### CS-WIDGET-001\n"
+        "\n"
+        "Covers: P-WIDGET\n"
+        "Kind: llm-judge\n"
+        "\n"
+        "```gherkin\n"
+        "Given a number 2\n"
+        "When it is tripled\n"
+        "Then the result is 6\n"
+        "```\n",
+    )
+
+    comp = repo_root / "specs" / "components" / "widget"
+    _write(
+        comp / "component.md",
+        "---\n"
+        "id: comp-widget\n"
+        "title: Widget\n"
+        "status: draft\n"
+        "owners: [team-a]\n"
+        "realizes: [P-WIDGET]\n"
+        "depends_on: []\n"
+        "---\n"
+        "\n"
+        "# Widget\n"
+        "\n"
+        "## Purpose\n"
+        "\n"
+        "Widget triples a number.\n",
+    )
+    _write(
+        comp / "requirements" / "R-WIDGET-001.md",
+        "# R-WIDGET-001\n\n**R-WIDGET-001** — `triple(x)` MUST return `3 * x`.\n",
+    )
+    _write(
+        comp / "acceptance" / "AC-WIDGET-001.md",
+        "# AC-WIDGET-001\n"
+        "\n"
+        "Covers: R-WIDGET-001\n"
+        "Kind: generated-test\n"
+        "\n"
+        "```gherkin\n"
+        "Given x = 2\n"
+        "When triple(x) is called\n"
+        "Then it returns 6\n"
+        "```\n",
+    )
+    _write(
+        comp / "interface" / "library.md",
+        "# Library\n\n```\ntriple(x: int) -> int\n```\n",
+    )
+    _write(comp / "constraints.md", "# Constraints\n\nNone.\n")
+
+    # The component's real (unsealed) code: one function, no strings or
+    # docstrings, so no equivalent mutants.
+    gen_dir = repo_root / "gen" / "widget"
+    _write(
+        gen_dir / "widget.py",
+        "def triple(x):\n"
+        "    return x * 3\n",
+    )
+
+    # A hand conftest above the generated tests that would import the
+    # ORIGINAL module first if it were ever loaded during a mutant run.
+    _write(
+        repo_root / "verification" / "widget" / "conftest.py",
+        "import sys\n"
+        "sys.path.insert(0, " + repr(str(gen_dir.resolve())) + ")\n"
+        "import widget  # noqa: E402,F401\n",
+    )
+
+    # The cached generated test (Criterion test filename).
+    _write(repo_root / GENERATED_TEST_REL, GENERATED_TEST)
 
 
-def test_hand_conftest_cannot_rescue_mutants_mutation_score_is_one(tmp_path):
+def _test_author(bundle):
+    # Fallback in case the implementation re-authors rather than using the
+    # cached file: returns the same test, TestAuthoringResult-shaped.
+    return {
+        "component_id": "comp-widget",
+        "criterion_id": "AC-WIDGET-001",
+        "model": "fake-model",
+        "seed": 0,
+        "prompt_version": "v1",
+        "cache_hit": False,
+        "file": {"path": GENERATED_TEST_REL, "content": GENERATED_TEST},
+        "model_call_error": None,
+    }
+
+
+def test_ac_verify_022_conftest_cannot_shield_mutants(tmp_path):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
-    build_fixture(repo_root)
-
-    def test_author(bundle):
-        # Only used if the orchestrator decides to (re)author; returns the
-        # very same test content, in TestAuthoringResult's shape.
-        return {
-            "component_id": "comp-bar",
-            "criterion_id": "AC-BAR-001",
-            "model": "fake-model",
-            "seed": 0,
-            "prompt_version": "v1",
-            "cache_hit": False,
-            "file": {"path": TEST_REL_PATH, "content": GENERATED_TEST},
-            "model_call_error": None,
-        }
+    _build_fixture(repo_root)
 
     report = verifier_orchestrator.verify(
-        "comp-bar", repo_root, judge=None, test_author=test_author
+        "comp-widget", repo_root, test_author=_test_author
     )
 
-    try:
-        detail = report.to_dict()
-    except Exception:  # pragma: no cover - diagnostic only
-        detail = report
-
     score = field(report, "mutation_score")
-    assert score is not None, f"mutation_score is null: {detail!r}"
-    assert float(score) == 1.0, f"expected mutation_score 1.0, got {score!r}: {detail!r}"
+    assert score is not None
+    assert float(score) == 1.0

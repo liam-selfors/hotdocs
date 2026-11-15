@@ -1,16 +1,14 @@
 """AC-VERIFY-014 (Covers: R-VERIFY-013).
 
-Two separate repo_root directories each declare a component with the same
-slug (``gizmo``) but different code. They are verified one after the other
-in the same process. Each call's ``interface_drift`` result and its
-compiled-criterion results must reflect that call's own repo_root's code.
-They must never come from a module cached during the other repo_root's
-earlier call.
+Two separate repo_root directories declare a component with the same
+slug ("widget") but different code. Verifying them one after the other
+in the same process must give each call results that reflect its own
+repo_root's code. Neither call may reuse a module cached by the other
+repo_root's earlier call.
 """
 
+import sys
 from pathlib import Path
-
-import pytest
 
 import verifier_orchestrator
 
@@ -19,66 +17,62 @@ def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-# ---------------------------------------------------------------------------
-# Fixture corpus
-# ---------------------------------------------------------------------------
-
 GLOSSARY = """# Glossary
 
-- **Gizmo** — a test term.
+- **Widget** — a test term.
 """
 
 CAPABILITY = """---
-id: P-GIZMO
-title: Gizmo Arithmetic
+id: P-WIDGET
+title: Widget capability
 status: draft
 owners: [team-a]
 ---
 
-# Gizmo Arithmetic
+# Widget capability
 
 ## Purpose
 
-Lets a caller triple and halve numbers.
+Numbers can be scaled by a fixed factor.
 
 ## Scope
 
-- In scope: tripling and halving integers.
+- In scope: scaling numbers.
 - Out of scope: everything else.
 
 ## Capability scenarios
 
-### CS-GIZMO-001
+### CS-WIDGET-001
 
-Covers: P-GIZMO
-Kind: llm-judge
+Covers: P-WIDGET
+Kind: compiled
 
 ```gherkin
-Given a number is 3
-When triple is invoked with [number]
-Then value equals 9
+Given a n is 2
+When double_it is invoked with [n]
+Then real equals 4
 ```
 """
 
-COMPONENT_MD = """---
-id: comp-gizmo
-title: Gizmo
+COMPONENT = """---
+id: comp-widget
+title: Widget
 status: draft
 owners: [team-a]
 depends_on: []
-realizes: [P-GIZMO]
+realizes: [P-WIDGET]
 ---
 
-# Gizmo
+# Widget
 
 ## Purpose
 
-Gizmo triples and halves numbers.
+Widget scales a number by a fixed factor.
 
 ## Scope
 
-- In scope: tripling and halving integers.
-- Out of scope: any other arithmetic.
+- In scope: doubling and tripling integers.
+- Out of scope: anything else.
 
 ## Definitions
 
@@ -111,84 +105,67 @@ See `constraints.md`.
 - Initial draft.
 """
 
-R_001 = """# R-GIZMO-001
+REQ_001 = """# R-WIDGET-001
 
-**R-GIZMO-001** — `triple(x)` MUST return a dict whose `value` is `3 * x`.
+**R-WIDGET-001** — `double_it(n)` MUST return `2 * n`.
 """
 
-R_002 = """# R-GIZMO-002
+REQ_002 = """# R-WIDGET-002
 
-**R-GIZMO-002** — `halve(x)` MUST return a dict whose `value` is `x // 2`.
+**R-WIDGET-002** — `triple_it(n)` MUST return `3 * n`.
 """
 
-AC_001 = """# AC-GIZMO-001
+AC_001 = """# AC-WIDGET-001
 
-Covers: R-GIZMO-001
+Covers: R-WIDGET-001
 Kind: compiled
 
 ```gherkin
-Given a number is 3
-When triple is invoked with [number]
-Then value equals 9
+Given a n is 2
+When double_it is invoked with [n]
+Then real equals 4
 ```
 """
 
-AC_002 = """# AC-GIZMO-002
+AC_002 = """# AC-WIDGET-002
 
-Covers: R-GIZMO-002
+Covers: R-WIDGET-002
 Kind: compiled
 
 ```gherkin
-Given a number is 8
-When halve is invoked with [number]
-Then value equals 4
+Given a n is 2
+When triple_it is invoked with [n]
+Then real equals 6
 ```
 """
 
-LIBRARY_MD = """# Library
+LIBRARY = """# Library
 
 ```
-triple(x: int) -> dict
-halve(x: int) -> dict
+double_it(n: int) -> int
+triple_it(n: int) -> int
 ```
 """
 
-CONSTRAINTS_MD = """# Constraints
+CONSTRAINTS = """# Constraints
 
 None.
 """
 
-# Code that matches the interface and satisfies both criteria.
-GOOD_CODE = '''class _Result(dict):
-    def __getattr__(self, name):
-        try:
-            return self[name]
-        except KeyError:
-            raise AttributeError(name)
+# Repo A: correct code that matches the declared interface exactly.
+CODE_A = """def double_it(n: int) -> int:
+    return 2 * n
 
 
-def triple(x: int) -> dict:
-    return _Result(value=3 * x)
+def triple_it(n: int) -> int:
+    return 3 * n
+"""
 
-
-def halve(x: int) -> dict:
-    return _Result(value=x // 2)
-'''
-
-# Same slug and module name, but different code. `triple` returns the wrong
-# value and the declared `halve` is missing entirely, so the code has
-# interface drift.
-BAD_CODE = '''class _Result(dict):
-    def __getattr__(self, name):
-        try:
-            return self[name]
-        except KeyError:
-            raise AttributeError(name)
-
-
-def triple(x: int) -> dict:
-    return _Result(value=3 * x + 1)
-'''
+# Repo B: same slug, but double_it is wrong and triple_it is missing.
+# That is behavioral failure plus interface drift.
+CODE_B = """def double_it(n: int) -> int:
+    return 2 * n + 1
+"""
 
 
 def _write(path: Path, text: str) -> None:
@@ -196,64 +173,69 @@ def _write(path: Path, text: str) -> None:
     path.write_text(text, encoding="utf-8")
 
 
-def _make_repo(root: Path, code: str) -> Path:
+def _build_repo(root: Path, code: str) -> Path:
     root.mkdir(parents=True, exist_ok=True)
     _write(root / "specs" / "glossary.md", GLOSSARY)
-    _write(root / "specs" / "product" / "P-GIZMO.md", CAPABILITY)
-    comp = root / "specs" / "components" / "gizmo"
-    _write(comp / "component.md", COMPONENT_MD)
-    _write(comp / "requirements" / "R-GIZMO-001.md", R_001)
-    _write(comp / "requirements" / "R-GIZMO-002.md", R_002)
-    _write(comp / "acceptance" / "AC-GIZMO-001.md", AC_001)
-    _write(comp / "acceptance" / "AC-GIZMO-002.md", AC_002)
-    _write(comp / "interface" / "library.md", LIBRARY_MD)
-    _write(comp / "constraints.md", CONSTRAINTS_MD)
-    _write(root / "gen" / "gizmo" / "gizmo.py", code)
+    _write(root / "specs" / "product" / "widget.md", CAPABILITY)
+    comp = root / "specs" / "components" / "widget"
+    _write(comp / "component.md", COMPONENT)
+    _write(comp / "requirements" / "R-WIDGET-001.md", REQ_001)
+    _write(comp / "requirements" / "R-WIDGET-002.md", REQ_002)
+    _write(comp / "acceptance" / "AC-WIDGET-001.md", AC_001)
+    _write(comp / "acceptance" / "AC-WIDGET-002.md", AC_002)
+    _write(comp / "interface" / "library.md", LIBRARY)
+    _write(comp / "constraints.md", CONSTRAINTS)
+    _write(root / "gen" / "widget" / "widget.py", code)
     return root
 
 
-def _criterion_results(report) -> dict:
-    out = {}
+def _criterion(report, criterion_id):
     for c in field(report, "criteria"):
-        out[field(c, "id")] = field(c, "result")
-    return out
-
-
-def _assert_good(report, label):
-    assert field(report, "interface_drift") is False, (
-        f"{label}: repo with matching code reported interface drift "
-        f"(stale module from the other repo_root?)"
+        if field(c, "id") == criterion_id:
+            return c
+    raise AssertionError(
+        f"criterion {criterion_id} missing from report: {field(report, 'criteria')!r}"
     )
-    results = _criterion_results(report)
-    assert results.get("AC-GIZMO-001") == "pass", (label, results)
-    assert results.get("AC-GIZMO-002") == "pass", (label, results)
 
 
-def _assert_bad(report, label):
-    assert field(report, "interface_drift") is True, (
-        f"{label}: repo whose code lacks declared `halve` reported no "
-        f"interface drift (stale module from the other repo_root?)"
-    )
-    results = _criterion_results(report)
-    assert "AC-GIZMO-001" in results, (label, results)
-    assert "AC-GIZMO-002" in results, (label, results)
-    assert results["AC-GIZMO-001"] != "pass", (label, results)
-    assert results["AC-GIZMO-002"] != "pass", (label, results)
+def _assert_report_for_a(report):
+    assert field(report, "component_id") == "comp-widget"
+    assert field(report, "interface_drift") is False
+    c1 = _criterion(report, "AC-WIDGET-001")
+    c2 = _criterion(report, "AC-WIDGET-002")
+    assert field(c1, "kind") == "compiled"
+    assert field(c2, "kind") == "compiled"
+    assert field(c1, "result") == "pass"
+    assert field(c2, "result") == "pass"
 
 
-@pytest.mark.parametrize("order", ["good_then_bad", "bad_then_good"])
-def test_same_slug_across_repo_roots_never_reuses_cached_module(tmp_path, order):
-    good_root = _make_repo(tmp_path / "repo_good", GOOD_CODE)
-    bad_root = _make_repo(tmp_path / "repo_bad", BAD_CODE)
-    assert good_root != bad_root
+def _assert_report_for_b(report):
+    assert field(report, "component_id") == "comp-widget"
+    assert field(report, "interface_drift") is True
+    c1 = _criterion(report, "AC-WIDGET-001")
+    c2 = _criterion(report, "AC-WIDGET-002")
+    assert field(c1, "kind") == "compiled"
+    assert field(c2, "kind") == "compiled"
+    assert field(c1, "result") == "fail"
+    assert field(c2, "result") == "fail"
 
-    if order == "good_then_bad":
-        first = verifier_orchestrator.verify("comp-gizmo", good_root)
-        _assert_good(first, "first call (good repo)")
-        second = verifier_orchestrator.verify("comp-gizmo", bad_root)
-        _assert_bad(second, "second call (bad repo)")
-    else:
-        first = verifier_orchestrator.verify("comp-gizmo", bad_root)
-        _assert_bad(first, "first call (bad repo)")
-        second = verifier_orchestrator.verify("comp-gizmo", good_root)
-        _assert_good(second, "second call (good repo)")
+
+def test_same_slug_in_two_repo_roots_never_shares_cached_modules(tmp_path):
+    sys.modules.pop("widget", None)
+
+    repo_a = _build_repo(tmp_path / "repo_a", CODE_A)
+    repo_b = _build_repo(tmp_path / "repo_b", CODE_B)
+
+    # First call: repo A, correct code.
+    report_a = verifier_orchestrator.verify("comp-widget", repo_a)
+    _assert_report_for_a(report_a)
+
+    # Second call, same process, same slug, different repo_root. It must
+    # reflect repo B's broken, drifted code, not repo A's cached module.
+    report_b = verifier_orchestrator.verify("comp-widget", repo_b)
+    _assert_report_for_b(report_b)
+
+    # Third call: back to repo A. It must reflect repo A's code again,
+    # not repo B's module from the immediately preceding call.
+    report_a_again = verifier_orchestrator.verify("comp-widget", repo_a)
+    _assert_report_for_a(report_a_again)

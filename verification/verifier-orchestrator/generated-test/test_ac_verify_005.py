@@ -1,90 +1,85 @@
-"""AC-VERIFY-005 (Covers: R-VERIFY-005).
+"""AC-VERIFY-005: a skipped llm-judge finding alone never causes an overall fail.
 
 Given a component where every compiled and generated-test criterion passes,
 its tests kill every mutant (mutation_score 1.0), interface_drift is false,
-and the only llm-judge criterion is skipped
-When verify runs
-Then the overall verdict is pass: a skipped finding alone never causes fail.
+and the only llm-judge criterion is skipped (no judge injected),
+When verify runs,
+Then the overall verdict is pass.
 """
 
 import verifier_orchestrator
 
-import json
 from pathlib import Path
-
-
-COMPONENT_ID = "comp-gizmo"
-SLUG = "gizmo"
-MODULE = "gizmo"
 
 
 def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def _write(root, rel, text):
-    path = Path(root) / rel
+def _write(repo_root, rel, text):
+    path = Path(repo_root) / rel
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
     return path
 
 
+FENCE = "```"
+
 GLOSSARY = """# Glossary
 
-- **Gizmo** — a component that doubles numbers.
+- **Doubling** — multiplying a number by two.
 """
 
 CAPABILITY = """---
-id: P-GIZMO
-title: Gizmo Doubling
+id: P-DOUBLING
+title: Doubling
 status: draft
 owners: [team-a]
 ---
 
-# Gizmo Doubling
+# Doubling
 
 ## Purpose
 
-Users can double a number.
+The system doubles integers.
 
 ## Scope
 
-- In scope: doubling an integer.
+- In scope: doubling integers.
 - Out of scope: everything else.
 
 ## Capability scenarios
 
-### CS-GIZMO-001
+### CS-DOUBLING-001
 
-Covers: P-GIZMO
-Kind: generated-test
+Covers: P-DOUBLING
+Kind: compiled
 
-```gherkin
-Given a number
-When the system doubles it
-Then the system reports twice that number
-```
-"""
+""" + FENCE + """gherkin
+Given a n is 3
+When double_value is invoked with [n]
+Then value equals 6
+""" + FENCE + "\n"
 
 COMPONENT_MD = """---
-id: comp-gizmo
-title: Gizmo
+id: comp-doubler
+title: Doubler
 status: draft
 owners: [team-a]
 depends_on: []
-realizes: [P-GIZMO]
+realizes: [P-DOUBLING]
 ---
 
-# Gizmo
+# Doubler
 
 ## Purpose
 
-Gizmo doubles a number and returns the doubled value wrapped in a record.
+Doubler doubles an integer and returns the doubled value.
 
 ## Scope
 
-- In scope: doubling an integer.
-- Out of scope: any other arithmetic.
+- In scope: doubling one integer.
+- Out of scope: everything else.
 
 ## Definitions
 
@@ -112,76 +107,68 @@ See `constraints.md`.
 
 ## Open questions
 
+None.
+
 ## Change log
 
 - Initial draft.
 """
 
-R1 = """# R-GIZMO-001
+R_001 = """# R-DOUBLER-001
 
-**R-GIZMO-001** — `double(x)` MUST return a `Doubled` whose `value` is `2 * x`.
+**R-DOUBLER-001** — `double_value(x)` MUST return an object whose `value` attribute is `2 * x`.
 """
 
-R2 = """# R-GIZMO-002
+R_002 = """# R-DOUBLER-002
 
-**R-GIZMO-002** — The record `double(x)` returns MUST be a `Doubled` instance carrying `value` as an attribute.
+**R-DOUBLER-002** — `double_value(x)` MUST double every integer input, including zero and negative numbers.
 """
 
-R3 = """# R-GIZMO-003
+R_003 = """# R-DOUBLER-003
 
-**R-GIZMO-003** — The interface MUST state the contract of `double` unambiguously.
+**R-DOUBLER-003** — The interface documentation of `double_value` MUST be clear and free of contradiction.
 """
 
-AC1 = """# AC-GIZMO-001
+AC_001 = """# AC-DOUBLER-001
 
-Covers: R-GIZMO-001
+Covers: R-DOUBLER-001
 Kind: compiled
 
-```gherkin
-Given a number is 3
-When double is invoked with [number]
+""" + FENCE + """gherkin
+Given a n is 3
+When double_value is invoked with [n]
 Then value equals 6
-```
-"""
+""" + FENCE + "\n"
 
-AC2 = """# AC-GIZMO-002
+AC_002 = """# AC-DOUBLER-002
 
-Covers: R-GIZMO-002
+Covers: R-DOUBLER-002
 Kind: generated-test
 
-```gherkin
-Given the integer 3
-When double is called with it
-Then it returns a Doubled instance whose value attribute is 6
-```
-"""
+""" + FENCE + """gherkin
+Given any integer x, including zero and negative numbers
+When double_value is called with x
+Then the returned object's value attribute equals twice x
+""" + FENCE + "\n"
 
-AC3 = """# AC-GIZMO-003
+AC_003 = """# AC-DOUBLER-003
 
-Covers: R-GIZMO-003
+Covers: R-DOUBLER-003
 Kind: llm-judge
 
-```gherkin
-Given the gizmo component's interface
-When a reviewer reads the contract of double
-Then the contract is stated unambiguously
-```
-"""
+""" + FENCE + """gherkin
+Given the interface documentation of double_value
+When a reviewer reads it
+Then it is clear and free of contradiction
+""" + FENCE + "\n"
 
 LIBRARY_MD = """# Library
 
-```
-double(x: int) -> Doubled
-```
-"""
+""" + FENCE + """
+double_value(x) -> object
+""" + FENCE + """
 
-DOUBLED_MD = """# `Doubled`
-
-```json
-{ "value": 6 }
-```
-
-`value` is twice the input.
+`double_value` returns an object whose `value` attribute is `2 * x`.
 """
 
 CONSTRAINTS_MD = """# Constraints
@@ -189,99 +176,248 @@ CONSTRAINTS_MD = """# Constraints
 None.
 """
 
-GEN_CODE = """class Doubled:
-    def __init__(self, value):
-        self.value = value
+GEN_CODE = """import types as _types
 
 
-def double(x: int) -> Doubled:
-    return Doubled(x * 2)
+def double_value(x) -> object:
+    return _types.SimpleNamespace(value=x * 2)
 """
 
-GEN_TEST_REL = "verification/gizmo/generated-test/test_ac_gizmo_002.py"
+GENERATED_TEST_PATH = "verification/doubler/generated-test/test_ac_doubler_002.py"
 
-GEN_TEST = """import gizmo
+GENERATED_TEST = """import doubler
 
 
-def test_double_returns_doubled_record():
-    result = gizmo.double(3)
-    assert type(result).__name__ == "Doubled"
-    assert result.value == 6
+def test_ac_doubler_002_doubles_every_input():
+    for x, want in [(3, 6), (5, 10), (-4, -8), (7, 14), (0, 0)]:
+        result = doubler.double_value(x)
+        assert result.value == want
+        assert type(result.value) is int
 """
 
-
-def _build_fixture(root):
-    _write(root, "specs/glossary.md", GLOSSARY)
-    _write(root, "specs/product/gizmo.md", CAPABILITY)
-    base = "specs/components/gizmo/"
-    _write(root, base + "component.md", COMPONENT_MD)
-    _write(root, base + "requirements/R-GIZMO-001.md", R1)
-    _write(root, base + "requirements/R-GIZMO-002.md", R2)
-    _write(root, base + "requirements/R-GIZMO-003.md", R3)
-    _write(root, base + "acceptance/AC-GIZMO-001.md", AC1)
-    _write(root, base + "acceptance/AC-GIZMO-002.md", AC2)
-    _write(root, base + "acceptance/AC-GIZMO-003.md", AC3)
-    _write(root, base + "interface/library.md", LIBRARY_MD)
-    _write(root, base + "interface/data/Doubled.md", DOUBLED_MD)
-    _write(root, base + "constraints.md", CONSTRAINTS_MD)
-    # The component's real code: a flat module directly under gen/<slug>/.
-    _write(root, "gen/gizmo/gizmo.py", GEN_CODE)
-    # A cached generated test under the glossary's "Criterion test filename".
-    _write(root, GEN_TEST_REL, GEN_TEST)
+FAKE_ASSEMBLER = '''import hashlib
+from dataclasses import dataclass, field
+from pathlib import Path
 
 
-def _make_test_author(log_path):
+class _ReadOnlyMapping:
+    def __getitem__(self, key):
+        if key not in self.__dataclass_fields__:
+            raise KeyError(key)
+        return getattr(self, key)
+
+    def get(self, key, default=None):
+        if key not in self.__dataclass_fields__:
+            return default
+        return getattr(self, key)
+
+    def keys(self):
+        return list(self.__dataclass_fields__)
+
+    def values(self):
+        return [getattr(self, k) for k in self.__dataclass_fields__]
+
+    def items(self):
+        return [(k, getattr(self, k)) for k in self.__dataclass_fields__]
+
+    def __contains__(self, key):
+        return key in self.__dataclass_fields__
+
+    def __iter__(self):
+        return iter(list(self.__dataclass_fields__))
+
+    def __len__(self):
+        return len(self.__dataclass_fields__)
+
+
+@dataclass
+class SpecBundle(_ReadOnlyMapping):
+    component_id: str
+    spec_bundle_hash: str
+    spec: str
+    interface: str
+    constraints: str
+    dependency_interfaces: dict = field(default_factory=dict)
+    dependency_context: dict = field(default_factory=dict)
+    dependency_usage: dict = field(default_factory=dict)
+    vars: dict = field(default_factory=dict)
+    glossary: str = ""
+    hint_code: object = None
+
+
+@dataclass
+class CriterionBundle(_ReadOnlyMapping):
+    component_id: str
+    criterion_id: str
+    covers: str
+    criterion_text: str
+    requirement_text: str
+    interface: str
+    glossary: str
+    dependency_interfaces: dict = field(default_factory=dict)
+
+
+def _body(path):
+    text = Path(path).read_text(encoding="utf-8")
+    if text.startswith("---\\n"):
+        end = text.find("\\n---", 4)
+        if end != -1:
+            text = text[end + 4:]
+    return text.strip()
+
+
+def _join(texts):
+    return "\\n\\n".join(t for t in (s.strip() for s in texts) if t)
+
+
+def _component_dir(component_id, repo_root):
+    slug = component_id[len("comp-"):] if component_id.startswith("comp-") else component_id
+    cdir = Path(repo_root) / "specs" / "components" / slug
+    if not (cdir / "component.md").is_file():
+        raise ValueError("unknown component id: " + component_id)
+    return cdir
+
+
+def _interface_text(cdir):
+    idir = cdir / "interface"
+    if not idir.is_dir():
+        return ""
+    return _join(_body(p) for p in sorted(idir.rglob("*.md")))
+
+
+def _glossary(repo_root):
+    g = Path(repo_root) / "specs" / "glossary.md"
+    return _body(g) if g.is_file() else ""
+
+
+def assemble(component_id, repo_root, mode="cold"):
+    cdir = _component_dir(component_id, repo_root)
+    reqs = sorted((cdir / "requirements").glob("R-*.md"))
+    spec = _join([_body(cdir / "component.md")] + [_body(p) for p in reqs])
+    interface = _interface_text(cdir)
+    cpath = cdir / "constraints.md"
+    constraints = _body(cpath) if cpath.is_file() else ""
+    glossary = _glossary(repo_root)
+    digest = hashlib.sha256(
+        "\\x00".join([spec, interface, constraints, glossary]).encode("utf-8")
+    ).hexdigest()
+    hint = None
+    if mode == "hint":
+        hint = {}
+        gdir = Path(repo_root) / "gen" / cdir.name
+        if gdir.is_dir():
+            for p in sorted(gdir.rglob("*")):
+                if p.is_file():
+                    hint[str(p.relative_to(gdir))] = p.read_text(encoding="utf-8")
+    return SpecBundle(
+        component_id=component_id,
+        spec_bundle_hash="sha256:" + digest,
+        spec=spec,
+        interface=interface,
+        constraints=constraints,
+        dependency_interfaces={},
+        dependency_context={},
+        dependency_usage={},
+        vars={},
+        glossary=glossary,
+        hint_code=hint,
+    )
+
+
+def assemble_criterion(component_id, criterion_id, repo_root):
+    cdir = _component_dir(component_id, repo_root)
+    apath = cdir / "acceptance" / (criterion_id + ".md")
+    if not apath.is_file():
+        raise ValueError("unknown criterion id: " + criterion_id)
+    text = apath.read_text(encoding="utf-8")
+    covers = ""
+    for line in text.splitlines():
+        if line.startswith("Covers:"):
+            covers = line[len("Covers:"):].strip()
+            break
+    rpath = cdir / "requirements" / (covers + ".md")
+    requirement_text = _body(rpath) if rpath.is_file() else ""
+    return CriterionBundle(
+        component_id=component_id,
+        criterion_id=criterion_id,
+        covers=covers,
+        criterion_text=text.strip(),
+        requirement_text=requirement_text,
+        interface=_interface_text(cdir),
+        glossary=_glossary(repo_root),
+        dependency_interfaces={},
+    )
+'''
+
+
+def _build_fixture(repo_root):
+    _write(repo_root, "specs/glossary.md", GLOSSARY)
+    _write(repo_root, "specs/product/doubling.md", CAPABILITY)
+    base = "specs/components/doubler/"
+    _write(repo_root, base + "component.md", COMPONENT_MD)
+    _write(repo_root, base + "requirements/R-DOUBLER-001.md", R_001)
+    _write(repo_root, base + "requirements/R-DOUBLER-002.md", R_002)
+    _write(repo_root, base + "requirements/R-DOUBLER-003.md", R_003)
+    _write(repo_root, base + "acceptance/AC-DOUBLER-001.md", AC_001)
+    _write(repo_root, base + "acceptance/AC-DOUBLER-002.md", AC_002)
+    _write(repo_root, base + "acceptance/AC-DOUBLER-003.md", AC_003)
+    _write(repo_root, base + "interface/library.md", LIBRARY_MD)
+    _write(repo_root, base + "constraints.md", CONSTRAINTS_MD)
+    # The component's real (unsealed) code.
+    _write(repo_root, "gen/doubler/doubler.py", GEN_CODE)
+    # A cached generated-test for the generated-test criterion (R-VERIFY-002).
+    _write(repo_root, GENERATED_TEST_PATH, GENERATED_TEST)
+    # Fake spec-bundle-assembler, flat-module shape, matching its documented interface.
+    _write(
+        repo_root,
+        "gen/spec-bundle-assembler/spec_bundle_assembler.py",
+        FAKE_ASSEMBLER,
+    )
+
+
+def _test_author(bundle):
     # Fallback only: the cached test above should make this unnecessary.
-    # If called, it returns the same passing test in TestAuthoringResult shape.
-    def test_author(bundle):
-        try:
-            criterion_id = bundle["criterion_id"]
-        except Exception:
-            criterion_id = getattr(bundle, "criterion_id", "AC-GIZMO-002")
-        with open(log_path, "a", encoding="utf-8") as fh:
-            fh.write(json.dumps({"criterion_id": criterion_id}) + "\n")
+    criterion_id = field(bundle, "criterion_id")
+    if criterion_id == "AC-DOUBLER-002":
         return {
-            "component_id": COMPONENT_ID,
-            "criterion_id": criterion_id,
-            "model": "fake-model",
-            "seed": 0,
-            "prompt_version": "v1",
-            "cache_hit": False,
-            "file": {"path": GEN_TEST_REL, "content": GEN_TEST},
             "model_call_error": None,
+            "file": {"path": GENERATED_TEST_PATH, "content": GENERATED_TEST},
         }
+    return {"model_call_error": "unexpected criterion " + str(criterion_id), "file": None}
 
-    return test_author
 
-
-def test_skipped_llm_judge_alone_does_not_fail_overall(tmp_path):
+def test_skipped_llm_judge_alone_does_not_fail_overall(tmp_path, monkeypatch):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
     _build_fixture(repo_root)
-    log_path = tmp_path / "test_author_calls.jsonl"
+    monkeypatch.chdir(repo_root)
 
-    # judge omitted: every llm-judge criterion reports skipped.
+    # No judge injected: every llm-judge criterion reports skipped.
     report = verifier_orchestrator.verify(
-        COMPONENT_ID, repo_root, test_author=_make_test_author(log_path)
+        "comp-doubler", repo_root, test_author=_test_author
     )
 
-    criteria = {field(c, "id"): c for c in field(report, "criteria")}
-    detail = json.dumps(
-        {k: dict(v) if isinstance(v, dict) else str(v) for k, v in criteria.items()},
-        default=str,
-        indent=1,
-    )
+    as_dict = report.to_dict() if hasattr(report, "to_dict") else report
+    criteria = field(report, "criteria")
+    by_id = {field(c, "id"): c for c in criteria}
 
-    # Preconditions of the Given clause.
-    assert set(criteria) == {"AC-GIZMO-001", "AC-GIZMO-002", "AC-GIZMO-003"}, detail
-    assert field(criteria["AC-GIZMO-001"], "kind") == "compiled", detail
-    assert field(criteria["AC-GIZMO-001"], "result") == "pass", detail
-    assert field(criteria["AC-GIZMO-002"], "kind") == "generated-test", detail
-    assert field(criteria["AC-GIZMO-002"], "result") == "pass", detail
-    assert field(criteria["AC-GIZMO-003"], "kind") == "llm-judge", detail
-    assert field(criteria["AC-GIZMO-003"], "result") == "skipped", detail
-    assert field(report, "interface_drift") is False, detail
+    # Given: the scenario the criterion describes actually holds.
+    assert set(by_id) == {"AC-DOUBLER-001", "AC-DOUBLER-002", "AC-DOUBLER-003"}, as_dict
+    assert field(by_id["AC-DOUBLER-001"], "kind") == "compiled", as_dict
+    assert field(by_id["AC-DOUBLER-002"], "kind") == "generated-test", as_dict
+    assert field(by_id["AC-DOUBLER-003"], "kind") == "llm-judge", as_dict
 
-    # Then: the overall verdict is pass, a skipped finding alone never fails it.
-    assert field(report, "overall") == "pass", detail
-    assert report.to_dict()["overall"] == "pass"
+    for c in criteria:
+        if field(c, "kind") in ("compiled", "generated-test"):
+            assert field(c, "result") == "pass", as_dict
+
+    llm_judge = [c for c in criteria if field(c, "kind") == "llm-judge"]
+    assert len(llm_judge) == 1, as_dict
+    assert field(llm_judge[0], "result") == "skipped", as_dict
+
+    assert field(report, "interface_drift") is False, as_dict
+    assert field(report, "mutation_score") == 1.0, as_dict
+
+    # Then: the overall verdict is pass — a skipped finding alone never fails it.
+    assert field(report, "overall") == "pass", as_dict
+    assert field(as_dict, "overall") == "pass", as_dict

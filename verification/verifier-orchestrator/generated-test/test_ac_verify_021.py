@@ -1,3 +1,5 @@
+"""AC-VERIFY-021 (Covers: R-VERIFY-018): verifier-orchestrator's main(argv) CLI."""
+
 import json
 from pathlib import Path
 
@@ -11,24 +13,56 @@ GLOSSARY = """# Glossary
 - **Foo** — a test term.
 """
 
-COMPONENT_MD = """---
+PRODUCT = """---
+id: P-FOO
+title: Foo capability
+status: draft
+owners: [team-a]
+---
+
+# Foo capability
+
+## Purpose
+
+Boxes a doubled number.
+
+## Scope
+
+- In scope: boxing a doubled number.
+- Out of scope: everything else.
+
+## Capability scenarios
+
+### CS-FOO-001
+
+Covers: P-FOO
+Kind: generated-test
+
+```gherkin
+Given the number 3
+When it is boxed
+Then the box holds 6
+```
+"""
+
+COMPONENT = """---
 id: comp-foo
 title: Foo
 status: draft
 owners: [team-a]
-depends_on: []
 realizes: [P-FOO]
+depends_on: []
 ---
 
 # Foo
 
 ## Purpose
 
-Foo doubles a number.
+Foo boxes a doubled number.
 
 ## Scope
 
-- In scope: doubling a number.
+- In scope: boxing a doubled number.
 - Out of scope: everything else.
 
 ## Definitions
@@ -45,7 +79,7 @@ See `interface/`.
 
 ## Data
 
-See `interface/data/`.
+None.
 
 ## Acceptance criteria
 
@@ -62,173 +96,149 @@ See `constraints.md`.
 - Initial draft.
 """
 
-PRODUCT_MD = """---
-id: P-FOO
-title: Foo capability
-status: draft
-owners: [team-a]
----
+REQUIREMENT = """# R-FOO-001
 
-# Foo capability
+**R-FOO-001** — `make_box(n)` MUST return an object whose `value` is `2 * n`.
+"""
 
-## Purpose
+ACCEPTANCE = """# AC-FOO-001
 
-Doubling numbers.
-
-## Scope
-
-- In scope: doubling numbers.
-
-## Capability scenarios
-
-### CS-FOO-001
-
-Covers: P-FOO
+Covers: R-FOO-001
 Kind: compiled
 
 ```gherkin
-Given a n is 2
-When double is invoked with n
-Then value equals 4
+Given a number is 3
+When make_box is invoked with [number]
+Then value equals 6
 ```
 """
 
-REQUIREMENT_MD = """# R-FOO-001
-
-**R-FOO-001** — `double(x)` MUST return a `Doubled` whose `value` is `2 * x`.
-"""
-
-LIBRARY_MD = """# Library
+LIBRARY = """# Library
 
 ```
-double(x: int) -> Doubled
+make_box(n: int) -> object
 ```
 """
 
-DOUBLED_MD = """# `Doubled`
-
-```json
-{ "value": 4 }
-```
-"""
-
-CONSTRAINTS_MD = """# Constraints
+CONSTRAINTS = """# Constraints
 
 None.
 """
 
-GEN_FOO_PY = """from dataclasses import dataclass
+PASSING_CODE = '''"""Foo boxes a doubled number."""
+
+import types as _types
 
 
-@dataclass
-class Doubled:
-    value: int
+def make_box(n: int) -> object:
+    """Return an object whose value is 2 * n."""
+    return _types.SimpleNamespace(value=2 * n)
+'''
+
+FAILING_CODE = '''"""Foo boxes a doubled number."""
+
+import types as _types
 
 
-def double(x: int) -> Doubled:
-    return Doubled(value=2 * x)
-"""
+def make_box(n: int) -> object:
+    """Return an object whose value is 2 * n."""
+    return _types.SimpleNamespace(value=n + 1)
+'''
 
 
-def acceptance_md(expected):
-    return (
-        "# AC-FOO-001\n"
-        "\n"
-        "Covers: R-FOO-001\n"
-        "Kind: compiled\n"
-        "\n"
-        "```gherkin\n"
-        "Given a n is 2\n"
-        "When double is invoked with n\n"
-        "Then value equals " + str(expected) + "\n"
-        "```\n"
-    )
-
-
-def write(path, text):
+def _write(path: Path, text: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
 
 
-def build_repo(root, expected):
-    write(root / "specs" / "glossary.md", GLOSSARY)
-    write(root / "specs" / "product" / "foo.md", PRODUCT_MD)
+def _build_repo(root: Path, code: str) -> Path:
+    _write(root / "specs" / "glossary.md", GLOSSARY)
+    _write(root / "specs" / "product" / "foo.md", PRODUCT)
     comp = root / "specs" / "components" / "foo"
-    write(comp / "component.md", COMPONENT_MD)
-    write(comp / "requirements" / "R-FOO-001.md", REQUIREMENT_MD)
-    write(comp / "interface" / "library.md", LIBRARY_MD)
-    write(comp / "interface" / "data" / "Doubled.md", DOUBLED_MD)
-    write(comp / "acceptance" / "AC-FOO-001.md", acceptance_md(expected))
-    write(comp / "constraints.md", CONSTRAINTS_MD)
-    write(root / "gen" / "foo" / "foo.py", GEN_FOO_PY)
+    _write(comp / "component.md", COMPONENT)
+    _write(comp / "requirements" / "R-FOO-001.md", REQUIREMENT)
+    _write(comp / "acceptance" / "AC-FOO-001.md", ACCEPTANCE)
+    _write(comp / "interface" / "library.md", LIBRARY)
+    _write(comp / "constraints.md", CONSTRAINTS)
+    _write(root / "gen" / "foo" / "foo.py", code)
     return root
 
 
-def field(value, name):
+def _field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def parse_json_output(out):
-    start = out.find("{")
-    assert start != -1, "no JSON object in output: %r" % out
-    obj, _ = json.JSONDecoder().raw_decode(out[start:])
-    return obj
+def _run(argv):
+    try:
+        return verifier_orchestrator.main(argv)
+    except SystemExit as exc:  # tolerate a usage path that exits with the code
+        code = exc.code
+        return code if isinstance(code, int) else (0 if code is None else 2)
 
 
-def test_passing_component_json_and_text(tmp_path, monkeypatch, capsys):
-    root = build_repo(tmp_path / "repo", 4)
-    monkeypatch.chdir(tmp_path)
-
-    rc_json = verifier_orchestrator.main(
-        ["comp-foo", "--repo-root=" + str(root), "--format=json"]
-    )
-    out_json = capsys.readouterr().out
-    assert rc_json == 0
-    report = parse_json_output(out_json)
-    assert report["overall"] == "pass"
-
-    rc_text = verifier_orchestrator.main(
-        ["comp-foo", "--repo-root", str(root), "--format", "text"]
-    )
-    out_text = capsys.readouterr().out
-    assert rc_text == 0
-    lines = out_text.splitlines()
-    assert "comp-foo: pass" in [l.strip() for l in lines], out_text
-    idx = [l.strip() for l in lines].index("comp-foo: pass")
-    assert lines[idx] == "comp-foo: pass"
-    following = lines[idx + 1:]
-    assert following, "no criterion lines after header: %r" % out_text
-    criterion_line = following[0]
-    assert criterion_line[:1].isspace(), "criterion line not indented: %r" % criterion_line
-    assert criterion_line.strip() == "AC-FOO-001: pass"
+@pytest.fixture
+def passing_root(tmp_path, monkeypatch):
+    root = _build_repo(tmp_path / "pass_repo", PASSING_CODE)
+    work = tmp_path / "cwd"
+    work.mkdir()
+    monkeypatch.chdir(work)
+    return root
 
 
-def test_failing_component_returns_1(tmp_path, monkeypatch, capsys):
-    root = build_repo(tmp_path / "repo", 5)
-    monkeypatch.chdir(tmp_path)
+@pytest.fixture
+def failing_root(tmp_path, monkeypatch):
+    root = _build_repo(tmp_path / "fail_repo", FAILING_CODE)
+    work = tmp_path / "cwd"
+    work.mkdir()
+    monkeypatch.chdir(work)
+    return root
 
-    rc = verifier_orchestrator.main(["comp-foo", "--repo-root=" + str(root)])
+
+def test_json_equals_form_passes(passing_root, capsys):
     capsys.readouterr()
-    assert rc == 1
+    code = _run(["comp-foo", f"--repo-root={passing_root}", "--format=json"])
+    out = capsys.readouterr().out
+    assert code == 0, out
+    report = json.loads(out.strip())
+    assert _field(report, "overall") == "pass"
+
+
+def test_text_separate_form_passes(passing_root, capsys):
+    capsys.readouterr()
+    code = _run(["comp-foo", "--repo-root", str(passing_root), "--format", "text"])
+    out = capsys.readouterr().out
+    assert code == 0, out
+    lines = [line for line in out.splitlines() if line.strip()]
+    assert lines, out
+    assert lines[0] == "comp-foo: pass"
+    criterion_lines = lines[1:]
+    assert criterion_lines, out
+    for line in criterion_lines:
+        assert line[:1].isspace(), f"criterion line not indented: {line!r}"
+    assert any(line.strip() == "AC-FOO-001: pass" for line in criterion_lines), out
+
+
+def test_failing_criterion_returns_1(failing_root, capsys):
+    capsys.readouterr()
+    code = _run(["comp-foo", f"--repo-root={failing_root}"])
+    out = capsys.readouterr().out
+    assert code == 1, out
 
 
 @pytest.mark.parametrize(
     "case",
-    ["no-args", "bogus-format", "unknown-arg", "repo-root-last", "unknown-component"],
+    ["no-args", "bogus-format", "unknown-arg", "repo-root-last", "no-component"],
 )
-def test_usage_errors_return_2(tmp_path, monkeypatch, capsys, case):
-    root = build_repo(tmp_path / "repo", 4)
-    monkeypatch.chdir(tmp_path)
-
-    argv = {
+def test_usage_errors_return_2(passing_root, capsys, case):
+    argvs = {
         "no-args": [],
-        "bogus-format": ["comp-foo", "--repo-root=" + str(root), "--format=bogus"],
-        "unknown-arg": ["comp-foo", "--repo-root=" + str(root), "--wat"],
+        "bogus-format": ["comp-foo", f"--repo-root={passing_root}", "--format=bogus"],
+        "unknown-arg": ["comp-foo", f"--repo-root={passing_root}", "--bogus-flag"],
         "repo-root-last": ["comp-foo", "--repo-root"],
-        "unknown-component": ["comp-nope", "--repo-root=" + str(root)],
-    }[case]
-
-    rc = verifier_orchestrator.main(argv)
-    err = capsys.readouterr().err
-    assert rc == 2
-    assert "hotdocs verify-component" in err
+        "no-component": ["comp-nope", f"--repo-root={passing_root}"],
+    }
+    capsys.readouterr()
+    code = _run(argvs[case])
+    captured = capsys.readouterr()
+    assert code == 2, (case, captured.out, captured.err)
+    assert "hotdocs verify-component" in captured.err, (case, captured.err)

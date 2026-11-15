@@ -1,3 +1,25 @@
+"""AC-VERIFY-015 (Covers: R-VERIFY-006).
+
+Given a component with two generated-test-kind criteria, each testing a
+different one of two functions in the same module, each test covering its
+own function fully, when verify runs, then the reported mutation_score
+reflects the union of both tests killing mutants (high), never either
+test's own isolated score against the whole module (which would be far
+lower).
+
+Fixture design: the module `mathkit` has exactly six mutation sites under
+the four permitted operators (no numeric constants are ever mutated, and the
+module contains no boolean constants, `is`, or `in`):
+
+    scale_sum: `a + b`, `(...) * c`, `(...) - a`        -> 3 mutants
+    in_range:  `n >= lo`, `n < hi`, `... and ...`       -> 3 mutants
+
+AC-MATHKIT-001's test kills exactly the three scale_sum mutants, and
+AC-MATHKIT-002's test kills exactly the three in_range mutants. Either
+test's isolated score against the whole module is therefore 3/6 = 0.5,
+while the union score is 6/6 = 1.0.
+"""
+
 import verifier_orchestrator
 
 from pathlib import Path
@@ -7,28 +29,23 @@ def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def _write(path, text):
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text, encoding="utf-8")
-
-
 GLOSSARY = """# Glossary
 
 - **Foo** — a test term.
 """
 
-PRODUCT = """---
-id: P-CALC
-title: Calc capability
+CAPABILITY = """---
+id: P-MATHKIT
+title: Math kit
 status: draft
 owners: [team-a]
 ---
 
-# Calc capability
+# Math kit
 
 ## Purpose
 
-Calc computes small arithmetic and classification results.
+Provides small arithmetic helpers.
 
 ## Scope
 
@@ -37,36 +54,36 @@ Calc computes small arithmetic and classification results.
 
 ## Capability scenarios
 
-### CS-CALC-001
+### CS-MATHKIT-001
 
-Covers: P-CALC
-Kind: llm-judge
+Covers: P-MATHKIT
+Kind: compiled
 
 ```gherkin
-Given a pair of numbers
-When the calc capability is used
-Then a result is returned
+Given a n is 5
+When mathkit.in_range is invoked with [5, 0, 10]
+Then result equals true
 ```
 """
 
 COMPONENT = """---
-id: comp-calc
-title: Calc
+id: comp-mathkit
+title: Math kit
 status: draft
 owners: [team-a]
+realizes: [P-MATHKIT]
 depends_on: []
-realizes: [P-CALC]
 ---
 
-# Calc
+# Math kit
 
 ## Purpose
 
-Calc combines two numbers and checks a number against a flag.
+Math kit provides two small arithmetic helpers.
 
 ## Scope
 
-- In scope: the `combine` and `check` functions.
+- In scope: the two helpers.
 - Out of scope: anything else.
 
 ## Definitions
@@ -100,47 +117,45 @@ See `constraints.md`.
 - Initial draft.
 """
 
-REQ_1 = """# R-CALC-001
+R1 = """# R-MATHKIT-001
 
-**R-CALC-001** — `combine(a, b)` MUST compute `total = a + b` and return
-`total * b` when `total > a`, otherwise `total // b`.
+**R-MATHKIT-001** — `scale_sum(a, b, c)` MUST return `(a + b) * c - a`.
 """
 
-REQ_2 = """# R-CALC-002
+R2 = """# R-MATHKIT-002
 
-**R-CALC-002** — `check(x, flag)` MUST return `True` when `x == 0` or
-`flag` is true, otherwise whether `x < 5`.
+**R-MATHKIT-002** — `in_range(n, lo, hi)` MUST return whether `lo <= n < hi`.
 """
 
-AC_1 = """# AC-CALC-001
+AC1 = """# AC-MATHKIT-001
 
-Covers: R-CALC-001
+Covers: R-MATHKIT-001
 Kind: generated-test
 
 ```gherkin
-Given two numbers a and b
-When combine is called with them
-Then it returns the combined value described by R-CALC-001
+Given numbers a = 2, b = 5 and c = 3
+When scale_sum(a, b, c) is called
+Then it returns 19
 ```
 """
 
-AC_2 = """# AC-CALC-002
+AC2 = """# AC-MATHKIT-002
 
-Covers: R-CALC-002
+Covers: R-MATHKIT-002
 Kind: generated-test
 
 ```gherkin
-Given a number x and a flag
-When check is called with them
-Then it returns the classification described by R-CALC-002
+Given a bound lo = 0 and hi = 10
+When in_range(n, lo, hi) is called for several n
+Then it is true exactly for lo <= n < hi
 ```
 """
 
 LIBRARY = """# Library
 
 ```
-combine(a: int, b: int) -> int
-check(x: int, flag: bool) -> bool
+scale_sum(a: int, b: int, c: int) -> int
+in_range(n: int, lo: int, hi: int) -> bool
 ```
 """
 
@@ -149,74 +164,90 @@ CONSTRAINTS = """# Constraints
 None.
 """
 
-# Exactly eight mutation sites: four in combine, four in check.
-MODULE = """def combine(a, b):
-    total = a + b
-    if total > a:
-        return total * b
-    return total // b
+MODULE = """def scale_sum(a, b, c):
+    return (a + b) * c - a
 
 
-def check(x, flag):
-    if x == 0 or flag:
-        return True
-    return x < 5
+def in_range(n, lo, hi):
+    return n >= lo and n < hi
 """
 
-# Kills all four combine mutants; never calls check.
-TEST_1 = """import calc
+IMPORT_PRELUDE = """import sys
+from pathlib import Path
 
-
-def test_combine_fully():
-    assert calc.combine(2, 3) == 15
-    assert calc.combine(4, -2) == -1
+try:
+    import mathkit
+except ImportError:
+    sys.path.append(str(Path(__file__).resolve().parents[3] / "gen" / "mathkit"))
+    import mathkit
 """
 
-# Kills all four check mutants; never calls combine.
-TEST_2 = """import calc
+TEST1 = IMPORT_PRELUDE + """
 
-
-def test_check_fully():
-    assert calc.check(7, False) == False
-    assert calc.check(7, True) == True
-    assert calc.check(0, False) == True
+def test_scale_sum():
+    assert mathkit.scale_sum(2, 5, 3) == 19
+    assert mathkit.scale_sum(1, 1, 1) == 1
+    assert mathkit.scale_sum(4, 2, 2) == 8
 """
 
-TESTS = {
-    "AC-CALC-001": ("verification/calc/generated-test/test_ac_calc_001.py", TEST_1),
-    "AC-CALC-002": ("verification/calc/generated-test/test_ac_calc_002.py", TEST_2),
+TEST2 = IMPORT_PRELUDE + """
+
+def test_in_range():
+    assert mathkit.in_range(5, 0, 10)
+    assert mathkit.in_range(0, 0, 10)
+    assert not mathkit.in_range(-1, 0, 10)
+    assert not mathkit.in_range(10, 0, 10)
+    assert not mathkit.in_range(11, 0, 10)
+"""
+
+CACHED_TESTS = {
+    "AC-MATHKIT-001": TEST1,
+    "AC-MATHKIT-002": TEST2,
 }
 
 
-def _build_fixture(repo_root: Path):
+def _write(path: Path, text: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+
+
+def _test_filename(criterion_id: str) -> str:
+    return "test_" + criterion_id.lower().replace("-", "_") + ".py"
+
+
+def _build_fixture(repo_root: Path) -> None:
     _write(repo_root / "specs" / "glossary.md", GLOSSARY)
-    _write(repo_root / "specs" / "product" / "calc.md", PRODUCT)
-    comp = repo_root / "specs" / "components" / "calc"
+    _write(repo_root / "specs" / "product" / "P-MATHKIT.md", CAPABILITY)
+    comp = repo_root / "specs" / "components" / "mathkit"
     _write(comp / "component.md", COMPONENT)
-    _write(comp / "requirements" / "R-CALC-001.md", REQ_1)
-    _write(comp / "requirements" / "R-CALC-002.md", REQ_2)
-    _write(comp / "acceptance" / "AC-CALC-001.md", AC_1)
-    _write(comp / "acceptance" / "AC-CALC-002.md", AC_2)
+    _write(comp / "requirements" / "R-MATHKIT-001.md", R1)
+    _write(comp / "requirements" / "R-MATHKIT-002.md", R2)
+    _write(comp / "acceptance" / "AC-MATHKIT-001.md", AC1)
+    _write(comp / "acceptance" / "AC-MATHKIT-002.md", AC2)
     _write(comp / "interface" / "library.md", LIBRARY)
     _write(comp / "constraints.md", CONSTRAINTS)
-    _write(repo_root / "gen" / "calc" / "calc.py", MODULE)
-    for rel, content in TESTS.values():
-        _write(repo_root / rel, content)
+    _write(repo_root / "gen" / "mathkit" / "mathkit.py", MODULE)
+    gt_dir = repo_root / "verification" / "mathkit" / "generated-test"
+    for cid, content in CACHED_TESTS.items():
+        _write(gt_dir / _test_filename(cid), content)
 
 
 def _fake_test_author(bundle):
-    # Fallback only: the tests are already cached, but if the orchestrator
-    # dispatches anyway it receives the very same test content.
-    cid = field(bundle, "criterion_id")
-    rel, content = TESTS[cid]
+    # Fallback only: each criterion already has a cached test, so this should
+    # not normally be called. If it is, it returns the same tests, in
+    # test-author's documented TestAuthoringResult shape.
+    cid = bundle["criterion_id"] if isinstance(bundle, dict) else getattr(bundle, "criterion_id")
     return {
-        "component_id": "comp-calc",
+        "component_id": "comp-mathkit",
         "criterion_id": cid,
         "model": "fake-model",
         "seed": 0,
         "prompt_version": "v1",
         "cache_hit": False,
-        "file": {"path": rel, "content": content},
+        "file": {
+            "path": "verification/mathkit/generated-test/" + _test_filename(cid),
+            "content": CACHED_TESTS[cid],
+        },
         "model_call_error": None,
     }
 
@@ -227,28 +258,29 @@ def test_mutation_score_is_union_across_generated_test_criteria(tmp_path):
     _build_fixture(repo_root)
 
     report = verifier_orchestrator.verify(
-        "comp-calc", repo_root, test_author=_fake_test_author
+        "comp-mathkit", repo_root, test_author=_fake_test_author
     )
 
+    # Both generated-test criteria are reported, and each test passes
+    # against the unmutated module.
     criteria = field(report, "criteria")
     by_id = {c["id"]: c for c in criteria}
-    assert "AC-CALC-001" in by_id and "AC-CALC-002" in by_id
-    # Both tests pass against the unmutated module (sanity: they really ran).
-    assert by_id["AC-CALC-001"]["result"] == "pass", by_id["AC-CALC-001"]
-    assert by_id["AC-CALC-002"]["result"] == "pass", by_id["AC-CALC-002"]
+    assert "AC-MATHKIT-001" in by_id
+    assert "AC-MATHKIT-002" in by_id
+    assert by_id["AC-MATHKIT-001"]["kind"] == "generated-test"
+    assert by_id["AC-MATHKIT-002"]["kind"] == "generated-test"
+    assert by_id["AC-MATHKIT-001"]["result"] == "pass"
+    assert by_id["AC-MATHKIT-002"]["result"] == "pass"
 
     score = field(report, "mutation_score")
+
+    # Exactly one number for the whole component.
     assert score is not None
     assert isinstance(score, (int, float)) and not isinstance(score, bool)
 
-    # Each test alone kills only its own function's 4 of the 8 mutants,
-    # i.e. an isolated (or averaged) score against the whole module is 0.5.
-    # The union of both tests kills all 8.
-    assert score > 0.5, (
-        "mutation_score %r looks like an isolated/averaged per-test score, "
-        "not the union across both generated-test files" % (score,)
-    )
-    assert 0.9 <= score <= 1.0, (
-        "expected the union mutation score to be high (all mutants killed by "
-        "some test), got %r" % (score,)
-    )
+    # Either test alone, against the whole module, kills 3 of 6 mutants.
+    isolated_score = 3 / 6
+    # Their union kills all 6.
+    assert score > isolated_score
+    assert score >= 0.8
+    assert abs(score - 1.0) < 1e-9

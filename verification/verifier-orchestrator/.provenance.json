@@ -1,9 +1,9 @@
 {
-  "spec_bundle_hash": "sha256:1b81ff222c9f33c1f31c3ffa36156da6694a40866496a1163757ac6d213431c6",
+  "spec_bundle_hash": "sha256:384b7528ef3f8b4508557a01670bcbae49986314b8d64ef9b7f72580c59f35c8",
   "model_pin": "claude-opus-5-5",
   "prompt_version": "v10",
   "retry_feedback": null,
-  "pipeline_version": "provenance-writer@1.0.0",
+  "pipeline_version": "v1",
   "gate_versions": {
     "compiler": "criterion-compiler@1.0.0",
     "generated_test": "generated_test@1.0.0",
@@ -12,7 +12,7 @@
     "secret_scanner": "secret_scanner@3.1.0+detect-secrets.1.5.0"
   },
   "provenance_hit": false,
-  "generated_at": "2026-11-15T19:17:37Z",
+  "generated_at": "2026-11-15T22:02:08Z",
   "verification_run_id": "verifier-orchestrator-attempt-1",
   "verification_report": {
     "component_id": "comp-verifier-orchestrator",
@@ -24,7 +24,7 @@
         "result": "pass",
         "test_authoring": {
           "model": "claude-opus-5-5",
-          "seed": 12,
+          "seed": 13,
           "prompt_version": "v1",
           "cache_hit": false
         }
@@ -36,7 +36,7 @@
         "result": "pass",
         "test_authoring": {
           "model": "claude-opus-5-5",
-          "seed": 12,
+          "seed": 13,
           "prompt_version": "v1",
           "cache_hit": false
         }
@@ -48,7 +48,7 @@
         "result": "pass",
         "test_authoring": {
           "model": "claude-opus-5-5",
-          "seed": 12,
+          "seed": 13,
           "prompt_version": "v1",
           "cache_hit": false
         }
@@ -60,7 +60,7 @@
         "result": "pass",
         "test_authoring": {
           "model": "claude-opus-5-5",
-          "seed": 12,
+          "seed": 13,
           "prompt_version": "v1",
           "cache_hit": false
         }
@@ -72,7 +72,7 @@
         "result": "pass",
         "test_authoring": {
           "model": "claude-opus-5-5",
-          "seed": 12,
+          "seed": 13,
           "prompt_version": "v1",
           "cache_hit": false
         }
@@ -84,7 +84,7 @@
         "result": "pass",
         "test_authoring": {
           "model": "claude-opus-5-5",
-          "seed": 12,
+          "seed": 13,
           "prompt_version": "v1",
           "cache_hit": false
         }
@@ -96,7 +96,7 @@
         "result": "pass",
         "test_authoring": {
           "model": "claude-opus-5-5",
-          "seed": 12,
+          "seed": 13,
           "prompt_version": "v1",
           "cache_hit": false
         }
@@ -108,7 +108,7 @@
         "result": "pass",
         "test_authoring": {
           "model": "claude-opus-5-5",
-          "seed": 12,
+          "seed": 13,
           "prompt_version": "v1",
           "cache_hit": false
         }
@@ -120,7 +120,7 @@
         "result": "pass",
         "test_authoring": {
           "model": "claude-opus-5-5",
-          "seed": 12,
+          "seed": 13,
           "prompt_version": "v1",
           "cache_hit": false
         }
@@ -132,7 +132,7 @@
         "result": "pass",
         "test_authoring": {
           "model": "claude-opus-5-5",
-          "seed": 12,
+          "seed": 13,
           "prompt_version": "v1",
           "cache_hit": false
         }
@@ -144,7 +144,7 @@
         "result": "pass",
         "test_authoring": {
           "model": "claude-opus-5-5",
-          "seed": 12,
+          "seed": 13,
           "prompt_version": "v1",
           "cache_hit": false
         }
@@ -156,7 +156,7 @@
         "result": "pass",
         "test_authoring": {
           "model": "claude-opus-5-5",
-          "seed": 12,
+          "seed": 13,
           "prompt_version": "v1",
           "cache_hit": false
         }
@@ -168,7 +168,7 @@
         "result": "pass",
         "test_authoring": {
           "model": "claude-opus-5-5",
-          "seed": 12,
+          "seed": 13,
           "prompt_version": "v1",
           "cache_hit": false
         }
@@ -180,7 +180,7 @@
         "result": "pass",
         "test_authoring": {
           "model": "claude-opus-5-5",
-          "seed": 12,
+          "seed": 13,
           "prompt_version": "v1",
           "cache_hit": false
         }
@@ -192,7 +192,7 @@
         "result": "pass",
         "test_authoring": {
           "model": "claude-opus-5-5",
-          "seed": 12,
+          "seed": 13,
           "prompt_version": "v1",
           "cache_hit": false
         }
@@ -204,7 +204,7 @@
         "result": "pass",
         "test_authoring": {
           "model": "claude-opus-5-5",
-          "seed": 12,
+          "seed": 13,
           "prompt_version": "v1",
           "cache_hit": false
         }
@@ -216,7 +216,7 @@
         "result": "pass",
         "test_authoring": {
           "model": "claude-opus-5-5",
-          "seed": 12,
+          "seed": 13,
           "prompt_version": "v1",
           "cache_hit": false
         }
@@ -228,7 +228,7 @@
         "result": "pass",
         "test_authoring": {
           "model": "claude-opus-5-5",
-          "seed": 12,
+          "seed": 13,
           "prompt_version": "v1",
           "cache_hit": false
         }
@@ -240,7 +240,7 @@
         "result": "pass",
         "test_authoring": {
           "model": "claude-opus-5-5",
-          "seed": 12,
+          "seed": 13,
           "prompt_version": "v1",
           "cache_hit": false
         }
@@ -252,7 +252,7 @@
         "result": "pass",
         "test_authoring": {
           "model": "claude-opus-5-5",
-          "seed": 12,
+          "seed": 13,
           "prompt_version": "v1",
           "cache_hit": false
         }
@@ -264,7 +264,7 @@
         "result": "pass",
         "test_authoring": {
           "model": "claude-opus-5-5",
-          "seed": 12,
+          "seed": 13,
           "prompt_version": "v1",
           "cache_hit": false
         }
@@ -276,7 +276,7 @@
         "result": "pass",
         "test_authoring": {
           "model": "claude-opus-5-5",
-          "seed": 12,
+          "seed": 13,
           "prompt_version": "v1",
           "cache_hit": false
         }

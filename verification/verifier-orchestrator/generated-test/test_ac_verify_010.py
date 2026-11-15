@@ -1,11 +1,6 @@
-"""AC-VERIFY-010 (Covers: R-VERIFY-010).
-
-Given a component with one generated-test-kind criterion, no cached test,
-  and no test_author configured
-When verify runs
-Then that criterion's result is fail, not skipped, and the overall verdict
-  is fail
-"""
+"""AC-VERIFY-010: a generated-test criterion with no cached test and no
+test_author configured is recorded as ``fail`` (not ``skipped``), and the
+overall verdict is ``fail`` (R-VERIFY-010)."""
 
 import json
 from pathlib import Path
@@ -13,13 +8,53 @@ from pathlib import Path
 import verifier_orchestrator
 
 
+COMPONENT_ID = "comp-widget"
+SLUG = "widget"
+CRITERION_ID = "AC-WIDGET-001"
+REQUIREMENT_ID = "R-WIDGET-001"
+
+
 def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
+
+
+def _write(path, text):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
 
 
 GLOSSARY = """# Glossary
 
 - **Widget** — a test term.
+"""
+
+PRODUCT = """---
+id: P-WIDGET
+title: Widget Capability
+status: draft
+owners: [team-a]
+---
+
+# Widget Capability
+
+## Purpose
+
+Doubling numbers.
+
+## Scope
+
+- In scope: doubling a number.
+
+### CS-WIDGET-001
+
+Covers: P-WIDGET
+Kind: compiled
+
+```gherkin
+Given a x is 2
+When widget.double is invoked with [x]
+Then result equals 4
+```
 """
 
 COMPONENT_MD = """---
@@ -39,7 +74,7 @@ Widget doubles a number.
 
 ## Scope
 
-- In scope: doubling an integer.
+- In scope: doubling a number.
 - Out of scope: everything else.
 
 ## Definitions
@@ -73,12 +108,12 @@ See `constraints.md`.
 - Initial draft.
 """
 
-REQUIREMENT_MD = """# R-WIDGET-001
+REQUIREMENT = """# R-WIDGET-001
 
 **R-WIDGET-001** — `double(x)` MUST return `2 * x`.
 """
 
-ACCEPTANCE_MD = """# AC-WIDGET-001
+ACCEPTANCE = """# AC-WIDGET-001
 
 Covers: R-WIDGET-001
 Kind: generated-test
@@ -90,163 +125,250 @@ Then it returns 4
 ```
 """
 
-LIBRARY_MD = """# Library
+LIBRARY = """# Library
 
 ```
 double(x: int) -> int
 ```
 """
 
-CONSTRAINTS_MD = """# Constraints
+CONSTRAINTS = """# Constraints
 
 None.
 """
 
-PRODUCT_MD = """---
-id: P-WIDGET
-title: Widget Doubling
-status: draft
-owners: [team-a]
----
-
-# Widget Doubling
-
-## Purpose
-
-Numbers can be doubled.
-
-## Scope
-
-- In scope: doubling an integer.
-
-## Capability scenarios
-
-### CS-WIDGET-001
-
-Covers: P-WIDGET
-Kind: llm-judge
-
-```gherkin
-Given a number
-When it is doubled
-Then the result is twice the number
-```
+GEN_MODULE = """def double(x):
+    return 2 * x
 """
 
-GEN_WIDGET = '''def double(x):
-    return 2 * x
-'''
-
-FAKE_ASSEMBLER = '''import json
+FAKE_ASSEMBLER = r'''
+import dataclasses
+import hashlib
+import re
 from pathlib import Path
 
-_LOG = {log_path!r}
+
+def _strip_frontmatter(text):
+    if text.startswith("---\n"):
+        end = text.find("\n---", 4)
+        if end != -1:
+            nl = text.find("\n", end + 4)
+            return text[nl + 1:] if nl != -1 else ""
+    return text
 
 
-def _log(record):
-    with open(_LOG, "a", encoding="utf-8") as fh:
-        fh.write(json.dumps(record) + "\\n")
+def _join(parts):
+    return "\n\n".join(p.strip() for p in parts if p and p.strip())
 
 
-class _Bundle(dict):
-    def __getattr__(self, name):
+def _slug(component_id):
+    return component_id[len("comp-"):] if component_id.startswith("comp-") else component_id
+
+
+class _MappingMixin:
+    def __getitem__(self, key):
         try:
-            return self[name]
-        except KeyError:
-            raise AttributeError(name)
+            return getattr(self, key)
+        except AttributeError:
+            raise KeyError(key)
+
+    def get(self, key, default=None):
+        return getattr(self, key, default)
+
+    def keys(self):
+        return [f.name for f in dataclasses.fields(self)]
+
+    def __iter__(self):
+        return iter(self.keys())
+
+    def __len__(self):
+        return len(self.keys())
+
+    def __contains__(self, key):
+        return key in self.keys()
 
 
-def _read(path):
-    p = Path(path)
-    return p.read_text(encoding="utf-8") if p.is_file() else ""
+@dataclasses.dataclass
+class SpecBundle(_MappingMixin):
+    component_id: str
+    spec_bundle_hash: str
+    spec: str
+    interface: str
+    constraints: str
+    dependency_interfaces: dict = dataclasses.field(default_factory=dict)
+    dependency_context: dict = dataclasses.field(default_factory=dict)
+    dependency_usage: dict = dataclasses.field(default_factory=dict)
+    vars: dict = dataclasses.field(default_factory=dict)
+    glossary: str = ""
+    hint_code: object = None
+
+
+@dataclasses.dataclass
+class CriterionBundle(_MappingMixin):
+    component_id: str
+    criterion_id: str
+    covers: str
+    criterion_text: str
+    requirement_text: str
+    interface: str
+    glossary: str
+    dependency_interfaces: dict = dataclasses.field(default_factory=dict)
+
+
+def _component_dir(component_id, repo_root):
+    return Path(repo_root) / "specs" / "components" / _slug(component_id)
+
+
+def _interface_text(cdir):
+    idir = cdir / "interface"
+    parts = []
+    if idir.is_dir():
+        for p in sorted(idir.rglob("*.md")):
+            parts.append(p.read_text(encoding="utf-8"))
+    return _join(parts)
+
+
+def _glossary(repo_root):
+    g = Path(repo_root) / "specs" / "glossary.md"
+    return g.read_text(encoding="utf-8").strip() if g.is_file() else ""
 
 
 def assemble(component_id, repo_root, mode="cold"):
-    _log({{"fn": "assemble", "component_id": component_id, "mode": mode}})
-    root = Path(repo_root)
-    base = root / "specs" / "components" / "widget"
-    return _Bundle(
+    cdir = _component_dir(component_id, repo_root)
+    spec_parts = [_strip_frontmatter((cdir / "component.md").read_text(encoding="utf-8"))]
+    rdir = cdir / "requirements"
+    if rdir.is_dir():
+        for p in sorted(rdir.glob("R-*.md")):
+            spec_parts.append(p.read_text(encoding="utf-8"))
+    spec = _join(spec_parts)
+    interface = _interface_text(cdir)
+    cpath = cdir / "constraints.md"
+    constraints = cpath.read_text(encoding="utf-8").strip() if cpath.is_file() else ""
+    glossary = _glossary(repo_root)
+    digest = hashlib.sha256(
+        "\0".join([spec, interface, constraints, glossary]).encode("utf-8")
+    ).hexdigest()
+    hint_code = None
+    if mode == "hint":
+        hint_code = {}
+        gdir = Path(repo_root) / "gen" / _slug(component_id)
+        if gdir.is_dir():
+            for p in sorted(gdir.rglob("*")):
+                if p.is_file():
+                    hint_code[str(p.relative_to(gdir))] = p.read_text(encoding="utf-8")
+    return SpecBundle(
         component_id=component_id,
-        spec_bundle_hash="sha256:" + "0" * 64,
-        spec=_read(base / "component.md") + "\\n\\n" + _read(base / "requirements" / "R-WIDGET-001.md"),
-        interface=_read(base / "interface" / "library.md"),
-        constraints=_read(base / "constraints.md"),
-        dependency_interfaces={{}},
-        dependency_context={{}},
-        dependency_usage={{}},
-        vars={{}},
-        glossary=_read(root / "specs" / "glossary.md"),
-        hint_code=None,
+        spec_bundle_hash="sha256:" + digest,
+        spec=spec,
+        interface=interface,
+        constraints=constraints,
+        glossary=glossary,
+        hint_code=hint_code,
     )
 
 
 def assemble_criterion(component_id, criterion_id, repo_root):
-    _log({{"fn": "assemble_criterion", "component_id": component_id, "criterion_id": criterion_id}})
-    root = Path(repo_root)
-    base = root / "specs" / "components" / "widget"
-    return _Bundle(
+    cdir = _component_dir(component_id, repo_root)
+    text = (cdir / "acceptance" / (criterion_id + ".md")).read_text(encoding="utf-8")
+    m = re.search(r"Covers:\s*(\S+)", text)
+    covers = m.group(1) if m else ""
+    g = re.search(r"```gherkin\n(.*?)```", text, re.S)
+    criterion_text = g.group(1).strip() if g else text.strip()
+    rpath = cdir / "requirements" / (covers + ".md")
+    requirement_text = rpath.read_text(encoding="utf-8").strip() if rpath.is_file() else ""
+    return CriterionBundle(
         component_id=component_id,
         criterion_id=criterion_id,
-        covers="R-WIDGET-001",
-        criterion_text=_read(base / "acceptance" / "AC-WIDGET-001.md"),
-        requirement_text=_read(base / "requirements" / "R-WIDGET-001.md"),
-        interface=_read(base / "interface" / "library.md"),
-        glossary=_read(root / "specs" / "glossary.md"),
-        dependency_interfaces={{}},
+        covers=covers,
+        criterion_text=criterion_text,
+        requirement_text=requirement_text,
+        interface=_interface_text(cdir),
+        glossary=_glossary(repo_root),
     )
 '''
 
 
-def _write(path: Path, text: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text, encoding="utf-8")
-
-
-def _build_fixture(repo_root: Path, log_path: Path) -> None:
+def _build_fixture(repo_root):
+    repo_root = Path(repo_root)
     _write(repo_root / "specs" / "glossary.md", GLOSSARY)
-    _write(repo_root / "specs" / "product" / "widget.md", PRODUCT_MD)
-    comp = repo_root / "specs" / "components" / "widget"
-    _write(comp / "component.md", COMPONENT_MD)
-    _write(comp / "requirements" / "R-WIDGET-001.md", REQUIREMENT_MD)
-    _write(comp / "acceptance" / "AC-WIDGET-001.md", ACCEPTANCE_MD)
-    _write(comp / "interface" / "library.md", LIBRARY_MD)
-    _write(comp / "constraints.md", CONSTRAINTS_MD)
-    _write(repo_root / "gen" / "widget" / "widget.py", GEN_WIDGET)
+    _write(repo_root / "specs" / "product" / "widget.md", PRODUCT)
+    cdir = repo_root / "specs" / "components" / SLUG
+    _write(cdir / "component.md", COMPONENT_MD)
+    _write(cdir / "requirements" / f"{REQUIREMENT_ID}.md", REQUIREMENT)
+    _write(cdir / "acceptance" / f"{CRITERION_ID}.md", ACCEPTANCE)
+    _write(cdir / "interface" / "library.md", LIBRARY)
+    _write(cdir / "constraints.md", CONSTRAINTS)
+    # The component's real generated code.
+    _write(repo_root / "gen" / SLUG / "widget.py", GEN_MODULE)
+    # Fake spec-bundle-assembler, flat-module shape, planted at repo_root.
     _write(
         repo_root / "gen" / "spec-bundle-assembler" / "spec_bundle_assembler.py",
-        FAKE_ASSEMBLER.format(log_path=str(log_path)),
+        FAKE_ASSEMBLER,
     )
+    return repo_root
+
+
+def _assert_no_cached_test(repo_root):
+    cached = (
+        Path(repo_root)
+        / "verification"
+        / SLUG
+        / "generated-test"
+        / "test_ac_widget_001.py"
+    )
+    assert not cached.exists()
+
+
+def _find_criterion(criteria):
+    matches = [c for c in criteria if field(c, "id") == CRITERION_ID]
+    assert len(matches) == 1, f"expected exactly one {CRITERION_ID} entry, got {criteria!r}"
+    return matches[0]
 
 
 def test_unauthored_generated_test_criterion_fails_not_skipped(tmp_path):
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    log_path = tmp_path / "assembler_calls.log"
-    _build_fixture(repo_root, log_path)
+    repo_root = _build_fixture(tmp_path / "repo")
+    _assert_no_cached_test(repo_root)
 
-    # Precondition: no cached generated test exists for the criterion.
-    cached = repo_root / "verification" / "widget" / "generated-test" / "test_ac_widget_001.py"
-    assert not cached.exists()
-
-    report = verifier_orchestrator.verify("comp-widget", repo_root, test_author=None)
+    report = verifier_orchestrator.verify(COMPONENT_ID, repo_root)
 
     criteria = field(report, "criteria")
-    matching = [c for c in criteria if field(c, "id") == "AC-WIDGET-001"]
-    assert len(matching) == 1, f"expected exactly one AC-WIDGET-001 entry, got {criteria!r}"
-    entry = matching[0]
-
+    entry = _find_criterion(criteria)
     assert field(entry, "kind") == "generated-test"
-    assert field(entry, "result") != "skipped"
-    assert field(entry, "result") == "fail"
-
+    result = field(entry, "result")
+    assert result != "skipped"
+    assert result == "fail"
     assert field(report, "overall") == "fail"
 
-    # The JSON form agrees with the attribute form.
-    as_dict = report.to_dict()
-    json.dumps(as_dict)
-    assert as_dict["overall"] == "fail"
-    dict_entry = [c for c in as_dict["criteria"] if c["id"] == "AC-WIDGET-001"][0]
-    assert dict_entry["result"] == "fail"
 
-    # Still no cached test was fabricated as a side effect of a skipped author.
-    assert "test_authoring" not in dict_entry
+def test_unauthored_generated_test_criterion_fails_explicit_none(tmp_path):
+    repo_root = _build_fixture(tmp_path / "repo")
+    _assert_no_cached_test(repo_root)
+
+    report = verifier_orchestrator.verify(
+        COMPONENT_ID, repo_root, judge=None, test_author=None
+    )
+
+    entry = _find_criterion(field(report, "criteria"))
+    assert field(entry, "result") == "fail"
+    assert field(report, "overall") == "fail"
+
+    as_dict = report.to_dict()
+    dict_entry = _find_criterion(as_dict["criteria"])
+    assert dict_entry["result"] == "fail"
+    assert as_dict["overall"] == "fail"
+
+
+def test_cli_reports_fail_for_unauthored_generated_test(tmp_path, capsys):
+    repo_root = _build_fixture(tmp_path / "repo")
+    _assert_no_cached_test(repo_root)
+
+    code = verifier_orchestrator.main(
+        [COMPONENT_ID, f"--repo-root={repo_root}", "--format=json"]
+    )
+    out = capsys.readouterr().out
+
+    assert code == 1
+    data = json.loads(out)
+    entry = _find_criterion(data["criteria"])
+    assert entry["result"] == "fail"
+    assert data["overall"] == "fail"

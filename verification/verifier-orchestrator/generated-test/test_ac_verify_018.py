@@ -1,22 +1,24 @@
-import verifier_orchestrator
-
 import json
 from pathlib import Path
 
-
-CRITERION_ID = "AC-FOO-003b"
+import verifier_orchestrator
 
 
 def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def bundle_field(bundle, name):
-    if isinstance(bundle, dict):
-        return bundle[name]
-    if hasattr(bundle, name):
-        return getattr(bundle, name)
-    return bundle[name]
+def _get(value, name):
+    if isinstance(value, dict):
+        return value.get(name)
+    try:
+        return getattr(value, name)
+    except AttributeError:
+        pass
+    try:
+        return value[name]
+    except Exception:
+        return None
 
 
 def _write(path: Path, text: str) -> None:
@@ -25,118 +27,107 @@ def _write(path: Path, text: str) -> None:
 
 
 FAKE_ASSEMBLER_TEMPLATE = '''import json
-import hashlib
+from pathlib import Path
 
-_LOG_PATH = {log_path!r}
+_LOG = {log_path!r}
 
 
 def _log(record):
-    with open(_LOG_PATH, "a", encoding="utf-8") as fh:
+    with open(_LOG, "a", encoding="utf-8") as fh:
         fh.write(json.dumps(record) + "\\n")
 
 
-class _MappingRecord:
-    _fields = ()
+class _Bundle:
+    def __init__(self, **kwargs):
+        self._fields = dict(kwargs)
+        for k, v in kwargs.items():
+            setattr(self, k, v)
 
     def __getitem__(self, key):
-        if key not in self._fields:
-            raise KeyError(key)
-        return getattr(self, key)
+        return self._fields[key]
 
     def get(self, key, default=None):
-        if key in self._fields:
-            return getattr(self, key)
-        return default
+        return self._fields.get(key, default)
 
     def keys(self):
-        return list(self._fields)
-
-    def items(self):
-        return [(k, getattr(self, k)) for k in self._fields]
-
-    def values(self):
-        return [getattr(self, k) for k in self._fields]
+        return self._fields.keys()
 
     def __iter__(self):
         return iter(self._fields)
 
-    def __contains__(self, key):
-        return key in self._fields
-
     def __len__(self):
         return len(self._fields)
 
-    def to_dict(self):
-        return {{k: getattr(self, k) for k in self._fields}}
 
-
-class SpecBundle(_MappingRecord):
-    _fields = (
-        "component_id", "spec_bundle_hash", "spec", "interface", "constraints",
-        "dependency_interfaces", "dependency_context", "dependency_usage",
-        "vars", "glossary", "hint_code",
-    )
-
-    def __init__(self, **kw):
-        for k in self._fields:
-            setattr(self, k, kw.get(k))
-
-
-class CriterionBundle(_MappingRecord):
-    _fields = (
-        "component_id", "criterion_id", "covers", "criterion_text",
-        "requirement_text", "interface", "glossary", "dependency_interfaces",
-    )
-
-    def __init__(self, **kw):
-        for k in self._fields:
-            setattr(self, k, kw.get(k))
-
-
-_INTERFACE = "# Library\\n\\n```\\ndouble(x: int) -> int\\n```"
+def _slug(component_id):
+    return component_id[len("comp-"):] if component_id.startswith("comp-") else component_id
 
 
 def assemble(component_id, repo_root, mode="cold"):
     _log({{"fn": "assemble", "component_id": component_id, "mode": mode}})
-    digest = hashlib.sha256(("fake:" + str(component_id)).encode("utf-8")).hexdigest()
-    return SpecBundle(
+    return _Bundle(
         component_id=component_id,
-        spec_bundle_hash="sha256:" + digest,
-        spec="# Foo\\n\\n## Purpose\\n\\nFoo doubles a number.",
-        interface=_INTERFACE,
-        constraints="# Constraints\\n\\nNone.",
+        spec_bundle_hash="sha256:" + "0" * 64,
+        spec="spec",
+        interface="# Library\\n\\n```\\ndouble(x: int) -> int\\n```",
+        constraints="None.",
         dependency_interfaces={{}},
         dependency_context={{}},
         dependency_usage={{}},
         vars={{}},
-        glossary="# Glossary\\n\\n- **Foo** \\u2014 a test term.",
+        glossary="",
         hint_code=None,
     )
 
 
 def assemble_criterion(component_id, criterion_id, repo_root):
-    _log({{"fn": "assemble_criterion", "component_id": component_id,
-           "criterion_id": criterion_id}})
-    return CriterionBundle(
+    _log({{"fn": "assemble_criterion", "component_id": component_id, "criterion_id": criterion_id}})
+    base = Path(repo_root) / "specs" / "components" / _slug(component_id)
+    criterion_text = ""
+    acc = base / "acceptance" / (str(criterion_id) + ".md")
+    if acc.is_file():
+        criterion_text = acc.read_text(encoding="utf-8")
+    return _Bundle(
         component_id=component_id,
         criterion_id=criterion_id,
         covers="R-FOO-003",
-        criterion_text="Given x is 2\\nWhen double is invoked with 2\\nThen result equals 4",
-        requirement_text="**R-FOO-003** \\u2014 `double(x)` MUST return `2 * x`.",
-        interface=_INTERFACE,
-        glossary="# Glossary\\n\\n- **Foo** \\u2014 a test term.",
+        criterion_text=criterion_text,
+        requirement_text="**R-FOO-003** — `double(x)` MUST return `2 * x`.",
+        interface="# Library\\n\\n```\\ndouble(x: int) -> int\\n```",
+        glossary="",
         dependency_interfaces={{}},
     )
+'''
+
+
+GENERATED_TEST_CONTENT = '''import importlib.util
+import sys
+from pathlib import Path
+
+
+def _load():
+    root = Path(__file__).resolve().parents[3]
+    path = root / "gen" / "foo" / "foo.py"
+    spec = importlib.util.spec_from_file_location("foo_under_test_ac_foo_003b", path)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules["foo_under_test_ac_foo_003b"] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_double():
+    module = _load()
+    assert module.double(2) == 4
 '''
 
 
 def _build_fixture(repo_root: Path, assembler_log: Path) -> None:
     _write(
         repo_root / "specs" / "glossary.md",
-        "# Glossary\n\n- **Foo** \u2014 a test term.\n",
+        "# Glossary\n\n- **Foo** — a test term.\n",
     )
     _write(
-        repo_root / "specs" / "product" / "P-FOO.md",
+        repo_root / "specs" / "product" / "foo-capability.md",
         "---\n"
         "id: P-FOO\n"
         "title: Foo Capability\n"
@@ -152,14 +143,13 @@ def _build_fixture(repo_root: Path, assembler_log: Path) -> None:
         "\n"
         "## Scope\n"
         "\n"
-        "- In scope: doubling.\n"
+        "- Doubling.\n"
         "\n"
         "## Capability scenarios\n"
         "\n"
         "### CS-FOO-001\n"
-        "\n"
         "Covers: P-FOO\n"
-        "Kind: compiled\n"
+        "Kind: generated-test\n"
         "\n"
         "```gherkin\n"
         "Given x is 2\n"
@@ -221,7 +211,7 @@ def _build_fixture(repo_root: Path, assembler_log: Path) -> None:
     )
     _write(
         comp / "requirements" / "R-FOO-003.md",
-        "# R-FOO-003\n\n**R-FOO-003** \u2014 `double(x)` MUST return `2 * x`.\n",
+        "# R-FOO-003\n\n**R-FOO-003** — `double(x)` MUST return `2 * x`.\n",
     )
     _write(
         comp / "acceptance" / "AC-FOO-003b.md",
@@ -231,9 +221,9 @@ def _build_fixture(repo_root: Path, assembler_log: Path) -> None:
         "Kind: generated-test\n"
         "\n"
         "```gherkin\n"
-        "Given x is 2\n"
-        "When double is invoked with 2\n"
-        "Then result equals 4\n"
+        "Given a number x of 2\n"
+        "When double is called with x\n"
+        "Then it returns 4\n"
         "```\n",
     )
     _write(
@@ -242,28 +232,20 @@ def _build_fixture(repo_root: Path, assembler_log: Path) -> None:
     )
     _write(comp / "constraints.md", "# Constraints\n\nNone.\n")
 
+    # The unsealed component's real code.
     _write(
         repo_root / "gen" / "foo" / "foo.py",
         "def double(x):\n    return 2 * x\n",
     )
 
+    # Fake spec-bundle-assembler, flat-module shape.
     _write(
         repo_root / "gen" / "spec-bundle-assembler" / "spec_bundle_assembler.py",
         FAKE_ASSEMBLER_TEMPLATE.format(log_path=str(assembler_log)),
     )
 
 
-def _read_log(path: Path):
-    if not path.is_file():
-        return []
-    return [
-        json.loads(line)
-        for line in path.read_text(encoding="utf-8").splitlines()
-        if line.strip()
-    ]
-
-
-def test_suffixed_criterion_id_taken_exactly_from_heading(tmp_path):
+def test_ac_verify_018_criterion_id_with_letter_suffix_passed_unchanged(tmp_path):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
     logs = tmp_path / "logs"
@@ -274,28 +256,21 @@ def test_suffixed_criterion_id_taken_exactly_from_heading(tmp_path):
     _build_fixture(repo_root, assembler_log)
 
     def test_author(bundle):
-        crit_id = bundle_field(bundle, "criterion_id")
-        comp_id = bundle_field(bundle, "component_id")
+        criterion_id = _get(bundle, "criterion_id")
+        component_id = _get(bundle, "component_id")
         with open(author_log, "a", encoding="utf-8") as fh:
-            fh.write(json.dumps({"criterion_id": crit_id, "component_id": comp_id}) + "\n")
-        content = (
-            "import foo\n"
-            "\n"
-            "\n"
-            "def test_double():\n"
-            "    assert foo.double(2) == 4\n"
-            "    assert foo.double(3) == 6\n"
-        )
+            fh.write(json.dumps({"criterion_id": criterion_id,
+                                 "component_id": component_id}) + "\n")
         return {
-            "component_id": comp_id,
-            "criterion_id": crit_id,
+            "component_id": component_id,
+            "criterion_id": criterion_id,
             "model": "fake-model",
             "seed": 0,
             "prompt_version": "v1",
             "cache_hit": False,
             "file": {
                 "path": "verification/foo/generated-test/test_ac_foo_003b.py",
-                "content": content,
+                "content": GENERATED_TEST_CONTENT,
             },
             "model_call_error": None,
         }
@@ -304,18 +279,22 @@ def test_suffixed_criterion_id_taken_exactly_from_heading(tmp_path):
 
     criteria = field(report, "criteria")
     ids = [field(c, "id") for c in criteria]
-
-    # The criteria entry's id is exactly the heading's id, suffix and case preserved.
-    assert ids == [CRITERION_ID], ids
+    assert "AC-FOO-003b" in ids, f"criteria ids were {ids!r}"
     assert "AC-FOO-003B" not in ids
     assert "ac-foo-003b" not in ids
+    matching = [c for c in criteria if field(c, "id") == "AC-FOO-003b"]
+    assert len(matching) == 1
 
-    # The bundle handed to test_author was assembled for exactly "AC-FOO-003b".
-    assemble_calls = [r for r in _read_log(assembler_log) if r["fn"] == "assemble_criterion"]
-    assert assemble_calls, "assemble_criterion was never called"
-    assert all(r["criterion_id"] == CRITERION_ID for r in assemble_calls), assemble_calls
-    assert all(r["component_id"] == "comp-foo" for r in assemble_calls), assemble_calls
+    # test_author was dispatched with a bundle for exactly "AC-FOO-003b".
+    assert author_log.is_file(), "test_author was never called"
+    author_records = [json.loads(line) for line in author_log.read_text(encoding="utf-8").splitlines() if line.strip()]
+    assert author_records, "test_author was never called"
+    assert all(r["criterion_id"] == "AC-FOO-003b" for r in author_records), author_records
 
-    author_calls = _read_log(author_log)
-    assert author_calls, "test_author was never called"
-    assert all(r["criterion_id"] == CRITERION_ID for r in author_calls), author_calls
+    # The bundle was assembled (via assemble_criterion) for exactly "AC-FOO-003b".
+    assert assembler_log.is_file(), "spec-bundle-assembler fake was never invoked"
+    asm_records = [json.loads(line) for line in assembler_log.read_text(encoding="utf-8").splitlines() if line.strip()]
+    crit_calls = [r for r in asm_records if r.get("fn") == "assemble_criterion"]
+    assert crit_calls, f"assemble_criterion was never called; log: {asm_records!r}"
+    assert [r["criterion_id"] for r in crit_calls] == ["AC-FOO-003b"] * len(crit_calls), crit_calls
+    assert any(r["criterion_id"] == "AC-FOO-003b" for r in crit_calls)

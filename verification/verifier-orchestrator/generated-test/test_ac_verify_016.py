@@ -1,19 +1,12 @@
-import os
-import signal
-import sys
+import verifier_orchestrator
+
+import threading
 import time
 from pathlib import Path
-
-import verifier_orchestrator
 
 
 def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
-
-
-def _write(path, text):
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text, encoding="utf-8")
 
 
 GLOSSARY = """# Glossary
@@ -32,7 +25,7 @@ owners: [team-a]
 
 ## Purpose
 
-Count up to a number.
+Count up from zero to a number.
 
 ## Scope
 
@@ -44,29 +37,29 @@ Count up to a number.
 ### CS-COUNTING-001
 
 Covers: P-COUNTING
-Kind: llm-judge
+Kind: generated-test
 
 ```gherkin
-Given a number
-When it is counted up to
-Then the count equals the number
+Given a number 3
+When counting runs
+Then it reaches 3
 ```
 """
 
 COMPONENT = """---
-id: comp-tally
-title: Tally
+id: comp-counter
+title: Counter
 status: draft
 owners: [team-a]
-realizes: [P-COUNTING]
 depends_on: []
+realizes: [P-COUNTING]
 ---
 
-# Tally
+# Counter
 
 ## Purpose
 
-Tally counts up from zero to a number.
+Counter counts up from zero to a number.
 
 ## Scope
 
@@ -104,20 +97,19 @@ See `constraints.md`.
 - Initial draft.
 """
 
-REQUIREMENT = """# R-TALLY-001
+REQUIREMENT = """# R-COUNTER-001
 
-**R-TALLY-001** — `count_up(x)` MUST count up from zero by one while the
-count is less than `x`, and return the final count.
+**R-COUNTER-001** — `count_to(x)` MUST count up from 0 in steps of 1 while below `x` and return the final count (0 when `x` is at most 0).
 """
 
-ACCEPTANCE = """# AC-TALLY-001
+ACCEPTANCE = """# AC-COUNTER-001
 
-Covers: R-TALLY-001
+Covers: R-COUNTER-001
 Kind: generated-test
 
 ```gherkin
-Given x = 3
-When count_up(x) is called
+Given x is 3
+When count_to(x) is called
 Then it returns 3
 ```
 """
@@ -125,7 +117,7 @@ Then it returns 3
 LIBRARY = """# Library
 
 ```
-count_up(x: int) -> int
+count_to(x: int) -> int
 ```
 """
 
@@ -134,100 +126,114 @@ CONSTRAINTS = """# Constraints
 None.
 """
 
-CANDIDATE = """def count_up(x):
+CANDIDATE = """def count_to(x):
     i = 0
     while i < x:
         i = i + 1
     return i
 """
 
-GENERATED_TEST = """import os
-import sys
-from pathlib import Path
+# The one generated test covering the loop. Imports the module by name so
+# that the PYTHONPATH the runner sets (the mutated copy for a mutant run)
+# wins; the appended relative entry is only a fallback for the unmutated run.
+GENERATED_TEST = """import sys
 
-sys.path.append(os.path.join("gen", "tally"))
-try:
-    sys.path.append(str(Path(__file__).resolve().parents[3] / "gen" / "tally"))
-except IndexError:
-    pass
+sys.path.append("gen/counter")
 
-import tally
+import counter
 
 
-def test_count_up_counts_to_x():
-    assert tally.count_up(3) == 3
-    assert tally.count_up(1) == 1
-    assert tally.count_up(0) == 0
-    assert tally.count_up(-2) == 0
+def test_count_to_three():
+    assert counter.count_to(3) == 3
+
+
+def test_count_to_one():
+    assert counter.count_to(1) == 1
+
+
+def test_count_to_zero():
+    assert counter.count_to(0) == 0
 """
 
 
-def _build_fixture(repo_root):
+def _write(path: Path, text: str):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+
+
+def _build_fixture(repo_root: Path):
     _write(repo_root / "specs" / "glossary.md", GLOSSARY)
     _write(repo_root / "specs" / "product" / "counting.md", PRODUCT)
-    comp = repo_root / "specs" / "components" / "tally"
+    comp = repo_root / "specs" / "components" / "counter"
     _write(comp / "component.md", COMPONENT)
-    _write(comp / "requirements" / "R-TALLY-001.md", REQUIREMENT)
-    _write(comp / "acceptance" / "AC-TALLY-001.md", ACCEPTANCE)
+    _write(comp / "requirements" / "R-COUNTER-001.md", REQUIREMENT)
+    _write(comp / "acceptance" / "AC-COUNTER-001.md", ACCEPTANCE)
     _write(comp / "interface" / "library.md", LIBRARY)
     _write(comp / "constraints.md", CONSTRAINTS)
-    _write(repo_root / "gen" / "tally" / "tally.py", CANDIDATE)
+    _write(repo_root / "gen" / "counter" / "counter.py", CANDIDATE)
     _write(
-        repo_root / "verification" / "tally" / "generated-test" / "test_ac_tally_001.py",
+        repo_root / "verification" / "counter" / "generated-test" / "test_ac_counter_001.py",
         GENERATED_TEST,
     )
 
 
-class _HangGuard(BaseException):
-    pass
+def _fallback_test_author(bundle):
+    # Only used if the cached generated test were somehow not picked up;
+    # returns the same test, in TestAuthoringResult's documented shape.
+    return {
+        "component_id": "comp-counter",
+        "criterion_id": "AC-COUNTER-001",
+        "model": "fake-model",
+        "seed": 0,
+        "prompt_version": "v1",
+        "cache_hit": False,
+        "file": {
+            "path": "verification/counter/generated-test/test_ac_counter_001.py",
+            "content": GENERATED_TEST,
+        },
+        "model_call_error": None,
+    }
 
 
-def test_nonterminating_mutant_times_out_and_counts_as_killed(tmp_path):
+def test_non_terminating_mutant_times_out_and_counts_as_killed(tmp_path):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
     _build_fixture(repo_root)
 
-    use_alarm = hasattr(signal, "SIGALRM")
-    old_handler = None
-    if use_alarm:
-        def _on_alarm(signum, frame):
-            raise _HangGuard("verify did not return (hang guard fired)")
+    outcome = {}
 
-        old_handler = signal.signal(signal.SIGALRM, _on_alarm)
-        signal.alarm(12)
+    def run():
+        try:
+            outcome["report"] = verifier_orchestrator.verify(
+                "comp-counter", repo_root, test_author=_fallback_test_author
+            )
+        except BaseException as exc:  # surfaced to the main thread below
+            outcome["error"] = exc
 
+    worker = threading.Thread(target=run, daemon=True)
     start = time.monotonic()
-    try:
-        report = verifier_orchestrator.verify("comp-tally", repo_root)
-    except _HangGuard as exc:
-        raise AssertionError(
-            "verify did not return within ten seconds: %s" % exc
-        ) from None
-    finally:
-        if use_alarm:
-            signal.alarm(0)
-            signal.signal(signal.SIGALRM, old_handler)
+    worker.start()
+    worker.join(timeout=10.0)
     elapsed = time.monotonic() - start
 
-    assert elapsed < 10, "verify took %.2f seconds, expected under 10" % elapsed
+    # Then: verify returns within ten seconds, despite a mutant
+    # (e.g. `i = i - 1`) that makes the loop never terminate.
+    assert not worker.is_alive(), "verify did not return within ten seconds"
+    assert elapsed < 10.0, f"verify took {elapsed:.2f}s"
+    if "error" in outcome:
+        raise outcome["error"]
+
+    report = outcome["report"]
 
     criteria = field(report, "criteria")
-    matching = [c for c in criteria if field(c, "id") == "AC-TALLY-001"]
-    assert len(matching) == 1, "expected exactly one AC-TALLY-001 entry, got %r" % (criteria,)
-    criterion = matching[0]
-    assert field(criterion, "kind") == "generated-test"
-    assert field(criterion, "result") == "pass", (
-        "the generated test passes on unmutated code, so the criterion must pass; got %r"
-        % (criterion,)
-    )
+    matching = [c for c in criteria if field(c, "id") == "AC-COUNTER-001"]
+    assert len(matching) == 1
+    # The unmutated run terminates normally and passes.
+    assert field(matching[0], "result") == "pass"
 
+    # Every terminating mutant of this function is killed by the test's exact
+    # return-value assertions, so any mutant left unkilled would be the
+    # non-terminating one: a timed-out mutant must count as killed.
     score = field(report, "mutation_score")
-    assert score is not None, "an unsealed component must report a mutation_score"
-    # Every mutant of count_up is killed by the generated test either by an
-    # assertion failure/error or, for the non-terminating loop mutant(s), by
-    # the wall-clock timeout. A timed-out mutant counts as killed, so the
-    # score must be perfect.
-    assert abs(float(score) - 1.0) < 1e-9, (
-        "expected every mutant (including the non-terminating one) to count as "
-        "killed, got mutation_score=%r" % (score,)
-    )
+    assert score is not None
+    assert abs(float(score) - 1.0) < 1e-9, f"mutation_score was {score}"

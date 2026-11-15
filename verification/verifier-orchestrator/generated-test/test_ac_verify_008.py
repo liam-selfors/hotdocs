@@ -1,61 +1,56 @@
-import dataclasses
+import verifier_orchestrator
+
 import json
 from pathlib import Path
-
-import verifier_orchestrator
 
 
 def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def _write(root, rel, text):
-    path = Path(root) / rel
+def _write(path: Path, text: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
-    return path
 
 
-FAKE_ASSEMBLER = '''import dataclasses
-import hashlib
+FAKE_ASSEMBLER = '''from dataclasses import dataclass, field
 from pathlib import Path
 
 
-class _MappingMixin:
+class _ReadOnlyMapping:
     def __getitem__(self, key):
-        if key in self.__dataclass_fields__:
+        try:
             return getattr(self, key)
-        raise KeyError(key)
+        except AttributeError:
+            raise KeyError(key)
 
     def get(self, key, default=None):
-        if key in self.__dataclass_fields__:
-            return getattr(self, key)
-        return default
-
-    def keys(self):
-        return list(self.__dataclass_fields__)
+        return getattr(self, key, default)
 
     def __contains__(self, key):
-        return key in self.__dataclass_fields__
+        return hasattr(self, key)
+
+    def keys(self):
+        return list(self.__dataclass_fields__.keys())
 
 
-@dataclasses.dataclass
-class SpecBundle(_MappingMixin):
+@dataclass
+class SpecBundle(_ReadOnlyMapping):
     component_id: str
     spec_bundle_hash: str
     spec: str
     interface: str
     constraints: str
-    dependency_interfaces: dict = dataclasses.field(default_factory=dict)
-    dependency_context: dict = dataclasses.field(default_factory=dict)
-    dependency_usage: dict = dataclasses.field(default_factory=dict)
-    vars: dict = dataclasses.field(default_factory=dict)
+    dependency_interfaces: dict = field(default_factory=dict)
+    dependency_context: dict = field(default_factory=dict)
+    dependency_usage: dict = field(default_factory=dict)
+    vars: dict = field(default_factory=dict)
     glossary: str = ""
     hint_code: object = None
 
 
-@dataclasses.dataclass
-class CriterionBundle(_MappingMixin):
+@dataclass
+class CriterionBundle(_ReadOnlyMapping):
     component_id: str
     criterion_id: str
     covers: str
@@ -63,312 +58,286 @@ class CriterionBundle(_MappingMixin):
     requirement_text: str
     interface: str
     glossary: str
-    dependency_interfaces: dict = dataclasses.field(default_factory=dict)
+    dependency_interfaces: dict = field(default_factory=dict)
 
 
 def _slug(component_id):
     return component_id[len("comp-"):] if component_id.startswith("comp-") else component_id
 
 
-def _strip_frontmatter(text):
-    if text.startswith("---\\n"):
-        end = text.find("\\n---\\n", 4)
-        if end != -1:
-            return text[end + 5:]
-    return text
+def _read(path):
+    p = Path(path)
+    return p.read_text(encoding="utf-8").strip() if p.is_file() else ""
 
 
-def _join(texts):
-    parts = [t.strip() for t in texts]
-    return "\\n\\n".join(p for p in parts if p)
-
-
-def _read_all(directory):
-    directory = Path(directory)
-    if not directory.is_dir():
-        return []
-    return [p.read_text(encoding="utf-8") for p in sorted(directory.rglob("*.md"))]
+def _interface_text(base):
+    parts = []
+    idir = base / "interface"
+    if idir.is_dir():
+        for p in sorted(idir.rglob("*.md")):
+            t = _read(p)
+            if t:
+                parts.append(t)
+    return "\\n\\n".join(parts)
 
 
 def assemble(component_id, repo_root, mode="cold"):
-    root = Path(repo_root)
-    comp = root / "specs" / "components" / _slug(component_id)
-    spec = _join([_strip_frontmatter((comp / "component.md").read_text(encoding="utf-8"))]
-                 + _read_all(comp / "requirements"))
-    interface = _join(_read_all(comp / "interface"))
-    constraints_path = comp / "constraints.md"
-    constraints = _join([constraints_path.read_text(encoding="utf-8")]) if constraints_path.is_file() else ""
-    glossary_path = root / "specs" / "glossary.md"
-    glossary = _join([glossary_path.read_text(encoding="utf-8")]) if glossary_path.is_file() else ""
-    digest = hashlib.sha256("\\0".join([spec, interface, constraints, glossary]).encode("utf-8")).hexdigest()
-    hint_code = None
-    if mode == "hint":
-        gen_dir = root / "gen" / _slug(component_id)
-        hint_code = {}
-        if gen_dir.is_dir():
-            for p in sorted(gen_dir.rglob("*.py")):
-                hint_code[str(p.relative_to(gen_dir))] = p.read_text(encoding="utf-8")
+    base = Path(repo_root) / "specs" / "components" / _slug(component_id)
+    spec_parts = [_read(base / "component.md")]
+    rdir = base / "requirements"
+    if rdir.is_dir():
+        spec_parts += [_read(p) for p in sorted(rdir.glob("R-*.md"))]
     return SpecBundle(
         component_id=component_id,
-        spec_bundle_hash="sha256:" + digest,
-        spec=spec,
-        interface=interface,
-        constraints=constraints,
-        glossary=glossary,
-        hint_code=hint_code,
+        spec_bundle_hash="sha256:" + "0" * 64,
+        spec="\\n\\n".join(s for s in spec_parts if s),
+        interface=_interface_text(base),
+        constraints=_read(base / "constraints.md"),
+        glossary=_read(Path(repo_root) / "specs" / "glossary.md"),
+        hint_code=None,
     )
 
 
 def assemble_criterion(component_id, criterion_id, repo_root):
-    root = Path(repo_root)
-    comp = root / "specs" / "components" / _slug(component_id)
-    text = (comp / "acceptance" / (criterion_id + ".md")).read_text(encoding="utf-8")
+    base = Path(repo_root) / "specs" / "components" / _slug(component_id)
+    ac_text = _read(base / "acceptance" / (criterion_id + ".md"))
     covers = ""
-    for line in text.splitlines():
+    for line in ac_text.splitlines():
         if line.startswith("Covers:"):
-            covers = line[len("Covers:"):].strip()
+            covers = line.split(":", 1)[1].strip()
             break
-    req_path = comp / "requirements" / (covers + ".md")
-    requirement_text = req_path.read_text(encoding="utf-8").strip() if req_path.is_file() else ""
-    glossary_path = root / "specs" / "glossary.md"
-    glossary = _join([glossary_path.read_text(encoding="utf-8")]) if glossary_path.is_file() else ""
     return CriterionBundle(
         component_id=component_id,
         criterion_id=criterion_id,
         covers=covers,
-        criterion_text=text.strip(),
-        requirement_text=requirement_text,
-        interface=_join(_read_all(comp / "interface")),
-        glossary=glossary,
+        criterion_text=ac_text,
+        requirement_text=_read(base / "requirements" / (covers + ".md")),
+        interface=_interface_text(base),
+        glossary=_read(Path(repo_root) / "specs" / "glossary.md"),
+        dependency_interfaces={},
     )
 '''
 
 
-def _build_fixture(root):
-    _write(root, "specs/glossary.md", "# Glossary\n\n- **Widget** — a test term.\n")
+COMPONENT_MD = """---
+id: comp-gizmo
+title: Gizmo
+status: draft
+owners: [team-a]
+realizes: [P-GIZMO]
+depends_on: []
+---
 
-    _write(
-        root,
-        "specs/product/widget.md",
-        "---\n"
-        "id: P-WIDGET\n"
-        "title: Widget\n"
-        "status: draft\n"
-        "owners: [team-a]\n"
-        "---\n"
-        "\n"
-        "# Widget\n"
-        "\n"
-        "## Purpose\n"
-        "\n"
-        "Provides tripled numbers.\n"
-        "\n"
-        "## Scope\n"
-        "\n"
-        "- In scope: tripling numbers.\n"
-        "\n"
-        "## Capability scenarios\n"
-        "\n"
-        "### CS-WIDGET-001\n"
-        "\n"
-        "Covers: P-WIDGET\n"
-        "Kind: llm-judge\n"
-        "\n"
-        "```gherkin\n"
-        "Given the assembled widget system\n"
-        "When a number is tripled\n"
-        "Then the tripled number is produced\n"
-        "```\n",
-    )
+# Gizmo
 
-    comp = "specs/components/widget/"
-    _write(
-        root,
-        comp + "component.md",
-        "---\n"
-        "id: comp-widget\n"
-        "title: Widget\n"
-        "status: draft\n"
-        "owners: [team-a]\n"
-        "depends_on: []\n"
-        "realizes: [P-WIDGET]\n"
-        "---\n"
-        "\n"
-        "# Widget\n"
-        "\n"
-        "## Purpose\n"
-        "\n"
-        "Widget triples a number.\n"
-        "\n"
-        "## Scope\n"
-        "\n"
-        "- In scope: tripling integers.\n"
-        "- Out of scope: everything else.\n"
-        "\n"
-        "## Definitions\n"
-        "\n"
-        "None.\n"
-        "\n"
-        "## Behavior\n"
-        "\n"
-        "See `requirements/`.\n"
-        "\n"
-        "## Interfaces\n"
-        "\n"
-        "See `interface/`.\n"
-        "\n"
-        "## Data\n"
-        "\n"
-        "See `interface/data/`.\n"
-        "\n"
-        "## Acceptance criteria\n"
-        "\n"
-        "See `acceptance/`.\n"
-        "\n"
-        "## Non-functional constraints\n"
-        "\n"
-        "See `constraints.md`.\n"
-        "\n"
-        "## Open questions\n"
-        "\n"
-        "## Change log\n"
-        "\n"
-        "- Initial draft.\n",
-    )
-    _write(
-        root,
-        comp + "requirements/R-WIDGET-001.md",
-        "# R-WIDGET-001\n\n**R-WIDGET-001** — `triple(x)` MUST return a `Tripled` whose `value` is `3 * x`.\n",
-    )
-    _write(
-        root,
-        comp + "requirements/R-WIDGET-002.md",
-        "# R-WIDGET-002\n\n**R-WIDGET-002** — `triple(x)` MUST accept a negative `x`.\n",
-    )
-    _write(
-        root,
-        comp + "requirements/R-WIDGET-003.md",
-        "# R-WIDGET-003\n\n**R-WIDGET-003** — The interface of `triple` MUST be unambiguous.\n",
-    )
-    _write(
-        root,
-        comp + "interface/library.md",
-        "# Library\n\n```\ntriple(x: int) -> Tripled\n```\n",
-    )
-    _write(
-        root,
-        comp + "interface/data/Tripled.md",
-        "# `Tripled`\n\n```json\n{ \"value\": 6 }\n```\n",
-    )
-    _write(root, comp + "constraints.md", "# Constraints\n\nNone.\n")
-    _write(
-        root,
-        comp + "acceptance/AC-WIDGET-001.md",
-        "# AC-WIDGET-001\n"
-        "\n"
-        "Covers: R-WIDGET-001\n"
-        "Kind: compiled\n"
-        "\n"
-        "```gherkin\n"
-        "Given a n is 2\n"
-        "When triple is invoked with [n]\n"
-        "Then value equals 6\n"
-        "```\n",
-    )
-    _write(
-        root,
-        comp + "acceptance/AC-WIDGET-002.md",
-        "# AC-WIDGET-002\n"
-        "\n"
-        "Covers: R-WIDGET-002\n"
-        "Kind: generated-test\n"
-        "\n"
-        "```gherkin\n"
-        "Given a negative number such as -2\n"
-        "When triple is called with it\n"
-        "Then the returned value is -6\n"
-        "```\n",
-    )
-    _write(
-        root,
-        comp + "acceptance/AC-WIDGET-003.md",
-        "# AC-WIDGET-003\n"
-        "\n"
-        "Covers: R-WIDGET-003\n"
-        "Kind: llm-judge\n"
-        "\n"
-        "```gherkin\n"
-        "Given the widget interface documentation\n"
-        "When a reviewer reads it\n"
-        "Then the behavior of triple is unambiguous\n"
-        "```\n",
-    )
+## Purpose
 
-    # The component's own generated code.
-    _write(
-        root,
-        "gen/widget/widget.py",
-        "from dataclasses import dataclass\n"
-        "\n"
-        "\n"
-        "@dataclass\n"
-        "class Tripled:\n"
-        "    value: int\n"
-        "\n"
-        "\n"
-        "def triple(x):\n"
-        "    return Tripled(value=3 * x)\n",
-    )
+Gizmo doubles a number.
 
-    # A cached generated test, so no test_author is needed.
-    _write(
-        root,
-        "verification/widget/generated-test/test_ac_widget_002.py",
-        "import widget\n"
-        "\n"
-        "\n"
-        "def test_ac_widget_002():\n"
-        "    assert widget.triple(-2).value == -6\n",
-    )
+## Scope
 
-    # Fake spec-bundle-assembler planted where verify loads it from.
-    _write(root, "gen/spec-bundle-assembler/spec_bundle_assembler.py", FAKE_ASSEMBLER)
+- In scope: doubling an integer.
+- Out of scope: everything else.
+
+## Definitions
+
+None.
+
+## Behavior
+
+See `requirements/`.
+
+## Interfaces
+
+See `interface/`.
+
+## Data
+
+See `interface/data/`.
+
+## Acceptance criteria
+
+See `acceptance/`.
+
+## Non-functional constraints
+
+See `constraints.md`.
+
+## Open questions
+
+## Change log
+
+- Initial draft.
+"""
+
+PRODUCT_MD = """---
+id: P-GIZMO
+title: Gizmo capability
+status: draft
+owners: [team-a]
+---
+
+# Gizmo capability
+
+## Purpose
+
+Numbers can be doubled.
+
+## Scope
+
+- In scope: doubling.
+
+### CS-GIZMO-001
+
+Covers: P-GIZMO
+Kind: llm-judge
+
+```gherkin
+Given a number
+When it is doubled
+Then the result is twice the number
+```
+"""
+
+GLOSSARY_MD = """# Glossary
+
+- **Gizmo term** — a test term.
+"""
+
+R1 = "# R-GIZMO-001\n\n**R-GIZMO-001** — The interface text for `double_it(x)` MUST be clear and unambiguous.\n"
+R2 = "# R-GIZMO-002\n\n**R-GIZMO-002** — `double_it(x)` MUST return `2 * x`.\n"
+
+AC1 = """# AC-GIZMO-001
+
+Covers: R-GIZMO-001
+Kind: llm-judge
+
+```gherkin
+Given the gizmo interface text
+When a reviewer reads it
+Then the meaning of double_it is unambiguous
+```
+"""
+
+AC2 = """# AC-GIZMO-002
+
+Covers: R-GIZMO-002
+Kind: generated-test
+
+```gherkin
+Given x = 3
+When double_it(x) is called
+Then it returns 6
+```
+"""
+
+LIBRARY_MD = """# Library
+
+```
+double_it(x: int) -> int
+```
+"""
+
+CONSTRAINTS_MD = "# Constraints\n\nNone.\n"
+
+GEN_CODE = '''def double_it(x: int) -> int:
+    """Return twice x."""
+    return 2 * x
+'''
+
+CACHED_TEST = '''import gizmo
 
 
-def _as_dict(report):
-    if isinstance(report, dict):
-        return report
-    return report.to_dict()
+def test_double_it_returns_twice_its_input():
+    assert gizmo.double_it(3) == 6
+    assert gizmo.double_it(0) == 0
+    assert gizmo.double_it(-2) == -4
+'''
 
 
-def _consistent_judge(bundle):
-    return {"result": "pass", "rationale": "The criterion is satisfied."}
+def _build_fixture(repo_root: Path) -> None:
+    _write(repo_root / "specs" / "glossary.md", GLOSSARY_MD)
+    _write(repo_root / "specs" / "product" / "gizmo.md", PRODUCT_MD)
+    comp = repo_root / "specs" / "components" / "gizmo"
+    _write(comp / "component.md", COMPONENT_MD)
+    _write(comp / "requirements" / "R-GIZMO-001.md", R1)
+    _write(comp / "requirements" / "R-GIZMO-002.md", R2)
+    _write(comp / "acceptance" / "AC-GIZMO-001.md", AC1)
+    _write(comp / "acceptance" / "AC-GIZMO-002.md", AC2)
+    _write(comp / "interface" / "library.md", LIBRARY_MD)
+    _write(comp / "constraints.md", CONSTRAINTS_MD)
+    _write(repo_root / "gen" / "gizmo" / "gizmo.py", GEN_CODE)
+    _write(
+        repo_root / "verification" / "gizmo" / "generated-test" / "test_ac_gizmo_002.py",
+        CACHED_TEST,
+    )
+    _write(
+        repo_root / "gen" / "spec-bundle-assembler" / "spec_bundle_assembler.py",
+        FAKE_ASSEMBLER,
+    )
 
 
-def test_ac_verify_008_verify_is_idempotent(tmp_path, monkeypatch):
+def _snapshot(root: Path, sub: str) -> dict:
+    base = root / sub
+    out = {}
+    for p in sorted(base.rglob("*")):
+        if p.is_file() and "__pycache__" not in p.parts and not p.name.endswith(".pyc"):
+            out[str(p.relative_to(root))] = p.read_bytes()
+    return out
+
+
+def _report_dict(report):
+    if hasattr(report, "to_dict"):
+        return report.to_dict()
+    return report
+
+
+def test_ac_verify_008_verify_twice_yields_identical_reports(tmp_path):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
     _build_fixture(repo_root)
-    monkeypatch.chdir(repo_root)
 
-    first = verifier_orchestrator.verify("comp-widget", repo_root, judge=_consistent_judge)
-    second = verifier_orchestrator.verify("comp-widget", repo_root, judge=_consistent_judge)
+    judge_calls = []
 
-    d1 = _as_dict(first)
-    d2 = _as_dict(second)
+    def judge(bundle):
+        judge_calls.append(1)
+        return {"result": "pass", "rationale": "The interface text is unambiguous."}
 
-    # Non-trivial run: every fixture criterion is reported.
-    ids1 = sorted(field(c, "id") for c in field(first, "criteria"))
-    assert ids1 == ["AC-WIDGET-001", "AC-WIDGET-002", "AC-WIDGET-003"]
+    gen_before = _snapshot(repo_root, "gen/gizmo")
+    acc_before = _snapshot(repo_root, "specs/components/gizmo/acceptance")
+
+    first = verifier_orchestrator.verify("comp-gizmo", repo_root, judge=judge)
+
+    # The Given: gen/<component>/ and acceptance/ content stay unchanged between runs.
+    assert _snapshot(repo_root, "gen/gizmo") == gen_before
+    assert _snapshot(repo_root, "specs/components/gizmo/acceptance") == acc_before
+    calls_after_first = len(judge_calls)
+
+    second = verifier_orchestrator.verify("comp-gizmo", repo_root, judge=judge)
+
+    assert _snapshot(repo_root, "gen/gizmo") == gen_before
+    assert _snapshot(repo_root, "specs/components/gizmo/acceptance") == acc_before
+
+    # The judge was actually consulted on each run (the llm-judge criterion was evaluated).
+    assert calls_after_first >= 1
+    assert len(judge_calls) - calls_after_first == calls_after_first
+
+    d1 = _report_dict(first)
+    d2 = _report_dict(second)
+
+    # Sanity: the reports describe the fixture component and its criteria.
+    assert field(d1, "component_id") == "comp-gizmo"
+    ids1 = sorted(field(c, "id") for c in field(d1, "criteria"))
+    assert ids1 == ["AC-GIZMO-001", "AC-GIZMO-002"]
+    judged = [c for c in field(d1, "criteria") if field(c, "id") == "AC-GIZMO-001"][0]
+    assert field(judged, "result") == "pass"
 
     # Then: the two VerificationReports are identical.
     assert json.dumps(d1, sort_keys=True, default=str) == json.dumps(d2, sort_keys=True, default=str)
     assert d1 == d2
-    assert field(first, "component_id") == field(second, "component_id")
+    assert field(first, "overall") == field(second, "overall")
     assert field(first, "criteria") == field(second, "criteria")
     assert field(first, "requirement_results") == field(second, "requirement_results")
     assert field(first, "interface_drift") == field(second, "interface_drift")
     assert field(first, "mutation_score") == field(second, "mutation_score")
-    assert field(first, "overall") == field(second, "overall")
-    if dataclasses.is_dataclass(first) and dataclasses.is_dataclass(second):
-        assert first == second
+    assert first == second
