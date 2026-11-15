@@ -2,160 +2,153 @@ import importlib.util
 import os
 import subprocess
 import sys
+import uuid
 from pathlib import Path
 
-import review_packet_builder as _rpb_for_source
+import pytest
 
-_REAL_MODULE_FILE = Path(_rpb_for_source.__file__).resolve()
-
-if _REAL_MODULE_FILE.name == "__init__.py":
-    _MODULE_IS_PACKAGE = True
-    _PACKAGE_ROOT = _REAL_MODULE_FILE.parent
-    _PACKAGE_FILE_CONTENTS = {
-        p.relative_to(_PACKAGE_ROOT): p.read_bytes()
-        for p in sorted(_PACKAGE_ROOT.rglob("*"))
-        if p.is_file() and "__pycache__" not in p.parts
-    }
-else:
-    _MODULE_IS_PACKAGE = False
-    _FLAT_MODULE_BYTES = _REAL_MODULE_FILE.read_bytes()
+import review_packet_builder
 
 
-def _materialize_component_copy(dest_component_dir: Path) -> Path:
-    dest_component_dir.mkdir(parents=True, exist_ok=True)
-    if _MODULE_IS_PACKAGE:
-        package_dir = dest_component_dir / "review_packet_builder"
-        for rel, data in _PACKAGE_FILE_CONTENTS.items():
-            target = package_dir / rel
-            target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_bytes(data)
-        return package_dir / "__init__.py"
-    target = dest_component_dir / "review_packet_builder.py"
-    target.write_bytes(_FLAT_MODULE_BYTES)
-    return target
+# Read the component's own source exactly once, at test-module import time,
+# from the normally imported module's __file__ (never from a copy).
+_SOURCE_BYTES = Path(review_packet_builder.__file__).read_bytes()
 
 
-def _load_module_by_path(module_path: Path):
-    if module_path.name == "__init__.py":
-        spec = importlib.util.spec_from_file_location(
-            "review_packet_builder",
-            module_path,
-            submodule_search_locations=[str(module_path.parent)],
-        )
-    else:
-        spec = importlib.util.spec_from_file_location("review_packet_builder", module_path)
-    module = importlib.util.module_from_spec(spec)
-    sys.modules["review_packet_builder"] = module
-    spec.loader.exec_module(module)
-    return module
+def field(value, name):
+    return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def _write_provenance_tracker_stub(path: Path, hit: bool) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
+_TRACKER_TEMPLATE = '''\
+def check_readiness(repo_root, changed_ids=None, model=None, seed=0, llm_backend=None):
+    hit = __HIT__
     if hit:
-        components = {
-            "comp-tool": {
-                "hit": True,
-                "verification_report": {
-                    "component_id": "comp-tool",
-                    "criteria": [],
-                    "requirement_results": {},
-                    "interface_drift": False,
-                    "mutation_score": 1.0,
-                    "overall": "pass",
-                },
-                "license_scan": {"component_id": "comp-tool", "blocked": False},
-                "secret_scan": {"component_id": "comp-tool", "flagged": False},
-            }
+        component_result = {
+            "hit": True,
+            "verification_report": {
+                "component_id": "comp-tool",
+                "criteria": [
+                    {"id": "AC-TOOL-001", "covers": "R-TOOL-001", "kind": "compiled", "result": "pass"}
+                ],
+                "requirement_results": {"R-TOOL-001": "pass"},
+                "interface_drift": False,
+                "mutation_score": 1.0,
+                "overall": "pass",
+            },
+            "license_scan": {"blocked": False, "findings": []},
+            "secret_scan": {"flagged": False, "findings": []},
         }
-        not_ready_reasons = []
+        ready = True
+        reasons = []
     else:
-        components = {
-            "comp-tool": {
-                "hit": False,
-                "verification_report": None,
-                "license_scan": None,
-                "secret_scan": None,
-            }
+        component_result = {
+            "hit": False,
+            "verification_report": None,
+            "license_scan": None,
+            "secret_scan": None,
         }
-        not_ready_reasons = ["comp-tool: no provenance for current spec state"]
-
-    report = {
-        "scope": "blast-radius",
-        "ready": hit,
-        "components": components,
+        ready = False
+        reasons = ["comp-tool: no provenance for current spec state - run hotdocs generate comp-tool"]
+    return {
+        "scope": "blast-radius" if changed_ids is not None else "whole-corpus",
+        "ready": ready,
+        "components": {"comp-tool": component_result},
         "capabilities": {},
-        "not_ready_reasons": not_ready_reasons,
+        "not_ready_reasons": reasons,
     }
 
-    source = (
-        "def check_readiness(repo_root, changed_ids=None, model=None, seed=0, llm_backend=None):\n"
-        "    return " + repr(report) + "\n"
-        "\n"
-        "def last_requirement_failures(component_id, repo_root):\n"
-        "    return []\n"
-    )
-    path.write_text(source)
+
+def last_requirement_failures(component_id, repo_root):
+    return []
+'''
 
 
-def _init_git_repo(path: Path) -> None:
-    path.mkdir(parents=True, exist_ok=True)
+def _write_tracker(directory: Path, hit: bool) -> None:
+    directory.mkdir(parents=True, exist_ok=True)
+    source = _TRACKER_TEMPLATE.replace("__HIT__", "True" if hit else "False")
+    (directory / "provenance_tracker.py").write_text(source, encoding="utf-8")
+
+
+def _git(repo: Path, *args: str) -> None:
     env = dict(os.environ)
     env.update(
         {
             "GIT_AUTHOR_NAME": "Test",
-            "GIT_AUTHOR_EMAIL": "test@example.com",
+            "GIT_AUTHOR_EMAIL": "test@example.invalid",
             "GIT_COMMITTER_NAME": "Test",
-            "GIT_COMMITTER_EMAIL": "test@example.com",
+            "GIT_COMMITTER_EMAIL": "test@example.invalid",
         }
     )
-    subprocess.run(["git", "init"], cwd=path, check=True, capture_output=True, env=env)
-    (path / "README.md").write_text("placeholder\n")
-    subprocess.run(["git", "add", "."], cwd=path, check=True, capture_output=True, env=env)
     subprocess.run(
-        ["git", "commit", "-m", "initial"], cwd=path, check=True, capture_output=True, env=env
+        ["git", "-c", "user.name=Test", "-c", "user.email=test@example.invalid",
+         "-c", "commit.gpgsign=false", *args],
+        cwd=str(repo),
+        env=env,
+        check=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
     )
 
 
-def _read_hit_status(packet):
-    return (
-        packet.get("provenance_hit_status")
-        if isinstance(packet, dict)
-        else getattr(packet, "provenance_hit_status", None)
-    )
+def _make_repo(repo: Path) -> None:
+    repo.mkdir(parents=True, exist_ok=True)
+    _git(repo, "init", "-q")
+    (repo / "README.md").write_text("fixture repo\n", encoding="utf-8")
+    _git(repo, "add", "README.md")
+    _git(repo, "commit", "-q", "-m", "initial")
 
 
-def test_provenance_hit_status_prefers_repo_root_tracker_over_tool_root(tmp_path):
-    tool_root = tmp_path / "tool_root"
-    repo_root = tmp_path / "repo_root"
+def _make_tool_root(tool_root: Path) -> Path:
+    copy_dir = tool_root / "gen" / "review-packet-builder"
+    copy_dir.mkdir(parents=True, exist_ok=True)
+    copy_path = copy_dir / "review_packet_builder.py"
+    copy_path.write_bytes(_SOURCE_BYTES)
+    _write_tracker(tool_root / "gen" / "provenance-tracker", hit=True)
+    return copy_path
 
-    component_copy_path = _materialize_component_copy(
-        tool_root / "gen" / "review-packet-builder"
-    )
-    _write_provenance_tracker_stub(
-        tool_root / "gen" / "provenance-tracker" / "provenance_tracker.py", hit=True
-    )
 
-    _init_git_repo(repo_root)
+def _load_copy(path: Path):
+    module_name = "review_packet_builder_copy_" + uuid.uuid4().hex
+    spec = importlib.util.spec_from_file_location(module_name, str(path))
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    spec.loader.exec_module(module)
+    return module, module_name
+
+
+@pytest.fixture
+def setup(tmp_path):
+    tool_root = tmp_path / "tool"
+    copy_path = _make_tool_root(tool_root)
+    repo_root = tmp_path / "repo"
+    _make_repo(repo_root)
+    loaded = []
+    yield tool_root, copy_path, repo_root, loaded
+    for name in loaded:
+        sys.modules.pop(name, None)
+
+
+def test_provenance_tracker_from_tool_root_when_repo_has_no_gen(setup):
+    tool_root, copy_path, repo_root, loaded = setup
     assert not (repo_root / "gen").exists()
 
-    loaded_module = _load_module_by_path(component_copy_path)
+    module, name = _load_copy(copy_path)
+    loaded.append(name)
 
-    try:
-        packet_with_tool_root_tracker = loaded_module.build_review_packet(
-            ["comp-tool"], repo_root
-        )
-        hit_status_from_tool_root = _read_hit_status(packet_with_tool_root_tracker)
-        assert hit_status_from_tool_root == {"comp-tool": True}
+    packet = module.build_review_packet(["comp-tool"], repo_root)
+    status = field(packet, "provenance_hit_status")
+    assert dict(status) == {"comp-tool": True}
+    assert status["comp-tool"] is True
 
-        _write_provenance_tracker_stub(
-            repo_root / "gen" / "provenance-tracker" / "provenance_tracker.py", hit=False
-        )
 
-        packet_with_repo_root_tracker = loaded_module.build_review_packet(
-            ["comp-tool"], repo_root
-        )
-        hit_status_from_repo_root = _read_hit_status(packet_with_repo_root_tracker)
-        assert hit_status_from_repo_root == {"comp-tool": False}
-    finally:
-        sys.modules["review_packet_builder"] = _rpb_for_source
+def test_provenance_tracker_from_repo_root_when_present(setup):
+    tool_root, copy_path, repo_root, loaded = setup
+    _write_tracker(repo_root / "gen" / "provenance-tracker", hit=False)
+
+    module, name = _load_copy(copy_path)
+    loaded.append(name)
+
+    packet = module.build_review_packet(["comp-tool"], repo_root)
+    status = field(packet, "provenance_hit_status")
+    assert dict(status) == {"comp-tool": False}
+    assert status["comp-tool"] is False

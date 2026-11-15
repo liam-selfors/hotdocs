@@ -1,202 +1,223 @@
-import json
-import shutil
-import subprocess
-import tempfile
-import unittest
-from pathlib import Path
-
 import review_packet_builder
 
+import dataclasses
+import json
+import os
+import subprocess
+from pathlib import Path
 
-FAKE_PROVENANCE_TRACKER_SOURCE = """
-def check_readiness(repo_root, changed_ids=None, model=None, seed=0, llm_backend=None):
+
+def field(value, name):
+    return value[name] if isinstance(value, dict) else getattr(value, name)
+
+
+MARKERS = [
+    "GENCODE_MARKER_OLD_ZQ7X",
+    "GENCODE_MARKER_NEW_K4VW",
+    "GENCODE_MARKER_WT_P9RJ",
+    "zq7x_old_helper",
+    "k4vw_new_helper",
+    "p9rj_worktree_helper",
+]
+
+
+def _git(repo_root, *args):
+    subprocess.run(
+        [
+            "git",
+            "-c", "user.name=Test",
+            "-c", "user.email=test@example.com",
+            "-c", "commit.gpgsign=false",
+            *args,
+        ],
+        cwd=str(repo_root),
+        check=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+
+
+def _write(path, text):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text)
+
+
+def _gen_code(tag, helper, n):
+    lines = [
+        '"""Generated module for comp-foo (%s)."""' % tag,
+        "",
+        "SENTINEL = %r" % tag,
+        "",
+    ]
+    for i in range(n):
+        lines.append("def %s_%d(x):" % (helper, i))
+        lines.append("    # %s line %d" % (tag, i))
+        lines.append("    return x * %d + len(%r)" % (i + 1, tag))
+        lines.append("")
+    return "\n".join(lines) + "\n"
+
+
+COMPONENT_MD = """---
+id: comp-foo
+title: Foo
+status: draft
+owners: [alice]
+depends_on: []
+---
+
+# Foo
+
+A synthetic component used to exercise the review packet builder.
+"""
+
+
+def _requirement(text):
+    return "# R-FOO-001\n\n**R-FOO-001** — %s\n" % text
+
+
+ACCEPTANCE = """# AC-FOO-001
+
+Covers: R-FOO-001
+Kind: generated-test
+
+```gherkin
+Given a foo
+When it runs
+Then it returns a value
+```
+"""
+
+
+def _verify_report():
+    verification_report = {
+        "component_id": "comp-foo",
+        "criteria": [
+            {"id": "AC-FOO-001", "covers": "R-FOO-001", "kind": "generated-test", "result": "pass"}
+        ],
+        "requirement_results": {"R-FOO-001": "pass"},
+        "interface_drift": False,
+        "mutation_score": 1.0,
+        "overall": "pass",
+    }
     return {
         "scope": "blast-radius",
         "ready": True,
         "components": {
             "comp-foo": {
                 "hit": True,
-                "verification_report": {
-                    "component_id": "comp-foo",
-                    "criteria": [
-                        {"id": "AC-FOO-001", "covers": "R-FOO-001", "kind": "compiled", "result": "pass"}
-                    ],
-                    "requirement_results": {"R-FOO-001": "pass"},
-                    "interface_drift": False,
-                    "mutation_score": 1.0,
-                    "overall": "pass"
-                },
-                "license_scan": {"blocked": False},
-                "secret_scan": {"flagged": False}
+                "verification_report": verification_report,
+                "license_scan": {"blocked": False, "matches": []},
+                "secret_scan": {"flagged": False, "findings": []},
             }
         },
         "capabilities": {},
-        "not_ready_reasons": []
+        "not_ready_reasons": [],
     }
 
 
-def last_requirement_failures(component_id, repo_root):
-    return []
-"""
-
-COMPONENT_MD = """---
-id: comp-foo
-title: Foo
-status: ratified
-owners: [alice]
-last_ratified_commit: 0000000000000000000000000000000000000
-sealed: false
----
-
-# Foo
-
-A synthetic component used only to exercise review-packet-builder.
-"""
-
-REQUIREMENT_MD = """# R-FOO-001
-
-**R-FOO-001** -- Foo MUST return a constant placeholder value for testing purposes.
-"""
-
-ACCEPTANCE_MD = """# AC-FOO-001
-
-Covers: R-FOO-001
-
-```gherkin
-Given foo
-When foo runs
-Then foo returns the placeholder value
-```
-"""
-
-ORIGINAL_GENERATED_CODE = """def foo():
-    # OLDLINE_MARKER_8e21cb_1
-    return "old-value-1"
-
-
-def helper_one():
-    # OLDLINE_MARKER_8e21cb_2
-    return "old-value-2"
-
-
-def helper_two():
-    # OLDLINE_MARKER_8e21cb_3
-    return "old-value-3"
-"""
-
-CHANGED_GENERATED_CODE = """def foo():
-    # NEWLINE_MARKER_4f9a21_1
-    return "new-value-1"
-
-
-def helper_one():
-    # NEWLINE_MARKER_4f9a21_2
-    return "new-value-2"
-
-
-def helper_two():
-    # NEWLINE_MARKER_4f9a21_3
-    return "new-value-3"
-
-
-def helper_three():
-    # NEWLINE_MARKER_4f9a21_4
-    return "new-value-4"
-
-
-def helper_four():
-    # NEWLINE_MARKER_4f9a21_5
-    return "new-value-5"
-"""
-
-
-def dual_get(obj, name, default=None):
-    if isinstance(obj, dict):
-        return obj.get(name, default)
-    return getattr(obj, name, default)
-
-
-def run_git(repo_root, *args):
-    subprocess.run(
-        ["git", "-C", str(repo_root), *args],
-        check=True, capture_output=True, text=True,
+def _write_tracker_standin(repo_root):
+    report_literal = repr(_verify_report())
+    src = (
+        "import copy\n"
+        "\n"
+        "REPORT = " + report_literal + "\n"
+        "\n"
+        "def check_readiness(repo_root, changed_ids=None, model=None, seed=0, llm_backend=None):\n"
+        "    return copy.deepcopy(REPORT)\n"
+        "\n"
+        "def last_requirement_failures(component_id, repo_root):\n"
+        "    return []\n"
     )
+    _write(repo_root / "gen" / "provenance-tracker" / "provenance_tracker.py", src)
 
 
-class BuildReviewPacketExcludesGeneratedCodeDiffTest(unittest.TestCase):
-    def setUp(self):
-        self.tmpdir = tempfile.mkdtemp()
-        self.repo_root = Path(self.tmpdir)
+def _to_plain(value, depth=0):
+    if depth > 50:
+        return str(value)
+    if isinstance(value, dict):
+        return {str(k): _to_plain(v, depth + 1) for k, v in value.items()}
+    if isinstance(value, (list, tuple, set, frozenset)):
+        return [_to_plain(v, depth + 1) for v in value]
+    if isinstance(value, (str, int, float, bool)) or value is None:
+        return value
+    if isinstance(value, Path):
+        return str(value)
+    if dataclasses.is_dataclass(value) and not isinstance(value, type):
+        return {
+            f.name: _to_plain(getattr(value, f.name), depth + 1)
+            for f in dataclasses.fields(value)
+        }
+    if hasattr(value, "__dict__"):
+        return {
+            str(k): _to_plain(v, depth + 1)
+            for k, v in vars(value).items()
+            if not str(k).startswith("__")
+        }
+    return str(value)
 
-        run_git(self.repo_root, "init")
-        run_git(self.repo_root, "config", "user.email", "test@example.com")
-        run_git(self.repo_root, "config", "user.name", "Test")
 
-        tracker_dir = self.repo_root / "gen" / "provenance-tracker"
-        tracker_dir.mkdir(parents=True)
-        (tracker_dir / "provenance_tracker.py").write_text(FAKE_PROVENANCE_TRACKER_SOURCE)
+def _build_fixture(tmp_path):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    _git(repo_root, "init", "-q")
+    _git(repo_root, "symbolic-ref", "HEAD", "refs/heads/main")
 
-        comp_dir = self.repo_root / "specs" / "components" / "foo"
-        (comp_dir / "requirements").mkdir(parents=True)
-        (comp_dir / "acceptance").mkdir(parents=True)
-        (comp_dir / "component.md").write_text(COMPONENT_MD)
-        (comp_dir / "requirements" / "R-FOO-001.md").write_text(REQUIREMENT_MD)
-        (comp_dir / "acceptance" / "AC-FOO-001.md").write_text(ACCEPTANCE_MD)
+    comp_dir = repo_root / "specs" / "components" / "foo"
+    _write(comp_dir / "component.md", COMPONENT_MD)
+    _write(comp_dir / "requirements" / "R-FOO-001.md",
+           _requirement("The foo MUST return a value."))
+    _write(comp_dir / "acceptance" / "AC-FOO-001.md", ACCEPTANCE)
+    _write(comp_dir / "constraints.md", "# Constraints\n\nNone.\n")
+    _write_tracker_standin(repo_root)
 
-        gen_foo_dir = self.repo_root / "gen" / "foo"
-        gen_foo_dir.mkdir(parents=True)
-        self.gen_foo_file = gen_foo_dir / "foo.py"
-        self.gen_foo_file.write_text(ORIGINAL_GENERATED_CODE)
+    gen_file = repo_root / "gen" / "foo" / "foo.py"
+    _write(gen_file, _gen_code("GENCODE_MARKER_OLD_ZQ7X", "zq7x_old_helper", 30))
 
-        run_git(self.repo_root, "add", "-A")
-        run_git(self.repo_root, "commit", "-m", "initial commit")
+    _git(repo_root, "add", "-A")
+    _git(repo_root, "commit", "-q", "-m", "base")
 
-        # Substantial regeneration of comp-foo's generated code.
-        self.gen_foo_file.write_text(CHANGED_GENERATED_CODE)
-        run_git(self.repo_root, "add", "-A")
-        run_git(self.repo_root, "commit", "-m", "regenerate comp-foo substantially")
+    # Feature branch: spec change plus a substantial rewrite of generated code.
+    _git(repo_root, "checkout", "-q", "-b", "feature")
+    _write(comp_dir / "requirements" / "R-FOO-001.md",
+           _requirement("The foo MUST return a strictly positive value."))
+    _write(gen_file, _gen_code("GENCODE_MARKER_NEW_K4VW", "k4vw_new_helper", 45))
+    _write(repo_root / "gen" / "foo" / "foo_extra.py",
+           _gen_code("GENCODE_MARKER_NEW_K4VW", "k4vw_new_helper_extra", 20))
+    _git(repo_root, "add", "-A")
+    _git(repo_root, "commit", "-q", "-m", "change spec and regenerate foo")
 
-        diff_proc = subprocess.run(
-            ["git", "-C", str(self.repo_root), "diff", "HEAD~1", "HEAD", "--", "gen/foo/foo.py"],
-            check=True, capture_output=True, text=True,
+    # Further uncommitted working-tree rewrite of generated code.
+    _write(gen_file, _gen_code("GENCODE_MARKER_WT_P9RJ", "p9rj_worktree_helper", 40))
+
+    return repo_root
+
+
+def test_packet_contains_no_generated_code_diff(tmp_path):
+    repo_root = _build_fixture(tmp_path)
+    changed_ids = ["comp-foo", "R-FOO-001"]
+
+    old_cwd = os.getcwd()
+    try:
+        os.chdir(str(repo_root))
+        packet = review_packet_builder.build_review_packet(changed_ids, repo_root)
+    finally:
+        os.chdir(old_cwd)
+
+    assert packet is not None
+    # The packet is a real ReviewPacket with its spec_diff section present.
+    spec_diff = field(packet, "spec_diff")
+    assert spec_diff is None or isinstance(spec_diff, str)
+
+    plain = _to_plain(packet)
+    text = json.dumps(plain, default=str, ensure_ascii=False)
+    text_all = text + "\n" + str(spec_diff or "")
+
+    for marker in MARKERS:
+        assert marker not in text_all, (
+            "generated-code content %r leaked into the review packet" % marker
         )
-        self.generated_code_diff = diff_proc.stdout
-        self.assertIn("NEWLINE_MARKER_4f9a21", self.generated_code_diff)
-        self.assertIn("OLDLINE_MARKER_8e21cb", self.generated_code_diff)
 
-    def tearDown(self):
-        shutil.rmtree(self.tmpdir, ignore_errors=True)
-
-    def test_packet_contains_no_generated_code_diff_content(self):
-        packet = review_packet_builder.build_review_packet(["comp-foo"], self.repo_root)
-
-        field_names = (
-            "spec_diff",
-            "changed_requirements",
-            "regenerated_components",
-            "verification_results",
-            "compliance_flags",
-            "provenance_hit_status",
-            "capability_scenarios",
-            "exemption_changes",
-            "residual_risk",
+    for path_fragment in ("a/gen/foo/", "b/gen/foo/", "+++ b/gen/", "--- a/gen/"):
+        assert path_fragment not in text_all, (
+            "generated-code diff header %r found in the review packet" % path_fragment
         )
-        fields = {name: dual_get(packet, name) for name in field_names}
-
-        serialized = json.dumps(fields, default=str)
-
-        self.assertNotIn(self.generated_code_diff, serialized)
-        self.assertNotIn("NEWLINE_MARKER_4f9a21", serialized)
-        self.assertNotIn("OLDLINE_MARKER_8e21cb", serialized)
-
-        checked_diff_line = False
-        for line in self.generated_code_diff.splitlines():
-            stripped = line.strip()
-            if stripped.startswith(("+", "-")) and len(stripped) > 3:
-                checked_diff_line = True
-                self.assertNotIn(stripped, serialized)
-        self.assertTrue(checked_diff_line)
-
-
-if __name__ == "__main__":
-    unittest.main()

@@ -1,49 +1,50 @@
-import os
-import shutil
-import subprocess
-import sys
-import tempfile
-import unittest
-from pathlib import Path
-
 import review_packet_builder
 
+import os
+import subprocess
+from pathlib import Path
 
-def _field(obj, name):
-    return obj.get(name) if isinstance(obj, dict) else getattr(obj, name, None)
+
+def field(value, name):
+    return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-PROVENANCE_TRACKER_STANDIN = '''
-def check_readiness(repo_root, changed_ids=None, model=None, seed=0, llm_backend=None):
-    log_path = __import__("os").environ.get("AC_PACKET_006_LOG")
-    if log_path:
-        with open(log_path, "a") as f:
-            f.write("check_readiness_called\\n")
+HIT_ID = "comp-alpha"
+MISS_ID = "comp-beta"
+
+
+def _verification_report(component_id, req_id, ac_id):
+    return {
+        "component_id": component_id,
+        "criteria": [
+            {
+                "id": ac_id,
+                "covers": req_id,
+                "kind": "compiled",
+                "result": "pass",
+            }
+        ],
+        "requirement_results": {req_id: "pass"},
+        "interface_drift": False,
+        "mutation_score": None,
+        "overall": "pass",
+    }
+
+
+def _verify_report():
     return {
         "scope": "blast-radius",
         "ready": False,
         "components": {
-            "comp-foo": {
+            HIT_ID: {
                 "hit": True,
-                "verification_report": {
-                    "component_id": "comp-foo",
-                    "criteria": [
-                        {
-                            "id": "AC-FOO-001",
-                            "covers": "R-FOO-001",
-                            "kind": "compiled",
-                            "result": "pass",
-                        }
-                    ],
-                    "requirement_results": {"R-FOO-001": "pass"},
-                    "interface_drift": False,
-                    "mutation_score": 1.0,
-                    "overall": "pass",
-                },
-                "license_scan": {"blocked": False},
-                "secret_scan": {"flagged": False},
+                "verification_report": _verification_report(
+                    HIT_ID, "R-ALPHA-001", "AC-ALPHA-001"
+                ),
+                "license_scan": {"blocked": False, "findings": []},
+                "secret_scan": {"flagged": False, "findings": []},
             },
-            "comp-bar": {
+            MISS_ID: {
                 "hit": False,
                 "verification_report": None,
                 "license_scan": None,
@@ -52,80 +53,120 @@ def check_readiness(repo_root, changed_ids=None, model=None, seed=0, llm_backend
         },
         "capabilities": {},
         "not_ready_reasons": [
-            "comp-bar: no provenance for current spec state \\u2014 run hotdocs generate comp-bar"
+            MISS_ID
+            + ": no provenance for current spec state - run hotdocs generate "
+            + MISS_ID
         ],
     }
 
 
-def last_requirement_failures(component_id, repo_root):
-    return []
-'''
+def _write(path, text):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
 
 
-class AcPacket006Test(unittest.TestCase):
-    def setUp(self):
-        self.repo_root = Path(tempfile.mkdtemp(prefix="ac-packet-006-"))
-        self.log_path = Path(tempfile.mkdtemp(prefix="ac-packet-006-log-")) / "invocations.log"
-        self._prior_log_env = os.environ.get("AC_PACKET_006_LOG")
-        os.environ["AC_PACKET_006_LOG"] = str(self.log_path)
-
-        subprocess.run(
-            ["git", "init"], cwd=str(self.repo_root), check=True, capture_output=True
-        )
-        subprocess.run(
-            ["git", "config", "user.email", "test@example.com"],
-            cwd=str(self.repo_root),
-            check=True,
-            capture_output=True,
-        )
-        subprocess.run(
-            ["git", "config", "user.name", "Test"],
-            cwd=str(self.repo_root),
-            check=True,
-            capture_output=True,
-        )
-        (self.repo_root / "README.md").write_text("placeholder\n")
-        subprocess.run(
-            ["git", "add", "."], cwd=str(self.repo_root), check=True, capture_output=True
-        )
-        subprocess.run(
-            ["git", "commit", "-m", "initial commit"],
-            cwd=str(self.repo_root),
-            check=True,
-            capture_output=True,
-        )
-
-        tracker_dir = self.repo_root / "gen" / "provenance-tracker"
-        tracker_dir.mkdir(parents=True, exist_ok=True)
-        (tracker_dir / "provenance_tracker.py").write_text(PROVENANCE_TRACKER_STANDIN)
-
-    def tearDown(self):
-        if self._prior_log_env is None:
-            os.environ.pop("AC_PACKET_006_LOG", None)
-        else:
-            os.environ["AC_PACKET_006_LOG"] = self._prior_log_env
-        shutil.rmtree(self.repo_root, ignore_errors=True)
-        shutil.rmtree(self.log_path.parent, ignore_errors=True)
-
-    def test_provenance_hit_status_reflects_hit_and_miss_per_component(self):
-        packet = review_packet_builder.build_review_packet(
-            ["comp-foo", "comp-bar"], self.repo_root
-        )
-
-        self.assertTrue(
-            self.log_path.exists(),
-            "expected the provenance-tracker stand-in to have been invoked",
-        )
-        self.assertIn("check_readiness_called", self.log_path.read_text())
-
-        provenance_hit_status = _field(packet, "provenance_hit_status")
-        self.assertIsNotNone(provenance_hit_status)
-
-        self.assertIn("comp-foo", provenance_hit_status)
-        self.assertIn("comp-bar", provenance_hit_status)
-        self.assertIs(provenance_hit_status["comp-foo"], True)
-        self.assertIs(provenance_hit_status["comp-bar"], False)
+def _write_component(repo_root, slug, upper):
+    comp_dir = repo_root / "specs" / "components" / slug
+    _write(
+        comp_dir / "component.md",
+        "---\n"
+        f"id: comp-{slug}\n"
+        f"title: {slug.capitalize()} fixture component\n"
+        "status: draft\n"
+        "owners: [fixture-owner]\n"
+        "depends_on: []\n"
+        "sealed: true\n"
+        f"source_path: legacy/{slug}/\n"
+        "---\n\n"
+        f"# comp-{slug}\n\nA synthetic fixture component.\n",
+    )
+    _write(
+        comp_dir / "requirements" / f"R-{upper}-001.md",
+        f"# R-{upper}-001\n\n**R-{upper}-001** - The component MUST do its thing.\n",
+    )
+    _write(
+        comp_dir / "acceptance" / f"AC-{upper}-001.md",
+        f"# AC-{upper}-001\n\nCovers: R-{upper}-001\nKind: compiled\n\n"
+        "```gherkin\nGiven a thing\nWhen it runs\nThen it works\n```\n",
+    )
+    _write(
+        comp_dir / "interface" / "library.md",
+        "# Library\n\n```\ndo_thing() -> None\n```\n",
+    )
+    _write(comp_dir / "constraints.md", "# Constraints\n\nNone.\n")
+    _write(repo_root / "legacy" / slug / f"{slug}.py", "def do_thing():\n    return None\n")
 
 
-if __name__ == "__main__":
-    unittest.main()
+def _write_tracker_stand_in(repo_root, log_path):
+    report_literal = repr(_verify_report())
+    source = (
+        "from pathlib import Path\n\n"
+        f"_LOG = {str(log_path)!r}\n"
+        f"_REPORT = {report_literal}\n\n\n"
+        "def check_readiness(repo_root, changed_ids=None, model=None, seed=0, llm_backend=None):\n"
+        "    with open(_LOG, 'a', encoding='utf-8') as fh:\n"
+        "        fh.write('check_readiness ' + repr(changed_ids) + '\\n')\n"
+        "    import copy\n"
+        "    report = copy.deepcopy(_REPORT)\n"
+        "    report['scope'] = 'blast-radius' if changed_ids is not None else 'whole-corpus'\n"
+        "    return report\n\n\n"
+        "def last_requirement_failures(component_id, repo_root):\n"
+        "    return []\n"
+    )
+    _write(
+        repo_root / "gen" / "provenance-tracker" / "provenance_tracker.py", source
+    )
+
+
+def _git(repo_root, *args):
+    env = dict(os.environ)
+    env.update(
+        {
+            "GIT_AUTHOR_NAME": "Fixture",
+            "GIT_AUTHOR_EMAIL": "fixture@example.invalid",
+            "GIT_COMMITTER_NAME": "Fixture",
+            "GIT_COMMITTER_EMAIL": "fixture@example.invalid",
+        }
+    )
+    subprocess.run(
+        ["git", *args],
+        cwd=str(repo_root),
+        check=True,
+        capture_output=True,
+        env=env,
+    )
+
+
+def _build_repo(tmp_path):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    log_path = tmp_path / "tracker_calls.log"
+    _write_component(repo_root, "alpha", "ALPHA")
+    _write_component(repo_root, "beta", "BETA")
+    _write_tracker_stand_in(repo_root, log_path)
+    _git(repo_root, "init", "-q")
+    _git(repo_root, "add", "-A")
+    _git(repo_root, "commit", "-q", "-m", "fixture")
+    return repo_root, log_path
+
+
+def test_provenance_hit_status_reflects_hit_and_miss_per_component(tmp_path):
+    repo_root, log_path = _build_repo(tmp_path)
+
+    changed_ids = [HIT_ID, MISS_ID, "R-ALPHA-001", "R-BETA-001"]
+    packet = review_packet_builder.build_review_packet(changed_ids, Path(repo_root))
+
+    # The provenance-tracker stand-in was actually consulted.
+    assert log_path.exists(), "provenance-tracker stand-in was never invoked"
+    assert "check_readiness" in log_path.read_text(encoding="utf-8")
+
+    status = field(packet, "provenance_hit_status")
+    assert isinstance(status, dict)
+
+    # Both components are shown explicitly, never left to be inferred.
+    assert HIT_ID in status, f"{HIT_ID} missing from provenance_hit_status: {status!r}"
+    assert MISS_ID in status, f"{MISS_ID} missing from provenance_hit_status: {status!r}"
+
+    # Each component's status is accurate.
+    assert status[HIT_ID] is True, f"expected {HIT_ID} hit True, got {status[HIT_ID]!r}"
+    assert status[MISS_ID] is False, f"expected {MISS_ID} hit False, got {status[MISS_ID]!r}"

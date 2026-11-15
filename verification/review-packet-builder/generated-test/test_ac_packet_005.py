@@ -1,136 +1,182 @@
+import json
+import os
 import subprocess
-import textwrap
 from pathlib import Path
+
+import pytest
 
 import review_packet_builder
 
 
-def _run_git(repo_root, *args):
-    subprocess.run(["git", *args], cwd=repo_root, check=True, capture_output=True)
+def field(value, name):
+    return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def _field(value, name):
-    if isinstance(value, dict):
-        return value.get(name)
-    return getattr(value, name, None)
-
-
-def _has_field(value, name):
+def has_field(value, name):
     if isinstance(value, dict):
         return name in value
     return hasattr(value, name)
 
 
-def _init_repo_root(tmp_path):
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    _run_git(repo_root, "init")
-    _run_git(repo_root, "config", "user.email", "test@example.com")
-    _run_git(repo_root, "config", "user.name", "Test")
+def _git(repo_root, *args):
+    env = dict(os.environ)
+    env.update(
+        {
+            "GIT_AUTHOR_NAME": "Test",
+            "GIT_AUTHOR_EMAIL": "test@example.invalid",
+            "GIT_COMMITTER_NAME": "Test",
+            "GIT_COMMITTER_EMAIL": "test@example.invalid",
+        }
+    )
+    subprocess.run(
+        ["git", "-c", "commit.gpgsign=false", *args],
+        cwd=str(repo_root),
+        check=True,
+        capture_output=True,
+        env=env,
+    )
 
-    comp_dir = repo_root / "specs" / "components" / "foo"
-    (comp_dir / "requirements").mkdir(parents=True)
-    (comp_dir / "acceptance").mkdir(parents=True)
 
-    (comp_dir / "component.md").write_text(textwrap.dedent("""\
-        ---
-        id: comp-foo
-        title: Foo Component
-        status: ratified
-        owners: [lselfors]
-        sealed: true
-        source_path: vendor/foo/foo.py
-        last_ratified_commit: 0000000000000000000000000000000000000000
-        ---
+def _write(path, text):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text)
 
-        # Foo Component
 
-        A sealed component used purely as a fixture for this test.
-        """))
+def _write_component(repo_root, slug, upper):
+    comp_dir = repo_root / "specs" / "components" / slug
+    _write(
+        comp_dir / "component.md",
+        "---\n"
+        f"id: comp-{slug}\n"
+        f"title: {slug.capitalize()} fixture component\n"
+        "status: draft\n"
+        "owners: [alice]\n"
+        "depends_on: []\n"
+        "sealed: true\n"
+        f"source_path: legacy/{slug}/\n"
+        "---\n\n"
+        f"# comp-{slug}\n\nA synthetic fixture component.\n",
+    )
+    _write(
+        comp_dir / "requirements" / f"R-{upper}-001.md",
+        f"# R-{upper}-001\n\n**R-{upper}-001** — The component MUST do one thing.\n",
+    )
+    _write(
+        comp_dir / "acceptance" / f"AC-{upper}-001.md",
+        f"# AC-{upper}-001\n\nCovers: R-{upper}-001\nKind: generated-test\n\n"
+        "```gherkin\nGiven a thing\nWhen it runs\nThen it works\n```\n",
+    )
+    _write(
+        comp_dir / "interface" / "library.md",
+        "# Library\n\n```\ndo_thing() -> None\n```\n",
+    )
+    _write(comp_dir / "constraints.md", "# Constraints\n\nNone.\n")
+    _write(repo_root / "legacy" / slug / f"{slug}.py", "def do_thing():\n    return None\n")
 
-    (comp_dir / "requirements" / "R-FOO-001.md").write_text(textwrap.dedent("""\
-        # R-FOO-001
 
-        **R-FOO-001** — Foo must do the foo thing.
-        """))
-
-    (comp_dir / "acceptance" / "AC-FOO-001.md").write_text(textwrap.dedent("""\
-        Covers: R-FOO-001
-
-        ```gherkin
-        Given a foo
-        When it is fooed
-        Then it foos
-        ```
-        """))
-
-    pt_dir = repo_root / "gen" / "provenance-tracker"
-    pt_dir.mkdir(parents=True)
-    (pt_dir / "provenance_tracker.py").write_text(textwrap.dedent("""\
-        def check_readiness(repo_root, changed_ids=None, model=None, seed=0, llm_backend=None):
-            return {
-                "scope": "blast-radius",
-                "ready": True,
-                "components": {
-                    "comp-foo": {
-                        "hit": True,
-                        "verification_report": {
-                            "component_id": "comp-foo",
-                            "criteria": [
-                                {
-                                    "id": "AC-FOO-001",
-                                    "covers": "R-FOO-001",
-                                    "kind": "compiled",
-                                    "result": "pass",
-                                },
-                            ],
-                            "requirement_results": {"R-FOO-001": "pass"},
-                            "interface_drift": False,
-                            "mutation_score": None,
-                            "overall": "pass",
-                        },
-                        "license_scan": {
-                            "blocked": False,
-                            "component_id": "comp-foo",
-                            "findings": [],
-                        },
-                        "secret_scan": {
-                            "flagged": False,
-                            "component_id": "comp-foo",
-                            "findings": [],
-                        },
-                    },
-                },
-                "capabilities": {},
-                "not_ready_reasons": [],
+def _verification_report(component_id, upper):
+    return {
+        "component_id": component_id,
+        "criteria": [
+            {
+                "id": f"AC-{upper}-001",
+                "covers": f"R-{upper}-001",
+                "kind": "generated-test",
+                "result": "pass",
             }
+        ],
+        "requirement_results": {f"R-{upper}-001": "pass"},
+        "interface_drift": False,
+        "mutation_score": None,
+        "overall": "pass",
+    }
 
 
-        def last_requirement_failures(component_id, repo_root):
-            return []
-        """))
-
-    (repo_root / "README.md").write_text("fixture repo\n")
-    _run_git(repo_root, "add", "-A")
-    _run_git(repo_root, "commit", "-m", "initial commit")
-
-    return repo_root
+def _provenance_check_result(component_id, upper):
+    return {
+        "hit": True,
+        "verification_report": _verification_report(component_id, upper),
+        "license_scan": {"blocked": False, "findings": []},
+        "secret_scan": {"flagged": False, "findings": []},
+    }
 
 
-def test_compliance_flags_present_with_both_fields_explicitly_empty(tmp_path):
-    repo_root = _init_repo_root(tmp_path)
+@pytest.fixture
+def repo_root(tmp_path):
+    root = tmp_path / "repo"
+    root.mkdir()
+    _git(root, "init", "-q")
 
-    packet = review_packet_builder.build_review_packet(["comp-foo"], repo_root)
+    _write_component(root, "foo", "FOO")
+    _write_component(root, "bar", "BAR")
 
-    assert _has_field(packet, "compliance_flags")
-    compliance_flags = _field(packet, "compliance_flags")
-    assert compliance_flags is not None
+    log_path = tmp_path / "tracker_calls.log"
+    verify_report = {
+        "scope": "blast-radius",
+        "ready": True,
+        "components": {
+            "comp-foo": _provenance_check_result("comp-foo", "FOO"),
+            "comp-bar": _provenance_check_result("comp-bar", "BAR"),
+        },
+        "capabilities": {},
+        "not_ready_reasons": [],
+    }
 
-    assert _has_field(compliance_flags, "license_scan")
-    assert _has_field(compliance_flags, "secret_scan")
+    stand_in = (
+        "import json\n"
+        f"_LOG_PATH = {str(log_path)!r}\n"
+        f"_REPORT = {verify_report!r}\n"
+        "\n"
+        "\n"
+        "def _log(record):\n"
+        "    with open(_LOG_PATH, 'a') as fh:\n"
+        "        fh.write(json.dumps(record) + '\\n')\n"
+        "\n"
+        "\n"
+        "def check_readiness(repo_root, changed_ids=None, model=None, seed=0, llm_backend=None):\n"
+        "    _log({'fn': 'check_readiness', 'changed_ids': list(changed_ids) if changed_ids is not None else None})\n"
+        "    import copy\n"
+        "    return copy.deepcopy(_REPORT)\n"
+        "\n"
+        "\n"
+        "def last_requirement_failures(component_id, repo_root):\n"
+        "    _log({'fn': 'last_requirement_failures', 'component_id': component_id})\n"
+        "    return []\n"
+    )
+    _write(root / "gen" / "provenance-tracker" / "provenance_tracker.py", stand_in)
 
-    license_scan = _field(compliance_flags, "license_scan")
-    secret_scan = _field(compliance_flags, "secret_scan")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", "initial fixture")
 
-    assert license_scan == []
-    assert secret_scan == []
+    return root, log_path
+
+
+def test_compliance_flags_present_and_explicitly_empty_when_scans_clean(repo_root):
+    root, log_path = repo_root
+    changed_ids = ["comp-foo", "R-FOO-001", "comp-bar", "R-BAR-001"]
+
+    packet = review_packet_builder.build_review_packet(changed_ids, root)
+
+    # The stand-in provenance-tracker was actually consulted.
+    assert log_path.exists(), "provenance-tracker stand-in was never invoked"
+    calls = [json.loads(line) for line in log_path.read_text().splitlines() if line.strip()]
+    assert any(c["fn"] == "check_readiness" for c in calls)
+
+    # compliance_flags is its own explicit section, present (not omitted).
+    assert has_field(packet, "compliance_flags"), "compliance_flags section omitted"
+    flags = field(packet, "compliance_flags")
+    assert flags is not None, "compliance_flags must be present, not null"
+
+    # Both fields present, explicitly empty lists — not omitted, not None.
+    assert has_field(flags, "license_scan"), "compliance_flags.license_scan omitted"
+    assert has_field(flags, "secret_scan"), "compliance_flags.secret_scan omitted"
+
+    license_flags = field(flags, "license_scan")
+    secret_flags = field(flags, "secret_scan")
+
+    assert license_flags is not None
+    assert secret_flags is not None
+    assert list(license_flags) == []
+    assert list(secret_flags) == []
+    assert isinstance(license_flags, (list, tuple))
+    assert isinstance(secret_flags, (list, tuple))
