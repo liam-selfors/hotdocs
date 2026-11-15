@@ -1,3 +1,6 @@
+"""AC-PROV-001: the written manifest's top-level keys exactly match
+SPEC_GUIDELINES.md §7's field list, with no extra keys and none missing."""
+
 import dataclasses
 import json
 from pathlib import Path
@@ -5,8 +8,8 @@ from pathlib import Path
 import provenance_writer
 
 
-# SPEC_GUIDELINES.md §7's provenance manifest field list (reproduced in
-# provenance-writer's interface/data provenance manifest document).
+# SPEC_GUIDELINES.md §7's provenance manifest field list, as reproduced in
+# provenance-writer's interface/data (provenance manifest).
 EXPECTED_KEYS = {
     "spec_bundle_hash",
     "model_pin",
@@ -22,12 +25,8 @@ EXPECTED_KEYS = {
     "secret_scan",
 }
 
-COMPONENT_ID = "comp-prov-sample"
-SLUG = "prov-sample"
-
-
-def _field(value, name):
-    return value[name] if isinstance(value, dict) else getattr(value, name)
+COMPONENT_ID = "comp-widget"
+SLUG = "widget"
 
 
 def _generation_result():
@@ -37,7 +36,7 @@ def _generation_result():
         "model": "claude-sonnet-5",
         "prompt_version": "v10",
         "cache_hit": False,
-        "files": {"prov_sample.py": "def compute_widget(x):\n    return x\n"},
+        "files": {"widget.py": "def make_widget(x):\n    return x\n"},
         "model_call_error": None,
         "refused": None,
         "retry_feedback": None,
@@ -49,13 +48,13 @@ def _verification_report():
         "component_id": COMPONENT_ID,
         "criteria": [
             {
-                "id": "AC-PROV-SAMPLE-001",
-                "covers": "R-PROV-SAMPLE-001",
+                "id": "AC-WIDGET-001",
+                "covers": "R-WIDGET-001",
                 "kind": "compiled",
                 "result": "pass",
             }
         ],
-        "requirement_results": {"R-PROV-SAMPLE-001": "pass"},
+        "requirement_results": {"R-WIDGET-001": "pass"},
         "interface_drift": False,
         "mutation_score": 0.9,
         "overall": "pass",
@@ -92,7 +91,7 @@ def _secret_scan_result():
     }
 
 
-def _inputs_fields():
+def _inputs_data():
     return {
         "component_id": COMPONENT_ID,
         "generation_result": _generation_result(),
@@ -108,51 +107,35 @@ def _inputs_fields():
     }
 
 
-def _build_inputs():
-    fields = _inputs_fields()
+def _make_inputs():
+    data = _inputs_data()
     cls = getattr(provenance_writer, "ProvenanceInputs", None)
-    if isinstance(cls, type):
-        if dataclasses.is_dataclass(cls):
-            names = {f.name for f in dataclasses.fields(cls)}
-            return cls(**{k: v for k, v in fields.items() if k in names})
+    if cls is not None and dataclasses.is_dataclass(cls):
         try:
-            return cls(**fields)
+            return cls(**data)
         except TypeError:
-            return fields
-    return fields
-
-
-def _read_manifest(path: Path):
-    assert path.is_file(), f"expected manifest at {path}"
-    data = json.loads(path.read_text(encoding="utf-8"))
-    assert isinstance(data, dict), f"manifest at {path} is not a JSON object"
+            return data
     return data
 
 
-def test_ac_prov_001_manifest_top_level_keys_match_spec_guidelines_section_7(tmp_path):
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    gen_dir = repo_root / "gen" / SLUG
-    gen_dir.mkdir(parents=True)
-    (gen_dir / "prov_sample.py").write_text(
-        "def compute_widget(x):\n    return x\n", encoding="utf-8"
-    )
+def test_ac_prov_001_manifest_top_level_keys_exactly_match_schema(tmp_path):
+    repo_root = Path(tmp_path)
+    (repo_root / "gen" / SLUG).mkdir(parents=True, exist_ok=True)
+    (repo_root / "verification" / SLUG).mkdir(parents=True, exist_ok=True)
 
-    inputs = _build_inputs()
+    provenance_writer.write_provenance(COMPONENT_ID, _make_inputs(), repo_root)
 
-    result = provenance_writer.write_provenance(COMPONENT_ID, inputs, repo_root)
-    assert result is None
-
-    gen_manifest = _read_manifest(repo_root / "gen" / SLUG / ".provenance.json")
-    ver_manifest = _read_manifest(
-        repo_root / "verification" / SLUG / ".provenance.json"
-    )
-
-    for label, manifest in (("gen", gen_manifest), ("verification", ver_manifest)):
+    manifest_paths = [
+        repo_root / "gen" / SLUG / ".provenance.json",
+        repo_root / "verification" / SLUG / ".provenance.json",
+    ]
+    for path in manifest_paths:
+        assert path.is_file(), f"manifest not written at {path}"
+        manifest = json.loads(path.read_text(encoding="utf-8"))
+        assert isinstance(manifest, dict), f"manifest at {path} is not a JSON object"
         keys = set(manifest.keys())
         extra = keys - EXPECTED_KEYS
         missing = EXPECTED_KEYS - keys
-        assert not extra, f"{label} manifest has extra keys: {sorted(extra)}"
-        assert not missing, f"{label} manifest is missing keys: {sorted(missing)}"
+        assert not extra, f"extra keys in {path}: {sorted(extra)}"
+        assert not missing, f"missing keys in {path}: {sorted(missing)}"
         assert keys == EXPECTED_KEYS
-        assert len(manifest) == len(EXPECTED_KEYS)

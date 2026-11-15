@@ -1,4 +1,4 @@
-"""AC-PROV-010 (Covers: R-PROV-010).
+"""AC-PROV-010: both provenance manifest copies are byte-identical.
 
 Given a completed write_provenance call
 When both gen/<component>/.provenance.json and
@@ -6,7 +6,6 @@ When both gen/<component>/.provenance.json and
 Then their contents are byte-identical
 """
 
-import dataclasses
 import json
 from pathlib import Path
 
@@ -15,64 +14,9 @@ import pytest
 import provenance_writer
 
 
-COMPONENT_ID = "comp-provwidget"
-SLUG = "provwidget"
-
-
-def _generation_result_with_files():
-    return {
-        "component_id": COMPONENT_ID,
-        "spec_bundle_hash": "sha256:" + "a" * 64,
-        "model": "claude-sonnet-5",
-        "prompt_version": "v10",
-        "cache_hit": False,
-        "files": {"provwidget.py": "def widget_value(x):\n    return x + 1\n"},
-        "model_call_error": None,
-        "refused": None,
-        "retry_feedback": None,
-    }
-
-
-def _generation_result_model_error():
-    return {
-        "component_id": COMPONENT_ID,
-        "spec_bundle_hash": "sha256:" + "b" * 64,
-        "model": "claude-sonnet-5",
-        "prompt_version": "v10",
-        "cache_hit": False,
-        "files": {},
-        "model_call_error": {"category": "network", "message": "connection reset"},
-        "refused": None,
-        "retry_feedback": ["R-PROVWIDGET-001"],
-    }
-
-
-def _verification_report():
-    return {
-        "component_id": COMPONENT_ID,
-        "criteria": [
-            {
-                "id": "AC-PROVWIDGET-001",
-                "covers": "R-PROVWIDGET-001",
-                "kind": "compiled",
-                "result": "pass",
-            },
-            {
-                "id": "AC-PROVWIDGET-002",
-                "covers": "R-PROVWIDGET-002",
-                "kind": "llm-judge",
-                "result": "skipped",
-                "rationale": None,
-            },
-        ],
-        "requirement_results": {
-            "R-PROVWIDGET-001": "pass",
-            "R-PROVWIDGET-002": "fail",
-        },
-        "interface_drift": False,
-        "mutation_score": 0.9,
-        "overall": "pass",
-    }
+COMPONENT_ID = "comp-provtarget"
+SLUG = "provtarget"
+SPEC_HASH = "sha256:" + "ab" * 32
 
 
 def _license_scan_result():
@@ -105,11 +49,49 @@ def _secret_scan_result():
     }
 
 
-def _make_inputs(generation_result, verification_report):
-    fields = {
+def _verification_report():
+    return {
         "component_id": COMPONENT_ID,
-        "generation_result": generation_result,
-        "verification_report": verification_report,
+        "criteria": [
+            {
+                "id": "AC-PROVTARGET-001",
+                "covers": "R-PROVTARGET-001",
+                "kind": "compiled",
+                "result": "pass",
+            },
+            {
+                "id": "AC-PROVTARGET-002",
+                "covers": "R-PROVTARGET-002",
+                "kind": "llm-judge",
+                "result": "skipped",
+                "rationale": None,
+            },
+        ],
+        "requirement_results": {
+            "R-PROVTARGET-001": "pass",
+            "R-PROVTARGET-002": "fail",
+        },
+        "interface_drift": False,
+        "mutation_score": 0.9,
+        "overall": "pass",
+    }
+
+
+def _inputs_with_candidate():
+    return {
+        "component_id": COMPONENT_ID,
+        "generation_result": {
+            "component_id": COMPONENT_ID,
+            "spec_bundle_hash": SPEC_HASH,
+            "model": "claude-sonnet-5",
+            "prompt_version": "v10",
+            "cache_hit": False,
+            "files": {"provtarget.py": "def compute_value(x):\n    return x + 1\n"},
+            "model_call_error": None,
+            "refused": None,
+            "retry_feedback": ["R-PROVTARGET-002"],
+        },
+        "verification_report": _verification_report(),
         "license_scan_result": _license_scan_result(),
         "secret_scan_result": _secret_scan_result(),
         "provenance_hit": False,
@@ -119,82 +101,81 @@ def _make_inputs(generation_result, verification_report):
             "license_scanner": "license_scanner@4.0.0-no-reference-corpus",
         },
     }
-    cls = getattr(provenance_writer, "ProvenanceInputs", None)
-    if cls is not None and dataclasses.is_dataclass(cls):
-        try:
-            return cls(**fields)
-        except TypeError:
-            pass
-    return fields
+
+
+def _inputs_without_candidate():
+    return {
+        "component_id": COMPONENT_ID,
+        "generation_result": {
+            "component_id": COMPONENT_ID,
+            "spec_bundle_hash": SPEC_HASH,
+            "model": "claude-sonnet-5",
+            "prompt_version": "v10",
+            "cache_hit": False,
+            "files": {},
+            "model_call_error": {"category": "network", "message": "connection reset"},
+            "refused": None,
+            "retry_feedback": None,
+        },
+        "verification_report": None,
+        "license_scan_result": _license_scan_result(),
+        "secret_scan_result": _secret_scan_result(),
+        "provenance_hit": False,
+        "attempts": 1,
+        "gate_versions": {"compiler": "1.0.0"},
+    }
+
+
+def _call_write(component_id, inputs, repo_root):
+    """Call write_provenance with a plain dict; fall back to the module's
+    ProvenanceInputs type if one exists and the dict form is rejected."""
+    try:
+        return provenance_writer.write_provenance(component_id, inputs, repo_root)
+    except (TypeError, AttributeError):
+        cls = getattr(provenance_writer, "ProvenanceInputs", None)
+        if cls is None:
+            raise
+        return provenance_writer.write_provenance(component_id, cls(**inputs), repo_root)
 
 
 @pytest.mark.parametrize(
-    "scenario",
-    ["verified-candidate", "never-reached-verification"],
+    "make_inputs",
+    [_inputs_with_candidate, _inputs_without_candidate],
+    ids=["with-candidate", "no-candidate"],
 )
-def test_both_provenance_copies_are_byte_identical(tmp_path, scenario):
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
+def test_both_manifest_copies_are_byte_identical(tmp_path, make_inputs):
+    repo_root = Path(tmp_path)
 
-    if scenario == "verified-candidate":
-        gen_result = _generation_result_with_files()
-        report = _verification_report()
-        # The generator would already have written the candidate here.
-        gen_dir = repo_root / "gen" / SLUG
-        gen_dir.mkdir(parents=True)
-        for rel, content in gen_result["files"].items():
-            (gen_dir / rel).write_text(content, encoding="utf-8")
-    else:
-        gen_result = _generation_result_model_error()
-        report = None
+    _call_write(COMPONENT_ID, make_inputs(), repo_root)
 
-    inputs = _make_inputs(gen_result, report)
-
-    # Given a completed write_provenance call
-    provenance_writer.write_provenance(COMPONENT_ID, inputs, repo_root)
-
-    # When both copies are read back, by exact path
     gen_manifest = repo_root / "gen" / SLUG / ".provenance.json"
     ver_manifest = repo_root / "verification" / SLUG / ".provenance.json"
 
-    assert gen_manifest.is_file(), f"missing {gen_manifest}"
-    assert ver_manifest.is_file(), f"missing {ver_manifest}"
+    assert gen_manifest.is_file(), f"missing manifest at {gen_manifest}"
+    assert ver_manifest.is_file(), f"missing manifest at {ver_manifest}"
 
     gen_bytes = gen_manifest.read_bytes()
     ver_bytes = ver_manifest.read_bytes()
 
-    # Sanity: it is a real, non-empty JSON manifest, not two empty files.
-    assert gen_bytes, "gen/ manifest is empty"
+    # Sanity: a real manifest was written, not an empty file.
+    assert gen_bytes, "gen manifest is empty"
     parsed = json.loads(gen_bytes.decode("utf-8"))
     assert isinstance(parsed, dict)
 
-    # Then their contents are byte-identical
+    # The criterion's Then clause: the two copies are byte-identical.
     assert gen_bytes == ver_bytes
 
 
 def test_rewrite_keeps_both_copies_byte_identical(tmp_path):
-    """A second write must not let the two copies diverge either."""
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
+    """A second completed write must leave the copies identical too,
+    never one updated and the other stale."""
+    repo_root = Path(tmp_path)
 
-    first = _make_inputs(_generation_result_model_error(), None)
-    provenance_writer.write_provenance(COMPONENT_ID, first, repo_root)
+    _call_write(COMPONENT_ID, _inputs_without_candidate(), repo_root)
+    _call_write(COMPONENT_ID, _inputs_with_candidate(), repo_root)
 
-    gen_dir = repo_root / "gen" / SLUG
-    gen_dir.mkdir(parents=True, exist_ok=True)
-    gen_result = _generation_result_with_files()
-    for rel, content in gen_result["files"].items():
-        (gen_dir / rel).write_text(content, encoding="utf-8")
-
-    second = _make_inputs(gen_result, _verification_report())
-    provenance_writer.write_provenance(COMPONENT_ID, second, repo_root)
-
-    gen_manifest = repo_root / "gen" / SLUG / ".provenance.json"
-    ver_manifest = repo_root / "verification" / SLUG / ".provenance.json"
-
-    gen_bytes = gen_manifest.read_bytes()
-    ver_bytes = ver_manifest.read_bytes()
+    gen_bytes = (repo_root / "gen" / SLUG / ".provenance.json").read_bytes()
+    ver_bytes = (repo_root / "verification" / SLUG / ".provenance.json").read_bytes()
 
     assert gen_bytes
-    assert isinstance(json.loads(gen_bytes.decode("utf-8")), dict)
     assert gen_bytes == ver_bytes

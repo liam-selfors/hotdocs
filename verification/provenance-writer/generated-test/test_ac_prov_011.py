@@ -5,7 +5,6 @@ When the written file is parsed as JSON
 Then parsing succeeds and its key set matches the schema exactly
 """
 
-import dataclasses
 import json
 from pathlib import Path
 
@@ -14,10 +13,11 @@ import pytest
 import provenance_writer
 
 
-COMPONENT_ID = "comp-widget"
-SLUG = "widget"
+COMPONENT_ID = "comp-foo"
+SLUG = "foo"
 
-# SPEC_GUIDELINES.md section 7's provenance manifest field set.
+# SPEC_GUIDELINES.md section 7 field set, as reproduced in the provenance
+# manifest interface document.
 EXPECTED_KEYS = {
     "spec_bundle_hash",
     "model_pin",
@@ -33,7 +33,53 @@ EXPECTED_KEYS = {
     "secret_scan",
 }
 
-SPEC_HASH = "sha256:" + "ab" * 32
+SPEC_BUNDLE_HASH = "sha256:" + "ab" * 32
+
+
+def _generation_result(with_files):
+    if with_files:
+        return {
+            "component_id": COMPONENT_ID,
+            "spec_bundle_hash": SPEC_BUNDLE_HASH,
+            "model": "claude-sonnet-5",
+            "prompt_version": "v10",
+            "cache_hit": False,
+            "files": {"foo.py": "def bar(x):\n    return x\n"},
+            "model_call_error": None,
+            "refused": None,
+            "retry_feedback": ["R-FOO-003"],
+        }
+    return {
+        "component_id": COMPONENT_ID,
+        "spec_bundle_hash": SPEC_BUNDLE_HASH,
+        "model": "claude-sonnet-5",
+        "prompt_version": "v10",
+        "cache_hit": False,
+        "files": {},
+        "model_call_error": {"category": "network", "message": "connection reset"},
+        "refused": None,
+        "retry_feedback": None,
+    }
+
+
+def _verification_report():
+    return {
+        "component_id": COMPONENT_ID,
+        "criteria": [
+            {"id": "AC-FOO-001", "covers": "R-FOO-001", "kind": "compiled", "result": "pass"},
+            {
+                "id": "AC-FOO-002",
+                "covers": "R-FOO-002",
+                "kind": "llm-judge",
+                "result": "skipped",
+                "rationale": None,
+            },
+        ],
+        "requirement_results": {"R-FOO-001": "pass", "R-FOO-002": "fail"},
+        "interface_drift": False,
+        "mutation_score": 0.92,
+        "overall": "pass",
+    }
 
 
 def _license_scan_result():
@@ -66,39 +112,7 @@ def _secret_scan_result():
     }
 
 
-def _verification_report():
-    return {
-        "component_id": COMPONENT_ID,
-        "criteria": [
-            {
-                "id": "AC-WIDGET-001",
-                "covers": "R-WIDGET-001",
-                "kind": "compiled",
-                "result": "pass",
-            }
-        ],
-        "requirement_results": {"R-WIDGET-001": "pass"},
-        "interface_drift": False,
-        "mutation_score": 0.9,
-        "overall": "pass",
-    }
-
-
-def _generation_result(with_files):
-    return {
-        "component_id": COMPONENT_ID,
-        "spec_bundle_hash": SPEC_HASH,
-        "model": "claude-sonnet-5",
-        "prompt_version": "v10",
-        "cache_hit": False,
-        "files": {"widget.py": "def make_widget():\n    return 1\n"} if with_files else {},
-        "model_call_error": None,
-        "refused": None if with_files else "sealed-component",
-        "retry_feedback": None,
-    }
-
-
-def _inputs_dict(with_files):
+def _inputs_fields(with_files):
     return {
         "component_id": COMPONENT_ID,
         "generation_result": _generation_result(with_files),
@@ -106,43 +120,49 @@ def _inputs_dict(with_files):
         "license_scan_result": _license_scan_result(),
         "secret_scan_result": _secret_scan_result(),
         "provenance_hit": False,
-        "attempts": 1,
-        "gate_versions": {
-            "compiler": "1.0.0",
-            "license_scanner": "license_scanner@4.0.0-no-reference-corpus",
-        },
+        "attempts": 2,
+        "gate_versions": {"compiler": "1.0.0", "license_scanner": "k-gram@1.0.0"},
     }
 
 
-def _make_inputs(data):
-    """Build a ProvenanceInputs dataclass if the module defines one, else a dict."""
+def _build_inputs(fields):
+    """Use the module's ProvenanceInputs type if it exposes one, else a dict."""
     cls = getattr(provenance_writer, "ProvenanceInputs", None)
-    if isinstance(cls, type) and dataclasses.is_dataclass(cls):
-        names = {f.name for f in dataclasses.fields(cls)}
-        kwargs = {k: v for k, v in data.items() if k in names}
+    if cls is not None and isinstance(cls, type) and cls is not dict:
         try:
-            return cls(**kwargs)
+            return cls(**fields)
         except TypeError:
-            return data
-    return data
+            pass
+    return dict(fields)
 
 
-def _reject_constant(name):
-    raise ValueError(f"non-standard JSON constant {name!r}")
+def _strict_parse(text):
+    """Parse as strictly valid JSON: no NaN/Infinity, no duplicate keys."""
 
+    def reject_constant(name):
+        raise ValueError("non-standard JSON constant: %s" % name)
 
-def _parse_strict(path: Path):
-    text = path.read_text(encoding="utf-8")
-    return json.loads(text, parse_constant=_reject_constant)
+    def no_duplicates(pairs):
+        keys = [k for k, _ in pairs]
+        if len(keys) != len(set(keys)):
+            raise ValueError("duplicate keys in JSON object: %r" % keys)
+        return dict(pairs)
+
+    return json.loads(
+        text, parse_constant=reject_constant, object_pairs_hook=no_duplicates
+    )
 
 
 @pytest.mark.parametrize("with_files", [True, False], ids=["verified", "never-verified"])
 def test_written_manifest_is_valid_json_with_exact_schema_keys(tmp_path, with_files):
-    repo_root = tmp_path / "repo"
+    repo_root = Path(tmp_path) / "repo"
     repo_root.mkdir()
 
-    inputs = _make_inputs(_inputs_dict(with_files))
-    provenance_writer.write_provenance(COMPONENT_ID, inputs, repo_root)
+    inputs = _build_inputs(_inputs_fields(with_files))
+
+    # Given a completed write_provenance call
+    result = provenance_writer.write_provenance(COMPONENT_ID, inputs, repo_root)
+    assert result is None
 
     manifest_paths = [
         repo_root / "gen" / SLUG / ".provenance.json",
@@ -150,18 +170,20 @@ def test_written_manifest_is_valid_json_with_exact_schema_keys(tmp_path, with_fi
     ]
 
     for path in manifest_paths:
-        assert path.is_file(), f"expected manifest at {path}"
-        try:
-            parsed = _parse_strict(path)
-        except ValueError as exc:  # json.JSONDecodeError is a ValueError
-            pytest.fail(f"{path} is not valid JSON: {exc}")
+        assert path.is_file(), "expected manifest at %s" % path
 
-        assert isinstance(parsed, dict), (
-            f"{path} top-level JSON value must be an object, got {type(parsed).__name__}"
-        )
-        keys = set(parsed.keys())
-        extra = keys - EXPECTED_KEYS
-        missing = EXPECTED_KEYS - keys
-        assert not extra, f"{path} has extra keys: {sorted(extra)}"
-        assert not missing, f"{path} is missing keys: {sorted(missing)}"
-        assert keys == EXPECTED_KEYS
+        # When the written file is parsed as JSON
+        text = path.read_text(encoding="utf-8")
+        try:
+            parsed = _strict_parse(text)
+        except ValueError as exc:  # json.JSONDecodeError is a ValueError
+            pytest.fail("manifest at %s is not valid JSON: %s" % (path, exc))
+
+        # Then parsing succeeds and its key set matches the schema exactly
+        assert isinstance(parsed, dict), "manifest top level must be a JSON object"
+        actual_keys = set(parsed.keys())
+        missing = EXPECTED_KEYS - actual_keys
+        extra = actual_keys - EXPECTED_KEYS
+        assert not missing, "manifest at %s is missing keys: %s" % (path, sorted(missing))
+        assert not extra, "manifest at %s has extra keys: %s" % (path, sorted(extra))
+        assert actual_keys == EXPECTED_KEYS

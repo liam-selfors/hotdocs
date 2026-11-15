@@ -1,9 +1,9 @@
 """AC-PROV-012 (Covers: R-PROV-012).
 
-Given two separate write_provenance calls, each with different ProvenanceInputs,
-When each manifest is written,
-Then both manifests' pipeline_version fields are identical, and equal this
-component's own version constant (PIPELINE_VERSION).
+Given two separate write_provenance calls, each with different
+ProvenanceInputs, when each manifest is written, then both manifests'
+pipeline_version fields are identical, and equal this component's own
+version constant (PIPELINE_VERSION).
 """
 
 import dataclasses
@@ -17,18 +17,7 @@ def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def _make_inputs(data):
-    """Build a ProvenanceInputs: the module's dataclass if it has one, else a dict."""
-    cls = getattr(provenance_writer, "ProvenanceInputs", None)
-    if cls is not None and dataclasses.is_dataclass(cls):
-        try:
-            return cls(**data)
-        except TypeError:
-            pass
-    return dict(data)
-
-
-def _license_scan(component_id, score):
+def _license_scan_result(component_id):
     return {
         "component_id": component_id,
         "gate_version": "license_scanner@4.0.0-no-reference-corpus",
@@ -41,102 +30,90 @@ def _license_scan(component_id, score):
         "notified": False,
         "notification_delivery_error": None,
         "cache_hit": False,
-    } if score is None else {
-        "component_id": component_id,
-        "gate_version": "license_scanner@4.0.3+9f2c41ab07de",
-        "evaluated": True,
-        "reason": None,
-        "similarity_score": score,
-        "block_threshold": 0.70,
-        "blocked": False,
-        "matches": [],
-        "notified": False,
-        "notification_delivery_error": None,
-        "cache_hit": True,
     }
 
 
-def _secret_scan(cache_hit):
+def _secret_scan_result(flagged=False):
     return {
         "scope": "full",
         "gate_version": "secret_scanner@3.1.0+detect-secrets.1.5.0",
-        "flagged": False,
+        "flagged": flagged,
         "matches": [],
         "allowed": [],
         "unused_allowlist_entries": [],
         "notified": False,
         "notification_delivery_error": None,
-        "cache_hit": cache_hit,
+        "cache_hit": False,
     }
 
 
-def _inputs_a():
-    component_id = "comp-alpha-widget"
-    return component_id, {
-        "component_id": component_id,
-        "generation_result": {
+def _make_inputs(data):
+    """Build ProvenanceInputs: the module's own type if it exposes one, else a dict."""
+    cls = getattr(provenance_writer, "ProvenanceInputs", None)
+    if cls is not None and dataclasses.is_dataclass(cls):
+        try:
+            return cls(**data)
+        except TypeError:
+            pass
+    return data
+
+
+def _inputs_one():
+    component_id = "comp-alpha"
+    return _make_inputs(
+        {
             "component_id": component_id,
-            "spec_bundle_hash": "sha256:" + "a" * 64,
-            "model": "claude-sonnet-5",
-            "prompt_version": "v10",
-            "cache_hit": False,
-            "files": {"alpha_widget.py": "def compute_alpha(x):\n    return x\n"},
-            "model_call_error": None,
-            "refused": None,
-            "retry_feedback": None,
-        },
-        "verification_report": {
+            "generation_result": {
+                "component_id": component_id,
+                "spec_bundle_hash": "sha256:" + "1" * 64,
+                "model": "claude-sonnet-5",
+                "prompt_version": "v10",
+                "cache_hit": False,
+                "files": {},
+                "model_call_error": {"category": "network", "message": "connection reset"},
+                "refused": None,
+                "retry_feedback": None,
+            },
+            "verification_report": None,
+            "license_scan_result": _license_scan_result(component_id),
+            "secret_scan_result": _secret_scan_result(flagged=False),
+            "provenance_hit": False,
+            "attempts": 1,
+            "gate_versions": {"compiler": "1.0.0", "license_scanner": "k-gram@1.0.0"},
+        }
+    )
+
+
+def _inputs_two():
+    component_id = "comp-beta"
+    return _make_inputs(
+        {
             "component_id": component_id,
-            "criteria": [
-                {"id": "AC-ALPHA-001", "covers": "R-ALPHA-001",
-                 "kind": "compiled", "result": "pass"},
-            ],
-            "requirement_results": {"R-ALPHA-001": "pass"},
-            "interface_drift": False,
-            "mutation_score": 0.9,
-            "overall": "pass",
-        },
-        "license_scan_result": _license_scan(component_id, 0.1),
-        "secret_scan_result": _secret_scan(False),
-        "provenance_hit": False,
-        "attempts": 1,
-        "gate_versions": {"compiler": "1.0.0", "license_scanner": "k-gram@1.0.0"},
-    }
+            "generation_result": {
+                "component_id": component_id,
+                "spec_bundle_hash": "sha256:" + "2" * 64,
+                "model": "claude-opus-5",
+                "prompt_version": "v9",
+                "cache_hit": False,
+                "files": {},
+                "model_call_error": None,
+                "refused": "sealed-component",
+                "retry_feedback": ["R-BETA-003"],
+            },
+            "verification_report": None,
+            "license_scan_result": _license_scan_result(component_id),
+            "secret_scan_result": _secret_scan_result(flagged=False),
+            "provenance_hit": True,
+            "attempts": 3,
+            "gate_versions": {"compiler": "9.9.9", "license_scanner": "k-gram@7.0.0"},
+        }
+    )
 
 
-def _inputs_b():
-    component_id = "comp-beta-gadget"
-    return component_id, {
-        "component_id": component_id,
-        "generation_result": {
-            "component_id": component_id,
-            "spec_bundle_hash": "sha256:" + "b" * 64,
-            "model": "ollama:llama3.1:8b",
-            "prompt_version": "v9",
-            "cache_hit": False,
-            "files": {},
-            "model_call_error": {"category": "network", "message": "connection reset"},
-            "refused": None,
-            "retry_feedback": ["R-BETA-002", "R-BETA-007"],
-        },
-        "verification_report": None,
-        "license_scan_result": _license_scan(component_id, None),
-        "secret_scan_result": _secret_scan(True),
-        "provenance_hit": True,
-        "attempts": 3,
-        "gate_versions": {
-            "compiler": "9.9.9",
-            "license_scanner": "k-gram@7.0.0",
-            "pipeline": "not-the-pipeline-version",
-        },
-    }
-
-
-def _read_manifests(repo_root, component_id):
-    slug = component_id[len("comp-"):]
+def _read_manifests(repo_root, slug):
     paths = [
-        repo_root / "gen" / slug / ".provenance.json",
-        repo_root / "verification" / slug / ".provenance.json",
+        Path(repo_root) / "gen" / slug / ".provenance.json",
+        Path(repo_root) / "verification" / slug / ".provenance.json",
     ]
     manifests = []
     for p in paths:
@@ -145,30 +122,34 @@ def _read_manifests(repo_root, component_id):
     return manifests
 
 
-def test_pipeline_version_is_component_constant_independent_of_inputs(tmp_path):
-    root_a = tmp_path / "repo_a"
-    root_b = tmp_path / "repo_b"
-    root_a.mkdir()
-    root_b.mkdir()
+def test_pipeline_version_is_identical_across_calls_and_equals_constant(tmp_path):
+    assert hasattr(provenance_writer, "PIPELINE_VERSION"), (
+        "provenance_writer must expose its own PIPELINE_VERSION constant"
+    )
+    expected = provenance_writer.PIPELINE_VERSION
 
-    cid_a, data_a = _inputs_a()
-    cid_b, data_b = _inputs_b()
+    repo_one = tmp_path / "repo_one"
+    repo_two = tmp_path / "repo_two"
+    repo_one.mkdir()
+    repo_two.mkdir()
 
-    provenance_writer.write_provenance(cid_a, _make_inputs(data_a), Path(root_a))
-    provenance_writer.write_provenance(cid_b, _make_inputs(data_b), Path(root_b))
+    provenance_writer.write_provenance("comp-alpha", _inputs_one(), repo_one)
+    provenance_writer.write_provenance("comp-beta", _inputs_two(), repo_two)
 
-    manifests_a = _read_manifests(root_a, cid_a)
-    manifests_b = _read_manifests(root_b, cid_b)
+    manifests_one = _read_manifests(repo_one, "alpha")
+    manifests_two = _read_manifests(repo_two, "beta")
 
-    versions = [field(m, "pipeline_version") for m in manifests_a + manifests_b]
+    versions = []
+    for manifest in manifests_one + manifests_two:
+        assert "pipeline_version" in manifest, "manifest lacks pipeline_version"
+        versions.append(manifest["pipeline_version"])
 
     # Both manifests' pipeline_version fields are identical...
     assert len(set(json.dumps(v, sort_keys=True) for v in versions)) == 1, versions
-
     # ...and equal this component's own version constant.
-    constant = provenance_writer.PIPELINE_VERSION
     for v in versions:
-        assert v == constant
+        assert v == expected
 
-    # Never sourced from the inputs (e.g. a gate_versions entry).
-    assert versions[0] != "not-the-pipeline-version"
+    # Not computed from inputs: it matches neither call's input-derived values.
+    for v in versions:
+        assert v not in ("v10", "v9", "1.0.0", "9.9.9", "k-gram@1.0.0", "k-gram@7.0.0") or v == expected

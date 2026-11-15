@@ -1,58 +1,41 @@
 import json
 from pathlib import Path
 
-import pytest
-
 import provenance_writer
 
 
 class _AttrDict(dict):
-    """A plain dict that also supports attribute access and to_dict(),
-    so it reads as either a JSON-shaped dict or a dataclass-like object."""
+    """A plain dict that also allows attribute-style reads.
+
+    Lets the faked upstream results be read either as a mapping or as an
+    object, since the ProvenanceInputs contract describes them by their
+    JSON shape only.
+    """
 
     def __getattr__(self, name):
         try:
             return self[name]
-        except KeyError as exc:
-            raise AttributeError(name) from exc
-
-    def to_dict(self):
-        return json.loads(json.dumps(self))
+        except KeyError:
+            raise AttributeError(name)
 
 
-def _field(value, name):
+def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
 def _generation_result():
+    # A refused generation: no candidate files, so verification_report is
+    # legitimately null (no missing upstream result).
     return _AttrDict(
         component_id="comp-foo",
-        spec_bundle_hash="sha256:" + "a" * 64,
+        spec_bundle_hash="sha256:" + "0" * 64,
         model="claude-sonnet-5",
-        prompt_version="v10",
+        prompt_version="v1",
         cache_hit=False,
-        files={"foo_module.py": "def bar(x):\n    return x\n"},
+        files={},
         model_call_error=None,
-        refused=None,
+        refused="sealed-component",
         retry_feedback=None,
-    )
-
-
-def _verification_report():
-    return _AttrDict(
-        component_id="comp-foo",
-        criteria=[
-            {
-                "id": "AC-FOO-001",
-                "covers": "R-FOO-001",
-                "kind": "compiled",
-                "result": "pass",
-            }
-        ],
-        requirement_results={"R-FOO-001": "pass"},
-        interface_drift=False,
-        mutation_score=0.9,
-        overall="pass",
     )
 
 
@@ -86,19 +69,23 @@ def _secret_scan_result():
     )
 
 
-def _make_inputs():
-    fields = dict(
+def _input_fields():
+    return dict(
         component_id="comp-foo",
         generation_result=_generation_result(),
-        verification_report=_verification_report(),
+        verification_report=None,
         license_scan_result=_license_scan_result(),
         secret_scan_result=_secret_scan_result(),
         provenance_hit=False,
         attempts=2,
         gate_versions={"compiler": "1.0.0", "license_scanner": "k-gram@1.0.0"},
     )
+
+
+def _make_inputs():
+    fields = _input_fields()
     cls = getattr(provenance_writer, "ProvenanceInputs", None)
-    if cls is not None and callable(cls):
+    if cls is not None:
         try:
             return cls(**fields)
         except TypeError:
@@ -106,18 +93,15 @@ def _make_inputs():
     return fields
 
 
-def _manifest_paths(repo_root: Path):
-    return [
-        repo_root / "gen" / "foo" / ".provenance.json",
-        repo_root / "verification" / "foo" / ".provenance.json",
-    ]
-
-
 def _run(repo_root: Path, inputs):
-    repo_root.mkdir(parents=True, exist_ok=True)
+    (repo_root / "gen" / "foo").mkdir(parents=True, exist_ok=True)
+    (repo_root / "verification" / "foo").mkdir(parents=True, exist_ok=True)
     provenance_writer.write_provenance("comp-foo", inputs, repo_root)
     manifests = []
-    for path in _manifest_paths(repo_root):
+    for path in (
+        repo_root / "gen" / "foo" / ".provenance.json",
+        repo_root / "verification" / "foo" / ".provenance.json",
+    ):
         assert path.is_file(), f"expected manifest at {path}"
         manifests.append(json.loads(path.read_text(encoding="utf-8")))
     return manifests
@@ -126,18 +110,25 @@ def _run(repo_root: Path, inputs):
 def test_ac_prov_013_verification_run_id_is_deterministic(tmp_path):
     inputs = _make_inputs()
 
-    # First run: verification_run_id is "<slug>-attempt-<attempts>".
-    first = _run(tmp_path / "run1", inputs)
-    for manifest in first:
-        assert _field(manifest, "verification_run_id") == "foo-attempt-2"
+    first_root = tmp_path / "first"
+    first_root.mkdir()
+    first_manifests = _run(first_root, inputs)
 
-    # Second run with the exact same inputs: identical verification_run_id.
-    second = _run(tmp_path / "run2", inputs)
-    for a, b in zip(first, second):
-        assert _field(a, "verification_run_id") == _field(b, "verification_run_id")
-        assert _field(b, "verification_run_id") == "foo-attempt-2"
+    # Then the manifest's verification_run_id is "foo-attempt-2"
+    for manifest in first_manifests:
+        assert field(manifest, "verification_run_id") == "foo-attempt-2"
 
-    # Re-running into the same repo_root also yields the same id.
-    third = _run(tmp_path / "run1", inputs)
-    for a, c in zip(first, third):
-        assert _field(a, "verification_run_id") == _field(c, "verification_run_id")
+    # Given the exact same ProvenanceInputs run a second time
+    second_root = tmp_path / "second"
+    second_root.mkdir()
+    second_manifests = _run(second_root, inputs)
+
+    # Then their verification_run_id fields are identical
+    first_ids = [field(m, "verification_run_id") for m in first_manifests]
+    second_ids = [field(m, "verification_run_id") for m in second_manifests]
+    assert first_ids == second_ids
+    assert all(run_id == "foo-attempt-2" for run_id in second_ids)
+
+    # Running again into the same repo_root yields the same id as well.
+    third_manifests = _run(first_root, inputs)
+    assert [field(m, "verification_run_id") for m in third_manifests] == first_ids
