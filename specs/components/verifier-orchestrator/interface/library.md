@@ -32,4 +32,4 @@ naming a capability file the fixture also writes under `specs/product/`
 `spec-bundle-assembler`'s interface text declares `foo(x)`, which
 `test-author`'s fake-arity check (`R-AUTHOR-020`) would match.
 
-Implements: `specs/architecture/step-phrase-grammar.md`
+Implements: `specs/architecture/step-phrase-grammar.md`, `SPEC_GUIDELINES.md`
