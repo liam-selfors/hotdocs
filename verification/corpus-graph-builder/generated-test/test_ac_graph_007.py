@@ -1,128 +1,170 @@
-import corpus_graph_builder
-
 import importlib
 import json
+import os
 from pathlib import Path
 
 import pytest
 
-
-def _main():
-    cli = importlib.import_module("corpus_graph_builder.cli")
-    return cli.main
+import corpus_graph_builder
 
 
-def _call(argv):
-    main = _main()
-    try:
-        return main(argv)
-    except SystemExit as exc:  # pragma: no cover - failure path
-        pytest.fail(f"main({argv!r}) raised SystemExit({exc.code!r}) instead of returning")
-    except BaseException as exc:  # pragma: no cover - failure path
-        pytest.fail(f"main({argv!r}) raised {type(exc).__name__}: {exc}")
+def _cli():
+    return importlib.import_module("corpus_graph_builder.cli")
 
 
-COMPONENT_MD = """---
-id: comp-a
-title: A
-status: draft
-owners: [team-a]
-depends_on: []
-realizes: []
-uses_var: []
-sealed: true
-source_path: legacy/a/
----
-
-# A
-
-## Purpose
-
-A tiny fixture component used to exercise the corpus graph builder CLI.
-"""
+def _write(path: Path, text: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
 
 
 def _make_corpus(repo_root: Path) -> None:
-    comp_dir = repo_root / "specs" / "components" / "a"
-    comp_dir.mkdir(parents=True, exist_ok=True)
-    (comp_dir / "component.md").write_text(COMPONENT_MD, encoding="utf-8")
+    _write(
+        repo_root / "specs" / "components" / "a" / "component.md",
+        "---\n"
+        "id: comp-a\n"
+        "title: Component A\n"
+        "status: draft\n"
+        "owners: [team-a]\n"
+        "depends_on: []\n"
+        "realizes: []\n"
+        "uses_var: []\n"
+        "sealed: true\n"
+        "source_path: legacy/a/\n"
+        "---\n"
+        "# Component A\n"
+        "\n"
+        "## Purpose\n"
+        "\n"
+        "A tiny fixture component.\n",
+    )
+    _write(
+        repo_root / "specs" / "components" / "a" / "requirements" / "R-A-001.md",
+        "**R-A-001** — Component A MUST exist.\n",
+    )
+    _write(
+        repo_root / "specs" / "components" / "a" / "acceptance" / "AC-A-001.md",
+        "# AC-A-001\n"
+        "\n"
+        "Covers: R-A-001\n"
+        "Kind: llm-judge\n"
+        "\n"
+        "```gherkin\n"
+        "Given component A\n"
+        "When it is inspected\n"
+        "Then it exists\n"
+        "```\n",
+    )
+    _write(
+        repo_root / "specs" / "product" / "x.md",
+        "---\n"
+        "id: P-X\n"
+        "title: Capability X\n"
+        "status: draft\n"
+        "owners: [team-a]\n"
+        "---\n"
+        "# Capability X\n",
+    )
+    _write(
+        repo_root / "specs" / "vars" / "y.md",
+        "---\n"
+        "id: VAR-Y\n"
+        "title: Var Y\n"
+        "status: draft\n"
+        "owners: [team-a]\n"
+        "---\n"
+        "# Var Y\n",
+    )
+    _write(
+        repo_root / "specs" / "decisions" / "D1.md",
+        "---\n"
+        "id: D1\n"
+        "title: Decision one\n"
+        "status: draft\n"
+        "owners: [team-a]\n"
+        "---\n"
+        "# D1\n",
+    )
+    _write(
+        repo_root / "specs" / "glossary.md",
+        "# Glossary\n\n- **thing** — a thing.\n",
+    )
 
 
-def _printed_paths(out: str):
-    return [line.strip() for line in out.splitlines() if line.strip()]
-
-
-def _assert_printed_path(out: str, expected: Path, base: Path) -> None:
+def _printed_path_matches(out: str, expected: Path, cwd: str) -> bool:
     expected_resolved = expected.resolve()
-    for line in _printed_paths(out):
+    for line in out.splitlines():
+        line = line.strip()
+        if not line or "corpus-graph.json" not in line:
+            continue
         candidate = Path(line)
         if not candidate.is_absolute():
-            candidate = base / candidate
+            candidate = Path(cwd) / candidate
         try:
             if candidate.resolve() == expected_resolved:
-                return
+                return True
         except OSError:
             continue
-    pytest.fail(f"expected printed path {expected} in output, got: {out!r}")
+    return False
 
 
-def _assert_written(repo_root: Path) -> None:
-    graph_path = repo_root / "verification" / "corpus-graph.json"
-    assert graph_path.is_file(), "verification/corpus-graph.json was not written"
-    data = json.loads(graph_path.read_text(encoding="utf-8"))
+def _check_written(repo_root: Path) -> None:
+    out_file = repo_root / "verification" / "corpus-graph.json"
+    assert out_file.is_file(), "verification/corpus-graph.json was not written"
+    data = json.loads(out_file.read_text(encoding="utf-8"))
     assert isinstance(data, dict)
     assert "nodes" in data
     assert "comp-a" in data["nodes"]
 
 
-def test_build_variants_return_0_write_and_print_path(tmp_path, monkeypatch, capsys):
+def test_build_variants_succeed_and_print_path(tmp_path, monkeypatch, capsys):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
     _make_corpus(repo_root)
-    graph_path = repo_root / "verification" / "corpus-graph.json"
+    other = tmp_path / "elsewhere"
+    other.mkdir()
+    out_file = repo_root / "verification" / "corpus-graph.json"
+    main = _cli().main
 
-    elsewhere = tmp_path / "elsewhere"
-    elsewhere.mkdir()
-    monkeypatch.chdir(elsewhere)
-
-    # --repo-root=<dir>
+    # 1: --repo-root=<dir>
+    monkeypatch.chdir(other)
     capsys.readouterr()
-    rc = _call(["build", f"--repo-root={repo_root}"])
+    rc = main(["build", f"--repo-root={repo_root}"])
     out = capsys.readouterr().out
     assert rc == 0
-    _assert_written(repo_root)
-    _assert_printed_path(out, graph_path, elsewhere)
+    _check_written(repo_root)
+    assert _printed_path_matches(out, out_file, os.getcwd()), out
+    assert not (other / "verification").exists()
 
-    graph_path.unlink()
-
-    # --repo-root <dir>
-    rc = _call(["build", "--repo-root", str(repo_root)])
+    # 2: --repo-root <dir>
+    out_file.unlink()
+    rc = main(["build", "--repo-root", str(repo_root)])
     out = capsys.readouterr().out
     assert rc == 0
-    _assert_written(repo_root)
-    _assert_printed_path(out, graph_path, elsewhere)
+    _check_written(repo_root)
+    assert _printed_path_matches(out, out_file, os.getcwd()), out
+    assert not (other / "verification").exists()
 
-    graph_path.unlink()
-
-    # default: current directory
+    # 3: default repo root is the current directory
+    out_file.unlink()
     monkeypatch.chdir(repo_root)
-    rc = _call(["build"])
+    rc = main(["build"])
     out = capsys.readouterr().out
     assert rc == 0
-    _assert_written(repo_root)
-    _assert_printed_path(out, graph_path, repo_root)
+    _check_written(repo_root)
+    assert _printed_path_matches(out, out_file, os.getcwd()), out
 
 
 def test_invalid_provenance_json_returns_1(tmp_path, monkeypatch):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
     _make_corpus(repo_root)
-    prov_dir = repo_root / "verification" / "a"
-    prov_dir.mkdir(parents=True)
-    (prov_dir / ".provenance.json").write_text("{not json", encoding="utf-8")
-
+    _write(repo_root / "verification" / "a" / ".provenance.json", "{not json")
     monkeypatch.chdir(tmp_path)
-    rc = _call(["build", f"--repo-root={repo_root}"])
+    main = _cli().main
+    try:
+        rc = main(["build", f"--repo-root={repo_root}"])
+    except BaseException as exc:  # noqa: BLE001
+        pytest.fail(f"main raised instead of returning 1: {exc!r}")
     assert rc == 1
 
 
@@ -136,6 +178,12 @@ def test_invalid_provenance_json_returns_1(tmp_path, monkeypatch):
     ],
 )
 def test_usage_errors_return_2_without_raising(argv, tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
-    rc = _call(list(argv))
+    work = tmp_path / "work"
+    work.mkdir()
+    monkeypatch.chdir(work)
+    main = _cli().main
+    try:
+        rc = main(list(argv))
+    except BaseException as exc:  # noqa: BLE001
+        pytest.fail(f"main({argv!r}) raised instead of returning 2: {exc!r}")
     assert rc == 2

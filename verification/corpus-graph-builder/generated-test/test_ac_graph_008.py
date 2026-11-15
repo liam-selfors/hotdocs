@@ -4,10 +4,6 @@ from pathlib import Path
 import corpus_graph_builder
 
 
-def field(value, name):
-    return value[name] if isinstance(value, dict) else getattr(value, name)
-
-
 GENERATED_AT = "2026-11-08T00:19:53Z"
 
 
@@ -16,17 +12,17 @@ def _write(path: Path, text: str) -> None:
     path.write_text(text, encoding="utf-8")
 
 
-def _component(repo_root: Path, slug: str, depends_on: str) -> None:
-    upper = slug.upper()
+def _component(repo_root: Path, slug: str, depends_on: str, owner: str) -> None:
     base = repo_root / "specs" / "components" / slug
+    upper = slug.upper()
     _write(
         base / "component.md",
         "---\n"
         f"id: comp-{slug}\n"
         f"title: Component {upper}\n"
         "status: draft\n"
-        "owners: [pipeline-team]\n"
-        f"depends_on: {depends_on}\n"
+        f"owners: [{owner}]\n"
+        f"depends_on: [{depends_on}]\n"
         "realizes: []\n"
         "uses_var: []\n"
         "sealed: true\n"
@@ -36,11 +32,11 @@ def _component(repo_root: Path, slug: str, depends_on: str) -> None:
         "\n"
         "## Purpose\n"
         "\n"
-        f"A small fixture component named {slug}.\n",
+        f"Component {upper} exists for a determinism fixture.\n",
     )
     _write(
         base / "requirements" / f"R-{upper}-001.md",
-        f"**R-{upper}-001** — The component MUST do one thing.\n",
+        f"**R-{upper}-001** — Component {upper} MUST do its one thing.\n",
     )
     _write(
         base / "acceptance" / f"AC-{upper}-001.md",
@@ -50,30 +46,30 @@ def _component(repo_root: Path, slug: str, depends_on: str) -> None:
         "Kind: generated-test\n"
         "\n"
         "```gherkin\n"
-        "Given an input\n"
-        "When the component runs\n"
-        "Then it does one thing\n"
+        f"Given component {upper}\n"
+        "When it runs\n"
+        "Then it does its one thing\n"
         "```\n",
     )
 
 
-def _make_fixture(repo_root: Path) -> None:
-    _component(repo_root, "a", "[]")
-    _component(repo_root, "b", "[comp-a]")
+def _build_fixture(repo_root: Path) -> None:
+    _component(repo_root, "a", "", "team-a")
+    _component(repo_root, "b", "comp-a", "team-b")
     manifest = {
         "generated_at": GENERATED_AT,
         "verification_report": {"overall": "pass"},
     }
     _write(
         repo_root / "verification" / "a" / ".provenance.json",
-        json.dumps(manifest),
+        json.dumps(manifest, indent=2) + "\n",
     )
 
 
 def test_ac_graph_008_graph_is_deterministic_and_plain_json(tmp_path):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
-    _make_fixture(repo_root)
+    _build_fixture(repo_root)
 
     graph1 = corpus_graph_builder.build_corpus_graph(repo_root)
     graph2 = corpus_graph_builder.build_corpus_graph(repo_root)
@@ -84,25 +80,24 @@ def test_ac_graph_008_graph_is_deterministic_and_plain_json(tmp_path):
     assert isinstance(bytes2, bytes)
     assert bytes1 == bytes2
 
-    expected_path = repo_root / "verification" / "corpus-graph.json"
-
     path1 = corpus_graph_builder.write_corpus_graph(graph1, repo_root)
-    assert Path(path1) == expected_path
     written1 = Path(path1).read_bytes()
-
     path2 = corpus_graph_builder.write_corpus_graph(graph2, repo_root)
-    assert Path(path2) == expected_path
     written2 = Path(path2).read_bytes()
+
+    expected_path = repo_root / "verification" / "corpus-graph.json"
+    assert Path(path1).resolve() == expected_path.resolve()
+    assert Path(path2).resolve() == expected_path.resolve()
 
     assert written1 == bytes1
     assert written2 == bytes1
     assert written1 == written2
 
     for raw in (bytes1, bytes2, written1, written2):
-        loaded = json.loads(raw)
-        node = loaded["nodes"]["comp-a"]
-        provenance = node["provenance"]
+        data = json.loads(raw.decode("utf-8"))
+        node_a = data["nodes"]["comp-a"]
+        provenance = node_a["provenance"]
         assert isinstance(provenance, dict)
-        assert isinstance(provenance["generated_at"], str)
         assert provenance["generated_at"] == GENERATED_AT
-        assert node["verification"] == {"overall": "pass"}
+        assert isinstance(provenance["generated_at"], str)
+        assert node_a["verification"] == {"overall": "pass"}

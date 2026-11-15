@@ -1,40 +1,39 @@
-"""hotdocs corpus-graph build [--repo-root=<dir>]"""
+"""CLI for `hotdocs corpus-graph build [--repo-root=<dir>]`."""
 
 from __future__ import annotations
 
 import sys
 from pathlib import Path
 
+from . import build_corpus_graph, write_corpus_graph
+
 
 def main(argv: list[str] | None = None) -> int:
     if argv is None:
         argv = sys.argv[1:]
-    argv = list(argv)
-    if not argv or argv[0] != "build":
+    args = list(argv)
+    if not args or args[0] != "build":
         return 2
 
     repo_root = Path.cwd()
-    rest = argv[1:]
-    i = 0
-    while i < len(rest):
-        tok = rest[i]
-        if tok.startswith("--repo-root="):
-            repo_root = Path(tok[len("--repo-root="):])
-        elif tok == "--repo-root" and i + 1 < len(rest):
+    i = 1
+    while i < len(args):
+        token = args[i]
+        if token.startswith("--repo-root="):
+            repo_root = Path(token[len("--repo-root="):])
             i += 1
-            repo_root = Path(rest[i])
+        elif token == "--repo-root" and i + 1 < len(args):
+            repo_root = Path(args[i + 1])
+            i += 2
         else:
             return 2
-        i += 1
 
     try:
-        from corpus_graph_builder import build_corpus_graph, write_corpus_graph
-
         graph = build_corpus_graph(repo_root)
         path = write_corpus_graph(graph, repo_root)
     except Exception:
         return 1
-    print(str(path))
+    print(path)
     return 0
 
 

@@ -26,11 +26,11 @@ def _build_fixture(repo_root: Path) -> None:
         "sealed: false\n"
         "---\n"
         "\n"
-        "# Component A\n"
+        "# comp-a\n"
         "\n"
         "## Purpose\n"
         "\n"
-        "Component A exists to exercise graph edges.\n",
+        "Component A exists for graph edge testing.\n",
     )
     _write(
         repo_root / "specs" / "components" / "b" / "component.md",
@@ -46,11 +46,11 @@ def _build_fixture(repo_root: Path) -> None:
         "source_path: legacy/b/\n"
         "---\n"
         "\n"
-        "# Component B\n"
+        "# comp-b\n"
         "\n"
         "## Purpose\n"
         "\n"
-        "Component B is depended upon by component A.\n",
+        "Component B is a dependency target.\n",
     )
     _write(
         repo_root / "specs" / "product" / "one.md",
@@ -61,12 +61,12 @@ def _build_fixture(repo_root: Path) -> None:
         "owners: [pipeline-team]\n"
         "---\n"
         "\n"
-        "# Capability One\n"
+        "# P-ONE\n"
         "\n"
-        "A capability realized by component A.\n",
+        "A capability.\n",
     )
     _write(
-        repo_root / "specs" / "vars" / "VAR-ONE.md",
+        repo_root / "specs" / "vars" / "one.md",
         "---\n"
         "id: VAR-ONE\n"
         "title: Var One\n"
@@ -76,25 +76,23 @@ def _build_fixture(repo_root: Path) -> None:
         "\n"
         "# VAR-ONE\n"
         "\n"
-        "A var used by component A.\n",
+        "A var.\n",
     )
 
 
-def _edge_to_dict(edge):
-    return {
-        "from": field(edge, "from"),
-        "to": field(edge, "to"),
-        "kind": field(edge, "kind"),
-    }
+def _normalize_edges(edges):
+    return [
+        {"from": field(e, "from"), "to": field(e, "to"), "kind": field(e, "kind")}
+        for e in edges
+    ]
 
 
-def test_edges_one_per_declared_relationship_sorted(tmp_path):
-    repo_root = Path(tmp_path)
+def test_ac_graph_002_edges_exactly_declared_relationships(tmp_path):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
     _build_fixture(repo_root)
 
     graph = corpus_graph_builder.build_corpus_graph(repo_root)
-
-    edges = [_edge_to_dict(e) for e in list(field(graph, "edges"))]
 
     expected = [
         {"from": "comp-a", "to": "P-ONE", "kind": "realizes"},
@@ -102,12 +100,12 @@ def test_edges_one_per_declared_relationship_sorted(tmp_path):
         {"from": "comp-a", "to": "comp-b", "kind": "depends_on"},
     ]
 
+    edges = _normalize_edges(list(field(graph, "edges")))
     assert edges == expected
 
     # Sorted by from, then to, then kind.
-    keys = [(e["from"], e["to"], e["kind"]) for e in edges]
-    assert keys == sorted(keys)
+    assert edges == sorted(edges, key=lambda e: (e["from"], e["to"], e["kind"]))
 
-    # The serialized form carries exactly the same edges.
+    # The serialized form carries the same edges.
     as_dict = graph.to_dict()
-    assert [_edge_to_dict(e) for e in as_dict["edges"]] == expected
+    assert _normalize_edges(list(as_dict["edges"])) == expected

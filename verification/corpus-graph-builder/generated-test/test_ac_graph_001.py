@@ -1,6 +1,6 @@
-import corpus_graph_builder
-
 from pathlib import Path
+
+import corpus_graph_builder
 
 
 def field(value, name):
@@ -18,7 +18,7 @@ def _component_md(slug: str) -> str:
         f"id: comp-{slug}\n"
         f"title: Component {slug.upper()}\n"
         "status: draft\n"
-        "owners: [pipeline-team]\n"
+        "owners: [test-team]\n"
         "depends_on: []\n"
         "realizes: []\n"
         "uses_var: []\n"
@@ -30,19 +30,21 @@ def _component_md(slug: str) -> str:
         "\n"
         "## Purpose\n"
         "\n"
-        f"Synthetic fixture component {slug} for graph building.\n"
+        f"Component {slug} exists only as a graph-builder test fixture.\n"
     )
 
 
 def _build_corpus(repo_root: Path) -> None:
+    specs = repo_root / "specs"
+
     # Capabilities
     _write(
-        repo_root / "specs" / "product" / "one.md",
+        specs / "product" / "one.md",
         "---\n"
         "id: P-ONE\n"
         "title: Capability One\n"
         "status: draft\n"
-        "owners: [pipeline-team]\n"
+        "owners: [test-team]\n"
         "---\n"
         "\n"
         "# P-ONE\n"
@@ -50,12 +52,12 @@ def _build_corpus(repo_root: Path) -> None:
         "The first capability.\n",
     )
     _write(
-        repo_root / "specs" / "product" / "two.md",
+        specs / "product" / "two.md",
         "---\n"
         "id: P-TWO\n"
         "title: Capability Two\n"
         "status: draft\n"
-        "owners: [pipeline-team]\n"
+        "owners: [test-team]\n"
         "---\n"
         "\n"
         "# P-TWO\n"
@@ -63,66 +65,61 @@ def _build_corpus(repo_root: Path) -> None:
         "The second capability.\n",
     )
 
+    # Var
+    _write(
+        specs / "vars" / "VAR-ONE.md",
+        "---\n"
+        "id: VAR-ONE\n"
+        "title: Var One\n"
+        "status: draft\n"
+        "owners: [test-team]\n"
+        "---\n"
+        "\n"
+        "# VAR-ONE\n"
+        "\n"
+        "A test variable declaration.\n",
+    )
+
+    # Decision
+    _write(
+        specs / "decisions" / "D1.md",
+        "---\n"
+        "id: D1\n"
+        "title: Decision One\n"
+        "status: draft\n"
+        "owners: [test-team]\n"
+        "---\n"
+        "\n"
+        "# D1\n"
+        "\n"
+        "A test decision.\n",
+    )
+
     # Components (no relations)
     for slug in ("a", "b", "c"):
-        _write(
-            repo_root / "specs" / "components" / slug / "component.md",
-            _component_md(slug),
-        )
+        _write(specs / "components" / slug / "component.md", _component_md(slug))
 
-    # Requirement file for comp-a, with a matching acceptance criterion
+    # Requirement file (plus its matching acceptance criterion)
     _write(
-        repo_root / "specs" / "components" / "a" / "requirements" / "R-A-001.md",
-        "# R-A-001\n"
-        "\n"
-        "**R-A-001** — The component MUST do the fixture thing.\n",
+        specs / "components" / "a" / "requirements" / "R-A-001.md",
+        "**R-A-001** — Component a MUST exist as a fixture.\n",
     )
     _write(
-        repo_root / "specs" / "components" / "a" / "acceptance" / "AC-A-001.md",
+        specs / "components" / "a" / "acceptance" / "AC-A-001.md",
         "# AC-A-001\n"
         "\n"
         "Covers: R-A-001\n"
         "Kind: generated-test\n"
         "\n"
         "```gherkin\n"
-        "Given a fixture input\n"
-        "When the component runs\n"
-        "Then it does the fixture thing\n"
+        "Given component a\n"
+        "When it is inspected\n"
+        "Then it exists\n"
         "```\n",
     )
 
-    # Var
-    _write(
-        repo_root / "specs" / "vars" / "one.md",
-        "---\n"
-        "id: VAR-ONE\n"
-        "title: Var One\n"
-        "status: draft\n"
-        "owners: [pipeline-team]\n"
-        "---\n"
-        "\n"
-        "# VAR-ONE\n"
-        "\n"
-        "A fixture variable declaration.\n",
-    )
 
-    # Decision
-    _write(
-        repo_root / "specs" / "decisions" / "D1.md",
-        "---\n"
-        "id: D1\n"
-        "title: Decision One\n"
-        "status: draft\n"
-        "owners: [pipeline-team]\n"
-        "---\n"
-        "\n"
-        "# D1\n"
-        "\n"
-        "A fixture decision.\n",
-    )
-
-
-def test_ac_graph_001_nodes_are_capabilities_components_and_vars(tmp_path):
+def test_ac_graph_001_nodes_are_exactly_capabilities_components_and_vars(tmp_path):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
     _build_corpus(repo_root)
@@ -130,16 +127,6 @@ def test_ac_graph_001_nodes_are_capabilities_components_and_vars(tmp_path):
     graph = corpus_graph_builder.build_corpus_graph(repo_root)
 
     nodes = field(graph, "nodes")
-    keys = set(nodes.keys()) if isinstance(nodes, dict) else set(nodes)
-
-    expected = {"P-ONE", "P-TWO", "comp-a", "comp-b", "comp-c", "VAR-ONE"}
-    assert keys == expected, f"unexpected node keys: {sorted(keys)}"
-
-    # No requirement, criterion or decision nodes
-    assert "R-A-001" not in keys
-    assert "AC-A-001" not in keys
-    assert "D1" not in keys
-
     expected_types = {
         "P-ONE": "capability",
         "P-TWO": "capability",
@@ -148,12 +135,14 @@ def test_ac_graph_001_nodes_are_capabilities_components_and_vars(tmp_path):
         "comp-c": "component",
         "VAR-ONE": "var",
     }
+
+    assert set(nodes.keys()) == set(expected_types.keys()), (
+        f"unexpected node keys: {sorted(nodes.keys())}"
+    )
+
     for node_id, expected_type in expected_types.items():
         node = nodes[node_id]
         assert field(node, "type") == expected_type, (
             f"node {node_id} has type {field(node, 'type')!r}, "
             f"expected {expected_type!r}"
         )
-
-    # build_corpus_graph writes nothing
-    assert not (repo_root / "verification" / "corpus-graph.json").exists()

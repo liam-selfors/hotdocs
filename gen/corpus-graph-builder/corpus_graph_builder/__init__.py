@@ -12,9 +12,11 @@ import duckdb
 
 __all__ = ["CorpusGraph", "build_corpus_graph", "write_corpus_graph"]
 
-_EDGE_KINDS = ("depends_on", "realizes", "uses_var")
 _NODE_KINDS = ("component", "capability", "var")
+_EDGE_KINDS = ("depends_on", "realizes", "uses_var")
 _SIZE_CAP = 4000
+_DEP_SLUG = "graph-query-engine"
+_DEP_MODULE = "graph_query_engine"
 
 
 @dataclass
@@ -35,25 +37,19 @@ class CorpusGraph:
         return (text + "\n").encode("utf-8")
 
 
-def _dep_dir(repo_root: Path, rel: str) -> Path:
-    candidate = Path(repo_root) / rel
-    if candidate.is_dir():
-        return candidate
-    gen_dir = next(p for p in Path(__file__).resolve().parents if p.name == "gen")
-    return gen_dir.parent / rel
+def _tool_root() -> Path:
+    here = Path(__file__).resolve()
+    return next(parent.parent for parent in here.parents if parent.name == "gen")
 
 
-def _load_module(directory: Path, name: str):
-    flat = directory / f"{name}.py"
-    if flat.is_file():
-        spec = importlib.util.spec_from_file_location(name, flat)
-    else:
-        pkg = directory / name
-        spec = importlib.util.spec_from_file_location(
-            name, pkg / "__init__.py", submodule_search_locations=[str(pkg)]
-        )
+def _load_graph_query_engine(repo_root: Path):
+    dep_dir = repo_root / "gen" / _DEP_SLUG
+    if not dep_dir.is_dir():
+        dep_dir = _tool_root() / "gen" / _DEP_SLUG
+    path = dep_dir / f"{_DEP_MODULE}.py"
+    spec = importlib.util.spec_from_file_location(_DEP_MODULE, str(path))
     module = importlib.util.module_from_spec(spec)
-    sys.modules[name] = module
+    sys.modules[_DEP_MODULE] = module
     spec.loader.exec_module(module)
     return module
 
@@ -64,56 +60,53 @@ def _rate(count: int, total: int) -> float:
     return count / total
 
 
-def _read_json(path: Path):
-    with open(path, encoding="utf-8") as fh:
-        return json.load(fh)
+def _component_node(repo_root: Path, comp_id: str, doc_row: dict, sizes: dict) -> dict:
+    slug = comp_id[len("comp-"):]
 
-
-def _component_node(repo_root: Path, cid: str, doc: dict, sizes: dict) -> dict:
-    slug = cid[len("comp-"):]
-
+    manifest_path = repo_root / "verification" / slug / ".provenance.json"
     verification = None
     provenance = None
-    manifest_path = repo_root / "verification" / slug / ".provenance.json"
     if manifest_path.is_file():
-        manifest = _read_json(manifest_path)
+        with manifest_path.open("r", encoding="utf-8") as fh:
+            manifest = json.load(fh)
         verification = manifest.get("verification_report")
         provenance = {k: v for k, v in manifest.items() if k != "verification_report"}
 
-    if slug in sizes:
-        size_status = "ok" if sizes[slug] <= _SIZE_CAP else "over"
-    else:
+    word_count = sizes.get(slug)
+    if word_count is None:
         size_status = "unknown"
+    elif word_count <= _SIZE_CAP:
+        size_status = "ok"
+    else:
+        size_status = "over"
 
-    pinned = []
     overrides_path = repo_root / "gen" / slug / ".overrides.json"
+    pinned_overrides = []
     if overrides_path.is_file():
-        data = _read_json(overrides_path)
-        if isinstance(data, list):
-            pinned = data
+        loaded = json.loads(overrides_path.read_text(encoding="utf-8"))
+        if isinstance(loaded, list):
+            pinned_overrides = loaded
 
     comp_dir = repo_root / "specs" / "components" / slug
     documents = {}
-    for path in sorted(comp_dir.rglob("*.md")):
-        rel = path.relative_to(comp_dir).as_posix()
-        documents[rel] = path.read_text(encoding="utf-8")
-    documents = {k: documents[k] for k in sorted(documents)}
+    for doc_path in sorted(comp_dir.rglob("*.md"), key=lambda p: p.relative_to(comp_dir).as_posix()):
+        documents[doc_path.relative_to(comp_dir).as_posix()] = doc_path.read_text(encoding="utf-8")
 
     return {
         "type": "component",
         "verification": verification,
         "provenance": provenance,
         "size_status": size_status,
-        "sealed": bool(doc.get("sealed") or False),
-        "pinned_overrides": pinned,
-        "owners": list(doc.get("owners") or []),
+        "sealed": doc_row.get("sealed") is True,
+        "pinned_overrides": pinned_overrides,
+        "owners": list(doc_row.get("owners") or []),
         "documents": documents,
     }
 
 
 def build_corpus_graph(repo_root: Path) -> CorpusGraph:
     repo_root = Path(repo_root)
-    gqe = _load_module(_dep_dir(repo_root, "gen/graph-query-engine"), "graph_query_engine")
+    gqe = _load_graph_query_engine(repo_root)
 
     con = duckdb.connect(":memory:")
     try:
@@ -132,17 +125,17 @@ def build_corpus_graph(repo_root: Path) -> CorpusGraph:
             "WHERE edge_type IN ('depends_on', 'realizes', 'uses_var')"
         ).fetchall()
         sizes = {
-            str(cid): wc
+            str(cid): int(wc)
             for cid, wc in con.execute(
                 "SELECT component_id, word_count FROM component_size"
             ).fetchall()
         }
         cur = con.execute("SELECT * FROM component_docs")
-        cols = [d[0] for d in cur.description]
+        columns = [d[0] for d in cur.description]
         docs = {}
         for row in cur.fetchall():
-            rec = dict(zip(cols, row))
-            docs[str(rec["id"])] = rec
+            row_dict = dict(zip(columns, row))
+            docs[row_dict["id"]] = row_dict
     finally:
         con.close()
 
@@ -154,36 +147,41 @@ def build_corpus_graph(repo_root: Path) -> CorpusGraph:
         key=lambda e: (e["from"], e["to"], e["kind"]),
     )
 
-    components = sorted(str(i) for i, k in node_rows if k == "component")
-    capabilities = sorted(str(i) for i, k in node_rows if k == "capability")
-    vars_ = sorted(str(i) for i, k in node_rows if k == "var")
-
     nodes = {}
-    for cap in capabilities:
-        nodes[cap] = {"type": "capability"}
-    for var in vars_:
-        nodes[var] = {"type": "var"}
-    for cid in components:
-        nodes[cid] = _component_node(repo_root, cid, docs.get(cid, {}), sizes)
+    for node_id, kind in node_rows:
+        node_id = str(node_id)
+        if kind == "component":
+            nodes[node_id] = _component_node(repo_root, node_id, docs.get(node_id, {}), sizes)
+        else:
+            nodes[node_id] = {"type": str(kind)}
 
     realized = {e["to"] for e in edges if e["kind"] == "realizes"}
     used_vars = {e["to"] for e in edges if e["kind"] == "uses_var"}
     depended_on = {e["to"] for e in edges if e["kind"] == "depends_on"}
     realizers = {e["from"] for e in edges if e["kind"] == "realizes"}
 
-    orphan_caps = sum(1 for c in capabilities if c not in realized)
-    orphan_vars = sum(1 for v in vars_ if v not in used_vars)
-    orphan_comps = sum(
-        1 for c in components if c not in depended_on and c not in realizers
-    )
+    capabilities = [n for n, v in nodes.items() if v["type"] == "capability"]
+    variables = [n for n, v in nodes.items() if v["type"] == "var"]
+    components = [n for n, v in nodes.items() if v["type"] == "component"]
 
     aggregates = {
-        "orphan_capability_rate": _rate(orphan_caps, len(capabilities)),
-        "orphan_component_rate": _rate(orphan_comps, len(components)),
-        "orphan_var_rate": _rate(orphan_vars, len(vars_)),
+        "orphan_capability_rate": _rate(
+            sum(1 for c in capabilities if c not in realized), len(capabilities)
+        ),
+        "orphan_component_rate": _rate(
+            sum(1 for c in components if c not in depended_on and c not in realizers),
+            len(components),
+        ),
+        "orphan_var_rate": _rate(
+            sum(1 for v in variables if v not in used_vars), len(variables)
+        ),
     }
 
-    return CorpusGraph(nodes=nodes, edges=edges, aggregates=aggregates)
+    return CorpusGraph(
+        nodes={k: nodes[k] for k in sorted(nodes)},
+        edges=edges,
+        aggregates=aggregates,
+    )
 
 
 def write_corpus_graph(graph: CorpusGraph, repo_root: Path) -> Path:

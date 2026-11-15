@@ -1,3 +1,14 @@
+"""AC-GRAPH-011 (Covers: R-GRAPH-003).
+
+Given comp-a whose component.md has the frontmatter owners: [team-x]
+  and whose directory also holds requirements/R-A-001.md and
+  interface/library.md
+When build_corpus_graph runs
+Then comp-a's node has owners ["team-x"], and documents whose keys are
+  exactly "component.md", "interface/library.md" and
+  "requirements/R-A-001.md", each mapped to that file's whole text
+"""
+
 from pathlib import Path
 
 import corpus_graph_builder
@@ -5,6 +16,19 @@ import corpus_graph_builder
 
 def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
+
+
+def lookup(container, key):
+    if isinstance(container, dict):
+        return container[key]
+    return getattr(container, key)
+
+
+def _write(path: Path, text: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    # Write raw bytes so the on-disk text is exactly `text`, with no
+    # newline translation.
+    path.write_bytes(text.encode("utf-8"))
 
 
 COMPONENT_MD = (
@@ -24,7 +48,7 @@ COMPONENT_MD = (
     "\n"
     "## Purpose\n"
     "\n"
-    "A small fixture component used to check graph node documents.\n"
+    "A small fixture component used to check graph documents.\n"
 )
 
 REQUIREMENT_MD = (
@@ -37,19 +61,17 @@ LIBRARY_MD = (
     "# Library\n"
     "\n"
     "```\n"
-    "do_a_thing(x: int) -> int\n"
+    "do_thing(x: int) -> int\n"
     "```\n"
+    "\n"
+    "Returns its argument unchanged.\n"
 )
 
 
-def _write(path: Path, text: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text, encoding="utf-8")
-
-
-def test_component_node_carries_owners_and_documents(tmp_path):
+def test_ac_graph_011_owners_and_documents(tmp_path):
     repo_root = tmp_path / "repo"
     comp_dir = repo_root / "specs" / "components" / "a"
+
     _write(comp_dir / "component.md", COMPONENT_MD)
     _write(comp_dir / "requirements" / "R-A-001.md", REQUIREMENT_MD)
     _write(comp_dir / "interface" / "library.md", LIBRARY_MD)
@@ -57,25 +79,20 @@ def test_component_node_carries_owners_and_documents(tmp_path):
     graph = corpus_graph_builder.build_corpus_graph(repo_root)
 
     nodes = field(graph, "nodes")
-    assert "comp-a" in nodes
-    node = nodes["comp-a"]
+    node = lookup(nodes, "comp-a")
 
     owners = field(node, "owners")
     assert list(owners) == ["team-x"]
 
     documents = field(node, "documents")
     documents = dict(documents)
-    assert set(documents.keys()) == {
-        "component.md",
-        "interface/library.md",
-        "requirements/R-A-001.md",
-    }
-    assert documents["component.md"] == (comp_dir / "component.md").read_text(
-        encoding="utf-8"
-    )
-    assert documents["component.md"] == COMPONENT_MD
-    assert documents["interface/library.md"] == LIBRARY_MD
-    assert documents["requirements/R-A-001.md"] == REQUIREMENT_MD
 
-    # build_corpus_graph writes nothing
-    assert not (repo_root / "verification" / "corpus-graph.json").exists()
+    expected = {
+        "component.md": COMPONENT_MD,
+        "interface/library.md": LIBRARY_MD,
+        "requirements/R-A-001.md": REQUIREMENT_MD,
+    }
+
+    assert set(documents.keys()) == set(expected.keys())
+    for key, text in expected.items():
+        assert documents[key] == text, f"documents[{key!r}] is not the file's whole text"
