@@ -3,40 +3,40 @@ import provenance_tracker
 from pathlib import Path
 
 
-class _DualDict(dict):
-    """A plain JSON-serializable dict that also exposes its keys as attributes,
-    so it satisfies either dict-style or attribute-style reading."""
+class _DualAccess(dict):
+    """A plain dict that also exposes its keys as attributes, so the target
+    may read a caller-supplied value either way."""
 
     def __getattr__(self, name):
         try:
-            return self[name]
-        except KeyError:
-            raise AttributeError(name)
+            value = self[name]
+        except KeyError as exc:
+            raise AttributeError(name) from exc
+        return value
 
 
 def _dual(value):
     if isinstance(value, dict):
-        return _DualDict({k: _dual(v) for k, v in value.items()})
+        return _DualAccess({k: _dual(v) for k, v in value.items()})
     if isinstance(value, list):
         return [_dual(v) for v in value]
     return value
 
 
-def _field(value, name):
-    return value[name] if isinstance(value, dict) else getattr(value, name)
-
-
-def test_last_requirement_failures_returns_only_failing_rids(tmp_path):
-    repo_root = Path(tmp_path)
-
-    generation_result = _dual(
+def _generation_result():
+    return _dual(
         {
             "component_id": "comp-foo",
             "model_call_error": None,
-            "files": [],
+            "files": [
+                {"path": "gen/foo/foo.py", "content": "def foo():\n    return 1\n"}
+            ],
         }
     )
-    verification_report = _dual(
+
+
+def _verification_report():
+    return _dual(
         {
             "component_id": "comp-foo",
             "criteria": [
@@ -52,9 +52,9 @@ def test_last_requirement_failures_returns_only_failing_rids(tmp_path):
                     "kind": "compiled",
                     "result": "fail",
                     "failure_detail": {
-                        "message": "x equals 1 failed",
-                        "expected": 1,
-                        "actual": 2,
+                        "message": "result.foo equals 5 failed",
+                        "expected": 5,
+                        "actual": 3,
                     },
                 },
             ],
@@ -65,23 +65,20 @@ def test_last_requirement_failures_returns_only_failing_rids(tmp_path):
         }
     )
 
-    record = provenance_tracker.write_attempt_record(
+
+def test_last_requirement_failures_returns_exactly_failing_rids(tmp_path):
+    repo_root = Path(tmp_path)
+
+    provenance_tracker.write_attempt_record(
         "comp-foo",
-        generation_result,
-        verification_report,
-        "sha256:" + "a" * 64,
+        _generation_result(),
+        _verification_report(),
+        "sha256:0123456789abcdef",
         repo_root,
     )
 
-    # Precondition: the most recent record for comp-foo has a non-null
-    # verification carrying the given flat requirement_results mapping.
-    verification = _field(record, "verification")
-    assert verification is not None
-    assert dict(_field(verification, "requirement_results")) == {
-        "R-FOO-001": "pass",
-        "R-FOO-002": "fail",
-    }
-    assert (repo_root / ".hotdocs" / "attempts").is_dir()
+    attempts_dir = repo_root / ".hotdocs" / "attempts"
+    assert attempts_dir.exists(), "write_attempt_record must write under .hotdocs/attempts/"
 
     result = provenance_tracker.last_requirement_failures("comp-foo", repo_root)
 

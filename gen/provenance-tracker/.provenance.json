@@ -1,5 +1,5 @@
 {
-  "spec_bundle_hash": "sha256:379c70dde389a9295d38e7be0502b3fb5da751fa93c933abec94782b1bbfa05c",
+  "spec_bundle_hash": "sha256:33f79a22eda04bdfeafed3f0b53feb1d97a9dd2d718c859aff06667f7c198f74",
   "model_pin": "claude-opus-5-5",
   "prompt_version": "v10",
   "retry_feedback": null,
@@ -12,7 +12,7 @@
     "secret_scanner": "secret_scanner@3.1.0+detect-secrets.1.5.0"
   },
   "provenance_hit": false,
-  "generated_at": "2026-11-15T23:23:03Z",
+  "generated_at": "2026-11-15T23:34:03Z",
   "verification_run_id": "provenance-tracker-attempt-1",
   "verification_report": {
     "component_id": "comp-provenance-tracker",
@@ -24,7 +24,7 @@
         "result": "pass",
         "test_authoring": {
           "model": "claude-opus-5-5",
-          "seed": 2,
+          "seed": 3,
           "prompt_version": "v1",
           "cache_hit": false
         }
@@ -36,7 +36,7 @@
         "result": "pass",
         "test_authoring": {
           "model": "claude-opus-5-5",
-          "seed": 2,
+          "seed": 3,
           "prompt_version": "v1",
           "cache_hit": false
         }
@@ -48,7 +48,7 @@
         "result": "pass",
         "test_authoring": {
           "model": "claude-opus-5-5",
-          "seed": 2,
+          "seed": 3,
           "prompt_version": "v1",
           "cache_hit": false
         }
@@ -60,7 +60,7 @@
         "result": "pass",
         "test_authoring": {
           "model": "claude-opus-5-5",
-          "seed": 2,
+          "seed": 3,
           "prompt_version": "v1",
           "cache_hit": false
         }
@@ -72,7 +72,7 @@
         "result": "pass",
         "test_authoring": {
           "model": "claude-opus-5-5",
-          "seed": 2,
+          "seed": 3,
           "prompt_version": "v1",
           "cache_hit": false
         }
@@ -84,7 +84,7 @@
         "result": "pass",
         "test_authoring": {
           "model": "claude-opus-5-5",
-          "seed": 2,
+          "seed": 3,
           "prompt_version": "v1",
           "cache_hit": false
         }
@@ -96,7 +96,7 @@
         "result": "pass",
         "test_authoring": {
           "model": "claude-opus-5-5",
-          "seed": 2,
+          "seed": 3,
           "prompt_version": "v1",
           "cache_hit": false
         }
@@ -108,7 +108,7 @@
         "result": "pass",
         "test_authoring": {
           "model": "claude-opus-5-5",
-          "seed": 2,
+          "seed": 3,
           "prompt_version": "v1",
           "cache_hit": false
         }
@@ -120,7 +120,7 @@
         "result": "pass",
         "test_authoring": {
           "model": "claude-opus-5-5",
-          "seed": 2,
+          "seed": 3,
           "prompt_version": "v1",
           "cache_hit": false
         }
