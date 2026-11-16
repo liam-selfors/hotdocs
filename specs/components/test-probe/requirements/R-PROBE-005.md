@@ -18,8 +18,11 @@
   - any other failure reached nothing this component can judge: no
     finding.
 
-  A report with no `testcase` element, or a pytest exit code of `2`,
-  `3` or `4`, gives one `collection_error` finding with pytest's last
+  A `testcase` whose `error` child's `message` is `collection failure`
+  is pytest's record of a file it could not collect, not a test: it is
+  never counted or classified as one. Such a record, a report with no
+  `testcase` element, or a pytest exit code of `2`, `3` or `4` gives
+  one `collection_error` finding, and only that, with pytest's last
   output line. A run still going after `timeout` seconds is killed and
   gives one `probe_timeout` finding. `tests_run` counts the `testcase`
   elements and `tests_reached` those that reached the code under test.

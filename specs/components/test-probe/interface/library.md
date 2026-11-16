@@ -35,7 +35,10 @@ the probing process, such as `pytest`. A `testcase` **reached** the code
 under test exactly when its `failure` message contains
 `HotdocsProbeStubReached`; it gives no finding. A failure of any other
 type that is not a `test_bug` gives no finding either. A timed-out run
-gives exactly one finding, `probe_timeout`: its report is not read. The
+gives exactly one finding, `probe_timeout`: its report is not read. A file
+pytest cannot collect appears in `report.xml` as a `testcase` with an
+`error` whose `message` is `collection failure`; it is no test, and gives
+exactly one finding, `collection_error`, with `tests_run` `0`. The
 one temporary directory is made by `tempfile.mkdtemp()` with no
 arguments.
 
