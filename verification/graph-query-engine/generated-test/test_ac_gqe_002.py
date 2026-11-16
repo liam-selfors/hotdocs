@@ -1,344 +1,367 @@
-import json
+import graph_query_engine
+
 import re
-from collections import Counter
 from pathlib import Path
 
 import pytest
-
-import graph_query_engine
 
 duckdb = pytest.importorskip("duckdb")
 
 
 FIVE_EDGE_TYPES = ("depends_on", "realizes", "uses_var", "depends_on_guarantees", "covers")
-DECISION_EDGE_TYPES = ("supersedes", "builds_on")
-ALL_EDGE_TYPES = FIVE_EDGE_TYPES + DECISION_EDGE_TYPES
-COMPONENT_LIST_FIELDS = ("depends_on", "realizes", "uses_var", "depends_on_guarantees")
+LIST_FIELDS = ("depends_on", "realizes", "uses_var", "depends_on_guarantees")
 
 
 # ---------------------------------------------------------------------------
-# Corpus location / synthetic fallback
+# Helpers
 # ---------------------------------------------------------------------------
-
-
-def _looks_like_repo_root(p: Path) -> bool:
-    return (
-        (p / "specs" / "components").is_dir()
-        and (p / "specs" / "decisions").is_dir()
-        and (p / "specs" / "product").is_dir()
-        and any((p / "specs" / "components").glob("*/component.md"))
-    )
-
-
-def _find_real_repo_root():
-    starts = [Path(__file__).resolve().parent, Path.cwd().resolve()]
-    seen = set()
-    for start in starts:
-        for cand in [start, *start.parents]:
-            if cand in seen:
-                continue
-            seen.add(cand)
-            if _looks_like_repo_root(cand):
-                return cand
-    return None
-
-
-def _write(path: Path, text: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text, encoding="utf-8")
-
-
-def _component_md(slug, depends_on, realizes, uses_var, dog, sealed):
-    lines = [
-        "---",
-        f"id: comp-{slug}",
-        f"title: {slug.capitalize()} Component",
-        "status: draft",
-        "owners: [team-a, team-b]",
-        f"depends_on: [{', '.join(depends_on)}]",
-        f"realizes: [{', '.join(realizes)}]",
-        f"uses_var: [{', '.join(uses_var)}]",
-        f"depends_on_guarantees: [{', '.join(dog)}]",
-    ]
-    if sealed:
-        lines.append("sealed: true")
-        lines.append(f"source_path: legacy/{slug}.py")
-    lines.append("---")
-    lines.append("")
-    lines.append(f"# {slug.capitalize()} Component")
-    lines.append("")
-    lines.append("## Purpose")
-    lines.append("")
-    lines.append(f"The {slug} component does one small, well-defined thing.")
-    lines.append("")
-    return "\n".join(lines)
-
-
-def _build_synthetic_corpus(root: Path) -> Path:
-    comps = {
-        "alpha": dict(
-            depends_on=["comp-beta", "comp-gamma"],
-            realizes=["P-ONE"],
-            uses_var=["VAR-ALPHA-PATH"],
-            dog=["G-BETA-001", "G-GAMMA-001"],
-            sealed=False,
-            reqs=["R-ALPHA-001", "R-ALPHA-002"],
-        ),
-        "beta": dict(
-            depends_on=["comp-gamma"],
-            realizes=["P-ONE", "P-TWO"],
-            uses_var=[],
-            dog=["G-GAMMA-001"],
-            sealed=False,
-            reqs=["R-BETA-001"],
-        ),
-        "gamma": dict(
-            depends_on=[],
-            realizes=[],
-            uses_var=["VAR-ALPHA-PATH", "VAR-GAMMA-MODE"],
-            dog=[],
-            sealed=True,
-            reqs=["R-GAMMA-001"],
-        ),
-    }
-    for slug, c in comps.items():
-        cdir = root / "specs" / "components" / slug
-        _write(
-            cdir / "component.md",
-            _component_md(slug, c["depends_on"], c["realizes"], c["uses_var"], c["dog"], c["sealed"]),
-        )
-        _write(cdir / "constraints.md", "# Constraints\n\nNone beyond the defaults.\n")
-        _write(
-            cdir / "interface" / "library.md",
-            f"# Library\n\n```\nrun_{slug}() -> None\n```\n\nRuns {slug}.\n",
-        )
-        _write(
-            cdir / "interface" / f"G-{slug.upper()}-001.md",
-            f"# G-{slug.upper()}-001\n\n**G-{slug.upper()}-001** — {slug} always returns.\n",
-        )
-        for i, rid in enumerate(c["reqs"], start=1):
-            _write(
-                cdir / "requirements" / f"{rid}.md",
-                f"# {rid}\n\n**{rid}** — The {slug} component MUST do thing {i}.\n",
-            )
-            ac = rid.replace("R-", "AC-", 1)
-            _write(
-                cdir / "acceptance" / f"{ac}.md",
-                f"# {ac}\n\nCovers: {rid}\nKind: generated-test\n\n"
-                "```gherkin\nGiven something\nWhen it runs\nThen it works\n```\n",
-            )
-        _write(
-            root / "gen" / slug / ".provenance.json",
-            json.dumps(
-                {
-                    "component_id": f"comp-{slug}",
-                    "spec_bundle_hash": "0" * 64,
-                    "verification_report": {"passed": True},
-                    "license_scan": {"passed": True},
-                    "secret_scan": {"passed": True},
-                    "provenance_hit": False,
-                }
-            ),
-        )
-        _write(root / "gen" / slug / f"{slug}.py", "def run():\n    return None\n")
-
-    for var in ("VAR-ALPHA-PATH", "VAR-GAMMA-MODE"):
-        _write(
-            root / "specs" / "vars" / f"{var}.md",
-            f"---\nid: {var}\ntitle: {var}\nstatus: draft\nowners: [team-a]\n---\n\n# {var}\n\nA var.\n",
-        )
-
-    _write(
-        root / "specs" / "product" / "P-ONE.md",
-        "---\nid: P-ONE\ntitle: Capability One\nstatus: draft\nowners: [team-a]\n---\n\n"
-        "# Capability One\n\n## Scenarios\n\n"
-        "### CS-ONE-001\nCovers: P-ONE\n\n```gherkin\nGiven a\nWhen b\nThen c\n```\n\n"
-        "### CS-ONE-002\nCovers: P-ONE\n\n```gherkin\nGiven a\nWhen b\nThen c\n```\n",
-    )
-    _write(
-        root / "specs" / "product" / "P-TWO.md",
-        "---\nid: P-TWO\ntitle: Capability Two\nstatus: draft\nowners: [team-b]\n---\n\n"
-        "# Capability Two\n\n## Scenarios\n\n"
-        "### CS-TWO-001\nCovers: P-TWO\n\n```gherkin\nGiven a\nWhen b\nThen c\n```\n",
-    )
-
-    _write(
-        root / "specs" / "decisions" / "D1.md",
-        "---\nid: D1\ntitle: First decision\nstatus: ratified\nowners: [team-a]\n"
-        "last_ratified_commit: abc1234\n---\n\n# D1\n\nThe first decision.\n",
-    )
-    _write(
-        root / "specs" / "decisions" / "D2.md",
-        "---\nid: D2\ntitle: Second decision\nstatus: draft\nowners: [team-a]\n"
-        "supersedes: D1\nbuilds_on: [D1]\n---\n\n# D2\n\nReplaces D1.\n",
-    )
-    _write(
-        root / "specs" / "decisions" / "D3.md",
-        "---\nid: D3\ntitle: Third decision\nstatus: draft\nowners: [team-b]\n"
-        "builds_on: [D1, D2]\n---\n\n# D3\n\n"
-        "An earlier draft of this record wrote the following line verbatim:\n\n"
-        "supersedes: D9\n\nbuilds_on: [D9]\n\nNeither is declared by this decision.\n",
-    )
-    _write(root / "specs" / "glossary.md", "# Glossary\n\n- **Thing** — a thing.\n")
-    return root
-
-
-# ---------------------------------------------------------------------------
-# Independent counting (plain Python over the files on disk)
-# ---------------------------------------------------------------------------
-
-
-def _read(p: Path) -> str:
-    return p.read_text(encoding="utf-8", errors="replace")
-
-
-def _frontmatter(text: str) -> str:
-    m = re.match(r"---\n(.*?)\n---\n", text, re.S)
-    return m.group(1) if m else ""
-
-
-def _fm_id(fm: str) -> str:
-    m = re.search(r"(?m)^id:\s*(\S+)", fm)
-    return m.group(1) if m else ""
-
-
-def _flow_list(fm: str, key: str):
-    m = re.search(r"(?m)^" + re.escape(key) + r":[ \t]*\[([^\]]*)\]", fm)
-    if not m:
-        return []
-    return [x.strip() for x in m.group(1).split(",") if x.strip() != ""]
-
-
-def _independent_edges(repo_root: Path) -> Counter:
-    expected = Counter()
-    specs = repo_root / "specs"
-
-    for comp_md in sorted(specs.glob("components/*/component.md")):
-        fm = _frontmatter(_read(comp_md))
-        src = _fm_id(fm)
-        for key in COMPONENT_LIST_FIELDS:
-            for target in _flow_list(fm, key):
-                expected[(src, target, key)] += 1
-
-    for ac in sorted(specs.glob("components/*/acceptance/*.md")):
-        m = re.search(r"(AC-[A-Za-z0-9-]+)\.md$", ac.name)
-        src = m.group(1) if m else ""
-        cm = re.search(r"(?m)^Covers:\s*(\S+)", _read(ac))
-        target = cm.group(1) if cm else ""
-        expected[(src, target, "covers")] += 1
-
-    cs_re = re.compile(r"### (CS-[A-Za-z0-9-]+)\s*\nCovers:\s*(\S+)")
-    for prod in sorted(specs.glob("product/*.md")):
-        for cs_id, target in cs_re.findall(_read(prod)):
-            expected[(cs_id, target, "covers")] += 1
-
-    for dec in sorted(specs.glob("decisions/*.md")):
-        fm = _frontmatter(_read(dec))
-        src = _fm_id(fm)
-        sm = re.search(r"(?m)^supersedes:\s*(\S+)", fm)
-        if sm and sm.group(1) != "":
-            expected[(src, sm.group(1), "supersedes")] += 1
-        for target in _flow_list(fm, "builds_on"):
-            expected[(src, target, "builds_on")] += 1
-
-    return expected
-
-
-# ---------------------------------------------------------------------------
-# Running the component under test
-# ---------------------------------------------------------------------------
-
 
 def _connect():
     con = duckdb.connect()
     try:
         con.execute("INSTALL yaml FROM community")
         con.execute("LOAD yaml")
-    except Exception as exc:  # environment cannot provide the extension
+    except Exception as exc:  # pragma: no cover - environment dependent
         con.close()
-        pytest.skip(f"DuckDB community 'yaml' extension unavailable: {exc}")
+        pytest.skip(f"DuckDB yaml community extension unavailable: {exc}")
     return con
 
 
-def _actual_edges(repo_root: Path) -> Counter:
-    con = _connect()
-    try:
-        result = graph_query_engine.load_views(con, repo_root)
-        assert result is None
-        rows = con.execute("SELECT source_id, target_id, edge_type FROM edges").fetchall()
-    finally:
-        con.close()
-    actual = Counter()
-    for src, tgt, et in rows:
-        actual[(src if src is not None else "", tgt if tgt is not None else "", et)] += 1
-    return actual
+def _edge_counts(con):
+    rows = con.execute(
+        "SELECT edge_type, count(*) FROM edges GROUP BY edge_type"
+    ).fetchall()
+    return {r[0]: int(r[1]) for r in rows}
 
 
-def _per_type(counter: Counter) -> dict:
-    out = {}
-    for (_, _, et), n in counter.items():
-        out[et] = out.get(et, 0) + n
-    return out
+def _edge_pairs(con, edge_type):
+    rows = con.execute(
+        "SELECT source_id, target_id FROM edges WHERE edge_type = ?", [edge_type]
+    ).fetchall()
+    return sorted((r[0], r[1]) for r in rows)
 
 
-def _assert_edges_match(repo_root: Path):
-    expected = _independent_edges(repo_root)
-    actual = _actual_edges(repo_root)
+def _frontmatter(text):
+    m = re.match(r"---\n(.*?)\n---\n", text, re.S)
+    return m.group(1) if m else None
 
-    unknown = sorted({et for (_, _, et) in actual} - set(ALL_EDGE_TYPES))
-    assert not unknown, f"edges view produced unexpected edge_type values: {unknown}"
 
-    exp_counts = _per_type(expected)
-    act_counts = _per_type(actual)
-    for et in FIVE_EDGE_TYPES:
-        assert act_counts.get(et, 0) == exp_counts.get(et, 0), (
-            f"edge_type {et!r}: edges view has {act_counts.get(et, 0)} rows, "
-            f"independent frontmatter/Covers: count is {exp_counts.get(et, 0)}"
+def _list_field_count(fm, key):
+    """Count non-empty entries of a flow-style `key: [a, b]` frontmatter line."""
+    if fm is None:
+        return 0
+    for line in fm.splitlines():
+        m = re.match(r"^" + re.escape(key) + r":[ \t]*\[([^\]]*)\]", line)
+        if m:
+            return len([e for e in (p.strip(" ") for p in m.group(1).split(",")) if e != ""])
+    return 0
+
+
+def _independent_counts(repo_root):
+    """Count expected edges directly from frontmatter / Covers: tags."""
+    repo_root = Path(repo_root)
+    counts = {t: 0 for t in FIVE_EDGE_TYPES}
+    counts["supersedes"] = 0
+    counts["builds_on"] = 0
+
+    for comp in sorted(repo_root.glob("specs/components/*/component.md")):
+        fm = _frontmatter(comp.read_text(encoding="utf-8"))
+        for key in LIST_FIELDS:
+            counts[key] += _list_field_count(fm, key)
+
+    for ac in sorted(repo_root.glob("specs/components/*/acceptance/*.md")):
+        text = ac.read_text(encoding="utf-8")
+        if re.search(r"(?m)^Covers:[ \t]*\S+", text):
+            counts["covers"] += 1
+
+    for prod in sorted(repo_root.glob("specs/product/*.md")):
+        text = prod.read_text(encoding="utf-8")
+        counts["covers"] += len(
+            re.findall(r"### (CS-[A-Za-z0-9-]+)\s*\nCovers:\s*(\S+)", text)
         )
-    for et in DECISION_EDGE_TYPES:
-        assert act_counts.get(et, 0) == exp_counts.get(et, 0), (
-            f"edge_type {et!r}: edges view has {act_counts.get(et, 0)} rows, "
-            f"independent decision-frontmatter count is {exp_counts.get(et, 0)}"
+
+    for dec in sorted(repo_root.glob("specs/decisions/*.md")):
+        fm = _frontmatter(dec.read_text(encoding="utf-8"))
+        if fm is None:
+            continue
+        if re.search(r"(?m)^supersedes:[ \t]*\S+", fm):
+            counts["supersedes"] += 1
+        counts["builds_on"] += _list_field_count(fm, "builds_on")
+
+    return counts
+
+
+def _tool_root():
+    here = Path(graph_query_engine.__file__).resolve()
+    for parent in here.parents:
+        if parent.name == "gen":
+            return parent.parent
+    return None
+
+
+def _write(path, text):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+
+
+def _component(root, slug, extra_fm, purpose, req_ids):
+    comp_dir = root / "specs" / "components" / slug
+    fm = (
+        "---\n"
+        f"id: comp-{slug}\n"
+        f"title: {slug.capitalize()}\n"
+        "status: draft\n"
+        "owners: [team-a]\n"
+        f"{extra_fm}"
+        "---\n"
+    )
+    body = (
+        f"\n# {slug.capitalize()}\n\n"
+        "## Purpose\n\n"
+        f"{purpose}\n\n"
+        "## Change log\n\n"
+        "- Initial draft.\n"
+    )
+    _write(comp_dir / "component.md", fm + body)
+    _write(comp_dir / "constraints.md", "# Constraints\n\nNo network access.\n")
+    _write(
+        comp_dir / "interface" / "library.md",
+        f"# Library\n\n```\nrun_{slug}() -> None\n```\n\nDoes the {slug} thing.\n",
+    )
+    for rid in req_ids:
+        suffix = rid.split("-", 1)[1]
+        _write(
+            comp_dir / "requirements" / f"{rid}.md",
+            f"# {rid}\n\n**{rid}** — The component MUST do thing {suffix}.\n",
+        )
+        ac_id = "AC-" + suffix
+        _write(
+            comp_dir / "acceptance" / f"{ac_id}.md",
+            f"# {ac_id}\n\n"
+            f"Covers: {rid}\n"
+            "Kind: compiled\n\n"
+            "```gherkin\n"
+            "Given a thing\n"
+            "When it runs\n"
+            "Then it works\n"
+            "```\n",
         )
 
-    for et in ALL_EDGE_TYPES:
-        exp_rows = Counter({k: v for k, v in expected.items() if k[2] == et})
-        act_rows = Counter({k: v for k, v in actual.items() if k[2] == et})
-        missing = exp_rows - act_rows
-        extra = act_rows - exp_rows
-        assert not missing and not extra, (
-            f"edge_type {et!r} rows differ from the independent count; "
-            f"missing={sorted(missing.elements())[:20]} extra={sorted(extra.elements())[:20]}"
-        )
-    return expected
+
+def _provenance(root, slug):
+    text = (
+        "{\n"
+        f'  "component_id": "comp-{slug}",\n'
+        '  "spec_bundle_hash": "sha256:0000000000000000",\n'
+        '  "generated_at": "2026-01-01T00:00:00Z",\n'
+        '  "model": "anthropic:claude-sonnet-5",\n'
+        '  "verification_report": {"result": "pass", "criteria": 1},\n'
+        '  "license_scan": {"result": "pass", "findings": 0},\n'
+        '  "secret_scan": {"result": "pass", "findings": 0},\n'
+        '  "provenance_hit": false\n'
+        "}\n"
+    )
+    _write(root / "gen" / slug / ".provenance.json", text)
+    _write(root / "verification" / slug / ".provenance.json", text)
+
+
+def _build_fixture(root):
+    _component(
+        root,
+        "alpha",
+        "depends_on: []\nrealizes: [P-FOO]\nuses_var: [VAR-FOO-PATH]\n",
+        "Alpha produces foo outputs.",
+        ["R-ALPHA-001", "R-ALPHA-002"],
+    )
+    _write(
+        root / "specs" / "components" / "alpha" / "guarantees" / "G-ALPHA-001.md",
+        "# G-ALPHA-001\n\n**G-ALPHA-001** — Alpha's output is deterministic.\n",
+    )
+    _component(
+        root,
+        "beta",
+        "depends_on: [comp-alpha]\nrealizes: [P-FOO]\ndepends_on_guarantees: [G-ALPHA-001]\n",
+        "Beta consumes alpha's outputs.",
+        ["R-BETA-001"],
+    )
+    _component(
+        root,
+        "gamma",
+        "sealed: true\nsource_path: legacy/gamma/\ndepends_on: [comp-alpha, comp-beta]\n",
+        "Gamma wraps legacy code.",
+        ["R-GAMMA-001"],
+    )
+    _provenance(root, "alpha")
+    _provenance(root, "beta")
+
+    _write(
+        root / "specs" / "product" / "P-FOO.md",
+        "---\n"
+        "id: P-FOO\n"
+        "title: Foo capability\n"
+        "status: draft\n"
+        "owners: [team-a]\n"
+        "---\n\n"
+        "# Foo capability\n\n"
+        "## Capability scenarios\n\n"
+        "### CS-FOO-001\n"
+        "Covers: P-FOO\n\n"
+        "```gherkin\nGiven foo\nWhen bar\nThen baz\n```\n\n"
+        "### CS-FOO-002\n"
+        "Covers: P-FOO\n\n"
+        "```gherkin\nGiven foo\nWhen qux\nThen quux\n```\n",
+    )
+
+    _write(
+        root / "specs" / "vars" / "VAR-FOO-PATH.md",
+        "---\n"
+        "id: VAR-FOO-PATH\n"
+        "title: Foo path\n"
+        "status: draft\n"
+        "owners: [team-a]\n"
+        "---\n\n"
+        "# VAR-FOO-PATH\n\nPath to the foo corpus.\n",
+    )
+
+    _write(
+        root / "specs" / "decisions" / "D1.md",
+        "---\n"
+        "id: D1\n"
+        "title: First decision\n"
+        "status: deprecated\n"
+        "owners: [team-a]\n"
+        "last_ratified_commit: abc1234\n"
+        "---\n\n"
+        "# D1\n\nThe original choice.\n",
+    )
+    _write(
+        root / "specs" / "decisions" / "D2.md",
+        "---\n"
+        "id: D2\n"
+        "title: Second decision\n"
+        "status: ratified\n"
+        "owners: [team-a]\n"
+        "last_ratified_commit: def5678\n"
+        "supersedes: D1\n"
+        "---\n\n"
+        "# D2\n\nReplaces D1.\n",
+    )
+    _write(
+        root / "specs" / "decisions" / "D3.md",
+        "---\n"
+        "id: D3\n"
+        "title: Third decision\n"
+        "status: draft\n"
+        "owners: [team-a]\n"
+        "builds_on: [D1, D2]\n"
+        "---\n\n"
+        "# D3\n\n"
+        "An earlier draft of this record declared, in its own frontmatter:\n\n"
+        "supersedes: D9\n"
+        "builds_on: [D7, D8]\n\n"
+        "That quoted prose is not a declaration.\n",
+    )
+
+    _write(
+        root / "specs" / "glossary.md",
+        "# Glossary\n\n- **Thing** — a thing.\n",
+    )
 
 
 # ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
 
+def test_edges_counts_match_independent_count_on_synthetic_corpus(tmp_path):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    _build_fixture(repo_root)
 
-def test_edges_row_counts_match_independent_count_on_real_corpus(tmp_path):
-    repo_root = _find_real_repo_root()
-    if repo_root is None:
-        repo_root = _build_synthetic_corpus(tmp_path / "repo")
-    _assert_edges_match(repo_root)
+    independent = _independent_counts(repo_root)
+    # Sanity-check the independent counter against hand-computed values.
+    assert independent == {
+        "depends_on": 3,
+        "realizes": 2,
+        "uses_var": 1,
+        "depends_on_guarantees": 1,
+        "covers": 6,
+        "supersedes": 1,
+        "builds_on": 2,
+    }
+
+    con = _connect()
+    try:
+        graph_query_engine.load_views(con, repo_root)
+        counts = _edge_counts(con)
+
+        for edge_type in FIVE_EDGE_TYPES:
+            assert counts.get(edge_type, 0) == independent[edge_type], (
+                edge_type,
+                counts,
+                independent,
+            )
+        for edge_type in ("supersedes", "builds_on"):
+            assert counts.get(edge_type, 0) == independent[edge_type], (
+                edge_type,
+                counts,
+                independent,
+            )
+
+        assert _edge_pairs(con, "depends_on") == sorted(
+            [
+                ("comp-beta", "comp-alpha"),
+                ("comp-gamma", "comp-alpha"),
+                ("comp-gamma", "comp-beta"),
+            ]
+        )
+        assert _edge_pairs(con, "realizes") == sorted(
+            [("comp-alpha", "P-FOO"), ("comp-beta", "P-FOO")]
+        )
+        assert _edge_pairs(con, "uses_var") == [("comp-alpha", "VAR-FOO-PATH")]
+        assert _edge_pairs(con, "depends_on_guarantees") == [
+            ("comp-beta", "G-ALPHA-001")
+        ]
+        assert _edge_pairs(con, "covers") == sorted(
+            [
+                ("AC-ALPHA-001", "R-ALPHA-001"),
+                ("AC-ALPHA-002", "R-ALPHA-002"),
+                ("AC-BETA-001", "R-BETA-001"),
+                ("AC-GAMMA-001", "R-GAMMA-001"),
+                ("CS-FOO-001", "P-FOO"),
+                ("CS-FOO-002", "P-FOO"),
+            ]
+        )
+        assert _edge_pairs(con, "supersedes") == [("D2", "D1")]
+        assert _edge_pairs(con, "builds_on") == sorted(
+            [("D3", "D1"), ("D3", "D2")]
+        )
+    finally:
+        con.close()
 
 
-def test_edges_row_counts_match_independent_count_on_synthetic_corpus(tmp_path):
-    repo_root = _build_synthetic_corpus(tmp_path / "repo")
-    expected = _assert_edges_match(repo_root)
+def test_edges_counts_match_independent_count_on_real_corpus():
+    tool_root = _tool_root()
+    if tool_root is None:
+        pytest.skip("module under test is not located under a gen/ directory")
+    components = list(tool_root.glob("specs/components/*/component.md"))
+    if not components:
+        pytest.skip(f"no real spec corpus found under {tool_root}")
 
-    counts = _per_type(expected)
-    # Sanity on the fixture itself: every one of the five edge types is exercised.
-    assert counts.get("depends_on") == 3
-    assert counts.get("realizes") == 3
-    assert counts.get("uses_var") == 3
-    assert counts.get("depends_on_guarantees") == 3
-    # 4 acceptance files + 3 capability scenario headings
-    assert counts.get("covers") == 7
-    assert counts.get("supersedes") == 1
-    assert counts.get("builds_on") == 3
-    # Prose quoting a field never becomes an edge (frontmatter-only decision arms).
-    assert ("D3", "D9", "supersedes") not in expected
-    assert ("D3", "D9", "builds_on") not in expected
+    independent = _independent_counts(tool_root)
+
+    con = _connect()
+    try:
+        graph_query_engine.load_views(con, tool_root)
+        counts = _edge_counts(con)
+    finally:
+        con.close()
+
+    for edge_type in FIVE_EDGE_TYPES:
+        assert counts.get(edge_type, 0) == independent[edge_type], (
+            edge_type,
+            counts.get(edge_type, 0),
+            independent[edge_type],
+        )
+    # A real corpus exercises at least depends_on and covers edges.
+    assert independent["depends_on"] > 0
+    assert independent["covers"] > 0

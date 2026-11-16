@@ -1,217 +1,238 @@
+"""AC-GQE-010 (Covers: R-GQE-002).
+
+The `edges` view's decision arms (`supersedes`/`builds_on`) read only a
+decision record's frontmatter block, never its prose:
+
+* a decision whose prose quotes `supersedes: D1` and `builds_on: [D2]` but
+  whose frontmatter declares neither yields no supersedes/builds_on row;
+* a decision whose frontmatter declares `builds_on: [D1, D2]` yields exactly
+  the rows (that decision, D1, builds_on) and (that decision, D2, builds_on).
+"""
+
 import json
 from pathlib import Path
 
+import duckdb
 import pytest
-
-duckdb = pytest.importorskip("duckdb")
 
 import graph_query_engine
 
 
 def _write(path: Path, text: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text, encoding="utf-8")
+    with open(path, "w", encoding="utf-8", newline="") as fh:
+        fh.write(text)
 
 
-def _decision(did: str, title: str, extra_fm: str = "", body: str = "") -> str:
-    fm_lines = [
-        f"id: {did}",
-        f"title: {title}",
-        "status: ratified",
-        "owners: [alice]",
-        "last_ratified_commit: 0000000000000000000000000000000000000000",
-    ]
-    if extra_fm:
-        fm_lines.append(extra_fm)
-    return "---\n" + "\n".join(fm_lines) + "\n---\n\n" + f"# {did} — {title}\n\n" + body + "\n"
-
-
-def _build_corpus(root: Path) -> None:
-    specs = root / "specs"
-
-    # Glossary
-    _write(specs / "glossary.md", "# Glossary\n\n- **Thing** — a thing.\n")
-
-    # One sealed component with a full set of unit files
-    comp_dir = specs / "components" / "alpha"
+def _build_repo(repo_root: Path) -> None:
+    """A small but complete synthetic spec corpus, so that every view's glob
+    matches at least one file and every frontmatter column is present."""
+    comp_dir = repo_root / "specs" / "components" / "foo"
     _write(
         comp_dir / "component.md",
         "---\n"
-        "id: comp-alpha\n"
-        "title: Alpha\n"
+        "id: comp-foo\n"
+        "title: Foo\n"
         "status: draft\n"
-        "owners: [alice]\n"
+        "owners: [pipeline-team]\n"
         "depends_on: []\n"
+        "realizes: []\n"
+        "uses_var: [VAR-FOO]\n"
+        "depends_on_guarantees: []\n"
         "sealed: true\n"
-        "source_path: legacy/alpha\n"
+        "source_path: legacy/foo/\n"
         "---\n"
         "\n"
-        "# Alpha\n"
+        "# Foo\n"
         "\n"
         "## Purpose\n"
         "\n"
-        "Alpha does a small fixture thing.\n"
+        "Does foo things for the fixture corpus.\n"
         "\n"
-        "## Guarantees\n"
+        "## Scope\n"
         "\n"
-        "- **G-ALPHA-001** — Alpha is deterministic.\n",
+        "Nothing else.\n",
     )
     _write(
-        comp_dir / "requirements" / "R-ALPHA-001.md",
-        "# R-ALPHA-001\n\n**R-ALPHA-001** — Alpha MUST return a value.\n",
+        comp_dir / "requirements" / "R-FOO-001.md",
+        "# R-FOO-001\n\n**R-FOO-001** — The component MUST do foo.\n",
     )
     _write(
-        comp_dir / "acceptance" / "AC-ALPHA-001.md",
-        "# AC-ALPHA-001\n\n"
-        "Covers: R-ALPHA-001\n"
-        "Kind: generated-test\n\n"
-        "```gherkin\nGiven alpha\nWhen called\nThen it returns a value\n```\n",
+        comp_dir / "acceptance" / "AC-FOO-001.md",
+        "# AC-FOO-001\n"
+        "\n"
+        "Covers: R-FOO-001\n"
+        "Kind: judged\n"
+        "\n"
+        "```gherkin\n"
+        "Given foo\n"
+        "When foo runs\n"
+        "Then foo happens\n"
+        "```\n",
     )
     _write(
         comp_dir / "interface" / "library.md",
-        "# Library\n\n```\nalpha() -> int\n```\n",
+        "# Library\n\n```\nfoo() -> None\n```\n",
     )
     _write(comp_dir / "constraints.md", "# Constraints\n\nNone.\n")
 
-    # Product capability file with one capability scenario
     _write(
-        specs / "product" / "P-ALPHA.md",
+        repo_root / "specs" / "product" / "P-FOO.md",
         "---\n"
-        "id: P-ALPHA\n"
-        "title: Alpha Capability\n"
+        "id: P-FOO\n"
+        "title: Foo capability\n"
         "status: draft\n"
-        "owners: [alice]\n"
+        "owners: [pipeline-team]\n"
         "---\n"
         "\n"
-        "# Alpha Capability\n"
+        "# Foo capability\n"
         "\n"
-        "### CS-ALPHA-001\n"
-        "Covers: G-ALPHA-001\n"
+        "## Scenarios\n"
         "\n"
-        "```gherkin\nGiven alpha\nThen it works\n```\n",
+        "### CS-FOO-001\n"
+        "Covers: P-FOO\n"
+        "\n"
+        "```gherkin\n"
+        "Given foo\n"
+        "Then foo\n"
+        "```\n",
     )
 
-    # Var declaration
     _write(
-        specs / "vars" / "VAR-ALPHA-PATH.md",
+        repo_root / "specs" / "vars" / "VAR-FOO.md",
         "---\n"
-        "id: VAR-ALPHA-PATH\n"
-        "title: Alpha Path\n"
+        "id: VAR-FOO\n"
+        "title: Foo var\n"
         "status: draft\n"
-        "owners: [alice]\n"
+        "owners: [pipeline-team]\n"
         "---\n"
         "\n"
-        "# VAR-ALPHA-PATH\n\nA path.\n",
+        "# VAR-FOO\n\nA foo variable.\n",
     )
 
-    # Decisions
-    decisions = specs / "decisions"
-    _write(decisions / "D1.md", _decision("D1", "First decision", body="Plain prose.\n"))
-    _write(decisions / "D2.md", _decision("D2", "Second decision", body="More plain prose.\n"))
-    # D3: prose quotes the fields (including at a line start), frontmatter declares neither
+    decisions = repo_root / "specs" / "decisions"
+    _write(
+        decisions / "D1.md",
+        "---\n"
+        "id: D1\n"
+        "title: First decision\n"
+        "status: ratified\n"
+        "owners: [pipeline-team]\n"
+        "last_ratified_commit: abc1234\n"
+        "---\n"
+        "\n"
+        "# D1\n\nThe first decision.\n",
+    )
+    _write(
+        decisions / "D2.md",
+        "---\n"
+        "id: D2\n"
+        "title: Second decision\n"
+        "status: draft\n"
+        "owners: [pipeline-team]\n"
+        "---\n"
+        "\n"
+        "# D2\n\nThe second decision.\n",
+    )
+    # D3: prose quotes both fields (inline and at a line start inside a code
+    # block), frontmatter declares neither.
     _write(
         decisions / "D3.md",
-        _decision(
-            "D3",
-            "Prose-quoting decision",
-            body=(
-                "This decision discusses another record whose frontmatter read:\n"
-                "\n"
-                "supersedes: D1\n"
-                "builds_on: [D2]\n"
-                "\n"
-                "and also inline as `supersedes: D1` and `builds_on: [D2]`,\n"
-                "but declares neither itself.\n"
-            ),
-        ),
+        "---\n"
+        "id: D3\n"
+        "title: Third decision quoting fields\n"
+        "status: draft\n"
+        "owners: [pipeline-team]\n"
+        "---\n"
+        "\n"
+        "# D3\n"
+        "\n"
+        "An earlier draft of this record declared `supersedes: D1` and\n"
+        "`builds_on: [D2]`; neither applies, and neither is declared.\n"
+        "\n"
+        "```yaml\n"
+        "supersedes: D1\n"
+        "builds_on: [D2]\n"
+        "```\n",
     )
-    # D4: frontmatter declares builds_on: [D1, D2]
+    # D4: frontmatter declares builds_on: [D1, D2].
     _write(
         decisions / "D4.md",
-        _decision(
-            "D4",
-            "Building decision",
-            extra_fm="builds_on: [D1, D2]",
-            body="Builds on two prior decisions.\n",
-        ),
-    )
-    # D5: declares supersedes so the column/field exists somewhere in the corpus
-    _write(
-        decisions / "D5.md",
-        _decision("D5", "Superseding decision", extra_fm="supersedes: D2", body="Replaces D2.\n"),
+        "---\n"
+        "id: D4\n"
+        "title: Fourth decision\n"
+        "status: draft\n"
+        "owners: [pipeline-team]\n"
+        "builds_on: [D1, D2]\n"
+        "---\n"
+        "\n"
+        "# D4\n\nBuilds on the first two decisions.\n",
     )
 
-    # A provenance manifest for the component
-    _write(
-        root / "gen" / "alpha" / ".provenance.json",
-        json.dumps(
-            {
-                "component_id": "comp-alpha",
-                "spec_bundle_hash": "sha256:" + "0" * 64,
-                "model": "anthropic:claude-sonnet-5",
-                "generated_at": "2026-01-01T00:00:00Z",
-                "verification_report": {"passed": True, "gates": []},
-                "license_scan": {"passed": True, "findings": []},
-                "secret_scan": {"passed": True, "findings": []},
-                "provenance_hit": False,
-            },
-            indent=2,
+    manifest = {
+        "component_id": "comp-foo",
+        "spec_bundle_hash": "0" * 64,
+        "verification_report": {"passed": True},
+        "license_scan": {"passed": True},
+        "secret_scan": {"passed": True},
+        "provenance_hit": False,
+    }
+    for where in ("gen", "verification"):
+        _write(
+            repo_root / where / "foo" / ".provenance.json",
+            json.dumps(manifest, indent=2) + "\n",
         )
-        + "\n",
-    )
 
 
-@pytest.fixture(scope="module")
-def con(tmp_path_factory):
-    root = tmp_path_factory.mktemp("gqe_ac010_repo")
-    _build_corpus(root)
+@pytest.fixture
+def con(tmp_path):
+    repo_root = tmp_path / "repo"
+    _build_repo(repo_root)
     connection = duckdb.connect()
+    connection.execute("INSTALL yaml FROM community")
+    connection.execute("LOAD yaml")
+    graph_query_engine.load_views(connection, repo_root)
     try:
-        connection.execute("INSTALL yaml FROM community")
-        connection.execute("LOAD yaml")
-    except Exception as exc:  # pragma: no cover - environment-dependent
+        yield connection
+    finally:
         connection.close()
-        pytest.skip(f"DuckDB community 'yaml' extension unavailable: {exc}")
-    graph_query_engine.load_views(connection, root)
-    yield connection
-    connection.close()
-
-
-def _decision_edges(con, source_id):
-    rows = con.execute(
-        "SELECT source_id, target_id, edge_type FROM edges "
-        "WHERE source_id = ? AND edge_type IN ('supersedes', 'builds_on') "
-        "ORDER BY target_id, edge_type",
-        [source_id],
-    ).fetchall()
-    return [tuple(r) for r in rows]
 
 
 def test_prose_quoted_fields_produce_no_decision_edges(con):
-    rows = _decision_edges(con, "D3")
+    rows = con.execute(
+        "SELECT source_id, target_id, edge_type FROM edges "
+        "WHERE source_id = 'D3' AND edge_type IN ('supersedes', 'builds_on')"
+    ).fetchall()
     assert rows == [], (
-        "D3's prose quotes `supersedes: D1` and `builds_on: [D2]` but its "
-        f"frontmatter declares neither; expected no edges, got {rows!r}"
+        "D3 declares neither supersedes nor builds_on in frontmatter, "
+        f"yet edges returned: {rows!r}"
     )
-    # No edge anywhere should point from D3 to D1/D2 via these types
+
+    # Also no edge anywhere sourced from D3's prose, whatever its source_id.
     stray = con.execute(
-        "SELECT count(*) FROM edges WHERE source_id = 'D3' "
-        "AND target_id IN ('D1', 'D2', '[D2]')"
-    ).fetchone()[0]
-    assert stray == 0
+        "SELECT source_id, target_id, edge_type FROM edges "
+        "WHERE edge_type = 'supersedes'"
+    ).fetchall()
+    assert stray == [], f"no decision declares supersedes, got: {stray!r}"
 
 
-def test_frontmatter_builds_on_list_produces_exact_rows(con):
-    rows = _decision_edges(con, "D4")
-    assert sorted(rows) == [
+def test_frontmatter_builds_on_list_yields_exactly_its_rows(con):
+    rows = con.execute(
+        "SELECT source_id, target_id, edge_type FROM edges "
+        "WHERE source_id = 'D4'"
+    ).fetchall()
+    normalized = sorted(tuple(str(v) for v in row) for row in rows)
+    assert normalized == [
         ("D4", "D1", "builds_on"),
         ("D4", "D2", "builds_on"),
-    ], f"unexpected decision edges for D4: {rows!r}"
-    # Exactly one row per (source, target, edge_type) — no duplicates
-    dup = con.execute(
-        "SELECT count(*) FROM ("
-        "  SELECT source_id, target_id, edge_type, count(*) AS n FROM edges "
-        "  WHERE source_id = 'D4' GROUP BY 1, 2, 3 HAVING count(*) > 1"
-        ")"
-    ).fetchone()[0]
-    assert dup == 0
+    ], f"unexpected edges for D4: {rows!r}"
+
+    # The only builds_on rows in the whole corpus are D4's two.
+    all_builds_on = con.execute(
+        "SELECT source_id, target_id, edge_type FROM edges "
+        "WHERE edge_type = 'builds_on'"
+    ).fetchall()
+    assert sorted(tuple(str(v) for v in r) for r in all_builds_on) == [
+        ("D4", "D1", "builds_on"),
+        ("D4", "D2", "builds_on"),
+    ], f"unexpected builds_on edges: {all_builds_on!r}"

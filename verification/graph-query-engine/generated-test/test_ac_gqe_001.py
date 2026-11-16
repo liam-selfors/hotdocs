@@ -1,14 +1,15 @@
-"""AC-GQE-001 (covers R-GQE-001).
+"""AC-GQE-001 (Covers: R-GQE-001).
 
 Given a repo root with a real spec corpus
 When load_views runs and nodes is queried
 Then the row count per kind matches an independent file-system count
-  for every one of the seven file-based kinds, never counting the
-  README.md in specs/product/, specs/vars/ or specs/decisions/.
+  for every kind, never counting the README.md in specs/product/,
+  specs/vars/ or specs/decisions/.
 """
 
-import json
+import glob
 import os
+import re
 from pathlib import Path
 
 import duckdb
@@ -17,7 +18,7 @@ import pytest
 import graph_query_engine
 
 
-SEVEN_KINDS = (
+KINDS = (
     "component",
     "capability",
     "var",
@@ -25,250 +26,262 @@ SEVEN_KINDS = (
     "guarantee",
     "requirement",
     "acceptance",
+    "capability_scenario",
 )
 
+CS_HEADING = re.compile(r"### (CS-[A-Za-z0-9-]+)")
 
-def _looks_like_corpus_root(path: Path) -> bool:
-    specs = path / "specs"
-    return (
-        (specs / "components").is_dir()
-        and (specs / "product").is_dir()
-        and (specs / "vars").is_dir()
-        and (specs / "decisions").is_dir()
-        and any((specs / "components").glob("*/component.md"))
+
+# --------------------------------------------------------------------------
+# helpers
+# --------------------------------------------------------------------------
+
+
+def _connect():
+    con = duckdb.connect()
+    con.execute("INSTALL yaml FROM community")
+    con.execute("LOAD yaml")
+    return con
+
+
+def _md_files(pattern):
+    return sorted(p for p in glob.glob(pattern) if os.path.isfile(p))
+
+
+def _non_readme(paths):
+    return [p for p in paths if os.path.basename(p) != "README.md"]
+
+
+def _independent_counts(repo_root: Path):
+    root = str(repo_root)
+    components = _md_files(os.path.join(root, "specs", "components", "*", "component.md"))
+    product = _non_readme(_md_files(os.path.join(root, "specs", "product", "*.md")))
+    vars_ = _non_readme(_md_files(os.path.join(root, "specs", "vars", "*.md")))
+    decisions = _non_readme(_md_files(os.path.join(root, "specs", "decisions", "*.md")))
+    guarantees = _md_files(
+        os.path.join(root, "specs", "components", "*", "interface", "guarantees", "*.md")
     )
+    requirements = _md_files(os.path.join(root, "specs", "components", "*", "requirements", "*.md"))
+    acceptance = _md_files(os.path.join(root, "specs", "components", "*", "acceptance", "*.md"))
+
+    scenarios = 0
+    for p in product:
+        with open(p, encoding="utf-8") as fh:
+            scenarios += len(CS_HEADING.findall(fh.read()))
+
+    return {
+        "component": len(components),
+        "capability": len(product),
+        "var": len(vars_),
+        "decision": len(decisions),
+        "guarantee": len(guarantees),
+        "requirement": len(requirements),
+        "acceptance": len(acceptance),
+        "capability_scenario": scenarios,
+    }
+
+
+def _view_counts(con):
+    rows = con.execute("SELECT kind, count(*) FROM nodes GROUP BY kind").fetchall()
+    counts = {k: 0 for k in KINDS}
+    for kind, n in rows:
+        counts[kind] = n
+    return counts
 
 
 def _find_real_repo_root():
-    candidates = []
-    try:
-        here = Path(__file__).resolve()
-        candidates.extend([here.parent] + list(here.parents))
-    except NameError:
-        pass
-    try:
-        cwd = Path(os.getcwd()).resolve()
-        candidates.extend([cwd] + list(cwd.parents))
-    except OSError:
-        pass
-    seen = set()
-    for candidate in candidates:
-        if candidate in seen:
-            continue
-        seen.add(candidate)
-        if _looks_like_corpus_root(candidate):
-            return candidate
+    """Tool root: parent of the nearest `gen` dir above the module, else any
+    ancestor holding a spec corpus."""
+    here = Path(graph_query_engine.__file__).resolve()
+    for parent in here.parents:
+        if parent.name == "gen":
+            candidate = parent.parent
+            if (candidate / "specs" / "components").is_dir():
+                return candidate
+            break
+    for parent in here.parents:
+        if (parent / "specs" / "components").is_dir():
+            return parent
+    cwd = Path.cwd().resolve()
+    for parent in (cwd, *cwd.parents):
+        if (parent / "specs" / "components").is_dir():
+            return parent
     return None
 
 
-def _write(path: Path, text: str) -> None:
+# --------------------------------------------------------------------------
+# synthetic corpus fixture
+# --------------------------------------------------------------------------
+
+
+def _write(path: Path, text: str):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
 
 
-def _build_fallback_corpus(root: Path) -> Path:
-    """A small on-disk corpus, used only if no real corpus is reachable."""
+def _build_corpus(root: Path):
     specs = root / "specs"
 
-    components = {
-        "alpha": {
-            "requirements": ["R-ALPHA-001", "R-ALPHA-002"],
-            "guarantees": ["G-ALPHA-001"],
-        },
-        "beta": {
-            "requirements": ["R-BETA-001"],
-            "guarantees": [],
-        },
-    }
-    for slug, parts in components.items():
-        comp_dir = specs / "components" / slug
+    for slug, n_req, n_g in (("alpha", 2, 1), ("beta", 1, 2), ("gamma", 3, 0)):
+        upper = slug.upper()
         _write(
-            comp_dir / "component.md",
+            specs / "components" / slug / "component.md",
             "---\n"
             f"id: comp-{slug}\n"
-            f"title: {slug.capitalize()}\n"
+            f"title: {slug.capitalize()} Component\n"
             "status: draft\n"
-            "owners: [pipeline-team]\n"
+            "owners: [test-team]\n"
             "depends_on: []\n"
             "sealed: true\n"
-            f"source_path: legacy/{slug}\n"
+            f"source_path: legacy/{slug}/\n"
             "---\n\n"
-            f"# {slug.capitalize()}\n\n"
-            "## Purpose\n\n"
-            f"{slug.capitalize()} does one small thing.\n",
+            f"# {slug.capitalize()}\n\n## Purpose\n\nDoes {slug} things.\n",
         )
-        _write(comp_dir / "constraints.md", "# Constraints\n\nNone.\n")
-        _write(comp_dir / "interface" / "library.md", "# Library\n\nNothing.\n")
-        for gid in parts["guarantees"]:
+        _write(
+            specs / "components" / slug / "constraints.md",
+            "# Constraints\n\nNone.\n",
+        )
+        for i in range(1, n_req + 1):
+            rid = f"R-{upper}-{i:03d}"
+            acid = f"AC-{upper}-{i:03d}"
             _write(
-                comp_dir / "interface" / "guarantees" / f"{gid}.md",
-                f"# {gid}\n\nA guarantee.\n",
+                specs / "components" / slug / "requirements" / f"{rid}.md",
+                f"# {rid}\n\n**{rid}** — The component MUST do thing {i}.\n",
             )
-        for idx, rid in enumerate(parts["requirements"], start=1):
             _write(
-                comp_dir / "requirements" / f"{rid}.md",
-                f"# {rid}\n\n**{rid}** — It MUST do a thing.\n",
-            )
-            ac_id = rid.replace("R-", "AC-", 1)
-            _write(
-                comp_dir / "acceptance" / f"{ac_id}.md",
-                f"# {ac_id}\n\nCovers: {rid}\nKind: judged\n\n"
+                specs / "components" / slug / "acceptance" / f"{acid}.md",
+                f"# {acid}\n\nCovers: {rid}\nKind: generated-test\n\n"
                 "```gherkin\nGiven x\nWhen y\nThen z\n```\n",
             )
-        _write(
-            root / "gen" / slug / ".provenance.json",
-            json.dumps(
-                {
-                    "component_id": f"comp-{slug}",
-                    "spec_bundle_hash": "0" * 64,
-                    "verification_report": {"passed": True},
-                    "license_scan": {"passed": True},
-                    "secret_scan": {"passed": True},
-                    "provenance_hit": False,
-                }
-            ),
-        )
+        for i in range(1, n_g + 1):
+            gid = f"G-{upper}-{i:03d}"
+            _write(
+                specs / "components" / slug / "interface" / "guarantees" / f"{gid}.md",
+                f"# {gid}\n\nThe component guarantees property {i}.\n",
+            )
 
     _write(
-        specs / "product" / "P-ALPHA.md",
-        "---\n"
-        "id: P-ALPHA\n"
-        "title: Alpha Capability\n"
-        "status: draft\n"
-        "owners: [pipeline-team]\n"
-        "---\n\n"
-        "# Alpha Capability\n\n"
-        "### CS-ALPHA-001\n\nCovers: P-ALPHA\n",
+        specs / "product" / "P-ONE.md",
+        "---\nid: P-ONE\ntitle: Capability One\nstatus: draft\nowners: [test-team]\n---\n\n"
+        "# Capability One\n\n## Scenarios\n\n"
+        "### CS-ONE-001\n\nCovers: P-ONE\n\n"
+        "### CS-ONE-002\n\nCovers: P-ONE\n",
     )
-    _write(specs / "product" / "README.md", "# Product\n\nIndex of capabilities.\n")
+    _write(
+        specs / "product" / "P-TWO.md",
+        "---\nid: P-TWO\ntitle: Capability Two\nstatus: draft\nowners: [test-team]\n---\n\n"
+        "# Capability Two\n\n### CS-TWO-001\n\nCovers: P-TWO\n",
+    )
+    _write(
+        specs / "product" / "README.md",
+        "# Product capabilities\n\nEach file here is one product capability.\n\n"
+        "### How to add one\n\nCopy an existing file.\n",
+    )
 
     _write(
-        specs / "vars" / "VAR-ALPHA-PATH.md",
-        "---\n"
-        "id: VAR-ALPHA-PATH\n"
-        "title: Alpha Path\n"
-        "status: draft\n"
-        "owners: [pipeline-team]\n"
-        "---\n\n"
-        "# VAR-ALPHA-PATH\n",
+        specs / "vars" / "VAR-FOO.md",
+        "---\nid: VAR-FOO\ntitle: Foo var\nstatus: draft\nowners: [test-team]\n---\n\n# VAR-FOO\n",
     )
-    _write(specs / "vars" / "README.md", "# Vars\n\nIndex of vars.\n")
+    _write(
+        specs / "vars" / "VAR-BAR-BAZ.md",
+        "---\nid: VAR-BAR-BAZ\ntitle: Bar baz var\nstatus: draft\nowners: [test-team]\n---\n\n"
+        "# VAR-BAR-BAZ\n",
+    )
+    _write(
+        specs / "vars" / "README.md",
+        "# Vars\n\nDeclarations only, never values.\n",
+    )
 
     _write(
         specs / "decisions" / "D1.md",
-        "---\n"
-        "id: D1\n"
-        "title: First Decision\n"
-        "status: ratified\n"
-        "owners: [pipeline-team]\n"
-        "last_ratified_commit: abc1234\n"
-        "supersedes: []\n"
-        "builds_on: []\n"
-        "---\n\n"
-        "# D1\n",
+        "---\nid: D1\ntitle: First decision\nstatus: ratified\nowners: [test-team]\n"
+        "last_ratified_commit: abc1234\n---\n\n# D1\n",
     )
     _write(
         specs / "decisions" / "D2.md",
-        "---\n"
-        "id: D2\n"
-        "title: Second Decision\n"
-        "status: draft\n"
-        "owners: [pipeline-team]\n"
-        "supersedes: [D1]\n"
-        "builds_on: []\n"
-        "---\n\n"
-        "# D2\n",
+        "---\nid: D2\ntitle: Second decision\nstatus: draft\nowners: [test-team]\n---\n\n# D2\n",
     )
-    _write(specs / "decisions" / "README.md", "# Decisions\n\nIndex of decisions.\n")
-
-    _write(specs / "glossary.md", "# Glossary\n")
-    return root
-
-
-def _md_files_excluding_readme(directory: Path):
-    if not directory.is_dir():
-        return []
-    return [
-        p
-        for p in directory.glob("*.md")
-        if p.is_file() and p.name != "README.md"
-    ]
+    _write(
+        specs / "decisions" / "D3.md",
+        "---\nid: D3\ntitle: Third decision\nstatus: deprecated\nowners: [test-team]\n---\n\n# D3\n",
+    )
+    _write(
+        specs / "decisions" / "README.md",
+        "# Decisions\n\nOne file per decision record.\n",
+    )
 
 
-def _independent_counts(repo_root: Path) -> dict:
-    specs = repo_root / "specs"
-    comp_root = specs / "components"
-    return {
-        "component": len([p for p in comp_root.glob("*/component.md") if p.is_file()]),
-        "capability": len(_md_files_excluding_readme(specs / "product")),
-        "var": len(_md_files_excluding_readme(specs / "vars")),
-        "decision": len(_md_files_excluding_readme(specs / "decisions")),
-        "guarantee": len(
-            [p for p in comp_root.glob("*/interface/guarantees/*.md") if p.is_file()]
-        ),
-        "requirement": len(
-            [p for p in comp_root.glob("*/requirements/*.md") if p.is_file()]
-        ),
-        "acceptance": len(
-            [p for p in comp_root.glob("*/acceptance/*.md") if p.is_file()]
-        ),
+# --------------------------------------------------------------------------
+# tests
+# --------------------------------------------------------------------------
+
+
+def test_nodes_counts_per_kind_match_filesystem_on_synthetic_corpus(tmp_path):
+    repo_root = tmp_path.resolve()
+    _build_corpus(repo_root)
+
+    expected = _independent_counts(repo_root)
+    # Sanity on the independent count itself (README.md excluded).
+    assert expected == {
+        "component": 3,
+        "capability": 2,
+        "var": 2,
+        "decision": 3,
+        "guarantee": 3,
+        "requirement": 6,
+        "acceptance": 6,
+        "capability_scenario": 3,
     }
 
-
-@pytest.fixture
-def repo_root(tmp_path):
-    real = _find_real_repo_root()
-    if real is not None:
-        return real.resolve()
-    return _build_fallback_corpus(tmp_path / "repo").resolve()
-
-
-@pytest.fixture
-def con():
-    connection = duckdb.connect()
-    connection.execute("INSTALL yaml FROM community")
-    connection.execute("LOAD yaml")
+    con = _connect()
     try:
-        yield connection
+        graph_query_engine.load_views(con, repo_root)
+        actual = _view_counts(con)
+
+        for kind in KINDS:
+            assert actual[kind] == expected[kind], (
+                f"kind {kind!r}: nodes has {actual[kind]} rows, "
+                f"file system has {expected[kind]}"
+            )
+
+        # No README-derived row sneaks in under any id (including a NULL id).
+        for kind in ("capability", "var", "decision"):
+            ids = {
+                r[0]
+                for r in con.execute("SELECT id FROM nodes WHERE kind = ?", [kind]).fetchall()
+            }
+            assert None not in ids, f"{kind} has a NULL-id row (README counted?)"
+        assert {
+            r[0] for r in con.execute("SELECT id FROM nodes WHERE kind = 'capability'").fetchall()
+        } == {"P-ONE", "P-TWO"}
+        assert {
+            r[0] for r in con.execute("SELECT id FROM nodes WHERE kind = 'var'").fetchall()
+        } == {"VAR-FOO", "VAR-BAR-BAZ"}
+        assert {
+            r[0] for r in con.execute("SELECT id FROM nodes WHERE kind = 'decision'").fetchall()
+        } == {"D1", "D2", "D3"}
     finally:
-        connection.close()
+        con.close()
 
 
-def test_nodes_row_count_per_kind_matches_filesystem(repo_root, con):
+def test_nodes_counts_per_kind_match_filesystem_on_real_corpus():
+    repo_root = _find_real_repo_root()
+    if repo_root is None:
+        pytest.skip("no real spec corpus found above the module under test")
+    repo_root = repo_root.resolve()
+
     expected = _independent_counts(repo_root)
-    assert expected["component"] > 0, "corpus must contain at least one component"
+    assert expected["component"] > 0
 
-    result = graph_query_engine.load_views(con, repo_root)
-    assert result is None
+    con = _connect()
+    try:
+        graph_query_engine.load_views(con, repo_root)
+        actual = _view_counts(con)
+    finally:
+        con.close()
 
-    rows = con.execute(
-        "SELECT kind, COUNT(*) FROM nodes GROUP BY kind"
-    ).fetchall()
-    actual = {kind: int(count) for kind, count in rows}
-
-    mismatches = {}
-    for kind in SEVEN_KINDS:
-        got = actual.get(kind, 0)
-        if got != expected[kind]:
-            mismatches[kind] = {"expected": expected[kind], "actual": got}
-
-    assert not mismatches, (
-        "nodes row count per kind disagrees with independent file-system "
-        f"count (README.md excluded): {mismatches}"
-    )
-
-
-def test_readme_files_never_become_nodes(repo_root, con):
-    graph_query_engine.load_views(con, repo_root)
-
-    for kind in ("capability", "var", "decision"):
-        null_ids = con.execute(
-            "SELECT COUNT(*) FROM nodes WHERE kind = ? AND id IS NULL", [kind]
-        ).fetchone()[0]
-        assert null_ids == 0, f"{kind} rows include {null_ids} NULL-id row(s) (README.md?)"
-
-        readme_ids = con.execute(
-            "SELECT COUNT(*) FROM nodes WHERE kind = ? AND lower(CAST(id AS VARCHAR)) LIKE '%readme%'",
-            [kind],
-        ).fetchone()[0]
-        assert readme_ids == 0, f"{kind} rows include a README-derived id"
+    for kind in KINDS:
+        assert actual[kind] == expected[kind], (
+            f"kind {kind!r}: nodes has {actual[kind]} rows, "
+            f"file system has {expected[kind]}"
+        )

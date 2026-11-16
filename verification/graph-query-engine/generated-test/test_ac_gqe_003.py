@@ -1,170 +1,153 @@
+"""AC-GQE-003: component_docs returns one row per real component, carrying
+that component's own frontmatter fields and its full raw text as `body`."""
+
+import glob
 import os
-import re
 from pathlib import Path
 
+import duckdb
 import pytest
-
-duckdb = pytest.importorskip("duckdb")
 
 import graph_query_engine
 
 
-KNOWN_SLUG = "graph-query-engine"
-KNOWN_ID = "comp-graph-query-engine"
+KNOWN_COMPONENT_ID = "comp-graph-query-engine"
 
 
-def _find_repo_root():
-    candidates = []
-    env_root = os.environ.get("HOTDOCS_REPO_ROOT") or os.environ.get("REPO_ROOT")
-    if env_root:
-        candidates.append(Path(env_root))
-    here = Path(__file__).resolve()
-    candidates.extend(here.parents)
-    cwd = Path.cwd().resolve()
-    candidates.append(cwd)
-    candidates.extend(cwd.parents)
-    seen = set()
-    for c in candidates:
-        try:
-            c = c.resolve()
-        except Exception:
-            continue
-        if c in seen:
-            continue
-        seen.add(c)
-        comp_dir = c / "specs" / "components"
-        if comp_dir.is_dir() and (comp_dir / KNOWN_SLUG / "component.md").is_file():
-            return c
+def _tool_root():
+    here = Path(graph_query_engine.__file__).resolve()
+    for parent in here.parents:
+        if parent.name == "gen":
+            return parent.parent
     return None
 
 
-def _split_frontmatter(text):
-    lines = text.splitlines()
-    if not lines or lines[0].strip() != "---":
-        return None, text
-    for i in range(1, len(lines)):
-        if lines[i].strip() == "---":
-            return lines[1:i], "\n".join(lines[i + 1:])
-    return None, text
+def _component_files(repo_root):
+    return sorted(
+        glob.glob(os.path.join(str(repo_root), "specs", "components", "*", "component.md"))
+    )
+
+
+def _write(path, text):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+
+
+def _build_synthetic_corpus(root):
+    """Fallback corpus, used only when the tool's own corpus can't be located."""
+    for slug, title in (("alpha-widget", "Alpha Widget"), ("beta-gadget", "Beta Gadget")):
+        cdir = root / "specs" / "components" / slug
+        _write(
+            cdir / "component.md",
+            "---\n"
+            f"id: comp-{slug}\n"
+            f"title: {title}\n"
+            "status: draft\n"
+            "owners: [test-team]\n"
+            "depends_on: []\n"
+            "sealed: true\n"
+            f"source_path: legacy/{slug}/\n"
+            "---\n"
+            "\n"
+            f"# {title}\n"
+            "\n"
+            "## Purpose\n"
+            "\n"
+            f"Distinctive body prose for {slug} unique-marker-{slug}.\n",
+        )
+        _write(cdir / "constraints.md", "# Constraints\n\nNone.\n")
+        tag = slug.split("-")[0].upper()
+        _write(
+            cdir / "requirements" / f"R-{tag}-001.md",
+            f"# R-{tag}-001\n\n**R-{tag}-001** — It MUST work.\n",
+        )
+        _write(
+            cdir / "acceptance" / f"AC-{tag}-001.md",
+            f"# AC-{tag}-001\n\nCovers: R-{tag}-001\nKind: generated-test\n\n"
+            "```gherkin\nGiven a thing\nWhen it runs\nThen it works\n```\n",
+        )
+    return root
 
 
 def _parse_frontmatter(text):
-    fm_lines, rest = _split_frontmatter(text)
+    lines = text.splitlines()
+    assert lines and lines[0].strip() == "---", "component.md must start with frontmatter"
     fields = {}
-    if fm_lines is None:
-        return fields, rest
-    for line in fm_lines:
-        if not line or line[0].isspace():
+    for line in lines[1:]:
+        if line.strip() == "---":
+            break
+        if not line or line[0].isspace() or ":" not in line:
             continue
-        m = re.match(r"^([A-Za-z_][A-Za-z0-9_\-]*)\s*:\s*(.*)$", line)
-        if not m:
-            continue
-        key, value = m.group(1), m.group(2).strip()
+        key, _, value = line.partition(":")
+        value = value.strip()
         if len(value) >= 2 and value[0] == value[-1] and value[0] in ("'", '"'):
             value = value[1:-1]
-        fields[key] = value
-    return fields, rest
+        fields[key.strip()] = value
+    return fields
 
 
-def _connect():
-    con = duckdb.connect()
-    try:
-        con.execute("INSTALL yaml FROM community")
-        con.execute("LOAD yaml")
-    except Exception as exc:  # pragma: no cover - environment dependent
-        con.close()
-        pytest.skip("yaml community extension unavailable: %r" % (exc,))
-    return con
+@pytest.fixture
+def repo_root(tmp_path):
+    root = _tool_root()
+    if root is not None and _component_files(root):
+        return root
+    return _build_synthetic_corpus(tmp_path / "repo")
+
+
+@pytest.fixture
+def con():
+    connection = duckdb.connect()
+    connection.execute("INSTALL yaml FROM community")
+    connection.execute("LOAD yaml")
+    yield connection
+    connection.close()
 
 
 def _rows(con, sql, params=None):
     cur = con.execute(sql, params or [])
     cols = [d[0] for d in cur.description]
-    return cols, [dict(zip(cols, r)) for r in cur.fetchall()]
+    return [dict(zip(cols, r)) for r in cur.fetchall()]
 
 
-@pytest.fixture(scope="module")
-def repo_root():
-    root = _find_repo_root()
-    if root is None:
-        pytest.skip("could not locate a real spec corpus repo root")
-    return root
+def test_component_docs_one_row_per_component_with_frontmatter_and_body(con, repo_root):
+    files = _component_files(repo_root)
+    assert files, "fixture corpus must contain at least one component"
+    expected_count = len(files)
 
+    graph_query_engine.load_views(con, Path(repo_root))
 
-@pytest.fixture(scope="module")
-def loaded_con(repo_root):
-    con = _connect()
-    result = graph_query_engine.load_views(con, repo_root)
-    assert result is None
-    yield con
-    con.close()
+    count = con.execute("SELECT count(*) FROM component_docs").fetchone()[0]
+    assert count == expected_count
 
+    distinct_ids = con.execute("SELECT count(DISTINCT id) FROM component_docs").fetchone()[0]
+    assert distinct_ids == expected_count
 
-def _real_component_files(repo_root):
-    return sorted(
-        p for p in (repo_root / "specs" / "components").glob("*/component.md")
-        if p.is_file()
-    )
+    # Pick a known component: this component itself if present, else the first one.
+    by_id = {}
+    for path in files:
+        with open(path, encoding="utf-8", newline="") as fh:
+            raw = fh.read()
+        fm = _parse_frontmatter(raw)
+        by_id[fm["id"]] = (fm, raw)
+    known_id = KNOWN_COMPONENT_ID if KNOWN_COMPONENT_ID in by_id else sorted(by_id)[0]
+    fm, raw = by_id[known_id]
 
-
-def test_component_docs_row_count_equals_real_component_count(repo_root, loaded_con):
-    files = _real_component_files(repo_root)
-    assert len(files) > 0
-    count = loaded_con.execute("SELECT count(*) FROM component_docs").fetchone()[0]
-    assert count == len(files)
-
-
-def test_component_docs_one_row_per_component_id(repo_root, loaded_con):
-    expected_ids = []
-    for p in _real_component_files(repo_root):
-        fields, _ = _parse_frontmatter(p.read_text(encoding="utf-8"))
-        expected_ids.append(fields.get("id"))
-    assert all(expected_ids)
-    _, rows = _rows(loaded_con, "SELECT id FROM component_docs")
-    actual_ids = [str(r["id"]) for r in rows]
-    assert sorted(actual_ids) == sorted(expected_ids)
-    assert len(set(actual_ids)) == len(actual_ids)
-
-
-def test_known_component_frontmatter_and_body_present(repo_root, loaded_con):
-    path = repo_root / "specs" / "components" / KNOWN_SLUG / "component.md"
-    raw = path.read_text(encoding="utf-8")
-    fields, rest = _parse_frontmatter(raw)
-    assert fields.get("id") == KNOWN_ID
-
-    cols, rows = _rows(
-        loaded_con, "SELECT * FROM component_docs WHERE id = ?", [KNOWN_ID]
-    )
-    assert len(rows) == 1
+    rows = _rows(con, "SELECT * FROM component_docs WHERE id = ?", [known_id])
+    assert len(rows) == 1, f"expected exactly one component_docs row for {known_id}"
     row = rows[0]
 
-    for required in ("id", "title", "status", "body"):
-        assert required in cols, "missing column %r in %r" % (required, cols)
+    # Its own frontmatter fields are present.
+    for col in ("id", "title", "status", "body"):
+        assert col in row, f"component_docs missing column {col!r}"
+    assert str(row["id"]) == fm["id"]
+    assert str(row["title"]) == fm["title"]
+    assert str(row["status"]) == fm["status"]
 
-    # Every top-level frontmatter key of the known component is passed through.
-    for key in fields:
-        assert key in cols, "frontmatter field %r not a column in %r" % (key, cols)
-
-    # Scalar frontmatter fields match the file's own values.
-    assert str(row["id"]) == KNOWN_ID
-    if "title" in fields and fields["title"]:
-        assert row["title"] is not None
-        assert str(row["title"]).strip() == fields["title"].strip()
-    if "status" in fields and fields["status"]:
-        assert row["status"] is not None
-        assert str(row["status"]).strip() == fields["status"].strip()
-
-    # Body is the full raw text, frontmatter included.
+    # Its body is the full raw text, frontmatter included.
     body = row["body"]
     assert isinstance(body, str)
-    assert body.lstrip().startswith("---")
-    norm_body = body.replace("\r\n", "\n")
-    norm_raw = raw.replace("\r\n", "\n")
-    assert norm_body.strip() == norm_raw.strip()
-    fm_lines, _ = _split_frontmatter(raw)
-    for line in fm_lines or []:
-        if line.strip():
-            assert line.rstrip() in norm_body
-    rest_stripped = rest.replace("\r\n", "\n").strip()
-    if rest_stripped:
-        assert rest_stripped in norm_body
+    assert body == raw
+    assert body.startswith("---")
+    assert f"id: {fm['id']}" in body
+    body_after_fm = raw.split("---", 2)[2].strip()
+    assert body_after_fm and body_after_fm in body

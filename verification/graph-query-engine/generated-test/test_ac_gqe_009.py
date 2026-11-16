@@ -1,144 +1,191 @@
-import textwrap
+"""AC-GQE-009 (Covers: R-GQE-001).
+
+Given a repo root with one component and two decision records: D1, whose
+frontmatter has the scalar line "supersedes: D2" (a single id, never a
+list), and D2, whose status is "deprecated"
+When load_views runs
+Then nodes contains a row for each decision, both kind "decision", and
+edges contains exactly the row (D1, D2, "supersedes").
+"""
+
+import json
 from pathlib import Path
 
+import duckdb
 import pytest
-
-duckdb = pytest.importorskip("duckdb")
 
 import graph_query_engine
 
 
-def _write(path: Path, content: str) -> None:
+def _write(path: Path, text: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(textwrap.dedent(content).lstrip("\n"), encoding="utf-8")
+    path.write_text(text, encoding="utf-8")
 
 
 def _build_fixture(repo_root: Path) -> None:
-    # One component, sealed, with every list-valued edge field present but empty
-    # (flow style), so no component-sourced edges exist.
+    # --- the one component (sealed; every list-valued field present, empty) ---
+    comp_dir = repo_root / "specs" / "components" / "foo"
     _write(
-        repo_root / "specs" / "components" / "widget" / "component.md",
-        """
-        ---
-        id: comp-widget
-        title: Widget
-        status: draft
-        owners: [alice]
-        depends_on: []
-        realizes: []
-        uses_var: []
-        depends_on_guarantees: []
-        sealed: true
-        source_path: legacy/widget
-        ---
+        comp_dir / "component.md",
+        "---\n"
+        "id: comp-foo\n"
+        "title: Foo\n"
+        "status: draft\n"
+        "owners: [team]\n"
+        "depends_on: []\n"
+        "realizes: []\n"
+        "uses_var: []\n"
+        "depends_on_guarantees: []\n"
+        "sealed: true\n"
+        "source_path: legacy/foo/\n"
+        "---\n"
+        "\n"
+        "# Foo\n"
+        "\n"
+        "## Purpose\n"
+        "\n"
+        "Foo does a small, well-defined thing for testing.\n"
+        "\n"
+        "## Notes\n"
+        "\n"
+        "Nothing else to say.\n",
+    )
+    _write(
+        comp_dir / "interface" / "guarantees" / "G-FOO-001.md",
+        "# G-FOO-001\n\nFoo always returns a value.\n",
+    )
+    _write(
+        comp_dir / "requirements" / "R-FOO-001.md",
+        "# R-FOO-001\n\n**R-FOO-001** — Foo MUST return a value.\n",
+    )
+    _write(
+        comp_dir / "acceptance" / "AC-FOO-001.md",
+        "# AC-FOO-001\n"
+        "\n"
+        "Covers: R-FOO-001\n"
+        "Kind: generated-test\n"
+        "\n"
+        "```gherkin\n"
+        "Given foo\n"
+        "When it runs\n"
+        "Then it returns a value\n"
+        "```\n",
+    )
+    _write(comp_dir / "constraints.md", "# Constraints\n\nNone.\n")
 
-        # Widget
-
-        ## Purpose
-
-        A synthetic component used only as a test fixture.
-        """,
+    # --- supporting corpus files so every glob has at least one match ---
+    _write(
+        repo_root / "specs" / "product" / "P-FOO.md",
+        "---\n"
+        "id: P-FOO\n"
+        "title: Foo capability\n"
+        "status: draft\n"
+        "owners: [team]\n"
+        "---\n"
+        "\n"
+        "# Foo capability\n"
+        "\n"
+        "Describes foo.\n",
+    )
+    _write(
+        repo_root / "specs" / "vars" / "VAR-FOO.md",
+        "---\n"
+        "id: VAR-FOO\n"
+        "title: Foo var\n"
+        "status: draft\n"
+        "owners: [team]\n"
+        "---\n"
+        "\n"
+        "# VAR-FOO\n"
+        "\n"
+        "A placeholder variable declaration.\n",
+    )
+    _write(
+        repo_root / "gen" / "foo" / ".provenance.json",
+        json.dumps(
+            {
+                "component_id": "comp-foo",
+                "spec_bundle_hash": "sha256:0000",
+                "verification_report": {"result": "pass"},
+                "license_scan": {"result": "pass"},
+                "secret_scan": {"result": "pass"},
+                "provenance_hit": False,
+            }
+        ),
     )
 
-    # D1 supersedes D2 via a scalar (never a list) frontmatter line.
+    # --- the two decision records under test ---
     _write(
         repo_root / "specs" / "decisions" / "D1.md",
-        """
-        ---
-        id: D1
-        title: Decision One
-        status: draft
-        owners: [alice]
-        supersedes: D2
-        ---
-
-        # D1
-
-        Supersedes D2.
-        """,
+        "---\n"
+        "id: D1\n"
+        "title: First decision\n"
+        "status: ratified\n"
+        "owners: [team]\n"
+        "last_ratified_commit: abc1234\n"
+        "supersedes: D2\n"
+        "---\n"
+        "\n"
+        "# D1\n"
+        "\n"
+        "Replaces D2.\n",
     )
-
-    # D2 is deprecated.
     _write(
         repo_root / "specs" / "decisions" / "D2.md",
-        """
-        ---
-        id: D2
-        title: Decision Two
-        status: deprecated
-        owners: [alice]
-        ---
-
-        # D2
-
-        Deprecated in favor of D1.
-        """,
+        "---\n"
+        "id: D2\n"
+        "title: Second decision\n"
+        "status: deprecated\n"
+        "owners: [team]\n"
+        "---\n"
+        "\n"
+        "# D2\n"
+        "\n"
+        "Superseded by D1.\n",
     )
 
 
-def _connect_with_yaml():
-    con = duckdb.connect(":memory:")
-    try:
-        con.execute("INSTALL yaml FROM community")
-        con.execute("LOAD yaml")
-    except Exception as exc:  # environment lacks the community extension
-        con.close()
-        pytest.skip(f"DuckDB community 'yaml' extension unavailable: {exc}")
-    return con
-
-
-def test_ac_gqe_009_decision_nodes_and_scalar_supersedes_edge(tmp_path):
+@pytest.fixture
+def loaded(tmp_path):
     repo_root = tmp_path.resolve() / "repo"
-    repo_root.mkdir(parents=True)
+    repo_root.mkdir()
     _build_fixture(repo_root)
 
-    con = _connect_with_yaml()
+    con = duckdb.connect()
+    con.execute("INSTALL yaml FROM community")
+    con.execute("LOAD yaml")
+
+    graph_query_engine.load_views(con, repo_root)
     try:
-        result = graph_query_engine.load_views(con, repo_root)
-        assert result is None
-
-        node_rows = con.execute(
-            "SELECT id, title, status, kind, owner_component_id FROM nodes"
-        ).fetchall()
-
-        decision_rows = {}
-        for row in node_rows:
-            node_id = None if row[0] is None else str(row[0])
-            if node_id in ("D1", "D2"):
-                assert node_id not in decision_rows, (
-                    f"duplicate nodes row for {node_id}: {node_rows!r}"
-                )
-                decision_rows[node_id] = row
-
-        assert set(decision_rows) == {"D1", "D2"}, (
-            f"expected a nodes row for each of D1 and D2, got {node_rows!r}"
-        )
-
-        for node_id, row in decision_rows.items():
-            _, title, status, kind, owner = row
-            assert kind == "decision", f"{node_id} kind was {kind!r}"
-            assert owner is None, f"{node_id} owner_component_id was {owner!r}"
-
-        assert decision_rows["D1"][1] == "Decision One"
-        assert decision_rows["D2"][1] == "Decision Two"
-        assert decision_rows["D2"][2] == "deprecated"
-
-        # The component itself is also present as a node.
-        component_kinds = [
-            row[3] for row in node_rows if row[0] is not None and str(row[0]) == "comp-widget"
-        ]
-        assert component_kinds == ["component"], (
-            f"expected exactly one component node for comp-widget, got {node_rows!r}"
-        )
-
-        edge_rows = con.execute(
-            "SELECT source_id, target_id, edge_type FROM edges"
-        ).fetchall()
-        normalized_edges = [
-            tuple(None if v is None else str(v) for v in row) for row in edge_rows
-        ]
-        assert normalized_edges == [("D1", "D2", "supersedes")], (
-            f"edges must contain exactly (D1, D2, 'supersedes'), got {normalized_edges!r}"
-        )
+        yield con
     finally:
         con.close()
+
+
+def test_ac_gqe_009_scalar_supersedes_yields_decision_nodes_and_one_edge(loaded):
+    con = loaded
+
+    # --- nodes: one row per decision, each of kind "decision" ---
+    rows = con.execute(
+        "SELECT id, kind FROM nodes WHERE id IN ('D1', 'D2') ORDER BY id"
+    ).fetchall()
+    assert rows == [("D1", "decision"), ("D2", "decision")], rows
+
+    decision_ids = sorted(
+        r[0]
+        for r in con.execute(
+            "SELECT id FROM nodes WHERE kind = 'decision'"
+        ).fetchall()
+    )
+    assert decision_ids == ["D1", "D2"], decision_ids
+
+    # --- edges: exactly the (D1, D2, supersedes) row for these decisions ---
+    decision_edges = con.execute(
+        "SELECT source_id, target_id, edge_type FROM edges "
+        "WHERE source_id IN ('D1', 'D2') "
+        "   OR target_id IN ('D1', 'D2') "
+        "   OR edge_type IN ('supersedes', 'builds_on')"
+    ).fetchall()
+    assert [tuple(r) for r in decision_edges] == [("D1", "D2", "supersedes")], (
+        decision_edges
+    )

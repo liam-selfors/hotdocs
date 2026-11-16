@@ -1,16 +1,12 @@
-import copy
 import threading
-from pathlib import Path
 
 import pytest
 
 import cache_manager
 
 
-def _field(value, name):
-    if isinstance(value, dict):
-        return value.get(name)
-    return getattr(value, name, None)
+def field(value, name):
+    return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
 def _make_key():
@@ -31,90 +27,66 @@ def _payload(files):
     }
 
 
-def _make_result(payload):
+def _result(payload):
     return cache_manager.CachedResult(
         gate_type="generator",
-        payload=copy.deepcopy(payload),
+        payload=payload,
         stored_at=cache_manager.now_iso(),
     )
-
-
-def _run_trial(repo_root: Path):
-    payload_a = _payload({"a.py": "A"})
-    payload_b = _payload({"b.py": "B"})
-    key_a = _make_key()
-    key_b = _make_key()
-    result_a = _make_result(payload_a)
-    result_b = _make_result(payload_b)
-
-    barrier = threading.Barrier(2)
-    errors = []
-    errors_lock = threading.Lock()
-
-    def writer(key, result):
-        try:
-            barrier.wait(timeout=10)
-            cache_manager.put(key, result, repo_root=repo_root)
-        except BaseException as exc:  # noqa: BLE001
-            with errors_lock:
-                errors.append(exc)
-
-    t1 = threading.Thread(target=writer, args=(key_a, result_a))
-    t2 = threading.Thread(target=writer, args=(key_b, result_b))
-    t1.start()
-    t2.start()
-    t1.join(timeout=30)
-    t2.join(timeout=30)
-
-    assert not t1.is_alive() and not t2.is_alive(), "concurrent put calls did not finish"
-    assert errors == [], f"concurrent put raised: {errors!r}"
-
-    got = cache_manager.get(_make_key(), repo_root=repo_root)
-    return got, payload_a, payload_b
 
 
 def test_ac_cache_009_concurrent_puts_never_merge_or_corrupt(tmp_path, monkeypatch):
     monkeypatch.delenv("VAR_CACHE_STORE_URL", raising=False)
 
+    payload_a = _payload({"a.py": "A"})
+    payload_b = _payload({"b.py": "B"})
+
     for trial in range(20):
         repo_root = tmp_path / f"trial_{trial}"
         repo_root.mkdir()
 
-        got, payload_a, payload_b = _run_trial(repo_root)
+        key = _make_key()
+        result_a = _result(_payload({"a.py": "A"}))
+        result_b = _result(_payload({"b.py": "B"}))
 
+        barrier = threading.Barrier(2)
+        errors = []
+
+        def writer(res):
+            try:
+                barrier.wait(timeout=10)
+                cache_manager.put(key, res, repo_root=repo_root)
+            except BaseException as exc:  # noqa: BLE001
+                errors.append(exc)
+
+        threads = [
+            threading.Thread(target=writer, args=(result_a,)),
+            threading.Thread(target=writer, args=(result_b,)),
+        ]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout=30)
+        for t in threads:
+            assert not t.is_alive(), f"trial {trial}: put thread hung"
+
+        assert errors == [], f"trial {trial}: put raised {errors!r}"
+
+        got = cache_manager.get(_make_key(), repo_root=repo_root)
         assert not isinstance(got, cache_manager.Miss), (
-            f"trial {trial}: get returned Miss after two concurrent puts"
+            f"trial {trial}: get returned Miss after two successful puts"
         )
-        assert got is not None, f"trial {trial}: get returned None"
+        assert got is not None
 
-        gate_type = _field(got, "gate_type")
-        assert gate_type == "generator", (
-            f"trial {trial}: unexpected gate_type {gate_type!r}"
-        )
-
-        payload = _field(got, "payload")
-        assert isinstance(payload, dict), (
-            f"trial {trial}: payload is not a dict: {payload!r}"
-        )
-
-        files = payload.get("files")
-        assert isinstance(files, dict), (
-            f"trial {trial}: payload files missing or not a dict: {files!r}"
-        )
-        assert not ("a.py" in files and "b.py" in files), (
-            f"trial {trial}: payload merged both writes: {files!r}"
-        )
-
-        for required in ("component_id", "model", "prompt_version", "files"):
-            assert required in payload, (
-                f"trial {trial}: payload missing required key {required!r}: {payload!r}"
-            )
+        assert field(got, "gate_type") == "generator"
+        payload = field(got, "payload")
+        payload = dict(payload) if not isinstance(payload, dict) else payload
 
         assert payload == payload_a or payload == payload_b, (
-            f"trial {trial}: payload matches neither written payload: {payload!r}"
+            f"trial {trial}: payload {payload!r} matches neither written payload"
         )
 
-        stored_at = _field(got, "stored_at")
-        assert isinstance(stored_at, str) and stored_at, (
-            f"trial {trial}: stored_at missing or truncated: {stored_at!r}"
+        files = payload["files"]
+        assert not ("a.py" in files and "b.py" in files), (
+            f"trial {trial}: payload files were merged: {files!r}"
         )

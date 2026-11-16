@@ -8,6 +8,8 @@ python -m cache_manager stats [--repo-root=<dir>]
 `main(argv: list[str] | None = None) -> int` takes the tokens after
 `python -m cache_manager` (no `hotdocs` verb routes here) and returns the
 exit code. Each flag also takes the space form (`--model-pin <p>`).
+Flags are never abbreviated: `--model=m` is an unknown flag, not
+`--model-pin`. Every `inspect` flag but `--repo-root` is required.
 `--repo-root` defaults to the current directory. Output is one line of
 JSON on stdout:
 
