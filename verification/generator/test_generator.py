@@ -380,7 +380,7 @@ def test_ac_gen_019_dependencies_fall_back_to_the_tool_root(tmp_path, monkeypatc
     assert "tool root" in backend.calls[0][0]
 
 
-def test_ac_gen_022_truncated_reply_writes_and_caches_nothing(repo_root):
+def test_ac_gen_023_truncated_reply_writes_and_caches_nothing(repo_root):
     """D304 -- a reply cut off before its end marker used to drop the
     unclosed file silently and write the rest."""
     from conftest import _NONCE_RE
@@ -397,7 +397,7 @@ def test_ac_gen_022_truncated_reply_writes_and_caches_nothing(repo_root):
     assert not (repo_root / "gen" / "foo").exists()
 
 
-def test_ac_gen_022_reply_without_the_module_is_missing_module(repo_root):
+def test_ac_gen_023_reply_without_the_module_is_missing_module(repo_root):
     backend = MockBackend([file_block("notes.py", "x = 1")])
     result = generate(FakeBundle(), "claude-sonnet-5", repo_root=repo_root, llm_backend=backend)
     assert result.model_call_error["category"] == "missing_module"
