@@ -275,7 +275,8 @@ def _run_hand_suite(component_id: str, sandbox: Path, code_rel: str) -> bool:
     for part in ("specs", "pipeline", "gen", "tools", "examples"):
         if (REAL_REPO / part).is_dir():
             shutil.copytree(REAL_REPO / part, root / part, ignore=ignore)
-    for f in ("requirements.txt", "pyproject.toml", "hotdocs.toml", "SPEC_GUIDELINES.md"):
+    for f in ("requirements.txt", "pyproject.toml", "hotdocs.toml", "SPEC_GUIDELINES.md",
+              ".secret-allowlist.json", ".gitignore"):
         if (REAL_REPO / f).is_file():
             shutil.copy2(REAL_REPO / f, root / f)
     shutil.rmtree(root / code_rel, ignore_errors=True)
@@ -318,6 +319,10 @@ def _build_sandbox(component_id: str) -> Path:
     shutil.copytree(REAL_REPO / "specs", sandbox / "specs")
     shutil.copytree(REAL_REPO / "pipeline", sandbox / "pipeline", ignore=shutil.ignore_patterns("__pycache__"))
     shutil.copy2(REAL_REPO / "SPEC_GUIDELINES.md", sandbox / "SPEC_GUIDELINES.md")  # R-ASSEMBLE-014
+    # The sealed secret allowlist (D294; its hash lives in specs/decisions/,
+    # copied above), so the sandbox's secret scan matches the real repo's.
+    if (REAL_REPO / ".secret-allowlist.json").is_file():
+        shutil.copy2(REAL_REPO / ".secret-allowlist.json", sandbox / ".secret-allowlist.json")
     (sandbox / "gen").mkdir()
     (sandbox / "verification").mkdir()
     (sandbox / ".hotdocs").mkdir()
