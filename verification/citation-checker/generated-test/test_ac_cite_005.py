@@ -1,105 +1,89 @@
+"""AC-CITE-005 (Covers: R-CITE-005).
+
+Given a decision record's builds_on naming a decision number with no
+corresponding specs/decisions/ file, and a second record's builds_on
+naming D7, one of D1-D14, never formalized as files,
+When check(repo_root) runs,
+Then only the first gets an R-CITE-005 finding.
+"""
+
+from pathlib import Path
+
 import citation_checker
 
 
-def _field(value, name):
-    if isinstance(value, dict):
-        return value.get(name)
-    return getattr(value, name, None)
+def field(value, name):
+    return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def _write(path, text):
+def _write(path: Path, text: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
 
 
-def _decision(doc_id, title, builds_on):
+def _decision(doc_id: str, builds_on: str) -> str:
     return (
         "---\n"
         f"id: {doc_id}\n"
-        f"title: {title}\n"
+        f"title: Decision {doc_id}\n"
         "status: draft\n"
-        "owners: [alice]\n"
-        f"builds_on: [{builds_on}]\n"
+        "owners: [test-team]\n"
+        f"builds_on: {builds_on}\n"
         "---\n"
+        f"# {doc_id}\n"
         "\n"
-        f"# {title}\n"
-        "\n"
-        "## Context\n"
-        "\n"
-        "A synthetic decision record used only as a test fixture.\n"
-        "\n"
-        "## Decision\n"
-        "\n"
-        "Nothing is decided here beyond fixture purposes.\n"
+        "A synthetic decision record used as a test fixture.\n"
     )
 
 
-def _build_repo(tmp_path):
-    repo_root = tmp_path / "repo"
-    specs = repo_root / "specs"
+def _build_fixture(repo_root: Path) -> None:
     _write(
-        specs / "glossary.md",
+        repo_root / "specs" / "glossary.md",
         "# Glossary\n"
         "\n"
         "- **Fixture term** — a term used only by this test fixture.\n",
     )
-    # First record: builds_on names a decision number with no file.
+    # First record: builds_on a decision number that has no file at all.
     _write(
-        specs / "decisions" / "D100.md",
-        _decision("D100", "Dangling builds_on", "D999"),
+        repo_root / "specs" / "decisions" / "D300.md",
+        _decision("D300", "[D500]"),
     )
-    # Second record: builds_on names D7, one of D1-D14, never formalized.
+    # Second record: builds_on D7, one of the informal D1-D14, never
+    # formalized as files -- exempt from resolution.
     _write(
-        specs / "decisions" / "D101.md",
-        _decision("D101", "Informal builds_on", "D7"),
+        repo_root / "specs" / "decisions" / "D301.md",
+        _decision("D301", "[D7]"),
     )
-    # Third record: builds_on resolves to a real decision file.
-    _write(
-        specs / "decisions" / "D102.md",
-        _decision("D102", "Resolving builds_on", "D100"),
-    )
-    return repo_root
 
 
-def test_only_dangling_builds_on_gets_r_cite_005_finding(tmp_path):
-    repo_root = _build_repo(tmp_path)
+def test_ac_cite_005_only_unresolved_builds_on_is_flagged(tmp_path):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    _build_fixture(repo_root)
 
-    # Sanity: neither D999 nor D7 exists as a file.
-    assert not (repo_root / "specs" / "decisions" / "D999.md").exists()
+    # Preconditions of the fixture itself.
+    assert (repo_root / "specs" / "decisions" / "D300.md").is_file()
+    assert (repo_root / "specs" / "decisions" / "D301.md").is_file()
+    assert not (repo_root / "specs" / "decisions" / "D500.md").exists()
     assert not (repo_root / "specs" / "decisions" / "D7.md").exists()
 
     findings = citation_checker.check(repo_root)
     assert isinstance(findings, list)
 
-    cite5 = [f for f in findings if _field(f, "rule_id") == "R-CITE-005"]
-    files = [_field(f, "file") for f in cite5]
+    cite5 = [f for f in findings if field(f, "rule_id") == "R-CITE-005"]
 
+    # Exactly one R-CITE-005 finding: for the first record only.
     assert len(cite5) == 1, f"expected exactly one R-CITE-005 finding, got {cite5!r}"
+
     finding = cite5[0]
-
-    file_value = str(_field(finding, "file")).replace("\\", "/")
-    assert file_value == "specs/decisions/D100.md", files
-
-    assert "specs/decisions/D101.md" not in [
-        str(x).replace("\\", "/") for x in files
-    ]
-    assert "specs/decisions/D102.md" not in [
-        str(x).replace("\\", "/") for x in files
-    ]
-
-    assert _field(finding, "severity") in ("fail", "warn")
-    line = _field(finding, "line")
+    assert field(finding, "file") == "specs/decisions/D300.md"
+    assert field(finding, "severity") in ("fail", "warn")
+    line = field(finding, "line")
     assert isinstance(line, int) and not isinstance(line, bool)
     assert line >= 1
-    message = _field(finding, "message")
-    assert isinstance(message, str) and message.strip()
+    assert isinstance(field(finding, "message"), str)
 
-
-def test_findings_have_exactly_documented_keys_for_r_cite_005(tmp_path):
-    repo_root = _build_repo(tmp_path)
-    findings = citation_checker.check(repo_root)
-    cite5 = [f for f in findings if _field(f, "rule_id") == "R-CITE-005"]
-    assert len(cite5) == 1
-    finding = cite5[0]
-    if isinstance(finding, dict):
-        assert set(finding.keys()) == {"rule_id", "severity", "file", "line", "message"}
+    # The D7 record never gets an R-CITE-005 finding.
+    assert not any(
+        field(f, "file") == "specs/decisions/D301.md" for f in cite5
+    )

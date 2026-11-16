@@ -6,36 +6,46 @@ import pytest
 import llm_endpoint
 
 
-def _field(value, name):
-    if isinstance(value, dict):
-        return value.get(name)
-    return getattr(value, name, None)
+def field(value, name):
+    return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
 @pytest.fixture
-def isolated(tmp_path, monkeypatch):
+def clean_env(tmp_path, monkeypatch):
     monkeypatch.delenv("VAR_HOTDOCS_CONFIG", raising=False)
-    work = tmp_path / "work"
-    work.mkdir()
-    monkeypatch.chdir(work)
-    return work
+    workdir = tmp_path / "work"
+    workdir.mkdir()
+    monkeypatch.chdir(workdir)
+    return workdir
 
 
-def test_ollama_prefix_vs_bare_tag_with_colon(isolated):
-    prefixed = llm_endpoint.parse_model("ollama:llama3.1:8b")
-    assert tuple(prefixed) == ("ollama", "llama3.1:8b")
+# --- Scenario 1: the prefix counts only when it names a known provider ---
 
-    bare = llm_endpoint.parse_model("llama3.1:8b")
-    assert tuple(bare) == (None, "llama3.1:8b")
 
+def test_ollama_prefix_and_bare_ollama_tag(clean_env):
+    provider, model = llm_endpoint.parse_model("ollama:llama3.1:8b")
+    assert provider == "ollama"
+    assert model == "llama3.1:8b"
+
+    provider, model = llm_endpoint.parse_model("llama3.1:8b")
+    assert provider is None
+    assert model == "llama3.1:8b"
+
+
+def test_ollama_prefixed_identifier_resolves_to_ollama(clean_env):
     resolved = llm_endpoint.resolve_provider("ollama:llama3.1:8b", None)
-    assert _field(resolved, "provider") == "ollama"
-    assert _field(resolved, "model") == "llama3.1:8b"
+    assert field(resolved, "provider") == "ollama"
+    assert field(resolved, "model") == "llama3.1:8b"
 
 
-def test_bare_name_uses_config_and_other_prefix_uses_its_defaults(isolated):
-    config_path = isolated / "hotdocs.toml"
-    config_path.write_text(
+# --- Scenario 2: bare name uses configured provider, prefix uses its defaults ---
+
+
+def _write_config(tmp_path):
+    config_dir = tmp_path / "cfg"
+    config_dir.mkdir()
+    path = config_dir / "hotdocs.toml"
+    path.write_text(
         "[llm]\n"
         'provider = "openai"\n'
         'model = "gpt-6-astra"\n'
@@ -43,27 +53,34 @@ def test_bare_name_uses_config_and_other_prefix_uses_its_defaults(isolated):
         "timeout_seconds = 400\n",
         encoding="utf-8",
     )
+    return path
 
-    config = llm_endpoint.load_config(config_path)
+
+def test_bare_name_uses_configured_provider_and_prefix_uses_defaults(
+    tmp_path, clean_env
+):
+    path = _write_config(tmp_path)
+    config = llm_endpoint.load_config(path)
     assert config is not None
-    assert _field(config, "provider") == "openai"
-    assert _field(config, "api_key_env") == "MY_KEY"
-    assert _field(config, "timeout_seconds") == 400
+    assert field(config, "provider") == "openai"
 
-    bare = llm_endpoint.resolve_provider("gpt-other-model", config)
-    assert _field(bare, "provider") == "openai"
-    assert _field(bare, "model") == "gpt-other-model"
-    assert _field(bare, "api_key_env") == "MY_KEY"
-    assert _field(bare, "timeout_seconds") == 400
-    assert _field(bare, "base_url") == "https://api.openai.com/v1"
+    bare = llm_endpoint.resolve_provider("gpt-6-astra", config)
+    assert field(bare, "provider") == "openai"
+    assert field(bare, "model") == "gpt-6-astra"
+    assert field(bare, "api_key_env") == "MY_KEY"
+    assert field(bare, "timeout_seconds") == 400
 
     gem = llm_endpoint.resolve_provider("gemini:gemini-4-argon", config)
-    assert _field(gem, "provider") == "gemini"
-    assert _field(gem, "model") == "gemini-4-argon"
-    assert _field(gem, "base_url") == "https://generativelanguage.googleapis.com"
-    assert _field(gem, "api_key_env") == "GEMINI_API_KEY"
-    assert _field(gem, "timeout_seconds") == llm_endpoint.DEFAULT_TIMEOUT_SECONDS
-    assert llm_endpoint.DEFAULT_TIMEOUT_SECONDS == 600
+    assert field(gem, "provider") == "gemini"
+    assert field(gem, "model") == "gemini-4-argon"
+    assert field(gem, "base_url") == "https://generativelanguage.googleapis.com"
+    assert field(gem, "api_key_env") == "GEMINI_API_KEY"
+    assert field(gem, "timeout_seconds") == llm_endpoint.DEFAULT_TIMEOUT_SECONDS
+    assert field(gem, "timeout_seconds") == 600
+    assert field(gem, "api_key_env") != "MY_KEY"
+
+
+# --- Scenario 3: provider receives the stripped model; response keeps the identifier ---
 
 
 class _FakeReply:
@@ -73,24 +90,33 @@ class _FakeReply:
     def __enter__(self):
         return self
 
-    def __exit__(self, exc_type, exc, tb):
+    def __exit__(self, *exc):
         return False
 
     def read(self, *args, **kwargs):
         return self._body
 
 
-def test_provider_receives_stripped_model_but_response_keeps_identifier(
-    isolated, monkeypatch
+def _request_body(request):
+    data = getattr(request, "data", None)
+    if data is None:
+        return None
+    if isinstance(data, (bytes, bytearray)):
+        data = data.decode("utf-8")
+    try:
+        return json.loads(data)
+    except (TypeError, ValueError):
+        return None
+
+
+def test_provider_gets_stripped_model_but_response_keeps_identifier(
+    clean_env, monkeypatch
 ):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test-not-a-real-key")
     recorded = []
 
-    def recorder(request, data=None, timeout=None, *args, **kwargs):
-        body = getattr(request, "data", None)
-        if body is None:
-            body = data
-        recorded.append(body)
+    def recorder(request, *args, **kwargs):
+        recorded.append(request)
         return _FakeReply(
             {
                 "id": "msg_test",
@@ -99,6 +125,7 @@ def test_provider_receives_stripped_model_but_response_keeps_identifier(
                 "model": "claude-sonnet-5-5",
                 "content": [{"type": "text", "text": "hello"}],
                 "stop_reason": "end_turn",
+                "stop_sequence": None,
                 "usage": {"input_tokens": 1, "output_tokens": 1},
             }
         )
@@ -107,22 +134,21 @@ def test_provider_receives_stripped_model_but_response_keeps_identifier(
 
     response = llm_endpoint.complete("hi", "anthropic:claude-sonnet-5-5")
 
-    assert len(recorded) >= 1
-    body = recorded[-1]
-    assert body is not None
-    if isinstance(body, (bytes, bytearray)):
-        body = body.decode("utf-8")
-    payload = json.loads(body)
-    assert payload.get("model") == "claude-sonnet-5-5"
+    bodies = [b for b in (_request_body(r) for r in recorded) if isinstance(b, dict)]
+    model_bodies = [b for b in bodies if "model" in b]
+    assert model_bodies, "no request with a JSON body naming a model was recorded"
+    assert model_bodies[-1]["model"] == "claude-sonnet-5-5"
 
-    assert _field(response, "model") == "anthropic:claude-sonnet-5-5"
+    assert field(response, "model_call_error") is None
+    assert field(response, "model") == "anthropic:claude-sonnet-5-5"
 
 
-def test_injected_backend_receives_identifier_unchanged(isolated):
-    seen = []
+def test_injected_backend_is_passed_identifier_unchanged(tmp_path, clean_env):
+    log_path = tmp_path / "backend_calls.jsonl"
 
     def backend(prompt, model, **params):
-        seen.append(model)
+        with open(log_path, "a", encoding="utf-8") as fh:
+            fh.write(json.dumps({"prompt": prompt, "model": model}) + "\n")
         return {
             "text": "ok",
             "model": model,
@@ -134,5 +160,11 @@ def test_injected_backend_receives_identifier_unchanged(isolated):
         "hi", "anthropic:claude-sonnet-5-5", backend=backend
     )
 
-    assert seen == ["anthropic:claude-sonnet-5-5"]
-    assert _field(response, "model") == "anthropic:claude-sonnet-5-5"
+    lines = [
+        json.loads(line)
+        for line in log_path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    assert len(lines) == 1
+    assert lines[0]["model"] == "anthropic:claude-sonnet-5-5"
+    assert field(response, "model") == "anthropic:claude-sonnet-5-5"

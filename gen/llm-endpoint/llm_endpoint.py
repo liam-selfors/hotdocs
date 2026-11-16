@@ -1,14 +1,9 @@
-"""LLM Endpoint: the single, vendor-agnostic transport for every model call.
+"""Vendor-agnostic transport for every model call the pipeline makes.
 
-`complete(prompt, model, **params)` resolves a model identifier to one of
-six providers (`claude-cli`, `anthropic`, `openai`, `openai-compatible`,
-`gemini`, `ollama`), makes exactly one bounded call, classifies any
-failure, logs one record under `.hotdocs/calls/`, and returns a
-`ModelResponse` dict. Credentials are read only from the process
-environment and never leave this module.
+One entry point, ``complete(prompt, model, **params)``, resolves a model
+identifier to one of six provider adapters, makes exactly one bounded call,
+classifies any failure, and records one line in ``.hotdocs/calls/``.
 """
-
-from __future__ import annotations
 
 import json
 import os
@@ -25,7 +20,9 @@ from pathlib import Path
 
 DEFAULT_TIMEOUT_SECONDS = 600
 MIN_TIMEOUT_SECONDS = 300
-USER_AGENT = "hotdocs-llm-endpoint/1.0 (python-urllib)"
+ANTHROPIC_DEFAULT_MAX_TOKENS = 32000
+USER_AGENT = "hotdocs-llm-endpoint/1.0 (Python urllib)"
+CONFIG_ENV_VAR = "VAR_HOTDOCS_CONFIG"
 
 PROVIDERS = {
     "claude-cli": {
@@ -66,16 +63,15 @@ PROVIDERS = {
     },
 }
 
-_CONFIG_ENTRIES = ("provider", "model", "base_url", "api_key_env", "timeout_seconds")
-_SECRET_NAME = re.compile(r"key|token|password|passwd|secret|credential", re.IGNORECASE)
+_CONFIG_KEYS = ("provider", "model", "base_url", "api_key_env", "timeout_seconds")
+_SECRET_HINTS = ("key", "token", "password", "passwd", "secret", "credential")
 _ENV_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
-_LLM_HEADER = re.compile(r"\s*\[\s*llm\s*\]\s*(#.*)?")
-_PROBE_PROMPT = "Reply with the single word: ok"
-
-_CLI_CATEGORIES = (
-    ("rate_limit", ("rate limit", "rate_limit", "429")),
-    ("auth", ("auth", "login", "api key", "401", "403")),
-    ("timeout", ("timed out", "timeout")),
+_URL = re.compile(r"https?://\S+")
+_TABLE_HEADER = re.compile(r"\[\[?[^\[\]]+\]\]?\s*(#.*)?")
+_LLM_HEADER = re.compile(r"\[\s*llm\s*\]\s*(#.*)?")
+_API_KEY_ENV_REFUSAL = (
+    "[llm] api_key_env must be the name of an environment variable, "
+    "never the key itself"
 )
 
 
@@ -83,93 +79,9 @@ class ModelResolutionError(Exception):
     """A model identifier resolves to no usable provider (R-ENDPOINT-002)."""
 
 
-class _CallError(Exception):
-    """A classified provider failure raised inside an adapter."""
-
-    def __init__(self, category, message):
-        super().__init__(message)
-        self.category = category
-        self.message = message
-
-
-# --------------------------------------------------------------------------
-# Resolution (R-ENDPOINT-002)
-# --------------------------------------------------------------------------
-
-
-def parse_model(model):
-    """Split an identifier into `(provider, model)`; provider None when bare."""
-    prefix, sep, rest = model.partition(":")
-    if sep and prefix in PROVIDERS:
-        if not rest:
-            raise ModelResolutionError(
-                f"model identifier {model!r} names provider {prefix!r} but no model after it"
-            )
-        return prefix, rest
-    return None, model
-
-
-def resolve_provider(model, config=None):
-    """Resolve an identifier to `{provider, model, base_url, api_key_env, timeout_seconds}`."""
-    provider, name = parse_model(model)
-    if config is not None and config.get("provider") not in PROVIDERS:
-        raise ModelResolutionError("hotdocs.toml configures no known provider")
-    settings = {}
-    if provider is None:
-        if config is not None:
-            provider = config["provider"]
-            settings = config
-        elif name.startswith("claude-"):
-            provider = "claude-cli"
-        else:
-            raise ModelResolutionError(
-                f"model {model!r} names no provider: write it as <provider>:<model> "
-                f"with one of {', '.join(PROVIDERS)}, or configure one in hotdocs.toml"
-            )
-    elif config is not None and config.get("provider") == provider:
-        settings = config
-    spec = PROVIDERS[provider]
-    base_url = settings.get("base_url") or spec["default_base_url"]
-    if spec["needs_base_url"] and not base_url:
-        raise ModelResolutionError(f"provider {provider!r} needs a base_url in hotdocs.toml")
-    return {
-        "provider": provider,
-        "model": name,
-        "base_url": base_url,
-        "api_key_env": settings.get("api_key_env") or spec["default_api_key_env"],
-        "timeout_seconds": settings.get("timeout_seconds") or DEFAULT_TIMEOUT_SECONDS,
-    }
-
-
-def resolve_backend_name(model):
-    """Compatibility label: `"anthropic"` for a bare `claude-*` name."""
-    provider, name = parse_model(model)
-    if provider is None and name.startswith("claude-"):
-        return "anthropic"
-    return resolve_provider(model)["provider"]
-
-
-# --------------------------------------------------------------------------
-# Entry point (R-ENDPOINT-001)
-# --------------------------------------------------------------------------
-
-
-def complete(prompt, model, *, backend=None, **params):
-    """Make one model call and return a `ModelResponse` dict."""
-    if backend is None:
-        try:
-            config = load_config()
-        except ValueError as exc:
-            raise ModelResolutionError(f"invalid hotdocs.toml: {exc}") from None
-        resolved = resolve_provider(model, config)
-        name = resolved["provider"]
-        text, error = _dispatch(prompt, resolved, params)
-    else:
-        name, text, error = _call_injected(backend, prompt, model, params)
-    response = {"text": text, "model": model, "backend": name, "model_call_error": error}
-    _log_call(response)
-    return response
-
+# ---------------------------------------------------------------------------
+# Small helpers
+# ---------------------------------------------------------------------------
 
 def _get(obj, key):
     if isinstance(obj, dict):
@@ -177,123 +89,389 @@ def _get(obj, key):
     return getattr(obj, key, None)
 
 
-def _backend_label(backend):
-    return getattr(backend, "__name__", None) or type(backend).__name__
+def _error(category, message):
+    return {"category": category, "message": message}
 
 
-def _call_injected(backend, prompt, model, params):
+def _is_variable_name(value):
+    return (
+        isinstance(value, str)
+        and _ENV_NAME.fullmatch(value) is not None
+        and value not in os.environ.values()
+    )
+
+
+# ---------------------------------------------------------------------------
+# Configuration (R-ENDPOINT-007)
+# ---------------------------------------------------------------------------
+
+def _validate_llm(table):
+    for name in table:
+        if name not in _CONFIG_KEYS:
+            if any(hint in name.lower() for hint in _SECRET_HINTS):
+                raise ValueError(
+                    f"[llm] entry {name!r} looks like a secret: hotdocs.toml "
+                    "must never hold a secret; name the environment variable "
+                    "in api_key_env instead"
+                )
+            raise ValueError(f"[llm] has unknown entry {name!r}")
+
+    provider = table.get("provider")
+    if not isinstance(provider, str) or provider not in PROVIDERS:
+        raise ValueError(
+            "[llm] provider is required and must be one of: "
+            + ", ".join(PROVIDERS)
+        )
+    model = table.get("model")
+    if not isinstance(model, str) or not model:
+        raise ValueError("[llm] model is required")
+
+    base_url = table.get("base_url") or None
+    if base_url is not None and not (
+        isinstance(base_url, str) and _URL.fullmatch(base_url)
+    ):
+        raise ValueError("[llm] base_url must be an http(s) URL")
+
+    api_key_env = table.get("api_key_env") or None
+    if api_key_env is not None and not _is_variable_name(api_key_env):
+        raise ValueError(_API_KEY_ENV_REFUSAL)
+
+    timeout_seconds = table.get("timeout_seconds")
+    if timeout_seconds is not None and (
+        not isinstance(timeout_seconds, int)
+        or isinstance(timeout_seconds, bool)
+        or timeout_seconds < MIN_TIMEOUT_SECONDS
+    ):
+        raise ValueError(
+            f"[llm] timeout_seconds must be an integer of at least "
+            f"{MIN_TIMEOUT_SECONDS}"
+        )
+
+    if provider == "claude-cli" and (base_url or api_key_env):
+        raise ValueError("[llm] claude-cli takes no base_url or api_key_env")
+    if PROVIDERS[provider]["needs_base_url"] and base_url is None:
+        raise ValueError(f"[llm] provider {provider} requires base_url")
+
+    return {
+        "provider": provider,
+        "model": model,
+        "base_url": base_url,
+        "api_key_env": api_key_env,
+        "timeout_seconds": timeout_seconds,
+    }
+
+
+def load_config(config_path=None):
+    from_env = False
+    if config_path is None:
+        named = os.environ.get(CONFIG_ENV_VAR)
+        if named:
+            config_path, from_env = named, True
+        else:
+            config_path = Path.cwd() / "hotdocs.toml"
+    path = Path(config_path)
+    if not path.is_file():
+        if from_env:
+            raise ValueError(
+                f"{CONFIG_ENV_VAR} names {path}, which does not exist"
+            )
+        return None
     try:
-        reply = backend(prompt, model, **params)
-    except Exception as exc:
-        return _backend_label(backend), None, _classify(exc)
-    name = _get(reply, "backend") or _backend_label(backend)
-    error = _get(reply, "model_call_error")
-    if error is not None:
-        return name, None, {"category": _get(error, "category"), "message": _get(error, "message")}
-    text, error = _reply(_get(reply, "text"))
-    return name, text, error
+        data = tomllib.loads(path.read_text(encoding="utf-8"))
+    except tomllib.TOMLDecodeError as exc:
+        raise ValueError(f"{path} is not valid TOML: {exc}") from None
+    table = data.get("llm")
+    if table is None:
+        return None
+    if not isinstance(table, dict):
+        raise ValueError("[llm] must be a table")
+    return _validate_llm(table)
 
 
-def _dispatch(prompt, resolved, params):
+def save_config(config_path, provider, model, base_url=None, api_key_env=None,
+                timeout_seconds=None):
+    settings = _validate_llm({
+        "provider": provider,
+        "model": model,
+        "base_url": base_url,
+        "api_key_env": api_key_env,
+        "timeout_seconds": timeout_seconds,
+    })
+    table_lines = ["[llm]"] + [
+        f"{key} = {json.dumps(settings[key])}"
+        for key in _CONFIG_KEYS
+        if settings[key] is not None
+    ]
+
+    path = Path(config_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    existing = path.read_text(encoding="utf-8").splitlines() if path.exists() else []
+
+    out, skipping, placed = [], False, False
+    for line in existing:
+        stripped = line.strip()
+        if _TABLE_HEADER.fullmatch(stripped):
+            skipping = _LLM_HEADER.fullmatch(stripped) is not None
+            if skipping and not placed:
+                out.extend(table_lines + [""])
+                placed = True
+        if not skipping:
+            out.append(line)
+    if not placed:
+        if out and out[-1].strip():
+            out.append("")
+        out.extend(table_lines)
+    while out and not out[-1].strip():
+        out.pop()
+    path.write_text("\n".join(out) + "\n", encoding="utf-8")
+
+
+# ---------------------------------------------------------------------------
+# Resolution (R-ENDPOINT-002)
+# ---------------------------------------------------------------------------
+
+def parse_model(model):
+    prefix, sep, rest = model.partition(":")
+    if sep and prefix in PROVIDERS:
+        if not rest:
+            raise ModelResolutionError(
+                f"model identifier {model!r} names provider {prefix!r} "
+                "but no model after it"
+            )
+        return prefix, rest
+    return None, model
+
+
+def resolve_provider(model, config=None):
+    provider, name = parse_model(model)
+    if config is not None:
+        try:
+            config = _validate_llm(config)
+        except ValueError as exc:
+            raise ModelResolutionError(f"invalid hotdocs.toml: {exc}") from None
+    if provider is None:
+        if config is not None:
+            provider = config["provider"]
+        elif name.startswith("claude-"):
+            provider = "claude-cli"
+        else:
+            raise ModelResolutionError(
+                f"model {model!r} names no provider: write it as "
+                "<provider>:<model> or configure one in hotdocs.toml"
+            )
+    settings = config if config is not None and config["provider"] == provider else {}
+    entry = PROVIDERS[provider]
+    base_url = settings.get("base_url") or entry["default_base_url"]
+    if base_url is None and entry["needs_base_url"]:
+        raise ModelResolutionError(
+            f"provider {provider} needs a base_url, set in hotdocs.toml"
+        )
+    return {
+        "provider": provider,
+        "model": name,
+        "base_url": base_url,
+        "api_key_env": settings.get("api_key_env") or entry["default_api_key_env"],
+        "timeout_seconds": settings.get("timeout_seconds") or DEFAULT_TIMEOUT_SECONDS,
+    }
+
+
+def resolve_backend_name(model):
+    provider, name = parse_model(model)
+    if provider is None and name.startswith("claude-"):
+        return "anthropic"
+    return resolve_provider(model)["provider"]
+
+
+# ---------------------------------------------------------------------------
+# Failure classification (R-ENDPOINT-004)
+# ---------------------------------------------------------------------------
+
+def _status_error(code):
+    if code in (401, 403):
+        category = "auth"
+    elif code == 429:
+        category = "rate_limit"
+    elif code in (408, 504):
+        category = "timeout"
+    else:
+        category = "network"
+    return _error(category, f"{code} from backend")
+
+
+def _is_timeout(exc):
+    timeouts = (socket.timeout, TimeoutError)
+    return isinstance(exc, timeouts) or (
+        isinstance(exc, urllib.error.URLError)
+        and isinstance(exc.reason, timeouts)
+    )
+
+
+def _classify_exception(exc):
+    if isinstance(exc, urllib.error.HTTPError):
+        return _status_error(exc.code)
+    if _is_timeout(exc):
+        return _error("timeout", "request timed out")
+    return _error("network", "network failure")
+
+
+# ---------------------------------------------------------------------------
+# HTTP adapters (R-ENDPOINT-003, R-ENDPOINT-008)
+# ---------------------------------------------------------------------------
+
+def _required_key(env_name):
+    key = os.environ.get(env_name, "")
+    if not key.strip():
+        if _is_variable_name(env_name):
+            message = f"missing API key: environment variable {env_name} is not set"
+        else:
+            message = "missing API key: " + _API_KEY_ENV_REFUSAL
+        return None, _error("auth", message)
+    return key, None
+
+
+def _optional_bearer(env_name):
+    key = os.environ.get(env_name) if env_name else None
+    return {"Authorization": f"Bearer {key}"} if key else {}
+
+
+def _base(resolved):
+    return resolved["base_url"].rstrip("/")
+
+
+def _exchange(provider, url, headers, body, timeout, extract):
+    request = urllib.request.Request(
+        url,
+        data=json.dumps(body).encode("utf-8"),
+        headers={"Content-Type": "application/json", "User-Agent": USER_AGENT, **headers},
+        method="POST",
+    )
     try:
-        text = _ADAPTERS[resolved["provider"]](prompt, resolved, params)
+        with urllib.request.urlopen(request, timeout=timeout) as reply:
+            raw = reply.read()
+    except urllib.error.HTTPError as exc:
+        if provider == "gemini" and exc.code == 400:
+            said = (exc.read() or b"").decode("utf-8", "replace").lower()
+            if "api key not valid" in said or "api_key_invalid" in said:
+                return None, _error("auth", "API key not valid")
+        return None, _status_error(exc.code)
     except Exception as exc:
-        return None, _classify(exc)
-    return _reply(text)
-
-
-def _reply(text):
-    if not text:
-        return None, {"category": "network", "message": "backend reply had no text"}
+        return None, _classify_exception(exc)
+    try:
+        text = extract(json.loads(raw))
+    except (ValueError, KeyError, IndexError, TypeError, AttributeError):
+        return None, _error("network", "unreadable reply body")
+    if not isinstance(text, str) or not text:
+        return None, _error("network", "reply had no text")
     return text, None
 
 
-def _classify(exc):
-    if isinstance(exc, _CallError):
-        return {"category": exc.category, "message": exc.message}
-    if isinstance(exc, urllib.error.HTTPError):
-        code = exc.code
-        if code in (401, 403):
-            category = "auth"
-        elif code == 429:
-            category = "rate_limit"
-        elif code in (408, 504):
-            category = "timeout"
-        else:
-            category = "network"
-        return {"category": category, "message": f"HTTP {code} from backend"}
-    if isinstance(exc, (socket.timeout, TimeoutError, subprocess.TimeoutExpired)) or (
-        isinstance(exc, urllib.error.URLError)
-        and isinstance(exc.reason, (socket.timeout, TimeoutError))
-    ):
-        return {"category": "timeout", "message": "backend call timed out"}
-    return {"category": "network", "message": "network failure calling backend"}
+def _messages(prompt):
+    return [{"role": "user", "content": prompt}]
 
 
-def _log_call(response):
-    now = datetime.now(timezone.utc)
-    record = {
-        "timestamp": now.isoformat(),
-        "model": response["model"],
-        "backend": response["backend"],
+def _anthropic(resolved, prompt, params):
+    key, error = _required_key(resolved["api_key_env"])
+    if error:
+        return None, error
+    body = {
+        "model": resolved["model"],
+        "max_tokens": params.get("max_tokens", ANTHROPIC_DEFAULT_MAX_TOKENS),
+        "messages": _messages(prompt),
     }
-    if response["model_call_error"] is None:
-        record["text_present"] = bool(response["text"])
-    else:
-        record["model_call_error"] = response["model_call_error"]
-    directory = Path.cwd() / ".hotdocs" / "calls"
-    directory.mkdir(parents=True, exist_ok=True)
-    filename = f"{now.strftime('%Y%m%dT%H%M%S%fZ')}-{uuid.uuid4().hex}.json"
-    (directory / filename).write_text(json.dumps(record), encoding="utf-8")
-
-
-# --------------------------------------------------------------------------
-# Adapters (R-ENDPOINT-003, R-ENDPOINT-008)
-# --------------------------------------------------------------------------
-
-
-def _claude_cli(prompt, resolved, params):
-    command = [
-        "claude",
-        "-p",
-        "--model",
-        resolved["model"],
-        "--tools",
-        "",
-        "--output-format",
-        "stream-json",
-        "--verbose",
-        "--bare" if os.environ.get("ANTHROPIC_API_KEY") else "--safe-mode",
-    ]
-    for key, value in params.items():
-        command += ["--" + key.replace("_", "-"), str(value)]
-    proc = subprocess.run(
-        command,
-        input=prompt,
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        timeout=resolved["timeout_seconds"],
+    if "temperature" in params:
+        body["temperature"] = params["temperature"]
+    headers = {"x-api-key": key, "anthropic-version": "2023-06-01"}
+    return _exchange(
+        "anthropic", _base(resolved) + "/v1/messages", headers, body,
+        resolved["timeout_seconds"],
+        lambda data: "".join(
+            block["text"] for block in data["content"] if block.get("type") == "text"
+        ),
     )
-    events = _parse_stream(proc.stdout)
-    if events is None:
-        if proc.returncode != 0:
-            _raise_cli_failure(proc.stderr + proc.stdout)
-        return proc.stdout
-    failures = [e for e in events if e.get("type") == "result" and e.get("is_error")]
-    if failures or proc.returncode != 0:
-        _raise_cli_failure(" ".join(str(e.get("result", "")) for e in failures) + " " + proc.stderr)
-    parts = []
-    for event in events:
-        if event.get("type") == "assistant":
-            for block in (event.get("message") or {}).get("content") or []:
-                if isinstance(block, dict) and block.get("type") == "text":
-                    parts.append(block.get("text", ""))
-    return "".join(parts)
 
 
-def _parse_stream(output):
+def _openai_style(provider, resolved, prompt, params, headers, token_field):
+    body = {"model": resolved["model"], "messages": _messages(prompt)}
+    if "max_tokens" in params:
+        body[token_field] = params["max_tokens"]
+    if "temperature" in params:
+        body["temperature"] = params["temperature"]
+    return _exchange(
+        provider, _base(resolved) + "/chat/completions", headers, body,
+        resolved["timeout_seconds"],
+        lambda data: data["choices"][0]["message"]["content"],
+    )
+
+
+def _openai(resolved, prompt, params):
+    key, error = _required_key(resolved["api_key_env"])
+    if error:
+        return None, error
+    return _openai_style(
+        "openai", resolved, prompt, params,
+        {"Authorization": f"Bearer {key}"}, "max_completion_tokens",
+    )
+
+
+def _openai_compatible(resolved, prompt, params):
+    return _openai_style(
+        "openai-compatible", resolved, prompt, params,
+        _optional_bearer(resolved["api_key_env"]), "max_tokens",
+    )
+
+
+def _gemini(resolved, prompt, params):
+    key, error = _required_key(resolved["api_key_env"])
+    if error:
+        return None, error
+    name = resolved["model"].removeprefix("models/")
+    generation_config = {}
+    if "max_tokens" in params:
+        generation_config["maxOutputTokens"] = params["max_tokens"]
+    if "temperature" in params:
+        generation_config["temperature"] = params["temperature"]
+    body = {
+        "contents": [{"role": "user", "parts": [{"text": prompt}]}],
+        "generationConfig": generation_config,
+    }
+    return _exchange(
+        "gemini", f"{_base(resolved)}/v1beta/models/{name}:generateContent",
+        {"x-goog-api-key": key}, body, resolved["timeout_seconds"],
+        lambda data: "".join(
+            part.get("text", "")
+            for part in data["candidates"][0]["content"]["parts"]
+            if not part.get("thought")
+        ),
+    )
+
+
+def _ollama(resolved, prompt, params):
+    options = {}
+    if "max_tokens" in params:
+        options["num_predict"] = params["max_tokens"]
+    if "temperature" in params:
+        options["temperature"] = params["temperature"]
+    if "num_ctx" in params:
+        options["num_ctx"] = params["num_ctx"]
+    body = {
+        "model": resolved["model"],
+        "messages": _messages(prompt),
+        "stream": False,
+        "options": options,
+    }
+    return _exchange(
+        "ollama", _base(resolved) + "/api/chat",
+        _optional_bearer(resolved["api_key_env"]), body,
+        resolved["timeout_seconds"],
+        lambda data: data["message"]["content"],
+    )
+
+
+# ---------------------------------------------------------------------------
+# claude-cli adapter (R-ENDPOINT-003)
+# ---------------------------------------------------------------------------
+
+def _read_stream(output):
     events = []
     for line in output.splitlines():
         if not line.strip():
@@ -301,157 +479,59 @@ def _parse_stream(output):
         try:
             event = json.loads(line)
         except ValueError:
-            return None
-        if not isinstance(event, dict):
-            return None
+            return output, False
+        if not isinstance(event, dict) or "type" not in event:
+            return output, False
         events.append(event)
-    return events or None
+    if not events:
+        return output, False
+    parts, failed = [], False
+    for event in events:
+        if event["type"] == "assistant":
+            for block in (event.get("message") or {}).get("content") or []:
+                if isinstance(block, dict) and block.get("type") == "text":
+                    parts.append(block.get("text", ""))
+        elif event["type"] == "result" and event.get("is_error") is True:
+            failed = True
+    return "".join(parts), failed
 
 
-def _raise_cli_failure(detail):
-    lowered = detail.lower()
-    for category, markers in _CLI_CATEGORIES:
-        if any(marker in lowered for marker in markers):
-            raise _CallError(category, f"claude command failed ({category})")
-    raise _CallError("network", "claude command failed (network)")
+def _command_error(reported):
+    lowered = reported.lower()
+    if any(hint in lowered for hint in ("rate limit", "rate_limit", "usage limit")):
+        return _error("rate_limit", "claude command reported a rate limit")
+    if any(hint in lowered for hint in (
+        "invalid api key", "authentication", "unauthorized", "not logged in", "/login",
+    )):
+        return _error("auth", "claude command reported an authentication failure")
+    return _error("network", "claude command failed")
 
 
-def _required_key(resolved):
-    env_name = resolved["api_key_env"]
-    key = os.environ.get(env_name)
-    if not key:
-        raise _CallError("auth", f"{env_name} is not set")
-    return key
-
-
-def _optional_key(resolved):
-    env_name = resolved["api_key_env"]
-    return os.environ.get(env_name) if env_name else None
-
-
-def _bearer(key):
-    return {"Authorization": f"Bearer {key}"} if key else {}
-
-
-def _copy(params, target, name, dest=None):
-    if name in params:
-        target[dest or name] = params[name]
-
-
-def _url(resolved, path):
-    return resolved["base_url"].rstrip("/") + path
-
-
-def _post_json(url, body, headers, timeout):
-    request = urllib.request.Request(
-        url,
-        data=json.dumps(body).encode("utf-8"),
-        headers={"Content-Type": "application/json", "User-Agent": USER_AGENT, **headers},
-        method="POST",
-    )
-    with urllib.request.urlopen(request, timeout=timeout) as reply:
-        return reply.read()
-
-
-def _answer(raw, extract):
+def _claude_cli(resolved, prompt, params):
+    command = [
+        "claude", "-p",
+        "--model", resolved["model"],
+        "--tools", "",
+        "--bare" if os.environ.get("ANTHROPIC_API_KEY") else "--safe-mode",
+        "--output-format", "stream-json", "--verbose",
+    ]
+    for name, value in params.items():
+        command += ["--" + name.replace("_", "-"), str(value)]
     try:
-        return extract(json.loads(raw))
-    except (ValueError, KeyError, IndexError, TypeError, AttributeError):
-        raise _CallError("network", "unreadable reply from backend") from None
-
-
-def _user_messages(prompt):
-    return [{"role": "user", "content": prompt}]
-
-
-def _anthropic(prompt, resolved, params):
-    key = _required_key(resolved)
-    body = {
-        "model": resolved["model"],
-        "max_tokens": params.get("max_tokens", 32000),
-        "messages": _user_messages(prompt),
-    }
-    _copy(params, body, "temperature")
-    raw = _post_json(
-        _url(resolved, "/v1/messages"),
-        body,
-        {"x-api-key": key, "anthropic-version": "2023-06-01"},
-        resolved["timeout_seconds"],
-    )
-    return _answer(
-        raw, lambda d: "".join(b["text"] for b in d["content"] if b.get("type") == "text")
-    )
-
-
-def _openai_chat(prompt, resolved, params, key, token_field):
-    body = {"model": resolved["model"], "messages": _user_messages(prompt)}
-    _copy(params, body, "max_tokens", token_field)
-    _copy(params, body, "temperature")
-    raw = _post_json(
-        _url(resolved, "/chat/completions"), body, _bearer(key), resolved["timeout_seconds"]
-    )
-    return _answer(raw, lambda d: d["choices"][0]["message"]["content"])
-
-
-def _openai(prompt, resolved, params):
-    return _openai_chat(prompt, resolved, params, _required_key(resolved), "max_completion_tokens")
-
-
-def _openai_compatible(prompt, resolved, params):
-    return _openai_chat(prompt, resolved, params, _optional_key(resolved), "max_tokens")
-
-
-def _gemini(prompt, resolved, params):
-    key = _required_key(resolved)
-    name = resolved["model"]
-    if name.startswith("models/"):
-        name = name[len("models/"):]
-    generation = {}
-    _copy(params, generation, "max_tokens", "maxOutputTokens")
-    _copy(params, generation, "temperature")
-    body = {
-        "contents": [{"role": "user", "parts": [{"text": prompt}]}],
-        "generationConfig": generation,
-    }
-    try:
-        raw = _post_json(
-            _url(resolved, f"/v1beta/models/{name}:generateContent"),
-            body,
-            {"x-goog-api-key": key},
-            resolved["timeout_seconds"],
+        done = subprocess.run(
+            command, input=prompt, capture_output=True, text=True,
+            timeout=resolved["timeout_seconds"],
         )
-    except urllib.error.HTTPError as exc:
-        if exc.code == 400 and "api key not valid" in exc.read().decode("utf-8", "replace").lower():
-            raise _CallError("auth", "API key not valid") from None
-        raise
-    return _answer(
-        raw,
-        lambda d: "".join(
-            p["text"]
-            for p in d["candidates"][0]["content"]["parts"]
-            if "text" in p and not p.get("thought")
-        ),
-    )
-
-
-def _ollama(prompt, resolved, params):
-    options = {}
-    _copy(params, options, "max_tokens", "num_predict")
-    _copy(params, options, "temperature")
-    _copy(params, options, "num_ctx")
-    body = {
-        "model": resolved["model"],
-        "messages": _user_messages(prompt),
-        "stream": False,
-        "options": options,
-    }
-    raw = _post_json(
-        _url(resolved, "/api/chat"),
-        body,
-        _bearer(_optional_key(resolved)),
-        resolved["timeout_seconds"],
-    )
-    return _answer(raw, lambda d: d["message"]["content"])
+    except subprocess.TimeoutExpired:
+        return None, _error("timeout", "claude command timed out")
+    except OSError:
+        return None, _error("network", "claude command could not be run")
+    text, failed = _read_stream(done.stdout)
+    if failed or done.returncode != 0:
+        return None, _command_error(done.stdout + done.stderr)
+    if not text:
+        return None, _error("network", "reply had no text")
+    return text, None
 
 
 _ADAPTERS = {
@@ -464,191 +544,126 @@ _ADAPTERS = {
 }
 
 
-# --------------------------------------------------------------------------
-# Configuration (R-ENDPOINT-007)
-# --------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# Call log (R-ENDPOINT-006)
+# ---------------------------------------------------------------------------
 
-
-def load_config(config_path=None):
-    """Return the validated `[llm]` table, or None; raise ValueError when invalid."""
-    if config_path is None:
-        named = os.environ.get("VAR_HOTDOCS_CONFIG")
-        if named:
-            config_path = Path(named)
-            if not config_path.is_file():
-                raise ValueError(f"VAR_HOTDOCS_CONFIG names {named}, which does not exist")
-        else:
-            config_path = Path.cwd() / "hotdocs.toml"
-    config_path = Path(config_path)
-    if not config_path.is_file():
-        return None
-    try:
-        data = tomllib.loads(config_path.read_text(encoding="utf-8"))
-    except tomllib.TOMLDecodeError as exc:
-        raise ValueError(f"{config_path} is not valid TOML: {exc}") from None
-    table = data.get("llm")
-    if table is None:
-        return None
-    return _validate_table(table)
-
-
-def _validate_table(table):
-    if not isinstance(table, dict):
-        raise ValueError("[llm] must be a table")
-    for entry in table:
-        if entry not in _CONFIG_ENTRIES:
-            if _SECRET_NAME.search(entry):
-                raise ValueError(
-                    f"hotdocs.toml must never hold a secret: entry {entry!r} looks like one; "
-                    "name the environment variable that holds it in api_key_env instead"
-                )
-            raise ValueError(f"unknown entry {entry!r} in [llm]")
-    provider = table.get("provider")
-    if not isinstance(provider, str) or provider not in PROVIDERS:
-        raise ValueError(f"[llm] provider must be one of {', '.join(PROVIDERS)}")
-    model = table.get("model")
-    if not isinstance(model, str) or not model.strip():
-        raise ValueError("[llm] model is required")
-    base_url = table.get("base_url") or None
-    if base_url is not None and (
-        not isinstance(base_url, str) or not re.match(r"https?://", base_url)
-    ):
-        raise ValueError("[llm] base_url must be an http(s) URL")
-    if PROVIDERS[provider]["needs_base_url"] and base_url is None:
-        raise ValueError(f"[llm] provider {provider!r} requires a base_url")
-    api_key_env = table.get("api_key_env") or None
-    if api_key_env is not None:
-        if not isinstance(api_key_env, str) or not _ENV_NAME.fullmatch(api_key_env):
-            raise ValueError(
-                "[llm] api_key_env must be the name of an environment variable, "
-                "never the key itself"
-            )
-        if api_key_env in os.environ.values():
-            raise ValueError(
-                "[llm] api_key_env equals an environment variable's value and looks like a "
-                "pasted key: it must be the variable's name, never the key itself"
-            )
-    if provider == "claude-cli" and (base_url is not None or api_key_env is not None):
-        raise ValueError("[llm] provider 'claude-cli' takes no base_url or api_key_env")
-    timeout = table.get("timeout_seconds")
-    if timeout is not None and (
-        isinstance(timeout, bool) or not isinstance(timeout, int) or timeout < MIN_TIMEOUT_SECONDS
-    ):
-        raise ValueError(f"[llm] timeout_seconds must be an integer of at least {MIN_TIMEOUT_SECONDS}")
-    return {
-        "provider": provider,
-        "model": model,
-        "base_url": base_url,
-        "api_key_env": api_key_env,
-        "timeout_seconds": timeout,
+def _log_call(response):
+    now = datetime.now(timezone.utc)
+    record = {
+        "timestamp": now.isoformat(),
+        "model": response["model"],
+        "backend": response["backend"],
     }
+    if response["model_call_error"] is None:
+        record["text_present"] = response["text"] is not None
+    else:
+        record["model_call_error"] = response["model_call_error"]
+    directory = Path.cwd() / ".hotdocs" / "calls"
+    directory.mkdir(parents=True, exist_ok=True)
+    name = f"{now.strftime('%Y%m%dT%H%M%S%fZ')}-{uuid.uuid4().hex[:12]}.json"
+    (directory / name).write_text(json.dumps(record), encoding="utf-8")
 
 
-def save_config(config_path, provider, model, base_url=None, api_key_env=None, timeout_seconds=None):
-    """Validate as `load_config` does, then replace only the file's `[llm]` table."""
-    table = {"provider": provider, "model": model}
-    for entry, value in (
-        ("base_url", base_url),
-        ("api_key_env", api_key_env),
-        ("timeout_seconds", timeout_seconds),
-    ):
-        if value is not None:
-            table[entry] = value
-    config = _validate_table(table)
-    lines = ["[llm]\n"]
-    for entry in _CONFIG_ENTRIES:
-        value = config[entry]
-        if value is not None:
-            lines.append(f"{entry} = {_toml_value(value)}\n")
-    path = Path(config_path)
-    existing = path.read_text(encoding="utf-8") if path.is_file() else ""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(_replace_llm_table(existing, "".join(lines)), encoding="utf-8")
+# ---------------------------------------------------------------------------
+# Entry point (R-ENDPOINT-001)
+# ---------------------------------------------------------------------------
+
+def complete(prompt, model, *, backend=None, **params):
+    if backend is None:
+        try:
+            config = load_config()
+        except ValueError as exc:
+            raise ModelResolutionError(f"invalid hotdocs.toml: {exc}") from None
+        resolved = resolve_provider(model, config)
+        backend_name = resolved["provider"]
+        text, error = _ADAPTERS[backend_name](resolved, prompt, params)
+    else:
+        backend_name = getattr(backend, "__name__", type(backend).__name__)
+        try:
+            reply = backend(prompt, model, **params)
+        except Exception as exc:
+            text, error = None, _classify_exception(exc)
+        else:
+            text = _get(reply, "text")
+            raw_error = _get(reply, "model_call_error")
+            error = None if raw_error is None else {
+                "category": _get(raw_error, "category"),
+                "message": _get(raw_error, "message"),
+            }
+            backend_name = _get(reply, "backend") or backend_name
+    response = {
+        "text": text,
+        "model": model,
+        "backend": backend_name,
+        "model_call_error": error,
+    }
+    _log_call(response)
+    return response
 
 
-def _toml_value(value):
-    return str(value) if isinstance(value, int) else json.dumps(value, ensure_ascii=False)
-
-
-def _replace_llm_table(text, block):
-    lines = text.splitlines(keepends=True)
-    start = None
-    for index, line in enumerate(lines):
-        if _LLM_HEADER.fullmatch(line.rstrip("\r\n")):
-            start = index
-            break
-    if start is None:
-        if text and not text.endswith("\n"):
-            text += "\n"
-        return text + ("\n" if text else "") + block
-    end = len(lines)
-    for index in range(start + 1, len(lines)):
-        if lines[index].lstrip().startswith("["):
-            end = index
-            break
-    tail = "".join(lines[end:])
-    return "".join(lines[:start]) + block + ("\n" + tail if tail else "")
-
-
-# --------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
 # Setup helpers (R-ENDPOINT-009)
-# --------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+
+def _probe_ollama():
+    url = PROVIDERS["ollama"]["default_base_url"] + "/api/tags"
+    request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
+    try:
+        with urllib.request.urlopen(request, timeout=1):
+            pass
+    except Exception:
+        return False, f"no Ollama server answered at {url}"
+    return True, f"Ollama server answered at {url}"
 
 
 def detect_providers(env=None, probe_ollama=True):
-    """Report, per provider, whether it looks usable now."""
     env = os.environ if env is None else env
     found = []
-    for name, spec in PROVIDERS.items():
-        key_env = spec["default_api_key_env"]
-        if name == "claude-cli":
-            available = shutil.which("claude", path=env.get("PATH") or "") is not None
-            reason = "claude command found on PATH" if available else "claude command not found on PATH"
-        elif key_env:
-            available = bool((env.get(key_env) or "").strip())
+    for provider, entry in PROVIDERS.items():
+        key_env = entry["default_api_key_env"]
+        if provider == "claude-cli":
+            available = shutil.which("claude", path=env.get("PATH", "")) is not None
+            reason = "claude command on PATH" if available else "claude command not on PATH"
+        elif key_env is not None:
+            available = bool(env.get(key_env, "").strip())
             reason = f"{key_env} is set" if available else f"{key_env} is not set"
-        elif spec["needs_base_url"]:
-            available, reason = False, "needs the base_url of an OpenAI-compatible server"
-        elif probe_ollama:
-            available = _ollama_answers(spec["default_base_url"])
-            reason = "Ollama server answered" if available else "no Ollama server answered"
+        elif provider == "ollama":
+            if probe_ollama:
+                available, reason = _probe_ollama()
+            else:
+                available, reason = False, "Ollama server not probed"
         else:
-            available, reason = False, "Ollama server not probed"
-        found.append(
-            {
-                "provider": name,
-                "available": available,
-                "reason": reason,
-                "suggested_model": spec["suggested_model"],
-                "api_key_env": key_env,
-            }
-        )
+            available, reason = False, "needs the base_url of a running server"
+        found.append({
+            "provider": provider,
+            "available": available,
+            "reason": reason,
+            "suggested_model": entry["suggested_model"],
+            "api_key_env": key_env,
+        })
     return found
 
 
-def _ollama_answers(base_url):
-    request = urllib.request.Request(base_url + "/api/tags", headers={"User-Agent": USER_AGENT})
-    try:
-        with urllib.request.urlopen(request, timeout=1):
-            return True
-    except Exception:
-        return False
-
-
-def check_connection(provider, model, base_url=None, api_key_env=None, timeout_seconds=30):
-    """Send one tiny real completion; return `{ok, error}`. Never logged."""
+def check_connection(provider, model, base_url=None, api_key_env=None,
+                     timeout_seconds=30):
     if provider not in PROVIDERS:
-        raise ValueError(f"unknown provider {provider!r}")
-    spec = PROVIDERS[provider]
-    if spec["needs_base_url"] and not base_url:
-        raise ValueError(f"provider {provider!r} requires a base_url")
+        raise ValueError(
+            f"unknown provider {provider!r}; expected one of: " + ", ".join(PROVIDERS)
+        )
+    entry = PROVIDERS[provider]
+    base = base_url or entry["default_base_url"]
+    if entry["needs_base_url"] and not base:
+        raise ValueError(f"provider {provider} needs a base_url")
     resolved = {
         "provider": provider,
         "model": model,
-        "base_url": base_url or spec["default_base_url"],
-        "api_key_env": api_key_env or spec["default_api_key_env"],
+        "base_url": base,
+        "api_key_env": api_key_env or entry["default_api_key_env"],
         "timeout_seconds": timeout_seconds,
     }
     params = {} if provider == "claude-cli" else {"max_tokens": 1024}
-    _text, error = _dispatch(_PROBE_PROMPT, resolved, params)
+    _text, error = _ADAPTERS[provider](
+        resolved, "Reply with the single word OK.", params
+    )
     return {"ok": error is None, "error": error}

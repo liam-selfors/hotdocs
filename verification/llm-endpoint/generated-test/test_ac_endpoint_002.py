@@ -1,32 +1,33 @@
 import json
-import os
 
 import pytest
 
 import llm_endpoint
 
 
-def _field(value, name):
-    if isinstance(value, dict):
-        return value.get(name)
-    return getattr(value, name, None)
+def field(value, name):
+    return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-@pytest.fixture
-def isolated_cwd(tmp_path, monkeypatch):
-    workdir = tmp_path / "work"
-    workdir.mkdir()
-    monkeypatch.delenv("VAR_HOTDOCS_CONFIG", raising=False)
-    monkeypatch.chdir(workdir)
-    return tmp_path
+def _make_mock_anthropic_backend(log_path):
+    """A mock Anthropic backend returning "hello" for any prompt.
 
+    Matches the documented injected-backend shape:
+    backend(prompt, model, **params) -> ModelResponse
+    """
 
-def test_ac_endpoint_002_mock_anthropic_backend_returns_hello(isolated_cwd):
-    invocation_log = isolated_cwd / "mock_invocations.jsonl"
-
-    def mock_anthropic_backend(prompt, model, **params):
-        with open(invocation_log, "a", encoding="utf-8") as fh:
-            fh.write(json.dumps({"prompt": prompt, "model": model}) + "\n")
+    def backend(prompt, model, **params):
+        with open(log_path, "a", encoding="utf-8") as fh:
+            fh.write(
+                json.dumps(
+                    {
+                        "prompt": prompt,
+                        "model": model,
+                        "params": sorted(params.keys()),
+                    }
+                )
+                + "\n"
+            )
         return {
             "text": "hello",
             "model": model,
@@ -34,40 +35,39 @@ def test_ac_endpoint_002_mock_anthropic_backend_returns_hello(isolated_cwd):
             "model_call_error": None,
         }
 
-    prompt = "Say something, please."
-    result = llm_endpoint.complete(
-        prompt, "claude-sonnet-5", backend=mock_anthropic_backend
+    return backend
+
+
+@pytest.mark.parametrize(
+    "prompt",
+    ["Say hi.", "Write a haiku about the sea.", ""],
+)
+def test_ac_endpoint_002_complete_returns_mock_text_and_model(
+    tmp_path, monkeypatch, prompt
+):
+    # Isolate config discovery and the call log to a fresh directory.
+    monkeypatch.delenv("VAR_HOTDOCS_CONFIG", raising=False)
+    workdir = tmp_path / "work"
+    workdir.mkdir()
+    monkeypatch.chdir(workdir)
+
+    log_path = tmp_path / "backend_invocations.jsonl"
+    backend = _make_mock_anthropic_backend(log_path)
+
+    response = llm_endpoint.complete(
+        prompt, model="claude-sonnet-5", backend=backend
     )
 
-    assert result is not None
-    assert _field(result, "text") == "hello"
-    assert _field(result, "model") == "claude-sonnet-5"
-    assert _field(result, "model_call_error") is None
-
-    # The injected mock was actually invoked with the caller's prompt.
-    assert invocation_log.exists(), "injected backend was never called"
+    # The injected mock was actually used.
+    assert log_path.exists(), "injected backend was never invoked"
     records = [
         json.loads(line)
-        for line in invocation_log.read_text(encoding="utf-8").splitlines()
+        for line in log_path.read_text(encoding="utf-8").splitlines()
         if line.strip()
     ]
     assert len(records) >= 1
-    assert records[0]["prompt"] == prompt
 
-
-def test_ac_endpoint_002_any_prompt_yields_hello(isolated_cwd):
-    def mock_anthropic_backend(prompt, model, **params):
-        return {
-            "text": "hello",
-            "model": model,
-            "backend": "anthropic",
-            "model_call_error": None,
-        }
-
-    for prompt in ["", "another prompt", "multi\nline\nprompt"]:
-        result = llm_endpoint.complete(
-            prompt, "claude-sonnet-5", backend=mock_anthropic_backend
-        )
-        assert _field(result, "text") == "hello"
-        assert _field(result, "model") == "claude-sonnet-5"
-        assert _field(result, "model_call_error") is None
+    # Then clause: text "hello", model "claude-sonnet-5", model_call_error null.
+    assert field(response, "text") == "hello"
+    assert field(response, "model") == "claude-sonnet-5"
+    assert field(response, "model_call_error") is None

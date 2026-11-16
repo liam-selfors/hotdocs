@@ -1,19 +1,24 @@
-import re
+"""AC-SIZE-002 (Covers: R-SIZE-002).
+
+Given a component whose generated_code_loc and component_doc_words are both
+over their warn thresholds, and a second component with only
+generated_code_loc over its warn threshold,
+When check(repo_root) runs,
+Then the first component gets a distinct R-SIZE-002 warning naming both
+dimensions and SPEC_GUIDELINES.md Section 4, and the second component gets
+no R-SIZE-002 finding at all.
+"""
+
 from pathlib import Path
 
 import size_checker
 
 
-DUAL = "dualheavy"
-CODE_ONLY = "loconly"
-LOC_LINES = 1000  # over the 800 warn threshold, under the 1500 hard-fail threshold
-BULK_WORDS = 2300  # over the 2000 warn threshold, comfortably under 4000
+GEN_LOC = 1000  # warn above 800, hard fail above 1500
 
 
-def _get(value, key):
-    if isinstance(value, dict):
-        return value.get(key)
-    return getattr(value, key, None)
+def field(value, name):
+    return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
 def _write(path: Path, text: str) -> None:
@@ -21,26 +26,34 @@ def _write(path: Path, text: str) -> None:
     path.write_text(text, encoding="utf-8")
 
 
-def _component_md(slug: str, title: str) -> str:
+def _filler(n_words: int, token: str) -> str:
+    words = [f"{token}{i % 7}" for i in range(n_words)]
+    lines = [" ".join(words[i:i + 20]) for i in range(0, len(words), 20)]
+    return "\n".join(lines)
+
+
+def _component_md(slug: str, scope_words: int) -> str:
+    scope_text = "- In scope: the synthetic {slug} fixture behavior.\n".format(slug=slug)
+    if scope_words:
+        scope_text += "\n" + _filler(scope_words, "scope") + "\n"
     return (
         "---\n"
         f"id: comp-{slug}\n"
-        f"title: {title}\n"
+        f"title: {slug.capitalize()}\n"
         "status: draft\n"
-        "owners: [alice]\n"
-        "realizes: [P-SIZEFIX]\n"
+        "owners: [team-test]\n"
+        "sealed: true\n"
+        f"source_path: legacy/{slug}/\n"
         "---\n"
-        "\n"
-        f"# {title}\n"
+        f"# {slug.capitalize()}\n"
         "\n"
         "## Purpose\n"
         "\n"
-        "A small synthetic component used only as a size fixture.\n"
+        f"A small synthetic component named {slug} used as a test fixture.\n"
         "\n"
         "## Scope\n"
         "\n"
-        "- In scope: fixture behavior.\n"
-        "- Out of scope: everything else.\n"
+        f"{scope_text}"
         "\n"
         "## Definitions\n"
         "\n"
@@ -70,134 +83,117 @@ def _component_md(slug: str, title: str) -> str:
         "\n"
         "## Change log\n"
         "\n"
-        "- Created as a fixture.\n"
+        "- Initial fixture.\n"
     )
 
 
-def _build_component(repo_root: Path, slug: str, prefix: str, bulk_words: int) -> None:
-    comp_dir = repo_root / "specs" / "components" / slug
-    _write(comp_dir / "component.md", _component_md(slug, slug.capitalize()))
-    _write(
-        comp_dir / "requirements" / f"R-{prefix}-001.md",
-        f"# R-{prefix}-001\n\nThe component MUST return its input unchanged.\n",
-    )
-    _write(
-        comp_dir / "acceptance" / f"AC-{prefix}-001.md",
-        f"# AC-{prefix}-001\n\n"
-        f"Covers: R-{prefix}-001\n"
-        "Kind: generated-test\n\n"
-        "Given an integer\nWhen run is called\nThen the same integer is returned\n",
-    )
-    _write(
-        comp_dir / "interface" / "library.md",
-        "# Library\n\n```\nrun(x: int) -> int\n```\n\nReturns its input.\n",
-    )
-    if bulk_words > 0:
-        vocab = ["system", "remains", "measurable", "under", "steady", "load", "always"]
-        words = [vocab[i % len(vocab)] for i in range(bulk_words)]
-        lines = []
-        for i in range(0, len(words), 20):
-            lines.append(" ".join(words[i:i + 20]))
-        body = "\n".join(lines)
-    else:
-        body = "The component responds promptly."
-    _write(
-        comp_dir / "constraints.md",
-        "# Constraints\n\n## Performance\n\n" + body + "\n",
-    )
-    code = "".join(f"v_{i} = {i}\n" for i in range(LOC_LINES))
-    _write(repo_root / "gen" / slug / f"{slug}.py", code)
+def _gen_code(loc: int) -> str:
+    lines = ["# synthetic generated module", ""]
+    for i in range(loc):
+        lines.append(f"value_{i} = {i}")
+        if i % 100 == 0:
+            lines.append("")
+            lines.append("    # an indented comment line")
+    return "\n".join(lines) + "\n"
 
 
-def _build_repo(repo_root: Path) -> None:
+def _make_component(repo: Path, slug: str, scope_words: int,
+                    constraint_words: int, loc: int) -> None:
+    upper = slug.upper()
+    comp = repo / "specs" / "components" / slug
+    _write(comp / "component.md", _component_md(slug, scope_words))
     _write(
-        repo_root / "specs" / "product" / "sizefix.md",
-        "---\n"
-        "id: P-SIZEFIX\n"
-        "title: Size Fixture Capability\n"
-        "status: draft\n"
-        "owners: [alice]\n"
-        "---\n"
-        "\n"
-        "# Size Fixture Capability\n"
-        "\n"
-        "## Purpose\n\nFixture capability.\n\n"
-        "## Scope\n\n- Fixture only.\n\n"
-        "### CS-SIZEFIX-001\n\nCovers: P-SIZEFIX\nKind: llm-judge\n\n"
-        "Given the fixture\nWhen it runs\nThen nothing happens\n",
+        comp / "requirements" / f"R-{upper}-001.md",
+        f"# R-{upper}-001\n\n**R-{upper}-001** — The component MUST exist "
+        "as a fixture.\n",
     )
     _write(
-        repo_root / "specs" / "glossary.md",
-        "# Glossary\n\n- **Fixture** — a synthetic test corpus.\n",
+        comp / "acceptance" / f"AC-{upper}-001.md",
+        f"# AC-{upper}-001\n\nCovers: R-{upper}-001\nKind: compiled\n\n"
+        "```gherkin\nGiven the fixture\nWhen it is loaded\n"
+        "Then it exists\n```\n",
     )
-    _build_component(repo_root, DUAL, "DUALHEAVY", BULK_WORDS)
-    _build_component(repo_root, CODE_ONLY, "LOCONLY", 0)
+    constraints = "# Constraints\n\n- None measurable beyond existence.\n"
+    if constraint_words:
+        constraints += "\n" + _filler(constraint_words, "constraint") + "\n"
+    _write(comp / "constraints.md", constraints)
+    _write(repo / "gen" / slug / f"{slug}.py", _gen_code(loc))
 
 
-def _belongs(finding, slug: str) -> bool:
-    file_val = str(_get(finding, "file") or "").replace("\\", "/")
-    message = str(_get(finding, "message") or "")
-    if f"specs/components/{slug}/" in file_val or f"gen/{slug}/" in file_val:
-        return True
-    if file_val.rstrip("/").endswith(f"/{slug}") or file_val == slug:
-        return True
-    return re.search(rf"(?<![\w-]){re.escape(slug)}(?![\w])", message) is not None or (
-        f"comp-{slug}" in message
+def _build_repo(repo: Path) -> None:
+    _write(
+        repo / "specs" / "glossary.md",
+        "# Glossary\n\n- **Fixture** — a synthetic test component.\n",
     )
+    # alpha: generated_code_loc (1000 > 800) AND component_doc_words
+    # (~3000 > 2000, < 4000) both over warn.
+    _make_component(repo, "alpha", scope_words=2400, constraint_words=600,
+                    loc=GEN_LOC)
+    # beta: only generated_code_loc over warn; docs tiny.
+    _make_component(repo, "beta", scope_words=0, constraint_words=0,
+                    loc=GEN_LOC)
 
 
-def test_multi_dimension_warn_signal_only_for_component_with_two_dimensions(tmp_path):
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    _build_repo(repo_root)
+def _mentions_loc(msg: str) -> bool:
+    low = msg.lower()
+    return "generated_code_loc" in low or "generated code" in low
 
-    findings = size_checker.check(repo_root)
-    findings = list(findings)
 
-    for f in findings:
-        for key in ("rule_id", "severity", "file", "line", "message"):
-            assert _get(f, key) is not None, f"finding missing {key}: {f!r}"
+def _mentions_doc_words(msg: str) -> bool:
+    low = msg.lower()
+    return "component_doc_words" in low or "component doc" in low
 
-    size002 = [f for f in findings if _get(f, "rule_id") == "R-SIZE-002"]
 
-    # R-SIZE-002 MUST NOT ever hard-fail.
-    for f in size002:
-        assert _get(f, "severity") == "warn", f"R-SIZE-002 finding hard-failed: {f!r}"
+def _mentions_section4(msg: str) -> bool:
+    low = msg.lower()
+    return "§4" in msg or "section 4" in low or "sec. 4" in low
 
-    # Fixture sanity: the code-only component really is over its LOC warn threshold.
-    code_only_findings = [f for f in findings if _belongs(f, CODE_ONLY)]
-    assert any(
-        _get(f, "rule_id") == "R-SIZE-001" for f in code_only_findings
-    ), f"expected an R-SIZE-001 finding for {CODE_ONLY}; got {findings!r}"
+
+def test_ac_size_002_multi_dimension_warn_signal(tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _build_repo(repo)
+
+    findings = size_checker.check(repo)
+    assert isinstance(findings, list)
+
+    # Sanity: beta's generated_code_loc really is over its warn threshold
+    # (so its lack of an R-SIZE-002 finding is meaningful).
+    beta_r1 = [
+        f for f in findings
+        if field(f, "rule_id") == "R-SIZE-001" and "beta" in field(f, "file")
+    ]
+    assert beta_r1, f"expected an R-SIZE-001 finding for beta, got {findings!r}"
+
+    r2 = [f for f in findings if field(f, "rule_id") == "R-SIZE-002"]
+
+    alpha_r2 = [f for f in r2 if "alpha" in field(f, "file")]
+    beta_r2 = [
+        f for f in r2
+        if "beta" in field(f, "file") or "beta" in field(f, "message")
+    ]
 
     # Second component: no R-SIZE-002 finding at all.
-    code_only_002 = [f for f in size002 if _belongs(f, CODE_ONLY)]
-    assert code_only_002 == [], f"unexpected R-SIZE-002 for {CODE_ONLY}: {code_only_002!r}"
+    assert beta_r2 == [], f"beta must get no R-SIZE-002 finding: {beta_r2!r}"
 
     # First component: exactly one distinct R-SIZE-002 warning.
-    dual_002 = [f for f in size002 if _belongs(f, DUAL)]
-    assert len(dual_002) == 1, f"expected one R-SIZE-002 for {DUAL}; got {size002!r}"
-    finding = dual_002[0]
-    assert _get(finding, "severity") == "warn"
-    assert isinstance(_get(finding, "line"), int)
+    assert len(alpha_r2) == 1, f"expected one R-SIZE-002 for alpha: {r2!r}"
+    assert len(r2) == 1, f"only alpha should get R-SIZE-002: {r2!r}"
 
-    message = str(_get(finding, "message"))
-    lowered = message.lower()
+    finding = alpha_r2[0]
+    assert field(finding, "severity") == "warn"
+    assert isinstance(field(finding, "line"), int)
+    file_rel = field(finding, "file")
+    assert not Path(file_rel).is_absolute()
+    assert "alpha" in file_rel
 
-    code_aliases = ["generated_code_loc", "generated code", "generated-code", "code_loc", "loc"]
-    doc_aliases = ["component_doc_words", "component doc", "component-doc", "doc_words", "doc words"]
-    assert any(a in lowered for a in code_aliases), f"code dimension not named: {message!r}"
-    assert any(a in lowered for a in doc_aliases), f"doc-words dimension not named: {message!r}"
+    message = field(finding, "message")
+    assert _mentions_loc(message), message
+    assert _mentions_doc_words(message), message
+    assert "SPEC_GUIDELINES.md" in message, message
+    assert _mentions_section4(message), message
+    # Current value of the deterministic dimension is named.
+    assert str(GEN_LOC) in message, message
 
-    # Current value of the generated-code dimension is named.
-    assert re.search(rf"(?<!\d){LOC_LINES}(?!\d)", message), f"LOC value not named: {message!r}"
-
-    # Points at SPEC_GUIDELINES.md Section 4.
-    assert "SPEC_GUIDELINES.md" in message, f"guidelines not referenced: {message!r}"
-    assert re.search(r"(§\s*4(?!\d)|section\s*4(?!\d))", message, re.IGNORECASE), (
-        f"Section 4 not referenced: {message!r}"
-    )
-
-    # Every R-SIZE-002 finding belongs to the dual-dimension component only.
-    for f in size002:
-        assert _belongs(f, DUAL), f"stray R-SIZE-002 finding: {f!r}"
+    # R-SIZE-002 never hard-fails.
+    assert all(field(f, "severity") != "fail" for f in r2)

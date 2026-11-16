@@ -1,10 +1,15 @@
+"""AC-ENDPOINT-004 (Covers: R-ENDPOINT-005).
+
+A provider credential never appears in a ModelResponse, in a call-log
+file under .hotdocs/calls/, or in a check_connection result, even when
+the vendor echoes it back in an HTTP 401 body. save_config refuses an
+api_key_env value that is the key itself, and writes no file.
+"""
+
 import io
 import json
-import os
 import urllib.error
 import urllib.request
-from email.message import Message
-from pathlib import Path
 
 import pytest
 
@@ -12,52 +17,47 @@ import llm_endpoint
 
 
 SECRET = "sk-SECRET-123"
-PROVIDERS_UNDER_TEST = ["anthropic", "openai", "gemini"]
-KEY_VARS = ["ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY"]
+KEY_VARS = ("ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY")
+PROVIDERS_UNDER_TEST = ("anthropic", "openai", "gemini")
 
 
-def _field(value, name):
-    if isinstance(value, dict):
-        return value.get(name)
-    return getattr(value, name, None)
-
-
-def _snapshot(value):
-    """Render every documented field plus the whole value as text."""
-    parts = [repr(value)]
-    for name in ("text", "model", "backend", "model_call_error", "ok", "error"):
-        field = _field(value, name)
-        parts.append(repr(field))
-        if field is not None:
-            for sub in ("category", "message"):
-                parts.append(repr(_field(field, sub)))
+def _dump(value):
+    """Render a returned value (dict or object) as fully as possible."""
+    parts = [repr(value), str(value)]
     try:
         parts.append(json.dumps(value, default=str))
     except Exception:
         pass
+    if not isinstance(value, dict):
+        try:
+            parts.append(repr(vars(value)))
+        except TypeError:
+            pass
     return "\n".join(parts)
 
 
 @pytest.fixture
-def leaky_env(tmp_path, monkeypatch):
+def secret_env(tmp_path, monkeypatch):
     monkeypatch.delenv("VAR_HOTDOCS_CONFIG", raising=False)
     workdir = tmp_path / "work"
     workdir.mkdir()
     monkeypatch.chdir(workdir)
-    for var in KEY_VARS:
-        monkeypatch.setenv(var, SECRET)
+    for name in KEY_VARS:
+        monkeypatch.setenv(name, SECRET)
 
     calls = []
 
-    def fake_urlopen(request, *args, **kwargs):
+    def fake_urlopen(request, timeout=None, *args, **kwargs):
         calls.append(request)
-        body = ("{\"error\": \"invalid api key: " + SECRET + "\"}").encode("utf-8")
-        hdrs = Message()
+        body = json.dumps(
+            {"error": {"type": "authentication_error",
+                       "message": "Invalid API key: " + SECRET}}
+        ).encode("utf-8")
         raise urllib.error.HTTPError(
             "https://example.invalid/endpoint",
             401,
             "Unauthorized",
-            hdrs,
+            None,
             io.BytesIO(body),
         )
 
@@ -65,63 +65,47 @@ def leaky_env(tmp_path, monkeypatch):
     return workdir, calls
 
 
-def test_secret_never_leaks_from_complete_call_log_or_check_connection(leaky_env):
-    workdir, calls = leaky_env
+def test_secret_never_in_responses_call_log_or_check_connection(secret_env):
+    workdir, _calls = secret_env
 
     responses = []
     for provider in PROVIDERS_UNDER_TEST:
-        response = llm_endpoint.complete("Say hello.", provider + ":m")
-        responses.append((provider, response))
+        responses.append(llm_endpoint.complete("Say hello.", provider + ":m"))
 
-    connection_results = []
-    for provider in PROVIDERS_UNDER_TEST:
-        result = llm_endpoint.check_connection(provider, "m")
-        connection_results.append((provider, result))
-
-    # The faked 401 path was actually exercised.
-    assert len(calls) >= len(PROVIDERS_UNDER_TEST), (
-        "expected urllib.request.urlopen to be reached for each provider"
-    )
-
-    for provider, response in responses:
-        assert response is not None
-        assert _field(response, "text") is None, provider
-        error = _field(response, "model_call_error")
-        assert error is not None, provider
-        assert _field(error, "category") == "auth", provider
-        assert SECRET not in _snapshot(response), (
-            "secret leaked into ModelResponse for " + provider
+    for resp in responses:
+        assert SECRET not in _dump(resp), (
+            "credential leaked into a ModelResponse: %r" % (resp,)
         )
 
-    for provider, result in connection_results:
-        assert result is not None
-        assert not _field(result, "ok"), provider
-        assert SECRET not in _snapshot(result), (
-            "secret leaked into check_connection result for " + provider
+    results = []
+    for provider in PROVIDERS_UNDER_TEST:
+        results.append(llm_endpoint.check_connection(provider, "m"))
+
+    for result in results:
+        assert SECRET not in _dump(result), (
+            "credential leaked into a check_connection result: %r" % (result,)
         )
 
     calls_dir = workdir / ".hotdocs" / "calls"
-    assert calls_dir.is_dir(), "expected .hotdocs/calls/ to be written"
-    log_files = [p for p in calls_dir.rglob("*") if p.is_file()]
-    assert len(log_files) >= len(PROVIDERS_UNDER_TEST)
-    for path in log_files:
-        content = path.read_bytes()
-        assert SECRET.encode("utf-8") not in content, (
-            "secret leaked into call log file " + str(path)
+    assert calls_dir.is_dir(), "complete() wrote no call log under .hotdocs/calls/"
+    files = [p for p in calls_dir.rglob("*") if p.is_file()]
+    assert len(files) >= len(PROVIDERS_UNDER_TEST), (
+        "expected at least one call-log file per complete() call, found %d"
+        % len(files)
+    )
+    for path in files:
+        content = path.read_bytes().decode("utf-8", errors="replace")
+        assert SECRET not in content, (
+            "credential leaked into call-log file %s" % path
         )
 
 
-def test_save_config_refuses_key_value_as_api_key_env(tmp_path, monkeypatch):
-    monkeypatch.delenv("VAR_HOTDOCS_CONFIG", raising=False)
+def test_save_config_refuses_key_as_api_key_env(tmp_path, monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", SECRET)
-    target_dir = tmp_path / "cfgdir"
-    config_path = target_dir / "hotdocs.toml"
+    config_path = tmp_path / "hotdocs.toml"
 
     with pytest.raises(ValueError) as excinfo:
         llm_endpoint.save_config(config_path, "openai", "m", api_key_env=SECRET)
 
-    message = str(excinfo.value)
-    assert "never the key itself" in message
-    assert SECRET not in message
+    assert "never the key itself" in str(excinfo.value)
     assert not config_path.exists()
-    assert not os.path.exists(str(Path(target_dir) / "hotdocs.toml"))

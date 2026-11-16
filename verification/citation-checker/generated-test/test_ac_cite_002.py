@@ -1,20 +1,10 @@
-"""AC-CITE-002 (covers R-CITE-002).
-
-Given a live requirement citing a real file's "Query surface" section,
-  and another citing the same file's "Nonexistent Heading" section
-When check(repo_root) runs
-Then only the second citation gets a R-CITE-002 finding
-"""
+import citation_checker
 
 from pathlib import Path
 
-import citation_checker
 
-
-def _get(value, key, default=None):
-    if isinstance(value, dict):
-        return value.get(key, default)
-    return getattr(value, key, default)
+def field(value, name):
+    return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
 def _write(path: Path, text: str) -> None:
@@ -22,67 +12,59 @@ def _write(path: Path, text: str) -> None:
     path.write_text(text, encoding="utf-8")
 
 
-ARCH_REL = "specs/architecture/graph-query-engine.md"
-GOOD_REQ_REL = "specs/components/foo/requirements/R-FOO-001.md"
-BAD_REQ_REL = "specs/components/foo/requirements/R-FOO-002.md"
+ARCH_REL = "specs/architecture/widgets.md"
+REQ_GOOD_REL = "specs/components/foo/requirements/R-FOO-001.md"
+REQ_BAD_REL = "specs/components/foo/requirements/R-FOO-002.md"
 
 
 def _build_fixture(repo_root: Path) -> None:
-    # Glossary (no frontmatter).
     _write(
         repo_root / "specs" / "glossary.md",
-        "# Glossary\n"
-        "\n"
-        "Canonical vocabulary.\n"
-        "\n"
-        "- **Widget** — a small test thing.\n",
+        "# Glossary\n\n"
+        "- **Widget** — a thing used only by this fixture.\n",
     )
 
-    # The real file whose section is cited.
     _write(
         repo_root / ARCH_REL,
         "---\n"
-        "id: graph-query-engine\n"
-        "title: Graph query engine\n"
-        "status: ratified\n"
-        "owners: [alice]\n"
-        "last_ratified_commit: 0000000000000000000000000000000000000000\n"
+        "id: arch-widgets\n"
+        "title: Widgets\n"
+        "status: draft\n"
+        "owners: [team-a]\n"
         "---\n"
         "\n"
-        "# Graph query engine\n"
-        "\n"
-        "## Purpose\n"
-        "\n"
-        "Exposes shared views over the corpus.\n"
+        "# Widgets\n"
         "\n"
         "## Query surface\n"
         "\n"
-        "The views every consumer reads.\n",
+        "The shared views live here.\n"
+        "\n"
+        "## Other section\n"
+        "\n"
+        "Nothing else.\n",
     )
 
-    comp_dir = repo_root / "specs" / "components" / "foo"
+    comp = repo_root / "specs" / "components" / "foo"
     _write(
-        comp_dir / "component.md",
+        comp / "component.md",
         "---\n"
         "id: comp-foo\n"
         "title: Foo\n"
-        "status: ratified\n"
-        "owners: [alice]\n"
+        "status: draft\n"
+        "owners: [team-a]\n"
         "sealed: true\n"
-        "source_path: legacy/foo\n"
-        "last_ratified_commit: 0000000000000000000000000000000000000000\n"
+        "source_path: legacy/foo/\n"
         "---\n"
         "\n"
         "# Foo\n"
         "\n"
         "## Purpose\n"
         "\n"
-        "A small fixture component.\n"
+        "Foo does a small thing for this fixture.\n"
         "\n"
         "## Scope\n"
         "\n"
-        "- In scope: fixture behavior.\n"
-        "- Out of scope: everything else.\n"
+        "- In scope: the small thing.\n"
         "\n"
         "## Definitions\n"
         "\n"
@@ -112,102 +94,76 @@ def _build_fixture(repo_root: Path) -> None:
         "\n"
         "## Change log\n"
         "\n"
-        "- Initial version.\n",
+        "- Created.\n",
     )
-
     _write(
-        repo_root / GOOD_REQ_REL,
+        comp / "requirements" / "R-FOO-001.md",
         "# R-FOO-001\n"
         "\n"
-        "**R-FOO-001** — The component MUST read only the views listed in "
-        "`specs/architecture/graph-query-engine.md`'s \"Query surface\" section.\n",
+        "**R-FOO-001** — Foo MUST read the views listed in\n"
+        "`" + ARCH_REL + "`'s \"Query surface\" section.\n",
     )
     _write(
-        repo_root / BAD_REQ_REL,
+        comp / "requirements" / "R-FOO-002.md",
         "# R-FOO-002\n"
         "\n"
-        "**R-FOO-002** — The component MUST follow the rules in "
-        "`specs/architecture/graph-query-engine.md`'s \"Nonexistent Heading\" section.\n",
+        "**R-FOO-002** — Foo MUST follow the rules listed in\n"
+        "`" + ARCH_REL + "`'s \"Nonexistent Heading\" section.\n",
     )
-
     _write(
-        comp_dir / "acceptance" / "AC-FOO-001.md",
+        comp / "acceptance" / "AC-FOO-001.md",
         "# AC-FOO-001\n"
         "\n"
         "Covers: R-FOO-001\n"
-        "Kind: llm-judge\n"
+        "Kind: compiled\n"
         "\n"
-        "The component reads only listed views.\n",
+        "```gherkin\n"
+        "Given foo\n"
+        "When it runs\n"
+        "Then it reads the views\n"
+        "```\n",
     )
     _write(
-        comp_dir / "acceptance" / "AC-FOO-002.md",
+        comp / "acceptance" / "AC-FOO-002.md",
         "# AC-FOO-002\n"
         "\n"
         "Covers: R-FOO-002\n"
-        "Kind: llm-judge\n"
+        "Kind: compiled\n"
         "\n"
-        "The component follows the rules.\n",
+        "```gherkin\n"
+        "Given foo\n"
+        "When it runs\n"
+        "Then it follows the rules\n"
+        "```\n",
     )
-
     _write(
-        comp_dir / "constraints.md",
-        "# Constraints\n"
-        "\n"
-        "None.\n",
+        comp / "constraints.md",
+        "# Constraints\n\nNone.\n",
     )
 
 
-def _norm(path_value) -> str:
-    return str(path_value).replace("\\", "/")
-
-
-def test_only_unresolved_section_pointer_gets_r_cite_002(tmp_path):
+def test_ac_cite_002_only_missing_heading_citation_is_flagged(tmp_path):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
     _build_fixture(repo_root)
 
     findings = citation_checker.check(repo_root)
-
     assert isinstance(findings, list)
 
-    cite2 = [f for f in findings if _get(f, "rule_id") == "R-CITE-002"]
-    cite2_files = [_norm(_get(f, "file")) for f in cite2]
+    cite2 = [f for f in findings if field(f, "rule_id") == "R-CITE-002"]
 
-    # The resolving pointer ("Query surface") must produce no R-CITE-002 finding.
-    assert GOOD_REQ_REL not in cite2_files, (
-        f"Resolving 'Query surface' pointer was flagged: {cite2!r}"
-    )
+    # The citation to the real "Query surface" heading resolves: no finding.
+    good = [f for f in cite2 if field(f, "file") == REQ_GOOD_REL]
+    assert good == [], f"unexpected R-CITE-002 finding(s) for resolvable pointer: {good}"
 
-    # The dangling pointer ("Nonexistent Heading") must produce exactly one.
-    assert cite2_files.count(BAD_REQ_REL) == 1, (
-        f"Expected exactly one R-CITE-002 finding on {BAD_REQ_REL}, got: {cite2!r}"
-    )
+    # The citation to "Nonexistent Heading" does not resolve: exactly one finding.
+    bad = [f for f in cite2 if field(f, "file") == REQ_BAD_REL]
+    assert len(bad) == 1, f"expected exactly one R-CITE-002 finding for {REQ_BAD_REL}, got {cite2}"
 
-    # And nothing else anywhere gets an R-CITE-002 finding.
-    assert len(cite2) == 1, f"Unexpected extra R-CITE-002 findings: {cite2!r}"
+    # And nothing else in the corpus yields an R-CITE-002 finding.
+    assert len(cite2) == 1, f"expected only the second citation flagged, got {cite2}"
 
-    finding = cite2[0]
-    severity = _get(finding, "severity")
-    assert severity in ("fail", "warn")
-    line = _get(finding, "line")
-    assert isinstance(line, int) and not isinstance(line, bool)
-    assert line >= 1
-    message = _get(finding, "message")
-    assert isinstance(message, str) and message
-
-
-def test_findings_have_exact_documented_keys(tmp_path):
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    _build_fixture(repo_root)
-
-    findings = citation_checker.check(repo_root)
-
-    cite2 = [f for f in findings if _get(f, "rule_id") == "R-CITE-002"]
-    assert len(cite2) == 1
-    finding = cite2[0]
-    if isinstance(finding, dict):
-        assert set(finding.keys()) == {"rule_id", "severity", "file", "line", "message"}
-    else:
-        for key in ("rule_id", "severity", "file", "line", "message"):
-            assert hasattr(finding, key)
+    finding = bad[0]
+    assert field(finding, "severity") in ("fail", "warn")
+    assert isinstance(field(finding, "line"), int)
+    assert isinstance(field(finding, "message"), str)

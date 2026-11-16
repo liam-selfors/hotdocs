@@ -1,5 +1,6 @@
 import json
 import os
+import stat
 import sys
 
 import pytest
@@ -7,107 +8,98 @@ import pytest
 import llm_endpoint
 
 
-pytestmark = pytest.mark.skipif(
-    sys.platform.startswith("win"),
-    reason="recorder relies on an executable shebang script on PATH",
-)
+def field(value, name):
+    return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def _field(value, name):
-    if isinstance(value, dict):
-        return value.get(name)
-    return getattr(value, name, None)
-
-
-def _setup(tmp_path, monkeypatch, stdout_text, exit_code=0):
-    bin_dir = tmp_path / "bin"
-    bin_dir.mkdir()
-    work_dir = tmp_path / "work"
-    work_dir.mkdir()
-    log_path = tmp_path / "claude_invocations.log"
-
-    script = (
-        "#!" + sys.executable + "\n"
-        "import sys, json\n"
-        "with open(" + repr(str(log_path)) + ", 'a') as _f:\n"
-        "    _f.write(json.dumps(sys.argv[1:]) + '\\n')\n"
-        "sys.stdout.write(" + repr(stdout_text) + ")\n"
-        "sys.stdout.flush()\n"
-        "sys.exit(" + repr(int(exit_code)) + ")\n"
-    )
-    claude_path = bin_dir / "claude"
-    claude_path.write_text(script)
-    os.chmod(str(claude_path), 0o755)
-
-    monkeypatch.delenv("VAR_HOTDOCS_CONFIG", raising=False)
-    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-    monkeypatch.setenv("PATH", str(bin_dir) + os.pathsep + os.environ.get("PATH", ""))
-    monkeypatch.chdir(work_dir)
-    return log_path
-
-
-def _read_invocations(log_path):
-    assert log_path.exists(), "the claude recorder was never invoked"
-    lines = [ln for ln in log_path.read_text().splitlines() if ln.strip()]
-    assert lines, "the claude recorder was never invoked"
-    return [json.loads(ln) for ln in lines]
-
-
-def _has_stream_json(argv):
-    has_format = False
-    for i, arg in enumerate(argv):
-        if arg == "--output-format" and i + 1 < len(argv) and argv[i + 1] == "stream-json":
-            has_format = True
-        if arg == "--output-format=stream-json":
-            has_format = True
-    return has_format and "--verbose" in argv
-
-
-STREAM_LINES = [
+SUCCESS_LINES = [
     {"type": "system"},
     {"type": "assistant", "message": {"content": [{"type": "text", "text": "ab"}]}},
     {
         "type": "assistant",
         "message": {"content": [{"type": "thinking"}, {"type": "text", "text": "cd"}]},
     },
+    {"type": "result", "is_error": False},
 ]
 
+ERROR_LINES = SUCCESS_LINES[:-1] + [{"type": "result", "is_error": True}]
 
-def _stream_output(is_error):
-    lines = list(STREAM_LINES) + [{"type": "result", "is_error": is_error}]
+
+def _install_recorder(tmp_path, monkeypatch, stdout_text):
+    """Put a fake `claude` command first on PATH.
+
+    It records its argv (as JSON) to a file the test controls, writes
+    `stdout_text` verbatim to stdout, and exits 0.
+    """
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    record_path = tmp_path / "recorded_argv.json"
+    payload_path = tmp_path / "recorder_stdout.txt"
+    payload_path.write_bytes(stdout_text.encode("utf-8"))
+
+    script = bin_dir / "claude"
+    script.write_text(
+        "#!" + sys.executable + "\n"
+        "import json, sys\n"
+        "with open(" + repr(str(record_path)) + ", 'w', encoding='utf-8') as fh:\n"
+        "    json.dump(sys.argv[1:], fh)\n"
+        "with open(" + repr(str(payload_path)) + ", 'rb') as fh:\n"
+        "    data = fh.read()\n"
+        "sys.stdout.buffer.write(data)\n"
+        "sys.stdout.buffer.flush()\n"
+        "sys.exit(0)\n",
+        encoding="utf-8",
+    )
+    script.chmod(script.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+
+    monkeypatch.setenv("PATH", str(bin_dir) + os.pathsep + os.environ.get("PATH", ""))
+    monkeypatch.delenv("VAR_HOTDOCS_CONFIG", raising=False)
+
+    work = tmp_path / "work"
+    work.mkdir()
+    monkeypatch.chdir(work)
+    return record_path
+
+
+def _stream(lines):
     return "".join(json.dumps(line) + "\n" for line in lines)
 
 
-def test_stream_json_reply_joins_every_assistant_text_block(tmp_path, monkeypatch):
-    log_path = _setup(tmp_path, monkeypatch, _stream_output(False))
-
-    result = llm_endpoint.complete("hi", "claude-sonnet-5")
-
-    assert _field(result, "text") == "abcd"
-    assert _field(result, "model_call_error") is None
-
-    invocations = _read_invocations(log_path)
-    for argv in invocations:
-        assert _has_stream_json(argv), (
-            "recorded command lacks --output-format stream-json --verbose: %r" % (argv,)
-        )
+def _read_argv(record_path):
+    assert record_path.exists(), "the claude recorder was never invoked"
+    return json.loads(record_path.read_text(encoding="utf-8"))
 
 
-def test_result_line_with_is_error_true_is_a_failure(tmp_path, monkeypatch):
-    log_path = _setup(tmp_path, monkeypatch, _stream_output(True))
+def test_stream_json_text_blocks_joined_in_order(tmp_path, monkeypatch):
+    record_path = _install_recorder(tmp_path, monkeypatch, _stream(SUCCESS_LINES))
 
-    result = llm_endpoint.complete("hi", "claude-sonnet-5")
+    response = llm_endpoint.complete("hi", "claude-sonnet-5")
 
-    assert _field(result, "text") is None
-    assert _field(result, "model_call_error") is not None
-    _read_invocations(log_path)
+    assert field(response, "text") == "abcd"
+    assert field(response, "model_call_error") is None
+
+    argv = _read_argv(record_path)
+    assert "--output-format" in argv
+    idx = argv.index("--output-format")
+    assert idx + 1 < len(argv) and argv[idx + 1] == "stream-json", argv
+    assert "--verbose" in argv, argv
 
 
-def test_non_stream_output_is_the_reply_unchanged(tmp_path, monkeypatch):
-    log_path = _setup(tmp_path, monkeypatch, "hello\n")
+def test_stream_json_result_is_error_is_failure(tmp_path, monkeypatch):
+    record_path = _install_recorder(tmp_path, monkeypatch, _stream(ERROR_LINES))
 
-    result = llm_endpoint.complete("hi", "claude-sonnet-5")
+    response = llm_endpoint.complete("hi", "claude-sonnet-5")
 
-    assert _field(result, "text") == "hello\n"
-    assert _field(result, "model_call_error") is None
-    _read_invocations(log_path)
+    assert field(response, "text") is None
+    assert field(response, "model_call_error") is not None
+    assert record_path.exists()
+
+
+def test_non_stream_output_is_reply_unchanged(tmp_path, monkeypatch):
+    record_path = _install_recorder(tmp_path, monkeypatch, "hello\n")
+
+    response = llm_endpoint.complete("hi", "claude-sonnet-5")
+
+    assert field(response, "model_call_error") is None
+    assert field(response, "text") == "hello\n"
+    assert record_path.exists()

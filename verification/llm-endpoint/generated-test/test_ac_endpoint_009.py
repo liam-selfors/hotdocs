@@ -1,4 +1,14 @@
+"""AC-ENDPOINT-009 (Covers: R-ENDPOINT-004).
+
+Every HTTP provider classifies each failure into exactly one category,
+makes exactly one call, and never raises; a provider needing a key with
+none in the environment reports `auth` without a call; Gemini's
+"API key not valid" 400 maps to `auth`.
+"""
+
+import email.message
 import io
+import json
 import socket
 import urllib.error
 import urllib.request
@@ -8,52 +18,48 @@ import pytest
 import llm_endpoint
 
 
-HTTP_PROVIDER_MODELS = [
-    ("anthropic", "anthropic:claude-sonnet-5"),
-    ("openai", "openai:gpt-6-astra"),
-    ("openai-compatible", "openai-compatible:local-model"),
-    ("gemini", "gemini:gemini-4-argon"),
-    ("ollama", "ollama:llama3.2"),
-]
+def field(value, name):
+    return value[name] if isinstance(value, dict) else getattr(value, name)
 
-KEY_ENVS = {
-    "anthropic": "ANTHROPIC_API_KEY",
-    "openai": "OPENAI_API_KEY",
-    "gemini": "GEMINI_API_KEY",
+
+KEY_VARS = ("ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY", "GOOGLE_API_KEY")
+
+
+# provider -> model string passed to complete() (openai-compatible is configured
+# through hotdocs.toml in the current directory and called by bare name).
+HTTP_PROVIDERS = {
+    "anthropic": "anthropic:claude-sonnet-5",
+    "openai": "openai:gpt-6-astra",
+    "openai-compatible": "compat-model",
+    "gemini": "gemini:gemini-4-argon",
+    "ollama": "ollama:llama3.2",
 }
 
-VALID_CATEGORIES = {"network", "auth", "rate_limit", "timeout"}
+KEYED_PROVIDERS = {
+    "anthropic": ("anthropic:claude-sonnet-5", "ANTHROPIC_API_KEY"),
+    "openai": ("openai:gpt-6-astra", "OPENAI_API_KEY"),
+    "gemini": ("gemini:gemini-4-argon", "GEMINI_API_KEY"),
+}
 
 
-def _field(value, name):
-    if isinstance(value, dict):
-        return value.get(name)
-    return getattr(value, name, None)
-
-
-def _http_error(code, body=b'{"error": {"message": "vendor says something specific"}}'):
+def _http_error(code, body=b"{}"):
     return urllib.error.HTTPError(
-        "http://example.invalid/endpoint",
-        code,
-        "error",
-        {},
-        io.BytesIO(body),
+        "http://example.invalid/", code, "error", email.message.Message(), io.BytesIO(body)
     )
 
 
-class _UnreadableResponse:
+class _UnreadableReply:
     status = 200
     code = 200
-    headers = {}
 
     def __enter__(self):
         return self
 
-    def __exit__(self, exc_type, exc, tb):
+    def __exit__(self, *exc):
         return False
 
     def read(self, *args, **kwargs):
-        return b"\x00\xff\xfe this is { not json at all"
+        return b"\x00\xff<<this is not a readable reply body>>"
 
     def getcode(self):
         return 200
@@ -63,13 +69,13 @@ class _UnreadableResponse:
 
 
 def _raise(exc):
-    def action():
+    def outcome():
         raise exc
 
-    return action
+    return outcome
 
 
-FAILURE_CASES = [
+OUTCOMES = [
     ("http_401", lambda: _raise(_http_error(401)), "auth"),
     ("http_403", lambda: _raise(_http_error(403)), "auth"),
     ("http_429", lambda: _raise(_http_error(429)), "rate_limit"),
@@ -84,19 +90,18 @@ FAILURE_CASES = [
         ),
         "network",
     ),
-    ("unreadable_body", lambda: (lambda: _UnreadableResponse()), "network"),
+    ("unreadable_body", lambda: (lambda: _UnreadableReply()), "network"),
 ]
 
 
-def _install_recorder(monkeypatch, action):
+def _make_recorder(outcome):
     calls = []
 
-    def fake_urlopen(request, *args, **kwargs):
-        calls.append({"request": request, "args": args, "kwargs": kwargs})
-        return action()
+    def recorder(request, *args, **kwargs):
+        calls.append((request, args, kwargs))
+        return outcome()
 
-    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
-    return calls
+    return recorder, calls
 
 
 def _prepare_env(monkeypatch, tmp_path, provider, with_keys=True):
@@ -104,94 +109,106 @@ def _prepare_env(monkeypatch, tmp_path, provider, with_keys=True):
     workdir.mkdir()
     monkeypatch.chdir(workdir)
     monkeypatch.delenv("VAR_HOTDOCS_CONFIG", raising=False)
-    for env_name in KEY_ENVS.values():
-        monkeypatch.delenv(env_name, raising=False)
+    for var in KEY_VARS:
+        monkeypatch.delenv(var, raising=False)
     if with_keys:
-        for env_name in KEY_ENVS.values():
-            monkeypatch.setenv(env_name, "fake-test-key-not-real-0000")
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "test-anthropic-key-not-real")
+        monkeypatch.setenv("OPENAI_API_KEY", "test-openai-key-not-real")
+        monkeypatch.setenv("GEMINI_API_KEY", "test-gemini-key-not-real")
     if provider == "openai-compatible":
         (workdir / "hotdocs.toml").write_text(
             "[llm]\n"
             'provider = "openai-compatible"\n'
-            'model = "local-model"\n'
+            'model = "compat-model"\n'
             'base_url = "http://127.0.0.1:9/v1"\n',
             encoding="utf-8",
         )
     return workdir
 
 
-def _assert_failed_with(result, expected_category):
-    error = _field(result, "model_call_error")
-    assert error is not None, "expected a model_call_error, got %r" % (result,)
-    assert _field(result, "text") is None
-    category = _field(error, "category")
-    assert category in VALID_CATEGORIES
-    assert category == expected_category, (
-        "expected category %r, got %r (result=%r)" % (expected_category, category, result)
-    )
-
-
+@pytest.mark.parametrize("provider", sorted(HTTP_PROVIDERS))
 @pytest.mark.parametrize(
-    "case_name,action_factory,expected_category",
-    FAILURE_CASES,
-    ids=[c[0] for c in FAILURE_CASES],
+    "outcome_name,outcome_factory,expected",
+    OUTCOMES,
+    ids=[o[0] for o in OUTCOMES],
 )
-@pytest.mark.parametrize(
-    "provider,model",
-    HTTP_PROVIDER_MODELS,
-    ids=[p[0] for p in HTTP_PROVIDER_MODELS],
-)
-def test_http_failure_classified_once_without_raising(
-    monkeypatch, tmp_path, provider, model, case_name, action_factory, expected_category
+def test_http_failure_is_classified_once_without_raising(
+    monkeypatch, tmp_path, provider, outcome_name, outcome_factory, expected
 ):
-    _prepare_env(monkeypatch, tmp_path, provider, with_keys=True)
-    calls = _install_recorder(monkeypatch, action_factory())
+    _prepare_env(monkeypatch, tmp_path, provider)
+    recorder, calls = _make_recorder(outcome_factory())
+    monkeypatch.setattr(urllib.request, "urlopen", recorder)
 
-    result = llm_endpoint.complete("Say hello.", model)
+    try:
+        result = llm_endpoint.complete("Say hello.", HTTP_PROVIDERS[provider])
+    except Exception as exc:  # pragma: no cover - the assertion is the point
+        pytest.fail(f"complete() raised {type(exc).__name__} for {provider}/{outcome_name}")
 
-    _assert_failed_with(result, expected_category)
-    assert len(calls) == 1, "recorder called %d times for %s/%s" % (
-        len(calls),
-        provider,
-        case_name,
+    error = field(result, "model_call_error")
+    assert error is not None, f"{provider}/{outcome_name}: expected a model_call_error"
+    assert field(error, "category") == expected, (
+        f"{provider}/{outcome_name}: category {field(error, 'category')!r}, "
+        f"expected {expected!r}"
     )
+    assert field(result, "text") is None
+    assert len(calls) == 1, f"{provider}/{outcome_name}: urlopen called {len(calls)} times"
 
 
-@pytest.mark.parametrize(
-    "provider,model",
-    [
-        ("anthropic", "anthropic:claude-sonnet-5"),
-        ("openai", "openai:gpt-6-astra"),
-        ("gemini", "gemini:gemini-4-argon"),
-    ],
-    ids=["anthropic", "openai", "gemini"],
-)
-def test_missing_key_reports_auth_without_calling(monkeypatch, tmp_path, provider, model):
+@pytest.mark.parametrize("provider", sorted(KEYED_PROVIDERS))
+def test_missing_key_reports_auth_without_call(monkeypatch, tmp_path, provider):
     _prepare_env(monkeypatch, tmp_path, provider, with_keys=False)
+    model, _key_var = KEYED_PROVIDERS[provider]
 
-    def should_not_be_called():
-        raise AssertionError("urlopen must not be called without a key")
+    def unexpected():
+        raise AssertionError("urlopen must not be reached")
 
-    calls = _install_recorder(monkeypatch, should_not_be_called)
+    recorder, calls = _make_recorder(unexpected)
+    monkeypatch.setattr(urllib.request, "urlopen", recorder)
 
-    result = llm_endpoint.complete("Say hello.", model)
+    try:
+        result = llm_endpoint.complete("Say hello.", model)
+    except Exception as exc:  # pragma: no cover
+        pytest.fail(f"complete() raised {type(exc).__name__} for {provider} with no key")
 
-    _assert_failed_with(result, "auth")
-    assert calls == []
+    error = field(result, "model_call_error")
+    assert error is not None
+    assert field(error, "category") == "auth"
+    assert field(result, "text") is None
+    assert calls == [], f"{provider}: urlopen was called {len(calls)} times without a key"
 
 
-def test_gemini_400_invalid_api_key_is_auth(monkeypatch, tmp_path):
-    _prepare_env(monkeypatch, tmp_path, "gemini", with_keys=True)
-    body = (
-        b'{"error": {"code": 400, '
-        b'"message": "API key not valid. Please pass a valid API key.", '
-        b'"status": "INVALID_ARGUMENT", '
-        b'"details": [{"@type": "type.googleapis.com/google.rpc.ErrorInfo", '
-        b'"reason": "API_KEY_INVALID", "domain": "googleapis.com"}]}}'
-    )
-    calls = _install_recorder(monkeypatch, _raise(_http_error(400, body)))
+def test_gemini_invalid_api_key_400_is_auth(monkeypatch, tmp_path):
+    _prepare_env(monkeypatch, tmp_path, "gemini")
+    body = json.dumps(
+        {
+            "error": {
+                "code": 400,
+                "message": "API key not valid. Please pass a valid API key.",
+                "status": "INVALID_ARGUMENT",
+                "details": [
+                    {
+                        "@type": "type.googleapis.com/google.rpc.ErrorInfo",
+                        "reason": "API_KEY_INVALID",
+                        "domain": "googleapis.com",
+                    }
+                ],
+            }
+        }
+    ).encode("utf-8")
 
-    result = llm_endpoint.complete("Say hello.", "gemini:gemini-4-argon")
+    def outcome():
+        raise _http_error(400, body)
 
-    _assert_failed_with(result, "auth")
+    recorder, calls = _make_recorder(outcome)
+    monkeypatch.setattr(urllib.request, "urlopen", recorder)
+
+    try:
+        result = llm_endpoint.complete("Say hello.", "gemini:gemini-4-argon")
+    except Exception as exc:  # pragma: no cover
+        pytest.fail(f"complete() raised {type(exc).__name__}")
+
+    error = field(result, "model_call_error")
+    assert error is not None
+    assert field(error, "category") == "auth"
+    assert field(result, "text") is None
     assert len(calls) == 1

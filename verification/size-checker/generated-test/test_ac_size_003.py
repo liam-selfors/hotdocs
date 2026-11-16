@@ -1,176 +1,193 @@
-import sys
+"""AC-SIZE-003 (Covers: R-SIZE-003).
+
+Given one requirement file over 500 words and a second requirement file in
+the same component under 250 words, with the component's overall
+component_doc_words still under 4000, when check(repo_root) runs, then the
+first file gets a fail-severity R-SIZE-003 finding naming its own word
+count, the second file gets no R-SIZE-003 finding, and R-SIZE-001's
+component_doc_words check does not fire.
+"""
+
 from pathlib import Path
 
 import size_checker
 
 
-def _field(value, name):
-    if isinstance(value, dict):
-        return value.get(name)
-    return getattr(value, name, None)
+def field(value, name):
+    return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def _norm(path_value):
-    return str(path_value).replace("\\", "/") if path_value is not None else None
+COMPONENT_MD = """---
+id: comp-foo
+title: Foo
+status: draft
+owners: [tester]
+sealed: true
+source_path: legacy/foo/
+---
+
+# Foo
+
+## Purpose
+
+Foo is a small synthetic component used only to exercise per-file size checks.
+
+## Scope
+
+- In scope: nothing beyond this fixture.
+- Out of scope: everything else.
+
+## Definitions
+
+None.
+
+## Behavior
+
+See `requirements/`.
+
+## Interfaces
+
+See `interface/`.
+
+## Data
+
+See `interface/data/`.
+
+## Acceptance criteria
+
+See `acceptance/`.
+
+## Non-functional constraints
+
+See `constraints.md`.
+
+## Open questions
+
+## Change log
+
+- Initial fixture.
+"""
+
+CONSTRAINTS_MD = """# Constraints
+
+- None for this fixture.
+"""
+
+GLOSSARY_MD = """# Glossary
+
+- **Fixture term** — a term used only by this synthetic fixture.
+"""
 
 
-def _write(path: Path, text: str) -> None:
+def _long_requirement_text():
+    header = "# R-FOO-001\n\n**R-FOO-001** — The component MUST do the long thing."
+    filler_lines = []
+    words = []
+    for i in range(600):
+        words.append("filler")
+        if len(words) == 12:
+            filler_lines.append(" ".join(words))
+            words = []
+    if words:
+        filler_lines.append(" ".join(words))
+    return header + "\n\n" + "\n".join(filler_lines) + "\n"
+
+
+SHORT_REQUIREMENT = """# R-FOO-002
+
+**R-FOO-002** — The component MUST do the short thing, briefly.
+"""
+
+AC_001 = """# AC-FOO-001
+
+Covers: R-FOO-001
+Kind: generated-test
+
+```gherkin
+Given a thing
+When it runs
+Then the long thing happens
+```
+"""
+
+AC_002 = """# AC-FOO-002
+
+Covers: R-FOO-002
+Kind: generated-test
+
+```gherkin
+Given a thing
+When it runs
+Then the short thing happens
+```
+"""
+
+
+def _write(path: Path, text: str):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
 
 
 def _build_fixture(repo_root: Path):
-    comp_dir = repo_root / "specs" / "components" / "widget"
-
-    _write(
-        repo_root / "specs" / "glossary.md",
-        "# Glossary\n\n- **Widget** — a small synthetic test fixture term.\n",
-    )
-
-    _write(
-        comp_dir / "component.md",
-        "---\n"
-        "id: comp-widget\n"
-        "title: Widget\n"
-        "status: draft\n"
-        "owners: [alice]\n"
-        "sealed: true\n"
-        "source_path: legacy/widget\n"
-        "---\n"
-        "\n"
-        "# Widget\n"
-        "\n"
-        "## Purpose\n"
-        "\n"
-        "Matches existing behavior; do not regenerate.\n"
-        "\n"
-        "## Scope\n"
-        "\n"
-        "- In scope: the widget.\n"
-        "- Out of scope: everything else.\n"
-        "\n"
-        "## Definitions\n"
-        "\n"
-        "None.\n"
-        "\n"
-        "## Behavior\n"
-        "\n"
-        "See `requirements/`.\n"
-        "\n"
-        "## Interfaces\n"
-        "\n"
-        "See `interface/`.\n"
-        "\n"
-        "## Data\n"
-        "\n"
-        "See `interface/data/`.\n"
-        "\n"
-        "## Acceptance criteria\n"
-        "\n"
-        "See `acceptance/`.\n"
-        "\n"
-        "## Non-functional constraints\n"
-        "\n"
-        "See `constraints.md`.\n"
-        "\n"
-        "## Open questions\n"
-        "\n"
-        "## Change log\n"
-        "\n"
-        "- Initial.\n",
-    )
-
-    filler_words = ["alpha", "bravo", "charlie", "delta", "echo", "foxtrot"]
-    filler = " ".join(filler_words[i % len(filler_words)] for i in range(600))
-    long_text = (
-        "# R-WIDGET-001\n\n"
-        "**R-WIDGET-001** — The widget MUST behave as described: "
-        + filler
-        + "\n"
-    )
-    long_path = comp_dir / "requirements" / "R-WIDGET-001.md"
-    _write(long_path, long_text)
-
-    short_text = (
-        "# R-WIDGET-002\n\n"
-        "**R-WIDGET-002** — The widget MUST remain small and simple.\n"
-    )
-    short_path = comp_dir / "requirements" / "R-WIDGET-002.md"
-    _write(short_path, short_text)
-
-    for n in ("001", "002"):
-        _write(
-            comp_dir / "acceptance" / f"AC-WIDGET-{n}.md",
-            f"# AC-WIDGET-{n}\n\n"
-            f"Covers: R-WIDGET-{n}\n"
-            "Kind: compiled\n\n"
-            "```gherkin\n"
-            "Given a widget\n"
-            "When it runs\n"
-            "Then it works\n"
-            "```\n",
-        )
-
-    _write(
-        comp_dir / "constraints.md",
-        "# Constraints\n\n- None beyond existing behavior.\n",
-    )
-
-    long_count = len(long_text.split())
-    short_count = len(short_text.split())
-
-    total_words = 0
-    for p in comp_dir.rglob("*.md"):
-        text = p.read_text(encoding="utf-8")
-        total_words += len(text.split())
-
-    return long_path, long_count, short_path, short_count, total_words
+    comp = repo_root / "specs" / "components" / "foo"
+    _write(repo_root / "specs" / "glossary.md", GLOSSARY_MD)
+    _write(comp / "component.md", COMPONENT_MD)
+    _write(comp / "constraints.md", CONSTRAINTS_MD)
+    long_text = _long_requirement_text()
+    _write(comp / "requirements" / "R-FOO-001.md", long_text)
+    _write(comp / "requirements" / "R-FOO-002.md", SHORT_REQUIREMENT)
+    _write(comp / "acceptance" / "AC-FOO-001.md", AC_001)
+    _write(comp / "acceptance" / "AC-FOO-002.md", AC_002)
+    return long_text
 
 
-def test_ac_size_003_per_file_word_count_isolated_from_aggregate(tmp_path):
+def test_ac_size_003_per_file_word_count(tmp_path):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
+    long_text = _build_fixture(repo_root)
 
-    long_path, long_count, short_path, short_count, total_words = _build_fixture(
-        repo_root
-    )
-
-    # Fixture preconditions per the criterion.
+    long_count = len(long_text.split())
+    short_count = len(SHORT_REQUIREMENT.split())
     assert long_count > 500
     assert short_count < 250
-    assert total_words < 4000
 
-    long_rel = long_path.relative_to(repo_root).as_posix()
-    short_rel = short_path.relative_to(repo_root).as_posix()
+    # Sanity: the component's whole-docs total stays well under 4000 (and 2000).
+    comp_dir = repo_root / "specs" / "components" / "foo"
+    total = 0
+    for p in comp_dir.rglob("*.md"):
+        text = p.read_text(encoding="utf-8")
+        if text.startswith("---"):
+            lines = text.splitlines()
+            for idx in range(1, len(lines)):
+                if lines[idx].strip() == "---":
+                    text = "\n".join(lines[idx + 1:])
+                    break
+        total += len(text.split())
+    assert total < 2000
 
     findings = size_checker.check(repo_root)
     assert isinstance(findings, list)
 
-    size3 = [f for f in findings if _field(f, "rule_id") == "R-SIZE-003"]
+    long_rel = "specs/components/foo/requirements/R-FOO-001.md"
+    short_rel = "specs/components/foo/requirements/R-FOO-002.md"
 
-    long_findings = [f for f in size3 if _norm(_field(f, "file")) == long_rel]
-    assert long_findings, (
-        f"expected an R-SIZE-003 finding for {long_rel}, got findings: {findings!r}"
-    )
-    matching = [
-        f
-        for f in long_findings
-        if _field(f, "severity") == "fail"
-        and str(long_count) in str(_field(f, "message") or "")
-    ]
-    assert matching, (
-        f"expected a fail-severity R-SIZE-003 finding for {long_rel} naming its "
-        f"word count {long_count}, got: {long_findings!r}"
-    )
-    for f in matching:
-        assert isinstance(_field(f, "line"), int)
+    def norm(f):
+        return str(field(f, "file")).replace("\\", "/")
 
-    short_findings = [f for f in size3 if _norm(_field(f, "file")) == short_rel]
-    assert short_findings == [], (
-        f"expected no R-SIZE-003 finding for {short_rel}, got: {short_findings!r}"
-    )
+    size3 = [f for f in findings if field(f, "rule_id") == "R-SIZE-003"]
 
-    size1 = [f for f in findings if _field(f, "rule_id") == "R-SIZE-001"]
-    assert size1 == [], (
-        f"expected R-SIZE-001's component_doc_words check not to fire, got: {size1!r}"
+    long_findings = [f for f in size3 if norm(f) == long_rel]
+    assert long_findings, f"expected an R-SIZE-003 finding for {long_rel}, got {findings!r}"
+    fail_findings = [f for f in long_findings if field(f, "severity") == "fail"]
+    assert fail_findings, f"expected fail severity, got {long_findings!r}"
+    assert any(str(long_count) in str(field(f, "message")) for f in fail_findings), (
+        f"expected message naming word count {long_count}, got {fail_findings!r}"
     )
+    for f in fail_findings:
+        assert isinstance(field(f, "line"), int)
+
+    short_findings = [f for f in size3 if norm(f) == short_rel]
+    assert short_findings == [], f"unexpected R-SIZE-003 finding for short file: {short_findings!r}"
+
+    size1 = [f for f in findings if field(f, "rule_id") == "R-SIZE-001"]
+    assert size1 == [], f"R-SIZE-001 must not fire: {size1!r}"
