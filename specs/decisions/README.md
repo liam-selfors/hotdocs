@@ -55,6 +55,15 @@ except decisions still informally recorded in `notes/initial-ideas.md`
 rather than as their own files, if any ever exist going forward the
 same way the pre-formalization era once did.
 
+## Landing a decision
+
+`last_ratified_commit` names the commit that landed the record, which
+cannot be known while that commit is being written. So a decision lands
+in two commits: the first carries the ratified record, with
+`last_ratified_commit: PENDING-COMMIT`, together with the spec change it
+explains; the second replaces the placeholder with the first commit's
+short hash and changes nothing else.
+
 ## The one sanctioned exception to immutability
 
 Once ratified, a decision record's body is immutable — a change in

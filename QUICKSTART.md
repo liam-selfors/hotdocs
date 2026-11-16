@@ -86,6 +86,19 @@ Run `hotdocs lint` after every change. The most useful habit: state concrete
 inputs and outputs in each acceptance criterion, and name every function the
 code must provide. What you leave implicit, the model guesses.
 
+Two rules matter most, because the model that writes the code never sees
+the acceptance criteria, and the model that writes each criterion's test
+sees only that criterion, its covered requirement and the interface:
+
+- every behavior a criterion checks must also be stated in a requirement;
+- every fact a test needs (a value, a file layout, an error) must be in the
+  criterion, its requirement or the interface.
+
+A component's docs are capped at 4,000 words and each file at 500.
+`AUTHORING.md` covers all of this in depth: criterion kinds, writing
+testable criteria, shared rules in `specs/architecture/`, decision
+records, and when to split a component.
+
 ## 5. Reading a failure
 
 `hotdocs generate` ends with `blocked` and a reason. `model_call_error` means
