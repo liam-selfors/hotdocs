@@ -1,22 +1,31 @@
+"""AC-GEN-004 (Covers: R-GEN-004).
+
+Given the same SpecBundle and two different model identifiers
+When generate is called once with each
+Then the mock model recorded for each call receives the model identifier
+  passed to that call, not a hardcoded default
+"""
+
+import generator
+
 import dataclasses
+import hashlib
+import importlib.util
 import json
 import re
-import uuid
+import sys
+from collections.abc import Mapping
 from pathlib import Path
 
 import pytest
 
-import generator
+
+def field(value, name):
+    return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def _field(value, name):
-    if isinstance(value, dict):
-        return value.get(name)
-    return getattr(value, name, None)
-
-
-@dataclasses.dataclass
-class _SpecBundle:
+@dataclasses.dataclass(eq=False)
+class _FallbackSpecBundle(Mapping):
     component_id: str
     spec_bundle_hash: str
     spec: str
@@ -29,208 +38,78 @@ class _SpecBundle:
     glossary: str = ""
     hint_code: object = None
 
-    def _names(self):
-        return [f.name for f in dataclasses.fields(self)]
-
     def __getitem__(self, key):
-        if key in self._names():
-            return getattr(self, key)
-        raise KeyError(key)
-
-    def get(self, key, default=None):
-        if key in self._names():
-            return getattr(self, key)
-        return default
-
-    def keys(self):
-        return list(self._names())
-
-    def items(self):
-        return [(k, getattr(self, k)) for k in self._names()]
-
-    def values(self):
-        return [getattr(self, k) for k in self._names()]
-
-    def __contains__(self, key):
-        return key in self._names()
+        names = [f.name for f in dataclasses.fields(self)]
+        if key not in names:
+            raise KeyError(key)
+        return getattr(self, key)
 
     def __iter__(self):
-        return iter(self._names())
+        return iter([f.name for f in dataclasses.fields(self)])
 
     def __len__(self):
-        return len(self._names())
+        return len(dataclasses.fields(self))
 
 
-_FAKE_CACHE_MANAGER = '''
-import dataclasses
-import datetime
-
-
-class SchemaValidationError(ValueError):
-    pass
-
-
-@dataclasses.dataclass
-class CacheKey:
-    spec_bundle_hash: str
-    gate_inputs_hash: str
-    gate_version: str
-    model_pin: str
-
-
-@dataclasses.dataclass
-class CachedResult:
-    gate_type: str
-    payload: dict
-    stored_at: str
-
-
-class Miss:
-    def __eq__(self, other):
-        return isinstance(other, Miss)
-
-    def __hash__(self):
-        return hash("Miss")
-
-    def __repr__(self):
-        return "Miss()"
-
-
-_REQUIRED = {
-    "generator": ["component_id", "model", "prompt_version", "files"],
-    "compiler": ["outputs", "gate_version", "summary"],
-    "generated_test": ["component_id", "criterion_id", "model", "file"],
-    "llm_judge": ["result", "rationale"],
-    "license_scanner": ["component_id", "gate_version", "similarity_score", "blocked", "matches"],
-    "secret_scanner": ["scope", "gate_version", "flagged", "matches"],
-}
-
-
-def _get(obj, name):
-    if isinstance(obj, dict):
-        return obj.get(name)
-    return getattr(obj, name, None)
-
-
-def get(cache_key, *, repo_root=None):
-    return Miss()
-
-
-def put(cache_key, result, *, repo_root=None):
-    gate_version = _get(cache_key, "gate_version") or ""
-    key_gate_type = gate_version.split("@", 1)[0]
-    gate_type = _get(result, "gate_type")
-    if gate_type not in _REQUIRED or gate_type != key_gate_type:
-        raise SchemaValidationError("gate type mismatch")
-    payload = _get(result, "payload")
-    if not isinstance(payload, dict):
-        raise SchemaValidationError("payload must be a mapping")
-    for k in _REQUIRED[gate_type]:
-        if k not in payload:
-            raise SchemaValidationError("missing payload key: " + k)
-    return None
-
-
-def now_iso():
-    return datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-
-
-def stats(*, repo_root=None):
-    return {"entry_count": 0}
-
-
-def main(argv=None):
-    print('{"result": "miss"}')
-    return 0
-'''
-
-
-_COMPONENT_MD = """---
-id: comp-foo
-title: Foo
-status: draft
-owners: [team-a]
-sealed: false
-depends_on: []
----
-
-# Foo
-
-## Purpose
-
-Foo doubles a number.
-"""
-
-
-def _write_fixture(repo_root: Path):
-    (repo_root / "specs").mkdir(parents=True, exist_ok=True)
-    (repo_root / "specs" / "glossary.md").write_text(
-        "# Glossary\n\n- **Foo** — a test term.\n", encoding="utf-8"
-    )
-    comp = repo_root / "specs" / "components" / "foo"
-    (comp / "requirements").mkdir(parents=True, exist_ok=True)
-    (comp / "acceptance").mkdir(parents=True, exist_ok=True)
-    (comp / "interface").mkdir(parents=True, exist_ok=True)
-    (comp / "component.md").write_text(_COMPONENT_MD, encoding="utf-8")
-    (comp / "requirements" / "R-FOO-001.md").write_text(
-        "# R-FOO-001\n\n**R-FOO-001** — `foo(x)` MUST return `2 * x`.\n",
-        encoding="utf-8",
-    )
-    (comp / "acceptance" / "AC-FOO-001.md").write_text(
-        "# AC-FOO-001\n\nCovers: R-FOO-001\nKind: generated-test\n\n"
-        "```gherkin\nGiven x = 2\nWhen foo(x) is called\nThen it returns 4\n```\n",
-        encoding="utf-8",
-    )
-    (comp / "interface" / "library.md").write_text(
-        "# Library\n\n```\nfoo(x: int) -> int\n```\n", encoding="utf-8"
-    )
-    (comp / "constraints.md").write_text("# Constraints\n\nNone.\n", encoding="utf-8")
-
-    fake_cache_dir = repo_root / "gen" / "cache-manager"
-    fake_cache_dir.mkdir(parents=True, exist_ok=True)
-    (fake_cache_dir / "cache_manager.py").write_text(_FAKE_CACHE_MANAGER, encoding="utf-8")
+def _load_real_spec_bundle_class():
+    """Try to use spec-bundle-assembler's own SpecBundle; fall back otherwise."""
+    try:
+        here = Path(generator.__file__).resolve()
+        gen = next(p for p in here.parents if p.name == "gen")
+        base = gen / "spec-bundle-assembler"
+        flat = base / "spec_bundle_assembler.py"
+        pkg = base / "spec_bundle_assembler" / "__init__.py"
+        path = flat if flat.is_file() else pkg
+        if not path.is_file():
+            return None
+        module_name = "_ac_gen_004_spec_bundle_assembler"
+        spec = importlib.util.spec_from_file_location(module_name, path)
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[module_name] = module
+        spec.loader.exec_module(module)
+        return getattr(module, "SpecBundle", None)
+    except Exception:
+        return None
 
 
 def _make_bundle():
-    return _SpecBundle(
+    kwargs = dict(
         component_id="comp-foo",
-        spec_bundle_hash="sha256:" + ("ab" * 32),
-        spec="# Foo\n\n## Purpose\n\nFoo doubles a number.\n\n# R-FOO-001\n\n"
-        "**R-FOO-001** — `foo(x)` MUST return `2 * x`.",
+        spec_bundle_hash="sha256:" + hashlib.sha256(b"ac-gen-004-bundle").hexdigest(),
+        spec="# Foo\n\n## Purpose\n\nFoo doubles a number.\n\n"
+        "# R-FOO-001\n\n**R-FOO-001** \u2014 `foo(x)` MUST return `2 * x`.",
         interface="# Library\n\n```\nfoo(x: int) -> int\n```",
-        constraints="# Constraints\n\nNone.",
+        constraints="None.",
         dependency_interfaces={},
         dependency_context={},
         dependency_usage={},
         vars={},
-        glossary="# Glossary\n\n- **Foo** — a test term.",
+        glossary="# Glossary\n\n- **Foo** \u2014 a test term.",
         hint_code=None,
     )
+    cls = _load_real_spec_bundle_class()
+    if cls is not None:
+        try:
+            return cls(**kwargs)
+        except Exception:
+            pass
+    return _FallbackSpecBundle(**kwargs)
 
 
 def _make_backend(log_path: Path):
     def backend(prompt, model, **params):
         with open(log_path, "a", encoding="utf-8") as fh:
             fh.write(json.dumps({"model": model}) + "\n")
-        text_prompt = prompt if isinstance(prompt, str) else str(prompt)
-        candidates = re.findall(r"BEGIN FILE ([0-9a-f]{32})", text_prompt)
-        if not candidates:
-            candidates = re.findall(
-                r"(?<![0-9a-fA-F])[0-9a-f]{32}(?![0-9a-fA-F])", text_prompt
-            )
-        nonces = []
-        for n in candidates:
-            if n not in nonces:
-                nonces.append(n)
-        blocks = "".join(
-            "-----BEGIN FILE {n}: foo.py-----\n"
+        nonce = re.search(r"-----BEGIN FILE ([0-9a-f]{32}):", prompt).group(1)
+        text = (
+            f"-----BEGIN FILE {nonce}: foo.py-----\n"
             "def foo(x):\n"
             "    return 2 * x\n"
-            "-----END FILE {n}-----\n".format(n=n)
-            for n in nonces
+            f"-----END FILE {nonce}-----\n"
+            f"-----END REPLY {nonce}-----\n"
         )
         return {
-            "text": "Here is the implementation.\n" + blocks,
+            "text": text,
             "model": model,
             "backend": "mock",
             "model_call_error": None,
@@ -239,31 +118,17 @@ def _make_backend(log_path: Path):
     return backend
 
 
-def _read_models(log_path: Path):
-    if not log_path.is_file():
-        return []
-    models = []
-    for line in log_path.read_text(encoding="utf-8").splitlines():
-        line = line.strip()
-        if line:
-            models.append(json.loads(line)["model"])
-    return models
-
-
-def test_ac_gen_004_model_identifier_passed_through_unchanged(tmp_path, monkeypatch):
+def test_model_identifier_passed_through_to_mock_model(tmp_path, monkeypatch):
+    monkeypatch.delenv("VAR_CACHE_STORE_URL", raising=False)
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
-    _write_fixture(repo_root)
-
-    monkeypatch.chdir(repo_root)
-    monkeypatch.delenv("VAR_HOTDOCS_CONFIG", raising=False)
-    monkeypatch.delenv("VAR_CACHE_STORE_URL", raising=False)
+    workdir = tmp_path / "cwd"
+    workdir.mkdir()
+    monkeypatch.chdir(workdir)
 
     bundle = _make_bundle()
-
-    suffix = uuid.uuid4().hex[:8]
-    model_a = "mock-model-alpha-" + suffix
-    model_b = "mock-model-beta-" + suffix
+    model_a = "mock-model-alpha-ac-gen-004"
+    model_b = "mock-model-beta-ac-gen-004"
     assert model_a != model_b
 
     log_a = tmp_path / "calls_a.jsonl"
@@ -276,21 +141,21 @@ def test_ac_gen_004_model_identifier_passed_through_unchanged(tmp_path, monkeypa
         bundle, model_b, repo_root=repo_root, llm_backend=_make_backend(log_b)
     )
 
-    models_a = _read_models(log_a)
-    models_b = _read_models(log_b)
+    assert log_a.is_file(), "mock model was never called for the first generate"
+    assert log_b.is_file(), "mock model was never called for the second generate"
 
-    assert models_a, "mock model was never called for the first generate() call"
-    assert models_b, "mock model was never called for the second generate() call"
+    calls_a = [json.loads(line) for line in log_a.read_text().splitlines() if line.strip()]
+    calls_b = [json.loads(line) for line in log_b.read_text().splitlines() if line.strip()]
 
-    assert all(m == model_a for m in models_a), (
-        "first call's mock model received %r, expected %r" % (models_a, model_a)
-    )
-    assert all(m == model_b for m in models_b), (
-        "second call's mock model received %r, expected %r" % (models_b, model_b)
-    )
+    assert len(calls_a) == 1
+    assert len(calls_b) == 1
+    assert calls_a[0]["model"] == model_a
+    assert calls_b[0]["model"] == model_b
 
-    assert model_b not in models_a
-    assert model_a not in models_b
-
-    assert _field(result_a, "model") == model_a
-    assert _field(result_b, "model") == model_b
+    # Each call's result reflects the model it was given, not a default.
+    assert field(result_a, "model") == model_a
+    assert field(result_b, "model") == model_b
+    assert field(result_a, "model_call_error") is None
+    assert field(result_b, "model_call_error") is None
+    assert field(result_a, "cache_hit") is False
+    assert field(result_b, "cache_hit") is False

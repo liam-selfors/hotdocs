@@ -1,68 +1,65 @@
+"""AC-GEN-009 (covers R-GEN-009): sealed components and pinned overrides are
+refused as a precondition, before any model call is attempted.
+
+Given a component marked sealed: true with a source_path, and a second
+component with a gen/<component>/.overrides.json listing one pinned file,
+when generate is invoked for either component with a mock model that records
+whether it was ever called, then the mock model is never called and the
+GenerationResult has files empty, model_call_error null, and refused set to a
+reason string naming which exemption applied.
+"""
+
+import generator
+
+import dataclasses
 import hashlib
 import json
-import os
 import re
-from dataclasses import dataclass, field, fields
 from pathlib import Path
 
 import pytest
-
-import generator
 
 
 MODEL = "claude-sonnet-5"
 
 
-@dataclass
-class _FakeSpecBundle:
+def field(value, name):
+    return value[name] if isinstance(value, dict) else getattr(value, name)
+
+
+@dataclasses.dataclass
+class FakeSpecBundle:
+    """A SpecBundle-shaped dataclass (fields in the documented order) that
+    also reads as a read-only mapping, as SpecBundle does."""
+
     component_id: str
     spec_bundle_hash: str
     spec: str
     interface: str
     constraints: str
-    dependency_interfaces: dict = field(default_factory=dict)
-    dependency_context: dict = field(default_factory=dict)
-    dependency_usage: dict = field(default_factory=dict)
-    vars: dict = field(default_factory=dict)
+    dependency_interfaces: dict = dataclasses.field(default_factory=dict)
+    dependency_context: dict = dataclasses.field(default_factory=dict)
+    dependency_usage: dict = dataclasses.field(default_factory=dict)
+    vars: dict = dataclasses.field(default_factory=dict)
     glossary: str = ""
-    hint_code: object = None
-
-    def _names(self):
-        return [f.name for f in fields(self)]
+    hint_code: dict = None
 
     def __getitem__(self, key):
-        if key not in self._names():
+        if key not in {f.name for f in dataclasses.fields(self)}:
             raise KeyError(key)
         return getattr(self, key)
 
     def get(self, key, default=None):
-        if key in self._names():
-            return getattr(self, key)
-        return default
+        try:
+            return self[key]
+        except KeyError:
+            return default
 
     def keys(self):
-        return list(self._names())
-
-    def items(self):
-        return [(k, getattr(self, k)) for k in self._names()]
-
-    def values(self):
-        return [getattr(self, k) for k in self._names()]
+        return [f.name for f in dataclasses.fields(self)]
 
     def __contains__(self, key):
-        return key in self._names()
-
-    def __iter__(self):
-        return iter(self._names())
-
-    def __len__(self):
-        return len(self._names())
-
-
-def _field(value, name):
-    if isinstance(value, dict):
-        return value.get(name)
-    return getattr(value, name, None)
+        return key in self.keys()
 
 
 def _write(path: Path, text: str) -> None:
@@ -70,121 +67,41 @@ def _write(path: Path, text: str) -> None:
     path.write_text(text, encoding="utf-8")
 
 
-GLOSSARY = "# Glossary\n\n- **Foo** — a test term.\n"
-
-FOO_COMPONENT_MD = (
-    "---\n"
-    "id: comp-foo\n"
-    "title: Foo\n"
-    "status: draft\n"
-    "owners: [team-a]\n"
-    "sealed: true\n"
-    "source_path: legacy/foo/\n"
-    "depends_on: []\n"
-    "---\n"
-    "\n"
-    "# Foo\n"
-    "\n"
-    "## Purpose\n"
-    "\n"
-    "Foo doubles a number.\n"
-)
-
-BAR_COMPONENT_MD = (
-    "---\n"
-    "id: comp-bar\n"
-    "title: Bar\n"
-    "status: draft\n"
-    "owners: [team-a]\n"
-    "sealed: false\n"
-    "depends_on: []\n"
-    "---\n"
-    "\n"
-    "# Bar\n"
-    "\n"
-    "## Purpose\n"
-    "\n"
-    "Bar triples a number.\n"
-)
-
-LEGACY_FOO_SOURCE = "def foo(x):\n    return 2 * x\n"
-PINNED_BAR_SOURCE = "def bar(x):\n    # hand-pinned\n    return 3 * x\n"
-
-
-def _build_corpus(repo_root: Path) -> None:
-    _write(repo_root / "specs" / "glossary.md", GLOSSARY)
-
-    foo = repo_root / "specs" / "components" / "foo"
-    _write(foo / "component.md", FOO_COMPONENT_MD)
-    _write(
-        foo / "requirements" / "R-FOO-001.md",
-        "# R-FOO-001\n\n**R-FOO-001** — `foo(x)` MUST return `2 * x`.\n",
+def _make_bundle(component_id: str, slug: str) -> FakeSpecBundle:
+    spec = (
+        f"# {slug.title()}\n\n## Purpose\n\n{slug.title()} doubles a number.\n\n"
+        f"# R-{slug.upper()}-001\n\n"
+        f"**R-{slug.upper()}-001** — `{slug}(x)` MUST return `2 * x`."
     )
-    _write(
-        foo / "acceptance" / "AC-FOO-001.md",
-        "# AC-FOO-001\n\nCovers: R-FOO-001\nKind: generated-test\n\n"
-        "```gherkin\nGiven x = 2\nWhen foo(x) is called\nThen it returns 4\n```\n",
-    )
-    _write(foo / "interface" / "library.md", "# Library\n\n```\nfoo(x: int) -> int\n```\n")
-    _write(foo / "constraints.md", "# Constraints\n\nNone.\n")
-    _write(repo_root / "legacy" / "foo" / "foo.py", LEGACY_FOO_SOURCE)
-
-    bar = repo_root / "specs" / "components" / "bar"
-    _write(bar / "component.md", BAR_COMPONENT_MD)
-    _write(
-        bar / "requirements" / "R-BAR-001.md",
-        "# R-BAR-001\n\n**R-BAR-001** — `bar(x)` MUST return `3 * x`.\n",
-    )
-    _write(
-        bar / "acceptance" / "AC-BAR-001.md",
-        "# AC-BAR-001\n\nCovers: R-BAR-001\nKind: generated-test\n\n"
-        "```gherkin\nGiven x = 2\nWhen bar(x) is called\nThen it returns 6\n```\n",
-    )
-    _write(bar / "interface" / "library.md", "# Library\n\n```\nbar(x: int) -> int\n```\n")
-    _write(bar / "constraints.md", "# Constraints\n\nNone.\n")
-
-    # The pinned override: one file listed in gen/bar/.overrides.json.
-    _write(repo_root / "gen" / "bar" / "bar.py", PINNED_BAR_SOURCE)
-    _write(
-        repo_root / "gen" / "bar" / ".overrides.json",
-        json.dumps({"pinned": ["bar.py"], "files": ["bar.py"]}, indent=2) + "\n",
-    )
-
-
-def _bundle_for(component_id: str, repo_root: Path) -> _FakeSpecBundle:
-    slug = component_id[len("comp-"):]
-    base = repo_root / "specs" / "components" / slug
-    component_body = (base / "component.md").read_text(encoding="utf-8").split("---\n", 2)[2].strip()
-    reqs = "\n\n".join(
-        p.read_text(encoding="utf-8").strip()
-        for p in sorted((base / "requirements").glob("*.md"))
-    )
-    interface = (base / "interface" / "library.md").read_text(encoding="utf-8").strip()
-    constraints = (base / "constraints.md").read_text(encoding="utf-8").strip()
-    digest = hashlib.sha256(
-        (component_id + component_body + reqs + interface + constraints).encode("utf-8")
-    ).hexdigest()
-    return _FakeSpecBundle(
+    interface = f"# Library\n\n```\n{slug}(x: int) -> int\n```"
+    constraints = "# Constraints\n\nNone."
+    digest = hashlib.sha256((spec + interface + constraints).encode("utf-8")).hexdigest()
+    return FakeSpecBundle(
         component_id=component_id,
         spec_bundle_hash="sha256:" + digest,
-        spec=component_body + "\n\n" + reqs,
+        spec=spec,
         interface=interface,
         constraints=constraints,
-        glossary=GLOSSARY.strip(),
+        glossary="# Glossary\n\n- **Foo** — a test term.",
         hint_code=None,
     )
 
 
-def _make_recording_backend(log_path: Path, component_slug: str):
+def _make_mock_backend(log_path: Path):
+    """A mock llm_backend matching llm-endpoint's backend shape:
+    backend(prompt, model, **params) -> ModelResponse. It appends a record
+    to a file the test controls every time it is invoked."""
+
     def backend(prompt, model, **params):
         with open(log_path, "a", encoding="utf-8") as fh:
             fh.write(json.dumps({"called": True, "model": model}) + "\n")
-        m = re.search(r"[0-9a-f]{32}", prompt or "")
-        nonce = m.group(0) if m else "0" * 32
+        match = re.search(r"-----BEGIN FILE ([0-9a-f]{32}):", prompt or "")
+        nonce = match.group(1) if match else "0" * 32
         text = (
-            f"-----BEGIN FILE {nonce}: {component_slug}.py-----\n"
-            "def clobbered():\n    return 'clobbered'\n"
+            f"-----BEGIN FILE {nonce}: foo.py-----\n"
+            "def foo(x):\n    return 2 * x\n"
             f"-----END FILE {nonce}-----\n"
+            f"-----END REPLY {nonce}-----\n"
         )
         return {
             "text": text,
@@ -196,101 +113,139 @@ def _make_recording_backend(log_path: Path, component_slug: str):
     return backend
 
 
-def _snapshot(directory: Path) -> dict:
-    if not directory.exists():
-        return {}
-    return {
-        str(p.relative_to(directory)): p.read_bytes()
-        for p in sorted(directory.rglob("*"))
-        if p.is_file()
-    }
+def _calls(log_path: Path) -> int:
+    if not log_path.exists():
+        return 0
+    return len([l for l in log_path.read_text(encoding="utf-8").splitlines() if l.strip()])
 
 
-@pytest.mark.parametrize(
-    "component_id, exemption",
-    [
-        ("comp-foo", "sealed"),
-        ("comp-bar", "pinned"),
-    ],
-)
-def test_ac_gen_009_refuses_before_any_model_call(tmp_path, monkeypatch, component_id, exemption):
+@pytest.fixture
+def repo(tmp_path, monkeypatch):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
-    _build_corpus(repo_root)
-
-    workdir = tmp_path / "cwd"
-    workdir.mkdir()
-    monkeypatch.chdir(workdir)
     monkeypatch.delenv("VAR_CACHE_STORE_URL", raising=False)
+    # Keep any stray side effects (e.g. call logs) inside the temp dir.
+    monkeypatch.chdir(tmp_path)
 
-    log_path = tmp_path / "model_calls.log"
-    slug = component_id[len("comp-"):]
-    backend = _make_recording_backend(log_path, slug)
+    _write(repo_root / "specs" / "glossary.md", "# Glossary\n\n- **Foo** — a test term.\n")
 
-    legacy_before = _snapshot(repo_root / "legacy")
-    gen_before = _snapshot(repo_root / "gen" / slug)
+    # Component 1: sealed, with a source_path holding its real code.
+    _write(
+        repo_root / "specs" / "components" / "foo" / "component.md",
+        "---\n"
+        "id: comp-foo\n"
+        "title: Foo\n"
+        "status: draft\n"
+        "owners: [team-a]\n"
+        "sealed: true\n"
+        "source_path: legacy/foo/\n"
+        "depends_on: []\n"
+        "---\n"
+        "\n"
+        "# Foo\n"
+        "\n"
+        "## Purpose\n"
+        "\n"
+        "Foo doubles a number.\n",
+    )
+    _write(repo_root / "legacy" / "foo" / "foo.py", "def foo(x):\n    return x + x\n")
 
-    bundle = _bundle_for(component_id, repo_root)
-    result = generator.generate(
-        bundle, MODEL, None, repo_root=repo_root, llm_backend=backend
+    # Component 2: not sealed, but with one pinned file in .overrides.json.
+    _write(
+        repo_root / "specs" / "components" / "bar" / "component.md",
+        "---\n"
+        "id: comp-bar\n"
+        "title: Bar\n"
+        "status: draft\n"
+        "owners: [team-a]\n"
+        "sealed: false\n"
+        "depends_on: []\n"
+        "---\n"
+        "\n"
+        "# Bar\n"
+        "\n"
+        "## Purpose\n"
+        "\n"
+        "Bar doubles a number.\n",
+    )
+    _write(repo_root / "gen" / "bar" / "bar.py", "# hand-pinned\ndef bar(x):\n    return 2 * x\n")
+    # The overrides file lists exactly one pinned file, bar.py.
+    _write(
+        repo_root / "gen" / "bar" / ".overrides.json",
+        json.dumps({"pinned": ["bar.py"]}, indent=2) + "\n",
+    )
+    return repo_root
+
+
+def _assert_refused(result, log_path, expected_keywords):
+    assert _calls(log_path) == 0, "mock model was called despite a write exemption"
+
+    files = field(result, "files")
+    assert files == {} or not files
+    assert files is not None and len(files) == 0
+
+    assert field(result, "model_call_error") is None
+
+    refused = field(result, "refused")
+    assert isinstance(refused, str) and refused.strip(), "refused must be a reason string"
+    lowered = refused.lower()
+    assert any(k in lowered for k in expected_keywords), (
+        f"refused reason {refused!r} does not name the exemption ({expected_keywords})"
+    )
+    assert field(result, "cache_hit") is False
+    return refused
+
+
+def test_sealed_component_is_refused_without_model_call(repo, tmp_path):
+    log_path = tmp_path / "sealed_calls.log"
+    backend = _make_mock_backend(log_path)
+    bundle = _make_bundle("comp-foo", "foo")
+    legacy_before = (repo / "legacy" / "foo" / "foo.py").read_text(encoding="utf-8")
+
+    result = generator.generate(bundle, MODEL, repo_root=repo, llm_backend=backend)
+
+    refused = _assert_refused(result, log_path, ["sealed"])
+    assert refused == "sealed-component"
+    assert field(result, "component_id") == "comp-foo"
+
+    # Nothing was written to the sealed component's source_path or gen/.
+    assert (repo / "legacy" / "foo" / "foo.py").read_text(encoding="utf-8") == legacy_before
+    assert sorted(p.name for p in (repo / "legacy" / "foo").iterdir()) == ["foo.py"]
+    assert not (repo / "gen" / "foo").exists() or not any((repo / "gen" / "foo").iterdir())
+
+
+def test_pinned_override_is_refused_without_model_call(repo, tmp_path):
+    log_path = tmp_path / "pinned_calls.log"
+    backend = _make_mock_backend(log_path)
+    bundle = _make_bundle("comp-bar", "bar")
+    pinned_before = (repo / "gen" / "bar" / "bar.py").read_text(encoding="utf-8")
+
+    result = generator.generate(bundle, MODEL, repo_root=repo, llm_backend=backend)
+
+    refused = _assert_refused(result, log_path, ["pinned", "override"])
+    assert refused == "pinned-override"
+    assert field(result, "component_id") == "comp-bar"
+
+    # The pinned file was not clobbered.
+    assert (repo / "gen" / "bar" / "bar.py").read_text(encoding="utf-8") == pinned_before
+
+
+def test_reasons_distinguish_the_two_exemptions(repo, tmp_path):
+    log_path = tmp_path / "both_calls.log"
+    backend = _make_mock_backend(log_path)
+
+    sealed = generator.generate(
+        _make_bundle("comp-foo", "foo"), MODEL, repo_root=repo, llm_backend=backend
+    )
+    pinned = generator.generate(
+        _make_bundle("comp-bar", "bar"), MODEL, repo_root=repo, llm_backend=backend
     )
 
-    # The mock model was never called.
-    assert not log_path.exists() or log_path.read_text(encoding="utf-8").strip() == "", (
-        "model backend was invoked despite a cold-regen exemption"
+    assert _calls(log_path) == 0
+    assert field(sealed, "refused") != field(pinned, "refused")
+    assert field(sealed, "refused") == generator.check_write_allowed(
+        _make_bundle("comp-foo", "foo"), repo_root=repo
     )
-
-    # files empty, model_call_error null, refused set to a reason string.
-    files = _field(result, "files")
-    assert not files, f"expected no files, got {files!r}"
-    assert _field(result, "model_call_error") is None
-    refused = _field(result, "refused")
-    assert isinstance(refused, str) and refused.strip(), f"expected refusal reason, got {refused!r}"
-    assert not _field(result, "cache_hit")
-
-    reason = refused.lower()
-    if exemption == "sealed":
-        assert "seal" in reason, f"sealed refusal reason does not name the exemption: {refused!r}"
-    else:
-        assert "pin" in reason or "override" in reason, (
-            f"pinned-override refusal reason does not name the exemption: {refused!r}"
-        )
-        assert "seal" not in reason, f"pinned-override refusal misnamed as sealed: {refused!r}"
-
-    # Nothing hands-off was clobbered.
-    assert _snapshot(repo_root / "legacy") == legacy_before
-    assert _snapshot(repo_root / "gen" / slug) == gen_before
-    assert (repo_root / "legacy" / "foo" / "foo.py").read_text(encoding="utf-8") == LEGACY_FOO_SOURCE
-    assert (repo_root / "gen" / "bar" / "bar.py").read_text(encoding="utf-8") == PINNED_BAR_SOURCE
-
-
-def test_ac_gen_009_refusal_reasons_are_distinct(tmp_path, monkeypatch):
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    _build_corpus(repo_root)
-
-    workdir = tmp_path / "cwd"
-    workdir.mkdir()
-    monkeypatch.chdir(workdir)
-    monkeypatch.delenv("VAR_CACHE_STORE_URL", raising=False)
-
-    log_path = tmp_path / "model_calls.log"
-
-    reasons = {}
-    for component_id in ("comp-foo", "comp-bar"):
-        slug = component_id[len("comp-"):]
-        result = generator.generate(
-            _bundle_for(component_id, repo_root),
-            MODEL,
-            None,
-            repo_root=repo_root,
-            llm_backend=_make_recording_backend(log_path, slug),
-        )
-        reasons[component_id] = _field(result, "refused")
-
-    assert not log_path.exists() or log_path.read_text(encoding="utf-8").strip() == ""
-    assert isinstance(reasons["comp-foo"], str) and reasons["comp-foo"]
-    assert isinstance(reasons["comp-bar"], str) and reasons["comp-bar"]
-    assert reasons["comp-foo"] != reasons["comp-bar"], (
-        f"both exemptions reported the same reason: {reasons!r}"
+    assert field(pinned, "refused") == generator.check_write_allowed(
+        _make_bundle("comp-bar", "bar"), repo_root=repo
     )

@@ -1,96 +1,34 @@
-"""AC-GEN-013 (covers R-GEN-012).
+"""AC-GEN-013 (Covers: R-GEN-012).
 
 Given a cold-mode SpecBundle, retry_feedback=["R-FOO-003"], and a mock
 model that records what it was sent, when generate is called, then the
-mock model's recorded input contains retry_feedback as a distinctly
-labeled section containing only "R-FOO-003" (no Gherkin text, rationale,
-or expected/actual values anywhere in the prompt), and the resulting
-GenerationResult's retry_feedback field echoes ["R-FOO-003"].
+mock's recorded input contains retry_feedback as a distinctly labeled
+section containing only "R-FOO-003" (no Gherkin text, rationale, or
+expected/actual values anywhere in the prompt), and the resulting
+GenerationResult's retry_feedback echoes ["R-FOO-003"].
 """
 
+import generator
+
 import dataclasses
-import difflib
 import hashlib
+import json
 import re
+from collections.abc import Mapping
 from pathlib import Path
 
 import pytest
 
-import generator
 
-
-MODEL = "claude-sonnet-5"
-
-FOO_CODE = "def foo(x):\n    return 2 * x\n"
-
-GHERKIN_SENTINEL = "ZQXGHERKINSENTINEL7731"
-RATIONALE_SENTINEL = "ZQXRATIONALESENTINEL4410"
-EXPECTED_SENTINEL = "ZQXEXPECTEDSENTINEL9921"
-ACTUAL_SENTINEL = "ZQXACTUALSENTINEL5502"
-
-COMPONENT_MD = (
-    "---\n"
-    "id: comp-foo\n"
-    "title: Foo\n"
-    "status: draft\n"
-    "owners: [team-a]\n"
-    "sealed: false\n"
-    "depends_on: []\n"
-    "---\n"
-    "\n"
-    "# Foo\n"
-    "\n"
-    "## Purpose\n"
-    "\n"
-    "Foo doubles a number.\n"
-)
-
-REQ_001 = "# R-FOO-001\n\n**R-FOO-001** \u2014 `foo(x)` MUST return `2 * x`.\n"
-REQ_003 = "# R-FOO-003\n\n**R-FOO-003** \u2014 `foo(0)` MUST return `0`.\n"
-
-AC_001 = (
-    "# AC-FOO-001\n"
-    "\n"
-    "Covers: R-FOO-001\n"
-    "Kind: generated-test\n"
-    "\n"
-    "```gherkin\n"
-    "Given x = 2\n"
-    "When foo(x) is called\n"
-    "Then it returns 4\n"
-    "```\n"
-)
-
-AC_003 = (
-    "# AC-FOO-003\n"
-    "\n"
-    "Covers: R-FOO-003\n"
-    "Kind: generated-test\n"
-    "\n"
-    "```gherkin\n"
-    f"Given x = 0 {GHERKIN_SENTINEL}\n"
-    "When foo(x) is called\n"
-    f"Then it returns 0 {GHERKIN_SENTINEL}\n"
-    "```\n"
-)
-
-INTERFACE_MD = "# Library\n\n```\nfoo(x: int) -> int\n```\n"
-CONSTRAINTS_MD = "# Constraints\n\nNone.\n"
-GLOSSARY_MD = "# Glossary\n\n- **Foo** \u2014 a test term.\n"
-
-PRIOR_FAILURE_REPORT = (
-    "{\n"
-    '  "criterion_id": "AC-FOO-003",\n'
-    '  "covers": "R-FOO-003",\n'
-    f'  "rationale": "{RATIONALE_SENTINEL}",\n'
-    f'  "expected": "{EXPECTED_SENTINEL}",\n'
-    f'  "actual": "{ACTUAL_SENTINEL}"\n'
-    "}\n"
-)
+def field(value, name):
+    return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
 @dataclasses.dataclass
-class FakeSpecBundle:
+class FakeSpecBundle(Mapping):
+    """Mirrors SpecBundle's documented fields, in order, readable both by
+    attribute and as a read-only mapping."""
+
     component_id: str
     spec_bundle_hash: str
     spec: str
@@ -103,30 +41,10 @@ class FakeSpecBundle:
     glossary: str = ""
     hint_code: object = None
 
-    def _names(self):
-        return [f.name for f in dataclasses.fields(self)]
-
     def __getitem__(self, key):
         if key not in self._names():
             raise KeyError(key)
         return getattr(self, key)
-
-    def get(self, key, default=None):
-        if key in self._names():
-            return getattr(self, key)
-        return default
-
-    def keys(self):
-        return list(self._names())
-
-    def values(self):
-        return [getattr(self, n) for n in self._names()]
-
-    def items(self):
-        return [(n, getattr(self, n)) for n in self._names()]
-
-    def __contains__(self, key):
-        return key in self._names()
 
     def __iter__(self):
         return iter(self._names())
@@ -134,80 +52,81 @@ class FakeSpecBundle:
     def __len__(self):
         return len(self._names())
 
-
-def _field(value, name):
-    if isinstance(value, dict):
-        return value.get(name)
-    return getattr(value, name, None)
+    def _names(self):
+        return [f.name for f in dataclasses.fields(self)]
 
 
-def _write(path: Path, content: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(content, encoding="utf-8")
+# Acceptance-only sentinels: they live on disk under the fixture's
+# acceptance/ directory, never in the bundle, and must never reach the model.
+GHERKIN_SENTINEL = "Given zorblax quantity = 777"
+WHEN_SENTINEL = "When frobnicate_quux(zorblax) is called"
+THEN_SENTINEL = "Then it returns 9931"
+RATIONALE_SENTINEL = "rationale: plinth-vortex-rationale-5521"
+EXPECTED_SENTINEL = "expected 9931 but got 1554"
+
+SENTINELS = [
+    GHERKIN_SENTINEL,
+    WHEN_SENTINEL,
+    THEN_SENTINEL,
+    RATIONALE_SENTINEL,
+    EXPECTED_SENTINEL,
+    "9931",
+    "1554",
+    "zorblax",
+    "plinth-vortex",
+]
+
+R_ID_RE = re.compile(r"R-[A-Z0-9]+-\d+")
 
 
-def _make_repo(repo: Path) -> Path:
-    repo.mkdir(parents=True, exist_ok=True)
-    _write(repo / "specs" / "glossary.md", GLOSSARY_MD)
-    comp = repo / "specs" / "components" / "foo"
-    _write(comp / "component.md", COMPONENT_MD)
-    _write(comp / "requirements" / "R-FOO-001.md", REQ_001)
-    _write(comp / "requirements" / "R-FOO-003.md", REQ_003)
-    _write(comp / "acceptance" / "AC-FOO-001.md", AC_001)
-    _write(comp / "acceptance" / "AC-FOO-003.md", AC_003)
-    _write(comp / "interface" / "library.md", INTERFACE_MD)
-    _write(comp / "constraints.md", CONSTRAINTS_MD)
-    # Prior-attempt failure details that must never reach the model.
-    _write(repo / "verification" / "foo" / "prior_failure.json", PRIOR_FAILURE_REPORT)
-    return repo
-
-
-def _make_bundle() -> FakeSpecBundle:
-    body = (
-        "# Foo\n\n## Purpose\n\nFoo doubles a number."
+def _make_bundle():
+    spec = (
+        "# Foo\n\n## Purpose\n\nFoo doubles a number.\n\n"
+        "# R-FOO-001\n\n**R-FOO-001** — `foo(x)` MUST return `2 * x`."
     )
-    spec = "\n\n".join(
-        [body.strip(), REQ_001.strip(), REQ_003.strip()]
-    )
-    digest = hashlib.sha256(
-        (spec + INTERFACE_MD + CONSTRAINTS_MD + GLOSSARY_MD).encode("utf-8")
-    ).hexdigest()
+    digest = hashlib.sha256(spec.encode("utf-8")).hexdigest()
     return FakeSpecBundle(
         component_id="comp-foo",
         spec_bundle_hash="sha256:" + digest,
         spec=spec,
-        interface=INTERFACE_MD.strip(),
-        constraints=CONSTRAINTS_MD.strip(),
-        dependency_interfaces={},
-        dependency_context={},
-        dependency_usage={},
-        vars={},
-        glossary=GLOSSARY_MD.strip(),
+        interface="# Library\n\n```\nfoo(x: int) -> int\n```",
+        constraints="# Constraints\n\nNone.",
+        glossary="# Glossary\n\n- **Foo** — a test term.",
         hint_code=None,
     )
 
 
-def _make_backend(record):
+def _write_acceptance_decoy(repo_root: Path):
+    acc_dir = repo_root / "specs" / "components" / "foo" / "acceptance"
+    acc_dir.mkdir(parents=True, exist_ok=True)
+    (acc_dir / "AC-FOO-003.md").write_text(
+        "# AC-FOO-003\n\n"
+        "Covers: R-FOO-003\n"
+        "Kind: generated-test\n\n"
+        "```gherkin\n"
+        f"{GHERKIN_SENTINEL}\n"
+        f"{WHEN_SENTINEL}\n"
+        f"{THEN_SENTINEL}\n"
+        "```\n\n"
+        f"{RATIONALE_SENTINEL}\n"
+        f"{EXPECTED_SENTINEL}\n",
+        encoding="utf-8",
+    )
+
+
+def _make_backend(log_path: Path):
     def backend(prompt, model, **params):
-        record.append(prompt)
-        text_prompt = prompt if isinstance(prompt, str) else str(prompt)
-        nonces = re.findall(r"BEGIN FILE\s+([0-9a-f]{32})", text_prompt)
-        if not nonces:
-            nonces = re.findall(
-                r"(?<![0-9A-Fa-f])[0-9a-f]{32}(?![0-9A-Fa-f])", text_prompt
-            )
-        unique = []
-        for n in nonces:
-            if n not in unique:
-                unique.append(n)
-        blocks = []
-        for n in unique:
-            blocks.append(
-                f"-----BEGIN FILE {n}: foo.py-----\n"
-                f"{FOO_CODE}"
-                f"-----END FILE {n}-----\n"
-            )
-        text = "".join(blocks) if blocks else "no nonce found in prompt"
+        with open(log_path, "a", encoding="utf-8") as fh:
+            fh.write(json.dumps({"prompt": prompt, "model": model}) + "\n")
+        m = re.search(r"-----BEGIN FILE ([0-9a-f]{32}):", prompt)
+        nonce = m.group(1) if m else "0" * 32
+        text = (
+            f"-----BEGIN FILE {nonce}: foo.py-----\n"
+            "def foo(x):\n"
+            "    return 2 * x\n"
+            f"-----END FILE {nonce}-----\n"
+            f"-----END REPLY {nonce}-----\n"
+        )
         return {
             "text": text,
             "model": model,
@@ -218,118 +137,86 @@ def _make_backend(record):
     return backend
 
 
-def _normalize(prompt: str) -> str:
-    return re.sub(r"(?<![0-9A-Fa-f])[0-9a-f]{32}(?![0-9A-Fa-f])", "<NONCE>", prompt)
+def _read_log(log_path: Path):
+    if not log_path.exists():
+        return []
+    return [
+        json.loads(line)
+        for line in log_path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
 
 
-def _inserted_text(base: str, new: str) -> str:
-    base_tokens = re.findall(r"\S+", base)
-    new_tokens = re.findall(r"\S+", new)
-    matcher = difflib.SequenceMatcher(None, base_tokens, new_tokens, autojunk=False)
-    parts = []
-    for tag, _i1, _i2, j1, j2 in matcher.get_opcodes():
-        if tag in ("insert", "replace"):
-            parts.append(" ".join(new_tokens[j1:j2]))
-    return "\n".join(parts)
-
-
-@pytest.fixture
-def isolated_env(tmp_path, monkeypatch):
+def test_retry_feedback_is_distinct_bare_rid_section_and_echoed(tmp_path, monkeypatch):
     monkeypatch.delenv("VAR_CACHE_STORE_URL", raising=False)
-    monkeypatch.delenv("VAR_HOTDOCS_CONFIG", raising=False)
-    workdir = tmp_path / "cwd"
-    workdir.mkdir()
-    monkeypatch.chdir(workdir)
-    return tmp_path
 
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    _write_acceptance_decoy(repo_root)
 
-def test_retry_feedback_is_distinct_rid_only_section_and_echoed(isolated_env):
-    tmp_path = isolated_env
+    work = tmp_path / "work"
+    work.mkdir()
+    monkeypatch.chdir(work)
+
+    log_path = tmp_path / "model_calls.jsonl"
+    backend = _make_backend(log_path)
     bundle = _make_bundle()
+    assert bundle.hint_code is None  # cold mode
 
-    # Call under test: retry_feedback supplied.
-    repo_retry = _make_repo(tmp_path / "repo_retry")
-    retry_record = []
     result = generator.generate(
         bundle,
-        MODEL,
+        "claude-sonnet-5",
         retry_feedback=["R-FOO-003"],
-        repo_root=repo_retry,
-        llm_backend=_make_backend(retry_record),
+        repo_root=repo_root,
+        llm_backend=backend,
     )
 
-    assert retry_record, (
-        "the mock model was never called; refused="
-        f"{_field(result, 'refused')!r}, model_call_error="
-        f"{_field(result, 'model_call_error')!r}"
-    )
-    retry_prompt = retry_record[0]
-    assert isinstance(retry_prompt, str)
+    # The mock model was actually called, once.
+    calls = _read_log(log_path)
+    assert len(calls) == 1, f"expected exactly one model call, got {len(calls)}"
+    prompt = calls[0]["prompt"]
+    assert isinstance(prompt, str) and prompt
 
-    # The result echoes retry_feedback exactly.
-    echoed = _field(result, "retry_feedback")
-    assert echoed is not None
-    assert list(echoed) == ["R-FOO-003"]
+    # The retry_feedback section, as generate itself renders it.
+    sections_with = generator.render_prompt_sections(bundle, ["R-FOO-003"])
+    sections_without = generator.render_prompt_sections(bundle, None)
+    assert len(sections_with) == len(sections_without) + 1
+    fb_title, fb_text = sections_with[-1]
+    other_titles = [t for t, _ in sections_without]
+    other_titles_with = [t for t, _ in sections_with[:-1]]
+    assert other_titles_with == other_titles
 
-    # The failed R-id reaches the model.
-    assert "R-FOO-003" in retry_prompt
+    # Distinctly labeled: its own title, unlike every bundle-derived section.
+    assert fb_title and fb_title.strip()
+    assert fb_title not in other_titles
+    assert fb_title in prompt
 
-    # No acceptance-criterion content anywhere in the prompt.
-    for sentinel in (
-        GHERKIN_SENTINEL,
-        RATIONALE_SENTINEL,
-        EXPECTED_SENTINEL,
-        ACTUAL_SENTINEL,
-    ):
-        assert sentinel not in retry_prompt, sentinel
-    assert "```gherkin" not in retry_prompt
-    assert "Covers: R-FOO-003" not in retry_prompt
-    assert "Covers: R-FOO-001" not in retry_prompt
-    assert "When foo(x) is called" not in retry_prompt
-    assert "Then it returns" not in retry_prompt
+    # Contains only the R-id "R-FOO-003".
+    assert "R-FOO-003" in fb_text
+    assert set(R_ID_RE.findall(fb_text)) == {"R-FOO-003"}
+    assert "MUST return" not in fb_text
+    for s in SENTINELS:
+        assert s not in fb_text
 
-    # Baseline: same bundle, no retry_feedback, to isolate the section the
-    # retry_feedback added to the prompt.
-    repo_base = _make_repo(tmp_path / "repo_base")
-    base_record = []
-    base_result = generator.generate(
-        bundle,
-        MODEL,
-        retry_feedback=None,
-        repo_root=repo_base,
-        llm_backend=_make_backend(base_record),
-    )
-    assert base_record, (
-        "the mock model was never called for the baseline; refused="
-        f"{_field(base_result, 'refused')!r}, model_call_error="
-        f"{_field(base_result, 'model_call_error')!r}"
-    )
-    base_prompt = base_record[0]
-    assert isinstance(base_prompt, str)
-    assert _field(base_result, "retry_feedback") is None
+    # Not merged into any bundle-derived section.
+    for _, text in sections_with[:-1]:
+        assert "R-FOO-003" not in text
 
-    added = _inserted_text(_normalize(base_prompt), _normalize(retry_prompt))
+    # The section reaches the model verbatim, and R-FOO-003 appears in the
+    # prompt only within that section.
+    assert fb_text.strip() in prompt
+    assert "R-FOO-003" in prompt
+    remainder = prompt.replace(fb_text.strip(), "")
+    assert "R-FOO-003" not in remainder
 
-    # The added section carries the R-id ...
-    assert "R-FOO-003" in added, added
-    # ... and only that R-id ...
-    assert set(re.findall(r"R-[A-Z]+-\d+", added)) == {"R-FOO-003"}, added
-    # ... under its own label (text beyond the bare R-id) ...
-    label_text = added.replace("R-FOO-003", "")
-    assert re.search(r"[A-Za-z]{3,}", label_text), added
-    # ... never merged with the bundle's own field content.
-    for bundle_fragment in (
-        "doubles a number",
-        "MUST return",
-        "foo(x: int) -> int",
-        "a test term",
-    ):
-        assert bundle_fragment not in added, (bundle_fragment, added)
-    # ... and carries no acceptance content either.
-    for sentinel in (
-        GHERKIN_SENTINEL,
-        RATIONALE_SENTINEL,
-        EXPECTED_SENTINEL,
-        ACTUAL_SENTINEL,
-    ):
-        assert sentinel not in added, sentinel
+    # No Gherkin text, rationale, or expected/actual values anywhere.
+    for s in SENTINELS:
+        assert s not in prompt, f"acceptance content leaked into prompt: {s!r}"
+    assert "```gherkin" not in prompt
+
+    # The result echoes retry_feedback.
+    assert field(result, "retry_feedback") == ["R-FOO-003"]
+    assert field(result, "model_call_error") is None
+    assert field(result, "refused") is None
+    assert field(result, "cache_hit") is False
+    assert field(result, "files")

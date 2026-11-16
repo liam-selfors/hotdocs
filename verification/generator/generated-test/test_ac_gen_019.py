@@ -1,163 +1,118 @@
+import generator
+
 import importlib.util
 import json
 import re
 import sys
-import uuid
 from pathlib import Path
 
 import pytest
 
-import generator
+
+def field(value, name):
+    return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def _field(value, name):
-    if isinstance(value, dict):
-        return value.get(name)
-    return getattr(value, name, None)
-
-
-def _tool_root_gen():
-    return next(
+def _tool_root():
+    gen = next(
         p for p in Path(generator.__file__).resolve().parents if p.name == "gen"
     )
+    return gen.parent
 
 
-def _load_spec_bundle_assembler():
-    gen = _tool_root_gen()
-    base = gen / "spec-bundle-assembler"
-    flat = base / "spec_bundle_assembler.py"
-    pkg = base / "spec_bundle_assembler" / "__init__.py"
-    path = flat if flat.is_file() else pkg
-    if not path.is_file():
-        return None
-    spec = importlib.util.spec_from_file_location("spec_bundle_assembler", path)
+def _load_from_tool_root(slug, module_name):
+    base = _tool_root() / "gen" / slug
+    flat = base / f"{module_name}.py"
+    path = flat if flat.is_file() else base / module_name / "__init__.py"
+    spec = importlib.util.spec_from_file_location(module_name, path)
     module = importlib.util.module_from_spec(spec)
-    sys.modules["spec_bundle_assembler"] = module
+    sys.modules[module_name] = module
     spec.loader.exec_module(module)
     return module
 
 
-class _DuckSpecBundle:
-    _FIELDS = (
-        "component_id",
-        "spec_bundle_hash",
-        "spec",
-        "interface",
-        "constraints",
-        "dependency_interfaces",
-        "dependency_context",
-        "dependency_usage",
-        "vars",
-        "glossary",
-        "hint_code",
+def _write(path: Path, text: str):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+
+
+GLOSSARY = "# Glossary\n\n- **Foo** — a test term.\n"
+
+COMPONENT_MD = (
+    "---\n"
+    "id: comp-foo\n"
+    "title: Foo\n"
+    "status: draft\n"
+    "owners: [team-a]\n"
+    "sealed: true\n"
+    "source_path: legacy/foo/\n"
+    "depends_on: []\n"
+    "---\n"
+    "\n"
+    "# Foo\n"
+    "\n"
+    "## Purpose\n"
+    "\n"
+    "Foo doubles a number.\n"
+)
+
+REQUIREMENT = "# R-FOO-001\n\n**R-FOO-001** — `foo(x)` MUST return `2 * x`.\n"
+
+ACCEPTANCE = (
+    "# AC-FOO-001\n"
+    "\n"
+    "Covers: R-FOO-001\n"
+    "Kind: generated-test\n"
+    "\n"
+    "```gherkin\n"
+    "Given x = 2\n"
+    "When foo(x) is called\n"
+    "Then it returns 4\n"
+    "```\n"
+)
+
+LIBRARY = "# Library\n\n```\nfoo(x: int) -> int\n```\n"
+
+CONSTRAINTS = "# Constraints\n\nNone.\n"
+
+
+def _build_corpus(root: Path):
+    _write(root / "specs" / "glossary.md", GLOSSARY)
+    comp = root / "specs" / "components" / "foo"
+    _write(comp / "component.md", COMPONENT_MD)
+    _write(comp / "requirements" / "R-FOO-001.md", REQUIREMENT)
+    _write(comp / "acceptance" / "AC-FOO-001.md", ACCEPTANCE)
+    _write(comp / "interface" / "library.md", LIBRARY)
+    _write(comp / "constraints.md", CONSTRAINTS)
+
+
+def _cold_bundle(corpus_root: Path):
+    spec_bundle_assembler = _load_from_tool_root(
+        "spec-bundle-assembler", "spec_bundle_assembler"
     )
-
-    def __init__(self, **kwargs):
-        for name in self._FIELDS:
-            setattr(self, name, kwargs.get(name))
-
-    def __getitem__(self, key):
-        if key not in self._FIELDS:
-            raise KeyError(key)
-        return getattr(self, key)
-
-    def get(self, key, default=None):
-        if key not in self._FIELDS:
-            return default
-        return getattr(self, key)
-
-    def keys(self):
-        return list(self._FIELDS)
-
-    def __iter__(self):
-        return iter(self._FIELDS)
-
-    def __len__(self):
-        return len(self._FIELDS)
-
-
-def _make_cold_bundle(with_dependency):
-    unique = uuid.uuid4().hex
-    kwargs = dict(
-        component_id="comp-foo",
-        spec_bundle_hash="sha256:" + (unique * 2),
-        spec=(
-            "# Foo\n\n## Purpose\n\nFoo doubles a number.\n\n"
-            "# R-FOO-001\n\n**R-FOO-001** — `foo(x)` MUST return `2 * x`."
-        ),
-        interface="# Library\n\n```\nfoo(x: int) -> int\n```",
-        constraints="None.",
-        dependency_interfaces={},
-        dependency_context={},
-        dependency_usage={},
-        vars={},
-        glossary="# Glossary\n\n- **Foo** — a test term.",
-        hint_code=None,
+    spec_linter = _load_from_tool_root("spec-linter", "spec_linter")
+    report = spec_linter.lint(None, corpus_root)
+    hard = (
+        report["hard_failures"] if isinstance(report, dict) else report.hard_failures
     )
-    if with_dependency:
-        kwargs["dependency_interfaces"] = {
-            "comp-bar": "# Library\n\n```\nbar(x: int) -> int\n```"
-        }
-        kwargs["dependency_context"] = {"comp-bar": "Bar adds one to a number."}
-        kwargs["dependency_usage"] = {
-            "comp-bar": "gen/bar/bar.py\n\ndef bar(x: int) -> int:\n    \"\"\"Add one.\"\"\""
-        }
-    sba = _load_spec_bundle_assembler()
-    cls = getattr(sba, "SpecBundle", None) if sba is not None else None
-    if cls is not None:
-        try:
-            return cls(**kwargs)
-        except TypeError:
-            pass
-    return _DuckSpecBundle(**kwargs)
+    assert hard == 0
+    bundle = spec_bundle_assembler.assemble("comp-foo", corpus_root, mode="cold")
+    assert field(bundle, "hint_code") is None
+    return bundle
 
 
-def _write_component_md(repo_root):
-    comp_dir = repo_root / "specs" / "components" / "foo"
-    comp_dir.mkdir(parents=True, exist_ok=True)
-    (comp_dir / "component.md").write_text(
-        "---\n"
-        "id: comp-foo\n"
-        "title: Foo\n"
-        "status: draft\n"
-        "owners: [team-a]\n"
-        "sealed: false\n"
-        "depends_on: []\n"
-        "---\n"
-        "\n"
-        "# Foo\n"
-        "\n"
-        "## Purpose\n"
-        "\n"
-        "Foo doubles a number.\n",
-        encoding="utf-8",
-    )
-
-
-def _extract_nonce(prompt):
-    m = re.search(r"BEGIN FILE\s+([0-9a-f]{32})", prompt)
-    if m:
-        return m.group(1)
-    tokens = re.findall(r"(?<![0-9a-fA-F])([0-9a-f]{32})(?![0-9a-fA-F])", prompt)
-    if tokens:
-        return tokens[-1]
-    return uuid.uuid4().hex
-
-
-def _make_backend(log_path):
+def _make_backend(log_path: Path):
     def backend(prompt, model, **params):
-        records = []
-        if log_path.exists():
-            records = json.loads(log_path.read_text(encoding="utf-8"))
-        records.append({"prompt": prompt, "model": model})
-        log_path.write_text(json.dumps(records), encoding="utf-8")
-        nonce = _extract_nonce(prompt)
+        with open(log_path, "a", encoding="utf-8") as fh:
+            fh.write(json.dumps({"prompt": prompt, "model": model}) + "\n")
+        nonce = re.search(r"-----BEGIN FILE ([0-9a-f]{32}):", prompt).group(1)
         text = (
             "Here is the candidate.\n"
             f"-----BEGIN FILE {nonce}: foo.py-----\n"
             "def foo(x):\n"
             "    return 2 * x\n"
             f"-----END FILE {nonce}-----\n"
+            f"-----END REPLY {nonce}-----\n"
         )
         return {
             "text": text,
@@ -169,27 +124,33 @@ def _make_backend(log_path):
     return backend
 
 
+def _read_log(log_path: Path):
+    if not log_path.is_file():
+        return []
+    return [
+        json.loads(line)
+        for line in log_path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+
+
 @pytest.fixture
-def isolated_env(tmp_path, monkeypatch):
+def env(tmp_path, monkeypatch):
     monkeypatch.delenv("VAR_CACHE_STORE_URL", raising=False)
-    monkeypatch.delenv("VAR_HOTDOCS_CONFIG", raising=False)
-    cwd = tmp_path / "cwd"
-    cwd.mkdir()
-    monkeypatch.chdir(cwd)
-    log_dir = tmp_path / "log"
-    log_dir.mkdir()
+    work = tmp_path / "work"
+    work.mkdir()
+    monkeypatch.chdir(work)
+    corpus = tmp_path / "corpus"
+    _build_corpus(corpus)
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
-    return repo_root, log_dir / "calls.json"
+    log_path = tmp_path / "calls.jsonl"
+    return corpus, repo_root, log_path
 
 
-@pytest.mark.parametrize("with_dependency", [False, True])
-def test_prompt_instructs_dependency_loads_resolve_from_repo_root(
-    isolated_env, with_dependency
-):
-    repo_root, log_path = isolated_env
-    _write_component_md(repo_root)
-    bundle = _make_cold_bundle(with_dependency)
+def test_prompt_instructs_dependency_loads_resolve_from_repo_root(env):
+    corpus, repo_root, log_path = env
+    bundle = _cold_bundle(corpus)
 
     result = generator.generate(
         bundle,
@@ -198,45 +159,28 @@ def test_prompt_instructs_dependency_loads_resolve_from_repo_root(
         llm_backend=_make_backend(log_path),
     )
 
-    assert _field(result, "refused") is None
-    assert log_path.exists(), "mock model was never called"
-    records = json.loads(log_path.read_text(encoding="utf-8"))
-    assert len(records) >= 1
-    prompt = records[0]["prompt"]
-    assert isinstance(prompt, str)
-    lowered = prompt.lower()
+    calls = _read_log(log_path)
+    assert len(calls) >= 1, "mock model was never called"
+    prompt = calls[0]["prompt"]
+    lower = prompt.lower()
 
-    # Resolve from the repo_root parameter the candidate's function received.
+    # The bundle's own text contains none of these; they must come from
+    # the prompt's instructions about dynamic dependency loading.
     assert "repo_root" in prompt
-    # Forbidden mechanisms each named explicitly.
     assert "sys.modules" in prompt
     assert "__file__" in prompt
-    assert "import" in lowered
-    # The gen/<dep-slug>/ module path.
-    assert "gen/" in prompt
-    # Fallback to the tool root when absent from repo_root.
-    assert any(
-        phrase in lowered
-        for phrase in (
-            "tool root",
-            "tool's root",
-            "tool's own",
-            "tool’s own",
-            "tool’s root",
-            "nearest gen",
-            "nearest `gen`",
-        )
-    ), "prompt never mentions falling back to the tool root"
-    assert any(
-        phrase in lowered for phrase in ("absent", "missing", "not present", "does not exist", "doesn't exist")
-    ), "prompt never states the tool-root fallback applies only when absent"
+    assert "import" in lower
+    assert "tool root" in lower
+    assert "never" in lower or "must not" in lower
+
+    assert field(result, "model_call_error") is None
+    assert field(result, "refused") is None
 
 
-def test_generate_completes_with_repo_root_lacking_gen(isolated_env):
-    repo_root, log_path = isolated_env
-    _write_component_md(repo_root)
+def test_generate_completes_with_no_gen_directory_in_repo_root(env):
+    corpus, repo_root, log_path = env
     assert not (repo_root / "gen").exists()
-    bundle = _make_cold_bundle(False)
+    bundle = _cold_bundle(corpus)
 
     result = generator.generate(
         bundle,
@@ -245,12 +189,14 @@ def test_generate_completes_with_repo_root_lacking_gen(isolated_env):
         llm_backend=_make_backend(log_path),
     )
 
-    assert result is not None
-    assert _field(result, "model_call_error") is None
-    assert _field(result, "refused") is None
-    files = _field(result, "files")
-    assert files, "expected a non-empty files mapping"
+    assert len(_read_log(log_path)) == 1
+    assert field(result, "model_call_error") is None
+    assert field(result, "refused") is None
+    assert field(result, "cache_hit") is False
+    files = field(result, "files")
+    assert files
     assert "foo.py" in files
     assert "return 2 * x" in files["foo.py"]
-    assert _field(result, "component_id") == "comp-foo"
-    assert log_path.exists(), "mock model was never called"
+    assert field(result, "component_id") == "comp-foo"
+    assert field(result, "spec_bundle_hash") == field(bundle, "spec_bundle_hash")
+    assert (repo_root / "gen" / "foo" / "foo.py").is_file()

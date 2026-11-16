@@ -1,16 +1,4 @@
-"""Generator: one pinned-model call turning a SpecBundle into gen/<component>/.
-
-Single-shot by design (R-GEN-011): exactly one candidate per invocation, no
-internal retry loop. The cache is checked first (R-GEN-005); in ``cold`` mode
-a successful result is written to ``gen/<component>/`` and the cache
-(R-GEN-006); ``hint`` mode writes neither (R-GEN-016). A sealed component or a
-pinned ``.overrides.json`` is refused before any model call (R-GEN-009).
-
-Dependencies (``cache-manager``, ``llm-endpoint``) are loaded per call from the
-``repo_root`` actually passed in, falling back to the tool root only when the
-dependency's directory is absent there, and each loaded module is registered in
-``sys.modules`` before its code runs (R-GEN-014).
-"""
+"""Generator: one single-shot model call producing gen/<component>/ from a SpecBundle."""
 
 import hashlib
 import importlib.util
@@ -18,20 +6,37 @@ import json
 import re
 import sys
 import uuid
-from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Optional
 
-GATE_VERSION = "generator@2.0.0"
-PROMPT_VERSION = "v10"
+GATE_VERSION = "generator@3.0.0"
+PROMPT_VERSION = "v11"
 
-_FIVE = "-" * 5
+_GATE_TYPE = GATE_VERSION.split("@", 1)[0]
 
-# Frozen, versioned prompt template (R-GEN-003). Placeholders: version, slug,
-# module, component_id, begin_marker, end_marker, nonce.
+_RESULT_FIELDS = (
+    "component_id",
+    "spec_bundle_hash",
+    "model",
+    "prompt_version",
+    "cache_hit",
+    "files",
+    "model_call_error",
+    "refused",
+    "retry_feedback",
+    "mode",
+    "transcript_sha256",
+    "turns",
+    "tool_calls",
+    "isolation",
+)
+
+_SEALED_RE = re.compile(r"^sealed:\s*true\s*$", re.M)
+
 PROMPT_TEMPLATE = """You are generating the complete source for one component of a spec-driven pipeline, to be written under gen/{slug}/, from the spec bundle sections below.
 
-PROMPT_VERSION: {version}
+PROMPT_VERSION: {prompt_version}
 
 Rules:
 - Construct your answer from exactly the sections given below. Never invent or assume anything about this component's "real" prior implementation.
@@ -42,11 +47,13 @@ Rules:
 - Any value you read from a dependency call -- including the dependency function's own top-level return value, not only values nested within it -- MUST use dual dict-or-attribute access, never a bare `.attr` access alone. A dependency may legitimately return either a dict or an object.
 - Output only the files that belong under gen/{slug}/ -- no explanation, no commentary outside of file content itself.
 
-Reply format: wrap each file's content exactly as a line holding the begin marker below (with the file's path relative to gen/{slug}/ in place of the placeholder), then the complete, exact file content, then a line holding the end marker below. The nonce {nonce} is unique to this call; use it on every marker. Text outside the blocks is ignored.
+Reply format: wrap each file's content exactly as a line holding the begin marker below (with the file's path relative to gen/{slug}/ in place of the placeholder), then the complete, exact file content, then a line holding the end marker below. After the last file, end your reply with a line holding the end-of-reply marker below. The nonce {nonce} is unique to this call; use it on every marker. Text outside the blocks is ignored.
 
-{begin_marker}
+-----BEGIN FILE {nonce}: <path relative to gen/{slug}/>-----
 <the complete, exact file content, verbatim>
-{end_marker}
+-----END FILE {nonce}-----
+
+-----END REPLY {nonce}-----
 
 ## component_id
 {component_id}
@@ -55,21 +62,38 @@ Reply format: wrap each file's content exactly as a line holding the begin marke
 
 @dataclass
 class GenerationResult:
-    component_id: str
-    spec_bundle_hash: str
-    model: str
-    prompt_version: str
-    cache_hit: bool
-    files: dict
-    model_call_error: dict | None
-    refused: str | None
-    retry_feedback: list | None
+    component_id: str = ""
+    spec_bundle_hash: str = ""
+    model: str = ""
+    prompt_version: str = PROMPT_VERSION
+    cache_hit: bool = False
+    files: dict = field(default_factory=dict)
+    model_call_error: Optional[dict] = None
+    refused: Optional[str] = None
+    retry_feedback: Optional[list] = None
+    mode: str = "single"
+    transcript_sha256: Optional[str] = None
+    turns: int = 1
+    tool_calls: int = 0
+    isolation: Optional[str] = None
 
 
 def _field(obj, name, default=None):
-    if isinstance(obj, Mapping):
+    if isinstance(obj, dict):
         return obj.get(name, default)
     return getattr(obj, name, default)
+
+
+def _slug(component_id):
+    return component_id.removeprefix("comp-")
+
+
+def _module_name(component_id):
+    return _slug(component_id).replace("-", "_")
+
+
+def _root(repo_root):
+    return Path(repo_root or Path.cwd())
 
 
 def _tool_root():
@@ -77,19 +101,17 @@ def _tool_root():
     return next(p for p in here.parents if p.name == "gen").parent
 
 
-def _load_dependency(dep_slug, module_name, repo_root):
-    base = repo_root / "gen" / dep_slug
+def _load_dependency(module_name, dep_slug, root):
+    base = root / "gen" / dep_slug
     if not base.is_dir():
         base = _tool_root() / "gen" / dep_slug
     flat = base / f"{module_name}.py"
     if flat.is_file():
         spec = importlib.util.spec_from_file_location(module_name, flat)
     else:
-        package_dir = base / module_name
+        pkg = base / module_name
         spec = importlib.util.spec_from_file_location(
-            module_name,
-            package_dir / "__init__.py",
-            submodule_search_locations=[str(package_dir)],
+            module_name, pkg / "__init__.py", submodule_search_locations=[str(pkg)]
         )
     module = importlib.util.module_from_spec(spec)
     sys.modules[module_name] = module
@@ -97,185 +119,225 @@ def _load_dependency(dep_slug, module_name, repo_root):
     return module
 
 
-def _is_sealed(repo_root, slug):
-    path = repo_root / "specs" / "components" / slug / "component.md"
-    if not path.is_file():
-        return False
-    match = re.match(r"---\s*\n(.*?)\n---", path.read_text(encoding="utf-8"), re.S)
-    return bool(match and re.search(r"^sealed:\s*true\s*$", match.group(1), re.M | re.I))
-
-
-def _has_pinned_overrides(repo_root, slug):
-    path = repo_root / "gen" / slug / ".overrides.json"
-    if not path.is_file():
-        return False
-    return bool(json.loads(path.read_text(encoding="utf-8")))
-
-
-def _gate_inputs_hash(retry_feedback):
-    text = json.dumps(sorted(retry_feedback or []), sort_keys=True)
-    return "sha256:" + hashlib.sha256(text.encode("utf-8")).hexdigest()
-
-
-def _render_mapping(mapping):
-    return "\n\n".join(f"### {key}\n{mapping[key]}" for key in sorted(mapping)) or "(none)"
-
-
-def _build_prompt(bundle, slug, component_id, nonce, retry_feedback, hint_code):
-    module = slug.replace("-", "_")
-    begin_marker = f"{_FIVE}BEGIN FILE {nonce}: <path relative to gen/{slug}/>{_FIVE}"
-    end_marker = f"{_FIVE}END FILE {nonce}{_FIVE}"
-    parts = [
-        PROMPT_TEMPLATE.format(
-            version=PROMPT_VERSION,
-            slug=slug,
-            module=module,
-            component_id=component_id,
-            begin_marker=begin_marker,
-            end_marker=end_marker,
-            nonce=nonce,
-        ),
-        "## SPEC\n" + _field(bundle, "spec", ""),
-        "## INTERFACE\n" + _field(bundle, "interface", ""),
-        "## CONSTRAINTS\n" + _field(bundle, "constraints", ""),
-        "## DEPENDENCY INTERFACES\n" + _render_mapping(_field(bundle, "dependency_interfaces", {})),
-        "## DEPENDENCY CONTEXT\n" + _render_mapping(_field(bundle, "dependency_context", {})),
-        "## VARS\n" + _render_mapping(_field(bundle, "vars", {})),
-        "## GLOSSARY\n" + _field(bundle, "glossary", ""),
-    ]
-    usage = {k: v for k, v in _field(bundle, "dependency_usage", {}).items() if v}
-    if usage:
-        parts.append(
-            "## DEPENDENCY USAGE\n"
-            "Real, importable symbols from each dependency's actual current code -- "
-            "use these to call the dependency correctly. Distinct from DEPENDENCY "
-            "INTERFACES (the dependency's contract) and not acceptance-test content.\n\n"
-            + _render_mapping(usage)
-        )
-    if hint_code is not None:
-        files = "\n\n".join(
-            f"--- hint file: {path} ---\n{hint_code[path]}\n--- end hint file: {path} ---"
-            for path in sorted(hint_code)
-        )
-        parts.append(
-            "## HINT_CODE\n"
-            "Existing code -- a revision starting point only. It is NOT part of the "
-            "spec sections above; keep it distinct from them.\n\n" + files
-        )
-    if retry_feedback:
-        parts.append(
-            "## RETRY_FEEDBACK\n"
-            "A bare list of requirement ids a prior attempt failed to satisfy -- "
-            "nothing else. Pay particular attention to satisfying exactly these "
-            "requirements correctly.\n"
-            + "\n".join(f"- {rid}" for rid in retry_feedback)
-        )
-    return "\n\n".join(parts) + "\n"
-
-
-def _parse_files(text, nonce, slug):
-    pattern = re.compile(
-        "^"
-        + re.escape(f"{_FIVE}BEGIN FILE {nonce}: ")
-        + r"([^\n]+?)"
-        + re.escape(_FIVE)
-        + r"\n(.*?)^"
-        + re.escape(f"{_FIVE}END FILE {nonce}{_FIVE}"),
-        re.M | re.S,
+def _cache_key(cache_manager, spec_bundle_hash, retry_feedback, model):
+    digest = hashlib.sha256(
+        json.dumps(sorted(retry_feedback or []), sort_keys=True).encode("utf-8")
+    ).hexdigest()
+    return cache_manager.CacheKey(
+        spec_bundle_hash=spec_bundle_hash,
+        gate_inputs_hash="sha256:" + digest,
+        gate_version=GATE_VERSION,
+        model_pin=model,
     )
-    files = {}
-    for match in pattern.finditer(text):
-        files[_strip_component_prefix(match.group(1).strip(), slug)] = match.group(2)
-    return files
 
 
-def _strip_component_prefix(path, slug):
+def _strip_prefix(slug, path):
     for prefix in (f"gen/{slug}/", f"{slug}/"):
         if path.startswith(prefix):
             return path[len(prefix):]
     return path
 
 
-def _write_files(repo_root, slug, files):
-    gen_dir = repo_root / "gen" / slug
-    for rel_path, content in files.items():
-        target = gen_dir / rel_path
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_bytes(content.encode("utf-8"))
+def _join_entries(entries):
+    return "\n\n".join(f"### {name}\n{text}" for name, text in entries.items())
+
+
+def check_write_allowed(bundle, repo_root=None):
+    root = _root(repo_root)
+    slug = _slug(_field(bundle, "component_id"))
+    component_md = root / "specs" / "components" / slug / "component.md"
+    if component_md.is_file() and _SEALED_RE.search(
+        component_md.read_text(encoding="utf-8").split("\n---", 1)[0]
+    ):
+        return "sealed-component"
+    overrides = root / "gen" / slug / ".overrides.json"
+    if overrides.is_file() and json.loads(overrides.read_text(encoding="utf-8")):
+        return "pinned-override"
+    return None
+
+
+def render_prompt_sections(bundle, retry_feedback=None):
+    sections = [
+        ("SPEC", _field(bundle, "spec", "")),
+        ("INTERFACE", _field(bundle, "interface", "")),
+        ("CONSTRAINTS", _field(bundle, "constraints", "")),
+        ("DEPENDENCY INTERFACES", _join_entries(_field(bundle, "dependency_interfaces", {}))),
+        ("VARS", _join_entries(_field(bundle, "vars", {}))),
+        ("GLOSSARY", _field(bundle, "glossary", "")),
+    ]
+    usage = {
+        dep: text
+        for dep, text in _field(bundle, "dependency_usage", {}).items()
+        if text
+    }
+    if usage:
+        sections.append((
+            "DEPENDENCY USAGE (real, importable symbols from each dependency's actual "
+            "current code -- distinct from DEPENDENCY INTERFACES, not acceptance-test content)",
+            _join_entries(usage),
+        ))
+    hint_code = _field(bundle, "hint_code")
+    if hint_code is not None:
+        sections.append((
+            "HINT CODE (the component's existing gen/<component>/ files -- "
+            "context only, NOT part of the spec)",
+            _join_entries(hint_code),
+        ))
+    if retry_feedback:
+        sections.append((
+            "RETRY FEEDBACK (requirement ids a prior attempt failed to satisfy -- ids only)",
+            "\n".join(retry_feedback),
+        ))
+    return sections
+
+
+def write_files(component_id, files, repo_root=None):
+    slug = _slug(component_id)
+    target = _root(repo_root) / "gen" / slug
+    for rel, content in files.items():
+        path = target / _strip_prefix(slug, rel)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content, encoding="utf-8")
+
+
+def _render_prompt(bundle, retry_feedback, nonce):
+    component_id = _field(bundle, "component_id")
+    header = PROMPT_TEMPLATE.format(
+        slug=_slug(component_id),
+        module=_module_name(component_id),
+        prompt_version=PROMPT_VERSION,
+        nonce=nonce,
+        component_id=component_id,
+    )
+    body = "\n\n".join(
+        f"## {title}\n{text}" for title, text in render_prompt_sections(bundle, retry_feedback)
+    )
+    return header + "\n" + body + "\n"
+
+
+def _parse_reply(text, nonce, component_id):
+    """Return (files, model_call_error)."""
+    slug = _slug(component_id)
+    module = _module_name(component_id)
+    begin_re = re.compile(rf"^-----BEGIN FILE {nonce}: (.+)-----$")
+    end_file = f"-----END FILE {nonce}-----"
+    end_reply = f"-----END REPLY {nonce}-----"
+    files = {}
+    path = None
+    buf = []
+    saw_end_reply = False
+    for line in text.splitlines(keepends=True):
+        stripped = line.rstrip("\r\n")
+        if path is None:
+            match = begin_re.match(stripped)
+            if match:
+                path = match.group(1)
+                buf = []
+            elif stripped == end_reply:
+                saw_end_reply = True
+        elif stripped == end_file:
+            files[_strip_prefix(slug, path)] = "".join(buf)
+            path = None
+        else:
+            buf.append(line)
+    if not files and path is None:
+        return {}, {"category": "empty_response", "message": "the model reply contained no files"}
+    if path is not None:
+        return {}, {
+            "category": "truncated_response",
+            "message": f"no END FILE marker after the BEGIN FILE line for {path}",
+        }
+    if not saw_end_reply:
+        return {}, {
+            "category": "truncated_response",
+            "message": "the reply's end marker is missing (no END REPLY line)",
+        }
+    if f"{module}.py" not in files and f"{module}/__init__.py" not in files:
+        return {}, {
+            "category": "missing_module",
+            "message": f"the reply holds neither {module}.py nor {module}/__init__.py",
+        }
+    return files, None
+
+
+def _result(bundle, model, retry_feedback, hint, **values):
+    result = GenerationResult(
+        component_id=_field(bundle, "component_id"),
+        spec_bundle_hash=_field(bundle, "spec_bundle_hash"),
+        model=model,
+        prompt_version=PROMPT_VERSION,
+        retry_feedback=retry_feedback,
+        **values,
+    )
+    result._hint_mode = hint
+    return result
 
 
 def generate(bundle, model, retry_feedback=None, *, repo_root=None, llm_backend=None):
-    repo_root = Path.cwd() if repo_root is None else Path(repo_root)
+    root = _root(repo_root)
     component_id = _field(bundle, "component_id")
-    spec_bundle_hash = _field(bundle, "spec_bundle_hash")
-    hint_code = _field(bundle, "hint_code", None)
-    slug = component_id[len("comp-"):] if component_id.startswith("comp-") else component_id
+    hint = _field(bundle, "hint_code") is not None
 
-    def result(*, cache_hit=False, files=None, model_call_error=None, refused=None):
-        return GenerationResult(
-            component_id=component_id,
-            spec_bundle_hash=spec_bundle_hash,
-            model=model,
-            prompt_version=PROMPT_VERSION,
-            cache_hit=cache_hit,
-            files=files if files is not None else {},
-            model_call_error=model_call_error,
-            refused=refused,
-            retry_feedback=retry_feedback,
-        )
+    refused = check_write_allowed(bundle, root)
+    if refused:
+        return _result(bundle, model, retry_feedback, hint, refused=refused)
 
-    # R-GEN-009: precondition refusal, before any cache or model access.
-    if _is_sealed(repo_root, slug):
-        return result(refused="sealed-component")
-    if _has_pinned_overrides(repo_root, slug):
-        return result(refused="pinned-override")
+    cache_manager = _load_dependency("cache_manager", "cache-manager", root)
+    key = _cache_key(cache_manager, _field(bundle, "spec_bundle_hash"), retry_feedback, model)
+    hit = cache_manager.get(key, repo_root=root)
+    if not isinstance(hit, cache_manager.Miss):
+        files = dict(_field(_field(hit, "payload"), "files"))
+        if not hint:
+            write_files(component_id, files, root)
+        return _result(bundle, model, retry_feedback, hint, cache_hit=True, files=files)
 
-    cache_manager = _load_dependency("cache-manager", "cache_manager", repo_root)
-    key = cache_manager.CacheKey(
-        spec_bundle_hash=spec_bundle_hash,
-        gate_inputs_hash=_gate_inputs_hash(retry_feedback),
-        gate_version=GATE_VERSION,
-        model_pin=model,
-    )
-    cached = cache_manager.get(key, repo_root=repo_root)
-    if not isinstance(cached, cache_manager.Miss):
-        files = dict(_field(_field(cached, "payload", {}), "files", {}))
-        if hint_code is None:
-            _write_files(repo_root, slug, files)
-        return result(cache_hit=True, files=files)
-
+    llm_endpoint = _load_dependency("llm_endpoint", "llm-endpoint", root)
     nonce = uuid.uuid4().hex
-    prompt = _build_prompt(bundle, slug, component_id, nonce, retry_feedback, hint_code)
-    llm_endpoint = _load_dependency("llm-endpoint", "llm_endpoint", repo_root)
-    response = llm_endpoint.complete(prompt, model, backend=llm_backend)
-
+    response = llm_endpoint.complete(
+        _render_prompt(bundle, retry_feedback, nonce), model, backend=llm_backend
+    )
     error = _field(response, "model_call_error")
     if error:
-        return result(model_call_error=error)
-
-    files = _parse_files(_field(response, "text"), nonce, slug)
-    if not files:
-        return result(
+        return _result(
+            bundle, model, retry_feedback, hint,
             model_call_error={
-                "category": "empty_response",
-                "message": "model response contained no files",
-            }
+                "category": _field(error, "category"),
+                "message": _field(error, "message"),
+            },
         )
 
-    if hint_code is None:
-        _write_files(repo_root, slug, files)
-        cache_manager.put(
-            key,
-            cache_manager.CachedResult(
-                gate_type="generator",
-                payload={
-                    "component_id": component_id,
-                    "model": model,
-                    "prompt_version": PROMPT_VERSION,
-                    "files": files,
-                },
-                stored_at=cache_manager.now_iso(),
-            ),
-            repo_root=repo_root,
-        )
-    return result(files=files)
+    files, error = _parse_reply(_field(response, "text"), nonce, component_id)
+    if error:
+        return _result(bundle, model, retry_feedback, hint, model_call_error=error)
+
+    if not hint:
+        write_files(component_id, files, root)
+    return _result(bundle, model, retry_feedback, hint, files=files)
+
+
+def commit_cache(result, repo_root=None):
+    if (
+        not _field(result, "files")
+        or _field(result, "model_call_error")
+        or _field(result, "refused")
+        or _field(result, "_hint_mode", False)
+    ):
+        return
+    root = _root(repo_root)
+    cache_manager = _load_dependency("cache_manager", "cache-manager", root)
+    key = _cache_key(
+        cache_manager,
+        _field(result, "spec_bundle_hash"),
+        _field(result, "retry_feedback"),
+        _field(result, "model"),
+    )
+    payload = {name: _field(result, name) for name in _RESULT_FIELDS}
+    cache_manager.put(
+        key,
+        cache_manager.CachedResult(
+            gate_type=_GATE_TYPE,
+            payload=payload,
+            stored_at=cache_manager.now_iso(),
+        ),
+        repo_root=root,
+    )

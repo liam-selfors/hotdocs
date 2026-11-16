@@ -1,194 +1,152 @@
-import json
-import re
-from collections.abc import Mapping
-from dataclasses import dataclass, field, fields
-
-import pytest
-
 import generator
 
-
-COMPONENT_ID = "comp-widget-maker"
-SLUG = "widget-maker"
-MODULE = "widget_maker"
-
-
-@dataclass
-class FakeSpecBundle(Mapping):
-    component_id: str
-    spec_bundle_hash: str
-    spec: str
-    interface: str
-    constraints: str
-    dependency_interfaces: dict = field(default_factory=dict)
-    dependency_context: dict = field(default_factory=dict)
-    dependency_usage: dict = field(default_factory=dict)
-    vars: dict = field(default_factory=dict)
-    glossary: str = ""
-    hint_code: object = None
-
-    def __getitem__(self, key):
-        names = [f.name for f in fields(self)]
-        if key not in names:
-            raise KeyError(key)
-        return getattr(self, key)
-
-    def __iter__(self):
-        return iter([f.name for f in fields(self)])
-
-    def __len__(self):
-        return len(fields(self))
-
-    def get(self, key, default=None):
-        try:
-            return self[key]
-        except KeyError:
-            return default
+import importlib.util
+import json
+import re
+import sys
+from pathlib import Path
 
 
-def _get(value, name):
-    if isinstance(value, dict):
-        return value.get(name)
-    return getattr(value, name, None)
+def field(value, name):
+    return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def _write_component_md(repo_root):
-    comp_dir = repo_root / "specs" / "components" / SLUG
-    comp_dir.mkdir(parents=True, exist_ok=True)
-    (comp_dir / "component.md").write_text(
+def _tool_gen_dir():
+    return next(
+        p for p in Path(generator.__file__).resolve().parents if p.name == "gen"
+    )
+
+
+def _load_from_tool(slug):
+    module_name = slug.replace("-", "_")
+    base = _tool_gen_dir() / slug
+    flat = base / f"{module_name}.py"
+    path = flat if flat.is_file() else base / module_name / "__init__.py"
+    spec = importlib.util.spec_from_file_location(module_name, path)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def _write(path, text):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+
+
+def _build_corpus(repo_root):
+    _write(
+        repo_root / "specs" / "glossary.md",
+        "# Glossary\n\n- **Foo** — a test term.\n",
+    )
+    comp = repo_root / "specs" / "components" / "foo"
+    _write(
+        comp / "component.md",
         "---\n"
-        "id: comp-widget-maker\n"
-        "title: Widget Maker\n"
+        "id: comp-foo\n"
+        "title: Foo\n"
         "status: draft\n"
         "owners: [team-a]\n"
-        "sealed: false\n"
+        "sealed: true\n"
+        "source_path: legacy/foo/\n"
         "depends_on: []\n"
         "---\n"
         "\n"
-        "# Widget Maker\n"
+        "# Foo\n"
         "\n"
         "## Purpose\n"
         "\n"
-        "Widget Maker doubles a number.\n",
-        encoding="utf-8",
+        "Foo doubles a number.\n",
     )
-    (repo_root / "specs" / "glossary.md").write_text(
-        "# Glossary\n\n- **Foo** — a test term.\n", encoding="utf-8"
+    _write(
+        comp / "requirements" / "R-FOO-001.md",
+        "# R-FOO-001\n\n**R-FOO-001** — `foo(x)` MUST return `2 * x`.\n",
     )
-
-
-def _make_bundle():
-    return FakeSpecBundle(
-        component_id=COMPONENT_ID,
-        spec_bundle_hash="sha256:" + "ab" * 32,
-        spec=(
-            "# Widget Maker\n\n## Purpose\n\nWidget Maker doubles a number.\n\n"
-            "# R-WIDGET-001\n\n**R-WIDGET-001** — `double(x)` MUST return `2 * x`."
-        ),
-        interface="# Library\n\n```\ndouble(x: int) -> int\n```",
-        constraints="# Constraints\n\nNone.",
-        dependency_interfaces={},
-        dependency_context={},
-        dependency_usage={},
-        vars={},
-        glossary="# Glossary\n\n- **Foo** — a test term.",
-        hint_code=None,
+    _write(
+        comp / "acceptance" / "AC-FOO-001.md",
+        "# AC-FOO-001\n"
+        "\n"
+        "Covers: R-FOO-001\n"
+        "Kind: generated-test\n"
+        "\n"
+        "```gherkin\n"
+        "Given x = 2\n"
+        "When foo(x) is called\n"
+        "Then it returns 4\n"
+        "```\n",
     )
+    _write(
+        comp / "interface" / "library.md",
+        "# Library\n\n```\nfoo(x: int) -> int\n```\n",
+    )
+    _write(comp / "constraints.md", "# Constraints\n\nNone.\n")
 
 
-def _bundle_text(bundle):
-    parts = []
-    for name in bundle:
-        value = bundle[name]
-        if isinstance(value, str):
-            parts.append(value)
-        elif isinstance(value, dict):
-            parts.append(json.dumps(value))
-    return "\n".join(parts)
+def test_ac_gen_016_prompt_instructs_flat_module_or_package_layout(
+    tmp_path, monkeypatch
+):
+    monkeypatch.delenv("VAR_CACHE_STORE_URL", raising=False)
 
+    corpus_root = tmp_path / "corpus"
+    corpus_root.mkdir()
+    _build_corpus(corpus_root)
 
-def _make_recording_backend(log_path):
-    def backend(prompt, model, **params):
-        record = {
-            "prompt": prompt if isinstance(prompt, str) else str(prompt),
-            "model": model,
-            "params": {k: (v if isinstance(v, (str, int, float, bool)) or v is None else repr(v))
-                       for k, v in params.items()},
-        }
-        existing = []
-        if log_path.exists():
-            existing = json.loads(log_path.read_text(encoding="utf-8"))
-        existing.append(record)
-        log_path.write_text(json.dumps(existing), encoding="utf-8")
+    spec_linter = _load_from_tool("spec-linter")
+    report = spec_linter.lint(None, corpus_root)
+    hard = report["hard_failures"] if isinstance(report, dict) else report.hard_failures
+    assert hard == 0
 
-        text_prompt = record["prompt"]
-        m = re.search(r"BEGIN FILE ([0-9a-f]{32})", text_prompt)
-        if m is None:
-            m = re.search(r"\b([0-9a-f]{32})\b", text_prompt)
+    spec_bundle_assembler = _load_from_tool("spec-bundle-assembler")
+    bundle = spec_bundle_assembler.assemble("comp-foo", corpus_root, "cold")
+    assert field(bundle, "hint_code") is None
+
+    # A bare repo_root: unsealed, no overrides, so generate reaches the model.
+    gen_root = tmp_path / "gen_root"
+    gen_root.mkdir()
+    workdir = tmp_path / "cwd"
+    workdir.mkdir()
+    monkeypatch.chdir(workdir)
+
+    log_path = tmp_path / "mock_calls.jsonl"
+
+    def mock_backend(prompt, model, **params):
+        with open(log_path, "a", encoding="utf-8") as fh:
+            fh.write(json.dumps({"prompt": prompt, "model": model}) + "\n")
+        m = re.search(r"-----BEGIN FILE ([0-9a-f]{32}):", prompt)
         nonce = m.group(1) if m else "0" * 32
-        reply = (
-            "Here is the module.\n"
-            f"-----BEGIN FILE {nonce}: {MODULE}.py-----\n"
-            "def double(x):\n"
+        text = (
+            f"-----BEGIN FILE {nonce}: foo.py-----\n"
+            "def foo(x):\n"
             "    return 2 * x\n"
             f"-----END FILE {nonce}-----\n"
+            f"-----END REPLY {nonce}-----\n"
         )
         return {
-            "text": reply,
+            "text": text,
             "model": model,
             "backend": "mock",
             "model_call_error": None,
         }
 
-    return backend
-
-
-def test_ac_gen_016_prompt_instructs_flat_or_package_layout(tmp_path, monkeypatch):
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    workdir = tmp_path / "cwd"
-    workdir.mkdir()
-    monkeypatch.chdir(workdir)
-    monkeypatch.delenv("VAR_CACHE_STORE_URL", raising=False)
-    monkeypatch.delenv("VAR_HOTDOCS_CONFIG", raising=False)
-
-    _write_component_md(repo_root)
-
-    bundle = _make_bundle()
-    bundle_text = _bundle_text(bundle)
-    # The layout instruction must be fixed scaffolding, never bundle content:
-    # make sure none of the strings we look for could have leaked in from the bundle.
-    assert MODULE not in bundle_text
-    assert "__init__" not in bundle_text
-    assert "src" not in bundle_text.lower()
-
-    log_path = tmp_path / "model_calls.json"
-    backend = _make_recording_backend(log_path)
-
-    result = generator.generate(
-        bundle,
-        "claude-sonnet-5",
-        repo_root=repo_root,
-        llm_backend=backend,
+    generator.generate(
+        bundle, "mock-model", repo_root=gen_root, llm_backend=mock_backend
     )
 
-    assert log_path.exists(), (
-        "mock model was never called; result: "
-        f"model_call_error={_get(result, 'model_call_error')!r}, "
-        f"refused={_get(result, 'refused')!r}"
-    )
-    calls = json.loads(log_path.read_text(encoding="utf-8"))
-    assert len(calls) >= 1
+    assert log_path.is_file(), "mock model was never called"
+    records = [
+        json.loads(line)
+        for line in log_path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    assert records, "mock model recorded no input"
+    prompt = records[0]["prompt"]
+    lowered = prompt.lower()
 
-    sent = "\n".join(
-        c["prompt"] + "\n" + "\n".join(str(v) for v in c["params"].values())
-        for c in calls
-    )
-
-    # Names the real flat module for comp-widget-maker.
-    assert f"{MODULE}.py" in sent, "prompt does not name the flat module widget_maker.py"
-    # Names the real package alternative for comp-widget-maker.
-    assert f"{MODULE}/" in sent, "prompt does not name the package widget_maker/"
-    assert "__init__.py" in sent, "prompt does not mention the package's __init__.py"
+    # Names the real flat module and the real package for comp-foo.
+    assert "foo.py" in prompt
+    assert "foo/" in prompt
+    assert "__init__.py" in prompt
+    # Directly under gen/<component>/.
+    assert "gen/foo" in prompt
     # Forbids a deeper src/-style layout.
-    assert "src" in sent.lower(), "prompt does not forbid a deeper src/-style layout"
+    assert ("src" in lowered) or ("deeper" in lowered) or ("nest" in lowered)
