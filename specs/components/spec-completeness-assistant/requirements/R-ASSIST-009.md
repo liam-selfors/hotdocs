@@ -14,9 +14,7 @@
   `CompletenessReport` as JSON; `text` prints a human-readable rendering
   naming every lint finding's `rule_id`, every predicted-blast-radius
   component with its count of `criterion_reviews` findings, and, when
-  present, the `completeness_score`.
+  not null, a line `completeness_score: <str(value)>`.
 
-  Covered from the start of its own repair rather than discovered again
-  later: three other components' CLIs went uncovered until mutation
-  testing exposed them (`D130`, `D136`, `D145`), and this one did too
-  (`D160`).
+  Covered from the start, unlike CLIs found uncovered by mutation
+  testing (`D130`, `D160`).

@@ -14,5 +14,11 @@
   answered `tool-call budget exhausted` as an error and sets `stop`
   `budget_exhausted`. The last stdout line whose JSON `type` is `result`
   gives `text` from `result` and `turns` from `num_turns`; a `subtype` of
-  `error_max_turns`, or a killed process, gives `budget_exhausted`; a
-  non-zero exit or no result line gives `error`, category `network`.
+  `error_max_turns`, or a killed process, gives `budget_exhausted`
+  whatever the exit code; a
+  non-zero exit or no result line gives `error`, category `network`,
+  unless `budget_exhausted` is already set. Otherwise, an exit of `0`
+  gives `end_turn`, or `budget_exhausted` when a call was past the cap.
+  The loop never waits for a socket connection: it returns once the
+  process has exited or been killed, after closing the socket and
+  removing the directory.

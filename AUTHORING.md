@@ -43,6 +43,15 @@ Implements: `specs/architecture/cli-conventions.md`
 The document is then part of the interface every generator and test author
 sees, and it does not count toward the component's word cap.
 
+Watch for criteria that combine requirements. A criterion that checks the
+order of several checks' findings, or that "only one finding" appears,
+depends on every rule that could add one, yet its test author sees only
+the one requirement it covers. Summarize how the pieces fit together (the
+checks in order, what triggers each, exact messages) in a section of the
+interface. When the tool's own `test-probe` and `surface-checker` were
+first reviewed with `hotdocs spec check`, most of the gaps it found were
+of this kind.
+
 ## 3. Choosing a criterion's kind
 
 | Kind | Use when | The test is |

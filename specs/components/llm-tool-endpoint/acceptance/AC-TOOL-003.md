@@ -21,7 +21,9 @@ Then the first request went to https://api.openai.com/v1/chat/completions,
   "c1", "content": "contents"}; and the result has text "fin" and stop
   "end_turn"
 
-Given the first reply's finish_reason is "length"
+Given the same setup but the first reply is {"choices": [{"message":
+  {"role": "assistant", "content": "partial"}, "finish_reason": "length"}]}
 When run_tool_loop is called
-Then stop is "truncated"
+Then stop is "truncated", text is "partial", and execute was never
+  called
 ```

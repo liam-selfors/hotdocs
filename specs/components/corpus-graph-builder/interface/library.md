@@ -42,3 +42,5 @@ with a `---` YAML frontmatter block holding at least `id`, `title` and
 
 `component_size`'s `component_id` is the bare `<slug>`, not
 `comp-<slug>`.
+
+Implements: `specs/architecture/cli-conventions.md`

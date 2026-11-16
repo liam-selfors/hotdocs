@@ -4,11 +4,13 @@ Covers: R-TOOL-005
 Kind: generated-test
 
 ```gherkin
-Given ANTHROPIC_API_KEY is "k", one tool "t", an execute returning
-  ("ok", False), and urllib.request.urlopen replaced by a function that
-  records each request and always replies with one tool_use block for
-  "t" and stop_reason "tool_use"
-When run_tool_loop(..., max_turns=3) is called
+Given ANTHROPIC_API_KEY is "k", one tool "t" (description "d",
+  input_schema {"type": "object"}), an execute returning ("ok", False),
+  and urllib.request.urlopen replaced by a function that records each
+  request and always replies {"content": [{"type": "tool_use", "id":
+  "u1", "name": "t", "input": {}}], "stop_reason": "tool_use"}
+When run_tool_loop("sys", "go", "anthropic:claude-opus-5-5", tools,
+  execute, max_turns=3) is called
 Then exactly 3 requests were recorded, turns is 3, tool_calls is 3, and
   stop is "budget_exhausted"
 

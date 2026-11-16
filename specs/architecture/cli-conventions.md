@@ -16,7 +16,9 @@ checker one contract to probe (`D299`).
 
 ## The `main` contract
 
-- The component exposes `main(argv: list[str] | None = None) -> int`.
+- The component exposes `main(argv: list[str] | None = None) -> int`,
+  importable from its module itself: a package re-exports it from its
+  `__init__.py`.
   `argv` holds the tokens after the verb words `hotdocs-cli`'s verb table
   strips for that component; `None` means `sys.argv[1:]`.
 - `main` returns an `int` exit code. It never calls `sys.exit` and never

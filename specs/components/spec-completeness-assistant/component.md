@@ -21,10 +21,9 @@ view and judging the change against the criteria that cover it,
 
 ## Rationale
 
-The assist agent the original brainstorm describes but never names. This is the component
-`notes/metrics.md` already assumes exists (its "Completeness-agent
-confidence" and "Assist-agent acceptance rate" metrics predate this
-spec) but that, until now, had never actually been specced.
+The assist agent `notes/metrics.md` already assumes (its
+"Completeness-agent confidence" and "Assist-agent acceptance rate"
+metrics predate this spec).
 
 ## Scope
 
@@ -66,13 +65,8 @@ See `interface/data/`.
 
 See `acceptance/`.
 
-Mixed `kind`, and deliberately the opposite mix from most of this corpus:
-every criterion is a `generated-test` except R-ASSIST-004/005 — this
-component's actual reason to exist — which are `llm-judge`. Unlike every coordination component specced so far
-(`verifier-orchestrator`, `merge-orchestrator`), this one's core value
-genuinely *is* judgment, not dispatch around it — a useful contrast case
-against the corpus's usual "prefer compiled" guidance rather than
-another confirmation of it.
+Every criterion is a `generated-test`, the judgment calls checked
+through a faked `llm-endpoint`.
 
 ## Non-functional constraints
 
@@ -98,3 +92,5 @@ None.
   halts only on a failure inside the change; the completeness prompt
   carries the covering criteria; redundancy is checked corpus-wide from
   deterministic candidates; a model makes lint run its glossary judge.
+- Visibility pass: shared fixture facts, reply shapes, the inside-a-
+  component match and the no-write rule moved into `interface/`.

@@ -439,6 +439,11 @@ def _write_provenance(component_id: str, bundle, result, report, license_result,
         print(f"provenance: NOT written -- spec_bundle_hash changed during the run ({current_hash})")
         return False
     gate_versions = _get(key, "gate_versions")
+    # D313: the key names the generator that produced the code. Until the
+    # provenance-checker that computes it lands, record the version of the
+    # generator this run actually used.
+    if "generator" not in gate_versions and hasattr(generator, "PROMPT_VERSION"):
+        gate_versions = {**gate_versions, "generator": f"{generator.GATE_VERSION}+{generator.PROMPT_VERSION}"}
     pw.write_provenance(component_id, {
         "component_id": component_id,
         "generation_result": result,

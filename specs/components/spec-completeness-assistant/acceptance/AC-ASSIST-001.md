@@ -13,8 +13,9 @@ When assist(["R-FOO-001"], repo_root, model="fake-model") runs
 Then lint_findings holds that finding unchanged, halted is true,
   predicted_blast_radius is [], criterion_reviews is {},
   completeness_score and completeness_rationale are null,
-  redundancy_flags is [], and the log shows no call to
-  compute_blast_radius, check or complete
+  redundancy_flags is [], degraded is false, and the log shows
+  glossary_judge then lint and no call to compute_blast_radius, check
+  or complete
 
 Given the same setup but the fail finding's file is
   "specs/components/bar/component.md"

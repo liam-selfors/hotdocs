@@ -31,3 +31,5 @@ written into its source) and returns `7`. For the `init` row the fake lives
 at `<tool_root>/gen/hotdocs-init/hotdocs_init.py` and also logs the keyword
 arguments it received. A **fake tool root** is a separate temporary
 directory passed as `tool_root`, holding fakes at the same relative paths.
+
+Implements: `specs/architecture/cli-conventions.md`

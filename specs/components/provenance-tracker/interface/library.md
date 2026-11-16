@@ -50,3 +50,5 @@ non-null `verification` and returns its `requirement_results`' failing
 lookup for a human deciding what to pass as `--retry-feedback` on
 their next `hotdocs generate` call — never called by any component
 itself.
+
+Implements: `specs/architecture/cli-conventions.md`

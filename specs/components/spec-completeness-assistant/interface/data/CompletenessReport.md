@@ -17,8 +17,19 @@
 }
 ```
 
-A dataclass with these fields in this order, with a `to_dict()` giving
-the JSON form.
+A dataclass with these fields in this order and a `to_dict()` giving
+the JSON form; its public members are exactly these fields and
+`to_dict()`, none of which blocks, fails, exits or has a side effect.
+`halted` and every other field are descriptive only (R-ASSIST-006).
+`to_dict()` always holds every field, degraded or halted: it is the
+R-ASSIST-008 hook, against which a calling tool records an accept or
+override of `predicted_blast_radius`, `completeness_score` or a
+`redundancy_flags` entry (named by its two ids).
+
+`predicted_blast_radius` is the `component_id` of each `impacted` entry,
+in `impacted`'s order, or `[]` when `precondition_error` is non-null.
+`degraded` is `true` exactly when no `model` was given, halted or not; a
+failed or unparseable model call leaves it `false`.
 
 `lint_findings` entries are exactly `spec-linter`'s own `Finding` shape
 (`interface/data/LintReport.md`'s `findings[]`, bundle-visible via

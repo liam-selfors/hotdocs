@@ -61,12 +61,32 @@ hotdocs verify                  # is everything ready?
 `generate` writes `gen/slugify/` and `verification/slugify/`. Never edit
 `gen/` by hand: change the spec and generate again.
 
-Other commands you will reach for: `hotdocs impact --changed=comp-slugify`
-(what a spec change touches), `hotdocs assist --changed=comp-slugify
---model=...` (a model's review of the change: lint findings, blast radius,
-a completeness score), `hotdocs track ui build` (a readiness page) and
-`hotdocs docs-site build` (a browsable site of the specs). `hotdocs` alone
-lists every verb.
+`generate` makes up to three attempts: when a candidate fails, the next
+attempt is told which requirement ids failed (never the tests
+themselves). `--max-attempts=1` makes one. With `--mode=agentic` the model
+instead works in a sandbox: it writes the module, imports it, writes and
+runs its own tests, and revises before finishing. Agentic mode needs a
+provider with tool use (`anthropic`, `openai`, `openai-compatible` or
+`claude-cli`) and an OS sandbox (`sandbox-exec` on macOS, `bwrap` on
+Linux); without one the model's code is not run unless you pass
+`--allow-unisolated-exec`. Defaults can go in `hotdocs.toml`:
+
+```
+[generate]
+max_attempts = 3
+mode = "single"
+```
+
+Other commands you will reach for: `hotdocs spec check comp-slugify` (can
+each criterion's test be written from what its author sees?),
+`hotdocs impact --changed=comp-slugify` (what a spec change touches),
+`hotdocs assist --changed=comp-slugify` (a model's review of the change:
+lint findings, blast radius, a completeness score, overlaps),
+`hotdocs decision new "<title>"` (record why), `hotdocs component new
+<name>` (lay out a component), `hotdocs track ui build` (a readiness page)
+and `hotdocs docs-site build` (a browsable site of the specs). Verbs that
+can use a model take the one in `hotdocs.toml`, saying so on stderr;
+`--no-model` skips it. `hotdocs` alone lists every verb.
 
 ## 4. Write your own component
 
@@ -82,7 +102,8 @@ A component is a directory of small files, as in the example
   a Given/When/Then with concrete values;
 - `constraints.md`.
 
-Run `hotdocs lint` after every change. The most useful habit: state concrete
+Run `hotdocs lint` after every change, and `hotdocs spec check
+comp-<name>` before generating. The most useful habit: state concrete
 inputs and outputs in each acceptance criterion, and name every function the
 code must provide. What you leave implicit, the model guesses.
 
@@ -101,14 +122,24 @@ records, and when to split a component.
 
 ## 5. Reading a failure
 
-`hotdocs generate` ends with `blocked` and a reason. `model_call_error` means
-no code was produced (the model or network failed): run it again.
-`verification_failed` means code was produced and a criterion failed; the
-output names each failing criterion and why. Nearly always the cause is in
-the spec: a missing detail, or an example that contradicts a requirement.
-Fix it there. `hotdocs track feedback comp-<name>` lists the failing
-requirement ids from the last attempt, and `--retry-feedback=R-...` passes
-them to the next `generate`.
+`hotdocs generate` lists each attempt and, if none passed, ends with
+`blocked` and a reason:
+
+- `model_call_error` — no usable code was produced. A network, auth,
+  rate-limit or timeout error is not retried: run it again later.
+  `truncated_response` means the reply was cut off: raise the provider's
+  output limit (below).
+- `surface_check_failed` — the code did not import, used a name a
+  dependency lacks, or mishandled an unknown command-line argument.
+- `verification_failed` — a criterion failed on every attempt. The output
+  names each failing criterion and why; a failure marked as the test's
+  own means its test could not be written soundly. Nearly always the
+  cause is in the spec: a missing detail, or an example that contradicts
+  a requirement. Run `hotdocs spec check` on it and fix the spec.
+
+`hotdocs track feedback comp-<name>` lists the failing requirement ids
+from the last attempt, and `--retry-feedback=R-...` passes them to the
+next `generate`.
 
 ## 6. Known limits
 
@@ -116,9 +147,12 @@ them to the next `generate`.
   provider-shaped strings, not ordinary passwords: a low-entropy value like
   `password = "hunter2"` passes. Keep passwords out of the repository.
 - With the `claude-cli` provider, a large component's reply can outgrow
-  the command's defaults. Set `CLAUDE_CODE_MAX_OUTPUT_TOKENS=128000` and
-  bound thinking with `MAX_THINKING_TOKENS` (the tool's own rebuild used
-  `32000`) so the whole reply fits: a file the reply cuts off before its
-  end marker is dropped, and verification then fails for its absence.
+  the command's defaults and fail as `truncated_response`. Set
+  `CLAUDE_CODE_MAX_OUTPUT_TOKENS=128000` and bound thinking with
+  `MAX_THINKING_TOKENS` (the tool's own rebuild used `32000`).
+- The live-provider tests are opt-in and cost real tokens:
+  `HOTDOCS_LIVE=1 pytest verification/llm-endpoint/test_live_providers.py
+  verification/llm-tool-endpoint/test_live_tool_loop.py
+  verification/agentic-generator/test_live_slugify.py`.
 - `hotdocs assist` and `hotdocs impact` need a git repository with a
   `main` or `master` branch.

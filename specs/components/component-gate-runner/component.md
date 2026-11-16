@@ -3,7 +3,7 @@ id: comp-component-gate-runner
 title: Component Gate Runner
 status: draft
 owners: [pipeline-team]
-depends_on: [comp-provenance-checker, comp-spec-bundle-assembler, comp-generator, comp-verifier-orchestrator, comp-license-scanner, comp-secret-scanner, comp-provenance-writer, comp-provenance-tracker, comp-test-author, comp-llm-endpoint]
+depends_on: [comp-provenance-checker, comp-spec-bundle-assembler, comp-generation-loop, comp-verifier-orchestrator, comp-license-scanner, comp-secret-scanner, comp-provenance-writer, comp-provenance-tracker]
 realizes: [P-ZERO-EDIT, P-COMPLIANCE-GATE]
 model_pin: claude-opus-5-5
 sealed: false
@@ -32,15 +32,15 @@ wiring its own dependencies is genuinely this component's job.
 ## Scope
 
 **In scope:** obtaining the canonical provenance key and short-
-circuiting on a passing hit (`R-GATE-001`); on a miss, assembling,
-generating once (cold mode), and verifying with its own `test_author`
-and `judge` closures (`R-GATE-002`, `R-GATE-003`, `R-GATE-010`);
-reporting a block and why (`R-GATE-004`); running both scans
-(`R-GATE-005`); recording the attempt and, when a candidate was
+circuiting on a passing hit (`R-GATE-001`); on a miss, assembling and
+running `generation-loop`'s bounded attempts (`R-GATE-002`,
+`R-GATE-003`); reporting a block and why (`R-GATE-004`); running both scans
+(`R-GATE-005`); recording each attempt and, when a candidate was
 produced, its provenance (`R-GATE-008`, `R-GATE-006`); routing a sealed
 component straight to re-verification and recording its sealed
 provenance (`R-GATE-007`); and the
-`hotdocs generate` CLI (`R-GATE-009`).
+`hotdocs generate` CLI, with attempt and mode defaults from
+`hotdocs.toml` (`R-GATE-009`, `R-GATE-010`).
 
 **Out of scope:** deciding merge readiness — `provenance-tracker`'s
 `hotdocs verify`, reading what this component wrote; sequencing
@@ -86,9 +86,12 @@ None.
 - `D166`: rewritten before its first build — the canonical provenance
   key (`D163`), only a passing hit short-circuits, `blocked`/
   `block_reason` in the result, the exact dependency call list, the
-  judge contract (`R-GATE-010`), CLI coverage (`R-GATE-009`).
+  judge contract (now `generation-loop`'s), CLI coverage (`R-GATE-009`).
   Cold-generated and landed at 13/13, `mutation_score` 0.88.
 - `D170`: a sealed component now ends with a sealed provenance
   manifest written through `provenance-writer` (`R-GATE-007`);
   sealedness comes from `provenance-checker`'s `current_sealed_key`.
   Regenerated and landed at 13/13, `mutation_score` 0.94.
+- `D314`: generation goes through `generation-loop` (`D310`); one
+  attempt record per attempt, counted from `.hotdocs/attempts/<component_id>/`;
+  `--max-attempts`, `--mode` and `hotdocs.toml` defaults.

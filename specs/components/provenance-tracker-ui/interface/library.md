@@ -27,3 +27,5 @@ therefore provide both `check_readiness` and
 `last_requirement_failures`. A missing
 `.hotdocs/attempts/` directory is normal, not an error (`R-UI-005`); a
 file there that exists but fails to parse as JSON raises `ValueError`.
+
+Implements: `specs/architecture/cli-conventions.md`

@@ -27,3 +27,5 @@ Python literal (`True`, `False`, `None`, never JSON spelling, never
 `last_requirement_failures(component_id, repo_root)` returning `[]`.
 Each criterion states what that dict reports; a spec id such as
 `R-FOO-002` exists only in the fixture's files and that dict.
+
+Implements: `specs/architecture/cli-conventions.md`

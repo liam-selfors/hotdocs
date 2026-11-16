@@ -4,10 +4,10 @@ Covers: R-GATE-003
 Kind: generated-test
 
 ```gherkin
-Given a provenance miss, a faked generator returning one file, and a
-  faked verify returning overall "fail" with requirement_results
-  {"R-FOO-001": "pass", "R-FOO-002": "fail"}
+Given a provenance miss and a faked run_attempts returning passed false
+  after three attempts, the last with outcome "verification_failed"
 When run_component_gates is called without retry_feedback
-Then generator was called exactly once, with retry_feedback None, and
-  blocked is true with block_reason "verification_failed"
+Then run_attempts was called exactly once, with retry_feedback None and
+  max_attempts 3, and blocked is true with block_reason
+  "verification_failed"
 ```

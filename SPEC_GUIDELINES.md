@@ -524,6 +524,18 @@ Rules:
   requirement is untested code that mutation testing will find anyway,
   one survivor at a time. (`R-LINT-031`, D162) Its finding is reported
   on the component's `interface/cli.md`, at line 1.
+- Every behavior a criterion checks **MUST** be stated in a requirement
+  or the interface: the generator never sees `acceptance/`, and
+  implements only what its bundle states. (D298)
+- Every fact a criterion's test needs (a value, file layout, reply
+  format, error category, flag or grammar form) **MUST** appear in that
+  criterion, the one requirement it covers, or the component's interface
+  with its `Implements:` documents: nothing else reaches its test
+  author. A rule several criteria share belongs in the interface or a
+  `specs/architecture/` document. `hotdocs spec check` reports
+  violations. (D298, D300)
+- A criterion **SHOULD** name concrete inputs and exact expected outputs,
+  and the exception class or exit code of every failure it expects.
 
 See `notes/determinism-trust-playbook.md` for how this `kind` split
 drives caching/trust design elsewhere in the pipeline (only `llm-judge`
@@ -662,11 +674,15 @@ discipline as the artifact itself:
 spec_bundle_hash    content hash of every spec file that fed generation
 model_pin           model id + version
 prompt_version      id of the frozen prompt template used
-retry_feedback      R-id list the caller supplied for this call, if any
-                    (R-GEN-012, D3) — null if the call was blind. No
-                    sample_index: D3 retired same-merge retry, so there
-                    is no "which sample" left to record, only whether
-                    this one call was informed.
+retry_feedback      R-id list the landing attempt was given (R-GEN-012),
+                    null if it was blind
+generation          mode (single or agentic), generator_version,
+                    transcript_sha256, turns, tool_calls, isolation —
+                    hashes and counts only, never a transcript (D312)
+attempts            attempts recorded for this component so far
+attempt_history     one entry per attempt of the landing run: number,
+                    outcome, retry_feedback, error_category,
+                    failed_requirements, transcript_sha256 (D310)
 pipeline_version    version of the generation pipeline itself
 gate_versions       per-gate version map (compiler, license_scanner,
                      mutation_harness, secret_scanner, ...)

@@ -3,12 +3,8 @@
 Covers: R-GATE-001
 Kind: generated-test
 
-Every scenario in this component's criteria builds a repo_root with
-`specs/components/foo/component.md` (id `comp-foo`) and a faked module
-under `gen/<slug>/` for each dependency `interface/library.md` lists,
-each appending one line per call to a shared invocation log file.
-Every faked provenance-checker also defines `current_sealed_key`,
-returning `None` unless a scenario says otherwise.
+Every dependency is a stand-in as `interface/library.md`'s test
+fixtures state; the faked `current_sealed_key` returns `None`.
 
 ```gherkin
 Given a faked provenance-checker whose current_provenance_key returns
@@ -17,10 +13,10 @@ Given a faked provenance-checker whose current_provenance_key returns
   verification_report and an unblocked license_scan
 When run_component_gates("comp-foo", repo_root, "m") is called
 Then check_provenance received "sha256:k" and {"verifier": "v@1"}, no
-  other dependency was called, provenance_hit is true, blocked is
+  dependency after check_provenance was called, provenance_hit is true, blocked is
   false, and verification is the hit's verification_report
 
 Given the same, but the hit's verification_report.overall is "fail"
 When run_component_gates is called
-Then generator was called exactly once and provenance_hit is false
+Then run_attempts was called exactly once and provenance_hit is false
 ```

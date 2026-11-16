@@ -27,6 +27,30 @@ instead of recomputing. Adding a dimension means naming its view first,
 the way `component_size` was settled, never re-deriving it per caller
 (`SPEC_GUIDELINES.md` §10).
 
+## From the authoring and agentic hardening round (2026-11)
+
+- **`llm-endpoint` ignores `stop_reason`.** A single-shot reply cut off at
+  `max_tokens` is now caught by the generator's END REPLY sentinel
+  (`D304`), but `llm-endpoint` itself should report a `max_tokens` /
+  `length` stop as its own error for every caller.
+- **`llm-endpoint` forwards `temperature`.** Current Claude models reject
+  sampling parameters with a 400; drop it for those models.
+- **Tool use for `gemini` and `ollama`.** `llm-tool-endpoint` raises
+  `ToolUseUnsupported` for both (`D308`).
+- **`bwrap` is specified but untested.** The Linux OS sandbox for agentic
+  mode (`specs/architecture/agent-sandbox.md`) has not run on Linux.
+- **A tool-loop call log.** `llm-tool-endpoint` writes no
+  `.hotdocs/calls/` records; `llm-endpoint`'s single-shot log does.
+- **A whole-result grammar step.** `Then the result is <literal>` for
+  `criterion-compiler`, so more criteria (the slugify example's among
+  them) can be `compiled` rather than `generated-test`; deferred from
+  this round (planned as `D306`).
+- **Data-type references cascade widely.** `R-ASSEMBLE-013` pulls any
+  data type an interface names, even in prose, into dependents' bundles;
+  `ModelResponse.md`'s one mention of `GenerationResult` makes that
+  schema reach 19 components. Consider resolving only types named in
+  signatures or schema blocks.
+
 ---
 
 ## Resolved entries

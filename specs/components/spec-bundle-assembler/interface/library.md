@@ -86,3 +86,5 @@ Deleting the `Kind:` line from an acceptance file is a hard lint
 failure, the way to build a corpus `assemble` refuses. A sealed
 component's real code goes under its `source_path`
 (`legacy/foo/foo.py`), never `gen/`.
+
+Implements: `specs/architecture/cli-conventions.md`

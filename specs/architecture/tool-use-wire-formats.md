@@ -48,8 +48,11 @@ Reply: `content` is a list of blocks; `text` blocks carry `text`,
 | `max_tokens` | stop: `truncated` |
 | `refusal` | stop: `refusal` |
 
-The assistant turn appended to `messages` is the reply's whole `content`
-list, unchanged. Results go back as one user message:
+Only `tool_use` runs tools; every other stop runs none of the reply's
+`tool_use` blocks. The assistant turn appended to `messages` is the
+reply's whole `content` list, unchanged. Results go back as one user
+message holding exactly one `tool_result` per `tool_use` block, in the
+blocks' order, error results included:
 
 ```json
 {"role": "user", "content": [
@@ -81,15 +84,29 @@ object is returned to the model as an error result.
 | `length` | stop: `truncated` |
 | `content_filter` | stop: `refusal` |
 
+Only `tool_calls` runs tools; on any other `finish_reason` the message's
+`tool_calls` are not run.
+
 The assistant message is appended unchanged; each result follows it as
 `{"role": "tool", "tool_call_id": "<id>", "content": "<text>"}`.
 
 ## `claude-cli`
 
 The tools are served by a stdio MCP server (JSON-RPC 2.0, one message per
-line) answering `initialize`, `tools/list` and `tools/call`; a
-`tools/call` result is `{"content": [{"type": "text", "text": "<text>"}],
-"isError": <bool>}`. The command is:
+line, UTF-8) answering `initialize`, `tools/list` and `tools/call`. A
+request is `{"jsonrpc": "2.0", "id", "method", "params"}`; a `tools/call`'s
+params are `{"name": <str>, "arguments": <object>}`. A reply is
+`{"jsonrpc": "2.0", "id": <the request's id>, "result": {...}}` or
+`{..., "error": {"code": <int>, "message": <str>}}`. A `tools/call` result
+is `{"content": [{"type": "text", "text": "<text>"}], "isError": <bool>}`.
+
+The server reads `tools.json`, a UTF-8 JSON array of the tool dicts
+exactly as the loop was given them, in order. For each `tools/call` it
+opens a new connection to the loop's Unix socket, writes
+`{"name", "arguments"}` as one newline-terminated UTF-8 JSON line, reads
+one such line `{"text": <str>, "is_error": <bool>}`, and closes.
+
+The command is:
 
 ```
 claude -p --model <m> --output-format stream-json --verbose
@@ -105,9 +122,10 @@ every MCP server. The flags above keep the user's CLAUDE.md, AGENTS.md,
 skills, hooks and memory out of the call and expose only the listed
 tools. Stdout is newline-delimited JSON events; the final
 `{"type": "result"}` event gives `result` (the text), `is_error` and
-`num_turns`. The loop's turn and tool-call caps are enforced by the MCP
-server, which answers every call past a cap with an error result, and the
-wall-clock cap by killing the process.
+`num_turns`. The turn cap is `--max-turns`; the tool-call cap is enforced
+behind the MCP server by the loop's socket end, which answers every call
+past it with an error result; the wall-clock cap is enforced by killing
+the process.
 
 ## `gemini`, `ollama`
 
