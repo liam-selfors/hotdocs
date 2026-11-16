@@ -1,144 +1,137 @@
+import spec_bundle_assembler
+
 import dataclasses
 import importlib.util
 import json
 import sys
 from pathlib import Path
 
-import spec_bundle_assembler
+
+GLOSSARY = """# Glossary
+
+- **Foo** — a test term.
+"""
+
+FOO_COMPONENT = """---
+id: comp-foo
+title: Foo
+status: draft
+owners: [team-a]
+sealed: true
+source_path: legacy/foo/
+depends_on: [comp-bar]
+---
+
+# Foo
+
+## Purpose
+
+Foo doubles a number.
+"""
+
+BAR_COMPONENT = """---
+id: comp-bar
+title: Bar
+status: draft
+owners: [team-a]
+sealed: true
+source_path: legacy/bar/
+depends_on: []
+---
+
+# Bar
+
+## Purpose
+
+Caches results.
+
+## Rationale
+
+Bar keeps a memo table per D13, trading memory for repeated lookup speed.
+"""
+
+D13_DECISION = """---
+id: D13
+title: Bar keeps a memo table
+status: draft
+owners: [team-a]
+---
+
+# D13: Bar keeps a memo table
+
+## Context
+
+Repeated lookups were slow.
+
+## Decision
+
+Bar keeps a memo table.
+
+## Consequences
+
+Bar uses more memory.
+"""
+
+RATIONALE_FRAGMENTS = [
+    "D13",
+    "memo table",
+    "trading memory",
+    "repeated lookup speed",
+]
 
 
-def _write(path: Path, content: str) -> None:
+def field(value, name):
+    return value[name] if isinstance(value, dict) else getattr(value, name)
+
+
+def _write(path: Path, text: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(content, encoding="utf-8")
+    path.write_text(text, encoding="utf-8")
 
 
-def _field(value, name):
-    if isinstance(value, dict):
-        return value.get(name)
-    try:
-        return value[name]
-    except Exception:
-        return getattr(value, name, None)
-
-
-GLOSSARY = "# Glossary\n\n- **Foo** — a test term.\n"
-
-FOO_COMPONENT = (
-    "---\n"
-    "id: comp-foo\n"
-    "title: Foo\n"
-    "status: draft\n"
-    "owners: [team-a]\n"
-    "sealed: true\n"
-    "source_path: legacy/foo/\n"
-    "depends_on: [comp-bar]\n"
-    "---\n"
-    "\n"
-    "# Foo\n"
-    "\n"
-    "## Purpose\n"
-    "\n"
-    "Foo doubles a number.\n"
-)
-
-BAR_COMPONENT = (
-    "---\n"
-    "id: comp-bar\n"
-    "title: Bar\n"
-    "status: draft\n"
-    "owners: [team-a]\n"
-    "sealed: true\n"
-    "source_path: legacy/bar/\n"
-    "depends_on: []\n"
-    "---\n"
-    "\n"
-    "# Bar\n"
-    "\n"
-    "## Purpose\n"
-    "\n"
-    "Caches results.\n"
-    "\n"
-    "## Rationale\n"
-    "\n"
-    "Bar keeps a cache because D13 chose memoization over recomputation, a quixotic tradeoff.\n"
-)
-
-DECISION_D13 = (
-    "---\n"
-    "id: D13\n"
-    "title: Memoize lookups\n"
-    "status: draft\n"
-    "owners: [team-a]\n"
-    "---\n"
-    "\n"
-    "# D13 — Memoize lookups\n"
-    "\n"
-    "## Decision\n"
-    "\n"
-    "Lookups are memoized rather than recomputed.\n"
-)
-
-FOO_REQ = "# R-FOO-001\n\n**R-FOO-001** — `foo(x)` MUST return `2 * x`.\n"
-
-FOO_AC = (
-    "# AC-FOO-001\n"
-    "\n"
-    "Covers: R-FOO-001\n"
-    "Kind: generated-test\n"
-    "\n"
-    "```gherkin\n"
-    "Given x = 2\n"
-    "When foo(x) is called\n"
-    "Then it returns 4\n"
-    "```\n"
-)
-
-FOO_LIB = "# Library\n\n```\nfoo(x: int) -> int\n```\n"
-
-BAR_REQ = "# R-BAR-001\n\n**R-BAR-001** — `bar(x)` MUST return `x`.\n"
-
-BAR_AC = (
-    "# AC-BAR-001\n"
-    "\n"
-    "Covers: R-BAR-001\n"
-    "Kind: generated-test\n"
-    "\n"
-    "```gherkin\n"
-    "Given x = 3\n"
-    "When bar(x) is called\n"
-    "Then it returns 3\n"
-    "```\n"
-)
-
-BAR_LIB = "# Library\n\n```\nbar(x: int) -> int\n```\n"
-
-CONSTRAINTS = "# Constraints\n\nNone.\n"
+def _write_component(repo_root: Path, slug: str, component_md: str, upper: str, func: str, req_text: str) -> None:
+    base = repo_root / "specs" / "components" / slug
+    _write(base / "component.md", component_md)
+    _write(
+        base / "requirements" / f"R-{upper}-001.md",
+        f"# R-{upper}-001\n\n**R-{upper}-001** — {req_text}\n",
+    )
+    _write(
+        base / "acceptance" / f"AC-{upper}-001.md",
+        f"# AC-{upper}-001\n"
+        "\n"
+        f"Covers: R-{upper}-001\n"
+        "Kind: generated-test\n"
+        "\n"
+        "```gherkin\n"
+        "Given x = 2\n"
+        f"When {func}(x) is called\n"
+        "Then it returns 4\n"
+        "```\n",
+    )
+    _write(
+        base / "interface" / "library.md",
+        f"# Library\n\n```\n{func}(x: int) -> int\n```\n",
+    )
+    _write(base / "constraints.md", "# Constraints\n\nNone.\n")
 
 
 def _build_corpus(repo_root: Path) -> None:
-    specs = repo_root / "specs"
-    _write(specs / "glossary.md", GLOSSARY)
-    _write(specs / "decisions" / "D13.md", DECISION_D13)
-
-    foo = specs / "components" / "foo"
-    _write(foo / "component.md", FOO_COMPONENT)
-    _write(foo / "requirements" / "R-FOO-001.md", FOO_REQ)
-    _write(foo / "acceptance" / "AC-FOO-001.md", FOO_AC)
-    _write(foo / "interface" / "library.md", FOO_LIB)
-    _write(foo / "constraints.md", CONSTRAINTS)
-
-    bar = specs / "components" / "bar"
-    _write(bar / "component.md", BAR_COMPONENT)
-    _write(bar / "requirements" / "R-BAR-001.md", BAR_REQ)
-    _write(bar / "acceptance" / "AC-BAR-001.md", BAR_AC)
-    _write(bar / "interface" / "library.md", BAR_LIB)
-    _write(bar / "constraints.md", CONSTRAINTS)
+    _write(repo_root / "specs" / "glossary.md", GLOSSARY)
+    _write_component(
+        repo_root, "foo", FOO_COMPONENT, "FOO", "foo",
+        "`foo(x)` MUST return `2 * x`.",
+    )
+    _write_component(
+        repo_root, "bar", BAR_COMPONENT, "BAR", "bar",
+        "`bar(x)` MUST return `2 * x`.",
+    )
+    _write(repo_root / "specs" / "decisions" / "D13.md", D13_DECISION)
 
 
 def _load_spec_linter():
     gen = next(
-        p
-        for p in Path(spec_bundle_assembler.__file__).resolve().parents
+        p for p in Path(spec_bundle_assembler.__file__).resolve().parents
         if p.name == "gen"
     )
     base = gen / "spec-linter"
@@ -154,34 +147,35 @@ def _load_spec_linter():
     return spec_linter
 
 
-BUNDLE_FIELDS = [
-    "component_id",
-    "spec_bundle_hash",
-    "spec",
-    "interface",
-    "constraints",
-    "dependency_interfaces",
-    "dependency_context",
-    "dependency_usage",
-    "vars",
-    "glossary",
-    "hint_code",
-]
-
-
-def _serialize_bundle(bundle) -> str:
+def _bundle_text(bundle) -> str:
+    names = [
+        "component_id",
+        "spec_bundle_hash",
+        "spec",
+        "interface",
+        "constraints",
+        "dependency_interfaces",
+        "dependency_context",
+        "dependency_usage",
+        "vars",
+        "glossary",
+        "hint_code",
+    ]
     parts = {}
+    for name in names:
+        try:
+            parts[name] = field(bundle, name)
+        except (KeyError, AttributeError):
+            parts[name] = None
+    text = json.dumps(parts, default=str, sort_keys=True)
     if dataclasses.is_dataclass(bundle) and not isinstance(bundle, type):
         try:
-            parts.update(dataclasses.asdict(bundle))
+            text += json.dumps(dataclasses.asdict(bundle), default=str, sort_keys=True)
         except Exception:
             pass
     elif isinstance(bundle, dict):
-        parts.update(bundle)
-    for name in BUNDLE_FIELDS:
-        if name not in parts:
-            parts[name] = _field(bundle, name)
-    return json.dumps(parts, default=str, ensure_ascii=False)
+        text += json.dumps(bundle, default=str, sort_keys=True)
+    return text
 
 
 def test_ac_assemble_010_dependency_context_is_purpose_only(tmp_path):
@@ -191,37 +185,17 @@ def test_ac_assemble_010_dependency_context_is_purpose_only(tmp_path):
 
     spec_linter = _load_spec_linter()
     report = spec_linter.lint(None, repo_root)
-    hard = (
-        report.get("hard_failures")
-        if isinstance(report, dict)
-        else getattr(report, "hard_failures", None)
-    )
-    findings = (
-        report.get("findings")
-        if isinstance(report, dict)
-        else getattr(report, "findings", None)
-    )
-    assert hard == 0, f"fixture is not lint-clean: {findings!r}"
+    hard = report["hard_failures"] if isinstance(report, dict) else report.hard_failures
+    assert hard == 0
 
     bundle = spec_bundle_assembler.assemble("comp-foo", repo_root)
 
-    dependency_context = _field(bundle, "dependency_context")
-    assert dependency_context is not None, "bundle has no dependency_context"
-    assert "comp-bar" in dependency_context, (
-        f"dependency_context lacks comp-bar: {dependency_context!r}"
-    )
-    assert dependency_context["comp-bar"] == "Caches results.", (
-        f"dependency_context['comp-bar'] was {dependency_context['comp-bar']!r}"
-    )
+    dependency_context = field(bundle, "dependency_context")
+    assert "comp-bar" in dependency_context
+    assert dependency_context["comp-bar"] == "Caches results."
 
-    serialized = _serialize_bundle(bundle)
-    assert "D13" not in serialized, "D13 leaked into the assembled bundle"
-    assert "quixotic" not in serialized, (
-        "Rationale content leaked into the assembled bundle"
-    )
-    assert "memoization over recomputation" not in serialized, (
-        "Rationale content leaked into the assembled bundle"
-    )
-    assert "Rationale" not in serialized, (
-        "Rationale section leaked into the assembled bundle"
-    )
+    text = _bundle_text(bundle)
+    for fragment in RATIONALE_FRAGMENTS:
+        assert fragment not in text, (
+            f"Rationale content {fragment!r} leaked into the assembled bundle"
+        )

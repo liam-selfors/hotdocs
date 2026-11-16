@@ -1,13 +1,103 @@
 import json
 from pathlib import Path
 
+import pytest
+
 import spec_linter
 
 
-def _get(value, key, default=None):
-    if isinstance(value, dict):
-        return value.get(key, default)
-    return getattr(value, key, default)
+def field(value, name):
+    return value[name] if isinstance(value, dict) else getattr(value, name)
+
+
+COMPONENT_MD = """---
+id: comp-foo
+title: Foo
+status: draft
+owners: [test-team]
+sealed: true
+source_path: legacy/foo/
+---
+
+# Foo
+
+## Purpose
+
+Foo does one small thing for the test fixture.
+
+## Scope
+
+- In scope: the one small thing.
+- Out of scope: everything else.
+
+## Definitions
+
+None.
+
+## Behavior
+
+See `requirements/`.
+
+## Interfaces
+
+See `interface/`.
+
+## Data
+
+See `interface/data/`.
+
+## Acceptance criteria
+
+See `acceptance/`.
+
+## Non-functional constraints
+
+See `constraints.md`.
+
+## Open questions
+
+## Change log
+
+- Initial draft.
+"""
+
+REQUIREMENT_MD = """# R-FOO-001
+
+**R-FOO-001** — Foo MUST do the one small thing.
+"""
+
+ACCEPTANCE_MD = """# AC-FOO-001
+
+Covers: R-FOO-001
+Kind: compiled
+
+```gherkin
+Given a foo
+When it runs
+Then it does the one small thing
+```
+"""
+
+CONSTRAINTS_MD = """# Constraints
+
+- None beyond the defaults.
+"""
+
+PRIMARY_GLOSSARY = """# Glossary
+
+Canonical vocabulary for this spec corpus. Specs **MUST** use these terms as
+defined.
+
+- **Widget** — a small thing the corpus talks about.
+"""
+
+SECOND_GLOSSARY = """# Glossary
+
+Canonical vocabulary for this spec corpus. Specs **MUST** use these terms as
+defined.
+
+- **Invoice** — a billing document the corpus talks about.
+"""
 
 
 def _write(path: Path, text: str) -> None:
@@ -15,157 +105,63 @@ def _write(path: Path, text: str) -> None:
     path.write_text(text, encoding="utf-8")
 
 
-def _build_base_corpus(root: Path) -> None:
-    comp = root / "specs" / "components" / "widget"
-    _write(
-        comp / "component.md",
-        "---\n"
-        "id: comp-widget\n"
-        "title: Widget\n"
-        "status: draft\n"
-        "owners: [alice]\n"
-        "sealed: true\n"
-        "source_path: legacy/widget\n"
-        "---\n"
-        "\n"
-        "# Widget\n"
-        "\n"
-        "## Purpose\n"
-        "\n"
-        "Provides a widget for test purposes.\n"
-        "\n"
-        "## Scope\n"
-        "\n"
-        "- In scope: widgets.\n"
-        "- Out of scope: everything else.\n"
-        "\n"
-        "## Definitions\n"
-        "\n"
-        "None.\n"
-        "\n"
-        "## Behavior\n"
-        "\n"
-        "See `requirements/`.\n"
-        "\n"
-        "## Interfaces\n"
-        "\n"
-        "See `interface/`.\n"
-        "\n"
-        "## Data\n"
-        "\n"
-        "See `interface/data/`.\n"
-        "\n"
-        "## Acceptance criteria\n"
-        "\n"
-        "See `acceptance/`.\n"
-        "\n"
-        "## Non-functional constraints\n"
-        "\n"
-        "See `constraints.md`.\n"
-        "\n"
-        "## Open questions\n"
-        "\n"
-        "## Change log\n"
-        "\n"
-        "- Initial draft.\n",
-    )
-    _write(
-        comp / "requirements" / "R-WIDGET-001.md",
-        "# R-WIDGET-001\n\n**R-WIDGET-001** — The widget MUST exist.\n",
-    )
-    _write(
-        comp / "acceptance" / "AC-WIDGET-001.md",
-        "# AC-WIDGET-001\n"
-        "\n"
-        "Covers: R-WIDGET-001\n"
-        "Kind: generated-test\n"
-        "\n"
-        "```gherkin\n"
-        "Given a widget\n"
-        "When it is checked\n"
-        "Then it exists\n"
-        "```\n",
-    )
-    _write(
-        comp / "constraints.md",
-        "# Constraints\n\nNone.\n",
-    )
-    _write(
-        root / "specs" / "glossary.md",
-        "# Glossary\n"
-        "\n"
-        "Canonical vocabulary for this spec corpus.\n"
-        "\n"
-        "- **Widget** — a thing the widget component provides.\n",
-    )
+def _build_corpus(root: Path, second_glossary: bool) -> Path:
+    specs = root / "specs"
+    for sub in ("product", "architecture", "vars", "decisions"):
+        (specs / sub).mkdir(parents=True, exist_ok=True)
+    comp = specs / "components" / "foo"
+    _write(comp / "component.md", COMPONENT_MD)
+    _write(comp / "requirements" / "R-FOO-001.md", REQUIREMENT_MD)
+    _write(comp / "acceptance" / "AC-FOO-001.md", ACCEPTANCE_MD)
+    _write(comp / "constraints.md", CONSTRAINTS_MD)
+    _write(specs / "glossary.md", PRIMARY_GLOSSARY)
+    if second_glossary:
+        _write(specs / "glossary-billing.md", SECOND_GLOSSARY)
+    return root
 
 
-def _add_second_glossary(root: Path) -> None:
-    _write(
-        root / "specs" / "glossary-billing.md",
-        "# Glossary\n"
-        "\n"
-        "Canonical vocabulary for this spec corpus.\n"
-        "\n"
-        "- **Invoice** — a billing document.\n",
-    )
+def _lint014_fails(report):
+    findings = field(report, "findings")
+    return [
+        f
+        for f in findings
+        if field(f, "rule_id") == "R-LINT-014" and field(f, "severity") == "fail"
+    ]
 
 
-def _lint014_fail_findings(report):
-    findings = _get(report, "findings", []) or []
-    out = []
-    for f in findings:
-        if _get(f, "rule_id") == "R-LINT-014" and _get(f, "severity") == "fail":
-            out.append(f)
-    return out
-
-
-def test_two_glossaries_without_bounded_context_decision_fails(tmp_path):
-    root = tmp_path / "repo"
-    root.mkdir()
-    _build_base_corpus(root)
-    _add_second_glossary(root)
+def test_two_glossaries_without_split_decision_fail_r_lint_014(tmp_path):
+    root = _build_corpus(tmp_path / "repo", second_glossary=True)
 
     report = spec_linter.lint(None, root)
 
-    hits = _lint014_fail_findings(report)
-    assert hits, (
+    matches = _lint014_fails(report)
+    assert matches, (
         "expected a fail-severity R-LINT-014 finding, got: "
-        + repr(_get(report, "findings"))
+        + repr([(field(f, "rule_id"), field(f, "severity")) for f in field(report, "findings")])
     )
-    hard_failures = _get(report, "hard_failures")
-    if hard_failures is None:
-        summary = _get(report, "summary")
-        if summary is not None:
-            hard_failures = _get(summary, "hard_failures")
-    if hard_failures is not None:
-        assert hard_failures >= 1
+    hard = report["hard_failures"] if isinstance(report, dict) else report.hard_failures
+    assert hard >= 1
 
 
-def test_single_glossary_has_no_lint014_failure(tmp_path):
-    root = tmp_path / "repo"
-    root.mkdir()
-    _build_base_corpus(root)
+def test_single_glossary_does_not_trigger_r_lint_014(tmp_path):
+    root = _build_corpus(tmp_path / "repo", second_glossary=False)
 
     report = spec_linter.lint(None, root)
 
-    hits = _lint014_fail_findings(report)
-    assert not hits, "unexpected R-LINT-014 finding with one glossary: " + repr(hits)
+    findings = field(report, "findings")
+    assert not [f for f in findings if field(f, "rule_id") == "R-LINT-014"]
 
 
-def test_cli_reports_lint014_and_exits_one(tmp_path, capsys):
-    root = tmp_path / "repo"
-    root.mkdir()
-    _build_base_corpus(root)
-    _add_second_glossary(root)
+def test_cli_reports_r_lint_014_fail_and_exit_1(tmp_path, capsys):
+    root = _build_corpus(tmp_path / "repo", second_glossary=True)
 
-    code = spec_linter.main(["--format=json", "--repo-root=" + str(root)])
-    assert code == 1
+    code = spec_linter.main(["--format=json", f"--repo-root={root}"])
 
     out = capsys.readouterr().out
-    data = json.loads(out)
-    findings = data.get("findings", []) if isinstance(data, dict) else []
+    assert code == 1
+    doc = json.loads(out)
     assert any(
-        f.get("rule_id") == "R-LINT-014" and f.get("severity") == "fail"
-        for f in findings
-    ), "expected R-LINT-014 fail finding in JSON output: " + out
+        f["rule_id"] == "R-LINT-014" and f["severity"] == "fail"
+        for f in doc["findings"]
+    )
+    assert doc["summary"]["hard_failures"] >= 1

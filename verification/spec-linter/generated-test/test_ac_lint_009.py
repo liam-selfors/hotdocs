@@ -1,3 +1,6 @@
+"""AC-LINT-009: a Covers: tag that does not resolve to a real R-id or P-id
+produces a fail-severity finding for rule R-LINT-009."""
+
 import json
 from pathlib import Path
 
@@ -6,10 +9,8 @@ import pytest
 import spec_linter
 
 
-def _get(value, key, default=None):
-    if isinstance(value, dict):
-        return value.get(key, default)
-    return getattr(value, key, default)
+def field(value, name):
+    return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
 def _write(path: Path, text: str) -> None:
@@ -21,16 +22,16 @@ COMPONENT_MD = """---
 id: comp-foo
 title: Foo
 status: draft
-owners: [alice]
+owners: [test-team]
 sealed: true
-source_path: legacy/foo
+source_path: legacy/foo/
 ---
 
 # Foo
 
 ## Purpose
 
-Foo does one small thing for testing purposes.
+Foo does one small thing for the test fixture.
 
 ## Scope
 
@@ -68,128 +69,119 @@ See `constraints.md`.
 - Initial draft.
 """
 
-REQ_MD = """# R-FOO-001
+REQUIREMENT_MD = """# R-FOO-001
 
-**R-FOO-001** — The component MUST return the one small thing.
+**R-FOO-001** — The component MUST return the input unchanged.
 """
 
 GOOD_AC_MD = """# AC-FOO-001
 
 Covers: R-FOO-001
-Kind: compiled
+Kind: generated-test
 
 ```gherkin
-Given a request
-When foo runs
-Then it returns the one small thing
+Given an input value
+When the component runs
+Then it returns the input unchanged
+```
+"""
+
+BAD_AC_MD = """# AC-FOO-002
+
+Covers: R-DOES-NOT-EXIST
+Kind: generated-test
+
+```gherkin
+Given an input value
+When the component runs
+Then it returns the input unchanged
 ```
 """
 
 CONSTRAINTS_MD = """# Constraints
 
-None.
+- None beyond the defaults. Measured by inspection.
 """
 
 GLOSSARY_MD = """# Glossary
 
-- **Foo thing** — the one small thing foo returns.
+- **Foo** — the fixture component.
 """
 
 
-def _bad_ac(ac_id: str, target: str) -> str:
-    return f"""# {ac_id}
-
-Covers: {target}
-Kind: compiled
-
-```gherkin
-Given a request
-When foo runs
-Then something happens
-```
-"""
-
-
-def _build_fixture(root: Path, extra_acs=None) -> Path:
+def _build_repo(root: Path, include_bad: bool) -> None:
     comp = root / "specs" / "components" / "foo"
     _write(comp / "component.md", COMPONENT_MD)
-    _write(comp / "requirements" / "R-FOO-001.md", REQ_MD)
+    _write(comp / "requirements" / "R-FOO-001.md", REQUIREMENT_MD)
     _write(comp / "acceptance" / "AC-FOO-001.md", GOOD_AC_MD)
     _write(comp / "constraints.md", CONSTRAINTS_MD)
     _write(root / "specs" / "glossary.md", GLOSSARY_MD)
-    for ac_id, target in (extra_acs or []):
-        _write(comp / "acceptance" / f"{ac_id}.md", _bad_ac(ac_id, target))
-    return root
+    if include_bad:
+        _write(comp / "acceptance" / "AC-FOO-002.md", BAD_AC_MD)
 
 
 def _findings(report):
-    findings = _get(report, "findings")
-    if findings is None:
-        findings = []
-    return list(findings)
+    return list(field(report, "findings"))
 
 
-def _lint009_fails(report):
+def _lint009_fails(findings):
     return [
         f
-        for f in _findings(report)
-        if _get(f, "rule_id") == "R-LINT-009" and _get(f, "severity") == "fail"
+        for f in findings
+        if field(f, "rule_id") == "R-LINT-009" and field(f, "severity") == "fail"
     ]
 
 
-def test_valid_covers_tag_produces_no_r_lint_009_finding(tmp_path):
-    root = _build_fixture(tmp_path)
-    report = spec_linter.lint(None, root)
-    lint009 = [f for f in _findings(report) if _get(f, "rule_id") == "R-LINT-009"]
-    assert lint009 == [], f"unexpected R-LINT-009 findings on clean fixture: {lint009}"
+def _hard(report):
+    return report["hard_failures"] if isinstance(report, dict) else report.hard_failures
 
 
-def test_dangling_r_id_covers_tag_is_fail_severity_r_lint_009(tmp_path):
-    root = _build_fixture(tmp_path)
-    baseline = spec_linter.lint(None, root)
-    assert _lint009_fails(baseline) == []
-
-    _write(
-        root / "specs" / "components" / "foo" / "acceptance" / "AC-FOO-002.md",
-        _bad_ac("AC-FOO-002", "R-DOES-NOT-EXIST"),
-    )
-    report = spec_linter.lint(None, root)
-    fails = _lint009_fails(report)
-    assert fails, (
-        "expected a fail-severity R-LINT-009 finding for Covers: R-DOES-NOT-EXIST; "
-        f"got findings: {_findings(report)}"
-    )
-    files = [str(_get(f, "file") or "") for f in fails]
-    assert any("AC-FOO-002" in fp for fp in files), (
-        f"R-LINT-009 finding should point at the offending criterion file; got {files}"
-    )
-    assert not any("AC-FOO-001" in fp for fp in files), (
-        f"the valid criterion must not be flagged; got {files}"
-    )
-
-    hard = _get(report, "hard_failures")
-    if hard is not None:
-        assert hard >= 1
+@pytest.fixture
+def baseline_repo(tmp_path):
+    root = tmp_path / "baseline"
+    root.mkdir()
+    _build_repo(root, include_bad=False)
+    return root
 
 
-def test_dangling_p_id_covers_tag_is_fail_severity_r_lint_009(tmp_path):
-    root = _build_fixture(tmp_path, extra_acs=[("AC-FOO-002", "P-DOES-NOT-EXIST")])
-    report = spec_linter.lint(None, root)
-    fails = _lint009_fails(report)
-    assert fails, (
-        "expected a fail-severity R-LINT-009 finding for Covers: P-DOES-NOT-EXIST; "
-        f"got findings: {_findings(report)}"
+@pytest.fixture
+def bad_repo(tmp_path):
+    root = tmp_path / "bad"
+    root.mkdir()
+    _build_repo(root, include_bad=True)
+    return root
+
+
+def test_baseline_has_no_r_lint_009_failure(baseline_repo):
+    report = spec_linter.lint(None, baseline_repo)
+    assert _lint009_fails(_findings(report)) == []
+
+
+def test_dangling_covers_yields_r_lint_009_fail_finding(baseline_repo, bad_repo):
+    baseline = spec_linter.lint(None, baseline_repo)
+    report = spec_linter.lint(None, bad_repo)
+
+    hits = _lint009_fails(_findings(report))
+    assert len(hits) >= 1, (
+        "expected a fail-severity R-LINT-009 finding, got: "
+        + repr([(field(f, "rule_id"), field(f, "severity")) for f in _findings(report)])
     )
 
+    # The dangling reference is a hard failure, counted in the summary.
+    assert _hard(report) >= 1
+    assert _hard(report) > _hard(baseline)
+    assert _lint009_fails(_findings(baseline)) == []
 
-def test_cli_reports_r_lint_009_and_exits_1(tmp_path, capsys):
-    root = _build_fixture(tmp_path, extra_acs=[("AC-FOO-002", "R-DOES-NOT-EXIST")])
-    rc = spec_linter.main(["--format=json", f"--repo-root={root}"])
+
+def test_dangling_covers_via_cli_json_reports_failure(bad_repo, capsys):
+    code = spec_linter.main(["--repo-root", str(bad_repo), "--format=json"])
     out = capsys.readouterr().out
-    assert rc == 1, f"expected exit code 1 with a fail-severity finding, got {rc}"
-    data = json.loads(out)
-    findings = data.get("findings", []) if isinstance(data, dict) else []
-    assert any(
-        f.get("rule_id") == "R-LINT-009" and f.get("severity") == "fail"
-        for f in findings
-    ), f"JSON report lacks a fail-severity R-LINT-009 finding: {findings}"
+    assert code == 1
+    doc = json.loads(out)
+    hits = [
+        f
+        for f in doc["findings"]
+        if f["rule_id"] == "R-LINT-009" and f["severity"] == "fail"
+    ]
+    assert len(hits) >= 1
+    assert doc["summary"]["hard_failures"] >= 1

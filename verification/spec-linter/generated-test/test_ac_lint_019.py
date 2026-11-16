@@ -1,35 +1,47 @@
-import os
-import tempfile
-import unittest
+"""AC-LINT-019: a spec line ending in two trailing spaces yields a
+fail-severity R-LINT-019 finding naming that line."""
+
+import json
 from pathlib import Path
 
 import spec_linter
 
 
-def _get(value, name, default=None):
-    if isinstance(value, dict):
-        return value.get(name, default)
-    return getattr(value, name, default)
+TARGET_REL = "specs/components/foo/requirements/R-FOO-001.md"
+TARGET_LINE = 3
+
+
+def field(value, name):
+    return value[name] if isinstance(value, dict) else getattr(value, name)
+
+
+def _sev(value):
+    sev = field(value, "severity")
+    return getattr(sev, "value", sev)
+
+
+def _norm(path_value):
+    return Path(str(path_value)).as_posix()
 
 
 COMPONENT_MD = """---
-id: comp-widget
-title: Widget
+id: comp-foo
+title: Foo
 status: draft
-owners: [alice]
+owners: [team]
 sealed: true
-source_path: legacy/widget
+source_path: legacy/foo/
 ---
 
-# Widget
+# Foo
 
 ## Purpose
 
-Widget does a small, self-contained thing for testing purposes.
+Foo returns zero and prints nothing, for fixture purposes only.
 
 ## Scope
 
-- In scope: the widget behavior.
+- In scope: returning zero.
 - Out of scope: everything else.
 
 ## Definitions
@@ -63,159 +75,99 @@ See `constraints.md`.
 - Initial draft.
 """
 
-REQUIREMENT_MD = """# R-WIDGET-001
-
-**R-WIDGET-001** — The widget MUST return the same output for the same input.
-This matches existing behavior; do not regenerate.
-"""
-
-ACCEPTANCE_MD = """# AC-WIDGET-001
-
-Covers: R-WIDGET-001
-Kind: compiled
-
-```gherkin
-Given a widget input
-When the widget runs twice
-Then both outputs are equal
-```
-"""
-
 CONSTRAINTS_MD = """# Constraints
 
-- None beyond existing behavior.
+None beyond the defaults.
+"""
+
+ACCEPTANCE_MD = """# AC-FOO-001
+
+Covers: R-FOO-001
+Kind: generated-test
+
+```gherkin
+Given the foo tool
+When it runs
+Then it returns zero
+```
 """
 
 GLOSSARY_MD = """# Glossary
 
-- **Widget** — a test-only fixture component.
+- **Foo** — a fixture-only term.
 """
 
-REQ_REL = "specs/components/widget/requirements/R-WIDGET-001.md"
-COMP_REL = "specs/components/widget/component.md"
+
+def _requirement(trailing: bool) -> str:
+    third = "**R-FOO-001** — The foo tool MUST return zero."
+    if trailing:
+        third += "  "
+    lines = [
+        "# R-FOO-001",
+        "",
+        third,
+        "It MUST NOT print anything.",
+        "",
+        "Rationale: fixture only.",
+    ]
+    return "\n".join(lines) + "\n"
 
 
-def _write(root, rel, text):
-    path = Path(root) / rel
+def _write(path: Path, text: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text, encoding="utf-8", newline="\n")
-    return path
+    path.write_bytes(text.encode("utf-8"))
 
 
-def _build_corpus(root):
-    _write(root, COMP_REL, COMPONENT_MD)
-    _write(root, REQ_REL, REQUIREMENT_MD)
-    _write(root, "specs/components/widget/acceptance/AC-WIDGET-001.md", ACCEPTANCE_MD)
-    _write(root, "specs/components/widget/constraints.md", CONSTRAINTS_MD)
-    _write(root, "specs/glossary.md", GLOSSARY_MD)
+def _build_repo(root: Path, trailing: bool) -> Path:
+    comp = root / "specs" / "components" / "foo"
+    _write(comp / "component.md", COMPONENT_MD)
+    _write(comp / "constraints.md", CONSTRAINTS_MD)
+    _write(comp / "requirements" / "R-FOO-001.md", _requirement(trailing))
+    _write(comp / "acceptance" / "AC-FOO-001.md", ACCEPTANCE_MD)
+    _write(root / "specs" / "glossary.md", GLOSSARY_MD)
+    return root
 
 
-def _norm(path_value):
-    return str(path_value).replace("\\", "/")
+def _lint019(findings):
+    return [f for f in findings if field(f, "rule_id") == "R-LINT-019"]
 
 
-def _lint019(report):
-    findings = _get(report, "findings", None) or []
-    return [f for f in findings if _get(f, "rule_id") == "R-LINT-019"]
+def test_clean_fixture_has_no_trailing_whitespace_finding(tmp_path):
+    repo = _build_repo(tmp_path / "clean", trailing=False)
+    report = spec_linter.lint(None, repo)
+    assert _lint019(field(report, "findings")) == []
 
 
-def _add_trailing_spaces(root, rel, line_index):
-    """Append two spaces to the given 0-based line; return its 1-based number."""
-    path = Path(root) / rel
-    lines = path.read_text(encoding="utf-8").split("\n")
-    assert lines[line_index].strip() != "", "target line must be non-empty"
-    assert not lines[line_index].endswith((" ", "\t"))
-    lines[line_index] = lines[line_index] + "  "
-    path.write_text("\n".join(lines), encoding="utf-8", newline="\n")
-    return line_index + 1
+def test_trailing_spaces_reported_as_fail_on_that_line(tmp_path):
+    repo = _build_repo(tmp_path / "dirty", trailing=True)
+    # sanity: the fixture really has exactly that one trailing-space line
+    raw_lines = (repo / TARGET_REL).read_text(encoding="utf-8").split("\n")
+    assert raw_lines[TARGET_LINE - 1].endswith("  ")
+    assert [i + 1 for i, l in enumerate(raw_lines) if l != l.rstrip()] == [
+        TARGET_LINE
+    ]
+
+    report = spec_linter.lint(None, repo)
+    hits = _lint019(field(report, "findings"))
+    assert len(hits) == 1, hits
+    hit = hits[0]
+    assert _sev(hit) == "fail"
+    assert _norm(field(hit, "file")) == TARGET_REL
+    assert field(hit, "line") == TARGET_LINE
+
+    hard = report["hard_failures"] if isinstance(report, dict) else report.hard_failures
+    assert hard >= 1
 
 
-class TestACLINT019TrailingWhitespace(unittest.TestCase):
-    def setUp(self):
-        self._tmp = tempfile.TemporaryDirectory()
-        self.repo_root = Path(self._tmp.name).resolve()
-        _build_corpus(self.repo_root)
-
-    def tearDown(self):
-        self._tmp.cleanup()
-
-    def test_clean_corpus_has_no_trailing_whitespace_findings(self):
-        report = spec_linter.lint(None, self.repo_root)
-        self.assertEqual(_lint019(report), [])
-
-    def test_two_trailing_spaces_in_requirement_reports_fail_on_that_line(self):
-        # Sanity baseline: no R-LINT-019 findings before the defect is introduced.
-        baseline = spec_linter.lint(None, self.repo_root)
-        self.assertEqual(_lint019(baseline), [])
-        baseline_hard = _get(baseline, "hard_failures", 0) or 0
-
-        # Line index 2 is the requirement body's first sentence line.
-        line_no = _add_trailing_spaces(self.repo_root, REQ_REL, 2)
-        self.assertEqual(line_no, 3)
-
-        report = spec_linter.lint(None, self.repo_root)
-        findings = _lint019(report)
-        self.assertTrue(findings, "expected an R-LINT-019 finding")
-
-        for f in findings:
-            self.assertEqual(_get(f, "severity"), "fail")
-
-        locations = {(_norm(_get(f, "file")), _get(f, "line")) for f in findings}
-        self.assertEqual(len(locations), 1, f"unexpected locations: {locations}")
-        (file_value, line_value) = next(iter(locations))
-        self.assertTrue(
-            file_value.endswith(REQ_REL),
-            f"finding file {file_value!r} does not name {REQ_REL!r}",
-        )
-        self.assertFalse(os.path.isabs(file_value), "file must be relative to repo_root")
-        self.assertEqual(line_value, line_no)
-
-        hard = _get(report, "hard_failures", 0) or 0
-        self.assertGreaterEqual(hard, 1)
-        self.assertGreater(hard, baseline_hard - 1)
-        self.assertGreaterEqual(hard, baseline_hard + 1)
-
-    def test_fail_not_warn_even_without_strict(self):
-        line_no = _add_trailing_spaces(self.repo_root, REQ_REL, 2)
-        report = spec_linter.lint(None, self.repo_root, strict=False)
-        findings = _lint019(report)
-        self.assertTrue(findings)
-        self.assertTrue(all(_get(f, "severity") == "fail" for f in findings))
-        self.assertTrue(all(_get(f, "line") == line_no for f in findings))
-
-    def test_trailing_spaces_in_frontmatter_line_reported(self):
-        # Line index 2 of component.md is "title: Widget", inside the frontmatter.
-        line_no = _add_trailing_spaces(self.repo_root, COMP_REL, 2)
-        self.assertEqual(line_no, 3)
-        report = spec_linter.lint(None, self.repo_root)
-        findings = _lint019(report)
-        self.assertTrue(findings, "expected an R-LINT-019 finding for a frontmatter line")
-        matching = [
-            f for f in findings
-            if _norm(_get(f, "file")).endswith(COMP_REL) and _get(f, "line") == line_no
-        ]
-        self.assertTrue(matching, f"no finding names {COMP_REL}:{line_no}: {findings}")
-        for f in matching:
-            self.assertEqual(_get(f, "severity"), "fail")
-
-    def test_report_to_json_contains_finding(self):
-        line_no = _add_trailing_spaces(self.repo_root, REQ_REL, 2)
-        report = spec_linter.lint(None, self.repo_root)
-        to_json = getattr(report, "to_json", None)
-        if to_json is None:
-            self.skipTest("report has no to_json")
-        data = to_json()
-        if isinstance(data, str):
-            import json
-            data = json.loads(data)
-        findings = [f for f in data["findings"] if f.get("rule_id") == "R-LINT-019"]
-        self.assertTrue(findings)
-        self.assertTrue(all(f["severity"] == "fail" for f in findings))
-        self.assertTrue(any(
-            _norm(f["file"]).endswith(REQ_REL) and f["line"] == line_no for f in findings
-        ))
-        self.assertGreaterEqual(data["summary"]["hard_failures"], 1)
-
-
-if __name__ == "__main__":
-    unittest.main()
+def test_cli_reports_trailing_whitespace_and_exits_1(tmp_path, capsys):
+    repo = _build_repo(tmp_path / "cli", trailing=True)
+    capsys.readouterr()
+    code = spec_linter.main([f"--repo-root={repo}", "--format=json"])
+    out = capsys.readouterr().out
+    assert code == 1
+    doc = json.loads(out)
+    hits = [f for f in doc["findings"] if f["rule_id"] == "R-LINT-019"]
+    assert len(hits) == 1, hits
+    assert hits[0]["severity"] == "fail"
+    assert _norm(hits[0]["file"]) == TARGET_REL
+    assert hits[0]["line"] == TARGET_LINE

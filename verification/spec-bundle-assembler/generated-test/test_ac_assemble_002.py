@@ -1,26 +1,12 @@
+import spec_bundle_assembler
+
 import importlib.util
 import sys
 from pathlib import Path
 
-import spec_bundle_assembler
 
-
-def _field(value, name, default=None):
-    if isinstance(value, dict):
-        return value.get(name, default)
-    if hasattr(value, name):
-        return getattr(value, name, default)
-    try:
-        return value[name]
-    except Exception:
-        pass
-    getter = getattr(value, "get", None)
-    if callable(getter):
-        try:
-            return getter(name, default)
-        except Exception:
-            pass
-    return default
+def field(value, name):
+    return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
 def _load_spec_linter():
@@ -47,27 +33,10 @@ def _write(path: Path, text: str) -> None:
     path.write_text(text, encoding="utf-8")
 
 
-def _component_md(comp_id, title, source_path, depends_on, purpose):
-    return "\n".join(
-        [
-            "---",
-            "id: " + comp_id,
-            "title: " + title,
-            "status: draft",
-            "owners: [team-a]",
-            "sealed: true",
-            "source_path: " + source_path,
-            "depends_on: " + depends_on,
-            "---",
-            "",
-            "# " + title,
-            "",
-            "## Purpose",
-            "",
-            purpose,
-            "",
-        ]
-    )
+IFACE_MARKER = "zqinterfacemarker"
+PURPOSE_MARKER = "zqpurposemarker"
+REQ_MARKER = "zqrequirementmarker"
+CONSTRAINT_MARKER = "zqconstraintmarker"
 
 
 def _build_corpus(repo_root: Path) -> None:
@@ -80,142 +49,143 @@ def _build_corpus(repo_root: Path) -> None:
     foo = repo_root / "specs" / "components" / "foo"
     _write(
         foo / "component.md",
-        _component_md("comp-foo", "Foo", "legacy/foo/", "[]", "Foo doubles a number."),
+        "---\n"
+        "id: comp-foo\n"
+        "title: Foo\n"
+        "status: draft\n"
+        "owners: [team-a]\n"
+        "sealed: true\n"
+        "source_path: legacy/foo/\n"
+        "depends_on: []\n"
+        "---\n"
+        "\n"
+        "# Foo\n"
+        "\n"
+        "## Purpose\n"
+        "\n"
+        "Foo doubles a number " + PURPOSE_MARKER + ".\n",
     )
     _write(
         foo / "requirements" / "R-FOO-001.md",
-        "# R-FOO-001\n\n**R-FOO-001** — `foo(x)` MUST return `2 * x`.\n",
+        "# R-FOO-001\n"
+        "\n"
+        "**R-FOO-001** — `foo(x)` MUST return `2 * x` (" + REQ_MARKER + ").\n",
     )
     _write(
         foo / "acceptance" / "AC-FOO-001.md",
-        "\n".join(
-            [
-                "# AC-FOO-001",
-                "",
-                "Covers: R-FOO-001",
-                "Kind: generated-test",
-                "",
-                "```gherkin",
-                "Given x = 2",
-                "When foo(x) is called",
-                "Then it returns 4",
-                "```",
-                "",
-            ]
-        ),
+        "# AC-FOO-001\n"
+        "\n"
+        "Covers: R-FOO-001\n"
+        "Kind: generated-test\n"
+        "\n"
+        "```gherkin\n"
+        "Given x = 2\n"
+        "When foo(x) is called\n"
+        "Then it returns 4\n"
+        "```\n",
     )
     _write(
         foo / "interface" / "library.md",
-        "# Library\n\n```\nfoo(x: int) -> int\n```\n",
+        "# Library\n"
+        "\n"
+        "```\n"
+        "foo(x: int) -> int\n"
+        "```\n"
+        "\n"
+        "Returns double its input " + IFACE_MARKER + ".\n",
     )
-    _write(foo / "constraints.md", "# Constraints\n\nNone.\n")
     _write(
-        repo_root / "legacy" / "foo" / "foo.py",
-        "def foo(x: int) -> int:\n    return 2 * x\n",
+        foo / "constraints.md",
+        "# Constraints\n\nNone (" + CONSTRAINT_MARKER + ").\n",
     )
+    _write(repo_root / "legacy" / "foo" / "foo.py", "def foo(x):\n    return 2 * x\n")
 
     # Dependent: comp-bar
     bar = repo_root / "specs" / "components" / "bar"
     _write(
         bar / "component.md",
-        _component_md(
-            "comp-bar", "Bar", "legacy/bar/", "[comp-foo]", "Bar triples a number."
-        ),
+        "---\n"
+        "id: comp-bar\n"
+        "title: Bar\n"
+        "status: draft\n"
+        "owners: [team-a]\n"
+        "sealed: true\n"
+        "source_path: legacy/bar/\n"
+        "depends_on: [comp-foo]\n"
+        "---\n"
+        "\n"
+        "# Bar\n"
+        "\n"
+        "## Purpose\n"
+        "\n"
+        "Bar quadruples a number.\n",
     )
     _write(
         bar / "requirements" / "R-BAR-001.md",
-        "# R-BAR-001\n\n**R-BAR-001** — `bar(x)` MUST return `3 * x`.\n",
+        "# R-BAR-001\n"
+        "\n"
+        "**R-BAR-001** — `bar(x)` MUST return `4 * x`.\n",
     )
     _write(
         bar / "acceptance" / "AC-BAR-001.md",
-        "\n".join(
-            [
-                "# AC-BAR-001",
-                "",
-                "Covers: R-BAR-001",
-                "Kind: generated-test",
-                "",
-                "```gherkin",
-                "Given x = 2",
-                "When bar(x) is called",
-                "Then it returns 6",
-                "```",
-                "",
-            ]
-        ),
+        "# AC-BAR-001\n"
+        "\n"
+        "Covers: R-BAR-001\n"
+        "Kind: generated-test\n"
+        "\n"
+        "```gherkin\n"
+        "Given x = 2\n"
+        "When bar(x) is called\n"
+        "Then it returns 8\n"
+        "```\n",
     )
     _write(
         bar / "interface" / "library.md",
         "# Library\n\n```\nbar(x: int) -> int\n```\n",
     )
     _write(bar / "constraints.md", "# Constraints\n\nNone.\n")
-    _write(
-        repo_root / "legacy" / "bar" / "bar.py",
-        "def bar(x: int) -> int:\n    return 3 * x\n",
-    )
+    _write(repo_root / "legacy" / "bar" / "bar.py", "def bar(x):\n    return 4 * x\n")
 
 
-def test_dependency_interfaces_contains_only_dependency_interface(tmp_path):
+def test_ac_assemble_002_dependency_interfaces_only_interface(tmp_path):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
     _build_corpus(repo_root)
 
     spec_linter = _load_spec_linter()
     report = spec_linter.lint(None, repo_root)
-    hard_failures = _field(report, "hard_failures")
-    if hard_failures is None:
-        summary = _field(report, "summary", {}) or {}
-        hard_failures = _field(summary, "hard_failures")
-    assert hard_failures == 0, "fixture corpus must be lint-clean: %r" % (
-        _field(report, "findings"),
-    )
+    hard = report["hard_failures"] if isinstance(report, dict) else report.hard_failures
+    assert hard == 0
 
     bundle = spec_bundle_assembler.assemble("comp-bar", repo_root)
 
-    dep_interfaces = _field(bundle, "dependency_interfaces")
-    assert dep_interfaces is not None, "bundle has no dependency_interfaces"
-    dep_interfaces = dict(dep_interfaces)
+    dep_ifaces = field(bundle, "dependency_interfaces")
+    assert set(dep_ifaces.keys()) == {"comp-foo"}
 
-    assert set(dep_interfaces.keys()) == {"comp-foo"}, dep_interfaces.keys()
-
-    foo_iface = dep_interfaces["comp-foo"]
+    foo_iface = dep_ifaces["comp-foo"]
     assert isinstance(foo_iface, str)
 
-    # The dependency's interface/ content is present.
+    # Contains the dependency's interface/ content.
+    assert IFACE_MARKER in foo_iface
     assert "foo(x: int) -> int" in foo_iface
-    assert "# Library" in foo_iface
 
-    # None of the dependency's component.md content.
-    for forbidden in (
-        "# Foo",
-        "## Purpose",
-        "Foo doubles a number",
-        "sealed:",
-        "source_path",
-        "legacy/foo",
-        "owners:",
-        "team-a",
-        "status: draft",
-        "depends_on",
-    ):
-        assert forbidden not in foo_iface, (
-            "component.md content %r leaked into dependency_interfaces" % forbidden
-        )
+    # Never the dependency's component.md (frontmatter, heading, Purpose).
+    assert PURPOSE_MARKER not in foo_iface
+    assert "Foo doubles a number" not in foo_iface
+    assert "id: comp-foo" not in foo_iface
+    assert "source_path" not in foo_iface
+    assert "## Purpose" not in foo_iface
 
-    # None of the dependency's requirements/ content.
-    for forbidden in ("R-FOO-001", "MUST return", "2 * x"):
-        assert forbidden not in foo_iface, (
-            "requirements/ content %r leaked into dependency_interfaces" % forbidden
-        )
+    # Never the dependency's requirements/.
+    assert REQ_MARKER not in foo_iface
+    assert "R-FOO-001" not in foo_iface
+    assert "MUST return `2 * x`" not in foo_iface
 
-    # None of the dependency's constraints.md content.
-    for forbidden in ("# Constraints", "None."):
-        assert forbidden not in foo_iface, (
-            "constraints.md content %r leaked into dependency_interfaces" % forbidden
-        )
+    # Never the dependency's constraints.md.
+    assert CONSTRAINT_MARKER not in foo_iface
+    assert "# Constraints" not in foo_iface
 
-    # And none of its acceptance/ content either.
-    for forbidden in ("AC-FOO-001", "Covers:", "Then it returns 4"):
-        assert forbidden not in foo_iface, (
-            "acceptance/ content %r leaked into dependency_interfaces" % forbidden
-        )
+    # And none of those internals leak into any dependency_interfaces value.
+    for value in dep_ifaces.values():
+        for marker in (PURPOSE_MARKER, REQ_MARKER, CONSTRAINT_MARKER):
+            assert marker not in value

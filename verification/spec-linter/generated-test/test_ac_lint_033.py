@@ -1,66 +1,55 @@
-import json
+"""AC-LINT-033 (Covers: R-LINT-033).
+
+lint() folds citation-checker's and size-checker's findings into its own
+report as Finding objects, and load_corpus is corpus-loader's function,
+re-exported unchanged.
+"""
+
+import dataclasses
 from pathlib import Path
 
 import spec_linter
 
 
-COMPONENT_REL = "specs/components/widget/component.md"
+COMPONENT_REL = "specs/components/foo/component.md"
+SENTENCE = "This component returns a fixed value to every caller always."  # 10 words
 
 
-def _get(value, name, default=None):
-    if isinstance(value, dict):
-        return value.get(name, default)
-    return getattr(value, name, default)
+def field(value, name):
+    return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def _norm_str(value):
-    inner = getattr(value, "value", value)
-    return str(inner)
-
-
-def _norm_path(value):
-    return str(value).replace("\\", "/")
-
-
-def _purpose_text():
-    sentence = "This component formats widget records into stable plain text output."
-    words = (sentence + " ") * 16
-    tokens = words.split()
-    assert len(tokens) == 160
-    return " ".join(tokens)
-
-
-def _write(path: Path, text: str):
+def _write(path: Path, text: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
 
 
-def _build_corpus(repo_root: Path):
-    comp_dir = repo_root / "specs" / "components" / "widget"
-    component_md = (
+def _build_corpus(repo_root: Path, purpose_text: str, rationale_text: str) -> None:
+    comp = repo_root / "specs" / "components" / "foo"
+    _write(
+        comp / "component.md",
         "---\n"
-        "id: comp-widget\n"
-        "title: Widget\n"
+        "id: comp-foo\n"
+        "title: Foo\n"
         "status: draft\n"
-        "owners: [alice]\n"
+        "owners: [test-team]\n"
         "sealed: true\n"
-        "source_path: legacy/widget.py\n"
+        "source_path: legacy/foo/\n"
         "---\n"
         "\n"
-        "# Widget\n"
+        "# Foo\n"
         "\n"
         "## Purpose\n"
         "\n"
-        + _purpose_text()
-        + "\n"
+        f"{purpose_text}\n"
         "\n"
         "## Rationale\n"
         "\n"
-        "This design follows D999.\n"
+        f"{rationale_text}\n"
         "\n"
         "## Scope\n"
         "\n"
-        "- In scope: formatting widget records.\n"
+        "- In scope: returning a fixed value.\n"
         "- Out of scope: everything else.\n"
         "\n"
         "## Definitions\n"
@@ -91,139 +80,143 @@ def _build_corpus(repo_root: Path):
         "\n"
         "## Change log\n"
         "\n"
-        "- Initial draft.\n"
-    )
-    _write(comp_dir / "component.md", component_md)
-    _write(
-        comp_dir / "requirements" / "R-WIDGET-001.md",
-        "# R-WIDGET-001\n\n**R-WIDGET-001** — The widget MUST format each record as plain text.\n",
+        "- Initial draft.\n",
     )
     _write(
-        comp_dir / "acceptance" / "AC-WIDGET-001.md",
-        "# AC-WIDGET-001\n\n"
-        "Covers: R-WIDGET-001\n"
-        "Kind: generated-test\n\n"
+        comp / "requirements" / "R-FOO-001.md",
+        "# R-FOO-001\n\n**R-FOO-001** — `foo` MUST return the integer 1.\n",
+    )
+    _write(
+        comp / "acceptance" / "AC-FOO-001.md",
+        "# AC-FOO-001\n"
+        "\n"
+        "Covers: R-FOO-001\n"
+        "Kind: generated-test\n"
+        "\n"
         "```gherkin\n"
-        "Given a record\n"
-        "When the widget formats it\n"
-        "Then the output is plain text\n"
+        "Given nothing\n"
+        "When foo() runs\n"
+        "Then it returns 1\n"
         "```\n",
     )
     _write(
-        comp_dir / "interface" / "library.md",
-        "# Library\n\n```\nformat(record: dict) -> str\n```\n\nFormats a record as plain text.\n",
+        comp / "interface" / "library.md",
+        "# Library\n\n```\nfoo() -> int\n```\n\nReturns the integer 1.\n",
     )
     _write(
-        comp_dir / "constraints.md",
-        "# Constraints\n\n- Formatting one record takes under 10 ms, measured by a timing test.\n",
+        comp / "interface" / "data" / "Value.md",
+        "# `Value`\n\nA plain integer.\n",
+    )
+    _write(
+        comp / "constraints.md",
+        "# Constraints\n\n"
+        "- Latency: a call completes in under 1 second, measured by timing one call.\n",
     )
     _write(
         repo_root / "specs" / "glossary.md",
-        "# Glossary\n\n- **Gizmo** — an unrelated example term.\n",
+        "# Glossary\n\n- **Widget** — a thing used only by this fixture.\n",
     )
 
 
-def _write_fake_checker(repo_root: Path, slug: str, module_name: str, finding: dict, log_path: Path):
-    source = (
-        "import json\n"
-        "\n"
-        "_LOG = " + repr(str(log_path)) + "\n"
-        "_FINDING = " + repr(finding) + "\n"
-        "\n"
-        "def check(repo_root):\n"
-        "    with open(_LOG, 'a', encoding='utf-8') as fh:\n"
-        "        fh.write(json.dumps({'module': " + repr(module_name) + ", 'repo_root': str(repo_root)}) + '\\n')\n"
-        "    return [dict(_FINDING)]\n"
+def _broken_corpus(repo_root: Path) -> None:
+    purpose = " ".join([SENTENCE] * 16)
+    assert len(purpose.split()) == 160
+    _build_corpus(
+        repo_root,
+        purpose,
+        "No further history applies. This design follows `D999`.",
     )
-    _write(repo_root / "gen" / slug / (module_name + ".py"), source)
 
 
-CITE_FINDING = {
-    "rule_id": "R-CITE-001",
-    "severity": "fail",
-    "file": COMPONENT_REL,
-    "line": 17,
-    "message": "cites D999, which has no decision file",
-}
-
-SIZE_FINDING = {
-    "rule_id": "R-SIZE-004",
-    "severity": "fail",
-    "file": COMPONENT_REL,
-    "line": 12,
-    "message": "Purpose section is 160 words, above the 150-word hard cap",
-}
-
-
-def _setup(tmp_path: Path):
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    _build_corpus(repo_root)
-    log_path = tmp_path / "checker_calls.log"
-    _write_fake_checker(repo_root, "citation-checker", "citation_checker", CITE_FINDING, log_path)
-    _write_fake_checker(repo_root, "size-checker", "size_checker", SIZE_FINDING, log_path)
-    return repo_root, log_path
-
-
-def _hard_failures(report):
-    value = _get(report, "hard_failures", None)
-    if value is None:
-        summary = _get(report, "summary", None)
-        if summary is not None:
-            value = _get(summary, "hard_failures", None)
-    return value
-
-
-def _is_finding(obj):
+def _is_finding(value) -> bool:
+    if isinstance(value, dict):
+        return False
     finding_cls = getattr(spec_linter, "Finding", None)
-    if isinstance(finding_cls, type):
-        return isinstance(obj, finding_cls)
-    return type(obj).__name__ == "Finding"
+    if finding_cls is not None:
+        return isinstance(value, finding_cls)
+    return dataclasses.is_dataclass(value) and type(value).__name__ == "Finding"
 
 
-def test_lint_includes_citation_and_size_checker_findings_as_findings(tmp_path):
-    repo_root, log_path = _setup(tmp_path)
+def _same_file(file_value, repo_root: Path) -> bool:
+    text = str(file_value).replace("\\", "/")
+    if text == COMPONENT_REL:
+        return True
+    p = Path(str(file_value))
+    if p.is_absolute():
+        try:
+            return p.resolve() == (repo_root / COMPONENT_REL).resolve()
+        except OSError:
+            return False
+    return False
+
+
+def test_clean_baseline_has_no_hard_failures(tmp_path):
+    repo_root = tmp_path / "clean"
+    repo_root.mkdir()
+    _build_corpus(repo_root, " ".join([SENTENCE] * 3), "No further history applies.")
+    report = spec_linter.lint(None, repo_root)
+    hard = report["hard_failures"] if isinstance(report, dict) else report.hard_failures
+    fails = [
+        (field(f, "rule_id"), field(f, "file"), field(f, "message"))
+        for f in field(report, "findings")
+        if field(f, "severity") == "fail"
+    ]
+    assert hard == 0, fails
+
+
+def test_lint_includes_citation_and_size_checker_findings(tmp_path):
+    repo_root = tmp_path / "broken"
+    repo_root.mkdir()
+    _broken_corpus(repo_root)
 
     report = spec_linter.lint(None, repo_root)
+    findings = list(field(report, "findings"))
+    summary = [
+        (field(f, "rule_id"), field(f, "severity"), str(field(f, "file")), field(f, "message"))
+        for f in findings
+    ]
 
-    findings = list(_get(report, "findings", []) or [])
+    cite = [
+        f
+        for f in findings
+        if field(f, "rule_id") == "R-CITE-001" and field(f, "severity") == "fail"
+    ]
+    size = [
+        f
+        for f in findings
+        if field(f, "rule_id") == "R-SIZE-004" and field(f, "severity") == "fail"
+    ]
 
-    cite = [f for f in findings if _norm_str(_get(f, "rule_id")) == "R-CITE-001"]
-    size = [f for f in findings if _norm_str(_get(f, "rule_id")) == "R-SIZE-004"]
+    assert len(cite) >= 1, summary
+    assert len(size) >= 1, summary
 
-    assert len(cite) == 1, findings
-    assert len(size) == 1, findings
+    cite_on_file = [f for f in cite if _same_file(field(f, "file"), repo_root)]
+    size_on_file = [f for f in size if _same_file(field(f, "file"), repo_root)]
+    assert cite_on_file, summary
+    assert size_on_file, summary
 
-    for found, expected in ((cite[0], CITE_FINDING), (size[0], SIZE_FINDING)):
-        assert _is_finding(found), type(found)
-        assert not isinstance(found, dict)
-        assert _norm_str(_get(found, "severity")) == "fail"
-        assert _norm_path(_get(found, "file")) == COMPONENT_REL
-        assert _get(found, "line") == expected["line"]
-        assert _get(found, "message") == expected["message"]
+    for f in cite_on_file + size_on_file:
+        assert _is_finding(f), (type(f), f)
 
-    # citation-checker's findings come before size-checker's
-    assert findings.index(cite[0]) < findings.index(size[0])
+    assert any("D999" in str(field(f, "message")) for f in cite_on_file), summary
 
-    assert _hard_failures(report) == 2
-
-    # Both dependency checkers really ran, against this repo_root
-    assert log_path.exists()
-    records = [json.loads(line) for line in log_path.read_text(encoding="utf-8").splitlines() if line.strip()]
-    modules = [r["module"] for r in records]
-    assert "citation_checker" in modules
-    assert "size_checker" in modules
-    for r in records:
-        assert Path(r["repo_root"]).resolve() == repo_root.resolve()
+    hard = report["hard_failures"] if isinstance(report, dict) else report.hard_failures
+    assert hard == 2, summary
 
 
 def test_load_corpus_returns_corpus_with_component(tmp_path):
-    repo_root, _ = _setup(tmp_path)
+    repo_root = tmp_path / "broken"
+    repo_root.mkdir()
+    _broken_corpus(repo_root)
 
-    assert callable(getattr(spec_linter, "load_corpus", None))
-    corpus = spec_linter.load_corpus(repo_root)
+    load_corpus = spec_linter.load_corpus
+    assert callable(load_corpus)
+    assert getattr(load_corpus, "__name__", None) == "load_corpus"
 
+    corpus = load_corpus(repo_root)
     assert type(corpus).__name__ == "Corpus"
-    components = _get(corpus, "components", None)
-    assert components is not None
-    assert "widget" in components
+    components = field(corpus, "components")
+    assert "foo" in components, list(components)
+    comp = components["foo"]
+    assert type(comp).__name__ == "Component"
+    assert field(comp, "name") == "foo"

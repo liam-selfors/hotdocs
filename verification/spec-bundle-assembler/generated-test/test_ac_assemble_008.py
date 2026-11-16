@@ -1,14 +1,89 @@
+import spec_bundle_assembler
+
 import importlib.util
 import sys
 from pathlib import Path
 
-import spec_bundle_assembler
+
+GLOSSARY = "# Glossary\n\n- **Foo** — a test term.\n"
+
+COMPONENT_MD = (
+    "---\n"
+    "id: comp-foo\n"
+    "title: Foo\n"
+    "status: draft\n"
+    "owners: [team-a]\n"
+    "sealed: true\n"
+    "source_path: legacy/foo/\n"
+    "depends_on: []\n"
+    "---\n"
+    "\n"
+    "# Foo\n"
+    "\n"
+    "## Purpose\n"
+    "\n"
+    "Foo doubles a number.\n"
+)
+
+REQUIREMENT_MD = "# R-FOO-001\n\n**R-FOO-001** — `foo(x)` MUST return `2 * x`.\n"
+
+ACCEPTANCE_MD = (
+    "# AC-FOO-001\n"
+    "\n"
+    "Covers: R-FOO-001\n"
+    "Kind: generated-test\n"
+    "\n"
+    "```gherkin\n"
+    "Given x = 2\n"
+    "When foo(x) is called\n"
+    "Then it returns 4\n"
+    "```\n"
+)
+
+LIBRARY_MD = "# Library\n\n```\nfoo(x: int) -> int\n```\n"
+
+CONSTRAINTS_MD = "# Constraints\n\nNone.\n"
+
+LEGACY_FOO_PY = "def foo(x):\n    return 2 * x\n"
+
+GEN_FILES = {
+    "foo.py": "def foo(x):\n    \"\"\"Double x.\"\"\"\n    return 2 * x\n",
+    "sub/helper.py": "HELPER_MARKER = 'hint-content-marker-123'\n",
+}
+
+COMPARED_FIELDS = [
+    "component_id",
+    "spec",
+    "interface",
+    "constraints",
+    "dependency_interfaces",
+    "dependency_context",
+    "dependency_usage",
+    "vars",
+    "glossary",
+]
 
 
-def _field(value, name):
-    if isinstance(value, dict):
-        return value.get(name)
-    return getattr(value, name, None)
+def field(value, name):
+    return value[name] if isinstance(value, dict) else getattr(value, name)
+
+
+def _write(path: Path, text: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+
+
+def _build_corpus(repo_root: Path) -> None:
+    _write(repo_root / "specs" / "glossary.md", GLOSSARY)
+    comp = repo_root / "specs" / "components" / "foo"
+    _write(comp / "component.md", COMPONENT_MD)
+    _write(comp / "requirements" / "R-FOO-001.md", REQUIREMENT_MD)
+    _write(comp / "acceptance" / "AC-FOO-001.md", ACCEPTANCE_MD)
+    _write(comp / "interface" / "library.md", LIBRARY_MD)
+    _write(comp / "constraints.md", CONSTRAINTS_MD)
+    _write(repo_root / "legacy" / "foo" / "foo.py", LEGACY_FOO_PY)
+    for rel, text in GEN_FILES.items():
+        _write(repo_root / "gen" / "foo" / rel, text)
 
 
 def _load_spec_linter():
@@ -30,133 +105,40 @@ def _load_spec_linter():
     return spec_linter
 
 
-def _write(path: Path, text: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text, encoding="utf-8")
-
-
-def _build_corpus(repo_root: Path) -> None:
-    _write(
-        repo_root / "specs" / "glossary.md",
-        "# Glossary\n\n- **Foo** — a test term.\n",
-    )
-    comp_dir = repo_root / "specs" / "components" / "foo"
-    _write(
-        comp_dir / "component.md",
-        "---\n"
-        "id: comp-foo\n"
-        "title: Foo\n"
-        "status: draft\n"
-        "owners: [team-a]\n"
-        "sealed: true\n"
-        "source_path: legacy/foo/\n"
-        "depends_on: []\n"
-        "---\n"
-        "\n"
-        "# Foo\n"
-        "\n"
-        "## Purpose\n"
-        "\n"
-        "Foo doubles a number.\n",
-    )
-    _write(
-        comp_dir / "requirements" / "R-FOO-001.md",
-        "# R-FOO-001\n\n**R-FOO-001** — `foo(x)` MUST return `2 * x`.\n",
-    )
-    _write(
-        comp_dir / "acceptance" / "AC-FOO-001.md",
-        "# AC-FOO-001\n"
-        "\n"
-        "Covers: R-FOO-001\n"
-        "Kind: generated-test\n"
-        "\n"
-        "```gherkin\n"
-        "Given x = 2\n"
-        "When foo(x) is called\n"
-        "Then it returns 4\n"
-        "```\n",
-    )
-    _write(
-        comp_dir / "interface" / "library.md",
-        "# Library\n\n```\nfoo(x: int) -> int\n```\n",
-    )
-    _write(comp_dir / "constraints.md", "# Constraints\n\nNone.\n")
-
-
-def _normalize_key(key) -> str:
-    k = str(key).replace("\\", "/")
-    while k.startswith("./"):
-        k = k[2:]
-    for prefix in ("gen/foo/",):
-        if k.startswith(prefix):
-            k = k[len(prefix):]
-    return k
-
-
-def _as_text(value):
-    if isinstance(value, (bytes, bytearray)):
-        return bytes(value).decode("utf-8")
-    return value
-
-
-def test_ac_assemble_008_hint_mode_adds_hint_code_only(tmp_path):
+def test_ac_assemble_008_hint_mode_adds_hint_code_and_changes_only_hash(tmp_path):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
     _build_corpus(repo_root)
 
-    gen_files = {
-        "foo.py": "def foo(x):\n    return 2 * x\n",
-        "sub/helper.txt": "helper content for hint mode\n",
-    }
-    for rel, content in gen_files.items():
-        _write(repo_root / "gen" / "foo" / rel, content)
-
     spec_linter = _load_spec_linter()
     report = spec_linter.lint(None, repo_root)
-    assert report.hard_failures == 0, [
-        (_field(f, "rule_id"), _field(f, "file"), _field(f, "message"))
-        for f in (_field(report, "findings") or [])
-    ]
+    hard = report["hard_failures"] if isinstance(report, dict) else report.hard_failures
+    assert hard == 0
 
     cold = spec_bundle_assembler.assemble("comp-foo", repo_root, mode="cold")
     hint = spec_bundle_assembler.assemble("comp-foo", repo_root, mode="hint")
 
     # Cold mode carries no hint_code.
-    assert _field(cold, "hint_code") is None
+    assert field(cold, "hint_code") is None
 
-    # Hint mode carries gen/foo/ content, keyed by relative path.
-    hint_code = _field(hint, "hint_code")
+    # Hint mode carries the gen/foo/ content, keyed by relative path.
+    hint_code = field(hint, "hint_code")
     assert hint_code is not None
-    hint_map = {_normalize_key(k): _as_text(v) for k, v in dict(hint_code).items()}
-    for rel, content in gen_files.items():
-        assert rel in hint_map, (rel, sorted(hint_map))
-        assert hint_map[rel] == content
+    assert dict(hint_code) == GEN_FILES
 
     # Every other field except spec_bundle_hash matches cold mode.
-    for name in (
-        "component_id",
-        "spec",
-        "interface",
-        "constraints",
-        "dependency_interfaces",
-        "dependency_context",
-        "dependency_usage",
-        "vars",
-        "glossary",
-    ):
-        assert _field(hint, name) == _field(cold, name), name
+    for name in COMPARED_FIELDS:
+        assert field(hint, name) == field(cold, name), (
+            f"field {name!r} differs between hint and cold mode"
+        )
 
-    assert _field(hint, "component_id") == "comp-foo"
-
-    # gen/ content must not leak into the cold bundle's own fields.
+    # The gen/ content is kept separate, never merged into the cold fields.
     for name in ("spec", "interface", "constraints", "glossary"):
-        text = _field(hint, name) or ""
-        assert "helper content for hint mode" not in text, name
-        assert "return 2 * x" not in text, name
+        assert "hint-content-marker-123" not in field(hint, name)
 
-    # spec_bundle_hash differs, since R-ASSEMBLE-007 hashes mode + gen/ in hint mode.
-    cold_hash = _field(cold, "spec_bundle_hash")
-    hint_hash = _field(hint, "spec_bundle_hash")
+    # spec_bundle_hash differs, since the mode and gen/foo/ are hashed in hint mode.
+    cold_hash = field(cold, "spec_bundle_hash")
+    hint_hash = field(hint, "spec_bundle_hash")
     assert isinstance(cold_hash, str) and cold_hash
     assert isinstance(hint_hash, str) and hint_hash
-    assert cold_hash != hint_hash
+    assert hint_hash != cold_hash

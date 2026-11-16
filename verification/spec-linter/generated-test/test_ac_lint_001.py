@@ -1,26 +1,58 @@
+"""AC-LINT-001: a component.md with no `owners` field yields a fail-severity
+R-LINT-001 finding."""
+
 import json
 from pathlib import Path
-
-import pytest
 
 import spec_linter
 
 
-def _get(value, key, default=None):
-    if isinstance(value, dict):
-        return value.get(key, default)
-    return getattr(value, key, default)
+def field(value, name):
+    return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def _findings(report):
-    findings = _get(report, "findings", None)
-    if findings is None:
-        return []
-    return list(findings)
+COMPONENT_BODY = """
+# Foo
 
+## Purpose
 
-def _norm(path_value):
-    return str(path_value).replace("\\", "/")
+Foo does one small thing for testing.
+
+## Scope
+
+- In scope: the one thing.
+- Out of scope: everything else.
+
+## Definitions
+
+None.
+
+## Behavior
+
+See `requirements/`.
+
+## Interfaces
+
+See `interface/`.
+
+## Data
+
+See `interface/data/`.
+
+## Acceptance criteria
+
+See `acceptance/`.
+
+## Non-functional constraints
+
+See `constraints.md`.
+
+## Open questions
+
+## Change log
+
+- Initial draft.
+"""
 
 
 def _write(path: Path, text: str) -> None:
@@ -28,191 +60,100 @@ def _write(path: Path, text: str) -> None:
     path.write_text(text, encoding="utf-8")
 
 
-def _build_fixture(repo_root: Path, include_owners: bool) -> Path:
-    specs = repo_root / "specs"
-    _write(
-        specs / "glossary.md",
-        "# Glossary\n\nCanonical vocabulary for this fixture corpus.\n",
-    )
-
-    comp_dir = specs / "components" / "foo"
-    frontmatter_lines = [
+def _build_repo(root: Path, include_owners: bool) -> Path:
+    specs = root / "specs"
+    lines = [
         "---",
         "id: comp-foo",
         "title: Foo",
         "status: draft",
     ]
     if include_owners:
-        frontmatter_lines.append("owners: [fixture-team]")
-    frontmatter_lines.extend(
-        [
-            "sealed: true",
-            "source_path: legacy/foo",
-            "---",
-        ]
-    )
-    body = "\n".join(
-        [
-            "",
-            "# Foo",
-            "",
-            "## Purpose",
-            "",
-            "Foo is a small fixture component used only to exercise the linter.",
-            "",
-            "## Scope",
-            "",
-            "- In scope: fixture behavior.",
-            "- Out of scope: everything else.",
-            "",
-            "## Definitions",
-            "",
-            "None.",
-            "",
-            "## Behavior",
-            "",
-            "See `requirements/`.",
-            "",
-            "## Interfaces",
-            "",
-            "See `interface/`.",
-            "",
-            "## Data",
-            "",
-            "See `interface/data/`.",
-            "",
-            "## Acceptance criteria",
-            "",
-            "See `acceptance/`.",
-            "",
-            "## Non-functional constraints",
-            "",
-            "See `constraints.md`.",
-            "",
-            "## Open questions",
-            "",
-            "## Change log",
-            "",
-            "- Initial draft.",
-            "",
-        ]
-    )
-    component_md = comp_dir / "component.md"
-    _write(component_md, "\n".join(frontmatter_lines) + "\n" + body)
-
+        lines.append("owners: [test-team]")
+    lines += [
+        "sealed: true",
+        "source_path: legacy/foo/",
+        "---",
+    ]
     _write(
-        comp_dir / "requirements" / "R-FOO-001.md",
-        "# R-FOO-001\n\n**R-FOO-001** — Foo MUST do the fixture thing.\n",
+        specs / "components" / "foo" / "component.md",
+        "\n".join(lines) + "\n" + COMPONENT_BODY,
     )
     _write(
-        comp_dir / "acceptance" / "AC-FOO-001.md",
-        "\n".join(
-            [
-                "# AC-FOO-001",
-                "",
-                "Covers: R-FOO-001",
-                "Kind: compiled",
-                "",
-                "```gherkin",
-                "Given a fixture",
-                "When foo runs",
-                "Then the fixture thing happens",
-                "```",
-                "",
-            ]
-        ),
+        specs / "components" / "foo" / "requirements" / "R-FOO-001.md",
+        "# R-FOO-001\n\n**R-FOO-001** — Foo MUST match existing behavior.\n",
     )
     _write(
-        comp_dir / "constraints.md",
-        "# Constraints\n\n- None beyond the fixture.\n",
+        specs / "components" / "foo" / "acceptance" / "AC-FOO-001.md",
+        "# AC-FOO-001\n\nCovers: R-FOO-001\nKind: compiled\n\n"
+        "```gherkin\nGiven foo\nWhen it runs\nThen it matches existing behavior\n```\n",
     )
-    return component_md
+    _write(
+        specs / "components" / "foo" / "constraints.md",
+        "# Constraints\n\nNone.\n",
+    )
+    _write(
+        specs / "glossary.md",
+        "# Glossary\n\n- **Foo** — a test term.\n",
+    )
+    return root
 
 
-def _lint_rule_findings(report, rule_id):
-    return [f for f in _findings(report) if _get(f, "rule_id") == rule_id]
+def _findings(report):
+    return list(field(report, "findings"))
+
+
+def _lint001_fail_on_foo(findings):
+    out = []
+    for f in findings:
+        if field(f, "rule_id") != "R-LINT-001":
+            continue
+        if field(f, "severity") != "fail":
+            continue
+        file = str(field(f, "file")).replace("\\", "/")
+        if file.endswith("specs/components/foo/component.md"):
+            out.append(f)
+    return out
+
+
+def test_control_with_owners_has_no_r_lint_001_finding(tmp_path):
+    repo = _build_repo(tmp_path / "ok", include_owners=True)
+    report = spec_linter.lint(None, repo)
+    lint001 = [
+        f
+        for f in _findings(report)
+        if field(f, "rule_id") == "R-LINT-001" and field(f, "severity") == "fail"
+    ]
+    assert lint001 == [], f"unexpected R-LINT-001 findings: {lint001!r}"
 
 
 def test_missing_owners_yields_fail_finding_for_r_lint_001(tmp_path):
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    _build_fixture(repo_root, include_owners=False)
-
-    report = spec_linter.lint(None, repo_root)
-
-    r001 = _lint_rule_findings(report, "R-LINT-001")
-    assert r001, (
-        "expected at least one R-LINT-001 finding for a component.md missing "
-        f"'owners'; got findings: {_findings(report)!r}"
+    repo = _build_repo(tmp_path / "bad", include_owners=False)
+    report = spec_linter.lint(None, repo)
+    findings = _findings(report)
+    matching = _lint001_fail_on_foo(findings)
+    assert matching, (
+        "expected a fail-severity R-LINT-001 finding on "
+        f"specs/components/foo/component.md, got: {findings!r}"
     )
-
-    fail_r001 = [f for f in r001 if _get(f, "severity") == "fail"]
-    assert fail_r001, (
-        f"expected an R-LINT-001 finding with severity 'fail'; got: {r001!r}"
-    )
-
-    on_component = [
-        f
-        for f in fail_r001
-        if _norm(_get(f, "file", "")).endswith("components/foo/component.md")
-    ]
-    assert on_component, (
-        "expected the fail-severity R-LINT-001 finding to be reported on "
-        f"specs/components/foo/component.md; got: {fail_r001!r}"
-    )
-
-    if isinstance(report, dict):
-        summary = report.get("summary") or {}
-        hard_failures = summary.get("hard_failures")
-    else:
-        hard_failures = getattr(report, "hard_failures", None)
-    assert hard_failures is not None
-    assert int(hard_failures) >= 1
+    hard = report["hard_failures"] if isinstance(report, dict) else report.hard_failures
+    assert hard >= 1
 
 
-def test_present_owners_yields_no_r_lint_001_finding_on_component(tmp_path):
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    _build_fixture(repo_root, include_owners=True)
-
-    report = spec_linter.lint(None, repo_root)
-
-    offending = [
-        f
-        for f in _lint_rule_findings(report, "R-LINT-001")
-        if _get(f, "severity") == "fail"
-        and _norm(_get(f, "file", "")).endswith("components/foo/component.md")
-    ]
-    assert not offending, (
-        "a component.md carrying every required field (including 'owners') "
-        f"must not produce a fail-severity R-LINT-001 finding; got: {offending!r}"
-    )
-
-
-def test_cli_missing_owners_exits_1_and_reports_r_lint_001(tmp_path, capsys):
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    _build_fixture(repo_root, include_owners=False)
-
-    exit_code = spec_linter.main(
-        ["--format=json", f"--repo-root={repo_root}"]
-    )
+def test_cli_missing_owners_reports_r_lint_001_and_exits_1(tmp_path, capsys):
+    repo = _build_repo(tmp_path / "cli", include_owners=False)
+    code = spec_linter.main(["--format=json", f"--repo-root={repo}"])
     captured = capsys.readouterr()
-
-    assert exit_code == 1, (
-        f"expected exit code 1 with a fail-severity finding; got {exit_code!r}; "
-        f"stdout={captured.out!r} stderr={captured.err!r}"
-    )
-
-    payload = json.loads(captured.out)
-    findings = payload.get("findings") or []
+    assert code == 1
+    doc = json.loads(captured.out)
     matching = [
         f
-        for f in findings
-        if f.get("rule_id") == "R-LINT-001" and f.get("severity") == "fail"
+        for f in doc["findings"]
+        if f["rule_id"] == "R-LINT-001"
+        and f["severity"] == "fail"
+        and str(f["file"]).replace("\\", "/").endswith(
+            "specs/components/foo/component.md"
+        )
     ]
-    assert matching, (
-        f"expected a fail-severity R-LINT-001 finding in JSON output; got: {findings!r}"
-    )
-    summary = payload.get("summary") or {}
-    assert int(summary.get("hard_failures", 0)) >= 1
+    assert matching, f"no fail R-LINT-001 finding in JSON report: {doc!r}"
+    assert doc["summary"]["hard_failures"] >= 1

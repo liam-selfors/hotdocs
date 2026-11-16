@@ -1,18 +1,12 @@
+import spec_bundle_assembler
+
 import importlib.util
 import sys
 from pathlib import Path
 
-import spec_bundle_assembler
 
-
-def _field(value, name, default=None):
-    if isinstance(value, dict):
-        return value.get(name, default)
-    try:
-        return value[name]
-    except Exception:
-        pass
-    return getattr(value, name, default)
+def field(value, name):
+    return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
 def _load_spec_linter():
@@ -39,21 +33,45 @@ def _write(path: Path, text: str) -> None:
     path.write_text(text, encoding="utf-8")
 
 
-VAR_DESCRIPTION = "The base URL the Foo service is reached at."
-VAR_TYPE_LINE = "Type: string (URL)"
-VAR_REQUIRED_LINE = "Required: yes"
+VAR_DESCRIPTION_LINE = "Description: the base URL the Foo service is reached at."
+VAR_NAME_LINE = "Name: VAR-FOO-URL"
+VAR_TYPE_LINE = "Type: url"
+VAR_REQUIRED_LINE = "Required: optional"
 VAR_SENSITIVITY_LINE = "Sensitivity: public"
+
+VAR_BODY = (
+    "# VAR-FOO-URL\n"
+    "\n"
+    "- " + VAR_NAME_LINE + "\n"
+    "- " + VAR_TYPE_LINE + "\n"
+    "- " + VAR_REQUIRED_LINE + "\n"
+    "- " + VAR_DESCRIPTION_LINE + "\n"
+    "- " + VAR_SENSITIVITY_LINE + "\n"
+)
 
 
 def _build_corpus(repo_root: Path) -> None:
+    specs = repo_root / "specs"
+
     _write(
-        repo_root / "specs" / "glossary.md",
+        specs / "glossary.md",
         "# Glossary\n"
         "\n"
         "- **Foo** — a test term.\n",
     )
 
-    comp = repo_root / "specs" / "components" / "foo"
+    _write(
+        specs / "vars" / "VAR-FOO-URL.md",
+        "---\n"
+        "id: VAR-FOO-URL\n"
+        "title: Foo URL\n"
+        "status: draft\n"
+        "owners: [team-a]\n"
+        "---\n"
+        "\n" + VAR_BODY,
+    )
+
+    comp = specs / "components" / "foo"
     _write(
         comp / "component.md",
         "---\n"
@@ -73,12 +91,14 @@ def _build_corpus(repo_root: Path) -> None:
         "\n"
         "Foo doubles a number.\n",
     )
+
     _write(
         comp / "requirements" / "R-FOO-001.md",
         "# R-FOO-001\n"
         "\n"
         "**R-FOO-001** — `foo(x)` MUST return `2 * x`.\n",
     )
+
     _write(
         comp / "acceptance" / "AC-FOO-001.md",
         "# AC-FOO-001\n"
@@ -92,6 +112,7 @@ def _build_corpus(repo_root: Path) -> None:
         "Then it returns 4\n"
         "```\n",
     )
+
     _write(
         comp / "interface" / "library.md",
         "# Library\n"
@@ -100,6 +121,7 @@ def _build_corpus(repo_root: Path) -> None:
         "foo(x: int) -> int\n"
         "```\n",
     )
+
     _write(
         comp / "constraints.md",
         "# Constraints\n"
@@ -107,68 +129,36 @@ def _build_corpus(repo_root: Path) -> None:
         "None.\n",
     )
 
-    _write(
-        repo_root / "specs" / "vars" / "VAR-FOO-URL.md",
-        "---\n"
-        "id: VAR-FOO-URL\n"
-        "title: Foo URL\n"
-        "status: draft\n"
-        "owners: [team-a]\n"
-        "type: string\n"
-        "required: true\n"
-        "sensitivity: public\n"
-        "---\n"
-        "\n"
-        "# VAR-FOO-URL\n"
-        "\n"
-        + VAR_DESCRIPTION
-        + "\n"
-        "\n"
-        "- " + VAR_TYPE_LINE + "\n"
-        "- " + VAR_REQUIRED_LINE + "\n"
-        "- " + VAR_SENSITIVITY_LINE + "\n",
-    )
 
-    _write(
-        repo_root / "legacy" / "foo" / "foo.py",
-        "def foo(x):\n"
-        "    return 2 * x\n",
-    )
-
-
-def test_ac_assemble_003_bundle_vars_contains_full_declaration(tmp_path, monkeypatch):
+def test_ac_assemble_003_vars_contains_full_declaration(tmp_path):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
     _build_corpus(repo_root)
 
-    sentinel_value = "https://sentinel-value-should-never-appear.invalid/xyz"
-    monkeypatch.setenv("VAR_FOO_URL", sentinel_value)
-
     spec_linter = _load_spec_linter()
     report = spec_linter.lint(None, repo_root)
-    hard_failures = _field(report, "hard_failures")
-    if hard_failures is None:
-        summary = _field(report, "summary", {}) or {}
-        hard_failures = _field(summary, "hard_failures", 0)
-    assert hard_failures == 0, _field(report, "findings")
+    hard = report["hard_failures"] if isinstance(report, dict) else report.hard_failures
+    assert hard == 0, getattr(report, "findings", report)
 
     bundle = spec_bundle_assembler.assemble("comp-foo", repo_root)
 
-    vars_field = _field(bundle, "vars")
-    assert vars_field is not None, "SpecBundle has no vars field"
-    keys = list(vars_field.keys()) if hasattr(vars_field, "keys") else []
-    assert "VAR-FOO-URL" in keys, f"vars keys were {keys!r}"
-
+    vars_field = field(bundle, "vars")
+    assert "VAR-FOO-URL" in vars_field, vars_field
     content = vars_field["VAR-FOO-URL"]
     assert isinstance(content, str)
-    assert content.strip() != ""
 
-    assert VAR_DESCRIPTION in content
-    assert VAR_TYPE_LINE in content
-    assert VAR_REQUIRED_LINE in content
-    assert VAR_SENSITIVITY_LINE in content
-    assert "# VAR-FOO-URL" in content
+    # The declaration's full body content is present.
+    assert VAR_BODY.strip() in content, content
 
-    assert sentinel_value not in content
-    for v in vars_field.values():
-        assert sentinel_value not in str(v)
+    # Each declared property is carried through.
+    for line in (
+        VAR_NAME_LINE,
+        VAR_TYPE_LINE,
+        VAR_REQUIRED_LINE,
+        VAR_DESCRIPTION_LINE,
+        VAR_SENSITIVITY_LINE,
+    ):
+        assert line in content, (line, content)
+
+    # Only the declared var is included.
+    assert set(vars_field.keys()) == {"VAR-FOO-URL"}

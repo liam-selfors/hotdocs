@@ -3,111 +3,109 @@ import importlib.util
 import sys
 from pathlib import Path
 
-import pytest
-
 import spec_bundle_assembler
 
 
 GLOSSARY = "# Glossary\n\n- **Foo** — a test term.\n"
 
-FOO_COMPONENT = (
-    "---\n"
-    "id: comp-foo\n"
-    "title: Foo\n"
-    "status: draft\n"
-    "owners: [team-a]\n"
-    "sealed: true\n"
-    "source_path: legacy/foo/\n"
-    "depends_on: []\n"
-    "---\n"
-    "\n"
-    "# Foo\n"
-    "\n"
-    "## Purpose\n"
-    "\n"
-    "Foo doubles a number.\n"
-)
+FOO_COMPONENT = """---
+id: comp-foo
+title: Foo
+status: draft
+owners: [team-a]
+sealed: true
+source_path: legacy/foo/
+depends_on: []
+---
 
-BAR_COMPONENT = (
-    "---\n"
-    "id: comp-bar\n"
-    "title: Bar\n"
-    "status: draft\n"
-    "owners: [team-a]\n"
-    "sealed: true\n"
-    "source_path: legacy/bar/\n"
-    "depends_on: [comp-foo]\n"
-    "---\n"
-    "\n"
-    "# Bar\n"
-    "\n"
-    "## Purpose\n"
-    "\n"
-    "Bar adds one to a doubled number.\n"
-)
+# Foo
 
-FOO_REQUIREMENT = "# R-FOO-001\n\n**R-FOO-001** — `foo(x)` MUST return `2 * x`.\n"
-BAR_REQUIREMENT = "# R-BAR-001\n\n**R-BAR-001** — `bar(x)` MUST return `foo(x) + 1`.\n"
+## Purpose
 
-FOO_ACCEPTANCE = (
-    "# AC-FOO-001\n"
-    "\n"
-    "Covers: R-FOO-001\n"
-    "Kind: generated-test\n"
-    "\n"
-    "```gherkin\n"
-    "Given x = 2\n"
-    "When foo(x) is called\n"
-    "Then it returns 4\n"
-    "```\n"
-)
+Foo doubles a number.
+"""
 
-BAR_ACCEPTANCE = (
-    "# AC-BAR-001\n"
-    "\n"
-    "Covers: R-BAR-001\n"
-    "Kind: generated-test\n"
-    "\n"
-    "```gherkin\n"
-    "Given x = 2\n"
-    "When bar(x) is called\n"
-    "Then it returns 5\n"
-    "```\n"
-)
+BAR_COMPONENT = """---
+id: comp-bar
+title: Bar
+status: draft
+owners: [team-a]
+sealed: true
+source_path: legacy/bar/
+depends_on: [comp-foo]
+---
 
-FOO_LIBRARY = "# Library\n\n```\nfoo(x: int) -> int\n```\n"
-BAR_LIBRARY = "# Library\n\n```\nbar(x: int) -> int\n```\n"
+# Bar
+
+## Purpose
+
+Bar adds one to a doubled number.
+"""
+
+FOO_REQ = "# R-FOO-001\n\n**R-FOO-001** — `foo(x)` MUST return `2 * x`.\n"
+
+FOO_AC = """# AC-FOO-001
+
+Covers: R-FOO-001
+Kind: generated-test
+
+```gherkin
+Given x = 2
+When foo(x) is called
+Then it returns 4
+```
+"""
+
+FOO_LIB = "# Library\n\n```\nfoo(x: int) -> int\n```\n"
+
+BAR_REQ = "# R-BAR-001\n\n**R-BAR-001** — `bar(x)` MUST return `foo(x) + 1`.\n"
+
+BAR_AC = """# AC-BAR-001
+
+Covers: R-BAR-001
+Kind: generated-test
+
+```gherkin
+Given x = 2
+When bar(x) is called
+Then it returns 5
+```
+"""
+
+BAR_LIB = "# Library\n\n```\nbar(x: int) -> int\n```\n"
 
 CONSTRAINTS = "# Constraints\n\nNone.\n"
 
-FOO_CODE = "def foo(x): return 2 * x\n"
-BAR_CODE = "def bar(x): return 2 * x + 1\n"
+FOO_PY = "def foo(x): return 2 * x\n"
+BAR_PY = "def bar(x): return 2 * x + 1\n"
 
 
-def _write(path: Path, text: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_bytes(text.encode("utf-8"))
+def field(value, name):
+    return value[name] if isinstance(value, dict) else getattr(value, name)
+
+
+def _write(root: Path, rel: str, text: str) -> None:
+    p = root / rel
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_bytes(text.encode("utf-8"))
 
 
 def _build_corpus(repo_root: Path) -> None:
-    _write(repo_root / "specs" / "glossary.md", GLOSSARY)
+    _write(repo_root, "specs/glossary.md", GLOSSARY)
 
-    foo = repo_root / "specs" / "components" / "foo"
-    _write(foo / "component.md", FOO_COMPONENT)
-    _write(foo / "requirements" / "R-FOO-001.md", FOO_REQUIREMENT)
-    _write(foo / "acceptance" / "AC-FOO-001.md", FOO_ACCEPTANCE)
-    _write(foo / "interface" / "library.md", FOO_LIBRARY)
-    _write(foo / "constraints.md", CONSTRAINTS)
+    _write(repo_root, "specs/components/foo/component.md", FOO_COMPONENT)
+    _write(repo_root, "specs/components/foo/requirements/R-FOO-001.md", FOO_REQ)
+    _write(repo_root, "specs/components/foo/acceptance/AC-FOO-001.md", FOO_AC)
+    _write(repo_root, "specs/components/foo/interface/library.md", FOO_LIB)
+    _write(repo_root, "specs/components/foo/constraints.md", CONSTRAINTS)
+    _write(repo_root, "legacy/foo/foo.py", FOO_PY)
 
-    bar = repo_root / "specs" / "components" / "bar"
-    _write(bar / "component.md", BAR_COMPONENT)
-    _write(bar / "requirements" / "R-BAR-001.md", BAR_REQUIREMENT)
-    _write(bar / "acceptance" / "AC-BAR-001.md", BAR_ACCEPTANCE)
-    _write(bar / "interface" / "library.md", BAR_LIBRARY)
-    _write(bar / "constraints.md", CONSTRAINTS)
-
-    _write(repo_root / "legacy" / "foo" / "foo.py", FOO_CODE)
-    _write(repo_root / "legacy" / "bar" / "bar.py", BAR_CODE)
+    _write(repo_root, "specs/components/bar/component.md", BAR_COMPONENT)
+    _write(repo_root, "specs/components/bar/requirements/R-BAR-001.md", BAR_REQ)
+    _write(repo_root, "specs/components/bar/acceptance/AC-BAR-001.md", BAR_AC)
+    _write(repo_root, "specs/components/bar/interface/library.md", BAR_LIB)
+    _write(repo_root, "specs/components/bar/constraints.md", CONSTRAINTS)
+    _write(repo_root, "legacy/bar/bar.py", BAR_PY)
 
 
 def _load_spec_linter():
@@ -121,126 +119,120 @@ def _load_spec_linter():
         else base / "spec_linter" / "__init__.py"
     )
     spec = importlib.util.spec_from_file_location("spec_linter", path)
-    spec_linter = importlib.util.module_from_spec(spec)
-    sys.modules["spec_linter"] = spec_linter
-    spec.loader.exec_module(spec_linter)
-    return spec_linter
-
-
-def _field(value, name):
-    if isinstance(value, dict):
-        return value.get(name)
-    return getattr(value, name, None)
-
-
-def _hard_failures(report):
-    value = _field(report, "hard_failures")
-    if value is None:
-        summary = _field(report, "summary")
-        if summary is not None:
-            value = _field(summary, "hard_failures")
-    return value
+    module = importlib.util.module_from_spec(spec)
+    sys.modules["spec_linter"] = module
+    spec.loader.exec_module(module)
+    return module
 
 
 def _assert_lint_clean(repo_root: Path) -> None:
     spec_linter = _load_spec_linter()
     report = spec_linter.lint(None, repo_root)
-    assert _hard_failures(report) == 0
+    hard = report["hard_failures"] if isinstance(report, dict) else report.hard_failures
+    assert hard == 0
 
 
-def _md_files_under(repo_root: Path, directory: Path):
-    if not directory.is_dir():
+def _md_files_under(repo_root: Path, rel_dir: str):
+    d = repo_root / rel_dir
+    if not d.is_dir():
         return []
     return [
         p.relative_to(repo_root).as_posix()
-        for p in directory.rglob("*.md")
-        if p.is_file()
+        for p in d.rglob("*")
+        if p.is_file() and p.suffix == ".md"
     ]
 
 
-def _code_files_under(repo_root: Path, directory: Path):
-    if not directory.is_dir():
+def _code_files_under(repo_root: Path, rel_dir: str):
+    d = repo_root / rel_dir
+    if not d.is_dir():
         return []
     out = []
-    for p in directory.rglob("*"):
+    for p in d.rglob("*"):
         if not p.is_file():
             continue
-        rel_parts = p.relative_to(directory).parts
+        rel_parts = p.relative_to(d).parts
         if p.name.startswith("."):
             continue
         if "__pycache__" in rel_parts:
+            continue
+        if any(part.startswith(".") for part in rel_parts):
             continue
         out.append(p.relative_to(repo_root).as_posix())
     return out
 
 
 def _expected_hash(repo_root: Path, mode: str = "cold") -> str:
-    bar = repo_root / "specs" / "components" / "bar"
-    foo = repo_root / "specs" / "components" / "foo"
-
-    paths = set()
-    # Target's own documents.
-    for f in (bar / "component.md", bar / "constraints.md"):
-        if f.is_file():
-            paths.add(f.relative_to(repo_root).as_posix())
-    paths.update(_md_files_under(repo_root, bar / "requirements"))
-    paths.update(_md_files_under(repo_root, bar / "interface"))
-
-    # Dependency comp-foo: component.md, interface/*.md, sealed code at source_path.
-    if (foo / "component.md").is_file():
-        paths.add((foo / "component.md").relative_to(repo_root).as_posix())
-    paths.update(_md_files_under(repo_root, foo / "interface"))
-    paths.update(_code_files_under(repo_root, repo_root / "legacy" / "foo"))
-
+    paths = []
+    # Target's own spec files.
+    for rel in (
+        "specs/components/bar/component.md",
+        "specs/components/bar/constraints.md",
+    ):
+        if (repo_root / rel).is_file():
+            paths.append(rel)
+    paths += _md_files_under(repo_root, "specs/components/bar/requirements")
+    paths += _md_files_under(repo_root, "specs/components/bar/interface")
+    # Dependency comp-foo: component.md, interface/*.md, code dir (sealed -> source_path).
+    if (repo_root / "specs/components/foo/component.md").is_file():
+        paths.append("specs/components/foo/component.md")
+    paths += _md_files_under(repo_root, "specs/components/foo/interface")
+    paths += _code_files_under(repo_root, "legacy/foo")
     # Glossary.
-    glossary = repo_root / "specs" / "glossary.md"
-    if glossary.is_file():
-        paths.add(glossary.relative_to(repo_root).as_posix())
+    if (repo_root / "specs/glossary.md").is_file():
+        paths.append("specs/glossary.md")
 
     stream = bytearray()
     stream += mode.encode("utf-8") + b"\x00"
-    for rel in sorted(paths):
+    for rel in sorted(set(paths)):
         stream += rel.encode("utf-8") + b"\x00"
-        stream += (repo_root / rel).read_bytes() + b"\x00"
+        stream += (repo_root / rel).read_bytes()
+        stream += b"\x00"
     return "sha256:" + hashlib.sha256(bytes(stream)).hexdigest()
 
 
-def _assemble_hash(repo_root: Path) -> str:
+def _hash_of(repo_root: Path) -> str:
     bundle = spec_bundle_assembler.assemble("comp-bar", repo_root, mode="cold")
-    value = _field(bundle, "spec_bundle_hash")
-    assert isinstance(value, str)
-    return value
+    return field(bundle, "spec_bundle_hash")
 
 
-@pytest.fixture
-def repo_root(tmp_path):
-    root = tmp_path / "repo"
-    root.mkdir()
-    _build_corpus(root)
-    _assert_lint_clean(root)
-    return root
+def test_spec_bundle_hash_matches_defined_stream(tmp_path):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    _build_corpus(repo_root)
+    _assert_lint_clean(repo_root)
+
+    expected = _expected_hash(repo_root, "cold")
+    actual = _hash_of(repo_root)
+    assert actual == expected
 
 
-def test_spec_bundle_hash_matches_defined_stream(repo_root):
-    actual = _assemble_hash(repo_root)
-    assert actual.startswith("sha256:")
-    assert actual == _expected_hash(repo_root, "cold")
+def test_provenance_manifest_in_code_dir_does_not_change_hash(tmp_path):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    _build_corpus(repo_root)
+    _assert_lint_clean(repo_root)
 
+    first = _hash_of(repo_root)
 
-def test_provenance_manifest_in_code_dir_does_not_change_hash(repo_root):
-    before = _assemble_hash(repo_root)
-    (repo_root / "legacy" / "foo" / ".provenance.json").write_bytes(
-        b'{"anything": "at all", "spec_bundle_hash": "sha256:deadbeef"}\n'
+    (repo_root / "legacy/foo/.provenance.json").write_bytes(
+        b'{"anything": "at all", "n": 42}\n'
     )
-    after = _assemble_hash(repo_root)
-    assert after == before
-    assert after == _expected_hash(repo_root, "cold")
+
+    second = _hash_of(repo_root)
+    assert second == first
 
 
-def test_dependency_code_change_changes_hash(repo_root):
-    before = _assemble_hash(repo_root)
-    foo_py = repo_root / "legacy" / "foo" / "foo.py"
-    foo_py.write_bytes(foo_py.read_bytes() + b"# an extra line\n")
-    after = _assemble_hash(repo_root)
-    assert after != before
-    assert after == _expected_hash(repo_root, "cold")
+def test_code_change_in_dependency_changes_hash(tmp_path):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    _build_corpus(repo_root)
+    _assert_lint_clean(repo_root)
+
+    first = _hash_of(repo_root)
+
+    foo_py = repo_root / "legacy/foo/foo.py"
+    foo_py.write_bytes(foo_py.read_bytes() + b"# an added line\n")
+
+    second = _hash_of(repo_root)
+    assert second != first

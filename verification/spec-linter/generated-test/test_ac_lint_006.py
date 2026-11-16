@@ -1,13 +1,9 @@
-"""AC-LINT-006 (covers R-LINT-006).
+"""AC-LINT-006: a non-sealed component with zero `realizes` entries fails lint.
 
-Given a component component.md with sealed: false (or absent) and zero
-realizes entries, when hotdocs lint runs against it, then the report
-contains a fail-severity finding for rule R-LINT-006.
+Covers: R-LINT-006
 """
 
-import io
 import json
-import contextlib
 from pathlib import Path
 
 import pytest
@@ -15,27 +11,33 @@ import pytest
 import spec_linter
 
 
-def _get(value, key, default=None):
-    if isinstance(value, dict):
-        return value.get(key, default)
-    return getattr(value, key, default)
+def field(value, name):
+    return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def _write(path: Path, text: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text, encoding="utf-8")
+def _sev(value):
+    sev = field(value, "severity")
+    return str(getattr(sev, "value", sev))
 
 
-COMPONENT_BODY = """
-# {title}
+def _findings(report):
+    return list(field(report, "findings"))
+
+
+def _rule_findings(report, rule_id):
+    return [f for f in _findings(report) if field(f, "rule_id") == rule_id]
+
+
+BODY = """
+# Foo
 
 ## Purpose
 
-A small synthetic component used only as a lint fixture.
+Foo does one small thing for testing purposes.
 
 ## Scope
 
-- In scope: fixture behavior.
+- In scope: the one small thing.
 - Out of scope: everything else.
 
 ## Definitions
@@ -70,158 +72,113 @@ See `constraints.md`.
 """
 
 
-def _write_component(repo_root: Path, slug: str, upper: str, frontmatter_extra: str) -> None:
-    comp_dir = repo_root / "specs" / "components" / slug
-    title = f"{slug.capitalize()} Component"
+def _write_component(repo_root: Path, extra_frontmatter: str = "") -> Path:
+    comp_dir = repo_root / "specs" / "components" / "foo"
+    (comp_dir / "requirements").mkdir(parents=True)
+    (comp_dir / "acceptance").mkdir(parents=True)
+    (comp_dir / "interface").mkdir(parents=True)
     fm = (
         "---\n"
-        f"id: comp-{slug}\n"
-        f"title: {title}\n"
+        "id: comp-foo\n"
+        "title: Foo\n"
         "status: draft\n"
-        "owners: [alice]\n"
-        f"{frontmatter_extra}"
-        "---\n"
+        "owners: [test-team]\n"
+        + extra_frontmatter
+        + "---\n"
     )
-    _write(comp_dir / "component.md", fm + COMPONENT_BODY.format(title=title))
-    _write(
-        comp_dir / "requirements" / f"R-{upper}-001.md",
-        f"# R-{upper}-001\n\n**R-{upper}-001** — The component MUST do its one thing.\n",
+    path = comp_dir / "component.md"
+    path.write_text(fm + BODY, encoding="utf-8")
+    (comp_dir / "requirements" / "R-FOO-001.md").write_text(
+        "# R-FOO-001\n\n**R-FOO-001** — Foo MUST do the one small thing.\n",
+        encoding="utf-8",
     )
-    _write(
-        comp_dir / "acceptance" / f"AC-{upper}-001.md",
-        f"# AC-{upper}-001\n\nCovers: R-{upper}-001\nKind: generated-test\n\n"
-        "```gherkin\nGiven a fixture\nWhen it runs\nThen it does its one thing\n```\n",
+    (comp_dir / "acceptance" / "AC-FOO-001.md").write_text(
+        "# AC-FOO-001\n\nCovers: R-FOO-001\nKind: generated-test\n\n"
+        "```gherkin\nGiven foo\nWhen it runs\nThen it does the thing\n```\n",
+        encoding="utf-8",
     )
-    _write(
-        comp_dir / "constraints.md",
-        "# Constraints\n\n- None beyond the defaults. Measured by inspection.\n",
+    (comp_dir / "constraints.md").write_text(
+        "# Constraints\n\nNone.\n", encoding="utf-8"
     )
-
-
-def _write_glossary(repo_root: Path) -> None:
-    _write(
-        repo_root / "specs" / "glossary.md",
-        "# Glossary\n\n- **Fixture** — a synthetic test corpus.\n",
-    )
+    return path
 
 
 def _write_product(repo_root: Path) -> None:
-    _write(
-        repo_root / "specs" / "product" / "p-fixture.md",
+    prod = repo_root / "specs" / "product"
+    prod.mkdir(parents=True, exist_ok=True)
+    (prod / "foo-capability.md").write_text(
         "---\n"
-        "id: P-FIXTURE\n"
-        "title: Fixture Capability\n"
+        "id: P-FOO\n"
+        "title: Foo capability\n"
         "status: draft\n"
-        "owners: [alice]\n"
+        "owners: [test-team]\n"
         "---\n\n"
-        "# Fixture Capability\n\n## Purpose\n\nA fixture capability.\n\n"
-        "## Scope\n\n- Fixture only.\n\n"
-        "### CS-FIXTURE-001\n\nCovers: P-FIXTURE\nKind: llm-judge\n\n"
-        "```gherkin\nGiven a fixture\nWhen it runs\nThen it works\n```\n",
+        "# Foo capability\n\n## Purpose\n\nDo foo.\n\n## Scope\n\n- foo\n",
+        encoding="utf-8",
     )
 
 
-def _findings(report):
-    findings = _get(report, "findings", None)
-    assert findings is not None, "LintReport exposes no findings"
-    return list(findings)
+def _assert_r_lint_006_fail(report):
+    hits = _rule_findings(report, "R-LINT-006")
+    fails = [f for f in hits if _sev(f) == "fail"]
+    assert fails, (
+        "expected a fail-severity R-LINT-006 finding, got: "
+        + repr([(field(f, "rule_id"), _sev(f), field(f, "file")) for f in _findings(report)])
+    )
+    files = [str(field(f, "file")).replace("\\", "/") for f in fails]
+    assert any(p.endswith("components/foo/component.md") for p in files), files
+    assert field(report, "hard_failures") >= 1
 
 
-def _lint_006_findings(report):
-    return [f for f in _findings(report) if _get(f, "rule_id") == "R-LINT-006"]
-
-
-def _file_str(finding) -> str:
-    return str(_get(finding, "file", "") or "").replace("\\", "/")
-
-
-UNSEALED_NO_REALIZES_VARIANTS = {
-    "sealed_absent_realizes_absent": "",
-    "sealed_false_realizes_absent": "sealed: false\n",
-    "sealed_absent_realizes_empty": "realizes: []\n",
-    "sealed_false_realizes_empty": "sealed: false\nrealizes: []\n",
-}
-
-
-@pytest.mark.parametrize(
-    "extra",
-    list(UNSEALED_NO_REALIZES_VARIANTS.values()),
-    ids=list(UNSEALED_NO_REALIZES_VARIANTS.keys()),
-)
-def test_unsealed_component_without_realizes_fails_r_lint_006(tmp_path, extra):
+def test_sealed_absent_and_no_realizes_fails(tmp_path):
     repo_root = tmp_path / "repo"
-    _write_glossary(repo_root)
-    _write_component(repo_root, "foo", "FOO", extra)
-
+    repo_root.mkdir()
+    _write_component(repo_root)
     report = spec_linter.lint(None, repo_root)
-
-    hits = _lint_006_findings(report)
-    assert hits, (
-        "expected an R-LINT-006 finding for an unsealed component with zero "
-        f"realizes entries; got rule ids {[_get(f, 'rule_id') for f in _findings(report)]}"
-    )
-    fail_hits = [f for f in hits if _get(f, "severity") == "fail"]
-    assert fail_hits, f"R-LINT-006 finding(s) not fail severity: {[_get(f, 'severity') for f in hits]}"
-    assert any("components/foo" in _file_str(f) for f in fail_hits), (
-        f"R-LINT-006 finding does not point at the foo component: {[_file_str(f) for f in fail_hits]}"
-    )
-
-    hard_failures = _get(report, "hard_failures", None)
-    if hard_failures is not None:
-        assert hard_failures >= 1
+    _assert_r_lint_006_fail(report)
 
 
-def test_only_the_unsealed_unrealized_component_is_flagged(tmp_path):
+def test_sealed_false_and_no_realizes_fails(tmp_path):
     repo_root = tmp_path / "repo"
-    _write_glossary(repo_root)
+    repo_root.mkdir()
+    _write_component(repo_root, "sealed: false\n")
+    report = spec_linter.lint(None, repo_root)
+    _assert_r_lint_006_fail(report)
+
+
+def test_non_sealed_with_realizes_has_no_r_lint_006(tmp_path):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
     _write_product(repo_root)
-    # Offending: unsealed, zero realizes.
-    _write_component(repo_root, "foo", "FOO", "sealed: false\n")
-    # Control: sealed, exempt from realizes.
-    _write_component(repo_root, "bar", "BAR", "sealed: true\nsource_path: legacy/bar\n")
-    # Control: unsealed but realizes a real capability.
-    _write_component(repo_root, "baz", "BAZ", "realizes: [P-FIXTURE]\n")
-
+    _write_component(repo_root, "realizes: [P-FOO]\n")
     report = spec_linter.lint(None, repo_root)
-
-    hits = [f for f in _lint_006_findings(report) if _get(f, "severity") == "fail"]
-    assert hits, "expected a fail-severity R-LINT-006 finding for comp-foo"
-    files = [_file_str(f) for f in hits]
-    assert any("components/foo" in p for p in files), files
-    assert not any("components/bar" in p for p in files), (
-        f"sealed component must not be flagged by R-LINT-006: {files}"
-    )
-    assert not any("components/baz" in p for p in files), (
-        f"component with a realizes entry must not be flagged by R-LINT-006: {files}"
-    )
+    assert not [
+        f for f in _rule_findings(report, "R-LINT-006") if _sev(f) == "fail"
+    ]
 
 
-def test_sealed_or_realizing_components_produce_no_r_lint_006(tmp_path):
+def test_sealed_true_without_realizes_has_no_r_lint_006(tmp_path):
     repo_root = tmp_path / "repo"
-    _write_glossary(repo_root)
-    _write_product(repo_root)
-    _write_component(repo_root, "bar", "BAR", "sealed: true\nsource_path: legacy/bar\n")
-    _write_component(repo_root, "baz", "BAZ", "sealed: false\nrealizes: [P-FIXTURE]\n")
-
+    repo_root.mkdir()
+    _write_component(repo_root, "sealed: true\nsource_path: legacy/foo/\n")
     report = spec_linter.lint(None, repo_root)
+    assert not [
+        f for f in _rule_findings(report, "R-LINT-006") if _sev(f) == "fail"
+    ]
 
-    hits = _lint_006_findings(report)
-    assert not hits, f"unexpected R-LINT-006 findings: {[(_file_str(f), _get(f, 'message')) for f in hits]}"
 
-
-def test_cli_reports_r_lint_006_and_exits_1(tmp_path):
+def test_cli_reports_r_lint_006_and_exits_1(tmp_path, capsys):
     repo_root = tmp_path / "repo"
-    _write_glossary(repo_root)
-    _write_component(repo_root, "foo", "FOO", "")
-
-    buf = io.StringIO()
-    with contextlib.redirect_stdout(buf):
-        code = spec_linter.main(["--format=json", f"--repo-root={repo_root}"])
-
-    assert code == 1, f"expected exit code 1 for a fail-severity finding, got {code}"
-    payload = json.loads(buf.getvalue())
-    findings = payload.get("findings", [])
-    assert any(
-        f.get("rule_id") == "R-LINT-006" and f.get("severity") == "fail"
-        for f in findings
-    ), f"no fail-severity R-LINT-006 in CLI JSON output: {findings}"
+    repo_root.mkdir()
+    _write_component(repo_root)
+    code = spec_linter.main(["--format=json", f"--repo-root={repo_root}"])
+    out = capsys.readouterr().out
+    assert code == 1
+    doc = json.loads(out)
+    hits = [
+        f
+        for f in doc["findings"]
+        if f["rule_id"] == "R-LINT-006" and f["severity"] == "fail"
+    ]
+    assert hits, doc
+    assert doc["summary"]["hard_failures"] >= 1

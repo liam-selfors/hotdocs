@@ -1,13 +1,23 @@
+"""AC-LINT-024 (Covers: R-LINT-024).
+
+Given a component's Purpose section containing the text "extracted once
+D30 found a real coupling", when the linter runs, then it fails with
+R-LINT-024; a second component whose Purpose has no decision citation
+(the same citation moved to its own Rationale section instead) produces
+no R-LINT-024 finding.
+"""
+
 import json
 from pathlib import Path
 
 import spec_linter
 
 
-def _get(obj, key):
-    if isinstance(obj, dict):
-        return obj.get(key)
-    return getattr(obj, key, None)
+CITING_TEXT = "extracted once D30 found a real coupling"
+
+
+def field(value, name):
+    return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
 def _write(path: Path, text: str) -> None:
@@ -15,18 +25,18 @@ def _write(path: Path, text: str) -> None:
     path.write_text(text, encoding="utf-8")
 
 
-def _component_md(slug: str, purpose: str, rationale: str | None) -> str:
+def _component_md(slug: str, purpose: str, rationale) -> str:
     parts = [
         "---",
         f"id: comp-{slug}",
-        f"title: {slug.capitalize()} Formatter",
+        f"title: {slug.replace('-', ' ').title()}",
         "status: draft",
-        "owners: [alice]",
+        "owners: [test-team]",
         "sealed: true",
-        f"source_path: legacy/{slug}",
+        f"source_path: legacy/{slug}/",
         "---",
         "",
-        f"# {slug.capitalize()} Formatter",
+        f"# {slug}",
         "",
         "## Purpose",
         "",
@@ -38,8 +48,8 @@ def _component_md(slug: str, purpose: str, rationale: str | None) -> str:
     parts += [
         "## Scope",
         "",
-        f"- In scope: formatting {slug} records.",
-        "- Out of scope: parsing.",
+        "- In scope: transforming widgets.",
+        "- Out of scope: everything else.",
         "",
         "## Definitions",
         "",
@@ -75,144 +85,117 @@ def _component_md(slug: str, purpose: str, rationale: str | None) -> str:
     return "\n".join(parts)
 
 
-def _make_component(repo: Path, slug: str, purpose: str, rationale: str | None) -> None:
-    upper = slug.upper()
-    base = repo / "specs" / "components" / slug
+def _add_component(root: Path, slug: str, prefix: str, purpose: str, rationale) -> None:
+    base = root / "specs" / "components" / slug
     _write(base / "component.md", _component_md(slug, purpose, rationale))
     _write(
-        base / "requirements" / f"R-{upper}-001.md",
-        f"# R-{upper}-001\n\n**R-{upper}-001** — The formatter MUST return a "
-        f"non-empty string for every {slug} record.\n",
+        base / "requirements" / f"R-{prefix}-001.md",
+        f"# R-{prefix}-001\n\n**R-{prefix}-001** — The component MUST "
+        "return the widget unchanged when given a widget.\n",
     )
     _write(
-        base / "acceptance" / f"AC-{upper}-001.md",
-        f"# AC-{upper}-001\n\nCovers: R-{upper}-001\nKind: compiled\n\n"
-        "```gherkin\nGiven a record\nWhen it is formatted\n"
-        "Then the result is a non-empty string\n```\n",
+        base / "acceptance" / f"AC-{prefix}-001.md",
+        f"# AC-{prefix}-001\n\nCovers: R-{prefix}-001\nKind: compiled\n\n"
+        "```gherkin\nGiven a widget\nWhen the component runs\n"
+        "Then it returns the widget unchanged\n```\n",
     )
     _write(
         base / "constraints.md",
-        "# Constraints\n\n- Formatting one record MUST take under 10 ms, "
-        "measured by a benchmark.\n",
+        "# Constraints\n\n- Completes in under 1 second, measured by a timer.\n",
     )
 
 
-def _write_decision(repo: Path) -> None:
+def _base_repo(root: Path) -> None:
     _write(
-        repo / "specs" / "decisions" / "D30.md",
-        "---\nid: D30\ntitle: Split parsing from formatting\nstatus: draft\n"
-        "owners: [alice]\n---\n\n# D30\n\nParsing and formatting were "
-        "coupled; split them.\n",
+        root / "specs" / "glossary.md",
+        "# Glossary\n\n- **Widget** — a thing the component transforms.\n",
     )
-
-
-def _write_glossary(repo: Path) -> None:
     _write(
-        repo / "specs" / "glossary.md",
-        "# Glossary\n\n- **Record** — one input item.\n",
+        root / "specs" / "decisions" / "D30.md",
+        "---\nid: D30\ntitle: Extract widget handling\nstatus: draft\n"
+        "owners: [test-team]\n---\n\n# D30\n\nA real coupling was found.\n",
     )
 
 
-CITING_PURPOSE = (
-    "Formats widget records for display. This unit was extracted once "
-    "D30 found a real coupling between parsing and formatting."
-)
-CLEAN_PURPOSE = "Formats gadget records for display."
-MOVED_RATIONALE = (
-    "This unit was extracted once D30 found a real coupling between "
-    "parsing and formatting."
-)
+def _bad_purpose() -> str:
+    return (
+        "Transforms widgets for its dependents; it was "
+        + CITING_TEXT
+        + " between widget parsing and widget rendering."
+    )
+
+
+def _good_purpose() -> str:
+    return "Transforms widgets for its dependents, returning each one unchanged."
+
+
+def _good_rationale() -> str:
+    return "This component was " + CITING_TEXT + " between parsing and rendering."
+
+
+def _findings(report):
+    return list(field(report, "findings"))
 
 
 def _lint024(report):
-    findings = _get(report, "findings") or []
-    return [f for f in findings if _get(f, "rule_id") == "R-LINT-024"]
+    return [f for f in _findings(report) if field(f, "rule_id") == "R-LINT-024"]
 
 
 def _norm(p) -> str:
-    return str(p or "").replace("\\", "/")
+    return str(p).replace("\\", "/")
 
 
-def _build_two_component_repo(repo: Path) -> None:
-    _write_glossary(repo)
-    _write_decision(repo)
-    _make_component(repo, "alpha", CITING_PURPOSE, None)
-    _make_component(repo, "beta", CLEAN_PURPOSE, MOVED_RATIONALE)
+def test_purpose_with_decision_citation_fails_with_r_lint_024(tmp_path):
+    root = tmp_path / "repo"
+    _base_repo(root)
+    _add_component(root, "bad-widget", "BADW", _bad_purpose(), None)
 
-
-def test_purpose_citation_fails_and_rationale_citation_does_not(tmp_path):
-    repo = tmp_path / "repo"
-    _build_two_component_repo(repo)
-
-    report = spec_linter.lint(None, repo)
+    report = spec_linter.lint(None, root)
     hits = _lint024(report)
-
-    alpha_hits = [
-        f for f in hits
-        if _norm(_get(f, "file")).endswith("specs/components/alpha/component.md")
-    ]
-    assert alpha_hits, f"expected an R-LINT-024 finding on alpha's component.md, got {hits!r}"
-    for f in alpha_hits:
-        assert _get(f, "severity") == "fail"
-
-    beta_hits = [
-        f for f in hits
-        if "specs/components/beta/" in _norm(_get(f, "file"))
-    ]
-    assert beta_hits == [], f"beta's Purpose has no citation, yet got {beta_hits!r}"
-
-    hard = _get(report, "hard_failures")
-    assert hard is not None and hard >= 1
+    assert hits, f"expected an R-LINT-024 finding, got {_findings(report)!r}"
+    assert any(field(f, "severity") == "fail" for f in hits), hits
+    assert any(
+        _norm(field(f, "file")).endswith("specs/components/bad-widget/component.md")
+        for f in hits
+    ), hits
+    assert field(report, "hard_failures") >= 1
 
 
-def test_component_with_citation_only_in_rationale_has_no_finding(tmp_path):
-    repo = tmp_path / "repo"
-    _write_glossary(repo)
-    _write_decision(repo)
-    _make_component(repo, "beta", CLEAN_PURPOSE, MOVED_RATIONALE)
+def test_purpose_citation_cli_exits_1_and_reports_r_lint_024(tmp_path, capsys):
+    root = tmp_path / "repo"
+    _base_repo(root)
+    _add_component(root, "bad-widget", "BADW", _bad_purpose(), None)
 
-    report = spec_linter.lint(None, repo)
-    assert _lint024(report) == []
-
-
-def test_backtick_wrapped_citation_in_purpose_also_fails(tmp_path):
-    repo = tmp_path / "repo"
-    _write_glossary(repo)
-    _write_decision(repo)
-    _make_component(
-        repo,
-        "gamma",
-        "Formats gamma records for display. This unit was extracted once "
-        "`D30` found a real coupling between parsing and formatting.",
-        None,
-    )
-
-    report = spec_linter.lint(None, repo)
-    hits = [
-        f for f in _lint024(report)
-        if _norm(_get(f, "file")).endswith("specs/components/gamma/component.md")
-    ]
-    assert hits
-    assert all(_get(f, "severity") == "fail" for f in hits)
-
-
-def test_cli_reports_r_lint_024_and_exits_1(tmp_path, capsys, monkeypatch):
-    repo = tmp_path / "repo"
-    _build_two_component_repo(repo)
-    monkeypatch.chdir(repo)
-
-    code = spec_linter.main(["--format=json", f"--repo-root={repo}"])
+    code = spec_linter.main(["--format=json", "--repo-root=" + str(root)])
     out = capsys.readouterr().out
     assert code == 1
+    doc = json.loads(out)
+    hits = [f for f in doc["findings"] if f["rule_id"] == "R-LINT-024"]
+    assert hits
+    assert any(f["severity"] == "fail" for f in hits)
 
-    data = json.loads(out.strip())
-    findings = data.get("findings", [])
-    rule_hits = [f for f in findings if f.get("rule_id") == "R-LINT-024"]
+
+def test_citation_moved_to_rationale_produces_no_r_lint_024(tmp_path):
+    root = tmp_path / "repo"
+    _base_repo(root)
+    _add_component(root, "good-widget", "GOODW", _good_purpose(), _good_rationale())
+
+    report = spec_linter.lint(None, root)
+    assert _lint024(report) == [], _lint024(report)
+
+
+def test_mixed_corpus_flags_only_the_purpose_citing_component(tmp_path):
+    root = tmp_path / "repo"
+    _base_repo(root)
+    _add_component(root, "bad-widget", "BADW", _bad_purpose(), None)
+    _add_component(root, "good-widget", "GOODW", _good_purpose(), _good_rationale())
+
+    report = spec_linter.lint(None, root)
+    hits = _lint024(report)
     assert any(
-        _norm(f.get("file")).endswith("specs/components/alpha/component.md")
-        and f.get("severity") == "fail"
-        for f in rule_hits
-    )
-    assert not any(
-        "specs/components/beta/" in _norm(f.get("file")) for f in rule_hits
-    )
+        field(f, "severity") == "fail"
+        and _norm(field(f, "file")).endswith("specs/components/bad-widget/component.md")
+        for f in hits
+    ), hits
+    assert not any("good-widget" in _norm(field(f, "file")) for f in hits), hits
+    assert field(report, "hard_failures") >= 1

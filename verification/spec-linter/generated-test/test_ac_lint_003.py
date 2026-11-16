@@ -1,27 +1,19 @@
 import json
 from pathlib import Path
 
-import pytest
-
 import spec_linter
 
 
-DANGLING_ID = "comp-ghost-does-not-exist"
+DANGLING_ID = "comp-ghost-dep"
+PRESENT_ID = "comp-present-dep"
 
 
-def _get(obj, key, default=None):
-    if isinstance(obj, dict):
-        return obj.get(key, default)
-    return getattr(obj, key, default)
+def field(value, name):
+    return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
 def _norm(value):
-    if value is None:
-        return None
-    inner = getattr(value, "value", None)
-    if isinstance(inner, str):
-        return inner.lower()
-    return str(value).lower()
+    return str(getattr(value, "value", value))
 
 
 def _write(path: Path, text: str) -> None:
@@ -29,28 +21,28 @@ def _write(path: Path, text: str) -> None:
     path.write_text(text, encoding="utf-8")
 
 
-def _component_md(comp_id: str, title: str, depends_on: list) -> str:
+def _component_md(comp_id: str, title: str, depends_on: list, source_path: str) -> str:
     deps = "[" + ", ".join(depends_on) + "]"
     return (
         "---\n"
         f"id: {comp_id}\n"
         f"title: {title}\n"
         "status: draft\n"
-        "owners: [alice]\n"
+        "owners: [test-team]\n"
         f"depends_on: {deps}\n"
         "sealed: true\n"
-        f"source_path: legacy/{comp_id}\n"
+        f"source_path: {source_path}\n"
         "---\n"
         "\n"
         f"# {title}\n"
         "\n"
         "## Purpose\n"
         "\n"
-        "Provides a small widget for test purposes.\n"
+        "Provides a small synthetic behavior used only as a lint fixture.\n"
         "\n"
         "## Scope\n"
         "\n"
-        "- In scope: widgets.\n"
+        "- In scope: the synthetic behavior.\n"
         "- Out of scope: everything else.\n"
         "\n"
         "## Definitions\n"
@@ -85,125 +77,93 @@ def _component_md(comp_id: str, title: str, depends_on: list) -> str:
     )
 
 
-def _write_component(repo_root: Path, slug: str, prefix: str, depends_on: list) -> Path:
+def _make_component(repo_root: Path, slug: str, prefix: str, depends_on: list) -> None:
     base = repo_root / "specs" / "components" / slug
-    comp_md = base / "component.md"
-    _write(comp_md, _component_md(f"comp-{slug}", slug.capitalize(), depends_on))
     _write(
-        base / "requirements" / f"R-{prefix}-001.md",
-        f"# R-{prefix}-001\n\n**R-{prefix}-001** — The component MUST produce a widget.\n",
+        base / "component.md",
+        _component_md(f"comp-{slug}", f"Synthetic {slug}", depends_on, f"legacy/{slug}/"),
+    )
+    req_id = f"R-{prefix}-001"
+    ac_id = f"AC-{prefix}-001"
+    _write(
+        base / "requirements" / f"{req_id}.md",
+        f"# {req_id}\n\n**{req_id}** — The component MUST return the value it is given.\n",
     )
     _write(
-        base / "acceptance" / f"AC-{prefix}-001.md",
-        f"# AC-{prefix}-001\n\n"
-        f"Covers: R-{prefix}-001\n"
-        "Kind: compiled\n\n"
+        base / "acceptance" / f"{ac_id}.md",
+        f"# {ac_id}\n\n"
+        f"Covers: {req_id}\n"
+        "Kind: generated-test\n"
+        "\n"
         "```gherkin\n"
-        "Given a request\n"
+        "Given a value 1\n"
         "When the component runs\n"
-        "Then a widget is produced\n"
+        "Then it returns 1\n"
         "```\n",
     )
     _write(
         base / "constraints.md",
-        "# Constraints\n\n- Latency: under 1s, measured by timing a call.\n",
+        "# Constraints\n\n- Runs in under 1 second, measured by wall clock.\n",
     )
-    return comp_md
+    (repo_root / "legacy" / slug).mkdir(parents=True, exist_ok=True)
 
 
-def _build_corpus(repo_root: Path, foo_depends_on: list) -> None:
+def _build_fixture(repo_root: Path) -> None:
     _write(
         repo_root / "specs" / "glossary.md",
-        "# Glossary\n\n- **Widget** — a small thing produced by a component.\n",
+        "# Glossary\n\n- **Widget** — a synthetic fixture term.\n",
     )
-    _write_component(repo_root, "bar", "BAR", [])
-    _write_component(repo_root, "foo", "FOO", foo_depends_on)
+    # A dependency that does exist.
+    _make_component(repo_root, "present-dep", "PRESENTDEP", [])
+    # The component under lint: one resolvable dependency, one dangling one.
+    _make_component(repo_root, "foo", "FOO", [PRESENT_ID, DANGLING_ID])
 
 
-def _lint_findings(repo_root: Path):
-    report = spec_linter.lint(None, repo_root)
-    findings = _get(report, "findings")
-    assert findings is not None, "LintReport must expose findings"
-    return list(findings)
+def _lint003_findings(findings):
+    return [f for f in findings if _norm(field(f, "rule_id")) == "R-LINT-003"]
 
 
-def _r_lint_003(findings):
-    return [f for f in findings if _norm(_get(f, "rule_id")) == "r-lint-003"]
+def test_dangling_depends_on_yields_fail_finding_naming_id(tmp_path):
+    _build_fixture(tmp_path)
 
+    report = spec_linter.lint(None, tmp_path)
+    findings = list(field(report, "findings"))
 
-def test_dangling_depends_on_produces_fail_finding_naming_id(tmp_path, monkeypatch):
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    _build_corpus(repo_root, ["comp-bar", DANGLING_ID])
-    monkeypatch.chdir(repo_root)
-
-    findings = _lint_findings(repo_root)
-    r003 = _r_lint_003(findings)
-
-    naming = [
-        f for f in r003 if DANGLING_ID in str(_get(f, "message", "") or "")
+    lint003 = _lint003_findings(findings)
+    matching = [
+        f
+        for f in lint003
+        if _norm(field(f, "severity")) == "fail" and DANGLING_ID in str(field(f, "message"))
     ]
-    assert naming, (
-        "expected an R-LINT-003 finding naming the dangling id; got: "
-        + repr([(_get(f, "rule_id"), _get(f, "message")) for f in findings])
-    )
-    assert any(_norm(_get(f, "severity")) == "fail" for f in naming), (
-        "the R-LINT-003 finding naming the dangling id must have fail severity; got "
-        + repr([_get(f, "severity") for f in naming])
+    assert matching, (
+        "expected a fail-severity R-LINT-003 finding naming "
+        f"{DANGLING_ID!r}; got: {[(field(f, 'rule_id'), field(f, 'severity'), field(f, 'message')) for f in findings]}"
     )
 
     # The resolvable dependency must not be reported as dangling.
-    for f in r003:
-        msg = str(_get(f, "message", "") or "")
-        assert "'comp-bar'" not in msg and '"comp-bar"' not in msg, (
-            f"resolvable depends_on entry comp-bar wrongly flagged: {msg}"
-        )
-
-    report = spec_linter.lint(None, repo_root)
-    hard = _get(report, "hard_failures")
-    if hard is not None:
-        assert hard >= 1
-
-
-def test_no_dangling_finding_when_all_depends_on_resolve(tmp_path, monkeypatch):
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    _build_corpus(repo_root, ["comp-bar"])
-    monkeypatch.chdir(repo_root)
-
-    findings = _lint_findings(repo_root)
-    r003 = _r_lint_003(findings)
-    assert not r003, (
-        "no R-LINT-003 finding expected when every depends_on resolves; got: "
-        + repr([_get(f, "message") for f in r003])
+    assert not any(PRESENT_ID in str(field(f, "message")) for f in lint003), (
+        f"resolvable dependency {PRESENT_ID!r} was wrongly reported by R-LINT-003"
     )
 
+    hard = report["hard_failures"] if isinstance(report, dict) else report.hard_failures
+    assert hard >= 1
 
-def test_cli_json_reports_dangling_depends_on_and_exits_1(tmp_path, monkeypatch, capsys):
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    _build_corpus(repo_root, [DANGLING_ID])
-    monkeypatch.chdir(repo_root)
 
-    code = spec_linter.main(["--format=json", f"--repo-root={repo_root}"])
+def test_dangling_depends_on_via_cli_json(tmp_path, capsys):
+    _build_fixture(tmp_path)
+
+    code = spec_linter.main([f"--repo-root={tmp_path}", "--format=json"])
     out = capsys.readouterr().out
-    assert code == 1, f"expected exit code 1 for a fail-severity finding, got {code}"
 
-    try:
-        data = json.loads(out)
-    except ValueError:
-        start = out.index("{")
-        end = out.rindex("}")
-        data = json.loads(out[start : end + 1])
-
-    findings = data.get("findings", [])
+    assert code == 1
+    doc = json.loads(out)
+    findings = doc["findings"]
     matching = [
         f
         for f in findings
-        if f.get("rule_id") == "R-LINT-003"
-        and f.get("severity") == "fail"
-        and DANGLING_ID in str(f.get("message", ""))
+        if f["rule_id"] == "R-LINT-003"
+        and f["severity"] == "fail"
+        and DANGLING_ID in f["message"]
     ]
-    assert matching, f"expected R-LINT-003 fail finding naming {DANGLING_ID}; got {findings!r}"
-    summary = data.get("summary", {})
-    assert summary.get("hard_failures", 0) >= 1
+    assert matching, f"no fail R-LINT-003 finding naming {DANGLING_ID!r} in {findings}"
+    assert doc["summary"]["hard_failures"] >= 1

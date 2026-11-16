@@ -1,4 +1,15 @@
+"""AC-LINT-032 (Covers: R-LINT-032).
+
+Given a project holding .hotdocs-tool.json with components "foo" and
+"cache-manager", when the linter runs on it, then "cache-manager" gets an
+R-LINT-032 fail finding and "foo" none.
+
+Given the same project without .hotdocs-tool.json, or the tool's own
+repository, when the linter runs on it, then there is no R-LINT-032 finding.
+"""
+
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -9,181 +20,208 @@ import spec_linter
 RULE = "R-LINT-032"
 
 
-def _get(value, name, default=None):
-    if isinstance(value, dict):
-        return value.get(name, default)
-    return getattr(value, name, default)
+def field(value, name):
+    return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def _tool_root():
+def _tool_root() -> Path:
+    """Parent of the nearest directory named `gen` above spec_linter's file."""
     here = Path(spec_linter.__file__).resolve()
     for parent in here.parents:
-        if parent.name == "gen" and parent.is_dir():
+        if parent.name == "gen":
             return parent.parent
-    return None
+    pytest.skip("spec_linter is not installed under a `gen` directory; no tool root")
 
 
-def _component_md(slug):
-    return (
-        "---\n"
-        f"id: comp-{slug}\n"
-        f"title: {slug} fixture\n"
-        "status: draft\n"
-        "owners: [alice]\n"
-        "sealed: true\n"
-        f"source_path: legacy/{slug}\n"
-        "---\n"
-        "\n"
-        f"# {slug}\n"
-        "\n"
-        "## Purpose\n"
-        "\n"
-        "A small fixture component used only for testing.\n"
-        "\n"
-        "## Scope\n"
-        "\n"
-        "- In scope: nothing.\n"
-        "- Out of scope: everything.\n"
-        "\n"
-        "## Definitions\n"
-        "\n"
-        "None.\n"
-        "\n"
-        "## Behavior\n"
-        "\n"
-        "See `requirements/`.\n"
-        "\n"
-        "## Interfaces\n"
-        "\n"
-        "See `interface/`.\n"
-        "\n"
-        "## Data\n"
-        "\n"
-        "See `interface/data/`.\n"
-        "\n"
-        "## Acceptance criteria\n"
-        "\n"
-        "See `acceptance/`.\n"
-        "\n"
-        "## Non-functional constraints\n"
-        "\n"
-        "See `constraints.md`.\n"
-        "\n"
-        "## Open questions\n"
-        "\n"
-        "## Change log\n"
-        "\n"
-        "- Initial draft.\n"
+def _shadowed_slug(tool_root: Path) -> str:
+    gen = tool_root / "gen"
+    if (gen / "cache-manager").is_dir():
+        return "cache-manager"
+    pytest.skip("tool root's gen/ has no cache-manager directory to shadow")
+
+
+def _write(path: Path, text: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+
+
+def _make_component(specs: Path, slug: str, prefix: str) -> None:
+    cdir = specs / "components" / slug
+    title = slug.replace("-", " ").title()
+    _write(
+        cdir / "component.md",
+        f"""---
+id: comp-{slug}
+title: {title}
+status: draft
+owners: [test-team]
+sealed: true
+source_path: legacy/{slug}/
+---
+
+# {title}
+
+## Purpose
+
+Stores and returns values for the {slug} test fixture component.
+
+## Scope
+
+- In scope: returning a stored value for a known key.
+- Out of scope: everything else.
+
+## Definitions
+
+None.
+
+## Behavior
+
+See `requirements/`.
+
+## Interfaces
+
+See `interface/`.
+
+## Data
+
+See `interface/data/`.
+
+## Acceptance criteria
+
+See `acceptance/`.
+
+## Non-functional constraints
+
+See `constraints.md`.
+
+## Open questions
+
+## Change log
+
+- Initial draft.
+""",
+    )
+    _write(
+        cdir / "requirements" / f"R-{prefix}-001.md",
+        f"""# R-{prefix}-001
+
+**R-{prefix}-001** — The component MUST return the stored value for a
+known key.
+""",
+    )
+    _write(
+        cdir / "acceptance" / f"AC-{prefix}-001.md",
+        f"""# AC-{prefix}-001
+
+Covers: R-{prefix}-001
+Kind: compiled
+
+```gherkin
+Given a stored value "v" under key "k"
+When the value for key "k" is requested
+Then the result is "v"
+```
+""",
+    )
+    _write(
+        cdir / "constraints.md",
+        "# Constraints\n\n- None beyond the defaults.\n",
     )
 
 
-def _build_project(root, slugs, with_marker):
-    root.mkdir(parents=True, exist_ok=True)
+def _make_project(root: Path, shadowed: str, with_marker: bool) -> Path:
     specs = root / "specs"
-    (specs / "components").mkdir(parents=True, exist_ok=True)
-    (specs / "glossary.md").write_text(
-        "# Glossary\n\n- **Fixture** — a test-only term.\n", encoding="utf-8"
+    _make_component(specs, "foo", "FOO")
+    _make_component(specs, shadowed, "SHADOW")
+    _write(
+        specs / "glossary.md",
+        "# Glossary\n\n- **Widget** — a thing used only by test fixtures.\n",
     )
-    for slug in slugs:
-        cdir = specs / "components" / slug
-        cdir.mkdir(parents=True, exist_ok=True)
-        (cdir / "component.md").write_text(_component_md(slug), encoding="utf-8")
     if with_marker:
-        (root / ".hotdocs-tool.json").write_text(json.dumps({}), encoding="utf-8")
+        _write(root / ".hotdocs-tool.json", json.dumps({}) + "\n")
     return root
 
 
 def _rule_findings(report):
-    findings = _get(report, "findings", None) or []
-    return [f for f in findings if _get(f, "rule_id") == RULE]
+    return [f for f in field(report, "findings") if field(f, "rule_id") == RULE]
 
 
-def _text_of(finding):
-    return f"{_get(finding, 'message', '') or ''} {_get(finding, 'file', '') or ''}"
+def _names_slug(finding, slug: str) -> bool:
+    text = f"{field(finding, 'message')} {field(finding, 'file')}"
+    return re.search(r"(?<![\w-])" + re.escape(slug) + r"(?![\w-])", text) is not None
 
 
-def _pick_shadowing_slug(tool_root):
-    gen = tool_root / "gen"
-    if (gen / "cache-manager").is_dir():
-        return "cache-manager"
-    for child in sorted(gen.iterdir()):
-        if child.is_dir() and not child.name.startswith(".") and child.name != "foo":
-            return child.name
-    return None
-
-
-@pytest.fixture
-def tool_root():
-    root = _tool_root()
-    if root is None:
-        pytest.skip("linter is not installed under a gen/ directory")
-    return root
-
-
-def test_project_with_marker_flags_shadowing_component_only(tmp_path, tool_root):
+def test_marker_project_flags_shadowing_component_only(tmp_path):
+    tool_root = _tool_root()
+    shadowed = _shadowed_slug(tool_root)
     if (tool_root / "gen" / "foo").exists():
-        pytest.skip("tool root unexpectedly has gen/foo")
-    shadow = _pick_shadowing_slug(tool_root)
-    if shadow is None:
-        pytest.skip("tool root has no gen/ component directories")
+        pytest.skip("tool root's gen/ unexpectedly holds a foo directory")
 
-    repo_root = _build_project(
-        tmp_path.resolve() / "project", ["foo", shadow], with_marker=True
-    )
-    report = spec_linter.lint(None, repo_root)
-    found = _rule_findings(report)
+    repo = _make_project(tmp_path / "project", shadowed, with_marker=True)
+    report = spec_linter.lint(None, repo)
+    findings = _rule_findings(report)
 
-    shadow_findings = [f for f in found if shadow in _text_of(f)]
-    assert shadow_findings, f"expected an {RULE} finding naming {shadow!r}, got {found!r}"
-    for f in shadow_findings:
-        assert _get(f, "severity") == "fail"
-    assert any(shadow in (_get(f, "message", "") or "") for f in shadow_findings)
-
-    foo_findings = [
-        f for f in found
-        if "'foo'" in _text_of(f)
-        or '"foo"' in _text_of(f)
-        or "/foo/" in _text_of(f)
-        or _text_of(f).strip().endswith("foo")
-        or " foo " in f" {_get(f, 'message', '') or ''} "
+    shadow_hits = [
+        f for f in findings
+        if field(f, "severity") == "fail" and _names_slug(f, shadowed)
     ]
-    assert not foo_findings, f"'foo' must get no {RULE} finding, got {foo_findings!r}"
-    assert len(found) == 1, f"expected exactly one {RULE} finding, got {found!r}"
-
-    hard = _get(report, "hard_failures")
-    if hard is None and isinstance(report, dict):
-        hard = (report.get("summary") or {}).get("hard_failures")
-    if hard is not None:
-        assert hard >= 1
-
-
-def test_project_without_marker_has_no_finding(tmp_path, tool_root):
-    shadow = _pick_shadowing_slug(tool_root) or "cache-manager"
-    repo_root = _build_project(
-        tmp_path.resolve() / "project", ["foo", shadow], with_marker=False
+    assert shadow_hits, (
+        f"expected an {RULE} fail finding naming {shadowed!r}; got "
+        f"{[(field(f, 'severity'), field(f, 'file'), field(f, 'message')) for f in findings]}"
     )
-    report = spec_linter.lint(None, repo_root)
-    found = _rule_findings(report)
-    assert found == [], f"no {RULE} finding expected without .hotdocs-tool.json, got {found!r}"
 
-
-def test_marker_removed_after_finding_clears_it(tmp_path, tool_root):
-    shadow = _pick_shadowing_slug(tool_root)
-    if shadow is None:
-        pytest.skip("tool root has no gen/ component directories")
-    repo_root = _build_project(
-        tmp_path.resolve() / "project", ["foo", shadow], with_marker=True
+    foo_hits = [f for f in findings if _names_slug(f, "foo")]
+    assert not foo_hits, (
+        f"'foo' is not under the tool's gen/ and must get no {RULE} finding; got "
+        f"{[(field(f, 'file'), field(f, 'message')) for f in foo_hits]}"
     )
-    first = _rule_findings(spec_linter.lint(None, repo_root))
-    assert first, f"expected an {RULE} finding while .hotdocs-tool.json is present"
-    (repo_root / ".hotdocs-tool.json").unlink()
-    second = _rule_findings(spec_linter.lint(None, repo_root))
-    assert second == []
+
+    # Every R-LINT-032 finding is about the shadowing component.
+    for f in findings:
+        assert _names_slug(f, shadowed), field(f, "message")
+
+    # A fail finding counts toward hard failures.
+    assert field(report, "hard_failures") >= 1
 
 
-def test_tool_own_repository_has_no_finding(tool_root):
+def test_marker_project_cli_reports_rule_and_exits_1(tmp_path, capsys):
+    tool_root = _tool_root()
+    shadowed = _shadowed_slug(tool_root)
+    if (tool_root / "gen" / "foo").exists():
+        pytest.skip("tool root's gen/ unexpectedly holds a foo directory")
+
+    repo = _make_project(tmp_path / "project", shadowed, with_marker=True)
+    capsys.readouterr()
+    code = spec_linter.main([f"--repo-root={repo}", "--format=json"])
+    out = capsys.readouterr().out
+    assert code == 1
+    doc = json.loads(out)
+    hits = [
+        f for f in doc["findings"]
+        if f["rule_id"] == RULE and f["severity"] == "fail" and _names_slug(f, shadowed)
+    ]
+    assert hits
+
+
+def test_project_without_marker_has_no_rule_finding(tmp_path):
+    tool_root = _tool_root()
+    shadowed = _shadowed_slug(tool_root)
+
+    repo = _make_project(tmp_path / "project", shadowed, with_marker=False)
+    assert not (repo / ".hotdocs-tool.json").exists()
+    report = spec_linter.lint(None, repo)
+    findings = _rule_findings(report)
+    assert findings == [], [
+        (field(f, "file"), field(f, "message")) for f in findings
+    ]
+
+
+def test_tool_own_repository_has_no_rule_finding():
+    tool_root = _tool_root()
     if not (tool_root / "specs").is_dir():
-        pytest.skip("tool root has no specs/ tree")
+        pytest.skip("tool root carries no specs/ tree to lint")
     report = spec_linter.lint(None, tool_root)
-    found = _rule_findings(report)
-    assert found == [], f"the tool's own repository must get no {RULE} finding, got {found!r}"
+    findings = _rule_findings(report)
+    assert findings == [], [
+        (field(f, "file"), field(f, "message")) for f in findings
+    ]

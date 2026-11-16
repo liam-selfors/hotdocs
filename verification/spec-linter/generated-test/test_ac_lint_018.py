@@ -1,13 +1,14 @@
-import sys
-from pathlib import Path
+"""AC-LINT-018: a depends_on_guarantees entry whose owning component is not in
+this component's own depends_on is a fail-severity R-LINT-018 finding naming
+the owning component by its comp-<slug> id."""
 
 import spec_linter
 
+from pathlib import Path
 
-def _get(value, key, default=None):
-    if isinstance(value, dict):
-        return value.get(key, default)
-    return getattr(value, key, default)
+
+def field(value, name):
+    return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
 def _write(path: Path, text: str) -> None:
@@ -15,199 +16,151 @@ def _write(path: Path, text: str) -> None:
     path.write_text(text, encoding="utf-8")
 
 
-def _component_md(comp_id, title, depends_on, depends_on_guarantees, source_path):
-    lines = [
-        "---",
-        f"id: {comp_id}",
-        f"title: {title}",
-        "status: draft",
-        "owners: [test-team]",
-    ]
-    if depends_on is not None:
-        lines.append("depends_on: [" + ", ".join(depends_on) + "]")
-    if depends_on_guarantees is not None:
-        lines.append(
-            "depends_on_guarantees: [" + ", ".join(depends_on_guarantees) + "]"
-        )
-    lines.append("sealed: true")
-    lines.append(f"source_path: {source_path}")
-    lines.append("---")
-    lines.append("")
-    lines.append(f"# {title}")
-    lines.append("")
-    lines.append("## Purpose")
-    lines.append("")
-    lines.append(f"A small synthetic component named {title} used as a test fixture.")
-    lines.append("")
-    lines.append("## Scope")
-    lines.append("")
-    lines.append("- In scope: fixture behavior.")
-    lines.append("- Out of scope: everything else.")
-    lines.append("")
-    lines.append("## Definitions")
-    lines.append("")
-    lines.append("None.")
-    lines.append("")
-    lines.append("## Behavior")
-    lines.append("")
-    lines.append("See `requirements/`.")
-    lines.append("")
-    lines.append("## Interfaces")
-    lines.append("")
-    lines.append("See `interface/`.")
-    lines.append("")
-    lines.append("## Data")
-    lines.append("")
-    lines.append("See `interface/data/`.")
-    lines.append("")
-    lines.append("## Acceptance criteria")
-    lines.append("")
-    lines.append("See `acceptance/`.")
-    lines.append("")
-    lines.append("## Non-functional constraints")
-    lines.append("")
-    lines.append("See `constraints.md`.")
-    lines.append("")
-    lines.append("## Open questions")
-    lines.append("")
-    lines.append("## Change log")
-    lines.append("")
-    lines.append("- Initial draft.")
-    lines.append("")
-    return "\n".join(lines)
-
-
-def _requirement(req_id: str) -> str:
+def _component_md(slug: str, title: str, extra_frontmatter: str = "") -> str:
     return (
-        f"# {req_id}\n"
+        "---\n"
+        f"id: comp-{slug}\n"
+        f"title: {title}\n"
+        "status: draft\n"
+        "owners: [test-team]\n"
+        "sealed: true\n"
+        f"source_path: legacy/{slug}/\n"
+        f"{extra_frontmatter}"
+        "---\n"
         "\n"
-        f"**{req_id}** — The component MUST behave as its fixture describes.\n"
+        f"# {title}\n"
+        "\n"
+        "## Purpose\n"
+        "\n"
+        f"A small synthetic component used only as a lint fixture.\n"
+        "\n"
+        "## Scope\n"
+        "\n"
+        "- In scope: fixture behavior.\n"
+        "- Out of scope: everything else.\n"
+        "\n"
+        "## Definitions\n"
+        "\n"
+        "None.\n"
+        "\n"
+        "## Behavior\n"
+        "\n"
+        "See `requirements/`.\n"
+        "\n"
+        "## Interfaces\n"
+        "\n"
+        "See `interface/`.\n"
+        "\n"
+        "## Data\n"
+        "\n"
+        "See `interface/data/`.\n"
+        "\n"
+        "## Acceptance criteria\n"
+        "\n"
+        "See `acceptance/`.\n"
+        "\n"
+        "## Non-functional constraints\n"
+        "\n"
+        "See `constraints.md`.\n"
+        "\n"
+        "## Open questions\n"
+        "\n"
+        "## Change log\n"
+        "\n"
+        "- Initial draft.\n"
     )
 
 
-def _acceptance(ac_id: str, req_id: str) -> str:
-    return (
-        f"# {ac_id}\n"
-        "\n"
-        f"Covers: {req_id}\n"
-        "Kind: generated-test\n"
-        "\n"
-        "```gherkin\n"
-        "Given the fixture component\n"
-        "When it runs\n"
-        "Then it behaves as described\n"
-        "```\n"
-    )
-
-
-def _constraints() -> str:
-    return (
-        "# Constraints\n"
-        "\n"
-        "- None beyond the defaults; measured by inspection.\n"
-    )
-
-
-def _build_corpus(repo_root: Path, foo_depends_on_bar: bool) -> None:
-    specs = repo_root / "specs"
+def _write_component(root: Path, slug: str, upper: str, extra_frontmatter: str = "") -> None:
+    cdir = root / "specs" / "components" / slug
+    _write(cdir / "component.md", _component_md(slug, f"{slug.capitalize()} Component", extra_frontmatter))
     _write(
-        specs / "glossary.md",
+        cdir / "requirements" / f"R-{upper}-001.md",
+        f"# R-{upper}-001\n\n"
+        f"**R-{upper}-001** — The component MUST match existing behavior.\n",
+    )
+    _write(
+        cdir / "acceptance" / f"AC-{upper}-001.md",
+        f"# AC-{upper}-001\n\n"
+        f"Covers: R-{upper}-001\n"
+        "Kind: generated-test\n\n"
+        "```gherkin\n"
+        "Given the component\n"
+        "When it runs\n"
+        "Then it matches existing behavior\n"
+        "```\n",
+    )
+    _write(
+        cdir / "constraints.md",
+        "# Constraints\n\n- None beyond existing behavior.\n",
+    )
+
+
+def _build_repo(root: Path, foo_depends_on_bar: bool) -> None:
+    _write(
+        root / "specs" / "glossary.md",
         "# Glossary\n\n- **Fixture** — a synthetic test corpus.\n",
     )
-
-    # comp-bar: owns guarantee G-BAR-001
-    bar = specs / "components" / "bar"
+    # bar owns guarantee G-BAR-001.
+    _write_component(root, "bar", "BAR")
     _write(
-        bar / "component.md",
-        _component_md("comp-bar", "Bar", None, None, "legacy/bar"),
+        root / "specs" / "components" / "bar" / "interface" / "guarantees" / "G-BAR-001.md",
+        "# G-BAR-001\n\n"
+        "**G-BAR-001** — The bar component MUST return results in a stable order.\n",
     )
-    _write(bar / "requirements" / "R-BAR-001.md", _requirement("R-BAR-001"))
-    _write(bar / "acceptance" / "AC-BAR-001.md", _acceptance("AC-BAR-001", "R-BAR-001"))
-    _write(
-        bar / "interface" / "guarantees" / "G-BAR-001.md",
-        "# G-BAR-001\n\n**G-BAR-001** — Bar MUST return results in a stable order.\n",
+    # foo relies on G-BAR-001; depends_on either omits or includes comp-bar.
+    deps = "depends_on: [comp-bar]\n" if foo_depends_on_bar else "depends_on: []\n"
+    _write_component(
+        root,
+        "foo",
+        "FOO",
+        extra_frontmatter=deps + "depends_on_guarantees: [G-BAR-001]\n",
     )
-    _write(bar / "constraints.md", _constraints())
-
-    # comp-foo: relies on G-BAR-001
-    foo = specs / "components" / "foo"
-    depends_on = ["comp-bar"] if foo_depends_on_bar else []
-    _write(
-        foo / "component.md",
-        _component_md("comp-foo", "Foo", depends_on, ["G-BAR-001"], "legacy/foo"),
-    )
-    _write(foo / "requirements" / "R-FOO-001.md", _requirement("R-FOO-001"))
-    _write(foo / "acceptance" / "AC-FOO-001.md", _acceptance("AC-FOO-001", "R-FOO-001"))
-    _write(foo / "constraints.md", _constraints())
 
 
-def _findings(report):
-    findings = _get(report, "findings", None)
-    assert findings is not None, "LintReport has no findings"
-    return list(findings)
+def _lint018_findings(report):
+    findings = field(report, "findings")
+    return [f for f in findings if field(f, "rule_id") == "R-LINT-018"]
 
 
-def _lint018_naming_bar(findings):
-    out = []
-    for f in findings:
-        rule_id = _get(f, "rule_id")
-        severity = _get(f, "severity")
-        message = _get(f, "message") or ""
-        if rule_id == "R-LINT-018" and severity == "fail" and "comp-bar" in message:
-            out.append(f)
-    return out
-
-
-def test_ac_lint_018_missing_owning_dependency_is_reported(tmp_path):
+def test_guarantee_owner_missing_from_depends_on_fails_naming_comp_bar(tmp_path):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
-    _build_corpus(repo_root, foo_depends_on_bar=False)
+    _build_repo(repo_root, foo_depends_on_bar=False)
 
     report = spec_linter.lint(None, repo_root)
-    findings = _findings(report)
 
-    matches = _lint018_naming_bar(findings)
-    assert matches, (
-        "expected a fail-severity R-LINT-018 finding naming comp-bar; got: "
-        + repr(
-            [
-                (_get(f, "rule_id"), _get(f, "severity"), _get(f, "message"))
-                for f in findings
-            ]
-        )
-    )
-
-    hard_failures = _get(report, "hard_failures", None)
-    if hard_failures is None:
-        summary = _get(report, "summary", None)
-        if summary is not None:
-            hard_failures = _get(summary, "hard_failures", None)
-    if hard_failures is not None:
-        assert hard_failures >= 1
-
-
-def test_ac_lint_018_no_finding_when_owner_is_listed_in_depends_on(tmp_path):
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    _build_corpus(repo_root, foo_depends_on_bar=True)
-
-    report = spec_linter.lint(None, repo_root)
-    findings = _findings(report)
-
-    matches = _lint018_naming_bar(findings)
-    assert not matches, (
-        "did not expect an R-LINT-018 finding naming comp-bar when comp-bar "
-        "is in depends_on; got: "
-        + repr([_get(f, "message") for f in matches])
-    )
-
-    lint018_fails = [
+    lint018 = _lint018_findings(report)
+    matching = [
         f
-        for f in findings
-        if _get(f, "rule_id") == "R-LINT-018" and _get(f, "severity") == "fail"
+        for f in lint018
+        if field(f, "severity") == "fail" and "comp-bar" in field(f, "message")
     ]
-    assert not lint018_fails, (
-        "G-BAR-001 exists and its owner is depended upon; expected no "
-        "R-LINT-018 failures, got: "
-        + repr([_get(f, "message") for f in lint018_fails])
+    assert matching, (
+        "expected a fail-severity R-LINT-018 finding naming comp-bar; got "
+        f"{[(field(f, 'severity'), field(f, 'message')) for f in lint018]}"
     )
+    assert field(report, "hard_failures") >= 1
+
+
+def test_guarantee_owner_listed_in_depends_on_has_no_missing_dependency_finding(tmp_path):
+    # Control: the same corpus with comp-bar in depends_on must not produce the
+    # missing-dependency finding, so the finding above is caused by the omission.
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    _build_repo(repo_root, foo_depends_on_bar=True)
+
+    report = spec_linter.lint(None, repo_root)
+
+    lint018 = _lint018_findings(report)
+    naming_bar = [
+        f
+        for f in lint018
+        if field(f, "severity") == "fail" and "comp-bar" in field(f, "message")
+    ]
+    assert naming_bar == [], (
+        "did not expect an R-LINT-018 finding naming comp-bar when it is in "
+        f"depends_on; got {[field(f, 'message') for f in naming_bar]}"
+    )
+    # G-BAR-001 exists, so no R-LINT-018 failure of any kind is expected.
+    assert [f for f in lint018 if field(f, "severity") == "fail"] == []

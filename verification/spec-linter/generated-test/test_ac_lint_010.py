@@ -1,42 +1,42 @@
-import json
-import textwrap
-from pathlib import Path
+"""AC-LINT-010: an acceptance criterion missing its `Kind:` tag yields a
+fail-severity R-LINT-010 finding when `hotdocs lint` runs against it."""
 
-import pytest
+import json
+from pathlib import Path
 
 import spec_linter
 
 
-def _get(value, name, default=None):
-    if isinstance(value, dict):
-        return value.get(name, default)
-    return getattr(value, name, default)
+AC_REL = "specs/components/foo/acceptance/AC-FOO-001.md"
+
+
+def field(value, name):
+    return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
 def _write(path: Path, text: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(textwrap.dedent(text).lstrip("\n"), encoding="utf-8")
+    path.write_text(text, encoding="utf-8")
 
 
-COMPONENT_MD = """
----
-id: comp-widget
-title: Widget
+COMPONENT_MD = """---
+id: comp-foo
+title: Foo
 status: draft
-owners: [alice]
+owners: [test-team]
 sealed: true
-source_path: legacy/widget
+source_path: legacy/foo/
 ---
 
-# Widget
+# Foo
 
 ## Purpose
 
-The widget frobs and twiddles inputs for its callers.
+Foo does one small thing for the test fixture.
 
 ## Scope
 
-- In scope: frobbing and twiddling.
+- In scope: the one thing.
 - Out of scope: everything else.
 
 ## Definitions
@@ -70,153 +70,93 @@ See `constraints.md`.
 - Initial draft.
 """
 
-REQ_1 = """
-# R-WIDGET-001
+REQUIREMENT_MD = """# R-FOO-001
 
-**R-WIDGET-001** — The widget MUST frob its input.
+**R-FOO-001** — Foo MUST do the one thing.
 """
 
-REQ_2 = """
-# R-WIDGET-002
-
-**R-WIDGET-002** — The widget MUST twiddle its input.
-"""
-
-AC_MISSING_KIND = """
-# AC-WIDGET-001
-
-Covers: R-WIDGET-001
-
-```gherkin
-Given an input value
-When the widget frobs it
-Then the output is frobbed
+GHERKIN = """```gherkin
+Given a foo input
+When foo runs
+Then foo does the one thing
 ```
 """
 
-AC_WITH_KIND = """
-# AC-WIDGET-002
 
-Covers: R-WIDGET-002
-Kind: compiled
-
-```gherkin
-Given an input value
-When the widget twiddles it
-Then the output is twiddled
-```
-"""
-
-CONSTRAINTS = """
-# Constraints
-
-- None beyond the defaults.
-"""
-
-GLOSSARY = """
-# Glossary
-
-- **Widget** — a thing that frobs.
-"""
+def _ac_text(with_kind: bool) -> str:
+    kind_line = "Kind: compiled\n" if with_kind else ""
+    return "# AC-FOO-001\n\nCovers: R-FOO-001\n" + kind_line + "\n" + GHERKIN
 
 
-def _build_corpus(root: Path, bad_has_kind: bool = False) -> Path:
-    comp = root / "specs" / "components" / "widget"
+def _build_repo(root: Path, with_kind: bool) -> Path:
+    comp = root / "specs" / "components" / "foo"
     _write(comp / "component.md", COMPONENT_MD)
-    _write(comp / "requirements" / "R-WIDGET-001.md", REQ_1)
-    _write(comp / "requirements" / "R-WIDGET-002.md", REQ_2)
-    if bad_has_kind:
-        _write(
-            comp / "acceptance" / "AC-WIDGET-001.md",
-            AC_MISSING_KIND.replace(
-                "Covers: R-WIDGET-001\n", "Covers: R-WIDGET-001\nKind: compiled\n"
-            ),
-        )
-    else:
-        _write(comp / "acceptance" / "AC-WIDGET-001.md", AC_MISSING_KIND)
-    _write(comp / "acceptance" / "AC-WIDGET-002.md", AC_WITH_KIND)
-    _write(comp / "constraints.md", CONSTRAINTS)
-    _write(root / "specs" / "glossary.md", GLOSSARY)
+    _write(comp / "requirements" / "R-FOO-001.md", REQUIREMENT_MD)
+    _write(comp / "acceptance" / "AC-FOO-001.md", _ac_text(with_kind))
+    _write(comp / "constraints.md", "# Constraints\n\nNone.\n")
+    _write(
+        root / "specs" / "glossary.md",
+        "# Glossary\n\n- **Foo** — the fixture component.\n",
+    )
     return root
 
 
-def _findings(report):
-    findings = _get(report, "findings", None)
-    if findings is None and not isinstance(report, dict):
-        to_json = getattr(report, "to_json", None)
-        if callable(to_json):
-            data = to_json()
-            if isinstance(data, str):
-                data = json.loads(data)
-            findings = data.get("findings")
-    return list(findings or [])
+def _is_ac_file(file_value) -> bool:
+    return str(file_value).replace("\\", "/").endswith(AC_REL)
 
 
-def _sev(finding):
-    sev = _get(finding, "severity")
-    sev = getattr(sev, "value", sev)
-    return str(sev).lower()
-
-
-def _file(finding):
-    return str(_get(finding, "file", "") or "").replace("\\", "/")
-
-
-def _lint010(findings):
-    return [f for f in findings if _get(f, "rule_id") == "R-LINT-010"]
-
-
-def test_missing_kind_produces_fail_finding_for_r_lint_010(tmp_path):
-    repo_root = _build_corpus(tmp_path)
+def _lint_findings(repo_root: Path):
     report = spec_linter.lint(None, repo_root)
-    hits = _lint010(_findings(report))
-    fails = [f for f in hits if _sev(f) == "fail"]
-    assert fails, f"expected a fail-severity R-LINT-010 finding, got {hits!r}"
-    assert any(_file(f).endswith("acceptance/AC-WIDGET-001.md") for f in fails), (
-        f"expected the R-LINT-010 fail finding to name AC-WIDGET-001.md, got {fails!r}"
+    return report, list(field(report, "findings"))
+
+
+def test_missing_kind_yields_fail_finding_for_r_lint_010(tmp_path):
+    repo_root = _build_repo(tmp_path / "repo", with_kind=False)
+    report, findings = _lint_findings(repo_root)
+
+    matches = [
+        f for f in findings
+        if field(f, "rule_id") == "R-LINT-010" and field(f, "severity") == "fail"
+    ]
+    assert matches, (
+        "expected a fail-severity R-LINT-010 finding, got: "
+        + repr([(field(f, "rule_id"), field(f, "severity"), field(f, "file"))
+                for f in findings])
+    )
+    assert any(_is_ac_file(field(f, "file")) for f in matches), (
+        "R-LINT-010 finding should point at the criterion missing its Kind: "
+        + repr([field(f, "file") for f in matches])
+    )
+    hard = report["hard_failures"] if isinstance(report, dict) else report.hard_failures
+    assert hard >= 1
+
+
+def test_criterion_with_kind_has_no_r_lint_010_finding(tmp_path):
+    repo_root = _build_repo(tmp_path / "repo", with_kind=True)
+    _, findings = _lint_findings(repo_root)
+
+    offending = [
+        f for f in findings
+        if field(f, "rule_id") == "R-LINT-010" and _is_ac_file(field(f, "file"))
+    ]
+    assert offending == [], (
+        "a complete criterion with Kind: and Given/When/Then must not trip "
+        "R-LINT-010: " + repr([field(f, "message") for f in offending])
     )
 
 
-def test_well_formed_criterion_is_not_flagged_by_r_lint_010(tmp_path):
-    repo_root = _build_corpus(tmp_path)
-    report = spec_linter.lint(None, repo_root)
-    hits = _lint010(_findings(report))
-    assert not any(_file(f).endswith("acceptance/AC-WIDGET-002.md") for f in hits), (
-        f"well-formed AC-WIDGET-002 must not be flagged by R-LINT-010: {hits!r}"
-    )
+def test_cli_reports_r_lint_010_fail_and_exits_1(tmp_path, capsys):
+    repo_root = _build_repo(tmp_path / "repo", with_kind=False)
 
-
-def test_hard_failures_count_reflects_r_lint_010_failure(tmp_path):
-    repo_root = _build_corpus(tmp_path)
-    report = spec_linter.lint(None, repo_root)
-    hard = _get(report, "hard_failures", None)
-    if hard is None:
-        summary = _get(report, "summary", None)
-        if summary is not None:
-            hard = _get(summary, "hard_failures", None)
-    if hard is not None:
-        assert int(hard) >= 1
-
-
-def test_adding_kind_removes_r_lint_010_finding(tmp_path):
-    repo_root = _build_corpus(tmp_path, bad_has_kind=True)
-    report = spec_linter.lint(None, repo_root)
-    hits = _lint010(_findings(report))
-    assert not hits, f"no R-LINT-010 findings expected once Kind: is present: {hits!r}"
-
-
-def test_cli_json_reports_r_lint_010_fail_and_exits_1(tmp_path, capsys):
-    repo_root = _build_corpus(tmp_path)
     code = spec_linter.main(["--format=json", f"--repo-root={repo_root}"])
     out = capsys.readouterr().out
+
     assert code == 1
-    data = json.loads(out)
-    findings = data.get("findings", []) if isinstance(data, dict) else []
-    fails = [
-        f
-        for f in findings
-        if f.get("rule_id") == "R-LINT-010" and str(f.get("severity")).lower() == "fail"
+    doc = json.loads(out)
+    matches = [
+        f for f in doc["findings"]
+        if f["rule_id"] == "R-LINT-010" and f["severity"] == "fail"
     ]
-    assert fails, f"expected a fail-severity R-LINT-010 finding in CLI JSON: {findings!r}"
-    summary = data.get("summary", {})
-    assert int(summary.get("hard_failures", 0)) >= 1
+    assert matches, "expected a fail-severity R-LINT-010 finding in JSON report"
+    assert any(_is_ac_file(f["file"]) for f in matches)
+    assert doc["summary"]["hard_failures"] >= 1

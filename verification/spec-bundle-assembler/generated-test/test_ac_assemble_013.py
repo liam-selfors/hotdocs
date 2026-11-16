@@ -1,109 +1,13 @@
-import importlib.util
-import sys
-from collections.abc import Mapping
-from pathlib import Path
-
 import spec_bundle_assembler
 
-
-GLOSSARY = "# Glossary\n\n- **Foo** — a test term.\n"
-
-FOO_COMPONENT = (
-    "---\n"
-    "id: comp-foo\n"
-    "title: Foo\n"
-    "status: draft\n"
-    "owners: [team-a]\n"
-    "sealed: true\n"
-    "source_path: legacy/foo/\n"
-    "depends_on: []\n"
-    "---\n"
-    "\n"
-    "# Foo\n"
-    "\n"
-    "## Purpose\n"
-    "\n"
-    "Foo doubles a number.\n"
-)
-
-FOO_REQUIREMENT = "# R-FOO-001\n\n**R-FOO-001** — `foo(x)` MUST return `2 * x`.\n"
-
-FOO_ACCEPTANCE = (
-    "# AC-FOO-001\n"
-    "\n"
-    "Covers: R-FOO-001\n"
-    "Kind: generated-test\n"
-    "\n"
-    "```gherkin\n"
-    "Given x = 2\n"
-    "When foo(x) is called\n"
-    "Then it returns 4\n"
-    "```\n"
-)
-
-FOO_INTERFACE = "# Library\n\n```\nfoo(x: int) -> int\n```\n"
-
-FOO_CONSTRAINTS = "# Constraints\n\nNone.\n"
-
-BAR_COMPONENT = (
-    "---\n"
-    "id: comp-bar\n"
-    "title: Bar\n"
-    "status: draft\n"
-    "owners: [team-a]\n"
-    "sealed: true\n"
-    "source_path: legacy/bar/\n"
-    "depends_on: [comp-foo]\n"
-    "---\n"
-    "\n"
-    "# Bar\n"
-    "\n"
-    "## Purpose\n"
-    "\n"
-    "Bar quadruples a number.\n"
-)
-
-BAR_REQUIREMENT = "# R-BAR-001\n\n**R-BAR-001** — `bar(x)` MUST return `4 * x`.\n"
-
-BAR_ACCEPTANCE = (
-    "# AC-BAR-001\n"
-    "\n"
-    "Covers: R-BAR-001\n"
-    "Kind: generated-test\n"
-    "\n"
-    "```gherkin\n"
-    "Given x = 2\n"
-    "When bar(x) is called\n"
-    "Then it returns 8\n"
-    "```\n"
-)
-
-BAR_INTERFACE = "# Library\n\n```\nbar(x: int) -> int\n```\n"
-
-BAR_CONSTRAINTS = "# Constraints\n\nNone.\n"
+import collections.abc
+import importlib.util
+import sys
+from pathlib import Path
 
 
-def _write(path: Path, text: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text, encoding="utf-8")
-
-
-def _build_corpus(repo_root: Path) -> None:
-    _write(repo_root / "specs" / "glossary.md", GLOSSARY)
-
-    foo = repo_root / "specs" / "components" / "foo"
-    _write(foo / "component.md", FOO_COMPONENT)
-    _write(foo / "requirements" / "R-FOO-001.md", FOO_REQUIREMENT)
-    _write(foo / "acceptance" / "AC-FOO-001.md", FOO_ACCEPTANCE)
-    _write(foo / "interface" / "library.md", FOO_INTERFACE)
-    _write(foo / "constraints.md", FOO_CONSTRAINTS)
-
-    bar = repo_root / "specs" / "components" / "bar"
-    _write(bar / "component.md", BAR_COMPONENT)
-    _write(bar / "requirements" / "R-BAR-001.md", BAR_REQUIREMENT)
-    _write(bar / "acceptance" / "AC-BAR-001.md", BAR_ACCEPTANCE)
-    _write(bar / "interface" / "library.md", BAR_INTERFACE)
-    _write(bar / "constraints.md", BAR_CONSTRAINTS)
+def field(value, name):
+    return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
 def _load_spec_linter():
@@ -125,95 +29,187 @@ def _load_spec_linter():
     return spec_linter
 
 
-def _assert_lint_clean(repo_root: Path) -> None:
+def _assert_lint_clean(repo_root):
     spec_linter = _load_spec_linter()
     report = spec_linter.lint(None, repo_root)
     hard = (
-        report.get("hard_failures")
-        if isinstance(report, dict)
-        else getattr(report, "hard_failures", None)
+        report["hard_failures"] if isinstance(report, dict) else report.hard_failures
     )
-    findings = (
-        report.get("findings")
-        if isinstance(report, dict)
-        else getattr(report, "findings", None)
-    )
-    assert hard == 0, f"fixture is not lint-clean: {findings!r}"
+    assert hard == 0, getattr(report, "findings", report)
 
 
-def _has_field(obj, name: str) -> bool:
-    if isinstance(obj, dict):
-        return name in obj
-    return hasattr(obj, name)
+GLOSSARY = "# Glossary\n\n- **Foo** — a test term.\n"
 
 
-def _field(obj, name: str):
-    if isinstance(obj, dict):
-        return obj.get(name)
-    return getattr(obj, name, None)
+FOO_COMPONENT = (
+    "---\n"
+    "id: comp-foo\n"
+    "title: Foo\n"
+    "status: draft\n"
+    "owners: [team-a]\n"
+    "sealed: true\n"
+    "source_path: legacy/foo/\n"
+    "depends_on: []\n"
+    "---\n"
+    "\n"
+    "# Foo\n"
+    "\n"
+    "## Purpose\n"
+    "\n"
+    "Foo doubles a number by way of the zircon-purpose-marker route.\n"
+)
+
+FOO_REQUIREMENT = (
+    "# R-FOO-001\n"
+    "\n"
+    "**R-FOO-001** — `foo(x)` MUST return `2 * x` per the quartz-requirement-marker rule.\n"
+)
+
+FOO_ACCEPTANCE = (
+    "# AC-FOO-001\n"
+    "\n"
+    "Covers: R-FOO-001\n"
+    "Kind: generated-test\n"
+    "\n"
+    "```gherkin\n"
+    "Given x = 2\n"
+    "When foo(x) is called\n"
+    "Then it returns 4\n"
+    "```\n"
+)
+
+FOO_LIBRARY = "# Library\n\n```\nfoo(x: int) -> int\n```\n"
+
+FOO_CONSTRAINTS = "# Constraints\n\nNone beyond the basalt-constraint-marker.\n"
 
 
-def _nonblank_lines(text: str) -> set:
-    return {line.strip() for line in text.splitlines() if line.strip()}
+BAR_COMPONENT = (
+    "---\n"
+    "id: comp-bar\n"
+    "title: Bar\n"
+    "status: draft\n"
+    "owners: [team-a]\n"
+    "sealed: true\n"
+    "source_path: legacy/bar/\n"
+    "depends_on: [comp-foo]\n"
+    "---\n"
+    "\n"
+    "# Bar\n"
+    "\n"
+    "## Purpose\n"
+    "\n"
+    "Bar adds one to a doubled number.\n"
+)
+
+BAR_REQUIREMENT = (
+    "# R-BAR-001\n"
+    "\n"
+    "**R-BAR-001** — `bar(x)` MUST return `foo(x) + 1`.\n"
+)
+
+BAR_ACCEPTANCE = (
+    "# AC-BAR-001\n"
+    "\n"
+    "Covers: R-BAR-001\n"
+    "Kind: generated-test\n"
+    "\n"
+    "```gherkin\n"
+    "Given x = 2\n"
+    "When bar(x) is called\n"
+    "Then it returns 5\n"
+    "```\n"
+)
+
+BAR_LIBRARY = "# Library\n\n```\nbar(x: int) -> int\n```\n"
+
+BAR_CONSTRAINTS = "# Constraints\n\nNone.\n"
 
 
-def test_dependency_interfaces_holds_dependency_interface_only(tmp_path):
+def _write(path, text):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+
+
+def _write_foo(repo_root):
+    comp = repo_root / "specs" / "components" / "foo"
+    _write(comp / "component.md", FOO_COMPONENT)
+    _write(comp / "requirements" / "R-FOO-001.md", FOO_REQUIREMENT)
+    _write(comp / "acceptance" / "AC-FOO-001.md", FOO_ACCEPTANCE)
+    _write(comp / "interface" / "library.md", FOO_LIBRARY)
+    _write(comp / "constraints.md", FOO_CONSTRAINTS)
+
+
+def _write_bar(repo_root):
+    comp = repo_root / "specs" / "components" / "bar"
+    _write(comp / "component.md", BAR_COMPONENT)
+    _write(comp / "requirements" / "R-BAR-001.md", BAR_REQUIREMENT)
+    _write(comp / "acceptance" / "AC-BAR-001.md", BAR_ACCEPTANCE)
+    _write(comp / "interface" / "library.md", BAR_LIBRARY)
+    _write(comp / "constraints.md", BAR_CONSTRAINTS)
+
+
+def _write_glossary(repo_root):
+    _write(repo_root / "specs" / "glossary.md", GLOSSARY)
+
+
+def _lines(text):
+    return {ln.strip() for ln in text.splitlines() if ln.strip()}
+
+
+def test_dependency_interfaces_holds_only_dependency_interface_text(tmp_path):
     repo_root = tmp_path / "repo"
-    _build_corpus(repo_root)
+    repo_root.mkdir()
+    _write_glossary(repo_root)
+    _write_foo(repo_root)
+    _write_bar(repo_root)
+
     _assert_lint_clean(repo_root)
 
-    bundle = spec_bundle_assembler.assemble_criterion(
-        "comp-bar", "AC-BAR-001", repo_root
-    )
+    bundle = spec_bundle_assembler.assemble_criterion("comp-bar", "AC-BAR-001", repo_root)
 
-    assert _has_field(bundle, "dependency_interfaces")
-    deps = _field(bundle, "dependency_interfaces")
+    deps = field(bundle, "dependency_interfaces")
     assert deps is not None
-    assert isinstance(deps, Mapping)
-    assert "comp-foo" in deps, f"dependency_interfaces keys: {list(deps)!r}"
-
+    assert isinstance(deps, collections.abc.Mapping)
+    assert "comp-foo" in deps
     value = deps["comp-foo"]
     assert isinstance(value, str)
 
-    # Contains the text of each of comp-foo's interface/ files.
-    for line in _nonblank_lines(FOO_INTERFACE):
-        assert line in value, f"missing interface line {line!r} in {value!r}"
+    # Contains the text of each of the dependency's interface/ files.
+    assert FOO_LIBRARY.strip() in value
     assert "foo(x: int) -> int" in value
 
-    # Contains no line unique to comp-foo's component.md, requirements/,
-    # or constraints.md.
-    interface_lines = _nonblank_lines(FOO_INTERFACE)
-    other_lines = (
-        _nonblank_lines(FOO_COMPONENT)
-        | _nonblank_lines(FOO_REQUIREMENT)
-        | _nonblank_lines(FOO_CONSTRAINTS)
-    )
-    unique_lines = other_lines - interface_lines
-    assert unique_lines  # sanity: there is something to check
-    value_lines = _nonblank_lines(value)
-    leaked = sorted(line for line in unique_lines if line in value_lines)
-    assert not leaked, f"non-interface lines leaked into dependency_interfaces: {leaked!r}"
+    # Contains no line unique to its component.md, requirements/ or constraints.md.
+    interface_lines = _lines(FOO_LIBRARY)
+    excluded_sources = FOO_COMPONENT + "\n" + FOO_REQUIREMENT + "\n" + FOO_CONSTRAINTS
+    unique_lines = _lines(excluded_sources) - interface_lines - {"---"}
+    value_lines = _lines(value)
+    leaked = sorted(unique_lines & value_lines)
+    assert leaked == [], f"dependency_interfaces leaked non-interface lines: {leaked}"
 
-    # Distinctive content checks, by substring as well.
-    assert "Foo doubles a number." not in value
-    assert "MUST return `2 * x`" not in value
-    assert "id: comp-foo" not in value
+    for marker in (
+        "zircon-purpose-marker",
+        "quartz-requirement-marker",
+        "basalt-constraint-marker",
+    ):
+        assert marker not in value
 
 
-def test_dependency_interfaces_empty_mapping_without_depends_on(tmp_path):
+def test_no_depends_on_gives_empty_mapping(tmp_path):
     repo_root = tmp_path / "repo"
-    _build_corpus(repo_root)
+    repo_root.mkdir()
+    _write_glossary(repo_root)
+    _write_foo(repo_root)
+
     _assert_lint_clean(repo_root)
 
-    bundle = spec_bundle_assembler.assemble_criterion(
-        "comp-foo", "AC-FOO-001", repo_root
-    )
+    bundle = spec_bundle_assembler.assemble_criterion("comp-foo", "AC-FOO-001", repo_root)
 
-    assert _has_field(bundle, "dependency_interfaces"), (
-        "dependency_interfaces must never be absent"
-    )
-    deps = _field(bundle, "dependency_interfaces")
-    assert deps is not None, "dependency_interfaces must never be null"
-    assert isinstance(deps, Mapping)
+    if isinstance(bundle, dict):
+        assert "dependency_interfaces" in bundle
+    else:
+        assert hasattr(bundle, "dependency_interfaces")
+    deps = field(bundle, "dependency_interfaces")
+    assert deps is not None
+    assert isinstance(deps, collections.abc.Mapping)
     assert len(deps) == 0
     assert dict(deps) == {}

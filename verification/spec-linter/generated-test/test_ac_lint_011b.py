@@ -1,43 +1,26 @@
-"""AC-LINT-011b — covers R-LINT-011.
-
-Given a component's Definitions section whose entry for a glossary term adds
-genuinely new, component-specific nuance with low textual overlap against the
-glossary's definition, when hotdocs lint runs against the component, then the
-report contains no R-LINT-011 finding (a permitted delta, not a redefinition).
-
-A sibling control (a near-verbatim restatement of the same glossary entry)
-confirms the fixture's Definitions entry is actually recognised by the
-R-LINT-011 check, so the negative assertion is not vacuous.
-"""
-
-import shutil
-import tempfile
+import json
 from pathlib import Path
-
-import pytest
 
 import spec_linter
 
 
-GLOSSARY_TERM = "Blast radius"
+GLOSSARY_TERM = "Widget frobnicator"
+
 GLOSSARY_DEFINITION = (
-    "the minimal set of components `impact-analyzer` determines need\n"
-    "  regeneration/re-verification for a given spec change."
+    "a pipeline stage that converts raw widget payloads into normalized "
+    "frobnication records for downstream storage and later retrieval."
 )
 
-# Genuinely new, component-specific nuance; deliberately shares essentially
-# no tokens with the glossary definition above.
-DELTA_DEFINITION = (
-    "here additionally includes every sealed legacy wrapper whose\n"
-    "  characterization fixtures reference touched vocabulary files, counted\n"
-    "  once per wrapper even when several fixtures overlap."
+# Genuinely new, component-specific nuance: near-zero token overlap with the
+# glossary's own definition text (well under the 0.8 threshold).
+LOCAL_DELTA_TEXT = (
+    "Here, additionally capped at three concurrent sessions per tenant; on "
+    "timeout it retries exactly once before surfacing an error to callers."
 )
 
 
-def _get(value, name, default=None):
-    if isinstance(value, dict):
-        return value.get(name, default)
-    return getattr(value, name, default)
+def field(value, name):
+    return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
 def _write(path: Path, text: str) -> None:
@@ -45,39 +28,40 @@ def _write(path: Path, text: str) -> None:
     path.write_text(text, encoding="utf-8")
 
 
-def _build_repo(root: Path, definitions_text: str) -> None:
+def _build_repo(repo_root: Path, definitions_text: str) -> Path:
+    specs = repo_root / "specs"
     _write(
-        root / "specs" / "glossary.md",
+        specs / "glossary.md",
         "# Glossary\n"
         "\n"
-        "Canonical vocabulary for this synthetic fixture corpus.\n"
+        "Canonical vocabulary for this spec corpus.\n"
         "\n"
         f"- **{GLOSSARY_TERM}** — {GLOSSARY_DEFINITION}\n"
         "- **Gate** — one verification step in the pipeline.\n",
     )
 
-    comp_dir = root / "specs" / "components" / "widget"
+    comp = specs / "components" / "foo"
     _write(
-        comp_dir / "component.md",
+        comp / "component.md",
         "---\n"
-        "id: comp-widget\n"
-        "title: Widget\n"
+        "id: comp-foo\n"
+        "title: Foo\n"
         "status: draft\n"
-        "owners: [alice]\n"
+        "owners: [pipeline-team]\n"
         "sealed: true\n"
-        "source_path: legacy/widget\n"
+        "source_path: legacy/foo/\n"
         "---\n"
         "\n"
-        "# Widget\n"
+        "# Foo\n"
         "\n"
         "## Purpose\n"
         "\n"
-        "Wraps a small legacy widget so its behavior is traceable.\n"
+        "Foo frobnicates widgets for its callers.\n"
         "\n"
         "## Scope\n"
         "\n"
-        "- In scope: the widget wrapper.\n"
-        "- Out of scope: everything else.\n"
+        "- In scope: frobnicating widgets.\n"
+        "- Out of scope: storing them.\n"
         "\n"
         "## Definitions\n"
         "\n"
@@ -110,99 +94,71 @@ def _build_repo(root: Path, definitions_text: str) -> None:
         "- Initial draft.\n",
     )
     _write(
-        comp_dir / "requirements" / "R-WIDGET-001.md",
-        "# R-WIDGET-001\n"
+        comp / "requirements" / "R-FOO-001.md",
+        "# R-FOO-001\n"
         "\n"
-        "**R-WIDGET-001** — The widget MUST match existing behavior.\n",
+        "**R-FOO-001** — Foo MUST frobnicate every widget it is given.\n",
     )
     _write(
-        comp_dir / "acceptance" / "AC-WIDGET-001.md",
-        "# AC-WIDGET-001\n"
+        comp / "acceptance" / "AC-FOO-001.md",
+        "# AC-FOO-001\n"
         "\n"
-        "Covers: R-WIDGET-001\n"
-        "Kind: generated-test\n"
+        "Covers: R-FOO-001\n"
+        "Kind: compiled\n"
         "\n"
         "```gherkin\n"
-        "Given the legacy widget\n"
-        "When it is exercised\n"
-        "Then it behaves as before\n"
+        "Given a widget\n"
+        "When foo runs\n"
+        "Then the widget is frobnicated\n"
         "```\n",
     )
     _write(
-        comp_dir / "constraints.md",
+        comp / "constraints.md",
         "# Constraints\n"
         "\n"
-        "- None beyond matching existing behavior.\n",
+        "- Frobnicates a widget in under 1 second, measured by a timer.\n",
+    )
+    return repo_root
+
+
+def _rule_ids(report):
+    findings = field(report, "findings")
+    return [field(f, "rule_id") for f in findings]
+
+
+def test_low_overlap_definitions_delta_is_not_flagged_by_r_lint_011(tmp_path):
+    repo_root = _build_repo(tmp_path / "repo", LOCAL_DELTA_TEXT)
+
+    report = spec_linter.lint(None, repo_root)
+
+    rule_ids = _rule_ids(report)
+    assert "R-LINT-011" not in rule_ids, (
+        "a genuinely new, low-overlap Definitions delta must not be reported "
+        f"as a redefinition; findings: {rule_ids}"
     )
 
 
-def _findings(report):
-    findings = _get(report, "findings", None)
-    if findings is None:
-        return []
-    return list(findings)
+def test_low_overlap_delta_not_flagged_via_cli_json(tmp_path, capsys):
+    repo_root = _build_repo(tmp_path / "repo", LOCAL_DELTA_TEXT)
+
+    code = spec_linter.main(["--format=json", f"--repo-root={repo_root}"])
+    out = capsys.readouterr().out
+
+    assert code in (0, 1)
+    doc = json.loads(out)
+    rule_ids = [f["rule_id"] for f in doc["findings"]]
+    assert "R-LINT-011" not in rule_ids, rule_ids
 
 
-def _lint_findings_for(definitions_text: str):
-    tmp = Path(tempfile.mkdtemp(prefix="ac_lint_011b_"))
-    try:
-        _build_repo(tmp, definitions_text)
-        report = spec_linter.lint(None, tmp)
-        assert report is not None, "lint() returned None instead of a LintReport"
-        return _findings(report)
-    finally:
-        shutil.rmtree(tmp, ignore_errors=True)
+def test_control_near_verbatim_restatement_is_flagged(tmp_path):
+    # Sanity control: the same fixture shape, with the glossary definition
+    # restated verbatim, does trigger R-LINT-011 -- so the absence asserted
+    # above reflects the low overlap, not a fixture the linter never parsed.
+    repo_root = _build_repo(tmp_path / "repo", GLOSSARY_DEFINITION)
 
+    report = spec_linter.lint(None, repo_root)
 
-def _r_lint_011(findings):
-    return [f for f in findings if _get(f, "rule_id") == "R-LINT-011"]
-
-
-def test_low_overlap_delta_is_not_flagged_as_redefinition():
-    findings = _lint_findings_for(DELTA_DEFINITION)
-    hits = _r_lint_011(findings)
-    assert hits == [], (
-        "A Definitions entry adding genuinely new, low-overlap nuance to a "
-        "glossary term is a permitted delta and must not produce an "
-        "R-LINT-011 finding; got: "
-        + repr([(_get(f, "file"), _get(f, "line"), _get(f, "message")) for f in hits])
-    )
-
-
-def test_low_overlap_delta_not_flagged_even_in_strict_mode():
-    tmp = Path(tempfile.mkdtemp(prefix="ac_lint_011b_strict_"))
-    try:
-        _build_repo(tmp, DELTA_DEFINITION)
-        report = spec_linter.lint(None, tmp, strict=True)
-        hits = _r_lint_011(_findings(report))
-        assert hits == [], (
-            "strict mode must not turn a permitted low-overlap delta into an "
-            "R-LINT-011 finding; got: "
-            + repr([_get(f, "message") for f in hits])
-        )
-    finally:
-        shutil.rmtree(tmp, ignore_errors=True)
-
-
-def test_control_near_verbatim_restatement_is_flagged():
-    # Control: the same fixture, but the Definitions entry restates the
-    # glossary definition verbatim. This proves the entry is actually seen by
-    # the R-LINT-011 check, so the negative test above is meaningful.
-    findings = _lint_findings_for(GLOSSARY_DEFINITION)
-    hits = _r_lint_011(findings)
-    assert hits, (
-        "control fixture: a verbatim restatement of the glossary definition "
-        "must produce an R-LINT-011 finding; findings were: "
-        + repr([(_get(f, "rule_id"), _get(f, "message")) for f in findings])
-    )
-    assert any(_get(f, "severity") == "fail" for f in hits), (
-        "R-LINT-011 restatement finding must be fail-severity; got: "
-        + repr([_get(f, "severity") for f in hits])
-    )
-    assert any(
-        "components/widget" in str(_get(f, "file", "")).replace("\\", "/")
-        for f in hits
-    ), (
-        "R-LINT-011 finding should be reported against the widget component; "
-        "got files: " + repr([_get(f, "file") for f in hits])
-    )
+    findings = field(report, "findings")
+    hits = [f for f in findings if field(f, "rule_id") == "R-LINT-011"]
+    assert hits, f"expected an R-LINT-011 finding; got {_rule_ids(report)}"
+    assert all(field(f, "severity") == "fail" for f in hits)

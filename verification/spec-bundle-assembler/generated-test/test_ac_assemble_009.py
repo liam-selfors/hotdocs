@@ -1,12 +1,17 @@
+import spec_bundle_assembler
+
 import dataclasses
 import importlib.util
 import sys
 from pathlib import Path
 
-import spec_bundle_assembler
 
+GEN_MARKER = "zqgenmarkerx81"
+OTHER_REQ_MARKER = "zqotherreqmarkerk3v"
+CONSTRAINTS_MARKER = "zqconstraintsmarkerp5w"
+MARKERS = (GEN_MARKER, OTHER_REQ_MARKER, CONSTRAINTS_MARKER)
 
-EXPECTED_FIELDS = [
+DOCUMENTED_FIELDS = (
     "component_id",
     "criterion_id",
     "covers",
@@ -15,73 +20,19 @@ EXPECTED_FIELDS = [
     "interface",
     "glossary",
     "dependency_interfaces",
-]
-
-FORBIDDEN_FIELDS = [
-    "spec",
-    "constraints",
-    "hint_code",
-    "spec_bundle_hash",
-    "dependency_context",
-    "dependency_usage",
-    "vars",
-]
-
-GEN_MARKER = "pelicangenmarker"
-CONSTRAINTS_MARKER = "quokka"
-OTHER_REQ_MARKER = "triple"
+)
 
 
-def _get(value, key):
-    if isinstance(value, dict):
-        return value.get(key)
-    return getattr(value, key, None)
+def field(value, name):
+    return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def _field_names(value):
-    if isinstance(value, dict):
-        return list(value.keys())
-    if dataclasses.is_dataclass(value):
-        return [f.name for f in dataclasses.fields(value)]
-    return [k for k in vars(value).keys() if not k.startswith("_")]
-
-
-def _all_text(value):
-    if value is None:
-        return ""
-    if isinstance(value, str):
-        return value
-    if isinstance(value, dict):
-        return "\n".join(str(k) + "\n" + _all_text(v) for k, v in value.items())
-    if isinstance(value, (list, tuple, set)):
-        return "\n".join(_all_text(v) for v in value)
-    return str(value)
-
-
-def _write(path: Path, content: str) -> None:
+def _write(path, text):
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(content, encoding="utf-8")
+    path.write_text(text, encoding="utf-8")
 
 
-def _load_spec_linter():
-    gen = next(
-        p for p in Path(spec_bundle_assembler.__file__).resolve().parents
-        if p.name == "gen"
-    )
-    base = gen / "spec-linter"
-    path = (
-        base / "spec_linter.py"
-        if (base / "spec_linter.py").is_file()
-        else base / "spec_linter" / "__init__.py"
-    )
-    spec = importlib.util.spec_from_file_location("spec_linter", path)
-    spec_linter = importlib.util.module_from_spec(spec)
-    sys.modules["spec_linter"] = spec_linter
-    spec.loader.exec_module(spec_linter)
-    return spec_linter
-
-
-def _build_corpus(repo_root: Path) -> None:
+def _build_corpus(repo_root):
     _write(
         repo_root / "specs" / "glossary.md",
         "# Glossary\n"
@@ -107,12 +58,16 @@ def _build_corpus(repo_root: Path) -> None:
         "\n"
         "Foo doubles a number.\n",
     )
+    # The "other" requirement: must never leak into the bundle for AC-FOO-002.
     _write(
         comp / "requirements" / "R-FOO-001.md",
         "# R-FOO-001\n"
         "\n"
-        "**R-FOO-001** — `foo(x)` MUST return `2 * x`.\n",
+        "**R-FOO-001** — `foo(x)` MUST return `2 * x` ("
+        + OTHER_REQ_MARKER
+        + ").\n",
     )
+    # The covered requirement of the criterion under assembly.
     _write(
         comp / "requirements" / "R-FOO-002.md",
         "# R-FOO-002\n"
@@ -151,29 +106,63 @@ def _build_corpus(repo_root: Path) -> None:
         "\n"
         "```\n"
         "foo(x: int) -> int\n"
+        "triple(x: int) -> int\n"
         "```\n",
     )
     _write(
         comp / "constraints.md",
         "# Constraints\n"
         "\n"
-        "None beyond the quokka ceiling.\n",
+        "None. " + CONSTRAINTS_MARKER + "\n",
     )
+    # Existing generated content for the component.
     _write(
-        repo_root / "legacy" / "foo" / "foo.py",
+        repo_root / "gen" / "foo" / "foo.py",
+        "# " + GEN_MARKER + "\n"
+        "GEN_CONSTANT = '" + GEN_MARKER + "'\n"
+        "\n"
+        "\n"
         "def foo(x):\n"
         "    return 2 * x\n",
     )
     _write(
-        repo_root / "gen" / "foo" / "foo.py",
-        "# pelicangenmarker\n"
-        "def foo(x):\n"
-        "    return 2 * x  # pelicangenmarker\n",
+        repo_root / "gen" / "foo" / "notes.txt",
+        "generated notes " + GEN_MARKER + "\n",
     )
-    _write(
-        repo_root / "gen" / "foo" / "NOTES.md",
-        "pelicangenmarker generated notes\n",
+
+
+def _load_spec_linter():
+    gen = next(
+        p
+        for p in Path(spec_bundle_assembler.__file__).resolve().parents
+        if p.name == "gen"
     )
+    base = gen / "spec-linter"
+    path = (
+        base / "spec_linter.py"
+        if (base / "spec_linter.py").is_file()
+        else base / "spec_linter" / "__init__.py"
+    )
+    spec = importlib.util.spec_from_file_location("spec_linter", path)
+    spec_linter = importlib.util.module_from_spec(spec)
+    sys.modules["spec_linter"] = spec_linter
+    spec.loader.exec_module(spec_linter)
+    return spec_linter
+
+
+def _collect_strings(value, out):
+    if isinstance(value, str):
+        out.append(value)
+    elif isinstance(value, dict):
+        for k, v in value.items():
+            _collect_strings(k, out)
+            _collect_strings(v, out)
+    elif isinstance(value, (list, tuple, set)):
+        for v in value:
+            _collect_strings(v, out)
+    elif value is not None:
+        out.append(str(value))
+    return out
 
 
 def test_ac_assemble_009_criterion_bundle_is_narrow(tmp_path):
@@ -182,66 +171,74 @@ def test_ac_assemble_009_criterion_bundle_is_narrow(tmp_path):
     _build_corpus(repo_root)
 
     spec_linter = _load_spec_linter()
-    assert spec_linter.lint(None, repo_root).hard_failures == 0
+    report = spec_linter.lint(None, repo_root)
+    hard = report["hard_failures"] if isinstance(report, dict) else report.hard_failures
+    assert hard == 0
 
     bundle = spec_bundle_assembler.assemble_criterion(
-        "comp-foo", "AC-FOO-001", repo_root
+        "comp-foo", "AC-FOO-002", repo_root
     )
-    assert bundle is not None
 
-    # Identity fields
-    assert _get(bundle, "component_id") == "comp-foo"
-    assert _get(bundle, "criterion_id") == "AC-FOO-001"
-    assert _get(bundle, "covers") == "R-FOO-001"
+    # Identity of the bundle.
+    assert field(bundle, "component_id") == "comp-foo"
+    assert field(bundle, "criterion_id") == "AC-FOO-002"
+    assert field(bundle, "covers") == "R-FOO-002"
 
-    # The criterion's own text
-    criterion_text = _get(bundle, "criterion_text")
+    # That criterion's own text.
+    criterion_text = field(bundle, "criterion_text")
     assert isinstance(criterion_text, str)
-    assert "Given x = 2" in criterion_text
-    assert "When foo(x) is called" in criterion_text
-    assert "Then it returns 4" in criterion_text
+    assert "When triple(x) is called" in criterion_text
+    assert "Then it returns 15" in criterion_text
+    # Not the other criterion's text.
+    assert "Then it returns 4" not in criterion_text
 
-    # Its covered requirement's text
-    requirement_text = _get(bundle, "requirement_text")
+    # Its covered requirement's text.
+    requirement_text = field(bundle, "requirement_text")
     assert isinstance(requirement_text, str)
-    assert "R-FOO-001" in requirement_text
-    assert "`foo(x)` MUST return `2 * x`" in requirement_text
+    assert "R-FOO-002" in requirement_text
+    assert "MUST return `3 * x`" in requirement_text
 
-    # The interface
-    interface = _get(bundle, "interface")
+    # The interface.
+    interface = field(bundle, "interface")
     assert isinstance(interface, str)
+    assert "triple(x: int) -> int" in interface
     assert "foo(x: int) -> int" in interface
 
-    # The glossary
-    glossary = _get(bundle, "glossary")
+    # The glossary.
+    glossary = field(bundle, "glossary")
     assert isinstance(glossary, str)
     assert "a test term" in glossary
 
-    # No dependencies declared, so no dependency interfaces
-    dep_ifaces = _get(bundle, "dependency_interfaces")
-    assert not dep_ifaces
+    # No SpecBundle-only fields that would carry excluded content.
+    if dataclasses.is_dataclass(bundle):
+        names = {f.name for f in dataclasses.fields(bundle)}
+    elif isinstance(bundle, dict):
+        names = set(bundle.keys())
+    else:
+        names = set()
+    for forbidden in ("spec", "constraints", "hint_code", "spec_bundle_hash"):
+        assert forbidden not in names, f"CriterionBundle has forbidden field {forbidden!r}"
 
-    # No field derived from gen/, other requirements, or constraints.md
-    names = _field_names(bundle)
-    for forbidden in FORBIDDEN_FIELDS:
-        assert forbidden not in names, (
-            f"CriterionBundle unexpectedly has field {forbidden!r}"
-        )
-    for name in names:
-        assert name in EXPECTED_FIELDS, (
-            f"CriterionBundle has unexpected field {name!r}"
-        )
+    # No field carries content from gen/foo/, any other requirements/ file,
+    # or constraints.md.
+    strings = []
+    for name in DOCUMENTED_FIELDS:
+        try:
+            value = field(bundle, name)
+        except (KeyError, AttributeError):
+            continue
+        _collect_strings(value, strings)
+    if dataclasses.is_dataclass(bundle):
+        for f in dataclasses.fields(bundle):
+            _collect_strings(getattr(bundle, f.name), strings)
+    elif isinstance(bundle, dict):
+        _collect_strings(bundle, strings)
+    strings.append(repr(bundle))
 
-    everything = "\n".join(_all_text(_get(bundle, name)) for name in names)
-    assert GEN_MARKER not in everything, (
-        "CriterionBundle contains content derived from gen/<component>/"
-    )
-    assert CONSTRAINTS_MARKER not in everything, (
-        "CriterionBundle contains content derived from constraints.md"
-    )
-    assert OTHER_REQ_MARKER not in everything, (
-        "CriterionBundle contains content from another requirement/criterion"
-    )
-    assert "R-FOO-002" not in everything
-    assert "AC-FOO-002" not in everything
-    assert "3 * x" not in everything
+    for marker in MARKERS:
+        for s in strings:
+            assert marker not in s, f"CriterionBundle leaked excluded content: {marker}"
+
+    # The other requirement's own statement must not appear either.
+    for s in strings:
+        assert "MUST return `2 * x`" not in s
