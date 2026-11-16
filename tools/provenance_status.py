@@ -24,7 +24,18 @@ def status(component_id: str) -> tuple[bool, object]:
         result = pc.check_sealed_provenance(component_id, REPO)
     else:
         key = pc.current_provenance_key(component_id, REPO)
-        result = pc.check_provenance(component_id, _get(key, "spec_bundle_hash"), _get(key, "gate_versions"), REPO)
+        gate_versions = dict(_get(key, "gate_versions"))
+        if "generator" not in gate_versions:
+            # D313: until the provenance-checker that names the generator
+            # lands, compare against the key it will compute.
+            gen = REPO / "gen" / "generator" / "generator.py"
+            ns = {}
+            for line in gen.read_text(encoding="utf-8").splitlines():
+                if line.startswith(("GATE_VERSION =", "PROMPT_VERSION =")):
+                    exec(line, ns)
+            if "PROMPT_VERSION" in ns:
+                gate_versions["generator"] = f"{ns['GATE_VERSION']}+{ns['PROMPT_VERSION']}"
+        result = pc.check_provenance(component_id, _get(key, "spec_bundle_hash"), gate_versions, REPO)
     return bool(_get(result, "hit")), _get(result, "reason")
 
 
