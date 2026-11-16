@@ -13,4 +13,11 @@ Then ok is False and the findings hold exactly one unknown_import finding,
 Given the same source without its second line
 When probe(source, {}, "slugify") is called
 Then no finding has kind "unknown_import"
+
+Given a test source holding, each on its own line, "from . import helpers",
+  "from os import path", "import xml.etree.ElementTree", and a try block
+  "import yaml_nonexistent_q" whose except clause is "except
+  (OSError, ImportError):", plus one test asserting path.sep
+When probe(source, {}, "slugify") is called
+Then no finding has kind "unknown_import"
 ```

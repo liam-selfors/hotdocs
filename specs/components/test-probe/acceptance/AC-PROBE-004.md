@@ -17,4 +17,13 @@ Then the findings hold exactly one fake_signature_mismatch finding, on
 Given the same bundle and a source whose fake is "def bar_get(*args):"
 When probe(source, bundle, "slugify") is called
 Then no finding has kind "fake_signature_mismatch"
+
+Given dependency_interfaces {"comp-bar": "bar_get(a: int, /, b: dict[str, tuple[int, int]], *, c: str) -> str"}
+  and a test source whose top-level "def bar_get(a, b, *, c):" matches
+  and whose line 10 starts a triple-quoted string literal whose third
+  line is "def bar_get(a, b):", plus "x = y = bar_get"
+When probe(source, bundle, "slugify") is called
+Then the findings hold exactly one fake_signature_mismatch finding, with
+  line 12 and message
+  "bar_get takes 2 parameters; the interface of comp-bar gives 3"
 ```

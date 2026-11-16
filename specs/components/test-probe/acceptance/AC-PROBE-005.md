@@ -20,4 +20,16 @@ Then tests_run is 5 and tests_reached is 2; the findings are one test_bug
 Given a test source whose only test calls time.sleep(30)
 When probe(source, {}, "slugify", timeout=2) is called
 Then the findings are exactly one probe_timeout finding and ok is False
+
+Given a test source whose module body raises RuntimeError("boom") before
+  any test is defined
+When probe(source, {}, "slugify") is called
+Then the findings are exactly one collection_error finding and
+  tests_run is 0
+
+Given a test source whose one test, test_x, calls eval("undefined_q")
+  before anything else (a NameError pyflakes cannot see)
+When probe(source, {}, "slugify") is called
+Then the findings are exactly one test_bug finding whose message starts
+  "test_x: NameError"
 ```
