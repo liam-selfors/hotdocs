@@ -4,10 +4,11 @@ Covers: R-AUTHOR-013
 Kind: generated-test
 
 ```gherkin
-Given any bundle
-When author_test builds its prompt
-Then the prompt states that a synthetic fixture should default to
-  sealed: true with a non-gen/ source_path unless the criterion under
-  test specifically concerns realizes or capability-linkage behavior,
-  in which case realizes must instead name at least one real P-id
+Given a bundle for comp-widget-maker whose dependency_interfaces is {},
+  a test-probe stand-in returning ok true, and a mock model that records
+  each prompt and replies with a valid marked test file
+When author_test(bundle, "mock", repo_root=<tmp>, llm_backend=<mock>)
+  is called
+Then the first recorded prompt contains the line
+  "- Only a criterion that needs `realizes`-driven behavior has the fixture supply a resolvable `P-<id>`."
 ```

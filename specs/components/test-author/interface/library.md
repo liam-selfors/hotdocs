@@ -14,6 +14,8 @@ external call. `llm_backend` is passed straight to `llm-endpoint`'s
 Each dependency (`cache-manager`, `llm-endpoint`, `test-probe`) is
 loaded from `<repo_root>/gen/<slug>/<module>.py`, else from the tool
 root's copy. The reply format, the `test-probe` stand-in and the
-written file are in `specs/architecture/test-author-fixtures.md`.
+written file are in `specs/architecture/test-author-fixtures.md`; the
+prompt's fixed rule blocks are in
+`specs/architecture/test-author-prompt.md`.
 
-Implements: `specs/architecture/cli-conventions.md`, `specs/architecture/test-author-fixtures.md`
+Implements: `specs/architecture/cli-conventions.md`, `specs/architecture/test-author-fixtures.md`, `specs/architecture/test-author-prompt.md`

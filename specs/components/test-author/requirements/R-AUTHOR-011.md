@@ -1,12 +1,8 @@
 # R-AUTHOR-011
 
 **R-AUTHOR-011** — The prompt MUST include each entry of
-  `dependency_interfaces`, one per
-  dependency, and MUST instruct the model that any fake it writes for a
-  dependency's behavior MUST match that dependency's real, documented
-  call signature and return shape exactly, never invented or simplified.
-
-  Prose alone proved insufficient for return shape (`D113`): the prompt
-  MUST also include one worked example — given a documented return type
-  with named fields, the fake MUST expose every field, never a bare
-  list/string/number even if the test reads only one.
+  `dependency_interfaces`, one per dependency, as that dependency's
+  id followed by its interface text unchanged, and MUST hold block
+  `R-AUTHOR-011` of `specs/architecture/test-author-prompt.md`, the
+  rule and worked example for a fake's signature and return shape
+  (`D113`). An empty `dependency_interfaces` adds no entry.
