@@ -135,7 +135,7 @@ permanent gap in this chain, remains unbuilt by design (sealed,
 `compiled` criterion requires the compiler that compiles it to never
 itself be agent-generated).
 
-## Full regeneration on Opus (2026-11, `D206`–`D291`)
+## Full regeneration on Opus (2026-11, `D206`–`D297`)
 
 Every component, including the five that had stayed hand-written and the
 sealed `criterion-compiler`, was then regenerated from its spec on
