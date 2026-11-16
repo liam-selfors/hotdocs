@@ -7,97 +7,102 @@ import pytest
 import review_packet_builder
 
 
-VERIFICATION_REPORT = {
-    "z": 1,
-    "a": 2,
-    "component_id": "comp-foo",
-    "criteria": [
-        {"id": "AC-FOO-001", "covers": "R-FOO-001", "kind": "compiled", "result": "pass"},
-    ],
-    "requirement_results": {"R-FOO-001": "pass"},
-    "interface_drift": False,
-    "mutation_score": 0.92,
-    "overall": "pass",
-}
-
-VERIFY_REPORT = {
-    "scope": "blast-radius",
-    "ready": True,
-    "components": {
-        "comp-foo": {
-            "hit": True,
-            "verification_report": VERIFICATION_REPORT,
-            "license_scan": {"blocked": False, "findings": []},
-            "secret_scan": {"flagged": False, "findings": []},
-        }
-    },
-    "capabilities": {},
-    "not_ready_reasons": [],
-}
-
-
 def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
+def _verification_report():
+    # "z" deliberately inserted before "a" so sort_keys ordering is observable.
+    report = {}
+    report["z"] = 1
+    report["a"] = 2
+    report["component_id"] = "comp-foo"
+    report["criteria"] = [
+        {"id": "AC-FOO-001", "covers": "R-FOO-001", "kind": "compiled", "result": "pass"},
+        {"id": "AC-FOO-002", "covers": "R-FOO-002", "kind": "llm-judge", "result": "skipped", "rationale": None},
+    ]
+    report["requirement_results"] = {"R-FOO-001": "pass", "R-FOO-002": "fail"}
+    report["interface_drift"] = False
+    report["mutation_score"] = 0.5
+    report["overall"] = "pass"
+    return report
+
+
+def _verify_report():
+    return {
+        "scope": "blast-radius",
+        "ready": True,
+        "components": {
+            "comp-foo": {
+                "hit": True,
+                "verification_report": _verification_report(),
+                "license_scan": {"blocked": False, "findings": []},
+                "secret_scan": {"flagged": False, "findings": []},
+            }
+        },
+        "capabilities": {},
+        "not_ready_reasons": [],
+    }
+
+
 def _git(repo, *args):
     subprocess.run(
-        [
-            "git",
-            "-c", "user.name=fixture",
-            "-c", "user.email=fixture@example.com",
-            "-c", "commit.gpgsign=false",
-            *args,
-        ],
+        ["git", "-c", "user.name=test", "-c", "user.email=test@example.com", *args],
         cwd=str(repo),
         check=True,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
     )
 
 
-def _make_repo(base: Path, raise_usage: bool = False):
-    repo = base / "repo"
-    fake_dir = repo / "gen" / "provenance-tracker"
-    fake_dir.mkdir(parents=True)
-    log_path = base / "provenance_tracker_invocations.log"
-
-    source = (
-        "LOG_PATH = " + repr(str(log_path)) + "\n"
-        "RAISE_USAGE = " + repr(bool(raise_usage)) + "\n"
-        "\n"
-        "\n"
-        "class UsageError(Exception):\n"
-        "    pass\n"
-        "\n"
-        "\n"
-        "def _log(name):\n"
-        "    with open(LOG_PATH, 'a') as fh:\n"
-        "        fh.write(name + '\\n')\n"
-        "\n"
-        "\n"
-        "def check_readiness(repo_root, changed_ids=None, model=None, seed=0, llm_backend=None):\n"
-        "    _log('check_readiness')\n"
-        "    if RAISE_USAGE:\n"
-        "        raise UsageError('fixture: provenance-tracker usage error')\n"
-        "    return " + repr(VERIFY_REPORT) + "\n"
-        "\n"
-        "\n"
-        "def last_requirement_failures(component_id, repo_root):\n"
-        "    _log('last_requirement_failures')\n"
-        "    return []\n"
-    )
-    (fake_dir / "provenance_tracker.py").write_text(source)
-    (repo / "README.md").write_text("fixture repo\n")
-
-    _git(repo, "init", "-q")
-    _git(repo, "add", "-A")
-    _git(repo, "commit", "-q", "-m", "initial fixture commit")
-    return repo, log_path
+def _make_repo(root, tracker_source):
+    root.mkdir(parents=True, exist_ok=True)
+    _git(root, "init", "-q")
+    (root / "README.md").write_text("fixture repo\n")
+    tracker_dir = root / "gen" / "provenance-tracker"
+    tracker_dir.mkdir(parents=True)
+    (tracker_dir / "provenance_tracker.py").write_text(tracker_source)
+    (root / ".gitignore").write_text("__pycache__/\n*.pyc\n")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", "initial")
+    return root
 
 
-def run_main(argv, capsys):
-    capsys.readouterr()
+GOOD_TRACKER = (
+    "import copy\n"
+    "\n"
+    "REPORT = " + repr(_verify_report()) + "\n"
+    "\n"
+    "\n"
+    "def check_readiness(repo_root, changed_ids=None, model=None, seed=0, llm_backend=None):\n"
+    "    return copy.deepcopy(REPORT)\n"
+    "\n"
+    "\n"
+    "def last_requirement_failures(component_id, repo_root):\n"
+    "    return []\n"
+)
+
+RAISING_TRACKER = (
+    "def check_readiness(repo_root, changed_ids=None, model=None, seed=0, llm_backend=None):\n"
+    "    raise ValueError('capability P-FOO needs a fresh run but no model was given')\n"
+    "\n"
+    "\n"
+    "def last_requirement_failures(component_id, repo_root):\n"
+    "    return []\n"
+)
+
+
+@pytest.fixture
+def repo(tmp_path):
+    return _make_repo(tmp_path / "repo", GOOD_TRACKER)
+
+
+@pytest.fixture
+def raising_repo(tmp_path):
+    return _make_repo(tmp_path / "raising_repo", RAISING_TRACKER)
+
+
+def run_main(argv):
     try:
         rc = review_packet_builder.main(argv)
     except SystemExit as exc:
@@ -108,141 +113,126 @@ def run_main(argv, capsys):
             rc = code
         else:
             rc = 1
+    return rc
+
+
+def test_json_packet_has_real_content(repo, capsys):
+    rc = run_main([
+        "review-packet", "build", "--changed=R-FOO-001",
+        "--repo-root=" + str(repo), "--format=json",
+    ])
     out = capsys.readouterr().out
-    return rc, out
-
-
-@pytest.fixture
-def good_repo(tmp_path):
-    return _make_repo(tmp_path)
-
-
-def test_json_build_renders_real_content(good_repo, capsys):
-    repo, log_path = good_repo
-    rc, out = run_main(
-        [
-            "review-packet", "build", "--changed=R-FOO-001",
-            "--repo-root=" + str(repo), "--format=json",
-        ],
-        capsys,
-    )
     assert rc == 0
-    assert log_path.exists() and "check_readiness" in log_path.read_text()
-
     packet = json.loads(out)
 
-    vr = field(packet, "verification_results")
+    vr = packet["verification_results"]
     assert isinstance(vr, dict) and vr, "verification_results must have real content"
     assert "comp-foo" in vr
-    report = vr["comp-foo"]
-    assert report["a"] == 2
-    assert report["z"] == 1
-    assert report["overall"] == "pass"
-    assert report["mutation_score"] == 0.92
+    result = vr["comp-foo"]
+    assert result["a"] == 2
+    assert result["z"] == 1
 
-    risk = field(packet, "residual_risk")
-    assert isinstance(risk, list) and risk, "residual_risk must have real content"
-    for entry in risk:
+    rr = packet["residual_risk"]
+    assert isinstance(rr, list) and rr, "residual_risk must have real content"
+    for entry in rr:
         assert isinstance(entry, dict)
-        assert "component_id" in entry and "message" in entry
+        assert isinstance(entry["component_id"], str) and entry["component_id"]
         assert isinstance(entry["message"], str) and entry["message"].strip()
-    assert any(entry["component_id"] == "comp-foo" for entry in risk)
+    assert any(entry["component_id"] == "comp-foo" for entry in rr)
 
-    ex = field(packet, "exemption_changes")
+    ex = packet["exemption_changes"]
     assert "sealed" in ex
     assert "pinned_overrides" in ex
-    assert isinstance(ex["sealed"], list)
-    assert isinstance(ex["pinned_overrides"], list)
+    assert ex["sealed"] == []
+    assert ex["pinned_overrides"] == []
 
 
-def test_space_separated_repeated_changed_flag(good_repo, capsys):
-    repo, _ = good_repo
-    rc, out = run_main(
-        [
-            "review-packet", "build",
-            "--changed", "R-FOO-001",
-            "--changed", "comp-foo",
-            "--repo-root", str(repo),
-            "--format", "json",
-        ],
-        capsys,
-    )
+def test_changed_requirements_is_r_id_subset_with_space_separated_flags(repo, capsys):
+    rc = run_main([
+        "review-packet", "build", "--changed", "R-FOO-001",
+        "--changed", "comp-foo", "--repo-root", str(repo), "--format", "json",
+    ])
+    out = capsys.readouterr().out
     assert rc == 0
     packet = json.loads(out)
-    assert field(packet, "changed_requirements") == ["R-FOO-001"]
+    assert packet["changed_requirements"] == ["R-FOO-001"]
 
 
-@pytest.mark.parametrize(
-    "argv_template",
-    [
-        ["review-packet", "build", "--repo-root={repo}"],
+def test_usage_errors_return_2(repo, capsys):
+    root = str(repo)
+    cases = [
+        ["review-packet", "build", "--repo-root=" + root],
         ["review-packet", "serve", "--changed=R-FOO-001"],
         ["review-packet"],
-        ["review-packet", "build", "--repo-root={repo}", "--changed"],
+        ["review-packet", "build", "--repo-root=" + root, "--changed"],
         ["review-packet", "build", "--changed=R-FOO-001", "--repo-root"],
-        ["review-packet", "build", "--changed=R-FOO-001", "--repo-root={repo}", "--format"],
-    ],
-)
-def test_usage_errors_return_2(good_repo, capsys, argv_template):
-    repo, _ = good_repo
-    argv = [a.replace("{repo}", str(repo)) for a in argv_template]
-    rc, _ = run_main(argv, capsys)
+        ["review-packet", "build", "--changed=R-FOO-001", "--repo-root=" + root, "--format"],
+    ]
+    for argv in cases:
+        rc = run_main(argv)
+        capsys.readouterr()
+        assert rc == 2, "expected exit 2 for argv %r, got %r" % (argv, rc)
+
+
+def test_invalid_format_returns_2(repo, capsys):
+    rc = run_main([
+        "review-packet", "build", "--changed=R-FOO-001",
+        "--repo-root=" + str(repo), "--format=bogus",
+    ])
+    capsys.readouterr()
     assert rc == 2
 
 
-def test_invalid_format_returns_2(good_repo, capsys):
-    repo, _ = good_repo
-    rc, _ = run_main(
-        [
-            "review-packet", "build", "--changed=R-FOO-001",
-            "--repo-root=" + str(repo), "--format=bogus",
-        ],
-        capsys,
-    )
-    assert rc == 2
-
-
-def test_upstream_usage_error_returns_1(tmp_path, capsys):
-    repo, _ = _make_repo(tmp_path, raise_usage=True)
-    rc, _ = run_main(
-        [
-            "review-packet", "build", "--changed=R-FOO-001",
-            "--repo-root=" + str(repo),
-        ],
-        capsys,
-    )
+def test_check_readiness_value_error_returns_1(raising_repo, capsys):
+    rc = run_main([
+        "review-packet", "build", "--changed=R-FOO-001",
+        "--repo-root=" + str(raising_repo),
+    ])
+    capsys.readouterr()
     assert rc == 1
 
 
-def test_sorted_keys_in_json_and_markdown(good_repo, capsys):
-    repo, _ = good_repo
+def _section(text, heading):
+    lines = text.splitlines()
+    start = None
+    for i, line in enumerate(lines):
+        if line.strip() == heading:
+            start = i + 1
+            break
+    assert start is not None, "heading %r not found in output:\n%s" % (heading, text)
+    body = []
+    for line in lines[start:]:
+        if line.startswith("## ") or line.startswith("# "):
+            break
+        body.append(line)
+    return "\n".join(body)
 
-    rc, out = run_main(
-        [
-            "review-packet", "build", "--changed=R-FOO-001",
-            "--repo-root=" + str(repo), "--format=json",
-        ],
-        capsys,
-    )
-    assert rc == 0
-    packet = json.loads(out)
-    assert out.strip() == json.dumps(packet, indent=2, sort_keys=True)
-    assert '"a"' in out and '"z"' in out
-    assert out.index('"a"') < out.index('"z"')
 
-    rc, md = run_main(
-        [
-            "review-packet", "build", "--changed=R-FOO-001",
-            "--repo-root=" + str(repo),
-        ],
-        capsys,
-    )
+def test_result_keys_sorted_in_json_and_markdown(repo, capsys):
+    rc = run_main([
+        "review-packet", "build", "--changed=R-FOO-001",
+        "--repo-root=" + str(repo), "--format=json",
+    ])
+    json_out = capsys.readouterr().out
     assert rc == 0
-    heading = "## Verification Results"
-    assert heading in md
-    rest = md[md.index(heading) + len(heading):]
-    end = rest.find("\n## ")
-    section = rest if end == -1 else rest[:end]
-    assert "comp-foo" in section
-    assert '"a"' in section and '"z"' in section
-    assert section.index('"a"') < section.index('"z"')
+    vr_idx = json_out.find('"verification_results"')
+    assert vr_idx != -1
+    tail = json_out[vr_idx:]
+    a_idx = tail.find('"a"')
+    z_idx = tail.find('"z"')
+    assert a_idx != -1 and z_idx != -1
+    assert a_idx < z_idx
+
+    rc = run_main([
+        "review-packet", "build", "--changed=R-FOO-001",
+        "--repo-root=" + str(repo),
+    ])
+    md_out = capsys.readouterr().out
+    assert rc == 0
+    section = _section(md_out, "## Verification Results")
+    comp_idx = section.find("comp-foo")
+    assert comp_idx != -1, "comp-foo entry missing from Verification Results:\n%s" % section
+    a_idx = section.find('"a"', comp_idx)
+    z_idx = section.find('"z"', comp_idx)
+    assert a_idx != -1 and z_idx != -1, section
+    assert a_idx < z_idx

@@ -1,5 +1,12 @@
-import os
+"""AC-PACKET-001 (Covers: R-PACKET-001).
+
+Given a PR changing one component's component.md
+When build_review_packet runs
+Then spec_diff contains the actual diff text for that file
+"""
+
 import subprocess
+import textwrap
 from pathlib import Path
 
 import pytest
@@ -7,8 +14,10 @@ import pytest
 import review_packet_builder
 
 
-ORIGINAL_LINE = "Original description line for foo, as it stood on main."
-UPDATED_LINE = "Updated description line for foo, revised in this PR."
+OLD_LINE = "Foo performs the ORIGINAL-BEHAVIOUR-MARKER-7f3a operation."
+NEW_LINE = "Foo performs the REVISED-BEHAVIOUR-MARKER-9c1d operation."
+UNCHANGED_LINE = "This sentence is unchanged context for the diff."
+
 COMPONENT_REL = "specs/components/foo/component.md"
 
 
@@ -16,149 +25,197 @@ def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def git(cwd, *args):
-    env = dict(os.environ)
-    env.update(
-        {
-            "GIT_AUTHOR_NAME": "Test Author",
-            "GIT_AUTHOR_EMAIL": "author@example.invalid",
-            "GIT_COMMITTER_NAME": "Test Author",
-            "GIT_COMMITTER_EMAIL": "author@example.invalid",
-            "GIT_TERMINAL_PROMPT": "0",
-        }
-    )
-    cmd = [
-        "git",
-        "-c", "user.name=Test Author",
-        "-c", "user.email=author@example.invalid",
-        "-c", "commit.gpgsign=false",
-        "-c", "tag.gpgsign=false",
-        "-c", "init.defaultBranch=main",
-        *args,
-    ]
+def _git(repo, *args):
     result = subprocess.run(
-        cmd, cwd=str(cwd), env=env, capture_output=True, text=True
+        ["git", *args],
+        cwd=str(repo),
+        capture_output=True,
+        text=True,
     )
     assert result.returncode == 0, (
-        f"git {' '.join(args)} failed:\nstdout={result.stdout}\nstderr={result.stderr}"
+        f"git {' '.join(args)} failed: {result.stdout}\n{result.stderr}"
     )
     return result.stdout
 
 
-def component_md(body_line):
-    return (
-        "---\n"
-        "id: comp-foo\n"
-        "title: Foo\n"
-        "status: draft\n"
-        "owners: [alice]\n"
-        "sealed: true\n"
-        "source_path: legacy/foo/\n"
-        "---\n"
-        "\n"
-        "# Foo\n"
-        "\n"
-        f"{body_line}\n"
-        "\n"
-        "Another stable paragraph that does not change.\n"
+def _component_md(body_line):
+    return textwrap.dedent(
+        f"""\
+        ---
+        id: comp-foo
+        title: Foo
+        status: draft
+        owners: [test-owner]
+        depends_on: []
+        sealed: true
+        source_path: legacy/foo/
+        ---
+
+        # Foo
+
+        {body_line}
+
+        {UNCHANGED_LINE}
+        """
     )
 
 
-PROVENANCE_TRACKER_STANDIN = '''\
-def check_readiness(repo_root, changed_ids=None, model=None, seed=0, llm_backend=None):
-    return {
-        "scope": "blast-radius" if changed_ids is not None else "whole-corpus",
-        "ready": True,
-        "components": {
-            "comp-foo": {
-                "hit": True,
-                "verification_report": {
-                    "component_id": "comp-foo",
-                    "criteria": [
-                        {"id": "AC-FOO-001", "covers": "R-FOO-001", "kind": "compiled", "result": "pass"}
-                    ],
-                    "requirement_results": {"R-FOO-001": "pass"},
-                    "interface_drift": False,
-                    "mutation_score": None,
-                    "overall": "pass",
-                },
-                "license_scan": {"blocked": False, "findings": []},
-                "secret_scan": {"flagged": False, "findings": []},
-            }
-        },
-        "capabilities": {},
-        "not_ready_reasons": [],
-    }
+VERIFY_REPORT = {
+    "scope": "blast-radius",
+    "ready": True,
+    "components": {
+        "comp-foo": {
+            "hit": True,
+            "verification_report": {
+                "component_id": "comp-foo",
+                "criteria": [
+                    {
+                        "id": "AC-FOO-001",
+                        "covers": "R-FOO-001",
+                        "kind": "compiled",
+                        "result": "pass",
+                    }
+                ],
+                "requirement_results": {"R-FOO-001": "pass"},
+                "interface_drift": False,
+                "mutation_score": None,
+                "overall": "pass",
+            },
+            "license_scan": {"blocked": False, "findings": []},
+            "secret_scan": {"flagged": False, "findings": []},
+        }
+    },
+    "capabilities": {},
+    "not_ready_reasons": [],
+}
 
 
-def last_requirement_failures(component_id, repo_root):
-    return []
-'''
-
-
-def write(path: Path, text: str):
+def _write_provenance_tracker_stand_in(repo_root):
+    path = repo_root / "gen" / "provenance-tracker" / "provenance_tracker.py"
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text, encoding="utf-8")
+    path.write_text(
+        "_REPORT = " + repr(VERIFY_REPORT) + "\n"
+        "\n"
+        "\n"
+        "def check_readiness(repo_root, changed_ids=None, model=None, seed=0, llm_backend=None):\n"
+        "    import copy\n"
+        "    return copy.deepcopy(_REPORT)\n"
+        "\n"
+        "\n"
+        "def last_requirement_failures(component_id, repo_root):\n"
+        "    return []\n"
+    )
+
+
+def _write_base_fixture(repo_root):
+    comp_dir = repo_root / "specs" / "components" / "foo"
+    (comp_dir / "requirements").mkdir(parents=True)
+    (comp_dir / "acceptance").mkdir(parents=True)
+    (comp_dir / "interface").mkdir(parents=True)
+
+    (comp_dir / "component.md").write_text(_component_md(OLD_LINE))
+    (comp_dir / "constraints.md").write_text("# Constraints\n\nNone.\n")
+    (comp_dir / "requirements" / "R-FOO-001.md").write_text(
+        "# R-FOO-001\n\n**R-FOO-001** — Foo MUST do its thing.\n"
+    )
+    (comp_dir / "acceptance" / "AC-FOO-001.md").write_text(
+        textwrap.dedent(
+            """\
+            # AC-FOO-001
+
+            Covers: R-FOO-001
+            Kind: compiled
+
+            ```gherkin
+            Given foo
+            When it runs
+            Then it does its thing
+            ```
+            """
+        )
+    )
+    (comp_dir / "interface" / "library.md").write_text(
+        "# Library\n\n```\nfoo() -> None\n```\n"
+    )
+
+    legacy = repo_root / "legacy" / "foo"
+    legacy.mkdir(parents=True)
+    (legacy / "foo.py").write_text("def foo():\n    return None\n")
+
+    _write_provenance_tracker_stand_in(repo_root)
 
 
 @pytest.fixture
-def repo_root(tmp_path):
-    upstream = tmp_path / "upstream"
-    upstream.mkdir()
-    git(upstream, "init")
-    git(upstream, "symbolic-ref", "HEAD", "refs/heads/main")
+def pr_repo(tmp_path):
+    origin = tmp_path / "origin.git"
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
 
-    write(upstream / COMPONENT_REL, component_md(ORIGINAL_LINE))
-    write(
-        upstream / "specs/components/foo/requirements/R-FOO-001.md",
-        "**R-FOO-001** — Foo MUST do the foo thing.\n",
+    _git(tmp_path, "init", "--bare", str(origin))
+
+    _git(repo_root, "init")
+    _git(repo_root, "symbolic-ref", "HEAD", "refs/heads/main")
+    _git(repo_root, "config", "user.name", "Test User")
+    _git(repo_root, "config", "user.email", "test@example.invalid")
+    _git(repo_root, "config", "commit.gpgsign", "false")
+    _git(repo_root, "config", "init.defaultBranch", "main")
+
+    _write_base_fixture(repo_root)
+    _git(repo_root, "add", "-A")
+    _git(repo_root, "commit", "-m", "base: add comp-foo")
+
+    # Make the default branch discoverable via a remote, as in a real PR.
+    _git(repo_root, "remote", "add", "origin", str(origin))
+    _git(repo_root, "push", "origin", "main")
+    _git(repo_root, "fetch", "origin")
+    _git(
+        repo_root,
+        "symbolic-ref",
+        "refs/remotes/origin/HEAD",
+        "refs/remotes/origin/main",
     )
-    write(
-        upstream / "specs/components/foo/acceptance/AC-FOO-001.md",
-        "# AC-FOO-001\n\nCovers: R-FOO-001\nKind: compiled\n\n"
-        "```gherkin\nGiven foo\nWhen foo runs\nThen foo happens\n```\n",
-    )
-    write(upstream / "specs/components/foo/constraints.md", "No constraints.\n")
-    write(
-        upstream / "gen/provenance-tracker/provenance_tracker.py",
-        PROVENANCE_TRACKER_STANDIN,
-    )
-    git(upstream, "add", "-A")
-    git(upstream, "commit", "-m", "initial corpus")
 
-    repo = tmp_path / "repo"
-    git(tmp_path, "clone", str(upstream), str(repo))
-    git(repo, "config", "user.name", "Test Author")
-    git(repo, "config", "user.email", "author@example.invalid")
-    git(repo, "config", "commit.gpgsign", "false")
+    # The PR: a feature branch changing only comp-foo's component.md.
+    _git(repo_root, "checkout", "-b", "feature/change-foo")
+    (repo_root / COMPONENT_REL).write_text(_component_md(NEW_LINE))
+    _git(repo_root, "add", "-A")
+    _git(repo_root, "commit", "-m", "change comp-foo component.md")
 
-    # The PR: a feature branch changing exactly one component's component.md.
-    git(repo, "checkout", "-b", "feature/change-foo")
-    write(repo / COMPONENT_REL, component_md(UPDATED_LINE))
-    git(repo, "add", "-A")
-    git(repo, "commit", "-m", "change foo component.md")
+    # Sanity: everything is committed, so a working-tree-vs-HEAD diff is empty.
+    assert _git(repo_root, "status", "--porcelain").strip() == ""
+    assert _git(repo_root, "diff", "HEAD", "--", "specs/").strip() == ""
 
-    # Sanity: the working tree is clean, so a bare working-tree-vs-HEAD
-    # diff would be empty.
-    assert git(repo, "status", "--porcelain").strip() == ""
-    return repo
+    return repo_root
 
 
-def test_spec_diff_contains_actual_diff_text_for_changed_component_md(repo_root):
-    packet = review_packet_builder.build_review_packet(["comp-foo"], repo_root)
+def test_spec_diff_contains_actual_diff_for_changed_component_md(pr_repo):
+    repo_root = pr_repo
+
+    # Reference diff the test itself computes (merge-base..HEAD over specs/).
+    base = _git(repo_root, "merge-base", "HEAD", "main").strip()
+    reference = _git(repo_root, "diff", base, "HEAD", "--", "specs/")
+    assert f"-{OLD_LINE}" in reference and f"+{NEW_LINE}" in reference
+
+    packet = review_packet_builder.build_review_packet(["comp-foo"], Path(repo_root))
 
     spec_diff = field(packet, "spec_diff")
     assert isinstance(spec_diff, str)
-    assert spec_diff.strip() != "", "spec_diff must not be empty for a committed PR change"
+    assert spec_diff.strip() != ""
 
-    assert COMPONENT_REL in spec_diff, (
-        f"spec_diff should name the changed file {COMPONENT_REL!r}; got:\n{spec_diff}"
-    )
+    # The diff names the changed file.
+    assert "components/foo/component.md" in spec_diff
 
-    lines = spec_diff.splitlines()
-    assert ("+" + UPDATED_LINE) in lines, (
-        f"spec_diff should contain the added line; got:\n{spec_diff}"
-    )
-    assert ("-" + ORIGINAL_LINE) in lines, (
-        f"spec_diff should contain the removed line (diff vs merge-base with main); got:\n{spec_diff}"
-    )
+    # The diff carries the actual removed and added lines of that file.
+    assert f"-{OLD_LINE}" in spec_diff
+    assert f"+{NEW_LINE}" in spec_diff
+
+    # Unchanged lines are never presented as removed or added.
+    assert f"-{UNCHANGED_LINE}" not in spec_diff
+    assert f"+{UNCHANGED_LINE}" not in spec_diff
+
+    # Every changed line of the reference diff appears in spec_diff.
+    for line in reference.splitlines():
+        if (line.startswith("+") or line.startswith("-")) and not (
+            line.startswith("+++") or line.startswith("---")
+        ):
+            assert line in spec_diff, f"missing diff line: {line!r}"

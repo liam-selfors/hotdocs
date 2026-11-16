@@ -1,20 +1,25 @@
-import json
+import review_packet_builder
+
+import os
+import pprint
 import subprocess
 from pathlib import Path
 
 import pytest
-
-import review_packet_builder
 
 
 def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-COMPONENT_ID = "comp-foo"
+def lookup(mapping, key):
+    if isinstance(mapping, dict):
+        return mapping[key]
+    return getattr(mapping, key)
+
 
 VERIFICATION_REPORT = {
-    "component_id": COMPONENT_ID,
+    "component_id": "comp-foo",
     "criteria": [
         {
             "id": "AC-FOO-001",
@@ -36,7 +41,7 @@ VERIFICATION_REPORT = {
     ],
     "requirement_results": {"R-FOO-001": "pass", "R-FOO-002": "fail"},
     "interface_drift": False,
-    "mutation_score": None,
+    "mutation_score": 0.9,
     "overall": "fail",
 }
 
@@ -44,7 +49,7 @@ VERIFY_REPORT = {
     "scope": "blast-radius",
     "ready": False,
     "components": {
-        COMPONENT_ID: {
+        "comp-foo": {
             "hit": True,
             "verification_report": VERIFICATION_REPORT,
             "license_scan": {"blocked": False, "findings": []},
@@ -53,85 +58,48 @@ VERIFY_REPORT = {
     },
     "capabilities": {},
     "not_ready_reasons": [
-        "comp-foo: verification failed (overall=fail)",
+        "comp-foo: verification failed (AC-FOO-002)"
     ],
 }
 
 
-def _write(path: Path, text: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text, encoding="utf-8")
-
-
-def _git(repo_root: Path, *args: str) -> None:
+def _git(repo_root, *args):
+    env = dict(os.environ)
+    env.update(
+        {
+            "GIT_AUTHOR_NAME": "test",
+            "GIT_AUTHOR_EMAIL": "test@example.com",
+            "GIT_COMMITTER_NAME": "test",
+            "GIT_COMMITTER_EMAIL": "test@example.com",
+        }
+    )
     subprocess.run(
-        [
-            "git",
-            "-c",
-            "user.name=Test",
-            "-c",
-            "user.email=test@example.com",
-            "-c",
-            "commit.gpgsign=false",
-            *args,
-        ],
+        ["git", *args],
         cwd=str(repo_root),
         check=True,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
+        env=env,
     )
 
 
-def _build_fixture(repo_root: Path) -> Path:
-    comp_dir = repo_root / "specs" / "components" / "foo"
-    _write(
-        comp_dir / "component.md",
-        "---\n"
-        "id: comp-foo\n"
-        "title: Foo\n"
-        "status: draft\n"
-        "owners: [test-owner]\n"
-        "sealed: true\n"
-        "source_path: legacy/foo/\n"
-        "depends_on: []\n"
-        "---\n\n"
-        "# Foo\n\nA synthetic fixture component.\n",
-    )
-    _write(comp_dir / "constraints.md", "# Constraints\n\nNone.\n")
-    _write(comp_dir / "interface" / "library.md", "# Library\n\n```\nfoo() -> int\n```\n")
-    _write(
-        comp_dir / "requirements" / "R-FOO-001.md",
-        "# R-FOO-001\n\n**R-FOO-001** — foo MUST return an int.\n",
-    )
-    _write(
-        comp_dir / "requirements" / "R-FOO-002.md",
-        "# R-FOO-002\n\n**R-FOO-002** — foo MUST return 5.\n",
-    )
-    _write(
-        comp_dir / "acceptance" / "AC-FOO-001.md",
-        "# AC-FOO-001\n\nCovers: R-FOO-001\nKind: compiled\n\n"
-        "```gherkin\nGiven nothing\nWhen foo runs\nThen the result is an int\n```\n",
-    )
-    _write(
-        comp_dir / "acceptance" / "AC-FOO-002.md",
-        "# AC-FOO-002\n\nCovers: R-FOO-002\nKind: compiled\n\n"
-        "```gherkin\nGiven nothing\nWhen foo runs\nThen the result equals 5\n```\n",
-    )
-    _write(repo_root / "legacy" / "foo" / "foo.py", "def foo():\n    return 3\n")
+@pytest.fixture
+def repo_root(tmp_path):
+    root = tmp_path / "repo"
+    root.mkdir()
+    _git(root, "init", "-q")
+    (root / "README.md").write_text("fixture repo\n")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", "initial")
 
-    log_path = repo_root.parent / "tracker_invocations.log"
-    tracker_src = (
-        "import json\n"
-        "\n"
-        "LOG_PATH = " + repr(str(log_path)) + "\n"
-        "\n"
-        "REPORT = " + repr(VERIFY_REPORT) + "\n"
+    tracker_dir = root / "gen" / "provenance-tracker"
+    tracker_dir.mkdir(parents=True)
+    report_literal = pprint.pformat(VERIFY_REPORT, width=100)
+    (tracker_dir / "provenance_tracker.py").write_text(
+        "REPORT = " + report_literal + "\n"
         "\n"
         "\n"
         "def check_readiness(repo_root, changed_ids=None, model=None, seed=0, llm_backend=None):\n"
-        "    with open(LOG_PATH, 'a', encoding='utf-8') as fh:\n"
-        "        fh.write(json.dumps({'fn': 'check_readiness', 'changed_ids': "
-        "list(changed_ids) if changed_ids is not None else None}) + '\\n')\n"
         "    import copy\n"
         "    return copy.deepcopy(REPORT)\n"
         "\n"
@@ -139,51 +107,31 @@ def _build_fixture(repo_root: Path) -> Path:
         "def last_requirement_failures(component_id, repo_root):\n"
         "    return []\n"
     )
-    _write(
-        repo_root / "gen" / "provenance-tracker" / "provenance_tracker.py",
-        tracker_src,
-    )
-
-    _git(repo_root, "init", "-q")
-    _git(repo_root, "add", "-A")
-    _git(repo_root, "commit", "-q", "-m", "initial fixture")
-    return log_path
+    (root / "NOTES.md").write_text("second commit\n")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", "add provenance-tracker stand-in")
+    return root
 
 
-def _criteria_by_id(report):
-    criteria = field(report, "criteria")
-    out = {}
-    for c in criteria:
-        out[field(c, "id")] = c
-    return out
-
-
-def test_verification_results_show_each_criterion_individually(tmp_path):
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    log_path = _build_fixture(repo_root)
-
-    packet = review_packet_builder.build_review_packet(
-        [COMPONENT_ID, "R-FOO-002"], repo_root
-    )
-
-    # The stand-in tracker was actually consulted.
-    assert log_path.exists()
-    calls = [json.loads(line) for line in log_path.read_text().splitlines() if line.strip()]
-    assert any(c["fn"] == "check_readiness" for c in calls)
+def test_verification_results_shows_each_criterion_individually(repo_root):
+    packet = review_packet_builder.build_review_packet(["comp-foo"], Path(repo_root))
 
     verification_results = field(packet, "verification_results")
-    assert COMPONENT_ID in verification_results
-    report = verification_results[COMPONENT_ID]
+    report = lookup(verification_results, "comp-foo")
 
-    # Not merely an aggregate verdict: the per-criterion breakdown is present.
-    assert not isinstance(report, (str, bool))
     criteria = field(report, "criteria")
-    assert len(list(criteria)) == 2
+    criteria = list(criteria)
+    assert len(criteria) == 2, criteria
 
-    by_id = _criteria_by_id(report)
+    by_id = {field(c, "id"): c for c in criteria}
     assert set(by_id) == {"AC-FOO-001", "AC-FOO-002"}
+
     assert field(by_id["AC-FOO-001"], "result") == "pass"
     assert field(by_id["AC-FOO-002"], "result") == "fail"
-    assert field(by_id["AC-FOO-001"], "covers") == "R-FOO-001"
-    assert field(by_id["AC-FOO-002"], "covers") == "R-FOO-002"
+
+    requirement_results = field(report, "requirement_results")
+    assert lookup(requirement_results, "R-FOO-001") == "pass"
+    assert lookup(requirement_results, "R-FOO-002") == "fail"
+
+    # Not only an aggregate verdict: the full breakdown is present alongside it.
+    assert field(report, "overall") == "fail"

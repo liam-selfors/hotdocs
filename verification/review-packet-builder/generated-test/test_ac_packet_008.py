@@ -1,8 +1,7 @@
 import review_packet_builder
 
-import os
+import json
 import subprocess
-import textwrap
 from pathlib import Path
 
 
@@ -21,8 +20,7 @@ def _git(repo_root, *args):
         ],
         cwd=str(repo_root),
         check=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        capture_output=True,
     )
 
 
@@ -31,128 +29,134 @@ def _write(path, text):
     path.write_text(text, encoding="utf-8")
 
 
-def _build_fixture(tmp_path):
+def _build_repo(tmp_path):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
-    log_path = tmp_path / "provenance_tracker_calls.log"
+    log_path = tmp_path / "tracker_calls.log"
 
-    # Minimal synthetic component spec.
     comp_dir = repo_root / "specs" / "components" / "foo"
     _write(
         comp_dir / "component.md",
-        textwrap.dedent(
-            """\
-            ---
-            id: comp-foo
-            title: Foo
-            status: draft
-            owners: [alice]
-            depends_on: []
-            ---
-
-            # Foo
-
-            A synthetic fixture component.
-            """
-        ),
+        "---\n"
+        "id: comp-foo\n"
+        "title: Foo\n"
+        "status: draft\n"
+        "owners: [test-owner]\n"
+        "depends_on: []\n"
+        "realizes: []\n"
+        "---\n"
+        "\n"
+        "# Foo\n"
+        "\n"
+        "A synthetic fixture component.\n",
     )
     _write(
         comp_dir / "requirements" / "R-FOO-001.md",
-        "**R-FOO-001** — Foo MUST do a thing.\n",
+        "**R-FOO-001** — Foo MUST do the thing.\n",
     )
     _write(
         comp_dir / "acceptance" / "AC-FOO-001.md",
-        "# AC-FOO-001\n\nCovers: R-FOO-001\nKind: generated-test\n\n"
-        "```gherkin\nGiven a foo\nWhen it runs\nThen it does a thing\n```\n",
+        "# AC-FOO-001\n"
+        "\n"
+        "Covers: R-FOO-001\n"
+        "Kind: generated-test\n"
+        "\n"
+        "```gherkin\n"
+        "Given foo\n"
+        "When it runs\n"
+        "Then the thing happens\n"
+        "```\n",
     )
-    _write(comp_dir / "interface" / "library.md", "# Library\n\n```\nfoo() -> None\n```\n")
-    _write(comp_dir / "constraints.md", "# Constraints\n\nNone.\n")
-    _write(repo_root / "gen" / "foo" / "foo.py", "def foo():\n    return None\n")
+    _write(comp_dir / "constraints.md", "No constraints.\n")
 
-    # provenance-tracker stand-in: overall "pass" but mutation_score < 1.0.
-    stand_in = textwrap.dedent(
-        """\
-        LOG_PATH = %r
-
-
-        def _log(line):
-            with open(LOG_PATH, "a", encoding="utf-8") as fh:
-                fh.write(line + "\\n")
-
-
-        def check_readiness(repo_root, changed_ids=None, model=None, seed=0, llm_backend=None):
-            _log("check_readiness")
-            return {
-                "scope": "blast-radius" if changed_ids is not None else "whole-corpus",
-                "ready": True,
-                "components": {
-                    "comp-foo": {
-                        "hit": True,
-                        "verification_report": {
-                            "component_id": "comp-foo",
-                            "criteria": [
-                                {
-                                    "id": "AC-FOO-001",
-                                    "covers": "R-FOO-001",
-                                    "kind": "generated-test",
-                                    "result": "pass",
-                                },
-                            ],
-                            "requirement_results": {"R-FOO-001": "pass"},
-                            "interface_drift": False,
-                            "mutation_score": 0.92,
-                            "overall": "pass",
-                        },
-                        "license_scan": {"blocked": False, "findings": []},
-                        "secret_scan": {"flagged": False, "findings": []},
-                    },
-                },
-                "capabilities": {},
-                "not_ready_reasons": [],
+    verification_report = {
+        "component_id": "comp-foo",
+        "criteria": [
+            {
+                "id": "AC-FOO-001",
+                "covers": "R-FOO-001",
+                "kind": "generated-test",
+                "result": "pass",
             }
+        ],
+        "requirement_results": {"R-FOO-001": "pass"},
+        "interface_drift": False,
+        "mutation_score": 0.92,
+        "overall": "pass",
+    }
+    verify_report = {
+        "scope": "blast-radius",
+        "ready": True,
+        "components": {
+            "comp-foo": {
+                "hit": True,
+                "verification_report": verification_report,
+                "license_scan": {"blocked": False, "matches": []},
+                "secret_scan": {"flagged": False, "findings": []},
+            }
+        },
+        "capabilities": {},
+        "not_ready_reasons": [],
+    }
 
-
-        def last_requirement_failures(component_id, repo_root):
-            _log("last_requirement_failures")
-            return []
-        """
-    ) % (str(log_path),)
-    _write(repo_root / "gen" / "provenance-tracker" / "provenance_tracker.py", stand_in)
+    tracker_src = (
+        "import json\n"
+        "\n"
+        f"_LOG_PATH = {str(log_path)!r}\n"
+        f"_REPORT = {verify_report!r}\n"
+        "\n"
+        "\n"
+        "def check_readiness(repo_root, changed_ids=None, model=None, seed=0, llm_backend=None):\n"
+        "    with open(_LOG_PATH, 'a', encoding='utf-8') as fh:\n"
+        "        fh.write(json.dumps({'fn': 'check_readiness', 'changed_ids': list(changed_ids) if changed_ids is not None else None}) + '\\n')\n"
+        "    import copy\n"
+        "    return copy.deepcopy(_REPORT)\n"
+        "\n"
+        "\n"
+        "def last_requirement_failures(component_id, repo_root):\n"
+        "    return []\n"
+    )
+    _write(
+        repo_root / "gen" / "provenance-tracker" / "provenance_tracker.py",
+        tracker_src,
+    )
 
     _git(repo_root, "init", "-q")
     _git(repo_root, "add", "-A")
     _git(repo_root, "commit", "-q", "-m", "initial fixture")
-
     return repo_root, log_path
 
 
-def test_ac_packet_008_residual_risk_includes_mutation_score_below_one(tmp_path):
-    repo_root, log_path = _build_fixture(tmp_path)
+def test_residual_risk_includes_mutation_score_below_one_despite_pass(tmp_path):
+    repo_root, log_path = _build_repo(tmp_path)
 
-    packet = review_packet_builder.build_review_packet(["comp-foo", "R-FOO-001"], repo_root)
+    packet = review_packet_builder.build_review_packet(
+        ["comp-foo", "R-FOO-001"], Path(repo_root)
+    )
 
-    # The stand-in provenance-tracker was actually consulted.
-    assert log_path.exists(), "provenance-tracker stand-in was never invoked"
-    assert "check_readiness" in log_path.read_text(encoding="utf-8")
+    # The provenance-tracker stand-in must actually have been consulted.
+    assert log_path.exists(), "provenance-tracker stand-in check_readiness was never called"
+    calls = [json.loads(line) for line in log_path.read_text().splitlines() if line.strip()]
+    assert any(c["fn"] == "check_readiness" for c in calls)
 
     residual_risk = field(packet, "residual_risk")
-    assert isinstance(residual_risk, list), f"residual_risk must be a list, got {residual_risk!r}"
+    assert isinstance(residual_risk, (list, tuple))
 
-    matching = []
-    for entry in residual_risk:
-        assert not isinstance(entry, str), (
-            f"residual_risk entries must be objects, never bare strings: {entry!r}"
-        )
-        if field(entry, "component_id") == "comp-foo":
-            matching.append(entry)
-
+    matching = [
+        entry for entry in residual_risk
+        if not isinstance(entry, str) and field(entry, "component_id") == "comp-foo"
+    ]
     assert matching, (
-        "residual_risk must include the comp-foo finding (mutation_score 0.92 < 1.0 "
-        f"despite overall=pass); got {residual_risk!r}"
+        f"residual_risk has no entry for comp-foo despite mutation_score 0.92 < 1.0 "
+        f"with overall=pass: {residual_risk!r}"
     )
 
     messages = [field(entry, "message") for entry in matching]
+    assert all(isinstance(m, str) and m.strip() for m in messages)
     assert any(
-        isinstance(m, str) and m.strip() and ("mutation" in m.lower() or "0.92" in m)
-        for m in messages
-    ), f"residual_risk entry for comp-foo must describe the mutation_score finding; got {messages!r}"
+        ("mutation" in m.lower()) or ("0.92" in m) for m in messages
+    ), f"no residual_risk message for comp-foo describes the mutation_score finding: {messages!r}"
+
+    # Every residual_risk entry is an object, never a bare string.
+    for entry in residual_risk:
+        assert not isinstance(entry, str)
