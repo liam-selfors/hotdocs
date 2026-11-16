@@ -29,8 +29,12 @@ fills them with its own values, `isolation` naming how code the model
 ran was contained.
 
 Exactly one of `files` (non-empty), `model_call_error`, or `refused` is
-populated on any result, and `cache_hit` is `false` whenever either of
-the other two is set. `model_call_error` (R-GEN-008, R-GEN-021) means a
-model call was attempted and produced no usable candidate; `refused`
+populated on any result (`files` is `{}` when it is not), and
+`cache_hit` is `false` whenever either of the other two is set.
+`model_call_error` (R-GEN-008, R-GEN-021), a dict
+`{"category": ..., "message": ...}`, means a model call was attempted
+and produced no usable candidate (a mock `llm_backend` reply that
+`R-GEN-021` rejects gives one; a test MAY also build a result by
+keyword); `refused`
 (R-GEN-009) means no model call was attempted at all, with a short
 reason such as `"sealed-component"` or `"pinned-override"`.

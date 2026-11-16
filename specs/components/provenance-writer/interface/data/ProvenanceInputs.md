@@ -9,29 +9,23 @@
   "secret_scan_result": { "...": "a SecretScanResult" },
   "provenance_hit": false,
   "attempts": 2,
+  "attempt_history": [{"number": 1, "outcome": "passed", "retry_feedback": [],
+                       "error_category": null, "failed_requirements": [],
+                       "transcript_sha256": null}],
   "gate_versions": { "compiler": "1.0.0", "license_scanner": "k-gram@1.0.0" }
 }
 ```
 
-**Previously referenced in `library.md`/`constraints.md`/`AC-PROV-001` but
-never actually defined here — a real, pre-existing gap, fixed now rather
-than propagated further.** `generation_result` is always populated —
-`GenerationResult`'s own `files`/`model_call_error`/`refused` fields (never
-more than one populated, per that type's own contract) already carry
-whether a candidate exists at all. `verification_report` is `null`
-whenever `generation_result.files` is empty (nothing was ever produced to
-verify) and populated otherwise; a `null` report alongside non-empty `files` is
-a missing upstream result, so `write_provenance` raises `MissingInputError`
-(`R-PROV-014`'s `inputs` shapes apply), never writing a manifest for it — this mirrors `ComponentPipelineResult`'s
-own `model_call_error`/`verification` split (`component-gate-runner`'s
-`R-GATE-004`), so
-`provenance-writer` can write a coherent manifest for a component that
-never reached verification, not only for one that did.
+`attempt_history` is the landing run's attempts, each a plain dict with
+exactly those keys (`generation-loop`'s `AttemptLoopResult`); it MAY be
+absent, meaning `[]`. `generation_result` is always populated; its
+`files`/`model_call_error`/`refused` fields carry whether a candidate
+exists. `verification_report` is `null` whenever `generation_result.files`
+is empty and populated otherwise; a `null` report alongside non-empty
+`files` is a missing upstream result, so `write_provenance` raises
+`MissingInputError` and writes no manifest. A manifest is thus written
+for a component that never reached verification too.
 
-`license_scan_result`/`secret_scan_result` are always populated
-regardless of generation outcome — both scans run unconditionally
-(`component-gate-runner`'s `R-GATE-005`) and don't depend on `generation_result` having
-succeeded. This bundle previously listed a `cross_model_check` field
-(`CrossCheckResult` or `None`) from when `cross-model-divergence-checker`
-existed; removed along with that component (the second-model scope cut) —
-not re-added speculatively.
+`license_scan_result`/`secret_scan_result` are always populated: both
+scans run whatever the generation outcome. Accepted shapes and required
+inputs: `specs/architecture/provenance-writer-fixtures.md`.

@@ -14,11 +14,16 @@ the parent of the nearest `gen` directory above this module's file. A
 project holds only its own components, so every verb falls back to it
 (`R-CLI-001`). The forwarded tokens end with `--repo-root=<root>` unless
 the arguments already hold a `--repo-root` (`R-CLI-002`), followed only by
-an injected `--model=...` (`R-CLI-003`).
+an injected `--model=...` (`R-CLI-003`). Without a `--repo-root`
+argument the repo root is `cwd` made absolute (`os.path.abspath`, not
+resolved), and that string is what `--repo-root=<root>` carries; no
+marker file such as `hotdocs.toml` or `.git` is needed.
 
 ## llm-endpoint
 
-Found as any module is (`R-CLI-001`). The one name
+Found and loaded as any module is (`R-CLI-001`): under the repo root
+first, fresh on every call, so a test may change a fake between calls.
+It is consulted only for a `required` or `optional` row. The one name
 used is `load_config(config_path=None)` — `{provider, model, base_url,
 api_key_env, timeout_seconds}`, `None` when there is no `[llm]` table,
 `ValueError` when invalid. Any stand-in must provide it.
@@ -31,5 +36,9 @@ written into its source) and returns `7`. For the `init` row the fake lives
 at `<tool_root>/gen/hotdocs-init/hotdocs_init.py` and also logs the keyword
 arguments it received. A **fake tool root** is a separate temporary
 directory passed as `tool_root`, holding fakes at the same relative paths.
+A **fake llm-endpoint** at `<project>/gen/llm-endpoint/llm_endpoint.py`
+defines `load_config(config_path=None)`, whose behaviour (return a dict,
+return `None`, or raise `ValueError`) is written into its source. A
+project is a temporary directory passed as `cwd`.
 
 Implements: `specs/architecture/cli-conventions.md`

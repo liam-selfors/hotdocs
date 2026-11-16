@@ -3,7 +3,7 @@ id: comp-provenance-checker
 title: Provenance Checker
 status: draft
 owners: [pipeline-team]
-depends_on: [comp-spec-bundle-assembler, comp-criterion-compiler, comp-test-author, comp-verifier-orchestrator, comp-license-scanner, comp-secret-scanner, comp-provenance-writer]
+depends_on: [comp-spec-bundle-assembler, comp-criterion-compiler, comp-test-author, comp-verifier-orchestrator, comp-license-scanner, comp-secret-scanner, comp-provenance-writer, comp-generator]
 realizes: [P-ZERO-EDIT]
 uses_var: [VAR-TRUST-JUDGE-PROVENANCE]
 model_pin: claude-opus-5-5
@@ -115,3 +115,5 @@ None.
   counterpart (`R-PROVCHECK-007`/`008`); depends on `provenance-writer`
   for the manifest schema.
   Regenerated and landed at 13/13, `mutation_score` 0.91.
+- `D313`: the key names the generator's version, so a generator or
+  prompt change invalidates every manifest it produced.
