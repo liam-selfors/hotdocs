@@ -1,0 +1,37 @@
+{
+  "capability_id": "P-ZERO-EDIT",
+  "capability_scenario_report": {
+    "P-ZERO-EDIT": {
+      "overall": "pass",
+      "scenarios": [
+        {
+          "id": "CS-ZERO-EDIT-001",
+          "kind": "generated-test",
+          "result": "pass"
+        }
+      ]
+    }
+  },
+  "content_hash": "sha256:509b0723cbe6cdc57a6d7114ae6a89adc793c219803e5d166c91c313cc58ee55",
+  "gate_version": "capability_scenario_verifier@2.0.0",
+  "model": "claude-opus-5-5",
+  "realizing_components": [
+    "comp-cache-manager",
+    "comp-capability-scenario-verifier",
+    "comp-component-gate-runner",
+    "comp-criterion-compiler",
+    "comp-generator",
+    "comp-graph-query-engine",
+    "comp-hotdocs-cli",
+    "comp-hotdocs-init",
+    "comp-impact-analyzer",
+    "comp-llm-endpoint",
+    "comp-provenance-checker",
+    "comp-provenance-writer",
+    "comp-review-packet-builder",
+    "comp-spec-bundle-assembler",
+    "comp-test-author",
+    "comp-verifier-orchestrator"
+  ],
+  "seed": 0
+}

@@ -32,9 +32,10 @@ Covers: P-DECISION-INTEGRITY
 Kind: generated-test
 
 ```gherkin
-Given a decision record superseded by a later one, and a live spec
-  file citing the superseded decision, last touched before the
-  superseding decision was ratified
+Given a decision record superseded by a later one, whose frontmatter
+  holds the scalar line "supersedes: <the earlier id>" (one id, never a
+  list), and a live spec file citing the superseded decision, last
+  touched before the superseding decision was ratified
 When decision-drift-detector runs
 Then that file/citation pair appears in the drift report
 ```
