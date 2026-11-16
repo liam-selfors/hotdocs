@@ -1,369 +1,326 @@
 """AC-GATE-006 (Covers: R-GATE-006).
 
 On a non-sealed provenance miss whose generation produced files,
-run_component_gates invokes provenance-writer's write_provenance once,
-after verification, both scans and the attempt record, with
-ProvenanceInputs built from the faked dependencies' own results and the
-provenance key's gate_versions. On a model_call_error, write_provenance
+run_component_gates invokes provenance-writer's write_provenance exactly
+once, after verification, both scans and the attempt record, with a
+plain-dict ProvenanceInputs built from the same provenance key and the
+faked dependencies' own results. On a model_call_error, write_provenance
 is never called.
 """
 
 import json
 from pathlib import Path
 
+import pytest
+
 import component_gate_runner
 
 
+LOG_ENV = "GATE_TEST_LOG"
+MODE_ENV = "GATE_TEST_GEN_MODE"
+
 COMPONENT_ID = "comp-foo"
 SLUG = "foo"
+SPEC_HASH = "sha256:0123abcd"
 GATE_VERSIONS = {"verifier": "v@1"}
 
+GEN_PASS = {
+    "component_id": COMPONENT_ID,
+    "spec_bundle_hash": SPEC_HASH,
+    "model": "mock-model",
+    "prompt_version": "v10",
+    "cache_hit": False,
+    "files": {"foo.py": "def double(x):\n    return 2 * x\n"},
+    "model_call_error": None,
+    "refused": None,
+    "retry_feedback": None,
+}
 
-def field(value, name):
-    return value[name] if isinstance(value, dict) else getattr(value, name)
+GEN_ERROR = {
+    "component_id": COMPONENT_ID,
+    "spec_bundle_hash": SPEC_HASH,
+    "model": "mock-model",
+    "prompt_version": "v10",
+    "cache_hit": False,
+    "files": {},
+    "model_call_error": {"category": "network", "message": "mock network failure"},
+    "refused": None,
+    "retry_feedback": None,
+}
+
+REPORT = {
+    "component_id": COMPONENT_ID,
+    "criteria": [
+        {"id": "AC-FOO-001", "covers": "R-FOO-001", "kind": "compiled", "result": "pass"},
+    ],
+    "requirement_results": {"R-FOO-001": "pass"},
+    "interface_drift": False,
+    "mutation_score": 0.9,
+    "overall": "pass",
+}
+
+LICENSE = {
+    "component_id": COMPONENT_ID,
+    "gate_version": "license_scanner@4.0.0-no-reference-corpus",
+    "evaluated": False,
+    "reason": "no-reference-corpus",
+    "similarity_score": None,
+    "block_threshold": None,
+    "blocked": False,
+    "matches": [],
+    "notified": False,
+    "notification_delivery_error": None,
+    "cache_hit": False,
+}
+
+SECRET = {
+    "scope": "full",
+    "gate_version": "secret_scanner@3.1.0+detect-secrets.1.5.0",
+    "flagged": False,
+    "matches": [],
+    "allowed": [],
+    "unused_allowlist_entries": [],
+    "notified": False,
+    "notification_delivery_error": None,
+    "cache_hit": False,
+}
 
 
-# ---------------------------------------------------------------------------
-# Shared helper code embedded at the top of every fake dependency module.
-# Each fake logs to <repo_root>/test-log/calls.jsonl, so the log location is
-# derived from the repo_root argument the fake is handed.
-# ---------------------------------------------------------------------------
-
-COMMON = '''
+PRELUDE = '''
+import copy
 import dataclasses
 import json
+import os
 from pathlib import Path
 
 
-def _norm(v):
-    if not isinstance(v, (dict, list, tuple, str, int, float, bool, type(None))):
-        to_dict = getattr(v, "to_dict", None)
-        if callable(to_dict):
-            v = to_dict()
-        elif dataclasses.is_dataclass(v) and not isinstance(v, type):
-            v = dataclasses.asdict(v)
-    if isinstance(v, dict):
-        return {str(k): _norm(x) for k, x in v.items()}
-    if isinstance(v, (list, tuple)):
-        return [_norm(x) for x in v]
-    if v is None or isinstance(v, (str, int, float, bool)):
+def _log(event, **data):
+    record = {"event": event}
+    record.update(data)
+    with open(os.environ["GATE_TEST_LOG"], "a", encoding="utf-8") as fh:
+        fh.write(json.dumps(record) + "\\n")
+
+
+def _plain(v):
+    if v is None or isinstance(v, (bool, str, int, float)):
         return v
-    if isinstance(v, Path):
-        return str(v)
+    if isinstance(v, dict):
+        return {str(k): _plain(x) for k, x in v.items()}
+    if isinstance(v, (list, tuple)):
+        return [_plain(x) for x in v]
+    if hasattr(v, "to_dict"):
+        return _plain(v.to_dict())
+    if dataclasses.is_dataclass(v) and not isinstance(v, type):
+        return _plain(dataclasses.asdict(v))
     if hasattr(v, "__dict__"):
-        return _norm(vars(v))
-    return str(v)
-
-
-def _log_dir(repo_root):
-    d = Path(repo_root) / "test-log"
-    d.mkdir(parents=True, exist_ok=True)
-    return d
-
-
-def _log(repo_root, call, **data):
-    entry = {"call": call}
-    entry.update(data)
-    with open(_log_dir(repo_root) / "calls.jsonl", "a", encoding="utf-8") as fh:
-        fh.write(json.dumps(entry, default=str) + "\\n")
-
-
-def _mode(repo_root):
-    p = _log_dir(repo_root) / "mode.txt"
-    return p.read_text(encoding="utf-8").strip() if p.is_file() else "pass"
+        return _plain(vars(v))
+    return repr(v)
 '''
 
 
-PROVENANCE_CHECKER = '''
+def _provenance_checker_src():
+    return PRELUDE + '''
 
-@dataclasses.dataclass
+GATE_VERSIONS = ''' + repr(GATE_VERSIONS) + '''
+SPEC_HASH = ''' + repr(SPEC_HASH) + '''
+
+
 class ProvenanceKey:
-    spec_bundle_hash: str
-    gate_versions: dict
-
-
-@dataclasses.dataclass
-class SealedKey:
-    owners: list
-    source_path: str
-    source_hash: str
-    verifier_version: str
+    def __init__(self, spec_bundle_hash, gate_versions):
+        self.spec_bundle_hash = spec_bundle_hash
+        self.gate_versions = gate_versions
 
 
 def current_sealed_key(component_id, repo_root):
-    _log(repo_root, "current_sealed_key", component_id=component_id)
+    _log("current_sealed_key", component_id=component_id)
     return None
 
 
 def current_provenance_key(component_id, repo_root):
-    _log(repo_root, "current_provenance_key", component_id=component_id)
-    return ProvenanceKey(
-        spec_bundle_hash="sha256:" + "ab" * 32,
-        gate_versions={"verifier": "v@1"},
-    )
+    _log("current_provenance_key", component_id=component_id)
+    return ProvenanceKey(SPEC_HASH, dict(GATE_VERSIONS))
 
 
 def check_provenance(component_id, spec_bundle_hash, gate_versions, repo_root):
-    _log(
-        repo_root,
-        "check_provenance",
-        component_id=component_id,
-        spec_bundle_hash=spec_bundle_hash,
-        gate_versions=_norm(gate_versions),
-    )
-    return {
-        "hit": False,
-        "verification_report": None,
-        "license_scan": None,
-        "secret_scan": None,
-    }
+    _log("check_provenance", component_id=component_id,
+         spec_bundle_hash=spec_bundle_hash, gate_versions=_plain(gate_versions))
+    return {"hit": False, "verification_report": None,
+            "license_scan": None, "secret_scan": None}
 
 
 def check_sealed_provenance(component_id, repo_root):
-    _log(repo_root, "check_sealed_provenance", component_id=component_id)
-    return {
-        "hit": False,
-        "sealed": False,
-        "reason": "not_sealed",
-        "verification_report": None,
-        "license_scan": None,
-        "secret_scan": None,
-        "owners": None,
-        "source_hash": None,
-        "written_at": None,
-    }
+    _log("check_sealed_provenance", component_id=component_id)
+    return {"hit": False, "sealed": False, "reason": "not_sealed",
+            "verification_report": None, "license_scan": None,
+            "secret_scan": None, "owners": None, "source_hash": None,
+            "written_at": None}
 '''
 
 
-SPEC_BUNDLE_ASSEMBLER = '''
+def _assembler_src():
+    return PRELUDE + '''
 
-@dataclasses.dataclass
+SPEC_HASH = ''' + repr(SPEC_HASH) + '''
+
+
 class SpecBundle:
-    component_id: str
-    spec_bundle_hash: str
-    spec: str
-    interface: str
-    constraints: str
-    dependency_interfaces: dict = dataclasses.field(default_factory=dict)
-    dependency_context: dict = dataclasses.field(default_factory=dict)
-    dependency_usage: dict = dataclasses.field(default_factory=dict)
-    vars: dict = dataclasses.field(default_factory=dict)
-    glossary: str = ""
-    hint_code: object = None
+    FIELDS = ("component_id", "spec_bundle_hash", "spec", "interface",
+              "constraints", "dependency_interfaces", "dependency_context",
+              "dependency_usage", "vars", "glossary", "hint_code")
+
+    def __init__(self, component_id):
+        self.component_id = component_id
+        self.spec_bundle_hash = SPEC_HASH
+        self.spec = "Foo doubles a number."
+        self.interface = "double(x: int) -> int"
+        self.constraints = "None."
+        self.dependency_interfaces = {}
+        self.dependency_context = {}
+        self.dependency_usage = {}
+        self.vars = {}
+        self.glossary = ""
+        self.hint_code = None
 
     def __getitem__(self, key):
+        if key not in self.FIELDS:
+            raise KeyError(key)
         return getattr(self, key)
 
     def get(self, key, default=None):
-        return getattr(self, key, default)
+        return getattr(self, key, default) if key in self.FIELDS else default
 
 
-@dataclasses.dataclass
 class CriterionBundle:
-    component_id: str
-    criterion_id: str
-    covers: str
-    criterion_text: str
-    requirement_text: str
-    interface: str
-    glossary: str
-    dependency_interfaces: dict = dataclasses.field(default_factory=dict)
+    FIELDS = ("component_id", "criterion_id", "covers", "criterion_text",
+              "requirement_text", "interface", "glossary",
+              "dependency_interfaces")
+
+    def __init__(self, component_id, criterion_id):
+        self.component_id = component_id
+        self.criterion_id = criterion_id
+        self.covers = "R-FOO-001"
+        self.criterion_text = "Given x = 2 When double(x) is called Then it returns 4"
+        self.requirement_text = "double(x) MUST return 2 * x."
+        self.interface = "double(x: int) -> int"
+        self.glossary = ""
+        self.dependency_interfaces = {}
 
     def __getitem__(self, key):
+        if key not in self.FIELDS:
+            raise KeyError(key)
         return getattr(self, key)
 
     def get(self, key, default=None):
-        return getattr(self, key, default)
+        return getattr(self, key, default) if key in self.FIELDS else default
 
 
 def assemble(component_id, repo_root, mode="cold"):
-    _log(repo_root, "assemble", component_id=component_id, mode=mode)
-    return SpecBundle(
-        component_id=component_id,
-        spec_bundle_hash="sha256:" + "ab" * 32,
-        spec="Foo doubles a number.",
-        interface="foo(x: int) -> int",
-        constraints="None.",
-    )
+    _log("assemble", component_id=component_id, mode=mode)
+    return SpecBundle(component_id)
 
 
 def assemble_criterion(component_id, criterion_id, repo_root):
-    _log(repo_root, "assemble_criterion", component_id=component_id, criterion_id=criterion_id)
-    return CriterionBundle(
-        component_id=component_id,
-        criterion_id=criterion_id,
-        covers="R-FOO-001",
-        criterion_text="Given x = 2 When foo(x) is called Then it returns 4",
-        requirement_text="foo(x) MUST return 2 * x.",
-        interface="foo(x: int) -> int",
-        glossary="",
-    )
+    _log("assemble_criterion", component_id=component_id, criterion_id=criterion_id)
+    return CriterionBundle(component_id, criterion_id)
 '''
 
 
-GENERATOR = '''
+def _generator_src():
+    return PRELUDE + '''
 
 GATE_VERSION = "generator@2.0.0"
 PROMPT_VERSION = "v10"
 
-
-@dataclasses.dataclass
-class GenerationResult:
-    component_id: str
-    spec_bundle_hash: str
-    model: str
-    prompt_version: str
-    cache_hit: bool
-    files: dict
-    model_call_error: object
-    refused: object
-    retry_feedback: object
+GEN_PASS = ''' + repr(GEN_PASS) + '''
+GEN_ERROR = ''' + repr(GEN_ERROR) + '''
 
 
 def generate(bundle, model, retry_feedback=None, *, repo_root=None, llm_backend=None):
-    component_id = bundle["component_id"] if isinstance(bundle, dict) else getattr(bundle, "component_id")
-    sbh = bundle["spec_bundle_hash"] if isinstance(bundle, dict) else getattr(bundle, "spec_bundle_hash")
-    if _mode(repo_root) == "error":
-        result = GenerationResult(
-            component_id=component_id,
-            spec_bundle_hash=sbh,
-            model=model,
-            prompt_version=PROMPT_VERSION,
-            cache_hit=False,
-            files={},
-            model_call_error={"category": "network", "message": "connection refused"},
-            refused=None,
-            retry_feedback=retry_feedback,
-        )
-    else:
-        files = {"foo.py": "def double(x):\\n    return 2 * x\\n"}
-        out = Path(repo_root) / "gen" / "foo"
-        out.mkdir(parents=True, exist_ok=True)
-        for rel, content in files.items():
-            (out / rel).write_text(content, encoding="utf-8")
-        result = GenerationResult(
-            component_id=component_id,
-            spec_bundle_hash=sbh,
-            model=model,
-            prompt_version=PROMPT_VERSION,
-            cache_hit=False,
-            files=files,
-            model_call_error=None,
-            refused=None,
-            retry_feedback=retry_feedback,
-        )
-    _log(repo_root, "generate", result=_norm(result))
-    return result
+    _log("generate", model=model)
+    if os.environ.get("GATE_TEST_GEN_MODE") == "error":
+        return copy.deepcopy(GEN_ERROR)
+    return copy.deepcopy(GEN_PASS)
 '''
 
 
-VERIFIER_ORCHESTRATOR = '''
+def _verifier_src():
+    return PRELUDE + '''
 
 GATE_VERSION = "verifier-orchestrator@2.0.0"
 
+REPORT = ''' + repr(REPORT) + '''
 
-@dataclasses.dataclass
+
 class VerificationReport:
-    component_id: str
-    criteria: list
-    requirement_results: dict
-    interface_drift: bool
-    mutation_score: object
-    overall: str
+    FIELDS = ("component_id", "criteria", "requirement_results",
+              "interface_drift", "mutation_score", "overall")
+
+    def __init__(self, data):
+        for key in self.FIELDS:
+            setattr(self, key, copy.deepcopy(data[key]))
 
     def to_dict(self):
-        return dataclasses.asdict(self)
+        return {key: copy.deepcopy(getattr(self, key)) for key in self.FIELDS}
 
 
 def verify(component_id, repo_root, judge=None, test_author=None):
-    report = VerificationReport(
-        component_id=component_id,
-        criteria=[
-            {"id": "AC-FOO-001", "covers": "R-FOO-001", "kind": "generated-test", "result": "pass"}
-        ],
-        requirement_results={"R-FOO-001": "pass"},
-        interface_drift=False,
-        mutation_score=0.81,
-        overall="pass",
-    )
-    _log(repo_root, "verify", component_id=component_id, result=_norm(report))
-    return report
+    _log("verify", component_id=component_id)
+    return VerificationReport(REPORT)
 '''
 
 
-LICENSE_SCANNER = '''
+def _license_src():
+    return PRELUDE + '''
 
-def gate_version(repo_root):
-    return "license_scanner@4.0.0-no-reference-corpus"
+LICENSE = ''' + repr(LICENSE) + '''
 
 
 def scan(component_id, repo_root):
-    result = {
-        "component_id": component_id,
-        "gate_version": "license_scanner@4.0.0-no-reference-corpus",
-        "evaluated": False,
-        "reason": "no-reference-corpus",
-        "similarity_score": None,
-        "block_threshold": None,
-        "blocked": False,
-        "matches": [],
-        "notified": False,
-        "notification_delivery_error": None,
-        "cache_hit": False,
-    }
-    _log(repo_root, "license_scan", component_id=component_id, result=_norm(result))
-    return result
+    _log("license_scan", component_id=component_id)
+    return copy.deepcopy(LICENSE)
+
+
+def gate_version(repo_root):
+    return LICENSE["gate_version"]
 '''
 
 
-SECRET_SCANNER = '''
+def _secret_src():
+    return PRELUDE + '''
+
+SECRET = ''' + repr(SECRET) + '''
+
 
 class AllowlistInvalidError(Exception):
     pass
 
 
-@dataclasses.dataclass
 class SecretScanResult:
-    scope: str
-    gate_version: str
-    flagged: bool
-    matches: list
-    allowed: list
-    unused_allowlist_entries: list
-    notified: bool
-    notification_delivery_error: object
-    cache_hit: bool
+    FIELDS = ("scope", "gate_version", "flagged", "matches", "allowed",
+              "unused_allowlist_entries", "notified",
+              "notification_delivery_error", "cache_hit")
+
+    def __init__(self, data):
+        for key in self.FIELDS:
+            setattr(self, key, copy.deepcopy(data[key]))
 
     def to_dict(self):
-        return dataclasses.asdict(self)
-
-
-def gate_version(repo_root):
-    return "secret_scanner@3.1.0+detect-secrets.1.5.0"
-
-
-def _clean(scope):
-    return SecretScanResult(
-        scope=scope,
-        gate_version="secret_scanner@3.1.0+detect-secrets.1.5.0",
-        flagged=False,
-        matches=[],
-        allowed=[],
-        unused_allowlist_entries=[],
-        notified=False,
-        notification_delivery_error=None,
-        cache_hit=False,
-    )
+        return {key: copy.deepcopy(getattr(self, key)) for key in self.FIELDS}
 
 
 def scan(repo_root):
-    result = _clean("full")
-    _log(repo_root, "secret_scan", result=_norm(result))
-    return result
+    _log("secret_scan")
+    return SecretScanResult(SECRET)
 
 
 def scan_files(paths, repo_root=None):
-    return _clean("precommit")
+    data = copy.deepcopy(SECRET)
+    data["scope"] = "precommit"
+    return SecretScanResult(data)
+
+
+def gate_version(repo_root):
+    return SECRET["gate_version"]
 
 
 def propose(repo_root):
@@ -371,41 +328,49 @@ def propose(repo_root):
 '''
 
 
-PROVENANCE_TRACKER = '''
+def _tracker_src():
+    return PRELUDE + '''
 
-def write_attempt_record(component_id, generation_result, verification_report, spec_bundle_hash, repo_root):
-    attempt_id = "2026-11-15T00:00:00Z-aaaaaa"
+
+def write_attempt_record(component_id, generation_result, verification_report,
+                         spec_bundle_hash, repo_root):
+    _log("write_attempt_record", component_id=component_id,
+         spec_bundle_hash=spec_bundle_hash,
+         verification_is_none=verification_report is None)
+    slug = component_id[len("comp-"):] if component_id.startswith("comp-") else component_id
+    attempts_dir = Path(repo_root) / ".hotdocs" / "attempts" / slug
+    attempts_dir.mkdir(parents=True, exist_ok=True)
+    attempt_id = "2026-11-15T00:00:00Z-a1b2c3"
     record = {
         "attempt_id": attempt_id,
         "component_id": component_id,
         "timestamp": "2026-11-15T00:00:00Z",
         "spec_bundle_hash": spec_bundle_hash,
-        "generation": _norm(generation_result),
-        "verification": _norm(verification_report),
+        "generation": _plain(generation_result),
+        "verification": _plain(verification_report),
     }
-    d = Path(repo_root) / ".hotdocs" / "attempts" / "foo"
-    d.mkdir(parents=True, exist_ok=True)
-    (d / (attempt_id.replace(":", "-") + ".json")).write_text(json.dumps(record), encoding="utf-8")
-    _log(repo_root, "write_attempt_record", component_id=component_id)
+    (attempts_dir / "2026-11-15T00-00-00Z-a1b2c3.json").write_text(
+        json.dumps(record), encoding="utf-8")
     return record
 
 
 def check_readiness(repo_root, changed_ids=None, model=None, seed=0, llm_backend=None):
-    return {
-        "scope": "whole-corpus",
-        "ready": True,
-        "components": {},
-        "capabilities": {},
-        "not_ready_reasons": [],
-    }
+    return {"scope": "whole-corpus", "ready": True, "components": {},
+            "capabilities": {}, "not_ready_reasons": []}
 
 
 def last_requirement_failures(component_id, repo_root):
     return []
+
+
+def main(argv):
+    return 0
 '''
 
 
-PROVENANCE_WRITER = '''
+def _writer_src():
+    return PRELUDE + '''
+
 
 class InvalidSealedInputError(Exception):
     pass
@@ -415,76 +380,67 @@ class MissingInputError(Exception):
     pass
 
 
-@dataclasses.dataclass
-class SealedProvenanceInputs:
-    component_id: str
-    owners: list
-    source_path: str
-    source_hash: str
-    verifier_version: str
-    verification_report: object
-
-
 def write_provenance(component_id, inputs, repo_root):
-    _log(repo_root, "write_provenance", component_id=component_id, inputs=_norm(inputs))
+    attempts_dir = Path(repo_root) / ".hotdocs" / "attempts" / "foo"
+    files_now = len([p for p in attempts_dir.iterdir()]) if attempts_dir.is_dir() else 0
+    _log("write_provenance", component_id=component_id,
+         inputs_is_dict=isinstance(inputs, dict),
+         attempts_type=(type(inputs.get("attempts")).__name__
+                        if isinstance(inputs, dict) else None),
+         attempt_files_at_call=files_now,
+         inputs=_plain(inputs))
     return None
 
 
 def write_sealed_provenance(component_id, inputs, repo_root):
-    _log(repo_root, "write_sealed_provenance", component_id=component_id, inputs=_norm(inputs))
+    _log("write_sealed_provenance", component_id=component_id)
     return None
+
+
+def main(argv):
+    return 0
 '''
 
 
-TEST_AUTHOR = '''
+def _test_author_src():
+    return PRELUDE + '''
+
+GATE_VERSION = "generated_test@1.0.0"
+
 
 def author_test(bundle, model, seed=0, *, repo_root=None, llm_backend=None):
-    if repo_root is not None:
-        _log(repo_root, "author_test")
-    return {
-        "component_id": "comp-foo",
-        "criterion_id": "AC-FOO-001",
-        "model": model,
-        "seed": seed,
-        "prompt_version": "v1",
-        "cache_hit": False,
-        "file": {"path": "verification/foo/generated-test/test_ac_foo_001.py", "content": "def test_x():\\n    pass\\n"},
-        "model_call_error": None,
-    }
+    _log("author_test", model=model)
+    return {"component_id": "comp-foo", "criterion_id": "AC-FOO-001",
+            "model": model, "seed": seed, "prompt_version": "v1",
+            "cache_hit": False, "file": None,
+            "model_call_error": {"category": "network", "message": "unused"}}
 '''
 
 
-LLM_ENDPOINT = '''
+def _llm_endpoint_src():
+    return PRELUDE + '''
 
 DEFAULT_TIMEOUT_SECONDS = 600
 
 
-class ModelResolutionError(Exception):
-    pass
-
-
 def complete(prompt, model, *, backend=None, **params):
-    if backend is not None:
-        return backend(prompt, model, **params)
-    return {"text": "pass", "model": model, "backend": "fake", "model_call_error": None}
-
-
-def parse_model(model):
-    return (None, model)
+    _log("complete", model=model)
+    return {"text": "pass", "model": model, "backend": "mock",
+            "model_call_error": None}
 '''
 
 
 FAKES = {
-    ("provenance-checker", "provenance_checker"): PROVENANCE_CHECKER,
-    ("spec-bundle-assembler", "spec_bundle_assembler"): SPEC_BUNDLE_ASSEMBLER,
-    ("generator", "generator"): GENERATOR,
-    ("verifier-orchestrator", "verifier_orchestrator"): VERIFIER_ORCHESTRATOR,
-    ("license-scanner", "license_scanner"): LICENSE_SCANNER,
-    ("secret-scanner", "secret_scanner"): SECRET_SCANNER,
-    ("provenance-tracker", "provenance_tracker"): PROVENANCE_TRACKER,
-    ("provenance-writer", "provenance_writer"): PROVENANCE_WRITER,
-    ("test-author", "test_author"): TEST_AUTHOR,
-    ("llm-endpoint", "llm_endpoint"): LLM_ENDPOINT,
+    "provenance-checker": _provenance_checker_src,
+    "spec-bundle-assembler": _assembler_src,
+    "generator": _generator_src,
+    "verifier-orchestrator": _verifier_src,
+    "license-scanner": _license_src,
+    "secret-scanner": _secret_src,
+    "provenance-tracker": _tracker_src,
+    "provenance-writer": _writer_src,
+    "test-author": _test_author_src,
+    "llm-endpoint": _llm_endpoint_src,
 }
 
 
@@ -504,88 +460,83 @@ Foo doubles a number.
 """
 
 
-def _mock_backend(prompt, model, **params):
-    return {"text": "pass", "model": model, "backend": "mock", "model_call_error": None}
+def field(value, name):
+    return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def _build_repo(root: Path, mode: str) -> Path:
-    root.mkdir(parents=True, exist_ok=True)
-    for (slug, module_name), body in FAKES.items():
-        d = root / "gen" / slug
-        d.mkdir(parents=True, exist_ok=True)
-        (d / f"{module_name}.py").write_text(COMMON + body, encoding="utf-8")
-    comp = root / "specs" / "components" / SLUG
-    comp.mkdir(parents=True, exist_ok=True)
-    (comp / "component.md").write_text(COMPONENT_MD, encoding="utf-8")
-    log_dir = root / "test-log"
-    log_dir.mkdir(parents=True, exist_ok=True)
-    (log_dir / "mode.txt").write_text(mode, encoding="utf-8")
-    return root
+@pytest.fixture
+def repo(tmp_path, monkeypatch):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    for slug, src in FAKES.items():
+        d = repo_root / "gen" / slug
+        d.mkdir(parents=True)
+        (d / (slug.replace("-", "_") + ".py")).write_text(src(), encoding="utf-8")
+    comp_dir = repo_root / "specs" / "components" / SLUG
+    comp_dir.mkdir(parents=True)
+    (comp_dir / "component.md").write_text(COMPONENT_MD, encoding="utf-8")
+
+    log_path = tmp_path / "calls.log"
+    log_path.write_text("", encoding="utf-8")
+    monkeypatch.setenv(LOG_ENV, str(log_path))
+    monkeypatch.delenv(MODE_ENV, raising=False)
+    return repo_root, log_path
 
 
-def _read_log(root: Path):
-    path = root / "test-log" / "calls.jsonl"
-    if not path.is_file():
-        return []
-    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+def read_log(log_path):
+    lines = log_path.read_text(encoding="utf-8").splitlines()
+    return [json.loads(line) for line in lines if line.strip()]
 
 
-def _index(entries, call):
-    idx = [i for i, e in enumerate(entries) if e["call"] == call]
-    assert idx, f"expected {call} to have been called; log: {[e['call'] for e in entries]}"
-    return idx
-
-
-def test_write_provenance_called_once_after_scans_and_attempt_record(tmp_path):
-    repo_root = _build_repo(tmp_path / "repo", "pass")
+def test_write_provenance_called_once_after_scans_and_attempt_record(repo):
+    repo_root, log_path = repo
+    attempts_dir = repo_root / ".hotdocs" / "attempts" / SLUG
+    assert not attempts_dir.exists()
 
     component_gate_runner.run_component_gates(
-        COMPONENT_ID, repo_root, "mock-model", seed=0, llm_backend=_mock_backend
+        COMPONENT_ID, repo_root, "mock-model", seed=0
     )
 
-    entries = _read_log(repo_root)
-    calls = [e["call"] for e in entries]
+    events = read_log(log_path)
+    names = [e["event"] for e in events]
 
-    wp_idx = [i for i, c in enumerate(calls) if c == "write_provenance"]
-    assert len(wp_idx) == 1, f"write_provenance calls: {len(wp_idx)}; log: {calls}"
-    wp = wp_idx[0]
+    writes = [e for e in events if e["event"] == "write_provenance"]
+    assert len(writes) == 1, names
+    write_idx = names.index("write_provenance")
 
-    for prior in ("verify", "license_scan", "secret_scan", "write_attempt_record"):
-        positions = _index(entries, prior)
-        assert max(positions) < wp, f"{prior} must conclude before write_provenance; log: {calls}"
+    for earlier in ("verify", "license_scan", "secret_scan", "write_attempt_record"):
+        assert earlier in names, (earlier, names)
+        assert names.index(earlier) < write_idx, (earlier, names)
+        assert all(i < write_idx for i, n in enumerate(names) if n == earlier), names
 
-    inputs = entries[wp]["inputs"]
-    assert isinstance(inputs, dict)
+    w = writes[0]
+    assert w["component_id"] == COMPONENT_ID
+    assert w["inputs_is_dict"] is True
+    inputs = w["inputs"]
 
-    assert inputs["gate_versions"] == GATE_VERSIONS
+    assert inputs["component_id"] == COMPONENT_ID
+    assert inputs["gate_versions"] == {"verifier": "v@1"}
     assert inputs["provenance_hit"] is False
-    assert not isinstance(inputs["attempts"], bool)
+    assert w["attempts_type"] == "int"
     assert inputs["attempts"] == 1
+    assert w["attempt_files_at_call"] == 1
 
-    gen_result = entries[_index(entries, "generate")[-1]]["result"]
-    ver_result = entries[_index(entries, "verify")[-1]]["result"]
-    lic_result = entries[_index(entries, "license_scan")[-1]]["result"]
-    sec_result = entries[_index(entries, "secret_scan")[-1]]["result"]
-
-    assert inputs["generation_result"] == gen_result
-    assert inputs["verification_report"] == ver_result
-    assert inputs["license_scan_result"] == lic_result
-    assert inputs["secret_scan_result"] == sec_result
+    assert inputs["generation_result"] == GEN_PASS
+    assert inputs["verification_report"] == REPORT
+    assert inputs["license_scan_result"] == LICENSE
+    assert inputs["secret_scan_result"] == SECRET
 
 
-def test_write_provenance_never_called_on_model_call_error(tmp_path):
-    repo_root = _build_repo(tmp_path / "repo", "error")
+def test_model_call_error_never_writes_provenance(repo, monkeypatch):
+    repo_root, log_path = repo
+    monkeypatch.setenv(MODE_ENV, "error")
 
     component_gate_runner.run_component_gates(
-        COMPONENT_ID, repo_root, "mock-model", seed=0, llm_backend=_mock_backend
+        COMPONENT_ID, repo_root, "mock-model", seed=0
     )
 
-    entries = _read_log(repo_root)
-    calls = [e["call"] for e in entries]
+    events = read_log(log_path)
+    names = [e["event"] for e in events]
 
-    # The generator was reached and returned the model_call_error.
-    gen_entries = [e for e in entries if e["call"] == "generate"]
-    assert gen_entries, f"generator was never called; log: {calls}"
-    assert gen_entries[-1]["result"]["model_call_error"] is not None
-
-    assert "write_provenance" not in calls, f"write_provenance must not be called; log: {calls}"
+    assert "generate" in names, names
+    assert "write_provenance" not in names, names
