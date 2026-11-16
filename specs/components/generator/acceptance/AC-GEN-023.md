@@ -16,6 +16,15 @@ When generate is called
 Then model_call_error has category "truncated_response" and its
   message contains "helpers.py"
 
+Given the same reply without its END REPLY line
+When generate is called
+Then model_call_error has category "truncated_response" and its
+  message contains "helpers.py"
+
+Given a reply that is the text "I cannot help with that." alone
+When generate is called
+Then model_call_error has category "empty_response"
+
 Given a mock reply with a complete block for notes.py only, ending in
   the END REPLY line
 When generate is called

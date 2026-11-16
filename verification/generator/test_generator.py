@@ -34,8 +34,6 @@ def test_ac_gen_001_cold_prompt_contains_exactly_cold_fields(repo_root):
     assert "FAKE INTERFACE TEXT" in sent_prompt
     assert "FAKE CONSTRAINTS TEXT" in sent_prompt
     assert "FAKE GLOSSARY TEXT" in sent_prompt
-    assert "## HINT_CODE" not in sent_prompt
-    assert "## RETRY_FEEDBACK" not in sent_prompt
 
 
 def test_ac_gen_002_hint_code_is_a_distinct_section(repo_root):
@@ -44,8 +42,11 @@ def test_ac_gen_002_hint_code_is_a_distinct_section(repo_root):
     generate(bundle, "claude-sonnet-5", repo_root=repo_root, llm_backend=backend)
 
     sent_prompt = backend.calls[0][0]
-    assert "## HINT_CODE" in sent_prompt
-    assert "foo.py" in sent_prompt and "x = 0" in sent_prompt
+    # R-GEN-002: its own section; the spec names no exact heading.
+    hint_headings = [l for l in sent_prompt.splitlines() if l.startswith("#") and "hint" in l.lower()]
+    assert hint_headings, "no section heading naming hint_code"
+    hint_section = sent_prompt[sent_prompt.index(hint_headings[0]):]
+    assert "foo.py" in hint_section and "x = 0" in hint_section
 
 
 def test_ac_gen_003_prompt_version_matches_frozen_template(repo_root):
@@ -178,9 +179,10 @@ def test_ac_gen_013_retry_feedback_is_bare_and_distinct(repo_root):
     result = generate(FakeBundle(), "claude-sonnet-5", ["R-FOO-003"], repo_root=repo_root, llm_backend=backend)
 
     sent_prompt = backend.calls[0][0]
-    assert "## RETRY_FEEDBACK" in sent_prompt
+    retry_headings = [l for l in sent_prompt.splitlines() if l.startswith("#") and "retry" in l.lower()]
+    assert retry_headings, "no section heading naming retry feedback"
     assert "R-FOO-003" in sent_prompt
-    retry_section = sent_prompt[sent_prompt.index("## RETRY_FEEDBACK"):]
+    retry_section = sent_prompt[sent_prompt.index(retry_headings[0]):]
     assert "Gherkin" not in retry_section
     assert "rationale" not in retry_section.lower()
     assert result.retry_feedback == ["R-FOO-003"]
