@@ -1,83 +1,120 @@
-import json
 import os
-import sys
-from pathlib import Path
+import textwrap
+
+import pytest
 
 import hotdocs_cli
 
 
-def _write_fake_component(root: Path, rel_dir: str, module: str, code: int, log_root: Path) -> Path:
-    target_dir = root / rel_dir
-    target_dir.mkdir(parents=True, exist_ok=True)
-    log_path = log_root / "calls.log"
-    source = (
-        "import json\n"
-        "\n"
-        f"_LOG = {str(log_path)!r}\n"
-        "\n"
-        "def main(argv):\n"
-        "    with open(_LOG, 'a', encoding='utf-8') as fh:\n"
-        "        fh.write(json.dumps(argv) + '\\n')\n"
-        f"    return {code}\n"
-    )
-    path = target_dir / f"{module}.py"
-    path.write_text(source, encoding="utf-8")
-    return path
+LLM_ENDPOINT_STANDIN = textwrap.dedent(
+    '''
+    class ModelResolutionError(Exception):
+        pass
 
 
-def _drop_cached(name: str):
-    # Avoid a stale module object from a previous project being reused by name.
-    for key in list(sys.modules):
-        if key == name or key.endswith("." + name):
-            mod = sys.modules.get(key)
-            f = getattr(mod, "__file__", None) or ""
-            if "spec-linter" in f or "spec_linter" in f:
-                sys.modules.pop(key, None)
+    def load_config(config_path=None):
+        return None
+    '''
+)
 
 
-def _call(argv, project: Path, tool_root: Path):
-    outputs = []
-    _drop_cached("spec_linter")
+def _write(path, text):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+
+
+def _make_root(root):
+    """A project or tool root with an llm-endpoint stand-in only."""
+    root.mkdir(parents=True, exist_ok=True)
+    _write(root / "gen" / "llm-endpoint" / "llm_endpoint.py", LLM_ENDPOINT_STANDIN)
+    return root
+
+
+def _lint_fake(project, body):
+    log = project / "calls.log"
+    source = textwrap.dedent(
+        '''
+        import json
+
+        LOG_PATH = {log!r}
+
+
+        class ModelResolutionError(Exception):
+            pass
+
+
+        def main(argv):
+            with open(LOG_PATH, "a", encoding="utf-8") as fh:
+                fh.write(json.dumps(list(argv)) + "\\n")
+        {body}
+        '''
+    ).format(log=str(log), body=textwrap.indent(textwrap.dedent(body), "    "))
+    _write(project / "gen" / "spec-linter" / "spec_linter.py", source)
+
+
+def _env():
+    env = dict(os.environ)
+    env.pop("VAR_HOTDOCS_CONFIG", None)
+    return env
+
+
+def _quiet(*args, **kwargs):
+    return None
+
+
+def _run(argv, project, tool_root):
     return hotdocs_cli.main(
         argv,
         tool_root=tool_root,
-        input_fn=lambda *a, **k: "",
-        output_fn=lambda *a, **k: outputs.append(a),
-        env=dict(os.environ),
+        output_fn=_quiet,
+        env=_env(),
         cwd=project,
     )
 
 
-def test_routed_verb_exit_codes_zero_then_seven(tmp_path):
-    empty_tool_root = tmp_path / "tool_root_empty"
-    empty_tool_root.mkdir()
+def test_routed_verb_returns_component_exit_code(tmp_path):
+    tool_root = _make_root(tmp_path / "toolroot")
 
-    project_zero = tmp_path / "project_zero"
-    project_zero.mkdir()
-    _write_fake_component(project_zero, "gen/spec-linter", "spec_linter", 0, project_zero)
+    project_zero = _make_root(tmp_path / "project_zero")
+    _lint_fake(project_zero, "return 0\n")
 
-    project_seven = tmp_path / "project_seven"
-    project_seven.mkdir()
-    _write_fake_component(project_seven, "gen/spec-linter", "spec_linter", 7, project_seven)
+    project_seven = _make_root(tmp_path / "project_seven")
+    _lint_fake(project_seven, "return 7\n")
 
-    code_zero = _call(["lint"], project_zero, empty_tool_root)
-    code_seven = _call(["lint"], project_seven, empty_tool_root)
-
-    assert code_zero == 0
-    assert code_seven == 7
+    assert _run(["lint"], project_zero, tool_root) == 0
+    assert _run(["lint"], project_seven, tool_root) == 7
 
 
-def test_unknown_verb_version_and_missing_component_exit_codes(tmp_path):
-    empty_tool_root = tmp_path / "tool_root_empty"
-    empty_tool_root.mkdir()
+def test_unknown_verb_version_and_missing_component(tmp_path):
+    tool_root = _make_root(tmp_path / "toolroot")
+    project = _make_root(tmp_path / "project")
 
-    project = tmp_path / "project"
-    project.mkdir()
+    assert _run(["frobnicate"], project, tool_root) == 2
+    assert _run(["--version"], project, tool_root) == 0
+    # No fake for "impact" in the project nor in the empty fake tool root.
+    assert _run(["impact"], project, tool_root) == 2
 
-    code_unknown = _call(["frobnicate"], project, empty_tool_root)
-    code_version = _call(["--version"], project, empty_tool_root)
-    code_missing = _call(["lint"], project, empty_tool_root)
 
-    assert code_unknown == 2
-    assert code_version == 0
-    assert code_missing == 2
+def test_model_resolution_error_is_usage_error(tmp_path, capsys):
+    tool_root = _make_root(tmp_path / "toolroot")
+    project = _make_root(tmp_path / "project")
+    _lint_fake(
+        project,
+        '''raise ModelResolutionError("model 'x' names no provider")\n''',
+    )
+
+    capsys.readouterr()
+    code = _run(["lint"], project, tool_root)
+    captured = capsys.readouterr()
+
+    assert code == 2
+    assert captured.err.splitlines() == ["usage error: model 'x' names no provider"]
+
+
+def test_other_exception_propagates(tmp_path):
+    tool_root = _make_root(tmp_path / "toolroot")
+    project = _make_root(tmp_path / "project")
+    _lint_fake(project, 'raise ValueError("boom")\n')
+
+    with pytest.raises(ValueError, match="boom"):
+        _run(["lint"], project, tool_root)

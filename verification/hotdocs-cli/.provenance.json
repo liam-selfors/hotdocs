@@ -1,9 +1,9 @@
 {
-  "spec_bundle_hash": "sha256:6494a2bfc535573c9d6dd0d891f5bd5a778fe34c51cbb380152a648ea9b7a962",
+  "spec_bundle_hash": "sha256:811a540fbd87f78cfa79cc45ce8d6b6ce1fe3a19f6c3add624d2c362080b9973",
   "model_pin": "claude-opus-5-5",
   "prompt_version": "v10",
   "retry_feedback": null,
-  "pipeline_version": "provenance-writer@1.0.0",
+  "pipeline_version": "v1",
   "gate_versions": {
     "compiler": "criterion-compiler@1.0.0",
     "generated_test": "generated_test@1.0.0",
@@ -12,7 +12,7 @@
     "secret_scanner": "secret_scanner@3.1.0+detect-secrets.1.5.0"
   },
   "provenance_hit": false,
-  "generated_at": "2026-11-15T15:32:40Z",
+  "generated_at": "2026-11-16T03:06:13Z",
   "verification_run_id": "hotdocs-cli-attempt-1",
   "verification_report": {
     "component_id": "comp-hotdocs-cli",
@@ -24,7 +24,7 @@
         "result": "pass",
         "test_authoring": {
           "model": "claude-opus-5-5",
-          "seed": 1,
+          "seed": 2,
           "prompt_version": "v1",
           "cache_hit": false
         }
@@ -36,7 +36,7 @@
         "result": "pass",
         "test_authoring": {
           "model": "claude-opus-5-5",
-          "seed": 1,
+          "seed": 2,
           "prompt_version": "v1",
           "cache_hit": false
         }
@@ -48,7 +48,7 @@
         "result": "pass",
         "test_authoring": {
           "model": "claude-opus-5-5",
-          "seed": 1,
+          "seed": 2,
           "prompt_version": "v1",
           "cache_hit": false
         }
@@ -60,7 +60,7 @@
         "result": "pass",
         "test_authoring": {
           "model": "claude-opus-5-5",
-          "seed": 1,
+          "seed": 2,
           "prompt_version": "v1",
           "cache_hit": false
         }
@@ -72,7 +72,7 @@
         "result": "pass",
         "test_authoring": {
           "model": "claude-opus-5-5",
-          "seed": 1,
+          "seed": 2,
           "prompt_version": "v1",
           "cache_hit": false
         }
@@ -84,7 +84,7 @@
         "result": "pass",
         "test_authoring": {
           "model": "claude-opus-5-5",
-          "seed": 1,
+          "seed": 2,
           "prompt_version": "v1",
           "cache_hit": false
         }
@@ -99,7 +99,7 @@
       "R-CLI-006": "pass"
     },
     "interface_drift": false,
-    "mutation_score": 0.9565217391304348,
+    "mutation_score": 0.9104477611940298,
     "overall": "pass"
   },
   "license_scan": {

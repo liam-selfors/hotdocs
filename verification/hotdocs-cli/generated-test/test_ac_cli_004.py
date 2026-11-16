@@ -1,11 +1,12 @@
 import os
 import sys
-from pathlib import Path
 
 import pytest
 
 import hotdocs_cli
 
+
+VERSION_LINE = "hotdocs 0.1.0"
 
 VERB_TABLE = [
     ("lint", "validate the spec corpus"),
@@ -34,83 +35,84 @@ VERB_TABLE = [
 
 class Collector:
     def __init__(self):
-        self.lines = []
+        self.chunks = []
 
     def __call__(self, *args, **kwargs):
         sep = kwargs.get("sep", " ")
-        if sep is None:
-            sep = " "
-        self.lines.append(sep.join(str(a) for a in args))
+        end = kwargs.get("end", "\n")
+        self.chunks.append(sep.join(str(a) for a in args) + end)
 
     @property
     def text(self):
-        return "\n".join(self.lines)
+        return "".join(self.chunks)
 
 
-def _make_dirs(tmp_path):
+def _make_project(tmp_path):
     project = tmp_path / "project"
     project.mkdir()
-    tool_root = tmp_path / "fake_tool_root"
-    tool_root.mkdir()
-    return project, tool_root
+    (project / "specs").mkdir()
+    return project
 
 
-def _no_input(*args, **kwargs):
-    raise AssertionError("input_fn should not be called")
+def _clean_env():
+    env = dict(os.environ)
+    env.pop("VAR_HOTDOCS_CONFIG", None)
+    return env
 
 
 def _assert_verb_list(text):
-    for words, summary in VERB_TABLE:
-        assert words in text, f"verb {words!r} missing from output:\n{text}"
-        assert summary in text, f"summary {summary!r} missing from output:\n{text}"
+    lines = text.splitlines()
+    for verb, summary in VERB_TABLE:
+        assert verb in text, f"verb {verb!r} missing from:\n{text}"
+        assert summary in text, f"summary {summary!r} missing from:\n{text}"
+        assert any(
+            verb in line and summary in line for line in lines
+        ), f"verb {verb!r} not listed with its summary {summary!r} in:\n{text}"
+
+
+@pytest.fixture
+def project(tmp_path, monkeypatch):
+    proj = _make_project(tmp_path)
+    monkeypatch.chdir(proj)
+    monkeypatch.delenv("VAR_HOTDOCS_CONFIG", raising=False)
+    return proj
+
+
+@pytest.fixture
+def fake_tool_root(tmp_path):
+    root = tmp_path / "toolroot"
+    root.mkdir()
+    return root
 
 
 @pytest.mark.parametrize("argv", [[], ["--help"], ["-h"], ["help"]])
-def test_help_prints_version_and_every_verb(tmp_path, monkeypatch, capsys, argv):
-    project, tool_root = _make_dirs(tmp_path)
-    monkeypatch.chdir(project)
+def test_help_prints_version_and_every_verb(argv, project, capsys):
     out = Collector()
     rc = hotdocs_cli.main(
-        list(argv),
-        tool_root=tool_root,
-        input_fn=_no_input,
-        output_fn=out,
-        cwd=project,
+        list(argv), output_fn=out, env=_clean_env(), cwd=project
     )
     captured = capsys.readouterr()
-    text = out.text + "\n" + captured.out
+    text = out.text + captured.out
     assert rc == 0
-    assert "hotdocs 0.1.0" in text
+    assert VERSION_LINE in text
     _assert_verb_list(text)
 
 
-def test_version_prints_version_and_returns_zero(tmp_path, monkeypatch, capsys):
-    project, tool_root = _make_dirs(tmp_path)
-    monkeypatch.chdir(project)
+def test_version_prints_version_and_returns_zero(project, capsys):
     out = Collector()
     rc = hotdocs_cli.main(
-        ["--version"],
-        tool_root=tool_root,
-        input_fn=_no_input,
-        output_fn=out,
-        cwd=project,
+        ["--version"], output_fn=out, env=_clean_env(), cwd=project
     )
     captured = capsys.readouterr()
-    text = out.text + "\n" + captured.out
+    text = out.text + captured.out
     assert rc == 0
-    assert "hotdocs 0.1.0" in text
+    assert VERSION_LINE in text
 
 
-def test_unknown_verb_returns_two_and_lists_verbs_on_stderr(tmp_path, monkeypatch, capsys):
-    project, tool_root = _make_dirs(tmp_path)
-    monkeypatch.chdir(project)
+def test_unknown_verb_returns_2_and_lists_verbs_on_stderr(project, capsys):
     out = Collector()
     rc = hotdocs_cli.main(
-        ["frobnicate"],
-        tool_root=tool_root,
-        input_fn=_no_input,
-        output_fn=out,
-        cwd=project,
+        ["frobnicate"], output_fn=out, env=_clean_env(), cwd=project
     )
     captured = capsys.readouterr()
     assert rc == 2
@@ -118,40 +120,44 @@ def test_unknown_verb_returns_two_and_lists_verbs_on_stderr(tmp_path, monkeypatc
     _assert_verb_list(captured.err)
 
 
-def test_lint_missing_everywhere_returns_two_and_names_path(tmp_path, monkeypatch, capsys):
-    project, tool_root = _make_dirs(tmp_path)
-    monkeypatch.chdir(project)
+def test_lint_missing_under_both_roots_returns_2_naming_path(
+    project, fake_tool_root, capsys
+):
     assert not (project / "gen" / "spec-linter").exists()
-    assert not (tool_root / "gen" / "spec-linter").exists()
+    assert not (fake_tool_root / "gen" / "spec-linter").exists()
     out = Collector()
     rc = hotdocs_cli.main(
         ["lint"],
-        tool_root=tool_root,
-        input_fn=_no_input,
+        tool_root=fake_tool_root,
         output_fn=out,
+        env=_clean_env(),
         cwd=project,
     )
     captured = capsys.readouterr()
-    text = "\n".join([out.text, captured.out, captured.err]).replace("\\", "/")
+    text = out.text + captured.out + captured.err
     assert rc == 2
-    assert "gen/spec-linter/spec_linter.py" in text
+    assert "gen/spec-linter/spec_linter.py" in text.replace("\\", "/")
 
 
-def test_lint_module_without_main_returns_two(tmp_path, monkeypatch, capsys):
-    project, tool_root = _make_dirs(tmp_path)
+def test_lint_fake_without_main_returns_2(project, fake_tool_root, capsys):
     fake_dir = project / "gen" / "spec-linter"
     fake_dir.mkdir(parents=True)
+    log_path = project / "calls.log"
     (fake_dir / "spec_linter.py").write_text(
-        "# fake spec_linter without a main\nVALUE = 1\n", encoding="utf-8"
+        "import json\n"
+        f"LOG_PATH = {str(log_path)!r}\n"
+        "def lint(paths=None, repo_root=None):\n"
+        "    return {'hard_failures': 0}\n",
+        encoding="utf-8",
     )
-    monkeypatch.chdir(project)
     out = Collector()
     rc = hotdocs_cli.main(
         ["lint"],
-        tool_root=tool_root,
-        input_fn=_no_input,
+        tool_root=fake_tool_root,
         output_fn=out,
+        env=_clean_env(),
         cwd=project,
     )
     capsys.readouterr()
     assert rc == 2
+    assert not log_path.exists()
