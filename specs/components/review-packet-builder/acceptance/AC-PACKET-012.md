@@ -34,7 +34,8 @@ When main(argv) runs
 Then it returns 2
 
 Given argv ["review-packet", "build", "--changed=R-FOO-001",
-  "--repo-root=<a repo whose provenance-tracker raises UsageError>"]
+  "--repo-root=<a repo whose provenance-tracker's check_readiness
+  raises ValueError>"]
 When main(argv) runs
 Then it returns 1
 

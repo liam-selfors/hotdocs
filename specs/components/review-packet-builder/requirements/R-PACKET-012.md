@@ -4,7 +4,9 @@
   exactly: `hotdocs review-packet build --changed=<spec-id>...
   [--repo-root=<dir>] [--format=markdown|json]`. Exit `0` once a
   packet is built, exit `1` when a required upstream result was
-  missing, exit `2` on any usage error (no subcommand, no `--changed`,
+  missing, any exception `provenance-tracker`'s `check_readiness`
+  raises included (such as its `ValueError` for a capability needing a
+  fresh run, `D288`), printing its message, exit `2` on any usage error (no subcommand, no `--changed`,
   an invalid `--format`). `--format=json` MUST print the packet as
   `json.dumps(packet, indent=2, sort_keys=True)`, and every JSON value
   in the markdown is dumped with `sort_keys=True`; the default/`--format=markdown` MUST print the human-readable
