@@ -1,8 +1,10 @@
 # R-ASSIST-010
 
-**R-ASSIST-010** — With a `model` configured, `assist` MUST make exactly
-  two `llm-endpoint` `complete` calls, completeness first, then
-  redundancy, and parse each response's `text` as JSON of exactly this
+**R-ASSIST-010** — With a `model` configured, `assist` MUST make one
+  `llm-endpoint` `complete` call for completeness and then, only when
+  `R-ASSIST-005` found a candidate pair, one for redundancy, and MUST
+  pass `spec-reviewer`'s `glossary_judge(model, llm_backend)` to `lint`
+  as `judge`. It parses each response's `text` as JSON of exactly this
   shape:
 
   ```json

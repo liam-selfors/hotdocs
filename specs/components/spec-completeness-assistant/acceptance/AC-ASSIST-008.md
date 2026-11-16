@@ -4,8 +4,8 @@ Covers: R-ASSIST-008
 Kind: generated-test
 
 ```gherkin
-Given a repo_root with faked spec-linter (no findings), impact-analyzer,
-  and spec-bundle-assembler modules, and a snapshot of every file under
+Given a repo_root with stand-ins for all four dependencies, lint
+  returning no findings, and a snapshot of every file under
   repo_root taken after the fixture is fully written
 When assist(changed_ids, repo_root) runs with no model and returns a
   CompletenessReport

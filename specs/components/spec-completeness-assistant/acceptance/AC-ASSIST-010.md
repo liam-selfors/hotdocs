@@ -4,17 +4,21 @@ Covers: R-ASSIST-010
 Kind: generated-test
 
 ```gherkin
-Given a repo_root with faked spec-linter (no findings), impact-analyzer
-  (blast radius comp-foo), spec-bundle-assembler, and generator
-  modules, and a faked llm-endpoint whose complete returns, in call
-  order, a completeness response {"completeness_score": 0.7,
+Given a repo_root whose R-FOO-001 and R-BAR-001 read the same apart
+  from their ids (so they are a redundancy candidate pair), stand-ins
+  for all four dependencies, lint returning no findings, a blast radius
+  of comp-foo, a glossary_judge stand-in returning a callable the test
+  can identify, and an llm-endpoint stand-in whose complete returns, in
+  call order, a completeness response {"completeness_score": 0.7,
   "completeness_rationale": "AC missing"} wrapped in a Markdown code
   fence (a line of three backticks, optionally tagged json, before it
   and a line of three backticks after it),
-  then a redundancy response holding one complete entry and one entry
-  with an empty rationale
-When assist(changed_ids, repo_root, model="fake-model") runs
-Then the faked llm-endpoint was called exactly twice,
+  then a redundancy response holding one complete entry, R-FOO-001
+  overlapping R-BAR-001, and one entry for the same pair with an empty
+  rationale
+When assist(["R-FOO-001"], repo_root, model="fake-model") runs
+Then the llm-endpoint stand-in was called exactly twice, lint received
+  that callable as judge,
   completeness_score is 0.7, completeness_rationale is "AC missing",
   redundancy_flags holds only the complete entry, and degraded is false
 

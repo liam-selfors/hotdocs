@@ -26,24 +26,15 @@ every other `kind`): it carries `test-author`'s provenance to
 `provenance-writer` inside this report, as `rationale` does for
 `llm-judge`.
 
-`covers` (R-VERIFY-011) is the same `Covers:` value every criterion already
-carries in its own file — exposed here so `requirement_results` is
-auditable, not just asserted. `requirement_results` (R-VERIFY-011) is the
-graph projection of `criteria` onto `R-id`s via `covers`: `pass` only if
-every covering criterion is `pass`, `fail` otherwise (a `skipped`
-`llm-judge` criterion counts as `fail` for this purpose — "not yet
-demonstrated" and "demonstrated wrong" are the same signal here).
-Deliberately **boolean-only** — no Gherkin text, no `rationale`, no
-expected/actual values — this is the field `generator`'s retry mechanism
-(R-GEN-010) consumes, and it must never carry anything that discloses what
-a specific test checked.
+`covers` (R-VERIFY-011) is each criterion's own `Covers:` value.
+`requirement_results` (R-VERIFY-011) projects `criteria` onto `R-id`s via
+`covers`: `pass` only if every covering criterion is `pass`, `fail`
+otherwise (a `skipped` `llm-judge` criterion counts as `fail` here). It is
+**boolean-only**: nothing in it discloses what a test checked.
 
-**This `skipped`-counts-as-`fail` rule is independent of `overall`'s**
-(R-VERIFY-005: a `skipped` `llm-judge` finding alone never fails
-`overall`): `overall` decides whether to block the merge,
-`requirement_results` what a retry should attend to. In the example,
-`AC-FOO-002` is `skipped`, giving `R-FOO-002: fail`, while `overall` is
-`pass`.
+That rule is independent of `overall`'s (R-VERIFY-005: a `skipped`
+`llm-judge` finding alone never fails `overall`), so in the example
+`R-FOO-002` is `fail` while `overall` is `pass`.
 
 **`failure_detail`** (R-VERIFY-012) — present only on a `compiled` or
 `generated-test` criterion whose `result` is `fail`:
@@ -53,8 +44,11 @@ a specific test checked.
   "failure_detail": { "message": "result.foo equals 5 failed", "expected": 5, "actual": 3 } }
 ```
 
-Mirrors `llm-judge`'s `rationale` one `kind` family over — every `kind`
-that can fail now carries its own structured account of why. Exposed
-for provenance/review-packet/human consumption only: it never reaches
-`requirement_results` (already boolean-only, above) or
-`retry_feedback`'s `R-id`-only channel (`R-GEN-012`).
+Exposed for provenance, review packets and people only: it never
+reaches `requirement_results` or `retry_feedback` (`R-GEN-012`).
+
+**`failure_origin`** (R-VERIFY-019) — present exactly on a `compiled` or
+`generated-test` criterion whose `result` is `fail`: `"test"` when no
+sound test could run for it (none authored, authoring failed, or its
+test failed `test-probe`'s probe), `"implementation"` when a test ran
+and failed. A retry attends only to `"implementation"` failures.

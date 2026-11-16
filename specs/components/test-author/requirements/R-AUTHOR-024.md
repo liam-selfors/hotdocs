@@ -7,7 +7,3 @@
   A correct candidate may key `sys.modules` dynamically (`R-GEN-018`),
   so the key is never predictable from the test's side; only a file
   survives regardless of which module object the candidate used.
-
-  Found (`D144`): an earlier fix (`D143`) instructed reading
-  `sys.modules[module_name]` under the bare dependency name — the
-  guessed-key failure `R-AUTHOR-022` already forbade.

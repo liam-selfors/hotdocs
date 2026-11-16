@@ -80,19 +80,44 @@ def forced(changed, graph) -> list[str]:
     return order
 
 
+def _interface_text(slug: str) -> str:
+    base = COMPONENTS / slug / "interface"
+    return "".join(p.read_text(encoding="utf-8") for p in sorted(base.rglob("*.md"))) if base.is_dir() else ""
+
+
 def files_reach(path: str) -> list[str]:
-    """Components whose own bundle a file edit changes directly."""
+    """Components whose own bundle a file edit changes directly: the glossary
+    reaches all; an `Implements:` document its implementers; a component's
+    own file that component. An `interface/` file also reaches its direct
+    dependents (their `dependency_interfaces`), and `interface/data/<Type>.md`
+    every component with a dependency whose interface names `Type` without
+    owning it (R-ASSEMBLE-013's one-level type resolution)."""
     rel = Path(path).as_posix()
+    graph = depends_on()
     if rel in ("specs/glossary.md",):
-        return sorted(depends_on())
-    hit = []
+        return sorted(graph)
+    hit = set()
     for root in sorted(COMPONENTS.iterdir()):
         lib = root / "interface" / "library.md"
         if lib.is_file() and re.search(r"^Implements:.*`%s`" % re.escape(rel), lib.read_text(encoding="utf-8"), re.M):
-            hit.append("comp-" + root.name)
+            hit.add("comp-" + root.name)
         if rel.startswith(f"specs/components/{root.name}/"):
-            hit.append("comp-" + root.name)
-    return hit
+            hit.add("comp-" + root.name)
+    match = re.match(r"specs/components/([^/]+)/interface/", rel)
+    if match:
+        owner = "comp-" + match.group(1)
+        hit.update(dependents(graph).get(owner, []))
+    match = re.match(r"specs/components/[^/]+/interface/data/([A-Za-z_][A-Za-z0-9_]*)\.md$", rel)
+    if match:
+        type_name = match.group(1)
+        for comp, deps in graph.items():
+            for dep in deps:
+                slug = dep.removeprefix("comp-")
+                if (COMPONENTS / slug / "interface" / "data" / f"{type_name}.md").is_file():
+                    continue
+                if re.search(r"(?<![A-Za-z0-9_])%s(?![A-Za-z0-9_])" % re.escape(type_name), _interface_text(slug)):
+                    hit.add(comp)
+    return sorted(hit)
 
 
 def main(argv) -> int:

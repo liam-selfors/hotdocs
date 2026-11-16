@@ -3,7 +3,7 @@ id: comp-test-author
 title: Test Author
 status: draft
 owners: [pipeline-team]
-depends_on: [comp-spec-bundle-assembler, comp-cache-manager, comp-llm-endpoint]
+depends_on: [comp-spec-bundle-assembler, comp-cache-manager, comp-llm-endpoint, comp-test-probe]
 realizes: [P-ZERO-EDIT, P-AMBIGUITY-GATE]
 model_pin: claude-opus-5-5
 sealed: false
@@ -17,11 +17,6 @@ Authors the test code for one `generated-test`-kind criterion, from
 spec prose alone, with no access to the implementation under test.
 Invoked by `verifier-orchestrator` via an injectable callable — it
 decides *when* (a criterion's `kind`); this decides *how*.
-
-## Rationale
-
-The "independent generation path" a `generated-test` criterion needs
-to be trustworthy. Mirrors `llm-judge`'s own `judge` parameter.
 
 ## Scope
 
@@ -52,8 +47,7 @@ See `interface/data/`.
 
 See `acceptance/`.
 
-All `kind: generated-test` (`D43`) — the model call uses an injected
-mock, `generator`'s pattern; none fit the step-phrase grammar.
+All `kind: generated-test` (`D43`), with an injected mock model.
 
 ## Non-functional constraints
 
@@ -65,4 +59,4 @@ None.
 
 ## Change log
 
-See the decisions, `D56` onward; `D269` adds the reply format to `interface/`.
+See the decisions, `D56` onward; `D303` adds the probe and repair loop.

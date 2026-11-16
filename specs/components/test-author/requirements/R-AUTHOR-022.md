@@ -7,6 +7,3 @@
   confirm a fake ran, its own code MUST record its invocation to a
   **file** (`R-AUTHOR-024`), never an in-process list — the test
   can't reliably re-locate the module object that wrote to it either.
-
-  Found at `D123`: a guessed `sys.modules["real_name"]` assertion
-  failed once the loader (correctly) keyed under something else.

@@ -12,7 +12,9 @@ messages go to `output_fn`, errors to `sys.stderr`. `tool_root` is the tool's
 own repository, supplied by the entry module in `tools/`; when `None`, it is
 the parent of the nearest `gen` directory above this module's file. A
 project holds only its own components, so every verb falls back to it
-(`R-CLI-001`).
+(`R-CLI-001`). The forwarded tokens end with `--repo-root=<root>` unless
+the arguments already hold a `--repo-root` (`R-CLI-002`), followed only by
+an injected `--model=...` (`R-CLI-003`).
 
 ## llm-endpoint
 

@@ -9,6 +9,11 @@
   "prompt_version": "v1",
   "cache_hit": false,
   "file": { "path": "verification/foo/generated-test/test_ac_foo_003.py", "content": "<test code>" },
-  "model_call_error": null
+  "model_call_error": null,
+  "repair_attempts": 0,
+  "probe_findings": []
 }
 ```
+
+`repair_attempts` and `probe_findings` (`R-AUTHOR-027`) are `0` and `[]`
+on a cache hit; `probe_findings` entries are `test-probe`'s finding dicts.

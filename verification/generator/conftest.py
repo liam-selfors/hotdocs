@@ -28,7 +28,8 @@ def file_block(path: str, content: str):
     def _build(prompt: str, model: str, **params: object) -> dict:
         match = _NONCE_RE.search(prompt)
         nonce = match.group("nonce") if match else "MISSING-NONCE"
-        text = f"-----BEGIN FILE {nonce}: {path}-----\n{content}\n-----END FILE {nonce}-----"
+        text = (f"-----BEGIN FILE {nonce}: {path}-----\n{content}\n-----END FILE {nonce}-----\n"
+                f"-----END REPLY {nonce}-----")
         return {"text": text, "model_call_error": None}
 
     return _build

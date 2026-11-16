@@ -7,7 +7,3 @@
   `%Y-%m-%dT%H:%M:%SZ` example with no fractional digits) — never
   compare a truncated-on-write timestamp against microsecond-precision
   bounds directly.
-
-  Found at `D129`: `before`/`after` captured at full microsecond
-  precision against a whole-second-documented format fails a
-  correctly-implemented candidate on almost every real run.

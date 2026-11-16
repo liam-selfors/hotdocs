@@ -70,4 +70,6 @@ See `constraints.md`.
 
 ## Change log
 
-- `D35`–`D209`: see the decisions; `D268` states the reply format.
+- `D35`–`D268`: see the decisions. `D304`: truncated replies and a
+  missing module are failures. `D305`: only `commit_cache` writes the
+  cache.

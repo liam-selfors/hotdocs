@@ -7,8 +7,8 @@ Kind: generated-test
 Given a fake tool root <t> holding a byte-for-byte copy of this
   component's module (read from the imported module's __file__) at
   <t>/gen/spec-completeness-assistant/spec_completeness_assistant.py,
-  stand-ins for spec-linter (no findings), impact-analyzer (blast
-  radius comp-tool) and spec-bundle-assembler under <t>/gen/, and a
+  stand-ins for all four dependencies under <t>/gen/ (lint returning no
+  findings, a blast radius of comp-tool), and a
   repo_root with no gen/ directory
 When that copy, loaded by file path, runs assist(["R-FOO-001"], repo_root)
 Then predicted_blast_radius is ["comp-tool"]

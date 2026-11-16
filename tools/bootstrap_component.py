@@ -568,6 +568,10 @@ def run(component_id: str, model: str, seed: int, retry_feedback: list[str] | No
         print(f"Sandbox kept at {sandbox} for inspection.")
         return 1
 
+    # Since D305 generate() never caches; a candidate is cached only once
+    # it has passed, so a --resume-sandbox run still hits it.
+    if hasattr(generator, "commit_cache"):
+        generator.commit_cache(result, repo_root=sandbox)
     _swap_in(component_id, sandbox, code_rel)
     if sealed_install:
         provenance_ok = _write_sealed_provenance(component_id)
