@@ -1,0 +1,26 @@
+{
+  "capability_id": "P-COMPLIANCE-GATE",
+  "capability_scenario_report": {
+    "P-COMPLIANCE-GATE": {
+      "overall": "pass",
+      "scenarios": [
+        {
+          "id": "CS-COMPLIANCE-001",
+          "kind": "generated-test",
+          "result": "pass"
+        }
+      ]
+    }
+  },
+  "content_hash": "sha256:c39c1d77e8dcd680da876ba5756aaae231fe3aaa9b6d4b17570e164d04cf6b12",
+  "gate_version": "capability_scenario_verifier@2.0.0",
+  "model": "claude-opus-5-5",
+  "realizing_components": [
+    "comp-component-gate-runner",
+    "comp-license-scanner",
+    "comp-provenance-writer",
+    "comp-review-packet-builder",
+    "comp-secret-scanner"
+  ],
+  "seed": 0
+}

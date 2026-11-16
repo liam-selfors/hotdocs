@@ -8,8 +8,26 @@
 /tmp/
 /scratch/
 
+# Local-only merge-tracking records and DuckDB index (SPEC_GUIDELINES.md §1) —
+# observability data, never a gate input, never committed.
+/.hotdocs/
+
+# Claude Code session-local config (subagent definitions included) — not a
+# spec-driven artifact, per-machine/per-session tooling.
+/.claude/
+
 # Dependency + build dirs (per-prototype; refine later)
 node_modules/
 __pycache__/
 *.pyc
 .venv/
+
+# docs-site-renderer's rendered output (R-DOCS-005) — a CI build artifact
+# deployed to a docs host, never committed. Found missing from this file
+# entirely while building this component's own test suite (D71).
+/dist/
+
+# Packaging output from `pip install -e` (pyproject.toml): setuptools writes
+# `tools/hotdocs.egg-info/` and may leave `build/`; never committed.
+*.egg-info/
+/build/

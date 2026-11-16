@@ -1,0 +1,33 @@
+# CLI
+
+```
+hotdocs compile-criteria <component-id> [--target=pytest] [--out=<dir>] [--repo-root=<dir>]
+```
+
+`main(argv: list[str] | None = None) -> int` gets the tokens after
+`compile-criteria` (`hotdocs-cli` strips the verb) and returns the exit
+code.
+
+- `<component-id>` — the component whose `acceptance/` directory to
+  compile.
+- `--target` — emitted test-framework target. Default and only supported
+  value for v1: `pytest` (Python). `--target` affects only the emit phase
+  of compilation, never parsing or interface-resolution (R-COMPILE-011);
+  any value other than `pytest` is a usage error (exit `2`), never a silent
+  fallback.
+- `--out` — output directory for compiled test files. Default:
+  `verification/<component>/compiled/`.
+- `--repo-root` — repository root. Defaults to the current git repository
+  root, same as every other CLI in this corpus.
+
+Step templates are not redefined here — see
+`specs/architecture/step-phrase-grammar.md`, the corpus-wide convention
+this component implements.
+
+**Exit codes:**
+
+| Code | Meaning |
+| --- | --- |
+| `0` | Every `kind: compiled` criterion compiled successfully. |
+| `1` | ≥1 criterion failed to compile (unrecognized step, unresolved reference, literal-safety violation). |
+| `2` | Usage error — unknown component id, missing required argument, or an unsupported `--target` value (R-COMPILE-011). |

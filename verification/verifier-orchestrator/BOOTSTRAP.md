@@ -1,0 +1,182 @@
+# Bootstrap Account: `verifier-orchestrator`
+
+Cold-generated, not hand-written — a real model call, through a real
+`generator` dispatching through a real `llm-endpoint`, from this
+component's own assembled spec bundle and nothing else. The first
+three real generation attempts (predating this file) each failed for
+a genuine, previously undocumented spec gap — how a dependent locates
+a sealed sibling module; interface-drift's exact scope (`D84`); a
+result field's required type (`D85`) — fixed at root cause before
+retrying, never patched by hand. All thirteen `AC-VERIFY-*` criteria
+pass against the hand-maintained suite
+(`test_verifier_orchestrator.py`) once landed.
+
+Every `AC-VERIFY-*` file declares `Kind: generated-test`, directly
+contradicting `component.md`'s own "Acceptance criteria" section,
+which claims all thirteen are `kind: compiled`. A real, pre-existing
+inconsistency — not resolved here (`D119`'s own context), and not
+load-bearing for this component's own verification, which always runs
+against the hand-maintained suite directly rather than through a
+self-verifying `bootstrap_component.py` cycle (the same `D58`-style
+exemption `test-author` uses, for the same reason: this component
+implements `verify()` itself, so using it to verify itself is
+circular).
+
+## Round: dependency_interfaces fix (`D119`, `D120`)
+
+Chasing `provenance-tracker`'s own recurring, real test-authoring
+failures (wrong-arity and wrong-shape dependency fakes, even after
+`test-author`'s own `R-AUTHOR-011`/`R-AUTHOR-020` fixes) led to
+checking what `dependency_interfaces` `test-author` actually receives
+during a real `bootstrap_component.py` run: always empty. This
+component's own `_build_criterion_bundle()` built a second,
+independent `CriterionBundle` with no `dependency_interfaces` field at
+all — a producer `D106`/`D112` already flagged as a deferred,
+tracked gap, now confirmed as the real root cause behind every
+dependency-shape-guessing failure any real component hit this session,
+not only `provenance-tracker`'s.
+
+This was never actually a spec gap: `R-VERIFY-009` already said to pass
+"exactly the `CriterionBundle` spec-bundle-assembler produces" — the
+real candidate had simply never implemented that, and `depends_on`
+was never amended to list `comp-spec-bundle-assembler` either. `D119`
+closed this directly: `depends_on` gains the missing dependency,
+`R-VERIFY-009` states the prohibition on a second `CriterionBundle`
+explicitly, and the hand-maintained suite gained a new fixture
+(`comp-bar`, a real dependency with a documented interface) and test
+proving `dependency_interfaces` now carries real content.
+
+The first real regen against this fix passed the new test directly,
+but regressed `AC-VERIFY-004` (interface drift). Calling the drift
+check directly, outside `verify()`, with the identical fixture, proved
+the check's own logic was correct — the real cause was
+`load_component_module`'s own `sys.modules[module_name]` cache, keyed
+by bare name only: every hand-maintained test uses slug `"foo"`
+against its own fresh `tmp_path`, and a later test's call silently
+reused an *earlier* test's cached module. The identical bug class
+`R-TRACK-011` already closed for `provenance-tracker`'s own loader.
+Closed by `D120`: `R-VERIFY-013` requires every cache keyed by
+`(repo_root, module_name)`.
+
+The next real regen against both fixes together passed all 14 cases
+(13 original plus the new dependency_interfaces test) directly.
+Swapped in. `model_pin` set to `claude-sonnet-5` (not previously
+pinned).
+
+Blast radius checked (`D99`): `corpus-graph-builder` is the only
+already-built dependent; its own suite (8/8) still passes unchanged.
+`component-gate-runner`/`provenance-writer` are also dependents but
+not yet built.
+
+## Round: mutation-score union fix (`D124`)
+
+With `D119`–`D123` landed, `provenance-tracker` finally reached 7/7
+real criteria passing — but `verify()`'s separate mutation-score gate
+still failed, consistently, at 0.04–0.14 against an 0.8 bar,
+regardless of test quality. Diagnosis: this component's own mutation
+testing scored each `generated-test` criterion's test file in
+isolation against mutants anywhere in the whole candidate module,
+then averaged the per-criterion scores — `provenance-tracker` has
+three behaviorally distinct entry points, and a criterion whose own
+Gherkin covers only one of them has no way to kill a mutant in a
+sibling function. `interface/data/VerificationReport.md` already
+documents `mutation_score` as one number per component, never one per
+criterion, confirming the averaging approach was never the intended
+design. Confirmed structural, not specific to `provenance-tracker`,
+with a new minimal two-function fixture in this suite
+(`do_the_thing`/`double_it`, each with its own passing, fully-covering
+test): the old algorithm scored 0.25 regardless.
+
+Closed by `D124`: `mutation_score` is now a union across all of a
+component's own `generated-test` criteria's tests — a mutant counts
+as killed if *any* of them fails against it. The new fixture now
+scores above the bar with the same tests unchanged. 15 of 15 cases
+pass directly, including the new union-scoring test. Swapped in.
+
+Closed by `D158`/`D159`: bootstrapping `provenance-tracker-ui` stalled
+for forty-five minutes when one mutant turned a CLI parser's counting
+loop infinite, because no test run had a timeout. Every run now has
+one (10 seconds or ten times the unmutated suite's own time), and a
+timed-out mutant counts as killed. Regenerating to add it took three
+attempts, each surfacing a real gap rather than a candidate bug: the
+universal prompt line `D138` added ignored a sealed dependency's
+`source_path`, sending the candidate to look for `criterion-compiler`
+under `gen/`; running mutant tests with `cwd=repo_root` let a test's
+relative `sys.path` entry import the original module, so every mutant
+survived; and the mutation operator set had never been specified, so
+a candidate quietly added numeric constants. Each fixed at its source
+(`R-GEN-018`, `R-VERIFY-014`, `R-VERIFY-006`). 16 of 16 pass directly,
+including a new looping-mutant fixture confirmed to hang the prior
+implementation first. Before swapping in, the old and new gates were
+run against three already-landed components (`decision-drift-detector`,
+`provenance-writer`, `review-packet-builder`): identical verdicts and
+per-criterion results, mutation scores slightly higher under the new
+gate. Swapped in.
+
+## `D163`: `GATE_VERSION` and lettered criterion ids
+
+A provenance key must name this gate's version without running it, so
+the module now exposes `GATE_VERSION` (`R-VERIFY-015`). The first
+`license-scanner` round against the prior gate then crashed inside
+`verify`: the criterion-id pattern could not match a lettered suffix,
+so `AC-LICENSE-003b` fell back to the uppercased file name,
+`AC-LICENSE-003B`, which `spec-bundle-assembler` rejected.
+`R-VERIFY-016` now takes the id exactly from the heading. Both new hand
+tests failed on the prior gate first. Regenerated in one attempt; 18
+of 18 pass. Old and new gates gave identical verdicts and mutation
+scores on `provenance-tracker-ui`, `spec-completeness-assistant`, and
+`decision-drift-detector`. Swapped in.
+
+## `D190`: `hotdocs verify-component`, and two things the spec left to chance
+
+`hotdocs verify` was claimed by this component and by
+`provenance-tracker`'s readiness check; a single entry point cannot
+route one verb to two programs. The command is now `hotdocs
+verify-component <component-id>`, covered by `R-VERIFY-018`,
+`AC-VERIFY-021`, and `verification/verifier-orchestrator/test_cli.py`
+(a separate file, so the main suite is untouched). Writing the
+requirement also fixed an inconsistency: an unknown component exited `1`,
+a failed verdict, where every other CLI here returns `2`, a usage error.
+
+Regenerated in a scratch copy of the repository, never the live tree:
+other agents' verification runs through this file. Three attempts, two
+gaps, both about the shape of `verify`'s return value, which nothing had
+pinned because one earlier generation happened to return an object:
+
+- Attempt 1 returned a plain dict; 19 of 29 hand tests failed on
+  `report.criteria`.
+- Attempt 2 returned an object, but made each `criteria` entry a
+  `CriterionResult` object; 12 failed on `c["result"]`.
+- `interface/library.md` now pins an object with attribute access and
+  `to_dict()`, whose `criteria` entries and `requirement_results` are
+  plain dicts. Attempt 3 passed all 29, including the sealed-component
+  tests (`AC-VERIFY-019`/`020`) written for `D171`.
+
+Before landing, the old and new gates were run on three landed
+components: identical verdicts and mutation scores. `GATE_VERSION` is
+unchanged (`verifier-orchestrator@2.0.0`): verification behavior did not
+move, only the command name, the usage message, and one exit code.
+
+## `D199`: the tool's components stay in the tool
+
+`spec-bundle-assembler` and `criterion-compiler` are loaded from
+`<repo_root>` when present and otherwise from the tool's own tree, so a
+project needs no copy of either. A new hand test verifies a component
+in a `repo_root` holding neither; it fails on the previous
+implementation.
+
+Regenerated in a scratch copy, three attempts:
+
+- Attempt 1 failed six tests. Four were not its fault: my first version
+  of `spec-linter`'s new `R-LINT-032` took any `gen/` parent for the
+  tool, and `spec-bundle-assembler` reuses a `spec_linter` imported for
+  an earlier test's scratch tree. The rule now applies only to a
+  project holding `.hotdocs-tool.json`. The other two were a sealed
+  component's handling.
+- Attempt 2 raised on a missing sealed `source_path` and returned a
+  report `dataclasses.asdict` rejects. `R-VERIFY-017` now says a missing
+  `source_path` makes `overall` `fail`, never an exception, and
+  `interface/library.md` that the report is a dataclass.
+- Attempt 3 passed all 30 hand tests and the 7 CLI tests. On
+  `hotdocs-cli` and `decision-drift-detector` the old and new gates gave
+  identical verdicts.

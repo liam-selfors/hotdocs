@@ -1,0 +1,13 @@
+# AC-LINT-020
+
+Covers: R-LINT-020
+Kind: generated-test
+
+```gherkin
+Given comp-foo's frontmatter declares depends_on_guarantees: [G-BAR-001],
+  G-BAR-001 exists under comp-bar's interface/guarantees/, and comp-foo's
+  depends_on list does NOT include comp-bar
+When the linter runs
+Then it fails with R-LINT-018: a guarantee's owner comes from its file's
+  path, since guarantee files carry no frontmatter
+```

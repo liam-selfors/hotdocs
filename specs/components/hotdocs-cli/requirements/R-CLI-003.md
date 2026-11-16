@@ -1,0 +1,3 @@
+# R-CLI-003
+
+**R-CLI-003** — For a row whose `model` is `required`, when the arguments hold no `--model` token (`--model` or `--model=...`) and `load_config(<repo root>/hotdocs.toml)` (`load_config` of `gen/llm-endpoint/llm_endpoint.py`, found as `R-CLI-001` finds a module) returns a provider and model, `--model=<provider>:<model>` (a model string, per the glossary) MUST be appended last, after the `--repo-root` token `R-CLI-002` may have appended. If `load_config` raises `ValueError`, its message MUST be printed to stderr and nothing injected. Nothing is injected otherwise: an explicit `--model` passes unchanged, and rows whose `model` is `no` never gain one, since a model silently turns a read-only check into paid work.

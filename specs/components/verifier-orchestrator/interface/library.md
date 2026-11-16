@@ -1,0 +1,38 @@
+# Library
+
+```
+verify(component_id: str, repo_root: Path, judge=None, test_author=None) -> VerificationReport
+GATE_VERSION: str  # "verifier-orchestrator@2.0.0" (R-VERIFY-015)
+```
+
+`verify` returns a **dataclass** instance whose fields are attributes
+(`report.overall`, `report.criteria`), with a `to_dict()` giving the
+JSON form. Each `criteria` entry is a plain **dict** (`c["id"]`,
+`c["result"]`), as is `requirement_results`: never a bare-dict report,
+never criterion objects (`D190`).
+
+`judge`/`test_author` are the glossary's "Injected `judge`/`test_author`
+callable shape" (`D65`): one `bundle` argument, unlike `spec-linter`'s
+three-argument `judge` (`R-LINT-015`). Omit `judge` to run with every `llm-judge` criterion reporting
+`skipped`. `test_author` is the equivalent for `generated-test` criteria
+lacking a cached test (R-VERIFY-009) — **but omitting it degrades
+differently**: a `generated-test` criterion with nothing cached and no
+`test_author` configured reports `fail`, not `skipped` (R-VERIFY-010).
+
+It loads `spec-bundle-assembler` from `<repo_root>/gen/spec-bundle-assembler/`
+and the sealed `criterion-compiler` from
+`<repo_root>/pipeline/criterion-compiler/`, either else from the tool
+root (`D199`); a test plants a fake dependency at that path. A fixture
+component under test is never `sealed`, unless its criterion concerns
+sealed verification (`R-VERIFY-017`): a sealed one runs only its
+characterization tests, never its compiled or generated ones. An
+unsealed fixture component lints clean only with `realizes: [P-<ID>]`
+naming a capability file the fixture also writes under `specs/product/`
+(`R-LINT-006`). Name fixture functions other than `foo`:
+`spec-bundle-assembler`'s interface text declares `foo(x)`, which
+`test-author`'s fake-arity check (`R-AUTHOR-020`) would match. Every
+fixture criterion has at least one Given, one When and one Then step
+(`R-LINT-010`). `verify` checks no precondition against `spec-linter`,
+so a test does not lint its fixture (`R-AUTHOR-015`).
+
+Implements: `specs/architecture/step-phrase-grammar.md`, `SPEC_GUIDELINES.md`
