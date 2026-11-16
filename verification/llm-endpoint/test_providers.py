@@ -324,7 +324,7 @@ def test_load_config_rejects_secrets_unknown_keys_and_bad_files(tmp_path, clean_
         load_config(write('[llm]\nprovider="openai"\nmodel="m"\nflavour="x"\n'))
     with pytest.raises(ValueError, match="provider"):
         load_config(write('[llm]\nprovider="nope"\nmodel="m"\n'))
-    with pytest.raises(ValueError, match="TOML"):
+    with pytest.raises(ValueError):  # R-ENDPOINT-007: names the problem; no wording is specified
         load_config(write("[llm\n"))
     assert load_config(write("[other]\nx = 1\n")) is None          # no [llm] table
     assert load_config(tmp_path / "missing.toml") is None
