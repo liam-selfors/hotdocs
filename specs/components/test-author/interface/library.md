@@ -13,3 +13,5 @@ external call. `llm_backend` is passed straight to `llm-endpoint`'s
 A mock replies `-----BEGIN FILE <n>-----`, the file, then
 `-----END FILE <n>-----`, `<n>` the `secrets.token_hex(16)` nonce read
 from the prompt.
+
+Implements: `specs/architecture/test-author-output.md`

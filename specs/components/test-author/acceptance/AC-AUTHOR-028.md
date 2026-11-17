@@ -7,16 +7,16 @@ Kind: generated-test
 Given a bundle for comp-foo whose criterion_text is
   "Given a\nWhen b\nThen c" and whose requirement_text is "R-X-1 MUST c",
   and a mock model replying with a marked file whose content is
-  "import x\n"
+  "import x"
 When author_test(bundle, "mock", repo_root=<tmp>, llm_backend=<mock>)
   is called
 Then the result's file content, and the text of the file written at
   <tmp>/<file path>, are both "# hotdocs-criterion: sha256:" followed by
   the lowercase hex SHA-256 of "Given a\nWhen b\nThen c\nR-X-1 MUST c"
-  (UTF-8), a newline, then "import x\n"
+  (UTF-8), a newline, then "import x"
 
 Given the same bundle, a fresh repo_root, and a mock model whose content
-  is "# hotdocs-criterion: sha256:0000\nimport x\n"
+  is "# hotdocs-criterion: sha256:0000\nimport x"
 When author_test(bundle, "mock", repo_root=<tmp>, llm_backend=<mock>)
   is called
 Then the result's file content has exactly one line starting
