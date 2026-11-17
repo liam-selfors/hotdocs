@@ -109,6 +109,11 @@ you changed. `hotdocs track feedback comp-<name>` lists the failing
 requirement ids from the last attempt, and `--retry-feedback=R-...` passes
 them to the next `generate`.
 
+A `mutation_error` line means every criterion passed, but the generated
+tests failed (or hung) when rerun in the mutation sandbox, a temporary
+copy of `gen/` whose working directory is not the repository root. A test
+that reads files relative to the current directory is the usual cause.
+
 `hotdocs verify` without `--model` reports every component and lists a
 capability that needs a fresh run as `needs a fresh run; pass --model`.
 
