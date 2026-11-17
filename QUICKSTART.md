@@ -47,7 +47,14 @@ file's hash in a ratified decision (`allowlist_sha256` in its frontmatter):
 the scanner honors a non-empty list only while its hash matches.
 
 Run `init` again any time; it never overwrites. `hotdocs init --reconfigure`
-changes only the provider. Make the project a git repository with a `main`
+changes only the provider.
+
+Running `hotdocs` from inside a Claude Code session (an agent driving it)
+with `claude-cli`: Claude Code sets `ANTHROPIC_API_KEY` for the commands
+it starts, and that key does not work for a separate `claude -p` call.
+Use your claude.ai login instead with `hotdocs init --provider claude-cli
+--auth login`, or add `auth = "login"` to the `[llm]` table of
+`hotdocs.toml`. Make the project a git repository with a `main`
 branch: `hotdocs impact` and `hotdocs assist` diff against it.
 
 ## 3. Generate and verify
@@ -89,13 +96,21 @@ code must provide. What you leave implicit, the model guesses.
 ## 5. Reading a failure
 
 `hotdocs generate` ends with `blocked` and a reason. `model_call_error` means
-no code was produced (the model or network failed): run it again.
+no code was produced (the model or network failed): run it again. For
+`empty_response` the message shows the start of what the model replied,
+which often names a detail the spec left out. `test_authoring_failed`
+means code was produced but a criterion's test could not be written (a
+model call dropped twice): run it again; nothing shows the code wrong.
 `verification_failed` means code was produced and a criterion failed; the
 output names each failing criterion and why. Nearly always the cause is in
 the spec: a missing detail, or an example that contradicts a requirement.
-Fix it there. `hotdocs track feedback comp-<name>` lists the failing
+Fix it there; the next `generate` writes a fresh test for any criterion
+you changed. `hotdocs track feedback comp-<name>` lists the failing
 requirement ids from the last attempt, and `--retry-feedback=R-...` passes
 them to the next `generate`.
+
+`hotdocs verify` without `--model` reports every component and lists a
+capability that needs a fresh run as `needs a fresh run; pass --model`.
 
 ## 6. Known limits
 
