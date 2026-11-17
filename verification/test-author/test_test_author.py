@@ -449,11 +449,7 @@ def test_ac_author_022_prompt_forbids_guessed_sys_modules_assertions(repo_root):
     bundle = fake_bundle()
     author_test(bundle, "claude-sonnet-5", repo_root=repo_root, llm_backend=backend)
 
-    sent_prompt = backend.calls[0][0]
-    normalized = " ".join(sent_prompt.split())
-    assert "sys.modules" in sent_prompt
-    assert "record" in normalized.lower()
-    assert "guess" in normalized.lower()
+    assert _block("R-AUTHOR-022", "foo") in backend.calls[0][0]
 
 
 def test_ac_author_023_prompt_states_write_time_window_truncation(repo_root):
@@ -480,11 +476,7 @@ def test_ac_author_024_prompt_states_file_based_invocation_log(repo_root):
     bundle = fake_bundle()
     author_test(bundle, "claude-sonnet-5", repo_root=repo_root, llm_backend=backend)
 
-    sent_prompt = backend.calls[0][0]
-    normalized = " ".join(sent_prompt.split())
-    assert "file" in normalized.lower() and "invocation" in normalized.lower()
-    assert "sys.modules" in sent_prompt
-    assert "in-process" in normalized.lower() or "in process" in normalized.lower()
+    assert _block("R-AUTHOR-024", "foo") in backend.calls[0][0]
 
 
 @pytest.mark.parametrize("fake, ok", [
