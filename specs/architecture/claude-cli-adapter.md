@@ -59,9 +59,11 @@ reply, unchanged, and a non-zero exit is a failure.
 
 ### Failures
 
-A failure is classified from the failing `result` events' `result`
-text and standard error, together and lowercased, by the first of these
-lists holding one of its markers: `rate_limit` (`rate limit`,
+A failure is classified from a text, lowercased: when standard output
+is the stream, the failing `result` events' `result` text and standard
+error together; otherwise standard output and standard error together.
+The category is the first of these lists holding one of its markers in
+that text: `rate_limit` (`rate limit`,
 `rate_limit`, `429`), `auth` (`auth`, `login`, `api key`, `401`, `403`),
 `timeout` (`timed out`, `timeout`); otherwise `network`. A run past the
 timeout is `timeout`. The message is `claude command failed (<category>)`.

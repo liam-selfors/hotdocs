@@ -23,7 +23,12 @@ Given ANTHROPIC_API_KEY set to "k1", a hotdocs.toml with provider
 When complete("hi", "m") is called
 Then model_call_error is {"category": "auth", "message": "claude command failed (auth): ANTHROPIC_API_KEY is set, so claude used it instead of your claude.ai login; unset it, or set auth = \"login\" in hotdocs.toml's [llm] table"}
 
-Given the same recorder and auth "key"
+Given ANTHROPIC_API_KEY unset, no auth, and a recorder that prints
+  "Not logged in · Please run /login" to stdout and exits 1
+When complete("hi", "m") is called
+Then model_call_error is {"category": "auth", "message": "claude command failed (auth)"}
+
+Given the recorder printing "Invalid API key" to stderr, exiting 1, and auth "key"
 When complete("hi", "m") is called
 Then model_call_error is {"category": "auth", "message": "claude command failed (auth)"}
 ```
