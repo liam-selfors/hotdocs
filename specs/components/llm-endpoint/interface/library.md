@@ -10,7 +10,7 @@ DEFAULT_TIMEOUT_SECONDS = 600
 `complete` returns a plain dict with exactly `ModelResponse`'s keys.
 `parse_model` splits an identifier into `(provider, model)`, the provider
 `None` for a bare name (`R-ENDPOINT-002`). `resolve_provider` returns
-`{provider, model, base_url, api_key_env, timeout_seconds}` for an
+`{provider, model, base_url, api_key_env, timeout_seconds, auth}` for an
 identifier under `config` (`load_config`'s shape, or `None`), filling a
 provider's defaults from `PROVIDERS` and `DEFAULT_TIMEOUT_SECONDS`; both
 raise `ModelResolutionError` exactly where `R-ENDPOINT-002` says.
@@ -43,14 +43,16 @@ classification, and logging against a mock, never a real call.
 PROVIDERS: dict[str, {default_base_url, default_api_key_env, needs_base_url, suggested_model}]
 load_config(config_path: Path | None = None) -> dict | None
 save_config(config_path: Path, provider: str, model: str, base_url: str | None = None,
-            api_key_env: str | None = None, timeout_seconds: int | None = None) -> None
+            api_key_env: str | None = None, timeout_seconds: int | None = None,
+            auth: str | None = None) -> None
 detect_providers(env: dict | None = None, probe_ollama: bool = True) -> list[dict]
 check_connection(provider: str, model: str, base_url: str | None = None,
-                 api_key_env: str | None = None, timeout_seconds: int = 30) -> dict
+                 api_key_env: str | None = None, timeout_seconds: int = 30,
+                 auth: str | None = None) -> dict
 ```
 
 `load_config` returns `{provider, model, base_url, api_key_env,
-timeout_seconds}` (unset entries `None`), or `None`; it raises
+timeout_seconds, auth}` (unset entries `None`), or `None`; it raises
 `ValueError` for an invalid file. `save_config` creates the file's
 directory when missing and replaces only its `[llm]` table.
 `detect_providers` returns, per
@@ -67,32 +69,7 @@ command's backend had before there were several providers.
 
 ## HTTP, the call log, and config messages
 
-Discovery reads `VAR_HOTDOCS_CONFIG` and the current directory; a
-resolution test unsets the one and uses a fresh other.
+In `specs/architecture/llm-endpoint-http.md`; the `claude` command in
+`specs/architecture/claude-cli-adapter.md`.
 
-Every HTTP request, the Ollama probe included, is
-`urllib.request.urlopen(request, timeout=<seconds>)`, looked up on the
-`urllib.request` module when the call is made (never imported by name,
-so replacing `urllib.request.urlopen` reaches every call). The reply is
-used only as a context manager and through `.read()`. Headers go into
-`urllib.request.Request`, which stores names capitalized (`X-api-key`, `User-agent`),
-so a recorded request's headers are read case-insensitively. An error status
-arrives as `urllib.error.HTTPError` (its `code` and `read()`), a timeout
-as `socket.timeout`, `TimeoutError` or a `URLError` wrapping one, and any
-other failure as `URLError` or `OSError`. The Ollama probe requests
-`<base_url>/api/tags` with a 1-second timeout and counts as available
-whenever `urlopen` returns.
-
-Each `complete()` call writes one JSON file under `.hotdocs/calls/` in
-the current directory: `{"timestamp", "model", "backend", "text_present"}`
-on success, `text_present` a boolean, or `{"timestamp", "model",
-"backend", "model_call_error"}` on failure; `timestamp` is ISO 8601 UTC.
-
-`complete()` raises `ModelResolutionError`, never `ValueError`, for an
-invalid `hotdocs.toml`, and nothing else: an exception an injected
-`backend` raises is returned as `model_call_error`, classified as HTTP
-failures are (`HTTPError` 401 or 403 `auth`, 429 `rate_limit`, 408 or
-504 or any timeout `timeout`, anything else `network`), with `text`
-`null` and no retry. `load_config`'s message for an entry whose name
-suggests a secret contains `must never hold a secret`; every refusal of an
-`api_key_env` value contains `never the key itself`.
+Implements: `specs/architecture/claude-cli-adapter.md`, `specs/architecture/llm-endpoint-http.md`

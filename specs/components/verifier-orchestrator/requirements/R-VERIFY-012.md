@@ -16,8 +16,5 @@
   `expected`/`actual` MAY be `null` for a `generated-test` criterion
   whose assertion this component cannot structurally interpret, in which
   case `message` alone is still required. A `pass` or `skipped`
-  criterion's `failure_detail` MUST be absent.
-
-  `failure_detail` MUST NOT reach `requirement_results` (`R-VERIFY-011`)
-  or `retry_feedback`'s `R-id`-only channel (`R-GEN-012`); it is exposed
-  on `criteria[]` for provenance, review-packet, and human use only.
+  criterion's `failure_detail` MUST be absent. It MUST NOT reach
+  `requirement_results` or `retry_feedback` (`R-GEN-012`).

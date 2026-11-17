@@ -18,11 +18,6 @@ spec prose alone, with no access to the implementation under test.
 Invoked by `verifier-orchestrator` via an injectable callable — it
 decides *when* (a criterion's `kind`); this decides *how*.
 
-## Rationale
-
-The "independent generation path" a `generated-test` criterion needs
-to be trustworthy. Mirrors `llm-judge`'s own `judge` parameter.
-
 ## Scope
 
 **In scope:** test code from a criterion's Given/When/Then prose plus
@@ -52,8 +47,7 @@ See `interface/data/`.
 
 See `acceptance/`.
 
-All `kind: generated-test` (`D43`) — the model call uses an injected
-mock, `generator`'s pattern; none fit the step-phrase grammar.
+All `kind: generated-test` (`D43`), with an injected mock model.
 
 ## Non-functional constraints
 
@@ -65,4 +59,4 @@ None.
 
 ## Change log
 
-See the decisions, `D56` onward; `D269` adds the reply format to `interface/`.
+See the decisions, `D56` onward; `D320` adds the criterion header.

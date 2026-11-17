@@ -28,6 +28,13 @@ def _rf(result, key):
     return result[key] if isinstance(result, dict) else getattr(result, key)
 
 
+def _body(content):
+    """R-AUTHOR-028 (D320): the file is a header line, then the test."""
+    first, _, rest = content.partition("\n")
+    assert first.startswith("# hotdocs-criterion: sha256:"), content
+    return rest
+
+
 def test_ac_author_001_prompt_contains_every_bundle_field(repo_root):
     backend = MockBackend([file_block("def test_x(): pass")])
     bundle = fake_bundle()
@@ -101,13 +108,13 @@ def test_ac_author_005_successful_call_is_cached(repo_root):
     first_backend = MockBackend([file_block("def test_x(): pass")])
     bundle = fake_bundle()
     first = author_test(bundle, "claude-sonnet-5", repo_root=repo_root, llm_backend=first_backend)
-    assert _file_field(_rf(first, "file"), "content") == "def test_x(): pass"
+    assert _body(_file_field(_rf(first, "file"), "content")) == "def test_x(): pass"
 
     second_backend = MockBackend([file_block("def test_y(): pass")])  # must never be called
     second = author_test(bundle, "claude-sonnet-5", repo_root=repo_root, llm_backend=second_backend)
     assert _rf(second, "cache_hit") is True
     assert second_backend.calls == []
-    assert _file_field(_rf(second, "file"), "content") == "def test_x(): pass"
+    assert _body(_file_field(_rf(second, "file"), "content")) == "def test_x(): pass"
 
 
 def test_ac_author_006_output_path_under_generated_test_dir(repo_root):
@@ -162,7 +169,7 @@ def test_ac_author_009_strips_fence_and_narration_around_markers(repo_root):
     result = author_test(bundle, "claude-sonnet-5", repo_root=repo_root, llm_backend=backend)
 
     assert _rf(result, "model_call_error") is None
-    assert _file_field(_rf(result, "file"), "content").strip() == "def test_x(): pass"
+    assert _body(_file_field(_rf(result, "file"), "content")).strip() == "def test_x(): pass"
     assert "```" not in _file_field(_rf(result, "file"), "content")
     assert "Sure, here is the test" not in _file_field(_rf(result, "file"), "content")
     assert "Let me know" not in _file_field(_rf(result, "file"), "content")

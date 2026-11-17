@@ -24,7 +24,7 @@ miss is run with `run_capability_gates`, passing `model`/`seed`/
 `llm_backend` straight through unchanged (`R-TRACK-010`). `model` is
 optional here, unlike `component-gate-runner`'s `run_component_gates`:
 it is only consulted for such a miss, and a miss with `model` still
-`None` raises `ValueError`, never silently skipped.
+`None` is reported not ready, never silently skipped (`R-TRACK-010`).
 
 ```
 write_attempt_record(
@@ -50,3 +50,5 @@ non-null `verification` and returns its `requirement_results`' failing
 lookup for a human deciding what to pass as `--retry-feedback` on
 their next `hotdocs generate` call — never called by any component
 itself.
+
+Implements: `specs/architecture/json-values.md`

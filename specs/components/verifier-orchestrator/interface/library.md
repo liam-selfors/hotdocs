@@ -2,7 +2,7 @@
 
 ```
 verify(component_id: str, repo_root: Path, judge=None, test_author=None) -> VerificationReport
-GATE_VERSION: str  # "verifier-orchestrator@2.0.0" (R-VERIFY-015)
+GATE_VERSION: str  # "verifier-orchestrator@2.1.0" (R-VERIFY-015)
 ```
 
 `verify` returns a **dataclass** instance whose fields are attributes
@@ -22,17 +22,7 @@ differently**: a `generated-test` criterion with nothing cached and no
 It loads `spec-bundle-assembler` from `<repo_root>/gen/spec-bundle-assembler/`
 and the sealed `criterion-compiler` from
 `<repo_root>/pipeline/criterion-compiler/`, either else from the tool
-root (`D199`); a test plants a fake dependency at that path. A fixture
-component under test is never `sealed`, unless its criterion concerns
-sealed verification (`R-VERIFY-017`): a sealed one runs only its
-characterization tests, never its compiled or generated ones. An
-unsealed fixture component lints clean only with `realizes: [P-<ID>]`
-naming a capability file the fixture also writes under `specs/product/`
-(`R-LINT-006`). Name fixture functions other than `foo`:
-`spec-bundle-assembler`'s interface text declares `foo(x)`, which
-`test-author`'s fake-arity check (`R-AUTHOR-020`) would match. Every
-fixture criterion has at least one Given, one When and one Then step
-(`R-LINT-010`). `verify` checks no precondition against `spec-linter`,
-so a test does not lint its fixture (`R-AUTHOR-015`).
+root (`D199`). How a test builds its fixture is in
+`specs/architecture/verifier-fixtures.md`.
 
-Implements: `specs/architecture/step-phrase-grammar.md`, `SPEC_GUIDELINES.md`
+Implements: `specs/architecture/step-phrase-grammar.md`, `SPEC_GUIDELINES.md`, `specs/architecture/verifier-fixtures.md`

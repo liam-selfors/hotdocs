@@ -21,8 +21,11 @@ are `null`.
 Otherwise `blocked` (`R-GATE-004`) is `true` exactly when no passing
 candidate exists: `block_reason` is `"model_call_error"` when
 `generator` returned one (`model_call_error` copies it, `verification`
-is `null`), or `"verification_failed"` when a candidate was produced
-and `verification.overall` is not `"pass"`. A passing candidate has
+is `null`); `"test_authoring_failed"` when a candidate was produced,
+`verification.overall` is not `"pass"`, at least one criterion is
+`"fail"`, and every `"fail"` criterion has `failure_origin` `"test"`
+(`R-GATE-004`); or `"verification_failed"` when a candidate was produced
+and `verification.overall` is otherwise not `"pass"`. A passing candidate has
 `blocked` `false` and `block_reason` `null`. `model_call_error` and
 `verification` are never both populated.
 

@@ -6,7 +6,7 @@ import json
 
 import pytest
 
-from conftest import acceptance_md, write_foo
+from conftest import acceptance_md, stamped, write_foo
 from verifier_orchestrator import main
 
 def _ac(cid, req, kind, gherkin):
@@ -39,7 +39,7 @@ def _component(repo_root, first_ac):
     })
     cached = repo_root / "verification" / "foo" / "generated-test" / "test_ac_foo_002.py"
     cached.parent.mkdir(parents=True, exist_ok=True)
-    cached.write_text(WORKING_TEST, encoding="utf-8")
+    cached.write_text(stamped(repo_root, "AC-FOO-002", WORKING_TEST), encoding="utf-8")
 
 
 def test_json_and_text_output_for_a_passing_component(repo_root, capsys):

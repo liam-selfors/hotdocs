@@ -29,15 +29,8 @@ aggregating mutation scores; producing one `VerificationReport`.
 *performing* an `llm-judge` evaluation or *authoring*
 `generated-test` code (this component dispatches to an injectable judge and
 an injectable `test_author` and records their results — it does not itself
-judge or author anything, see the note below); **re-deciding a criterion's
-declared `kind`** — `compiled`/`generated-test`/`llm-judge` is fixed at
-spec-authoring time in `acceptance/`, lint-checked (R-LINT-010), and never
-reconsidered here. Giving this component (or `test-author`) the power to
-override that declaration at verification time was considered and
-explicitly rejected: it would make `kind:` advisory rather than normative,
-and would turn this component's own dispatch logic into a judgment call,
-breaking the determinism cache-key validity and R-VERIFY-008's
-idempotency claim both depend on.
+judge or author anything); **re-deciding a criterion's declared `kind`**,
+which is fixed in `acceptance/` and lint-checked (R-LINT-010).
 
 ## Definitions
 
@@ -59,11 +52,8 @@ See `interface/data/`.
 
 See `acceptance/`.
 
-All thirteen criteria are `kind: compiled` — this component coordinates
-checking mechanisms (some of which involve judgment or external calls), but
-the coordination itself is deterministic dispatch-and-record logic, testable
-by mocking `criterion-compiler` and the judge callable. A fourth component
-in this corpus whose entire acceptance set is `compiled`.
+Deterministic dispatch-and-record logic, testable by mocking
+`criterion-compiler`, the judge and `test_author`.
 
 ## Non-functional constraints
 
@@ -73,4 +63,4 @@ See `constraints.md`.
 
 ## Change log
 
-See the decisions, `D27` onward; `D274` adds fixture guidance to `interface/`.
+See the decisions, `D27` onward; `D320` adds the criterion header check.

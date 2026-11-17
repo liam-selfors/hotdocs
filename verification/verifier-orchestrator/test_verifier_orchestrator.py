@@ -3,7 +3,7 @@ specs/components/verifier-orchestrator/acceptance/."""
 
 from dataclasses import asdict
 
-from conftest import FOO_CODE_DRIFT, FOO_CODE_TWO_FUNCTIONS, acceptance_md, write_bar, write_foo
+from conftest import FOO_CODE_DRIFT, FOO_CODE_TWO_FUNCTIONS, acceptance_md, stamped, write_bar, write_foo
 from verifier_orchestrator import verify
 
 COMPILED_AC = acceptance_md(
@@ -48,7 +48,7 @@ def test_ac_verify_002_cached_generated_test_is_executed(repo_root):
     write_foo(repo_root, extra_acceptance={"AC-FOO-002.md": GENTEST_AC})
     cache_path = repo_root / "verification" / "foo" / "generated-test" / "test_ac_foo_002.py"
     cache_path.parent.mkdir(parents=True, exist_ok=True)
-    cache_path.write_text(WORKING_TEST_SOURCE, encoding="utf-8")
+    cache_path.write_text(stamped(repo_root, "AC-FOO-002", WORKING_TEST_SOURCE), encoding="utf-8")
 
     report = verify("comp-foo", repo_root)
     by_id = {c["id"]: c for c in report.criteria}
@@ -82,7 +82,7 @@ def test_ac_verify_005_skipped_llm_judge_alone_does_not_fail_overall(repo_root):
     })
     cache_path = repo_root / "verification" / "foo" / "generated-test" / "test_ac_foo_002.py"
     cache_path.parent.mkdir(parents=True, exist_ok=True)
-    cache_path.write_text(WORKING_TEST_SOURCE, encoding="utf-8")
+    cache_path.write_text(stamped(repo_root, "AC-FOO-002", WORKING_TEST_SOURCE), encoding="utf-8")
 
     report = verify("comp-foo", repo_root, judge=None)
     by_id = {c["id"]: c for c in report.criteria}
@@ -94,7 +94,7 @@ def test_ac_verify_006_mutation_score_below_bar_fails_overall(repo_root):
     write_foo(repo_root, extra_acceptance={"AC-FOO-002.md": GENTEST_AC})
     cache_path = repo_root / "verification" / "foo" / "generated-test" / "test_ac_foo_002.py"
     cache_path.parent.mkdir(parents=True, exist_ok=True)
-    cache_path.write_text(WEAK_TEST_SOURCE, encoding="utf-8")
+    cache_path.write_text(stamped(repo_root, "AC-FOO-002", WEAK_TEST_SOURCE), encoding="utf-8")
 
     report = verify("comp-foo", repo_root)
     assert report.mutation_score is not None
@@ -256,8 +256,8 @@ def test_ac_verify_015_mutation_score_is_a_union_not_a_per_criterion_average(rep
     )
     gentest_dir = repo_root / "verification" / "foo" / "generated-test"
     gentest_dir.mkdir(parents=True, exist_ok=True)
-    (gentest_dir / "test_ac_foo_002.py").write_text(do_the_thing_test, encoding="utf-8")
-    (gentest_dir / "test_ac_foo_004.py").write_text(double_it_test, encoding="utf-8")
+    (gentest_dir / "test_ac_foo_002.py").write_text(stamped(repo_root, "AC-FOO-002", do_the_thing_test), encoding="utf-8")
+    (gentest_dir / "test_ac_foo_004.py").write_text(stamped(repo_root, "AC-FOO-004", double_it_test), encoding="utf-8")
 
     report = verify("comp-foo", repo_root)
     by_id = {c["id"]: c for c in report.criteria}
@@ -302,7 +302,7 @@ def test_ac_verify_016_hanging_mutant_times_out_and_counts_killed(repo_root):
     )
     gentest_dir = repo_root / "verification" / "foo" / "generated-test"
     gentest_dir.mkdir(parents=True, exist_ok=True)
-    (gentest_dir / "test_ac_foo_002.py").write_text(loop_test, encoding="utf-8")
+    (gentest_dir / "test_ac_foo_002.py").write_text(stamped(repo_root, "AC-FOO-002", loop_test), encoding="utf-8")
 
     started = time.monotonic()
     report = verify("comp-foo", repo_root)
@@ -456,8 +456,12 @@ def test_ac_verify_020_mutation_operator_swaps_are_pinned(repo_root):
     gentest_dir = repo_root / "verification" / "foo" / "generated-test"
     gentest_dir.mkdir(parents=True, exist_ok=True)
     (gentest_dir / "test_ac_foo_002.py").write_text(
-        "import sys\nsys.path.insert(0, 'gen/foo')\nfrom foo import g\n\n"
-        "def test_g():\n    assert g(1, 2) == 1\n    assert g(2, 1) == 0\n",
+        stamped(
+            repo_root,
+            "AC-FOO-002",
+            "import sys\nsys.path.insert(0, 'gen/foo')\nfrom foo import g\n\n"
+            "def test_g():\n    assert g(1, 2) == 1\n    assert g(2, 1) == 0\n",
+        ),
         encoding="utf-8",
     )
     report = verify("comp-foo", repo_root)
