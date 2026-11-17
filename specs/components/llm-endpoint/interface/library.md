@@ -11,7 +11,8 @@ DEFAULT_TIMEOUT_SECONDS = 600
 `parse_model` splits an identifier into `(provider, model)`, the provider
 `None` for a bare name (`R-ENDPOINT-002`). `resolve_provider` returns
 `{provider, model, base_url, api_key_env, timeout_seconds, auth}` for an
-identifier under `config` (`load_config`'s shape, or `None`), filling a
+identifier under `config` (`load_config`'s shape, an entry it lacks
+read as `None`, or `None`), filling a
 provider's defaults from `PROVIDERS` and `DEFAULT_TIMEOUT_SECONDS`; both
 raise `ModelResolutionError` exactly where `R-ENDPOINT-002` says.
 
