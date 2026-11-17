@@ -1,7 +1,6 @@
-import dataclasses
+# hotdocs-criterion: sha256:9461041486b91ab9a0d85d1990794a3348688bd2810709141b243d486bf291fb
 import json
 import re
-import uuid
 from pathlib import Path
 
 import pytest
@@ -9,228 +8,92 @@ import pytest
 import generator
 
 
-def _field(value, name):
-    if isinstance(value, dict):
-        return value.get(name)
-    return getattr(value, name, None)
+def field(value, name):
+    return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-@dataclasses.dataclass
-class _SpecBundle:
-    component_id: str
-    spec_bundle_hash: str
-    spec: str
-    interface: str
-    constraints: str
-    dependency_interfaces: dict = dataclasses.field(default_factory=dict)
-    dependency_context: dict = dataclasses.field(default_factory=dict)
-    dependency_usage: dict = dataclasses.field(default_factory=dict)
-    vars: dict = dataclasses.field(default_factory=dict)
-    glossary: str = ""
-    hint_code: object = None
-
-    def _names(self):
-        return [f.name for f in dataclasses.fields(self)]
-
-    def __getitem__(self, key):
-        if key in self._names():
-            return getattr(self, key)
-        raise KeyError(key)
-
-    def get(self, key, default=None):
-        if key in self._names():
-            return getattr(self, key)
-        return default
-
-    def keys(self):
-        return list(self._names())
-
-    def items(self):
-        return [(k, getattr(self, k)) for k in self._names()]
-
-    def values(self):
-        return [getattr(self, k) for k in self._names()]
-
-    def __contains__(self, key):
-        return key in self._names()
-
-    def __iter__(self):
-        return iter(self._names())
-
-    def __len__(self):
-        return len(self._names())
+def _write(path, text):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
 
 
-_FAKE_CACHE_MANAGER = '''
-import dataclasses
-import datetime
-
-
-class SchemaValidationError(ValueError):
-    pass
-
-
-@dataclasses.dataclass
-class CacheKey:
-    spec_bundle_hash: str
-    gate_inputs_hash: str
-    gate_version: str
-    model_pin: str
-
-
-@dataclasses.dataclass
-class CachedResult:
-    gate_type: str
-    payload: dict
-    stored_at: str
-
-
-class Miss:
-    def __eq__(self, other):
-        return isinstance(other, Miss)
-
-    def __hash__(self):
-        return hash("Miss")
-
-    def __repr__(self):
-        return "Miss()"
-
-
-_REQUIRED = {
-    "generator": ["component_id", "model", "prompt_version", "files"],
-    "compiler": ["outputs", "gate_version", "summary"],
-    "generated_test": ["component_id", "criterion_id", "model", "file"],
-    "llm_judge": ["result", "rationale"],
-    "license_scanner": ["component_id", "gate_version", "similarity_score", "blocked", "matches"],
-    "secret_scanner": ["scope", "gate_version", "flagged", "matches"],
-}
-
-
-def _get(obj, name):
-    if isinstance(obj, dict):
-        return obj.get(name)
-    return getattr(obj, name, None)
-
-
-def get(cache_key, *, repo_root=None):
-    return Miss()
-
-
-def put(cache_key, result, *, repo_root=None):
-    gate_version = _get(cache_key, "gate_version") or ""
-    key_gate_type = gate_version.split("@", 1)[0]
-    gate_type = _get(result, "gate_type")
-    if gate_type not in _REQUIRED or gate_type != key_gate_type:
-        raise SchemaValidationError("gate type mismatch")
-    payload = _get(result, "payload")
-    if not isinstance(payload, dict):
-        raise SchemaValidationError("payload must be a mapping")
-    for k in _REQUIRED[gate_type]:
-        if k not in payload:
-            raise SchemaValidationError("missing payload key: " + k)
-    return None
-
-
-def now_iso():
-    return datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-
-
-def stats(*, repo_root=None):
-    return {"entry_count": 0}
-
-
-def main(argv=None):
-    print('{"result": "miss"}')
-    return 0
-'''
-
-
-_COMPONENT_MD = """---
-id: comp-foo
-title: Foo
-status: draft
-owners: [team-a]
-sealed: false
-depends_on: []
----
-
-# Foo
-
-## Purpose
-
-Foo doubles a number.
-"""
-
-
-def _write_fixture(repo_root: Path):
-    (repo_root / "specs").mkdir(parents=True, exist_ok=True)
-    (repo_root / "specs" / "glossary.md").write_text(
-        "# Glossary\n\n- **Foo** — a test term.\n", encoding="utf-8"
+def _build_fixture(repo_root):
+    _write(
+        repo_root / "specs" / "glossary.md",
+        "# Glossary\n\n- **Foo** \u2014 a test term.\n",
     )
     comp = repo_root / "specs" / "components" / "foo"
-    (comp / "requirements").mkdir(parents=True, exist_ok=True)
-    (comp / "acceptance").mkdir(parents=True, exist_ok=True)
-    (comp / "interface").mkdir(parents=True, exist_ok=True)
-    (comp / "component.md").write_text(_COMPONENT_MD, encoding="utf-8")
-    (comp / "requirements" / "R-FOO-001.md").write_text(
-        "# R-FOO-001\n\n**R-FOO-001** — `foo(x)` MUST return `2 * x`.\n",
-        encoding="utf-8",
+    _write(
+        comp / "component.md",
+        "---\n"
+        "id: comp-foo\n"
+        "title: Foo\n"
+        "status: draft\n"
+        "owners: [team-a]\n"
+        "sealed: false\n"
+        "depends_on: []\n"
+        "---\n"
+        "\n"
+        "# Foo\n"
+        "\n"
+        "## Purpose\n"
+        "\n"
+        "Foo doubles a number.\n",
     )
-    (comp / "acceptance" / "AC-FOO-001.md").write_text(
-        "# AC-FOO-001\n\nCovers: R-FOO-001\nKind: generated-test\n\n"
-        "```gherkin\nGiven x = 2\nWhen foo(x) is called\nThen it returns 4\n```\n",
-        encoding="utf-8",
+    _write(
+        comp / "requirements" / "R-FOO-001.md",
+        "# R-FOO-001\n\n**R-FOO-001** \u2014 `foo(x)` MUST return `2 * x`.\n",
     )
-    (comp / "interface" / "library.md").write_text(
-        "# Library\n\n```\nfoo(x: int) -> int\n```\n", encoding="utf-8"
+    _write(
+        comp / "acceptance" / "AC-FOO-001.md",
+        "# AC-FOO-001\n"
+        "\n"
+        "Covers: R-FOO-001\n"
+        "Kind: generated-test\n"
+        "\n"
+        "```gherkin\n"
+        "Given x = 2\n"
+        "When foo(x) is called\n"
+        "Then it returns 4\n"
+        "```\n",
     )
-    (comp / "constraints.md").write_text("# Constraints\n\nNone.\n", encoding="utf-8")
-
-    fake_cache_dir = repo_root / "gen" / "cache-manager"
-    fake_cache_dir.mkdir(parents=True, exist_ok=True)
-    (fake_cache_dir / "cache_manager.py").write_text(_FAKE_CACHE_MANAGER, encoding="utf-8")
-
-
-def _make_bundle():
-    return _SpecBundle(
-        component_id="comp-foo",
-        spec_bundle_hash="sha256:" + ("ab" * 32),
-        spec="# Foo\n\n## Purpose\n\nFoo doubles a number.\n\n# R-FOO-001\n\n"
-        "**R-FOO-001** — `foo(x)` MUST return `2 * x`.",
-        interface="# Library\n\n```\nfoo(x: int) -> int\n```",
-        constraints="# Constraints\n\nNone.",
-        dependency_interfaces={},
-        dependency_context={},
-        dependency_usage={},
-        vars={},
-        glossary="# Glossary\n\n- **Foo** — a test term.",
-        hint_code=None,
+    _write(
+        comp / "interface" / "library.md",
+        "# Library\n\n```\nfoo(x: int) -> int\n```\n",
     )
+    _write(comp / "constraints.md", "# Constraints\n\nNone.\n")
 
 
-def _make_backend(log_path: Path):
+def _bundle():
+    return {
+        "component_id": "comp-foo",
+        "spec_bundle_hash": "sha256:" + "ab" * 32,
+        "spec": "# Foo\n\n## Purpose\n\nFoo doubles a number.\n\n# R-FOO-001\n\n**R-FOO-001** \u2014 `foo(x)` MUST return `2 * x`.",
+        "interface": "# Library\n\n```\nfoo(x: int) -> int\n```",
+        "constraints": "# Constraints\n\nNone.",
+        "dependency_interfaces": {},
+        "dependency_context": {},
+        "dependency_usage": {},
+        "vars": {},
+        "glossary": "# Glossary\n\n- **Foo** \u2014 a test term.",
+        "hint_code": None,
+    }
+
+
+def _make_backend(log_path):
     def backend(prompt, model, **params):
         with open(log_path, "a", encoding="utf-8") as fh:
             fh.write(json.dumps({"model": model}) + "\n")
-        text_prompt = prompt if isinstance(prompt, str) else str(prompt)
-        candidates = re.findall(r"BEGIN FILE ([0-9a-f]{32})", text_prompt)
-        if not candidates:
-            candidates = re.findall(
-                r"(?<![0-9a-fA-F])[0-9a-f]{32}(?![0-9a-fA-F])", text_prompt
-            )
-        nonces = []
-        for n in candidates:
-            if n not in nonces:
-                nonces.append(n)
-        blocks = "".join(
-            "-----BEGIN FILE {n}: foo.py-----\n"
+        m = re.search(r"BEGIN FILE ([0-9a-f]{32})", prompt)
+        nonce = m.group(1) if m else ""
+        text = (
+            "-----BEGIN FILE " + nonce + ": foo.py-----\n"
             "def foo(x):\n"
             "    return 2 * x\n"
-            "-----END FILE {n}-----\n".format(n=n)
-            for n in nonces
+            "-----END FILE " + nonce + "-----\n"
         )
         return {
-            "text": "Here is the implementation.\n" + blocks,
+            "text": text,
             "model": model,
             "backend": "mock",
             "model_call_error": None,
@@ -239,58 +102,35 @@ def _make_backend(log_path: Path):
     return backend
 
 
-def _read_models(log_path: Path):
-    if not log_path.is_file():
-        return []
-    models = []
-    for line in log_path.read_text(encoding="utf-8").splitlines():
-        line = line.strip()
-        if line:
-            models.append(json.loads(line)["model"])
-    return models
-
-
-def test_ac_gen_004_model_identifier_passed_through_unchanged(tmp_path, monkeypatch):
+def test_model_identifier_passed_through_unchanged(tmp_path, monkeypatch):
+    monkeypatch.delenv("VAR_CACHE_STORE_URL", raising=False)
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
-    _write_fixture(repo_root)
-
+    _build_fixture(repo_root)
     monkeypatch.chdir(repo_root)
-    monkeypatch.delenv("VAR_HOTDOCS_CONFIG", raising=False)
-    monkeypatch.delenv("VAR_CACHE_STORE_URL", raising=False)
 
-    bundle = _make_bundle()
+    log_path = tmp_path / "model_calls.log"
+    backend = _make_backend(log_path)
 
-    suffix = uuid.uuid4().hex[:8]
-    model_a = "mock-model-alpha-" + suffix
-    model_b = "mock-model-beta-" + suffix
-    assert model_a != model_b
+    model_a = "anthropic:test-model-alpha-ac-gen-004"
+    model_b = "ollama:test-model-beta-ac-gen-004"
+    bundle = _bundle()
 
-    log_a = tmp_path / "calls_a.jsonl"
-    log_b = tmp_path / "calls_b.jsonl"
+    result_a = generator.generate(bundle, model_a, repo_root=repo_root, llm_backend=backend)
+    result_b = generator.generate(bundle, model_b, repo_root=repo_root, llm_backend=backend)
 
-    result_a = generator.generate(
-        bundle, model_a, repo_root=repo_root, llm_backend=_make_backend(log_a)
-    )
-    result_b = generator.generate(
-        bundle, model_b, repo_root=repo_root, llm_backend=_make_backend(log_b)
-    )
+    for result in (result_a, result_b):
+        assert field(result, "refused") is None
+        assert field(result, "model_call_error") is None
+        assert field(result, "cache_hit") is False
 
-    models_a = _read_models(log_a)
-    models_b = _read_models(log_b)
+    assert log_path.exists(), "mock model was never called"
+    recorded = [
+        json.loads(line)["model"]
+        for line in log_path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    assert recorded == [model_a, model_b]
 
-    assert models_a, "mock model was never called for the first generate() call"
-    assert models_b, "mock model was never called for the second generate() call"
-
-    assert all(m == model_a for m in models_a), (
-        "first call's mock model received %r, expected %r" % (models_a, model_a)
-    )
-    assert all(m == model_b for m in models_b), (
-        "second call's mock model received %r, expected %r" % (models_b, model_b)
-    )
-
-    assert model_b not in models_a
-    assert model_a not in models_b
-
-    assert _field(result_a, "model") == model_a
-    assert _field(result_b, "model") == model_b
+    assert field(result_a, "model") == model_a
+    assert field(result_b, "model") == model_b

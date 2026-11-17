@@ -1,6 +1,8 @@
-import dataclasses
+# hotdocs-criterion: sha256:b0c2fd8d2d16ef7a247a59f4b8d3f1943421ea20368c677b754e6181906a7dda
+import hashlib
+import importlib.util
 import json
-import urllib.error
+import sys
 from pathlib import Path
 
 import pytest
@@ -8,289 +10,245 @@ import pytest
 import generator
 
 
-ENDPOINT_CATEGORIES = {"network", "auth", "rate_limit", "timeout"}
+COMPONENT_ID = "comp-foo"
+SLUG = "foo"
+MODEL = "anthropic:claude-sonnet-5"
+BUNDLE_HASH = "sha256:" + "0" * 64
 
 
-def _field(value, name):
-    if isinstance(value, dict):
-        return value.get(name)
-    return getattr(value, name, None)
+def field(value, name):
+    return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-@dataclasses.dataclass
-class _FakeSpecBundle:
-    component_id: str
-    spec_bundle_hash: str
-    spec: str
-    interface: str
-    constraints: str
-    dependency_interfaces: dict = dataclasses.field(default_factory=dict)
-    dependency_context: dict = dataclasses.field(default_factory=dict)
-    dependency_usage: dict = dataclasses.field(default_factory=dict)
-    vars: dict = dataclasses.field(default_factory=dict)
-    glossary: str = ""
-    hint_code: object = None
-
-    def __getitem__(self, key):
-        if key not in self.keys():
-            raise KeyError(key)
-        return getattr(self, key)
-
-    def get(self, key, default=None):
-        if key in self.keys():
-            return getattr(self, key)
-        return default
-
-    def keys(self):
-        return [f.name for f in dataclasses.fields(self)]
-
-    def __iter__(self):
-        return iter(self.keys())
-
-    def __len__(self):
-        return len(self.keys())
-
-    def __contains__(self, key):
-        return key in self.keys()
-
-    def items(self):
-        return [(k, getattr(self, k)) for k in self.keys()]
-
-    def values(self):
-        return [getattr(self, k) for k in self.keys()]
+def load_module(path, module_name):
+    spec = importlib.util.spec_from_file_location(module_name, path)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    spec.loader.exec_module(module)
+    return module
 
 
-FAKE_CACHE_MANAGER_TEMPLATE = '''
-import dataclasses
-import json
-from datetime import datetime, timezone
-
-_LOG_PATH = {log_path!r}
-
-
-def _log(record):
-    with open(_LOG_PATH, "a", encoding="utf-8") as fh:
-        fh.write(json.dumps(record, default=str) + "\\n")
+def load_cache_manager():
+    gen = next(p for p in Path(generator.__file__).resolve().parents if p.name == "gen")
+    base = gen / "cache-manager"
+    path = base / "cache_manager.py" if (base / "cache_manager.py").is_file() else base / "cache_manager" / "__init__.py"
+    return load_module(path, "cache_manager")
 
 
-@dataclasses.dataclass
-class CacheKey:
-    spec_bundle_hash: str
-    gate_inputs_hash: str
-    gate_version: str
-    model_pin: str
+class Bundle(dict):
+    """A SpecBundle stand-in readable both as a mapping and by attribute."""
+
+    def __getattr__(self, name):
+        try:
+            return self[name]
+        except KeyError:
+            raise AttributeError(name)
 
 
-@dataclasses.dataclass
-class CachedResult:
-    gate_type: str
-    payload: dict
-    stored_at: str
-
-
-class Miss:
-    def __eq__(self, other):
-        return isinstance(other, Miss)
-
-    def __hash__(self):
-        return hash("Miss")
-
-    def __repr__(self):
-        return "Miss()"
-
-
-class SchemaValidationError(ValueError):
-    pass
-
-
-def _key_dict(cache_key):
-    if isinstance(cache_key, dict):
-        return dict(cache_key)
-    try:
-        return dataclasses.asdict(cache_key)
-    except Exception:
-        return {{"repr": repr(cache_key)}}
-
-
-def get(cache_key, *, repo_root=None):
-    _log({{"op": "get", "key": _key_dict(cache_key)}})
-    return Miss()
-
-
-def put(cache_key, result, *, repo_root=None):
-    _log({{"op": "put", "key": _key_dict(cache_key)}})
-    return None
-
-
-def now_iso():
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-
-
-def stats(*, repo_root=None):
-    return {{"entry_count": 0}}
-
-
-def main(argv=None):
-    print(json.dumps({{"result": "miss"}}))
-    return 0
-'''
-
-
-COMPONENT_MD = """---
-id: comp-foo
-title: Foo
-status: draft
-owners: [team-a]
-sealed: false
-depends_on: []
----
-
-# Foo
-
-## Purpose
-
-Foo doubles a number.
-"""
-
-
-def _build_repo(tmp_path):
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    (repo_root / "specs").mkdir()
-    (repo_root / "specs" / "glossary.md").write_text(
-        "# Glossary\n\n- **Foo** — a test term.\n", encoding="utf-8"
-    )
-    comp_dir = repo_root / "specs" / "components" / "foo"
-    comp_dir.mkdir(parents=True)
-    (comp_dir / "component.md").write_text(COMPONENT_MD, encoding="utf-8")
-
-    cache_log = tmp_path / "cache_calls.jsonl"
-    cache_log.write_text("", encoding="utf-8")
-    fake_dir = repo_root / "gen" / "cache-manager"
-    fake_dir.mkdir(parents=True)
-    (fake_dir / "cache_manager.py").write_text(
-        FAKE_CACHE_MANAGER_TEMPLATE.format(log_path=str(cache_log)),
-        encoding="utf-8",
-    )
-    return repo_root, cache_log
-
-
-def _bundle():
-    return _FakeSpecBundle(
-        component_id="comp-foo",
-        spec_bundle_hash="sha256:" + "ab" * 32,
-        spec="# Foo\n\n## Purpose\n\nFoo doubles a number.\n\n# R-FOO-001\n\n"
-        "**R-FOO-001** — `foo(x)` MUST return `2 * x`.",
+def make_bundle():
+    return Bundle(
+        component_id=COMPONENT_ID,
+        spec_bundle_hash=BUNDLE_HASH,
+        spec="# Foo\n\n## Purpose\n\nFoo doubles a number.\n\n# R-FOO-001\n\n**R-FOO-001** \u2014 `foo(x)` MUST return `2 * x`.",
         interface="# Library\n\n```\nfoo(x: int) -> int\n```",
-        constraints="None.",
-        glossary="- **Foo** — a test term.",
+        constraints="# Constraints\n\nNone.",
+        dependency_interfaces={},
+        dependency_context={},
+        dependency_usage={},
+        vars={},
+        glossary="# Glossary\n\n- **Foo** \u2014 a test term.",
         hint_code=None,
     )
 
 
-def _read_cache_log(cache_log):
-    records = []
-    for line in cache_log.read_text(encoding="utf-8").splitlines():
-        line = line.strip()
-        if line:
-            records.append(json.loads(line))
-    return records
+def write(path, text):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
 
 
-def _gen_files_written(repo_root):
-    target = repo_root / "gen" / "foo"
-    if not target.exists():
-        return []
-    return [p for p in target.rglob("*") if p.is_file()]
-
-
-def _local_cache_files(repo_root):
-    cache_dir = repo_root / ".hotdocs" / "cache"
-    if not cache_dir.exists():
-        return []
-    return [p for p in cache_dir.rglob("*") if p.is_file()]
+def build_repo(repo_root):
+    write(repo_root / "specs" / "glossary.md", "# Glossary\n\n- **Foo** \u2014 a test term.\n")
+    comp = repo_root / "specs" / "components" / SLUG
+    write(
+        comp / "component.md",
+        "---\n"
+        "id: comp-foo\n"
+        "title: Foo\n"
+        "status: draft\n"
+        "owners: [team-a]\n"
+        "sealed: false\n"
+        "depends_on: []\n"
+        "---\n"
+        "\n"
+        "# Foo\n"
+        "\n"
+        "## Purpose\n"
+        "\n"
+        "Foo doubles a number.\n",
+    )
+    write(
+        comp / "requirements" / "R-FOO-001.md",
+        "# R-FOO-001\n\n**R-FOO-001** \u2014 `foo(x)` MUST return `2 * x`.\n",
+    )
+    write(
+        comp / "acceptance" / "AC-FOO-001.md",
+        "# AC-FOO-001\n\nCovers: R-FOO-001\nKind: generated-test\n\n```gherkin\nGiven x = 2\nWhen foo(x) is called\nThen it returns 4\n```\n",
+    )
+    write(comp / "interface" / "library.md", "# Library\n\n```\nfoo(x: int) -> int\n```\n")
+    write(comp / "constraints.md", "# Constraints\n\nNone.\n")
 
 
 @pytest.fixture
-def env(tmp_path, monkeypatch):
-    repo_root, cache_log = _build_repo(tmp_path)
+def repo_root(tmp_path, monkeypatch):
     monkeypatch.delenv("VAR_CACHE_STORE_URL", raising=False)
-    monkeypatch.delenv("VAR_HOTDOCS_CONFIG", raising=False)
-    monkeypatch.chdir(repo_root)
-    return repo_root, cache_log
+    root = tmp_path / "repo"
+    root.mkdir()
+    build_repo(root)
+    monkeypatch.chdir(root)
+    return root
 
 
-def test_network_error_yields_model_call_error_no_files_no_cache_hit(env):
-    repo_root, cache_log = env
-    calls = []
+def make_text_backend(text, log_path):
+    def backend(prompt, model, **params):
+        with open(log_path, "a", encoding="utf-8") as fh:
+            fh.write("call\n")
+        return {"text": text, "model": model, "backend": "mock", "model_call_error": None}
 
-    def failing_backend(prompt, model, **params):
-        calls.append({"prompt": prompt, "model": model})
-        raise urllib.error.URLError("connection refused")
+    return backend
 
-    result = generator.generate(
-        _bundle(),
-        "claude-sonnet-5",
-        None,
-        repo_root=repo_root,
-        llm_backend=failing_backend,
+
+def calls(log_path):
+    if not log_path.exists():
+        return 0
+    return len([l for l in log_path.read_text(encoding="utf-8").splitlines() if l.strip()])
+
+
+def gen_files(repo_root):
+    d = repo_root / "gen" / SLUG
+    if not d.exists():
+        return []
+    return [p for p in d.rglob("*") if p.is_file()]
+
+
+def assert_nothing_cached(repo_root):
+    cm = load_cache_manager()
+    stats = cm.stats(repo_root=repo_root)
+    assert field(stats, "entry_count") == 0
+    key = cm.CacheKey(
+        spec_bundle_hash=BUNDLE_HASH,
+        gate_inputs_hash="sha256:" + hashlib.sha256(
+            json.dumps(sorted([]), sort_keys=True).encode("utf-8")
+        ).hexdigest(),
+        gate_version=generator.GATE_VERSION,
+        model_pin=MODEL,
     )
-
-    assert calls, "the mock model was never called"
-
-    error = _field(result, "model_call_error")
-    assert error is not None and error, f"expected model_call_error, got {error!r}"
-    category = _field(error, "category")
-    assert category in ENDPOINT_CATEGORIES, f"unexpected category {category!r}"
-
-    files = _field(result, "files")
-    assert not files, f"expected empty files, got {files!r}"
-
-    assert _field(result, "cache_hit") is False
-    assert _field(result, "refused") is None
-
-    puts = [r for r in _read_cache_log(cache_log) if r.get("op") == "put"]
-    assert puts == [], f"a failed call must not be cached: {puts!r}"
-    assert _gen_files_written(repo_root) == []
-    assert _local_cache_files(repo_root) == []
+    assert isinstance(cm.get(key, repo_root=repo_root), cm.Miss)
 
 
-def test_response_without_file_blocks_is_empty_response(env):
-    repo_root, cache_log = env
-    calls = []
+def assert_failed_result(result):
+    assert field(result, "model_call_error") is not None
+    assert not field(result, "files")
+    assert field(result, "cache_hit") is False
+    assert field(result, "refused") is None
 
-    def blockless_backend(prompt, model, **params):
-        calls.append({"prompt": prompt, "model": model})
+
+# --- Scenario 1: network error ---------------------------------------------
+
+def test_network_error_raised_by_mock_is_model_call_error(repo_root, tmp_path):
+    log_path = tmp_path / "calls.log"
+
+    def backend(prompt, model, **params):
+        with open(log_path, "a", encoding="utf-8") as fh:
+            fh.write("call\n")
+        raise ConnectionError("network unreachable")
+
+    result = generator.generate(make_bundle(), MODEL, repo_root=repo_root, llm_backend=backend)
+
+    assert calls(log_path) >= 1
+    assert_failed_result(result)
+    assert gen_files(repo_root) == []
+    assert_nothing_cached(repo_root)
+
+
+def test_network_error_reported_by_mock_is_model_call_error(repo_root, tmp_path):
+    log_path = tmp_path / "calls.log"
+
+    def backend(prompt, model, **params):
+        with open(log_path, "a", encoding="utf-8") as fh:
+            fh.write("call\n")
         return {
-            "text": "I considered the spec carefully but produced no files here.\n"
-            "def foo(x):\n    return 2 * x\n",
+            "text": None,
             "model": model,
             "backend": "mock",
-            "model_call_error": None,
+            "model_call_error": {"category": "network", "message": "network unreachable"},
         }
 
-    result = generator.generate(
-        _bundle(),
-        "claude-sonnet-5",
-        None,
-        repo_root=repo_root,
-        llm_backend=blockless_backend,
+    result = generator.generate(make_bundle(), MODEL, repo_root=repo_root, llm_backend=backend)
+
+    assert calls(log_path) >= 1
+    assert_failed_result(result)
+    assert gen_files(repo_root) == []
+    assert_nothing_cached(repo_root)
+
+
+# --- Scenario 2: reply with no file blocks ---------------------------------
+
+def test_reply_without_files_is_empty_response(repo_root, tmp_path):
+    log_path = tmp_path / "calls.log"
+    text = "I cannot: the bundle omits X."
+    backend = make_text_backend(text, log_path)
+
+    result = generator.generate(make_bundle(), MODEL, repo_root=repo_root, llm_backend=backend)
+
+    assert calls(log_path) >= 1
+    assert_failed_result(result)
+    err = field(result, "model_call_error")
+    assert field(err, "category") == "empty_response"
+    assert field(err, "message") == (
+        "the model reply contained no files; it began:\nI cannot: the bundle omits X."
     )
+    assert gen_files(repo_root) == []
+    assert_nothing_cached(repo_root)
 
-    assert calls, "the mock model was never called"
 
-    error = _field(result, "model_call_error")
-    assert error is not None and error, f"expected model_call_error, got {error!r}"
-    assert _field(error, "category") == "empty_response"
-    assert isinstance(_field(error, "message"), str)
+# --- Scenario 3: long reply truncated ---------------------------------------
 
-    files = _field(result, "files")
-    assert not files, f"expected empty files, got {files!r}"
+def test_long_reply_without_files_is_truncated(repo_root, tmp_path):
+    log_path = tmp_path / "calls.log"
+    text = "a" * 4010
+    backend = make_text_backend(text, log_path)
 
-    assert _field(result, "cache_hit") is False
-    assert _field(result, "refused") is None
+    result = generator.generate(make_bundle(), MODEL, repo_root=repo_root, llm_backend=backend)
 
-    puts = [r for r in _read_cache_log(cache_log) if r.get("op") == "put"]
-    assert puts == [], f"an empty response must not be cached: {puts!r}"
-    assert _gen_files_written(repo_root) == [], "nothing may be written to gen/foo/"
-    assert _local_cache_files(repo_root) == []
+    assert calls(log_path) >= 1
+    assert_failed_result(result)
+    err = field(result, "model_call_error")
+    assert field(err, "category") == "empty_response"
+    message = field(err, "message")
+    assert message.endswith("\n[10 more characters]")
+    assert message == (
+        "the model reply contained no files; it began:\n"
+        + "a" * 4000
+        + "\n[10 more characters]"
+    )
+    assert gen_files(repo_root) == []
+    assert_nothing_cached(repo_root)
+
+
+# --- Scenario 4: whitespace-only reply --------------------------------------
+
+def test_whitespace_reply_is_empty(repo_root, tmp_path):
+    log_path = tmp_path / "calls.log"
+    backend = make_text_backend("  \n", log_path)
+
+    result = generator.generate(make_bundle(), MODEL, repo_root=repo_root, llm_backend=backend)
+
+    assert calls(log_path) >= 1
+    assert_failed_result(result)
+    err = field(result, "model_call_error")
+    assert field(err, "category") == "empty_response"
+    assert field(err, "message") == "the model reply was empty"
+    if isinstance(err, dict):
+        assert err == {"category": "empty_response", "message": "the model reply was empty"}
+    assert gen_files(repo_root) == []
+    assert_nothing_cached(repo_root)

@@ -1,10 +1,7 @@
-"""AC-GEN-018 (covers R-GEN-017): GenerationResult.spec_bundle_hash MUST
-equal the bundle's own spec_bundle_hash exactly."""
+# hotdocs-criterion: sha256:2661491a3726dc87d0a772fce8585cbd6cc854422aebc72adb032dd0725d5e52
+"""AC-GEN-018 / R-GEN-017: GenerationResult.spec_bundle_hash echoes bundle.spec_bundle_hash."""
 
-import dataclasses
-import hashlib
 import re
-from collections.abc import Mapping
 from pathlib import Path
 
 import pytest
@@ -12,60 +9,33 @@ import pytest
 import generator
 
 
-COMPONENT_ID = "comp-foo"
-COMPONENT_SLUG = "foo"
-MODEL = "claude-sonnet-5"
-
-FILE_PATH = "foo.py"
-FILE_CONTENT = "def foo(x: int) -> int:\n    return 2 * x\n"
+def field(value, name):
+    return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-@dataclasses.dataclass
-class FakeSpecBundle(Mapping):
-    """Mirrors comp-spec-bundle-assembler's documented SpecBundle: a dataclass
-    with these fields in this order that also reads as a read-only mapping."""
+class Bundle(dict):
+    """A SpecBundle stand-in readable both as a mapping and by attribute."""
 
-    component_id: str
-    spec_bundle_hash: str
-    spec: str
-    interface: str
-    constraints: str
-    dependency_interfaces: dict = dataclasses.field(default_factory=dict)
-    dependency_context: dict = dataclasses.field(default_factory=dict)
-    dependency_usage: dict = dataclasses.field(default_factory=dict)
-    vars: dict = dataclasses.field(default_factory=dict)
-    glossary: str = ""
-    hint_code: object = None
-
-    def _names(self):
-        return [f.name for f in dataclasses.fields(self)]
-
-    def __getitem__(self, key):
-        if key in self._names():
-            return getattr(self, key)
-        raise KeyError(key)
-
-    def __iter__(self):
-        return iter(self._names())
-
-    def __len__(self):
-        return len(self._names())
+    def __getattr__(self, name):
+        try:
+            return self[name]
+        except KeyError:
+            raise AttributeError(name)
 
 
-def _field(value, name):
-    if isinstance(value, dict):
-        return value.get(name)
-    return getattr(value, name, None)
+def write(path, text):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
 
 
-def _make_hash(label: str) -> str:
-    return "sha256:" + hashlib.sha256(label.encode("utf-8")).hexdigest()
-
-
-def _write_component_md(repo_root: Path) -> None:
-    comp_dir = repo_root / "specs" / "components" / COMPONENT_SLUG
-    comp_dir.mkdir(parents=True, exist_ok=True)
-    (comp_dir / "component.md").write_text(
+def build_fixture(repo_root):
+    write(
+        repo_root / "specs" / "glossary.md",
+        "# Glossary\n\n- **Foo** — a test term.\n",
+    )
+    comp = repo_root / "specs" / "components" / "foo"
+    write(
+        comp / "component.md",
         "---\n"
         "id: comp-foo\n"
         "title: Foo\n"
@@ -80,50 +50,48 @@ def _write_component_md(repo_root: Path) -> None:
         "## Purpose\n"
         "\n"
         "Foo doubles a number.\n",
-        encoding="utf-8",
     )
-    glossary = repo_root / "specs" / "glossary.md"
-    glossary.parent.mkdir(parents=True, exist_ok=True)
-    glossary.write_text("# Glossary\n\n- **Foo** — a test term.\n", encoding="utf-8")
-
-
-def _make_bundle(spec_bundle_hash: str) -> FakeSpecBundle:
-    return FakeSpecBundle(
-        component_id=COMPONENT_ID,
-        spec_bundle_hash=spec_bundle_hash,
-        spec=(
-            "# Foo\n\n## Purpose\n\nFoo doubles a number.\n\n"
-            "# R-FOO-001\n\n**R-FOO-001** — `foo(x)` MUST return `2 * x`."
-        ),
-        interface="# Library\n\n```\nfoo(x: int) -> int\n```",
-        constraints="# Constraints\n\nNone.",
-        glossary="# Glossary\n\n- **Foo** — a test term.",
+    write(
+        comp / "requirements" / "R-FOO-001.md",
+        "# R-FOO-001\n\n**R-FOO-001** — `foo(x)` MUST return `2 * x`.\n",
     )
+    write(
+        comp / "acceptance" / "AC-FOO-001.md",
+        "# AC-FOO-001\n"
+        "\n"
+        "Covers: R-FOO-001\n"
+        "Kind: generated-test\n"
+        "\n"
+        "```gherkin\n"
+        "Given x = 2\n"
+        "When foo(x) is called\n"
+        "Then it returns 4\n"
+        "```\n",
+    )
+    write(
+        comp / "interface" / "library.md",
+        "# Library\n\n```\nfoo(x: int) -> int\n```\n",
+    )
+    write(comp / "constraints.md", "# Constraints\n\nNone.\n")
 
 
-def _candidate_nonces(prompt: str) -> list:
-    found = re.findall(r"(?<![0-9a-fA-F])([0-9a-f]{32})(?![0-9a-fA-F])", prompt)
-    seen = []
-    for n in found:
-        if n not in seen:
-            seen.append(n)
-    return seen
-
-
-def _make_backend(calls: list):
+def make_backend(log_path):
     def backend(prompt, model, **params):
-        calls.append({"model": model})
-        nonces = _candidate_nonces(prompt)
-        assert nonces, "prompt did not state a 32-hex nonce for the file markers"
-        blocks = []
-        for nonce in nonces:
-            blocks.append(
-                f"-----BEGIN FILE {nonce}: {FILE_PATH}-----\n"
-                f"{FILE_CONTENT}"
-                f"-----END FILE {nonce}-----\n"
-            )
+        with open(log_path, "a", encoding="utf-8") as fh:
+            fh.write("call\n")
+        m = re.search(r"BEGIN FILE ([0-9a-f]{32})", prompt)
+        if m is None:
+            m = re.search(r"(?<![0-9a-f])([0-9a-f]{32})(?![0-9a-f])", prompt)
+        nonce = m.group(1) if m else "nonce"
+        text = (
+            "Here is the implementation.\n"
+            "-----BEGIN FILE " + nonce + ": foo.py-----\n"
+            "def foo(x):\n"
+            "    return 2 * x\n"
+            "-----END FILE " + nonce + "-----\n"
+        )
         return {
-            "text": "Here is the implementation.\n" + "".join(blocks),
+            "text": text,
             "model": model,
             "backend": "mock",
             "model_call_error": None,
@@ -132,77 +100,52 @@ def _make_backend(calls: list):
     return backend
 
 
-@pytest.fixture
-def isolated_env(tmp_path, monkeypatch):
+def make_bundle(spec_bundle_hash):
+    return Bundle(
+        component_id="comp-foo",
+        spec_bundle_hash=spec_bundle_hash,
+        spec="# Foo\n\n## Purpose\n\nFoo doubles a number.\n\n# R-FOO-001\n\n**R-FOO-001** — `foo(x)` MUST return `2 * x`.",
+        interface="# Library\n\n```\nfoo(x: int) -> int\n```",
+        constraints="# Constraints\n\nNone.",
+        dependency_interfaces={},
+        dependency_context={},
+        dependency_usage={},
+        vars={},
+        glossary="# Glossary\n\n- **Foo** — a test term.",
+        hint_code=None,
+    )
+
+
+@pytest.mark.parametrize(
+    "known_hash",
+    [
+        "sha256:" + "ab" * 32,
+        "sha256:" + "0123456789abcdef" * 4,
+    ],
+)
+def test_generation_result_echoes_bundle_spec_bundle_hash(tmp_path, monkeypatch, known_hash):
     monkeypatch.delenv("VAR_CACHE_STORE_URL", raising=False)
-    monkeypatch.delenv("VAR_HOTDOCS_CONFIG", raising=False)
-    work = tmp_path / "cwd"
-    work.mkdir()
-    monkeypatch.chdir(work)
-    return tmp_path
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    build_fixture(repo_root)
+    log_path = tmp_path / "backend_calls.log"
 
-
-def _run(repo_root: Path, spec_bundle_hash: str, retry_feedback=None):
-    _write_component_md(repo_root)
-    bundle = _make_bundle(spec_bundle_hash)
-    calls = []
+    bundle = make_bundle(known_hash)
     result = generator.generate(
         bundle,
-        MODEL,
-        retry_feedback,
+        "mock:model",
         repo_root=repo_root,
-        llm_backend=_make_backend(calls),
+        llm_backend=make_backend(log_path),
     )
-    return bundle, result, calls
 
+    # The mock model was actually called and produced valid files.
+    assert log_path.is_file()
+    assert log_path.read_text(encoding="utf-8").count("call") >= 1
+    assert field(result, "model_call_error") is None
+    assert field(result, "refused") is None
+    files = field(result, "files")
+    assert files
 
-def test_spec_bundle_hash_echoes_bundle_hash_exactly(isolated_env):
-    repo_root = isolated_env / "repo"
-    repo_root.mkdir()
-    known_hash = _make_hash("AC-GEN-018 known bundle")
-
-    bundle, result, calls = _run(repo_root, known_hash)
-
-    assert result is not None
-    assert _field(result, "model_call_error") is None, _field(result, "model_call_error")
-    assert _field(result, "refused") is None, _field(result, "refused")
-    files = _field(result, "files")
-    assert files, "expected a successful generation with non-empty files"
-    assert calls, "the injected mock model was never called"
-
-    got = _field(result, "spec_bundle_hash")
-    assert isinstance(got, str)
-    assert got == bundle.spec_bundle_hash
-    assert got == known_hash
-
-
-def test_spec_bundle_hash_tracks_each_distinct_bundle(isolated_env):
-    hash_a = _make_hash("AC-GEN-018 bundle A")
-    hash_b = _make_hash("AC-GEN-018 bundle B")
-    assert hash_a != hash_b
-
-    repo_a = isolated_env / "repo_a"
-    repo_a.mkdir()
-    repo_b = isolated_env / "repo_b"
-    repo_b.mkdir()
-
-    bundle_a, result_a, _ = _run(repo_a, hash_a)
-    bundle_b, result_b, _ = _run(repo_b, hash_b, ["R-FOO-001"])
-
-    assert _field(result_a, "files"), "bundle A generation did not succeed"
-    assert _field(result_b, "files"), "bundle B generation did not succeed"
-    assert _field(result_a, "spec_bundle_hash") == bundle_a.spec_bundle_hash == hash_a
-    assert _field(result_b, "spec_bundle_hash") == bundle_b.spec_bundle_hash == hash_b
-
-
-def test_spec_bundle_hash_echoed_on_repeat_call(isolated_env):
-    repo_root = isolated_env / "repo"
-    repo_root.mkdir()
-    known_hash = _make_hash("AC-GEN-018 repeat")
-
-    bundle, first, _ = _run(repo_root, known_hash)
-    _, second, _ = _run(repo_root, known_hash)
-
-    assert _field(first, "files"), "first generation did not succeed"
-    assert _field(first, "spec_bundle_hash") == bundle.spec_bundle_hash
-    assert _field(second, "spec_bundle_hash") == bundle.spec_bundle_hash
+    # The Then clause: exact echo of the bundle's own spec_bundle_hash.
+    assert field(result, "spec_bundle_hash") == known_hash
+    assert field(result, "spec_bundle_hash") == bundle.spec_bundle_hash

@@ -1,0 +1,1 @@
+{"timestamp": "2026-11-17T14:43:15.671481+00:00", "model": "claude-sonnet-5", "backend": "MockBackend", "model_call_error": {"category": "timeout", "message": "bounded wait exceeded"}}
