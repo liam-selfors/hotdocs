@@ -9,11 +9,6 @@
   transport-level log, not a copy of every prompt/response) or the full
   `model_call_error` object.
 
-  This is deliberately a different, lower-level record than anything a
-  caller (`generator`, `test-author`, `component-gate-runner`'s `judge`
-  wiring) separately persists about its own attempt — `D19`. This one
-  is caller-agnostic: it answers "how many calls, to which backend, with
-  what error rate" across the whole pipeline, independent of which
-  component's semantics any individual call served. Writing it here,
-  once, is what `D18` already made this component the right place for —
-  every model call already passes through here regardless of caller.
+  It is caller-agnostic and lower-level than any record a caller keeps
+  of its own attempt (`D19`): it answers how many calls went to which
+  backend, with what error rate.
