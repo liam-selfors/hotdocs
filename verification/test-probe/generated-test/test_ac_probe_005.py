@@ -11,35 +11,72 @@ def _findings(report):
     return list(field(report, "findings"))
 
 
-def test_classification_of_five_tests():
-    source = textwrap.dedent(
-        '''
-        import pytest
-        from slugify import slugify
+SOURCE_MIXED = textwrap.dedent(
+    '''
+    import pytest
+    from slugify import slugify
 
 
-        def test_reach():
-            assert slugify("A") == "a"
+    def test_reach():
+        assert slugify("A") == "a"
 
 
-        def test_guarded():
-            with pytest.raises(Exception):
-                slugify("")
+    def test_guarded():
+        with pytest.raises(Exception):
+            slugify("")
 
 
-        def test_missing(no_such_fixture):
-            assert no_such_fixture is not None
+    def test_missing(no_such_fixture):
+        assert no_such_fixture is not None
 
 
-        def test_constant():
-            assert 1 == 1
+    def test_constant():
+        assert 1 == 1
 
 
-        def test_wrong():
-            assert int("x") == 1
-        '''
-    )
-    report = test_probe.probe(source, {}, "slugify")
+    def test_wrong():
+        assert int("x") == 1
+    '''
+).lstrip()
+
+
+SOURCE_SLEEP = textwrap.dedent(
+    '''
+    import time
+
+
+    def test_sleeps():
+        time.sleep(30)
+        assert True
+    '''
+).lstrip()
+
+
+SOURCE_COLLECTION_ERROR = textwrap.dedent(
+    '''
+    raise RuntimeError("boom")
+
+
+    def test_after():
+        assert True
+    '''
+).lstrip()
+
+
+SOURCE_HIDDEN_NAME_ERROR = textwrap.dedent(
+    '''
+    from slugify import slugify
+
+
+    def test_x():
+        eval("undefined_q")
+        assert slugify("A") == "a"
+    '''
+).lstrip()
+
+
+def test_mixed_tests_are_classified():
+    report = test_probe.probe(SOURCE_MIXED, {}, "slugify")
 
     assert field(report, "tests_run") == 5
     assert field(report, "tests_reached") == 2
@@ -63,17 +100,8 @@ def test_classification_of_five_tests():
     assert field(report, "ok") is False
 
 
-def test_timeout_gives_one_probe_timeout():
-    source = textwrap.dedent(
-        '''
-        import time
-
-
-        def test_sleepy():
-            time.sleep(30)
-        '''
-    )
-    report = test_probe.probe(source, {}, "slugify", timeout=2)
+def test_long_running_test_times_out():
+    report = test_probe.probe(SOURCE_SLEEP, {}, "slugify", timeout=2)
 
     findings = _findings(report)
     assert len(findings) == 1, findings
@@ -81,17 +109,8 @@ def test_timeout_gives_one_probe_timeout():
     assert field(report, "ok") is False
 
 
-def test_module_body_raise_gives_one_collection_error():
-    source = textwrap.dedent(
-        '''
-        raise RuntimeError("boom")
-
-
-        def test_never():
-            assert True
-        '''
-    )
-    report = test_probe.probe(source, {}, "slugify")
+def test_module_body_error_is_collection_error():
+    report = test_probe.probe(SOURCE_COLLECTION_ERROR, {}, "slugify")
 
     findings = _findings(report)
     assert len(findings) == 1, findings
@@ -100,17 +119,7 @@ def test_module_body_raise_gives_one_collection_error():
 
 
 def test_runtime_name_error_is_test_bug():
-    source = textwrap.dedent(
-        '''
-        from slugify import slugify
-
-
-        def test_x():
-            eval("undefined_q")
-            assert slugify("A") == "a"
-        '''
-    )
-    report = test_probe.probe(source, {}, "slugify")
+    report = test_probe.probe(SOURCE_HIDDEN_NAME_ERROR, {}, "slugify")
 
     findings = _findings(report)
     assert len(findings) == 1, findings

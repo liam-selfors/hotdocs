@@ -8,7 +8,7 @@ def field(value, name):
 SOURCE = "def test_a(:\n    pass\n"
 
 
-def test_syntax_error_gives_single_finding_and_no_stub_run():
+def test_ac_probe_001_syntax_error_returns_single_finding_and_no_stub_run():
     report = test_probe.probe(SOURCE, {}, "slugify")
 
     assert field(report, "ok") is False
@@ -26,7 +26,7 @@ def test_syntax_error_gives_single_finding_and_no_stub_run():
     assert field(report, "tests_reached") == 0
 
 
-def test_syntax_error_report_to_dict_agrees():
+def test_ac_probe_001_to_dict_agrees():
     report = test_probe.probe(SOURCE, {}, "slugify")
     if isinstance(report, dict):
         data = report

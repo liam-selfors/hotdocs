@@ -5,19 +5,18 @@ def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
+def _findings(report):
+    return list(field(report, "findings"))
+
+
 def _mismatches(report):
-    findings = field(report, "findings")
-    return [f for f in findings if field(f, "kind") == "fake_signature_mismatch"]
+    return [
+        f for f in _findings(report)
+        if field(f, "kind") == "fake_signature_mismatch"
+    ]
 
 
-def _line_of(source, prefix):
-    for index, text in enumerate(source.split("\n"), start=1):
-        if text.startswith(prefix):
-            return index
-    raise AssertionError("prefix not found: " + prefix)
-
-
-BUNDLE_ONE = {
+BUNDLE_1 = {
     "dependency_interfaces": {
         "comp-bar": (
             "bar_get(key: str, default: dict[str, str]) -> str\n"
@@ -27,67 +26,66 @@ BUNDLE_ONE = {
 }
 
 
-def test_ac_probe_004_single_mismatch_on_bar_get_def_line():
-    source = "\n".join(
-        [
-            "# fixture test file",
-            "",
-            "",
-            "def bar_get(key):",
-            "    return 'v'",
-            "",
-            "",
-            "def bar_put(key):",
-            "    return None",
-            "",
-            "",
-            "def other(a, b, c):",
-            "    return a",
-            "",
-            "",
-            "alias = bar_get",
-            "",
-            "",
-            "def test_nothing():",
-            "    assert True",
-            "",
-        ]
-    )
-    report = test_probe.probe(source, BUNDLE_ONE, "slugify")
+def test_one_mismatch_on_bar_get_def_line():
+    lines = [
+        "# fakes for comp-bar",
+        "",
+        "def bar_get(key):",
+        "    return 'x'",
+        "",
+        "",
+        "def bar_put(key):",
+        "    return None",
+        "",
+        "",
+        "def other(a, b, c):",
+        "    return None",
+        "",
+        "",
+        "alias = bar_get",
+        "",
+        "",
+        "def test_nothing():",
+        "    assert True",
+        "",
+    ]
+    source = "\n".join(lines)
+    bar_get_line = lines.index("def bar_get(key):") + 1
+
+    report = test_probe.probe(source, BUNDLE_1, "slugify")
+
     mismatches = _mismatches(report)
-    assert len(mismatches) == 1, mismatches
+    assert len(mismatches) == 1, _findings(report)
     finding = mismatches[0]
-    assert field(finding, "line") == _line_of(source, "def bar_get(")
+    assert field(finding, "line") == bar_get_line
     assert field(finding, "message") == (
         "bar_get takes 1 parameters; the interface of comp-bar gives 2"
     )
     assert field(finding, "severity") == "error"
 
 
-def test_ac_probe_004_star_args_fake_satisfies_any_count():
-    source = "\n".join(
-        [
-            "# fixture test file",
-            "",
-            "",
-            "def bar_get(*args):",
-            "    return 'v'",
-            "",
-            "",
-            "def bar_put(key):",
-            "    return None",
-            "",
-            "",
-            "def test_nothing():",
-            "    assert True",
-            "",
-        ]
-    )
-    report = test_probe.probe(source, BUNDLE_ONE, "slugify")
-    assert _mismatches(report) == []
+def test_star_args_fake_satisfies_any_count():
+    lines = [
+        "def bar_get(*args):",
+        "    return 'x'",
+        "",
+        "",
+        "def bar_put(key):",
+        "    return None",
+        "",
+        "",
+        "def test_nothing():",
+        "    assert True",
+        "",
+    ]
+    source = "\n".join(lines)
+
+    report = test_probe.probe(source, BUNDLE_1, "slugify")
+
+    assert _mismatches(report) == [], _findings(report)
 
 
-def test_ac_probe_004_def_inside_string_literal_and_chained_alias():
+def test_def_inside_string_literal_is_checked_with_its_source_line():
     bundle = {
         "dependency_interfaces": {
             "comp-bar": (
@@ -96,24 +94,20 @@ def test_ac_probe_004_def_inside_string_literal_and_chained_alias():
         }
     }
     lines = [
-        "# fixture test file",          # 1
-        "",                             # 2
-        "",                             # 3
-        "def bar_get(a, b, *, c):",     # 4
-        "    return 'v'",               # 5
-        "",                             # 6
-        "",                             # 7
-        "x = y = bar_get",              # 8
-        "",                             # 9
-        'SNIPPET = """',                # 10
-        "import os",                    # 11
-        "def bar_get(a, b):",           # 12
-        "    return os.sep",            # 13
-        '"""',                          # 14
-        "",                             # 15
-        "",                             # 16
-        "def test_nothing():",          # 17
-        "    assert SNIPPET",           # 18
+        "def bar_get(a, b, *, c):",      # 1
+        "    return 'x'",                # 2
+        "",                              # 3
+        "",                              # 4
+        "x = y = bar_get",               # 5
+        "",                              # 6
+        "",                              # 7
+        "def test_nothing():",           # 8
+        "    assert True",               # 9
+        'SNIPPET = """',                 # 10
+        "# a fake inside a string",      # 11
+        "def bar_get(a, b):",            # 12
+        "    return 1",                  # 13
+        '"""',                           # 14
         "",
     ]
     source = "\n".join(lines)
@@ -121,10 +115,12 @@ def test_ac_probe_004_def_inside_string_literal_and_chained_alias():
     assert source.split("\n")[11] == "def bar_get(a, b):"
 
     report = test_probe.probe(source, bundle, "slugify")
+
     mismatches = _mismatches(report)
-    assert len(mismatches) == 1, mismatches
+    assert len(mismatches) == 1, _findings(report)
     finding = mismatches[0]
     assert field(finding, "line") == 12
     assert field(finding, "message") == (
         "bar_get takes 2 parameters; the interface of comp-bar gives 3"
     )
+    assert field(finding, "severity") == "error"

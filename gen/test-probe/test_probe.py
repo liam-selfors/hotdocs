@@ -1,9 +1,7 @@
 """Test probe: checks a generated test file for defects of its own."""
 
 import ast
-import dataclasses
 import importlib.util
-import io
 import os
 import re
 import shutil
@@ -12,16 +10,34 @@ import sys
 import tempfile
 import xml.etree.ElementTree as ET
 from collections.abc import Mapping
+from dataclasses import dataclass, field
 
 import pyflakes.api
 import pyflakes.messages
-import pyflakes.reporter
 
 GATE_VERSION = "test-probe@1.0.0"
 
-_TARGET_NAME = "test_probe_target.py"
+_TARGET = "test_probe_target.py"
 
-_STUB_SOURCE = '''class HotdocsProbeStubReached(BaseException):
+_SEVERITY = {
+    "syntax_error": "error",
+    "undefined_name": "error",
+    "unknown_import": "error",
+    "fake_signature_mismatch": "error",
+    "collection_error": "error",
+    "test_bug": "error",
+    "probe_timeout": "error",
+    "vacuous": "warn",
+}
+
+_BUG_PREFIXES = ("NameError", "UnboundLocalError", "ImportError", "ModuleNotFoundError")
+
+_IMPORT_GUARDS = ("ImportError", "ModuleNotFoundError")
+
+_SIG_START = re.compile(r"([A-Za-z_]\w*)\(")
+_ARROW = re.compile(r"\s*->")
+
+STUB_SOURCE = '''class HotdocsProbeStubReached(BaseException):
     pass
 
 
@@ -42,25 +58,13 @@ def __getattr__(name):
     return _Stub(name)
 '''
 
-_TEST_BUG_PREFIXES = (
-    "NameError",
-    "UnboundLocalError",
-    "ImportError",
-    "ModuleNotFoundError",
-)
 
-_IMPORT_ERROR_NAMES = ("ImportError", "ModuleNotFoundError")
-
-_SIG_START = re.compile(r"(?<!\w)([A-Za-z_]\w*)\(")
-_ARROW = re.compile(r"\s*->")
-
-
-@dataclasses.dataclass
+@dataclass
 class ProbeReport:
     ok: bool
-    findings: list
-    tests_run: int
-    tests_reached: int
+    findings: list = field(default_factory=list)
+    tests_run: int = 0
+    tests_reached: int = 0
 
     def to_dict(self):
         return {
@@ -72,163 +76,243 @@ class ProbeReport:
 
 
 def _finding(kind, line, message):
-    return {
-        "kind": kind,
-        "severity": "warn" if kind == "vacuous" else "error",
-        "line": line,
-        "message": message,
-    }
+    return {"kind": kind, "severity": _SEVERITY[kind], "line": line, "message": message}
 
 
-def _ordered(findings):
+def _sorted(findings):
     return sorted(findings, key=lambda f: (f["line"], f["message"]))
 
 
-# --- R-PROBE-002: pyflakes -------------------------------------------------
+def _report(findings, tests_run, tests_reached):
+    ok = not any(f["severity"] == "error" for f in findings)
+    return ProbeReport(ok, findings, tests_run, tests_reached)
 
 
-class _CollectingReporter(pyflakes.reporter.Reporter):
+# -- R-PROBE-002: pyflakes -------------------------------------------------
+
+
+class _Collector:
     def __init__(self):
-        super().__init__(io.StringIO(), io.StringIO())
         self.messages = []
+
+    def unexpectedError(self, filename, msg):
+        pass
+
+    def syntaxError(self, filename, msg, lineno, offset, text):
+        pass
 
     def flake(self, message):
         self.messages.append(message)
 
 
-def _check_undefined_names(test_source):
-    reporter = _CollectingReporter()
-    pyflakes.api.check(test_source, _TARGET_NAME, reporter)
-    findings = []
-    for message in reporter.messages:
-        if isinstance(message, pyflakes.messages.UndefinedName):
-            findings.append(
-                _finding(
-                    "undefined_name",
-                    message.lineno,
-                    "undefined name '%s'" % message.message_args[0],
-                )
-            )
-    return _ordered(findings)
+def _check_pyflakes(test_source):
+    collector = _Collector()
+    pyflakes.api.check(test_source, _TARGET, collector)
+    return [
+        _finding("undefined_name", m.lineno, "undefined name '%s'" % m.message_args[0])
+        for m in collector.messages
+        if isinstance(m, pyflakes.messages.UndefinedName)
+    ]
 
 
-# --- R-PROBE-003: imports ----------------------------------------------------
+# -- R-PROBE-003: imports --------------------------------------------------
 
 
-def _catches_import_error(try_node):
-    for handler in try_node.handlers:
-        caught = handler.type
-        elts = caught.elts if isinstance(caught, ast.Tuple) else [caught]
-        if any(
-            isinstance(e, ast.Name) and e.id in _IMPORT_ERROR_NAMES for e in elts
-        ):
+def _guards_import(node):
+    for handler in node.handlers:
+        types = handler.type.elts if isinstance(handler.type, ast.Tuple) else [handler.type]
+        if any(isinstance(t, ast.Name) and t.id in _IMPORT_GUARDS for t in types):
             return True
     return False
 
 
-def _unresolved(part, module_name):
+def _collect_imports(node, guarded, out):
+    if isinstance(node, (ast.Import, ast.ImportFrom)) and not guarded:
+        out.append(node)
+    for name, value in ast.iter_fields(node):
+        children = value if isinstance(value, list) else [value]
+        child_guarded = guarded or (
+            isinstance(node, ast.Try) and name == "body" and _guards_import(node)
+        )
+        for child in children:
+            if isinstance(child, ast.AST):
+                _collect_imports(child, child_guarded, out)
+
+
+def _resolves(part, names):
     return (
-        part != module_name
-        and part not in sys.stdlib_module_names
-        and importlib.util.find_spec(part) is None
+        part in names
+        or part in sys.stdlib_module_names
+        or importlib.util.find_spec(part) is not None
     )
 
 
-def _visit_imports(node, guarded, module_name, out):
-    if isinstance(node, ast.Try):
-        inner = guarded or _catches_import_error(node)
-        for child in node.body:
-            _visit_imports(child, inner, module_name, out)
-        for child in node.handlers + node.orelse + node.finalbody:
-            _visit_imports(child, guarded, module_name, out)
-        return
-    if not guarded:
-        parts = []
-        if isinstance(node, ast.Import):
-            parts = [alias.name.split(".")[0] for alias in node.names]
-        elif isinstance(node, ast.ImportFrom) and node.level == 0:
-            parts = [node.module.split(".")[0]]
-        for part in parts:
-            if _unresolved(part, module_name):
-                out.append(
-                    _finding("unknown_import", node.lineno, "cannot import '%s'" % part)
-                )
-    for child in ast.iter_child_nodes(node):
-        _visit_imports(child, guarded, module_name, out)
-
-
-def _check_imports(tree, module_name):
+def _check_imports(tree, names):
+    nodes = []
+    _collect_imports(tree, False, nodes)
     findings = []
-    _visit_imports(tree, False, module_name, findings)
-    return _ordered(findings)
+    for node in nodes:
+        if isinstance(node, ast.Import):
+            modules = [alias.name for alias in node.names]
+        elif node.level == 0:
+            modules = [node.module]
+        else:
+            modules = []
+        for module in modules:
+            part = module.split(".")[0]
+            if not _resolves(part, names):
+                findings.append(_finding("unknown_import", node.lineno, "cannot import '%s'" % part))
+    return findings
 
 
-# --- R-PROBE-004: fake arity -------------------------------------------------
+# -- R-PROBE-004: fake arity -----------------------------------------------
 
 
-def _interface_signatures(text):
-    """Yield (name, parameter count) for each parseable signature in text."""
+def _arity(args):
+    params = list(args.posonlyargs) + list(args.args) + list(args.kwonlyargs)
+    params += [a for a in (args.vararg, args.kwarg) if a is not None]
+    count = len([p for p in params if p.arg != "self"])
+    return count, args.vararg is not None or args.kwarg is not None
+
+
+def _signatures(text):
     for match in _SIG_START.finditer(text):
-        start = match.end() - 1
         depth = 0
-        end = None
-        for index in range(start, len(text)):
+        for index in range(match.end() - 1, len(text)):
             char = text[index]
             if char in "([{":
                 depth += 1
             elif char in ")]}":
                 depth -= 1
                 if depth == 0:
-                    end = index
                     break
-        if end is None or text[end] != ")" or not _ARROW.match(text, end + 1):
+        else:
             continue
-        params = text[start + 1:end]
+        if not _ARROW.match(text, index + 1):
+            continue
+        name = match.group(1)
         try:
-            fn = ast.parse("def _f(%s):\n    pass\n" % params).body[0]
-        except SyntaxError:
+            tree = ast.parse("def %s(%s): pass" % (name, text[match.end():index]))
+        except (SyntaxError, ValueError):
             continue
-        args = fn.args
-        names = [a.arg for a in args.posonlyargs + args.args + args.kwonlyargs]
-        names += [a.arg for a in (args.vararg, args.kwarg) if a is not None]
-        yield match.group(1), sum(1 for n in names if n != "self")
+        yield name, _arity(tree.body[0].args)[0]
 
 
-def _fake_arity(args):
-    if args.vararg is not None or args.kwarg is not None:
-        return None
-    return len(args.posonlyargs) + len(args.args) + len(args.kwonlyargs)
-
-
-def _collect_fakes(tree):
-    defs = []
-    for node in tree.body:
+def _collect_fakes(module, offset, out):
+    known = {}
+    for node in module.body:
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            defs.append((node.name, _fake_arity(node.args), node.lineno))
+            count, variadic = _arity(node.args)
+            known[node.name] = (count, variadic, node.lineno + offset)
+            out.append((node.name,) + known[node.name])
+        elif (
+            isinstance(node, ast.Assign)
+            and len(node.targets) == 1
+            and isinstance(node.targets[0], ast.Name)
+            and isinstance(node.value, ast.Name)
+            and node.value.id in known
+        ):
+            known[node.targets[0].id] = known[node.value.id]
+            out.append((node.targets[0].id,) + known[node.value.id])
+
+
+def _check_fakes(tree, dependency_interfaces):
+    interfaces = {}
+    for component_id, text in dependency_interfaces.items():
+        for name, count in _signatures(text):
+            interfaces.setdefault(name, []).append((component_id, count))
+    fakes = []
+    _collect_fakes(tree, 0, fakes)
     for node in ast.walk(tree):
         if isinstance(node, ast.Constant) and isinstance(node.value, str):
             try:
                 inner = ast.parse(node.value)
             except (SyntaxError, ValueError):
                 continue
-            for sub in inner.body:
-                if isinstance(sub, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                    defs.append(
-                        (sub.name, _fake_arity(sub.args), node.lineno + sub.lineno - 1)
-                    )
-    by_name = {name: (count, line) for name, count, line in defs}
-    fakes = list(defs)
-    for node in tree.body:
-        if (
-            isinstance(node, ast.Assign)
-            and len(node.targets) == 1
-            and isinstance(node.targets[0], ast.Name)
-            and isinstance(node.value, ast.Name)
-            and node.value.id in by_name
-        ):
-            count, line = by_name[node.value.id]
-            fakes.append((node.targets[0].id, count, line))
-    return fakes
+            _collect_fakes(inner, node.lineno - 1, fakes)
+    findings = []
+    for name, count, variadic, line in fakes:
+        if name not in interfaces or variadic:
+            continue
+        options = interfaces[name]
+        if any(count == m for _, m in options):
+            continue
+        component_id, expected = options[0]
+        findings.append(
+            _finding(
+                "fake_signature_mismatch",
+                line,
+                "%s takes %d parameters; the interface of %s gives %d"
+                % (name, count, component_id, expected),
+            )
+        )
+    return findings
+
+
+# -- R-PROBE-005: stub run -------------------------------------------------
+
+
+def _last_line(proc):
+    out = proc.stdout.strip() or proc.stderr.strip()
+    return (out.splitlines() or [""])[-1]
+
+
+def _stub_run(test_source, names, timeout):
+    tmp = tempfile.mkdtemp()
+    try:
+        with open(os.path.join(tmp, _TARGET), "w", encoding="utf-8") as handle:
+            handle.write(test_source)
+        for name in names:
+            with open(os.path.join(tmp, name + ".py"), "w", encoding="utf-8") as handle:
+                handle.write(STUB_SOURCE)
+        report_path = os.path.join(tmp, "report.xml")
+        env = dict(os.environ)
+        env["PYTHONPATH"] = tmp
+        command = [
+            sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider",
+            "--noconftest", "--junitxml=" + report_path, _TARGET,
+        ]
+        try:
+            proc = subprocess.run(
+                command, cwd=tmp, env=env, capture_output=True, text=True, timeout=timeout
+            )
+        except subprocess.TimeoutExpired:
+            return [_finding("probe_timeout", None, "stub run exceeded %s seconds" % timeout)], 0, 0
+        testcases = (
+            list(ET.parse(report_path).getroot().iter("testcase"))
+            if os.path.exists(report_path)
+            else []
+        )
+        collection_failed = any(
+            err.get("message", "") == "collection failure"
+            for tc in testcases
+            for err in tc.findall("error")
+        )
+        if proc.returncode in (2, 3, 4) or not testcases or collection_failed:
+            return [_finding("collection_error", None, _last_line(proc))], 0, 0
+        findings = []
+        reached = 0
+        for tc in testcases:
+            name = tc.get("name", "")
+            failure = tc.find("failure")
+            error = tc.find("error")
+            failure_message = None if failure is None else failure.get("message", "")
+            if failure_message is not None and "HotdocsProbeStubReached" in failure_message:
+                reached += 1
+            elif error is not None:
+                findings.append(_finding("test_bug", None, "%s: %s" % (name, error.get("message", ""))))
+            elif failure_message is not None and failure_message.startswith(_BUG_PREFIXES):
+                findings.append(_finding("test_bug", None, "%s: %s" % (name, failure_message)))
+            elif failure is None and tc.find("skipped") is None:
+                findings.append(
+                    _finding("vacuous", None, "%s passed without reaching the code under test" % name)
+                )
+        return findings, len(testcases), reached
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+# -- entry point -----------------------------------------------------------
 
 
 def _dependency_interfaces(criterion_bundle):
@@ -237,156 +321,21 @@ def _dependency_interfaces(criterion_bundle):
     return getattr(criterion_bundle, "dependency_interfaces", {})
 
 
-def _check_fakes(tree, criterion_bundle):
-    deps = {}
-    for component_id, text in _dependency_interfaces(criterion_bundle).items():
-        for name, count in _interface_signatures(text):
-            deps.setdefault(name, []).append((component_id, count))
-    findings = []
-    for name, count, line in _collect_fakes(tree):
-        if name not in deps or count is None:
-            continue
-        signatures = deps[name]
-        if any(m == count for _, m in signatures):
-            continue
-        component_id, m = signatures[0]
-        findings.append(
-            _finding(
-                "fake_signature_mismatch",
-                line,
-                "%s takes %d parameters; the interface of %s gives %d"
-                % (name, count, component_id, m),
-            )
-        )
-    return _ordered(findings)
-
-
-# --- R-PROBE-005: stub run ---------------------------------------------------
-
-
-def _stub_run(test_source, module_name, timeout):
-    """Return (findings, tests_run, tests_reached)."""
-    tmp = tempfile.mkdtemp()
-    try:
-        with open(os.path.join(tmp, _TARGET_NAME), "w", encoding="utf-8") as fh:
-            fh.write(test_source)
-        with open(os.path.join(tmp, module_name + ".py"), "w", encoding="utf-8") as fh:
-            fh.write(_STUB_SOURCE)
-        report_path = os.path.join(tmp, "report.xml")
-        env = dict(os.environ)
-        env["PYTHONPATH"] = tmp
-        command = [
-            sys.executable,
-            "-m",
-            "pytest",
-            "-q",
-            "-p",
-            "no:cacheprovider",
-            "--noconftest",
-            "--junitxml=" + report_path,
-            _TARGET_NAME,
-        ]
-        try:
-            result = subprocess.run(
-                command,
-                cwd=tmp,
-                env=env,
-                capture_output=True,
-                text=True,
-                timeout=timeout,
-            )
-        except subprocess.TimeoutExpired:
-            return (
-                [
-                    _finding(
-                        "probe_timeout",
-                        None,
-                        "stub run exceeded %s seconds" % timeout,
-                    )
-                ],
-                0,
-                0,
-            )
-        last_line = ((result.stdout + result.stderr).strip().splitlines() or [""])[-1]
-        collection_error = (
-            [_finding("collection_error", None, last_line)],
-            0,
-            0,
-        )
-        if result.returncode in (2, 3, 4):
-            return collection_error
-        root = ET.parse(report_path).getroot()
-        testcases = []
-        collection_failed = False
-        for testcase in root.iter("testcase"):
-            error = testcase.find("error")
-            if error is not None and error.get("message") == "collection failure":
-                collection_failed = True
-            else:
-                testcases.append(testcase)
-        if collection_failed or not testcases:
-            return collection_error
-        findings = []
-        reached = 0
-        for testcase in testcases:
-            name = testcase.get("name")
-            failure = testcase.find("failure")
-            error = testcase.find("error")
-            skipped = testcase.find("skipped")
-            if failure is not None:
-                message = failure.get("message", "")
-                if "HotdocsProbeStubReached" in message:
-                    reached += 1
-                elif message.startswith(_TEST_BUG_PREFIXES):
-                    findings.append(
-                        _finding("test_bug", None, "%s: %s" % (name, message))
-                    )
-            if error is not None:
-                findings.append(
-                    _finding(
-                        "test_bug", None, "%s: %s" % (name, error.get("message", ""))
-                    )
-                )
-            if failure is None and error is None and skipped is None:
-                findings.append(
-                    _finding(
-                        "vacuous",
-                        None,
-                        "%s passed without reaching the code under test" % name,
-                    )
-                )
-        return _ordered(findings), len(testcases), reached
-    finally:
-        shutil.rmtree(tmp, ignore_errors=True)
-
-
-# --- probe -------------------------------------------------------------------
-
-
 def probe(test_source, criterion_bundle, module_name, *, timeout=60.0):
+    names = [module_name] if isinstance(module_name, str) else list(module_name)
     try:
         tree = ast.parse(test_source)
     except SyntaxError as exc:
-        return ProbeReport(
-            ok=False,
-            findings=[_finding("syntax_error", exc.lineno, exc.msg)],
-            tests_run=0,
-            tests_reached=0,
-        )
+        return _report([_finding("syntax_error", exc.lineno, str(exc.msg))], 0, 0)
+
     findings = []
-    findings += _check_undefined_names(test_source)
-    findings += _check_imports(tree, module_name)
-    findings += _check_fakes(tree, criterion_bundle)
-    tests_run = 0
-    tests_reached = 0
-    if not any(f["severity"] == "error" for f in findings):
-        stub_findings, tests_run, tests_reached = _stub_run(
-            test_source, module_name, timeout
-        )
-        findings += stub_findings
-    return ProbeReport(
-        ok=not any(f["severity"] == "error" for f in findings),
-        findings=findings,
-        tests_run=tests_run,
-        tests_reached=tests_reached,
-    )
+    findings += _sorted(_check_pyflakes(test_source))
+    findings += _sorted(_check_imports(tree, names))
+    findings += _sorted(_check_fakes(tree, _dependency_interfaces(criterion_bundle)))
+
+    if any(f["severity"] == "error" for f in findings):
+        return _report(findings, 0, 0)
+
+    run_findings, tests_run, tests_reached = _stub_run(test_source, names, timeout)
+    findings += _sorted(run_findings)
+    return _report(findings, tests_run, tests_reached)
