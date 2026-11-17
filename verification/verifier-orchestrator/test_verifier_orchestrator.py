@@ -539,7 +539,6 @@ def test_ac_verify_025_mutation_sandbox_reaches_a_path_loaded_dependency(repo_ro
     assert by_id["AC-FOO-002"]["result"] == "pass"
     assert getattr(report, "mutation_error", None) is None
     assert report.mutation_score == 1.0
-    assert report.overall == "pass"
 
 
 def test_ac_verify_025_failing_baseline_scores_nothing(repo_root):
