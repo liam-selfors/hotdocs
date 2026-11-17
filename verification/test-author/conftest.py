@@ -50,8 +50,10 @@ def file_block(content: str, wrapper: str = "{marked}"):
     test place extra narration/fencing around the marked block while
     still producing a response the real extractor must handle."""
     def _build(prompt, model, **params):
-        m = re.search(r"-----BEGIN FILE (\S+)-----", prompt)
-        nonce = m.group(1) if m else "MISSING-NONCE"
+        # A repair prompt repeats the original prompt, old nonce and all,
+        # before its own instruction, so the live nonce is the last one.
+        found = re.findall(r"-----BEGIN FILE ([0-9a-f]{32})-----", prompt)
+        nonce = found[-1] if found else "MISSING-NONCE"
         marked = f"-----BEGIN FILE {nonce}-----\n{content}\n-----END FILE {nonce}-----"
         return {"text": wrapper.format(marked=marked), "model_call_error": None}
     return _build

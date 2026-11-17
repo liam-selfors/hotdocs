@@ -3,7 +3,7 @@
 One module file, `test_probe.py`, never a package.
 
 ```
-probe(test_source: str, criterion_bundle, module_name: str, *,
+probe(test_source: str, criterion_bundle, module_name: str | list[str], *,
       timeout: float = 60.0) -> ProbeReport
 GATE_VERSION: str  # "test-probe@1.0.0"
 ```
@@ -13,7 +13,9 @@ GATE_VERSION: str  # "test-probe@1.0.0"
 `dependency_interfaces` is read, a dict from component id to that
 component's `interface/` text, and a missing key means `{}`.
 `module_name` is the importable name of the component's module, such as
-`slugify`.
+`slugify`, or a list of such names, such as a capability scenario's
+realizing modules `["slugify", "url_tools"]`; a string is read as a
+one-name list, and every name below means each name of that list.
 
 ## How a probe runs
 
@@ -29,7 +31,7 @@ The checks run in this order, each giving only these kinds:
 
 The stub run happens only when checks 1 to 4 found no `error`; otherwise
 `tests_run` and `tests_reached` are `0`. An import resolves when its
-first dotted part is `module_name` (the stub answers every name), a
+first dotted part is a name of `module_name` (the stub answers every name), a
 standard-library module, or anything `importlib.util.find_spec` finds in
 the probing process, such as `pytest`. A `testcase` **reached** the code
 under test exactly when its `failure` message contains
@@ -45,8 +47,8 @@ arguments.
 ## The stub run
 
 The stub run executes, in a fresh temporary directory holding only the
-test file (named `test_probe_target.py`) and the stub module
-(`<module_name>.py`):
+test file (named `test_probe_target.py`) and one stub module per name
+of `module_name` (`<name>.py`, each with the source below):
 
 ```
 <sys.executable> -m pytest -q -p no:cacheprovider --noconftest

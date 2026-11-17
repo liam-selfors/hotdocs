@@ -50,6 +50,12 @@ the way `component_size` was settled, never re-deriving it per caller
   `ModelResponse.md`'s one mention of `GenerationResult` makes that
   schema reach 19 components. Consider resolving only types named in
   signatures or schema blocks.
+- **`test-probe` passes a test that fails before the stub.** A test
+  whose own setup raises, such as a `KeyError` from `str.format` over a
+  template holding braces, reaches no code under test, yet
+  `R-PROBE-005` gives it no finding. Such a failure, when no test in the
+  file reached the stub, should be a `test_bug`. `D316`'s prompt rule
+  covers the one case seen so far.
 
 ---
 
