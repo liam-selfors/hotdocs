@@ -1,88 +1,114 @@
-import json
 import re
-from dataclasses import dataclass, field, fields
-
-import pytest
 
 import test_author
 
 
 CRITERION_TEXT = (
-    "Given a zebra-quartz input value of 7\n"
-    "When frobnicate_widget is called\n"
-    "Then it returns the marker CRIT-MARKER-91f3a"
+    "Given a zebra-quartz widget named QX-7781\n"
+    "When frobnicate_qx7781 is invoked\n"
+    "Then it returns the string marigold-teapot-5521"
 )
 REQUIREMENT_TEXT = (
-    "# R-WIDGET-004\n\n"
-    "**R-WIDGET-004** — `frobnicate_widget(x)` MUST return the marker "
-    "REQ-MARKER-7b2c4 for any zebra-quartz input."
+    "**R-FOO-001** \u2014 `frobnicate_qx7781()` MUST return the sentinel "
+    "string `marigold-teapot-5521` (requirement-sentinel-90417)."
 )
 INTERFACE_TEXT = (
-    "# Library\n\n"
+    "# Library\n"
+    "\n"
     "```\n"
-    "frobnicate_widget(x: int) -> str  # IFACE-MARKER-c0d9e\n"
+    "frobnicate_qx7781() -> str  # interface-sentinel-33820\n"
     "```"
 )
 GLOSSARY_TEXT = (
-    "# Glossary\n\n"
-    "- **Zebra-quartz** — a test term GLOSS-MARKER-5e8a1."
+    "# Glossary\n"
+    "\n"
+    "- **Quartzling** \u2014 a glossary-sentinel-61294 test term."
 )
 
 
-@dataclass(eq=False)
-class FakeCriterionBundle(dict):
-    """A CriterionBundle stand-in readable both as attributes and as a mapping."""
+class Bundle:
+    """A CriterionBundle stand-in readable both by attribute and as a mapping."""
 
-    component_id: str
-    criterion_id: str
-    covers: str
-    criterion_text: str
-    requirement_text: str
-    interface: str
-    glossary: str
-    dependency_interfaces: dict = field(default_factory=dict)
-    module_names: list = field(default_factory=list)
+    _FIELDS = (
+        "component_id",
+        "criterion_id",
+        "covers",
+        "criterion_text",
+        "requirement_text",
+        "interface",
+        "glossary",
+        "dependency_interfaces",
+        "module_names",
+    )
 
-    def __post_init__(self):
-        dict.update(self, {f.name: getattr(self, f.name) for f in fields(self)})
+    def __init__(self, **kwargs):
+        for name in self._FIELDS:
+            setattr(self, name, kwargs.get(name))
+
+    def __getitem__(self, key):
+        if key not in self._FIELDS:
+            raise KeyError(key)
+        return getattr(self, key)
+
+    def get(self, key, default=None):
+        if key in self._FIELDS:
+            return getattr(self, key)
+        return default
+
+    def __contains__(self, key):
+        return key in self._FIELDS
+
+    def __iter__(self):
+        return iter(self._FIELDS)
+
+    def __len__(self):
+        return len(self._FIELDS)
+
+    def keys(self):
+        return list(self._FIELDS)
+
+    def items(self):
+        return [(k, getattr(self, k)) for k in self._FIELDS]
+
+    def values(self):
+        return [getattr(self, k) for k in self._FIELDS]
 
 
-def _get(value, name):
-    if isinstance(value, dict):
-        return value.get(name)
-    return getattr(value, name, None)
+def field(value, name):
+    return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def _norm(text):
-    return " ".join(str(text).split())
+def test_ac_author_001_prompt_contains_criterion_requirement_interface_glossary(
+    tmp_path, monkeypatch
+):
+    monkeypatch.delenv("VAR_CACHE_STORE_URL", raising=False)
 
+    bundle = Bundle(
+        component_id="comp-foo",
+        criterion_id="AC-FOO-001",
+        covers="R-FOO-001",
+        criterion_text=CRITERION_TEXT,
+        requirement_text=REQUIREMENT_TEXT,
+        interface=INTERFACE_TEXT,
+        glossary=GLOSSARY_TEXT,
+        dependency_interfaces={},
+        module_names=["foo"],
+    )
 
-def _make_backend(log_path):
-    def backend(prompt, model, **params):
-        record = {
-            "prompt": prompt if isinstance(prompt, str) else str(prompt),
-            "model": model,
-            "params": {k: (v if isinstance(v, (str, int, float, bool, type(None))) else str(v))
-                       for k, v in params.items()},
-        }
+    recorded = []
+    log_path = tmp_path / "mock_calls.log"
+
+    def mock_backend(prompt, model, **params):
+        recorded.append(prompt)
         with open(log_path, "a", encoding="utf-8") as fh:
-            fh.write(json.dumps(record) + "\n")
-
-        prompt_str = record["prompt"]
-        m = re.search(r"-----BEGIN FILE ([0-9a-f]{32})-----", prompt_str)
-        if m is None:
-            m = re.search(r"\b([0-9a-f]{32})\b", prompt_str)
-        nonce = m.group(1) if m else "0" * 32
-
-        test_code = (
-            "import widget\n\n\n"
-            "def test_ac_widget_004():\n"
-            "    assert widget.frobnicate_widget(7) == 'CRIT-MARKER-91f3a'\n"
-        )
+            fh.write("call\n")
+        match = re.search(r"-----BEGIN FILE ([0-9a-fA-F]+)-----", prompt)
+        nonce = match.group(1) if match else ""
         text = (
-            f"-----BEGIN FILE {nonce}-----\n"
-            f"{test_code}"
-            f"-----END FILE {nonce}-----\n"
+            "-----BEGIN FILE " + nonce + "-----\n"
+            "def test_placeholder():\n"
+            "    assert True\n"
+            "-----END FILE " + nonce + "-----"
         )
         return {
             "text": text,
@@ -91,76 +117,24 @@ def _make_backend(log_path):
             "model_call_error": None,
         }
 
-    return backend
-
-
-def _read_records(log_path):
-    if not log_path.exists():
-        return []
-    records = []
-    for line in log_path.read_text(encoding="utf-8").splitlines():
-        line = line.strip()
-        if line:
-            records.append(json.loads(line))
-    return records
-
-
-def test_ac_author_001_prompt_contains_criterion_requirement_interface_glossary(tmp_path, monkeypatch):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
-    work_dir = tmp_path / "work"
-    work_dir.mkdir()
-    log_dir = tmp_path / "log"
-    log_dir.mkdir()
-    log_path = log_dir / "backend_calls.jsonl"
-
-    monkeypatch.chdir(work_dir)
-    monkeypatch.delenv("VAR_CACHE_STORE_URL", raising=False)
-    monkeypatch.delenv("VAR_HOTDOCS_CONFIG", raising=False)
-
-    bundle = FakeCriterionBundle(
-        component_id="comp-widget",
-        criterion_id="AC-WIDGET-004",
-        covers="R-WIDGET-004",
-        criterion_text=CRITERION_TEXT,
-        requirement_text=REQUIREMENT_TEXT,
-        interface=INTERFACE_TEXT,
-        glossary=GLOSSARY_TEXT,
-        dependency_interfaces={},
-        module_names=["widget"],
-    )
 
     result = test_author.author_test(
         bundle,
-        "claude-sonnet-5",
+        "anthropic:claude-sonnet-5",
         0,
         repo_root=repo_root,
-        llm_backend=_make_backend(log_path),
+        llm_backend=mock_backend,
     )
-    assert result is not None
 
-    records = _read_records(log_path)
-    assert records, "the mock model was never called by author_test"
+    assert field(result, "model_call_error") is None
+    assert log_path.is_file(), "mock model was never called"
+    assert len(recorded) >= 1
 
-    recorded_input = "\n".join(
-        r["prompt"] + "\n" + "\n".join(str(v) for v in r["params"].values())
-        for r in records
-    )
-    normalized_input = _norm(recorded_input)
+    sent = "\n".join(recorded)
 
-    assert _norm(CRITERION_TEXT) in normalized_input, "criterion text missing from model input"
-    assert _norm(REQUIREMENT_TEXT) in normalized_input, "covered requirement text missing from model input"
-    assert _norm(INTERFACE_TEXT) in normalized_input, "interface content missing from model input"
-    assert _norm(GLOSSARY_TEXT) in normalized_input, "glossary missing from model input"
-
-    # Distinctive markers from each section, checked raw as well.
-    for marker in (
-        "CRIT-MARKER-91f3a",
-        "REQ-MARKER-7b2c4",
-        "IFACE-MARKER-c0d9e",
-        "GLOSS-MARKER-5e8a1",
-    ):
-        assert marker in recorded_input, f"{marker} missing from model input"
-
-    model_call_error = _get(result, "model_call_error")
-    assert model_call_error is None, f"unexpected model_call_error: {model_call_error!r}"
+    assert CRITERION_TEXT in sent, "criterion text missing from model input"
+    assert REQUIREMENT_TEXT in sent, "requirement text missing from model input"
+    assert INTERFACE_TEXT in sent, "interface missing from model input"
+    assert GLOSSARY_TEXT in sent, "glossary missing from model input"

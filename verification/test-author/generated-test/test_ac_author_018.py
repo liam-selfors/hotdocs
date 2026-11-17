@@ -1,7 +1,12 @@
-import json
 import re
 
 import test_author
+
+
+EXPECTED_LINE = (
+    "- A unit file (`constraints.md`, or anything under `requirements/`, "
+    "`interface/` or `acceptance/`) carries no frontmatter at all."
+)
 
 
 class _Bundle(dict):
@@ -14,59 +19,42 @@ class _Bundle(dict):
             raise AttributeError(name)
 
 
-def _field(value, name):
-    if isinstance(value, dict):
-        return value.get(name)
-    return getattr(value, name, None)
-
-
 def _make_bundle():
-    # Deliberately avoid the words "last_ratified_commit" anywhere in the
-    # bundle, so any mention in the prompt must come from author_test itself.
-    criterion_text = (
-        "Given a synthetic spec corpus fixture under a fresh temporary repo_root,\n"
-        "  containing specs/components/foo/component.md and a decision document\n"
-        "  specs/decisions/D1.md\n"
-        "When foo(x) is called with x = 2\n"
-        "Then it returns 4"
-    )
-    requirement_text = (
-        "# R-FOO-001\n\n"
-        "**R-FOO-001** \u2014 `foo(x)` MUST return `2 * x`."
-    )
-    interface = "# Library\n\n```\nfoo(x: int) -> int\n```"
-    glossary = "# Glossary\n\n- **Foo** \u2014 a test term."
     return _Bundle(
-        component_id="comp-foo",
-        criterion_id="AC-FOO-001",
-        covers="R-FOO-001",
-        criterion_text=criterion_text,
-        requirement_text=requirement_text,
-        interface=interface,
-        glossary=glossary,
+        component_id="comp-widget-maker",
+        criterion_id="AC-WIDGET-MAKER-001",
+        covers="R-WIDGET-MAKER-001",
+        criterion_text=(
+            "Given x = 2\n"
+            "When make_widget(x) is called\n"
+            "Then it returns 4"
+        ),
+        requirement_text=(
+            "# R-WIDGET-MAKER-001\n\n"
+            "**R-WIDGET-MAKER-001** — `make_widget(x)` MUST return `2 * x`."
+        ),
+        interface="# Library\n\n```\nmake_widget(x: int) -> int\n```",
+        glossary="# Glossary\n\n- **Widget** — a test term.",
         dependency_interfaces={},
-        module_names=["foo"],
     )
 
 
-def test_prompt_states_ratified_requires_placeholder_last_ratified_commit(tmp_path, monkeypatch):
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    workdir = tmp_path / "cwd"
-    workdir.mkdir()
-    monkeypatch.chdir(workdir)
-    monkeypatch.delenv("VAR_CACHE_STORE_URL", raising=False)
+def test_prompt_contains_unit_file_no_frontmatter_line(tmp_path):
+    prompts = []
 
-    prompt_log = tmp_path / "prompts.jsonl"
-    nonce_re = re.compile(r"-----BEGIN FILE ([0-9a-f]{32})-----")
-
-    def backend(prompt, model, **params):
-        with open(prompt_log, "a", encoding="utf-8") as fh:
-            fh.write(json.dumps({"prompt": prompt, "model": model}) + "\n")
-        nonces = nonce_re.findall(prompt)
-        nonce = nonces[-1] if nonces else "0" * 32
-        body = "def test_foo():\n    assert 2 * 2 == 4\n"
-        text = "-----BEGIN FILE %s-----\n%s-----END FILE %s-----\n" % (nonce, body, nonce)
+    def mock_backend(prompt, model, **params):
+        prompts.append(prompt)
+        match = re.search(r"-----BEGIN FILE ([0-9a-fA-F]+)-----", prompt)
+        nonce = match.group(1) if match else "0" * 32
+        text = (
+            "-----BEGIN FILE " + nonce + "-----\n"
+            "import widget_maker\n"
+            "\n"
+            "\n"
+            "def test_doubles():\n"
+            "    assert widget_maker.make_widget(2) == 4\n"
+            "-----END FILE " + nonce + "-----"
+        )
         return {
             "text": text,
             "model": model,
@@ -74,44 +62,9 @@ def test_prompt_states_ratified_requires_placeholder_last_ratified_commit(tmp_pa
             "model_call_error": None,
         }
 
-    bundle = _make_bundle()
-    result = test_author.author_test(
-        bundle,
-        "mock:ac-author-018-fixture-model",
-        seed=18018,
-        repo_root=repo_root,
-        llm_backend=backend,
+    test_author.author_test(
+        _make_bundle(), "mock", repo_root=tmp_path, llm_backend=mock_backend
     )
-    assert result is not None
 
-    assert prompt_log.is_file(), "the mock backend was never called, so no prompt was built"
-    records = [
-        json.loads(line)
-        for line in prompt_log.read_text(encoding="utf-8").splitlines()
-        if line.strip()
-    ]
-    assert records, "no prompt captured"
-
-    for record in records:
-        prompt = record["prompt"]
-        assert isinstance(prompt, str) and prompt
-
-        indices = [m.start() for m in re.finditer(r"last_ratified_commit", prompt)]
-        assert indices, "prompt never mentions last_ratified_commit"
-
-        found = False
-        for i in indices:
-            window = prompt[max(0, i - 600): i + 600].lower()
-            mentions_ratified = "ratified" in window.replace("last_ratified_commit", "")
-            mentions_status = "status" in window
-            mentions_placeholder = "placeholder" in window or "fake" in window
-            if mentions_ratified and mentions_status and mentions_placeholder:
-                found = True
-                break
-        assert found, (
-            "prompt does not state that a document with status: ratified must also "
-            "set last_ratified_commit to a placeholder value"
-        )
-
-    error = _field(result, "model_call_error")
-    assert error is None, "unexpected model_call_error: %r" % (error,)
+    assert prompts, "the mock backend was never called"
+    assert EXPECTED_LINE in prompts[0].splitlines()

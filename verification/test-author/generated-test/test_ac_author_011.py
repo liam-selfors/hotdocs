@@ -1,35 +1,25 @@
-import json
 import re
-import sys
-from pathlib import Path
-
-import pytest
 
 import test_author
 
 
-DEP_INTERFACE_TEXT = (
-    "# Library\n"
+DEP_ID = "comp-zebra-quux"
+DEP_INTERFACE = "zq_lookup(x: int, y: str) -> ZqResult"
+RULE_TEXT = "a fake MUST return every field, never a bare list, string or number in its place"
+
+NONCE_RE = re.compile(r"-----BEGIN FILE ([0-9a-f]{32})-----")
+
+REPLY_BODY = (
+    "import widget_maker\n"
     "\n"
-    "```\n"
-    "do_the_thing(x: int, y: str) -> SomeResult\n"
-    "```\n"
     "\n"
-    "`SomeResult` is a record with fields `zorblax_marker_7731: str` and\n"
-    "`quillon_count_4410: int`, in that order.\n"
+    "def test_widget():\n"
+    "    assert widget_maker is not None\n"
 )
 
-TARGET_INTERFACE_TEXT = (
-    "# Library\n"
-    "\n"
-    "```\n"
-    "widget_total(n: int) -> int\n"
-    "```\n"
-)
 
-GLOSSARY_TEXT = "# Glossary\n\n- **Widget** — a test term.\n"
-
-MOCK_TEST_FILE = "def test_placeholder():\n    assert True\n"
+def field(value, name):
+    return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
 class _Bundle(dict):
@@ -38,52 +28,47 @@ class _Bundle(dict):
     def __getattr__(self, name):
         try:
             return self[name]
-        except KeyError as exc:
-            raise AttributeError(name) from exc
+        except KeyError:
+            raise AttributeError(name)
 
 
-def _field(value, name):
-    if isinstance(value, dict):
-        return value.get(name)
-    return getattr(value, name, None)
-
-
-def _make_bundle(criterion_id, covers, dependency_interfaces):
+def make_bundle(dependency_interfaces):
     return _Bundle(
-        component_id="comp-widget",
-        criterion_id=criterion_id,
-        covers=covers,
+        component_id="comp-widget-maker",
+        criterion_id="AC-WIDGET-MAKER-001",
+        covers="R-WIDGET-MAKER-001",
         criterion_text=(
-            "Given n = 3\n"
-            "When widget_total(n) is called\n"
-            "Then it returns 6"
+            "Given a widget size of 2\n"
+            "When make_widget(2) is called\n"
+            "Then it returns a widget of size 2"
         ),
         requirement_text=(
-            "# " + covers + "\n\n**" + covers + "** — `widget_total(n)` MUST return `2 * n`."
+            "**R-WIDGET-MAKER-001** - `make_widget(n)` MUST return a widget of size `n`."
         ),
-        interface=TARGET_INTERFACE_TEXT,
-        glossary=GLOSSARY_TEXT,
+        interface="# Library\n\n```\nmake_widget(n: int) -> dict\n```\n",
+        glossary="# Glossary\n\n- **Widget** - a test term.\n",
         dependency_interfaces=dict(dependency_interfaces),
-        module_names=["widget"],
+        module_names=["widget_maker"],
     )
 
 
-def _make_backend(log_path):
-    nonce_re = re.compile(r"-----BEGIN FILE ([0-9a-fA-F]{32})-----")
-    any_hex_re = re.compile(r"\b([0-9a-f]{32})\b")
+class RecordingMock:
+    def __init__(self):
+        self.prompts = []
 
-    def backend(prompt, model, **params):
-        with open(log_path, "a", encoding="utf-8") as fh:
-            fh.write(json.dumps({"prompt": prompt, "model": model}) + "\n")
-        m = nonce_re.search(prompt)
-        nonce = m.group(1) if m else None
-        if nonce is None:
-            m2 = any_hex_re.search(prompt)
-            nonce = m2.group(1) if m2 else "0" * 32
+    def __call__(self, *args, **kwargs):
+        prompt = args[0] if args else kwargs.get("prompt")
+        if len(args) > 1:
+            model = args[1]
+        else:
+            model = kwargs.get("model", "mock")
+        self.prompts.append(prompt)
+        match = NONCE_RE.search(prompt or "")
+        nonce = match.group(1) if match else "0" * 32
         text = (
             "-----BEGIN FILE " + nonce + "-----\n"
-            + MOCK_TEST_FILE
-            + "-----END FILE " + nonce + "-----\n"
+            + REPLY_BODY
+            + "\n-----END FILE " + nonce + "-----"
         )
         return {
             "text": text,
@@ -92,100 +77,33 @@ def _make_backend(log_path):
             "model_call_error": None,
         }
 
-    return backend
 
-
-def _read_prompts(log_path):
-    if not Path(log_path).is_file():
-        return []
-    prompts = []
-    for line in Path(log_path).read_text(encoding="utf-8").splitlines():
-        line = line.strip()
-        if line:
-            prompts.append(json.loads(line)["prompt"])
-    return prompts
-
-
-@pytest.fixture
-def isolated_env(tmp_path, monkeypatch):
-    work = tmp_path / "cwd"
-    work.mkdir()
-    monkeypatch.chdir(work)
-    monkeypatch.delenv("VAR_CACHE_STORE_URL", raising=False)
-    monkeypatch.delenv("VAR_HOTDOCS_CONFIG", raising=False)
+def test_dependency_interfaces_included_in_prompt(tmp_path):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
-    log_path = tmp_path / "logs" / "prompts.jsonl"
-    log_path.parent.mkdir()
-    return repo_root, log_path
+    mock = RecordingMock()
+    bundle = make_bundle({DEP_ID: DEP_INTERFACE})
+
+    test_author.author_test(bundle, "mock", repo_root=repo_root, llm_backend=mock)
+
+    assert len(mock.prompts) >= 1
+    first = mock.prompts[0]
+    assert DEP_ID in first
+    assert DEP_INTERFACE in first
+    assert RULE_TEXT in first
 
 
-def test_prompt_includes_dependency_interface_and_fake_fidelity_instruction(isolated_env):
-    repo_root, log_path = isolated_env
-    bundle = _make_bundle(
-        "AC-WIDGET-011",
-        "R-WIDGET-011",
-        {"comp-bar": DEP_INTERFACE_TEXT},
-    )
-
-    result = test_author.author_test(
-        bundle,
-        "claude-sonnet-5",
-        0,
-        repo_root=repo_root,
-        llm_backend=_make_backend(log_path),
-    )
-
-    prompts = _read_prompts(log_path)
-    assert prompts, "the model backend was never called, so no prompt was sent"
-    prompt = prompts[0]
-
-    # The exact dependency interface text is included verbatim.
-    assert DEP_INTERFACE_TEXT.strip() in prompt
-    assert "do_the_thing(x: int, y: str) -> SomeResult" in prompt
-    assert "comp-bar" in prompt
-
-    # An instruction that fakes must match the real signature and return
-    # shape, never inventing one. None of these words appear in the bundle's
-    # own texts, so they must come from the prompt's instructions.
-    lowered = prompt.lower()
-    assert "fake" in lowered
-    assert "signature" in lowered
-    assert "return" in lowered
-    assert "shape" in lowered
-    assert "invent" in lowered
-
-    assert _field(result, "model_call_error") is None
-    file_value = _field(result, "file")
-    assert file_value is not None
-    content = _field(file_value, "content")
-    assert content is not None
-    assert "def test_placeholder" in content
-
-
-def test_prompt_builds_with_no_dependencies_and_claims_none(isolated_env):
-    repo_root, log_path = isolated_env
-    bundle = _make_bundle("AC-WIDGET-012", "R-WIDGET-012", {})
+def test_empty_dependency_interfaces_adds_no_entry(tmp_path):
+    repo_root = tmp_path / "repo-empty"
+    repo_root.mkdir()
+    mock = RecordingMock()
+    bundle = make_bundle({})
 
     result = test_author.author_test(
-        bundle,
-        "claude-sonnet-5",
-        0,
-        repo_root=repo_root,
-        llm_backend=_make_backend(log_path),
+        bundle, "mock", repo_root=repo_root, llm_backend=mock
     )
 
-    prompts = _read_prompts(log_path)
-    assert prompts, "the prompt did not build / the model backend was never called"
-    for prompt in prompts:
-        assert "comp-bar" not in prompt
-        assert "do_the_thing" not in prompt
-        assert "SomeResult" not in prompt
-        assert "zorblax_marker_7731" not in prompt
-
-    assert _field(result, "model_call_error") is None
-    file_value = _field(result, "file")
-    assert file_value is not None
-    content = _field(file_value, "content")
-    assert content is not None
-    assert "def test_placeholder" in content
+    assert field(result, "model_call_error") is None
+    assert len(mock.prompts) >= 1
+    first = mock.prompts[0]
+    assert DEP_ID not in first

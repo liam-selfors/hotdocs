@@ -1,18 +1,14 @@
 import re
-import sys
 
 import pytest
 
 import test_author
 
 
-def _field(value, name):
-    if isinstance(value, dict):
-        return value.get(name)
-    return getattr(value, name, None)
+NONCE_RE = re.compile(r"-----BEGIN FILE ([0-9a-f]{32})-----")
 
 
-class _Bundle(dict):
+class Bundle(dict):
     """A CriterionBundle stand-in readable both as a mapping and by attribute."""
 
     def __getattr__(self, name):
@@ -22,49 +18,37 @@ class _Bundle(dict):
             raise AttributeError(name)
 
 
-_BUNDLE_A = {
-    "component_id": "comp-foo",
-    "criterion_id": "AC-FOO-001",
-    "covers": "R-FOO-001",
-    "criterion_text": "Given x = 2\nWhen foo(x) is called\nThen it returns 4",
-    "requirement_text": "# R-FOO-001\n\n**R-FOO-001** \u2014 `foo(x)` MUST return `2 * x`.",
-    "interface": "# Library\n\n```\nfoo(x: int) -> int\n```",
-    "glossary": "# Glossary\n\n- **Foo** \u2014 a test term.",
-    "dependency_interfaces": {},
-    "module_names": ["foo"],
-}
-
-_BUNDLE_B = {
-    "component_id": "comp-bar",
-    "criterion_id": "AC-BAR-007",
-    "covers": "R-BAR-007",
-    "criterion_text": "Given an empty list\nWhen bar(items) is called\nThen it returns an empty tuple",
-    "requirement_text": "# R-BAR-007\n\n**R-BAR-007** \u2014 `bar(items)` MUST return a tuple of the items.",
-    "interface": "# Library\n\n```\nbar(items: list) -> tuple\n```",
-    "glossary": "# Glossary\n\n- **Bar** \u2014 another test term.",
-    "dependency_interfaces": {
-        "comp-baz": "# Library\n\n```\nbaz(n: int) -> str\n```",
-    },
-}
+def make_bundle(**extra):
+    data = {
+        "component_id": "comp-widget-maker",
+        "criterion_id": "AC-WIDGET-MAKER-001",
+        "covers": "R-WIDGET-MAKER-001",
+        "criterion_text": (
+            "Given a widget size of 2\n"
+            "When make_widget(2) is called\n"
+            "Then it returns a widget of size 2"
+        ),
+        "requirement_text": (
+            "# R-WIDGET-MAKER-001\n\n"
+            "**R-WIDGET-MAKER-001** — `make_widget(n)` MUST return a widget of size `n`."
+        ),
+        "interface": "# Library\n\n```\nmake_widget(n: int) -> dict\n```\n",
+        "glossary": "# Glossary\n\n- **Widget** — a test term.\n",
+        "dependency_interfaces": {},
+    }
+    data.update(extra)
+    return Bundle(data)
 
 
-def _make_backend(prompts):
-    def backend(*args, **kwargs):
-        prompt = kwargs.get("prompt")
-        if prompt is None:
-            prompt = args[0] if args else ""
-        model = kwargs.get("model")
-        if model is None:
-            model = args[1] if len(args) > 1 else ""
+def make_recording_backend():
+    prompts = []
+
+    def backend(prompt, model, **params):
         prompts.append(prompt)
-        match = re.search(r"-----BEGIN FILE ([0-9a-fA-F]+)-----", prompt or "")
-        nonce = match.group(1) if match else "0" * 32
-        content = "def test_placeholder():\n    assert True\n"
-        text = (
-            "-----BEGIN FILE " + nonce + "-----\n"
-            + content
-            + "-----END FILE " + nonce + "-----\n"
-        )
+        m = NONCE_RE.search(prompt)
+        nonce = m.group(1) if m else "0" * 32
+        body = "import os\n\n\ndef test_placeholder():\n    assert os is not None\n"
+        text = "-----BEGIN FILE " + nonce + "-----\n" + body + "-----END FILE " + nonce + "-----"
         return {
             "text": text,
             "model": model,
@@ -72,65 +56,34 @@ def _make_backend(prompts):
             "model_call_error": None,
         }
 
-    return backend
+    return backend, prompts
 
 
-@pytest.mark.parametrize("raw_bundle", [_BUNDLE_A, _BUNDLE_B], ids=["foo", "bar"])
-def test_prompt_instructs_lint_self_check_before_behavior(raw_bundle, tmp_path, monkeypatch):
+@pytest.fixture(autouse=True)
+def _local_cache(monkeypatch):
     monkeypatch.delenv("VAR_CACHE_STORE_URL", raising=False)
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    workdir = tmp_path / "cwd"
-    workdir.mkdir()
-    monkeypatch.chdir(workdir)
 
-    # The bundle itself must not carry the instruction text, so anything found
-    # in the prompt is the prompt's own statement, not an echo of the bundle.
-    bundle_text = repr(raw_bundle).lower()
-    assert "lint" not in bundle_text
-    assert "hard" not in bundle_text
 
-    prompts = []
-    backend = _make_backend(prompts)
-    bundle = _Bundle(raw_bundle)
+def test_prompt_holds_block_r_author_015_with_derived_module(tmp_path):
+    backend, prompts = make_recording_backend()
+    bundle = make_bundle()
 
-    result = test_author.author_test(
-        bundle,
-        "claude-sonnet-5",
-        0,
-        repo_root=repo_root,
-        llm_backend=backend,
-    )
+    test_author.author_test(bundle, "mock", repo_root=tmp_path, llm_backend=backend)
 
-    assert _field(result, "model_call_error") is None
-    assert len(prompts) >= 1, "author_test never called the model backend"
+    assert prompts, "the mock model was never called"
+    lines = prompts[0].splitlines()
+    assert "    import widget_maker" in lines
+    assert "    assert spec_linter.lint(None, repo_root).hard_failures == 0" in lines
+    assert "@MODULE@" not in prompts[0]
 
-    prompt = prompts[0]
-    assert isinstance(prompt, str) and prompt
 
-    # The exact worked call shape, literally, not prose.
-    assert "lint(None, repo_root)" in prompt
+def test_prompt_uses_first_module_name_when_given(tmp_path):
+    backend, prompts = make_recording_backend()
+    bundle = make_bundle(module_names=["alpha_mod", "beta_mod"])
 
-    lowered = prompt.lower()
+    test_author.author_test(bundle, "mock", repo_root=tmp_path, llm_backend=backend)
 
-    # It names spec-linter as the source of the lint() being called.
-    assert re.search(r"spec[-_ ]linter", lowered), "prompt does not mention spec-linter"
-
-    # It ties the self-check to a spec-linter-checked precondition.
-    assert "precondition" in lowered, "prompt does not mention a spec-linter-checked precondition"
-
-    # It requires asserting zero hard-fail findings.
-    assert re.search(r"hard[\s_-]?fail", lowered), "prompt does not mention hard-fail findings"
-    assert (
-        "zero" in lowered
-        or "hard_failures == 0" in prompt
-        or re.search(r"==\s*0", prompt) is not None
-    ), "prompt does not require zero hard-fail findings"
-
-    # It requires the self-check to come first, before the real behavior.
-    assert "before" in lowered or "first" in lowered, (
-        "prompt does not require the lint self-check to run before the behavior under test"
-    )
-
-    # The snippet must not appear in a single-positional-argument form.
-    assert re.search(r"lint\(\s*repo_root\s*\)", prompt) is None
+    assert prompts, "the mock model was never called"
+    lines = prompts[0].splitlines()
+    assert "    import alpha_mod" in lines
+    assert "    import widget_maker" not in lines

@@ -1,378 +1,372 @@
-"""test-author: authors one generated-test criterion's test code from spec prose alone."""
+"""test-author: authors one generated-test criterion's test file from spec prose alone."""
 
 import argparse
 import ast
-import dataclasses
 import hashlib
 import importlib.util
 import json
 import re
 import secrets
 import sys
-import textwrap
-from collections.abc import Mapping
 from pathlib import Path
 
 PROMPT_VERSION = "v1"
+GATE_VERSION = "generated_test@1.0.0"
 GATE_TYPE = "generated_test"
-GATE_VERSION = GATE_TYPE + "@1.0.0"
-
-_BUNDLE_FIELDS = (
-    "component_id",
-    "criterion_id",
-    "covers",
-    "criterion_text",
-    "requirement_text",
-    "interface",
-    "glossary",
-    "dependency_interfaces",
-    "module_names",
-)
 
 
-@dataclasses.dataclass
-class TestAuthoringResult:
-    __test__ = False
+# ---------------------------------------------------------------------------
+# Prompt blocks (specs/architecture/test-author-prompt.md), verbatim.
+# ---------------------------------------------------------------------------
 
-    component_id: str
-    criterion_id: str
-    model: str
-    seed: int
-    prompt_version: str
-    cache_hit: bool
-    file: dict
-    model_call_error: dict
+_BLOCKS = [
+    """The component under test itself needs no custom loader: a plain `import @MODULE@`.
+Its own dependencies are resolved differently. No dependency is statically importable: each is loaded at runtime from `<repo_root>/gen/<dependency-slug>/<module_name>.py` (flat) or `<repo_root>/gen/<dependency-slug>/<module_name>/__init__.py` (package), else from the tool's own copy, so omitting one never makes it missing.
+A dependency is never interceptable by name-based `sys.modules` injection or `mock.patch`.
+To fake a dependency, write a fake module file under a fresh temporary `repo_root`, always in flat-module shape: `<repo_root>/gen/<dependency-slug>/<module_name>.py`. Every real loader checks flat first.
+`module_name` is the slug with hyphens replaced by underscores, never `"__init__"`.
+Whenever a test loads a module from a file path itself, it uses exactly this shape, with `sys.modules[module_name] = module` before `spec.loader.exec_module(module)`, which a dataclass needs:
+
+    import importlib.util
+    import sys
+
+    def load_module(path, module_name):
+        spec = importlib.util.spec_from_file_location(module_name, path)
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[module_name] = module
+        spec.loader.exec_module(module)
+        return module""",
+    """Any fake a test writes for a dependency's behavior MUST match that dependency's real, documented call signature and return shape exactly, as its interface above gives them, never invented or simplified.
+Given a documented return type with named fields, a fake MUST return every field, never a bare list, string or number in its place, even when the test reads only one field. For a dependency that documents
+
+    bar_get(key: str) -> Entry
+    Entry: {"key": str, "value": str, "stored_at": str}
+
+a correct fake is
+
+    def bar_get(key):
+        return {"key": key, "value": "v", "stored_at": "2026-01-01T00:00:00Z"}
+
+and a fake whose body is `return "v"` is wrong.""",
+    """When a test builds a synthetic spec corpus (a fixture) under a temporary `repo_root`:
+- Every frontmatter-bearing document it builds (`component.md`, `specs/vars/VAR-*.md`, `specs/decisions/D<N>.md`) carries `id`, `title`, `status` and `owners`, always, with `status` exactly one of `draft`, `ratified` or `deprecated`.
+- A document with `status: ratified` also sets the placeholder `last_ratified_commit: 0000000`.
+- Every `requirements/` file of every fixture component has a matching `acceptance/` file with a `Covers:` tag.
+- A unit file (`constraints.md`, or anything under `requirements/`, `interface/` or `acceptance/`) carries no frontmatter at all.
+- A test MUST NEVER `import yaml` or any other third-party package not already installed: it writes and parses frontmatter as plain text.""",
+    """- A fixture component defaults to `sealed: true` with a short, fake `source_path` not under `gen/`, such as `source_path: legacy/foo/`, unless the criterion concerns `realizes` or capability linkage: sealed exempts it from `realizes` and the capability machinery.
+- Only a criterion that needs `realizes`-driven behavior has the fixture supply a resolvable `P-<id>`.""",
+    """- Every list-valued frontmatter field (`owners`, `depends_on`, `realizes`, `uses_var`) uses YAML flow style, such as `owners: [a, b]`, never block style (`- a` lines), which the frontmatter reader does not read as a list.""",
+    """- When the criterion depends on a precondition the target checks with `spec-linter`, the test calls `lint()` on the fixture first and asserts zero hard failures before exercising the behavior under test. The call is exactly `lint(None, repo_root)`: `paths` first and positionally `None`, never one positional argument.
+
+    import importlib.util
+    import sys
+    from pathlib import Path
+    import @MODULE@
+
+    gen = next(p for p in Path(@MODULE@.__file__).resolve().parents if p.name == "gen")
+    base = gen / "spec-linter"
+    path = base / "spec_linter.py" if (base / "spec_linter.py").is_file() else base / "spec_linter" / "__init__.py"
+    spec = importlib.util.spec_from_file_location("spec_linter", path)
+    spec_linter = importlib.util.module_from_spec(spec)
+    sys.modules["spec_linter"] = spec_linter
+    spec.loader.exec_module(spec_linter)
+    assert spec_linter.lint(None, repo_root).hard_failures == 0""",
+    """Every field read from a value the target itself returns, not only a faked dependency's data, MUST use dual dict-or-attribute access, never one assumed shape:
+
+    def field(value, name):
+        return value[name] if isinstance(value, dict) else getattr(value, name)""",
+    """A test MUST NEVER assert a fake was used by reaching into `sys.modules` under a guessed key: real loaders key modules dynamically, often by `repo_root` or a hash, so any guess is unreliable.""",
+    """A test asserting that a wall-clock "own write time" field falls within a `[before, after]` window truncates `before` and `after` to the precision of the field's documented format, such as whole seconds for a `%Y-%m-%dT%H:%M:%SZ` example with no fractional digits (`datetime.now(timezone.utc).replace(microsecond=0)`), never comparing a timestamp truncated on write against microsecond-precision bounds.""",
+    """To confirm a fake ran, the fake's own code appends one line per call to a log file at a path the test controls, and the test reads that file; never an in-process, module-level list, since the test cannot reliably find the module object that wrote it.
+A test builds the source of any file it writes by concatenating strings, with `repr()` for every value it embeds, never with `str.format`, `%` or an f-string over text that holds braces or percent signs.""",
+]
 
 
-def _field(value, name, default=None):
-    if isinstance(value, Mapping):
-        return value.get(name, default)
-    return getattr(value, name, default)
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def _field(value, name):
+    if isinstance(value, dict):
+        return value.get(name)
+    return getattr(value, name, None)
 
 
-def _text(bundle, name):
-    return str(_field(bundle, name) or "")
+def _bget(bundle, name):
+    if isinstance(bundle, dict):
+        return bundle.get(name)
+    return getattr(bundle, name, None)
+
+
+def _slug(component_id):
+    return component_id.removeprefix("comp-")
+
+
+def _module_names(bundle):
+    names = _bget(bundle, "module_names") or []
+    if names:
+        return list(names)
+    return [_slug(_bget(bundle, "component_id") or "").replace("-", "_")]
+
+
+def _filename(criterion_id):
+    return "test_" + criterion_id.lower().replace("-", "_") + ".py"
+
+
+def _sha(text):
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
 def _tool_root():
-    return next(p for p in Path(__file__).resolve().parents if p.name == "gen").parent
+    for parent in Path(__file__).resolve().parents:
+        if parent.name == "gen":
+            return parent.parent
 
 
-def _load_dependency(repo_root, slug, module_name):
+def _load_dep(slug, module_name, repo_root):
     base = Path(repo_root) / "gen" / slug
     if not base.is_dir():
         base = _tool_root() / "gen" / slug
     path = base / (module_name + ".py")
-    locations = None
     if not path.is_file():
         path = base / module_name / "__init__.py"
-        locations = [str(path.parent)]
-    digest = hashlib.sha256(str(path.resolve()).encode("utf-8")).hexdigest()[:16]
-    load_name = "_test_author_dep_%s_%s" % (module_name, digest)
-    spec = importlib.util.spec_from_file_location(
-        load_name, path, submodule_search_locations=locations
-    )
+    key = "_test_author_dep_" + module_name + "_" + _sha(str(path.resolve()))[:16]
+    spec = importlib.util.spec_from_file_location(key, path)
     module = importlib.util.module_from_spec(spec)
-    sys.modules[load_name] = module
+    sys.modules[key] = module
     spec.loader.exec_module(module)
     return module
 
 
-def _sha256(value):
-    data = json.dumps(value, sort_keys=True, default=str).encode("utf-8")
-    return "sha256:" + hashlib.sha256(data).hexdigest()
+def _with_header(bundle, content):
+    criterion_text = _bget(bundle, "criterion_text") or ""
+    requirement_text = _bget(bundle, "requirement_text") or ""
+    header = "# hotdocs-criterion: sha256:" + _sha(criterion_text + "\n" + requirement_text)
+    first, sep, rest = content.partition("\n")
+    if first.startswith("# hotdocs-criterion:"):
+        content = rest
+    return header + "\n" + content
 
 
-def _criterion_hash(bundle):
-    return _sha256({name: _field(bundle, name) for name in _BUNDLE_FIELDS})
+def _build_prompt(bundle, nonce):
+    modules = _module_names(bundle)
+    module = modules[0]
+    parts = [
+        "You are writing one Python pytest test file for one acceptance criterion "
+        "of a software component, from its specification alone. You have no access "
+        "to the component's implementation.",
+        "You have no tool or file access: answer from this bundle alone.",
+        "Wrap your test file's content exactly as:\n\n"
+        "-----BEGIN FILE " + nonce + "-----\n"
+        "<the complete, exact test file content, verbatim>\n"
+        "-----END FILE " + nonce + "-----",
+        "The test must exercise the component's public interface as described, "
+        "asserting the criterion's Then clause.",
+        "The module(s) under test, each imported with exactly this statement:\n\n"
+        + "\n".join("import " + name for name in modules),
+    ]
+    parts.extend(block.replace("@MODULE@", module) for block in _BLOCKS)
+    parts.append("## Component\n\n" + str(_bget(bundle, "component_id") or ""))
+    parts.append("## Criterion " + str(_bget(bundle, "criterion_id") or "") + "\n\n"
+                 + "Covers: " + str(_bget(bundle, "covers") or "") + "\n\n"
+                 + str(_bget(bundle, "criterion_text") or ""))
+    parts.append("## Covered requirement\n\n" + str(_bget(bundle, "requirement_text") or ""))
+    parts.append("## Interface\n\n" + str(_bget(bundle, "interface") or ""))
+    dep_interfaces = _bget(bundle, "dependency_interfaces") or {}
+    if dep_interfaces:
+        entries = ["### " + dep_id + "\n" + text for dep_id, text in dep_interfaces.items()]
+        parts.append("## Dependency interfaces\n\n" + "\n\n".join(entries))
+    parts.append("## Glossary\n\n" + str(_bget(bundle, "glossary") or ""))
+    return "\n\n".join(parts) + "\n"
 
 
-def _gate_inputs_hash(seed):
-    return _sha256({"seed": seed, "prompt_version": PROMPT_VERSION})
+# ---------------------------------------------------------------------------
+# Static validation (R-AUTHOR-020)
+# ---------------------------------------------------------------------------
+
+_SIG_RE = re.compile(r"\b([A-Za-z_]\w*)\(([^()]*)\)\s*->")
 
 
-def _test_path(component_id, criterion_id):
-    slug = component_id.removeprefix("comp-")
-    filename = "test_%s.py" % criterion_id.lower().replace("-", "_")
-    return "verification/%s/generated-test/%s" % (slug, filename)
+def _split_params(text):
+    parts, depth, cur = [], 0, ""
+    for ch in text:
+        if ch in "[{(":
+            depth += 1
+        elif ch in "]})":
+            depth -= 1
+        if ch == "," and depth == 0:
+            parts.append(cur)
+            cur = ""
+        else:
+            cur += ch
+    parts.append(cur)
+    return [p.strip() for p in parts if p.strip()]
 
 
-def _write(root, path, content):
-    target = Path(root) / path
+def _dep_signatures(dep_interfaces):
+    sigs = {}
+    for text in dep_interfaces.values():
+        for match in _SIG_RE.finditer(text or ""):
+            params = [p for p in _split_params(match.group(2)) if p not in ("*", "/")]
+            arity = None if any(p.startswith("*") for p in params) else len(params)
+            sigs.setdefault(match.group(1), set()).add(arity)
+    return sigs
+
+
+def _fn_arity(fn):
+    a = fn.args
+    if a.vararg or a.kwarg:
+        return None
+    return len(a.posonlyargs) + len(a.args) + len(a.kwonlyargs)
+
+
+def _check_tree(tree, sigs):
+    defs = {}
+    for node in tree.body:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            defs[node.name] = _fn_arity(node)
+    candidates = list(defs.items())
+    for node in tree.body:
+        if (isinstance(node, ast.Assign) and len(node.targets) == 1
+                and isinstance(node.targets[0], ast.Name)
+                and isinstance(node.value, ast.Name) and node.value.id in defs):
+            candidates.append((node.targets[0].id, defs[node.value.id]))
+    for name, arity in candidates:
+        if name in sigs and arity is not None:
+            expected = sigs[name]
+            if None not in expected and arity not in expected:
+                return name, arity, expected
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            try:
+                sub = ast.parse(node.value)
+            except (SyntaxError, ValueError):
+                continue
+            found = _check_tree(sub, sigs)
+            if found:
+                return found
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Library
+# ---------------------------------------------------------------------------
+
+def _result(bundle, model, seed, cache_hit, file, error):
+    return {
+        "component_id": _bget(bundle, "component_id"),
+        "criterion_id": _bget(bundle, "criterion_id"),
+        "model": model,
+        "seed": seed,
+        "prompt_version": PROMPT_VERSION,
+        "cache_hit": cache_hit,
+        "file": file,
+        "model_call_error": error,
+    }
+
+
+def _write(repo_root, rel_path, content):
+    target = Path(repo_root) / rel_path
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_bytes(content.encode("utf-8"))
 
 
-_GUIDANCE = """## How the component under test resolves its own dependencies
-
-No dependency is statically importable. Resolution is dynamic, at runtime, from `<repo_root>/gen/<dependency-slug>/<module_name>.py` (flat) or `.../<module_name>/__init__.py` (package), else the tool's own copy, so omitting one never makes it missing. It is never interceptable by name-based `sys.modules` injection or `mock.patch`.
-
-To fake a dependency, write a fake module file under a fresh temporary `repo_root` -- always flat-module shape, `<repo_root>/gen/<dependency-slug>/<module_name>.py`: every real loader checks flat first. `module_name` is the slug with hyphens replaced by underscores, never `"__init__"`.
-
-The component under test itself needs no custom loader: a plain `import <module_name>` -- exactly the import statement(s) given under "Module under test" below. The generator may lay a module out as `<module>.py` or a `<module>/` package; the import is the same either way.
-
-When the test itself loads any module from a file path, register it in `sys.modules` BEFORE executing it (a dataclass needs this):
-
-```python
-import importlib.util, sys
-spec = importlib.util.spec_from_file_location(module_name, path)
-module = importlib.util.module_from_spec(spec)
-sys.modules[module_name] = module
-spec.loader.exec_module(module)
-```
-
-## Faking a dependency
-
-Any fake you write for a dependency's behavior MUST match that dependency's real, documented call signature and return shape exactly, as given in its interface under "Dependency interfaces" below -- never invented or simplified. A dependency's contract is public; the target's own implementation is not, and you have none of it.
-
-Worked example: the documented signature is `lookup(key: str) -> Record`, and `Record` documents the named fields `name` and `size`. The fake MUST take exactly that one parameter and expose every field:
-
-```python
-def lookup(key):
-    return {"name": "x", "size": 1}
-```
-
-never `return "x"`, `return [1]`, or a bare number -- even if the test reads only `name`.
-
-To confirm a fake was invoked, use a file-based invocation log: the fake's own code appends its invocation record to a file under a path the test controls, and the test reads that file. Never assert a fake was used by reaching into `sys.modules` under a guessed key -- real loaders key dynamically (often `repo_root`- or hash-qualified), so any guess is unreliable -- and never record invocations in an in-process, module-level list.
-
-## Reading values the target returns
-
-Every field read from a value the target itself returns (not only a faked dependency's data) MUST use dual dict-or-attribute access, never assumed to be one shape -- any component may return either a dict or an object:
-
-```python
-def field(value, name):
-    return value[name] if isinstance(value, dict) else getattr(value, name)
-```
-
-## Wall-clock timestamps
-
-A test asserting a wall-clock "own write time" field falls within a `[before, after]` window MUST truncate `before`/`after` to the same precision the field's own documented format carries (e.g. whole seconds for a `%Y-%m-%dT%H:%M:%SZ` example with no fractional digits: `datetime.now(timezone.utc).replace(microsecond=0)`) -- never compare a truncated-on-write timestamp against microsecond-precision bounds directly.
-
-## Synthetic spec fixtures
-
-Every frontmatter-bearing document a fixture constructs (`component.md`, `specs/vars/VAR-*.md`, `specs/decisions/D<N>.md`) MUST carry the frontmatter SPEC_GUIDELINES.md requires: `id`, `title`, `status`, `owners`, always, with `status` exactly one of `draft`/`ratified`/`deprecated`. `status: ratified` also sets a placeholder `last_ratified_commit`. A unit file (`constraints.md`, or anything under `requirements/`, `interface/`, `acceptance/`) carries no frontmatter at all. Every `requirements/` file needs a matching `acceptance/` file with a `Covers:` tag, for every fixture component.
-
-Any list-valued frontmatter field (`owners`, `depends_on`, `realizes`, `uses_var`) MUST use YAML flow style, e.g. `[a, b]`, never block style: this corpus's frontmatter reader does not recognize block style as a list.
-
-A synthetic fixture SHOULD default to `sealed: true` with a short, fake `source_path` not under `gen/` (e.g. `legacy/foo/`), unless the criterion specifically concerns `realizes`/capability-linkage: sealed exempts it from `realizes` and the capability machinery. Only when the criterion genuinely needs `realizes`-driven behavior MUST the fixture supply a resolvable `P-<id>`.
-
-A test MUST NEVER `import yaml` or any other not-already-installed third-party package: write and parse frontmatter as plain text.
-
-Whenever the test constructs a synthetic fixture and the criterion depends on a precondition the target checks against `spec-linter`, the test MUST call `lint()` against the fixture first and assert zero hard-fail findings before exercising the real behavior. Load `spec_linter` from `<tool root>/gen/spec-linter/spec_linter.py` (else `.../spec_linter/__init__.py`), the tool root being the parent of the nearest directory named `gen` above the module under test's `__file__`, with the loader snippet above. The call is exactly `lint(None, repo_root)` -- `paths` first, positionally `None`, never one positional argument:
-
-```python
-report = spec_linter.lint(None, repo_root)
-hard = report["hard_failures"] if isinstance(report, dict) else report.hard_failures
-assert hard == 0
-```
-"""
-
-
-def _build_prompt(bundle, nonce):
-    component_id = _text(bundle, "component_id")
-    module_names = list(_field(bundle, "module_names") or []) or [
-        component_id.removeprefix("comp-").replace("-", "_")
-    ]
-    imports = "\n".join("import %s" % name for name in module_names)
-    dependencies = _field(bundle, "dependency_interfaces") or {}
-    dependency_text = "\n\n".join(
-        "### %s\n\n%s" % (dep_id, text) for dep_id, text in dependencies.items()
-    ) or "(none)"
-    return "\n\n".join([
-        "You are writing one pytest test file for one acceptance criterion of "
-        "component `%s`, from spec prose alone. You have no access to the "
-        "implementation under test, and no tool or file access: answer from "
-        "this bundle alone. The test MUST exercise the component's public "
-        "interface as described below and assert the criterion's Then clause."
-        % component_id,
-        "## Module under test\n\nImport the module(s) under test with exactly "
-        "these statements, in this order:\n\n```python\n%s\n```" % imports,
-        "## Criterion %s (Covers: %s)\n\n%s" % (
-            _text(bundle, "criterion_id"),
-            _text(bundle, "covers"),
-            _text(bundle, "criterion_text"),
-        ),
-        "## Covered requirement\n\n%s" % _text(bundle, "requirement_text"),
-        "## Interface of the component under test\n\n%s" % _text(bundle, "interface"),
-        "## Dependency interfaces\n\n%s" % dependency_text,
-        "## Glossary\n\n%s" % _text(bundle, "glossary"),
-        _GUIDANCE,
-        "## Reply format\n\nWrap your test file's content exactly as:\n\n"
-        "-----BEGIN FILE %s-----\n"
-        "<the complete, exact test file content, verbatim>\n"
-        "-----END FILE %s-----\n\n"
-        "Anything outside these markers is discarded." % (nonce, nonce),
-    ])
-
-
-_SIGNATURE_START = re.compile(r"([A-Za-z_]\w*)\(")
-_ARROW = re.compile(r"\s*->")
-_PARAM_HEAD = re.compile(r"(\*{1,2})?[A-Za-z_]\w*|\*|/")
-_OPEN = "([{"
-_CLOSE = ")]}"
-
-
-def _split_params(text):
-    parts = []
-    current = ""
-    depth = 0
-    for ch in text:
-        depth += (ch in _OPEN) - (ch in _CLOSE)
-        if ch == "," and depth == 0:
-            parts.append(current)
-            current = ""
-        else:
-            current += ch
-    parts.append(current)
-    return [part.strip() for part in parts if part.strip()]
-
-
-def _signatures(text):
-    for match in _SIGNATURE_START.finditer(text):
-        start = match.end()
-        index = start
-        depth = 1
-        while index < len(text) and depth:
-            depth += (text[index] in _OPEN) - (text[index] in _CLOSE)
-            index += 1
-        if depth or not _ARROW.match(text, index):
-            continue
-        heads = [re.split(r"[:=]", param, 1)[0].strip() for param in _split_params(text[start:index - 1])]
-        if all(_PARAM_HEAD.fullmatch(head) for head in heads):
-            yield match.group(1), sum(1 for head in heads if head[0] not in "*/")
-
-
-def _dependency_arities(dependency_interfaces):
-    arities = {}
-    for text in dependency_interfaces.values():
-        for name, count in _signatures(str(text)):
-            arities.setdefault(name, set()).add(count)
-    return arities
-
-
-def _fake_arity(function):
-    args = function.args
-    if args.vararg or args.kwarg:
-        return None
-    return len(args.posonlyargs) + len(args.args) + len(args.kwonlyargs)
-
-
-def _arity_mismatch(tree, arities):
-    functions = [node for node in tree.body if isinstance(node, ast.FunctionDef)]
-    by_name = {function.name: function for function in functions}
-    candidates = [(function.name, function) for function in functions]
-    for node in tree.body:
-        if (
-            isinstance(node, ast.Assign)
-            and len(node.targets) == 1
-            and isinstance(node.targets[0], ast.Name)
-            and isinstance(node.value, ast.Name)
-            and node.value.id in by_name
-        ):
-            candidates.append((node.targets[0].id, by_name[node.value.id]))
-    for name, function in candidates:
-        count = _fake_arity(function)
-        if name in arities and count is not None and count not in arities[name]:
-            expected = " or ".join(str(n) for n in sorted(arities[name]))
-            return "fake `%s` takes %d parameter(s); dependency signature takes %s" % (
-                name, count, expected,
-            )
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Constant) and isinstance(node.value, str):
-            try:
-                inner = ast.parse(textwrap.dedent(node.value))
-            except (SyntaxError, ValueError):
-                continue
-            mismatch = _arity_mismatch(inner, arities)
-            if mismatch:
-                return mismatch
-    return None
-
-
-def _extract(text, nonce, dependency_interfaces):
-    pattern = re.compile(
-        r"-----BEGIN FILE " + nonce + r"-----\n?(.*?)\n?-----END FILE " + nonce + r"-----",
-        re.DOTALL,
-    )
-    match = pattern.search(text)
-    if match is None:
-        return None, {
-            "category": "missing_file_block",
-            "message": "no matching BEGIN/END FILE pair for this call's nonce",
-        }
-    content = match.group(1)
-    try:
-        tree = ast.parse(content)
-    except SyntaxError as exc:
-        return None, {
-            "category": "malformed_code",
-            "message": "authored test is not valid Python: %s" % exc.msg,
-        }
-    mismatch = _arity_mismatch(tree, _dependency_arities(dependency_interfaces))
-    if mismatch:
-        return None, {"category": "fake_signature_mismatch", "message": mismatch}
-    return content, None
-
-
 def author_test(bundle, model, seed=0, *, repo_root=None, llm_backend=None):
-    root = Path(repo_root or Path.cwd())
-    component_id = _text(bundle, "component_id")
-    criterion_id = _text(bundle, "criterion_id")
-    path = _test_path(component_id, criterion_id)
+    repo_root = Path(repo_root) if repo_root is not None else Path.cwd()
+    component_id = _bget(bundle, "component_id") or ""
+    criterion_id = _bget(bundle, "criterion_id") or ""
+    dep_interfaces = _bget(bundle, "dependency_interfaces") or {}
+    rel_path = "verification/" + _slug(component_id) + "/generated-test/" + _filename(criterion_id)
 
-    cache = _load_dependency(root, "cache-manager", "cache_manager")
-    key = cache.CacheKey(
-        spec_bundle_hash=_criterion_hash(bundle),
-        gate_inputs_hash=_gate_inputs_hash(seed),
+    criterion_hash = "sha256:" + _sha(json.dumps({
+        "component_id": component_id,
+        "criterion_id": criterion_id,
+        "covers": _bget(bundle, "covers"),
+        "criterion_text": _bget(bundle, "criterion_text"),
+        "requirement_text": _bget(bundle, "requirement_text"),
+        "interface": _bget(bundle, "interface"),
+        "glossary": _bget(bundle, "glossary"),
+    }, sort_keys=True))
+    gate_inputs_hash = "sha256:" + _sha(json.dumps({
+        "seed": seed,
+        "prompt_version": PROMPT_VERSION,
+        "dependency_interfaces": dict(dep_interfaces),
+        "module_names": _module_names(bundle),
+    }, sort_keys=True))
+
+    cache_manager = _load_dep("cache-manager", "cache_manager", repo_root)
+    key = cache_manager.CacheKey(
+        spec_bundle_hash=criterion_hash,
+        gate_inputs_hash=gate_inputs_hash,
         gate_version=GATE_VERSION,
         model_pin=model,
     )
-    cached = cache.get(key, repo_root=root)
-    if not isinstance(cached, cache.Miss):
-        content = _field(_field(_field(cached, "payload"), "file"), "content")
-        _write(root, path, content)
-        return TestAuthoringResult(
-            component_id, criterion_id, model, seed, PROMPT_VERSION, True,
-            {"path": path, "content": content}, None,
-        )
+    cached = cache_manager.get(key, repo_root=repo_root)
+    if not isinstance(cached, cache_manager.Miss):
+        cached_file = _field(_field(cached, "payload"), "file")
+        content = _with_header(bundle, _field(cached_file, "content"))
+        _write(repo_root, rel_path, content)
+        return _result(bundle, model, seed, True, {"path": rel_path, "content": content}, None)
 
+    llm_endpoint = _load_dep("llm-endpoint", "llm_endpoint", repo_root)
     nonce = secrets.token_hex(16)
-    endpoint = _load_dependency(root, "llm-endpoint", "llm_endpoint")
-    response = endpoint.complete(_build_prompt(bundle, nonce), model, backend=llm_backend)
+    response = llm_endpoint.complete(_build_prompt(bundle, nonce), model, backend=llm_backend)
     error = _field(response, "model_call_error")
-    content = None
-    if not error:
-        content, error = _extract(
-            _field(response, "text"), nonce, _field(bundle, "dependency_interfaces") or {}
-        )
     if error:
-        return TestAuthoringResult(
-            component_id, criterion_id, model, seed, PROMPT_VERSION, False, None, error,
-        )
+        return _result(bundle, model, seed, False, None, error)
 
-    file = {"path": path, "content": content}
-    cache.put(
-        key,
-        cache.CachedResult(
-            gate_type=GATE_TYPE,
-            payload={
-                "component_id": component_id,
-                "criterion_id": criterion_id,
-                "model": model,
-                "seed": seed,
-                "prompt_version": PROMPT_VERSION,
-                "file": dict(file),
-            },
-            stored_at=cache.now_iso(),
-        ),
-        repo_root=root,
+    match = re.search(
+        "-----BEGIN FILE " + nonce + "-----\n?(.*?)\n?-----END FILE " + nonce + "-----",
+        _field(response, "text"),
+        re.DOTALL,
     )
-    _write(root, path, content)
-    return TestAuthoringResult(
-        component_id, criterion_id, model, seed, PROMPT_VERSION, False, file, None,
-    )
+    if not match:
+        return _result(bundle, model, seed, False, None, {
+            "category": "missing_file_markers",
+            "message": "response holds no matching BEGIN/END FILE marker pair",
+        })
+    extracted = match.group(1)
 
+    try:
+        tree = ast.parse(extracted)
+    except SyntaxError as exc:
+        return _result(bundle, model, seed, False, None, {
+            "category": "malformed_code",
+            "message": "authored test is not valid Python: " + str(exc.msg),
+        })
+
+    mismatch = _check_tree(tree, _dep_signatures(dep_interfaces))
+    if mismatch:
+        name, arity, expected = mismatch
+        return _result(bundle, model, seed, False, None, {
+            "category": "fake_signature_mismatch",
+            "message": "fake " + name + " takes " + str(arity)
+                       + " parameter(s); its dependency interface documents "
+                       + " or ".join(str(n) for n in sorted(expected)),
+        })
+
+    content = _with_header(bundle, extracted)
+    file = {"path": rel_path, "content": content}
+    cache_manager.put(key, cache_manager.CachedResult(
+        gate_type=GATE_TYPE,
+        payload={
+            "component_id": component_id,
+            "criterion_id": criterion_id,
+            "model": model,
+            "file": file,
+            "seed": seed,
+            "prompt_version": PROMPT_VERSION,
+        },
+        stored_at=cache_manager.now_iso(),
+    ), repo_root=repo_root)
+    _write(repo_root, rel_path, content)
+    return _result(bundle, model, seed, False, file, None)
+
+
+# ---------------------------------------------------------------------------
+# CLI: hotdocs author-test <component-id> <criterion-id> --model=<id> ...
+# ---------------------------------------------------------------------------
 
 def main(argv=None):
     parser = argparse.ArgumentParser(prog="hotdocs author-test")
@@ -386,15 +380,18 @@ def main(argv=None):
         args = parser.parse_args(argv)
     except SystemExit:
         return 2
-    root = Path(args.repo_root)
-    assembler = _load_dependency(root, "spec-bundle-assembler", "spec_bundle_assembler")
-    bundle = assembler.assemble_criterion(args.component_id, args.criterion_id, root)
-    result = author_test(bundle, args.model, args.seed, repo_root=root)
+    repo_root = Path(args.repo_root)
+    assembler = _load_dep("spec-bundle-assembler", "spec_bundle_assembler", repo_root)
+    bundle = assembler.assemble_criterion(args.component_id, args.criterion_id, repo_root)
+    result = author_test(bundle, args.model, args.seed, repo_root=repo_root)
+    error = result["model_call_error"]
     if args.format == "json":
-        print(json.dumps(dataclasses.asdict(result)))
+        print(json.dumps(result))
+    elif error:
+        print("model_call_error: " + str(_field(error, "category")) + ": " + str(_field(error, "message")))
     else:
-        print(json.dumps(result.model_call_error) if result.model_call_error else result.file["path"])
-    return 1 if result.model_call_error else 0
+        print(result["file"]["path"])
+    return 1 if error else 0
 
 
 if __name__ == "__main__":

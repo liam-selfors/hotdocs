@@ -1,10 +1,3 @@
-"""AC-AUTHOR-009: author_test extracts strictly from between the
-nonce-delimited BEGIN/END FILE markers, and a response with no marker
-pair is a distinct authoring failure that writes nothing to cache or disk.
-"""
-
-import dataclasses
-import os
 import re
 from pathlib import Path
 
@@ -13,233 +6,169 @@ import pytest
 import test_author
 
 
-GLOSSARY = "# Glossary\n\n- **Foo** \u2014 a test term.\n"
+NONCE_RE = re.compile(r"-----BEGIN FILE ([0-9a-f]+)-----")
 
-CRITERION_TEXT = (
-    "# AC-FOO-001\n\n"
-    "Covers: R-FOO-001\n"
-    "Kind: generated-test\n\n"
-    "Given x = 2\n"
-    "When foo(x) is called\n"
-    "Then it returns 4\n"
-)
+MODEL = "claude-sonnet-5"
 
-REQUIREMENT_TEXT = "# R-FOO-001\n\n**R-FOO-001** \u2014 `foo(x)` MUST return `2 * x`.\n"
-
-INTERFACE_TEXT = "# Library\n\n    foo(x: int) -> int\n"
-
-REAL_TEST_CODE = (
+EXPECTED_CODE = (
     "import foo\n"
     "\n"
     "\n"
-    "def test_ac_foo_001_doubles_two_marker_payload_7f3a():\n"
-    "    assert foo.foo(2) == 4\n"
+    "def test_foo_doubles():\n"
+    "    assert foo.foo(2) == 4"
 )
 
-NARRATION_BEFORE = "Sure! Here is the requested test file for AC-FOO-001, enjoy."
-NARRATION_AFTER = "Let me know if you would like any further changes to it."
+NARRATION_BEFORE = "Sure! Here is the test file you asked for:"
+NARRATION_AFTER = "Let me know if you need anything else."
 
 
-@dataclasses.dataclass
-class FakeCriterionBundle:
-    """Mirrors spec-bundle-assembler's CriterionBundle: a dataclass with the
-    documented fields, in order, that also reads as a mapping."""
-
-    component_id: str
-    criterion_id: str
-    covers: str
-    criterion_text: str
-    requirement_text: str
-    interface: str
-    glossary: str
-    dependency_interfaces: dict = dataclasses.field(default_factory=dict)
-    module_names: list = dataclasses.field(default_factory=lambda: ["foo"])
-
-    def _names(self):
-        return [f.name for f in dataclasses.fields(self)]
-
-    def __getitem__(self, key):
-        if key in self._names():
-            return getattr(self, key)
-        raise KeyError(key)
-
-    def get(self, key, default=None):
-        if key in self._names():
-            return getattr(self, key)
-        return default
-
-    def __contains__(self, key):
-        return key in self._names()
-
-    def keys(self):
-        return list(self._names())
-
-    def values(self):
-        return [getattr(self, n) for n in self._names()]
-
-    def items(self):
-        return [(n, getattr(self, n)) for n in self._names()]
-
-    def __iter__(self):
-        return iter(self._names())
-
-    def __len__(self):
-        return len(self._names())
+def field(value, name):
+    return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def _make_bundle():
-    return FakeCriterionBundle(
+def body(content):
+    first, _, rest = content.partition("\n")
+    return rest if first.startswith("# hotdocs-criterion:") else content
+
+
+class Bundle(dict):
+    """A CriterionBundle stand-in readable both as a mapping and by attribute."""
+
+    def __getattr__(self, name):
+        try:
+            return self[name]
+        except KeyError:
+            raise AttributeError(name)
+
+
+def make_bundle():
+    return Bundle(
         component_id="comp-foo",
-        criterion_id="AC-FOO-001",
-        covers="R-FOO-001",
-        criterion_text=CRITERION_TEXT,
-        requirement_text=REQUIREMENT_TEXT,
-        interface=INTERFACE_TEXT,
-        glossary=GLOSSARY,
+        criterion_id="AC-FOO-003",
+        covers="R-FOO-003",
+        criterion_text=(
+            "Given x = 2\n"
+            "When foo(x) is called\n"
+            "Then it returns 4"
+        ),
+        requirement_text="**R-FOO-003** — `foo(x)` MUST return `2 * x`.",
+        interface="# Library\n\n```\nfoo(x: int) -> int\n```",
+        glossary="# Glossary\n\n- **Foo** — a test term.",
         dependency_interfaces={},
+        module_names=["foo"],
     )
 
 
-def _field(value, name):
-    if value is None:
-        return None
-    if isinstance(value, dict):
-        return value.get(name)
-    return getattr(value, name, None)
+def nonce_from(prompt):
+    m = NONCE_RE.search(prompt)
+    assert m is not None, "prompt carries no BEGIN FILE nonce marker"
+    return m.group(1)
 
 
-def _extract_nonce(prompt):
-    candidates = re.findall(r"-----BEGIN FILE ([0-9A-Za-z]+)-----", prompt)
-    assert candidates, "prompt carries no '-----BEGIN FILE <nonce>-----' instruction"
-    hex32 = [c for c in candidates if re.fullmatch(r"[0-9a-fA-F]{32}", c)]
-    return hex32[0] if hex32 else candidates[0]
-
-
-def _model_response(text, model):
-    return {
-        "text": text,
-        "model": model,
-        "backend": "mock",
-        "model_call_error": None,
-    }
-
-
-def _wrapped_backend(calls):
+def make_fenced_backend():
     def backend(prompt, model, **params):
-        calls.append(prompt)
-        nonce = _extract_nonce(prompt)
+        n = nonce_from(prompt)
         text = (
             NARRATION_BEFORE + "\n"
             "```python\n"
-            "-----BEGIN FILE " + nonce + "-----\n"
-            + REAL_TEST_CODE
-            + "-----END FILE " + nonce + "-----\n"
+            "-----BEGIN FILE " + n + "-----\n"
+            + EXPECTED_CODE + "\n"
+            "-----END FILE " + n + "-----\n"
             "```\n"
             + NARRATION_AFTER + "\n"
         )
-        return _model_response(text, model)
+        return {
+            "text": text,
+            "model": model,
+            "backend": "mock",
+            "model_call_error": None,
+        }
 
     return backend
 
 
-def _markerless_backend(calls):
+def make_nonconforming_backend():
     def backend(prompt, model, **params):
-        calls.append(prompt)
         text = (
-            "Sure, here is a test file:\n"
+            NARRATION_BEFORE + "\n"
             "```python\n"
-            + REAL_TEST_CODE
-            + "```\n"
-            "Hope this helps.\n"
+            + EXPECTED_CODE + "\n"
+            "```\n"
+            + NARRATION_AFTER + "\n"
         )
-        return _model_response(text, model)
+        return {
+            "text": text,
+            "model": model,
+            "backend": "mock",
+            "model_call_error": None,
+        }
 
     return backend
 
 
-def _files_under(path):
-    path = Path(path)
-    if not path.exists():
+def all_files(root):
+    root = Path(root)
+    if not root.exists():
         return []
-    return [p for p in path.rglob("*") if p.is_file()]
+    return [p for p in root.rglob("*") if p.is_file()]
 
 
-@pytest.fixture
-def repo_root(tmp_path, monkeypatch):
-    root = tmp_path / "repo"
-    root.mkdir()
-    monkeypatch.chdir(root)
+@pytest.fixture(autouse=True)
+def _local_cache(monkeypatch):
     monkeypatch.delenv("VAR_CACHE_STORE_URL", raising=False)
-    monkeypatch.delenv("VAR_HOTDOCS_CONFIG", raising=False)
-    return root
 
 
-def test_extracts_exactly_between_markers_discarding_fence_and_narration(repo_root):
-    calls = []
+def test_extracts_exactly_between_markers(tmp_path):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+
     result = test_author.author_test(
-        _make_bundle(),
-        "mock-model",
-        0,
-        repo_root=repo_root,
-        llm_backend=_wrapped_backend(calls),
+        make_bundle(), MODEL, 0,
+        repo_root=repo_root, llm_backend=make_fenced_backend(),
     )
 
-    assert len(calls) == 1, "the mock backend should have been called exactly once"
-    nonce = _extract_nonce(calls[0])
+    assert field(result, "model_call_error") is None
+    file = field(result, "file")
+    assert file is not None
+    content = field(file, "content")
 
-    assert _field(result, "model_call_error") is None
-    file_ = _field(result, "file")
-    assert file_ is not None, "a well-formed marker pair must produce a file"
-    content = _field(file_, "content")
-    assert isinstance(content, str)
-
-    # Exactly the text between the markers (modulo the line breaks that
-    # directly abut the marker lines themselves).
-    assert content.strip("\r\n") == REAL_TEST_CODE.strip("\r\n")
-    assert REAL_TEST_CODE.strip("\r\n") in content
-
-    # Nothing from outside or of the markers themselves leaks in.
+    assert body(content) == EXPECTED_CODE
     assert "```" not in content
     assert NARRATION_BEFORE not in content
     assert NARRATION_AFTER not in content
-    assert "-----BEGIN FILE" not in content
-    assert "-----END FILE" not in content
-    assert nonce not in content
+    assert "BEGIN FILE" not in content
+    assert "END FILE" not in content
+
+    path = Path(field(file, "path"))
+    written = path if path.is_absolute() else repo_root / path
+    assert written.is_file()
+    assert body(written.read_text()) == EXPECTED_CODE
 
 
-def test_no_marker_pair_is_distinct_failure_writing_nothing(repo_root):
-    calls = []
+def test_missing_markers_is_distinct_failure_and_writes_nothing(tmp_path):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+
     result = test_author.author_test(
-        _make_bundle(),
-        "mock-model",
-        0,
-        repo_root=repo_root,
-        llm_backend=_markerless_backend(calls),
+        make_bundle(), MODEL, 0,
+        repo_root=repo_root, llm_backend=make_nonconforming_backend(),
     )
 
-    assert len(calls) == 1, "the mock backend should have been called exactly once"
-    assert _field(result, "file") is None
-    assert not _field(result, "cache_hit")
+    assert field(result, "file") is None
+    assert field(result, "cache_hit") is False
 
-    # Nothing written to verification/<component>/generated-test/.
-    assert _files_under(repo_root / "verification") == []
-    assert not (repo_root / "verification" / "foo" / "generated-test").exists() or \
-        _files_under(repo_root / "verification" / "foo" / "generated-test") == []
-    # Nothing written to the local cache store.
-    assert _files_under(repo_root / ".hotdocs" / "cache") == []
+    gen_test_dir = repo_root / "verification" / "foo" / "generated-test"
+    assert all_files(gen_test_dir) == []
+    assert all_files(repo_root / "verification") == []
+    assert all_files(repo_root / ".hotdocs" / "cache") == []
 
-    # And the failure was not cached: a subsequent identical call with a
-    # conforming response must be a real miss that calls the model again.
-    calls2 = []
-    result2 = test_author.author_test(
-        _make_bundle(),
-        "mock-model",
-        0,
-        repo_root=repo_root,
-        llm_backend=_wrapped_backend(calls2),
+    # Nothing was cached: a later conforming call on the same key is a
+    # fresh model call, not a cache hit.
+    again = test_author.author_test(
+        make_bundle(), MODEL, 0,
+        repo_root=repo_root, llm_backend=make_fenced_backend(),
     )
-    assert len(calls2) == 1, "the failed attempt must not have been cached"
-    assert not _field(result2, "cache_hit")
-    file2 = _field(result2, "file")
-    assert file2 is not None
-    assert _field(file2, "content").strip("\r\n") == REAL_TEST_CODE.strip("\r\n")
+    assert field(again, "cache_hit") is False
+    again_file = field(again, "file")
+    assert again_file is not None
+    assert body(field(again_file, "content")) == EXPECTED_CODE
