@@ -4,10 +4,12 @@ Covers: R-AUTHOR-023
 Kind: generated-test
 
 ```gherkin
-Given any bundle
-When author_test builds its prompt
-Then the prompt instructs that a wall-clock write-time window check
-  must truncate its own before/after bounds to the documented field
-  format's own precision, never compare a truncated-on-write
-  timestamp against microsecond-precision bounds directly
+Given a bundle for comp-widget-maker whose dependency_interfaces is {},
+  and a mock model that records
+  each prompt and replies with a valid marked test file
+When author_test(bundle, "mock", repo_root=<tmp>, llm_backend=<mock>)
+  is called
+Then the first recorded prompt contains
+  "(`datetime.now(timezone.utc).replace(microsecond=0)`)" and contains
+  "never comparing a timestamp truncated on write against microsecond-precision bounds."
 ```

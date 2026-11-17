@@ -4,10 +4,21 @@ Covers: R-AUTHOR-015
 Kind: generated-test
 
 ```gherkin
-Given any bundle
-When author_test builds its prompt
-Then the prompt states that a test depending on a spec-linter-checked
-  precondition should self-check the constructed fixture against
-  spec-linter's own lint() first, asserting zero hard-fail findings,
-  before exercising the behavior actually under test
+Given a bundle for comp-widget-maker whose dependency_interfaces is {},
+  and a mock model that records
+  each prompt and replies with a valid marked test file
+When author_test(bundle, "mock", repo_root=<tmp>, llm_backend=<mock>)
+  is called
+Then the first recorded prompt contains the line
+  "    import widget_maker" and the line
+  "    assert spec_linter.lint(None, repo_root).hard_failures == 0",
+  and contains no "@MODULE@"
+
+Given a bundle for comp-widget-maker whose module_names is
+  ["alpha_mod", "beta_mod"], and a mock model that records each prompt and replies with a valid
+  marked test file
+When author_test(bundle, "mock", repo_root=<tmp>, llm_backend=<mock>)
+  is called
+Then the first recorded prompt contains the line "    import alpha_mod"
+  and does not contain the line "    import widget_maker"
 ```
