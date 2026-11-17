@@ -29,6 +29,29 @@ the way `component_size` was settled, never re-deriving it per caller
 
 ---
 
+## A test's helpers named `test*` are collected by pytest
+
+`D326` tells `verifier-orchestrator`'s test authors, through
+`specs/architecture/verifier-fixtures.md`, never to name a helper with a
+`test` prefix. The rule holds for every generated test and belongs in
+`test-author`'s fixed prompt text (`D316`), or in its static checks
+(`R-AUTHOR-020`) as a top-level `test*` function with parameters that
+no fixture supplies. Either change regenerates `test-author` and its
+dependents.
+
+---
+
+## The bootstrap dependency-surface gate misreads local names
+
+`tools/bootstrap_component.py`'s dependency surface gate reported
+"spec-bundle-assembler has no append" for a candidate whose local list
+`assembler` called `.append`: it matches attribute uses by a name's
+resemblance to a dependency, not by what the name is bound to. The
+port into `surface-checker` (planned on `refine-authoring-agentic`)
+should resolve names to the imports they come from.
+
+---
+
 ## Resolved entries
 
 Removed from this file, with their rationale in the decision named:

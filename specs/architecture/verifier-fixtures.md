@@ -28,7 +28,12 @@ naming a capability file the fixture also writes under `specs/product/`
 `test-author`'s fake-arity check (`R-AUTHOR-020`) would match. Every
 fixture criterion has at least one Given, one When and one Then step
 (`R-LINT-010`). `verify` checks no precondition against `spec-linter`,
-so a test does not lint its fixture (`R-AUTHOR-015`).
+so a test does not lint its fixture (`R-AUTHOR-015`). A
+test's own helper functions are named without a `test` prefix
+(`build_fixture`, `characterization_source`): pytest collects every
+top-level `test*` function in the file, and one taking parameters it
+has no fixture for errors the whole criterion (`D326`). Test functions
+for a fixture's own suite are written only inside string literals.
 
 A `spec-bundle-assembler` stand-in defines
 `assemble_criterion(component_id, criterion_id, repo_root)`, the only
