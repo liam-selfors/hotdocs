@@ -1,5 +1,7 @@
-import os
+# hotdocs-criterion: sha256:e8ebdf83e3a63d8cbf70e1b135d82d2365aacb37d033314d3437d5f3f837d6fd
+import importlib.util
 import re
+import sys
 from pathlib import Path
 
 import pytest
@@ -7,15 +9,24 @@ import pytest
 import test_author
 
 
-NONCE_RE = re.compile(r"-----BEGIN FILE ([0-9a-f]{32})-----")
+MODEL = "claude-sonnet-5"
+SLUG = "foo"
 
 
 def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
+def load_module(path, module_name):
+    spec = importlib.util.spec_from_file_location(module_name, path)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
 class Bundle(dict):
-    """A CriterionBundle stand-in readable both as a mapping and by attribute."""
+    """A CriterionBundle readable both as a mapping and by attribute."""
 
     def __getattr__(self, name):
         try:
@@ -27,218 +38,209 @@ class Bundle(dict):
 def make_bundle(dependency_interfaces):
     return Bundle(
         component_id="comp-foo",
-        criterion_id="AC-FOO-003",
-        covers="R-FOO-003",
-        criterion_text="Given x = 2\nWhen foo(x) is called\nThen it returns 4",
-        requirement_text="**R-FOO-003** — `foo(x)` MUST return `2 * x`.",
-        interface="# Library\n\n```\nfoo(x: int) -> int\n```",
-        glossary="# Glossary\n\n- **Foo** — a test term.",
-        dependency_interfaces=dependency_interfaces,
+        criterion_id="AC-FOO-001",
+        covers="R-FOO-001",
+        criterion_text=(
+            "Given x = 2\n"
+            "When foo(x) is called\n"
+            "Then it returns 4\n"
+        ),
+        requirement_text="**R-FOO-001** \u2014 `foo(x)` MUST return `2 * x`.",
+        interface="# Library\n\n```\nfoo(x: int) -> int\n```\n",
+        glossary="# Glossary\n\n- **Foo** \u2014 a test term.\n",
+        dependency_interfaces=dict(dependency_interfaces),
         module_names=["foo"],
     )
 
 
-def write_fake_cache_manager(repo_root, log_path):
-    src = (
-        "import dataclasses\n"
-        "from datetime import datetime, timezone\n"
-        "\n"
-        "LOG = " + repr(str(log_path)) + "\n"
-        "\n"
-        "def _log(line):\n"
-        "    with open(LOG, 'a') as f:\n"
-        "        f.write(line + '\\n')\n"
-        "\n"
-        "class Miss:\n"
-        "    def __eq__(self, other):\n"
-        "        return isinstance(other, Miss)\n"
-        "    def __hash__(self):\n"
-        "        return 0\n"
-        "\n"
-        "class SchemaValidationError(ValueError):\n"
-        "    pass\n"
-        "\n"
-        "@dataclasses.dataclass\n"
-        "class CacheKey:\n"
-        "    spec_bundle_hash: str = ''\n"
-        "    gate_inputs_hash: str = ''\n"
-        "    gate_version: str = ''\n"
-        "    model_pin: str = ''\n"
-        "    def __getitem__(self, k):\n"
-        "        return getattr(self, k)\n"
-        "    def get(self, k, d=None):\n"
-        "        return getattr(self, k, d)\n"
-        "\n"
-        "@dataclasses.dataclass\n"
-        "class CachedResult:\n"
-        "    gate_type: str = ''\n"
-        "    payload: dict = None\n"
-        "    stored_at: str = ''\n"
-        "    def __getitem__(self, k):\n"
-        "        return getattr(self, k)\n"
-        "    def get(self, k, d=None):\n"
-        "        return getattr(self, k, d)\n"
-        "\n"
-        "def get(cache_key, *, repo_root=None):\n"
-        "    _log('get')\n"
-        "    return Miss()\n"
-        "\n"
-        "def put(cache_key, result, *, repo_root=None):\n"
-        "    _log('put')\n"
-        "    return None\n"
-        "\n"
-        "def now_iso():\n"
-        "    return datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')\n"
-        "\n"
-        "def stats(*, repo_root=None):\n"
-        "    return {'entry_count': 0}\n"
-    )
-    d = Path(repo_root) / "gen" / "cache-manager"
-    d.mkdir(parents=True, exist_ok=True)
-    (d / "cache_manager.py").write_text(src)
+NONCE_RE = re.compile(r"-----BEGIN FILE ([0-9a-fA-F]+)-----")
 
 
-def make_backend(content, prompt_log):
+def make_backend(content):
     def backend(prompt, model, **params):
-        prompt_log.append(prompt)
-        found = NONCE_RE.findall(prompt)
-        assert found, "prompt holds no BEGIN FILE nonce"
-        n = found[0]
-        text = "-----BEGIN FILE " + n + "-----\n" + content + "\n-----END FILE " + n + "-----"
-        return {"text": text, "model": model, "backend": "mock", "model_call_error": None}
+        m = NONCE_RE.search(prompt)
+        nonce = m.group(1) if m else "0" * 32
+        text = (
+            "-----BEGIN FILE " + nonce + "-----\n"
+            + content
+            + "\n-----END FILE " + nonce + "-----"
+        )
+        return {
+            "text": text,
+            "model": model,
+            "backend": "mock",
+            "model_call_error": None,
+        }
 
     return backend
 
 
-@pytest.fixture
-def env(tmp_path, monkeypatch):
-    monkeypatch.delenv("VAR_CACHE_STORE_URL", raising=False)
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    log_path = tmp_path / "cache_calls.log"
-    write_fake_cache_manager(repo_root, log_path)
-    monkeypatch.chdir(repo_root)
-    return repo_root, log_path
-
-
-def run(repo_root, bundle, content, seed=0):
-    prompts = []
-    result = test_author.author_test(
-        bundle,
-        "claude-sonnet-5",
-        seed,
-        repo_root=repo_root,
-        llm_backend=make_backend(content, prompts),
-    )
-    assert prompts, "the mock backend was never called"
-    return result
-
-
-def put_count(log_path):
-    if not log_path.exists():
-        return 0
-    return sum(1 for line in log_path.read_text().splitlines() if line.strip() == "put")
-
-
-def generated_dir_files(repo_root):
-    d = Path(repo_root) / "verification" / "foo" / "generated-test"
-    if not d.exists():
+def files_under(path):
+    if not path.exists():
         return []
-    return [p for p in d.rglob("*") if p.is_file()]
+    return [p for p in path.rglob("*") if p.is_file()]
 
 
-def assert_rejected(result, category, repo_root, log_path, name=None):
-    err = field(result, "model_call_error")
-    assert err is not None, "expected a model_call_error"
-    assert field(err, "category") == category
-    if name is not None:
-        try:
-            message = field(err, "message")
-        except (KeyError, AttributeError):
-            message = None
-        assert name in str(message) or name in repr(err)
-    assert field(result, "file") is None
-    assert put_count(log_path) == 0, "a rejected response was cached"
-    assert generated_dir_files(repo_root) == [], "a rejected response was written"
+def cache_entry_count(repo_root):
+    try:
+        gen = next(
+            p for p in Path(test_author.__file__).resolve().parents if p.name == "gen"
+        )
+    except StopIteration:
+        return None
+    base = gen / "cache-manager"
+    if (base / "cache_manager.py").is_file():
+        path = base / "cache_manager.py"
+    elif (base / "cache_manager" / "__init__.py").is_file():
+        path = base / "cache_manager" / "__init__.py"
+    else:
+        return None
+    try:
+        cm = load_module(path, "cache_manager")
+    except Exception:
+        return None
+    stats = cm.stats(repo_root=repo_root)
+    return field(stats, "entry_count")
 
 
-def assert_accepted(result):
-    assert field(result, "model_call_error") is None
-    assert field(result, "file") is not None
+def assert_nothing_written(repo_root):
+    gt = repo_root / "verification" / SLUG / "generated-test"
+    assert files_under(gt) == [], "a test file was written: " + repr(files_under(gt))
+    cache_dir = repo_root / ".hotdocs" / "cache"
+    assert files_under(cache_dir) == [], "cache was written: " + repr(files_under(cache_dir))
+    count = cache_entry_count(repo_root)
+    if count is not None:
+        assert count == 0
+
+
+def error_text(err):
+    try:
+        msg = field(err, "message")
+    except (KeyError, AttributeError):
+        msg = None
+    return (str(msg) if msg is not None else "") + " " + str(err)
+
+
+@pytest.fixture
+def repo_root(tmp_path, monkeypatch):
+    root = tmp_path / "repo"
+    root.mkdir()
+    monkeypatch.delenv("VAR_CACHE_STORE_URL", raising=False)
+    monkeypatch.chdir(root)
+    return root
 
 
 DO_THING_IFACE = {
-    "comp-bar": "# Library\n\n```\ndo_thing(a: int, b: str, c: dict[str, str]) -> bool\n```\n",
+    "comp-bar": (
+        "# Library\n\n"
+        "```\n"
+        "do_thing(a: int, b: str, c: dict[str, str]) -> bool\n"
+        "```\n"
+    )
 }
 
 SCAN_IFACES = {
-    "comp-bar": "# Library\n\n```\nscan(component_id: str, repo_root: Path) -> dict\n```\n",
-    "comp-baz": "# Library\n\n```\nscan(repo_root: Path) -> dict\n```\n",
+    "comp-bar": (
+        "# Library\n\n"
+        "```\n"
+        "scan(component_id: str, repo_root: Path) -> Report\n"
+        "```\n"
+    ),
+    "comp-baz": (
+        "# Library\n\n"
+        "```\n"
+        "scan(repo_root: Path) -> Report\n"
+        "```\n"
+    ),
 }
 
 
-def test_not_python_is_malformed_code(env):
-    repo_root, log_path = env
-    content = "this is (not python at all\n  ::: }{ def def\n"
-    result = run(repo_root, make_bundle(DO_THING_IFACE), content, seed=1)
-    assert_rejected(result, "malformed_code", repo_root, log_path)
+def run(bundle, content, repo_root):
+    return test_author.author_test(
+        bundle, MODEL, 0, repo_root=repo_root, llm_backend=make_backend(content)
+    )
 
 
-def test_two_arg_fake_alias_is_signature_mismatch(env):
-    repo_root, log_path = env
+def test_malformed_code_rejected(repo_root):
+    content = "def (:\n    this is not python ??? }}}\n"
+    result = run(make_bundle({}), content, repo_root)
+    err = field(result, "model_call_error")
+    assert err is not None
+    assert field(err, "category") == "malformed_code"
+    assert field(result, "file") is None
+    assert_nothing_written(repo_root)
+
+
+def test_two_arg_alias_fake_rejected(repo_root):
     content = (
+        "import foo\n"
+        "\n"
         "def _fake_do_thing(a, b):\n"
         "    return True\n"
         "\n"
         "do_thing = _fake_do_thing\n"
         "\n"
-        "def test_something():\n"
-        "    assert do_thing(1, 'x') is True\n"
+        "def test_foo():\n"
+        "    assert foo.foo(2) == 4\n"
     )
-    result = run(repo_root, make_bundle(DO_THING_IFACE), content, seed=2)
-    assert_rejected(result, "fake_signature_mismatch", repo_root, log_path, name="do_thing")
+    result = run(make_bundle(DO_THING_IFACE), content, repo_root)
+    err = field(result, "model_call_error")
+    assert err is not None
+    assert field(err, "category") == "fake_signature_mismatch"
+    assert "do_thing" in error_text(err)
+    assert field(result, "file") is None
+    assert_nothing_written(repo_root)
 
 
-def test_three_arg_fake_alias_is_accepted(env):
-    repo_root, log_path = env
+def test_three_arg_alias_fake_accepted(repo_root):
     content = (
+        "import foo\n"
+        "\n"
         "def _fake_do_thing(a, b, c):\n"
         "    return True\n"
         "\n"
         "do_thing = _fake_do_thing\n"
         "\n"
-        "def test_something():\n"
-        "    assert do_thing(1, 'x', {'k': 'v'}) is True\n"
+        "def test_foo():\n"
+        "    assert foo.foo(2) == 4\n"
     )
-    result = run(repo_root, make_bundle(DO_THING_IFACE), content, seed=3)
-    assert_accepted(result)
+    result = run(make_bundle(DO_THING_IFACE), content, repo_root)
+    assert field(result, "model_call_error") is None
+    f = field(result, "file")
+    assert f is not None
+    assert "_fake_do_thing(a, b, c)" in field(f, "content")
 
 
-@pytest.mark.parametrize(
-    "params, seed",
-    [("component_id, repo_root", 4), ("repo_root", 5)],
-)
-def test_scan_matching_either_dependency_is_accepted(env, params, seed):
-    repo_root, log_path = env
+@pytest.mark.parametrize("params", ["component_id, repo_root", "repo_root"])
+def test_scan_matching_any_dependency_arity_accepted(repo_root, params):
     content = (
+        "import foo\n"
+        "\n"
         "def scan(" + params + "):\n"
         "    return {}\n"
         "\n"
-        "def test_scan():\n"
-        "    assert scan is not None\n"
+        "def test_foo():\n"
+        "    assert foo.foo(2) == 4\n"
     )
-    result = run(repo_root, make_bundle(SCAN_IFACES), content, seed=seed)
-    assert_accepted(result)
+    result = run(make_bundle(SCAN_IFACES), content, repo_root)
+    assert field(result, "model_call_error") is None
+    assert field(result, "file") is not None
 
 
-def test_scan_with_three_params_is_rejected(env):
-    repo_root, log_path = env
+def test_scan_three_params_rejected(repo_root):
     content = (
+        "import foo\n"
+        "\n"
         "def scan(component_id, repo_root, extra):\n"
         "    return {}\n"
         "\n"
-        "def test_scan():\n"
-        "    assert scan is not None\n"
+        "def test_foo():\n"
+        "    assert foo.foo(2) == 4\n"
     )
-    result = run(repo_root, make_bundle(SCAN_IFACES), content, seed=6)
-    assert_rejected(result, "fake_signature_mismatch", repo_root, log_path, name="scan")
+    result = run(make_bundle(SCAN_IFACES), content, repo_root)
+    err = field(result, "model_call_error")
+    assert err is not None
+    assert field(err, "category") == "fake_signature_mismatch"
+    assert "scan" in error_text(err)
+    assert field(result, "file") is None
+    assert_nothing_written(repo_root)

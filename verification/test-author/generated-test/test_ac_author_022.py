@@ -1,3 +1,4 @@
+# hotdocs-criterion: sha256:98938c90d2f9c4f907a8ea1007194e8b1e8087238e08ae8813c82bee41305a07
 import re
 
 import test_author
@@ -10,8 +11,8 @@ EXPECTED_LINE = (
 )
 
 
-class _Bundle(dict):
-    """A CriterionBundle stand-in readable both as a mapping and by attribute."""
+class Bundle(dict):
+    """A CriterionBundle readable both as a mapping and by attribute."""
 
     def __getattr__(self, name):
         try:
@@ -20,38 +21,37 @@ class _Bundle(dict):
             raise AttributeError(name)
 
 
-def _make_bundle():
-    return _Bundle(
+def make_bundle():
+    return Bundle(
         component_id="comp-widget-maker",
         criterion_id="AC-WIDGET-MAKER-001",
         covers="R-WIDGET-MAKER-001",
         criterion_text=(
-            "Given a widget size of 2\n"
-            "When make_widget(2) is called\n"
-            "Then it returns a widget of size 2"
+            "Given x = 2\n"
+            "When make_widget(x) is called\n"
+            "Then it returns 4"
         ),
         requirement_text=(
-            "**R-WIDGET-MAKER-001** — `make_widget(n)` MUST return a widget of size `n`."
+            "# R-WIDGET-MAKER-001\n\n"
+            "**R-WIDGET-MAKER-001** — `make_widget(x)` MUST return `2 * x`."
         ),
-        interface="# Library\n\n```\nmake_widget(n: int) -> dict\n```",
+        interface="# Library\n\n```\nmake_widget(x: int) -> int\n```",
         glossary="# Glossary\n\n- **Widget** — a test term.",
         dependency_interfaces={},
     )
 
 
-_NONCE_RE = re.compile(r"-----BEGIN FILE ([0-9a-fA-F]+)-----")
-
-
-def test_prompt_contains_r_author_022_block_line(tmp_path):
+def test_prompt_contains_sys_modules_guessed_key_rule(tmp_path):
     prompts = []
 
     def mock_backend(prompt, model, **params):
         prompts.append(prompt)
-        match = _NONCE_RE.search(prompt)
-        nonce = match.group(1) if match else ""
+        match = re.search(r"-----BEGIN FILE ([0-9a-f]+)-----", prompt)
+        nonce = match.group(1) if match else "0" * 32
         text = (
             "-----BEGIN FILE " + nonce + "-----\n"
-            "def test_widget():\n"
+            "import widget_maker\n\n\n"
+            "def test_ok():\n"
             "    assert True\n"
             "-----END FILE " + nonce + "-----"
         )
@@ -62,8 +62,11 @@ def test_prompt_contains_r_author_022_block_line(tmp_path):
             "model_call_error": None,
         }
 
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+
     test_author.author_test(
-        _make_bundle(), "mock", repo_root=tmp_path, llm_backend=mock_backend
+        make_bundle(), "mock", repo_root=repo_root, llm_backend=mock_backend
     )
 
     assert prompts, "the mock model was never called"

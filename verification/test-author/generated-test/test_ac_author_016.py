@@ -1,3 +1,4 @@
+# hotdocs-criterion: sha256:07a8aba0f528ef8eb6efeedfeea07fe06c60fea4ae2bce330eb1d1a1bd278683
 import re
 
 import test_author
@@ -10,7 +11,7 @@ EXPECTED_LINE = (
 
 
 class _Bundle(dict):
-    """A CriterionBundle stand-in readable both as a mapping and by attribute."""
+    """A CriterionBundle stand-in that reads both as a mapping and by attribute."""
 
     def __getattr__(self, name):
         try:
@@ -25,32 +26,34 @@ def _make_bundle():
         criterion_id="AC-WIDGET-MAKER-001",
         covers="R-WIDGET-MAKER-001",
         criterion_text=(
-            "Given a widget spec\n"
-            "When make_widget(spec) is called\n"
-            "Then it returns a widget"
+            "Given x = 2\n"
+            "When make_widget(x) is called\n"
+            "Then it returns 4"
         ),
         requirement_text=(
             "# R-WIDGET-MAKER-001\n\n"
-            "**R-WIDGET-MAKER-001** \u2014 `make_widget(spec)` MUST return a widget."
+            "**R-WIDGET-MAKER-001** — `make_widget(x)` MUST return `2 * x`."
         ),
-        interface="# Library\n\n```\nmake_widget(spec: dict) -> dict\n```\n",
-        glossary="# Glossary\n\n- **Widget** \u2014 a test term.\n",
+        interface="# Library\n\n```\nmake_widget(x: int) -> int\n```",
+        glossary="# Glossary\n\n- **Widget** — a test term.",
         dependency_interfaces={},
     )
 
 
-def test_prompt_contains_requirements_acceptance_rule_line(tmp_path):
+def test_prompt_contains_fixture_requirements_acceptance_rule_line(tmp_path):
     prompts = []
-    nonce_re = re.compile(r"-----BEGIN FILE ([0-9a-fA-F]+)-----")
 
     def mock_backend(prompt, model, **params):
         prompts.append(prompt)
-        match = nonce_re.search(prompt)
-        nonce = match.group(1) if match else ""
+        match = re.search(r"-----BEGIN FILE ([0-9a-f]+)-----", prompt)
+        nonce = match.group(1) if match else "0" * 32
         text = (
             "-----BEGIN FILE " + nonce + "-----\n"
-            "def test_placeholder():\n"
-            "    assert True\n"
+            "import widget_maker\n"
+            "\n"
+            "\n"
+            "def test_make_widget():\n"
+            "    assert widget_maker.make_widget(2) == 4\n"
             "-----END FILE " + nonce + "-----"
         )
         return {

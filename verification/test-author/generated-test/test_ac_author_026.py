@@ -1,12 +1,15 @@
+# hotdocs-criterion: sha256:a9c2a275e7e101030337c16d3949e23ad1e8cc3893bfc2dc12ee5f0e5ca27615
 import re
-
-import pytest
 
 import test_author
 
 
-class _Bundle(dict):
-    """A CriterionBundle stand-in readable both as a mapping and by attribute."""
+def field(value, name):
+    return value[name] if isinstance(value, dict) else getattr(value, name)
+
+
+class Bundle(dict):
+    """A CriterionBundle readable both as a mapping and by attribute."""
 
     def __getattr__(self, name):
         try:
@@ -15,35 +18,34 @@ class _Bundle(dict):
             raise AttributeError(name)
 
 
-def _make_bundle(component_id, module_names):
-    return _Bundle(
+NONCE_RE = re.compile(r"-----BEGIN FILE ([0-9a-f]{32})-----")
+
+
+def make_bundle(component_id, criterion_id, covers, module_names):
+    return Bundle(
         component_id=component_id,
-        criterion_id="AC-SLUG-001",
-        covers="R-SLUG-001",
+        criterion_id=criterion_id,
+        covers=covers,
         criterion_text=(
-            "Given the text \"Hello World\"\n"
-            "When it is converted\n"
-            "Then the result is \"hello-world\"\n"
+            "Given an input value\n"
+            "When the operation is performed\n"
+            "Then the expected output is produced"
         ),
-        requirement_text="**R-SLUG-001** -- conversion MUST lowercase and hyphenate.",
-        interface="# Library\n\n    convert(text: str) -> str\n",
-        glossary="# Glossary\n\n- **Slug** -- a test term.\n",
+        requirement_text="**" + covers + "** - The operation MUST produce the expected output.",
+        interface="# Library\n\n```\noperate(x: str) -> str\n```",
+        glossary="# Glossary\n\n- **Foo** - a test term.",
         dependency_interfaces={},
         module_names=list(module_names),
     )
 
 
-def _field(value, name):
-    return value[name] if isinstance(value, dict) else getattr(value, name)
-
-
-def _run_and_capture(bundle, repo_root):
+def run_and_capture_prompt(bundle, repo_root):
     prompts = []
 
     def backend(prompt, model, **params):
         prompts.append(prompt)
-        m = re.search(r"BEGIN FILE ([0-9a-f]{32})", prompt)
-        nonce = m.group(1) if m else re.search(r"[0-9a-f]{32}", prompt).group(0)
+        match = NONCE_RE.search(prompt)
+        nonce = match.group(1) if match else "0" * 32
         text = (
             "-----BEGIN FILE " + nonce + "-----\n"
             "def test_placeholder():\n"
@@ -60,41 +62,36 @@ def _run_and_capture(bundle, repo_root):
     result = test_author.author_test(
         bundle,
         "claude-sonnet-5",
-        seed=0,
+        0,
         repo_root=repo_root,
         llm_backend=backend,
     )
-    assert _field(result, "model_call_error") is None
-    assert prompts, "the model backend was never called, so no prompt was built"
+    assert field(result, "model_call_error") is None
+    assert len(prompts) >= 1, "author_test never called the model backend"
     return prompts
 
 
-@pytest.fixture(autouse=True)
-def _local_cache(monkeypatch):
-    monkeypatch.delenv("VAR_CACHE_STORE_URL", raising=False)
-
-
-def test_module_names_replace_derived_name_for_capability_scenario(tmp_path):
-    bundle = _make_bundle("capabilities/P-SLUGS", ["slugify", "url_tools"])
-    prompts = _run_and_capture(bundle, tmp_path)
+def test_module_names_replace_derived_name_for_capability(tmp_path):
+    bundle = make_bundle(
+        "capabilities/P-SLUGS",
+        "AC-SLUGS-001",
+        "R-SLUGS-001",
+        ["slugify", "url_tools"],
+    )
+    prompts = run_and_capture_prompt(bundle, tmp_path)
     for prompt in prompts:
         assert "import slugify" in prompt
         assert "import url_tools" in prompt
         assert "import capabilities" not in prompt
 
 
-def test_module_names_listed_in_order(tmp_path):
-    bundle = _make_bundle("capabilities/P-SLUGS", ["slugify", "url_tools"])
-    prompt = _run_and_capture(bundle, tmp_path)[0]
-    first_slugify = prompt.find("import slugify\n")
-    if first_slugify == -1:
-        first_slugify = prompt.find("import slugify")
-    first_url_tools = prompt.find("import url_tools")
-    assert first_slugify != -1 and first_url_tools != -1
-
-
 def test_empty_module_names_falls_back_to_derived_name(tmp_path):
-    bundle = _make_bundle("comp-semver", [])
-    prompts = _run_and_capture(bundle, tmp_path)
+    bundle = make_bundle(
+        "comp-semver",
+        "AC-SEMVER-001",
+        "R-SEMVER-001",
+        [],
+    )
+    prompts = run_and_capture_prompt(bundle, tmp_path)
     for prompt in prompts:
         assert "import semver" in prompt

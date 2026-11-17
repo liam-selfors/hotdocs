@@ -1,59 +1,54 @@
+# hotdocs-criterion: sha256:8c5734d641f3f23c85e33506432c6238ae799a40fdedf92790337a2c87d6afb4
 import re
 
 import test_author
 
 
-EXPECTED_FAKE_LOG = (
-    "the fake's own code appends one line per call to a log file "
-    "at a path the test controls"
+LOG_LINE = (
+    "the fake's own code appends one line per call to a log file at a path the test controls"
 )
-EXPECTED_NO_FORMAT = (
-    "never with `str.format`, `%` or an f-string over text that holds "
-    "braces or percent signs."
+CONCAT_LINE = (
+    "never with `str.format`, `%` or an f-string over text that holds braces or percent signs."
 )
 
-
-class _Bundle(dict):
-    """A CriterionBundle stand-in readable both as a mapping and by attribute."""
-
-    def __getattr__(self, name):
-        try:
-            return self[name]
-        except KeyError:
-            raise AttributeError(name)
+NONCE_RE = re.compile(r"-----BEGIN FILE ([0-9a-f]{32})-----")
 
 
-def _make_bundle():
-    return _Bundle(
-        component_id="comp-widget-maker",
-        criterion_id="AC-WIDGET-MAKER-001",
-        covers="R-WIDGET-MAKER-001",
-        criterion_text=(
-            "Given a widget size of 2\n"
-            "When make_widget(2) is called\n"
-            "Then it returns a widget of size 2"
+def field(value, name):
+    return value[name] if isinstance(value, dict) else getattr(value, name)
+
+
+def make_bundle():
+    return {
+        "component_id": "comp-widget-maker",
+        "criterion_id": "AC-WIDGET-MAKER-001",
+        "covers": "R-WIDGET-MAKER-001",
+        "criterion_text": (
+            "Given x = 2\n"
+            "When make_widget(x) is called\n"
+            "Then it returns 4"
         ),
-        requirement_text=(
-            "**R-WIDGET-MAKER-001** — `make_widget(size)` MUST return a "
-            "widget whose size is `size`."
+        "requirement_text": (
+            "# R-WIDGET-MAKER-001\n\n"
+            "**R-WIDGET-MAKER-001** — `make_widget(x)` MUST return `2 * x`."
         ),
-        interface="# Library\n\n```\nmake_widget(size: int) -> dict\n```\n",
-        glossary="# Glossary\n\n- **Widget** — a test term.\n",
-        dependency_interfaces={},
-    )
+        "interface": "# Library\n\n```\nmake_widget(x: int) -> int\n```",
+        "glossary": "# Glossary\n\n- **Widget** — a test term.",
+        "dependency_interfaces": {},
+    }
 
 
-def _make_mock(recorded):
-    def backend(prompt, model, **params):
-        recorded.append(prompt)
-        match = re.search(r"-----BEGIN FILE ([0-9a-fA-F]+)-----", prompt)
+def test_prompt_holds_block_r_author_024(tmp_path):
+    prompts = []
+
+    def mock_backend(prompt, model, **params):
+        prompts.append(prompt)
+        match = NONCE_RE.search(prompt)
         nonce = match.group(1) if match else ""
         text = (
             "-----BEGIN FILE " + nonce + "-----\n"
-            "import widget_maker\n"
-            "\n"
-            "def test_placeholder():\n"
-            "    assert widget_maker is not None\n"
+            "def test_ok():\n"
+            "    assert True\n"
             "-----END FILE " + nonce + "-----"
         )
         return {
@@ -63,19 +58,16 @@ def _make_mock(recorded):
             "model_call_error": None,
         }
 
-    return backend
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
 
-
-def test_prompt_holds_block_r_author_024(tmp_path):
-    recorded = []
-    backend = _make_mock(recorded)
-    bundle = _make_bundle()
-
-    test_author.author_test(
-        bundle, "mock", repo_root=tmp_path, llm_backend=backend
+    result = test_author.author_test(
+        make_bundle(), "mock", repo_root=repo_root, llm_backend=mock_backend
     )
 
-    assert len(recorded) >= 1, "the mock model was never called"
-    first_prompt = recorded[0]
-    assert EXPECTED_FAKE_LOG in first_prompt
-    assert EXPECTED_NO_FORMAT in first_prompt
+    assert field(result, "model_call_error") is None
+    assert prompts, "the mock model was never called"
+
+    first = prompts[0]
+    assert LOG_LINE in first
+    assert CONCAT_LINE in first
