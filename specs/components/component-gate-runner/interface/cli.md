@@ -27,7 +27,9 @@ next argument.
   `block_reason` (`passed` when not blocked), and each scan's
   `blocked`/`flagged`; then `model_call_error: <category>: <message>`
   when one is set, `<criterion id>: <failure_detail.message>` for each
-  `"fail"` criterion when `block_reason` is `"test_authoring_failed"`, and `license_scan not evaluated: <reason>` when the
+  `"fail"` criterion when `block_reason` is `"test_authoring_failed"`, `mutation_error: <message>` when the
+  verification report's `mutation_error` is set (`D324`), and
+  `license_scan not evaluated: <reason>` when the
   license scan's `evaluated` is false (read with dual dict-or-attribute
   access).
 

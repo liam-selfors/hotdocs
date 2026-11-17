@@ -482,3 +482,80 @@ def test_d199_tool_components_fall_back_to_the_tool_root(repo_root):
     report = verify("comp-foo", repo_root)
     by_id = {c["id"]: c for c in report.criteria}
     assert by_id["AC-FOO-001"]["result"] == "pass"
+
+
+# D324: mutation runs see the criterion run's gen/ layout, and score only
+# after an unmutated baseline passes.
+FOO_CODE_LOADS_BAR = """import importlib.util
+from dataclasses import dataclass
+from pathlib import Path
+
+
+@dataclass
+class Thing:
+    value: int
+
+
+def do_the_thing(x):
+    return Thing(value=x + 1)
+
+
+def _bar():
+    path = Path(__file__).resolve().parents[1] / "bar" / "bar.py"
+    spec = importlib.util.spec_from_file_location("bar", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def foo():
+    return 2 * _bar().bar()
+"""
+
+FOO_TESTS_BOTH = (
+    "from foo import do_the_thing, foo\n\n"
+    "def test_foo():\n"
+    "    assert foo() == 4\n"
+    "    assert do_the_thing(1).value == 2\n"
+    "    assert do_the_thing(1).value != 3\n"
+)
+
+
+def _cache_test(repo_root, source):
+    gentest_dir = repo_root / "verification" / "foo" / "generated-test"
+    gentest_dir.mkdir(parents=True, exist_ok=True)
+    (gentest_dir / "test_ac_foo_002.py").write_text(stamped(repo_root, "AC-FOO-002", source), encoding="utf-8")
+
+
+def test_ac_verify_025_mutation_sandbox_reaches_a_path_loaded_dependency(repo_root):
+    write_foo(repo_root, code=FOO_CODE_LOADS_BAR, extra_acceptance={"AC-FOO-002.md": GENTEST_AC})
+    (repo_root / "gen" / "bar").mkdir(parents=True, exist_ok=True)
+    (repo_root / "gen" / "bar" / "bar.py").write_text("def bar():\n    return 2\n", encoding="utf-8")
+    _cache_test(repo_root, FOO_TESTS_BOTH)
+
+    report = verify("comp-foo", repo_root)
+
+    by_id = {c["id"]: c for c in report.criteria}
+    assert by_id["AC-FOO-002"]["result"] == "pass"
+    assert getattr(report, "mutation_error", None) is None
+    assert report.mutation_score == 1.0
+    assert report.overall == "pass"
+
+
+def test_ac_verify_025_failing_baseline_scores_nothing(repo_root):
+    write_foo(repo_root, extra_acceptance={"AC-FOO-002.md": GENTEST_AC})
+    _cache_test(repo_root, (
+        "from pathlib import Path\n"
+        "from foo import do_the_thing\n\n"
+        "def test_only_from_repo_root():\n"
+        "    assert do_the_thing(1).value == 2\n"
+        "    assert (Path.cwd() / 'specs').is_dir()\n"
+    ))
+
+    report = verify("comp-foo", repo_root)
+
+    by_id = {c["id"]: c for c in report.criteria}
+    assert by_id["AC-FOO-002"]["result"] == "pass"
+    assert report.mutation_score is None
+    assert report.overall == "fail"
+    assert report.mutation_error == "mutation baseline failed in the sandbox: pytest exited 1"

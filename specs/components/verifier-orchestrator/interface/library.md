@@ -2,7 +2,7 @@
 
 ```
 verify(component_id: str, repo_root: Path, judge=None, test_author=None) -> VerificationReport
-GATE_VERSION: str  # "verifier-orchestrator@2.1.0" (R-VERIFY-015)
+GATE_VERSION: str  # "verifier-orchestrator@2.2.0" (R-VERIFY-015)
 ```
 
 `verify` returns a **dataclass** instance whose fields are attributes
@@ -25,4 +25,4 @@ and the sealed `criterion-compiler` from
 root (`D199`). How a test builds its fixture is in
 `specs/architecture/verifier-fixtures.md`.
 
-Implements: `specs/architecture/step-phrase-grammar.md`, `SPEC_GUIDELINES.md`, `specs/architecture/verifier-fixtures.md`
+Implements: `specs/architecture/step-phrase-grammar.md`, `SPEC_GUIDELINES.md`, `specs/architecture/verifier-fixtures.md`, `specs/architecture/mutation-runs.md`

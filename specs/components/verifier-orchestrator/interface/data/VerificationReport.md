@@ -12,11 +12,14 @@
   "requirement_results": { "R-FOO-001": "pass", "R-FOO-002": "fail", "R-FOO-003": "pass" },
   "interface_drift": false,
   "mutation_score": 0.92,
+  "mutation_error": null,
   "overall": "pass"
 }
 ```
 
-`mutation_score` is `null` for a sealed component (`R-VERIFY-017`).
+`mutation_score` is `null` for a sealed component (`R-VERIFY-017`) and
+when `mutation_error`, a failed baseline's message
+(`specs/architecture/mutation-runs.md`), is set.
 
 `result` is one of `pass` / `fail` / `skipped`, `spec-linter`'s
 `severity` vocabulary. `test_authoring` is present only on

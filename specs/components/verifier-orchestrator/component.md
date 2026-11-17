@@ -63,4 +63,4 @@ See `constraints.md`.
 
 ## Change log
 
-See the decisions, `D27` onward; `D320` adds the criterion header check.
+See the decisions, `D27` onward, through `D320` and `D324`.
