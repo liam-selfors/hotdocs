@@ -1,115 +1,75 @@
-import corpus_loader
-
+# hotdocs-criterion: sha256:85ee80d0c296973bcdf40e75ed8e76498d5a614d8cf53ed46e8b467aa24e4b65
 from pathlib import Path
 
-import duckdb
-import pytest
+import corpus_loader
 
 
 def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def _write(path: Path, text: str) -> None:
+def _write(path, text):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
 
 
-def _build_corpus(repo_root: Path) -> None:
+def _build_corpus(repo_root):
     specs = repo_root / "specs"
-
     _write(
         specs / "glossary.md",
-        "# Glossary\n"
-        "\n"
-        "- **Widget** — a small demo thing used by the fixture.\n",
+        "# Glossary\n\n"
+        + "- **Widget** — a small fixture thing used only in tests.\n",
     )
-
-    _write(
-        specs / "decisions" / "D1.md",
-        "---\n"
-        "id: D1\n"
-        "title: Demo decision\n"
-        "status: draft\n"
-        "owners: [alice]\n"
-        "---\n"
-        "\n"
-        "# D1 — Demo decision\n"
-        "\n"
-        "A placeholder decision for the fixture.\n",
-    )
-
-    _write(
-        specs / "vars" / "VAR-WIDGET-PATH.md",
-        "---\n"
-        "id: VAR-WIDGET-PATH\n"
-        "title: Widget path\n"
-        "status: draft\n"
-        "owners: [alice]\n"
-        "---\n"
-        "\n"
-        "# VAR-WIDGET-PATH\n"
-        "\n"
-        "A placeholder variable declaration.\n",
-    )
-
-    comp = specs / "components" / "widget"
+    comp = specs / "components" / "foo"
     _write(
         comp / "component.md",
         "---\n"
-        "id: comp-widget\n"
-        "title: Widget\n"
-        "status: draft\n"
-        "owners: [alice]\n"
-        "sealed: true\n"
-        "source_path: legacy/widget/\n"
-        "depends_on: []\n"
-        "---\n"
-        "\n"
-        "# Widget\n"
-        "\n"
-        "## Purpose\n"
-        "\n"
-        "Provides a widget for the fixture corpus.\n"
-        "\n"
-        "## Definitions\n"
-        "\n"
-        "None.\n",
+        + "id: comp-foo\n"
+        + "title: Foo\n"
+        + "status: draft\n"
+        + "owners: [alice]\n"
+        + "sealed: true\n"
+        + "source_path: legacy/foo/\n"
+        + "---\n"
+        + "\n"
+        + "# Foo\n"
+        + "\n"
+        + "## Purpose\n"
+        + "\n"
+        + "Foo is a fixture component that does one small thing.\n",
     )
     _write(
-        comp / "requirements" / "R-WIDGET-001.md",
-        "**R-WIDGET-001** — `make_widget()` MUST return a widget.\n",
+        comp / "requirements" / "R-FOO-001.md",
+        "# R-FOO-001\n\n"
+        + "**R-FOO-001** — `foo()` MUST return the string `foo`.\n",
     )
     _write(
-        comp / "acceptance" / "AC-WIDGET-001.md",
-        "# AC-WIDGET-001\n"
-        "\n"
-        "Covers: R-WIDGET-001\n"
-        "Kind: generated-test\n"
-        "\n"
-        "```gherkin\n"
-        "Given nothing\n"
-        "When make_widget() runs\n"
-        "Then it returns a widget\n"
-        "```\n",
+        comp / "acceptance" / "AC-FOO-001.md",
+        "# AC-FOO-001\n\n"
+        + "Covers: R-FOO-001\n"
+        + "Kind: generated-test\n\n"
+        + "```gherkin\n"
+        + "Given nothing\n"
+        + "When foo() runs\n"
+        + "Then it returns \"foo\"\n"
+        + "```\n",
     )
     _write(
         comp / "interface" / "library.md",
-        "# Library\n"
-        "\n"
-        "```\n"
-        "make_widget() -> Widget\n"
-        "```\n",
+        "# Library\n\n"
+        + "```\n"
+        + "foo() -> str\n"
+        + "```\n\n"
+        + "Returns `foo`.\n",
     )
     _write(
         comp / "constraints.md",
-        "# Constraints\n"
-        "\n"
-        "None.\n",
+        "# Constraints\n\n"
+        + "None.\n",
     )
 
 
-def test_ac_corpus_002_graph_is_duckdb_with_one_component_node(tmp_path):
+def test_ac_corpus_002_graph_is_duckdb_connection_with_one_component(tmp_path):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
     _build_corpus(repo_root)
@@ -118,6 +78,9 @@ def test_ac_corpus_002_graph_is_duckdb_with_one_component_node(tmp_path):
 
     graph = field(corpus, "graph")
     assert graph is not None
+
+    import duckdb
+
     assert isinstance(graph, duckdb.DuckDBPyConnection)
 
     row = graph.execute(

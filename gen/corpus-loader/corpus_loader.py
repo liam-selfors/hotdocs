@@ -4,58 +4,14 @@ from __future__ import annotations
 
 import importlib.util
 import re
-import string
 import sys
 from dataclasses import dataclass
-from fnmatch import fnmatchcase
 from pathlib import Path
 from typing import Any
 
 import duckdb
 
-_DEP_SLUG = "graph-query-engine"
-_DEP_MODULE = "graph_query_engine"
-
-# Patterns relative to specs/, checked part-by-part.
-_DOC_TYPES = (
-    ("components/*/component.md", "component-root"),
-    ("components/*/requirements/R-*.md", "component-requirement"),
-    ("components/*/interface/cli.md", "component-interface-cli"),
-    ("components/*/interface/library.md", "component-interface-library"),
-    ("components/*/interface/data/*.md", "component-interface-data"),
-    ("components/*/interface/guarantees/G-*.md", "component-interface-guarantee"),
-    ("components/*/acceptance/AC-*.md", "component-acceptance"),
-    ("components/*/constraints.md", "component-constraints"),
-    ("product/*.md", "product"),
-    ("architecture/*.md", "architecture"),
-    ("vars/*.md", "var"),
-    ("decisions/*.md", "decision"),
-)
-
-_STEM_ID_TYPES = {
-    "component-requirement",
-    "component-acceptance",
-    "component-interface-guarantee",
-}
-
-_INDEXED_TYPES = {"component-root", "product", "architecture", "var", "decision"}
-
-_SINGLE_ATTRS = {
-    "component-root": "root",
-    "component-interface-cli": "interface_cli",
-    "component-interface-library": "interface_library",
-    "component-constraints": "constraints",
-}
-
-_KEYED_ATTRS = {
-    "component-requirement": "requirements",
-    "component-interface-data": "interface_data",
-    "component-interface-guarantee": "interface_guarantees",
-    "component-acceptance": "acceptance",
-}
-
-_ENTRY_RE = re.compile(r"^-\s+\*\*(.+?)\*\*(.*)$")
-_LEAD = "\u2014-" + string.whitespace
+__all__ = ["Doc", "Component", "Corpus", "load_corpus"]
 
 
 @dataclass
@@ -94,146 +50,228 @@ class Corpus:
     graph: Any
 
 
-def _matches(parts: tuple, pattern: str) -> bool:
-    pat = pattern.split("/")
-    return len(parts) == len(pat) and all(
-        fnmatchcase(part, p) for part, p in zip(parts, pat)
-    )
+_TOP_LEVEL_TYPES = {
+    "product": "product",
+    "architecture": "architecture",
+    "vars": "var",
+    "decisions": "decision",
+}
+
+_STEM_ID_TYPES = {
+    "component-requirement",
+    "component-acceptance",
+    "component-interface-guarantee",
+}
+
+_ID_INDEX_TYPES = {"component-root", "product", "architecture", "var", "decision"}
+
+_GLOSSARY_ENTRY = re.compile(r"^- \*\*(.+?)\*\*(.*)$")
 
 
-def _classify(parts: tuple) -> Any:
-    for pattern, doc_type in _DOC_TYPES:
-        if _matches(parts, pattern):
-            return doc_type
-    return None
+def _classify(parts):
+    """Return (doc_type, component_name) for a path's parts under specs/, or None."""
+    name = parts[-1]
+    if name == "README.md":
+        return None
+    if len(parts) == 2 and parts[0] in _TOP_LEVEL_TYPES:
+        return _TOP_LEVEL_TYPES[parts[0]], None
+    if len(parts) < 3 or parts[0] != "components":
+        return None
+    comp = parts[1]
+    rest = tuple(parts[2:])
+    doc_type = None
+    if rest == ("component.md",):
+        doc_type = "component-root"
+    elif rest == ("constraints.md",):
+        doc_type = "component-constraints"
+    elif rest == ("interface", "cli.md"):
+        doc_type = "component-interface-cli"
+    elif rest == ("interface", "library.md"):
+        doc_type = "component-interface-library"
+    elif len(rest) == 2 and rest[0] == "requirements" and name.startswith("R-"):
+        doc_type = "component-requirement"
+    elif len(rest) == 2 and rest[0] == "acceptance" and name.startswith("AC-"):
+        doc_type = "component-acceptance"
+    elif len(rest) == 3 and rest[:2] == ("interface", "data"):
+        doc_type = "component-interface-data"
+    elif len(rest) == 3 and rest[:2] == ("interface", "guarantees") and name.startswith("G-"):
+        doc_type = "component-interface-guarantee"
+    if doc_type is None:
+        return None
+    return doc_type, comp
 
 
-def _parse_value(raw: str) -> Any:
+def _parse_value(raw):
     value = raw.strip()
     if value.startswith("[") and value.endswith("]"):
-        return [item.strip() for item in value[1:-1].split(",") if item.strip()]
-    if value in ("true", "false"):
-        return value == "true"
+        inner = value[1:-1]
+        return [item.strip() for item in inner.split(",") if item.strip()]
+    if value == "true":
+        return True
+    if value == "false":
+        return False
     return value.strip("\"'")
 
 
-def _split(text: str) -> tuple:
+def _parse_text(text):
+    """Return (frontmatter, body, has_frontmatter)."""
     lines = text.splitlines()
-    if lines[:1] == ["---"] and "---" in lines[1:]:
-        end = lines.index("---", 1)
-        frontmatter = {}
-        for line in lines[1:end]:
-            if ":" in line:
-                key, _, raw = line.partition(":")
-                frontmatter[key.strip()] = _parse_value(raw)
-        return frontmatter, "\n".join(lines[end + 1:]), True
+    if lines and lines[0].strip() == "---":
+        for j in range(1, len(lines)):
+            if lines[j].strip() == "---":
+                frontmatter = {}
+                for line in lines[1:j]:
+                    if ":" in line:
+                        key, _, raw = line.partition(":")
+                        frontmatter[key.strip()] = _parse_value(raw)
+                return frontmatter, "\n".join(lines[j + 1:]), True
     return {}, text, False
 
 
-def _glossary_defs(files: list) -> dict:
-    defs = {}
-    for path in files:
-        entries = []
-        current = None
-        for line in path.read_text(encoding="utf-8").splitlines():
-            match = _ENTRY_RE.match(line)
-            if match:
-                current = [match.group(2).lstrip(_LEAD)]
-                entries.append((match.group(1).strip().lower(), current))
-            elif current is not None and (not line.strip() or line[0].isspace()):
-                current.append(line)
-            else:
-                current = None
-        for term, lines in entries:
-            defs[term] = "\n".join(lines).strip()
-    return defs
+def _parse_glossary(text, defs):
+    term = None
+    buf = []
+
+    def flush():
+        if term is not None:
+            defs[term] = "\n".join(buf).strip()
+
+    for line in text.splitlines():
+        m = _GLOSSARY_ENTRY.match(line)
+        if m:
+            flush()
+            term = m.group(1).strip().lower()
+            buf = [m.group(2).lstrip("—- \t")]
+        elif term is not None:
+            buf.append(line)
+    flush()
 
 
-def _tool_root() -> Path:
-    return next(p.parent for p in Path(__file__).resolve().parents if p.name == "gen")
+def _tool_root():
+    for parent in Path(__file__).resolve().parents:
+        if parent.name == "gen":
+            return parent.parent
+    return None
 
 
-def _load_graph_query_engine(repo_root: Path):
-    dep_dir = repo_root / "gen" / _DEP_SLUG
-    if not dep_dir.is_dir():
-        dep_dir = _tool_root() / "gen" / _DEP_SLUG
-    flat = dep_dir / f"{_DEP_MODULE}.py"
+def _load_graph_query_engine(repo_root):
+    module_name = "graph_query_engine"
+    rel = Path("gen") / "graph-query-engine"
+    base = Path(repo_root) / rel
+    if not base.is_dir():
+        base = _tool_root() / rel
+    flat = base / f"{module_name}.py"
     if flat.is_file():
-        spec = importlib.util.spec_from_file_location(_DEP_MODULE, flat)
+        spec = importlib.util.spec_from_file_location(module_name, flat)
     else:
-        pkg = dep_dir / _DEP_MODULE
+        pkg_dir = base / module_name
         spec = importlib.util.spec_from_file_location(
-            _DEP_MODULE, pkg / "__init__.py", submodule_search_locations=[str(pkg)]
+            module_name,
+            pkg_dir / "__init__.py",
+            submodule_search_locations=[str(pkg_dir)],
         )
     module = importlib.util.module_from_spec(spec)
-    sys.modules[_DEP_MODULE] = module
+    sys.modules[module_name] = module
     spec.loader.exec_module(module)
     return module
 
 
-def _new_component(name: str) -> Component:
-    return Component(name, None, {}, None, None, {}, {}, {}, None)
+def _get(obj, name):
+    if isinstance(obj, dict):
+        return obj[name]
+    return getattr(obj, name)
+
+
+def _new_component(name):
+    return Component(
+        name=name,
+        root=None,
+        requirements={},
+        interface_cli=None,
+        interface_library=None,
+        interface_data={},
+        interface_guarantees={},
+        acceptance={},
+        constraints=None,
+    )
 
 
 def load_corpus(repo_root: Path) -> Corpus:
-    root = Path(repo_root).absolute()
-    specs = root / "specs"
+    repo_root = Path(repo_root)
+    root_abs = repo_root.absolute()
+    specs = root_abs / "specs"
 
     docs = []
     components = {}
     id_index = {}
+
     for path in sorted(specs.rglob("*.md")):
-        if path.name == "README.md":
-            continue
         parts = path.relative_to(specs).parts
-        doc_type = _classify(parts)
-        if doc_type is None:
+        classified = _classify(parts)
+        if classified is None:
             continue
-        frontmatter, body, has_frontmatter = _split(path.read_text(encoding="utf-8"))
+        doc_type, comp_name = classified
+        text = path.read_text(encoding="utf-8")
+        frontmatter, body, has_fm = _parse_text(text)
         if doc_type in _STEM_ID_TYPES:
             doc_id = path.stem
         else:
             doc_id = frontmatter.get("id")
-        component = parts[1] if doc_type.startswith("component-") else None
         doc = Doc(
-            path,
-            path.relative_to(root).as_posix(),
-            doc_id,
-            frontmatter,
-            body,
-            doc_type,
-            component,
-            has_frontmatter,
+            path=path,
+            rel_path=path.relative_to(root_abs).as_posix(),
+            doc_id=doc_id,
+            frontmatter=frontmatter,
+            body=body,
+            doc_type=doc_type,
+            component=comp_name,
+            has_frontmatter=has_fm,
         )
         docs.append(doc)
 
-        if component is not None:
-            if component not in components:
-                components[component] = _new_component(component)
-            comp = components[component]
-            if doc_type in _SINGLE_ATTRS:
-                setattr(comp, _SINGLE_ATTRS[doc_type], doc)
-            else:
-                getattr(comp, _KEYED_ATTRS[doc_type])[path.stem] = doc
-
-        if doc_type in _INDEXED_TYPES:
+        if doc_type in _ID_INDEX_TYPES:
             id_index[doc_id] = doc
 
-    glossary_files = sorted(specs.glob("glossary*.md"))
-    glossary_defs = _glossary_defs(glossary_files)
+        if comp_name is None:
+            continue
+        comp = components.get(comp_name)
+        if comp is None:
+            comp = _new_component(comp_name)
+            components[comp_name] = comp
+        if doc_type == "component-root":
+            comp.root = doc
+        elif doc_type == "component-requirement":
+            comp.requirements[doc_id] = doc
+        elif doc_type == "component-interface-cli":
+            comp.interface_cli = doc
+        elif doc_type == "component-interface-library":
+            comp.interface_library = doc
+        elif doc_type == "component-interface-data":
+            comp.interface_data[path.stem] = doc
+        elif doc_type == "component-interface-guarantee":
+            comp.interface_guarantees[doc_id] = doc
+        elif doc_type == "component-acceptance":
+            comp.acceptance[doc_id] = doc
+        else:
+            comp.constraints = doc
 
-    graph = duckdb.connect()
-    graph.execute("INSTALL yaml FROM community")
-    graph.execute("LOAD yaml")
-    gqe = _load_graph_query_engine(root)
-    gqe.load_views(graph, root)
+    glossary_files = sorted(specs.glob("glossary*.md"))
+    glossary_defs = {}
+    for gpath in glossary_files:
+        _parse_glossary(gpath.read_text(encoding="utf-8"), glossary_defs)
+
+    con = duckdb.connect()
+    con.execute("INSTALL yaml FROM community")
+    con.execute("LOAD yaml")
+    gqe = _load_graph_query_engine(repo_root)
+    _get(gqe, "load_views")(con, repo_root)
 
     return Corpus(
-        root,
-        docs,
-        components,
-        id_index,
-        glossary_defs,
-        glossary_files,
-        graph,
+        repo_root=repo_root,
+        docs=docs,
+        components=components,
+        id_index=id_index,
+        glossary_defs=glossary_defs,
+        glossary_files=glossary_files,
+        graph=con,
     )
