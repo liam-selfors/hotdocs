@@ -1,23 +1,18 @@
-import spec_bundle_assembler
-
+# hotdocs-criterion: sha256:201f339d53b8f358852c277266b27cebef189dc057a4267fe43c97473bd6e54c
 import importlib.util
 import sys
 from pathlib import Path
 
+import spec_bundle_assembler
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
 
 def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def _load_spec_linter():
+def load_spec_linter():
     gen = next(
-        p
-        for p in Path(spec_bundle_assembler.__file__).resolve().parents
-        if p.name == "gen"
+        p for p in Path(spec_bundle_assembler.__file__).resolve().parents if p.name == "gen"
     )
     base = gen / "spec-linter"
     path = (
@@ -32,230 +27,165 @@ def _load_spec_linter():
     return spec_linter
 
 
-def _assert_lint_clean(repo_root):
-    spec_linter = _load_spec_linter()
-    report = spec_linter.lint(None, repo_root)
-    hard = report["hard_failures"] if isinstance(report, dict) else report.hard_failures
-    if hard != 0:
-        findings = report["findings"] if isinstance(report, dict) else report.findings
-        raise AssertionError(f"fixture is not lint-clean: {findings!r}")
-
-
-def _write(path, text):
+def write(path, text):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
 
 
-GLOSSARY = "# Glossary\n\n- **Foo** — a test term.\n"
-
-
-def _write_glossary(repo_root):
-    _write(repo_root / "specs" / "glossary.md", GLOSSARY)
-
-
-def _write_component(repo_root, slug, depends_on, library_md, data_files=None):
-    """Write one complete, lint-shaped sealed component."""
+def make_component(repo_root, slug, depends_on, library_text, data_types=None):
     upper = slug.upper()
     title = slug.capitalize()
     comp_dir = repo_root / "specs" / "components" / slug
-    deps = "[" + ", ".join(depends_on) + "]"
-    component_md = (
+    write(
+        comp_dir / "component.md",
         "---\n"
-        f"id: comp-{slug}\n"
-        f"title: {title}\n"
-        "status: draft\n"
-        "owners: [team-a]\n"
-        "sealed: true\n"
-        f"source_path: legacy/{slug}/\n"
-        f"depends_on: {deps}\n"
-        "---\n"
-        "\n"
-        f"# {title}\n"
-        "\n"
-        "## Purpose\n"
-        "\n"
-        f"{title} doubles a number.\n"
+        + "id: comp-" + slug + "\n"
+        + "title: " + title + "\n"
+        + "status: draft\n"
+        + "owners: [team-a]\n"
+        + "sealed: true\n"
+        + "source_path: legacy/" + slug + "/\n"
+        + "depends_on: [" + ", ".join(depends_on) + "]\n"
+        + "---\n"
+        + "\n"
+        + "# " + title + "\n"
+        + "\n"
+        + "## Purpose\n"
+        + "\n"
+        + title + " doubles a number.\n",
     )
-    _write(comp_dir / "component.md", component_md)
-
-    req_id = f"R-{upper}-001"
-    ac_id = f"AC-{upper}-001"
-    _write(
-        comp_dir / "requirements" / f"{req_id}.md",
-        f"# {req_id}\n\n**{req_id}** — `{slug}(x)` MUST return `2 * x`.\n",
+    rid = "R-" + upper + "-001"
+    acid = "AC-" + upper + "-001"
+    write(
+        comp_dir / "requirements" / (rid + ".md"),
+        "# " + rid + "\n"
+        + "\n"
+        + "**" + rid + "** \u2014 `" + slug + "(x)` MUST return `2 * x`.\n",
     )
-    _write(
-        comp_dir / "acceptance" / f"{ac_id}.md",
-        f"# {ac_id}\n"
-        "\n"
-        f"Covers: {req_id}\n"
-        "Kind: generated-test\n"
-        "\n"
-        "```gherkin\n"
-        "Given x = 2\n"
-        f"When {slug}(x) is called\n"
-        "Then it returns 4\n"
-        "```\n",
+    write(
+        comp_dir / "acceptance" / (acid + ".md"),
+        "# " + acid + "\n"
+        + "\n"
+        + "Covers: " + rid + "\n"
+        + "Kind: generated-test\n"
+        + "\n"
+        + "```gherkin\n"
+        + "Given x = 2\n"
+        + "When " + slug + "(x) is called\n"
+        + "Then it returns 4\n"
+        + "```\n",
     )
-    _write(comp_dir / "interface" / "library.md", library_md)
-    _write(comp_dir / "constraints.md", "# Constraints\n\nNone.\n")
-    for name, text in (data_files or {}).items():
-        _write(comp_dir / "interface" / "data" / f"{name}.md", text)
-    return ac_id
+    write(comp_dir / "interface" / "library.md", library_text)
+    write(comp_dir / "constraints.md", "# Constraints\n\nNone.\n")
+    for type_name, type_text in (data_types or {}).items():
+        write(comp_dir / "interface" / "data" / (type_name + ".md"), type_text)
 
 
-def _plain_library(slug):
-    return "# Library\n\n```\n" + f"{slug}(x: int) -> int\n" + "```\n"
-
-
-# comp-bar's own interface names "Widget" (scenario 1/3) but never owns it.
-BAR_LIBRARY_WIDGET = (
-    "# Library\n"
-    "\n"
-    "```\n"
-    "make_widget(label: str) -> Widget\n"
-    "```\n"
-    "\n"
-    "Returns a new Widget for the given label.\n"
-)
-
-# comp-bar's own interface names "Gadget", which nobody in the corpus owns.
-BAR_LIBRARY_GADGET = (
-    "# Library\n"
-    "\n"
-    "```\n"
-    "make_gadget(label: str) -> Gadget\n"
-    "```\n"
-    "\n"
-    "Returns a new Gadget for the given label.\n"
-)
-
-BAZ_WIDGET_SENTINEL = "baz-widget-doc-sentinel-7f3a"
-QUX_WIDGET_SENTINEL = "qux-widget-doc-sentinel-91c2"
-
-BAZ_WIDGET_MD = (
-    "# `Widget`\n"
-    "\n"
-    "A record with a `label` field and a `size` field.\n"
-    "\n"
-    f"Marker: {BAZ_WIDGET_SENTINEL}\n"
-)
-
-QUX_WIDGET_MD = (
-    "# `Widget`\n"
-    "\n"
-    "A different record with a `label` field only.\n"
-    "\n"
-    f"Marker: {QUX_WIDGET_SENTINEL}\n"
-)
-
-
-def _dep_entry(repo_root, dep_ac):
-    bundle = spec_bundle_assembler.assemble_criterion("comp-dep", dep_ac, repo_root)
-    dep_ifaces = field(bundle, "dependency_interfaces")
-    assert "comp-bar" in dep_ifaces, f"comp-bar missing from {list(dep_ifaces)!r}"
-    entry = dep_ifaces["comp-bar"]
-    assert isinstance(entry, str)
-    return entry
-
-
-# ---------------------------------------------------------------------------
-# Scenario 1: a uniquely-owned referenced type is appended, labeled with owner
-# ---------------------------------------------------------------------------
-
-def test_referenced_type_owned_elsewhere_is_appended_with_owner_label(tmp_path):
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    _write_glossary(repo_root)
-    _write_component(repo_root, "bar", [], BAR_LIBRARY_WIDGET)
-    _write_component(
-        repo_root, "baz", [], _plain_library("baz"), data_files={"Widget": BAZ_WIDGET_MD}
+def write_glossary(repo_root):
+    write(
+        repo_root / "specs" / "glossary.md",
+        "# Glossary\n\n- **Foo** \u2014 a test term.\n",
     )
-    dep_ac = _write_component(repo_root, "dep", ["comp-bar"], _plain_library("dep"))
 
-    _assert_lint_clean(repo_root)
 
-    entry = _dep_entry(repo_root, dep_ac)
-    own = BAR_LIBRARY_WIDGET.strip()
+def foo_library():
+    return "# Library\n\n```\nfoo(x: int) -> int\n```\n"
 
-    # comp-bar's own interface content is present.
+
+def bar_library(type_name):
+    return "# Library\n\n```\nbar_make(n: int) -> " + type_name + "\n```\n"
+
+
+def lint_clean(repo_root):
+    spec_linter = load_spec_linter()
+    assert spec_linter.lint(None, repo_root).hard_failures == 0
+
+
+def bar_entry(repo_root):
+    bundle = spec_bundle_assembler.assemble_criterion("comp-foo", "AC-FOO-001", repo_root)
+    deps = field(bundle, "dependency_interfaces")
+    assert "comp-bar" in deps
+    return deps["comp-bar"]
+
+
+def test_resolves_unowned_type_from_other_component_with_label(tmp_path):
+    repo_root = tmp_path
+    write_glossary(repo_root)
+    make_component(repo_root, "foo", ["comp-bar"], foo_library())
+    bar_text = bar_library("Widget")
+    make_component(repo_root, "bar", [], bar_text)
+    widget_marker = "Widget holds a sprocket count of zorblax magnitude."
+    make_component(
+        repo_root,
+        "baz",
+        [],
+        "# Library\n\n```\nbaz(x: int) -> int\n```\n",
+        data_types={"Widget": "# `Widget`\n\n" + widget_marker + "\n"},
+    )
+    lint_clean(repo_root)
+
+    entry = bar_entry(repo_root)
+
+    own = "bar_make(n: int) -> Widget"
     assert own in entry
+    assert widget_marker in entry
 
-    # Widget's own documented content (from comp-baz) is appended.
-    assert BAZ_WIDGET_SENTINEL in entry
-    assert "A record with a `label` field and a `size` field." in entry
-    assert entry.index(own) < entry.index(BAZ_WIDGET_SENTINEL)
+    lines = entry.splitlines()
+    label_idx = None
+    for i, line in enumerate(lines):
+        if "Widget" in line and "comp-baz" in line:
+            label_idx = i
+            break
+    assert label_idx is not None, "no heading labels Widget as owned by comp-baz"
 
-    # ...under a label naming both the type and its real owner, comp-baz.
-    appended = entry[entry.index(own) + len(own):]
-    label_lines = [
-        line for line in appended.splitlines() if "Widget" in line and "comp-baz" in line
-    ]
-    assert label_lines, (
-        "no label naming both 'Widget' and its owner 'comp-baz' in the appended "
-        f"section:\n{appended}"
+    own_idx = next(i for i, line in enumerate(lines) if own in line)
+    marker_idx = next(i for i, line in enumerate(lines) if widget_marker in line)
+    assert own_idx < label_idx < marker_idx
+
+
+def test_unresolved_type_name_is_skipped(tmp_path):
+    repo_root = tmp_path
+    write_glossary(repo_root)
+    make_component(repo_root, "foo", ["comp-bar"], foo_library())
+    bar_text = bar_library("Gizmo")
+    make_component(repo_root, "bar", [], bar_text)
+    make_component(repo_root, "baz", [], "# Library\n\n```\nbaz(x: int) -> int\n```\n")
+    lint_clean(repo_root)
+
+    entry = bar_entry(repo_root)
+
+    assert entry.strip() == bar_text.strip()
+    assert entry.count("Gizmo") == bar_text.count("Gizmo")
+
+
+def test_ambiguous_type_name_is_skipped(tmp_path):
+    repo_root = tmp_path
+    write_glossary(repo_root)
+    make_component(repo_root, "foo", ["comp-bar"], foo_library())
+    bar_text = bar_library("Gadget")
+    make_component(repo_root, "bar", [], bar_text)
+    marker_one = "Gadget variant one with quibblex flavor."
+    marker_two = "Gadget variant two with frobnitz flavor."
+    make_component(
+        repo_root,
+        "qux",
+        [],
+        "# Library\n\n```\nqux(x: int) -> int\n```\n",
+        data_types={"Gadget": "# `Gadget`\n\n" + marker_one + "\n"},
     )
-    label_pos = appended.index(label_lines[0])
-    assert label_pos < appended.index(BAZ_WIDGET_SENTINEL), (
-        "the owner label must precede Widget's appended content"
+    make_component(
+        repo_root,
+        "zap",
+        [],
+        "# Library\n\n```\nzap(x: int) -> int\n```\n",
+        data_types={"Gadget": "# `Gadget`\n\n" + marker_two + "\n"},
     )
+    lint_clean(repo_root)
 
+    entry = bar_entry(repo_root)
 
-# ---------------------------------------------------------------------------
-# Scenario 2: an unresolved name is skipped silently — nothing fabricated
-# ---------------------------------------------------------------------------
-
-def test_unresolved_type_name_adds_no_section(tmp_path):
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    _write_glossary(repo_root)
-    _write_component(repo_root, "bar", [], BAR_LIBRARY_GADGET)
-    dep_ac = _write_component(repo_root, "dep", ["comp-bar"], _plain_library("dep"))
-
-    _assert_lint_clean(repo_root)
-
-    entry = _dep_entry(repo_root, dep_ac)
-    own = BAR_LIBRARY_GADGET.strip()
-
-    # comp-bar's own content, unchanged, and nothing else.
-    assert own in entry
-    assert entry.replace(own, "", 1).strip() == "", (
-        f"unexpected extra content in comp-bar's entry:\n{entry}"
-    )
-    # No fabricated section for the unresolved name.
-    assert entry.count("Gadget") == own.count("Gadget")
-
-
-# ---------------------------------------------------------------------------
-# Scenario 3: an ambiguously-owned name is skipped silently — never a guess
-# ---------------------------------------------------------------------------
-
-def test_ambiguously_owned_type_name_adds_no_section(tmp_path):
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    _write_glossary(repo_root)
-    _write_component(repo_root, "bar", [], BAR_LIBRARY_WIDGET)
-    _write_component(
-        repo_root, "baz", [], _plain_library("baz"), data_files={"Widget": BAZ_WIDGET_MD}
-    )
-    _write_component(
-        repo_root, "qux", [], _plain_library("qux"), data_files={"Widget": QUX_WIDGET_MD}
-    )
-    dep_ac = _write_component(repo_root, "dep", ["comp-bar"], _plain_library("dep"))
-
-    _assert_lint_clean(repo_root)
-
-    entry = _dep_entry(repo_root, dep_ac)
-    own = BAR_LIBRARY_WIDGET.strip()
-
-    # comp-bar's own content, unchanged, and nothing else.
-    assert own in entry
-    assert entry.replace(own, "", 1).strip() == "", (
-        f"unexpected extra content in comp-bar's entry:\n{entry}"
-    )
-    # Neither claimant's Widget documentation was guessed in.
-    assert BAZ_WIDGET_SENTINEL not in entry
-    assert QUX_WIDGET_SENTINEL not in entry
-    assert "comp-baz" not in entry
+    assert entry.strip() == bar_text.strip()
+    assert marker_one not in entry
+    assert marker_two not in entry
     assert "comp-qux" not in entry
-    assert entry.count("Widget") == own.count("Widget")
+    assert "comp-zap" not in entry

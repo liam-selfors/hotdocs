@@ -1,11 +1,18 @@
-import spec_bundle_assembler
+# hotdocs-criterion: sha256:3ce1427643cdd075e9ec6ce15ceeb478c92121a66598b1405bd56dabe50ae23b
+"""AC-ASSEMBLE-006: assembling the same component twice over an unchanged
+corpus yields byte-identical SpecBundles (R-ASSEMBLE-006)."""
 
+import dataclasses
 import importlib.util
 import json
 import sys
 from pathlib import Path
 
-import pytest
+import spec_bundle_assembler
+
+
+def field(value, name):
+    return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
 BUNDLE_FIELDS = [
@@ -23,14 +30,9 @@ BUNDLE_FIELDS = [
 ]
 
 
-def field(value, name):
-    return value[name] if isinstance(value, dict) else getattr(value, name)
-
-
-def _load_spec_linter():
+def load_spec_linter():
     gen = next(
-        p
-        for p in Path(spec_bundle_assembler.__file__).resolve().parents
+        p for p in Path(spec_bundle_assembler.__file__).resolve().parents
         if p.name == "gen"
     )
     base = gen / "spec-linter"
@@ -46,120 +48,143 @@ def _load_spec_linter():
     return spec_linter
 
 
-def _write(path: Path, text: str) -> None:
+def write(path, text):
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text, encoding="utf-8")
+    path.write_bytes(text.encode("utf-8"))
 
 
-def _write_component(repo_root: Path, slug: str, title: str, depends_on: str, purpose: str,
-                     rid: str, acid: str, req_text: str, signature: str) -> None:
+def write_component(repo_root, slug, title, upper, depends_on, purpose):
     comp_dir = repo_root / "specs" / "components" / slug
-    _write(
+    write(
         comp_dir / "component.md",
         "---\n"
-        f"id: comp-{slug}\n"
-        f"title: {title}\n"
-        "status: draft\n"
-        "owners: [team-a]\n"
-        "sealed: true\n"
-        f"source_path: legacy/{slug}/\n"
-        f"depends_on: {depends_on}\n"
-        "---\n"
-        "\n"
-        f"# {title}\n"
-        "\n"
-        "## Purpose\n"
-        "\n"
-        f"{purpose}\n",
+        + "id: comp-" + slug + "\n"
+        + "title: " + title + "\n"
+        + "status: draft\n"
+        + "owners: [team-a]\n"
+        + "sealed: true\n"
+        + "source_path: legacy/" + slug + "/\n"
+        + "depends_on: [" + depends_on + "]\n"
+        + "---\n"
+        + "\n"
+        + "# " + title + "\n"
+        + "\n"
+        + "## Purpose\n"
+        + "\n"
+        + purpose + "\n",
     )
-    _write(
-        comp_dir / "requirements" / f"{rid}.md",
-        f"# {rid}\n"
-        "\n"
-        f"**{rid}** — {req_text}\n",
-    )
-    _write(
-        comp_dir / "acceptance" / f"{acid}.md",
-        f"# {acid}\n"
-        "\n"
-        f"Covers: {rid}\n"
-        "Kind: generated-test\n"
-        "\n"
-        "```gherkin\n"
-        "Given x = 2\n"
-        "When the function is called with x\n"
-        "Then it returns 4\n"
-        "```\n",
-    )
-    _write(
+    for n in ("001", "002"):
+        rid = "R-" + upper + "-" + n
+        acid = "AC-" + upper + "-" + n
+        write(
+            comp_dir / "requirements" / (rid + ".md"),
+            "# " + rid + "\n"
+            + "\n"
+            + "**" + rid + "** — `" + slug + "(x)` MUST return `2 * x`.\n",
+        )
+        write(
+            comp_dir / "acceptance" / (acid + ".md"),
+            "# " + acid + "\n"
+            + "\n"
+            + "Covers: " + rid + "\n"
+            + "Kind: generated-test\n"
+            + "\n"
+            + "```gherkin\n"
+            + "Given x = 2\n"
+            + "When " + slug + "(x) is called\n"
+            + "Then it returns 4\n"
+            + "```\n",
+        )
+    write(
         comp_dir / "interface" / "library.md",
         "# Library\n"
-        "\n"
-        "```\n"
-        f"{signature}\n"
-        "```\n",
+        + "\n"
+        + "```\n"
+        + slug + "(x: int) -> int\n"
+        + "```\n",
     )
-    _write(
+    write(
         comp_dir / "constraints.md",
         "# Constraints\n"
-        "\n"
-        "None.\n",
+        + "\n"
+        + "None.\n",
     )
 
 
-@pytest.fixture
-def repo_root(tmp_path):
-    root = tmp_path / "repo"
-    root.mkdir()
-    _write(
-        root / "specs" / "glossary.md",
+def build_corpus(repo_root):
+    write(
+        repo_root / "specs" / "glossary.md",
         "# Glossary\n"
-        "\n"
-        "- **Foo** — a test term.\n",
+        + "\n"
+        + "- **Foo** — a test term.\n",
     )
-    _write_component(
-        root, "foo", "Foo", "[]", "Foo doubles a number.",
-        "R-FOO-001", "AC-FOO-001",
-        "`foo(x)` MUST return `2 * x`.",
-        "foo(x: int) -> int",
-    )
-    _write_component(
-        root, "bar", "Bar", "[comp-foo]", "Bar doubles a number using Foo.",
-        "R-BAR-001", "AC-BAR-001",
-        "`bar(x)` MUST return `foo(x)`.",
-        "bar(x: int) -> int",
+    write_component(repo_root, "foo", "Foo", "FOO", "", "Foo doubles a number.")
+    write_component(
+        repo_root, "bar", "Bar", "BAR", "comp-foo", "Bar doubles a number too."
     )
 
-    spec_linter = _load_spec_linter()
-    report = spec_linter.lint(None, root)
-    hard = report["hard_failures"] if isinstance(report, dict) else report.hard_failures
-    assert hard == 0
-    return root
+
+def snapshot_files(repo_root):
+    return {
+        str(p.relative_to(repo_root)): p.read_bytes()
+        for p in sorted(repo_root.rglob("*"))
+        if p.is_file()
+    }
 
 
-def _serialize(bundle) -> bytes:
-    data = {name: field(bundle, name) for name in BUNDLE_FIELDS}
-    return json.dumps(data, ensure_ascii=False).encode("utf-8")
+def to_plain(value):
+    if dataclasses.is_dataclass(value) and not isinstance(value, type):
+        return {f.name: to_plain(getattr(value, f.name)) for f in dataclasses.fields(value)}
+    if isinstance(value, dict):
+        return {str(k): to_plain(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [to_plain(v) for v in value]
+    return value
 
 
-@pytest.mark.parametrize("component_id", ["comp-foo", "comp-bar"])
-def test_assemble_twice_is_byte_identical(repo_root, component_id):
-    first = spec_bundle_assembler.assemble(component_id, repo_root)
-    second = spec_bundle_assembler.assemble(component_id, repo_root)
-
-    assert field(first, "component_id") == component_id
-    assert field(second, "component_id") == component_id
-
-    for name in BUNDLE_FIELDS:
-        assert field(first, name) == field(second, name), name
-
-    assert _serialize(first) == _serialize(second)
-    assert field(first, "spec_bundle_hash") == field(second, "spec_bundle_hash")
+def bundle_bytes(bundle):
+    plain = {name: to_plain(field(bundle, name)) for name in BUNDLE_FIELDS}
+    return json.dumps(plain, ensure_ascii=False, sort_keys=False).encode("utf-8")
 
 
-def test_assemble_cli_json_twice_is_byte_identical(repo_root, capsys):
-    argv = ["comp-bar", "--format=json", f"--repo-root={repo_root}"]
+def test_assemble_twice_is_byte_identical(tmp_path):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    build_corpus(repo_root)
 
+    spec_linter = load_spec_linter()
+    assert spec_linter.lint(None, repo_root).hard_failures == 0
+
+    before = snapshot_files(repo_root)
+
+    for component_id in ("comp-foo", "comp-bar"):
+        first = spec_bundle_assembler.assemble(component_id, repo_root)
+        second = spec_bundle_assembler.assemble(component_id, repo_root)
+
+        assert field(first, "component_id") == component_id
+        for name in BUNDLE_FIELDS:
+            assert field(first, name) == field(second, name), name
+
+        hash_value = field(first, "spec_bundle_hash")
+        assert isinstance(hash_value, str) and hash_value.startswith("sha256:")
+
+        assert bundle_bytes(first) == bundle_bytes(second)
+
+    # Corpus stayed unchanged throughout (assemble has no side effects).
+    assert snapshot_files(repo_root) == before
+
+
+def test_cli_json_output_twice_is_byte_identical(tmp_path, capsys):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    build_corpus(repo_root)
+
+    spec_linter = load_spec_linter()
+    assert spec_linter.lint(None, repo_root).hard_failures == 0
+
+    argv = ["comp-bar", "--format=json", "--repo-root=" + str(repo_root)]
+
+    capsys.readouterr()
     code1 = spec_bundle_assembler.main(list(argv))
     out1 = capsys.readouterr().out
     code2 = spec_bundle_assembler.main(list(argv))
@@ -168,5 +193,5 @@ def test_assemble_cli_json_twice_is_byte_identical(repo_root, capsys):
     assert code1 == 0
     assert code2 == 0
     assert out1.encode("utf-8") == out2.encode("utf-8")
-    parsed = json.loads(out1)
-    assert parsed["component_id"] == "comp-bar"
+    doc = json.loads(out1)
+    assert doc["component_id"] == "comp-bar"

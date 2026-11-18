@@ -1,15 +1,16 @@
-import spec_bundle_assembler
-
+# hotdocs-criterion: sha256:5b259344703316955b10da6f24cd28ea45bd58df2d0851a418f45e506484d2ba
 import importlib.util
 import sys
 from pathlib import Path
+
+import spec_bundle_assembler
 
 
 def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def _load_spec_linter():
+def load_spec_linter():
     gen = next(
         p
         for p in Path(spec_bundle_assembler.__file__).resolve().parents
@@ -28,39 +29,42 @@ def _load_spec_linter():
     return spec_linter
 
 
-def _write(path: Path, text: str) -> None:
+def write(path, text):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
 
 
-VAR_DESCRIPTION_LINE = "Description: the base URL the Foo service is reached at."
-VAR_NAME_LINE = "Name: VAR-FOO-URL"
+VAR_DESCRIPTION_LINE = "The base URL the Foo service is reached at, used to locate Foo endpoints."
 VAR_TYPE_LINE = "Type: url"
-VAR_REQUIRED_LINE = "Required: optional"
+VAR_REQUIRED_LINE = "Required: yes"
 VAR_SENSITIVITY_LINE = "Sensitivity: public"
 
 VAR_BODY = (
-    "# VAR-FOO-URL\n"
+    "# Foo URL\n"
     "\n"
-    "- " + VAR_NAME_LINE + "\n"
-    "- " + VAR_TYPE_LINE + "\n"
-    "- " + VAR_REQUIRED_LINE + "\n"
-    "- " + VAR_DESCRIPTION_LINE + "\n"
-    "- " + VAR_SENSITIVITY_LINE + "\n"
+    + VAR_TYPE_LINE + "\n"
+    "\n"
+    + VAR_REQUIRED_LINE + "\n"
+    "\n"
+    + VAR_SENSITIVITY_LINE + "\n"
+    "\n"
+    "## Description\n"
+    "\n"
+    + VAR_DESCRIPTION_LINE + "\n"
 )
 
 
-def _build_corpus(repo_root: Path) -> None:
+def build_corpus(repo_root):
     specs = repo_root / "specs"
 
-    _write(
+    write(
         specs / "glossary.md",
         "# Glossary\n"
         "\n"
         "- **Foo** — a test term.\n",
     )
 
-    _write(
+    write(
         specs / "vars" / "VAR-FOO-URL.md",
         "---\n"
         "id: VAR-FOO-URL\n"
@@ -68,11 +72,12 @@ def _build_corpus(repo_root: Path) -> None:
         "status: draft\n"
         "owners: [team-a]\n"
         "---\n"
-        "\n" + VAR_BODY,
+        "\n"
+        + VAR_BODY,
     )
 
     comp = specs / "components" / "foo"
-    _write(
+    write(
         comp / "component.md",
         "---\n"
         "id: comp-foo\n"
@@ -92,14 +97,14 @@ def _build_corpus(repo_root: Path) -> None:
         "Foo doubles a number.\n",
     )
 
-    _write(
+    write(
         comp / "requirements" / "R-FOO-001.md",
         "# R-FOO-001\n"
         "\n"
         "**R-FOO-001** — `foo(x)` MUST return `2 * x`.\n",
     )
 
-    _write(
+    write(
         comp / "acceptance" / "AC-FOO-001.md",
         "# AC-FOO-001\n"
         "\n"
@@ -113,7 +118,7 @@ def _build_corpus(repo_root: Path) -> None:
         "```\n",
     )
 
-    _write(
+    write(
         comp / "interface" / "library.md",
         "# Library\n"
         "\n"
@@ -122,7 +127,7 @@ def _build_corpus(repo_root: Path) -> None:
         "```\n",
     )
 
-    _write(
+    write(
         comp / "constraints.md",
         "# Constraints\n"
         "\n"
@@ -133,12 +138,10 @@ def _build_corpus(repo_root: Path) -> None:
 def test_ac_assemble_003_vars_contains_full_declaration(tmp_path):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
-    _build_corpus(repo_root)
+    build_corpus(repo_root)
 
-    spec_linter = _load_spec_linter()
-    report = spec_linter.lint(None, repo_root)
-    hard = report["hard_failures"] if isinstance(report, dict) else report.hard_failures
-    assert hard == 0, getattr(report, "findings", report)
+    spec_linter = load_spec_linter()
+    assert spec_linter.lint(None, repo_root).hard_failures == 0
 
     bundle = spec_bundle_assembler.assemble("comp-foo", repo_root)
 
@@ -147,18 +150,17 @@ def test_ac_assemble_003_vars_contains_full_declaration(tmp_path):
     content = vars_field["VAR-FOO-URL"]
     assert isinstance(content, str)
 
-    # The declaration's full body content is present.
+    # The full declaration body must be present, not a summary or excerpt.
     assert VAR_BODY.strip() in content, content
-
-    # Each declared property is carried through.
     for line in (
-        VAR_NAME_LINE,
+        "# Foo URL",
         VAR_TYPE_LINE,
         VAR_REQUIRED_LINE,
-        VAR_DESCRIPTION_LINE,
         VAR_SENSITIVITY_LINE,
+        "## Description",
+        VAR_DESCRIPTION_LINE,
     ):
         assert line in content, (line, content)
 
-    # Only the declared var is included.
+    # Only the used var is included.
     assert set(vars_field.keys()) == {"VAR-FOO-URL"}

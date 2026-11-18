@@ -1,27 +1,28 @@
-import spec_bundle_assembler
-
+# hotdocs-criterion: sha256:35ada3d6a89e95563ade91faed82f54149cc19722d58834829ed1ebed39eb986
 import importlib.util
 import sys
 from pathlib import Path
 
+import spec_bundle_assembler
 
-PURPOSE_TOKEN = "kumquatpurposesentinel"
-SCOPE_TOKEN = "marmaladescopesentinel"
-RATIONALE_TOKEN = "zeppelinrationalesentinel"
-OPEN_Q_TOKEN = "quagmireopenquestionsentinel"
-CHANGELOG_TOKEN = "xylophonechangelogsentinel"
+
+PURPOSE_TEXT = "Foo doubles a number using the quillfeather purpose marker."
+SCOPE_TEXT = "Foo covers integer inputs only, the marrowbrook scope marker."
+RATIONALE_TEXT = "Doubling was chosen over tripling, the cobblewick rationale marker."
+OPEN_QUESTIONS_TEXT = "Should foo accept floats, the thistledown open marker."
+CHANGE_LOG_TEXT = "Initial version written, the lanternmoss changelog marker."
 
 
 def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def _write(path: Path, text: str) -> None:
+def write(path, text):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
 
 
-def _load_spec_linter():
+def load_spec_linter():
     gen = next(
         p
         for p in Path(spec_bundle_assembler.__file__).resolve().parents
@@ -40,17 +41,13 @@ def _load_spec_linter():
     return spec_linter
 
 
-def _build_corpus(repo_root: Path) -> None:
-    _write(
+def build_corpus(repo_root):
+    write(
         repo_root / "specs" / "glossary.md",
-        "# Glossary\n"
-        "\n"
-        "- **Foo** — a test term.\n",
+        "# Glossary\n\n- **Foo** — a test term.\n",
     )
-
     comp = repo_root / "specs" / "components" / "foo"
-    _write(
-        comp / "component.md",
+    component_md = (
         "---\n"
         "id: comp-foo\n"
         "title: Foo\n"
@@ -65,31 +62,35 @@ def _build_corpus(repo_root: Path) -> None:
         "\n"
         "## Purpose\n"
         "\n"
-        f"Foo doubles a number. {PURPOSE_TOKEN}\n"
+        + PURPOSE_TEXT
+        + "\n"
         "\n"
         "## Scope\n"
         "\n"
-        f"Foo handles integer inputs only. {SCOPE_TOKEN}\n"
+        + SCOPE_TEXT
+        + "\n"
         "\n"
         "## Rationale\n"
         "\n"
-        f"Doubling was chosen because it is simple. {RATIONALE_TOKEN}\n"
+        + RATIONALE_TEXT
+        + "\n"
         "\n"
         "## Open questions\n"
         "\n"
-        f"Whether foo should ever triple a number. {OPEN_Q_TOKEN}\n"
+        + OPEN_QUESTIONS_TEXT
+        + "\n"
         "\n"
         "## Change log\n"
         "\n"
-        f"Initial version written. {CHANGELOG_TOKEN}\n",
+        + CHANGE_LOG_TEXT
+        + "\n"
     )
-    _write(
+    write(comp / "component.md", component_md)
+    write(
         comp / "requirements" / "R-FOO-001.md",
-        "# R-FOO-001\n"
-        "\n"
-        "**R-FOO-001** — `foo(x)` MUST return `2 * x`.\n",
+        "# R-FOO-001\n\n**R-FOO-001** — `foo(x)` MUST return `2 * x`.\n",
     )
-    _write(
+    write(
         comp / "acceptance" / "AC-FOO-001.md",
         "# AC-FOO-001\n"
         "\n"
@@ -102,43 +103,31 @@ def _build_corpus(repo_root: Path) -> None:
         "Then it returns 4\n"
         "```\n",
     )
-    _write(
+    write(
         comp / "interface" / "library.md",
-        "# Library\n"
-        "\n"
-        "```\n"
-        "foo(x: int) -> int\n"
-        "```\n",
+        "# Library\n\n```\nfoo(x: int) -> int\n```\n",
     )
-    _write(
-        comp / "constraints.md",
-        "# Constraints\n"
-        "\n"
-        "None.\n",
-    )
-    _write(repo_root / "legacy" / "foo" / "foo.py", "def foo(x):\n    return 2 * x\n")
+    write(comp / "constraints.md", "# Constraints\n\nNone.\n")
 
 
-def test_ac_assemble_012_target_component_md_excludes_rationale_open_questions_change_log(tmp_path):
+def test_ac_assemble_012_cold_spec_excludes_rationale_open_questions_change_log(tmp_path):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
-    _build_corpus(repo_root)
+    build_corpus(repo_root)
 
-    spec_linter = _load_spec_linter()
-    report = spec_linter.lint(None, repo_root)
-    hard = report["hard_failures"] if isinstance(report, dict) else report.hard_failures
-    assert hard == 0
+    spec_linter = load_spec_linter()
+    assert spec_linter.lint(None, repo_root).hard_failures == 0
 
     bundle = spec_bundle_assembler.assemble("comp-foo", repo_root, mode="cold")
-
     spec_text = field(bundle, "spec")
+
     assert isinstance(spec_text, str)
+    assert PURPOSE_TEXT in spec_text
+    assert SCOPE_TEXT in spec_text
 
-    # Purpose and Scope text are included.
-    assert PURPOSE_TOKEN in spec_text
-    assert SCOPE_TOKEN in spec_text
-
-    # Rationale, Open questions, and Change log text are excluded.
-    assert RATIONALE_TOKEN not in spec_text
-    assert OPEN_Q_TOKEN not in spec_text
-    assert CHANGELOG_TOKEN not in spec_text
+    assert "cobblewick" not in spec_text
+    assert "thistledown" not in spec_text
+    assert "lanternmoss" not in spec_text
+    assert RATIONALE_TEXT not in spec_text
+    assert OPEN_QUESTIONS_TEXT not in spec_text
+    assert CHANGE_LOG_TEXT not in spec_text

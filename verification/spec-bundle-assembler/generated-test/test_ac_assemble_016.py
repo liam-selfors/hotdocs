@@ -1,13 +1,63 @@
-import spec_bundle_assembler
-
+# hotdocs-criterion: sha256:4dec2bc8e4c5502e2d4a1a427d215bbef68fc948916f2137cfba5b311a094fc9
 import importlib.util
 import sys
 from pathlib import Path
 
 import pytest
 
+import spec_bundle_assembler
 
-RULES_TEXT = (
+
+GLOSSARY = "# Glossary\n\n- **Foo** — a test term.\n"
+
+COMPONENT_MD = (
+    "---\n"
+    "id: comp-foo\n"
+    "title: Foo\n"
+    "status: draft\n"
+    "owners: [team-a]\n"
+    "sealed: true\n"
+    "source_path: legacy/foo/\n"
+    "depends_on: []\n"
+    "---\n"
+    "\n"
+    "# Foo\n"
+    "\n"
+    "## Purpose\n"
+    "\n"
+    "Foo doubles a number.\n"
+)
+
+REQUIREMENT_MD = (
+    "# R-FOO-001\n"
+    "\n"
+    "**R-FOO-001** — `foo(x)` MUST return `2 * x`.\n"
+)
+
+ACCEPTANCE_MD = (
+    "# AC-FOO-001\n"
+    "\n"
+    "Covers: R-FOO-001\n"
+    "Kind: generated-test\n"
+    "\n"
+    "```gherkin\n"
+    "Given x = 2\n"
+    "When foo(x) is called\n"
+    "Then it returns 4\n"
+    "```\n"
+)
+
+LIBRARY_BASE = (
+    "# Library\n"
+    "\n"
+    "```\n"
+    "foo(x: int) -> int\n"
+    "```\n"
+)
+
+CONSTRAINTS_MD = "# Constraints\n\nNone.\n"
+
+RULES_MD = (
     "---\n"
     "id: arch-rules\n"
     "title: Rules\n"
@@ -26,11 +76,9 @@ def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def _load_spec_linter():
+def load_spec_linter():
     gen = next(
-        p
-        for p in Path(spec_bundle_assembler.__file__).resolve().parents
-        if p.name == "gen"
+        p for p in Path(spec_bundle_assembler.__file__).resolve().parents if p.name == "gen"
     )
     base = gen / "spec-linter"
     path = (
@@ -45,123 +93,60 @@ def _load_spec_linter():
     return spec_linter
 
 
-def _write(path: Path, text: str) -> None:
+def write(path, text):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
 
 
-def _build_fixture(repo_root: Path, implements_path: str) -> None:
-    _write(
-        repo_root / "specs" / "glossary.md",
-        "# Glossary\n"
-        "\n"
-        "- **Foo** — a test term.\n",
-    )
-
+def build_fixture(repo_root, implements_path, write_rules=True):
+    write(repo_root / "specs" / "glossary.md", GLOSSARY)
     comp = repo_root / "specs" / "components" / "foo"
-    _write(
-        comp / "component.md",
-        "---\n"
-        "id: comp-foo\n"
-        "title: Foo\n"
-        "status: draft\n"
-        "owners: [team-a]\n"
-        "sealed: true\n"
-        "source_path: legacy/foo/\n"
-        "depends_on: []\n"
-        "---\n"
-        "\n"
-        "# Foo\n"
-        "\n"
-        "## Purpose\n"
-        "\n"
-        "Foo doubles a number.\n",
-    )
-    _write(
-        comp / "requirements" / "R-FOO-001.md",
-        "# R-FOO-001\n"
-        "\n"
-        "**R-FOO-001** — `foo(x)` MUST return `2 * x`.\n",
-    )
-    _write(
-        comp / "acceptance" / "AC-FOO-001.md",
-        "# AC-FOO-001\n"
-        "\n"
-        "Covers: R-FOO-001\n"
-        "Kind: generated-test\n"
-        "\n"
-        "```gherkin\n"
-        "Given x = 2\n"
-        "When foo(x) is called\n"
-        "Then it returns 4\n"
-        "```\n",
-    )
-    _write(
-        comp / "interface" / "library.md",
-        "# Library\n"
-        "\n"
-        "```\n"
-        "foo(x: int) -> int\n"
-        "```\n"
-        "\n"
-        "Implements: `" + implements_path + "`\n",
-    )
-    _write(
-        comp / "constraints.md",
-        "# Constraints\n"
-        "\n"
-        "None.\n",
-    )
-
-    _write(repo_root / "specs" / "architecture" / "rules.md", RULES_TEXT)
-
-    _write(
-        repo_root / "legacy" / "foo" / "foo.py",
-        "def foo(x: int) -> int:\n"
-        "    return 2 * x\n",
-    )
+    write(comp / "component.md", COMPONENT_MD)
+    write(comp / "requirements" / "R-FOO-001.md", REQUIREMENT_MD)
+    write(comp / "acceptance" / "AC-FOO-001.md", ACCEPTANCE_MD)
+    library = LIBRARY_BASE + "\n" + "Implements: `" + implements_path + "`\n"
+    write(comp / "interface" / "library.md", library)
+    write(comp / "constraints.md", CONSTRAINTS_MD)
+    if write_rules:
+        write(repo_root / "specs" / "architecture" / "rules.md", RULES_MD)
 
 
-MARKER = "\n## Implements: specs/architecture/rules.md\n\n"
-
-
-def _assert_appended(interface: str) -> None:
+def assert_implements_appended(interface, full_text):
+    marker = "\n## Implements: specs/architecture/rules.md\n\n"
     assert isinstance(interface, str)
-    idx = interface.find(MARKER)
-    assert idx != -1, f"marker not found in interface: {interface!r}"
-    rest = interface[idx + len(MARKER):]
-    # Immediately followed by the file's full text...
-    assert rest.startswith(RULES_TEXT.rstrip()), (
-        f"text after marker is not the file's full text: {rest!r}"
+    idx = interface.find(marker)
+    assert idx != -1, "marker not found in interface: " + repr(interface)
+    rest = interface[idx + len(marker):]
+    expected = full_text.rstrip()
+    assert rest.startswith(expected), (
+        "document text does not immediately follow marker: " + repr(rest)
     )
-    # ...and nothing but whitespace after it.
-    assert rest.rstrip() == RULES_TEXT.rstrip()
-    assert rest[len(RULES_TEXT.rstrip()):].strip() == ""
+    assert rest[len(expected):].strip() == "", (
+        "unexpected trailing content after document: " + repr(rest[len(expected):])
+    )
 
 
 def test_implements_document_appended_to_both_bundles(tmp_path):
     repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    _build_fixture(repo_root, "specs/architecture/rules.md")
+    build_fixture(repo_root, "specs/architecture/rules.md")
 
-    spec_linter = _load_spec_linter()
-    report = spec_linter.lint(None, repo_root)
-    hard = report["hard_failures"] if isinstance(report, dict) else report.hard_failures
-    assert hard == 0
+    spec_linter = load_spec_linter()
+    assert spec_linter.lint(None, repo_root).hard_failures == 0
+
+    full_text = (repo_root / "specs" / "architecture" / "rules.md").read_text(encoding="utf-8")
 
     bundle = spec_bundle_assembler.assemble("comp-foo", repo_root)
-    _assert_appended(field(bundle, "interface"))
+    assert_implements_appended(field(bundle, "interface"), full_text)
 
-    cbundle = spec_bundle_assembler.assemble_criterion(
-        "comp-foo", "AC-FOO-001", repo_root
-    )
-    _assert_appended(field(cbundle, "interface"))
+    cbundle = spec_bundle_assembler.assemble_criterion("comp-foo", "AC-FOO-001", repo_root)
+    assert_implements_appended(field(cbundle, "interface"), full_text)
 
 
-def test_implements_missing_path_raises_precondition_failure(tmp_path):
+def test_missing_implements_document_raises_precondition_failure(tmp_path):
     repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    _build_fixture(repo_root, "specs/architecture/missing.md")
+    build_fixture(repo_root, "specs/architecture/missing.md")
 
-    with pytest.raises(spec_bundle_assembler.PreconditionFailure):
+    precondition_failure = getattr(spec_bundle_assembler, "PreconditionFailure")
+
+    with pytest.raises(precondition_failure):
         spec_bundle_assembler.assemble("comp-foo", repo_root)
