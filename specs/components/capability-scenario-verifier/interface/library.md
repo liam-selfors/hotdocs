@@ -22,6 +22,8 @@ llm_backend)`, passing its own three values through unchanged, after
 A developer never invokes this component directly: it has no CLI
 (`D92`, `D174`).
 
+Implements: `specs/architecture/capability-scenario-fixtures.md`
+
 ## Dependencies
 
 Each is loaded lazily, at its first use, from `repo_root`, or from the
@@ -46,31 +48,5 @@ these is used.
 
 ## Test fixtures
 
-A test builds a temporary `repo_root` and supplies `test-author` and
-`llm-endpoint` as small fake modules at the paths above, and copies the
-real compiler from the live repository's `pipeline/criterion-compiler/`
-to the same relative path. A fake embeds no secret-shaped string. Every
-fixture uses exactly these shapes, because the code under test reads
-them and nothing else:
-
-- a component: `specs/components/<slug>/component.md` with frontmatter
-  `id: comp-<slug>`, `realizes: [P-X]`, `sealed: false`, plus its code
-  under `gen/<slug>/` (a sealed one instead has `sealed: true`,
-  `source_path: pipeline/<slug>/`, and its code there);
-- a capability: `specs/product/<name>.md` — never `specs/capabilities/`
-  — with frontmatter `id: P-X`, then one `### CS-X-001` section per
-  scenario holding `Covers: P-X`, `Kind: <kind>`, and a fenced
-  `gherkin` block of plain `Given`/`When`/`Then` lines, no `Scenario:`;
-- a fake `author_test` result: `{"model_call_error": None, "file":
-  {"path": "verification/capabilities/P-X/generated-test/test_cs_x_001.py",
-  "content": "def test_x():\n    assert True\n"}}` — the `path` is always
-  repo-relative under `verification/`;
-- a fake `author_test` is called as `author_test(bundle, model, seed=,
-  repo_root=, llm_backend=)` with `R-SCENARIO-007`'s dict, so it reads
-  `bundle["criterion_id"]` (the scenario id) and `bundle["criterion_text"]`
-  (its Gherkin), never `scenario_id` or `gherkin`; only a callable
-  passed to `run_capability_scenarios` receives the `R-SCENARIO-003`
-  bundle with `scenario_id`. A fake `complete(prompt, model, backend=)`
-  returns `{"text": ..., "model_call_error": None}`;
-- a report: `{"P-X": {"overall": ..., "scenarios": [{"id": ..., "kind":
-  ..., "result": ...}]}}`.
+A test builds its fixtures and finds the real compiler as
+`specs/architecture/capability-scenario-fixtures.md` says.
