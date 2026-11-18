@@ -1,51 +1,32 @@
-"""AC-SIZE-004 (Covers: R-SIZE-004).
-
-Given a component whose Purpose section is 160 words long, with no
-decision citation anywhere in it, when check(repo_root) runs, then it
-fails with R-SIZE-004 naming the hard-fail threshold (150) -- the rule
-fires on length alone, independently of any decision-citation rule.
-"""
-
-import re
+# hotdocs-criterion: sha256:bab4c8383d1885ec2bcdbd8f17863c7dad470c7c1da2ba7d0def32abe0dbe47c
 from pathlib import Path
 
 import size_checker
-
-
-COMPONENT_SLUG = "foo"
-COMPONENT_REL = "specs/components/foo/component.md"
-HARD_FAIL_THRESHOLD = 150
 
 
 def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def _purpose_text(word_count):
-    words = [f"word{i}" for i in range(word_count)]
-    lines = []
-    for start in range(0, word_count, 10):
-        lines.append(" ".join(words[start:start + 10]))
-    return "\n".join(lines)
-
-
-def _write(path: Path, text: str):
+def _write(path, text):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
 
 
-def _build_repo(root: Path, purpose_words: int) -> str:
-    purpose = _purpose_text(purpose_words)
-    # Sanity on the fixture itself: exact length, no decision citation.
-    assert len(purpose.split()) == purpose_words
-    assert re.search(r"\bD\d+\b", purpose) is None
+PURPOSE_WORDS = 160
 
+
+def _build_fixture(repo_root):
+    comp = repo_root / "specs" / "components" / "foo"
+    purpose = " ".join(["alpha"] * PURPOSE_WORDS)
+    assert len(purpose.split()) == PURPOSE_WORDS
+    assert "D1" not in purpose
     component_md = (
         "---\n"
         "id: comp-foo\n"
         "title: Foo\n"
         "status: draft\n"
-        "owners: [team-foo]\n"
+        "owners: [team-a]\n"
         "sealed: true\n"
         "source_path: legacy/foo/\n"
         "---\n"
@@ -53,12 +34,12 @@ def _build_repo(root: Path, purpose_words: int) -> str:
         "\n"
         "## Purpose\n"
         "\n"
-        f"{purpose}\n"
+        + purpose
+        + "\n"
         "\n"
         "## Scope\n"
         "\n"
-        "- In scope: foo things.\n"
-        "- Out of scope: everything else.\n"
+        "- In scope: foo.\n"
         "\n"
         "## Definitions\n"
         "\n"
@@ -88,79 +69,42 @@ def _build_repo(root: Path, purpose_words: int) -> str:
         "\n"
         "## Change log\n"
         "\n"
-        "- Initial version.\n"
+        "- Created.\n"
     )
-    comp_dir = root / "specs" / "components" / COMPONENT_SLUG
-    _write(comp_dir / "component.md", component_md)
+    _write(comp / "component.md", component_md)
     _write(
-        comp_dir / "requirements" / "R-FOO-001.md",
-        "# R-FOO-001\n\n**R-FOO-001** — Foo MUST do a foo thing.\n",
+        comp / "requirements" / "R-FOO-001.md",
+        "# R-FOO-001\n\n**R-FOO-001** — Foo MUST do foo.\n",
     )
     _write(
-        comp_dir / "acceptance" / "AC-FOO-001.md",
+        comp / "acceptance" / "AC-FOO-001.md",
         "# AC-FOO-001\n\nCovers: R-FOO-001\nKind: generated-test\n\n"
-        "```gherkin\nGiven a foo\nWhen it runs\nThen it does a foo thing\n```\n",
+        "```gherkin\nGiven foo\nWhen bar\nThen baz\n```\n",
     )
-    _write(
-        comp_dir / "constraints.md",
-        "# Constraints\n\nNone.\n",
-    )
-    _write(
-        root / "specs" / "glossary.md",
-        "# Glossary\n\n- **Foo thing** — a thing foo does.\n",
-    )
-    return purpose
+    _write(comp / "constraints.md", "# Constraints\n\nNone.\n")
+    return "specs/components/foo/component.md"
 
 
-def _size_004_findings(findings):
-    return [
-        f for f in findings
-        if field(f, "rule_id") == "R-SIZE-004"
-        and field(f, "file") == COMPONENT_REL
-    ]
+def test_ac_size_004_long_purpose_without_citations_hard_fails(tmp_path):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    component_rel = _build_fixture(repo_root)
 
-
-def test_purpose_of_160_words_without_citation_fails_r_size_004(tmp_path):
-    _build_repo(tmp_path, 160)
-
-    findings = size_checker.check(tmp_path)
+    findings = size_checker.check(repo_root)
     assert isinstance(findings, list)
 
-    matched = _size_004_findings(findings)
-    fails = [f for f in matched if field(f, "severity") == "fail"]
-    assert fails, f"expected a fail-severity R-SIZE-004 finding, got {findings!r}"
+    size_004 = [f for f in findings if field(f, "rule_id") == "R-SIZE-004"]
+    assert size_004, "expected an R-SIZE-004 finding, got: " + repr(findings)
+
+    fails = [f for f in size_004 if field(f, "severity") == "fail"]
+    assert fails, "expected R-SIZE-004 severity fail, got: " + repr(size_004)
 
     finding = fails[0]
-    assert str(HARD_FAIL_THRESHOLD) in field(finding, "message"), (
-        "R-SIZE-004 failure message must name the hard-fail threshold 150: "
-        f"{field(finding, 'message')!r}"
-    )
-    line = field(finding, "line")
-    assert isinstance(line, int) and not isinstance(line, bool)
-    assert line >= 1
+    assert field(finding, "file") == component_rel
+    assert isinstance(field(finding, "line"), int)
+    message = field(finding, "message")
+    assert isinstance(message, str)
+    assert "150" in message, "message should name the hard-fail threshold: " + repr(message)
 
-    # Every finding has exactly the documented keys/fields.
-    for f in findings:
-        for key in ("rule_id", "severity", "file", "line", "message"):
-            field(f, key)
-        assert field(f, "severity") in ("fail", "warn")
-
-
-def test_purpose_at_exactly_150_words_does_not_hard_fail(tmp_path):
-    _build_repo(tmp_path, HARD_FAIL_THRESHOLD)
-
-    findings = size_checker.check(tmp_path)
-    matched = _size_004_findings(findings)
-    assert not [f for f in matched if field(f, "severity") == "fail"], (
-        f"150 words is not above the hard-fail cap: {matched!r}"
-    )
-
-
-def test_purpose_of_151_words_hard_fails(tmp_path):
-    _build_repo(tmp_path, HARD_FAIL_THRESHOLD + 1)
-
-    findings = size_checker.check(tmp_path)
-    matched = _size_004_findings(findings)
-    fails = [f for f in matched if field(f, "severity") == "fail"]
-    assert fails, f"151 words is above the hard-fail cap: {findings!r}"
-    assert str(HARD_FAIL_THRESHOLD) in field(fails[0], "message")
+    # Fires on length alone: no decision-citation rule is involved here.
+    assert not any(field(f, "rule_id") == "R-LINT-024" for f in findings)

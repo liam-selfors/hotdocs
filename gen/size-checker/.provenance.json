@@ -1,19 +1,19 @@
 {
-  "spec_bundle_hash": "sha256:62d9c9687d797ccb6070b744a2cb454a61a4adbe354885a2cc7ee26979de4f22",
+  "spec_bundle_hash": "sha256:cf29360394c20a46b8b6db81bef602327e3b6555ced8d911b4f31119dc721043",
   "model_pin": "claude-opus-5-5",
   "prompt_version": "v11",
   "retry_feedback": null,
   "pipeline_version": "v1",
   "gate_versions": {
     "compiler": "criterion-compiler@1.0.0",
-    "generated_test": "generated_test@1.0.0",
-    "verifier": "verifier-orchestrator@2.0.0",
+    "generated_test": "generated_test@1.1.0",
+    "verifier": "verifier-orchestrator@2.2.0",
     "license_scanner": "license_scanner@4.0.0-no-reference-corpus",
     "secret_scanner": "secret_scanner@3.1.0+detect-secrets.1.5.0",
     "generator": "generator@3.0.0+v11"
   },
   "provenance_hit": false,
-  "generated_at": "2026-11-16T14:17:52Z",
+  "generated_at": "2026-11-18T18:20:20Z",
   "verification_run_id": "size-checker-attempt-1",
   "verification_report": {
     "component_id": "comp-size-checker",
@@ -22,49 +22,85 @@
         "id": "AC-SIZE-001",
         "covers": "R-SIZE-001",
         "kind": "generated-test",
-        "result": "pass",
         "test_authoring": {
           "model": "claude-opus-5-5",
           "seed": 1,
           "prompt_version": "v1",
           "cache_hit": false
-        }
+        },
+        "result": "pass"
       },
       {
         "id": "AC-SIZE-002",
         "covers": "R-SIZE-002",
         "kind": "generated-test",
-        "result": "pass",
         "test_authoring": {
           "model": "claude-opus-5-5",
           "seed": 1,
           "prompt_version": "v1",
           "cache_hit": false
-        }
+        },
+        "result": "pass"
       },
       {
         "id": "AC-SIZE-003",
         "covers": "R-SIZE-003",
         "kind": "generated-test",
-        "result": "pass",
         "test_authoring": {
           "model": "claude-opus-5-5",
           "seed": 1,
           "prompt_version": "v1",
           "cache_hit": false
-        }
+        },
+        "result": "pass"
       },
       {
         "id": "AC-SIZE-004",
         "covers": "R-SIZE-004",
         "kind": "generated-test",
-        "result": "pass",
         "test_authoring": {
           "model": "claude-opus-5-5",
           "seed": 1,
           "prompt_version": "v1",
           "cache_hit": false
-        }
+        },
+        "result": "pass"
+      },
+      {
+        "id": "AC-SIZE-005",
+        "covers": "R-SIZE-001",
+        "kind": "generated-test",
+        "test_authoring": {
+          "model": "claude-opus-5-5",
+          "seed": 1,
+          "prompt_version": "v1",
+          "cache_hit": false
+        },
+        "result": "pass"
+      },
+      {
+        "id": "AC-SIZE-006",
+        "covers": "R-SIZE-001",
+        "kind": "generated-test",
+        "test_authoring": {
+          "model": "claude-opus-5-5",
+          "seed": 1,
+          "prompt_version": "v1",
+          "cache_hit": false
+        },
+        "result": "pass"
+      },
+      {
+        "id": "AC-SIZE-007",
+        "covers": "R-SIZE-003",
+        "kind": "generated-test",
+        "test_authoring": {
+          "model": "claude-opus-5-5",
+          "seed": 1,
+          "prompt_version": "v1",
+          "cache_hit": false
+        },
+        "result": "pass"
       }
     ],
     "requirement_results": {
@@ -74,7 +110,8 @@
       "R-SIZE-004": "pass"
     },
     "interface_drift": false,
-    "mutation_score": 1.0,
+    "mutation_score": 0.8604651162790697,
+    "mutation_error": null,
     "overall": "pass"
   },
   "license_scan": {
@@ -198,6 +235,10 @@
       {
         "file": "verification/corpus-graph.json",
         "type": "Base64 High Entropy String"
+      },
+      {
+        "file": "verification/generator/generated-test/test_ac_gen_018.py",
+        "type": "Hex High Entropy String"
       },
       {
         "file": "verification/graph-query-engine/generated-test/test_ac_gqe_008.py",
