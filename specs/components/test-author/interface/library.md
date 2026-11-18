@@ -5,7 +5,7 @@ author_test(
     bundle: CriterionBundle, model: str, seed: int = 0,
     *, repo_root: Path = None, llm_backend=None,
 ) -> TestAuthoringResult
-GATE_VERSION = "generated_test@1.1.0"
+GATE_VERSION = "generated_test@1.2.0"
 ```
 
 Not a pure function: like `generator`'s `generate()`, it makes an

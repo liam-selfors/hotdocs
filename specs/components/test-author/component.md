@@ -59,4 +59,5 @@ None.
 
 ## Change log
 
-See the decisions, `D56` onward; `D320` adds the criterion header.
+See the decisions, `D56` onward; `D320` adds the criterion header,
+`D334` scopes the fake check.

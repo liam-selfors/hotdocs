@@ -11,10 +11,8 @@
   counts as killed if *any* of the `generated-test` files fails against
   it.
 
-  **Exactly four mutation operators, one mutant per site** (`D159`),
-  with these exact swaps (`D172`) — the bar was calibrated against them,
-  so a regeneration MUST NOT change them: a comparison with exactly one
-  operator has it swapped `==`↔`!=`, `<`↔`>=`, `>`↔`<=`, `is`↔`is not`,
-  `in`↔`not in` (a chained comparison is not a site); an `and`/`or`
-  flipped to the other; a binary `+`↔`-`, `*`↔`/`, `//`↔`%`; a boolean
-  constant negated. Never numeric constants or anything else.
+  **The mutation sites and swaps are exactly those of
+  `specs/architecture/mutation-runs.md`**, one mutant per site
+  (`D159`, `D172`): Python's four operators, and the token swaps inside
+  a string literal holding JavaScript (`D335`). The bar was calibrated
+  against them, so a regeneration MUST NOT change them.

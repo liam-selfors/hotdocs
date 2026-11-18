@@ -25,12 +25,9 @@ interface drift check.
 mechanism by its declared `kind`; running the interface drift check;
 aggregating mutation scores; producing one `VerificationReport`.
 
-**Out of scope:** the license/secret scans (separate components);
-*performing* an `llm-judge` evaluation or *authoring*
-`generated-test` code (this component dispatches to an injectable judge and
-an injectable `test_author` and records their results — it does not itself
-judge or author anything); **re-deciding a criterion's declared `kind`**,
-which is fixed in `acceptance/` and lint-checked (R-LINT-010).
+**Out of scope:** the license/secret scans; judging or authoring
+anything (it dispatches to an injectable judge and `test_author` and
+records their results); re-deciding a criterion's `kind` (R-LINT-010).
 
 ## Definitions
 
@@ -52,9 +49,6 @@ See `interface/data/`.
 
 See `acceptance/`.
 
-Deterministic dispatch-and-record logic, testable by mocking
-`criterion-compiler`, the judge and `test_author`.
-
 ## Non-functional constraints
 
 See `constraints.md`.
@@ -63,4 +57,4 @@ See `constraints.md`.
 
 ## Change log
 
-See the decisions, `D27` onward, through `D320` and `D324`.
+See the decisions, `D27` onward, through `D320`, `D324` and `D335`.

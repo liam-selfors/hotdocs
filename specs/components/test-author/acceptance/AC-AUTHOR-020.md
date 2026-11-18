@@ -12,15 +12,15 @@ Then the result has model_call_error with category "malformed_code",
 
 Given a bundle whose dependency_interfaces documents
   "do_thing(a: int, b: str, c: dict[str, str]) -> bool" for comp-bar,
-  and a mock model whose response defines a 2-argument fake aliased to
-  do_thing
+  and a mock model whose response defines a 2-argument function fake
+  and installs it with monkeypatch.setattr(module, "do_thing", fake)
 When author_test is called
 Then the result has model_call_error with category
   "fake_signature_mismatch" naming do_thing, and nothing is written to
   cache or to verification/<component>/generated-test/
 
 Given the same dependency_interfaces and a mock model whose response
-  defines a 3-argument fake aliased to do_thing
+  installs a 3-argument fake the same way
 When author_test is called
 Then the result succeeds normally with no model_call_error
 ```
@@ -28,7 +28,8 @@ Then the result succeeds normally with no model_call_error
 ```gherkin
 Given dependency_interfaces where one dependency exposes
   scan(component_id, repo_root) and another exposes scan(repo_root)
-When a response's fake defines scan with two parameters, or with one
+When a response writes a fake module whose source string defines scan
+  with two parameters, or with one
 Then it is accepted either way, and a fake scan with three parameters
   is still rejected as fake_signature_mismatch
 ```

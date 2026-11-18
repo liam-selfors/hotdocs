@@ -21,13 +21,9 @@
 when `mutation_error`, a failed baseline's message
 (`specs/architecture/mutation-runs.md`), is set.
 
-`result` is one of `pass` / `fail` / `skipped`, `spec-linter`'s
-`severity` vocabulary. `test_authoring` is present only on
-`generated-test` criteria that actually dispatched to `test_author` this
-run (absent on a cache hit with no fresh authoring call, and absent on
-every other `kind`): it carries `test-author`'s provenance to
-`provenance-writer` inside this report, as `rationale` does for
-`llm-judge`.
+`result` is `pass`, `fail` or `skipped`. `test_authoring` appears only
+on a `generated-test` criterion that called `test_author` this run,
+carrying its provenance to `provenance-writer`.
 
 `covers` (R-VERIFY-011) is each criterion's own `Covers:` value.
 `requirement_results` (R-VERIFY-011) projects `criteria` onto `R-id`s via
@@ -35,9 +31,8 @@ every other `kind`): it carries `test-author`'s provenance to
 otherwise (a `skipped` `llm-judge` criterion counts as `fail` here). It is
 **boolean-only**: nothing in it discloses what a test checked.
 
-That rule is independent of `overall`'s (R-VERIFY-005: a `skipped`
-`llm-judge` finding alone never fails `overall`), so in the example
-`R-FOO-002` is `fail` while `overall` is `pass`.
+A `skipped` finding never fails `overall` (R-VERIFY-005), so in the
+example `R-FOO-002` is `fail` while `overall` is `pass`.
 
 **`failure_detail`** (R-VERIFY-012) — present only on a `compiled` or
 `generated-test` criterion whose `result` is `fail`:
@@ -46,9 +41,6 @@ That rule is independent of `overall`'s (R-VERIFY-005: a `skipped`
 { "id": "AC-FOO-004", "covers": "R-FOO-004", "kind": "compiled", "result": "fail",
   "failure_detail": { "message": "result.foo equals 5 failed", "expected": 5, "actual": 3 } }
 ```
-
-Exposed for provenance, review packets and people only: it never
-reaches `requirement_results` or `retry_feedback` (`R-GEN-012`).
 
 **`failure_origin`** (R-VERIFY-019) — present exactly on a `compiled` or
 `generated-test` criterion whose `result` is `fail`: `"test"` when no
