@@ -73,4 +73,4 @@ plus the SHA-256 hex digest of
 `json.dumps(sorted(retry_feedback or []), sort_keys=True)` encoded as
 UTF-8. Every result's `prompt_version` is `PROMPT_VERSION`.
 
-Implements: `specs/architecture/generator-prompt.md`
+Implements: `specs/architecture/generator-prompt.md`, `specs/architecture/cli-conventions.md`
