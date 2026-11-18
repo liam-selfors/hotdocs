@@ -4,14 +4,16 @@ import re
 import test_author
 
 
-EXPECTED_LINE = (
+REQUIRED_LINE = (
     "- Every `requirements/` file of every fixture component has a matching "
     "`acceptance/` file with a `Covers:` tag."
 )
 
+NONCE_RE = re.compile(r"-----BEGIN FILE ([0-9a-f]+)-----")
+
 
 class _Bundle(dict):
-    """A CriterionBundle stand-in that reads both as a mapping and by attribute."""
+    """A CriterionBundle stand-in readable both as a mapping and by attribute."""
 
     def __getattr__(self, name):
         try:
@@ -26,35 +28,38 @@ def _make_bundle():
         criterion_id="AC-WIDGET-MAKER-001",
         covers="R-WIDGET-MAKER-001",
         criterion_text=(
-            "Given x = 2\n"
-            "When make_widget(x) is called\n"
-            "Then it returns 4"
+            "Given a width of 3\n"
+            "When make_widget(3) is called\n"
+            "Then it returns a widget of width 3"
         ),
         requirement_text=(
             "# R-WIDGET-MAKER-001\n\n"
-            "**R-WIDGET-MAKER-001** — `make_widget(x)` MUST return `2 * x`."
+            "**R-WIDGET-MAKER-001** — `make_widget(w)` MUST return a widget of width `w`."
         ),
-        interface="# Library\n\n```\nmake_widget(x: int) -> int\n```",
-        glossary="# Glossary\n\n- **Widget** — a test term.",
+        interface="# Library\n\n```\nmake_widget(w: int) -> dict\n```\n",
+        glossary="# Glossary\n\n- **Widget** — a test term.\n",
         dependency_interfaces={},
     )
 
 
-def test_prompt_contains_fixture_requirements_acceptance_rule_line(tmp_path):
+def test_prompt_contains_requirements_acceptance_rule_line(tmp_path):
     prompts = []
 
-    def mock_backend(prompt, model, **params):
+    def mock_backend(prompt, model=None, *args, **params):
         prompts.append(prompt)
-        match = re.search(r"-----BEGIN FILE ([0-9a-f]+)-----", prompt)
+        match = NONCE_RE.search(prompt)
         nonce = match.group(1) if match else "0" * 32
-        text = (
-            "-----BEGIN FILE " + nonce + "-----\n"
+        body = (
             "import widget_maker\n"
             "\n"
             "\n"
             "def test_make_widget():\n"
-            "    assert widget_maker.make_widget(2) == 4\n"
-            "-----END FILE " + nonce + "-----"
+            "    assert widget_maker is not None\n"
+        )
+        text = (
+            "-----BEGIN FILE " + nonce + "-----\n"
+            + body
+            + "-----END FILE " + nonce + "-----"
         )
         return {
             "text": text,
@@ -70,4 +75,5 @@ def test_prompt_contains_fixture_requirements_acceptance_rule_line(tmp_path):
 
     assert prompts, "the mock model was never called"
     first_prompt = prompts[0]
-    assert EXPECTED_LINE in first_prompt.splitlines()
+    assert isinstance(first_prompt, str)
+    assert REQUIRED_LINE in first_prompt.splitlines()

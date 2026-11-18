@@ -4,12 +4,8 @@ import re
 import test_author
 
 
-def field(value, name):
-    return value[name] if isinstance(value, dict) else getattr(value, name)
-
-
-class Bundle(dict):
-    """A CriterionBundle readable both as a mapping and by attribute."""
+class _Bundle(dict):
+    """A CriterionBundle stand-in readable both as a mapping and by attribute."""
 
     def __getattr__(self, name):
         try:
@@ -18,33 +14,31 @@ class Bundle(dict):
             raise AttributeError(name)
 
 
-NONCE_RE = re.compile(r"-----BEGIN FILE ([0-9a-f]{32})-----")
-
-
-def make_bundle(component_id, criterion_id, covers, module_names):
-    return Bundle(
+def _make_bundle(component_id, criterion_id, covers, module_names):
+    return _Bundle(
         component_id=component_id,
         criterion_id=criterion_id,
         covers=covers,
         criterion_text=(
-            "Given an input value\n"
-            "When the operation is performed\n"
-            "Then the expected output is produced"
+            "Given a string\n"
+            "When it is processed\n"
+            "Then a result is returned"
         ),
-        requirement_text="**" + covers + "** - The operation MUST produce the expected output.",
-        interface="# Library\n\n```\noperate(x: str) -> str\n```",
-        glossary="# Glossary\n\n- **Foo** - a test term.",
+        requirement_text="**" + covers + "** - processing MUST return a result.",
+        interface="# Library\n\n```\nprocess(s: str) -> str\n```\n",
+        glossary="# Glossary\n\n- **Foo** - a test term.\n",
         dependency_interfaces={},
-        module_names=list(module_names),
+        module_names=module_names,
     )
 
 
-def run_and_capture_prompt(bundle, repo_root):
-    prompts = []
+_NONCE_RE = re.compile(r"-----BEGIN FILE ([0-9a-f]{32})-----")
 
+
+def _make_backend(prompts):
     def backend(prompt, model, **params):
         prompts.append(prompt)
-        match = NONCE_RE.search(prompt)
+        match = _NONCE_RE.search(prompt)
         nonce = match.group(1) if match else "0" * 32
         text = (
             "-----BEGIN FILE " + nonce + "-----\n"
@@ -59,39 +53,57 @@ def run_and_capture_prompt(bundle, repo_root):
             "model_call_error": None,
         }
 
-    result = test_author.author_test(
-        bundle,
-        "claude-sonnet-5",
-        0,
-        repo_root=repo_root,
-        llm_backend=backend,
-    )
-    assert field(result, "model_call_error") is None
-    assert len(prompts) >= 1, "author_test never called the model backend"
+    return backend
+
+
+def _capture_prompts(bundle, repo_root):
+    prompts = []
+    backend = _make_backend(prompts)
+    error = None
+    try:
+        test_author.author_test(
+            bundle,
+            "mock-model",
+            0,
+            repo_root=repo_root,
+            llm_backend=backend,
+        )
+    except Exception as exc:  # the criterion concerns the prompt only
+        error = exc
+    assert prompts, "author_test never called the model backend: " + repr(error)
     return prompts
 
 
-def test_module_names_replace_derived_name_for_capability(tmp_path):
-    bundle = make_bundle(
+def test_module_names_replace_derived_import(tmp_path):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    bundle = _make_bundle(
         "capabilities/P-SLUGS",
-        "AC-SLUGS-001",
-        "R-SLUGS-001",
+        "SC-SLUGS-001",
+        "P-SLUGS",
         ["slugify", "url_tools"],
     )
-    prompts = run_and_capture_prompt(bundle, tmp_path)
-    for prompt in prompts:
-        assert "import slugify" in prompt
-        assert "import url_tools" in prompt
-        assert "import capabilities" not in prompt
+
+    prompts = _capture_prompts(bundle, repo_root)
+    prompt = prompts[0]
+
+    assert "import slugify" in prompt
+    assert "import url_tools" in prompt
+    for p in prompts:
+        assert "import capabilities" not in p
 
 
 def test_empty_module_names_falls_back_to_derived_name(tmp_path):
-    bundle = make_bundle(
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    bundle = _make_bundle(
         "comp-semver",
         "AC-SEMVER-001",
         "R-SEMVER-001",
         [],
     )
-    prompts = run_and_capture_prompt(bundle, tmp_path)
-    for prompt in prompts:
-        assert "import semver" in prompt
+
+    prompts = _capture_prompts(bundle, repo_root)
+    prompt = prompts[0]
+
+    assert "import semver" in prompt

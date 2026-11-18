@@ -8,25 +8,45 @@ import pytest
 import test_author
 
 
-CANONICAL_MODEL = "canonical-model-zeta"
+CANONICAL_MODEL = "claude-sonnet-5"
 
 
 def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-class Bundle(dict):
-    """A CriterionBundle that reads both as a mapping and by attribute."""
+class _Bundle:
+    """A CriterionBundle stand-in readable both by attribute and as a mapping."""
 
-    def __getattr__(self, name):
-        try:
-            return self[name]
-        except KeyError:
-            raise AttributeError(name)
+    def __init__(self, **kwargs):
+        self._data = dict(kwargs)
+        for k, v in kwargs.items():
+            setattr(self, k, v)
+
+    def __getitem__(self, key):
+        return self._data[key]
+
+    def get(self, key, default=None):
+        return self._data.get(key, default)
+
+    def keys(self):
+        return self._data.keys()
+
+    def items(self):
+        return self._data.items()
+
+    def __iter__(self):
+        return iter(self._data)
+
+    def __contains__(self, key):
+        return key in self._data
+
+    def __len__(self):
+        return len(self._data)
 
 
-def make_bundle():
-    return Bundle(
+def _make_bundle():
+    return _Bundle(
         component_id="comp-foo",
         criterion_id="AC-FOO-001",
         covers="R-FOO-001",
@@ -34,42 +54,35 @@ def make_bundle():
             "# AC-FOO-001\n\nCovers: R-FOO-001\nKind: generated-test\n\n"
             "```gherkin\nGiven x = 2\nWhen foo(x) is called\nThen it returns 4\n```\n"
         ),
-        requirement_text="# R-FOO-001\n\n**R-FOO-001** — `foo(x)` MUST return `2 * x`.",
+        requirement_text="# R-FOO-001\n\n**R-FOO-001** \u2014 `foo(x)` MUST return `2 * x`.\n",
         interface="# Library\n\n```\nfoo(x: int) -> int\n```\n",
-        glossary="# Glossary\n\n- **Foo** — a test term.",
+        glossary="# Glossary\n\n- **Foo** \u2014 a test term.\n",
         dependency_interfaces={},
         module_names=["foo"],
     )
 
 
-def write_generator_state(repo_root, model_a):
-    """Record that the generator produced this component's current code with model A."""
-    gen_dir = Path(repo_root) / "gen" / "foo"
+def _seed_prior_generation(repo_root, model_a):
+    """The Given: the generator used model A for this component's current code."""
+    gen_dir = repo_root / "gen" / "foo"
     gen_dir.mkdir(parents=True, exist_ok=True)
     (gen_dir / "foo.py").write_text("def foo(x):\n    return 2 * x\n")
     provenance = {
         "component_id": "comp-foo",
         "model": model_a,
-        "generation_result": {
-            "component_id": "comp-foo",
-            "spec_bundle_hash": "sha256:" + "0" * 64,
-            "model": model_a,
-            "prompt_version": "v1",
-            "cache_hit": False,
-            "files": {"foo.py": "def foo(x):\n    return 2 * x\n"},
-            "model_call_error": None,
-            "refused": None,
-            "retry_feedback": None,
-        },
+        "prompt_version": "v1",
+        "spec_bundle_hash": "sha256:" + "0" * 64,
+        "files": ["foo.py"],
     }
-    (gen_dir / ".provenance.json").write_text(json.dumps(provenance))
+    (gen_dir / ".provenance.json").write_text(json.dumps(provenance, indent=2))
 
 
-def make_backend(calls):
+def _make_backend(log_path):
     def backend(prompt, model, **params):
-        calls.append(model)
-        match = re.search(r"-----BEGIN FILE ([0-9a-f]{32})-----", prompt)
-        nonce = match.group(1) if match else "0" * 32
+        with open(log_path, "a") as fh:
+            fh.write(json.dumps({"model": model}) + "\n")
+        m = re.search(r"-----BEGIN FILE ([0-9a-f]{32})-----", prompt)
+        nonce = m.group(1) if m else "0" * 32
         text = (
             "-----BEGIN FILE " + nonce + "-----\n"
             "import foo\n\n\ndef test_foo():\n    assert foo.foo(2) == 4\n"
@@ -87,29 +100,36 @@ def make_backend(calls):
 
 @pytest.mark.parametrize(
     "model_a",
-    ["claude-opus-4", "openai:gpt-6-astra", "ollama:llama3.1:8b", "some-other-model"],
+    [
+        "model-a-legacy",
+        "anthropic:claude-opus-4",
+        "ollama:llama3.1:8b",
+        "openai:gpt-6-astra",
+    ],
 )
-def test_author_test_uses_canonical_model_regardless_of_generator_model(
-    tmp_path, monkeypatch, model_a
-):
-    monkeypatch.delenv("VAR_CACHE_STORE_URL", raising=False)
-    repo_root = tmp_path / ("repo_" + re.sub(r"[^a-zA-Z0-9]", "_", model_a))
+def test_author_test_calls_canonical_model_regardless_of_generator_model(tmp_path, model_a):
+    repo_root = tmp_path / "repo"
     repo_root.mkdir()
-    monkeypatch.chdir(repo_root)
-    write_generator_state(repo_root, model_a)
+    _seed_prior_generation(repo_root, model_a)
 
-    calls = []
+    log_path = tmp_path / "backend_calls.log"
+    backend = _make_backend(log_path)
+
     result = test_author.author_test(
-        make_bundle(),
+        _make_bundle(),
         CANONICAL_MODEL,
         0,
         repo_root=repo_root,
-        llm_backend=make_backend(calls),
+        llm_backend=backend,
     )
 
     assert field(result, "model_call_error") is None
-    assert calls, "the model backend was never called"
-    for called_model in calls:
-        assert called_model == CANONICAL_MODEL
-        assert called_model != model_a
+
+    assert log_path.is_file(), "the model backend was never called"
+    calls = [json.loads(line) for line in log_path.read_text().splitlines() if line.strip()]
+    assert len(calls) >= 1
+    for call in calls:
+        assert call["model"] == CANONICAL_MODEL
+        assert call["model"] != model_a
+
     assert field(result, "model") == CANONICAL_MODEL
