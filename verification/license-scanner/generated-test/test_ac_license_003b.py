@@ -1,3 +1,4 @@
+# hotdocs-criterion: sha256:cab6477bddb6c4cb56709a6cc50fbe2af69917ab59a1e00e5bde4b90dabf008a
 """AC-LICENSE-003b (covers R-LICENSE-003).
 
 Given a similarity score below the block threshold against a reference

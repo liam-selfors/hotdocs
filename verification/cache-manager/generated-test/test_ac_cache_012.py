@@ -1,3 +1,4 @@
+# hotdocs-criterion: sha256:65629ece68040f74bee358f16abb976e10e157c59f7914d1c9fe297a996424f5
 import json
 from pathlib import Path
 

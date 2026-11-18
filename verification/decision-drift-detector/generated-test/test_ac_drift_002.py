@@ -1,3 +1,4 @@
+# hotdocs-criterion: sha256:f0accf502bec5038fd5dbca12b867d6a48a4f3c2adc789c53fe717885b70a8ee
 """AC-DRIFT-002 — a spec file citing a superseded decision, whose own
 last-touching commit is a descendant of (not an ancestor of) the
 superseding decision's ratification commit, MUST NOT be reported as a

@@ -1,3 +1,4 @@
+# hotdocs-criterion: sha256:5857d0c9405ae5820ae9d908481985c1342556d4216fe03fb4be5c4da691bca7
 import email.message
 import json
 import os

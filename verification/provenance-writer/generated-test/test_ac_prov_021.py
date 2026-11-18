@@ -1,13 +1,4 @@
-"""AC-PROV-021 (Covers: R-PROV-010).
-
-The provenance manifest is written identically to both
-gen/<slug>/.provenance.json and verification/<slug>/.provenance.json,
-replacing (never merging with) any stale content. The sealed manifest is
-replaced in place with no second file created. A null verification report
-is recorded as null only when nothing was generated; a null report
-alongside generated files raises MissingInputError and writes nothing.
-"""
-
+# hotdocs-criterion: sha256:cc8f26218217c9a73de2b41305d3ed14274349919c32f0fa6f033f6ee584cc92
 import json
 import os
 import re
@@ -18,74 +9,32 @@ import pytest
 import provenance_writer
 
 
-COMPONENT_ID = "comp-foo"
-SLUG = "foo"
-STALE_MARKER = "STALE-MARKER-ac-prov-021"
-
-
-# ---------------------------------------------------------------- helpers
-
 def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def gen_path(repo_root):
-    return Path(repo_root) / "gen" / SLUG / ".provenance.json"
+STALE_TEXT = json.dumps(
+    {
+        "spec_bundle_hash": "sha256:stalestalestale",
+        "stale_marker": "old-content-must-vanish",
+        "verification_report": {"stale": True},
+    },
+    sort_keys=True,
+)
 
 
-def ver_path(repo_root):
-    return Path(repo_root) / "verification" / SLUG / ".provenance.json"
-
-
-def sealed_path(repo_root):
-    return Path(repo_root) / "pipeline" / SLUG / ".sealed-provenance.json"
-
-
-def all_files(root):
-    out = set()
+def _all_files(root):
+    found = set()
     for dirpath, _dirnames, filenames in os.walk(str(root)):
         for name in filenames:
             full = Path(dirpath) / name
-            out.add(full.relative_to(root).as_posix())
-    return out
+            found.add(full.relative_to(root).as_posix())
+    return found
 
 
-def write_json(path, obj):
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(obj, indent=2), encoding="utf-8")
-
-
-def make_generation_result(files, refused=None):
+def _license_scan():
     return {
-        "component_id": COMPONENT_ID,
-        "spec_bundle_hash": "sha256:" + "1" * 64,
-        "model": "claude-sonnet-5",
-        "prompt_version": "v10",
-        "cache_hit": False,
-        "files": files,
-        "model_call_error": None,
-        "refused": refused,
-        "retry_feedback": None,
-    }
-
-
-def make_verification_report(overall="pass"):
-    return {
-        "component_id": COMPONENT_ID,
-        "criteria": [
-            {"id": "AC-FOO-001", "covers": "R-FOO-001", "kind": "compiled", "result": "pass"},
-            {"id": "AC-FOO-002", "covers": "R-FOO-002", "kind": "compiled", "result": "pass"},
-        ],
-        "requirement_results": {"R-FOO-001": "pass", "R-FOO-002": "pass"},
-        "interface_drift": False,
-        "mutation_score": 0.9,
-        "overall": overall,
-    }
-
-
-def make_license_scan_result():
-    return {
-        "component_id": COMPONENT_ID,
+        "component_id": "comp-foo",
         "gate_version": "license_scanner@4.0.0-no-reference-corpus",
         "evaluated": False,
         "reason": "no-reference-corpus",
@@ -99,7 +48,7 @@ def make_license_scan_result():
     }
 
 
-def make_secret_scan_result():
+def _secret_scan():
     return {
         "scope": "full",
         "gate_version": "secret_scanner@3.1.0+detect-secrets.1.5.0",
@@ -113,133 +62,97 @@ def make_secret_scan_result():
     }
 
 
-def make_inputs(generation_result, verification_report):
+def _generation_result(files, model_call_error=None, refused=None):
     return {
-        "component_id": COMPONENT_ID,
+        "component_id": "comp-foo",
+        "spec_bundle_hash": "sha256:" + "ab" * 32,
+        "model": "claude-sonnet-5",
+        "prompt_version": "v10",
+        "cache_hit": False,
+        "files": files,
+        "model_call_error": model_call_error,
+        "refused": refused,
+        "retry_feedback": None,
+    }
+
+
+def _verification_report():
+    return {
+        "component_id": "comp-foo",
+        "criteria": [
+            {"id": "AC-FOO-001", "covers": "R-FOO-001", "kind": "compiled", "result": "pass"},
+            {"id": "AC-FOO-002", "covers": "R-FOO-002", "kind": "compiled", "result": "pass"},
+        ],
+        "requirement_results": {"R-FOO-001": "pass", "R-FOO-002": "pass"},
+        "interface_drift": False,
+        "mutation_score": 0.9,
+        "mutation_error": None,
+        "overall": "pass",
+    }
+
+
+def _inputs(generation_result, verification_report):
+    return {
+        "component_id": "comp-foo",
         "generation_result": generation_result,
         "verification_report": verification_report,
-        "license_scan_result": make_license_scan_result(),
-        "secret_scan_result": make_secret_scan_result(),
-        "provenance_hit": False,
-        "attempts": 1,
-        "gate_versions": {"compiler": "1.0.0", "license_scanner": "k-gram@1.0.0"},
-    }
-
-
-def stale_manifest():
-    return {
-        "spec_bundle_hash": "sha256:" + "9" * 64,
-        "model_pin": "stale-model",
-        "prompt_version": "v0",
-        "retry_feedback": ["R-STALE-001"],
-        "pipeline_version": "v0",
-        "gate_versions": {"compiler": "0.0.1"},
+        "license_scan_result": _license_scan(),
+        "secret_scan_result": _secret_scan(),
         "provenance_hit": True,
-        "generated_at": "2000-01-01T00:00:00Z",
-        "verification_run_id": "run-stale",
-        "verification_report": {
-            "component_id": "comp-stale",
-            "criteria": [],
-            "requirement_results": {},
-            "interface_drift": True,
-            "mutation_score": 0.0,
-            "overall": "fail",
-        },
-        "license_scan": {"component_id": "comp-stale"},
-        "secret_scan": {"scope": "stale"},
-        "stale_marker": STALE_MARKER,
+        "attempts": 3,
+        "gate_versions": {"compiler": "9.9.9", "license_scanner": "k-gram@7.7.7"},
     }
 
 
-def read_both(repo_root):
-    g, v = gen_path(repo_root), ver_path(repo_root)
-    assert g.is_file(), "gen/<slug>/.provenance.json was not written"
-    assert v.is_file(), "verification/<slug>/.provenance.json was not written"
-    g_bytes, v_bytes = g.read_bytes(), v.read_bytes()
-    g_obj = json.loads(g_bytes.decode("utf-8"))
-    v_obj = json.loads(v_bytes.decode("utf-8"))
-    return g_bytes, v_bytes, g_obj, v_obj
-
-
-# ---------------------------------------------------- scenario 1: overwrite
-
-def test_write_provenance_replaces_stale_content_in_both_copies(tmp_path):
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    stale = stale_manifest()
-    write_json(gen_path(repo_root), stale)
-    write_json(ver_path(repo_root), stale)
-
-    new_report = make_verification_report()
-    inputs = make_inputs(make_generation_result({"foo.py": "def bar():\n    return 1\n"}), new_report)
-
-    provenance_writer.write_provenance(COMPONENT_ID, inputs, repo_root)
-
-    g_bytes, v_bytes, g_obj, v_obj = read_both(repo_root)
-
-    # Two copies of one logical artifact: identical.
-    assert g_obj == v_obj
-    assert g_bytes == v_bytes
-
-    # Nothing stale survives (overwritten, never merged).
-    assert isinstance(g_obj, dict)
-    assert "stale_marker" not in g_obj
-    assert STALE_MARKER.encode("utf-8") not in g_bytes
-    assert STALE_MARKER.encode("utf-8") not in v_bytes
-    assert b"comp-stale" not in g_bytes
-    assert b"run-stale" not in g_bytes
-
-    # The content reflects the new inputs.
-    assert g_obj["verification_report"] == new_report
-    assert g_obj["license_scan"] == make_license_scan_result()
-    assert g_obj["secret_scan"] == make_secret_scan_result()
-    assert g_obj["provenance_hit"] is False
-
-    # Exactly the new manifest: same shape as a fresh write of the same inputs.
-    fresh_root = tmp_path / "fresh"
-    fresh_root.mkdir()
-    provenance_writer.write_provenance(
-        COMPONENT_ID,
-        make_inputs(make_generation_result({"foo.py": "def bar():\n    return 1\n"}), make_verification_report()),
-        fresh_root,
+def _manifest_paths(repo_root):
+    return (
+        repo_root / "gen" / "foo" / ".provenance.json",
+        repo_root / "verification" / "foo" / ".provenance.json",
     )
-    _, _, fresh_obj, _ = read_both(fresh_root)
-    assert set(g_obj.keys()) == set(fresh_obj.keys())
-    for key in fresh_obj:
-        if key in ("generated_at", "verification_run_id"):
-            continue
-        assert g_obj[key] == fresh_obj[key], key
 
 
-# --------------------------------------------- scenario 2: sealed overwrite
+def test_write_provenance_overwrites_both_stale_copies_identically(tmp_path):
+    repo_root = tmp_path
+    gen_path, ver_path = _manifest_paths(repo_root)
+    for p in (gen_path, ver_path):
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(STALE_TEXT, encoding="utf-8")
 
-SEALED_KEYS = {
-    "kind", "version", "component_id", "owners", "source_path", "source_hash",
-    "verifier_version", "characterization", "written_at",
-}
+    report = _verification_report()
+    inputs = _inputs(_generation_result({"foo.py": "x = 1\n"}), report)
+
+    provenance_writer.write_provenance("comp-foo", inputs, repo_root)
+
+    assert gen_path.is_file()
+    assert ver_path.is_file()
+    gen_bytes = gen_path.read_bytes()
+    ver_bytes = ver_path.read_bytes()
+    assert gen_bytes == ver_bytes, "the two provenance copies diverged"
+
+    text = gen_bytes.decode("utf-8")
+    assert "old-content-must-vanish" not in text
+    assert "sha256:stalestalestale" not in text
+
+    manifest = json.loads(text)
+    assert isinstance(manifest, dict)
+    assert "stale_marker" not in manifest
+    assert manifest.get("spec_bundle_hash") != "sha256:stalestalestale"
+    assert manifest["provenance_hit"] is True
+    assert manifest["gate_versions"] == inputs["gate_versions"]
+    assert manifest["verification_report"] == report
+    assert manifest["license_scan"] == _license_scan()
+    assert manifest["secret_scan"] == _secret_scan()
 
 
-def test_write_sealed_provenance_replaces_stale_content_without_second_file(tmp_path):
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    stale = {
-        "kind": "sealed-provenance",
-        "version": 1,
-        "component_id": "comp-stale",
-        "owners": ["stale-team"],
-        "source_path": "pipeline/foo/",
-        "source_hash": "sha256:" + "f" * 64,
-        "verifier_version": "verifier-orchestrator@1.0.0",
-        "characterization": {"overall": "fail", "criteria_passed": 0, "criteria_total": 7},
-        "written_at": "2000-01-01T00:00:00Z",
-        "stale_marker": STALE_MARKER,
-    }
-    write_json(sealed_path(repo_root), stale)
-    before = all_files(repo_root)
+def test_write_sealed_provenance_overwrites_stale_single_file(tmp_path):
+    repo_root = tmp_path
+    sealed_path = repo_root / "pipeline" / "foo" / ".sealed-provenance.json"
+    sealed_path.parent.mkdir(parents=True, exist_ok=True)
+    sealed_path.write_text(STALE_TEXT, encoding="utf-8")
+    files_before = _all_files(repo_root)
 
-    new_hash = "sha256:" + "0123456789abcdef" * 4
     report = {
-        "component_id": COMPONENT_ID,
+        "component_id": "comp-foo",
         "criteria": [
             {"id": "AC-FOO-001", "covers": "R-FOO-001", "kind": "compiled", "result": "pass"},
             {"id": "AC-FOO-002", "covers": "R-FOO-002", "kind": "compiled", "result": "pass"},
@@ -248,94 +161,90 @@ def test_write_sealed_provenance_replaces_stale_content_without_second_file(tmp_
         "requirement_results": {"R-FOO-001": "pass", "R-FOO-002": "pass", "R-FOO-003": "pass"},
         "interface_drift": False,
         "mutation_score": None,
+        "mutation_error": None,
         "overall": "pass",
     }
-    inputs = provenance_writer.SealedProvenanceInputs(
-        component_id=COMPONENT_ID,
-        owners=["pipeline-team"],
-        source_path="pipeline/foo/",
-        source_hash=new_hash,
-        verifier_version="verifier-orchestrator@2.0.0",
-        verification_report=report,
-    )
+    source_hash = "sha256:" + "0123456789abcdef" * 4
+    inputs = {
+        "component_id": "comp-foo",
+        "owners": ["pipeline-team"],
+        "source_path": "pipeline/foo/",
+        "source_hash": source_hash,
+        "verifier_version": "verifier-orchestrator@2.2.0",
+        "verification_report": report,
+    }
 
-    provenance_writer.write_sealed_provenance(COMPONENT_ID, inputs, repo_root)
+    provenance_writer.write_sealed_provenance("comp-foo", inputs, repo_root)
 
-    path = sealed_path(repo_root)
-    assert path.is_file()
-    raw = path.read_bytes()
-    assert STALE_MARKER.encode("utf-8") not in raw
-    manifest = json.loads(raw.decode("utf-8"))
+    assert _all_files(repo_root) == files_before, "a second file was created"
+    assert sorted(os.listdir(str(sealed_path.parent))) == [".sealed-provenance.json"]
 
-    assert isinstance(manifest, dict)
-    assert set(manifest.keys()) == SEALED_KEYS
+    text = sealed_path.read_text(encoding="utf-8")
+    assert "old-content-must-vanish" not in text
+    manifest = json.loads(text)
+    assert set(manifest) == {
+        "kind",
+        "version",
+        "component_id",
+        "owners",
+        "source_path",
+        "source_hash",
+        "verifier_version",
+        "characterization",
+        "written_at",
+    }
     assert manifest["kind"] == "sealed-provenance"
     assert manifest["version"] == 1 and manifest["version"] is not True
-    assert manifest["component_id"] == COMPONENT_ID
+    assert manifest["component_id"] == "comp-foo"
     assert manifest["owners"] == ["pipeline-team"]
-    assert manifest["source_path"].rstrip("/") == "pipeline/foo"
-    assert manifest["source_hash"] == new_hash
-    assert manifest["verifier_version"] == "verifier-orchestrator@2.0.0"
+    assert manifest["source_path"] == "pipeline/foo/"
+    assert manifest["source_hash"] == source_hash
+    assert manifest["verifier_version"] == "verifier-orchestrator@2.2.0"
     assert manifest["characterization"] == {
-        "overall": "pass", "criteria_passed": 3, "criteria_total": 3,
+        "overall": "pass",
+        "criteria_passed": 3,
+        "criteria_total": 3,
     }
-    assert re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z", manifest["written_at"])
-    assert manifest["written_at"] != "2000-01-01T00:00:00Z"
-
-    # No second file anywhere: the file set is unchanged.
-    assert all_files(repo_root) == before
-
-
-# ------------------------------------- scenario 3: nothing generated -> null
-
-@pytest.mark.parametrize("files", [{}, None], ids=["files-empty", "files-none"])
-def test_no_files_and_null_report_writes_null_verification_report(tmp_path, files):
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    inputs = make_inputs(make_generation_result(files, refused="pinned-override"), None)
-
-    provenance_writer.write_provenance(COMPONENT_ID, inputs, repo_root)
-
-    g_bytes, v_bytes, g_obj, v_obj = read_both(repo_root)
-    assert g_obj == v_obj
-    assert g_bytes == v_bytes
-    assert "verification_report" in g_obj
-    assert g_obj["verification_report"] is None
-    assert v_obj["verification_report"] is None
+    assert re.match(
+        r"^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$",
+        manifest["written_at"],
+    )
 
 
-# ------------------------- scenario 4: files but null report -> MissingInput
+@pytest.mark.parametrize(
+    "generation_result",
+    [
+        _generation_result({}, refused="sealed-component"),
+        _generation_result(
+            None, model_call_error={"category": "network", "message": "down"}
+        ),
+    ],
+    ids=["files-empty", "files-none"],
+)
+def test_write_provenance_without_candidate_writes_null_report(tmp_path, generation_result):
+    repo_root = tmp_path
+    inputs = _inputs(generation_result, None)
 
-def test_files_with_null_report_raises_and_writes_nothing_fresh_repo(tmp_path):
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    missing_error = getattr(provenance_writer, "MissingInputError")
-    inputs = make_inputs(make_generation_result({"foo.py": "def bar():\n    return 1\n"}), None)
+    provenance_writer.write_provenance("comp-foo", inputs, repo_root)
 
-    with pytest.raises(missing_error):
-        provenance_writer.write_provenance(COMPONENT_ID, inputs, repo_root)
-
-    assert not gen_path(repo_root).exists()
-    assert not ver_path(repo_root).exists()
-    assert all_files(repo_root) == set()
+    gen_path, ver_path = _manifest_paths(repo_root)
+    assert gen_path.is_file()
+    assert ver_path.is_file()
+    assert gen_path.read_bytes() == ver_path.read_bytes()
+    manifest = json.loads(gen_path.read_text(encoding="utf-8"))
+    assert "verification_report" in manifest
+    assert manifest["verification_report"] is None
 
 
-def test_files_with_null_report_raises_and_leaves_existing_files_untouched(tmp_path):
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    stale = stale_manifest()
-    write_json(gen_path(repo_root), stale)
-    write_json(ver_path(repo_root), stale)
-    g_before = gen_path(repo_root).read_bytes()
-    v_before = ver_path(repo_root).read_bytes()
-    files_before = all_files(repo_root)
+def test_write_provenance_missing_report_with_files_raises_and_writes_nothing(tmp_path):
+    repo_root = tmp_path
+    assert hasattr(provenance_writer, "MissingInputError")
+    inputs = _inputs(_generation_result({"foo.py": "x = 1\n"}), None)
 
-    missing_error = getattr(provenance_writer, "MissingInputError")
-    inputs = make_inputs(make_generation_result({"foo.py": "def bar():\n    return 1\n"}), None)
+    with pytest.raises(provenance_writer.MissingInputError):
+        provenance_writer.write_provenance("comp-foo", inputs, repo_root)
 
-    with pytest.raises(missing_error):
-        provenance_writer.write_provenance(COMPONENT_ID, inputs, repo_root)
-
-    assert gen_path(repo_root).read_bytes() == g_before
-    assert ver_path(repo_root).read_bytes() == v_before
-    assert all_files(repo_root) == files_before
+    gen_path, ver_path = _manifest_paths(repo_root)
+    assert not gen_path.exists()
+    assert not ver_path.exists()
+    assert _all_files(repo_root) == set()

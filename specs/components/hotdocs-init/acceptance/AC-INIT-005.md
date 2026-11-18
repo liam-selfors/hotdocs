@@ -24,4 +24,9 @@ Then stderr holds "could not save: nope", init carries on, and the exit code is 
 Given --no-test
 When init runs
 Then check_connection was never called
+
+Given fake check_connection returning {ok true}
+When init runs with --provider claude-cli --model m --auth login --yes
+Then check_connection received auth "login", and it saves via
+  save_config(<dir>/hotdocs.toml, "claude-cli", "m", auth="login")
 ```

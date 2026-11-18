@@ -1,8 +1,4 @@
-"""AC-AUTHOR-014: the prompt author_test builds states that any list-valued
-frontmatter field in a synthetic fixture must use flow-style syntax like
-[a, b] rather than a dash-prefixed block list (R-AUTHOR-014)."""
-
-import json
+# hotdocs-criterion: sha256:808b85e3b4936ee9ea210fca5c3d72d955285bba2c3e5dd434b99077feb2454a
 import re
 
 import pytest
@@ -10,120 +6,67 @@ import pytest
 import test_author
 
 
-_NONCE_RE = re.compile(r"-----BEGIN FILE ([0-9a-fA-F]{32})-----")
-_HEX32_RE = re.compile(r"\b([0-9a-fA-F]{32})\b")
+EXPECTED_LINE = (
+    "- Every list-valued frontmatter field (`owners`, `depends_on`, `realizes`, "
+    "`uses_var`) uses YAML flow style, such as `owners: [a, b]`, never block style "
+    "(`- a` lines), which the frontmatter reader does not read as a list."
+)
 
 
-class _Bundle:
-    """A CriterionBundle stand-in: exposes every documented field as an
-    attribute and also reads as a mapping, as the real dataclass does."""
+class Bundle(dict):
+    """A CriterionBundle stand-in readable both as a mapping and by attribute."""
 
-    _FIELDS = (
-        "component_id",
-        "criterion_id",
-        "covers",
-        "criterion_text",
-        "requirement_text",
-        "interface",
-        "glossary",
-        "dependency_interfaces",
+    def __getattr__(self, name):
+        try:
+            return self[name]
+        except KeyError:
+            raise AttributeError(name)
+
+
+def field(value, name):
+    return value[name] if isinstance(value, dict) else getattr(value, name)
+
+
+def make_bundle():
+    return Bundle(
+        component_id="comp-widget-maker",
+        criterion_id="AC-WIDGET-MAKER-001",
+        covers="R-WIDGET-MAKER-001",
+        criterion_text=(
+            "Given w = 3\n"
+            "When make_widget(w) is called\n"
+            "Then it returns 6"
+        ),
+        requirement_text=(
+            "# R-WIDGET-MAKER-001\n\n"
+            "**R-WIDGET-MAKER-001** \u2014 `make_widget(w)` MUST return `2 * w`."
+        ),
+        interface="# Library\n\n```\nmake_widget(w: int) -> int\n```",
+        glossary="# Glossary\n\n- **Widget** \u2014 a test term.",
+        dependency_interfaces={},
     )
 
-    def __init__(self, **kwargs):
-        self._data = {}
-        for name in self._FIELDS:
-            default = {} if name == "dependency_interfaces" else ""
-            value = kwargs.get(name, default)
-            self._data[name] = value
-            setattr(self, name, value)
-        if "module_names" in kwargs:
-            self._data["module_names"] = kwargs["module_names"]
-            setattr(self, "module_names", kwargs["module_names"])
 
-    def __getitem__(self, key):
-        return self._data[key]
-
-    def get(self, key, default=None):
-        return self._data.get(key, default)
-
-    def __contains__(self, key):
-        return key in self._data
-
-    def __iter__(self):
-        return iter(self._data)
-
-    def __len__(self):
-        return len(self._data)
-
-    def keys(self):
-        return self._data.keys()
-
-    def items(self):
-        return self._data.items()
-
-    def values(self):
-        return self._data.values()
+NONCE_RE = re.compile(r"-----BEGIN FILE ([0-9a-fA-F]{32})-----")
+NONCE_FALLBACK_RE = re.compile(r"BEGIN FILE ([0-9A-Za-z]+)-----")
 
 
-def _field(value, name):
-    if isinstance(value, dict):
-        return value.get(name)
-    return getattr(value, name, None)
-
-
-def _bundles():
-    # Deliberately free of the words/strings the assertions look for, so a
-    # match can only come from author_test's own prompt text.
-    return [
-        _Bundle(
-            component_id="comp-foo",
-            criterion_id="AC-FOO-001",
-            covers="R-FOO-001",
-            criterion_text="Given x = 2\nWhen foo(x) is called\nThen it returns 4",
-            requirement_text="# R-FOO-001\n\n**R-FOO-001** — `foo(x)` MUST return `2 * x`.",
-            interface="# Library\n\n```\nfoo(x: int) -> int\n```",
-            glossary="# Glossary\n\n- **Foo** — a test term.",
-            dependency_interfaces={},
-        ),
-        _Bundle(
-            component_id="comp-bar",
-            criterion_id="AC-BAR-002",
-            covers="R-BAR-002",
-            criterion_text="Given a name\nWhen bar(name) is called\nThen it returns a greeting",
-            requirement_text="# R-BAR-002\n\n**R-BAR-002** — `bar(name)` MUST return `'hi ' + name`.",
-            interface="# Library\n\n```\nbar(name: str) -> str\n```",
-            glossary="# Glossary\n\n- **Bar** — another test term.",
-            dependency_interfaces={
-                "comp-foo": "# Library\n\n```\nfoo(x: int) -> int\n```",
-            },
-        ),
-        _Bundle(
-            component_id="comp-baz-qux",
-            criterion_id="AC-BAZQUX-003",
-            covers="R-BAZQUX-003",
-            criterion_text="Given nothing\nWhen baz() is called\nThen it returns zero",
-            requirement_text="# R-BAZQUX-003\n\n**R-BAZQUX-003** — `baz()` MUST return `0`.",
-            interface="# Library\n\n```\nbaz() -> int\n```",
-            glossary="# Glossary\n\n- **Baz** — a third test term.",
-            dependency_interfaces={},
-            module_names=["baz_qux"],
-        ),
-    ]
-
-
-def _make_backend(log_path):
+def make_mock(prompts):
     def backend(prompt, model, **params):
-        with open(log_path, "a", encoding="utf-8") as fh:
-            fh.write(json.dumps({"prompt": prompt, "model": model}) + "\n")
-        m = _NONCE_RE.search(prompt)
-        if m is None:
-            m = _HEX32_RE.search(prompt)
-        nonce = m.group(1) if m else "0" * 32
-        body = "def test_placeholder():\n    assert True\n"
+        prompts.append(prompt)
+        match = NONCE_RE.search(prompt) or NONCE_FALLBACK_RE.search(prompt)
+        nonce = match.group(1) if match else "0" * 32
+        content = (
+            "import widget_maker\n"
+            "\n"
+            "\n"
+            "def test_make_widget():\n"
+            "    assert widget_maker.make_widget(3) == 6\n"
+        )
         text = (
-            f"-----BEGIN FILE {nonce}-----\n"
-            f"{body}"
-            f"-----END FILE {nonce}-----\n"
+            "-----BEGIN FILE " + nonce + "-----\n"
+            + content
+            + "-----END FILE " + nonce + "-----"
         )
         return {
             "text": text,
@@ -135,61 +78,20 @@ def _make_backend(log_path):
     return backend
 
 
-def _read_prompts(log_path):
-    if not log_path.exists():
-        return []
-    prompts = []
-    for line in log_path.read_text(encoding="utf-8").splitlines():
-        line = line.strip()
-        if line:
-            prompts.append(json.loads(line)["prompt"])
-    return prompts
-
-
-@pytest.mark.parametrize("index", [0, 1, 2])
-def test_prompt_requires_flow_style_frontmatter_lists(index, tmp_path, monkeypatch):
-    bundle = _bundles()[index]
-
-    # Sanity: the bundle itself carries none of the asserted text.
-    for value in bundle.values():
-        text = json.dumps(value) if not isinstance(value, str) else value
-        assert "[a, b]" not in text
-        assert "flow" not in text.lower()
-        assert "block" not in text.lower()
-
+def test_prompt_contains_flow_style_block(tmp_path, monkeypatch):
     monkeypatch.delenv("VAR_CACHE_STORE_URL", raising=False)
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
-    work = tmp_path / "work"
-    work.mkdir()
-    monkeypatch.chdir(work)
 
-    log_path = tmp_path / "backend_calls.jsonl"
-    backend = _make_backend(log_path)
+    prompts = []
+    backend = make_mock(prompts)
 
     result = test_author.author_test(
-        bundle,
-        "claude-sonnet-5",
-        0,
-        repo_root=repo_root,
-        llm_backend=backend,
+        make_bundle(), "mock", repo_root=repo_root, llm_backend=backend
     )
 
-    assert _field(result, "model_call_error") is None
-
-    prompts = _read_prompts(log_path)
-    assert prompts, "author_test never called the injected llm_backend"
-
-    prompt = prompts[-1]
-    assert isinstance(prompt, str)
-    lowered = prompt.lower()
-
-    # The literal flow-style example the requirement mandates.
-    assert "[a, b]" in prompt, "prompt does not show the literal flow-style example [a, b]"
-    # It names flow style and contrasts it with block style.
-    assert "flow" in lowered, "prompt does not mention YAML flow style"
-    assert "block" in lowered, "prompt does not rule out block-style lists"
-    # The rule is about list-valued frontmatter fields in synthetic fixtures.
-    assert "frontmatter" in lowered
-    assert "list" in lowered
-    assert "fixture" in lowered
+    assert result is not None
+    assert prompts, "the mock model was never called"
+    first_prompt = prompts[0]
+    assert isinstance(first_prompt, str)
+    assert EXPECTED_LINE in first_prompt.splitlines()

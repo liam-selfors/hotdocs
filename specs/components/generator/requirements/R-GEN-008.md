@@ -8,4 +8,8 @@
 
   A response parsing to no files produced none:
   `model_call_error` is `{"category": "empty_response", "message": ...}`
-  and nothing is written or cached.
+  and nothing is written or cached. The message is
+  `the model reply contained no files; it began:`, a newline, and the
+  reply's first 4000 characters, then, for a longer reply, a newline and
+  `[<n> more characters]`; for a reply of only whitespace it is
+  `the model reply was empty` (`D321`).

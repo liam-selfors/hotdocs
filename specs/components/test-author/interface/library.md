@@ -5,7 +5,7 @@ author_test(
     bundle: CriterionBundle, model: str, seed: int = 0,
     *, repo_root: Path = None, llm_backend=None,
 ) -> TestAuthoringResult
-GATE_VERSION = "generated_test@2.0.0"
+GATE_VERSION = "generated_test@2.1.0"
 ```
 
 Not a pure function: like `generator`'s `generate()`, it makes an
@@ -15,7 +15,8 @@ Each dependency (`cache-manager`, `llm-endpoint`, `test-probe`) is
 loaded from `<repo_root>/gen/<slug>/<module>.py`, else from the tool
 root's copy. The reply format, the `test-probe` stand-in and the
 written file are in `specs/architecture/test-author-fixtures.md`; the
-prompt's fixed rule blocks are in
-`specs/architecture/test-author-prompt.md`.
+exact returned, written and cached content, and how a test compares
+it, in `specs/architecture/test-author-output.md`; the prompt's fixed
+rule blocks in `specs/architecture/test-author-prompt.md`.
 
-Implements: `specs/architecture/cli-conventions.md`, `specs/architecture/test-author-fixtures.md`, `specs/architecture/test-author-prompt.md`
+Implements: `specs/architecture/cli-conventions.md`, `specs/architecture/test-author-fixtures.md`, `specs/architecture/test-author-output.md`, `specs/architecture/test-author-prompt.md`

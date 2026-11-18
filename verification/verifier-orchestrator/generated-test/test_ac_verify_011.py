@@ -1,3 +1,4 @@
+# hotdocs-criterion: sha256:04c4f9672d8633ccb1a4bccda5c0eb210d83a947107d9652ceb5fb49b592a0aa
 import json
 import re
 from pathlib import Path
@@ -5,218 +6,98 @@ from pathlib import Path
 import verifier_orchestrator
 
 
+CRITERIA = [
+    # (criterion id, covers, kind, gherkin marker text)
+    ("AC-WIDGET-001", "R-WIDGET-001", "generated-test",
+     "Given a widget_alpha is 2\nWhen widget.double is invoked with [widget_alpha]\nThen result equals 4"),
+    ("AC-WIDGET-002", "R-WIDGET-001", "generated-test",
+     "Given a widget_beta is 3\nWhen widget.double is invoked with [widget_beta]\nThen result equals 6"),
+    ("AC-WIDGET-003", "R-WIDGET-002", "generated-test",
+     "Given a widget_gamma is 5\nWhen widget.triple is invoked with [widget_gamma]\nThen result equals 15"),
+    ("AC-WIDGET-004", "R-WIDGET-003", "llm-judge",
+     "Given a widget_delta is 1\nWhen widget.describe is invoked with [widget_delta]\nThen result equals \"clear\""),
+]
+
+REQUIREMENTS = {
+    "R-WIDGET-001": "**R-WIDGET-001** — `double(x)` MUST return `2 * x`.",
+    "R-WIDGET-002": "**R-WIDGET-002** — `triple(x)` MUST return `3 * x`.",
+    "R-WIDGET-003": "**R-WIDGET-003** — `describe(x)` documentation MUST be clear.",
+}
+
+PASSING_TEST = "def test_widget_ok():\n    assert 2 * 2 == 4\n"
+FAILING_TEST = (
+    "def test_widget_bad():\n"
+    "    expected_marker_value = 15\n"
+    "    actual_marker_value = 14\n"
+    "    assert actual_marker_value == expected_marker_value\n"
+)
+
+
 def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def _write(path: Path, text: str) -> None:
+def write(path, text):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
 
 
-FAKE_ASSEMBLER = '''\
-from pathlib import Path
+def build_fixture(repo_root):
+    write(repo_root / "specs" / "glossary.md", "# Glossary\n\n- **Widget** — a test term.\n")
 
-
-class _Bundle:
-    _FIELDS = ()
-
-    def __init__(self, **kwargs):
-        for name in self._FIELDS:
-            setattr(self, name, kwargs.get(name))
-
-    def __getitem__(self, key):
-        if key not in self._FIELDS:
-            raise KeyError(key)
-        return getattr(self, key)
-
-    def get(self, key, default=None):
-        if key in self._FIELDS:
-            return getattr(self, key)
-        return default
-
-    def keys(self):
-        return list(self._FIELDS)
-
-    def __iter__(self):
-        return iter(self._FIELDS)
-
-    def __len__(self):
-        return len(self._FIELDS)
-
-
-class SpecBundle(_Bundle):
-    _FIELDS = (
-        "component_id", "spec_bundle_hash", "spec", "interface", "constraints",
-        "dependency_interfaces", "dependency_context", "dependency_usage",
-        "vars", "glossary", "hint_code",
-    )
-
-
-class CriterionBundle(_Bundle):
-    _FIELDS = (
-        "component_id", "criterion_id", "covers", "criterion_text",
-        "requirement_text", "interface", "glossary", "dependency_interfaces",
-    )
-
-
-def _slug(component_id):
-    return component_id[len("comp-"):] if component_id.startswith("comp-") else component_id
-
-
-def _read(path):
-    p = Path(path)
-    return p.read_text(encoding="utf-8") if p.is_file() else ""
-
-
-def _interface(comp_dir):
-    parts = []
-    idir = comp_dir / "interface"
-    if idir.is_dir():
-        for p in sorted(idir.rglob("*.md")):
-            parts.append(p.read_text(encoding="utf-8").strip())
-    return "\\n\\n".join(x for x in parts if x)
-
-
-def assemble(component_id, repo_root, mode="cold"):
-    repo_root = Path(repo_root)
-    comp_dir = repo_root / "specs" / "components" / _slug(component_id)
-    spec_parts = [_read(comp_dir / "component.md").strip()]
-    rdir = comp_dir / "requirements"
-    if rdir.is_dir():
-        for p in sorted(rdir.glob("R-*.md")):
-            spec_parts.append(p.read_text(encoding="utf-8").strip())
-    return SpecBundle(
-        component_id=component_id,
-        spec_bundle_hash="sha256:" + "0" * 64,
-        spec="\\n\\n".join(x for x in spec_parts if x),
-        interface=_interface(comp_dir),
-        constraints=_read(comp_dir / "constraints.md").strip(),
-        dependency_interfaces={},
-        dependency_context={},
-        dependency_usage={},
-        vars={},
-        glossary=_read(repo_root / "specs" / "glossary.md").strip(),
-        hint_code=None,
-    )
-
-
-def assemble_criterion(component_id, criterion_id, repo_root):
-    repo_root = Path(repo_root)
-    comp_dir = repo_root / "specs" / "components" / _slug(component_id)
-    text = _read(comp_dir / "acceptance" / (criterion_id + ".md"))
-    covers = ""
-    for line in text.splitlines():
-        if line.startswith("Covers:"):
-            covers = line.split(":", 1)[1].strip()
-            break
-    return CriterionBundle(
-        component_id=component_id,
-        criterion_id=criterion_id,
-        covers=covers,
-        criterion_text=text,
-        requirement_text=_read(comp_dir / "requirements" / (covers + ".md")),
-        interface=_interface(comp_dir),
-        glossary=_read(repo_root / "specs" / "glossary.md").strip(),
-        dependency_interfaces={},
-    )
-'''
-
-
-GHERKIN = {
-    "AC-FOO-001": (
-        "Given the number two is supplied to the doubling routine\n"
-        "When double is called with that number\n"
-        "Then the doubling routine answers four"
-    ),
-    "AC-FOO-002": (
-        "Given the number five is supplied to the doubling routine\n"
-        "When double is called with that number\n"
-        "Then the doubling routine answers ten"
-    ),
-    "AC-FOO-003": (
-        "Given a negative operand minus three is supplied\n"
-        "When double is called with the negative operand\n"
-        "Then the doubling routine answers minus six"
-    ),
-    "AC-FOO-004": (
-        "Given the Foo specification text is reviewed\n"
-        "When a reviewer reads its requirements\n"
-        "Then the wording about doubling is unambiguous and clear"
-    ),
-}
-
-
-def _acceptance(ac_id: str, covers: str, kind: str) -> str:
-    return (
-        f"# {ac_id}\n"
-        "\n"
-        f"Covers: {covers}\n"
-        f"Kind: {kind}\n"
-        "\n"
-        "```gherkin\n"
-        f"{GHERKIN[ac_id]}\n"
-        "```\n"
-    )
-
-
-def _build_fixture(repo_root: Path) -> None:
-    _write(
-        repo_root / "specs" / "glossary.md",
-        "# Glossary\n\n- **Foo** — a test term.\n",
-    )
-    _write(
-        repo_root / "specs" / "product" / "foo-capability.md",
+    write(
+        repo_root / "specs" / "product" / "widgeting.md",
         "---\n"
-        "id: P-FOO\n"
-        "title: Foo Capability\n"
+        "id: P-WIDGET\n"
+        "title: Widgeting\n"
         "status: draft\n"
         "owners: [team-a]\n"
         "---\n"
         "\n"
-        "# Foo Capability\n"
+        "# Widgeting\n"
         "\n"
         "## Purpose\n"
         "\n"
-        "Doubling numbers.\n"
+        "Widgets get computed.\n"
         "\n"
         "## Scope\n"
         "\n"
-        "- In scope: doubling.\n"
+        "- In scope: widgets.\n"
         "\n"
         "## Capability scenarios\n"
         "\n"
-        "### CS-FOO-001\n"
-        "Covers: P-FOO\n"
+        "### CS-WIDGET-001\n"
+        "Covers: P-WIDGET\n"
         "Kind: llm-judge\n"
         "\n"
         "```gherkin\n"
-        "Given the assembled system is available\n"
-        "When a user asks it to double a number\n"
-        "Then the system answers with twice that number\n"
+        "Given a w is 1\n"
+        "When widget.double is invoked with [w]\n"
+        "Then result equals 2\n"
         "```\n",
     )
-    comp = repo_root / "specs" / "components" / "foo"
-    _write(
+
+    comp = repo_root / "specs" / "components" / "widget"
+    write(
         comp / "component.md",
         "---\n"
-        "id: comp-foo\n"
-        "title: Foo\n"
+        "id: comp-widget\n"
+        "title: Widget\n"
         "status: draft\n"
         "owners: [team-a]\n"
-        "realizes: [P-FOO]\n"
+        "realizes: [P-WIDGET]\n"
         "depends_on: []\n"
         "---\n"
         "\n"
-        "# Foo\n"
+        "# Widget\n"
         "\n"
         "## Purpose\n"
         "\n"
-        "Foo doubles a number.\n"
+        "Widget computes multiples of a number.\n"
         "\n"
         "## Scope\n"
         "\n"
-        "- In scope: doubling integers.\n"
+        "- In scope: multiples.\n"
         "\n"
         "## Definitions\n"
         "\n"
@@ -246,119 +127,120 @@ def _build_fixture(repo_root: Path) -> None:
         "\n"
         "## Change log\n"
         "\n"
-        "- Initial draft.\n",
+        "- Initial.\n",
     )
-    _write(
-        comp / "requirements" / "R-FOO-001.md",
-        "# R-FOO-001\n\n**R-FOO-001** — `double(x)` MUST return `2 * x` for positive `x`.\n",
-    )
-    _write(
-        comp / "requirements" / "R-FOO-002.md",
-        "# R-FOO-002\n\n**R-FOO-002** — `double(x)` MUST return `2 * x` for negative `x`.\n",
-    )
-    _write(
-        comp / "requirements" / "R-FOO-003.md",
-        "# R-FOO-003\n\n**R-FOO-003** — The specification of `double` MUST be unambiguous.\n",
-    )
-    _write(comp / "acceptance" / "AC-FOO-001.md", _acceptance("AC-FOO-001", "R-FOO-001", "generated-test"))
-    _write(comp / "acceptance" / "AC-FOO-002.md", _acceptance("AC-FOO-002", "R-FOO-001", "generated-test"))
-    _write(comp / "acceptance" / "AC-FOO-003.md", _acceptance("AC-FOO-003", "R-FOO-002", "generated-test"))
-    _write(comp / "acceptance" / "AC-FOO-004.md", _acceptance("AC-FOO-004", "R-FOO-003", "llm-judge"))
-    _write(
+    for rid, text in REQUIREMENTS.items():
+        write(comp / "requirements" / (rid + ".md"), "# " + rid + "\n\n" + text + "\n")
+    write(
         comp / "interface" / "library.md",
-        "# Library\n\n```\ndouble(x: int) -> int\n```\n",
+        "# Library\n\n```\ndouble(x: int) -> int\ntriple(x: int) -> int\ndescribe(x: int) -> str\n```\n",
     )
-    _write(comp / "constraints.md", "# Constraints\n\nNone.\n")
+    write(comp / "constraints.md", "# Constraints\n\nNone.\n")
+    for cid, covers, kind, gherkin in CRITERIA:
+        write(
+            comp / "acceptance" / (cid + ".md"),
+            "# " + cid + "\n"
+            "\n"
+            "Covers: " + covers + "\n"
+            "Kind: " + kind + "\n"
+            "\n"
+            "```gherkin\n" + gherkin + "\n```\n",
+        )
 
-    # The component's real code.
-    _write(repo_root / "gen" / "foo" / "foo.py", "def double(x):\n    return 2 * x\n")
+    # Component's real code: empty module, the generated tests import nothing.
+    write(repo_root / "gen" / "widget" / "widget.py", "")
 
-    # Cached generated tests (Criterion test filename convention).
-    gt = repo_root / "verification" / "foo" / "generated-test"
-    _write(
-        gt / "test_ac_foo_001.py",
-        "def test_ac_foo_001():\n    assert 2 * 2 == 4\n",
+    # spec-bundle-assembler stand-in.
+    covers_map = dict((c[0], c[1]) for c in CRITERIA)
+    text_map = dict((c[0], c[3]) for c in CRITERIA)
+    interface_text = (comp / "interface" / "library.md").read_text(encoding="utf-8")
+    glossary_text = (repo_root / "specs" / "glossary.md").read_text(encoding="utf-8")
+    assembler_src = (
+        "COVERS = " + repr(covers_map) + "\n"
+        "TEXTS = " + repr(text_map) + "\n"
+        "REQS = " + repr(REQUIREMENTS) + "\n"
+        "INTERFACE = " + repr(interface_text) + "\n"
+        "GLOSSARY = " + repr(glossary_text) + "\n"
+        "\n"
+        "def assemble_criterion(component_id, criterion_id, repo_root):\n"
+        "    covers = COVERS[criterion_id]\n"
+        "    return {\n"
+        "        'component_id': component_id,\n"
+        "        'criterion_id': criterion_id,\n"
+        "        'covers': covers,\n"
+        "        'criterion_text': TEXTS[criterion_id],\n"
+        "        'requirement_text': REQS[covers],\n"
+        "        'interface': INTERFACE,\n"
+        "        'glossary': GLOSSARY,\n"
+        "        'dependency_interfaces': {},\n"
+        "    }\n"
     )
-    _write(
-        gt / "test_ac_foo_002.py",
-        "def test_ac_foo_002():\n    assert 5 * 2 == 10\n",
-    )
-    _write(
-        gt / "test_ac_foo_003.py",
-        "def test_ac_foo_003():\n"
-        "    expected_marker_value = 'EXPECTED-SENTINEL-VALUE'\n"
-        "    actual_marker_value = 'ACTUAL-SENTINEL-VALUE'\n"
-        "    assert actual_marker_value == expected_marker_value\n",
-    )
-
-    # Fake spec-bundle-assembler dependency, planted at the repo-root path.
-    _write(
-        repo_root / "gen" / "spec-bundle-assembler" / "spec_bundle_assembler.py",
-        FAKE_ASSEMBLER,
-    )
+    write(repo_root / "gen" / "spec-bundle-assembler" / "spec_bundle_assembler.py", assembler_src)
 
 
-def _strings_in(value):
-    if isinstance(value, str):
-        yield value
-    elif isinstance(value, dict):
-        for k, v in value.items():
-            yield from _strings_in(k)
-            yield from _strings_in(v)
-    elif isinstance(value, (list, tuple)):
-        for v in value:
-            yield from _strings_in(v)
-    elif value is not None and not isinstance(value, bool):
-        yield str(value)
+def make_test_author(log_path):
+    def test_author_stub(bundle):
+        cid = bundle["criterion_id"] if isinstance(bundle, dict) else getattr(bundle, "criterion_id")
+        with open(log_path, "a", encoding="utf-8") as fh:
+            fh.write(cid + "\n")
+        content = FAILING_TEST if cid == "AC-WIDGET-003" else PASSING_TEST
+        return {
+            "component_id": "comp-widget",
+            "criterion_id": cid,
+            "model": "fake-model",
+            "seed": 0,
+            "prompt_version": "v1",
+            "cache_hit": False,
+            "file": {
+                "path": "verification/widget/generated-test/test_" + cid.lower().replace("-", "_") + ".py",
+                "content": content,
+            },
+            "model_call_error": None,
+        }
+
+    return test_author_stub
+
+
+def check_boolean_only(rr):
+    assert isinstance(rr, dict)
+    for key, value in rr.items():
+        assert isinstance(key, str) and re.fullmatch(r"R-[A-Z0-9]+-\d+", key), key
+        assert isinstance(value, str) and value in ("pass", "fail"), value
+    dumped = json.dumps(rr)
+    forbidden = ["Given", "When", "Then", "rationale", "expected", "actual", "widget_alpha",
+                 "widget_gamma", "AC-WIDGET", "failure_detail", "message", "skipped"]
+    for cid, _covers, _kind, gherkin in CRITERIA:
+        for line in gherkin.splitlines():
+            forbidden.append(line)
+    for word in forbidden:
+        assert word not in dumped, word
 
 
 def test_requirement_results_projection_is_boolean_only(tmp_path):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
-    _build_fixture(repo_root)
+    build_fixture(repo_root)
+    log_path = tmp_path / "author_calls.log"
 
-    report = verifier_orchestrator.verify("comp-foo", repo_root)
+    report = verifier_orchestrator.verify(
+        "comp-widget", repo_root, judge=None, test_author=make_test_author(log_path)
+    )
 
-    requirement_results = field(report, "requirement_results")
-    assert isinstance(requirement_results, dict)
-
-    expected = {"R-FOO-001": "pass", "R-FOO-002": "fail", "R-FOO-003": "fail"}
-    assert dict(requirement_results) == expected
-
-    # The JSON form carries the same projection.
-    as_dict = report.to_dict()
-    assert as_dict["requirement_results"] == expected
-
-    # Only R-id keys and pass/fail values, nothing nested.
-    for key, value in requirement_results.items():
-        assert isinstance(key, str) and re.fullmatch(r"R-[A-Z0-9]+-\d{3}", key), key
-        assert value in ("pass", "fail"), value
-
-    serialized = json.dumps(requirement_results, sort_keys=True)
-
-    # No Gherkin text anywhere in it.
-    for keyword in ("Given", "When", "Then", "gherkin"):
-        assert keyword not in serialized
-    for text in GHERKIN.values():
-        for line in text.splitlines():
-            assert line not in serialized
-            step_body = line.split(" ", 1)[1]
-            assert step_body not in serialized
-
-    # No rationale, failure detail, or expected/actual values anywhere in it.
-    for forbidden_key in ("rationale", "failure_detail", "expected", "actual", "message"):
-        assert forbidden_key not in serialized
-    assert "EXPECTED-SENTINEL-VALUE" not in serialized
-    assert "ACTUAL-SENTINEL-VALUE" not in serialized
-
+    # Sanity: the per-criterion results are what the scenario sets up.
     criteria = field(report, "criteria")
-    allowed = set(expected) | {"pass", "fail"}
-    for c in criteria:
-        for extra_key in ("rationale", "failure_detail"):
-            extra = c.get(extra_key) if isinstance(c, dict) else getattr(c, extra_key, None)
-            if extra is None:
-                continue
-            for s in _strings_in(extra):
-                if s in allowed or len(s) < 5:
-                    continue
-                assert s not in serialized, (extra_key, s)
+    by_id = dict((field(c, "id"), field(c, "result")) for c in criteria)
+    assert by_id.get("AC-WIDGET-001") == "pass"
+    assert by_id.get("AC-WIDGET-002") == "pass"
+    assert by_id.get("AC-WIDGET-003") == "fail"
+    assert by_id.get("AC-WIDGET-004") == "skipped"
+
+    expected = {"R-WIDGET-001": "pass", "R-WIDGET-002": "fail", "R-WIDGET-003": "fail"}
+
+    rr = field(report, "requirement_results")
+    assert rr == expected
+    check_boolean_only(rr)
+
+    as_dict = report.to_dict()
+    rr_json = as_dict["requirement_results"]
+    assert rr_json == expected
+    check_boolean_only(rr_json)

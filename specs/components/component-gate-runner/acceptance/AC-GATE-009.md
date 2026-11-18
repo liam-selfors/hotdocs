@@ -26,6 +26,24 @@ When main runs generate for comp-foo with --model=m
 Then it returns 1 and prints text containing
   "model_call_error: empty_response: no files"
 
+Given verify returning overall "fail" with one criterion AC-FOO-001,
+  result "fail", failure_origin "test", failure_detail message
+  "test authoring failed: network: dropped"
+When main runs generate for comp-foo with --model=m
+Then it returns 1 and prints text containing "test_authoring_failed"
+  and "AC-FOO-001: test authoring failed: network: dropped"
+
+Given verify returning overall "fail" with one criterion whose
+  failure_detail actual is {"b", "a"}
+When main runs generate for comp-foo with --model=m --format=json
+Then it returns 0 and prints JSON in which that actual is ["a", "b"]
+
+Given verify returning overall "fail", mutation_score None and
+  mutation_error "mutation baseline failed in the sandbox: pytest exited 1"
+When main runs generate for comp-foo with --model=m
+Then it returns 0 and prints text containing
+  "mutation_error: mutation baseline failed in the sandbox: pytest exited 1"
+
 Given a faked license scan with evaluated false and reason
   "no-reference-corpus"
 When main runs generate for comp-foo with --model=m

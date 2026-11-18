@@ -1,20 +1,10 @@
-"""CS-COMPLIANCE-001: licensed-code risk never reaches main silently.
-
-Given generated code that matches a known-licensed-code fingerprint above the
-similarity threshold, when the pipeline's license scan runs, then the merge is
-blocked, the result is written into the provenance manifest's license_scan
-field regardless of outcome, and the finding appears in the review packet even
-if a subsequent retry resolves it.
-"""
-
+# hotdocs-criterion: sha256:f7ba8474a0a5845a8fc7b934f4555f4b0b0d7619a5bf501b0b55dc23b5505e6e
 import dataclasses
 import hashlib
+import io
 import json
-import pprint
 import re
 import subprocess
-import textwrap
-import urllib.error
 import urllib.request
 from pathlib import Path
 
@@ -27,129 +17,54 @@ import review_packet_builder
 import secret_scanner
 
 
-COMPONENT_ID = "comp-licfixture"
-SLUG = "licfixture"
-MODEL = "anthropic:claude-sonnet-5"
-RETRY_FEEDBACK = ["R-LICFIX-001"]
-REFERENCE_ID = "ref-ringbuf"
-SPEC_BUNDLE_HASH = "sha256:" + "ab" * 32
-SECRET_GATE_VERSION = "secret_scanner@3.1.0+detect-secrets.1.5.0"
+COMPONENT_ID = "comp-foo"
+SLUG = "foo"
 
-
-# Generated code that a reference corpus entry fingerprints in full. It holds
-# no comments, no string literals and no floor division, so the documented
-# comment stripping never changes its token stream.
-LICENSED_SOURCE = textwrap.dedent(
-    """\
-    def interleave_ring_buffer(capacity, values):
-        ring = [None] * capacity
-        head = 0
-        count = 0
-        for value in values:
-            ring[head] = value
-            head = (head + 1) % capacity
-            if count < capacity:
-                count = count + 1
-        ordered = []
-        start = (head - count) % capacity
-        for offset in range(count):
-            ordered.append(ring[(start + offset) % capacity])
-        return ordered
-
-
-    def weighted_reservoir_merge(left, right, weight_left, weight_right):
-        merged = []
-        left_index = 0
-        right_index = 0
-        while left_index < len(left) and right_index < len(right):
-            left_score = left[left_index] * weight_left
-            right_score = right[right_index] * weight_right
-            if left_score <= right_score:
-                merged.append(left[left_index])
-                left_index = left_index + 1
-            else:
-                merged.append(right[right_index])
-                right_index = right_index + 1
-        merged.extend(left[left_index:])
-        merged.extend(right[right_index:])
-        return merged
-
-
-    def cascade_checksum(blocks, modulus, seed_value):
-        accumulator = seed_value
-        rolling = 1
-        for block in blocks:
-            for item in block:
-                rolling = (rolling * 31 + item) % modulus
-                accumulator = (accumulator + rolling * 7) % modulus
-            accumulator = (accumulator ^ rolling) % modulus
-        return accumulator, rolling
-    """
+LICENSED_CODE = (
+    "def merge_intervals(intervals):\n"
+    "    ordered = sorted(intervals, key=lambda pair: pair[0])\n"
+    "    merged = []\n"
+    "    for start, end in ordered:\n"
+    "        if merged and start <= merged[-1][1]:\n"
+    "            merged[-1][1] = max(merged[-1][1], end)\n"
+    "        else:\n"
+    "            merged.append([start, end])\n"
+    "    return merged\n"
+    "\n"
+    "\n"
+    "def total_covered(intervals):\n"
+    "    return sum(end - start for start, end in merge_intervals(intervals))\n"
 )
 
-# What the retry generates: shares no 9-token window with the corpus.
-CLEAN_SOURCE = textwrap.dedent(
-    """\
-    def total_of(numbers):
-        result = 0
-        for n in numbers:
-            result = result + n
-        return result
-    """
+RETRY_CODE = (
+    "def greet_visitor(name_text):\n"
+    "    banner_line = 'welcome ' + name_text\n"
+    "    return banner_line.upper()\n"
+    "\n"
+    "\n"
+    "def count_vowels(word_value):\n"
+    "    vowel_set = 'aeiou'\n"
+    "    return len([ch for ch in word_value.lower() if ch in vowel_set])\n"
 )
-
-VERIFICATION_REPORT = {
-    "component_id": COMPONENT_ID,
-    "overall": "pass",
-    "criteria": [],
-    "run_id": "run-licfix-1",
-    "verification_run_id": "run-licfix-1",
-    "mutation_score": 1.0,
-}
-
-CLEAN_SECRET_SCAN = {
-    "scope": "full",
-    "gate_version": SECRET_GATE_VERSION,
-    "flagged": False,
-    "matches": [],
-    "allowed": [],
-    "unused_allowlist_entries": [],
-    "notified": False,
-    "notification_delivery_error": None,
-    "cache_hit": False,
-}
-
-
-# ---------------------------------------------------------------------------
-# helpers
 
 
 def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def plain(value):
-    if value is None or isinstance(value, (str, int, float, bool)):
-        return value
+def as_plain(value):
     if isinstance(value, dict):
-        return {key: plain(item) for key, item in value.items()}
+        return {k: as_plain(v) for k, v in value.items()}
     if isinstance(value, (list, tuple)):
-        return [plain(item) for item in value]
-    if hasattr(value, "to_dict"):
-        return plain(value.to_dict())
+        return [as_plain(v) for v in value]
+    if hasattr(value, "to_dict") and callable(getattr(value, "to_dict")):
+        return as_plain(value.to_dict())
     if dataclasses.is_dataclass(value) and not isinstance(value, type):
-        return plain(dataclasses.asdict(value))
-    if hasattr(value, "__dict__"):
-        return plain(vars(value))
+        return as_plain(dataclasses.asdict(value))
     return value
 
 
-def normalize(value):
-    return json.loads(json.dumps(plain(value)))
-
-
 def window_hashes(text):
-    """The documented window hashing, applied to the fingerprinted source."""
     text = re.sub(r"/\*.*?\*/", " ", text, flags=re.S)
     text = re.sub(r'""".*?"""', " ", text, flags=re.S)
     text = re.sub(r"'''.*?'''", " ", text, flags=re.S)
@@ -157,507 +72,325 @@ def window_hashes(text):
     text = re.sub(r"#[^\n]*", " ", text)
     tokens = [t.lower() for t in re.findall(r"[A-Za-z_][A-Za-z0-9_]*|\d+", text)]
     hashes = set()
-    for start in range(len(tokens) - 8):
-        window = "\x1f".join(tokens[start:start + 9])
+    for i in range(len(tokens) - 8):
+        window = "\x1f".join(tokens[i:i + 9])
         hashes.add(hashlib.sha256(window.encode("utf-8")).hexdigest())
     return sorted(hashes)
 
 
-def _write(path, text):
+def write(path, text):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
 
 
-def _read_log(log_path):
-    if not log_path.exists():
-        return []
-    return [
-        json.loads(line)
-        for line in log_path.read_text(encoding="utf-8").splitlines()
-        if line.strip()
-    ]
+def write_component_code(repo_root, text):
+    write(repo_root / "gen" / SLUG / (SLUG + ".py"), text)
+    write(repo_root / "legacy" / SLUG / (SLUG + ".py"), text)
 
 
-# ---------------------------------------------------------------------------
-# fake dependency modules (flat shape under <repo_root>/gen/<slug>/)
-
-_COMMON = textwrap.dedent(
-    '''\
-    import json
-    import os
-    from pathlib import Path
-
-
-    def _log(entry):
-        path = os.environ.get("HOTDOCS_TEST_LOG")
-        if path:
-            with open(path, "a", encoding="utf-8") as handle:
-                handle.write(json.dumps(entry) + "\\n")
-
-
-    def _field(value, name, default=None):
-        if isinstance(value, dict):
-            return value.get(name, default)
-        return getattr(value, name, default)
-
-    '''
-)
-
-_PROVENANCE_CHECKER = '''
-
-def current_sealed_key(component_id, repo_root):
-    _log({"call": "current_sealed_key", "component_id": component_id})
-    return None
-
-
-def current_provenance_key(component_id, repo_root):
-    _log({"call": "current_provenance_key", "component_id": component_id})
-    return {
-        "component_id": component_id,
-        "spec_bundle_hash": SPEC_BUNDLE_HASH,
-        "gate_versions": dict(GATE_VERSIONS),
-    }
-
-
-def check_provenance(component_id, spec_bundle_hash, gate_versions, repo_root):
-    _log({"call": "check_provenance", "component_id": component_id})
-    return {
-        "component_id": component_id,
-        "hit": False,
-        "status": "miss",
-        "reason": "no-manifest",
-        "verification": None,
-        "license_scan": None,
-        "secret_scan": None,
-    }
-'''
-
-_SPEC_BUNDLE_ASSEMBLER = '''
-
-def assemble(component_id, repo_root=None, mode="cold"):
-    _log({"call": "assemble", "component_id": component_id, "mode": mode})
-    return {"component_id": component_id, "mode": mode, "files": {}}
-'''
-
-_GENERATOR = '''
-
-def generate(bundle, model, retry_feedback, repo_root=None, llm_backend=None):
-    component_id = _field(bundle, "component_id") or os.environ["HOTDOCS_TEST_COMPONENT"]
-    slug = component_id[len("comp-"):]
-    control = Path(os.environ["HOTDOCS_TEST_CONTROL"])
-    source_name = "clean.py.txt" if retry_feedback else "licensed.py.txt"
-    text = (control / source_name).read_text(encoding="utf-8")
-    relative = "gen/" + slug + "/" + slug.replace("-", "_") + ".py"
-    target = Path(repo_root) / relative
-    target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(text, encoding="utf-8")
-    feedback = list(retry_feedback) if retry_feedback is not None else None
-    _log({
-        "call": "generate",
-        "component_id": component_id,
-        "model": model,
-        "retry_feedback": feedback,
-        "source": source_name,
-    })
-    return {
-        "component_id": component_id,
-        "model": model,
-        "model_pin": model,
-        "prompt_version": "v1",
-        "pipeline_version": "v1",
-        "retry_feedback": feedback,
-        "files": {relative: text},
-        "model_call_error": None,
-        "refused": None,
-    }
-'''
-
-_VERIFIER_ORCHESTRATOR = '''
-
-def verify(component_id, repo_root, judge=None, test_author=None):
-    _log({"call": "verify", "component_id": component_id})
-    return dict(VERIFICATION_REPORT)
-'''
-
-_TEST_AUTHOR = '''
-
-def author_test(criterion_bundle, model, seed=0, repo_root=None, llm_backend=None):
-    _log({"call": "author_test", "model": model})
-    return {"model_call_error": None, "file": None}
-'''
-
-_LLM_ENDPOINT = '''
-
-def complete(prompt, model, backend=None):
-    _log({"call": "complete", "model": model})
-    return "pass"
-'''
-
-_CACHE_MANAGER = '''
-
-class CacheKey:
-    def __init__(self, spec_bundle_hash=None, gate_inputs_hash=None,
-                 gate_version=None, model_pin=None):
-        self.spec_bundle_hash = spec_bundle_hash
-        self.gate_inputs_hash = gate_inputs_hash
-        self.gate_version = gate_version
-        self.model_pin = model_pin
-
-
-class CachedResult:
-    def __init__(self, gate_type=None, payload=None, stored_at=None):
-        self.gate_type = gate_type
-        self.payload = payload
-        self.stored_at = stored_at
-
-
-class Miss:
-    payload = None
-
-
-def get(cache_key, repo_root=None):
-    _log({"call": "cache_get", "gate_version": _field(cache_key, "gate_version")})
-    return Miss()
-
-
-def put(cache_key, cached_result, repo_root=None):
-    _log({"call": "cache_put", "gate_type": _field(cached_result, "gate_type")})
-    return None
-'''
-
-_SECRET_SCANNER = '''
-from dataclasses import asdict, dataclass
-from dataclasses import field as dc_field
-
-
-class AllowlistInvalidError(Exception):
-    pass
-
-
-@dataclass
-class SecretScanResult:
-    scope: str = "full"
-    gate_version: str = SECRET_GATE_VERSION
-    flagged: bool = False
-    matches: list = dc_field(default_factory=list)
-    allowed: list = dc_field(default_factory=list)
-    unused_allowlist_entries: list = dc_field(default_factory=list)
-    notified: bool = False
-    notification_delivery_error: object = None
-    cache_hit: bool = False
-
-    def to_dict(self):
-        return asdict(self)
-
-
-def scan(repo_root):
-    _log({"call": "secret_scan"})
-    return SecretScanResult()
-
-
-def scan_files(paths, repo_root=None):
-    _log({"call": "secret_scan_files"})
-    return SecretScanResult(scope="precommit")
-
-
-def gate_version(repo_root):
-    return SECRET_GATE_VERSION
-
-
-def propose(repo_root):
-    return {"allowlist": {"version": 1, "entries": []}, "ineligible": []}
-'''
-
-_PROVENANCE_TRACKER_HEAD = '''
-
-def write_attempt_record(component_id, generation_result, verification_report,
-                         spec_bundle_hash, repo_root):
-    slug = component_id[len("comp-"):]
-    directory = Path(repo_root) / ".hotdocs" / "attempts" / slug
-    directory.mkdir(parents=True, exist_ok=True)
-    number = len(list(directory.iterdir())) + 1
-    record = {
-        "component_id": component_id,
-        "attempt": number,
-        "spec_bundle_hash": spec_bundle_hash,
-        "retry_feedback": _field(generation_result, "retry_feedback"),
-        "verification_overall": (
-            _field(verification_report, "overall")
-            if verification_report is not None else None
-        ),
-    }
-    (directory / ("attempt-%03d.json" % number)).write_text(
-        json.dumps(record), encoding="utf-8"
-    )
-    _log({"call": "write_attempt_record", "component_id": component_id, "attempt": number})
-    return record
-
-
-def last_requirement_failures(component_id, repo_root):
-    return []
-
-
-def check_readiness(repo_root, changed_ids=None, model=None, seed=0, llm_backend=None):
-    _log({"call": "check_readiness", "changed_ids": changed_ids})
-    return '''
-
-
-def _fake(repo, slug, body, prelude=""):
-    module = slug.replace("-", "_")
-    _write(repo / "gen" / slug / f"{module}.py", _COMMON + prelude + body)
-
-
-def _write_spec_fixture(repo):
-    base = repo / "specs" / "components" / SLUG
-    _write(
-        base / "component.md",
-        textwrap.dedent(
-            f"""\
-            ---
-            id: {COMPONENT_ID}
-            title: License Fixture Component
-            status: draft
-            owners: [pipeline-team]
-            depends_on: []
-            ---
-
-            # License Fixture Component
-
-            Synthetic component whose generated code the test controls.
-            """
-        ),
-    )
-    _write(base / "requirements" / "R-LICFIX-001.md", "Returns the requested values.\n")
-    _write(
-        base / "acceptance" / "AC-LICFIX-001.md",
-        "Covers: R-LICFIX-001\n\nThe requested values are returned.\n",
-    )
-    _write(base / "interface" / "library.md", "One function.\n")
-    _write(base / "constraints.md", "None.\n")
-
-
-def _git(repo, *args):
-    subprocess.run(
-        [
-            "git",
-            "-c", "user.name=Fixture",
-            "-c", "user.email=fixture@example.invalid",
-            "-c", "commit.gpgsign=false",
-            *args,
-        ],
-        cwd=repo,
-        check=True,
-        capture_output=True,
+def cache_manager_source():
+    return (
+        "import os\n"
+        "\n"
+        "\n"
+        "def _log(line):\n"
+        "    path = os.environ.get('HOTDOCS_TEST_CACHE_LOG')\n"
+        "    if path:\n"
+        "        with open(path, 'a', encoding='utf-8') as fh:\n"
+        "            fh.write(line + '\\n')\n"
+        "\n"
+        "\n"
+        "class CacheKey:\n"
+        "    def __init__(self, spec_bundle_hash=None, gate_inputs_hash=None, gate_version=None, model_pin=None):\n"
+        "        self.spec_bundle_hash = spec_bundle_hash\n"
+        "        self.gate_inputs_hash = gate_inputs_hash\n"
+        "        self.gate_version = gate_version\n"
+        "        self.model_pin = model_pin\n"
+        "\n"
+        "\n"
+        "class CachedResult:\n"
+        "    def __init__(self, gate_type=None, payload=None, stored_at=None):\n"
+        "        self.gate_type = gate_type\n"
+        "        self.payload = payload\n"
+        "        self.stored_at = stored_at\n"
+        "\n"
+        "\n"
+        "class Miss:\n"
+        "    def __init__(self, reason='absent'):\n"
+        "        self.reason = reason\n"
+        "        self.payload = None\n"
+        "\n"
+        "\n"
+        "def get(cache_key, repo_root=None):\n"
+        "    _log('get')\n"
+        "    return Miss()\n"
+        "\n"
+        "\n"
+        "def put(cache_key, cached_result, repo_root=None):\n"
+        "    _log('put')\n"
+        "    return None\n"
     )
 
 
-# ---------------------------------------------------------------------------
-# the test
+def tracker_source(verify_report):
+    return (
+        "import os\n"
+        "\n"
+        "VERIFY_REPORT = " + repr(verify_report) + "\n"
+        "\n"
+        "\n"
+        "def check_readiness(repo_root, changed_ids=None, model=None, seed=0, llm_backend=None):\n"
+        "    path = os.environ.get('HOTDOCS_TEST_TRACKER_LOG')\n"
+        "    if path:\n"
+        "        with open(path, 'a', encoding='utf-8') as fh:\n"
+        "            fh.write('check_readiness\\n')\n"
+        "    return VERIFY_REPORT\n"
+        "\n"
+        "\n"
+        "def last_requirement_failures(component_id, repo_root):\n"
+        "    return []\n"
+    )
 
 
-def test_cs_compliance_001_licensed_match_blocks_records_and_surfaces(tmp_path, monkeypatch):
-    repo = tmp_path / "repo"
-    control = tmp_path / "control"
-    repo.mkdir()
-    control.mkdir()
-    log_path = control / "calls.jsonl"
-
-    _write(control / "licensed.py.txt", LICENSED_SOURCE)
-    _write(control / "clean.py.txt", CLEAN_SOURCE)
-
-    # Reference corpus fingerprinting the licensed code, outside repo_root.
-    hashes = window_hashes(LICENSED_SOURCE)
-    assert len(hashes) > 100
-    corpus_path = control / "license-corpus.json"
-    _write(
-        corpus_path,
+def build_fixture(repo_root):
+    write(
+        repo_root / "specs" / "components" / SLUG / "component.md",
+        "---\n"
+        "id: comp-foo\n"
+        "title: Foo\n"
+        "status: draft\n"
+        "owners: [pipeline-team]\n"
+        "sealed: true\n"
+        "source_path: legacy/foo/\n"
+        "---\n"
+        "\n"
+        "# Foo\n"
+        "\n"
+        "A fixture component.\n",
+    )
+    write(
+        repo_root / "specs" / "components" / SLUG / "requirements" / "R-FOO-001.md",
+        "# R-FOO-001\n\nFoo merges intervals.\n",
+    )
+    write(
+        repo_root / "specs" / "components" / SLUG / "acceptance" / "AC-FOO-001.md",
+        "# AC-FOO-001\n\nCovers: R-FOO-001\n\nFoo merges overlapping intervals.\n",
+    )
+    write_component_code(repo_root, LICENSED_CODE)
+    write(
+        repo_root / "compliance" / "license-corpus.json",
         json.dumps(
             {
                 "corpus_version": 3,
                 "block_threshold": 0.70,
                 "entries": [
                     {
-                        "reference_id": REFERENCE_ID,
+                        "reference_id": "ref-001",
                         "license_family": "GPL",
                         "risk_tier": "high",
-                        "hashes": hashes,
+                        "hashes": window_hashes(LICENSED_CODE),
                     }
                 ],
-            }
+            },
+            indent=2,
         ),
     )
+    write(repo_root / "gen" / "cache-manager" / "cache_manager.py", cache_manager_source())
 
-    monkeypatch.setenv("VAR_LICENSE_CORPUS_PATH", str(corpus_path))
-    monkeypatch.delenv("VAR_COMPLIANCE_WEBHOOK_URL", raising=False)
-    monkeypatch.setenv("HOTDOCS_TEST_LOG", str(log_path))
-    monkeypatch.setenv("HOTDOCS_TEST_CONTROL", str(control))
-    monkeypatch.setenv("HOTDOCS_TEST_COMPONENT", COMPONENT_ID)
+    def git(*args):
+        subprocess.run(
+            ["git", "-c", "user.name=test", "-c", "user.email=test@example.com", *args],
+            cwd=str(repo_root),
+            check=True,
+            capture_output=True,
+        )
 
-    def _no_network(*args, **kwargs):
-        with open(log_path, "a", encoding="utf-8") as handle:
-            handle.write(json.dumps({"call": "urlopen"}) + "\n")
-        raise urllib.error.URLError("network disabled in test")
+    git("init")
+    git("add", "-A")
+    git("commit", "-m", "fixture")
 
-    monkeypatch.setattr(urllib.request, "urlopen", _no_network)
 
-    license_gate_version = license_scanner.gate_version(repo)
-    assert license_gate_version.startswith("license_scanner@4.0.3+")
-
-    gate_versions = {
-        "license_scanner": license_gate_version,
-        "secret_scanner": SECRET_GATE_VERSION,
-    }
-
-    # What provenance-tracker's readiness check reports for this PR: the
-    # license finding raised during the pipeline run that blocked the merge.
-    blocked_license_literal = {
-        "component_id": COMPONENT_ID,
-        "gate_version": license_gate_version,
-        "evaluated": True,
-        "reason": None,
-        "similarity_score": 1.0,
-        "block_threshold": 0.7,
-        "blocked": True,
-        "matches": [
-            {
-                "reference_id": REFERENCE_ID,
-                "license_family": "GPL",
-                "risk_tier": "high",
-                "score": 1.0,
-            }
-        ],
+def secret_scan_result():
+    return {
+        "scope": "full",
+        "gate_version": "secret_scanner@3.1.0+detect-secrets.1.5.0",
+        "flagged": False,
+        "matches": [],
+        "allowed": [],
+        "unused_allowlist_entries": [],
         "notified": False,
         "notification_delivery_error": None,
         "cache_hit": False,
     }
+
+
+def verification_report():
+    return {
+        "component_id": COMPONENT_ID,
+        "overall": "pass",
+        "criteria": [
+            {
+                "criterion_id": "AC-FOO-001",
+                "result": "pass",
+                "failure_origin": None,
+                "failure_detail": None,
+            }
+        ],
+        "mutation_score": 1.0,
+        "mutation_error": None,
+        "run_id": "run-1",
+        "verification_run_id": "run-1",
+    }
+
+
+def generation_result():
+    return {
+        "component_id": COMPONENT_ID,
+        "files": ["gen/foo/foo.py"],
+        "model_call_error": None,
+        "refused": None,
+        "model": "anthropic:claude-sonnet-5",
+        "model_pin": "anthropic:claude-sonnet-5",
+        "prompt_version": "v1",
+        "retry_feedback": None,
+        "spec_bundle_hash": "sha256:" + "0" * 64,
+    }
+
+
+def provenance_inputs(license_result, attempts):
+    return {
+        "component_id": COMPONENT_ID,
+        "generation_result": generation_result(),
+        "verification_report": verification_report(),
+        "license_scan_result": license_result,
+        "secret_scan_result": secret_scan_result(),
+        "provenance_hit": False,
+        "attempts": attempts,
+        "gate_versions": {
+            "license_scanner": field(license_result, "gate_version"),
+            "secret_scanner": "secret_scanner@3.1.0+detect-secrets.1.5.0",
+        },
+    }
+
+
+def read_manifests(repo_root):
+    paths = [
+        repo_root / "gen" / SLUG / ".provenance.json",
+        repo_root / "verification" / SLUG / ".provenance.json",
+    ]
+    manifests = []
+    for path in paths:
+        assert path.is_file(), "missing provenance manifest at " + str(path)
+        manifests.append(json.loads(path.read_text(encoding="utf-8")))
+    return manifests
+
+
+def run_license_cli(repo_root):
+    try:
+        code = license_scanner.main([COMPONENT_ID, "--repo-root", str(repo_root), "--format", "json"])
+    except SystemExit as exc:
+        code = exc.code
+    return 0 if code is None else code
+
+
+def test_cs_compliance_001(tmp_path, monkeypatch, capsys):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    logs = tmp_path / "logs"
+    logs.mkdir()
+    tracker_log = logs / "tracker.log"
+
+    monkeypatch.setenv("VAR_LICENSE_CORPUS_PATH", "compliance/license-corpus.json")
+    monkeypatch.delenv("VAR_COMPLIANCE_WEBHOOK_URL", raising=False)
+    monkeypatch.setenv("HOTDOCS_TEST_TRACKER_LOG", str(tracker_log))
+    monkeypatch.setenv("HOTDOCS_TEST_CACHE_LOG", str(logs / "cache.log"))
+
+    def fake_urlopen(*args, **kwargs):
+        return io.BytesIO(b"{}")
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.chdir(repo_root)
+
+    build_fixture(repo_root)
+
+    # When: the pipeline's license scan runs over the licensed-code match.
+    first = license_scanner.scan(COMPONENT_ID, repo_root)
+    first_plain = as_plain(first)
+
+    # Then: the merge is blocked.
+    assert field(first, "evaluated") is True
+    assert field(first, "component_id") == COMPONENT_ID
+    assert field(first, "similarity_score") >= field(first, "block_threshold")
+    assert field(first, "blocked") is True
+    matches = field(first, "matches")
+    assert len(matches) >= 1
+    assert any(field(m, "reference_id") == "ref-001" for m in matches)
+    assert run_license_cli(repo_root) == 1
+    capsys.readouterr()
+
+    # The blocked result is written into the provenance manifest's license_scan.
+    provenance_writer.write_provenance(COMPONENT_ID, provenance_inputs(first_plain, 1), repo_root)
+    for manifest in read_manifests(repo_root):
+        recorded = manifest["license_scan"]
+        assert recorded["blocked"] is True
+        assert recorded["evaluated"] is True
+        assert recorded["component_id"] == COMPONENT_ID
+        assert recorded["similarity_score"] == field(first, "similarity_score")
+        assert recorded["gate_version"] == field(first, "gate_version")
+
+    # The provenance-tracker stand-in reports the flagged finding, with
+    # "components" and "capabilities" as mappings keyed by id.
     verify_report = {
         "ready": False,
-        "changed_ids": [COMPONENT_ID],
-        "blast_radius": [COMPONENT_ID],
-        "regenerated_components": [COMPONENT_ID],
+        "blocked": True,
+        "overall": "fail",
         "components": {
             COMPONENT_ID: {
                 "component_id": COMPONENT_ID,
-                "ready": False,
-                "provenance_hit": False,
+                "status": "blocked",
                 "blocked": True,
-                "block_reason": "license_scan_blocked",
-                "verification": dict(VERIFICATION_REPORT),
-                "license_scan": blocked_license_literal,
-                "secret_scan": dict(CLEAN_SECRET_SCAN),
-                "attempts": 2,
+                "regenerated": True,
+                "provenance_hit": False,
+                "verification": verification_report(),
+                "verification_report": verification_report(),
+                "license_scan": first_plain,
+                "secret_scan": secret_scan_result(),
+                "block_reasons": ["license_scan"],
             }
         },
         "capabilities": {},
-        "blocking": [{"component_id": COMPONENT_ID, "reason": "license_scan_blocked"}],
+        "blocking": [{"component_id": COMPONENT_ID, "reason": "license_scan"}],
     }
-
-    # Fixture repo: the component spec plus stand-ins for every dependency
-    # the gate runner reaches, except the real license-scanner and
-    # provenance-writer, which are the subjects here.
-    _write_spec_fixture(repo)
-    _fake(
-        repo,
-        "provenance-checker",
-        _PROVENANCE_CHECKER,
-        prelude=(
-            "SPEC_BUNDLE_HASH = " + repr(SPEC_BUNDLE_HASH) + "\n"
-            "GATE_VERSIONS = " + repr(gate_versions) + "\n"
-        ),
-    )
-    _fake(repo, "spec-bundle-assembler", _SPEC_BUNDLE_ASSEMBLER)
-    _fake(repo, "generator", _GENERATOR)
-    _fake(
-        repo,
-        "verifier-orchestrator",
-        _VERIFIER_ORCHESTRATOR,
-        prelude="VERIFICATION_REPORT = " + repr(VERIFICATION_REPORT) + "\n",
-    )
-    _fake(repo, "test-author", _TEST_AUTHOR)
-    _fake(repo, "llm-endpoint", _LLM_ENDPOINT)
-    _fake(repo, "cache-manager", _CACHE_MANAGER)
-    _fake(
-        repo,
-        "secret-scanner",
-        _SECRET_SCANNER,
-        prelude="SECRET_GATE_VERSION = " + repr(SECRET_GATE_VERSION) + "\n",
-    )
-    _fake(
-        repo,
-        "provenance-tracker",
-        _PROVENANCE_TRACKER_HEAD + pprint.pformat(verify_report, width=100) + "\n",
+    write(
+        repo_root / "gen" / "provenance-tracker" / "provenance_tracker.py",
+        tracker_source(verify_report),
     )
 
-    subprocess.run(["git", "init", "-q"], cwd=repo, check=True, capture_output=True)
-    _git(repo, "symbolic-ref", "HEAD", "refs/heads/main")
-    _git(repo, "add", "-A")
-    _git(repo, "commit", "-q", "-m", "fixture")
+    # A subsequent retry resolves the finding.
+    write_component_code(repo_root, RETRY_CODE)
+    second = license_scanner.scan(COMPONENT_ID, repo_root)
+    second_plain = as_plain(second)
+    assert field(second, "evaluated") is True
+    assert field(second, "blocked") is False
+    assert run_license_cli(repo_root) == 0
+    capsys.readouterr()
 
-    manifest_paths = [
-        repo / "gen" / SLUG / ".provenance.json",
-        repo / "verification" / SLUG / ".provenance.json",
-    ]
+    # The result is written regardless of outcome: the clean one too.
+    provenance_writer.write_provenance(COMPONENT_ID, provenance_inputs(second_plain, 2), repo_root)
+    for manifest in read_manifests(repo_root):
+        recorded = manifest["license_scan"]
+        assert recorded["blocked"] is False
+        assert recorded["evaluated"] is True
+        assert recorded["component_id"] == COMPONENT_ID
 
-    # ---- first run: generated code matches the licensed fingerprint ----
-    first = component_gate_runner.run_component_gates(
-        COMPONENT_ID, repo, MODEL, seed=0, llm_backend=None, retry_feedback=None
-    )
-    assert field(first, "component_id") == COMPONENT_ID
-    assert field(first, "provenance_hit") is False
+    # The original finding still appears in the review packet.
+    packet = review_packet_builder.build_review_packet([COMPONENT_ID], repo_root)
+    assert tracker_log.is_file()
+    assert "check_readiness" in tracker_log.read_text(encoding="utf-8")
 
-    first_license = field(first, "license_scan")
-    assert field(first_license, "evaluated") is True
-    assert field(first_license, "reason") is None
-    assert field(first_license, "gate_version") == license_gate_version
-    threshold = field(first_license, "block_threshold")
-    assert threshold == pytest.approx(0.70)
-    assert field(first_license, "similarity_score") > threshold
-    # The merge is blocked by the license gate.
-    assert field(first_license, "blocked") is True
-    first_matches = field(first_license, "matches")
-    assert any(field(m, "reference_id") == REFERENCE_ID for m in first_matches)
-
-    # The blocked result is written into the manifest's license_scan field.
-    for path in manifest_paths:
-        assert path.is_file(), f"provenance manifest missing at {path}"
-        manifest = json.loads(path.read_text(encoding="utf-8"))
-        assert "license_scan" in manifest
-        assert normalize(manifest["license_scan"]) == normalize(first_license)
-        assert manifest["license_scan"]["blocked"] is True
-
-    # ---- retry: regenerated code no longer matches ----
-    second = component_gate_runner.run_component_gates(
-        COMPONENT_ID, repo, MODEL, seed=0, llm_backend=None,
-        retry_feedback=list(RETRY_FEEDBACK),
-    )
-    second_license = field(second, "license_scan")
-    assert field(second_license, "evaluated") is True
-    assert field(second_license, "blocked") is False
-
-    # Written into the manifest regardless of outcome: the clean result too.
-    for path in manifest_paths:
-        assert path.is_file(), f"provenance manifest missing at {path}"
-        manifest = json.loads(path.read_text(encoding="utf-8"))
-        assert normalize(manifest["license_scan"]) == normalize(second_license)
-        assert manifest["license_scan"]["blocked"] is False
-
-    calls = _read_log(log_path)
-    generate_calls = [c for c in calls if c["call"] == "generate"]
-    assert [c["retry_feedback"] for c in generate_calls] == [None, RETRY_FEEDBACK]
-    assert len([c for c in calls if c["call"] == "write_attempt_record"]) == 2
-
-    # ---- the finding still appears in the review packet ----
-    packet = review_packet_builder.build_review_packet([COMPONENT_ID], repo)
-    compliance_flags = field(packet, "compliance_flags")
-    license_flags = field(compliance_flags, "license_scan")
-    entries = [e for e in license_flags if field(e, "component_id") == COMPONENT_ID]
-    assert entries, (
-        "the license finding was resolved by a retry but must still appear in "
-        f"the review packet; got {normalize(license_flags)!r}"
-    )
-    flagged_result = field(entries[0], "result")
-    assert field(flagged_result, "blocked") is True
-    assert any(
-        field(m, "reference_id") == REFERENCE_ID
-        for m in field(flagged_result, "matches")
-    )
+    flags = field(packet, "compliance_flags")
+    license_flags = field(flags, "license_scan")
+    assert isinstance(license_flags, list)
+    flagged = [entry for entry in license_flags if field(entry, "component_id") == COMPONENT_ID]
+    assert len(flagged) >= 1, "blocked license finding missing from review packet"
+    assert any(field(field(entry, "result"), "blocked") is True for entry in flagged)

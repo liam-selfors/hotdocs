@@ -2,14 +2,11 @@
 
 **R-VERIFY-017** — For a component whose `component.md` frontmatter has
   `sealed: true` and a single-line `source_path: <path>` (`D170`),
-  `verify` MUST verify the code at `<repo_root>/<source_path>`, not
-  `gen/<slug>/`: that directory is where the module is loaded from for
-  interface drift (`R-VERIFY-004`) and what tests may import, and a
-  missing `source_path` directory makes `overall` `fail`, never an
-  exception. Its criteria are
-  verified only by the characterization tests: the `test_*.py` files
-  directly in `verification/<slug>/` (hand-maintained, never authored by
-  `test_author`).
+  `verify` MUST check the code at `<repo_root>/<source_path>`, not
+  `gen/<slug>/`, for interface drift (`R-VERIFY-004`) and imports; a
+  missing directory makes `overall` `fail`, never an exception. Its
+  criteria are verified only by the hand-maintained characterization
+  tests, the `test_*.py` files directly in `verification/<slug>/`.
 
   A `compiled` or `generated-test` criterion `AC-X-NNN` is `pass` iff at
   least one test function named `test_` plus the id lowercased with

@@ -6,19 +6,16 @@
   if generation reached it, the full `VerificationReport`, taken as
   direct parameters from `component-gate-runner`.
 
-  Written for both outcomes, success and failure — `D19` closes a real
-  gap: a failed attempt commits no provenance at all, so without this,
-  its full diagnostic detail (why, not just that) would exist only in
-  `component-gate-runner`'s process memory for the duration of one
-  `generate` run, then vanish. `AttemptRecord` is the full-detail
-  companion a human (or `provenance-tracker-ui`, `D88`) reads when a
-  component's provenance check fails and they need to know why.
+  Written for both outcomes, success and failure (`D19`): a failed
+  attempt commits no provenance, so this record is where a person, or
+  `provenance-tracker-ui` (`D88`), reads why it failed.
 
   **The returned `AttemptRecord`'s own `generation`/`verification`
   fields MUST be the same JSON-equivalent plain form written to disk**
   (`D100`, `AttemptRecord.md`) — never the original
   `GenerationResult`/`VerificationReport` object echoed back by
   reference. Each input may be a dict, a dataclass, or any object
-  with attributes (the real `GenerationResult` is a dataclass), and is
-  converted recursively to plain JSON values before writing: a
-  dataclass via `dataclasses.asdict`, another object via its `vars()`.
+  with attributes, and is converted to plain JSON values before writing
+  exactly as `specs/architecture/json-values.md` gives, so a `set` or
+  any other value inside a failing criterion's `failure_detail` never
+  stops the write (`D318`).

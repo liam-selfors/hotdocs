@@ -4,15 +4,14 @@ Covers: R-TRACK-004
 Kind: generated-test
 
 ```gherkin
-Given component-gate-runner calling write_attempt_record with a
-  component_id, a GenerationResult, a VerificationReport (or null), and
-  a spec_bundle_hash as plain parameters
-When write_attempt_record runs
-Then it writes the AttemptRecord from those parameters directly,
-  never from a reference to component-gate-runner's own
-  ComponentPipelineResult type — confirmed by this component's own
-  depends_on list specifically excluding comp-component-gate-runner
-  (this component may still list other real dependencies; the only
-  claim under test is that comp-component-gate-runner itself is not
-  one of them)
+Given a plain dict with the GenerationResult fields as
+  generation_result, a plain dict with the VerificationReport fields as
+  verification_report, and spec_bundle_hash "sha256:abc"
+When write_attempt_record("comp-foo", generation_result,
+  verification_report, "sha256:abc", repo_root) runs
+Then it returns an AttemptRecord whose generation and verification
+  values come from those two dicts, one file exists under
+  .hotdocs/attempts/comp-foo/, and the source of the provenance_tracker
+  module, read with inspect.getsource, contains neither
+  "component_gate_runner" nor "ComponentPipelineResult"
 ```

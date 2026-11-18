@@ -1,3 +1,5 @@
+# hotdocs-criterion: sha256:d0ea99b23eaaa87aa880cf9c0f7d28486d5b03f4b233ff0301e85ab3911d5fab
+import copy
 import hashlib
 import json
 from pathlib import Path
@@ -7,6 +9,7 @@ import pytest
 import provenance_checker
 
 
+COMPONENT_ID = "comp-foo"
 OWNERS = ["pipeline-team", "alice"]
 SOURCE_PATH = "pipeline/foo/"
 VERIFIER_VERSION = "verifier-orchestrator@2.0.0"
@@ -17,67 +20,70 @@ def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def _component_md(sealed: bool) -> str:
-    lines = [
-        "---",
-        "id: comp-foo",
-        "title: Foo",
-        "status: draft",
-        "owners: [pipeline-team, alice]",
-    ]
+def _write(path, text):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+
+
+def _build_fixture(repo_root, sealed=True):
+    _write(
+        repo_root / "specs" / "glossary.md",
+        "# Glossary\n\n- **Foo** \u2014 a test term.\n",
+    )
+    frontmatter = (
+        "---\n"
+        "id: comp-foo\n"
+        "title: Foo\n"
+        "status: draft\n"
+        "owners: [pipeline-team, alice]\n"
+    )
     if sealed:
-        lines.append("sealed: true")
-        lines.append("source_path: pipeline/foo/")
-    else:
-        lines.append("sealed: false")
-    lines.append("depends_on: []")
-    lines.append("---")
-    lines.append("")
-    lines.append("# Foo")
-    lines.append("")
-    lines.append("## Purpose")
-    lines.append("")
-    lines.append("Foo doubles a number.")
-    lines.append("")
-    return "\n".join(lines)
-
-
-FAKE_VERIFIER = (
-    'GATE_VERSION = "verifier-orchestrator@2.0.0"\n'
-    "\n"
-    "\n"
-    "def verify(component_id, repo_root, judge=None, test_author=None):\n"
-    '    raise NotImplementedError("fake verifier-orchestrator: verify not used")\n'
-)
-
-
-def make_repo(root: Path, sealed: bool = True) -> Path:
-    root.mkdir(parents=True, exist_ok=True)
-    (root / "specs").mkdir(parents=True, exist_ok=True)
-    (root / "specs" / "glossary.md").write_text(
-        "# Glossary\n\n- **Foo** — a test term.\n", encoding="utf-8"
+        frontmatter += "sealed: true\n" + "source_path: pipeline/foo/\n"
+    frontmatter += "depends_on: []\n" + "---\n"
+    _write(
+        repo_root / "specs" / "components" / "foo" / "component.md",
+        frontmatter + "\n# Foo\n\n## Purpose\n\nFoo doubles a number.\n",
     )
-    comp_dir = root / "specs" / "components" / "foo"
-    comp_dir.mkdir(parents=True, exist_ok=True)
-    (comp_dir / "component.md").write_text(_component_md(sealed), encoding="utf-8")
+    comp_dir = repo_root / "specs" / "components" / "foo"
+    _write(
+        comp_dir / "requirements" / "R-FOO-001.md",
+        "# R-FOO-001\n\n**R-FOO-001** \u2014 `foo(x)` MUST return `2 * x`.\n",
+    )
+    _write(
+        comp_dir / "acceptance" / "AC-FOO-001.md",
+        "# AC-FOO-001\n\n"
+        "Covers: R-FOO-001\n"
+        "Kind: generated-test\n\n"
+        "```gherkin\n"
+        "Given x = 2\n"
+        "When foo(x) is called\n"
+        "Then it returns 4\n"
+        "```\n",
+    )
+    _write(
+        comp_dir / "interface" / "library.md",
+        "# Library\n\n```\nfoo(x: int) -> int\n```\n",
+    )
+    _write(comp_dir / "constraints.md", "# Constraints\n\nNone.\n")
 
-    src = root / "pipeline" / "foo"
-    src.mkdir(parents=True, exist_ok=True)
-    (src / "foo.py").write_text(
-        "def double(x):\n    return 2 * x\n", encoding="utf-8"
+    # Sealed component's real source.
+    _write(
+        repo_root / "pipeline" / "foo" / "foo.py",
+        "def foo(x):\n    return 2 * x\n",
     )
 
-    vo = root / "gen" / "verifier-orchestrator"
-    vo.mkdir(parents=True, exist_ok=True)
-    (vo / "verifier_orchestrator.py").write_text(FAKE_VERIFIER, encoding="utf-8")
-    return root
+    # Fake verifier-orchestrator, flat-module shape.
+    _write(
+        repo_root / "gen" / "verifier-orchestrator" / "verifier_orchestrator.py",
+        "GATE_VERSION = " + repr(VERIFIER_VERSION) + "\n",
+    )
 
 
-def valid_manifest(source_hash: str) -> dict:
+def _valid_manifest(source_hash):
     return {
         "kind": "sealed-provenance",
         "version": 1,
-        "component_id": "comp-foo",
+        "component_id": COMPONENT_ID,
         "owners": list(OWNERS),
         "source_path": SOURCE_PATH,
         "source_hash": source_hash,
@@ -91,45 +97,30 @@ def valid_manifest(source_hash: str) -> dict:
     }
 
 
-def manifest_path(root: Path) -> Path:
-    return root / "pipeline" / "foo" / ".sealed-provenance.json"
-
-
-def snapshot(root: Path) -> dict:
-    out = {}
-    for p in sorted(root.rglob("*")):
-        rel = p.relative_to(root)
+def _snapshot(repo_root):
+    snap = {}
+    for p in sorted(repo_root.rglob("*")):
+        rel = p.relative_to(repo_root)
         if "__pycache__" in rel.parts:
             continue
         if p.is_file():
-            out[rel.as_posix()] = ("file", p.read_bytes())
+            snap[str(rel)] = ("file", p.read_bytes())
         elif p.is_dir():
-            out[rel.as_posix()] = ("dir", None)
-        else:
-            out[rel.as_posix()] = ("other", None)
-    return out
+            snap[str(rel)] = ("dir", None)
+    return snap
 
 
-def different_hash(current: str) -> str:
-    h = "sha256:" + hashlib.sha256(b"entirely different content").hexdigest()
-    if h == current:
-        h = "sha256:" + hashlib.sha256(b"yet other content").hexdigest()
-    assert h != current
-    return h
+def _different_hash(current):
+    candidate = "sha256:" + hashlib.sha256(b"entirely different content").hexdigest()
+    if candidate == current:
+        candidate = "sha256:" + hashlib.sha256(b"other different content").hexdigest()
+    return candidate
 
 
-# Each mutator takes (manifest_dict, current_hash) and returns the text to
-# write, or None to write no manifest at all.
-def _json(m):
-    return json.dumps(m)
-
-
+# Each mutator takes (manifest_dict, current_source_hash) and returns either
+# a dict (to be written as JSON) or a str (written verbatim).
 def m_valid(m, h):
-    return _json(m)
-
-
-def m_missing(m, h):
-    return None
+    return m
 
 
 def m_not_json(m, h):
@@ -138,77 +129,76 @@ def m_not_json(m, h):
 
 def m_extra_key(m, h):
     m["extra"] = "x"
-    return _json(m)
+    return m
 
 
-def m_lacks_key(m, h):
+def m_missing_key(m, h):
     del m["written_at"]
-    return _json(m)
+    return m
 
 
 def m_version_true(m, h):
     m["version"] = True
-    return _json(m)
+    return m
 
 
-def m_short_hash(m, h):
+def m_bad_hash(m, h):
     m["source_hash"] = "sha256:abc"
-    return _json(m)
+    return m
 
 
-def m_owner_capital(m, h):
+def m_bad_owner(m, h):
     m["owners"] = ["pipeline-team", "Alice"]
-    return _json(m)
+    return m
 
 
 def m_pass_partial(m, h):
     m["characterization"] = {"overall": "pass", "criteria_passed": 1, "criteria_total": 2}
-    return _json(m)
+    return m
 
 
 def m_component_bar(m, h):
     m["component_id"] = "comp-bar"
-    return _json(m)
+    return m
 
 
 def m_other_path(m, h):
     m["source_path"] = "pipeline/other/"
-    return _json(m)
+    return m
 
 
 def m_source_changed(m, h):
-    m["source_hash"] = different_hash(h)
-    return _json(m)
+    m["source_hash"] = _different_hash(h)
+    return m
 
 
 def m_owners_subset(m, h):
     m["owners"] = ["pipeline-team"]
-    return _json(m)
+    return m
 
 
 def m_owners_reordered(m, h):
     m["owners"] = ["alice", "pipeline-team"]
-    return _json(m)
+    return m
 
 
 def m_verifier_old(m, h):
     m["verifier_version"] = "verifier-orchestrator@1.0.0"
-    return _json(m)
+    return m
 
 
 def m_char_fail(m, h):
     m["characterization"] = {"overall": "fail", "criteria_passed": 1, "criteria_total": 2}
-    return _json(m)
+    return m
 
 
 MISS_SCENARIOS = [
-    ("missing", m_missing, "manifest_missing"),
     ("not_json", m_not_json, "manifest_invalid"),
     ("extra_key", m_extra_key, "manifest_invalid"),
-    ("lacks_key", m_lacks_key, "manifest_invalid"),
+    ("missing_key", m_missing_key, "manifest_invalid"),
     ("version_true", m_version_true, "manifest_invalid"),
-    ("short_hash", m_short_hash, "manifest_invalid"),
-    ("owner_capital", m_owner_capital, "manifest_invalid"),
+    ("bad_hash", m_bad_hash, "manifest_invalid"),
+    ("bad_owner", m_bad_owner, "manifest_invalid"),
     ("pass_partial", m_pass_partial, "manifest_invalid"),
     ("component_bar", m_component_bar, "component_mismatch"),
     ("other_path", m_other_path, "component_mismatch"),
@@ -216,56 +206,75 @@ MISS_SCENARIOS = [
     ("owners_subset", m_owners_subset, "owners_changed"),
     ("owners_reordered", m_owners_reordered, "owners_changed"),
     ("verifier_old", m_verifier_old, "verifier_changed"),
-    ("characterization_failed", m_char_fail, "characterization_failed"),
+    ("char_fail", m_char_fail, "characterization_failed"),
 ]
 
 
-def _setup_sealed(tmp_path: Path, mutator):
-    repo_root = make_repo(tmp_path / "repo", sealed=True)
-    key = provenance_checker.current_sealed_key("comp-foo", repo_root)
+def _setup_sealed(tmp_path, mutator):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    _build_fixture(repo_root, sealed=True)
+    key = provenance_checker.current_sealed_key(COMPONENT_ID, repo_root)
     assert key is not None
     current_hash = field(key, "source_hash")
-    text = mutator(valid_manifest(current_hash), current_hash)
-    if text is not None:
-        manifest_path(repo_root).write_text(text, encoding="utf-8")
+    if mutator is not None:
+        content = mutator(copy.deepcopy(_valid_manifest(current_hash)), current_hash)
+        text = content if isinstance(content, str) else json.dumps(content, indent=2)
+        _write(repo_root / "pipeline" / "foo" / ".sealed-provenance.json", text)
     return repo_root, current_hash
 
 
-def _vr_overall(vr):
+def _assert_vr_pass(vr):
     if isinstance(vr, dict):
-        return vr
-    return {"overall": getattr(vr, "overall")}
+        assert vr == {"overall": "pass"}
+    else:
+        assert field(vr, "overall") == "pass"
 
 
-def test_valid_current_manifest_is_a_hit(tmp_path):
+def test_valid_current_manifest_is_hit(tmp_path):
     repo_root, current_hash = _setup_sealed(tmp_path, m_valid)
-    before = snapshot(repo_root)
-
-    result = provenance_checker.check_sealed_provenance("comp-foo", repo_root)
+    before = _snapshot(repo_root)
+    result = provenance_checker.check_sealed_provenance(COMPONENT_ID, repo_root)
+    after = _snapshot(repo_root)
 
     assert field(result, "hit") is True
     assert field(result, "reason") is None
     assert field(result, "sealed") is True
-    assert _vr_overall(field(result, "verification_report")) == {"overall": "pass"}
+    _assert_vr_pass(field(result, "verification_report"))
     assert list(field(result, "owners")) == OWNERS
     assert field(result, "written_at") == WRITTEN_AT
     assert field(result, "source_hash") == current_hash
     assert field(result, "license_scan") is None
     assert field(result, "secret_scan") is None
+    assert before == after
 
-    assert snapshot(repo_root) == before
+
+def test_manifest_missing(tmp_path):
+    repo_root, _ = _setup_sealed(tmp_path, None)
+    before = _snapshot(repo_root)
+    result = provenance_checker.check_sealed_provenance(COMPONENT_ID, repo_root)
+    after = _snapshot(repo_root)
+
+    assert field(result, "reason") == "manifest_missing"
+    assert field(result, "hit") is False
+    assert field(result, "sealed") is True
+    assert field(result, "verification_report") is None
+    assert field(result, "owners") is None
+    assert field(result, "source_hash") is None
+    assert field(result, "written_at") is None
+    assert before == after
 
 
 @pytest.mark.parametrize(
     "mutator,expected_reason",
-    [(m, r) for _, m, r in MISS_SCENARIOS],
-    ids=[i for i, _, _ in MISS_SCENARIOS],
+    [(m, r) for (_, m, r) in MISS_SCENARIOS],
+    ids=[n for (n, _, _) in MISS_SCENARIOS],
 )
-def test_sealed_miss_reasons(tmp_path, mutator, expected_reason):
+def test_stale_or_invalid_manifest_is_miss(tmp_path, mutator, expected_reason):
     repo_root, _ = _setup_sealed(tmp_path, mutator)
-    before = snapshot(repo_root)
-
-    result = provenance_checker.check_sealed_provenance("comp-foo", repo_root)
+    before = _snapshot(repo_root)
+    result = provenance_checker.check_sealed_provenance(COMPONENT_ID, repo_root)
+    after = _snapshot(repo_root)
 
     assert field(result, "reason") == expected_reason
     assert field(result, "hit") is False
@@ -276,20 +285,22 @@ def test_sealed_miss_reasons(tmp_path, mutator, expected_reason):
     assert field(result, "written_at") is None
     assert field(result, "license_scan") is None
     assert field(result, "secret_scan") is None
+    assert before == after
 
-    assert snapshot(repo_root) == before
 
-
-def test_not_sealed_component(tmp_path):
-    repo_root = make_repo(tmp_path / "repo", sealed=False)
-    assert provenance_checker.current_sealed_key("comp-foo", repo_root) is None
-    # A manifest lying around does not make an unsealed component sealed.
-    manifest_path(repo_root).write_text(
-        json.dumps(valid_manifest("sha256:" + "0" * 64)), encoding="utf-8"
+def test_not_sealed(tmp_path):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    _build_fixture(repo_root, sealed=False)
+    # A manifest present anyway must not matter for an unsealed component.
+    manifest = _valid_manifest("sha256:" + hashlib.sha256(b"x").hexdigest())
+    _write(
+        repo_root / "pipeline" / "foo" / ".sealed-provenance.json",
+        json.dumps(manifest, indent=2),
     )
-    before = snapshot(repo_root)
-
-    result = provenance_checker.check_sealed_provenance("comp-foo", repo_root)
+    before = _snapshot(repo_root)
+    result = provenance_checker.check_sealed_provenance(COMPONENT_ID, repo_root)
+    after = _snapshot(repo_root)
 
     assert field(result, "reason") == "not_sealed"
     assert field(result, "hit") is False
@@ -298,7 +309,4 @@ def test_not_sealed_component(tmp_path):
     assert field(result, "owners") is None
     assert field(result, "source_hash") is None
     assert field(result, "written_at") is None
-    assert field(result, "license_scan") is None
-    assert field(result, "secret_scan") is None
-
-    assert snapshot(repo_root) == before
+    assert before == after

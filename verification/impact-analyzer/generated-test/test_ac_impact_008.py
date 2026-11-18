@@ -1,3 +1,4 @@
+# hotdocs-criterion: sha256:867fe269983858c3e59a96d389d8b34fa99ddd0869dfecd186def610b9e1e99c
 """AC-IMPACT-008 (covers R-IMPACT-008).
 
 Given comp-foo's interface/guarantees/G-FOO-001.md changed, and comp-bar

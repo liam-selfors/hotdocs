@@ -23,9 +23,10 @@ When check_readiness is called
 Then ready is false and not_ready_reasons names that capability,
   despite every component passing
 
-Given an intersecting capability that is a provenance miss and model
-  is None
+Given every component passes and an intersecting capability P-FOO is a
+  provenance miss, with model None
 When check_readiness is called
-Then it raises ValueError, without skipping the capability or calling
-  run_capability_gates
+Then it does not raise, ready is false, not_ready_reasons holds exactly
+  "P-FOO: needs a fresh run; pass --model", every component appears in
+  the report, and run_capability_gates was never called
 ```

@@ -13,6 +13,16 @@ When verify(component_id, repo_root, test_author=stand_in) runs
 Then test_author was called exactly once and the criterion's result is
   "pass"
 
+Given the same fixture whose cached test has no header line
+When verify runs
+Then test_author was called exactly once and the criterion's result is
+  "pass"
+
+Given the same fixture with a cached passing test carrying the correct
+  header
+When verify runs
+Then test_author was never called and the criterion's result is "pass"
+
 Given the same fixture with a cached test carrying the correct header,
   a test-probe stand-in that returns ok False with one finding of kind
   "undefined_name" for every source, and a test_author stand-in that
@@ -22,11 +32,8 @@ Then test_author was called exactly once, and the criterion's result is
   "fail" with failure_origin "test" and failure_detail.message
   "test failed its probe: undefined_name"
 
-Given the same fixture with no test_author and no cached test
-When verify runs
-Then the criterion's result is "fail" with failure_origin "test"
-
-Given a cached test that passes its probe and fails against the code
+Given a cached test carrying the correct header that passes its probe
+  and fails against the code
 When verify runs with no test_author
 Then the criterion's result is "fail" with failure_origin
   "implementation"

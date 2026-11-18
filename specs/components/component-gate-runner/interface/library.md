@@ -93,4 +93,4 @@ says so. A CLI test's `repo_root` also holds
 
 CLI: see `interface/cli.md`.
 
-Implements: `specs/architecture/cli-conventions.md`
+Implements: `specs/architecture/cli-conventions.md`, `specs/architecture/json-values.md`

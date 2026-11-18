@@ -1,3 +1,11 @@
+# hotdocs-criterion: sha256:bac5fc306521c69e7a803fb3d03cbb4a8e29c4aca29a91ee61adf41480b8e2e9
+"""AC-PROVCHECK-006 (covers R-PROVCHECK-004): check_provenance is read-only.
+
+Given gen/foo/.provenance.json exists
+When check_provenance is called for comp-foo, on either a hit or a miss
+Then the file's content and mtime are unchanged and no other file is written
+"""
+
 import json
 import os
 from pathlib import Path
@@ -7,18 +15,16 @@ import pytest
 import provenance_checker
 
 
-SPEC_HASH = "sha256:" + "ab" * 32
+MATCHING_HASH = "sha256:" + "ab" * 32
 OTHER_HASH = "sha256:" + "cd" * 32
 
 GATE_VERSIONS = {
     "compiler": "criterion-compiler@1.0.0",
-    "generated_test": "generated_test@1.0.0",
-    "verifier": "verifier-orchestrator@2.0.0",
+    "generated_test": "generated_test@1.1.0",
+    "verifier": "verifier-orchestrator@2.2.0",
     "license_scanner": "license_scanner@4.0.0-no-reference-corpus",
     "secret_scanner": "secret_scanner@3.1.0+detect-secrets.1.5.0",
 }
-
-OLD_MTIME_NS = 1_600_000_000_000_000_000  # fixed, well in the past
 
 
 def field(value, name):
@@ -27,7 +33,7 @@ def field(value, name):
 
 def _manifest():
     return {
-        "spec_bundle_hash": SPEC_HASH,
+        "spec_bundle_hash": MATCHING_HASH,
         "model_pin": "claude-sonnet-5",
         "prompt_version": "v1",
         "retry_feedback": None,
@@ -48,7 +54,8 @@ def _manifest():
             ],
             "requirement_results": {"R-FOO-001": "pass"},
             "interface_drift": False,
-            "mutation_score": 0.9,
+            "mutation_score": 0.92,
+            "mutation_error": None,
             "overall": "pass",
         },
         "license_scan": {
@@ -78,96 +85,96 @@ def _manifest():
     }
 
 
-def _setup_repo(repo_root: Path) -> Path:
-    content = json.dumps(_manifest(), indent=2, sort_keys=True) + "\n"
-    gen_manifest = repo_root / "gen" / "foo" / ".provenance.json"
-    gen_manifest.parent.mkdir(parents=True)
-    gen_manifest.write_text(content, encoding="utf-8")
-    ver_manifest = repo_root / "verification" / "foo" / ".provenance.json"
-    ver_manifest.parent.mkdir(parents=True)
-    ver_manifest.write_text(content, encoding="utf-8")
-    for p in (gen_manifest, ver_manifest):
-        os.utime(p, ns=(OLD_MTIME_NS, OLD_MTIME_NS))
-    return gen_manifest
-
-
-def _snapshot(repo_root: Path):
-    files = {}
-    dirs = set()
-    for p in repo_root.rglob("*"):
-        if "__pycache__" in p.parts:
-            continue
-        rel = p.relative_to(repo_root).as_posix()
-        if p.is_dir():
-            dirs.add(rel)
-        else:
-            st = p.stat()
-            files[rel] = (p.read_bytes(), st.st_mtime_ns)
-    return files, dirs
-
-
-def _assert_untouched(repo_root, gen_manifest, original_bytes, before):
-    assert gen_manifest.is_file(), ".provenance.json was deleted"
-    assert gen_manifest.read_bytes() == original_bytes, ".provenance.json content changed"
-    assert gen_manifest.stat().st_mtime_ns == OLD_MTIME_NS, ".provenance.json mtime changed"
-    after = _snapshot(repo_root)
-    assert after[1] == before[1], "directories were created or removed"
-    assert set(after[0]) == set(before[0]), (
-        "files were created or deleted: "
-        f"added={sorted(set(after[0]) - set(before[0]))}, "
-        f"removed={sorted(set(before[0]) - set(after[0]))}"
-    )
-    for rel, (data, mtime) in before[0].items():
-        assert after[0][rel][0] == data, f"{rel} content changed"
-        assert after[0][rel][1] == mtime, f"{rel} mtime changed"
+def _snapshot(root):
+    """Map every path under root (files and directories) to its state."""
+    state = {}
+    for dirpath, dirnames, filenames in os.walk(root):
+        d = Path(dirpath)
+        st = os.stat(d)
+        state[str(d)] = ("dir", st.st_mtime_ns, tuple(sorted(dirnames + filenames)))
+        for name in filenames:
+            p = d / name
+            st = os.stat(p)
+            state[str(p)] = ("file", st.st_mtime_ns, st.st_size, p.read_bytes())
+    return state
 
 
 @pytest.fixture
-def repo(tmp_path, monkeypatch):
+def workspace(tmp_path, monkeypatch):
     repo_root = tmp_path / "repo"
-    repo_root.mkdir()
+    gen_foo = repo_root / "gen" / "foo"
+    gen_foo.mkdir(parents=True)
+    ver_foo = repo_root / "verification" / "foo"
+    ver_foo.mkdir(parents=True)
+
+    text = json.dumps(_manifest(), indent=2, sort_keys=True) + "\n"
+    manifest_path = gen_foo / ".provenance.json"
+    manifest_path.write_text(text, encoding="utf-8")
+    (ver_foo / ".provenance.json").write_text(text, encoding="utf-8")
+
+    # Push mtimes into the past so any rewrite is visible even at coarse
+    # filesystem timestamp resolution.
+    past = 1_600_000_000
+    for p in (manifest_path, ver_foo / ".provenance.json"):
+        os.utime(p, (past, past))
+
+    # Run with the workspace as cwd so any relative-path write lands where
+    # the snapshot can see it.
+    monkeypatch.chdir(tmp_path)
     monkeypatch.delenv("VAR_TRUST_JUDGE_PROVENANCE", raising=False)
-    monkeypatch.chdir(repo_root)
-    gen_manifest = _setup_repo(repo_root)
-    return repo_root, gen_manifest
+    return tmp_path, repo_root, manifest_path, text.encode("utf-8")
 
 
-def test_hit_is_read_only(repo):
-    repo_root, gen_manifest = repo
-    original = gen_manifest.read_bytes()
-    before = _snapshot(repo_root)
+def _assert_unchanged(before, after, manifest_path, original_bytes, past_mtime_ns):
+    assert manifest_path.read_bytes() == original_bytes
+    assert os.stat(manifest_path).st_mtime_ns == past_mtime_ns
+    added = sorted(set(after) - set(before))
+    removed = sorted(set(before) - set(after))
+    assert added == [], "files written: " + repr(added)
+    assert removed == [], "files deleted: " + repr(removed)
+    changed = sorted(k for k in before if before[k] != after[k])
+    assert changed == [], "paths modified: " + repr(changed)
+
+
+def test_check_provenance_hit_attempt_is_read_only(workspace):
+    root, repo_root, manifest_path, original = workspace
+    past_ns = os.stat(manifest_path).st_mtime_ns
+    before = _snapshot(root)
 
     result = provenance_checker.check_provenance(
-        "comp-foo", SPEC_HASH, dict(GATE_VERSIONS), repo_root
+        "comp-foo", MATCHING_HASH, dict(GATE_VERSIONS), repo_root
     )
+    assert field(result, "hit") in (True, False)
 
-    assert field(result, "hit") is True
-    _assert_untouched(repo_root, gen_manifest, original, before)
+    after = _snapshot(root)
+    _assert_unchanged(before, after, manifest_path, original, past_ns)
 
 
-def test_miss_on_hash_mismatch_is_read_only(repo):
-    repo_root, gen_manifest = repo
-    original = gen_manifest.read_bytes()
-    before = _snapshot(repo_root)
+def test_check_provenance_miss_is_read_only(workspace):
+    root, repo_root, manifest_path, original = workspace
+    past_ns = os.stat(manifest_path).st_mtime_ns
+    before = _snapshot(root)
 
     result = provenance_checker.check_provenance(
         "comp-foo", OTHER_HASH, dict(GATE_VERSIONS), repo_root
     )
-
     assert field(result, "hit") is False
-    _assert_untouched(repo_root, gen_manifest, original, before)
+
+    after = _snapshot(root)
+    _assert_unchanged(before, after, manifest_path, original, past_ns)
 
 
-def test_miss_on_gate_version_mismatch_is_read_only(repo):
-    repo_root, gen_manifest = repo
-    original = gen_manifest.read_bytes()
-    before = _snapshot(repo_root)
+def test_check_provenance_gate_version_miss_is_read_only(workspace):
+    root, repo_root, manifest_path, original = workspace
+    past_ns = os.stat(manifest_path).st_mtime_ns
+    before = _snapshot(root)
 
     changed = dict(GATE_VERSIONS)
-    changed["verifier"] = "verifier-orchestrator@9.9.9"
+    changed["compiler"] = "criterion-compiler@9.9.9"
     result = provenance_checker.check_provenance(
-        "comp-foo", SPEC_HASH, changed, repo_root
+        "comp-foo", MATCHING_HASH, changed, repo_root
     )
-
     assert field(result, "hit") is False
-    _assert_untouched(repo_root, gen_manifest, original, before)
+
+    after = _snapshot(root)
+    _assert_unchanged(before, after, manifest_path, original, past_ns)

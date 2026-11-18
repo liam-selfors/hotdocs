@@ -59,4 +59,5 @@ None.
 
 ## Change log
 
-See the decisions, `D56` onward; `D303` adds the probe and repair loop.
+See the decisions, `D56` onward; `D303` adds the probe and repair loop,
+`D320` the header on a cached file too.

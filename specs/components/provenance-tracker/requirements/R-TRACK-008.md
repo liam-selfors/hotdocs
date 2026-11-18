@@ -15,10 +15,8 @@
   from their hands.
 
   **`verification.requirement_results` MUST be read as a flat `R-id ->
-  "pass"|"fail"` string mapping** (`D95`), exactly as
-  `AttemptRecord.md` now states directly — never assumed to be a list
-  of per-requirement objects, a shape a real candidate guessed instead
-  once nothing in this component's own assembled spec bundle stated
-  the real shape (this component correctly never depends on
-  `verifier-orchestrator`, whose own type this sub-field otherwise
-  comes from).
+  "pass"|"fail"` string mapping** (`D95`, `AttemptRecord.md`). An
+  `R-id` it marks `"fail"` is left out when every entry of
+  `verification.criteria` that covers it and whose `result` is not
+  `"pass"` has `failure_origin` `"test"`: no test could be written for
+  it, so it is no feedback for the next generation (`D319`).

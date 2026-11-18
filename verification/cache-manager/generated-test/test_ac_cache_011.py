@@ -1,3 +1,4 @@
+# hotdocs-criterion: sha256:2eae1fa812edbd7e944d1e86b6368eef9275931200a7c30a2d446fe23601d20e
 import json
 
 import pytest

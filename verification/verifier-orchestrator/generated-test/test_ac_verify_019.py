@@ -1,10 +1,4 @@
-"""AC-VERIFY-019 (Covers: R-VERIFY-017): sealed components are verified only by
-their characterization tests in verification/<slug>/, against the code at
-<repo_root>/<source_path>."""
-
-import importlib.util
-import json
-import py_compile
+# hotdocs-criterion: sha256:f00d560fd75d6b9f9615075acc008c6eaa97d563a7883f0562af40c5a166c7f4
 import shutil
 from pathlib import Path
 
@@ -15,7 +9,16 @@ def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def _write(path: Path, text: str) -> None:
+def optional_field(value, name):
+    if value is None:
+        return None
+    if isinstance(value, dict):
+        return value.get(name)
+    return getattr(value, name, None)
+
+
+def write(path, text):
+    path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
 
@@ -37,133 +40,137 @@ COMPONENT_MD = (
     "\n"
     "## Purpose\n"
     "\n"
-    "Foo does the thing to a number.\n"
+    "Foo doubles a number.\n"
 )
 
-LIBRARY_MD = (
-    "# Library\n"
-    "\n"
-    "```\n"
-    "do_the_thing(x: int) -> int\n"
-    "```\n"
-)
+LIBRARY_MD = "# Library\n\n```\ndo_the_thing(x)\n```\n"
 
 CONSTRAINTS_MD = "# Constraints\n\nNone.\n"
 
-FOO_PY = (
-    "def do_the_thing(x: int) -> int:\n"
-    "    return 2 * x\n"
-)
+FOO_SOURCE = "def do_the_thing(x):\n    return 2 * x\n"
 
-REQUIREMENTS = {
-    "R-FOO-001": "`do_the_thing(x)` MUST return `2 * x`.",
-    "R-FOO-002": "`do_the_thing(x)` MUST NOT raise for an integer `x`.",
-    "R-FOO-003": "`do_the_thing(x)` MUST return an integer.",
-}
-
-PASSING_001 = (
-    "def test_ac_foo_001_returns_value():\n"
-    "    assert 2 * 2 == 4\n"
-    "\n"
-    "\n"
-    "def test_ac_foo_001_other():\n"
-    "    assert 0 * 2 == 0\n"
-)
-
-FAILING_002 = (
-    "\n"
-    "\n"
-    "def test_ac_foo_002_fails():\n"
-    "    assert 3 * 2 == 7\n"
-)
-
-FIXED_002 = (
-    "\n"
-    "\n"
-    "def test_ac_foo_002_fails():\n"
-    "    assert 3 * 2 == 6\n"
-)
-
-DECOY_003 = (
-    "\n"
-    "\n"
-    "def test_ac_foo_0031_x():\n"
-    "    assert True\n"
+ASSEMBLER_SOURCE = (
+    "def assemble_criterion(component_id, criterion_id, repo_root):\n"
+    "    covers = 'R-' + criterion_id[len('AC-'):]\n"
+    "    return {\n"
+    "        'component_id': component_id,\n"
+    "        'criterion_id': criterion_id,\n"
+    "        'covers': covers,\n"
+    "        'criterion_text': 'criterion text for ' + criterion_id,\n"
+    "        'requirement_text': 'requirement text for ' + covers,\n"
+    "        'interface': " + repr(LIBRARY_MD) + ",\n"
+    "        'glossary': " + repr(GLOSSARY) + ",\n"
+    "        'dependency_interfaces': {},\n"
+    "    }\n"
 )
 
 
-def _criterion(ac_id: str, r_id: str) -> str:
+def requirement_text(num):
+    rid = "R-FOO-" + num
+    return "# " + rid + "\n\n**" + rid + "** — `do_the_thing(x)` MUST return `2 * x`.\n"
+
+
+def acceptance_text(num):
     return (
-        f"# {ac_id}\n"
+        "# AC-FOO-" + num + "\n"
         "\n"
-        f"Covers: {r_id}\n"
+        "Covers: R-FOO-" + num + "\n"
         "Kind: generated-test\n"
         "\n"
         "```gherkin\n"
-        "Given an integer x is 2\n"
-        "When do_the_thing(x) is called\n"
+        "Given x is 2\n"
+        "When do_the_thing is invoked with 2\n"
         "Then it returns 4\n"
         "```\n"
     )
 
 
-def build(repo_root: Path, test_src: str, criteria=("001", "002")) -> Path:
-    _write(repo_root / "specs" / "glossary.md", GLOSSARY)
+def characterization_source(fixed, extra_0031=False):
+    src = (
+        "def test_ac_foo_001_returns_value():\n"
+        "    assert 1 + 1 == 2\n"
+        "\n"
+        "\n"
+        "def test_ac_foo_001_other():\n"
+        "    assert True\n"
+        "\n"
+        "\n"
+        "def test_ac_foo_002_fails():\n"
+        "    assert " + ("True" if fixed else "False") + "\n"
+    )
+    if extra_0031:
+        src += (
+            "\n"
+            "\n"
+            "def test_ac_foo_0031_x():\n"
+            "    assert True\n"
+        )
+    return src
+
+
+def build_fixture(repo_root, nums=("001", "002"), fixed=False, extra_0031=False):
+    repo_root = Path(repo_root)
+    write(repo_root / "specs" / "glossary.md", GLOSSARY)
     comp = repo_root / "specs" / "components" / "foo"
-    _write(comp / "component.md", COMPONENT_MD)
-    _write(comp / "interface" / "library.md", LIBRARY_MD)
-    _write(comp / "constraints.md", CONSTRAINTS_MD)
-    for n in criteria:
-        r_id = f"R-FOO-{n}"
-        ac_id = f"AC-FOO-{n}"
-        _write(comp / "requirements" / f"{r_id}.md",
-               f"# {r_id}\n\n**{r_id}** — {REQUIREMENTS[r_id]}\n")
-        _write(comp / "acceptance" / f"{ac_id}.md", _criterion(ac_id, r_id))
-    _write(repo_root / "pipeline" / "foo" / "foo.py", FOO_PY)
-    _write(repo_root / "verification" / "foo" / "test_foo.py", test_src)
+    write(comp / "component.md", COMPONENT_MD)
+    write(comp / "interface" / "library.md", LIBRARY_MD)
+    write(comp / "constraints.md", CONSTRAINTS_MD)
+    for num in nums:
+        write(comp / "requirements" / ("R-FOO-" + num + ".md"), requirement_text(num))
+        write(comp / "acceptance" / ("AC-FOO-" + num + ".md"), acceptance_text(num))
+    write(repo_root / "pipeline" / "foo" / "foo.py", FOO_SOURCE)
+    write(
+        repo_root / "gen" / "spec-bundle-assembler" / "spec_bundle_assembler.py",
+        ASSEMBLER_SOURCE,
+    )
+    write(
+        repo_root / "verification" / "foo" / "test_foo.py",
+        characterization_source(fixed, extra_0031),
+    )
     return repo_root
 
 
-def by_id(report):
+def criteria_by_id(report):
     return {field(c, "id"): c for c in field(report, "criteria")}
 
 
-def summary(report):
-    crit = {
-        cid: (field(c, "result"), field(c, "kind"), field(c, "covers"))
-        for cid, c in by_id(report).items()
+def snapshot(report):
+    crit = {}
+    for cid, c in criteria_by_id(report).items():
+        detail = optional_field(c, "failure_detail")
+        crit[cid] = (field(c, "result"), optional_field(detail, "message"))
+    return {
+        "criteria": crit,
+        "interface_drift": field(report, "interface_drift"),
+        "mutation_score": field(report, "mutation_score"),
+        "overall": field(report, "overall"),
     }
-    return (
-        crit,
-        field(report, "interface_drift"),
-        field(report, "mutation_score"),
-        field(report, "overall"),
-    )
 
 
-def test_sealed_component_mixed_results(tmp_path):
-    repo = build(tmp_path / "repo", PASSING_001 + FAILING_002)
-    assert not (repo / "gen" / "foo").exists()
+def test_sealed_component_initial_verdicts(tmp_path):
+    repo_root = build_fixture(tmp_path / "repo")
+    report = verifier_orchestrator.verify("comp-foo", repo_root)
 
-    report = verifier_orchestrator.verify("comp-foo", repo)
-    crit = by_id(report)
-
+    crit = criteria_by_id(report)
     assert field(crit["AC-FOO-001"], "result") == "pass"
-    c2 = crit["AC-FOO-002"]
-    assert field(c2, "result") == "fail"
-    fd = c2.get("failure_detail") if isinstance(c2, dict) else getattr(c2, "failure_detail", None)
-    assert fd, "failing criterion must carry a failure_detail"
+    assert field(crit["AC-FOO-002"], "result") == "fail"
+    assert optional_field(crit["AC-FOO-002"], "failure_detail")
     assert field(report, "interface_drift") is False
     assert field(report, "mutation_score") is None
     assert field(report, "overall") == "fail"
 
 
-def test_sealed_component_all_passing(tmp_path):
-    repo = build(tmp_path / "repo", PASSING_001 + FIXED_002)
+def test_sealed_component_fixed_test_passes_overall(tmp_path):
+    repo_root = build_fixture(tmp_path / "repo")
+    first = verifier_orchestrator.verify("comp-foo", repo_root)
+    assert field(first, "overall") == "fail"
 
-    report = verifier_orchestrator.verify("comp-foo", repo)
-    crit = by_id(report)
-
+    write(
+        repo_root / "verification" / "foo" / "test_foo.py",
+        characterization_source(fixed=True),
+    )
+    report = verifier_orchestrator.verify("comp-foo", repo_root)
+    crit = criteria_by_id(report)
     assert field(crit["AC-FOO-001"], "result") == "pass"
     assert field(crit["AC-FOO-002"], "result") == "pass"
     assert field(report, "interface_drift") is False
@@ -171,60 +178,47 @@ def test_sealed_component_all_passing(tmp_path):
     assert field(report, "overall") == "pass"
 
 
-def test_criterion_without_characterization_test(tmp_path):
-    repo = build(
-        tmp_path / "repo",
-        PASSING_001 + FIXED_002 + DECOY_003,
-        criteria=("001", "002", "003"),
+def test_sealed_component_criterion_without_matching_test(tmp_path):
+    repo_root = build_fixture(
+        tmp_path / "repo", nums=("001", "002", "003"), fixed=True, extra_0031=True
     )
-
-    report = verifier_orchestrator.verify("comp-foo", repo)
-    crit = by_id(report)
-
-    c3 = crit["AC-FOO-003"]
-    assert field(c3, "result") == "fail"
-    fd = c3.get("failure_detail") if isinstance(c3, dict) else getattr(c3, "failure_detail", None)
-    assert fd is not None
-    assert field(fd, "message") == "no characterization test"
+    report = verifier_orchestrator.verify("comp-foo", repo_root)
+    crit = criteria_by_id(report)
     assert field(crit["AC-FOO-001"], "result") == "pass"
     assert field(crit["AC-FOO-002"], "result") == "pass"
+    assert field(crit["AC-FOO-003"], "result") == "fail"
+    detail = optional_field(crit["AC-FOO-003"], "failure_detail")
+    assert detail is not None
+    assert field(detail, "message") == "no characterization test"
+    assert field(report, "mutation_score") is None
     assert field(report, "overall") == "fail"
 
 
-def test_provenance_and_pycache_are_ignored(tmp_path):
-    repo = build(tmp_path / "repo", PASSING_001 + FAILING_002)
+def test_sealed_component_ignores_provenance_and_pycache(tmp_path):
+    repo_root = build_fixture(tmp_path / "repo", fixed=True)
+    before = verifier_orchestrator.verify("comp-foo", repo_root)
+    before_snap = snapshot(before)
+    assert before_snap["overall"] == "pass"
 
-    before = summary(verifier_orchestrator.verify("comp-foo", repo))
-
-    src_dir = repo / "pipeline" / "foo"
-    _write(
-        src_dir / ".sealed-provenance.json",
-        json.dumps({
-            "component_id": "comp-foo",
-            "owners": ["team-a"],
-            "source_hash": "sha256:" + "0" * 64,
-            "verdict": "pass",
-        }),
+    src = repo_root / "pipeline" / "foo"
+    write(
+        src / ".sealed-provenance.json",
+        '{"owners": ["team-a"], "source_hash": "sha256:' + "0" * 64 + '"}\n',
     )
-    src = src_dir / "foo.py"
-    py_compile.compile(str(src), cfile=importlib.util.cache_from_source(str(src)))
-    _write(src_dir / "__pycache__" / "notes.txt", "stale cache\n")
-    assert (src_dir / "__pycache__").is_dir()
+    pycache = src / "__pycache__"
+    pycache.mkdir(parents=True, exist_ok=True)
+    (pycache / "foo.cpython-311.pyc").write_bytes(b"\x00\x01junk-bytes\xff")
+    write(pycache / "stray.py", "def stray_public_function(a, b):\n    return a\n")
 
-    after = summary(verifier_orchestrator.verify("comp-foo", repo))
-
-    assert after == before
-    assert before[0]["AC-FOO-001"][0] == "pass"
-    assert before[0]["AC-FOO-002"][0] == "fail"
-    assert before[1] is False
-    assert before[3] == "fail"
+    after = verifier_orchestrator.verify("comp-foo", repo_root)
+    assert snapshot(after) == before_snap
 
 
-def test_missing_source_path_fails_overall(tmp_path):
-    repo = build(tmp_path / "repo", PASSING_001 + FIXED_002)
-    shutil.rmtree(repo / "pipeline" / "foo")
-    assert not (repo / "pipeline" / "foo").exists()
+def test_sealed_component_missing_source_path_fails_overall(tmp_path):
+    repo_root = build_fixture(tmp_path / "repo", fixed=True)
+    first = verifier_orchestrator.verify("comp-foo", repo_root)
+    assert field(first, "overall") == "pass"
 
-    report = verifier_orchestrator.verify("comp-foo", repo)
-
+    shutil.rmtree(repo_root / "pipeline" / "foo")
+    report = verifier_orchestrator.verify("comp-foo", repo_root)
     assert field(report, "overall") == "fail"

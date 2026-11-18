@@ -1,3 +1,4 @@
+# hotdocs-criterion: sha256:5123928a026b5c217d17398d0e0b2f4058e66e641676fc4c14ef6c3d3918c0ef
 import json
 import re
 from pathlib import Path
@@ -7,87 +8,48 @@ import pytest
 import test_author
 
 
-CANONICAL_MODEL = "canonical-model-x"
+CANONICAL_MODEL = "canonical-model-zeta"
 
 
-def _get(value, key, default=None):
-    if isinstance(value, dict):
-        return value.get(key, default)
-    return getattr(value, key, default)
+def field(value, name):
+    return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-class _Bundle:
-    """A CriterionBundle stand-in readable both by attribute and as a mapping."""
+class Bundle(dict):
+    """A CriterionBundle that reads both as a mapping and by attribute."""
 
-    _FIELDS = (
-        "component_id",
-        "criterion_id",
-        "covers",
-        "criterion_text",
-        "requirement_text",
-        "interface",
-        "glossary",
-        "dependency_interfaces",
-    )
-
-    def __init__(self, **kwargs):
-        self._data = {}
-        for name in self._FIELDS:
-            value = kwargs.get(name, {} if name == "dependency_interfaces" else "")
-            self._data[name] = value
-            setattr(self, name, value)
-
-    def __getitem__(self, key):
-        return self._data[key]
-
-    def get(self, key, default=None):
-        return self._data.get(key, default)
-
-    def __contains__(self, key):
-        return key in self._data
-
-    def __iter__(self):
-        return iter(self._data)
-
-    def __len__(self):
-        return len(self._data)
-
-    def keys(self):
-        return self._data.keys()
-
-    def items(self):
-        return self._data.items()
-
-    def values(self):
-        return self._data.values()
+    def __getattr__(self, name):
+        try:
+            return self[name]
+        except KeyError:
+            raise AttributeError(name)
 
 
-def _make_bundle():
-    return _Bundle(
+def make_bundle():
+    return Bundle(
         component_id="comp-foo",
         criterion_id="AC-FOO-001",
         covers="R-FOO-001",
         criterion_text=(
-            "Given x = 2\n"
-            "When foo(x) is called\n"
-            "Then it returns 4"
+            "# AC-FOO-001\n\nCovers: R-FOO-001\nKind: generated-test\n\n"
+            "```gherkin\nGiven x = 2\nWhen foo(x) is called\nThen it returns 4\n```\n"
         ),
         requirement_text="# R-FOO-001\n\n**R-FOO-001** — `foo(x)` MUST return `2 * x`.",
-        interface="# Library\n\n```\nfoo(x: int) -> int\n```",
+        interface="# Library\n\n```\nfoo(x: int) -> int\n```\n",
         glossary="# Glossary\n\n- **Foo** — a test term.",
         dependency_interfaces={},
+        module_names=["foo"],
     )
 
 
-def _seed_repo_with_model_a(repo_root: Path, model_a: str) -> None:
-    """Lay down this component's 'current code', produced by generator with model_a."""
-    gen_dir = repo_root / "gen" / "foo"
+def write_generator_state(repo_root, model_a):
+    """Record that the generator produced this component's current code with model A."""
+    gen_dir = Path(repo_root) / "gen" / "foo"
     gen_dir.mkdir(parents=True, exist_ok=True)
-    (gen_dir / "foo.py").write_text(
-        "def foo(x):\n    return 2 * x\n", encoding="utf-8"
-    )
+    (gen_dir / "foo.py").write_text("def foo(x):\n    return 2 * x\n")
     provenance = {
         "component_id": "comp-foo",
+        "model": model_a,
         "generation_result": {
             "component_id": "comp-foo",
             "spec_bundle_hash": "sha256:" + "0" * 64,
@@ -99,29 +61,19 @@ def _seed_repo_with_model_a(repo_root: Path, model_a: str) -> None:
             "refused": None,
             "retry_feedback": None,
         },
-        "model": model_a,
     }
-    (gen_dir / ".provenance.json").write_text(
-        json.dumps(provenance, indent=2), encoding="utf-8"
-    )
+    (gen_dir / ".provenance.json").write_text(json.dumps(provenance))
 
 
-def _make_backend(log_path: Path):
-    nonce_re = re.compile(r"-----BEGIN FILE ([0-9a-f]{32})-----")
-
+def make_backend(calls):
     def backend(prompt, model, **params):
-        with open(log_path, "a", encoding="utf-8") as fh:
-            fh.write(json.dumps({"model": model}) + "\n")
-        match = nonce_re.search(prompt or "")
-        nonce = match.group(1) if match else ""
-        body = (
-            "def test_placeholder():\n"
-            "    assert 2 * 2 == 4\n"
-        )
+        calls.append(model)
+        match = re.search(r"-----BEGIN FILE ([0-9a-f]{32})-----", prompt)
+        nonce = match.group(1) if match else "0" * 32
         text = (
             "-----BEGIN FILE " + nonce + "-----\n"
-            + body
-            + "-----END FILE " + nonce + "-----\n"
+            "import foo\n\n\ndef test_foo():\n    assert foo.foo(2) == 4\n"
+            "-----END FILE " + nonce + "-----"
         )
         return {
             "text": text,
@@ -133,84 +85,31 @@ def _make_backend(log_path: Path):
     return backend
 
 
-def _read_log(log_path: Path):
-    if not log_path.is_file():
-        return []
-    return [
-        json.loads(line)
-        for line in log_path.read_text(encoding="utf-8").splitlines()
-        if line.strip()
-    ]
-
-
-@pytest.mark.parametrize("model_a", ["anthropic:claude-legacy-a", "ollama:llama3.1:8b"])
+@pytest.mark.parametrize(
+    "model_a",
+    ["claude-opus-4", "openai:gpt-6-astra", "ollama:llama3.1:8b", "some-other-model"],
+)
 def test_author_test_uses_canonical_model_regardless_of_generator_model(
     tmp_path, monkeypatch, model_a
 ):
     monkeypatch.delenv("VAR_CACHE_STORE_URL", raising=False)
-    monkeypatch.delenv("VAR_HOTDOCS_CONFIG", raising=False)
-
-    repo_root = tmp_path / "repo"
+    repo_root = tmp_path / ("repo_" + re.sub(r"[^a-zA-Z0-9]", "_", model_a))
     repo_root.mkdir()
-    workdir = tmp_path / "cwd"
-    workdir.mkdir()
-    monkeypatch.chdir(workdir)
+    monkeypatch.chdir(repo_root)
+    write_generator_state(repo_root, model_a)
 
-    _seed_repo_with_model_a(repo_root, model_a)
-
-    log_path = tmp_path / "backend_calls.jsonl"
-    backend = _make_backend(log_path)
-
+    calls = []
     result = test_author.author_test(
-        _make_bundle(),
+        make_bundle(),
         CANONICAL_MODEL,
         0,
         repo_root=repo_root,
-        llm_backend=backend,
+        llm_backend=make_backend(calls),
     )
 
-    calls = _read_log(log_path)
-    assert calls, "expected the model backend to be called on a fresh cache"
-    for call in calls:
-        called_model = call["model"]
-        assert called_model == CANONICAL_MODEL or called_model.endswith(":" + CANONICAL_MODEL), (
-            f"backend called with {called_model!r}, expected canonical {CANONICAL_MODEL!r}"
-        )
-        assert model_a not in called_model
-        assert model_a.split(":", 1)[-1] not in called_model
-
-    assert _get(result, "model_call_error") is None
-    assert _get(result, "model") == CANONICAL_MODEL
-
-
-def test_author_test_model_is_same_across_different_generator_models(tmp_path, monkeypatch):
-    monkeypatch.delenv("VAR_CACHE_STORE_URL", raising=False)
-    monkeypatch.delenv("VAR_HOTDOCS_CONFIG", raising=False)
-
-    workdir = tmp_path / "cwd"
-    workdir.mkdir()
-    monkeypatch.chdir(workdir)
-
-    observed = []
-    for idx, model_a in enumerate(["model-a-first", "model-a-second"]):
-        repo_root = tmp_path / f"repo{idx}"
-        repo_root.mkdir()
-        _seed_repo_with_model_a(repo_root, model_a)
-
-        log_path = tmp_path / f"backend_calls_{idx}.jsonl"
-        result = test_author.author_test(
-            _make_bundle(),
-            CANONICAL_MODEL,
-            0,
-            repo_root=repo_root,
-            llm_backend=_make_backend(log_path),
-        )
-        calls = _read_log(log_path)
-        assert calls, "expected the model backend to be called on a fresh cache"
-        models = {c["model"] for c in calls}
-        assert all(model_a not in m for m in models)
-        observed.append(models)
-        assert _get(result, "model") == CANONICAL_MODEL
-        assert _get(result, "model_call_error") is None
-
-    assert observed[0] == observed[1]
+    assert field(result, "model_call_error") is None
+    assert calls, "the model backend was never called"
+    for called_model in calls:
+        assert called_model == CANONICAL_MODEL
+        assert called_model != model_a
+    assert field(result, "model") == CANONICAL_MODEL

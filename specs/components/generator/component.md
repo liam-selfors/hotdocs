@@ -36,9 +36,8 @@ cache first; in `cold` mode only, writing the result to
 neither); recording provenance.
 
 **Out of scope (why `depends_on` excludes `verifier-orchestrator`):**
-any retry of its own — exactly one candidate per call, single-shot.
-`D3` retired the best-of-k loop; a human re-running
-`hotdocs generate` is the only path back for a failed one.
+any retry of its own — exactly one candidate per call; `generation-loop`
+retries (`D310`).
 
 ## Definitions
 
@@ -70,6 +69,5 @@ See `constraints.md`.
 
 ## Change log
 
-- `D35`–`D268`: see the decisions. `D304`: truncated replies and a
-  missing module are failures. `D305`: only `commit_cache` writes the
-  cache.
+`D35` onward: see the decisions, most recently `D304`, `D305` and
+`D325`.

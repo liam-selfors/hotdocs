@@ -73,10 +73,20 @@ since trusting a compiled criterion means trusting its compiler.
 `notes/bootstrap-history.md` tells how each component first landed;
 `verification/<slug>/BOOTSTRAP.md` has each one's full account.
 
-Decisions are ADRs in `specs/decisions/`, `D1` through `D297` (`D1`–`D75`
+Decisions are ADRs in `specs/decisions/`, `D1` through `D332` (`D1`–`D75`
 from the 2026-10 baseline reset, the rest recorded as they were made).
 `notes/initial-ideas.md` holds the original brainstorm, with its own
 informal numbering.
+
+## Before pushing
+
+Every commit pushed from this repository first passes
+`tools/verify_push.py`: in a throwaway worktree of exactly that commit
+it runs `hotdocs lint` and then `hotdocs verify`, which checks every
+component's and capability's provenance without calling a model. Run
+`python tools/verify_push.py --install-hook` once per clone to make it
+the `pre-push` hook; `python tools/verify_push.py [<commit>]` runs it by
+hand. Pull requests are reviewed and merged by a person.
 
 ## License
 

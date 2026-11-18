@@ -1,3 +1,4 @@
+# hotdocs-criterion: sha256:7ea5b13ba8eac9614251eaa04e0ee5ec5557148c5949d16118fac58b16c035c3
 """AC-IMPACT-001 (covers R-IMPACT-001).
 
 Given a changed spec id for component comp-foo

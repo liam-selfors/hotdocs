@@ -9,4 +9,11 @@ Given comp-foo's most recent AttemptRecord with a non-null
   {"R-FOO-001": "pass", "R-FOO-002": "fail"}
 When last_requirement_failures("comp-foo", repo_root) is called
 Then it returns exactly ["R-FOO-002"]
+
+Given comp-foo's most recent AttemptRecord whose requirement_results is
+  {"R-FOO-001": "fail", "R-FOO-002": "fail"} and whose criteria are
+  AC-FOO-001 covering R-FOO-001, "fail", failure_origin "test", and
+  AC-FOO-002 covering R-FOO-002, "fail", failure_origin "implementation"
+When last_requirement_failures("comp-foo", repo_root) is called
+Then it returns exactly ["R-FOO-002"]
 ```

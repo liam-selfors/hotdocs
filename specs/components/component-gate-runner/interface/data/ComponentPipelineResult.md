@@ -33,8 +33,10 @@ loop's `attempts` list. When the loop's `passed` is true, `blocked` is
 its `generation_result` holds. Otherwise `blocked` is `true` and
 `block_reason` comes from the last attempt's `outcome`:
 `generation_failed` gives `"model_call_error"`, `surface_failed`
-`"surface_check_failed"`, `verification_failed` `"verification_failed"`
-and `refused` `"refused"`; `stop_reason` is never consulted.
+`"surface_check_failed"`, `refused` `"refused"`, and
+`verification_failed` `"test_authoring_failed"` when every `"fail"`
+criterion of that attempt's report has `failure_origin` `"test"`, else
+`"verification_failed"`; `stop_reason` is never consulted.
 `model_call_error` is the loop's last `generation_result.model_call_error`
 (a `{category, message}` value) when `block_reason` is
 `"model_call_error"`, else `null`.

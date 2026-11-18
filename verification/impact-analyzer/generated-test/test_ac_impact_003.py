@@ -1,3 +1,4 @@
+# hotdocs-criterion: sha256:350f2c4429e98d528e95960e2f21ee2e97b8d848ac8483bb7890637abeb5ee90
 import importlib.util
 import subprocess
 import sys

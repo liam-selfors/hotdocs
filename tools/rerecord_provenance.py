@@ -19,10 +19,18 @@ It writes nothing for a component whose hash changed or whose fresh
 verification does not pass. Usage:
 
     python tools/rerecord_provenance.py [comp-<slug> ...]
+
+With `--author-tests=<model>:<seed>`, step 2 passes the real
+`test-author`, so a criterion with no committed test, or a stale one
+(`R-VERIFY-019`), gets one written for the unchanged code, as new
+criteria for a weak suite need (D329); if verification still fails, the
+committed tests are put back as they were.
 """
 import importlib.util
 import json
+import shutil
 import sys
+import tempfile
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
@@ -88,7 +96,7 @@ def _carry_test_authoring(slug: str, manifest: dict, report) -> None:
             criterion["test_authoring"] = record
 
 
-def rerecord(component_id: str, pc, pw, vo, lic, sec) -> bool:
+def rerecord(component_id: str, pc, pw, vo, lic, sec, author=None) -> bool:
     slug = component_id.removeprefix("comp-")
     manifest_path = REPO / "gen" / slug / ".provenance.json"
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
@@ -97,7 +105,15 @@ def rerecord(component_id: str, pc, pw, vo, lic, sec) -> bool:
     if current_hash != manifest.get("spec_bundle_hash"):
         print(f"{component_id}: SKIPPED -- spec_bundle_hash changed since generation; regenerate it")
         return False
-    report = vo.verify(component_id, REPO, judge=None, test_author=None)
+    tests_dir = REPO / "verification" / slug / "generated-test"
+    backup = None
+    if author is not None:
+        backup = Path(tempfile.mkdtemp(prefix=f"rerecord_{slug}_")) / "generated-test"
+        shutil.copytree(tests_dir, backup)
+    report = vo.verify(component_id, REPO, judge=None, test_author=author)
+    if _get(report, "overall") != "pass" and backup is not None:
+        shutil.rmtree(tests_dir)
+        shutil.copytree(backup, tests_dir)
     if _get(report, "overall") != "pass":
         failing = [c["id"] for c in _get(report, "criteria", []) if c.get("result") != "pass"]
         print(f"{component_id}: SKIPPED -- fresh verification is {_get(report, 'overall')} "
@@ -140,11 +156,17 @@ def main(argv) -> int:
     vo = _load("verifier-orchestrator")
     lic = _load("license-scanner")
     sec = _load("secret-scanner")
+    author = None
+    for arg in [a for a in argv if a.startswith("--author-tests=")]:
+        argv = [a for a in argv if a != arg]
+        model, _, seed = arg.split("=", 1)[1].rpartition(":")
+        ta = _load("test-author")
+        author = lambda bundle: ta.author_test(bundle, model, seed=int(seed), repo_root=REPO, llm_backend=None)
     ids = argv or ["comp-" + p.name for p in sorted((REPO / "specs" / "components").iterdir())
                    if p.is_dir() and not _sealed(p.name)]
     ok = True
     for component_id in ids:
-        ok = rerecord(component_id, pc, pw, vo, lic, sec) and ok
+        ok = rerecord(component_id, pc, pw, vo, lic, sec, author) and ok
     return 0 if ok else 1
 
 

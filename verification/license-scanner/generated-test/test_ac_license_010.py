@@ -1,3 +1,4 @@
+# hotdocs-criterion: sha256:f5b091631f4d4edddb88968958c0ce67f70d97747638afe6451bd6b975748457
 """AC-LICENSE-010 (covers R-LICENSE-008).
 
 gate_version(repo_root) MUST return exactly the gate_version that

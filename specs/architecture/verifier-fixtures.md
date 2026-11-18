@@ -29,7 +29,12 @@ naming a capability file the fixture also writes under `specs/product/`
 `test-probe`'s fake-arity check would match. Every
 fixture criterion has at least one Given, one When and one Then step
 (`R-LINT-010`). `verify` checks no precondition against `spec-linter`,
-so a test does not lint its fixture (`R-AUTHOR-015`).
+so a test does not lint its fixture (`R-AUTHOR-015`). A
+test's own helper functions are named without a `test` prefix
+(`build_fixture`, `characterization_source`): pytest collects every
+top-level `test*` function in the file, and one taking parameters it
+has no fixture for errors the whole criterion (`D326`). Test functions
+for a fixture's own suite are written only inside string literals.
 
 A `test-probe` stand-in defines `probe(test_source, criterion_bundle,
 module_name, *, timeout=60.0)` returning an object with `ok` (bool),
@@ -48,14 +53,18 @@ the first line as `# hotdocs-criterion: sha256:` followed by
 `hashlib.sha256((criterion_text + "\n" + requirement_text).encode("utf-8")).hexdigest()`.
 A header line is one matching
 `^# hotdocs-criterion: sha256:[0-9a-f]{64}$`; any other first line,
-including uppercase hex, is no header, so that file is never stale.
+including uppercase hex, is no header, so that file is stale.
 
-From a `test_author` outcome (`test-author`'s `TestAuthoringResult`, as
-a mapping or an object) `verify` reads `model_call_error` and
-`file["content"]` only; `file["path"]` is ignored. It writes that content
-under the glossary's "Criterion test filename" into a temporary
-directory, probes it and runs it there. It never writes under
-`verification/`, so a stale or probe-failed cached file stays on disk.
+A `test_author` stand-in is a callable taking the bundle and returning a
+`TestAuthoringResult`-shaped mapping or object: `model`, `seed`,
+`prompt_version`, `cache_hit`, `model_call_error` (`None` or a dict with
+`category` and `message`) and `file` (`None` or a dict with `path` and
+`content`). `verify` reads `model_call_error` and `file["content"]`;
+`file["path"]` is ignored. It writes that content under the glossary's
+"Criterion test filename" into a temporary directory, probes it and
+runs it there, never writing under `verification/`, so a stale or
+probe-failed cached file stays on disk. A stand-in records its calls by
+appending to a file the test controls.
 
 A `generated-test` criterion's file runs as
 `<sys.executable> -m pytest <file>` with the working directory

@@ -47,7 +47,14 @@ file's hash in a ratified decision (`allowlist_sha256` in its frontmatter):
 the scanner honors a non-empty list only while its hash matches.
 
 Run `init` again any time; it never overwrites. `hotdocs init --reconfigure`
-changes only the provider. Make the project a git repository with a `main`
+changes only the provider.
+
+Running `hotdocs` from inside a Claude Code session (an agent driving it)
+with `claude-cli`: Claude Code sets `ANTHROPIC_API_KEY` for the commands
+it starts, and that key does not work for a separate `claude -p` call.
+Use your claude.ai login instead with `hotdocs init --provider claude-cli
+--auth login`, or add `auth = "login"` to the `[llm]` table of
+`hotdocs.toml`. Make the project a git repository with a `main`
 branch: `hotdocs impact` and `hotdocs assist` diff against it.
 
 ## 3. Generate and verify
@@ -128,18 +135,32 @@ records, and when to split a component.
 - `model_call_error` — no usable code was produced. A network, auth,
   rate-limit or timeout error is not retried: run it again later.
   `truncated_response` means the reply was cut off: raise the provider's
-  output limit (below).
+  output limit (below). For `empty_response` the message shows the start
+  of what the model replied, which often names a detail the spec left
+  out.
 - `surface_check_failed` — the code did not import, used a name a
   dependency lacks, or mishandled an unknown command-line argument.
+- `test_authoring_failed` — code was produced but a criterion's test
+  could not be written (a model call dropped twice): run it again;
+  nothing shows the code wrong.
 - `verification_failed` — a criterion failed on every attempt. The output
   names each failing criterion and why; a failure marked as the test's
   own means its test could not be written soundly. Nearly always the
   cause is in the spec: a missing detail, or an example that contradicts
-  a requirement. Run `hotdocs spec check` on it and fix the spec.
+  a requirement. Run `hotdocs spec check` on it and fix the spec; the
+  next `generate` writes a fresh test for any criterion you changed.
 
 `hotdocs track feedback comp-<name>` lists the failing requirement ids
 from the last attempt, and `--retry-feedback=R-...` passes them to the
 next `generate`.
+
+A `mutation_error` line means every criterion passed, but the generated
+tests failed (or hung) when rerun in the mutation sandbox, a temporary
+copy of `gen/` whose working directory is not the repository root. A test
+that reads files relative to the current directory is the usual cause.
+
+`hotdocs verify` without `--model` reports every component and lists a
+capability that needs a fresh run as `needs a fresh run; pass --model`.
 
 ## 6. Known limits
 

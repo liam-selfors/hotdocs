@@ -1,3 +1,4 @@
+# hotdocs-criterion: sha256:3ed8d42effd631091ccf50a0871296ef40f402f573399370fab5224d624a720b
 """AC-IMPACT-005 (covers R-IMPACT-005).
 
 Given P-ZERO-EDIT's capability scenarios changed, and comp-foo has

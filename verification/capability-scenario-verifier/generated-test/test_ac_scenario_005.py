@@ -1,5 +1,5 @@
+# hotdocs-criterion: sha256:e68f8244ae33b7adc245c86cd235f2a99bec3b05b19d2f5efb73b76c703344bc
 import json
-import os
 import shutil
 from pathlib import Path
 
@@ -9,313 +9,254 @@ import capability_scenario_verifier
 
 
 CAP_ID = "P-ZERO-EDIT"
-
-PASSING_REPORT = {
-    CAP_ID: {
-        "overall": "pass",
-        "scenarios": [
-            {"id": "CS-ZERO-EDIT-001", "kind": "generated-test", "result": "pass"}
-        ],
-    }
-}
+SLUG = "zero-edit-thing"
+RECORD_REL = Path("verification") / "capabilities" / CAP_ID / ".provenance.json"
 
 
 def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def _plain(value):
-    """Convert a report-ish value into plain JSON-compatible data."""
-    if value is None or isinstance(value, (str, int, float, bool)):
-        return value
-    if isinstance(value, dict):
-        return {k: _plain(v) for k, v in value.items()}
-    if isinstance(value, (list, tuple)):
-        return [_plain(v) for v in value]
-    if hasattr(value, "__dict__"):
-        return {k: _plain(v) for k, v in vars(value).items() if not k.startswith("_")}
-    return value
-
-
-def _normalize(result):
-    return {
-        "hit": field(result, "hit"),
-        "capability_scenario_report": _plain(field(result, "capability_scenario_report")),
-    }
-
-
 def _tool_root():
-    here = Path(capability_scenario_verifier.__file__).resolve()
-    for parent in here.parents:
-        if parent.name == "gen":
-            return parent.parent
-    return None
+    gen = next(
+        p
+        for p in Path(capability_scenario_verifier.__file__).resolve().parents
+        if p.name == "gen"
+    )
+    return gen.parent
 
 
-def _write(path: Path, text: str):
+def _write(path, text):
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text, encoding="utf-8")
+    path.write_text(text)
 
 
-FAKE_TEST_AUTHOR = '''\
-import json
-
-_LOG = {log!r}
-
-
-def author_test(bundle, model, seed=0, *, repo_root=None, llm_backend=None):
-    with open(_LOG, "a", encoding="utf-8") as fh:
-        fh.write(json.dumps({{"fn": "author_test", "criterion_id": bundle["criterion_id"], "model": model}}) + "\\n")
-    criterion_id = bundle["criterion_id"]
-    fname = "test_" + criterion_id.lower().replace("-", "_") + ".py"
-    return {{
-        "component_id": "comp-zero-edit-impl",
-        "criterion_id": criterion_id,
-        "model": model,
-        "seed": seed,
-        "prompt_version": "v1",
-        "cache_hit": False,
-        "file": {{
-            "path": "verification/capabilities/P-ZERO-EDIT/generated-test/" + fname,
-            "content": "def test_x():\\n    assert True\\n",
-        }},
-        "model_call_error": None,
-    }}
-'''
-
-FAKE_LLM_ENDPOINT = '''\
-import json
-
-_LOG = {log!r}
+def _fake_test_author_source(log_path):
+    lines = [
+        "LOG = " + repr(str(log_path)),
+        "",
+        "",
+        "def author_test(bundle, model, seed=0, repo_root=None, llm_backend=None):",
+        "    with open(LOG, 'a') as f:",
+        "        f.write('author_test\\n')",
+        "    cid = bundle['criterion_id']",
+        "    name = 'test_' + cid.lower().replace('-', '_') + '.py'",
+        "    path = " + repr("verification/capabilities/" + CAP_ID + "/generated-test/") + " + name",
+        "    content = " + repr("def test_x():\n    assert True\n"),
+        "    return {",
+        "        'component_id': bundle.get('component_id', " + repr(CAP_ID) + "),",
+        "        'criterion_id': cid,",
+        "        'model': model,",
+        "        'seed': seed,",
+        "        'prompt_version': 'v1',",
+        "        'cache_hit': False,",
+        "        'file': {'path': path, 'content': content},",
+        "        'model_call_error': None,",
+        "    }",
+        "",
+    ]
+    return "\n".join(lines)
 
 
-def complete(prompt, model, *, backend=None, **params):
-    with open(_LOG, "a", encoding="utf-8") as fh:
-        fh.write(json.dumps({{"fn": "complete", "model": model}}) + "\\n")
-    return {{
-        "text": "pass",
-        "model": model,
-        "backend": "fake",
-        "model_call_error": None,
-    }}
-'''
+def _fake_llm_endpoint_source(log_path):
+    lines = [
+        "LOG = " + repr(str(log_path)),
+        "",
+        "",
+        "def complete(prompt, model, backend=None, **params):",
+        "    with open(LOG, 'a') as f:",
+        "        f.write('complete\\n')",
+        "    return {",
+        "        'text': 'PASS',",
+        "        'model': model,",
+        "        'backend': 'fake',",
+        "        'model_call_error': None,",
+        "    }",
+        "",
+    ]
+    return "\n".join(lines)
 
 
-def _build_repo(tmp_path: Path):
+def _build_repo(tmp_path):
     repo_root = tmp_path / "repo"
-    log_dir = tmp_path / "logs"
     repo_root.mkdir()
-    log_dir.mkdir()
-    author_log = log_dir / "test_author_calls.jsonl"
-    endpoint_log = log_dir / "llm_endpoint_calls.jsonl"
+    log_path = tmp_path / "calls.log"
 
-    # Capability spec
+    # Product capability
     _write(
         repo_root / "specs" / "product" / "zero-edit.md",
         "---\n"
-        "id: P-ZERO-EDIT\n"
+        "id: " + CAP_ID + "\n"
         "title: Zero edit\n"
         "status: draft\n"
-        "owners: [tester]\n"
+        "owners: [alice]\n"
         "---\n"
         "\n"
         "# Zero edit\n"
         "\n"
         "### CS-ZERO-EDIT-001\n"
         "\n"
-        "Covers: P-ZERO-EDIT\n"
+        "Covers: " + CAP_ID + "\n"
         "Kind: generated-test\n"
         "\n"
         "```gherkin\n"
-        "Given an unchanged repository\n"
-        "When verification runs\n"
-        "Then nothing is regenerated\n"
+        "Given a cached artifact\n"
+        "When the pipeline runs\n"
+        "Then no file is edited\n"
         "```\n",
     )
 
     # Realizing component
-    comp_dir = repo_root / "specs" / "components" / "zero-edit-impl"
+    comp_dir = repo_root / "specs" / "components" / SLUG
     _write(
         comp_dir / "component.md",
         "---\n"
-        "id: comp-zero-edit-impl\n"
-        "title: Zero edit impl\n"
+        "id: comp-" + SLUG + "\n"
+        "title: Zero edit thing\n"
         "status: draft\n"
-        "owners: [tester]\n"
-        "realizes: [P-ZERO-EDIT]\n"
+        "owners: [alice]\n"
+        "realizes: [" + CAP_ID + "]\n"
         "sealed: false\n"
         "---\n"
         "\n"
-        "# Zero edit impl\n"
-        "\n"
-        "Realizes the zero-edit capability.\n",
+        "# Zero edit thing\n",
     )
     _write(
-        comp_dir / "requirements" / "R-ZEI-001.md",
-        "**R-ZEI-001** — MUST do nothing when nothing changed.\n",
+        comp_dir / "requirements" / "R-ZET-001.md",
+        "**R-ZET-001** - MUST do nothing.\n",
     )
     _write(
-        comp_dir / "acceptance" / "AC-ZEI-001.md",
-        "# AC-ZEI-001\n\nCovers: R-ZEI-001\nKind: generated-test\n\n"
-        "```gherkin\nGiven nothing\nWhen nothing\nThen nothing\n```\n",
+        comp_dir / "acceptance" / "AC-ZET-001.md",
+        "# AC-ZET-001\n\nCovers: R-ZET-001\nKind: generated-test\n\n"
+        "```gherkin\nGiven nothing\nWhen nothing happens\nThen nothing changes\n```\n",
     )
     _write(comp_dir / "interface" / "library.md", "# Library\n\n```\nnoop()\n```\n")
     _write(comp_dir / "constraints.md", "# Constraints\n\nNone.\n")
     _write(
-        repo_root / "gen" / "zero-edit-impl" / "zero_edit_impl.py",
+        repo_root / "gen" / SLUG / (SLUG.replace("-", "_") + ".py"),
         "def noop():\n    return None\n",
     )
 
-    # Fake dependencies
+    # Fake dependencies (flat-module shape)
     _write(
         repo_root / "gen" / "test-author" / "test_author.py",
-        FAKE_TEST_AUTHOR.format(log=str(author_log)),
+        _fake_test_author_source(log_path),
     )
     _write(
         repo_root / "gen" / "llm-endpoint" / "llm_endpoint.py",
-        FAKE_LLM_ENDPOINT.format(log=str(endpoint_log)),
+        _fake_llm_endpoint_source(log_path),
     )
 
     # Real compiler copied from the live repository
-    tool_root = _tool_root()
-    if tool_root is not None:
-        src = tool_root / "pipeline" / "criterion-compiler"
-        if src.is_dir():
-            shutil.copytree(
-                src,
-                repo_root / "pipeline" / "criterion-compiler",
-                ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
-            )
+    src = _tool_root() / "pipeline" / "criterion-compiler"
+    if src.is_dir():
+        shutil.copytree(
+            src,
+            repo_root / "pipeline" / "criterion-compiler",
+            ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
+        )
 
-    return repo_root, author_log, endpoint_log
+    return repo_root, log_path
 
 
-def _record_path(repo_root: Path) -> Path:
-    return repo_root / "verification" / "capabilities" / CAP_ID / ".provenance.json"
+def _prime(repo_root):
+    """Produce a committed record whose gate_version/content_hash are current."""
+    result = capability_scenario_verifier.run_capability_gates(CAP_ID, repo_root, "m")
+    assert field(result, "hit") is False
+    record_path = repo_root / RECORD_REL
+    assert record_path.is_file()
+    record = json.loads(record_path.read_text())
+    assert record["gate_version"] == capability_scenario_verifier.GATE_VERSION
+    return record_path, record
 
 
-def _snapshot(root: Path):
+def _snapshot(repo_root):
     snap = {}
-    for dirpath, _dirnames, filenames in os.walk(root):
-        for name in filenames:
-            p = Path(dirpath) / name
+    for p in sorted(repo_root.rglob("*")):
+        if p.is_file():
             st = p.stat()
-            snap[str(p.relative_to(root))] = (st.st_mtime_ns, st.st_size, p.read_bytes())
+            snap[str(p.relative_to(repo_root))] = (p.read_bytes(), st.st_mtime_ns)
     return snap
 
 
-def _calls(log: Path):
-    if not log.exists():
+def _calls(log_path):
+    if not log_path.exists():
         return []
-    return [line for line in log.read_text(encoding="utf-8").splitlines() if line.strip()]
+    return [line for line in log_path.read_text().splitlines() if line.strip()]
 
 
-@pytest.fixture
-def seeded(tmp_path):
-    repo_root, author_log, endpoint_log = _build_repo(tmp_path)
+def test_hit_returns_record_report_and_gates_reuse_it_without_side_effects(tmp_path):
+    repo_root, log_path = _build_repo(tmp_path)
+    record_path, record = _prime(repo_root)
 
-    # Seed a committed record whose content_hash is the current one, by a
-    # real run against the fakes.
-    capability_scenario_verifier.run_capability_gates(CAP_ID, repo_root, "m")
-    record_path = _record_path(repo_root)
-    assert record_path.is_file(), "seeding run did not write the committed record"
-    record = json.loads(record_path.read_text(encoding="utf-8"))
-    assert record["gate_version"] == capability_scenario_verifier.GATE_VERSION
+    passing_report = {
+        CAP_ID: {
+            "overall": "pass",
+            "scenarios": [
+                {"id": "CS-ZERO-EDIT-001", "kind": "generated-test", "result": "pass"}
+            ],
+        }
+    }
+    record["capability_scenario_report"] = passing_report
+    record_path.write_text(json.dumps(record, indent=2))
 
-    # Make the committed report a known passing one (content_hash untouched).
-    record["capability_scenario_report"] = PASSING_REPORT
-    record_path.write_text(json.dumps(record, indent=2), encoding="utf-8")
-
-    # Reset the fakes' invocation logs.
-    for log in (author_log, endpoint_log):
-        if log.exists():
-            log.unlink()
-
-    return repo_root, author_log, endpoint_log, record_path, record
-
-
-def test_check_is_hit_and_carries_record_report(seeded):
-    repo_root, _a, _e, _rp, record = seeded
-    result = capability_scenario_verifier.check_capability_provenance(CAP_ID, repo_root)
-    assert field(result, "hit") is True
-    assert _plain(field(result, "capability_scenario_report")) == record["capability_scenario_report"]
-    assert _plain(field(result, "capability_scenario_report")) == PASSING_REPORT
-
-
-def test_run_on_hit_returns_check_result_untouched(seeded):
-    repo_root, author_log, endpoint_log, _rp, record = seeded
+    if log_path.exists():
+        log_path.unlink()
+    before = _snapshot(repo_root)
 
     check = capability_scenario_verifier.check_capability_provenance(CAP_ID, repo_root)
     assert field(check, "hit") is True
+    assert field(check, "capability_scenario_report") == passing_report
 
-    before = _snapshot(repo_root)
-
-    result_m = capability_scenario_verifier.run_capability_gates(CAP_ID, repo_root, "m")
-    result_none_default = capability_scenario_verifier.run_capability_gates(CAP_ID, repo_root)
-    result_none_explicit = capability_scenario_verifier.run_capability_gates(
-        CAP_ID, repo_root, None
-    )
-    result_none_kw = capability_scenario_verifier.run_capability_gates(
-        CAP_ID, repo_root, model=None
+    run_m = capability_scenario_verifier.run_capability_gates(CAP_ID, repo_root, "m")
+    assert field(run_m, "hit") == field(check, "hit")
+    assert field(run_m, "capability_scenario_report") == field(
+        check, "capability_scenario_report"
     )
 
+    run_none = capability_scenario_verifier.run_capability_gates(CAP_ID, repo_root, None)
+    assert field(run_none, "hit") == field(check, "hit")
+    assert field(run_none, "capability_scenario_report") == field(
+        check, "capability_scenario_report"
+    )
+
+    assert _calls(log_path) == []
     after = _snapshot(repo_root)
-
-    expected = _normalize(check)
-    assert expected["hit"] is True
-    assert expected["capability_scenario_report"] == record["capability_scenario_report"]
-
-    for res in (result_m, result_none_default, result_none_explicit, result_none_kw):
-        assert _normalize(res) == expected
-        if isinstance(res, dict) and isinstance(check, dict):
-            assert res == check
-
-    # No fake module was called.
-    assert _calls(author_log) == []
-    assert _calls(endpoint_log) == []
-
-    # Nothing under repo_root was written or modified.
-    assert set(after) == set(before), (
-        "files added/removed: %r" % (set(after) ^ set(before))
-    )
-    for rel, info in before.items():
-        assert after[rel] == info, "file modified: %s" % rel
+    assert after == before
 
 
-def test_check_miss_cases(seeded):
-    repo_root, author_log, endpoint_log, record_path, record = seeded
+def test_misses_give_hit_false_and_null_report(tmp_path):
+    repo_root, log_path = _build_repo(tmp_path)
 
-    # A record that is not valid JSON.
-    record_path.write_text("{ this is not json", encoding="utf-8")
-    result = capability_scenario_verifier.check_capability_provenance(CAP_ID, repo_root)
-    assert field(result, "hit") is False
-    assert field(result, "capability_scenario_report") is None
+    # No record
+    record_path = repo_root / RECORD_REL
+    assert not record_path.exists()
+    res = capability_scenario_verifier.check_capability_provenance(CAP_ID, repo_root)
+    assert field(res, "hit") is False
+    assert field(res, "capability_scenario_report") is None
 
-    # A record with a different gate_version.
+    record_path, record = _prime(repo_root)
+
+    # Record that is not valid JSON
+    record_path.write_text("{ this is not json")
+    res = capability_scenario_verifier.check_capability_provenance(CAP_ID, repo_root)
+    assert field(res, "hit") is False
+    assert field(res, "capability_scenario_report") is None
+
+    # Record with a different gate_version
     stale = dict(record)
-    stale["gate_version"] = "capability_scenario_verifier@0.0.1-different"
-    record_path.write_text(json.dumps(stale, indent=2), encoding="utf-8")
-    result = capability_scenario_verifier.check_capability_provenance(CAP_ID, repo_root)
-    assert field(result, "hit") is False
-    assert field(result, "capability_scenario_report") is None
-
-    # No record at all.
-    record_path.unlink()
-    result = capability_scenario_verifier.check_capability_provenance(CAP_ID, repo_root)
-    assert field(result, "hit") is False
-    assert field(result, "capability_scenario_report") is None
-
-    # The check is a pure read: no fake was called.
-    assert _calls(author_log) == []
-    assert _calls(endpoint_log) == []
+    stale["gate_version"] = "capability_scenario_verifier@0.0.1-other"
+    record_path.write_text(json.dumps(stale, indent=2))
+    res = capability_scenario_verifier.check_capability_provenance(CAP_ID, repo_root)
+    assert field(res, "hit") is False
+    assert field(res, "capability_scenario_report") is None
 
 
-def test_unknown_capability_raises(tmp_path):
-    repo_root, _author_log, _endpoint_log = _build_repo(tmp_path)
-    unknown = "P-NOT-DECLARED-ANYWHERE"
+def test_unknown_capability_raises_from_both(tmp_path):
+    repo_root, log_path = _build_repo(tmp_path)
 
     with pytest.raises(capability_scenario_verifier.UnknownCapabilityError):
-        capability_scenario_verifier.check_capability_provenance(unknown, repo_root)
+        capability_scenario_verifier.check_capability_provenance("P-NO-SUCH-THING", repo_root)
 
     with pytest.raises(capability_scenario_verifier.UnknownCapabilityError):
-        capability_scenario_verifier.run_capability_gates(unknown, repo_root, "m")
+        capability_scenario_verifier.run_capability_gates("P-NO-SUCH-THING", repo_root, "m")

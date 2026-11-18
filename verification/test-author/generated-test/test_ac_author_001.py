@@ -1,88 +1,112 @@
-import json
+# hotdocs-criterion: sha256:299e5ce5aaf366b4fde5f4a9b8fd059fb9b5826647d34a63b64336a1b828c791
+import importlib.util
 import re
-from dataclasses import dataclass, field, fields
-
-import pytest
+import sys
+from pathlib import Path
 
 import test_author
 
 
+def load_module(path, module_name):
+    spec = importlib.util.spec_from_file_location(module_name, path)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def field(value, name):
+    return value[name] if isinstance(value, dict) else getattr(value, name)
+
+
+class _MappingBundle(dict):
+    """Fallback bundle that reads both as a mapping and by attribute."""
+
+    def __getattr__(self, name):
+        try:
+            return self[name]
+        except KeyError as exc:
+            raise AttributeError(name) from exc
+
+
 CRITERION_TEXT = (
-    "Given a zebra-quartz input value of 7\n"
-    "When frobnicate_widget is called\n"
-    "Then it returns the marker CRIT-MARKER-91f3a"
+    "Given x = 2 ZQXCRITERIONMARKER\n"
+    "When foo(x) is called\n"
+    "Then it returns 4"
 )
 REQUIREMENT_TEXT = (
-    "# R-WIDGET-004\n\n"
-    "**R-WIDGET-004** — `frobnicate_widget(x)` MUST return the marker "
-    "REQ-MARKER-7b2c4 for any zebra-quartz input."
+    "# R-FOO-001\n\n"
+    "**R-FOO-001** \u2014 `foo(x)` MUST return `2 * x`. ZQXREQUIREMENTMARKER"
 )
 INTERFACE_TEXT = (
     "# Library\n\n"
     "```\n"
-    "frobnicate_widget(x: int) -> str  # IFACE-MARKER-c0d9e\n"
+    "foo(x: int) -> int  # ZQXINTERFACEMARKER\n"
     "```"
 )
 GLOSSARY_TEXT = (
     "# Glossary\n\n"
-    "- **Zebra-quartz** — a test term GLOSS-MARKER-5e8a1."
+    "- **Foo** \u2014 a test term. ZQXGLOSSARYMARKER"
 )
 
 
-@dataclass(eq=False)
-class FakeCriterionBundle(dict):
-    """A CriterionBundle stand-in readable both as attributes and as a mapping."""
-
-    component_id: str
-    criterion_id: str
-    covers: str
-    criterion_text: str
-    requirement_text: str
-    interface: str
-    glossary: str
-    dependency_interfaces: dict = field(default_factory=dict)
-    module_names: list = field(default_factory=list)
-
-    def __post_init__(self):
-        dict.update(self, {f.name: getattr(self, f.name) for f in fields(self)})
+def _bundle_fields():
+    return {
+        "component_id": "comp-foo",
+        "criterion_id": "AC-FOO-001",
+        "covers": "R-FOO-001",
+        "criterion_text": CRITERION_TEXT,
+        "requirement_text": REQUIREMENT_TEXT,
+        "interface": INTERFACE_TEXT,
+        "glossary": GLOSSARY_TEXT,
+        "dependency_interfaces": {},
+    }
 
 
-def _get(value, name):
-    if isinstance(value, dict):
-        return value.get(name)
-    return getattr(value, name, None)
-
-
-def _norm(text):
-    return " ".join(str(text).split())
-
-
-def _make_backend(log_path):
-    def backend(prompt, model, **params):
-        record = {
-            "prompt": prompt if isinstance(prompt, str) else str(prompt),
-            "model": model,
-            "params": {k: (v if isinstance(v, (str, int, float, bool, type(None))) else str(v))
-                       for k, v in params.items()},
-        }
-        with open(log_path, "a", encoding="utf-8") as fh:
-            fh.write(json.dumps(record) + "\n")
-
-        prompt_str = record["prompt"]
-        m = re.search(r"-----BEGIN FILE ([0-9a-f]{32})-----", prompt_str)
-        if m is None:
-            m = re.search(r"\b([0-9a-f]{32})\b", prompt_str)
-        nonce = m.group(1) if m else "0" * 32
-
-        test_code = (
-            "import widget\n\n\n"
-            "def test_ac_widget_004():\n"
-            "    assert widget.frobnicate_widget(7) == 'CRIT-MARKER-91f3a'\n"
+def _make_bundle():
+    fields = _bundle_fields()
+    try:
+        gen = next(
+            p for p in Path(test_author.__file__).resolve().parents if p.name == "gen"
         )
+        base = gen / "spec-bundle-assembler"
+        flat = base / "spec_bundle_assembler.py"
+        path = flat if flat.is_file() else base / "spec_bundle_assembler" / "__init__.py"
+        if path.is_file():
+            sba = load_module(path, "spec_bundle_assembler")
+            cls = getattr(sba, "CriterionBundle", None)
+            if cls is not None:
+                try:
+                    return cls(module_names=["foo"], **fields)
+                except TypeError:
+                    return cls(**fields)
+    except StopIteration:
+        pass
+    except Exception:
+        pass
+    fields["module_names"] = ["foo"]
+    return _MappingBundle(fields)
+
+
+def test_author_test_sends_criterion_requirement_interface_and_glossary(tmp_path):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    log_dir = tmp_path / "prompts"
+    log_dir.mkdir()
+
+    reply_body = "import foo\n\n\ndef test_placeholder():\n    assert True\n"
+
+    def mock_backend(prompt, model, **params):
+        index = len(list(log_dir.iterdir()))
+        (log_dir / ("prompt_" + str(index).zfill(4) + ".txt")).write_text(
+            prompt, encoding="utf-8"
+        )
+        nonces = re.findall(r"-----BEGIN FILE ([0-9a-f]{32})-----", prompt)
+        nonce = nonces[-1] if nonces else "0" * 32
         text = (
-            f"-----BEGIN FILE {nonce}-----\n"
-            f"{test_code}"
-            f"-----END FILE {nonce}-----\n"
+            "-----BEGIN FILE " + nonce + "-----\n"
+            + reply_body
+            + "\n-----END FILE " + nonce + "-----"
         )
         return {
             "text": text,
@@ -91,76 +115,21 @@ def _make_backend(log_path):
             "model_call_error": None,
         }
 
-    return backend
-
-
-def _read_records(log_path):
-    if not log_path.exists():
-        return []
-    records = []
-    for line in log_path.read_text(encoding="utf-8").splitlines():
-        line = line.strip()
-        if line:
-            records.append(json.loads(line))
-    return records
-
-
-def test_ac_author_001_prompt_contains_criterion_requirement_interface_glossary(tmp_path, monkeypatch):
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    work_dir = tmp_path / "work"
-    work_dir.mkdir()
-    log_dir = tmp_path / "log"
-    log_dir.mkdir()
-    log_path = log_dir / "backend_calls.jsonl"
-
-    monkeypatch.chdir(work_dir)
-    monkeypatch.delenv("VAR_CACHE_STORE_URL", raising=False)
-    monkeypatch.delenv("VAR_HOTDOCS_CONFIG", raising=False)
-
-    bundle = FakeCriterionBundle(
-        component_id="comp-widget",
-        criterion_id="AC-WIDGET-004",
-        covers="R-WIDGET-004",
-        criterion_text=CRITERION_TEXT,
-        requirement_text=REQUIREMENT_TEXT,
-        interface=INTERFACE_TEXT,
-        glossary=GLOSSARY_TEXT,
-        dependency_interfaces={},
-        module_names=["widget"],
-    )
-
+    bundle = _make_bundle()
     result = test_author.author_test(
         bundle,
         "claude-sonnet-5",
         0,
         repo_root=repo_root,
-        llm_backend=_make_backend(log_path),
+        llm_backend=mock_backend,
     )
     assert result is not None
 
-    records = _read_records(log_path)
-    assert records, "the mock model was never called by author_test"
+    prompt_files = sorted(log_dir.iterdir())
+    assert prompt_files, "the mock model was never called"
+    first_prompt = prompt_files[0].read_text(encoding="utf-8")
 
-    recorded_input = "\n".join(
-        r["prompt"] + "\n" + "\n".join(str(v) for v in r["params"].values())
-        for r in records
-    )
-    normalized_input = _norm(recorded_input)
-
-    assert _norm(CRITERION_TEXT) in normalized_input, "criterion text missing from model input"
-    assert _norm(REQUIREMENT_TEXT) in normalized_input, "covered requirement text missing from model input"
-    assert _norm(INTERFACE_TEXT) in normalized_input, "interface content missing from model input"
-    assert _norm(GLOSSARY_TEXT) in normalized_input, "glossary missing from model input"
-
-    # Distinctive markers from each section, checked raw as well.
-    for marker in (
-        "CRIT-MARKER-91f3a",
-        "REQ-MARKER-7b2c4",
-        "IFACE-MARKER-c0d9e",
-        "GLOSS-MARKER-5e8a1",
-    ):
-        assert marker in recorded_input, f"{marker} missing from model input"
-
-    model_call_error = _get(result, "model_call_error")
-    assert model_call_error is None, f"unexpected model_call_error: {model_call_error!r}"
+    assert CRITERION_TEXT in first_prompt
+    assert REQUIREMENT_TEXT in first_prompt
+    assert INTERFACE_TEXT in first_prompt
+    assert GLOSSARY_TEXT in first_prompt

@@ -1,249 +1,227 @@
-"""AC-SCENARIO-004 (Covers: R-SCENARIO-003).
-
-- A generated-test scenario is dispatched fresh to the injected
-  test_author on every run_capability_scenarios call, with no cache-file
-  short-circuit.
-- The bundle given to the injected test_author has exactly the keys
-  capability_id, scenario_id, covers, kind, gherkin, file.
-- With no test_author supplied, a generated-test scenario's result is
-  "fail".
-"""
-
+# hotdocs-criterion: sha256:39417c6c89ab90006148579eff477d5b46f879ef1fa8b41d89e7ad5ab1f1cb4e
 import json
 import shutil
-from collections.abc import Mapping
 from pathlib import Path
-
-import pytest
 
 import capability_scenario_verifier
 
 
-CAPABILITY_ID = "P-X"
-SCENARIO_ID = "CS-X-001"
-GENERATED_PATH = "verification/capabilities/P-X/generated-test/test_cs_x_001.py"
-GENERATED_CONTENT = "def test_x():\n    assert True\n"
+EXPECTED_BUNDLE_KEYS = {"capability_id", "scenario_id", "covers", "kind", "gherkin", "file"}
 
 
 def field(value, name):
-    if isinstance(value, Mapping):
-        return value[name]
-    return getattr(value, name)
+    return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
 def capability_entry(report, capability_id):
-    if isinstance(report, Mapping):
+    if isinstance(report, dict):
         return report[capability_id]
-    if hasattr(report, "__getitem__"):
+    try:
         return report[capability_id]
-    return getattr(report, capability_id)
+    except (TypeError, KeyError):
+        return getattr(report, capability_id)
 
 
 def scenario_result(report, capability_id, scenario_id):
     entry = capability_entry(report, capability_id)
-    scenarios = field(entry, "scenarios")
-    for scenario in scenarios:
+    for scenario in field(entry, "scenarios"):
         if field(scenario, "id") == scenario_id:
             return field(scenario, "result")
-    raise AssertionError(
-        f"scenario {scenario_id} not found in report for {capability_id}: {report!r}"
+    raise AssertionError("scenario " + scenario_id + " missing from report")
+
+
+def _live_repo_root():
+    gen = next(
+        p for p in Path(capability_scenario_verifier.__file__).resolve().parents
+        if p.name == "gen"
     )
+    return gen.parent
 
 
-def _tool_root():
-    here = Path(capability_scenario_verifier.__file__).resolve()
-    for parent in here.parents:
-        if parent.name == "gen":
-            return parent.parent
-    return None
-
-
-FAKE_TEST_AUTHOR_MODULE = '''\
-def author_test(bundle, model, seed=0, *, repo_root=None, llm_backend=None):
-    criterion_id = bundle["criterion_id"]
-    name = "test_" + str(criterion_id).lower().replace("-", "_") + ".py"
-    return {
-        "component_id": bundle.get("component_id", ""),
-        "criterion_id": criterion_id,
-        "model": model,
-        "seed": seed,
-        "prompt_version": "v1",
-        "cache_hit": False,
-        "file": {
-            "path": "verification/capabilities/P-X/generated-test/" + name,
-            "content": "def test_x():\\n    assert True\\n",
-        },
-        "model_call_error": None,
-    }
-'''
-
-FAKE_LLM_ENDPOINT_MODULE = '''\
-def complete(prompt, model, *, backend=None, **params):
-    return {
-        "text": "pass",
-        "model": model,
-        "backend": "fake",
-        "model_call_error": None,
-    }
-'''
-
-
-def _write(path: Path, text: str):
+def _write(path, text):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text)
 
 
-def _build_repo(root: Path) -> Path:
-    comp = root / "specs" / "components" / "widget"
+def build_repo(repo_root):
+    # Real compiler copied from the live repository.
+    live_compiler = _live_repo_root() / "pipeline" / "criterion-compiler"
+    if live_compiler.is_dir():
+        shutil.copytree(
+            live_compiler,
+            repo_root / "pipeline" / "criterion-compiler",
+            ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
+        )
+
+    # Fake test-author dependency (flat module shape).
     _write(
-        comp / "component.md",
+        repo_root / "gen" / "test-author" / "test_author.py",
+        "GATE_VERSION = " + repr("generated_test@1.1.0") + "\n"
+        "\n"
+        "def author_test(bundle, model, seed=0, *, repo_root=None, llm_backend=None):\n"
+        "    return {\n"
+        "        " + repr("component_id") + ": None,\n"
+        "        " + repr("criterion_id") + ": bundle[" + repr("criterion_id") + "],\n"
+        "        " + repr("model") + ": model,\n"
+        "        " + repr("seed") + ": seed,\n"
+        "        " + repr("prompt_version") + ": " + repr("v1") + ",\n"
+        "        " + repr("cache_hit") + ": False,\n"
+        "        " + repr("file") + ": {\n"
+        "            " + repr("path") + ": "
+        + repr("verification/capabilities/P-X/generated-test/test_cs_x_001.py") + ",\n"
+        "            " + repr("content") + ": "
+        + repr("def test_x():\n    assert True\n") + ",\n"
+        "        },\n"
+        "        " + repr("model_call_error") + ": None,\n"
+        "    }\n",
+    )
+
+    # Fake llm-endpoint dependency (flat module shape).
+    _write(
+        repo_root / "gen" / "llm-endpoint" / "llm_endpoint.py",
+        "def complete(prompt, model, *, backend=None, **params):\n"
+        "    return {\n"
+        "        " + repr("text") + ": " + repr("PASS") + ",\n"
+        "        " + repr("model") + ": model,\n"
+        "        " + repr("backend") + ": " + repr("fake") + ",\n"
+        "        " + repr("model_call_error") + ": None,\n"
+        "    }\n",
+    )
+
+    # A non-sealed component realizing P-X.
+    comp_dir = repo_root / "specs" / "components" / "foo"
+    _write(
+        comp_dir / "component.md",
         "---\n"
-        "id: comp-widget\n"
-        "title: Widget\n"
+        "id: comp-foo\n"
+        "title: Foo\n"
         "status: draft\n"
-        "owners: [tester]\n"
+        "owners: [alice]\n"
         "realizes: [P-X]\n"
         "sealed: false\n"
-        "---\n\n"
-        "# Widget\n\n"
-        "A small widget component used as a fixture.\n",
+        "---\n"
+        "\n"
+        "# comp-foo\n"
+        "\n"
+        "A fixture component.\n",
     )
     _write(
-        comp / "requirements" / "R-WIDGET-001.md",
-        "**R-WIDGET-001** — The widget MUST exist.\n",
+        comp_dir / "requirements" / "R-FOO-001.md",
+        "**R-FOO-001** — Foo MUST exist.\n",
     )
     _write(
-        comp / "acceptance" / "AC-WIDGET-001.md",
-        "# AC-WIDGET-001\n\n"
-        "Covers: R-WIDGET-001\n"
-        "Kind: llm-judge\n\n"
+        comp_dir / "acceptance" / "AC-FOO-001.md",
+        "# AC-FOO-001\n"
+        "\n"
+        "Covers: R-FOO-001\n"
+        "Kind: compiled\n"
+        "\n"
         "```gherkin\n"
-        "Given a widget\n"
-        "When it is inspected\n"
-        "Then it exists\n"
+        "Given a value is 1\n"
+        "When nothing happens\n"
+        "Then value equals 1\n"
         "```\n",
     )
-    _write(
-        comp / "interface" / "library.md",
-        "# Library\n\n```\nwidget_value() -> int\n```\n",
-    )
-    _write(comp / "constraints.md", "# Constraints\n\nNone.\n")
-    _write(
-        root / "gen" / "widget" / "widget.py",
-        "def widget_value():\n    return 1\n",
-    )
+    _write(comp_dir / "constraints.md", "# Constraints\n\nNone.\n")
+    _write(repo_root / "gen" / "foo" / "foo.py", "VALUE = 1\n")
 
+    # The capability, with one generated-test scenario.
     _write(
-        root / "specs" / "product" / "x.md",
+        repo_root / "specs" / "product" / "x.md",
         "---\n"
         "id: P-X\n"
-        "title: Capability X\n"
+        "title: X capability\n"
         "status: draft\n"
-        "owners: [tester]\n"
-        "---\n\n"
-        "# P-X\n\n"
-        "A capability realized by the widget.\n\n"
-        "### CS-X-001\n\n"
+        "owners: [alice]\n"
+        "---\n"
+        "\n"
+        "# P-X\n"
+        "\n"
+        "### CS-X-001\n"
+        "\n"
         "Covers: P-X\n"
-        "Kind: generated-test\n\n"
+        "Kind: generated-test\n"
+        "\n"
         "```gherkin\n"
-        "Given a widget\n"
-        "When the widget is used\n"
-        "Then the widget works\n"
+        "Given a foo component\n"
+        "When it runs\n"
+        "Then it succeeds\n"
         "```\n",
     )
 
-    _write(root / "gen" / "test-author" / "test_author.py", FAKE_TEST_AUTHOR_MODULE)
-    _write(root / "gen" / "llm-endpoint" / "llm_endpoint.py", FAKE_LLM_ENDPOINT_MODULE)
 
-    tool_root = _tool_root()
-    if tool_root is not None:
-        src = tool_root / "pipeline" / "criterion-compiler"
-        if src.is_dir():
-            shutil.copytree(
-                src,
-                root / "pipeline" / "criterion-compiler",
-                ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
-            )
-    return root
-
-
-def _make_recording_test_author(log_path: Path):
-    def fake_test_author(bundle):
-        keys = sorted(bundle.keys()) if isinstance(bundle, Mapping) else None
-        record = {
-            "keys": keys,
-            "bundle": dict(bundle) if isinstance(bundle, Mapping) else repr(bundle),
-        }
+def make_recording_test_author(log_path):
+    def test_author(bundle):
+        if isinstance(bundle, dict):
+            keys = sorted(bundle.keys())
+        else:
+            keys = sorted(vars(bundle).keys())
         with open(log_path, "a") as fh:
-            fh.write(json.dumps(record, default=str) + "\n")
+            fh.write(json.dumps(keys) + "\n")
         return {
             "model_call_error": None,
-            "file": {"path": GENERATED_PATH, "content": GENERATED_CONTENT},
+            "file": {
+                "path": "verification/capabilities/P-X/generated-test/test_cs_x_001.py",
+                "content": "def test_x():\n    assert True\n",
+            },
         }
 
-    return fake_test_author
+    return test_author
 
 
-def _read_log(log_path: Path):
+def read_log(log_path):
     if not log_path.exists():
         return []
     return [json.loads(line) for line in log_path.read_text().splitlines() if line.strip()]
 
 
-@pytest.fixture
-def repo(tmp_path, monkeypatch):
-    root = tmp_path / "repo"
-    root.mkdir()
-    _build_repo(root)
-    monkeypatch.chdir(tmp_path)
-    return root
+def test_generated_test_scenario_dispatched_fresh_on_every_call(tmp_path):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    build_repo(repo_root)
+    log_path = tmp_path / "test_author_calls.log"
+    test_author = make_recording_test_author(log_path)
+
+    report1 = capability_scenario_verifier.run_capability_scenarios(
+        ["comp-foo"], repo_root, judge=None, test_author=test_author
+    )
+    assert len(read_log(log_path)) == 1
+    capability_entry(report1, "P-X")
+
+    report2 = capability_scenario_verifier.run_capability_scenarios(
+        ["comp-foo"], repo_root, judge=None, test_author=test_author
+    )
+    capability_entry(report2, "P-X")
+
+    calls = read_log(log_path)
+    assert len(calls) == 2, "test_author must be invoked on both calls, got " + repr(calls)
 
 
-def test_generated_test_scenario_dispatched_fresh_on_every_call(repo, tmp_path):
-    log_path = tmp_path / "test_author_calls.jsonl"
-    fake = _make_recording_test_author(log_path)
+def test_bundle_keys_are_exactly_the_scenario_shape(tmp_path):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    build_repo(repo_root)
+    log_path = tmp_path / "test_author_calls.log"
+    test_author = make_recording_test_author(log_path)
 
     capability_scenario_verifier.run_capability_scenarios(
-        ["comp-widget"], repo, test_author=fake
-    )
-    first_calls = _read_log(log_path)
-    assert len(first_calls) >= 1, "test_author was not invoked on the first call"
-
-    # Content unchanged; any file the first run wrote stays in place.
-    capability_scenario_verifier.run_capability_scenarios(
-        ["comp-widget"], repo, test_author=fake
-    )
-    second_calls = _read_log(log_path)
-    assert len(second_calls) > len(first_calls), (
-        "test_author was not invoked on the second call: a cache file "
-        "short-circuited the dispatch"
+        ["comp-foo"], repo_root, judge=None, test_author=test_author
     )
 
-
-def test_bundle_keys_are_exactly_the_scenario_shape(repo, tmp_path):
-    log_path = tmp_path / "test_author_bundles.jsonl"
-    fake = _make_recording_test_author(log_path)
-
-    capability_scenario_verifier.run_capability_scenarios(
-        ["comp-widget"], repo, test_author=fake
-    )
-    records = _read_log(log_path)
-    assert records, "test_author was never invoked"
-    expected = sorted(
-        ["capability_id", "scenario_id", "covers", "kind", "gherkin", "file"]
-    )
-    for record in records:
-        assert record["keys"] == expected, (
-            f"bundle keys {record['keys']!r} != {expected!r}"
-        )
-    bundle = records[0]["bundle"]
-    assert bundle["capability_id"] == CAPABILITY_ID
-    assert bundle["scenario_id"] == SCENARIO_ID
+    calls = read_log(log_path)
+    assert len(calls) >= 1
+    for keys in calls:
+        assert set(keys) == EXPECTED_BUNDLE_KEYS
+        assert len(keys) == len(EXPECTED_BUNDLE_KEYS)
 
 
-def test_generated_test_scenario_fails_without_test_author(repo):
+def test_generated_test_scenario_without_test_author_fails(tmp_path):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    build_repo(repo_root)
+
     report = capability_scenario_verifier.run_capability_scenarios(
-        ["comp-widget"], repo
+        ["comp-foo"], repo_root, judge=None, test_author=None
     )
-    assert scenario_result(report, CAPABILITY_ID, SCENARIO_ID) == "fail"
+
+    assert scenario_result(report, "P-X", "CS-X-001") == "fail"

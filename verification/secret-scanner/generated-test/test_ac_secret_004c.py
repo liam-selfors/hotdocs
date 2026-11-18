@@ -1,3 +1,4 @@
+# hotdocs-criterion: sha256:e87f027e7034777fbb55267815d43067beed50473559528124e69fb96a6c770b
 import sys
 import urllib.request
 from pathlib import Path

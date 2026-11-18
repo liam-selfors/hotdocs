@@ -3,7 +3,7 @@
 ```
 hotdocs init [<dir>] [--example] [--reconfigure] [--provider <name>]
     [--model <name>] [--base-url <url>] [--api-key-env <NAME>]
-    [--no-test] [--yes]
+    [--auth <login|key>] [--no-test] [--yes]
 ```
 
 `main(argv)` receives everything after the `init` word. Every flag takes its

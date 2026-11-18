@@ -1,88 +1,50 @@
-import review_packet_builder
+# hotdocs-criterion: sha256:b6c64e3db5c043593531e6542768e90e8a177a5a635d83e6311c9bbe567f0233
+"""AC-PACKET-011: every upstream-sourced packet field is read from
+provenance-tracker's check_readiness VerifyReport, never from a live call
+into verifier-orchestrator, license-scanner, secret-scanner,
+capability-scenario-verifier, or provenance-checker."""
 
-import dataclasses
-import json
-import os
 import subprocess
 from pathlib import Path
 
-import pytest
+import review_packet_builder
 
-
-# --------------------------------------------------------------------------
-# Helpers
-# --------------------------------------------------------------------------
 
 def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def to_plain(value):
-    """Normalize a returned value (dict, dataclass, or plain object) to plain
-    JSON-like Python data, so it can be compared against the fixture dicts."""
-    if isinstance(value, dict):
-        return {k: to_plain(v) for k, v in value.items()}
-    if isinstance(value, (list, tuple)):
-        return [to_plain(v) for v in value]
-    if dataclasses.is_dataclass(value) and not isinstance(value, type):
-        return to_plain(dataclasses.asdict(value))
-    if hasattr(value, "__dict__") and not isinstance(value, type):
-        return {k: to_plain(v) for k, v in vars(value).items() if not k.startswith("_")}
-    return value
-
-
-def _git(repo_root, *args):
-    subprocess.run(
-        [
-            "git",
-            "-c", "user.name=Test",
-            "-c", "user.email=test@example.invalid",
-            "-c", "commit.gpgsign=false",
-            *args,
-        ],
-        cwd=str(repo_root),
-        check=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-    )
-
-
-def _write(path: Path, text: str):
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text, encoding="utf-8")
-
-
-# --------------------------------------------------------------------------
-# Fixture data: what provenance-tracker's check_readiness reports
-# --------------------------------------------------------------------------
-
 VERIFICATION_REPORT = {
     "component_id": "comp-foo",
     "criteria": [
-        {"id": "AC-FOO-001", "covers": "R-FOO-001", "kind": "compiled", "result": "pass"},
-        {"id": "AC-FOO-002", "covers": "R-FOO-002", "kind": "compiled", "result": "pass"},
+        {
+            "id": "AC-FOO-001",
+            "covers": "R-FOO-001",
+            "kind": "compiled",
+            "result": "pass",
+        }
     ],
-    "requirement_results": {"R-FOO-001": "pass", "R-FOO-002": "pass"},
+    "requirement_results": {"R-FOO-001": "pass"},
     "interface_drift": False,
     "mutation_score": 1.0,
+    "mutation_error": None,
     "overall": "pass",
-    "marker": "from-verify-report-verification-7731",
 }
 
 LICENSE_SCAN = {
     "blocked": True,
-    "findings": [{"path": "foo.py", "license": "GPL-3.0", "marker": "from-verify-report-license-4417"}],
+    "findings": [{"path": "foo.py", "license": "GPL-3.0", "similarity": 0.97}],
 }
 
 SECRET_SCAN = {
     "flagged": True,
-    "findings": [{"path": "foo.py", "line": 3, "marker": "from-verify-report-secret-9902"}],
+    "findings": [{"path": "foo.py", "line": 3, "kind": "aws-access-key"}],
 }
 
 CAPABILITY_SCENARIO_REPORT = {
     "P-ZERO-EDIT": {
         "overall": "pass",
-        "scenarios": [{"id": "S-ZERO-EDIT-001", "result": "pass", "marker": "from-verify-report-cap-5560"}],
+        "scenarios": [{"id": "SC-ZERO-EDIT-001", "result": "pass"}],
     }
 }
 
@@ -109,198 +71,166 @@ VERIFY_REPORT = {
     ],
 }
 
-
-TRACKER_TEMPLATE = '''\
-import json as _json
-
-_LOG_PATH = {log_path!r}
-_REPORT = {report}
-
-
-def _log(record):
-    with open(_LOG_PATH, "a", encoding="utf-8") as fh:
-        fh.write(_json.dumps(record) + "\\n")
+FORBIDDEN_SLUGS = [
+    "verifier-orchestrator",
+    "license-scanner",
+    "secret-scanner",
+    "capability-scenario-verifier",
+    "provenance-checker",
+]
 
 
-def check_readiness(repo_root, changed_ids=None, model=None, seed=0, llm_backend=None):
-    _log({{"module": "provenance_tracker", "fn": "check_readiness",
-           "changed_ids": repr(changed_ids)}})
-    return {report}
+def _write(path, text):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text)
 
 
-def last_requirement_failures(component_id, repo_root):
-    _log({{"module": "provenance_tracker", "fn": "last_requirement_failures",
-           "component_id": repr(component_id)}})
-    return []
-'''
+def _git(repo_root, *args):
+    subprocess.run(
+        ["git", "-c", "user.name=test", "-c", "user.email=test@example.com"]
+        + list(args),
+        cwd=str(repo_root),
+        check=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
 
 
-FORBIDDEN_TEMPLATE = '''\
-import json as _json
-
-_LOG_PATH = {log_path!r}
-_MODULE = {module_name!r}
-
-
-def _log(fn):
-    with open(_LOG_PATH, "a", encoding="utf-8") as fh:
-        fh.write(_json.dumps({{"module": _MODULE, "fn": fn}}) + "\\n")
-
-
-def _make(fn_name):
-    def _fake(*args, **kwargs):
-        _log(fn_name)
-        return None
-    _fake.__name__ = fn_name
-    return _fake
-
-
-{explicit}
+def _tracker_source(log_path):
+    return (
+        "from pathlib import Path\n"
+        "\n"
+        "_LOG = " + repr(str(log_path)) + "\n"
+        "_REPORT = " + repr(VERIFY_REPORT) + "\n"
+        "\n"
+        "\n"
+        "def check_readiness(repo_root, changed_ids=None, model=None, seed=0, llm_backend=None):\n"
+        "    with open(_LOG, 'a') as fh:\n"
+        "        fh.write('check_readiness ' + repr(changed_ids) + '\\n')\n"
+        "    import copy\n"
+        "    return copy.deepcopy(_REPORT)\n"
+        "\n"
+        "\n"
+        "def last_requirement_failures(component_id, repo_root):\n"
+        "    return []\n"
+    )
 
 
-def __getattr__(name):
-    if name.startswith("_"):
-        raise AttributeError(name)
-    return _make(name)
-'''
+def _forbidden_source(slug, log_path):
+    return (
+        "_LOG = " + repr(str(log_path)) + "\n"
+        "_SLUG = " + repr(slug) + "\n"
+        "\n"
+        "\n"
+        "def _record(name):\n"
+        "    with open(_LOG, 'a') as fh:\n"
+        "        fh.write(_SLUG + ' ' + name + '\\n')\n"
+        "\n"
+        "\n"
+        "def __getattr__(name):\n"
+        "    if name.startswith('__'):\n"
+        "        raise AttributeError(name)\n"
+        "\n"
+        "    def _forbidden(*args, **kwargs):\n"
+        "        _record(name)\n"
+        "        raise RuntimeError('live call into ' + _SLUG + '.' + name + ' is forbidden')\n"
+        "\n"
+        "    return _forbidden\n"
+    )
 
-FORBIDDEN_MODULES = {
-    "verifier-orchestrator": ("verifier_orchestrator", ["verify", "run_verification", "verify_component"]),
-    "license-scanner": ("license_scanner", ["scan", "scan_licenses", "license_scan"]),
-    "secret-scanner": ("secret_scanner", ["scan", "scan_secrets", "secret_scan"]),
-    "capability-scenario-verifier": (
-        "capability_scenario_verifier",
-        ["check_capability_provenance", "run_capability_gates"],
-    ),
-    "provenance-checker": (
-        "provenance_checker",
-        ["current_sealed_key", "current_provenance_key", "check_provenance", "check_sealed_provenance"],
-    ),
-}
 
-
-@pytest.fixture
-def repo(tmp_path):
+def _build_fixture(tmp_path):
     repo_root = tmp_path / "repo"
+    log_dir = tmp_path / "logs"
+    log_dir.mkdir()
     repo_root.mkdir()
-    log_path = tmp_path / "invocations.log"
-    log_path.write_text("", encoding="utf-8")
 
-    # Minimal spec corpus for comp-foo, realizing P-ZERO-EDIT.
+    tracker_log = log_dir / "tracker.log"
+    forbidden_log = log_dir / "forbidden.log"
+
     _write(
         repo_root / "specs" / "components" / "foo" / "component.md",
         "---\n"
         "id: comp-foo\n"
         "title: Foo\n"
         "status: draft\n"
-        "owners: [test-owner]\n"
+        "owners: [alice]\n"
         "depends_on: []\n"
         "realizes: [P-ZERO-EDIT]\n"
-        "---\n\n"
-        "# Foo\n\nA fixture component.\n",
+        "---\n"
+        "\n"
+        "# Foo\n"
+        "\n"
+        "A fixture component.\n",
     )
     _write(
         repo_root / "specs" / "components" / "foo" / "requirements" / "R-FOO-001.md",
-        "**R-FOO-001** — Foo MUST do one thing.\n",
-    )
-    _write(
-        repo_root / "specs" / "components" / "foo" / "requirements" / "R-FOO-002.md",
-        "**R-FOO-002** — Foo MUST do another thing.\n",
+        "# R-FOO-001\n\n**R-FOO-001** — Foo MUST do the thing.\n",
     )
     _write(
         repo_root / "specs" / "components" / "foo" / "acceptance" / "AC-FOO-001.md",
-        "# AC-FOO-001\n\nCovers: R-FOO-001\nKind: compiled\n",
-    )
-    _write(
-        repo_root / "specs" / "components" / "foo" / "acceptance" / "AC-FOO-002.md",
-        "# AC-FOO-002\n\nCovers: R-FOO-002\nKind: compiled\n",
-    )
-    _write(
-        repo_root / "specs" / "components" / "foo" / "constraints.md",
-        "# Constraints\n\nNone.\n",
+        "# AC-FOO-001\n\nCovers: R-FOO-001\nKind: compiled\n\nFoo does the thing.\n",
     )
 
-    # provenance-tracker stand-in.
     _write(
         repo_root / "gen" / "provenance-tracker" / "provenance_tracker.py",
-        TRACKER_TEMPLATE.format(log_path=str(log_path), report=repr(VERIFY_REPORT)),
+        _tracker_source(tracker_log),
     )
-
-    # Fakes for every component the packet must NOT call directly.
-    for slug, (module_name, fns) in FORBIDDEN_MODULES.items():
-        explicit = "\n".join(f"{fn} = _make({fn!r})" for fn in fns)
+    for slug in FORBIDDEN_SLUGS:
+        module_name = slug.replace("-", "_")
         _write(
-            repo_root / "gen" / slug / f"{module_name}.py",
-            FORBIDDEN_TEMPLATE.format(
-                log_path=str(log_path), module_name=module_name, explicit=explicit
-            ),
+            repo_root / "gen" / slug / (module_name + ".py"),
+            _forbidden_source(slug, forbidden_log),
         )
 
     _git(repo_root, "init", "-q")
     _git(repo_root, "add", "-A")
-    _git(repo_root, "commit", "-q", "-m", "initial fixture commit")
+    _git(repo_root, "commit", "-q", "-m", "initial fixture")
 
-    return repo_root, log_path
+    # A spec change in the working tree for the packet's diff to describe.
+    _write(
+        repo_root / "specs" / "components" / "foo" / "requirements" / "R-FOO-001.md",
+        "# R-FOO-001\n\n**R-FOO-001** — Foo MUST do the thing, quickly.\n",
+    )
+
+    return repo_root, tracker_log, forbidden_log
 
 
-def _read_log(log_path):
-    lines = [l for l in log_path.read_text(encoding="utf-8").splitlines() if l.strip()]
-    return [json.loads(l) for l in lines]
-
-
-# --------------------------------------------------------------------------
-# AC-PACKET-011
-# --------------------------------------------------------------------------
-
-def test_ac_packet_011_fields_populated_entirely_from_verify_report(repo):
-    repo_root, log_path = repo
+def test_upstream_fields_come_only_from_verify_report(tmp_path):
+    repo_root, tracker_log, forbidden_log = _build_fixture(tmp_path)
 
     packet = review_packet_builder.build_review_packet(
-        ["comp-foo", "R-FOO-001"], Path(repo_root)
+        ["comp-foo", "R-FOO-001"], repo_root
     )
 
-    invocations = _read_log(log_path)
+    # provenance-tracker's check_readiness was actually consulted.
+    assert tracker_log.is_file(), "check_readiness was never called"
+    assert "check_readiness" in tracker_log.read_text()
 
-    # provenance-tracker's check_readiness is the read source.
-    assert any(
-        rec["module"] == "provenance_tracker" and rec["fn"] == "check_readiness"
-        for rec in invocations
-    ), f"check_readiness was never called; invocations: {invocations}"
+    # No live call into any of the components the VerifyReport already covers.
+    calls = forbidden_log.read_text() if forbidden_log.is_file() else ""
+    assert calls == "", "unexpected live upstream calls:\n" + calls
 
-    # No live call into any of the underlying components.
-    forbidden = {m for (m, _fns) in FORBIDDEN_MODULES.values()}
-    forbidden_calls = [rec for rec in invocations if rec["module"] in forbidden]
-    assert forbidden_calls == [], (
-        f"build_review_packet called into a component directly: {forbidden_calls}"
-    )
+    # verification_results: verbatim from components[comp-foo].verification_report
+    verification_results = field(packet, "verification_results")
+    assert verification_results["comp-foo"] == VERIFICATION_REPORT
 
-    # verification_results — from components[comp-foo].verification_report.
-    verification_results = to_plain(field(packet, "verification_results"))
-    assert verification_results == {"comp-foo": VERIFICATION_REPORT}
-
-    # compliance_flags — from components[comp-foo].license_scan / secret_scan.
+    # compliance_flags: from license_scan / secret_scan in the VerifyReport
     compliance_flags = field(packet, "compliance_flags")
     license_entries = field(compliance_flags, "license_scan")
     secret_entries = field(compliance_flags, "secret_scan")
-
-    license_entries = list(license_entries)
-    secret_entries = list(secret_entries)
     assert len(license_entries) == 1
     assert field(license_entries[0], "component_id") == "comp-foo"
-    assert to_plain(field(license_entries[0], "result")) == LICENSE_SCAN
-
+    assert field(license_entries[0], "result") == LICENSE_SCAN
     assert len(secret_entries) == 1
     assert field(secret_entries[0], "component_id") == "comp-foo"
-    assert to_plain(field(secret_entries[0], "result")) == SECRET_SCAN
+    assert field(secret_entries[0], "result") == SECRET_SCAN
 
-    # provenance_hit_status — from components[comp-foo].hit.
-    provenance_hit_status = to_plain(field(packet, "provenance_hit_status"))
+    # provenance_hit_status: from the VerifyReport's own `hit` field
+    provenance_hit_status = field(packet, "provenance_hit_status")
     assert provenance_hit_status == {"comp-foo": True}
 
-    # capability_scenarios — from capabilities[P-ZERO-EDIT].capability_scenario_report,
-    # keyed by P-id, value exactly as read (itself keyed by P-id, never unwrapped).
-    capability_scenarios = to_plain(field(packet, "capability_scenarios"))
+    # capability_scenarios: from capabilities[P-ZERO-EDIT].capability_scenario_report,
+    # keyed by P-id, value exactly as read (itself keyed by P-id, never unwrapped)
+    capability_scenarios = field(packet, "capability_scenarios")
     assert capability_scenarios == {"P-ZERO-EDIT": CAPABILITY_SCENARIO_REPORT}
-
-    # Distinct section, never conflated with verification_results.
-    assert "P-ZERO-EDIT" not in verification_results

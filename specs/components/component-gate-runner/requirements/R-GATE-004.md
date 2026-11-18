@@ -4,6 +4,9 @@
   never silently accepted, with `block_reason` from the last attempt's
   `outcome`: `generation_failed` gives `"model_call_error"` (with
   `model_call_error` the last generation result's), `surface_failed`
-  gives `"surface_check_failed"`, `verification_failed` gives
-  `"verification_failed"`, and `refused` gives `"refused"`. Overall merge
-  readiness stays `provenance-tracker`'s decision.
+  gives `"surface_check_failed"`, `refused` gives `"refused"`, and
+  `verification_failed` gives `"test_authoring_failed"` when every
+  criterion of that attempt's `VerificationReport` whose `result` is
+  `"fail"` has `failure_origin` `"test"` (no test could be written, so
+  nothing shows the code wrong, `D319`), else `"verification_failed"`.
+  Overall merge readiness stays `provenance-tracker`'s decision.

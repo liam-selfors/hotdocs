@@ -1,5 +1,7 @@
-import json
+# hotdocs-criterion: sha256:e8ebdf83e3a63d8cbf70e1b135d82d2365aacb37d033314d3437d5f3f837d6fd
+import importlib.util
 import re
+import sys
 from pathlib import Path
 
 import pytest
@@ -7,19 +9,24 @@ import pytest
 import test_author
 
 
-COMPONENT_ID = "comp-foo"
-COMPONENT_SLUG = "foo"
-CRITERION_ID = "AC-FOO-003"
 MODEL = "claude-sonnet-5"
+SLUG = "foo"
 
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
+def field(value, name):
+    return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-class _Bundle(dict):
-    """A CriterionBundle stand-in readable both as a mapping and by attribute."""
+def load_module(path, module_name):
+    spec = importlib.util.spec_from_file_location(module_name, path)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+class Bundle(dict):
+    """A CriterionBundle readable both as a mapping and by attribute."""
 
     def __getattr__(self, name):
         try:
@@ -28,127 +35,35 @@ class _Bundle(dict):
             raise AttributeError(name)
 
 
-def _field(value, name):
-    if value is None:
-        return None
-    if isinstance(value, dict):
-        return value.get(name)
-    return getattr(value, name, None)
-
-
-def _error_text(err):
-    if err is None:
-        return ""
-    if isinstance(err, dict):
-        return json.dumps(err, default=str)
-    parts = [str(err)]
-    for n in ("category", "message", "function", "name", "detail", "details"):
-        v = getattr(err, n, None)
-        if v is not None:
-            parts.append(str(v))
-    return " ".join(parts)
-
-
-def _library_md(*signatures):
-    lines = ["# Library", "", "```"]
-    lines.extend(signatures)
-    lines.append("```")
-    lines.append("")
-    return "\n".join(lines)
-
-
-def _make_bundle(dependency_interfaces):
-    return _Bundle(
-        component_id=COMPONENT_ID,
-        criterion_id=CRITERION_ID,
-        covers="R-FOO-003",
+def make_bundle(dependency_interfaces):
+    return Bundle(
+        component_id="comp-foo",
+        criterion_id="AC-FOO-001",
+        covers="R-FOO-001",
         criterion_text=(
             "Given x = 2\n"
             "When foo(x) is called\n"
             "Then it returns 4\n"
         ),
-        requirement_text="**R-FOO-003** — `foo(x)` MUST return `2 * x`.",
-        interface=_library_md("foo(x: int) -> int"),
-        glossary="# Glossary\n\n- **Foo** — a test term.\n",
+        requirement_text="**R-FOO-001** \u2014 `foo(x)` MUST return `2 * x`.",
+        interface="# Library\n\n```\nfoo(x: int) -> int\n```\n",
+        glossary="# Glossary\n\n- **Foo** \u2014 a test term.\n",
         dependency_interfaces=dict(dependency_interfaces),
         module_names=["foo"],
     )
 
 
-BAR_INTERFACES = {
-    "comp-bar": _library_md("do_thing(a: int, b: str, c: dict[str, str]) -> bool"),
-}
-
-SCAN_INTERFACES = {
-    "comp-alpha": _library_md("scan(component_id: str, repo_root: Path) -> dict"),
-    "comp-beta": _library_md("scan(repo_root: Path) -> dict"),
-}
+NONCE_RE = re.compile(r"-----BEGIN FILE ([0-9a-fA-F]+)-----")
 
 
-def _test_file(*fake_lines):
-    lines = ["import foo", "", ""]
-    lines.extend(fake_lines)
-    lines.extend(
-        [
-            "",
-            "",
-            "def test_ac_foo_003():",
-            "    assert foo.foo(2) == 4",
-            "",
-        ]
-    )
-    return "\n".join(lines)
-
-
-VALID_PLAIN = _test_file("# no fakes needed")
-
-MALFORMED = "This is <<< not ::: python at all ))) {{ def ( ]] = = =\n"
-
-DO_THING_TWO_ARGS = _test_file(
-    "def _fake_do_thing(a, b):",
-    "    return True",
-    "",
-    "",
-    "do_thing = _fake_do_thing",
-)
-
-DO_THING_THREE_ARGS = _test_file(
-    "def _fake_do_thing(a, b, c):",
-    "    return True",
-    "",
-    "",
-    "do_thing = _fake_do_thing",
-)
-
-SCAN_TWO_ARGS = _test_file(
-    "def scan(component_id, repo_root):",
-    "    return {}",
-)
-
-SCAN_ONE_ARG = _test_file(
-    "def scan(repo_root):",
-    "    return {}",
-)
-
-SCAN_THREE_ARGS = _test_file(
-    "def scan(a, b, c):",
-    "    return {}",
-)
-
-
-def _make_backend(response_body, log_path):
+def make_backend(content):
     def backend(prompt, model, **params):
-        with open(log_path, "a", encoding="utf-8") as fh:
-            fh.write(json.dumps({"model": model}) + "\n")
-        text_prompt = prompt if isinstance(prompt, str) else str(prompt)
-        m = re.search(r"BEGIN FILE ([0-9a-f]{32})", text_prompt)
-        if m is None:
-            m = re.search(r"\b([0-9a-f]{32})\b", text_prompt)
-        nonce = m.group(1) if m else ""
+        m = NONCE_RE.search(prompt)
+        nonce = m.group(1) if m else "0" * 32
         text = (
             "-----BEGIN FILE " + nonce + "-----\n"
-            + response_body
-            + "\n-----END FILE " + nonce + "-----\n"
+            + content
+            + "\n-----END FILE " + nonce + "-----"
         )
         return {
             "text": text,
@@ -160,165 +75,172 @@ def _make_backend(response_body, log_path):
     return backend
 
 
-def _call_count(log_path):
-    if not Path(log_path).exists():
-        return 0
-    return len([ln for ln in Path(log_path).read_text().splitlines() if ln.strip()])
-
-
-def _fresh_repo(base, name, monkeypatch):
-    repo_root = base / name
-    repo_root.mkdir(parents=True, exist_ok=True)
-    monkeypatch.chdir(repo_root)
-    return repo_root
-
-
-def _files_under(path):
-    path = Path(path)
+def files_under(path):
     if not path.exists():
         return []
     return [p for p in path.rglob("*") if p.is_file()]
 
 
-def _assert_nothing_written(repo_root):
-    cache_files = _files_under(repo_root / ".hotdocs" / "cache")
-    assert cache_files == [], f"unexpected cache entries: {cache_files}"
-    out_files = _files_under(repo_root / "verification" / COMPONENT_SLUG / "generated-test")
-    assert out_files == [], f"unexpected generated-test files: {out_files}"
+def cache_entry_count(repo_root):
+    try:
+        gen = next(
+            p for p in Path(test_author.__file__).resolve().parents if p.name == "gen"
+        )
+    except StopIteration:
+        return None
+    base = gen / "cache-manager"
+    if (base / "cache_manager.py").is_file():
+        path = base / "cache_manager.py"
+    elif (base / "cache_manager" / "__init__.py").is_file():
+        path = base / "cache_manager" / "__init__.py"
+    else:
+        return None
+    try:
+        cm = load_module(path, "cache_manager")
+    except Exception:
+        return None
+    stats = cm.stats(repo_root=repo_root)
+    return field(stats, "entry_count")
 
 
-def _run(bundle, response_body, repo_root, log_path):
-    backend = _make_backend(response_body, log_path)
+def assert_nothing_written(repo_root):
+    gt = repo_root / "verification" / SLUG / "generated-test"
+    assert files_under(gt) == [], "a test file was written: " + repr(files_under(gt))
+    cache_dir = repo_root / ".hotdocs" / "cache"
+    assert files_under(cache_dir) == [], "cache was written: " + repr(files_under(cache_dir))
+    count = cache_entry_count(repo_root)
+    if count is not None:
+        assert count == 0
+
+
+def error_text(err):
+    try:
+        msg = field(err, "message")
+    except (KeyError, AttributeError):
+        msg = None
+    return (str(msg) if msg is not None else "") + " " + str(err)
+
+
+@pytest.fixture
+def repo_root(tmp_path, monkeypatch):
+    root = tmp_path / "repo"
+    root.mkdir()
+    monkeypatch.delenv("VAR_CACHE_STORE_URL", raising=False)
+    monkeypatch.chdir(root)
+    return root
+
+
+DO_THING_IFACE = {
+    "comp-bar": (
+        "# Library\n\n"
+        "```\n"
+        "do_thing(a: int, b: str, c: dict[str, str]) -> bool\n"
+        "```\n"
+    )
+}
+
+SCAN_IFACES = {
+    "comp-bar": (
+        "# Library\n\n"
+        "```\n"
+        "scan(component_id: str, repo_root: Path) -> Report\n"
+        "```\n"
+    ),
+    "comp-baz": (
+        "# Library\n\n"
+        "```\n"
+        "scan(repo_root: Path) -> Report\n"
+        "```\n"
+    ),
+}
+
+
+def run(bundle, content, repo_root):
     return test_author.author_test(
-        bundle, MODEL, 0, repo_root=repo_root, llm_backend=backend
+        bundle, MODEL, 0, repo_root=repo_root, llm_backend=make_backend(content)
     )
 
 
-def _assert_success(result, repo_root, response_body):
-    err = _field(result, "model_call_error")
-    assert err is None, f"expected success, got model_call_error: {_error_text(err)}"
-    file_entry = _field(result, "file")
-    assert file_entry is not None
-    content = _field(file_entry, "content")
-    assert isinstance(content, str)
-    assert content.strip() == response_body.strip()
-    path = _field(file_entry, "path")
-    assert path
-    p = Path(path)
-    if not p.is_absolute():
-        p = repo_root / p
-    assert p.is_file(), f"expected the accepted test to be written at {p}"
+def test_malformed_code_rejected(repo_root):
+    content = "def (:\n    this is not python ??? }}}\n"
+    result = run(make_bundle({}), content, repo_root)
+    err = field(result, "model_call_error")
+    assert err is not None
+    assert field(err, "category") == "malformed_code"
+    assert field(result, "file") is None
+    assert_nothing_written(repo_root)
 
 
-def _assert_rejected(result, category, repo_root):
-    err = _field(result, "model_call_error")
-    assert err is not None, "expected a model_call_error"
-    assert _field(err, "category") == category, _error_text(err)
-    assert _field(result, "file") is None
-    assert _field(result, "cache_hit") is not True
-    _assert_nothing_written(repo_root)
-    return err
+def test_two_arg_alias_fake_rejected(repo_root):
+    content = (
+        "import foo\n"
+        "\n"
+        "def _fake_do_thing(a, b):\n"
+        "    return True\n"
+        "\n"
+        "do_thing = _fake_do_thing\n"
+        "\n"
+        "def test_foo():\n"
+        "    assert foo.foo(2) == 4\n"
+    )
+    result = run(make_bundle(DO_THING_IFACE), content, repo_root)
+    err = field(result, "model_call_error")
+    assert err is not None
+    assert field(err, "category") == "fake_signature_mismatch"
+    assert "do_thing" in error_text(err)
+    assert field(result, "file") is None
+    assert_nothing_written(repo_root)
 
 
-@pytest.fixture(autouse=True)
-def _isolated_env(monkeypatch):
-    monkeypatch.delenv("VAR_CACHE_STORE_URL", raising=False)
-    monkeypatch.delenv("VAR_HOTDOCS_CONFIG", raising=False)
+def test_three_arg_alias_fake_accepted(repo_root):
+    content = (
+        "import foo\n"
+        "\n"
+        "def _fake_do_thing(a, b, c):\n"
+        "    return True\n"
+        "\n"
+        "do_thing = _fake_do_thing\n"
+        "\n"
+        "def test_foo():\n"
+        "    assert foo.foo(2) == 4\n"
+    )
+    result = run(make_bundle(DO_THING_IFACE), content, repo_root)
+    assert field(result, "model_call_error") is None
+    f = field(result, "file")
+    assert f is not None
+    assert "_fake_do_thing(a, b, c)" in field(f, "content")
 
 
-# ---------------------------------------------------------------------------
-# Scenario 1: syntax check
-# ---------------------------------------------------------------------------
+@pytest.mark.parametrize("params", ["component_id, repo_root", "repo_root"])
+def test_scan_matching_any_dependency_arity_accepted(repo_root, params):
+    content = (
+        "import foo\n"
+        "\n"
+        "def scan(" + params + "):\n"
+        "    return {}\n"
+        "\n"
+        "def test_foo():\n"
+        "    assert foo.foo(2) == 4\n"
+    )
+    result = run(make_bundle(SCAN_IFACES), content, repo_root)
+    assert field(result, "model_call_error") is None
+    assert field(result, "file") is not None
 
 
-def test_malformed_python_is_rejected_and_nothing_written(tmp_path, monkeypatch):
-    repo_root = _fresh_repo(tmp_path, "repo_malformed", monkeypatch)
-    log_path = tmp_path / "calls_malformed.log"
-    bundle = _make_bundle(BAR_INTERFACES)
-
-    result = _run(bundle, MALFORMED, repo_root, log_path)
-
-    assert _call_count(log_path) >= 1, "the mock model was never called"
-    _assert_rejected(result, "malformed_code", repo_root)
-
-    # Nothing was cached: a later valid call under the same key is a miss
-    # and reaches the model again.
-    before = _call_count(log_path)
-    follow_up = _run(bundle, VALID_PLAIN, repo_root, log_path)
-    assert _call_count(log_path) > before
-    assert _field(follow_up, "cache_hit") is False
-    _assert_success(follow_up, repo_root, VALID_PLAIN)
-
-
-# ---------------------------------------------------------------------------
-# Scenario 2: fake arity mismatch via alias
-# ---------------------------------------------------------------------------
-
-
-def test_two_arg_fake_aliased_to_do_thing_is_rejected(tmp_path, monkeypatch):
-    repo_root = _fresh_repo(tmp_path, "repo_mismatch", monkeypatch)
-    log_path = tmp_path / "calls_mismatch.log"
-    bundle = _make_bundle(BAR_INTERFACES)
-
-    result = _run(bundle, DO_THING_TWO_ARGS, repo_root, log_path)
-
-    assert _call_count(log_path) >= 1, "the mock model was never called"
-    err = _assert_rejected(result, "fake_signature_mismatch", repo_root)
-    assert "do_thing" in _error_text(err)
-
-    # Nothing was cached: a later call under the same key reaches the model.
-    before = _call_count(log_path)
-    follow_up = _run(bundle, DO_THING_THREE_ARGS, repo_root, log_path)
-    assert _call_count(log_path) > before
-    assert _field(follow_up, "cache_hit") is False
-    _assert_success(follow_up, repo_root, DO_THING_THREE_ARGS)
-
-
-# ---------------------------------------------------------------------------
-# Scenario 3: matching arity (bracketed comma is not a separator)
-# ---------------------------------------------------------------------------
-
-
-def test_three_arg_fake_aliased_to_do_thing_succeeds(tmp_path, monkeypatch):
-    repo_root = _fresh_repo(tmp_path, "repo_match", monkeypatch)
-    log_path = tmp_path / "calls_match.log"
-    bundle = _make_bundle(BAR_INTERFACES)
-
-    result = _run(bundle, DO_THING_THREE_ARGS, repo_root, log_path)
-
-    assert _call_count(log_path) >= 1, "the mock model was never called"
-    _assert_success(result, repo_root, DO_THING_THREE_ARGS)
-
-
-# ---------------------------------------------------------------------------
-# Scenario 4: a name defined by more than one dependency
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.parametrize(
-    "case_name, body",
-    [("two_params", SCAN_TWO_ARGS), ("one_param", SCAN_ONE_ARG)],
-)
-def test_scan_fake_matching_any_dependency_arity_is_accepted(
-    tmp_path, monkeypatch, case_name, body
-):
-    repo_root = _fresh_repo(tmp_path, "repo_scan_" + case_name, monkeypatch)
-    log_path = tmp_path / ("calls_scan_" + case_name + ".log")
-    bundle = _make_bundle(SCAN_INTERFACES)
-
-    result = _run(bundle, body, repo_root, log_path)
-
-    assert _call_count(log_path) >= 1, "the mock model was never called"
-    _assert_success(result, repo_root, body)
-
-
-def test_scan_fake_matching_no_dependency_arity_is_rejected(tmp_path, monkeypatch):
-    repo_root = _fresh_repo(tmp_path, "repo_scan_three", monkeypatch)
-    log_path = tmp_path / "calls_scan_three.log"
-    bundle = _make_bundle(SCAN_INTERFACES)
-
-    result = _run(bundle, SCAN_THREE_ARGS, repo_root, log_path)
-
-    assert _call_count(log_path) >= 1, "the mock model was never called"
-    err = _assert_rejected(result, "fake_signature_mismatch", repo_root)
-    assert "scan" in _error_text(err)
+def test_scan_three_params_rejected(repo_root):
+    content = (
+        "import foo\n"
+        "\n"
+        "def scan(component_id, repo_root, extra):\n"
+        "    return {}\n"
+        "\n"
+        "def test_foo():\n"
+        "    assert foo.foo(2) == 4\n"
+    )
+    result = run(make_bundle(SCAN_IFACES), content, repo_root)
+    err = field(result, "model_call_error")
+    assert err is not None
+    assert field(err, "category") == "fake_signature_mismatch"
+    assert "scan" in error_text(err)
+    assert field(result, "file") is None
+    assert_nothing_written(repo_root)

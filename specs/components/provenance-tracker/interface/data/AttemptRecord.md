@@ -19,14 +19,14 @@ relationship `ComponentPipelineResult` already has between
 `model_call_error` and `verification`, preserved here at the
 per-attempt level.
 
-**`verification.requirement_results`'s own real shape** (`D95`) — the
-one sub-field of `VerificationReport` this component actually reads
-(`last_requirement_failures`, `R-TRACK-008`), stated here directly
-since this component never depends on `verifier-orchestrator` for the
-rest of that type: a flat JSON object mapping each `R-id` string
-directly to the string `"pass"` or `"fail"` — never a list of
-per-requirement objects, never a nested status field. For example:
-`{"R-FOO-001": "pass", "R-FOO-002": "fail"}`.
+**What `last_requirement_failures` reads of `verification`** (`D95`,
+`R-TRACK-008`), stated here since this component never depends on
+`verifier-orchestrator`: `requirement_results`, a flat JSON object
+mapping each `R-id` string to `"pass"` or `"fail"`, such as
+`{"R-FOO-001": "pass", "R-FOO-002": "fail"}`; and `criteria`, a list of
+objects each with `covers` (one `R-id`), `result` (`"pass"`, `"fail"` or
+`"skipped"`) and, on a failed one, `failure_origin` (`"test"` or
+`"implementation"`; absent means `"implementation"`).
 
 Never mutated once written, append-only — a later, separate
 `hotdocs generate` attempt on the same component writes its own new

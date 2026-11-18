@@ -11,9 +11,11 @@
   1. call `check_capability_provenance(capability_id, repo_root)`;
   2. if its `hit` is true, that result is the capability's result and
      nothing further is called for it;
-  3. if its `hit` is false and `model` is `None`, raise `ValueError` (a
-     usage error) before any further call, never skipping the capability
-     or running it without a model;
+  3. if its `hit` is false and `model` is `None`, the capability is not
+     ready, with the `not_ready_reasons` entry
+     `<capability_id>: needs a fresh run; pass --model`, and nothing
+     further is called for it (`D323`): the components are still all
+     checked and reported;
   4. otherwise call `run_capability_gates(capability_id, repo_root,
      model, seed, llm_backend)`, passing this function's own three values
      through unchanged (`D174`'s signature) — never
