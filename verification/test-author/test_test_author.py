@@ -408,8 +408,8 @@ def test_ac_author_020_rejects_fake_with_wrong_arity(repo_root):
     )
     backend = MockBackend([file_block(
         "def _fake_do_thing(a, b): pass\n"
-        "do_thing = _fake_do_thing\n"
-        "def test_x(): pass"
+        "def test_x(monkeypatch):\n"
+        "    monkeypatch.setattr(target, \"do_thing\", _fake_do_thing)"
     )] * 3)
     result = author_test(bundle, "claude-sonnet-5", repo_root=repo_root, llm_backend=backend)
 
@@ -422,8 +422,8 @@ def test_ac_author_020_accepts_fake_with_matching_arity(repo_root):
     )
     backend = MockBackend([file_block(
         "def _fake_do_thing(a, b, c): pass\n"
-        "do_thing = _fake_do_thing\n"
-        "def test_x(): pass"
+        "def test_x(monkeypatch):\n"
+        "    monkeypatch.setattr(target, \"do_thing\", _fake_do_thing)"
     )])
     result = author_test(bundle, "claude-sonnet-5", repo_root=repo_root, llm_backend=backend)
 
@@ -543,13 +543,32 @@ def test_ac_author_020_name_shared_by_two_dependencies_accepts_either_arity(repo
     }
     # One fresh repo_root per case: a shared one would serve later cases
     # from test-author's own cache without re-validating them.
-    backend = MockBackend([file_block(fake + "\ndef test_x(): pass")] * 3)
+    # The fake is a fake module's source, written as a string (D113, D334).
+    backend = MockBackend([file_block("FAKE = " + repr(fake + "\n") + "\ndef test_x(): pass")] * 3)
     result = author_test(fake_bundle(dependency_interfaces=interfaces), "claude-sonnet-5",
                          repo_root=repo_root, llm_backend=backend)
     if ok:
         assert _rf(result, "model_call_error") is None, fake
     else:
         _rejected(result, "fake_signature_mismatch")
+
+
+def test_d334_helper_sharing_a_dependency_name_is_not_a_fake(repo_root):
+    """D334, issue #12 -- a top-level helper installed nowhere is never
+    checked against a dependency function of the same name."""
+    bundle = fake_bundle(
+        dependency_interfaces={"comp-erd-graph": "build_graph(manifest, *, plan=None, dbt_links=None) -> dict"}
+    )
+    backend = MockBackend([file_block(
+        "def build_graph():\n"
+        "    return {\"nodes\": [], \"edges\": []}\n"
+        "def test_x():\n"
+        "    assert build_graph()[\"nodes\"] == []"
+    )])
+    result = author_test(bundle, "claude-sonnet-5", repo_root=repo_root, llm_backend=backend)
+
+    assert _rf(result, "model_call_error") is None
+    assert _rf(result, "file") is not None
 
 
 @pytest.mark.parametrize("component_id, module", [("comp-foo-bar", "foo_bar"), ("comp-semver", "semver")])
