@@ -1,286 +1,256 @@
-"""AC-VERIFY-015 (Covers: R-VERIFY-006).
-
-Given a component with two generated-test-kind criteria, each testing a
-different one of two functions in the same module, each test covering its
-own function fully, when verify runs, then the reported mutation_score
-reflects the union of both tests killing mutants (high), never either
-test's own isolated score against the whole module (which would be far
-lower).
-
-Fixture design: the module `mathkit` has exactly six mutation sites under
-the four permitted operators (no numeric constants are ever mutated, and the
-module contains no boolean constants, `is`, or `in`):
-
-    scale_sum: `a + b`, `(...) * c`, `(...) - a`        -> 3 mutants
-    in_range:  `n >= lo`, `n < hi`, `... and ...`       -> 3 mutants
-
-AC-MATHKIT-001's test kills exactly the three scale_sum mutants, and
-AC-MATHKIT-002's test kills exactly the three in_range mutants. Either
-test's isolated score against the whole module is therefore 3/6 = 0.5,
-while the union score is 6/6 = 1.0.
-"""
+# hotdocs-criterion: sha256:acabc539e4ecfade4e5923f05033b1aef308c105d6cb58abca75af0ba41b32d9
+import sys
+from pathlib import Path
 
 import verifier_orchestrator
-
-from pathlib import Path
 
 
 def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-GLOSSARY = """# Glossary
-
-- **Foo** — a test term.
-"""
-
-CAPABILITY = """---
-id: P-MATHKIT
-title: Math kit
-status: draft
-owners: [team-a]
----
-
-# Math kit
-
-## Purpose
-
-Provides small arithmetic helpers.
-
-## Scope
-
-- In scope: arithmetic helpers.
-- Out of scope: everything else.
-
-## Capability scenarios
-
-### CS-MATHKIT-001
-
-Covers: P-MATHKIT
-Kind: compiled
-
-```gherkin
-Given a n is 5
-When mathkit.in_range is invoked with [5, 0, 10]
-Then result equals true
-```
-"""
-
-COMPONENT = """---
-id: comp-mathkit
-title: Math kit
-status: draft
-owners: [team-a]
-realizes: [P-MATHKIT]
-depends_on: []
----
-
-# Math kit
-
-## Purpose
-
-Math kit provides two small arithmetic helpers.
-
-## Scope
-
-- In scope: the two helpers.
-- Out of scope: anything else.
-
-## Definitions
-
-None.
-
-## Behavior
-
-See `requirements/`.
-
-## Interfaces
-
-See `interface/`.
-
-## Data
-
-See `interface/data/`.
-
-## Acceptance criteria
-
-See `acceptance/`.
-
-## Non-functional constraints
-
-See `constraints.md`.
-
-## Open questions
-
-## Change log
-
-- Initial draft.
-"""
-
-R1 = """# R-MATHKIT-001
-
-**R-MATHKIT-001** — `scale_sum(a, b, c)` MUST return `(a + b) * c - a`.
-"""
-
-R2 = """# R-MATHKIT-002
-
-**R-MATHKIT-002** — `in_range(n, lo, hi)` MUST return whether `lo <= n < hi`.
-"""
-
-AC1 = """# AC-MATHKIT-001
-
-Covers: R-MATHKIT-001
-Kind: generated-test
-
-```gherkin
-Given numbers a = 2, b = 5 and c = 3
-When scale_sum(a, b, c) is called
-Then it returns 19
-```
-"""
-
-AC2 = """# AC-MATHKIT-002
-
-Covers: R-MATHKIT-002
-Kind: generated-test
-
-```gherkin
-Given a bound lo = 0 and hi = 10
-When in_range(n, lo, hi) is called for several n
-Then it is true exactly for lo <= n < hi
-```
-"""
-
-LIBRARY = """# Library
-
-```
-scale_sum(a: int, b: int, c: int) -> int
-in_range(n: int, lo: int, hi: int) -> bool
-```
-"""
-
-CONSTRAINTS = """# Constraints
-
-None.
-"""
-
-MODULE = """def scale_sum(a, b, c):
-    return (a + b) * c - a
-
-
-def in_range(n, lo, hi):
-    return n >= lo and n < hi
-"""
-
-IMPORT_PRELUDE = """import sys
-from pathlib import Path
-
-try:
-    import mathkit
-except ImportError:
-    sys.path.append(str(Path(__file__).resolve().parents[3] / "gen" / "mathkit"))
-    import mathkit
-"""
-
-TEST1 = IMPORT_PRELUDE + """
-
-def test_scale_sum():
-    assert mathkit.scale_sum(2, 5, 3) == 19
-    assert mathkit.scale_sum(1, 1, 1) == 1
-    assert mathkit.scale_sum(4, 2, 2) == 8
-"""
-
-TEST2 = IMPORT_PRELUDE + """
-
-def test_in_range():
-    assert mathkit.in_range(5, 0, 10)
-    assert mathkit.in_range(0, 0, 10)
-    assert not mathkit.in_range(-1, 0, 10)
-    assert not mathkit.in_range(10, 0, 10)
-    assert not mathkit.in_range(11, 0, 10)
-"""
-
-CACHED_TESTS = {
-    "AC-MATHKIT-001": TEST1,
-    "AC-MATHKIT-002": TEST2,
-}
-
-
-def _write(path: Path, text: str) -> None:
+def write(path, text):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
 
 
-def _test_filename(criterion_id: str) -> str:
-    return "test_" + criterion_id.lower().replace("-", "_") + ".py"
+MODULE_SOURCE = (
+    "def scale(a: int, b: int) -> int:\n"
+    "    return a * b + a\n"
+    "\n"
+    "\n"
+    "def pick(x: int, y: int) -> bool:\n"
+    "    if x > y and x != 0:\n"
+    "        return True\n"
+    "    return False\n"
+)
+
+TEST_SCALE_SOURCE = (
+    "import widget\n"
+    "\n"
+    "\n"
+    "def test_scale_values():\n"
+    "    assert widget.scale(3, 4) == 15\n"
+    "    assert widget.scale(2, 5) == 12\n"
+)
+
+TEST_PICK_SOURCE = (
+    "import widget\n"
+    "\n"
+    "\n"
+    "def test_pick_values():\n"
+    "    assert widget.pick(3, 2) is True\n"
+    "    assert widget.pick(1, 2) is False\n"
+    "    assert widget.pick(0, -1) is False\n"
+)
+
+REQ_001_TEXT = "# R-WIDGET-001\n\n**R-WIDGET-001** \u2014 `scale(a, b)` MUST return `a * b + a`.\n"
+REQ_002_TEXT = (
+    "# R-WIDGET-002\n\n**R-WIDGET-002** \u2014 `pick(x, y)` MUST return `True` exactly "
+    "when `x > y` and `x` is not zero, else `False`.\n"
+)
+
+AC_001_TEXT = (
+    "# AC-WIDGET-001\n"
+    "\n"
+    "Covers: R-WIDGET-001\n"
+    "Kind: generated-test\n"
+    "\n"
+    "```gherkin\n"
+    "Given a and b are 3 and 4\n"
+    "When scale is called with them\n"
+    "Then it returns 15\n"
+    "```\n"
+)
+
+AC_002_TEXT = (
+    "# AC-WIDGET-002\n"
+    "\n"
+    "Covers: R-WIDGET-002\n"
+    "Kind: generated-test\n"
+    "\n"
+    "```gherkin\n"
+    "Given x is 3 and y is 2\n"
+    "When pick is called with them\n"
+    "Then it returns True\n"
+    "```\n"
+)
+
+LIBRARY_TEXT = (
+    "# Library\n"
+    "\n"
+    "```\n"
+    "scale(a: int, b: int) -> int\n"
+    "pick(x: int, y: int) -> bool\n"
+    "```\n"
+)
 
 
-def _build_fixture(repo_root: Path) -> None:
-    _write(repo_root / "specs" / "glossary.md", GLOSSARY)
-    _write(repo_root / "specs" / "product" / "P-MATHKIT.md", CAPABILITY)
-    comp = repo_root / "specs" / "components" / "mathkit"
-    _write(comp / "component.md", COMPONENT)
-    _write(comp / "requirements" / "R-MATHKIT-001.md", R1)
-    _write(comp / "requirements" / "R-MATHKIT-002.md", R2)
-    _write(comp / "acceptance" / "AC-MATHKIT-001.md", AC1)
-    _write(comp / "acceptance" / "AC-MATHKIT-002.md", AC2)
-    _write(comp / "interface" / "library.md", LIBRARY)
-    _write(comp / "constraints.md", CONSTRAINTS)
-    _write(repo_root / "gen" / "mathkit" / "mathkit.py", MODULE)
-    gt_dir = repo_root / "verification" / "mathkit" / "generated-test"
-    for cid, content in CACHED_TESTS.items():
-        _write(gt_dir / _test_filename(cid), content)
+def build_fixture(repo_root, log_path):
+    write(repo_root / "specs" / "glossary.md", "# Glossary\n\n- **Widget** \u2014 a test term.\n")
+    write(
+        repo_root / "specs" / "product" / "widget.md",
+        "---\n"
+        "id: P-WIDGET\n"
+        "title: Widget capability\n"
+        "status: draft\n"
+        "owners: [team-a]\n"
+        "---\n"
+        "\n"
+        "# Widget capability\n"
+        "\n"
+        "## Purpose\n"
+        "\n"
+        "Widgets compute things.\n"
+        "\n"
+        "## Scope\n"
+        "\n"
+        "- In scope: widgets.\n",
+    )
+    comp = repo_root / "specs" / "components" / "widget"
+    write(
+        comp / "component.md",
+        "---\n"
+        "id: comp-widget\n"
+        "title: Widget\n"
+        "status: draft\n"
+        "owners: [team-a]\n"
+        "realizes: [P-WIDGET]\n"
+        "depends_on: []\n"
+        "---\n"
+        "\n"
+        "# Widget\n"
+        "\n"
+        "## Purpose\n"
+        "\n"
+        "Widget scales numbers and picks between them.\n"
+        "\n"
+        "## Scope\n"
+        "\n"
+        "- In scope: scale and pick.\n"
+        "\n"
+        "## Definitions\n"
+        "\n"
+        "None.\n"
+        "\n"
+        "## Behavior\n"
+        "\n"
+        "See `requirements/`.\n"
+        "\n"
+        "## Interfaces\n"
+        "\n"
+        "See `interface/`.\n"
+        "\n"
+        "## Data\n"
+        "\n"
+        "See `interface/data/`.\n"
+        "\n"
+        "## Acceptance criteria\n"
+        "\n"
+        "See `acceptance/`.\n"
+        "\n"
+        "## Non-functional constraints\n"
+        "\n"
+        "See `constraints.md`.\n"
+        "\n"
+        "## Open questions\n"
+        "\n"
+        "## Change log\n"
+        "\n"
+        "- Initial.\n",
+    )
+    write(comp / "requirements" / "R-WIDGET-001.md", REQ_001_TEXT)
+    write(comp / "requirements" / "R-WIDGET-002.md", REQ_002_TEXT)
+    write(comp / "acceptance" / "AC-WIDGET-001.md", AC_001_TEXT)
+    write(comp / "acceptance" / "AC-WIDGET-002.md", AC_002_TEXT)
+    write(comp / "interface" / "library.md", LIBRARY_TEXT)
+    write(comp / "constraints.md", "# Constraints\n\nNone.\n")
 
+    write(repo_root / "gen" / "widget" / "widget.py", MODULE_SOURCE)
 
-def _fake_test_author(bundle):
-    # Fallback only: each criterion already has a cached test, so this should
-    # not normally be called. If it is, it returns the same tests, in
-    # test-author's documented TestAuthoringResult shape.
-    cid = bundle["criterion_id"] if isinstance(bundle, dict) else getattr(bundle, "criterion_id")
-    return {
-        "component_id": "comp-mathkit",
-        "criterion_id": cid,
-        "model": "fake-model",
-        "seed": 0,
-        "prompt_version": "v1",
-        "cache_hit": False,
-        "file": {
-            "path": "verification/mathkit/generated-test/" + _test_filename(cid),
-            "content": CACHED_TESTS[cid],
-        },
-        "model_call_error": None,
-    }
-
-
-def test_mutation_score_is_union_across_generated_test_criteria(tmp_path):
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    _build_fixture(repo_root)
-
-    report = verifier_orchestrator.verify(
-        "comp-mathkit", repo_root, test_author=_fake_test_author
+    assembler_source = (
+        "import json\n"
+        "\n"
+        "LOG_PATH = " + repr(str(log_path)) + "\n"
+        "COVERS = " + repr({"AC-WIDGET-001": "R-WIDGET-001", "AC-WIDGET-002": "R-WIDGET-002"}) + "\n"
+        "CRITERIA = " + repr({"AC-WIDGET-001": AC_001_TEXT, "AC-WIDGET-002": AC_002_TEXT}) + "\n"
+        "REQS = " + repr({"R-WIDGET-001": REQ_001_TEXT, "R-WIDGET-002": REQ_002_TEXT}) + "\n"
+        "INTERFACE = " + repr(LIBRARY_TEXT) + "\n"
+        "\n"
+        "\n"
+        "def assemble_criterion(component_id, criterion_id, repo_root):\n"
+        "    with open(LOG_PATH, 'a', encoding='utf-8') as fh:\n"
+        "        fh.write('assemble ' + str(criterion_id) + '\\n')\n"
+        "    covers = COVERS[criterion_id]\n"
+        "    return {\n"
+        "        'component_id': component_id,\n"
+        "        'criterion_id': criterion_id,\n"
+        "        'covers': covers,\n"
+        "        'criterion_text': CRITERIA[criterion_id],\n"
+        "        'requirement_text': REQS[covers],\n"
+        "        'interface': INTERFACE,\n"
+        "        'glossary': '# Glossary',\n"
+        "        'dependency_interfaces': {},\n"
+        "    }\n"
+    )
+    write(
+        repo_root / "gen" / "spec-bundle-assembler" / "spec_bundle_assembler.py",
+        assembler_source,
     )
 
-    # Both generated-test criteria are reported, and each test passes
-    # against the unmutated module.
+
+def test_mutation_score_is_union_of_all_generated_tests(tmp_path):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    log_path = tmp_path / "calls.log"
+    log_path.write_text("", encoding="utf-8")
+    build_fixture(repo_root, log_path)
+
+    sources = {"AC-WIDGET-001": TEST_SCALE_SOURCE, "AC-WIDGET-002": TEST_PICK_SOURCE}
+
+    def author(bundle):
+        criterion_id = field(bundle, "criterion_id")
+        with open(log_path, "a", encoding="utf-8") as fh:
+            fh.write("author " + str(criterion_id) + "\n")
+        name = "test_" + criterion_id.lower().replace("-", "_") + ".py"
+        return {
+            "component_id": field(bundle, "component_id"),
+            "criterion_id": criterion_id,
+            "model": "fake-model",
+            "seed": 0,
+            "prompt_version": "v1",
+            "cache_hit": False,
+            "model_call_error": None,
+            "file": {
+                "path": "verification/widget/generated-test/" + name,
+                "content": sources[criterion_id],
+            },
+        }
+
+    report = verifier_orchestrator.verify("comp-widget", repo_root, test_author=author)
+
+    logged = log_path.read_text(encoding="utf-8").splitlines()
+    assert "author AC-WIDGET-001" in logged
+    assert "author AC-WIDGET-002" in logged
+
     criteria = field(report, "criteria")
-    by_id = {c["id"]: c for c in criteria}
-    assert "AC-MATHKIT-001" in by_id
-    assert "AC-MATHKIT-002" in by_id
-    assert by_id["AC-MATHKIT-001"]["kind"] == "generated-test"
-    assert by_id["AC-MATHKIT-002"]["kind"] == "generated-test"
-    assert by_id["AC-MATHKIT-001"]["result"] == "pass"
-    assert by_id["AC-MATHKIT-002"]["result"] == "pass"
+    by_id = {field(c, "id"): c for c in criteria}
+    assert field(by_id["AC-WIDGET-001"], "result") == "pass"
+    assert field(by_id["AC-WIDGET-002"], "result") == "pass"
 
+    assert field(report, "mutation_error") is None
     score = field(report, "mutation_score")
-
-    # Exactly one number for the whole component.
     assert score is not None
-    assert isinstance(score, (int, float)) and not isinstance(score, bool)
 
-    # Either test alone, against the whole module, kills 3 of 6 mutants.
-    isolated_score = 3 / 6
-    # Their union kills all 6.
-    assert score > isolated_score
+    # 7 mutants total: scale has 2 sites (*, +), pick has 5 (>, and, !=, True, False).
+    # The scale test alone kills 2/7, the pick test alone 5/7; their average is 0.5.
+    # Only the union of both tests kills all 7.
+    isolated_scale = 2 / 7
+    isolated_pick = 5 / 7
+    assert score > isolated_pick
+    assert score > isolated_scale
+    assert score > (isolated_scale + isolated_pick) / 2
     assert score >= 0.8
     assert abs(score - 1.0) < 1e-9
+
+    assert field(report, "overall") == "pass"

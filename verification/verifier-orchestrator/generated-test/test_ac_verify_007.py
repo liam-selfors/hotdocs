@@ -1,6 +1,4 @@
-"""AC-VERIFY-007: verify produces exactly one VerificationReport carrying
-per-criterion results, mutation_score, interface_drift and overall."""
-
+# hotdocs-criterion: sha256:ca4c4e91c0dc7bef09feb5cf84ecedac5f6146725e96f39845dfe8563d4a96dc
 import dataclasses
 import json
 from pathlib import Path
@@ -8,230 +6,106 @@ from pathlib import Path
 import verifier_orchestrator
 
 
+COMPONENT_ID = "comp-widget"
+SLUG = "widget"
+
+GEN_CRITERION_ID = "AC-WIDGET-001"
+JUDGE_CRITERION_ID = "AC-WIDGET-002"
+
+GLOSSARY_TEXT = "# Glossary\n\n- **Widget** \u2014 a test term.\n"
+
+INTERFACE_TEXT = "# Library\n\n```\ndouble(x: int) -> int\n```\n"
+
+REQ1_TEXT = "# R-WIDGET-001\n\n**R-WIDGET-001** \u2014 `double(x)` MUST return `2 * x`.\n"
+REQ2_TEXT = "# R-WIDGET-002\n\n**R-WIDGET-002** \u2014 The interface MUST be described clearly.\n"
+
+AC1_TEXT = (
+    "# AC-WIDGET-001\n"
+    "\n"
+    "Covers: R-WIDGET-001\n"
+    "Kind: generated-test\n"
+    "\n"
+    "```gherkin\n"
+    "Given x = 2\n"
+    "When double(x) is called\n"
+    "Then it returns 4\n"
+    "```\n"
+)
+
+AC2_TEXT = (
+    "# AC-WIDGET-002\n"
+    "\n"
+    "Covers: R-WIDGET-002\n"
+    "Kind: llm-judge\n"
+    "\n"
+    "```gherkin\n"
+    "Given the widget interface\n"
+    "When a reviewer reads it\n"
+    "Then it is clear\n"
+    "```\n"
+)
+
+GENERATED_TEST_CONTENT = (
+    "import widget\n"
+    "\n"
+    "\n"
+    "def test_double():\n"
+    "    assert widget.double(2) == 4\n"
+    "    assert widget.double(3) == 6\n"
+    "    assert widget.double(0) == 0\n"
+)
+
+VALID_RESULTS = {"pass", "fail", "skipped"}
+EXPECTED_KEYS = {"component_id", "criteria", "mutation_score", "interface_drift", "overall"}
+
+
 def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-FAKE_ASSEMBLER = r'''
-import hashlib
-from dataclasses import dataclass, field
-from pathlib import Path
-
-
-class _MappingMixin:
-    def __getitem__(self, key):
-        if key in self.__dataclass_fields__:
-            return getattr(self, key)
-        raise KeyError(key)
-
-    def get(self, key, default=None):
-        if key in self.__dataclass_fields__:
-            return getattr(self, key)
-        return default
-
-    def keys(self):
-        return list(self.__dataclass_fields__)
-
-    def items(self):
-        return [(k, getattr(self, k)) for k in self.__dataclass_fields__]
-
-    def values(self):
-        return [getattr(self, k) for k in self.__dataclass_fields__]
-
-    def __iter__(self):
-        return iter(list(self.__dataclass_fields__))
-
-    def __len__(self):
-        return len(self.__dataclass_fields__)
-
-    def __contains__(self, key):
-        return key in self.__dataclass_fields__
-
-
-@dataclass
-class SpecBundle(_MappingMixin):
-    component_id: str
-    spec_bundle_hash: str
-    spec: str
-    interface: str
-    constraints: str
-    dependency_interfaces: dict = field(default_factory=dict)
-    dependency_context: dict = field(default_factory=dict)
-    dependency_usage: dict = field(default_factory=dict)
-    vars: dict = field(default_factory=dict)
-    glossary: str = ""
-    hint_code: object = None
-
-
-@dataclass
-class CriterionBundle(_MappingMixin):
-    component_id: str
-    criterion_id: str
-    covers: str
-    criterion_text: str
-    requirement_text: str
-    interface: str
-    glossary: str
-    dependency_interfaces: dict = field(default_factory=dict)
-
-
-def _slug(component_id):
-    return component_id[len("comp-"):] if component_id.startswith("comp-") else component_id
-
-
-def _body(text):
-    if text.startswith("---\n"):
-        end = text.find("\n---", 4)
-        if end != -1:
-            nl = text.find("\n", end + 4)
-            return text[nl + 1:] if nl != -1 else ""
-    return text
-
-
-def _join(texts):
-    parts = [t.strip() for t in texts if t.strip()]
-    return "\n\n".join(parts)
-
-
-def _files(directory):
-    directory = Path(directory)
-    if not directory.is_dir():
-        return []
-    return sorted(p for p in directory.rglob("*.md") if p.is_file())
-
-
-def _comp_dir(component_id, repo_root):
-    d = Path(repo_root) / "specs" / "components" / _slug(component_id)
-    if not (d / "component.md").is_file():
-        raise ValueError("unknown component id: " + component_id)
-    return d
-
-
-def _glossary(repo_root):
-    p = Path(repo_root) / "specs" / "glossary.md"
-    return p.read_text().strip() if p.is_file() else ""
-
-
-def assemble(component_id, repo_root, mode="cold"):
-    if mode not in ("cold", "hint"):
-        raise ValueError("bad mode: " + str(mode))
-    d = _comp_dir(component_id, repo_root)
-    spec_files = [d / "component.md"] + _files(d / "requirements")
-    iface_files = _files(d / "interface")
-    constraints_file = d / "constraints.md"
-    spec = _join(_body(p.read_text()) for p in spec_files)
-    interface = _join(p.read_text() for p in iface_files)
-    constraints = constraints_file.read_text().strip() if constraints_file.is_file() else ""
-    glossary = _glossary(repo_root)
-    h = hashlib.sha256()
-    for p in spec_files + iface_files + ([constraints_file] if constraints_file.is_file() else []):
-        h.update(str(p.relative_to(repo_root)).encode("utf-8"))
-        h.update(p.read_bytes())
-    h.update(glossary.encode("utf-8"))
-    hint_code = None
-    if mode == "hint":
-        gen_dir = Path(repo_root) / "gen" / _slug(component_id)
-        hint_code = {}
-        if gen_dir.is_dir():
-            for p in sorted(gen_dir.rglob("*")):
-                if p.is_file():
-                    hint_code[str(p.relative_to(gen_dir))] = p.read_text()
-    return SpecBundle(
-        component_id=component_id,
-        spec_bundle_hash="sha256:" + h.hexdigest(),
-        spec=spec,
-        interface=interface,
-        constraints=constraints,
-        glossary=glossary,
-        hint_code=hint_code,
-    )
-
-
-def assemble_criterion(component_id, criterion_id, repo_root):
-    d = _comp_dir(component_id, repo_root)
-    ac = d / "acceptance" / (criterion_id + ".md")
-    if not ac.is_file():
-        raise ValueError("unknown criterion id: " + criterion_id)
-    text = ac.read_text()
-    covers = ""
-    for line in text.splitlines():
-        if line.startswith("Covers:"):
-            covers = line[len("Covers:"):].strip()
-            break
-    req = d / "requirements" / (covers + ".md")
-    requirement_text = req.read_text().strip() if req.is_file() else ""
-    interface = _join(p.read_text() for p in _files(d / "interface"))
-    return CriterionBundle(
-        component_id=component_id,
-        criterion_id=criterion_id,
-        covers=covers,
-        criterion_text=text.strip(),
-        requirement_text=requirement_text,
-        interface=interface,
-        glossary=_glossary(repo_root),
-    )
-'''
-
-
-def _write(path: Path, text: str):
+def write(path, text):
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text)
+    path.write_text(text, encoding="utf-8")
 
 
-def _build_fixture(repo_root: Path):
-    _write(repo_root / "specs" / "glossary.md", "# Glossary\n\n- **Doubling** \u2014 a test term.\n")
-    _write(
-        repo_root / "specs" / "product" / "doubling.md",
+def build_fixture(root):
+    write(root / "specs" / "glossary.md", GLOSSARY_TEXT)
+    write(
+        root / "specs" / "product" / "widgets.md",
         "---\n"
-        "id: P-DOUBLING\n"
-        "title: Doubling\n"
+        "id: P-WIDGET\n"
+        "title: Widgets\n"
         "status: draft\n"
         "owners: [team-a]\n"
         "---\n"
         "\n"
-        "# Doubling\n"
+        "# Widgets\n"
         "\n"
         "## Purpose\n"
         "\n"
-        "Numbers can be doubled.\n"
+        "Widgets double numbers.\n",
+    )
+    comp = root / "specs" / "components" / SLUG
+    write(
+        comp / "component.md",
+        "---\n"
+        "id: comp-widget\n"
+        "title: Widget\n"
+        "status: draft\n"
+        "owners: [team-a]\n"
+        "realizes: [P-WIDGET]\n"
+        "depends_on: []\n"
+        "---\n"
+        "\n"
+        "# Widget\n"
+        "\n"
+        "## Purpose\n"
+        "\n"
+        "Widget doubles a number.\n"
         "\n"
         "## Scope\n"
         "\n"
         "- In scope: doubling.\n"
-        "\n"
-        "## Capability scenarios\n"
-        "\n"
-        "### CS-DOUBLING-001\n"
-        "Covers: P-DOUBLING\n"
-        "Kind: llm-judge\n"
-        "\n"
-        "```gherkin\n"
-        "Given a number\n"
-        "When it is doubled\n"
-        "Then the result is twice the number\n"
-        "```\n",
-    )
-    comp = repo_root / "specs" / "components" / "doubler"
-    _write(
-        comp / "component.md",
-        "---\n"
-        "id: comp-doubler\n"
-        "title: Doubler\n"
-        "status: draft\n"
-        "owners: [team-a]\n"
-        "depends_on: []\n"
-        "realizes: [P-DOUBLING]\n"
-        "---\n"
-        "\n"
-        "# Doubler\n"
-        "\n"
-        "## Purpose\n"
-        "\n"
-        "Doubler doubles a number.\n"
-        "\n"
-        "## Scope\n"
-        "\n"
-        "- In scope: doubling integers.\n"
         "\n"
         "## Definitions\n"
         "\n"
@@ -261,127 +135,150 @@ def _build_fixture(repo_root: Path):
         "\n"
         "## Change log\n"
         "\n"
-        "- Initial draft.\n",
+        "- Initial.\n",
     )
-    _write(
-        comp / "requirements" / "R-DOUBLER-001.md",
-        "# R-DOUBLER-001\n\n**R-DOUBLER-001** \u2014 `double(x)` MUST return `2 * x`.\n",
+    write(comp / "requirements" / "R-WIDGET-001.md", REQ1_TEXT)
+    write(comp / "requirements" / "R-WIDGET-002.md", REQ2_TEXT)
+    write(comp / "interface" / "library.md", INTERFACE_TEXT)
+    write(comp / "constraints.md", "# Constraints\n\nNone.\n")
+    write(comp / "acceptance" / "AC-WIDGET-001.md", AC1_TEXT)
+    write(comp / "acceptance" / "AC-WIDGET-002.md", AC2_TEXT)
+
+    write(
+        root / "gen" / SLUG / "widget.py",
+        "def double(x):\n"
+        "    return 2 * x\n",
     )
-    _write(
-        comp / "requirements" / "R-DOUBLER-002.md",
-        "# R-DOUBLER-002\n\n**R-DOUBLER-002** \u2014 `double(x)` MUST NOT mutate its input.\n",
-    )
-    _write(
-        comp / "acceptance" / "AC-DOUBLER-001.md",
-        "# AC-DOUBLER-001\n"
+
+    log_path = root.parent / (root.name + "-assembler-calls.log")
+    criteria = {
+        GEN_CRITERION_ID: {
+            "covers": "R-WIDGET-001",
+            "criterion_text": AC1_TEXT,
+            "requirement_text": REQ1_TEXT,
+        },
+        JUDGE_CRITERION_ID: {
+            "covers": "R-WIDGET-002",
+            "criterion_text": AC2_TEXT,
+            "requirement_text": REQ2_TEXT,
+        },
+    }
+    assembler_source = (
+        "CRITERIA = " + repr(criteria) + "\n"
+        "INTERFACE = " + repr(INTERFACE_TEXT) + "\n"
+        "GLOSSARY = " + repr(GLOSSARY_TEXT) + "\n"
+        "LOG = " + repr(str(log_path)) + "\n"
         "\n"
-        "Covers: R-DOUBLER-001\n"
-        "Kind: llm-judge\n"
         "\n"
-        "```gherkin\n"
-        "Given the doubler requirement text\n"
-        "When a reviewer reads it\n"
-        "Then it states the doubling rule unambiguously\n"
-        "```\n",
+        "def assemble_criterion(component_id, criterion_id, repo_root):\n"
+        "    with open(LOG, 'a', encoding='utf-8') as fh:\n"
+        "        fh.write(str(criterion_id) + '\\n')\n"
+        "    info = CRITERIA.get(criterion_id, {'covers': '', 'criterion_text': '', 'requirement_text': ''})\n"
+        "    return {\n"
+        "        'component_id': component_id,\n"
+        "        'criterion_id': criterion_id,\n"
+        "        'covers': info['covers'],\n"
+        "        'criterion_text': info['criterion_text'],\n"
+        "        'requirement_text': info['requirement_text'],\n"
+        "        'interface': INTERFACE,\n"
+        "        'glossary': GLOSSARY,\n"
+        "        'dependency_interfaces': {},\n"
+        "    }\n"
     )
-    _write(
-        comp / "acceptance" / "AC-DOUBLER-002.md",
-        "# AC-DOUBLER-002\n"
-        "\n"
-        "Covers: R-DOUBLER-002\n"
-        "Kind: llm-judge\n"
-        "\n"
-        "```gherkin\n"
-        "Given the doubler input-mutation requirement\n"
-        "When a reviewer reads it\n"
-        "Then it states the no-mutation rule unambiguously\n"
-        "```\n",
-    )
-    _write(comp / "interface" / "library.md", "# Library\n\n```\ndouble(x: int) -> int\n```\n")
-    _write(comp / "constraints.md", "# Constraints\n\nNone.\n")
-    _write(repo_root / "gen" / "doubler" / "doubler.py", "def double(x):\n    return 2 * x\n")
-    _write(
-        repo_root / "gen" / "spec-bundle-assembler" / "spec_bundle_assembler.py",
-        FAKE_ASSEMBLER,
-    )
+    write(root / "gen" / "spec-bundle-assembler" / "spec_bundle_assembler.py", assembler_source)
+    return root
 
 
-EXPECTED_IDS = {"AC-DOUBLER-001", "AC-DOUBLER-002"}
-RESULTS = {"pass", "fail", "skipped"}
+def make_test_author(log_path):
+    def test_author(bundle):
+        with open(log_path, "a", encoding="utf-8") as fh:
+            fh.write(str(field(bundle, "criterion_id")) + "\n")
+        return {
+            "component_id": field(bundle, "component_id"),
+            "criterion_id": field(bundle, "criterion_id"),
+            "model": "fake-model",
+            "seed": 0,
+            "prompt_version": "v1",
+            "cache_hit": False,
+            "file": {
+                "path": "verification/widget/generated-test/test_ac_widget_001.py",
+                "content": GENERATED_TEST_CONTENT,
+            },
+            "model_call_error": None,
+        }
+
+    return test_author
 
 
-def _judge(bundle):
-    return {"result": "pass", "rationale": "The requirement is stated unambiguously."}
+def check_report_dict(data):
+    assert isinstance(data, dict)
+    for key in EXPECTED_KEYS:
+        assert key in data, "missing key " + key
+    assert data["component_id"] == COMPONENT_ID
 
+    criteria = data["criteria"]
+    assert isinstance(criteria, list)
+    ids = [c["id"] for c in criteria]
+    assert sorted(ids) == sorted([GEN_CRITERION_ID, JUDGE_CRITERION_ID])
+    for c in criteria:
+        assert isinstance(c, dict)
+        assert c["result"] in VALID_RESULTS
 
-def _check_mutation_score(score):
+    by_id = {c["id"]: c for c in criteria}
+    assert by_id[JUDGE_CRITERION_ID]["result"] == "skipped"
+
+    score = data["mutation_score"]
     assert score is None or (
-        isinstance(score, (int, float)) and not isinstance(score, bool) and 0 <= score <= 1
-    ), f"mutation_score must be null or a number in [0, 1], got {score!r}"
+        isinstance(score, (int, float)) and not isinstance(score, bool) and 0.0 <= score <= 1.0
+    )
+    assert isinstance(data["interface_drift"], bool)
+    assert data["overall"] in {"pass", "fail"}
 
 
-def test_verify_produces_exactly_one_structured_report(tmp_path):
-    repo_root = tmp_path / "repo"
-    _build_fixture(repo_root)
+def test_verify_produces_exactly_one_report(tmp_path):
+    root = build_fixture(tmp_path / "repo")
+    author_log = tmp_path / "author-calls.log"
 
-    report = verifier_orchestrator.verify("comp-doubler", repo_root, judge=_judge)
+    report = verifier_orchestrator.verify(
+        COMPONENT_ID, root, test_author=make_test_author(author_log)
+    )
 
-    # Exactly one report: a single dataclass instance, never a list, tuple or bare dict.
+    # Exactly one report: a single dataclass instance, not a list or bare dict.
     assert not isinstance(report, (list, tuple, set, dict))
     assert dataclasses.is_dataclass(report) and not isinstance(report, type)
 
-    # Per-criterion results.
-    criteria = field(report, "criteria")
-    assert isinstance(criteria, list)
-    ids = [field(c, "id") for c in criteria]
-    assert len(ids) == len(set(ids)), f"duplicate criterion entries: {ids}"
-    assert set(ids) == EXPECTED_IDS
-    for c in criteria:
+    # Attribute access on the report itself.
+    assert report.component_id == COMPONENT_ID
+    assert isinstance(report.criteria, list)
+    for c in report.criteria:
         assert isinstance(c, dict)
-        assert field(c, "result") in RESULTS
+    assert report.overall in {"pass", "fail"}
+    assert isinstance(report.interface_drift, bool)
+    score = report.mutation_score
+    assert score is None or 0.0 <= score <= 1.0
 
-    # mutation_score, interface_drift, overall.
-    _check_mutation_score(field(report, "mutation_score"))
-    assert isinstance(field(report, "interface_drift"), bool)
-    assert field(report, "overall") in {"pass", "fail"}
+    # JSON form carries per-criterion results, mutation_score, interface_drift, overall.
+    data = report.to_dict()
+    check_report_dict(data)
+    json.dumps(data)
 
-    # JSON form carries the same four parts, as one object.
-    d = report.to_dict()
-    assert isinstance(d, dict)
-    for key in ("criteria", "mutation_score", "interface_drift", "overall"):
-        assert key in d, f"to_dict() missing {key!r}"
-    assert {c["id"] for c in d["criteria"]} == EXPECTED_IDS
-    assert len(d["criteria"]) == len(EXPECTED_IDS)
-    for c in d["criteria"]:
-        assert c["result"] in RESULTS
-    _check_mutation_score(d["mutation_score"])
-    assert isinstance(d["interface_drift"], bool)
-    assert d["overall"] in {"pass", "fail"}
-    assert d["overall"] == field(report, "overall")
-    assert d["interface_drift"] == field(report, "interface_drift")
-    json.dumps(d)
+    assert data["overall"] == report.overall
+    assert data["interface_drift"] == report.interface_drift
+    assert data["mutation_score"] == report.mutation_score
+    assert [c["id"] for c in data["criteria"]] == [c["id"] for c in report.criteria]
 
 
 def test_cli_json_prints_exactly_one_report(tmp_path, capsys):
-    repo_root = tmp_path / "repo"
-    _build_fixture(repo_root)
+    root = build_fixture(tmp_path / "repo")
 
-    rc = verifier_orchestrator.main(
-        ["comp-doubler", f"--repo-root={repo_root}", "--format=json"]
+    code = verifier_orchestrator.main(
+        [COMPONENT_ID, "--repo-root=" + str(root), "--format=json"]
     )
     out = capsys.readouterr().out
-    assert rc in (0, 1)
 
-    parsed = json.loads(out)  # raises if more than one JSON document is printed
-    assert isinstance(parsed, dict)
-    assert parsed.get("component_id") == "comp-doubler"
-    for key in ("criteria", "mutation_score", "interface_drift", "overall"):
-        assert key in parsed, f"printed report missing {key!r}"
-    assert {c["id"] for c in parsed["criteria"]} == EXPECTED_IDS
-    assert len(parsed["criteria"]) == len(EXPECTED_IDS)
-    for c in parsed["criteria"]:
-        assert c["result"] in RESULTS
-    _check_mutation_score(parsed["mutation_score"])
-    assert isinstance(parsed["interface_drift"], bool)
-    assert parsed["overall"] in {"pass", "fail"}
-    assert rc == (0 if parsed["overall"] == "pass" else 1)
+    # The whole stdout parses as one single JSON object: exactly one report.
+    data = json.loads(out.strip())
+    check_report_dict(data)
+
+    assert code in (0, 1)
+    assert code == (0 if data["overall"] == "pass" else 1)
