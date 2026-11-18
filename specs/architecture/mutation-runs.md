@@ -44,6 +44,34 @@ whichever is larger. If it exits nonzero or times out, no mutant runs:
 with `<code>` pytest's exit status. `mutation_error` is `null` in every
 other case.
 
+**The sites.** Every `.py` file of the copy, in sorted path order, is
+parsed once; within a file, sites are taken in `ast.walk` order, and
+each site gives exactly one mutant, a copy of the file with that one
+change, written back with `ast.unparse`.
+
+- *Python* (`D159`, `D172`): a comparison with exactly one operator
+  (a chained comparison is not a site) has it swapped `==`↔`!=`,
+  `<`↔`>=`, `>`↔`<=`, `is`↔`is not`, `in`↔`not in`; an `and`/`or` is
+  flipped to the other; a binary `+`↔`-`, `*`↔`/`, `//`↔`%`; a boolean
+  constant is negated. Never a numeric constant or anything else.
+- *JavaScript in a string* (`D335`): a `str` constant, including one
+  part of an f-string but never a docstring (the first statement of a
+  module, class or function body), holds JavaScript when it matches
+  `\bfunction\s*[\w$]*\s*\(|=>|\b(const|let)\s` and also contains
+  `;` or `{`. Its JavaScript is the
+  whole string, or, when it contains `<script`, only the text between
+  each `<script ...>` tag's `>` and the following `</script>`. That text
+  is read left to right as tokens, skipping `'...'`, `"..."` and
+  `` `...` `` strings (a backslash escapes the next character) and
+  `//` and `/* */` comments. Each of these tokens is a site, swapped
+  `===`↔`!==`, `==`↔`!=`, `<`↔`>=`, `>`↔`<=`, `<=`↔`>`, `>=`↔`<`,
+  `&&`↔`||`, `true`↔`false`, and `+`↔`-` when the token before it is an
+  identifier, a number, `)` or `]`. Longer operators are read first, so
+  `===`, `=>`, `++`, `+=`, `<<`, `>>` and `>>>` are never split or
+  mutated. The mutant replaces that one token in the constant's value.
+  A string's JavaScript sites come after that constant's place in the
+  walk, in text order.
+
 **The score.** Killed mutants over all mutants, `1.0` when there are no
 mutants; a mutant is killed when its run exits nonzero or times out.
 
