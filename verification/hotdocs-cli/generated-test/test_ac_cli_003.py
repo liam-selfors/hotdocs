@@ -1,3 +1,4 @@
+# hotdocs-criterion: sha256:3afc6eceb8358189c0d08a42196d31ca8ce64712a7cceb4d9b53a2fe531860b6
 import json
 import os
 from pathlib import Path
@@ -7,133 +8,127 @@ import pytest
 import hotdocs_cli
 
 
-COMPONENT_LOCATIONS = {
-    "generate": ("gen/component-gate-runner", "component_gate_runner"),
-    "author-test": ("gen/test-author", "test_author"),
-    "verify": ("gen/provenance-tracker", "provenance_tracker"),
-    "lint": ("gen/spec-linter", "spec_linter"),
-    "assist": ("gen/spec-completeness-assistant", "spec_completeness_assistant"),
-}
-
-FULL_CONFIG_BODY = (
-    "    return {\n"
-    "        'provider': 'claude-cli',\n"
-    "        'model': 'sonnet',\n"
-    "        'base_url': None,\n"
-    "        'api_key_env': None,\n"
-    "        'timeout_seconds': None,\n"
-    "    }\n"
-)
-
-NONE_CONFIG_BODY = "    return None\n"
-
-RAISING_CONFIG_BODY = "    raise ValueError('bad')\n"
+COMPONENTS = [
+    ("gen/component-gate-runner", "component_gate_runner"),
+    ("gen/test-author", "test_author"),
+    ("gen/provenance-tracker", "provenance_tracker"),
+    ("gen/spec-linter", "spec_linter"),
+    ("gen/spec-completeness-assistant", "spec_completeness_assistant"),
+]
 
 
-def _fake_component_source(log_path):
-    return (
+def _write_component(project, dir_, module):
+    target_dir = project / dir_
+    target_dir.mkdir(parents=True, exist_ok=True)
+    log_path = str(project / "calls.log")
+    src = (
         "import json\n"
         "\n"
+        "LOG = " + repr(log_path) + "\n"
+        "\n"
         "def main(argv):\n"
-        f"    with open({str(log_path)!r}, 'a', encoding='utf-8') as fh:\n"
-        "        fh.write(json.dumps(list(argv)) + '\\n')\n"
+        "    with open(LOG, 'a') as f:\n"
+        "        f.write(json.dumps(argv) + '\\n')\n"
         "    return 7\n"
     )
+    (target_dir / (module + ".py")).write_text(src)
 
 
-def _fake_llm_endpoint_source(body):
-    return (
-        "class ModelResolutionError(Exception):\n"
-        "    pass\n"
+def _write_llm_endpoint(project):
+    target_dir = project / "gen" / "llm-endpoint"
+    target_dir.mkdir(parents=True, exist_ok=True)
+    mode_path = str(project / "llm_mode.txt")
+    src = (
+        "MODE = " + repr(mode_path) + "\n"
         "\n"
         "def load_config(config_path=None):\n"
-        f"{body}"
+        "    with open(MODE) as f:\n"
+        "        mode = f.read().strip()\n"
+        "    if mode == 'none':\n"
+        "        return None\n"
+        "    if mode == 'raise':\n"
+        "        raise ValueError('bad')\n"
+        "    return {\n"
+        "        'provider': 'claude-cli',\n"
+        "        'model': 'sonnet',\n"
+        "        'base_url': None,\n"
+        "        'api_key_env': None,\n"
+        "        'timeout_seconds': None,\n"
+        "        'auth': None,\n"
+        "    }\n"
     )
+    (target_dir / "llm_endpoint.py").write_text(src)
 
 
-def _write(path, text):
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text, encoding="utf-8")
-
-
-def _build(base, name, load_config_body):
-    """Create a fresh project and a fresh fake tool root, each holding the
-    fake components and a fake llm-endpoint. Every fake logs to the
-    project's calls.log."""
-    project = base / name / "project"
-    tool_root = base / name / "tool"
-    project.mkdir(parents=True)
-    tool_root.mkdir(parents=True)
-    log_path = project / "calls.log"
-    _write(
-        project / "hotdocs.toml",
-        '[llm]\nprovider = "claude-cli"\nmodel = "sonnet"\n',
+@pytest.fixture
+def env_setup(tmp_path):
+    project = (tmp_path / "project")
+    project.mkdir()
+    project = project.resolve()
+    tool_root = (tmp_path / "tool_root")
+    tool_root.mkdir()
+    tool_root = tool_root.resolve()
+    (project / "hotdocs.toml").write_text(
+        "[llm]\n" + "provider = " + json.dumps("claude-cli") + "\n"
+        + "model = " + json.dumps("sonnet") + "\n"
     )
-    for root in (project, tool_root):
-        for directory, module in COMPONENT_LOCATIONS.values():
-            _write(root / directory / f"{module}.py", _fake_component_source(log_path))
-        _write(
-            root / "gen" / "llm-endpoint" / "llm_endpoint.py",
-            _fake_llm_endpoint_source(load_config_body),
-        )
-    return project, tool_root, log_path
+    for dir_, module in COMPONENTS:
+        _write_component(project, dir_, module)
+    _write_llm_endpoint(project)
+    set_mode(project, "config")
+    return project, tool_root
 
 
-def _env():
-    env = dict(os.environ)
-    env.pop("VAR_HOTDOCS_CONFIG", None)
-    return env
+def set_mode(project, mode):
+    (project / "llm_mode.txt").write_text(mode)
 
 
-def _run(project, tool_root, argv):
-    return hotdocs_cli.main(
+def run(project, tool_root, argv):
+    log = project / "calls.log"
+    if log.exists():
+        log.unlink()
+    code = hotdocs_cli.main(
         list(argv),
         tool_root=tool_root,
         input_fn=lambda *a, **k: "",
         output_fn=lambda *a, **k: None,
-        env=_env(),
+        env=dict(os.environ),
         cwd=project,
     )
+    assert log.is_file(), "fake component was not called for " + repr(argv)
+    lines = [ln for ln in log.read_text().splitlines() if ln.strip()]
+    assert len(lines) == 1
+    return code, json.loads(lines[0])
 
 
-def _recorded(log_path):
-    assert log_path.exists(), "fake component was never invoked"
-    lines = [ln for ln in log_path.read_text(encoding="utf-8").splitlines() if ln.strip()]
-    assert len(lines) == 1, f"expected exactly one recorded call, got {lines!r}"
-    return json.loads(lines[0])
+def repo_root_token(project):
+    return "--repo-root=" + str(project)
 
 
-def _normalize(tokens, project):
-    out = []
-    target = Path(project).resolve()
-    for tok in tokens:
-        if isinstance(tok, str) and tok.startswith("--repo-root="):
-            value = tok[len("--repo-root="):]
-            if Path(value).resolve() == target:
-                out.append("--repo-root=<project>")
-                continue
-        out.append(tok)
-    return out
+def has_model(tokens):
+    return any(t == "--model" or t.startswith("--model=") for t in tokens)
 
 
-def _has_model(tokens):
-    return any(t == "--model" or str(t).startswith("--model=") for t in tokens)
+def test_model_injected_for_required_rows(env_setup):
+    project, tool_root = env_setup
+    set_mode(project, "config")
 
+    code, forwarded = run(project, tool_root, ["generate", "comp-x"])
+    assert code == 7
+    assert forwarded == [
+        "generate",
+        "comp-x",
+        repo_root_token(project),
+        "--model=claude-cli:sonnet",
+    ]
 
-@pytest.mark.parametrize(
-    "argv",
-    [
-        ["generate", "comp-x"],
-        ["author-test", "comp-x", "AC-X-1"],
-    ],
-)
-def test_configured_model_is_appended_last(tmp_path, argv):
-    project, tool_root, log_path = _build(tmp_path, "case", FULL_CONFIG_BODY)
-    rc = _run(project, tool_root, argv)
-    assert rc == 7
-    tokens = _normalize(_recorded(log_path), project)
-    assert tokens == list(argv) + [
-        "--repo-root=<project>",
+    code, forwarded = run(project, tool_root, ["author-test", "comp-x", "AC-X-1"])
+    assert code == 7
+    assert forwarded == [
+        "author-test",
+        "comp-x",
+        "AC-X-1",
+        repo_root_token(project),
         "--model=claude-cli:sonnet",
     ]
 
@@ -145,47 +140,41 @@ def test_configured_model_is_appended_last(tmp_path, argv):
         ["generate", "comp-x", "--model=m"],
     ],
 )
-def test_explicit_model_passes_unchanged(tmp_path, argv):
-    project, tool_root, log_path = _build(tmp_path, "case", FULL_CONFIG_BODY)
-    rc = _run(project, tool_root, argv)
-    assert rc == 7
-    tokens = _normalize(_recorded(log_path), project)
-    assert tokens == list(argv) + ["--repo-root=<project>"]
-    model_tokens = [t for t in tokens if t == "--model" or t.startswith("--model=")]
+def test_explicit_model_passes_unchanged(env_setup, argv):
+    project, tool_root = env_setup
+    set_mode(project, "config")
+    code, forwarded = run(project, tool_root, argv)
+    assert code == 7
+    assert forwarded == list(argv) + [repo_root_token(project)]
+    model_tokens = [
+        t for t in forwarded if t == "--model" or t.startswith("--model=")
+    ]
     assert len(model_tokens) == 1
 
 
-def test_no_config_or_invalid_config_injects_nothing(tmp_path, capsys):
-    # First: load_config returns None.
-    project1, tool_root1, log1 = _build(tmp_path, "none", NONE_CONFIG_BODY)
-    rc1 = _run(project1, tool_root1, ["generate", "comp-x"])
-    assert rc1 == 7
-    tokens1 = _normalize(_recorded(log1), project1)
-    assert tokens1 == ["generate", "comp-x", "--repo-root=<project>"]
-    first = capsys.readouterr()
-    assert "bad" not in first.err
+def test_no_injection_when_config_none_or_invalid(env_setup, capsys):
+    project, tool_root = env_setup
+    expected = ["generate", "comp-x", repo_root_token(project)]
 
-    # Second: load_config raises ValueError("bad").
-    project2, tool_root2, log2 = _build(tmp_path, "raise", RAISING_CONFIG_BODY)
-    rc2 = _run(project2, tool_root2, ["generate", "comp-x"])
-    assert rc2 == 7
-    tokens2 = _normalize(_recorded(log2), project2)
-    assert tokens2 == ["generate", "comp-x", "--repo-root=<project>"]
-    second = capsys.readouterr()
-    assert "bad" in second.err
+    set_mode(project, "none")
+    capsys.readouterr()
+    code, forwarded = run(project, tool_root, ["generate", "comp-x"])
+    assert code == 7
+    assert forwarded == expected
+
+    set_mode(project, "raise")
+    capsys.readouterr()
+    code, forwarded = run(project, tool_root, ["generate", "comp-x"])
+    captured = capsys.readouterr()
+    assert code == 7
+    assert forwarded == expected
+    assert "bad" in captured.err
 
 
-@pytest.mark.parametrize(
-    "argv",
-    [
-        ["verify"],
-        ["lint"],
-        ["assist"],
-    ],
-)
-def test_model_never_injected_for_non_model_rows(tmp_path, argv):
-    project, tool_root, log_path = _build(tmp_path, "case", FULL_CONFIG_BODY)
-    rc = _run(project, tool_root, argv)
-    assert rc == 7
-    tokens = _recorded(log_path)
-    assert not _has_model(tokens), f"unexpected --model in {tokens!r}"
+@pytest.mark.parametrize("argv", [["verify"], ["lint"], ["assist"]])
+def test_model_no_rows_never_gain_model(env_setup, argv):
+    project, tool_root = env_setup
+    set_mode(project, "config")
+    code, forwarded = run(project, tool_root, argv)
+    assert code == 7
+    assert not has_model(forwarded), forwarded
