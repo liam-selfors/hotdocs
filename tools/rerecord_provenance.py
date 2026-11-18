@@ -20,11 +20,11 @@ verification does not pass. Usage:
 
     python tools/rerecord_provenance.py [comp-<slug> ...]
 
-With `--author-tests=<model>:<seed>`, step 2 instead sets the
-component's committed generated tests aside and has the real
-`test-author` write fresh ones for the unchanged code, as a weak suite's
-mutation score needs (D328); if verification still fails, the committed
-tests are put back.
+With `--author-tests=<model>:<seed>`, step 2 passes the real
+`test-author`, so a criterion with no committed test, or a stale one
+(`R-VERIFY-019`), gets one written for the unchanged code, as new
+criteria for a weak suite need (D329); if verification still fails, the
+committed tests are put back as they were.
 """
 import importlib.util
 import json
@@ -110,8 +110,6 @@ def rerecord(component_id: str, pc, pw, vo, lic, sec, author=None) -> bool:
     if author is not None:
         backup = Path(tempfile.mkdtemp(prefix=f"rerecord_{slug}_")) / "generated-test"
         shutil.copytree(tests_dir, backup)
-        for old_test in tests_dir.glob("test_*.py"):
-            old_test.unlink()
     report = vo.verify(component_id, REPO, judge=None, test_author=author)
     if _get(report, "overall") != "pass" and backup is not None:
         shutil.rmtree(tests_dir)
