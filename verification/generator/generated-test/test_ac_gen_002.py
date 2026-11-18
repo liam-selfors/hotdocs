@@ -1,126 +1,83 @@
-import generator
-
-import dataclasses
-import importlib.util
+# hotdocs-criterion: sha256:9d98968e486d52fecbdf4e7da39c0f35c12201434f9a0d193a21e3413e64f9b1
 import json
 import re
-import sys
 from pathlib import Path
 
 import pytest
 
+import generator
 
-HINT_MARKER = "HINT_CODE_MARKER_7f3a91"
-SPEC_MARKER = "SPEC_TEXT_MARKER_c04e2b"
-INTERFACE_MARKER = "INTERFACE_TEXT_MARKER_5d18aa"
-CONSTRAINTS_MARKER = "CONSTRAINTS_TEXT_MARKER_e29f07"
-GLOSSARY_MARKER = "GLOSSARY_TEXT_MARKER_b6713c"
 
-HINT_CODE = {
-    "foo.py": (
-        "def foo(x):\n"
-        "    # " + HINT_MARKER + "\n"
-        "    return x + x\n"
-    )
-}
+SPEC_TEXT = "Foo doubles a number. SPECTEXT_c0ld_9a1."
+INTERFACE_TEXT = "foo(x: int) -> int  IFACETEXT_c0ld_2b7"
+CONSTRAINTS_TEXT = "None. CONSTRAINTTEXT_c0ld_5e3"
+GLOSSARY_TEXT = "- **Foo** — a test term. GLOSSTEXT_c0ld_8d4"
+HINT_MARKER = "HINTMARKER_existing_code_7f3a"
+HINT_CONTENT = "def foo(x):\n    # " + HINT_MARKER + "\n    return 2 * x\n"
+
+COLD_HEADINGS = [
+    "## SPEC",
+    "## INTERFACE",
+    "## CONSTRAINTS",
+    "## DEPENDENCY INTERFACES",
+    "## DEPENDENCY CONTEXT",
+    "## VARS",
+    "## GLOSSARY",
+]
+
+
+class Bundle(dict):
+    """A SpecBundle stand-in readable both as a mapping and by attribute."""
+
+    def __getattr__(self, name):
+        try:
+            return self[name]
+        except KeyError:
+            raise AttributeError(name)
 
 
 def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-@dataclasses.dataclass
-class _FallbackSpecBundle:
-    component_id: str
-    spec_bundle_hash: str
-    spec: str
-    interface: str
-    constraints: str
-    dependency_interfaces: dict = dataclasses.field(default_factory=dict)
-    dependency_context: dict = dataclasses.field(default_factory=dict)
-    dependency_usage: dict = dataclasses.field(default_factory=dict)
-    vars: dict = dataclasses.field(default_factory=dict)
-    glossary: str = ""
-    hint_code: dict = None
-
-    def __getitem__(self, key):
-        if key not in self.__dataclass_fields__:
-            raise KeyError(key)
-        return getattr(self, key)
-
-    def get(self, key, default=None):
-        if key in self.__dataclass_fields__:
-            return getattr(self, key)
-        return default
-
-    def __contains__(self, key):
-        return key in self.__dataclass_fields__
-
-    def keys(self):
-        return list(self.__dataclass_fields__.keys())
+def section(prompt, heading):
+    lines = prompt.split("\n")
+    start = lines.index(heading) + 1
+    end = next(
+        (i for i in range(start, len(lines)) if lines[i].startswith("## ")),
+        len(lines),
+    )
+    return "\n".join(lines[start:end]).rstrip("\n")
 
 
-def _load_spec_bundle_class():
-    try:
-        here = Path(generator.__file__).resolve()
-        gen_dir = next(p for p in here.parents if p.name == "gen")
-    except (StopIteration, TypeError, AttributeError):
-        return None
-    base = gen_dir / "spec-bundle-assembler"
-    flat = base / "spec_bundle_assembler.py"
-    pkg = base / "spec_bundle_assembler" / "__init__.py"
-    path = flat if flat.is_file() else pkg
-    if not path.is_file():
-        return None
-    try:
-        if "spec_bundle_assembler" in sys.modules:
-            mod = sys.modules["spec_bundle_assembler"]
-        else:
-            spec = importlib.util.spec_from_file_location("spec_bundle_assembler", path)
-            mod = importlib.util.module_from_spec(spec)
-            sys.modules["spec_bundle_assembler"] = mod
-            spec.loader.exec_module(mod)
-        return getattr(mod, "SpecBundle", None)
-    except Exception:
-        return None
-
-
-def _make_bundle():
-    kwargs = dict(
+def make_hint_bundle():
+    return Bundle(
         component_id="comp-foo",
         spec_bundle_hash="sha256:" + "ab" * 32,
-        spec="# Foo\n\n## Purpose\n\nFoo doubles a number. " + SPEC_MARKER
-        + "\n\n**R-FOO-001** — `foo(x)` MUST return `2 * x`.",
-        interface="# Library\n\n```\nfoo(x: int) -> int\n```\n\n" + INTERFACE_MARKER,
-        constraints="# Constraints\n\nNone. " + CONSTRAINTS_MARKER,
+        spec=SPEC_TEXT,
+        interface=INTERFACE_TEXT,
+        constraints=CONSTRAINTS_TEXT,
         dependency_interfaces={},
         dependency_context={},
         dependency_usage={},
         vars={},
-        glossary="# Glossary\n\n- **Foo** — a test term. " + GLOSSARY_MARKER,
-        hint_code=dict(HINT_CODE),
+        glossary=GLOSSARY_TEXT,
+        hint_code={"foo.py": HINT_CONTENT},
     )
-    cls = _load_spec_bundle_class()
-    if cls is not None:
-        try:
-            return cls(**kwargs)
-        except Exception:
-            pass
-    return _FallbackSpecBundle(**kwargs)
 
 
-def _make_backend(log_path):
+def make_recording_backend(log_path):
     def backend(prompt, model, **params):
         with open(log_path, "a", encoding="utf-8") as fh:
             fh.write(json.dumps({"prompt": prompt, "model": model}) + "\n")
         m = re.search(r"-----BEGIN FILE ([0-9a-f]{32}):", prompt)
         nonce = m.group(1) if m else "0" * 32
         text = (
-            f"-----BEGIN FILE {nonce}: foo.py-----\n"
+            "-----BEGIN FILE " + nonce + ": foo.py-----\n"
             "def foo(x):\n"
             "    return 2 * x\n"
-            f"-----END FILE {nonce}-----\n"
-            f"-----END REPLY {nonce}-----\n"
+            "-----END FILE " + nonce + "-----\n"
+            "-----END REPLY " + nonce + "-----\n"
         )
         return {
             "text": text,
@@ -132,63 +89,57 @@ def _make_backend(log_path):
     return backend
 
 
-def test_hint_code_is_distinctly_labeled_section_in_model_input(tmp_path, monkeypatch):
+def test_hint_code_sent_as_distinct_labeled_section(tmp_path, monkeypatch):
     monkeypatch.delenv("VAR_CACHE_STORE_URL", raising=False)
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
-    log_dir = tmp_path / "log"
-    log_dir.mkdir()
-    log_path = log_dir / "model_calls.jsonl"
-    monkeypatch.chdir(repo_root)
+    log_path = tmp_path / "model_calls.jsonl"
 
-    bundle = _make_bundle()
-
+    bundle = make_hint_bundle()
     generator.generate(
         bundle,
-        "claude-sonnet-5",
+        "anthropic:mock-model",
         repo_root=repo_root,
-        llm_backend=_make_backend(log_path),
+        llm_backend=make_recording_backend(log_path),
     )
 
     assert log_path.is_file(), "mock model was never called"
-    records = [json.loads(line) for line in log_path.read_text(encoding="utf-8").splitlines() if line.strip()]
-    assert len(records) >= 1
-    prompt = records[-1]["prompt"]
-
-    # The recorded input contains the hint code and the cold bundle fields.
-    assert HINT_MARKER in prompt
-    assert SPEC_MARKER in prompt
-    assert INTERFACE_MARKER in prompt
-
-    # The prompt's bundle-derived sections: hint code lives in its own labeled section.
-    sections = generator.render_prompt_sections(bundle)
-    sections = [(str(t), str(x)) for t, x in sections]
-    assert sections, "render_prompt_sections returned no sections"
-
-    hint_sections = [(t, x) for t, x in sections if HINT_MARKER in x or HINT_MARKER in t]
-    assert len(hint_sections) >= 1, "hint_code not present in any prompt section"
-
-    cold_markers = (SPEC_MARKER, INTERFACE_MARKER, CONSTRAINTS_MARKER, GLOSSARY_MARKER)
-    for title, text in hint_sections:
-        assert title.strip(), "hint_code section has no label"
-        for marker in cold_markers:
-            assert marker not in text, (
-                f"hint_code section {title!r} is merged with a cold bundle field ({marker})"
-            )
-        # The label itself is present in what the model was sent.
-        assert title.strip() in prompt, f"hint section label {title!r} not in model input"
-
-    cold_sections = [
-        (t, x) for t, x in sections if any(m in x for m in cold_markers)
+    records = [
+        json.loads(line)
+        for line in log_path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
     ]
-    assert cold_sections, "cold bundle fields not present in any prompt section"
-    for title, text in cold_sections:
-        assert HINT_MARKER not in text, (
-            f"cold section {title!r} also contains hint_code"
-        )
+    assert len(records) == 1
+    prompt = records[0]["prompt"]
+    lines = prompt.split("\n")
 
-    hint_titles = {t.strip() for t, _ in hint_sections}
-    cold_titles = {t.strip() for t, _ in cold_sections}
-    assert hint_titles.isdisjoint(cold_titles), (
-        "hint_code section label is not distinct from cold bundle section labels"
-    )
+    # hint_code appears under its own distinctly labeled heading
+    assert "## HINT_CODE" in lines
+    hint_section = section(prompt, "## HINT_CODE")
+    assert "--- hint file: foo.py ---" in hint_section
+    assert "--- end hint file: foo.py ---" in hint_section
+    assert HINT_MARKER in hint_section
+    assert "return 2 * x" in hint_section
+
+    # the hint code appears only in the HINT_CODE section, never merged elsewhere
+    assert prompt.count(HINT_MARKER) == 1
+
+    # every cold field section is present, separate, and free of hint code
+    for heading in COLD_HEADINGS:
+        assert heading in lines, heading
+        text = section(prompt, heading)
+        assert HINT_MARKER not in text, heading
+        assert "--- hint file:" not in text, heading
+
+    # cold fields live in their own sections, not inside the hint section
+    assert SPEC_TEXT in section(prompt, "## SPEC")
+    assert INTERFACE_TEXT in section(prompt, "## INTERFACE")
+    assert CONSTRAINTS_TEXT in section(prompt, "## CONSTRAINTS")
+    assert GLOSSARY_TEXT in section(prompt, "## GLOSSARY")
+    for cold_text in (SPEC_TEXT, INTERFACE_TEXT, CONSTRAINTS_TEXT, GLOSSARY_TEXT):
+        assert cold_text not in hint_section
+
+    # the hint section is a different section from every cold one
+    hint_idx = lines.index("## HINT_CODE")
+    for heading in COLD_HEADINGS:
+        assert lines.index(heading) != hint_idx

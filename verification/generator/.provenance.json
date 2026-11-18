@@ -1,19 +1,19 @@
 {
-  "spec_bundle_hash": "sha256:ba9c8f6a5abd4bb35db2d7ca7a5408b9759b9ccbc3d81ca0a05d44f5d22f7812",
+  "spec_bundle_hash": "sha256:edb1d9815f9d9414e0b6cfa1dca96bedc593793c8f40069516d16614feaf73a2",
   "model_pin": "claude-opus-5-5",
-  "prompt_version": "v10",
+  "prompt_version": "v11",
   "retry_feedback": null,
   "pipeline_version": "v1",
   "gate_versions": {
     "compiler": "criterion-compiler@1.0.0",
-    "generated_test": "generated_test@1.0.0",
-    "verifier": "verifier-orchestrator@2.0.0",
+    "generated_test": "generated_test@1.1.0",
+    "verifier": "verifier-orchestrator@2.2.0",
     "license_scanner": "license_scanner@4.0.0-no-reference-corpus",
     "secret_scanner": "secret_scanner@3.1.0+detect-secrets.1.5.0",
-    "generator": "generator@2.0.0+v10"
+    "generator": "generator@3.0.0+v11"
   },
   "provenance_hit": false,
-  "generated_at": "2026-11-16T10:26:51Z",
+  "generated_at": "2026-11-18T22:39:06Z",
   "verification_run_id": "generator-attempt-1",
   "verification_report": {
     "component_id": "comp-generator",
@@ -22,241 +22,241 @@
         "id": "AC-GEN-001",
         "covers": "R-GEN-001",
         "kind": "generated-test",
-        "result": "pass",
         "test_authoring": {
           "model": "claude-opus-5-5",
-          "seed": 2,
+          "seed": 1,
           "prompt_version": "v1",
           "cache_hit": false
-        }
+        },
+        "result": "pass"
       },
       {
         "id": "AC-GEN-002",
         "covers": "R-GEN-002",
         "kind": "generated-test",
-        "result": "pass",
         "test_authoring": {
           "model": "claude-opus-5-5",
-          "seed": 2,
+          "seed": 1,
           "prompt_version": "v1",
           "cache_hit": false
-        }
+        },
+        "result": "pass"
       },
       {
         "id": "AC-GEN-003",
         "covers": "R-GEN-003",
         "kind": "generated-test",
-        "result": "pass",
         "test_authoring": {
           "model": "claude-opus-5-5",
-          "seed": 2,
+          "seed": 1,
           "prompt_version": "v1",
           "cache_hit": false
-        }
+        },
+        "result": "pass"
       },
       {
         "id": "AC-GEN-004",
         "covers": "R-GEN-004",
         "kind": "generated-test",
-        "result": "pass",
         "test_authoring": {
           "model": "claude-opus-5-5",
-          "seed": 2,
+          "seed": 1,
           "prompt_version": "v1",
           "cache_hit": false
-        }
+        },
+        "result": "pass"
       },
       {
         "id": "AC-GEN-005",
         "covers": "R-GEN-005",
         "kind": "generated-test",
-        "result": "pass",
         "test_authoring": {
           "model": "claude-opus-5-5",
-          "seed": 2,
+          "seed": 1,
           "prompt_version": "v1",
           "cache_hit": false
-        }
+        },
+        "result": "pass"
       },
       {
         "id": "AC-GEN-006",
         "covers": "R-GEN-006",
         "kind": "generated-test",
-        "result": "pass",
         "test_authoring": {
           "model": "claude-opus-5-5",
-          "seed": 2,
+          "seed": 1,
           "prompt_version": "v1",
           "cache_hit": false
-        }
+        },
+        "result": "pass"
       },
       {
         "id": "AC-GEN-008",
         "covers": "R-GEN-008",
         "kind": "generated-test",
-        "result": "pass",
         "test_authoring": {
           "model": "claude-opus-5-5",
-          "seed": 2,
+          "seed": 1,
           "prompt_version": "v1",
           "cache_hit": false
-        }
+        },
+        "result": "pass"
       },
       {
         "id": "AC-GEN-009",
         "covers": "R-GEN-009",
         "kind": "generated-test",
-        "result": "pass",
         "test_authoring": {
           "model": "claude-opus-5-5",
-          "seed": 2,
+          "seed": 1,
           "prompt_version": "v1",
           "cache_hit": false
-        }
+        },
+        "result": "pass"
       },
       {
         "id": "AC-GEN-012",
         "covers": "R-GEN-011",
         "kind": "generated-test",
-        "result": "pass",
         "test_authoring": {
           "model": "claude-opus-5-5",
-          "seed": 2,
+          "seed": 1,
           "prompt_version": "v1",
           "cache_hit": false
-        }
+        },
+        "result": "pass"
       },
       {
         "id": "AC-GEN-013",
         "covers": "R-GEN-012",
         "kind": "generated-test",
-        "result": "pass",
         "test_authoring": {
           "model": "claude-opus-5-5",
-          "seed": 2,
+          "seed": 1,
           "prompt_version": "v1",
           "cache_hit": false
-        }
+        },
+        "result": "pass"
       },
       {
         "id": "AC-GEN-014",
         "covers": "R-GEN-013",
         "kind": "generated-test",
-        "result": "pass",
         "test_authoring": {
           "model": "claude-opus-5-5",
-          "seed": 2,
+          "seed": 1,
           "prompt_version": "v1",
           "cache_hit": false
-        }
+        },
+        "result": "pass"
       },
       {
         "id": "AC-GEN-015",
         "covers": "R-GEN-014",
         "kind": "generated-test",
-        "result": "pass",
         "test_authoring": {
           "model": "claude-opus-5-5",
-          "seed": 2,
+          "seed": 1,
           "prompt_version": "v1",
           "cache_hit": false
-        }
+        },
+        "result": "pass"
       },
       {
         "id": "AC-GEN-016",
         "covers": "R-GEN-015",
         "kind": "generated-test",
-        "result": "pass",
         "test_authoring": {
           "model": "claude-opus-5-5",
-          "seed": 2,
+          "seed": 1,
           "prompt_version": "v1",
           "cache_hit": false
-        }
+        },
+        "result": "pass"
       },
       {
         "id": "AC-GEN-017",
         "covers": "R-GEN-016",
         "kind": "generated-test",
-        "result": "pass",
         "test_authoring": {
           "model": "claude-opus-5-5",
-          "seed": 2,
+          "seed": 1,
           "prompt_version": "v1",
           "cache_hit": false
-        }
+        },
+        "result": "pass"
       },
       {
         "id": "AC-GEN-018",
         "covers": "R-GEN-017",
         "kind": "generated-test",
-        "result": "pass",
         "test_authoring": {
           "model": "claude-opus-5-5",
-          "seed": 2,
+          "seed": 1,
           "prompt_version": "v1",
           "cache_hit": false
-        }
+        },
+        "result": "pass"
       },
       {
         "id": "AC-GEN-019",
         "covers": "R-GEN-018",
         "kind": "generated-test",
-        "result": "pass",
         "test_authoring": {
           "model": "claude-opus-5-5",
-          "seed": 2,
+          "seed": 1,
           "prompt_version": "v1",
           "cache_hit": false
-        }
+        },
+        "result": "pass"
       },
       {
         "id": "AC-GEN-020",
         "covers": "R-GEN-019",
         "kind": "generated-test",
-        "result": "pass",
         "test_authoring": {
           "model": "claude-opus-5-5",
-          "seed": 2,
+          "seed": 1,
           "prompt_version": "v1",
           "cache_hit": false
-        }
+        },
+        "result": "pass"
       },
       {
         "id": "AC-GEN-021",
         "covers": "R-GEN-015",
         "kind": "generated-test",
-        "result": "pass",
         "test_authoring": {
           "model": "claude-opus-5-5",
-          "seed": 2,
+          "seed": 1,
           "prompt_version": "v1",
           "cache_hit": false
-        }
+        },
+        "result": "pass"
       },
       {
         "id": "AC-GEN-022",
         "covers": "R-GEN-020",
         "kind": "generated-test",
-        "result": "pass",
         "test_authoring": {
           "model": "claude-opus-5-5",
-          "seed": 2,
+          "seed": 1,
           "prompt_version": "v1",
           "cache_hit": false
-        }
+        },
+        "result": "pass"
       },
       {
         "id": "AC-GEN-023",
         "covers": "R-GEN-021",
         "kind": "generated-test",
-        "result": "pass",
         "test_authoring": {
           "model": "claude-opus-5-5",
-          "seed": 2,
+          "seed": 1,
           "prompt_version": "v1",
           "cache_hit": false
-        }
+        },
+        "result": "pass"
       }
     ],
     "requirement_results": {
@@ -281,7 +281,8 @@
       "R-GEN-021": "pass"
     },
     "interface_drift": false,
-    "mutation_score": 1.0,
+    "mutation_score": 0.9152542372881356,
+    "mutation_error": null,
     "overall": "pass"
   },
   "license_scan": {
@@ -387,6 +388,11 @@
         "rule_id": "AWS Access Key",
         "file": "specs/components/secret-scanner/acceptance/AC-SECRET-018.md",
         "line": 7
+      },
+      {
+        "rule_id": "Hex High Entropy String",
+        "file": "verification/generator/generated-test/test_ac_gen_018.py",
+        "line": 99
       }
     ],
     "unused_allowlist_entries": [

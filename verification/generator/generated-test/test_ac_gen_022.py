@@ -1,18 +1,13 @@
-import json
+# hotdocs-criterion: sha256:fd31aa524571c8746ee162f860de81fb55c923838df84727c54fc3733477189e
 import re
 import uuid
 from dataclasses import dataclass, field as dc_field, fields as dc_fields
-from pathlib import Path
 
 import generator
 
 
-def field(value, name):
-    return value[name] if isinstance(value, dict) else getattr(value, name)
-
-
 @dataclass
-class FakeSpecBundle:
+class FakeBundle:
     component_id: str
     spec_bundle_hash: str
     spec: str
@@ -26,7 +21,7 @@ class FakeSpecBundle:
     hint_code: object = None
 
     def __getitem__(self, key):
-        if key not in self.keys():
+        if key not in {f.name for f in dc_fields(self)}:
             raise KeyError(key)
         return getattr(self, key)
 
@@ -39,56 +34,43 @@ class FakeSpecBundle:
     def keys(self):
         return [f.name for f in dc_fields(self)]
 
+    def __contains__(self, key):
+        return key in self.keys()
+
     def __iter__(self):
         return iter(self.keys())
 
     def __len__(self):
         return len(self.keys())
 
-    def __contains__(self, key):
-        return key in self.keys()
 
-    def items(self):
-        return [(k, getattr(self, k)) for k in self.keys()]
-
-    def values(self):
-        return [getattr(self, k) for k in self.keys()]
+def field(value, name):
+    return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def _make_bundle():
-    return FakeSpecBundle(
+def test_prompt_instructs_nothing_more_and_mentions_mutation_testing(tmp_path, monkeypatch):
+    monkeypatch.delenv("VAR_CACHE_STORE_URL", raising=False)
+
+    bundle = FakeBundle(
         component_id="comp-foo",
         spec_bundle_hash="sha256:" + uuid.uuid4().hex + uuid.uuid4().hex,
-        spec=(
-            "# Foo\n\n## Purpose\n\nFoo doubles a number.\n\n"
-            "# R-FOO-001\n\n**R-FOO-001** — `foo(x)` MUST return `2 * x`."
-        ),
+        spec="# Foo\n\n## Purpose\n\nFoo doubles a number.\n\n# R-FOO-001\n\n**R-FOO-001** \u2014 `foo(x)` MUST return `2 * x`.",
         interface="# Library\n\n```\nfoo(x: int) -> int\n```",
         constraints="# Constraints\n\nNone.",
-        glossary="# Glossary\n\n- **Foo** — a test term.",
-        hint_code=None,
+        glossary="# Glossary\n\n- **Foo** \u2014 a test term.",
     )
 
-
-def test_ac_gen_022_prompt_says_nothing_more_and_mutation_testing(tmp_path, monkeypatch):
-    monkeypatch.delenv("VAR_CACHE_STORE_URL", raising=False)
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    monkeypatch.chdir(repo_root)
-
-    log_path = tmp_path / "mock_prompts.jsonl"
+    received = []
 
     def mock_backend(prompt, model, **params):
-        with open(log_path, "a", encoding="utf-8") as fh:
-            fh.write(json.dumps({"prompt": prompt, "model": model}) + "\n")
-        match = re.search(r"-----BEGIN FILE ([0-9a-f]{32}):", prompt)
-        nonce = match.group(1) if match else uuid.uuid4().hex
+        received.append(prompt)
+        nonce = re.search(r"-----BEGIN FILE ([0-9a-f]{32}):", prompt).group(1)
         text = (
-            f"-----BEGIN FILE {nonce}: foo.py-----\n"
+            "-----BEGIN FILE " + nonce + ": foo.py-----\n"
             "def foo(x):\n"
             "    return 2 * x\n"
-            f"-----END FILE {nonce}-----\n"
-            f"-----END REPLY {nonce}-----\n"
+            "-----END FILE " + nonce + "-----\n"
+            "-----END REPLY " + nonce + "-----\n"
         )
         return {
             "text": text,
@@ -97,26 +79,13 @@ def test_ac_gen_022_prompt_says_nothing_more_and_mutation_testing(tmp_path, monk
             "model_call_error": None,
         }
 
-    bundle = _make_bundle()
     result = generator.generate(
-        bundle,
-        "mock:model",
-        repo_root=repo_root,
-        llm_backend=mock_backend,
+        bundle, "mock-model", repo_root=tmp_path, llm_backend=mock_backend
     )
-    assert result is not None
+
     assert field(result, "cache_hit") is False
-
-    assert log_path.is_file(), "mock model was never called"
-    records = [
-        json.loads(line)
-        for line in log_path.read_text(encoding="utf-8").splitlines()
-        if line.strip()
-    ]
-    assert records, "mock model was never called"
-
-    for record in records:
-        prompt = record["prompt"]
-        assert isinstance(prompt, str)
-        assert "nothing more" in prompt
-        assert "mutation testing" in prompt
+    assert len(received) >= 1
+    prompt = received[0]
+    lowered = prompt.lower()
+    assert "nothing more" in lowered
+    assert "mutation testing" in lowered

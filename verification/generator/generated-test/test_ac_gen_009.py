@@ -1,107 +1,79 @@
-"""AC-GEN-009 (covers R-GEN-009): sealed components and pinned overrides are
-refused as a precondition, before any model call is attempted.
-
-Given a component marked sealed: true with a source_path, and a second
-component with a gen/<component>/.overrides.json listing one pinned file,
-when generate is invoked for either component with a mock model that records
-whether it was ever called, then the mock model is never called and the
-GenerationResult has files empty, model_call_error null, and refused set to a
-reason string naming which exemption applied.
-"""
-
-import generator
-
-import dataclasses
-import hashlib
+# hotdocs-criterion: sha256:c7142ff1f230f6b1088fe2f13ca9e8de65faa0e4d6d2f626c7fc89ad2cc2be4c
 import json
 import re
 from pathlib import Path
 
 import pytest
 
-
-MODEL = "claude-sonnet-5"
+import generator
 
 
 def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-@dataclasses.dataclass
-class FakeSpecBundle:
-    """A SpecBundle-shaped dataclass (fields in the documented order) that
-    also reads as a read-only mapping, as SpecBundle does."""
+class Bundle:
+    _FIELDS = (
+        "component_id",
+        "spec_bundle_hash",
+        "spec",
+        "interface",
+        "constraints",
+        "dependency_interfaces",
+        "dependency_context",
+        "dependency_usage",
+        "vars",
+        "glossary",
+        "hint_code",
+    )
 
-    component_id: str
-    spec_bundle_hash: str
-    spec: str
-    interface: str
-    constraints: str
-    dependency_interfaces: dict = dataclasses.field(default_factory=dict)
-    dependency_context: dict = dataclasses.field(default_factory=dict)
-    dependency_usage: dict = dataclasses.field(default_factory=dict)
-    vars: dict = dataclasses.field(default_factory=dict)
-    glossary: str = ""
-    hint_code: dict = None
+    def __init__(self, component_id, spec_bundle_hash):
+        self.component_id = component_id
+        self.spec_bundle_hash = spec_bundle_hash
+        self.spec = "# Spec\n\nDoubles a number."
+        self.interface = "# Library\n\n    foo(x: int) -> int"
+        self.constraints = "# Constraints\n\nNone."
+        self.dependency_interfaces = {}
+        self.dependency_context = {}
+        self.dependency_usage = {}
+        self.vars = {}
+        self.glossary = "# Glossary\n\n- **Foo** — a test term."
+        self.hint_code = None
 
     def __getitem__(self, key):
-        if key not in {f.name for f in dataclasses.fields(self)}:
+        if key not in self._FIELDS:
             raise KeyError(key)
         return getattr(self, key)
 
     def get(self, key, default=None):
-        try:
-            return self[key]
-        except KeyError:
-            return default
+        if key in self._FIELDS:
+            return getattr(self, key)
+        return default
 
     def keys(self):
-        return [f.name for f in dataclasses.fields(self)]
+        return list(self._FIELDS)
+
+    def __iter__(self):
+        return iter(self._FIELDS)
 
     def __contains__(self, key):
-        return key in self.keys()
+        return key in self._FIELDS
+
+    def __len__(self):
+        return len(self._FIELDS)
 
 
-def _write(path: Path, text: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text, encoding="utf-8")
-
-
-def _make_bundle(component_id: str, slug: str) -> FakeSpecBundle:
-    spec = (
-        f"# {slug.title()}\n\n## Purpose\n\n{slug.title()} doubles a number.\n\n"
-        f"# R-{slug.upper()}-001\n\n"
-        f"**R-{slug.upper()}-001** — `{slug}(x)` MUST return `2 * x`."
-    )
-    interface = f"# Library\n\n```\n{slug}(x: int) -> int\n```"
-    constraints = "# Constraints\n\nNone."
-    digest = hashlib.sha256((spec + interface + constraints).encode("utf-8")).hexdigest()
-    return FakeSpecBundle(
-        component_id=component_id,
-        spec_bundle_hash="sha256:" + digest,
-        spec=spec,
-        interface=interface,
-        constraints=constraints,
-        glossary="# Glossary\n\n- **Foo** — a test term.",
-        hint_code=None,
-    )
-
-
-def _make_mock_backend(log_path: Path):
-    """A mock llm_backend matching llm-endpoint's backend shape:
-    backend(prompt, model, **params) -> ModelResponse. It appends a record
-    to a file the test controls every time it is invoked."""
-
+def make_backend(log_path):
     def backend(prompt, model, **params):
         with open(log_path, "a", encoding="utf-8") as fh:
-            fh.write(json.dumps({"called": True, "model": model}) + "\n")
-        match = re.search(r"-----BEGIN FILE ([0-9a-f]{32}):", prompt or "")
-        nonce = match.group(1) if match else "0" * 32
+            fh.write("called\n")
+        m = re.search(r"-----BEGIN FILE ([0-9a-f]{32}):", prompt)
+        nonce = m.group(1) if m else "0" * 32
         text = (
-            f"-----BEGIN FILE {nonce}: foo.py-----\n"
-            "def foo(x):\n    return 2 * x\n"
-            f"-----END FILE {nonce}-----\n"
-            f"-----END REPLY {nonce}-----\n"
+            "-----BEGIN FILE " + nonce + ": out.py-----\n"
+            + "def foo(x):\n    return 2 * x\n"
+            + "-----END FILE " + nonce + "-----\n"
+            + "-----END REPLY " + nonce + "-----\n"
         )
         return {
             "text": text,
@@ -113,25 +85,10 @@ def _make_mock_backend(log_path: Path):
     return backend
 
 
-def _calls(log_path: Path) -> int:
-    if not log_path.exists():
-        return 0
-    return len([l for l in log_path.read_text(encoding="utf-8").splitlines() if l.strip()])
-
-
-@pytest.fixture
-def repo(tmp_path, monkeypatch):
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    monkeypatch.delenv("VAR_CACHE_STORE_URL", raising=False)
-    # Keep any stray side effects (e.g. call logs) inside the temp dir.
-    monkeypatch.chdir(tmp_path)
-
-    _write(repo_root / "specs" / "glossary.md", "# Glossary\n\n- **Foo** — a test term.\n")
-
-    # Component 1: sealed, with a source_path holding its real code.
-    _write(
-        repo_root / "specs" / "components" / "foo" / "component.md",
+def write_sealed_component(repo_root):
+    comp_dir = repo_root / "specs" / "components" / "foo"
+    comp_dir.mkdir(parents=True, exist_ok=True)
+    (comp_dir / "component.md").write_text(
         "---\n"
         "id: comp-foo\n"
         "title: Foo\n"
@@ -147,12 +104,18 @@ def repo(tmp_path, monkeypatch):
         "## Purpose\n"
         "\n"
         "Foo doubles a number.\n",
+        encoding="utf-8",
     )
-    _write(repo_root / "legacy" / "foo" / "foo.py", "def foo(x):\n    return x + x\n")
+    legacy = repo_root / "legacy" / "foo"
+    legacy.mkdir(parents=True, exist_ok=True)
+    (legacy / "foo.py").write_text("def foo(x):\n    return 2 * x\n", encoding="utf-8")
+    return "comp-foo", "foo"
 
-    # Component 2: not sealed, but with one pinned file in .overrides.json.
-    _write(
-        repo_root / "specs" / "components" / "bar" / "component.md",
+
+def write_pinned_component(repo_root):
+    comp_dir = repo_root / "specs" / "components" / "bar"
+    comp_dir.mkdir(parents=True, exist_ok=True)
+    (comp_dir / "component.md").write_text(
         "---\n"
         "id: comp-bar\n"
         "title: Bar\n"
@@ -167,85 +130,72 @@ def repo(tmp_path, monkeypatch):
         "## Purpose\n"
         "\n"
         "Bar doubles a number.\n",
+        encoding="utf-8",
     )
-    _write(repo_root / "gen" / "bar" / "bar.py", "# hand-pinned\ndef bar(x):\n    return 2 * x\n")
-    # The overrides file lists exactly one pinned file, bar.py.
-    _write(
-        repo_root / "gen" / "bar" / ".overrides.json",
-        json.dumps({"pinned": ["bar.py"]}, indent=2) + "\n",
+    gen_dir = repo_root / "gen" / "bar"
+    gen_dir.mkdir(parents=True, exist_ok=True)
+    (gen_dir / "bar.py").write_text("def bar(x):\n    return 2 * x\n", encoding="utf-8")
+    (gen_dir / ".overrides.json").write_text(json.dumps(["bar.py"]), encoding="utf-8")
+    return "comp-bar", "bar"
+
+
+@pytest.mark.parametrize(
+    "builder, expected_reason",
+    [
+        (write_sealed_component, "sealed-component"),
+        (write_pinned_component, "pinned-override"),
+    ],
+)
+def test_exempt_component_refused_before_model_call(
+    tmp_path, monkeypatch, builder, expected_reason
+):
+    monkeypatch.delenv("VAR_CACHE_STORE_URL", raising=False)
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    monkeypatch.chdir(repo_root)
+
+    component_id, slug = builder(repo_root)
+    gen_dir = repo_root / "gen" / slug
+    before = {}
+    if gen_dir.is_dir():
+        for p in gen_dir.rglob("*"):
+            if p.is_file():
+                before[str(p.relative_to(gen_dir))] = p.read_bytes()
+
+    log_path = tmp_path / "model_calls.log"
+    backend = make_backend(log_path)
+
+    bundle = Bundle(component_id, "sha256:" + "a" * 64)
+
+    result = generator.generate(
+        bundle,
+        "mock-model",
+        None,
+        repo_root=repo_root,
+        llm_backend=backend,
     )
-    return repo_root
 
+    # The mock model is never called.
+    assert not log_path.exists() or log_path.read_text(encoding="utf-8") == ""
 
-def _assert_refused(result, log_path, expected_keywords):
-    assert _calls(log_path) == 0, "mock model was called despite a write exemption"
-
+    # files empty, model_call_error null, refused names the exemption.
     files = field(result, "files")
-    assert files == {} or not files
-    assert files is not None and len(files) == 0
-
+    assert not files
+    assert files == {}
     assert field(result, "model_call_error") is None
-
     refused = field(result, "refused")
-    assert isinstance(refused, str) and refused.strip(), "refused must be a reason string"
-    lowered = refused.lower()
-    assert any(k in lowered for k in expected_keywords), (
-        f"refused reason {refused!r} does not name the exemption ({expected_keywords})"
-    )
+    assert isinstance(refused, str)
+    assert refused == expected_reason
     assert field(result, "cache_hit") is False
-    return refused
 
-
-def test_sealed_component_is_refused_without_model_call(repo, tmp_path):
-    log_path = tmp_path / "sealed_calls.log"
-    backend = _make_mock_backend(log_path)
-    bundle = _make_bundle("comp-foo", "foo")
-    legacy_before = (repo / "legacy" / "foo" / "foo.py").read_text(encoding="utf-8")
-
-    result = generator.generate(bundle, MODEL, repo_root=repo, llm_backend=backend)
-
-    refused = _assert_refused(result, log_path, ["sealed"])
-    assert refused == "sealed-component"
-    assert field(result, "component_id") == "comp-foo"
-
-    # Nothing was written to the sealed component's source_path or gen/.
-    assert (repo / "legacy" / "foo" / "foo.py").read_text(encoding="utf-8") == legacy_before
-    assert sorted(p.name for p in (repo / "legacy" / "foo").iterdir()) == ["foo.py"]
-    assert not (repo / "gen" / "foo").exists() or not any((repo / "gen" / "foo").iterdir())
-
-
-def test_pinned_override_is_refused_without_model_call(repo, tmp_path):
-    log_path = tmp_path / "pinned_calls.log"
-    backend = _make_mock_backend(log_path)
-    bundle = _make_bundle("comp-bar", "bar")
-    pinned_before = (repo / "gen" / "bar" / "bar.py").read_text(encoding="utf-8")
-
-    result = generator.generate(bundle, MODEL, repo_root=repo, llm_backend=backend)
-
-    refused = _assert_refused(result, log_path, ["pinned", "override"])
-    assert refused == "pinned-override"
-    assert field(result, "component_id") == "comp-bar"
-
-    # The pinned file was not clobbered.
-    assert (repo / "gen" / "bar" / "bar.py").read_text(encoding="utf-8") == pinned_before
-
-
-def test_reasons_distinguish_the_two_exemptions(repo, tmp_path):
-    log_path = tmp_path / "both_calls.log"
-    backend = _make_mock_backend(log_path)
-
-    sealed = generator.generate(
-        _make_bundle("comp-foo", "foo"), MODEL, repo_root=repo, llm_backend=backend
-    )
-    pinned = generator.generate(
-        _make_bundle("comp-bar", "bar"), MODEL, repo_root=repo, llm_backend=backend
-    )
-
-    assert _calls(log_path) == 0
-    assert field(sealed, "refused") != field(pinned, "refused")
-    assert field(sealed, "refused") == generator.check_write_allowed(
-        _make_bundle("comp-foo", "foo"), repo_root=repo
-    )
-    assert field(pinned, "refused") == generator.check_write_allowed(
-        _make_bundle("comp-bar", "bar"), repo_root=repo
-    )
+    # Nothing in the declared hands-off paths was clobbered.
+    after = {}
+    if gen_dir.is_dir():
+        for p in gen_dir.rglob("*"):
+            if p.is_file():
+                after[str(p.relative_to(gen_dir))] = p.read_bytes()
+    assert after == before
+    if expected_reason == "sealed-component":
+        assert (repo_root / "legacy" / "foo" / "foo.py").read_text(
+            encoding="utf-8"
+        ) == "def foo(x):\n    return 2 * x\n"

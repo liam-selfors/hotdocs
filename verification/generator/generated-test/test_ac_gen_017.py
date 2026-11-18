@@ -1,49 +1,74 @@
-import generator
-
+# hotdocs-criterion: sha256:9f99408c3b7715cf4013bfacf8a8b4258de6d545002863b46de79b844e3d804d
 import hashlib
 import importlib.util
 import json
 import re
 import sys
 from collections.abc import Mapping
-from dataclasses import dataclass, field as dc_field
 from pathlib import Path
 
 import pytest
 
+import generator
 
+
+MODEL = "claude-sonnet-5"
 COMPONENT_ID = "comp-foo"
 SLUG = "foo"
-MODEL = "anthropic:claude-sonnet-5"
-SPEC_BUNDLE_HASH = "sha256:" + hashlib.sha256(b"ac-gen-017 synthetic spec state").hexdigest()
+SPEC_BUNDLE_HASH = "sha256:" + hashlib.sha256(b"ac-gen-017-spec-state").hexdigest()
 
-CANDIDATE_CONTENT = "def foo(x):\n    return 2 * x\n"
-HINT_CONTENT = "def foo(x):\n    # prior hint code\n    return x + x\n"
+OLD_HINT_CONTENT = "def foo(x):\n    return x + x  # old hint code\n"
+COLD_CONTENT = "def foo(x):\n    return 2 * x  # cold candidate\n"
+HINT_CONTENT = "def foo(x):\n    return 2 * x  # hint candidate\n"
 
 
 def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-@dataclass
-class FakeSpecBundle(Mapping):
-    component_id: str
-    spec_bundle_hash: str
-    spec: str
-    interface: str
-    constraints: str
-    dependency_interfaces: dict = dc_field(default_factory=dict)
-    dependency_context: dict = dc_field(default_factory=dict)
-    dependency_usage: dict = dc_field(default_factory=dict)
-    vars: dict = dc_field(default_factory=dict)
-    glossary: str = ""
-    hint_code: object = None
+def load_module(path, module_name):
+    spec = importlib.util.spec_from_file_location(module_name, path)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    spec.loader.exec_module(module)
+    return module
 
+
+def load_cache_manager():
+    gen = next(p for p in Path(generator.__file__).resolve().parents if p.name == "gen")
+    base = gen / "cache-manager"
+    flat = base / "cache_manager.py"
+    path = flat if flat.is_file() else base / "cache_manager" / "__init__.py"
+    return load_module(path, "cache_manager")
+
+
+class FakeBundle(Mapping):
     _FIELDS = (
-        "component_id", "spec_bundle_hash", "spec", "interface", "constraints",
-        "dependency_interfaces", "dependency_context", "dependency_usage",
-        "vars", "glossary", "hint_code",
+        "component_id",
+        "spec_bundle_hash",
+        "spec",
+        "interface",
+        "constraints",
+        "dependency_interfaces",
+        "dependency_context",
+        "dependency_usage",
+        "vars",
+        "glossary",
+        "hint_code",
     )
+
+    def __init__(self, **kw):
+        self.component_id = kw["component_id"]
+        self.spec_bundle_hash = kw["spec_bundle_hash"]
+        self.spec = kw.get("spec", "")
+        self.interface = kw.get("interface", "")
+        self.constraints = kw.get("constraints", "")
+        self.dependency_interfaces = kw.get("dependency_interfaces", {})
+        self.dependency_context = kw.get("dependency_context", {})
+        self.dependency_usage = kw.get("dependency_usage", {})
+        self.vars = kw.get("vars", {})
+        self.glossary = kw.get("glossary", "")
+        self.hint_code = kw.get("hint_code", None)
 
     def __getitem__(self, key):
         if key not in self._FIELDS:
@@ -58,11 +83,11 @@ class FakeSpecBundle(Mapping):
 
 
 def make_bundle(hint_code):
-    return FakeSpecBundle(
+    return FakeBundle(
         component_id=COMPONENT_ID,
         spec_bundle_hash=SPEC_BUNDLE_HASH,
-        spec="# Foo\n\n## Purpose\n\nFoo doubles a number.\n\n# R-FOO-001\n\n"
-             "**R-FOO-001** — `foo(x)` MUST return `2 * x`.",
+        spec="# Foo\n\n## Purpose\n\nFoo doubles a number.\n\n"
+        "# R-FOO-001\n\n**R-FOO-001** — `foo(x)` MUST return `2 * x`.",
         interface="# Library\n\n```\nfoo(x: int) -> int\n```",
         constraints="# Constraints\n\nNone.",
         glossary="# Glossary\n\n- **Foo** — a test term.",
@@ -70,85 +95,74 @@ def make_bundle(hint_code):
     )
 
 
-def load_cache_manager():
-    gen = next(p for p in Path(generator.__file__).resolve().parents if p.name == "gen")
-    base = gen / "cache-manager"
-    path = base / "cache_manager.py" if (base / "cache_manager.py").is_file() else base / "cache_manager" / "__init__.py"
-    name = "_ac_gen_017_cache_manager"
-    spec = importlib.util.spec_from_file_location(name, path)
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[name] = module
-    spec.loader.exec_module(module)
-    return module
-
-
 def make_backend(log_path, content):
     def backend(prompt, model, **params):
         with open(log_path, "a", encoding="utf-8") as fh:
-            fh.write(json.dumps({"model": model}) + "\n")
+            fh.write("call " + model + "\n")
         nonce = re.search(r"-----BEGIN FILE ([0-9a-f]{32}):", prompt).group(1)
         text = (
-            f"-----BEGIN FILE {nonce}: foo.py-----\n"
-            f"{content}"
-            f"-----END FILE {nonce}-----\n"
-            f"-----END REPLY {nonce}-----\n"
+            "-----BEGIN FILE " + nonce + ": foo.py-----\n"
+            + content
+            + "-----END FILE " + nonce + "-----\n"
+            + "-----END REPLY " + nonce + "-----\n"
         )
         return {"text": text, "model": model, "backend": "mock", "model_call_error": None}
+
     return backend
 
 
 def call_count(log_path):
-    if not Path(log_path).exists():
+    if not log_path.exists():
         return 0
-    return len([l for l in Path(log_path).read_text(encoding="utf-8").splitlines() if l.strip()])
+    return len([ln for ln in log_path.read_text(encoding="utf-8").splitlines() if ln.strip()])
 
 
-def snapshot_gen(repo_root):
-    gen = Path(repo_root) / "gen"
-    snap = {}
-    if not gen.exists():
-        return snap
-    for p in sorted(gen.rglob("*")):
-        if "__pycache__" in p.parts:
-            continue
-        rel = p.relative_to(gen).as_posix()
-        snap[rel] = p.read_bytes() if p.is_file() else None
-    return snap
+def snapshot(directory):
+    if not directory.exists():
+        return None
+    return {
+        str(p.relative_to(directory)): p.read_bytes()
+        for p in sorted(directory.rglob("*"))
+        if p.is_file()
+    }
 
 
-def gate_inputs_hash(retry_feedback=None):
-    raw = json.dumps(sorted(retry_feedback or []), sort_keys=True).encode("utf-8")
-    return "sha256:" + hashlib.sha256(raw).hexdigest()
+def cache_key(cache_manager):
+    gate_inputs_hash = "sha256:" + hashlib.sha256(
+        json.dumps(sorted([]), sort_keys=True).encode("utf-8")
+    ).hexdigest()
+    return cache_manager.CacheKey(
+        spec_bundle_hash=SPEC_BUNDLE_HASH,
+        gate_inputs_hash=gate_inputs_hash,
+        gate_version=generator.GATE_VERSION,
+        model_pin=MODEL,
+    )
 
 
 @pytest.fixture
-def env(tmp_path, monkeypatch):
+def repo_root(tmp_path, monkeypatch):
     monkeypatch.delenv("VAR_CACHE_STORE_URL", raising=False)
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    cwd = tmp_path / "cwd"
-    cwd.mkdir()
-    monkeypatch.chdir(cwd)
-    return repo_root, tmp_path
+    root = tmp_path / "repo"
+    root.mkdir()
+    monkeypatch.chdir(root)
+    return root
 
 
-def test_hint_mode_miss_returns_candidate_without_writing_gen_or_cache(env):
-    repo_root, tmp_path = env
+def test_hint_mode_miss_returns_candidate_without_writing_gen_or_cache(repo_root, tmp_path):
     cache_manager = load_cache_manager()
-
     gen_dir = repo_root / "gen" / SLUG
     gen_dir.mkdir(parents=True)
-    (gen_dir / "foo.py").write_text(HINT_CONTENT, encoding="utf-8")
-    before = snapshot_gen(repo_root)
+    (gen_dir / "foo.py").write_text(OLD_HINT_CONTENT, encoding="utf-8")
+    before = snapshot(gen_dir)
 
-    stats_before = cache_manager.stats(repo_root=repo_root)
-    assert field(stats_before, "entry_count") == 0
+    key = cache_key(cache_manager)
+    assert isinstance(cache_manager.get(key, repo_root=repo_root), cache_manager.Miss)
+    assert cache_manager.stats(repo_root=repo_root)["entry_count"] == 0
 
-    log_path = tmp_path / "calls.log"
-    bundle = make_bundle({"foo.py": HINT_CONTENT})
+    log_path = tmp_path / "hint_model_calls.log"
+    bundle = make_bundle({"foo.py": OLD_HINT_CONTENT})
     result = generator.generate(
-        bundle, MODEL, repo_root=repo_root,
-        llm_backend=make_backend(log_path, CANDIDATE_CONTENT),
+        bundle, MODEL, repo_root=repo_root, llm_backend=make_backend(log_path, HINT_CONTENT)
     )
 
     assert call_count(log_path) == 1
@@ -157,55 +171,47 @@ def test_hint_mode_miss_returns_candidate_without_writing_gen_or_cache(env):
     assert field(result, "refused") is None
     files = field(result, "files")
     assert "foo.py" in files
-    assert files["foo.py"].strip() == CANDIDATE_CONTENT.strip()
+    assert files["foo.py"].rstrip("\n") == HINT_CONTENT.rstrip("\n")
 
     # gen/<component>/ untouched
-    assert snapshot_gen(repo_root) == before
+    assert snapshot(gen_dir) == before
 
-    # nothing written to the cache
-    stats_after = cache_manager.stats(repo_root=repo_root)
-    assert field(stats_after, "entry_count") == 0
-    key = cache_manager.CacheKey(
-        spec_bundle_hash=SPEC_BUNDLE_HASH,
-        gate_inputs_hash=gate_inputs_hash(None),
-        gate_version=generator.GATE_VERSION,
-        model_pin=MODEL,
-    )
+    # nothing written to the cache by generate
     assert isinstance(cache_manager.get(key, repo_root=repo_root), cache_manager.Miss)
+    assert cache_manager.stats(repo_root=repo_root)["entry_count"] == 0
+
+    # commit_cache must not write a hint-mode result either
+    generator.commit_cache(result, repo_root=repo_root)
+    assert isinstance(cache_manager.get(key, repo_root=repo_root), cache_manager.Miss)
+    assert cache_manager.stats(repo_root=repo_root)["entry_count"] == 0
+    assert snapshot(gen_dir) == before
 
 
-def test_hint_mode_hit_returns_cached_cold_result_without_model_call_or_gen_write(env):
-    repo_root, tmp_path = env
+def test_hint_mode_hit_returns_cached_cold_result_without_model_call(repo_root, tmp_path):
     cache_manager = load_cache_manager()
+    key = cache_key(cache_manager)
 
-    # Produce and cache a cold-mode result for the exact same spec state.
-    cold_log = tmp_path / "cold_calls.log"
+    # Produce and cache a cold-mode result for this exact spec state.
+    cold_log = tmp_path / "cold_model_calls.log"
     cold_result = generator.generate(
-        make_bundle(None), MODEL, repo_root=repo_root,
-        llm_backend=make_backend(cold_log, CANDIDATE_CONTENT),
+        make_bundle(None), MODEL, repo_root=repo_root, llm_backend=make_backend(cold_log, COLD_CONTENT)
     )
     assert call_count(cold_log) == 1
     cold_files = field(cold_result, "files")
-    assert cold_files, "cold-mode setup produced no files"
+    assert "foo.py" in cold_files
     generator.commit_cache(cold_result, repo_root=repo_root)
-    assert field(cache_manager.stats(repo_root=repo_root), "entry_count") >= 1
+    assert not isinstance(cache_manager.get(key, repo_root=repo_root), cache_manager.Miss)
 
-    # Hint code is the component's current gen/<component>/ content.
     gen_dir = repo_root / "gen" / SLUG
-    hint_code = {}
-    if gen_dir.exists():
-        for p in gen_dir.rglob("*"):
-            if p.is_file() and "__pycache__" not in p.parts:
-                hint_code[p.relative_to(gen_dir).as_posix()] = p.read_text(encoding="utf-8")
-    if not hint_code:
-        hint_code = {"foo.py": HINT_CONTENT}
-    before = snapshot_gen(repo_root)
-    entries_before = field(cache_manager.stats(repo_root=repo_root), "entry_count")
+    before = snapshot(gen_dir)
+    hint_code = dict(before_text) if (before_text := {
+        k: v.decode("utf-8") for k, v in (before or {}).items()
+    }) else {"foo.py": OLD_HINT_CONTENT}
 
-    hint_log = tmp_path / "hint_calls.log"
+    hint_log = tmp_path / "hint_model_calls.log"
     result = generator.generate(
         make_bundle(hint_code), MODEL, repo_root=repo_root,
-        llm_backend=make_backend(hint_log, "def foo(x):\n    return 'should not be used'\n"),
+        llm_backend=make_backend(hint_log, HINT_CONTENT),
     )
 
     # no model call occurs
@@ -214,7 +220,6 @@ def test_hint_mode_hit_returns_cached_cold_result_without_model_call_or_gen_writ
     assert field(result, "cache_hit") is True
     assert field(result, "model_call_error") is None
     assert field(result, "refused") is None
-    assert dict(field(result, "files")) == dict(cold_files)
+    assert field(result, "files") == cold_files
     # gen/<component>/ stays untouched
-    assert snapshot_gen(repo_root) == before
-    assert field(cache_manager.stats(repo_root=repo_root), "entry_count") == entries_before
+    assert snapshot(gen_dir) == before
