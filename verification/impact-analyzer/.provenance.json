@@ -12,7 +12,7 @@
     "secret_scanner": "secret_scanner@3.1.0+detect-secrets.1.5.0"
   },
   "provenance_hit": false,
-  "generated_at": "2026-11-18T06:57:10Z",
+  "generated_at": "2026-11-18T10:02:33Z",
   "verification_run_id": "impact-analyzer-attempt-1",
   "verification_report": {
     "component_id": "comp-impact-analyzer",
@@ -165,25 +165,25 @@
         "id": "AC-IMPACT-011",
         "covers": "R-IMPACT-001",
         "kind": "generated-test",
+        "result": "pass",
         "test_authoring": {
           "model": "claude-opus-5-5",
           "seed": 1,
           "prompt_version": "v1",
           "cache_hit": false
-        },
-        "result": "pass"
+        }
       },
       {
         "id": "AC-IMPACT-012",
         "covers": "R-IMPACT-010",
         "kind": "generated-test",
+        "result": "pass",
         "test_authoring": {
           "model": "claude-opus-5-5",
           "seed": 1,
           "prompt_version": "v1",
           "cache_hit": false
-        },
-        "result": "pass"
+        }
       }
     ],
     "requirement_results": {
@@ -219,15 +219,8 @@
   "secret_scan": {
     "scope": "full",
     "gate_version": "secret_scanner@3.1.0+detect-secrets.1.5.0",
-    "flagged": true,
-    "matches": [
-      {
-        "rule_id": "Hex High Entropy String",
-        "risk_tier": "low",
-        "file": "verification/generator/generated-test/test_ac_gen_018.py",
-        "line": 123
-      }
-    ],
+    "flagged": false,
+    "matches": [],
     "allowed": [
       {
         "rule_id": "Hex High Entropy String",
@@ -333,6 +326,11 @@
         "rule_id": "Base64 High Entropy String",
         "file": "verification/corpus-graph.json",
         "line": 10370
+      },
+      {
+        "rule_id": "Hex High Entropy String",
+        "file": "verification/generator/generated-test/test_ac_gen_018.py",
+        "line": 123
       },
       {
         "rule_id": "Hex High Entropy String",

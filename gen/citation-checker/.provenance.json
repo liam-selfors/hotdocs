@@ -12,7 +12,7 @@
     "secret_scanner": "secret_scanner@3.1.0+detect-secrets.1.5.0"
   },
   "provenance_hit": false,
-  "generated_at": "2026-11-18T06:01:15Z",
+  "generated_at": "2026-11-18T09:53:11Z",
   "verification_run_id": "citation-checker-attempt-1",
   "verification_report": {
     "component_id": "comp-citation-checker",
@@ -76,15 +76,8 @@
   "secret_scan": {
     "scope": "full",
     "gate_version": "secret_scanner@3.1.0+detect-secrets.1.5.0",
-    "flagged": true,
-    "matches": [
-      {
-        "rule_id": "Hex High Entropy String",
-        "risk_tier": "low",
-        "file": "verification/generator/generated-test/test_ac_gen_018.py",
-        "line": 123
-      }
-    ],
+    "flagged": false,
+    "matches": [],
     "allowed": [
       {
         "rule_id": "Hex High Entropy String",
@@ -190,6 +183,11 @@
         "rule_id": "Base64 High Entropy String",
         "file": "verification/corpus-graph.json",
         "line": 10370
+      },
+      {
+        "rule_id": "Hex High Entropy String",
+        "file": "verification/generator/generated-test/test_ac_gen_018.py",
+        "line": 123
       },
       {
         "rule_id": "Hex High Entropy String",
