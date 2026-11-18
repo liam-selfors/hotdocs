@@ -1,3 +1,4 @@
+# hotdocs-criterion: sha256:d516809a8bcf9286c75d36dde92f2bacdd1457f33090ecbeea291f6aabff357c
 """AC-LINT-006 (covers R-LINT-006).
 
 Given a component component.md with sealed: false (or absent) and zero

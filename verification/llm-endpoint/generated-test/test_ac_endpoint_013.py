@@ -1,3 +1,4 @@
+# hotdocs-criterion: sha256:a2aff241b318609daa4b7b8395449e20b7550ab8258d8d7b69e742b2f5909ab6
 import os
 import stat
 

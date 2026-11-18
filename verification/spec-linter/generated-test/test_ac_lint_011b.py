@@ -1,3 +1,4 @@
+# hotdocs-criterion: sha256:61e43e9b7f6f5ac81d42b04f255164349f421c73373dfef7d9886ebaf2b7b7eb
 """AC-LINT-011b — covers R-LINT-011.
 
 Given a component's Definitions section whose entry for a glossary term adds

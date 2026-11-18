@@ -1,3 +1,4 @@
+# hotdocs-criterion: sha256:b569f3f0d0fa2e51d3fc982c555ec94b2f4908d526c735107f1dc50740672261
 """AC-IMPACT-007 (covers R-IMPACT-007).
 
 Given a corpus containing a dangling depends_on reference unrelated to the

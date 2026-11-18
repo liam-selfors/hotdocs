@@ -1,3 +1,4 @@
+# hotdocs-criterion: sha256:b9181b28b410cbb32a8a003c1809abb5cf1f4eb69b0490e912b109f973897271
 import os
 import tempfile
 import unittest

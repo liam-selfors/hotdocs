@@ -1,3 +1,4 @@
+# hotdocs-criterion: sha256:aefe9120909ff6ff02a493886d2b6ed5a070ce39ecfbe5fdd16d16dac86aa6d6
 import textwrap
 from pathlib import Path
 

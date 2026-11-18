@@ -1,3 +1,4 @@
+# hotdocs-criterion: sha256:f34fde1494ba0278563326b95ecda1d35227fff8ff049ebc3c9f3ea3742b1e3c
 import importlib.util
 import inspect
 import sys

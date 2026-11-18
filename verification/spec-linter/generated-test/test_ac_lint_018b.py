@@ -1,3 +1,4 @@
+# hotdocs-criterion: sha256:64eba2eeba5325607c2e47f3b215a9fc4bd156ba5b225a9216b611f46af7d964
 """AC-LINT-018b (covers R-LINT-018).
 
 Given a component's depends_on_guarantees lists G-DOES-NOT-EXIST

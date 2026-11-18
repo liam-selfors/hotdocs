@@ -1,3 +1,4 @@
+# hotdocs-criterion: sha256:49e5f23e374d24e536bea83f84337292fce27d1278094438fcb5e4d779c13d2d
 import os
 import stat
 import urllib.request

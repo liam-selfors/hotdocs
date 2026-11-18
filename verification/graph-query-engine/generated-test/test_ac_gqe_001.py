@@ -1,3 +1,4 @@
+# hotdocs-criterion: sha256:2a37a9bae3fdec97e064d39e684f8f9bf938697dbade46d0f598f03c5703fc6a
 """AC-GQE-001 (covers R-GQE-001).
 
 Given a repo root with a real spec corpus

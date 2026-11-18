@@ -1,3 +1,4 @@
+# hotdocs-criterion: sha256:d1bae7f370922346ca9a78d8d6f05998bad3b370131a711fa4e59587e4766c90
 """AC-SECRET-015 (covers R-SECRET-012): a finding is suppressed only by an
 exact allowlist entry (same file, same type, same hashed secret) and by
 nothing else.

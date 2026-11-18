@@ -1,3 +1,4 @@
+# hotdocs-criterion: sha256:4eed23423f0512281c01425206bc551c3f5df5584c5f0117d841d7037effc877
 """AC-SECRET-018 (covers R-SECRET-012): the allowlist is honored only when
 sealed by the highest-numbered ratified decision carrying its exact SHA-256;
 otherwise it is invalid as a whole and an allowlist-invalid match is added.

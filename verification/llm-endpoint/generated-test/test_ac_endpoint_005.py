@@ -1,3 +1,4 @@
+# hotdocs-criterion: sha256:9d4124d68e671b0deeefb5d12e05db0177568ce56461753b1bc9e1233e56e6db
 """AC-ENDPOINT-005 (Covers: R-ENDPOINT-003).
 
 Given no hotdocs.toml, and the claude command replaced by a recorder,

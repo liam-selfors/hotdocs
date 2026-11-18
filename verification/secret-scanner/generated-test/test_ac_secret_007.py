@@ -1,3 +1,4 @@
+# hotdocs-criterion: sha256:347a4c8232bfbbc9c5ddc125d587ee0a0cde73322447804e1b70d2ffe6810258
 """AC-SECRET-007 (covers R-SECRET-007).
 
 Given any full scan

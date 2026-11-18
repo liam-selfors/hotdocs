@@ -1,3 +1,4 @@
+# hotdocs-criterion: sha256:85ee80d0c296973bcdf40e75ed8e76498d5a614d8cf53ed46e8b467aa24e4b65
 """AC-CORPUS-002 (covers R-CORPUS-002).
 
 Given a small synthetic corpus with exactly one component,

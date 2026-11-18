@@ -1,3 +1,4 @@
+# hotdocs-criterion: sha256:11959e32b8f156ede0c3a7325491c2d4a9556b97402c5053b237c21558140164
 """AC-IMPACT-008c (covers R-IMPACT-008).
 
 Given comp-foo has two guarantees, G-FOO-001 and G-FOO-002; comp-bar

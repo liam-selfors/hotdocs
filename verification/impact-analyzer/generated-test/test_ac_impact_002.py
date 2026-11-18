@@ -1,3 +1,4 @@
+# hotdocs-criterion: sha256:7140302812014b04eee35ed6f4aacd06d38366ca30c8a25cee7ea40880efb545
 """AC-IMPACT-002 (covers R-IMPACT-002).
 
 Given comp-foo's component.md changed but every file under its interface/

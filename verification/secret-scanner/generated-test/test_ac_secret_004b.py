@@ -1,3 +1,4 @@
+# hotdocs-criterion: sha256:3b2758179c0899d4aef96e2629a55573230b0703c2392c9db919dceedd29999c
 import hashlib
 import sys
 import textwrap

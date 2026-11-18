@@ -1,3 +1,4 @@
+# hotdocs-criterion: sha256:56c7127b01d2251dfb7037b01dbc9105a7bfbd38e544422c1fcbd395b4d7089c
 """AC-GQE-005 (covers R-GQE-005).
 
 Given a component with a committed verification/<component>/.provenance.json

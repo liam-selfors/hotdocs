@@ -1,3 +1,4 @@
+# hotdocs-criterion: sha256:5d1ada16d0f4c1af2142ba96fb5a4a305c93cfb69a5dfa48daabaa7cc52cbe62
 import dataclasses
 import importlib.util
 import sys
