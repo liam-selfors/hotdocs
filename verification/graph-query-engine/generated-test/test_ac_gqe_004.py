@@ -1,206 +1,209 @@
-"""AC-GQE-004: component_context extracts a multi-line Purpose section in full.
-
-Covers: R-GQE-004
-"""
-
-import json
-from pathlib import Path
-
+# hotdocs-criterion: sha256:ab2dc9ea57bcb21cf1170ce9aefeb016f86b6160c625086497056e899492fcd2
 import duckdb
-import pytest
 
 import graph_query_engine
 
 
 PURPOSE_LINES = [
-    "The foo widget turns raw spec text into a normalized widget record.",
-    "It runs entirely locally and never touches the network.",
-    "This third line proves the section genuinely spans multiple lines.",
+    "Foo keeps the first line of its purpose here.",
+    "It continues the same purpose on a second line.",
+    "And finishes it on a third line.",
 ]
 
-OTHER_PURPOSE_LINES = [
-    "The bar gadget supplies helper records to the foo widget.",
-    "It also spans more than one line of prose.",
+BAR_PURPOSE_LINES = [
+    "Bar has a purpose too.",
+    "It also spans two lines.",
 ]
 
 
-def _write(path: Path, text: str) -> None:
+def _write(path, text):
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text, encoding="utf-8")
+    path.write_text(text, encoding="utf-8", newline="\n")
 
 
-def _component_md(comp_id, title, purpose_lines, depends_on, realizes, uses_var):
-    purpose = "\n".join(purpose_lines)
-    return (
+def _build_corpus(repo_root):
+    specs = repo_root / "specs"
+
+    foo_md = (
         "---\n"
-        f"id: {comp_id}\n"
-        f"title: {title}\n"
+        "id: comp-foo\n"
+        "title: Foo\n"
         "status: draft\n"
-        "owners: [team-a]\n"
-        f"depends_on: [{', '.join(depends_on)}]\n"
-        f"realizes: [{', '.join(realizes)}]\n"
-        f"uses_var: [{', '.join(uses_var)}]\n"
-        "depends_on_guarantees: []\n"
+        "owners: [team]\n"
         "sealed: true\n"
-        f"source_path: legacy/{comp_id[len('comp-'):]}/\n"
+        "source_path: legacy/foo/\n"
+        "depends_on: [comp-bar]\n"
+        "realizes: [P-X]\n"
+        "uses_var: [VAR-X]\n"
+        "depends_on_guarantees: [G-BAR-001]\n"
         "---\n"
         "\n"
-        f"# {title}\n"
+        "# Foo\n"
         "\n"
         "## Purpose\n"
         "\n"
-        f"{purpose}\n"
+        + "\n".join(PURPOSE_LINES)
+        + "\n"
         "\n"
-        "## Definitions\n"
+        "## Notes\n"
         "\n"
-        "- **Widget** - a normalized record.\n"
+        "one two three\n"
+    )
+    _write(specs / "components" / "foo" / "component.md", foo_md)
+
+    bar_md = (
+        "---\n"
+        "id: comp-bar\n"
+        "title: Bar\n"
+        "status: draft\n"
+        "owners: [team]\n"
+        "sealed: true\n"
+        "source_path: legacy/bar/\n"
+        "realizes: [P-X]\n"
+        "---\n"
         "\n"
-        "## Change log\n"
+        "# Bar\n"
         "\n"
-        "- Initial draft.\n"
+        "## Purpose\n"
+        "\n"
+        + "\n".join(BAR_PURPOSE_LINES)
+        + "\n"
+        "\n"
+        "## Notes\n"
+        "\n"
+        "Nothing else.\n"
     )
+    _write(specs / "components" / "bar" / "component.md", bar_md)
 
-
-def _make_component(repo_root, slug, title, prefix, purpose_lines, depends_on, realizes, uses_var):
-    comp_id = f"comp-{slug}"
-    base = repo_root / "specs" / "components" / slug
+    foo = specs / "components" / "foo"
+    _write(foo / "requirements" / "R-FOO-001.md", "# R-FOO-001\n\nfoo MUST work.\n")
+    _write(foo / "requirements" / "R-FOO-002.md", "# R-FOO-002\n\nfoo MUST stop.\n")
     _write(
-        base / "component.md",
-        _component_md(comp_id, title, purpose_lines, depends_on, realizes, uses_var),
-    )
-    _write(
-        base / "requirements" / f"R-{prefix}-001.md",
-        f"# R-{prefix}-001\n\n**R-{prefix}-001** - The component MUST do its one thing.\n",
-    )
-    _write(
-        base / "acceptance" / f"AC-{prefix}-001.md",
-        f"# AC-{prefix}-001\n\n"
-        f"Covers: R-{prefix}-001\n"
-        "Kind: generated-test\n\n"
-        "```gherkin\n"
-        "Given a thing\n"
-        "When it runs\n"
-        "Then it does its one thing\n"
-        "```\n",
+        foo / "acceptance" / "AC-FOO-001.md",
+        "# AC-FOO-001\n\nCovers: R-FOO-001\nKind: generated-test\n",
     )
     _write(
-        base / "interface" / "library.md",
-        "# Library\n\n```\ndo_thing() -> None\n```\n",
+        foo / "acceptance" / "AC-FOO-002.md",
+        "# AC-FOO-002\n\nCovers: R-FOO-002\nKind: generated-test\n",
     )
-    _write(base / "constraints.md", "# Constraints\n\nNo network access.\n")
-
-    manifest = {
-        "component_id": comp_id,
-        "spec_bundle_hash": "0" * 64,
-        "model": "anthropic:claude-sonnet-5",
-        "generated_at": "2026-01-01T00:00:00Z",
-        "verification_report": {"passed": True, "results": []},
-        "license_scan": {"passed": True, "findings": []},
-        "secret_scan": {"passed": True, "findings": []},
-        "provenance_hit": False,
-    }
-    for top in ("gen", "verification"):
-        _write(repo_root / top / slug / ".provenance.json", json.dumps(manifest))
-    return comp_id
-
-
-@pytest.fixture
-def repo_root(tmp_path):
-    root = tmp_path / "repo"
-    root.mkdir()
-
-    _make_component(
-        root,
-        "foo-widget",
-        "Foo Widget",
-        "FOO",
-        PURPOSE_LINES,
-        depends_on=["comp-bar-gadget"],
-        realizes=["P-FOO"],
-        uses_var=["VAR-FOO"],
-    )
-    _make_component(
-        root,
-        "bar-gadget",
-        "Bar Gadget",
-        "BAR",
-        OTHER_PURPOSE_LINES,
-        depends_on=["comp-foo-widget"],
-        realizes=["P-FOO"],
-        uses_var=["VAR-FOO"],
+    _write(
+        foo / "interface" / "guarantees" / "G-FOO-001.md",
+        "# G-FOO-001\n\nfoo never fails.\n",
     )
 
     _write(
-        root / "specs" / "vars" / "VAR-FOO.md",
-        "---\nid: VAR-FOO\ntitle: Foo Var\nstatus: draft\nowners: [team-a]\n---\n\n"
-        "# VAR-FOO\n\nA fake variable.\n",
+        specs / "product" / "x.md",
+        "---\n"
+        "id: P-X\n"
+        "title: X\n"
+        "status: draft\n"
+        "owners: [team]\n"
+        "---\n"
+        "# X\n"
+        "\n"
+        "### CS-X-001\n"
+        "Covers: P-X\n"
+        "\n"
+        "### CS-X-002\n"
+        "Covers: P-X\n",
     )
     _write(
-        root / "specs" / "product" / "P-FOO.md",
-        "---\nid: P-FOO\ntitle: Foo Capability\nstatus: draft\nowners: [team-a]\n---\n\n"
-        "# Foo Capability\n\nA fake product capability.\n",
+        specs / "vars" / "x.md",
+        "---\n"
+        "id: VAR-X\n"
+        "title: V\n"
+        "status: draft\n"
+        "owners: [team]\n"
+        "---\n"
+        "# V\n",
     )
     _write(
-        root / "specs" / "decisions" / "D1.md",
-        "---\nid: D1\ntitle: First Decision\nstatus: ratified\nowners: [team-a]\n"
-        "last_ratified_commit: abc1234\n---\n\n# D1\n\nA fake decision.\n",
+        specs / "decisions" / "D1.md",
+        "---\n"
+        "id: D1\n"
+        "title: One\n"
+        "status: ratified\n"
+        "owners: [team]\n"
+        "last_ratified_commit: 0000000\n"
+        "---\n"
+        "# D1\n",
     )
     _write(
-        root / "specs" / "decisions" / "D2.md",
-        "---\nid: D2\ntitle: Second Decision\nstatus: draft\nowners: [team-a]\n"
-        "last_ratified_commit: abc1234\n---\n\n# D2\n\nAnother fake decision.\n",
+        specs / "decisions" / "D2.md",
+        "---\n"
+        "id: D2\n"
+        "title: Two\n"
+        "status: draft\n"
+        "owners: [team]\n"
+        "supersedes: D1\n"
+        "builds_on: [D1]\n"
+        "---\n"
+        "# D2\n",
     )
-    _write(root / "specs" / "glossary.md", "# Glossary\n\n- **Widget** - a record.\n")
-    return root
+    for sub in ("product", "vars", "decisions"):
+        _write(specs / sub / "README.md", "# Readme\n\nNotes.\n")
 
 
-@pytest.fixture
-def con():
-    connection = duckdb.connect()
-    connection.execute("INSTALL yaml FROM community")
-    connection.execute("LOAD yaml")
-    yield connection
-    connection.close()
-
-
-def test_ac_gqe_004_multiline_purpose_extracted_in_full(con, repo_root):
+def _load(repo_root):
+    con = duckdb.connect()
+    con.execute("INSTALL yaml FROM community")
+    con.execute("LOAD yaml")
     graph_query_engine.load_views(con, repo_root)
+    return con
 
+
+def _purposes(con):
     rows = con.execute(
-        "SELECT component_id, purpose FROM component_context WHERE component_id = ?",
-        ["comp-foo-widget"],
+        "SELECT component_id, purpose FROM component_context"
     ).fetchall()
+    return rows
 
-    assert len(rows) == 1, f"expected exactly one row for comp-foo-widget, got {rows!r}"
-    component_id, purpose = rows[0]
-    assert component_id == "comp-foo-widget"
 
-    assert purpose is not None, "purpose is NULL"
-    assert purpose != "", "purpose silently extracted to an empty string"
+def test_multiline_purpose_is_extracted_in_full(tmp_path):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    _build_corpus(repo_root)
+
+    con = _load(repo_root)
+    try:
+        rows = _purposes(con)
+    finally:
+        con.close()
+
+    foo_rows = [r for r in rows if r[0] == "comp-foo"]
+    assert len(foo_rows) == 1, rows
+    purpose = foo_rows[0][1]
+
+    assert purpose is not None
+    assert purpose != ""
     assert purpose.strip() != ""
-
-    # The full multi-line text is present, not just one line of it.
+    # Spans multiple lines: every line is present and newlines are kept.
+    assert "\n" in purpose.strip()
     for line in PURPOSE_LINES:
-        assert line in purpose, f"missing purpose line {line!r} in {purpose!r}"
-    assert "\n" in purpose.strip(), f"purpose is not multi-line: {purpose!r}"
+        assert line in purpose, (line, purpose)
     assert purpose.strip() == "\n".join(PURPOSE_LINES)
+    # Stops at the next section, does not swallow it.
+    assert "## Notes" not in purpose
+    assert "one two three" not in purpose
 
-    # Nothing from the following section leaked into the Purpose text.
-    assert "Definitions" not in purpose
-    assert "Widget** - a normalized record" not in purpose
 
+def test_every_component_with_multiline_purpose_gets_full_text(tmp_path):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    _build_corpus(repo_root)
 
-def test_ac_gqe_004_every_multiline_purpose_non_empty(con, repo_root):
-    graph_query_engine.load_views(con, repo_root)
+    con = _load(repo_root)
+    try:
+        rows = _purposes(con)
+    finally:
+        con.close()
 
-    rows = con.execute(
-        "SELECT component_id, purpose FROM component_context ORDER BY component_id"
-    ).fetchall()
-    by_id = {r[0]: r[1] for r in rows}
+    by_id = {}
+    for component_id, purpose in rows:
+        assert component_id not in by_id, rows
+        by_id[component_id] = purpose
 
-    assert set(by_id) == {"comp-foo-widget", "comp-bar-gadget"}
-    assert len(rows) == 2, f"expected one row per component, got {rows!r}"
-
-    assert by_id["comp-bar-gadget"] is not None
-    assert by_id["comp-bar-gadget"].strip() == "\n".join(OTHER_PURPOSE_LINES)
-    assert by_id["comp-foo-widget"].strip() == "\n".join(PURPOSE_LINES)
+    assert set(by_id) == {"comp-foo", "comp-bar"}, rows
+    assert by_id["comp-bar"] is not None
+    assert by_id["comp-bar"].strip() == "\n".join(BAR_PURPOSE_LINES)
+    assert by_id["comp-foo"].strip() == "\n".join(PURPOSE_LINES)

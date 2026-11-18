@@ -1,151 +1,152 @@
-"""AC-GQE-006: component_size's word_count matches spec-linter's own
-component_doc_words value (R-SIZE-001) exactly, for every component of a
-real spec corpus.
-
-The expected per-component value is computed here independently, in plain
-Python, from R-SIZE-001's own definition as restated by R-GQE-006: every
-``*.md`` doc at any depth under ``specs/components/<slug>/``, a leading
-YAML frontmatter block (``---\\n ... \\n---\\n``) stripped, split on
-whitespace, and empty tokens dropped. Whitespace is RE2's ``\\s`` exactly
-(``[\\t\\n\\f\\r ]``), which is what DuckDB's ``regexp_split_to_array``
-uses.
-"""
-
-import os
-import re
+# hotdocs-criterion: sha256:61719cbc447c2dc850b168354bfcf43ffb630ec9ca057666688511ff6f9a9c47
 from pathlib import Path
 
 import duckdb
-import pytest
 
 import graph_query_engine
 
 
-# RE2's \s class (DuckDB's regex engine): [\t\n\f\r ], no \v and no Unicode spaces.
-_RE2_WHITESPACE = re.compile(r"[\t\n\f\r ]+")
-# Same frontmatter pattern as the view, with DOTALL ('s' flag), first match
-# only, anchored at the start of the text.
-_FRONTMATTER = re.compile(r"^---\n.*?\n---\n", re.S)
+def _write(repo_root, rel, text):
+    path = Path(repo_root) / rel
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(text.encode("utf-8"))
 
 
-def field(value, name):
-    return value[name] if isinstance(value, dict) else getattr(value, name)
+def _build_fixture(repo_root):
+    _write(
+        repo_root,
+        "specs/components/foo/component.md",
+        "---\n"
+        + "id: comp-foo\n"
+        + "title: Foo\n"
+        + "status: draft\n"
+        + "owners: [team]\n"
+        + "depends_on: [comp-bar]\n"
+        + "realizes: [P-X]\n"
+        + "uses_var: [VAR-X]\n"
+        + "depends_on_guarantees: [G-BAR-001]\n"
+        + "---\n"
+        + "\n"
+        + "# Foo\n"
+        + "\n"
+        + "one two three\n",
+    )
+    _write(
+        repo_root,
+        "specs/components/bar/component.md",
+        "---\n"
+        + "id: comp-bar\n"
+        + "title: Bar\n"
+        + "status: draft\n"
+        + "owners: [team]\n"
+        + "realizes: [P-X]\n"
+        + "---\n"
+        + "\n"
+        + "# Bar\n",
+    )
+    _write(
+        repo_root,
+        "specs/components/foo/requirements/R-FOO-001.md",
+        "# R-FOO-001\n" + "\n" + "foo MUST work.\n",
+    )
+    _write(
+        repo_root,
+        "specs/components/foo/requirements/R-FOO-002.md",
+        "# R-FOO-002\n" + "\n" + "foo MUST stop.\n",
+    )
+    _write(
+        repo_root,
+        "specs/components/foo/acceptance/AC-FOO-001.md",
+        "# AC-FOO-001\n" + "\n" + "Covers: R-FOO-001\n" + "Kind: generated-test\n",
+    )
+    _write(
+        repo_root,
+        "specs/components/foo/interface/guarantees/G-FOO-001.md",
+        "# G-FOO-001\n" + "\n" + "foo never fails.\n",
+    )
+    _write(
+        repo_root,
+        "specs/product/x.md",
+        "---\n"
+        + "id: P-X\n"
+        + "title: X\n"
+        + "status: draft\n"
+        + "owners: [team]\n"
+        + "---\n"
+        + "\n"
+        + "# X\n"
+        + "\n"
+        + "### CS-X-001\n"
+        + "Covers: P-X\n"
+        + "\n"
+        + "### CS-X-002\n"
+        + "Covers: P-X\n",
+    )
+    _write(
+        repo_root,
+        "specs/vars/x.md",
+        "---\n"
+        + "id: VAR-X\n"
+        + "title: V\n"
+        + "status: draft\n"
+        + "owners: [team]\n"
+        + "---\n"
+        + "\n"
+        + "# V\n",
+    )
+    _write(
+        repo_root,
+        "specs/decisions/D1.md",
+        "---\n"
+        + "id: D1\n"
+        + "title: One\n"
+        + "status: ratified\n"
+        + "owners: [team]\n"
+        + "---\n"
+        + "\n"
+        + "# D1\n",
+    )
+    _write(
+        repo_root,
+        "specs/decisions/D2.md",
+        "---\n"
+        + "id: D2\n"
+        + "title: Two\n"
+        + "status: draft\n"
+        + "owners: [team]\n"
+        + "supersedes: D1\n"
+        + "builds_on: [D1]\n"
+        + "---\n"
+        + "\n"
+        + "# D2\n",
+    )
+    for d in ("specs/product", "specs/vars", "specs/decisions"):
+        _write(repo_root, d + "/README.md", "# Readme\n" + "\n" + "Notes.\n")
 
 
-def _tool_root() -> Path:
-    here = Path(graph_query_engine.__file__).resolve()
-    for parent in here.parents:
-        if parent.name == "gen":
-            return parent.parent
-    for parent in here.parents:
-        if (parent / "specs" / "components").is_dir():
-            return parent
-    pytest.skip("no real spec corpus found above the module under test")
+def test_ac_gqe_006_component_size_word_counts(tmp_path):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    _build_fixture(repo_root)
 
-
-def _doc_words(text: str) -> int:
-    stripped = _FRONTMATTER.sub("", text, count=1)
-    stripped = stripped.strip(" ")
-    return len([tok for tok in _RE2_WHITESPACE.split(stripped) if tok != ""])
-
-
-def _expected_component_doc_words(repo_root: Path) -> dict:
-    """component slug -> summed word count, over specs/components/*/**/*.md."""
-    components_dir = repo_root / "specs" / "components"
-    expected = {}
-    for comp_dir in sorted(components_dir.iterdir()):
-        if not comp_dir.is_dir() or comp_dir.name.startswith("."):
-            continue
-        total = 0
-        found_any = False
-        for dirpath, dirnames, filenames in os.walk(comp_dir):
-            # Glob matching does not descend into hidden directories.
-            dirnames[:] = [d for d in dirnames if not d.startswith(".")]
-            for name in filenames:
-                if name.startswith(".") or not name.endswith(".md"):
-                    continue
-                path = Path(dirpath) / name
-                if not path.is_file():
-                    continue
-                found_any = True
-                total += _doc_words(path.read_bytes().decode("utf-8"))
-        if found_any:
-            expected[comp_dir.name] = total
-    return expected
-
-
-@pytest.fixture
-def repo_root() -> Path:
-    root = _tool_root()
-    if not (root / "specs" / "components").is_dir():
-        pytest.skip(f"{root} carries no specs/components/ corpus")
-    return root
-
-
-@pytest.fixture
-def con():
-    connection = duckdb.connect()
-    connection.execute("INSTALL yaml FROM community")
-    connection.execute("LOAD yaml")
+    con = duckdb.connect()
     try:
-        yield connection
+        con.execute("INSTALL yaml FROM community")
+        con.execute("LOAD yaml")
+        graph_query_engine.load_views(con, repo_root)
+
+        rows = con.execute(
+            "SELECT component_id, word_count FROM component_size"
+        ).fetchall()
     finally:
-        connection.close()
+        con.close()
 
-
-def test_component_size_word_count_matches_component_doc_words(con, repo_root):
-    expected = _expected_component_doc_words(repo_root)
-    assert expected, "real spec corpus has no component docs to measure"
-
-    graph_query_engine.load_views(con, repo_root)
-
-    rows = con.execute(
-        "SELECT component_id, word_count FROM component_size ORDER BY component_id"
-    ).fetchall()
-
-    ids = [row[0] for row in rows]
-    # One row per component.
-    assert len(ids) == len(set(ids)), f"duplicate component rows: {ids}"
-
-    # Bare slugs, never comp- prefixed.
-    for component_id in ids:
-        assert component_id is not None
-        assert not component_id.startswith("comp-"), component_id
-
-    actual = {}
+    sizes = {}
     for component_id, word_count in rows:
-        assert word_count is not None, component_id
-        assert int(word_count) == word_count
-        actual[component_id] = int(word_count)
+        assert component_id not in sizes, "duplicate row for " + repr(component_id)
+        sizes[component_id] = int(word_count)
 
-    assert set(actual) == set(expected), (
-        f"missing: {sorted(set(expected) - set(actual))}; "
-        f"unexpected: {sorted(set(actual) - set(expected))}"
-    )
-
-    mismatches = {
-        cid: (actual[cid], expected[cid])
-        for cid in expected
-        if actual[cid] != expected[cid]
-    }
-    assert not mismatches, (
-        "component_size.word_count != component_doc_words (actual, expected): "
-        f"{mismatches}"
-    )
-
-
-def test_component_size_counts_each_file_without_trailing_newline_token(
-    con, repo_root
-):
-    """Every component's count is exact: an off-by-one per file (the spurious
-    trailing empty token from each file's trailing newline) would surface as
-    word_count exceeding the independent count by the component's file count."""
-    expected = _expected_component_doc_words(repo_root)
-    graph_query_engine.load_views(con, repo_root)
-
-    rows = con.execute("SELECT component_id, word_count FROM component_size").fetchall()
-    actual = {row[0]: int(row[1]) for row in rows}
-
-    over = {cid: actual[cid] - expected[cid] for cid in expected
-            if cid in actual and actual[cid] > expected[cid]}
-    assert not over, f"word_count over-counts component_doc_words by: {over}"
+    assert len(rows) == 2, rows
+    assert sizes == {"foo": 26, "bar": 2}, sizes
+    assert sizes["foo"] == 26
+    assert sizes["bar"] == 2

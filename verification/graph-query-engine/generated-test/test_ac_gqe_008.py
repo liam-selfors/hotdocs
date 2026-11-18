@@ -1,181 +1,149 @@
-"""AC-GQE-008: decision_lineage returns id + last_ratified_commit only,
-with NULL (not empty string) when the field is absent."""
-
-import json
-from pathlib import Path
-
+# hotdocs-criterion: sha256:e0b48aff94edffb559380770e59586bb9b2beead36c6961b1ee5422fbcafc627
 import duckdb
-import pytest
 
 import graph_query_engine
 
 
-RATIFIED_COMMIT = "0123456789abcdef0123456789abcdef01234567"
-
-
-def _write(path: Path, text: str) -> None:
+def _write(path, text):
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text, encoding="utf-8")
+    path.write_bytes(text.encode("utf-8"))
 
 
-def _component(repo_root: Path, slug: str, depends_on: str) -> None:
-    upper = slug.upper()
-    base = repo_root / "specs" / "components" / slug
-    _write(
-        base / "component.md",
-        "---\n"
-        f"id: comp-{slug}\n"
-        f"title: {slug.capitalize()} Component\n"
-        "status: draft\n"
-        "owners: [pipeline-team]\n"
-        f"depends_on: {depends_on}\n"
-        "realizes: []\n"
-        "uses_var: [VAR-FOO]\n"
-        "depends_on_guarantees: []\n"
-        "sealed: true\n"
-        f"source_path: legacy/{slug}/\n"
-        "---\n"
-        "\n"
-        f"# {slug.capitalize()} Component\n"
-        "\n"
-        "## Purpose\n"
-        "\n"
-        f"Does a small {slug} thing for the fixture corpus.\n"
-        "\n"
-        "## Change log\n"
-        "\n"
-        "- Initial draft.\n",
-    )
-    _write(
-        base / "requirements" / f"R-{upper}-001.md",
-        f"# R-{upper}-001\n\n**R-{upper}-001** — The component MUST do the {slug} thing.\n",
-    )
-    _write(
-        base / "acceptance" / f"AC-{upper}-001.md",
-        f"# AC-{upper}-001\n\nCovers: R-{upper}-001\nKind: generated-test\n\n"
-        "```gherkin\nGiven a thing\nWhen it runs\nThen it works\n```\n",
-    )
-    _write(
-        base / "interface" / "library.md",
-        f"# Library\n\n```\ndo_{slug}() -> None\n```\n",
-    )
-    _write(base / "constraints.md", "# Constraints\n\nNone.\n")
-    _write(
-        repo_root / "gen" / slug / ".provenance.json",
-        json.dumps(
-            {
-                "component_id": f"comp-{slug}",
-                "spec_bundle_hash": "deadbeef" * 8,
-                "verification_report": {"status": "pass"},
-                "license_scan": {"status": "pass"},
-                "secret_scan": {"status": "pass"},
-                "provenance_hit": False,
-            }
-        ),
-    )
+def _frontmatter(lines):
+    return "---\n" + "\n".join(lines) + "\n---\n"
 
 
-def _build_repo(repo_root: Path) -> None:
-    _component(repo_root, "foo", "[]")
-    _component(repo_root, "bar", "[comp-foo]")
+def _build_fixture(repo_root):
+    specs = repo_root / "specs"
 
     _write(
-        repo_root / "specs" / "vars" / "VAR-FOO.md",
-        "---\n"
-        "id: VAR-FOO\n"
-        "title: Foo Var\n"
-        "status: draft\n"
-        "owners: [pipeline-team]\n"
-        "---\n"
-        "\n"
-        "# VAR-FOO\n\nA fixture variable.\n",
+        specs / "components" / "foo" / "component.md",
+        _frontmatter(
+            [
+                "id: comp-foo",
+                "title: Foo",
+                "status: draft",
+                "owners: [team]",
+                "depends_on: [comp-bar]",
+                "realizes: [P-X]",
+                "uses_var: [VAR-X]",
+                "depends_on_guarantees: [G-BAR-001]",
+            ]
+        )
+        + "\n# Foo\n\none two three\n",
     )
     _write(
-        repo_root / "specs" / "product" / "P-FOO.md",
-        "---\n"
-        "id: P-FOO\n"
-        "title: Foo Capability\n"
-        "status: draft\n"
-        "owners: [pipeline-team]\n"
-        "---\n"
-        "\n"
-        "# P-FOO\n\nA fixture capability.\n",
+        specs / "components" / "bar" / "component.md",
+        _frontmatter(
+            [
+                "id: comp-bar",
+                "title: Bar",
+                "status: draft",
+                "owners: [team]",
+                "realizes: [P-X]",
+            ]
+        )
+        + "\n# Bar\n",
     )
-
-    # Decision WITH last_ratified_commit.
     _write(
-        repo_root / "specs" / "decisions" / "D1.md",
-        "---\n"
-        "id: D1\n"
-        "title: First Decision\n"
-        "status: ratified\n"
-        "owners: [pipeline-team]\n"
-        f"last_ratified_commit: {RATIFIED_COMMIT}\n"
-        "supersedes: []\n"
-        "builds_on: []\n"
-        "---\n"
-        "\n"
-        "# D1\n\nA ratified decision.\n",
+        specs / "components" / "foo" / "requirements" / "R-FOO-001.md",
+        "# R-FOO-001\n\nfoo MUST work.\n",
     )
-    # Decision with NO last_ratified_commit field at all.
     _write(
-        repo_root / "specs" / "decisions" / "D2.md",
-        "---\n"
-        "id: D2\n"
-        "title: Second Decision\n"
-        "status: draft\n"
-        "owners: [pipeline-team]\n"
-        "supersedes: []\n"
-        "builds_on: [D1]\n"
-        "---\n"
-        "\n"
-        "# D2\n\nA draft decision, never ratified.\n",
+        specs / "components" / "foo" / "requirements" / "R-FOO-002.md",
+        "# R-FOO-002\n\nfoo MUST stop.\n",
+    )
+    _write(
+        specs / "components" / "foo" / "acceptance" / "AC-FOO-001.md",
+        "# AC-FOO-001\n\nCovers: R-FOO-001\nKind: generated-test\n",
+    )
+    _write(
+        specs / "components" / "foo" / "acceptance" / "AC-FOO-002.md",
+        "# AC-FOO-002\n\nCovers: R-FOO-002\nKind: generated-test\n",
+    )
+    _write(
+        specs / "components" / "foo" / "interface" / "guarantees" / "G-FOO-001.md",
+        "# G-FOO-001\n\nfoo never fails.\n",
+    )
+    _write(
+        specs / "product" / "x.md",
+        _frontmatter(["id: P-X", "title: X", "status: draft", "owners: [team]"])
+        + "# X\n\n### CS-X-001\nCovers: P-X\n\n### CS-X-002\nCovers: P-X\n",
+    )
+    _write(
+        specs / "vars" / "x.md",
+        _frontmatter(["id: VAR-X", "title: V", "status: draft", "owners: [team]"])
+        + "# V\n",
     )
 
+    # Decision with last_ratified_commit set.
+    _write(
+        specs / "decisions" / "D1.md",
+        _frontmatter(
+            [
+                "id: D1",
+                "title: One",
+                "status: ratified",
+                "owners: [team]",
+                "last_ratified_commit: 0000000",
+            ]
+        )
+        + "# D1\n",
+    )
+    # Decision with no last_ratified_commit field at all.
+    _write(
+        specs / "decisions" / "D2.md",
+        _frontmatter(
+            [
+                "id: D2",
+                "title: Two",
+                "status: draft",
+                "owners: [team]",
+                "supersedes: D1",
+                "builds_on: [D1]",
+            ]
+        )
+        + "# D2\n",
+    )
 
-@pytest.fixture
-def con():
-    connection = duckdb.connect()
-    connection.execute("INSTALL yaml FROM community")
-    connection.execute("LOAD yaml")
-    try:
-        yield connection
-    finally:
-        connection.close()
+    for sub in ("product", "vars", "decisions"):
+        _write(specs / sub / "README.md", "# Readme\n\nNotes.\n")
 
 
-def test_decision_lineage_null_for_missing_commit_and_only_two_columns(tmp_path, con):
+def test_ac_gqe_008_decision_lineage_columns_and_null_commit(tmp_path):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
-    _build_repo(repo_root)
+    _build_fixture(repo_root)
 
-    graph_query_engine.load_views(con, repo_root)
+    con = duckdb.connect()
+    try:
+        con.execute("INSTALL yaml FROM community")
+        con.execute("LOAD yaml")
 
-    cursor = con.execute(
-        "SELECT * FROM decision_lineage ORDER BY id"
-    )
-    columns = [d[0] for d in cursor.description]
-    rows = cursor.fetchall()
+        graph_query_engine.load_views(con, repo_root)
 
-    # The view has no other columns than id and last_ratified_commit.
+        cur = con.execute("SELECT * FROM decision_lineage ORDER BY id")
+        columns = [d[0] for d in cur.description]
+        rows = cur.fetchall()
+    finally:
+        con.close()
+
+    # The view has no columns other than id and last_ratified_commit.
     assert sorted(columns) == ["id", "last_ratified_commit"]
     assert len(columns) == 2
 
-    by_id = {
-        row[columns.index("id")]: row[columns.index("last_ratified_commit")]
-        for row in rows
-    }
-    assert set(by_id) == {"D1", "D2"}
+    by_id = {}
+    for row in rows:
+        record = dict(zip(columns, row))
+        by_id[record["id"]] = record
+
+    # One row per decision record; the frontmatter-less README is not a row.
     assert len(rows) == 2
+    assert set(by_id) == {"D1", "D2"}
 
-    # First row: the ratified commit.
-    assert by_id["D1"] == RATIFIED_COMMIT
+    # The ratified decision carries its commit.
+    assert by_id["D1"]["last_ratified_commit"] == "0000000"
 
-    # Second row: SQL NULL, not an empty string.
-    assert by_id["D2"] is None
-    assert by_id["D2"] != ""
-
-    null_check = con.execute(
-        "SELECT last_ratified_commit IS NULL FROM decision_lineage WHERE id = 'D2'"
-    ).fetchall()
-    assert null_check == [(True,)]
+    # The decision with no field at all yields NULL, not an empty string.
+    assert by_id["D2"]["last_ratified_commit"] is None
+    assert by_id["D2"]["last_ratified_commit"] != ""
