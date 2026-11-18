@@ -1,3 +1,4 @@
+# hotdocs-criterion: sha256:1f72a459df41d92c7d8b3b0b752b29daece1e0d6e6c612ddbe9fb113e7e027a9
 import email.message
 import io
 import json
@@ -15,7 +16,7 @@ def field(value, name):
 
 TOOL = {
     "name": "read_file",
-    "description": "Read a file from the workspace.",
+    "description": "Read a file.",
     "input_schema": {
         "type": "object",
         "properties": {"path": {"type": "string"}},
@@ -25,7 +26,7 @@ TOOL = {
 
 
 @pytest.mark.parametrize(
-    "status,category",
+    "status, category",
     [
         (401, "auth"),
         (429, "rate_limit"),
@@ -33,7 +34,7 @@ TOOL = {
         (500, "network"),
     ],
 )
-def test_ac_tool_006_http_error_categorized_without_leak(
+def test_http_error_ends_loop_with_categorized_error(
     status, category, tmp_path, monkeypatch
 ):
     workdir = tmp_path / "work"
@@ -46,22 +47,19 @@ def test_ac_tool_006_http_error_categorized_without_leak(
 
     def fake_urlopen(request, timeout=None, *args, **kwargs):
         url = request.full_url if hasattr(request, "full_url") else str(request)
-        headers = {}
-        if hasattr(request, "header_items"):
-            headers = {k.lower(): v for k, v in request.header_items()}
-        body = None
+        headers = dict(request.header_items()) if hasattr(request, "header_items") else {}
         data = getattr(request, "data", None)
+        body = None
         if data is not None:
-            if isinstance(data, (bytes, bytearray)):
-                data = data.decode("utf-8")
             try:
-                body = json.loads(data)
+                body = json.loads(data.decode("utf-8"))
             except Exception:
                 body = data
         recorded.append({"url": url, "headers": headers, "body": body})
         hdrs = email.message.Message()
+        hdrs["Content-Type"] = "text/plain"
         raise urllib.error.HTTPError(
-            url, status, "error", hdrs, io.BytesIO(b"vendor says no")
+            url, status, "vendor says no", hdrs, io.BytesIO(b"vendor says no")
         )
 
     monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
@@ -76,19 +74,14 @@ def test_ac_tool_006_http_error_categorized_without_leak(
         "sys", "go", "anthropic:claude-opus-5-5", [TOOL], execute
     )
 
-    # Exactly one request: no retry.
-    assert len(recorded) == 1, recorded
-
+    assert len(recorded) == 1
+    assert executed == []
     assert field(result, "stop") == "error"
 
-    error = field(result, "model_call_error")
-    assert error is not None
-    assert field(error, "category") == category
+    err = field(result, "model_call_error")
+    assert err is not None
+    assert field(err, "category") == category
 
-    as_dict = result if isinstance(result, dict) else result.to_dict()
-    rendered = json.dumps(as_dict)
+    rendered = json.dumps(result.to_dict())
     assert "vendor says no" not in rendered
     assert "secret-key-value" not in rendered
-
-    # No tool ran since no reply was ever received.
-    assert executed == []

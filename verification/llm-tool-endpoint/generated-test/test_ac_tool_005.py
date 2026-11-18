@@ -1,3 +1,4 @@
+# hotdocs-criterion: sha256:29e0235d2b18c5ae68940cc2e7625e9c01c851bf03eac891804c68e05ef1ab01
 import json
 import urllib.request
 
@@ -6,23 +7,21 @@ import pytest
 import llm_tool_endpoint
 
 
-MODEL = "anthropic:claude-opus-5-5"
+def field(value, name):
+    return value[name] if isinstance(value, dict) else getattr(value, name)
 
-TOOLS = [{"name": "t", "description": "d", "input_schema": {"type": "object"}}]
 
 REPLY = {
     "content": [{"type": "tool_use", "id": "u1", "name": "t", "input": {}}],
     "stop_reason": "tool_use",
 }
 
-
-def field(value, name):
-    return value[name] if isinstance(value, dict) else getattr(value, name)
+TOOLS = [{"name": "t", "description": "d", "input_schema": {"type": "object"}}]
 
 
 class _FakeResponse:
-    def __init__(self, document):
-        self._payload = json.dumps(document).encode("utf-8")
+    def __init__(self, doc):
+        self._data = json.dumps(doc).encode("utf-8")
 
     def __enter__(self):
         return self
@@ -31,82 +30,77 @@ class _FakeResponse:
         return False
 
     def read(self, *args, **kwargs):
-        return self._payload
-
-    def close(self):
-        pass
+        return self._data
 
 
 @pytest.fixture
-def setup(monkeypatch, tmp_path):
-    work = tmp_path / "work"
-    work.mkdir()
-    monkeypatch.chdir(work)
+def setup(tmp_path, monkeypatch):
+    workdir = tmp_path / "work"
+    workdir.mkdir()
+    monkeypatch.chdir(workdir)
     monkeypatch.delenv("VAR_HOTDOCS_CONFIG", raising=False)
     monkeypatch.setenv("ANTHROPIC_API_KEY", "k")
 
-    recorded = []
+    requests = []
 
-    def fake_urlopen(request, *args, **kwargs):
-        data = request.data
-        if isinstance(data, (bytes, bytearray)):
-            body = json.loads(data.decode("utf-8"))
-        elif isinstance(data, str):
-            body = json.loads(data)
-        else:
-            body = None
-        recorded.append(
+    def fake_urlopen(request, timeout=None, *args, **kwargs):
+        body = request.data
+        if isinstance(body, (bytes, bytearray)):
+            body = body.decode("utf-8")
+        parsed = json.loads(body) if body else None
+        requests.append(
             {
                 "url": request.full_url,
-                "headers": {k.lower(): v for k, v in request.header_items()},
-                "body": body,
-                "timeout": kwargs.get("timeout", args[1] if len(args) > 1 else None),
+                "headers": dict(request.header_items()),
+                "body": parsed,
+                "timeout": timeout,
             }
         )
         return _FakeResponse(REPLY)
 
     monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
 
-    executed = []
+    calls = []
 
     def execute(name, arguments):
-        executed.append((name, arguments))
+        calls.append((name, arguments))
         return ("ok", False)
 
-    return recorded, executed, execute
+    return requests, calls, execute
 
 
-def test_max_turns_budget_exhausted(setup):
-    recorded, executed, execute = setup
-
+def test_max_turns_budget(setup):
+    requests, calls, execute = setup
     result = llm_tool_endpoint.run_tool_loop(
-        "sys", "go", MODEL, TOOLS, execute, max_turns=3
+        "sys", "go", "anthropic:claude-opus-5-5", TOOLS, execute, max_turns=3
     )
-
-    assert len(recorded) == 3
+    assert len(requests) == 3
     assert field(result, "turns") == 3
     assert field(result, "tool_calls") == 3
+    assert len(calls) == 3
     assert field(result, "stop") == "budget_exhausted"
 
 
-def test_max_tool_calls_budget_exhausted(setup):
-    recorded, executed, execute = setup
-
+def test_max_tool_calls_budget(setup):
+    requests, calls, execute = setup
     result = llm_tool_endpoint.run_tool_loop(
-        "sys", "go", MODEL, TOOLS, execute, max_turns=10, max_tool_calls=2
+        "sys",
+        "go",
+        "anthropic:claude-opus-5-5",
+        TOOLS,
+        execute,
+        max_turns=10,
+        max_tool_calls=2,
     )
-
-    assert len(executed) == 2
+    assert len(calls) == 2
     assert field(result, "tool_calls") == 2
     assert field(result, "stop") == "budget_exhausted"
 
 
-def test_zero_wall_seconds_budget_exhausted(setup):
-    recorded, executed, execute = setup
-
+def test_wall_seconds_zero_budget(setup):
+    requests, calls, execute = setup
     result = llm_tool_endpoint.run_tool_loop(
-        "sys", "go", MODEL, TOOLS, execute, wall_seconds=0
+        "sys", "go", "anthropic:claude-opus-5-5", TOOLS, execute, wall_seconds=0
     )
-
-    assert recorded == []
+    assert len(requests) == 0
     assert field(result, "stop") == "budget_exhausted"
