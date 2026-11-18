@@ -1,169 +1,168 @@
 # hotdocs-criterion: sha256:4afabea7a812311e37279498436751cdb210eeb730895762b596db2ba7b7414e
+from pathlib import Path
+
 import citation_checker
 
-from pathlib import Path
+
+GLOSSARY = (
+    "# Glossary\n"
+    "\n"
+    "Canonical vocabulary for the fixture corpus.\n"
+    "\n"
+    "- **Widget** — a small fixture thing used by tests.\n"
+    "- **Big Widget** — a larger fixture thing, spanning\n"
+    "  more than one line of definition text.\n"
+)
 
 
 def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-COMPONENT_MD = """---
-id: comp-widgets
-title: Widgets
-status: ratified
-owners: [tester]
-sealed: true
-source_path: legacy/widgets/
-last_ratified_commit: 0000000000000000000000000000000000000000
----
-
-# Widgets
-
-## Purpose
-
-Handles widgets for testing citations.
-
-## Scope
-
-- In scope: widgets.
-- Out of scope: everything else.
-
-## Definitions
-
-None.
-
-## Behavior
-
-See `requirements/`.
-
-## Interfaces
-
-See `interface/`.
-
-## Data
-
-See `interface/data/`.
-
-## Acceptance criteria
-
-See `acceptance/`.
-
-## Non-functional constraints
-
-See `constraints.md`.
-
-## Open questions
-
-## Change log
-
-- Initial version.
-"""
-
-
-def _write(path: Path, text: str) -> None:
+def write(path, text):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
 
 
-def _build_fixture(repo_root: Path, glossary_entries, requirement_bodies):
-    """requirement_bodies: list of (req_id, body_text). Returns rel paths by req id."""
-    glossary = "# Glossary\n\nCanonical vocabulary.\n\n"
-    for term, definition in glossary_entries:
-        glossary += "- **%s** — %s\n" % (term, definition)
-    _write(repo_root / "specs" / "glossary.md", glossary)
+def build_repo(repo_root, requirement_bodies):
+    """Build a fixture corpus with one sealed draft component `foo`.
 
-    comp_dir = repo_root / "specs" / "components" / "widgets"
-    _write(comp_dir / "component.md", COMPONENT_MD)
-    _write(
-        comp_dir / "constraints.md",
-        "# Constraints\n\n- None beyond the defaults; measured by inspection.\n",
+    requirement_bodies maps a requirement id (e.g. "R-FOO-001") to its
+    full file text. Each gets a matching acceptance file.
+    """
+    specs = repo_root / "specs"
+    write(specs / "glossary.md", GLOSSARY)
+    comp = specs / "components" / "foo"
+    component_md = (
+        "---\n"
+        "id: comp-foo\n"
+        "title: Foo\n"
+        "status: draft\n"
+        "owners: [tester]\n"
+        "sealed: true\n"
+        "source_path: legacy/foo/\n"
+        "---\n"
+        "\n"
+        "# Foo\n"
+        "\n"
+        "## Purpose\n"
+        "\n"
+        "A fixture component for citation checking.\n"
+        "\n"
+        "## Scope\n"
+        "\n"
+        "- In scope: fixtures.\n"
+        "\n"
+        "## Definitions\n"
+        "\n"
+        "None.\n"
+        "\n"
+        "## Behavior\n"
+        "\n"
+        "See requirements.\n"
+        "\n"
+        "## Interfaces\n"
+        "\n"
+        "See interface.\n"
+        "\n"
+        "## Data\n"
+        "\n"
+        "None.\n"
+        "\n"
+        "## Acceptance criteria\n"
+        "\n"
+        "See acceptance.\n"
+        "\n"
+        "## Non-functional constraints\n"
+        "\n"
+        "None.\n"
+        "\n"
+        "## Open questions\n"
+        "\n"
+        "## Change log\n"
+        "\n"
+        "- Created.\n"
     )
-
-    rel_paths = {}
-    for idx, (req_id, body) in enumerate(requirement_bodies, start=1):
-        req_path = comp_dir / "requirements" / ("%s.md" % req_id)
-        _write(req_path, body)
-        rel_paths[req_id] = req_path.relative_to(repo_root).as_posix()
-        ac_id = "AC-WID-%03d" % idx
-        _write(
-            comp_dir / "acceptance" / ("%s.md" % ac_id),
-            "# %s\n\nCovers: %s\nKind: llm-judge\n\nThe requirement holds.\n"
-            % (ac_id, req_id),
+    write(comp / "component.md", component_md)
+    for req_id, body in requirement_bodies.items():
+        write(comp / "requirements" / (req_id + ".md"), body)
+        ac_id = "AC-" + req_id[len("R-"):]
+        ac_text = (
+            "# " + ac_id + "\n"
+            "\n"
+            "Covers: " + req_id + "\n"
+            "Kind: generated-test\n"
+            "\n"
+            "Given a fixture\n"
+            "When it runs\n"
+            "Then it works\n"
         )
-    return rel_paths
+        write(comp / "acceptance" / (ac_id + ".md"), ac_text)
 
 
-def _cite3_findings(repo_root: Path):
+def cite_findings(repo_root):
     findings = citation_checker.check(repo_root)
     return [f for f in findings if field(f, "rule_id") == "R-CITE-003"]
 
 
-def _norm(p) -> str:
-    return str(p).replace("\\", "/")
+def req_path(req_id):
+    return "specs/components/foo/requirements/" + req_id + ".md"
 
 
-def test_missing_glossary_entry_citation_flagged_only(tmp_path):
+def test_missing_glossary_entry_gets_finding_existing_does_not(tmp_path):
     repo_root = tmp_path / "repo"
-    rel = _build_fixture(
+    build_repo(
         repo_root,
-        [("Widget", "a thing that is cited by the fixture.")],
-        [
-            (
-                "R-WID-001",
-                "# R-WID-001\n\n**R-WID-001** — Every input MUST be handled as\n"
-                "described by the glossary's \"Widget\" entry.\n",
+        {
+            "R-FOO-001": (
+                "**R-FOO-001** — The tool MUST handle each item as\n"
+                "described in the glossary's \"Widget\" entry.\n"
             ),
-            (
-                "R-WID-002",
-                "# R-WID-002\n\n**R-WID-002** — Every output MUST be shaped as\n"
-                "described by the glossary's \"Gizmo\" entry.\n",
+            "R-FOO-002": (
+                "**R-FOO-002** — The tool MUST handle each item as\n"
+                "described in the glossary's \"Gizmo\" entry.\n"
             ),
-        ],
+        },
     )
+    findings = cite_findings(repo_root)
+    files = [field(f, "file") for f in findings]
+    assert len(findings) == 1, findings
+    assert files == [req_path("R-FOO-002")]
+    f = findings[0]
+    assert field(f, "severity") in ("fail", "warn")
+    assert isinstance(field(f, "line"), int)
+    assert isinstance(field(f, "message"), str)
 
-    found = _cite3_findings(repo_root)
-    files = [_norm(field(f, "file")) for f in found]
 
-    assert len(found) == 1, found
-    assert files == [rel["R-WID-002"]], found
-    assert rel["R-WID-001"] not in files
-    assert isinstance(field(found[0], "line"), int)
-
-
-def test_wrap_trailing_punct_and_placeholder_ok_but_case_mismatch_flagged(tmp_path):
+def test_wrap_trailing_punctuation_placeholder_ok_case_mismatch_flagged(tmp_path):
     repo_root = tmp_path / "repo"
-    rel = _build_fixture(
+    build_repo(
         repo_root,
-        [("Widget Frame", "the frame holding a widget.")],
-        [
-            (
-                "R-WID-001",
-                "# R-WID-001\n\n**R-WID-001** — Every widget MUST sit in what\n"
-                "the glossary's \"Widget\n  Frame\" entry describes.\n",
+        {
+            # Wrapped across two lines: whitespace collapses to "Big Widget".
+            "R-FOO-001": (
+                "**R-FOO-001** — The tool MUST treat it per the glossary's \"Big\n"
+                "  Widget\" entry when sizing.\n"
             ),
-            (
-                "R-WID-002",
-                "# R-WID-002\n\n**R-WID-002** — Every frame MUST follow the\n"
-                "glossary's \"Widget Frame,\" which defines its shape.\n",
+            # Trailing comma inside the closing quote is not part of the term.
+            "R-FOO-002": (
+                "**R-FOO-002** — The tool MUST, per the glossary's \"Widget,\"\n"
+                "handle each item.\n"
             ),
-            (
-                "R-WID-003",
-                "# R-WID-003\n\n**R-WID-003** — Every frame MUST be sized per\n"
-                "the glossary's \"widget frame\" entry.\n",
+            # Different letter case: case-exact match fails.
+            "R-FOO-003": (
+                "**R-FOO-003** — The tool MUST handle each item per the\n"
+                "glossary's \"widget\" entry.\n"
             ),
-            (
-                "R-WID-004",
-                "# R-WID-004\n\n**R-WID-004** — Every citation of the form\n"
-                "the glossary's \"<Term>\" MUST resolve to a real entry.\n",
+            # Placeholder, not a citation.
+            "R-FOO-004": (
+                "**R-FOO-004** — A citation is written as the glossary's \"<Term>\"\n"
+                "with the entry header quoted.\n"
             ),
-        ],
+        },
     )
-
-    found = _cite3_findings(repo_root)
-    files = [_norm(field(f, "file")) for f in found]
-
-    assert len(found) == 1, found
-    assert files == [rel["R-WID-003"]], found
-    for ok in ("R-WID-001", "R-WID-002", "R-WID-004"):
-        assert rel[ok] not in files, (ok, found)
+    findings = cite_findings(repo_root)
+    files = [field(f, "file") for f in findings]
+    assert len(findings) == 1, findings
+    assert files == [req_path("R-FOO-003")]
+    assert field(findings[0], "severity") in ("fail", "warn")
