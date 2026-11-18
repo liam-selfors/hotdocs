@@ -1,13 +1,4 @@
-"""AC-DOCS-002: a component's detail view shows every field of its node.
-
-Given a component node whose documents, verification (with criteria and
-requirement_results), provenance, size_status, sealed, pinned_overrides and
-owners each hold a distinctive value, when render_docs_site runs, then that
-component's detail view includes every one of those values.
-"""
-
-import html
-import json
+# hotdocs-criterion: sha256:0ff6f223686dccbc5c9f5db7dc4b02fed3ca45c10194385d2648c89d0843d0f8
 import re
 from dataclasses import dataclass, field as dc_field
 from pathlib import Path
@@ -20,10 +11,7 @@ def field(value, name):
 
 
 @dataclass
-class CorpusGraph:
-    """Stand-in matching corpus-graph-builder's documented CorpusGraph shape:
-    a dataclass with nodes, edges, aggregates, to_dict() and to_json_bytes()."""
-
+class FakeCorpusGraph:
     nodes: dict = dc_field(default_factory=dict)
     edges: list = dc_field(default_factory=list)
     aggregates: dict = dc_field(default_factory=dict)
@@ -36,66 +24,71 @@ class CorpusGraph:
         }
 
     def to_json_bytes(self):
+        import json
+
         return (
             json.dumps(self.to_dict(), sort_keys=True, indent=2, ensure_ascii=True)
             + "\n"
         ).encode("utf-8")
 
-    # Tolerate dict-style access as well.
-    def __getitem__(self, key):
-        return self.to_dict()[key]
 
-    def get(self, key, default=None):
-        return self.to_dict().get(key, default)
+COMPONENT_ID = "comp-zqwidget"
 
-
-SLUG = "zqwidget"
-COMP_ID = "comp-" + SLUG
-
-DOC_COMPONENT = "Zqcomponentbodymarker71"
-DOC_REQUIREMENT = "Zqrequirementbodymarker72"
-DOC_INTERFACE = "Zqinterfacebodymarker73"
-DOC_ACCEPTANCE = "Zqacceptancebodymarker74"
-DOC_CONSTRAINTS = "Zqconstraintsbodymarker75"
+DOC_COMPONENT = "zqcomponenttext4411"
+DOC_REQUIREMENT = "zqrequirementtext4412"
+DOC_INTERFACE = "zqinterfacetext4413"
+DOC_ACCEPTANCE = "zqacceptancetext4414"
+DOC_CONSTRAINTS = "zqconstraintstext4415"
 
 REQ_ID = "R-ZQWIDGET-001"
-REQ_STATUS = "zqreqstatus81"
+REQ_STATUS = "zqreqstatus4421"
 CRIT_ID = "AC-ZQWIDGET-001"
 CRIT_KIND = "generated-test"
-CRIT_RESULT = "zqcritresult82"
+CRIT_RESULT = "zqcritresult4422"
 
-MODEL_PIN = "anthropic:zqmodelpin83"
-PROMPT_VERSION = "zqpromptversion84"
+MODEL_PIN = "anthropic:zqmodelpin4431"
+PROMPT_VERSION = "zqpromptversion4432"
 GENERATED_AT = "2026-03-04T05:06:07Z"
 
 SIZE_STATUS = "over"
-PINNED_OVERRIDE = "zqpinnedfile85.py"
-OWNER = "zqownerteam86"
+PINNED_OVERRIDE = "zqpinnedoverride4441"
+OWNER = "zqownerteam4451"
 
 
-def _build_graph():
+def build_graph():
+    component_md = (
+        "---\n"
+        "id: " + COMPONENT_ID + "\n"
+        "title: Zq Widget\n"
+        "status: draft\n"
+        "owners: [" + OWNER + "]\n"
+        "sealed: true\n"
+        "source_path: legacy/zqwidget/\n"
+        "depends_on: []\n"
+        "realizes: []\n"
+        "uses_var: []\n"
+        "---\n"
+        "\n"
+        "# Zq Widget\n"
+        "\n"
+        "Purpose " + DOC_COMPONENT + " here.\n"
+    )
     documents = {
         "acceptance/AC-ZQWIDGET-001.md": (
-            "# AC-ZQWIDGET-001\n\nCovers: R-ZQWIDGET-001\n\n" + DOC_ACCEPTANCE + "\n"
+            "# " + CRIT_ID + "\n\nCovers: " + REQ_ID + "\n\nText " + DOC_ACCEPTANCE + " here.\n"
         ),
-        "component.md": (
-            "---\nid: comp-zqwidget\ntitle: Zq Widget\nstatus: draft\n"
-            "owners: [zqownerteam86]\nsealed: true\n---\n\n# Zq Widget\n\n"
-            + DOC_COMPONENT
-            + "\n"
-        ),
-        "constraints.md": "# Constraints\n\n" + DOC_CONSTRAINTS + "\n",
-        "interface/library.md": "# Library\n\n" + DOC_INTERFACE + "\n",
+        "component.md": component_md,
+        "constraints.md": "# Constraints\n\nText " + DOC_CONSTRAINTS + " here.\n",
+        "interface/library.md": "# Library\n\nText " + DOC_INTERFACE + " here.\n",
         "requirements/R-ZQWIDGET-001.md": (
-            "**R-ZQWIDGET-001** - " + DOC_REQUIREMENT + "\n"
+            "**" + REQ_ID + "** - Text " + DOC_REQUIREMENT + " here.\n"
         ),
     }
-    component_node = {
+    node = {
         "type": "component",
         "verification": {
             "criteria": [
                 {
-                    "id": CRIT_ID,
                     "criterion_id": CRIT_ID,
                     "kind": CRIT_KIND,
                     "result": CRIT_RESULT,
@@ -114,88 +107,78 @@ def _build_graph():
         "owners": [OWNER],
         "documents": documents,
     }
-    nodes = {
-        "P-ZQCAP": {"type": "capability"},
-        COMP_ID: component_node,
-    }
-    edges = [{"from": COMP_ID, "to": "P-ZQCAP", "kind": "realizes"}]
-    aggregates = {
-        "orphan_capability_rate": 0.0,
-        "orphan_component_rate": 0.0,
-        "orphan_var_rate": 0.0,
-    }
-    return CorpusGraph(nodes=nodes, edges=edges, aggregates=aggregates)
-
-
-def _detail_view_text(out_dir: Path) -> str:
-    pages = [p for p in out_dir.rglob("*") if p.is_file()]
-    html_pages = [p for p in pages if p.suffix.lower() in (".html", ".htm")]
-    assert html_pages, f"no HTML pages rendered under {out_dir}: {pages}"
-
-    by_name = [
-        p
-        for p in html_pages
-        if SLUG in str(p.relative_to(out_dir)).lower()
-    ]
-    candidates = by_name
-    if not candidates:
-        candidates = [
-            p
-            for p in html_pages
-            if DOC_COMPONENT in p.read_text(encoding="utf-8", errors="replace")
-        ]
-    assert candidates, (
-        "could not locate the detail page for "
-        + COMP_ID
-        + f" among {[str(p) for p in html_pages]}"
+    return FakeCorpusGraph(
+        nodes={COMPONENT_ID: node},
+        edges=[],
+        aggregates={
+            "orphan_capability_rate": 0.0,
+            "orphan_component_rate": 0.0,
+            "orphan_var_rate": 0.0,
+        },
     )
-    raw = "\n".join(p.read_text(encoding="utf-8", errors="replace") for p in candidates)
-    return html.unescape(raw)
 
 
-def test_ac_docs_002_detail_view_includes_every_node_value(tmp_path):
-    graph = _build_graph()
-    out_dir = tmp_path / "site"
+def _read_text_files(out_dir):
+    result = {}
+    for p in sorted(Path(out_dir).rglob("*")):
+        if p.is_file():
+            try:
+                result[p] = p.read_text(encoding="utf-8")
+            except (UnicodeDecodeError, OSError):
+                continue
+    return result
+
+
+def test_detail_view_includes_every_component_field_value(tmp_path):
+    graph = build_graph()
+    out_dir = tmp_path / "out"
 
     docs_site_renderer.render_docs_site(graph, out_dir)
 
-    assert out_dir.is_dir(), "render_docs_site did not create the output directory"
-    text = _detail_view_text(out_dir)
+    assert out_dir.is_dir(), "render_docs_site did not create out_dir"
+    files = _read_text_files(out_dir)
+    assert files, "render_docs_site wrote no files"
 
-    # documents: rendered component.md / requirements / interface / acceptance / constraints
-    for marker in (
+    plain_values = [
         DOC_COMPONENT,
         DOC_REQUIREMENT,
         DOC_INTERFACE,
         DOC_ACCEPTANCE,
         DOC_CONSTRAINTS,
-    ):
-        assert marker in text, f"document content {marker!r} missing from detail view"
+        REQ_ID,
+        REQ_STATUS,
+        CRIT_ID,
+        CRIT_KIND,
+        CRIT_RESULT,
+        MODEL_PIN,
+        PROMPT_VERSION,
+        GENERATED_AT,
+        PINNED_OVERRIDE,
+        OWNER,
+    ]
 
-    # verification.requirement_results: each R-id with its live status
-    assert REQ_ID in text, "requirement id missing from detail view"
-    assert REQ_STATUS in text, "requirement live status missing from detail view"
+    def missing_in(text):
+        missing = [v for v in plain_values if v not in text]
+        if not re.search(r"\b" + re.escape(SIZE_STATUS) + r"\b", text):
+            missing.append("size_status=" + SIZE_STATUS)
+        if "sealed" not in text.lower():
+            missing.append("sealed")
+        return missing
 
-    # verification.criteria: criteria broken out by kind with their results
-    assert CRIT_ID in text, "criterion id missing from detail view"
-    assert CRIT_KIND in text, "criterion kind missing from detail view"
-    assert CRIT_RESULT in text, "criterion result missing from detail view"
-
-    # provenance: model pin, prompt version, last cold-regen timestamp
-    assert MODEL_PIN in text, "provenance model pin missing from detail view"
-    assert PROMPT_VERSION in text, "provenance prompt version missing from detail view"
-    assert GENERATED_AT in text, "provenance timestamp missing from detail view"
-
-    # size_status
-    assert re.search(r"\bover\b", text, re.IGNORECASE), (
-        "size_status value 'over' missing from detail view"
+    candidates = {p: t for p, t in files.items() if DOC_COMPONENT in t}
+    assert candidates, (
+        "no rendered file contains the component's component.md content; files: "
+        + repr([str(p.relative_to(out_dir)) for p in files])
     )
 
-    # sealed / pinned-override exemption status
-    assert re.search(r"sealed", text, re.IGNORECASE), (
-        "sealed exemption status missing from detail view"
-    )
-    assert PINNED_OVERRIDE in text, "pinned override missing from detail view"
+    report = {}
+    for p, text in candidates.items():
+        missing = missing_in(text)
+        if not missing:
+            return
+        report[str(p.relative_to(out_dir))] = missing
 
-    # owners
-    assert OWNER in text, "owner missing from detail view"
+    raise AssertionError(
+        "no detail view for " + COMPONENT_ID + " includes every value; missing per file: "
+        + repr(report)
+    )
