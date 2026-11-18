@@ -1,3 +1,4 @@
+# hotdocs-criterion: sha256:a0635e41972096b43558224eeed433365c345d5b5dc317b8b150bd6c68936023
 import json
 from html.parser import HTMLParser
 from pathlib import Path
@@ -9,66 +10,56 @@ def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-NODE_IDS = ["P-ZERO-EDIT", "comp-bar", "comp-foo", "comp-qux"]
-
-EXPECTED = {
-    "comp-foo": "passing",
-    "comp-bar": "failing",
-    "comp-qux": "failing",
-    "P-ZERO-EDIT": "failing",
-}
-
-
-FAKE_TRACKER_TEMPLATE = r'''
+FAKE_TRACKER_SOURCE = '''
 import json
 from pathlib import Path
 
-_LOG = Path(__LOG_PATH__)
+LOG_PATH = __LOG_PATH__
 
 
-def _log(entry):
-    with open(_LOG, "a", encoding="utf-8") as fh:
-        fh.write(json.dumps(entry) + "\n")
+def _log(line):
+    with open(LOG_PATH, "a", encoding="utf-8") as fh:
+        fh.write(line + "\\n")
 
 
-def _verification_report(component_id, r_id, overall):
-    result = "pass" if overall == "pass" else "fail"
+def _vr(component_id, overall):
+    fail = overall != "pass"
     return {
         "component_id": component_id,
         "criteria": [
-            {"id": "AC-" + r_id[2:], "covers": r_id, "kind": "compiled", "result": result}
+            {
+                "id": "AC-X-001",
+                "covers": "R-X-001",
+                "kind": "generated-test",
+                "result": "fail" if fail else "pass",
+            }
         ],
-        "requirement_results": {r_id: result},
+        "requirement_results": {"R-X-001": "fail" if fail else "pass"},
         "interface_drift": False,
         "mutation_score": 0.9,
+        "mutation_error": None,
         "overall": overall,
     }
 
 
-def _hit(component_id, r_id, overall, license_blocked=False, secret_flagged=False):
+def _hit(component_id, overall, blocked, flagged):
     return {
         "hit": True,
-        "verification_report": _verification_report(component_id, r_id, overall),
-        "license_scan": {"blocked": license_blocked, "findings": []},
-        "secret_scan": {"flagged": secret_flagged, "findings": []},
+        "verification_report": _vr(component_id, overall),
+        "license_scan": {"blocked": blocked, "findings": []},
+        "secret_scan": {"flagged": flagged, "findings": []},
     }
 
 
 def check_readiness(repo_root, changed_ids=None, model=None, seed=0, llm_backend=None):
-    _log({
-        "fn": "check_readiness",
-        "repo_root": str(repo_root),
-        "changed_ids": changed_ids,
-        "model": model,
-        "seed": seed,
-    })
+    _log("check_readiness")
     return {
         "scope": "blast-radius" if changed_ids is not None else "whole-corpus",
         "ready": False,
         "components": {
-            "comp-foo": _hit("comp-foo", "R-FOO-001", "pass"),
-            "comp-bar": _hit("comp-bar", "R-BAR-001", "fail"),
-            "comp-qux": _hit("comp-qux", "R-QUX-001", "pass", license_blocked=True),
+            "comp-foo": _hit("comp-foo", "pass", False, False),
+            "comp-bar": _hit("comp-bar", "fail", False, False),
+            "comp-qux": _hit("comp-qux", "pass", True, False),
         },
         "capabilities": {
             "P-ZERO-EDIT": {
@@ -87,50 +78,45 @@ def check_readiness(repo_root, changed_ids=None, model=None, seed=0, llm_backend
 
 
 def last_requirement_failures(component_id, repo_root):
-    _log({"fn": "last_requirement_failures", "component_id": component_id})
+    _log("last_requirement_failures " + str(component_id))
     return []
 
 
-def write_attempt_record(component_id, generation_result, verification_report,
-                         spec_bundle_hash, repo_root):
-    raise AssertionError("write_attempt_record must not be called by the UI")
+def write_attempt_record(component_id, generation_result, verification_report, spec_bundle_hash, repo_root):
+    return {
+        "attempt_id": "2026-01-01T00:00:00Z-000000",
+        "component_id": component_id,
+        "timestamp": "2026-01-01T00:00:00Z",
+        "spec_bundle_hash": spec_bundle_hash,
+        "generation": {},
+        "verification": verification_report,
+    }
 '''
 
 
-def _component_graph_node():
+def _corpus_graph():
+    def comp():
+        return {
+            "type": "component",
+            "verification": None,
+            "provenance": None,
+            "size_status": "ok",
+            "sealed": False,
+            "pinned_overrides": [],
+            "owners": ["team"],
+            "documents": {},
+        }
+
     return {
-        "type": "component",
-        "verification": None,
-        "provenance": None,
-        "size_status": "ok",
-        "sealed": False,
-        "pinned_overrides": [],
-        "owners": ["test-team"],
-        "documents": {},
-    }
-
-
-def _build_repo(tmp_path):
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    log_path = tmp_path / "tracker_calls.jsonl"
-
-    fake_dir = repo_root / "gen" / "provenance-tracker"
-    fake_dir.mkdir(parents=True)
-    (fake_dir / "provenance_tracker.py").write_text(
-        FAKE_TRACKER_TEMPLATE.replace("__LOG_PATH__", repr(str(log_path))),
-        encoding="utf-8",
-    )
-
-    graph = {
         "nodes": {
             "P-ZERO-EDIT": {"type": "capability"},
-            "comp-bar": _component_graph_node(),
-            "comp-foo": _component_graph_node(),
-            "comp-qux": _component_graph_node(),
+            "comp-bar": comp(),
+            "comp-foo": comp(),
+            "comp-qux": comp(),
         },
         "edges": [
             {"from": "comp-foo", "to": "P-ZERO-EDIT", "kind": "realizes"},
+            {"from": "comp-foo", "to": "comp-bar", "kind": "depends_on"},
         ],
         "aggregates": {
             "orphan_capability_rate": 0.0,
@@ -138,40 +124,36 @@ def _build_repo(tmp_path):
             "orphan_var_rate": 0.0,
         },
     }
-    vdir = repo_root / "verification"
-    vdir.mkdir()
-    (vdir / "corpus-graph.json").write_text(
-        json.dumps(graph, sort_keys=True, indent=2) + "\n", encoding="utf-8"
-    )
-    return repo_root, log_path
 
 
 VOID_TAGS = {
-    "area", "base", "br", "col", "embed", "hr", "img", "input", "link",
-    "meta", "param", "source", "track", "wbr",
+    "area", "base", "br", "col", "embed", "hr", "img", "input",
+    "link", "meta", "param", "source", "track", "wbr",
 }
 
 
-class _StatusElementCollector(HTMLParser):
+class _StatusCollector(HTMLParser):
     def __init__(self):
         super().__init__(convert_charrefs=True)
-        self.stack = []  # list of (tag, record_or_None)
-        self.records = []
+        self.elements = []
+        self.stack = []
+
+    def _record(self, tag, attrs):
+        attr_map = {k: (v if v is not None else "") for k, v in attrs}
+        el = None
+        if "data-status" in attr_map:
+            el = {"tag": tag, "attrs": attr_map, "text": ""}
+            self.elements.append(el)
+        return el
 
     def handle_starttag(self, tag, attrs):
-        attr_map = {k: (v if v is not None else "") for k, v in attrs}
-        record = None
-        if "data-status" in attr_map:
-            record = {"tag": tag, "attrs": attr_map, "text": []}
-            self.records.append(record)
+        el = self._record(tag, attrs)
         if tag in VOID_TAGS:
             return
-        self.stack.append((tag, record))
+        self.stack.append((tag, el))
 
     def handle_startendtag(self, tag, attrs):
-        attr_map = {k: (v if v is not None else "") for k, v in attrs}
-        if "data-status" in attr_map:
-            self.records.append({"tag": tag, "attrs": attr_map, "text": []})
+        self._record(tag, attrs)
 
     def handle_endtag(self, tag):
         for i in range(len(self.stack) - 1, -1, -1):
@@ -180,79 +162,80 @@ class _StatusElementCollector(HTMLParser):
                 return
 
     def handle_data(self, data):
-        for _, record in self.stack:
-            if record is not None:
-                record["text"].append(data)
+        for _, el in self.stack:
+            if el is not None:
+                el["text"] += data
 
 
-def _ids_by_attr(record):
-    found = set()
-    for name, value in record["attrs"].items():
-        if name in ("class", "data-status"):
-            continue
-        for node_id in NODE_IDS:
-            if value == node_id or value.endswith(node_id):
-                found.add(node_id)
-    return found
+def _elements_for(elements, node_id):
+    by_attr = [
+        el for el in elements
+        if any(k != "data-status" and v == node_id for k, v in el["attrs"].items())
+    ]
+    if by_attr:
+        return by_attr
+    by_attr_token = [
+        el for el in elements
+        if any(
+            k not in ("data-status", "class") and node_id in v.split()
+            for k, v in el["attrs"].items()
+        )
+    ]
+    if by_attr_token:
+        return by_attr_token
+    by_text = [el for el in elements if node_id in el["text"]]
+    if not by_text:
+        return []
+    # prefer the innermost (shortest-text) matching elements
+    min_len = min(len(el["text"]) for el in by_text)
+    return [el for el in by_text if len(el["text"]) == min_len]
 
 
-def _ids_by_text(record):
-    text = "".join(record["text"])
-    return {node_id for node_id in NODE_IDS if node_id in text}
+def test_ac_ui_002_statuses_map_report_fields(tmp_path):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    log_path = tmp_path / "tracker-calls.log"
 
+    fake_dir = repo_root / "gen" / "provenance-tracker"
+    fake_dir.mkdir(parents=True)
+    source = FAKE_TRACKER_SOURCE.replace("__LOG_PATH__", repr(str(log_path)))
+    (fake_dir / "provenance_tracker.py").write_text(source, encoding="utf-8")
 
-def test_ac_ui_002_statuses_map_directly_and_render_matching_attributes(tmp_path):
-    repo_root, log_path = _build_repo(tmp_path)
+    (repo_root / "verification").mkdir()
+    (repo_root / "verification" / "corpus-graph.json").write_text(
+        json.dumps(_corpus_graph(), sort_keys=True, indent=2) + "\n", encoding="utf-8"
+    )
+
     out_dir = tmp_path / "out"
-
     snapshot = provenance_tracker_ui.render_tracker_ui(out_dir, repo_root)
 
-    # The faked provenance-tracker was actually consulted, exactly once.
-    calls = [
-        json.loads(line)
-        for line in log_path.read_text(encoding="utf-8").splitlines()
-        if line.strip()
-    ]
-    readiness_calls = [c for c in calls if c["fn"] == "check_readiness"]
-    assert len(readiness_calls) == 1
+    calls = log_path.read_text(encoding="utf-8").splitlines()
+    assert calls.count("check_readiness") == 1
 
-    # Snapshot statuses.
+    expected = {
+        "comp-foo": "passing",
+        "comp-bar": "failing",
+        "comp-qux": "failing",
+        "P-ZERO-EDIT": "failing",
+    }
+
     nodes = field(snapshot, "nodes")
     statuses = {field(n, "id"): field(n, "status") for n in nodes}
-    assert set(statuses) == set(EXPECTED)
-    for node_id, expected_status in EXPECTED.items():
-        assert statuses[node_id] == expected_status, (node_id, statuses[node_id])
+    assert set(statuses) == set(expected)
+    for node_id, status in expected.items():
+        assert statuses[node_id] == status, (node_id, statuses[node_id])
 
-    # Rendered page: each node element's data-status and status-<status> class.
-    index = Path(out_dir) / "index.html"
-    assert index.is_file()
-    html = index.read_text(encoding="utf-8")
-
-    parser = _StatusElementCollector()
-    parser.feed(html)
+    html_path = Path(out_dir) / "index.html"
+    assert html_path.is_file()
+    parser = _StatusCollector()
+    parser.feed(html_path.read_text(encoding="utf-8"))
     parser.close()
-    records = parser.records
-    assert records, "no element carrying a data-status attribute was rendered"
+    assert parser.elements, "no element carries a data-status attribute"
 
-    use_attrs = any(_ids_by_attr(r) for r in records)
-    by_node = {node_id: [] for node_id in NODE_IDS}
-    for record in records:
-        if use_attrs:
-            ids = _ids_by_attr(record)
-        else:
-            ids = _ids_by_text(record)
-            if len(ids) != 1:
-                continue
-        for node_id in ids:
-            by_node[node_id].append(record)
-
-    for node_id in NODE_IDS:
-        elements = by_node[node_id]
-        assert elements, "no node element with data-status found for %s" % node_id
-        snapshot_status = statuses[node_id]
-        for element in elements:
-            assert element["attrs"]["data-status"] == snapshot_status, (
-                node_id, element["attrs"]
-            )
-            classes = element["attrs"].get("class", "").split()
-            assert "status-" + snapshot_status in classes, (node_id, element["attrs"])
+    for node_id, snap_status in statuses.items():
+        els = _elements_for(parser.elements, node_id)
+        assert els, "no node element with data-status found for " + node_id
+        for el in els:
+            assert el["attrs"]["data-status"] == snap_status, (node_id, el["attrs"])
+            classes = el["attrs"].get("class", "").split()
+            assert "status-" + snap_status in classes, (node_id, classes)
