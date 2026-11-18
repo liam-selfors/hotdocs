@@ -1,8 +1,8 @@
+# hotdocs-criterion: sha256:b0a3d0a915d686ad352980d94ad7d8ad4630a52e980e58914ae13f931e9e5452
 import importlib.metadata
 import json
 import os
 import stat
-import sys
 from pathlib import Path
 
 import pytest
@@ -10,335 +10,372 @@ import pytest
 import hotdocs_init
 
 
-def _get(value, key, default=None):
-    if isinstance(value, dict):
-        return value.get(key, default)
-    return getattr(value, key, default)
+MISSING_MSG = "provider not configured: gen/llm-endpoint is missing"
 
 
-_FAKE_TEMPLATE = r'''
-import json
-import os
-from pathlib import Path
-
-_LOG = __LOG__
-_DETECT = json.loads(__DETECT__)
-PROVIDERS = json.loads(__PROVIDERS__)
-
-_UNSET = object()
+def field(value, name):
+    return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def _log(name, **data):
-    rec = {"call": name}
-    rec.update(data)
-    with open(_LOG, "a", encoding="utf-8") as fh:
-        fh.write(json.dumps(rec, default=str) + "\n")
-
-
-def detect_providers(env=None, probe_ollama=True):
-    _log("detect_providers", env_given=env is not None, probe_ollama=probe_ollama)
-    return [dict(p) for p in _DETECT]
-
-
-def check_connection(provider, model, base_url=None, api_key_env=None, timeout_seconds=30):
-    _log("check_connection", provider=provider, model=model, base_url=base_url,
-         api_key_env=api_key_env)
-    return {"ok": True, "error": None}
-
-
-def save_config(config_path, provider, model, base_url=_UNSET, api_key_env=_UNSET,
-                timeout_seconds=_UNSET):
-    _log(
-        "save_config",
-        config_path=str(config_path),
-        provider=provider,
-        model=model,
-        base_url_passed=base_url is not _UNSET,
-        base_url=None if base_url is _UNSET else base_url,
-        api_key_env_passed=api_key_env is not _UNSET,
-        api_key_env=None if api_key_env is _UNSET else api_key_env,
-        timeout_seconds_passed=timeout_seconds is not _UNSET,
-    )
-    path = Path(config_path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    lines = ["[llm]", 'provider = "%s"' % provider, 'model = "%s"' % model]
-    if base_url is not _UNSET and base_url is not None:
-        lines.append('base_url = "%s"' % base_url)
-    if api_key_env is not _UNSET and api_key_env is not None:
-        lines.append('api_key_env = "%s"' % api_key_env)
-    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-    return None
-
-
-def load_config(config_path=None):
-    _log("load_config", config_path=str(config_path))
-    path = Path(config_path) if config_path is not None else Path("hotdocs.toml")
-    if not path.exists():
-        return None
-    result = {"provider": None, "model": None, "base_url": None,
-              "api_key_env": None, "timeout_seconds": None}
-    in_llm = False
-    found = False
-    for raw in path.read_text(encoding="utf-8").splitlines():
-        line = raw.strip()
-        if line.startswith("["):
-            in_llm = line == "[llm]"
-            if in_llm:
-                found = True
-            continue
-        if in_llm and "=" in line:
-            k, v = line.split("=", 1)
-            k = k.strip()
-            v = v.strip().strip('"')
-            if k in result:
-                result[k] = v
-    if not found:
-        return None
-    return result
-'''
-
-
-def _all_providers(overrides=None):
-    providers = {
-        "claude-cli": {"default_base_url": None, "default_api_key_env": None,
-                       "needs_base_url": False, "suggested_model": "claude-sonnet-5"},
-        "anthropic": {"default_base_url": "https://api.anthropic.com",
-                      "default_api_key_env": "ANTHROPIC_API_KEY",
-                      "needs_base_url": False, "suggested_model": "claude-sonnet-5"},
-        "openai": {"default_base_url": "https://api.openai.com/v1",
-                   "default_api_key_env": "OPENAI_API_KEY",
-                   "needs_base_url": False, "suggested_model": "gpt-x"},
-        "openai-compatible": {"default_base_url": None, "default_api_key_env": None,
-                              "needs_base_url": True, "suggested_model": ""},
-        "gemini": {"default_base_url": "https://generativelanguage.googleapis.com",
-                   "default_api_key_env": "GEMINI_API_KEY",
-                   "needs_base_url": False, "suggested_model": "gemini-4-argon"},
-        "ollama": {"default_base_url": "http://localhost:11434",
-                   "default_api_key_env": None,
-                   "needs_base_url": False, "suggested_model": "llama3.2"},
+def base_providers():
+    return {
+        "claude-cli": {
+            "default_base_url": None,
+            "default_api_key_env": None,
+            "needs_base_url": False,
+            "suggested_model": "claude-sonnet-5",
+        },
+        "anthropic": {
+            "default_base_url": "https://api.anthropic.com",
+            "default_api_key_env": "ANTHROPIC_API_KEY",
+            "needs_base_url": False,
+            "suggested_model": "claude-sonnet-5",
+        },
+        "openai": {
+            "default_base_url": "https://api.openai.com/v1",
+            "default_api_key_env": "OPENAI_API_KEY",
+            "needs_base_url": False,
+            "suggested_model": "gpt-x",
+        },
+        "openai-compatible": {
+            "default_base_url": None,
+            "default_api_key_env": None,
+            "needs_base_url": True,
+            "suggested_model": "",
+        },
+        "gemini": {
+            "default_base_url": "https://generativelanguage.googleapis.com",
+            "default_api_key_env": "GEMINI_API_KEY",
+            "needs_base_url": False,
+            "suggested_model": "gemini-4-argon",
+        },
+        "ollama": {
+            "default_base_url": "http://localhost:11434",
+            "default_api_key_env": None,
+            "needs_base_url": False,
+            "suggested_model": "llama3.2",
+        },
     }
-    if overrides:
-        providers.update(overrides)
-    return providers
 
 
-OLLAMA_UNAVAILABLE = {"provider": "ollama", "available": False, "reason": "not running",
-                      "suggested_model": "llama3.2", "api_key_env": None}
-OPENAI_AVAILABLE = {"provider": "openai", "available": True, "reason": "ready",
-                    "suggested_model": "gpt-x", "api_key_env": "OPENAI_API_KEY"}
+FAKE_BODY = (
+    "import json\n"
+    "from pathlib import Path\n"
+    "\n"
+    "def _log(name, **kw):\n"
+    "    with open(LOG, 'a', encoding='utf-8') as fh:\n"
+    "        fh.write(json.dumps({'fn': name, 'args': kw}, default=str) + '\\n')\n"
+    "\n"
+    "def detect_providers(env=None, probe_ollama=True):\n"
+    "    _log('detect_providers', probe_ollama=probe_ollama)\n"
+    "    return [dict(e) for e in _DETECTED]\n"
+    "\n"
+    "def check_connection(provider, model, base_url=None, api_key_env=None,\n"
+    "                     timeout_seconds=30, auth=None):\n"
+    "    _log('check_connection', provider=provider, model=model, base_url=base_url,\n"
+    "         api_key_env=api_key_env, timeout_seconds=timeout_seconds, auth=auth)\n"
+    "    if provider not in PROVIDERS:\n"
+    "        raise ValueError('unknown provider')\n"
+    "    if PROVIDERS[provider]['needs_base_url'] and not base_url:\n"
+    "        raise ValueError('base_url required')\n"
+    "    return {'ok': True, 'error': None}\n"
+    "\n"
+    "def save_config(config_path, provider, model, base_url=None, api_key_env=None,\n"
+    "                timeout_seconds=None, auth=None):\n"
+    "    _log('save_config', config_path=str(config_path), provider=provider, model=model,\n"
+    "         base_url=base_url, api_key_env=api_key_env,\n"
+    "         timeout_seconds=timeout_seconds, auth=auth)\n"
+    "    if provider not in PROVIDERS or not model:\n"
+    "        raise ValueError('invalid config')\n"
+    "    p = Path(config_path)\n"
+    "    p.parent.mkdir(parents=True, exist_ok=True)\n"
+    "    existing = p.read_text(encoding='utf-8') if p.exists() else ''\n"
+    "    kept = []\n"
+    "    in_llm = False\n"
+    "    for line in existing.splitlines():\n"
+    "        s = line.strip()\n"
+    "        if s.startswith('['):\n"
+    "            in_llm = (s == '[llm]')\n"
+    "        if not in_llm:\n"
+    "            kept.append(line)\n"
+    "    out = kept + ['[llm]', 'provider = ' + json.dumps(provider), 'model = ' + json.dumps(model)]\n"
+    "    if base_url is not None:\n"
+    "        out.append('base_url = ' + json.dumps(base_url))\n"
+    "    if api_key_env is not None:\n"
+    "        out.append('api_key_env = ' + json.dumps(api_key_env))\n"
+    "    if timeout_seconds is not None:\n"
+    "        out.append('timeout_seconds = ' + str(int(timeout_seconds)))\n"
+    "    if auth is not None:\n"
+    "        out.append('auth = ' + json.dumps(auth))\n"
+    "    p.write_text('\\n'.join(out) + '\\n', encoding='utf-8')\n"
+    "\n"
+    "def load_config(config_path=None):\n"
+    "    _log('load_config', config_path=None if config_path is None else str(config_path))\n"
+    "    p = Path('hotdocs.toml') if config_path is None else Path(config_path)\n"
+    "    if not p.exists():\n"
+    "        return None\n"
+    "    result = None\n"
+    "    in_llm = False\n"
+    "    for line in p.read_text(encoding='utf-8').splitlines():\n"
+    "        s = line.strip()\n"
+    "        if not s or s.startswith('#'):\n"
+    "            continue\n"
+    "        if s.startswith('['):\n"
+    "            in_llm = (s == '[llm]')\n"
+    "            if in_llm and result is None:\n"
+    "                result = {'provider': None, 'model': None, 'base_url': None,\n"
+    "                          'api_key_env': None, 'timeout_seconds': None, 'auth': None}\n"
+    "            continue\n"
+    "        if in_llm and '=' in s:\n"
+    "            k, v = s.split('=', 1)\n"
+    "            k = k.strip()\n"
+    "            v = v.strip()\n"
+    "            if v.startswith('\"'):\n"
+    "                v = json.loads(v)\n"
+    "            else:\n"
+    "                v = int(v)\n"
+    "            if k in result:\n"
+    "                result[k] = v\n"
+    "    return result\n"
+)
 
 
-def _make_tool_root(base, log_path, detect, providers=None, with_endpoint=True):
-    root = base / "toolroot"
-    root.mkdir(parents=True, exist_ok=True)
-    pytest_version = importlib.metadata.version("pytest")
-    (root / "requirements.txt").write_text("pytest==%s\n" % pytest_version, encoding="utf-8")
-    slugs = root / "examples" / "slugify" / "specs" / "product"
-    slugs.mkdir(parents=True, exist_ok=True)
-    (slugs / "slugs.md").write_text("# Slugs\n\nTurn titles into slugs.\n", encoding="utf-8")
+def make_tool_root(tmp_path, detected, with_endpoint=True):
+    root = tmp_path / "tool"
+    root.mkdir()
+    (root / "requirements.txt").write_text(
+        "pytest==" + importlib.metadata.version("pytest") + "\n", encoding="utf-8"
+    )
+    ex = root / "examples" / "slugify" / "specs" / "product"
+    ex.mkdir(parents=True)
+    (ex / "slugs.md").write_text("# Slugs\n\nTurn titles into slugs.\n", encoding="utf-8")
+    logdir = tmp_path / "logs"
+    logdir.mkdir()
+    log = logdir / "calls.log"
     if with_endpoint:
-        ep = root / "gen" / "llm-endpoint"
-        ep.mkdir(parents=True, exist_ok=True)
+        d = root / "gen" / "llm-endpoint"
+        d.mkdir(parents=True)
         src = (
-            _FAKE_TEMPLATE
-            .replace("__LOG__", repr(str(log_path)))
-            .replace("__DETECT__", repr(json.dumps(detect)))
-            .replace("__PROVIDERS__", repr(json.dumps(providers or _all_providers())))
+            "LOG = " + repr(str(log)) + "\n"
+            + "PROVIDERS = " + repr(base_providers()) + "\n"
+            + "_DETECTED = " + repr(detected) + "\n"
+            + FAKE_BODY
         )
-        (ep / "llm_endpoint.py").write_text(src, encoding="utf-8")
-    return root
+        (d / "llm_endpoint.py").write_text(src, encoding="utf-8")
+    return root, log
 
 
-def _make_env(base, with_claude=False):
-    bindir = base / "bin"
-    bindir.mkdir(parents=True, exist_ok=True)
-    if with_claude:
-        claude = bindir / "claude"
-        claude.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
-        claude.chmod(claude.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
-    home = base / "home"
-    home.mkdir(parents=True, exist_ok=True)
-    return {"PATH": str(bindir), "HOME": str(home)}
+def make_env(tmp_path):
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    claude = bindir / "claude"
+    claude.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    claude.chmod(claude.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+    env = dict(os.environ)
+    env["PATH"] = str(bindir) + os.pathsep + env.get("PATH", "")
+    return env
 
 
-def _read_log(log_path):
-    if not Path(log_path).exists():
-        return []
-    out = []
-    for line in Path(log_path).read_text(encoding="utf-8").splitlines():
-        line = line.strip()
-        if line:
-            out.append(json.loads(line))
-    return out
+def make_project(tmp_path):
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    return proj
 
 
-def _saves(log_path):
-    return [r for r in _read_log(log_path) if r.get("call") == "save_config"]
-
-
-class _Inputs:
+class Prompter:
     def __init__(self, answers):
         self.answers = list(answers)
-        self.prompts = []
+        self.questions = []
 
     def __call__(self, prompt=""):
-        self.prompts.append(str(prompt))
-        if len(self.prompts) > 100:
-            raise RuntimeError("too many questions asked")
+        self.questions.append(prompt)
+        if len(self.questions) > 60:
+            raise RuntimeError("too many questions")
         if self.answers:
             return self.answers.pop(0)
         return ""
 
 
-def _classify(prompt):
-    low = prompt.lower()
-    if "url" in low:
-        return "base_url"
-    if "key" in low:
-        return "api_key"
-    if "model" in low:
+class Output:
+    def __init__(self):
+        self.lines = []
+
+    def __call__(self, *args, **kwargs):
+        self.lines.append(" ".join(str(a) for a in args))
+
+    def text(self):
+        return "\n".join(self.lines)
+
+
+def classify(q):
+    s = q.lower()
+    if "url" in s:
+        return "url"
+    if "variable" in s or "env" in s:
+        return "key"
+    if "model" in s:
         return "model"
-    if "provider" in low:
+    if "provider" in s:
         return "provider"
     return None
 
 
-def _kinds(prompts):
-    return [k for k in (_classify(p) for p in prompts) if k is not None]
+def kinds(questions):
+    return [k for k in (classify(q) for q in questions) if k is not None]
 
 
-def _run(tmp_path, argv_extra, answers, detect, providers=None, with_endpoint=True,
-         with_claude=False, project=None):
-    log_dir = tmp_path / "logs"
-    log_dir.mkdir(parents=True, exist_ok=True)
-    log_path = log_dir / "calls.jsonl"
-    tool_root = _make_tool_root(tmp_path, log_path, detect, providers, with_endpoint)
-    if project is None:
-        project = tmp_path / "proj"
-        project.mkdir(parents=True, exist_ok=True)
-    env = _make_env(tmp_path, with_claude=with_claude)
-    inputs = _Inputs(answers)
-    outputs = []
+def read_log(log):
+    if not log.exists():
+        return []
+    return [json.loads(l) for l in log.read_text(encoding="utf-8").splitlines() if l.strip()]
 
-    def output_fn(*args, **kwargs):
-        outputs.append(" ".join(str(a) for a in args))
 
-    code = hotdocs_init.main(
-        [str(project)] + list(argv_extra),
-        tool_root=tool_root,
-        input_fn=inputs,
-        output_fn=output_fn,
+def save_calls(log):
+    return [c["args"] for c in read_log(log) if c["fn"] == "save_config"]
+
+
+LISTING = [
+    {
+        "provider": "ollama",
+        "available": False,
+        "reason": "not running",
+        "suggested_model": "llama3.2",
+        "api_key_env": None,
+    },
+    {
+        "provider": "openai",
+        "available": True,
+        "reason": "OPENAI_API_KEY is set",
+        "suggested_model": "gpt-x",
+        "api_key_env": "OPENAI_API_KEY",
+    },
+]
+
+
+def run(tmp_path, detected, answers, argv_extra=(), with_endpoint=True, pre=None):
+    root, log = make_tool_root(tmp_path, detected, with_endpoint=with_endpoint)
+    proj = make_project(tmp_path)
+    if pre is not None:
+        pre(proj)
+    env = make_env(tmp_path)
+    prompter = Prompter(answers)
+    out = Output()
+    rc = hotdocs_init.main(
+        [str(proj)] + list(argv_extra),
+        tool_root=root,
+        input_fn=prompter,
+        output_fn=out,
         env=env,
-        cwd=project,
+        cwd=proj,
     )
-    return code, inputs, outputs, log_path, project
+    return rc, prompter, out, log, proj
 
 
-def test_interactive_defaults_ask_provider_model_key_and_save_openai(tmp_path):
-    code, inputs, outputs, log_path, project = _run(
-        tmp_path, [], [], [OLLAMA_UNAVAILABLE, OPENAI_AVAILABLE]
-    )
-    kinds = _kinds(inputs.prompts)
-    assert kinds == ["provider", "model", "api_key"], inputs.prompts
-    text = "\n".join(outputs)
+def test_all_defaults_asks_provider_model_key_in_order(tmp_path):
+    rc, prompter, out, log, proj = run(tmp_path, LISTING, [])
+    for q in prompter.questions:
+        assert q.endswith(" ")
+    ks = kinds(prompter.questions)
+    assert ks[:3] == ["provider", "model", "key"], prompter.questions
+    assert "url" not in ks
+    assert ks.count("provider") == 1
+    assert ks.count("model") == 1
+    assert ks.count("key") == 1
+    text = out.text()
     assert "ollama" in text
     assert "openai" in text
-    saves = _saves(log_path)
-    assert len(saves) == 1, saves
-    s = saves[0]
-    assert s["provider"] == "openai"
-    assert s["model"] == "gpt-x"
-    assert s["api_key_env_passed"] is True
-    assert s["api_key_env"] == "OPENAI_API_KEY"
-    assert s["timeout_seconds_passed"] is False
-    assert Path(s["config_path"]).name == "hotdocs.toml"
-    detects = [r for r in _read_log(log_path) if r.get("call") == "detect_providers"]
-    assert detects and all(r["env_given"] for r in detects)
+    calls = save_calls(log)
+    assert len(calls) == 1
+    c = calls[0]
+    assert c["provider"] == "openai"
+    assert c["model"] == "gpt-x"
+    assert c["api_key_env"] == "OPENAI_API_KEY"
+    assert c["timeout_seconds"] is None
 
 
-def test_unrecognised_provider_answer_is_asked_again_and_number_selects(tmp_path):
-    code, inputs, outputs, log_path, project = _run(
-        tmp_path, [], ["bogus", "2"], [OLLAMA_UNAVAILABLE, OPENAI_AVAILABLE]
-    )
-    kinds = _kinds(inputs.prompts)
-    assert kinds[:2] == ["provider", "provider"], inputs.prompts
-    assert kinds.count("provider") == 2, inputs.prompts
-    assert kinds[2:] == ["model", "api_key"], inputs.prompts
-    saves = _saves(log_path)
-    assert len(saves) == 1, saves
-    assert saves[0]["provider"] == "openai"
-    assert saves[0]["model"] == "gpt-x"
-    assert saves[0]["timeout_seconds_passed"] is False
+def test_unrecognised_provider_asked_again_then_number_selects(tmp_path):
+    rc, prompter, out, log, proj = run(tmp_path, LISTING, ["bogus", "2"])
+    ks = kinds(prompter.questions)
+    assert ks[:2] == ["provider", "provider"], prompter.questions
+    assert ks.count("provider") == 2
+    assert ks[2:4] == ["model", "key"]
+    calls = save_calls(log)
+    assert len(calls) == 1
+    assert calls[0]["provider"] == "openai"
+    assert calls[0]["model"] == "gpt-x"
 
 
-def test_openai_compatible_asks_model_and_base_url_again_when_empty(tmp_path):
-    detect = [
-        OLLAMA_UNAVAILABLE,
-        {"provider": "openai-compatible", "available": True, "reason": "configurable",
-         "suggested_model": "", "api_key_env": None},
+def test_openai_compatible_reasks_model_and_base_url(tmp_path):
+    detected = [
+        {
+            "provider": "openai-compatible",
+            "available": True,
+            "reason": "needs a base URL",
+            "suggested_model": "",
+            "api_key_env": None,
+        }
     ]
-    providers = _all_providers({
-        "openai-compatible": {"default_base_url": None, "default_api_key_env": None,
-                              "needs_base_url": True, "suggested_model": ""},
-    })
     answers = ["openai-compatible", "", "m", "", "http://h/v1", ""]
-    code, inputs, outputs, log_path, project = _run(
-        tmp_path, [], answers, detect, providers=providers
-    )
-    kinds = _kinds(inputs.prompts)
-    assert kinds == ["provider", "model", "model", "base_url", "base_url", "api_key"], \
-        inputs.prompts
-    saves = _saves(log_path)
-    assert len(saves) == 1, saves
-    s = saves[0]
-    assert s["provider"] == "openai-compatible"
-    assert s["model"] == "m"
-    assert s["base_url"] == "http://h/v1"
-    assert s["api_key_env_passed"] is False
-    assert s["timeout_seconds_passed"] is False
+    rc, prompter, out, log, proj = run(tmp_path, detected, answers)
+    ks = kinds(prompter.questions)
+    assert ks[:6] == ["provider", "model", "model", "url", "url", "key"], prompter.questions
+    assert ks.count("model") == 2
+    assert ks.count("url") == 2
+    calls = save_calls(log)
+    assert len(calls) == 1
+    c = calls[0]
+    assert c["provider"] == "openai-compatible"
+    assert c["model"] == "m"
+    assert c["base_url"] == "http://h/v1"
+    assert c["api_key_env"] is None
+    assert c["timeout_seconds"] is None
 
 
-def test_claude_cli_asks_no_base_url_or_api_key_and_returns_zero(tmp_path):
-    detect = [
-        {"provider": "claude-cli", "available": True, "reason": "claude on PATH",
-         "suggested_model": "claude-sonnet-5", "api_key_env": None},
-        OLLAMA_UNAVAILABLE,
+def test_claude_cli_asks_no_base_url_or_key_and_returns_zero(tmp_path):
+    detected = [
+        {
+            "provider": "claude-cli",
+            "available": True,
+            "reason": "claude found on PATH",
+            "suggested_model": "claude-sonnet-5",
+            "api_key_env": None,
+        }
     ]
-    code, inputs, outputs, log_path, project = _run(
-        tmp_path, [], [], detect, with_claude=True
+    rc, prompter, out, log, proj = run(tmp_path, detected, [])
+    ks = kinds(prompter.questions)
+    assert "url" not in ks, prompter.questions
+    assert "key" not in ks, prompter.questions
+    assert rc == 0
+    calls = save_calls(log)
+    assert len(calls) == 1
+    assert calls[0]["provider"] == "claude-cli"
+    assert calls[0]["model"] == "claude-sonnet-5"
+
+
+def test_missing_llm_endpoint_with_yes(tmp_path):
+    rc, prompter, out, log, proj = run(
+        tmp_path, LISTING, [], argv_extra=["--yes"], with_endpoint=False
     )
-    kinds = _kinds(inputs.prompts)
-    assert "base_url" not in kinds, inputs.prompts
-    assert "api_key" not in kinds, inputs.prompts
-    assert kinds[:2] == ["provider", "model"], inputs.prompts
-    assert code == 0
-    saves = _saves(log_path)
-    assert len(saves) == 1, saves
-    assert saves[0]["provider"] == "claude-cli"
-    assert saves[0]["model"] == "claude-sonnet-5"
-    assert saves[0]["timeout_seconds_passed"] is False
+    assert any(MISSING_MSG in line for line in out.lines), out.lines
+    assert rc == 0
+    assert not (proj / "hotdocs.toml").exists()
 
 
-def test_missing_llm_endpoint_reports_and_carries_on(tmp_path):
-    code, inputs, outputs, log_path, project = _run(
-        tmp_path, ["--yes"], [], [OPENAI_AVAILABLE], with_endpoint=False
+def test_existing_hotdocs_toml_is_kept(tmp_path):
+    content = (
+        "[llm]\n"
+        "provider = \"openai\"\n"
+        "model = \"gpt-x\"\n"
+        "api_key_env = \"OPENAI_API_KEY\"\n"
     )
-    msg = "provider not configured: gen/llm-endpoint is missing"
-    assert any(msg in o for o in outputs), outputs
-    assert code == 0
-    assert not (project / "hotdocs.toml").exists()
 
+    def pre(proj):
+        (proj / "hotdocs.toml").write_text(content, encoding="utf-8")
 
-def test_existing_hotdocs_toml_skips_provider_step(tmp_path):
-    project = tmp_path / "proj"
-    project.mkdir(parents=True, exist_ok=True)
-    original = b'[llm]\nprovider = "ollama"\nmodel = "llama3.2"\n'
-    (project / "hotdocs.toml").write_bytes(original)
-    code, inputs, outputs, log_path, project = _run(
-        tmp_path, [], [], [OLLAMA_UNAVAILABLE, OPENAI_AVAILABLE], project=project
-    )
-    assert _saves(log_path) == []
-    assert (project / "hotdocs.toml").read_bytes() == original
-    kinds = _kinds(inputs.prompts)
-    assert "provider" not in kinds, inputs.prompts
-    assert any("hotdocs.toml" in o for o in outputs), outputs
+    rc, prompter, out, log, proj = run(tmp_path, LISTING, [], pre=pre)
+    assert save_calls(log) == []
+    assert (proj / "hotdocs.toml").read_text(encoding="utf-8") == content
+    ks = kinds(prompter.questions)
+    assert "provider" not in ks, prompter.questions
+    assert "model" not in ks, prompter.questions
+    assert "hotdocs.toml" in out.text()
