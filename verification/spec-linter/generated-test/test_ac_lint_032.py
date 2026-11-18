@@ -1,4 +1,5 @@
-"""AC-LINT-032 (Covers: R-LINT-032).
+# hotdocs-criterion: sha256:c484d5ec82c18f08c2ed8640ed608570b88ddb5bc5f526dc139c4eacd27f1088
+"""AC-LINT-032 (covers R-LINT-032).
 
 Given a project holding .hotdocs-tool.json with components "foo" and
 "cache-manager", when the linter runs on it, then "cache-manager" gets an
@@ -8,7 +9,6 @@ Given the same project without .hotdocs-tool.json, or the tool's own
 repository, when the linter runs on it, then there is no R-LINT-032 finding.
 """
 
-import json
 import re
 from pathlib import Path
 
@@ -24,204 +24,146 @@ def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def _tool_root() -> Path:
-    """Parent of the nearest directory named `gen` above spec_linter's file."""
+def _tool_gen():
     here = Path(spec_linter.__file__).resolve()
     for parent in here.parents:
         if parent.name == "gen":
-            return parent.parent
-    pytest.skip("spec_linter is not installed under a `gen` directory; no tool root")
+            return parent
+    pytest.fail("spec_linter is not located under a 'gen' directory")
 
 
-def _shadowed_slug(tool_root: Path) -> str:
-    gen = tool_root / "gen"
-    if (gen / "cache-manager").is_dir():
+def _shadow_slug():
+    """The criterion's slug, 'cache-manager', when the tool's gen/ holds it;
+    otherwise a slug the tool's gen/ certainly holds (the linter's own)."""
+    tool_gen = _tool_gen()
+    if (tool_gen / "cache-manager").is_dir():
         return "cache-manager"
-    pytest.skip("tool root's gen/ has no cache-manager directory to shadow")
+    return "spec-linter"
 
 
-def _write(path: Path, text: str) -> None:
+def _write(path, text):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
 
 
-def _make_component(specs: Path, slug: str, prefix: str) -> None:
-    cdir = specs / "components" / slug
-    title = slug.replace("-", " ").title()
-    _write(
-        cdir / "component.md",
-        f"""---
-id: comp-{slug}
-title: {title}
-status: draft
-owners: [test-team]
-sealed: true
-source_path: legacy/{slug}/
----
-
-# {title}
-
-## Purpose
-
-Stores and returns values for the {slug} test fixture component.
-
-## Scope
-
-- In scope: returning a stored value for a known key.
-- Out of scope: everything else.
-
-## Definitions
-
-None.
-
-## Behavior
-
-See `requirements/`.
-
-## Interfaces
-
-See `interface/`.
-
-## Data
-
-See `interface/data/`.
-
-## Acceptance criteria
-
-See `acceptance/`.
-
-## Non-functional constraints
-
-See `constraints.md`.
-
-## Open questions
-
-## Change log
-
-- Initial draft.
-""",
-    )
-    _write(
-        cdir / "requirements" / f"R-{prefix}-001.md",
-        f"""# R-{prefix}-001
-
-**R-{prefix}-001** — The component MUST return the stored value for a
-known key.
-""",
-    )
-    _write(
-        cdir / "acceptance" / f"AC-{prefix}-001.md",
-        f"""# AC-{prefix}-001
-
-Covers: R-{prefix}-001
-Kind: compiled
-
-```gherkin
-Given a stored value "v" under key "k"
-When the value for key "k" is requested
-Then the result is "v"
-```
-""",
-    )
-    _write(
-        cdir / "constraints.md",
-        "# Constraints\n\n- None beyond the defaults.\n",
+def _component_md(slug):
+    return (
+        "---\n"
+        "id: comp-" + slug + "\n"
+        "title: " + slug + " component\n"
+        "status: draft\n"
+        "owners: [test-team]\n"
+        "sealed: true\n"
+        "source_path: legacy/" + slug + "/\n"
+        "---\n"
+        "\n"
+        "# " + slug + "\n"
+        "\n"
+        "## Purpose\n"
+        "\n"
+        "A small fixture component used for testing.\n"
+        "\n"
+        "## Scope\n"
+        "\n"
+        "- In scope: nothing beyond this fixture.\n"
+        "\n"
+        "## Definitions\n"
+        "\n"
+        "None.\n"
+        "\n"
+        "## Behavior\n"
+        "\n"
+        "See `requirements/`.\n"
+        "\n"
+        "## Interfaces\n"
+        "\n"
+        "See `interface/`.\n"
+        "\n"
+        "## Data\n"
+        "\n"
+        "See `interface/data/`.\n"
+        "\n"
+        "## Acceptance criteria\n"
+        "\n"
+        "See `acceptance/`.\n"
+        "\n"
+        "## Non-functional constraints\n"
+        "\n"
+        "See `constraints.md`.\n"
+        "\n"
+        "## Open questions\n"
+        "\n"
+        "## Change log\n"
+        "\n"
+        "- Initial draft.\n"
     )
 
 
-def _make_project(root: Path, shadowed: str, with_marker: bool) -> Path:
-    specs = root / "specs"
-    _make_component(specs, "foo", "FOO")
-    _make_component(specs, shadowed, "SHADOW")
+def _build_project(root, slugs, with_marker):
     _write(
-        specs / "glossary.md",
-        "# Glossary\n\n- **Widget** — a thing used only by test fixtures.\n",
+        root / "specs" / "glossary.md",
+        "# Glossary\n\n- **Fixture** — a test fixture term.\n",
     )
+    for slug in slugs:
+        base = root / "specs" / "components" / slug
+        _write(base / "component.md", _component_md(slug))
+        _write(
+            base / "constraints.md",
+            "# Constraints\n\nNone beyond the defaults.\n",
+        )
     if with_marker:
-        _write(root / ".hotdocs-tool.json", json.dumps({}) + "\n")
+        _write(root / ".hotdocs-tool.json", "{}\n")
     return root
 
 
 def _rule_findings(report):
-    return [f for f in field(report, "findings") if field(f, "rule_id") == RULE]
+    findings = field(report, "findings")
+    return [f for f in findings if field(f, "rule_id") == RULE]
 
 
-def _names_slug(finding, slug: str) -> bool:
-    text = f"{field(finding, 'message')} {field(finding, 'file')}"
-    return re.search(r"(?<![\w-])" + re.escape(slug) + r"(?![\w-])", text) is not None
+def _names_slug(finding, slug):
+    message = field(finding, "message") or ""
+    file = field(finding, "file") or ""
+    pattern = r"(?<![\w-])" + re.escape(slug) + r"(?![\w-])"
+    return bool(re.search(pattern, message)) or ("components/" + slug + "/") in str(file)
 
 
-def test_marker_project_flags_shadowing_component_only(tmp_path):
-    tool_root = _tool_root()
-    shadowed = _shadowed_slug(tool_root)
-    if (tool_root / "gen" / "foo").exists():
-        pytest.skip("tool root's gen/ unexpectedly holds a foo directory")
+def test_project_component_shadowing_tool_component_fails(tmp_path):
+    slug = _shadow_slug()
+    tool_gen = _tool_gen()
+    assert not (tool_gen / "foo").exists(), "tool gen/ unexpectedly holds 'foo'"
 
-    repo = _make_project(tmp_path / "project", shadowed, with_marker=True)
-    report = spec_linter.lint(None, repo)
-    findings = _rule_findings(report)
+    repo_root = _build_project(tmp_path / "project", ["foo", slug], with_marker=True)
 
-    shadow_hits = [
-        f for f in findings
-        if field(f, "severity") == "fail" and _names_slug(f, shadowed)
-    ]
-    assert shadow_hits, (
-        f"expected an {RULE} fail finding naming {shadowed!r}; got "
-        f"{[(field(f, 'severity'), field(f, 'file'), field(f, 'message')) for f in findings]}"
+    report = spec_linter.lint(None, repo_root)
+    hits = _rule_findings(report)
+
+    shadow_hits = [f for f in hits if _names_slug(f, slug)]
+    assert shadow_hits, "expected an R-LINT-032 finding naming " + repr(slug)
+    for f in shadow_hits:
+        assert field(f, "severity") == "fail"
+    assert any(slug in (field(f, "message") or "") for f in shadow_hits), (
+        "the finding's message must name the slug " + repr(slug)
     )
 
-    foo_hits = [f for f in findings if _names_slug(f, "foo")]
-    assert not foo_hits, (
-        f"'foo' is not under the tool's gen/ and must get no {RULE} finding; got "
-        f"{[(field(f, 'file'), field(f, 'message')) for f in foo_hits]}"
-    )
+    foo_hits = [f for f in hits if _names_slug(f, "foo")]
+    assert foo_hits == [], "'foo' must get no R-LINT-032 finding"
 
-    # Every R-LINT-032 finding is about the shadowing component.
-    for f in findings:
-        assert _names_slug(f, shadowed), field(f, "message")
-
-    # A fail finding counts toward hard failures.
     assert field(report, "hard_failures") >= 1
 
 
-def test_marker_project_cli_reports_rule_and_exits_1(tmp_path, capsys):
-    tool_root = _tool_root()
-    shadowed = _shadowed_slug(tool_root)
-    if (tool_root / "gen" / "foo").exists():
-        pytest.skip("tool root's gen/ unexpectedly holds a foo directory")
+def test_project_without_marker_has_no_finding(tmp_path):
+    slug = _shadow_slug()
+    repo_root = _build_project(tmp_path / "project", ["foo", slug], with_marker=False)
+    assert not (repo_root / ".hotdocs-tool.json").exists()
 
-    repo = _make_project(tmp_path / "project", shadowed, with_marker=True)
-    capsys.readouterr()
-    code = spec_linter.main([f"--repo-root={repo}", "--format=json"])
-    out = capsys.readouterr().out
-    assert code == 1
-    doc = json.loads(out)
-    hits = [
-        f for f in doc["findings"]
-        if f["rule_id"] == RULE and f["severity"] == "fail" and _names_slug(f, shadowed)
-    ]
-    assert hits
+    report = spec_linter.lint(None, repo_root)
+    assert _rule_findings(report) == []
 
 
-def test_project_without_marker_has_no_rule_finding(tmp_path):
-    tool_root = _tool_root()
-    shadowed = _shadowed_slug(tool_root)
-
-    repo = _make_project(tmp_path / "project", shadowed, with_marker=False)
-    assert not (repo / ".hotdocs-tool.json").exists()
-    report = spec_linter.lint(None, repo)
-    findings = _rule_findings(report)
-    assert findings == [], [
-        (field(f, "file"), field(f, "message")) for f in findings
-    ]
-
-
-def test_tool_own_repository_has_no_rule_finding():
-    tool_root = _tool_root()
+def test_tool_own_repository_has_no_finding():
+    tool_root = _tool_gen().parent
     if not (tool_root / "specs").is_dir():
-        pytest.skip("tool root carries no specs/ tree to lint")
+        pytest.skip("tool root has no specs/ tree to lint")
     report = spec_linter.lint(None, tool_root)
-    findings = _rule_findings(report)
-    assert findings == [], [
-        (field(f, "file"), field(f, "message")) for f in findings
-    ]
+    assert _rule_findings(report) == []

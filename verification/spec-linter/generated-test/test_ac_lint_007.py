@@ -2,8 +2,6 @@
 import json
 from pathlib import Path
 
-import pytest
-
 import spec_linter
 
 
@@ -11,177 +9,153 @@ def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-COMPONENT_MD = """---
-id: comp-foo
-title: Foo Widget
-status: draft
-owners: [test-team]
-sealed: true
-source_path: legacy/foo/
----
+COMPONENT_MD = (
+    "---\n"
+    "id: comp-foo\n"
+    "title: Foo\n"
+    "status: draft\n"
+    "owners: [team-a]\n"
+    "sealed: true\n"
+    "source_path: legacy/foo/\n"
+    "---\n"
+    "\n"
+    "# Foo\n"
+    "\n"
+    "## Purpose\n"
+    "\n"
+    "Adds two numbers together for its callers.\n"
+    "\n"
+    "## Scope\n"
+    "\n"
+    "- In scope: addition.\n"
+    "- Out of scope: everything else.\n"
+    "\n"
+    "## Definitions\n"
+    "\n"
+    "None.\n"
+    "\n"
+    "## Behavior\n"
+    "\n"
+    "See `requirements/`.\n"
+    "\n"
+    "## Interfaces\n"
+    "\n"
+    "See `interface/`.\n"
+    "\n"
+    "## Data\n"
+    "\n"
+    "See `interface/data/`.\n"
+    "\n"
+    "## Acceptance criteria\n"
+    "\n"
+    "See `acceptance/`.\n"
+    "\n"
+    "## Non-functional constraints\n"
+    "\n"
+    "See `constraints.md`.\n"
+    "\n"
+    "## Open questions\n"
+    "\n"
+    "## Change log\n"
+    "\n"
+    "- Initial draft.\n"
+)
 
-# Foo Widget
+# No RFC 2119 keyword anywhere in this requirement's text.
+REQ_NO_KEYWORD = (
+    "# R-FOO-001\n"
+    "\n"
+    "**R-FOO-001** \u2014 The widget returns the sum of its two inputs.\n"
+)
 
-## Purpose
-
-Counts widgets for a caller.
-
-## Scope
-
-- In scope: counting widgets.
-- Out of scope: everything else.
-
-## Definitions
-
-None.
-
-## Behavior
-
-See `requirements/`.
-
-## Interfaces
-
-See `interface/`.
-
-## Data
-
-See `interface/data/`.
-
-## Acceptance criteria
-
-See `acceptance/`.
-
-## Non-functional constraints
-
-See `constraints.md`.
-
-## Open questions
-
-## Change log
-
-- Initial draft.
-"""
-
-# Control requirement: carries an RFC 2119 keyword.
-REQ_WITH_KEYWORD = """# R-FOO-001
-
-**R-FOO-001** \u2014 The widget counter MUST return the number of widgets held.
-"""
-
-# Requirement under test: no RFC 2119 keyword anywhere in its text.
-REQ_WITHOUT_KEYWORD = """# R-FOO-002
-
-**R-FOO-002** \u2014 The widget counter returns zero when it holds no widgets.
-"""
-
-AC_1 = """# AC-FOO-001
-
-Covers: R-FOO-001
-Kind: compiled
-
-```gherkin
-Given a counter holding 3 widgets
-When the count is read
-Then the result is 3
-```
-"""
-
-AC_2 = """# AC-FOO-002
-
-Covers: R-FOO-002
-Kind: compiled
-
-```gherkin
-Given a counter holding 0 widgets
-When the count is read
-Then the result is 0
-```
-"""
-
-CONSTRAINTS = """# Constraints
-
-- Counting completes in under 1 second, measured by a wall-clock timer.
-"""
-
-GLOSSARY = """# Glossary
-
-- **Widget** \u2014 a thing being counted.
-"""
+# Control: this requirement does use an RFC 2119 keyword.
+REQ_WITH_KEYWORD = (
+    "# R-FOO-002\n"
+    "\n"
+    "**R-FOO-002** \u2014 The widget MUST reject a non-numeric input.\n"
+)
 
 
-def _build_repo(root: Path) -> Path:
-    specs = root / "specs"
+def acceptance(ac_id, req_id):
+    return (
+        "# " + ac_id + "\n"
+        "\n"
+        "Covers: " + req_id + "\n"
+        "Kind: compiled\n"
+        "\n"
+        "```gherkin\n"
+        "Given two numbers\n"
+        "When the widget runs\n"
+        "Then it returns a result\n"
+        "```\n"
+    )
+
+
+def build_fixture(repo_root: Path) -> None:
+    specs = repo_root / "specs"
     comp = specs / "components" / "foo"
     (comp / "requirements").mkdir(parents=True)
     (comp / "acceptance").mkdir(parents=True)
     (comp / "component.md").write_text(COMPONENT_MD)
-    (comp / "requirements" / "R-FOO-001.md").write_text(REQ_WITH_KEYWORD)
-    (comp / "requirements" / "R-FOO-002.md").write_text(REQ_WITHOUT_KEYWORD)
-    (comp / "acceptance" / "AC-FOO-001.md").write_text(AC_1)
-    (comp / "acceptance" / "AC-FOO-002.md").write_text(AC_2)
-    (comp / "constraints.md").write_text(CONSTRAINTS)
-    (specs / "glossary.md").write_text(GLOSSARY)
-    return root
-
-
-def _findings(report):
-    return list(field(report, "findings"))
-
-
-def _r_lint_007_for(findings, req_stem):
-    out = []
-    for f in findings:
-        if field(f, "rule_id") != "R-LINT-007":
-            continue
-        if req_stem in str(field(f, "file")):
-            out.append(f)
-    return out
-
-
-def test_requirement_without_rfc2119_keyword_fails_r_lint_007(tmp_path):
-    repo_root = _build_repo(tmp_path)
-
-    report = spec_linter.lint(None, repo_root)
-    findings = _findings(report)
-
-    missing = _r_lint_007_for(findings, "R-FOO-002")
-    assert missing, (
-        "expected an R-LINT-007 finding for the keyword-less requirement; got: "
-        + repr([(field(f, "rule_id"), field(f, "file"), field(f, "message")) for f in findings])
-    )
-    assert any(field(f, "severity") == "fail" for f in missing), (
-        "R-LINT-007 finding must be fail-severity; got: "
-        + repr([field(f, "severity") for f in missing])
+    (comp / "requirements" / "R-FOO-001.md").write_text(REQ_NO_KEYWORD)
+    (comp / "requirements" / "R-FOO-002.md").write_text(REQ_WITH_KEYWORD)
+    (comp / "acceptance" / "AC-FOO-001.md").write_text(acceptance("AC-FOO-001", "R-FOO-001"))
+    (comp / "acceptance" / "AC-FOO-002.md").write_text(acceptance("AC-FOO-002", "R-FOO-002"))
+    (comp / "constraints.md").write_text("# Constraints\n\nNone.\n")
+    (specs / "glossary.md").write_text(
+        "# Glossary\n\n- **Widget** \u2014 the thing that adds numbers.\n"
     )
 
-    # The finding is reported against the offending requirement file.
-    fail_files = [str(field(f, "file")) for f in missing if field(f, "severity") == "fail"]
-    assert any(p.replace("\\", "/").endswith("requirements/R-FOO-002.md") for p in fail_files)
 
-    # A hard failure is counted.
-    hard = report["summary"]["hard_failures"] if isinstance(report, dict) and "summary" in report \
-        else field(report, "hard_failures")
-    assert hard >= 1
-
-    # Control: the requirement that does carry an RFC 2119 keyword (and a
-    # well-formed id matching its filename) gets no R-LINT-007 finding.
-    assert _r_lint_007_for(findings, "R-FOO-001") == []
+def _lint007(findings):
+    return [f for f in findings if field(f, "rule_id") == "R-LINT-007"]
 
 
-def test_cli_lint_reports_r_lint_007_fail_and_exits_1(tmp_path, capsys):
-    repo_root = _build_repo(tmp_path)
+def test_requirement_without_rfc2119_keyword_fails_lint(tmp_path):
+    build_fixture(tmp_path)
 
-    code = spec_linter.main(["--format=json", f"--repo-root={repo_root}"])
-    captured = capsys.readouterr()
+    report = spec_linter.lint(None, tmp_path)
+    findings = list(field(report, "findings"))
+
+    lint007 = _lint007(findings)
+    bad = [
+        f for f in lint007
+        if str(field(f, "file")).replace("\\", "/").endswith(
+            "specs/components/foo/requirements/R-FOO-001.md"
+        )
+    ]
+    assert bad, "expected an R-LINT-007 finding for R-FOO-001.md, got: " + repr(findings)
+    assert any(field(f, "severity") == "fail" for f in bad), repr(bad)
+
+    # The requirement that does use an RFC 2119 keyword draws no R-LINT-007 failure.
+    good = [
+        f for f in lint007
+        if str(field(f, "file")).replace("\\", "/").endswith(
+            "specs/components/foo/requirements/R-FOO-002.md"
+        )
+        and field(f, "severity") == "fail"
+    ]
+    assert good == [], repr(good)
+
+    assert field(report, "hard_failures") >= 1
+
+
+def test_cli_reports_r_lint_007_failure(tmp_path, capsys):
+    build_fixture(tmp_path)
+
+    code = spec_linter.main(["--format=json", "--repo-root=" + str(tmp_path)])
+    out = capsys.readouterr().out
 
     assert code == 1
-    doc = json.loads(captured.out)
-    findings = doc["findings"]
-    hits = [
+    data = json.loads(out)
+    findings = data["findings"]
+    matching = [
         f for f in findings
         if f["rule_id"] == "R-LINT-007"
-        and "R-FOO-002" in str(f["file"])
         and f["severity"] == "fail"
+        and str(f["file"]).replace("\\", "/").endswith(
+            "specs/components/foo/requirements/R-FOO-001.md"
+        )
     ]
-    assert hits, repr(findings)
-    assert doc["summary"]["hard_failures"] >= 1
+    assert matching, repr(findings)
+    assert data["summary"]["hard_failures"] >= 1

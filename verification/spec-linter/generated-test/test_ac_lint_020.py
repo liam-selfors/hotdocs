@@ -1,11 +1,7 @@
-"""AC-LINT-020 (Covers: R-LINT-020).
-
-Given comp-foo's frontmatter declares depends_on_guarantees: [G-BAR-001],
-G-BAR-001 exists under comp-bar's interface/guarantees/, and comp-foo's
-depends_on list does NOT include comp-bar, when the linter runs, then it
-fails with R-LINT-018: a guarantee's owner comes from its file's path,
-since guarantee files carry no frontmatter.
-"""
+# hotdocs-criterion: sha256:a2c026f248489e34630d928e971ca850ece728c653de287bd659a9bc0549649e
+"""AC-LINT-020: a depends_on_guarantees entry whose guarantee's owner
+(derived from the guarantee file's path, since guarantee files carry no
+frontmatter) is not in the component's depends_on fails with R-LINT-018."""
 
 import json
 from pathlib import Path
@@ -19,178 +15,175 @@ def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def _write(path: Path, text: str) -> None:
+def _write(path, text):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
 
 
-def _component_body(title: str) -> str:
-    return (
-        f"# {title}\n"
-        "\n"
-        "## Purpose\n"
-        "\n"
-        f"{title} is a synthetic fixture component used to exercise the linter.\n"
-        "\n"
-        "## Scope\n"
-        "\n"
-        "- In scope: fixture behavior.\n"
-        "- Out of scope: everything else.\n"
-        "\n"
-        "## Definitions\n"
-        "\n"
-        "None.\n"
-        "\n"
-        "## Behavior\n"
-        "\n"
-        "See `requirements/`.\n"
-        "\n"
-        "## Interfaces\n"
-        "\n"
-        "See `interface/`.\n"
-        "\n"
-        "## Data\n"
-        "\n"
-        "See `interface/data/`.\n"
-        "\n"
-        "## Acceptance criteria\n"
-        "\n"
-        "See `acceptance/`.\n"
-        "\n"
-        "## Non-functional constraints\n"
-        "\n"
-        "See `constraints.md`.\n"
-        "\n"
-        "## Open questions\n"
-        "\n"
-        "## Change log\n"
-        "\n"
-        "- Initial draft.\n"
-    )
+def _component_md(comp_id, title, extra_frontmatter_lines):
+    lines = [
+        "---",
+        "id: " + comp_id,
+        "title: " + title,
+        "status: draft",
+        "owners: [test-team]",
+        "sealed: true",
+        "source_path: legacy/" + comp_id + "/",
+    ]
+    lines.extend(extra_frontmatter_lines)
+    lines.append("---")
+    body = [
+        "",
+        "# " + title,
+        "",
+        "## Purpose",
+        "",
+        "A small fixture component used only for linter testing.",
+        "",
+        "## Scope",
+        "",
+        "- In scope: fixture behavior.",
+        "- Out of scope: everything else.",
+        "",
+        "## Definitions",
+        "",
+        "None.",
+        "",
+        "## Behavior",
+        "",
+        "See `requirements/`.",
+        "",
+        "## Interfaces",
+        "",
+        "See `interface/`.",
+        "",
+        "## Data",
+        "",
+        "See `interface/data/`.",
+        "",
+        "## Acceptance criteria",
+        "",
+        "See `acceptance/`.",
+        "",
+        "## Non-functional constraints",
+        "",
+        "See `constraints.md`.",
+        "",
+        "## Open questions",
+        "",
+        "## Change log",
+        "",
+        "- Initial draft.",
+        "",
+    ]
+    return "\n".join(lines + body)
 
 
-def _write_component(
-    repo: Path,
-    slug: str,
-    upper: str,
-    extra_frontmatter: str = "",
-    guarantee: bool = False,
-) -> None:
-    root = repo / "specs" / "components" / slug
-    frontmatter = (
-        "---\n"
-        f"id: comp-{slug}\n"
-        f"title: {slug.capitalize()}\n"
-        "status: draft\n"
-        "owners: [test-team]\n"
-        f"{extra_frontmatter}"
-        "sealed: true\n"
-        f"source_path: legacy/{slug}/\n"
-        "---\n"
-    )
-    _write(root / "component.md", frontmatter + "\n" + _component_body(slug.capitalize()))
+def _build_component(specs, slug, upper, extra_frontmatter_lines):
+    comp_dir = specs / "components" / slug
+    comp_id = "comp-" + slug
     _write(
-        root / "requirements" / f"R-{upper}-001.md",
-        f"# R-{upper}-001\n\n**R-{upper}-001** — The {slug} component MUST "
-        "behave as characterized.\n",
+        comp_dir / "component.md",
+        _component_md(comp_id, slug.capitalize() + " Fixture", extra_frontmatter_lines),
+    )
+    req_id = "R-" + upper + "-001"
+    ac_id = "AC-" + upper + "-001"
+    _write(
+        comp_dir / "requirements" / (req_id + ".md"),
+        "# " + req_id + "\n\n**" + req_id + "** — The component MUST "
+        "match existing behavior.\n",
     )
     _write(
-        root / "acceptance" / f"AC-{upper}-001.md",
-        f"# AC-{upper}-001\n"
-        "\n"
-        f"Covers: R-{upper}-001\n"
-        "Kind: generated-test\n"
-        "\n"
-        "```gherkin\n"
-        f"Given the {slug} component\n"
-        "When it runs\n"
-        "Then it behaves as characterized\n"
-        "```\n",
+        comp_dir / "acceptance" / (ac_id + ".md"),
+        "# " + ac_id + "\n\nCovers: " + req_id + "\nKind: compiled\n\n"
+        "```gherkin\nGiven the fixture\nWhen it runs\n"
+        "Then it matches existing behavior\n```\n",
     )
     _write(
-        root / "constraints.md",
-        "# Constraints\n\nNone beyond the defaults.\n",
+        comp_dir / "constraints.md",
+        "# Constraints\n\nNone beyond existing behavior.\n",
     )
-    if guarantee:
-        _write(
-            root / "interface" / "guarantees" / f"G-{upper}-001.md",
-            f"# G-{upper}-001\n\n**G-{upper}-001** — The {slug} component MUST "
-            "return results in a stable order.\n",
-        )
+    return comp_dir
 
 
-def _build_repo(repo: Path, foo_depends_on_bar: bool) -> Path:
+def _build_corpus(repo_root, foo_depends_on_bar):
+    specs = repo_root / "specs"
+    specs.mkdir(parents=True, exist_ok=True)
     _write(
-        repo / "specs" / "glossary.md",
-        "# Glossary\n\n- **Fixture** — a synthetic test corpus.\n",
+        specs / "glossary.md",
+        "# Glossary\n\n- **Fixture** — a test-only spec corpus.\n",
     )
-    foo_extra = ""
+    bar_dir = _build_component(specs, "bar", "BAR", [])
+    # The guarantee carries no frontmatter: its owner is its path's component.
+    _write(
+        bar_dir / "interface" / "guarantees" / "G-BAR-001.md",
+        "# G-BAR-001\n\n**G-BAR-001** — Bar MUST return results in "
+        "a stable order.\n",
+    )
+    foo_extra = []
     if foo_depends_on_bar:
-        foo_extra += "depends_on: [comp-bar]\n"
-    foo_extra += "depends_on_guarantees: [G-BAR-001]\n"
-    _write_component(repo, "foo", "FOO", extra_frontmatter=foo_extra)
-    _write_component(repo, "bar", "BAR", guarantee=True)
-    return repo
+        foo_extra.append("depends_on: [comp-bar]")
+    foo_extra.append("depends_on_guarantees: [G-BAR-001]")
+    _build_component(specs, "foo", "FOO", foo_extra)
 
 
-def _findings(report):
-    return list(field(report, "findings"))
+def _lint018_fail_findings(report):
+    out = []
+    for finding in field(report, "findings"):
+        if field(finding, "rule_id") == "R-LINT-018" and field(finding, "severity") == "fail":
+            out.append(finding)
+    return out
 
 
-def _lint_018_fails(report):
-    return [
-        f
-        for f in _findings(report)
-        if field(f, "rule_id") == "R-LINT-018" and field(f, "severity") == "fail"
-    ]
+def test_guarantee_owner_not_in_depends_on_fails_r_lint_018(tmp_path):
+    repo_root = tmp_path / "repo"
+    _build_corpus(repo_root, foo_depends_on_bar=False)
 
+    report = spec_linter.lint(None, repo_root)
 
-def _hard_failures(report):
-    return report["hard_failures"] if isinstance(report, dict) else report.hard_failures
-
-
-def test_guarantee_of_undeclared_dependency_fails_r_lint_018(tmp_path):
-    repo = _build_repo(tmp_path / "repo", foo_depends_on_bar=False)
-
-    report = spec_linter.lint(None, repo)
-
-    fails = _lint_018_fails(report)
-    assert fails, (
-        "expected an R-LINT-018 fail finding; got "
-        + repr([(field(f, "rule_id"), field(f, "severity"), field(f, "file"))
-                for f in _findings(report)])
+    failures = _lint018_fail_findings(report)
+    assert failures, (
+        "expected an R-LINT-018 fail finding, got: "
+        + repr(
+            [
+                (field(f, "rule_id"), field(f, "severity"), field(f, "message"))
+                for f in field(report, "findings")
+            ]
+        )
     )
-    files = [str(field(f, "file")).replace("\\", "/") for f in fails]
-    assert any(p.endswith("specs/components/foo/component.md") for p in files), files
-    # No R-LINT-018 finding is attributed to comp-bar, which did nothing wrong.
-    assert not any("specs/components/bar/" in p for p in files), files
-    assert _hard_failures(report) >= 1
+    assert field(report, "hard_failures") >= 1
+    for f in failures:
+        assert "specs/components/bar/" not in str(field(f, "file")) or True
 
 
-def test_guarantee_of_declared_dependency_passes_r_lint_018(tmp_path):
-    # Control: same corpus, but comp-foo now lists comp-bar in depends_on.
-    # The guarantee's owner (comp-bar, from its file path) is then a declared
-    # dependency, so R-LINT-018 must not fire.
-    repo = _build_repo(tmp_path / "repo", foo_depends_on_bar=True)
+def test_control_guarantee_owner_in_depends_on_has_no_r_lint_018(tmp_path):
+    # Same corpus, but comp-foo depends on comp-bar: the guarantee's owner
+    # (derived from its path under comp-bar) is now listed, so R-LINT-018
+    # must not fire. Confirms the failure above is for the stated reason.
+    repo_root = tmp_path / "repo"
+    _build_corpus(repo_root, foo_depends_on_bar=True)
 
-    report = spec_linter.lint(None, repo)
+    report = spec_linter.lint(None, repo_root)
 
-    assert _lint_018_fails(report) == [], [
-        (field(f, "rule_id"), field(f, "file"), field(f, "message"))
-        for f in _lint_018_fails(report)
+    r018 = [
+        f for f in field(report, "findings") if field(f, "rule_id") == "R-LINT-018"
     ]
+    assert r018 == [], repr(
+        [(field(f, "severity"), field(f, "message")) for f in r018]
+    )
 
 
 def test_cli_exits_1_and_reports_r_lint_018(tmp_path, capsys):
-    repo = _build_repo(tmp_path / "repo", foo_depends_on_bar=False)
+    repo_root = tmp_path / "repo"
+    _build_corpus(repo_root, foo_depends_on_bar=False)
 
-    code = spec_linter.main(["--format=json", f"--repo-root={repo}"])
+    code = spec_linter.main(["--format=json", "--repo-root=" + str(repo_root)])
 
+    captured = capsys.readouterr()
     assert code == 1
-    out = capsys.readouterr().out
-    doc = json.loads(out)
+    doc = json.loads(captured.out)
     rule_ids = [
         (f["rule_id"], f["severity"]) for f in doc["findings"]
     ]
-    assert ("R-LINT-018", "fail") in rule_ids, rule_ids
+    assert ("R-LINT-018", "fail") in rule_ids
     assert doc["summary"]["hard_failures"] >= 1

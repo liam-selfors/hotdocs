@@ -1,8 +1,6 @@
 # hotdocs-criterion: sha256:c8f08b9b1081e70e298efe48bba3a8bb93f2f0f97d870a0967ad0f01fc620fd7
-"""AC-LINT-035: lint limits its own and its checkers' findings to `paths`.
-
-Covers: R-LINT-033
-"""
+"""AC-LINT-035 (covers R-LINT-033): lint's findings, including those merged
+in from citation-checker and size-checker, are limited to `paths`."""
 
 from pathlib import Path
 
@@ -13,14 +11,19 @@ def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def _component_md(slug):
+def _write(path, text):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+
+
+def _component_md(slug, missing_dep):
     return (
         "---\n"
         + "id: comp-" + slug + "\n"
         + "title: Component " + slug.upper() + "\n"
         + "status: draft\n"
         + "owners: [test-team]\n"
-        + "depends_on: [comp-does-not-exist-" + slug + "]\n"
+        + "depends_on: [" + missing_dep + "]\n"
         + "sealed: true\n"
         + "source_path: legacy/" + slug + "/\n"
         + "---\n"
@@ -29,12 +32,12 @@ def _component_md(slug):
         + "\n"
         + "## Purpose\n"
         + "\n"
-        + "A small fixture component used to exercise path scoping.\n"
+        + "A small fixture component used to exercise the linter.\n"
         + "\n"
         + "## Scope\n"
         + "\n"
-        + "- In scope: nothing.\n"
-        + "- Out of scope: everything.\n"
+        + "- In scope: fixture behavior.\n"
+        + "- Out of scope: everything else.\n"
         + "\n"
         + "## Definitions\n"
         + "\n"
@@ -68,71 +71,88 @@ def _component_md(slug):
     )
 
 
-def _build_corpus(repo_root):
-    specs = repo_root / "specs"
-    (specs / "components").mkdir(parents=True)
-    (specs / "glossary.md").write_text(
-        "# Glossary\n\n- **Fixture term** — a term used only by this test.\n",
-        encoding="utf-8",
+def _build_component(repo_root, slug, missing_dep):
+    upper = slug.upper()
+    base = repo_root / "specs" / "components" / slug
+    _write(base / "component.md", _component_md(slug, missing_dep))
+    req_id = "R-" + upper + "-001"
+    ac_id = "AC-" + upper + "-001"
+    _write(
+        base / "requirements" / (req_id + ".md"),
+        "# " + req_id + "\n\n**" + req_id + "** — The component MUST match "
+        "existing behavior.\n",
     )
-    for slug in ("a", "b"):
-        comp = specs / "components" / slug
-        comp.mkdir(parents=True)
-        (comp / "component.md").write_text(_component_md(slug), encoding="utf-8")
-        (comp / "constraints.md").write_text(
-            "# Constraints\n\nNone.\n", encoding="utf-8"
-        )
+    _write(
+        base / "acceptance" / (ac_id + ".md"),
+        "# " + ac_id + "\n\nCovers: " + req_id + "\nKind: compiled\n\n"
+        "```gherkin\nGiven the component\nWhen it runs\n"
+        "Then it matches existing behavior\n```\n",
+    )
+    _write(
+        base / "constraints.md",
+        "# Constraints\n\nNone beyond the defaults.\n",
+    )
 
 
-def _rel(file_value, repo_root):
-    text = str(file_value).replace("\\", "/")
-    p = Path(text)
-    if p.is_absolute():
-        try:
-            text = p.resolve().relative_to(repo_root.resolve()).as_posix()
-        except ValueError:
-            text = p.as_posix()
-    if text.startswith("./"):
-        text = text[2:]
-    return text
+def _build_fixture(repo_root):
+    _write(
+        repo_root / "specs" / "glossary.md",
+        "# Glossary\n\n- **Fixture** — a synthetic corpus used by tests.\n",
+    )
+    _build_component(repo_root, "a", "comp-does-not-exist-a")
+    _build_component(repo_root, "b", "comp-does-not-exist-b")
 
 
-def test_ac_lint_035_findings_limited_to_paths(tmp_path, monkeypatch):
+def _norm(file_value):
+    return str(file_value).replace("\\", "/")
+
+
+def test_lint_findings_limited_to_directory_path(tmp_path, monkeypatch):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
-    _build_corpus(repo_root)
+    _build_fixture(repo_root)
     monkeypatch.chdir(repo_root)
 
-    # Directory path: everything must be under specs/components/a/.
-    report_a = spec_linter.lint([Path("specs/components/a")], repo_root)
-    findings_a = list(field(report_a, "findings"))
-    files_a = [_rel(field(f, "file"), repo_root) for f in findings_a]
-    for f, rel in zip(findings_a, files_a):
-        assert rel.startswith("specs/components/a/"), (
+    report = spec_linter.lint([Path("specs/components/a")], repo_root)
+    findings = list(field(report, "findings"))
+
+    assert findings, "expected at least one finding for component a"
+    for f in findings:
+        file_value = _norm(field(f, "file"))
+        assert file_value.startswith("specs/components/a/"), (
             "finding outside specs/components/a/: "
-            + repr((field(f, "rule_id"), rel, field(f, "message")))
+            + repr(file_value) + " " + repr(field(f, "rule_id"))
         )
+
     assert any(
         field(f, "rule_id") == "R-LINT-003"
-        and rel == "specs/components/a/component.md"
-        for f, rel in zip(findings_a, files_a)
-    ), "expected an R-LINT-003 finding for a/component.md, got " + repr(
-        [(field(f, "rule_id"), rel) for f, rel in zip(findings_a, files_a)]
+        and _norm(field(f, "file")) == "specs/components/a/component.md"
+        for f in findings
+    ), "no R-LINT-003 finding for specs/components/a/component.md: " + repr(
+        [(field(f, "rule_id"), field(f, "file")) for f in findings]
     )
 
-    # File path: everything must be exactly specs/components/b/component.md.
-    report_b = spec_linter.lint(
+
+def test_lint_findings_limited_to_file_path(tmp_path, monkeypatch):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    _build_fixture(repo_root)
+    monkeypatch.chdir(repo_root)
+
+    report = spec_linter.lint(
         [Path("specs/components/b/component.md")], repo_root
     )
-    findings_b = list(field(report_b, "findings"))
-    files_b = [_rel(field(f, "file"), repo_root) for f in findings_b]
-    for f, rel in zip(findings_b, files_b):
-        assert rel == "specs/components/b/component.md", (
+    findings = list(field(report, "findings"))
+
+    assert findings, "expected at least one finding for component b"
+    for f in findings:
+        file_value = _norm(field(f, "file"))
+        assert file_value == "specs/components/b/component.md", (
             "finding outside specs/components/b/component.md: "
-            + repr((field(f, "rule_id"), rel, field(f, "message")))
+            + repr(file_value) + " " + repr(field(f, "rule_id"))
         )
-    assert any(
-        field(f, "rule_id") == "R-LINT-003" for f in findings_b
-    ), "expected an R-LINT-003 finding for b/component.md, got " + repr(
-        [(field(f, "rule_id"), rel) for f, rel in zip(findings_b, files_b)]
+
+    assert any(field(f, "rule_id") == "R-LINT-003" for f in findings), (
+        "no R-LINT-003 finding among: "
+        + repr([(field(f, "rule_id"), field(f, "file")) for f in findings])
     )

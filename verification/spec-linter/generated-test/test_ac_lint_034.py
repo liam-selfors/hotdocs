@@ -1,5 +1,6 @@
 # hotdocs-criterion: sha256:0a86de084d8afde3a45af667001ce44b05c18c457dc7087bc022375a1374daef
 import json
+from pathlib import Path
 
 import spec_linter
 
@@ -8,11 +9,15 @@ def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def as_json(value):
-    out = value.to_json() if hasattr(value, "to_json") else value
-    if isinstance(out, (str, bytes)):
-        out = json.loads(out)
-    return out
+def sev(value):
+    s = field(value, "severity")
+    return getattr(s, "value", s)
+
+
+def as_obj(j):
+    if isinstance(j, (str, bytes)):
+        return json.loads(j)
+    return j
 
 
 def write(path, text):
@@ -20,41 +25,25 @@ def write(path, text):
     path.write_text(text, encoding="utf-8")
 
 
-GLOSSARY_DEF = (
-    "a reusable unit of the frobnication pipeline that holds exactly one gizmo."
-)
-LOCAL_DEF = (
-    "within this component, a cached record of one earlier lint run, "
-    "stored on disk between invocations."
-)
-
-
 def build_corpus(root):
     specs = root / "specs"
     write(
         specs / "glossary.md",
-        "# Glossary\n\n"
-        "Canonical vocabulary.\n\n"
-        "- **Widget** \u2014 " + GLOSSARY_DEF + "\n",
+        "# Glossary\n"
+        "\n"
+        "Canonical vocabulary for this fixture corpus.\n"
+        "\n"
+        "- **Widget** \u2014 a reusable rendering unit composed of nested frames, "
+        "declared once in the layout registry and instantiated by reference.\n",
     )
-    write(
-        specs / "decisions" / "D1.md",
-        "---\n"
-        "id: D1\n"
-        "title: Foo exists\n"
-        "status: draft\n"
-        "owners: [team-a]\n"
-        "---\n\n"
-        "# D1: Foo exists\n\n"
-        "## Context\n\nA fixture needs a decision to cite.\n\n"
-        "## Decision\n\nFoo exists as a sealed fixture component.\n",
+
+    comp = specs / "components" / "foo"
+    purpose_sentence = (
+        "This component turns layout requests into rendered frames for the dashboard. "
     )
-    purpose = (
-        "This component exists to exercise the linter fixture paths carefully. "
-        * 10
-    ).strip()
+    purpose = (purpose_sentence * 9).strip()  # 99 words: above warn 80, below fail 150
     write(
-        specs / "components" / "foo" / "component.md",
+        comp / "component.md",
         "---\n"
         "id: comp-foo\n"
         "title: Foo\n"
@@ -62,119 +51,211 @@ def build_corpus(root):
         "owners: [team-a]\n"
         "sealed: true\n"
         "source_path: legacy/foo/\n"
-        "---\n\n"
-        "# Foo\n\n"
-        "## Purpose\n\n" + purpose + "\n\n"
-        "## Rationale\n\nSee D1.\n\n"
-        "## Scope\n\n- In scope: fixture behavior.\n- Out of scope: everything else.\n\n"
-        "## Definitions\n\n"
-        "- **Widget** \u2014 " + LOCAL_DEF + "\n\n"
-        "## Behavior\n\nSee `requirements/`.\n\n"
-        "## Interfaces\n\nSee `interface/`.\n\n"
-        "## Data\n\nSee `interface/data/`.\n\n"
-        "## Acceptance criteria\n\nSee `acceptance/`.\n\n"
-        "## Non-functional constraints\n\nSee `constraints.md`.\n\n"
-        "## Open questions\n\n"
-        "## Change log\n\n- Initial draft.\n",
+        "---\n"
+        "\n"
+        "# Foo\n"
+        "\n"
+        "## Purpose\n"
+        "\n"
+        + purpose
+        + "\n"
+        "\n"
+        "## Scope\n"
+        "\n"
+        "- In scope: rendering frames for layout requests.\n"
+        "- Out of scope: persisting layouts.\n"
+        "\n"
+        "## Definitions\n"
+        "\n"
+        "- **Widget** \u2014 here, also any clickable toolbar button shown "
+        "beside the search box.\n"
+        "\n"
+        "## Behavior\n"
+        "\n"
+        "See `requirements/`.\n"
+        "\n"
+        "## Interfaces\n"
+        "\n"
+        "See `interface/`.\n"
+        "\n"
+        "## Data\n"
+        "\n"
+        "See `interface/data/`.\n"
+        "\n"
+        "## Acceptance criteria\n"
+        "\n"
+        "See `acceptance/`.\n"
+        "\n"
+        "## Non-functional constraints\n"
+        "\n"
+        "See `constraints.md`.\n"
+        "\n"
+        "## Open questions\n"
+        "\n"
+        "## Change log\n"
+        "\n"
+        "- Initial draft.\n",
+    )
+
+    padding_sentence = (
+        "Each frame is produced from the request alone and carries no state between calls. "
     )
     write(
-        specs / "components" / "foo" / "requirements" / "R-FOO-001.md",
-        "# R-FOO-001\n\n"
-        "**R-FOO-001** \u2014 `foo()` MUST return `None` (D1).\n",
+        comp / "requirements" / "R-FOO-001.md",
+        "# R-FOO-001\n"
+        "\n"
+        "**R-FOO-001** \u2014 The renderer MUST emit exactly one frame per layout request.\n"
+        "\n"
+        + (padding_sentence * 20).strip()
+        + "\n",
     )
     write(
-        specs / "components" / "foo" / "interface" / "library.md",
-        "# Library\n\n```\nfoo() -> None\n```\n\nReturns nothing.\n",
-    )
-    write(
-        specs / "components" / "foo" / "interface" / "data" / "Thing.md",
-        "# `Thing`\n\nA plain marker type with no fields.\n",
-    )
-    padding = ("This sentence pads the criterion text for size purposes. " * 40).strip()
-    write(
-        specs / "components" / "foo" / "acceptance" / "AC-FOO-001.md",
-        "# AC-FOO-001\n\n"
+        comp / "acceptance" / "AC-FOO-001.md",
+        "# AC-FOO-001\n"
+        "\n"
         "Covers: R-FOO-001\n"
-        "Kind: generated-test\n\n"
+        "Kind: compiled\n"
+        "\n"
         "```gherkin\n"
-        "Given the foo module\n"
-        "When foo() is called\n"
-        "Then it returns None\n"
-        "```\n\n" + padding + "\n",
+        "Given one layout request\n"
+        "When the renderer runs\n"
+        "Then exactly one frame is emitted\n"
+        "```\n",
     )
     write(
-        specs / "components" / "foo" / "constraints.md",
-        "# Constraints\n\n"
-        "- `foo()` returns within 10 ms, measured by timing 100 calls.\n",
+        comp / "interface" / "library.md",
+        "# Library\n"
+        "\n"
+        "```\n"
+        "render(request: dict) -> FooResult\n"
+        "```\n"
+        "\n"
+        "Renders one frame for one layout request.\n",
+    )
+    write(
+        comp / "interface" / "data" / "FooResult.md",
+        "# `FooResult`\n"
+        "\n"
+        "```json\n"
+        "{\"frame\": \"string\"}\n"
+        "```\n",
+    )
+    write(
+        comp / "constraints.md",
+        "# Constraints\n"
+        "\n"
+        "- Rendering one frame completes within 50 ms, measured by a timing benchmark.\n",
     )
 
 
-def by_severity(report, severity):
-    return [f for f in field(report, "findings") if field(f, "severity") == severity]
-
-
-def lint015(report):
+def lint_findings_015(report):
     return [f for f in field(report, "findings") if field(f, "rule_id") == "R-LINT-015"]
 
 
-def test_ac_lint_034(tmp_path):
+def counts(report):
+    findings = field(report, "findings")
+    return (
+        sum(1 for f in findings if sev(f) == "fail"),
+        sum(1 for f in findings if sev(f) == "warn"),
+        sum(1 for f in findings if sev(f) == "skipped"),
+    )
+
+
+def assert_summary_consistent(report):
+    n_fail, n_warn, n_skip = counts(report)
+    assert field(report, "hard_failures") == n_fail
+    assert field(report, "warnings") == n_warn
+    assert field(report, "skipped") == n_skip
+    summary = as_obj(report.to_json())["summary"]
+    assert summary["hard_failures"] == n_fail
+    assert summary["warnings"] == n_warn
+    assert summary["skipped"] == n_skip
+
+
+def test_ac_lint_034_no_judge_skips_and_counts(tmp_path):
     build_corpus(tmp_path)
-
-    # --- no judge ---
     report = spec_linter.lint(None, tmp_path)
-    fails = by_severity(report, "fail")
-    warns = by_severity(report, "warn")
-    skips = by_severity(report, "skipped")
-    assert fails == [], [field(f, "message") for f in fails]
-    assert len(warns) >= 1
 
-    entries = lint015(report)
-    assert len(entries) == 1
-    assert field(entries[0], "severity") == "skipped"
+    # Preconditions: no fail-severity finding, at least one warn.
+    assert field(report, "hard_failures") == 0, [
+        (field(f, "rule_id"), field(f, "message")) for f in field(report, "findings")
+    ]
+    n_fail, n_warn, n_skip = counts(report)
+    assert n_fail == 0
+    assert n_warn >= 1
 
-    assert field(report, "hard_failures") == len(fails)
-    assert field(report, "warnings") == len(warns)
-    assert field(report, "skipped") == len(skips)
+    r15 = lint_findings_015(report)
+    assert len(r15) == 1
+    finding = r15[0]
+    assert sev(finding) == "skipped"
+    assert str(field(finding, "file")).replace("\\", "/").endswith(
+        "specs/components/foo/component.md"
+    )
+    assert "rationale" not in as_obj(finding.to_json())
 
-    summary = as_json(report)["summary"]
-    assert summary["hard_failures"] == len(fails)
-    assert summary["warnings"] == len(warns)
-    assert summary["skipped"] == len(skips)
+    assert n_skip >= 1
+    assert_summary_consistent(report)
 
-    # --- strict ---
-    strict_report = spec_linter.lint(None, tmp_path, strict=True)
-    assert field(strict_report, "hard_failures") == len(warns)
 
-    # --- judge: conflict ---
+def test_ac_lint_034_strict_counts_warns_as_failures(tmp_path):
+    build_corpus(tmp_path)
+    plain = spec_linter.lint(None, tmp_path)
+    assert field(plain, "hard_failures") == 0
+    _, n_warn, _ = counts(plain)
+    assert n_warn >= 1
+
+    strict = spec_linter.lint(None, tmp_path, strict=True)
+    assert field(strict, "hard_failures") == n_warn
+
+
+def test_ac_lint_034_judge_outcomes(tmp_path):
+    build_corpus(tmp_path)
+    precheck = spec_linter.lint(None, tmp_path)
+    assert field(precheck, "hard_failures") == 0
+
     calls = []
 
-    def judge_conflict(term, local_text, glossary_text):
-        calls.append(term)
-        return (True, "contradicts the glossary")
+    def make_judge(result):
+        def judge(term, local_text, glossary_text):
+            calls.append((term, local_text, glossary_text))
+            return result
+        return judge
 
-    r1 = spec_linter.lint(None, tmp_path, judge=judge_conflict)
-    assert any("widget" in str(t).lower() for t in calls)
-    e1 = lint015(r1)
-    assert len(e1) == 1
-    assert field(e1[0], "severity") == "fail"
-    j1 = as_json(e1[0])
-    assert j1["rationale"] == "contradicts the glossary"
-    assert field(r1, "hard_failures") == len(by_severity(r1, "fail"))
+    # 1. Conflict -> fail with rationale.
+    report = spec_linter.lint(
+        None, tmp_path, judge=make_judge((True, "contradicts the glossary"))
+    )
+    r15 = lint_findings_015(report)
+    assert len(r15) == 1
+    finding = r15[0]
+    assert sev(finding) == "fail"
+    fj = as_obj(finding.to_json())
+    assert "rationale" in fj
+    rationale = fj["rationale"]
+    rtext = rationale if isinstance(rationale, str) else json.dumps(rationale)
+    assert "contradicts the glossary" in rtext
+    assert field(report, "hard_failures") >= 1
+    assert_summary_consistent(report)
 
-    # --- judge: consistent ---
-    def judge_ok(term, local_text, glossary_text):
-        return (False, "consistent")
+    assert calls, "judge was never called"
+    assert any("widget" in str(c[0]).lower() for c in calls)
 
-    r2 = spec_linter.lint(None, tmp_path, judge=judge_ok)
-    assert lint015(r2) == []
+    # 2. Consistent -> no R-LINT-015 finding.
+    calls.clear()
+    report = spec_linter.lint(None, tmp_path, judge=make_judge((False, "consistent")))
+    assert lint_findings_015(report) == []
+    assert calls
+    assert field(report, "hard_failures") == 0
+    assert_summary_consistent(report)
 
-    # --- judge: could not judge ---
-    def judge_none(term, local_text, glossary_text):
-        return None
-
-    r3 = spec_linter.lint(None, tmp_path, judge=judge_none)
-    e3 = lint015(r3)
-    assert len(e3) == 1
-    assert field(e3[0], "severity") == "skipped"
-    j3 = as_json(e3[0])
-    assert "rationale" not in j3
+    # 3. Judge could not judge -> skipped, no rationale key.
+    calls.clear()
+    report = spec_linter.lint(None, tmp_path, judge=make_judge(None))
+    r15 = lint_findings_015(report)
+    assert len(r15) == 1
+    finding = r15[0]
+    assert sev(finding) == "skipped"
+    assert "rationale" not in as_obj(finding.to_json())
+    assert calls
+    assert field(report, "hard_failures") == 0
+    assert_summary_consistent(report)

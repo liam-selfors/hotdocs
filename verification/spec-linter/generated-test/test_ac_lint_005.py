@@ -1,5 +1,6 @@
+# hotdocs-criterion: sha256:e5e7f939e39f3ae739e713bd43abb4e8ca74ec5286ba491dc2df7c1db168f42b
 """AC-LINT-005: a sealed component with no source_path gets a fail-severity
-finding for rule R-LINT-005."""
+R-LINT-005 finding."""
 
 import json
 from pathlib import Path
@@ -11,145 +12,152 @@ def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-COMPONENT_BODY = """
-# Foo
-
-## Purpose
-
-Foo does a small, well-defined thing for testing the linter.
-
-## Scope
-
-- In scope: the foo behavior.
-- Out of scope: everything else.
-
-## Definitions
-
-None.
-
-## Behavior
-
-See `requirements/`.
-
-## Interfaces
-
-See `interface/`.
-
-## Data
-
-See `interface/data/`.
-
-## Acceptance criteria
-
-See `acceptance/`.
-
-## Non-functional constraints
-
-See `constraints.md`.
-
-## Open questions
-
-## Change log
-
-- Initial draft.
-"""
-
-
-def _write(path: Path, text: str) -> None:
+def _write(path, text):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
 
 
-def _build_repo(root: Path, with_source_path: bool) -> Path:
-    specs = root / "specs"
-    comp = specs / "components" / "foo"
-    fm = [
-        "---",
-        "id: comp-foo",
-        "title: Foo",
-        "status: draft",
-        "owners: [test-team]",
-        "sealed: true",
-    ]
-    if with_source_path:
-        fm.append("source_path: legacy/foo/")
-        (root / "legacy" / "foo").mkdir(parents=True, exist_ok=True)
-    fm.append("---")
-    _write(comp / "component.md", "\n".join(fm) + "\n" + COMPONENT_BODY)
+def _component_md(comp_id, title, extra_frontmatter):
+    return (
+        "---\n"
+        "id: " + comp_id + "\n"
+        "title: " + title + "\n"
+        "status: draft\n"
+        "owners: [test-team]\n"
+        + extra_frontmatter
+        + "---\n"
+        "\n"
+        "# " + title + "\n"
+        "\n"
+        "## Purpose\n"
+        "\n"
+        "Matches existing behavior; do not regenerate.\n"
+        "\n"
+        "## Scope\n"
+        "\n"
+        "- In scope: existing behavior.\n"
+        "- Out of scope: everything else.\n"
+        "\n"
+        "## Definitions\n"
+        "\n"
+        "None.\n"
+        "\n"
+        "## Behavior\n"
+        "\n"
+        "See `requirements/`.\n"
+        "\n"
+        "## Interfaces\n"
+        "\n"
+        "See `interface/`.\n"
+        "\n"
+        "## Data\n"
+        "\n"
+        "See `interface/data/`.\n"
+        "\n"
+        "## Acceptance criteria\n"
+        "\n"
+        "See `acceptance/`.\n"
+        "\n"
+        "## Non-functional constraints\n"
+        "\n"
+        "See `constraints.md`.\n"
+        "\n"
+        "## Open questions\n"
+        "\n"
+        "## Change log\n"
+        "\n"
+        "- Initial draft.\n"
+    )
+
+
+def _make_component(repo_root, slug, upper, extra_frontmatter):
+    base = repo_root / "specs" / "components" / slug
     _write(
-        comp / "requirements" / "R-FOO-001.md",
-        "# R-FOO-001\n\n**R-FOO-001** — Foo MUST match existing behavior.\n",
+        base / "component.md",
+        _component_md("comp-" + slug, slug.capitalize() + " Component", extra_frontmatter),
+    )
+    req_id = "R-" + upper + "-001"
+    ac_id = "AC-" + upper + "-001"
+    _write(
+        base / "requirements" / (req_id + ".md"),
+        "# " + req_id + "\n\n**" + req_id + "** — The component MUST match existing behavior.\n",
     )
     _write(
-        comp / "acceptance" / "AC-FOO-001.md",
-        "# AC-FOO-001\n\nCovers: R-FOO-001\nKind: generated-test\n\n"
-        "```gherkin\nGiven foo\nWhen foo runs\nThen foo matches existing behavior\n```\n",
+        base / "acceptance" / (ac_id + ".md"),
+        "# " + ac_id + "\n"
+        "\n"
+        "Covers: " + req_id + "\n"
+        "Kind: compiled\n"
+        "\n"
+        "```gherkin\n"
+        "Given the existing code\n"
+        "When it runs\n"
+        "Then it matches existing behavior\n"
+        "```\n",
     )
     _write(
-        comp / "constraints.md",
-        "# Constraints\n\nNone beyond matching existing behavior.\n",
+        base / "constraints.md",
+        "# Constraints\n\nNone beyond existing behavior.\n",
     )
+
+
+def _build_fixture(repo_root):
+    (repo_root / "specs").mkdir(parents=True, exist_ok=True)
     _write(
-        specs / "glossary.md",
-        "# Glossary\n\n- **Foo** — a test term.\n",
+        repo_root / "specs" / "glossary.md",
+        "# Glossary\n\n- **Widget** — a thing used in tests.\n",
     )
-    return root
+    # The component under test: sealed: true, no source_path.
+    _make_component(repo_root, "foo", "FOO", "sealed: true\n")
+    # A control: sealed: true with a source_path, which R-LINT-005 accepts.
+    _make_component(repo_root, "bar", "BAR", "sealed: true\nsource_path: legacy/bar/\n")
 
 
-def _lint_findings(report):
-    return list(field(report, "findings"))
+FOO_FILE = "specs/components/foo/component.md"
+BAR_FILE = "specs/components/bar/component.md"
 
 
-def _r005_fails(findings):
-    return [
-        f
-        for f in findings
-        if field(f, "rule_id") == "R-LINT-005" and field(f, "severity") == "fail"
-    ]
+def _norm(p):
+    return str(p).replace("\\", "/")
 
 
-def test_sealed_without_source_path_fails_r_lint_005(tmp_path):
-    repo_root = _build_repo(tmp_path / "repo", with_source_path=False)
+def test_lint_reports_fail_for_sealed_without_source_path(tmp_path):
+    repo_root = tmp_path / "repo"
+    _build_fixture(repo_root)
 
     report = spec_linter.lint(None, repo_root)
+    findings = list(field(report, "findings"))
 
-    findings = _lint_findings(report)
-    hits = _r005_fails(findings)
-    assert hits, (
-        "expected a fail-severity R-LINT-005 finding, got: "
-        + repr([(field(f, "rule_id"), field(f, "severity")) for f in findings])
+    r005 = [f for f in findings if field(f, "rule_id") == "R-LINT-005"]
+    foo_r005 = [f for f in r005 if _norm(field(f, "file")).endswith(FOO_FILE)]
+
+    assert foo_r005, (
+        "expected an R-LINT-005 finding for " + FOO_FILE + ", got: " + repr(findings)
     )
-    hard = report["hard_failures"] if isinstance(report, dict) else report.hard_failures
-    assert hard >= 1
+    assert any(field(f, "severity") == "fail" for f in foo_r005), repr(foo_r005)
+
+    # The correctly-sealed control component must not trigger R-LINT-005.
+    bar_r005 = [f for f in r005 if _norm(field(f, "file")).endswith(BAR_FILE)]
+    assert bar_r005 == [], repr(bar_r005)
+
+    assert field(report, "hard_failures") >= 1
 
 
-def test_sealed_with_source_path_has_no_r_lint_005_failure(tmp_path):
-    repo_root = _build_repo(tmp_path / "repo", with_source_path=True)
+def test_cli_lint_json_reports_fail_for_sealed_without_source_path(tmp_path, capsys):
+    repo_root = tmp_path / "repo"
+    _build_fixture(repo_root)
 
-    report = spec_linter.lint(None, repo_root)
-
-    findings = _lint_findings(report)
-    assert not _r005_fails(findings), (
-        "unexpected R-LINT-005 failure for sealed component carrying source_path: "
-        + repr([field(f, "message") for f in _r005_fails(findings)])
-    )
-
-
-def test_cli_reports_r_lint_005_fail_for_sealed_without_source_path(
-    tmp_path, capsys, monkeypatch
-):
-    repo_root = _build_repo(tmp_path / "repo", with_source_path=False)
-    monkeypatch.chdir(repo_root)
-
-    code = spec_linter.main(["--format=json", f"--repo-root={repo_root}"])
-
+    code = spec_linter.main(["--format=json", "--repo-root=" + str(repo_root)])
     out = capsys.readouterr().out
+
     assert code == 1
     doc = json.loads(out)
-    hits = [
+    findings = doc["findings"]
+    foo_r005 = [
         f
-        for f in doc["findings"]
-        if f["rule_id"] == "R-LINT-005" and f["severity"] == "fail"
+        for f in findings
+        if f["rule_id"] == "R-LINT-005" and _norm(f["file"]).endswith(FOO_FILE)
     ]
-    assert hits, f"expected R-LINT-005 fail finding in CLI JSON output: {doc!r}"
+    assert foo_r005, repr(findings)
+    assert any(f["severity"] == "fail" for f in foo_r005), repr(foo_r005)
     assert doc["summary"]["hard_failures"] >= 1

@@ -1,9 +1,6 @@
-"""AC-LINT-033 (Covers: R-LINT-033).
-
-lint() folds citation-checker's and size-checker's findings into its own
-report as Finding objects, and load_corpus is corpus-loader's function,
-re-exported unchanged.
-"""
+# hotdocs-criterion: sha256:01a445c3cb51513fee68906229ba1414e124bcb4dc27e37918c3d1d02714e4ae
+"""AC-LINT-033: lint folds in citation-checker's and size-checker's findings
+as Findings, and load_corpus is corpus-loader's function re-exported."""
 
 import dataclasses
 from pathlib import Path
@@ -12,27 +9,19 @@ import spec_linter
 
 
 COMPONENT_REL = "specs/components/foo/component.md"
-SENTENCE = "This component returns a fixed value to every caller always."  # 10 words
 
 
 def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def _write(path: Path, text: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text, encoding="utf-8")
-
-
-def _build_corpus(repo_root: Path, purpose_text: str, rationale_text: str) -> None:
-    comp = repo_root / "specs" / "components" / "foo"
-    _write(
-        comp / "component.md",
+def _component_md(purpose_text, rationale_text):
+    return (
         "---\n"
         "id: comp-foo\n"
         "title: Foo\n"
         "status: draft\n"
-        "owners: [test-team]\n"
+        "owners: [team-a]\n"
         "sealed: true\n"
         "source_path: legacy/foo/\n"
         "---\n"
@@ -41,15 +30,17 @@ def _build_corpus(repo_root: Path, purpose_text: str, rationale_text: str) -> No
         "\n"
         "## Purpose\n"
         "\n"
-        f"{purpose_text}\n"
+        + purpose_text
+        + "\n"
         "\n"
         "## Rationale\n"
         "\n"
-        f"{rationale_text}\n"
+        + rationale_text
+        + "\n"
         "\n"
         "## Scope\n"
         "\n"
-        "- In scope: returning a fixed value.\n"
+        "- In scope: returning a widget.\n"
         "- Out of scope: everything else.\n"
         "\n"
         "## Definitions\n"
@@ -80,11 +71,32 @@ def _build_corpus(repo_root: Path, purpose_text: str, rationale_text: str) -> No
         "\n"
         "## Change log\n"
         "\n"
-        "- Initial draft.\n",
+        "- Initial draft.\n"
     )
+
+
+def _write(path, text):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+
+
+def _build_corpus(repo_root, with_problems):
+    specs = repo_root / "specs"
+    _write(
+        specs / "glossary.md",
+        "# Glossary\n\n- **Widget** — a small thing the foo component returns.\n",
+    )
+    comp = specs / "components" / "foo"
+    if with_problems:
+        purpose = " ".join(["word"] * 160)
+        rationale = "This design follows `D999`, which was decided earlier."
+    else:
+        purpose = "Foo returns a widget to its caller."
+        rationale = "Kept deliberately small."
+    _write(comp / "component.md", _component_md(purpose, rationale))
     _write(
         comp / "requirements" / "R-FOO-001.md",
-        "# R-FOO-001\n\n**R-FOO-001** — `foo` MUST return the integer 1.\n",
+        "# R-FOO-001\n\n**R-FOO-001** — The component MUST return a widget.\n",
     )
     _write(
         comp / "acceptance" / "AC-FOO-001.md",
@@ -94,129 +106,85 @@ def _build_corpus(repo_root: Path, purpose_text: str, rationale_text: str) -> No
         "Kind: generated-test\n"
         "\n"
         "```gherkin\n"
-        "Given nothing\n"
-        "When foo() runs\n"
-        "Then it returns 1\n"
+        "Given the foo component\n"
+        "When it is asked for a widget\n"
+        "Then it returns a widget\n"
         "```\n",
     )
     _write(
-        comp / "interface" / "library.md",
-        "# Library\n\n```\nfoo() -> int\n```\n\nReturns the integer 1.\n",
-    )
-    _write(
-        comp / "interface" / "data" / "Value.md",
-        "# `Value`\n\nA plain integer.\n",
-    )
-    _write(
         comp / "constraints.md",
-        "# Constraints\n\n"
-        "- Latency: a call completes in under 1 second, measured by timing one call.\n",
-    )
-    _write(
-        repo_root / "specs" / "glossary.md",
-        "# Glossary\n\n- **Widget** — a thing used only by this fixture.\n",
+        "# Constraints\n\n- None beyond defaults; measured by review.\n",
     )
 
 
-def _broken_corpus(repo_root: Path) -> None:
-    purpose = " ".join([SENTENCE] * 16)
-    assert len(purpose.split()) == 160
-    _build_corpus(
-        repo_root,
-        purpose,
-        "No further history applies. This design follows `D999`.",
-    )
+def _norm(p):
+    return str(p).replace("\\", "/")
 
 
-def _is_finding(value) -> bool:
-    if isinstance(value, dict):
-        return False
+def _is_finding(obj):
     finding_cls = getattr(spec_linter, "Finding", None)
-    if finding_cls is not None:
-        return isinstance(value, finding_cls)
-    return dataclasses.is_dataclass(value) and type(value).__name__ == "Finding"
-
-
-def _same_file(file_value, repo_root: Path) -> bool:
-    text = str(file_value).replace("\\", "/")
-    if text == COMPONENT_REL:
+    if finding_cls is not None and isinstance(obj, finding_cls):
         return True
-    p = Path(str(file_value))
-    if p.is_absolute():
-        try:
-            return p.resolve() == (repo_root / COMPONENT_REL).resolve()
-        except OSError:
-            return False
-    return False
+    return type(obj).__name__ == "Finding" and dataclasses.is_dataclass(obj)
 
 
-def test_clean_baseline_has_no_hard_failures(tmp_path):
-    repo_root = tmp_path / "clean"
-    repo_root.mkdir()
-    _build_corpus(repo_root, " ".join([SENTENCE] * 3), "No further history applies.")
+def test_clean_base_corpus_lints_clean(tmp_path):
+    repo_root = tmp_path / "repo"
+    _build_corpus(repo_root, with_problems=False)
     report = spec_linter.lint(None, repo_root)
-    hard = report["hard_failures"] if isinstance(report, dict) else report.hard_failures
-    fails = [
+    failures = [
         (field(f, "rule_id"), field(f, "file"), field(f, "message"))
         for f in field(report, "findings")
         if field(f, "severity") == "fail"
     ]
-    assert hard == 0, fails
+    assert field(report, "hard_failures") == 0, failures
 
 
-def test_lint_includes_citation_and_size_checker_findings(tmp_path):
-    repo_root = tmp_path / "broken"
-    repo_root.mkdir()
-    _broken_corpus(repo_root)
+def test_lint_includes_citation_and_size_findings(tmp_path):
+    repo_root = tmp_path / "repo"
+    _build_corpus(repo_root, with_problems=True)
 
     report = spec_linter.lint(None, repo_root)
     findings = list(field(report, "findings"))
-    summary = [
-        (field(f, "rule_id"), field(f, "severity"), str(field(f, "file")), field(f, "message"))
-        for f in findings
-    ]
 
     cite = [
-        f
-        for f in findings
-        if field(f, "rule_id") == "R-CITE-001" and field(f, "severity") == "fail"
+        f for f in findings
+        if field(f, "rule_id") == "R-CITE-001"
+        and field(f, "severity") == "fail"
+        and _norm(field(f, "file")) == COMPONENT_REL
     ]
     size = [
-        f
-        for f in findings
-        if field(f, "rule_id") == "R-SIZE-004" and field(f, "severity") == "fail"
+        f for f in findings
+        if field(f, "rule_id") == "R-SIZE-004"
+        and field(f, "severity") == "fail"
+        and _norm(field(f, "file")) == COMPONENT_REL
     ]
+    summary = [
+        (field(f, "rule_id"), field(f, "severity"), field(f, "file"), field(f, "message"))
+        for f in findings
+    ]
+    assert len(cite) == 1, summary
+    assert len(size) == 1, summary
+    assert _is_finding(cite[0]), type(cite[0])
+    assert _is_finding(size[0]), type(size[0])
 
-    assert len(cite) >= 1, summary
-    assert len(size) >= 1, summary
+    # citation-checker's findings come before size-checker's
+    assert findings.index(cite[0]) < findings.index(size[0])
 
-    cite_on_file = [f for f in cite if _same_file(field(f, "file"), repo_root)]
-    size_on_file = [f for f in size if _same_file(field(f, "file"), repo_root)]
-    assert cite_on_file, summary
-    assert size_on_file, summary
-
-    for f in cite_on_file + size_on_file:
-        assert _is_finding(f), (type(f), f)
-
-    assert any("D999" in str(field(f, "message")) for f in cite_on_file), summary
-
-    hard = report["hard_failures"] if isinstance(report, dict) else report.hard_failures
-    assert hard == 2, summary
+    assert field(report, "hard_failures") == 2, summary
 
 
 def test_load_corpus_returns_corpus_with_component(tmp_path):
-    repo_root = tmp_path / "broken"
-    repo_root.mkdir()
-    _broken_corpus(repo_root)
+    repo_root = tmp_path / "repo"
+    _build_corpus(repo_root, with_problems=True)
 
-    load_corpus = spec_linter.load_corpus
-    assert callable(load_corpus)
-    assert getattr(load_corpus, "__name__", None) == "load_corpus"
+    assert callable(spec_linter.load_corpus)
+    assert spec_linter.load_corpus.__name__ == "load_corpus"
 
-    corpus = load_corpus(repo_root)
+    corpus = spec_linter.load_corpus(repo_root)
     assert type(corpus).__name__ == "Corpus"
     components = field(corpus, "components")
-    assert "foo" in components, list(components)
-    comp = components["foo"]
-    assert type(comp).__name__ == "Component"
-    assert field(comp, "name") == "foo"
+    assert "foo" in components
+    root = field(components["foo"], "root")
+    assert root is not None
+    assert _norm(field(root, "rel_path")) == COMPONENT_REL

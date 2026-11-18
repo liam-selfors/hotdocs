@@ -1,4 +1,17 @@
-import json
+# hotdocs-criterion: sha256:c01b30487dd9a1c93447acbfa52f2db02f321adec7d89fbae0f742dae6236564
+"""AC-LINT-021: R-LINT-008 / R-LINT-009 resolved via graph-query-engine's
+nodes/edges views.
+
+Fixture:
+  - comp-foo has requirement R-FOO-001 and no acceptance file covering it.
+  - comp-bar has exactly one requirement, R-BAR-001, covered by AC-BAR-001,
+    plus AC-BAR-002 whose Covers: tag names R-BAR-999 (which does not exist).
+
+Expectation: the only R-LINT-008 / R-LINT-009 findings are a fail-severity
+R-LINT-008 for R-FOO-001 and a fail-severity R-LINT-009 for AC-BAR-002, and
+these agree exactly with what the corpus's own nodes/edges views say.
+"""
+
 from pathlib import Path
 
 import spec_linter
@@ -8,186 +21,167 @@ def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-COMPONENT_TEMPLATE = """---
-id: comp-{slug}
-title: {title}
-status: draft
-owners: [team-test]
-sealed: true
-source_path: legacy/{slug}/
----
-
-# {title}
-
-## Purpose
-
-The {slug} component is a small synthetic fixture used to exercise the linter's traceability checks.
-
-## Scope
-
-- In scope: a single synthetic behavior.
-- Out of scope: everything else.
-
-## Definitions
-
-None beyond the glossary.
-
-## Behavior
-
-See `requirements/`.
-
-## Interfaces
-
-See `interface/`.
-
-## Data
-
-See `interface/data/`.
-
-## Acceptance criteria
-
-See `acceptance/`.
-
-## Non-functional constraints
-
-See `constraints.md`.
-
-## Open questions
-
-## Change log
-
-- Initial draft.
-"""
-
-REQUIREMENT_TEMPLATE = """# {rid}
-
-**{rid}** — The {slug} component MUST return the input value unchanged.
-"""
-
-ACCEPTANCE_TEMPLATE = """# {acid}
-
-Covers: {covers}
-Kind: generated-test
-
-```gherkin
-Given an input value
-When the {slug} component processes it
-Then the same value is returned
-```
-"""
-
-CONSTRAINTS = """# Constraints
-
-- Latency: under 1 second per call. Measurement: wall-clock timing in a unit test.
-"""
-
-GLOSSARY = """# Glossary
-
-- **Fixture** — a synthetic spec used only for testing.
-"""
-
-
-def _write(path: Path, text: str) -> None:
+def _write(path, text):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
 
 
-def _make_component(specs: Path, slug: str, title: str) -> Path:
-    root = specs / "components" / slug
-    _write(root / "component.md", COMPONENT_TEMPLATE.format(slug=slug, title=title))
-    _write(root / "constraints.md", CONSTRAINTS)
-    (root / "interface").mkdir(parents=True, exist_ok=True)
-    return root
+def _component_md(comp_id, title, slug):
+    return (
+        "---\n"
+        "id: " + comp_id + "\n"
+        "title: " + title + "\n"
+        "status: draft\n"
+        "owners: [test-team]\n"
+        "sealed: true\n"
+        "source_path: legacy/" + slug + "/\n"
+        "---\n"
+        "\n"
+        "# " + title + "\n"
+        "\n"
+        "## Purpose\n"
+        "\n"
+        "A small fixture component used to exercise traceability checks.\n"
+        "\n"
+        "## Scope\n"
+        "\n"
+        "- In scope: fixture behavior.\n"
+        "- Out of scope: everything else.\n"
+        "\n"
+        "## Definitions\n"
+        "\n"
+        "None.\n"
+        "\n"
+        "## Behavior\n"
+        "\n"
+        "See `requirements/`.\n"
+        "\n"
+        "## Interfaces\n"
+        "\n"
+        "See `interface/`.\n"
+        "\n"
+        "## Data\n"
+        "\n"
+        "See `interface/data/`.\n"
+        "\n"
+        "## Acceptance criteria\n"
+        "\n"
+        "See `acceptance/`.\n"
+        "\n"
+        "## Non-functional constraints\n"
+        "\n"
+        "See `constraints.md`.\n"
+        "\n"
+        "## Open questions\n"
+        "\n"
+        "## Change log\n"
+        "\n"
+        "- Initial draft.\n"
+    )
 
 
-def _build_fixture(repo_root: Path) -> None:
+def _requirement(req_id):
+    return (
+        "# " + req_id + "\n"
+        "\n"
+        "**" + req_id + "** — The component MUST return zero when called.\n"
+    )
+
+
+def _acceptance(ac_id, covers):
+    return (
+        "# " + ac_id + "\n"
+        "\n"
+        "Covers: " + covers + "\n"
+        "Kind: compiled\n"
+        "\n"
+        "```gherkin\n"
+        "Given the component is available\n"
+        "When it is called\n"
+        "Then it returns zero\n"
+        "```\n"
+    )
+
+
+def _constraints():
+    return "# Constraints\n\nNone.\n"
+
+
+def _build_fixture(repo_root):
     specs = repo_root / "specs"
-    for sub in ("product", "architecture", "vars", "decisions"):
-        (specs / sub).mkdir(parents=True, exist_ok=True)
-    _write(specs / "glossary.md", GLOSSARY)
-
-    # comp-foo: R-FOO-001 with no acceptance criterion covering it.
-    foo = _make_component(specs, "foo", "Foo")
     _write(
-        foo / "requirements" / "R-FOO-001.md",
-        REQUIREMENT_TEMPLATE.format(rid="R-FOO-001", slug="foo"),
-    )
-    (foo / "acceptance").mkdir(parents=True, exist_ok=True)
-
-    # comp-bar: R-BAR-001 covered by AC-BAR-001; AC-BAR-002 covers a
-    # nonexistent R-BAR-999.
-    bar = _make_component(specs, "bar", "Bar")
-    _write(
-        bar / "requirements" / "R-BAR-001.md",
-        REQUIREMENT_TEMPLATE.format(rid="R-BAR-001", slug="bar"),
-    )
-    _write(
-        bar / "acceptance" / "AC-BAR-001.md",
-        ACCEPTANCE_TEMPLATE.format(acid="AC-BAR-001", covers="R-BAR-001", slug="bar"),
-    )
-    _write(
-        bar / "acceptance" / "AC-BAR-002.md",
-        ACCEPTANCE_TEMPLATE.format(acid="AC-BAR-002", covers="R-BAR-999", slug="bar"),
+        specs / "glossary.md",
+        "# Glossary\n\n- **Fixture term** — a term used only by this fixture.\n",
     )
 
+    foo = specs / "components" / "foo"
+    _write(foo / "component.md", _component_md("comp-foo", "Foo", "foo"))
+    _write(foo / "requirements" / "R-FOO-001.md", _requirement("R-FOO-001"))
+    _write(foo / "constraints.md", _constraints())
 
-def _traceability_findings(findings):
-    return [
-        f
-        for f in findings
-        if field(f, "rule_id") in ("R-LINT-008", "R-LINT-009")
-    ]
-
-
-def _mentions(finding, token):
-    text = "{} {}".format(field(finding, "file") or "", field(finding, "message") or "")
-    return token in text
-
-
-def _assert_exact_traceability(findings):
-    trace = _traceability_findings(findings)
-    assert len(trace) == 2, "expected exactly two R-LINT-008/009 findings, got: {!r}".format(
-        [(field(f, "rule_id"), field(f, "file"), field(f, "message")) for f in trace]
-    )
-
-    r008 = [f for f in trace if field(f, "rule_id") == "R-LINT-008"]
-    r009 = [f for f in trace if field(f, "rule_id") == "R-LINT-009"]
-    assert len(r008) == 1, r008
-    assert len(r009) == 1, r009
-
-    f008 = r008[0]
-    assert field(f008, "severity") == "fail"
-    assert _mentions(f008, "R-FOO-001"), (field(f008, "file"), field(f008, "message"))
-    assert not _mentions(f008, "R-BAR-001")
-
-    f009 = r009[0]
-    assert field(f009, "severity") == "fail"
-    assert _mentions(f009, "AC-BAR-002"), (field(f009, "file"), field(f009, "message"))
-    assert not _mentions(f009, "AC-BAR-001")
+    bar = specs / "components" / "bar"
+    _write(bar / "component.md", _component_md("comp-bar", "Bar", "bar"))
+    _write(bar / "requirements" / "R-BAR-001.md", _requirement("R-BAR-001"))
+    _write(bar / "acceptance" / "AC-BAR-001.md", _acceptance("AC-BAR-001", "R-BAR-001"))
+    _write(bar / "acceptance" / "AC-BAR-002.md", _acceptance("AC-BAR-002", "R-BAR-999"))
+    _write(bar / "constraints.md", _constraints())
 
 
-def test_ac_lint_021_traceability_findings_via_lint(tmp_path):
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
+def _mentions(finding, ident):
+    file_ = field(finding, "file") or ""
+    message = field(finding, "message") or ""
+    return ident in str(file_) or ident in str(message)
+
+
+def test_forward_and_backward_traceability_via_nodes_edges(tmp_path):
+    repo_root = tmp_path
     _build_fixture(repo_root)
 
     report = spec_linter.lint(None, repo_root)
-    findings = report["findings"] if isinstance(report, dict) else report.findings
+    findings = list(field(report, "findings"))
 
-    _assert_exact_traceability(findings)
+    trace = [f for f in findings if field(f, "rule_id") in ("R-LINT-008", "R-LINT-009")]
 
-    hard = report["hard_failures"] if isinstance(report, dict) else report.hard_failures
-    assert hard >= 2
+    lint008 = [f for f in trace if field(f, "rule_id") == "R-LINT-008"]
+    lint009 = [f for f in trace if field(f, "rule_id") == "R-LINT-009"]
 
+    assert len(trace) == 2, "expected exactly two R-LINT-008/009 findings, got: " + repr(trace)
+    assert len(lint008) == 1, repr(lint008)
+    assert len(lint009) == 1, repr(lint009)
 
-def test_ac_lint_021_traceability_findings_via_cli_json(tmp_path, capsys):
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    _build_fixture(repo_root)
+    f008 = lint008[0]
+    assert field(f008, "severity") == "fail"
+    assert _mentions(f008, "R-FOO-001"), repr(f008)
+    assert not _mentions(f008, "R-BAR-001"), repr(f008)
 
-    code = spec_linter.main(["--format=json", "--repo-root", str(repo_root)])
-    out = capsys.readouterr().out
+    f009 = lint009[0]
+    assert field(f009, "severity") == "fail"
+    assert _mentions(f009, "AC-BAR-002") or _mentions(f009, "R-BAR-999"), repr(f009)
+    assert not _mentions(f009, "AC-BAR-001"), repr(f009)
 
-    assert code == 1
-    doc = json.loads(out)
-    _assert_exact_traceability(doc["findings"])
+    # Both must agree with graph-query-engine's own nodes/edges views over
+    # the same corpus: the linter's answer is a query over these views.
+    corpus = spec_linter.load_corpus(repo_root)
+    con = field(corpus, "graph")
+
+    uncovered = sorted(
+        row[0]
+        for row in con.execute(
+            "SELECT id FROM nodes WHERE kind = 'requirement' "
+            "AND id NOT IN (SELECT target_id FROM edges WHERE edge_type = 'covers')"
+        ).fetchall()
+    )
+    assert uncovered == ["R-FOO-001"]
+
+    dangling = sorted(
+        (row[0], row[1])
+        for row in con.execute(
+            "SELECT source_id, target_id FROM edges WHERE edge_type = 'covers' "
+            "AND target_id NOT IN (SELECT id FROM nodes "
+            "WHERE kind IN ('requirement', 'capability'))"
+        ).fetchall()
+    )
+    assert dangling == [("AC-BAR-002", "R-BAR-999")]
+
+    # R-BAR-001 is covered: it must not appear in any R-LINT-008 finding.
+    assert all(not _mentions(f, "R-BAR-001") for f in lint008)
