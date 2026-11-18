@@ -1,37 +1,20 @@
+# hotdocs-criterion: sha256:0ad2555e6fd5b3d5331ccfd68ff126ed2714a1c63b8bed9bf3970f1dec812133
 import json
 import types
 from pathlib import Path
 
-import pytest
-
 import provenance_writer
 
 
-COMPONENT_ID = "comp-ns-widget"
-SLUG = "ns-widget"
+COMPONENT_ID = "comp-foo"
+SLUG = "foo"
 
 
 def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def _generation_result():
-    # A refused generation: no files, so verification_report may be null
-    # without being a missing upstream result.
-    return {
-        "component_id": COMPONENT_ID,
-        "spec_bundle_hash": "sha256:" + "ab" * 32,
-        "model": "claude-sonnet-5",
-        "prompt_version": "v10",
-        "cache_hit": False,
-        "files": {},
-        "model_call_error": None,
-        "refused": "sealed-component",
-        "retry_feedback": None,
-    }
-
-
-def _license_fields():
+def license_fields():
     return {
         "component_id": COMPONENT_ID,
         "gate_version": "license_scanner@4.0.3+9f2c41ab07de",
@@ -54,7 +37,7 @@ def _license_fields():
     }
 
 
-def _secret_fields():
+def secret_fields():
     return {
         "scope": "full",
         "gate_version": "secret_scanner@3.1.0+detect-secrets.1.5.0",
@@ -63,19 +46,19 @@ def _secret_fields():
             {
                 "rule_id": "AWS Access Key",
                 "risk_tier": "high",
-                "file": "gen/ns-widget/config.py",
+                "file": "gen/foo/config.py",
                 "line": 12,
             }
         ],
         "allowed": [
             {
                 "rule_id": "AWS Access Key",
-                "file": "verification/ns-widget/test_x.py",
+                "file": "verification/foo/test_x.py",
                 "line": 3,
             }
         ],
         "unused_allowlist_entries": [
-            {"file": "verification/ns-widget/old.py", "type": "AWS Access Key"}
+            {"file": "verification/foo/old.py", "type": "AWS Access Key"}
         ],
         "notified": False,
         "notification_delivery_error": None,
@@ -83,11 +66,44 @@ def _secret_fields():
     }
 
 
-def _make_inputs(license_scan_result, secret_scan_result):
-    fields = {
+def generation_result():
+    return {
         "component_id": COMPONENT_ID,
-        "generation_result": _generation_result(),
-        "verification_report": None,
+        "spec_bundle_hash": "sha256:" + "0" * 64,
+        "model": "claude-sonnet-5",
+        "prompt_version": "v10",
+        "cache_hit": False,
+        "files": {"foo.py": "x = 1\n"},
+        "model_call_error": None,
+        "refused": None,
+        "retry_feedback": None,
+    }
+
+
+def verification_report():
+    return {
+        "component_id": COMPONENT_ID,
+        "criteria": [
+            {
+                "id": "AC-FOO-001",
+                "covers": "R-FOO-001",
+                "kind": "compiled",
+                "result": "pass",
+            }
+        ],
+        "requirement_results": {"R-FOO-001": "pass"},
+        "interface_drift": False,
+        "mutation_score": 0.92,
+        "mutation_error": None,
+        "overall": "pass",
+    }
+
+
+def make_inputs(license_scan_result, secret_scan_result):
+    data = {
+        "component_id": COMPONENT_ID,
+        "generation_result": generation_result(),
+        "verification_report": verification_report(),
         "license_scan_result": license_scan_result,
         "secret_scan_result": secret_scan_result,
         "provenance_hit": False,
@@ -100,82 +116,71 @@ def _make_inputs(license_scan_result, secret_scan_result):
     cls = getattr(provenance_writer, "ProvenanceInputs", None)
     if cls is not None:
         try:
-            return cls(**fields)
+            return cls(**data)
         except TypeError:
             pass
-    return dict(fields)
+    return data
 
 
-def _manifest_paths(repo_root):
+def manifest_paths(repo_root):
     return [
-        repo_root / "gen" / SLUG / ".provenance.json",
-        repo_root / "verification" / SLUG / ".provenance.json",
+        Path(repo_root) / "gen" / SLUG / ".provenance.json",
+        Path(repo_root) / "verification" / SLUG / ".provenance.json",
     ]
 
 
-def _read_manifests(repo_root):
+def read_manifests(repo_root):
     manifests = []
-    for path in _manifest_paths(repo_root):
-        assert path.is_file(), f"manifest not written at {path}"
+    for path in manifest_paths(repo_root):
+        assert path.is_file(), "manifest not written at " + str(path)
         manifests.append(json.loads(path.read_text(encoding="utf-8")))
     return manifests
 
 
-def test_simplenamespace_scan_results_are_serialized_with_all_fields(tmp_path):
-    repo_root = Path(tmp_path)
-    license_fields = _license_fields()
-    secret_fields = _secret_fields()
-    license_ns = types.SimpleNamespace(**license_fields)
-    secret_ns = types.SimpleNamespace(**secret_fields)
+def test_simple_namespace_scan_results_are_serialized(tmp_path):
+    lic = license_fields()
+    sec = secret_fields()
+    inputs = make_inputs(
+        types.SimpleNamespace(**lic), types.SimpleNamespace(**sec)
+    )
 
-    inputs = _make_inputs(license_ns, secret_ns)
+    provenance_writer.write_provenance(COMPONENT_ID, inputs, tmp_path)
 
-    # Must not raise.
-    provenance_writer.write_provenance(COMPONENT_ID, inputs, repo_root)
-
-    for manifest in _read_manifests(repo_root):
-        license_scan = manifest["license_scan"]
-        secret_scan = manifest["secret_scan"]
+    for manifest in read_manifests(tmp_path):
+        license_scan = field(manifest, "license_scan")
+        secret_scan = field(manifest, "secret_scan")
         assert isinstance(license_scan, dict)
         assert isinstance(secret_scan, dict)
-        for name, value in license_fields.items():
-            assert name in license_scan, f"license_scan missing {name!r}"
-            assert license_scan[name] == value, (
-                f"license_scan[{name!r}] = {license_scan[name]!r}, expected {value!r}"
-            )
-        for name, value in secret_fields.items():
-            assert name in secret_scan, f"secret_scan missing {name!r}"
-            assert secret_scan[name] == value, (
-                f"secret_scan[{name!r}] = {secret_scan[name]!r}, expected {value!r}"
-            )
+        for name, value in lic.items():
+            assert name in license_scan, "license_scan missing " + name
+            assert license_scan[name] == value, name
+        for name, value in sec.items():
+            assert name in secret_scan, "secret_scan missing " + name
+            assert secret_scan[name] == value, name
 
 
-class _PlainLicenseResult:
-    """A plain (non-dict, non-dataclass) object exposing fields as attributes."""
-
+class AttrLicenseScan:
     def __init__(self, fields):
         for name, value in fields.items():
             setattr(self, name, value)
-        self._cache = {"private": "state"}
+        self._cache = {"hidden": "value"}
 
     def describe(self):
-        return "license scan result"
+        return "license scan for " + str(self.component_id)
 
 
-def test_plain_object_converted_from_public_non_callable_attributes(tmp_path):
-    repo_root = Path(tmp_path)
-    license_fields = _license_fields()
-    license_obj = _PlainLicenseResult(license_fields)
-    secret_ns = types.SimpleNamespace(**_secret_fields())
+def test_plain_object_uses_public_non_callable_attributes(tmp_path):
+    lic = license_fields()
+    lic["blocked"] = True
+    obj = AttrLicenseScan(lic)
+    inputs = make_inputs(obj, types.SimpleNamespace(**secret_fields()))
 
-    inputs = _make_inputs(license_obj, secret_ns)
+    provenance_writer.write_provenance(COMPONENT_ID, inputs, tmp_path)
 
-    provenance_writer.write_provenance(COMPONENT_ID, inputs, repo_root)
-
-    for manifest in _read_manifests(repo_root):
-        license_scan = manifest["license_scan"]
+    for manifest in read_manifests(tmp_path):
+        license_scan = field(manifest, "license_scan")
         assert isinstance(license_scan, dict)
         assert "blocked" in license_scan
-        assert license_scan["blocked"] == license_fields["blocked"]
+        assert license_scan["blocked"] is True
         assert "describe" not in license_scan
         assert "_cache" not in license_scan
