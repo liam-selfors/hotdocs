@@ -1,3 +1,4 @@
+# hotdocs-criterion: sha256:4afabea7a812311e37279498436751cdb210eeb730895762b596db2ba7b7414e
 import citation_checker
 
 from pathlib import Path

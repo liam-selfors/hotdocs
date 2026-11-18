@@ -1,3 +1,4 @@
+# hotdocs-criterion: sha256:c0a8b3c943d34299fd3a19ab1657c407326cc2d59879c6ff1dcac8bb1c057ea5
 """AC-SECRET-003 (covers R-SECRET-003).
 
 Given a full scan with zero matches, when secret-scan completes, then a

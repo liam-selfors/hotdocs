@@ -41,7 +41,9 @@ Kind: generated-test
 
 ```gherkin
 Given a component spec whose Behavior section contains a requirement with no
-  covering acceptance criterion
+  covering acceptance criterion, the corpus otherwise lint-clean: each
+  requirement file's first "# " heading is exactly its own id, such as
+  "# R-FOO-001"
 When the spec change is submitted to the pipeline
 Then spec-linter reports a fail-severity finding and the merge is blocked
   before generation runs

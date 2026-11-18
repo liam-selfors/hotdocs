@@ -22,13 +22,14 @@ next argument.
   `run_component_gates` as a list; omitted means `None`.
 - `--repo-root` — default the current directory.
 - `--format` — `json` prints the `ComponentPipelineResult` as JSON,
-  converting each nested value recursively: an object with `to_dict()`
-  through it, a dataclass via `dataclasses.asdict`, any other object
-  via `vars()`;
+  converted as `specs/architecture/json-values.md` gives (`D318`);
   `text` (default) prints the component id, `provenance hit` or the
   `block_reason` (`passed` when not blocked), and each scan's
   `blocked`/`flagged`; then `model_call_error: <category>: <message>`
-  when one is set, and `license_scan not evaluated: <reason>` when the
+  when one is set, `<criterion id>: <failure_detail.message>` for each
+  `"fail"` criterion when `block_reason` is `"test_authoring_failed"`, `mutation_error: <message>` when the
+  verification report's `mutation_error` is set (`D324`), and
+  `license_scan not evaluated: <reason>` when the
   license scan's `evaluated` is false (read with dual dict-or-attribute
   access).
 
@@ -37,5 +38,5 @@ next argument.
 | Code | Meaning |
 | --- | --- |
 | `0` | The gauntlet concluded — a hit, a pass, or a verification failure alike. |
-| `1` | `block_reason` is `"model_call_error"`. |
+| `1` | `block_reason` is `"model_call_error"` or `"test_authoring_failed"`: re-running may succeed. |
 | `2` | Usage error: a missing `<component-id>` or `--model`, an unknown component, a non-integer `--seed`, an invalid `--format`, an unknown argument, a wrong first word, or a flag given last with no value. |

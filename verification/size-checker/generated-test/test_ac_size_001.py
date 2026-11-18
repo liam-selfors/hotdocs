@@ -1,3 +1,4 @@
+# hotdocs-criterion: sha256:62658c384b0d81e29bde1789ebe40feca12058f202b351fc9d316ae8691ba8c1
 """AC-SIZE-001 (covers R-SIZE-001).
 
 Given a component whose generated-code LOC estimate exceeds 1500

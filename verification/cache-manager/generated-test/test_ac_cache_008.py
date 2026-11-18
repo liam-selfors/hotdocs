@@ -1,3 +1,4 @@
+# hotdocs-criterion: sha256:a7cdba70d4b04ab452a3a3f88d8ba9766d3bca6e249268af78da01dad6260ac5
 """AC-CACHE-008 (covers R-CACHE-008).
 
 Given a key that was successfully put, then evicted by the backing store

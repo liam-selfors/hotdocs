@@ -1,3 +1,4 @@
+# hotdocs-criterion: sha256:94e2c625582cc00833e4d8954a11ab855f68dbf8713b1d862c210f221eb13dda
 import copy
 import threading
 

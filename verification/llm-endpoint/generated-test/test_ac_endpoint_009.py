@@ -1,20 +1,19 @@
+# hotdocs-criterion: sha256:c37e39ce724498a7115189e3a7e73115c87485973a36b139487a999f52c05643
 import io
+import json
 import socket
 import urllib.error
 import urllib.request
+import email.message
 
 import pytest
 
 import llm_endpoint
 
 
-HTTP_PROVIDER_MODELS = [
-    ("anthropic", "anthropic:claude-sonnet-5"),
-    ("openai", "openai:gpt-6-astra"),
-    ("openai-compatible", "openai-compatible:local-model"),
-    ("gemini", "gemini:gemini-4-argon"),
-    ("ollama", "ollama:llama3.2"),
-]
+def field(value, name):
+    return value[name] if isinstance(value, dict) else getattr(value, name)
+
 
 KEY_ENVS = {
     "anthropic": "ANTHROPIC_API_KEY",
@@ -22,38 +21,38 @@ KEY_ENVS = {
     "gemini": "GEMINI_API_KEY",
 }
 
-VALID_CATEGORIES = {"network", "auth", "rate_limit", "timeout"}
+MODELS = {
+    "anthropic": "anthropic:claude-sonnet-5",
+    "openai": "openai:gpt-6-astra",
+    "openai-compatible": "openai-compatible:test-model",
+    "gemini": "gemini:gemini-4-argon",
+    "ollama": "ollama:llama3.2",
+}
+
+HTTP_PROVIDERS = ["anthropic", "openai", "openai-compatible", "gemini", "ollama"]
 
 
-def _field(value, name):
-    if isinstance(value, dict):
-        return value.get(name)
-    return getattr(value, name, None)
-
-
-def _http_error(code, body=b'{"error": {"message": "vendor says something specific"}}'):
+def _http_error(code, body=b'{"error": {"message": "boom"}}'):
+    hdrs = email.message.Message()
+    hdrs["Content-Type"] = "application/json"
     return urllib.error.HTTPError(
-        "http://example.invalid/endpoint",
-        code,
-        "error",
-        {},
-        io.BytesIO(body),
+        "http://example.invalid/", code, "error", hdrs, io.BytesIO(body)
     )
 
 
-class _UnreadableResponse:
-    status = 200
-    code = 200
-    headers = {}
+class _GarbageReply:
+    def __init__(self):
+        self.status = 200
+        self.code = 200
 
     def __enter__(self):
         return self
 
-    def __exit__(self, exc_type, exc, tb):
+    def __exit__(self, *exc):
         return False
 
     def read(self, *args, **kwargs):
-        return b"\x00\xff\xfe this is { not json at all"
+        return b"\xff\xfe<<< this is not a readable reply body >>>\x00"
 
     def getcode(self):
         return 200
@@ -62,136 +61,154 @@ class _UnreadableResponse:
         pass
 
 
-def _raise(exc):
-    def action():
-        raise exc
+def _make_outcome(kind):
+    """Return a callable that, when invoked, raises or returns per `kind`."""
+    if isinstance(kind, int):
+        def act():
+            raise _http_error(kind)
+    elif kind == "socket_timeout":
+        def act():
+            raise socket.timeout("timed out")
+    elif kind == "refused":
+        def act():
+            raise urllib.error.URLError(
+                ConnectionRefusedError(61, "Connection refused")
+            )
+    elif kind == "unreadable":
+        def act():
+            return _GarbageReply()
+    else:  # pragma: no cover
+        raise AssertionError(kind)
+    return act
 
-    return action
 
-
-FAILURE_CASES = [
-    ("http_401", lambda: _raise(_http_error(401)), "auth"),
-    ("http_403", lambda: _raise(_http_error(403)), "auth"),
-    ("http_429", lambda: _raise(_http_error(429)), "rate_limit"),
-    ("http_408", lambda: _raise(_http_error(408)), "timeout"),
-    ("http_504", lambda: _raise(_http_error(504)), "timeout"),
-    ("http_500", lambda: _raise(_http_error(500)), "network"),
-    ("socket_timeout", lambda: _raise(socket.timeout("timed out")), "timeout"),
-    (
-        "connection_refused",
-        lambda: _raise(
-            urllib.error.URLError(ConnectionRefusedError(61, "Connection refused"))
-        ),
-        "network",
-    ),
-    ("unreadable_body", lambda: (lambda: _UnreadableResponse()), "network"),
+FAILURES = [
+    (401, "auth"),
+    (403, "auth"),
+    (429, "rate_limit"),
+    (408, "timeout"),
+    (504, "timeout"),
+    (500, "network"),
+    ("socket_timeout", "timeout"),
+    ("refused", "network"),
+    ("unreadable", "network"),
 ]
 
 
-def _install_recorder(monkeypatch, action):
-    calls = []
+def _install_recorder(monkeypatch, log_path, act):
+    def recorder(*args, **kwargs):
+        with open(log_path, "a", encoding="utf-8") as fh:
+            fh.write(json.dumps({"called": True}) + "\n")
+        return act()
 
-    def fake_urlopen(request, *args, **kwargs):
-        calls.append({"request": request, "args": args, "kwargs": kwargs})
-        return action()
-
-    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
-    return calls
+    monkeypatch.setattr(urllib.request, "urlopen", recorder)
 
 
-def _prepare_env(monkeypatch, tmp_path, provider, with_keys=True):
+def _calls(log_path):
+    if not log_path.exists():
+        return 0
+    return len([l for l in log_path.read_text(encoding="utf-8").splitlines() if l.strip()])
+
+
+def _prepare_workdir(tmp_path, monkeypatch, provider):
     workdir = tmp_path / "work"
     workdir.mkdir()
-    monkeypatch.chdir(workdir)
     monkeypatch.delenv("VAR_HOTDOCS_CONFIG", raising=False)
-    for env_name in KEY_ENVS.values():
-        monkeypatch.delenv(env_name, raising=False)
-    if with_keys:
-        for env_name in KEY_ENVS.values():
-            monkeypatch.setenv(env_name, "fake-test-key-not-real-0000")
+    monkeypatch.chdir(workdir)
     if provider == "openai-compatible":
-        (workdir / "hotdocs.toml").write_text(
-            "[llm]\n"
-            'provider = "openai-compatible"\n'
-            'model = "local-model"\n'
-            'base_url = "http://127.0.0.1:9/v1"\n',
-            encoding="utf-8",
+        llm_endpoint.save_config(
+            workdir / "hotdocs.toml",
+            "openai-compatible",
+            "test-model",
+            base_url="http://127.0.0.1:9/v1",
         )
     return workdir
 
 
-def _assert_failed_with(result, expected_category):
-    error = _field(result, "model_call_error")
-    assert error is not None, "expected a model_call_error, got %r" % (result,)
-    assert _field(result, "text") is None
-    category = _field(error, "category")
-    assert category in VALID_CATEGORIES
-    assert category == expected_category, (
-        "expected category %r, got %r (result=%r)" % (expected_category, category, result)
+def _assert_failed(resp, expected_category):
+    err = field(resp, "model_call_error")
+    assert err is not None, f"expected a model_call_error, got {resp!r}"
+    assert field(err, "category") == expected_category, (
+        f"expected {expected_category}, got {field(err, 'category')!r}"
     )
+    assert field(resp, "text") is None
 
 
+@pytest.mark.parametrize("provider", HTTP_PROVIDERS)
 @pytest.mark.parametrize(
-    "case_name,action_factory,expected_category",
-    FAILURE_CASES,
-    ids=[c[0] for c in FAILURE_CASES],
+    "kind,expected", FAILURES, ids=[str(k) for k, _ in FAILURES]
 )
-@pytest.mark.parametrize(
-    "provider,model",
-    HTTP_PROVIDER_MODELS,
-    ids=[p[0] for p in HTTP_PROVIDER_MODELS],
-)
-def test_http_failure_classified_once_without_raising(
-    monkeypatch, tmp_path, provider, model, case_name, action_factory, expected_category
-):
-    _prepare_env(monkeypatch, tmp_path, provider, with_keys=True)
-    calls = _install_recorder(monkeypatch, action_factory())
+def test_http_failure_classified_once_no_raise(tmp_path, monkeypatch, provider, kind, expected):
+    for p, env in KEY_ENVS.items():
+        monkeypatch.setenv(env, "test-fake-key-value-0000")
+    _prepare_workdir(tmp_path, monkeypatch, provider)
 
-    result = llm_endpoint.complete("Say hello.", model)
+    log_path = tmp_path / "urlopen_calls.log"
+    _install_recorder(monkeypatch, log_path, _make_outcome(kind))
 
-    _assert_failed_with(result, expected_category)
-    assert len(calls) == 1, "recorder called %d times for %s/%s" % (
-        len(calls),
-        provider,
-        case_name,
-    )
+    try:
+        resp = llm_endpoint.complete("Say hello.", MODELS[provider])
+    except Exception as exc:  # nothing may be raised
+        pytest.fail(f"complete() raised {type(exc).__name__}: {exc}")
+
+    _assert_failed(resp, expected)
+    assert _calls(log_path) == 1, "urlopen recorder must be called exactly once"
 
 
-@pytest.mark.parametrize(
-    "provider,model",
-    [
-        ("anthropic", "anthropic:claude-sonnet-5"),
-        ("openai", "openai:gpt-6-astra"),
-        ("gemini", "gemini:gemini-4-argon"),
-    ],
-    ids=["anthropic", "openai", "gemini"],
-)
-def test_missing_key_reports_auth_without_calling(monkeypatch, tmp_path, provider, model):
-    _prepare_env(monkeypatch, tmp_path, provider, with_keys=False)
+@pytest.mark.parametrize("provider", sorted(KEY_ENVS))
+def test_missing_key_reports_auth_without_call(tmp_path, monkeypatch, provider):
+    for env in KEY_ENVS.values():
+        monkeypatch.delenv(env, raising=False)
+    _prepare_workdir(tmp_path, monkeypatch, provider)
 
-    def should_not_be_called():
-        raise AssertionError("urlopen must not be called without a key")
+    log_path = tmp_path / "urlopen_calls.log"
 
-    calls = _install_recorder(monkeypatch, should_not_be_called)
+    def act():
+        raise AssertionError("urlopen must not be called")
 
-    result = llm_endpoint.complete("Say hello.", model)
+    _install_recorder(monkeypatch, log_path, act)
 
-    _assert_failed_with(result, "auth")
-    assert calls == []
+    try:
+        resp = llm_endpoint.complete("Say hello.", MODELS[provider])
+    except Exception as exc:
+        pytest.fail(f"complete() raised {type(exc).__name__}: {exc}")
+
+    _assert_failed(resp, "auth")
+    assert _calls(log_path) == 0, "recorder must never be called without a key"
 
 
-def test_gemini_400_invalid_api_key_is_auth(monkeypatch, tmp_path):
-    _prepare_env(monkeypatch, tmp_path, "gemini", with_keys=True)
-    body = (
-        b'{"error": {"code": 400, '
-        b'"message": "API key not valid. Please pass a valid API key.", '
-        b'"status": "INVALID_ARGUMENT", '
-        b'"details": [{"@type": "type.googleapis.com/google.rpc.ErrorInfo", '
-        b'"reason": "API_KEY_INVALID", "domain": "googleapis.com"}]}}'
-    )
-    calls = _install_recorder(monkeypatch, _raise(_http_error(400, body)))
+def test_gemini_400_invalid_api_key_is_auth(tmp_path, monkeypatch):
+    monkeypatch.setenv("GEMINI_API_KEY", "test-fake-key-value-0000")
+    _prepare_workdir(tmp_path, monkeypatch, "gemini")
 
-    result = llm_endpoint.complete("Say hello.", "gemini:gemini-4-argon")
+    body = json.dumps(
+        {
+            "error": {
+                "code": 400,
+                "message": "API key not valid. Please pass a valid API key.",
+                "status": "INVALID_ARGUMENT",
+                "details": [
+                    {
+                        "@type": "type.googleapis.com/google.rpc.ErrorInfo",
+                        "reason": "API_KEY_INVALID",
+                        "domain": "googleapis.com",
+                    }
+                ],
+            }
+        }
+    ).encode("utf-8")
 
-    _assert_failed_with(result, "auth")
-    assert len(calls) == 1
+    log_path = tmp_path / "urlopen_calls.log"
+
+    def act():
+        raise _http_error(400, body)
+
+    _install_recorder(monkeypatch, log_path, act)
+
+    try:
+        resp = llm_endpoint.complete("Say hello.", MODELS["gemini"])
+    except Exception as exc:
+        pytest.fail(f"complete() raised {type(exc).__name__}: {exc}")
+
+    _assert_failed(resp, "auth")
+    assert _calls(log_path) == 1

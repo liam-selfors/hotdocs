@@ -1,3 +1,4 @@
+# hotdocs-criterion: sha256:f30fe440434d1920aa5442f0511f5561378e5aa04069d3bb390663d1a32d3a10
 import sys
 import tempfile
 import textwrap

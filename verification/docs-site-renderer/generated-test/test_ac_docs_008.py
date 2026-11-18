@@ -1,17 +1,20 @@
-import docs_site_renderer
-
+# hotdocs-criterion: sha256:94ff90ba5945d0aab68fac561574d6b827fdc59df1f3982a95b4d052eb5997f8
 import json
 from dataclasses import dataclass, field as dc_field
 from pathlib import Path
 
+import docs_site_renderer
 
-RAW_SCRIPT = "<script>alert(1)</script>"
-ALPHA_TEXT = "<script>alert(1)</script> & more"
-BETA_MARKER = "BetaDocMarker42"
+
+RAW = "<script>alert(1)</script>"
+DOC_TEXT = RAW + " & more"
+ALPHA = "comp-alpha"
+BETA = "comp-beta"
+BETA_MARKER = "BetaDocMarkerText"
 
 
 @dataclass
-class CorpusGraph:
+class FakeCorpusGraph:
     nodes: dict = dc_field(default_factory=dict)
     edges: list = dc_field(default_factory=list)
     aggregates: dict = dc_field(default_factory=dict)
@@ -30,23 +33,26 @@ class CorpusGraph:
         ).encode("utf-8")
 
 
-def _build_graph():
+def make_graph():
     nodes = {
-        "comp-alpha": {
+        ALPHA: {
             "type": "component",
-            "verification": None,
+            "verification": {
+                "requirement_results": {},
+                "criteria": [],
+            },
             "provenance": {
                 "model": "anthropic:claude-sonnet-5",
                 "prompt_version": "v1",
-                "generated_at": "2026-11-01T00:00:00Z",
+                "generated_at": "2026-01-01T00:00:00Z",
             },
             "size_status": "ok",
             "sealed": True,
             "pinned_overrides": [],
-            "owners": ["docs-team"],
-            "documents": {"component.md": ALPHA_TEXT},
+            "owners": ["alpha-team"],
+            "documents": {"component.md": DOC_TEXT},
         },
-        "comp-beta": {
+        BETA: {
             "type": "component",
             "verification": None,
             "provenance": None,
@@ -54,56 +60,78 @@ def _build_graph():
             "sealed": False,
             "pinned_overrides": [],
             "owners": [],
-            "documents": {"component.md": BETA_MARKER + "\n"},
+            "documents": {"component.md": BETA_MARKER},
         },
     }
-    return CorpusGraph(
-        nodes=nodes,
-        edges=[],
-        aggregates={
-            "orphan_capability_rate": 0.0,
-            "orphan_component_rate": 0.0,
-            "orphan_var_rate": 0.0,
-        },
-    )
+    aggregates = {
+        "orphan_capability_rate": 0.0,
+        "orphan_component_rate": 1.0,
+        "orphan_var_rate": 0.0,
+    }
+    return FakeCorpusGraph(nodes=nodes, edges=[], aggregates=aggregates)
 
 
-def _read_all(out_dir: Path):
-    pages = {}
-    for p in sorted(out_dir.rglob("*")):
+def all_files(out_dir):
+    result = {}
+    for p in sorted(Path(out_dir).rglob("*")):
         if p.is_file():
-            pages[p] = p.read_bytes().decode("utf-8", errors="replace")
-    return pages
+            result[p] = p.read_text(encoding="utf-8", errors="replace")
+    return result
 
 
-def test_ac_docs_008_detail_views_escape_and_tolerate_nulls(tmp_path):
-    out_dir = tmp_path / "out"
-    graph = _build_graph()
+def detail_pages(files, out_dir, node_id, other_id):
+    slug = node_id[len("comp-"):]
+    other_slug = other_id[len("comp-"):]
+    by_path = [
+        p
+        for p in files
+        if p.suffix.lower() in (".html", ".htm")
+        and (
+            node_id in str(p.relative_to(out_dir))
+            or slug in str(p.relative_to(out_dir))
+        )
+        and other_slug not in str(p.relative_to(out_dir))
+    ]
+    if by_path:
+        return by_path
+    return [
+        p
+        for p, text in files.items()
+        if p.suffix.lower() in (".html", ".htm")
+        and node_id in text
+        and other_id not in text
+    ]
 
-    # Must not raise, even with the second node's null/empty fields.
+
+def test_ac_docs_008_escapes_values_and_tolerates_null_fields(tmp_path):
+    out_dir = tmp_path / "site"
+    graph = make_graph()
+
     docs_site_renderer.render_docs_site(graph, out_dir)
 
-    pages = _read_all(out_dir)
-    assert pages, "render_docs_site wrote no files"
+    files = all_files(out_dir)
+    assert files, "render_docs_site wrote no files"
 
-    # The raw script must never appear anywhere in the rendered site.
-    for path, text in pages.items():
-        assert RAW_SCRIPT not in text, f"raw script tag found unescaped in {path}"
+    # The raw script tag never appears anywhere in the rendered site.
+    for p, text in files.items():
+        assert RAW not in text, "raw unescaped script found in " + str(p)
 
-    # The first node's detail view: the page rendering its document content.
-    alpha_pages = [p for p, t in pages.items() if "&amp; more" in t]
-    assert alpha_pages, "no page contains the escaped '&amp; more' document text"
-    assert any("&lt;script&gt;" in pages[p] for p in alpha_pages), (
-        "the page holding comp-alpha's document does not contain '&lt;script&gt;'"
+    alpha_pages = detail_pages(files, out_dir, ALPHA, BETA)
+    assert alpha_pages, "no detail view found for " + ALPHA
+    alpha_hits = [
+        p
+        for p in alpha_pages
+        if "&lt;script&gt;" in files[p] and "&amp; more" in files[p]
+    ]
+    assert alpha_hits, (
+        "first node's detail view lacks escaped document text: "
+        + repr([str(p) for p in alpha_pages])
     )
-    assert any(
-        "&lt;script&gt;" in pages[p] and "&amp; more" in pages[p] for p in alpha_pages
-    )
+    for p in alpha_hits:
+        assert RAW not in files[p]
 
-    # The second node's detail view rendered: its document content is present
-    # on some page, and that page is not comp-alpha's detail view.
-    beta_pages = [p for p, t in pages.items() if BETA_MARKER in t]
-    assert beta_pages, "comp-beta's detail view (its document content) was not rendered"
-    assert any(p not in alpha_pages for p in beta_pages) or any(
-        "comp-beta" in pages[p] for p in beta_pages
+    beta_pages = detail_pages(files, out_dir, BETA, ALPHA)
+    assert beta_pages, "no detail view found for " + BETA
+    assert any(BETA_MARKER in files[p] for p in beta_pages), (
+        "second node's detail view did not render its content"
     )

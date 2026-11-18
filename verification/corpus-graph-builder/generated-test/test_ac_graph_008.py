@@ -1,3 +1,4 @@
+# hotdocs-criterion: sha256:800869d5f7f6154bc666ffceb732fbef6bea09c33d0e9ca86a612449e638f5a7
 import json
 from pathlib import Path
 
@@ -7,66 +8,64 @@ import corpus_graph_builder
 GENERATED_AT = "2026-11-08T00:19:53Z"
 
 
-def _write(path: Path, text: str) -> None:
+def field(value, name):
+    return value[name] if isinstance(value, dict) else getattr(value, name)
+
+
+def _write(path, text):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
 
 
-def _component(repo_root: Path, slug: str, depends_on: str, owner: str) -> None:
+def _component(repo_root, slug, upper):
     base = repo_root / "specs" / "components" / slug
-    upper = slug.upper()
+    text = (
+        "---\n"
+        + "id: comp-" + slug + "\n"
+        + "title: Component " + upper + "\n"
+        + "status: draft\n"
+        + "owners: [pipeline-team]\n"
+        + "depends_on: []\n"
+        + "realizes: []\n"
+        + "uses_var: []\n"
+        + "sealed: true\n"
+        + "source_path: legacy/" + slug + "/\n"
+        + "---\n"
+        + "\n"
+        + "# Component " + upper + "\n"
+        + "\n"
+        + "## Purpose\n"
+        + "\n"
+        + "A small fixture component named " + slug + ".\n"
+    )
+    _write(base / "component.md", text)
+    req_id = "R-" + upper + "-001"
+    ac_id = "AC-" + upper + "-001"
     _write(
-        base / "component.md",
-        "---\n"
-        f"id: comp-{slug}\n"
-        f"title: Component {upper}\n"
-        "status: draft\n"
-        f"owners: [{owner}]\n"
-        f"depends_on: [{depends_on}]\n"
-        "realizes: []\n"
-        "uses_var: []\n"
-        "sealed: true\n"
-        f"source_path: legacy/{slug}/\n"
-        "---\n"
-        f"# comp-{slug}\n"
-        "\n"
-        "## Purpose\n"
-        "\n"
-        f"Component {upper} exists for a determinism fixture.\n",
+        base / "requirements" / (req_id + ".md"),
+        "**" + req_id + "** — The component MUST exist.\n",
     )
     _write(
-        base / "requirements" / f"R-{upper}-001.md",
-        f"**R-{upper}-001** — Component {upper} MUST do its one thing.\n",
-    )
-    _write(
-        base / "acceptance" / f"AC-{upper}-001.md",
-        f"# AC-{upper}-001\n"
-        "\n"
-        f"Covers: R-{upper}-001\n"
-        "Kind: generated-test\n"
-        "\n"
-        "```gherkin\n"
-        f"Given component {upper}\n"
-        "When it runs\n"
-        "Then it does its one thing\n"
-        "```\n",
+        base / "acceptance" / (ac_id + ".md"),
+        "# " + ac_id + "\n\nCovers: " + req_id + "\nKind: llm-judge\n\n"
+        + "The component exists.\n",
     )
 
 
-def _build_fixture(repo_root: Path) -> None:
-    _component(repo_root, "a", "", "team-a")
-    _component(repo_root, "b", "comp-a", "team-b")
+def _build_fixture(repo_root):
+    _component(repo_root, "a", "A")
+    _component(repo_root, "b", "B")
     manifest = {
         "generated_at": GENERATED_AT,
         "verification_report": {"overall": "pass"},
     }
     _write(
         repo_root / "verification" / "a" / ".provenance.json",
-        json.dumps(manifest, indent=2) + "\n",
+        json.dumps(manifest),
     )
 
 
-def test_ac_graph_008_graph_is_deterministic_and_plain_json(tmp_path):
+def test_graph_is_deterministic_and_plain_json(tmp_path):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
     _build_fixture(repo_root)
@@ -77,27 +76,25 @@ def test_ac_graph_008_graph_is_deterministic_and_plain_json(tmp_path):
     bytes1 = graph1.to_json_bytes()
     bytes2 = graph2.to_json_bytes()
     assert isinstance(bytes1, bytes)
-    assert isinstance(bytes2, bytes)
     assert bytes1 == bytes2
 
-    path1 = corpus_graph_builder.write_corpus_graph(graph1, repo_root)
-    written1 = Path(path1).read_bytes()
-    path2 = corpus_graph_builder.write_corpus_graph(graph2, repo_root)
-    written2 = Path(path2).read_bytes()
+    out1 = corpus_graph_builder.write_corpus_graph(graph1, repo_root)
+    written1 = Path(out1).read_bytes()
+    out2 = corpus_graph_builder.write_corpus_graph(graph2, repo_root)
+    written2 = Path(out2).read_bytes()
 
     expected_path = repo_root / "verification" / "corpus-graph.json"
-    assert Path(path1).resolve() == expected_path.resolve()
-    assert Path(path2).resolve() == expected_path.resolve()
+    assert Path(out1).resolve() == expected_path.resolve()
+    assert Path(out2).resolve() == expected_path.resolve()
 
     assert written1 == bytes1
     assert written2 == bytes1
     assert written1 == written2
 
-    for raw in (bytes1, bytes2, written1, written2):
-        data = json.loads(raw.decode("utf-8"))
-        node_a = data["nodes"]["comp-a"]
-        provenance = node_a["provenance"]
-        assert isinstance(provenance, dict)
+    for raw in (bytes1, written1, written2):
+        data = json.loads(raw)
+        node = data["nodes"]["comp-a"]
+        provenance = node["provenance"]
         assert provenance["generated_at"] == GENERATED_AT
         assert isinstance(provenance["generated_at"], str)
-        assert node_a["verification"] == {"overall": "pass"}
+        assert node["verification"] == {"overall": "pass"}

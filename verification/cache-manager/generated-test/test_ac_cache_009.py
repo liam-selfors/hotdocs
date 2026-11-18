@@ -1,3 +1,4 @@
+# hotdocs-criterion: sha256:5c88050ddb651d4ee27c67e294631f736ea7b20dde8e2945c21946f04d872775
 import copy
 import threading
 from pathlib import Path

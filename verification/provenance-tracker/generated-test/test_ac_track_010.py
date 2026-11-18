@@ -1,338 +1,298 @@
-import json
-import textwrap
+# hotdocs-criterion: sha256:ba31793e3eb629453aeb572bc685912e82fc02ecaf09465c98014a15827a0267
+import importlib.util
+import sys
 from pathlib import Path
 
-import pytest
-
 import provenance_tracker
-
-
-MODEL = "anthropic:claude-sonnet-5"
-SEED = 7
-BACKEND = "backend-sentinel"
 
 
 def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-# ---------------------------------------------------------------------------
-# Fixture construction
-# ---------------------------------------------------------------------------
+def load_module(path, module_name):
+    spec = importlib.util.spec_from_file_location(module_name, path)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    spec.loader.exec_module(module)
+    return module
 
-def _write(path: Path, content: str):
+
+CHECKER_BODY = (
+    "\n"
+    "def _log(line):\n"
+    "    with open(LOG, 'a') as f:\n"
+    "        f.write(line + '\\n')\n"
+    "\n"
+    "\n"
+    "class _Key:\n"
+    "    def __init__(self, spec_bundle_hash, gate_versions):\n"
+    "        self.spec_bundle_hash = spec_bundle_hash\n"
+    "        self.gate_versions = gate_versions\n"
+    "\n"
+    "\n"
+    "def current_sealed_key(component_id, repo_root):\n"
+    "    _log('sealed_key ' + component_id)\n"
+    "    return None\n"
+    "\n"
+    "\n"
+    "def current_provenance_key(component_id, repo_root):\n"
+    "    _log('provenance_key ' + component_id)\n"
+    "    return _Key('sha256:' + '0' * 64, {\n"
+    "        'compiler': 'criterion-compiler@1.0.0',\n"
+    "        'generated_test': 'generated_test@1.0.0',\n"
+    "        'verifier': 'verifier-orchestrator@2.0.0',\n"
+    "        'license_scanner': 'license_scanner@4.0.3',\n"
+    "        'secret_scanner': 'secret_scanner@0.0.0',\n"
+    "    })\n"
+    "\n"
+    "\n"
+    "def check_provenance(component_id, spec_bundle_hash, gate_versions, repo_root):\n"
+    "    _log('check_provenance ' + component_id)\n"
+    "    return {\n"
+    "        'hit': True,\n"
+    "        'verification_report': {\n"
+    "            'component_id': component_id,\n"
+    "            'criteria': [{'id': 'AC-X-001', 'covers': 'R-X-001', 'kind': 'compiled', 'result': 'pass'}],\n"
+    "            'requirement_results': {'R-X-001': 'pass'},\n"
+    "            'interface_drift': False,\n"
+    "            'mutation_score': 0.9,\n"
+    "            'mutation_error': None,\n"
+    "            'overall': 'pass',\n"
+    "        },\n"
+    "        'license_scan': {\n"
+    "            'component_id': component_id,\n"
+    "            'gate_version': 'license_scanner@4.0.3',\n"
+    "            'evaluated': True,\n"
+    "            'reason': None,\n"
+    "            'similarity_score': 0.1,\n"
+    "            'block_threshold': 0.7,\n"
+    "            'blocked': False,\n"
+    "            'matches': [],\n"
+    "            'notified': False,\n"
+    "            'notification_delivery_error': None,\n"
+    "            'cache_hit': False,\n"
+    "        },\n"
+    "        'secret_scan': {\n"
+    "            'scope': 'full',\n"
+    "            'gate_version': 'secret_scanner@0.0.0',\n"
+    "            'flagged': False,\n"
+    "            'matches': [],\n"
+    "            'allowed': [],\n"
+    "            'unused_allowlist_entries': [],\n"
+    "            'notified': False,\n"
+    "            'notification_delivery_error': None,\n"
+    "            'cache_hit': False,\n"
+    "        },\n"
+    "    }\n"
+    "\n"
+    "\n"
+    "def check_sealed_provenance(component_id, repo_root):\n"
+    "    _log('check_sealed ' + component_id)\n"
+    "    return {\n"
+    "        'hit': False,\n"
+    "        'sealed': False,\n"
+    "        'reason': 'not_sealed',\n"
+    "        'verification_report': None,\n"
+    "        'license_scan': None,\n"
+    "        'secret_scan': None,\n"
+    "        'owners': None,\n"
+    "        'source_hash': None,\n"
+    "        'written_at': None,\n"
+    "    }\n"
+)
+
+
+VERIFIER_BODY = (
+    "\n"
+    "GATE_VERSION = 'capability_scenario_verifier@2.0.0'\n"
+    "\n"
+    "\n"
+    "class UnknownCapabilityError(ValueError):\n"
+    "    pass\n"
+    "\n"
+    "\n"
+    "class ModelRequiredError(ValueError):\n"
+    "    pass\n"
+    "\n"
+    "\n"
+    "def _log(line):\n"
+    "    with open(LOG, 'a') as f:\n"
+    "        f.write(line + '\\n')\n"
+    "\n"
+    "\n"
+    "def run_capability_scenarios(blast_radius, repo_root, judge=None, test_author=None):\n"
+    "    _log('run_scenarios')\n"
+    "    return {}\n"
+    "\n"
+    "\n"
+    "def check_capability_provenance(capability_id, repo_root):\n"
+    "    _log('check ' + capability_id)\n"
+    "    return {'hit': False, 'capability_scenario_report': None}\n"
+    "\n"
+    "\n"
+    "def run_capability_gates(capability_id, repo_root, model=None, seed=0, llm_backend=None):\n"
+    "    _log('run ' + capability_id + ' ' + repr(model) + ' ' + repr(seed))\n"
+    "    overall = OUTCOMES.get(capability_id, 'pass')\n"
+    "    return {\n"
+    "        'hit': False,\n"
+    "        'capability_scenario_report': {\n"
+    "            capability_id: {\n"
+    "                'overall': overall,\n"
+    "                'scenarios': [\n"
+    "                    {'id': 'CS-' + capability_id[2:] + '-001', 'kind': 'compiled', 'result': overall}\n"
+    "                ],\n"
+    "            }\n"
+    "        },\n"
+    "    }\n"
+)
+
+
+def _write(path, text):
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(content)
+    path.write_text(text)
 
 
-def _component_md(slug: str, capability: str) -> str:
-    return textwrap.dedent(
-        f"""\
-        ---
-        id: comp-{slug}
-        title: Component {slug}
-        status: draft
-        owners: [team-{slug}]
-        depends_on: []
-        realizes: [{capability}]
-        sealed: false
-        ---
+def _component(repo_root, slug, realizes):
+    upper = slug.upper()
+    base = repo_root / "specs" / "components" / slug
+    _write(
+        base / "component.md",
+        "---\n"
+        "id: comp-" + slug + "\n"
+        "title: " + slug.capitalize() + "\n"
+        "status: draft\n"
+        "owners: [pipeline-team]\n"
+        "depends_on: []\n"
+        "realizes: [" + ", ".join(realizes) + "]\n"
+        "sealed: false\n"
+        "---\n\n"
+        "# " + slug.capitalize() + "\n\n"
+        "A fixture component.\n",
+    )
+    _write(
+        base / "requirements" / ("R-" + upper + "-001.md"),
+        "# R-" + upper + "-001\n\nThe component MUST do its one thing.\n",
+    )
+    _write(
+        base / "acceptance" / ("AC-" + upper + "-001.md"),
+        "# AC-" + upper + "-001\n\n"
+        "Covers: R-" + upper + "-001\n"
+        "Kind: compiled\n\n"
+        "```gherkin\nGiven a thing\nWhen it runs\nThen it works\n```\n",
+    )
+    _write(base / "interface" / "library.md", "# Library\n\nNothing.\n")
+    _write(base / "constraints.md", "# Constraints\n\nNone.\n")
+    _write(repo_root / "gen" / slug / (slug.replace("-", "_") + ".py"), "X = 1\n")
 
-        # comp-{slug}
 
-        A synthetic component realizing {capability}.
-        """
+def _capability(repo_root, cap_id):
+    name = cap_id[2:].lower()
+    _write(
+        repo_root / "specs" / "product" / (name + ".md"),
+        "---\n"
+        "id: " + cap_id + "\n"
+        "title: " + name.capitalize() + "\n"
+        "status: draft\n"
+        "owners: [pipeline-team]\n"
+        "---\n\n"
+        "# " + cap_id + "\n\n"
+        "### CS-" + cap_id[2:] + "-001\n\n"
+        "Covers: " + cap_id + "\n"
+        "Kind: compiled\n\n"
+        "```gherkin\nGiven a thing\nWhen it runs\nThen it works\n```\n",
     )
 
 
-def _product_md(cap_id: str, name: str) -> str:
-    suffix = cap_id[len("P-"):]
-    return textwrap.dedent(
-        f"""\
-        ---
-        id: {cap_id}
-        title: Capability {name}
-        status: draft
-        owners: [product-team]
-        ---
-
-        # {cap_id}
-
-        A synthetic product capability.
-
-        ### CS-{suffix}-001
-
-        Covers: {cap_id}
-        Kind: generated-test
-
-        ```gherkin
-        Given a thing
-        When it is exercised
-        Then it works
-        ```
-        """
+def _build(tmp_path, components, capabilities, outcomes):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    log = tmp_path / "calls.log"
+    _write(repo_root / "specs" / "glossary.md", "# Glossary\n\n- **Thing** — a thing.\n")
+    for slug, realizes in components.items():
+        _component(repo_root, slug, realizes)
+    for cap in capabilities:
+        _capability(repo_root, cap)
+    _write(
+        repo_root / "gen" / "provenance-checker" / "provenance_checker.py",
+        "LOG = " + repr(str(log)) + "\n" + CHECKER_BODY,
     )
-
-
-PROVENANCE_CHECKER_FAKE = '''
-import json
-from types import SimpleNamespace
-
-LOG_PATH = {log_path!r}
-
-
-def _log(record):
-    with open(LOG_PATH, "a") as fh:
-        fh.write(json.dumps(record) + "\\n")
-
-
-def current_sealed_key(component_id, repo_root):
-    _log({{"fn": "current_sealed_key", "component_id": component_id}})
-    return None
-
-
-def current_provenance_key(component_id, repo_root):
-    _log({{"fn": "current_provenance_key", "component_id": component_id}})
-    return SimpleNamespace(
-        spec_bundle_hash="sha256:" + "ab" * 32,
-        gate_versions={{
-            "compiler": "criterion-compiler@1.0.0",
-            "generated_test": "generated_test@1.0.0",
-            "verifier": "verifier-orchestrator@2.0.0",
-            "license_scanner": "license_scanner@4.0.3+9f2c41ab07de",
-            "secret_scanner": "secret_scanner@0.0.0",
-        }},
+    _write(
+        repo_root / "gen" / "capability-scenario-verifier" / "capability_scenario_verifier.py",
+        "LOG = " + repr(str(log)) + "\n"
+        + "OUTCOMES = " + repr(dict(outcomes)) + "\n"
+        + VERIFIER_BODY,
     )
+    return repo_root, log
 
 
-def check_provenance(component_id, spec_bundle_hash, gate_versions, repo_root):
-    _log({{"fn": "check_provenance", "component_id": component_id}})
-    return {{
-        "hit": True,
-        "verification_report": {{
-            "component_id": component_id,
-            "criteria": [
-                {{"id": "AC-X-001", "covers": "R-X-001", "kind": "compiled", "result": "pass"}}
-            ],
-            "requirement_results": {{"R-X-001": "pass"}},
-            "interface_drift": False,
-            "mutation_score": 0.9,
-            "overall": "pass",
-        }},
-        "license_scan": {{
-            "component_id": component_id,
-            "gate_version": "license_scanner@4.0.3+9f2c41ab07de",
-            "evaluated": True,
-            "reason": None,
-            "similarity_score": 0.1,
-            "block_threshold": 0.7,
-            "blocked": False,
-            "matches": [],
-            "notified": False,
-            "notification_delivery_error": None,
-            "cache_hit": False,
-        }},
-        "secret_scan": {{
-            "scope": "full",
-            "gate_version": "secret_scanner@0.0.0",
-            "flagged": False,
-            "matches": [],
-            "allowed": [],
-            "unused_allowlist_entries": [],
-            "notified": False,
-            "notification_delivery_error": None,
-            "cache_hit": False,
-        }},
-    }}
+def _lines(log):
+    if not log.exists():
+        return []
+    return [line for line in log.read_text().splitlines() if line]
 
-
-def check_sealed_provenance(component_id, repo_root):
-    _log({{"fn": "check_sealed_provenance", "component_id": component_id}})
-    return {{
-        "hit": False,
-        "sealed": False,
-        "reason": "not_sealed",
-        "verification_report": None,
-        "license_scan": None,
-        "secret_scan": None,
-        "owners": None,
-        "source_hash": None,
-        "written_at": None,
-    }}
-'''
-
-
-CAPABILITY_VERIFIER_FAKE = '''
-import json
-
-LOG_PATH = {log_path!r}
-FAILING = {failing!r}
-
-GATE_VERSION = "capability_scenario_verifier@2.0.0"
-
-
-class UnknownCapabilityError(ValueError):
-    pass
-
-
-class ModelRequiredError(ValueError):
-    pass
-
-
-def _log(record):
-    with open(LOG_PATH, "a") as fh:
-        fh.write(json.dumps(record) + "\\n")
-
-
-def run_capability_scenarios(blast_radius, repo_root, judge=None, test_author=None):
-    _log({{"fn": "run_capability_scenarios"}})
-    return {{}}
-
-
-def check_capability_provenance(capability_id, repo_root):
-    _log({{"fn": "check_capability_provenance", "capability_id": capability_id}})
-    return {{"hit": False, "capability_scenario_report": None}}
-
-
-def run_capability_gates(capability_id, repo_root, model=None, seed=0, llm_backend=None):
-    _log({{
-        "fn": "run_capability_gates",
-        "capability_id": capability_id,
-        "model": model,
-        "seed": seed,
-        "llm_backend": llm_backend if isinstance(llm_backend, (str, type(None))) else repr(llm_backend),
-    }})
-    suffix = capability_id[len("P-"):]
-    result = "fail" if capability_id in FAILING else "pass"
-    return {{
-        "hit": False,
-        "capability_scenario_report": {{
-            capability_id: {{
-                "overall": result,
-                "scenarios": [
-                    {{"id": "CS-" + suffix + "-001", "kind": "generated-test", "result": result}}
-                ],
-            }}
-        }},
-    }}
-'''
-
-
-IMPACT_ANALYZER_FAKE = '''
-def compute_blast_radius(changed_ids, repo_root):
-    return {
-        "impacted": [
-            {"component_id": c, "reason": "direct", "via": None}
-            for c in changed_ids
-            if c.startswith("comp-")
-        ],
-        "precondition_error": None,
-    }
-'''
-
-
-def _build_repo(tmp_path: Path, failing=()):
-    repo = tmp_path / "repo"
-    log_dir = tmp_path / "logs"
-    log_dir.mkdir(parents=True, exist_ok=True)
-    prov_log = log_dir / "provenance_checker.jsonl"
-    cap_log = log_dir / "capability_verifier.jsonl"
-    prov_log.write_text("")
-    cap_log.write_text("")
-
-    _write(repo / "specs" / "components" / "alpha" / "component.md",
-           _component_md("alpha", "P-ONE"))
-    _write(repo / "specs" / "components" / "beta" / "component.md",
-           _component_md("beta", "P-TWO"))
-    _write(repo / "specs" / "product" / "one.md", _product_md("P-ONE", "one"))
-    _write(repo / "specs" / "product" / "two.md", _product_md("P-TWO", "two"))
-    _write(repo / "gen" / "alpha" / "alpha.py", "VALUE = 1\n")
-    _write(repo / "gen" / "beta" / "beta.py", "VALUE = 2\n")
-
-    _write(repo / "gen" / "provenance-checker" / "provenance_checker.py",
-           PROVENANCE_CHECKER_FAKE.format(log_path=str(prov_log)))
-    _write(repo / "gen" / "capability-scenario-verifier" / "capability_scenario_verifier.py",
-           CAPABILITY_VERIFIER_FAKE.format(log_path=str(cap_log), failing=list(failing)))
-    _write(repo / "gen" / "impact-analyzer" / "impact_analyzer.py", IMPACT_ANALYZER_FAKE)
-
-    return repo, prov_log, cap_log
-
-
-def _read_log(path: Path):
-    return [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
-
-
-# ---------------------------------------------------------------------------
-# Scenarios
-# ---------------------------------------------------------------------------
 
 def test_all_components_and_capabilities_pass_is_ready(tmp_path):
-    repo, prov_log, cap_log = _build_repo(tmp_path)
-
-    report = provenance_tracker.check_readiness(
-        repo, None, model=MODEL, seed=SEED, llm_backend=BACKEND
+    repo_root, log = _build(
+        tmp_path,
+        {"alpha": ["P-FOO"], "beta": ["P-BAR"]},
+        ["P-FOO", "P-BAR"],
+        {"P-FOO": "pass", "P-BAR": "pass"},
     )
+    report = provenance_tracker.check_readiness(repo_root, model="test-model", seed=0)
 
     assert field(report, "ready") is True
     assert list(field(report, "not_ready_reasons")) == []
+    components = field(report, "components")
+    assert "comp-alpha" in components
+    assert "comp-beta" in components
 
-    calls = _read_log(cap_log)
-    checked = [c["capability_id"] for c in calls if c["fn"] == "check_capability_provenance"]
-    ran = [c for c in calls if c["fn"] == "run_capability_gates"]
-    assert sorted(checked) == ["P-ONE", "P-TWO"]
-    assert sorted(c["capability_id"] for c in ran) == ["P-ONE", "P-TWO"]
-    assert not any(c["fn"] == "run_capability_scenarios" for c in calls)
-
-    # check-then-run ordering, and model/seed/llm_backend passed through unchanged
-    for cap in ("P-ONE", "P-TWO"):
-        idx_check = next(i for i, c in enumerate(calls)
-                         if c["fn"] == "check_capability_provenance" and c["capability_id"] == cap)
-        idx_run = next(i for i, c in enumerate(calls)
-                       if c["fn"] == "run_capability_gates" and c["capability_id"] == cap)
-        assert idx_check < idx_run
-    for c in ran:
-        assert c["model"] == MODEL
-        assert c["seed"] == SEED
-        assert c["llm_backend"] == BACKEND
-
-    capabilities = field(report, "capabilities")
-    assert set(capabilities.keys()) == {"P-ONE", "P-TWO"}
+    lines = _lines(log)
+    run_lines = [line for line in lines if line.startswith("run ")]
+    assert any(line.startswith("run P-FOO ") for line in run_lines)
+    assert any(line.startswith("run P-BAR ") for line in run_lines)
+    for cap in ("P-FOO", "P-BAR"):
+        check_idx = lines.index("check " + cap)
+        run_idx = next(i for i, line in enumerate(lines) if line.startswith("run " + cap + " "))
+        assert check_idx < run_idx
 
 
-def test_one_failing_capability_makes_not_ready_despite_components_passing(tmp_path):
-    repo, prov_log, cap_log = _build_repo(tmp_path, failing=("P-TWO",))
-
-    report = provenance_tracker.check_readiness(
-        repo, None, model=MODEL, seed=SEED, llm_backend=BACKEND
+def test_one_failing_capability_makes_not_ready(tmp_path):
+    repo_root, log = _build(
+        tmp_path,
+        {"alpha": ["P-FOO"], "beta": ["P-BAR"]},
+        ["P-FOO", "P-BAR"],
+        {"P-FOO": "pass", "P-BAR": "fail"},
     )
+    report = provenance_tracker.check_readiness(repo_root, model="test-model", seed=0)
 
     assert field(report, "ready") is False
     reasons = list(field(report, "not_ready_reasons"))
-    assert reasons, "not_ready_reasons must name the failing capability"
-    assert any("P-TWO" in str(r) for r in reasons)
-    assert not any("P-ONE" in str(r) for r in reasons)
-
-    # every component passed provenance checking
-    prov_calls = _read_log(prov_log)
-    checked_components = {c["component_id"] for c in prov_calls if c["fn"] == "check_provenance"}
-    assert checked_components == {"comp-alpha", "comp-beta"}
+    assert any("P-BAR" in r for r in reasons)
+    assert not any("P-FOO" in r for r in reasons)
+    assert not any("comp-alpha" in r or "comp-beta" in r for r in reasons)
     components = field(report, "components")
-    for cid in ("comp-alpha", "comp-beta"):
-        assert field(components[cid], "hit") is True
-
-    ran = [c["capability_id"] for c in _read_log(cap_log) if c["fn"] == "run_capability_gates"]
-    assert "P-TWO" in ran
+    assert "comp-alpha" in components
+    assert "comp-beta" in components
 
 
-def test_capability_miss_without_model_raises_value_error(tmp_path):
-    repo, prov_log, cap_log = _build_repo(tmp_path)
+def test_capability_miss_without_model_is_not_ready_and_never_runs(tmp_path):
+    repo_root, log = _build(
+        tmp_path,
+        {"alpha": ["P-FOO"], "beta": ["P-FOO"]},
+        ["P-FOO"],
+        {"P-FOO": "pass"},
+    )
+    report = provenance_tracker.check_readiness(repo_root, model=None)
 
-    with pytest.raises(ValueError):
-        provenance_tracker.check_readiness(
-            repo, None, model=None, seed=SEED, llm_backend=BACKEND
-        )
+    assert field(report, "ready") is False
+    assert list(field(report, "not_ready_reasons")) == [
+        "P-FOO: needs a fresh run; pass --model"
+    ]
+    components = field(report, "components")
+    assert "comp-alpha" in components
+    assert "comp-beta" in components
 
-    calls = _read_log(cap_log)
-    assert any(c["fn"] == "check_capability_provenance" for c in calls)
-    assert not any(c["fn"] == "run_capability_gates" for c in calls)
-    assert not any(c["fn"] == "run_capability_scenarios" for c in calls)
+    lines = _lines(log)
+    assert "check P-FOO" in lines
+    assert not any(line.startswith("run ") for line in lines)

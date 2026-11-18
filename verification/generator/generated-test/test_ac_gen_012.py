@@ -1,160 +1,155 @@
-import json
+# hotdocs-criterion: sha256:6ed9ce064d8b05328d951fc7f51208fd6485fbb1f4cc068567f78dd06a04154d
+"""AC-GEN-012 (covers R-GEN-011): a hanging model call is not retried.
+
+Given a mock model configured to hang (never respond) and the SDK's own
+default timeout, when generate is called, then the call eventually
+completes with model_call_error set (not an unbounded hang), and the mock
+model records exactly one call attempt: no internal retry occurred.
+
+The mock backend stands in for a provider that never answers. The SDK's
+default timeout (llm-endpoint's DEFAULT_TIMEOUT_SECONDS) is far too long
+to wait out in a unit test, so the mock models the hang as a short block
+followed by what the SDK reports once its own timeout fires: a
+ModelResponse whose model_call_error has category "timeout". What this
+test checks is generator's handling of that outcome: it surfaces the
+error once and makes no second attempt.
+"""
+
 import threading
 import time
-from collections.abc import Mapping
-from dataclasses import dataclass, field, fields
+import uuid
 from pathlib import Path
-
-import pytest
 
 import generator
 
 
-def _get(value, name):
-    if isinstance(value, dict):
-        return value.get(name)
-    return getattr(value, name, None)
+def field(value, name):
+    return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-@dataclass
-class _FakeSpecBundle(Mapping):
-    component_id: str
-    spec_bundle_hash: str
-    spec: str
-    interface: str
-    constraints: str
-    dependency_interfaces: dict = field(default_factory=dict)
-    dependency_context: dict = field(default_factory=dict)
-    dependency_usage: dict = field(default_factory=dict)
-    vars: dict = field(default_factory=dict)
-    glossary: str = ""
-    hint_code: object = None
-
-    def _names(self):
-        return [f.name for f in fields(self)]
-
-    def __getitem__(self, key):
-        if key not in self._names():
-            raise KeyError(key)
-        return getattr(self, key)
-
-    def __iter__(self):
-        return iter(self._names())
-
-    def __len__(self):
-        return len(self._names())
+COMPONENT_MD = (
+    "---\n"
+    "id: comp-foo\n"
+    "title: Foo\n"
+    "status: draft\n"
+    "owners: [team-a]\n"
+    "sealed: false\n"
+    "depends_on: []\n"
+    "---\n"
+    "\n"
+    "# Foo\n"
+    "\n"
+    "## Purpose\n"
+    "\n"
+    "Foo doubles a number.\n"
+)
 
 
-COMPONENT_MD = """---
-id: comp-foo
-title: Foo
-status: draft
-owners: [team-a]
-sealed: false
-depends_on: []
----
-
-# Foo
-
-## Purpose
-
-Foo doubles a number.
-"""
-
-
-def _make_repo(tmp_path: Path) -> Path:
-    repo_root = tmp_path / "repo"
-    comp_dir = repo_root / "specs" / "components" / "foo"
-    (comp_dir / "requirements").mkdir(parents=True)
-    (comp_dir / "interface").mkdir(parents=True)
-    (comp_dir / "acceptance").mkdir(parents=True)
-    (comp_dir / "component.md").write_text(COMPONENT_MD, encoding="utf-8")
-    (comp_dir / "requirements" / "R-FOO-001.md").write_text(
-        "# R-FOO-001\n\n**R-FOO-001** — `foo(x)` MUST return `2 * x`.\n",
-        encoding="utf-8",
+def _write_fixture(repo_root: Path) -> None:
+    specs = repo_root / "specs"
+    specs.mkdir(parents=True, exist_ok=True)
+    (specs / "glossary.md").write_text("# Glossary\n\n- **Foo** — a test term.\n")
+    comp = specs / "components" / "foo"
+    (comp / "requirements").mkdir(parents=True, exist_ok=True)
+    (comp / "acceptance").mkdir(parents=True, exist_ok=True)
+    (comp / "interface").mkdir(parents=True, exist_ok=True)
+    (comp / "component.md").write_text(COMPONENT_MD)
+    (comp / "requirements" / "R-FOO-001.md").write_text(
+        "# R-FOO-001\n\n**R-FOO-001** — `foo(x)` MUST return `2 * x`.\n"
     )
-    (comp_dir / "acceptance" / "AC-FOO-001.md").write_text(
-        "# AC-FOO-001\n\nCovers: R-FOO-001\nKind: generated-test\n\n"
-        "```gherkin\nGiven x = 2\nWhen foo(x) is called\nThen it returns 4\n```\n",
-        encoding="utf-8",
+    (comp / "acceptance" / "AC-FOO-001.md").write_text(
+        "# AC-FOO-001\n\n"
+        "Covers: R-FOO-001\n"
+        "Kind: generated-test\n\n"
+        "```gherkin\n"
+        "Given x = 2\n"
+        "When foo(x) is called\n"
+        "Then it returns 4\n"
+        "```\n"
     )
-    (comp_dir / "interface" / "library.md").write_text(
-        "# Library\n\n```\nfoo(x: int) -> int\n```\n", encoding="utf-8"
+    (comp / "interface" / "library.md").write_text(
+        "# Library\n\n```\nfoo(x: int) -> int\n```\n"
     )
-    (comp_dir / "constraints.md").write_text("# Constraints\n\nNone.\n", encoding="utf-8")
-    (repo_root / "specs" / "glossary.md").write_text(
-        "# Glossary\n\n- **Foo** — a test term.\n", encoding="utf-8"
-    )
-    return repo_root
+    (comp / "constraints.md").write_text("# Constraints\n\nNone.\n")
 
 
-def _make_bundle() -> _FakeSpecBundle:
-    return _FakeSpecBundle(
-        component_id="comp-foo",
-        spec_bundle_hash="sha256:" + "a1" * 32,
-        spec="# Foo\n\n## Purpose\n\nFoo doubles a number.\n\n"
+def _bundle():
+    return {
+        "component_id": "comp-foo",
+        # Unique per run so no prior cache entry can turn this into a hit.
+        "spec_bundle_hash": "sha256:" + uuid.uuid4().hex + uuid.uuid4().hex,
+        "spec": "# Foo\n\n## Purpose\n\nFoo doubles a number.\n\n"
         "# R-FOO-001\n\n**R-FOO-001** — `foo(x)` MUST return `2 * x`.",
-        interface="# Library\n\n```\nfoo(x: int) -> int\n```",
-        constraints="# Constraints\n\nNone.",
-        glossary="# Glossary\n\n- **Foo** — a test term.",
-    )
+        "interface": "# Library\n\n```\nfoo(x: int) -> int\n```",
+        "constraints": "# Constraints\n\nNone.",
+        "dependency_interfaces": {},
+        "dependency_context": {},
+        "dependency_usage": {},
+        "vars": {},
+        "glossary": "# Glossary\n\n- **Foo** — a test term.",
+        "hint_code": None,
+    }
 
 
-def test_hanging_model_yields_single_attempt_model_call_error(tmp_path, monkeypatch):
-    # Isolate cache-manager to the local fallback store and llm-endpoint's call log
-    # to a scratch working directory.
+def test_hanging_model_yields_single_attempt_and_model_call_error(tmp_path, monkeypatch):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    _write_fixture(repo_root)
+
+    # Keep any cache traffic local to this temporary repo.
     monkeypatch.delenv("VAR_CACHE_STORE_URL", raising=False)
-    workdir = tmp_path / "cwd"
-    workdir.mkdir()
-    monkeypatch.chdir(workdir)
+    monkeypatch.chdir(repo_root)
 
-    repo_root = _make_repo(tmp_path)
-    bundle = _make_bundle()
-
-    log_path = tmp_path / "mock_model_calls.log"
-    log_path.write_text("", encoding="utf-8")
+    call_log = tmp_path / "mock_calls.log"
+    call_log.write_text("")
 
     def hanging_backend(prompt, model, **params):
-        # Record the attempt to a file the test controls.
-        with open(log_path, "a", encoding="utf-8") as fh:
-            fh.write(json.dumps({"model": model, "t": time.time()}) + "\n")
-        # The model never responds; what eventually surfaces is the SDK's own
-        # default timeout firing, simulated here as the timeout exception the
-        # bounded call raises once it gives up waiting.
+        # Record the attempt first, so a retry would show up as a second line.
+        with open(call_log, "a") as fh:
+            fh.write("call\n")
+        # The provider never answers. Block briefly, then report what the
+        # SDK reports when its own default timeout expires.
         time.sleep(0.2)
-        raise TimeoutError("model did not respond before the default timeout")
+        return {
+            "text": None,
+            "model": model,
+            "backend": "mock-hang",
+            "model_call_error": {
+                "category": "timeout",
+                "message": "model call timed out",
+            },
+        }
 
     outcome = {}
 
     def run():
         try:
             outcome["result"] = generator.generate(
-                bundle,
-                "anthropic:claude-sonnet-5",
-                None,
+                _bundle(),
+                "claude-sonnet-5",
                 repo_root=repo_root,
                 llm_backend=hanging_backend,
             )
-        except BaseException as exc:  # pragma: no cover - surfaced below
+        except BaseException as exc:  # surfaced below
             outcome["error"] = exc
 
     worker = threading.Thread(target=run, daemon=True)
     worker.start()
     worker.join(timeout=120)
 
-    assert not worker.is_alive(), "generate() hung instead of completing with model_call_error"
-    assert "error" not in outcome, f"generate() raised instead of returning: {outcome.get('error')!r}"
+    assert not worker.is_alive(), "generate did not complete: unbounded hang"
+    assert "error" not in outcome, "generate raised instead of returning: %r" % (
+        outcome.get("error"),
+    )
 
     result = outcome["result"]
 
-    model_call_error = _get(result, "model_call_error")
-    assert model_call_error, "expected model_call_error to be set for a hanging model"
+    # The call completed with model_call_error set.
+    assert field(result, "model_call_error"), "expected model_call_error to be set"
+    assert not field(result, "files"), "a failed call must not produce files"
+    assert field(result, "refused") is None, "a hang is a model_call_error, not a refusal"
+    assert field(result, "cache_hit") is False
 
-    assert not _get(result, "files"), "a failed call must not produce files"
-    assert _get(result, "refused") is None, "a hanging model call is not a refusal"
-    assert _get(result, "cache_hit") is False, "a failed call is never a cache hit"
-
-    lines = [ln for ln in log_path.read_text(encoding="utf-8").splitlines() if ln.strip()]
-    assert len(lines) == 1, (
-        f"expected exactly one model call attempt (no internal retry), got {len(lines)}"
-    )
+    # Exactly one call attempt: no internal retry.
+    lines = [ln for ln in call_log.read_text().splitlines() if ln.strip()]
+    assert len(lines) == 1, "expected exactly one model call attempt, saw %d" % len(lines)

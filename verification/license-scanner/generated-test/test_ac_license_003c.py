@@ -1,3 +1,4 @@
+# hotdocs-criterion: sha256:bf2849a8c7d5527db331b1b1baec586b2d0b3a95a38fa0acb4b985a8c81a1f7c
 import hashlib
 import json
 import os

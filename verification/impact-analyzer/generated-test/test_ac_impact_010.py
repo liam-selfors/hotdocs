@@ -1,3 +1,4 @@
+# hotdocs-criterion: sha256:a40b943e5a1bafaf93789dec6c13a6b00375dc029835c73cffdf9b90073eeb56
 """AC-IMPACT-010 (covers R-IMPACT-010).
 
 "The prior commit" resolves to the merge-base between HEAD and the repo's

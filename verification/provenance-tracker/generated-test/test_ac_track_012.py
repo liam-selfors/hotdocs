@@ -1,27 +1,18 @@
-"""AC-TRACK-012 (covers R-TRACK-012).
+# hotdocs-criterion: sha256:809a54635f6462b3bc8bdf4e6571e23aa08547a2b75700642c283d6c8693f3ab
+"""AC-TRACK-012: check_readiness reads dict-shaped dependency results.
 
-Given a dict-shaped (never object-shaped) fake provenance-checker result
-and a dict-shaped fake impact-analyzer impacted entry, when
-check_readiness runs over that scope, then it reads hit/component_id/etc.
-correctly from the dict shape and does not raise AttributeError.
+Covers: R-TRACK-012
 """
 
-import provenance_tracker
-
-import copy
 import json
 from pathlib import Path
 
 import pytest
 
-
-def field(value, name):
-    return value[name] if isinstance(value, dict) else getattr(value, name)
+import provenance_tracker
 
 
-FOO_HASH = "sha256:" + "a" * 64
-BAR_HASH = "sha256:" + "b" * 64
-
+SPEC_HASH = "sha256:" + "ab" * 32
 GATE_VERSIONS = {
     "compiler": "criterion-compiler@1.0.0",
     "generated_test": "generated_test@1.0.0",
@@ -31,312 +22,273 @@ GATE_VERSIONS = {
 }
 
 
-def _hit_result(component_id):
-    return {
-        "hit": True,
-        "verification_report": {
-            "component_id": component_id,
-            "criteria": [
-                {
-                    "id": "AC-FOO-001",
-                    "covers": "R-FOO-001",
-                    "kind": "compiled",
-                    "result": "pass",
-                }
-            ],
-            "requirement_results": {"R-FOO-001": "pass"},
-            "interface_drift": False,
-            "mutation_score": 0.92,
-            "overall": "pass",
-        },
-        "license_scan": {
-            "component_id": component_id,
-            "gate_version": "license_scanner@4.0.3+9f2c41ab07de",
-            "evaluated": True,
-            "reason": None,
-            "similarity_score": 0.1,
-            "block_threshold": 0.7,
-            "blocked": False,
-            "matches": [],
-            "notified": False,
-            "notification_delivery_error": None,
-            "cache_hit": False,
-        },
-        "secret_scan": {
-            "scope": "full",
-            "gate_version": "secret_scanner@0.0.0",
-            "flagged": False,
-            "matches": [],
-            "allowed": [],
-            "unused_allowlist_entries": [],
-            "notified": False,
-            "notification_delivery_error": None,
-            "cache_hit": False,
-        },
-    }
+def field(value, name):
+    return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def _miss_result():
-    return {
-        "hit": False,
-        "verification_report": None,
-        "license_scan": None,
-        "secret_scan": None,
-    }
+def _write(path, text):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
 
 
-PROVENANCE_CHECKER_SRC = '''\
-import copy
-import json
-
-LOG = {log!r}
-RESULTS = {results!r}
-HASHES = {hashes!r}
-GATE_VERSIONS = {gate_versions!r}
-
-
-def _log(rec):
-    with open(LOG, "a") as f:
-        f.write(json.dumps(rec) + "\\n")
-
-
-def _norm(component_id):
-    component_id = str(component_id)
-    return component_id if component_id.startswith("comp-") else "comp-" + component_id
-
-
-class _Key(dict):
-    """ProvenanceKey: documented as an object exposing both fields as
-    attributes; also indexable, so it is readable either way."""
-
-    def __getattr__(self, name):
-        try:
-            return self[name]
-        except KeyError:
-            raise AttributeError(name)
-
-
-def current_sealed_key(component_id, repo_root):
-    _log({{"fn": "current_sealed_key", "component_id": _norm(component_id)}})
-    return None
-
-
-def current_provenance_key(component_id, repo_root):
-    cid = _norm(component_id)
-    _log({{"fn": "current_provenance_key", "component_id": cid}})
-    return _Key(
-        spec_bundle_hash=HASHES.get(cid, "sha256:" + "0" * 64),
-        gate_versions=dict(GATE_VERSIONS),
-    )
-
-
-def check_provenance(component_id, spec_bundle_hash, gate_versions, repo_root):
-    cid = _norm(component_id)
-    _log({{
-        "fn": "check_provenance",
-        "component_id": cid,
-        "spec_bundle_hash": spec_bundle_hash,
-        "gate_versions": dict(gate_versions),
-    }})
-    if cid in RESULTS:
-        return copy.deepcopy(RESULTS[cid])
-    return {{"hit": False, "verification_report": None,
-             "license_scan": None, "secret_scan": None}}
-
-
-def check_sealed_provenance(component_id, repo_root):
-    _log({{"fn": "check_sealed_provenance", "component_id": _norm(component_id)}})
-    return {{
-        "hit": False,
-        "sealed": False,
-        "reason": "not_sealed",
-        "verification_report": None,
-        "license_scan": None,
-        "secret_scan": None,
-        "owners": None,
-        "source_hash": None,
-        "written_at": None,
-    }}
-'''
-
-
-IMPACT_ANALYZER_SRC = '''\
-import copy
-import json
-
-LOG = {log!r}
-IMPACTED = {impacted!r}
-
-
-def compute_blast_radius(changed_ids, repo_root):
-    with open(LOG, "a") as f:
-        f.write(json.dumps({{"fn": "compute_blast_radius",
-                             "changed_ids": list(changed_ids)}}) + "\\n")
-    return {{"impacted": copy.deepcopy(IMPACTED), "precondition_error": None}}
-'''
-
-
-CAPABILITY_VERIFIER_SRC = '''\
-import json
-
-LOG = {log!r}
-GATE_VERSION = "capability_scenario_verifier@2.0.0"
-
-
-class UnknownCapabilityError(ValueError):
-    pass
-
-
-class ModelRequiredError(ValueError):
-    pass
-
-
-def _log(rec):
-    with open(LOG, "a") as f:
-        f.write(json.dumps(rec) + "\\n")
-
-
-def _report(capability_id):
-    return {{capability_id: {{"overall": "pass", "scenarios": []}}}}
-
-
-def run_capability_scenarios(blast_radius, repo_root, judge=None, test_author=None):
-    _log({{"fn": "run_capability_scenarios"}})
-    return {{}}
-
-
-def check_capability_provenance(capability_id, repo_root):
-    _log({{"fn": "check_capability_provenance", "capability_id": capability_id}})
-    return {{"hit": True, "capability_scenario_report": _report(capability_id)}}
-
-
-def run_capability_gates(capability_id, repo_root, model=None, seed=0, llm_backend=None):
-    _log({{"fn": "run_capability_gates", "capability_id": capability_id}})
-    return {{"hit": True, "capability_scenario_report": _report(capability_id)}}
-'''
-
-
-def _write_component_md(repo_root, slug):
-    d = repo_root / "specs" / "components" / slug
-    d.mkdir(parents=True, exist_ok=True)
-    (d / "component.md").write_text(
+def _build_corpus(repo_root):
+    comp_dir = repo_root / "specs" / "components" / "foo"
+    _write(
+        comp_dir / "component.md",
         "---\n"
-        f"id: comp-{slug}\n"
-        f"title: {slug} component\n"
+        "id: comp-foo\n"
+        "title: Foo\n"
         "status: draft\n"
-        "owners: [test-team]\n"
-        "sealed: false\n"
-        "realizes: []\n"
-        "---\n\n"
-        f"# comp-{slug}\n\nA fixture component.\n"
+        "owners: [pipeline-team]\n"
+        "sealed: true\n"
+        "source_path: legacy/foo/\n"
+        "depends_on: []\n"
+        "---\n"
+        "\n"
+        "# Foo\n"
+        "\n"
+        "## Purpose\n"
+        "\n"
+        "A fixture component.\n",
+    )
+    _write(
+        comp_dir / "requirements" / "R-FOO-001.md",
+        "# R-FOO-001\n\n**R-FOO-001** — The component MUST do foo.\n",
+    )
+    _write(
+        comp_dir / "acceptance" / "AC-FOO-001.md",
+        "# AC-FOO-001\n\nCovers: R-FOO-001\nKind: generated-test\n\n"
+        "```gherkin\nGiven foo\nWhen foo runs\nThen foo happens\n```\n",
+    )
+    _write(comp_dir / "constraints.md", "# Constraints\n\nNone.\n")
+
+
+def _write_fake_provenance_checker(repo_root, log_path, hit):
+    if hit:
+        result_src = (
+            "    return {\n"
+            "        'hit': True,\n"
+            "        'verification_report': {\n"
+            "            'component_id': component_id,\n"
+            "            'criteria': [\n"
+            "                {'id': 'AC-FOO-001', 'covers': 'R-FOO-001',\n"
+            "                 'kind': 'generated-test', 'result': 'pass'},\n"
+            "            ],\n"
+            "            'requirement_results': {'R-FOO-001': 'pass'},\n"
+            "            'interface_drift': False,\n"
+            "            'mutation_score': 0.9,\n"
+            "            'mutation_error': None,\n"
+            "            'overall': 'pass',\n"
+            "        },\n"
+            "        'license_scan': {\n"
+            "            'component_id': component_id,\n"
+            "            'gate_version': 'license_scanner@4.0.3+9f2c41ab07de',\n"
+            "            'evaluated': True,\n"
+            "            'reason': None,\n"
+            "            'similarity_score': 0.1,\n"
+            "            'block_threshold': 0.7,\n"
+            "            'blocked': False,\n"
+            "            'matches': [],\n"
+            "            'notified': False,\n"
+            "            'notification_delivery_error': None,\n"
+            "            'cache_hit': False,\n"
+            "        },\n"
+            "        'secret_scan': {\n"
+            "            'scope': 'full',\n"
+            "            'gate_version': 'secret_scanner@0.0.0',\n"
+            "            'flagged': False,\n"
+            "            'matches': [],\n"
+            "            'allowed': [],\n"
+            "            'unused_allowlist_entries': [],\n"
+            "            'notified': False,\n"
+            "            'notification_delivery_error': None,\n"
+            "            'cache_hit': False,\n"
+            "        },\n"
+            "    }\n"
+        )
+    else:
+        result_src = (
+            "    return {\n"
+            "        'hit': False,\n"
+            "        'verification_report': None,\n"
+            "        'license_scan': None,\n"
+            "        'secret_scan': None,\n"
+            "    }\n"
+        )
+    src = (
+        "import json\n"
+        "\n"
+        "LOG = " + repr(str(log_path)) + "\n"
+        "SPEC_HASH = " + repr(SPEC_HASH) + "\n"
+        "GATE_VERSIONS = " + repr(GATE_VERSIONS) + "\n"
+        "\n"
+        "\n"
+        "class _Key(dict):\n"
+        "    def __getattr__(self, name):\n"
+        "        try:\n"
+        "            return self[name]\n"
+        "        except KeyError:\n"
+        "            raise AttributeError(name)\n"
+        "\n"
+        "\n"
+        "def _log(entry):\n"
+        "    with open(LOG, 'a', encoding='utf-8') as fh:\n"
+        "        fh.write(json.dumps(entry) + '\\n')\n"
+        "\n"
+        "\n"
+        "def current_sealed_key(component_id, repo_root):\n"
+        "    _log(['current_sealed_key', component_id])\n"
+        "    return None\n"
+        "\n"
+        "\n"
+        "def current_provenance_key(component_id, repo_root):\n"
+        "    _log(['current_provenance_key', component_id])\n"
+        "    return _Key(spec_bundle_hash=SPEC_HASH, gate_versions=dict(GATE_VERSIONS))\n"
+        "\n"
+        "\n"
+        "def check_provenance(component_id, spec_bundle_hash, gate_versions, repo_root):\n"
+        "    _log(['check_provenance', component_id, spec_bundle_hash])\n"
+        + result_src
+        + "\n"
+        "\n"
+        "def check_sealed_provenance(component_id, repo_root):\n"
+        "    _log(['check_sealed_provenance', component_id])\n"
+        "    return {\n"
+        "        'hit': False,\n"
+        "        'sealed': False,\n"
+        "        'reason': 'not_sealed',\n"
+        "        'verification_report': None,\n"
+        "        'license_scan': None,\n"
+        "        'secret_scan': None,\n"
+        "        'owners': None,\n"
+        "        'source_hash': None,\n"
+        "        'written_at': None,\n"
+        "    }\n"
+    )
+    _write(repo_root / "gen" / "provenance-checker" / "provenance_checker.py", src)
+
+
+def _write_fake_impact_analyzer(repo_root, log_path):
+    src = (
+        "import json\n"
+        "\n"
+        "LOG = " + repr(str(log_path)) + "\n"
+        "\n"
+        "\n"
+        "def compute_blast_radius(changed_ids, repo_root):\n"
+        "    with open(LOG, 'a', encoding='utf-8') as fh:\n"
+        "        fh.write(json.dumps(['compute_blast_radius', list(changed_ids)]) + '\\n')\n"
+        "    return {\n"
+        "        'impacted': [\n"
+        "            {'component_id': 'comp-foo', 'reason': 'direct', 'via': None},\n"
+        "        ],\n"
+        "        'precondition_error': None,\n"
+        "    }\n"
+    )
+    _write(repo_root / "gen" / "impact-analyzer" / "impact_analyzer.py", src)
+
+
+def _write_fake_capability_verifier(repo_root, log_path):
+    src = (
+        "import json\n"
+        "\n"
+        "LOG = " + repr(str(log_path)) + "\n"
+        "GATE_VERSION = 'capability_scenario_verifier@2.0.0'\n"
+        "\n"
+        "\n"
+        "class UnknownCapabilityError(ValueError):\n"
+        "    pass\n"
+        "\n"
+        "\n"
+        "class ModelRequiredError(ValueError):\n"
+        "    pass\n"
+        "\n"
+        "\n"
+        "def _log(entry):\n"
+        "    with open(LOG, 'a', encoding='utf-8') as fh:\n"
+        "        fh.write(json.dumps(entry) + '\\n')\n"
+        "\n"
+        "\n"
+        "def _report(capability_id):\n"
+        "    return {capability_id: {'overall': 'pass', 'scenarios': []}}\n"
+        "\n"
+        "\n"
+        "def run_capability_scenarios(blast_radius, repo_root, judge=None, test_author=None):\n"
+        "    _log(['run_capability_scenarios', list(blast_radius)])\n"
+        "    return {}\n"
+        "\n"
+        "\n"
+        "def check_capability_provenance(capability_id, repo_root):\n"
+        "    _log(['check_capability_provenance', capability_id])\n"
+        "    return {'hit': True, 'capability_scenario_report': _report(capability_id)}\n"
+        "\n"
+        "\n"
+        "def run_capability_gates(capability_id, repo_root, model=None, seed=0, llm_backend=None):\n"
+        "    _log(['run_capability_gates', capability_id])\n"
+        "    return {'hit': True, 'capability_scenario_report': _report(capability_id)}\n"
+    )
+    _write(
+        repo_root
+        / "gen"
+        / "capability-scenario-verifier"
+        / "capability_scenario_verifier.py",
+        src,
     )
 
 
-def _build_repo(tmp_path, results, impacted):
+def _read_log(log_path):
+    if not log_path.is_file():
+        return []
+    return [
+        json.loads(line)
+        for line in log_path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+
+
+@pytest.mark.parametrize("hit", [True, False])
+def test_check_readiness_reads_dict_shaped_dependency_results(tmp_path, hit):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
-    log = tmp_path / "invocations.jsonl"
-    log.write_text("")
+    log_path = tmp_path / "calls.log"
 
-    for slug in ("foo", "bar"):
-        _write_component_md(repo_root, slug)
-        (repo_root / "gen" / slug).mkdir(parents=True, exist_ok=True)
-    (repo_root / "specs" / "product").mkdir(parents=True, exist_ok=True)
+    _build_corpus(repo_root)
+    _write_fake_provenance_checker(repo_root, log_path, hit)
+    _write_fake_impact_analyzer(repo_root, log_path)
+    _write_fake_capability_verifier(repo_root, log_path)
 
-    pc_dir = repo_root / "gen" / "provenance-checker"
-    pc_dir.mkdir(parents=True)
-    (pc_dir / "provenance_checker.py").write_text(
-        PROVENANCE_CHECKER_SRC.format(
-            log=str(log),
-            results=results,
-            hashes={"comp-foo": FOO_HASH, "comp-bar": BAR_HASH},
-            gate_versions=GATE_VERSIONS,
-        )
-    )
-
-    ia_dir = repo_root / "gen" / "impact-analyzer"
-    ia_dir.mkdir(parents=True)
-    (ia_dir / "impact_analyzer.py").write_text(
-        IMPACT_ANALYZER_SRC.format(log=str(log), impacted=impacted)
-    )
-
-    cv_dir = repo_root / "gen" / "capability-scenario-verifier"
-    cv_dir.mkdir(parents=True)
-    (cv_dir / "capability_scenario_verifier.py").write_text(
-        CAPABILITY_VERIFIER_SRC.format(log=str(log))
-    )
-
-    return repo_root, log
-
-
-def _read_log(log):
-    return [json.loads(line) for line in Path(log).read_text().splitlines() if line.strip()]
-
-
-IMPACTED = [
-    {"component_id": "comp-foo", "reason": "direct", "via": None},
-    {"component_id": "comp-bar", "reason": "transitive-interface", "via": "comp-foo"},
-]
-
-
-def _run(repo_root):
     try:
-        return provenance_tracker.check_readiness(repo_root, changed_ids=["comp-foo"])
-    except AttributeError as exc:  # the criterion's Then clause
+        report = provenance_tracker.check_readiness(
+            Path(repo_root), changed_ids=["comp-foo"]
+        )
+    except AttributeError as exc:  # pragma: no cover - the failure being guarded
         pytest.fail(
-            f"check_readiness raised AttributeError reading a dict-shaped "
-            f"dependency value: {exc!r}"
+            "check_readiness raised AttributeError on dict-shaped dependency "
+            "results: " + repr(exc)
         )
 
+    calls = _read_log(log_path)
 
-def test_dict_shaped_results_read_correctly_mixed_hit_and_miss(tmp_path):
-    results = {"comp-foo": _hit_result("comp-foo"), "comp-bar": _miss_result()}
-    repo_root, log = _build_repo(tmp_path, copy.deepcopy(results), IMPACTED)
-
-    report = _run(repo_root)
-
-    # component_id was read from each dict-shaped impacted entry.
-    components = field(report, "components")
-    assert set(components.keys()) == {"comp-foo", "comp-bar"}
-
-    # Each ProvenanceCheckResult copied verbatim from the dict shape.
-    assert components["comp-foo"] == results["comp-foo"]
-    assert components["comp-bar"] == results["comp-bar"]
+    # The fake impact-analyzer was consulted and its dict entry's
+    # component_id was read correctly, driving the provenance check.
+    assert ["compute_blast_radius", ["comp-foo"]] in calls
+    prov_calls = [c for c in calls if c[0] == "check_provenance"]
+    assert prov_calls, "check_provenance was never called: " + repr(calls)
+    assert all(c[1] == "comp-foo" for c in prov_calls)
+    assert prov_calls[0][2] == SPEC_HASH
 
     assert field(report, "scope") == "blast-radius"
 
-    # `hit` was read correctly: the miss makes it not ready, and is named.
-    assert field(report, "ready") is False
-    reasons = field(report, "not_ready_reasons")
-    assert any("comp-bar" in r for r in reasons), reasons
-    assert not any("comp-foo" in r for r in reasons), reasons
-
-    entries = _read_log(log)
-    checks = {e["component_id"]: e for e in entries if e["fn"] == "check_provenance"}
-    assert set(checks) == {"comp-foo", "comp-bar"}
-    assert checks["comp-foo"]["spec_bundle_hash"] == FOO_HASH
-    assert checks["comp-bar"]["spec_bundle_hash"] == BAR_HASH
-    assert checks["comp-foo"]["gate_versions"] == GATE_VERSIONS
-    assert not any(e["fn"] == "check_sealed_provenance" for e in entries)
-
-
-def test_dict_shaped_results_all_hits_passing_are_ready(tmp_path):
-    results = {"comp-foo": _hit_result("comp-foo"), "comp-bar": _hit_result("comp-bar")}
-    repo_root, log = _build_repo(tmp_path, copy.deepcopy(results), IMPACTED)
-
-    report = _run(repo_root)
-
     components = field(report, "components")
-    assert set(components.keys()) == {"comp-foo", "comp-bar"}
-    assert components["comp-foo"] == results["comp-foo"]
-    assert components["comp-bar"] == results["comp-bar"]
+    assert "comp-foo" in components
+    entry = components["comp-foo"]
+    assert field(entry, "hit") is hit
 
-    assert field(report, "ready") is True
-    assert list(field(report, "not_ready_reasons")) == []
-
-    entries = _read_log(log)
-    assert any(e["fn"] == "compute_blast_radius" for e in entries)
-    assert {e["component_id"] for e in entries if e["fn"] == "check_provenance"} == {
-        "comp-foo",
-        "comp-bar",
-    }
+    ready = field(report, "ready")
+    reasons = list(field(report, "not_ready_reasons"))
+    if hit:
+        assert ready is True, "expected ready; reasons: " + repr(reasons)
+        assert not any("comp-foo" in str(r) for r in reasons)
+    else:
+        assert ready is False
+        assert any("comp-foo" in str(r) for r in reasons), repr(reasons)

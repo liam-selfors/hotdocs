@@ -1,3 +1,4 @@
+# hotdocs-criterion: sha256:728be360cfa8f6262384febbdc5c4e5d04aab6767efac6fa35513d696baf1045
 """AC-IMPACT-006 (covers R-IMPACT-006).
 
 Given an unchanged corpus and the same --changed argument,

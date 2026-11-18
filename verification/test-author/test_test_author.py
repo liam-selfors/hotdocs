@@ -4,6 +4,7 @@ specs/components/test-author/acceptance/."""
 
 import dataclasses
 import json
+import re
 import types
 
 from conftest import REPO_ROOT, MockBackend, fake_bundle, fake_bundle_dict, file_block
@@ -26,6 +27,13 @@ def _rf(result, key):
     -- same duck-typing convention (D94) as everything else in this
     corpus. Never assume attribute access alone."""
     return result[key] if isinstance(result, dict) else getattr(result, key)
+
+
+def _body(content):
+    """R-AUTHOR-028 (D320): the file is a header line, then the test."""
+    first, _, rest = content.partition("\n")
+    assert first.startswith("# hotdocs-criterion: sha256:"), content
+    return rest
 
 
 def test_ac_author_001_prompt_contains_every_bundle_field(repo_root):
@@ -101,13 +109,13 @@ def test_ac_author_005_successful_call_is_cached(repo_root):
     first_backend = MockBackend([file_block("def test_x(): pass")])
     bundle = fake_bundle()
     first = author_test(bundle, "claude-sonnet-5", repo_root=repo_root, llm_backend=first_backend)
-    assert _file_field(_rf(first, "file"), "content") == "def test_x(): pass"
+    assert _body(_file_field(_rf(first, "file"), "content")) == "def test_x(): pass"
 
     second_backend = MockBackend([file_block("def test_y(): pass")])  # must never be called
     second = author_test(bundle, "claude-sonnet-5", repo_root=repo_root, llm_backend=second_backend)
     assert _rf(second, "cache_hit") is True
     assert second_backend.calls == []
-    assert _file_field(_rf(second, "file"), "content") == "def test_x(): pass"
+    assert _body(_file_field(_rf(second, "file"), "content")) == "def test_x(): pass"
 
 
 def test_ac_author_006_output_path_under_generated_test_dir(repo_root):
@@ -162,7 +170,7 @@ def test_ac_author_009_strips_fence_and_narration_around_markers(repo_root):
     result = author_test(bundle, "claude-sonnet-5", repo_root=repo_root, llm_backend=backend)
 
     assert _rf(result, "model_call_error") is None
-    assert _file_field(_rf(result, "file"), "content").strip() == "def test_x(): pass"
+    assert _body(_file_field(_rf(result, "file"), "content")).strip() == "def test_x(): pass"
     assert "```" not in _file_field(_rf(result, "file"), "content")
     assert "Sure, here is the test" not in _file_field(_rf(result, "file"), "content")
     assert "Let me know" not in _file_field(_rf(result, "file"), "content")
@@ -441,11 +449,7 @@ def test_ac_author_022_prompt_forbids_guessed_sys_modules_assertions(repo_root):
     bundle = fake_bundle()
     author_test(bundle, "claude-sonnet-5", repo_root=repo_root, llm_backend=backend)
 
-    sent_prompt = backend.calls[0][0]
-    normalized = " ".join(sent_prompt.split())
-    assert "sys.modules" in sent_prompt
-    assert "record" in normalized.lower()
-    assert "guess" in normalized.lower()
+    assert _block("R-AUTHOR-022", "foo") in backend.calls[0][0]
 
 
 def test_ac_author_023_prompt_states_write_time_window_truncation(repo_root):
@@ -472,11 +476,7 @@ def test_ac_author_024_prompt_states_file_based_invocation_log(repo_root):
     bundle = fake_bundle()
     author_test(bundle, "claude-sonnet-5", repo_root=repo_root, llm_backend=backend)
 
-    sent_prompt = backend.calls[0][0]
-    normalized = " ".join(sent_prompt.split())
-    assert "file" in normalized.lower() and "invocation" in normalized.lower()
-    assert "sys.modules" in sent_prompt
-    assert "in-process" in normalized.lower() or "in process" in normalized.lower()
+    assert _block("R-AUTHOR-024", "foo") in backend.calls[0][0]
 
 
 @pytest.mark.parametrize("fake, ok", [
@@ -547,3 +547,33 @@ def test_d199_dependencies_fall_back_to_the_tool_root(tmp_path, monkeypatch):
     result = author_test(fake_bundle(), "claude-sonnet-5", repo_root=tmp_path, llm_backend=backend)
     assert _rf(result, "model_call_error") is None
     assert _rf(result, "file") is not None
+
+
+_PROMPT_DOC = REPO_ROOT / "specs" / "architecture" / "test-author-prompt.md"
+
+
+def _block(req_id, module):
+    """One block of specs/architecture/test-author-prompt.md, as the
+    prompt must hold it (D316)."""
+    text = _PROMPT_DOC.read_text(encoding="utf-8")
+    m = re.search(r"### Block " + re.escape(req_id) + r"\n\n```text\n(.*?)\n```\n", text, re.DOTALL)
+    assert m, req_id
+    return m.group(1).replace("@MODULE@", module)
+
+
+_BLOCK_IDS = re.findall(r"^### Block (R-AUTHOR-\d+)$", _PROMPT_DOC.read_text(encoding="utf-8"), re.MULTILINE)
+
+
+@pytest.mark.parametrize("req_id", _BLOCK_IDS)
+def test_d316_prompt_holds_every_block_exactly_once(repo_root, req_id):
+    backend = MockBackend([file_block("def test_x(): pass")])
+    author_test(fake_bundle(component_id="comp-widget-maker"), "claude-sonnet-5",
+                repo_root=repo_root, llm_backend=backend)
+    assert backend.calls[0][0].count(_block(req_id, "widget_maker")) == 1
+
+
+def test_d316_blocks_use_the_first_explicit_module_name(repo_root):
+    backend = MockBackend([file_block("def test_x(): pass")])
+    author_test(fake_bundle(module_names=["alpha_mod", "beta_mod"]), "claude-sonnet-5",
+                repo_root=repo_root, llm_backend=backend)
+    assert _block("R-AUTHOR-015", "alpha_mod") in backend.calls[0][0]

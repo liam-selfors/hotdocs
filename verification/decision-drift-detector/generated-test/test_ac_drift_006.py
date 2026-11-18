@@ -1,3 +1,4 @@
+# hotdocs-criterion: sha256:7e00cee7f409f547c8f76ddf36366e1cbcf082ab3fe905488787772718fe34fe
 import importlib
 import importlib.util
 import json

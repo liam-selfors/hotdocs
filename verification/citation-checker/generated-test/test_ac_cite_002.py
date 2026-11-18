@@ -1,3 +1,4 @@
+# hotdocs-criterion: sha256:d29c5bbbf75818cab1378ec28e7fb78cadc496076d78846220760160af9c095e
 """AC-CITE-002 (covers R-CITE-002).
 
 Given a live requirement citing a real file's "Query surface" section,

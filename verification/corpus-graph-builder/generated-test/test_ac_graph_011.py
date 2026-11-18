@@ -1,14 +1,4 @@
-"""AC-GRAPH-011 (Covers: R-GRAPH-003).
-
-Given comp-a whose component.md has the frontmatter owners: [team-x]
-  and whose directory also holds requirements/R-A-001.md and
-  interface/library.md
-When build_corpus_graph runs
-Then comp-a's node has owners ["team-x"], and documents whose keys are
-  exactly "component.md", "interface/library.md" and
-  "requirements/R-A-001.md", each mapped to that file's whole text
-"""
-
+# hotdocs-criterion: sha256:6b2df5e2d9f8d8a9a61bdd69efa127079f2882316259c8303144ce4dfdc50dbb
 from pathlib import Path
 
 import corpus_graph_builder
@@ -18,60 +8,49 @@ def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def lookup(container, key):
-    if isinstance(container, dict):
-        return container[key]
-    return getattr(container, key)
-
-
-def _write(path: Path, text: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    # Write raw bytes so the on-disk text is exactly `text`, with no
-    # newline translation.
-    path.write_bytes(text.encode("utf-8"))
-
-
 COMPONENT_MD = (
     "---\n"
     "id: comp-a\n"
     "title: Component A\n"
     "status: draft\n"
     "owners: [team-x]\n"
+    "sealed: true\n"
+    "source_path: legacy/a/\n"
     "depends_on: []\n"
     "realizes: []\n"
     "uses_var: []\n"
-    "sealed: true\n"
-    "source_path: legacy/a/\n"
     "---\n"
     "\n"
-    "# Component A\n"
+    "# comp-a\n"
     "\n"
     "## Purpose\n"
     "\n"
-    "A small fixture component used to check graph documents.\n"
+    "A fixture component used to check owners and documents.\n"
 )
 
 REQUIREMENT_MD = (
     "# R-A-001\n"
     "\n"
-    "**R-A-001** — Component A MUST do its one thing.\n"
+    "**R-A-001** \u2014 Component A MUST do one thing.\n"
 )
 
 LIBRARY_MD = (
     "# Library\n"
     "\n"
     "```\n"
-    "do_thing(x: int) -> int\n"
+    "do_thing() -> None\n"
     "```\n"
-    "\n"
-    "Returns its argument unchanged.\n"
 )
 
 
-def test_ac_graph_011_owners_and_documents(tmp_path):
-    repo_root = tmp_path / "repo"
-    comp_dir = repo_root / "specs" / "components" / "a"
+def _write(path, text):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(text.encode("utf-8"))
 
+
+def test_component_node_carries_owners_and_documents(tmp_path):
+    repo_root = tmp_path
+    comp_dir = repo_root / "specs" / "components" / "a"
     _write(comp_dir / "component.md", COMPONENT_MD)
     _write(comp_dir / "requirements" / "R-A-001.md", REQUIREMENT_MD)
     _write(comp_dir / "interface" / "library.md", LIBRARY_MD)
@@ -79,20 +58,32 @@ def test_ac_graph_011_owners_and_documents(tmp_path):
     graph = corpus_graph_builder.build_corpus_graph(repo_root)
 
     nodes = field(graph, "nodes")
-    node = lookup(nodes, "comp-a")
+    assert "comp-a" in nodes
+    node = nodes["comp-a"]
 
     owners = field(node, "owners")
     assert list(owners) == ["team-x"]
 
     documents = field(node, "documents")
     documents = dict(documents)
-
-    expected = {
-        "component.md": COMPONENT_MD,
-        "interface/library.md": LIBRARY_MD,
-        "requirements/R-A-001.md": REQUIREMENT_MD,
+    assert set(documents.keys()) == {
+        "component.md",
+        "interface/library.md",
+        "requirements/R-A-001.md",
     }
+    assert documents["component.md"] == COMPONENT_MD
+    assert documents["interface/library.md"] == LIBRARY_MD
+    assert documents["requirements/R-A-001.md"] == REQUIREMENT_MD
 
-    assert set(documents.keys()) == set(expected.keys())
-    for key, text in expected.items():
-        assert documents[key] == text, f"documents[{key!r}] is not the file's whole text"
+    # The serialized shape agrees as well.
+    as_dict = graph.to_dict()
+    node_dict = as_dict["nodes"]["comp-a"]
+    assert node_dict["owners"] == ["team-x"]
+    assert sorted(node_dict["documents"].keys()) == [
+        "component.md",
+        "interface/library.md",
+        "requirements/R-A-001.md",
+    ]
+    assert node_dict["documents"]["component.md"] == COMPONENT_MD
+    assert node_dict["documents"]["interface/library.md"] == LIBRARY_MD
+    assert node_dict["documents"]["requirements/R-A-001.md"] == REQUIREMENT_MD

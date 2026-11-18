@@ -8,6 +8,27 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT / "gen" / "verifier-orchestrator"))
 import verifier_orchestrator  # noqa: E402
 
+
+def stamped(repo_root: Path, criterion_id: str, source: str, component_id: str = "comp-foo") -> str:
+    """A cached generated test as test-author writes it (D320): the
+    criterion header, computed from the bundle the real assembler builds
+    for this fixture, then the test."""
+    import hashlib
+    import importlib.util
+
+    path = REPO_ROOT / "gen" / "spec-bundle-assembler" / "spec_bundle_assembler.py"
+    spec = importlib.util.spec_from_file_location("_stamp_assembler", path)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules["_stamp_assembler"] = module
+    spec.loader.exec_module(module)
+    bundle = module.assemble_criterion(component_id, criterion_id, repo_root)
+
+    def field(name):
+        return bundle[name] if isinstance(bundle, dict) else getattr(bundle, name)
+
+    digest = hashlib.sha256((field("criterion_text") + "\n" + field("requirement_text")).encode("utf-8")).hexdigest()
+    return "# hotdocs-criterion: sha256:" + digest + "\n" + source
+
 FOO_COMPONENT_MD_TEMPLATE = """---
 id: comp-foo
 title: Foo

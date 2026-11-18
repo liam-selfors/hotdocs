@@ -17,8 +17,8 @@ pass": without `--changed` it checks the whole corpus, with it that blast
 radius. Components are only checked against `provenance-checker`,
 read-only, never triggering `component-gate-runner` (`D93`); intersecting
 capabilities are checked-then-run against `capability-scenario-verifier`
-(`D89`/`D92`). `--model` is needed only when a capability needs a fresh
-run. `--format=text` (default) prints `ready` or `not ready` and then each
+(`D89`/`D92`). `--model` is needed only for a capability that needs a fresh run;
+without it, that capability is reported not ready (`R-TRACK-010`). `--format=text` (default) prints `ready` or `not ready` and then each
 `not_ready_reasons` entry on its own line; `--format=json` prints the
 result as JSON, converted as `R-TRACK-007` converts its inputs. Nothing requires running it before a commit (`D87`).
 
@@ -36,7 +36,7 @@ There is no `hotdocs track write`: `component-gate-runner` calls
 | --- | --- |
 | `0` | Ready — every item in scope has current, passing provenance. |
 | `1` | Not ready — see `not_ready_reasons`. |
-| `2` | Usage error: an unknown argument, a non-integer `--seed`, an invalid `--format`, a flag given last with no value, or a capability in scope that needs a fresh run without `--model`. |
+| `2` | Usage error: an unknown argument, a non-integer `--seed`, an invalid `--format`, or a flag given last with no value. |
 
 **Exit codes (`hotdocs track feedback`):**
 

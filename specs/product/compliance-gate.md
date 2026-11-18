@@ -29,7 +29,9 @@ Kind: generated-test
 
 ```gherkin
 Given generated code that matches a known-licensed-code fingerprint above the
-  similarity threshold
+  similarity threshold, and any stand-in provenance-tracker whose
+  check_readiness returns a VerifyReport whose "components" and
+  "capabilities" are mappings keyed by id, never lists
 When the pipeline's license scan runs
 Then the merge is blocked, the result is written into the provenance
   manifest's license_scan field regardless of outcome, and the finding

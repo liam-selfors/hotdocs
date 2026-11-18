@@ -1,3 +1,4 @@
+# hotdocs-criterion: sha256:9a680ca6d143b5dd55735fdf986cb493379e53202a8f8d079b16616303f98331
 """AC-IMPACT-004 — covers R-IMPACT-004.
 
 Given VAR-CACHE-STORE-URL changed, and comp-cache-manager has

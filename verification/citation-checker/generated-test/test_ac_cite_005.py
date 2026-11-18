@@ -1,3 +1,4 @@
+# hotdocs-criterion: sha256:a9fb2574f0dc7e03ba98e9e2986d372aec08b1c6d4f2bd026b3e1933fba4a9b8
 import citation_checker
 
 

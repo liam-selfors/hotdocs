@@ -73,3 +73,5 @@ gives. Results from every dependency are read with dual
 dict-or-attribute access.
 
 CLI: see `interface/cli.md`.
+
+Implements: `specs/architecture/json-values.md`

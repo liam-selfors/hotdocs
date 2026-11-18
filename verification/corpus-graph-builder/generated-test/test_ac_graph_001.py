@@ -1,3 +1,4 @@
+# hotdocs-criterion: sha256:e314feeea317ae75aa0e9701c2b9e875646fb0062668f42caf24aa9d98ee91ca
 from pathlib import Path
 
 import corpus_graph_builder
@@ -7,38 +8,37 @@ def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def _write(path: Path, text: str) -> None:
+def write(path, text):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
 
 
-def _component_md(slug: str) -> str:
+def component_md(slug):
     return (
         "---\n"
-        f"id: comp-{slug}\n"
-        f"title: Component {slug.upper()}\n"
+        "id: comp-" + slug + "\n"
+        "title: Component " + slug.upper() + "\n"
         "status: draft\n"
         "owners: [test-team]\n"
         "depends_on: []\n"
         "realizes: []\n"
         "uses_var: []\n"
         "sealed: true\n"
-        f"source_path: legacy/{slug}/\n"
+        "source_path: legacy/" + slug + "/\n"
         "---\n"
         "\n"
-        f"# comp-{slug}\n"
+        "# comp-" + slug + "\n"
         "\n"
         "## Purpose\n"
         "\n"
-        f"Component {slug} exists only as a graph-builder test fixture.\n"
+        "A fixture component named " + slug + ".\n"
     )
 
 
-def _build_corpus(repo_root: Path) -> None:
+def build_fixture(repo_root):
     specs = repo_root / "specs"
 
-    # Capabilities
-    _write(
+    write(
         specs / "product" / "one.md",
         "---\n"
         "id: P-ONE\n"
@@ -51,7 +51,7 @@ def _build_corpus(repo_root: Path) -> None:
         "\n"
         "The first capability.\n",
     )
-    _write(
+    write(
         specs / "product" / "two.md",
         "---\n"
         "id: P-TWO\n"
@@ -65,9 +65,27 @@ def _build_corpus(repo_root: Path) -> None:
         "The second capability.\n",
     )
 
-    # Var
-    _write(
-        specs / "vars" / "VAR-ONE.md",
+    for slug in ("a", "b", "c"):
+        write(specs / "components" / slug / "component.md", component_md(slug))
+
+    write(
+        specs / "components" / "a" / "requirements" / "R-A-001.md",
+        "# R-A-001\n"
+        "\n"
+        "**R-A-001** \u2014 Component a MUST do one thing.\n",
+    )
+    write(
+        specs / "components" / "a" / "acceptance" / "AC-A-001.md",
+        "# AC-A-001\n"
+        "\n"
+        "Covers: R-A-001\n"
+        "Kind: generated-test\n"
+        "\n"
+        "Component a does one thing.\n",
+    )
+
+    write(
+        specs / "vars" / "one.md",
         "---\n"
         "id: VAR-ONE\n"
         "title: Var One\n"
@@ -77,11 +95,10 @@ def _build_corpus(repo_root: Path) -> None:
         "\n"
         "# VAR-ONE\n"
         "\n"
-        "A test variable declaration.\n",
+        "A fixture var.\n",
     )
 
-    # Decision
-    _write(
+    write(
         specs / "decisions" / "D1.md",
         "---\n"
         "id: D1\n"
@@ -92,42 +109,18 @@ def _build_corpus(repo_root: Path) -> None:
         "\n"
         "# D1\n"
         "\n"
-        "A test decision.\n",
-    )
-
-    # Components (no relations)
-    for slug in ("a", "b", "c"):
-        _write(specs / "components" / slug / "component.md", _component_md(slug))
-
-    # Requirement file (plus its matching acceptance criterion)
-    _write(
-        specs / "components" / "a" / "requirements" / "R-A-001.md",
-        "**R-A-001** — Component a MUST exist as a fixture.\n",
-    )
-    _write(
-        specs / "components" / "a" / "acceptance" / "AC-A-001.md",
-        "# AC-A-001\n"
-        "\n"
-        "Covers: R-A-001\n"
-        "Kind: generated-test\n"
-        "\n"
-        "```gherkin\n"
-        "Given component a\n"
-        "When it is inspected\n"
-        "Then it exists\n"
-        "```\n",
+        "A fixture decision.\n",
     )
 
 
-def test_ac_graph_001_nodes_are_exactly_capabilities_components_and_vars(tmp_path):
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    _build_corpus(repo_root)
+def test_ac_graph_001_nodes_are_capabilities_components_and_vars(tmp_path):
+    repo_root = Path(tmp_path)
+    build_fixture(repo_root)
 
     graph = corpus_graph_builder.build_corpus_graph(repo_root)
-
     nodes = field(graph, "nodes")
-    expected_types = {
+
+    expected = {
         "P-ONE": "capability",
         "P-TWO": "capability",
         "comp-a": "component",
@@ -136,13 +129,10 @@ def test_ac_graph_001_nodes_are_exactly_capabilities_components_and_vars(tmp_pat
         "VAR-ONE": "var",
     }
 
-    assert set(nodes.keys()) == set(expected_types.keys()), (
-        f"unexpected node keys: {sorted(nodes.keys())}"
-    )
+    assert set(nodes.keys()) == set(expected.keys())
+    for node_id, node_type in expected.items():
+        assert field(nodes[node_id], "type") == node_type, node_id
 
-    for node_id, expected_type in expected_types.items():
-        node = nodes[node_id]
-        assert field(node, "type") == expected_type, (
-            f"node {node_id} has type {field(node, 'type')!r}, "
-            f"expected {expected_type!r}"
-        )
+    assert "D1" not in nodes
+    assert "R-A-001" not in nodes
+    assert "AC-A-001" not in nodes

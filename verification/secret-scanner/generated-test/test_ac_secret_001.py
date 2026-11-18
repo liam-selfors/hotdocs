@@ -1,3 +1,4 @@
+# hotdocs-criterion: sha256:3151255d2b8f70a05e083ac3687d19ca1778d541327e6d090c52f9099bd196ad
 """AC-SECRET-001 (covers R-SECRET-001): full-scan coverage, skips, and match shape."""
 
 import sys

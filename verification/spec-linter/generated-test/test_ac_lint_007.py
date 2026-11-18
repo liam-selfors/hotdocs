@@ -1,3 +1,4 @@
+# hotdocs-criterion: sha256:5fc4d0246fbc8b3a64252ef19c136c88bf1b8793832219122ae90606823bf0e4
 import json
 import sys
 import tempfile

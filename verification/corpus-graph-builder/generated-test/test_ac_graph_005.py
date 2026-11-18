@@ -1,99 +1,83 @@
-import corpus_graph_builder
-
+# hotdocs-criterion: sha256:be54039464f819b1c3f01efba10f1b550e78f887bccae22329081d121f390070
 from pathlib import Path
 
 import pytest
+
+import corpus_graph_builder
 
 
 def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def _write(path: Path, text: str) -> None:
+def write(path, text):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
 
 
-def _write_component(repo_root: Path, slug: str, uses_var: list[str]) -> None:
-    comp_dir = repo_root / "specs" / "components" / slug
-    uses = ", ".join(uses_var)
-    _write(
-        comp_dir / "component.md",
+def component_md(slug, uses_var):
+    return (
         "---\n"
-        f"id: comp-{slug}\n"
-        f"title: Fixture component {slug}\n"
-        "status: draft\n"
-        "owners: [fixture-team]\n"
-        "depends_on: []\n"
-        "realizes: []\n"
-        f"uses_var: [{uses}]\n"
-        "sealed: true\n"
-        f"source_path: legacy/{slug}/\n"
-        "---\n"
-        f"# comp-{slug}\n"
-        "\n"
-        "## Purpose\n"
-        "\n"
-        "A small fixture component used to exercise the corpus graph.\n",
-    )
-    upper = slug.upper()
-    _write(
-        comp_dir / "requirements" / f"R-{upper}-001.md",
-        f"**R-{upper}-001** — The component MUST exist as a fixture.\n",
-    )
-    _write(
-        comp_dir / "acceptance" / f"AC-{upper}-001.md",
-        f"# AC-{upper}-001\n"
-        "\n"
-        f"Covers: R-{upper}-001\n"
-        "Kind: generated-test\n"
-        "\n"
-        "```gherkin\n"
-        "Given the fixture component\n"
-        "When it is inspected\n"
-        "Then it exists\n"
-        "```\n",
+        + "id: comp-" + slug + "\n"
+        + "title: Component " + slug + "\n"
+        + "status: draft\n"
+        + "owners: [test-team]\n"
+        + "depends_on: []\n"
+        + "realizes: []\n"
+        + "uses_var: [" + ", ".join(uses_var) + "]\n"
+        + "sealed: true\n"
+        + "source_path: legacy/" + slug + "/\n"
+        + "---\n"
+        + "\n"
+        + "# comp-" + slug + "\n"
+        + "\n"
+        + "## Purpose\n"
+        + "\n"
+        + "A test fixture component.\n"
     )
 
 
-def _write_var(repo_root: Path, var_id: str) -> None:
-    _write(
-        repo_root / "specs" / "vars" / f"{var_id}.md",
+def var_md(var_id):
+    return (
         "---\n"
-        f"id: {var_id}\n"
-        f"title: Fixture var {var_id}\n"
-        "status: draft\n"
-        "owners: [fixture-team]\n"
-        "---\n"
-        f"# {var_id}\n"
-        "\n"
-        "A fixture variable declaration.\n",
+        + "id: " + var_id + "\n"
+        + "title: " + var_id + " title\n"
+        + "status: draft\n"
+        + "owners: [test-team]\n"
+        + "---\n"
+        + "\n"
+        + "# " + var_id + "\n"
+        + "\n"
+        + "A test fixture var.\n"
     )
 
 
-def test_orphan_var_rate_is_half_when_one_of_two_vars_is_used(tmp_path):
+def test_orphan_var_rate_half_when_one_of_two_vars_used(tmp_path):
     repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    _write_var(repo_root, "VAR-ONE")
-    _write_var(repo_root, "VAR-TWO")
-    _write_component(repo_root, "a", ["VAR-ONE"])
+    write(repo_root / "specs" / "vars" / "VAR-ONE.md", var_md("VAR-ONE"))
+    write(repo_root / "specs" / "vars" / "VAR-TWO.md", var_md("VAR-TWO"))
+    write(
+        repo_root / "specs" / "components" / "a" / "component.md",
+        component_md("a", ["VAR-ONE"]),
+    )
 
     graph = corpus_graph_builder.build_corpus_graph(repo_root)
-
     aggregates = field(graph, "aggregates")
     rate = field(aggregates, "orphan_var_rate")
+
     assert rate == pytest.approx(0.5)
 
 
-def test_orphan_var_rate_is_zero_with_no_vars_directory(tmp_path):
+def test_orphan_var_rate_zero_with_no_vars_directory(tmp_path):
     repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    _write_component(repo_root, "a", [])
+    write(
+        repo_root / "specs" / "components" / "a" / "component.md",
+        component_md("a", []),
+    )
     assert not (repo_root / "specs" / "vars").exists()
 
     graph = corpus_graph_builder.build_corpus_graph(repo_root)
-
     aggregates = field(graph, "aggregates")
     rate = field(aggregates, "orphan_var_rate")
-    assert rate == pytest.approx(0.0)
-    assert float(rate) == 0.0
+
+    assert rate == 0.0

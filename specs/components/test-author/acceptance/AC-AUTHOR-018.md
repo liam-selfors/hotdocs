@@ -4,9 +4,11 @@ Covers: R-AUTHOR-012
 Kind: generated-test
 
 ```gherkin
-Given a bundle whose criterion requires a synthetic fixture
-When author_test builds its prompt
-Then the prompt states that any document using status: ratified must
-  also set last_ratified_commit to a present, clearly-fake placeholder
-  value
+Given a bundle for comp-widget-maker whose dependency_interfaces is {},
+  and a mock model that records
+  each prompt and replies with a valid marked test file
+When author_test(bundle, "mock", repo_root=<tmp>, llm_backend=<mock>)
+  is called
+Then the first recorded prompt contains the line
+  "- A unit file (`constraints.md`, or anything under `requirements/`, `interface/` or `acceptance/`) carries no frontmatter at all."
 ```

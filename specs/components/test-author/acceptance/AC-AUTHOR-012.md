@@ -4,9 +4,13 @@ Covers: R-AUTHOR-012
 Kind: generated-test
 
 ```gherkin
-Given any bundle
-When author_test builds its prompt
-Then the prompt states that id, title, status, and owners are always
-  required on a component.md, and that any synthetic component.md
-  the test constructs from scratch must include them
+Given a bundle for comp-widget-maker whose dependency_interfaces is {},
+  and a mock model that records
+  each prompt and replies with a valid marked test file
+When author_test(bundle, "mock", repo_root=<tmp>, llm_backend=<mock>)
+  is called
+Then the first recorded prompt contains the line
+  "- A document with `status: ratified` also sets the placeholder `last_ratified_commit: 0000000`."
+  and the line
+  "- A test MUST NEVER `import yaml` or any other third-party package not already installed: it writes and parses frontmatter as plain text."
 ```

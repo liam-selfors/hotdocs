@@ -1,3 +1,4 @@
+# hotdocs-criterion: sha256:d30070f48637604d57dc2d4c512dfc3197212cb007dfa594b11a3434a85c7f4d
 import json
 import shutil
 from pathlib import Path
@@ -7,134 +8,118 @@ import pytest
 import capability_scenario_verifier
 
 
-EXPECTED_RECORD_KEYS = {
-    "capability_id",
-    "gate_version",
-    "content_hash",
-    "realizing_components",
-    "capability_scenario_report",
-    "model",
-    "seed",
-}
-
-
 def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def _tool_root():
-    here = Path(capability_scenario_verifier.__file__).resolve()
-    for parent in here.parents:
-        if parent.name == "gen":
-            return parent.parent
-    return None
-
-
 def _write(path, text):
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text)
+    path.write_text(text, encoding="utf-8")
 
 
-def _fake_test_author_source(author_log, marker):
+def _live_root():
+    here = Path(capability_scenario_verifier.__file__).resolve()
+    gen = next((p for p in here.parents if p.name == "gen"), None)
+    return gen.parent if gen is not None else None
+
+
+def _copy_compiler(repo_root):
+    live = _live_root()
+    if live is None:
+        return
+    src = live / "pipeline" / "criterion-compiler"
+    if src.is_dir():
+        shutil.copytree(
+            src,
+            repo_root / "pipeline" / "criterion-compiler",
+            ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
+        )
+
+
+def _fake_test_author_source(log_path):
     return (
         "import json\n"
-        "from pathlib import Path\n"
         "\n"
-        f"_LOG = {str(author_log)!r}\n"
-        f"_MARKER = {str(marker)!r}\n"
-        "\n"
+        "LOG_PATH = " + repr(str(log_path)) + "\n"
         "\n"
         "def author_test(bundle, model, seed=0, *, repo_root=None, llm_backend=None):\n"
-        "    criterion_id = bundle['criterion_id']\n"
-        "    _text = bundle['criterion_text']\n"
-        "    with open(_LOG, 'a') as fh:\n"
-        "        fh.write(json.dumps({'criterion_id': criterion_id, 'model': model,\n"
-        "                             'seed': seed}) + '\\n')\n"
-        "    name = 'test_' + criterion_id.lower().replace('-', '_') + '.py'\n"
-        "    rel = 'verification/capabilities/P-X/generated-test/' + name\n"
-        "    content = (\n"
-        "        'from pathlib import Path\\n'\n"
-        "        '\\n'\n"
-        "        '\\n'\n"
-        "        'def test_x():\\n'\n"
-        "        '    Path(' + repr(_MARKER) + ').write_text(\"ran\")\\n'\n"
-        "        '    assert True\\n'\n"
-        "    )\n"
-        "    if repo_root is not None:\n"
-        "        target = Path(repo_root) / rel\n"
-        "        target.parent.mkdir(parents=True, exist_ok=True)\n"
-        "        target.write_text(content)\n"
+        "    with open(LOG_PATH, 'a', encoding='utf-8') as fh:\n"
+        "        fh.write(json.dumps({'fn': 'author_test', 'criterion_id': bundle['criterion_id'], "
+        "'criterion_text': bundle['criterion_text'], 'model': model, 'seed': seed}) + '\\n')\n"
         "    return {\n"
-        "        'component_id': None,\n"
-        "        'criterion_id': criterion_id,\n"
+        "        'component_id': " + repr("comp-foo") + ",\n"
+        "        'criterion_id': bundle['criterion_id'],\n"
         "        'model': model,\n"
         "        'seed': seed,\n"
-        "        'prompt_version': 'v1',\n"
+        "        'prompt_version': " + repr("v1") + ",\n"
         "        'cache_hit': False,\n"
-        "        'file': {'path': rel, 'content': content},\n"
+        "        'file': {\n"
+        "            'path': " + repr("verification/capabilities/P-X/generated-test/test_cs_x_001.py") + ",\n"
+        "            'content': " + repr("def test_x():\n    assert True\n") + ",\n"
+        "        },\n"
         "        'model_call_error': None,\n"
         "    }\n"
     )
 
 
-def _fake_llm_endpoint_source(llm_log):
+def _fake_llm_endpoint_source(log_path):
     return (
         "import json\n"
         "\n"
-        f"_LOG = {str(llm_log)!r}\n"
-        "\n"
+        "LOG_PATH = " + repr(str(log_path)) + "\n"
         "\n"
         "def complete(prompt, model, *, backend=None, **params):\n"
-        "    with open(_LOG, 'a') as fh:\n"
-        "        fh.write(json.dumps({'model': model}) + '\\n')\n"
-        "    return {'text': 'pass', 'model': model, 'backend': 'fake',\n"
-        "            'model_call_error': None}\n"
+        "    with open(LOG_PATH, 'a', encoding='utf-8') as fh:\n"
+        "        fh.write(json.dumps({'fn': 'complete', 'model': model}) + '\\n')\n"
+        "    return {\n"
+        "        'text': " + repr("PASS") + ",\n"
+        "        'model': model,\n"
+        "        'backend': " + repr("fake") + ",\n"
+        "        'model_call_error': None,\n"
+        "    }\n"
     )
 
 
-def _build_repo(repo_root, author_log, llm_log, marker):
-    repo_root.mkdir(parents=True, exist_ok=True)
+def _build_repo(tmp_path):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    log_path = tmp_path / "calls.log"
 
-    # A realizing component.
+    # Realizing component (not sealed: concerns capability linkage).
     _write(
-        repo_root / "specs/components/widget/component.md",
+        repo_root / "specs" / "components" / "foo" / "component.md",
         "---\n"
-        "id: comp-widget\n"
-        "title: Widget\n"
+        "id: comp-foo\n"
+        "title: Foo\n"
         "status: draft\n"
-        "owners: [tester]\n"
+        "owners: [alice]\n"
         "realizes: [P-X]\n"
         "sealed: false\n"
         "---\n"
         "\n"
-        "# Widget\n"
+        "# Foo\n"
         "\n"
-        "A small widget component.\n",
+        "A component realizing P-X.\n",
     )
     _write(
-        repo_root / "specs/components/widget/requirements/R-WIDGET-001.md",
-        "**R-WIDGET-001** — MUST expose `use()` returning `True`.\n",
+        repo_root / "specs" / "components" / "foo" / "requirements" / "R-FOO-001.md",
+        "**R-FOO-001** — MUST exist.\n",
     )
     _write(
-        repo_root / "specs/components/widget/acceptance/AC-WIDGET-001.md",
-        "# AC-WIDGET-001\n\nCovers: R-WIDGET-001\nKind: generated-test\n\n"
-        "```gherkin\nGiven a widget\nWhen use() is called\nThen it returns true\n```\n",
+        repo_root / "specs" / "components" / "foo" / "acceptance" / "AC-FOO-001.md",
+        "# AC-FOO-001\n\nCovers: R-FOO-001\nKind: generated-test\n\n"
+        "```gherkin\nGiven nothing\nWhen nothing happens\nThen nothing changes\n```\n",
     )
-    _write(
-        repo_root / "specs/components/widget/interface/library.md",
-        "# Library\n\n```\nuse() -> bool\n```\n",
-    )
-    _write(repo_root / "specs/components/widget/constraints.md", "# Constraints\n\nNone.\n")
-    _write(repo_root / "gen/widget/widget.py", "def use():\n    return True\n")
+    _write(repo_root / "gen" / "foo" / "foo.py", "def foo():\n    return 1\n")
 
-    # A capability with one generated-test scenario.
+    # Capability with one generated-test scenario.
     _write(
-        repo_root / "specs/product/x.md",
+        repo_root / "specs" / "product" / "x.md",
         "---\n"
         "id: P-X\n"
         "title: Capability X\n"
         "status: draft\n"
-        "owners: [tester]\n"
+        "owners: [alice]\n"
         "---\n"
         "\n"
         "# Capability X\n"
@@ -145,122 +130,90 @@ def _build_repo(repo_root, author_log, llm_log, marker):
         "Kind: generated-test\n"
         "\n"
         "```gherkin\n"
-        "Given a widget\n"
-        "When it is used\n"
-        "Then it works\n"
+        "Given a value is 1\n"
+        "When the thing runs\n"
+        "Then the result is 1\n"
         "```\n",
     )
 
-    # Fake dependencies.
-    _write(
-        repo_root / "gen/test-author/test_author.py",
-        _fake_test_author_source(author_log, marker),
-    )
-    _write(repo_root / "gen/llm-endpoint/llm_endpoint.py", _fake_llm_endpoint_source(llm_log))
+    # Fake dependencies, flat-module shape.
+    _write(repo_root / "gen" / "test-author" / "test_author.py", _fake_test_author_source(log_path))
+    _write(repo_root / "gen" / "llm-endpoint" / "llm_endpoint.py", _fake_llm_endpoint_source(log_path))
 
-    # Real compiler, copied from the live repository.
-    tool_root = _tool_root()
-    if tool_root is not None:
-        src = tool_root / "pipeline" / "criterion-compiler"
-        if src.is_dir():
-            shutil.copytree(
-                src,
-                repo_root / "pipeline" / "criterion-compiler",
-                ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
-            )
+    _copy_compiler(repo_root)
+    return repo_root, log_path
 
 
-def _snapshot(root):
-    snap = {}
-    for p in sorted(root.rglob("*")):
-        rel = str(p.relative_to(root))
-        if p.is_file():
-            snap[rel] = p.read_bytes()
-        else:
-            snap[rel] = None
-    return snap
-
-
-def _read_log(path):
-    if not path.exists():
+def _read_log(log_path):
+    if not log_path.exists():
         return []
-    return [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
+    return [json.loads(line) for line in log_path.read_text(encoding="utf-8").splitlines() if line.strip()]
 
 
-def test_ac_scenario_006_fresh_run_records_then_hits(tmp_path):
-    repo_root = tmp_path / "repo"
-    logs = tmp_path / "logs"
-    logs.mkdir()
-    author_log = logs / "author.jsonl"
-    llm_log = logs / "llm.jsonl"
-    marker = logs / "scenario_test_ran.txt"
-    _build_repo(repo_root, author_log, llm_log, marker)
+def _all_files(root):
+    return sorted(str(p.relative_to(root)) for p in root.rglob("*") if p.is_file())
 
-    record_path = repo_root / "verification/capabilities/P-X/.provenance.json"
+
+def test_fresh_run_writes_record_then_check_hits(tmp_path):
+    repo_root, log_path = _build_repo(tmp_path)
+    record_path = repo_root / "verification" / "capabilities" / "P-X" / ".provenance.json"
     assert not record_path.exists()
 
     result = capability_scenario_verifier.run_capability_gates("P-X", repo_root, "m", seed=2)
 
-    # The scenario's test was authored and run.
-    calls = _read_log(author_log)
-    assert any(c["criterion_id"] == "CS-X-001" for c in calls), calls
-    assert marker.exists(), "the scenario's generated test was not run"
+    # The scenario's test was authored via the fake and run.
+    calls = [c for c in _read_log(log_path) if c["fn"] == "author_test"]
+    assert len(calls) == 1
+    assert calls[0]["criterion_id"] == "CS-X-001"
+    assert calls[0]["model"] == "m"
+    assert calls[0]["seed"] == 2
 
     assert field(result, "hit") is False
     report = field(result, "capability_scenario_report")
-    assert report is not None
-    assert list(report.keys() if isinstance(report, dict) else vars(report).keys()) == ["P-X"]
-    entry = field(report, "P-X")
+    assert list(report.keys()) == ["P-X"]
+    entry = report["P-X"]
     assert field(entry, "overall") == "pass"
-    scenarios = list(field(entry, "scenarios"))
+    scenarios = field(entry, "scenarios")
     assert len(scenarios) == 1
     assert field(scenarios[0], "id") == "CS-X-001"
     assert field(scenarios[0], "kind") == "generated-test"
     assert field(scenarios[0], "result") == "pass"
 
-    # The committed record exists with exactly the documented keys.
+    # The committed record.
     assert record_path.is_file()
-    record = json.loads(record_path.read_text())
+    record = json.loads(record_path.read_text(encoding="utf-8"))
     assert isinstance(record, dict)
-    assert set(record.keys()) == EXPECTED_RECORD_KEYS
+    assert set(record.keys()) == {
+        "capability_id",
+        "gate_version",
+        "content_hash",
+        "realizing_components",
+        "capability_scenario_report",
+        "model",
+        "seed",
+    }
     assert record["capability_id"] == "P-X"
     assert record["gate_version"] == capability_scenario_verifier.GATE_VERSION
     assert isinstance(record["content_hash"], str) and record["content_hash"]
-    assert record["realizing_components"] == ["comp-widget"]
+    assert record["realizing_components"] == ["comp-foo"]
+    assert record["capability_scenario_report"] == json.loads(json.dumps(report))
     assert record["model"] == "m"
     assert record["seed"] == 2
-    rec_report = record["capability_scenario_report"]
-    assert set(rec_report.keys()) == {"P-X"}
-    assert rec_report["P-X"]["overall"] == "pass"
 
-    # Given that record now exists, the check is a hit.
+    # Given that record now exists, a check is a hit.
     check = capability_scenario_verifier.check_capability_provenance("P-X", repo_root)
     assert field(check, "hit") is True
-    check_report = field(check, "capability_scenario_report")
-    assert check_report is not None
-    assert field(field(check_report, "P-X"), "overall") == "pass"
+    assert json.loads(json.dumps(field(check, "capability_scenario_report"))) == record["capability_scenario_report"]
 
 
-def test_ac_scenario_006_model_none_on_miss_raises(tmp_path):
-    repo_root = tmp_path / "repo"
-    logs = tmp_path / "logs"
-    logs.mkdir()
-    author_log = logs / "author.jsonl"
-    llm_log = logs / "llm.jsonl"
-    marker = logs / "scenario_test_ran.txt"
-    _build_repo(repo_root, author_log, llm_log, marker)
-
-    before = _snapshot(repo_root)
+def test_miss_without_model_raises_and_touches_nothing(tmp_path):
+    repo_root, log_path = _build_repo(tmp_path)
+    before = _all_files(repo_root)
 
     with pytest.raises(capability_scenario_verifier.ModelRequiredError):
         capability_scenario_verifier.run_capability_gates("P-X", repo_root, None)
 
-    # No fake module was called.
-    assert not author_log.exists()
-    assert not llm_log.exists()
-    assert not marker.exists()
-
-    # No file was written.
-    after = _snapshot(repo_root)
-    assert after == before
-    assert not (repo_root / "verification/capabilities/P-X/.provenance.json").exists()
+    assert not log_path.exists()
+    assert _read_log(log_path) == []
+    assert not (repo_root / "verification" / "capabilities" / "P-X" / ".provenance.json").exists()
+    assert _all_files(repo_root) == before

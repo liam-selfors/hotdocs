@@ -1,244 +1,256 @@
-"""AC-VERIFY-021 (Covers: R-VERIFY-018): verifier-orchestrator's main(argv) CLI."""
-
+# hotdocs-criterion: sha256:89b65bad9f3e45cf253595727e43f86d4c8dfa5f495c7ebdffcb553a3d076b6b
 import json
 from pathlib import Path
-
-import pytest
 
 import verifier_orchestrator
 
 
-GLOSSARY = """# Glossary
+COMPONENT_MD = (
+    "---\n"
+    "id: comp-foo\n"
+    "title: Foo\n"
+    "status: draft\n"
+    "owners: [team-a]\n"
+    "depends_on: []\n"
+    "realizes: [P-FOO]\n"
+    "---\n"
+    "\n"
+    "# Foo\n"
+    "\n"
+    "## Purpose\n"
+    "\n"
+    "Foo doubles a number.\n"
+    "\n"
+    "## Scope\n"
+    "\n"
+    "- In scope: doubling.\n"
+    "\n"
+    "## Definitions\n"
+    "\n"
+    "None.\n"
+    "\n"
+    "## Behavior\n"
+    "\n"
+    "See `requirements/`.\n"
+    "\n"
+    "## Interfaces\n"
+    "\n"
+    "See `interface/`.\n"
+    "\n"
+    "## Data\n"
+    "\n"
+    "See `interface/data/`.\n"
+    "\n"
+    "## Acceptance criteria\n"
+    "\n"
+    "See `acceptance/`.\n"
+    "\n"
+    "## Non-functional constraints\n"
+    "\n"
+    "See `constraints.md`.\n"
+    "\n"
+    "## Open questions\n"
+    "\n"
+    "## Change log\n"
+    "\n"
+    "- Initial.\n"
+)
 
-- **Foo** — a test term.
-"""
+PRODUCT_MD = (
+    "---\n"
+    "id: P-FOO\n"
+    "title: Foo capability\n"
+    "status: draft\n"
+    "owners: [team-a]\n"
+    "---\n"
+    "\n"
+    "# Foo capability\n"
+    "\n"
+    "## Purpose\n"
+    "\n"
+    "Doubling numbers.\n"
+    "\n"
+    "## Scope\n"
+    "\n"
+    "- Doubling.\n"
+)
 
-PRODUCT = """---
-id: P-FOO
-title: Foo capability
-status: draft
-owners: [team-a]
----
+REQUIREMENT_MD = (
+    "# R-FOO-001\n"
+    "\n"
+    "**R-FOO-001** \u2014 `double_it(x)` MUST return a `Doubled` whose "
+    "`value` is `2 * x`.\n"
+)
 
-# Foo capability
+ACCEPTANCE_MD = (
+    "# AC-FOO-001\n"
+    "\n"
+    "Covers: R-FOO-001\n"
+    "Kind: compiled\n"
+    "\n"
+    "```gherkin\n"
+    "Given a n is 2\n"
+    "When double_it is invoked with {\"x\": n}\n"
+    "Then value equals 4\n"
+    "```\n"
+)
 
-## Purpose
+LIBRARY_MD = (
+    "# Library\n"
+    "\n"
+    "```\n"
+    "double_it(x: int) -> Doubled\n"
+    "```\n"
+)
 
-Boxes a doubled number.
+DOUBLED_MD = (
+    "# `Doubled`\n"
+    "\n"
+    "```json\n"
+    "{\"value\": 4}\n"
+    "```\n"
+)
 
-## Scope
+CONSTRAINTS_MD = "# Constraints\n\nNone.\n"
 
-- In scope: boxing a doubled number.
-- Out of scope: everything else.
-
-## Capability scenarios
-
-### CS-FOO-001
-
-Covers: P-FOO
-Kind: generated-test
-
-```gherkin
-Given the number 3
-When it is boxed
-Then the box holds 6
-```
-"""
-
-COMPONENT = """---
-id: comp-foo
-title: Foo
-status: draft
-owners: [team-a]
-realizes: [P-FOO]
-depends_on: []
----
-
-# Foo
-
-## Purpose
-
-Foo boxes a doubled number.
-
-## Scope
-
-- In scope: boxing a doubled number.
-- Out of scope: everything else.
-
-## Definitions
-
-None.
-
-## Behavior
-
-See `requirements/`.
-
-## Interfaces
-
-See `interface/`.
-
-## Data
-
-None.
-
-## Acceptance criteria
-
-See `acceptance/`.
-
-## Non-functional constraints
-
-See `constraints.md`.
-
-## Open questions
-
-## Change log
-
-- Initial draft.
-"""
-
-REQUIREMENT = """# R-FOO-001
-
-**R-FOO-001** — `make_box(n)` MUST return an object whose `value` is `2 * n`.
-"""
-
-ACCEPTANCE = """# AC-FOO-001
-
-Covers: R-FOO-001
-Kind: compiled
-
-```gherkin
-Given a number is 3
-When make_box is invoked with [number]
-Then value equals 6
-```
-"""
-
-LIBRARY = """# Library
-
-```
-make_box(n: int) -> object
-```
-"""
-
-CONSTRAINTS = """# Constraints
-
-None.
-"""
-
-PASSING_CODE = '''"""Foo boxes a doubled number."""
-
-import types as _types
+GLOSSARY_MD = "# Glossary\n\n- **Foo** \u2014 a test term.\n"
 
 
-def make_box(n: int) -> object:
-    """Return an object whose value is 2 * n."""
-    return _types.SimpleNamespace(value=2 * n)
-'''
+def module_source(wrong):
+    expr = "2 * x + 1" if wrong else "2 * x"
+    return (
+        "class Doubled(dict):\n"
+        "    def __getattr__(self, name):\n"
+        "        try:\n"
+        "            return self[name]\n"
+        "        except KeyError:\n"
+        "            raise AttributeError(name)\n"
+        "\n"
+        "\n"
+        "def double_it(x):\n"
+        "    return Doubled(value=" + expr + ")\n"
+    )
 
-FAILING_CODE = '''"""Foo boxes a doubled number."""
 
-import types as _types
+def assembler_source():
+    criterion_text = ACCEPTANCE_MD
+    requirement_text = REQUIREMENT_MD
+    interface_text = LIBRARY_MD + "\n" + DOUBLED_MD
+    return (
+        "CRITERION_TEXT = " + repr(criterion_text) + "\n"
+        "REQUIREMENT_TEXT = " + repr(requirement_text) + "\n"
+        "INTERFACE_TEXT = " + repr(interface_text) + "\n"
+        "GLOSSARY_TEXT = " + repr(GLOSSARY_MD) + "\n"
+        "\n"
+        "\n"
+        "def assemble_criterion(component_id, criterion_id, repo_root):\n"
+        "    return {\n"
+        "        'component_id': component_id,\n"
+        "        'criterion_id': criterion_id,\n"
+        "        'covers': 'R-FOO-001',\n"
+        "        'criterion_text': CRITERION_TEXT,\n"
+        "        'requirement_text': REQUIREMENT_TEXT,\n"
+        "        'interface': INTERFACE_TEXT,\n"
+        "        'glossary': GLOSSARY_TEXT,\n"
+        "        'dependency_interfaces': {},\n"
+        "    }\n"
+        "\n"
+        "\n"
+        "def assemble(component_id, repo_root, mode='cold'):\n"
+        "    return {\n"
+        "        'component_id': component_id,\n"
+        "        'spec_bundle_hash': 'sha256:' + '0' * 64,\n"
+        "        'spec': REQUIREMENT_TEXT,\n"
+        "        'interface': INTERFACE_TEXT,\n"
+        "        'constraints': 'None.',\n"
+        "        'dependency_interfaces': {},\n"
+        "        'dependency_context': {},\n"
+        "        'dependency_usage': {},\n"
+        "        'vars': {},\n"
+        "        'glossary': GLOSSARY_TEXT,\n"
+        "        'hint_code': None,\n"
+        "    }\n"
+    )
 
 
-def make_box(n: int) -> object:
-    """Return an object whose value is 2 * n."""
-    return _types.SimpleNamespace(value=n + 1)
-'''
-
-
-def _write(path: Path, text: str) -> None:
+def write(path, text):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
 
 
-def _build_repo(root: Path, code: str) -> Path:
-    _write(root / "specs" / "glossary.md", GLOSSARY)
-    _write(root / "specs" / "product" / "foo.md", PRODUCT)
+def build_fixture(root, wrong=False):
+    root = Path(root)
+    write(root / "specs" / "glossary.md", GLOSSARY_MD)
+    write(root / "specs" / "product" / "foo.md", PRODUCT_MD)
     comp = root / "specs" / "components" / "foo"
-    _write(comp / "component.md", COMPONENT)
-    _write(comp / "requirements" / "R-FOO-001.md", REQUIREMENT)
-    _write(comp / "acceptance" / "AC-FOO-001.md", ACCEPTANCE)
-    _write(comp / "interface" / "library.md", LIBRARY)
-    _write(comp / "constraints.md", CONSTRAINTS)
-    _write(root / "gen" / "foo" / "foo.py", code)
+    write(comp / "component.md", COMPONENT_MD)
+    write(comp / "requirements" / "R-FOO-001.md", REQUIREMENT_MD)
+    write(comp / "acceptance" / "AC-FOO-001.md", ACCEPTANCE_MD)
+    write(comp / "interface" / "library.md", LIBRARY_MD)
+    write(comp / "interface" / "data" / "Doubled.md", DOUBLED_MD)
+    write(comp / "constraints.md", CONSTRAINTS_MD)
+    write(root / "gen" / "foo" / "foo.py", module_source(wrong))
+    write(
+        root / "gen" / "spec-bundle-assembler" / "spec_bundle_assembler.py",
+        assembler_source(),
+    )
     return root
 
 
-def _field(value, name):
-    return value[name] if isinstance(value, dict) else getattr(value, name)
-
-
-def _run(argv):
+def run_main(argv):
     try:
         return verifier_orchestrator.main(argv)
-    except SystemExit as exc:  # tolerate a usage path that exits with the code
+    except SystemExit as exc:
         code = exc.code
-        return code if isinstance(code, int) else (0 if code is None else 2)
+        if code is None:
+            return 0
+        if isinstance(code, int):
+            return code
+        return 2
 
 
-@pytest.fixture
-def passing_root(tmp_path, monkeypatch):
-    root = _build_repo(tmp_path / "pass_repo", PASSING_CODE)
-    work = tmp_path / "cwd"
-    work.mkdir()
-    monkeypatch.chdir(work)
-    return root
-
-
-@pytest.fixture
-def failing_root(tmp_path, monkeypatch):
-    root = _build_repo(tmp_path / "fail_repo", FAILING_CODE)
-    work = tmp_path / "cwd"
-    work.mkdir()
-    monkeypatch.chdir(work)
-    return root
-
-
-def test_json_equals_form_passes(passing_root, capsys):
+def test_passing_component_json_and_text(tmp_path, capsys):
+    root = build_fixture(tmp_path / "repo")
     capsys.readouterr()
-    code = _run(["comp-foo", f"--repo-root={passing_root}", "--format=json"])
-    out = capsys.readouterr().out
-    assert code == 0, out
-    report = json.loads(out.strip())
-    assert _field(report, "overall") == "pass"
 
+    rc_json = run_main(["comp-foo", "--repo-root=" + str(root), "--format=json"])
+    out_json = capsys.readouterr().out
+    assert rc_json == 0
+    report = json.loads(out_json)
+    assert report["overall"] == "pass"
 
-def test_text_separate_form_passes(passing_root, capsys):
-    capsys.readouterr()
-    code = _run(["comp-foo", "--repo-root", str(passing_root), "--format", "text"])
-    out = capsys.readouterr().out
-    assert code == 0, out
-    lines = [line for line in out.splitlines() if line.strip()]
-    assert lines, out
-    assert lines[0] == "comp-foo: pass"
+    rc_text = run_main(["comp-foo", "--repo-root", str(root), "--format", "text"])
+    out_text = capsys.readouterr().out
+    assert rc_text == 0
+    lines = [line for line in out_text.splitlines() if line.strip()]
+    assert lines[0].strip() == "comp-foo: pass"
+    assert len(lines) >= 2
     criterion_lines = lines[1:]
-    assert criterion_lines, out
     for line in criterion_lines:
-        assert line[:1].isspace(), f"criterion line not indented: {line!r}"
-    assert any(line.strip() == "AC-FOO-001: pass" for line in criterion_lines), out
+        assert line[0] in (" ", "\t"), line
+    assert "AC-FOO-001: pass" in [line.strip() for line in criterion_lines]
 
 
-def test_failing_criterion_returns_1(failing_root, capsys):
+def test_failing_component_returns_1(tmp_path, capsys):
+    root = build_fixture(tmp_path / "repo", wrong=True)
     capsys.readouterr()
-    code = _run(["comp-foo", f"--repo-root={failing_root}"])
-    out = capsys.readouterr().out
-    assert code == 1, out
-
-
-@pytest.mark.parametrize(
-    "case",
-    ["no-args", "bogus-format", "unknown-arg", "repo-root-last", "no-component"],
-)
-def test_usage_errors_return_2(passing_root, capsys, case):
-    argvs = {
-        "no-args": [],
-        "bogus-format": ["comp-foo", f"--repo-root={passing_root}", "--format=bogus"],
-        "unknown-arg": ["comp-foo", f"--repo-root={passing_root}", "--bogus-flag"],
-        "repo-root-last": ["comp-foo", "--repo-root"],
-        "no-component": ["comp-nope", f"--repo-root={passing_root}"],
-    }
+    rc = run_main(["comp-foo", "--repo-root=" + str(root)])
     capsys.readouterr()
-    code = _run(argvs[case])
-    captured = capsys.readouterr()
-    assert code == 2, (case, captured.out, captured.err)
-    assert "hotdocs verify-component" in captured.err, (case, captured.err)
+    assert rc == 1
+
+
+def test_usage_errors_return_2(tmp_path, capsys):
+    root = build_fixture(tmp_path / "repo")
+    cases = [
+        [],
+        ["comp-foo", "--repo-root=" + str(root), "--format=bogus"],
+        ["comp-foo", "--repo-root=" + str(root), "--bogus-flag"],
+        ["comp-foo", "--repo-root"],
+        ["comp-nope", "--repo-root=" + str(root)],
+    ]
+    capsys.readouterr()
+    for argv in cases:
+        rc = run_main(argv)
+        captured = capsys.readouterr()
+        assert rc == 2, argv
+        assert "hotdocs verify-component" in captured.err, argv

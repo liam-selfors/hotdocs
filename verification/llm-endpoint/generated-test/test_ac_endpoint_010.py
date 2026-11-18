@@ -1,46 +1,33 @@
-import email.message
+# hotdocs-criterion: sha256:0144371462bc34f251f30e9cd799cb491277de442a9e0a619c737e047b34aa36
 import io
 import json
 import os
 import stat
-import sys
 import urllib.error
 import urllib.request
+import email.message
 
 import pytest
 
 import llm_endpoint
 
 
-EXPECTED_PROVIDERS = {
-    "claude-cli",
-    "anthropic",
-    "openai",
-    "openai-compatible",
-    "gemini",
-    "ollama",
-}
-
-ENTRY_KEYS = ("provider", "available", "reason", "suggested_model", "api_key_env")
+def field(value, name):
+    return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def _get(value, key, default=None):
+def has_field(value, name):
     if isinstance(value, dict):
-        return value.get(key, default)
-    return getattr(value, key, default)
-
-
-def _has(value, key):
-    if isinstance(value, dict):
-        return key in value
-    return hasattr(value, key)
+        return name in value
+    return hasattr(value, name)
 
 
 class _FakeReply:
     def __init__(self, body: bytes):
         self._body = body
-        self.status = 200
-        self.code = 200
+
+    def read(self, *args, **kwargs):
+        return self._body
 
     def __enter__(self):
         return self
@@ -48,240 +35,167 @@ class _FakeReply:
     def __exit__(self, exc_type, exc, tb):
         return False
 
-    def read(self, *args, **kwargs):
-        return self._body
 
-    def getcode(self):
-        return 200
-
-    def close(self):
-        pass
+def _raising_urlopen(*args, **kwargs):
+    raise urllib.error.URLError("connection refused")
 
 
-def _request_url(request):
-    if isinstance(request, str):
-        return request
-    full = getattr(request, "full_url", None)
-    if full is not None:
-        return full
-    get_full = getattr(request, "get_full_url", None)
-    if callable(get_full):
-        return get_full()
-    return str(request)
+def _entries_by_name(entries):
+    entries = list(entries)
+    by_name = {}
+    for entry in entries:
+        by_name[field(entry, "provider")] = entry
+    return entries, by_name
 
 
-def _empty_bin_dir(tmp_path, name):
-    d = tmp_path / name
+def _make_claude_dir(base):
+    d = base / "with_claude"
     d.mkdir()
+    exe = d / "claude"
+    exe.write_text("#!/bin/sh\nexit 0\n")
+    exe.chmod(exe.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
     return d
 
 
-def _make_claude_executable(directory):
-    names = ["claude"]
-    if os.name == "nt":
-        names += ["claude.exe", "claude.cmd", "claude.bat"]
-    for n in names:
-        p = directory / n
-        p.write_text("#!/bin/sh\nexit 0\n")
-        mode = os.stat(p).st_mode
-        os.chmod(p, mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH | stat.S_IRUSR)
+def test_detect_providers_only_openai_available_then_claude_cli_with_claude_on_path(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr(urllib.request, "urlopen", _raising_urlopen)
 
+    empty_dir = tmp_path / "no_claude"
+    empty_dir.mkdir()
 
-def _raising_urlopen(calls=None):
-    def fake(request, *args, **kwargs):
-        if calls is not None:
-            calls.append({"url": _request_url(request), "args": args, "kwargs": kwargs})
-        raise urllib.error.URLError(ConnectionRefusedError(111, "Connection refused"))
+    env = {
+        "PATH": str(empty_dir),
+        "OPENAI_API_KEY": "k",
+        "GEMINI_API_KEY": " ",
+    }
+    entries = llm_endpoint.detect_providers(env=env)
+    entries, by_name = _entries_by_name(entries)
 
-    return fake
-
-
-def _entries_by_provider(result):
-    assert isinstance(result, list), f"detect_providers must return a list, got {type(result)!r}"
-    by_name = {}
-    for entry in result:
-        for key in ENTRY_KEYS:
-            assert _has(entry, key), f"entry {entry!r} missing key {key!r}"
-        name = _get(entry, "provider")
-        assert name not in by_name, f"duplicate entry for provider {name!r}"
-        by_name[name] = entry
-    return by_name
-
-
-def _isolate_env(monkeypatch, tmp_path):
-    monkeypatch.delenv("VAR_HOTDOCS_CONFIG", raising=False)
-    work = tmp_path / "work"
-    work.mkdir(exist_ok=True)
-    monkeypatch.chdir(work)
-    return work
-
-
-def test_providers_names_match_contract():
-    names = set(llm_endpoint.PROVIDERS.keys())
-    assert names == EXPECTED_PROVIDERS
-
-
-def test_detect_providers_one_entry_per_provider_only_openai_available(monkeypatch, tmp_path):
-    _isolate_env(monkeypatch, tmp_path)
-    calls = []
-    monkeypatch.setattr(urllib.request, "urlopen", _raising_urlopen(calls))
-    # Make sure the real process env would mislead if consulted.
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "real-env-anthropic-key")
-    monkeypatch.setenv("GEMINI_API_KEY", "real-env-gemini-key")
-
-    bin_dir = _empty_bin_dir(tmp_path, "nobin")
-    env = {"PATH": str(bin_dir), "OPENAI_API_KEY": "k", "GEMINI_API_KEY": " "}
-
-    result = llm_endpoint.detect_providers(env=env)
-    by_name = _entries_by_provider(result)
-
-    assert set(by_name.keys()) == set(llm_endpoint.PROVIDERS.keys())
-    assert len(result) == len(llm_endpoint.PROVIDERS)
-
-    available = {name for name, entry in by_name.items() if _get(entry, "available") is True}
-    assert available == {"openai"}, f"expected only openai available, got {available!r}"
+    provider_names = set(llm_endpoint.PROVIDERS)
+    assert len(entries) == len(provider_names)
+    assert set(by_name) == provider_names
 
     for name, entry in by_name.items():
-        assert isinstance(_get(entry, "available"), bool)
-        reason = _get(entry, "reason")
-        assert isinstance(reason, str)
-        assert "k" != reason
-        expected_suggestion = llm_endpoint.PROVIDERS[name]
-        expected_suggestion = _get(expected_suggestion, "suggested_model")
-        assert _get(entry, "suggested_model") == expected_suggestion
+        for key in ("provider", "available", "reason", "suggested_model", "api_key_env"):
+            assert has_field(entry, key), f"{name} entry lacks {key}"
+        assert field(entry, "suggested_model") == field(
+            llm_endpoint.PROVIDERS[name], "suggested_model"
+        )
 
-    assert _get(by_name["openai"], "api_key_env") == "OPENAI_API_KEY"
-    assert _get(by_name["gemini"], "api_key_env") == "GEMINI_API_KEY"
-    assert _get(by_name["anthropic"], "api_key_env") == "ANTHROPIC_API_KEY"
+    available = {name for name, entry in by_name.items() if bool(field(entry, "available"))}
+    assert available == {"openai"}
 
+    claude_dir = _make_claude_dir(tmp_path)
+    env_with_claude = dict(env)
+    env_with_claude["PATH"] = str(claude_dir)
+    entries2 = llm_endpoint.detect_providers(env=env_with_claude)
+    entries2, by_name2 = _entries_by_name(entries2)
 
-def test_detect_providers_claude_on_path_makes_claude_cli_available(monkeypatch, tmp_path):
-    _isolate_env(monkeypatch, tmp_path)
-    monkeypatch.setattr(urllib.request, "urlopen", _raising_urlopen())
-
-    bin_dir = _empty_bin_dir(tmp_path, "withclaude")
-    _make_claude_executable(bin_dir)
-    env = {"PATH": str(bin_dir), "OPENAI_API_KEY": "k", "GEMINI_API_KEY": " "}
-
-    result = llm_endpoint.detect_providers(env=env)
-    by_name = _entries_by_provider(result)
-    assert set(by_name.keys()) == set(llm_endpoint.PROVIDERS.keys())
-
-    available = {name for name, entry in by_name.items() if _get(entry, "available") is True}
-    assert available == {"openai", "claude-cli"}, f"got {available!r}"
+    assert set(by_name2) == provider_names
+    assert len(entries2) == len(provider_names)
+    available2 = {
+        name for name, entry in by_name2.items() if bool(field(entry, "available"))
+    }
+    assert available2 == {"openai", "claude-cli"}
 
 
-def test_detect_providers_ollama_available_when_probe_answers(monkeypatch, tmp_path):
-    _isolate_env(monkeypatch, tmp_path)
+def test_detect_providers_ollama_available_when_probe_answers_within_a_second(
+    tmp_path, monkeypatch
+):
     calls = []
 
-    def fake_urlopen(request, *args, **kwargs):
-        calls.append({"url": _request_url(request), "args": args, "kwargs": kwargs})
-        return _FakeReply(json.dumps({"models": [{"name": "llama3.2:latest"}]}).encode())
+    def answering_urlopen(request, *args, **kwargs):
+        if "timeout" in kwargs:
+            timeout = kwargs["timeout"]
+        elif args:
+            timeout = args[-1] if not isinstance(args[0], (bytes, type(None))) else (
+                args[1] if len(args) > 1 else None
+            )
+        else:
+            timeout = None
+        url = getattr(request, "full_url", request)
+        calls.append({"url": str(url), "timeout": timeout})
+        return _FakeReply(json.dumps({"models": []}).encode("utf-8"))
 
-    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.setattr(urllib.request, "urlopen", answering_urlopen)
 
-    bin_dir = _empty_bin_dir(tmp_path, "nobin2")
-    env = {"PATH": str(bin_dir)}
+    empty_dir = tmp_path / "no_claude"
+    empty_dir.mkdir()
+    entries = llm_endpoint.detect_providers(env={"PATH": str(empty_dir)})
+    entries, by_name = _entries_by_name(entries)
 
-    result = llm_endpoint.detect_providers(env=env)
-    by_name = _entries_by_provider(result)
+    assert "ollama" in by_name
+    assert bool(field(by_name["ollama"], "available")) is True
 
-    assert _get(by_name["ollama"], "available") is True
-
-    probe_calls = [c for c in calls if c["url"].rstrip("/").endswith("/api/tags")]
-    assert probe_calls, f"expected a probe to /api/tags, saw {[c['url'] for c in calls]!r}"
-    for c in probe_calls:
-        timeout = c["kwargs"].get("timeout")
-        if timeout is None and len(c["args"]) >= 2:
-            timeout = c["args"][1]
-        assert timeout is not None, "Ollama probe must pass an explicit timeout"
-        assert float(timeout) <= 1.5, f"probe timeout {timeout!r} exceeds about a second"
+    assert calls, "the Ollama probe never called urllib.request.urlopen"
+    for call in calls:
+        timeout = call["timeout"]
+        assert timeout is not None, "the Ollama probe set no timeout"
+        assert 0 < float(timeout) <= 1.5
 
 
-_OPENAI_SUCCESS_BODY = json.dumps(
-    {
-        "id": "chatcmpl-test",
+def test_check_connection_ok_then_auth_error_no_call_log_and_unknown_provider(
+    tmp_path, monkeypatch
+):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("VAR_HOTDOCS_CONFIG", raising=False)
+    secret = "sk-test-secret-value-1234567890"
+    monkeypatch.setenv("OPENAI_API_KEY", secret)
+
+    body = {
+        "id": "chatcmpl-1",
         "object": "chat.completion",
         "model": "m",
         "choices": [
             {
                 "index": 0,
-                "message": {"role": "assistant", "content": "ok"},
+                "message": {"role": "assistant", "content": "OK"},
                 "finish_reason": "stop",
             }
         ],
-        "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
-        "output_text": "ok",
+        "output_text": "OK",
         "output": [
             {
                 "type": "message",
                 "role": "assistant",
-                "content": [{"type": "output_text", "text": "ok"}],
+                "content": [{"type": "output_text", "text": "OK"}],
             }
         ],
     }
-).encode()
-
-
-def _calls_dir_entries(work):
-    calls_dir = work / ".hotdocs" / "calls"
-    if not calls_dir.exists():
-        return []
-    return [p for p in calls_dir.rglob("*") if p.is_file()]
-
-
-def test_check_connection_success_then_auth_failure_and_no_call_log(monkeypatch, tmp_path):
-    work = _isolate_env(monkeypatch, tmp_path)
-    secret = "sk-test-SECRETVALUE-0123456789"
-    monkeypatch.setenv("OPENAI_API_KEY", secret)
-
-    calls = []
 
     def ok_urlopen(request, *args, **kwargs):
-        calls.append(_request_url(request))
-        return _FakeReply(_OPENAI_SUCCESS_BODY)
+        return _FakeReply(json.dumps(body).encode("utf-8"))
 
     monkeypatch.setattr(urllib.request, "urlopen", ok_urlopen)
-    result = llm_endpoint.check_connection("openai", "m")
-    assert calls, "check_connection must make a real (here: faked) HTTP request"
-    assert _get(result, "ok") is True
-    assert _get(result, "error") is None
-    assert _calls_dir_entries(work) == []
+    result_ok = llm_endpoint.check_connection("openai", "m")
+    assert field(result_ok, "ok") is True
+    assert field(result_ok, "error") is None
 
-    def auth_fail_urlopen(request, *args, **kwargs):
-        url = _request_url(request)
-        calls.append(url)
-        hdrs = email.message.Message()
+    def unauthorized_urlopen(request, *args, **kwargs):
+        url = getattr(request, "full_url", str(request))
         raise urllib.error.HTTPError(
             url,
             401,
             "Unauthorized",
-            hdrs,
-            io.BytesIO(b'{"error": {"message": "Incorrect API key provided", "type": "invalid_request_error"}}'),
+            email.message.Message(),
+            io.BytesIO(b'{"error": {"message": "Incorrect API key provided"}}'),
         )
 
-    monkeypatch.setattr(urllib.request, "urlopen", auth_fail_urlopen)
-    result = llm_endpoint.check_connection("openai", "m")
-    assert _get(result, "ok") is False
-    error = _get(result, "error")
+    monkeypatch.setattr(urllib.request, "urlopen", unauthorized_urlopen)
+    result_fail = llm_endpoint.check_connection("openai", "m")
+    assert field(result_fail, "ok") is False
+    error = field(result_fail, "error")
     assert error is not None
-    assert _get(error, "category") == "auth"
-    message = _get(error, "message")
-    assert isinstance(message, str)
-    assert secret not in message
-    assert secret not in repr(result)
+    assert field(error, "category") == "auth"
+    assert has_field(error, "message")
+    assert secret not in str(field(error, "message"))
+    assert secret not in repr(result_fail)
 
-    assert _calls_dir_entries(work) == [], "check_connection must never write a call-log record"
+    calls_dir = tmp_path / ".hotdocs" / "calls"
+    if calls_dir.exists():
+        assert list(calls_dir.iterdir()) == []
 
-
-def test_check_connection_unknown_provider_raises_value_error(monkeypatch, tmp_path):
-    _isolate_env(monkeypatch, tmp_path)
-    monkeypatch.setenv("OPENAI_API_KEY", "k")
-
-    def must_not_call(request, *args, **kwargs):
-        raise AssertionError("no request expected for an unknown provider")
-
-    monkeypatch.setattr(urllib.request, "urlopen", must_not_call)
     with pytest.raises(ValueError):
         llm_endpoint.check_connection("no-such-provider", "m")

@@ -1,86 +1,104 @@
-import provenance_tracker
-
+# hotdocs-criterion: sha256:c604d7f178c33aebfe09e849686a4c126b79dcd02a492d356f82673476368d55
 from pathlib import Path
 
+import provenance_tracker
 
-class _DualAccess(dict):
-    """A plain dict that also exposes its keys as attributes, so the target
-    may read a caller-supplied value either way."""
+
+class AttrDict(dict):
+    """A dict that also exposes its keys as attributes, so the target may
+    read it either way (dual dict-or-attribute access)."""
 
     def __getattr__(self, name):
         try:
-            value = self[name]
+            return self[name]
         except KeyError as exc:
             raise AttributeError(name) from exc
-        return value
+
+    def to_dict(self):
+        return dict(self)
 
 
-def _dual(value):
-    if isinstance(value, dict):
-        return _DualAccess({k: _dual(v) for k, v in value.items()})
-    if isinstance(value, list):
-        return [_dual(v) for v in value]
-    return value
+def field(value, name):
+    return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def _generation_result():
-    return _dual(
-        {
-            "component_id": "comp-foo",
-            "model_call_error": None,
-            "files": [
-                {"path": "gen/foo/foo.py", "content": "def foo():\n    return 1\n"}
-            ],
-        }
+def _generation_result(component_id):
+    return AttrDict(
+        component_id=component_id,
+        model_call_error=None,
+        files=[],
+        model="anthropic:claude-sonnet-5",
+        seed=0,
     )
 
 
-def _verification_report():
-    return _dual(
-        {
-            "component_id": "comp-foo",
-            "criteria": [
-                {
-                    "id": "AC-FOO-001",
-                    "covers": "R-FOO-001",
-                    "kind": "compiled",
-                    "result": "pass",
-                },
-                {
-                    "id": "AC-FOO-002",
-                    "covers": "R-FOO-002",
-                    "kind": "compiled",
-                    "result": "fail",
-                    "failure_detail": {
-                        "message": "result.foo equals 5 failed",
-                        "expected": 5,
-                        "actual": 3,
-                    },
-                },
-            ],
-            "requirement_results": {"R-FOO-001": "pass", "R-FOO-002": "fail"},
-            "interface_drift": False,
-            "mutation_score": 0.9,
-            "overall": "fail",
-        }
-    )
-
-
-def test_last_requirement_failures_returns_exactly_failing_rids(tmp_path):
-    repo_root = Path(tmp_path)
-
-    provenance_tracker.write_attempt_record(
-        "comp-foo",
-        _generation_result(),
-        _verification_report(),
-        "sha256:0123456789abcdef",
+def _write(repo_root, component_id, verification):
+    record = provenance_tracker.write_attempt_record(
+        component_id,
+        _generation_result(component_id),
+        verification,
+        "sha256:" + "0" * 64,
         repo_root,
     )
+    assert field(record, "verification") is not None
+    return record
 
-    attempts_dir = repo_root / ".hotdocs" / "attempts"
-    assert attempts_dir.exists(), "write_attempt_record must write under .hotdocs/attempts/"
+
+def test_returns_failing_requirement_ids(tmp_path):
+    repo_root = Path(tmp_path) / "repo"
+    repo_root.mkdir()
+    verification = AttrDict(
+        component_id="comp-foo",
+        criteria=[
+            AttrDict(id="AC-FOO-001", covers="R-FOO-001", kind="generated-test", result="pass"),
+            AttrDict(
+                id="AC-FOO-002",
+                covers="R-FOO-002",
+                kind="generated-test",
+                result="fail",
+                failure_origin="implementation",
+            ),
+        ],
+        requirement_results={"R-FOO-001": "pass", "R-FOO-002": "fail"},
+        interface_drift=False,
+        mutation_score=None,
+        mutation_error=None,
+        overall="fail",
+    )
+    _write(repo_root, "comp-foo", verification)
 
     result = provenance_tracker.last_requirement_failures("comp-foo", repo_root)
+    assert list(result) == ["R-FOO-002"]
 
-    assert isinstance(result, list)
-    assert result == ["R-FOO-002"]
+
+def test_excludes_requirement_whose_failures_all_have_test_origin(tmp_path):
+    repo_root = Path(tmp_path) / "repo"
+    repo_root.mkdir()
+    verification = AttrDict(
+        component_id="comp-foo",
+        criteria=[
+            AttrDict(
+                id="AC-FOO-001",
+                covers="R-FOO-001",
+                kind="generated-test",
+                result="fail",
+                failure_origin="test",
+            ),
+            AttrDict(
+                id="AC-FOO-002",
+                covers="R-FOO-002",
+                kind="generated-test",
+                result="fail",
+                failure_origin="implementation",
+            ),
+        ],
+        requirement_results={"R-FOO-001": "fail", "R-FOO-002": "fail"},
+        interface_drift=False,
+        mutation_score=None,
+        mutation_error=None,
+        overall="fail",
+    )
+    _write(repo_root, "comp-foo", verification)
+
+    result = provenance_tracker.last_requirement_failures("comp-foo", repo_root)
+    assert list(result) == ["R-FOO-002"]

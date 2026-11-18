@@ -546,7 +546,7 @@ def run(component_id: str, model: str, seed: int, retry_feedback: list[str] | No
     finally:
         if saved_timeout is not None:
             verifier_orchestrator.DEFAULT_TEST_TIMEOUT = saved_timeout
-    print(f"verify: overall={report.overall} interface_drift={report.interface_drift} mutation_score={report.mutation_score}")
+    print(f"verify: overall={report.overall} interface_drift={report.interface_drift} mutation_score={report.mutation_score} mutation_error={getattr(report, 'mutation_error', None)}")
     for entry in report.criteria:
         print(f"  {entry}")
     print(f"requirement_results: {report.requirement_results}")

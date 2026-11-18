@@ -1,3 +1,4 @@
+# hotdocs-criterion: sha256:3046d392a7efc0437b6b25e37a330b6e0423da326a0835a61319b55cd5392044
 """AC-SECRET-009 (covers R-SECRET-009).
 
 A flagged SecretScanResult stays recorded in cache-manager under its own

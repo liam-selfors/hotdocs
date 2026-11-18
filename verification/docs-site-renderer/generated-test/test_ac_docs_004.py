@@ -1,112 +1,74 @@
-"""AC-DOCS-004 (Covers: R-DOCS-004).
+# hotdocs-criterion: sha256:5f0fb7d44491d9d9be1a9d36d01c16912e902309998b197625865011bab462ac
+"""AC-DOCS-004: given only corpus-graph.json, render_docs_site completes,
+reading nothing else (R-DOCS-004: the site is a pure function of the graph)."""
 
-Given only corpus-graph.json as input, with no other files available,
-when render_docs_site runs, then it completes successfully, reading
-nothing else.
-"""
-
-import builtins
-import dataclasses
-import io
 import json
-import mimetypes
 import os
-import site
 import sys
 from pathlib import Path
 
 import docs_site_renderer
+import docs_site_renderer.cli
 
 
-DOC_MARKER = "zqxalphadocmarker"
-REQ_MARKER = "zqxalpharequirementmarker"
+_STATE = {"active": False, "repo_root": None, "opened": []}
+_HOOK_INSTALLED = {"done": False}
 
 
-# --------------------------------------------------------------------------
-# A CorpusGraph matching comp-corpus-graph-builder's documented shape:
-# a dataclass with `nodes`, `edges`, `aggregates`, `to_dict()` and
-# `to_json_bytes()`.
-# --------------------------------------------------------------------------
-@dataclasses.dataclass
-class CorpusGraph:
-    nodes: dict
-    edges: list
-    aggregates: dict
+def _normalize(raw):
+    if isinstance(raw, int):
+        return None
+    try:
+        raw = os.fspath(raw)
+    except TypeError:
+        return None
+    if isinstance(raw, bytes):
+        try:
+            raw = os.fsdecode(raw)
+        except Exception:
+            return None
+    if not isinstance(raw, str):
+        return None
+    if not os.path.isabs(raw):
+        try:
+            raw = os.path.join(os.getcwd(), raw)
+        except Exception:
+            return None
+    try:
+        return os.path.realpath(raw)
+    except Exception:
+        return os.path.abspath(raw)
 
-    def to_dict(self):
-        return {
-            "nodes": self.nodes,
-            "edges": self.edges,
-            "aggregates": self.aggregates,
-        }
 
-    def to_json_bytes(self):
-        return (
-            json.dumps(self.to_dict(), sort_keys=True, indent=2, ensure_ascii=True)
-            + "\n"
-        ).encode("utf-8")
+def _hook(event, args):
+    if not _STATE["active"]:
+        return
+    if event != "open" or not args:
+        return
+    # Avoid recursion while normalizing paths.
+    _STATE["active"] = False
+    try:
+        path = _normalize(args[0])
+        root = _STATE["repo_root"]
+        if path is not None and root is not None:
+            if path == root or path.startswith(root + os.sep):
+                _STATE["opened"].append(path)
+    finally:
+        _STATE["active"] = True
+
+
+def _install_hook():
+    if not _HOOK_INSTALLED["done"]:
+        sys.addaudithook(_hook)
+        _HOOK_INSTALLED["done"] = True
 
 
 def _graph_dict():
-    component_md = (
-        "---\n"
-        "id: comp-alpha\n"
-        "title: Alpha\n"
-        "status: draft\n"
-        "owners: [docs-team]\n"
-        "depends_on: [comp-beta]\n"
-        "realizes: [P-ALPHA]\n"
-        "uses_var: [VAR-ALPHA-URL]\n"
-        "sealed: true\n"
-        "source_path: legacy/alpha/\n"
-        "---\n"
-        "\n"
-        "# Alpha\n"
-        "\n"
-        "The alpha component " + DOC_MARKER + " does things.\n"
-    )
-    req_md = (
-        "# R-ALPHA-001\n"
-        "\n"
-        "**R-ALPHA-001** — Alpha MUST " + REQ_MARKER + ".\n"
-    )
-    beta_md = (
-        "---\n"
-        "id: comp-beta\n"
-        "title: Beta\n"
-        "status: draft\n"
-        "owners: [docs-team]\n"
-        "depends_on: []\n"
-        "realizes: []\n"
-        "uses_var: []\n"
-        "sealed: true\n"
-        "source_path: legacy/beta/\n"
-        "---\n"
-        "\n"
-        "# Beta\n"
-    )
     return {
         "nodes": {
-            "P-ALPHA": {"type": "capability"},
-            "VAR-ALPHA-URL": {"type": "var"},
-            "comp-alpha": {
-                "type": "component",
-                "verification": None,
-                "provenance": {
-                    "component_id": "comp-alpha",
-                    "generated_at": "2026-01-01T00:00:00Z",
-                    "model": "anthropic:claude-sonnet-5",
-                },
-                "size_status": "ok",
-                "sealed": True,
-                "pinned_overrides": [],
-                "owners": ["docs-team"],
-                "documents": {
-                    "component.md": component_md,
-                    "requirements/R-ALPHA-001.md": req_md,
-                },
-            },
-            "comp-beta": {
+            "P-ZERO-EDIT": {"type": "capability"},
+            "VAR-FOO-URL": {"type": "var"},
+            "comp-bar": {
                 "type": "component",
                 "verification": None,
                 "provenance": None,
@@ -114,13 +76,26 @@ def _graph_dict():
                 "sealed": True,
                 "pinned_overrides": [],
                 "owners": [],
-                "documents": {"component.md": beta_md},
+                "documents": {},
+            },
+            "comp-foo": {
+                "type": "component",
+                "verification": None,
+                "provenance": None,
+                "size_status": "ok",
+                "sealed": True,
+                "pinned_overrides": [],
+                "owners": ["docs-team"],
+                "documents": {
+                    "component.md": "---\nid: comp-foo\ntitle: Foo\nstatus: draft\nowners: [docs-team]\n---\n\n# Foo\n\nFoo body text.\n",
+                    "requirements/R-FOO-001.md": "**R-FOO-001** — Foo MUST work.\n",
+                },
             },
         },
         "edges": [
-            {"from": "comp-alpha", "to": "P-ALPHA", "kind": "realizes"},
-            {"from": "comp-alpha", "to": "VAR-ALPHA-URL", "kind": "uses_var"},
-            {"from": "comp-alpha", "to": "comp-beta", "kind": "depends_on"},
+            {"from": "comp-foo", "to": "P-ZERO-EDIT", "kind": "realizes"},
+            {"from": "comp-foo", "to": "VAR-FOO-URL", "kind": "uses_var"},
+            {"from": "comp-foo", "to": "comp-bar", "kind": "depends_on"},
         ],
         "aggregates": {
             "orphan_capability_rate": 0.0,
@@ -130,169 +105,62 @@ def _graph_dict():
     }
 
 
-# --------------------------------------------------------------------------
-# Read tracking
-# --------------------------------------------------------------------------
-def _real(p):
-    return os.path.realpath(os.path.abspath(os.fsdecode(p)))
-
-
-def _under(path, root):
-    root = root.rstrip(os.sep) or os.sep
-    return path == root or path.startswith(root + os.sep)
-
-
-def _tool_gen_dir():
-    here = Path(os.path.realpath(docs_site_renderer.__file__)).parent
-    for parent in [here, *here.parents]:
-        if parent.name == "gen":
-            return str(parent)
-    return None
-
-
-def _allowed_roots(out_dir):
-    roots = set()
-    pkg_file = os.path.realpath(docs_site_renderer.__file__)
-    roots.add(os.path.dirname(pkg_file))
-    gen_dir = _tool_gen_dir()
-    if gen_dir:
-        roots.add(os.path.realpath(gen_dir))
-    for p in (sys.prefix, sys.base_prefix, sys.exec_prefix):
-        if p:
-            roots.add(os.path.realpath(p))
-    try:
-        for p in site.getsitepackages():
-            roots.add(os.path.realpath(p))
-    except Exception:
-        pass
-    try:
-        roots.add(os.path.realpath(site.getusersitepackages()))
-    except Exception:
-        pass
-    roots.add(_real(out_dir))
-    return roots
-
-
-class _ReadRecorder:
-    def __init__(self):
-        self.reads = []
-
-    def record(self, target):
-        if isinstance(target, int):
-            return
-        try:
-            self.reads.append(_real(target))
-        except Exception:
-            pass
-
-
-def _install_tracking(monkeypatch, recorder):
-    orig_open = builtins.open
-    orig_io_open = io.open
-    orig_os_open = os.open
-    orig_scandir = os.scandir
-    orig_listdir = os.listdir
-
-    def _is_read_mode(mode):
-        return "r" in mode or "+" in mode
-
-    def make_open(orig):
-        def tracked_open(file, mode="r", *args, **kwargs):
-            if _is_read_mode(mode):
-                recorder.record(file)
-            return orig(file, mode, *args, **kwargs)
-
-        return tracked_open
-
-    def tracked_os_open(path, flags, *args, **kwargs):
-        acc = flags & getattr(os, "O_ACCMODE", 3)
-        if acc in (os.O_RDONLY, os.O_RDWR):
-            recorder.record(path)
-        return orig_os_open(path, flags, *args, **kwargs)
-
-    def tracked_scandir(path="."):
-        recorder.record(path)
-        return orig_scandir(path)
-
-    def tracked_listdir(path="."):
-        recorder.record(path)
-        return orig_listdir(path)
-
-    monkeypatch.setattr(builtins, "open", make_open(orig_open))
-    monkeypatch.setattr(io, "open", make_open(orig_io_open))
-    monkeypatch.setattr(os, "open", tracked_os_open)
-    monkeypatch.setattr(os, "scandir", tracked_scandir)
-    monkeypatch.setattr(os, "listdir", tracked_listdir)
-
-
-# --------------------------------------------------------------------------
-# The test
-# --------------------------------------------------------------------------
 def test_ac_docs_004_renders_from_corpus_graph_json_alone(tmp_path, monkeypatch):
-    # Given only corpus-graph.json as input, with no other files available.
-    input_dir = tmp_path / "input"
-    input_dir.mkdir()
-    graph_file = input_dir / "corpus-graph.json"
-    seed = CorpusGraph(**_graph_dict())
-    graph_file.write_bytes(seed.to_json_bytes())
-    assert sorted(os.listdir(input_dir)) == ["corpus-graph.json"]
-
-    loaded = json.loads(graph_file.read_text(encoding="utf-8"))
-    graph = CorpusGraph(
-        nodes=loaded["nodes"],
-        edges=loaded["edges"],
-        aggregates=loaded["aggregates"],
+    repo_root = tmp_path / "repo"
+    (repo_root / "verification").mkdir(parents=True)
+    graph_path = repo_root / "verification" / "corpus-graph.json"
+    graph_path.write_bytes(
+        (json.dumps(_graph_dict(), sort_keys=True, indent=2, ensure_ascii=True) + "\n").encode("utf-8")
     )
-
     out_dir = tmp_path / "site"
-    monkeypatch.chdir(input_dir)
 
-    allowed = _allowed_roots(out_dir)
-    allowed_files = {_real(graph_file)}
-    for f in getattr(mimetypes, "knownfiles", []) or []:
-        allowed_files.add(_real(f))
+    # The only file available under repo_root is corpus-graph.json.
+    present = sorted(p for p in repo_root.rglob("*") if p.is_file())
+    assert present == [graph_path]
 
-    recorder = _ReadRecorder()
+    monkeypatch.chdir(repo_root)
 
-    # When render_docs_site runs.
-    with monkeypatch.context() as m:
-        _install_tracking(m, recorder)
-        result = docs_site_renderer.render_docs_site(graph, out_dir)
+    real_root = os.path.realpath(str(repo_root))
+    real_graph = os.path.realpath(str(graph_path))
+    real_gen = os.path.join(real_root, "gen")
 
-    # Then it completes successfully ...
-    assert result is None
-    assert out_dir.is_dir(), "render_docs_site produced no output directory"
-    produced = [p for p in out_dir.rglob("*") if p.is_file()]
-    assert produced, "render_docs_site wrote no files"
-    assert any(p.suffix.lower() in (".html", ".htm") for p in produced), (
-        "no HTML page was rendered"
-    )
+    _install_hook()
+    _STATE["repo_root"] = real_root
+    _STATE["opened"] = []
+    _STATE["active"] = True
+    try:
+        code = docs_site_renderer.cli.main(
+            ["--repo-root=" + str(repo_root), "--out=" + str(out_dir)]
+        )
+    finally:
+        _STATE["active"] = False
+    opened = list(_STATE["opened"])
 
-    # ... with the content drawn from the graph it was given ...
+    assert code == 0
+
+    # It read nothing under repo_root other than corpus-graph.json
+    # (dependency module code under gen/ is code, not a data source).
+    others = [
+        p
+        for p in opened
+        if p != real_graph
+        and not (p.startswith(real_gen + os.sep) and p.endswith(".py"))
+    ]
+    assert others == [], "read files other than corpus-graph.json: " + repr(others)
+    assert real_graph in opened, "corpus-graph.json was never read"
+
+    # The site was actually rendered, from the graph's content.
+    assert out_dir.is_dir()
+    files = [p for p in out_dir.rglob("*") if p.is_file()]
+    assert files, "no site files rendered"
     combined = ""
-    for p in produced:
+    for p in files:
         try:
             combined += p.read_text(encoding="utf-8", errors="replace")
         except Exception:
             pass
-    assert "comp-alpha" in combined
-    assert DOC_MARKER in combined, (
-        "component document text from the graph's `documents` was not rendered"
-    )
+    assert "comp-foo" in combined
 
-    # ... reading nothing else.
-    unexpected = sorted(
-        {
-            r
-            for r in recorder.reads
-            if r not in allowed_files
-            and not any(_under(r, root) for root in allowed)
-        }
-    )
-    assert unexpected == [], (
-        "render_docs_site read from sources other than the given graph: "
-        + repr(unexpected)
-    )
-
-    # The input directory still holds only corpus-graph.json.
-    assert sorted(os.listdir(input_dir)) == ["corpus-graph.json"]
+    # Still nothing else was created in the input repo.
+    after = sorted(p for p in repo_root.rglob("*") if p.is_file())
+    assert after == [graph_path]

@@ -5,6 +5,10 @@
   accepted, with a `block_reason` distinguishing `"model_call_error"`
   (no candidate was ever produced, and `verifier-orchestrator` was
   never called) from `"verification_failed"` (a candidate was produced
-  and failed) — different facts for a developer deciding whether to
-  re-run or fix the spec first (`D19`). Overall merge readiness stays
+  and failed) and from `"test_authoring_failed"` (a candidate was
+  produced, but every criterion of its `VerificationReport` whose
+  `result` is `"fail"` has `failure_origin` `"test"`: no test could be
+  written for it, so nothing shows the code wrong, `D319`) — different
+  facts for a developer deciding whether to re-run or fix the spec first
+  (`D19`). Overall merge readiness stays
   `provenance-tracker`'s decision.

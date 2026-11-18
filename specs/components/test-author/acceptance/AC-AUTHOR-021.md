@@ -4,9 +4,12 @@ Covers: R-AUTHOR-021
 Kind: generated-test
 
 ```gherkin
-Given any bundle
-When author_test builds its prompt
-Then the prompt instructs that any field read from a value returned
-  by the target component itself must use dual dict-or-attribute
-  access, never assumed to be only a dict or only an object
+Given a bundle for comp-widget-maker whose dependency_interfaces is {},
+  and a mock model that records
+  each prompt and replies with a valid marked test file
+When author_test(bundle, "mock", repo_root=<tmp>, llm_backend=<mock>)
+  is called
+Then the first recorded prompt contains the line
+  "        return value[name] if isinstance(value, dict) else getattr(value, name)"
+  and contains "MUST use dual dict-or-attribute access, never one assumed shape:"
 ```

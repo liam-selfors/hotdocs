@@ -6,12 +6,10 @@
   is freeform-derived, written with no Given/When/Then block
   (`SPEC_GUIDELINES.md` §5, `D80`).
 
-  **A single score for the whole component, a union across all of its
-  own `generated-test` criteria's test files — never an average of
-  per-criterion scores** (`D124`): generate each mutant once, against the
-  whole candidate module; it counts as killed if *any* of those test
-  files fails against it. `VerificationReport.mutation_score` is exactly
-  one number per component (`interface/data/VerificationReport.md`).
+  **One score for the whole component, never an average** (`D124`):
+  each mutant is generated once, against the whole candidate module, and
+  counts as killed if *any* of the `generated-test` files fails against
+  it.
 
   **Exactly four mutation operators, one mutant per site** (`D159`),
   with these exact swaps (`D172`) — the bar was calibrated against them,

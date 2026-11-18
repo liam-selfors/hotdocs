@@ -1,3 +1,4 @@
+# hotdocs-criterion: sha256:1b1004ff1274edf7a768a717f564c1d5a57b1ea6d538c9965e73d6f61e5679c9
 """AC-SECRET-002 (covers R-SECRET-002).
 
 Given a full scan with at least one match

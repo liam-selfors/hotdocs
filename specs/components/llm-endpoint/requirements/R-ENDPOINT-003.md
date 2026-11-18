@@ -11,17 +11,8 @@
   plugin or registry, and never a change to `complete()`
   (`R-ENDPOINT-001`) or any caller.
 
-  **When `claude-cli` dispatches via the `claude` command's
-  non-interactive mode (`D33`), it MUST pass `--tools ""` on every call**
-  (`D35`), or the command keeps its tools. **It MUST also pass `--bare`
-  when `ANTHROPIC_API_KEY` is set, or `--safe-mode` when it is not**
-  (`D82`), since `--bare` refuses a subscription login. It MUST NOT check for a credential and refuse
-  early; it dispatches and classifies what the command reports
-  (`R-ENDPOINT-004`).
-
-  **It MUST pass `--output-format stream-json --verbose`, and the reply
-  is every text block of every `assistant` message, in order, joined with
-  nothing between them** (`D225`): a long reply spans several messages,
-  and plain output keeps only the last. A `result` line with `is_error`
-  true is a failure; output that is not that stream is the reply
-  unchanged, never stripped.
+  **`claude-cli` MUST run the `claude` command's non-interactive mode
+  (`D33`) exactly as `specs/architecture/claude-cli-adapter.md` gives**:
+  its arguments, its environment under `hotdocs.toml`'s `auth` entry,
+  how its output becomes the reply, and how a failure is classified and
+  worded (`D35`, `D82`, `D225`, `D322`).

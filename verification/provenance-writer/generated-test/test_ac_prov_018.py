@@ -1,12 +1,10 @@
-import provenance_writer
-
+# hotdocs-criterion: sha256:1f643b81be3b3331ccc1605717d178ff423b21cebaf6b9e118fa4b5652b28477
 import json
 import re
-from dataclasses import dataclass, field as dc_field
 from datetime import datetime, timezone
 from pathlib import Path
 
-import pytest
+import provenance_writer
 
 
 EXPECTED_KEYS = [
@@ -21,49 +19,23 @@ EXPECTED_KEYS = [
     "written_at",
 ]
 
-COMPONENT_ID = "comp-foo"
-OWNERS = ["pipeline-team", "alice"]
-SOURCE_PATH = "pipeline/foo/"
 SOURCE_HASH = "sha256:" + "0123456789abcdef" * 4
 VERIFIER_VERSION = "verifier-orchestrator@2.0.0"
-
+OWNERS = ["pipeline-team", "alice"]
+SOURCE_PATH = "pipeline/foo/"
 WRITTEN_AT_RE = re.compile(r"^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$")
 
 
-@dataclass
-class FakeVerificationReport:
-    """Mirrors verifier-orchestrator's VerificationReport: a dataclass whose
-    fields are attributes, with to_dict() giving the JSON form."""
-
-    component_id: str
-    criteria: list
-    requirement_results: dict = dc_field(default_factory=dict)
-    interface_drift: bool = False
-    mutation_score: object = None
-    overall: str = "pass"
-
-    def to_dict(self):
-        def crit(c):
-            if isinstance(c, dict):
-                return dict(c)
-            return {"id": c.id, "covers": c.covers, "kind": c.kind, "result": c.result}
-
-        return {
-            "component_id": self.component_id,
-            "criteria": [crit(c) for c in self.criteria],
-            "requirement_results": dict(self.requirement_results),
-            "interface_drift": self.interface_drift,
-            "mutation_score": self.mutation_score,
-            "overall": self.overall,
-        }
+def field(value, name):
+    return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-@dataclass
-class CriterionObject:
-    id: str
-    covers: str
-    kind: str
-    result: str
+class CriterionObj:
+    def __init__(self, id, covers, kind, result):
+        self.id = id
+        self.covers = covers
+        self.kind = kind
+        self.result = result
 
 
 def _criteria_dicts(results):
@@ -71,8 +43,8 @@ def _criteria_dicts(results):
     for i, r in enumerate(results, start=1):
         out.append(
             {
-                "id": "AC-FOO-%03d" % i,
-                "covers": "R-FOO-%03d" % i,
+                "id": "AC-FOO-00" + str(i),
+                "covers": "R-FOO-00" + str(i),
                 "kind": "compiled",
                 "result": r,
             }
@@ -80,37 +52,38 @@ def _criteria_dicts(results):
     return out
 
 
-def _report(results, overall, as_objects=False):
-    crits = _criteria_dicts(results)
-    if as_objects:
-        crits = [CriterionObject(**c) for c in crits]
-    req_results = {
-        "R-FOO-%03d" % i: r for i, r in enumerate(results, start=1)
-    }
-    return FakeVerificationReport(
-        component_id=COMPONENT_ID,
-        criteria=crits,
-        requirement_results=req_results,
-        interface_drift=False,
-        mutation_score=None,
-        overall=overall,
-    )
+def _criteria_objs(results):
+    out = []
+    for i, r in enumerate(results, start=1):
+        out.append(
+            CriterionObj(
+                id="AC-FOO-00" + str(i),
+                covers="R-FOO-00" + str(i),
+                kind="compiled",
+                result=r,
+            )
+        )
+    return out
 
 
-def _inputs_dataclass(report):
-    return provenance_writer.SealedProvenanceInputs(
-        component_id=COMPONENT_ID,
-        owners=list(OWNERS),
-        source_path=SOURCE_PATH,
-        source_hash=SOURCE_HASH,
-        verifier_version=VERIFIER_VERSION,
-        verification_report=report,
-    )
-
-
-def _inputs_dict(report):
+def _report(overall, criteria):
+    req = {}
+    for c in criteria:
+        req[field(c, "covers")] = "pass" if field(c, "result") == "pass" else "fail"
     return {
-        "component_id": COMPONENT_ID,
+        "component_id": "comp-foo",
+        "criteria": criteria,
+        "requirement_results": req,
+        "interface_drift": False,
+        "mutation_score": None,
+        "mutation_error": None,
+        "overall": overall,
+    }
+
+
+def _fields(report):
+    return {
+        "component_id": "comp-foo",
         "owners": list(OWNERS),
         "source_path": SOURCE_PATH,
         "source_hash": SOURCE_HASH,
@@ -123,98 +96,119 @@ def _manifest_path(repo_root):
     return Path(repo_root) / "pipeline" / "foo" / ".sealed-provenance.json"
 
 
-def _all_files(root):
+def _all_files(repo_root):
     return sorted(
-        p.relative_to(root).as_posix() for p in Path(root).rglob("*") if p.is_file()
+        str(p.relative_to(repo_root)).replace("\\", "/")
+        for p in Path(repo_root).rglob("*")
+        if p.is_file()
     )
+
+
+def _now_s():
+    return datetime.now(timezone.utc).replace(microsecond=0)
 
 
 def _run(repo_root, inputs):
-    repo_root = Path(repo_root)
-    repo_root.mkdir(parents=True, exist_ok=True)
-    before = datetime.now(timezone.utc).replace(microsecond=0)
-    provenance_writer.write_sealed_provenance(COMPONENT_ID, inputs, repo_root)
-    after = datetime.now(timezone.utc).replace(microsecond=0)
+    before = _now_s()
+    provenance_writer.write_sealed_provenance("comp-foo", inputs, repo_root)
+    after = _now_s()
     path = _manifest_path(repo_root)
-    assert path.is_file(), "expected manifest at %s" % path
+    assert path.is_file(), "manifest not written at " + str(path)
     text = path.read_text(encoding="utf-8")
-    manifest = json.loads(text)
-    return manifest, before, after
-
-
-def _assert_common(manifest, before, after):
-    assert isinstance(manifest, dict)
-    assert list(manifest.keys()) == EXPECTED_KEYS
-    assert manifest["kind"] == "sealed-provenance"
-    assert manifest["version"] == 1
-    assert type(manifest["version"]) is int
-    assert manifest["component_id"] == COMPONENT_ID
-    assert manifest["owners"] == OWNERS
-    assert manifest["source_path"] == SOURCE_PATH
-    assert manifest["source_hash"] == SOURCE_HASH
-    assert manifest["verifier_version"] == VERIFIER_VERSION
-    written_at = manifest["written_at"]
-    assert isinstance(written_at, str)
-    assert WRITTEN_AT_RE.match(written_at), written_at
+    data = json.loads(text)
+    assert isinstance(data, dict)
+    written_at = data.get("written_at")
+    assert isinstance(written_at, str) and WRITTEN_AT_RE.match(written_at), written_at
     ts = datetime.strptime(written_at, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
-    assert before <= ts <= after
+    assert before <= ts <= after, (before, ts, after)
+    return data
 
 
-def _assert_characterization(manifest, overall, passed, total):
-    char = manifest["characterization"]
-    assert char == {
-        "overall": overall,
-        "criteria_passed": passed,
-        "criteria_total": total,
-    }
-    assert type(char["criteria_passed"]) is int
-    assert type(char["criteria_total"]) is int
-
-
-def test_all_pass_writes_manifest_only_at_source_path(tmp_path):
-    repo_root = tmp_path / "repo"
-    report = _report(["pass", "pass", "pass"], "pass")
-    manifest, before, after = _run(repo_root, _inputs_dataclass(report))
-
-    _assert_common(manifest, before, after)
-    _assert_characterization(manifest, "pass", 3, 3)
-
-    assert not (repo_root / "gen").exists()
-    assert not (repo_root / "verification").exists()
+def _assert_common(data, repo_root):
+    assert list(data.keys()) == EXPECTED_KEYS
+    assert data["kind"] == "sealed-provenance"
+    assert data["version"] == 1
+    assert type(data["version"]) is int
+    assert data["component_id"] == "comp-foo"
+    assert data["owners"] == OWNERS
+    assert data["source_path"] == SOURCE_PATH
+    assert data["source_hash"] == SOURCE_HASH
+    assert data["verifier_version"] == VERIFIER_VERSION
+    assert not (Path(repo_root) / "gen").exists()
+    assert not (Path(repo_root) / "verification").exists()
     assert _all_files(repo_root) == ["pipeline/foo/.sealed-provenance.json"]
 
 
-def test_one_failing_criterion_yields_fail_characterization(tmp_path):
+def _without_time(data):
+    return {k: v for k, v in data.items() if k != "written_at"}
+
+
+def test_all_pass_dataclass_inputs(tmp_path):
     repo_root = tmp_path / "repo"
-    report = _report(["pass", "fail", "pass"], "fail")
-    manifest, before, after = _run(repo_root, _inputs_dataclass(report))
+    repo_root.mkdir()
+    report = _report("pass", _criteria_dicts(["pass", "pass", "pass"]))
+    inputs = provenance_writer.SealedProvenanceInputs(**_fields(report))
+    data = _run(repo_root, inputs)
+    _assert_common(data, repo_root)
+    assert data["characterization"] == {
+        "overall": "pass",
+        "criteria_passed": 3,
+        "criteria_total": 3,
+    }
+    assert list(data["characterization"].keys()) == [
+        "overall",
+        "criteria_passed",
+        "criteria_total",
+    ] or set(data["characterization"].keys()) == {
+        "overall",
+        "criteria_passed",
+        "criteria_total",
+    }
 
-    _assert_common(manifest, before, after)
-    _assert_characterization(manifest, "fail", 2, 3)
 
-    assert not (repo_root / "gen").exists()
-    assert not (repo_root / "verification").exists()
+def test_one_fail_characterization(tmp_path):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    report = _report("fail", _criteria_dicts(["pass", "fail", "pass"]))
+    inputs = provenance_writer.SealedProvenanceInputs(**_fields(report))
+    data = _run(repo_root, inputs)
+    _assert_common(data, repo_root)
+    assert data["characterization"] == {
+        "overall": "fail",
+        "criteria_passed": 2,
+        "criteria_total": 3,
+    }
 
 
-def test_plain_dict_inputs_and_attribute_criteria_write_same_manifest(tmp_path):
-    ref_root = tmp_path / "ref"
-    ref_manifest, before_ref, after_ref = _run(
-        ref_root, _inputs_dataclass(_report(["pass", "pass", "pass"], "pass"))
-    )
-    _assert_common(ref_manifest, before_ref, after_ref)
+def test_plain_dict_inputs_and_attribute_criteria(tmp_path):
+    root_a = tmp_path / "a"
+    root_a.mkdir()
+    report_a = _report("pass", _criteria_dicts(["pass", "pass", "pass"]))
+    inputs_a = provenance_writer.SealedProvenanceInputs(**_fields(report_a))
+    data_a = _run(root_a, inputs_a)
+    _assert_common(data_a, root_a)
 
-    alt_root = tmp_path / "alt"
-    alt_report = _report(["pass", "pass", "pass"], "pass", as_objects=True)
-    alt_manifest, before_alt, after_alt = _run(alt_root, _inputs_dict(alt_report))
+    root_b = tmp_path / "b"
+    root_b.mkdir()
+    report_b = _report("pass", _criteria_objs(["pass", "pass", "pass"]))
+    inputs_b = _fields(report_b)
+    data_b = _run(root_b, inputs_b)
+    _assert_common(data_b, root_b)
 
-    _assert_common(alt_manifest, before_alt, after_alt)
-    _assert_characterization(alt_manifest, "pass", 3, 3)
+    assert _without_time(data_b) == _without_time(data_a)
+    assert data_b["characterization"] == {
+        "overall": "pass",
+        "criteria_passed": 3,
+        "criteria_total": 3,
+    }
 
-    assert list(alt_manifest.keys()) == list(ref_manifest.keys())
-    for key in EXPECTED_KEYS:
-        if key == "written_at":
-            continue
-        assert alt_manifest[key] == ref_manifest[key], key
-
-    assert not (alt_root / "gen").exists()
-    assert not (alt_root / "verification").exists()
+    root_c = tmp_path / "c"
+    root_c.mkdir()
+    report_c = _report("fail", _criteria_objs(["pass", "fail", "pass"]))
+    data_c = _run(root_c, _fields(report_c))
+    _assert_common(data_c, root_c)
+    assert data_c["characterization"] == {
+        "overall": "fail",
+        "criteria_passed": 2,
+        "criteria_total": 3,
+    }

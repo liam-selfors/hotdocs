@@ -4,12 +4,11 @@ Covers: R-AUTHOR-012
 Kind: generated-test
 
 ```gherkin
-Given any bundle
-When author_test builds its prompt
-Then the prompt states that status must be exactly one of draft,
-  ratified, or deprecated, that the required-frontmatter rule applies
-  to VAR-*.md and decision D<N>.md files as well as component.md, and
-  that every requirements/ file in a synthetic fixture needs a
-  matching acceptance/ file covering it for every component the
-  fixture constructs
+Given a bundle for comp-widget-maker whose dependency_interfaces is {},
+  and a mock model that records
+  each prompt and replies with a valid marked test file
+When author_test(bundle, "mock", repo_root=<tmp>, llm_backend=<mock>)
+  is called
+Then the first recorded prompt contains the line
+  "- Every `requirements/` file of every fixture component has a matching `acceptance/` file with a `Covers:` tag."
 ```

@@ -1,3 +1,4 @@
+# hotdocs-criterion: sha256:c84a85f6271d974be40747434b792f66b58cb564d63c2ad1f66063ca721c8392
 import json
 import re
 from collections import Counter

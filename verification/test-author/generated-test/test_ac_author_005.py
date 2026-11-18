@@ -1,293 +1,309 @@
+# hotdocs-criterion: sha256:1b6ad90e04bd0ce03c3e1a15c9f6ac7482dab7a3207a03c7ea45fcdc20fa8567
+import dataclasses
+import importlib.util
 import json
 import re
+import sys
 from pathlib import Path
 
 import test_author
 
 
-FIXED_TEST_CODE = (
-    "def test_fixed_result():\n"
-    "    assert 2 * 2 == 4\n"
-)
-
 MODEL = "claude-sonnet-5"
 
-
-FAKE_CACHE_MANAGER = '''
-import dataclasses
-import datetime
-import json
-from pathlib import Path
-
-_STORE_PATH = Path(__STORE_PATH__)
-_LOG_PATH = Path(__LOG_PATH__)
-
-_REQUIRED = {
-    "generator": ["component_id", "model", "prompt_version", "files"],
-    "compiler": ["outputs", "gate_version", "summary"],
-    "generated_test": ["component_id", "criterion_id", "model", "file"],
-    "llm_judge": ["result", "rationale"],
-    "license_scanner": ["component_id", "gate_version", "similarity_score", "blocked", "matches"],
-    "secret_scanner": ["scope", "gate_version", "flagged", "matches"],
-}
+EXPECTED_CONTENT = "import os\n\n\ndef test_fixed():\n    assert os.sep\n"
 
 
-class SchemaValidationError(ValueError):
-    pass
+def field(value, name):
+    return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-class Miss:
-    def __eq__(self, other):
-        return isinstance(other, Miss)
+def body(content):
+    first, _, rest = content.partition("\n")
+    return rest if first.startswith("# hotdocs-criterion:") else content
 
-    def __hash__(self):
-        return 0
 
-    def __repr__(self):
-        return "Miss()"
+def load_module(path, module_name):
+    spec = importlib.util.spec_from_file_location(module_name, path)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    spec.loader.exec_module(module)
+    return module
 
 
 @dataclasses.dataclass
-class CacheKey:
-    spec_bundle_hash: str
-    gate_inputs_hash: str
-    gate_version: str
-    model_pin: str
+class Bundle:
+    component_id: str
+    criterion_id: str
+    covers: str
+    criterion_text: str
+    requirement_text: str
+    interface: str
+    glossary: str
+    dependency_interfaces: dict = dataclasses.field(default_factory=dict)
+    module_names: list = dataclasses.field(default_factory=list)
+
+    def __getitem__(self, key):
+        if key not in self.keys():
+            raise KeyError(key)
+        return getattr(self, key)
+
+    def get(self, key, default=None):
+        return getattr(self, key, default) if key in self.keys() else default
+
+    def keys(self):
+        return [f.name for f in dataclasses.fields(self)]
+
+    def items(self):
+        return [(k, getattr(self, k)) for k in self.keys()]
+
+    def values(self):
+        return [getattr(self, k) for k in self.keys()]
+
+    def __contains__(self, key):
+        return key in self.keys()
+
+    def __iter__(self):
+        return iter(self.keys())
+
+    def __len__(self):
+        return len(self.keys())
 
 
-@dataclasses.dataclass
-class CachedResult:
-    gate_type: str
-    payload: dict
-    stored_at: str
-
-
-def _as_dict(obj):
-    if isinstance(obj, dict):
-        return dict(obj)
-    if dataclasses.is_dataclass(obj) and not isinstance(obj, type):
-        return dataclasses.asdict(obj)
-    try:
-        return dict(vars(obj))
-    except TypeError:
-        return {"value": obj}
-
-
-def _key_dict(cache_key):
-    d = _as_dict(cache_key)
-    return {
-        "spec_bundle_hash": d.get("spec_bundle_hash"),
-        "gate_inputs_hash": d.get("gate_inputs_hash"),
-        "gate_version": d.get("gate_version"),
-        "model_pin": d.get("model_pin"),
-    }
-
-
-def _key_str(cache_key):
-    return json.dumps(_key_dict(cache_key), sort_keys=True, default=str)
-
-
-def _load_store():
-    if not _STORE_PATH.is_file():
-        return {}
-    try:
-        return json.loads(_STORE_PATH.read_text(encoding="utf-8"))
-    except Exception:
-        return {}
-
-
-def _log(record):
-    with open(_LOG_PATH, "a", encoding="utf-8") as fh:
-        fh.write(json.dumps(record, sort_keys=True, default=str) + "\\n")
-
-
-def now_iso():
-    return datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-
-
-def get(cache_key, *, repo_root=None):
-    _log({"op": "get", "key": _key_dict(cache_key)})
-    store = _load_store()
-    entry = store.get(_key_str(cache_key))
-    if entry is None:
-        return Miss()
-    return CachedResult(
-        gate_type=entry.get("gate_type"),
-        payload=entry.get("payload"),
-        stored_at=entry.get("stored_at"),
-    )
-
-
-def put(cache_key, result, *, repo_root=None):
-    key = _key_dict(cache_key)
-    res = _as_dict(result)
-    gate_version = key.get("gate_version") or ""
-    gate_type = gate_version.split("@", 1)[0]
-    if res.get("gate_type") != gate_type:
-        raise SchemaValidationError("gate_type mismatch")
-    if gate_type not in _REQUIRED:
-        raise SchemaValidationError("unknown gate type")
-    payload = res.get("payload")
-    payload_d = _as_dict(payload) if payload is not None else {}
-    missing = [k for k in _REQUIRED[gate_type] if k not in payload_d]
-    if missing:
-        raise SchemaValidationError("missing payload keys: %r" % (missing,))
-    entry = {
-        "gate_type": res.get("gate_type"),
-        "payload": json.loads(json.dumps(payload_d, default=lambda o: _as_dict(o))),
-        "stored_at": res.get("stored_at"),
-    }
-    store = _load_store()
-    store[_key_str(cache_key)] = entry
-    _STORE_PATH.write_text(json.dumps(store, sort_keys=True, default=str), encoding="utf-8")
-    _log({"op": "put", "key": key, "result": entry})
-    return None
-
-
-def stats(*, repo_root=None):
-    return {"entry_count": len(_load_store())}
-
-
-def main(argv=None):
-    return 0
-'''
-
-
-class _Bundle(dict):
-    def __getattr__(self, name):
-        try:
-            return self[name]
-        except KeyError:
-            raise AttributeError(name)
-
-
-def _field(value, name, default=None):
-    if isinstance(value, dict):
-        return value.get(name, default)
-    return getattr(value, name, default)
-
-
-def _make_bundle():
-    return _Bundle(
+def make_bundle():
+    return Bundle(
         component_id="comp-foo",
         criterion_id="AC-FOO-001",
         covers="R-FOO-001",
         criterion_text="Given x = 2\nWhen foo(x) is called\nThen it returns 4",
-        requirement_text="# R-FOO-001\n\n**R-FOO-001** — `foo(x)` MUST return `2 * x`.",
+        requirement_text="# R-FOO-001\n\n**R-FOO-001** \u2014 `foo(x)` MUST return `2 * x`.",
         interface="# Library\n\n```\nfoo(x: int) -> int\n```",
-        glossary="# Glossary\n\n- **Foo** — a test term.",
+        glossary="# Glossary\n\n- **Foo** \u2014 a test term.",
         dependency_interfaces={},
         module_names=["foo"],
     )
 
 
-def _read_log(path):
-    if not path.is_file():
-        return []
-    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+FAKE_CACHE_BODY = (
+    "import dataclasses\n"
+    "import json\n"
+    "import os\n"
+    "from datetime import datetime, timezone\n"
+    "\n"
+    "\n"
+    "@dataclasses.dataclass\n"
+    "class CacheKey:\n"
+    "    spec_bundle_hash: str\n"
+    "    gate_inputs_hash: str\n"
+    "    gate_version: str\n"
+    "    model_pin: str\n"
+    "\n"
+    "\n"
+    "@dataclasses.dataclass\n"
+    "class CachedResult:\n"
+    "    gate_type: str\n"
+    "    payload: dict\n"
+    "    stored_at: str\n"
+    "\n"
+    "\n"
+    "class Miss:\n"
+    "    def __eq__(self, other):\n"
+    "        return isinstance(other, Miss)\n"
+    "\n"
+    "    def __hash__(self):\n"
+    "        return 0\n"
+    "\n"
+    "\n"
+    "class SchemaValidationError(ValueError):\n"
+    "    pass\n"
+    "\n"
+    "\n"
+    "_REQUIRED = {\n"
+    "    'generator': ['component_id', 'model', 'prompt_version', 'files'],\n"
+    "    'compiler': ['outputs', 'gate_version', 'summary'],\n"
+    "    'generated_test': ['component_id', 'criterion_id', 'model', 'file'],\n"
+    "    'llm_judge': ['result', 'rationale'],\n"
+    "    'license_scanner': ['component_id', 'gate_version', 'similarity_score', 'blocked', 'matches'],\n"
+    "    'secret_scanner': ['scope', 'gate_version', 'flagged', 'matches'],\n"
+    "}\n"
+    "\n"
+    "\n"
+    "def _f(value, name):\n"
+    "    return value[name] if isinstance(value, dict) else getattr(value, name)\n"
+    "\n"
+    "\n"
+    "def _plain(v):\n"
+    "    if dataclasses.is_dataclass(v) and not isinstance(v, type):\n"
+    "        return _plain({f.name: getattr(v, f.name) for f in dataclasses.fields(v)})\n"
+    "    if isinstance(v, dict):\n"
+    "        return {str(k): _plain(x) for k, x in v.items()}\n"
+    "    if isinstance(v, (list, tuple)):\n"
+    "        return [_plain(x) for x in v]\n"
+    "    if v is None or isinstance(v, (str, int, float, bool)):\n"
+    "        return v\n"
+    "    if hasattr(v, '__dict__'):\n"
+    "        return _plain(vars(v))\n"
+    "    return str(v)\n"
+    "\n"
+    "\n"
+    "def _key(cache_key):\n"
+    "    return {\n"
+    "        'spec_bundle_hash': _f(cache_key, 'spec_bundle_hash'),\n"
+    "        'gate_inputs_hash': _f(cache_key, 'gate_inputs_hash'),\n"
+    "        'gate_version': _f(cache_key, 'gate_version'),\n"
+    "        'model_pin': _f(cache_key, 'model_pin'),\n"
+    "    }\n"
+    "\n"
+    "\n"
+    "def _skey(k):\n"
+    "    return json.dumps([k['spec_bundle_hash'], k['gate_inputs_hash'], k['gate_version'], k['model_pin']])\n"
+    "\n"
+    "\n"
+    "def _load():\n"
+    "    if not os.path.exists(STORE_PATH):\n"
+    "        return {}\n"
+    "    with open(STORE_PATH, 'r', encoding='utf-8') as fh:\n"
+    "        return json.load(fh)\n"
+    "\n"
+    "\n"
+    "def _log(entry):\n"
+    "    with open(LOG_PATH, 'a', encoding='utf-8') as fh:\n"
+    "        fh.write(json.dumps(entry) + '\\n')\n"
+    "\n"
+    "\n"
+    "def now_iso():\n"
+    "    return datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')\n"
+    "\n"
+    "\n"
+    "def get(cache_key, *, repo_root=None):\n"
+    "    k = _plain(_key(cache_key))\n"
+    "    store = _load()\n"
+    "    entry = store.get(_skey(k))\n"
+    "    _log({'op': 'get', 'key': k, 'result': 'hit' if entry else 'miss'})\n"
+    "    if entry is None:\n"
+    "        return Miss()\n"
+    "    return CachedResult(gate_type=entry['gate_type'], payload=entry['payload'], stored_at=entry['stored_at'])\n"
+    "\n"
+    "\n"
+    "def put(cache_key, result, *, repo_root=None):\n"
+    "    k = _plain(_key(cache_key))\n"
+    "    gate_type = _f(result, 'gate_type')\n"
+    "    payload = _plain(_f(result, 'payload'))\n"
+    "    stored_at = _f(result, 'stored_at')\n"
+    "    expected_type = k['gate_version'].split('@', 1)[0]\n"
+    "    if gate_type != expected_type or gate_type not in _REQUIRED:\n"
+    "        raise SchemaValidationError('gate type mismatch')\n"
+    "    if not isinstance(payload, dict):\n"
+    "        raise SchemaValidationError('payload not a mapping')\n"
+    "    for name in _REQUIRED[gate_type]:\n"
+    "        if name not in payload:\n"
+    "            raise SchemaValidationError('missing ' + name)\n"
+    "    store = _load()\n"
+    "    entry = {'key': k, 'gate_type': gate_type, 'payload': payload, 'stored_at': stored_at}\n"
+    "    store[_skey(k)] = entry\n"
+    "    with open(STORE_PATH, 'w', encoding='utf-8') as fh:\n"
+    "        json.dump(store, fh)\n"
+    "    _log({'op': 'put', 'key': k, 'gate_type': gate_type, 'payload': payload})\n"
+    "    return None\n"
+    "\n"
+    "\n"
+    "def stats(*, repo_root=None):\n"
+    "    return {'entry_count': len(_load())}\n"
+    "\n"
+    "\n"
+    "def main(argv=None):\n"
+    "    return 0\n"
+)
 
 
-def test_cache_miss_result_written_under_looked_up_key(tmp_path, monkeypatch):
+def write_fake_cache(repo_root, log_path, store_path):
+    d = repo_root / "gen" / "cache-manager"
+    d.mkdir(parents=True, exist_ok=True)
+    source = (
+        "LOG_PATH = " + repr(str(log_path)) + "\n"
+        + "STORE_PATH = " + repr(str(store_path)) + "\n"
+        + FAKE_CACHE_BODY
+    )
+    path = d / "cache_manager.py"
+    path.write_text(source, encoding="utf-8")
+    return path
+
+
+def mock_backend(prompt, model, **params):
+    m = re.search(r"-----BEGIN FILE ([0-9a-f]{32})-----", prompt)
+    assert m is not None, "prompt carries no BEGIN FILE nonce"
+    n = m.group(1)
+    text = "-----BEGIN FILE " + n + "-----\n" + EXPECTED_CONTENT + "\n-----END FILE " + n + "-----"
+    return {"text": text, "model": model, "backend": "mock", "model_call_error": None}
+
+
+def payload_file_content(payload):
+    f = field(payload, "file")
+    if isinstance(f, str):
+        return f
+    return field(f, "content")
+
+
+def test_ac_author_005_miss_result_written_to_cache_under_key(tmp_path, monkeypatch):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
-    monkeypatch.chdir(tmp_path)
+    log_path = tmp_path / "cache_calls.log"
+    store_path = tmp_path / "cache_store.json"
+    fake_path = write_fake_cache(repo_root, log_path, store_path)
 
-    store_path = tmp_path / "fake_cache_store.json"
-    cache_log = tmp_path / "fake_cache_log.jsonl"
-    backend_log = tmp_path / "backend_log.jsonl"
-
-    fake_dir = repo_root / "gen" / "cache-manager"
-    fake_dir.mkdir(parents=True)
-    fake_src = (
-        FAKE_CACHE_MANAGER
-        .replace("__STORE_PATH__", repr(str(store_path)))
-        .replace("__LOG_PATH__", repr(str(cache_log)))
-    )
-    (fake_dir / "cache_manager.py").write_text(fake_src, encoding="utf-8")
+    monkeypatch.delenv("VAR_CACHE_STORE_URL", raising=False)
+    monkeypatch.chdir(repo_root)
 
     # Empty cache precondition.
     assert not store_path.exists()
 
-    def mock_backend(prompt, model, **params):
-        with open(backend_log, "a", encoding="utf-8") as fh:
-            fh.write(json.dumps({"model": model}) + "\n")
-        m = re.search(r"BEGIN FILE ([0-9a-f]{32})", prompt)
-        if m is None:
-            m = re.search(r"\b([0-9a-f]{32})\b", prompt)
-        assert m is not None, "nonce not found in prompt"
-        nonce = m.group(1)
-        text = (
-            f"-----BEGIN FILE {nonce}-----\n"
-            f"{FIXED_TEST_CODE}"
-            f"-----END FILE {nonce}-----\n"
-        )
-        return {
-            "text": text,
-            "model": model,
-            "backend": "mock",
-            "model_call_error": None,
-        }
-
+    bundle = make_bundle()
     result = test_author.author_test(
-        _make_bundle(), MODEL, 0, repo_root=repo_root, llm_backend=mock_backend
+        bundle, MODEL, 0, repo_root=repo_root, llm_backend=mock_backend
     )
 
-    # The fresh call happened and succeeded.
-    assert len(_read_log(backend_log)) == 1
-    assert _field(result, "model_call_error") is None
-    assert _field(result, "cache_hit") is False
-    result_file = _field(result, "file")
-    assert result_file is not None
-    result_content = _field(result_file, "content")
-    assert isinstance(result_content, str)
-    assert result_content.strip() == FIXED_TEST_CODE.strip()
+    assert field(result, "model_call_error") is None
+    assert field(result, "cache_hit") is False
+    returned_content = field(field(result, "file"), "content")
+    assert body(returned_content) == EXPECTED_CONTENT
 
-    records = _read_log(cache_log)
-    gets = [r for r in records if r["op"] == "get"]
-    puts = [r for r in records if r["op"] == "put"]
+    assert log_path.is_file(), "fake cache-manager was never called"
+    calls = [json.loads(line) for line in log_path.read_text(encoding="utf-8").splitlines() if line.strip()]
 
-    # A lookup (miss) happened, and exactly one write followed it.
-    assert gets, "author_test never looked up the cache"
-    assert len(puts) == 1, f"expected exactly one put, got {len(puts)}"
-    first_get_index = records.index(gets[0])
-    put_index = records.index(puts[0])
-    assert first_get_index < put_index
+    gets = [c for c in calls if c["op"] == "get"]
+    puts = [c for c in calls if c["op"] == "put"]
+    assert gets, "cache-manager get was never consulted"
+    assert gets[0]["result"] == "miss"
+    assert len(puts) == 1, calls
+    put_call = puts[0]
+    assert calls.index(gets[0]) < calls.index(put_call)
 
-    put_record = puts[0]
-    key = put_record["key"]
-
-    # Written under the very key that was looked up on the miss.
+    key = put_call["key"]
+    # Stored under the same key that was looked up and missed.
     assert key == gets[0]["key"]
-    assert isinstance(key.get("gate_version"), str)
-    assert key["gate_version"].startswith("generated_test@")
-    assert key.get("model_pin") == MODEL
-    assert key.get("spec_bundle_hash")
-    assert key.get("gate_inputs_hash")
+    assert key["gate_version"] == test_author.GATE_VERSION
+    assert key["model_pin"] == MODEL
+    assert isinstance(key["spec_bundle_hash"], str) and key["spec_bundle_hash"]
+    assert isinstance(key["gate_inputs_hash"], str) and key["gate_inputs_hash"]
 
-    # The stored result is the model's result.
-    stored = put_record["result"]
-    assert stored["gate_type"] == "generated_test"
-    payload = stored["payload"]
-    assert payload.get("component_id") == "comp-foo"
-    assert payload.get("criterion_id") == "AC-FOO-001"
-    assert payload.get("model") == MODEL
-    stored_file = payload.get("file")
-    assert stored_file is not None
-    stored_content = stored_file.get("content") if isinstance(stored_file, dict) else stored_file
-    assert isinstance(stored_content, str)
-    assert stored_content.strip() == FIXED_TEST_CODE.strip()
-    assert stored_content == result_content
+    assert put_call["gate_type"] == "generated_test"
+    payload = put_call["payload"]
+    assert field(payload, "component_id") == "comp-foo"
+    assert field(payload, "criterion_id") == "AC-FOO-001"
+    assert field(payload, "model") == MODEL
+    assert body(payload_file_content(payload)) == EXPECTED_CONTENT
 
-    # And the cache actually holds it afterward under that key.
-    store = json.loads(store_path.read_text(encoding="utf-8"))
-    key_str = json.dumps(
-        {
-            "spec_bundle_hash": key.get("spec_bundle_hash"),
-            "gate_inputs_hash": key.get("gate_inputs_hash"),
-            "gate_version": key.get("gate_version"),
-            "model_pin": key.get("model_pin"),
-        },
-        sort_keys=True,
-    )
-    assert key_str in store
-    assert store[key_str]["payload"]["file"] == stored_file
+    # The cache contains that result under that key afterward.
+    saved = sys.modules.get("cache_manager")
+    try:
+        cm = load_module(fake_path, "cache_manager")
+        hit = cm.get(cm.CacheKey(**key), repo_root=repo_root)
+        assert not isinstance(hit, cm.Miss)
+        assert field(hit, "gate_type") == "generated_test"
+        assert body(payload_file_content(field(hit, "payload"))) == EXPECTED_CONTENT
+        assert cm.stats(repo_root=repo_root)["entry_count"] == 1
+    finally:
+        if saved is None:
+            sys.modules.pop("cache_manager", None)
+        else:
+            sys.modules["cache_manager"] = saved

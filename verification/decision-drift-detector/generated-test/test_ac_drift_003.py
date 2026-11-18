@@ -1,3 +1,4 @@
+# hotdocs-criterion: sha256:e714d29c9eb22e335e630f341808aacbb9052e6e58b1a0e1cd7b932da5d49091
 import os
 import shutil
 import subprocess

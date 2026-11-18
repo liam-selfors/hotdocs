@@ -1,19 +1,12 @@
+# hotdocs-criterion: sha256:b8e7f1ad41a1c33c136ded41f6b22138b7dd0b9aec46970d119cd170599643c5
 import verifier_orchestrator
 
 
-def test_ac_verify_017_gate_version_readable_without_verify(monkeypatch):
-    calls = []
-
-    def _forbidden_verify(*args, **kwargs):
-        calls.append((args, kwargs))
-        raise AssertionError("verify must not be called to read GATE_VERSION")
-
-    # Guard: reading GATE_VERSION must never depend on calling verify.
-    if hasattr(verifier_orchestrator, "verify"):
-        monkeypatch.setattr(verifier_orchestrator, "verify", _forbidden_verify)
-
+def test_gate_version_is_readable_without_calling_verify():
+    # Given the verifier-orchestrator module is imported
+    # When GATE_VERSION is read, without calling verify
     value = verifier_orchestrator.GATE_VERSION
 
+    # Then it equals "verifier-orchestrator@2.2.0"
     assert isinstance(value, str)
-    assert value == "verifier-orchestrator@2.0.0"
-    assert calls == []
+    assert value == "verifier-orchestrator@2.2.0"

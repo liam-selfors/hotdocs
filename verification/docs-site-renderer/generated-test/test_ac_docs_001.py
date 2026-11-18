@@ -1,66 +1,33 @@
-"""AC-DOCS-001: the rendered DAG view holds one element per node and one per edge.
-
-Given a corpus-graph.json with three nodes and two edges
-When render_docs_site runs
-Then the rendered site's DAG view contains three node elements and two edge
-  elements
-"""
+# hotdocs-criterion: sha256:d80361d3ad408411bbabfa7c7e3375afc88980f27e09626ddaf769954abe7e8a
+"""AC-DOCS-001: the DAG view holds three node elements and two edge elements
+for a corpus graph with three nodes and two edges."""
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field as dc_field
 from html.parser import HTMLParser
 from pathlib import Path
 
 import docs_site_renderer
 
 
-# --------------------------------------------------------------------------
-# Fixture: a CorpusGraph-shaped value (comp-corpus-graph-builder's documented
-# shape: a dataclass with nodes/edges/aggregates, to_dict(), to_json_bytes()).
-# It is also a dict holding the same keys, so either access style works.
-# --------------------------------------------------------------------------
+NODE_IDS = ["comp-alpha", "P-BETA-CAP", "VAR-GAMMA-URL"]
+EXPECTED_EDGES = {
+    frozenset(("comp-alpha", "P-BETA-CAP")),
+    frozenset(("comp-alpha", "VAR-GAMMA-URL")),
+}
 
-COMPONENT_MD = (
-    "---\n"
-    "id: comp-foo\n"
-    "title: Foo\n"
-    "status: draft\n"
-    "owners: [pipeline-team]\n"
-    "depends_on: []\n"
-    "realizes: [P-ZERO-EDIT]\n"
-    "uses_var: [VAR-FOO-URL]\n"
-    "sealed: false\n"
-    "---\n"
-    "\n"
-    "# Foo\n"
-    "\n"
-    "A synthetic component.\n"
-)
-
-REQUIREMENT_MD = "**R-FOO-001** — MUST do foo.\n"
-
-NODE_IDS = ["P-ZERO-EDIT", "VAR-FOO-URL", "comp-foo"]
-
-EDGES = [
-    {"from": "comp-foo", "to": "P-ZERO-EDIT", "kind": "realizes"},
-    {"from": "comp-foo", "to": "VAR-FOO-URL", "kind": "uses_var"},
-]
-
-NODE_TYPES = {"capability", "component", "var"}
-EDGE_KINDS = {"depends_on", "realizes", "uses_var"}
+VOID_TAGS = {
+    "area", "base", "br", "col", "embed", "hr", "img", "input", "link",
+    "meta", "param", "source", "track", "wbr",
+}
+SKIP_TAGS = {"script", "style", "template", "noscript"}
 
 
-@dataclass(eq=False)
-class CorpusGraph(dict):
-    nodes: dict
-    edges: list
-    aggregates: dict
-
-    def __post_init__(self):
-        dict.update(
-            self,
-            {"nodes": self.nodes, "edges": self.edges, "aggregates": self.aggregates},
-        )
+@dataclass
+class FakeCorpusGraph:
+    nodes: dict = dc_field(default_factory=dict)
+    edges: list = dc_field(default_factory=list)
+    aggregates: dict = dc_field(default_factory=dict)
 
     def to_dict(self):
         return {
@@ -75,303 +42,140 @@ class CorpusGraph(dict):
             + "\n"
         ).encode("utf-8")
 
+    def __getitem__(self, key):
+        return self.to_dict()[key]
 
-def _make_graph():
+
+def make_graph():
     nodes = {
-        "P-ZERO-EDIT": {"type": "capability"},
-        "comp-foo": {
+        "comp-alpha": {
             "type": "component",
             "verification": None,
             "provenance": None,
             "size_status": "ok",
             "sealed": False,
             "pinned_overrides": [],
-            "owners": ["pipeline-team"],
+            "owners": ["docs-team"],
             "documents": {
-                "component.md": COMPONENT_MD,
-                "requirements/R-FOO-001.md": REQUIREMENT_MD,
+                "component.md": "---\nid: comp-alpha\ntitle: Alpha\nstatus: draft\n---\n\n# Alpha\n\nA component.\n",
             },
         },
-        "VAR-FOO-URL": {"type": "var"},
+        "P-BETA-CAP": {"type": "capability"},
+        "VAR-GAMMA-URL": {"type": "var"},
     }
+    edges = [
+        {"from": "comp-alpha", "to": "P-BETA-CAP", "kind": "realizes"},
+        {"from": "comp-alpha", "to": "VAR-GAMMA-URL", "kind": "uses_var"},
+    ]
     aggregates = {
         "orphan_capability_rate": 0.0,
         "orphan_component_rate": 0.0,
         "orphan_var_rate": 0.0,
     }
-    return CorpusGraph(
-        nodes=nodes, edges=[dict(e) for e in EDGES], aggregates=aggregates
-    )
+    return FakeCorpusGraph(nodes=nodes, edges=edges, aggregates=aggregates)
 
 
-# --------------------------------------------------------------------------
-# Minimal HTML tree builder (stdlib only).
-# --------------------------------------------------------------------------
-
-VOID_TAGS = {
-    "area", "base", "br", "col", "embed", "hr", "img", "input", "link",
-    "meta", "param", "source", "track", "wbr",
-}
+def ids_in(text):
+    return {nid for nid in NODE_IDS if nid in text}
 
 
-class _El:
-    def __init__(self, tag, attrs, parent):
-        self.tag = tag
-        self.attrs = attrs
-        self.parent = parent
-        self.children = []
-        self.text_parts = []
+class ElementCollector(HTMLParser):
+    """Collects, per element, its attribute values plus its own direct text
+    (excluding script/style content)."""
 
-    def text(self):
-        out = list(self.text_parts)
-        for c in self.children:
-            out.append(c.text())
-        return " ".join(out)
-
-    def attr_text(self):
-        return " ".join(v for _, v in self.attrs)
-
-    def ancestors(self):
-        n = self.parent
-        while n is not None:
-            yield n
-            n = n.parent
-
-
-class _Builder(HTMLParser):
     def __init__(self):
         super().__init__(convert_charrefs=True)
-        self.root = _El("#root", [], None)
-        self.cur = self.root
-        self.all = []
+        self.stack = []
+        self.elements = []
+        self.skip_depth = 0
 
-    def _new(self, tag, attrs):
-        el = _El(tag.lower(), [(k.lower(), v or "") for k, v in attrs], self.cur)
-        self.cur.children.append(el)
-        self.all.append(el)
-        return el
+    def _finish(self, entry):
+        self.elements.append(entry)
 
     def handle_starttag(self, tag, attrs):
-        el = self._new(tag, attrs)
-        if el.tag not in VOID_TAGS:
-            self.cur = el
+        tag = tag.lower()
+        if tag in SKIP_TAGS:
+            self.skip_depth += 1
+            self.stack.append({"tag": tag, "text": [], "attrs": [], "skip": True})
+            return
+        attr_text = [v for _, v in attrs if v]
+        entry = {"tag": tag, "text": [], "attrs": attr_text, "skip": False}
+        if tag in VOID_TAGS:
+            self._finish(entry)
+            return
+        self.stack.append(entry)
 
     def handle_startendtag(self, tag, attrs):
-        self._new(tag, attrs)
+        tag = tag.lower()
+        attr_text = [v for _, v in attrs if v]
+        self._finish({"tag": tag, "text": [], "attrs": attr_text, "skip": False})
 
     def handle_endtag(self, tag):
         tag = tag.lower()
-        n = self.cur
-        while n is not self.root and n.tag != tag:
-            n = n.parent
-        if n is not self.root:
-            self.cur = n.parent
+        if not any(e["tag"] == tag for e in self.stack):
+            return
+        while self.stack:
+            entry = self.stack.pop()
+            if entry["skip"]:
+                self.skip_depth -= 1
+            else:
+                self._finish(entry)
+            if entry["tag"] == tag:
+                break
 
     def handle_data(self, data):
-        self.cur.text_parts.append(data)
+        if self.skip_depth > 0 or not self.stack:
+            return
+        self.stack[-1]["text"].append(data)
+
+    def close(self):
+        super().close()
+        while self.stack:
+            entry = self.stack.pop()
+            if not entry["skip"]:
+                self._finish(entry)
 
 
-def _parse(html_text):
-    b = _Builder()
-    b.feed(html_text)
-    b.close()
-    return b.all
+def analyse_page(html_text):
+    parser = ElementCollector()
+    parser.feed(html_text)
+    parser.close()
+    node_ids = set()
+    edge_pairs = set()
+    for entry in parser.elements:
+        blob = " ".join(entry["attrs"]) + " " + "".join(entry["text"])
+        found = ids_in(blob)
+        if len(found) == 1:
+            node_ids |= found
+        elif len(found) == 2:
+            edge_pairs.add(frozenset(found))
+    return node_ids, edge_pairs
 
-
-# --------------------------------------------------------------------------
-# Locating node and edge elements.
-# --------------------------------------------------------------------------
-
-def _refs(s):
-    low = s.lower()
-    return {nid for nid in NODE_IDS if nid.lower() in low}
-
-
-def _class_tokens(el):
-    toks = []
-    for k, v in el.attrs:
-        if k == "class":
-            toks.extend(t.lower() for t in v.split())
-    return toks
-
-
-def _token_marks(token, word):
-    return (
-        token == word
-        or token.endswith("-" + word)
-        or token.endswith("_" + word)
-    )
-
-
-def _attr(el, name):
-    for k, v in el.attrs:
-        if k == name:
-            return v
-    return None
-
-
-def _is_edge_marked(el):
-    if any(_token_marks(t, "edge") for t in _class_tokens(el)):
-        return True
-    names = {k for k, _ in el.attrs}
-    if any(n.startswith("data-edge") for n in names):
-        return True
-    has_from = bool(names & {"data-from", "data-source", "data-src"})
-    has_to = bool(names & {"data-to", "data-target", "data-dst"})
-    if has_from and has_to:
-        return True
-    kind = _attr(el, "data-kind")
-    if kind is not None and kind.strip() in EDGE_KINDS:
-        return True
-    return False
-
-
-def _is_node_marked(el):
-    if _is_edge_marked(el):
-        return False
-    if any(_token_marks(t, "node") for t in _class_tokens(el)):
-        return True
-    names = {k for k, _ in el.attrs}
-    if any(n.startswith("data-node") for n in names):
-        return True
-    for n in ("data-type", "data-kind", "data-node-type"):
-        v = _attr(el, n)
-        if v is not None and v.strip() in NODE_TYPES:
-            return True
-    return False
-
-
-def _edges_referenced(ids):
-    return {
-        (e["from"], e["to"], e["kind"])
-        for e in EDGES
-        if e["from"] in ids and e["to"] in ids
-    }
-
-
-def _outermost(els):
-    s = set(map(id, els))
-    return [e for e in els if not any(id(a) in s for a in e.ancestors())]
-
-
-def _marker_strategy(all_els):
-    edge_els = []
-    for el in all_els:
-        if _is_edge_marked(el):
-            ids = _refs(el.attr_text() + " " + el.text())
-            if _edges_referenced(ids):
-                edge_els.append(el)
-    edge_els = _outermost(edge_els)
-    edge_ids = set(map(id, edge_els))
-
-    node_els = []
-    for el in all_els:
-        if any(id(a) in edge_ids for a in el.ancestors()) or id(el) in edge_ids:
-            continue
-        if _is_node_marked(el):
-            if _refs(el.attr_text() + " " + el.text()):
-                node_els.append(el)
-    node_els = _outermost(node_els)
-    return node_els, edge_els
-
-
-def _fallback_strategy(all_els):
-    edge_els = []
-    for el in all_els:
-        if el.tag == "a":
-            continue
-        if _edges_referenced(_refs(el.attr_text())):
-            edge_els.append(el)
-    edge_els = _outermost(edge_els)
-    edge_ids = set(map(id, edge_els))
-
-    node_els = []
-    for el in all_els:
-        if el.tag != "a":
-            continue
-        if any(id(a) in edge_ids for a in el.ancestors()):
-            continue
-        href = _attr(el, "href") or ""
-        if len(_refs(href)) == 1:
-            node_els.append(el)
-    return node_els, edge_els
-
-
-def _analyse(html_text):
-    all_els = _parse(html_text)
-    nodes, edges = _marker_strategy(all_els)
-    if not nodes and not edges:
-        nodes, edges = _fallback_strategy(all_els)
-    return nodes, edges
-
-
-def _find_dag_page(out_dir):
-    pages = sorted(p for p in Path(out_dir).rglob("*") if p.is_file() and p.suffix.lower() in (".html", ".htm"))
-    assert pages, f"no HTML pages rendered under {out_dir}"
-
-    best = None
-    for p in pages:
-        text = p.read_text(encoding="utf-8", errors="replace")
-        low = text.lower()
-        if not all(nid.lower() in low for nid in NODE_IDS):
-            continue
-        nodes, edges = _analyse(text)
-        name = p.name.lower()
-        preferred = (
-            name in ("index.html", "index.htm")
-            or "dag" in name
-            or "graph" in name
-        )
-        score = (len(nodes) + len(edges) > 0, bool(edges), preferred, len(edges), len(nodes))
-        if best is None or score > best[0]:
-            best = (score, p, text, nodes, edges)
-    assert best is not None, (
-        "no rendered HTML page mentions all three node ids: "
-        + ", ".join(str(p.relative_to(out_dir)) for p in pages)
-    )
-    return best[1], best[2], best[3], best[4]
-
-
-# --------------------------------------------------------------------------
-# The test.
-# --------------------------------------------------------------------------
 
 def test_ac_docs_001_dag_view_has_three_nodes_and_two_edges(tmp_path):
-    graph = _make_graph()
-
-    # Given: a corpus-graph.json with three nodes and two edges.
-    verification_dir = tmp_path / "repo" / "verification"
-    verification_dir.mkdir(parents=True)
-    graph_path = verification_dir / "corpus-graph.json"
-    graph_path.write_bytes(graph.to_json_bytes())
-    on_disk = json.loads(graph_path.read_text(encoding="utf-8"))
-    assert len(on_disk["nodes"]) == 3
-    assert len(on_disk["edges"]) == 2
-
+    graph = make_graph()
     out_dir = tmp_path / "site"
 
-    # When: render_docs_site runs.
     result = docs_site_renderer.render_docs_site(graph, out_dir)
     assert result is None
 
-    # Then: the DAG view contains three node elements and two edge elements.
-    page, text, node_els, edge_els = _find_dag_page(out_dir)
-
-    detail = (
-        f"page={page.relative_to(out_dir)}; "
-        f"node elements={[ (e.tag, e.attrs) for e in node_els ]}; "
-        f"edge elements={[ (e.tag, e.attrs) for e in edge_els ]}"
+    assert out_dir.is_dir(), "render_docs_site did not create the output directory"
+    pages = sorted(
+        p for p in out_dir.rglob("*") if p.is_file() and p.suffix.lower() in (".html", ".htm")
     )
+    assert pages, "no HTML pages were rendered"
 
-    assert len(node_els) == 3, f"expected 3 node elements, got {len(node_els)}: {detail}"
-    assert len(edge_els) == 2, f"expected 2 edge elements, got {len(edge_els)}: {detail}"
+    summaries = []
+    matching = []
+    for page in pages:
+        text = page.read_text(encoding="utf-8", errors="replace")
+        node_ids, edge_pairs = analyse_page(text)
+        summaries.append((str(page.relative_to(out_dir)), sorted(node_ids),
+                          sorted(sorted(p) for p in edge_pairs)))
+        if node_ids == set(NODE_IDS) and edge_pairs == EXPECTED_EDGES:
+            matching.append(page)
 
-    node_ids_seen = set()
-    for el in node_els:
-        node_ids_seen |= _refs(el.attr_text() + " " + el.text())
-    assert node_ids_seen == set(NODE_IDS), detail
-
-    edges_seen = set()
-    for el in edge_els:
-        edges_seen |= _edges_referenced(_refs(el.attr_text() + " " + el.text()))
-    assert edges_seen == {(e["from"], e["to"], e["kind"]) for e in EDGES}, detail
+    assert matching, (
+        "no rendered page is a DAG view holding exactly the three node elements "
+        "and the two edge elements; per-page findings: " + repr(summaries)
+    )

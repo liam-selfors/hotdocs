@@ -1,3 +1,4 @@
+# hotdocs-criterion: sha256:bab4c8383d1885ec2bcdbd8f17863c7dad470c7c1da2ba7d0def32abe0dbe47c
 import re
 import shutil
 import tempfile

@@ -15,7 +15,8 @@ Given main(["--provider","openai","--api-key-env","sk-abc123"]) and "--api-key-e
 When called
 Then each returns 2, nothing is written, and no output contains "sk-abc123"
 
-Given main(["--provider","claude-cli","--base-url","http://h"]), then "--api-key-env","K"
+Given main(["--provider","claude-cli","--base-url","http://h"]), then "--api-key-env","K",
+  then "--auth","token", and main(["--provider","openai","--model","m","--auth","login"])
 When called
 Then each returns 2
 

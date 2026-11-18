@@ -27,14 +27,14 @@ names are used, read with dual dict-or-attribute access:
   `{provider, available, reason, suggested_model, api_key_env}`; called with
   `env=<the env given to main>`, and with no `env` when none was given;
 - `check_connection(provider, model, base_url=None, api_key_env=None,
-  timeout_seconds=30)` — `{ok, error}`, `error` `None` or `{category,
+  timeout_seconds=30, auth=None)` — `{ok, error}`, `error` `None` or `{category,
   message}`; raises `ValueError` for an unknown provider or a missing
   required `base_url`;
 - `save_config(config_path, provider, model, base_url=None,
-  api_key_env=None, timeout_seconds=None)` — keeps other file content,
+  api_key_env=None, timeout_seconds=None, auth=None)` — keeps other file content,
   replaces `[llm]`, raises `ValueError` for anything invalid;
 - `load_config(config_path=None)` — `{provider, model, base_url,
-  api_key_env, timeout_seconds}`, `None` when there is no `[llm]` table,
+  api_key_env, timeout_seconds, auth}`, `None` when there is no `[llm]` table,
   `ValueError` when invalid.
 
 `hotdocs.toml` is written and read only through `save_config` and
