@@ -1,4 +1,4 @@
-import json
+# hotdocs-criterion: sha256:155f62e871d75030e1820ac89319ef7af2d4a2e6e89027761c0728c2ff37793c
 import os
 import subprocess
 from pathlib import Path
@@ -12,114 +12,117 @@ def field(value, name):
 
 def _git(repo_root, *args):
     env = dict(os.environ)
-    env.update(
-        {
-            "GIT_AUTHOR_NAME": "Test",
-            "GIT_AUTHOR_EMAIL": "test@example.invalid",
-            "GIT_COMMITTER_NAME": "Test",
-            "GIT_COMMITTER_EMAIL": "test@example.invalid",
-        }
-    )
+    env.update({
+        "GIT_AUTHOR_NAME": "Test",
+        "GIT_AUTHOR_EMAIL": "test@example.invalid",
+        "GIT_COMMITTER_NAME": "Test",
+        "GIT_COMMITTER_EMAIL": "test@example.invalid",
+    })
     subprocess.run(
-        ["git", *args],
-        cwd=str(repo_root),
-        env=env,
-        check=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        ["git", "-c", "user.name=Test", "-c", "user.email=test@example.invalid",
+         "-c", "commit.gpgsign=false"] + list(args),
+        cwd=str(repo_root), check=True, capture_output=True, env=env,
     )
 
 
-STAND_IN_TEMPLATE = '''
-import json as _json
-
-_LOG_PATH = {log_path!r}
-
-
-def _log(record):
-    with open(_LOG_PATH, "a", encoding="utf-8") as fh:
-        fh.write(_json.dumps(record) + "\\n")
+def _write(path, text):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text)
 
 
-def check_readiness(repo_root, changed_ids=None, model=None, seed=0, llm_backend=None):
-    _log({{"fn": "check_readiness", "changed_ids": list(changed_ids) if changed_ids is not None else None}})
-    return {{
-        "scope": "blast-radius",
-        "ready": True,
-        "components": {{
-            "comp-alpha": {{
-                "hit": True,
-                "verification_report": {{
-                    "component_id": "comp-alpha",
-                    "criteria": [
-                        {{"id": "AC-ALPHA-001", "covers": "R-ALPHA-001", "kind": "compiled", "result": "pass"}}
-                    ],
-                    "requirement_results": {{"R-ALPHA-001": "pass"}},
-                    "interface_drift": False,
-                    "mutation_score": 1.0,
-                    "overall": "pass",
-                }},
-                "license_scan": {{"blocked": False}},
-                "secret_scan": {{"flagged": False}},
-            }},
-            "comp-beta": {{
-                "hit": True,
-                "verification_report": {{
-                    "component_id": "comp-beta",
-                    "criteria": [
-                        {{"id": "AC-BETA-001", "covers": "R-BETA-001", "kind": "compiled", "result": "pass"}}
-                    ],
-                    "requirement_results": {{"R-BETA-001": "pass"}},
-                    "interface_drift": False,
-                    "mutation_score": 1.0,
-                    "overall": "pass",
-                }},
-                "license_scan": {{"blocked": False}},
-                "secret_scan": {{"flagged": False}},
-            }},
-        }},
-        "capabilities": {{}},
-        "not_ready_reasons": [],
-    }}
+def _component(repo_root, slug, upper):
+    base = repo_root / "specs" / "components" / slug
+    _write(
+        base / "component.md",
+        "---\n"
+        "id: comp-" + slug + "\n"
+        "title: " + slug.capitalize() + "\n"
+        "status: draft\n"
+        "owners: [tester]\n"
+        "sealed: true\n"
+        "source_path: legacy/" + slug + "/\n"
+        "---\n\n"
+        "# " + slug.capitalize() + "\n\nA fixture component.\n",
+    )
+    _write(
+        base / "requirements" / ("R-" + upper + "-001.md"),
+        "# R-" + upper + "-001\n\n**R-" + upper + "-001** — The component MUST work.\n",
+    )
+    _write(
+        base / "acceptance" / ("AC-" + upper + "-001.md"),
+        "# AC-" + upper + "-001\n\nCovers: R-" + upper + "-001\nKind: generated-test\n\n"
+        "```gherkin\nGiven a thing\nWhen it runs\nThen it works\n```\n",
+    )
+    _write(base / "interface" / "library.md", "# Library\n\n```\nrun() -> None\n```\n")
+    _write(base / "constraints.md", "# Constraints\n\nNone.\n")
 
 
-def last_requirement_failures(component_id, repo_root):
-    _log({{"fn": "last_requirement_failures", "component_id": component_id}})
-    return []
-'''
+def _verification_report(component_id, upper):
+    return {
+        "component_id": component_id,
+        "criteria": [
+            {"id": "AC-" + upper + "-001", "covers": "R-" + upper + "-001",
+             "kind": "generated-test", "result": "pass"},
+        ],
+        "requirement_results": {"R-" + upper + "-001": "pass"},
+        "interface_drift": False,
+        "mutation_score": 1.0,
+        "mutation_error": None,
+        "overall": "pass",
+    }
 
 
-def _make_repo(tmp_path):
+def _provenance_check_result(component_id, upper):
+    return {
+        "hit": True,
+        "verification_report": _verification_report(component_id, upper),
+        "license_scan": {"blocked": False, "findings": []},
+        "secret_scan": {"flagged": False, "findings": []},
+    }
+
+
+def test_regenerated_components_lists_exactly_report_component_keys(tmp_path):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
-    _git(repo_root, "init", "-q")
-    (repo_root / "README.md").write_text("fixture repo\n", encoding="utf-8")
-    _git(repo_root, "add", "README.md")
-    _git(repo_root, "commit", "-q", "-m", "initial")
+    log_path = tmp_path / "check_readiness_calls.log"
 
-    log_path = tmp_path / "provenance_tracker_calls.jsonl"
-    stand_in_dir = repo_root / "gen" / "provenance-tracker"
-    stand_in_dir.mkdir(parents=True)
-    (stand_in_dir / "provenance_tracker.py").write_text(
-        STAND_IN_TEMPLATE.format(log_path=str(log_path)), encoding="utf-8"
+    _component(repo_root, "alpha", "ALPHA")
+    _component(repo_root, "beta", "BETA")
+    _component(repo_root, "gamma", "GAMMA")
+
+    report = {
+        "scope": "blast-radius",
+        "ready": True,
+        "components": {
+            "comp-alpha": _provenance_check_result("comp-alpha", "ALPHA"),
+            "comp-beta": _provenance_check_result("comp-beta", "BETA"),
+        },
+        "capabilities": {},
+        "not_ready_reasons": [],
+    }
+
+    stand_in = (
+        "def check_readiness(repo_root, changed_ids=None, model=None, seed=0, llm_backend=None):\n"
+        "    with open(" + repr(str(log_path)) + ", 'a') as fh:\n"
+        "        fh.write('check_readiness\\n')\n"
+        "    return " + repr(report) + "\n"
+        "\n"
+        "\n"
+        "def last_requirement_failures(component_id, repo_root):\n"
+        "    return []\n"
     )
-    return repo_root, log_path
+    _write(repo_root / "gen" / "provenance-tracker" / "provenance_tracker.py", stand_in)
 
+    _git(repo_root, "init", "-q")
+    _git(repo_root, "add", "-A")
+    _git(repo_root, "commit", "-q", "-m", "initial fixture")
 
-def test_regenerated_components_are_exactly_check_readiness_component_keys(tmp_path):
-    repo_root, log_path = _make_repo(tmp_path)
+    packet = review_packet_builder.build_review_packet(["comp-alpha"], repo_root)
 
-    packet = review_packet_builder.build_review_packet(["R-ALPHA-001"], repo_root)
-
-    # The stand-in provenance-tracker was actually consulted.
-    assert log_path.exists(), "provenance-tracker stand-in check_readiness was never called"
-    calls = [
-        json.loads(line)
-        for line in log_path.read_text(encoding="utf-8").splitlines()
-        if line.strip()
-    ]
-    assert any(c["fn"] == "check_readiness" for c in calls)
+    assert log_path.is_file(), "provenance-tracker stand-in check_readiness was never called"
+    assert "check_readiness" in log_path.read_text()
 
     regenerated = list(field(packet, "regenerated_components"))
-    assert len(regenerated) == 2, regenerated
+    assert len(regenerated) == 2
     assert sorted(regenerated) == ["comp-alpha", "comp-beta"]
+    assert "comp-gamma" not in regenerated

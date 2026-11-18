@@ -1,173 +1,190 @@
+# hotdocs-criterion: sha256:9d25e83c601f12f3a5b585e88481304212944d9cc13248e4ce7011f2f5d36304
 import importlib.util
-import os
 import subprocess
 import sys
-import uuid
 from pathlib import Path
+
+import pytest
 
 import review_packet_builder
 
 
-# Read once, at import time, from the normally imported module's own file.
+# Read once, at import, from the normally imported module's own file.
 _SOURCE_BYTES = Path(review_packet_builder.__file__).read_bytes()
+
+
+def load_module(path, module_name):
+    spec = importlib.util.spec_from_file_location(module_name, path)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    spec.loader.exec_module(module)
+    return module
 
 
 def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def _git(repo_root, *args):
-    env = dict(os.environ)
-    env.setdefault("GIT_AUTHOR_NAME", "test")
-    env.setdefault("GIT_AUTHOR_EMAIL", "test@example.com")
-    env.setdefault("GIT_COMMITTER_NAME", "test")
-    env.setdefault("GIT_COMMITTER_EMAIL", "test@example.com")
+def _git(repo, *args):
     subprocess.run(
-        [
-            "git",
-            "-c", "user.name=test",
-            "-c", "user.email=test@example.com",
-            "-c", "commit.gpgsign=false",
-            "-c", "init.defaultBranch=main",
-            *args,
-        ],
-        cwd=str(repo_root),
+        ["git", "-c", "user.name=test", "-c", "user.email=test@example.com",
+         "-c", "commit.gpgsign=false", "-c", "init.defaultBranch=main"]
+        + list(args),
+        cwd=str(repo),
         check=True,
-        capture_output=True,
-        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
     )
 
 
-def _make_repo(repo_root):
-    repo_root.mkdir(parents=True)
-    _git(repo_root, "init")
-    (repo_root / "README.md").write_text("fixture repo\n")
-    _git(repo_root, "add", "README.md")
-    _git(repo_root, "commit", "-m", "initial")
-    assert not (repo_root / "gen").exists()
+def _make_repo(repo):
+    repo.mkdir(parents=True)
+    _git(repo, "init")
+    (repo / "README.md").write_text("fixture repo\n")
+    _git(repo, "add", "README.md")
+    _git(repo, "commit", "-m", "initial")
 
 
-def _stand_in_source(hit, log_path):
-    if hit:
-        component_result = (
-            "{\n"
-            "        'hit': True,\n"
-            "        'verification_report': {\n"
-            "            'component_id': 'comp-tool',\n"
-            "            'criteria': [],\n"
-            "            'requirement_results': {},\n"
-            "            'interface_drift': False,\n"
-            "            'mutation_score': 1.0,\n"
-            "            'overall': 'pass',\n"
-            "        },\n"
-            "        'license_scan': {'blocked': False, 'findings': []},\n"
-            "        'secret_scan': {'flagged': False, 'findings': []},\n"
-            "    }"
-        )
-        ready = "True"
-        reasons = "[]"
-    else:
-        component_result = (
-            "{\n"
-            "        'hit': False,\n"
-            "        'verification_report': None,\n"
-            "        'license_scan': None,\n"
-            "        'secret_scan': None,\n"
-            "    }"
-        )
-        ready = "False"
-        reasons = (
-            "['comp-tool: no provenance for current spec state "
-            "\u2014 run hotdocs generate comp-tool']"
-        )
-    return (
-        "LOG_PATH = " + repr(str(log_path)) + "\n"
+def _verification_report(component_id):
+    return {
+        "component_id": component_id,
+        "criteria": [
+            {"id": "AC-TOOL-001", "covers": "R-TOOL-001", "kind": "compiled", "result": "pass"},
+        ],
+        "requirement_results": {"R-TOOL-001": "pass"},
+        "interface_drift": False,
+        "mutation_score": 1.0,
+        "mutation_error": None,
+        "overall": "pass",
+    }
+
+
+def _hit_report():
+    return {
+        "scope": "blast-radius",
+        "ready": True,
+        "components": {
+            "comp-tool": {
+                "hit": True,
+                "verification_report": _verification_report("comp-tool"),
+                "license_scan": {"blocked": False, "findings": []},
+                "secret_scan": {"flagged": False, "findings": []},
+            }
+        },
+        "capabilities": {},
+        "not_ready_reasons": [],
+    }
+
+
+def _miss_report():
+    return {
+        "scope": "blast-radius",
+        "ready": False,
+        "components": {
+            "comp-tool": {
+                "hit": False,
+                "verification_report": None,
+                "license_scan": None,
+                "secret_scan": None,
+            }
+        },
+        "capabilities": {},
+        "not_ready_reasons": [
+            "comp-tool: no provenance for current spec state — run hotdocs generate comp-tool"
+        ],
+    }
+
+
+def _write_tracker(path, log_path, tag, report):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    src = (
+        "import copy\n"
         "\n"
+        "LOG = " + repr(str(log_path)) + "\n"
+        "TAG = " + repr(tag) + "\n"
+        "REPORT = " + repr(report) + "\n"
         "\n"
         "def check_readiness(repo_root, changed_ids=None, model=None, seed=0, llm_backend=None):\n"
-        "    with open(LOG_PATH, 'a') as fh:\n"
-        "        fh.write('check_readiness\\n')\n"
-        "    return {\n"
-        "        'scope': 'blast-radius' if changed_ids is not None else 'whole-corpus',\n"
-        "        'ready': " + ready + ",\n"
-        "        'components': {\n"
-        "            'comp-tool': " + component_result + ",\n"
-        "        },\n"
-        "        'capabilities': {},\n"
-        "        'not_ready_reasons': " + reasons + ",\n"
-        "    }\n"
-        "\n"
+        "    with open(LOG, 'a') as f:\n"
+        "        f.write(TAG + '\\n')\n"
+        "    result = copy.deepcopy(REPORT)\n"
+        "    result['scope'] = 'blast-radius' if changed_ids is not None else 'whole-corpus'\n"
+        "    return result\n"
         "\n"
         "def last_requirement_failures(component_id, repo_root):\n"
         "    return []\n"
     )
+    path.write_text(src)
 
 
-def _write_stand_in(root, hit, log_path):
-    d = root / "gen" / "provenance-tracker"
-    d.mkdir(parents=True, exist_ok=True)
-    (d / "provenance_tracker.py").write_text(_stand_in_source(hit, log_path))
+@pytest.fixture
+def preserved_modules():
+    names = ["review_packet_builder", "provenance_tracker"]
+    saved = {n: sys.modules.get(n) for n in names}
+    yield
+    for n, m in saved.items():
+        if m is None:
+            sys.modules.pop(n, None)
+        else:
+            sys.modules[n] = m
 
 
-def _make_tool_root(tool_root, tool_log):
-    copy_dir = tool_root / "gen" / "review-packet-builder"
-    copy_dir.mkdir(parents=True)
-    copy_path = copy_dir / "review_packet_builder.py"
+def _setup_tool_root(tmp_path, log_path):
+    t = tmp_path / "toolroot"
+    copy_path = t / "gen" / "review-packet-builder" / "review_packet_builder.py"
+    copy_path.parent.mkdir(parents=True)
     copy_path.write_bytes(_SOURCE_BYTES)
-    _write_stand_in(tool_root, hit=True, log_path=tool_log)
-    return copy_path
+    _write_tracker(
+        t / "gen" / "provenance-tracker" / "provenance_tracker.py",
+        log_path,
+        "tool",
+        _hit_report(),
+    )
+    return t, copy_path
 
 
-def _load_copy(copy_path):
-    module_name = "review_packet_builder_copy_" + uuid.uuid4().hex
-    spec = importlib.util.spec_from_file_location(module_name, str(copy_path))
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[module_name] = module
-    spec.loader.exec_module(module)
-    return module, module_name
-
-
-def _read_log(path):
-    if not path.exists():
+def _read_log(log_path):
+    if not log_path.exists():
         return []
-    return [line for line in path.read_text().splitlines() if line.strip()]
+    return [line for line in log_path.read_text().splitlines() if line]
 
 
-def test_tool_root_provenance_tracker_used_when_repo_has_no_gen(tmp_path):
-    tool_root = tmp_path / "tool"
+def test_tool_root_tracker_used_when_repo_has_no_gen(tmp_path, preserved_modules):
+    log_path = tmp_path / "calls.log"
+    t, copy_path = _setup_tool_root(tmp_path, log_path)
     repo_root = tmp_path / "repo"
-    tool_log = tmp_path / "tool_tracker.log"
-
-    copy_path = _make_tool_root(tool_root, tool_log)
     _make_repo(repo_root)
+    assert not (repo_root / "gen").exists()
 
-    module, module_name = _load_copy(copy_path)
-    try:
-        packet = module.build_review_packet(["comp-tool"], repo_root)
-    finally:
-        sys.modules.pop(module_name, None)
+    sys.modules.pop("provenance_tracker", None)
+    module = load_module(str(copy_path), "review_packet_builder")
+    packet = module.build_review_packet(["comp-tool"], repo_root)
 
     status = field(packet, "provenance_hit_status")
     assert dict(status) == {"comp-tool": True}
-    assert _read_log(tool_log), "tool-root provenance-tracker stand-in was never invoked"
+    calls = _read_log(log_path)
+    assert "tool" in calls
+    assert "repo" not in calls
 
 
-def test_repo_root_provenance_tracker_preferred_when_present(tmp_path):
-    tool_root = tmp_path / "tool"
+def test_repo_root_tracker_preferred_when_present(tmp_path, preserved_modules):
+    log_path = tmp_path / "calls.log"
+    t, copy_path = _setup_tool_root(tmp_path, log_path)
     repo_root = tmp_path / "repo"
-    tool_log = tmp_path / "tool_tracker.log"
-    repo_log = tmp_path / "repo_tracker.log"
-
-    copy_path = _make_tool_root(tool_root, tool_log)
     _make_repo(repo_root)
-    _write_stand_in(repo_root, hit=False, log_path=repo_log)
+    _write_tracker(
+        repo_root / "gen" / "provenance-tracker" / "provenance_tracker.py",
+        log_path,
+        "repo",
+        _miss_report(),
+    )
 
-    module, module_name = _load_copy(copy_path)
-    try:
-        packet = module.build_review_packet(["comp-tool"], repo_root)
-    finally:
-        sys.modules.pop(module_name, None)
+    sys.modules.pop("provenance_tracker", None)
+    module = load_module(str(copy_path), "review_packet_builder")
+    packet = module.build_review_packet(["comp-tool"], repo_root)
 
     status = field(packet, "provenance_hit_status")
     assert dict(status) == {"comp-tool": False}
-    assert _read_log(repo_log), "repo_root provenance-tracker stand-in was never invoked"
+    calls = _read_log(log_path)
+    assert "repo" in calls
+    assert "tool" not in calls

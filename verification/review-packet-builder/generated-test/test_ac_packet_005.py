@@ -1,11 +1,8 @@
-import review_packet_builder
-
-import os
-import shutil
+# hotdocs-criterion: sha256:c632c121be610c2f70201312b3baafc80b8365e527e64ccab6c2fd37b184ecd1
 import subprocess
 from pathlib import Path
 
-import pytest
+import review_packet_builder
 
 
 def field(value, name):
@@ -18,175 +15,156 @@ def has_field(value, name):
     return hasattr(value, name)
 
 
-def _verification_report(component_id, r_id, ac_id):
-    return {
-        "component_id": component_id,
+def _write(path, text):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+
+
+def _git(repo_root, *args):
+    subprocess.run(
+        [
+            "git",
+            "-c", "user.name=Test",
+            "-c", "user.email=test@example.invalid",
+            "-c", "commit.gpgsign=false",
+        ]
+        + list(args),
+        cwd=str(repo_root),
+        check=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+
+
+def _build_fixture(repo_root, log_path):
+    # Minimal synthetic spec corpus: one sealed component.
+    _write(
+        repo_root / "specs" / "components" / "foo" / "component.md",
+        "---\n"
+        "id: comp-foo\n"
+        "title: Foo\n"
+        "status: ratified\n"
+        "last_ratified_commit: 0000000\n"
+        "owners: [alice]\n"
+        "sealed: true\n"
+        "source_path: legacy/foo/\n"
+        "---\n"
+        "\n"
+        "# comp-foo\n"
+        "\n"
+        "A fixture component.\n",
+    )
+    _write(
+        repo_root / "specs" / "components" / "foo" / "requirements" / "R-FOO-001.md",
+        "# R-FOO-001\n\n**R-FOO-001** — Foo MUST do the thing.\n",
+    )
+    _write(
+        repo_root / "specs" / "components" / "foo" / "acceptance" / "AC-FOO-001.md",
+        "# AC-FOO-001\n\nCovers: R-FOO-001\nKind: compiled\n\n"
+        "```gherkin\nGiven a thing\nWhen foo runs\nThen the thing is done\n```\n",
+    )
+    _write(repo_root / "legacy" / "foo" / "foo.py", "VALUE = 1\n")
+
+    verification_report = {
+        "component_id": "comp-foo",
         "criteria": [
             {
-                "id": ac_id,
-                "covers": r_id,
+                "id": "AC-FOO-001",
+                "covers": "R-FOO-001",
                 "kind": "compiled",
                 "result": "pass",
             }
         ],
-        "requirement_results": {r_id: "pass"},
+        "requirement_results": {"R-FOO-001": "pass"},
         "interface_drift": False,
         "mutation_score": None,
+        "mutation_error": None,
         "overall": "pass",
     }
-
-
-def _clean_report():
-    return {
+    license_scan = {
+        "component_id": "comp-foo",
+        "blocked": False,
+        "findings": [],
+    }
+    secret_scan = {
+        "component_id": "comp-foo",
+        "flagged": False,
+        "findings": [],
+    }
+    verify_report = {
         "scope": "blast-radius",
         "ready": True,
         "components": {
             "comp-foo": {
                 "hit": True,
-                "verification_report": _verification_report(
-                    "comp-foo", "R-FOO-001", "AC-FOO-001"
-                ),
-                "license_scan": {"blocked": False, "findings": []},
-                "secret_scan": {"flagged": False, "findings": []},
-            },
-            "comp-bar": {
-                "hit": True,
-                "verification_report": _verification_report(
-                    "comp-bar", "R-BAR-001", "AC-BAR-001"
-                ),
-                "license_scan": {"blocked": False, "findings": []},
-                "secret_scan": {"flagged": False, "findings": []},
-            },
+                "verification_report": verification_report,
+                "license_scan": license_scan,
+                "secret_scan": secret_scan,
+            }
         },
         "capabilities": {},
         "not_ready_reasons": [],
     }
 
-
-def _git(repo_root, *args):
-    env = dict(os.environ)
-    env.update(
-        {
-            "GIT_AUTHOR_NAME": "Test",
-            "GIT_AUTHOR_EMAIL": "test@example.com",
-            "GIT_COMMITTER_NAME": "Test",
-            "GIT_COMMITTER_EMAIL": "test@example.com",
-        }
-    )
-    subprocess.run(
-        ["git", *args],
-        cwd=str(repo_root),
-        check=True,
-        capture_output=True,
-        env=env,
-    )
-
-
-def _write_component(repo_root, slug, upper):
-    comp_dir = repo_root / "specs" / "components" / slug
-    (comp_dir / "requirements").mkdir(parents=True, exist_ok=True)
-    (comp_dir / "acceptance").mkdir(parents=True, exist_ok=True)
-    (comp_dir / "interface").mkdir(parents=True, exist_ok=True)
-    (comp_dir / "component.md").write_text(
-        "---\n"
-        f"id: comp-{slug}\n"
-        f"title: {slug.capitalize()} component\n"
-        "status: draft\n"
-        "owners: [tester]\n"
-        "sealed: true\n"
-        f"source_path: legacy/{slug}/\n"
-        "---\n\n"
-        f"# comp-{slug}\n\nA synthetic fixture component.\n"
-    )
-    (comp_dir / "constraints.md").write_text("# Constraints\n\nNone.\n")
-    (comp_dir / "interface" / "library.md").write_text(
-        f"# Library\n\n```\n{slug}() -> None\n```\n"
-    )
-    (comp_dir / "requirements" / f"R-{upper}-001.md").write_text(
-        f"# R-{upper}-001\n\n**R-{upper}-001** — The {slug} component MUST do its thing.\n"
-    )
-    (comp_dir / "acceptance" / f"AC-{upper}-001.md").write_text(
-        f"# AC-{upper}-001\n\nCovers: R-{upper}-001\nKind: compiled\n\n"
-        "```gherkin\nGiven a thing\nWhen it runs\nThen it works\n```\n"
-    )
-    legacy = repo_root / "legacy" / slug
-    legacy.mkdir(parents=True, exist_ok=True)
-    (legacy / f"{slug}.py").write_text("def run():\n    return None\n")
-
-
-def _write_tracker_stand_in(repo_root, log_path):
-    tracker_dir = repo_root / "gen" / "provenance-tracker"
-    tracker_dir.mkdir(parents=True, exist_ok=True)
-    report_literal = repr(_clean_report())
     source = (
-        "import copy\n"
+        "LOG_PATH = " + repr(str(log_path)) + "\n"
+        "REPORT = " + repr(verify_report) + "\n"
         "\n"
-        f"_LOG_PATH = {str(log_path)!r}\n"
-        f"REPORT = {report_literal}\n"
+        "\n"
+        "def _log(line):\n"
+        "    with open(LOG_PATH, 'a', encoding='utf-8') as fh:\n"
+        "        fh.write(line + '\\n')\n"
         "\n"
         "\n"
         "def check_readiness(repo_root, changed_ids=None, model=None, seed=0, llm_backend=None):\n"
-        "    with open(_LOG_PATH, 'a') as fh:\n"
-        "        fh.write('check_readiness\\n')\n"
+        "    _log('check_readiness')\n"
+        "    import copy\n"
         "    report = copy.deepcopy(REPORT)\n"
         "    report['scope'] = 'blast-radius' if changed_ids is not None else 'whole-corpus'\n"
         "    return report\n"
         "\n"
         "\n"
         "def last_requirement_failures(component_id, repo_root):\n"
+        "    _log('last_requirement_failures')\n"
         "    return []\n"
     )
-    (tracker_dir / "provenance_tracker.py").write_text(source)
-
-
-@pytest.fixture
-def repo_root(tmp_path):
-    if shutil.which("git") is None:
-        pytest.skip("git is required to build the fixture repository")
-    root = tmp_path / "repo"
-    root.mkdir()
-    log_dir = tmp_path / "logs"
-    log_dir.mkdir()
-    log_path = log_dir / "tracker_calls.log"
-
-    _git(root, "init", "-q")
-    _write_component(root, "foo", "FOO")
-    _write_component(root, "bar", "BAR")
-    _write_tracker_stand_in(root, log_path)
-    _git(root, "add", "-A")
-    _git(root, "commit", "-q", "-m", "initial fixture")
-
-    # A spec change after the commit, so a diff exists to report.
-    req = root / "specs" / "components" / "foo" / "requirements" / "R-FOO-001.md"
-    req.write_text(
-        "# R-FOO-001\n\n**R-FOO-001** — The foo component MUST do its thing well.\n"
+    _write(
+        repo_root / "gen" / "provenance-tracker" / "provenance_tracker.py",
+        source,
     )
-    return root, log_path
+
+    _git(repo_root, "init", "-q")
+    _git(repo_root, "add", "-A")
+    _git(repo_root, "commit", "-q", "-m", "initial fixture")
 
 
-def test_clean_scans_yield_explicit_empty_compliance_flags(repo_root):
-    root, log_path = repo_root
-    changed_ids = ["comp-foo", "R-FOO-001", "comp-bar", "R-BAR-001"]
+def test_clean_scans_yield_explicitly_empty_compliance_flags(tmp_path):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    log_path = tmp_path / "fake_calls.log"
+    _build_fixture(repo_root, log_path)
 
-    packet = review_packet_builder.build_review_packet(changed_ids, Path(root))
+    packet = review_packet_builder.build_review_packet(
+        ["comp-foo", "R-FOO-001"], repo_root
+    )
 
-    # The provenance-tracker stand-in was consulted.
-    assert log_path.exists(), "provenance-tracker stand-in was never invoked"
-    assert "check_readiness" in log_path.read_text()
+    # The provenance-tracker stand-in was actually consulted.
+    assert log_path.is_file()
+    assert "check_readiness" in log_path.read_text(encoding="utf-8").splitlines()
 
-    # compliance_flags is present, not omitted.
-    assert has_field(packet, "compliance_flags"), "compliance_flags omitted from packet"
+    # compliance_flags is present as its own section, not omitted.
+    assert has_field(packet, "compliance_flags")
     flags = field(packet, "compliance_flags")
-    assert flags is not None, "compliance_flags must be an explicit section, not None"
+    assert flags is not None
 
     # Both fields are explicitly present...
-    assert has_field(flags, "license_scan"), "compliance_flags.license_scan omitted"
-    assert has_field(flags, "secret_scan"), "compliance_flags.secret_scan omitted"
+    assert has_field(flags, "license_scan")
+    assert has_field(flags, "secret_scan")
 
     license_flags = field(flags, "license_scan")
     secret_flags = field(flags, "secret_scan")
 
-    # ...and explicitly empty lists, not None or missing.
+    # ...and explicitly empty lists, not None / omitted.
     assert license_flags is not None
     assert secret_flags is not None
     assert list(license_flags) == []
