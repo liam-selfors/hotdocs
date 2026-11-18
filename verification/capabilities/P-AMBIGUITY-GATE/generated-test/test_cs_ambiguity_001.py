@@ -1,6 +1,5 @@
-# hotdocs-criterion: sha256:79b17241908ec9aa3a9d13408402fa05198c36150d3862982523f2fa552a7468
+# hotdocs-criterion: sha256:72f18b70ecaf5786a29b49c9e991944737cbbc8e14185c56734fe64409fb1257
 import importlib.util
-import json
 import sys
 from pathlib import Path
 
@@ -18,6 +17,9 @@ import test_author
 import verifier_orchestrator
 
 
+REQ_ID = "R-FOO-001"
+
+
 def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
@@ -30,163 +32,151 @@ def load_module(path, module_name):
     return module
 
 
-def _write(path, text):
+def load_real_spec_linter():
+    gen = next(
+        p
+        for p in Path(capability_scenario_verifier.__file__).resolve().parents
+        if p.name == "gen"
+    )
+    base = gen / "spec-linter"
+    if (base / "spec_linter.py").is_file():
+        path = base / "spec_linter.py"
+    else:
+        path = base / "spec_linter" / "__init__.py"
+    return load_module(path, "spec_linter")
+
+
+def write(path, text):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
 
 
-def _build_corpus(repo_root, cover_second_requirement):
+def build_corpus(repo_root):
     specs = repo_root / "specs"
-    _write(
+    write(
         specs / "glossary.md",
         "# Glossary\n"
         "\n"
-        "- **Widget** \u2014 a small thing the foo component manages.\n",
+        "- **Widget** \u2014 a small unit of work handled by the foo component.\n",
     )
     comp = specs / "components" / "foo"
-    _write(
+    write(
         comp / "component.md",
         "---\n"
         "id: comp-foo\n"
         "title: Foo\n"
         "status: draft\n"
         "owners: [pipeline-team]\n"
+        "sealed: true\n"
+        "source_path: legacy/foo/\n"
         "depends_on: []\n"
         "realizes: []\n"
         "uses_var: []\n"
-        "sealed: true\n"
-        "source_path: legacy/foo/\n"
         "---\n"
         "\n"
         "# Foo\n"
         "\n"
         "## Purpose\n"
         "\n"
-        "Foo manages widgets.\n"
+        "Foo doubles a number.\n"
         "\n"
         "## Behavior\n"
         "\n"
-        "- `R-FOO-001` \u2014 foo stores a widget.\n"
-        "- `R-FOO-002` \u2014 foo deletes a widget.\n",
+        "- `" + REQ_ID + "`: doubling returns twice its input.\n",
     )
-    _write(
-        comp / "requirements" / "R-FOO-001.md",
-        "# R-FOO-001: Store a widget\n"
+    write(
+        comp / "requirements" / (REQ_ID + ".md"),
+        "# " + REQ_ID + "\n"
         "\n"
-        "`store(name)` MUST record the widget under `name`.\n",
+        "`double(x)` MUST return twice `x`.\n",
     )
-    _write(
-        comp / "requirements" / "R-FOO-002.md",
-        "# R-FOO-002: Delete a widget\n"
-        "\n"
-        "`delete(name)` MUST remove the widget recorded under `name`.\n",
-    )
-    _write(
+    write(
         comp / "interface" / "library.md",
         "# Library\n"
         "\n"
         "```\n"
-        "store(name: str) -> None\n"
-        "delete(name: str) -> None\n"
+        "double(x: int) -> int\n"
         "```\n",
     )
-    _write(
-        comp / "constraints.md",
-        "# Constraints\n"
-        "\n"
-        "None.\n",
-    )
-    _write(
+    write(
         comp / "acceptance" / "AC-FOO-001.md",
         "# AC-FOO-001\n"
         "\n"
-        "Covers: R-FOO-001\n"
+        "Covers: " + REQ_ID + "\n"
         "Kind: generated-test\n"
         "\n"
         "```gherkin\n"
-        "Given an empty foo store\n"
-        "When store is called with name \"a\"\n"
-        "Then the widget \"a\" is recorded\n"
+        "Given the number 2\n"
+        "When double is called with it\n"
+        "Then the result is 4\n"
         "```\n",
     )
-    if cover_second_requirement:
-        _write(
-            comp / "acceptance" / "AC-FOO-002.md",
-            "# AC-FOO-002\n"
-            "\n"
-            "Covers: R-FOO-002\n"
-            "Kind: generated-test\n"
-            "\n"
-            "```gherkin\n"
-            "Given a foo store holding widget \"a\"\n"
-            "When delete is called with name \"a\"\n"
-            "Then the widget \"a\" is no longer recorded\n"
-            "```\n",
-        )
+    write(repo_root / "legacy" / "foo" / "foo.py", "def double(x):\n    return 2 * x\n")
+    return comp
 
 
-def _fail_findings(report):
-    out = []
-    for f in field(report, "findings"):
-        if field(f, "severity") == "fail":
-            out.append(
-                (
-                    field(f, "rule_id"),
-                    str(field(f, "file")),
-                    str(field(f, "message")),
-                )
-            )
-    return out
+def fail_findings(report):
+    return [f for f in field(report, "findings") if field(f, "severity") == "fail"]
 
 
-def _mentions_uncovered(finding):
-    rule_id, file, message = finding
-    return "R-FOO-002" in file or "R-FOO-002" in message
+def mentions_req(finding):
+    text = str(field(finding, "file")) + " " + str(field(finding, "message"))
+    return REQ_ID in text or "foo" in str(field(finding, "file"))
 
 
-def test_uncovered_requirement_fails_lint_and_blocks_before_generation(tmp_path):
-    # Control: every requirement covered.
-    control_root = tmp_path / "control"
-    control_root.mkdir()
-    _build_corpus(control_root, cover_second_requirement=True)
-    control_report = spec_linter.lint(None, control_root)
-    control_fails = _fail_findings(control_report)
-    assert not any(_mentions_uncovered(f) for f in control_fails), control_fails
-
-    # Defect: R-FOO-002 in the Behavior section has no covering criterion.
+def test_uncovered_requirement_fails_lint_and_blocks_before_generation(tmp_path, capsys):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
-    _build_corpus(repo_root, cover_second_requirement=False)
+    comp = build_corpus(repo_root)
+    linter = load_real_spec_linter()
 
-    report = spec_linter.lint(None, repo_root)
-    fails = _fail_findings(report)
-    new_fails = [f for f in fails if f not in control_fails]
-    assert new_fails, "expected a new fail-severity finding, got: " + repr(fails)
-    assert any(_mentions_uncovered(f) for f in new_fails), new_fails
+    # Precondition: the corpus with full coverage is lint-clean.
+    baseline = linter.lint(None, repo_root)
+    assert field(baseline, "hard_failures") == 0, [
+        (field(f, "rule_id"), field(f, "file"), field(f, "message"))
+        for f in fail_findings(baseline)
+    ]
+
+    # The spec change: the requirement loses its only covering criterion.
+    (comp / "acceptance" / "AC-FOO-001.md").unlink()
+
+    # Then: spec-linter reports a fail-severity finding.
+    report = linter.lint(None, repo_root)
+    fails = fail_findings(report)
     assert field(report, "hard_failures") >= 1
+    assert fails, "expected a fail-severity finding for the uncovered requirement"
+    assert any(mentions_req(f) for f in fails), [
+        (field(f, "rule_id"), field(f, "file"), field(f, "message")) for f in fails
+    ]
 
-    # The merge gate: spec-linter's CLI exits 1 on a fail-severity finding.
-    exit_code = spec_linter.main(["--format=json", "--repo-root=" + str(repo_root)])
-    assert exit_code == 1
+    # The lint gate blocks the merge: exit code 1.
+    code = linter.main(["--repo-root=" + str(repo_root), "--format=json"])
+    capsys.readouterr()
+    assert code == 1
 
-    # Generation never runs: the pipeline stops at the lint failure, so no
-    # model call is ever dispatched.
+    # Submitted to the pipeline with a model configured: the lint failure
+    # stops it before any generation (no model call is ever made).
     log_path = tmp_path / "backend_calls.log"
 
     def backend(prompt, model, **params):
         with open(log_path, "a", encoding="utf-8") as fh:
-            fh.write(json.dumps({"model": model}) + "\n")
+            fh.write("called\n")
         return {
             "text": "{}",
             "model": model,
-            "backend": "fake",
+            "backend": "mock",
             "model_call_error": None,
         }
 
     assist_report = spec_completeness_assistant.assist(
-        ["R-FOO-002"], repo_root, model="fake-model", llm_backend=backend
+        [REQ_ID], repo_root, model="claude-sonnet-5", llm_backend=backend
     )
+    capsys.readouterr()
+
     lint_findings = field(assist_report, "lint_findings")
-    assert any(field(f, "severity") == "fail" for f in lint_findings), lint_findings
+    assist_fails = [f for f in lint_findings if field(f, "severity") == "fail"]
+    assert assist_fails, "pipeline should surface the fail-severity lint finding"
+
     calls = log_path.read_text(encoding="utf-8").splitlines() if log_path.exists() else []
-    assert calls == [], "generation/model calls ran despite a lint failure: " + repr(calls)
+    assert calls == [], "generation/model calls ran despite a blocking lint failure"
+    assert not (repo_root / "gen" / "foo").exists()
