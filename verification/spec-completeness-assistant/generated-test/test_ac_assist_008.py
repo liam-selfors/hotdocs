@@ -1,10 +1,18 @@
-import json
+# hotdocs-criterion: sha256:0dbd531749952e258873a0971fe1e4af96dd73fc484d68fcca7e8eee96188cad
+import importlib.util
 import os
+import sys
 from pathlib import Path
 
-import pytest
-
 import spec_completeness_assistant
+
+
+def load_module(path, module_name):
+    spec = importlib.util.spec_from_file_location(module_name, path)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    spec.loader.exec_module(module)
+    return module
 
 
 def field(value, name):
@@ -17,130 +25,18 @@ def has_field(value, name):
     return hasattr(value, name)
 
 
-# Shared helper class used by every fake: readable both as attributes and
-# as a mapping, since a caller may access either way.
-_REC_CLASS = '''
-import json as _json
-
-
-class _Rec:
-    def __init__(self, **kw):
-        object.__setattr__(self, "_keys", list(kw))
-        for k, v in kw.items():
-            object.__setattr__(self, k, v)
-
-    def __getitem__(self, k):
-        if k not in self._keys:
-            raise KeyError(k)
-        return getattr(self, k)
-
-    def get(self, k, default=None):
-        return getattr(self, k) if k in self._keys else default
-
-    def __contains__(self, k):
-        return k in self._keys
-
-    def __iter__(self):
-        return iter(self._keys)
-
-    def keys(self):
-        return list(self._keys)
-
-    def items(self):
-        return [(k, getattr(self, k)) for k in self._keys]
-
-    def values(self):
-        return [getattr(self, k) for k in self._keys]
-
-    def __len__(self):
-        return len(self._keys)
-
-    def to_json(self):
-        return {k: getattr(self, k) for k in self._keys}
-
-
-def _log(entry):
-    with open(LOG, "a", encoding="utf-8") as fh:
-        fh.write(_json.dumps(entry) + "\\n")
-'''
-
-_LINTER_BODY = '''
-
-class LintReport(_Rec):
-    pass
-
-
-def lint(paths, repo_root, strict=False, judge=None):
-    _log({"fn": "lint"})
-    return LintReport(
-        findings=[],
-        summary={"hard_failures": 0, "warnings": 0, "skipped": 0},
-        hard_failures=0,
-        warnings=0,
-        skipped=0,
-    )
-'''
-
-_IMPACT_BODY = '''
-
-def compute_blast_radius(changed_ids, repo_root):
-    _log({"fn": "compute_blast_radius", "changed_ids": list(changed_ids)})
-    return _Rec(
-        impacted=[{"component_id": "comp-foo", "reason": "direct", "via": None}],
-        precondition_error=None,
-    )
-'''
-
-_ASSEMBLER_BODY = '''
-
-def _bundle(component_id, mode):
-    return _Rec(
-        component_id=component_id,
-        spec_bundle_hash="sha256:" + "0" * 64,
-        spec="Foo doubles a number.\\n\\n**R-FOO-001** \\u2014 `foo(x)` MUST return `2 * x`.",
-        interface="# Library\\n\\n```\\nfoo(x: int) -> int\\n```",
-        constraints="None.",
-        dependency_interfaces={},
-        dependency_context={},
-        dependency_usage={},
-        vars={},
-        glossary="- **Foo** \\u2014 a test term.",
-        hint_code=({} if mode == "hint" else None),
-    )
-
-
-def assemble(component_id, repo_root, mode="cold"):
-    _log({"fn": "assemble", "component_id": component_id, "mode": mode})
-    return _bundle(component_id, mode)
-
-
-def assemble_criterion(component_id, criterion_id, repo_root):
-    _log({"fn": "assemble_criterion", "component_id": component_id})
-    return _Rec(
-        component_id=component_id,
-        criterion_id=criterion_id,
-        covers="R-FOO-001",
-        criterion_text="",
-        requirement_text="",
-        interface="",
-        glossary="",
-        dependency_interfaces={},
-    )
-'''
-
-
-def _write(path: Path, text: str):
+def write(path, text):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
 
 
-def _write_corpus(repo_root: Path):
-    _write(
+def build_corpus(repo_root):
+    write(
         repo_root / "specs" / "glossary.md",
-        "# Glossary\n\n- **Foo** \u2014 a test term.\n",
+        "# Glossary\n\n- **Foo** — a test term.\n",
     )
     comp = repo_root / "specs" / "components" / "foo"
-    _write(
+    write(
         comp / "component.md",
         "---\n"
         "id: comp-foo\n"
@@ -158,11 +54,11 @@ def _write_corpus(repo_root: Path):
         "\n"
         "Foo doubles a number.\n",
     )
-    _write(
+    write(
         comp / "requirements" / "R-FOO-001.md",
-        "# R-FOO-001\n\n**R-FOO-001** \u2014 `foo(x)` MUST return `2 * x`.\n",
+        "# R-FOO-001\n\n**R-FOO-001** — `foo(x)` MUST return `2 * x`.\n",
     )
-    _write(
+    write(
         comp / "acceptance" / "AC-FOO-001.md",
         "# AC-FOO-001\n"
         "\n"
@@ -175,73 +71,239 @@ def _write_corpus(repo_root: Path):
         "Then it returns 4\n"
         "```\n",
     )
-    _write(
+    write(
         comp / "interface" / "library.md",
         "# Library\n\n```\nfoo(x: int) -> int\n```\n",
     )
-    _write(comp / "constraints.md", "# Constraints\n\nNone.\n")
-    _write(
-        repo_root / "legacy" / "foo" / "foo.py",
-        "def foo(x):\n    return 2 * x\n",
+    write(comp / "constraints.md", "# Constraints\n\nNone.\n")
+
+
+def fake_linter_source(log_path):
+    return (
+        "import dataclasses\n"
+        "\n"
+        "LOG_PATH = " + repr(str(log_path)) + "\n"
+        "\n"
+        "\n"
+        "def _log(line):\n"
+        "    with open(LOG_PATH, 'a', encoding='utf-8') as fh:\n"
+        "        fh.write(line + '\\n')\n"
+        "\n"
+        "\n"
+        "@dataclasses.dataclass\n"
+        "class Finding:\n"
+        "    rule_id: str\n"
+        "    severity: str\n"
+        "    file: str\n"
+        "    line: int\n"
+        "    message: str\n"
+        "    rationale: object = None\n"
+        "\n"
+        "    def to_json(self):\n"
+        "        d = {'rule_id': self.rule_id, 'severity': self.severity,\n"
+        "             'file': self.file, 'line': self.line, 'message': self.message}\n"
+        "        if self.rationale is not None:\n"
+        "            d['rationale'] = self.rationale\n"
+        "        return d\n"
+        "\n"
+        "\n"
+        "@dataclasses.dataclass\n"
+        "class LintReport:\n"
+        "    findings: list = dataclasses.field(default_factory=list)\n"
+        "\n"
+        "    @property\n"
+        "    def hard_failures(self):\n"
+        "        return sum(1 for f in self.findings if f.severity == 'fail')\n"
+        "\n"
+        "    @property\n"
+        "    def warnings(self):\n"
+        "        return sum(1 for f in self.findings if f.severity == 'warn')\n"
+        "\n"
+        "    @property\n"
+        "    def skipped(self):\n"
+        "        return sum(1 for f in self.findings if f.severity == 'skipped')\n"
+        "\n"
+        "    def to_json(self):\n"
+        "        return {'findings': [f.to_json() for f in self.findings],\n"
+        "                'summary': {'hard_failures': self.hard_failures,\n"
+        "                            'warnings': self.warnings,\n"
+        "                            'skipped': self.skipped}}\n"
+        "\n"
+        "\n"
+        "def lint(paths, repo_root, strict=False, judge=None):\n"
+        "    _log('lint')\n"
+        "    return LintReport(findings=[])\n"
     )
 
 
-def _write_fakes(repo_root: Path, log: Path):
-    header = "LOG = " + repr(str(log)) + "\n"
-    _write(
-        repo_root / "gen" / "spec-linter" / "spec_linter.py",
-        header + _REC_CLASS + _LINTER_BODY,
-    )
-    _write(
-        repo_root / "gen" / "impact-analyzer" / "impact_analyzer.py",
-        header + _REC_CLASS + _IMPACT_BODY,
-    )
-    _write(
-        repo_root / "gen" / "spec-bundle-assembler" / "spec_bundle_assembler.py",
-        header + _REC_CLASS + _ASSEMBLER_BODY,
+def fake_impact_source(log_path):
+    return (
+        "LOG_PATH = " + repr(str(log_path)) + "\n"
+        "\n"
+        "\n"
+        "def _log(line):\n"
+        "    with open(LOG_PATH, 'a', encoding='utf-8') as fh:\n"
+        "        fh.write(line + '\\n')\n"
+        "\n"
+        "\n"
+        "def compute_blast_radius(changed_ids, repo_root):\n"
+        "    _log('compute_blast_radius')\n"
+        "    return {\n"
+        "        'impacted': [\n"
+        "            {'component_id': 'comp-foo', 'reason': 'direct', 'via': None},\n"
+        "        ],\n"
+        "        'precondition_error': None,\n"
+        "    }\n"
     )
 
 
-def _snapshot(root: Path):
-    snap = {}
-    for dirpath, dirnames, filenames in os.walk(root):
+def fake_assembler_source(log_path):
+    return (
+        "import dataclasses\n"
+        "\n"
+        "LOG_PATH = " + repr(str(log_path)) + "\n"
+        "\n"
+        "\n"
+        "def _log(line):\n"
+        "    with open(LOG_PATH, 'a', encoding='utf-8') as fh:\n"
+        "        fh.write(line + '\\n')\n"
+        "\n"
+        "\n"
+        "class _Mapping:\n"
+        "    def __getitem__(self, key):\n"
+        "        if key not in self.keys():\n"
+        "            raise KeyError(key)\n"
+        "        return getattr(self, key)\n"
+        "\n"
+        "    def get(self, key, default=None):\n"
+        "        try:\n"
+        "            return self[key]\n"
+        "        except KeyError:\n"
+        "            return default\n"
+        "\n"
+        "    def keys(self):\n"
+        "        return [f.name for f in dataclasses.fields(self)]\n"
+        "\n"
+        "    def __iter__(self):\n"
+        "        return iter(self.keys())\n"
+        "\n"
+        "    def __len__(self):\n"
+        "        return len(self.keys())\n"
+        "\n"
+        "    def __contains__(self, key):\n"
+        "        return key in self.keys()\n"
+        "\n"
+        "    def items(self):\n"
+        "        return [(k, getattr(self, k)) for k in self.keys()]\n"
+        "\n"
+        "    def values(self):\n"
+        "        return [getattr(self, k) for k in self.keys()]\n"
+        "\n"
+        "\n"
+        "@dataclasses.dataclass\n"
+        "class SpecBundle(_Mapping):\n"
+        "    component_id: str\n"
+        "    spec_bundle_hash: str\n"
+        "    spec: str\n"
+        "    interface: str\n"
+        "    constraints: str\n"
+        "    dependency_interfaces: dict = dataclasses.field(default_factory=dict)\n"
+        "    dependency_context: dict = dataclasses.field(default_factory=dict)\n"
+        "    dependency_usage: dict = dataclasses.field(default_factory=dict)\n"
+        "    vars: dict = dataclasses.field(default_factory=dict)\n"
+        "    glossary: str = ''\n"
+        "    hint_code: object = None\n"
+        "\n"
+        "\n"
+        "@dataclasses.dataclass\n"
+        "class CriterionBundle(_Mapping):\n"
+        "    component_id: str\n"
+        "    criterion_id: str\n"
+        "    covers: str\n"
+        "    criterion_text: str\n"
+        "    requirement_text: str\n"
+        "    interface: str\n"
+        "    glossary: str\n"
+        "    dependency_interfaces: dict = dataclasses.field(default_factory=dict)\n"
+        "\n"
+        "\n"
+        "def assemble(component_id, repo_root, mode='cold'):\n"
+        "    _log('assemble ' + component_id + ' ' + mode)\n"
+        "    return SpecBundle(\n"
+        "        component_id=component_id,\n"
+        "        spec_bundle_hash='sha256:' + '0' * 64,\n"
+        "        spec='# Foo\\n\\nFoo doubles a number.',\n"
+        "        interface='# Library',\n"
+        "        constraints='None.',\n"
+        "        dependency_interfaces={},\n"
+        "        dependency_context={},\n"
+        "        dependency_usage={},\n"
+        "        vars={},\n"
+        "        glossary='- **Foo** — a test term.',\n"
+        "        hint_code=({} if mode == 'hint' else None),\n"
+        "    )\n"
+        "\n"
+        "\n"
+        "def assemble_criterion(component_id, criterion_id, repo_root):\n"
+        "    _log('assemble_criterion ' + component_id + ' ' + criterion_id)\n"
+        "    return CriterionBundle(\n"
+        "        component_id=component_id,\n"
+        "        criterion_id=criterion_id,\n"
+        "        covers='R-FOO-001',\n"
+        "        criterion_text='Given x = 2',\n"
+        "        requirement_text='foo(x) MUST return 2 * x.',\n"
+        "        interface='# Library',\n"
+        "        glossary='- **Foo** — a test term.',\n"
+        "        dependency_interfaces={},\n"
+        "    )\n"
+    )
+
+
+def snapshot(repo_root):
+    result = {}
+    for dirpath, dirnames, filenames in os.walk(repo_root):
         dirnames[:] = [d for d in dirnames if d != "__pycache__"]
         for name in filenames:
-            p = Path(dirpath) / name
-            rel = p.relative_to(root)
+            full = Path(dirpath) / name
+            rel = full.relative_to(repo_root)
             if "__pycache__" in rel.parts:
                 continue
-            snap[rel.as_posix()] = p.read_bytes()
-    return snap
+            result[rel.as_posix()] = full.read_bytes()
+    return result
 
 
-def test_ac_assist_008_report_exposes_decision_hook_and_repo_unchanged(
-    tmp_path, monkeypatch
-):
+def test_ac_assist_008_report_exposes_decision_fields_and_repo_unchanged(tmp_path):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
-    log = tmp_path / "invocations.log"
+    log_path = tmp_path / "fake_calls.log"
 
-    workdir = tmp_path / "cwd"
-    workdir.mkdir()
-    monkeypatch.chdir(workdir)
+    build_corpus(repo_root)
+    write(
+        repo_root / "gen" / "spec-linter" / "spec_linter.py",
+        fake_linter_source(log_path),
+    )
+    write(
+        repo_root / "gen" / "impact-analyzer" / "impact_analyzer.py",
+        fake_impact_source(log_path),
+    )
+    write(
+        repo_root / "gen" / "spec-bundle-assembler" / "spec_bundle_assembler.py",
+        fake_assembler_source(log_path),
+    )
 
-    _write_corpus(repo_root)
-    _write_fakes(repo_root, log)
-
-    before = _snapshot(repo_root)
+    before = snapshot(repo_root)
     assert before, "fixture snapshot should not be empty"
 
     report = spec_completeness_assistant.assist(["R-FOO-001"], repo_root)
 
-    # The faked dependencies were the ones actually used.
-    assert log.is_file(), "faked spec-linter was never invoked"
-    calls = [json.loads(line) for line in log.read_text().splitlines() if line]
-    assert any(c["fn"] == "lint" for c in calls)
+    # The fakes actually ran.
+    calls = log_path.read_text(encoding="utf-8").splitlines() if log_path.exists() else []
+    assert "lint" in calls
+    assert "compute_blast_radius" in calls
+    assert any(line.startswith("assemble comp-foo") for line in calls)
 
-    # The report exposes every field a calling tool needs to record an
-    # accept/override decision against this component's suggestions,
-    # none silently omitted, even in degraded (no-model) mode.
+    # The report exposes the fields a calling tool needs to record an
+    # accept/override decision against the suggestions it carries.
     for name in (
         "lint_findings",
         "predicted_blast_radius",
@@ -251,22 +313,18 @@ def test_ac_assist_008_report_exposes_decision_hook_and_repo_unchanged(
         "redundancy_flags",
         "degraded",
     ):
-        assert has_field(report, name), f"report is missing field {name!r}"
+        assert has_field(report, name), "report missing field " + repr(name)
 
+    assert list(field(report, "lint_findings")) == []
+    assert list(field(report, "predicted_blast_radius")) == ["comp-foo"]
+    previews = field(report, "hint_previews")
+    assert "comp-foo" in previews
     assert field(report, "degraded") is True
     assert field(report, "completeness_score") is None
-    assert field(report, "completeness_rationale") is None
-    flags = field(report, "redundancy_flags")
-    assert flags is None or list(flags) == []
-    assert list(field(report, "lint_findings")) == []
-    assert "comp-foo" in list(field(report, "predicted_blast_radius"))
+    assert not field(report, "redundancy_flags")
 
-    # repo_root is unchanged, ignoring Python's own __pycache__.
-    after = _snapshot(repo_root)
-    assert set(after) == set(before), (
-        "files added/removed under repo_root: "
-        f"added={sorted(set(after) - set(before))}, "
-        f"removed={sorted(set(before) - set(after))}"
-    )
-    changed = sorted(k for k in before if before[k] != after[k])
-    assert changed == [], f"files modified under repo_root: {changed}"
+    # The component itself captured/stored nothing: repo_root is unchanged.
+    after = snapshot(repo_root)
+    assert sorted(after.keys()) == sorted(before.keys())
+    for rel, content in before.items():
+        assert after[rel] == content, "file changed: " + rel
