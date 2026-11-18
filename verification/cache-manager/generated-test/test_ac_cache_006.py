@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:526877abdb617edbd2abf23613731d2ae9a47fb1f1aa965408b4cdb6983d76dd
+# hotdocs-criterion: sha256:8c6f9b07ca6319114e4a38912e7f2a3b6805498eabee45d37eb603180176055b
 import json
 
 import pytest
@@ -6,98 +6,81 @@ import pytest
 import cache_manager
 
 
-SPEC_HASH = "sha256:a"
-INPUTS_HASH = "sha256:b"
-GATE_VERSION = "generator@1.0.0"
-MODEL_PIN = "m"
+SBH = "sha256:a"
+GIH = "sha256:b"
+GV = "generator@1.0.0"
+PIN = "m"
 STORED_AT = "2026-01-01T00:00:00Z"
 
 
-@pytest.fixture
-def repo_root(tmp_path, monkeypatch):
+@pytest.fixture(autouse=True)
+def _no_remote_store(monkeypatch):
     monkeypatch.delenv("VAR_CACHE_STORE_URL", raising=False)
-    root = tmp_path / "repo"
-    root.mkdir()
-    monkeypatch.chdir(root)
-    return root
 
 
 def _put_entry(repo_root):
     key = cache_manager.CacheKey(
-        spec_bundle_hash=SPEC_HASH,
-        gate_inputs_hash=INPUTS_HASH,
-        gate_version=GATE_VERSION,
-        model_pin=MODEL_PIN,
+        spec_bundle_hash=SBH,
+        gate_inputs_hash=GIH,
+        gate_version=GV,
+        model_pin=PIN,
     )
     result = cache_manager.CachedResult(
         gate_type="generator",
         payload={
-            "component_id": "comp-example",
-            "model": "anthropic:claude-sonnet-5",
+            "component_id": "comp-foo",
+            "model": "m",
             "prompt_version": "1",
-            "files": {"example.py": "print('hi')\n"},
+            "files": {"foo.py": "x = 1\n"},
         },
         stored_at=STORED_AT,
     )
     cache_manager.put(key, result, repo_root=repo_root)
 
 
-def _run(argv):
-    """Run main(argv); a SystemExit's code is treated as the exit code."""
-    try:
-        return cache_manager.main(argv)
-    except SystemExit as exc:  # pragma: no cover - lenient on usage errors
-        code = exc.code
-        if code is None:
-            return 0
-        if isinstance(code, int):
-            return code
-        return 1
-
-
-def _last_json_line(text):
-    lines = [line for line in text.splitlines() if line.strip()]
-    assert lines, "expected one line of JSON on stdout, got nothing"
-    return json.loads(lines[-1])
-
-
-def _full_args(repo_root, model_pin=MODEL_PIN):
+def _inspect_argv(repo_root, model_pin=PIN):
     return [
         "inspect",
-        "--spec-bundle-hash=" + SPEC_HASH,
-        "--gate-inputs-hash=" + INPUTS_HASH,
-        "--gate-version=" + GATE_VERSION,
+        "--spec-bundle-hash=" + SBH,
+        "--gate-inputs-hash=" + GIH,
+        "--gate-version=" + GV,
         "--model-pin=" + model_pin,
         "--repo-root=" + str(repo_root),
     ]
 
 
-def test_inspect_hit_reports_provenance_fields_without_payload(repo_root, capsys):
-    _put_entry(repo_root)
+def _stdout_json(capsys):
+    out = capsys.readouterr().out
+    lines = [line for line in out.splitlines() if line.strip()]
+    assert len(lines) == 1, out
+    return json.loads(lines[0])
+
+
+def test_inspect_hit_reports_provenance_fields_without_payload(tmp_path, capsys):
+    _put_entry(tmp_path)
     capsys.readouterr()
 
-    code = cache_manager.main(_full_args(repo_root))
-    out = capsys.readouterr().out
+    code = cache_manager.main(_inspect_argv(tmp_path))
 
     assert code == 0
-    parsed = _last_json_line(out)
-    assert "payload" not in parsed
-    assert parsed == {
+    doc = _stdout_json(capsys)
+    assert "payload" not in doc
+    assert doc == {
         "result": "hit",
         "gate_type": "generator",
         "stored_at": STORED_AT,
     }
 
 
-def test_inspect_miss_for_other_model_pin(repo_root, capsys):
-    _put_entry(repo_root)
+def test_inspect_miss_for_other_model_pin(tmp_path, capsys):
+    _put_entry(tmp_path)
     capsys.readouterr()
 
-    code = cache_manager.main(_full_args(repo_root, model_pin="other"))
-    out = capsys.readouterr().out
+    code = cache_manager.main(_inspect_argv(tmp_path, model_pin="other"))
 
     assert code == 0
-    assert _last_json_line(out) == {"result": "miss"}
+    doc = _stdout_json(capsys)
+    assert doc == {"result": "miss"}
 
 
 @pytest.mark.parametrize(
@@ -107,17 +90,14 @@ def test_inspect_miss_for_other_model_pin(repo_root, capsys):
         [],
         ["purge"],
     ],
-    ids=["inspect-missing-flags", "no-subcommand", "unknown-subcommand"],
 )
-def test_usage_errors_return_2(repo_root, capsys, argv):
-    _put_entry(repo_root)
-    capsys.readouterr()
-
-    assert _run(argv) == 2
+def test_usage_errors_return_2(argv, capsys):
+    code = cache_manager.main(argv)
+    assert code == 2
 
 
 @pytest.mark.parametrize(
-    "omit_prefix",
+    "drop_prefix",
     [
         "--spec-bundle-hash=",
         "--gate-inputs-hash=",
@@ -125,27 +105,26 @@ def test_usage_errors_return_2(repo_root, capsys, argv):
         "--model-pin=",
     ],
 )
-def test_inspect_with_one_required_flag_left_out_returns_2(
-    repo_root, capsys, omit_prefix
-):
-    _put_entry(repo_root)
+def test_inspect_missing_required_flag_returns_2(tmp_path, capsys, drop_prefix):
+    _put_entry(tmp_path)
     capsys.readouterr()
+    argv = [a for a in _inspect_argv(tmp_path) if not a.startswith(drop_prefix)]
+    assert len(argv) == 5
 
-    argv = [a for a in _full_args(repo_root) if not a.startswith(omit_prefix)]
-    assert len(argv) == len(_full_args(repo_root)) - 1
+    code = cache_manager.main(argv)
 
-    assert _run(argv) == 2
+    assert code == 2
 
 
-def test_inspect_with_abbreviated_model_flag_returns_2(repo_root, capsys):
-    _put_entry(repo_root)
+def test_inspect_abbreviated_model_flag_returns_2(tmp_path, capsys):
+    _put_entry(tmp_path)
     capsys.readouterr()
-
     argv = [
-        "--model=m" if a == "--model-pin=" + MODEL_PIN else a
-        for a in _full_args(repo_root)
+        ("--model=" + PIN) if a == "--model-pin=" + PIN else a
+        for a in _inspect_argv(tmp_path)
     ]
     assert "--model=m" in argv
-    assert not any(a.startswith("--model-pin") for a in argv)
 
-    assert _run(argv) == 2
+    code = cache_manager.main(argv)
+
+    assert code == 2

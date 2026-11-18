@@ -1,23 +1,29 @@
-"""Content-addressed gate cache (comp-cache-manager).
+"""Cache Manager: a content-addressed get/put store for gate results."""
 
-Library: get / put / now_iso / stats, plus the CacheKey / CachedResult
-dataclasses, the Miss sentinel class and SchemaValidationError.
-CLI: ``python -m cache_manager inspect ...`` / ``python -m cache_manager stats``.
-"""
-
-import argparse
 import hashlib
 import json
 import os
 import sys
 import tempfile
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
-_STORE_URL_ENV = "VAR_CACHE_STORE_URL"
+__all__ = [
+    "CacheKey",
+    "CachedResult",
+    "Miss",
+    "SchemaValidationError",
+    "get",
+    "put",
+    "now_iso",
+    "stats",
+    "main",
+]
 
-_REQUIRED_PAYLOAD_KEYS = {
+_ENV_VAR = "VAR_CACHE_STORE_URL"
+
+REQUIRED_PAYLOAD_KEYS = {
     "generator": ("component_id", "model", "prompt_version", "files"),
     "compiler": ("outputs", "gate_version", "summary"),
     "generated_test": ("component_id", "criterion_id", "model", "file"),
@@ -49,7 +55,7 @@ class CachedResult:
 
 
 class Miss:
-    """A definitive cache miss. Any two instances compare equal."""
+    """A definitive cache miss."""
 
     def __eq__(self, other):
         return isinstance(other, Miss)
@@ -57,9 +63,12 @@ class Miss:
     def __hash__(self):
         return hash(Miss)
 
+    def __repr__(self):
+        return "Miss()"
+
 
 class SchemaValidationError(ValueError):
-    """Raised by put when a result's shape doesn't match its gate type."""
+    """Raised by put when a result's shape does not match its key's gate type."""
 
 
 def now_iso() -> str:
@@ -67,7 +76,7 @@ def now_iso() -> str:
 
 
 def _shared_store_configured() -> bool:
-    return bool(os.environ.get(_STORE_URL_ENV))
+    return bool(os.environ.get(_ENV_VAR))
 
 
 def _cache_dir(repo_root) -> Path:
@@ -75,47 +84,45 @@ def _cache_dir(repo_root) -> Path:
     return root / ".hotdocs" / "cache"
 
 
-def _key_digest(cache_key: CacheKey) -> str:
+def _entry_path(cache_key: CacheKey, repo_root) -> Path:
     material = json.dumps(
         [
             cache_key.spec_bundle_hash,
             cache_key.gate_inputs_hash,
             cache_key.gate_version,
             cache_key.model_pin,
-        ],
-        separators=(",", ":"),
+        ]
     )
-    return hashlib.sha256(material.encode("utf-8")).hexdigest()
+    digest = hashlib.sha256(material.encode("utf-8")).hexdigest()
+    return _cache_dir(repo_root) / (digest + ".json")
 
 
 def _validate(cache_key: CacheKey, result: CachedResult) -> None:
-    key_gate_type = cache_key.gate_version.partition("@")[0]
+    key_gate_type = cache_key.gate_version.split("@", 1)[0]
+    if key_gate_type not in REQUIRED_PAYLOAD_KEYS:
+        raise SchemaValidationError(f"unknown gate type: {key_gate_type!r}")
     if result.gate_type != key_gate_type:
         raise SchemaValidationError(
-            f"result gate_type {result.gate_type!r} does not match "
-            f"gate_version {cache_key.gate_version!r}"
+            f"result gate_type {result.gate_type!r} does not match key gate type "
+            f"{key_gate_type!r}"
         )
-    required = _REQUIRED_PAYLOAD_KEYS.get(result.gate_type)
-    if required is None:
-        raise SchemaValidationError(f"unknown gate_type {result.gate_type!r}")
     payload = result.payload
     if not isinstance(payload, dict):
-        raise SchemaValidationError(
-            f"payload for {result.gate_type!r} must be a mapping"
-        )
-    missing = [k for k in required if k not in payload]
+        raise SchemaValidationError("payload must be a mapping")
+    missing = [k for k in REQUIRED_PAYLOAD_KEYS[key_gate_type] if k not in payload]
     if missing:
         raise SchemaValidationError(
-            f"payload for {result.gate_type!r} missing required keys: {missing}"
+            f"payload for {key_gate_type!r} is missing required keys: {missing}"
         )
 
 
 def get(cache_key: CacheKey, *, repo_root: Path = None):
+    if _shared_store_configured():
+        return Miss()
     try:
-        if _shared_store_configured():
-            return Miss()
-        path = _cache_dir(repo_root) / f"{_key_digest(cache_key)}.json"
-        data = json.loads(path.read_text(encoding="utf-8"))
+        path = _entry_path(cache_key, repo_root)
+        with open(path, "r", encoding="utf-8") as fh:
+            data = json.load(fh)
         return CachedResult(
             gate_type=data["gate_type"],
             payload=data["payload"],
@@ -129,13 +136,19 @@ def put(cache_key: CacheKey, result: CachedResult, *, repo_root: Path = None) ->
     _validate(cache_key, result)
     if _shared_store_configured():
         return None
-    directory = _cache_dir(repo_root)
-    directory.mkdir(parents=True, exist_ok=True)
-    target = directory / f"{_key_digest(cache_key)}.json"
-    fd, tmp_path = tempfile.mkstemp(dir=directory, suffix=".tmp")
-    with os.fdopen(fd, "w", encoding="utf-8") as handle:
-        json.dump(asdict(result), handle)
-    os.replace(tmp_path, target)
+    path = _entry_path(cache_key, repo_root)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    data = json.dumps(
+        {
+            "gate_type": result.gate_type,
+            "payload": result.payload,
+            "stored_at": result.stored_at,
+        }
+    )
+    fd, tmp = tempfile.mkstemp(dir=str(path.parent), suffix=".tmp")
+    with os.fdopen(fd, "w", encoding="utf-8") as fh:
+        fh.write(data)
+    os.replace(tmp, path)
     return None
 
 
@@ -145,52 +158,96 @@ def stats(*, repo_root: Path = None) -> dict:
     return {"entry_count": len(list(_cache_dir(repo_root).glob("*.json")))}
 
 
-def _build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="cache_manager", allow_abbrev=False)
-    subparsers = parser.add_subparsers(dest="command", required=True)
+_GENERAL_USAGE = "usage: python -m cache_manager {inspect,stats} ..."
+_INSPECT_USAGE = (
+    "usage: python -m cache_manager inspect --spec-bundle-hash=<h> "
+    "--gate-inputs-hash=<h> --gate-version=<v> --model-pin=<p> [--repo-root=<dir>]"
+)
+_STATS_USAGE = "usage: python -m cache_manager stats [--repo-root=<dir>]"
 
-    inspect_parser = subparsers.add_parser("inspect", allow_abbrev=False)
-    inspect_parser.add_argument("--spec-bundle-hash", required=True)
-    inspect_parser.add_argument("--gate-inputs-hash", required=True)
-    inspect_parser.add_argument("--gate-version", required=True)
-    inspect_parser.add_argument("--model-pin", required=True)
-    inspect_parser.add_argument("--repo-root", default=".")
-
-    stats_parser = subparsers.add_parser("stats", allow_abbrev=False)
-    stats_parser.add_argument("--repo-root", default=".")
-
-    return parser
+_INSPECT_REQUIRED = (
+    "--spec-bundle-hash",
+    "--gate-inputs-hash",
+    "--gate-version",
+    "--model-pin",
+)
 
 
-def main(argv=None) -> int:
-    parser = _build_parser()
-    try:
-        args = parser.parse_args(sys.argv[1:] if argv is None else argv)
-    except SystemExit:
-        return 2
+class _UsageError(Exception):
+    pass
 
-    repo_root = Path(args.repo_root)
-    if args.command == "inspect":
+
+def _usage_error(cause: str, usage: str) -> int:
+    sys.stderr.write(f"usage error: {cause}\n")
+    sys.stderr.write(usage + "\n")
+    return 2
+
+
+def _parse_flags(tokens, allowed):
+    values = {}
+    i = 0
+    while i < len(tokens):
+        token = tokens[i]
+        name, sep, value = token.partition("=")
+        if name not in allowed:
+            raise _UsageError(f"unknown argument: {token}")
+        if not sep:
+            if i + 1 >= len(tokens):
+                raise _UsageError(f"flag {name} requires a value")
+            i += 1
+            value = tokens[i]
+        values[name] = value
+        i += 1
+    return values
+
+
+def main(argv: list = None) -> int:
+    if argv is None:
+        argv = sys.argv[1:]
+    argv = list(argv)
+    if not argv:
+        return _usage_error("no subcommand given", _GENERAL_USAGE)
+    command, rest = argv[0], argv[1:]
+
+    if command == "inspect":
+        try:
+            flags = _parse_flags(rest, set(_INSPECT_REQUIRED) | {"--repo-root"})
+        except _UsageError as exc:
+            return _usage_error(str(exc), _INSPECT_USAGE)
+        missing = [f for f in _INSPECT_REQUIRED if f not in flags]
+        if missing:
+            return _usage_error(
+                f"missing required flag: {missing[0]}", _INSPECT_USAGE
+            )
         key = CacheKey(
-            spec_bundle_hash=args.spec_bundle_hash,
-            gate_inputs_hash=args.gate_inputs_hash,
-            gate_version=args.gate_version,
-            model_pin=args.model_pin,
+            spec_bundle_hash=flags["--spec-bundle-hash"],
+            gate_inputs_hash=flags["--gate-inputs-hash"],
+            gate_version=flags["--gate-version"],
+            model_pin=flags["--model-pin"],
         )
-        found = get(key, repo_root=repo_root)
-        if isinstance(found, Miss):
-            output = {"result": "miss"}
+        result = get(key, repo_root=Path(flags.get("--repo-root", ".")))
+        if isinstance(result, Miss):
+            out = {"result": "miss"}
         else:
-            output = {
+            out = {
                 "result": "hit",
-                "gate_type": found.gate_type,
-                "stored_at": found.stored_at,
+                "gate_type": result.gate_type,
+                "stored_at": result.stored_at,
             }
-    else:
-        output = stats(repo_root=repo_root)
+        sys.stdout.write(json.dumps(out) + "\n")
+        return 0
 
-    print(json.dumps(output))
-    return 0
+    if command == "stats":
+        try:
+            flags = _parse_flags(rest, {"--repo-root"})
+        except _UsageError as exc:
+            return _usage_error(str(exc), _STATS_USAGE)
+        sys.stdout.write(
+            json.dumps(stats(repo_root=Path(flags.get("--repo-root", ".")))) + "\n"
+        )
+        return 0
+
+    return _usage_error(f"unknown subcommand: {command}", _GENERAL_USAGE)
 
 
 if __name__ == "__main__":

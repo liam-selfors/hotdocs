@@ -1,11 +1,6 @@
-"""AC-CACHE-001 (Covers: R-CACHE-001).
-
-Given no entry stored for a given cache key
-When get is called with that key
-Then it returns Miss, not an error and not a partial result
-"""
-
-import dataclasses
+# hotdocs-criterion: sha256:425580bd57220ff362ecfbcbed133b7e60113cb5d5d0e759ddc9f947df27c459
+import json
+from dataclasses import replace
 
 import pytest
 
@@ -16,26 +11,41 @@ def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def _hash(ch):
-    return "sha256:" + (ch * 64)
-
-
-def _key(**overrides):
-    values = dict(
-        spec_bundle_hash=_hash("a"),
-        gate_inputs_hash=_hash("b"),
-        gate_version="license_scanner@4.0.3+9f2c41ab07de",
-        model_pin="claude-sonnet-5",
-    )
+def make_key(**overrides):
+    values = {
+        "spec_bundle_hash": "sha256:" + "a" * 64,
+        "gate_inputs_hash": "sha256:" + "b" * 64,
+        "gate_version": "license_scanner@4.0.3+9f2c41ab07de",
+        "model_pin": "claude-sonnet-5",
+    }
     values.update(overrides)
     return cache_manager.CacheKey(**values)
 
 
-def _result():
-    return cache_manager.CachedResult(
+@pytest.fixture
+def empty_repo(tmp_path, monkeypatch):
+    monkeypatch.delenv("VAR_CACHE_STORE_URL", raising=False)
+    monkeypatch.chdir(tmp_path)
+    return tmp_path
+
+
+def test_get_on_empty_store_returns_miss(empty_repo):
+    key = make_key()
+
+    result = cache_manager.get(key, repo_root=empty_repo)
+
+    assert result is not None
+    assert isinstance(result, cache_manager.Miss)
+    assert result == cache_manager.Miss()
+    assert not isinstance(result, cache_manager.CachedResult)
+
+
+def test_get_with_unstored_key_returns_miss_not_partial_match(empty_repo):
+    stored_key = make_key()
+    stored = cache_manager.CachedResult(
         gate_type="license_scanner",
         payload={
-            "component_id": "comp-example",
+            "component_id": "comp-foo",
             "gate_version": "license_scanner@4.0.3+9f2c41ab07de",
             "similarity_score": 0.0,
             "blocked": False,
@@ -43,68 +53,39 @@ def _result():
         },
         stored_at=cache_manager.now_iso(),
     )
+    cache_manager.put(stored_key, stored, repo_root=empty_repo)
+
+    # Keys sharing every field but one with the stored entry: no entry is
+    # stored for any of them, so each must be a definitive Miss.
+    near_keys = [
+        replace(stored_key, model_pin="claude-opus-5"),
+        replace(stored_key, spec_bundle_hash="sha256:" + "c" * 64),
+        replace(stored_key, gate_inputs_hash="sha256:" + "d" * 64),
+        replace(stored_key, gate_version="license_scanner@4.0.4+9f2c41ab07de"),
+    ]
+    for near_key in near_keys:
+        result = cache_manager.get(near_key, repo_root=empty_repo)
+        assert result is not None
+        assert isinstance(result, cache_manager.Miss), near_key
+        assert result == cache_manager.Miss()
 
 
-@pytest.fixture
-def repo_root(tmp_path, monkeypatch):
-    # Force the local fallback store, scoped to a fresh, empty repo root.
-    monkeypatch.delenv("VAR_CACHE_STORE_URL", raising=False)
-    root = tmp_path / "repo"
-    root.mkdir()
-    monkeypatch.chdir(root)
-    return root
+def test_cli_inspect_on_empty_store_reports_miss(empty_repo, capsys):
+    argv = [
+        "inspect",
+        "--spec-bundle-hash=sha256:" + "a" * 64,
+        "--gate-inputs-hash=sha256:" + "b" * 64,
+        "--gate-version=license_scanner@4.0.3+9f2c41ab07de",
+        "--model-pin=claude-sonnet-5",
+        "--repo-root=" + str(empty_repo),
+    ]
 
+    code = cache_manager.main(argv)
 
-def _assert_definitive_miss(result):
-    assert result is not None, "get must report a miss as a Miss instance, never None"
-    assert isinstance(result, cache_manager.Miss), (
-        f"expected a Miss, got {type(result)!r}: {result!r}"
-    )
-    assert not isinstance(result, cache_manager.CachedResult)
-    assert result == cache_manager.Miss()
-
-
-def test_get_on_empty_store_returns_miss(repo_root):
-    assert cache_manager.stats(repo_root=repo_root)["entry_count"] == 0
-
-    result = cache_manager.get(_key(), repo_root=repo_root)
-
-    _assert_definitive_miss(result)
-
-
-def test_get_on_empty_store_default_repo_root_returns_miss(repo_root):
-    # repo_root defaults to the current working directory (the fresh tmp root).
-    result = cache_manager.get(_key())
-
-    _assert_definitive_miss(result)
-
-
-@pytest.mark.parametrize(
-    "overrides",
-    [
-        {"spec_bundle_hash": _hash("c")},
-        {"gate_inputs_hash": _hash("d")},
-        {"gate_version": "license_scanner@4.0.4+9f2c41ab07de"},
-        {"model_pin": "claude-sonnet-5-5"},
-    ],
-    ids=["spec_bundle_hash", "gate_inputs_hash", "gate_version", "model_pin"],
-)
-def test_get_for_unstored_near_key_returns_miss_not_approximate(repo_root, overrides):
-    stored_key = _key()
-    stored = _result()
-    cache_manager.put(stored_key, stored, repo_root=repo_root)
-
-    # Sanity: the exact key is a hit, so the store really holds a neighbour.
-    hit = cache_manager.get(stored_key, repo_root=repo_root)
-    assert not isinstance(hit, cache_manager.Miss)
-    assert field(hit, "gate_type") == "license_scanner"
-    assert field(hit, "payload") == stored.payload
-
-    # A key differing in exactly one field has no entry: it must be a
-    # definitive Miss, never the "probably equivalent" neighbour's result.
-    unstored_key = dataclasses.replace(stored_key, **overrides)
-    assert unstored_key != stored_key
-
-    result = cache_manager.get(unstored_key, repo_root=repo_root)
-
-    _assert_definitive_miss(result)
+    assert code == 0
+    out = capsys.readouterr().out.strip()
+    lines = [line for line in out.splitlines() if line.strip()]
+    assert len(lines) == 1
+    doc = json.loads(lines[0])
+    assert field(doc, "result") == "miss"
+    assert "payload" not in doc

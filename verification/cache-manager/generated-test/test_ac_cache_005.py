@@ -1,6 +1,7 @@
-import cache_manager
+# hotdocs-criterion: sha256:63f58b8f258d5caf3984a43e0a827519012ed73d65199e7bbb4f20f7e990a817
+"""AC-CACHE-005: gate_version is part of the lookup key itself (R-CACHE-005)."""
 
-from pathlib import Path
+import cache_manager
 
 
 def field(value, name):
@@ -27,7 +28,7 @@ def _result():
     return cache_manager.CachedResult(
         gate_type="license_scanner",
         payload={
-            "component_id": "comp-example",
+            "component_id": "comp-foo",
             "gate_version": OLD_GATE_VERSION,
             "similarity_score": 0.0,
             "blocked": False,
@@ -37,29 +38,32 @@ def _result():
     )
 
 
-def test_ac_cache_005_gate_version_is_part_of_lookup_key(tmp_path, monkeypatch):
-    # Force the local fallback store under a fresh, isolated repo root.
+def test_get_with_different_gate_version_returns_miss(tmp_path, monkeypatch):
+    # Force the local fallback store under a fresh repo_root.
     monkeypatch.delenv("VAR_CACHE_STORE_URL", raising=False)
     monkeypatch.chdir(tmp_path)
-    repo_root = Path(tmp_path)
 
-    old_key = _key(OLD_GATE_VERSION)
-    cache_manager.put(old_key, _result(), repo_root=repo_root)
+    stored = _result()
+    cache_manager.put(_key(OLD_GATE_VERSION), stored, repo_root=tmp_path)
 
-    # Sanity: the entry really is stored and retrievable under its own key.
-    hit = cache_manager.get(old_key, repo_root=repo_root)
-    assert not isinstance(hit, cache_manager.Miss), (
-        "precondition failed: entry stored under the old gate_version was not retrievable"
-    )
+    # Sanity: the entry is retrievable under its own gate_version.
+    hit = cache_manager.get(_key(OLD_GATE_VERSION), repo_root=tmp_path)
+    assert not isinstance(hit, cache_manager.Miss)
     assert field(hit, "gate_type") == "license_scanner"
 
-    # Same spec_bundle_hash / gate_inputs_hash / model_pin, different gate_version.
-    new_key = _key(NEW_GATE_VERSION)
-    result = cache_manager.get(new_key, repo_root=repo_root)
-
+    # Same spec_bundle_hash / gate_inputs_hash / model_pin, new gate_version.
+    result = cache_manager.get(_key(NEW_GATE_VERSION), repo_root=tmp_path)
     assert result is not None
-    assert isinstance(result, cache_manager.Miss), (
-        "get with gate_version %r returned an entry stored under %r"
-        % (NEW_GATE_VERSION, OLD_GATE_VERSION)
-    )
+    assert isinstance(result, cache_manager.Miss)
     assert result == cache_manager.Miss()
+
+
+def test_old_entry_not_returned_under_new_gate_version_even_after_repeat(tmp_path, monkeypatch):
+    monkeypatch.delenv("VAR_CACHE_STORE_URL", raising=False)
+    monkeypatch.chdir(tmp_path)
+
+    cache_manager.put(_key(OLD_GATE_VERSION), _result(), repo_root=tmp_path)
+
+    for _ in range(2):
+        result = cache_manager.get(_key(NEW_GATE_VERSION), repo_root=tmp_path)
+        assert isinstance(result, cache_manager.Miss)

@@ -10,11 +10,15 @@ import cache_manager
 STORE_URL = "redis://cache.internal:6379/0"
 
 
-def _key(gate_type="license_scanner"):
+def field(value, name):
+    return value[name] if isinstance(value, dict) else getattr(value, name)
+
+
+def _key():
     return cache_manager.CacheKey(
         spec_bundle_hash="sha256:" + "a" * 64,
         gate_inputs_hash="sha256:" + "b" * 64,
-        gate_version=f"{gate_type}@4.0.3+9f2c41ab07de",
+        gate_version="license_scanner@4.0.3+9f2c41ab07de",
         model_pin="claude-sonnet-5",
     )
 
@@ -33,55 +37,49 @@ def _valid_result():
     )
 
 
-def _files_under(path: Path):
+def _files_under(path):
     if not path.exists():
         return []
-    if path.is_file():
-        return [path]
-    return list(path.rglob("*"))
+    return [p for p in path.rglob("*")]
 
 
-@pytest.fixture
-def repo_root(tmp_path, monkeypatch):
-    root = tmp_path / "repo"
-    root.mkdir()
-    monkeypatch.chdir(root)
+def test_store_url_set_put_then_get_is_miss_and_nothing_stored(tmp_path, monkeypatch, capsys):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    cwd = tmp_path / "elsewhere"
+    cwd.mkdir()
+    monkeypatch.chdir(cwd)
     monkeypatch.setenv("VAR_CACHE_STORE_URL", STORE_URL)
-    return root
 
-
-def test_store_url_set_put_then_get_is_miss_and_nothing_stored(repo_root, capsys):
     key = _key()
-    result = _valid_result()
-
-    # put must not crash, even though the shared store is unreachable
-    ret = cache_manager.put(key, result, repo_root=repo_root)
-    assert ret is None
-
+    cache_manager.put(key, _valid_result(), repo_root=repo_root)
     got = cache_manager.get(key, repo_root=repo_root)
+
     assert got is not None
     assert isinstance(got, cache_manager.Miss)
-    assert got == cache_manager.Miss()
 
     cache_dir = repo_root / ".hotdocs" / "cache"
-    assert _files_under(cache_dir) == [], (
-        f"expected nothing under {cache_dir}, found {_files_under(cache_dir)}"
-    )
+    assert _files_under(cache_dir) == []
+    assert _files_under(cwd / ".hotdocs" / "cache") == []
 
     capsys.readouterr()
-    code = cache_manager.main(["stats", f"--repo-root={repo_root}"])
+    code = cache_manager.main(["stats", "--repo-root=" + str(repo_root)])
     out = capsys.readouterr().out
     assert code == 0
     lines = [ln for ln in out.splitlines() if ln.strip()]
-    assert lines, "stats printed nothing"
-    assert json.loads(lines[-1]) == {"entry_count": 0}
+    assert len(lines) == 1
+    assert json.loads(lines[0]) == {"entry_count": 0}
 
-    # Still nothing written after stats either
-    assert _files_under(cache_dir) == []
+    stats = cache_manager.stats(repo_root=repo_root)
+    assert field(stats, "entry_count") == 0
 
 
-def test_store_url_set_put_with_missing_required_key_raises(repo_root):
-    key = _key()
+def test_store_url_set_put_with_missing_required_key_raises(tmp_path, monkeypatch):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("VAR_CACHE_STORE_URL", STORE_URL)
+
     bad = cache_manager.CachedResult(
         gate_type="license_scanner",
         payload={
@@ -95,7 +93,7 @@ def test_store_url_set_put_with_missing_required_key_raises(repo_root):
     )
 
     with pytest.raises(cache_manager.SchemaValidationError):
-        cache_manager.put(key, bad, repo_root=repo_root)
+        cache_manager.put(_key(), bad, repo_root=repo_root)
 
     assert issubclass(cache_manager.SchemaValidationError, ValueError)
     assert _files_under(repo_root / ".hotdocs" / "cache") == []
