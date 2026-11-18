@@ -2,7 +2,7 @@
 
 ```
 verify(component_id: str, repo_root: Path, judge=None, test_author=None) -> VerificationReport
-GATE_VERSION: str  # "verifier-orchestrator@3.1.0" (R-VERIFY-015)
+GATE_VERSION: str  # "verifier-orchestrator@3.2.0" (R-VERIFY-015)
 ```
 
 `verify` returns a **dataclass** instance whose fields are attributes

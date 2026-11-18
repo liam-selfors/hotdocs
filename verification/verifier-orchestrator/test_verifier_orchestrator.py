@@ -323,7 +323,7 @@ def test_ac_verify_017_gate_version_readable_without_verify():
     # D163: a provenance key names this gate's version without running it.
     import verifier_orchestrator
 
-    assert verifier_orchestrator.GATE_VERSION == "verifier-orchestrator@3.1.0"
+    assert verifier_orchestrator.GATE_VERSION == "verifier-orchestrator@3.2.0"
 
 
 def test_ac_verify_018_lettered_criterion_id_kept_exactly(repo_root):

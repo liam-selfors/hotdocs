@@ -5,7 +5,7 @@ One module file, `test_probe.py`, never a package.
 ```
 probe(test_source: str, criterion_bundle, module_name: str | list[str], *,
       timeout: float = 60.0) -> ProbeReport
-GATE_VERSION: str  # "test-probe@1.0.0"
+GATE_VERSION: str  # "test-probe@1.1.0"
 ```
 
 `criterion_bundle` is a `CriterionBundle` or a mapping with its keys
