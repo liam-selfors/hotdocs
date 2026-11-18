@@ -1,19 +1,19 @@
 {
-  "spec_bundle_hash": "sha256:68ac1de6dee4208b985b6443cfbdb685782be3b2286d453491d9ca30d009c07c",
+  "spec_bundle_hash": "sha256:a6b0703cb0acb0eb9506672ec35eafe5753d59e59b4f574c4428d2e81dc03ac2",
   "model_pin": "claude-opus-5-5",
   "prompt_version": "v11",
   "retry_feedback": null,
   "pipeline_version": "v1",
   "gate_versions": {
     "compiler": "criterion-compiler@1.0.0",
-    "generated_test": "generated_test@1.0.0",
-    "verifier": "verifier-orchestrator@2.0.0",
+    "generated_test": "generated_test@1.1.0",
+    "verifier": "verifier-orchestrator@2.2.0",
     "license_scanner": "license_scanner@4.0.0-no-reference-corpus",
     "secret_scanner": "secret_scanner@3.1.0+detect-secrets.1.5.0",
     "generator": "generator@3.0.0+v11"
   },
   "provenance_hit": false,
-  "generated_at": "2026-11-16T14:26:38Z",
+  "generated_at": "2026-11-18T22:26:53Z",
   "verification_run_id": "llm-endpoint-attempt-1",
   "verification_report": {
     "component_id": "comp-llm-endpoint",
@@ -22,157 +22,181 @@
         "id": "AC-ENDPOINT-001",
         "covers": "R-ENDPOINT-002",
         "kind": "generated-test",
-        "result": "pass",
         "test_authoring": {
           "model": "claude-opus-5-5",
-          "seed": 2,
+          "seed": 3,
           "prompt_version": "v1",
           "cache_hit": false
-        }
+        },
+        "result": "pass"
       },
       {
         "id": "AC-ENDPOINT-002",
         "covers": "R-ENDPOINT-001",
         "kind": "generated-test",
-        "result": "pass",
         "test_authoring": {
           "model": "claude-opus-5-5",
-          "seed": 2,
+          "seed": 3,
           "prompt_version": "v1",
           "cache_hit": false
-        }
+        },
+        "result": "pass"
       },
       {
         "id": "AC-ENDPOINT-003",
         "covers": "R-ENDPOINT-004",
         "kind": "generated-test",
-        "result": "pass",
         "test_authoring": {
           "model": "claude-opus-5-5",
-          "seed": 2,
+          "seed": 3,
           "prompt_version": "v1",
           "cache_hit": false
-        }
+        },
+        "result": "pass"
       },
       {
         "id": "AC-ENDPOINT-004",
         "covers": "R-ENDPOINT-005",
         "kind": "generated-test",
-        "result": "pass",
         "test_authoring": {
           "model": "claude-opus-5-5",
-          "seed": 2,
+          "seed": 3,
           "prompt_version": "v1",
           "cache_hit": false
-        }
+        },
+        "result": "pass"
       },
       {
         "id": "AC-ENDPOINT-005",
         "covers": "R-ENDPOINT-003",
         "kind": "generated-test",
-        "result": "pass",
         "test_authoring": {
           "model": "claude-opus-5-5",
-          "seed": 2,
+          "seed": 3,
           "prompt_version": "v1",
           "cache_hit": false
-        }
+        },
+        "result": "pass"
       },
       {
         "id": "AC-ENDPOINT-006",
         "covers": "R-ENDPOINT-006",
         "kind": "generated-test",
-        "result": "pass",
         "test_authoring": {
           "model": "claude-opus-5-5",
-          "seed": 2,
+          "seed": 3,
           "prompt_version": "v1",
           "cache_hit": false
-        }
+        },
+        "result": "pass"
       },
       {
         "id": "AC-ENDPOINT-007",
         "covers": "R-ENDPOINT-007",
         "kind": "generated-test",
-        "result": "pass",
         "test_authoring": {
           "model": "claude-opus-5-5",
-          "seed": 2,
+          "seed": 3,
           "prompt_version": "v1",
           "cache_hit": false
-        }
+        },
+        "result": "pass"
       },
       {
         "id": "AC-ENDPOINT-008",
         "covers": "R-ENDPOINT-008",
         "kind": "generated-test",
-        "result": "pass",
         "test_authoring": {
           "model": "claude-opus-5-5",
-          "seed": 2,
+          "seed": 3,
           "prompt_version": "v1",
           "cache_hit": false
-        }
+        },
+        "result": "pass"
       },
       {
         "id": "AC-ENDPOINT-009",
         "covers": "R-ENDPOINT-004",
         "kind": "generated-test",
-        "result": "pass",
         "test_authoring": {
           "model": "claude-opus-5-5",
-          "seed": 2,
+          "seed": 3,
           "prompt_version": "v1",
           "cache_hit": false
-        }
+        },
+        "result": "pass"
       },
       {
         "id": "AC-ENDPOINT-010",
         "covers": "R-ENDPOINT-009",
         "kind": "generated-test",
-        "result": "pass",
         "test_authoring": {
           "model": "claude-opus-5-5",
-          "seed": 2,
+          "seed": 3,
           "prompt_version": "v1",
           "cache_hit": false
-        }
+        },
+        "result": "pass"
       },
       {
         "id": "AC-ENDPOINT-011",
         "covers": "R-ENDPOINT-002",
         "kind": "generated-test",
-        "result": "pass",
         "test_authoring": {
           "model": "claude-opus-5-5",
-          "seed": 2,
+          "seed": 3,
           "prompt_version": "v1",
           "cache_hit": false
-        }
+        },
+        "result": "pass"
       },
       {
         "id": "AC-ENDPOINT-012",
         "covers": "R-ENDPOINT-003",
         "kind": "generated-test",
-        "result": "pass",
         "test_authoring": {
           "model": "claude-opus-5-5",
-          "seed": 2,
+          "seed": 3,
           "prompt_version": "v1",
           "cache_hit": false
-        }
+        },
+        "result": "pass"
       },
       {
         "id": "AC-ENDPOINT-013",
         "covers": "R-ENDPOINT-007",
         "kind": "generated-test",
-        "result": "pass",
         "test_authoring": {
           "model": "claude-opus-5-5",
-          "seed": 2,
+          "seed": 3,
           "prompt_version": "v1",
           "cache_hit": false
-        }
+        },
+        "result": "pass"
+      },
+      {
+        "id": "AC-ENDPOINT-014",
+        "covers": "R-ENDPOINT-003",
+        "kind": "generated-test",
+        "test_authoring": {
+          "model": "claude-opus-5-5",
+          "seed": 3,
+          "prompt_version": "v1",
+          "cache_hit": false
+        },
+        "result": "pass"
+      },
+      {
+        "id": "AC-ENDPOINT-015",
+        "covers": "R-ENDPOINT-007",
+        "kind": "generated-test",
+        "test_authoring": {
+          "model": "claude-opus-5-5",
+          "seed": 3,
+          "prompt_version": "v1",
+          "cache_hit": false
+        },
+        "result": "pass"
       }
     ],
     "requirement_results": {
@@ -187,7 +211,8 @@
       "R-ENDPOINT-009": "pass"
     },
     "interface_drift": false,
-    "mutation_score": 0.8251748251748252,
+    "mutation_score": 0.8832116788321168,
+    "mutation_error": null,
     "overall": "pass"
   },
   "license_scan": {
@@ -311,6 +336,10 @@
       {
         "file": "verification/corpus-graph.json",
         "type": "Base64 High Entropy String"
+      },
+      {
+        "file": "verification/generator/generated-test/test_ac_gen_018.py",
+        "type": "Hex High Entropy String"
       },
       {
         "file": "verification/graph-query-engine/generated-test/test_ac_gqe_008.py",

@@ -1,3 +1,4 @@
+# hotdocs-criterion: sha256:d372593334530003f8b86b1cc881c05c1daa16d80e20b69409add4c73de5a85b
 import json
 import urllib.request
 
@@ -6,28 +7,23 @@ import pytest
 import llm_endpoint
 
 
+KEYS = {
+    "ANTHROPIC_API_KEY": "sk-ant-test-key-123",
+    "OPENAI_API_KEY": "sk-openai-test-key-456",
+    "GEMINI_API_KEY": "gemini-test-key-789",
+}
+
+
 def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-class _FakeReply:
+class FakeReply:
     def __init__(self, payload):
         self._data = json.dumps(payload).encode("utf-8")
-        self.status = 200
-        self.code = 200
-        self.headers = {"Content-Type": "application/json"}
 
     def read(self, *args, **kwargs):
         return self._data
-
-    def getcode(self):
-        return 200
-
-    def info(self):
-        return self.headers
-
-    def close(self):
-        pass
 
     def __enter__(self):
         return self
@@ -36,248 +32,194 @@ class _FakeReply:
         return False
 
 
-class _Recorder:
-    def __init__(self, payload):
-        self.payload = payload
-        self.requests = []
+def install_recorder(monkeypatch, payload):
+    calls = []
 
-    def __call__(self, request, *args, **kwargs):
-        self.requests.append(request)
-        return _FakeReply(self.payload)
+    def fake_urlopen(request, data=None, timeout=None, *args, **kwargs):
+        calls.append({"request": request, "timeout": timeout})
+        return FakeReply(payload)
 
-
-def _headers(request):
-    items = {}
-    for name, value in request.header_items():
-        items[name.lower()] = value
-    return items
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    return calls
 
 
-def _url(request):
-    return request.full_url if isinstance(request, urllib.request.Request) else str(request)
-
-
-def _body(request):
-    data = request.data
-    assert data is not None, "request carries no body"
-    if isinstance(data, (bytes, bytearray)):
-        data = data.decode("utf-8")
-    return json.loads(data)
-
-
-def _find_request(recorder, expected_url):
-    urls = [_url(r) for r in recorder.requests]
-    matching = [r for r in recorder.requests if _url(r) == expected_url]
-    assert len(matching) == 1, f"expected exactly one request to {expected_url}, saw {urls}"
-    return matching[0]
-
-
-def _assert_user_agent(headers):
-    ua = headers.get("user-agent")
-    assert ua, "no User-Agent header set on the request"
-    assert not ua.startswith("Python-urllib"), f"User-Agent is not descriptive: {ua!r}"
+def request_parts(request):
+    assert isinstance(request, urllib.request.Request)
+    headers = {k.lower(): v for k, v in request.header_items()}
+    raw = request.data
+    if isinstance(raw, (bytes, bytearray)):
+        raw = raw.decode("utf-8")
+    body = json.loads(raw) if raw else None
+    return request.get_method(), request.full_url, headers, body
 
 
 @pytest.fixture
-def clean_env(tmp_path, monkeypatch):
+def isolated(tmp_path, monkeypatch):
     monkeypatch.delenv("VAR_HOTDOCS_CONFIG", raising=False)
-    workdir = tmp_path / "work"
-    workdir.mkdir()
-    monkeypatch.chdir(workdir)
-    return workdir
+    monkeypatch.chdir(tmp_path)
+    return tmp_path
 
 
-ANTHROPIC_KEY = "sk-ant-test-key-1111"
-OPENAI_KEY = "sk-openai-test-key-2222"
-GEMINI_KEY = "gemini-test-key-3333"
+ANTHROPIC_REPLY = {
+    "id": "msg_1",
+    "type": "message",
+    "role": "assistant",
+    "model": "m",
+    "content": [
+        {"type": "thinking", "thinking": "let me think", "signature": "sig"},
+        {"type": "text", "text": "Hello"},
+        {"type": "text", "text": " world"},
+    ],
+    "stop_reason": "end_turn",
+    "usage": {"input_tokens": 3, "output_tokens": 2},
+}
+
+OPENAI_REPLY = {
+    "id": "chatcmpl-1",
+    "object": "chat.completion",
+    "model": "m",
+    "choices": [
+        {
+            "index": 0,
+            "message": {"role": "assistant", "content": "Hi from openai"},
+            "finish_reason": "stop",
+        }
+    ],
+}
+
+GEMINI_REPLY = {
+    "candidates": [
+        {
+            "content": {
+                "role": "model",
+                "parts": [
+                    {"text": "internal musing", "thought": True},
+                    {"text": "Hi"},
+                    {"text": " there"},
+                ],
+            },
+            "finishReason": "STOP",
+        }
+    ]
+}
+
+OLLAMA_REPLY = {
+    "model": "m",
+    "created_at": "2026-01-01T00:00:00Z",
+    "message": {"role": "assistant", "content": "Hi from ollama"},
+    "done": True,
+}
 
 
-def test_anthropic_wire_format(clean_env, monkeypatch):
-    monkeypatch.setenv("ANTHROPIC_API_KEY", ANTHROPIC_KEY)
-    reply = {
-        "id": "msg_1",
-        "type": "message",
-        "role": "assistant",
-        "model": "m",
-        "content": [
-            {"type": "thinking", "thinking": "SECRET-THOUGHTS", "signature": "sig"},
-            {"type": "text", "text": "Hello"},
-            {"type": "text", "text": "world"},
-        ],
-        "stop_reason": "end_turn",
-        "usage": {"input_tokens": 3, "output_tokens": 2},
-    }
-    recorder = _Recorder(reply)
-    monkeypatch.setattr(urllib.request, "urlopen", recorder)
+def check_common(resp, provider, model_string, expected_text, headers):
+    assert field(resp, "model_call_error") is None
+    assert field(resp, "text") == expected_text
+    assert field(resp, "backend") == provider
+    assert field(resp, "model") == model_string
+    assert headers.get("user-agent"), "a descriptive User-Agent is required"
 
-    result = llm_endpoint.complete("say hi", "anthropic:m", max_tokens=50)
 
-    req = _find_request(recorder, "https://api.anthropic.com/v1/messages")
-    assert req.get_method() == "POST"
-    headers = _headers(req)
-    assert headers.get("x-api-key") == ANTHROPIC_KEY
+def test_anthropic_wire_format(isolated, monkeypatch):
+    for k, v in KEYS.items():
+        monkeypatch.setenv(k, v)
+    calls = install_recorder(monkeypatch, ANTHROPIC_REPLY)
+
+    resp = llm_endpoint.complete("say hi", "anthropic:m", max_tokens=50)
+
+    assert len(calls) == 1
+    method, url, headers, body = request_parts(calls[0]["request"])
+    assert method == "POST"
+    assert url == "https://api.anthropic.com/v1/messages"
+    assert headers.get("x-api-key") == KEYS["ANTHROPIC_API_KEY"]
     assert headers.get("anthropic-version") == "2023-06-01"
     assert "authorization" not in headers
-    _assert_user_agent(headers)
-    body = _body(req)
-    assert body["max_tokens"] == 50
     assert body["model"] == "m"
+    assert body["max_tokens"] == 50
     assert "say hi" in json.dumps(body["messages"])
-
-    assert field(result, "model_call_error") is None
-    text = field(result, "text")
-    assert isinstance(text, str)
-    assert "SECRET-THOUGHTS" not in text
-    assert text.startswith("Hello")
-    assert text.endswith("world")
-    assert text[len("Hello"):-len("world")].strip() == ""
-    assert field(result, "model") == "anthropic:m"
-    assert field(result, "backend") == "anthropic"
+    check_common(resp, "anthropic", "anthropic:m", "Hello world", headers)
 
 
-def test_openai_wire_format(clean_env, monkeypatch):
-    monkeypatch.setenv("OPENAI_API_KEY", OPENAI_KEY)
-    reply = {
-        "id": "chatcmpl-1",
-        "object": "chat.completion",
-        "model": "m",
-        "choices": [
-            {
-                "index": 0,
-                "message": {"role": "assistant", "content": "Hi from openai"},
-                "finish_reason": "stop",
-            }
-        ],
-        "usage": {"prompt_tokens": 3, "completion_tokens": 3, "total_tokens": 6},
-    }
-    recorder = _Recorder(reply)
-    monkeypatch.setattr(urllib.request, "urlopen", recorder)
+def test_openai_wire_format(isolated, monkeypatch):
+    for k, v in KEYS.items():
+        monkeypatch.setenv(k, v)
+    calls = install_recorder(monkeypatch, OPENAI_REPLY)
 
-    result = llm_endpoint.complete("say hi", "openai:m", max_tokens=50)
+    resp = llm_endpoint.complete("say hi", "openai:m", max_tokens=50)
 
-    req = _find_request(recorder, "https://api.openai.com/v1/chat/completions")
-    assert req.get_method() == "POST"
-    headers = _headers(req)
-    assert headers.get("authorization") == f"Bearer {OPENAI_KEY}"
-    _assert_user_agent(headers)
-    body = _body(req)
+    assert len(calls) == 1
+    method, url, headers, body = request_parts(calls[0]["request"])
+    assert method == "POST"
+    assert url == "https://api.openai.com/v1/chat/completions"
+    assert headers.get("authorization") == "Bearer " + KEYS["OPENAI_API_KEY"]
+    assert body["model"] == "m"
     assert body["max_completion_tokens"] == 50
     assert "max_tokens" not in body
-    assert body["model"] == "m"
     assert "say hi" in json.dumps(body["messages"])
-
-    assert field(result, "model_call_error") is None
-    assert field(result, "text") == "Hi from openai"
-    assert field(result, "model") == "openai:m"
-    assert field(result, "backend") == "openai"
+    check_common(resp, "openai", "openai:m", "Hi from openai", headers)
 
 
-def test_gemini_wire_format(clean_env, monkeypatch):
-    monkeypatch.setenv("GEMINI_API_KEY", GEMINI_KEY)
-    reply = {
-        "candidates": [
-            {
-                "content": {
-                    "role": "model",
-                    "parts": [
-                        {"text": "SECRET-THOUGHTS", "thought": True},
-                        {"text": "Hi from gemini"},
-                    ],
-                },
-                "finishReason": "STOP",
-                "index": 0,
-            }
-        ],
-        "usageMetadata": {"promptTokenCount": 3, "candidatesTokenCount": 3},
-    }
-    recorder = _Recorder(reply)
-    monkeypatch.setattr(urllib.request, "urlopen", recorder)
+def test_gemini_wire_format(isolated, monkeypatch):
+    for k, v in KEYS.items():
+        monkeypatch.setenv(k, v)
+    calls = install_recorder(monkeypatch, GEMINI_REPLY)
 
-    result = llm_endpoint.complete("say hi", "gemini:m", max_tokens=50)
+    resp = llm_endpoint.complete("say hi", "gemini:m", max_tokens=50)
 
-    expected_url = "https://generativelanguage.googleapis.com/v1beta/models/m:generateContent"
-    for r in recorder.requests:
-        assert GEMINI_KEY not in _url(r), "Gemini key leaked into the URL"
-        assert "key=" not in _url(r), "Gemini key passed as a URL query parameter"
-    req = _find_request(recorder, expected_url)
-    assert req.get_method() == "POST"
-    headers = _headers(req)
-    assert headers.get("x-goog-api-key") == GEMINI_KEY
-    assert "authorization" not in headers
-    _assert_user_agent(headers)
-    body = _body(req)
+    assert len(calls) == 1
+    method, url, headers, body = request_parts(calls[0]["request"])
+    assert method == "POST"
+    assert url == (
+        "https://generativelanguage.googleapis.com/v1beta/models/m:generateContent"
+    )
+    assert headers.get("x-goog-api-key") == KEYS["GEMINI_API_KEY"]
+    assert KEYS["GEMINI_API_KEY"] not in url
+    assert "key=" not in url
     assert body["generationConfig"]["maxOutputTokens"] == 50
     assert "say hi" in json.dumps(body["contents"])
-
-    assert field(result, "model_call_error") is None
-    assert field(result, "text") == "Hi from gemini"
-    assert field(result, "model") == "gemini:m"
-    assert field(result, "backend") == "gemini"
+    check_common(resp, "gemini", "gemini:m", "Hi there", headers)
 
 
-def test_ollama_wire_format(clean_env, monkeypatch):
-    reply = {
-        "model": "m",
-        "created_at": "2026-01-01T00:00:00Z",
-        "message": {"role": "assistant", "content": "Hi from ollama"},
-        "done": True,
-    }
-    recorder = _Recorder(reply)
-    monkeypatch.setattr(urllib.request, "urlopen", recorder)
+def test_ollama_wire_format(isolated, monkeypatch):
+    for k, v in KEYS.items():
+        monkeypatch.setenv(k, v)
+    calls = install_recorder(monkeypatch, OLLAMA_REPLY)
 
-    result = llm_endpoint.complete("say hi", "ollama:m", max_tokens=50)
+    resp = llm_endpoint.complete("say hi", "ollama:m", max_tokens=50)
 
-    req = _find_request(recorder, "http://localhost:11434/api/chat")
-    assert req.get_method() == "POST"
-    headers = _headers(req)
+    assert len(calls) == 1
+    method, url, headers, body = request_parts(calls[0]["request"])
+    assert method == "POST"
+    assert url == "http://localhost:11434/api/chat"
     assert "authorization" not in headers
-    _assert_user_agent(headers)
-    body = _body(req)
+    assert body["model"] == "m"
     assert body["stream"] is False
     assert body["options"]["num_predict"] == 50
-    assert body["model"] == "m"
     assert "say hi" in json.dumps(body["messages"])
-
-    assert field(result, "model_call_error") is None
-    assert field(result, "text") == "Hi from ollama"
-    assert field(result, "model") == "ollama:m"
-    assert field(result, "backend") == "ollama"
+    check_common(resp, "ollama", "ollama:m", "Hi from ollama", headers)
 
 
-def test_openai_compatible_from_config_without_key(clean_env, monkeypatch):
-    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
-    (clean_env / "hotdocs.toml").write_text(
+def test_openai_compatible_from_config_without_key(isolated, monkeypatch):
+    for k in KEYS:
+        monkeypatch.delenv(k, raising=False)
+    toml = (
         "[llm]\n"
-        'provider = "openai-compatible"\n'
-        'model = "m"\n'
-        'base_url = "http://h:8000/v1"\n',
-        encoding="utf-8",
+        + "provider = " + json.dumps("openai-compatible") + "\n"
+        + "model = " + json.dumps("m") + "\n"
+        + "base_url = " + json.dumps("http://h:8000/v1") + "\n"
     )
-    reply = {
-        "id": "chatcmpl-2",
-        "object": "chat.completion",
-        "model": "m",
-        "choices": [
-            {
-                "index": 0,
-                "message": {"role": "assistant", "content": "Hi from compat"},
-                "finish_reason": "stop",
-            }
-        ],
-    }
-    recorder = _Recorder(reply)
-    monkeypatch.setattr(urllib.request, "urlopen", recorder)
+    (isolated / "hotdocs.toml").write_text(toml, encoding="utf-8")
+    calls = install_recorder(monkeypatch, OPENAI_REPLY)
 
-    result = llm_endpoint.complete("say hi", "m", max_tokens=50)
+    resp = llm_endpoint.complete("say hi", "m", max_tokens=50)
 
-    req = _find_request(recorder, "http://h:8000/v1/chat/completions")
-    assert req.get_method() == "POST"
-    headers = _headers(req)
+    assert len(calls) == 1
+    method, url, headers, body = request_parts(calls[0]["request"])
+    assert method == "POST"
+    assert url == "http://h:8000/v1/chat/completions"
     assert "authorization" not in headers
-    body = _body(req)
     assert body["max_tokens"] == 50
     assert body["model"] == "m"
-
-    assert field(result, "model_call_error") is None
-    assert field(result, "text") == "Hi from compat"
-    assert field(result, "backend") == "openai-compatible"
+    assert field(resp, "model_call_error") is None
+    assert field(resp, "text") == "Hi from openai"
+    assert field(resp, "backend") == "openai-compatible"
+    assert field(resp, "model") == "m"

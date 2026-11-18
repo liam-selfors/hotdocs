@@ -1,24 +1,9 @@
-"""AC-ENDPOINT-005 (Covers: R-ENDPOINT-003).
-
-Part 1: with no hotdocs.toml and the `claude` command replaced by a
-recorder, a bare `claude-sonnet-5` with no provider-selection parameter
-dispatches through claude-cli, passing `--tools ""` and exactly one of
-`--bare` (ANTHROPIC_API_KEY set) or `--safe-mode` (not set).
-
-Part 2: each prefixed model (`anthropic:m`, `openai:m`, `gemini:m`,
-`ollama:m`, `openai-compatible:m`), with a hotdocs.toml configuring
-openai-compatible at http://h:8000/v1, dispatches over HTTP through its
-own adapter via `urllib.request.urlopen`, with no dependency beyond the
-standard library.
-"""
-
+# hotdocs-criterion: sha256:9d4124d68e671b0deeefb5d12e05db0177568ce56461753b1bc9e1233e56e6db
 import json
 import os
 import stat
 import sys
-import urllib.parse
 import urllib.request
-from pathlib import Path
 
 import pytest
 
@@ -29,79 +14,61 @@ def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-_FAKE_CLAUDE_PY = r'''
-import json
-import sys
-
-with open(__LOG__, "a", encoding="utf-8") as fh:
-    fh.write(json.dumps(sys.argv[1:]) + "\n")
-
-assistant = {
-    "type": "assistant",
-    "message": {
-        "role": "assistant",
-        "content": [{"type": "text", "text": "recorded reply"}],
-    },
-}
-result = {
-    "type": "result",
-    "subtype": "success",
-    "is_error": False,
-    "result": "recorded reply",
-}
-sys.stdout.write(json.dumps(assistant) + "\n")
-sys.stdout.write(json.dumps(result) + "\n")
-sys.stdout.flush()
-sys.exit(0)
-'''
+THIRD_PARTY_HTTP_MODULES = [
+    "requests",
+    "httpx",
+    "aiohttp",
+    "urllib3",
+    "anthropic",
+    "openai",
+    "google",
+    "google.generativeai",
+    "google.genai",
+    "ollama",
+    "litellm",
+]
 
 
-def _install_fake_claude(tmp_path, monkeypatch):
-    """Put a recording `claude` command first on PATH; return its log path."""
-    bin_dir = tmp_path / "fakebin"
-    bin_dir.mkdir()
-    log = tmp_path / "claude_calls.jsonl"
-    script = tmp_path / "fake_claude_impl.py"
-    script.write_text(
-        _FAKE_CLAUDE_PY.replace("__LOG__", repr(str(log))), encoding="utf-8"
+def _write_fake_claude(bin_dir, log_path):
+    bin_dir.mkdir(parents=True, exist_ok=True)
+    script_path = bin_dir / "claude"
+    source = (
+        "#!" + sys.executable + "\n"
+        + "import json\n"
+        + "import os\n"
+        + "import sys\n"
+        + "sys.stdin.read()\n"
+        + "with open(" + repr(str(log_path)) + ", 'a') as fh:\n"
+        + "    fh.write(json.dumps({'args': sys.argv[1:], "
+        + "'key': os.environ.get('ANTHROPIC_API_KEY')}) + '\\n')\n"
+        + "print(json.dumps({'type': 'assistant', 'message': "
+        + "{'content': [{'type': 'text', 'text': 'hello from claude'}]}}))\n"
+        + "print(json.dumps({'type': 'result', 'is_error': False, "
+        + "'result': 'hello from claude'}))\n"
     )
-    wrapper = bin_dir / "claude"
-    wrapper.write_text(
-        "#!/bin/sh\n" f'exec "{sys.executable}" "{script}" "$@"\n',
-        encoding="utf-8",
+    script_path.write_text(source)
+    script_path.chmod(
+        script_path.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH
     )
-    wrapper.chmod(
-        wrapper.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH
-    )
-    monkeypatch.setenv(
-        "PATH", str(bin_dir) + os.pathsep + os.environ.get("PATH", "")
-    )
-    return log
+    return script_path
 
 
-def _read_claude_calls(log):
-    if not log.exists():
+def _read_log(log_path):
+    if not log_path.exists():
         return []
     return [
         json.loads(line)
-        for line in log.read_text(encoding="utf-8").splitlines()
+        for line in log_path.read_text().splitlines()
         if line.strip()
     ]
 
 
-def _fresh_workdir(tmp_path, monkeypatch):
-    monkeypatch.delenv("VAR_HOTDOCS_CONFIG", raising=False)
-    work = tmp_path / "work"
-    work.mkdir()
-    monkeypatch.chdir(work)
-    return work
-
-
-class _FakeReply:
+class _FakeResponse:
     def __init__(self, body):
         self._body = body
         self.status = 200
         self.code = 200
+        self.headers = {"Content-Type": "application/json"}
 
     def read(self, *args, **kwargs):
         return self._body
@@ -112,11 +79,11 @@ class _FakeReply:
     def __enter__(self):
         return self
 
-    def __exit__(self, *exc):
+    def __exit__(self, exc_type, exc, tb):
         return False
 
 
-# One reply body that every provider's wire format can read its text from.
+# One body that satisfies every provider's reply shape at once.
 _REPLY_BODY = json.dumps(
     {
         # anthropic Messages API
@@ -137,173 +104,132 @@ _REPLY_BODY = json.dumps(
         "candidates": [
             {"content": {"role": "model", "parts": [{"text": "ok"}]}}
         ],
-        # ollama /api/chat and /api/generate
-        "message": {"role": "assistant", "content": "ok"},
+        # ollama /api/generate and /api/chat
         "response": "ok",
+        "message": {"role": "assistant", "content": "ok"},
         "done": True,
     }
 ).encode("utf-8")
 
 
-def _request_url(request):
-    if hasattr(request, "full_url"):
-        return request.full_url
-    if hasattr(request, "get_full_url"):
-        return request.get_full_url()
-    return str(request)
-
-
-def _install_urlopen_recorder(monkeypatch):
-    calls = []
-
+def _make_urlopen_recorder(calls):
     def fake_urlopen(request, *args, **kwargs):
-        calls.append(_request_url(request))
-        return _FakeReply(_REPLY_BODY)
+        url = getattr(request, "full_url", None)
+        if url is None:
+            url = str(request)
+        calls.append(url)
+        return _FakeResponse(_REPLY_BODY)
 
-    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
-    return calls
-
-
-# ---------------------------------------------------------------------------
-# Part 1: bare claude-sonnet-5 -> claude-cli
-# ---------------------------------------------------------------------------
+    return fake_urlopen
 
 
-@pytest.mark.parametrize("api_key_set", [True, False], ids=["key-set", "key-unset"])
-def test_bare_claude_model_dispatches_through_claude_cli(
-    tmp_path, monkeypatch, api_key_set
+@pytest.fixture
+def isolated_cwd(tmp_path, monkeypatch):
+    work = tmp_path / "work"
+    work.mkdir()
+    monkeypatch.chdir(work)
+    monkeypatch.delenv("VAR_HOTDOCS_CONFIG", raising=False)
+    return work
+
+
+@pytest.mark.parametrize("key_set", [True, False])
+def test_bare_claude_model_without_config_dispatches_through_claude_cli(
+    tmp_path, isolated_cwd, monkeypatch, key_set
 ):
-    work = _fresh_workdir(tmp_path, monkeypatch)
-    assert not (work / "hotdocs.toml").exists()
-    log = _install_fake_claude(tmp_path, monkeypatch)
-    http_calls = _install_urlopen_recorder(monkeypatch)
+    assert not (isolated_cwd / "hotdocs.toml").exists()
 
-    if api_key_set:
-        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test-not-a-real-key")
+    log_path = tmp_path / "claude_calls.log"
+    bin_dir = tmp_path / "bin"
+    _write_fake_claude(bin_dir, log_path)
+    monkeypatch.setenv(
+        "PATH", str(bin_dir) + os.pathsep + os.environ.get("PATH", "")
+    )
+
+    if key_set:
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test-anthropic")
     else:
         monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
 
-    response = llm_endpoint.complete("Say hello.", "claude-sonnet-5")
+    http_calls = []
+    monkeypatch.setattr(
+        urllib.request, "urlopen", _make_urlopen_recorder(http_calls)
+    )
 
-    assert field(response, "backend") == "claude-cli"
-    assert http_calls == [], "claude-cli must not dispatch over HTTP"
+    result = llm_endpoint.complete("Say hello", "claude-sonnet-5")
 
-    calls = _read_claude_calls(log)
-    assert len(calls) >= 1, "the claude command was never invoked"
+    entries = _read_log(log_path)
+    assert len(entries) == 1, entries
+    args = entries[0]["args"]
 
-    for argv in calls:
-        has_empty_tools = any(
-            (arg == "--tools" and i + 1 < len(argv) and argv[i + 1] == "")
-            or arg == "--tools="
-            for i, arg in enumerate(argv)
-        )
-        assert has_empty_tools, f'--tools "" missing from {argv!r}'
+    assert "--tools" in args
+    tools_index = args.index("--tools")
+    assert tools_index + 1 < len(args)
+    assert args[tools_index + 1] == ""
 
-        if api_key_set:
-            assert "--bare" in argv, f"--bare missing from {argv!r}"
-            assert "--safe-mode" not in argv, f"unexpected --safe-mode in {argv!r}"
-        else:
-            assert "--safe-mode" in argv, f"--safe-mode missing from {argv!r}"
-            assert "--bare" not in argv, f"unexpected --bare in {argv!r}"
+    if key_set:
+        assert "--bare" in args
+        assert "--safe-mode" not in args
+    else:
+        assert "--safe-mode" in args
+        assert "--bare" not in args
 
+    assert http_calls == []
 
-# ---------------------------------------------------------------------------
-# Part 2: prefixed models -> their own HTTP adapters, stdlib only
-# ---------------------------------------------------------------------------
-
-_HTTP_CASES = [
-    # (model string, expected backend, expected scheme://netloc, path fragment)
-    ("anthropic:m", "anthropic", "https://api.anthropic.com", "/messages"),
-    ("openai:m", "openai", "https://api.openai.com", "/chat/completions"),
-    (
-        "gemini:m",
-        "gemini",
-        "https://generativelanguage.googleapis.com",
-        "generateContent",
-    ),
-    ("ollama:m", "ollama", "http://localhost:11434", "/api/"),
-    ("openai-compatible:m", "openai-compatible", "http://h:8000", "/v1/chat/completions"),
-]
-
-_THIRD_PARTY_HTTP = {
-    "requests",
-    "httpx",
-    "aiohttp",
-    "urllib3",
-    "anthropic",
-    "openai",
-    "google",
-    "ollama",
-    "litellm",
-}
-
-
-def _new_third_party_modules(before):
-    stdlib = getattr(sys, "stdlib_module_names", None)
-    bad = []
-    for name in set(sys.modules) - before:
-        top = name.split(".")[0]
-        if top.startswith("llm_endpoint"):
-            continue
-        if top in _THIRD_PARTY_HTTP:
-            bad.append(name)
-            continue
-        if stdlib is not None and top in stdlib:
-            continue
-        mod = sys.modules.get(name)
-        path = str(getattr(mod, "__file__", None) or "")
-        if "site-packages" in path or "dist-packages" in path:
-            bad.append(name)
-    return sorted(bad)
+    assert field(result, "backend") == "claude-cli"
+    assert field(result, "model") == "claude-sonnet-5"
+    assert field(result, "model_call_error") is None
+    assert field(result, "text") == "hello from claude"
 
 
 @pytest.mark.parametrize(
-    "model, backend, origin, path_fragment",
-    _HTTP_CASES,
-    ids=[c[0] for c in _HTTP_CASES],
+    "model, provider, expected_url_prefix",
+    [
+        ("anthropic:m", "anthropic", "https://api.anthropic.com"),
+        ("openai:m", "openai", "https://api.openai.com/v1"),
+        ("gemini:m", "gemini", "https://generativelanguage.googleapis.com"),
+        ("ollama:m", "ollama", "http://localhost:11434"),
+        ("openai-compatible:m", "openai-compatible", "http://h:8000/v1"),
+    ],
 )
 def test_prefixed_models_dispatch_over_http_through_own_adapter(
-    tmp_path, monkeypatch, model, backend, origin, path_fragment
+    tmp_path, isolated_cwd, monkeypatch, model, provider, expected_url_prefix
 ):
-    work = _fresh_workdir(tmp_path, monkeypatch)
-    (work / "hotdocs.toml").write_text(
+    (isolated_cwd / "hotdocs.toml").write_text(
         "[llm]\n"
-        'provider = "openai-compatible"\n'
-        'model = "m"\n'
-        'base_url = "http://h:8000/v1"\n',
-        encoding="utf-8",
-    )
-    claude_log = _install_fake_claude(tmp_path, monkeypatch)
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test-not-real")
-    monkeypatch.setenv("OPENAI_API_KEY", "sk-openai-test-not-real")
-    monkeypatch.setenv("GEMINI_API_KEY", "gemini-test-not-real")
-    calls = _install_urlopen_recorder(monkeypatch)
-
-    modules_before = set(sys.modules)
-    response = llm_endpoint.complete("Say hello.", model)
-    new_third_party = _new_third_party_modules(modules_before)
-
-    assert field(response, "backend") == backend
-    assert field(response, "model") == model
-    assert field(response, "model_call_error") is None, (
-        f"{model} failed: {field(response, 'model_call_error')!r}"
-    )
-    assert field(response, "text") is not None
-
-    assert calls, f"{model} did not dispatch through urllib.request.urlopen"
-    expected = urllib.parse.urlsplit(origin)
-    for url in calls:
-        parts = urllib.parse.urlsplit(url)
-        assert (parts.scheme, parts.netloc) == (expected.scheme, expected.netloc), (
-            f"{model} sent a request to {url!r}, not to its own adapter's {origin}"
-        )
-    assert any(path_fragment in url for url in calls), (
-        f"{model}: no request matched {path_fragment!r} in {calls!r}"
+        + "provider = " + json.dumps("openai-compatible") + "\n"
+        + "model = " + json.dumps("m") + "\n"
+        + "base_url = " + json.dumps("http://h:8000/v1") + "\n"
     )
 
-    assert _read_claude_calls(claude_log) == [], (
-        f"{model} must not dispatch through the claude command"
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test-anthropic")
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test-openai")
+    monkeypatch.setenv("GEMINI_API_KEY", "test-gemini")
+
+    # A claude command that would record any (wrong) dispatch to claude-cli.
+    claude_log = tmp_path / "claude_calls.log"
+    bin_dir = tmp_path / "bin"
+    _write_fake_claude(bin_dir, claude_log)
+    monkeypatch.setenv(
+        "PATH", str(bin_dir) + os.pathsep + os.environ.get("PATH", "")
     )
-    assert new_third_party == [], (
-        f"{model} pulled in non-standard-library modules: {new_third_party!r}"
+
+    # Standard library only: any third-party HTTP/SDK import fails.
+    for name in THIRD_PARTY_HTTP_MODULES:
+        monkeypatch.setitem(sys.modules, name, None)
+
+    http_calls = []
+    monkeypatch.setattr(
+        urllib.request, "urlopen", _make_urlopen_recorder(http_calls)
     )
+
+    result = llm_endpoint.complete("Say ok", model)
+
+    assert len(http_calls) == 1, http_calls
+    assert http_calls[0].startswith(expected_url_prefix), http_calls[0]
+
+    assert _read_log(claude_log) == []
+
+    assert field(result, "backend") == provider
+    assert field(result, "model") == model
+    assert field(result, "model_call_error") is None
+    assert field(result, "text") == "ok"

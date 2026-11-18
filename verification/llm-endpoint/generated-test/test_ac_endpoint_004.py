@@ -1,11 +1,4 @@
-"""AC-ENDPOINT-004 (Covers: R-ENDPOINT-005).
-
-A provider credential never appears in a ModelResponse, in a call-log
-file under .hotdocs/calls/, or in a check_connection result, even when
-the vendor echoes it back in an HTTP 401 body. save_config refuses an
-api_key_env value that is the key itself, and writes no file.
-"""
-
+# hotdocs-criterion: sha256:8ce9b39c3e966ea61044c092e9cccb94bc665bcf93c921809a0772b865d5e2ea
 import io
 import json
 import urllib.error
@@ -17,23 +10,19 @@ import llm_endpoint
 
 
 SECRET = "sk-SECRET-123"
-KEY_VARS = ("ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY")
-PROVIDERS_UNDER_TEST = ("anthropic", "openai", "gemini")
+PROVIDERS_UNDER_TEST = ["anthropic", "openai", "gemini"]
+
+
+def field(value, name):
+    return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
 def _dump(value):
-    """Render a returned value (dict or object) as fully as possible."""
-    parts = [repr(value), str(value)]
     try:
-        parts.append(json.dumps(value, default=str))
+        text = json.dumps(value, default=str)
     except Exception:
-        pass
-    if not isinstance(value, dict):
-        try:
-            parts.append(repr(vars(value)))
-        except TypeError:
-            pass
-    return "\n".join(parts)
+        text = ""
+    return text + "\n" + repr(value)
 
 
 @pytest.fixture
@@ -42,22 +31,21 @@ def secret_env(tmp_path, monkeypatch):
     workdir = tmp_path / "work"
     workdir.mkdir()
     monkeypatch.chdir(workdir)
-    for name in KEY_VARS:
-        monkeypatch.setenv(name, SECRET)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", SECRET)
+    monkeypatch.setenv("OPENAI_API_KEY", SECRET)
+    monkeypatch.setenv("GEMINI_API_KEY", SECRET)
 
     calls = []
 
     def fake_urlopen(request, timeout=None, *args, **kwargs):
-        calls.append(request)
-        body = json.dumps(
-            {"error": {"type": "authentication_error",
-                       "message": "Invalid API key: " + SECRET}}
-        ).encode("utf-8")
+        url = request.full_url if hasattr(request, "full_url") else str(request)
+        calls.append(url)
+        body = ("{\"error\": \"invalid api key " + SECRET + "\"}").encode("utf-8")
         raise urllib.error.HTTPError(
-            "https://example.invalid/endpoint",
+            url,
             401,
-            "Unauthorized",
-            None,
+            "Unauthorized: " + SECRET,
+            {},
             io.BytesIO(body),
         )
 
@@ -65,44 +53,59 @@ def secret_env(tmp_path, monkeypatch):
     return workdir, calls
 
 
-def test_secret_never_in_responses_call_log_or_check_connection(secret_env):
-    workdir, _calls = secret_env
+def _call_log_texts(workdir):
+    calls_dir = workdir / ".hotdocs" / "calls"
+    texts = []
+    if calls_dir.is_dir():
+        for path in sorted(calls_dir.rglob("*")):
+            if path.is_file():
+                texts.append((path, path.read_text(encoding="utf-8", errors="replace")))
+    return texts
+
+
+def test_secret_never_in_responses_logs_or_check_results(secret_env):
+    workdir, calls = secret_env
 
     responses = []
     for provider in PROVIDERS_UNDER_TEST:
-        responses.append(llm_endpoint.complete("Say hello.", provider + ":m"))
+        resp = llm_endpoint.complete("hello", provider + ":m")
+        responses.append(resp)
 
     for resp in responses:
-        assert SECRET not in _dump(resp), (
-            "credential leaked into a ModelResponse: %r" % (resp,)
-        )
+        assert SECRET not in _dump(resp)
+        # The 401 should surface as a model_call_error, never text.
+        err = field(resp, "model_call_error")
+        assert err is not None
+        assert SECRET not in _dump(err)
 
     results = []
     for provider in PROVIDERS_UNDER_TEST:
-        results.append(llm_endpoint.check_connection(provider, "m"))
+        result = llm_endpoint.check_connection(provider, "m")
+        results.append(result)
 
     for result in results:
-        assert SECRET not in _dump(result), (
-            "credential leaked into a check_connection result: %r" % (result,)
-        )
+        assert SECRET not in _dump(result)
+        assert field(result, "ok") is False
+        error = field(result, "error")
+        if error is not None:
+            assert SECRET not in _dump(error)
 
-    calls_dir = workdir / ".hotdocs" / "calls"
-    assert calls_dir.is_dir(), "complete() wrote no call log under .hotdocs/calls/"
-    files = [p for p in calls_dir.rglob("*") if p.is_file()]
-    assert len(files) >= len(PROVIDERS_UNDER_TEST), (
-        "expected at least one call-log file per complete() call, found %d"
-        % len(files)
-    )
-    for path in files:
-        content = path.read_bytes().decode("utf-8", errors="replace")
-        assert SECRET not in content, (
-            "credential leaked into call-log file %s" % path
-        )
+    logs = _call_log_texts(workdir)
+    assert logs, "complete() must write call log files under .hotdocs/calls/"
+    for path, text in logs:
+        assert SECRET not in text, "secret leaked into " + str(path)
 
 
 def test_save_config_refuses_key_as_api_key_env(tmp_path, monkeypatch):
+    monkeypatch.delenv("VAR_HOTDOCS_CONFIG", raising=False)
     monkeypatch.setenv("OPENAI_API_KEY", SECRET)
-    config_path = tmp_path / "hotdocs.toml"
+    workdir = tmp_path / "work"
+    workdir.mkdir()
+    monkeypatch.chdir(workdir)
+
+    config_dir = tmp_path / "cfg"
+    config_dir.mkdir()
+    config_path = config_dir / "hotdocs.toml"
 
     with pytest.raises(ValueError) as excinfo:
         llm_endpoint.save_config(config_path, "openai", "m", api_key_env=SECRET)

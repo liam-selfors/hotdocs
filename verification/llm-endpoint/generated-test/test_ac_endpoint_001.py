@@ -1,4 +1,7 @@
-import subprocess
+# hotdocs-criterion: sha256:49e5f23e374d24e536bea83f84337292fce27d1278094438fcb5e4d779c13d2d
+import os
+import stat
+import sys
 import urllib.request
 
 import pytest
@@ -6,95 +9,73 @@ import pytest
 import llm_endpoint
 
 
-def _install_call_guards(monkeypatch, calls):
-    """Record (and refuse) any attempted network or subprocess call."""
+def _install_call_traps(tmp_path, monkeypatch):
+    """Record any attempt to reach a network or the claude command."""
+    log_path = tmp_path / "call_attempts.log"
 
     def fake_urlopen(*args, **kwargs):
-        calls.append(("urlopen", args, kwargs))
-        raise AssertionError("no HTTP call may be attempted before resolution succeeds")
-
-    def make_fake_sub(name):
-        def fake(*args, **kwargs):
-            calls.append((name, args, kwargs))
-            raise AssertionError("no subprocess may be started before resolution succeeds")
-
-        return fake
+        with open(log_path, "a") as fh:
+            fh.write("urlopen\n")
+        raise AssertionError("urlopen must not be called")
 
     monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
-    for name in ("run", "Popen", "call", "check_call", "check_output"):
-        monkeypatch.setattr(subprocess, name, make_fake_sub(name))
+
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    script = bin_dir / "claude"
+    source = (
+        "#!" + sys.executable + "\n"
+        "import sys\n"
+        "with open(" + repr(str(log_path)) + ", 'a') as fh:\n"
+        "    fh.write('claude ' + ' '.join(sys.argv[1:]) + '\\n')\n"
+        "sys.exit(1)\n"
+    )
+    script.write_text(source)
+    script.chmod(script.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+    monkeypatch.setenv("PATH", str(bin_dir) + os.pathsep + os.environ.get("PATH", ""))
+    return log_path
 
 
-@pytest.fixture
-def fresh_dir(tmp_path, monkeypatch):
-    monkeypatch.delenv("VAR_HOTDOCS_CONFIG", raising=False)
-    work = tmp_path / "work"
+def _fresh_cwd(tmp_path, monkeypatch, name):
+    work = tmp_path / name
     work.mkdir()
     monkeypatch.chdir(work)
-    assert not (work / "hotdocs.toml").exists()
+    monkeypatch.delenv("VAR_HOTDOCS_CONFIG", raising=False)
     return work
 
 
-def _error_type():
-    err = getattr(llm_endpoint, "ModelResolutionError", None)
-    assert err is not None, "llm_endpoint must expose ModelResolutionError"
-    assert isinstance(err, type) and issubclass(err, BaseException)
-    return err
+def test_unmatched_bare_name_without_config_raises_usage_error(tmp_path, monkeypatch):
+    work = _fresh_cwd(tmp_path, monkeypatch, "work")
+    assert not (work / "hotdocs.toml").exists()
+    log_path = _install_call_traps(tmp_path, monkeypatch)
 
-
-def test_unmatched_bare_model_without_config_raises_usage_error(fresh_dir, monkeypatch):
-    err_type = _error_type()
-    calls = []
-    _install_call_guards(monkeypatch, calls)
-
-    with pytest.raises(err_type) as excinfo:
+    with pytest.raises(llm_endpoint.ModelResolutionError):
         llm_endpoint.complete("Say hello.", "gpt-5")
 
-    # A raised resolution error, never a returned ModelResponse with model_call_error.
-    assert isinstance(excinfo.value, err_type)
-    # Raised before any call is attempted.
-    assert calls == []
+    assert not log_path.exists(), log_path.read_text()
 
 
-def _write_openai_compatible_without_base_url(directory):
-    (directory / "hotdocs.toml").write_text(
+def test_openai_compatible_without_base_url_raises_usage_error(tmp_path, monkeypatch):
+    work = _fresh_cwd(tmp_path, monkeypatch, "work")
+    (work / "hotdocs.toml").write_text(
         "[llm]\n"
         'provider = "openai-compatible"\n'
-        'model = "my-local-model"\n',
-        encoding="utf-8",
+        'model = "my-local-model"\n'
     )
+    log_path = _install_call_traps(tmp_path, monkeypatch)
 
-
-@pytest.mark.parametrize("model", ["my-local-model", "openai-compatible:my-local-model"])
-def test_openai_compatible_without_base_url_raises_usage_error(fresh_dir, monkeypatch, model):
-    err_type = _error_type()
-    _write_openai_compatible_without_base_url(fresh_dir)
-    calls = []
-    _install_call_guards(monkeypatch, calls)
-
-    with pytest.raises(err_type):
-        llm_endpoint.complete("Say hello.", model)
-
-    assert calls == []
-
-
-def test_missing_base_url_error_is_same_as_invalid_config_error(fresh_dir, monkeypatch):
-    err_type = _error_type()
-    calls = []
-    _install_call_guards(monkeypatch, calls)
-
-    # Invalid hotdocs.toml (not parseable TOML).
-    (fresh_dir / "hotdocs.toml").write_text(
-        "[llm\nprovider = = \"openai\n", encoding="utf-8"
-    )
-    with pytest.raises(err_type) as invalid_info:
+    with pytest.raises(llm_endpoint.ModelResolutionError):
         llm_endpoint.complete("Say hello.", "my-local-model")
 
-    # openai-compatible with no base_url.
-    _write_openai_compatible_without_base_url(fresh_dir)
-    with pytest.raises(err_type) as missing_info:
+    assert not log_path.exists(), log_path.read_text()
+
+
+def test_invalid_config_raises_same_usage_error(tmp_path, monkeypatch):
+    work = _fresh_cwd(tmp_path, monkeypatch, "work")
+    (work / "hotdocs.toml").write_text("[llm\nprovider = = broken\n")
+    log_path = _install_call_traps(tmp_path, monkeypatch)
+
+    with pytest.raises(llm_endpoint.ModelResolutionError):
         llm_endpoint.complete("Say hello.", "my-local-model")
 
-    assert isinstance(invalid_info.value, err_type)
-    assert isinstance(missing_info.value, err_type)
-    assert calls == []
+    assert not log_path.exists(), log_path.read_text()
