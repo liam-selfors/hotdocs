@@ -77,6 +77,16 @@ from the 2026-10 baseline reset, the rest recorded as they were made).
 `notes/initial-ideas.md` holds the original brainstorm, with its own
 informal numbering.
 
+## Before pushing
+
+Every commit pushed from this repository first passes
+`tools/verify_push.py`: in a throwaway worktree of exactly that commit
+it runs `hotdocs lint` and then `hotdocs verify`, which checks every
+component's and capability's provenance without calling a model. Run
+`python tools/verify_push.py --install-hook` once per clone to make it
+the `pre-push` hook; `python tools/verify_push.py [<commit>]` runs it by
+hand. Pull requests are reviewed and merged by a person.
+
 ## License
 
 Apache-2.0 (`LICENSE`, `D202`). Generated code in your project is yours;
