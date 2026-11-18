@@ -1,11 +1,8 @@
-"""CS-AMBIGUITY-001 (Covers: P-AMBIGUITY-GATE).
-
-Given a component spec whose Behavior section contains a requirement with no
-  covering acceptance criterion
-When the spec change is submitted to the pipeline
-Then spec-linter reports a fail-severity finding and the merge is blocked
-  before generation runs
-"""
+# hotdocs-criterion: sha256:79b17241908ec9aa3a9d13408402fa05198c36150d3862982523f2fa552a7468
+import importlib.util
+import json
+import sys
+from pathlib import Path
 
 import capability_scenario_verifier
 import citation_checker
@@ -20,203 +17,176 @@ import spec_linter
 import test_author
 import verifier_orchestrator
 
-import json
-import shutil
-from pathlib import Path
+
+def field(value, name):
+    return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-UNCOVERED_ID = "R-WIDGET-002"
+def load_module(path, module_name):
+    spec = importlib.util.spec_from_file_location(module_name, path)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    spec.loader.exec_module(module)
+    return module
 
 
-def field(value, name, default=None):
-    if isinstance(value, dict):
-        return value.get(name, default)
-    return getattr(value, name, default)
-
-
-def _write(path: Path, text: str) -> None:
+def _write(path, text):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
 
 
-def _component_md(behavior_ids):
-    behavior_lines = "\n".join(
-        f"- `{rid}` — the widget behaves as its requirement file states."
-        for rid in behavior_ids
+def _build_corpus(repo_root, cover_second_requirement):
+    specs = repo_root / "specs"
+    _write(
+        specs / "glossary.md",
+        "# Glossary\n"
+        "\n"
+        "- **Widget** \u2014 a small thing the foo component manages.\n",
     )
-    return (
+    comp = specs / "components" / "foo"
+    _write(
+        comp / "component.md",
         "---\n"
-        "id: comp-widget\n"
-        "title: Widget\n"
+        "id: comp-foo\n"
+        "title: Foo\n"
         "status: draft\n"
         "owners: [pipeline-team]\n"
-        "sealed: true\n"
-        "source_path: legacy/widget/\n"
         "depends_on: []\n"
         "realizes: []\n"
         "uses_var: []\n"
+        "sealed: true\n"
+        "source_path: legacy/foo/\n"
         "---\n"
         "\n"
-        "# Widget\n"
+        "# Foo\n"
         "\n"
         "## Purpose\n"
         "\n"
-        "A small fixture component used to exercise traceability checks.\n"
+        "Foo manages widgets.\n"
         "\n"
         "## Behavior\n"
         "\n"
-        f"{behavior_lines}\n"
-    )
-
-
-def _build_fixture(repo_root: Path, with_uncovered: bool) -> None:
-    _write(
-        repo_root / "specs" / "glossary.md",
-        "# Glossary\n\n- **widget** — the fixture component in this corpus.\n",
-    )
-    _write(repo_root / "legacy" / "widget" / "widget.py", "def widget_value():\n    return 1\n")
-
-    behavior_ids = ["R-WIDGET-001"] + ([UNCOVERED_ID] if with_uncovered else [])
-    comp_dir = repo_root / "specs" / "components" / "widget"
-    _write(comp_dir / "component.md", _component_md(behavior_ids))
-
-    _write(
-        comp_dir / "requirements" / "R-WIDGET-001.md",
-        "# R-WIDGET-001\n\n`widget_value()` MUST return `1`.\n",
+        "- `R-FOO-001` \u2014 foo stores a widget.\n"
+        "- `R-FOO-002` \u2014 foo deletes a widget.\n",
     )
     _write(
-        comp_dir / "acceptance" / "AC-WIDGET-001.md",
-        "# AC-WIDGET-001\n"
+        comp / "requirements" / "R-FOO-001.md",
+        "# R-FOO-001: Store a widget\n"
         "\n"
-        "Covers: R-WIDGET-001\n"
-        "Kind: llm-judge\n"
+        "`store(name)` MUST record the widget under `name`.\n",
+    )
+    _write(
+        comp / "requirements" / "R-FOO-002.md",
+        "# R-FOO-002: Delete a widget\n"
         "\n"
-        "```gherkin\n"
-        "Given a widget fixture\n"
-        "When widget_value is called\n"
-        "Then the result is 1\n"
+        "`delete(name)` MUST remove the widget recorded under `name`.\n",
+    )
+    _write(
+        comp / "interface" / "library.md",
+        "# Library\n"
+        "\n"
+        "```\n"
+        "store(name: str) -> None\n"
+        "delete(name: str) -> None\n"
         "```\n",
     )
-    if with_uncovered:
-        # A requirement with no acceptance criterion carrying `Covers: R-WIDGET-002`.
+    _write(
+        comp / "constraints.md",
+        "# Constraints\n"
+        "\n"
+        "None.\n",
+    )
+    _write(
+        comp / "acceptance" / "AC-FOO-001.md",
+        "# AC-FOO-001\n"
+        "\n"
+        "Covers: R-FOO-001\n"
+        "Kind: generated-test\n"
+        "\n"
+        "```gherkin\n"
+        "Given an empty foo store\n"
+        "When store is called with name \"a\"\n"
+        "Then the widget \"a\" is recorded\n"
+        "```\n",
+    )
+    if cover_second_requirement:
         _write(
-            comp_dir / "requirements" / f"{UNCOVERED_ID}.md",
-            f"# {UNCOVERED_ID}\n\n`widget_value()` MUST never return a negative number.\n",
+            comp / "acceptance" / "AC-FOO-002.md",
+            "# AC-FOO-002\n"
+            "\n"
+            "Covers: R-FOO-002\n"
+            "Kind: generated-test\n"
+            "\n"
+            "```gherkin\n"
+            "Given a foo store holding widget \"a\"\n"
+            "When delete is called with name \"a\"\n"
+            "Then the widget \"a\" is no longer recorded\n"
+            "```\n",
         )
 
 
 def _fail_findings(report):
-    return [f for f in field(report, "findings") or [] if field(f, "severity") == "fail"]
+    out = []
+    for f in field(report, "findings"):
+        if field(f, "severity") == "fail":
+            out.append(
+                (
+                    field(f, "rule_id"),
+                    str(field(f, "file")),
+                    str(field(f, "message")),
+                )
+            )
+    return out
 
 
-def _mentions_uncovered(finding) -> bool:
-    text = f"{field(finding, 'file') or ''} {field(finding, 'message') or ''}"
-    return UNCOVERED_ID in text
+def _mentions_uncovered(finding):
+    rule_id, file, message = finding
+    return "R-FOO-002" in file or "R-FOO-002" in message
 
 
-def test_uncovered_requirement_fails_lint_and_blocks_merge(tmp_path, capsys):
-    baseline_root = tmp_path / "baseline"
-    _build_fixture(baseline_root, with_uncovered=False)
-    baseline = spec_linter.lint(None, baseline_root)
-    assert not any(_mentions_uncovered(f) for f in _fail_findings(baseline))
+def test_uncovered_requirement_fails_lint_and_blocks_before_generation(tmp_path):
+    # Control: every requirement covered.
+    control_root = tmp_path / "control"
+    control_root.mkdir()
+    _build_corpus(control_root, cover_second_requirement=True)
+    control_report = spec_linter.lint(None, control_root)
+    control_fails = _fail_findings(control_report)
+    assert not any(_mentions_uncovered(f) for f in control_fails), control_fails
 
-    repo_root = tmp_path / "changed"
-    _build_fixture(repo_root, with_uncovered=True)
+    # Defect: R-FOO-002 in the Behavior section has no covering criterion.
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    _build_corpus(repo_root, cover_second_requirement=False)
 
     report = spec_linter.lint(None, repo_root)
     fails = _fail_findings(report)
-    uncovered_fails = [f for f in fails if _mentions_uncovered(f)]
-    assert uncovered_fails, (
-        "expected a fail-severity finding for the uncovered requirement; got "
-        f"{[(field(f, 'rule_id'), field(f, 'severity'), field(f, 'file'), field(f, 'message')) for f in field(report, 'findings') or []]}"
-    )
+    new_fails = [f for f in fails if f not in control_fails]
+    assert new_fails, "expected a new fail-severity finding, got: " + repr(fails)
+    assert any(_mentions_uncovered(f) for f in new_fails), new_fails
+    assert field(report, "hard_failures") >= 1
 
-    hard = report["hard_failures"] if isinstance(report, dict) else report.hard_failures
-    assert hard >= 1
-    assert hard > (
-        baseline["hard_failures"] if isinstance(baseline, dict) else baseline.hard_failures
-    )
-
-    # The merge gate: the linter's CLI exits 1 on any fail-severity finding.
-    exit_code = spec_linter.main([f"--repo-root={repo_root}", "--format=json"])
-    capsys.readouterr()
+    # The merge gate: spec-linter's CLI exits 1 on a fail-severity finding.
+    exit_code = spec_linter.main(["--format=json", "--repo-root=" + str(repo_root)])
     assert exit_code == 1
 
+    # Generation never runs: the pipeline stops at the lint failure, so no
+    # model call is ever dispatched.
+    log_path = tmp_path / "backend_calls.log"
 
-def test_uncovered_requirement_stops_pipeline_before_generation(tmp_path):
-    fixture_root = tmp_path / "fixture"
-    _build_fixture(fixture_root, with_uncovered=True)
-
-    repo_root = tmp_path / "pipeline"
-    shutil.copytree(fixture_root, repo_root)
-
-    log_path = tmp_path / "invocations.log"
-    log_literal = repr(str(log_path))
-
-    log_helper = (
-        "import json\n"
-        "def _log(record):\n"
-        f"    with open({log_literal}, 'a', encoding='utf-8') as fh:\n"
-        "        fh.write(json.dumps(record) + '\\n')\n"
-    )
-
-    _write(
-        repo_root / "gen" / "impact-analyzer" / "impact_analyzer.py",
-        log_helper
-        + "\n"
-        "def compute_blast_radius(changed_ids, repo_root):\n"
-        "    _log({'fn': 'compute_blast_radius', 'changed_ids': list(changed_ids)})\n"
-        "    return ['comp-widget']\n",
-    )
-    _write(
-        repo_root / "gen" / "spec-bundle-assembler" / "spec_bundle_assembler.py",
-        log_helper
-        + "\n"
-        "def assemble(component_id, repo_root=None, mode='full', **kwargs):\n"
-        "    _log({'fn': 'assemble', 'component_id': component_id, 'mode': mode})\n"
-        "    return {'component_id': component_id, 'mode': mode, 'files': {}}\n",
-    )
-    _write(
-        repo_root / "gen" / "generator" / "generator.py",
-        log_helper
-        + "\n"
-        "def generate(bundle, model, retry_feedback=None, repo_root=None, llm_backend=None, **kwargs):\n"
-        "    _log({'fn': 'generate', 'model': model})\n"
-        "    return {'files': [], 'model_call_error': None}\n",
-    )
-    _write(
-        repo_root / "gen" / "llm-endpoint" / "llm_endpoint.py",
-        log_helper
-        + "\n"
-        "def complete(prompt, model, *, backend=None, **params):\n"
-        "    _log({'fn': 'complete', 'model': model})\n"
-        "    return {'text': '{}', 'model': model, 'backend': 'fake', 'model_call_error': None}\n",
-    )
-
-    def fake_backend(prompt, model, **params):
+    def backend(prompt, model, **params):
         with open(log_path, "a", encoding="utf-8") as fh:
-            fh.write(json.dumps({"fn": "llm_backend", "model": model}) + "\n")
-        return {"text": "{}", "model": model, "backend": "fake", "model_call_error": None}
+            fh.write(json.dumps({"model": model}) + "\n")
+        return {
+            "text": "{}",
+            "model": model,
+            "backend": "fake",
+            "model_call_error": None,
+        }
 
-    result = spec_completeness_assistant.assist(
-        [UNCOVERED_ID], repo_root, model="fake-model", llm_backend=fake_backend
+    assist_report = spec_completeness_assistant.assist(
+        ["R-FOO-002"], repo_root, model="fake-model", llm_backend=backend
     )
-
-    lint_findings = field(result, "lint_findings") or []
-    fails = [f for f in lint_findings if field(f, "severity") == "fail"]
-    assert any(_mentions_uncovered(f) for f in fails), (
-        f"expected a fail-severity lint finding for {UNCOVERED_ID}; got {lint_findings!r}"
-    )
-
-    calls = []
-    if log_path.exists():
-        calls = [
-            json.loads(line)
-            for line in log_path.read_text(encoding="utf-8").splitlines()
-            if line.strip()
-        ]
-    called = [c["fn"] for c in calls]
-    assert "generate" not in called, f"generation ran despite a fail lint finding: {called}"
-    assert "complete" not in called, f"a model call ran despite a fail lint finding: {called}"
-    assert "llm_backend" not in called, f"a model call ran despite a fail lint finding: {called}"
-    assert not (repo_root / "gen" / "widget").exists()
+    lint_findings = field(assist_report, "lint_findings")
+    assert any(field(f, "severity") == "fail" for f in lint_findings), lint_findings
+    calls = log_path.read_text(encoding="utf-8").splitlines() if log_path.exists() else []
+    assert calls == [], "generation/model calls ran despite a lint failure: " + repr(calls)
