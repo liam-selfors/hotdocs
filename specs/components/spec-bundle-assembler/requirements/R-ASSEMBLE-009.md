@@ -3,8 +3,9 @@
 **R-ASSEMBLE-009** — MUST also expose a narrower assembly entry point
   producing a `CriterionBundle` — one acceptance criterion's own text, its
   covered requirement's text, the target component's `interface/` content,
-  the glossary, and `dependency_interfaces` (`D100`, below) — for
-  `test-author`'s use. A `CriterionBundle` MUST NOT include the target
+  the glossary, `dependency_interfaces` (`D100`, below), and `testing`,
+  the component's test spec as `specs/architecture/test-reuse.md` builds
+  it (`D341`) — for `test-author`'s use. A `CriterionBundle` MUST NOT include the target
   component's `gen/<component>/` content, any other file under
   `requirements/`, or `constraints.md` — narrower than the `SpecBundle`
   R-ASSEMBLE-001–008 describe, not a variant of it, because
@@ -26,3 +27,7 @@
   guessed wrong about a dependency's call shape in three different ways
   (`D100`), despite every one of those shapes being fully documented
   and already available to `generator` via this exact mechanism.
+
+  **`testing` is the second exception**, and test-only: it says how a
+  test builds fixtures, never what the component does, and `SpecBundle`
+  never includes it (`D341`).

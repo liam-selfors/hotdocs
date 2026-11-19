@@ -31,8 +31,8 @@ carrying its provenance to `provenance-writer`.
 otherwise (a `skipped` `llm-judge` criterion counts as `fail` here). It is
 **boolean-only**: nothing in it discloses what a test checked.
 
-A `skipped` finding never fails `overall` (R-VERIFY-005), so in the
-example `R-FOO-002` is `fail` while `overall` is `pass`.
+In the example `R-FOO-002` is `fail` while `overall` is `pass`
+(R-VERIFY-005).
 
 **`failure_detail`** (R-VERIFY-012) — present only on a `compiled` or
 `generated-test` criterion whose `result` is `fail`:
@@ -45,5 +45,5 @@ example `R-FOO-002` is `fail` while `overall` is `pass`.
 **`failure_origin`** (R-VERIFY-019) — present exactly on a `compiled` or
 `generated-test` criterion whose `result` is `fail`: `"test"` when no
 sound test could run for it (none authored, authoring failed, or its
-test failed `test-probe`'s probe), `"implementation"` when a test ran
-and failed. A retry attends only to `"implementation"` failures.
+test failed `test-probe`'s probe or the mutation sandbox),
+`"implementation"` when a test ran and failed. A retry attends only to `"implementation"` failures.

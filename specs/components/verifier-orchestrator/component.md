@@ -57,5 +57,5 @@ See `constraints.md`.
 
 ## Change log
 
-See the decisions, `D27` onward; `D307` probes every generated test,
-`D320`, `D324` and `D335`.
+See the decisions, `D27` onward; latest `D307`, `D320`, `D324`, `D335`,
+`D341`.

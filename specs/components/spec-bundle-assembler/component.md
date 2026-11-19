@@ -55,8 +55,8 @@ See `interface/data/`.
 
 See `acceptance/`.
 
-Every criterion is `kind: generated-test`, over the synthetic corpus the
-"Test fixtures" section of the library interface defines.
+Every criterion is `kind: generated-test`, over the synthetic corpus
+`testing.md` defines.
 
 ## Non-functional constraints
 
@@ -64,20 +64,9 @@ See `constraints.md`.
 
 ## Open questions
 
-- ~~Whether `spec_bundle_hash` should hash the files' raw bytes or a
-  normalized form (e.g. with trailing whitespace stripped)~~ — resolved:
-  raw bytes, permanently, not provisionally. Normalizing the hash itself
-  was rejected once a concrete risk surfaced: these are Markdown files, and
-  Markdown is not whitespace-insensitive (two-or-more trailing spaces are
-  CommonMark's hard-line-break syntax; indentation is load-bearing inside
-  nested lists and code fences) — there is no universally-safe
-  normalization rule to hash against instead, so "ignore whitespace
-  differences" risks silently treating two *meaningfully* different
-  bundles as identical. The cache-hit-rate concern this question raised is
-  real but belongs at a different layer: `spec-linter`'s new R-LINT-019
-  rejects trailing whitespace outright, so the cosmetic diff never reaches
-  a committed file in the first place — the hash stays simple and
-  trustworthy, and the cache-hit benefit is real rather than approximate.
+- ~~Hash raw bytes or a normalized form?~~ Resolved: raw bytes.
+  Markdown whitespace can be meaningful, so no normalization is safe;
+  `R-LINT-019` rejects trailing whitespace instead.
 
 ## Change log
 

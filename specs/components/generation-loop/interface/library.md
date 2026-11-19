@@ -76,3 +76,5 @@ Test fixtures: each dependency is a stand-in module at
 `verifier-orchestrator/verifier_orchestrator.py`, `test-author/test_author.py`,
 `llm-endpoint/llm_endpoint.py`) providing the names above and recording
 each call, with its arguments, to a file.
+
+Implements: `specs/architecture/test-reuse.md`

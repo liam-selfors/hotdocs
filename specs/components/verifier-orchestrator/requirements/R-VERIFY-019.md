@@ -3,12 +3,10 @@
 **R-VERIFY-019** — For every `generated-test` criterion, this component
   MUST:
 
-  1. treat a cached file as stale unless its first line is
-     `# hotdocs-criterion: sha256:<hex>` with `<hex>` the SHA-256 of the
-     criterion's `CriterionBundle` `criterion_text`, a newline, and its
-     `requirement_text`, encoded UTF-8; a file with no such line is
-     stale too. A stale file is ignored as if absent, so the test is
-     authored again (R-VERIFY-009, `D320`).
+  1. treat a cached file as stale unless its first line is the header
+     `specs/architecture/test-reuse.md` defines for the criterion's
+     `CriterionBundle`; a stale file is ignored as if absent, so the
+     test is authored again (R-VERIFY-009, `D320`, `D341`).
   2. when a `test_author` call returns a `model_call_error` whose
      `category` is `network`, `timeout` or `rate_limit`, call it once
      more for that criterion (`D319`).
@@ -24,4 +22,6 @@
   `test failed its probe: <error kinds, comma-separated>` or
   `test authoring failed: <category>: <message>`.
 
-  Every other failed criterion has `failure_origin` `"implementation"`.
+  A test that fails alone in the mutation sandbox is handled as
+  `test-reuse.md`'s "Mutation runs" says. Every other failed criterion has
+  `failure_origin` `"implementation"`.

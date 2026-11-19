@@ -18,6 +18,7 @@ SELECT
     lambda x: x != ''
   ))) AS word_count
 FROM read_text('{repo_root}/specs/components/*/**/*.md')
+WHERE NOT ends_with(filename, '/testing.md')
 GROUP BY 1;
 ```
 
@@ -27,3 +28,5 @@ GROUP BY 1;
   token every file's own trailing newline otherwise produces (`D13`).
   The frontmatter-stripping `regexp_replace` MUST keep its `'s'` flag,
   for the same DOTALL reason as `R-GQE-004`.
+  A component's `testing.md` is test-only text the generator never sees
+  and is not counted (`D341`).

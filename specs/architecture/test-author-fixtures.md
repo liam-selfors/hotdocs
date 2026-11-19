@@ -80,9 +80,10 @@ relative to `repo_root`:
 `verification/foo/generated-test/test_ac_foo_003.py`. Its
 `content` is one header line, `# hotdocs-criterion: sha256:<hex>`, a
 newline, then the accepted test exactly as probed. `<hex>` is
-`hashlib.sha256((criterion_text + "\n" + requirement_text).encode("utf-8")).hexdigest()`
-over the bundle's fields, 64 lowercase hex characters, never taken from
-the model's content. When the probed test's first line begins
+the SHA-256 of `json.dumps({k: bundle[k] for k in ("criterion_text", "requirement_text", "interface", "glossary", "testing")}, sort_keys=True, ensure_ascii=False, separators=(",", ":"))` encoded UTF-8, as
+`specs/architecture/test-reuse.md` defines it (`D341`), 64 lowercase hex
+characters, never taken from the model's content; a missing `testing`
+key counts as `""`. When the probed test's first line begins
 `# hotdocs-criterion:`, that line and its newline are dropped before the
 header is prepended.
 

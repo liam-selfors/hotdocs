@@ -6,7 +6,3 @@
   output is not covered.
 - **`kind:` is read-only input.** Neither this component nor
   `test_author` MAY alter a criterion's declared `kind`.
-- **No bypassing `skipped` or the `generated-test`/`llm-judge` `fail`
-  asymmetry.** A `skipped` `llm-judge` result MUST never become `pass`,
-  and an unauthored `generated-test` result MUST never become `skipped`
-  (R-VERIFY-005/010).

@@ -553,7 +553,21 @@ def _carry_tests(component_id: str, sandbox: Path, bundle) -> None:
     _reuse_committed(component_id, sandbox)
 
 
-_BUNDLE_FIELDS = ("criterion_text", "requirement_text", "interface", "glossary")
+_BUNDLE_FIELDS = ("criterion_text", "requirement_text", "interface", "glossary", "testing")
+
+
+def _criterion_header(bundle) -> str:
+    """The header line the real verifier expects (R-VERIFY-019): the
+    whole-bundle hash from verifier-orchestrator@3.3.0 on (D341), the
+    criterion-and-requirement hash before."""
+    version = str(getattr(verifier_orchestrator, "GATE_VERSION", ""))
+    major_minor = tuple(int(x) for x in re.findall(r"@(\d+)\.(\d+)", version)[0]) if "@" in version else (0, 0)
+    if major_minor >= (3, 3):
+        text = json.dumps({k: _get(bundle, k) or "" for k in _BUNDLE_FIELDS},
+                          sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+    else:
+        text = _get(bundle, "criterion_text") + "\n" + _get(bundle, "requirement_text")
+    return "# hotdocs-criterion: sha256:" + hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
 def _bundle_view(component_id: str, criterion_id: str, root: Path) -> str | None:
@@ -594,7 +608,13 @@ def _reuse_committed(component_id: str, sandbox: Path) -> None:
         then = _bundle_view(component_id, criterion_id, snapshots[commit])
         if then is not None and then == _bundle_view(component_id, criterion_id, REAL_REPO):
             dest_dir.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(test, dest_dir / test.name)
+            # Stamp the header the running verifier expects: the bundle is
+            # unchanged since this test was committed, so it is current.
+            lines = test.read_text(encoding="utf-8").split("\n")
+            if lines and lines[0].startswith("# hotdocs-criterion:"):
+                lines = lines[1:]
+            current = spec_bundle_assembler.assemble_criterion(component_id, criterion_id, REAL_REPO)
+            (dest_dir / test.name).write_text(_criterion_header(current) + "\n" + "\n".join(lines), encoding="utf-8")
             reused.append(criterion_id)
     for snap in snapshots.values():
         shutil.rmtree(snap, ignore_errors=True)

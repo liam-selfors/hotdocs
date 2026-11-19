@@ -58,9 +58,11 @@ assembler function `verify` calls. Its return value, a `CriterionBundle`
 or a mapping with its keys, is the bundle `verify` hashes for
 `R-VERIFY-019`, passes to `test_author` and passes to `test-probe`'s
 `probe`. A test that needs a cached file's correct header plants such a
-stand-in with known `criterion_text` and `requirement_text` and writes
-the first line as `# hotdocs-criterion: sha256:` followed by
-`hashlib.sha256((criterion_text + "\n" + requirement_text).encode("utf-8")).hexdigest()`.
+stand-in with known `criterion_text`, `requirement_text`, `interface`,
+`glossary` and `testing` and writes the first line as
+`# hotdocs-criterion: sha256:` followed by the SHA-256 hex of
+`json.dumps({k: bundle[k] for k in ("criterion_text", "requirement_text", "interface", "glossary", "testing")}, sort_keys=True, ensure_ascii=False, separators=(",", ":"))` encoded UTF-8
+(`specs/architecture/test-reuse.md`, `D341`).
 A header line is one matching
 `^# hotdocs-criterion: sha256:[0-9a-f]{64}$`; any other first line,
 including uppercase hex, is no header, so that file is stale.
