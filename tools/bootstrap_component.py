@@ -137,6 +137,8 @@ _NOT_CONSUMER_NAMES = {
     "test-author": {"ParsedCriterion", "compile_criterion", "complete"},
     # The bootstrap's own timeout adjustment, read with a getattr fallback.
     "verifier-orchestrator": {"DEFAULT_TEST_TIMEOUT"},
+    # A local list named `assembler` that caches the loaded module (D339).
+    "spec-bundle-assembler": {"append"},
 }
 
 
