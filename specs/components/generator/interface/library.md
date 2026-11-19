@@ -63,7 +63,8 @@ reply, never on a cache hit; with no `python` adapter it returns
 ## Reply format
 
 The model's reply, a mock's included, wraps each file as a line
-`-----BEGIN FILE <nonce>: <path>-----`, the file's content, then a line
+`-----BEGIN FILE <nonce>: <path>-----`, the file's content (the lines
+between the markers, endings kept: `ok` is `"ok\n"`), then a line
 `-----END FILE <nonce>-----`, and ends with the line
 `-----END REPLY <nonce>-----` (`R-GEN-021`): `<path>` relative to
 `gen/<component>/`, `<nonce>` the fresh `uuid.uuid4().hex` the prompt
@@ -84,4 +85,4 @@ plus the SHA-256 hex digest of
 `json.dumps(sorted(retry_feedback or []), sort_keys=True)` encoded as
 UTF-8. Every result's `prompt_version` is `PROMPT_VERSION`.
 
-Implements: `specs/architecture/generator-prompt.md`, `specs/architecture/cli-conventions.md`, `specs/architecture/asset-kinds.md`
+Implements: `specs/architecture/generator-prompt.md`, `specs/architecture/asset-kinds.md`
