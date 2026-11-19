@@ -8,13 +8,17 @@
   order — excluding any `__pycache__` directory and any file named
   `.provenance.json` — as relative path and bytes, every field
   `\0`-terminated. A component with no code directory contributes its id
-  alone. Last come the bytes of `environments/python/requirements.lock`,
-  when it exists, the environment the tests run in.
+  alone. Then, each `\0`-terminated, the bytes of
+  `environments/python/requirements.lock`, when it exists, and last,
+  always, the UTF-8 of
+  `json.dumps(versions, sort_keys=True, separators=(",", ":"))`,
+  `versions` being what the `python` adapter's `provision(repo_root)`
+  reports, the full Python version and packages fingerprint (`D345`),
+  `{}` with no adapter or `ok` false (called once per key, loaded as
+  `R-SCENARIO-005` loads it), so an environment change re-runs scenarios.
 
-  It hashes actual code, deliberately not `spec_bundle_hash`: a
-  spec-level hash would reopen the blind spot this component exists to
-  close (`D2`). It also covers the capability's own file, so editing a
-  scenario invalidates a prior pass.
+  It hashes actual code, not `spec_bundle_hash`, which would reopen the
+  blind spot this component closes (`D2`).
 
   The record is `verification/capabilities/<capability_id>/.provenance.json`,
   a JSON object (sorted keys, two-space indent) with exactly
@@ -22,5 +26,5 @@
   (sorted ids), `capability_scenario_report` (this capability's report),
   `model` (string or `null`), and `seed`. Only `run_capability_gates`
   writes it, on a miss. `gate_version` is the module constant
-  `GATE_VERSION`, `"capability_scenario_verifier@2.1.0"`; any change to
+  `GATE_VERSION`, `"capability_scenario_verifier@2.2.0"`; any change to
   `R-SCENARIO-005`'s execution or this hash MUST raise it here.

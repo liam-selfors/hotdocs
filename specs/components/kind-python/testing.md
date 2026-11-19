@@ -3,8 +3,13 @@
 Tests import the module as `import kind_python` and call its functions
 directly; this component's own tests never use an `asset_runner`
 fixture. They run under the same Python as the module, so
-`sys.executable` and `sys.version_info` give the values a
+`sys.executable` and `platform.python_version()` give the values a
 criterion compares with.
+
+`envinfo(python)` is the expected `versions`: `json.loads` of the last
+stdout line of `subprocess.run([python, "-I", "-c", PROGRAM],
+capture_output=True, text=True)`, `PROGRAM` R-KPY-004's four-line
+program copied exactly. This is the one subprocess a test may start.
 
 Fixtures: a code directory is a directory under pytest's `tmp_path`
 named as the criterion names it; write each file with
@@ -34,4 +39,4 @@ unless the criterion sets it.
 Catch failures with `pytest.raises(kind_python.AssetError)` or
 `pytest.raises(ValueError)` and compare `str(excinfo.value)` exactly
 where a criterion gives the message. Never start Python yourself with
-`subprocess`.
+`subprocess` otherwise.

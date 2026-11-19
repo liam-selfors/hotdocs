@@ -80,17 +80,11 @@ None.
 ## Change log
 
 - Initial draft (`D29`).
-- `D47`: first real implementation (`verification/provenance-checker/
-  BOOTSTRAP.md`).
-- `D163`: gains `current_provenance_key`, the one definition of the
-  `spec_bundle_hash`/`gate_versions` a hit compares, so the writer of
-  `.provenance.json` and every checker of it agree. `R-PROVCHECK-006`
-  covers the CLI (`D162`), whose hash validation rejected every real
-  `sha256:`-prefixed hash.
-- `D170`: `current_sealed_key`/`check_sealed_provenance` — the sealed
-  counterpart (`R-PROVCHECK-007`/`008`); depends on `provenance-writer`
-  for the manifest schema.
-  Regenerated and landed at 13/13, `mutation_score` 0.91.
+- `D47`: first real implementation.
+- `D163`: `current_provenance_key`, the one definition of the key a hit
+  compares; `R-PROVCHECK-006` covers the CLI (`D162`).
+- `D170`: the sealed counterpart (`R-PROVCHECK-007`/`008`). Landed at
+  13/13, `mutation_score` 0.91.
 - `D313`: the key names the generator's version, so a generator or
   prompt change invalidates every manifest it produced.
 - `D343`: the key includes each declared asset's definition, adapter
@@ -98,3 +92,6 @@ None.
 - `D344`: the assets value starts with the implicit `python` entry, path
   `"."`, for every component; a manifest with no `assets` now misses
   with `assets differ`. Tests plant a fake `python` adapter.
+- `D345`: a miss only in assets' `versions` or `lockfile_sha256` is
+  `environment differs` (`R-PROVCHECK-010`), so `component-gate-runner`
+  re-verifies instead of regenerating.

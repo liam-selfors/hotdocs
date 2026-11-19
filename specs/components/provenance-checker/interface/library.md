@@ -27,12 +27,9 @@ is the slug with hyphens replaced by underscores (`spec_bundle_assembler`,
 `license_scanner`, `secret_scanner`, `generator`). Only when `<dir>` is
 absent under `repo_root` is the tool root's copy used (`D199`). Each is
 loaded from its file afresh on every call, never reused from an earlier
-`sys.modules` entry, so a stand-in that records its calls does so
-through a side channel the test controls, such as a file outside
-`repo_root` whose path is written into the stand-in's source. Beyond
+`sys.modules` entry. Beyond
 loading these and the asset reads below, it reads nothing under
-`repo_root`: every other corpus read happens inside `assemble`, so a
-stand-in `assemble` needs no `specs/` tree. It reads, in this order:
+`repo_root`: every other corpus read happens inside `assemble`. It reads, in this order:
 
 1. `spec-bundle-assembler`'s `assemble(component_id, repo_root=...,
    mode="cold")`, taking only its `spec_bundle_hash`
@@ -43,8 +40,7 @@ stand-in `assemble` needs no `specs/` tree. It reads, in this order:
 6. `secret-scanner`'s `gate_version(repo_root)`
 7. `generator`'s `GATE_VERSION` and `PROMPT_VERSION`
 
-Any stand-in for these dependencies must provide each name this list
-gives. No network access, no model call, no write, `provision` aside
+No network access, no model call, no write, `provision` aside
 (`R-PROVCHECK-004`).
 
 ## Assets (`D343`, `D344`)
@@ -57,7 +53,9 @@ kind, the repository's definition
 `<repo_root>/specs/architecture/asset-kind-<kind>.md`, if any, and the
 adapter `asset-kinds.md`'s Lookup finds: `<repo_root>/gen/kind-<kind>/kind_<kind>.py`,
 else the tool root's, the tool root as asset-kinds.md defines it. The adapter is loaded by path afresh on every call; only its
-`provision(repo_root)` is called (`R-PROVCHECK-009`).
+`provision(repo_root)` is called (`R-PROVCHECK-009`). A miss in
+`versions` or `lockfile_sha256` alone is `environment differs`
+(`R-PROVCHECK-010`, `D345`).
 
 ## Sealed components (`D170`)
 
@@ -71,7 +69,6 @@ rather than reading `component.md` themselves. It reads
 reads the sealed manifest (`provenance-writer`'s
 `interface/data/SealedProvenance.md`) and compares it to the current
 key (`R-PROVCHECK-008`). Both are read-only and make no network or
-model call. Any stand-in for `verifier-orchestrator` provides
-`GATE_VERSION`.
+model call.
 
 Implements: `specs/architecture/cli-conventions.md`, `specs/architecture/asset-kinds.md`

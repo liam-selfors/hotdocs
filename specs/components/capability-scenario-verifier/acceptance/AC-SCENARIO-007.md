@@ -14,6 +14,11 @@ When the capability's own specs/product file changes
 Then check_capability_provenance gives hit false
 
 Given the same hit
+When the planted python adapter's provision reports versions
+  {"python": "3.14.7"} instead of {}
+Then check_capability_provenance gives hit false
+
+Given the same hit
 When a file in a component that does not realize the capability
   changes, or a __pycache__ file in a realizing component appears
 Then check_capability_provenance still gives hit true

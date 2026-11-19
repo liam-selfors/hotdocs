@@ -19,7 +19,7 @@
   a kind lacks an adapter (reason `unknown asset kind:
   <kind>`, `python` included), when `provision` reports `ok` false (reason: its `reason`,
   verbatim), or when the manifest's `assets` differs from it (reason
-  `assets differ`), the kinds checked in the value's order. A manifest with no `assets` field, or `null`,
+  `assets differ`, or `R-PROVCHECK-010`'s `environment differs`), the kinds checked in the value's order. A manifest with no `assets` field, or `null`,
   compares as `[]`, which never equals a current value, so it misses
   with `assets differ`: it predates `D344` and was verified without
   the `python` entry.

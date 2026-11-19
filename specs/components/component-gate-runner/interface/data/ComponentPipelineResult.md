@@ -4,6 +4,7 @@
 {
   "component_id": "comp-foo",
   "provenance_hit": false,
+  "reverified": false,
   "blocked": true,
   "block_reason": "verification_failed",
   "model_call_error": null,
@@ -31,15 +32,16 @@ On a non-sealed miss (`R-GATE-004`), `verification` is the loop's last
 loop's `attempts` list. When the loop's `passed` is true, `blocked` is
 `false` and `block_reason` and `model_call_error` are `null`, whatever
 its `generation_result` holds. Otherwise `blocked` is `true` and
-`block_reason` comes from the last attempt's `outcome`:
-`generation_failed` gives `"model_call_error"`, `surface_failed`
-`"surface_check_failed"`, `refused` `"refused"`, and
-`verification_failed` `"test_authoring_failed"` when every `"fail"`
-criterion of that attempt's report has `failure_origin` `"test"`, else
-`"verification_failed"`; `stop_reason` is never consulted.
+`block_reason` comes from the last attempt's `outcome` (`R-GATE-004`);
+`stop_reason` is never consulted.
 `model_call_error` is the loop's last `generation_result.model_call_error`
 (a `{category, message}` value) when `block_reason` is
 `"model_call_error"`, else `null`.
+
+After a passing re-verification (`R-GATE-011`), `reverified` is
+`true`, `blocked` is `false`, `attempts` is `[]`, `verification` and
+the scans are the re-verification's, and the other fields are `null`
+or `false`. On every other path `reverified` is `false`.
 
 For a sealed component (`R-GATE-007`), `verification` is `verify`'s
 report and `attempts` is `[]`; `blocked` is `true`, with `block_reason`

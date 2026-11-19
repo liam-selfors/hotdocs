@@ -6,10 +6,8 @@ hotdocs generate <component-id> --model=<model-id> [--seed=<n>] \
   [--allow-unisolated-exec] [--repo-root=<dir>] [--format=json|text]
 ```
 
-The one command a developer uses to (re)generate a component, distinct
-from `hotdocs verify`'s read-only check (`D91`/`D93`). Run it across a
-multi-component change in `depends_on` order; this component does not
-sequence multiple calls itself (`R-ASSEMBLE-011`).
+The one command a developer uses to (re)generate a component
+(`D91`/`D93`), one component per call.
 
 `main(argv)` receives `argv` beginning `["generate", <component-id>,
 ...]`. Every flag takes its value either as `--flag=value` or as the
@@ -28,8 +26,8 @@ next argument.
 - `--repo-root` — default the current directory.
 - `--format` — `json` prints the `ComponentPipelineResult` as JSON,
   converted as `specs/architecture/json-values.md` gives (`D318`);
-  `text` (default) prints the component id, `provenance hit` or the
-  `block_reason` (`passed` when not blocked), one line per attempt,
+  `text` (default) prints the component id, `provenance hit`,
+  `reverified` (`R-GATE-011`) or the `block_reason` (`passed` when not blocked), one line per attempt,
   `attempt <number>: <outcome>`, and each scan's
   `blocked`/`flagged`; then `model_call_error: <category>: <message>`
   when one is set, `<criterion id>: <failure_detail.message>` for each

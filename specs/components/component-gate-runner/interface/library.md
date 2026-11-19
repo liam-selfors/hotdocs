@@ -17,7 +17,8 @@ run_component_gates(
 unchanged, and `repo_root` goes to every dependency exactly as
 received, never resolved or converted. `run_component_gates` validates
 nothing itself and reads no file except to count
-`.hotdocs/attempts/<component_id>/` (`0` when absent): every fact about
+`.hotdocs/attempts/<component_id>/` (`0` when absent) and, after a
+passing re-verification, the committed manifest: every other fact about
 the component comes from its dependencies.
 
 Each dependency `<slug>` is loaded from
@@ -36,6 +37,18 @@ are, in this order:
    key.spec_bundle_hash, key.gate_versions, repo_root)` — on a
    short-circuiting hit (`interface/data/ComponentPipelineResult.md`),
    nothing below is called
+1a. only on a miss whose `reason` is `"environment differs"`
+   (`R-GATE-011`): `make_closures` and `verify` as a sealed component's
+   steps 1 and 2 below, then both scans as in 4. If they pass (`R-GATE-011`), read
+   `<repo_root>/gen/<slug>/.provenance.json` as JSON (`<slug>` is
+   `component_id` without `comp-`), call `write_provenance` as in 5
+   with `verification_report`, `license_scan_result` and
+   `secret_scan_result` these three results, `attempts` and
+   `attempt_history` the manifest's, and `generation_result`
+   `{"files": {}, "spec_bundle_hash": key.spec_bundle_hash}` plus the
+   manifest's `model_pin` as `model`, its `prompt_version` and
+   `retry_feedback`, and each field of its `generation` but
+   `generator_version`; nothing below is called. Otherwise go on to 2
 2. `spec-bundle-assembler`'s `assemble(component_id,
    repo_root=repo_root, mode="cold")`
 3. `generation-loop`'s `run_attempts(component_id, bundle, repo_root,
@@ -75,21 +88,6 @@ this order, and never `run_attempts`:
 No dependency name beyond these lists is used: `ProvenanceInputs` is a
 dict, never a class from `provenance-writer`. Results from every
 dependency are read with dual dict-or-attribute access.
-
-Test fixtures: each dependency is a stand-in at
-`<repo_root>/gen/<slug>/<module>.py` (`provenance-checker/provenance_checker.py`,
-`spec-bundle-assembler/spec_bundle_assembler.py`,
-`generation-loop/generation_loop.py`,
-`provenance-tracker/provenance_tracker.py`,
-`verifier-orchestrator/verifier_orchestrator.py`,
-`license-scanner/license_scanner.py`, `secret-scanner/secret_scanner.py`,
-`provenance-writer/provenance_writer.py`) providing the names above and
-recording each call, with its arguments, to a file. A stand-in may
-return plain dicts; a `run_attempts` stand-in returns a dict with
-`AttemptLoopResult`'s keys and calls `on_attempt` only when its test
-says so. A CLI test's `repo_root` also holds
-`specs/components/<slug>/component.md` (`interface/cli.md`);
-`run_component_gates` itself needs none.
 
 CLI: see `interface/cli.md`.
 

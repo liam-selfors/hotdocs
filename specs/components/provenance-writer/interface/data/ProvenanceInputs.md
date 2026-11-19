@@ -21,7 +21,8 @@ exactly those keys (`generation-loop`'s `AttemptLoopResult`); it MAY be
 absent, meaning `[]`. `generation_result` is always populated; its
 `files`/`model_call_error`/`refused` fields carry whether a candidate
 exists. `verification_report` is `null` whenever `generation_result.files`
-is empty and populated otherwise; a `null` report alongside non-empty
+is empty, except when committed code is re-verified (`D345`), and
+populated otherwise; a `null` report alongside non-empty
 `files` is a missing upstream result, so `write_provenance` raises
 `MissingInputError` and writes no manifest. A manifest is thus written
 for a component that never reached verification too.

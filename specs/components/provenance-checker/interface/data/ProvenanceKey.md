@@ -13,7 +13,7 @@
   },
   "assets": [{"kind": "python", "path": ".",
               "definition_sha256": "sha256:...", "adapter_sha256": "sha256:...",
-              "versions": {"python": "3.12"}, "lockfile_sha256": null},
+              "versions": {"python": "3.14.6", "packages": "sha256:..."}, "lockfile_sha256": null},
              {"kind": "javascript", "path": "static/app.js",
               "definition_sha256": "sha256:...", "adapter_sha256": "sha256:...",
               "versions": {"node": "24.1.0"}, "lockfile_sha256": null}]

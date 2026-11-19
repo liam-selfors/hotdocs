@@ -19,5 +19,5 @@ component never recomputes or summarizes them.
 `reason` is `null` on a hit; on a miss, the first that applies, in this
 order: `no manifest`, `spec_bundle_hash differs`, `gate_versions differ`,
 then `R-PROVCHECK-009`'s `unknown asset kind: <kind>`, the adapter's
-provision reason, or `assets differ`, then `llm-judge results not
-trusted`.
+provision reason, or `R-PROVCHECK-010`'s `environment differs` or
+else `assets differ`, then `llm-judge results not trusted`.

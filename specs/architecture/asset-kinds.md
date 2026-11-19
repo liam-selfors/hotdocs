@@ -167,7 +167,10 @@ instead, verified by evaluation, regenerating only the adapter.
   once per distinct kind.
   `provenance-writer` copies it into the manifest's `assets` and
   `provenance-checker`'s key includes it, so a changed definition,
-  adapter, program version or lockfile makes the component miss.
+  adapter, program version or lockfile makes the component miss. A miss
+  whose only differences are assets' `versions` or `lockfile_sha256` is
+  `environment differs`, and `component-gate-runner` re-verifies the
+  committed code before it regenerates anything (`D345`).
 
 ## The adapter interface
 

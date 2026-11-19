@@ -23,7 +23,7 @@ was reused (`R-SCENARIO-004`). The shape mirrors `provenance-checker`'s
 ```json
 {
   "capability_id": "P-ZERO-EDIT",
-  "gate_version": "capability_scenario_verifier@2.1.0",
+  "gate_version": "capability_scenario_verifier@2.2.0",
   "content_hash": "sha256:...",
   "realizing_components": ["comp-cache-manager"],
   "capability_scenario_report": { "P-ZERO-EDIT": { "overall": "pass", "scenarios": [] } },

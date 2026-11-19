@@ -15,7 +15,8 @@ When check_provenance("comp-foo", "H", {}, repo_root) is called
 Then hit is true and reason is null
 
 Given that manifest, and separately: the definition file's bytes
-  changed; the adapter's provision reporting versions {"fakec": "2.1.0"}
+  changed; a comment line appended to kind_fake.py, both after the
+  manifest was written
 Then hit is false and reason is "assets differ"
 
 Given the adapter's provision reporting ok false and reason

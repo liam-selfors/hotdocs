@@ -3,9 +3,6 @@
 Covers: R-GATE-001
 Kind: generated-test
 
-Every dependency is a stand-in as `interface/library.md`'s test
-fixtures state; the faked `current_sealed_key` returns `None`.
-
 ```gherkin
 Given a faked provenance-checker whose current_provenance_key returns
   spec_bundle_hash "sha256:k" and gate_versions {"verifier": "v@1"},

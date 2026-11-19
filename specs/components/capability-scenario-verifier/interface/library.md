@@ -4,7 +4,7 @@
 run_capability_scenarios(blast_radius: list[str], repo_root: Path, judge=None, test_author=None) -> CapabilityScenarioReport
 check_capability_provenance(capability_id: str, repo_root: Path) -> CapabilityProvenanceCheckResult
 run_capability_gates(capability_id: str, repo_root: Path, model: str | None = None, seed: int = 0, llm_backend=None) -> CapabilityProvenanceCheckResult
-GATE_VERSION: str  # "capability_scenario_verifier@2.1.0" (R-SCENARIO-006)
+GATE_VERSION: str  # "capability_scenario_verifier@2.2.0" (R-SCENARIO-006)
 class UnknownCapabilityError(ValueError)
 class ModelRequiredError(ValueError)
 ```

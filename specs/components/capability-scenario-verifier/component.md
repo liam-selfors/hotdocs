@@ -17,18 +17,14 @@ Runs the capability scenarios of every product capability whose
 `realizes`-set intersects a merge's blast radius, against the real,
 fully assembled `gen/` output produced by that merge — the permanent,
 cross-component backstop for behavioral risk no `interface/`-level
-diffing can fully rule out by documentation alone. Structurally, the
-cross-component analog of what `verifier-orchestrator` already does
-per-component: same dispatch mechanisms
-(`criterion-compiler`/`test_author`/`judge`), one scope level up.
+diffing can fully rule out by documentation alone. The cross-component analog
+of `verifier-orchestrator`, with the same dispatch mechanisms.
 
 ## Rationale
 
 Covers `interface/guarantees/` too (`D2`), for the reason `R-IMPACT-008`
 states. Extracted from `merge-orchestrator` (`D14`) when that
-component's fan-out and word caps crowded together. Renamed from
-"golden-scenario-verifier": a capability-level analog of a component's
-acceptance criteria, one scope level up.
+component's fan-out and word caps crowded together.
 
 ## Scope
 
@@ -74,8 +70,7 @@ See `constraints.md`.
 
 ## Open questions
 
-None — extracted whole from `merge-orchestrator`'s already-resolved
-`R-MERGE-014`/`R-MERGE-020`, not a fresh design.
+None.
 
 ## Change log
 
@@ -95,3 +90,5 @@ None — extracted whole from `merge-orchestrator`'s already-resolved
 - `D344`: `R-SCENARIO-005`, `AC-SCENARIO-013`: tests run under the
   `python` adapter's `interpreter`; the key covers the Python lock;
   `capability_scenario_verifier@2.1.0`.
+- `D345`: the key ends with the `python` provision's `versions`
+  (`R-SCENARIO-006`); `capability_scenario_verifier@2.2.0`.

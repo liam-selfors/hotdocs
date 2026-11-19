@@ -6,7 +6,5 @@
   not match the supplied ones, on `R-PROVCHECK-009`'s asset misses, or
   when they match but R-PROVCHECK-002's
   `llm-judge`/
-  `VAR-TRUST-JUDGE-PROVENANCE` exception applies. A miss here always
-  means the caller MUST run the full generation/verification/scan
-  sequence for that component — there is no partial-credit result that
-  trusts some of a manifest's fields while re-deriving others.
+  `VAR-TRUST-JUDGE-PROVENANCE` exception applies. No result trusts
+  some of a manifest's fields while re-deriving others.

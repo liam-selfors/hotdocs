@@ -32,9 +32,18 @@ module itself exists is the generator's own `missing_module` check.
 
 ## Environment
 
-Python, version `<major>.<minor>` from `<interpreter> -c "import sys;
-print('%d.%d' % sys.version_info[:2])"`, so a patch release changes no
-provenance key. A project that commits
+Python. `versions` is `{"python": <platform.python_version()>,
+"packages": "sha256:<hex>"}`, both read by running the reported
+interpreter with `-I` and a fixed program (`comp-kind-python`), the
+packages hash over the environment's installed distributions as sorted,
+distinct `<normalized name>==<version>` lines joined with `\n`, so a
+package nobody declared counts too (`D345`). A project may pin its
+interpreter in `environments/python/python-version`: its stripped text
+is a version prefix (`3.14` or `3.14.6`), and the running interpreter's
+full version must equal it or start with it followed by `.`, else
+`provision` fails with `python environment: needs Python <pin>, found
+<version>` before anything is created, with or without a lock (a lock's
+environment is built from the running interpreter). A project that commits
 `environments/python/requirements.lock` gets an environment of its own:
 `provision`, holding an exclusive lock on
 `<repo_root>/.hotdocs/env/python.lock` (`fcntl.flock`; POSIX only, no
@@ -44,7 +53,7 @@ with `<running interpreter> -m venv --clear` and installs the lock with
 (pip's version notice would otherwise end its stderr) whenever the
 environment's interpreter is missing or not executable, or the marker
 `<repo_root>/.hotdocs/env/python/.lock-sha256` does not record both the
-lock's SHA-256 and the running interpreter's `<major>.<minor>` (then
+lock's SHA-256 and the running interpreter's full version (then
 records them), and reports `interpreter` the environment's `bin/python` (`Scripts\python.exe`
 on Windows). The lock MUST pin `pytest`, since criteria run under it.
 With no lock, the environment is the one `hotdocs` runs in:

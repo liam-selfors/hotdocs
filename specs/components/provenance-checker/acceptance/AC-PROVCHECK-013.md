@@ -3,8 +3,7 @@
 Covers: R-PROVCHECK-008
 Kind: generated-test
 
-Fixture and valid manifest as in AC-PROVCHECK-012 (a valid, current manifest
-passes). Each scenario changes exactly one thing in an otherwise valid and
+Fixture and valid manifest: `testing.md`, "Sealed manifests". Each scenario changes exactly one thing in an otherwise valid and
 current manifest, written as JSON, and calls check_sealed_provenance.
 
 ```gherkin
