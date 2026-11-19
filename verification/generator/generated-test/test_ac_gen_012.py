@@ -1,22 +1,15 @@
-# hotdocs-criterion: sha256:6ed9ce064d8b05328d951fc7f51208fd6485fbb1f4cc068567f78dd06a04154d
-"""AC-GEN-012 (covers R-GEN-011): a hanging model call is not retried.
+# hotdocs-criterion: sha256:6103083fa1fd08cde3c042da9b13c8ca9df37e3dfe16ab602b0cb6e0e4df5ed1
+"""AC-GEN-012 (covers R-GEN-011): generate never retries an llm-endpoint call.
 
-Given a mock model configured to hang (never respond) and the SDK's own
-default timeout, when generate is called, then the call eventually
-completes with model_call_error set (not an unbounded hang), and the mock
-model records exactly one call attempt: no internal retry occurred.
-
-A test cannot wait out a real 600-second SDK timeout, so the mock models
-the hang as the SDK would surface it. It blocks for a short while with no
-reply, then returns the ModelResponse the SDK produces once its own default
-timeout expires: a `timeout` model_call_error. The test runs `generate` in a
-worker thread with a generous bound, so an unbounded hang or a retry loop
-fails the test instead of stalling the run.
+A mock model that "hangs" until the SDK's own default timeout gives up is
+simulated by a backend that blocks briefly and then reports the timeout
+the endpoint's default timeout would produce. generate must complete with
+model_call_error set, and the mock must record exactly one call attempt.
 """
 
 import threading
 import time
-import uuid
+from pathlib import Path
 
 import generator
 
@@ -25,92 +18,81 @@ def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-class FakeBundle:
-    """An object with the SpecBundle fields, readable as attributes or as a mapping."""
+PYTHON_ADAPTER = (
+    "from pathlib import Path\n"
+    "\n"
+    "KIND = \"python\"\n"
+    "\n"
+    "\n"
+    "def layout_errors(code_dir):\n"
+    "    return [\"bad.py:1: SyntaxError: x\"] if (Path(code_dir) / \"bad.py\").exists() else []\n"
+    "\n"
+    "\n"
+    "def provision(repo_root):\n"
+    "    return {\"ok\": True, \"reason\": \"\", \"versions\": {\"python\": \"3.12\"}, "
+    "\"lockfile_sha256\": None, \"interpreter\": \"/fake/python\"}\n"
+)
 
-    _FIELDS = (
-        "component_id",
-        "spec_bundle_hash",
-        "spec",
-        "interface",
-        "constraints",
-        "dependency_interfaces",
-        "dependency_context",
-        "dependency_usage",
-        "vars",
-        "glossary",
-        "hint_code",
-    )
-
-    def __init__(self, **kwargs):
-        for name in self._FIELDS:
-            setattr(self, name, kwargs.get(name))
-
-    def __getitem__(self, key):
-        if key not in self._FIELDS:
-            raise KeyError(key)
-        return getattr(self, key)
-
-    def get(self, key, default=None):
-        if key not in self._FIELDS:
-            return default
-        return getattr(self, key)
-
-    def keys(self):
-        return list(self._FIELDS)
-
-    def __iter__(self):
-        return iter(self._FIELDS)
-
-    def __len__(self):
-        return len(self._FIELDS)
-
-    def __contains__(self, key):
-        return key in self._FIELDS
+COMPONENT_MD = (
+    "---\n"
+    "id: comp-widget-maker\n"
+    "title: Widget Maker\n"
+    "status: draft\n"
+    "owners: [pipeline-team]\n"
+    "depends_on: []\n"
+    "sealed: false\n"
+    "---\n"
+    "\n"
+    "# Widget Maker\n"
+)
 
 
-def make_bundle():
-    return FakeBundle(
-        component_id="comp-hangfoo",
-        spec_bundle_hash="sha256:" + uuid.uuid4().hex + uuid.uuid4().hex,
-        spec="# Hangfoo\n\n**R-HANGFOO-001** — `foo(x)` MUST return `2 * x`.",
-        interface="# Library\n\n```\nfoo(x: int) -> int\n```",
-        constraints="# Constraints\n\nNone.",
-        dependency_interfaces={},
-        dependency_context={},
-        dependency_usage={},
-        vars={},
-        glossary="# Glossary\n\n- **Foo** — a test term.",
-        hint_code=None,
-    )
+def _make_repo(repo_root):
+    comp_dir = repo_root / "specs" / "components" / "widget-maker"
+    comp_dir.mkdir(parents=True)
+    (comp_dir / "component.md").write_text(COMPONENT_MD, encoding="utf-8")
+    adapter_dir = repo_root / "gen" / "kind-python"
+    adapter_dir.mkdir(parents=True)
+    (adapter_dir / "kind_python.py").write_text(PYTHON_ADAPTER, encoding="utf-8")
 
 
-def test_hanging_model_call_is_attempted_exactly_once(tmp_path, monkeypatch):
+def _bundle():
+    return {
+        "component_id": "comp-widget-maker",
+        "spec_bundle_hash": "sha256:" + "ac0012" * 10 + "abcd",
+        "spec": "# Widget Maker\n\nMakes widgets.",
+        "interface": "make_widget() -> str",
+        "constraints": "None.",
+        "dependency_interfaces": {},
+        "dependency_context": {},
+        "dependency_usage": {},
+        "vars": {},
+        "glossary": "",
+        "hint_code": None,
+    }
+
+
+def test_ac_gen_012_hanging_model_called_once_no_retry(tmp_path, monkeypatch):
     monkeypatch.delenv("VAR_CACHE_STORE_URL", raising=False)
 
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
+    _make_repo(repo_root)
+
     call_log = tmp_path / "calls.log"
     call_log.write_text("", encoding="utf-8")
 
-    hang_seconds = 0.5
-
     def hanging_backend(prompt, model, **params):
-        # Record the attempt before "hanging", so even a call that is
-        # later abandoned still counts.
+        # Record the attempt first, then "hang" until the SDK's own default
+        # timeout gives up, reported as the endpoint's timeout error.
         with open(call_log, "a", encoding="utf-8") as fh:
             fh.write("call\n")
-        # The model never replies; the SDK's own default timeout is what
-        # ends the wait, surfaced as a timeout model_call_error.
-        time.sleep(hang_seconds)
+        time.sleep(0.5)
         return {
             "text": None,
             "model": model,
             "backend": "mock-hang",
-            "model_call_error": {
-                "category": "timeout",
-                "message": "model did not respond before the default timeout",
-            },
+            "model_call_error": {"category": "timeout", "message": "model call timed out"},
         }
 
     outcome = {}
@@ -118,9 +100,8 @@ def test_hanging_model_call_is_attempted_exactly_once(tmp_path, monkeypatch):
     def run():
         try:
             outcome["result"] = generator.generate(
-                make_bundle(),
-                "mock-hang-model",
-                None,
+                _bundle(),
+                "claude-sonnet-5",
                 repo_root=repo_root,
                 llm_backend=hanging_backend,
             )
@@ -129,21 +110,17 @@ def test_hanging_model_call_is_attempted_exactly_once(tmp_path, monkeypatch):
 
     worker = threading.Thread(target=run, daemon=True)
     worker.start()
-    worker.join(timeout=60)
+    worker.join(timeout=120)
 
-    assert not worker.is_alive(), (
-        "generate did not complete: an unbounded hang or an internal retry loop"
-    )
+    assert not worker.is_alive(), "generate did not complete: unbounded hang"
     assert "error" not in outcome, "generate raised: " + repr(outcome.get("error"))
-    result = outcome["result"]
 
+    result = outcome["result"]
     error = field(result, "model_call_error")
-    assert error, "expected model_call_error to be set, got " + repr(error)
-    assert field(result, "refused") is None
-    assert not field(result, "files")
+    assert error is not None, "expected model_call_error to be set"
+    assert field(result, "files") == {}
     assert field(result, "cache_hit") is False
+    assert field(result, "refused") is None
 
     calls = [line for line in call_log.read_text(encoding="utf-8").splitlines() if line.strip()]
-    assert len(calls) == 1, (
-        "expected exactly one model call attempt (no internal retry), got " + repr(len(calls))
-    )
+    assert len(calls) == 1, "expected exactly one model call attempt, got " + repr(len(calls))

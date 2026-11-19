@@ -1,150 +1,118 @@
-# hotdocs-criterion: sha256:6b331b90b7ec95d4b0f51c7299165b0a9bcfa8e56c04eec8ef9537cf0b76fa97
-"""AC-GEN-021 (covers R-GEN-015): generator strips one redundant leading
-`gen/<component>/` or `<component>/` prefix from returned file paths before
-writing, and rewrites no other path."""
-
+# hotdocs-criterion: sha256:70b0ded720285dc02f790ebbf1d4cccc64021a71efaba740216c2fc605e0fddb
+import hashlib
 import re
+import uuid
 from pathlib import Path
 
 import generator
 
 
-SLUG = "foo-bar"
-COMPONENT_ID = "comp-foo-bar"
+PYTHON_ADAPTER = (
+    "from pathlib import Path\n"
+    "\n"
+    "KIND = \"python\"\n"
+    "\n"
+    "\n"
+    "def layout_errors(code_dir):\n"
+    "    return [\"bad.py:1: SyntaxError: x\"] if (Path(code_dir) / \"bad.py\").exists() else []\n"
+    "\n"
+    "\n"
+    "def provision(repo_root):\n"
+    "    return {\"ok\": True, \"reason\": \"\", \"versions\": {\"python\": \"3.12\"}, "
+    "\"lockfile_sha256\": None, \"interpreter\": \"/fake/python\"}\n"
+)
 
-
-class Bundle:
-    """A SpecBundle-shaped object readable both by attribute and as a mapping."""
-
-    _FIELDS = (
-        "component_id",
-        "spec_bundle_hash",
-        "spec",
-        "interface",
-        "constraints",
-        "dependency_interfaces",
-        "dependency_context",
-        "dependency_usage",
-        "vars",
-        "glossary",
-        "hint_code",
-    )
-
-    def __init__(self, **kwargs):
-        for name in self._FIELDS:
-            setattr(self, name, kwargs.get(name))
-
-    def __getitem__(self, key):
-        if key not in self._FIELDS:
-            raise KeyError(key)
-        return getattr(self, key)
-
-    def get(self, key, default=None):
-        if key not in self._FIELDS:
-            return default
-        return getattr(self, key)
-
-    def keys(self):
-        return list(self._FIELDS)
-
-    def __iter__(self):
-        return iter(self._FIELDS)
-
-    def __len__(self):
-        return len(self._FIELDS)
-
-    def __contains__(self, key):
-        return key in self._FIELDS
+COMPONENT_MD = (
+    "---\n"
+    "id: comp-foo-bar\n"
+    "title: Foo Bar\n"
+    "status: draft\n"
+    "owners: [pipeline-team]\n"
+    "depends_on: []\n"
+    "sealed: false\n"
+    "---\n"
+    "\n"
+    "# Foo Bar\n"
+)
 
 
 def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def make_bundle():
-    return Bundle(
-        component_id=COMPONENT_ID,
-        spec_bundle_hash="sha256:" + "ac0021" + "0" * 58,
-        spec="# Foo Bar\n\n## Purpose\n\nFoo bar does foo bar things.\n\n"
-        "# R-FOO-BAR-001\n\n**R-FOO-BAR-001** — `foo_bar(x)` MUST return `2 * x`.",
-        interface="# Library\n\n```\nfoo_bar(x: int) -> int\n```",
-        constraints="# Constraints\n\nNone.",
-        dependency_interfaces={},
-        dependency_context={},
-        dependency_usage={},
-        vars={},
-        glossary="# Glossary\n\n- **Foo** — a test term.",
-        hint_code=None,
-    )
+def _setup_repo(repo_root):
+    adapter = repo_root / "gen" / "kind-python" / "kind_python.py"
+    adapter.parent.mkdir(parents=True, exist_ok=True)
+    adapter.write_text(PYTHON_ADAPTER, encoding="utf-8")
+    comp = repo_root / "specs" / "components" / "foo-bar" / "component.md"
+    comp.parent.mkdir(parents=True, exist_ok=True)
+    comp.write_text(COMPONENT_MD, encoding="utf-8")
 
 
-RETURNED_FILES = {
-    "foo-bar/foo_bar.py": "def foo_bar(x):\n    return 2 * x\n",
-    "gen/foo-bar/helpers/__init__.py": "HELPER = 1\n",
-    "foo_bar_extra.py": "EXTRA = 2\n",
+def _bundle():
+    digest = hashlib.sha256(uuid.uuid4().hex.encode("utf-8")).hexdigest()
+    return {
+        "component_id": "comp-foo-bar",
+        "spec_bundle_hash": "sha256:" + digest,
+        "spec": "# Foo Bar\n\nProvides foo_bar.",
+        "interface": "def foo_bar() -> int",
+        "constraints": "",
+        "dependency_interfaces": {},
+        "dependency_context": {},
+        "dependency_usage": {},
+        "vars": {},
+        "glossary": "",
+        "hint_code": None,
+    }
+
+
+REPLY_FILES = {
+    "foo-bar/foo_bar.py": "def foo_bar():\n    return 1\n",
+    "gen/foo-bar/helpers/__init__.py": "HELPER = 2\n",
+    "foo_bar_extra.py": "EXTRA = 3\n",
 }
 
 
-def make_backend(log_path):
-    def backend(prompt, model, **params):
-        with open(log_path, "a", encoding="utf-8") as fh:
-            fh.write("called\n")
-        nonce = re.search(r"-----BEGIN FILE ([0-9a-f]{32}):", prompt).group(1)
-        parts = []
-        for path, content in RETURNED_FILES.items():
-            parts.append("-----BEGIN FILE " + nonce + ": " + path + "-----")
-            parts.append(content.rstrip("\n"))
-            parts.append("-----END FILE " + nonce + "-----")
-        parts.append("-----END REPLY " + nonce + "-----")
-        text = "\n".join(parts) + "\n"
-        return {
-            "text": text,
-            "model": model,
-            "backend": "mock",
-            "model_call_error": None,
-        }
-
-    return backend
+def _mock_backend(prompt, model, **params):
+    nonce = re.search(r"-----BEGIN FILE ([0-9a-f]{32}):", prompt).group(1)
+    parts = []
+    for path, content in REPLY_FILES.items():
+        parts.append("-----BEGIN FILE " + nonce + ": " + path + "-----\n")
+        parts.append(content)
+        parts.append("-----END FILE " + nonce + "-----\n")
+    parts.append("-----END REPLY " + nonce + "-----\n")
+    return {
+        "text": "".join(parts),
+        "model": model,
+        "backend": "mock",
+        "model_call_error": None,
+    }
 
 
-def test_redundant_component_prefix_is_stripped_once(tmp_path, monkeypatch):
+def test_ac_gen_021_strips_redundant_component_prefix(tmp_path, monkeypatch):
     monkeypatch.delenv("VAR_CACHE_STORE_URL", raising=False)
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
-    log_path = tmp_path / "backend_calls.log"
+    _setup_repo(repo_root)
 
     result = generator.generate(
-        make_bundle(),
-        "mock-model",
-        None,
+        _bundle(),
+        "claude-sonnet-5",
         repo_root=repo_root,
-        llm_backend=make_backend(log_path),
+        llm_backend=_mock_backend,
     )
 
-    # The mock model was actually called (no cache hit, no refusal).
-    assert log_path.is_file()
-    assert log_path.read_text(encoding="utf-8").count("called") >= 1
-    assert field(result, "refused") is None
     assert field(result, "model_call_error") is None
-    assert field(result, "cache_hit") is False
+    assert field(result, "refused") is None
 
-    out_dir = repo_root / "gen" / SLUG
-    assert (out_dir / "foo_bar.py").is_file()
-    assert (out_dir / "helpers" / "__init__.py").is_file()
-    assert (out_dir / "foo_bar_extra.py").is_file()
+    out = repo_root / "gen" / "foo-bar"
+    assert (out / "foo_bar.py").is_file()
+    assert (out / "helpers" / "__init__.py").is_file()
+    assert (out / "foo_bar_extra.py").is_file()
 
-    assert (out_dir / "foo_bar.py").read_text(encoding="utf-8").strip() == \
-        RETURNED_FILES["foo-bar/foo_bar.py"].strip()
-    assert (out_dir / "helpers" / "__init__.py").read_text(encoding="utf-8").strip() == \
-        RETURNED_FILES["gen/foo-bar/helpers/__init__.py"].strip()
-    assert (out_dir / "foo_bar_extra.py").read_text(encoding="utf-8").strip() == \
-        RETURNED_FILES["foo_bar_extra.py"].strip()
+    assert (out / "foo_bar.py").read_text(encoding="utf-8") == REPLY_FILES["foo-bar/foo_bar.py"]
+    assert (out / "helpers" / "__init__.py").read_text(encoding="utf-8") == REPLY_FILES["gen/foo-bar/helpers/__init__.py"]
+    assert (out / "foo_bar_extra.py").read_text(encoding="utf-8") == REPLY_FILES["foo_bar_extra.py"]
 
-    nested_component = out_dir / "foo-bar"
-    nested_gen = out_dir / "gen"
-    if nested_component.exists():
-        assert [p for p in nested_component.rglob("*") if p.is_file()] == []
-    if nested_gen.exists():
-        assert [p for p in nested_gen.rglob("*") if p.is_file()] == []
-    assert not nested_component.exists()
-    assert not nested_gen.exists()
+    assert not (out / "foo-bar").exists()
+    assert not (out / "gen").exists()

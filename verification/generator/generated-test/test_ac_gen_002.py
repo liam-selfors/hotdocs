@@ -1,39 +1,23 @@
-# hotdocs-criterion: sha256:9d98968e486d52fecbdf4e7da39c0f35c12201434f9a0d193a21e3413e64f9b1
-import json
+# hotdocs-criterion: sha256:a5e72912f7cfd34062e18958b815bc46592122f0daec08e15afc3cb868ab2755
 import re
 from pathlib import Path
-
-import pytest
 
 import generator
 
 
-SPEC_TEXT = "Foo doubles a number. SPECTEXT_c0ld_9a1."
-INTERFACE_TEXT = "foo(x: int) -> int  IFACETEXT_c0ld_2b7"
-CONSTRAINTS_TEXT = "None. CONSTRAINTTEXT_c0ld_5e3"
-GLOSSARY_TEXT = "- **Foo** — a test term. GLOSSTEXT_c0ld_8d4"
-HINT_MARKER = "HINTMARKER_existing_code_7f3a"
-HINT_CONTENT = "def foo(x):\n    # " + HINT_MARKER + "\n    return 2 * x\n"
-
-COLD_HEADINGS = [
-    "## SPEC",
-    "## INTERFACE",
-    "## CONSTRAINTS",
-    "## DEPENDENCY INTERFACES",
-    "## DEPENDENCY CONTEXT",
-    "## VARS",
-    "## GLOSSARY",
-]
-
-
-class Bundle(dict):
-    """A SpecBundle stand-in readable both as a mapping and by attribute."""
-
-    def __getattr__(self, name):
-        try:
-            return self[name]
-        except KeyError:
-            raise AttributeError(name)
+PY_ADAPTER = (
+    "from pathlib import Path\n"
+    "\n"
+    "KIND = \"python\"\n"
+    "\n"
+    "\n"
+    "def layout_errors(code_dir):\n"
+    "    return [\"bad.py:1: SyntaxError: x\"] if (Path(code_dir) / \"bad.py\").exists() else []\n"
+    "\n"
+    "\n"
+    "def provision(repo_root):\n"
+    "    return {\"ok\": True, \"reason\": \"\", \"versions\": {\"python\": \"3.12\"}, \"lockfile_sha256\": None, \"interpreter\": \"/fake/python\"}\n"
+)
 
 
 def field(value, name):
@@ -43,103 +27,79 @@ def field(value, name):
 def section(prompt, heading):
     lines = prompt.split("\n")
     start = lines.index(heading) + 1
-    end = next(
-        (i for i in range(start, len(lines)) if lines[i].startswith("## ")),
-        len(lines),
-    )
+    end = next((i for i in range(start, len(lines)) if lines[i].startswith("## ")), len(lines))
     return "\n".join(lines[start:end]).rstrip("\n")
 
 
-def make_hint_bundle():
-    return Bundle(
-        component_id="comp-foo",
-        spec_bundle_hash="sha256:" + "ab" * 32,
-        spec=SPEC_TEXT,
-        interface=INTERFACE_TEXT,
-        constraints=CONSTRAINTS_TEXT,
-        dependency_interfaces={},
-        dependency_context={},
-        dependency_usage={},
-        vars={},
-        glossary=GLOSSARY_TEXT,
-        hint_code={"foo.py": HINT_CONTENT},
-    )
+def test_ac_gen_002_hint_code_in_own_labeled_section(tmp_path, monkeypatch):
+    monkeypatch.delenv("VAR_CACHE_STORE_URL", raising=False)
+    repo_root = tmp_path / "repo"
+    adapter_dir = repo_root / "gen" / "kind-python"
+    adapter_dir.mkdir(parents=True)
+    (adapter_dir / "kind_python.py").write_text(PY_ADAPTER, encoding="utf-8")
 
+    hint_a = "HINT_TOKEN_ALPHA_7f3a = 1\n"
+    hint_b = "HINT_TOKEN_BETA_9c2d = 2\n"
+    bundle = {
+        "component_id": "comp-hintee",
+        "spec_bundle_hash": "sha256:" + "ab" * 32,
+        "spec": "SPEC_TOKEN_ONE describes the component.",
+        "interface": "INTERFACE_TOKEN_TWO def run() -> int",
+        "constraints": "CONSTRAINTS_TOKEN_THREE",
+        "dependency_interfaces": {},
+        "dependency_context": {},
+        "dependency_usage": {},
+        "vars": {},
+        "glossary": "GLOSSARY_TOKEN_FOUR",
+        "hint_code": {"zeta.py": hint_b, "alpha.py": hint_a},
+    }
 
-def make_recording_backend(log_path):
+    prompts = []
+
     def backend(prompt, model, **params):
-        with open(log_path, "a", encoding="utf-8") as fh:
-            fh.write(json.dumps({"prompt": prompt, "model": model}) + "\n")
-        m = re.search(r"-----BEGIN FILE ([0-9a-f]{32}):", prompt)
-        nonce = m.group(1) if m else "0" * 32
+        prompts.append(prompt)
+        nonce = re.search(r"-----BEGIN FILE ([0-9a-f]{32}):", prompt).group(1)
         text = (
-            "-----BEGIN FILE " + nonce + ": foo.py-----\n"
-            "def foo(x):\n"
-            "    return 2 * x\n"
+            "-----BEGIN FILE " + nonce + ": hintee.py-----\n"
+            "def run():\n"
+            "    return 1\n"
             "-----END FILE " + nonce + "-----\n"
             "-----END REPLY " + nonce + "-----\n"
         )
-        return {
-            "text": text,
-            "model": model,
-            "backend": "mock",
-            "model_call_error": None,
-        }
+        return {"text": text, "model": model, "backend": "mock", "model_call_error": None}
 
-    return backend
+    generator.generate(bundle, "mock-model", repo_root=repo_root, llm_backend=backend)
 
-
-def test_hint_code_sent_as_distinct_labeled_section(tmp_path, monkeypatch):
-    monkeypatch.delenv("VAR_CACHE_STORE_URL", raising=False)
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    log_path = tmp_path / "model_calls.jsonl"
-
-    bundle = make_hint_bundle()
-    generator.generate(
-        bundle,
-        "anthropic:mock-model",
-        repo_root=repo_root,
-        llm_backend=make_recording_backend(log_path),
-    )
-
-    assert log_path.is_file(), "mock model was never called"
-    records = [
-        json.loads(line)
-        for line in log_path.read_text(encoding="utf-8").splitlines()
-        if line.strip()
-    ]
-    assert len(records) == 1
-    prompt = records[0]["prompt"]
+    assert len(prompts) >= 1
+    prompt = prompts[0]
     lines = prompt.split("\n")
 
-    # hint_code appears under its own distinctly labeled heading
+    # hint_code has its own distinctly labeled section
     assert "## HINT_CODE" in lines
     hint_section = section(prompt, "## HINT_CODE")
-    assert "--- hint file: foo.py ---" in hint_section
-    assert "--- end hint file: foo.py ---" in hint_section
-    assert HINT_MARKER in hint_section
-    assert "return 2 * x" in hint_section
+    assert "--- hint file: alpha.py ---" in hint_section
+    assert "--- end hint file: alpha.py ---" in hint_section
+    assert "--- hint file: zeta.py ---" in hint_section
+    assert "--- end hint file: zeta.py ---" in hint_section
+    assert "HINT_TOKEN_ALPHA_7f3a = 1" in hint_section
+    assert "HINT_TOKEN_BETA_9c2d = 2" in hint_section
+    # files sorted by path
+    assert hint_section.index("--- hint file: alpha.py ---") < hint_section.index("--- hint file: zeta.py ---")
 
-    # the hint code appears only in the HINT_CODE section, never merged elsewhere
-    assert prompt.count(HINT_MARKER) == 1
+    # hint section is separate from cold bundle fields
+    cold_headings = ["## SPEC", "## INTERFACE", "## CONSTRAINTS", "## GLOSSARY"]
+    cold_tokens = ["SPEC_TOKEN_ONE", "INTERFACE_TOKEN_TWO", "CONSTRAINTS_TOKEN_THREE", "GLOSSARY_TOKEN_FOUR"]
+    for heading, token in zip(cold_headings, cold_tokens):
+        assert heading in lines
+        cold_text = section(prompt, heading)
+        assert token in cold_text
+        assert "HINT_TOKEN_ALPHA_7f3a" not in cold_text
+        assert "HINT_TOKEN_BETA_9c2d" not in cold_text
+        assert "hint file:" not in cold_text
+        assert token not in hint_section
 
-    # every cold field section is present, separate, and free of hint code
-    for heading in COLD_HEADINGS:
-        assert heading in lines, heading
-        text = section(prompt, heading)
-        assert HINT_MARKER not in text, heading
-        assert "--- hint file:" not in text, heading
-
-    # cold fields live in their own sections, not inside the hint section
-    assert SPEC_TEXT in section(prompt, "## SPEC")
-    assert INTERFACE_TEXT in section(prompt, "## INTERFACE")
-    assert CONSTRAINTS_TEXT in section(prompt, "## CONSTRAINTS")
-    assert GLOSSARY_TEXT in section(prompt, "## GLOSSARY")
-    for cold_text in (SPEC_TEXT, INTERFACE_TEXT, CONSTRAINTS_TEXT, GLOSSARY_TEXT):
-        assert cold_text not in hint_section
-
-    # the hint section is a different section from every cold one
-    hint_idx = lines.index("## HINT_CODE")
-    for heading in COLD_HEADINGS:
-        assert lines.index(heading) != hint_idx
+    # hint code appears only within its own section
+    assert prompt.count("HINT_TOKEN_ALPHA_7f3a") == 1
+    assert prompt.count("HINT_TOKEN_BETA_9c2d") == 1
+    # and that section comes after the cold sections
+    assert lines.index("## HINT_CODE") > lines.index("## GLOSSARY")

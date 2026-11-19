@@ -1,8 +1,25 @@
-# hotdocs-criterion: sha256:296ca67b813232de5b35276ac95c9d7957d6759f83c6ed98eccb12e43b394bf5
+# hotdocs-criterion: sha256:d5848df6bcecdea0a408c32ffc387b8da1f5b500a35b9a1f489672d9ea38b3f4
 import re
-from dataclasses import dataclass, field as dc_field, fields as dc_fields
+from dataclasses import dataclass, field as dc_field
+from pathlib import Path
 
 import generator
+
+
+PYTHON_ADAPTER = (
+    "from pathlib import Path\n"
+    "\n"
+    "KIND = \"python\"\n"
+    "\n"
+    "\n"
+    "def layout_errors(code_dir):\n"
+    "    return [\"bad.py:1: SyntaxError: x\"] if (Path(code_dir) / \"bad.py\").exists() else []\n"
+    "\n"
+    "\n"
+    "def provision(repo_root):\n"
+    "    return {\"ok\": True, \"reason\": \"\", \"versions\": {\"python\": \"3.12\"}, "
+    "\"lockfile_sha256\": None, \"interpreter\": \"/fake/python\"}\n"
+)
 
 
 @dataclass
@@ -20,24 +37,13 @@ class FakeSpecBundle:
     hint_code: object = None
 
     def __getitem__(self, key):
-        if key not in self.keys():
-            raise KeyError(key)
         return getattr(self, key)
 
     def get(self, key, default=None):
-        if key in self.keys():
-            return getattr(self, key)
-        return default
+        return getattr(self, key, default)
 
     def keys(self):
-        return [f.name for f in dc_fields(self)]
-
-    def __contains__(self, key):
-        return key in self.keys()
-
-
-def field(value, name):
-    return value[name] if isinstance(value, dict) else getattr(value, name)
+        return list(self.__dataclass_fields__.keys())
 
 
 def section(prompt, heading):
@@ -47,12 +53,19 @@ def section(prompt, heading):
     return "\n".join(lines[start:end]).rstrip("\n")
 
 
-def test_ac_gen_001_cold_prompt_built_from_bundle_sections(tmp_path, monkeypatch):
+def test_ac_gen_001_cold_prompt_sections(tmp_path, monkeypatch):
     monkeypatch.delenv("VAR_CACHE_STORE_URL", raising=False)
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    monkeypatch.chdir(repo_root)
+
+    adapter_dir = repo_root / "gen" / "kind-python"
+    adapter_dir.mkdir(parents=True)
+    (adapter_dir / "kind_python.py").write_text(PYTHON_ADAPTER, encoding="utf-8")
 
     bundle = FakeSpecBundle(
         component_id="comp-foo",
-        spec_bundle_hash="sha256:" + "ac9e0010" * 8,
+        spec_bundle_hash="sha256:" + "a1" * 32,
         spec="SPEC-MARK",
         interface="IFACE-MARK",
         constraints="CONS-MARK",
@@ -68,61 +81,30 @@ def test_ac_gen_001_cold_prompt_built_from_bundle_sections(tmp_path, monkeypatch
 
     def mock_backend(prompt, model, **params):
         recorded.append(prompt)
-        m = re.search(r"-----BEGIN FILE ([0-9a-f]{32}):", prompt)
-        nonce = m.group(1) if m else "0" * 32
+        nonce = re.search(r"-----BEGIN FILE ([0-9a-f]{32}):", prompt).group(1)
         text = (
             "-----BEGIN FILE " + nonce + ": foo.py-----\n"
-            "def foo(x):\n"
-            "    return 2 * x\n"
+            "x = 1\n"
             "-----END FILE " + nonce + "-----\n"
             "-----END REPLY " + nonce + "-----\n"
         )
-        return {
-            "text": text,
-            "model": model,
-            "backend": "mock",
-            "model_call_error": None,
-        }
+        return {"text": text, "model": model, "backend": "mock", "model_call_error": None}
 
-    generator.generate(
-        bundle,
-        "mock-model",
-        repo_root=tmp_path,
-        llm_backend=mock_backend,
-    )
+    generator.generate(bundle, "mock-model", repo_root=repo_root, llm_backend=mock_backend)
 
-    assert len(recorded) == 1, "the mock model should have been called exactly once"
+    assert len(recorded) == 1
     prompt = recorded[0]
 
     assert section(prompt, "## SPEC") == "SPEC-MARK"
     assert section(prompt, "## DEPENDENCY CONTEXT") == "### comp-bar\nDC-MARK"
 
-    expected_sections = {
-        "## INTERFACE": "IFACE-MARK",
-        "## CONSTRAINTS": "CONS-MARK",
-        "## DEPENDENCY INTERFACES": "DI-MARK",
-        "## VARS": "VAR-MARK",
-        "## GLOSSARY": "GLOSS-MARK",
-    }
-    all_sections = dict(expected_sections)
-    all_sections["## SPEC"] = "SPEC-MARK"
-    all_sections["## DEPENDENCY CONTEXT"] = "DC-MARK"
+    assert section(prompt, "## INTERFACE") == "IFACE-MARK"
+    assert section(prompt, "## CONSTRAINTS") == "CONS-MARK"
+    assert section(prompt, "## DEPENDENCY INTERFACES") == "### comp-bar\nDI-MARK"
+    assert section(prompt, "## VARS") == "### VAR-X\nVAR-MARK"
+    assert section(prompt, "## GLOSSARY") == "GLOSS-MARK"
 
-    for heading, marker in expected_sections.items():
-        text = section(prompt, heading)
-        assert marker in text, heading + " should contain " + marker
-    for heading, marker in all_sections.items():
-        for other_heading in all_sections:
-            if other_heading == heading:
-                continue
-            assert marker not in section(prompt, other_heading), (
-                marker + " should only be in " + heading + ", found in " + other_heading
-            )
-
-    assert "### VAR-X" in section(prompt, "## VARS")
-    assert "### comp-bar" in section(prompt, "## DEPENDENCY INTERFACES")
-
-    prompt_lines = prompt.split("\n")
-    assert "## DEPENDENCY USAGE" not in prompt_lines
-    assert "## HINT_CODE" not in prompt_lines
-    assert "## RETRY_FEEDBACK" not in prompt_lines
+    lines = prompt.split("\n")
+    assert "## DEPENDENCY USAGE" not in lines
+    assert "## HINT_CODE" not in lines
+    assert "## RETRY_FEEDBACK" not in lines

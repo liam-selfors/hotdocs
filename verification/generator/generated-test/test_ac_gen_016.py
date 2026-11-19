@@ -1,58 +1,85 @@
-# hotdocs-criterion: sha256:d80143ef89dfd898a8b2bad8a61c03c3de25c747f2018ee6a21041bba719402e
+# hotdocs-criterion: sha256:fd7d3aa456e68ce3aba03b5894c64b3154c5461e4e8313aebf5d317cde4fa37d
 import re
+from pathlib import Path
 
 import generator
 
 
-COMPONENT_ID = "comp-widget-maker"
-SLUG = "widget-maker"
-MODULE = "widget_maker"
+PYTHON_ADAPTER = (
+    "from pathlib import Path\n"
+    "\n"
+    "KIND = \"python\"\n"
+    "\n"
+    "\n"
+    "def layout_errors(code_dir):\n"
+    "    return [\"bad.py:1: SyntaxError: x\"] if (Path(code_dir) / \"bad.py\").exists() else []\n"
+    "\n"
+    "\n"
+    "def provision(repo_root):\n"
+    "    return {\"ok\": True, \"reason\": \"\", \"versions\": {\"python\": \"3.12\"}, "
+    "\"lockfile_sha256\": None, \"interpreter\": \"/fake/python\"}\n"
+)
 
-
-class Bundle(dict):
-    """A SpecBundle stand-in readable both as a mapping and by attribute."""
-
-    def __getattr__(self, name):
-        try:
-            return self[name]
-        except KeyError:
-            raise AttributeError(name)
+COMPONENT_MD = (
+    "---\n"
+    "id: comp-widget-maker\n"
+    "title: Widget Maker\n"
+    "status: draft\n"
+    "owners: [pipeline-team]\n"
+    "depends_on: []\n"
+    "sealed: false\n"
+    "---\n"
+    "\n"
+    "# Widget Maker\n"
+)
 
 
 def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def make_bundle():
-    return Bundle(
-        component_id=COMPONENT_ID,
-        spec_bundle_hash="sha256:" + "ab" * 32,
-        spec="# Widgets\n\n## Purpose\n\nMakes widgets.\n\n**R-WIDGET-001** — `make(n)` MUST return n widgets.",
-        interface="# Library\n\n```\nmake(n: int) -> list\n```",
-        constraints="# Constraints\n\nNone.",
-        dependency_interfaces={},
-        dependency_context={},
-        dependency_usage={},
-        vars={},
-        glossary="# Glossary\n\n- **Widget** — a test term.",
-        hint_code=None,
-    )
+def _plant(repo_root):
+    adapter = repo_root / "gen" / "kind-python" / "kind_python.py"
+    adapter.parent.mkdir(parents=True, exist_ok=True)
+    adapter.write_text(PYTHON_ADAPTER, encoding="utf-8")
+    comp = repo_root / "specs" / "components" / "widget-maker" / "component.md"
+    comp.parent.mkdir(parents=True, exist_ok=True)
+    comp.write_text(COMPONENT_MD, encoding="utf-8")
 
 
-def test_prompt_instructs_flat_module_or_package_directly_under_gen_component(tmp_path, monkeypatch):
+def _bundle():
+    return {
+        "component_id": "comp-widget-maker",
+        "spec_bundle_hash": "sha256:" + "ab" * 32,
+        "spec": "A component that makes widgets.",
+        "interface": "make() -> int",
+        "constraints": "Be deterministic.",
+        "dependency_interfaces": {},
+        "dependency_context": {},
+        "dependency_usage": {},
+        "vars": {},
+        "glossary": "",
+        "hint_code": None,
+    }
+
+
+def test_ac_gen_016_prompt_instructs_flat_or_package_layout(tmp_path, monkeypatch):
     monkeypatch.delenv("VAR_CACHE_STORE_URL", raising=False)
-    monkeypatch.chdir(tmp_path)
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    _plant(repo_root)
 
-    calls = []
+    recorded = []
 
-    def backend(prompt, model, **params):
-        calls.append(prompt)
+    def mock_backend(prompt, model, **params):
+        recorded.append(prompt)
         nonce = re.search(r"-----BEGIN FILE ([0-9a-f]{32}):", prompt).group(1)
         text = (
-            "-----BEGIN FILE " + nonce + ": " + MODULE + ".py-----\n"
-            + "def make(n):\n    return [object() for _ in range(n)]\n"
-            + "-----END FILE " + nonce + "-----\n"
-            + "-----END REPLY " + nonce + "-----\n"
+            "-----BEGIN FILE " + nonce + ": widget_maker.py-----\n"
+            "def make():\n"
+            "    return 1\n"
+            "-----END FILE " + nonce + "-----\n"
+            "-----END REPLY " + nonce + "-----\n"
         )
         return {
             "text": text,
@@ -61,38 +88,24 @@ def test_prompt_instructs_flat_module_or_package_directly_under_gen_component(tm
             "model_call_error": None,
         }
 
-    bundle = make_bundle()
     result = generator.generate(
-        bundle, "claude-sonnet-5", repo_root=tmp_path, llm_backend=backend
+        _bundle(), "mock-model", repo_root=repo_root, llm_backend=mock_backend
     )
 
-    assert len(calls) == 1, "the mock model should have been called exactly once"
-    assert field(result, "cache_hit") is False
-    prompt = calls[0]
+    assert field(result, "refused") is None
+    assert len(recorded) == 1, "the mock model must be called exactly once"
+    prompt = recorded[0]
 
-    # The layout instruction is fixed scaffolding, so it appears in the
-    # fixed instructions that precede every bundle-derived section.
-    lines = prompt.split("\n")
-    assert "## SPEC" in lines
-    scaffolding = "\n".join(lines[: lines.index("## SPEC")])
+    # The layout instruction is fixed scaffolding, preceding every bundle-derived section.
+    marker = "\n## SPEC\n"
+    assert marker in prompt
+    instructions = prompt[: prompt.index(marker)]
 
-    # Sanity: the bundle content itself never names these, so they come
-    # from the scaffolding, not the bundle.
-    for value in bundle.values():
-        if isinstance(value, str):
-            assert MODULE not in value
-            assert "gen/" not in value
-
-    # Names the real flat module and the real package for this component.
-    assert MODULE + ".py" in scaffolding
-    assert MODULE + "/" in scaffolding
-    assert "__init__.py" in scaffolding
-
-    # Directly under gen/<component>/ (the slug, never the comp- id).
-    assert "gen/" + SLUG + "/" in scaffolding or "gen/" + SLUG in scaffolding
-
-    # Rules out a deeper layout such as a src/ subdirectory.
-    lowered = scaffolding.lower()
-    assert any(word in lowered for word in ("src", "deeper", "nested", "subdirector")), (
-        "the prompt should forbid a deeper (e.g. src/) layout"
-    )
+    # Names the real module as a flat module and as a package.
+    assert "widget_maker.py" in instructions
+    assert "widget_maker/" in instructions
+    assert "__init__.py" in instructions
+    # Directly under gen/<component>/.
+    assert "gen/widget-maker" in instructions
+    # Forbids a deeper src/-style layout.
+    assert re.search(r"\bsrc\b", instructions), "prompt must rule out a src/-style layout"

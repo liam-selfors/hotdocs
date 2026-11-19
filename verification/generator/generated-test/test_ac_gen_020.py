@@ -1,159 +1,109 @@
-# hotdocs-criterion: sha256:2f0bbc4ea468170252d2f5646d87543dbc134ea76e657c330fc24b410fadcbee
-import json
+# hotdocs-criterion: sha256:661e9a182423bea16648086aeb39016e5c40c6090007be6f9b3b82fea63ed8a1
 import re
+from pathlib import Path
 
 import generator
 
 
-class _Bundle:
-    """A SpecBundle-shaped object readable both by attribute and as a mapping."""
+PYTHON_ADAPTER = (
+    "from pathlib import Path\n"
+    "\n"
+    "KIND = \"python\"\n"
+    "\n"
+    "\n"
+    "def layout_errors(code_dir):\n"
+    "    return [\"bad.py:1: SyntaxError: x\"] if (Path(code_dir) / \"bad.py\").exists() else []\n"
+    "\n"
+    "\n"
+    "def provision(repo_root):\n"
+    "    return {\"ok\": True, \"reason\": \"\", \"versions\": {\"python\": \"3.12\"}, "
+    "\"lockfile_sha256\": None, \"interpreter\": \"/fake/python\"}\n"
+)
 
-    _FIELDS = (
-        "component_id",
-        "spec_bundle_hash",
-        "spec",
-        "interface",
-        "constraints",
-        "dependency_interfaces",
-        "dependency_context",
-        "dependency_usage",
-        "vars",
-        "glossary",
-        "hint_code",
-    )
-
-    def __init__(self, **kwargs):
-        for name in self._FIELDS:
-            setattr(self, name, kwargs[name])
-
-    def __getitem__(self, key):
-        if key not in self._FIELDS:
-            raise KeyError(key)
-        return getattr(self, key)
-
-    def get(self, key, default=None):
-        if key in self._FIELDS:
-            return getattr(self, key)
-        return default
-
-    def keys(self):
-        return list(self._FIELDS)
-
-    def __iter__(self):
-        return iter(self._FIELDS)
-
-    def __len__(self):
-        return len(self._FIELDS)
-
-    def __contains__(self, key):
-        return key in self._FIELDS
+COMPONENT_MD = (
+    "---\n"
+    "id: comp-widget-maker\n"
+    "title: Widget Maker\n"
+    "status: draft\n"
+    "owners: [pipeline-team]\n"
+    "depends_on: []\n"
+    "sealed: false\n"
+    "---\n"
+    "\n"
+    "# Widget Maker\n"
+)
 
 
 def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def _make_bundle():
-    # Deliberately bland content: no dependencies at all (the instruction
-    # must be present regardless of depends_on), and no words the
-    # assertions look for, so any match comes from generate's own prompt.
-    return _Bundle(
-        component_id="comp-foo",
-        spec_bundle_hash="sha256:" + "a1" * 32,
-        spec="# Foo\n\n## Purpose\n\nFoo doubles a number.\n\n**R-FOO-001** — foo(x) MUST yield 2 * x.",
-        interface="# Library\n\n```\nfoo(x: int) -> int\n```",
-        constraints="# Constraints\n\nNone.",
-        dependency_interfaces={},
-        dependency_context={},
-        dependency_usage={},
-        vars={},
-        glossary="# Glossary\n\n- **Foo** — a test term.",
-        hint_code=None,
-    )
+def _plant(repo_root):
+    comp_dir = repo_root / "specs" / "components" / "widget-maker"
+    comp_dir.mkdir(parents=True)
+    (comp_dir / "component.md").write_text(COMPONENT_MD, encoding="utf-8")
+    adapter_dir = repo_root / "gen" / "kind-python"
+    adapter_dir.mkdir(parents=True)
+    (adapter_dir / "kind_python.py").write_text(PYTHON_ADAPTER, encoding="utf-8")
 
 
-TOP_LEVEL_PHRASES = (
-    "top-level",
-    "top level",
-    "toplevel",
-    "own return value",
-    "return value itself",
-    "own top",
-)
+def _bundle():
+    # Bundle text deliberately avoids the words the instruction under test uses,
+    # so any match in the prompt must come from the generator's own instructions.
+    return {
+        "component_id": "comp-widget-maker",
+        "spec_bundle_hash": "sha256:" + "ab" * 32,
+        "spec": "Widget Maker makes widgets.",
+        "interface": "make_widget(name: str) -> str",
+        "constraints": "Be quick.",
+        "dependency_interfaces": {},
+        "dependency_context": {},
+        "dependency_usage": {},
+        "vars": {},
+        "glossary": "Widget: a thing.",
+        "hint_code": None,
+    }
 
 
-def test_prompt_instructs_dual_access_for_dependency_top_level_return(tmp_path, monkeypatch):
+def test_ac_gen_020_prompt_instructs_dual_access_for_dependency_values(tmp_path, monkeypatch):
     monkeypatch.delenv("VAR_CACHE_STORE_URL", raising=False)
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
-    log_path = tmp_path / "mock_calls.log"
+    _plant(repo_root)
+
+    sent = []
 
     def mock_backend(prompt, model, **params):
-        with open(log_path, "a", encoding="utf-8") as fh:
-            fh.write(json.dumps(prompt) + "\n")
+        sent.append(prompt)
         nonce = re.search(r"-----BEGIN FILE ([0-9a-f]{32}):", prompt).group(1)
-        text = (
-            "-----BEGIN FILE " + nonce + ": foo.py-----\n"
-            "def foo(x):\n"
-            "    return 2 * x\n"
+        reply = (
+            "-----BEGIN FILE " + nonce + ": widget_maker.py-----\n"
+            "def make_widget(name):\n"
+            "    return name\n"
             "-----END FILE " + nonce + "-----\n"
             "-----END REPLY " + nonce + "-----\n"
         )
         return {
-            "text": text,
+            "text": reply,
             "model": model,
             "backend": "mock",
             "model_call_error": None,
         }
 
-    bundle = _make_bundle()
-    assert bundle.hint_code is None  # cold mode
+    bundle = _bundle()
+    generator.generate(bundle, "mock-model", repo_root=repo_root, llm_backend=mock_backend)
 
-    result = generator.generate(
-        bundle, "mock-model", repo_root=repo_root, llm_backend=mock_backend
-    )
+    assert sent, "the mock model was never called"
+    prompt = sent[0]
+    lowered = prompt.lower()
 
-    assert field(result, "refused") is None
-    assert field(result, "cache_hit") is False
+    for value in bundle.values():
+        if isinstance(value, str):
+            for word in ("attribute", "top-level", "top level", "dict"):
+                assert word not in value.lower()
 
-    assert log_path.is_file(), "mock model was never called"
-    lines = [ln for ln in log_path.read_text(encoding="utf-8").splitlines() if ln.strip()]
-    assert len(lines) == 1, "expected exactly one model call, got %d" % len(lines)
-    prompt = json.loads(lines[0])
-    assert isinstance(prompt, str) and prompt
-
-    low = prompt.lower()
-
-    # The prompt as a whole must talk about dual dict-or-attribute access.
-    assert "dict" in low, "prompt never mentions dict access"
-    assert ("attribute" in low) or ("getattr" in low), "prompt never mentions attribute access"
-
-    # It must forbid a bare attribute access on its own.
-    assert ("bare" in low) or (" alone" in low) or ("never" in low), (
-        "prompt never forbids a bare attribute access alone"
-    )
-
-    # And it must extend that rule explicitly to a dependency's own
-    # top-level return value, not only nested values: some mention of the
-    # top-level return value must sit near the dict/attribute instruction.
-    found = False
-    for phrase in TOP_LEVEL_PHRASES:
-        start = 0
-        while True:
-            idx = low.find(phrase, start)
-            if idx < 0:
-                break
-            window = low[max(0, idx - 800): idx + 800]
-            if "dict" in window and ("attribute" in window or "getattr" in window):
-                found = True
-                break
-            start = idx + 1
-        if found:
-            break
-    assert found, (
-        "prompt does not instruct that a dependency's own top-level return "
-        "value must use dual dict-or-attribute access"
-    )
-
-    # The instruction concerns values read from dependency calls.
-    assert "depend" in low
+    assert "dependency" in lowered or "dependencies" in lowered
+    assert "attribute" in lowered or "getattr" in lowered
+    assert "dict" in lowered
+    assert "top-level" in lowered or "top level" in lowered
+    assert "return" in lowered

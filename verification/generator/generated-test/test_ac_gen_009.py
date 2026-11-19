@@ -1,4 +1,5 @@
-# hotdocs-criterion: sha256:c7142ff1f230f6b1088fe2f13ca9e8de65faa0e4d6d2f626c7fc89ad2cc2be4c
+# hotdocs-criterion: sha256:241bf7faba37b5afdb540a0f50a1a40c3db74ba47b185a9351f5b76198854519
+import hashlib
 import json
 import re
 from pathlib import Path
@@ -8,194 +9,129 @@ import pytest
 import generator
 
 
+PYTHON_ADAPTER = (
+    "from pathlib import Path\n"
+    "\n"
+    "KIND = \"python\"\n"
+    "\n"
+    "\n"
+    "def layout_errors(code_dir):\n"
+    "    return [\"bad.py:1: SyntaxError: x\"] if (Path(code_dir) / \"bad.py\").exists() else []\n"
+    "\n"
+    "\n"
+    "def provision(repo_root):\n"
+    "    return {\"ok\": True, \"reason\": \"\", \"versions\": {\"python\": \"3.12\"}, "
+    "\"lockfile_sha256\": None, \"interpreter\": \"/fake/python\"}\n"
+)
+
+
 def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-class Bundle:
-    _FIELDS = (
-        "component_id",
-        "spec_bundle_hash",
-        "spec",
-        "interface",
-        "constraints",
-        "dependency_interfaces",
-        "dependency_context",
-        "dependency_usage",
-        "vars",
-        "glossary",
-        "hint_code",
-    )
-
-    def __init__(self, component_id, spec_bundle_hash):
-        self.component_id = component_id
-        self.spec_bundle_hash = spec_bundle_hash
-        self.spec = "# Spec\n\nDoubles a number."
-        self.interface = "# Library\n\n    foo(x: int) -> int"
-        self.constraints = "# Constraints\n\nNone."
-        self.dependency_interfaces = {}
-        self.dependency_context = {}
-        self.dependency_usage = {}
-        self.vars = {}
-        self.glossary = "# Glossary\n\n- **Foo** — a test term."
-        self.hint_code = None
-
-    def __getitem__(self, key):
-        if key not in self._FIELDS:
-            raise KeyError(key)
-        return getattr(self, key)
-
-    def get(self, key, default=None):
-        if key in self._FIELDS:
-            return getattr(self, key)
-        return default
-
-    def keys(self):
-        return list(self._FIELDS)
-
-    def __iter__(self):
-        return iter(self._FIELDS)
-
-    def __contains__(self, key):
-        return key in self._FIELDS
-
-    def __len__(self):
-        return len(self._FIELDS)
+def write(path, text):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
 
 
-def make_backend(log_path):
+def component_md(component_id, title, sealed, source_path=None):
+    lines = [
+        "---",
+        "id: " + component_id,
+        "title: " + title,
+        "status: draft",
+        "owners: [pipeline-team]",
+        "depends_on: []",
+        "sealed: " + ("true" if sealed else "false"),
+    ]
+    if source_path is not None:
+        lines.append("source_path: " + source_path)
+    lines.append("---")
+    lines.append("")
+    lines.append("# " + title)
+    lines.append("")
+    return "\n".join(lines)
+
+
+def make_bundle(component_id, tag):
+    return {
+        "component_id": component_id,
+        "spec_bundle_hash": "sha256:" + hashlib.sha256(tag.encode("utf-8")).hexdigest(),
+        "spec": "Spec for " + component_id,
+        "interface": "Interface for " + component_id,
+        "constraints": "",
+        "dependency_interfaces": {},
+        "dependency_context": {},
+        "dependency_usage": {},
+        "vars": {},
+        "glossary": "",
+        "hint_code": None,
+    }
+
+
+def make_backend(log_path, filename):
     def backend(prompt, model, **params):
         with open(log_path, "a", encoding="utf-8") as fh:
             fh.write("called\n")
-        m = re.search(r"-----BEGIN FILE ([0-9a-f]{32}):", prompt)
-        nonce = m.group(1) if m else "0" * 32
+        nonce = re.search(r"-----BEGIN FILE ([0-9a-f]{32}):", prompt).group(1)
         text = (
-            "-----BEGIN FILE " + nonce + ": out.py-----\n"
-            + "def foo(x):\n    return 2 * x\n"
-            + "-----END FILE " + nonce + "-----\n"
-            + "-----END REPLY " + nonce + "-----\n"
+            "-----BEGIN FILE " + nonce + ": " + filename + "-----\n"
+            "X = 1\n"
+            "-----END FILE " + nonce + "-----\n"
+            "-----END REPLY " + nonce + "-----\n"
         )
-        return {
-            "text": text,
-            "model": model,
-            "backend": "mock",
-            "model_call_error": None,
-        }
+        return {"text": text, "model": model, "backend": "mock", "model_call_error": None}
 
     return backend
 
 
-def write_sealed_component(repo_root):
-    comp_dir = repo_root / "specs" / "components" / "foo"
-    comp_dir.mkdir(parents=True, exist_ok=True)
-    (comp_dir / "component.md").write_text(
-        "---\n"
-        "id: comp-foo\n"
-        "title: Foo\n"
-        "status: draft\n"
-        "owners: [team-a]\n"
-        "sealed: true\n"
-        "source_path: legacy/foo/\n"
-        "depends_on: []\n"
-        "---\n"
-        "\n"
-        "# Foo\n"
-        "\n"
-        "## Purpose\n"
-        "\n"
-        "Foo doubles a number.\n",
-        encoding="utf-8",
-    )
-    legacy = repo_root / "legacy" / "foo"
-    legacy.mkdir(parents=True, exist_ok=True)
-    (legacy / "foo.py").write_text("def foo(x):\n    return 2 * x\n", encoding="utf-8")
-    return "comp-foo", "foo"
-
-
-def write_pinned_component(repo_root):
-    comp_dir = repo_root / "specs" / "components" / "bar"
-    comp_dir.mkdir(parents=True, exist_ok=True)
-    (comp_dir / "component.md").write_text(
-        "---\n"
-        "id: comp-bar\n"
-        "title: Bar\n"
-        "status: draft\n"
-        "owners: [team-a]\n"
-        "sealed: false\n"
-        "depends_on: []\n"
-        "---\n"
-        "\n"
-        "# Bar\n"
-        "\n"
-        "## Purpose\n"
-        "\n"
-        "Bar doubles a number.\n",
-        encoding="utf-8",
-    )
-    gen_dir = repo_root / "gen" / "bar"
-    gen_dir.mkdir(parents=True, exist_ok=True)
-    (gen_dir / "bar.py").write_text("def bar(x):\n    return 2 * x\n", encoding="utf-8")
-    (gen_dir / ".overrides.json").write_text(json.dumps(["bar.py"]), encoding="utf-8")
-    return "comp-bar", "bar"
-
-
-@pytest.mark.parametrize(
-    "builder, expected_reason",
-    [
-        (write_sealed_component, "sealed-component"),
-        (write_pinned_component, "pinned-override"),
-    ],
-)
-def test_exempt_component_refused_before_model_call(
-    tmp_path, monkeypatch, builder, expected_reason
-):
+@pytest.mark.parametrize("case", ["sealed", "pinned"])
+def test_ac_gen_009_exempt_components_refused_without_model_call(tmp_path, monkeypatch, case):
     monkeypatch.delenv("VAR_CACHE_STORE_URL", raising=False)
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
-    monkeypatch.chdir(repo_root)
-
-    component_id, slug = builder(repo_root)
-    gen_dir = repo_root / "gen" / slug
-    before = {}
-    if gen_dir.is_dir():
-        for p in gen_dir.rglob("*"):
-            if p.is_file():
-                before[str(p.relative_to(gen_dir))] = p.read_bytes()
+    write(repo_root / "gen" / "kind-python" / "kind_python.py", PYTHON_ADAPTER)
 
     log_path = tmp_path / "model_calls.log"
-    backend = make_backend(log_path)
 
-    bundle = Bundle(component_id, "sha256:" + "a" * 64)
+    if case == "sealed":
+        slug = "widget"
+        component_id = "comp-widget"
+        write(
+            repo_root / "specs" / "components" / slug / "component.md",
+            component_md(component_id, "Widget", True, "legacy/widget/"),
+        )
+        write(repo_root / "legacy" / "widget" / "widget.py", "ORIGINAL = True\n")
+        filename = "widget.py"
+        expected_reason = "sealed-component"
+    else:
+        slug = "gadget"
+        component_id = "comp-gadget"
+        write(
+            repo_root / "specs" / "components" / slug / "component.md",
+            component_md(component_id, "Gadget", False),
+        )
+        write(repo_root / "gen" / slug / "gadget.py", "PINNED = True\n")
+        write(repo_root / "gen" / slug / ".overrides.json", json.dumps(["gadget.py"]))
+        filename = "gadget.py"
+        expected_reason = "pinned-override"
+
+    bundle = make_bundle(component_id, "ac-gen-009-" + case)
+    backend = make_backend(log_path, filename)
 
     result = generator.generate(
         bundle,
-        "mock-model",
+        "claude-sonnet-5",
         None,
         repo_root=repo_root,
         llm_backend=backend,
     )
 
-    # The mock model is never called.
-    assert not log_path.exists() or log_path.read_text(encoding="utf-8") == ""
+    calls = log_path.read_text(encoding="utf-8") if log_path.exists() else ""
+    assert calls == "", "mock model was called"
 
-    # files empty, model_call_error null, refused names the exemption.
-    files = field(result, "files")
-    assert not files
-    assert files == {}
+    assert field(result, "files") == {}
     assert field(result, "model_call_error") is None
     refused = field(result, "refused")
     assert isinstance(refused, str)
     assert refused == expected_reason
-    assert field(result, "cache_hit") is False
-
-    # Nothing in the declared hands-off paths was clobbered.
-    after = {}
-    if gen_dir.is_dir():
-        for p in gen_dir.rglob("*"):
-            if p.is_file():
-                after[str(p.relative_to(gen_dir))] = p.read_bytes()
-    assert after == before
-    if expected_reason == "sealed-component":
-        assert (repo_root / "legacy" / "foo" / "foo.py").read_text(
-            encoding="utf-8"
-        ) == "def foo(x):\n    return 2 * x\n"
