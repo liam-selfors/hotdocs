@@ -40,6 +40,28 @@ def provision(repo_root):
     return {"ok": True, "reason": "", "versions": {"fakeprog": "2.0.0"}, "lockfile_sha256": None}
 ```
 
+Every criterion's temporary `repo_root` also plants the fake `python`
+adapter `gen/kind-python/kind_python.py` (`D344`), so no criterion
+depends on the real adapter or environment:
+
+```python
+from pathlib import Path
+
+KIND = "python"
+
+
+def layout_errors(code_dir):
+    return ["bad.py:1: SyntaxError: x"] if (Path(code_dir) / "bad.py").exists() else []
+
+
+def provision(repo_root):
+    return {"ok": True, "reason": "", "versions": {"python": "3.12.0"}, "lockfile_sha256": None, "interpreter": "/fake/python"}
+```
+
+To observe that `provision` is called, a criterion rewrites it to also
+append a line to a file outside `repo_root` whose path is written into
+the source, and the fake kind's likewise.
+
 A kind named `nosuchkind` has neither, here or in the tool, so it has no
 adapter. No Node or other program is needed.
 

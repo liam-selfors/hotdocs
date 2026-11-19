@@ -16,6 +16,10 @@ Given files {"widget_maker/__init__.py": "", "static/app.txt": "ok"}
 When check_assets is called
 Then it returns (None, [])
 
+Given files {"widget_maker.py": "", "bad.py": "", "static/app.txt": "ok"}
+When check_assets is called
+Then it returns ("malformed_layout", ["bad.py:1: SyntaxError: x"])
+
 Given files {"widget_maker.py": ""}
 When check_assets is called
 Then it returns ("missing_asset", ["missing asset: static/app.txt"])
@@ -29,7 +33,8 @@ Given the first fixture, then repo_root/NO_ENV created
 When check_asset_environment("comp-widget-maker", repo_root=repo_root)
   is called before and after creating it
 Then it returns (None, []) and then
-  ("environment", ["fake needs fakeprog >= 2"]); with the kind
+  ("environment", ["fake needs fakeprog >= 2"]), the fake python
+  adapter's provision called first; with the kind
   nosuchkind instead it returns
   ("environment", ["unknown asset kind: nosuchkind"])
 ```

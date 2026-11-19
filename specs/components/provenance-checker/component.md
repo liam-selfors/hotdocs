@@ -95,3 +95,6 @@ None.
   prompt change invalidates every manifest it produced.
 - `D343`: the key includes each declared asset's definition, adapter
   and environment (`R-PROVCHECK-009`); a miss names its `reason`.
+- `D344`: the assets value starts with the implicit `python` entry, path
+  `"."`, for every component; a manifest with no `assets` now misses
+  with `assets differ`. Tests plant a fake `python` adapter.

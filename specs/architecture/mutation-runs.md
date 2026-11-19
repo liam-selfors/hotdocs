@@ -65,23 +65,29 @@ other case.
 plugin `specs/architecture/verifier-fixtures.md` describes, its asset
 files those of the copy, `<tmp>/gen/<slug>/<path>`.
 
-**The sites.** Every `.py` file of the copy, in sorted path order, is
-parsed once; within a file, sites are taken in `ast.walk` order, and
-each site gives exactly one mutant, a copy of the file with that one
-change, written back with `ast.unparse`.
+**The sites.** Each site gives exactly one mutant, applied alone to the
+copy, in this order:
 
-- *Python* (`D159`, `D172`): a comparison with exactly one operator
-  (a chained comparison is not a site) has it swapped `==`↔`!=`,
-  `<`↔`>=`, `>`↔`<=`, `is`↔`is not`, `in`↔`not in`; an `and`/`or` is
-  flipped to the other; a binary `+`↔`-`, `*`↔`/`, `//`↔`%`; a boolean
-  constant is negated. Never a numeric constant or anything else.
+- *Python* (`D159`, `D172`, `D344`): the sites the `python` adapter,
+  `comp-kind-python` found by asset-kinds.md's Lookup, lists with
+  `strength_sites(<tmp>/gen/<slug>)`, in that order; each mutant is
+  `apply_site(<tmp>/gen/<slug>, site)`. The rules, every `.py` file of
+  the copy in sorted path order and Python's operator swaps, are
+  `specs/architecture/asset-kind-python.md`'s "Strength check", stated
+  there exactly as this document stated them before `D344`.
 - *Assets* (`specs/architecture/asset-kinds.md`, `D343`): after every
   Python site come, for each asset the component declares, in
   declaration order, the sites the kind's adapter lists with
   `strength_sites(<tmp>/gen/<slug>/<path>)`, in that order. Each gives
-  one mutant: `apply_site(<tmp>/gen/<slug>/<path>, site)` rewrites the
-  copy's asset file with that one change, the tests run, and the file's
-  original bytes are written back before the next mutant.
+  one mutant: `apply_site(<tmp>/gen/<slug>/<path>, site)`.
+
+For every mutant, the tests run, then every file of the copy is
+restored to its original bytes before the next mutant.
+
+**The interpreter.** The baseline and every mutant run under the
+`interpreter` the `python` adapter's `provision` reported for this
+`verify` call (`D344`), never `sys.executable` unless that is what it
+reported.
 
 **The score.** Killed mutants over all mutants, Python and asset alike,
 one score for the component (`D124`), `1.0` when there are no mutants;

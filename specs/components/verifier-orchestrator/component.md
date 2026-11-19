@@ -13,8 +13,8 @@ sealed: false
 
 ## Purpose
 
-Runs every applicable verification gate against one component's generated
-output, Python and declared assets, and produces one structured verdict:
+Runs every verification gate against one component's generated
+output and its assets, and produces one structured verdict:
 `compiled`, `generated-test` and `llm-judge` criteria, the mutation
 score and the interface drift check.
 
@@ -26,7 +26,7 @@ the mutation score; provisioning asset environments; one
 
 **Out of scope:** the license/secret scans; judging or authoring
 anything (it dispatches to an injectable judge and `test_author` and
-records their results); re-deciding a criterion's `kind` (R-LINT-010).
+records their results).
 
 ## Definitions
 
@@ -56,7 +56,7 @@ See `constraints.md`.
 
 ## Change log
 
-See the decisions, `D27` onward; latest `D324`, `D341`, `D343`
-(declared assets: `asset_runner`, environments, asset strength sites,
-`assets` in the report; JavaScript in a Python string fails, superseding
-`D335`; `GATE_VERSION` 3.4.0).
+See the decisions, `D27` onward; latest `D343` (declared assets),
+`D344` (`python` an asset kind: its adapter's mutation sites,
+provisioned first, its `interpreter` for every pytest run, first in
+`assets`; `GATE_VERSION` 3.5.0).

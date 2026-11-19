@@ -63,8 +63,7 @@ See `constraints.md`.
 
 ## Change log
 
-`D35` onward: see the decisions, most recently `D304`, `D305` and
-`D325`.
+`D35` onward: see the decisions.
 
-- `D343`: declared assets — R-GEN-015, R-GEN-021, `check_assets`,
-  AC-GEN-024, AC-GEN-025; `generator@3.1.0`, `v12`.
+- `D343`: declared assets (R-GEN-015, R-GEN-021); `generator@3.1.0`, `v12`.
+- `D344`: the implicit `python` kind (R-GEN-021); `generator@3.2.0`.

@@ -11,7 +11,7 @@ When lint(None, repo_root) runs
 Then there is no R-LINT-034 finding
 
 Given the same corpus with assets [demo, Demo:a.js, demo:/abs.js,
-  demo:a\b.js, demo:x/../y.js, demo:static/m.py]
+  demo:a\b.js, demo:x/../y.js, demo:static/m.py, python:pkg]
 When lint(None, repo_root) runs
 Then specs/components/web/component.md has exactly these R-LINT-034 fail
   findings, in this order:
@@ -20,7 +20,8 @@ Then specs/components/web/component.md has exactly these R-LINT-034 fail
   "asset 'demo:/abs.js': path must be relative with / separators",
   "asset 'demo:a\b.js': path must be relative with / separators",
   "asset 'demo:x/../y.js': path contains ..",
-  "asset 'demo:static/m.py': path ends in .py"
+  "asset 'demo:static/m.py': path ends in .py",
+  "asset 'python:pkg': python is never declared"
 
 Given the same corpus with "assets: demo:static/app.js", not a list
 When lint(None, repo_root) runs

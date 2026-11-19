@@ -46,12 +46,13 @@ stand-in `assemble` needs no `specs/` tree. It reads, in this order:
 Any stand-in for these dependencies must provide each name this list
 gives. No network access, no model call, no write.
 
-## Assets (`D343`)
+## Assets (`D343`, `D344`)
 
 `current_provenance_key` and `check_provenance` (the latter only after
 `spec_bundle_hash` and `gate_versions` match) read the component's
 `<repo_root>/specs/components/<slug>/component.md` frontmatter `assets`
-and, per declared kind, the repository's definition
+and, per kind, the implicit `python` first and then each declared
+kind, the repository's definition
 `<repo_root>/specs/architecture/asset-kind-<kind>.md`, if any, and the
 adapter `asset-kinds.md`'s Lookup finds: `<repo_root>/gen/kind-<kind>/kind_<kind>.py`,
 else the tool root's, the tool root as asset-kinds.md defines it. The adapter is loaded by path afresh on every call; only its

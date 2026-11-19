@@ -26,4 +26,7 @@
         is `malformed_layout`, message `undeclared file: <path>`;
      3. each message of each declared asset's adapter `layout_errors`,
         in declaration order, as `<path>: <message>`; any is
-        `malformed_layout`.
+        `malformed_layout`;
+     4. each message of the `python` adapter's `layout_errors` on the
+        reply's `.py` files, written as one temporary code directory,
+        as given; any is `malformed_layout` (`D344`).

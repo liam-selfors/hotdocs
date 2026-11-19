@@ -28,6 +28,6 @@ Then the result has no model_call_error, files is {"widget_maker.py":
 Given the component declares assets [nosuchkind:static/app.txt] and the
   reply has blocks for widget_maker.py and static/app.txt holding "ok"
 When generate is called
-Then model_call_error is {"category": "malformed_layout", "message":
+Then model_call_error is {"category": "environment", "message":
   "unknown asset kind: nosuchkind"} and nothing is written or cached
 ```

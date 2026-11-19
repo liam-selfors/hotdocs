@@ -2,14 +2,12 @@
 
 **R-GEN-012** — The model call MAY optionally receive `retry_feedback` —
   a bare list of `R-id`s a **caller** supplies as having failed on some
-  prior attempt. When present, it MUST be included as its own clearly
-  distinguished context section, never merged with or indistinguishable
-  from the `SpecBundle`'s own fields, as `R-GEN-002` requires for `hint_code`.
+  prior attempt. When present, it MUST be its own distinct context section,
+  never merged with the `SpecBundle`'s fields.
 
   `retry_feedback` MUST contain **only** `R-id`s — never Gherkin text,
   `rationale`, expected/actual values, or any other acceptance-criterion
   content (R-ASSEMBLE-001).
 
-  This component MUST NOT decide whether to use `retry_feedback`, and
-  MUST NOT derive it from anything on disk itself: the list comes from
-  the caller, a developer's `--retry-feedback` or an attempt loop.
+  This component MUST NOT derive `retry_feedback` itself: the list
+  comes only from the caller.

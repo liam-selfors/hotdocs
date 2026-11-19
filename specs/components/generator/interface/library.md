@@ -30,12 +30,10 @@ Before any model call, `generate` looks up the `R-GEN-005` key with
 `sealed`/`source_path` and `assets` and `gen/<component>/.overrides.json`,
 and is where `gen/<component>/` is written. An absent
 `component.md`, or one without `sealed: true`, is unsealed; an absent
-`.overrides.json` pins nothing. A bare temporary `repo_root` therefore
-reaches the model call. `llm_backend` goes straight to `llm-endpoint`'s
+`.overrides.json` pins nothing. `llm_backend` goes straight to `llm-endpoint`'s
 `backend` parameter: the criteria's injected mock model.
 
-The helpers are the pieces `generate` itself uses, for another
-generation mode to share:
+Helpers `generate` itself uses, shared with other generation modes:
 
 - `check_write_allowed` returns `R-GEN-009`'s refusal reason
   (`"sealed-component"`, `"pinned-override"`) or `None`;
@@ -46,18 +44,21 @@ generation mode to share:
   `R-GEN-015`'s prefix stripped) into `gen/<component>/`;
 - `check_assets` applies `R-GEN-021`'s asset checks to `files` (same
   paths), writing nothing under `repo_root`: each asset is checked as a
-  file under a temporary directory, removed afterwards.
+  file, and the `.py` files as one code directory, under a temporary
+  directory, removed afterwards.
 
 ## Assets
 
 Declared assets, the tool root and adapter lookup are as
 `asset-kinds.md` states; an adapter is registered in `sys.modules` under
 a unique name before it runs (`R-GEN-014`). `check_asset_environment`
-calls each declared kind's `provision(repo_root)` once, in order of
-first declaration, returning `("environment", [message])` for the first
-kind with no adapter (`unknown asset kind: <kind>`) or `ok` false (its
-`reason`), else `(None, [])`. `check_assets` calls only `layout_errors`,
-on a fresh reply, never on a cache hit.
+calls `provision(repo_root)` of the implicit `python` kind, then of each
+declared kind once, in order of first declaration (`D344`), returning
+`("environment", [message])` for the first kind with no adapter
+(`unknown asset kind: <kind>`) or `ok` false (its `reason`), else
+`(None, [])`. `check_assets` calls only `layout_errors`, on a fresh
+reply, never on a cache hit; with no `python` adapter it returns
+`("environment", ["unknown asset kind: python"])`.
 
 ## Reply format
 
@@ -72,7 +73,7 @@ The prompt's reply-format instructions precede every bundle-derived
 section and show the begin marker with this call's nonce filled in.
 
 ```
-GATE_VERSION = "generator@3.1.0"
+GATE_VERSION = "generator@3.2.0"
 PROMPT_VERSION = "v12"
 ```
 

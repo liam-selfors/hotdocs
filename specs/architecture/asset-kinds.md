@@ -20,13 +20,14 @@ provenance treat every kind alike (`D340`, `D343`). A project built with
 - An **asset** is one generated file a component produces, at
   `gen/<slug>/<path>`.
 - An **asset kind** names how an asset is laid out, run and checked.
-  `python` is the pipeline's own kind: today's rules for a component's
-  module or package, with no adapter. Every other kind has a
-  **definition**, `specs/architecture/asset-kind-<kind>.md`, a spec that
+  Every kind, `python` included (`D344`), has a **definition**, `specs/architecture/asset-kind-<kind>.md`, a spec that
   only people, lint and the adapter's own bundles read, and an
   **adapter**, the component `comp-kind-<kind>`, which carries the
   definition out and is the only part of a kind the running pipeline
   reads.
+- Every component has one implicit `python` asset, its code directory
+  `gen/<slug>/` (`specs/architecture/asset-kind-python.md`); it is never
+  declared, and `python` in `assets` is a lint failure.
 - A component declares its non-Python assets in `component.md`
   frontmatter as a list of `<kind>:<path>` strings:
 
@@ -100,39 +101,46 @@ instead, verified by evaluation, regenerating only the adapter.
   `CriterionBundle`'s `testing`, after any `Uses:` documents,
   `\n## Asset kind: <kind>\n\n` followed by `guidance()["test_author"]`,
   each text stripped. Neither text reaches the other side.
-- **Layout.** First, each declared kind with no adapter, or whose
+- **Layout.** First, each kind, the implicit `python` first and then
+  each declared kind, with no adapter, or whose
   `provision(repo_root)` reports `ok` false, ends generation with the
   category `environment`, before any model call, and the message `unknown asset kind: <kind>` or
   the adapter's `reason`; no model call can fix it, so it is never
   retried. Then a reply MUST write every declared asset path, besides the
   Python module; a declared path left unwritten is `missing_asset`.
-  Writing an undeclared non-`.py` file is `malformed_layout`. Each written
-  asset is then checked with the adapter's `layout_errors`; any error is
+  Writing an undeclared non-`.py` file is `malformed_layout`. The reply's
+  `.py` files, as one code directory, and then each written asset are
+  checked with their adapter's `layout_errors`; any error is
   `malformed_layout` with the adapter's messages.
 - **Surface.** After `provision` reports `ok` (a failure is a finding
   with its `reason`), `surface-checker` compares `surface(...)["names"]` with
   the names the asset's interface file states; a name stated and not
-  provided is a surface failure, as for a missing Python name.
+  provided is a surface failure, as for a missing Python name. For
+  `python`, `surface-checker`'s import and dependency checks are the
+  surface gate (`asset-kind-python.md`).
 - **Running criteria.** Every criterion run and mutation run gets the
   pytest fixture `asset_runner`, from a plugin `verifier-orchestrator`
   supplies with `-p`. `asset_runner(path)` returns the adapter's
   callable for the declared asset at `path` in the code being verified;
   a path not declared raises `KeyError`. Generated tests stay plain
-  pytest and never run the environment's programs themselves.
+  pytest and never run the environment's programs themselves. Every
+  pytest run of a component, criterion, baseline or mutant, uses the
+  `interpreter` the `python` adapter's `provision` reports.
 - **Probe.** `test-probe`'s stub run supplies an `asset_runner` fixture
   whose callable raises `HotdocsProbeStubReached` when called, so a test
   that reaches an asset reaches the code under test.
 - **Retries.** `missing_asset` and `malformed_layout` are retried by
   `generation-loop` as `missing_module` is.
 - **Environment.** Before a component's criteria run,
-  `verifier-orchestrator` calls `provision(repo_root)` for each declared
-  kind. When it reports `ok` false, every `generated-test` criterion of
-  the component is `fail` with `failure_origin` `"environment"` and
+  `verifier-orchestrator` calls `provision(repo_root)` for the implicit
+  `python` kind and then each declared kind. When it reports `ok` false,
+  every `generated-test` and `compiled` criterion of the component, each
+  of which runs its code, is `fail` with `failure_origin` `"environment"` and
   `failure_detail.message` the adapter's `reason`, the mutation score is
   null, and nothing is run or skipped silently.
-- **Strength.** The mutation score covers every asset: the Python sites
-  of `mutation-runs.md`, then each declared asset's
-  `strength_sites(...)` in declaration order, each applied alone with
+- **Strength.** The mutation score covers every asset: the `python`
+  adapter's `strength_sites(<copy>)` over the code directory's copy, then
+  each declared asset's `strength_sites(...)` in declaration order, each applied alone with
   `apply_site` in the mutation sandbox, killed exactly as a Python
   mutant is. One score for the component, against the same bar.
 - **Language outside an asset.** A `str` constant of a component's
@@ -143,13 +151,14 @@ instead, verified by evaluation, regenerating only the adapter.
   `javascript in a string at <file>:<line>; declare it as an asset (specs/architecture/asset-kinds.md)`
   with `<file>` relative to `gen/<slug>/`, so the component fails rather
   than report a score its logic never earned (issue #13).
-- **Provenance.** `VerificationReport.assets` lists, per declared asset
-  in declaration order,
+- **Provenance.** `VerificationReport.assets` lists the implicit
+  `python` asset first, with `path` `"."`, then each declared asset in
+  declaration order,
   `{"kind", "path", "definition_sha256", "adapter_sha256", "versions", "lockfile_sha256"}`:
   the SHA-256 of `<repo_root>/specs/architecture/asset-kind-<kind>.md`
   (null when the repository does not define the kind) and of the adapter
   module as Lookup finds it, and `versions` and `lockfile_sha256` as `provision`
-  reported them; `[]` when the component declares none. Every hash is
+  reported them. Every hash is
   `"sha256:"` followed by the lowercase hex SHA-256 of the file's raw
   bytes, as `spec_bundle_hash` is written, and `provision` is called
   once per distinct kind.
@@ -165,7 +174,7 @@ instead, verified by evaluation, regenerating only the adapter.
 KIND: str
 layout_errors(asset_file: Path) -> list[str]
 surface(asset_file: Path) -> dict          # {"names": [str, ...]}
-provision(repo_root: Path) -> dict         # {"ok", "reason", "versions", "lockfile_sha256"}
+provision(repo_root: Path) -> dict         # {"ok", "reason", "versions", "lockfile_sha256", "interpreter"}
 guidance() -> dict                         # {"generator": str, "test_author": str}
 asset_runner(asset_file: Path) -> Callable[[str, list], object]
 strength_sites(asset_file: Path) -> list[dict]   # each has "description"
@@ -178,7 +187,9 @@ apply_site(asset_file: Path, site: dict) -> None
   `<kind> needs <program> >= <version>` or `<kind> environment: <reason>`.
   `versions` maps each program to the version it printed;
   `lockfile_sha256` is `"sha256:<hex>"` of the lockfile's bytes, or null
-  with no lockfile.
+  with no lockfile; `interpreter` is the absolute path of the Python that
+  runs the component's tests for `python`, and null for every other
+  kind.
 - The callable `asset_runner` returns takes an entry point and a list of
   JSON values and returns a JSON value, raising `AssetError` (defined by
   the adapter, with the asset's own error message) when the asset
@@ -194,20 +205,21 @@ suite scores below it. A strength check that cannot fail is a defect.
 
 ## Environments
 
-`hotdocs` runs in its own Python environment, which no asset uses. A
-kind's environment lives in `<repo_root>/.hotdocs/env/<kind>/`, never
+`hotdocs` runs in its own Python environment. A kind's environment lives in `<repo_root>/.hotdocs/env/<kind>/`, never
 committed, built from its committed lockfile by the adapter's
 `provision` on first use; a project provisions only the environments of the kinds
 its components declare, so a project with no `javascript` asset never
-needs Node. The `python` kind runs in `hotdocs`' environment for the
-`hotdocs` corpus itself, and in `.hotdocs/env/python/` from
-`environments/python/requirements.lock` once a project adopts it
-(`D340`).
+needs Node. The `python` kind runs in `.hotdocs/env/python/`, built
+from `environments/python/requirements.lock`, when the project commits
+that lock, so its code cannot import a package the project never
+declared (`D340`, `D344`); without a lock it runs in `hotdocs`' own
+environment, as the `hotdocs` corpus itself does.
 
 ## Built-in kinds
 
 | Kind | Asset | Environment | Surface | Strength |
 | --- | --- | --- | --- | --- |
+| `python` | The code directory, implicit | Python; a project lock optional | Public names; `surface-checker`'s checks | Mutation |
 | `javascript` | One ES module file | Node >= 24 | Exported names | Mutation |
 
 Proposed next, each its own decision and adapter: `sql`, `data-schema`,

@@ -1,5 +1,21 @@
 # Testing provenance-checker
 
+## The fake `python` adapter
+
+Every criterion's `repo_root` plants `<repo_root>/gen/kind-python/kind_python.py`
+(`D344`), so no criterion depends on the real adapter or the running
+environment: it defines `KIND = "python"`, `guidance()` returning
+`{"generator": "", "test_author": ""}`, and a deterministic
+`provision(repo_root)` returning exactly
+`{"ok": True, "reason": "", "versions": {"python": "3.12.0"}, "lockfile_sha256": None, "interpreter": "/fake/python"}`;
+it is varied and observed as the fake kind's adapter is below. No
+`asset-kind-python.md` is planted, so the expected python entry P is
+`{"kind": "python", "path": ".", "definition_sha256": null, "adapter_sha256": PA, "versions": {"python": "3.12.0"}, "lockfile_sha256": null}`,
+PA being `"sha256:"` plus the lowercase hex SHA-256 of `kind_python.py`'s
+bytes. Every manifest a scenario expects to hit, and that gives no
+`assets` of its own, has `assets` `[P]`, the current value of a
+component that declares none.
+
 ## A fake asset kind
 
 Criteria about assets (`AC-PROVCHECK-014`) plant a kind `fake` under a
@@ -27,7 +43,7 @@ temporary `repo_root`, so no real environment (Node) is needed:
 
 Unless a scenario says otherwise, `provision` reports `ok` true and
 `versions` `{"fakec": "2.0.0"}`, and the expected assets value E is
-`[{"kind": "fake", "path": "static/a.fake", "definition_sha256": D, "adapter_sha256": A, "versions": {"fakec": "2.0.0"}, "lockfile_sha256": null}]`,
+`[P, {"kind": "fake", "path": "static/a.fake", "definition_sha256": D, "adapter_sha256": A, "versions": {"fakec": "2.0.0"}, "lockfile_sha256": null}]`,
 D and A being `"sha256:"` plus the lowercase hex SHA-256 of `asset-kind-fake.md`'s
 and `kind_fake.py`'s bytes.
 

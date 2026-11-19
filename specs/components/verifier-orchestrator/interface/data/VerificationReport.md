@@ -13,7 +13,9 @@
   "interface_drift": false,
   "mutation_score": 0.92,
   "mutation_error": null,
-  "assets": [],
+  "assets": [{ "kind": "python", "path": ".", "definition_sha256": null,
+    "adapter_sha256": "sha256:<hex>", "versions": { "python": "3.12.4" },
+    "lockfile_sha256": null }],
   "overall": "pass"
 }
 ```
@@ -26,8 +28,7 @@ when an environment failed (`R-VERIFY-020`).
 on a `generated-test` criterion that called `test_author` this run.
 
 `covers` is the criterion's own `Covers:` value; `requirement_results`
-is R-VERIFY-011's projection. In the example `R-FOO-002` is `fail`
-while `overall` is `pass` (R-VERIFY-005).
+is R-VERIFY-011's projection.
 
 **`failure_detail`** (R-VERIFY-012), only on a failed `compiled` or
 `generated-test` criterion:
@@ -39,16 +40,9 @@ while `overall` is `pass` (R-VERIFY-005).
 
 **`failure_origin`** (R-VERIFY-019), exactly on a failed `compiled` or
 `generated-test` criterion: `"test"` when no sound test could run for it,
-`"environment"` when a declared kind is unknown or unprovisioned
-(`R-VERIFY-020`), `"implementation"` when a test ran and failed. A retry
-attends only to `"implementation"` failures.
+`"environment"` when an asset's kind is unknown or unprovisioned
+(`R-VERIFY-020`), `"implementation"` when a test ran and failed.
 
-**`assets`** (R-VERIFY-020), one entry per declared asset in
-declaration order, `[]` with none, as
-`specs/architecture/asset-kinds.md`'s Provenance bullet states:
-
-```json
-{ "kind": "javascript", "path": "static/app.js",
-  "definition_sha256": "sha256:<hex>", "adapter_sha256": "sha256:<hex>",
-  "versions": { "node": "24.1.0" }, "lockfile_sha256": null }
-```
+**`assets`** (R-VERIFY-020), the implicit `python` asset first, then
+one entry per declared asset in declaration order, as
+`specs/architecture/asset-kinds.md`'s Provenance bullet states.

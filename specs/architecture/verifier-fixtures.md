@@ -80,7 +80,8 @@ probe-failed cached file stays on disk. A stand-in records its calls by
 appending to a file the test controls.
 
 A `generated-test` criterion's file runs as
-`<sys.executable> -m pytest <file>` with the working directory
+`<interpreter> -m pytest <file>`, `<interpreter>` the one the `python`
+adapter's `provision` reported (`D344`), with the working directory
 `repo_root` and `PYTHONPATH` set to `gen/<slug>/` (`R-VERIFY-001`). Its
 `result` is `pass` exactly when that run exits `0`, and `fail`
 otherwise. The mutation score and interface drift change only the
@@ -138,3 +139,46 @@ frontmatter and writes `gen/<slug>/data/table.txt` as the two lines
 When the fixture's Python module has no mutation site, a test asserting `run("a", []) == 1` alone scores exactly `0.5`. A kind
 with no adapter, such as `nokind`, is declared without planting
 `gen/kind-nokind/`.
+
+## The `python` kind
+
+`verify` provisions the implicit `python` asset (`D344`,
+`specs/architecture/asset-kind-python.md`) before every declared one,
+with its adapter found by Lookup:
+`<repo_root>/gen/kind-python/kind_python.py`, else the tool root's. A
+fixture that does not concern the `python` kind plants nothing, so the
+tool root's real adapter is used: in a criterion run it is
+`Path(verifier_orchestrator.__file__).parents[1] / "kind-python" / "kind_python.py"`,
+and in a mutation run the same path reaches it through the sandbox's
+symbolic link `gen/kind-python`. With no
+`environments/python/requirements.lock` in the fixture, its report has
+`ok` true, `interpreter` the running interpreter, `versions`
+`{"python": platform.python_version()}` and `lockfile_sha256` null, and
+the `assets` entry `{"kind": "python", "path": ".", "definition_sha256": None, "adapter_sha256": <that file's hash>, "versions": {"python": platform.python_version()}, "lockfile_sha256": None}`,
+`definition_sha256` null because the fixture writes no
+`specs/architecture/asset-kind-python.md`.
+
+Every pytest run, criterion, baseline or mutant, uses `<interpreter>`
+in place of `sys.executable`. When the `python` report has `ok` false
+there is none: every `generated-test` and `compiled` criterion fails
+as `R-VERIFY-020` states, and only `llm-judge` criteria, which run no
+code, are still judged.
+
+**A fake `python` adapter.** A test concerning the `python` kind plants
+`<repo_root>/gen/kind-python/kind_python.py` defining `KIND = "python"`,
+`layout_errors` returning `[]`, `surface` returning `{"names": []}`,
+`guidance()` returning `{"generator": "", "test_author": ""}`,
+`strength_sites` returning `[]`, `apply_site` doing nothing, and one of:
+
+- *failing*: `provision(repo_root)` returns
+  `{"ok": False, "reason": "python environment: broken", "versions": {}, "lockfile_sha256": None, "interpreter": None}`;
+- *wrapped*: `provision(repo_root)` returns
+  `{"ok": True, "reason": "", "versions": {"python": "0.0"}, "lockfile_sha256": None, "interpreter": <wrapper>}`,
+  where `<wrapper>` is the absolute path of `<repo_root>/wrapper.sh`,
+  which the test writes with mode `0o755` as exactly the three lines
+  `#!/bin/sh`, `echo called >> <repo_root>/wrapper.log` and
+  `exec <sys.executable> "$@"`, the paths written absolute. Each run
+  under it appends one line `called` to `wrapper.log`, so a test can
+  count its runs; with one passing `generated-test` criterion and no
+  mutation site there are at least two, the criterion's and the
+  baseline's.

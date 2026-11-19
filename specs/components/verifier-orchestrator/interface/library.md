@@ -2,7 +2,7 @@
 
 ```
 verify(component_id: str, repo_root: Path, judge=None, test_author=None) -> VerificationReport
-GATE_VERSION: str  # "verifier-orchestrator@3.4.0" (R-VERIFY-015)
+GATE_VERSION: str  # "verifier-orchestrator@3.5.0" (R-VERIFY-015)
 DEFAULT_TEST_TIMEOUT: float  # 300.0, read at each run (R-VERIFY-014)
 ```
 
@@ -12,9 +12,7 @@ form. Each `criteria` entry is a plain **dict** (`c["id"]`,
 `c["result"]`), as is `requirement_results` (`D190`).
 
 `judge`/`test_author` are the glossary's "Injected `judge`/`test_author`
-callable shape" (`D65`): one `bundle` argument. Without `judge`,
-`llm-judge` criteria are `skipped`; without `test_author`, an uncached
-`generated-test` criterion is `fail` (R-VERIFY-010).
+callable shape" (`D65`): one `bundle` argument.
 
 It loads `spec-bundle-assembler` from `<repo_root>/gen/spec-bundle-assembler/`,
 `test-probe` from `<repo_root>/gen/test-probe/` and the sealed

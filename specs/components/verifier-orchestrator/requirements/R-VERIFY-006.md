@@ -11,7 +11,7 @@
   `generated-test` file fails against it.
 
   The sites, swaps and the check for JavaScript in a Python string are
-  exactly those of `specs/architecture/mutation-runs.md`: Python's
-  operators (`D159`, `D172`), then each declared asset's strength sites
-  (`D343`). The bar was calibrated against them, so a regeneration MUST
+  exactly those of `specs/architecture/mutation-runs.md`: the `python`
+  adapter's strength sites (`D159`, `D172`, `D344`), then each declared
+  asset's (`D343`). The bar was calibrated against them, so a regeneration MUST
   NOT change them.

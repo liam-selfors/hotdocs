@@ -16,6 +16,9 @@
   - A `/`-separated segment of `path` equal to `..`:
     `asset '<entry>': path contains ..`.
   - `path` ending in `.py`: `asset '<entry>': path ends in .py`.
+  - `kind` `python`, which every component has implicitly (`D344`):
+    `asset '<entry>': python is never declared`; no further check of
+    that entry.
   - Neither `<repo_root>/specs/architecture/asset-kind-<kind>.md` nor an
     adapter `gen/kind-<kind>/kind_<kind>.py` under `repo_root` or the
     tool root (as in R-LINT-032) exists:

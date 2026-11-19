@@ -23,8 +23,7 @@
 this order. `retry_feedback` echoes the caller's (`null` if none). `generate` always returns `mode`
 `"single"`, `transcript_sha256` `null`, `turns` `1`, `tool_calls` `0`
 and `isolation` `null` (a cache hit included); another generation mode
-fills them with its own values, `isolation` naming how code the model
-ran was contained.
+fills them.
 
 Exactly one of `files` (non-empty), `model_call_error`, or `refused` is
 populated on any result (`files` is `{}` when it is not), and
