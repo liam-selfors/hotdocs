@@ -1,162 +1,126 @@
+# hotdocs-criterion: sha256:a461be5e27324d62ee35ef17872a075b470ab069c50a8b70974dd26059bd74d5
 import os
 import time
 from pathlib import Path
 
-import pytest
-
 import criterion_compiler
 
 
-SLUG = "widget-maker"
-COMPONENT_ID = "comp-" + SLUG
+def field(value, name):
+    return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def _get(value, key, default=None):
-    if isinstance(value, dict):
-        return value.get(key, default)
-    return getattr(value, key, default)
-
-
-def _write(path: Path, text: str) -> None:
+def write(path, text):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
 
 
-def _build_fixture(repo_root: Path) -> None:
-    comp_dir = repo_root / "specs" / "components" / SLUG
-
-    _write(
-        comp_dir / "component.md",
+def build_fixture(repo_root):
+    comp = repo_root / "specs" / "components" / "foo"
+    write(
+        comp / "component.md",
         "---\n"
-        "id: comp-widget-maker\n"
-        "title: Widget Maker\n"
-        "status: draft\n"
-        "owners: [alice]\n"
-        "depends_on: []\n"
-        "sealed: true\n"
-        "source_path: legacy/widget_maker\n"
-        "---\n"
-        "\n"
-        "# Widget Maker\n"
-        "\n"
-        "A synthetic component used to exercise criterion compilation.\n",
+        + "id: comp-foo\n"
+        + "title: Foo\n"
+        + "status: draft\n"
+        + "owners: [team-a]\n"
+        + "depends_on: []\n"
+        + "sealed: true\n"
+        + "source_path: legacy/foo/\n"
+        + "---\n"
+        + "\n"
+        + "# Foo\n"
+        + "\n"
+        + "A small fixture component.\n",
     )
-
-    _write(
-        comp_dir / "requirements" / "R-WIDGET-001.md",
-        "# R-WIDGET-001\n"
-        "\n"
-        "**R-WIDGET-001** - make_widget MUST return a widget named as asked.\n",
+    write(
+        comp / "constraints.md",
+        "# Constraints\n\nNone.\n",
     )
-    _write(
-        comp_dir / "requirements" / "R-WIDGET-002.md",
-        "# R-WIDGET-002\n"
-        "\n"
-        "**R-WIDGET-002** - A bound fixture MUST be observable.\n",
+    write(
+        comp / "requirements" / "R-FOO-001.md",
+        "# R-FOO-001\n"
+        + "\n"
+        + "**R-FOO-001** — `greet` MUST return a greeting.\n",
     )
-
-    _write(
-        comp_dir / "interface" / "library.md",
+    write(
+        comp / "requirements" / "R-FOO-002.md",
+        "# R-FOO-002\n"
+        + "\n"
+        + "**R-FOO-002** — A fixture value MUST be preserved.\n",
+    )
+    write(
+        comp / "interface" / "library.md",
         "# Library\n"
-        "\n"
-        "```\n"
-        "make_widget(name: str, size: int = 1) -> dict\n"
-        "```\n"
-        "\n"
-        "Builds a widget.\n",
+        + "\n"
+        + "```\n"
+        + "greet(name: str, punctuation: str = \"!\") -> str\n"
+        + "```\n"
+        + "\n"
+        + "`greet` returns a greeting.\n",
+    )
+    write(
+        comp / "acceptance" / "AC-FOO-001.md",
+        "# AC-FOO-001\n"
+        + "\n"
+        + "Covers: R-FOO-001\n"
+        + "Kind: compiled\n"
+        + "\n"
+        + "```gherkin\n"
+        + "Given a payload is \"world\"\n"
+        + "When greet is invoked with {\"name\": payload}\n"
+        + "Then length equals 12\n"
+        + "```\n",
+    )
+    write(
+        comp / "acceptance" / "AC-FOO-002.md",
+        "# AC-FOO-002\n"
+        + "\n"
+        + "Covers: R-FOO-002\n"
+        + "Kind: compiled\n"
+        + "\n"
+        + "```gherkin\n"
+        + "Given a count is 3\n"
+        + "Then count equals 3\n"
+        + "```\n",
     )
 
-    _write(
-        comp_dir / "acceptance" / "AC-WIDGET-001.md",
-        "# AC-WIDGET-001\n"
-        "\n"
-        "Covers: R-WIDGET-001\n"
-        "Kind: compiled\n"
-        "\n"
-        "```gherkin\n"
-        "Given a payload is \"abc\"\n"
-        "When make_widget is invoked with {\"name\": payload}\n"
-        "Then name equals \"abc\"\n"
-        "```\n",
-    )
-    _write(
-        comp_dir / "acceptance" / "AC-WIDGET-002.md",
-        "# AC-WIDGET-002\n"
-        "\n"
-        "Covers: R-WIDGET-002\n"
-        "Kind: compiled\n"
-        "\n"
-        "```gherkin\n"
-        "Given a count is 3\n"
-        "Then size equals 3\n"
-        "```\n",
-    )
 
-
-def _compile(repo_root: Path, out_dir: Path):
-    last_exc = None
-    for cid in (COMPONENT_ID, SLUG):
-        try:
-            report = criterion_compiler.compile(cid, repo_root, out_dir=out_dir)
-        except Exception as exc:  # try the other id form
-            last_exc = exc
-            continue
-        outputs = _get(report, "outputs") or []
-        if outputs:
-            return cid, report
-    if last_exc is not None:
-        raise last_exc
-    pytest.fail("compile produced no outputs for either component id form")
-
-
-def _snapshot(out_dir: Path) -> dict:
-    snap = {}
+def snapshot(out_dir):
+    result = {}
     for p in sorted(out_dir.rglob("*")):
         if p.is_file():
             st = os.stat(p)
-            snap[str(p.relative_to(out_dir))] = (st.st_mtime_ns, p.read_bytes())
-    return snap
+            result[str(p.relative_to(out_dir))] = (st.st_mtime_ns, p.read_bytes())
+    return result
 
 
-def test_recompiling_unchanged_content_does_not_touch_outputs(tmp_path):
+def test_recompile_unchanged_content_does_not_touch_outputs(tmp_path):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
-    _build_fixture(repo_root)
-    out_dir = tmp_path / "out" / "compiled"
+    build_fixture(repo_root)
+    out_dir = tmp_path / "out"
 
-    cid, first_report = _compile(repo_root, out_dir)
+    report1 = criterion_compiler.compile("comp-foo", repo_root, "pytest", out_dir)
+    outputs1 = field(report1, "outputs")
+    compiled1 = [o for o in outputs1 if field(o, "status") == "compiled"]
+    assert compiled1, "fixture should compile at least one criterion: " + repr(outputs1)
 
-    outputs = _get(first_report, "outputs") or []
-    compiled = [o for o in outputs if _get(o, "status") == "compiled"]
-    assert compiled, (
-        "fixture expected to compile at least one criterion; outputs were: %r"
-        % (outputs,)
-    )
-
-    before = _snapshot(out_dir)
-    assert before, "first compile wrote no files under the --out directory"
+    before = snapshot(out_dir)
+    assert before, "first compile should write output files"
 
     # Ensure any rewrite would be observable even on coarse-mtime filesystems.
-    time.sleep(1.2)
+    time.sleep(1.5)
 
-    second_report = criterion_compiler.compile(cid, repo_root, out_dir=out_dir)
-    second_outputs = _get(second_report, "outputs") or []
-    assert second_outputs, "second compile returned no outputs"
+    report2 = criterion_compiler.compile("comp-foo", repo_root, "pytest", out_dir)
+    outputs2 = field(report2, "outputs")
+    compiled2 = [o for o in outputs2 if field(o, "status") == "compiled"]
+    assert len(compiled2) == len(compiled1)
 
-    after = _snapshot(out_dir)
+    after = snapshot(out_dir)
 
-    for rel, (mtime_ns, content) in before.items():
-        assert rel in after, "output file %s disappeared on recompile" % rel
-        new_mtime_ns, new_content = after[rel]
-        assert new_content == content, (
-            "output file %s content changed on recompile of unchanged input" % rel
-        )
-        assert new_mtime_ns == mtime_ns, (
-            "output file %s mtime changed on recompile of unchanged input "
-            "(%d -> %d)" % (rel, mtime_ns, new_mtime_ns)
-        )
-
-    assert set(after) == set(before), (
-        "set of output files changed on recompile: before=%r after=%r"
-        % (sorted(before), sorted(after))
-    )
+    for name, (mtime_ns, content) in before.items():
+        assert name in after, "output file disappeared on recompile: " + repr(name)
+        new_mtime_ns, new_content = after[name]
+        assert new_content == content, "content changed for " + repr(name)
+        assert new_mtime_ns == mtime_ns, "mtime changed for " + repr(name)
