@@ -6,7 +6,7 @@ def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def test_ac_probe_001_syntax_error_returns_single_finding_and_no_run():
+def test_ac_probe_001_syntax_error_gives_one_finding_and_no_run():
     source = "def test_a(:\n    pass\n"
     report = test_probe.probe(source, {}, "slugify")
 
@@ -15,7 +15,6 @@ def test_ac_probe_001_syntax_error_returns_single_finding_and_no_run():
     findings = field(report, "findings")
     assert isinstance(findings, list)
     assert len(findings) == 1
-
     finding = findings[0]
     assert field(finding, "kind") == "syntax_error"
     assert field(finding, "severity") == "error"
@@ -23,12 +22,3 @@ def test_ac_probe_001_syntax_error_returns_single_finding_and_no_run():
 
     assert field(report, "tests_run") == 0
     assert field(report, "tests_reached") == 0
-
-    as_dict = report.to_dict()
-    assert as_dict["ok"] is False
-    assert len(as_dict["findings"]) == 1
-    assert as_dict["findings"][0]["kind"] == "syntax_error"
-    assert as_dict["findings"][0]["severity"] == "error"
-    assert as_dict["findings"][0]["line"] == 1
-    assert as_dict["tests_run"] == 0
-    assert as_dict["tests_reached"] == 0

@@ -1,19 +1,19 @@
 {
-  "spec_bundle_hash": "sha256:a77e7561c9e6b01d36fa7049f899d87a57a78d1ed5f3c91ae76678a0f57de40d",
+  "spec_bundle_hash": "sha256:0f05dbf39cc5710da6c55d8094e8f511b51c57aacf66081da2963deff5cd7a9a",
   "model_pin": "claude-opus-5-5",
-  "prompt_version": "v11",
+  "prompt_version": "v12",
   "retry_feedback": null,
   "pipeline_version": "v1",
   "gate_versions": {
     "compiler": "criterion-compiler@1.0.0",
-    "generated_test": "generated_test@1.1.0",
-    "verifier": "verifier-orchestrator@2.2.0",
+    "generated_test": "generated_test@1.2.0",
+    "verifier": "verifier-orchestrator@2.3.0",
     "license_scanner": "license_scanner@4.0.0-no-reference-corpus",
     "secret_scanner": "secret_scanner@3.1.0+detect-secrets.1.5.0",
-    "generator": "generator@3.0.0+v11"
+    "generator": "generator@3.2.0+v12"
   },
   "provenance_hit": false,
-  "generated_at": "2026-11-19T02:09:40Z",
+  "generated_at": "2026-11-19T16:19:35Z",
   "verification_run_id": "test-probe-attempt-1",
   "verification_report": {
     "component_id": "comp-test-probe",
@@ -22,85 +22,109 @@
         "id": "AC-PROBE-001",
         "covers": "R-PROBE-001",
         "kind": "generated-test",
+        "result": "pass",
         "test_authoring": {
           "model": "claude-opus-5-5",
-          "seed": 2,
+          "seed": 1,
           "prompt_version": "v1",
           "cache_hit": false
-        },
-        "result": "pass"
+        }
       },
       {
         "id": "AC-PROBE-002",
         "covers": "R-PROBE-002",
         "kind": "generated-test",
+        "result": "pass",
         "test_authoring": {
           "model": "claude-opus-5-5",
-          "seed": 2,
+          "seed": 1,
           "prompt_version": "v1",
           "cache_hit": false
-        },
-        "result": "pass"
+        }
       },
       {
         "id": "AC-PROBE-003",
         "covers": "R-PROBE-003",
         "kind": "generated-test",
+        "result": "pass",
         "test_authoring": {
           "model": "claude-opus-5-5",
-          "seed": 2,
+          "seed": 1,
           "prompt_version": "v1",
           "cache_hit": false
-        },
-        "result": "pass"
+        }
       },
       {
         "id": "AC-PROBE-004",
         "covers": "R-PROBE-004",
         "kind": "generated-test",
+        "result": "pass",
         "test_authoring": {
           "model": "claude-opus-5-5",
-          "seed": 2,
+          "seed": 1,
           "prompt_version": "v1",
           "cache_hit": false
-        },
-        "result": "pass"
+        }
       },
       {
         "id": "AC-PROBE-005",
         "covers": "R-PROBE-005",
         "kind": "generated-test",
+        "result": "pass",
         "test_authoring": {
           "model": "claude-opus-5-5",
-          "seed": 2,
+          "seed": 1,
           "prompt_version": "v1",
           "cache_hit": false
-        },
-        "result": "pass"
+        }
       },
       {
         "id": "AC-PROBE-006",
         "covers": "R-PROBE-006",
         "kind": "generated-test",
+        "result": "pass",
         "test_authoring": {
           "model": "claude-opus-5-5",
-          "seed": 2,
+          "seed": 1,
           "prompt_version": "v1",
           "cache_hit": false
-        },
-        "result": "pass"
+        }
       },
       {
         "id": "AC-PROBE-007",
         "covers": "R-PROBE-003",
         "kind": "generated-test",
+        "result": "pass",
         "test_authoring": {
           "model": "claude-opus-5-5",
-          "seed": 2,
+          "seed": 1,
           "prompt_version": "v1",
           "cache_hit": false
-        },
-        "result": "pass"
+        }
+      },
+      {
+        "id": "AC-PROBE-008",
+        "covers": "R-PROBE-007",
+        "kind": "generated-test",
+        "result": "pass",
+        "test_authoring": {
+          "model": "claude-opus-5-5",
+          "seed": 1,
+          "prompt_version": "v1",
+          "cache_hit": false
+        }
+      },
+      {
+        "id": "AC-PROBE-009",
+        "covers": "R-PROBE-008",
+        "kind": "generated-test",
+        "result": "pass",
+        "test_authoring": {
+          "model": "claude-opus-5-5",
+          "seed": 1,
+          "prompt_version": "v1",
+          "cache_hit": false
+        }
       }
     ],
     "requirement_results": {
@@ -109,10 +133,12 @@
       "R-PROBE-003": "pass",
       "R-PROBE-004": "pass",
       "R-PROBE-005": "pass",
-      "R-PROBE-006": "pass"
+      "R-PROBE-006": "pass",
+      "R-PROBE-007": "pass",
+      "R-PROBE-008": "pass"
     },
     "interface_drift": false,
-    "mutation_score": 0.863013698630137,
+    "mutation_score": 0.865979381443299,
     "mutation_error": null,
     "overall": "pass"
   },

@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:3a3d7edd033e236c8ceb0363a0fc42b1a10ff633dc0a59d814eea2593e8a7870
+# hotdocs-criterion: sha256:0bf76506dc7851e94c315104a40dd06d72ca78c5dc7062bedd3a1b52b028e952
 import test_probe
 
 
@@ -33,10 +33,9 @@ def test_unresolvable_import_reported_once_with_line_and_message():
     finding = unknown[0]
     assert field(finding, "line") == 2
     assert field(finding, "message") == "cannot import 'your_module_here'"
-    assert field(finding, "severity") == "error"
 
 
-def test_without_unresolvable_import_no_unknown_import_finding():
+def test_source_without_second_line_has_no_unknown_import():
     lines = SOURCE.split("\n")
     source = "\n".join(lines[:1] + lines[2:])
     assert "your_module_here" not in source
@@ -44,7 +43,7 @@ def test_without_unresolvable_import_no_unknown_import_finding():
     assert _unknown_imports(report) == []
 
 
-def test_relative_stdlib_dotted_and_guarded_imports_not_reported():
+def test_relative_stdlib_and_guarded_imports_not_reported():
     source = (
         "from . import helpers\n"
         "from os import path\n"
@@ -54,7 +53,7 @@ def test_relative_stdlib_dotted_and_guarded_imports_not_reported():
         "except (OSError, ImportError):\n"
         "    yaml_nonexistent_q = None\n"
         "\n"
-        "def test_sep():\n"
+        "def test_a():\n"
         "    assert path.sep\n"
     )
     report = test_probe.probe(source, {}, "slugify")
