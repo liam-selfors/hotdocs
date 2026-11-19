@@ -1,8 +1,4 @@
 # hotdocs-criterion: sha256:fa4cf421e48e617fbb352eb0bee6a456e7a58281e1fd9909d92058c4707deed2
-"""AC-LINT-018: a depends_on_guarantees entry whose owning component is not
-listed in the component's own depends_on yields a fail-severity R-LINT-018
-finding naming the owning component by its comp-<slug> id."""
-
 from pathlib import Path
 
 import spec_linter
@@ -12,148 +8,129 @@ def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
+def _text(value):
+    value = getattr(value, "value", value)
+    return str(value)
+
+
 def _write(path, text):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
 
 
-def _component_md(comp_id, title, slug, extra_frontmatter_lines):
+def _component_md(comp_id, title, slug, extra_lines):
     lines = [
         "---",
         "id: " + comp_id,
         "title: " + title,
         "status: draft",
-        "owners: [test-team]",
+        "owners: [pipeline-team]",
         "sealed: true",
         "source_path: legacy/" + slug + "/",
     ]
-    lines.extend(extra_frontmatter_lines)
-    lines.extend(
-        [
-            "---",
-            "",
-            "# " + title,
-            "",
-            "## Purpose",
-            "",
-            "A small fixture component used for linting tests.",
-            "",
-            "## Scope",
-            "",
-            "- In scope: fixture behavior.",
-            "- Out of scope: everything else.",
-            "",
-            "## Definitions",
-            "",
-            "None.",
-            "",
-            "## Behavior",
-            "",
-            "See `requirements/`.",
-            "",
-            "## Interfaces",
-            "",
-            "See `interface/`.",
-            "",
-            "## Data",
-            "",
-            "See `interface/data/`.",
-            "",
-            "## Acceptance criteria",
-            "",
-            "See `acceptance/`.",
-            "",
-            "## Non-functional constraints",
-            "",
-            "See `constraints.md`.",
-            "",
-            "## Open questions",
-            "",
-            "## Change log",
-            "",
-            "- Initial draft.",
-            "",
-        ]
-    )
-    return "\n".join(lines)
+    lines.extend(extra_lines)
+    lines.append("---")
+    body = [
+        "",
+        "# " + title,
+        "",
+        "## Purpose",
+        "",
+        "A small fixture component used to exercise the linter.",
+        "",
+        "## Scope",
+        "",
+        "- In scope: fixture behavior.",
+        "- Out of scope: everything else.",
+        "",
+        "## Definitions",
+        "",
+        "None.",
+        "",
+        "## Behavior",
+        "",
+        "See `requirements/`.",
+        "",
+        "## Interfaces",
+        "",
+        "See `interface/`.",
+        "",
+        "## Data",
+        "",
+        "See `interface/data/`.",
+        "",
+        "## Acceptance criteria",
+        "",
+        "See `acceptance/`.",
+        "",
+        "## Non-functional constraints",
+        "",
+        "See `constraints.md`.",
+        "",
+        "## Open questions",
+        "",
+        "## Change log",
+        "",
+        "- Initial draft.",
+        "",
+    ]
+    return "\n".join(lines + body)
 
 
-def _requirement(req_id):
-    return "\n".join(
-        [
-            "# " + req_id,
-            "",
-            "**" + req_id + "** — The component MUST behave as characterized.",
-            "",
-        ]
-    )
-
-
-def _acceptance(ac_id, req_id):
-    return "\n".join(
-        [
-            "# " + ac_id,
-            "",
-            "Covers: " + req_id,
-            "Kind: compiled",
-            "",
-            "```gherkin",
-            "Given the component is loaded",
-            "When it runs",
-            "Then it behaves as characterized",
-            "```",
-            "",
-        ]
-    )
-
-
-def _constraints():
-    return "\n".join(
-        [
-            "# Constraints",
-            "",
-            "- None beyond the defaults.",
-            "",
-        ]
-    )
-
-
-def _build_component(repo_root, slug, upper, frontmatter_extra):
-    base = repo_root / "specs" / "components" / slug
+def _add_units(comp_dir, prefix):
+    req_id = "R-" + prefix + "-001"
+    ac_id = "AC-" + prefix + "-001"
     _write(
-        base / "component.md",
-        _component_md("comp-" + slug, slug.capitalize(), slug, frontmatter_extra),
+        comp_dir / "requirements" / (req_id + ".md"),
+        "# " + req_id + "\n\n**" + req_id + "** — The component MUST "
+        "match existing behavior.\n",
     )
-    req_id = "R-" + upper + "-001"
-    ac_id = "AC-" + upper + "-001"
-    _write(base / "requirements" / (req_id + ".md"), _requirement(req_id))
-    _write(base / "acceptance" / (ac_id + ".md"), _acceptance(ac_id, req_id))
-    _write(base / "constraints.md", _constraints())
-    return base
+    _write(
+        comp_dir / "acceptance" / (ac_id + ".md"),
+        "# " + ac_id + "\n\nCovers: " + req_id + "\nKind: compiled\n\n"
+        "```gherkin\nGiven the component\nWhen it runs\n"
+        "Then it matches existing behavior\n```\n",
+    )
+    _write(
+        comp_dir / "constraints.md",
+        "# Constraints\n\nNone.\n",
+    )
 
 
 def _build_corpus(repo_root, foo_depends_on_bar):
+    specs = repo_root / "specs"
     _write(
-        repo_root / "specs" / "glossary.md",
-        "# Glossary\n\n- **Fixture** — a synthetic test corpus.\n",
+        specs / "glossary.md",
+        "# Glossary\n\n- **Fixture** — a synthetic spec corpus.\n",
     )
-    bar = _build_component(repo_root, "bar", "BAR", [])
+
+    bar_dir = specs / "components" / "bar"
+    _write(bar_dir / "component.md", _component_md("comp-bar", "Bar", "bar", []))
+    _add_units(bar_dir, "BAR")
     _write(
-        bar / "interface" / "guarantees" / "G-BAR-001.md",
-        "# G-BAR-001\n\n**G-BAR-001** — Bar MUST return results in a stable order.\n",
+        bar_dir / "interface" / "guarantees" / "G-BAR-001.md",
+        "# G-BAR-001\n\n**G-BAR-001** — Bar MUST return results in a "
+        "stable order.\n",
     )
-    foo_extra = ["depends_on_guarantees: [G-BAR-001]"]
+
+    foo_extra = []
     if foo_depends_on_bar:
-        foo_extra.insert(0, "depends_on: [comp-bar]")
-    _build_component(repo_root, "foo", "FOO", foo_extra)
+        foo_extra.append("depends_on: [comp-bar]")
+    foo_extra.append("depends_on_guarantees: [G-BAR-001]")
+    foo_dir = specs / "components" / "foo"
+    _write(foo_dir / "component.md", _component_md("comp-foo", "Foo", "foo", foo_extra))
+    _add_units(foo_dir, "FOO")
 
 
-def _lint_018_findings(report):
-    out = []
+def _r018_fail_findings(report):
+    result = []
     for finding in field(report, "findings"):
-        if field(finding, "rule_id") == "R-LINT-018":
-            out.append(finding)
-    return out
+        if _text(field(finding, "rule_id")) != "R-LINT-018":
+            continue
+        if _text(field(finding, "severity")) != "fail":
+            continue
+        result.append(finding)
+    return result
 
 
 def test_guarantee_of_undeclared_dependency_fails_naming_owner(tmp_path):
@@ -162,29 +139,23 @@ def test_guarantee_of_undeclared_dependency_fails_naming_owner(tmp_path):
 
     report = spec_linter.lint(None, repo_root)
 
-    findings = _lint_018_findings(report)
-    matching = [
-        f
-        for f in findings
-        if field(f, "severity") == "fail" and "comp-bar" in str(field(f, "message"))
-    ]
-    assert matching, (
-        "expected a fail-severity R-LINT-018 finding naming comp-bar; got: "
-        + repr([(field(f, "severity"), field(f, "message")) for f in findings])
+    matches = _r018_fail_findings(report)
+    assert matches, (
+        "expected a fail-severity R-LINT-018 finding, got: "
+        + repr([(field(f, "rule_id"), field(f, "severity"), field(f, "message"))
+                for f in field(report, "findings")])
+    )
+    assert any("comp-bar" in _text(field(f, "message")) for f in matches), repr(
+        [field(f, "message") for f in matches]
     )
     assert field(report, "hard_failures") >= 1
 
 
-def test_guarantee_of_declared_dependency_has_no_missing_dependency_finding(tmp_path):
+def test_guarantee_of_declared_dependency_has_no_r018_failure(tmp_path):
     repo_root = Path(tmp_path)
     _build_corpus(repo_root, foo_depends_on_bar=True)
 
     report = spec_linter.lint(None, repo_root)
 
-    findings = _lint_018_findings(report)
-    naming_bar = [f for f in findings if "comp-bar" in str(field(f, "message"))]
-    assert naming_bar == [], (
-        "did not expect an R-LINT-018 finding naming comp-bar when comp-bar is "
-        "in depends_on; got: "
-        + repr([(field(f, "severity"), field(f, "message")) for f in naming_bar])
-    )
+    matches = _r018_fail_findings(report)
+    assert matches == [], repr([field(f, "message") for f in matches])

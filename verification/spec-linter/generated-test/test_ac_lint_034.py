@@ -9,46 +9,41 @@ def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def sev(value):
-    s = field(value, "severity")
-    return getattr(s, "value", s)
-
-
-def as_obj(j):
-    if isinstance(j, (str, bytes)):
-        return json.loads(j)
-    return j
-
-
-def write(path, text):
+def _write(path, text):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
 
 
-def build_corpus(root):
-    specs = root / "specs"
-    write(
+PURPOSE_SENTENCE = (
+    "This fixture component accepts plain input records, normalizes their "
+    "fields, and hands the cleaned records to whichever caller asked for them. "
+)
+
+
+def _build_corpus(repo_root):
+    specs = repo_root / "specs"
+
+    _write(
         specs / "glossary.md",
         "# Glossary\n"
         "\n"
-        "Canonical vocabulary for this fixture corpus.\n"
+        "Canonical vocabulary.\n"
         "\n"
-        "- **Widget** \u2014 a reusable rendering unit composed of nested frames, "
-        "declared once in the layout registry and instantiated by reference.\n",
+        "- **Widget** — a reusable rectangular panel shown on the operations "
+        "dashboard, holding one chart and its legend.\n",
     )
 
-    comp = specs / "components" / "foo"
-    purpose_sentence = (
-        "This component turns layout requests into rendered frames for the dashboard. "
-    )
-    purpose = (purpose_sentence * 9).strip()  # 99 words: above warn 80, below fail 150
-    write(
-        comp / "component.md",
+    # Purpose well above 80 words (warn) but below 150 (no fail).
+    purpose = (PURPOSE_SENTENCE * 5).strip()
+
+    comp_dir = specs / "components" / "foo"
+    _write(
+        comp_dir / "component.md",
         "---\n"
         "id: comp-foo\n"
         "title: Foo\n"
         "status: draft\n"
-        "owners: [team-a]\n"
+        "owners: [team]\n"
         "sealed: true\n"
         "source_path: legacy/foo/\n"
         "---\n"
@@ -62,13 +57,13 @@ def build_corpus(root):
         "\n"
         "## Scope\n"
         "\n"
-        "- In scope: rendering frames for layout requests.\n"
-        "- Out of scope: persisting layouts.\n"
+        "- In scope: normalizing records.\n"
+        "- Out of scope: storing records.\n"
         "\n"
         "## Definitions\n"
         "\n"
-        "- **Widget** \u2014 here, also any clickable toolbar button shown "
-        "beside the search box.\n"
+        "- **Widget** — inside this component, a purple spinning token that "
+        "rotates forever and never displays any chart at all.\n"
         "\n"
         "## Behavior\n"
         "\n"
@@ -97,165 +92,138 @@ def build_corpus(root):
         "- Initial draft.\n",
     )
 
-    padding_sentence = (
-        "Each frame is produced from the request alone and carries no state between calls. "
-    )
-    write(
-        comp / "requirements" / "R-FOO-001.md",
+    # A requirement file above 250 words (warn) but below 500 (no fail).
+    filler = " ".join(["normalized"] * 270)
+    _write(
+        comp_dir / "requirements" / "R-FOO-001.md",
         "# R-FOO-001\n"
         "\n"
-        "**R-FOO-001** \u2014 The renderer MUST emit exactly one frame per layout request.\n"
+        "**R-FOO-001** — The component MUST trim surrounding whitespace from "
+        "every field of every record it returns.\n"
         "\n"
-        + (padding_sentence * 20).strip()
+        + filler
         + "\n",
     )
-    write(
-        comp / "acceptance" / "AC-FOO-001.md",
+
+    _write(
+        comp_dir / "acceptance" / "AC-FOO-001.md",
         "# AC-FOO-001\n"
         "\n"
         "Covers: R-FOO-001\n"
         "Kind: compiled\n"
         "\n"
         "```gherkin\n"
-        "Given one layout request\n"
-        "When the renderer runs\n"
-        "Then exactly one frame is emitted\n"
+        "Given a record with field \"name\" set to \"  a  \"\n"
+        "When the record is normalized\n"
+        "Then field \"name\" is \"a\"\n"
         "```\n",
     )
-    write(
-        comp / "interface" / "library.md",
-        "# Library\n"
-        "\n"
-        "```\n"
-        "render(request: dict) -> FooResult\n"
-        "```\n"
-        "\n"
-        "Renders one frame for one layout request.\n",
-    )
-    write(
-        comp / "interface" / "data" / "FooResult.md",
-        "# `FooResult`\n"
-        "\n"
-        "```json\n"
-        "{\"frame\": \"string\"}\n"
-        "```\n",
-    )
-    write(
-        comp / "constraints.md",
+
+    _write(
+        comp_dir / "constraints.md",
         "# Constraints\n"
         "\n"
-        "- Rendering one frame completes within 50 ms, measured by a timing benchmark.\n",
+        "- Normalizing one record takes under 1 ms, measured by a benchmark.\n",
     )
 
 
-def lint_findings_015(report):
-    return [f for f in field(report, "findings") if field(f, "rule_id") == "R-LINT-015"]
+def _report_json(report):
+    data = report.to_json()
+    if isinstance(data, (str, bytes)):
+        data = json.loads(data)
+    return data
 
 
-def counts(report):
-    findings = field(report, "findings")
-    return (
-        sum(1 for f in findings if sev(f) == "fail"),
-        sum(1 for f in findings if sev(f) == "warn"),
-        sum(1 for f in findings if sev(f) == "skipped"),
-    )
+def _lint015(report):
+    return [
+        f for f in field(report, "findings")
+        if field(f, "rule_id") == "R-LINT-015"
+    ]
 
 
-def assert_summary_consistent(report):
-    n_fail, n_warn, n_skip = counts(report)
+def _lint015_json(report):
+    data = _report_json(report)
+    return [f for f in data["findings"] if f["rule_id"] == "R-LINT-015"]
+
+
+def _counts(report):
+    sev = [field(f, "severity") for f in field(report, "findings")]
+    return sev.count("fail"), sev.count("warn"), sev.count("skipped")
+
+
+def test_ac_lint_034(tmp_path):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    _build_corpus(repo_root)
+
+    # --- No judge: R-LINT-015 skipped, summary counts consistent ---
+    report = spec_linter.lint(None, repo_root)
+    n_fail, n_warn, n_skipped = _counts(report)
+
+    entries = _lint015(report)
+    assert len(entries) == 1
+    assert field(entries[0], "severity") == "skipped"
+
+    # Preconditions of the criterion's corpus: no fails, at least one warn.
+    assert n_fail == 0, [
+        (field(f, "rule_id"), field(f, "message"))
+        for f in field(report, "findings")
+        if field(f, "severity") == "fail"
+    ]
+    assert n_warn >= 1
+
     assert field(report, "hard_failures") == n_fail
     assert field(report, "warnings") == n_warn
-    assert field(report, "skipped") == n_skip
-    summary = as_obj(report.to_json())["summary"]
+    assert field(report, "skipped") == n_skipped
+
+    summary = _report_json(report)["summary"]
     assert summary["hard_failures"] == n_fail
     assert summary["warnings"] == n_warn
-    assert summary["skipped"] == n_skip
+    assert summary["skipped"] == n_skipped
 
+    skipped_json = _lint015_json(report)
+    assert len(skipped_json) == 1
+    assert skipped_json[0]["severity"] == "skipped"
+    assert "rationale" not in skipped_json[0]
 
-def test_ac_lint_034_no_judge_skips_and_counts(tmp_path):
-    build_corpus(tmp_path)
-    report = spec_linter.lint(None, tmp_path)
+    # --- Strict: warn findings count as hard failures ---
+    strict_report = spec_linter.lint(None, repo_root, strict=True)
+    assert field(strict_report, "hard_failures") == n_warn
 
-    # Preconditions: no fail-severity finding, at least one warn.
-    assert field(report, "hard_failures") == 0, [
-        (field(f, "rule_id"), field(f, "message")) for f in field(report, "findings")
-    ]
-    n_fail, n_warn, n_skip = counts(report)
-    assert n_fail == 0
-    assert n_warn >= 1
-
-    r15 = lint_findings_015(report)
-    assert len(r15) == 1
-    finding = r15[0]
-    assert sev(finding) == "skipped"
-    assert str(field(finding, "file")).replace("\\", "/").endswith(
-        "specs/components/foo/component.md"
-    )
-    assert "rationale" not in as_obj(finding.to_json())
-
-    assert n_skip >= 1
-    assert_summary_consistent(report)
-
-
-def test_ac_lint_034_strict_counts_warns_as_failures(tmp_path):
-    build_corpus(tmp_path)
-    plain = spec_linter.lint(None, tmp_path)
-    assert field(plain, "hard_failures") == 0
-    _, n_warn, _ = counts(plain)
-    assert n_warn >= 1
-
-    strict = spec_linter.lint(None, tmp_path, strict=True)
-    assert field(strict, "hard_failures") == n_warn
-
-
-def test_ac_lint_034_judge_outcomes(tmp_path):
-    build_corpus(tmp_path)
-    precheck = spec_linter.lint(None, tmp_path)
-    assert field(precheck, "hard_failures") == 0
-
+    # --- Judge reporting a conflict ---
     calls = []
 
-    def make_judge(result):
-        def judge(term, local_text, glossary_text):
-            calls.append((term, local_text, glossary_text))
-            return result
-        return judge
+    def judge_conflict(term, local_text, glossary_text):
+        calls.append((term, local_text, glossary_text))
+        return (True, "contradicts the glossary")
 
-    # 1. Conflict -> fail with rationale.
-    report = spec_linter.lint(
-        None, tmp_path, judge=make_judge((True, "contradicts the glossary"))
-    )
-    r15 = lint_findings_015(report)
-    assert len(r15) == 1
-    finding = r15[0]
-    assert sev(finding) == "fail"
-    fj = as_obj(finding.to_json())
-    assert "rationale" in fj
-    rationale = fj["rationale"]
-    rtext = rationale if isinstance(rationale, str) else json.dumps(rationale)
-    assert "contradicts the glossary" in rtext
-    assert field(report, "hard_failures") >= 1
-    assert_summary_consistent(report)
-
-    assert calls, "judge was never called"
-    assert any("widget" in str(c[0]).lower() for c in calls)
-
-    # 2. Consistent -> no R-LINT-015 finding.
-    calls.clear()
-    report = spec_linter.lint(None, tmp_path, judge=make_judge((False, "consistent")))
-    assert lint_findings_015(report) == []
+    conflict_report = spec_linter.lint(None, repo_root, judge=judge_conflict)
     assert calls
-    assert field(report, "hard_failures") == 0
-    assert_summary_consistent(report)
+    entries = _lint015(conflict_report)
+    assert len(entries) == 1
+    assert field(entries[0], "severity") == "fail"
+    entries_json = _lint015_json(conflict_report)
+    assert len(entries_json) == 1
+    assert entries_json[0]["severity"] == "fail"
+    assert entries_json[0]["rationale"] == "contradicts the glossary"
 
-    # 3. Judge could not judge -> skipped, no rationale key.
-    calls.clear()
-    report = spec_linter.lint(None, tmp_path, judge=make_judge(None))
-    r15 = lint_findings_015(report)
-    assert len(r15) == 1
-    finding = r15[0]
-    assert sev(finding) == "skipped"
-    assert "rationale" not in as_obj(finding.to_json())
-    assert calls
-    assert field(report, "hard_failures") == 0
-    assert_summary_consistent(report)
+    # --- Judge reporting consistency: no R-LINT-015 finding ---
+    def judge_consistent(term, local_text, glossary_text):
+        return (False, "consistent")
+
+    consistent_report = spec_linter.lint(None, repo_root, judge=judge_consistent)
+    assert _lint015(consistent_report) == []
+    assert _lint015_json(consistent_report) == []
+
+    # --- Judge that cannot judge: skipped, no rationale ---
+    def judge_none(term, local_text, glossary_text):
+        return None
+
+    none_report = spec_linter.lint(None, repo_root, judge=judge_none)
+    entries = _lint015(none_report)
+    assert len(entries) == 1
+    assert field(entries[0], "severity") == "skipped"
+    entries_json = _lint015_json(none_report)
+    assert len(entries_json) == 1
+    assert entries_json[0]["severity"] == "skipped"
+    assert "rationale" not in entries_json[0]

@@ -2,8 +2,6 @@
 import json
 from pathlib import Path
 
-import pytest
-
 import spec_linter
 
 
@@ -25,7 +23,7 @@ COMPONENT_MD = (
     "\n"
     "## Purpose\n"
     "\n"
-    "Foo does a small, well-defined thing for testing.\n"
+    "Foo does a small thing for testing.\n"
     "\n"
     "## Scope\n"
     "\n"
@@ -63,109 +61,93 @@ COMPONENT_MD = (
     "- Initial draft.\n"
 )
 
-R_FOO_001 = (
-    "# R-FOO-001\n"
-    "\n"
-    "**R-FOO-001** — Foo MUST return the input unchanged.\n"
-)
 
-R_FOO_002 = (
-    "# R-FOO-002\n"
-    "\n"
-    "**R-FOO-002** — Foo MUST reject an empty input.\n"
-)
-
-AC_FOO_001 = (
-    "# AC-FOO-001\n"
-    "\n"
-    "Covers: R-FOO-002\n"
-    "Kind: compiled\n"
-    "\n"
-    "```gherkin\n"
-    "Given an empty input\n"
-    "When foo runs\n"
-    "Then it rejects the input\n"
-    "```\n"
-)
-
-CONSTRAINTS_MD = (
-    "# Constraints\n"
-    "\n"
-    "- Foo SHOULD complete within 1 second, measured by wall clock.\n"
-)
-
-GLOSSARY_MD = (
-    "# Glossary\n"
-    "\n"
-    "- **Foo** — the component under test.\n"
-)
+def _requirement(rid, text):
+    return "# " + rid + "\n\n**" + rid + "** — " + text + "\n"
 
 
-def build_fixture(repo_root: Path) -> None:
-    comp = repo_root / "specs" / "components" / "foo"
+def _acceptance(acid, rid):
+    return (
+        "# " + acid + "\n"
+        "\n"
+        "Covers: " + rid + "\n"
+        "Kind: generated-test\n"
+        "\n"
+        "```gherkin\n"
+        "Given a foo\n"
+        "When the thing runs\n"
+        "Then it completes\n"
+        "```\n"
+    )
+
+
+def _build_fixture(repo_root: Path) -> None:
+    specs = repo_root / "specs"
+    comp = specs / "components" / "foo"
     (comp / "requirements").mkdir(parents=True)
     (comp / "acceptance").mkdir(parents=True)
-    (comp / "component.md").write_text(COMPONENT_MD, encoding="utf-8")
-    (comp / "requirements" / "R-FOO-001.md").write_text(R_FOO_001, encoding="utf-8")
-    (comp / "requirements" / "R-FOO-002.md").write_text(R_FOO_002, encoding="utf-8")
-    (comp / "acceptance" / "AC-FOO-001.md").write_text(AC_FOO_001, encoding="utf-8")
-    (comp / "constraints.md").write_text(CONSTRAINTS_MD, encoding="utf-8")
-    (repo_root / "specs" / "glossary.md").write_text(GLOSSARY_MD, encoding="utf-8")
+    (comp / "interface").mkdir(parents=True)
+    (comp / "component.md").write_text(COMPONENT_MD)
+    (comp / "requirements" / "R-FOO-001.md").write_text(
+        _requirement("R-FOO-001", "The foo MUST do the first thing.")
+    )
+    (comp / "requirements" / "R-FOO-002.md").write_text(
+        _requirement("R-FOO-002", "The foo MUST do the second thing.")
+    )
+    # Only R-FOO-002 is covered; R-FOO-001 has zero covering criteria.
+    (comp / "acceptance" / "AC-FOO-002.md").write_text(
+        _acceptance("AC-FOO-002", "R-FOO-002")
+    )
+    (comp / "constraints.md").write_text(
+        "# Constraints\n\n- None beyond the defaults.\n"
+    )
+    (specs / "glossary.md").write_text(
+        "# Glossary\n\n- **Thing** — a thing foo does.\n"
+    )
 
 
-def names_requirement(finding, req_id):
+def _names(finding, rid):
     message = str(field(finding, "message") or "")
-    file = str(field(finding, "file") or "")
-    return req_id in message or req_id in file
+    file_ = str(field(finding, "file") or "")
+    return rid in message or (rid + ".md") in file_
 
 
-def lint_008_findings(findings):
-    return [f for f in findings if field(f, "rule_id") == "R-LINT-008"]
-
-
-def test_uncovered_requirement_fails_r_lint_008_library(tmp_path):
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    build_fixture(repo_root)
-
-    report = spec_linter.lint(None, repo_root)
-    findings = list(field(report, "findings"))
-
-    r008 = lint_008_findings(findings)
-    matching = [
-        f for f in r008
-        if field(f, "severity") == "fail" and names_requirement(f, "R-FOO-001")
+def _check_findings(findings):
+    lint8 = [f for f in findings if field(f, "rule_id") == "R-LINT-008"]
+    hits = [
+        f for f in lint8
+        if field(f, "severity") == "fail" and _names(f, "R-FOO-001")
     ]
-    assert matching, (
-        "expected a fail-severity R-LINT-008 finding naming R-FOO-001; got "
+    assert hits, (
+        "expected a fail-severity R-LINT-008 finding naming R-FOO-001, got: "
         + repr([(field(f, "rule_id"), field(f, "severity"), field(f, "file"),
                  field(f, "message")) for f in findings])
     )
+    # The covered requirement is not reported as untraced.
+    assert not [f for f in lint8 if _names(f, "R-FOO-002")]
 
-    # R-FOO-002 has a covering criterion, so it must not be flagged.
-    assert not [f for f in r008 if names_requirement(f, "R-FOO-002")
-                and not names_requirement(f, "R-FOO-001")]
 
+def test_uncovered_requirement_fails_forward_traceability(tmp_path):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    _build_fixture(repo_root)
+
+    report = spec_linter.lint(None, repo_root)
+
+    findings = list(field(report, "findings"))
+    _check_findings(findings)
     assert field(report, "hard_failures") >= 1
 
 
-def test_uncovered_requirement_fails_r_lint_008_cli(tmp_path, capsys, monkeypatch):
+def test_uncovered_requirement_fails_via_cli_json(tmp_path, capsys):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
-    build_fixture(repo_root)
-    monkeypatch.chdir(repo_root)
+    _build_fixture(repo_root)
 
     code = spec_linter.main(["--format=json", "--repo-root=" + str(repo_root)])
     out = capsys.readouterr().out
 
     assert code == 1
-    doc = json.loads(out)
-    findings = doc["findings"]
-    matching = [
-        f for f in findings
-        if f["rule_id"] == "R-LINT-008"
-        and f["severity"] == "fail"
-        and ("R-FOO-001" in str(f.get("message", "")) or "R-FOO-001" in str(f.get("file", "")))
-    ]
-    assert matching, "expected R-LINT-008 fail finding naming R-FOO-001 in " + repr(findings)
-    assert doc["summary"]["hard_failures"] >= 1
+    data = json.loads(out)
+    _check_findings(data["findings"])
+    assert data["summary"]["hard_failures"] >= 1

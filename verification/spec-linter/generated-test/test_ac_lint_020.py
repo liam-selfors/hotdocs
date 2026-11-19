@@ -1,12 +1,9 @@
 # hotdocs-criterion: sha256:a2c026f248489e34630d928e971ca850ece728c653de287bd659a9bc0549649e
-"""AC-LINT-020: a depends_on_guarantees entry whose guarantee's owner
-(derived from the guarantee file's path, since guarantee files carry no
-frontmatter) is not in the component's depends_on fails with R-LINT-018."""
+"""AC-LINT-020: a depends_on_guarantees entry whose owning component (derived
+from the guarantee file's path, since guarantee files carry no frontmatter) is
+not listed in depends_on fails with R-LINT-018."""
 
-import json
 from pathlib import Path
-
-import pytest
 
 import spec_linter
 
@@ -20,111 +17,89 @@ def _write(path, text):
     path.write_text(text, encoding="utf-8")
 
 
-def _component_md(comp_id, title, extra_frontmatter_lines):
+def _component_md(comp_id, title, extra_lines):
     lines = [
         "---",
         "id: " + comp_id,
         "title: " + title,
         "status: draft",
-        "owners: [test-team]",
+        "owners: [pipeline-team]",
         "sealed: true",
         "source_path: legacy/" + comp_id + "/",
     ]
-    lines.extend(extra_frontmatter_lines)
+    lines.extend(extra_lines)
     lines.append("---")
-    body = [
-        "",
-        "# " + title,
-        "",
-        "## Purpose",
-        "",
-        "A small fixture component used only for linter testing.",
-        "",
-        "## Scope",
-        "",
-        "- In scope: fixture behavior.",
-        "- Out of scope: everything else.",
-        "",
-        "## Definitions",
-        "",
-        "None.",
-        "",
-        "## Behavior",
-        "",
-        "See `requirements/`.",
-        "",
-        "## Interfaces",
-        "",
-        "See `interface/`.",
-        "",
-        "## Data",
-        "",
-        "See `interface/data/`.",
-        "",
-        "## Acceptance criteria",
-        "",
-        "See `acceptance/`.",
-        "",
-        "## Non-functional constraints",
-        "",
-        "See `constraints.md`.",
-        "",
-        "## Open questions",
-        "",
-        "## Change log",
-        "",
-        "- Initial draft.",
-        "",
-    ]
-    return "\n".join(lines + body)
+    lines.append("")
+    lines.append("# " + title)
+    lines.append("")
+    lines.append("## Purpose")
+    lines.append("")
+    lines.append("Matches existing behavior; do not regenerate.")
+    lines.append("")
+    lines.append("## Scope")
+    lines.append("")
+    lines.append("- In scope: existing behavior.")
+    lines.append("- Out of scope: everything else.")
+    lines.append("")
+    lines.append("## Definitions")
+    lines.append("")
+    lines.append("None.")
+    lines.append("")
+    lines.append("## Behavior")
+    lines.append("")
+    lines.append("See `requirements/`.")
+    lines.append("")
+    lines.append("## Interfaces")
+    lines.append("")
+    lines.append("See `interface/`.")
+    lines.append("")
+    lines.append("## Data")
+    lines.append("")
+    lines.append("See `interface/data/`.")
+    lines.append("")
+    lines.append("## Acceptance criteria")
+    lines.append("")
+    lines.append("See `acceptance/`.")
+    lines.append("")
+    lines.append("## Non-functional constraints")
+    lines.append("")
+    lines.append("See `constraints.md`.")
+    lines.append("")
+    lines.append("## Open questions")
+    lines.append("")
+    lines.append("## Change log")
+    lines.append("")
+    lines.append("- Initial draft.")
+    lines.append("")
+    return "\n".join(lines)
 
 
-def _build_component(specs, slug, upper, extra_frontmatter_lines):
-    comp_dir = specs / "components" / slug
-    comp_id = "comp-" + slug
+def _build_fixture(repo_root, foo_depends_on_bar):
+    specs = repo_root / "specs"
+    _write(specs / "glossary.md", "# Glossary\n\n- **Widget** — a thing.\n")
+
+    # comp-bar: owns guarantee G-BAR-001 under its interface/guarantees/.
+    bar = specs / "components" / "bar"
+    _write(bar / "component.md", _component_md("comp-bar", "Bar", []))
     _write(
-        comp_dir / "component.md",
-        _component_md(comp_id, slug.capitalize() + " Fixture", extra_frontmatter_lines),
-    )
-    req_id = "R-" + upper + "-001"
-    ac_id = "AC-" + upper + "-001"
-    _write(
-        comp_dir / "requirements" / (req_id + ".md"),
-        "# " + req_id + "\n\n**" + req_id + "** — The component MUST "
-        "match existing behavior.\n",
+        bar / "interface" / "guarantees" / "G-BAR-001.md",
+        "# G-BAR-001\n\nBar MUST return results in a stable order.\n",
     )
     _write(
-        comp_dir / "acceptance" / (ac_id + ".md"),
-        "# " + ac_id + "\n\nCovers: " + req_id + "\nKind: compiled\n\n"
-        "```gherkin\nGiven the fixture\nWhen it runs\n"
-        "Then it matches existing behavior\n```\n",
-    )
-    _write(
-        comp_dir / "constraints.md",
+        bar / "constraints.md",
         "# Constraints\n\nNone beyond existing behavior.\n",
     )
-    return comp_dir
 
-
-def _build_corpus(repo_root, foo_depends_on_bar):
-    specs = repo_root / "specs"
-    specs.mkdir(parents=True, exist_ok=True)
-    _write(
-        specs / "glossary.md",
-        "# Glossary\n\n- **Fixture** — a test-only spec corpus.\n",
-    )
-    bar_dir = _build_component(specs, "bar", "BAR", [])
-    # The guarantee carries no frontmatter: its owner is its path's component.
-    _write(
-        bar_dir / "interface" / "guarantees" / "G-BAR-001.md",
-        "# G-BAR-001\n\n**G-BAR-001** — Bar MUST return results in "
-        "a stable order.\n",
-    )
-    foo_extra = []
+    # comp-foo: relies on G-BAR-001.
+    extra = ["depends_on_guarantees: [G-BAR-001]"]
     if foo_depends_on_bar:
-        foo_extra.append("depends_on: [comp-bar]")
-    foo_extra.append("depends_on_guarantees: [G-BAR-001]")
-    _build_component(specs, "foo", "FOO", foo_extra)
+        extra.insert(0, "depends_on: [comp-bar]")
+    foo = specs / "components" / "foo"
+    _write(foo / "component.md", _component_md("comp-foo", "Foo", extra))
+    _write(
+        foo / "constraints.md",
+        "# Constraints\n\nNone beyond existing behavior.\n",
+    )
 
 
 def _lint018_fail_findings(report):
@@ -137,53 +112,36 @@ def _lint018_fail_findings(report):
 
 def test_guarantee_owner_not_in_depends_on_fails_r_lint_018(tmp_path):
     repo_root = tmp_path / "repo"
-    _build_corpus(repo_root, foo_depends_on_bar=False)
+    repo_root.mkdir()
+    _build_fixture(repo_root, foo_depends_on_bar=False)
 
     report = spec_linter.lint(None, repo_root)
 
     failures = _lint018_fail_findings(report)
     assert failures, (
-        "expected an R-LINT-018 fail finding, got: "
-        + repr(
-            [
-                (field(f, "rule_id"), field(f, "severity"), field(f, "message"))
-                for f in field(report, "findings")
-            ]
-        )
+        "expected an R-LINT-018 fail finding: G-BAR-001 is owned by comp-bar "
+        "(from its path) but comp-foo does not list comp-bar in depends_on; got "
+        + repr([(field(f, "rule_id"), field(f, "severity"), field(f, "file"), field(f, "message"))
+                for f in field(report, "findings")])
+    )
+    assert any("components/foo/" in str(field(f, "file")).replace("\\", "/") for f in failures), (
+        "the R-LINT-018 finding should be reported against comp-foo; got "
+        + repr([field(f, "file") for f in failures])
     )
     assert field(report, "hard_failures") >= 1
-    for f in failures:
-        assert "specs/components/bar/" not in str(field(f, "file")) or True
 
 
-def test_control_guarantee_owner_in_depends_on_has_no_r_lint_018(tmp_path):
-    # Same corpus, but comp-foo depends on comp-bar: the guarantee's owner
-    # (derived from its path under comp-bar) is now listed, so R-LINT-018
-    # must not fire. Confirms the failure above is for the stated reason.
+def test_guarantee_owner_listed_in_depends_on_has_no_r_lint_018(tmp_path):
+    # Control: the same corpus, with comp-bar in comp-foo's depends_on, resolves
+    # G-BAR-001's owner from its path and so produces no R-LINT-018 failure.
     repo_root = tmp_path / "repo"
-    _build_corpus(repo_root, foo_depends_on_bar=True)
+    repo_root.mkdir()
+    _build_fixture(repo_root, foo_depends_on_bar=True)
 
     report = spec_linter.lint(None, repo_root)
 
-    r018 = [
-        f for f in field(report, "findings") if field(f, "rule_id") == "R-LINT-018"
-    ]
-    assert r018 == [], repr(
-        [(field(f, "severity"), field(f, "message")) for f in r018]
+    failures = _lint018_fail_findings(report)
+    assert failures == [], (
+        "no R-LINT-018 failure expected when the guarantee's owner is in depends_on; got "
+        + repr([(field(f, "file"), field(f, "message")) for f in failures])
     )
-
-
-def test_cli_exits_1_and_reports_r_lint_018(tmp_path, capsys):
-    repo_root = tmp_path / "repo"
-    _build_corpus(repo_root, foo_depends_on_bar=False)
-
-    code = spec_linter.main(["--format=json", "--repo-root=" + str(repo_root)])
-
-    captured = capsys.readouterr()
-    assert code == 1
-    doc = json.loads(captured.out)
-    rule_ids = [
-        (f["rule_id"], f["severity"]) for f in doc["findings"]
-    ]
-    assert ("R-LINT-018", "fail") in rule_ids
-    assert doc["summary"]["hard_failures"] >= 1

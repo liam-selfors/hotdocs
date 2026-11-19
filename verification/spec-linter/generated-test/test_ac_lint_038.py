@@ -1,8 +1,4 @@
 # hotdocs-criterion: sha256:2d2557209a09d836abbc2fc64b1f9b818d8e65c4b8963880e1c6a0905a5f0b1b
-"""AC-LINT-038: the depends_on graph's cycle check (R-LINT-004) over
-architecture docs reports exactly the docs on the cycle, and nothing
-when there is no cycle."""
-
 from pathlib import Path
 
 import spec_linter
@@ -12,60 +8,50 @@ def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def _write(path: Path, text: str) -> None:
+def write(path, text):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
 
 
-def _arch_doc(doc_id, depends_on):
-    lines = [
-        "---",
-        "id: " + doc_id,
-        "title: Architecture " + doc_id,
-        "status: draft",
-        "owners: [pipeline-team]",
-        "depends_on: [" + ", ".join(depends_on) + "]",
-        "---",
-        "",
-        "# Architecture " + doc_id,
-        "",
-        "## Purpose",
-        "",
-        "A synthetic architecture document used as a lint fixture.",
-        "",
-        "## Change log",
-        "",
-        "- Initial draft.",
-        "",
-    ]
-    return "\n".join(lines)
-
-
-def _build_corpus(repo_root: Path, graph: dict) -> None:
-    specs = repo_root / "specs"
-    _write(
-        specs / "glossary.md",
-        "# Glossary\n\n- **Fixture term** — a term used only by this fixture.\n",
+def arch_doc(doc_id, depends_on):
+    deps = "[" + ", ".join(depends_on) + "]"
+    return (
+        "---\n"
+        + "id: " + doc_id + "\n"
+        + "title: " + doc_id.replace("-", " ").title() + "\n"
+        + "status: draft\n"
+        + "owners: [pipeline-team]\n"
+        + "depends_on: " + deps + "\n"
+        + "---\n"
+        + "\n"
+        + "# " + doc_id + "\n"
+        + "\n"
+        + "## Purpose\n"
+        + "\n"
+        + "A fixture architecture document.\n"
     )
-    for doc_id, deps in graph.items():
-        _write(specs / "architecture" / (doc_id + ".md"), _arch_doc(doc_id, deps))
 
 
-def _normalized_file(finding) -> str:
-    return str(field(finding, "file")).replace("\\", "/")
+def build_repo(root, docs):
+    write(root / "specs" / "glossary.md", "# Glossary\n\n- **Fixture term** — a term used only by this test.\n")
+    for doc_id, deps in docs.items():
+        write(root / "specs" / "architecture" / (doc_id + ".md"), arch_doc(doc_id, deps))
 
 
-def _r004_findings(report):
-    return [
-        f
-        for f in field(report, "findings")
-        if field(f, "rule_id") == "R-LINT-004"
-    ]
+def rule_findings(report, rule_id):
+    findings = field(report, "findings")
+    return [f for f in findings if field(f, "rule_id") == rule_id]
 
 
-def test_cycle_between_arch_a_and_arch_b_reported_once_without_arch_c(tmp_path):
+def is_architecture_file(finding):
+    file_value = str(field(finding, "file")).replace("\\", "/")
+    return "specs/architecture/" in file_value
+
+
+def test_cycle_among_architecture_docs_reported_once_naming_only_cycle_members(tmp_path):
     repo_root = tmp_path / "repo"
-    _build_corpus(
+    repo_root.mkdir()
+    build_repo(
         repo_root,
         {
             "arch-a": ["arch-b"],
@@ -76,25 +62,24 @@ def test_cycle_between_arch_a_and_arch_b_reported_once_without_arch_c(tmp_path):
 
     report = spec_linter.lint(None, repo_root)
 
-    arch_fail = [
+    cycle_findings = [
         f
-        for f in _r004_findings(report)
-        if field(f, "severity") == "fail"
-        and "specs/architecture/" in _normalized_file(f)
+        for f in rule_findings(report, "R-LINT-004")
+        if field(f, "severity") == "fail" and is_architecture_file(f)
     ]
-    assert len(arch_fail) == 1, [
-        (field(f, "file"), field(f, "message")) for f in _r004_findings(report)
+    assert len(cycle_findings) == 1, [
+        (field(f, "file"), field(f, "message")) for f in cycle_findings
     ]
+    message = str(field(cycle_findings[0], "message"))
+    assert "arch-a" in message
+    assert "arch-b" in message
+    assert "arch-c" not in message
 
-    message = str(field(arch_fail[0], "message"))
-    assert "arch-a" in message, message
-    assert "arch-b" in message, message
-    assert "arch-c" not in message, message
 
-
-def test_no_cycle_yields_no_r_lint_004_finding(tmp_path):
+def test_acyclic_architecture_docs_have_no_cycle_finding(tmp_path):
     repo_root = tmp_path / "repo"
-    _build_corpus(
+    repo_root.mkdir()
+    build_repo(
         repo_root,
         {
             "arch-a": [],
@@ -104,5 +89,7 @@ def test_no_cycle_yields_no_r_lint_004_finding(tmp_path):
 
     report = spec_linter.lint(None, repo_root)
 
-    found = _r004_findings(report)
-    assert found == [], [(field(f, "file"), field(f, "message")) for f in found]
+    cycle_findings = rule_findings(report, "R-LINT-004")
+    assert cycle_findings == [], [
+        (field(f, "file"), field(f, "message")) for f in cycle_findings
+    ]

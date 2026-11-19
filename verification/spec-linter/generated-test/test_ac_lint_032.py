@@ -1,23 +1,9 @@
 # hotdocs-criterion: sha256:c484d5ec82c18f08c2ed8640ed608570b88ddb5bc5f526dc139c4eacd27f1088
-"""AC-LINT-032 (covers R-LINT-032).
-
-Given a project holding .hotdocs-tool.json with components "foo" and
-"cache-manager", when the linter runs on it, then "cache-manager" gets an
-R-LINT-032 fail finding and "foo" none.
-
-Given the same project without .hotdocs-tool.json, or the tool's own
-repository, when the linter runs on it, then there is no R-LINT-032 finding.
-"""
-
 import re
+import shutil
 from pathlib import Path
 
-import pytest
-
 import spec_linter
-
-
-RULE = "R-LINT-032"
 
 
 def field(value, name):
@@ -25,20 +11,9 @@ def field(value, name):
 
 
 def _tool_gen():
-    here = Path(spec_linter.__file__).resolve()
-    for parent in here.parents:
-        if parent.name == "gen":
-            return parent
-    pytest.fail("spec_linter is not located under a 'gen' directory")
-
-
-def _shadow_slug():
-    """The criterion's slug, 'cache-manager', when the tool's gen/ holds it;
-    otherwise a slug the tool's gen/ certainly holds (the linter's own)."""
-    tool_gen = _tool_gen()
-    if (tool_gen / "cache-manager").is_dir():
-        return "cache-manager"
-    return "spec-linter"
+    return next(
+        p for p in Path(spec_linter.__file__).resolve().parents if p.name == "gen"
+    )
 
 
 def _write(path, text):
@@ -65,7 +40,7 @@ def _component_md(slug):
         "\n"
         "## Scope\n"
         "\n"
-        "- In scope: nothing beyond this fixture.\n"
+        "- In scope: nothing.\n"
         "\n"
         "## Definitions\n"
         "\n"
@@ -99,71 +74,62 @@ def _component_md(slug):
     )
 
 
-def _build_project(root, slugs, with_marker):
+def _build_project(repo_root, with_tool_marker):
+    for slug in ("foo", "cache-manager"):
+        _write(repo_root / "specs" / "components" / slug / "component.md", _component_md(slug))
     _write(
-        root / "specs" / "glossary.md",
-        "# Glossary\n\n- **Fixture** — a test fixture term.\n",
+        repo_root / "specs" / "glossary.md",
+        "# Glossary\n\n- **Widget** — a fixture term.\n",
     )
-    for slug in slugs:
-        base = root / "specs" / "components" / slug
-        _write(base / "component.md", _component_md(slug))
-        _write(
-            base / "constraints.md",
-            "# Constraints\n\nNone beyond the defaults.\n",
-        )
-    if with_marker:
-        _write(root / ".hotdocs-tool.json", "{}\n")
-    return root
+    if with_tool_marker:
+        _write(repo_root / ".hotdocs-tool.json", "{}\n")
 
 
-def _rule_findings(report):
+def _lint032(repo_root):
+    report = spec_linter.lint(None, repo_root)
     findings = field(report, "findings")
-    return [f for f in findings if field(f, "rule_id") == RULE]
+    return [f for f in findings if field(f, "rule_id") == "R-LINT-032"]
 
 
-def _names_slug(finding, slug):
-    message = field(finding, "message") or ""
-    file = field(finding, "file") or ""
+def _names_slug(finding, slug, repo_root):
+    text = str(field(finding, "message")) + " " + str(field(finding, "file"))
+    text = text.replace(str(repo_root), "")
     pattern = r"(?<![\w-])" + re.escape(slug) + r"(?![\w-])"
-    return bool(re.search(pattern, message)) or ("components/" + slug + "/") in str(file)
+    return re.search(pattern, text) is not None
 
 
-def test_project_component_shadowing_tool_component_fails(tmp_path):
-    slug = _shadow_slug()
+def test_ac_lint_032_project_component_shadowing_tool_component(tmp_path):
     tool_gen = _tool_gen()
-    assert not (tool_gen / "foo").exists(), "tool gen/ unexpectedly holds 'foo'"
+    tool_root = tool_gen.parent
+    cache_dir = tool_gen / "cache-manager"
+    created = False
+    if not cache_dir.is_dir():
+        cache_dir.mkdir()
+        created = True
+    try:
+        assert not (tool_gen / "foo").is_dir()
 
-    repo_root = _build_project(tmp_path / "project", ["foo", slug], with_marker=True)
+        repo_root = tmp_path / "proj"
+        repo_root.mkdir()
+        _build_project(repo_root, with_tool_marker=True)
 
-    report = spec_linter.lint(None, repo_root)
-    hits = _rule_findings(report)
+        found = _lint032(repo_root)
+        cache_fails = [
+            f
+            for f in found
+            if field(f, "severity") == "fail" and _names_slug(f, "cache-manager", repo_root)
+        ]
+        assert len(cache_fails) >= 1, found
+        foo_findings = [f for f in found if _names_slug(f, "foo", repo_root)]
+        assert foo_findings == [], foo_findings
 
-    shadow_hits = [f for f in hits if _names_slug(f, slug)]
-    assert shadow_hits, "expected an R-LINT-032 finding naming " + repr(slug)
-    for f in shadow_hits:
-        assert field(f, "severity") == "fail"
-    assert any(slug in (field(f, "message") or "") for f in shadow_hits), (
-        "the finding's message must name the slug " + repr(slug)
-    )
+        # Same project without .hotdocs-tool.json: no R-LINT-032 finding.
+        (repo_root / ".hotdocs-tool.json").unlink()
+        assert _lint032(repo_root) == []
 
-    foo_hits = [f for f in hits if _names_slug(f, "foo")]
-    assert foo_hits == [], "'foo' must get no R-LINT-032 finding"
-
-    assert field(report, "hard_failures") >= 1
-
-
-def test_project_without_marker_has_no_finding(tmp_path):
-    slug = _shadow_slug()
-    repo_root = _build_project(tmp_path / "project", ["foo", slug], with_marker=False)
-    assert not (repo_root / ".hotdocs-tool.json").exists()
-
-    report = spec_linter.lint(None, repo_root)
-    assert _rule_findings(report) == []
-
-
-def test_tool_own_repository_has_no_finding():
-    tool_root = _tool_gen().parent
-    if not (tool_root / "specs").is_dir():
-        pytest.skip("tool root has no specs/ tree to lint")
-    report = spec_linter.lint(None, tool_root)
-    assert _rule_findings(report) == []
+        # The tool's own repository: no R-LINT-032 finding.
+        if (tool_root / "specs").is_dir() and not (tool_root / ".hotdocs-tool.json").exists():
+            assert _lint032(tool_root) == []
+    finally:
+        if created:
+            shutil.rmtree(cache_dir, ignore_errors=True)

@@ -1,26 +1,25 @@
 # hotdocs-criterion: sha256:61e43e9b7f6f5ac81d42b04f255164349f421c73373dfef7d9886ebaf2b7b7eb
-"""AC-LINT-011b: a Definitions entry that adds genuinely new, low-overlap
-nuance to a glossary term is a permitted delta, not a redefinition, so
-the lint report carries no R-LINT-011 finding."""
+"""AC-LINT-011b: a Definitions entry for a glossary term that adds genuinely
+new, component-specific nuance (low textual overlap with the glossary's own
+definition) is a permitted delta, so the lint report carries no R-LINT-011
+finding."""
 
-import json
 from pathlib import Path
 
 import spec_linter
 
 
-TERM = "Widget frobnication"
+TERM = "Widget"
 
-GLOSSARY_TEXT = (
-    "the process by which a widget's internal counters are reset to zero "
-    "before each batch run begins, so that every run starts from a clean "
-    "baseline."
+GLOSSARY_DEFINITION = (
+    "reusable rendering unit composed into dashboard pages, "
+    "refreshed every poll cycle."
 )
 
-# Genuinely new, component-specific nuance with low token overlap.
-DELTA_TEXT = (
-    "Here, frobnication additionally locks our shared ledger file, letting "
-    "concurrent readers observe one stable snapshot while it proceeds."
+# Shares no tokens with GLOSSARY_DEFINITION: genuinely new nuance.
+LOCAL_DELTA = (
+    "In this component, exclusively signed bundles qualify; unsigned "
+    "artifacts stay quarantined pending operator approval."
 )
 
 
@@ -33,17 +32,18 @@ def _write(path, text):
     path.write_text(text, encoding="utf-8")
 
 
-def _build_corpus(repo_root, definition_text):
+def _build_corpus(repo_root, local_definition):
     specs = repo_root / "specs"
+
     _write(
         specs / "glossary.md",
         "# Glossary\n"
         "\n"
         "Canonical vocabulary.\n"
         "\n"
-        "- **" + TERM + "** \u2014 " + GLOSSARY_TEXT + "\n"
-        "- **Other term** \u2014 an unrelated entry used only as padding.\n",
+        "- **" + TERM + "** \u2014 " + GLOSSARY_DEFINITION + "\n",
     )
+
     comp = specs / "components" / "foo"
     _write(
         comp / "component.md",
@@ -60,16 +60,16 @@ def _build_corpus(repo_root, definition_text):
         "\n"
         "## Purpose\n"
         "\n"
-        "Foo frobnicates widgets for its callers.\n"
+        "Foo validates incoming widgets before they are displayed.\n"
         "\n"
         "## Scope\n"
         "\n"
-        "- In scope: frobnicating widgets.\n"
-        "- Out of scope: everything else.\n"
+        "- In scope: widget validation.\n"
+        "- Out of scope: rendering.\n"
         "\n"
         "## Definitions\n"
         "\n"
-        "- **" + TERM + "** \u2014 " + definition_text + "\n"
+        "- **" + TERM + "** \u2014 " + local_definition + "\n"
         "\n"
         "## Behavior\n"
         "\n"
@@ -101,7 +101,7 @@ def _build_corpus(repo_root, definition_text):
         comp / "requirements" / "R-FOO-001.md",
         "# R-FOO-001\n"
         "\n"
-        "**R-FOO-001** \u2014 Foo MUST frobnicate a widget when asked.\n",
+        "**R-FOO-001** \u2014 Foo MUST reject an unsigned widget.\n",
     )
     _write(
         comp / "acceptance" / "AC-FOO-001.md",
@@ -111,48 +111,47 @@ def _build_corpus(repo_root, definition_text):
         "Kind: compiled\n"
         "\n"
         "```gherkin\n"
-        "Given a widget\n"
-        "When foo frobnicates it\n"
-        "Then the widget is frobnicated\n"
+        "Given an unsigned widget\n"
+        "When foo validates it\n"
+        "Then it is rejected\n"
         "```\n",
     )
     _write(
         comp / "constraints.md",
         "# Constraints\n"
         "\n"
-        "- None beyond the defaults.\n",
+        "- Validation completes within 1 second, measured by a timer.\n",
     )
 
 
-def _lint011(report):
-    return [
-        f for f in field(report, "findings") if field(f, "rule_id") == "R-LINT-011"
-    ]
+def _lint011_findings(repo_root):
+    report = spec_linter.lint(None, repo_root)
+    findings = field(report, "findings")
+    return [f for f in findings if field(f, "rule_id") == "R-LINT-011"]
 
 
-def test_low_overlap_delta_has_no_r_lint_011_finding(tmp_path):
-    _build_corpus(tmp_path, DELTA_TEXT)
-    report = spec_linter.lint(None, tmp_path)
-    found = _lint011(report)
-    assert found == [], "unexpected R-LINT-011 findings: " + repr(found)
+def test_low_overlap_definitions_delta_is_not_flagged(tmp_path):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    _build_corpus(repo_root, LOCAL_DELTA)
 
+    findings = _lint011_findings(repo_root)
 
-def test_low_overlap_delta_cli_json_has_no_r_lint_011_finding(tmp_path, capsys):
-    _build_corpus(tmp_path, DELTA_TEXT)
-    code = spec_linter.main(["--format=json", "--repo-root=" + str(tmp_path)])
-    assert code in (0, 1)
-    out = capsys.readouterr().out
-    doc = json.loads(out)
-    rule_ids = [f["rule_id"] for f in doc["findings"]]
-    assert "R-LINT-011" not in rule_ids
+    assert findings == [], (
+        "a genuinely new, low-overlap Definitions delta must not be "
+        "reported as an R-LINT-011 redefinition, got: " + repr(findings)
+    )
 
 
 def test_control_verbatim_restatement_is_flagged(tmp_path):
-    # Control: the same fixture with the glossary text restated verbatim
-    # must trigger R-LINT-011, proving the negative result above is not
-    # merely the entry going unread.
-    _build_corpus(tmp_path, GLOSSARY_TEXT)
-    report = spec_linter.lint(None, tmp_path)
-    found = _lint011(report)
-    assert found, "verbatim restatement was not flagged by R-LINT-011"
-    assert all(field(f, "severity") == "fail" for f in found)
+    # Sanity control: the same fixture shape with the glossary text restated
+    # verbatim does trigger R-LINT-011, so the absence above is meaningful.
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    _build_corpus(repo_root, GLOSSARY_DEFINITION)
+
+    findings = _lint011_findings(repo_root)
+
+    assert findings, "a verbatim restatement must produce an R-LINT-011 finding"
+    for f in findings:
+        assert field(f, "severity") == "fail"

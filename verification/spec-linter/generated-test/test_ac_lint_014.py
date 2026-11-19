@@ -1,8 +1,4 @@
 # hotdocs-criterion: sha256:1cd2506c2c779d3c7b8aab44f2696294f0a8ac59b0501a460f5a40a5d199163e
-"""AC-LINT-014: two glossary-like files under specs/ with no architecture-level
-bounded-context split decision produce a fail-severity R-LINT-014 finding."""
-
-import json
 from pathlib import Path
 
 import spec_linter
@@ -12,16 +8,16 @@ def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def _write(path, text):
+def write(path, text):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
 
 
-def _build_corpus(repo_root):
+def build_fixture(repo_root):
     specs = repo_root / "specs"
     comp = specs / "components" / "foo"
 
-    _write(
+    write(
         comp / "component.md",
         "---\n"
         "id: comp-foo\n"
@@ -36,11 +32,11 @@ def _build_corpus(repo_root):
         "\n"
         "## Purpose\n"
         "\n"
-        "Foo matches existing behavior and is not regenerated.\n"
+        "Foo does a small thing for the fixture.\n"
         "\n"
         "## Scope\n"
         "\n"
-        "- In scope: foo behavior.\n"
+        "- In scope: the small thing.\n"
         "- Out of scope: everything else.\n"
         "\n"
         "## Definitions\n"
@@ -73,11 +69,11 @@ def _build_corpus(repo_root):
         "\n"
         "- Initial draft.\n",
     )
-    _write(
+    write(
         comp / "requirements" / "R-FOO-001.md",
         "# R-FOO-001\n\n**R-FOO-001** — Foo MUST match existing behavior.\n",
     )
-    _write(
+    write(
         comp / "acceptance" / "AC-FOO-001.md",
         "# AC-FOO-001\n"
         "\n"
@@ -85,68 +81,58 @@ def _build_corpus(repo_root):
         "Kind: compiled\n"
         "\n"
         "```gherkin\n"
-        "Given an input\n"
-        "When foo runs\n"
-        "Then the output matches existing behavior\n"
+        "Given foo\n"
+        "When it runs\n"
+        "Then it matches existing behavior\n"
         "```\n",
     )
-    _write(
+    write(
         comp / "constraints.md",
-        "# Constraints\n\nNone beyond existing behavior.\n",
+        "# Constraints\n\nNone.\n",
     )
 
-    # Two files that both declare themselves a corpus glossary.
-    _write(
+    # Two files under specs/ that both declare themselves a corpus glossary.
+    write(
         specs / "glossary.md",
         "# Glossary\n"
         "\n"
         "Canonical vocabulary for this spec corpus.\n"
         "\n"
-        "- **Widget** — a unit of work handled by foo.\n",
+        "- **Widget** — a small thing the fixture talks about.\n",
     )
-    _write(
+    write(
         specs / "glossary-billing.md",
         "# Glossary\n"
         "\n"
-        "Canonical vocabulary for this spec corpus (billing terms).\n"
+        "Canonical vocabulary for this spec corpus's billing subsystem.\n"
         "\n"
         "- **Invoice** — a request for payment.\n",
     )
-    # Deliberately no specs/architecture/ document recording a
-    # bounded-context split decision.
+    # No specs/architecture/ document records a bounded-context split.
 
 
-def _r014_fails(findings):
-    return [
-        f
-        for f in findings
-        if field(f, "rule_id") == "R-LINT-014" and field(f, "severity") == "fail"
-    ]
-
-
-def test_two_glossaries_without_split_decision_fail_lint(tmp_path):
+def test_two_glossaries_without_split_decision_fail_r_lint_014(tmp_path):
     repo_root = tmp_path / "repo"
-    _build_corpus(repo_root)
+    repo_root.mkdir()
+    build_fixture(repo_root)
+
+    assert not (repo_root / "specs" / "architecture").exists()
 
     report = spec_linter.lint(None, repo_root)
 
     findings = list(field(report, "findings"))
-    hits = _r014_fails(findings)
-    assert hits, "expected a fail-severity R-LINT-014 finding, got: " + repr(
-        [(field(f, "rule_id"), field(f, "severity"), field(f, "file")) for f in findings]
+    matching = [
+        f
+        for f in findings
+        if field(f, "rule_id") == "R-LINT-014" and field(f, "severity") == "fail"
+    ]
+    assert matching, (
+        "expected a fail-severity R-LINT-014 finding, got: "
+        + repr(
+            [
+                (field(f, "rule_id"), field(f, "severity"), field(f, "file"), field(f, "message"))
+                for f in findings
+            ]
+        )
     )
     assert field(report, "hard_failures") >= 1
-
-
-def test_two_glossaries_without_split_decision_fail_cli_json(tmp_path, capsys):
-    repo_root = tmp_path / "repo"
-    _build_corpus(repo_root)
-
-    code = spec_linter.main(["--format=json", "--repo-root=" + str(repo_root)])
-    out = capsys.readouterr().out
-
-    assert code == 1
-    doc = json.loads(out)
-    hits = _r014_fails(doc["findings"])
-    assert hits, "expected a fail-severity R-LINT-014 finding in JSON report"
-    assert doc["summary"]["hard_failures"] >= 1

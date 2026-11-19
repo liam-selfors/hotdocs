@@ -1,7 +1,8 @@
 # hotdocs-criterion: sha256:01c1d8473761a8f0f84cc05f053a918362e8f518dc767e5bac88c18e857d5bab
-"""AC-LINT-002: a ratified component.md with a non-empty "Open questions"
+"""AC-LINT-002: a ratified component with a non-empty "Open questions"
 section yields a fail-severity finding for rule R-LINT-002."""
 
+import json
 from pathlib import Path
 
 import spec_linter
@@ -11,21 +12,18 @@ def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def _sev(value):
-    sev = field(value, "severity")
-    return getattr(sev, "value", sev)
-
-
-def _write(path: Path, text: str) -> None:
+def _write(path, text):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
 
 
-def _build_fixture(repo_root: Path, open_questions: str) -> Path:
+def _build_corpus(repo_root, open_questions_body):
     specs = repo_root / "specs"
     _write(
         specs / "glossary.md",
-        "# Glossary\n\n- **Widget** — a small thing used in tests.\n",
+        "# Glossary\n"
+        "\n"
+        "- **Widget** \u2014 a thing the foo component handles.\n",
     )
     comp = specs / "components" / "foo"
     component_md = (
@@ -43,16 +41,16 @@ def _build_fixture(repo_root: Path, open_questions: str) -> Path:
         "\n"
         "## Purpose\n"
         "\n"
-        "Foo does a small thing for tests.\n"
+        "Foo handles widgets for its callers.\n"
         "\n"
         "## Scope\n"
         "\n"
-        "- In scope: the small thing.\n"
+        "- In scope: widgets.\n"
         "- Out of scope: everything else.\n"
         "\n"
         "## Definitions\n"
         "\n"
-        "None.\n"
+        "None beyond the glossary.\n"
         "\n"
         "## Behavior\n"
         "\n"
@@ -76,16 +74,17 @@ def _build_fixture(repo_root: Path, open_questions: str) -> Path:
         "\n"
         "## Open questions\n"
         "\n"
-        + open_questions
-        + "\n"
-        "## Change log\n"
+        + open_questions_body
+        + "## Change log\n"
         "\n"
         "- Initial draft.\n"
     )
     _write(comp / "component.md", component_md)
     _write(
         comp / "requirements" / "R-FOO-001.md",
-        "# R-FOO-001\n\n**R-FOO-001** — Foo MUST do the small thing.\n",
+        "# R-FOO-001\n"
+        "\n"
+        "**R-FOO-001** \u2014 Foo MUST handle every widget it is given.\n",
     )
     _write(
         comp / "acceptance" / "AC-FOO-001.md",
@@ -95,52 +94,74 @@ def _build_fixture(repo_root: Path, open_questions: str) -> Path:
         "Kind: generated-test\n"
         "\n"
         "```gherkin\n"
-        "Given foo\n"
-        "When the small thing is requested\n"
-        "Then foo does the small thing\n"
+        "Given a widget\n"
+        "When foo handles it\n"
+        "Then the widget is handled\n"
         "```\n",
     )
     _write(
         comp / "constraints.md",
-        "# Constraints\n\n- None beyond defaults; measured by inspection.\n",
+        "# Constraints\n"
+        "\n"
+        "- Handles a widget in under 1 second, measured by a timer.\n",
     )
     return comp / "component.md"
 
 
-def _lint_002_findings(report):
-    findings = field(report, "findings")
-    return [f for f in findings if field(f, "rule_id") == "R-LINT-002"]
+def _lint_002_fails(findings):
+    return [
+        f
+        for f in findings
+        if field(f, "rule_id") == "R-LINT-002" and field(f, "severity") == "fail"
+    ]
 
 
 def test_ratified_with_open_questions_fails_r_lint_002(tmp_path):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
-    _build_fixture(
+    _build_corpus(
         repo_root,
-        "- Should foo also do the big thing?\n",
+        "- Should foo also handle gadgets?\n\n",
     )
 
     report = spec_linter.lint(None, repo_root)
 
-    matches = _lint_002_findings(report)
-    fails = [f for f in matches if _sev(f) == "fail"]
-    assert fails, (
-        "expected a fail-severity R-LINT-002 finding, got: "
-        + repr(field(report, "findings"))
-    )
-    assert any(
-        "components/foo/component.md" in str(field(f, "file")).replace("\\", "/")
-        for f in fails
+    hits = _lint_002_fails(field(report, "findings"))
+    assert hits, "expected a fail-severity R-LINT-002 finding, got: " + repr(
+        field(report, "findings")
     )
     assert field(report, "hard_failures") >= 1
+    assert any(
+        str(field(f, "file")).replace("\\", "/").endswith("components/foo/component.md")
+        for f in hits
+    )
 
 
 def test_ratified_with_empty_open_questions_has_no_r_lint_002(tmp_path):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
-    _build_fixture(repo_root, "")
+    _build_corpus(repo_root, "")
 
     report = spec_linter.lint(None, repo_root)
 
-    fails = [f for f in _lint_002_findings(report) if _sev(f) == "fail"]
-    assert fails == [], "unexpected R-LINT-002 findings: " + repr(fails)
+    assert _lint_002_fails(field(report, "findings")) == [], repr(
+        field(report, "findings")
+    )
+
+
+def test_cli_reports_r_lint_002_and_exits_1(tmp_path, capsys):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    _build_corpus(
+        repo_root,
+        "- Should foo also handle gadgets?\n\n",
+    )
+
+    code = spec_linter.main(["--format=json", "--repo-root=" + str(repo_root)])
+    out = capsys.readouterr().out
+
+    assert code == 1
+    data = json.loads(out)
+    hits = _lint_002_fails(data["findings"])
+    assert hits, "expected a fail-severity R-LINT-002 finding in JSON: " + out
+    assert data["summary"]["hard_failures"] >= 1

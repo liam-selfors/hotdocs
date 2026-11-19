@@ -1,19 +1,19 @@
 {
-  "spec_bundle_hash": "sha256:84a9de20487d74ec9a9e8d1b643b8b29ea656216a0bb61a7db873158e5a2880c",
+  "spec_bundle_hash": "sha256:a90fb5780b9c3d764c634e609642e4427e3a2ae9b0a22790135f6beec45450d3",
   "model_pin": "claude-opus-5-5",
   "prompt_version": "v11",
   "retry_feedback": null,
   "pipeline_version": "v1",
   "gate_versions": {
     "compiler": "criterion-compiler@1.0.0",
-    "generated_test": "generated_test@1.1.0",
-    "verifier": "verifier-orchestrator@2.2.0",
+    "generated_test": "generated_test@1.2.0",
+    "verifier": "verifier-orchestrator@2.3.0",
     "license_scanner": "license_scanner@4.0.0-no-reference-corpus",
     "secret_scanner": "secret_scanner@3.1.0+detect-secrets.1.5.0",
     "generator": "generator@3.0.0+v11"
   },
   "provenance_hit": false,
-  "generated_at": "2026-11-18T21:29:59Z",
+  "generated_at": "2026-11-19T13:55:46Z",
   "verification_run_id": "spec-linter-attempt-1",
   "verification_report": {
     "component_id": "comp-spec-linter",
@@ -22,169 +22,169 @@
         "id": "AC-LINT-001",
         "covers": "R-LINT-001",
         "kind": "generated-test",
+        "result": "pass",
         "test_authoring": {
           "model": "claude-opus-5-5",
           "seed": 1,
           "prompt_version": "v1",
           "cache_hit": false
-        },
-        "result": "pass"
+        }
       },
       {
         "id": "AC-LINT-002",
         "covers": "R-LINT-002",
         "kind": "generated-test",
+        "result": "pass",
         "test_authoring": {
           "model": "claude-opus-5-5",
           "seed": 1,
           "prompt_version": "v1",
           "cache_hit": false
-        },
-        "result": "pass"
+        }
       },
       {
         "id": "AC-LINT-003",
         "covers": "R-LINT-003",
         "kind": "generated-test",
+        "result": "pass",
         "test_authoring": {
           "model": "claude-opus-5-5",
           "seed": 1,
           "prompt_version": "v1",
           "cache_hit": false
-        },
-        "result": "pass"
+        }
       },
       {
         "id": "AC-LINT-004",
         "covers": "R-LINT-004",
         "kind": "generated-test",
+        "result": "pass",
         "test_authoring": {
           "model": "claude-opus-5-5",
           "seed": 1,
           "prompt_version": "v1",
           "cache_hit": false
-        },
-        "result": "pass"
+        }
       },
       {
         "id": "AC-LINT-005",
         "covers": "R-LINT-005",
         "kind": "generated-test",
+        "result": "pass",
         "test_authoring": {
           "model": "claude-opus-5-5",
           "seed": 1,
           "prompt_version": "v1",
           "cache_hit": false
-        },
-        "result": "pass"
+        }
       },
       {
         "id": "AC-LINT-006",
         "covers": "R-LINT-006",
         "kind": "generated-test",
+        "result": "pass",
         "test_authoring": {
           "model": "claude-opus-5-5",
           "seed": 1,
           "prompt_version": "v1",
           "cache_hit": false
-        },
-        "result": "pass"
+        }
       },
       {
         "id": "AC-LINT-007",
         "covers": "R-LINT-007",
         "kind": "generated-test",
+        "result": "pass",
         "test_authoring": {
           "model": "claude-opus-5-5",
           "seed": 1,
           "prompt_version": "v1",
           "cache_hit": false
-        },
-        "result": "pass"
+        }
       },
       {
         "id": "AC-LINT-008",
         "covers": "R-LINT-008",
         "kind": "generated-test",
+        "result": "pass",
         "test_authoring": {
           "model": "claude-opus-5-5",
           "seed": 1,
           "prompt_version": "v1",
           "cache_hit": false
-        },
-        "result": "pass"
+        }
       },
       {
         "id": "AC-LINT-009",
         "covers": "R-LINT-009",
         "kind": "generated-test",
+        "result": "pass",
         "test_authoring": {
           "model": "claude-opus-5-5",
           "seed": 1,
           "prompt_version": "v1",
           "cache_hit": false
-        },
-        "result": "pass"
+        }
       },
       {
         "id": "AC-LINT-010",
         "covers": "R-LINT-010",
         "kind": "generated-test",
+        "result": "pass",
         "test_authoring": {
           "model": "claude-opus-5-5",
           "seed": 1,
           "prompt_version": "v1",
           "cache_hit": false
-        },
-        "result": "pass"
+        }
       },
       {
         "id": "AC-LINT-011",
         "covers": "R-LINT-011",
         "kind": "generated-test",
+        "result": "pass",
         "test_authoring": {
           "model": "claude-opus-5-5",
           "seed": 1,
           "prompt_version": "v1",
           "cache_hit": false
-        },
-        "result": "pass"
+        }
       },
       {
         "id": "AC-LINT-011b",
         "covers": "R-LINT-011",
         "kind": "generated-test",
+        "result": "pass",
         "test_authoring": {
           "model": "claude-opus-5-5",
           "seed": 1,
           "prompt_version": "v1",
           "cache_hit": false
-        },
-        "result": "pass"
+        }
       },
       {
         "id": "AC-LINT-013",
         "covers": "R-LINT-013",
         "kind": "generated-test",
+        "result": "pass",
         "test_authoring": {
           "model": "claude-opus-5-5",
           "seed": 1,
           "prompt_version": "v1",
           "cache_hit": false
-        },
-        "result": "pass"
+        }
       },
       {
         "id": "AC-LINT-014",
         "covers": "R-LINT-014",
         "kind": "generated-test",
+        "result": "pass",
         "test_authoring": {
           "model": "claude-opus-5-5",
           "seed": 1,
           "prompt_version": "v1",
           "cache_hit": false
-        },
-        "result": "pass"
+        }
       },
       {
         "id": "AC-LINT-015",
@@ -204,193 +204,217 @@
         "id": "AC-LINT-016",
         "covers": "R-LINT-016",
         "kind": "generated-test",
+        "result": "pass",
         "test_authoring": {
           "model": "claude-opus-5-5",
           "seed": 1,
           "prompt_version": "v1",
           "cache_hit": false
-        },
-        "result": "pass"
+        }
       },
       {
         "id": "AC-LINT-017",
         "covers": "R-LINT-017",
         "kind": "generated-test",
+        "result": "pass",
         "test_authoring": {
           "model": "claude-opus-5-5",
           "seed": 1,
           "prompt_version": "v1",
           "cache_hit": false
-        },
-        "result": "pass"
+        }
       },
       {
         "id": "AC-LINT-018",
         "covers": "R-LINT-018",
         "kind": "generated-test",
+        "result": "pass",
         "test_authoring": {
           "model": "claude-opus-5-5",
           "seed": 1,
           "prompt_version": "v1",
           "cache_hit": false
-        },
-        "result": "pass"
+        }
       },
       {
         "id": "AC-LINT-018b",
         "covers": "R-LINT-018",
         "kind": "generated-test",
+        "result": "pass",
         "test_authoring": {
           "model": "claude-opus-5-5",
           "seed": 1,
           "prompt_version": "v1",
           "cache_hit": false
-        },
-        "result": "pass"
+        }
       },
       {
         "id": "AC-LINT-019",
         "covers": "R-LINT-019",
         "kind": "generated-test",
+        "result": "pass",
         "test_authoring": {
           "model": "claude-opus-5-5",
           "seed": 1,
           "prompt_version": "v1",
           "cache_hit": false
-        },
-        "result": "pass"
+        }
       },
       {
         "id": "AC-LINT-020",
         "covers": "R-LINT-020",
         "kind": "generated-test",
+        "result": "pass",
         "test_authoring": {
           "model": "claude-opus-5-5",
           "seed": 1,
           "prompt_version": "v1",
           "cache_hit": false
-        },
-        "result": "pass"
+        }
       },
       {
         "id": "AC-LINT-021",
         "covers": "R-LINT-021",
         "kind": "generated-test",
+        "result": "pass",
         "test_authoring": {
           "model": "claude-opus-5-5",
           "seed": 1,
           "prompt_version": "v1",
           "cache_hit": false
-        },
-        "result": "pass"
+        }
       },
       {
         "id": "AC-LINT-024",
         "covers": "R-LINT-024",
         "kind": "generated-test",
+        "result": "pass",
         "test_authoring": {
           "model": "claude-opus-5-5",
           "seed": 1,
           "prompt_version": "v1",
           "cache_hit": false
-        },
-        "result": "pass"
+        }
       },
       {
         "id": "AC-LINT-031",
         "covers": "R-LINT-031",
         "kind": "generated-test",
+        "result": "pass",
         "test_authoring": {
           "model": "claude-opus-5-5",
           "seed": 1,
           "prompt_version": "v1",
           "cache_hit": false
-        },
-        "result": "pass"
+        }
       },
       {
         "id": "AC-LINT-032",
         "covers": "R-LINT-032",
         "kind": "generated-test",
+        "result": "pass",
         "test_authoring": {
           "model": "claude-opus-5-5",
           "seed": 1,
           "prompt_version": "v1",
           "cache_hit": false
-        },
-        "result": "pass"
+        }
       },
       {
         "id": "AC-LINT-033",
         "covers": "R-LINT-033",
         "kind": "generated-test",
+        "result": "pass",
         "test_authoring": {
           "model": "claude-opus-5-5",
           "seed": 1,
           "prompt_version": "v1",
           "cache_hit": false
-        },
-        "result": "pass"
+        }
       },
       {
         "id": "AC-LINT-034",
         "covers": "R-LINT-015",
         "kind": "generated-test",
+        "result": "pass",
         "test_authoring": {
           "model": "claude-opus-5-5",
           "seed": 1,
           "prompt_version": "v1",
           "cache_hit": false
-        },
-        "result": "pass"
+        }
       },
       {
         "id": "AC-LINT-035",
         "covers": "R-LINT-033",
         "kind": "generated-test",
+        "result": "pass",
         "test_authoring": {
           "model": "claude-opus-5-5",
           "seed": 1,
           "prompt_version": "v1",
           "cache_hit": false
-        },
-        "result": "pass"
+        }
       },
       {
         "id": "AC-LINT-036",
         "covers": "R-LINT-014",
         "kind": "generated-test",
+        "result": "pass",
         "test_authoring": {
           "model": "claude-opus-5-5",
           "seed": 1,
           "prompt_version": "v1",
           "cache_hit": false
-        },
-        "result": "pass"
+        }
       },
       {
         "id": "AC-LINT-037",
         "covers": "R-LINT-003",
         "kind": "generated-test",
+        "result": "pass",
         "test_authoring": {
           "model": "claude-opus-5-5",
           "seed": 1,
           "prompt_version": "v1",
           "cache_hit": false
-        },
-        "result": "pass"
+        }
       },
       {
         "id": "AC-LINT-038",
         "covers": "R-LINT-004",
         "kind": "generated-test",
+        "result": "pass",
         "test_authoring": {
           "model": "claude-opus-5-5",
           "seed": 1,
           "prompt_version": "v1",
           "cache_hit": false
-        },
-        "result": "pass"
+        }
+      },
+      {
+        "id": "AC-LINT-039",
+        "covers": "R-LINT-034",
+        "kind": "generated-test",
+        "result": "pass",
+        "test_authoring": {
+          "model": "claude-opus-5-5",
+          "seed": 1,
+          "prompt_version": "v1",
+          "cache_hit": false
+        }
+      },
+      {
+        "id": "AC-LINT-040",
+        "covers": "R-LINT-034",
+        "kind": "generated-test",
+        "result": "pass",
+        "test_authoring": {
+          "model": "claude-opus-5-5",
+          "seed": 1,
+          "prompt_version": "v1",
+          "cache_hit": false
+        }
       }
     ],
     "requirement_results": {
@@ -417,10 +441,11 @@
       "R-LINT-024": "pass",
       "R-LINT-031": "pass",
       "R-LINT-032": "pass",
-      "R-LINT-033": "pass"
+      "R-LINT-033": "pass",
+      "R-LINT-034": "pass"
     },
     "interface_drift": false,
-    "mutation_score": 0.8191489361702128,
+    "mutation_score": 0.8015267175572519,
     "mutation_error": null,
     "overall": "pass"
   },
