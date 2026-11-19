@@ -4,8 +4,8 @@ import re
 import test_author
 
 
-class Bundle(dict):
-    """A CriterionBundle that reads both as a mapping and by attribute."""
+class _Bundle(dict):
+    """A CriterionBundle stand-in readable both as a mapping and by attribute."""
 
     def __getattr__(self, name):
         try:
@@ -14,8 +14,8 @@ class Bundle(dict):
             raise AttributeError(name)
 
 
-def make_bundle():
-    return Bundle(
+def _make_bundle():
+    return _Bundle(
         component_id="comp-widget-maker",
         criterion_id="AC-WIDGET-MAKER-001",
         covers="R-WIDGET-MAKER-001",
@@ -25,34 +25,41 @@ def make_bundle():
             "Then it returns a widget"
         ),
         requirement_text=(
-            "# R-WIDGET-MAKER-001\n\n"
-            "**R-WIDGET-MAKER-001** — `make_widget(spec)` MUST return a widget."
+            "**R-WIDGET-MAKER-001** \u2014 `make_widget(spec)` MUST return a widget."
         ),
-        interface="# Library\n\n```\nmake_widget(spec: dict) -> dict\n```",
-        glossary="# Glossary\n\n- **Widget** — a test term.",
+        interface="# Library\n\n```\nmake_widget(spec: dict) -> dict\n```\n",
+        glossary="# Glossary\n\n- **Widget** \u2014 a test term.\n",
         dependency_interfaces={},
     )
 
 
-NONCE_RE = re.compile(r"-----BEGIN FILE ([0-9a-f]{32})-----")
+def _find_nonce(prompt):
+    m = re.search(r"-----BEGIN FILE ([0-9a-f]{32})-----", prompt)
+    if m:
+        return m.group(1)
+    m = re.search(r"-----END FILE ([0-9a-f]{32})-----", prompt)
+    if m:
+        return m.group(1)
+    m = re.search(r"\b([0-9a-f]{32})\b", prompt)
+    assert m is not None, "no nonce found in prompt"
+    return m.group(1)
 
 
-def make_mock(recorded):
-    def backend(prompt, model, **params):
-        recorded.append(prompt)
-        match = NONCE_RE.search(prompt)
-        nonce = match.group(1) if match else "0" * 32
-        content = (
+def test_prompt_holds_write_time_window_precision_block(tmp_path, monkeypatch):
+    monkeypatch.delenv("VAR_CACHE_STORE_URL", raising=False)
+    prompts = []
+
+    def mock_backend(prompt, model, **params):
+        prompts.append(prompt)
+        nonce = _find_nonce(prompt)
+        text = (
+            "-----BEGIN FILE " + nonce + "-----\n"
             "import widget_maker\n"
             "\n"
             "\n"
-            "def test_widget():\n"
+            "def test_placeholder():\n"
             "    assert widget_maker is not None\n"
-        )
-        text = (
-            "-----BEGIN FILE " + nonce + "-----\n"
-            + content
-            + "-----END FILE " + nonce + "-----"
+            "-----END FILE " + nonce + "-----"
         )
         return {
             "text": text,
@@ -61,21 +68,14 @@ def make_mock(recorded):
             "model_call_error": None,
         }
 
-    return backend
-
-
-def test_prompt_holds_write_time_window_precision_block(tmp_path):
-    recorded = []
-    backend = make_mock(recorded)
-
     test_author.author_test(
-        make_bundle(), "mock", repo_root=tmp_path, llm_backend=backend
+        _make_bundle(), "mock", repo_root=tmp_path, llm_backend=mock_backend
     )
 
-    assert len(recorded) >= 1, "the mock model was never called"
-    first_prompt = recorded[0]
-    assert "(`datetime.now(timezone.utc).replace(microsecond=0)`)" in first_prompt
+    assert len(prompts) >= 1
+    first = prompts[0]
+    assert "(`datetime.now(timezone.utc).replace(microsecond=0)`)" in first
     assert (
         "never comparing a timestamp truncated on write against "
         "microsecond-precision bounds."
-    ) in first_prompt
+    ) in first

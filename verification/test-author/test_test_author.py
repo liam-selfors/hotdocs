@@ -571,6 +571,24 @@ def test_d334_helper_sharing_a_dependency_name_is_not_a_fake(repo_root):
     assert _rf(result, "file") is not None
 
 
+def test_d334_helper_sharing_a_dependency_name_is_not_a_fake(repo_root):
+    """D334, issue #12 -- a top-level helper installed nowhere is never
+    checked against a dependency function of the same name."""
+    bundle = fake_bundle(
+        dependency_interfaces={"comp-erd-graph": "build_graph(manifest, *, plan=None, dbt_links=None) -> dict"}
+    )
+    backend = MockBackend([file_block(
+        "def build_graph():\n"
+        "    return {\"nodes\": [], \"edges\": []}\n"
+        "def test_x():\n"
+        "    assert build_graph()[\"nodes\"] == []"
+    )])
+    result = author_test(bundle, "claude-sonnet-5", repo_root=repo_root, llm_backend=backend)
+
+    assert _rf(result, "model_call_error") is None
+    assert _rf(result, "file") is not None
+
+
 @pytest.mark.parametrize("component_id, module", [("comp-foo-bar", "foo_bar"), ("comp-semver", "semver")])
 def test_ac_author_025_prompt_names_the_component_under_tests_module(repo_root, component_id, module):
     """D189 -- the component under test's module is its slug with hyphens

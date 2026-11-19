@@ -1,6 +1,8 @@
 # hotdocs-criterion: sha256:28c2a3b3dd4873db11df990a47bf1fc496415763800cde7a80b33a6b5460ed66
-import importlib.util
-import sys
+"""AC-VERIFY-004: a component whose gen/<component>/ public interface does not
+match its interface/ contract makes verify report interface_drift true and an
+overall verdict of fail (R-VERIFY-004)."""
+
 from pathlib import Path
 
 import pytest
@@ -10,7 +12,71 @@ import verifier_orchestrator
 
 COMPONENT_ID = "comp-widget"
 SLUG = "widget"
-MODULE = "widget"
+MODULE_NAME = "widget"
+CRITERION_ID = "AC-WIDGET-001"
+REQUIREMENT_ID = "R-WIDGET-001"
+
+GLOSSARY_TEXT = "# Glossary\n\n- **Widget** — a test term.\n"
+
+LIBRARY_TEXT = (
+    "# Library\n"
+    "\n"
+    "```\n"
+    "widget_double(x: int) -> int\n"
+    "widget_label(name: str, prefix: str) -> str\n"
+    "```\n"
+)
+
+REQUIREMENT_TEXT = (
+    "# " + REQUIREMENT_ID + "\n"
+    "\n"
+    "**" + REQUIREMENT_ID + "** — `widget_double(x)` MUST return `2 * x`.\n"
+)
+
+CRITERION_TEXT = (
+    "# " + CRITERION_ID + "\n"
+    "\n"
+    "Covers: " + REQUIREMENT_ID + "\n"
+    "Kind: llm-judge\n"
+    "\n"
+    "```gherkin\n"
+    "Given a widget specification\n"
+    "When a reviewer reads it\n"
+    "Then the doubling behaviour is stated clearly\n"
+    "```\n"
+)
+
+# Generated code variants.
+MISSING_CALLABLE_SOURCE = (
+    "def widget_label(name, prefix):\n"
+    "    return prefix + name\n"
+    "\n"
+    "\n"
+    "class WidgetHelper:\n"
+    "    pass\n"
+)
+
+PARAMETER_MISMATCH_SOURCE = (
+    "def widget_double(y, z):\n"
+    "    return 2 * y\n"
+    "\n"
+    "\n"
+    "def widget_label(name, prefix):\n"
+    "    return prefix + name\n"
+)
+
+MATCHING_SOURCE = (
+    "def widget_double(x):\n"
+    "    return 2 * x\n"
+    "\n"
+    "\n"
+    "def widget_label(name, prefix):\n"
+    "    return prefix + name\n"
+    "\n"
+    "\n"
+    "class WidgetHelper:\n"
+    "    pass\n"
+)
 
 
 def field(value, name):
@@ -22,29 +88,30 @@ def write(path, text):
     path.write_text(text, encoding="utf-8")
 
 
-def assembler_source():
-    return (
-        "def assemble_criterion(component_id, criterion_id, repo_root):\n"
-        "    return {\n"
-        "        'component_id': component_id,\n"
-        "        'criterion_id': criterion_id,\n"
-        "        'covers': " + repr("R-WIDGET-001") + ",\n"
-        "        'criterion_text': " + repr("Given a widget\nWhen it is scaled\nThen it is scaled") + ",\n"
-        "        'requirement_text': " + repr("**R-WIDGET-001** - scale MUST multiply.") + ",\n"
-        "        'interface': " + repr("# Library\n\nscale(value: int, factor: int) -> int") + ",\n"
-        "        'glossary': " + repr("# Glossary\n\n- **Widget** - a test term.") + ",\n"
-        "        'dependency_interfaces': {},\n"
-        "    }\n"
-    )
+def fake_assembler_source():
+    lines = [
+        "def assemble_criterion(component_id, criterion_id, repo_root):",
+        "    return {",
+        "        'component_id': component_id,",
+        "        'criterion_id': criterion_id,",
+        "        'covers': " + repr(REQUIREMENT_ID) + ",",
+        "        'criterion_text': " + repr(CRITERION_TEXT) + ",",
+        "        'requirement_text': " + repr(REQUIREMENT_TEXT) + ",",
+        "        'interface': " + repr(LIBRARY_TEXT) + ",",
+        "        'glossary': " + repr(GLOSSARY_TEXT) + ",",
+        "        'dependency_interfaces': {},",
+        "    }",
+        "",
+    ]
+    return "\n".join(lines)
 
 
-def build_fixture(repo_root, module_source):
+def build_fixture(repo_root, gen_source):
+    specs = repo_root / "specs"
+    write(specs / "glossary.md", GLOSSARY_TEXT)
+
     write(
-        repo_root / "specs" / "glossary.md",
-        "# Glossary\n\n- **Widget** \u2014 a test term.\n",
-    )
-    write(
-        repo_root / "specs" / "product" / "P-WIDGET.md",
+        specs / "product" / "widget-capability.md",
         "---\n"
         "id: P-WIDGET\n"
         "title: Widget Capability\n"
@@ -56,45 +123,44 @@ def build_fixture(repo_root, module_source):
         "\n"
         "## Purpose\n"
         "\n"
-        "Scale widgets.\n"
+        "Widgets double numbers.\n"
         "\n"
         "## Scope\n"
         "\n"
-        "- Scaling.\n"
-        "\n"
-        "## Capability scenarios\n"
+        "- In scope: doubling.\n"
         "\n"
         "### CS-WIDGET-001\n"
         "\n"
         "Covers: P-WIDGET\n"
         "\n"
         "```gherkin\n"
-        "Given a widget is 2\n"
-        "When scale is invoked with [2, 3]\n"
-        "Then value equals 6\n"
+        "Given a number\n"
+        "When it is doubled\n"
+        "Then the result is twice the number\n"
         "```\n",
     )
-    comp = repo_root / "specs" / "components" / SLUG
+
+    comp = specs / "components" / SLUG
     write(
         comp / "component.md",
         "---\n"
-        "id: comp-widget\n"
+        "id: " + COMPONENT_ID + "\n"
         "title: Widget\n"
         "status: draft\n"
         "owners: [team-a]\n"
-        "realizes: [P-WIDGET]\n"
         "depends_on: []\n"
+        "realizes: [P-WIDGET]\n"
         "---\n"
         "\n"
         "# Widget\n"
         "\n"
         "## Purpose\n"
         "\n"
-        "Widget scales a number by a factor.\n"
+        "Widget doubles a number.\n"
         "\n"
         "## Scope\n"
         "\n"
-        "- In scope: scaling.\n"
+        "- In scope: doubling.\n"
         "\n"
         "## Definitions\n"
         "\n"
@@ -126,74 +192,47 @@ def build_fixture(repo_root, module_source):
         "\n"
         "- Initial.\n",
     )
-    write(
-        comp / "requirements" / "R-WIDGET-001.md",
-        "# R-WIDGET-001\n\n**R-WIDGET-001** \u2014 `scale(value, factor)` MUST return `value * factor`.\n",
-    )
-    write(
-        comp / "acceptance" / "AC-WIDGET-001.md",
-        "# AC-WIDGET-001\n"
-        "\n"
-        "Covers: R-WIDGET-001\n"
-        "Kind: llm-judge\n"
-        "\n"
-        "```gherkin\n"
-        "Given the widget requirements\n"
-        "When a reviewer reads them\n"
-        "Then they are unambiguous\n"
-        "```\n",
-    )
-    write(
-        comp / "interface" / "library.md",
-        "# Library\n\n```\nscale(value: int, factor: int) -> int\n```\n",
-    )
+    write(comp / "requirements" / (REQUIREMENT_ID + ".md"), REQUIREMENT_TEXT)
+    write(comp / "acceptance" / (CRITERION_ID + ".md"), CRITERION_TEXT)
+    write(comp / "interface" / "library.md", LIBRARY_TEXT)
     write(comp / "constraints.md", "# Constraints\n\nNone.\n")
 
+    # Fake spec-bundle-assembler at the path verify loads it from.
     write(
         repo_root / "gen" / "spec-bundle-assembler" / "spec_bundle_assembler.py",
-        assembler_source(),
+        fake_assembler_source(),
     )
-    write(repo_root / "gen" / SLUG / (MODULE + ".py"), module_source)
 
-
-MISSING_CALLABLE = (
-    "def other(value, factor):\n"
-    "    return value * factor\n"
-)
-
-PARAM_MISMATCH = (
-    "def scale(value):\n"
-    "    return value\n"
-)
-
-MATCHING = (
-    "def scale(value, factor):\n"
-    "    return value * factor\n"
-)
+    # The component's generated code.
+    write(repo_root / "gen" / SLUG / (MODULE_NAME + ".py"), gen_source)
 
 
 @pytest.mark.parametrize(
-    "module_source",
-    [MISSING_CALLABLE, PARAM_MISMATCH],
+    "gen_source",
+    [MISSING_CALLABLE_SOURCE, PARAMETER_MISMATCH_SOURCE],
     ids=["missing-callable", "parameter-mismatch"],
 )
-def test_interface_drift_fails_verification(tmp_path, module_source):
+def test_interface_drift_fails_verdict(tmp_path, gen_source):
     repo_root = tmp_path / "repo"
-    build_fixture(repo_root, module_source)
+    repo_root.mkdir()
+    build_fixture(repo_root, gen_source)
 
     report = verifier_orchestrator.verify(COMPONENT_ID, repo_root)
 
     assert field(report, "interface_drift") is True
     assert field(report, "overall") == "fail"
 
-    as_dict = report.to_dict() if hasattr(report, "to_dict") else report
-    assert as_dict["interface_drift"] is True
-    assert as_dict["overall"] == "fail"
+    # The only criterion is an llm-judge with no judge: skipped, which never
+    # fails overall by itself, so the fail verdict comes from the drift.
+    criteria = field(report, "criteria")
+    results = {c["id"]: c["result"] for c in criteria}
+    assert results.get(CRITERION_ID) == "skipped"
 
 
-def test_matching_interface_reports_no_drift(tmp_path):
+def test_matching_interface_has_no_drift(tmp_path):
     repo_root = tmp_path / "repo"
-    build_fixture(repo_root, MATCHING)
+    repo_root.mkdir()
+    build_fixture(repo_root, MATCHING_SOURCE)
 
     report = verifier_orchestrator.verify(COMPONENT_ID, repo_root)
 

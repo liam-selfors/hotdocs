@@ -1,8 +1,6 @@
-# hotdocs-criterion: sha256:e8ebdf83e3a63d8cbf70e1b135d82d2365aacb37d033314d3437d5f3f837d6fd
-import importlib.util
+# hotdocs-criterion: sha256:fb71e6a9110f9a42a81692de9807bfe83ba5b910e361a3d8e60be2ceb088ca30
+import dataclasses
 import re
-import sys
-from pathlib import Path
 
 import pytest
 
@@ -10,6 +8,7 @@ import test_author
 
 
 MODEL = "claude-sonnet-5"
+COMPONENT_ID = "comp-foo"
 SLUG = "foo"
 
 
@@ -17,49 +16,71 @@ def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def load_module(path, module_name):
-    spec = importlib.util.spec_from_file_location(module_name, path)
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[module_name] = module
-    spec.loader.exec_module(module)
-    return module
+@dataclasses.dataclass
+class Bundle:
+    component_id: str
+    criterion_id: str
+    covers: str
+    criterion_text: str
+    requirement_text: str
+    interface: str
+    glossary: str
+    dependency_interfaces: dict = dataclasses.field(default_factory=dict)
+    module_names: list = dataclasses.field(default_factory=list)
 
+    def _names(self):
+        return [f.name for f in dataclasses.fields(self)]
 
-class Bundle(dict):
-    """A CriterionBundle readable both as a mapping and by attribute."""
+    def __getitem__(self, key):
+        if key in self._names():
+            return getattr(self, key)
+        raise KeyError(key)
 
-    def __getattr__(self, name):
-        try:
-            return self[name]
-        except KeyError:
-            raise AttributeError(name)
+    def get(self, key, default=None):
+        if key in self._names():
+            return getattr(self, key)
+        return default
+
+    def __contains__(self, key):
+        return key in self._names()
+
+    def keys(self):
+        return list(self._names())
+
+    def items(self):
+        return [(k, getattr(self, k)) for k in self._names()]
+
+    def __iter__(self):
+        return iter(self._names())
+
+    def __len__(self):
+        return len(self._names())
 
 
 def make_bundle(dependency_interfaces):
     return Bundle(
-        component_id="comp-foo",
+        component_id=COMPONENT_ID,
         criterion_id="AC-FOO-001",
         covers="R-FOO-001",
-        criterion_text=(
-            "Given x = 2\n"
-            "When foo(x) is called\n"
-            "Then it returns 4\n"
-        ),
-        requirement_text="**R-FOO-001** \u2014 `foo(x)` MUST return `2 * x`.",
-        interface="# Library\n\n```\nfoo(x: int) -> int\n```\n",
-        glossary="# Glossary\n\n- **Foo** \u2014 a test term.\n",
-        dependency_interfaces=dict(dependency_interfaces),
+        criterion_text="Given x = 2\nWhen foo(x) is called\nThen it returns 4",
+        requirement_text="# R-FOO-001\n\n**R-FOO-001** — `foo(x)` MUST return `2 * x`.",
+        interface="# Library\n\n```\nfoo(x: int) -> int\n```",
+        glossary="# Glossary\n\n- **Foo** — a test term.",
+        dependency_interfaces=dependency_interfaces,
         module_names=["foo"],
     )
 
 
-NONCE_RE = re.compile(r"-----BEGIN FILE ([0-9a-fA-F]+)-----")
+def lib_doc(signature):
+    return "# Library\n\n```\n" + signature + "\n```\n"
 
 
-def make_backend(content):
+def make_backend(content, log):
     def backend(prompt, model, **params):
-        m = NONCE_RE.search(prompt)
-        nonce = m.group(1) if m else "0" * 32
+        log.append(prompt)
+        m = re.search(r"-----BEGIN FILE ([0-9a-f]{32})-----", prompt)
+        assert m is not None, "prompt does not carry a BEGIN FILE nonce"
+        nonce = m.group(1)
         text = (
             "-----BEGIN FILE " + nonce + "-----\n"
             + content
@@ -75,172 +96,136 @@ def make_backend(content):
     return backend
 
 
+@pytest.fixture
+def repo_root(tmp_path, monkeypatch):
+    monkeypatch.delenv("VAR_CACHE_STORE_URL", raising=False)
+    root = tmp_path / "repo"
+    root.mkdir()
+    monkeypatch.chdir(root)
+    return root
+
+
 def files_under(path):
     if not path.exists():
         return []
     return [p for p in path.rglob("*") if p.is_file()]
 
 
-def cache_entry_count(repo_root):
-    try:
-        gen = next(
-            p for p in Path(test_author.__file__).resolve().parents if p.name == "gen"
-        )
-    except StopIteration:
-        return None
-    base = gen / "cache-manager"
-    if (base / "cache_manager.py").is_file():
-        path = base / "cache_manager.py"
-    elif (base / "cache_manager" / "__init__.py").is_file():
-        path = base / "cache_manager" / "__init__.py"
-    else:
-        return None
-    try:
-        cm = load_module(path, "cache_manager")
-    except Exception:
-        return None
-    stats = cm.stats(repo_root=repo_root)
-    return field(stats, "entry_count")
-
-
 def assert_nothing_written(repo_root):
-    gt = repo_root / "verification" / SLUG / "generated-test"
-    assert files_under(gt) == [], "a test file was written: " + repr(files_under(gt))
+    out_dir = repo_root / "verification" / SLUG / "generated-test"
+    assert files_under(out_dir) == [], "a test file was written despite a rejected response"
     cache_dir = repo_root / ".hotdocs" / "cache"
-    assert files_under(cache_dir) == [], "cache was written: " + repr(files_under(cache_dir))
-    count = cache_entry_count(repo_root)
-    if count is not None:
-        assert count == 0
+    assert files_under(cache_dir) == [], "a cache entry was written despite a rejected response"
+
+
+def run(repo_root, bundle, content, seed=0):
+    log = []
+    result = test_author.author_test(
+        bundle, MODEL, seed, repo_root=repo_root, llm_backend=make_backend(content, log)
+    )
+    assert log, "mock backend was never called"
+    return result
 
 
 def error_text(err):
-    try:
-        msg = field(err, "message")
-    except (KeyError, AttributeError):
-        msg = None
-    return (str(msg) if msg is not None else "") + " " + str(err)
+    if isinstance(err, dict):
+        return " ".join(str(v) for v in err.values())
+    parts = []
+    for name in ("category", "message"):
+        if hasattr(err, name):
+            parts.append(str(getattr(err, name)))
+    return " ".join(parts) + " " + str(err)
 
 
-@pytest.fixture
-def repo_root(tmp_path, monkeypatch):
-    root = tmp_path / "repo"
-    root.mkdir()
-    monkeypatch.delenv("VAR_CACHE_STORE_URL", raising=False)
-    monkeypatch.chdir(root)
-    return root
-
-
-DO_THING_IFACE = {
-    "comp-bar": (
-        "# Library\n\n"
-        "```\n"
-        "do_thing(a: int, b: str, c: dict[str, str]) -> bool\n"
-        "```\n"
-    )
-}
-
-SCAN_IFACES = {
-    "comp-bar": (
-        "# Library\n\n"
-        "```\n"
-        "scan(component_id: str, repo_root: Path) -> Report\n"
-        "```\n"
-    ),
-    "comp-baz": (
-        "# Library\n\n"
-        "```\n"
-        "scan(repo_root: Path) -> Report\n"
-        "```\n"
-    ),
-}
-
-
-def run(bundle, content, repo_root):
-    return test_author.author_test(
-        bundle, MODEL, 0, repo_root=repo_root, llm_backend=make_backend(content)
-    )
-
-
-def test_malformed_code_rejected(repo_root):
-    content = "def (:\n    this is not python ??? }}}\n"
-    result = run(make_bundle({}), content, repo_root)
+def assert_rejected(result, category, repo_root):
     err = field(result, "model_call_error")
-    assert err is not None
-    assert field(err, "category") == "malformed_code"
+    assert err is not None, "expected a model_call_error"
+    assert field(err, "category") == category
     assert field(result, "file") is None
     assert_nothing_written(repo_root)
+    return err
 
 
-def test_two_arg_alias_fake_rejected(repo_root):
-    content = (
-        "import foo\n"
-        "\n"
-        "def _fake_do_thing(a, b):\n"
-        "    return True\n"
-        "\n"
-        "do_thing = _fake_do_thing\n"
-        "\n"
-        "def test_foo():\n"
-        "    assert foo.foo(2) == 4\n"
-    )
-    result = run(make_bundle(DO_THING_IFACE), content, repo_root)
-    err = field(result, "model_call_error")
-    assert err is not None
-    assert field(err, "category") == "fake_signature_mismatch"
-    assert "do_thing" in error_text(err)
-    assert field(result, "file") is None
-    assert_nothing_written(repo_root)
-
-
-def test_three_arg_alias_fake_accepted(repo_root):
-    content = (
-        "import foo\n"
-        "\n"
-        "def _fake_do_thing(a, b, c):\n"
-        "    return True\n"
-        "\n"
-        "do_thing = _fake_do_thing\n"
-        "\n"
-        "def test_foo():\n"
-        "    assert foo.foo(2) == 4\n"
-    )
-    result = run(make_bundle(DO_THING_IFACE), content, repo_root)
-    assert field(result, "model_call_error") is None
-    f = field(result, "file")
-    assert f is not None
-    assert "_fake_do_thing(a, b, c)" in field(f, "content")
-
-
-@pytest.mark.parametrize("params", ["component_id, repo_root", "repo_root"])
-def test_scan_matching_any_dependency_arity_accepted(repo_root, params):
-    content = (
-        "import foo\n"
-        "\n"
-        "def scan(" + params + "):\n"
-        "    return {}\n"
-        "\n"
-        "def test_foo():\n"
-        "    assert foo.foo(2) == 4\n"
-    )
-    result = run(make_bundle(SCAN_IFACES), content, repo_root)
+def assert_accepted(result):
     assert field(result, "model_call_error") is None
     assert field(result, "file") is not None
 
 
-def test_scan_three_params_rejected(repo_root):
-    content = (
-        "import foo\n"
-        "\n"
-        "def scan(component_id, repo_root, extra):\n"
-        "    return {}\n"
-        "\n"
-        "def test_foo():\n"
-        "    assert foo.foo(2) == 4\n"
+# --- Scenario 1: not Python at all -------------------------------------------
+
+def test_malformed_code_is_rejected(repo_root):
+    bundle = make_bundle({"comp-bar": lib_doc("do_thing(a: int, b: str, c: dict[str, str]) -> bool")})
+    content = "this is ) not (( python at all :: def\n    }}} ???"
+    result = run(repo_root, bundle, content)
+    assert_rejected(result, "malformed_code", repo_root)
+
+
+# --- Scenario 2/3: monkeypatched fake arity -----------------------------------
+
+def monkeypatch_body(params):
+    lines = [
+        "import foo",
+        "",
+        "",
+        "def fake(" + ", ".join(params) + "):",
+        "    return True",
+        "",
+        "",
+        "def test_uses_fake(monkeypatch):",
+        "    monkeypatch.setattr(foo, " + repr("do_thing") + ", fake)",
+        "    assert True",
+        "",
+    ]
+    return "\n".join(lines)
+
+
+def test_two_arg_monkeypatched_fake_is_signature_mismatch(repo_root):
+    bundle = make_bundle({"comp-bar": lib_doc("do_thing(a: int, b: str, c: dict[str, str]) -> bool")})
+    result = run(repo_root, bundle, monkeypatch_body(["a", "b"]))
+    err = assert_rejected(result, "fake_signature_mismatch", repo_root)
+    assert "do_thing" in error_text(err)
+
+
+def test_three_arg_monkeypatched_fake_is_accepted(repo_root):
+    bundle = make_bundle({"comp-bar": lib_doc("do_thing(a: int, b: str, c: dict[str, str]) -> bool")})
+    result = run(repo_root, bundle, monkeypatch_body(["a", "b", "c"]))
+    assert_accepted(result)
+
+
+# --- Scenario 4: name defined by several dependencies -------------------------
+
+def scan_deps():
+    return {
+        "comp-alpha": lib_doc("scan(component_id: str, repo_root: Path) -> dict"),
+        "comp-beta": lib_doc("scan(repo_root: Path) -> dict"),
+    }
+
+
+def fake_module_body(params):
+    src = "def scan(" + ", ".join(params) + "):\n    return {}\n"
+    lines = [
+        "SRC = " + repr(src),
+        "",
+        "",
+        "def test_writes_fake(tmp_path):",
+        "    path = tmp_path / " + repr("gen") + " / " + repr("alpha") + " / " + repr("alpha.py"),
+        "    path.parent.mkdir(parents=True)",
+        "    path.write_text(SRC)",
+        "    assert path.read_text() == SRC",
+        "",
+    ]
+    return "\n".join(lines)
+
+
+@pytest.mark.parametrize("params", [["component_id", "repo_root"], ["repo_root"]])
+def test_fake_module_scan_matching_any_dependency_arity_is_accepted(repo_root, params):
+    result = run(repo_root, make_bundle(scan_deps()), fake_module_body(params))
+    assert_accepted(result)
+
+
+def test_fake_module_scan_matching_no_dependency_arity_is_rejected(repo_root):
+    result = run(
+        repo_root, make_bundle(scan_deps()), fake_module_body(["component_id", "repo_root", "extra"])
     )
-    result = run(make_bundle(SCAN_IFACES), content, repo_root)
-    err = field(result, "model_call_error")
-    assert err is not None
-    assert field(err, "category") == "fake_signature_mismatch"
+    err = assert_rejected(result, "fake_signature_mismatch", repo_root)
     assert "scan" in error_text(err)
-    assert field(result, "file") is None
-    assert_nothing_written(repo_root)

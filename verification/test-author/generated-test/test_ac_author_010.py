@@ -4,18 +4,51 @@ import re
 import test_author
 
 
-class _Bundle(dict):
-    """A CriterionBundle stand-in that reads both as a mapping and by attribute."""
+class _Bundle:
+    """A CriterionBundle stand-in readable both by attribute and as a mapping."""
 
-    def __getattr__(self, name):
-        try:
-            return self[name]
-        except KeyError:
-            raise AttributeError(name)
+    _FIELDS = (
+        "component_id",
+        "criterion_id",
+        "covers",
+        "criterion_text",
+        "requirement_text",
+        "interface",
+        "glossary",
+        "dependency_interfaces",
+    )
 
+    def __init__(self, **kwargs):
+        for name in self._FIELDS:
+            setattr(self, name, kwargs.get(name))
 
-def field(value, name):
-    return value[name] if isinstance(value, dict) else getattr(value, name)
+    def __getitem__(self, key):
+        if key not in self._FIELDS:
+            raise KeyError(key)
+        return getattr(self, key)
+
+    def get(self, key, default=None):
+        if key in self._FIELDS:
+            return getattr(self, key)
+        return default
+
+    def __contains__(self, key):
+        return key in self._FIELDS
+
+    def keys(self):
+        return list(self._FIELDS)
+
+    def __iter__(self):
+        return iter(self._FIELDS)
+
+    def __len__(self):
+        return len(self._FIELDS)
+
+    def items(self):
+        return [(k, getattr(self, k)) for k in self._FIELDS]
+
+    def values(self):
+        return [getattr(self, k) for k in self._FIELDS]
 
 
 def _make_bundle():
@@ -24,24 +57,21 @@ def _make_bundle():
         criterion_id="AC-WIDGET-MAKER-001",
         covers="R-WIDGET-MAKER-001",
         criterion_text=(
-            "Given a widget size of 3\n"
-            "When make_widget(3) is called\n"
-            "Then it returns a widget of size 3"
+            "Given x = 2\n"
+            "When make_widget(x) is called\n"
+            "Then it returns 4"
         ),
         requirement_text=(
             "# R-WIDGET-MAKER-001\n\n"
-            "**R-WIDGET-MAKER-001** \u2014 `make_widget(n)` MUST return a widget of size `n`."
+            "**R-WIDGET-MAKER-001** — `make_widget(x)` MUST return `2 * x`."
         ),
-        interface="# Library\n\n```\nmake_widget(n: int) -> dict\n```\n",
-        glossary="# Glossary\n\n- **Widget** \u2014 a test term.\n",
+        interface="# Library\n\n```\nmake_widget(x: int) -> int\n```",
+        glossary="# Glossary\n\n- **Widget** — a test term.",
         dependency_interfaces={},
     )
 
 
-def test_prompt_holds_dependency_resolution_block(tmp_path, monkeypatch):
-    monkeypatch.delenv("VAR_CACHE_STORE_URL", raising=False)
-    monkeypatch.chdir(tmp_path)
-
+def test_prompt_holds_dependency_resolution_block(tmp_path):
     prompts = []
 
     def mock_backend(prompt, model, **params):
@@ -53,8 +83,8 @@ def test_prompt_holds_dependency_resolution_block(tmp_path, monkeypatch):
             "import widget_maker\n"
             "\n"
             "\n"
-            "def test_widget():\n"
-            "    assert widget_maker is not None\n"
+            "def test_it():\n"
+            "    assert widget_maker.make_widget(2) == 4\n"
             "-----END FILE " + nonce + "-----"
         )
         return {
@@ -64,14 +94,11 @@ def test_prompt_holds_dependency_resolution_block(tmp_path, monkeypatch):
             "model_call_error": None,
         }
 
-    bundle = _make_bundle()
-    result = test_author.author_test(
-        bundle, "mock", repo_root=tmp_path, llm_backend=mock_backend
+    test_author.author_test(
+        _make_bundle(), "mock", repo_root=tmp_path, llm_backend=mock_backend
     )
 
-    assert field(result, "model_call_error") is None
-    assert len(prompts) >= 1, "the mock model was never called"
-
+    assert prompts, "the mock backend was never called"
     lines = prompts[0].splitlines()
 
     assert (
@@ -83,11 +110,8 @@ def test_prompt_holds_dependency_resolution_block(tmp_path, monkeypatch):
         in lines
     )
 
-    sys_line = "        sys.modules[module_name] = module"
+    sys_modules_line = "        sys.modules[module_name] = module"
     exec_line = "        spec.loader.exec_module(module)"
-    assert sys_line in lines
+    assert sys_modules_line in lines
     assert exec_line in lines
-    sys_index = lines.index(sys_line)
-    assert exec_line in lines[sys_index + 1:], (
-        "the exec_module line must occur after the sys.modules assignment line"
-    )
+    assert lines.index(sys_modules_line) < lines.index(exec_line)

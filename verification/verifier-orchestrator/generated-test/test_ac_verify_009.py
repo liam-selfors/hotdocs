@@ -7,34 +7,14 @@ import pytest
 import verifier_orchestrator
 
 
-COMPONENT_ID = "comp-bar"
-CRITERION_ID = "AC-BAR-001"
+COMPONENT_ID = "comp-widget"
+SLUG = "widget"
+CRITERION_ID = "AC-WIDGET-001"
+REQUIREMENT_ID = "R-WIDGET-001"
 
 
 def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
-
-
-def plain_bundle(bundle):
-    if isinstance(bundle, dict):
-        return dict(bundle)
-    keys = [
-        "component_id",
-        "criterion_id",
-        "covers",
-        "criterion_text",
-        "requirement_text",
-        "interface",
-        "glossary",
-        "dependency_interfaces",
-    ]
-    out = {}
-    for k in keys:
-        try:
-            out[k] = bundle[k]
-        except Exception:
-            out[k] = getattr(bundle, k)
-    return out
 
 
 def write(path, text):
@@ -42,70 +22,71 @@ def write(path, text):
     path.write_text(text, encoding="utf-8")
 
 
-def expected_bundle_data():
+def expected_bundle():
     return {
         "component_id": COMPONENT_ID,
         "criterion_id": CRITERION_ID,
-        "covers": "R-BAR-001",
-        "criterion_text": "UNIQUE-CRITERION-TEXT-7731 Given a number 2 When double_it is called Then it returns 4",
-        "requirement_text": "UNIQUE-REQUIREMENT-TEXT-5519 double_it(x) MUST return 2 * x.",
-        "interface": "UNIQUE-INTERFACE-TEXT-4402 double_it(x: int) -> int",
-        "glossary": "UNIQUE-GLOSSARY-TEXT-9087",
-        "dependency_interfaces": {"comp-zzz": "UNIQUE-DEP-INTERFACE-3318"},
+        "covers": REQUIREMENT_ID,
+        "criterion_text": "SENTINEL-CRITERION-TEXT-7f3a: Given a widget input 2 When bar_double runs Then it yields 4",
+        "requirement_text": "SENTINEL-REQUIREMENT-TEXT-91bc: bar_double(x) MUST return 2 * x.",
+        "interface": "SENTINEL-INTERFACE-TEXT-44de",
+        "glossary": "SENTINEL-GLOSSARY-TEXT-0a12",
+        "dependency_interfaces": {"comp-sentinel": "SENTINEL-DEP-INTERFACE-5e6f"},
     }
 
 
 def build_fixture(repo_root, assembler_log):
     write(
         repo_root / "specs" / "glossary.md",
-        "# Glossary\n\n- **Bar** — a test term.\n",
+        "# Glossary\n\n- **Widget** \u2014 a test term.\n",
     )
     write(
-        repo_root / "specs" / "product" / "P-BAR.md",
+        repo_root / "specs" / "product" / "widget.md",
         "---\n"
-        "id: P-BAR\n"
-        "title: Bar capability\n"
+        "id: P-WIDGET\n"
+        "title: Widget Capability\n"
         "status: draft\n"
         "owners: [team-a]\n"
         "---\n"
         "\n"
-        "# Bar capability\n"
+        "# Widget Capability\n"
         "\n"
         "## Purpose\n"
         "\n"
-        "Doubling numbers.\n"
+        "Widgets double numbers.\n"
         "\n"
         "## Scope\n"
         "\n"
         "- In scope: doubling.\n"
         "\n"
-        "### CS-BAR-001\n"
+        "### CS-WIDGET-001\n"
         "\n"
-        "Covers: P-BAR\n"
+        "Covers: P-WIDGET\n"
+        "Kind: compiled\n"
         "\n"
         "```gherkin\n"
-        "Given a number 2\n"
-        "When it is doubled\n"
-        "Then the result is 4\n"
+        "Given a value is 2\n"
+        "When widget.bar_double is invoked with [2]\n"
+        "Then result equals 4\n"
         "```\n",
     )
-    comp = repo_root / "specs" / "components" / "bar"
+    comp = repo_root / "specs" / "components" / SLUG
     write(
         comp / "component.md",
         "---\n"
-        "id: comp-bar\n"
-        "title: Bar\n"
+        "id: comp-widget\n"
+        "title: Widget\n"
         "status: draft\n"
         "owners: [team-a]\n"
         "depends_on: []\n"
-        "realizes: [P-BAR]\n"
+        "realizes: [P-WIDGET]\n"
         "---\n"
         "\n"
-        "# Bar\n"
+        "# Widget\n"
         "\n"
         "## Purpose\n"
         "\n"
-        "Bar doubles a number.\n"
+        "Widget doubles a number.\n"
         "\n"
         "## Scope\n"
         "\n"
@@ -142,42 +123,46 @@ def build_fixture(repo_root, assembler_log):
         "- Initial.\n",
     )
     write(
-        comp / "requirements" / "R-BAR-001.md",
-        "# R-BAR-001\n\n**R-BAR-001** — `double_it(x)` MUST return `2 * x`.\n",
+        comp / "requirements" / "R-WIDGET-001.md",
+        "# R-WIDGET-001\n\n**R-WIDGET-001** \u2014 `bar_double(x)` MUST return `2 * x`.\n",
     )
     write(
-        comp / "acceptance" / "AC-BAR-001.md",
-        "# AC-BAR-001\n"
+        comp / "acceptance" / "AC-WIDGET-001.md",
+        "# AC-WIDGET-001\n"
         "\n"
-        "Covers: R-BAR-001\n"
+        "Covers: R-WIDGET-001\n"
         "Kind: generated-test\n"
         "\n"
         "```gherkin\n"
-        "Given a number 2\n"
-        "When double_it is called with it\n"
+        "Given a widget input of 2\n"
+        "When bar_double is called with it\n"
         "Then it returns 4\n"
         "```\n",
     )
     write(
         comp / "interface" / "library.md",
-        "# Library\n\n```\ndouble_it(x: int) -> int\n```\n",
+        "# Library\n\n```\nbar_double(x: int) -> int\n```\n",
     )
     write(comp / "constraints.md", "# Constraints\n\nNone.\n")
+
     write(
-        repo_root / "gen" / "bar" / "bar.py",
-        "def double_it(x):\n    return 2 * x\n",
+        repo_root / "gen" / SLUG / "widget.py",
+        "def bar_double(x):\n    return 2 * x\n",
     )
+
     assembler_source = (
         "import json\n"
         "\n"
         "LOG = " + repr(str(assembler_log)) + "\n"
-        "BUNDLE = " + repr(expected_bundle_data()) + "\n"
+        "BUNDLE = " + repr(expected_bundle()) + "\n"
         "\n"
         "\n"
         "def assemble_criterion(component_id, criterion_id, repo_root):\n"
-        "    with open(LOG, 'a', encoding='utf-8') as f:\n"
-        "        f.write(json.dumps([component_id, criterion_id, str(repo_root)]) + '\\n')\n"
-        "    return json.loads(json.dumps(BUNDLE))\n"
+        "    with open(LOG, 'a', encoding='utf-8') as fh:\n"
+        "        fh.write(json.dumps([component_id, criterion_id, str(repo_root)]) + '\\n')\n"
+        "    result = dict(BUNDLE)\n"
+        "    result['dependency_interfaces'] = dict(BUNDLE['dependency_interfaces'])\n"
+        "    return result\n"
     )
     write(
         repo_root / "gen" / "spec-bundle-assembler" / "spec_bundle_assembler.py",
@@ -185,43 +170,50 @@ def build_fixture(repo_root, assembler_log):
     )
 
 
-def authored_test_code(marker, passing):
-    return (
-        "MARKER = " + repr(str(marker)) + "\n"
-        "\n"
-        "\n"
-        "def test_authored_marker():\n"
-        "    with open(MARKER, 'a', encoding='utf-8') as f:\n"
-        "        f.write('ran\\n')\n"
-        "    assert " + ("True" if passing else "False") + "\n"
-    )
+def bundle_as_dict(bundle):
+    keys = list(expected_bundle().keys())
+    if isinstance(bundle, dict):
+        return dict(bundle)
+    out = {}
+    for key in keys:
+        try:
+            out[key] = bundle[key]
+        except Exception:
+            out[key] = getattr(bundle, key)
+    return out
 
 
-@pytest.mark.parametrize("passing,expected_result", [(True, "pass"), (False, "fail")])
-def test_generated_test_dispatches_assembler_bundle_and_runs_returned_code(
-    tmp_path, passing, expected_result
-):
+@pytest.mark.parametrize("passing", [True, False])
+def test_generated_test_dispatches_exact_bundle_and_runs_returned_code(tmp_path, passing):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
     logs = tmp_path / "logs"
     logs.mkdir()
     assembler_log = logs / "assembler.log"
     author_log = logs / "author.log"
-    marker = logs / "marker.txt"
+    marker = logs / "generated_test_ran.txt"
+
     build_fixture(repo_root, assembler_log)
 
-    # No cached test exists for the criterion.
-    assert not (
-        repo_root / "verification" / "bar" / "generated-test" / "test_ac_bar_001.py"
-    ).exists()
+    cached = (
+        repo_root / "verification" / SLUG / "generated-test" / "test_ac_widget_001.py"
+    )
+    assert not cached.exists()
 
-    received = []
-    code = authored_test_code(marker, passing)
+    expected_value = "4" if passing else "5"
+    test_content = (
+        "import widget\n"
+        "\n"
+        "\n"
+        "def test_widget_doubles():\n"
+        "    with open(" + repr(str(marker)) + ", 'a', encoding='utf-8') as fh:\n"
+        "        fh.write(" + repr("ran\n") + ")\n"
+        "    assert widget.bar_double(2) == " + expected_value + "\n"
+    )
 
-    def test_author(bundle):
-        received.append(bundle)
-        with open(author_log, "a", encoding="utf-8") as f:
-            f.write(json.dumps(plain_bundle(bundle), sort_keys=True) + "\n")
+    def fake_test_author(bundle):
+        with open(author_log, "a", encoding="utf-8") as fh:
+            fh.write(json.dumps(bundle_as_dict(bundle), sort_keys=True) + "\n")
         return {
             "component_id": COMPONENT_ID,
             "criterion_id": CRITERION_ID,
@@ -229,37 +221,50 @@ def test_generated_test_dispatches_assembler_bundle_and_runs_returned_code(
             "seed": 0,
             "prompt_version": "v1",
             "cache_hit": False,
-            "file": {
-                "path": "verification/bar/generated-test/test_ac_bar_001.py",
-                "content": code,
-            },
             "model_call_error": None,
+            "file": {
+                "path": "verification/widget/generated-test/test_ac_widget_001.py",
+                "content": test_content,
+            },
         }
 
     report = verifier_orchestrator.verify(
-        COMPONENT_ID, repo_root, test_author=test_author
+        COMPONENT_ID, repo_root, test_author=fake_test_author
     )
 
-    # The assembler stand-in was asked for exactly this criterion's bundle.
-    assert assembler_log.is_file()
-    calls = [json.loads(l) for l in assembler_log.read_text(encoding="utf-8").splitlines() if l.strip()]
-    assert any(c[0] == COMPONENT_ID and c[1] == CRITERION_ID for c in calls)
+    # assemble_criterion was the bundle's producer, called for this criterion
+    assert assembler_log.exists(), "assemble_criterion was never called"
+    assembler_calls = [
+        json.loads(line)
+        for line in assembler_log.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    matching = [
+        c
+        for c in assembler_calls
+        if c[0] == COMPONENT_ID
+        and c[1] == CRITERION_ID
+        and Path(c[2]).resolve() == repo_root.resolve()
+    ]
+    assert matching, assembler_calls
 
-    # test_author invoked exactly once, with exactly the assembler's bundle.
-    assert len(received) == 1
-    author_lines = [l for l in author_log.read_text(encoding="utf-8").splitlines() if l.strip()]
-    assert len(author_lines) == 1
-    assert plain_bundle(received[0]) == expected_bundle_data()
-    assert json.loads(author_lines[0]) == expected_bundle_data()
+    # test_author was invoked exactly once, with exactly that CriterionBundle
+    assert author_log.exists(), "test_author was never called"
+    author_calls = [
+        json.loads(line)
+        for line in author_log.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    assert len(author_calls) == 1, author_calls
+    assert author_calls[0] == expected_bundle()
 
-    # The returned test code was executed.
-    assert marker.is_file()
+    # the returned test code was executed
+    assert marker.exists(), "the returned test code was never executed"
     assert "ran" in marker.read_text(encoding="utf-8")
 
-    # And its outcome produced the criterion's result.
+    # and its run produced the criterion's result
     criteria = field(report, "criteria")
-    matching = [c for c in criteria if field(c, "id") == CRITERION_ID]
-    assert len(matching) == 1
-    entry = matching[0]
-    assert field(entry, "kind") == "generated-test"
-    assert field(entry, "result") == expected_result
+    entries = [c for c in criteria if field(c, "id") == CRITERION_ID]
+    assert len(entries) == 1, criteria
+    entry = entries[0]
+    assert field(entry, "result") == ("pass" if passing else "fail")

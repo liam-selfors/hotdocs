@@ -12,8 +12,8 @@ def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-class Bundle(dict):
-    """A CriterionBundle readable both as a mapping and by attribute."""
+class _Bundle(dict):
+    """A CriterionBundle stand-in readable both as a mapping and by attribute."""
 
     def __getattr__(self, name):
         try:
@@ -22,20 +22,19 @@ class Bundle(dict):
             raise AttributeError(name)
 
 
-RESULT_FIELDS = [
-    "component_id",
-    "criterion_id",
-    "model",
-    "seed",
-    "prompt_version",
-    "cache_hit",
-    "file",
-    "model_call_error",
-]
+_NONCE_RE = re.compile(r"-----BEGIN FILE ([0-9a-f]{32})-----")
+
+_EXTRACTED = (
+    "import foo\n"
+    "\n"
+    "\n"
+    "def test_foo_doubles():\n"
+    "    assert foo.foo(2) == 4\n"
+)
 
 
 def _make_bundle():
-    return Bundle(
+    return _Bundle(
         component_id="comp-foo",
         criterion_id="AC-FOO-001",
         covers="R-FOO-001",
@@ -44,36 +43,45 @@ def _make_bundle():
             "When foo(x) is called\n"
             "Then it returns 4\n"
         ),
-        requirement_text="# R-FOO-001\n\n**R-FOO-001** — `foo(x)` MUST return `2 * x`.",
-        interface="# Library\n\n```\nfoo(x: int) -> int\n```",
-        glossary="# Glossary\n\n- **Foo** — a test term.",
+        requirement_text="**R-FOO-001** \u2014 `foo(x)` MUST return `2 * x`.",
+        interface="# Library\n\n```\nfoo(x: int) -> int\n```\n",
+        glossary="# Glossary\n\n- **Foo** \u2014 a test term.\n",
         dependency_interfaces={},
         module_names=["foo"],
     )
 
 
+def _all_text_under(root):
+    chunks = []
+    for p in Path(root).rglob("*"):
+        chunks.append(str(p))
+        if p.is_file():
+            try:
+                chunks.append(p.read_bytes().decode("utf-8", errors="ignore"))
+            except OSError:
+                pass
+    return "\n".join(chunks)
+
+
 def test_api_key_never_appears_in_result_or_logs(tmp_path, monkeypatch, caplog, capsys):
-    secret = "sk-ant-api03-SECRETKEY" + secrets.token_hex(24)
-    monkeypatch.setenv("ANTHROPIC_API_KEY", secret)
-    monkeypatch.setenv("VAR_ANTHROPIC_API_KEY", secret)
+    api_key = "sk-ant-api03-SENTINEL" + secrets.token_hex(24)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", api_key)
+    monkeypatch.setenv("VAR_ANTHROPIC_API_KEY", api_key)
+    monkeypatch.delenv("VAR_CACHE_STORE_URL", raising=False)
 
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
     monkeypatch.chdir(tmp_path)
 
     calls_log = tmp_path / "backend_calls.log"
-    body_text = "def test_placeholder():\n    assert 2 * 2 == 4"
 
-    def mock_backend(prompt, model, **params):
+    def backend(prompt, model, **params):
         with open(calls_log, "a") as fh:
             fh.write("call\n")
-        match = re.search(r"-----BEGIN FILE ([0-9a-f]{32})-----", prompt)
-        nonce = match.group(1) if match else ""
-        text = (
-            "-----BEGIN FILE " + nonce + "-----\n"
-            + body_text + "\n"
-            + "-----END FILE " + nonce + "-----"
-        )
+        m = _NONCE_RE.search(prompt)
+        assert m is not None, "prompt carries no BEGIN FILE nonce"
+        n = m.group(1)
+        text = "-----BEGIN FILE " + n + "-----\n" + _EXTRACTED + "\n-----END FILE " + n + "-----"
         return {
             "text": text,
             "model": model,
@@ -86,50 +94,49 @@ def test_api_key_never_appears_in_result_or_logs(tmp_path, monkeypatch, caplog, 
     result = test_author.author_test(
         _make_bundle(),
         "claude-sonnet-5",
-        0,
+        seed=0,
         repo_root=repo_root,
-        llm_backend=mock_backend,
+        llm_backend=backend,
     )
 
-    # The call must be a successful one.
+    # The call was successful.
     assert field(result, "model_call_error") is None
-    file_value = field(result, "file")
-    assert file_value is not None
-    content = field(file_value, "content")
+    file_obj = field(result, "file")
+    assert file_obj is not None
+    content = field(file_obj, "content")
     assert isinstance(content, str) and content
-    assert calls_log.is_file()
-    assert calls_log.read_text().count("call") >= 1
+    assert calls_log.is_file() or field(result, "cache_hit")
 
-    # TestAuthoringResult: no field, nor its overall representation, holds the key.
-    assert secret not in repr(result)
-    assert secret not in str(result)
-    for name in RESULT_FIELDS:
+    # Nothing in the TestAuthoringResult carries the key.
+    for name in (
+        "component_id",
+        "criterion_id",
+        "model",
+        "seed",
+        "prompt_version",
+        "cache_hit",
+        "file",
+        "model_call_error",
+    ):
         value = field(result, name)
-        assert secret not in repr(value), name
-        assert secret not in str(value), name
-    assert secret not in str(field(file_value, "path"))
-    assert secret not in content
+        assert api_key not in repr(value), name
+        assert api_key not in str(value), name
+    assert api_key not in repr(result)
+    assert api_key not in str(result)
+    assert api_key not in content
+    assert api_key not in str(field(file_obj, "path"))
 
-    # Logs captured through the logging module.
-    assert secret not in caplog.text
+    # Nothing logged through `logging` carries the key.
+    assert api_key not in caplog.text
     for record in caplog.records:
-        assert secret not in record.getMessage()
-        assert secret not in repr(record.args)
+        assert api_key not in record.getMessage()
+        assert api_key not in repr(record.args)
 
-    # Anything printed to stdout/stderr.
+    # Nothing printed carries the key.
     captured = capsys.readouterr()
-    assert secret not in captured.out
-    assert secret not in captured.err
+    assert api_key not in captured.out
+    assert api_key not in captured.err
 
-    # Any file written (output file, cache entries, call logs, provenance)
-    # under repo_root or the working directory.
-    secret_bytes = secret.encode("utf-8")
-    for root in (repo_root, tmp_path):
-        for dirpath, _dirnames, filenames in os.walk(root):
-            for filename in filenames:
-                path = Path(dirpath) / filename
-                try:
-                    data = path.read_bytes()
-                except OSError:
-                    continue
-                assert secret_bytes not in data, str(path)
+    # Nothing written to disk (written test file, cache, call logs, provenance) carries the key.
+    assert api_key not in _all_text_under(repo_root)
+    assert api_key not in _all_text_under(tmp_path)

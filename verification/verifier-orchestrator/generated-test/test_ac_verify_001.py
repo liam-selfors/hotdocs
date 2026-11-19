@@ -8,14 +8,136 @@ import pytest
 import verifier_orchestrator
 
 
-COMPONENT_ID = "comp-widget"
-SLUG = "widget"
-CRITERION_ID = "AC-WIDGET-001"
-REQUIREMENT_ID = "R-WIDGET-001"
+COMPONENT_ID = "comp-abacus"
+SLUG = "abacus"
+MODULE = "abacus"
+CRITERION_ID = "AC-ABACUS-001"
+REQUIREMENT_ID = "R-ABACUS-001"
 
 
 def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
+
+
+COMPILER_BODY = r'''
+from dataclasses import dataclass, field
+from pathlib import Path
+
+GATE_VERSION = "criterion-compiler@1.0.0"
+
+
+@dataclass
+class ParsedCriterion:
+    criterion_id: str = ""
+    covers: str = ""
+    kind: str = "compiled"
+    gherkin: str = ""
+    file: str = ""
+
+
+@dataclass
+class InterfaceSurface:
+    functions: dict = field(default_factory=dict)
+    types: dict = field(default_factory=dict)
+    module_name: str = ""
+
+
+@dataclass
+class CompileReport:
+    outputs: list
+    gate_version: str
+    summary: dict
+
+
+def _log(line):
+    with open(LOG_PATH, "a", encoding="utf-8") as fh:
+        fh.write(line + "\n")
+
+
+def _source():
+    return (
+        "import abacus\n"
+        "\n"
+        "\n"
+        "def test_ac_abacus_001():\n"
+        "    assert abacus.tally(2) == " + repr(EXPECTED) + "\n"
+    )
+
+
+def compile(component_id, repo_root, target="pytest", out_dir=None):
+    repo_root = Path(repo_root)
+    if component_id.startswith("comp-"):
+        slug = component_id[len("comp-"):]
+    else:
+        slug = component_id
+    acc = repo_root / "specs" / "components" / slug / "acceptance"
+    if out_dir is not None:
+        out = Path(out_dir)
+        if not out.is_absolute():
+            out = repo_root / out
+    else:
+        out = repo_root / "verification" / slug / "compiled"
+    outputs = []
+    skipped = 0
+    for path in sorted(acc.glob("AC-*.md")):
+        text = path.read_text(encoding="utf-8")
+        if "Kind: compiled" not in text:
+            skipped += 1
+            continue
+        cid = path.stem
+        covers = ""
+        for line in text.splitlines():
+            if line.startswith("Covers:"):
+                covers = line.split(":", 1)[1].strip()
+                break
+        _log("compile " + cid)
+        out.mkdir(parents=True, exist_ok=True)
+        target_file = out / ("test_" + cid.lower().replace("-", "_") + ".py")
+        target_file.write_text(_source(), encoding="utf-8")
+        try:
+            rel = str(target_file.resolve().relative_to(repo_root.resolve()))
+        except ValueError:
+            rel = str(target_file.resolve())
+        outputs.append({
+            "criterion_id": cid,
+            "covers": covers,
+            "status": "compiled",
+            "file": rel,
+        })
+    return CompileReport(
+        outputs=outputs,
+        gate_version=GATE_VERSION,
+        summary={
+            "compiled": len(outputs),
+            "errors": 0,
+            "skipped_non_compiled_kind": skipped,
+        },
+    )
+
+
+def compile_criterion(criterion, surface=None):
+    if isinstance(criterion, dict):
+        cid = criterion.get("criterion_id", "")
+    else:
+        cid = getattr(criterion, "criterion_id", "")
+    _log("compile_criterion " + str(cid))
+    return {"status": "compiled", "source": _source()}
+'''
+
+
+ASSEMBLER_BODY = r'''
+def assemble_criterion(component_id, criterion_id, repo_root):
+    return {
+        "component_id": component_id,
+        "criterion_id": criterion_id,
+        "covers": "R-ABACUS-001",
+        "criterion_text": "Given a n is 2\nWhen tally is invoked with [n]\nThen value equals 4",
+        "requirement_text": "**R-ABACUS-001** — `tally(x)` MUST return `2 * x`.",
+        "interface": "# Library\n\n```\ntally(x: int) -> int\n```",
+        "glossary": "# Glossary\n\n- **Foo** — a test term.",
+        "dependency_interfaces": {},
+    }
+'''
 
 
 def write(path, text):
@@ -23,173 +145,60 @@ def write(path, text):
     path.write_text(text, encoding="utf-8")
 
 
-# The test the mock criterion-compiler "emits" for the compiled criterion.
-# It imports the component's real module by its underscored slug, as
-# criterion-compiler's emitted code does (R-COMPILE-013).
-EMITTED_SOURCE = (
-    "import widget\n"
-    "\n"
-    "\n"
-    "def test_ac_widget_001():\n"
-    "    result = widget.double(2)\n"
-    "    assert result == 4\n"
-)
-
-
-def compiler_source(log_path):
-    return (
-        "import json\n"
-        "from dataclasses import dataclass, field\n"
-        "from pathlib import Path\n"
-        "\n"
-        "GATE_VERSION = 'criterion-compiler@1.0.0'\n"
-        "LOG = " + repr(str(log_path)) + "\n"
-        "SOURCE = " + repr(EMITTED_SOURCE) + "\n"
-        "\n"
-        "\n"
-        "def _log(line):\n"
-        "    with open(LOG, 'a', encoding='utf-8') as fh:\n"
-        "        fh.write(line + '\\n')\n"
-        "\n"
-        "\n"
-        "@dataclass\n"
-        "class ParsedCriterion:\n"
-        "    criterion_id: str = ''\n"
-        "    covers: str = ''\n"
-        "    kind: str = ''\n"
-        "    gherkin: str = ''\n"
-        "    file: str = ''\n"
-        "\n"
-        "\n"
-        "@dataclass\n"
-        "class InterfaceSurface:\n"
-        "    functions: dict = field(default_factory=dict)\n"
-        "    types: dict = field(default_factory=dict)\n"
-        "    module_name: str = ''\n"
-        "\n"
-        "\n"
-        "@dataclass\n"
-        "class CompileReport:\n"
-        "    outputs: list = field(default_factory=list)\n"
-        "    gate_version: str = GATE_VERSION\n"
-        "    summary: dict = field(default_factory=dict)\n"
-        "\n"
-        "\n"
-        "def _test_name(criterion_id):\n"
-        "    return 'test_' + criterion_id.lower().replace('-', '_') + '.py'\n"
-        "\n"
-        "\n"
-        "def _covers(text):\n"
-        "    for line in text.splitlines():\n"
-        "        if line.startswith('Covers:'):\n"
-        "            return line[len('Covers:'):].strip()\n"
-        "    return ''\n"
-        "\n"
-        "\n"
-        "def compile_criterion(criterion, surface=None):\n"
-        "    if isinstance(criterion, dict):\n"
-        "        cid = criterion.get('criterion_id', '')\n"
-        "    else:\n"
-        "        cid = getattr(criterion, 'criterion_id', '')\n"
-        "    _log('compile_criterion ' + str(cid))\n"
-        "    return {'status': 'compiled', 'source': SOURCE}\n"
-        "\n"
-        "\n"
-        "def compile(component_id, repo_root, target='pytest', out_dir=None):\n"
-        "    repo_root = Path(repo_root)\n"
-        "    slug = component_id[5:] if component_id.startswith('comp-') else component_id\n"
-        "    out = Path(out_dir) if out_dir is not None else repo_root / 'verification' / slug / 'compiled'\n"
-        "    out.mkdir(parents=True, exist_ok=True)\n"
-        "    acceptance = repo_root / 'specs' / 'components' / slug / 'acceptance'\n"
-        "    outputs = []\n"
-        "    skipped = 0\n"
-        "    for path in sorted(acceptance.glob('AC-*.md')):\n"
-        "        text = path.read_text(encoding='utf-8')\n"
-        "        if 'Kind: compiled' not in text:\n"
-        "            skipped += 1\n"
-        "            continue\n"
-        "        cid = path.stem\n"
-        "        _log('compile ' + str(component_id) + ' ' + cid)\n"
-        "        target_file = out / _test_name(cid)\n"
-        "        target_file.write_text(SOURCE, encoding='utf-8')\n"
-        "        try:\n"
-        "            rel = str(target_file.resolve().relative_to(repo_root.resolve()))\n"
-        "        except ValueError:\n"
-        "            rel = str(target_file.resolve())\n"
-        "        outputs.append({\n"
-        "            'criterion_id': cid,\n"
-        "            'covers': _covers(text),\n"
-        "            'status': 'compiled',\n"
-        "            'file': rel,\n"
-        "        })\n"
-        "    if not outputs:\n"
-        "        _log('compile ' + str(component_id))\n"
-        "    return CompileReport(\n"
-        "        outputs=outputs,\n"
-        "        gate_version=GATE_VERSION,\n"
-        "        summary={'compiled': len(outputs), 'errors': 0, 'skipped_non_compiled_kind': skipped},\n"
-        "    )\n"
-    )
-
-
-def assembler_source(log_path):
-    return (
-        "LOG = " + repr(str(log_path)) + "\n"
-        "\n"
-        "\n"
-        "def assemble_criterion(component_id, criterion_id, repo_root):\n"
-        "    with open(LOG, 'a', encoding='utf-8') as fh:\n"
-        "        fh.write('assemble_criterion ' + str(criterion_id) + '\\n')\n"
-        "    return {\n"
-        "        'component_id': component_id,\n"
-        "        'criterion_id': criterion_id,\n"
-        "        'covers': " + repr(REQUIREMENT_ID) + ",\n"
-        "        'criterion_text': 'criterion text',\n"
-        "        'requirement_text': 'requirement text',\n"
-        "        'interface': 'double(x: int) -> int',\n"
-        "        'glossary': '',\n"
-        "        'dependency_interfaces': {},\n"
-        "    }\n"
-    )
-
-
-def build_fixture(repo_root, compiler_log, assembler_log, impl_body):
+def build_fixture(repo_root, log_path, expected_value):
     write(
         repo_root / "specs" / "glossary.md",
-        "# Glossary\n\n- **Widget** — a test term.\n",
+        "# Glossary\n\n- **Foo** — a test term.\n",
     )
     write(
-        repo_root / "specs" / "product" / "widget.md",
+        repo_root / "specs" / "product" / "P-ABACUS.md",
         "---\n"
-        "id: P-WIDGET\n"
-        "title: Widget capability\n"
+        "id: P-ABACUS\n"
+        "title: Abacus capability\n"
         "status: draft\n"
         "owners: [team-a]\n"
         "---\n"
         "\n"
-        "# Widget capability\n"
+        "# Abacus capability\n"
         "\n"
         "## Purpose\n"
         "\n"
-        "Doubling numbers.\n",
+        "Doubling numbers.\n"
+        "\n"
+        "## Scope\n"
+        "\n"
+        "- In scope: doubling.\n"
+        "\n"
+        "## Capability scenarios\n"
+        "\n"
+        "### CS-ABACUS-001\n"
+        "\n"
+        "Covers: P-ABACUS\n"
+        "Kind: compiled\n"
+        "\n"
+        "```gherkin\n"
+        "Given a n is 2\n"
+        "When tally is invoked with [n]\n"
+        "Then value equals 4\n"
+        "```\n",
     )
     comp = repo_root / "specs" / "components" / SLUG
     write(
         comp / "component.md",
         "---\n"
-        "id: comp-widget\n"
-        "title: Widget\n"
+        "id: comp-abacus\n"
+        "title: Abacus\n"
         "status: draft\n"
         "owners: [team-a]\n"
+        "realizes: [P-ABACUS]\n"
         "depends_on: []\n"
-        "realizes: [P-WIDGET]\n"
         "---\n"
         "\n"
-        "# Widget\n"
+        "# Abacus\n"
         "\n"
         "## Purpose\n"
         "\n"
-        "Widget doubles a number.\n"
+        "Abacus doubles a number.\n"
         "\n"
         "## Scope\n"
         "\n"
@@ -227,71 +236,65 @@ def build_fixture(repo_root, compiler_log, assembler_log, impl_body):
     )
     write(
         comp / "requirements" / (REQUIREMENT_ID + ".md"),
-        "# " + REQUIREMENT_ID + "\n\n**" + REQUIREMENT_ID
-        + "** — `double(x)` MUST return `2 * x`.\n",
+        "# R-ABACUS-001\n\n**R-ABACUS-001** — `tally(x)` MUST return `2 * x`.\n",
     )
     write(
         comp / "acceptance" / (CRITERION_ID + ".md"),
-        "# " + CRITERION_ID + "\n"
+        "# AC-ABACUS-001\n"
         "\n"
-        "Covers: " + REQUIREMENT_ID + "\n"
+        "Covers: R-ABACUS-001\n"
         "Kind: compiled\n"
         "\n"
         "```gherkin\n"
         "Given a n is 2\n"
-        "When double is invoked with [n]\n"
+        "When tally is invoked with [n]\n"
         "Then value equals 4\n"
         "```\n",
     )
     write(
         comp / "interface" / "library.md",
-        "# Library\n\n```\ndouble(x: int) -> int\n```\n",
+        "# Library\n\n```\ntally(x: int) -> int\n```\n",
     )
     write(comp / "constraints.md", "# Constraints\n\nNone.\n")
 
     write(
-        repo_root / "gen" / SLUG / "widget.py",
-        "def double(x):\n" + impl_body,
-    )
-    write(
-        repo_root / "pipeline" / "criterion-compiler" / "criterion_compiler.py",
-        compiler_source(compiler_log),
+        repo_root / "gen" / SLUG / (MODULE + ".py"),
+        "def tally(x):\n    return 2 * x\n",
     )
     write(
         repo_root / "gen" / "spec-bundle-assembler" / "spec_bundle_assembler.py",
-        assembler_source(assembler_log),
+        ASSEMBLER_BODY,
+    )
+    write(
+        repo_root / "pipeline" / "criterion-compiler" / "criterion_compiler.py",
+        "LOG_PATH = " + repr(str(log_path)) + "\n"
+        + "EXPECTED = " + repr(expected_value) + "\n"
+        + COMPILER_BODY,
     )
 
 
 @pytest.mark.parametrize(
-    "impl_body, expected",
-    [
-        ("    return 2 * x\n", "pass"),
-        ("    return 2 * x + 1\n", "fail"),
-    ],
+    "expected_value, expected_result",
+    [(4, "pass"), (5, "fail")],
 )
-def test_compiled_criterion_dispatched_to_mock_compiler_and_reported(
-    tmp_path, impl_body, expected
+def test_compiled_criterion_dispatched_to_compiler_and_reported(
+    tmp_path, expected_value, expected_result
 ):
     repo_root = tmp_path / "repo"
-    compiler_log = tmp_path / "compiler-calls.log"
-    assembler_log = tmp_path / "assembler-calls.log"
-    build_fixture(repo_root, compiler_log, assembler_log, impl_body)
+    repo_root.mkdir()
+    log_path = tmp_path / "compiler_calls.log"
+    build_fixture(repo_root, log_path, expected_value)
 
     report = verifier_orchestrator.verify(COMPONENT_ID, repo_root)
 
     # The mock compiler was invoked for that criterion.
-    assert compiler_log.is_file(), "mock criterion-compiler was never invoked"
-    lines = [
-        line for line in compiler_log.read_text(encoding="utf-8").splitlines()
-        if line.strip()
-    ]
-    assert any(CRITERION_ID in line for line in lines), lines
+    assert log_path.is_file(), "mock criterion-compiler was never invoked"
+    calls = [line for line in log_path.read_text(encoding="utf-8").splitlines() if line]
+    assert any(CRITERION_ID in line for line in calls), calls
 
-    # Its pass/fail result appears in the report under that criterion's id.
+    # Its pass/fail result appears in the report under the criterion's id.
     criteria = field(report, "criteria")
     matching = [c for c in criteria if field(c, "id") == CRITERION_ID]
     assert len(matching) == 1, criteria
     entry = matching[0]
-    assert field(entry, "kind") == "compiled"
-    assert field(entry, "result") == expected
+    assert field(entry, "result") == expected_result, entry
