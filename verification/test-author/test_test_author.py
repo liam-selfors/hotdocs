@@ -407,9 +407,10 @@ def test_ac_author_020_rejects_fake_with_wrong_arity(repo_root):
         dependency_interfaces={"comp-bar": "do_thing(a: int, b: str, c: dict[str, str]) -> bool"}
     )
     backend = MockBackend([file_block(
+        "import foo\n"  # the component's own module, which the probe's stub answers
         "def _fake_do_thing(a, b): pass\n"
         "def test_x(monkeypatch):\n"
-        "    monkeypatch.setattr(target, \"do_thing\", _fake_do_thing)"
+        "    monkeypatch.setattr(foo, \"do_thing\", _fake_do_thing)"
     )] * 3)
     result = author_test(bundle, "claude-sonnet-5", repo_root=repo_root, llm_backend=backend)
 
@@ -421,9 +422,10 @@ def test_ac_author_020_accepts_fake_with_matching_arity(repo_root):
         dependency_interfaces={"comp-bar": "do_thing(a: int, b: str, c: dict[str, str]) -> bool"}
     )
     backend = MockBackend([file_block(
+        "import foo\n"  # the component's own module, which the probe's stub answers
         "def _fake_do_thing(a, b, c): pass\n"
         "def test_x(monkeypatch):\n"
-        "    monkeypatch.setattr(target, \"do_thing\", _fake_do_thing)"
+        "    monkeypatch.setattr(foo, \"do_thing\", _fake_do_thing)"
     )])
     result = author_test(bundle, "claude-sonnet-5", repo_root=repo_root, llm_backend=backend)
 
