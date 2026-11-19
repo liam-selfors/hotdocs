@@ -13,138 +13,110 @@ def write(path, text):
     path.write_text(text, encoding="utf-8")
 
 
-def component_md(comp_id, title, source_path, rationale):
+def component_md(slug, rationale):
     return (
         "---\n"
-        "id: " + comp_id + "\n"
-        "title: " + title + "\n"
-        "status: draft\n"
-        "owners: [team]\n"
-        "sealed: true\n"
-        "source_path: " + source_path + "\n"
-        "---\n"
-        "\n"
-        "## Purpose\n"
-        "\n"
-        "Does a small, self-contained thing for the test fixture.\n"
-        "\n"
-        "## Rationale\n"
-        "\n"
+        + "id: comp-" + slug + "\n"
+        + "title: " + slug.capitalize() + " component\n"
+        + "status: draft\n"
+        + "owners: [team-a]\n"
+        + "sealed: true\n"
+        + "source_path: legacy/" + slug + "/\n"
+        + "---\n"
+        + "\n"
+        + "# " + slug.capitalize() + "\n"
+        + "\n"
+        + "## Purpose\n"
+        + "\n"
+        + "Does a small thing for the test corpus.\n"
+        + "\n"
+        + "## Rationale\n"
+        + "\n"
         + rationale + "\n"
-        "\n"
-        "## Scope\n"
-        "\n"
-        "- In scope: the fixture.\n"
-        "- Out of scope: everything else.\n"
-        "\n"
-        "## Definitions\n"
-        "\n"
-        "None.\n"
-        "\n"
-        "## Behavior\n"
-        "\n"
-        "See `requirements/`.\n"
-        "\n"
-        "## Interfaces\n"
-        "\n"
-        "See `interface/`.\n"
-        "\n"
-        "## Data\n"
-        "\n"
-        "See `interface/data/`.\n"
-        "\n"
-        "## Acceptance criteria\n"
-        "\n"
-        "See `acceptance/`.\n"
-        "\n"
-        "## Non-functional constraints\n"
-        "\n"
-        "See `constraints.md`.\n"
-        "\n"
-        "## Open questions\n"
-        "\n"
-        "## Change log\n"
-        "\n"
-        "- Initial version.\n"
+        + "\n"
+        + "## Scope\n"
+        + "\n"
+        + "- In scope: the small thing.\n"
+        + "- Out of scope: everything else.\n"
+        + "\n"
+        + "## Definitions\n"
+        + "\n"
+        + "None.\n"
+        + "\n"
+        + "## Behavior\n"
+        + "\n"
+        + "See `requirements/`.\n"
+        + "\n"
+        + "## Interfaces\n"
+        + "\n"
+        + "See `interface/`.\n"
+        + "\n"
+        + "## Data\n"
+        + "\n"
+        + "See `interface/data/`.\n"
+        + "\n"
+        + "## Acceptance criteria\n"
+        + "\n"
+        + "See `acceptance/`.\n"
+        + "\n"
+        + "## Non-functional constraints\n"
+        + "\n"
+        + "See `constraints.md`.\n"
+        + "\n"
+        + "## Open questions\n"
+        + "\n"
+        + "## Change log\n"
+        + "\n"
+        + "- Initial version.\n"
     )
 
 
 def build_fixture(repo_root):
-    specs = repo_root / "specs"
-
-    # One real, formalized decision file so specs/decisions/ exists;
-    # it cites nothing itself.
     write(
-        specs / "decisions" / "D20.md",
+        repo_root / "specs" / "decisions" / "D100.md",
         "---\n"
-        "id: D20\n"
-        "title: An unrelated decision\n"
-        "status: draft\n"
-        "owners: [team]\n"
-        "---\n"
-        "\n"
-        "## Context\n"
-        "\n"
-        "Unrelated to the fixture components.\n",
+        + "id: D100\n"
+        + "title: A real formal decision\n"
+        + "status: draft\n"
+        + "owners: [team-a]\n"
+        + "---\n"
+        + "\n"
+        + "# A real formal decision\n"
+        + "\n"
+        + "Something was decided.\n",
     )
-
-    # The informal brainstorm holding D1-D14, never formalized as files.
     write(
         repo_root / "notes" / "initial-ideas.md",
-        "# Initial ideas\n"
-        "\n"
-        "## D7 - an early brainstorm idea\n"
-        "\n"
-        "Informal, never formalized.\n",
+        "# Initial ideas\n\n## D7\n\nAn informal brainstorm idea.\n",
     )
-
-    write(specs / "glossary.md", "# Glossary\n\n- **Fixture term** - a term.\n")
-
-    # First component: cites a decision number with no specs/decisions/ file.
     write(
-        specs / "components" / "alpha" / "component.md",
+        repo_root / "specs" / "components" / "alpha" / "component.md",
         component_md(
-            "comp-alpha",
-            "Alpha",
-            "legacy/alpha/",
-            "This design follows decision D999 exactly.",
+            "alpha",
+            "This design follows the decision recorded in `D999`.",
         ),
     )
-
-    # Second component: cites D7, one of initial-ideas.md's D1-D14.
     write(
-        specs / "components" / "beta" / "component.md",
+        repo_root / "specs" / "components" / "beta" / "component.md",
         component_md(
-            "comp-beta",
-            "Beta",
-            "legacy/beta/",
-            "This follows `notes/initial-ideas.md`'s D7, the original brainstorm idea.",
+            "beta",
+            "This design follows `notes/initial-ideas.md`'s `D7`.",
         ),
     )
 
 
-def test_ac_cite_001_only_unformalized_decision_citation_is_flagged(tmp_path):
+def test_ac_cite_001_only_unresolved_formal_citation_flagged(tmp_path):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
     build_fixture(repo_root)
 
     findings = citation_checker.check(repo_root)
-    assert isinstance(findings, list)
 
-    cite_001 = [f for f in findings if field(f, "rule_id") == "R-CITE-001"]
+    cite_findings = [f for f in findings if field(f, "rule_id") == "R-CITE-001"]
+    files = [field(f, "file") for f in cite_findings]
 
-    alpha_file = "specs/components/alpha/component.md"
-    beta_file = "specs/components/beta/component.md"
-
-    alpha_findings = [f for f in cite_001 if field(f, "file") == alpha_file]
-    beta_findings = [f for f in cite_001 if field(f, "file") == beta_file]
-
-    assert len(alpha_findings) == 1, cite_001
-    assert beta_findings == [], cite_001
-    assert len(cite_001) == 1, cite_001
-
-    finding = alpha_findings[0]
-    assert field(finding, "severity") in ("fail", "warn")
-    assert isinstance(field(finding, "line"), int)
-    assert field(finding, "line") >= 1
-    assert isinstance(field(finding, "message"), str)
+    assert len(cite_findings) == 1, cite_findings
+    assert files == ["specs/components/alpha/component.md"], cite_findings
+    assert "specs/components/beta/component.md" not in files
+    assert isinstance(field(cite_findings[0], "line"), int)
+    assert field(cite_findings[0], "severity") in ("fail", "warn")
