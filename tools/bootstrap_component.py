@@ -22,6 +22,8 @@ usage error.
 from __future__ import annotations
 
 import argparse
+import hashlib
+import json
 import re
 import shutil
 import subprocess
@@ -479,6 +481,68 @@ def _write_sealed_provenance(component_id: str) -> bool:
     return _get(report, "overall") == "pass"
 
 
+CARRY_FILE = "carry.json"
+
+
+def _test_author_hash() -> str:
+    """Hash of the real test-author code: a test written by other code is
+    never carried over."""
+    digest = hashlib.sha256()
+    for path in sorted((REAL_REPO / "gen" / "test-author").rglob("*.py")):
+        if "__pycache__" not in path.parts:
+            digest.update(path.relative_to(REAL_REPO).as_posix().encode() + b"\0" + path.read_bytes())
+    return "sha256:" + digest.hexdigest()
+
+
+def _record_carry(component_id: str, sandbox: Path, bundle, report) -> None:
+    """Note in a failed seed's sandbox which generated tests passed, so the
+    next seed reuses them instead of authoring them again. Tests are written
+    from the spec alone, so one that passed stays valid while the spec bundle
+    and test-author are unchanged. A failed mutation baseline cannot be
+    pinned on one test, so then nothing is carried."""
+    if getattr(report, "mutation_error", None):
+        return
+    passed = [_get(e, "id") for e in report.criteria
+              if _get(e, "kind") == "generated-test" and _get(e, "result") == "pass"]
+    (sandbox / CARRY_FILE).write_text(json.dumps({
+        "component_id": component_id,
+        "spec_bundle_hash": _get(bundle, "spec_bundle_hash"),
+        "test_author": _test_author_hash(),
+        "passed": passed,
+    }, indent=2))
+
+
+def _carry_tests(component_id: str, sandbox: Path, bundle) -> None:
+    """Copy into a fresh sandbox the passing generated tests of the newest
+    earlier seed of this component whose spec bundle and test-author match;
+    verify reuses each one whose header is current (R-VERIFY-019)."""
+    slug = _slug(component_id)
+    want = (_get(bundle, "spec_bundle_hash"), _test_author_hash())
+    earlier = sorted(Path(tempfile.gettempdir()).glob(f"bootstrap_{slug}_*/{CARRY_FILE}"),
+                     key=lambda p: p.stat().st_mtime, reverse=True)
+    for carry_path in earlier:
+        if carry_path.parent == sandbox:
+            continue
+        try:
+            carry = json.loads(carry_path.read_text())
+        except (OSError, ValueError):
+            continue
+        if carry.get("component_id") != component_id or (carry.get("spec_bundle_hash"), carry.get("test_author")) != want:
+            continue
+        src_dir = carry_path.parent / "verification" / slug / "generated-test"
+        dest_dir = sandbox / "verification" / slug / "generated-test"
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        copied = []
+        for cid in carry.get("passed", []):
+            name = "test_" + cid.lower().replace("-", "_") + ".py"  # verify's naming
+            if (src_dir / name).is_file():
+                shutil.copy2(src_dir / name, dest_dir / name)
+                copied.append(cid)
+        print(f"carried {len(copied)} passing test(s) from {carry_path.parent.name}: {', '.join(copied)}")
+        return
+    print("carried 0 tests: no earlier seed with the same spec bundle and test-author")
+
+
 def run(component_id: str, model: str, seed: int, retry_feedback: list[str] | None, keep_sandbox: bool,
         hand_suite: bool = False, sealed_install: bool = False, resume: Path | None = None) -> int:
     code_rel = None
@@ -500,6 +564,8 @@ def run(component_id: str, model: str, seed: int, retry_feedback: list[str] | No
 
     bundle = spec_bundle_assembler.assemble(component_id, repo_root=sandbox, mode="cold")
     print(f"spec_bundle_hash: {_get(bundle, 'spec_bundle_hash')}")
+    if resume is None:
+        _carry_tests(component_id, sandbox, bundle)
 
     # Never generate beside the target's old code (see _build_sandbox).
     shutil.rmtree(sandbox / "gen" / _slug(component_id), ignore_errors=True)
@@ -560,6 +626,7 @@ def run(component_id: str, model: str, seed: int, retry_feedback: list[str] | No
     print(f"secret_scan: flagged={_get(secret_result, 'flagged')} (informational at this gate; blocking handled elsewhere)")
 
     passed = report.overall == "pass" and not _get(license_result, 'blocked')
+    _record_carry(component_id, sandbox, bundle, report)
     if not passed:
         print(f"FAIL: not swapped in -- real gen/{_slug(component_id)}/ and verification/ left untouched.")
         print(f"Sandbox kept at {sandbox} for inspection.")
