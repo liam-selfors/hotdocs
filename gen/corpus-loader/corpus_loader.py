@@ -1,17 +1,14 @@
 """Corpus Loader: reads a spec corpus into one in-memory model."""
-
 from __future__ import annotations
 
 import importlib.util
 import re
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 import duckdb
-
-__all__ = ["Doc", "Component", "Corpus", "load_corpus"]
 
 
 @dataclass
@@ -29,14 +26,14 @@ class Doc:
 @dataclass
 class Component:
     name: str
-    root: Any
-    requirements: dict
-    interface_cli: Any
-    interface_library: Any
-    interface_data: dict
-    interface_guarantees: dict
-    acceptance: dict
-    constraints: Any
+    root: Any = None
+    requirements: dict = field(default_factory=dict)
+    interface_cli: Any = None
+    interface_library: Any = None
+    interface_data: dict = field(default_factory=dict)
+    interface_guarantees: dict = field(default_factory=dict)
+    acceptance: dict = field(default_factory=dict)
+    constraints: Any = None
 
 
 @dataclass
@@ -50,7 +47,7 @@ class Corpus:
     graph: Any
 
 
-_TOP_LEVEL_TYPES = {
+_TOP_DIRS = {
     "product": "product",
     "architecture": "architecture",
     "vars": "var",
@@ -63,165 +60,144 @@ _STEM_ID_TYPES = {
     "component-interface-guarantee",
 }
 
-_ID_INDEX_TYPES = {"component-root", "product", "architecture", "var", "decision"}
-
-_GLOSSARY_ENTRY = re.compile(r"^- \*\*(.+?)\*\*(.*)$")
+_INDEXED_TYPES = {"component-root", "product", "architecture", "var", "decision"}
 
 
-def _classify(parts):
-    """Return (doc_type, component_name) for a path's parts under specs/, or None."""
-    name = parts[-1]
-    if name == "README.md":
-        return None
-    if len(parts) == 2 and parts[0] in _TOP_LEVEL_TYPES:
-        return _TOP_LEVEL_TYPES[parts[0]], None
-    if len(parts) < 3 or parts[0] != "components":
-        return None
-    comp = parts[1]
-    rest = tuple(parts[2:])
-    doc_type = None
-    if rest == ("component.md",):
-        doc_type = "component-root"
-    elif rest == ("constraints.md",):
-        doc_type = "component-constraints"
-    elif rest == ("interface", "cli.md"):
-        doc_type = "component-interface-cli"
-    elif rest == ("interface", "library.md"):
-        doc_type = "component-interface-library"
-    elif len(rest) == 2 and rest[0] == "requirements" and name.startswith("R-"):
-        doc_type = "component-requirement"
-    elif len(rest) == 2 and rest[0] == "acceptance" and name.startswith("AC-"):
-        doc_type = "component-acceptance"
-    elif len(rest) == 3 and rest[:2] == ("interface", "data"):
-        doc_type = "component-interface-data"
-    elif len(rest) == 3 and rest[:2] == ("interface", "guarantees") and name.startswith("G-"):
-        doc_type = "component-interface-guarantee"
-    if doc_type is None:
-        return None
-    return doc_type, comp
+def _classify(parts: tuple) -> tuple:
+    """Return (doc_type, component_name) or (None, None) for unlisted paths."""
+    if len(parts) == 2 and parts[0] in _TOP_DIRS:
+        return _TOP_DIRS[parts[0]], None
+    if len(parts) >= 3 and parts[0] == "components":
+        comp = parts[1]
+        sub = parts[2:]
+        name = sub[-1]
+        if sub == ("component.md",):
+            return "component-root", comp
+        if sub == ("constraints.md",):
+            return "component-constraints", comp
+        if len(sub) == 2 and sub[0] == "requirements" and name.startswith("R-"):
+            return "component-requirement", comp
+        if sub == ("interface", "cli.md"):
+            return "component-interface-cli", comp
+        if sub == ("interface", "library.md"):
+            return "component-interface-library", comp
+        if len(sub) == 3 and sub[:2] == ("interface", "data"):
+            return "component-interface-data", comp
+        if len(sub) == 3 and sub[:2] == ("interface", "guarantees") and name.startswith("G-"):
+            return "component-interface-guarantee", comp
+        if len(sub) == 2 and sub[0] == "acceptance" and name.startswith("AC-"):
+            return "component-acceptance", comp
+    return None, None
 
 
-def _parse_value(raw):
+def _parse_value(raw: str) -> Any:
     value = raw.strip()
     if value.startswith("[") and value.endswith("]"):
-        inner = value[1:-1]
-        return [item.strip() for item in inner.split(",") if item.strip()]
+        return [s.strip() for s in value[1:-1].split(",") if s.strip()]
     if value == "true":
         return True
     if value == "false":
         return False
-    return value.strip("\"'")
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in ("'", '"'):
+        return value[1:-1]
+    return value
 
 
-def _parse_text(text):
-    """Return (frontmatter, body, has_frontmatter)."""
+def _split_frontmatter(text: str) -> tuple:
     lines = text.splitlines()
     if lines and lines[0].strip() == "---":
-        for j in range(1, len(lines)):
-            if lines[j].strip() == "---":
-                frontmatter = {}
-                for line in lines[1:j]:
-                    if ":" in line:
-                        key, _, raw = line.partition(":")
-                        frontmatter[key.strip()] = _parse_value(raw)
-                return frontmatter, "\n".join(lines[j + 1:]), True
+        for i in range(1, len(lines)):
+            if lines[i].strip() == "---":
+                fm = {}
+                for line in lines[1:i]:
+                    key, sep, val = line.partition(":")
+                    if sep:
+                        fm[key.strip()] = _parse_value(val)
+                return fm, "\n".join(lines[i + 1:]), True
     return {}, text, False
 
 
-def _parse_glossary(text, defs):
-    term = None
-    buf = []
+_ENTRY_RE = re.compile(r"^- \*\*(.+?)\*\*(.*)$")
 
-    def flush():
+
+def _parse_glossary(text: str, defs: dict) -> None:
+    term = None
+    chunk: list = []
+
+    def flush() -> None:
         if term is not None:
-            defs[term] = "\n".join(buf).strip()
+            joined = "\n".join(chunk).lstrip("—- \t\n").strip()
+            defs[term.lower()] = joined
 
     for line in text.splitlines():
-        m = _GLOSSARY_ENTRY.match(line)
+        m = _ENTRY_RE.match(line)
         if m:
             flush()
-            term = m.group(1).strip().lower()
-            buf = [m.group(2).lstrip("—- \t")]
-        elif term is not None:
-            buf.append(line)
+            term = m.group(1)
+            chunk = [m.group(2)]
+        elif term is not None and (line.strip() == "" or line[:1].isspace()):
+            chunk.append(line)
+        else:
+            flush()
+            term = None
+            chunk = []
     flush()
 
 
-def _tool_root():
-    for parent in Path(__file__).resolve().parents:
+def _tool_root() -> Path:
+    for parent in Path(__file__).absolute().parents:
         if parent.name == "gen":
             return parent.parent
-    return None
+    return Path(__file__).absolute().parent
 
 
-def _load_graph_query_engine(repo_root):
-    module_name = "graph_query_engine"
+def _load_graph_query_engine(repo_root: Path):
     rel = Path("gen") / "graph-query-engine"
-    base = Path(repo_root) / rel
+    base = repo_root / rel
     if not base.is_dir():
         base = _tool_root() / rel
-    flat = base / f"{module_name}.py"
-    if flat.is_file():
-        spec = importlib.util.spec_from_file_location(module_name, flat)
-    else:
-        pkg_dir = base / module_name
+    pkg_init = base / "graph_query_engine" / "__init__.py"
+    name = "graph_query_engine"
+    if pkg_init.is_file():
         spec = importlib.util.spec_from_file_location(
-            module_name,
-            pkg_dir / "__init__.py",
-            submodule_search_locations=[str(pkg_dir)],
+            name, pkg_init, submodule_search_locations=[str(pkg_init.parent)]
         )
+    else:
+        spec = importlib.util.spec_from_file_location(name, base / "graph_query_engine.py")
     module = importlib.util.module_from_spec(spec)
-    sys.modules[module_name] = module
+    sys.modules[name] = module
     spec.loader.exec_module(module)
     return module
 
 
-def _get(obj, name):
+def _dep_get(obj: Any, key: str) -> Any:
     if isinstance(obj, dict):
-        return obj[name]
-    return getattr(obj, name)
-
-
-def _new_component(name):
-    return Component(
-        name=name,
-        root=None,
-        requirements={},
-        interface_cli=None,
-        interface_library=None,
-        interface_data={},
-        interface_guarantees={},
-        acceptance={},
-        constraints=None,
-    )
+        return obj[key]
+    return getattr(obj, key)
 
 
 def load_corpus(repo_root: Path) -> Corpus:
-    repo_root = Path(repo_root)
-    root_abs = repo_root.absolute()
-    specs = root_abs / "specs"
+    root = Path(repo_root).absolute()
+    specs = root / "specs"
 
-    docs = []
-    components = {}
-    id_index = {}
+    docs: list = []
+    components: dict = {}
+    id_index: dict = {}
 
     for path in sorted(specs.rglob("*.md")):
-        parts = path.relative_to(specs).parts
-        classified = _classify(parts)
-        if classified is None:
+        if path.name == "README.md":
             continue
-        doc_type, comp_name = classified
+        doc_type, comp_name = _classify(path.relative_to(specs).parts)
+        if doc_type is None:
+            continue
         text = path.read_text(encoding="utf-8")
-        frontmatter, body, has_fm = _parse_text(text)
-        if doc_type in _STEM_ID_TYPES:
-            doc_id = path.stem
-        else:
-            doc_id = frontmatter.get("id")
+        fm, body, has_fm = _split_frontmatter(text)
+        doc_id = path.stem if doc_type in _STEM_ID_TYPES else fm.get("id")
         doc = Doc(
             path=path,
-            rel_path=path.relative_to(root_abs).as_posix(),
+            rel_path=path.relative_to(root).as_posix(),
             doc_id=doc_id,
-            frontmatter=frontmatter,
+            frontmatter=fm,
             body=body,
             doc_type=doc_type,
             component=comp_name,
@@ -229,45 +205,41 @@ def load_corpus(repo_root: Path) -> Corpus:
         )
         docs.append(doc)
 
-        if doc_type in _ID_INDEX_TYPES:
+        if doc_type in _INDEXED_TYPES:
             id_index[doc_id] = doc
 
-        if comp_name is None:
-            continue
-        comp = components.get(comp_name)
-        if comp is None:
-            comp = _new_component(comp_name)
-            components[comp_name] = comp
-        if doc_type == "component-root":
-            comp.root = doc
-        elif doc_type == "component-requirement":
-            comp.requirements[doc_id] = doc
-        elif doc_type == "component-interface-cli":
-            comp.interface_cli = doc
-        elif doc_type == "component-interface-library":
-            comp.interface_library = doc
-        elif doc_type == "component-interface-data":
-            comp.interface_data[path.stem] = doc
-        elif doc_type == "component-interface-guarantee":
-            comp.interface_guarantees[doc_id] = doc
-        elif doc_type == "component-acceptance":
-            comp.acceptance[doc_id] = doc
-        else:
-            comp.constraints = doc
+        if comp_name is not None:
+            comp = components.setdefault(comp_name, Component(name=comp_name))
+            if doc_type == "component-root":
+                comp.root = doc
+            elif doc_type == "component-constraints":
+                comp.constraints = doc
+            elif doc_type == "component-requirement":
+                comp.requirements[doc_id] = doc
+            elif doc_type == "component-interface-cli":
+                comp.interface_cli = doc
+            elif doc_type == "component-interface-library":
+                comp.interface_library = doc
+            elif doc_type == "component-interface-data":
+                comp.interface_data[path.stem] = doc
+            elif doc_type == "component-interface-guarantee":
+                comp.interface_guarantees[doc_id] = doc
+            else:
+                comp.acceptance[doc_id] = doc
 
     glossary_files = sorted(specs.glob("glossary*.md"))
-    glossary_defs = {}
+    glossary_defs: dict = {}
     for gpath in glossary_files:
         _parse_glossary(gpath.read_text(encoding="utf-8"), glossary_defs)
 
     con = duckdb.connect()
     con.execute("INSTALL yaml FROM community")
     con.execute("LOAD yaml")
-    gqe = _load_graph_query_engine(repo_root)
-    _get(gqe, "load_views")(con, repo_root)
+    gqe = _load_graph_query_engine(root)
+    _dep_get(gqe, "load_views")(con, root)
 
     return Corpus(
-        repo_root=repo_root,
+        repo_root=root,
         docs=docs,
         components=components,
         id_index=id_index,
