@@ -1,18 +1,20 @@
-"""Graph Query Engine: the seven shared DuckDB views over the spec corpus.
+"""Graph Query Engine: the seven shared DuckDB views over a spec corpus.
 
-`load_views(con, repo_root)` creates (or replaces) `nodes`, `edges`,
-`component_docs`, `component_context`, `component_provenance`,
-`component_size` and `decision_lineage` on `con`. The `yaml` community
-extension must already be installed and loaded on `con`
-(`INSTALL yaml FROM community` then `LOAD yaml`).
+`load_views(con, repo_root)` creates `nodes`, `edges`, `component_docs`,
+`component_context`, `component_provenance`, `component_size` and
+`decision_lineage` on `con`. The SQL below keeps a `{repo_root}`
+placeholder that is substituted only at call time.
 
-The SQL below carries a `{repo_root}` placeholder; it is substituted only
-when `load_views` runs, never baked in here.
+The `yaml` community extension must already be installed and loaded on
+`con` (`INSTALL yaml FROM community` then `LOAD yaml`).
 """
 
 import glob
 import os
 import re
+from pathlib import Path
+
+PLACEHOLDER = "{repo_root}"
 
 NODES_SQL = r"""
 CREATE OR REPLACE VIEW nodes AS
@@ -132,8 +134,6 @@ SELECT
 FROM component_docs;
 """
 
-COMPONENT_PROVENANCE_GLOB = "verification/*/.provenance.json"
-
 COMPONENT_PROVENANCE_SQL = r"""
 CREATE OR REPLACE VIEW component_provenance AS
 SELECT
@@ -148,7 +148,7 @@ CREATE OR REPLACE VIEW component_provenance AS
 SELECT
   NULL::VARCHAR AS component_id,
   NULL::VARCHAR AS spec_bundle_hash,
-  NULL::TIMESTAMPTZ AS generated_at,
+  NULL::TIMESTAMP WITH TIME ZONE AS generated_at,
   NULL::STRUCT(status VARCHAR) AS verification_report,
   NULL::STRUCT(status VARCHAR) AS license_scan,
   NULL::STRUCT(status VARCHAR) AS secret_scan,
@@ -169,6 +169,7 @@ SELECT
     lambda x: x != ''
   ))) AS word_count
 FROM read_text('{repo_root}/specs/components/*/**/*.md')
+WHERE NOT ends_with(filename, '/testing.md')
 GROUP BY 1;
 """
 
@@ -182,34 +183,38 @@ FROM (SELECT regexp_extract(content, '^---\n(.*?)\n---\n', 1, 's') AS fm
 WHERE fm != '';
 """
 
+PROVENANCE_GLOB = "verification/*/.provenance.json"
+
 _YAML_CALL = re.compile(
-    r"read_yaml_frontmatter\('\{repo_root\}/([^']+)', filename:=true\)"
+    r"read_yaml_frontmatter\('\{repo_root\}/([^']*)', filename:=true\)"
 )
 
-_YAML_EMPTY = (
+_EMPTY_FRONTMATTER = (
     "(SELECT NULL::VARCHAR AS id, NULL::VARCHAR AS title, "
     "NULL::VARCHAR AS status, NULL::VARCHAR AS filename WHERE false)"
 )
 
 
-def _has_match(repo_root, rel_glob):
-    return len(glob.glob(os.path.join(repo_root, rel_glob))) > 0
+def _has_match(root, pattern):
+    return len(glob.glob(os.path.join(root, pattern))) > 0
 
 
-def _render(sql, repo_root):
-    def _yaml_site(match):
-        if _has_match(repo_root, match.group(1)):
+def _guard_yaml(sql, root):
+    def repl(match):
+        if _has_match(root, match.group(1)):
             return match.group(0)
-        return _YAML_EMPTY
+        return _EMPTY_FRONTMATTER
 
-    sql = _YAML_CALL.sub(_yaml_site, sql)
-    return sql.replace("{repo_root}", repo_root)
+    return _YAML_CALL.sub(repl, sql)
+
+
+def _render(sql, root):
+    return _guard_yaml(sql, root).replace(PLACEHOLDER, root)
 
 
 def load_views(con, repo_root):
-    """Create (or replace) all seven views on `con` for the corpus under `repo_root`."""
-    root = str(repo_root)
-    if _has_match(root, COMPONENT_PROVENANCE_GLOB):
+    root = str(Path(repo_root))
+    if _has_match(root, PROVENANCE_GLOB):
         provenance_sql = COMPONENT_PROVENANCE_SQL
     else:
         provenance_sql = COMPONENT_PROVENANCE_EMPTY_SQL
