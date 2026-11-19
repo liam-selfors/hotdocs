@@ -227,6 +227,8 @@ def repo_root(tmp_path):
     shutil.copytree(REPO_ROOT / "gen" / "spec-bundle-assembler", tmp_path / "gen" / "spec-bundle-assembler")
     shutil.copytree(REPO_ROOT / "gen" / "spec-linter", tmp_path / "gen" / "spec-linter")
     shutil.copytree(REPO_ROOT / "gen" / "graph-query-engine", tmp_path / "gen" / "graph-query-engine")
+    # The python adapter every component has (D344): found under repo_root first.
+    shutil.copytree(REPO_ROOT / "gen" / "kind-python", tmp_path / "gen" / "kind-python")
     # spec-linter loads these since the D242 split; a copied component takes
     # tmp_path for the tool root, so they must be here too.
     for slug in ("corpus-loader", "citation-checker", "size-checker"):
