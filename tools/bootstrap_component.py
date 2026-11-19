@@ -507,13 +507,12 @@ def _record_carry(component_id: str, sandbox: Path, bundle, report) -> None:
     pinned on one test, so then nothing is carried."""
     if getattr(report, "mutation_error", None):
         return
+    # A score under the bar is carried too: each passing test still checks
+    # its criterion, the next seed's code brings different mutants, and
+    # survivors come from criteria that leave behaviour unpinned, which
+    # authoring the same criteria again does not change.
     passed = [_get(e, "id") for e in report.criteria
               if _get(e, "kind") == "generated-test" and _get(e, "result") == "pass"]
-    # Every criterion passed yet the seed failed: the mutation score is under
-    # the bar, so the tests as a set are too weak and new code cannot fix
-    # that. Carry none, and keep the next seed from reusing committed ones.
-    if report.overall != "pass" and all(_get(e, "result") != "fail" for e in report.criteria):
-        passed = []
     (sandbox / CARRY_FILE).write_text(json.dumps({
         "component_id": component_id,
         "spec_bundle_hash": _get(bundle, "spec_bundle_hash"),
