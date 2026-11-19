@@ -42,6 +42,16 @@ module_name, *, timeout=60.0)` returning an object with `ok` (bool),
 `message`) and `to_dict()`. A fixture that does not concern probing
 plants one returning `ok` true with no findings, so every test runs.
 
+A test whose fixture has a `compiled` criterion supplies the compiler
+in `repo_root`: a stand-in, or the real one copied to
+`<repo_root>/pipeline/criterion-compiler/` from
+`<live>/pipeline/criterion-compiler/`, where `<live>` is
+`(Path(verifier_orchestrator.__file__).resolve().parents[1] /
+"spec-bundle-assembler").resolve().parents[1]` (`D339`). It never
+relies on `verify`'s fallback to the tool root: a mutation run's tool
+root holds only `gen/` (`specs/architecture/mutation-runs.md`), while a
+sibling `gen/` directory resolves to the tree the criterion run used.
+
 A `spec-bundle-assembler` stand-in defines
 `assemble_criterion(component_id, criterion_id, repo_root)`, the only
 assembler function `verify` calls. Its return value, a `CriterionBundle`
