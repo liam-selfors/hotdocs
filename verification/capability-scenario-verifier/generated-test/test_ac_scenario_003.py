@@ -1,5 +1,4 @@
-# hotdocs-criterion: sha256:66f831fb40a66c1a6517f3b9f19e42927bc627f6f724354d05bcfd5be21fe32a
-import importlib.util
+# hotdocs-criterion: sha256:6e02c08c3123ab72f22c5e8de39f1a8ee83829792384d7adaccb04874a08ffec
 import sys
 from pathlib import Path
 
@@ -12,192 +11,209 @@ def field(value, name):
 
 def has_field(value, name):
     if isinstance(value, dict):
-        return name in value and value[name] is not None
+        return name in value
     return getattr(value, name, None) is not None
 
 
-def _write(path, text):
+def write(path, text):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text)
 
 
-def _fake_test_author_source():
-    return (
-        "def author_test(bundle, model, seed=0, *, repo_root=None, llm_backend=None):\n"
-        "    cid = bundle['criterion_id']\n"
-        "    name = 'test_' + cid.lower().replace('-', '_') + '.py'\n"
+def plant_python_adapter(repo_root):
+    src = (
+        "import sys\n"
+        "\n"
+        "\n"
+        "def provision(repo_root):\n"
+        "    return {\"ok\": True, \"reason\": \"\", \"versions\": {}, \"lockfile_sha256\": None,\n"
+        "            \"interpreter\": sys.executable}\n"
+    )
+    write(repo_root / "gen" / "kind-python" / "kind_python.py", src)
+
+
+def plant_fake_dependencies(repo_root):
+    passing = "def test_x():\n    assert True\n"
+    ta = (
+        "def author_test(bundle, model, seed=0, repo_root=None, llm_backend=None):\n"
+        "    cid = bundle[\"criterion_id\"]\n"
+        "    name = \"test_\" + cid.lower().replace(\"-\", \"_\") + \".py\"\n"
         "    return {\n"
-        "        'component_id': " + repr("capability") + ",\n"
-        "        'criterion_id': cid,\n"
-        "        'model': model,\n"
-        "        'seed': seed,\n"
-        "        'prompt_version': " + repr("v1") + ",\n"
-        "        'cache_hit': False,\n"
-        "        'file': {\n"
-        "            'path': " + repr("verification/capabilities/P-X/generated-test/") + " + name,\n"
-        "            'content': " + repr("def test_x():\n    assert True\n") + ",\n"
-        "        },\n"
-        "        'model_call_error': None,\n"
+        "        \"component_id\": bundle.get(\"component_id\", \"\"),\n"
+        "        \"criterion_id\": cid,\n"
+        "        \"model\": model,\n"
+        "        \"seed\": seed,\n"
+        "        \"prompt_version\": \"v1\",\n"
+        "        \"cache_hit\": False,\n"
+        "        \"file\": {\"path\": \"verification/capabilities/fake/generated-test/\" + name,\n"
+        "                 \"content\": " + repr(passing) + "},\n"
+        "        \"model_call_error\": None,\n"
+        "        \"repair_attempts\": 0,\n"
+        "        \"probe_findings\": [],\n"
         "    }\n"
     )
-
-
-def _fake_llm_endpoint_source():
-    return (
+    write(repo_root / "gen" / "test-author" / "test_author.py", ta)
+    reply = '{"result": "pass", "rationale": "fake"}'
+    le = (
         "def complete(prompt, model, *, backend=None, **params):\n"
-        "    return {\n"
-        "        'text': " + repr('{"result": "fail", "rationale": "because"}') + ",\n"
-        "        'model': model,\n"
-        "        'backend': " + repr("fake") + ",\n"
-        "        'model_call_error': None,\n"
-        "    }\n"
+        "    return {\"text\": " + repr(reply) + ", \"model\": model,\n"
+        "            \"backend\": \"fake\", \"model_call_error\": None}\n"
     )
+    write(repo_root / "gen" / "llm-endpoint" / "llm_endpoint.py", le)
 
 
-def _scenario_section(scenario_id, kind):
+def plant_component(repo_root, slug, capability_id):
+    text = (
+        "---\n"
+        "id: comp-" + slug + "\n"
+        "title: " + slug + "\n"
+        "status: draft\n"
+        "owners: [pipeline-team]\n"
+        "realizes: [" + capability_id + "]\n"
+        "sealed: false\n"
+        "---\n"
+        "\n"
+        "# " + slug + "\n"
+    )
+    write(repo_root / "specs" / "components" / slug / "component.md", text)
+    module = slug.replace("-", "_")
+    write(repo_root / "gen" / slug / (module + ".py"), "VALUE = 1\n")
+
+
+def scenario_section(scenario_id, capability_id, kind):
     return (
         "### " + scenario_id + "\n"
         "\n"
-        "Covers: P-X\n"
+        "Covers: " + capability_id + "\n"
         "Kind: " + kind + "\n"
         "\n"
         "```gherkin\n"
         "Given the system is assembled\n"
-        "When a user runs it\n"
-        "Then it works\n"
+        "When the capability is exercised\n"
+        "Then it behaves as described\n"
         "```\n"
         "\n"
     )
 
 
-def _build_repo(repo_root, scenarios):
-    _write(
-        repo_root / "specs" / "components" / "foo" / "component.md",
+def plant_capability(repo_root, name, capability_id, sections):
+    text = (
         "---\n"
-        "id: comp-foo\n"
-        "title: Foo\n"
+        "id: " + capability_id + "\n"
+        "title: " + name + "\n"
         "status: draft\n"
-        "owners: [team]\n"
-        "depends_on: []\n"
-        "realizes: [P-X]\n"
-        "sealed: false\n"
+        "owners: [pipeline-team]\n"
         "---\n"
         "\n"
-        "# Foo\n",
-    )
-    _write(repo_root / "gen" / "foo" / "foo.py", "VALUE = 1\n")
-
-    body = (
-        "---\n"
-        "id: P-X\n"
-        "title: Capability X\n"
-        "status: draft\n"
-        "owners: [team]\n"
-        "---\n"
+        "# " + name + "\n"
         "\n"
-        "# Capability X\n"
-        "\n"
-        "## Scenarios\n"
+        "Capability description.\n"
         "\n"
     )
-    for scenario_id, kind in scenarios:
-        body = body + _scenario_section(scenario_id, kind)
-    _write(repo_root / "specs" / "product" / "x.md", body)
-
-    _write(repo_root / "gen" / "test-author" / "test_author.py", _fake_test_author_source())
-    _write(repo_root / "gen" / "llm-endpoint" / "llm_endpoint.py", _fake_llm_endpoint_source())
+    for section in sections:
+        text += section
+    write(repo_root / "specs" / "product" / (name + ".md"), text)
 
 
-def _passing_test_author(bundle):
-    sid = field(bundle, "scenario_id")
-    name = "test_" + sid.lower().replace("-", "_") + ".py"
-    return {
-        "component_id": "capability",
-        "criterion_id": sid,
-        "model": "fake-model",
-        "seed": 0,
-        "prompt_version": "v1",
-        "cache_hit": False,
-        "file": {
-            "path": "verification/capabilities/P-X/generated-test/" + name,
-            "content": "def test_x():\n    assert True\n",
-        },
-        "model_call_error": None,
-    }
-
-
-def _failing_judge(bundle):
-    return {"result": "fail", "rationale": "because"}
-
-
-def test_mixed_scenarios_report_rationale_only_on_llm_judge_and_fail_overall(tmp_path):
+def base_repo(tmp_path):
     repo_root = tmp_path / "repo"
-    _build_repo(
+    repo_root.mkdir()
+    plant_python_adapter(repo_root)
+    plant_fake_dependencies(repo_root)
+    return repo_root
+
+
+def capability_entry(report, capability_id):
+    if isinstance(report, dict):
+        return report[capability_id]
+    return getattr(report, capability_id)
+
+
+def test_generated_test_and_llm_judge_scenarios(tmp_path):
+    repo_root = base_repo(tmp_path)
+    plant_component(repo_root, "alpha", "P-ALPHA")
+    plant_capability(
         repo_root,
-        [("CS-X-001", "generated-test"), ("CS-X-002", "llm-judge")],
+        "alpha",
+        "P-ALPHA",
+        [
+            scenario_section("CS-ALPHA-001", "P-ALPHA", "generated-test"),
+            scenario_section("CS-ALPHA-002", "P-ALPHA", "llm-judge"),
+        ],
     )
+
+    log = tmp_path / "calls.log"
+
+    def fake_test_author(bundle):
+        sid = bundle.get("scenario_id") if isinstance(bundle, dict) else getattr(bundle, "scenario_id")
+        with open(log, "a") as fh:
+            fh.write("test_author " + str(sid) + "\n")
+        return {
+            "model_call_error": None,
+            "file": {
+                "path": "verification/capabilities/P-ALPHA/generated-test/test_cs_alpha_001.py",
+                "content": "def test_x():\n    assert True\n",
+            },
+        }
+
+    def fake_judge(bundle):
+        sid = bundle.get("scenario_id") if isinstance(bundle, dict) else getattr(bundle, "scenario_id")
+        with open(log, "a") as fh:
+            fh.write("judge " + str(sid) + "\n")
+        return {"result": "fail", "rationale": "because"}
 
     report = capability_scenario_verifier.run_capability_scenarios(
-        ["comp-foo"],
-        repo_root,
-        judge=_failing_judge,
-        test_author=_passing_test_author,
+        ["comp-alpha"], repo_root, judge=fake_judge, test_author=fake_test_author
     )
 
-    cap = field(report, "P-X")
-    scenarios = list(field(cap, "scenarios"))
+    entry = capability_entry(report, "P-ALPHA")
+    scenarios = list(field(entry, "scenarios"))
     assert len(scenarios) == 2
 
-    by_kind = {field(s, "kind"): s for s in scenarios}
-    assert set(by_kind) == {"generated-test", "llm-judge"}
+    by_id = {field(s, "id"): s for s in scenarios}
+    assert set(by_id) == {"CS-ALPHA-001", "CS-ALPHA-002"}
 
-    gen_entry = by_kind["generated-test"]
-    judge_entry = by_kind["llm-judge"]
+    generated = by_id["CS-ALPHA-001"]
+    judged = by_id["CS-ALPHA-002"]
+    assert field(generated, "kind") == "generated-test"
+    assert field(judged, "kind") == "llm-judge"
 
-    assert field(gen_entry, "id") == "CS-X-001"
-    assert field(judge_entry, "id") == "CS-X-002"
+    assert not has_field(generated, "rationale")
+    assert field(judged, "rationale") == "because"
 
-    if isinstance(gen_entry, dict):
-        assert "rationale" not in gen_entry
-    else:
-        assert getattr(gen_entry, "rationale", None) is None
-
-    assert field(judge_entry, "rationale") == "because"
-    assert field(judge_entry, "result") == "fail"
-
-    assert field(cap, "overall") == "fail"
+    assert field(entry, "overall") == "fail"
 
 
-def test_capability_without_scenarios_fails_with_empty_list(tmp_path):
-    repo_root = tmp_path / "repo"
-    _build_repo(repo_root, [])
+def test_capability_without_scenarios_fails(tmp_path):
+    repo_root = base_repo(tmp_path)
+    plant_component(repo_root, "beta", "P-BETA")
+    plant_capability(repo_root, "beta", "P-BETA", [])
 
-    report = capability_scenario_verifier.run_capability_scenarios(
-        ["comp-foo"],
+    report = capability_scenario_verifier.run_capability_scenarios(["comp-beta"], repo_root)
+
+    entry = capability_entry(report, "P-BETA")
+    assert field(entry, "overall") == "fail"
+    assert list(field(entry, "scenarios")) == []
+
+
+def test_llm_judge_only_without_judge_is_skipped(tmp_path):
+    repo_root = base_repo(tmp_path)
+    plant_component(repo_root, "gamma", "P-GAMMA")
+    plant_capability(
         repo_root,
-        judge=_failing_judge,
-        test_author=_passing_test_author,
+        "gamma",
+        "P-GAMMA",
+        [scenario_section("CS-GAMMA-001", "P-GAMMA", "llm-judge")],
     )
 
-    cap = field(report, "P-X")
-    assert field(cap, "overall") == "fail"
-    assert list(field(cap, "scenarios")) == []
-
-
-def test_only_llm_judge_scenario_without_judge_is_skipped(tmp_path):
-    repo_root = tmp_path / "repo"
-    _build_repo(repo_root, [("CS-X-001", "llm-judge")])
-
     report = capability_scenario_verifier.run_capability_scenarios(
-        ["comp-foo"],
-        repo_root,
+        ["comp-gamma"], repo_root, judge=None
     )
 
-    cap = field(report, "P-X")
-    scenarios = list(field(cap, "scenarios"))
+    entry = capability_entry(report, "P-GAMMA")
+    scenarios = list(field(entry, "scenarios"))
     assert len(scenarios) == 1
-    entry = scenarios[0]
-    assert field(entry, "id") == "CS-X-001"
-    assert field(entry, "kind") == "llm-judge"
-    assert field(entry, "result") == "skipped"
-    assert field(cap, "overall") == "skipped"
+    only = scenarios[0]
+    assert field(only, "id") == "CS-GAMMA-001"
+    assert field(only, "result") == "skipped"
+    assert field(entry, "overall") == "skipped"

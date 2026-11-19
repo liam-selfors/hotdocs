@@ -1,68 +1,67 @@
-# hotdocs-criterion: sha256:4c6f2ca3b8c831fbd00205fd01fd737cf0369582cca9232d95b7b2a9d401527d
+# hotdocs-criterion: sha256:b0da5a97e89bde6d9051a804fb08228d14ef56e0dc2c4f2dc036c0d9bbd72905
+import os
 import shutil
 import sys
 from pathlib import Path
 
-import pytest
-
 import capability_scenario_verifier
 
 
-PASS_SOURCE = "def test_x():\n    assert True\n"
-FAIL_SOURCE = "def test_x():\n    assert False\n"
 GHERKIN = "Given a x is 1\nThen x equals 1"
+COMPILED_REL = Path("verification") / "capabilities" / "P-X" / "compiled"
+TEST_FILE_NAME = "test_cs_x_001.py"
 
 
 def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-@pytest.fixture(autouse=True)
-def _forget_cached_compiler():
-    # Each test supplies its own criterion_compiler under its own repo_root;
-    # make sure a module loaded by an earlier test is not reused by name.
-    sys.modules.pop("criterion_compiler", None)
-    yield
-    sys.modules.pop("criterion_compiler", None)
-
-
 def _write(path, text):
+    path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
+    return path
 
 
-def make_repo(tmp_path):
-    repo = tmp_path / "repo"
-    repo.mkdir()
+def _plant_python_adapter(repo_root):
+    src = (
+        "import sys\n"
+        "\n"
+        "\n"
+        "def provision(repo_root):\n"
+        "    return {\"ok\": True, \"reason\": \"\", \"versions\": {}, \"lockfile_sha256\": None,\n"
+        "            \"interpreter\": sys.executable}\n"
+    )
+    _write(repo_root / "gen" / "kind-python" / "kind_python.py", src)
 
-    _write(
-        repo / "specs" / "components" / "x" / "component.md",
+
+def _build_corpus(repo_root):
+    _plant_python_adapter(repo_root)
+    component_md = (
         "---\n"
-        "id: comp-x\n"
-        "title: X\n"
+        "id: comp-foo\n"
+        "title: Foo\n"
         "status: draft\n"
-        "owners: [team]\n"
-        "depends_on: []\n"
+        "owners: [pipeline-team]\n"
         "realizes: [P-X]\n"
         "sealed: false\n"
         "---\n"
         "\n"
-        "# X\n"
+        "# Foo\n"
         "\n"
-        "A component realizing capability P-X.\n",
+        "A component realizing P-X.\n"
     )
-    _write(repo / "gen" / "x" / "x.py", "VALUE = 1\n")
-
-    _write(
-        repo / "specs" / "product" / "x.md",
+    _write(repo_root / "specs" / "components" / "foo" / "component.md", component_md)
+    _write(repo_root / "gen" / "foo" / "foo.py", "VALUE = 1\n")
+    product_md = (
         "---\n"
         "id: P-X\n"
-        "title: Capability X\n"
+        "title: X capability\n"
         "status: draft\n"
-        "owners: [team]\n"
+        "owners: [pipeline-team]\n"
         "---\n"
         "\n"
-        "# Capability X\n"
+        "# X capability\n"
         "\n"
         "### CS-X-001\n"
         "\n"
@@ -70,45 +69,14 @@ def make_repo(tmp_path):
         "Kind: compiled\n"
         "\n"
         "```gherkin\n"
-        + GHERKIN
-        + "\n"
-        "```\n",
+        + GHERKIN + "\n"
+        "```\n"
     )
-
-    # Small fakes for the other dependencies, per the fixture rules.
-    _write(
-        repo / "gen" / "test-author" / "test_author.py",
-        "def author_test(bundle, model, seed=0, *, repo_root=None, llm_backend=None):\n"
-        "    return {\n"
-        "        'component_id': 'comp-x',\n"
-        "        'criterion_id': bundle['criterion_id'],\n"
-        "        'model': model,\n"
-        "        'seed': seed,\n"
-        "        'prompt_version': 'v1',\n"
-        "        'cache_hit': False,\n"
-        "        'file': {\n"
-        "            'path': 'verification/capabilities/P-X/generated-test/test_cs_x_001.py',\n"
-        "            'content': " + repr(PASS_SOURCE) + ",\n"
-        "        },\n"
-        "        'model_call_error': None,\n"
-        "    }\n",
-    )
-    _write(
-        repo / "gen" / "llm-endpoint" / "llm_endpoint.py",
-        "def complete(prompt, model, *, backend=None, **params):\n"
-        "    return {\n"
-        "        'text': 'pass',\n"
-        "        'model': model,\n"
-        "        'backend': 'fake',\n"
-        "        'model_call_error': None,\n"
-        "    }\n",
-    )
-    return repo
+    _write(repo_root / "specs" / "product" / "x.md", product_md)
 
 
-def write_fake_compiler(repo, result, log_path):
-    _write(
-        repo / "pipeline" / "criterion-compiler" / "criterion_compiler.py",
+def _plant_fake_compiler(repo_root, result, log_path):
+    src = (
         "class ParsedCriterion:\n"
         "    def __init__(self, criterion_id=None, covers=None, kind=None, gherkin=None, file=None):\n"
         "        self.criterion_id = criterion_id\n"
@@ -118,84 +86,105 @@ def write_fake_compiler(repo, result, log_path):
         "        self.file = file\n"
         "\n"
         "\n"
+        "LOG_PATH = " + repr(str(log_path)) + "\n"
         "RESULT = " + repr(result) + "\n"
-        "LOG = " + repr(str(log_path)) + "\n"
         "\n"
         "\n"
         "def compile_criterion(parsed, surface=None):\n"
-        "    with open(LOG, 'a', encoding='utf-8') as f:\n"
-        "        f.write(str(getattr(parsed, 'criterion_id', '')) + '\\n')\n"
-        "    return dict(RESULT)\n",
+        "    with open(LOG_PATH, 'a') as handle:\n"
+        "        handle.write(str(parsed.criterion_id) + '\\n')\n"
+        "    return dict(RESULT)\n"
     )
+    _write(repo_root / "pipeline" / "criterion-compiler" / "criterion_compiler.py", src)
 
 
-def copy_real_compiler(repo):
-    live = (
-        Path(capability_scenario_verifier.__file__).resolve().parents[1] / "llm-endpoint"
-    ).resolve().parents[1]
-    src = live / "pipeline" / "criterion-compiler"
-    dst = repo / "pipeline" / "criterion-compiler"
-    shutil.copytree(src, dst, ignore=shutil.ignore_patterns("__pycache__"))
-
-
-def scenario_result(report, scenario_id):
-    entry = field(report, "P-X")
-    scenarios = field(entry, "scenarios")
+def _scenario_result(report, scenario_id="CS-X-001"):
+    cap = report["P-X"]
+    scenarios = field(cap, "scenarios")
     matches = [s for s in scenarios if field(s, "id") == scenario_id]
     assert len(matches) == 1, scenarios
     return field(matches[0], "result")
 
 
-def compiled_dir(repo):
-    return repo / "verification" / "capabilities" / "P-X" / "compiled"
+def _run(repo_root):
+    return capability_scenario_verifier.run_capability_scenarios(
+        ["comp-foo"], repo_root, judge=None, test_author=None
+    )
 
 
-def test_compiled_source_passing_is_written_run_and_passes(tmp_path):
-    repo = make_repo(tmp_path)
-    log = tmp_path / "compile.log"
-    write_fake_compiler(repo, {"status": "compiled", "source": PASS_SOURCE}, log)
+def test_compiled_true_source_is_written_run_and_passes(tmp_path):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    log_path = tmp_path / "compiler.log"
+    _build_corpus(repo_root)
+    source = "def test_x():\n    assert True\n"
+    _plant_fake_compiler(repo_root, {"status": "compiled", "source": source}, log_path)
 
-    report = capability_scenario_verifier.run_capability_scenarios(["comp-x"], repo)
+    report = _run(repo_root)
 
-    written = compiled_dir(repo) / "test_cs_x_001.py"
+    assert log_path.is_file()
+    assert "CS-X-001" in log_path.read_text().splitlines()
+    written = repo_root / COMPILED_REL / TEST_FILE_NAME
     assert written.is_file()
-    assert written.read_text(encoding="utf-8") == PASS_SOURCE
-    assert log.is_file() and log.read_text(encoding="utf-8").strip() != ""
-    assert scenario_result(report, "CS-X-001") == "pass"
+    assert written.read_text() == source
+    assert _scenario_result(report) == "pass"
 
 
-def test_compiled_source_failing_is_written_and_fails(tmp_path):
-    repo = make_repo(tmp_path)
-    log = tmp_path / "compile.log"
-    write_fake_compiler(repo, {"status": "compiled", "source": FAIL_SOURCE}, log)
+def test_compiled_false_source_is_written_and_fails(tmp_path):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    log_path = tmp_path / "compiler.log"
+    _build_corpus(repo_root)
+    source = "def test_x():\n    assert False\n"
+    _plant_fake_compiler(repo_root, {"status": "compiled", "source": source}, log_path)
 
-    report = capability_scenario_verifier.run_capability_scenarios(["comp-x"], repo)
+    report = _run(repo_root)
 
-    written = compiled_dir(repo) / "test_cs_x_001.py"
+    assert log_path.is_file()
+    assert "CS-X-001" in log_path.read_text().splitlines()
+    written = repo_root / COMPILED_REL / TEST_FILE_NAME
     assert written.is_file()
-    assert written.read_text(encoding="utf-8") == FAIL_SOURCE
-    assert scenario_result(report, "CS-X-001") == "fail"
+    assert written.read_text() == source
+    assert _scenario_result(report) == "fail"
 
 
 def test_compile_error_fails_and_writes_nothing(tmp_path):
-    repo = make_repo(tmp_path)
-    log = tmp_path / "compile.log"
-    write_fake_compiler(repo, {"status": "error", "message": "bad step"}, log)
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    log_path = tmp_path / "compiler.log"
+    _build_corpus(repo_root)
+    _plant_fake_compiler(repo_root, {"status": "error", "message": "bad step"}, log_path)
 
-    report = capability_scenario_verifier.run_capability_scenarios(["comp-x"], repo)
+    report = _run(repo_root)
 
-    assert scenario_result(report, "CS-X-001") == "fail"
-    d = compiled_dir(repo)
-    existing = [p for p in d.rglob("*") if p.is_file()] if d.exists() else []
-    assert existing == []
+    assert log_path.is_file()
+    assert "CS-X-001" in log_path.read_text().splitlines()
+    assert _scenario_result(report) == "fail"
+    compiled_dir = repo_root / COMPILED_REL
+    if compiled_dir.exists():
+        files = [p for p in compiled_dir.rglob("*") if p.is_file()]
+        assert files == []
 
 
 def test_real_compiler_compiling_alone_is_not_a_pass(tmp_path):
-    repo = make_repo(tmp_path)
-    copy_real_compiler(repo)
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    _build_corpus(repo_root)
 
-    report = capability_scenario_verifier.run_capability_scenarios(["comp-x"], repo)
+    live = (
+        Path(capability_scenario_verifier.__file__).resolve().parents[1]
+        / "llm-endpoint"
+    ).resolve().parents[1]
+    live_compiler = live / "pipeline" / "criterion-compiler"
+    assert live_compiler.is_dir(), live_compiler
+    shutil.copytree(
+        live_compiler,
+        repo_root / "pipeline" / "criterion-compiler",
+        ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
+    )
 
-    result = scenario_result(report, "CS-X-001")
-    assert result != "pass"
+    report = _run(repo_root)
+
+    result = _scenario_result(report)
     assert result == "fail"
+    assert result != "pass"
