@@ -1,3 +1,4 @@
+# hotdocs-criterion: sha256:a1c9c6977bc103100c233e2f8d464a65051f67fd5cec6b2281e2589f86a1d7d5
 import test_probe
 
 
@@ -5,11 +6,9 @@ def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-SOURCE = "def test_a(:\n    pass\n"
-
-
-def test_ac_probe_001_syntax_error_returns_single_finding_and_no_stub_run():
-    report = test_probe.probe(SOURCE, {}, "slugify")
+def test_ac_probe_001_syntax_error_returns_single_finding_and_no_run():
+    source = "def test_a(:\n    pass\n"
+    report = test_probe.probe(source, {}, "slugify")
 
     assert field(report, "ok") is False
 
@@ -25,19 +24,11 @@ def test_ac_probe_001_syntax_error_returns_single_finding_and_no_stub_run():
     assert field(report, "tests_run") == 0
     assert field(report, "tests_reached") == 0
 
-
-def test_ac_probe_001_to_dict_agrees():
-    report = test_probe.probe(SOURCE, {}, "slugify")
-    if isinstance(report, dict):
-        data = report
-    else:
-        data = report.to_dict()
-
-    assert data["ok"] is False
-    assert len(data["findings"]) == 1
-    only = data["findings"][0]
-    assert only["kind"] == "syntax_error"
-    assert only["severity"] == "error"
-    assert only["line"] == 1
-    assert data["tests_run"] == 0
-    assert data["tests_reached"] == 0
+    as_dict = report.to_dict()
+    assert as_dict["ok"] is False
+    assert len(as_dict["findings"]) == 1
+    assert as_dict["findings"][0]["kind"] == "syntax_error"
+    assert as_dict["findings"][0]["severity"] == "error"
+    assert as_dict["findings"][0]["line"] == 1
+    assert as_dict["tests_run"] == 0
+    assert as_dict["tests_reached"] == 0

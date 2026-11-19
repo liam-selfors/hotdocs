@@ -1,3 +1,4 @@
+# hotdocs-criterion: sha256:f09c30b1f823ca100ed041fdc355679f23ec946989592713944fd90c3ce6e051
 import test_probe
 
 
@@ -5,18 +6,18 @@ def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def _findings(report):
-    return list(field(report, "findings"))
-
-
-def _mismatches(report):
+def mismatches(report):
     return [
-        f for f in _findings(report)
+        f for f in field(report, "findings")
         if field(f, "kind") == "fake_signature_mismatch"
     ]
 
 
-BUNDLE_1 = {
+def line_of(lines, text):
+    return lines.index(text) + 1
+
+
+BUNDLE = {
     "dependency_interfaces": {
         "comp-bar": (
             "bar_get(key: str, default: dict[str, str]) -> str\n"
@@ -26,12 +27,13 @@ BUNDLE_1 = {
 }
 
 
-def test_one_mismatch_on_bar_get_def_line():
+def test_alias_installed_fake_with_wrong_arity_gives_one_mismatch():
     lines = [
-        "# fakes for comp-bar",
+        "import slugify as target",
+        "",
         "",
         "def bar_get(key):",
-        "    return 'x'",
+        "    return 'v'",
         "",
         "",
         "def bar_put(key):",
@@ -39,88 +41,113 @@ def test_one_mismatch_on_bar_get_def_line():
         "",
         "",
         "def other(a, b, c):",
-        "    return None",
+        "    return a",
         "",
         "",
         "alias = bar_get",
         "",
         "",
-        "def test_nothing():",
-        "    assert True",
+        "def test_fakes(monkeypatch):",
+        "    monkeypatch.setattr(target, \"bar_get\", alias)",
+        "    monkeypatch.setattr(target, \"bar_put\", bar_put)",
+        "    assert target.bar_get('k') == 'v'",
         "",
     ]
     source = "\n".join(lines)
-    bar_get_line = lines.index("def bar_get(key):") + 1
-
-    report = test_probe.probe(source, BUNDLE_1, "slugify")
-
-    mismatches = _mismatches(report)
-    assert len(mismatches) == 1, _findings(report)
-    finding = mismatches[0]
-    assert field(finding, "line") == bar_get_line
-    assert field(finding, "message") == (
+    report = test_probe.probe(source, BUNDLE, "slugify")
+    found = mismatches(report)
+    assert len(found) == 1
+    assert field(found[0], "line") == line_of(lines, "def bar_get(key):")
+    assert field(found[0], "message") == (
         "bar_get takes 1 parameters; the interface of comp-bar gives 2"
     )
-    assert field(finding, "severity") == "error"
+    assert field(found[0], "severity") == "error"
 
 
 def test_star_args_fake_satisfies_any_count():
     lines = [
+        "import slugify as target",
+        "",
+        "",
         "def bar_get(*args):",
-        "    return 'x'",
+        "    return 'v'",
         "",
         "",
         "def bar_put(key):",
         "    return None",
         "",
         "",
-        "def test_nothing():",
-        "    assert True",
+        "alias = bar_get",
+        "",
+        "",
+        "def test_fakes(monkeypatch):",
+        "    monkeypatch.setattr(target, \"bar_get\", alias)",
+        "    monkeypatch.setattr(target, \"bar_put\", bar_put)",
+        "    assert target.bar_get('k') == 'v'",
         "",
     ]
     source = "\n".join(lines)
-
-    report = test_probe.probe(source, BUNDLE_1, "slugify")
-
-    assert _mismatches(report) == [], _findings(report)
+    report = test_probe.probe(source, BUNDLE, "slugify")
+    assert mismatches(report) == []
 
 
-def test_def_inside_string_literal_is_checked_with_its_source_line():
+def test_uninstalled_helper_is_never_a_fake():
+    lines = [
+        "import slugify",
+        "",
+        "",
+        "def bar_get():",
+        "    return 'v'",
+        "",
+        "",
+        "def test_helper():",
+        "    assert bar_get() == 'v'",
+        "    assert slugify is not None",
+        "",
+    ]
+    source = "\n".join(lines)
+    report = test_probe.probe(source, BUNDLE, "slugify")
+    assert mismatches(report) == []
+
+
+def test_fake_module_source_in_string_literal_is_checked():
     bundle = {
         "dependency_interfaces": {
             "comp-bar": (
-                "bar_get(a: int, /, b: dict[str, tuple[int, int]], *, c: str) -> str"
+                "bar_get(a: int, /, b: dict[str, tuple[int, int]], *, c: str)"
+                " -> str"
             )
         }
     }
     lines = [
-        "def bar_get(a, b, *, c):",      # 1
-        "    return 'x'",                # 2
-        "",                              # 3
-        "",                              # 4
-        "x = y = bar_get",               # 5
-        "",                              # 6
-        "",                              # 7
-        "def test_nothing():",           # 8
-        "    assert True",               # 9
-        'SNIPPET = """',                 # 10
-        "# a fake inside a string",      # 11
-        "def bar_get(a, b):",            # 12
-        "    return 1",                  # 13
-        '"""',                           # 14
+        "import slugify as target",
+        "",
+        "",
+        "def bar_get(a, b, *, c):",
+        "    return 'v'",
+        "",
+        "",
+        "x = y = bar_get",
+        "",
+        "FAKE_SOURCE = \"\"\"",
+        "# fake comp-bar module",
+        "def bar_get(a, b):",
+        "    return 'v'",
+        "\"\"\"",
+        "",
+        "",
+        "def test_install(monkeypatch):",
+        "    monkeypatch.setattr(target, \"bar_get\", bar_get)",
+        "    assert target.bar_get(1, 2, c='z') == 'v'",
         "",
     ]
+    assert lines[9].startswith("FAKE_SOURCE = \"\"\"")
+    assert lines[11] == "def bar_get(a, b):"
     source = "\n".join(lines)
-    assert source.split("\n")[9].startswith('SNIPPET = """')
-    assert source.split("\n")[11] == "def bar_get(a, b):"
-
     report = test_probe.probe(source, bundle, "slugify")
-
-    mismatches = _mismatches(report)
-    assert len(mismatches) == 1, _findings(report)
-    finding = mismatches[0]
-    assert field(finding, "line") == 12
-    assert field(finding, "message") == (
+    found = mismatches(report)
+    assert len(found) == 1
+    assert field(found[0], "line") == 12
+    assert field(found[0], "message") == (
         "bar_get takes 2 parameters; the interface of comp-bar gives 3"
     )
-    assert field(finding, "severity") == "error"
