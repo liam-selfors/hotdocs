@@ -1,106 +1,60 @@
-# hotdocs-criterion: sha256:3818c6bb5b4f6f9b1cbad0319cf82577980408db08e758de309185eae04c92fe
+# hotdocs-criterion: sha256:1e3f0351d6cab3ce47426d4ae9cb08c7ed10ba17b147161ed2c2936e66721c90
 import re
 
 import test_author
 
 
-EXPECTED_LINE = (
-    "- Only a criterion that needs `realizes`-driven behavior has the fixture "
-    "supply a resolvable `P-<id>`."
-)
+EXPECTED_LINE = "- Only a criterion that needs `realizes`-driven behavior has the fixture supply a resolvable `P-<id>`."
 
 
-class _Bundle:
-    """A CriterionBundle stand-in readable both by attribute and as a mapping."""
+def field(value, name):
+    return value[name] if isinstance(value, dict) else getattr(value, name)
 
-    _FIELDS = (
-        "component_id",
-        "criterion_id",
-        "covers",
-        "criterion_text",
-        "requirement_text",
-        "interface",
-        "glossary",
-        "dependency_interfaces",
+
+def _write_probe_stand_in(repo_root, log_path):
+    probe_dir = repo_root / "gen" / "test-probe"
+    probe_dir.mkdir(parents=True, exist_ok=True)
+    source = (
+        "class _Report:\n"
+        "    def __init__(self):\n"
+        "        self.ok = True\n"
+        "        self.findings = []\n"
+        "        self.tests_run = 1\n"
+        "        self.tests_reached = 1\n"
+        "\n"
+        "    def to_dict(self):\n"
+        "        return {'ok': self.ok, 'findings': list(self.findings), "
+        "'tests_run': self.tests_run, 'tests_reached': self.tests_reached}\n"
+        "\n"
+        "\n"
+        "GATE_VERSION = 'test-probe@1.3.0'\n"
+        "\n"
+        "\n"
+        "def probe(test_source, criterion_bundle, module_name, *, timeout=60.0, interpreter=None):\n"
+        "    with open(" + repr(str(log_path)) + ", 'a', encoding='utf-8') as fh:\n"
+        "        fh.write('probe\\n')\n"
+        "    return _Report()\n"
     )
-
-    def __init__(self, **kwargs):
-        for name in self._FIELDS:
-            setattr(self, name, kwargs[name])
-
-    def __getitem__(self, key):
-        if key in self._FIELDS:
-            return getattr(self, key)
-        raise KeyError(key)
-
-    def get(self, key, default=None):
-        if key in self._FIELDS:
-            return getattr(self, key)
-        return default
-
-    def __contains__(self, key):
-        return key in self._FIELDS
-
-    def __iter__(self):
-        return iter(self._FIELDS)
-
-    def __len__(self):
-        return len(self._FIELDS)
-
-    def keys(self):
-        return list(self._FIELDS)
-
-    def items(self):
-        return [(k, getattr(self, k)) for k in self._FIELDS]
-
-    def values(self):
-        return [getattr(self, k) for k in self._FIELDS]
+    (probe_dir / "test_probe.py").write_text(source, encoding="utf-8")
 
 
-def _make_bundle():
-    return _Bundle(
-        component_id="comp-widget-maker",
-        criterion_id="AC-WIDGET-MAKER-001",
-        covers="R-WIDGET-MAKER-001",
-        criterion_text=(
-            "Given a widget name \"w\"\n"
-            "When make_widget(\"w\") is called\n"
-            "Then it returns a widget named \"w\""
-        ),
-        requirement_text=(
-            "# R-WIDGET-MAKER-001\n\n"
-            "**R-WIDGET-MAKER-001** — `make_widget(name)` MUST return a widget "
-            "whose name is `name`."
-        ),
-        interface="# Library\n\n```\nmake_widget(name: str) -> dict\n```\n",
-        glossary="# Glossary\n\n- **Widget** — a test term.\n",
-        dependency_interfaces={},
-    )
+def test_prompt_holds_r_author_013_realizes_line(tmp_path, monkeypatch):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    monkeypatch.chdir(repo_root)
+    monkeypatch.delenv("VAR_CACHE_STORE_URL", raising=False)
 
+    probe_log = tmp_path / "probe_calls.log"
+    _write_probe_stand_in(repo_root, probe_log)
 
-_NONCE_RE = re.compile(r"-----BEGIN FILE ([0-9a-f]{32})-----")
-
-_TEST_BODY = (
-    "import widget_maker\n"
-    "\n"
-    "\n"
-    "def test_make_widget():\n"
-    "    assert widget_maker is not None\n"
-)
-
-
-def test_prompt_contains_realizes_fixture_line(tmp_path):
     prompts = []
 
     def mock_backend(prompt, model, **params):
         prompts.append(prompt)
-        match = _NONCE_RE.search(prompt)
-        nonce = match.group(1) if match else "0" * 32
-        text = (
-            "-----BEGIN FILE " + nonce + "-----\n"
-            + _TEST_BODY
-            + "-----END FILE " + nonce + "-----"
-        )
+        nonces = re.findall(r"-----BEGIN FILE ([0-9a-f]{32})-----", prompt)
+        n = nonces[-1] if nonces else "0" * 32
+        body = "import widget_maker\n\n\ndef test_x():\n    assert widget_maker is not None\n"
+        text = "-----BEGIN FILE " + n + "-----\n" + body + "\n-----END FILE " + n + "-----"
         return {
             "text": text,
             "model": model,
@@ -108,10 +62,18 @@ def test_prompt_contains_realizes_fixture_line(tmp_path):
             "model_call_error": None,
         }
 
-    bundle = _make_bundle()
-    test_author.author_test(
-        bundle, "mock", repo_root=tmp_path, llm_backend=mock_backend
-    )
+    bundle = {
+        "component_id": "comp-widget-maker",
+        "criterion_id": "AC-WIDGET-MAKER-001",
+        "covers": "R-WIDGET-MAKER-001",
+        "criterion_text": "Given a widget, When made, Then it exists.",
+        "requirement_text": "R-WIDGET-MAKER-001 — The maker MUST make a widget.",
+        "interface": "make_widget() -> dict",
+        "glossary": "",
+        "dependency_interfaces": {},
+    }
+
+    test_author.author_test(bundle, "mock", repo_root=repo_root, llm_backend=mock_backend)
 
     assert prompts, "the mock model was never called"
     first_prompt = prompts[0]

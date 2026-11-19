@@ -1,47 +1,52 @@
-# hotdocs-criterion: sha256:1199be166408761e7f0513187d375a0a4f71e5675e4433ba9f7eb607afc98db9
+# hotdocs-criterion: sha256:a7a4e22c2f817db4292205edac23f8064653076c1f37444061a67680fa4e7ae7
 import re
 
 import test_author
 
 
-class _Bundle(dict):
-    """A CriterionBundle stand-in readable both as a mapping and by attribute."""
+PROBE_STANDIN_SOURCE = (
+    "class _Report:\n"
+    "    def __init__(self):\n"
+    "        self.ok = True\n"
+    "        self.findings = []\n"
+    "        self.tests_run = 1\n"
+    "        self.tests_reached = 1\n"
+    "\n"
+    "    def to_dict(self):\n"
+    "        return {\n"
+    "            'ok': self.ok,\n"
+    "            'findings': list(self.findings),\n"
+    "            'tests_run': self.tests_run,\n"
+    "            'tests_reached': self.tests_reached,\n"
+    "        }\n"
+    "\n"
+    "\n"
+    "def probe(test_source, criterion_bundle, module_name, *, timeout=60.0, interpreter=None):\n"
+    "    return _Report()\n"
+)
 
-    def __getattr__(self, name):
-        try:
-            return self[name]
-        except KeyError:
-            raise AttributeError(name)
+VALID_TEST_FILE = "def test_placeholder():\n    assert True\n"
 
-
-def _make_bundle(module_names=None):
-    data = {
-        "component_id": "comp-widget-maker",
-        "criterion_id": "AC-WIDGET-MAKER-001",
-        "covers": "R-WIDGET-MAKER-001",
-        "criterion_text": "Given x = 2\nWhen make(x) is called\nThen it returns 4",
-        "requirement_text": "# R-WIDGET-MAKER-001\n\n**R-WIDGET-MAKER-001** — `make(x)` MUST return `2 * x`.",
-        "interface": "# Library\n\n```\nmake(x: int) -> int\n```",
-        "glossary": "# Glossary\n\n- **Widget** — a test term.",
-        "dependency_interfaces": {},
-    }
-    if module_names is not None:
-        data["module_names"] = list(module_names)
-    return _Bundle(data)
-
-
-_NONCE_RE = re.compile(r"-----BEGIN FILE ([0-9a-f]{32})-----")
+NONCE_RE = re.compile(r"-----BEGIN FILE ([0-9a-f]{32})-----")
 
 
-def _make_backend(recorded):
+def _setup_repo(repo_root, monkeypatch):
+    repo_root.mkdir(parents=True, exist_ok=True)
+    probe_dir = repo_root / "gen" / "test-probe"
+    probe_dir.mkdir(parents=True, exist_ok=True)
+    (probe_dir / "test_probe.py").write_text(PROBE_STANDIN_SOURCE, encoding="utf-8")
+    monkeypatch.chdir(repo_root)
+    monkeypatch.delenv("VAR_CACHE_STORE_URL", raising=False)
+
+
+def _make_mock(prompts):
     def backend(prompt, model, **params):
-        recorded.append(prompt)
-        match = _NONCE_RE.search(prompt)
-        nonce = match.group(1) if match else "0" * 32
+        prompts.append(prompt)
+        nonce = NONCE_RE.findall(prompt)[-1]
         text = (
             "-----BEGIN FILE " + nonce + "-----\n"
-            + "def test_ok():\n    assert True\n"
-            + "-----END FILE " + nonce + "-----"
+            + VALID_TEST_FILE
+            + "\n-----END FILE " + nonce + "-----"
         )
         return {
             "text": text,
@@ -53,28 +58,49 @@ def _make_backend(recorded):
     return backend
 
 
-def test_prompt_holds_lint_self_check_block_with_derived_module(tmp_path):
-    recorded = []
-    bundle = _make_bundle()
+def _base_bundle():
+    return {
+        "component_id": "comp-widget-maker",
+        "criterion_id": "AC-WIDGET-MAKER-001",
+        "covers": "R-WIDGET-MAKER-001",
+        "criterion_text": "Given a widget\nWhen made\nThen it exists",
+        "requirement_text": "R-WIDGET-MAKER-001 - The widget MUST be made.",
+        "interface": "make_widget() -> dict",
+        "glossary": "",
+        "dependency_interfaces": {},
+    }
+
+
+def test_prompt_holds_lint_block_with_derived_module_name(tmp_path, monkeypatch):
+    repo_root = tmp_path / "repo_derived"
+    _setup_repo(repo_root, monkeypatch)
+    prompts = []
+    bundle = _base_bundle()
+
     test_author.author_test(
-        bundle, "mock", repo_root=tmp_path, llm_backend=_make_backend(recorded)
+        bundle, "mock", repo_root=repo_root, llm_backend=_make_mock(prompts)
     )
-    assert recorded, "the mock model was never called"
-    prompt = recorded[0]
-    lines = prompt.splitlines()
+
+    assert prompts, "mock model was never called"
+    first = prompts[0]
+    lines = first.splitlines()
     assert "    import widget_maker" in lines
     assert "    assert spec_linter.lint(None, repo_root).hard_failures == 0" in lines
-    assert "@MODULE@" not in prompt
+    assert "@MODULE@" not in first
 
 
-def test_prompt_uses_first_module_name_when_given(tmp_path):
-    recorded = []
-    bundle = _make_bundle(module_names=["alpha_mod", "beta_mod"])
+def test_prompt_uses_first_module_name_when_given(tmp_path, monkeypatch):
+    repo_root = tmp_path / "repo_module_names"
+    _setup_repo(repo_root, monkeypatch)
+    prompts = []
+    bundle = _base_bundle()
+    bundle["module_names"] = ["alpha_mod", "beta_mod"]
+
     test_author.author_test(
-        bundle, "mock", repo_root=tmp_path, llm_backend=_make_backend(recorded)
+        bundle, "mock", repo_root=repo_root, llm_backend=_make_mock(prompts)
     )
-    assert recorded, "the mock model was never called"
-    prompt = recorded[0]
-    lines = prompt.splitlines()
+
+    assert prompts, "mock model was never called"
+    lines = prompts[0].splitlines()
     assert "    import alpha_mod" in lines
     assert "    import widget_maker" not in lines

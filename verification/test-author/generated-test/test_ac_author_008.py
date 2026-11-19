@@ -1,9 +1,10 @@
 # hotdocs-criterion: sha256:b1c690e4752c8972b48ed08820ffbb5b82eccbf003369d902ee61d6113418a59
+import dataclasses
+import json
 import logging
 import os
 import re
 import secrets
-from pathlib import Path
 
 import test_author
 
@@ -12,102 +13,65 @@ def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-class _Bundle(dict):
-    """A CriterionBundle stand-in readable both as a mapping and by attribute."""
-
-    def __getattr__(self, name):
-        try:
-            return self[name]
-        except KeyError:
-            raise AttributeError(name)
+def body(content):
+    first, _, rest = content.partition("\n")
+    return rest if first.startswith("# hotdocs-criterion:") else content
 
 
-_NONCE_RE = re.compile(r"-----BEGIN FILE ([0-9a-f]{32})-----")
-
-_EXTRACTED = (
-    "import foo\n"
+TEST_BODY = (
+    "import widget_maker\n"
     "\n"
     "\n"
-    "def test_foo_doubles():\n"
-    "    assert foo.foo(2) == 4\n"
+    "def test_widget():\n"
+    "    assert widget_maker.make() is not None\n"
 )
 
 
-def _make_bundle():
-    return _Bundle(
-        component_id="comp-foo",
-        criterion_id="AC-FOO-001",
-        covers="R-FOO-001",
-        criterion_text=(
-            "Given x = 2\n"
-            "When foo(x) is called\n"
-            "Then it returns 4\n"
-        ),
-        requirement_text="**R-FOO-001** \u2014 `foo(x)` MUST return `2 * x`.",
-        interface="# Library\n\n```\nfoo(x: int) -> int\n```\n",
-        glossary="# Glossary\n\n- **Foo** \u2014 a test term.\n",
-        dependency_interfaces={},
-        module_names=["foo"],
+def _write_probe_stand_in(repo_root, log_path):
+    probe_dir = repo_root / "gen" / "test-probe"
+    probe_dir.mkdir(parents=True, exist_ok=True)
+    source = (
+        "class _Report:\n"
+        "    def __init__(self):\n"
+        "        self.ok = True\n"
+        "        self.findings = []\n"
+        "        self.tests_run = 1\n"
+        "        self.tests_reached = 1\n"
+        "\n"
+        "    def to_dict(self):\n"
+        "        return {'ok': self.ok, 'findings': list(self.findings),\n"
+        "                'tests_run': self.tests_run, 'tests_reached': self.tests_reached}\n"
+        "\n"
+        "\n"
+        "def probe(test_source, criterion_bundle, module_name, *, timeout=60.0, interpreter=None):\n"
+        "    with open(" + repr(str(log_path)) + ", 'a', encoding='utf-8') as fh:\n"
+        "        fh.write('probe\\n')\n"
+        "    return _Report()\n"
     )
+    (probe_dir / "test_probe.py").write_text(source, encoding="utf-8")
 
 
-def _all_text_under(root):
-    chunks = []
-    for p in Path(root).rglob("*"):
-        chunks.append(str(p))
-        if p.is_file():
-            try:
-                chunks.append(p.read_bytes().decode("utf-8", errors="ignore"))
-            except OSError:
-                pass
-    return "\n".join(chunks)
-
-
-def test_api_key_never_appears_in_result_or_logs(tmp_path, monkeypatch, caplog, capsys):
-    api_key = "sk-ant-api03-SENTINEL" + secrets.token_hex(24)
-    monkeypatch.setenv("ANTHROPIC_API_KEY", api_key)
-    monkeypatch.setenv("VAR_ANTHROPIC_API_KEY", api_key)
-    monkeypatch.delenv("VAR_CACHE_STORE_URL", raising=False)
-
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    monkeypatch.chdir(tmp_path)
-
-    calls_log = tmp_path / "backend_calls.log"
-
-    def backend(prompt, model, **params):
-        with open(calls_log, "a") as fh:
-            fh.write("call\n")
-        m = _NONCE_RE.search(prompt)
-        assert m is not None, "prompt carries no BEGIN FILE nonce"
-        n = m.group(1)
-        text = "-----BEGIN FILE " + n + "-----\n" + _EXTRACTED + "\n-----END FILE " + n + "-----"
-        return {
-            "text": text,
-            "model": model,
-            "backend": "mock",
-            "model_call_error": None,
-        }
-
-    caplog.set_level(logging.DEBUG)
-
-    result = test_author.author_test(
-        _make_bundle(),
-        "claude-sonnet-5",
-        seed=0,
-        repo_root=repo_root,
-        llm_backend=backend,
+def _mock_backend(prompt, model, **params):
+    nonce = re.findall(r"-----BEGIN FILE ([0-9a-f]{32})-----", prompt)[-1]
+    text = (
+        "-----BEGIN FILE " + nonce + "-----\n"
+        + TEST_BODY
+        + "\n-----END FILE " + nonce + "-----"
     )
+    return {
+        "text": text,
+        "model": model,
+        "backend": "mock",
+        "model_call_error": None,
+    }
 
-    # The call was successful.
-    assert field(result, "model_call_error") is None
-    file_obj = field(result, "file")
-    assert file_obj is not None
-    content = field(file_obj, "content")
-    assert isinstance(content, str) and content
-    assert calls_log.is_file() or field(result, "cache_hit")
 
-    # Nothing in the TestAuthoringResult carries the key.
+def _result_texts(result):
+    texts = [repr(result), str(result)]
+    if dataclasses.is_dataclass(result) and not isinstance(result, type):
+        texts.append(json.dumps(dataclasses.asdict(result), default=str))
+    elif isinstance(result, dict):
+        texts.append(json.dumps(result, default=str))
     for name in (
         "component_id",
         "criterion_id",
@@ -117,26 +81,76 @@ def test_api_key_never_appears_in_result_or_logs(tmp_path, monkeypatch, caplog, 
         "cache_hit",
         "file",
         "model_call_error",
+        "repair_attempts",
+        "probe_findings",
     ):
-        value = field(result, name)
-        assert api_key not in repr(value), name
-        assert api_key not in str(value), name
-    assert api_key not in repr(result)
-    assert api_key not in str(result)
-    assert api_key not in content
-    assert api_key not in str(field(file_obj, "path"))
+        texts.append(repr(field(result, name)))
+    return texts
 
-    # Nothing logged through `logging` carries the key.
-    assert api_key not in caplog.text
-    for record in caplog.records:
-        assert api_key not in record.getMessage()
-        assert api_key not in repr(record.args)
 
-    # Nothing printed carries the key.
+def test_api_key_never_appears_in_result_or_logs(tmp_path, monkeypatch, capsys, caplog):
+    sentinel = "sk-ant-hotdocs-SENTINEL-" + secrets.token_hex(16)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", sentinel)
+    monkeypatch.setenv("VAR_ANTHROPIC_API_KEY", sentinel)
+    monkeypatch.delenv("VAR_CACHE_STORE_URL", raising=False)
+
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    monkeypatch.chdir(repo_root)
+
+    probe_log = tmp_path / "probe_calls.log"
+    _write_probe_stand_in(repo_root, probe_log)
+
+    bundle = {
+        "component_id": "comp-widget-maker",
+        "criterion_id": "AC-WIDGET-MAKER-001",
+        "covers": "R-WIDGET-MAKER-001",
+        "criterion_text": "Given a widget\nWhen made\nThen it exists",
+        "requirement_text": "R-WIDGET-MAKER-001 - make() MUST return a widget.",
+        "interface": "make() -> Widget",
+        "glossary": "",
+        "dependency_interfaces": {},
+    }
+
+    caplog.set_level(logging.DEBUG)
+
+    result = test_author.author_test(
+        bundle, "mock", 0, repo_root=repo_root, llm_backend=_mock_backend
+    )
+
+    # The call was successful.
+    assert field(result, "model_call_error") is None
+    file_value = field(result, "file")
+    assert file_value is not None
+    assert body(field(file_value, "content")) == TEST_BODY
+    assert probe_log.is_file()
+    assert probe_log.read_text(encoding="utf-8").count("probe\n") >= 1
+
+    # The key's value appears nowhere in the returned result.
+    for text in _result_texts(result):
+        assert sentinel not in text
+
+    # Nor in captured stdout/stderr or Python logging output.
     captured = capsys.readouterr()
-    assert api_key not in captured.out
-    assert api_key not in captured.err
+    assert sentinel not in captured.out
+    assert sentinel not in captured.err
+    assert sentinel not in caplog.text
+    for record in caplog.records:
+        assert sentinel not in record.getMessage()
 
-    # Nothing written to disk (written test file, cache, call logs, provenance) carries the key.
-    assert api_key not in _all_text_under(repo_root)
-    assert api_key not in _all_text_under(tmp_path)
+    # Nor in any file written under repo_root: the written test, the cache
+    # entry, and llm-endpoint's call logs under .hotdocs/calls/.
+    needle = sentinel.encode("utf-8")
+    checked = 0
+    for dirpath, _dirnames, filenames in os.walk(tmp_path):
+        for name in filenames:
+            path = os.path.join(dirpath, name)
+            with open(path, "rb") as fh:
+                data = fh.read()
+            assert needle not in data, "API key value found in " + path
+            checked += 1
+    assert checked > 0
+
+    written = repo_root / field(file_value, "path")
+    assert written.is_file()
+    assert sentinel not in written.read_text(encoding="utf-8")

@@ -1,155 +1,140 @@
-# hotdocs-criterion: sha256:3745d3a5f20e1eb2114570f43981eb024d57d6cfb253f1b8681bb6871db11e57
-import re
+# hotdocs-criterion: sha256:cc17af5dc84a304a910327bcc8f1b450471c368042d4f67b05ee38785ca5777e
+import dataclasses
+import json
 from pathlib import Path
+
+import pytest
 
 import test_author
 
 
-ERD_GRAPH_INTERFACE = (
-    "# Library\n"
-    "\n"
-    "```\n"
-    "build_graph(manifest, *, plan=None, dbt_links=None) -> dict\n"
-    "```\n"
+@dataclasses.dataclass
+class FakeResult:
+    component_id: str
+    criterion_id: str
+    model: str
+    seed: int
+    prompt_version: str
+    cache_hit: bool
+    file: object
+    model_call_error: object
+    repair_attempts: int
+    probe_findings: list
+
+
+FIXED_BUNDLE = {
+    "component_id": "comp-foo",
+    "criterion_id": "AC-FOO-001",
+    "covers": "R-FOO-001",
+    "criterion_text": "Given x When y Then z",
+    "requirement_text": "R-FOO-001 text",
+    "interface": "",
+    "glossary": "",
+    "dependency_interfaces": {},
+    "testing": "",
+}
+
+
+def plant_assembler(root):
+    base = Path(root) / "gen" / "spec-bundle-assembler"
+    base.mkdir(parents=True, exist_ok=True)
+    source = (
+        "def assemble(component_id, repo_root, mode='cold'):\n"
+        "    raise RuntimeError('not used')\n"
+        "\n"
+        "\n"
+        "def assemble_criterion(component_id, criterion_id, repo_root):\n"
+        "    return dict(" + repr(FIXED_BUNDLE) + ")\n"
+    )
+    (base / "spec_bundle_assembler.py").write_text(source, encoding="utf-8")
+
+
+def make_stub(seeds, model_call_error):
+    def stub(bundle, model, seed=0, *, repo_root=None, llm_backend=None):
+        seeds.append(seed)
+        if model_call_error is None:
+            file = {"path": "p.py", "content": "x"}
+        else:
+            file = None
+        return FakeResult(
+            component_id="comp-foo",
+            criterion_id="AC-FOO-001",
+            model=model,
+            seed=seed,
+            prompt_version="v1",
+            cache_hit=False,
+            file=file,
+            model_call_error=model_call_error,
+            repair_attempts=0,
+            probe_findings=[],
+        )
+
+    return stub
+
+
+@pytest.fixture
+def cli_root(tmp_path, monkeypatch):
+    root = tmp_path / "repo"
+    root.mkdir()
+    monkeypatch.chdir(root)
+    monkeypatch.delenv("VAR_CACHE_STORE_URL", raising=False)
+    plant_assembler(root)
+    return root
+
+
+def valid_argv(root):
+    return ["comp-foo", "AC-FOO-001", "--model", "m", "--repo-root", str(root)]
+
+
+def test_success_text_and_json(cli_root, monkeypatch, capsys):
+    seeds = []
+    monkeypatch.setattr(test_author, "author_test", make_stub(seeds, None))
+
+    code = test_author.main(valid_argv(cli_root))
+    out, err = capsys.readouterr()
+    assert code == 0
+    assert out == "AC-FOO-001: wrote p.py\n"
+    assert seeds == [0]
+
+    code = test_author.main(valid_argv(cli_root) + ["--format=json"])
+    out, err = capsys.readouterr()
+    assert code == 0
+    doc = json.loads(out)
+    assert doc["criterion_id"] == "AC-FOO-001"
+
+
+def test_model_call_error(cli_root, monkeypatch, capsys):
+    seeds = []
+    monkeypatch.setattr(
+        test_author,
+        "author_test",
+        make_stub(seeds, {"category": "network", "message": "down"}),
+    )
+    code = test_author.main(valid_argv(cli_root))
+    out, err = capsys.readouterr()
+    assert code == 1
+    assert out == "AC-FOO-001: model_call_error network: down\n"
+
+
+@pytest.mark.parametrize(
+    "extra, cause",
+    [
+        (None, "expected <component-id> and <criterion-id>"),
+        (["--format=xml"], "--format must be json or text"),
+        (["--seed=x"], "--seed must be an integer"),
+        (["--bogus"], "unknown argument --bogus"),
+        (["--model"], "--model requires a value"),
+    ],
 )
-
-
-class _Bundle(dict):
-    """A CriterionBundle stand-in readable both as a mapping and by attribute."""
-
-    def __getattr__(self, name):
-        try:
-            return self[name]
-        except KeyError:
-            raise AttributeError(name)
-
-
-def field(value, name):
-    return value[name] if isinstance(value, dict) else getattr(value, name)
-
-
-def body(content):
-    first, _, rest = content.partition("\n")
-    return rest if first.startswith("# hotdocs-criterion:") else content
-
-
-def make_bundle():
-    return _Bundle(
-        component_id="comp-erd-viewer",
-        criterion_id="AC-ERD-VIEWER-001",
-        covers="R-ERD-VIEWER-001",
-        criterion_text=(
-            "Given a manifest\n"
-            "When render(manifest) is called\n"
-            "Then it returns a non-empty string\n"
-        ),
-        requirement_text=(
-            "# R-ERD-VIEWER-001\n\n"
-            "**R-ERD-VIEWER-001** — `render(manifest)` MUST return a non-empty string."
-        ),
-        interface="# Library\n\n```\nrender(manifest: dict) -> str\n```\n",
-        glossary="# Glossary\n\n- **Foo** — a test term.\n",
-        dependency_interfaces={"comp-erd-graph": ERD_GRAPH_INTERFACE},
-        module_names=["erd_viewer"],
-    )
-
-
-_NONCE_RE = re.compile(r"-----BEGIN FILE ([0-9a-f]{32})-----")
-
-
-def make_backend(content, calls):
-    def backend(prompt, model, **params):
-        calls.append(prompt)
-        match = _NONCE_RE.search(prompt)
-        assert match is not None, "no nonce found in prompt"
-        n = match.group(1)
-        text = "-----BEGIN FILE " + n + "-----\n" + content + "\n-----END FILE " + n + "-----"
-        return {
-            "text": text,
-            "model": model,
-            "backend": "mock",
-            "model_call_error": None,
-        }
-
-    return backend
-
-
-def test_unused_top_level_helper_is_not_a_fake(tmp_path, monkeypatch):
-    monkeypatch.delenv("VAR_CACHE_STORE_URL", raising=False)
-    repo_root = tmp_path / "repo_helper"
-    repo_root.mkdir()
-
-    content = (
-        "import erd_viewer\n"
-        "\n"
-        "\n"
-        "def build_graph():\n"
-        "    return {}\n"
-        "\n"
-        "\n"
-        "def test_helper_used_locally():\n"
-        "    graph = build_graph()\n"
-        "    assert graph == {}\n"
-        "    assert isinstance(erd_viewer.render({\"nodes\": []}), str)"
-    )
-    calls = []
-    result = test_author.author_test(
-        make_bundle(),
-        "claude-sonnet-5",
-        0,
-        repo_root=repo_root,
-        llm_backend=make_backend(content, calls),
-    )
-
-    assert calls, "mock backend was never called"
-    assert field(result, "model_call_error") is None
-
-    file_info = field(result, "file")
-    assert file_info is not None
-    returned = field(file_info, "content")
-    assert body(returned) == content
-
-    path = Path(field(file_info, "path"))
-    if not path.is_absolute():
-        path = repo_root / path
-    assert path.is_file()
-    assert body(path.read_text()) == content
-
-
-def test_fake_module_source_with_wrong_arity_is_rejected(tmp_path, monkeypatch):
-    monkeypatch.delenv("VAR_CACHE_STORE_URL", raising=False)
-    repo_root = tmp_path / "repo_fake"
-    repo_root.mkdir()
-
-    fake_source = "def build_graph():\n    return {}\n"
-    content = (
-        "import erd_viewer\n"
-        "\n"
-        "FAKE_SOURCE = " + repr(fake_source) + "\n"
-        "\n"
-        "\n"
-        "def test_with_fake_dependency(tmp_path):\n"
-        "    target = tmp_path / 'gen' / 'erd-graph' / 'erd_graph.py'\n"
-        "    target.parent.mkdir(parents=True)\n"
-        "    target.write_text(FAKE_SOURCE)\n"
-        "    assert isinstance(erd_viewer.render({'nodes': []}), str)"
-    )
-    calls = []
-    result = test_author.author_test(
-        make_bundle(),
-        "claude-sonnet-5",
-        0,
-        repo_root=repo_root,
-        llm_backend=make_backend(content, calls),
-    )
-
-    assert calls, "mock backend was never called"
-    err = field(result, "model_call_error")
-    assert err is not None
-    assert field(err, "category") == "fake_signature_mismatch"
-    try:
-        message = field(err, "message")
-    except (KeyError, AttributeError):
-        message = None
-    named = (message is not None and "build_graph" in str(message)) or "build_graph" in str(err)
-    assert named, "error does not name build_graph: " + repr(err)
+def test_usage_errors(cli_root, monkeypatch, capsys, extra, cause):
+    seeds = []
+    monkeypatch.setattr(test_author, "author_test", make_stub(seeds, None))
+    if extra is None:
+        argv = ["comp-foo"]
+    else:
+        argv = valid_argv(cli_root) + extra
+    code = test_author.main(argv)
+    out, err = capsys.readouterr()
+    assert code == 2
+    assert out == ""
+    assert err.startswith("usage error: " + cause)

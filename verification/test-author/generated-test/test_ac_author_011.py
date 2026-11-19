@@ -1,90 +1,73 @@
-# hotdocs-criterion: sha256:b047ca0bf3500ca9998eeef0fe2f562d9350a675d9e406cffea7bd79d7fc9c90
-import dataclasses
+# hotdocs-criterion: sha256:96c08b4e776c6ec3c57229e460154c8042ca41a153cc8a5b846b94a4ee31e6d6
 import re
-from dataclasses import dataclass, field as dc_field
+from pathlib import Path
 
 import test_author
 
 
-BLOCK_LINE = "a fake MUST return every field, never a bare list, string or number in its place"
-DEP_ID = "comp-zebra-quux"
-DEP_IFACE = "zq_lookup(x: int, y: str) -> ZqResult"
+ZQ_ID = "comp-zebra-quux"
+ZQ_INTERFACE = "zq_lookup(x: int, y: str) -> ZqResult"
+FAKE_RULE = "a fake MUST return every field, never a bare list, string or number in its place"
 
-NONCE_RE = re.compile(r"-----BEGIN FILE ([0-9a-f]{32})-----")
+TEST_FILE = (
+    "import widget_maker\n"
+    "\n"
+    "\n"
+    "def test_widget():\n"
+    "    assert widget_maker.make() is not None\n"
+)
 
 
 def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-@dataclass
-class Bundle:
-    component_id: str
-    criterion_id: str
-    covers: str
-    criterion_text: str
-    requirement_text: str
-    interface: str
-    glossary: str
-    dependency_interfaces: dict = dc_field(default_factory=dict)
-    module_names: list = dc_field(default_factory=list)
-
-    def __getitem__(self, key):
-        try:
-            return getattr(self, key)
-        except AttributeError:
-            raise KeyError(key)
-
-    def get(self, key, default=None):
-        return getattr(self, key, default)
-
-    def keys(self):
-        return [f.name for f in dataclasses.fields(self)]
-
-    def __contains__(self, key):
-        return key in self.keys()
-
-    def __iter__(self):
-        return iter(self.keys())
-
-    def items(self):
-        return [(k, getattr(self, k)) for k in self.keys()]
-
-    def values(self):
-        return [getattr(self, k) for k in self.keys()]
-
-
 def make_bundle(dependency_interfaces):
-    return Bundle(
-        component_id="comp-widget-maker",
-        criterion_id="AC-WIDGET-MAKER-001",
-        covers="R-WIDGET-MAKER-001",
-        criterion_text=(
-            "Given a widget spec\n"
-            "When make_widget(spec) is called\n"
-            "Then it returns a widget"
-        ),
-        requirement_text=(
-            "# R-WIDGET-MAKER-001\n\n"
-            "**R-WIDGET-MAKER-001** — `make_widget(spec)` MUST return a widget."
-        ),
-        interface="# Library\n\n```\nmake_widget(spec: dict) -> dict\n```",
-        glossary="# Glossary\n\n- **Widget** — a test term.",
-        dependency_interfaces=dict(dependency_interfaces),
-        module_names=["widget_maker"],
+    return {
+        "component_id": "comp-widget-maker",
+        "criterion_id": "AC-WIDGET-MAKER-001",
+        "covers": "R-WIDGET-MAKER-001",
+        "criterion_text": "Given a widget\nWhen make() is called\nThen a widget is returned",
+        "requirement_text": "R-WIDGET-MAKER-001 make() MUST return a widget.",
+        "interface": "make() -> Widget",
+        "glossary": "",
+        "dependency_interfaces": dependency_interfaces,
+    }
+
+
+def write_probe_stand_in(repo_root, log_path):
+    probe_dir = Path(repo_root) / "gen" / "test-probe"
+    probe_dir.mkdir(parents=True, exist_ok=True)
+    source = (
+        "class _Report:\n"
+        "    def __init__(self):\n"
+        "        self.ok = True\n"
+        "        self.findings = []\n"
+        "        self.tests_run = 1\n"
+        "        self.tests_reached = 1\n"
+        "\n"
+        "    def to_dict(self):\n"
+        "        return {'ok': self.ok, 'findings': list(self.findings),\n"
+        "                'tests_run': self.tests_run, 'tests_reached': self.tests_reached}\n"
+        "\n"
+        "\n"
+        "def probe(test_source, criterion_bundle, module_name, *, timeout=60.0, interpreter=None):\n"
+        "    with open(" + repr(str(log_path)) + ", 'a', encoding='utf-8') as fh:\n"
+        "        fh.write('probe\\n')\n"
+        "    return _Report()\n"
     )
+    (probe_dir / "test_probe.py").write_text(source, encoding="utf-8")
 
 
-def make_backend(prompts):
+def make_mock(prompts):
     def backend(prompt, model, **params):
         prompts.append(prompt)
-        m = NONCE_RE.search(prompt)
-        nonce = m.group(1) if m else ""
-        content = "import widget_maker\n\n\ndef test_placeholder():\n    assert True"
+        nonces = re.findall(r"-----BEGIN FILE ([0-9a-f]{32})-----", prompt)
+        n = nonces[-1]
         text = (
-            "-----BEGIN FILE " + nonce + "-----\n"
-            + content
-            + "\n-----END FILE " + nonce + "-----"
+            "-----BEGIN FILE " + n + "-----\n"
+            + TEST_FILE
+            + "\n-----END FILE " + n + "-----"
         )
         return {
             "text": text,
@@ -96,34 +79,34 @@ def make_backend(prompts):
     return backend
 
 
-def test_prompt_includes_dependency_interface_and_fake_rule(tmp_path):
-    repo_root = tmp_path / "repo_with_dep"
+def run(tmp_path, monkeypatch, name, dependency_interfaces):
+    repo_root = tmp_path / name
     repo_root.mkdir()
+    monkeypatch.chdir(repo_root)
+    monkeypatch.delenv("VAR_CACHE_STORE_URL", raising=False)
+    log_path = tmp_path / (name + "-probe.log")
+    write_probe_stand_in(repo_root, log_path)
     prompts = []
-    bundle = make_bundle({DEP_ID: DEP_IFACE})
-
-    test_author.author_test(
-        bundle, "mock", repo_root=repo_root, llm_backend=make_backend(prompts)
-    )
-
-    assert len(prompts) >= 1, "mock model was never called"
-    first = prompts[0]
-    assert DEP_ID in first
-    assert DEP_IFACE in first
-    assert BLOCK_LINE in first
-
-
-def test_empty_dependency_interfaces_adds_no_entry(tmp_path):
-    repo_root = tmp_path / "repo_no_dep"
-    repo_root.mkdir()
-    prompts = []
-    bundle = make_bundle({})
-
     result = test_author.author_test(
-        bundle, "mock", repo_root=repo_root, llm_backend=make_backend(prompts)
+        make_bundle(dependency_interfaces),
+        "mock",
+        repo_root=repo_root,
+        llm_backend=make_mock(prompts),
     )
+    return result, prompts
 
-    assert field(result, "model_call_error") is None
-    assert len(prompts) >= 1, "mock model was never called"
+
+def test_prompt_includes_dependency_interfaces_and_fake_rule(tmp_path, monkeypatch):
+    result, prompts = run(tmp_path, monkeypatch, "with-deps", {ZQ_ID: ZQ_INTERFACE})
+    assert prompts, "mock model was never called"
     first = prompts[0]
-    assert DEP_ID not in first
+    assert ZQ_ID in first
+    assert ZQ_INTERFACE in first
+    assert FAKE_RULE in first
+
+
+def test_empty_dependency_interfaces_adds_no_entry(tmp_path, monkeypatch):
+    result, prompts = run(tmp_path, monkeypatch, "no-deps", {})
+    assert field(result, "model_call_error") is None
+    assert prompts, "mock model was never called"
+    assert ZQ_ID not in prompts[0]

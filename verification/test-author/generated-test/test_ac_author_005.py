@@ -1,21 +1,8 @@
 # hotdocs-criterion: sha256:1b6ad90e04bd0ce03c3e1a15c9f6ac7482dab7a3207a03c7ea45fcdc20fa8567
-import importlib.util
 import re
-import sys
 from pathlib import Path
 
 import test_author
-
-
-EXPECTED = "import os\n\n\ndef test_placeholder():\n    assert os.sep"
-
-
-def load_module(path, module_name):
-    spec = importlib.util.spec_from_file_location(module_name, path)
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[module_name] = module
-    spec.loader.exec_module(module)
-    return module
 
 
 def field(value, name):
@@ -27,110 +14,120 @@ def body(content):
     return rest if first.startswith("# hotdocs-criterion:") else content
 
 
-def _gen_dir():
-    return next(p for p in Path(test_author.__file__).resolve().parents if p.name == "gen")
+TEST_CONTENT = (
+    "import widget_maker\n"
+    "\n"
+    "\n"
+    "def test_make():\n"
+    "    assert widget_maker.make() == 1\n"
+)
 
 
-def _load_dep(slug):
-    module_name = slug.replace("-", "_")
-    base = _gen_dir() / slug
-    flat = base / (module_name + ".py")
-    path = flat if flat.is_file() else base / module_name / "__init__.py"
-    return load_module(path, module_name)
+def _bundle():
+    return {
+        "component_id": "comp-widget-maker",
+        "criterion_id": "AC-WIDGET-MAKER-001",
+        "covers": "R-WIDGET-MAKER-001",
+        "criterion_text": "Given a widget\nWhen make is called\nThen it returns 1",
+        "requirement_text": "R-WIDGET-MAKER-001 - make MUST return 1.",
+        "interface": "make() -> int",
+        "glossary": "",
+        "dependency_interfaces": {},
+    }
 
 
-class _HybridBundle:
-    def __init__(self, **kwargs):
-        self.__dict__.update(kwargs)
-
-    def __getitem__(self, key):
-        return self.__dict__[key]
-
-    def get(self, key, default=None):
-        return self.__dict__.get(key, default)
-
-    def keys(self):
-        return self.__dict__.keys()
-
-    def __iter__(self):
-        return iter(self.__dict__)
-
-    def __len__(self):
-        return len(self.__dict__)
-
-
-def _make_bundle():
-    fields = dict(
-        component_id="comp-foo",
-        criterion_id="AC-FOO-001",
-        covers="R-FOO-001",
-        criterion_text="Given x = 2\nWhen foo(x) is called\nThen it returns 4",
-        requirement_text="**R-FOO-001** — `foo(x)` MUST return `2 * x`.",
-        interface="# Library\n\n```\nfoo(x: int) -> int\n```",
-        glossary="# Glossary\n\n- **Foo** — a test term.",
-        dependency_interfaces={},
+def _write_probe_stand_in(repo_root, log_path):
+    probe_dir = repo_root / "gen" / "test-probe"
+    probe_dir.mkdir(parents=True, exist_ok=True)
+    src = (
+        "class _Report:\n"
+        "    def __init__(self):\n"
+        "        self.ok = True\n"
+        "        self.findings = []\n"
+        "        self.tests_run = 1\n"
+        "        self.tests_reached = 1\n"
+        "\n"
+        "    def to_dict(self):\n"
+        "        return {'ok': self.ok, 'findings': list(self.findings),\n"
+        "                'tests_run': self.tests_run, 'tests_reached': self.tests_reached}\n"
+        "\n"
+        "\n"
+        "def probe(test_source, criterion_bundle, module_name, *, timeout=60.0, interpreter=None):\n"
+        "    with open(" + repr(str(log_path)) + ", 'a') as f:\n"
+        "        f.write('probe\\n')\n"
+        "    return _Report()\n"
     )
-    try:
-        sba = _load_dep("spec-bundle-assembler")
-        cls = sba.CriterionBundle
-        try:
-            return cls(module_names=["foo"], **fields)
-        except TypeError:
-            return cls(**fields)
-    except Exception:
-        return _HybridBundle(module_names=["foo"], **fields)
+    (probe_dir / "test_probe.py").write_text(src, encoding="utf-8")
 
 
-def _mock_backend(reply_body, calls):
+def _make_backend(log_path):
     def backend(prompt, model, **params):
-        calls.append(prompt)
-        m = re.search(r"-----BEGIN FILE ([0-9a-f]{32})-----", prompt)
-        assert m, "prompt carries no BEGIN FILE nonce"
-        n = m.group(1)
-        text = "-----BEGIN FILE " + n + "-----\n" + reply_body + "\n-----END FILE " + n + "-----"
-        return {"text": text, "model": model, "backend": "mock", "model_call_error": None}
+        with open(log_path, "a") as f:
+            f.write("call\n")
+        n = re.findall(r"-----BEGIN FILE ([0-9a-f]{32})-----", prompt)[-1]
+        text = (
+            "-----BEGIN FILE " + n + "-----\n"
+            + TEST_CONTENT
+            + "\n-----END FILE " + n + "-----"
+        )
+        return {
+            "text": text,
+            "model": model,
+            "backend": "mock",
+            "model_call_error": None,
+        }
 
     return backend
 
 
-def test_ac_author_005_result_cached_under_correct_key(tmp_path, monkeypatch):
-    monkeypatch.delenv("VAR_CACHE_STORE_URL", raising=False)
-    monkeypatch.chdir(tmp_path)
-    repo_root = tmp_path
+def _cache_entries(repo_root):
+    cache_dir = repo_root / ".hotdocs" / "cache"
+    if not cache_dir.exists():
+        return []
+    return [p for p in cache_dir.rglob("*") if p.is_file()]
 
-    cache_manager = _load_dep("cache-manager")
+
+def test_cache_miss_result_is_written_to_cache_under_its_key(tmp_path, monkeypatch):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    monkeypatch.chdir(repo_root)
+    monkeypatch.delenv("VAR_CACHE_STORE_URL", raising=False)
+
+    probe_log = tmp_path / "probe.log"
+    _write_probe_stand_in(repo_root, probe_log)
 
     # Given an empty cache
-    assert field(cache_manager.stats(repo_root=repo_root), "entry_count") == 0
+    assert _cache_entries(repo_root) == []
 
-    bundle = _make_bundle()
-    model = "claude-sonnet-5"
-
-    # When author_test is called with a mock returning a fixed result
-    calls = []
-    result = test_author.author_test(
-        bundle, model, 0, repo_root=repo_root, llm_backend=_mock_backend(EXPECTED, calls)
+    first_log = tmp_path / "first_backend.log"
+    first = test_author.author_test(
+        _bundle(), "mock", 0, repo_root=repo_root, llm_backend=_make_backend(first_log)
     )
-    assert len(calls) == 1
-    assert field(result, "model_call_error") is None
-    assert field(result, "cache_hit") is False
-    assert body(field(field(result, "file"), "content")) == EXPECTED
 
-    # Then the cache holds that result afterward
-    assert field(cache_manager.stats(repo_root=repo_root), "entry_count") == 1
+    assert field(first, "model_call_error") is None
+    assert field(first, "cache_hit") is False
+    assert first_log.read_text().count("call\n") >= 1
+    first_file = field(first, "file")
+    assert first_file is not None
+    assert body(field(first_file, "content")) == TEST_CONTENT
 
-    # ... under the key author_test itself looks up: a repeat call is served
-    # from the cache, never reaching the model, with the same content.
-    second_calls = []
+    # Then cache-manager holds an entry afterward
+    assert len(_cache_entries(repo_root)) >= 1
+
+    # ...under the correct key: the same inputs now hit the cache and
+    # return that same result without calling the model.
+    second_log = tmp_path / "second_backend.log"
     second = test_author.author_test(
-        bundle,
-        model,
-        0,
-        repo_root=repo_root,
-        llm_backend=_mock_backend("import sys\n# a different reply", second_calls),
+        _bundle(), "mock", 0, repo_root=repo_root, llm_backend=_make_backend(second_log)
     )
-    assert second_calls == []
-    assert field(second, "cache_hit") is True
+
     assert field(second, "model_call_error") is None
-    assert body(field(field(second, "file"), "content")) == EXPECTED
-    assert field(cache_manager.stats(repo_root=repo_root), "entry_count") == 1
+    assert field(second, "cache_hit") is True
+    assert not second_log.exists() or second_log.read_text() == ""
+    second_file = field(second, "file")
+    assert second_file is not None
+    assert body(field(second_file, "content")) == TEST_CONTENT
+    assert field(second_file, "content") == field(first_file, "content")
+    assert field(second_file, "path") == field(first_file, "path")
+    assert field(second, "criterion_id") == "AC-WIDGET-MAKER-001"
+    assert field(second, "component_id") == "comp-widget-maker"

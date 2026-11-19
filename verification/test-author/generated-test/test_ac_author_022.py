@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:98938c90d2f9c4f907a8ea1007194e8b1e8087238e08ae8813c82bee41305a07
+# hotdocs-criterion: sha256:5ce4013d0e2aa8116fee0b41ce32bd2af4826f29ebc30a9cb476374f98668f64
 import re
 
 import test_author
@@ -10,55 +10,54 @@ EXPECTED_LINE = (
     "`repo_root` or a hash, so any guess is unreliable."
 )
 
-NONCE_RE = re.compile(r"-----BEGIN FILE ([0-9a-f]{32})-----")
 
-
-class Bundle(dict):
-    """A CriterionBundle stand-in readable both as a mapping and by attribute."""
-
-    def __getattr__(self, name):
-        try:
-            return self[name]
-        except KeyError:
-            raise AttributeError(name)
-
-
-def make_bundle():
-    return Bundle(
-        component_id="comp-widget-maker",
-        criterion_id="AC-WIDGET-MAKER-001",
-        covers="R-WIDGET-MAKER-001",
-        criterion_text=(
-            "Given x = 2\n"
-            "When make_widget(x) is called\n"
-            "Then it returns 4"
-        ),
-        requirement_text=(
-            "# R-WIDGET-MAKER-001\n\n"
-            "**R-WIDGET-MAKER-001** — `make_widget(x)` MUST return `2 * x`."
-        ),
-        interface="# Library\n\n```\nmake_widget(x: int) -> int\n```",
-        glossary="# Glossary\n\n- **Widget** — a test term.",
-        dependency_interfaces={},
+def _write_probe_stand_in(repo_root, log_path):
+    probe_dir = repo_root / "gen" / "test-probe"
+    probe_dir.mkdir(parents=True, exist_ok=True)
+    source = (
+        "class _Report:\n"
+        "    def __init__(self):\n"
+        "        self.ok = True\n"
+        "        self.findings = []\n"
+        "        self.tests_run = 1\n"
+        "        self.tests_reached = 1\n"
+        "\n"
+        "    def to_dict(self):\n"
+        "        return {\n"
+        "            'ok': self.ok,\n"
+        "            'findings': list(self.findings),\n"
+        "            'tests_run': self.tests_run,\n"
+        "            'tests_reached': self.tests_reached,\n"
+        "        }\n"
+        "\n"
+        "\n"
+        "def probe(test_source, criterion_bundle, module_name, *, timeout=60.0, interpreter=None):\n"
+        "    with open(" + repr(str(log_path)) + ", 'a', encoding='utf-8') as fh:\n"
+        "        fh.write('probe\\n')\n"
+        "    return _Report()\n"
     )
+    (probe_dir / "test_probe.py").write_text(source, encoding="utf-8")
 
 
-def test_prompt_contains_r_author_022_line(tmp_path, monkeypatch):
+def test_prompt_holds_r_author_022_line(tmp_path, monkeypatch):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    monkeypatch.chdir(repo_root)
     monkeypatch.delenv("VAR_CACHE_STORE_URL", raising=False)
 
+    probe_log = tmp_path / "probe_calls.log"
+    _write_probe_stand_in(repo_root, probe_log)
+
     prompts = []
+    test_body = "def test_widget():\n    assert True\n"
 
     def mock_backend(prompt, model, **params):
         prompts.append(prompt)
-        match = NONCE_RE.search(prompt)
-        nonce = match.group(1) if match else "0" * 32
+        nonce = re.findall(r"-----BEGIN FILE ([0-9a-f]{32})-----", prompt)[-1]
         text = (
             "-----BEGIN FILE " + nonce + "-----\n"
-            "import widget_maker\n"
-            "\n"
-            "def test_x():\n"
-            "    assert widget_maker.make_widget(2) == 4\n"
-            "-----END FILE " + nonce + "-----"
+            + test_body
+            + "\n-----END FILE " + nonce + "-----"
         )
         return {
             "text": text,
@@ -67,10 +66,21 @@ def test_prompt_contains_r_author_022_line(tmp_path, monkeypatch):
             "model_call_error": None,
         }
 
+    bundle = {
+        "component_id": "comp-widget-maker",
+        "criterion_id": "AC-WIDGET-MAKER-001",
+        "covers": "R-WIDGET-MAKER-001",
+        "criterion_text": "Given a widget, When made, Then it exists.",
+        "requirement_text": "R-WIDGET-MAKER-001 The maker MUST make widgets.",
+        "interface": "make_widget() -> dict",
+        "glossary": "",
+        "dependency_interfaces": {},
+    }
+
     test_author.author_test(
-        make_bundle(), "mock", repo_root=tmp_path, llm_backend=mock_backend
+        bundle, "mock", repo_root=repo_root, llm_backend=mock_backend
     )
 
-    assert len(prompts) >= 1, "the mock model was never called"
+    assert prompts, "the mock model was never called"
     first_prompt = prompts[0]
     assert EXPECTED_LINE in first_prompt.splitlines()

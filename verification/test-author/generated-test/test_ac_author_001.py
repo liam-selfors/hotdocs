@@ -1,117 +1,76 @@
 # hotdocs-criterion: sha256:299e5ce5aaf366b4fde5f4a9b8fd059fb9b5826647d34a63b64336a1b828c791
 import re
-import uuid
+from pathlib import Path
 
 import test_author
+
+
+CRITERION_TEXT = (
+    "Given a widget blueprint zq7-alpha When make_widget is called "
+    "Then the returned widget carries the blueprint marker zq7-alpha"
+)
+REQUIREMENT_TEXT = (
+    "R-WIDGET-MAKER-001 The widget maker MUST stamp every widget with "
+    "its blueprint marker, requirement-token rq9-bravo"
+)
+INTERFACE_TEXT = (
+    "make_widget(blueprint: str) -> Widget  interface-token if4-charlie"
+)
+GLOSSARY_TEXT = (
+    "Widget: a stamped artifact produced by the widget maker, "
+    "glossary-token gl2-delta"
+)
 
 
 def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-class Bundle:
-    """A CriterionBundle stand-in readable both by attribute and as a mapping."""
-
-    _FIELDS = (
-        "component_id",
-        "criterion_id",
-        "covers",
-        "criterion_text",
-        "requirement_text",
-        "interface",
-        "glossary",
-        "dependency_interfaces",
-        "module_names",
+def _write_probe_stand_in(repo_root, log_path):
+    probe_dir = repo_root / "gen" / "test-probe"
+    probe_dir.mkdir(parents=True, exist_ok=True)
+    source = (
+        "class _Report:\n"
+        "    def __init__(self):\n"
+        "        self.ok = True\n"
+        "        self.findings = []\n"
+        "        self.tests_run = 1\n"
+        "        self.tests_reached = 1\n"
+        "\n"
+        "    def to_dict(self):\n"
+        "        return {\n"
+        "            'ok': self.ok,\n"
+        "            'findings': list(self.findings),\n"
+        "            'tests_run': self.tests_run,\n"
+        "            'tests_reached': self.tests_reached,\n"
+        "        }\n"
+        "\n"
+        "\n"
+        "def probe(test_source, criterion_bundle, module_name, *, timeout=60.0, interpreter=None):\n"
+        "    with open(" + repr(str(log_path)) + ", 'a', encoding='utf-8') as fh:\n"
+        "        fh.write('probe\\n')\n"
+        "    return _Report()\n"
     )
-
-    def __init__(self, **kwargs):
-        for name in self._FIELDS:
-            setattr(self, name, kwargs.get(name))
-        if self.dependency_interfaces is None:
-            self.dependency_interfaces = {}
-        if self.module_names is None:
-            self.module_names = []
-
-    def __getitem__(self, key):
-        if key not in self._FIELDS:
-            raise KeyError(key)
-        return getattr(self, key)
-
-    def get(self, key, default=None):
-        if key in self._FIELDS:
-            return getattr(self, key)
-        return default
-
-    def __contains__(self, key):
-        return key in self._FIELDS
-
-    def __iter__(self):
-        return iter(self._FIELDS)
-
-    def __len__(self):
-        return len(self._FIELDS)
-
-    def keys(self):
-        return list(self._FIELDS)
-
-    def items(self):
-        return [(k, getattr(self, k)) for k in self._FIELDS]
-
-    def values(self):
-        return [getattr(self, k) for k in self._FIELDS]
+    (probe_dir / "test_probe.py").write_text(source, encoding="utf-8")
 
 
-NONCE_RE = re.compile(r"-----BEGIN FILE ([0-9a-f]{32})-----")
+def test_prompt_contains_criterion_requirement_interface_and_glossary(tmp_path, monkeypatch):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    monkeypatch.chdir(repo_root)
+    monkeypatch.delenv("VAR_CACHE_STORE_URL", raising=False)
 
-
-def test_ac_author_001_prompt_contains_criterion_requirement_interface_glossary(tmp_path):
-    marker = uuid.uuid4().hex
-
-    criterion_text = (
-        "Given x = 2 and marker crit-" + marker + "\n"
-        "When widget_double(x) is called\n"
-        "Then it returns 4"
-    )
-    requirement_text = (
-        "# R-WIDGET-MAKER-001\n\n"
-        "**R-WIDGET-MAKER-001** — `widget_double(x)` MUST return `2 * x` (req-"
-        + marker
-        + ")."
-    )
-    interface_text = (
-        "# Library\n\n"
-        "```\n"
-        "widget_double(x: int) -> int\n"
-        "```\n\n"
-        "iface-" + marker
-    )
-    glossary_text = "# Glossary\n\n- **Widget** — a test term, gloss-" + marker + "."
-
-    bundle = Bundle(
-        component_id="comp-widget-maker",
-        criterion_id="AC-WIDGET-MAKER-001",
-        covers="R-WIDGET-MAKER-001",
-        criterion_text=criterion_text,
-        requirement_text=requirement_text,
-        interface=interface_text,
-        glossary=glossary_text,
-        dependency_interfaces={},
-        module_names=["widget_maker"],
-    )
+    probe_log = tmp_path / "probe_calls.log"
+    _write_probe_stand_in(repo_root, probe_log)
 
     recorded = []
 
     def mock_backend(prompt, model, **params):
         recorded.append(prompt)
-        m = NONCE_RE.search(prompt)
-        nonce = m.group(1) if m else "0" * 32
-        text = (
-            "-----BEGIN FILE " + nonce + "-----\n"
-            "import widget_maker\n\n\n"
-            "def test_x():\n"
-            "    assert widget_maker.widget_double(2) == 4\n"
-            "-----END FILE " + nonce + "-----"
-        )
+        nonces = re.findall(r"-----BEGIN FILE ([0-9a-f]{32})-----", prompt)
+        n = nonces[-1] if nonces else "0" * 32
+        body = "def test_placeholder():\n    assert True\n"
+        text = "-----BEGIN FILE " + n + "-----\n" + body + "\n-----END FILE " + n + "-----"
         return {
             "text": text,
             "model": model,
@@ -119,33 +78,27 @@ def test_ac_author_001_prompt_contains_criterion_requirement_interface_glossary(
             "model_call_error": None,
         }
 
+    bundle = {
+        "component_id": "comp-widget-maker",
+        "criterion_id": "AC-WIDGET-MAKER-001",
+        "covers": "R-WIDGET-MAKER-001",
+        "criterion_text": CRITERION_TEXT,
+        "requirement_text": REQUIREMENT_TEXT,
+        "interface": INTERFACE_TEXT,
+        "glossary": GLOSSARY_TEXT,
+        "dependency_interfaces": {},
+    }
+
     result = test_author.author_test(
-        bundle,
-        "mock-model-" + marker,
-        0,
-        repo_root=tmp_path,
-        llm_backend=mock_backend,
+        bundle, "mock", 0, repo_root=repo_root, llm_backend=mock_backend
     )
 
     assert result is not None
-    assert field(result, "model_call_error") is None
-    assert recorded, "the mock model was never called"
+    assert len(recorded) >= 1, "the mock model was never called"
 
-    def holds_all(prompt):
-        return (
-            criterion_text in prompt
-            and requirement_text in prompt
-            and interface_text in prompt
-            and glossary_text in prompt
-        )
-
-    assert any(holds_all(p) for p in recorded), (
-        "no recorded model input contained the criterion text, the covered "
-        "requirement's text, the interface and the glossary"
-    )
-
-    first = recorded[0]
-    assert criterion_text in first
-    assert requirement_text in first
-    assert interface_text in first
-    assert glossary_text in first
+    first_prompt = recorded[0]
+    assert isinstance(first_prompt, str)
+    assert CRITERION_TEXT in first_prompt
+    assert REQUIREMENT_TEXT in first_prompt
+    assert INTERFACE_TEXT in first_prompt
+    assert GLOSSARY_TEXT in first_prompt

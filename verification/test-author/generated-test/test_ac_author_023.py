@@ -1,65 +1,81 @@
-# hotdocs-criterion: sha256:d9634ae64bd7805e29fa8845ec396254cff614dd2ed940a679560181c2531721
+# hotdocs-criterion: sha256:35cb68a9b14e729798a81cddb732efd8aa6467bae949df3be8237cd11cbd1067
 import re
 
 import test_author
 
 
-class _Bundle(dict):
-    """A CriterionBundle stand-in readable both as a mapping and by attribute."""
+VALID_TEST = (
+    "import widget_maker\n"
+    "\n"
+    "\n"
+    "def test_make():\n"
+    "    assert widget_maker.make() is not None\n"
+)
 
-    def __getattr__(self, name):
-        try:
-            return self[name]
-        except KeyError:
-            raise AttributeError(name)
+
+def field(value, name):
+    return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def _make_bundle():
-    return _Bundle(
-        component_id="comp-widget-maker",
-        criterion_id="AC-WIDGET-MAKER-001",
-        covers="R-WIDGET-MAKER-001",
-        criterion_text=(
-            "Given a widget spec\n"
-            "When make_widget(spec) is called\n"
-            "Then it returns a widget"
-        ),
-        requirement_text=(
-            "**R-WIDGET-MAKER-001** \u2014 `make_widget(spec)` MUST return a widget."
-        ),
-        interface="# Library\n\n```\nmake_widget(spec: dict) -> dict\n```\n",
-        glossary="# Glossary\n\n- **Widget** \u2014 a test term.\n",
-        dependency_interfaces={},
+def write_probe_stand_in(repo_root, log_path):
+    probe_dir = repo_root / "gen" / "test-probe"
+    probe_dir.mkdir(parents=True, exist_ok=True)
+    source = (
+        "LOG_PATH = " + repr(str(log_path)) + "\n"
+        "\n"
+        "\n"
+        "class _Report:\n"
+        "    def __init__(self):\n"
+        "        self.ok = True\n"
+        "        self.findings = []\n"
+        "        self.tests_run = 1\n"
+        "        self.tests_reached = 1\n"
+        "\n"
+        "    def to_dict(self):\n"
+        "        return dict(ok=self.ok, findings=list(self.findings),\n"
+        "                    tests_run=self.tests_run, tests_reached=self.tests_reached)\n"
+        "\n"
+        "\n"
+        "def probe(test_source, criterion_bundle, module_name, *, timeout=60.0, interpreter=None):\n"
+        "    with open(LOG_PATH, 'a') as fh:\n"
+        "        fh.write('probe\\n')\n"
+        "    return _Report()\n"
     )
+    (probe_dir / "test_probe.py").write_text(source)
 
 
-def _find_nonce(prompt):
-    m = re.search(r"-----BEGIN FILE ([0-9a-f]{32})-----", prompt)
-    if m:
-        return m.group(1)
-    m = re.search(r"-----END FILE ([0-9a-f]{32})-----", prompt)
-    if m:
-        return m.group(1)
-    m = re.search(r"\b([0-9a-f]{32})\b", prompt)
-    assert m is not None, "no nonce found in prompt"
-    return m.group(1)
+def make_bundle():
+    return {
+        "component_id": "comp-widget-maker",
+        "criterion_id": "AC-WIDGET-MAKER-001",
+        "covers": "R-WIDGET-MAKER-001",
+        "criterion_text": "Given a widget\nWhen make() is called\nThen a widget is returned",
+        "requirement_text": "R-WIDGET-MAKER-001 - make() MUST return a widget.",
+        "interface": "make() -> Widget",
+        "glossary": "",
+        "dependency_interfaces": {},
+    }
 
 
 def test_prompt_holds_write_time_window_precision_block(tmp_path, monkeypatch):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    monkeypatch.chdir(repo_root)
     monkeypatch.delenv("VAR_CACHE_STORE_URL", raising=False)
+
+    probe_log = tmp_path / "probe_calls.log"
+    write_probe_stand_in(repo_root, probe_log)
+
     prompts = []
 
     def mock_backend(prompt, model, **params):
         prompts.append(prompt)
-        nonce = _find_nonce(prompt)
+        nonces = re.findall(r"-----BEGIN FILE ([0-9a-f]{32})-----", prompt)
+        n = nonces[-1] if nonces else "0" * 32
         text = (
-            "-----BEGIN FILE " + nonce + "-----\n"
-            "import widget_maker\n"
-            "\n"
-            "\n"
-            "def test_placeholder():\n"
-            "    assert widget_maker is not None\n"
-            "-----END FILE " + nonce + "-----"
+            "-----BEGIN FILE " + n + "-----\n"
+            + VALID_TEST
+            + "\n-----END FILE " + n + "-----"
         )
         return {
             "text": text,
@@ -68,11 +84,13 @@ def test_prompt_holds_write_time_window_precision_block(tmp_path, monkeypatch):
             "model_call_error": None,
         }
 
-    test_author.author_test(
-        _make_bundle(), "mock", repo_root=tmp_path, llm_backend=mock_backend
+    result = test_author.author_test(
+        make_bundle(), "mock", repo_root=repo_root, llm_backend=mock_backend
     )
 
+    assert field(result, "model_call_error") is None
     assert len(prompts) >= 1
+
     first = prompts[0]
     assert "(`datetime.now(timezone.utc).replace(microsecond=0)`)" in first
     assert (

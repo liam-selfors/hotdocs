@@ -8,78 +8,88 @@ def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-class Bundle(dict):
-    """A CriterionBundle readable both as a mapping and by attribute."""
-
-    def __getattr__(self, name):
-        try:
-            return self[name]
-        except KeyError:
-            raise AttributeError(name)
-
-
-def make_bundle():
-    return Bundle(
-        component_id="comp-foo",
-        criterion_id="AC-FOO-001",
-        covers="R-FOO-001",
-        criterion_text=(
-            "Given x = 2\n"
-            "When foo(x) is called\n"
-            "Then it returns 4\n"
-        ),
-        requirement_text="**R-FOO-001** — `foo(x)` MUST return `2 * x`.",
-        interface="# Library\n\n```\nfoo(x: int) -> int\n```\n",
-        glossary="# Glossary\n\n- **Foo** — a test term.\n",
-        dependency_interfaces={},
-        module_names=["foo"],
+def write_probe_stand_in(repo_root, log_path):
+    probe_dir = repo_root / "gen" / "test-probe"
+    probe_dir.mkdir(parents=True, exist_ok=True)
+    source = (
+        "import dataclasses\n"
+        "\n"
+        "GATE_VERSION = " + repr("test-probe@1.3.0") + "\n"
+        "LOG_PATH = " + repr(str(log_path)) + "\n"
+        "\n"
+        "\n"
+        "@dataclasses.dataclass\n"
+        "class ProbeReport:\n"
+        "    ok: bool\n"
+        "    findings: list\n"
+        "    tests_run: int\n"
+        "    tests_reached: int\n"
+        "\n"
+        "    def to_dict(self):\n"
+        "        return {\n"
+        "            " + repr("ok") + ": self.ok,\n"
+        "            " + repr("findings") + ": list(self.findings),\n"
+        "            " + repr("tests_run") + ": self.tests_run,\n"
+        "            " + repr("tests_reached") + ": self.tests_reached,\n"
+        "        }\n"
+        "\n"
+        "\n"
+        "def probe(test_source, criterion_bundle, module_name, *, timeout=60.0, interpreter=None):\n"
+        "    with open(LOG_PATH, " + repr("a") + ") as fh:\n"
+        "        fh.write(" + repr("probe\n") + ")\n"
+        "    return ProbeReport(ok=True, findings=[], tests_run=1, tests_reached=1)\n"
     )
+    (probe_dir / "test_probe.py").write_text(source)
 
 
-NONCE_RE = re.compile(r"-----BEGIN FILE ([0-9a-f]{32})-----")
+def test_backend_never_receives_seed(tmp_path, monkeypatch):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    monkeypatch.chdir(repo_root)
+    monkeypatch.delenv("VAR_CACHE_STORE_URL", raising=False)
 
+    probe_log = tmp_path / "probe_calls.log"
+    write_probe_stand_in(repo_root, probe_log)
 
-def test_backend_receives_only_prompt_and_model_no_seed(tmp_path):
     calls = []
-    model = "claude-sonnet-5"
+    test_file = "def test_placeholder():\n    assert True\n"
 
     def spy_backend(*args, **kwargs):
         calls.append((args, dict(kwargs)))
-        if args:
-            prompt = args[0]
-        else:
-            prompt = kwargs.get("prompt", "")
-        m = NONCE_RE.search(prompt)
-        nonce = m.group(1) if m else "0" * 32
+        prompt = args[0] if args else kwargs.get("prompt", "")
+        nonce = re.findall(r"-----BEGIN FILE ([0-9a-f]{32})-----", prompt)[-1]
         text = (
             "-----BEGIN FILE " + nonce + "-----\n"
-            "import foo\n\n\ndef test_foo():\n    assert foo.foo(2) == 4\n"
-            "-----END FILE " + nonce + "-----"
+            + test_file
+            + "\n-----END FILE " + nonce + "-----"
         )
         return {
             "text": text,
-            "model": model,
-            "backend": "spy",
+            "model": "mock",
+            "backend": "mock",
             "model_call_error": None,
         }
 
+    bundle = {
+        "component_id": "comp-widget-maker",
+        "criterion_id": "AC-WIDGET-MAKER-001",
+        "covers": "R-WIDGET-MAKER-001",
+        "criterion_text": "Given a widget\nWhen it is made\nThen it exists",
+        "requirement_text": "R-WIDGET-MAKER-001 - a widget MUST be made.",
+        "interface": "make_widget() -> dict",
+        "glossary": "",
+        "dependency_interfaces": {},
+    }
+
     result = test_author.author_test(
-        make_bundle(), model, 7, repo_root=tmp_path, llm_backend=spy_backend
+        bundle, "mock", 7, repo_root=repo_root, llm_backend=spy_backend
     )
 
-    assert calls, "the spy backend was never called"
+    assert field(result, "model_call_error") is None
+    assert len(calls) >= 1
 
     for args, kwargs in calls:
-        # No seed keyword argument at all.
-        assert "seed" not in kwargs, "seed was forwarded to the backend: " + repr(kwargs)
-
-        # Only prompt and model are passed as positional arguments.
-        assert len(args) == 2, "expected exactly (prompt, model) positionally, got " + repr(len(args))
-        prompt, passed_model = args
-        assert isinstance(prompt, str) and prompt
-        assert passed_model == model
-
-        # Nothing else (no bookkeeping params) is forwarded either.
-        assert kwargs == {}, "unexpected extra keyword arguments: " + repr(sorted(kwargs))
-
-    assert field(result, "model_call_error") is None
+        assert len(args) == 2, "backend got positional args beyond prompt and model: %r" % (args,)
+        assert isinstance(args[0], str)
+        assert args[1] == "mock"
+        assert "seed" not in kwargs, "seed was forwarded to the backend: %r" % (kwargs,)

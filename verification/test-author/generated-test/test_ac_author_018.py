@@ -1,7 +1,5 @@
-# hotdocs-criterion: sha256:ae091f478ed0e2402e73c9516912bbf0b101d4c59f0c47fe9d09f211d6c6ddfd
+# hotdocs-criterion: sha256:14fd239a48f89b9cd7cbaf6fe9016735492c505c126a2be12778524df45fcdc7
 import re
-
-import pytest
 
 import test_author
 
@@ -12,92 +10,63 @@ EXPECTED_LINE = (
 )
 
 
-class _Bundle:
-    """A CriterionBundle stand-in readable both by attribute and as a mapping."""
+def field(value, name):
+    return value[name] if isinstance(value, dict) else getattr(value, name)
 
-    _FIELDS = (
-        "component_id",
-        "criterion_id",
-        "covers",
-        "criterion_text",
-        "requirement_text",
-        "interface",
-        "glossary",
-        "dependency_interfaces",
+
+def _write_probe_stand_in(repo_root, log_path):
+    probe_dir = repo_root / "gen" / "test-probe"
+    probe_dir.mkdir(parents=True, exist_ok=True)
+    source = (
+        "class _Report:\n"
+        "    def __init__(self):\n"
+        "        self.ok = True\n"
+        "        self.findings = []\n"
+        "        self.tests_run = 1\n"
+        "        self.tests_reached = 1\n"
+        "\n"
+        "    def to_dict(self):\n"
+        "        return {\n"
+        "            'ok': self.ok,\n"
+        "            'findings': list(self.findings),\n"
+        "            'tests_run': self.tests_run,\n"
+        "            'tests_reached': self.tests_reached,\n"
+        "        }\n"
+        "\n"
+        "\n"
+        "def probe(test_source, criterion_bundle, module_name, *, timeout=60.0):\n"
+        "    with open(" + repr(str(log_path)) + ", 'a', encoding='utf-8') as fh:\n"
+        "        fh.write('probe\\n')\n"
+        "    return _Report()\n"
     )
-
-    def __init__(self, **kwargs):
-        for name in self._FIELDS:
-            setattr(self, name, kwargs[name])
-
-    def __getitem__(self, key):
-        if key not in self._FIELDS:
-            raise KeyError(key)
-        return getattr(self, key)
-
-    def get(self, key, default=None):
-        if key in self._FIELDS:
-            return getattr(self, key)
-        return default
-
-    def __contains__(self, key):
-        return key in self._FIELDS
-
-    def keys(self):
-        return list(self._FIELDS)
-
-    def __iter__(self):
-        return iter(self._FIELDS)
-
-    def __len__(self):
-        return len(self._FIELDS)
-
-    def items(self):
-        return [(k, getattr(self, k)) for k in self._FIELDS]
-
-    def values(self):
-        return [getattr(self, k) for k in self._FIELDS]
+    (probe_dir / "test_probe.py").write_text(source, encoding="utf-8")
 
 
-def _make_bundle():
-    return _Bundle(
-        component_id="comp-widget-maker",
-        criterion_id="AC-WIDGET-MAKER-001",
-        covers="R-WIDGET-MAKER-001",
-        criterion_text=(
-            "Given x = 2\n"
-            "When make_widget(x) is called\n"
-            "Then it returns 4\n"
-        ),
-        requirement_text=(
-            "# R-WIDGET-MAKER-001\n\n"
-            "**R-WIDGET-MAKER-001** \u2014 `make_widget(x)` MUST return `2 * x`.\n"
-        ),
-        interface="# Library\n\n```\nmake_widget(x: int) -> int\n```\n",
-        glossary="# Glossary\n\n- **Widget** \u2014 a test term.\n",
-        dependency_interfaces={},
-    )
-
-
-_NONCE_RE = re.compile(r"-----BEGIN FILE ([0-9a-f]{32})-----")
-
-
-def test_first_prompt_contains_unit_file_no_frontmatter_line(tmp_path, monkeypatch):
+def test_prompt_contains_unit_file_frontmatter_rule(tmp_path, monkeypatch):
+    repo_root = tmp_path
+    monkeypatch.chdir(repo_root)
     monkeypatch.delenv("VAR_CACHE_STORE_URL", raising=False)
 
-    recorded = []
+    probe_log = tmp_path / "probe_calls.log"
+    _write_probe_stand_in(repo_root, probe_log)
+
+    prompts = []
+    test_body = (
+        "import widget_maker\n"
+        "\n"
+        "\n"
+        "def test_something():\n"
+        "    widget_maker.make()\n"
+    )
 
     def mock_backend(prompt, model, **params):
-        recorded.append(prompt)
-        match = _NONCE_RE.search(prompt)
-        nonce = match.group(1) if match else "0" * 32
+        prompts.append(prompt)
+        nonces = re.findall(r"-----BEGIN FILE ([0-9a-f]{32})-----", prompt)
+        nonce = nonces[-1] if nonces else "0" * 32
         text = (
             "-----BEGIN FILE " + nonce + "-----\n"
-            "import widget_maker\n"
-            "\n"
-            "def test_placeholder():\n"
-            "    assert True\n"
-            "-----END FILE " + nonce + "-----"
+            + test_body
+            + "\n-----END FILE " + nonce + "-----"
         )
         return {
             "text": text,
@@ -106,9 +75,22 @@ def test_first_prompt_contains_unit_file_no_frontmatter_line(tmp_path, monkeypat
             "model_call_error": None,
         }
 
-    bundle = _make_bundle()
-    test_author.author_test(bundle, "mock", repo_root=tmp_path, llm_backend=mock_backend)
+    bundle = {
+        "component_id": "comp-widget-maker",
+        "criterion_id": "AC-WIDGET-MAKER-001",
+        "covers": "R-WIDGET-MAKER-001",
+        "criterion_text": "Given a widget, When make() is called, Then a widget is returned.",
+        "requirement_text": "R-WIDGET-MAKER-001 - make() MUST return a widget.",
+        "interface": "make() -> Widget",
+        "glossary": "",
+        "dependency_interfaces": {},
+    }
 
-    assert recorded, "the mock model was never called"
-    first_prompt = recorded[0]
+    result = test_author.author_test(
+        bundle, "mock", repo_root=repo_root, llm_backend=mock_backend
+    )
+
+    assert result is not None
+    assert len(prompts) >= 1
+    first_prompt = prompts[0]
     assert EXPECTED_LINE in first_prompt.splitlines()

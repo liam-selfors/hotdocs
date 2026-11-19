@@ -1,109 +1,85 @@
-# hotdocs-criterion: sha256:a9c2a275e7e101030337c16d3949e23ad1e8cc3893bfc2dc12ee5f0e5ca27615
+# hotdocs-criterion: sha256:f882fb1cf4339c98b52bcb673ae87006bc309650dc998cce4bf83275c9abf4fc
 import re
 
 import test_author
 
 
-class _Bundle(dict):
-    """A CriterionBundle stand-in readable both as a mapping and by attribute."""
+PROBE_SOURCE = (
+    "class _Report:\n"
+    "    def __init__(self):\n"
+    "        self.ok = True\n"
+    "        self.findings = []\n"
+    "        self.tests_run = 1\n"
+    "        self.tests_reached = 1\n"
+    "\n"
+    "    def to_dict(self):\n"
+    "        return {'ok': self.ok, 'findings': list(self.findings),\n"
+    "                'tests_run': self.tests_run, 'tests_reached': self.tests_reached}\n"
+    "\n"
+    "\n"
+    "def probe(test_source, criterion_bundle, module_name, *, timeout=60.0, interpreter=None):\n"
+    "    return _Report()\n"
+)
 
-    def __getattr__(self, name):
-        try:
-            return self[name]
-        except KeyError:
-            raise AttributeError(name)
-
-
-def _make_bundle(component_id, criterion_id, covers, module_names):
-    return _Bundle(
-        component_id=component_id,
-        criterion_id=criterion_id,
-        covers=covers,
-        criterion_text=(
-            "Given a string\n"
-            "When it is processed\n"
-            "Then a result is returned"
-        ),
-        requirement_text="**" + covers + "** - processing MUST return a result.",
-        interface="# Library\n\n```\nprocess(s: str) -> str\n```\n",
-        glossary="# Glossary\n\n- **Foo** - a test term.\n",
-        dependency_interfaces={},
-        module_names=module_names,
-    )
-
-
-_NONCE_RE = re.compile(r"-----BEGIN FILE ([0-9a-f]{32})-----")
+TEST_BODY = "def test_ok():\n    assert True\n"
 
 
 def _make_backend(prompts):
     def backend(prompt, model, **params):
         prompts.append(prompt)
-        match = _NONCE_RE.search(prompt)
-        nonce = match.group(1) if match else "0" * 32
-        text = (
-            "-----BEGIN FILE " + nonce + "-----\n"
-            "def test_placeholder():\n"
-            "    assert True\n"
-            "-----END FILE " + nonce + "-----"
-        )
-        return {
-            "text": text,
-            "model": model,
-            "backend": "mock",
-            "model_call_error": None,
-        }
+        n = re.findall(r"-----BEGIN FILE ([0-9a-f]{32})-----", prompt)[-1]
+        text = "-----BEGIN FILE " + n + "-----\n" + TEST_BODY + "\n-----END FILE " + n + "-----"
+        return {"text": text, "model": model, "backend": "mock", "model_call_error": None}
 
     return backend
 
 
-def _capture_prompts(bundle, repo_root):
+def _setup_repo(repo_root, monkeypatch):
+    repo_root.mkdir(parents=True, exist_ok=True)
+    probe_dir = repo_root / "gen" / "test-probe"
+    probe_dir.mkdir(parents=True, exist_ok=True)
+    (probe_dir / "test_probe.py").write_text(PROBE_SOURCE, encoding="utf-8")
+    monkeypatch.chdir(repo_root)
+    monkeypatch.delenv("VAR_CACHE_STORE_URL", raising=False)
+
+
+def _bundle(component_id, criterion_id, module_names):
+    return {
+        "component_id": component_id,
+        "criterion_id": criterion_id,
+        "covers": criterion_id.replace("AC-", "R-", 1),
+        "criterion_text": "Given an input\nWhen it is processed\nThen the output is correct",
+        "requirement_text": "The component MUST process input correctly.",
+        "interface": "process(text: str) -> str",
+        "glossary": "",
+        "dependency_interfaces": {},
+        "module_names": module_names,
+    }
+
+
+def test_module_names_replace_derived_import(tmp_path, monkeypatch):
+    repo_root = tmp_path / "scenario_a"
+    _setup_repo(repo_root, monkeypatch)
     prompts = []
-    backend = _make_backend(prompts)
-    error = None
-    try:
-        test_author.author_test(
-            bundle,
-            "mock-model",
-            0,
-            repo_root=repo_root,
-            llm_backend=backend,
-        )
-    except Exception as exc:  # the criterion concerns the prompt only
-        error = exc
-    assert prompts, "author_test never called the model backend: " + repr(error)
-    return prompts
-
-
-def test_module_names_replace_derived_import(tmp_path):
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    bundle = _make_bundle(
-        "capabilities/P-SLUGS",
-        "SC-SLUGS-001",
-        "P-SLUGS",
-        ["slugify", "url_tools"],
+    bundle = _bundle("capabilities/P-SLUGS", "AC-SLUGS-001", ["slugify", "url_tools"])
+    test_author.author_test(
+        bundle, "mock", 0, repo_root=repo_root, llm_backend=_make_backend(prompts)
     )
-
-    prompts = _capture_prompts(bundle, repo_root)
-    prompt = prompts[0]
-
-    assert "import slugify" in prompt
-    assert "import url_tools" in prompt
-    for p in prompts:
-        assert "import capabilities" not in p
+    assert prompts, "author_test never called the model backend"
+    for prompt in prompts:
+        assert "import slugify" in prompt
+        assert "import url_tools" in prompt
+        assert "import capabilities" not in prompt
 
 
-def test_empty_module_names_falls_back_to_derived_name(tmp_path):
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    bundle = _make_bundle(
-        "comp-semver",
-        "AC-SEMVER-001",
-        "R-SEMVER-001",
-        [],
+def test_empty_module_names_uses_derived_name(tmp_path, monkeypatch):
+    repo_root = tmp_path / "scenario_b"
+    _setup_repo(repo_root, monkeypatch)
+    prompts = []
+    bundle = _bundle("comp-semver", "AC-SEMVER-001", [])
+    test_author.author_test(
+        bundle, "mock", 0, repo_root=repo_root, llm_backend=_make_backend(prompts)
     )
-
-    prompts = _capture_prompts(bundle, repo_root)
-    prompt = prompts[0]
-
-    assert "import semver" in prompt
+    assert prompts, "author_test never called the model backend"
+    for prompt in prompts:
+        assert "import semver" in prompt
