@@ -43,13 +43,16 @@ one out is a lint failure, not a default.
 1. **Layout.** The files the generator must write for an asset of this
    kind, under `gen/<slug>/<path>`, and how a reply that writes others
    is rejected (`missing_module`, `malformed_layout`).
-2. **Toolchain.** The external programs the adapter runs, each with a
-   minimum version and the command that reports it (`node --version`).
-   A project needs a toolchain only when one of its components declares
-   an asset of that kind. When it is missing, every criterion that needs
-   it fails with `failure_origin` `"toolchain"` and the message
-   `<kind> needs <program> <version>`; it is never skipped, because a
-   skipped gate reads as a passing one.
+2. **Environment.** What an asset of this kind needs in order to run
+   and be checked, and how `hotdocs` provisions it (see Environments
+   below): the programs, each with a minimum version and the command
+   that reports it (`node --version`, `python3 --version`), and the
+   packages, read from a lockfile the project commits
+   (`environments/<kind>/requirements.lock`, `package-lock.json`).
+   When the environment cannot be provisioned, every criterion that
+   needs it fails with `failure_origin` `"environment"` and the message
+   `<kind> needs <program> <version>` or `<kind> environment: <reason>`;
+   it is never skipped, because a skipped gate reads as a passing one.
 3. **Surface.** What other assets and components may rely on: for code,
    its exported names; for data, its schema; for a document, its
    required sections and anchors. The adapter extracts the surface from
@@ -59,7 +62,7 @@ one out is a lint failure, not a default.
    the asset (run a script with arguments, call an exported function
    with JSON arguments and read JSON back, query a data file), and the
    text the test author is shown about using it. A test never shells
-   out to the toolchain itself.
+   out to the environment's programs itself.
 5. **Strength check.** How the pipeline knows the tests would notice a
    wrong asset, the role mutation plays for Python. Exactly one of:
    - *mutation*: sites and swaps, stated as `mutation-runs.md` states
@@ -78,12 +81,41 @@ one out is a lint failure, not a default.
    conventions the asset must follow (module format, dialect, no
    network), never test mechanics.
 
+## Environments
+
+`hotdocs` itself always runs on Python, in its own environment. That
+environment is the tool's, never an asset's: a project's assets run in
+environments their kinds declare, and a project provisions only the
+environments of kinds its components declare. A project whose
+components declare only `javascript` assets needs Node and its
+lockfile, and no Python packages of its own; one with no asset needing
+Node never needs Node.
+
+- **Where.** Each kind's environment lives in
+  `<project>/.hotdocs/env/<kind>/` (a Python virtual environment, a
+  `node_modules` directory), created by `hotdocs env sync` and on
+  first use, and never committed. Its inputs are committed:
+  `environments/<kind>/` holds the kind's lockfile.
+- **What is recorded.** Provenance records, per asset, the kind, the
+  environment's programs and versions as reported, and the SHA-256 of
+  its lockfile. A changed lockfile changes the provenance key of every
+  asset of that kind, as a changed dependency's code does today.
+- **Isolation.** Criteria and strength runs for an asset use only its
+  kind's environment: its interpreter or runtime, its packages, its
+  `PATH` entries. They never see the tool's own packages, so a project
+  asset cannot pass by importing something the project never declared.
+- **The `python` kind.** A project's Python assets run in
+  `.hotdocs/env/python/`, from `environments/python/requirements.lock`.
+  The `hotdocs` corpus itself is the one exception, by declaration: its
+  `python` environment is the tool's own (`requirements.txt`), because
+  its components are the tool.
+
 ## Built-in kinds
 
-| Kind | Layout | Toolchain | Surface | Strength |
+| Kind | Layout | Environment | Surface | Strength |
 | --- | --- | --- | --- | --- |
-| `python` | `<module>.py` or `<module>/` | Python | Exported names | Mutation (`mutation-runs.md`) |
-| `javascript` | One ES module file per asset, no imports outside the asset | Node >= 20 | `export` names | Mutation (`D335`'s tokens, applied to the whole file) |
+| `python` | `<module>.py` or `<module>/` | Python and the project's locked packages | Exported names | Mutation (`mutation-runs.md`) |
+| `javascript` | One ES module file per asset, no imports outside the asset | Node >= 20 and the project's `package-lock.json` | `export` names | Mutation (`D335`'s tokens, applied to the whole file) |
 | `sql` | One `.sql` file of named statements (`-- name: <name>` before each) | DuckDB (already a Python dependency) | Statement names and result columns | Mutation (comparison, `AND`/`OR`, `JOIN` type, `DISTINCT` dropped) |
 | `data-schema` | A JSON Schema file plus example instances | Python `jsonschema` (a new dependency) | The schema itself | Perturbation (each schema keyword violated once) |
 | `document` | Markdown with required sections | none | Section headings and anchors | Perturbation |
@@ -109,7 +141,8 @@ The adapter interface:
 ```
 layout_errors(asset_dir: Path, declared: dict) -> list[str]
 surface(asset_dir: Path, declared: dict) -> dict
-toolchain() -> list[{"program", "min_version", "version_command"}]
+environment() -> {"programs": [{"program", "min_version", "version_command"}], "lockfile": str | None}
+provision(project_root: Path) -> dict  # {"ok", "reason", "versions", "lockfile_sha256"}
 asset_runner(asset_dir: Path, declared: dict) -> callable
 strength_sites(asset_dir: Path, declared: dict) -> list[Site]
 apply_site(asset_dir: Path, site: Site) -> None

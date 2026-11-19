@@ -27,8 +27,8 @@ Ask the user, or find in the code, and write down:
 Check `<tool_root>/specs/asset-kinds/` for a built-in kind that already
 fits. Prefer extending a built-in kind's declaration over a new kind.
 
-Decisions that are the user's, not yours: adding a toolchain the project
-does not already need; choosing evaluation (model calls on every
+Decisions that are the user's, not yours: adding an environment (a
+program or package set) the project does not already need; choosing evaluation (model calls on every
 verification) as a strength check; anything that makes a gate skip
 instead of fail.
 
@@ -46,7 +46,9 @@ lists. Write them in this order:
 3. **Running criteria.** What `asset_runner` takes and returns, with one
    example call and result. Inputs and outputs are JSON-shaped, so
    tests stay plain pytest.
-4. **Layout**, **toolchain**, then the two guidance texts.
+4. **Layout**, **environment** (programs with versions, the lockfile,
+   and how `provision` reports failure), then the two guidance texts.
+   Never rely on packages from `hotdocs`' own environment.
 
 ## 3. Keep test text and generator text apart
 
@@ -68,7 +70,7 @@ guess will guess differently on each run. Check the definition states:
   the current directory: verification and mutation runs use different
   directories (`D324`, `D336`, `D339`).
 - The exact text or JSON of any reply, message or error a test asserts.
-- What a test must not do: shell out to the toolchain directly, depend
+- What a test must not do: shell out to the environment's programs directly, depend
   on wall-clock time or network, define top-level `test*` helpers.
 - How a fake or stand-in is installed, if tests need one.
 
@@ -92,7 +94,7 @@ guess will guess differently on each run. Check the definition states:
 ## 6. Report
 
 Tell the user: the kind and its seven parts in one paragraph each, the
-calibration scores, every toolchain it adds, the decision id, and what
+calibration scores, every environment it adds, the decision id, and what
 you left open. Never report a kind as done while its strength check is
 untested.
 
@@ -111,5 +113,5 @@ untested.
 - Running: `asset_runner("filterNodes", [snapshot, "gen"])` runs
   `node --input-type=module` on a fixed driver that imports the module
   and prints the JSON result.
-- Toolchain: Node >= 20, required only by projects that declare a
-  `javascript` asset.
+- Environment: Node >= 20 and the project's `package-lock.json`,
+  provisioned only for projects that declare a `javascript` asset.
