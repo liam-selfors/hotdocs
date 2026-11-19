@@ -1,28 +1,31 @@
 # hotdocs-criterion: sha256:59efc19c7fa012cb10c4216a95ff19ebb0ef46c0b3001cde90b817e2d75f4582
 import json
-import os
 from pathlib import Path
 
 import agentic_generator
 
 
-def field(value, name):
-    return value[name] if isinstance(value, dict) else getattr(value, name)
-
-
-GENERATOR_SOURCE_TEMPLATE_HEAD = (
+GENERATOR_STANDIN = (
+    "import dataclasses\n"
     "import json\n"
-    "from dataclasses import dataclass, field\n"
+    "import os\n"
+    "\n"
+    "_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))\n"
     "\n"
     "\n"
-    "@dataclass\n"
+    "def _log(name, record):\n"
+    "    with open(os.path.join(_ROOT, name), 'a', encoding='utf-8') as fh:\n"
+    "        fh.write(json.dumps(record) + '\\n')\n"
+    "\n"
+    "\n"
+    "@dataclasses.dataclass\n"
     "class GenerationResult:\n"
     "    component_id: str = ''\n"
     "    spec_bundle_hash: str = ''\n"
     "    model: str = ''\n"
     "    prompt_version: str = ''\n"
     "    cache_hit: bool = False\n"
-    "    files: dict = field(default_factory=dict)\n"
+    "    files: dict = dataclasses.field(default_factory=dict)\n"
     "    model_call_error: object = None\n"
     "    refused: object = None\n"
     "    retry_feedback: object = None\n"
@@ -41,111 +44,99 @@ GENERATOR_SOURCE_TEMPLATE_HEAD = (
     "    return [('Spec', 'SPEC TEXT'), ('Component interface', 'IFACE TEXT')]\n"
     "\n"
     "\n"
+    "def write_files(component_id, files, repo_root=None):\n"
+    "    _log('write_files.jsonl', {'component_id': component_id, 'files': dict(files),\n"
+    "                               'repo_root': None if repo_root is None else str(repo_root)})\n"
+    "\n"
+    "\n"
+    "def check_assets(component_id, files, repo_root=None):\n"
+    "    _log('check_assets.jsonl', {'component_id': component_id, 'files': dict(files),\n"
+    "                                'repo_root': None if repo_root is None else str(repo_root)})\n"
+    "    if any('bad' in content for content in files.values()):\n"
+    "        return ('malformed_layout', ['static/app.txt: bad'])\n"
+    "    return (None, [])\n"
+    "\n"
+    "\n"
+    "def check_asset_environment(component_id, repo_root=None):\n"
+    "    base = str(repo_root) if repo_root is not None else _ROOT\n"
+    "    if os.path.exists(os.path.join(base, 'NO_ENV')):\n"
+    "        return ('environment', ['fake needs fakeprog >= 2'])\n"
+    "    return (None, [])\n"
 )
 
 
-def write_generator_stand_in(repo_root, write_log):
-    source = (
-        GENERATOR_SOURCE_TEMPLATE_HEAD
-        + "WRITE_LOG = " + repr(str(write_log)) + "\n"
-        + "\n"
-        + "\n"
-        + "def write_files(component_id, files, repo_root=None):\n"
-        + "    with open(WRITE_LOG, 'a', encoding='utf-8') as f:\n"
-        + "        f.write(json.dumps([component_id, dict(files), str(repo_root)]) + '\\n')\n"
-    )
-    path = Path(repo_root) / "gen" / "generator" / "generator.py"
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(source, encoding="utf-8")
+LOOP_STANDIN = (
+    "import json\n"
+    "import os\n"
+    "\n"
+    "_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))\n"
+    "\n"
+    "\n"
+    "class ToolLoopResult:\n"
+    "    def __init__(self, text, transcript, turns, tool_calls, stop, model_call_error):\n"
+    "        self.text = text\n"
+    "        self.transcript = transcript\n"
+    "        self.turns = turns\n"
+    "        self.tool_calls = tool_calls\n"
+    "        self.stop = stop\n"
+    "        self.model_call_error = model_call_error\n"
+    "\n"
+    "    def to_dict(self):\n"
+    "        return {'text': self.text, 'transcript': self.transcript, 'turns': self.turns,\n"
+    "                'tool_calls': self.tool_calls, 'stop': self.stop,\n"
+    "                'model_call_error': self.model_call_error}\n"
+    "\n"
+    "\n"
+    "def run_tool_loop(system, prompt, model, tools, execute, *, max_turns=40,\n"
+    "                  max_tool_calls=120, wall_seconds=1800.0, repo_root=None,\n"
+    "                  claude_command='claude'):\n"
+    "    with open(os.path.join(_ROOT, 'loop_args.jsonl'), 'a', encoding='utf-8') as fh:\n"
+    "        fh.write(json.dumps({'system': system, 'prompt': prompt, 'model': model,\n"
+    "                             'tools': tools, 'max_turns': max_turns,\n"
+    "                             'max_tool_calls': max_tool_calls,\n"
+    "                             'wall_seconds': wall_seconds,\n"
+    "                             'repo_root': None if repo_root is None else str(repo_root),\n"
+    "                             'claude_command': claude_command}) + '\\n')\n"
+    "    with open(os.path.join(_ROOT, 'script.json'), encoding='utf-8') as fh:\n"
+    "        script = json.load(fh)\n"
+    "    count = 0\n"
+    "    for step in script:\n"
+    "        name, arguments = step[0], step[1]\n"
+    "        text, is_error = execute(name, arguments)\n"
+    "        count += 1\n"
+    "        with open(os.path.join(_ROOT, 'results.jsonl'), 'a', encoding='utf-8') as fh:\n"
+    "            fh.write(json.dumps([name, arguments, text, is_error]) + '\\n')\n"
+    "    return ToolLoopResult('done', [], 1, count, 'end_turn', None)\n"
+)
 
 
-def write_loop_stand_in(repo_root, script_path, record_path, args_path):
-    source = (
-        "import json\n"
-        "from dataclasses import dataclass, field\n"
-        "\n"
-        "SCRIPT_PATH = " + repr(str(script_path)) + "\n"
-        "RECORD_PATH = " + repr(str(record_path)) + "\n"
-        "ARGS_PATH = " + repr(str(args_path)) + "\n"
-        "\n"
-        "\n"
-        "@dataclass\n"
-        "class ToolLoopResult:\n"
-        "    text: str = ''\n"
-        "    transcript: list = field(default_factory=list)\n"
-        "    turns: int = 0\n"
-        "    tool_calls: int = 0\n"
-        "    stop: str = 'end_turn'\n"
-        "    model_call_error: object = None\n"
-        "\n"
-        "    def to_dict(self):\n"
-        "        return {\n"
-        "            'text': self.text,\n"
-        "            'transcript': self.transcript,\n"
-        "            'turns': self.turns,\n"
-        "            'tool_calls': self.tool_calls,\n"
-        "            'stop': self.stop,\n"
-        "            'model_call_error': self.model_call_error,\n"
-        "        }\n"
-        "\n"
-        "\n"
-        "def run_tool_loop(system, prompt, model, tools, execute, *, max_turns=40,\n"
-        "                  max_tool_calls=120, wall_seconds=1800.0, repo_root=None,\n"
-        "                  claude_command='claude'):\n"
-        "    with open(ARGS_PATH, 'a', encoding='utf-8') as f:\n"
-        "        f.write(json.dumps({\n"
-        "            'system': system, 'prompt': prompt, 'model': model,\n"
-        "            'tools': tools, 'max_turns': max_turns,\n"
-        "            'max_tool_calls': max_tool_calls, 'wall_seconds': wall_seconds,\n"
-        "            'repo_root': None if repo_root is None else str(repo_root),\n"
-        "            'claude_command': claude_command,\n"
-        "        }, default=str) + '\\n')\n"
-        "    with open(SCRIPT_PATH, encoding='utf-8') as f:\n"
-        "        script = json.load(f)\n"
-        "    count = 0\n"
-        "    transcript = []\n"
-        "    for step in script:\n"
-        "        name = step['name']\n"
-        "        arguments = step['arguments']\n"
-        "        text, is_error = execute(name, arguments)\n"
-        "        count += 1\n"
-        "        transcript.append({'role': 'user', 'content': name})\n"
-        "        with open(RECORD_PATH, 'a', encoding='utf-8') as f:\n"
-        "            f.write(json.dumps([name, arguments, text, is_error]) + '\\n')\n"
-        "    return ToolLoopResult(text='done', transcript=transcript, turns=1,\n"
-        "                          tool_calls=count, stop='end_turn',\n"
-        "                          model_call_error=None)\n"
-    )
-    path = Path(repo_root) / "gen" / "llm-tool-endpoint" / "llm_tool_endpoint.py"
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(source, encoding="utf-8")
+def field(value, name):
+    return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def setup_repo(tmp_path, script):
+def make_repo(tmp_path, script):
     repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    logs = tmp_path / "logs"
-    logs.mkdir()
-    script_path = logs / "script.json"
-    record_path = logs / "records.jsonl"
-    args_path = logs / "loop_args.jsonl"
-    write_log = logs / "write_files.jsonl"
-    script_path.write_text(json.dumps(script), encoding="utf-8")
-    write_generator_stand_in(repo_root, write_log)
-    write_loop_stand_in(repo_root, script_path, record_path, args_path)
-    return repo_root, record_path
+    gen_dir = repo_root / "gen" / "generator"
+    gen_dir.mkdir(parents=True)
+    (gen_dir / "generator.py").write_text(GENERATOR_STANDIN, encoding="utf-8")
+    loop_dir = repo_root / "gen" / "llm-tool-endpoint"
+    loop_dir.mkdir(parents=True)
+    (loop_dir / "llm_tool_endpoint.py").write_text(LOOP_STANDIN, encoding="utf-8")
+    (repo_root / "script.json").write_text(json.dumps(script), encoding="utf-8")
+    return repo_root
 
 
-def read_records(record_path):
-    lines = Path(record_path).read_text(encoding="utf-8").splitlines()
-    return [json.loads(line) for line in lines if line.strip()]
+def read_results(repo_root):
+    path = repo_root / "results.jsonl"
+    assert path.is_file(), "loop stand-in never recorded a result"
+    records = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if line.strip():
+            records.append(json.loads(line))
+    return records
 
 
-def step(name, **arguments):
-    return {"name": name, "arguments": arguments}
-
-
-def bundle():
+def make_bundle():
     return {
         "component_id": "comp-widget",
         "spec_bundle_hash": "sha256:" + "0" * 64,
@@ -153,31 +144,28 @@ def bundle():
     }
 
 
-def test_ac_agent_009_tools_paths_limits_and_truncation(tmp_path):
+def test_ac_agent_009_tool_results_follow_rules_and_limits(tmp_path):
     script = [
-        step("write_file", path="work/pkg/a.py", content="A = 1"),
-        step("write_file", path="work/pkg/b.py", content="B = 2"),
-        step("list_files", path="work"),
-        step("read_file", path="work/pkg"),
-        step("write_file", path="scratch/long.txt", content="y" * 9000),
-        step("read_file", path="scratch/long.txt"),
+        ["write_file", {"path": "work/pkg/a.py", "content": "A = 1"}],
+        ["write_file", {"path": "work/pkg/b.py", "content": "B = 2"}],
+        ["list_files", {"path": "work"}],
+        ["read_file", {"path": "work/pkg"}],
+        ["write_file", {"path": "scratch/long.txt", "content": "y" * 9000}],
+        ["read_file", {"path": "scratch/long.txt"}],
     ]
     for i in range(1, 198):
-        script.append(step("write_file", path="scratch/f%03d.py" % i, content="x = 0"))
+        script.append(["write_file", {"path": "scratch/f%03d.py" % i, "content": "x = 0"}])
     script += [
-        step("write_file", path="scratch/f198.py", content="x = 0"),
-        step("write_file", path="work/pkg/a.py", content="A = 2"),
-        step("read_file", path="work/pkg/a.py"),
-        step("delete_file", path="work/pkg/b.py"),
-        step("write_file", path="scratch/f198.py", content="x = 0"),
-        step("finish", summary="done"),
+        ["write_file", {"path": "scratch/f198.py", "content": "x = 0"}],
+        ["write_file", {"path": "work/pkg/a.py", "content": "A = 2"}],
+        ["read_file", {"path": "work/pkg/a.py"}],
+        ["delete_file", {"path": "work/pkg/b.py"}],
+        ["write_file", {"path": "scratch/f198.py", "content": "x = 0"}],
+        ["finish", {"summary": "done"}],
     ]
-    repo_root, record_path = setup_repo(tmp_path, script)
+    repo_root = make_repo(tmp_path, script)
 
-    agentic_generator.generate_agentic(bundle(), "m", repo_root=repo_root)
-
-    records = read_records(record_path)
-    got = [(r[2], bool(r[3])) for r in records]
+    agentic_generator.generate_agentic(make_bundle(), "m", repo_root=repo_root)
 
     expected = [
         ("wrote work/pkg/a.py", False),
@@ -198,30 +186,32 @@ def test_ac_agent_009_tools_paths_limits_and_truncation(tmp_path):
         ("finished", False),
     ]
 
-    assert len(got) == len(expected)
-    for index, (g, e) in enumerate(zip(got, expected)):
-        assert g == e, "mismatch at step " + repr(index) + ": " + repr(g)[:200]
-    for r in records:
-        assert isinstance(r[3], bool)
+    records = read_results(repo_root)
+    actual = [(r[2], r[3]) for r in records]
+    assert len(actual) == len(expected)
+    for index, (got, want) in enumerate(zip(actual, expected)):
+        assert got[0] == want[0], (index, got[0][:200], want[0][:200])
+        assert got[1] == want[1], (index, got, want)
+        assert isinstance(got[1], bool), (index, got)
 
 
 def test_ac_agent_009_unisolated_check_import(tmp_path, monkeypatch):
     monkeypatch.setattr(agentic_generator, "SANDBOX_EXEC", "/nonexistent/sandbox")
     monkeypatch.setattr(agentic_generator, "BWRAP", "/nonexistent/sandbox")
     script = [
-        step("write_file", path="work/widget.py", content="A = 1"),
-        step("check_import"),
-        step("finish", summary="done"),
+        ["write_file", {"path": "work/widget.py", "content": "A = 1"}],
+        ["check_import", {}],
+        ["finish", {"summary": "done"}],
     ]
-    repo_root, record_path = setup_repo(tmp_path, script)
+    repo_root = make_repo(tmp_path, script)
 
     result = agentic_generator.generate_agentic(
-        bundle(), "m", repo_root=repo_root, allow_unisolated_exec=True
+        make_bundle(), "m", repo_root=repo_root, allow_unisolated_exec=True
     )
 
-    records = read_records(record_path)
-    check = [r for r in records if r[0] == "check_import"]
-    assert len(check) == 1
-    assert (check[0][2], bool(check[0][3])) == ("0\n", False)
-    assert check[0][3] is False
+    records = read_results(repo_root)
+    check_records = [r for r in records if r[0] == "check_import"]
+    assert len(check_records) == 1
+    assert (check_records[0][2], check_records[0][3]) == ("0\n", False)
+    assert check_records[0][3] is False
     assert field(result, "isolation") == "unisolated"

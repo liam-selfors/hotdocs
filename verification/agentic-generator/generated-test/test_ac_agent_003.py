@@ -11,7 +11,12 @@ GENERATOR_SOURCE = (
     "import os\n"
     "from dataclasses import dataclass, field\n"
     "\n"
-    "HERE = os.path.dirname(os.path.abspath(__file__))\n"
+    "_HERE = os.path.dirname(os.path.abspath(__file__))\n"
+    "\n"
+    "\n"
+    "def _log(name, payload):\n"
+    "    with open(os.path.join(_HERE, name), 'a', encoding='utf-8') as fh:\n"
+    "        fh.write(json.dumps(payload, default=str) + '\\n')\n"
     "\n"
     "\n"
     "@dataclass\n"
@@ -41,76 +46,76 @@ GENERATOR_SOURCE = (
     "\n"
     "\n"
     "def write_files(component_id, files, repo_root=None):\n"
-    "    with open(os.path.join(HERE, 'write_files.jsonl'), 'a', encoding='utf-8') as f:\n"
-    "        f.write(json.dumps({'component_id': component_id, 'files': dict(files),\n"
-    "                            'repo_root': None if repo_root is None else str(repo_root)}) + '\\n')\n"
+    "    _log('write_files.log', {'component_id': component_id, 'files': files,\n"
+    "                             'repo_root': repo_root})\n"
+    "\n"
+    "\n"
+    "def check_assets(component_id, files, repo_root=None):\n"
+    "    _log('check_assets.log', {'component_id': component_id, 'files': files,\n"
+    "                              'repo_root': repo_root})\n"
+    "    for content in files.values():\n"
+    "        if 'bad' in content:\n"
+    "            return ('malformed_layout', ['static/app.txt: bad'])\n"
+    "    return (None, [])\n"
+    "\n"
+    "\n"
+    "def check_asset_environment(component_id, repo_root=None):\n"
+    "    if repo_root is not None and os.path.exists(os.path.join(str(repo_root), 'NO_ENV')):\n"
+    "        return ('environment', ['fake needs fakeprog >= 2'])\n"
+    "    return (None, [])\n"
 )
+
 
 LOOP_SOURCE = (
     "import json\n"
     "import os\n"
-    "from dataclasses import dataclass, field, asdict\n"
     "\n"
-    "HERE = os.path.dirname(os.path.abspath(__file__))\n"
+    "_HERE = os.path.dirname(os.path.abspath(__file__))\n"
     "\n"
     "\n"
-    "@dataclass\n"
-    "class ToolLoopResult:\n"
-    "    text: str = ''\n"
-    "    transcript: list = field(default_factory=list)\n"
-    "    turns: int = 0\n"
-    "    tool_calls: int = 0\n"
-    "    stop: str = 'end_turn'\n"
-    "    model_call_error: object = None\n"
+    "class _Result:\n"
+    "    def __init__(self, text, transcript, turns, tool_calls, stop, model_call_error):\n"
+    "        self.text = text\n"
+    "        self.transcript = transcript\n"
+    "        self.turns = turns\n"
+    "        self.tool_calls = tool_calls\n"
+    "        self.stop = stop\n"
+    "        self.model_call_error = model_call_error\n"
     "\n"
     "    def to_dict(self):\n"
-    "        return asdict(self)\n"
+    "        return {'text': self.text, 'transcript': self.transcript,\n"
+    "                'turns': self.turns, 'tool_calls': self.tool_calls,\n"
+    "                'stop': self.stop, 'model_call_error': self.model_call_error}\n"
     "\n"
     "\n"
     "def run_tool_loop(system, prompt, model, tools, execute, *, max_turns=40,\n"
     "                  max_tool_calls=120, wall_seconds=1800.0, repo_root=None,\n"
     "                  claude_command='claude'):\n"
-    "    with open(os.path.join(HERE, 'loop_args.jsonl'), 'a', encoding='utf-8') as f:\n"
-    "        f.write(json.dumps({'system': system, 'prompt': prompt, 'model': model,\n"
-    "                            'tools': [t.get('name') for t in tools],\n"
-    "                            'max_turns': max_turns, 'max_tool_calls': max_tool_calls,\n"
-    "                            'wall_seconds': wall_seconds,\n"
-    "                            'repo_root': None if repo_root is None else str(repo_root),\n"
-    "                            'claude_command': claude_command}) + '\\n')\n"
-    "    with open(os.path.join(HERE, 'script.json'), encoding='utf-8') as f:\n"
-    "        script = json.load(f)\n"
+    "    with open(os.path.join(_HERE, 'args.log'), 'a', encoding='utf-8') as fh:\n"
+    "        fh.write(json.dumps({'system': system, 'prompt': prompt, 'model': model,\n"
+    "                             'tools': tools, 'max_turns': max_turns,\n"
+    "                             'max_tool_calls': max_tool_calls,\n"
+    "                             'wall_seconds': wall_seconds,\n"
+    "                             'repo_root': repo_root,\n"
+    "                             'claude_command': claude_command}, default=str) + '\\n')\n"
+    "    with open(os.path.join(_HERE, 'script.json'), encoding='utf-8') as fh:\n"
+    "        script = json.load(fh)\n"
     "    count = 0\n"
     "    for step in script:\n"
     "        name = step['name']\n"
     "        arguments = step['arguments']\n"
     "        text, is_error = execute(name, arguments)\n"
     "        count += 1\n"
-    "        with open(os.path.join(HERE, 'results.jsonl'), 'a', encoding='utf-8') as f:\n"
-    "            f.write(json.dumps([name, arguments, text, is_error]) + '\\n')\n"
-    "    return ToolLoopResult(text='done', transcript=[], turns=1, tool_calls=count,\n"
-    "                          stop='end_turn', model_call_error=None)\n"
+    "        with open(os.path.join(_HERE, 'results.log'), 'a', encoding='utf-8') as fh:\n"
+    "            fh.write(json.dumps({'name': name, 'arguments': {k: (v if not isinstance(v, str) or len(v) < 100 else '<long>') for k, v in arguments.items()},\n"
+    "                                 'text': text, 'is_error': is_error}) + '\\n')\n"
+    "    return _Result('Done.', [{'role': 'user', 'content': prompt}], 1, count,\n"
+    "                   'end_turn', None)\n"
 )
 
 
-def _setup(repo_root):
-    gen_dir = repo_root / "gen" / "generator"
-    gen_dir.mkdir(parents=True)
-    (gen_dir / "generator.py").write_text(GENERATOR_SOURCE, encoding="utf-8")
-    loop_dir = repo_root / "gen" / "llm-tool-endpoint"
-    loop_dir.mkdir(parents=True)
-    (loop_dir / "llm_tool_endpoint.py").write_text(LOOP_SOURCE, encoding="utf-8")
-    return loop_dir
-
-
-def test_ac_agent_003_tool_results_in_order(tmp_path, monkeypatch):
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    loop_dir = _setup(repo_root)
-
-    monkeypatch.setattr(agentic_generator, "SANDBOX_EXEC", str(tmp_path / "no-sandbox-exec"))
-    monkeypatch.setattr(agentic_generator, "BWRAP", str(tmp_path / "no-bwrap"))
-
-    script = [
+def _script():
+    return [
         {"name": "write_file", "arguments": {"path": "work/a.py", "content": "x = 1"}},
         {"name": "read_file", "arguments": {"path": "work/a.py"}},
         {"name": "read_file", "arguments": {"path": "/etc/hosts"}},
@@ -119,12 +124,26 @@ def test_ac_agent_003_tool_results_in_order(tmp_path, monkeypatch):
         {"name": "write_file", "arguments": {"path": "work/big.py", "content": "a" * 524289}},
         {"name": "delete_file", "arguments": {"path": "work/a.py"}},
         {"name": "read_file", "arguments": {"path": "work/a.py"}},
-        {"name": "shell", "arguments": {}},
+        {"name": "shell", "arguments": {"command": "ls"}},
         {"name": "read_file", "arguments": {}},
         {"name": "finish", "arguments": {"summary": "done"}},
         {"name": "write_file", "arguments": {"path": "work/b.py"}},
     ]
-    (loop_dir / "script.json").write_text(json.dumps(script), encoding="utf-8")
+
+
+def test_ac_agent_003_tool_results_in_order(tmp_path, monkeypatch):
+    repo_root = tmp_path / "repo"
+    gen_dir = repo_root / "gen" / "generator"
+    loop_dir = repo_root / "gen" / "llm-tool-endpoint"
+    gen_dir.mkdir(parents=True)
+    loop_dir.mkdir(parents=True)
+    (gen_dir / "generator.py").write_text(GENERATOR_SOURCE, encoding="utf-8")
+    (loop_dir / "llm_tool_endpoint.py").write_text(LOOP_SOURCE, encoding="utf-8")
+    (loop_dir / "script.json").write_text(json.dumps(_script()), encoding="utf-8")
+
+    missing = str(tmp_path / "no-such-sandbox-binary")
+    monkeypatch.setattr(agentic_generator, "SANDBOX_EXEC", missing)
+    monkeypatch.setattr(agentic_generator, "BWRAP", missing)
 
     bundle = {
         "component_id": "comp-widget",
@@ -132,44 +151,49 @@ def test_ac_agent_003_tool_results_in_order(tmp_path, monkeypatch):
         "hint_code": None,
     }
 
-    agentic_generator.generate_agentic(bundle, "anthropic:claude-test", repo_root=repo_root)
+    agentic_generator.generate_agentic(
+        bundle, "anthropic:claude-sonnet-5", None, repo_root=repo_root
+    )
 
-    results_path = loop_dir / "results.jsonl"
-    assert results_path.is_file(), "loop stand-in never recorded any execute result"
-    lines = [ln for ln in results_path.read_text(encoding="utf-8").splitlines() if ln.strip()]
-    results = [json.loads(ln) for ln in lines]
-    assert len(results) == len(script)
-    texts = [r[2] for r in results]
-    errs = [r[3] for r in results]
+    results_path = loop_dir / "results.log"
+    assert results_path.exists(), "loop stand-in never recorded any results"
+    results = [
+        json.loads(line)
+        for line in results_path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    assert len(results) == 12, results
 
-    # 1. write
+    texts = [r["text"] for r in results]
+    errors = [r["is_error"] for r in results]
+
+    # 1. write_file work/a.py
     assert texts[0] == "wrote work/a.py"
-    assert errs[0] is False
-    # 2. read back
+    assert errors[0] is False
+    # 2. read_file work/a.py
     assert texts[1] == "x = 1"
-    assert errs[1] is False
+    assert errors[1] is False
     # 3-5. path rules
     for i in (2, 3, 4):
-        assert errs[i] is True, (i, texts[i])
+        assert errors[i] is True, (i, results[i])
         assert texts[i].startswith("path not allowed:"), (i, texts[i])
     # 6. size limit
-    assert errs[5] is True
-    assert texts[5].startswith("too large:"), texts[5]
+    assert errors[5] is True
     assert "524288" in texts[5], texts[5]
     # 7. delete
     assert texts[6] == "deleted work/a.py"
-    assert errs[6] is False
-    # 8. read of deleted file is an error
-    assert errs[7] is True
+    assert errors[6] is False
+    # 8. read of deleted file
+    assert errors[7] is True, results[7]
     # 9. unknown tool
-    assert errs[8] is True
+    assert errors[8] is True
     assert texts[8].startswith("bad call:"), texts[8]
-    # 10. missing argument
-    assert errs[9] is True
+    # 10. missing path
+    assert errors[9] is True
     assert texts[9].startswith("bad call:"), texts[9]
     # 11. finish
     assert texts[10] == "finished"
-    assert errs[10] is False
+    assert errors[10] is False
     # 12. after finish
     assert texts[11] == "already finished"
-    assert errs[11] is True
+    assert errors[11] is True

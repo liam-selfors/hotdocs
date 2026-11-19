@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:c91c5a80910356f126318f6dc8e5b8aaf0cbda67530a7e5bff8e0b6c3a7739c4
+# hotdocs-criterion: sha256:3ced0b378a13d9ba20421183e2dfd320710fb2908335b559029b2838fd00af11
 import os
 import tempfile
 from pathlib import Path
@@ -10,16 +10,19 @@ def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def _write_generator_stand_in(repo_root, log_path):
-    src = (
+def _generator_source(log_path, refusal):
+    return (
+        "import json\n"
+        "import os\n"
         "from dataclasses import dataclass, field\n"
         "\n"
-        "LOG_PATH = " + repr(str(log_path)) + "\n"
+        "LOG = " + repr(str(log_path)) + "\n"
+        "REFUSAL = " + repr(refusal) + "\n"
         "\n"
         "\n"
-        "def _log(line):\n"
-        "    with open(LOG_PATH, 'a', encoding='utf-8') as fh:\n"
-        "        fh.write(line + '\\n')\n"
+        "def _log(entry):\n"
+        "    with open(LOG, 'a', encoding='utf-8') as fh:\n"
+        "        fh.write(json.dumps(entry, default=str) + '\\n')\n"
         "\n"
         "\n"
         "@dataclass\n"
@@ -41,116 +44,136 @@ def _write_generator_stand_in(repo_root, log_path):
         "\n"
         "\n"
         "def check_write_allowed(bundle, repo_root=None):\n"
-        "    _log('check_write_allowed')\n"
-        "    return 'sealed-component'\n"
+        "    _log(['check_write_allowed', bundle['component_id'], str(repo_root)])\n"
+        "    return REFUSAL\n"
         "\n"
         "\n"
         "def render_prompt_sections(bundle, retry_feedback=None):\n"
-        "    _log('render_prompt_sections')\n"
+        "    _log(['render_prompt_sections', bundle['component_id']])\n"
         "    return [('Spec', 'SPEC TEXT'), ('Component interface', 'IFACE TEXT')]\n"
         "\n"
         "\n"
         "def write_files(component_id, files, repo_root=None):\n"
-        "    _log('write_files ' + repr(component_id) + ' ' + repr(sorted(files)))\n"
+        "    _log(['write_files', component_id, files, str(repo_root)])\n"
+        "\n"
+        "\n"
+        "def check_assets(component_id, files, repo_root=None):\n"
+        "    _log(['check_assets', component_id, files, str(repo_root)])\n"
+        "    for content in files.values():\n"
+        "        if 'bad' in content:\n"
+        "            return ('malformed_layout', ['static/app.txt: bad'])\n"
+        "    return (None, [])\n"
+        "\n"
+        "\n"
+        "def check_asset_environment(component_id, repo_root=None):\n"
+        "    _log(['check_asset_environment', component_id, str(repo_root)])\n"
+        "    if repo_root is not None and os.path.exists(os.path.join(str(repo_root), 'NO_ENV')):\n"
+        "        return ('environment', ['fake needs fakeprog >= 2'])\n"
+        "    return (None, [])\n"
     )
-    d = repo_root / "gen" / "generator"
-    d.mkdir(parents=True, exist_ok=True)
-    (d / "generator.py").write_text(src, encoding="utf-8")
 
 
-def _write_loop_stand_in(repo_root, log_path, script_path, results_path):
-    src = (
+def _loop_source(log_path, script_path):
+    return (
         "import json\n"
+        "import os\n"
+        "from dataclasses import dataclass, field\n"
         "\n"
-        "LOG_PATH = " + repr(str(log_path)) + "\n"
-        "SCRIPT_PATH = " + repr(str(script_path)) + "\n"
-        "RESULTS_PATH = " + repr(str(results_path)) + "\n"
+        "LOG = " + repr(str(log_path)) + "\n"
+        "SCRIPT = " + repr(str(script_path)) + "\n"
         "\n"
         "\n"
+        "@dataclass\n"
         "class _Result:\n"
-        "    def __init__(self, text, transcript, turns, tool_calls, stop, model_call_error):\n"
-        "        self.text = text\n"
-        "        self.transcript = transcript\n"
-        "        self.turns = turns\n"
-        "        self.tool_calls = tool_calls\n"
-        "        self.stop = stop\n"
-        "        self.model_call_error = model_call_error\n"
+        "    text: str = ''\n"
+        "    transcript: list = field(default_factory=list)\n"
+        "    turns: int = 0\n"
+        "    tool_calls: int = 0\n"
+        "    stop: str = 'end_turn'\n"
+        "    model_call_error: object = None\n"
         "\n"
-        "    def to_dict(self):\n"
-        "        return {'text': self.text, 'transcript': self.transcript,\n"
-        "                'turns': self.turns, 'tool_calls': self.tool_calls,\n"
-        "                'stop': self.stop, 'model_call_error': self.model_call_error}\n"
+        "\n"
+        "def _log(entry):\n"
+        "    with open(LOG, 'a', encoding='utf-8') as fh:\n"
+        "        fh.write(json.dumps(entry, default=str) + '\\n')\n"
         "\n"
         "\n"
         "def run_tool_loop(system, prompt, model, tools, execute, *, max_turns=40,\n"
         "                  max_tool_calls=120, wall_seconds=1800.0, repo_root=None,\n"
         "                  claude_command='claude'):\n"
-        "    with open(LOG_PATH, 'a', encoding='utf-8') as fh:\n"
-        "        fh.write(json.dumps({'called': True, 'model': model,\n"
-        "                             'max_turns': max_turns,\n"
-        "                             'max_tool_calls': max_tool_calls}) + '\\n')\n"
-        "    with open(SCRIPT_PATH, 'r', encoding='utf-8') as fh:\n"
-        "        script = json.load(fh)\n"
+        "    _log(['called', system, prompt, model, tools, max_turns, max_tool_calls,\n"
+        "          wall_seconds, str(repo_root), claude_command])\n"
+        "    steps = []\n"
+        "    if os.path.exists(SCRIPT):\n"
+        "        with open(SCRIPT, encoding='utf-8') as fh:\n"
+        "            steps = json.load(fh)\n"
         "    count = 0\n"
-        "    for step in script:\n"
-        "        text, is_error = execute(step['name'], step['arguments'])\n"
+        "    for step in steps:\n"
+        "        name = step[0]\n"
+        "        arguments = step[1]\n"
+        "        text, is_error = execute(name, arguments)\n"
         "        count += 1\n"
-        "        with open(RESULTS_PATH, 'a', encoding='utf-8') as fh:\n"
-        "            fh.write(json.dumps([step['name'], step['arguments'], text, is_error]) + '\\n')\n"
-        "    return _Result('done', [{'role': 'user', 'content': prompt}], 1, count,\n"
-        "                   'end_turn', None)\n"
+        "        _log(['step', name, arguments, text, is_error])\n"
+        "    return _Result(text='done', transcript=[], turns=1, tool_calls=count,\n"
+        "                   stop='end_turn', model_call_error=None)\n"
     )
-    d = repo_root / "gen" / "llm-tool-endpoint"
-    d.mkdir(parents=True, exist_ok=True)
-    (d / "llm_tool_endpoint.py").write_text(src, encoding="utf-8")
 
 
-def test_ac_agent_001_refusal_skips_sandbox_and_loop(tmp_path, monkeypatch):
+def _setup(tmp_path, monkeypatch, refusal, no_env):
     repo_root = tmp_path / "repo"
-    repo_root.mkdir()
+    gen_dir = repo_root / "gen" / "generator"
+    loop_dir = repo_root / "gen" / "llm-tool-endpoint"
+    gen_dir.mkdir(parents=True)
+    loop_dir.mkdir(parents=True)
     logs = tmp_path / "logs"
     logs.mkdir()
     gen_log = logs / "generator.log"
     loop_log = logs / "loop.log"
-    loop_results = logs / "loop_results.log"
-    script_path = logs / "script.json"
-    script_path.write_text("[]", encoding="utf-8")
+    script = logs / "script.json"
+    script.write_text("[]", encoding="utf-8")
+    (gen_dir / "generator.py").write_text(_generator_source(gen_log, refusal), encoding="utf-8")
+    (loop_dir / "llm_tool_endpoint.py").write_text(_loop_source(loop_log, script), encoding="utf-8")
+    if no_env:
+        (repo_root / "NO_ENV").write_text("", encoding="utf-8")
 
-    _write_generator_stand_in(repo_root, gen_log)
-    _write_loop_stand_in(repo_root, loop_log, script_path, loop_results)
+    fresh_tmp = tmp_path / "systmp"
+    fresh_tmp.mkdir()
+    monkeypatch.setattr(tempfile, "tempdir", str(fresh_tmp))
+    monkeypatch.setattr(agentic_generator, "SANDBOX_EXEC", str(tmp_path / "no-sandbox-exec"))
+    monkeypatch.setattr(agentic_generator, "BWRAP", str(tmp_path / "no-bwrap"))
+    return repo_root, loop_log
 
-    # Isolate the temp directory so the "no hotdocs-agent-* directory"
-    # check is exact and unaffected by other processes.
-    private_tmp = tmp_path / "systmp"
-    private_tmp.mkdir()
-    monkeypatch.setenv("TMPDIR", str(private_tmp))
-    monkeypatch.setattr(tempfile, "tempdir", str(private_tmp))
 
-    # Make OS sandboxes unavailable; irrelevant here but keeps the run inert.
-    monkeypatch.setattr(agentic_generator, "SANDBOX_EXEC", str(tmp_path / "no-such-sandbox-exec"))
-    monkeypatch.setattr(agentic_generator, "BWRAP", str(tmp_path / "no-such-bwrap"))
+def _bundle():
+    return {"component_id": "comp-widget", "spec_bundle_hash": "sha256:x", "hint_code": None}
 
-    bundle = {"component_id": "comp-widget", "spec_bundle_hash": "sha256:x", "hint_code": None}
 
-    result = agentic_generator.generate_agentic(bundle, "m", repo_root=repo_root)
+def _agent_dirs():
+    base = tempfile.gettempdir()
+    return [n for n in os.listdir(base) if n.startswith("hotdocs-agent-")]
+
+
+def test_refusal_returns_without_sandbox_or_loop(tmp_path, monkeypatch):
+    repo_root, loop_log = _setup(tmp_path, monkeypatch, "sealed-component", False)
+
+    result = agentic_generator.generate_agentic(_bundle(), "m", repo_root=repo_root)
 
     assert field(result, "refused") == "sealed-component"
     assert field(result, "mode") == "agentic"
     assert field(result, "turns") == 0
     assert field(result, "tool_calls") == 0
-
-    # check_write_allowed was consulted
-    assert gen_log.is_file()
-    assert "check_write_allowed" in gen_log.read_text(encoding="utf-8").splitlines()
-
-    # The loop stand-in was never called
     assert not loop_log.exists() or loop_log.read_text(encoding="utf-8").strip() == ""
-    assert not loop_results.exists()
+    assert _agent_dirs() == []
 
-    # No sandbox directory was created
-    tmpdir = tempfile.gettempdir()
-    leftovers = [name for name in os.listdir(tmpdir) if name.startswith("hotdocs-agent-")]
-    assert [n for n in leftovers if os.path.isdir(os.path.join(tmpdir, n))] == []
 
-    # Nothing written into gen/widget either
-    assert not (Path(repo_root) / "gen" / "widget").exists()
+def test_environment_failure_returns_model_call_error(tmp_path, monkeypatch):
+    repo_root, loop_log = _setup(tmp_path, monkeypatch, None, True)
+
+    result = agentic_generator.generate_agentic(_bundle(), "m", repo_root=repo_root)
+
+    assert field(result, "model_call_error") == {
+        "category": "environment",
+        "message": "fake needs fakeprog >= 2",
+    }
+    assert field(result, "turns") == 0
+    assert not loop_log.exists() or loop_log.read_text(encoding="utf-8").strip() == ""
