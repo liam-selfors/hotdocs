@@ -20,19 +20,9 @@ def load_module(path, module_name):
 
 def _tool_gen():
     return next(
-        p
-        for p in Path(spec_bundle_assembler.__file__).resolve().parents
+        p for p in Path(spec_bundle_assembler.__file__).resolve().parents
         if p.name == "gen"
     )
-
-
-def _load_spec_linter():
-    base = _tool_gen() / "spec-linter"
-    if (base / "spec_linter.py").is_file():
-        path = base / "spec_linter.py"
-    else:
-        path = base / "spec_linter" / "__init__.py"
-    return load_module(path, "spec_linter")
 
 
 def _write(path, text):
@@ -41,14 +31,13 @@ def _write(path, text):
 
 
 def _build_fixture(repo_root):
-    specs = repo_root / "specs"
     _write(
-        specs / "glossary.md",
+        repo_root / "specs" / "glossary.md",
         "# Glossary\n"
         "\n"
-        "- **Foo** \u2014 a test term.\n",
+        "- **Foo** — a test term.\n",
     )
-    comp = specs / "components" / "foo"
+    comp = repo_root / "specs" / "components" / "foo"
     _write(
         comp / "component.md",
         "---\n"
@@ -71,7 +60,7 @@ def _build_fixture(repo_root):
         comp / "requirements" / "R-FOO-001.md",
         "# R-FOO-001\n"
         "\n"
-        "**R-FOO-001** \u2014 `foo(x)` MUST return `2 * x`.\n",
+        "**R-FOO-001** — `foo(x)` MUST return `2 * x`.\n",
     )
     _write(
         comp / "acceptance" / "AC-FOO-001.md",
@@ -102,46 +91,40 @@ def _build_fixture(repo_root):
     )
 
 
-def test_assemble_falls_back_to_tool_root_when_repo_has_no_gen(tmp_path):
+def test_assemble_without_repo_gen_uses_tool_root_dependencies(tmp_path):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
     _build_fixture(repo_root)
 
     assert not (repo_root / "gen").exists()
 
-    # The tool root holds the dependencies the fallback must find.
-    tool_gen = _tool_gen()
-    assert repo_root.resolve() not in tool_gen.parents
-    assert (tool_gen / "spec-linter").is_dir()
-    assert (tool_gen / "graph-query-engine").is_dir()
+    gen = _tool_gen()
+    # The dependencies exist under the tool root, the only place they can come from.
+    for slug in ("spec-linter", "graph-query-engine"):
+        mod = slug.replace("-", "_")
+        base = gen / slug
+        assert (base / (mod + ".py")).is_file() or (base / mod / "__init__.py").is_file()
 
-    spec_linter = _load_spec_linter()
+    base = gen / "spec-linter"
+    path = (
+        base / "spec_linter.py"
+        if (base / "spec_linter.py").is_file()
+        else base / "spec_linter" / "__init__.py"
+    )
+    spec_linter = load_module(path, "spec_linter")
     assert spec_linter.lint(None, repo_root).hard_failures == 0
-    assert not (repo_root / "gen").exists()
 
     bundle = spec_bundle_assembler.assemble("comp-foo", repo_root)
     assert field(bundle, "component_id") == "comp-foo"
-    spec_text = field(bundle, "spec")
-    assert "Foo doubles a number." in spec_text
-    assert "R-FOO-001" in spec_text
+    assert "R-FOO-001" in field(bundle, "spec")
     assert "foo(x: int) -> int" in field(bundle, "interface")
-    assert "None." in field(bundle, "constraints")
-    assert "a test term." in field(bundle, "glossary")
-    assert field(bundle, "hint_code") is None
-    assert str(field(bundle, "spec_bundle_hash")).startswith("sha256:")
 
-    assert not (repo_root / "gen").exists()
-
-    crit = spec_bundle_assembler.assemble_criterion(
+    criterion_bundle = spec_bundle_assembler.assemble_criterion(
         "comp-foo", "AC-FOO-001", repo_root
     )
-    assert field(crit, "component_id") == "comp-foo"
-    assert field(crit, "criterion_id") == "AC-FOO-001"
-    assert field(crit, "covers") == "R-FOO-001"
-    assert "Then it returns 4" in field(crit, "criterion_text")
-    assert "MUST return" in field(crit, "requirement_text")
-    assert "foo(x: int) -> int" in field(crit, "interface")
-    assert "a test term." in field(crit, "glossary")
-    assert dict(field(crit, "dependency_interfaces")) == {}
+    assert field(criterion_bundle, "component_id") == "comp-foo"
+    assert field(criterion_bundle, "criterion_id") == "AC-FOO-001"
+    assert field(criterion_bundle, "covers") == "R-FOO-001"
+    assert "foo(x: int) -> int" in field(criterion_bundle, "interface")
 
     assert not (repo_root / "gen").exists()

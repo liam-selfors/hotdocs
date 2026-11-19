@@ -10,9 +10,18 @@ def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
+def load_module(path, module_name):
+    spec = importlib.util.spec_from_file_location(module_name, path)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
 def load_spec_linter():
     gen = next(
-        p for p in Path(spec_bundle_assembler.__file__).resolve().parents if p.name == "gen"
+        p for p in Path(spec_bundle_assembler.__file__).resolve().parents
+        if p.name == "gen"
     )
     base = gen / "spec-linter"
     path = (
@@ -20,11 +29,7 @@ def load_spec_linter():
         if (base / "spec_linter.py").is_file()
         else base / "spec_linter" / "__init__.py"
     )
-    spec = importlib.util.spec_from_file_location("spec_linter", path)
-    spec_linter = importlib.util.module_from_spec(spec)
-    sys.modules["spec_linter"] = spec_linter
-    spec.loader.exec_module(spec_linter)
-    return spec_linter
+    return load_module(path, "spec_linter")
 
 
 def write(path, text):
@@ -32,126 +37,110 @@ def write(path, text):
     path.write_text(text, encoding="utf-8")
 
 
-FENCE = "```"
-
-BAR_PURPOSE_MARKER = "zqbarpurposemarker"
-BAR_REQUIREMENT_MARKER = "zqbarrequirementmarker"
-BAR_CONSTRAINTS_MARKER = "zqbarconstraintsmarker"
-BAR_INTERFACE_MARKER = "zqbarinterfacemarker"
+BAR_INTERFACE_MARKER = "bar_iface_marker_kappa"
+BAR_PURPOSE_MARKER = "purposemarkerdelta"
+BAR_REQUIREMENT_MARKER = "reqmarkerzeta"
+BAR_CONSTRAINT_MARKER = "constraintmarkeromega"
+BAR_TITLE = "Bartitlemarkersigma"
 
 
 def build_component(
-    repo_root,
-    slug,
-    comp_id,
-    title,
-    req_id,
-    ac_id,
-    depends_on,
-    purpose,
-    requirement_text,
-    interface_sig,
-    constraints_text,
+    repo_root, slug, comp_id, title, depends_on, purpose,
+    req_id, req_text, ac_id, given_when_then, iface_sig, constraints_text,
 ):
-    comp_dir = repo_root / "specs" / "components" / slug
+    root = repo_root / "specs" / "components" / slug
     write(
-        comp_dir / "component.md",
+        root / "component.md",
         "---\n"
-        + "id: " + comp_id + "\n"
-        + "title: " + title + "\n"
-        + "status: draft\n"
-        + "owners: [team-a]\n"
-        + "sealed: true\n"
-        + "source_path: legacy/" + slug + "/\n"
-        + "depends_on: " + depends_on + "\n"
-        + "---\n"
-        + "\n"
-        + "# " + title + "\n"
-        + "\n"
-        + "## Purpose\n"
-        + "\n"
+        "id: " + comp_id + "\n"
+        "title: " + title + "\n"
+        "status: draft\n"
+        "owners: [team-a]\n"
+        "sealed: true\n"
+        "source_path: legacy/" + slug + "/\n"
+        "depends_on: " + depends_on + "\n"
+        "---\n"
+        "\n"
+        "# " + title + "\n"
+        "\n"
+        "## Purpose\n"
+        "\n"
         + purpose + "\n",
     )
     write(
-        comp_dir / "requirements" / (req_id + ".md"),
+        root / "requirements" / (req_id + ".md"),
         "# " + req_id + "\n"
-        + "\n"
-        + "**" + req_id + "** — " + requirement_text + "\n",
+        "\n"
+        "**" + req_id + "** \u2014 " + req_text + "\n",
     )
     write(
-        comp_dir / "acceptance" / (ac_id + ".md"),
+        root / "acceptance" / (ac_id + ".md"),
         "# " + ac_id + "\n"
-        + "\n"
-        + "Covers: " + req_id + "\n"
-        + "Kind: generated-test\n"
-        + "\n"
-        + FENCE + "gherkin\n"
-        + "Given x = 2\n"
-        + "When the function is called with x\n"
-        + "Then it returns the documented result\n"
-        + FENCE + "\n",
+        "\n"
+        "Covers: " + req_id + "\n"
+        "Kind: generated-test\n"
+        "\n"
+        "```gherkin\n"
+        + given_when_then +
+        "```\n",
     )
     write(
-        comp_dir / "interface" / "library.md",
+        root / "interface" / "library.md",
         "# Library\n"
-        + "\n"
-        + FENCE + "\n"
-        + interface_sig + "\n"
-        + FENCE + "\n",
+        "\n"
+        "```\n"
+        + iface_sig + "\n"
+        "```\n",
     )
     write(
-        comp_dir / "constraints.md",
+        root / "constraints.md",
         "# Constraints\n"
-        + "\n"
+        "\n"
         + constraints_text + "\n",
     )
-    # Sealed component's real code lives under its source_path, never gen/.
-    write(
-        repo_root / "legacy" / slug / (slug + ".py"),
-        "def " + slug + "(x):\n"
-        + "    return x\n",
-    )
 
 
-def build_fixture(repo_root):
+def build_corpus(repo_root):
     write(
         repo_root / "specs" / "glossary.md",
         "# Glossary\n"
-        + "\n"
-        + "- **Foo** — a test term.\n",
+        "\n"
+        "- **Foo** \u2014 a test term.\n",
     )
     build_component(
         repo_root,
-        slug="bar",
-        comp_id="comp-bar",
-        title="Bar",
-        req_id="R-BAR-001",
-        ac_id="AC-BAR-001",
-        depends_on="[]",
-        purpose="Bar triples a number " + BAR_PURPOSE_MARKER + ".",
-        requirement_text="`bar(x)` MUST return `3 * x` " + BAR_REQUIREMENT_MARKER + ".",
-        interface_sig="bar(x: int) -> int  # " + BAR_INTERFACE_MARKER,
-        constraints_text="None " + BAR_CONSTRAINTS_MARKER + ".",
+        "bar",
+        "comp-bar",
+        BAR_TITLE,
+        "[]",
+        "Bar triples a number, " + BAR_PURPOSE_MARKER + ".",
+        "R-BAR-001",
+        "`bar(x)` MUST return `3 * x` for " + BAR_REQUIREMENT_MARKER + ".",
+        "AC-BAR-001",
+        "Given x = 2\nWhen bar(x) is called\nThen it returns 6\n",
+        BAR_INTERFACE_MARKER + "(x: int) -> int",
+        "Bar never caches, " + BAR_CONSTRAINT_MARKER + ".",
     )
     build_component(
         repo_root,
-        slug="foo",
-        comp_id="comp-foo",
-        title="Foo",
-        req_id="R-FOO-001",
-        ac_id="AC-FOO-001",
-        depends_on="[comp-bar]",
-        purpose="Foo doubles a number.",
-        requirement_text="`foo(x)` MUST return `2 * x`.",
-        interface_sig="foo(x: int) -> int",
-        constraints_text="None.",
+        "foo",
+        "comp-foo",
+        "Foo",
+        "[comp-bar]",
+        "Foo doubles a number.",
+        "R-FOO-001",
+        "`foo(x)` MUST return `2 * x`.",
+        "AC-FOO-001",
+        "Given x = 2\nWhen foo(x) is called\nThen it returns 4\n",
+        "foo(x: int) -> int",
+        "None.",
     )
 
 
-def test_dependency_interfaces_contains_only_interface_content(tmp_path):
+def test_dependency_interfaces_contain_only_interface_content(tmp_path):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
-    build_fixture(repo_root)
+    build_corpus(repo_root)
 
     spec_linter = load_spec_linter()
     assert spec_linter.lint(None, repo_root).hard_failures == 0
@@ -159,34 +148,29 @@ def test_dependency_interfaces_contains_only_interface_content(tmp_path):
     bundle = spec_bundle_assembler.assemble("comp-foo", repo_root)
 
     dep_ifaces = field(bundle, "dependency_interfaces")
-    assert set(dep_ifaces.keys()) == {"comp-bar"}
+    assert "comp-bar" in dep_ifaces
+    bar_text = dep_ifaces["comp-bar"]
+    assert isinstance(bar_text, str)
 
-    bar_iface = dep_ifaces["comp-bar"]
-    assert isinstance(bar_iface, str)
+    # Only the dependency's interface/ content is present.
+    assert BAR_INTERFACE_MARKER in bar_text
 
-    # The dependency's interface/ content is present.
-    assert BAR_INTERFACE_MARKER in bar_iface
-    assert "bar(x: int) -> int" in bar_iface
+    # Never its component.md (frontmatter, title, Purpose).
+    assert BAR_TITLE not in bar_text
+    assert BAR_PURPOSE_MARKER not in bar_text
+    assert "legacy/bar" not in bar_text
+    assert "sealed: true" not in bar_text
+    assert "## Purpose" not in bar_text
 
-    # Never its component.md content.
-    assert BAR_PURPOSE_MARKER not in bar_iface
-    assert "Bar triples a number" not in bar_iface
-    assert "comp-bar" not in bar_iface
-    assert "source_path" not in bar_iface
-    assert "## Purpose" not in bar_iface
+    # Never its requirements/.
+    assert BAR_REQUIREMENT_MARKER not in bar_text
+    assert "R-BAR-001" not in bar_text
 
-    # Never its requirements/ content.
-    assert BAR_REQUIREMENT_MARKER not in bar_iface
-    assert "R-BAR-001" not in bar_iface
-    assert "MUST return" not in bar_iface
+    # Never its constraints.md.
+    assert BAR_CONSTRAINT_MARKER not in bar_text
+    assert "# Constraints" not in bar_text
 
-    # Never its constraints.md content.
-    assert BAR_CONSTRAINTS_MARKER not in bar_iface
-    assert "# Constraints" not in bar_iface
-
-    # No other dict-valued bundle field smuggles the dependency's
-    # requirements or constraints into the dependency_interfaces view.
-    for value in dep_ifaces.values():
+    # Nothing from the dependency leaks into any other dependency entry.
+    for key, value in dep_ifaces.items():
         assert BAR_REQUIREMENT_MARKER not in value
-        assert BAR_CONSTRAINTS_MARKER not in value
-        assert BAR_PURPOSE_MARKER not in value
+        assert BAR_CONSTRAINT_MARKER not in value

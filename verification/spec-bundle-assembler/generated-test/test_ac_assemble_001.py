@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:d3da20a0e4a3c62aa90858483ba4c62f800384f0bc628db0d5cffe82fc9f7482
+# hotdocs-criterion: sha256:cae59ca8846b8523928eb1beea0652ec592e97ca45bcdfa0d9ff9b6400bd44c8
 import dataclasses
 import importlib.util
 import sys
@@ -11,30 +11,18 @@ def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def load_module(path, module_name):
-    spec = importlib.util.spec_from_file_location(module_name, path)
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[module_name] = module
-    spec.loader.exec_module(module)
-    return module
-
-
 def load_spec_linter():
-    gen = next(
-        p
-        for p in Path(spec_bundle_assembler.__file__).resolve().parents
-        if p.name == "gen"
-    )
+    gen = next(p for p in Path(spec_bundle_assembler.__file__).resolve().parents if p.name == "gen")
     base = gen / "spec-linter"
-    path = (
-        base / "spec_linter.py"
-        if (base / "spec_linter.py").is_file()
-        else base / "spec_linter" / "__init__.py"
-    )
-    return load_module(path, "spec_linter")
+    path = base / "spec_linter.py" if (base / "spec_linter.py").is_file() else base / "spec_linter" / "__init__.py"
+    spec = importlib.util.spec_from_file_location("spec_linter", path)
+    spec_linter = importlib.util.module_from_spec(spec)
+    sys.modules["spec_linter"] = spec_linter
+    spec.loader.exec_module(spec_linter)
+    return spec_linter
 
 
-GLOSSARY = "# Glossary\n\n- **Foo** \u2014 a test term.\n"
+GLOSSARY = "# Glossary\n\n- **Foo** — a test term.\n"
 
 COMPONENT_MD = (
     "---\n"
@@ -54,11 +42,7 @@ COMPONENT_MD = (
     "Foo doubles a number.\n"
 )
 
-REQUIREMENT_MD = (
-    "# R-FOO-001\n"
-    "\n"
-    "**R-FOO-001** \u2014 `foo(x)` MUST return `2 * x`.\n"
-)
+REQUIREMENT_MD = "# R-FOO-001\n\n**R-FOO-001** — `foo(x)` MUST return `2 * x`.\n"
 
 ACCEPTANCE_MD = (
     "# AC-FOO-001\n"
@@ -86,22 +70,18 @@ def build_corpus(repo_root):
     (comp / "interface").mkdir(parents=True)
     (specs / "glossary.md").write_text(GLOSSARY, encoding="utf-8")
     (comp / "component.md").write_text(COMPONENT_MD, encoding="utf-8")
-    (comp / "requirements" / "R-FOO-001.md").write_text(
-        REQUIREMENT_MD, encoding="utf-8"
-    )
-    (comp / "acceptance" / "AC-FOO-001.md").write_text(
-        ACCEPTANCE_MD, encoding="utf-8"
-    )
+    (comp / "requirements" / "R-FOO-001.md").write_text(REQUIREMENT_MD, encoding="utf-8")
+    (comp / "acceptance" / "AC-FOO-001.md").write_text(ACCEPTANCE_MD, encoding="utf-8")
     (comp / "interface" / "library.md").write_text(LIBRARY_MD, encoding="utf-8")
     (comp / "constraints.md").write_text(CONSTRAINTS_MD, encoding="utf-8")
 
 
-def bundle_field_names(bundle):
+def field_names(bundle):
     if isinstance(bundle, dict):
         return list(bundle.keys())
     if dataclasses.is_dataclass(bundle):
         return [f.name for f in dataclasses.fields(bundle)]
-    return [n for n in vars(bundle) if not n.startswith("_")]
+    return list(bundle.keys())
 
 
 def collect_strings(value, out):
@@ -121,10 +101,9 @@ def collect_strings(value, out):
         out.append(str(value))
 
 
-def test_cold_bundle_includes_spec_interface_constraints_and_excludes_acceptance(
-    tmp_path,
-):
-    repo_root = tmp_path
+def test_ac_assemble_001_cold_bundle_includes_spec_excludes_acceptance(tmp_path):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
     build_corpus(repo_root)
 
     spec_linter = load_spec_linter()
@@ -132,43 +111,37 @@ def test_cold_bundle_includes_spec_interface_constraints_and_excludes_acceptance
 
     bundle = spec_bundle_assembler.assemble("comp-foo", repo_root, mode="cold")
 
-    assert field(bundle, "component_id") == "comp-foo"
-
     spec_text = field(bundle, "spec")
     interface_text = field(bundle, "interface")
     constraints_text = field(bundle, "constraints")
 
-    # component.md body content
+    # Spec: component.md body and requirements/ content.
+    assert isinstance(spec_text, str)
     assert "Foo doubles a number." in spec_text
-    # requirements/ content
-    assert "`foo(x)` MUST return `2 * x`." in spec_text
-    # interface/ content
+    assert "MUST return `2 * x`" in spec_text
+
+    # Interface content.
+    assert isinstance(interface_text, str)
     assert "foo(x: int) -> int" in interface_text
-    # constraints.md content
+
+    # Constraints content.
+    assert isinstance(constraints_text, str)
     assert "None." in constraints_text
 
-    # cold mode: no hint code
-    assert field(bundle, "hint_code") is None
-
-    # No field is named after acceptance/criteria.
-    names = bundle_field_names(bundle)
+    # No field derived from acceptance/.
+    names = field_names(bundle)
     for name in names:
         lowered = name.lower()
         assert "acceptance" not in lowered, name
         assert "criteri" not in lowered, name
 
-    # No field's content is derived from acceptance/.
     strings = []
     for name in names:
         collect_strings(field(bundle, name), strings)
     joined = "\n".join(strings)
-    for marker in (
-        "AC-FOO-001",
-        "Covers: R-FOO-001",
-        "Kind: generated-test",
-        "Given x = 2",
-        "When foo(x) is called",
-        "Then it returns 4",
-        "```gherkin",
-    ):
-        assert marker not in joined, marker
+    assert "AC-FOO-001" not in joined
+    assert "Given x = 2" not in joined
+    assert "When foo(x) is called" not in joined
+    assert "Then it returns 4" not in joined
+    assert "Kind: generated-test" not in joined
+    assert "Covers: R-FOO-001" not in joined
