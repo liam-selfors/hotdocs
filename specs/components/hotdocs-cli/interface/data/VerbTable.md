@@ -35,6 +35,7 @@ packages' submodules.
 | `decision ratify` | `gen/spec-scaffolder` | `spec_scaffolder` | 0 | no | ratify a decision record |
 | `decision record-commit` | `gen/spec-scaffolder` | `spec_scaffolder` | 0 | no | record the commit that landed a decision |
 | `component new` | `gen/spec-scaffolder` | `spec_scaffolder` | 0 | no | lay out a new component |
+| `kind new` | `gen/spec-scaffolder` | `spec_scaffolder` | 0 | no | scaffold a new asset kind |
 | `init` | `gen/hotdocs-init` | `hotdocs_init` | 1 | no | set up a new project |
 
 `init` is special (`R-CLI-005`). `cache` is documented by

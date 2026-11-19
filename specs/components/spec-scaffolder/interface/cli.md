@@ -6,14 +6,15 @@ hotdocs decision ratify <D<N>> [--repo-root=<dir>]
 hotdocs decision record-commit <D<N>> [--commit=<hash>] [--repo-root=<dir>]
 hotdocs component new <slug> [--title=<title>] [--owners=<a,b>] [--depends-on=<comp-a,comp-b>]
     [--realizes=<P-a,P-b>] [--sealed] [--repo-root=<dir>]
+hotdocs kind new <kind> [--title=<title>] [--owners=<a,b>] [--realizes=<P-a,P-b>] [--repo-root=<dir>]
 ```
 
-`main(argv)` receives `argv` beginning `["decision", ...]` or
-`["component", ...]`: `hotdocs-cli` strips no words for these verbs.
+`main(argv)` receives `argv` beginning `["decision", ...]`,
+`["component", ...]` or `["kind", ...]`: `hotdocs-cli` strips no words for these verbs.
 `--repo-root` defaults to the current directory. Comma-separated flag
 values are split on `,` with surrounding spaces removed.
 
-On success each command prints one line to stdout and returns `0`:
+On success each command prints to stdout and returns `0`:
 
 - `decision new`: the path written, relative to `repo_root`
   (`specs/decisions/D13.md`).
@@ -22,6 +23,10 @@ On success each command prints one line to stdout and returns `0`:
 - `decision record-commit`: the commit recorded.
 - `component new`: the directory written, relative to `repo_root`
   (`specs/components/my-thing/`).
+- `kind new`: the three paths `new_kind` returns, one per line in its
+  order, relative to `repo_root`, the directory ending in `/`
+  (`specs/architecture/asset-kind-sql.md`, `specs/components/kind-sql/`,
+  `specs/decisions/D14.md`).
 
 A `ValueError`, `FileExistsError` or `LookupError` from the library prints
 one line, `error: <message>`, to stderr and returns `1`. Usage errors
@@ -31,6 +36,6 @@ follow `specs/architecture/cli-conventions.md` and return `2`.
 
 | Code | Meaning |
 | --- | --- |
-| `0` | The file or directory was written. |
+| `0` | The files or directory were written. |
 | `1` | The library refused: invalid argument, existing target, or unknown, already-ratified, unratified or uncommitted decision. |
 | `2` | Usage error. |

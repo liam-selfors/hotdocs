@@ -67,3 +67,4 @@ None.
 ## Change log
 
 - `D184`: initial design. `D185`: setup (`init`) split out to `hotdocs-init`.
+- `D346`: the `kind new` row, routed to `spec-scaffolder` as `component new` is.

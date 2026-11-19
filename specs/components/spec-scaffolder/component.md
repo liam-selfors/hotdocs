@@ -15,14 +15,15 @@ sealed: false
 
 Takes the mechanical work out of growing a specbase: allocating the next
 decision id, writing a decision record's skeleton, ratifying it,
-recording the commit that landed it, and laying out a new component's
-directory. It writes structure and frontmatter only, never normative
+recording the commit that landed it, laying out a new component's
+directory, and laying out a new asset kind: its definition with a
+prompt per section, its adapter component and a draft decision. It writes structure and frontmatter only, never normative
 content.
 
 ## Scope
 
 **In scope:** `hotdocs decision new`, `decision ratify`,
-`decision record-commit` and `component new`, and the library functions
+`decision record-commit`, `component new` and `kind new`, and the library functions
 behind them, all acting on files under a given `repo_root`.
 
 **Out of scope:** writing a decision's reasoning or a component's
@@ -66,3 +67,5 @@ None.
 ## Change log
 
 - `D299`: initial spec.
+- `D346`: `new_kind` and `hotdocs kind new` scaffold a new asset kind
+  for a person or an agent to complete.
