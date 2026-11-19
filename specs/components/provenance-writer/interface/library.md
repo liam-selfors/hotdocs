@@ -25,4 +25,4 @@ component, `<repo_root>/<source_path>/.sealed-provenance.json`). Read one by
 its exact path, never by a glob such as `*.provenance.json`, which a hidden
 file never matches.
 
-Implements: `specs/architecture/cli-conventions.md`, `specs/architecture/json-values.md`, `specs/architecture/provenance-writer-fixtures.md`
+Implements: `specs/architecture/cli-conventions.md`, `specs/architecture/json-values.md`, `specs/architecture/provenance-writer-fixtures.md`, `specs/architecture/asset-kinds.md`

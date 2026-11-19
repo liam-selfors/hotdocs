@@ -3,10 +3,11 @@ id: comp-provenance-tracker-ui
 title: Provenance Tracker UI
 status: draft
 owners: [pipeline-team]
-depends_on: [comp-provenance-tracker, comp-corpus-graph-builder]
+depends_on: [comp-provenance-tracker, comp-corpus-graph-builder, comp-kind-javascript]
 realizes: [P-MERGE-VISIBILITY]
 model_pin: claude-opus-5-5
 sealed: false
+assets: [javascript:static/app.js]
 ---
 
 # Provenance Tracker UI
@@ -42,7 +43,8 @@ build for the chosen scope (`R-UI-007`); reading `corpus-graph.json`
 for topology (`R-UI-004`); mapping each node to a status (`R-UI-002`);
 attaching `AttemptRecord` history and `last_requirement_failures` as
 retry-feedback suggestions to failing or missing nodes (`R-UI-008`);
-writing one self-contained page (`R-UI-001`).
+writing one self-contained page (`R-UI-001`) whose only script is the
+asset `static/app.js`, filtering nodes by status (`R-UI-010`).
 
 **Out of scope:** a "generate" action of its own (`R-UI-003`) — a
 developer runs `hotdocs generate` themselves; any view-time query or
@@ -108,3 +110,8 @@ None.
 - `D161`: `AC-UI-003`'s no-generate-action check excludes the
   `tracker-snapshot` data block; `R-UI-009` covers every CLI flag form.
   Cold-generated and landed (`mutation_score` 0.95).
+- `D343`: the page's JavaScript moves out of a Python string into the
+  declared `javascript` asset `static/app.js`
+  (`interface/assets/app.js.md`), inlined once as a module script. New
+  `R-UI-010` (status filter, decided by the pure `hiddenByStatus`),
+  `AC-UI-010`, `AC-UI-011`.

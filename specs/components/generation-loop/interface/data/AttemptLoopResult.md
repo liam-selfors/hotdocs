@@ -24,7 +24,8 @@ A dataclass with these fields in this order, with a `to_dict()` giving
 the JSON form, each attempt a plain dict with exactly these keys.
 `outcome` is one of `passed`, `verification_failed`, `surface_failed`,
 `generation_failed`, `refused`. `stop_reason` is `passed`,
-`max_attempts`, `not_retried` (an error a new attempt cannot fix) or
+`max_attempts`, `not_retried` (an error a new attempt cannot fix),
+`environment` (an asset kind's environment is missing, R-LOOP-004) or
 `refused`. `failed_requirements` are the ids that attempt contributes
 to the next one's feedback; `reauthored_tests` the criteria whose test
 files it deleted (R-LOOP-007).

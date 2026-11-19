@@ -5,7 +5,7 @@ One module file, `test_probe.py`, never a package.
 ```
 probe(test_source: str, criterion_bundle, module_name: str | list[str], *,
       timeout: float = 60.0) -> ProbeReport
-GATE_VERSION: str  # "test-probe@1.1.0"
+GATE_VERSION: str  # "test-probe@1.2.0"
 ```
 
 `criterion_bundle` is a `CriterionBundle` or a mapping with its keys
@@ -47,12 +47,13 @@ arguments.
 ## The stub run
 
 The stub run executes, in a fresh temporary directory holding only the
-test file (named `test_probe_target.py`) and one stub module per name
-of `module_name` (`<name>.py`, each with the source below):
+test file (named `test_probe_target.py`), one stub module per name
+of `module_name` (`<name>.py`, each with the source below) and the
+asset plugin `hotdocs_probe_assets.py` (`R-PROBE-007`):
 
 ```
 <sys.executable> -m pytest -q -p no:cacheprovider --noconftest
-    --junitxml=<tmp>/report.xml test_probe_target.py
+    -p hotdocs_probe_assets --junitxml=<tmp>/report.xml test_probe_target.py
 ```
 
 with `PYTHONPATH` set to that directory alone and the current directory
@@ -85,6 +86,30 @@ def __getattr__(name):
     return _Stub(name)
 ```
 
+The asset plugin's source is exactly:
+
+```python
+import pytest
+
+
+class HotdocsProbeStubReached(BaseException):
+    pass
+
+
+def _reached(*args, **kwargs):
+    raise HotdocsProbeStubReached("asset_runner")
+
+
+@pytest.fixture
+def asset_runner():
+    def runner(path):
+        return _reached
+
+    return runner
+```
+
 Test fixtures: a test passes `test_source` as a string literal and a
 plain dict as `criterion_bundle`, such as
 `{"dependency_interfaces": {"comp-bar": "bar_get(key: str) -> str"}}`.
+
+Implements: `specs/architecture/asset-kinds.md`

@@ -10,7 +10,7 @@
   "interface": "<interface/ content>",
   "glossary": "<specs/glossary.md body>",
   "dependency_interfaces": { "comp-bar": "<bar/interface/ content>" },
-  "testing": "<testing.md and its Uses: documents, or \"\">"
+  "testing": "<testing.md, its Uses: documents and asset-kind test author guidance (R-ASSEMBLE-016), or \"\">"
 }
 ```
 

@@ -52,10 +52,6 @@ See `interface/data/`. (the provenance manifest schema is `SPEC_GUIDELINES.md`
 
 See `acceptance/`.
 
-All ten criteria are `kind: compiled` — collecting and writing already-
-produced results is pure, deterministic logic. A sixth component in this
-corpus with a fully `compiled` acceptance set.
-
 ## Non-functional constraints
 
 See `constraints.md`.
@@ -67,4 +63,5 @@ None.
 ## Change log
 
 Initial draft, then `D29`, `D67`, `D128`, `D130`, `D131`, `D132` and
-`D170`: see the decisions.
+`D170`: see the decisions. `D343`: the manifest records each asset's
+kind, definition, adapter and environment (`R-PROV-022`).

@@ -25,11 +25,28 @@ no baseline or mutant runs.
 `<tmp>/gen/<slug>/`, a copy of `<repo_root>/gen/<slug>/` without
 `__pycache__`, and, for every other directory `<repo_root>/gen/<name>/`,
 a symbolic link `<tmp>/gen/<name>` to it. Only files of the copy are
-ever mutated. Each run's working directory and `PYTHONPATH` are
-`<tmp>/gen/<slug>`, with pytest's `--noconftest`. So code that finds
+ever mutated. Each run's working directory is `<tmp>/gen/<slug>`, its
+`PYTHONPATH` that directory then the plugin directory (below), with
+pytest's `--noconftest`. So code that finds
 its dependencies from its own `__file__` (the parent of the nearest
 `gen` directory, then `gen/<dependency-slug>/`) reaches the same
 dependency code it reaches in the criterion run.
+
+**Language outside an asset.** Whenever a baseline would run, before
+it, every `.py` file of
+the copy, in sorted path order, is parsed and its `str` constants are
+read in `ast.walk` order, including each part of an f-string and never
+a docstring (the first statement of a module, class or function body).
+The first constant at least 200 characters long that matches
+`\bfunction\s*[\w$]*\s*\(|=>|\b(const|let)\s` and contains `;` or `{`
+holds JavaScript no mutant reaches: no baseline or mutant runs,
+`mutation_score` is `null`, `overall` is `fail`, and `mutation_error`
+is exactly
+
+    javascript in a string at <file>:<line>; declare it as an asset (specs/architecture/asset-kinds.md)
+
+with `<file>` the file's path relative to `<tmp>/gen/<slug>/`, using
+`/`, and `<line>` the constant's `lineno` (issue #13, `D343`).
 
 **The baseline.** Before any mutant, and even when there is none, the
 tests run once on the unmutated copy, with the 300-second timeout. If that run passes, each
@@ -44,6 +61,10 @@ whichever is larger. If it exits nonzero or times out, no mutant runs:
 with `<code>` pytest's exit status. `mutation_error` is `null` in every
 other case.
 
+**The `asset_runner` plugin.** Every baseline and mutant run gets the
+plugin `specs/architecture/verifier-fixtures.md` describes, its asset
+files those of the copy, `<tmp>/gen/<slug>/<path>`.
+
 **The sites.** Every `.py` file of the copy, in sorted path order, is
 parsed once; within a file, sites are taken in `ast.walk` order, and
 each site gives exactly one mutant, a copy of the file with that one
@@ -54,26 +75,17 @@ change, written back with `ast.unparse`.
   `<`↔`>=`, `>`↔`<=`, `is`↔`is not`, `in`↔`not in`; an `and`/`or` is
   flipped to the other; a binary `+`↔`-`, `*`↔`/`, `//`↔`%`; a boolean
   constant is negated. Never a numeric constant or anything else.
-- *JavaScript in a string* (`D335`): a `str` constant, including one
-  part of an f-string but never a docstring (the first statement of a
-  module, class or function body), holds JavaScript when it matches
-  `\bfunction\s*[\w$]*\s*\(|=>|\b(const|let)\s` and also contains
-  `;` or `{`. Its JavaScript is the
-  whole string, or, when it contains `<script`, only the text between
-  each `<script ...>` tag's `>` and the following `</script>`. That text
-  is read left to right as tokens, skipping `'...'`, `"..."` and
-  `` `...` `` strings (a backslash escapes the next character) and
-  `//` and `/* */` comments. Each of these tokens is a site, swapped
-  `===`↔`!==`, `==`↔`!=`, `<`↔`>=`, `>`↔`<=`, `<=`↔`>`, `>=`↔`<`,
-  `&&`↔`||`, `true`↔`false`, and `+`↔`-` when the token before it is an
-  identifier, a number, `)` or `]`. Longer operators are read first, so
-  `===`, `=>`, `++`, `+=`, `<<`, `>>` and `>>>` are never split or
-  mutated. The mutant replaces that one token in the constant's value.
-  A string's JavaScript sites come after that constant's place in the
-  walk, in text order.
+- *Assets* (`specs/architecture/asset-kinds.md`, `D343`): after every
+  Python site come, for each asset the component declares, in
+  declaration order, the sites the kind's adapter lists with
+  `strength_sites(<tmp>/gen/<slug>/<path>)`, in that order. Each gives
+  one mutant: `apply_site(<tmp>/gen/<slug>/<path>, site)` rewrites the
+  copy's asset file with that one change, the tests run, and the file's
+  original bytes are written back before the next mutant.
 
-**The score.** Killed mutants over all mutants, `1.0` when there are no
-mutants; a mutant is killed when its run exits nonzero or times out.
+**The score.** Killed mutants over all mutants, Python and asset alike,
+one score for the component (`D124`), `1.0` when there are no mutants;
+a mutant is killed when its run exits nonzero or times out.
 
 Test fixtures: a fixture making a component's code load a dependency
 by path writes the dependency as `<repo_root>/gen/<dependency-slug>/<module>.py`

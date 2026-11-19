@@ -10,5 +10,4 @@
 - **Never a cache-manager client.** This component answers a different
   question ("was this proven correct") from `cache-manager`'s ("has
   this work already been done") and MUST NOT call `cache-manager` to
-  answer it — conflating the two is the exact gap this component exists
-  to close.
+  answer it.

@@ -67,3 +67,5 @@ None.
 
 - `D303`: initial spec; the fake-arity check moves here from
   `test-author`'s `R-AUTHOR-020`.
+- `D343`: `R-PROBE-007`, `AC-PROBE-008`: the stub run supplies an
+  `asset_runner` fixture through a `-p` plugin; `test-probe@1.2.0`.

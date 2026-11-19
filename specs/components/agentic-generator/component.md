@@ -62,3 +62,4 @@ None.
 ## Change log
 
 - `D309`: initial spec.
+- `D343`: R-AGENT-005 applies `generator`'s `check_assets`; AC-AGENT-010.

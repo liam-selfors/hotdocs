@@ -14,16 +14,15 @@ sealed: false
 ## Purpose
 
 Runs every applicable verification gate against one component's generated
-output and produces a single, structured pass/fail verdict: `compiled`
-criteria (via `criterion-compiler`), `generated-test` criteria, `llm-judge`
-criteria, the contract/property tests derived from `interface/`, and the
-interface drift check.
+output, Python and declared assets, and produces one structured verdict:
+`compiled`, `generated-test` and `llm-judge` criteria, the mutation
+score and the interface drift check.
 
 ## Scope
 
-**In scope:** dispatching each acceptance criterion to the right checking
-mechanism by its declared `kind`; running the interface drift check;
-aggregating mutation scores; producing one `VerificationReport`.
+**In scope:** dispatching each criterion by its `kind`; the drift check;
+the mutation score; provisioning asset environments; one
+`VerificationReport`.
 
 **Out of scope:** the license/secret scans; judging or authoring
 anything (it dispatches to an injectable judge and `test_author` and
@@ -57,5 +56,7 @@ See `constraints.md`.
 
 ## Change log
 
-See the decisions, `D27` onward; latest `D307`, `D320`, `D324`, `D335`,
-`D341`.
+See the decisions, `D27` onward; latest `D324`, `D341`, `D343`
+(declared assets: `asset_runner`, environments, asset strength sites,
+`assets` in the report; JavaScript in a Python string fails, superseding
+`D335`; `GATE_VERSION` 3.4.0).

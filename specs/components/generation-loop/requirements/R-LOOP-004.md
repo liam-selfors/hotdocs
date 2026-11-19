@@ -7,4 +7,7 @@
   the very object `generate` returned; in agentic mode, and on any
   failure, it never does. A `surface_failed` or `verification_failed`
   attempt MUST be followed by another while fewer than `max_attempts`
-  have run, even when it added no feedback ids.
+  have run, even when it added no feedback ids — except that a
+  `verification_failed` attempt whose report has any criterion with
+  `failure_origin` `"environment"` ends the loop at once with
+  `stop_reason` `environment` (`D343`).

@@ -4,7 +4,7 @@ One module file, `surface_checker.py`, never a package.
 
 ```
 check_surface(component_id: str, repo_root: Path, code_dir: Path | None = None) -> SurfaceReport
-GATE_VERSION: str  # "surface-checker@1.0.0"
+GATE_VERSION: str  # "surface-checker@1.1.0"
 ```
 
 `code_dir` is the candidate's directory, default
@@ -49,8 +49,44 @@ current environment otherwise kept.
    that order: a `main` that prints nothing and returns `0` gives
    `exit 0, no usage error line`. A timeout gives message `timeout`.
 
+4. **Assets** (`R-SURF-005`): for each asset the component declares,
+   in declaration order. The declarations are the `component.md`
+   frontmatter line starting `assets:`, an inline list such as
+   `assets: [javascript:static/app.js, fake:static/b.js]`: the text
+   between `[` and `]` split on `,`, each item stripped, empty items
+   dropped, each split at its first `:` into `<kind>` and `<path>`; no
+   such line means none. Per asset, the first of these that applies
+   gives one `asset_error` finding and ends that asset's check:
+   - no adapter (Lookup, `specs/architecture/asset-kinds.md`:
+     `<repo_root>/gen/kind-<kind>/kind_<kind>.py`, else the same path
+     under the tool root, the parent of the nearest directory named
+     `gen` above `surface_checker.py`): `unknown asset kind: <kind>`;
+   - no file `<code_dir>/<path>`: `<path>: no such asset file`;
+   - no `<repo_root>/specs/components/<slug>/interface/assets/<file name>.md`,
+     `<file name>` the part of `<path>` after its last `/`:
+     `<path>: no interface file interface/assets/<file name>.md`;
+   - the surface call fails: a subprocess, `sys.executable` with
+     `PYTHONPATH` the adapter's directory and a 60-second timeout, loads
+     the adapter by path with `importlib.util.spec_from_file_location`
+     and prints `json.dumps(surface(Path(<code_dir>/<path>))["names"])`;
+     a non-zero exit gives `<path>: surface failed: <last non-empty
+     stderr line>` (an adapter raising `RuntimeError("boom")` gives
+     `RuntimeError: boom`), a timeout `<path>: surface failed: timeout`.
+
+   The stated names are read from the interface file's first fenced
+   block (from the first line starting with three backticks to the
+   next such line): each non-blank line states one name, the last identifier
+   (`[A-Za-z_$][A-Za-z0-9_$]*`) before the line's first `(`, or the
+   line's last identifier when it has no `(`; `export function
+   filterNodes(nodes, query)` states `filterNodes`, `export const
+   LIMIT` states `LIMIT`. Each distinct stated name not in the printed
+   list gives one `asset_name_missing` finding,
+   `<path> has no <name>, which its interface states`, sorted by name.
+   A provided name not stated gives nothing.
+
 A component with no `depends_on` entries, and one whose library has no
-such `Implements:` line, gets no finding from checks 2 and 3.
+such `Implements:` line, gets no finding from checks 2 and 3; one with
+no `assets:` line, none from check 4.
 
 ## Test fixtures
 
@@ -62,3 +98,5 @@ list, a missing key meaning none; for a sealed one `sealed: true` and
 under `gen/<slug>/` or the sealed `source_path`. A candidate's uses of a
 dependency sit inside function bodies, so importing the candidate never
 runs them. No lint is run.
+
+Implements: `specs/architecture/asset-kinds.md`

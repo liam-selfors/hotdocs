@@ -5,23 +5,19 @@
 
   1. treat a cached file as stale unless its first line is the header
      `specs/architecture/test-reuse.md` defines for the criterion's
-     `CriterionBundle`; a stale file is ignored as if absent, so the
-     test is authored again (R-VERIFY-009, `D320`, `D341`).
-  2. when a `test_author` call returns a `model_call_error` whose
-     `category` is `network`, `timeout` or `rate_limit`, call it once
-     more for that criterion (`D319`).
-  3. pass the file's source, the bundle and the component's module name
-     (its slug, hyphens replaced by underscores) to `test-probe`'s
-     `probe`. When the report's `ok` is false and this file was not
-     authored in this run, author the test again once and probe the new
-     file (`D307`).
+     `CriterionBundle`, and author a stale one again (`D320`, `D341`).
+  2. when `test_author` returns a `model_call_error` whose `category` is
+     `network`, `timeout` or `rate_limit`, call it once more (`D319`).
+  3. pass the file's source, the bundle and the module name (the slug,
+     hyphens as underscores) to `test-probe`'s `probe`; when `ok` is
+     false and the file was not authored in this run, author it again
+     once and probe the new file (`D307`).
 
   A test that still fails its probe, or whose last authoring call
   returned a `model_call_error`, is never run: the criterion is `fail`
   with `failure_origin` `"test"` and `failure_detail.message`
   `test failed its probe: <error kinds, comma-separated>` or
-  `test authoring failed: <category>: <message>`.
-
-  A test that fails alone in the mutation sandbox is handled as
-  `test-reuse.md`'s "Mutation runs" says. Every other failed criterion has
-  `failure_origin` `"implementation"`.
+  `test authoring failed: <category>: <message>`. A test failing alone
+  in the mutation sandbox is handled as `test-reuse.md`'s "Mutation
+  runs" says. Every other failed criterion has `failure_origin`
+  `"implementation"`, except `R-VERIFY-020`'s `"environment"`.

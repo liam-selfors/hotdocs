@@ -13,11 +13,8 @@
   facts: callable, signature, docstring — never source text, never
   anything from `acceptance/`).
 
-  **Absent (an empty string) for a dependency with no real code yet** —
-  the same graceful-degradation posture `component_provenance` already
-  takes for a component with no `.provenance.json` (`R-GQE-005`): a
-  spec-only dependency has nothing real to introspect, and that is
-  expected state, not an error.
+  **An empty string for a dependency with no real code yet**: expected
+  state, not an error.
 
   **A `sealed` dependency's real code lives at its declared
   `source_path`, never under `gen/<dependency>/`** (`D60`): its card is
@@ -30,7 +27,5 @@
   (`D86`, `D91`, `D93`).
 
   **Deliberately one-directional — a dependency's bundle MUST NOT
-  include anything about how its dependents use it.** Feeding call-site
-  usage back would reintroduce a cycle `depends_on` keeps out and let
-  calling patterns steer behavior instead of `interface/`. A missing
+  include anything about how its dependents use it.** A missing
   contract is an `interface/` change, never a prompt input.

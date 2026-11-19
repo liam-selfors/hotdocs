@@ -20,8 +20,8 @@ unavailable by setting them to a path that does not exist.
 `GenerationResult` is `generator`'s, built with `generator`'s own
 dataclass. `generator` and `llm-tool-endpoint` are loaded from
 `<repo_root>/gen/<slug>/<module>.py`, else from the tool root's copy:
-`check_write_allowed`, `render_prompt_sections` and `write_files` from
-the first, `run_tool_loop` from the second.
+`check_write_allowed`, `render_prompt_sections`, `write_files` and
+`check_assets` from the first, `run_tool_loop` from the second.
 
 `generate_agentic` reads a bundle's fields only by subscript
 (`bundle["component_id"]`, `bundle["spec_bundle_hash"]`,
@@ -58,8 +58,11 @@ order, every one defaulted (`component_id=""`, `spec_bundle_hash=""`,
 `isolation=None`), `check_write_allowed(bundle, repo_root=None)`
 returning `None`, `render_prompt_sections(bundle, retry_feedback=None)`
 returning `[("Spec", "SPEC TEXT"), ("Component interface", "IFACE TEXT")]`,
-and `write_files(component_id, files, repo_root=None)` recording its
-arguments to a file. A bundle is any mapping with `component_id`,
+`write_files(component_id, files, repo_root=None)` recording its
+arguments to a file, and `check_assets(component_id, files,
+repo_root=None)` recording its arguments to a file and returning
+`("malformed_layout", ["static/app.txt: bad"])` when some file's content
+contains `bad`, else `(None, [])`. A bundle is any mapping with `component_id`,
 `spec_bundle_hash` and `hint_code`.
 
 Implements: `specs/architecture/agent-sandbox.md`

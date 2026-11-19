@@ -30,9 +30,9 @@ loaded from its file afresh on every call, never reused from an earlier
 `sys.modules` entry, so a stand-in that records its calls does so
 through a side channel the test controls, such as a file outside
 `repo_root` whose path is written into the stand-in's source. Beyond
-loading these, it reads nothing under `repo_root`: every corpus read
-happens inside `assemble`, so a stand-in `assemble` needs no `specs/`
-tree. It reads, in this order:
+loading these and the asset reads below, it reads nothing under
+`repo_root`: every other corpus read happens inside `assemble`, so a
+stand-in `assemble` needs no `specs/` tree. It reads, in this order:
 
 1. `spec-bundle-assembler`'s `assemble(component_id, repo_root=...,
    mode="cold")`, taking only its `spec_bundle_hash`
@@ -45,6 +45,17 @@ tree. It reads, in this order:
 
 Any stand-in for these dependencies must provide each name this list
 gives. No network access, no model call, no write.
+
+## Assets (`D343`)
+
+`current_provenance_key` and `check_provenance` (the latter only after
+`spec_bundle_hash` and `gate_versions` match) read the component's
+`<repo_root>/specs/components/<slug>/component.md` frontmatter `assets`
+and, per declared kind, the definition and adapter that
+`asset-kinds.md`'s Lookup finds: `<repo_root>/specs/asset-kinds/<kind>.md`
+and `<repo_root>/gen/kind-<kind>/kind_<kind>.py`, each else the tool
+root's. The adapter is loaded by path afresh on every call; only its
+`provision(repo_root)` is called (`R-PROVCHECK-009`).
 
 ## Sealed components (`D170`)
 
@@ -61,4 +72,4 @@ key (`R-PROVCHECK-008`). Both are read-only and make no network or
 model call. Any stand-in for `verifier-orchestrator` provides
 `GATE_VERSION`.
 
-Implements: `specs/architecture/cli-conventions.md`
+Implements: `specs/architecture/cli-conventions.md`, `specs/architecture/asset-kinds.md`

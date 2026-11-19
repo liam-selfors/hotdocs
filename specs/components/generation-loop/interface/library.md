@@ -10,7 +10,8 @@ run_attempts(component_id: str, bundle, repo_root: Path, model: str, *,
              on_attempt=None) -> AttemptLoopResult
 make_closures(model: str, seed: int, repo_root: Path, llm_backend=None) -> tuple
 RETRIED_CATEGORIES = ("truncated_response", "missing_module", "empty_response",
-                      "agent_budget_exhausted", "agent_unfinished", "undecodable_file")
+                      "agent_budget_exhausted", "agent_unfinished", "undecodable_file",
+                      "missing_asset", "malformed_layout")
 ```
 
 `mode` is `"single"` or `"agentic"`; any other value, or a
@@ -67,8 +68,9 @@ very objects the dependencies returned, never copies.
 An attempt whose generation made no files runs neither `check_surface`
 nor `verify`. After a `surface_failed` or `verification_failed` attempt
 another follows while fewer than `max_attempts` have run, even when it
-added no feedback ids; `not_retried` applies only to a
-`generation_failed` attempt.
+added no feedback ids, unless the loop stops with `environment`
+(R-LOOP-004); `not_retried` applies only to a `generation_failed`
+attempt.
 
 Test fixtures: each dependency is a stand-in module at
 `<repo_root>/gen/<slug>/<module>.py` (`generator/generator.py`,

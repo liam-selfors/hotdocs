@@ -21,23 +21,11 @@ regeneration and re-verification for that component.
 
 ## Rationale
 
-This is the mechanism behind the original claim that a merge whose spec
-state exactly matches an already-verified prior state can skip
-regeneration and re-verification entirely. That claim was previously
-implemented (`D29`) by asking `cache-manager` a question its own data
-could never answer: `cache-manager` records that a candidate was
-*produced*, not that it was ever *verified* — `verifier-orchestrator`
-never writes to it. A candidate that failed verification gets cached
-under the same key as one that passed, with nothing distinguishing them
-on a later `get`. `.provenance.json` doesn't have this problem: it is
-written only by `provenance-writer`, only from `verifier-orchestrator`'s
-real output (`R-PROV-005`), and only ever reaches a component's
-committed directory because `R-MERGE-011` already blocked the commit
-otherwise — the same discipline that makes `SPEC_GUIDELINES.md` §7 call
-it an SBOM/SLSA-style attestation. The fact a matching one exists on
-disk, for the exact current `spec_bundle_hash`, *is* the proof — no
-separate store, no new cryptography, nothing `cache-manager` needs to
-change.
+`cache-manager` records that a candidate was *produced*, never that
+it was *verified* (`D29`). `.provenance.json` is written only from
+`verifier-orchestrator`'s real output (`R-PROV-005`) and reaches a
+committed directory only past `R-MERGE-011`, so a matching one on disk
+*is* the proof.
 
 ## Scope
 
@@ -57,10 +45,7 @@ current.
 **Out of scope:** computing the current `spec_bundle_hash`
 (`spec-bundle-assembler`'s job); writing or modifying `.provenance.json`
 (`provenance-writer`'s job); deciding whether a *candidate* should be
-regenerated to avoid a redundant model call — that's `cache-manager`'s
-narrower, still-unchanged job, answering a different question
-("has this exact work already been done") from the one this component
-answers ("has this exact work already been proven correct").
+regenerated to avoid a redundant model call (`cache-manager`'s job).
 
 ## Definitions
 
@@ -82,12 +67,7 @@ See `interface/data/`.
 
 See `acceptance/`.
 
-Every criterion is `kind: generated-test` (`D43`) — reading a committed
-file, comparing a hash, and reading one boolean var is pure,
-deterministic logic that needs no model or judgment, but none of this
-component's criteria are actually written in `specs/architecture/
-step-phrase-grammar.md`'s fixed step vocabulary, so `kind: compiled`
-would not describe how they're really verified.
+Every criterion is `kind: generated-test` (`D43`).
 
 ## Non-functional constraints
 
@@ -100,12 +80,8 @@ None.
 ## Change log
 
 - Initial draft (`D29`).
-- `D47`: first real implementation, via three real `generate()`
-  retries (the first two found real, corpus-wide gaps — `D45`'s
-  `component_id`-to-slug mapping, `D46`'s output-layout requirement —
-  fixed in `generator`/`glossary.md`, not here). `gen/provenance-
-  checker/` is now a real top-level package. See `verification/
-  provenance-checker/BOOTSTRAP.md` for the full account.
+- `D47`: first real implementation (`verification/provenance-checker/
+  BOOTSTRAP.md`).
 - `D163`: gains `current_provenance_key`, the one definition of the
   `spec_bundle_hash`/`gate_versions` a hit compares, so the writer of
   `.provenance.json` and every checker of it agree. `R-PROVCHECK-006`
@@ -117,3 +93,5 @@ None.
   Regenerated and landed at 13/13, `mutation_score` 0.91.
 - `D313`: the key names the generator's version, so a generator or
   prompt change invalidates every manifest it produced.
+- `D343`: the key includes each declared asset's definition, adapter
+  and environment (`R-PROVCHECK-009`); a miss names its `reason`.

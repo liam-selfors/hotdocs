@@ -34,10 +34,13 @@ named path that does not exist is a `PreconditionFailure`, as for
 exactly
 
     text + "".join(f"\n## Uses: {path}\n\n{doc}" for path, doc in uses)
+         + "".join(f"\n## Asset kind: {kind}\n\n{guide}" for kind, guide in kinds)
 
-with `text` the file's full text as read and `uses` each `Uses:` path in
-order with that file's full text; `""` when the component has no
-`testing.md`. `SpecBundle` never includes it, so the generator never
+with `text` the file's full text as read, `""` when the component has no
+`testing.md`; `uses` each `Uses:` path in order with that file's full
+text; and `kinds` each asset kind the component declares, sorted, with
+its definition's `## Test author guidance` section
+(`specs/architecture/asset-kinds.md`). `SpecBundle` never includes it, so the generator never
 sees it.
 
 ## The criterion header

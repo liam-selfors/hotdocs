@@ -16,14 +16,16 @@ sealed: false
 Rejects a generated candidate cheaply, before the long verification,
 when it cannot work in place: it does not import, it uses a name one of
 its dependencies does not have, or, for a component with a command
-line, it mishandles an unknown argument. These are the failures that
+line, it mishandles an unknown argument, or a declared asset lacks
+a name its interface states. These are the failures that
 otherwise surface only when a user first runs the tool.
 
 ## Scope
 
 **In scope:** an import of the candidate; the names it uses on each
 direct dependency's module; a smoke run of its `main` with an unknown
-argument when it implements `specs/architecture/cli-conventions.md`.
+argument when it implements `specs/architecture/cli-conventions.md`;
+the names each declared asset provides, through its kind's adapter.
 
 **Out of scope:** behavior the acceptance criteria check; the
 candidate's own interface (the verifier's interface drift check).
@@ -64,3 +66,6 @@ None.
 
 - `D311`: initial spec; the import and dependency checks come from
   `tools/bootstrap_component.py`'s gates.
+- `D343`: `R-SURF-005`, `AC-SURF-005`, `AC-SURF-006`: declared assets'
+  surfaces are checked through their kinds' adapters; `R-SURF-004`
+  orders the new findings; `surface-checker@1.1.0`.

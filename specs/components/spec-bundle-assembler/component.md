@@ -28,10 +28,6 @@ at the bundle level; including each dependency's `Purpose` text
 alongside its `interface/` content (`R-ASSEMBLE-010`), so a generating
 model sees not just a dependency's contract but what it's for.
 
-## Rationale
-
-The cold-vs-hint split traces to the original brainstorm.
-
 **Out of scope:** calling any model (`generator`'s job); deciding *whether*
 to regenerate (`impact-analyzer`'s job); verifying anything.
 
@@ -85,3 +81,4 @@ Each decision holds its full rationale.
 - `D177`: `AC-ASSEMBLE-011`'s failure traced to its test's fixture.
 - `D207`: the synthetic corpus every criterion uses is stated once, in
   the library interface.
+- `D343`: asset kinds (`R-ASSEMBLE-016`, `AC-ASSEMBLE-019`-`021`).

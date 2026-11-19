@@ -10,6 +10,8 @@
   - the target's `component.md`, `constraints.md`, and every `.md` file
     under its `requirements/` and `interface/`;
   - each document `R-ASSEMBLE-014` appends;
+  - each asset-kind definition `R-ASSEMBLE-016` reads, under the path
+    `specs/asset-kinds/<kind>.md` whichever root it was read from;
   - for each `depends_on` component, its `component.md`, every `.md` file
     under its `interface/`, and every file under its code directory
     (`source_path` when sealed, else `gen/<slug>/`);

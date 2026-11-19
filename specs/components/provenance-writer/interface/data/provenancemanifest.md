@@ -22,6 +22,11 @@ convenience, not as a second definition:
   "verification_run_id": "run-123",
   "verification_report": { "...": "a VerificationReport" },
   "license_scan": { "...": "a LicenseScanResult" },
-  "secret_scan": { "...": "a SecretScanResult" }
+  "secret_scan": { "...": "a SecretScanResult" },
+  "assets": [{"kind": "javascript", "path": "static/app.js", "definition_sha256": "sha256:...",
+              "adapter_sha256": "sha256:...", "versions": {"node": "24.1.0"},
+              "lockfile_sha256": null}]
 }
 ```
+
+`assets` is the `verification_report`'s, verbatim (`R-PROV-022`).

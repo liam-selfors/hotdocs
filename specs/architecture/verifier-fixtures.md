@@ -11,7 +11,8 @@ depends_on: []
 ## Purpose
 
 How a test of `verifier-orchestrator` builds the synthetic corpus and
-the stand-ins `verify` runs against.
+the stand-ins `verify` runs against, and how a test run reaches a
+declared asset (`specs/architecture/asset-kinds.md`, `D343`).
 
 ## Rules
 
@@ -91,3 +92,48 @@ In `test failed its probe: <error kinds>`, the kinds are the distinct
 `kind` values of the last probe report's findings whose `severity` is
 `"error"`, in order of first appearance, joined by `", "`. A `test-probe`
 stand-in's failing finding therefore carries `"severity": "error"`.
+
+## Assets
+
+**The `asset_runner` plugin.** Each `verify` call writes a fresh
+temporary directory `<plug>` holding only `hotdocs_asset_runner.py`.
+Every pytest run of a criterion, baseline or mutant gets
+`-p hotdocs_asset_runner`, `<plug>` as the last `PYTHONPATH` entry, and
+the environment variable `HOTDOCS_ASSETS`: a JSON list with one object
+per declared asset, in declaration order,
+`{"path": <declared path>, "file": <absolute path of that asset in the code being verified>, "adapter": <absolute path of the adapter module found by Lookup>}`,
+and `[]` when the component declares none. The code being verified is
+`gen/<slug>/` for a criterion run and `<tmp>/gen/<slug>/` for a
+mutation run. The plugin defines the function-scoped fixture
+`asset_runner`, a function of one `path`: for the entry whose `path`
+equals it, it loads the module at `adapter` with
+`importlib.util.spec_from_file_location` and returns
+`module.asset_runner(Path(file))`; any other `path` raises
+`KeyError(path)`. It reads `HOTDOCS_ASSETS` when the fixture is
+requested, and imports nothing from `hotdocs`.
+
+**A fake kind.** A test concerning assets plants a kind needing no
+program, never `javascript`: `<repo_root>/specs/asset-kinds/fake.md`,
+frontmatter then the seven `## ` sections of asset-kinds.md's "The
+definition", each with one line of text, and
+`<repo_root>/gen/kind-fake/kind_fake.py`, its adapter. The component
+declares `assets: [fake:data/table.txt]` in its `component.md`
+frontmatter and writes `gen/<slug>/data/table.txt` as the two lines
+`a=1` and `b=2`. The adapter defines:
+
+- `KIND = "fake"`; `layout_errors` returns `[]`; `surface` returns
+  `{"names": []}`.
+- `provision(repo_root)` returns
+  `{"ok": True, "reason": None, "versions": {"fake": "1.0"}, "lockfile_sha256": None}`,
+  or, for a test of an unprovisioned environment,
+  `{"ok": False, "reason": "fake needs fakeprog >= 2", "versions": {}, "lockfile_sha256": None}`.
+- `asset_runner(asset_file)` returns `run(entry, args)`, which reads the
+  file when called and returns the integer after `<entry>=` on its line.
+- `strength_sites(asset_file)` returns
+  `[{"description": "1: a"}, {"description": "2: b"}]`, and
+  `apply_site(asset_file, site)` adds 1 to the number on that site's
+  line.
+
+When the fixture's Python module has no mutation site, a test asserting `run("a", []) == 1` alone scores exactly `0.5`. A kind
+with no adapter, such as `nokind`, is declared without planting
+`gen/kind-nokind/`.

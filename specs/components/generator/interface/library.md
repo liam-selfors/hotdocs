@@ -9,13 +9,13 @@ commit_cache(result: GenerationResult, repo_root: Path = None) -> None
 check_write_allowed(bundle: SpecBundle, repo_root: Path = None) -> str | None
 render_prompt_sections(bundle: SpecBundle, retry_feedback: list[str] | None = None) -> list[tuple[str, str]]
 write_files(component_id: str, files: dict[str, str], repo_root: Path = None) -> None
+check_assets(component_id: str, files: dict[str, str], repo_root: Path = None) -> tuple[str | None, list[str]]
 ```
 
 The library is the module `generator` (`from generator import generate,
 commit_cache, GATE_VERSION`).
 
-Not a pure function — this is the one component in the corpus whose job
-requires an external call. Side effects: in `cold` mode, `generate`
+Side effects: in `cold` mode, `generate`
 writes `gen/<component>/`; in `hint` mode it writes nothing
 (`R-GEN-016`). The mode is `cold` when `bundle.hint_code` is `None` and
 `hint` otherwise. Only `commit_cache` writes the cache (`R-GEN-006`).
@@ -23,14 +23,11 @@ writes `gen/<component>/`; in `hint` mode it writes nothing
 Before any model call, `generate` looks up the `R-GEN-005` key with
 `cache_manager.get`; on a hit it returns the stored `files` with
 `cache_hit` `true` and never calls `llm-endpoint`. `generate` and
-`commit_cache` pass `repo_root` through to `cache_manager.get`/`put`, so
-with `VAR_CACHE_STORE_URL` unset a test inspects the cache with
-`cache_manager.get(key, repo_root=repo_root)` or
-`cache_manager.stats(repo_root=repo_root)`.
+`commit_cache` pass `repo_root` through to `cache_manager.get`/`put`.
 
 `repo_root` locates `specs/components/<slug>/component.md`'s
 `sealed`/`source_path` and `gen/<component>/.overrides.json` for
-`R-GEN-009`, and is where `gen/<component>/` is written. An absent
+`R-GEN-009`, and its `assets` (Assets, below), and is where `gen/<component>/` is written. An absent
 `component.md`, or one without `sealed: true`, is unsealed; an absent
 `.overrides.json` pins nothing. A bare temporary `repo_root` therefore
 reaches the model call. `llm_backend` goes straight to `llm-endpoint`'s
@@ -45,7 +42,22 @@ generation mode to share:
   as `(title, text)` pairs in prompt order, `retry_feedback`'s last when
   given, without the reply-format instructions;
 - `write_files` writes `files` (paths relative to `gen/<component>/`,
-  `R-GEN-015`'s prefix stripped) into `gen/<component>/`.
+  `R-GEN-015`'s prefix stripped) into `gen/<component>/`;
+- `check_assets` applies `R-GEN-021`'s asset checks to `files` (same
+  paths) and returns the category and its messages, or `(None, [])`.
+  It writes nothing under `repo_root`; a written asset is checked as a
+  file of that path under a temporary directory, removed afterwards.
+
+## Assets
+
+The declared assets are `component.md`'s frontmatter `assets`, each
+`<kind>:<path>` split at its first `:`; none when the file or key is
+absent. An adapter is found and loaded by path as
+`asset-kinds.md`'s Lookup says, `<tool_root>` the parent of the nearest
+`gen` directory above `generator`'s own file, registered in
+`sys.modules` under a unique name before it runs (`R-GEN-014`). Only
+its `layout_errors` is called. The checks run only on a fresh reply,
+never on a cache hit.
 
 ## Reply format
 
@@ -57,13 +69,11 @@ The model's reply, a mock's included, wraps each file as a line
 states for this call. Text outside the blocks is ignored.
 
 The prompt's reply-format instructions precede every bundle-derived
-section and show the begin marker with this call's nonce filled in, so
-a mock reads the nonce as the first match of
-`re.search(r"-----BEGIN FILE ([0-9a-f]{32}):", prompt).group(1)`.
+section and show the begin marker with this call's nonce filled in.
 
 ```
-GATE_VERSION = "generator@3.0.0"
-PROMPT_VERSION = "v11"
+GATE_VERSION = "generator@3.1.0"
+PROMPT_VERSION = "v12"
 ```
 
 The cache key (`R-GEN-005`) is `cache-manager`'s `CacheKey` with
@@ -73,4 +83,4 @@ plus the SHA-256 hex digest of
 `json.dumps(sorted(retry_feedback or []), sort_keys=True)` encoded as
 UTF-8. Every result's `prompt_version` is `PROMPT_VERSION`.
 
-Implements: `specs/architecture/generator-prompt.md`, `specs/architecture/cli-conventions.md`
+Implements: `specs/architecture/generator-prompt.md`, `specs/architecture/cli-conventions.md`, `specs/architecture/asset-kinds.md`

@@ -24,7 +24,8 @@ A dataclass with these fields in this order (the four dicts default to
 read-only mapping: `bundle["spec"]` and `bundle.get("spec")` work.
 Each text field joins its documents' bodies, each stripped, empty ones
 dropped, with one blank line between. `interface` ends with any
-documents `R-ASSEMBLE-014` appends.
+documents `R-ASSEMBLE-014` appends, then
+`R-ASSEMBLE-016`'s asset-kind generator guidance.
 `dependency_context` (`R-ASSEMBLE-010`) holds each dependency's `Purpose`
 only. `dependency_usage` (`R-ASSEMBLE-011`) is introspected from a
 dependency's real code, `""` when it has none, and nothing flows the

@@ -7,12 +7,11 @@
   (`SPEC_GUIDELINES.md` §5, `D80`).
 
   **One score for the whole component, never an average** (`D124`):
-  each mutant is generated once, against the whole candidate module, and
-  counts as killed if *any* of the `generated-test` files fails against
-  it.
+  each mutant is generated once and counts as killed if *any*
+  `generated-test` file fails against it.
 
-  **The mutation sites and swaps are exactly those of
-  `specs/architecture/mutation-runs.md`**, one mutant per site
-  (`D159`, `D172`): Python's four operators, and the token swaps inside
-  a string literal holding JavaScript (`D335`). The bar was calibrated
-  against them, so a regeneration MUST NOT change them.
+  The sites, swaps and the check for JavaScript in a Python string are
+  exactly those of `specs/architecture/mutation-runs.md`: Python's
+  operators (`D159`, `D172`), then each declared asset's strength sites
+  (`D343`). The bar was calibrated against them, so a regeneration MUST
+  NOT change them.

@@ -18,4 +18,4 @@ checkers load their corpus through it. `corpus-loader`, `citation-checker`
 and `size-checker` load from `<repo_root>/gen/<slug>/`, or the same path
 under the tool root (`D199`).
 
-Implements: `SPEC_GUIDELINES.md`, `specs/architecture/graph-query-engine.md`, `specs/architecture/cli-conventions.md`
+Implements: `SPEC_GUIDELINES.md`, `specs/architecture/graph-query-engine.md`, `specs/architecture/cli-conventions.md`, `specs/architecture/asset-kinds.md`

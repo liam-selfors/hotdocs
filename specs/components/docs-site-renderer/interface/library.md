@@ -21,8 +21,14 @@ empty shows as absent, never as an error. Every value written into a
 page is HTML-escaped.
 
 The DAG view (`R-DOCS-001`) holds one element per node, linking to its
-detail page, and one per edge, with no coordinates: a script embedded in
-the page lays them out and filters them in the browser, so the Python
-code computes no layout.
+detail page, and one per edge, with no coordinates. The declared asset
+`static/app.js` (`interface/assets/app.js.md`), at
+`gen/docs-site-renderer/static/app.js` — `Path(__file__).parent.parent
+/ "static" / "app.js"` from `docs_site_renderer/__init__.py` — is
+inlined into `index.html` as `R-DOCS-001` states, and lays out
+(`R-DOCS-008`) and filters (`R-DOCS-009`) them in the browser, so the
+Python code computes no layout and holds no JavaScript. Reading the
+asset is the component's own file, not a second data source under
+`R-DOCS-004`.
 
 Implements: `specs/architecture/cli-conventions.md`

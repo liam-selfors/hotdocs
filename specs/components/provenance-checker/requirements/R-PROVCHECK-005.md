@@ -6,7 +6,8 @@
   and whose `gate_versions` maps exactly `compiler`, `generated_test`,
   `verifier`, `license_scanner`, `secret_scanner` and `generator` to the
   values `interface/library.md` names, unchanged but for `generator`,
-  which is `generator`'s `GATE_VERSION`, `+`, and its `PROMPT_VERSION`. It MUST NOT run any scan,
+  which is `generator`'s `GATE_VERSION`, `+`, and its `PROMPT_VERSION`,
+  and whose `assets` is `R-PROVCHECK-009`'s. It MUST NOT run any scan,
   generation, or verification, and MUST NOT write anything. A
   dependency that cannot be loaded, or an exception from
   `assemble`, propagates to the caller unchanged — never a guessed or

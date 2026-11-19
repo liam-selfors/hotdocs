@@ -164,6 +164,7 @@ optional).
 | `depends_on` | never (optional) | List of spec ids this one requires. Forms the dependency graph (D2). **(component `component.md` only)** |
 | `realizes` | condition: required unless `sealed: true` | List of `P-<id>`s this component contributes to. (D8) **(component `component.md` only)** |
 | `uses_var` | never (optional) | List of `VAR-<id>`s this component reads from `specs/vars/`. (D12) **(component `component.md` only)** |
+| `assets` | never (optional) | List of `<kind>:<path>` strings: a component's non-Python generated files, each at `gen/<slug>/<path>`. See `specs/architecture/asset-kinds.md`. (D343) **(component `component.md` only)** |
 | `depends_on_guarantees` | never (optional) | List of `G-<comp>-NNN` ids — a **strictly opt-in narrowing** of which of a dependency's `interface/guarantees/` entries this component actually relies on. (D2) **(component `component.md` only)** |
 | `supersedes` | never (optional) | Prior spec id this one replaces. |
 | `builds_on` | never (optional) | List of prior `D<N>`s this decision's reasoning depends on, without replacing any of them. **(decision record only)** |
@@ -189,6 +190,9 @@ optional).
   **body**, as bullets, not in frontmatter — its frontmatter is just `id` /
   `title` / `status` / `owners`. (A var declaration is a single flat file,
   not split into units — there's exactly one thing in it to address.)
+- Every `assets` entry **MUST** be `<kind>:<path>` with a relative, `/`-separated
+  `path` free of `..` and not ending in `.py`, and `<kind>` **MUST** have a
+  definition with all seven sections (`specs/architecture/asset-kinds.md`).
 - A unit file under `requirements/`, `interface/`, or `acceptance/`, or
   `constraints.md`, **MUST NOT** carry any frontmatter block at all. Finding
   one is a hard lint failure — the same structural guarantee that used to
@@ -701,6 +705,9 @@ secret_scan         result (secret-scanner) — missing from an earlier draft
                      expected a secret_scanner entry; found while specifying
                      provenance-writer, which is what actually assembles
                      this file from every other component's output
+assets              the VerificationReport's assets: per declared asset,
+                     kind, path, definition/adapter SHA-256, versions,
+                     lockfile_sha256; [] when none (D343)
 ```
 
 This is the evidence trail for incident debugging (is this a spec bug or a

@@ -49,6 +49,9 @@ required: a `generation_result` of `{"files": {}}`, scan results of `{}`,
   or `null`. A transcript MAY arrive as `generation_result.transcript`;
   it, and every `generation_result` field not named here, is never
   written.
+- `assets` is `verification_report.assets` copied verbatim, order kept,
+  and `[]` when `verification_report` is `null` or has no `assets` or a
+  `null` one (`R-PROV-022`).
 - `pipeline_version` is a module constant; `generated_at` is the current
   UTC time as `YYYY-MM-DDTHH:MM:SSZ`; `verification_run_id` is
   `"<slug>-attempt-<attempts>"`.

@@ -61,3 +61,5 @@ None.
 ## Change log
 
 - `D310`: initial spec, superseding `D3`'s one-shot rule.
+- `D343`: `missing_asset`, `malformed_layout` retried; `environment`
+  stops the loop (R-LOOP-003, R-LOOP-004, AC-LOOP-008, AC-LOOP-009).
