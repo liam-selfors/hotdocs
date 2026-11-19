@@ -50,8 +50,7 @@ in `repo_root`: a stand-in, or the real one copied to
 `(Path(verifier_orchestrator.__file__).resolve().parents[1] /
 "spec-bundle-assembler").resolve().parents[1]` (`D339`). It never
 relies on `verify`'s fallback to the tool root: a mutation run's tool
-root holds only `gen/` and `specs/asset-kinds/`
-(`specs/architecture/mutation-runs.md`), while a
+root holds only `gen/` (`specs/architecture/mutation-runs.md`), while a
 sibling `gen/` directory resolves to the tree the criterion run used.
 
 A `spec-bundle-assembler` stand-in defines
@@ -114,7 +113,7 @@ equals it, it loads the module at `adapter` with
 requested, and imports nothing from `hotdocs`.
 
 **A fake kind.** A test concerning assets plants a kind needing no
-program, never `javascript`: `<repo_root>/specs/asset-kinds/fake.md`,
+program, never `javascript`: `<repo_root>/specs/architecture/asset-kind-fake.md`,
 frontmatter then the seven `## ` sections of asset-kinds.md's "The
 definition", each with one line of text, and
 `<repo_root>/gen/kind-fake/kind_fake.py`, its adapter. The component
@@ -123,7 +122,8 @@ frontmatter and writes `gen/<slug>/data/table.txt` as the two lines
 `a=1` and `b=2`. The adapter defines:
 
 - `KIND = "fake"`; `layout_errors` returns `[]`; `surface` returns
-  `{"names": []}`.
+  `{"names": []}`; `guidance()` returns
+  `{"generator": "Fake generator text.", "test_author": "Fake test text."}`.
 - `provision(repo_root)` returns
   `{"ok": True, "reason": "", "versions": {"fake": "1.0"}, "lockfile_sha256": None}`,
   or, for a test of an unprovisioned environment,

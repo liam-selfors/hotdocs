@@ -5,9 +5,10 @@
 Criteria about assets (`AC-PROVCHECK-014`) plant a kind `fake` under a
 temporary `repo_root`, so no real environment (Node) is needed:
 
-- `<repo_root>/specs/asset-kinds/fake.md`: any fixed text; its bytes'
+- `<repo_root>/specs/architecture/asset-kind-fake.md`: any fixed text; its bytes'
   SHA-256 is the expected `definition_sha256`.
-- `<repo_root>/gen/kind-fake/kind_fake.py`: defines `KIND = "fake"` and
+- `<repo_root>/gen/kind-fake/kind_fake.py`: defines `KIND = "fake"`,
+  `guidance()` returning `{"generator": "G.", "test_author": "T."}`, and
   a deterministic `provision(repo_root)` returning a dict with exactly
   `ok`, `reason`, `versions`, `lockfile_sha256`, e.g.
   `{"ok": True, "reason": "", "versions": {"fakec": "2.0.0"}, "lockfile_sha256": None}`.
@@ -27,7 +28,7 @@ temporary `repo_root`, so no real environment (Node) is needed:
 Unless a scenario says otherwise, `provision` reports `ok` true and
 `versions` `{"fakec": "2.0.0"}`, and the expected assets value E is
 `[{"kind": "fake", "path": "static/a.fake", "definition_sha256": D, "adapter_sha256": A, "versions": {"fakec": "2.0.0"}, "lockfile_sha256": null}]`,
-D and A being `"sha256:"` plus the lowercase hex SHA-256 of `fake.md`'s
+D and A being `"sha256:"` plus the lowercase hex SHA-256 of `asset-kind-fake.md`'s
 and `kind_fake.py`'s bytes.
 
 For `current_provenance_key`, also plant the dependency stand-ins

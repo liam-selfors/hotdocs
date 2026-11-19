@@ -51,10 +51,10 @@ gives. No network access, no model call, no write.
 `current_provenance_key` and `check_provenance` (the latter only after
 `spec_bundle_hash` and `gate_versions` match) read the component's
 `<repo_root>/specs/components/<slug>/component.md` frontmatter `assets`
-and, per declared kind, the definition and adapter that
-`asset-kinds.md`'s Lookup finds: `<repo_root>/specs/asset-kinds/<kind>.md`
-and `<repo_root>/gen/kind-<kind>/kind_<kind>.py`, each else the tool
-root's, the tool root as asset-kinds.md defines it. The adapter is loaded by path afresh on every call; only its
+and, per declared kind, the repository's definition
+`<repo_root>/specs/architecture/asset-kind-<kind>.md`, if any, and the
+adapter `asset-kinds.md`'s Lookup finds: `<repo_root>/gen/kind-<kind>/kind_<kind>.py`,
+else the tool root's, the tool root as asset-kinds.md defines it. The adapter is loaded by path afresh on every call; only its
 `provision(repo_root)` is called (`R-PROVCHECK-009`).
 
 ## Sealed components (`D170`)

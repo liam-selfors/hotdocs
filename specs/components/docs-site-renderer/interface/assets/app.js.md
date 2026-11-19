@@ -1,6 +1,6 @@
 # Asset `static/app.js`
 
-Kind `javascript` (`specs/asset-kinds/javascript.md`, `D343`): the DAG
+Kind `javascript` (`specs/architecture/asset-kind-javascript.md`, `D343`): the DAG
 view's only script, at `gen/docs-site-renderer/static/app.js`, beside
 the package directory `docs_site_renderer/`.
 

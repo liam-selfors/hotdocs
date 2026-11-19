@@ -12,18 +12,17 @@
   `component.md` frontmatter `assets` (read through `load_corpus`'s
   `Component`, `R-ASSEMBLE-012`), the text before its first `:`,
   de-duplicated and sorted; none when the key is absent. A kind's
-  definition is `<repo_root>/specs/asset-kinds/<kind>.md`, or, when that
+  adapter is `<repo_root>/gen/kind-<kind>/kind_<kind>.py`, or, when that
   file does not exist, the same path under the tool root
-  (`R-ASSEMBLE-015`). With neither, both functions raise
-  `PreconditionFailure` with the message
-  `no definition for asset kind <kind>`. A definition's section
-  `<name>` is the text after its line `## <name>` up to the next line
-  beginning `## ` or the end of the file, stripped.
+  (`R-ASSEMBLE-015`), loaded by path afresh on each call. With neither,
+  both functions raise `PreconditionFailure` with the message
+  `unknown asset kind: <kind>`. Its `guidance()` is called once per
+  kind and returns `{"generator": str, "test_author": str}`; each text
+  is used stripped. No definition document is read.
 
   `assemble` MUST append to `SpecBundle.interface`, after every document
   `R-ASSEMBLE-014` appends, for each declared kind in order,
-  `"\n\n## Asset kind: " + kind + "\n\n" + section`, `section` the
-  definition's `Generator guidance`. `assemble_criterion` MUST append to
-  `CriterionBundle.testing`, after any `Uses:` documents, for each,
-  `"\n## Asset kind: " + kind + "\n\n" + section`, `section` its
-  `Test author guidance`. Neither text appears in the other bundle.
+  `"\n\n## Asset kind: " + kind + "\n\n" + generator`. `assemble_criterion`
+  MUST append to `CriterionBundle.testing`, after any `Uses:` documents,
+  for each, `"\n## Asset kind: " + kind + "\n\n" + test_author`.
+  Neither text appears in the other bundle.

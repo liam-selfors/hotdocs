@@ -3,7 +3,7 @@
 Asset criteria never use a real kind and never need Node. A test plants
 each kind it names in its synthetic `repo_root`:
 
-- `specs/asset-kinds/<kind>.md`, any text (`check_surface` does not
+- `specs/architecture/asset-kind-<kind>.md`, any text (`check_surface` does not
   read it);
 - `gen/kind-<kind>/kind_<kind>.py`, plain Python, for example
 

@@ -12,8 +12,9 @@
   — `spec-linter`, reached via DuckDB's own `yaml` community extension
   through its own dependency on `graph-query-engine` — already
   provides. Files `load_corpus` does not parse — `Implements:` and
-  `Uses:` documents, `interface/assets/` files and asset-kind
-  definitions (`R-ASSEMBLE-016`) — are content, read from disk as text.
+  `Uses:` documents and `interface/assets/` files — are content, read
+  from disk as text, and asset-kind adapters are loaded by path
+  (`R-ASSEMBLE-016`).
 
   Found once a candidate re-parsed frontmatter with `PyYAML`, a package
   this corpus never installs (`D101`).

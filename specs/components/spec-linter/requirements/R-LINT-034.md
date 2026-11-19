@@ -16,17 +16,18 @@
   - A `/`-separated segment of `path` equal to `..`:
     `asset '<entry>': path contains ..`.
   - `path` ending in `.py`: `asset '<entry>': path ends in .py`.
-  - Neither `<repo_root>/specs/asset-kinds/<kind>.md` nor the tool
-    root's (as in R-LINT-032) exists:
+  - Neither `<repo_root>/specs/architecture/asset-kind-<kind>.md` nor an
+    adapter `gen/kind-<kind>/kind_<kind>.py` under `repo_root` or the
+    tool root (as in R-LINT-032) exists:
     `asset kind '<kind>' has no definition`.
-  - In the definition found first (repo's, then tool's), for each of
+  - In the repository's definition, if any, for each of
     `Layout`, `Environment`, `Surface`, `Running criteria`,
     `Strength check`, `Test author guidance`, `Generator guidance`, no
     line `## <name>`:
     `asset kind '<kind>' definition lacks section '<name>'`; or only
     whitespace before the next `## ` line or the end:
     `asset kind '<kind>' definition has empty section '<name>'`.
-  - The definition is `<repo_root>`'s and `depends_on` lacks
+  - The repository has the definition and `depends_on` lacks
     `comp-kind-<kind>`:
     `asset kind '<kind>' is defined in this repository; depends_on must list comp-kind-<kind>`.
 

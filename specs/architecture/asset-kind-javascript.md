@@ -1,5 +1,5 @@
 ---
-id: kind-javascript
+id: arch-asset-kind-javascript
 title: Asset kind javascript
 status: draft
 owners: [pipeline-team]

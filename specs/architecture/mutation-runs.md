@@ -24,11 +24,7 @@ no baseline or mutant runs.
 **The sandbox.** A fresh temporary directory `<tmp>` holds
 `<tmp>/gen/<slug>/`, a copy of `<repo_root>/gen/<slug>/` without
 `__pycache__`, and, for every other directory `<repo_root>/gen/<name>/`,
-a symbolic link `<tmp>/gen/<name>` to it, and, when
-`<repo_root>/specs/asset-kinds/` exists, a symbolic link
-`<tmp>/specs/asset-kinds` to it, so the tool root's asset-kind
-definitions (`specs/architecture/asset-kinds.md`) are those of the
-criterion run. Only files of the copy are
+a symbolic link `<tmp>/gen/<name>` to it. Only files of the copy are
 ever mutated. Each run's working directory is `<tmp>/gen/<slug>`, its
 `PYTHONPATH` that directory then the plugin directory (below), with
 pytest's `--noconftest`. So code that finds

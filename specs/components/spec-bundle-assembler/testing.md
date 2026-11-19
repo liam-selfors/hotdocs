@@ -92,7 +92,7 @@ export function double(x)
 ````
 
 **The project-kind asset fixture** adds to the asset fixture
-`specs/asset-kinds/javascript.md`: frontmatter `id: kind-javascript`,
+`specs/architecture/asset-kind-javascript.md`: frontmatter `id: kind-javascript`,
 `title: Asset kind javascript`, `status: draft`, `owners: [team-a]`,
 `depends_on: []`, then `# Asset kind javascript` and, in this order, the
 sections `Layout`, `Environment`, `Surface`, `Running criteria`,
@@ -101,8 +101,20 @@ sections `Layout`, `Environment`, `Surface`, `Running criteria`,
 adds `specs/components/kind-javascript/`, built as foo with
 `comp-kind-javascript`, `Kind javascript`, `R-KJS-001`, `AC-KJS-001`,
 `source_path: legacy/kind-javascript/` and no `assets`, and foo's
-`depends_on` becomes `[comp-kind-javascript]`.
+`depends_on` becomes `[comp-kind-javascript]`. Its adapter, found under
+`repo_root` before the tool's, is `gen/kind-javascript/kind_javascript.py`:
 
-The asset fixture alone takes the definition from the tool root (the
+```python
+KIND = "javascript"
+
+
+def guidance():
+    return {"generator": "Generator guidance text.\n",
+            "test_author": "Test author guidance text.\n"}
+```
+
+The asset fixture alone takes the tool's own adapter,
+`<tool_root>/gen/kind-javascript/kind_javascript.py` (the tool root the
 parent of the nearest `gen` above `spec_bundle_assembler.__file__`); a
-test reads that file's section as `R-ASSEMBLE-016` defines it.
+test loads it by path with `importlib.util.spec_from_file_location` and
+calls its `guidance()` for the expected texts.

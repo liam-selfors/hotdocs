@@ -1,6 +1,6 @@
 # Asset `static/app.js`
 
-Kind `javascript` (`specs/asset-kinds/javascript.md`, `D343`): the
+Kind `javascript` (`specs/architecture/asset-kind-javascript.md`, `D343`): the
 page's only script, at `gen/provenance-tracker-ui/static/app.js`, next
 to the flat module `provenance_tracker_ui.py`.
 
@@ -30,5 +30,5 @@ on `click`: builds `nodes` from every `li.node` element
 (`{"id": data-node-id, "status": data-status}`), calls
 `hiddenByStatus(nodes, <the button's data-filter>)`, and sets each
 `li.node` element's `hidden` property to that node's result. It makes
-no decision of its own (`specs/asset-kinds/javascript.md`'s generator
+no decision of its own (`specs/architecture/asset-kind-javascript.md`'s generator
 guidance).

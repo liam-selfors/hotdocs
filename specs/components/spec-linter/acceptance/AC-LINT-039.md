@@ -5,7 +5,7 @@ Kind: generated-test
 
 ```gherkin
 Given a corpus whose component "web" has depends_on [comp-kind-demo] and
-  assets [demo:static/app.js], and specs/asset-kinds/demo.md has the
+  assets [demo:static/app.js], and specs/architecture/asset-kind-demo.md has the
   seven sections of R-LINT-034, each with one line of text
 When lint(None, repo_root) runs
 Then there is no R-LINT-034 finding

@@ -22,8 +22,11 @@ provenance treat every kind alike (`D340`, `D343`). A project built with
 - An **asset kind** names how an asset is laid out, run and checked.
   `python` is the pipeline's own kind: today's rules for a component's
   module or package, with no adapter. Every other kind has a
-  **definition**, `specs/asset-kinds/<kind>.md`, and an **adapter**, the
-  component `comp-kind-<kind>`, which carries the definition out.
+  **definition**, `specs/architecture/asset-kind-<kind>.md`, a spec that
+  only people, lint and the adapter's own bundles read, and an
+  **adapter**, the component `comp-kind-<kind>`, which carries the
+  definition out and is the only part of a kind the running pipeline
+  reads.
 - A component declares its non-Python assets in `component.md`
   frontmatter as a list of `<kind>:<path>` strings:
 
@@ -38,31 +41,29 @@ provenance treat every kind alike (`D340`, `D343`). A project built with
   end in `.py`, and names one file outside the component's Python
   module or package. With no `assets` key the component has only its
   Python module, as before. When the project defines `<kind>` itself
-  (Lookup, below), a component declaring it lists `comp-kind-<kind>` in
-  `depends_on`; a built-in kind's adapter is the tool's, and provenance
-  covers it by hash.
+  (it has `specs/architecture/asset-kind-<kind>.md`), a component
+  declaring it lists `comp-kind-<kind>` in `depends_on`; a built-in
+  kind's adapter is the tool's, and provenance covers it by hash.
 
 ## Lookup
 
-A definition is read from `<repo_root>/specs/asset-kinds/<kind>.md`,
-or, when that file does not exist, from the tool's own
-`<tool_root>/specs/asset-kinds/<kind>.md`, the **tool root** being the
-parent of the nearest directory named `gen` above the reading module's
-own file. In a mutation run, whose copy is `<tmp>/gen/<slug>/`, the tool
-root is `<tmp>`, so the run also links `<tmp>/specs/asset-kinds` to the
-repository's `specs/asset-kinds/` when that exists
-(`specs/architecture/mutation-runs.md`). An adapter is loaded by path,
-never imported by name: `<repo_root>/gen/kind-<kind>/kind_<kind>.py`,
-or the tool's own when that file does not exist. Pipeline components
-never list an adapter in `depends_on`, so adding or changing a kind
-regenerates the kind and the components that declare it, never the
-pipeline. A kind with no definition is a lint failure for every
-component declaring it; a kind with no adapter fails generation and
-verification of such a component with `unknown asset kind: <kind>`.
+An adapter is loaded by path, never imported by name:
+`<repo_root>/gen/kind-<kind>/kind_<kind>.py`, or, when that file does
+not exist, `<tool_root>/gen/kind-<kind>/kind_<kind>.py`, the **tool
+root** being the parent of the nearest directory named `gen` above the
+reading module's own file. Pipeline components never list an adapter in
+`depends_on`, so adding or changing a kind regenerates the kind and the
+components that declare it, never the pipeline. The running pipeline
+never reads a definition: everything it needs from a kind comes from
+the adapter, so the tool's built-in kinds need nothing outside `gen/`.
+A kind with neither a definition in the repository nor an adapter
+(repository's or tool's) is a lint failure for every component
+declaring it; a kind with no adapter fails generation and verification
+of such a component with `unknown asset kind: <kind>`.
 
 ## The definition
 
-`specs/asset-kinds/<kind>.md` has exactly these seven `## ` sections,
+`specs/architecture/asset-kind-<kind>.md` has exactly these seven `## ` sections,
 each non-empty; one missing or empty is a lint failure.
 
 1. `## Layout` — what the file at `path` must be, and how a reply that
@@ -77,10 +78,15 @@ each non-empty; one missing or empty is a lint failure.
    stated as `mutation-runs.md` states Python's), *perturbation* (a
    fixed list of edits that make the asset wrong) or *evaluation* (fixed
    cases with expected judgements, for text that drives a model).
-6. `## Test author guidance` — test-only text: how a test builds
-   fixtures and calls `asset_runner`, and what it must not do.
-7. `## Generator guidance` — conventions the asset must follow, never
-   test mechanics.
+6. `## Test author guidance` — what the adapter's `guidance()` returns
+   as `"test_author"`: test-only text, how a test builds fixtures and
+   calls `asset_runner`, and what it must not do.
+7. `## Generator guidance` — what `guidance()` returns as `"generator"`:
+   conventions the asset must follow, never test mechanics.
+
+A definition states the two guidance texts exactly, so the adapter's
+criteria pin them; a later decision may state requirements on them
+instead, verified by evaluation, regenerating only the adapter.
 
 ## What each pipeline step does with an asset
 
@@ -90,10 +96,10 @@ each non-empty; one missing or empty is a lint failure.
   every test author see it.
 - **Bundles.** `spec-bundle-assembler` appends to the `SpecBundle`, for
   each declared kind in sorted order, `## Asset kind: <kind>` followed by
-  the definition's generator guidance; and to every `CriterionBundle`'s
-  `testing`, after any `Uses:` documents, `\n## Asset kind: <kind>\n\n`
-  followed by the definition's test author guidance. Neither text
-  reaches the other side.
+  the adapter's `guidance()["generator"]`; and to every
+  `CriterionBundle`'s `testing`, after any `Uses:` documents,
+  `\n## Asset kind: <kind>\n\n` followed by `guidance()["test_author"]`,
+  each text stripped. Neither text reaches the other side.
 - **Layout.** First, each declared kind with no adapter, or whose
   `provision(repo_root)` reports `ok` false, ends generation with the
   category `environment`, before any model call, and the message `unknown asset kind: <kind>` or
@@ -140,8 +146,9 @@ each non-empty; one missing or empty is a lint failure.
 - **Provenance.** `VerificationReport.assets` lists, per declared asset
   in declaration order,
   `{"kind", "path", "definition_sha256", "adapter_sha256", "versions", "lockfile_sha256"}`:
-  the SHA-256 of the definition file and of the adapter module as found
-  by Lookup, and `versions` and `lockfile_sha256` as `provision`
+  the SHA-256 of `<repo_root>/specs/architecture/asset-kind-<kind>.md`
+  (null when the repository does not define the kind) and of the adapter
+  module as Lookup finds it, and `versions` and `lockfile_sha256` as `provision`
   reported them; `[]` when the component declares none. Every hash is
   `"sha256:"` followed by the lowercase hex SHA-256 of the file's raw
   bytes, as `spec_bundle_hash` is written, and `provision` is called
@@ -159,6 +166,7 @@ KIND: str
 layout_errors(asset_file: Path) -> list[str]
 surface(asset_file: Path) -> dict          # {"names": [str, ...]}
 provision(repo_root: Path) -> dict         # {"ok", "reason", "versions", "lockfile_sha256"}
+guidance() -> dict                         # {"generator": str, "test_author": str}
 asset_runner(asset_file: Path) -> Callable[[str, list], object]
 strength_sites(asset_file: Path) -> list[dict]   # each has "description"
 apply_site(asset_file: Path, site: dict) -> None

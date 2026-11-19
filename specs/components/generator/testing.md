@@ -19,7 +19,7 @@ assets: [fake:static/app.txt]
 ```
 
 replacing `fake` with the criterion's kind when it names another, and
-the fake kind: its definition `specs/asset-kinds/fake.md`, a `# Fake`
+the fake kind: its definition `specs/architecture/asset-kind-fake.md`, a `# Fake`
 line and the seven `## ` sections of `specs/architecture/asset-kinds.md`
 each followed by a line `x`, and its adapter
 `gen/kind-fake/kind_fake.py`:

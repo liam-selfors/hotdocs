@@ -3,7 +3,7 @@
 **R-VERIFY-020** — For the assets a component declares
   (`specs/architecture/asset-kinds.md`, `D343`), this component MUST:
 
-  1. find each kind's definition and adapter by asset-kinds.md's Lookup,
+  1. find each kind's adapter by asset-kinds.md's Lookup,
      with the tool root it defines, and give every test
      run the `asset_runner` plugin `specs/architecture/verifier-fixtures.md`
      describes.
@@ -18,5 +18,5 @@
      null.
   3. report `assets` as asset-kinds.md's Provenance bullet states; a
      kind with no adapter has `adapter_sha256` null, `versions` `{}`
-     and `lockfile_sha256` null, and a kind with no definition
-     `definition_sha256` null.
+     and `lockfile_sha256` null, and a kind the repository does not
+     define `definition_sha256` null.

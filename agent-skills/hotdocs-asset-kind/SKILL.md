@@ -24,8 +24,8 @@ Ask the user, or find in the code, and write down:
   weak; stop and work this out with the user.
 - What must be installed to run or check it, with versions.
 
-Check `<tool_root>/specs/asset-kinds/` for a built-in kind that already
-fits. Prefer extending a built-in kind's declaration over a new kind.
+Check `<tool_root>/gen/kind-*/` for a built-in kind (an adapter) that
+already fits. Prefer extending a built-in kind's declaration over a new kind.
 
 Decisions that are the user's, not yours: adding an environment (a
 program or package set) the project does not already need; choosing evaluation (model calls on every
@@ -34,7 +34,7 @@ instead of fail.
 
 ## 2. Write the definition, strength check first
 
-Create `specs/asset-kinds/<kind>.md` with the seven parts the contract
+Create `specs/architecture/asset-kind-<kind>.md` with the seven parts the contract
 lists. Write them in this order:
 
 1. **Strength check.** Pick mutation for executable code, perturbation

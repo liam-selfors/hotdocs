@@ -24,7 +24,7 @@ measure how well a test suite checks the module.
 `D343` builds asset kinds with `javascript` first, so JavaScript is
 declared as a file of its own and mutated over the whole file instead of
 inside Python strings. The adapter carries out
-`specs/asset-kinds/javascript.md` through the interface every adapter
+`specs/architecture/asset-kind-javascript.md` through the interface every adapter
 shares, `specs/architecture/asset-kinds.md`. Its own Node driver is kept
 short so that the adapter passes the rule it helps enforce: no
 JavaScript of 200 characters or more inside a Python string.
