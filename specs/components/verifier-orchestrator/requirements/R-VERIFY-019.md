@@ -8,8 +8,9 @@
      `CriterionBundle`, and author a stale one again (`D320`, `D341`).
   2. when `test_author` returns a `model_call_error` whose `category` is
      `network`, `timeout` or `rate_limit`, call it once more (`D319`).
-  3. pass the file's source, the bundle and the module name (the slug,
-     hyphens as underscores) to `test-probe`'s `probe`; when `ok` is
+  3. pass the file's source, the bundle, the module name (the slug,
+     hyphens as underscores) and `interpreter=` the `python` report's
+     `interpreter` (`D344`) to `test-probe`'s `probe`; when `ok` is
      false and the file was not authored in this run, author it again
      once and probe the new file (`D307`).
 

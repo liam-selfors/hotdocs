@@ -64,12 +64,9 @@ See `interface/data/`.
 
 See `acceptance/`.
 
-Every criterion is `kind: generated-test` (`D43`) — dispatch-and-
-aggregate logic, tested with fake dependencies placed under a temporary
-`repo_root` and asserting on call arguments and results, the pattern
-`verifier-orchestrator` established for coordination logic. None is
-written in the step-phrase grammar, so `kind: compiled` would not
-describe how they are really verified.
+Every criterion is `kind: generated-test` (`D43`): dispatch-and-
+aggregate logic, tested with fake dependencies under a temporary
+`repo_root`, asserting on call arguments and results.
 
 ## Non-functional constraints
 
@@ -95,3 +92,6 @@ None — extracted whole from `merge-orchestrator`'s already-resolved
 - `D175`: cold-generated and landed at 12/12, `mutation_score` 0.84. A
   `compiled` capability scenario cannot pass with `surface=None`.
 - `D198`: the test author's bundle names the realizing modules.
+- `D344`: `R-SCENARIO-005`, `AC-SCENARIO-013`: tests run under the
+  `python` adapter's `interpreter`; the key covers the Python lock;
+  `capability_scenario_verifier@2.1.0`.

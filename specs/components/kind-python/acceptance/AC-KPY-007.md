@@ -18,6 +18,6 @@ Given tmp_path / ".hotdocs" created as an empty regular file
 And the lock holding exactly "--no-index\npytest==99.0.0\n"
 When provision(tmp_path) is called
 Then ok is False, versions {}, interpreter None, and reason starts with
-  "python environment: Error: [Errno 20] Not a directory: "
-  (venv could not create its directory; nothing reaches the network)
+  "python environment: [Errno 20] Not a directory: "
+  (the lock's directory cannot be created; nothing reaches the network)
 ```

@@ -5,5 +5,5 @@
   component declares, `pass` only if **every** criterion whose
   `Covers:` names it is `pass`, `fail` if any is `fail` or `skipped`.
 
-  It MUST contain **only** `R-id` keys and `pass`/`fail` values, never
-  Gherkin text, `rationale` or expected/actual values (R-ASSEMBLE-001).
+  It MUST contain **only** `R-id` keys and `pass`/`fail` values
+  (R-ASSEMBLE-001).

@@ -18,7 +18,9 @@ Then it returns (None, [])
 
 Given files {"widget_maker.py": "", "bad.py": "", "static/app.txt": "ok"}
 When check_assets is called
-Then it returns ("malformed_layout", ["bad.py:1: SyntaxError: x"])
+Then it returns ("malformed_layout", ["bad.py:1: SyntaxError: x"]);
+  with static/app.txt holding "bad" too, it returns
+  ("malformed_layout", ["static/app.txt: bad"]), declared assets first
 
 Given files {"widget_maker.py": ""}
 When check_assets is called

@@ -34,7 +34,8 @@ dependency code it reaches in the criterion run.
 
 **Language outside an asset.** Whenever a baseline would run, before
 it, every `.py` file of
-the copy, in sorted path order, is parsed and its `str` constants are
+the copy, outside `__pycache__`, in order of relative path compared as
+`/`-joined strings, is parsed and its `str` constants are
 read in `ast.walk` order, including each part of an f-string and never
 a docstring (the first statement of a module, class or function body).
 The first constant at least 200 characters long that matches
@@ -58,8 +59,8 @@ whichever is larger. If it exits nonzero or times out, no mutant runs:
     mutation baseline failed in the sandbox: pytest exited <code>
     mutation baseline timed out in the sandbox after 300 seconds
 
-with `<code>` pytest's exit status. `mutation_error` is `null` in every
-other case.
+with `<code>` pytest's exit status. `mutation_error` is `null` in every case
+this document does not name.
 
 **The `asset_runner` plugin.** Every baseline and mutant run gets the
 plugin `specs/architecture/verifier-fixtures.md` describes, its asset
@@ -72,7 +73,8 @@ copy, in this order:
   `comp-kind-python` found by asset-kinds.md's Lookup, lists with
   `strength_sites(<tmp>/gen/<slug>)`, in that order; each mutant is
   `apply_site(<tmp>/gen/<slug>, site)`. The rules, every `.py` file of
-  the copy in sorted path order and Python's operator swaps, are
+  the copy in order of relative path compared as `/`-joined strings,
+  and Python's operator swaps, are
   `specs/architecture/asset-kind-python.md`'s "Strength check", stated
   there exactly as this document stated them before `D344`.
 - *Assets* (`specs/architecture/asset-kinds.md`, `D343`): after every
@@ -83,6 +85,15 @@ copy, in this order:
 
 For every mutant, the tests run, then every file of the copy is
 restored to its original bytes before the next mutant.
+
+**An adapter failure.** When a kind's `strength_sites` or `apply_site`
+raises, `python`'s included, no further mutant runs, `mutation_score`
+is `null`, `overall` is `fail`, and `mutation_error` is exactly
+
+    <kind> adapter failed: <ExceptionType>: <message>
+
+with `<ExceptionType>` the exception's class `__name__` and `<message>`
+its `str()`.
 
 **The interpreter.** The baseline and every mutant run under the
 `interpreter` the `python` adapter's `provision` reported for this

@@ -8,8 +8,8 @@
   `importlib.import_module(`, `module_from_spec(`, `exec_module(` or a
   function whose name starts `_load`, and contains the dependency's slug
   or module name as a quoted string; names starting `__` are ignored.
-  It MUST then check, in one subprocess importing the dependency's
-  module, each name with `hasattr`, or as an importable submodule
+  It MUST then check, in one subprocess of `R-SURF-006`'s interpreter
+  importing the dependency's module, each name with `hasattr`, or as an importable submodule
   `<module>.<name>`. Each missing name gives one `dependency_name`
   finding, `<dep-slug> has no <name>, which the candidate uses`. A
   dependency whose module does not import is skipped.

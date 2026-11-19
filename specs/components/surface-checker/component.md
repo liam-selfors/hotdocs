@@ -22,7 +22,8 @@ otherwise surface only when a user first runs the tool.
 
 ## Scope
 
-**In scope:** an import of the candidate; the names it uses on each
+**In scope:** the `python` environment the candidate runs in; an
+import of the candidate; the names it uses on each
 direct dependency's module; a smoke run of its `main` with an unknown
 argument when it implements `specs/architecture/cli-conventions.md`;
 the names each declared asset provides, through its kind's adapter.
@@ -69,3 +70,7 @@ None.
 - `D343`: `R-SURF-005`, `AC-SURF-005`, `AC-SURF-006`: declared assets'
   surfaces are checked through their kinds' adapters; `R-SURF-004`
   orders the new findings; `surface-checker@1.1.0`.
+- `D344`: `R-SURF-006`, `AC-SURF-007`: the candidate and its
+  dependencies are imported under the interpreter the `python` adapter's
+  `provision` reports, and a failed provision is one `environment`
+  finding; `surface-checker@1.2.0`.

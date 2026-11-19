@@ -5,13 +5,14 @@ Kind: generated-test
 
 ```gherkin
 Given comp-qux declaring no assets with verifier-fixtures.md's failing
-  python adapter planted, and one cached passing generated test
+  python adapter planted, one cached passing generated test and one
+  passing compiled criterion
 When verify runs
-Then the criterion is "fail" with failure_origin "environment" and
+Then both criteria are "fail" with failure_origin "environment" and
   failure_detail.message "python environment: broken"
 
 Given the wrapped python adapter is planted instead
 When verify runs
-Then the criterion is pass and wrapper.log holds at least two lines
+Then both criteria pass and wrapper.log holds at least two lines
   "called"
 ```

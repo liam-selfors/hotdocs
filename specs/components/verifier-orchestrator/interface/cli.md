@@ -4,8 +4,6 @@
 hotdocs verify-component <component-id> [--repo-root=<dir>] [--format=json|text]
 ```
 
-Not `hotdocs verify`, `provenance-tracker`'s readiness check (`D190`).
-
 `main(argv)` receives `argv` beginning with `<component-id>`. Each flag
 takes its value as `--flag=value` or as the next argument;
 `--repo-root` defaults to the current directory, `--format` to `text`.

@@ -11,7 +11,9 @@
   `versions` and `lockfile_sha256` from `provision(repo_root)`, called
   once per distinct kind (`{}` and `null` with no adapter). A missing
   `component.md` or `assets` key declares nothing, so the value is the
-  `python` entry alone: every verified component has it. `current_provenance_key`
+  `python` entry alone: every verified component has it. A sealed
+  component's (`R-PROVCHECK-007`) value is `[]`, and no adapter is
+  called. `current_provenance_key`
   returns it as `assets`. `check_provenance` computes it itself, only
   once `spec_bundle_hash` and `gate_versions` match, and MUST miss when
   a kind lacks an adapter (reason `unknown asset kind:

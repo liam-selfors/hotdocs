@@ -5,11 +5,11 @@ and never raise. When `<repo_root>/environments/python/requirements.lock`
 is not a file, it writes nothing and returns `ok` true, `reason` `""`,
 `lockfile_sha256` `None`, `interpreter` `sys.executable`, and
 `versions` `{"python": <v>}`, `<v>` the stripped stdout of running
-`sys.executable -c "import platform; print(platform.python_version())"`
-(30-second timeout). With a lock it does what `R-KPY-005` states.
+`sys.executable -c "import sys; print('%d.%d' % sys.version_info[:2])"`
+(30-second timeout): major and minor only, so a patch release changes
+no provenance key. With a lock it does what `R-KPY-005` states.
 
 In either case, when that version command exits non-zero or times out,
 the result is `ok` false with `reason`
 `python environment: python version check failed`, `versions` `{}` and
-`interpreter` `None`. Every `ok` result becomes the interpreter
-`surface` and `asset_runner` start (`interface/library.md`).
+`interpreter` `None`.

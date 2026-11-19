@@ -34,6 +34,10 @@ Given comp-foo's component.md is removed
 Then current_provenance_key's assets is exactly [P], and a manifest
   with assets [P] is a hit
 
+Given comp-foo's component.md also has the line "sealed: true"
+Then current_provenance_key's assets is [] and neither adapter's
+  provision was called
+
 Given a manifest with no assets field, or assets null
 Then hit is false and reason is "assets differ", and so with comp-foo's
   component.md removed

@@ -55,7 +55,7 @@ def layout_errors(code_dir):
 
 
 def provision(repo_root):
-    return {"ok": True, "reason": "", "versions": {"python": "3.12.0"}, "lockfile_sha256": None, "interpreter": "/fake/python"}
+    return {"ok": True, "reason": "", "versions": {"python": "3.12"}, "lockfile_sha256": None, "interpreter": "/fake/python"}
 ```
 
 To observe that `provision` is called, a criterion rewrites it to also

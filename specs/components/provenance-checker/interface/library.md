@@ -12,7 +12,7 @@ check_sealed_provenance(component_id: str, repo_root: Path) -> SealedCheckResult
 
 `check_provenance` is a pure function of the working tree's current
 state plus `VAR-TRUST-JUDGE-PROVENANCE` — no network access, no model
-call.
+call, except what an adapter's `provision` does (`R-PROVCHECK-004`).
 
 `current_provenance_key` is the one definition of the values a caller
 passes to `check_provenance`, and that `component-gate-runner` passes
@@ -44,7 +44,8 @@ stand-in `assemble` needs no `specs/` tree. It reads, in this order:
 7. `generator`'s `GATE_VERSION` and `PROMPT_VERSION`
 
 Any stand-in for these dependencies must provide each name this list
-gives. No network access, no model call, no write.
+gives. No network access, no model call, no write, `provision` aside
+(`R-PROVCHECK-004`).
 
 ## Assets (`D343`, `D344`)
 

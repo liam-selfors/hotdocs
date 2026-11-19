@@ -73,7 +73,7 @@ See `constraints.md`.
   environment by definition, and no network sandbox is applied.
 - `surface` and `asset_runner` take the code directory only, so the
   module name comes from the directory's name and the interpreter from
-  the last `provision` call; callers pass directories named by slug.
+  `HOTDOCS_PYTHON`; callers pass directories named by slug.
 
 ## Change log
 

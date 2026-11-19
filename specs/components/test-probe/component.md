@@ -69,3 +69,6 @@ None.
   `test-author`'s `R-AUTHOR-020`.
 - `D343`: `R-PROBE-007`, `AC-PROBE-008`: the stub run supplies an
   `asset_runner` fixture through a `-p` plugin; `test-probe@1.2.0`.
+- `D344`: `R-PROBE-008`, `AC-PROBE-009`: `probe` takes the `interpreter`
+  the `python` adapter's `provision` reports, for the stub run and import
+  resolution; `test-probe@1.3.0`.

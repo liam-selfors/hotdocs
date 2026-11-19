@@ -4,9 +4,13 @@ One module file, `test_probe.py`, never a package.
 
 ```
 probe(test_source: str, criterion_bundle, module_name: str | list[str], *,
-      timeout: float = 60.0) -> ProbeReport
-GATE_VERSION: str  # "test-probe@1.2.0"
+      timeout: float = 60.0, interpreter: str | None = None) -> ProbeReport
+GATE_VERSION: str  # "test-probe@1.3.0"
 ```
+
+`interpreter` is the Python that runs the component's tests, the
+`interpreter` the `python` adapter's `provision` reports
+(`specs/architecture/asset-kinds.md`); `None` means `sys.executable`.
 
 `criterion_bundle` is a `CriterionBundle` or a mapping with its keys
 (`spec-bundle-assembler`'s `interface/data/CriterionBundle.md`); only
@@ -32,8 +36,10 @@ The checks run in this order, each giving only these kinds:
 The stub run happens only when checks 1 to 4 found no `error`; otherwise
 `tests_run` and `tests_reached` are `0`. An import resolves when its
 first dotted part is a name of `module_name` (the stub answers every name), a
-standard-library module, or anything `importlib.util.find_spec` finds in
-the probing process, such as `pytest`. A `testcase` **reached** the code
+standard-library module, or anything `importlib.util.find_spec` finds,
+such as `pytest`: in the probing process when `interpreter` is `None`,
+else in one subprocess of `interpreter`, the current environment kept,
+that checks every remaining part. A `testcase` **reached** the code
 under test exactly when its `failure` message contains
 `HotdocsProbeStubReached`; it gives no finding. A failure of any other
 type that is not a `test_bug` gives no finding either. A timed-out run
@@ -52,7 +58,7 @@ of `module_name` (`<name>.py`, each with the source below) and the
 asset plugin `hotdocs_probe_assets.py` (`R-PROBE-007`):
 
 ```
-<sys.executable> -m pytest -q -p no:cacheprovider --noconftest
+<interpreter> -m pytest -q -p no:cacheprovider --noconftest
     -p hotdocs_probe_assets --junitxml=<tmp>/report.xml test_probe_target.py
 ```
 

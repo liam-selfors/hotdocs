@@ -4,7 +4,7 @@ One module file, `surface_checker.py`, never a package.
 
 ```
 check_surface(component_id: str, repo_root: Path, code_dir: Path | None = None) -> SurfaceReport
-GATE_VERSION: str  # "surface-checker@1.1.0"
+GATE_VERSION: str  # "surface-checker@1.2.0"
 ```
 
 `code_dir` is the candidate's directory, default
@@ -13,12 +13,23 @@ by underscores, a `<module>.py` or `<module>/__init__.py` in `code_dir`.
 A direct dependency's module is found at
 `<repo_root>/gen/<dep-slug>/`, or, for a component whose `component.md`
 has `sealed: true`, at `<repo_root>/<source_path>`; a dependency with no
-such directory is skipped. Each subprocess is `sys.executable` with
-`PYTHONPATH` set to the directory holding the module it imports, the
-current environment otherwise kept.
+such directory is skipped. Each subprocess that imports the candidate
+or a dependency (checks 1 to 3) is the **interpreter** with `PYTHONPATH`
+set to the directory holding the module it imports, the current
+environment otherwise kept; an adapter's own subprocesses are
+`sys.executable`.
 
 ## How a check runs
 
+0. **Environment** (`R-SURF-006`): the `python` adapter, found as check
+   4 finds an adapter, has its `provision(<repo_root>)` called in a
+   subprocess like check 4's surface call, with a 600-second timeout,
+   printing the result as JSON. Its `interpreter` is the interpreter.
+   Without an adapter, or when `ok` is false, the subprocess fails, or
+   it times out, the check gives one `environment` finding and ends;
+   the message is `unknown asset kind: python`, the `reason`,
+   `python environment: <last non-empty stderr line>`, or
+   `python environment: timed out`.
 1. **Import** (`R-SURF-001`): `import <module>` in a subprocess; a
    non-zero exit gives one `import_error` finding, message the last
    non-empty stderr line, and ends the check.

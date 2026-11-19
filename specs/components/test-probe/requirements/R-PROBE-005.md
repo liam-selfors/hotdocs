@@ -1,7 +1,8 @@
 # R-PROBE-005
 
 **R-PROBE-005** — When no earlier check found an `error`, `probe` MUST
-  run the test once against the stub module exactly as
+  run the test once against the stub module, under the interpreter
+  `R-PROBE-008` gives, exactly as
   `interface/library.md` gives, and classify each `testcase` of the
   report:
 

@@ -16,7 +16,8 @@
   matches. `test_author` and the cache are never used; `llm-judge`
   criteria follow `R-VERIFY-003`.
 
-  No mutation testing: `mutation_score` is `null` and `overall` is
+  No mutation testing and no asset provisioning:
+  `assets` is `[]`, pytest runs under `sys.executable`, `mutation_score` is `null` and `overall` is
   `pass` iff no criterion failed and there is no drift.
   `.sealed-provenance.json` files and `__pycache__` directories under
   `source_path` are ignored.

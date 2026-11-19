@@ -18,25 +18,34 @@ adapter.
 
 ## Layout
 
-Every `.py` file under the code directory, outside `__pycache__`, MUST
-parse with `ast.parse` under the environment's Python. `layout_errors`
-returns, for each file that does not, in sorted relative-path order,
-`<relative path>:<line>: SyntaxError: <message>`, `<message>` the
-exception's `msg`; an empty list means the layout is valid. That the
+The code directory's **Python files** are every `.py` file under it,
+at any depth, outside `__pycache__`, always taken sorted by their
+relative paths compared as `/`-joined strings (`b.py` before `b/c.py`).
+Each MUST parse with `ast.parse`, run in the adapter's own process,
+under `hotdocs`' Python, not the environment's: a syntax check needs no
+environment. `layout_errors` returns, for each file that does not, in
+that order, `<relative path>:<line>: SyntaxError: <message>`,
+`<message>` the exception's `msg` (`<line>` 0 when it has none; a
+`ValueError` from the parse counts too, its `str` the message); an empty
+list means the layout is valid, and it never raises. That the
 module itself exists is the generator's own `missing_module` check.
 
 ## Environment
 
-Python, version from `<interpreter> -c "import platform;
-print(platform.python_version())"`. A project that commits
+Python, version `<major>.<minor>` from `<interpreter> -c "import sys;
+print('%d.%d' % sys.version_info[:2])"`, so a patch release changes no
+provenance key. A project that commits
 `environments/python/requirements.lock` gets an environment of its own:
-`provision` creates `<repo_root>/.hotdocs/env/python/` with
-`<running interpreter> -m venv` if its interpreter is absent, installs the lock with
+`provision`, holding an exclusive lock on
+`<repo_root>/.hotdocs/env/python.lock` (`fcntl.flock`; POSIX only, no
+lock where `fcntl` is missing), rebuilds `<repo_root>/.hotdocs/env/python/`
+with `<running interpreter> -m venv --clear` and installs the lock with
 `<env python> -m pip install --no-input --disable-pip-version-check -r <lock>`
-(pip's version notice would otherwise end its stderr) when the lock's
-SHA-256 differs from the one recorded in
-`<repo_root>/.hotdocs/env/python/.lock-sha256` (then records it), and
-reports `interpreter` the environment's `bin/python` (`Scripts\python.exe`
+(pip's version notice would otherwise end its stderr) whenever the
+environment's interpreter is missing or not executable, or the marker
+`<repo_root>/.hotdocs/env/python/.lock-sha256` does not record both the
+lock's SHA-256 and the running interpreter's `<major>.<minor>` (then
+records them), and reports `interpreter` the environment's `bin/python` (`Scripts\python.exe`
 on Windows). The lock MUST pin `pytest`, since criteria run under it.
 With no lock, the environment is the one `hotdocs` runs in:
 `interpreter` is the running interpreter, `lockfile_sha256` null, and
@@ -45,11 +54,17 @@ nothing is created; the `hotdocs` corpus itself has no lock. Failures:
 `python environment: <last non-empty line of the failing command's
 stderr>` when creating or installing fails.
 
+`surface` and `asset_runner` take no `repo_root`, so they start the
+interpreter the environment variable `HOTDOCS_PYTHON` names, when set
+and non-empty, else the running one; `verifier-orchestrator` sets it to
+`provision`'s `interpreter` for runs that use them (nothing in the
+pipeline calls either today).
+
 ## Surface
 
 The public top-level names of `<module>`: `surface(code_dir)["names"]`
 is the sorted list of `dir(<module>)` entries not starting with `_`,
-read by importing it in a subprocess of the environment's interpreter
+read by importing it in a subprocess of the environment's interpreter (`## Environment`)
 with `PYTHONPATH` the code directory. The interface's `library.md` is
 the asset's interface file; `surface-checker`'s import and dependency
 checks (`R-SURF-001`, `R-SURF-002`) remain the surface gate for this
@@ -69,7 +84,7 @@ raises.
 
 Mutation, exactly as `specs/architecture/mutation-runs.md` has always
 stated Python's (`D159`, `D172`): every `.py` file of the code directory,
-outside `__pycache__`, in sorted relative-path order, is parsed once;
+outside `__pycache__`, in the order `## Layout` states, is parsed once;
 within a file, sites are taken in `ast.walk` order. A comparison with
 exactly one operator has it swapped `==`↔`!=`, `<`↔`>=`, `>`↔`<=`,
 `is`↔`is not`, `in`↔`not in`; an `and`/`or` is flipped to the other; a

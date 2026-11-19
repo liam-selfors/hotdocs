@@ -7,10 +7,10 @@ Every criterion's `repo_root` plants `<repo_root>/gen/kind-python/kind_python.py
 environment: it defines `KIND = "python"`, `guidance()` returning
 `{"generator": "", "test_author": ""}`, and a deterministic
 `provision(repo_root)` returning exactly
-`{"ok": True, "reason": "", "versions": {"python": "3.12.0"}, "lockfile_sha256": None, "interpreter": "/fake/python"}`;
+`{"ok": True, "reason": "", "versions": {"python": "3.12"}, "lockfile_sha256": None, "interpreter": "/fake/python"}`;
 it is varied and observed as the fake kind's adapter is below. No
 `asset-kind-python.md` is planted, so the expected python entry P is
-`{"kind": "python", "path": ".", "definition_sha256": null, "adapter_sha256": PA, "versions": {"python": "3.12.0"}, "lockfile_sha256": null}`,
+`{"kind": "python", "path": ".", "definition_sha256": null, "adapter_sha256": PA, "versions": {"python": "3.12"}, "lockfile_sha256": null}`,
 PA being `"sha256:"` plus the lowercase hex SHA-256 of `kind_python.py`'s
 bytes. Every manifest a scenario expects to hit, and that gives no
 `assets` of its own, has `assets` `[P]`, the current value of a

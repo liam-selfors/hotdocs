@@ -54,7 +54,10 @@ not exist, `<tool_root>/gen/kind-<kind>/kind_<kind>.py`, the **tool
 root** being the parent of the nearest directory named `gen` above the
 reading module's own file. Pipeline components never list an adapter in
 `depends_on`, so adding or changing a kind regenerates the kind and the
-components that declare it, never the pipeline. The running pipeline
+components that declare it, never the pipeline. `python` is the one
+exception in scope: every component has it, so a change to its adapter
+or definition makes every provenance key miss, as a new verifier
+version does. The running pipeline
 never reads a definition: everything it needs from a kind comes from
 the adapter, so the tool's built-in kinds need nothing outside `gen/`.
 A kind with neither a definition in the repository nor an adapter
@@ -108,8 +111,8 @@ instead, verified by evaluation, regenerating only the adapter.
   the adapter's `reason`; no model call can fix it, so it is never
   retried. Then a reply MUST write every declared asset path, besides the
   Python module; a declared path left unwritten is `missing_asset`.
-  Writing an undeclared non-`.py` file is `malformed_layout`. The reply's
-  `.py` files, as one code directory, and then each written asset are
+  Writing an undeclared non-`.py` file is `malformed_layout`. Each written
+  asset and then the reply's `.py` files, as one code directory, are
   checked with their adapter's `layout_errors`; any error is
   `malformed_layout` with the adapter's messages.
 - **Surface.** After `provision` reports `ok` (a failure is a finding

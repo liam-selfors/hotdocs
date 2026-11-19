@@ -343,6 +343,11 @@ def _build_sandbox(component_id: str) -> Path:
     # on it (decision-drift-detector) first had a generated-test criterion.
     infra = {"cache-manager", "llm-endpoint", "spec-bundle-assembler"}
     needed = set(_depends_on_slugs(component_id)) | infra
+    # Asset-kind adapters are found by path, never through depends_on
+    # (D343, D344): every component has the implicit python asset, and
+    # code under test inside the sandbox resolves its tool root to the
+    # sandbox itself, so each committed gen/kind-*/ must be there too.
+    needed |= {d.name for d in (REAL_REPO / "gen").glob("kind-*") if d.is_dir()}
     for infra_slug in infra:
         # the machinery's own dependencies: an in-sandbox copy of the
         # assembler resolves its tool root to the sandbox itself (D213)

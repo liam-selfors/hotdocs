@@ -34,10 +34,15 @@ the package `<module>/` inside it.
 
 ## The interpreter
 
-The Python that `surface` and `asset_runner` start is the `interpreter`
-of the most recent `provision` call in this process that reported `ok`,
-or `sys.executable` before any. Each such subprocess gets a copy of
+The Python that `surface` and `asset_runner` start is
+`os.environ["HOTDOCS_PYTHON"]` when that is set and non-empty, else
+`sys.executable`, read at each call; the module keeps no state between
+calls. `verifier-orchestrator` sets it to `provision`'s `interpreter`
+when a run uses them; nothing in the pipeline calls them today. Each
+such subprocess gets a copy of
 `os.environ` with `PYTHONPATH` set to `str(asset_file)` alone, runs with
 the code directory as its working directory, captures stdout and stderr
 as text, and is killed after 30 seconds. Its result is read from the
 last stdout line that is not empty after stripping, decoded as JSON.
+When the process cannot be started (`OSError`), `surface` gives
+`{"names": []}` and `run` raises `AssetError("cannot start <interpreter>")`.

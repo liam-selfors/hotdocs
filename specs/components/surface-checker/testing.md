@@ -21,6 +21,28 @@ each kind it names in its synthetic `repo_root`:
   for `fakeoff`, the same `surface` and a `provision` returning `ok`
   `False` with `reason` `"fakeoff needs fakeprog >= 2"`.
 
+Every synthetic `repo_root`, in every criterion, plants the `python`
+adapter `gen/kind-python/kind_python.py`, so no criterion depends on the
+tool's own:
+
+```python
+import sys
+from pathlib import Path
+
+
+def provision(repo_root):
+    return {"ok": True, "reason": "", "versions": {}, "lockfile_sha256": None,
+            "interpreter": sys.executable}
+```
+
+**The planted wrapper interpreter** is an executable file
+`<repo_root>/pywrap` (mode `0o755`, POSIX shell) with the lines
+`#!/bin/sh` and `HOTDOCS_WRAPPED=1 exec '<sys.executable>' "$@"`, the
+test's own `sys.executable` written in; the planted `python` adapter's
+`provision` then reports `"interpreter": str(Path(repo_root) / "pywrap")`.
+A criterion whose `provision` reports `ok` `False` returns that `ok` and
+`reason` with `"interpreter": None`.
+
 A kind the criterion says has no adapter, such as `nokind_q`, is simply
 not planted; no such kind exists under the tool's own `gen/` either.
 
