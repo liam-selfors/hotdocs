@@ -22,6 +22,8 @@ usage error.
 from __future__ import annotations
 
 import argparse
+import copy
+import dataclasses
 import hashlib
 import json
 import re
@@ -679,7 +681,23 @@ def run(component_id: str, model: str, seed: int, retry_feedback: list[str] | No
         print(f"Sandbox kept at {sandbox} for inspection.")
         return 1
 
+    # A test-author that predates D341 ignores CriterionBundle.testing, so
+    # until test-author itself is regenerated its authors would never see a
+    # component's testing.md. Hand it over inside the interface text, which
+    # every test-author shows, with a heading saying what it is.
+    author_reads_testing = "testing" in Path(test_author.__file__).read_text(encoding="utf-8")
+
     def test_author_closure(crit_bundle):
+        testing = _get(crit_bundle, "testing") or ""
+        if testing and not author_reads_testing:
+            extra = "\n\n## Test spec (testing.md: test mechanics only)\n\n" + testing
+            if isinstance(crit_bundle, dict):
+                crit_bundle = {**crit_bundle, "interface": (crit_bundle.get("interface") or "") + extra}
+            elif dataclasses.is_dataclass(crit_bundle):
+                crit_bundle = dataclasses.replace(crit_bundle, interface=(crit_bundle.interface or "") + extra)
+            else:
+                crit_bundle = copy.copy(crit_bundle)
+                crit_bundle.interface = (getattr(crit_bundle, "interface", "") or "") + extra
         return test_author.author_test(crit_bundle, model, seed=seed, repo_root=sandbox, llm_backend=None)
 
     # A verifier-orchestrator candidate's own tests call verify(), which runs
