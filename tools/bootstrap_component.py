@@ -504,6 +504,11 @@ def _record_carry(component_id: str, sandbox: Path, bundle, report) -> None:
         return
     passed = [_get(e, "id") for e in report.criteria
               if _get(e, "kind") == "generated-test" and _get(e, "result") == "pass"]
+    # Every criterion passed yet the seed failed: the mutation score is under
+    # the bar, so the tests as a set are too weak and new code cannot fix
+    # that. Carry none, and keep the next seed from reusing committed ones.
+    if report.overall != "pass" and all(_get(e, "result") != "fail" for e in report.criteria):
+        passed = []
     (sandbox / CARRY_FILE).write_text(json.dumps({
         "component_id": component_id,
         "spec_bundle_hash": _get(bundle, "spec_bundle_hash"),
@@ -540,7 +545,55 @@ def _carry_tests(component_id: str, sandbox: Path, bundle) -> None:
                 copied.append(cid)
         print(f"carried {len(copied)} passing test(s) from {carry_path.parent.name}: {', '.join(copied)}")
         return
-    print("carried 0 tests: no earlier seed with the same spec bundle and test-author")
+    _reuse_committed(component_id, sandbox)
+
+
+_BUNDLE_FIELDS = ("criterion_text", "requirement_text", "interface", "glossary")
+
+
+def _bundle_view(component_id: str, criterion_id: str, root: Path) -> str | None:
+    try:
+        b = spec_bundle_assembler.assemble_criterion(component_id, criterion_id, root)
+    except Exception:
+        return None
+    return json.dumps({k: _get(b, k) for k in _BUNDLE_FIELDS}, sort_keys=True, default=str)
+
+
+def _reuse_committed(component_id: str, sandbox: Path) -> None:
+    """With no earlier seed to carry from, start from the committed generated
+    tests whose criterion, covered requirement, interface (with its
+    Implements: documents) and glossary are what they were when the test was
+    last committed. A dependency's interface may have changed (a version
+    string, a reworded paragraph): a test whose fakes no longer fit fails,
+    and the next seed authors that one test again."""
+    slug = _slug(component_id)
+    real_dir = REAL_REPO / "verification" / slug / "generated-test"
+    dest_dir = sandbox / "verification" / slug / "generated-test"
+    by_name = {"test_" + p.stem.lower().replace("-", "_") + ".py": p.stem
+               for p in (REAL_REPO / "specs" / "components" / slug / "acceptance").glob("AC-*.md")}
+    snapshots: dict[str, Path] = {}
+    reused = []
+    for test in sorted(real_dir.glob("test_*.py")):
+        criterion_id = by_name.get(test.name)
+        git = lambda *a: subprocess.run(["git", *a], cwd=REAL_REPO, capture_output=True)
+        if not criterion_id or git("diff", "--quiet", "HEAD", "--", str(test)).returncode != 0:
+            continue
+        commit = git("log", "-1", "--format=%H", "--", str(test)).stdout.decode().strip()
+        if not commit:
+            continue
+        if commit not in snapshots:
+            snap = Path(tempfile.mkdtemp(prefix="bootstrap_snapshot_"))
+            archive = git("archive", commit, "specs", "SPEC_GUIDELINES.md").stdout
+            subprocess.run(["tar", "-x", "-C", str(snap)], input=archive, check=True)
+            snapshots[commit] = snap
+        then = _bundle_view(component_id, criterion_id, snapshots[commit])
+        if then is not None and then == _bundle_view(component_id, criterion_id, REAL_REPO):
+            dest_dir.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(test, dest_dir / test.name)
+            reused.append(criterion_id)
+    for snap in snapshots.values():
+        shutil.rmtree(snap, ignore_errors=True)
+    print(f"reused {len(reused)} committed test(s) whose criterion bundle is unchanged: {', '.join(reused)}")
 
 
 def run(component_id: str, model: str, seed: int, retry_feedback: list[str] | None, keep_sandbox: bool,
