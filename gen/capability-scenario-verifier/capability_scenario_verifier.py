@@ -2,23 +2,19 @@
 
 Runs the capability scenarios of every product capability whose
 `realizes`-set intersects a blast radius, against the real assembled
-code, and checks/writes per-capability provenance records.
+`gen/` output, and keeps per-capability provenance records.
 """
 
 import hashlib
 import importlib.util
 import json
 import os
+import re
 import subprocess
 import sys
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 GATE_VERSION = "capability_scenario_verifier@2.0.0"
-
-_PYTEST_TIMEOUT_SECONDS = 120
-_COMPILER_DIR = "pipeline/criterion-compiler"
-_TEST_AUTHOR_DIR = "gen/test-author"
-_LLM_ENDPOINT_DIR = "gen/llm-endpoint"
 
 
 class UnknownCapabilityError(ValueError):
@@ -30,24 +26,44 @@ class ModelRequiredError(ValueError):
 
 
 # ---------------------------------------------------------------------------
-# Helpers: dual access, module loading
-# ---------------------------------------------------------------------------
+# helpers
 
 
-def _get(obj, key):
+def _get(obj, key, default=None):
     if isinstance(obj, dict):
-        return obj.get(key)
-    return getattr(obj, key, None)
+        return obj.get(key, default)
+    return getattr(obj, key, default)
 
 
-def _tool_root():
-    return next(p.parent for p in Path(__file__).resolve().parents if p.name == "gen")
+def _unquote(value):
+    return value.strip().strip("'\"")
+
+
+def _scalar(value):
+    if value.startswith("[") and value.endswith("]"):
+        return [_unquote(x) for x in value[1:-1].split(",") if x.strip()]
+    return _unquote(value)
+
+
+def _frontmatter(text):
+    lines = text.splitlines()
+    data = {}
+    if not lines or lines[0].strip() != "---":
+        return data
+    for line in lines[1:]:
+        if line.strip() == "---":
+            break
+        key, sep, value = line.partition(":")
+        if sep:
+            data[key.strip()] = _scalar(value.strip())
+    return data
 
 
 def _load(module_name, rel_dir, repo_root):
     base = Path(repo_root) / rel_dir
     if not base.is_dir():
-        base = _tool_root() / rel_dir
+        gen = next(p for p in Path(__file__).resolve().parents if p.name == "gen")
+        base = gen.parent / rel_dir
     flat = base / f"{module_name}.py"
     if flat.is_file():
         spec = importlib.util.spec_from_file_location(module_name, flat)
@@ -62,51 +78,22 @@ def _load(module_name, rel_dir, repo_root):
     return module
 
 
-# ---------------------------------------------------------------------------
-# Corpus parsing
-# ---------------------------------------------------------------------------
-
-
-def _scalar(value):
-    if value.startswith("[") and value.endswith("]"):
-        items = [item.strip().strip("'\"") for item in value[1:-1].split(",")]
-        return [item for item in items if item]
-    if value == "true":
-        return True
-    if value == "false":
-        return False
-    return value.strip("'\"")
-
-
-def _frontmatter(text):
-    lines = text.splitlines()
-    fm = {}
-    if lines and lines[0].strip() == "---":
-        for line in lines[1:]:
-            if line.strip() == "---":
-                break
-            key, sep, val = line.partition(":")
-            if sep:
-                fm[key.strip()] = _scalar(val.strip())
-    return fm
-
-
 def _components(repo_root):
     comps = []
-    for cm in sorted((repo_root / "specs" / "components").glob("*/component.md")):
-        fm = _frontmatter(cm.read_text(encoding="utf-8"))
-        comp_id = fm["id"]
-        slug = comp_id[len("comp-"):] if comp_id.startswith("comp-") else comp_id
-        if fm.get("sealed") is True:
-            code_dir = repo_root / fm["source_path"]
-        else:
-            code_dir = repo_root / "gen" / slug
+    for path in sorted((repo_root / "specs" / "components").glob("*/component.md")):
+        fm = _frontmatter(path.read_text(encoding="utf-8"))
+        cid = fm.get("id")
+        realizes = fm.get("realizes", [])
+        if not isinstance(realizes, list):
+            realizes = [realizes]
         comps.append(
             {
-                "id": comp_id,
-                "slug": slug,
-                "realizes": fm.get("realizes") or [],
-                "code_dir": code_dir,
+                "id": cid,
+                "slug": cid.removeprefix("comp-"),
+                "spec_dir": path.parent,
+                "sealed": str(fm.get("sealed", "")).lower() == "true",
+                "source_path": fm.get("source_path"),
+                "realizes": realizes,
             }
         )
     return comps
@@ -115,347 +102,329 @@ def _components(repo_root):
 def _capabilities(repo_root):
     caps = {}
     for path in sorted((repo_root / "specs" / "product").glob("*.md")):
-        fm = _frontmatter(path.read_text(encoding="utf-8"))
-        if "id" in fm:
-            caps[fm["id"]] = path
+        cid = _frontmatter(path.read_text(encoding="utf-8")).get("id")
+        caps.setdefault(cid, path)
     return caps
 
 
-def _find_capability(capability_id, repo_root):
-    caps = _capabilities(repo_root)
-    if capability_id not in caps:
-        raise UnknownCapabilityError(capability_id)
-    return caps[capability_id]
+def _realizing(capability_id, comps):
+    return sorted((c for c in comps if capability_id in c["realizes"]), key=lambda c: c["id"])
 
 
-def _realizing(capability_id, components):
-    return sorted(
-        (c for c in components if capability_id in c["realizes"]),
-        key=lambda c: c["id"],
-    )
+def _code_dir(comp, repo_root):
+    root = Path(os.path.abspath(repo_root))
+    if comp["sealed"]:
+        return root / comp["source_path"]
+    return root / "gen" / comp["slug"]
 
 
-def _scenarios(text):
-    scenarios = []
-    current = None
-    in_gherkin = False
-    for line in text.splitlines():
-        stripped = line.strip()
-        if current is not None and in_gherkin:
-            if stripped.startswith("```"):
-                in_gherkin = False
-            else:
-                current["gherkin_lines"].append(line)
-            continue
-        if stripped.startswith("### CS-"):
-            current = {
-                "id": stripped[4:].strip(),
-                "covers": "",
-                "kind": "",
-                "gherkin_lines": [],
-            }
-            scenarios.append(current)
-        elif stripped.startswith("## ") or stripped.startswith("### "):
-            current = None
-        elif current is not None:
-            if stripped.startswith("Covers:"):
-                current["covers"] = stripped[len("Covers:"):].strip().strip("`")
-            elif stripped.startswith("Kind:"):
-                current["kind"] = stripped[len("Kind:"):].strip().strip("`")
-            elif stripped.startswith("```gherkin"):
-                in_gherkin = True
-    return [
-        {
-            "id": s["id"],
-            "covers": s["covers"],
-            "kind": s["kind"],
-            "gherkin": "\n".join(s["gherkin_lines"]),
-        }
-        for s in scenarios
-    ]
-
-
-def _code_files(code_dir, skip_provenance):
-    if not code_dir.is_dir():
+def _files(root, skip_provenance):
+    if not root.is_dir():
         return []
-    files = []
-    for path in code_dir.rglob("*"):
-        rel = path.relative_to(code_dir)
-        if "__pycache__" in rel.parts or not path.is_file():
+    out = []
+    for p in root.rglob("*"):
+        rel = p.relative_to(root)
+        if "__pycache__" in rel.parts or not p.is_file():
             continue
-        if skip_provenance and path.name == ".provenance.json":
+        if skip_provenance and p.name == ".provenance.json":
             continue
-        files.append((rel.as_posix(), path))
-    return sorted(files, key=lambda item: item[0])
+        out.append((rel.as_posix(), p))
+    return sorted(out)
+
+
+def _content_hash(product, realizing, repo_root):
+    h = hashlib.sha256()
+    h.update(product.read_bytes() + b"\0")
+    for comp in realizing:
+        h.update(comp["id"].encode("utf-8") + b"\0")
+        for rel, p in _files(_code_dir(comp, repo_root), True):
+            h.update(rel.encode("utf-8") + b"\0")
+            h.update(p.read_bytes() + b"\0")
+    return "sha256:" + h.hexdigest()
+
+
+def _parse_scenarios(text):
+    scenarios = []
+    cur = None
+    in_fence = False
+    capture = False
+    buf = []
+    for line in text.splitlines():
+        s = line.strip()
+        if in_fence:
+            if s.startswith("```"):
+                in_fence = False
+                if capture:
+                    cur["gherkin"] = "\n".join(buf)
+                    capture = False
+            elif capture:
+                buf.append(line)
+            continue
+        if s.startswith("```"):
+            in_fence = True
+            capture = cur is not None and s[3:].strip() == "gherkin"
+            buf = []
+            continue
+        if s.startswith("#"):
+            m = re.match(r"###\s+(CS-\S+)", s)
+            cur = None
+            if m:
+                cur = {"id": m.group(1), "covers": "", "kind": "", "gherkin": ""}
+                scenarios.append(cur)
+            continue
+        if cur is not None and s.startswith("Covers:"):
+            cur["covers"] = s[len("Covers:"):].strip().strip("`")
+        elif cur is not None and s.startswith("Kind:"):
+            cur["kind"] = s[len("Kind:"):].strip().strip("`")
+    return scenarios
 
 
 # ---------------------------------------------------------------------------
-# Test execution
-# ---------------------------------------------------------------------------
+# dispatch
 
 
-def _run_pytest(rel_path, repo_root, realizing):
+def _run_test(rel_path, realizing, repo_root):
     env = dict(os.environ)
-    env["PYTHONPATH"] = os.pathsep.join(str(c["code_dir"]) for c in realizing)
+    env["PYTHONPATH"] = os.pathsep.join(str(_code_dir(c, repo_root)) for c in realizing)
     try:
         proc = subprocess.run(
             [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", str(rel_path)],
             cwd=str(repo_root),
             env=env,
-            timeout=_PYTEST_TIMEOUT_SECONDS,
+            timeout=120,
             capture_output=True,
         )
     except (subprocess.TimeoutExpired, OSError):
-        return "fail"
-    return "pass" if proc.returncode == 0 else "fail"
+        return False
+    return proc.returncode == 0
 
 
 def _write(repo_root, rel_path, content):
-    target = repo_root / rel_path
+    target = Path(repo_root) / rel_path
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(content, encoding="utf-8")
 
 
-def _run_compiled(capability_id, scenario, cap_rel_file, repo_root, realizing):
-    compiler = _load("criterion_compiler", _COMPILER_DIR, repo_root)
-    parsed = compiler.ParsedCriterion(
+def _compiled_test(capability_id, scenario, product_rel, repo_root):
+    cc = _load("criterion_compiler", "pipeline/criterion-compiler", repo_root)
+    parsed = cc.ParsedCriterion(
         criterion_id=scenario["id"],
         covers=scenario["covers"],
         kind=scenario["kind"],
         gherkin=scenario["gherkin"],
-        file=cap_rel_file,
+        file=product_rel,
     )
-    result = compiler.compile_criterion(parsed, surface=None)
-    if _get(result, "status") == "error":
-        return "fail"
+    res = cc.compile_criterion(parsed, surface=None)
+    if _get(res, "status") == "error":
+        return None
     name = "test_" + scenario["id"].lower().replace("-", "_") + ".py"
-    rel = Path("verification") / "capabilities" / capability_id / "compiled" / name
-    _write(repo_root, rel, _get(result, "source"))
-    return _run_pytest(rel, repo_root, realizing)
+    rel = f"verification/capabilities/{capability_id}/compiled/{name}"
+    _write(repo_root, rel, _get(res, "source"))
+    return rel
 
 
-def _run_generated(bundle, test_author, repo_root, realizing):
+def _generated_test(bundle, test_author, repo_root):
     if test_author is None:
-        return "fail"
-    outcome = test_author(bundle)
-    if _get(outcome, "model_call_error"):
-        return "fail"
-    file = _get(outcome, "file")
-    if not file:
-        return "fail"
-    rel = Path(_get(file, "path"))
-    if rel.is_absolute() or not rel.parts or rel.parts[0] != "verification" or ".." in rel.parts:
-        return "fail"
-    _write(repo_root, rel, _get(file, "content"))
-    return _run_pytest(rel, repo_root, realizing)
+        return None
+    out = test_author(bundle)
+    file = _get(out, "file")
+    if _get(out, "model_call_error") or not file:
+        return None
+    path = str(_get(file, "path"))
+    pp = PurePosixPath(path)
+    if pp.is_absolute() or pp.parts[:1] != ("verification",) or ".." in pp.parts:
+        return None
+    _write(repo_root, path, _get(file, "content"))
+    return path
 
 
-def _run_capability(capability_id, cap_path, repo_root, realizing, judge, test_author):
-    cap_rel_file = cap_path.relative_to(repo_root).as_posix()
-    entries = []
-    for scenario in _scenarios(cap_path.read_text(encoding="utf-8")):
-        kind = scenario["kind"]
-        entry = {"id": scenario["id"], "kind": kind}
-        bundle = {
-            "capability_id": capability_id,
-            "scenario_id": scenario["id"],
-            "covers": scenario["covers"],
-            "kind": kind,
-            "gherkin": scenario["gherkin"],
-            "file": cap_rel_file,
-        }
-        if kind == "compiled":
-            entry["result"] = _run_compiled(capability_id, scenario, cap_rel_file, repo_root, realizing)
-        elif kind == "generated-test":
-            entry["result"] = _run_generated(bundle, test_author, repo_root, realizing)
-        elif judge is None:
+def _dispatch(capability_id, scenario, product_rel, realizing, repo_root, judge, test_author):
+    kind = scenario["kind"]
+    entry = {"id": scenario["id"], "kind": kind}
+    bundle = {
+        "capability_id": capability_id,
+        "scenario_id": scenario["id"],
+        "covers": scenario["covers"],
+        "kind": kind,
+        "gherkin": scenario["gherkin"],
+        "file": product_rel,
+    }
+    if kind == "llm-judge":
+        if judge is None:
             entry["result"] = "skipped"
+            return entry
+        out = judge(bundle)
+        if isinstance(out, dict):
+            result = out.get("result", out.get("verdict"))
+            rationale = out.get("rationale", "")
         else:
-            outcome = judge(bundle)
-            if isinstance(outcome, dict):
-                result = outcome.get("result", outcome.get("verdict"))
-                rationale = outcome.get("rationale", "")
-            else:
-                result = outcome
-                rationale = ""
-            entry["result"] = result
-            entry["rationale"] = rationale
-        entries.append(entry)
-    results = [e["result"] for e in entries]
-    if "fail" in results or not results:
-        overall = "fail"
-    elif all(r == "skipped" for r in results):
-        overall = "skipped"
+            result = out
+            rationale = ""
+        entry["result"] = "pass" if result == "pass" else "fail"
+        entry["rationale"] = rationale
+        return entry
+    if kind == "compiled":
+        rel = _compiled_test(capability_id, scenario, product_rel, repo_root)
+    elif kind == "generated-test":
+        rel = _generated_test(bundle, test_author, repo_root)
     else:
-        overall = "pass"
-    return {"overall": overall, "scenarios": entries}
+        rel = None
+    passed = rel is not None and _run_test(rel, realizing, repo_root)
+    entry["result"] = "pass" if passed else "fail"
+    return entry
 
 
-# ---------------------------------------------------------------------------
-# Public: run scenarios for a blast radius
-# ---------------------------------------------------------------------------
+def _overall(entries):
+    results = [e["result"] for e in entries]
+    if not results or "fail" in results:
+        return "fail"
+    if all(r == "skipped" for r in results):
+        return "skipped"
+    return "pass"
+
+
+def _run_capability(capability_id, product, realizing, repo_root, judge, test_author):
+    entries = []
+    if product is not None:
+        product_rel = product.relative_to(repo_root).as_posix()
+        for scenario in _parse_scenarios(product.read_text(encoding="utf-8")):
+            entries.append(
+                _dispatch(capability_id, scenario, product_rel, realizing, repo_root, judge, test_author)
+            )
+    return {"overall": _overall(entries), "scenarios": entries}
 
 
 def run_capability_scenarios(blast_radius, repo_root, judge=None, test_author=None):
     repo_root = Path(repo_root)
-    components = _components(repo_root)
+    comps = _components(repo_root)
     radius = set(blast_radius)
-    targets = sorted(
-        {cap for c in components if c["id"] in radius for cap in c["realizes"]}
-    )
+    cap_ids = sorted({t for c in comps if c["id"] in radius for t in c["realizes"]})
     caps = _capabilities(repo_root)
-    report = {}
-    for capability_id in targets:
-        report[capability_id] = _run_capability(
-            capability_id,
-            caps[capability_id],
-            repo_root,
-            _realizing(capability_id, components),
-            judge,
-            test_author,
-        )
-    return report
+    return {
+        cid: _run_capability(cid, caps.get(cid), _realizing(cid, comps), repo_root, judge, test_author)
+        for cid in cap_ids
+    }
 
 
 # ---------------------------------------------------------------------------
-# Provenance
-# ---------------------------------------------------------------------------
+# provenance
 
 
-def _content_hash(cap_path, realizing):
-    h = hashlib.sha256()
-    h.update(cap_path.read_bytes() + b"\0")
-    for comp in realizing:
-        h.update(comp["id"].encode("utf-8") + b"\0")
-        for rel, path in _code_files(comp["code_dir"], skip_provenance=True):
-            h.update(rel.encode("utf-8") + b"\0")
-            h.update(path.read_bytes() + b"\0")
-    return "sha256:" + h.hexdigest()
+def _record_path(repo_root, capability_id):
+    return Path(repo_root) / "verification" / "capabilities" / capability_id / ".provenance.json"
 
 
-def _record_path(capability_id, repo_root):
-    return repo_root / "verification" / "capabilities" / capability_id / ".provenance.json"
-
-
-def check_capability_provenance(capability_id, repo_root):
+def _check(capability_id, repo_root):
     repo_root = Path(repo_root)
-    cap_path = _find_capability(capability_id, repo_root)
-    realizing = _realizing(capability_id, _components(repo_root))
-    current = _content_hash(cap_path, realizing)
+    product = _capabilities(repo_root).get(capability_id)
+    if product is None:
+        raise UnknownCapabilityError(f"unknown capability: {capability_id}")
+    comps = _components(repo_root)
+    realizing = _realizing(capability_id, comps)
+    content_hash = _content_hash(product, realizing, repo_root)
+    result = {"hit": False, "capability_scenario_report": None}
     try:
-        record = json.loads(_record_path(capability_id, repo_root).read_text(encoding="utf-8"))
+        record = json.loads(_record_path(repo_root, capability_id).read_text(encoding="utf-8"))
     except (OSError, ValueError):
-        return {"hit": False, "capability_scenario_report": None}
+        record = None
     if (
         isinstance(record, dict)
         and record.get("gate_version") == GATE_VERSION
-        and record.get("content_hash") == current
+        and record.get("content_hash") == content_hash
     ):
-        return {"hit": True, "capability_scenario_report": record.get("capability_scenario_report")}
-    return {"hit": False, "capability_scenario_report": None}
+        result = {"hit": True, "capability_scenario_report": record.get("capability_scenario_report")}
+    return result, product, realizing, content_hash
 
 
-# ---------------------------------------------------------------------------
-# Callables built by run_capability_gates
-# ---------------------------------------------------------------------------
+def check_capability_provenance(capability_id, repo_root):
+    return _check(capability_id, repo_root)[0]
 
 
-def _make_test_author(capability_id, cap_path, realizing, repo_root, model, seed, llm_backend):
-    def _test_author(bundle):
-        module = _load("test_author", _TEST_AUTHOR_DIR, repo_root)
+def _make_test_author(capability_id, product, realizing, repo_root, model, seed, llm_backend):
+    def test_author(bundle):
+        mod = _load("test_author", "gen/test-author", repo_root)
         interface_parts = []
         for comp in realizing:
             interface_parts.append(f"## {comp['id']}")
-            iface_dir = repo_root / "specs" / "components" / comp["slug"] / "interface"
-            for md in sorted(iface_dir.rglob("*.md")):
-                interface_parts.append(md.read_text(encoding="utf-8"))
-        glossary_path = repo_root / "specs" / "glossary.md"
-        glossary = glossary_path.read_text(encoding="utf-8") if glossary_path.is_file() else ""
+            iface = comp["spec_dir"] / "interface"
+            for _rel, p in _files(iface, False):
+                if p.suffix == ".md":
+                    interface_parts.append(p.read_text(encoding="utf-8"))
+        glossary = Path(repo_root) / "specs" / "glossary.md"
         criterion_bundle = {
             "component_id": f"capabilities/{capability_id}",
             "criterion_id": bundle["scenario_id"],
             "covers": bundle["covers"],
             "criterion_text": bundle["gherkin"],
-            "requirement_text": cap_path.read_text(encoding="utf-8"),
+            "requirement_text": product.read_text(encoding="utf-8"),
             "interface": "\n".join(interface_parts),
-            "glossary": glossary,
+            "glossary": glossary.read_text(encoding="utf-8") if glossary.is_file() else "",
             "dependency_interfaces": {},
             "module_names": [c["slug"].replace("-", "_") for c in realizing],
         }
-        return module.author_test(
+        return mod.author_test(
             criterion_bundle, model, seed=seed, repo_root=repo_root, llm_backend=llm_backend
         )
 
-    return _test_author
+    return test_author
 
 
-def _unfence(text):
-    stripped = text.strip()
-    if stripped.startswith("```"):
-        lines = stripped.splitlines()[1:]
-        if lines and lines[-1].strip().startswith("```"):
-            lines = lines[:-1]
-        stripped = "\n".join(lines)
-    return stripped
+def _extract_json_text(text):
+    lines = text.splitlines()
+    fences = [i for i, line in enumerate(lines) if line.startswith("```")]
+    if fences:
+        end = fences[1] if len(fences) > 1 else len(lines)
+        return "\n".join(lines[fences[0] + 1:end])
+    return text.strip()
 
 
 def _make_judge(realizing, repo_root, model, llm_backend):
-    def _judge(bundle):
-        module = _load("llm_endpoint", _LLM_ENDPOINT_DIR, repo_root)
+    def judge(bundle):
         parts = [
-            "You are judging whether a product capability scenario is satisfied "
-            "by the code below.",
+            "You are judging whether a product capability scenario holds against "
+            "the real, fully assembled code below.",
+            f"Scenario: {bundle['scenario_id']}",
             f"Covers: {bundle['covers']}",
-            "Scenario (Gherkin):",
+            "Gherkin:",
             bundle["gherkin"],
             "",
-            "Code of every realizing component:",
+            "Code:",
         ]
         for comp in realizing:
-            parts.append(f"## {comp['id']}")
-            for rel, path in _code_files(comp["code_dir"], skip_provenance=False):
-                parts.append(f"### {rel}")
-                parts.append(path.read_text(encoding="utf-8", errors="replace"))
-        parts.append("")
+            for rel, p in _files(_code_dir(comp, repo_root), False):
+                parts.append(f"=== {comp['id']}: {rel} ===")
+                parts.append(p.read_bytes().decode("utf-8", "replace"))
         parts.append(
             'Reply with JSON only: {"result": "pass" | "fail", "rationale": "..."}'
         )
-        response = module.complete("\n".join(parts), model, backend=llm_backend)
-        error = _get(response, "model_call_error")
-        if error:
-            return {"result": "fail", "rationale": f"judge unavailable: {_get(error, 'message')}"}
+        prompt = "\n".join(parts)
+        le = _load("llm_endpoint", "gen/llm-endpoint", repo_root)
+        resp = le.complete(prompt, model, backend=llm_backend)
+        err = _get(resp, "model_call_error")
+        if err:
+            return {"result": "fail", "rationale": f"judge unavailable: {_get(err, 'message')}"}
         try:
-            parsed = json.loads(_unfence(_get(response, "text")))
-        except (TypeError, ValueError):
-            return {"result": "fail", "rationale": "judge unavailable: unparseable reply"}
-        result = _get(parsed, "result")
+            parsed = json.loads(_extract_json_text(_get(resp, "text") or ""))
+        except ValueError as exc:
+            return {"result": "fail", "rationale": f"judge unavailable: unparseable reply: {exc}"}
+        result = parsed.get("result") if isinstance(parsed, dict) else None
         if result not in ("pass", "fail"):
             return {"result": "fail", "rationale": f"judge unavailable: invalid result {result!r}"}
-        return {"result": result, "rationale": _get(parsed, "rationale")}
+        return {"result": result, "rationale": parsed.get("rationale", "")}
 
-    return _judge
+    return judge
 
 
 def run_capability_gates(capability_id, repo_root, model=None, seed=0, llm_backend=None):
-    repo_root = Path(repo_root)
-    checked = check_capability_provenance(capability_id, repo_root)
-    if checked["hit"]:
-        return checked
+    check, product, realizing, content_hash = _check(capability_id, repo_root)
+    if check["hit"]:
+        return check
     if model is None:
-        raise ModelRequiredError(f"a model is required to run capability {capability_id}")
-    cap_path = _find_capability(capability_id, repo_root)
-    realizing = _realizing(capability_id, _components(repo_root))
-    content_hash = _content_hash(cap_path, realizing)
-    report = {
-        capability_id: _run_capability(
-            capability_id,
-            cap_path,
-            repo_root,
-            realizing,
-            _make_judge(realizing, repo_root, model, llm_backend),
-            _make_test_author(capability_id, cap_path, realizing, repo_root, model, seed, llm_backend),
-        )
-    }
+        raise ModelRequiredError("a model is required to run capability gates on a miss")
+    root = Path(repo_root)
+    ta = _make_test_author(capability_id, product, realizing, repo_root, model, seed, llm_backend)
+    jg = _make_judge(realizing, repo_root, model, llm_backend)
+    report = {capability_id: _run_capability(capability_id, product, realizing, root, jg, ta)}
     record = {
         "capability_id": capability_id,
         "gate_version": GATE_VERSION,
@@ -465,7 +434,7 @@ def run_capability_gates(capability_id, repo_root, model=None, seed=0, llm_backe
         "model": model,
         "seed": seed,
     }
-    path = _record_path(capability_id, repo_root)
+    path = _record_path(root, capability_id)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(record, sort_keys=True, indent=2), encoding="utf-8")
+    path.write_text(json.dumps(record, sort_keys=True, indent=2) + "\n", encoding="utf-8")
     return {"hit": False, "capability_scenario_report": report}

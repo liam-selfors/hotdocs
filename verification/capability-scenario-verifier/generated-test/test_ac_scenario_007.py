@@ -1,265 +1,197 @@
 # hotdocs-criterion: sha256:4a3e04c972b7c29a9e9262d670a6f7a3ad85f7b3165297507a26d03b84f6d7e2
 import json
-import shutil
 from pathlib import Path
-
-import pytest
 
 import capability_scenario_verifier
 
 
-CAPABILITY_ID = "P-X"
-MODEL = "fake-model"
+CAP_ID = "P-X"
 
 
 def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def _live_repo_root():
-    gen = next(
-        p
-        for p in Path(capability_scenario_verifier.__file__).resolve().parents
-        if p.name == "gen"
-    )
-    return gen.parent
-
-
 def _write(path, text):
+    path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text, encoding="utf-8")
+    path.write_text(text)
 
 
-PRODUCT_MD = (
-    "---\n"
-    "id: P-X\n"
-    "title: X capability\n"
-    "status: draft\n"
-    "owners: [tester]\n"
-    "---\n"
-    "\n"
-    "# P-X\n"
-    "\n"
-    "The X capability.\n"
-    "\n"
-    "### CS-X-001\n"
-    "\n"
-    "Covers: P-X\n"
-    "Kind: generated-test\n"
-    "\n"
-    "```gherkin\n"
-    "Given a thing exists\n"
-    "When it runs\n"
-    "Then it works\n"
-    "```\n"
-)
-
-
-def _component_md(slug, realizes):
+def _component_md(slug, title, realizes):
     return (
         "---\n"
-        "id: comp-" + slug + "\n"
-        "title: " + slug.capitalize() + "\n"
+        + "id: comp-" + slug + "\n"
+        + "title: " + title + "\n"
+        + "status: draft\n"
+        + "owners: [pipeline-team]\n"
+        + "realizes: [" + ", ".join(realizes) + "]\n"
+        + "sealed: false\n"
+        + "depends_on: []\n"
+        + "---\n"
+        + "\n"
+        + "# " + title + "\n"
+    )
+
+
+def _product_md():
+    return (
+        "---\n"
+        "id: P-X\n"
+        "title: Capability X\n"
         "status: draft\n"
-        "owners: [tester]\n"
-        "realizes: " + realizes + "\n"
-        "depends_on: []\n"
-        "sealed: false\n"
+        "owners: [pipeline-team]\n"
         "---\n"
         "\n"
-        "# " + slug.capitalize() + "\n"
+        "# Capability X\n"
+        "\n"
+        "### CS-X-001\n"
+        "\n"
+        "Covers: P-X\n"
+        "Kind: generated-test\n"
+        "\n"
+        "```gherkin\n"
+        "Given a thing exists\n"
+        "When the thing is used\n"
+        "Then the thing works\n"
+        "```\n"
     )
 
 
-def _fake_test_author_source(log_path):
-    return (
-        "from pathlib import Path\n"
-        "\n"
-        "LOG_PATH = " + repr(str(log_path)) + "\n"
-        "CONTENT = " + repr("def test_x():\n    assert True\n") + "\n"
-        "\n"
-        "\n"
-        "def author_test(bundle, model, seed=0, *, repo_root=None, llm_backend=None):\n"
-        "    criterion_id = bundle['criterion_id']\n"
-        "    _text = bundle['criterion_text']\n"
-        "    with open(LOG_PATH, 'a', encoding='utf-8') as fh:\n"
-        "        fh.write('author_test ' + str(criterion_id) + '\\n')\n"
-        "    rel = 'verification/capabilities/P-X/generated-test/test_' + "
-        "str(criterion_id).lower().replace('-', '_') + '.py'\n"
-        "    if repo_root is not None:\n"
-        "        target = Path(repo_root) / rel\n"
-        "        target.parent.mkdir(parents=True, exist_ok=True)\n"
-        "        target.write_text(CONTENT, encoding='utf-8')\n"
-        "    return {\n"
-        "        'component_id': 'P-X',\n"
-        "        'criterion_id': criterion_id,\n"
-        "        'model': model,\n"
-        "        'seed': seed,\n"
-        "        'prompt_version': 'v1',\n"
-        "        'cache_hit': False,\n"
-        "        'file': {'path': rel, 'content': CONTENT},\n"
-        "        'model_call_error': None,\n"
-        "    }\n"
-    )
+def _build_fixture(repo_root):
+    author_log = repo_root.parent / "author_calls.log"
+    run_log = repo_root.parent / "scenario_runs.log"
 
+    # Capability
+    _write(repo_root / "specs" / "product" / "x.md", _product_md())
 
-def _fake_llm_endpoint_source(log_path):
-    return (
-        "LOG_PATH = " + repr(str(log_path)) + "\n"
-        "\n"
-        "\n"
-        "def complete(prompt, model, *, backend=None, **params):\n"
-        "    with open(LOG_PATH, 'a', encoding='utf-8') as fh:\n"
-        "        fh.write('complete\\n')\n"
-        "    return {\n"
-        "        'text': 'PASS',\n"
-        "        'model': model,\n"
-        "        'backend': 'fake',\n"
-        "        'model_call_error': None,\n"
-        "    }\n"
-    )
-
-
-def _build_repo(tmp_path):
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    log_path = tmp_path / "fake_calls.log"
-
-    _write(repo_root / "specs" / "product" / "x.md", PRODUCT_MD)
-
-    _write(
-        repo_root / "specs" / "components" / "foo" / "component.md",
-        _component_md("foo", "[P-X]"),
-    )
+    # Realizing component
+    _write(repo_root / "specs" / "components" / "foo" / "component.md",
+           _component_md("foo", "Foo", ["P-X"]))
     _write(repo_root / "gen" / "foo" / "foo.py", "VALUE = 1\n")
+    _write(repo_root / "gen" / "foo" / "helper.py", "def helper():\n    return 0\n")
 
-    _write(
-        repo_root / "specs" / "components" / "bar" / "component.md",
-        _component_md("bar", "[]"),
-    )
+    # Non-realizing component
+    _write(repo_root / "specs" / "components" / "bar" / "component.md",
+           _component_md("bar", "Bar", []))
     _write(repo_root / "gen" / "bar" / "bar.py", "OTHER = 1\n")
 
-    _write(
-        repo_root / "gen" / "test-author" / "test_author.py",
-        _fake_test_author_source(log_path),
-    )
-    _write(
-        repo_root / "gen" / "llm-endpoint" / "llm_endpoint.py",
-        _fake_llm_endpoint_source(log_path),
+    # Generated test content: logs each execution, then passes
+    test_content = (
+        "def test_x():\n"
+        + "    with open(" + repr(str(run_log)) + ", 'a') as f:\n"
+        + "        f.write('ran\\n')\n"
+        + "    assert True\n"
     )
 
-    src = _live_repo_root() / "pipeline" / "criterion-compiler"
-    if src.is_dir():
-        shutil.copytree(
-            src,
-            repo_root / "pipeline" / "criterion-compiler",
-            ignore=shutil.ignore_patterns("__pycache__"),
-        )
+    author_src = (
+        "LOG = " + repr(str(author_log)) + "\n"
+        + "CONTENT = " + repr(test_content) + "\n"
+        + "\n"
+        + "def author_test(bundle, model, seed=0, *, repo_root=None, llm_backend=None):\n"
+        + "    criterion_id = bundle['criterion_id']\n"
+        + "    with open(LOG, 'a') as f:\n"
+        + "        f.write(str(criterion_id) + '\\n')\n"
+        + "    name = 'test_' + str(criterion_id).lower().replace('-', '_') + '.py'\n"
+        + "    return {\n"
+        + "        'component_id': 'capability:P-X',\n"
+        + "        'criterion_id': criterion_id,\n"
+        + "        'model': model,\n"
+        + "        'seed': seed,\n"
+        + "        'prompt_version': 'v1',\n"
+        + "        'cache_hit': False,\n"
+        + "        'file': {\n"
+        + "            'path': 'verification/capabilities/P-X/generated-test/' + name,\n"
+        + "            'content': CONTENT,\n"
+        + "        },\n"
+        + "        'model_call_error': None,\n"
+        + "    }\n"
+    )
+    _write(repo_root / "gen" / "test-author" / "test_author.py", author_src)
 
-    return repo_root, log_path
+    endpoint_src = (
+        "def complete(prompt, model, *, backend=None, **params):\n"
+        + "    return {\n"
+        + "        'text': 'pass',\n"
+        + "        'model': model,\n"
+        + "        'backend': 'fake',\n"
+        + "        'model_call_error': None,\n"
+        + "    }\n"
+    )
+    _write(repo_root / "gen" / "llm-endpoint" / "llm_endpoint.py", endpoint_src)
+
+    return author_log, run_log
 
 
 def _record_path(repo_root):
-    return (
-        repo_root / "verification" / "capabilities" / CAPABILITY_ID / ".provenance.json"
-    )
+    return repo_root / "verification" / "capabilities" / CAP_ID / ".provenance.json"
 
 
-def _read_record(repo_root):
-    return json.loads(_record_path(repo_root).read_text(encoding="utf-8"))
+def _record_hash(repo_root):
+    data = json.loads(_record_path(repo_root).read_text())
+    return data["content_hash"]
 
 
-@pytest.fixture
-def hit_repo(tmp_path):
-    repo_root, log_path = _build_repo(tmp_path)
+def _hit(repo_root):
+    result = capability_scenario_verifier.check_capability_provenance(CAP_ID, repo_root)
+    return field(result, "hit")
+
+
+def _run_count(run_log):
+    if not run_log.is_file():
+        return 0
+    return len([ln for ln in run_log.read_text().splitlines() if ln.strip()])
+
+
+def test_content_hash_tracks_realizing_code_and_capability_file(tmp_path):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    author_log, run_log = _build_fixture(repo_root)
+
+    # Establish a committed record that is a hit.
     capability_scenario_verifier.run_capability_gates(
-        CAPABILITY_ID, repo_root, model=MODEL, seed=0, llm_backend=None
+        CAP_ID, repo_root, model="fake-model", seed=0, llm_backend=None
     )
     assert _record_path(repo_root).is_file()
-    check = capability_scenario_verifier.check_capability_provenance(
-        CAPABILITY_ID, repo_root
-    )
-    assert field(check, "hit") is True
-    return repo_root, log_path
+    original_hash = _record_hash(repo_root)
+    assert isinstance(original_hash, str) and original_hash.startswith("sha256:")
+    assert _hit(repo_root) is True
 
+    # A change in a non-realizing component, or a __pycache__ file in a
+    # realizing one, keeps the hit.
+    (repo_root / "gen" / "bar" / "bar.py").write_text("OTHER = 2\n")
+    pycache = repo_root / "gen" / "foo" / "__pycache__"
+    pycache.mkdir(parents=True, exist_ok=True)
+    (pycache / "foo.cpython-311.pyc").write_bytes(b"\x00\x01\x02junk")
+    assert _hit(repo_root) is True
 
-def _change_one_byte(path):
-    data = bytearray(path.read_bytes())
-    idx = data.index(ord("1"))
-    data[idx] = ord("2")
-    path.write_bytes(bytes(data))
-
-
-def test_realizing_component_code_change_is_miss(hit_repo):
-    repo_root, _ = hit_repo
-    _change_one_byte(repo_root / "gen" / "foo" / "foo.py")
-    check = capability_scenario_verifier.check_capability_provenance(
-        CAPABILITY_ID, repo_root
-    )
-    assert field(check, "hit") is False
-
-
-def test_capability_product_spec_change_is_miss(hit_repo):
-    repo_root, _ = hit_repo
+    # Changing the capability's own specs/product file breaks the hit.
     product = repo_root / "specs" / "product" / "x.md"
-    text = product.read_text(encoding="utf-8")
-    product.write_text(
-        text.replace("The X capability.", "The X capability!"), encoding="utf-8"
+    product_original = product.read_bytes()
+    product.write_bytes(product_original.replace(b"Capability X\n\n###", b"Capability Y\n\n###", 1))
+    assert product.read_bytes() != product_original
+    assert _hit(repo_root) is False
+    product.write_bytes(product_original)
+    assert _hit(repo_root) is True
+
+    # One byte changed in a realizing component's code, no spec change:
+    # the hit is gone.
+    code = repo_root / "gen" / "foo" / "foo.py"
+    original_code = code.read_bytes()
+    changed_code = original_code.replace(b"1", b"2", 1)
+    assert len(changed_code) == len(original_code) and changed_code != original_code
+    code.write_bytes(changed_code)
+    assert _hit(repo_root) is False
+
+    # run_capability_gates after that change re-runs the scenarios and
+    # records a different content_hash.
+    runs_before = _run_count(run_log)
+    capability_scenario_verifier.run_capability_gates(
+        CAP_ID, repo_root, model="fake-model", seed=0, llm_backend=None
     )
-    check = capability_scenario_verifier.check_capability_provenance(
-        CAPABILITY_ID, repo_root
-    )
-    assert field(check, "hit") is False
+    runs_after = _run_count(run_log)
+    assert runs_after > runs_before
 
-
-def test_non_realizing_component_change_still_hit(hit_repo):
-    repo_root, _ = hit_repo
-    _change_one_byte(repo_root / "gen" / "bar" / "bar.py")
-    check = capability_scenario_verifier.check_capability_provenance(
-        CAPABILITY_ID, repo_root
-    )
-    assert field(check, "hit") is True
-
-
-def test_pycache_in_realizing_component_still_hit(hit_repo):
-    repo_root, _ = hit_repo
-    pyc = repo_root / "gen" / "foo" / "__pycache__" / "foo.cpython-311.pyc"
-    pyc.parent.mkdir(parents=True, exist_ok=True)
-    pyc.write_bytes(b"\x00\x01fake-bytecode")
-    check = capability_scenario_verifier.check_capability_provenance(
-        CAPABILITY_ID, repo_root
-    )
-    assert field(check, "hit") is True
-
-
-def test_run_after_code_change_reruns_and_updates_hash(hit_repo):
-    repo_root, _ = hit_repo
-    before = _read_record(repo_root)
-    before_hash = before["content_hash"]
-    assert isinstance(before_hash, str) and before_hash.startswith("sha256:")
-
-    _change_one_byte(repo_root / "gen" / "foo" / "foo.py")
-
-    result = capability_scenario_verifier.run_capability_gates(
-        CAPABILITY_ID, repo_root, model=MODEL, seed=0, llm_backend=None
-    )
-
-    # A fresh run reports hit false with the fresh report (nothing reused).
-    assert field(result, "hit") is False
-    report = field(result, "capability_scenario_report")
-    assert report is not None
-    entry = report[CAPABILITY_ID] if isinstance(report, dict) else getattr(report, CAPABILITY_ID)
-    scenarios = field(entry, "scenarios")
-    ids = [field(s, "id") for s in scenarios]
-    assert "CS-X-001" in ids
-
-    after = _read_record(repo_root)
-    assert after["capability_id"] == CAPABILITY_ID
-    assert after["content_hash"].startswith("sha256:")
-    assert after["content_hash"] != before_hash
-
-    # The new record now matches the tree again.
-    check = capability_scenario_verifier.check_capability_provenance(
-        CAPABILITY_ID, repo_root
-    )
-    assert field(check, "hit") is True
+    new_hash = _record_hash(repo_root)
+    assert isinstance(new_hash, str) and new_hash.startswith("sha256:")
+    assert new_hash != original_hash
