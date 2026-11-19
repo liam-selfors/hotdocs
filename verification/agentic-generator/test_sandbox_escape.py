@@ -49,7 +49,7 @@ def _run(tmp_path, script):
     script_path, log_path = tmp_path / "script.json", tmp_path / "log.json"
     script_path.write_text(json.dumps(script))
     stand_in.write_text(STAND_IN.format(script=str(script_path), log=str(log_path)))
-    for dep in ("generator", "cache-manager", "llm-endpoint"):
+    for dep in ("generator", "cache-manager", "llm-endpoint", "kind-python"):  # kind-python: D344
         src = REPO_ROOT / "gen" / dep
         if src.is_dir():
             shutil.copytree(src, repo / "gen" / dep, ignore=shutil.ignore_patterns("__pycache__"))
