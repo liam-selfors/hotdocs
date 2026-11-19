@@ -13,7 +13,11 @@ Then the SpecBundle's interface ends with
   G and T the stripped "generator" and "test_author" values of the
   tool's own adapter's guidance()
 
-Given the asset fixture with foo's assets "[nokind:static/x.txt]"
+Given the library's project-kind asset fixture with its kind renamed
+  "nokind" throughout (specs/architecture/asset-kind-nokind.md,
+  component comp-kind-nokind, foo's assets "[nokind:static/app.js]" and
+  depends_on [comp-kind-nokind]) and no gen/kind-nokind/ anywhere, so
+  the corpus lints clean but the kind has no adapter
 When assemble runs
 Then it raises PreconditionFailure whose message is
   "unknown asset kind: nokind"
