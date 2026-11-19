@@ -14,7 +14,7 @@ strength_sites(asset_file: Path) -> list[StrengthSite]
 apply_site(asset_file: Path, site: StrengthSite) -> None
 ```
 
-Implements: `specs/architecture/asset-kinds.md`, `specs/asset-kinds/javascript.md`
+Implements: `specs/architecture/asset-kinds.md`
 
 `surface` returns `{"names": [str, ...]}`. `ProvisionResult` and
 `StrengthSite` are plain `dict`s (`interface/data/`). Every path is a

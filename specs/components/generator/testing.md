@@ -32,6 +32,12 @@ KIND = "fake"
 
 def layout_errors(asset_file):
     return ["bad"] if "bad" in Path(asset_file).read_text(encoding="utf-8") else []
+
+
+def provision(repo_root):
+    if (Path(repo_root) / "NO_ENV").exists():
+        return {"ok": False, "reason": "fake needs fakeprog >= 2", "versions": {}, "lockfile_sha256": None}
+    return {"ok": True, "reason": "", "versions": {"fakeprog": "2.0.0"}, "lockfile_sha256": None}
 ```
 
 A kind named `nosuchkind` has neither, here or in the tool, so it has no

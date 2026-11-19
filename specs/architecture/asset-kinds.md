@@ -29,6 +29,11 @@ provenance treat every kind alike (`D340`, `D343`). A project built with
 
       assets: [javascript:static/app.js]
 
+  It is always one line. Every component reads it the same way: the
+  text between `[` and `]` on the frontmatter line that starts with
+  `assets:`, split on `,`, each item stripped and split at its first
+  `:` into kind and path; no such line means no assets. A block-style
+  list is a lint failure (`R-LINT-034`).
   `path` is relative to `gen/<slug>/`, uses `/`, has no `..`, does not
   end in `.py`, and names one file outside the component's Python
   module or package. With no `assets` key the component has only its
@@ -41,7 +46,12 @@ provenance treat every kind alike (`D340`, `D343`). A project built with
 
 A definition is read from `<repo_root>/specs/asset-kinds/<kind>.md`,
 or, when that file does not exist, from the tool's own
-`<tool_root>/specs/asset-kinds/<kind>.md`. An adapter is loaded by path,
+`<tool_root>/specs/asset-kinds/<kind>.md`, the **tool root** being the
+parent of the nearest directory named `gen` above the reading module's
+own file. In a mutation run, whose copy is `<tmp>/gen/<slug>/`, the tool
+root is `<tmp>`, so the run also links `<tmp>/specs/asset-kinds` to the
+repository's `specs/asset-kinds/` when that exists
+(`specs/architecture/mutation-runs.md`). An adapter is loaded by path,
 never imported by name: `<repo_root>/gen/kind-<kind>/kind_<kind>.py`,
 or the tool's own when that file does not exist. Pipeline components
 never list an adapter in `depends_on`, so adding or changing a kind
@@ -84,12 +94,17 @@ each non-empty; one missing or empty is a lint failure.
   `testing`, after any `Uses:` documents, `\n## Asset kind: <kind>\n\n`
   followed by the definition's test author guidance. Neither text
   reaches the other side.
-- **Layout.** A reply MUST write every declared asset path, besides the
+- **Layout.** First, each declared kind with no adapter, or whose
+  `provision(repo_root)` reports `ok` false, ends generation with the
+  category `environment`, before any model call, and the message `unknown asset kind: <kind>` or
+  the adapter's `reason`; no model call can fix it, so it is never
+  retried. Then a reply MUST write every declared asset path, besides the
   Python module; a declared path left unwritten is `missing_asset`.
   Writing an undeclared non-`.py` file is `malformed_layout`. Each written
   asset is then checked with the adapter's `layout_errors`; any error is
   `malformed_layout` with the adapter's messages.
-- **Surface.** `surface-checker` compares `surface(...)["names"]` with
+- **Surface.** After `provision` reports `ok` (a failure is a finding
+  with its `reason`), `surface-checker` compares `surface(...)["names"]` with
   the names the asset's interface file states; a name stated and not
   provided is a surface failure, as for a missing Python name.
 - **Running criteria.** Every criterion run and mutation run gets the

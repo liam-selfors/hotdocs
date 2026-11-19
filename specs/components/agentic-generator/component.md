@@ -62,4 +62,4 @@ None.
 ## Change log
 
 - `D309`: initial spec.
-- `D343`: R-AGENT-005 applies `generator`'s `check_assets`; AC-AGENT-010.
+- `D343`: R-AGENT-001 environment check, R-AGENT-002 asset paths, R-AGENT-005 `check_assets`; AC-AGENT-010; `agent-v2`.

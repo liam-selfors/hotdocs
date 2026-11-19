@@ -12,4 +12,10 @@ When generate_agentic({"component_id": "comp-widget", "spec_bundle_hash":
 Then the result's refused is "sealed-component", mode is "agentic",
   turns is 0, the loop stand-in was never called, and no directory
   whose name starts "hotdocs-agent-" exists under tempfile.gettempdir()
+
+Given a generator stand-in and <tmp>/NO_ENV created
+When generate_agentic is called the same way
+Then the result's model_call_error is {"category": "environment",
+  "message": "fake needs fakeprog >= 2"}, turns is 0 and the loop
+  stand-in was never called
 ```

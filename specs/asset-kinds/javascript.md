@@ -15,13 +15,17 @@ for criteria and in a browser by whatever page includes it (`D343`).
 ## Layout
 
 The asset is one UTF-8 file, usually `static/<name>.js`. It MUST parse
-as an ES module: `node --check` on a copy named `<name>.mjs` exits 0.
-It MUST NOT contain an `import` statement or `import(` call, `require(`,
-`fetch(`, `XMLHttpRequest` or `WebSocket`, outside strings and comments.
-`layout_errors` returns one message per violation, `parse error: <the
-first line of node's stderr starting SyntaxError:>` (its first line
-names a temporary path) or `forbidden: <token>`; an empty list means the
-layout is valid.
+as an ES module (`node --check` on a copy named `<name>.mjs` exits 0)
+and MUST NOT use, outside strings and comments, the name `import`,
+`require(`, `fetch(`, `XMLHttpRequest` or `WebSocket`. `layout_errors`
+returns, in order: `parse error: not UTF-8` alone for a file that is not
+UTF-8; else `parse error: <line>`, `<line>` the first line of Node's
+stderr starting `SyntaxError:` (else its first non-empty line), or
+`parse error: timed out after 30 seconds`; then one
+`forbidden: import`, `forbidden: require(`, `forbidden: fetch(`,
+`forbidden: XMLHttpRequest` or `forbidden: WebSocket` per occurrence.
+An empty list means the layout is valid. A missing Node is the
+environment's failure, reported by `provision` before layout is checked.
 
 ## Environment
 
@@ -64,8 +68,10 @@ Mutation. Every token of the file is read left to right, skipping
 character; a template's `${...}` is skipped with it) and `//` and
 `/* */` comments. Each of these tokens is a site, swapped `===`↔`!==`,
 `==`↔`!=`, `<`↔`>=`, `>`↔`<=`, `<=`↔`>`, `>=`↔`<`, `&&`↔`||`,
-`true`↔`false`, and `+`↔`-` when the token before it is an identifier
-that is not a keyword (so `return -x` has no site), a number, `)` or `]`. Longer operators are read first, so `===`, `=>`,
+`true`↔`false`, and `+`↔`-` when the token before it is a number, `)`,
+`]`, or a name other than `return`, `typeof`, `void`, `delete`, `throw`,
+`new`, `in`, `of`, `instanceof`, `case`, `do`, `else`, `yield` or
+`await` (so `return -x` has no site). Longer operators are read first, so `===`, `=>`,
 `++`, `+=`, `<<`, `>>` and `>>>` are never split or mutated. Sites are
 listed in text order; each site's `description` is
 `<line>: <token> -> <swap>`, and `apply_site` rewrites the file with that
@@ -91,8 +97,10 @@ Write the asset as an ES module of pure functions over JSON values,
 each exported with `export function <name>(...)`, plus at most one
 export `init(document)` that only wires browser events to those
 functions: `init` contains no comparison, logical or arithmetic
-operator and no condition, so every decision is made, and tested, in a
-pure export. No imports, no network, no `eval`, no globals beyond the
+operator, no `true` or `false` and no condition, so every decision, and
+every mutation site, is in a pure export that tests call. No imports, no network, no `eval`, no globals beyond the
 module's own, and no regular expression literals (write
-`new RegExp("...")`), which the strength check's scan does not read. A page using the asset inlines its text in
+`new RegExp("...")`), which the strength check's scan does not read.
+The text `</script` appears nowhere in the file, so a page can inline it.
+A page using the asset inlines its text in
 `<script type="module">` followed by `init(document);`.

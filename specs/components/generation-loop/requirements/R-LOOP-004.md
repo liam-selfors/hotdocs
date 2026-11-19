@@ -9,5 +9,6 @@
   attempt MUST be followed by another while fewer than `max_attempts`
   have run, even when it added no feedback ids — except that a
   `verification_failed` attempt whose report has any criterion with
-  `failure_origin` `"environment"` ends the loop at once with
+  `failure_origin` `"environment"`, or a `generation_failed` attempt
+  whose category is `environment`, ends the loop at once with
   `stop_reason` `environment` (`D343`).

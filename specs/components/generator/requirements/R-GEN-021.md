@@ -1,7 +1,10 @@
 # R-GEN-021
 
-**R-GEN-021** — `generate()` MUST reject an incomplete reply before
-  writing or caching anything, checking in this order:
+**R-GEN-021** — Before any model call, `generate()` MUST return
+  `check_asset_environment`'s category, if any, as the
+  `model_call_error`, messages joined by `"\n"`. It MUST reject an
+  incomplete reply before writing or caching anything, checking in this
+  order:
 
   1. a reply with no `BEGIN FILE` line at all is `R-GEN-008`'s
      `empty_response`, whether or not it ends with the sentinel;
@@ -21,8 +24,6 @@
         `missing_asset`, message `missing asset: <path>`;
      2. each written path not ending in `.py` and not declared, sorted,
         is `malformed_layout`, message `undeclared file: <path>`;
-     3. each declared asset, in declaration order: a kind with no
-        adapter is `malformed_layout` with the one message
-        `unknown asset kind: <kind>`, stopping there; otherwise each
-        message of its adapter's `layout_errors`, as `<path>: <message>`,
-        and any message at all is `malformed_layout`.
+     3. each message of each declared asset's adapter `layout_errors`,
+        in declaration order, as `<path>: <message>`; any is
+        `malformed_layout`.

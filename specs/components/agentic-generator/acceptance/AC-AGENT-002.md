@@ -16,4 +16,9 @@ Then the recorded results are, in order, "bundle/01-spec.md\nbundle/02-component
   read_file, write_file, delete_file, check_import, run_scratch_tests and
   finish, max_turns 7, and a system text containing "work/", "scratch/",
   "widget_maker.py" and "finish"; and the prompt names both bundle files
+
+Given also <tmp>/specs/components/widget-maker/component.md whose
+  frontmatter has the line "assets: [fake:static/app.txt]"
+When generate_agentic is called the same way
+Then the system text also contains "static/app.txt"
 ```

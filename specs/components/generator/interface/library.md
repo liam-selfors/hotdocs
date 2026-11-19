@@ -10,6 +10,7 @@ check_write_allowed(bundle: SpecBundle, repo_root: Path = None) -> str | None
 render_prompt_sections(bundle: SpecBundle, retry_feedback: list[str] | None = None) -> list[tuple[str, str]]
 write_files(component_id: str, files: dict[str, str], repo_root: Path = None) -> None
 check_assets(component_id: str, files: dict[str, str], repo_root: Path = None) -> tuple[str | None, list[str]]
+check_asset_environment(component_id: str, repo_root: Path = None) -> tuple[str | None, list[str]]
 ```
 
 The library is the module `generator` (`from generator import generate,
@@ -26,8 +27,8 @@ Before any model call, `generate` looks up the `R-GEN-005` key with
 `commit_cache` pass `repo_root` through to `cache_manager.get`/`put`.
 
 `repo_root` locates `specs/components/<slug>/component.md`'s
-`sealed`/`source_path` and `gen/<component>/.overrides.json` for
-`R-GEN-009`, and its `assets` (Assets, below), and is where `gen/<component>/` is written. An absent
+`sealed`/`source_path` and `assets` and `gen/<component>/.overrides.json`,
+and is where `gen/<component>/` is written. An absent
 `component.md`, or one without `sealed: true`, is unsealed; an absent
 `.overrides.json` pins nothing. A bare temporary `repo_root` therefore
 reaches the model call. `llm_backend` goes straight to `llm-endpoint`'s
@@ -44,20 +45,19 @@ generation mode to share:
 - `write_files` writes `files` (paths relative to `gen/<component>/`,
   `R-GEN-015`'s prefix stripped) into `gen/<component>/`;
 - `check_assets` applies `R-GEN-021`'s asset checks to `files` (same
-  paths) and returns the category and its messages, or `(None, [])`.
-  It writes nothing under `repo_root`; a written asset is checked as a
-  file of that path under a temporary directory, removed afterwards.
+  paths), writing nothing under `repo_root`: each asset is checked as a
+  file under a temporary directory, removed afterwards.
 
 ## Assets
 
-The declared assets are `component.md`'s frontmatter `assets`, each
-`<kind>:<path>` split at its first `:`; none when the file or key is
-absent. An adapter is found and loaded by path as
-`asset-kinds.md`'s Lookup says, `<tool_root>` the parent of the nearest
-`gen` directory above `generator`'s own file, registered in
-`sys.modules` under a unique name before it runs (`R-GEN-014`). Only
-its `layout_errors` is called. The checks run only on a fresh reply,
-never on a cache hit.
+Declared assets, the tool root and adapter lookup are as
+`asset-kinds.md` states; an adapter is registered in `sys.modules` under
+a unique name before it runs (`R-GEN-014`). `check_asset_environment`
+calls each declared kind's `provision(repo_root)` once, in order of
+first declaration, returning `("environment", [message])` for the first
+kind with no adapter (`unknown asset kind: <kind>`) or `ok` false (its
+`reason`), else `(None, [])`. `check_assets` calls only `layout_errors`,
+on a fresh reply, never on a cache hit.
 
 ## Reply format
 

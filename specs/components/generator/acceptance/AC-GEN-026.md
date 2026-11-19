@@ -24,4 +24,12 @@ Given a bare repo_root with no component.md and files
   {"widget_maker.py": ""}
 When check_assets is called
 Then it returns (None, [])
+
+Given the first fixture, then repo_root/NO_ENV created
+When check_asset_environment("comp-widget-maker", repo_root=repo_root)
+  is called before and after creating it
+Then it returns (None, []) and then
+  ("environment", ["fake needs fakeprog >= 2"]); with the kind
+  nosuchkind instead it returns
+  ("environment", ["unknown asset kind: nosuchkind"])
 ```

@@ -61,6 +61,9 @@ current environment otherwise kept.
      `<repo_root>/gen/kind-<kind>/kind_<kind>.py`, else the same path
      under the tool root, the parent of the nearest directory named
      `gen` above `surface_checker.py`): `unknown asset kind: <kind>`;
+   - the adapter's `provision(<repo_root>)`, called once per kind in a
+     subprocess like the surface call's below, reports `ok` false:
+     `<path>: <reason>`;
    - no file `<code_dir>/<path>`: `<path>: no such asset file`;
    - no `<repo_root>/specs/components/<slug>/interface/assets/<file name>.md`,
      `<file name>` the part of `<path>` after its last `/`:

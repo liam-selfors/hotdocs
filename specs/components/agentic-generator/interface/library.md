@@ -7,7 +7,7 @@ generate_agentic(bundle: SpecBundle, model: str, retry_feedback: list[str] | Non
                  *, repo_root: Path = None, allow_unisolated_exec: bool = False,
                  max_turns: int = 40, max_tool_calls: int = 120,
                  wall_seconds: float = 1800.0, claude_command: str = "claude") -> GenerationResult
-AGENT_PROMPT_VERSION = "agent-v1"
+AGENT_PROMPT_VERSION = "agent-v2"
 SANDBOX_EXEC = "/usr/bin/sandbox-exec"
 BWRAP = "bwrap"
 ```
@@ -20,8 +20,8 @@ unavailable by setting them to a path that does not exist.
 `GenerationResult` is `generator`'s, built with `generator`'s own
 dataclass. `generator` and `llm-tool-endpoint` are loaded from
 `<repo_root>/gen/<slug>/<module>.py`, else from the tool root's copy:
-`check_write_allowed`, `render_prompt_sections`, `write_files` and
-`check_assets` from the first, `run_tool_loop` from the second.
+`check_write_allowed`, `render_prompt_sections`, `write_files`,
+`check_assets` and `check_asset_environment` from the first, `run_tool_loop` from the second.
 
 `generate_agentic` reads a bundle's fields only by subscript
 (`bundle["component_id"]`, `bundle["spec_bundle_hash"]`,
@@ -62,7 +62,10 @@ returning `[("Spec", "SPEC TEXT"), ("Component interface", "IFACE TEXT")]`,
 arguments to a file, and `check_assets(component_id, files,
 repo_root=None)` recording its arguments to a file and returning
 `("malformed_layout", ["static/app.txt: bad"])` when some file's content
-contains `bad`, else `(None, [])`. A bundle is any mapping with `component_id`,
+contains `bad`, else `(None, [])`, and
+`check_asset_environment(component_id, repo_root=None)` returning
+`("environment", ["fake needs fakeprog >= 2"])` when
+`<repo_root>/NO_ENV` exists, else `(None, [])`. A bundle is any mapping with `component_id`,
 `spec_bundle_hash` and `hint_code`.
 
-Implements: `specs/architecture/agent-sandbox.md`
+Implements: `specs/architecture/agent-sandbox.md`, `specs/architecture/asset-kinds.md`

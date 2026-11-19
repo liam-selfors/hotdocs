@@ -4,7 +4,7 @@
   (`specs/architecture/asset-kinds.md`, `D343`), this component MUST:
 
   1. find each kind's definition and adapter by asset-kinds.md's Lookup,
-     with `verify`'s tool root as `<tool_root>`, and give every test
+     with the tool root it defines, and give every test
      run the `asset_runner` plugin `specs/architecture/verifier-fixtures.md`
      describes.
   2. before any criterion runs, call `provision(repo_root)` once per

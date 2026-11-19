@@ -52,7 +52,7 @@ Browser-only, never called by tests. Reads `nodes` from `#nodes .node`
 `data-to`, `data-kind`); draws `layoutGraph`'s result into `svg#dag`
 (sets its `width`/`height`, one `line` per laid-out edge with `stroke`
 its color, one clickable `g` per node with a circle at `(x, y)`, radius
-8, and its id as text at `(labelX, labelY)`, linking to the node's
-detail page). On `input` in `#search`, calls `filterGraph` with the
+8, and its id as text at `(labelX, labelY)`, linking to the `href` of
+the `a` inside that node's `li`, copied unchanged). On `input` in `#search`, calls `filterGraph` with the
 field's value and toggles class `hidden` on each list item and drawn
 mark from the result. It decides nothing itself.

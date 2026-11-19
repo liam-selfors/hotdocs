@@ -30,6 +30,6 @@ Exactly one of `files` (non-empty), `model_call_error`, or `refused` is
 populated on any result (`files` is `{}` when it is not), and
 `cache_hit` is `false` whenever either of the other two is set.
 `model_call_error` (R-GEN-008, R-GEN-021), a dict
-`{"category": ..., "message": ...}`, means a model call was attempted
-and produced no usable candidate; `refused`
+`{"category": ..., "message": ...}`, means no usable candidate
+(`environment` before any model call); `refused`
 (R-GEN-009), the reason, means no model call was attempted.

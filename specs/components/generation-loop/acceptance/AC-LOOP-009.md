@@ -16,4 +16,10 @@ Then generate and verify were each called once, the only attempt's
   outcome is "verification_failed" with failed_requirements ["R-W-2"],
   passed is False, stop_reason is "environment", and commit_cache was
   never called
+
+Given a generate stand-in returning model_call_error {"category":
+  "environment", "message": "javascript needs node >= 24"}
+When run_attempts is called the same way
+Then generate was called once, verify never, the only attempt's outcome
+  is "generation_failed" and stop_reason is "environment"
 ```

@@ -54,7 +54,7 @@ gives. No network access, no model call, no write.
 and, per declared kind, the definition and adapter that
 `asset-kinds.md`'s Lookup finds: `<repo_root>/specs/asset-kinds/<kind>.md`
 and `<repo_root>/gen/kind-<kind>/kind_<kind>.py`, each else the tool
-root's. The adapter is loaded by path afresh on every call; only its
+root's, the tool root as asset-kinds.md defines it. The adapter is loaded by path afresh on every call; only its
 `provision(repo_root)` is called (`R-PROVCHECK-009`).
 
 ## Sealed components (`D170`)

@@ -15,8 +15,11 @@ each kind it names in its synthetic `repo_root`:
       return {"names": ["a", "b"]}
   ```
 
-  or, for `fakebad`, a `surface` whose body is
-  `raise RuntimeError("boom")`.
+  plus `provision(repo_root)` returning
+  `{"ok": True, "reason": "", "versions": {}, "lockfile_sha256": None}`;
+  for `fakebad`, a `surface` whose body is `raise RuntimeError("boom")`;
+  for `fakeoff`, the same `surface` and a `provision` returning `ok`
+  `False` with `reason` `"fakeoff needs fakeprog >= 2"`.
 
 A kind the criterion says has no adapter, such as `nokind_q`, is simply
 not planted; no such kind exists under the tool's own `gen/` either.

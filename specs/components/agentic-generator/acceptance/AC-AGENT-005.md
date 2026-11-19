@@ -13,7 +13,7 @@ When generate_agentic(bundle for comp-widget-maker with spec_bundle_hash
   "sha256:h", "m", ["R-W-1"], repo_root=<tmp>) is called
 Then the result has files {"widget_maker/__init__.py": "A = 1",
   "widget_maker/core.py": "B = 2"}, no model_call_error, mode "agentic",
-  cache_hit false, prompt_version "agent-v1", retry_feedback ["R-W-1"],
+  cache_hit false, prompt_version "agent-v2", retry_feedback ["R-W-1"],
   spec_bundle_hash "sha256:h", turns 3, tool_calls 3, transcript_sha256
   "sha256:" plus the SHA-256 of json.dumps of that transcript with
   sort_keys, and write_files was called once with those files

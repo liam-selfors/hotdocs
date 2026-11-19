@@ -50,7 +50,8 @@ in `repo_root`: a stand-in, or the real one copied to
 `(Path(verifier_orchestrator.__file__).resolve().parents[1] /
 "spec-bundle-assembler").resolve().parents[1]` (`D339`). It never
 relies on `verify`'s fallback to the tool root: a mutation run's tool
-root holds only `gen/` (`specs/architecture/mutation-runs.md`), while a
+root holds only `gen/` and `specs/asset-kinds/`
+(`specs/architecture/mutation-runs.md`), while a
 sibling `gen/` directory resolves to the tree the criterion run used.
 
 A `spec-bundle-assembler` stand-in defines
@@ -124,7 +125,7 @@ frontmatter and writes `gen/<slug>/data/table.txt` as the two lines
 - `KIND = "fake"`; `layout_errors` returns `[]`; `surface` returns
   `{"names": []}`.
 - `provision(repo_root)` returns
-  `{"ok": True, "reason": None, "versions": {"fake": "1.0"}, "lockfile_sha256": None}`,
+  `{"ok": True, "reason": "", "versions": {"fake": "1.0"}, "lockfile_sha256": None}`,
   or, for a test of an unprovisioned environment,
   `{"ok": False, "reason": "fake needs fakeprog >= 2", "versions": {}, "lockfile_sha256": None}`.
 - `asset_runner(asset_file)` returns `run(entry, args)`, which reads the
