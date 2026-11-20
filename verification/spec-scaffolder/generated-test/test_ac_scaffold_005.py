@@ -1,4 +1,4 @@
-import os
+# hotdocs-criterion: sha256:68fb30278f8a78709e9a3f4ed43126b4ff9f960e95e03f61435b6b3e32358573
 from pathlib import Path
 
 import pytest
@@ -60,54 +60,69 @@ EXPECTED_COMPONENT_MD = (
     "- Initial draft.\n"
 )
 
-EXPECTED_CONSTRAINTS_MD = "# Order Book \u2014 Non-Functional Constraints\n\n- TODO.\n"
+EXPECTED_CONSTRAINTS_MD = (
+    "# Order Book \u2014 Non-Functional Constraints\n\n- TODO.\n"
+)
 
-GITKEEP_DIRS = ["requirements", "acceptance", "interface", os.path.join("interface", "data")]
+EXPECTED_ENTRIES = {
+    "component.md",
+    "constraints.md",
+    "requirements",
+    "requirements/.gitkeep",
+    "acceptance",
+    "acceptance/.gitkeep",
+    "interface",
+    "interface/.gitkeep",
+    "interface/data",
+    "interface/data/.gitkeep",
+}
 
 
-def _snapshot(root: Path):
-    snap = {}
-    for p in sorted(root.rglob("*")):
-        rel = p.relative_to(root).as_posix()
-        if p.is_file():
-            snap[rel] = p.read_bytes()
-        else:
-            snap[rel] = None
-    return snap
+def _snapshot(directory):
+    result = {}
+    for p in sorted(directory.rglob("*")):
+        rel = p.relative_to(directory).as_posix()
+        result[rel] = p.read_bytes() if p.is_file() else None
+    return result
 
 
 @pytest.fixture
 def repo_root(tmp_path):
-    root = tmp_path / "repo"
-    (root / "specs").mkdir(parents=True)
-    return root
+    (tmp_path / "specs").mkdir()
+    return tmp_path
 
 
-def test_ac_scaffold_005(repo_root):
+def test_new_component_creates_exact_layout(repo_root):
     result = spec_scaffolder.new_component(
         repo_root, "order-book", depends_on=["comp-ledger"], realizes=["P-TRADING"]
     )
-
     expected_dir = repo_root / "specs" / "components" / "order-book"
     assert Path(result).resolve() == expected_dir.resolve()
     assert expected_dir.is_dir()
 
-    component_md = expected_dir / "component.md"
-    constraints_md = expected_dir / "constraints.md"
-    assert component_md.is_file()
-    assert constraints_md.is_file()
+    entries = {p.relative_to(expected_dir).as_posix() for p in expected_dir.rglob("*")}
+    assert entries == EXPECTED_ENTRIES
 
-    for d in GITKEEP_DIRS:
-        dir_path = expected_dir / d
-        assert dir_path.is_dir(), f"missing directory {d}"
-        gitkeep = dir_path / ".gitkeep"
-        assert gitkeep.is_file(), f"missing .gitkeep in {d}"
-        assert gitkeep.read_bytes() == b"", f".gitkeep in {d} is not empty"
+    for d in ("requirements", "acceptance", "interface", "interface/data"):
+        assert (expected_dir / d).is_dir()
+        gitkeep = expected_dir / d / ".gitkeep"
+        assert gitkeep.is_file()
+        assert gitkeep.read_bytes() == b""
 
-    assert component_md.read_text(encoding="utf-8") == EXPECTED_COMPONENT_MD
-    assert constraints_md.read_text(encoding="utf-8") == EXPECTED_CONSTRAINTS_MD
+    component_md = (expected_dir / "component.md").read_bytes().decode("utf-8")
+    assert component_md == EXPECTED_COMPONENT_MD
 
-    before = _snapshot(repo_root)
+    constraints_md = (expected_dir / "constraints.md").read_bytes().decode("utf-8")
+    assert constraints_md == EXPECTED_CONSTRAINTS_MD
+
+
+def test_new_component_refuses_existing_and_non_kebab(repo_root):
+    spec_scaffolder.new_component(
+        repo_root, "order-book", depends_on=["comp-ledger"], realizes=["P-TRADING"]
+    )
+    components = repo_root / "specs" / "components"
+    target = components / "order-book"
+    before = _snapshot(target)
 
     with pytest.raises(FileExistsError):
         spec_scaffolder.new_component(repo_root, "order-book")
@@ -115,10 +130,5 @@ def test_ac_scaffold_005(repo_root):
     with pytest.raises(ValueError):
         spec_scaffolder.new_component(repo_root, "Order_Book")
 
-    components_dir = repo_root / "specs" / "components"
-    entries = sorted(p.name for p in components_dir.iterdir())
-    assert entries == ["order-book"]
-
-    # Nothing written by either refused call.
-    after = _snapshot(repo_root)
-    assert after == before
+    assert sorted(p.name for p in components.iterdir()) == ["order-book"]
+    assert _snapshot(target) == before

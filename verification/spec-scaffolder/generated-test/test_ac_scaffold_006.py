@@ -1,66 +1,60 @@
+# hotdocs-criterion: sha256:4fc92b399e7a14953155b1de9a6143365618537df6daa047c74b4a66a9085ffd
 import os
+from pathlib import Path
 
 import pytest
 
 import spec_scaffolder
 
 
-def _snapshot(root):
-    entries = set()
-    for dirpath, dirnames, filenames in os.walk(root):
-        for d in dirnames:
-            entries.add(("d", os.path.relpath(os.path.join(dirpath, d), root)))
-        for f in filenames:
-            full = os.path.join(dirpath, f)
-            with open(full, "rb") as fh:
-                content = fh.read()
-            entries.add(("f", os.path.relpath(full, root), content))
-    return entries
-
-
 def _lines(path):
-    with open(path, "r", encoding="utf-8") as fh:
-        return [line.rstrip("\r\n") for line in fh.read().splitlines()]
+    return [line.rstrip() for line in Path(path).read_text(encoding="utf-8").splitlines()]
 
 
-def test_decision_new_prints_path_and_writes_owners(tmp_path, capsys):
-    repo_root = tmp_path / "repo"
-    (repo_root / "specs" / "decisions").mkdir(parents=True)
+def _snapshot(root):
+    return sorted(str(p.relative_to(root)) for p in Path(root).rglob("*"))
 
-    rc = spec_scaffolder.main(
-        [
-            "decision",
-            "new",
-            "First call",
-            "--owners=a, b",
-            "--repo-root=%s" % repo_root,
-        ]
+
+def _write_decision(root, n):
+    text = (
+        "---\n"
+        + "id: D" + str(n) + "\n"
+        + "title: Prior decision " + str(n) + "\n"
+        + "status: draft\n"
+        + "owners: [x]\n"
+        + "---\n"
+        + "\n"
+        + "# D" + str(n) + "\n"
     )
-    captured = capsys.readouterr()
-
-    assert rc == 0, captured.err
-    assert captured.out.splitlines() == ["specs/decisions/D1.md"]
-
-    record = repo_root / "specs" / "decisions" / "D1.md"
-    assert record.is_file()
-    owners_lines = [l for l in _lines(record) if l.startswith("owners:")]
-    assert owners_lines == ["owners: [a, b]"]
+    (root / "specs" / "decisions" / ("D" + str(n) + ".md")).write_text(text, encoding="utf-8")
 
 
-def test_decision_ratify_unknown_returns_1_with_error_line(tmp_path, capsys):
-    repo_root = tmp_path / "repo"
-    (repo_root / "specs" / "decisions").mkdir(parents=True)
+def _assert_one_error_line(err):
+    err_lines = [line for line in err.splitlines() if line.strip()]
+    assert len(err_lines) == 1, err
+    assert err_lines[0].startswith("error: "), err
 
+
+def test_decision_new_and_ratify_unknown(tmp_path, capsys):
+    root = tmp_path / "repo"
+    (root / "specs" / "decisions").mkdir(parents=True)
+
+    capsys.readouterr()
     rc = spec_scaffolder.main(
-        ["decision", "ratify", "D9", "--repo-root", str(repo_root)]
+        ["decision", "new", "First call", "--owners=a, b", "--repo-root=" + str(root)]
     )
-    captured = capsys.readouterr()
+    out, err = capsys.readouterr()
+    assert rc == 0, err
+    assert out.splitlines() == ["specs/decisions/D1.md"]
+    d1 = root / "specs" / "decisions" / "D1.md"
+    assert d1.is_file()
+    assert "owners: [a, b]" in _lines(d1)
 
+    capsys.readouterr()
+    rc = spec_scaffolder.main(["decision", "ratify", "D9", "--repo-root", str(root)])
+    out, err = capsys.readouterr()
     assert rc == 1
-    err_lines = [l for l in captured.err.splitlines() if l.strip() != ""]
-    assert len(err_lines) == 1, captured.err
-    assert err_lines[0].startswith("error: ")
-    assert "Traceback" not in captured.err
+    _assert_one_error_line(err)
 
 
 @pytest.mark.parametrize(
@@ -70,47 +64,110 @@ def test_decision_ratify_unknown_returns_1_with_error_line(tmp_path, capsys):
         ["decision", "new", "x", "--owners"],
         ["decision", "frobnicate"],
         ["component", "new"],
+        ["kind", "new"],
+        ["kind"],
     ],
 )
-def test_usage_errors_return_2_and_write_nothing(tmp_path, capsys, monkeypatch, argv):
-    repo_root = tmp_path / "repo"
-    (repo_root / "specs" / "decisions").mkdir(parents=True)
-    (repo_root / "specs" / "components").mkdir(parents=True)
-    monkeypatch.chdir(repo_root)
+def test_usage_errors(argv, tmp_path, capsys, monkeypatch):
+    root = tmp_path / "repo"
+    (root / "specs" / "decisions").mkdir(parents=True)
+    monkeypatch.chdir(root)
+    before = _snapshot(root)
 
-    before = _snapshot(str(repo_root))
+    capsys.readouterr()
     rc = spec_scaffolder.main(list(argv))
-    captured = capsys.readouterr()
-    after = _snapshot(str(repo_root))
+    out, err = capsys.readouterr()
 
     assert rc == 2
-    err_lines = captured.err.splitlines()
-    assert err_lines, "expected stderr output"
-    assert err_lines[0].startswith("usage error: "), captured.err
-    assert "Traceback" not in captured.err
-    assert "Traceback" not in captured.out
-    assert before == after
+    err_lines = err.splitlines()
+    assert err_lines, "no stderr output"
+    assert err_lines[0].startswith("usage error: "), err
+    assert "Traceback" not in err
+    assert "Traceback" not in out
+    assert _snapshot(root) == before
 
 
-def test_component_new_sealed_prints_dir_and_writes_sealed(tmp_path, capsys):
-    repo_root = tmp_path / "repo"
-    (repo_root / "specs").mkdir(parents=True)
+def test_component_new_sealed(tmp_path, capsys):
+    root = tmp_path / "repo"
+    (root / "specs").mkdir(parents=True)
 
+    capsys.readouterr()
     rc = spec_scaffolder.main(
+        ["component", "new", "my-thing", "--sealed", "--repo-root=" + str(root)]
+    )
+    out, err = capsys.readouterr()
+    assert rc == 0, err
+    assert out.splitlines() == ["specs/components/my-thing/"]
+    comp = root / "specs" / "components" / "my-thing" / "component.md"
+    assert comp.is_file()
+    assert "sealed: true" in _lines(comp)
+
+
+def _kind_repo(tmp_path):
+    root = tmp_path / "repo"
+    (root / "specs" / "decisions").mkdir(parents=True)
+    _write_decision(root, 4)
+    return root
+
+
+def _run_kind_sql(root):
+    return spec_scaffolder.main(
         [
-            "component",
+            "kind",
             "new",
-            "my-thing",
-            "--sealed",
-            "--repo-root=%s" % repo_root,
+            "sql",
+            "--title",
+            "SQL",
+            "--owners=a, b",
+            "--realizes=P-DATA",
+            "--repo-root=" + str(root),
         ]
     )
-    captured = capsys.readouterr()
 
-    assert rc == 0, captured.err
-    assert captured.out.splitlines() == ["specs/components/my-thing/"]
 
-    component_md = repo_root / "specs" / "components" / "my-thing" / "component.md"
-    assert component_md.is_file()
-    sealed_lines = [l for l in _lines(component_md) if l.startswith("sealed:")]
-    assert sealed_lines == ["sealed: true"]
+def test_kind_new(tmp_path, capsys):
+    root = _kind_repo(tmp_path)
+
+    capsys.readouterr()
+    rc = _run_kind_sql(root)
+    out, err = capsys.readouterr()
+    assert rc == 0, err
+    assert out.splitlines() == [
+        "specs/architecture/asset-kind-sql.md",
+        "specs/components/kind-sql/",
+        "specs/decisions/D5.md",
+    ]
+    definition = root / "specs" / "architecture" / "asset-kind-sql.md"
+    assert definition.is_file()
+    def_lines = _lines(definition)
+    assert "title: Asset kind SQL" in def_lines
+    assert "owners: [a, b]" in def_lines
+    comp = root / "specs" / "components" / "kind-sql" / "component.md"
+    assert comp.is_file()
+    assert "realizes: [P-DATA]" in _lines(comp)
+    assert (root / "specs" / "decisions" / "D5.md").is_file()
+
+
+def test_kind_new_refusals(tmp_path, capsys):
+    root = _kind_repo(tmp_path)
+
+    capsys.readouterr()
+    rc = _run_kind_sql(root)
+    out, err = capsys.readouterr()
+    assert rc == 0, err
+
+    d6 = root / "specs" / "decisions" / "D6.md"
+
+    capsys.readouterr()
+    rc = spec_scaffolder.main(["kind", "new", "sql", "--repo-root=" + str(root)])
+    out, err = capsys.readouterr()
+    assert rc == 1
+    _assert_one_error_line(err)
+    assert not d6.exists()
+
+    capsys.readouterr()
+    rc = spec_scaffolder.main(["kind", "new", "python", "--repo-root=" + str(root)])
+    out, err = capsys.readouterr()
+    assert rc == 1
+    _assert_one_error_line(err)
+    assert not d6.exists()

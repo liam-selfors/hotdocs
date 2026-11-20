@@ -1,18 +1,19 @@
 {
-  "spec_bundle_hash": "sha256:2919ed9e4b859cad3a21c713c6611c815f79335cd84a13ba380666360675a547",
+  "spec_bundle_hash": "sha256:1edc1f5b698ff93b4c066a55b4585a92c4ba4e76c35514a5cf639bb062668d16",
   "model_pin": "claude-opus-5-5",
-  "prompt_version": "v10",
+  "prompt_version": "v12",
   "retry_feedback": null,
   "pipeline_version": "v1",
   "gate_versions": {
     "compiler": "criterion-compiler@1.0.0",
-    "generated_test": "generated_test@1.0.0",
-    "verifier": "verifier-orchestrator@2.0.0",
+    "generated_test": "generated_test@3.0.0",
+    "verifier": "verifier-orchestrator@2.3.0",
     "license_scanner": "license_scanner@4.0.0-no-reference-corpus",
-    "secret_scanner": "secret_scanner@3.1.0+detect-secrets.1.5.0"
+    "secret_scanner": "secret_scanner@3.1.0+detect-secrets.1.5.0",
+    "generator": "generator@3.2.0+v12"
   },
   "provenance_hit": false,
-  "generated_at": "2026-11-16T07:59:00Z",
+  "generated_at": "2026-11-20T05:08:08Z",
   "verification_run_id": "spec-scaffolder-attempt-1",
   "verification_report": {
     "component_id": "comp-spec-scaffolder",
@@ -88,6 +89,30 @@
           "prompt_version": "v1",
           "cache_hit": false
         }
+      },
+      {
+        "id": "AC-SCAFFOLD-007",
+        "covers": "R-SCAFFOLD-007",
+        "kind": "generated-test",
+        "result": "pass",
+        "test_authoring": {
+          "model": "claude-opus-5-5",
+          "seed": 1,
+          "prompt_version": "v1",
+          "cache_hit": false
+        }
+      },
+      {
+        "id": "AC-SCAFFOLD-008",
+        "covers": "R-SCAFFOLD-008",
+        "kind": "generated-test",
+        "result": "pass",
+        "test_authoring": {
+          "model": "claude-opus-5-5",
+          "seed": 1,
+          "prompt_version": "v1",
+          "cache_hit": false
+        }
       }
     ],
     "requirement_results": {
@@ -96,10 +121,13 @@
       "R-SCAFFOLD-003": "pass",
       "R-SCAFFOLD-004": "pass",
       "R-SCAFFOLD-005": "pass",
-      "R-SCAFFOLD-006": "pass"
+      "R-SCAFFOLD-006": "pass",
+      "R-SCAFFOLD-007": "pass",
+      "R-SCAFFOLD-008": "pass"
     },
     "interface_drift": false,
-    "mutation_score": 0.9454545454545454,
+    "mutation_score": 0.9318181818181818,
+    "mutation_error": null,
     "overall": "pass"
   },
   "license_scan": {
@@ -223,6 +251,10 @@
       {
         "file": "verification/corpus-graph.json",
         "type": "Base64 High Entropy String"
+      },
+      {
+        "file": "verification/generator/generated-test/test_ac_gen_018.py",
+        "type": "Hex High Entropy String"
       },
       {
         "file": "verification/graph-query-engine/generated-test/test_ac_gqe_008.py",
