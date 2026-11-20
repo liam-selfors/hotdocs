@@ -1,3 +1,4 @@
+# hotdocs-criterion: sha256:dd749050cdf78897393aaa3a2c6c80cbbca597c2634b92e09322653114da865f
 import importlib.util
 import sys
 from pathlib import Path
@@ -9,37 +10,29 @@ def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def _write(path: Path, text: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text, encoding="utf-8")
-
-
-def _load_spec_linter():
-    gen = next(
-        p for p in Path(spec_reviewer.__file__).resolve().parents if p.name == "gen"
-    )
-    base = gen / "spec-linter"
-    path = (
-        base / "spec_linter.py"
-        if (base / "spec_linter.py").is_file()
-        else base / "spec_linter" / "__init__.py"
-    )
-    spec = importlib.util.spec_from_file_location("spec_linter", path)
+def load_module(path, module_name):
+    spec = importlib.util.spec_from_file_location(module_name, path)
     module = importlib.util.module_from_spec(spec)
-    sys.modules["spec_linter"] = module
+    sys.modules[module_name] = module
     spec.loader.exec_module(module)
     return module
 
 
-def _build_corpus(repo_root: Path) -> None:
-    _write(
-        repo_root / "specs" / "glossary.md",
+def write(path, text):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+
+
+def build_corpus(repo_root):
+    specs = repo_root / "specs"
+    write(
+        specs / "glossary.md",
         "# Glossary\n"
         "\n"
         "- **Foo** — a test term.\n",
     )
-    comp = repo_root / "specs" / "components" / "foo"
-    _write(
+    comp = specs / "components" / "foo"
+    write(
         comp / "component.md",
         "---\n"
         "id: comp-foo\n"
@@ -57,13 +50,13 @@ def _build_corpus(repo_root: Path) -> None:
         "\n"
         "Foo doubles a number.\n",
     )
-    _write(
+    write(
         comp / "requirements" / "R-FOO-001.md",
         "# R-FOO-001\n"
         "\n"
-        "**R-FOO-001** — `foo(x)` MUST return `4`, honoring `--opt=`.\n",
+        "**R-FOO-001** — `foo(x)` MUST return `4` when given `--opt=<v>`.\n",
     )
-    _write(
+    write(
         comp / "acceptance" / "AC-FOO-001.md",
         "# AC-FOO-001\n"
         "\n"
@@ -77,17 +70,15 @@ def _build_corpus(repo_root: Path) -> None:
         "  and `--fast` again\n"
         "```\n",
     )
-    _write(
+    write(
         comp / "interface" / "library.md",
         "# Library\n"
         "\n"
         "```\n"
         "foo(x: int) -> int\n"
-        "```\n"
-        "\n"
-        "`foo` accepts `--opt=` followed by a value.\n",
+        "```\n",
     )
-    _write(
+    write(
         comp / "constraints.md",
         "# Constraints\n"
         "\n"
@@ -95,19 +86,23 @@ def _build_corpus(repo_root: Path) -> None:
     )
 
 
-def test_ac_review_003_invisible_reference_from_when_and_then_only(tmp_path):
+def lint_clean(repo_root):
+    gen = next(p for p in Path(spec_reviewer.__file__).resolve().parents if p.name == "gen")
+    base = gen / "spec-linter"
+    path = (
+        base / "spec_linter.py"
+        if (base / "spec_linter.py").is_file()
+        else base / "spec_linter" / "__init__.py"
+    )
+    spec_linter = load_module(path, "spec_linter")
+    assert spec_linter.lint(None, repo_root).hard_failures == 0
+
+
+def test_ac_review_003_invisible_reference_reported_once(tmp_path):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
-    _build_corpus(repo_root)
-
-    spec_linter = _load_spec_linter()
-    lint_report = spec_linter.lint(None, repo_root)
-    hard = (
-        lint_report["hard_failures"]
-        if isinstance(lint_report, dict)
-        else lint_report.hard_failures
-    )
-    assert hard == 0
+    build_corpus(repo_root)
+    lint_clean(repo_root)
 
     report = spec_reviewer.check(["AC-FOO-001"], repo_root)
 
@@ -117,9 +112,8 @@ def test_ac_review_003_invisible_reference_from_when_and_then_only(tmp_path):
     assert field(finding, "criterion_id") == "AC-FOO-001"
     assert field(finding, "kind") == "invisible_reference"
     assert field(finding, "token") == "--fast"
-    assert (
-        field(finding, "message")
-        == "`--fast` appears in AC-FOO-001 but not in what its test author sees"
+    assert field(finding, "message") == (
+        "`--fast` appears in AC-FOO-001 but not in what its test author sees"
     )
 
     assert dict(field(report, "writable")) == {"AC-FOO-001": None}

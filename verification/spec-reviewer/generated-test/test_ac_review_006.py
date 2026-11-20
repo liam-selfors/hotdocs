@@ -1,16 +1,14 @@
-import json
+# hotdocs-criterion: sha256:8b5a4f85fa35ae5504b835d80eac5fa9158a8ce34b56bc17e4abf40d4b8b0543
+import spec_reviewer
 
 import pytest
 
-import spec_reviewer
 
-
-def _make_backend(log_path, reply_text=None, error=None):
-    """A mock llm_backend(prompt, model, **params) that logs each call to a file."""
+def make_backend(reply_text=None, error=None):
+    calls = []
 
     def backend(prompt, model, **params):
-        with open(log_path, "a", encoding="utf-8") as fh:
-            fh.write(json.dumps({"prompt": prompt, "model": model}) + "\n")
+        calls.append({"prompt": prompt, "model": model, "params": params})
         if error is not None:
             return {
                 "text": None,
@@ -25,36 +23,20 @@ def _make_backend(log_path, reply_text=None, error=None):
             "model_call_error": None,
         }
 
-    return backend
+    return backend, calls
 
 
-def _read_calls(log_path):
-    if not log_path.exists():
-        return []
-    lines = [ln for ln in log_path.read_text(encoding="utf-8").splitlines() if ln.strip()]
-    return [json.loads(ln) for ln in lines]
-
-
-def test_judge_parses_reply_and_makes_one_call(tmp_path, monkeypatch):
-    # complete() writes its call log under the current directory.
+def test_judge_parses_reply_and_calls_backend_once(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
-    log_path = tmp_path / "backend_calls.jsonl"
-    backend = _make_backend(
-        log_path, reply_text='ok {"conflicts": true, "rationale": "narrower"}'
-    )
-
+    backend, calls = make_backend('ok {"conflicts": true, "rationale": "narrower"}')
     judge = spec_reviewer.glossary_judge("mock", backend)
     assert callable(judge)
 
     result = judge("Foo", "local meaning", "glossary meaning")
 
     assert result is not None
-    result = tuple(result)
-    assert result == (True, "narrower")
+    assert tuple(result) == (True, "narrower")
     assert result[0] is True
-    assert isinstance(result[1], str)
-
-    calls = _read_calls(log_path)
     assert len(calls) == 1
     prompt = calls[0]["prompt"]
     assert isinstance(prompt, str)
@@ -68,16 +50,16 @@ def test_judge_parses_reply_and_makes_one_call(tmp_path, monkeypatch):
     [
         ("no json", None),
         ('{"conflicts": "yes", "rationale": "r"}', None),
-        (None, {"category": "timeout", "message": "timed out"}),
+        (None, {"category": "timeout", "message": "the call timed out"}),
     ],
     ids=["no-json", "non-bool-conflicts", "model-call-error-timeout"],
 )
-def test_judge_returns_none_for_unusable_reply(tmp_path, monkeypatch, reply_text, error):
+def test_judge_returns_none_for_bad_replies(tmp_path, monkeypatch, reply_text, error):
     monkeypatch.chdir(tmp_path)
-    log_path = tmp_path / "backend_calls.jsonl"
-    backend = _make_backend(log_path, reply_text=reply_text, error=error)
-
+    backend, calls = make_backend(reply_text, error)
     judge = spec_reviewer.glossary_judge("mock", backend)
+
     result = judge("Foo", "local meaning", "glossary meaning")
 
     assert result is None
+    assert len(calls) == 1

@@ -1,18 +1,19 @@
 {
-  "spec_bundle_hash": "sha256:98f20fab44c0bb996d2131a6f33952692bdcc4d9c6bef781bc7a46c9cce63051",
+  "spec_bundle_hash": "sha256:08950c091a64c39a0215803159a6bad4d4e0db54bec488c5fa1602f0df9db227",
   "model_pin": "claude-opus-5-5",
-  "prompt_version": "v10",
+  "prompt_version": "v12",
   "retry_feedback": null,
   "pipeline_version": "v1",
   "gate_versions": {
     "compiler": "criterion-compiler@1.0.0",
-    "generated_test": "generated_test@1.0.0",
-    "verifier": "verifier-orchestrator@2.0.0",
+    "generated_test": "generated_test@3.0.0",
+    "verifier": "verifier-orchestrator@2.3.0",
     "license_scanner": "license_scanner@4.0.0-no-reference-corpus",
-    "secret_scanner": "secret_scanner@3.1.0+detect-secrets.1.5.0"
+    "secret_scanner": "secret_scanner@3.1.0+detect-secrets.1.5.0",
+    "generator": "generator@3.2.0+v12"
   },
   "provenance_hit": false,
-  "generated_at": "2026-11-16T08:02:34Z",
+  "generated_at": "2026-11-20T05:03:14Z",
   "verification_run_id": "spec-reviewer-attempt-1",
   "verification_report": {
     "component_id": "comp-spec-reviewer",
@@ -21,43 +22,85 @@
         "id": "AC-REVIEW-001",
         "covers": "R-REVIEW-001",
         "kind": "generated-test",
-        "result": "pass"
+        "result": "pass",
+        "test_authoring": {
+          "model": "claude-opus-5-5",
+          "seed": 2,
+          "prompt_version": "v1",
+          "cache_hit": false
+        }
       },
       {
         "id": "AC-REVIEW-002",
         "covers": "R-REVIEW-002",
         "kind": "generated-test",
-        "result": "pass"
+        "result": "pass",
+        "test_authoring": {
+          "model": "claude-opus-5-5",
+          "seed": 2,
+          "prompt_version": "v1",
+          "cache_hit": false
+        }
       },
       {
         "id": "AC-REVIEW-003",
         "covers": "R-REVIEW-003",
         "kind": "generated-test",
-        "result": "pass"
+        "result": "pass",
+        "test_authoring": {
+          "model": "claude-opus-5-5",
+          "seed": 2,
+          "prompt_version": "v1",
+          "cache_hit": false
+        }
       },
       {
         "id": "AC-REVIEW-004",
         "covers": "R-REVIEW-004",
         "kind": "generated-test",
-        "result": "pass"
+        "result": "pass",
+        "test_authoring": {
+          "model": "claude-opus-5-5",
+          "seed": 2,
+          "prompt_version": "v1",
+          "cache_hit": false
+        }
       },
       {
         "id": "AC-REVIEW-005",
         "covers": "R-REVIEW-005",
         "kind": "generated-test",
-        "result": "pass"
+        "result": "pass",
+        "test_authoring": {
+          "model": "claude-opus-5-5",
+          "seed": 2,
+          "prompt_version": "v1",
+          "cache_hit": false
+        }
       },
       {
         "id": "AC-REVIEW-006",
         "covers": "R-REVIEW-006",
         "kind": "generated-test",
-        "result": "pass"
+        "result": "pass",
+        "test_authoring": {
+          "model": "claude-opus-5-5",
+          "seed": 2,
+          "prompt_version": "v1",
+          "cache_hit": false
+        }
       },
       {
         "id": "AC-REVIEW-007",
         "covers": "R-REVIEW-007",
         "kind": "generated-test",
-        "result": "pass"
+        "result": "pass",
+        "test_authoring": {
+          "model": "claude-opus-5-5",
+          "seed": 2,
+          "prompt_version": "v1",
+          "cache_hit": false
+        }
       }
     ],
     "requirement_results": {
@@ -70,7 +113,8 @@
       "R-REVIEW-007": "pass"
     },
     "interface_drift": false,
-    "mutation_score": 1.0,
+    "mutation_score": 0.8311688311688312,
+    "mutation_error": null,
     "overall": "pass"
   },
   "license_scan": {
@@ -194,6 +238,10 @@
       {
         "file": "verification/corpus-graph.json",
         "type": "Base64 High Entropy String"
+      },
+      {
+        "file": "verification/generator/generated-test/test_ac_gen_018.py",
+        "type": "Hex High Entropy String"
       },
       {
         "file": "verification/graph-query-engine/generated-test/test_ac_gqe_008.py",
@@ -342,6 +390,6 @@
     ],
     "notified": false,
     "notification_delivery_error": null,
-    "cache_hit": true
+    "cache_hit": false
   }
 }

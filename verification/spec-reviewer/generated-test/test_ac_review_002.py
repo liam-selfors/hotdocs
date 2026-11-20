@@ -1,15 +1,24 @@
+# hotdocs-criterion: sha256:8dfa3f9677629ee02d716cc9378c4c984e03f16ad12be6d24dd238dce784d85b
 import importlib.util
-import json
 import sys
 from pathlib import Path
-
-import pytest
 
 import spec_reviewer
 
 
 def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
+
+
+def load_spec_linter():
+    gen = next(p for p in Path(spec_reviewer.__file__).resolve().parents if p.name == "gen")
+    base = gen / "spec-linter"
+    path = base / "spec_linter.py" if (base / "spec_linter.py").is_file() else base / "spec_linter" / "__init__.py"
+    spec = importlib.util.spec_from_file_location("spec_linter", path)
+    spec_linter = importlib.util.module_from_spec(spec)
+    sys.modules["spec_linter"] = spec_linter
+    spec.loader.exec_module(spec_linter)
+    return spec_linter
 
 
 GLOSSARY = "# Glossary\n\n- **Foo** — a test term.\n"
@@ -32,9 +41,13 @@ COMPONENT_MD = (
     "Foo doubles a number.\n"
 )
 
-REQUIREMENT_MD = "# R-FOO-001\n\n**R-FOO-001** — `foo(x)` MUST return `2 * x`.\n"
+REQUIREMENT_MD = (
+    "# R-FOO-001\n"
+    "\n"
+    "**R-FOO-001** — `foo(x)` MUST return `2 * x`.\n"
+)
 
-ACCEPTANCE_MD = (
+ACCEPTANCE_CLEAN = (
     "# AC-FOO-001\n"
     "\n"
     "Covers: R-FOO-001\n"
@@ -47,7 +60,7 @@ ACCEPTANCE_MD = (
     "```\n"
 )
 
-ACCEPTANCE_NO_KIND_MD = (
+ACCEPTANCE_NO_KIND = (
     "# AC-FOO-001\n"
     "\n"
     "Covers: R-FOO-001\n"
@@ -59,52 +72,42 @@ ACCEPTANCE_NO_KIND_MD = (
     "```\n"
 )
 
-LIBRARY_MD = "# Library\n\n```\nfoo(x: int) -> int\n```\n"
+LIBRARY_MD = (
+    "# Library\n"
+    "\n"
+    "```\n"
+    "foo(x: int) -> int\n"
+    "```\n"
+)
 
 CONSTRAINTS_MD = "# Constraints\n\nNone.\n"
 
 
-def write_corpus(repo_root: Path, delete_kind: bool = False) -> None:
+def write(path, text):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+
+
+def build_corpus(repo_root, acceptance_text):
     specs = repo_root / "specs"
     comp = specs / "components" / "foo"
-    (comp / "requirements").mkdir(parents=True, exist_ok=True)
-    (comp / "acceptance").mkdir(parents=True, exist_ok=True)
-    (comp / "interface").mkdir(parents=True, exist_ok=True)
-    (specs / "glossary.md").write_text(GLOSSARY, encoding="utf-8")
-    (comp / "component.md").write_text(COMPONENT_MD, encoding="utf-8")
-    (comp / "requirements" / "R-FOO-001.md").write_text(REQUIREMENT_MD, encoding="utf-8")
-    (comp / "acceptance" / "AC-FOO-001.md").write_text(
-        ACCEPTANCE_NO_KIND_MD if delete_kind else ACCEPTANCE_MD, encoding="utf-8"
-    )
-    (comp / "interface" / "library.md").write_text(LIBRARY_MD, encoding="utf-8")
-    (comp / "constraints.md").write_text(CONSTRAINTS_MD, encoding="utf-8")
+    write(specs / "glossary.md", GLOSSARY)
+    write(comp / "component.md", COMPONENT_MD)
+    write(comp / "requirements" / "R-FOO-001.md", REQUIREMENT_MD)
+    write(comp / "acceptance" / "AC-FOO-001.md", acceptance_text)
+    write(comp / "interface" / "library.md", LIBRARY_MD)
+    write(comp / "constraints.md", CONSTRAINTS_MD)
 
 
-def load_spec_linter():
-    gen = next(
-        p for p in Path(spec_reviewer.__file__).resolve().parents if p.name == "gen"
-    )
-    base = gen / "spec-linter"
-    path = (
-        base / "spec_linter.py"
-        if (base / "spec_linter.py").is_file()
-        else base / "spec_linter" / "__init__.py"
-    )
-    spec = importlib.util.spec_from_file_location("spec_linter", path)
-    module = importlib.util.module_from_spec(spec)
-    sys.modules["spec_linter"] = module
-    spec.loader.exec_module(module)
-    return module
+def test_fail_lint_finding_stops_check_before_model(tmp_path):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    build_corpus(repo_root, ACCEPTANCE_NO_KIND)
 
+    calls = []
 
-def hard_failures(report):
-    return report["hard_failures"] if isinstance(report, dict) else report.hard_failures
-
-
-def make_counting_backend(log_path: Path):
-    def backend(prompt, model, **params):
-        with open(log_path, "a", encoding="utf-8") as fh:
-            fh.write(json.dumps({"model": model}) + "\n")
+    def llm_backend(prompt, model, **params):
+        calls.append(prompt)
         return {
             "text": '{"conflicts": false, "rationale": "ok"}',
             "model": model,
@@ -112,59 +115,26 @@ def make_counting_backend(log_path: Path):
             "model_call_error": None,
         }
 
-    return backend
-
-
-def count_calls(log_path: Path) -> int:
-    if not log_path.exists():
-        return 0
-    return len([ln for ln in log_path.read_text(encoding="utf-8").splitlines() if ln.strip()])
-
-
-def test_fail_severity_lint_finding_stops_check_before_any_model_call(tmp_path, monkeypatch):
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    monkeypatch.chdir(tmp_path)
-
-    # Sanity: the corpus is lint-clean before the Kind: line is deleted.
-    write_corpus(repo_root, delete_kind=False)
-    spec_linter = load_spec_linter()
-    assert hard_failures(spec_linter.lint(None, repo_root)) == 0
-
-    # Now delete the Kind: line: a fail-severity lint finding.
-    write_corpus(repo_root, delete_kind=True)
-    assert hard_failures(spec_linter.lint(None, repo_root)) >= 1
-
-    log_path = tmp_path / "backend_calls.log"
-    backend = make_counting_backend(log_path)
-
-    report = spec_reviewer.check(
-        ["comp-foo"], repo_root, model="mock", llm_backend=backend
-    )
+    report = spec_reviewer.check(["comp-foo"], repo_root, model="mock", llm_backend=llm_backend)
 
     lint_findings = list(field(report, "lint_findings"))
     severities = [field(f, "severity") for f in lint_findings]
-    assert any(s == "fail" for s in severities), lint_findings
-
+    assert "fail" in severities, lint_findings
     assert list(field(report, "criteria_checked")) == []
+    assert len(calls) == 0
 
-    assert count_calls(log_path) == 0
 
-
-def test_lint_clean_corpus_is_checked(tmp_path, monkeypatch):
+def test_lint_clean_corpus_checks_criteria(tmp_path):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
-    monkeypatch.chdir(tmp_path)
+    build_corpus(repo_root, ACCEPTANCE_CLEAN)
 
-    write_corpus(repo_root, delete_kind=False)
     spec_linter = load_spec_linter()
-    assert hard_failures(spec_linter.lint(None, repo_root)) == 0
+    assert spec_linter.lint(None, repo_root).hard_failures == 0
 
     report = spec_reviewer.check(["comp-foo"], repo_root)
 
     lint_findings = list(field(report, "lint_findings"))
     for f in lint_findings:
-        assert field(f, "severity") != "fail", lint_findings
-
-    criteria_checked = list(field(report, "criteria_checked"))
-    assert len(criteria_checked) > 0
+        assert field(f, "severity") != "fail", f
+    assert len(list(field(report, "criteria_checked"))) > 0
