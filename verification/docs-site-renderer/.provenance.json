@@ -1,5 +1,5 @@
 {
-  "spec_bundle_hash": "sha256:a81d1c7922184efdf4a03007e042d16b7ed475d29a9e2ef32c46a0221b96a5bf",
+  "spec_bundle_hash": "sha256:1d25ad38862706f92a558a6b7abadf5a2fe2086c265b4da33128dc6b5f25a3c0",
   "model_pin": "claude-opus-5-5",
   "prompt_version": "v12",
   "retry_feedback": null,
@@ -23,7 +23,7 @@
     "generator": "generator@3.2.0+v12"
   },
   "provenance_hit": false,
-  "generated_at": "2026-11-20T18:28:34Z",
+  "generated_at": "2026-11-20T22:46:38Z",
   "verification_run_id": "docs-site-renderer-attempt-1",
   "verification_report": {
     "component_id": "comp-docs-site-renderer",
@@ -32,133 +32,67 @@
         "id": "AC-DOCS-001",
         "covers": "R-DOCS-001",
         "kind": "generated-test",
-        "result": "pass",
-        "test_authoring": {
-          "model": "claude-opus-5-5",
-          "seed": 1,
-          "prompt_version": "v1",
-          "cache_hit": false
-        }
+        "result": "pass"
       },
       {
         "id": "AC-DOCS-002",
         "covers": "R-DOCS-002",
         "kind": "generated-test",
-        "result": "pass",
-        "test_authoring": {
-          "model": "claude-opus-5-5",
-          "seed": 1,
-          "prompt_version": "v1",
-          "cache_hit": false
-        }
+        "result": "pass"
       },
       {
         "id": "AC-DOCS-003",
         "covers": "R-DOCS-003",
         "kind": "generated-test",
-        "result": "pass",
-        "test_authoring": {
-          "model": "claude-opus-5-5",
-          "seed": 1,
-          "prompt_version": "v1",
-          "cache_hit": false
-        }
+        "result": "pass"
       },
       {
         "id": "AC-DOCS-004",
         "covers": "R-DOCS-004",
         "kind": "generated-test",
-        "result": "pass",
-        "test_authoring": {
-          "model": "claude-opus-5-5",
-          "seed": 1,
-          "prompt_version": "v1",
-          "cache_hit": false
-        }
+        "result": "pass"
       },
       {
         "id": "AC-DOCS-005",
         "covers": "R-DOCS-005",
         "kind": "generated-test",
-        "result": "pass",
-        "test_authoring": {
-          "model": "claude-opus-5-5",
-          "seed": 1,
-          "prompt_version": "v1",
-          "cache_hit": false
-        }
+        "result": "pass"
       },
       {
         "id": "AC-DOCS-006",
         "covers": "R-DOCS-006",
         "kind": "generated-test",
-        "result": "pass",
-        "test_authoring": {
-          "model": "claude-opus-5-5",
-          "seed": 1,
-          "prompt_version": "v1",
-          "cache_hit": false
-        }
+        "result": "pass"
       },
       {
         "id": "AC-DOCS-007",
         "covers": "R-DOCS-007",
         "kind": "generated-test",
-        "result": "pass",
-        "test_authoring": {
-          "model": "claude-opus-5-5",
-          "seed": 1,
-          "prompt_version": "v1",
-          "cache_hit": false
-        }
+        "result": "pass"
       },
       {
         "id": "AC-DOCS-008",
         "covers": "R-DOCS-002",
         "kind": "generated-test",
-        "result": "pass",
-        "test_authoring": {
-          "model": "claude-opus-5-5",
-          "seed": 1,
-          "prompt_version": "v1",
-          "cache_hit": false
-        }
+        "result": "pass"
       },
       {
         "id": "AC-DOCS-009",
         "covers": "R-DOCS-008",
         "kind": "generated-test",
-        "result": "pass",
-        "test_authoring": {
-          "model": "claude-opus-5-5",
-          "seed": 1,
-          "prompt_version": "v1",
-          "cache_hit": false
-        }
+        "result": "pass"
       },
       {
         "id": "AC-DOCS-010",
         "covers": "R-DOCS-009",
         "kind": "generated-test",
-        "result": "pass",
-        "test_authoring": {
-          "model": "claude-opus-5-5",
-          "seed": 1,
-          "prompt_version": "v1",
-          "cache_hit": false
-        }
+        "result": "pass"
       },
       {
         "id": "AC-DOCS-011",
         "covers": "R-DOCS-001",
         "kind": "generated-test",
-        "result": "pass",
-        "test_authoring": {
-          "model": "claude-opus-5-5",
-          "seed": 1,
-          "prompt_version": "v1",
-          "cache_hit": false
-        }
+        "result": "pass"
       }
     ],
     "requirement_results": {
@@ -173,7 +107,7 @@
       "R-DOCS-009": "pass"
     },
     "interface_drift": false,
-    "mutation_score": 0.9056603773584906,
+    "mutation_score": 0.9272727272727272,
     "mutation_error": null,
     "assets": [
       {
@@ -191,7 +125,7 @@
         "kind": "javascript",
         "path": "static/app.js",
         "definition_sha256": "sha256:d2f09824acce8d89c52a8aca03208100bf2394ead1badbcf74f9579121e57e24",
-        "adapter_sha256": "sha256:4ed9650cd6a5dbd63a3a306fd79eccc9769b0cd0e85446e6e6244966eccdb2a9",
+        "adapter_sha256": "sha256:c09f8f18021cda03fee69e8d32d755747839181a3503bf65d05ed968ec7dd11b",
         "versions": {
           "node": "26.0.0"
         },
@@ -491,7 +425,7 @@
       "kind": "javascript",
       "path": "static/app.js",
       "definition_sha256": "sha256:d2f09824acce8d89c52a8aca03208100bf2394ead1badbcf74f9579121e57e24",
-      "adapter_sha256": "sha256:4ed9650cd6a5dbd63a3a306fd79eccc9769b0cd0e85446e6e6244966eccdb2a9",
+      "adapter_sha256": "sha256:c09f8f18021cda03fee69e8d32d755747839181a3503bf65d05ed968ec7dd11b",
       "versions": {
         "node": "26.0.0"
       },
