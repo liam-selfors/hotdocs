@@ -11,9 +11,8 @@ When verify runs
 Then both criteria are "fail" with failure_origin "environment" and
   failure_detail.message "python environment: broken"
 
-Given the wrapped python adapter is planted instead, its wrapper
-  exec'ing sys.executable exactly as given, never resolved (a venv's
-  interpreter resolves to a base one without pytest)
+Given the wrapped python adapter instead, its wrapper exec'ing
+  sys.executable unresolved
 When verify runs
 Then both criteria pass and wrapper.log holds at least two lines
   "called"
