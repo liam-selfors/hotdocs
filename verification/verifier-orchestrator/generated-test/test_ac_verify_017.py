@@ -1,8 +1,8 @@
-# hotdocs-criterion: sha256:b2af422f0a5dd0077a955661c88c3beffc6658d7143fa3836973c67279be86e4
+# hotdocs-criterion: sha256:487bf8056dfdb4e2f9ddffdc9808f6c25d1eb02dab4e6a26030cd00dbc75c13d
 import verifier_orchestrator
 
 
-def test_gate_version_readable_without_calling_verify():
+def test_gate_version_is_readable_without_calling_verify():
     value = verifier_orchestrator.GATE_VERSION
     assert isinstance(value, str)
-    assert value == "verifier-orchestrator@2.3.0"
+    assert value == "verifier-orchestrator@3.5.0"

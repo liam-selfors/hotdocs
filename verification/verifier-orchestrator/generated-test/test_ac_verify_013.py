@@ -1,8 +1,14 @@
-# hotdocs-criterion: sha256:11172d0fbb864ab78678f1166b06e1a64795be2e5fc5d996643385ac74875160
+# hotdocs-criterion: sha256:d785875974b7c18c5d6a5fe9dc43481eb3ab577cef0443be6a77afb91470f150
+import verifier_orchestrator
+
 import shutil
 from pathlib import Path
 
-import verifier_orchestrator
+
+SLUG = "acme-widget"
+MODULE = "acme_widget"
+COMPONENT_ID = "comp-acme-widget"
+CRITERION_ID = "AC-ACME-001"
 
 
 def field(value, name):
@@ -14,89 +20,70 @@ def write(path, text):
     path.write_text(text, encoding="utf-8")
 
 
-CRITERION_TEXT = (
-    "# AC-WIDGET-001\n"
-    "\n"
-    "Covers: R-WIDGET-001\n"
-    "Kind: compiled\n"
-    "\n"
-    "```gherkin\n"
-    "Given a seed is 1\n"
-    "When compute is invoked with {\"x\": seed}\n"
-    "Then foo equals 5\n"
-    "```\n"
-)
-
-REQUIREMENT_TEXT = (
-    "# R-WIDGET-001\n"
-    "\n"
-    "**R-WIDGET-001** \u2014 `compute(x)` MUST return a value whose `foo` is `5`.\n"
-)
-
-INTERFACE_TEXT = (
-    "# Library\n"
-    "\n"
-    "```\n"
-    "compute(x: int) -> object\n"
-    "```\n"
-)
+def live_root():
+    return (
+        Path(verifier_orchestrator.__file__).resolve().parents[1]
+        / "spec-bundle-assembler"
+    ).resolve().parents[1]
 
 
 def build_fixture(repo_root):
+    comp = repo_root / "specs" / "components" / SLUG
+
     write(
         repo_root / "specs" / "glossary.md",
-        "# Glossary\n\n- **Widget** \u2014 a test term.\n",
+        "# Glossary\n\n- **Widget** — a thing with a foo.\n",
     )
+
     write(
-        repo_root / "specs" / "product" / "widget-cap.md",
+        repo_root / "specs" / "product" / "acme.md",
         "---\n"
-        "id: P-WIDGET\n"
-        "title: Widget capability\n"
+        "id: P-ACME\n"
+        "title: Acme capability\n"
         "status: draft\n"
-        "owners: [team-a]\n"
+        "owners: [test-team]\n"
         "---\n"
         "\n"
-        "# Widget capability\n"
+        "# Acme capability\n"
         "\n"
         "## Purpose\n"
         "\n"
-        "Widgets compute things.\n"
+        "Make widgets.\n"
         "\n"
         "## Scope\n"
         "\n"
         "- In scope: widgets.\n"
         "\n"
-        "### CS-WIDGET-001\n"
+        "### CS-ACME-001\n"
         "\n"
-        "Covers: P-WIDGET\n"
+        "Covers: P-ACME\n"
         "\n"
         "```gherkin\n"
         "Given a seed is 1\n"
-        "When compute is invoked with {\"x\": seed}\n"
+        "When make_widget is invoked with {\"x\": seed}\n"
         "Then foo equals 5\n"
         "```\n",
     )
-    comp = repo_root / "specs" / "components" / "widget"
+
     write(
         comp / "component.md",
         "---\n"
-        "id: comp-widget\n"
-        "title: Widget\n"
+        "id: " + COMPONENT_ID + "\n"
+        "title: Acme Widget\n"
         "status: draft\n"
-        "owners: [team-a]\n"
-        "realizes: [P-WIDGET]\n"
-        "depends_on: []\n"
+        "owners: [test-team]\n"
+        "realizes: [P-ACME]\n"
         "---\n"
         "\n"
-        "# Widget\n"
+        "# Acme Widget\n"
         "\n"
         "## Purpose\n"
         "\n"
-        "Widget computes a value.\n"
+        "Builds widgets.\n"
         "\n"
         "## Scope\n"
         "\n"
-        "- In scope: computing.\n"
+        "- In scope: widgets.\n"
         "\n"
         "## Definitions\n"
         "\n"
@@ -128,19 +115,48 @@ def build_fixture(repo_root):
         "\n"
         "- Initial.\n",
     )
-    write(comp / "requirements" / "R-WIDGET-001.md", REQUIREMENT_TEXT)
-    write(comp / "acceptance" / "AC-WIDGET-001.md", CRITERION_TEXT)
-    write(comp / "interface" / "library.md", INTERFACE_TEXT)
+
+    write(
+        comp / "requirements" / "R-ACME-001.md",
+        "**R-ACME-001** — `make_widget(x)` MUST return a widget whose "
+        "`foo` is 5.\n",
+    )
+
+    write(
+        comp / "interface" / "library.md",
+        "# Library\n"
+        "\n"
+        "```\n"
+        "make_widget(x: int) -> Widget\n"
+        "```\n",
+    )
+
     write(comp / "constraints.md", "# Constraints\n\nNone.\n")
 
-    # Generated code under test: returns foo == 3, not the expected 5.
     write(
-        repo_root / "gen" / "widget" / "widget.py",
-        "import types\n"
+        comp / "acceptance" / (CRITERION_ID + ".md"),
+        "# " + CRITERION_ID + "\n"
+        "\n"
+        "Covers: R-ACME-001\n"
+        "Kind: compiled\n"
+        "\n"
+        "```gherkin\n"
+        "Given a seed is 1\n"
+        "When make_widget is invoked with {\"x\": seed}\n"
+        "Then foo equals 5\n"
+        "```\n",
+    )
+
+    # Generated code under test: result.foo is 3, not 5.
+    write(
+        repo_root / "gen" / SLUG / (MODULE + ".py"),
+        "class Widget:\n"
+        "    def __init__(self, foo):\n"
+        "        self.foo = foo\n"
         "\n"
         "\n"
-        "def compute(x):\n"
-        "    return types.SimpleNamespace(foo=3)\n",
+        "def make_widget(x):\n"
+        "    return Widget(3)\n",
     )
 
     # spec-bundle-assembler stand-in.
@@ -150,50 +166,55 @@ def build_fixture(repo_root):
         "    return {\n"
         "        'component_id': component_id,\n"
         "        'criterion_id': criterion_id,\n"
-        "        'covers': 'R-WIDGET-001',\n"
-        "        'criterion_text': " + repr(CRITERION_TEXT) + ",\n"
-        "        'requirement_text': " + repr(REQUIREMENT_TEXT) + ",\n"
-        "        'interface': " + repr(INTERFACE_TEXT) + ",\n"
-        "        'glossary': '# Glossary',\n"
+        "        'covers': 'R-ACME-001',\n"
+        "        'criterion_text': 'criterion text',\n"
+        "        'requirement_text': 'requirement text',\n"
+        "        'interface': 'make_widget(x: int) -> Widget',\n"
+        "        'glossary': 'glossary',\n"
         "        'dependency_interfaces': {},\n"
-        "    }\n"
-        "\n"
-        "\n"
-        "def assemble(component_id, repo_root, mode='cold'):\n"
-        "    return {\n"
-        "        'component_id': component_id,\n"
-        "        'spec_bundle_hash': 'sha256:' + '0' * 64,\n"
-        "        'spec': '',\n"
-        "        'interface': " + repr(INTERFACE_TEXT) + ",\n"
-        "        'constraints': '',\n"
-        "        'dependency_interfaces': {},\n"
-        "        'dependency_context': {},\n"
-        "        'dependency_usage': {},\n"
-        "        'vars': {},\n"
-        "        'glossary': '# Glossary',\n"
-        "        'hint_code': None,\n"
+        "        'testing': '',\n"
         "    }\n",
     )
 
-    # Real criterion-compiler, copied from the live tree.
-    live = (
-        Path(verifier_orchestrator.__file__).resolve().parents[1]
-        / "spec-bundle-assembler"
-    ).resolve().parents[1]
-    src = live / "pipeline" / "criterion-compiler"
+    # test-probe stand-in: always ok.
+    write(
+        repo_root / "gen" / "test-probe" / "test_probe.py",
+        "class ProbeReport:\n"
+        "    def __init__(self):\n"
+        "        self.ok = True\n"
+        "        self.findings = []\n"
+        "        self.tests_run = 0\n"
+        "        self.tests_reached = 0\n"
+        "\n"
+        "    def to_dict(self):\n"
+        "        return {\n"
+        "            'ok': self.ok,\n"
+        "            'findings': list(self.findings),\n"
+        "            'tests_run': self.tests_run,\n"
+        "            'tests_reached': self.tests_reached,\n"
+        "        }\n"
+        "\n"
+        "\n"
+        "def probe(test_source, criterion_bundle, module_name, *, timeout=60.0, interpreter=None):\n"
+        "    return ProbeReport()\n",
+    )
+
+    # The real criterion-compiler, copied into repo_root.
+    src = live_root() / "pipeline" / "criterion-compiler"
     dst = repo_root / "pipeline" / "criterion-compiler"
+    dst.parent.mkdir(parents=True, exist_ok=True)
     shutil.copytree(src, dst, ignore=shutil.ignore_patterns("__pycache__"))
 
 
-def test_ac_verify_013_failure_detail_expected_and_actual(tmp_path):
+def test_ac_verify_013(tmp_path):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
     build_fixture(repo_root)
 
-    report = verifier_orchestrator.verify("comp-widget", repo_root)
+    report = verifier_orchestrator.verify(COMPONENT_ID, repo_root)
 
     criteria = field(report, "criteria")
-    matching = [c for c in criteria if field(c, "id") == "AC-WIDGET-001"]
+    matching = [c for c in criteria if field(c, "id") == CRITERION_ID]
     assert len(matching) == 1, criteria
     criterion = matching[0]
 

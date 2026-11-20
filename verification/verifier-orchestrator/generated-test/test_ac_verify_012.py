@@ -1,5 +1,6 @@
-# hotdocs-criterion: sha256:590cee13fb5272544f5b437fdbba064327f47ee7a9c59a50552e814a14200300
-import os
+# hotdocs-criterion: sha256:d032c613d06c2c2f37d5c36def981d48205e4fac1c7f494519ba8e528349ac72
+import importlib.util
+import sys
 from pathlib import Path
 
 import verifier_orchestrator
@@ -14,42 +15,7 @@ def write(path, text):
     path.write_text(text, encoding="utf-8")
 
 
-def build_fixture(repo_root, assembler_log):
-    write(
-        repo_root / "specs" / "glossary.md",
-        "# Glossary\n\n- **Widget** — a test term.\n",
-    )
-
-    write(
-        repo_root / "specs" / "product" / "widget-capability.md",
-        "---\n"
-        "id: P-WIDGET\n"
-        "title: Widget Capability\n"
-        "status: draft\n"
-        "owners: [team-a]\n"
-        "---\n"
-        "\n"
-        "# Widget Capability\n"
-        "\n"
-        "## Purpose\n"
-        "\n"
-        "Widgets double numbers.\n"
-        "\n"
-        "## Scope\n"
-        "\n"
-        "- In scope: doubling.\n"
-        "\n"
-        "### CS-WIDGET-001\n"
-        "\n"
-        "Covers: P-WIDGET\n"
-        "\n"
-        "```gherkin\n"
-        "Given a number is 2\n"
-        "When the widget doubles it\n"
-        "Then the answer is 4\n"
-        "```\n",
-    )
-
+def build_fixture(repo_root):
     comp = repo_root / "specs" / "components" / "widget"
     write(
         comp / "component.md",
@@ -57,8 +23,7 @@ def build_fixture(repo_root, assembler_log):
         "id: comp-widget\n"
         "title: Widget\n"
         "status: draft\n"
-        "owners: [team-a]\n"
-        "depends_on: []\n"
+        "owners: [team]\n"
         "realizes: [P-WIDGET]\n"
         "---\n"
         "\n"
@@ -66,11 +31,11 @@ def build_fixture(repo_root, assembler_log):
         "\n"
         "## Purpose\n"
         "\n"
-        "Widget doubles a number.\n"
+        "Renders widgets.\n"
         "\n"
         "## Scope\n"
         "\n"
-        "- In scope: doubling.\n"
+        "- In scope: rendering.\n"
         "\n"
         "## Definitions\n"
         "\n"
@@ -100,12 +65,11 @@ def build_fixture(repo_root, assembler_log):
         "\n"
         "## Change log\n"
         "\n"
-        "- Initial draft.\n",
+        "- Initial.\n",
     )
     write(
         comp / "requirements" / "R-WIDGET-001.md",
-        "# R-WIDGET-001\n\n"
-        "**R-WIDGET-001** — `bar(x)` MUST return `2 * x`.\n",
+        "**R-WIDGET-001** — The widget spec MUST be clear and unambiguous.\n",
     )
     write(
         comp / "acceptance" / "AC-WIDGET-001.md",
@@ -115,74 +79,92 @@ def build_fixture(repo_root, assembler_log):
         "Kind: llm-judge\n"
         "\n"
         "```gherkin\n"
-        "Given the widget specification\n"
-        "When a reviewer reads requirement R-WIDGET-001\n"
-        "Then it states the doubling behavior unambiguously\n"
+        "Given the widget spec\n"
+        "When a reviewer reads it\n"
+        "Then it is clear and unambiguous\n"
         "```\n",
     )
     write(
         comp / "interface" / "library.md",
-        "# Library\n\n```\nbar(x: int) -> int\n```\n",
+        "# Library\n"
+        "\n"
+        "```\n"
+        "render_widget(name: str) -> str\n"
+        "```\n",
     )
     write(comp / "constraints.md", "# Constraints\n\nNone.\n")
-
     write(
-        repo_root / "gen" / "widget" / "widget.py",
-        "def bar(x):\n    return 2 * x\n",
+        repo_root / "specs" / "product" / "widget.md",
+        "---\n"
+        "id: P-WIDGET\n"
+        "title: Widget capability\n"
+        "status: draft\n"
+        "owners: [team]\n"
+        "---\n"
+        "\n"
+        "# Widget capability\n"
+        "\n"
+        "## Purpose\n"
+        "\n"
+        "Widgets.\n",
     )
+    write(repo_root / "specs" / "glossary.md", "# Glossary\n")
+    write(repo_root / "gen" / "widget" / "widget.py", "")
 
-    assembler_source = (
-        "LOG_PATH = " + repr(str(assembler_log)) + "\n"
-        "\n"
-        "\n"
-        "def assemble_criterion(component_id, criterion_id, repo_root):\n"
-        "    with open(LOG_PATH, 'a', encoding='utf-8') as fh:\n"
-        "        fh.write(str(criterion_id) + '\\n')\n"
-        "    return {\n"
-        "        'component_id': component_id,\n"
-        "        'criterion_id': criterion_id,\n"
-        "        'covers': 'R-WIDGET-001',\n"
-        "        'criterion_text': " + repr(
-            "Given the widget specification\n"
-            "When a reviewer reads requirement R-WIDGET-001\n"
-            "Then it states the doubling behavior unambiguously"
-        ) + ",\n"
-        "        'requirement_text': " + repr(
-            "**R-WIDGET-001** — `bar(x)` MUST return `2 * x`."
-        ) + ",\n"
-        "        'interface': " + repr("# Library\n\n```\nbar(x: int) -> int\n```") + ",\n"
-        "        'glossary': " + repr("# Glossary\n\n- **Widget** — a test term.") + ",\n"
-        "        'dependency_interfaces': {},\n"
-        "    }\n"
-    )
+    bundle_literal = {
+        "component_id": "comp-widget",
+        "criterion_id": "AC-WIDGET-001",
+        "covers": "R-WIDGET-001",
+        "criterion_text": "Given the widget spec\nWhen a reviewer reads it\nThen it is clear and unambiguous",
+        "requirement_text": "**R-WIDGET-001** — The widget spec MUST be clear and unambiguous.",
+        "interface": "render_widget(name: str) -> str",
+        "glossary": "# Glossary",
+        "dependency_interfaces": {},
+        "testing": "",
+    }
     write(
         repo_root / "gen" / "spec-bundle-assembler" / "spec_bundle_assembler.py",
-        assembler_source,
+        "def assemble_criterion(component_id, criterion_id, repo_root):\n"
+        "    bundle = dict(" + repr(bundle_literal) + ")\n"
+        "    bundle['component_id'] = component_id\n"
+        "    bundle['criterion_id'] = criterion_id\n"
+        "    return bundle\n",
+    )
+    write(
+        repo_root / "gen" / "test-probe" / "test_probe.py",
+        "class _Report:\n"
+        "    def __init__(self):\n"
+        "        self.ok = True\n"
+        "        self.findings = []\n"
+        "        self.tests_run = 0\n"
+        "        self.tests_reached = 0\n"
+        "\n"
+        "    def to_dict(self):\n"
+        "        return {'ok': self.ok, 'findings': list(self.findings),\n"
+        "                'tests_run': self.tests_run, 'tests_reached': self.tests_reached}\n"
+        "\n"
+        "\n"
+        "def probe(test_source, criterion_bundle, module_name, *, timeout=60.0, interpreter=None):\n"
+        "    return _Report()\n",
     )
 
 
 def test_llm_judge_called_exactly_once(tmp_path):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
-    logs = tmp_path / "logs"
-    logs.mkdir()
-    assembler_log = logs / "assembler.log"
-    judge_log = logs / "judge.log"
+    build_fixture(repo_root)
 
-    build_fixture(repo_root, assembler_log)
+    log = tmp_path / "judge_calls.log"
 
     def judge(bundle):
-        with open(judge_log, "a", encoding="utf-8") as fh:
-            fh.write("call\n")
-        return {"result": "pass", "rationale": "The requirement is clear."}
+        with open(log, "a", encoding="utf-8") as fh:
+            fh.write("called\n")
+        return {"result": "pass", "rationale": "clear enough"}
 
     report = verifier_orchestrator.verify("comp-widget", repo_root, judge=judge)
 
-    calls = []
-    if judge_log.exists():
-        calls = [line for line in judge_log.read_text(encoding="utf-8").splitlines() if line]
-
-    assert len(calls) == 1, "judge called " + str(len(calls)) + " times, expected exactly 1"
+    calls = log.read_text(encoding="utf-8").splitlines() if log.exists() else []
+    assert len(calls) == 1, "judge called " + str(len(calls)) + " times"
 
     criteria = field(report, "criteria")
     ids = [field(c, "id") for c in criteria]

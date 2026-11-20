@@ -1,10 +1,11 @@
-"""Verifier orchestrator: runs every verification gate for one component."""
+"""Verifier orchestrator: runs every verification gate against one component."""
 
 import ast
-import contextlib
 import dataclasses
 import hashlib
 import importlib.util
+import inspect
+import itertools
 import json
 import os
 import re
@@ -18,23 +19,50 @@ import xml.etree.ElementTree as ET
 from collections.abc import Mapping
 from pathlib import Path
 
-GATE_VERSION = "verifier-orchestrator@2.3.0"
+GATE_VERSION = "verifier-orchestrator@3.5.0"
+DEFAULT_TEST_TIMEOUT = 300.0
 
-TIMEOUT = 300
-_COMPARE_ENV = "HOTDOCS_VERIFY_COMPARE"
-_RETRYABLE = ("network", "timeout", "rate_limit")
-_USAGE = "usage: hotdocs verify-component <component-id> [--repo-root=<dir>] [--format=json|text]"
+USAGE = (
+    "usage: hotdocs verify-component <component-id> "
+    "[--repo-root=<dir>] [--format=json|text]"
+)
 
-_CONFTEST = '''import json
+_TRANSIENT = ("network", "timeout", "rate_limit")
+_HEADER_KEYS = ("criterion_text", "requirement_text", "interface", "glossary", "testing")
+_DEPENDENCIES = {
+    "spec_bundle_assembler": "gen/spec-bundle-assembler",
+    "test_probe": "gen/test-probe",
+    "criterion_compiler": "pipeline/criterion-compiler",
+}
+_JS = re.compile(r"\bfunction\s*[\w$]*\s*\(|=>|\b(const|let)\s")
+_LOADS = itertools.count()
+_NO = object()
+
+_PLUGIN_SOURCE = '''import importlib.util
+import json
 import os
+import sys
+from pathlib import Path
+
+import pytest
 
 
-def pytest_assertrepr_compare(op, left, right):
-    path = os.environ.get("HOTDOCS_VERIFY_COMPARE")
-    if path and not os.path.exists(path):
-        with open(path, "w", encoding="utf-8") as handle:
-            json.dump({"op": op, "left": repr(left), "right": repr(right)}, handle)
-    return None
+@pytest.fixture
+def asset_runner():
+    entries = json.loads(os.environ["HOTDOCS_ASSETS"])
+
+    def runner(path):
+        for entry in entries:
+            if entry["path"] == path:
+                name = "_hotdocs_asset_adapter_" + str(len(sys.modules))
+                spec = importlib.util.spec_from_file_location(name, entry["adapter"])
+                module = importlib.util.module_from_spec(spec)
+                sys.modules[name] = module
+                spec.loader.exec_module(module)
+                return module.asset_runner(Path(entry["file"]))
+        raise KeyError(path)
+
+    return runner
 '''
 
 
@@ -44,12 +72,24 @@ class VerificationReport:
     criteria: list
     requirement_results: dict
     interface_drift: bool
-    mutation_score: float | None
-    mutation_error: str | None
+    mutation_score: object
+    mutation_error: object
+    assets: list
     overall: str
 
     def to_dict(self):
         return dataclasses.asdict(self)
+
+
+@dataclasses.dataclass
+class _Criterion:
+    id: str
+    covers: str
+    kind: str
+    freeform: bool
+
+
+# ---------------------------------------------------------------- helpers
 
 
 def _get(obj, key, default=None):
@@ -58,524 +98,696 @@ def _get(obj, key, default=None):
     return getattr(obj, key, default)
 
 
-def _test_filename(criterion_id):
-    return "test_" + criterion_id.lower().replace("-", "_") + ".py"
+def _sha(path):
+    return "sha256:" + hashlib.sha256(Path(path).read_bytes()).hexdigest()
+
+
+def _tool_root():
+    here = Path(os.path.abspath(__file__))
+    return next(p.parent for p in here.parents if p.name == "gen")
+
+
+def _load_path(path, name, locations=None):
+    load_name = f"_hotdocs_vo_{next(_LOADS)}_{name}"
+    spec = importlib.util.spec_from_file_location(
+        load_name, str(path), submodule_search_locations=locations
+    )
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[load_name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def _load_dir(directory, module_name):
+    package = Path(directory) / module_name / "__init__.py"
+    if package.is_file():
+        return _load_path(package, module_name, [str(package.parent)])
+    return _load_path(Path(directory) / f"{module_name}.py", module_name)
+
+
+def _adapter_path(repo_root, kind):
+    rel = Path("gen") / f"kind-{kind}" / f"kind_{kind}.py"
+    path = repo_root / rel
+    if not path.is_file():
+        path = _tool_root() / rel
+    return path if path.is_file() else None
+
+
+def _test_stem(criterion_id):
+    return "test_" + criterion_id.lower().replace("-", "_")
+
+
+def _header(bundle):
+    payload = json.dumps(
+        {key: _get(bundle, key) for key in _HEADER_KEYS},
+        sort_keys=True,
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+    return "# hotdocs-criterion: sha256:" + hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
 def _detail(message, expected=None, actual=None):
     return {"message": message, "expected": expected, "actual": actual}
 
 
-def _literal(text):
-    try:
-        return ast.literal_eval(text)
-    except Exception:
-        return None
+def _entry(crit, result, **extra):
+    return {"id": crit.id, "covers": crit.covers, "kind": crit.kind, "result": result, **extra}
 
 
-# ---------------------------------------------------------------- loading
+def _fail(crit, origin, detail, **extra):
+    return _entry(crit, "fail", **extra, failure_origin=origin, failure_detail=detail)
 
 
-def _load_module(base, name):
-    flat = base / f"{name}.py"
-    path = flat if flat.is_file() else base / name / "__init__.py"
-    spec = importlib.util.spec_from_file_location(name, path)
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[name] = module
-    spec.loader.exec_module(module)
-    return module
+def _error_kinds(report):
+    kinds = []
+    for finding in _get(report, "findings", []):
+        kind = _get(finding, "kind")
+        if _get(finding, "severity") == "error" and kind not in kinds:
+            kinds.append(kind)
+    return ", ".join(kinds)
 
 
-def _tool_root():
-    here = Path(__file__).resolve()
-    return next(p for p in here.parents if p.name == "gen").parent
+# ---------------------------------------------------------------- spec parsing
 
 
-def _load_dependency(root, rel, name):
-    base = root / rel
-    if not base.is_dir():
-        base = _tool_root() / rel
-    return _load_module(base, name)
+def _frontmatter(text):
+    match = re.match(r"---\s*\n(.*?)\n---", text, re.S)
+    block = match.group(1) if match else ""
+    sealed = re.search(r"^sealed:\s*true\s*$", block, re.M) is not None
+    source = re.search(r"^source_path:\s*(.+?)\s*$", block, re.M)
+    assets = re.search(r"^assets:[^\[\n]*\[(.*)\]", block, re.M)
+    declared = []
+    for item in assets.group(1).split(",") if assets else []:
+        kind, _, path = item.strip().partition(":")
+        if kind:
+            declared.append((kind.strip(), path.strip()))
+    return sealed, source.group(1) if source else None, declared
 
 
-# ---------------------------------------------------------------- corpus
-
-
-def _frontmatter(path):
-    text = path.read_text(encoding="utf-8")
-    block = re.match(r"---\n(.*?)\n---", text, re.S).group(1)
-    return {k: v.strip() for k, v in re.findall(r"^(\w+):[ \t]*(.*)$", block, re.M)}
-
-
-def _read_criteria(acceptance_dir):
-    specs = []
+def _criteria(acceptance_dir):
+    found = []
     for path in sorted(acceptance_dir.glob("AC-*.md")):
         text = path.read_text(encoding="utf-8")
-        cid = re.search(r"^#\s+(AC-\S+)", text, re.M).group(1)
-        cov = re.search(r"Covers:\s*`?([^\s`]+)", text)
-        kind = re.compile(r"^Kind:\s*(\S+)", re.M).search(text, cov.end()).group(1)
-        specs.append({
-            "id": cid,
-            "covers": cov.group(1),
-            "kind": kind,
-            "freeform": not re.search(r"^\s*```gherkin", text, re.M),
-        })
-    return specs
+        ident = re.search(r"^#\s+(AC-[A-Z0-9-]*[0-9][a-z]?)\b", text, re.M).group(1)
+        covers = re.search(r"Covers:[\s*`]*([RP]-[A-Za-z0-9-]*[A-Za-z0-9])", text)
+        kind = re.compile(r"^Kind:[ `]*(compiled|generated-test|llm-judge)", re.M).search(
+            text, covers.end()
+        ).group(1)
+        gherkin = re.search(r"^\s*```gherkin", text, re.M) is not None
+        found.append(
+            _Criterion(ident, covers.group(1), kind, kind == "generated-test" and not gherkin)
+        )
+    return found
+
+
+def _signatures(text):
+    logical = []
+    state = None
+    buf = ""
+    for line in text.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("```"):
+            state = None if state else ("plain" if stripped == "```" else "other")
+            buf = ""
+            continue
+        if state != "plain":
+            continue
+        buf = f"{buf} {stripped}" if buf else line
+        if buf.count("(") > buf.count(")"):
+            continue
+        logical.append(buf)
+        buf = ""
+    found = []
+    for line in logical:
+        match = re.match(r"(\w+)\(", line)
+        if not match:
+            continue
+        depth = 0
+        inside = ""
+        for index in range(match.end() - 1, len(line)):
+            depth += (line[index] in "([{") - (line[index] in ")]}")
+            if depth == 0:
+                inside = line[match.end():index]
+                break
+        found.append((match.group(1), _param_list(inside)))
+    return found
+
+
+def _param_list(inside):
+    pieces = []
+    depth = 0
+    current = ""
+    for char in inside:
+        depth += (char in "([{") - (char in ")]}")
+        if char == "," and depth == 0:
+            pieces.append(current)
+            current = ""
+        else:
+            current += char
+    pieces.append(current)
+    names = []
+    for piece in pieces:
+        match = re.match(r"\w+", piece.strip().lstrip("*"))
+        if match:
+            names.append(match.group(0))
+    return names
+
+
+def _interface_drift(interface_dir, code_dir, module_name):
+    documented = []
+    for name in ("library.md", "cli.md"):
+        path = interface_dir / name
+        if path.is_file():
+            documented += _signatures(path.read_text(encoding="utf-8"))
+    if (interface_dir / "cli.md").is_file():
+        documented.append(("main", ["argv"]))
+    try:
+        module = _load_dir(code_dir, module_name)
+    except Exception:
+        return True
+    for name, params in documented:
+        obj = getattr(module, name, None)
+        if not callable(obj) or list(inspect.signature(obj).parameters) != params:
+            return True
+    return False
+
+
+def _characterization(test_dir):
+    tests = []
+    for path in sorted(test_dir.glob("test_*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        tests += [
+            (path, node.name)
+            for node in tree.body
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        ]
+    return tests
+
+
+def _py_files(directory):
+    return sorted(
+        (p for p in directory.rglob("*.py") if "__pycache__" not in p.relative_to(directory).parts),
+        key=lambda p: p.relative_to(directory).as_posix(),
+    )
+
+
+def _javascript(copy):
+    for path in _py_files(copy):
+        tree = ast.parse(path.read_bytes())
+        docs = set()
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
+                for first in node.body[:1]:
+                    if isinstance(first, ast.Expr) and isinstance(first.value, ast.Constant):
+                        docs.add(id(first.value))
+        for node in ast.walk(tree):
+            if (
+                isinstance(node, ast.Constant)
+                and isinstance(node.value, str)
+                and id(node) not in docs
+                and len(node.value) >= 200
+                and _JS.search(node.value)
+                and (";" in node.value or "{" in node.value)
+            ):
+                return f"{path.relative_to(copy).as_posix()}:{node.lineno}"
+    return None
 
 
 # ---------------------------------------------------------------- running
 
 
-def _pytest(files, cwd, pythonpath, timeout, env_extra, extra_args=()):
-    cmd = [sys.executable, "-m", "pytest", "-p", "no:cacheprovider", *extra_args, *map(str, files)]
-    env = {**os.environ, "PYTHONPATH": str(pythonpath), "PYTHONDONTWRITEBYTECODE": "1", **env_extra}
+def _kill_tree(pid):
+    listing = subprocess.run(["ps", "-eo", "pid=,ppid="], capture_output=True, text=True).stdout
+    children = {}
+    for line in listing.splitlines():
+        fields = line.split()
+        children.setdefault(int(fields[1]), []).append(int(fields[0]))
+    stack, tree = [pid], []
+    while stack:
+        for child in children.get(stack.pop(), []):
+            tree.append(child)
+            stack.append(child)
+    for target in tree + [pid]:
+        try:
+            os.kill(target, signal.SIGKILL)
+        except OSError:
+            pass
+
+
+def _run(cmd, cwd, env, timeout):
     start = time.monotonic()
     proc = subprocess.Popen(
-        cmd, cwd=str(cwd), env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-        text=True, start_new_session=True,
+        cmd,
+        cwd=str(cwd),
+        env=env,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
     )
     try:
-        out, _ = proc.communicate(timeout=timeout)
-        rc = proc.returncode
+        code = proc.wait(timeout=timeout)
     except subprocess.TimeoutExpired:
-        with contextlib.suppress(ProcessLookupError):
-            os.killpg(proc.pid, signal.SIGKILL)
-        proc.communicate()
-        out, rc = "", None
-    return rc, out, time.monotonic() - start
+        _kill_tree(proc.pid)
+        proc.wait()
+        code = None
+    return code, time.monotonic() - start
 
 
-def _run_test(content, criterion_id, cwd, pythonpath):
-    with tempfile.TemporaryDirectory() as tmp:
-        tmp = Path(tmp)
-        (tmp / "conftest.py").write_text(_CONFTEST, encoding="utf-8")
-        test = tmp / _test_filename(criterion_id)
-        test.write_text(content, encoding="utf-8")
-        record = tmp / "compare.json"
-        rc, out, _ = _pytest([test], cwd, pythonpath, TIMEOUT, {_COMPARE_ENV: str(record)})
-        if rc == 0:
-            return None
-        if rc is None:
-            return _detail(f"timed out after {TIMEOUT} seconds")
-        compared = json.loads(record.read_text(encoding="utf-8")) if record.is_file() else {}
-        lines = out.splitlines()
-        messages = (
-            [line[1:].strip() for line in lines if line.startswith("E ")]
-            or [line.strip() for line in reversed(lines) if line.strip()]
-            or [f"pytest exited {rc}"]
+def _junit_failure(path):
+    try:
+        root = ET.parse(str(path)).getroot()
+    except (OSError, ET.ParseError):
+        return "", ""
+    for case in root.iter("testcase"):
+        for child in case:
+            if child.tag in ("failure", "error"):
+                return child.get("message", ""), child.text or ""
+    return "", ""
+
+
+def _literal(text, missing=None):
+    try:
+        return ast.literal_eval(text.strip())
+    except (ValueError, SyntaxError, TypeError, MemoryError, RecursionError):
+        return missing
+
+
+def _rendered(rendered, sep, side):
+    for match in re.finditer(re.escape(sep), rendered):
+        sides = (
+            _literal(rendered[: match.start()], _NO),
+            _literal(rendered[match.end():], _NO),
         )
-        return _detail(messages[0], _literal(compared.get("right")), _literal(compared.get("left")))
+        if not any(value is _NO for value in sides):
+            return sides[side]
+    return None
 
 
-def _characterize(root, slug, code_dir):
-    files = sorted((root / "verification" / slug).glob("test_*.py"))
-    if not files:
-        return []
-    with tempfile.TemporaryDirectory() as tmp:
-        report = Path(tmp) / "junit.xml"
-        rc, _, _ = _pytest(files, root, code_dir, TIMEOUT, {}, [f"--junitxml={report}"])
-        if rc is None:
-            return None
-        cases = []
-        for case in ET.parse(report).iter("testcase"):
-            bad = next((c for c in case if c.tag in ("failure", "error", "skipped")), None)
-            message = None if bad is None else (bad.get("message") or bad.tag)
-            cases.append((case.get("name", "").split("[")[0], message))
-        return cases
-
-
-def _sealed_detail(cases, criterion_id):
-    if cases is None:
-        return _detail(f"timed out after {TIMEOUT} seconds")
-    prefix = "test_" + criterion_id.lower().replace("-", "_")
-    matches = [msg for name, msg in cases if name == prefix or name.startswith(prefix + "_")]
-    if not matches:
-        return _detail("no characterization test")
-    failed = [m for m in matches if m is not None]
-    return _detail(failed[0]) if failed else None
-
-
-# ---------------------------------------------------------------- drift
-
-
-def _documented(text):
-    sigs = []
-    in_fence = False
-    buffer = ""
-    for line in text.splitlines():
-        if re.match(r"^```\s*$", line) or (line.startswith("```") and not in_fence):
-            plain = re.match(r"^```\s*$", line) is not None
-            in_fence = plain and not in_fence
-            buffer = ""
-            continue
-        if not in_fence:
-            continue
-        if buffer or re.match(r"[A-Za-z_]\w*\(", line):
-            buffer += " " + line
-            if buffer.count("(") <= buffer.count(")"):
-                sigs.append(_signature(buffer))
-                buffer = ""
-    return sigs
-
-
-def _signature(text):
-    m = re.match(r"\s*([A-Za-z_]\w*)\(", text)
-    depth = 0
-    end = len(text)
-    for i in range(m.end() - 1, len(text)):
-        depth += text[i] in "([{"
-        depth -= text[i] in ")]}"
-        if depth == 0:
-            end = i
-            break
-    params, current, depth = [], "", 0
-    for c in text[m.end():end] + ",":
-        depth += c in "([{"
-        depth -= c in ")]}"
-        if c == "," and depth == 0:
-            params.append(current)
-            current = ""
-        else:
-            current += c
-    names = [p.group(1) for p in (re.match(r"\s*\*{0,2}([A-Za-z_]\w*)", q) for q in params) if p]
-    return m.group(1), names
-
-
-def _param_names(obj):
+def _compare(text):
     try:
-        import inspect
-        return list(inspect.signature(obj).parameters)
-    except (TypeError, ValueError):
+        node = ast.parse(text, mode="eval").body
+    except SyntaxError:
         return None
+    if (
+        isinstance(node, ast.Compare)
+        and len(node.ops) == 1
+        and isinstance(node.ops[0], (ast.Eq, ast.In))
+    ):
+        return node
+    return None
 
 
-def _interface_drift(comp_dir, code_dir, slug):
-    sigs = []
-    for name in ("library.md", "cli.md"):
-        path = comp_dir / "interface" / name
-        if path.is_file():
-            sigs += _documented(path.read_text(encoding="utf-8"))
-    if (comp_dir / "interface" / "cli.md").is_file():
-        sigs.append(("main", None))
-    if not sigs:
-        return False
-    try:
-        module = _load_module(code_dir, slug.replace("-", "_"))
-    except Exception:
-        module = None
-    for name, params in sigs:
-        obj = getattr(module, name, None)
-        if not callable(obj):
-            return True
-        if params is not None and _param_names(obj) != params:
-            return True
-    return False
+def _pytest_detail(junit, code):
+    if code is None:
+        return _detail(f"test timed out after {DEFAULT_TEST_TIMEOUT:g} seconds")
+    message, text = _junit_failure(junit)
+    first = message.split("\n", 1)[0]
+    source = re.search(r"^>\s+assert\s+(.+?)\s*$", text, re.M)
+    node = _compare(source.group(1)) if source else None
+    if node is not None:
+        left = ast.unparse(node.left)
+        right = ast.unparse(node.comparators[0])
+        rendered = first[first.find("assert ") + len("assert "):]
+        if isinstance(node.ops[0], ast.Eq):
+            return _detail(
+                f"{left} equals {right} failed", _literal(right), _rendered(rendered, " == ", 0)
+            )
+        return _detail(
+            f"{right} contains {left} failed", _literal(left), _rendered(rendered, " in ", 1)
+        )
+    return _detail(first or f"pytest exited {code}")
 
 
-# ---------------------------------------------------------------- mutation
-
-_CMP = {
-    ast.Eq: ast.NotEq, ast.NotEq: ast.Eq, ast.Lt: ast.GtE, ast.GtE: ast.Lt,
-    ast.Gt: ast.LtE, ast.LtE: ast.Gt, ast.Is: ast.IsNot, ast.IsNot: ast.Is,
-    ast.In: ast.NotIn, ast.NotIn: ast.In,
-}
-_BOOL = {ast.And: ast.Or, ast.Or: ast.And}
-_BIN = {
-    ast.Add: ast.Sub, ast.Sub: ast.Add, ast.Mult: ast.Div, ast.Div: ast.Mult,
-    ast.FloorDiv: ast.Mod, ast.Mod: ast.FloorDiv,
-}
-
-_JS_RE = re.compile(r"\bfunction\s*[\w$]*\s*\(|=>|\b(const|let)\s")
-_SCRIPT_RE = re.compile(r"<script[^>]*>(.*?)</script>", re.S)
-_JS_WORD = re.compile(r"[A-Za-z_$][\w$]*|\d[\w.]*")
-_JS_PUNCT = sorted(
-    [">>>=", "===", "!==", ">>>", "<<=", ">>=", "**=", "...", "&&=", "||=", "??=",
-     "=>", "==", "!=", "<=", ">=", "&&", "||", "??", "++", "--", "+=", "-=", "*=",
-     "/=", "%=", "&=", "|=", "^=", "<<", ">>", "**", "?."],
-    key=len, reverse=True,
-)
-_JS_SWAP = {
-    "===": "!==", "!==": "===", "==": "!=", "!=": "==", "<": ">=", ">": "<=",
-    "<=": ">", ">=": "<", "&&": "||", "||": "&&", "true": "false", "false": "true",
-}
+# ---------------------------------------------------------------- orchestration
 
 
-def _js_token_sites(s, a, b):
-    sites, prev, i = [], None, a
-    while i < b:
-        c = s[i]
-        if c.isspace():
-            i += 1
-        elif s.startswith("//", i, b):
-            j = s.find("\n", i, b)
-            i = b if j < 0 else j
-        elif s.startswith("/*", i, b):
-            j = s.find("*/", i + 2, b)
-            i = b if j < 0 else j + 2
-        elif c in "'\"`":
-            j = i + 1
-            while j < b and s[j] != c:
-                j += 2 if s[j] == "\\" else 1
-            i, prev = j + 1, "string"
+class _Verifier:
+    def __init__(self, component_id, repo_root, judge, test_author, work):
+        self.component_id = component_id
+        self.repo_root = repo_root
+        self.judge = judge
+        self.test_author = test_author
+        self.work = work
+        self.slug = component_id.removeprefix("comp-")
+        self.module_name = self.slug.replace("-", "_")
+        self.spec_dir = repo_root / "specs" / "components" / self.slug
+        self.plug = work / "plug"
+        self.plug.mkdir()
+        (self.plug / "hotdocs_asset_runner.py").write_text(_PLUGIN_SOURCE, encoding="utf-8")
+        self.authored = work / "authored"
+        self.authored.mkdir()
+        self.compiled = None
+        self.passing = []
+        self.declared = []
+        self.adapters = {}
+        self.adapter_paths = {}
+        self.interpreter = sys.executable
+        self.code_dir = repo_root / "gen" / self.slug
+
+    def dependency(self, name):
+        rel = _DEPENDENCIES[name]
+        base = self.repo_root / rel
+        if not base.is_dir():
+            base = _tool_root() / rel
+        return _load_dir(base, name)
+
+    def env(self, code_dir):
+        env = dict(os.environ)
+        env["PYTHONPATH"] = os.pathsep.join([str(code_dir), str(self.plug)])
+        env["HOTDOCS_ASSETS"] = json.dumps(
+            [
+                {
+                    "path": path,
+                    "file": str(code_dir / path),
+                    "adapter": str(self.adapter_paths[kind]),
+                }
+                for kind, path in self.declared
+            ]
+        )
+        env["HOTDOCS_PYTHON"] = str(self.interpreter)
+        env["PYTHONDONTWRITEBYTECODE"] = "1"
+        return env
+
+    def run(self):
+        text = (self.spec_dir / "component.md").read_text(encoding="utf-8")
+        sealed, source_path, declared = _frontmatter(text)
+        criteria = _criteria(self.spec_dir / "acceptance")
+        score = error = None
+        if sealed:
+            self.code_dir = self.repo_root / source_path
+            assets, failure = [], None
+            tests = _characterization(self.repo_root / "verification" / self.slug)
         else:
-            m = _JS_WORD.match(s, i, b)
-            if m:
-                tok, kind = m.group(), "word"
+            self.declared = declared
+            assets, failure = self.provision()
+            tests = []
+        drift = _interface_drift(self.spec_dir / "interface", self.code_dir, self.module_name)
+        entries = []
+        for crit in criteria:
+            if crit.kind == "llm-judge":
+                entries.append(self.judged(crit))
+            elif sealed:
+                entries.append(self.characterized(crit, tests))
+            elif failure is not None:
+                entries.append(_fail(crit, "environment", _detail(failure)))
+            elif crit.kind == "compiled":
+                entries.append(self.compiled_criterion(crit))
             else:
-                tok = next((p for p in _JS_PUNCT if s.startswith(p, i, b)), c)
-                kind = tok
-            end = i + len(tok)
-            if tok in _JS_SWAP:
-                sites.append((i, end, _JS_SWAP[tok]))
-            elif tok in ("+", "-") and prev in ("word", ")", "]"):
-                sites.append((i, end, "-" if tok == "+" else "+"))
-            prev, i = kind, end
-    return sites
+                entries.append(self.generated(crit))
+        if not sealed and failure is None:
+            score, error = self.mutation()
+        results = {}
+        for rid in sorted(p.stem for p in (self.spec_dir / "requirements").glob("R-*.md")):
+            covering = [e["result"] for e in entries if e["covers"] == rid]
+            results[rid] = "pass" if all(r == "pass" for r in covering) else "fail"
+        threshold = 0.9 if any(c.freeform for c in criteria) else 0.8
+        failed = (
+            drift
+            or error is not None
+            or any(e["result"] == "fail" for e in entries)
+            or (score is not None and score < threshold)
+        )
+        return VerificationReport(
+            component_id=self.component_id,
+            criteria=entries,
+            requirement_results=results,
+            interface_drift=drift,
+            mutation_score=score,
+            mutation_error=error,
+            assets=assets,
+            overall="fail" if failed else "pass",
+        )
 
+    # -- assets
 
-def _js_sites(s):
-    if not (_JS_RE.search(s) and (";" in s or "{" in s)):
-        return []
-    spans = [m.span(1) for m in _SCRIPT_RE.finditer(s)] if "<script" in s else [(0, len(s))]
-    sites = []
-    for a, b in spans:
-        sites.extend(_js_token_sites(s, a, b))
-    return sites
+    def provision(self):
+        reports = {}
+        failures = []
+        for kind in ["python"] + [k for k, _ in self.declared]:
+            if kind in reports:
+                continue
+            path = _adapter_path(self.repo_root, kind)
+            self.adapter_paths[kind] = path
+            report = {}
+            if path is None:
+                failures.append(f"unknown asset kind: {kind}")
+            else:
+                module = _load_path(path, f"kind_{kind}")
+                self.adapters[kind] = module
+                report = module.provision(self.repo_root)
+                if not _get(report, "ok"):
+                    failures.append(_get(report, "reason"))
+            reports[kind] = report
+        self.interpreter = _get(reports["python"], "interpreter")
+        assets = [self.asset("python", ".", reports)] + [
+            self.asset(kind, path, reports) for kind, path in self.declared
+        ]
+        return assets, failures[0] if failures else None
 
+    def asset(self, kind, path, reports):
+        definition = self.repo_root / "specs" / "architecture" / f"asset-kind-{kind}.md"
+        adapter = self.adapter_paths[kind]
+        return {
+            "kind": kind,
+            "path": path,
+            "definition_sha256": _sha(definition) if definition.is_file() else None,
+            "adapter_sha256": _sha(adapter) if adapter else None,
+            "versions": _get(reports[kind], "versions", {}),
+            "lockfile_sha256": _get(reports[kind], "lockfile_sha256"),
+        }
 
-def _sites(tree):
-    docs = set()
-    for node in ast.walk(tree):
-        if isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
-            first = node.body[:1]
-            if first and isinstance(first[0], ast.Expr) and isinstance(first[0].value, ast.Constant) \
-                    and isinstance(first[0].value.value, str):
-                docs.add(id(first[0].value))
-    sites = []
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Compare) and len(node.ops) == 1:
-            sites.append((node, "ops", [_CMP[type(node.ops[0])]()]))
-        elif isinstance(node, ast.BoolOp):
-            sites.append((node, "op", _BOOL[type(node.op)]()))
-        elif isinstance(node, ast.BinOp) and type(node.op) in _BIN:
-            sites.append((node, "op", _BIN[type(node.op)]()))
-        elif isinstance(node, ast.Constant) and isinstance(node.value, bool):
-            sites.append((node, "value", not node.value))
-        elif isinstance(node, ast.Constant) and isinstance(node.value, str) and id(node) not in docs:
-            value = node.value
-            for start, end, repl in _js_sites(value):
-                sites.append((node, "value", value[:start] + repl + value[end:]))
-    return sites
+    # -- criteria
 
+    def bundle(self, crit):
+        assembler = self.dependency("spec_bundle_assembler")
+        return assembler.assemble_criterion(self.component_id, crit.id, self.repo_root)
 
-def _mutation(root, slug, tests):
-    if not tests:
-        return 1.0, None
-    with tempfile.TemporaryDirectory() as tmp:
-        tmp = Path(tmp)
-        gen = tmp / "gen"
-        copy = gen / slug
-        shutil.copytree(root / "gen" / slug, copy, ignore=shutil.ignore_patterns("__pycache__"))
-        for other in sorted((root / "gen").iterdir()):
-            if other.is_dir() and other.name != slug:
-                (gen / other.name).symlink_to(other.resolve())
-        test_dir = tmp / "tests"
-        test_dir.mkdir()
-        files = []
-        for cid, content in tests:
-            path = test_dir / _test_filename(cid)
-            path.write_text(content, encoding="utf-8")
-            files.append(path)
-        rc, _, elapsed = _pytest(files, copy, copy, TIMEOUT, {}, ["--noconftest"])
-        if rc is None:
-            return None, f"mutation baseline timed out in the sandbox after {TIMEOUT} seconds"
-        if rc != 0:
-            return None, f"mutation baseline failed in the sandbox: pytest exited {rc}"
-        limit = max(2.0, 10 * elapsed)
+    def judged(self, crit):
+        if self.judge is None:
+            return _entry(crit, "skipped", rationale=None)
+        outcome = self.judge(self.bundle(crit))
+        if isinstance(outcome, (str, bool)):
+            result, rationale = outcome, None
+        else:
+            result = _get(outcome, "result", _get(outcome, "verdict"))
+            rationale = _get(outcome, "rationale")
+        return _entry(crit, "pass" if result in (True, "pass") else "fail", rationale=rationale)
+
+    def run_criterion(self, crit, targets, extra):
+        junit = self.work / f"{crit.id}.xml"
+        cmd = [
+            str(self.interpreter), "-m", "pytest", "-q",
+            "-p", "no:cacheprovider", "-p", "hotdocs_asset_runner",
+            f"--junitxml={junit}", *map(str, targets),
+        ]
+        code, _ = _run(cmd, self.repo_root, self.env(self.code_dir), DEFAULT_TEST_TIMEOUT)
+        if code == 0:
+            return _entry(crit, "pass", **extra)
+        return _fail(crit, "implementation", _pytest_detail(junit, code), **extra)
+
+    def characterized(self, crit, tests):
+        stem = _test_stem(crit.id)
+        targets = [
+            f"{path}::{name}"
+            for path, name in tests
+            if name == stem or name.startswith(stem + "_")
+        ]
+        if not targets:
+            return _fail(crit, "implementation", _detail("no characterization test"))
+        return self.run_criterion(crit, targets, {})
+
+    def compiled_criterion(self, crit):
+        if self.compiled is None:
+            compiler = self.dependency("criterion_compiler")
+            report = compiler.compile(self.component_id, self.repo_root, out_dir=self.work / "compiled")
+            self.compiled = {_get(o, "criterion_id"): o for o in _get(report, "outputs", [])}
+        output = self.compiled.get(crit.id, {})
+        if _get(output, "status") != "compiled":
+            return _fail(crit, "implementation", _detail(_get(output, "message", "not compiled")))
+        return self.run_criterion(crit, [self.repo_root / _get(output, "file")], {})
+
+    def author(self, bundle, extra):
+        outcome = self.test_author(bundle)
+        if _get(_get(outcome, "model_call_error"), "category") in _TRANSIENT:
+            outcome = self.test_author(bundle)
+        extra["test_authoring"] = {
+            key: _get(outcome, key) for key in ("model", "seed", "prompt_version", "cache_hit")
+        }
+        error = _get(outcome, "model_call_error")
+        if error:
+            return None, (
+                f"test authoring failed: {_get(error, 'category')}: {_get(error, 'message')}"
+            )
+        return _get(_get(outcome, "file"), "content"), None
+
+    def write(self, name, source):
+        path = self.authored / name
+        path.write_text(source, encoding="utf-8")
+        return path
+
+    def probe(self, source, bundle):
+        probe = self.dependency("test_probe").probe
+        kwargs = {}
+        if "interpreter" in inspect.signature(probe).parameters:
+            kwargs["interpreter"] = self.interpreter
+        return probe(source, bundle, self.module_name, **kwargs)
+
+    def generated(self, crit):
+        bundle = self.bundle(crit)
+        name = _test_stem(crit.id) + ".py"
+        cache = self.repo_root / "verification" / self.slug / "generated-test" / name
+        source = cache.read_text(encoding="utf-8") if cache.is_file() else ""
+        extra = {}
+        path, authored = cache, False
+        if source.split("\n", 1)[0] != _header(bundle):
+            if self.test_author is None:
+                return _fail(
+                    crit, "test", _detail("no current cached test and no test_author configured")
+                )
+            source, problem = self.author(bundle, extra)
+            if problem:
+                return _fail(crit, "test", _detail(problem), **extra)
+            path, authored = self.write(name, source), True
+        report = self.probe(source, bundle)
+        if not _get(report, "ok") and not authored and self.test_author is not None:
+            source, problem = self.author(bundle, extra)
+            if problem:
+                return _fail(crit, "test", _detail(problem), **extra)
+            path = self.write(name, source)
+            report = self.probe(source, bundle)
+        if not _get(report, "ok"):
+            return _fail(
+                crit, "test", _detail("test failed its probe: " + _error_kinds(report)), **extra
+            )
+        entry = self.run_criterion(crit, [path], extra)
+        if entry["result"] == "pass":
+            self.passing.append((entry, path, cache))
+        return entry
+
+    # -- mutation
+
+    def sandbox_run(self, copy, files, timeout):
+        cmd = [
+            str(self.interpreter), "-m", "pytest", "-q",
+            "-p", "no:cacheprovider", "--noconftest", "-p", "hotdocs_asset_runner",
+            *map(str, files),
+        ]
+        return _run(cmd, copy, self.env(copy), timeout)
+
+    def mutation(self):
+        if not self.passing:
+            return None, None
+        sandbox = self.work / "sandbox"
+        copy = sandbox / "gen" / self.slug
+        shutil.copytree(self.code_dir, copy, ignore=shutil.ignore_patterns("__pycache__"))
+        for other in sorted((self.repo_root / "gen").iterdir()):
+            if other.is_dir() and other.name != self.slug:
+                os.symlink(other, sandbox / "gen" / other.name)
+        found = _javascript(copy)
+        if found:
+            return None, (
+                f"javascript in a string at {found}; declare it as an asset "
+                "(specs/architecture/asset-kinds.md)"
+            )
+        tests = list(self.passing)
+        code, elapsed = self.sandbox_run(copy, [t[1] for t in tests], DEFAULT_TEST_TIMEOUT)
+        if code != 0:
+            remaining = []
+            for item in tests:
+                alone, _ = self.sandbox_run(copy, [item[1]], DEFAULT_TEST_TIMEOUT)
+                if alone != 0:
+                    entry = item[0]
+                    entry["result"] = "fail"
+                    entry["failure_origin"] = "test"
+                    entry["failure_detail"] = _detail("test fails in the mutation sandbox")
+                    item[2].unlink(missing_ok=True)
+                else:
+                    remaining.append(item)
+            if not remaining:
+                return None, None
+            if len(remaining) < len(tests):
+                tests = remaining
+                code, elapsed = self.sandbox_run(copy, [t[1] for t in tests], DEFAULT_TEST_TIMEOUT)
+        if code is None:
+            return None, "mutation baseline timed out in the sandbox after 300 seconds"
+        if code != 0:
+            return None, f"mutation baseline failed in the sandbox: pytest exited {code}"
+        timeout = max(2.0, 10 * elapsed)
+        files = [t[1] for t in tests]
+        snapshot = {p: p.read_bytes() for p in copy.rglob("*") if p.is_file()}
+        targets = [("python", copy)] + [(kind, copy / path) for kind, path in self.declared]
         killed = total = 0
-        for py in sorted(copy.rglob("*.py")):
-            original = py.read_text(encoding="utf-8")
-            tree = ast.parse(original)
-            for node, attr, new in _sites(tree):
-                old = getattr(node, attr)
-                setattr(node, attr, new)
-                mutated = ast.unparse(tree)
-                setattr(node, attr, old)
-                py.write_text(mutated, encoding="utf-8")
-                rc, _, _ = _pytest(files, copy, copy, limit, {}, ["--noconftest"])
-                killed += rc != 0
-                total += 1
-            py.write_text(original, encoding="utf-8")
+        for kind, target in targets:
+            adapter = self.adapters[kind]
+            try:
+                for site in adapter.strength_sites(target):
+                    adapter.apply_site(target, site)
+                    result, _ = self.sandbox_run(copy, files, timeout)
+                    killed += result != 0
+                    total += 1
+                    for path, data in snapshot.items():
+                        path.write_bytes(data)
+            except Exception as exc:
+                return None, f"{kind} adapter failed: {type(exc).__name__}: {exc}"
         return (killed / total if total else 1.0), None
 
 
-# ---------------------------------------------------------------- verify
-
-
-def _with_detail(base, detail, origin="implementation", extra=None):
-    entry = dict(base)
-    entry["result"] = "pass" if detail is None else "fail"
-    entry.update(extra or {})
-    if detail is not None:
-        entry["failure_detail"] = detail
-        entry["failure_origin"] = origin
-    return entry
-
-
 def verify(component_id, repo_root, judge=None, test_author=None):
-    root = Path(repo_root).absolute()
-    slug = component_id.removeprefix("comp-")
-    comp_dir = root / "specs" / "components" / slug
-    meta = _frontmatter(comp_dir / "component.md")
-    sealed = meta.get("sealed") == "true"
-    code_dir = root / meta["source_path"] if sealed else root / "gen" / slug
-    specs = _read_criteria(comp_dir / "acceptance")
-
-    loaded = {}
-
-    def dep(name, rel):
-        key = (str(root), name)
-        if key not in loaded:
-            loaded[key] = _load_dependency(root, rel, name)
-        return loaded[key]
-
-    def bundle_for(cid):
-        assembler = dep("spec_bundle_assembler", "gen/spec-bundle-assembler")
-        return assembler.assemble_criterion(component_id, cid, root)
-
-    def generated(cid):
-        cached = root / "verification" / slug / "generated-test" / _test_filename(cid)
-        content = None
-        authoring = None
-        bundle = None
-        if cached.is_file() or test_author is not None:
-            bundle = bundle_for(cid)
-            text = (_get(bundle, "criterion_text") + "\n" + _get(bundle, "requirement_text")).encode("utf-8")
-            header = "# hotdocs-criterion: sha256:" + hashlib.sha256(text).hexdigest()
-            if cached.is_file():
-                cached_text = cached.read_text(encoding="utf-8")
-                if cached_text.split("\n", 1)[0] == header:
-                    content = cached_text
-        if content is None and test_author is None:
-            return _detail("no cached test and no test_author configured"), "test", None, None
-        if content is None:
-            result = test_author(bundle)
-            if _get(_get(result, "model_call_error"), "category") in _RETRYABLE:
-                result = test_author(bundle)
-            error = _get(result, "model_call_error")
-            authoring = {k: _get(result, k) for k in ("model", "seed", "prompt_version", "cache_hit")}
-            if error is not None:
-                message = f"test authoring failed: {_get(error, 'category')}: {_get(error, 'message')}"
-                return _detail(message), "test", authoring, None
-            content = _get(_get(result, "file"), "content")
-        return _run_test(content, cid, root, code_dir), "implementation", authoring, content
-
-    outputs = {}
-    if not sealed and any(s["kind"] == "compiled" for s in specs):
-        compiler = dep("criterion_compiler", "pipeline/criterion-compiler")
-        report = compiler.compile(component_id, root)
-        outputs = {_get(o, "criterion_id"): o for o in _get(report, "outputs")}
-    cases = _characterize(root, slug, code_dir) if sealed else None
-
-    criteria = []
-    passing = []
-    for spec in specs:
-        cid, kind = spec["id"], spec["kind"]
-        base = {"id": cid, "covers": spec["covers"], "kind": kind}
-        if kind == "llm-judge":
-            if judge is None:
-                result, rationale = "skipped", None
-            else:
-                outcome = judge(bundle_for(cid))
-                verdict = _get(outcome, "result")
-                verdict = _get(outcome, "verdict") if verdict is None else verdict
-                verdict = outcome if verdict is None else verdict
-                result = "pass" if verdict is True or str(verdict).lower() == "pass" else "fail"
-                rationale = _get(outcome, "rationale")
-            criteria.append({**base, "result": result, "rationale": rationale})
-        elif sealed:
-            criteria.append(_with_detail(base, _sealed_detail(cases, cid)))
-        elif kind == "compiled":
-            out = outputs.get(cid)
-            if _get(out, "status") == "compiled":
-                content = (root / _get(out, "file")).read_text(encoding="utf-8")
-                detail = _run_test(content, cid, root, code_dir)
-            else:
-                detail = _detail(_get(out, "message") or f"{cid} was not compiled")
-            criteria.append(_with_detail(base, detail))
-        else:
-            detail, origin, authoring, content = generated(cid)
-            extra = {"test_authoring": authoring} if authoring is not None else None
-            criteria.append(_with_detail(base, detail, origin, extra))
-            if detail is None:
-                passing.append((cid, content))
-
-    requirement_results = {}
-    for path in sorted((comp_dir / "requirements").glob("R-*.md")):
-        covering = [c for c in criteria if c["covers"] == path.stem]
-        ok = bool(covering) and all(c["result"] == "pass" for c in covering)
-        requirement_results[path.stem] = "pass" if ok else "fail"
-
-    drift = _interface_drift(comp_dir, code_dir, slug)
-    failed = any(c["result"] == "fail" for c in criteria) or drift
-
-    if sealed:
-        score, error = None, None
-        failed = failed or not code_dir.is_dir()
-    else:
-        score, error = _mutation(root, slug, passing)
-        threshold = 0.9 if any(s["kind"] == "generated-test" and s["freeform"] for s in specs) else 0.8
-        failed = failed or error is not None or score < threshold
-
-    return VerificationReport(
-        component_id=component_id,
-        criteria=criteria,
-        requirement_results=requirement_results,
-        interface_drift=drift,
-        mutation_score=score,
-        mutation_error=error,
-        overall="fail" if failed else "pass",
-    )
+    with tempfile.TemporaryDirectory() as work:
+        verifier = _Verifier(
+            component_id, Path(repo_root).absolute(), judge, test_author, Path(work)
+        )
+        return verifier.run()
 
 
 # ---------------------------------------------------------------- CLI
 
 
-def _usage():
-    print(_USAGE, file=sys.stderr)
+def _usage(cause):
+    print(f"usage error: {cause}", file=sys.stderr)
+    print(USAGE, file=sys.stderr)
     return 2
 
 
-def main(argv):
-    args = list(argv)
-    opts = {"--repo-root": ".", "--format": "text"}
+def main(argv=None):
+    if argv is None:
+        argv = sys.argv[1:]
     component_id = None
-    i = 0
-    while i < len(args):
-        arg = args[i]
-        name, eq, value = arg.partition("=")
-        if name in opts:
+    repo_root = "."
+    fmt = "text"
+    index = 0
+    while index < len(argv):
+        token = argv[index]
+        flag, eq, value = token.partition("=")
+        if flag in ("--repo-root", "--format"):
             if not eq:
-                if i + 1 >= len(args):
-                    return _usage()
-                i += 1
-                value = args[i]
-            opts[name] = value
-        elif component_id is None and not arg.startswith("-"):
-            component_id = arg
+                if index + 1 >= len(argv):
+                    return _usage(f"{flag} requires a value")
+                index += 1
+                value = argv[index]
+            if flag == "--repo-root":
+                repo_root = value
+            else:
+                fmt = value
+        elif token.startswith("-") or component_id is not None:
+            return _usage(f"unknown argument: {token}")
         else:
-            return _usage()
-        i += 1
-    if component_id is None or opts["--format"] not in ("json", "text"):
-        return _usage()
-    root = Path(opts["--repo-root"])
-    if not (root / "specs" / "components" / component_id.removeprefix("comp-") / "component.md").is_file():
-        return _usage()
+            component_id = token
+        index += 1
+    if component_id is None:
+        return _usage("missing <component-id>")
+    if fmt not in ("json", "text"):
+        return _usage(f"invalid --format: {fmt}")
+    root = Path(repo_root)
+    slug = component_id.removeprefix("comp-")
+    if not (root / "specs" / "components" / slug / "component.md").is_file():
+        return _usage(f"unknown component: {component_id}")
     report = verify(component_id, root)
-    if opts["--format"] == "json":
-        print(json.dumps(report.to_dict(), indent=2))
+    if fmt == "json":
+        print(json.dumps(report.to_dict(), indent=2, default=repr))
     else:
         print(f"{report.component_id}: {report.overall}")
-        for c in report.criteria:
-            print(f"  {c['id']}: {c['result']}")
+        for criterion in report.criteria:
+            print(f"  {criterion['id']}: {criterion['result']}")
     return 0 if report.overall == "pass" else 1

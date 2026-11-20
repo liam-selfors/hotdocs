@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:ca4c4e91c0dc7bef09feb5cf84ecedac5f6146725e96f39845dfe8563d4a96dc
+# hotdocs-criterion: sha256:d0236924d9868d2706bca47f2014627428ba238878f42ebfbbe3895d1699643d
 import json
 from pathlib import Path
 
@@ -10,52 +10,53 @@ def field(value, name):
 
 
 def write(path, text):
+    path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
 
 
-CRITERION_TEXTS = {
-    "AC-WIDGET-001": (
-        "Given a number 2\n"
-        "When double is called with it\n"
-        "Then it returns 4\n"
-    ),
-    "AC-WIDGET-002": (
-        "Given the widget spec\n"
-        "When a reviewer reads it\n"
-        "Then it is clear\n"
-    ),
+CRITERIA = {
+    "AC-WIDGET-001": ("R-WIDGET-001", "generated-test"),
+    "AC-WIDGET-002": ("R-WIDGET-002", "llm-judge"),
 }
 
-REQUIREMENT_TEXTS = {
-    "R-WIDGET-001": "**R-WIDGET-001** — `double(x)` MUST return `2 * x`.",
-    "R-WIDGET-002": "**R-WIDGET-002** — The widget spec MUST be clear.",
-}
 
-COVERS = {"AC-WIDGET-001": "R-WIDGET-001", "AC-WIDGET-002": "R-WIDGET-002"}
+GENERATED_TEST_SOURCE = (
+    "import widget\n"
+    "\n"
+    "\n"
+    "def test_value_is_three():\n"
+    "    assert widget.VALUE == 3\n"
+)
 
 
-def build_fixture(repo_root, log_path):
-    write(repo_root / "specs" / "glossary.md", "# Glossary\n\n- **Widget** — a test term.\n")
+def build_fixture(repo_root):
+    repo_root = Path(repo_root)
+
     write(
-        repo_root / "specs" / "product" / "widgeting.md",
+        repo_root / "specs" / "glossary.md",
+        "# Glossary\n\n- **Widget** - a thing under test.\n",
+    )
+    write(
+        repo_root / "specs" / "product" / "widget.md",
         "---\n"
-        "id: P-WIDGETING\n"
-        "title: Widgeting\n"
+        "id: P-WIDGET\n"
+        "title: Widget capability\n"
         "status: draft\n"
-        "owners: [team-a]\n"
+        "owners: [team]\n"
         "---\n"
         "\n"
-        "# Widgeting\n"
+        "# Widget capability\n"
         "\n"
         "## Purpose\n"
         "\n"
-        "Widgets double numbers.\n"
+        "Provide a widget value.\n"
         "\n"
         "## Scope\n"
         "\n"
-        "- In scope: doubling.\n",
+        "- In scope: the widget value.\n",
     )
+
     comp = repo_root / "specs" / "components" / "widget"
     write(
         comp / "component.md",
@@ -63,181 +64,234 @@ def build_fixture(repo_root, log_path):
         "id: comp-widget\n"
         "title: Widget\n"
         "status: draft\n"
-        "owners: [team-a]\n"
-        "realizes: [P-WIDGETING]\n"
-        "depends_on: []\n"
+        "owners: [team]\n"
+        "realizes: [P-WIDGET]\n"
         "---\n"
         "\n"
         "# Widget\n"
         "\n"
         "## Purpose\n"
         "\n"
-        "Widget doubles a number.\n",
+        "Exposes a constant widget value.\n"
+        "\n"
+        "## Scope\n"
+        "\n"
+        "- In scope: the value.\n"
+        "\n"
+        "## Definitions\n"
+        "\n"
+        "None.\n"
+        "\n"
+        "## Behavior\n"
+        "\n"
+        "See `requirements/`.\n"
+        "\n"
+        "## Interfaces\n"
+        "\n"
+        "See `interface/`.\n"
+        "\n"
+        "## Data\n"
+        "\n"
+        "See `interface/data/`.\n"
+        "\n"
+        "## Acceptance criteria\n"
+        "\n"
+        "See `acceptance/`.\n"
+        "\n"
+        "## Non-functional constraints\n"
+        "\n"
+        "See `constraints.md`.\n"
+        "\n"
+        "## Open questions\n"
+        "\n"
+        "## Change log\n"
+        "\n"
+        "- Initial.\n",
     )
-    write(comp / "requirements" / "R-WIDGET-001.md", "# R-WIDGET-001\n\n" + REQUIREMENT_TEXTS["R-WIDGET-001"] + "\n")
-    write(comp / "requirements" / "R-WIDGET-002.md", "# R-WIDGET-002\n\n" + REQUIREMENT_TEXTS["R-WIDGET-002"] + "\n")
+    write(
+        comp / "requirements" / "R-WIDGET-001.md",
+        "**R-WIDGET-001** - The module MUST expose `VALUE` equal to 3.\n",
+    )
+    write(
+        comp / "requirements" / "R-WIDGET-002.md",
+        "**R-WIDGET-002** - The spec MUST be clear.\n",
+    )
+    write(
+        comp / "interface" / "library.md",
+        "# Library\n\n```\nVALUE: int  # 3\n```\n",
+    )
+    write(comp / "constraints.md", "# Constraints\n\nNone.\n")
     write(
         comp / "acceptance" / "AC-WIDGET-001.md",
-        "# AC-WIDGET-001\n\nCovers: R-WIDGET-001\nKind: generated-test\n\n```gherkin\n"
-        + CRITERION_TEXTS["AC-WIDGET-001"]
-        + "```\n",
+        "# AC-WIDGET-001\n"
+        "\n"
+        "Covers: R-WIDGET-001\n"
+        "Kind: generated-test\n"
+        "\n"
+        "```gherkin\n"
+        "Given the widget module\n"
+        "When VALUE is read\n"
+        "Then it equals 3\n"
+        "```\n",
     )
     write(
         comp / "acceptance" / "AC-WIDGET-002.md",
-        "# AC-WIDGET-002\n\nCovers: R-WIDGET-002\nKind: llm-judge\n\n```gherkin\n"
-        + CRITERION_TEXTS["AC-WIDGET-002"]
-        + "```\n",
-    )
-    write(comp / "interface" / "library.md", "# Library\n\n```\ndouble(x: int) -> int\n```\n")
-    write(comp / "constraints.md", "# Constraints\n\nNone.\n")
-
-    write(repo_root / "gen" / "widget" / "widget.py", "def double(x):\n    return x * 2\n")
-
-    assembler_src = (
-        "from pathlib import Path\n"
+        "# AC-WIDGET-002\n"
         "\n"
-        "CRITERION_TEXTS = " + repr(CRITERION_TEXTS) + "\n"
-        "REQUIREMENT_TEXTS = " + repr(REQUIREMENT_TEXTS) + "\n"
-        "COVERS = " + repr(COVERS) + "\n"
-        "LOG = " + repr(str(log_path)) + "\n"
+        "Covers: R-WIDGET-002\n"
+        "Kind: llm-judge\n"
+        "\n"
+        "```gherkin\n"
+        "Given the widget spec\n"
+        "When a reviewer reads it\n"
+        "Then it is clear\n"
+        "```\n",
+    )
+
+    # Component code: no mutation sites (a numeric constant is never a site).
+    write(repo_root / "gen" / "widget" / "widget.py", "VALUE = 3\n")
+
+    # spec-bundle-assembler stand-in.
+    covers_map = {cid: cov for cid, (cov, _kind) in CRITERIA.items()}
+    write(
+        repo_root / "gen" / "spec-bundle-assembler" / "spec_bundle_assembler.py",
+        "COVERS = " + repr(covers_map) + "\n"
+        "\n"
         "\n"
         "def assemble_criterion(component_id, criterion_id, repo_root):\n"
-        "    with open(LOG, 'a', encoding='utf-8') as fh:\n"
-        "        fh.write('assemble_criterion ' + criterion_id + '\\n')\n"
-        "    covers = COVERS[criterion_id]\n"
         "    return {\n"
         "        'component_id': component_id,\n"
         "        'criterion_id': criterion_id,\n"
-        "        'covers': covers,\n"
-        "        'criterion_text': CRITERION_TEXTS[criterion_id],\n"
-        "        'requirement_text': REQUIREMENT_TEXTS[covers],\n"
-        "        'interface': '# Library\\n\\ndouble(x: int) -> int',\n"
-        "        'glossary': '# Glossary',\n"
+        "        'covers': COVERS.get(criterion_id, ''),\n"
+        "        'criterion_text': 'criterion ' + criterion_id,\n"
+        "        'requirement_text': 'requirement for ' + criterion_id,\n"
+        "        'interface': 'VALUE: int',\n"
+        "        'glossary': 'glossary',\n"
         "        'dependency_interfaces': {},\n"
-        "    }\n"
+        "        'testing': '',\n"
+        "    }\n",
     )
-    write(repo_root / "gen" / "spec-bundle-assembler" / "spec_bundle_assembler.py", assembler_src)
 
-    compiler_src = (
-        "from dataclasses import dataclass, field\n"
+    # test-probe stand-in: always ok, no findings.
+    write(
+        repo_root / "gen" / "test-probe" / "test_probe.py",
+        "GATE_VERSION = 'test-probe@1.3.0'\n"
         "\n"
-        "GATE_VERSION = 'criterion-compiler@1.0.0'\n"
         "\n"
-        "@dataclass\n"
-        "class InterfaceSurface:\n"
-        "    functions: dict = field(default_factory=dict)\n"
-        "    types: dict = field(default_factory=dict)\n"
-        "    module_name: str = ''\n"
+        "class ProbeReport:\n"
+        "    def __init__(self):\n"
+        "        self.ok = True\n"
+        "        self.findings = []\n"
+        "        self.tests_run = 1\n"
+        "        self.tests_reached = 1\n"
         "\n"
-        "@dataclass\n"
-        "class ParsedCriterion:\n"
-        "    criterion_id: str\n"
-        "    covers: str\n"
-        "    kind: str\n"
-        "    gherkin: str\n"
-        "    file: str\n"
+        "    def to_dict(self):\n"
+        "        return {\n"
+        "            'ok': self.ok,\n"
+        "            'findings': list(self.findings),\n"
+        "            'tests_run': self.tests_run,\n"
+        "            'tests_reached': self.tests_reached,\n"
+        "        }\n"
         "\n"
-        "@dataclass\n"
-        "class CompileReport:\n"
-        "    outputs: list\n"
-        "    gate_version: str\n"
-        "    summary: dict\n"
         "\n"
-        "def compile(component_id, repo_root, target='pytest', out_dir=None):\n"
-        "    return CompileReport(outputs=[], gate_version=GATE_VERSION,\n"
-        "                         summary={'compiled': 0, 'errors': 0, 'skipped_non_compiled_kind': 2})\n"
-        "\n"
-        "def compile_criterion(criterion, surface=None):\n"
-        "    return {'status': 'error', 'message': 'line 1: not supported in stand-in'}\n"
+        "def probe(test_source, criterion_bundle, module_name, *, timeout=60.0, interpreter=None):\n"
+        "    return ProbeReport()\n",
     )
-    write(repo_root / "pipeline" / "criterion-compiler" / "criterion_compiler.py", compiler_src)
+    return repo_root
 
 
-TEST_CONTENT = (
-    "import widget\n"
-    "\n"
-    "\n"
-    "def test_double():\n"
-    "    assert widget.double(2) == 4\n"
-    "    assert widget.double(3) == 6\n"
-)
-
-
-def make_test_author(log_path):
-    def test_author(bundle):
+def make_author(log_path):
+    def author_stub(bundle):
         with open(log_path, "a", encoding="utf-8") as fh:
-            fh.write("test_author\n")
+            fh.write(str(field(bundle, "criterion_id")) + "\n")
         return {
-            "component_id": "comp-widget",
-            "criterion_id": "AC-WIDGET-001",
             "model": "fake-model",
             "seed": 0,
             "prompt_version": "v1",
             "cache_hit": False,
+            "model_call_error": None,
             "file": {
                 "path": "verification/widget/generated-test/test_ac_widget_001.py",
-                "content": TEST_CONTENT,
+                "content": GENERATED_TEST_SOURCE,
             },
-            "model_call_error": None,
         }
 
-    return test_author
+    return author_stub
 
 
-def test_verify_produces_exactly_one_verification_report(tmp_path):
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    log_path = tmp_path / "calls.log"
-    log_path.write_text("", encoding="utf-8")
-    build_fixture(repo_root, log_path)
+def make_judge(log_path):
+    def judge_stub(bundle):
+        with open(log_path, "a", encoding="utf-8") as fh:
+            fh.write(str(field(bundle, "criterion_id")) + "\n")
+        return {"result": "pass", "rationale": "clear enough"}
+
+    return judge_stub
+
+
+def test_verify_produces_exactly_one_structured_report(tmp_path):
+    repo_root = build_fixture(tmp_path / "repo")
+    author_log = tmp_path / "author.log"
+    judge_log = tmp_path / "judge.log"
 
     report = verifier_orchestrator.verify(
-        "comp-widget", repo_root, test_author=make_test_author(log_path)
+        "comp-widget",
+        repo_root,
+        judge=make_judge(judge_log),
+        test_author=make_author(author_log),
     )
 
-    # Exactly one report: a single dataclass instance, not a collection or bare dict.
+    # Exactly one report object, not a collection of reports.
     assert report is not None
-    assert not isinstance(report, (list, tuple, set, dict))
-    assert type(report).__name__ == "VerificationReport"
+    assert not isinstance(report, (list, tuple, set))
+    assert hasattr(report, "to_dict")
 
-    assert field(report, "component_id") == "comp-widget"
-
-    criteria = field(report, "criteria")
-    assert isinstance(criteria, list)
-    ids = [c["id"] for c in criteria]
-    assert sorted(ids) == ["AC-WIDGET-001", "AC-WIDGET-002"]
-    assert len(ids) == len(set(ids))
-    for c in criteria:
-        assert isinstance(c, dict)
-        assert c["result"] in ("pass", "fail", "skipped")
-        assert c["covers"] == COVERS[c["id"]]
-    by_id = {c["id"]: c for c in criteria}
-    assert by_id["AC-WIDGET-001"]["kind"] == "generated-test"
-    assert by_id["AC-WIDGET-001"]["result"] == "pass"
-    assert by_id["AC-WIDGET-002"]["kind"] == "llm-judge"
-    assert by_id["AC-WIDGET-002"]["result"] == "skipped"
-
-    mutation_score = field(report, "mutation_score")
-    assert mutation_score is None or isinstance(mutation_score, (int, float))
-    assert not isinstance(mutation_score, bool)
-
-    interface_drift = field(report, "interface_drift")
-    assert isinstance(interface_drift, bool)
-
-    overall = field(report, "overall")
-    assert overall in ("pass", "fail")
-
-    # The JSON form carries the same single report with all required keys.
     as_dict = report.to_dict()
     assert isinstance(as_dict, dict)
-    for key in ("component_id", "criteria", "mutation_score", "interface_drift", "overall"):
-        assert key in as_dict
-    assert as_dict["overall"] == overall
-    assert as_dict["interface_drift"] == interface_drift
-    assert as_dict["mutation_score"] == mutation_score
-    assert sorted(c["id"] for c in as_dict["criteria"]) == ["AC-WIDGET-001", "AC-WIDGET-002"]
-    json.dumps(as_dict)
+    # The JSON form is one serializable document.
+    reparsed = json.loads(json.dumps(as_dict))
+    assert isinstance(reparsed, dict)
 
-    # The test_author stand-in ran once for the one generated-test criterion.
-    calls = [line for line in log_path.read_text(encoding="utf-8").splitlines() if line == "test_author"]
-    assert len(calls) == 1
+    for key in ("component_id", "criteria", "mutation_score", "interface_drift", "overall", "assets"):
+        assert key in as_dict, key
+
+    assert field(report, "component_id") == "comp-widget"
+    assert as_dict["component_id"] == "comp-widget"
+
+    # Per-criterion results: one entry per acceptance criterion.
+    criteria = field(report, "criteria")
+    assert isinstance(criteria, list)
+    ids = [field(c, "id") for c in criteria]
+    assert sorted(ids) == sorted(CRITERIA.keys())
+    assert len(ids) == len(set(ids))
+    for c in criteria:
+        cid = field(c, "id")
+        assert field(c, "result") in ("pass", "fail", "skipped")
+        assert field(c, "covers") == CRITERIA[cid][0]
+        assert field(c, "kind") == CRITERIA[cid][1]
+
+    dict_ids = sorted(c["id"] for c in as_dict["criteria"])
+    assert dict_ids == sorted(CRITERIA.keys())
+
+    # Mutation score: a number in [0, 1] or null.
+    score = field(report, "mutation_score")
+    assert score is None or (
+        isinstance(score, (int, float)) and not isinstance(score, bool) and 0.0 <= score <= 1.0
+    )
+    assert as_dict["mutation_score"] == score
+
+    # Interface drift: a boolean.
+    drift = field(report, "interface_drift")
+    assert isinstance(drift, bool)
+    assert as_dict["interface_drift"] == drift
+
+    # Overall verdict.
+    overall = field(report, "overall")
+    assert overall in ("pass", "fail")
+    assert as_dict["overall"] == overall
+
+    # Declared assets: the implicit python asset first.
+    assets = field(report, "assets")
+    assert isinstance(assets, list)
+    assert len(assets) >= 1
+    assert field(assets[0], "kind") == "python"
+    assert field(assets[0], "path") == "."

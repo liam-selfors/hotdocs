@@ -1,12 +1,39 @@
-# hotdocs-criterion: sha256:2590c13211f01655490ce8e068d4a07a9c9c054ac7d5b940a6d7a56a05398633
-"""AC-VERIFY-015: the mutation score is one union score across all
-generated-test files, never either test's isolated score."""
-
+# hotdocs-criterion: sha256:658047b890f107acf818962774e98f900311dd6b6cbc8198d06f3b24f64408e2
+import hashlib
+import json
 from pathlib import Path
 
-import pytest
-
 import verifier_orchestrator
+
+
+SLUG = "widget-math"
+COMPONENT_ID = "comp-widget-math"
+MODULE = "widget_math"
+
+LIBRARY_TEXT = (
+    "# Library\n"
+    "\n"
+    "```\n"
+    "alpha(x: int) -> int\n"
+    "beta(x: int, y: int) -> int\n"
+    "```\n"
+    "\n"
+    "`alpha(x)` returns `x + 1` when `x > 0`, else `x - 1`.\n"
+    "`beta(x, y)` returns `x * y - y`.\n"
+)
+
+MODULE_SOURCE = (
+    "def alpha(x):\n"
+    "    if x > 0:\n"
+    "        return x + 1\n"
+    "    return x - 1\n"
+    "\n"
+    "\n"
+    "def beta(x, y):\n"
+    "    return x * y - y\n"
+)
+
+GLOSSARY_TEXT = "# Glossary\n\n- **Widget** - a thing.\n"
 
 
 def field(value, name):
@@ -18,259 +45,228 @@ def write(path, text):
     path.write_text(text, encoding="utf-8")
 
 
-GLOSSARY = "# Glossary\n\n- **Foo** \u2014 a test term.\n"
-
-PRODUCT = (
-    "---\n"
-    "id: P-MIX\n"
-    "title: Mix\n"
-    "status: draft\n"
-    "owners: [team-a]\n"
-    "---\n"
-    "\n"
-    "# Mix\n"
-    "\n"
-    "## Purpose\n"
-    "\n"
-    "Mixes numbers.\n"
-    "\n"
-    "## Scope\n"
-    "\n"
-    "- In scope: mixing numbers.\n"
-    "\n"
-    "### CS-MIX-001\n"
-    "\n"
-    "Covers: P-MIX\n"
-    "\n"
-    "```gherkin\n"
-    "Given two numbers\n"
-    "When they are mixed\n"
-    "Then a mixed number results\n"
-    "```\n"
-)
-
-COMPONENT = (
-    "---\n"
-    "id: comp-mixer\n"
-    "title: Mixer\n"
-    "status: draft\n"
-    "owners: [team-a]\n"
-    "realizes: [P-MIX]\n"
-    "depends_on: []\n"
-    "---\n"
-    "\n"
-    "# Mixer\n"
-    "\n"
-    "## Purpose\n"
-    "\n"
-    "Mixer combines numbers and checks bounds.\n"
-    "\n"
-    "## Scope\n"
-    "\n"
-    "- In scope: blend and both.\n"
-    "\n"
-    "## Definitions\n"
-    "\n"
-    "None.\n"
-    "\n"
-    "## Behavior\n"
-    "\n"
-    "See `requirements/`.\n"
-    "\n"
-    "## Interfaces\n"
-    "\n"
-    "See `interface/`.\n"
-    "\n"
-    "## Data\n"
-    "\n"
-    "See `interface/data/`.\n"
-    "\n"
-    "## Acceptance criteria\n"
-    "\n"
-    "See `acceptance/`.\n"
-    "\n"
-    "## Non-functional constraints\n"
-    "\n"
-    "See `constraints.md`.\n"
-    "\n"
-    "## Open questions\n"
-    "\n"
-    "## Change log\n"
-    "\n"
-    "- Initial.\n"
-)
-
-REQ_1 = "# R-MIXER-001\n\n**R-MIXER-001** \u2014 `blend(a, b, c, d)` MUST return `(a + b) * c - d`.\n"
-REQ_2 = "# R-MIXER-002\n\n**R-MIXER-002** \u2014 `both(p, q)` MUST return whether `p > 3` and `q < 7`.\n"
-
-AC_1 = (
-    "# AC-MIXER-001\n"
-    "\n"
-    "Covers: R-MIXER-001\n"
-    "Kind: generated-test\n"
-    "\n"
-    "```gherkin\n"
-    "Given the integers 5, 3, 4 and 2\n"
-    "When blend is called with them\n"
-    "Then it returns 30\n"
-    "```\n"
-)
-
-AC_2 = (
-    "# AC-MIXER-002\n"
-    "\n"
-    "Covers: R-MIXER-002\n"
-    "Kind: generated-test\n"
-    "\n"
-    "```gherkin\n"
-    "Given the pairs (5, 5), (5, 9) and (1, 5)\n"
-    "When both is called with each pair\n"
-    "Then it returns True, False and False\n"
-    "```\n"
-)
-
-LIBRARY = (
-    "# Library\n"
-    "\n"
-    "```\n"
-    "blend(a: int, b: int, c: int, d: int) -> int\n"
-    "both(p: int, q: int) -> bool\n"
-    "```\n"
-)
-
-CONSTRAINTS = "# Constraints\n\nNone.\n"
-
-MODULE = (
-    "def blend(a, b, c, d):\n"
-    "    return (a + b) * c - d\n"
-    "\n"
-    "\n"
-    "def both(p, q):\n"
-    "    return p > 3 and q < 7\n"
-)
-
-TEST_BLEND = (
-    "import mixer\n"
-    "\n"
-    "\n"
-    "def test_blend():\n"
-    "    assert mixer.blend(5, 3, 4, 2) == 30\n"
-)
-
-TEST_BOTH = (
-    "import mixer\n"
-    "\n"
-    "\n"
-    "def test_both():\n"
-    "    assert mixer.both(5, 5) is True\n"
-    "    assert mixer.both(5, 9) is False\n"
-    "    assert mixer.both(1, 5) is False\n"
-)
-
-ASSEMBLER_BODY = (
-    "from pathlib import Path\n"
-    "\n"
-    "\n"
-    "def assemble_criterion(component_id, criterion_id, repo_root):\n"
-    "    root = Path(repo_root)\n"
-    "    slug = component_id[len('comp-'):] if component_id.startswith('comp-') else component_id\n"
-    "    comp = root / 'specs' / 'components' / slug\n"
-    "    criterion_text = (comp / 'acceptance' / (criterion_id + '.md')).read_text(encoding='utf-8')\n"
-    "    covers = ''\n"
-    "    for line in criterion_text.splitlines():\n"
-    "        if line.startswith('Covers:'):\n"
-    "            covers = line.split(':', 1)[1].strip()\n"
-    "            break\n"
-    "    req = comp / 'requirements' / (covers + '.md')\n"
-    "    requirement_text = req.read_text(encoding='utf-8') if req.is_file() else ''\n"
-    "    interface = (comp / 'interface' / 'library.md').read_text(encoding='utf-8')\n"
-    "    glossary = (root / 'specs' / 'glossary.md').read_text(encoding='utf-8')\n"
-    "    with open(LOG_PATH, 'a', encoding='utf-8') as fh:\n"
-    "        fh.write('assemble ' + criterion_id + '\\n')\n"
-    "    return {\n"
-    "        'component_id': component_id,\n"
-    "        'criterion_id': criterion_id,\n"
-    "        'covers': covers,\n"
-    "        'criterion_text': criterion_text,\n"
-    "        'requirement_text': requirement_text,\n"
-    "        'interface': interface,\n"
-    "        'glossary': glossary,\n"
-    "        'dependency_interfaces': {},\n"
-    "    }\n"
-)
+def make_bundles():
+    bundles = {}
+    specs = [
+        ("AC-WMATH-001", "R-WMATH-001", "alpha"),
+        ("AC-WMATH-002", "R-WMATH-002", "beta"),
+    ]
+    for crit_id, req_id, fn in specs:
+        bundles[crit_id] = {
+            "component_id": COMPONENT_ID,
+            "criterion_id": crit_id,
+            "covers": req_id,
+            "criterion_text": (
+                "Given a number\nWhen " + fn + " is called\nThen it returns the documented value"
+            ),
+            "requirement_text": "**" + req_id + "** - `" + fn + "` MUST behave as documented.",
+            "interface": LIBRARY_TEXT,
+            "glossary": GLOSSARY_TEXT,
+            "dependency_interfaces": {},
+            "testing": "",
+        }
+    return bundles
 
 
-def build_fixture(repo_root, assembler_log):
-    write(repo_root / "specs" / "glossary.md", GLOSSARY)
-    write(repo_root / "specs" / "product" / "mix.md", PRODUCT)
-    comp = repo_root / "specs" / "components" / "mixer"
-    write(comp / "component.md", COMPONENT)
-    write(comp / "requirements" / "R-MIXER-001.md", REQ_1)
-    write(comp / "requirements" / "R-MIXER-002.md", REQ_2)
-    write(comp / "acceptance" / "AC-MIXER-001.md", AC_1)
-    write(comp / "acceptance" / "AC-MIXER-002.md", AC_2)
-    write(comp / "interface" / "library.md", LIBRARY)
-    write(comp / "constraints.md", CONSTRAINTS)
-    write(repo_root / "gen" / "mixer" / "mixer.py", MODULE)
-    assembler_source = "LOG_PATH = " + repr(str(assembler_log)) + "\n" + ASSEMBLER_BODY
-    write(
-        repo_root / "gen" / "spec-bundle-assembler" / "spec_bundle_assembler.py",
-        assembler_source,
+def header_for(bundle):
+    payload = json.dumps(
+        {k: bundle[k] for k in ("criterion_text", "requirement_text", "interface", "glossary", "testing")},
+        sort_keys=True,
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+    return "# hotdocs-criterion: sha256:" + hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def alpha_test_source(bundle):
+    return (
+        header_for(bundle) + "\n"
+        "import widget_math\n"
+        "\n"
+        "\n"
+        "def test_alpha_positive():\n"
+        "    assert widget_math.alpha(5) == 6\n"
+        "\n"
+        "\n"
+        "def test_alpha_negative():\n"
+        "    assert widget_math.alpha(-5) == -6\n"
+        "\n"
+        "\n"
+        "def test_alpha_zero():\n"
+        "    assert widget_math.alpha(0) == -1\n"
     )
 
 
-def make_author(log_path):
-    contents = {"AC-MIXER-001": TEST_BLEND, "AC-MIXER-002": TEST_BOTH}
+def beta_test_source(bundle):
+    return (
+        header_for(bundle) + "\n"
+        "import widget_math\n"
+        "\n"
+        "\n"
+        "def test_beta():\n"
+        "    assert widget_math.beta(4, 2) == 6\n"
+        "\n"
+        "\n"
+        "def test_beta_other():\n"
+        "    assert widget_math.beta(3, 5) == 10\n"
+    )
 
+
+def build_fixture(repo_root, bundles):
+    comp = repo_root / "specs" / "components" / SLUG
+    write(
+        comp / "component.md",
+        "---\n"
+        "id: " + COMPONENT_ID + "\n"
+        "title: Widget Math\n"
+        "status: draft\n"
+        "owners: [test-team]\n"
+        "realizes: [P-WMATH]\n"
+        "---\n"
+        "\n"
+        "# Widget Math\n"
+        "\n"
+        "## Purpose\n\nTwo small arithmetic functions.\n\n"
+        "## Scope\n\n- In scope: alpha and beta.\n\n"
+        "## Definitions\n\nNone.\n\n"
+        "## Behavior\n\nSee `requirements/`.\n\n"
+        "## Interfaces\n\nSee `interface/`.\n\n"
+        "## Data\n\nSee `interface/data/`.\n\n"
+        "## Acceptance criteria\n\nSee `acceptance/`.\n\n"
+        "## Non-functional constraints\n\nSee `constraints.md`.\n\n"
+        "## Open questions\n\n"
+        "## Change log\n\n- Initial.\n",
+    )
+    write(
+        comp / "requirements" / "R-WMATH-001.md",
+        "# R-WMATH-001\n\n**R-WMATH-001** - `alpha(x)` MUST return `x + 1` when `x > 0`, else `x - 1`.\n",
+    )
+    write(
+        comp / "requirements" / "R-WMATH-002.md",
+        "# R-WMATH-002\n\n**R-WMATH-002** - `beta(x, y)` MUST return `x * y - y`.\n",
+    )
+    write(
+        comp / "acceptance" / "AC-WMATH-001.md",
+        "# AC-WMATH-001\n\nCovers: R-WMATH-001\nKind: generated-test\n\n"
+        "```gherkin\n"
+        "Given a number x\n"
+        "When alpha is called with x\n"
+        "Then it returns x + 1 for positive x and x - 1 otherwise\n"
+        "```\n",
+    )
+    write(
+        comp / "acceptance" / "AC-WMATH-002.md",
+        "# AC-WMATH-002\n\nCovers: R-WMATH-002\nKind: generated-test\n\n"
+        "```gherkin\n"
+        "Given numbers x and y\n"
+        "When beta is called with x and y\n"
+        "Then it returns x * y - y\n"
+        "```\n",
+    )
+    write(comp / "interface" / "library.md", LIBRARY_TEXT)
+    write(comp / "constraints.md", "# Constraints\n\nNone.\n")
+    write(
+        repo_root / "specs" / "product" / "wmath.md",
+        "---\n"
+        "id: P-WMATH\n"
+        "title: Widget math capability\n"
+        "status: draft\n"
+        "owners: [test-team]\n"
+        "---\n"
+        "\n"
+        "# Widget math\n\n## Purpose\n\nArithmetic.\n\n## Scope\n\n- alpha, beta.\n",
+    )
+    write(repo_root / "specs" / "glossary.md", GLOSSARY_TEXT)
+
+    write(repo_root / "gen" / SLUG / (MODULE + ".py"), MODULE_SOURCE)
+
+    write(
+        repo_root / "gen" / "spec-bundle-assembler" / "spec_bundle_assembler.py",
+        "BUNDLES = " + repr(bundles) + "\n"
+        "\n"
+        "\n"
+        "def assemble(component_id, repo_root, mode='cold'):\n"
+        "    raise RuntimeError('assemble is not used by verify')\n"
+        "\n"
+        "\n"
+        "def assemble_criterion(component_id, criterion_id, repo_root):\n"
+        "    return dict(BUNDLES[criterion_id])\n",
+    )
+
+    write(
+        repo_root / "gen" / "test-probe" / "test_probe.py",
+        "GATE_VERSION = 'test-probe@1.3.0'\n"
+        "\n"
+        "\n"
+        "class ProbeReport:\n"
+        "    def __init__(self):\n"
+        "        self.ok = True\n"
+        "        self.findings = []\n"
+        "        self.tests_run = 1\n"
+        "        self.tests_reached = 1\n"
+        "\n"
+        "    def to_dict(self):\n"
+        "        return {'ok': self.ok, 'findings': list(self.findings),\n"
+        "                'tests_run': self.tests_run, 'tests_reached': self.tests_reached}\n"
+        "\n"
+        "\n"
+        "def probe(test_source, criterion_bundle, module_name, *, timeout=60.0, interpreter=None):\n"
+        "    return ProbeReport()\n",
+    )
+
+
+def make_author(log_path, bundles):
     def author(bundle):
-        criterion_id = field(bundle, "criterion_id")
+        crit_id = field(bundle, "criterion_id")
         with open(log_path, "a", encoding="utf-8") as fh:
-            fh.write("author " + criterion_id + "\n")
-        filename = "test_" + criterion_id.lower().replace("-", "_") + ".py"
+            fh.write(crit_id + "\n")
+        source_bundle = bundles[crit_id]
+        if crit_id == "AC-WMATH-001":
+            content = alpha_test_source(source_bundle)
+        else:
+            content = beta_test_source(source_bundle)
+        name = "test_" + crit_id.lower().replace("-", "_") + ".py"
         return {
+            "component_id": COMPONENT_ID,
+            "criterion_id": crit_id,
             "model": "fake-model",
             "seed": 0,
             "prompt_version": "v1",
             "cache_hit": False,
+            "file": {"path": "verification/" + SLUG + "/generated-test/" + name, "content": content},
             "model_call_error": None,
-            "file": {
-                "path": "verification/mixer/generated-test/" + filename,
-                "content": contents[criterion_id],
-            },
+            "repair_attempts": 0,
+            "probe_findings": [],
         }
 
     return author
 
 
-def test_mutation_score_is_union_of_both_generated_tests(tmp_path):
+def test_mutation_score_is_union_of_both_tests_kills(tmp_path):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
-    logs = tmp_path / "logs"
-    logs.mkdir()
-    assembler_log = logs / "assembler.log"
-    author_log = logs / "author.log"
-    build_fixture(repo_root, assembler_log)
+    bundles = make_bundles()
+    build_fixture(repo_root, bundles)
+    log_path = tmp_path / "author.log"
+    author = make_author(log_path, bundles)
 
-    report = verifier_orchestrator.verify(
-        "comp-mixer", repo_root, test_author=make_author(author_log)
-    )
+    report = verifier_orchestrator.verify(COMPONENT_ID, repo_root, judge=None, test_author=author)
 
-    # Both stand-in test files were authored and both pass on the real code.
-    authored = author_log.read_text(encoding="utf-8").splitlines()
-    assert sorted(authored) == ["author AC-MIXER-001", "author AC-MIXER-002"]
+    calls = log_path.read_text(encoding="utf-8").split()
+    assert sorted(set(calls)) == ["AC-WMATH-001", "AC-WMATH-002"]
 
-    criteria = {field(c, "id"): c for c in field(report, "criteria")}
-    assert field(criteria["AC-MIXER-001"], "result") == "pass"
-    assert field(criteria["AC-MIXER-002"], "result") == "pass"
+    criteria = field(report, "criteria")
+    results = {field(c, "id"): field(c, "result") for c in criteria}
+    assert results.get("AC-WMATH-001") == "pass", criteria
+    assert results.get("AC-WMATH-002") == "pass", criteria
 
     assert field(report, "mutation_error") is None
     score = field(report, "mutation_score")
     assert score is not None
-
-    # Six mutants in total: three in blend, three in both. Each test kills
-    # all of its own function's mutants and none of the other's, so either
-    # test's isolated score against the whole module is 0.5; the union of
-    # both tests kills every mutant.
-    assert score > 0.5
-    assert score >= 0.8
-    assert score == pytest.approx(1.0)
+    # alpha has 3 mutation sites, beta has 2: each test alone would score
+    # 0.6 or 0.4 against the whole module; the union kills all 5.
+    assert abs(score - 0.6) > 1e-9
+    assert abs(score - 0.4) > 1e-9
+    assert abs(score - 0.5) > 1e-9
+    assert score == 1.0
+    assert field(report, "overall") == "pass"
