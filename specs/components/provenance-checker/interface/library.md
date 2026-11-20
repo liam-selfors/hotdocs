@@ -52,8 +52,9 @@ and, per kind, the implicit `python` first and then each declared
 kind, the repository's definition
 `<repo_root>/specs/architecture/asset-kind-<kind>.md`, if any, and the
 adapter `asset-kinds.md`'s Lookup finds: `<repo_root>/gen/kind-<kind>/kind_<kind>.py`,
-else the tool root's, the tool root as asset-kinds.md defines it. The adapter is loaded by path afresh on every call; only its
-`provision(repo_root)` is called (`R-PROVCHECK-009`). A miss in
+else the tool root's, the tool root as asset-kinds.md defines it. The adapter is loaded by path afresh on every call, with
+`sys.dont_write_bytecode` true while it loads so no `__pycache__` is
+written (`R-PROVCHECK-004`); only its `provision(repo_root)` is called (`R-PROVCHECK-009`). A miss in
 `versions` or `lockfile_sha256` alone is `environment differs`
 (`R-PROVCHECK-010`, `D345`).
 

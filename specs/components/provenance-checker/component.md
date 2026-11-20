@@ -83,10 +83,8 @@ None.
 - `D47`: first real implementation.
 - `D163`: `current_provenance_key`, the one definition of the key a hit
   compares; `R-PROVCHECK-006` covers the CLI (`D162`).
-- `D170`: the sealed counterpart (`R-PROVCHECK-007`/`008`). Landed at
-  13/13, `mutation_score` 0.91.
-- `D313`: the key names the generator's version, so a generator or
-  prompt change invalidates every manifest it produced.
+- `D170`: the sealed counterpart (`R-PROVCHECK-007`/`008`).
+- `D313`: the key names the generator's version.
 - `D343`: the key includes each declared asset's definition, adapter
   and environment (`R-PROVCHECK-009`); a miss names its `reason`.
 - `D344`: the assets value starts with the implicit `python` entry, path
