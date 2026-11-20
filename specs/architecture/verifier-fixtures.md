@@ -152,9 +152,12 @@ tool root's real adapter is used: in a criterion run it is
 and in a mutation run the same path reaches it through the sandbox's
 symbolic link `gen/kind-python`. With no
 `environments/python/requirements.lock` in the fixture, its report has
-`ok` true, `interpreter` the running interpreter, `versions`
-`{"python": platform.python_version()}` and `lockfile_sha256` null, and
-the `assets` entry `{"kind": "python", "path": ".", "definition_sha256": None, "adapter_sha256": <that file's hash>, "versions": {"python": platform.python_version()}, "lockfile_sha256": None}`,
+`ok` true, `interpreter` the running interpreter and `lockfile_sha256`
+null; its `versions` (the full Python version and the installed
+packages' fingerprint, `D345`) a test never writes out: it loads that
+file by path with `importlib.util.spec_from_file_location`, calls its
+`provision(repo_root)` and takes `["versions"]`. The `assets` entry is
+`{"kind": "python", "path": ".", "definition_sha256": None, "adapter_sha256": <that file's hash>, "versions": <those versions>, "lockfile_sha256": None}`,
 `definition_sha256` null because the fixture writes no
 `specs/architecture/asset-kind-python.md`.
 
