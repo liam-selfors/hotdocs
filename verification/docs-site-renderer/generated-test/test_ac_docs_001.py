@@ -1,33 +1,17 @@
-# hotdocs-criterion: sha256:d80361d3ad408411bbabfa7c7e3375afc88980f27e09626ddaf769954abe7e8a
-"""AC-DOCS-001: the DAG view holds three node elements and two edge elements
-for a corpus graph with three nodes and two edges."""
+# hotdocs-criterion: sha256:28a8efb40db58c6ab430fdff6d4853522493d53e866186b969e525bc8d3fff11
+import docs_site_renderer
 
+import dataclasses
 import json
-from dataclasses import dataclass, field as dc_field
 from html.parser import HTMLParser
 from pathlib import Path
 
-import docs_site_renderer
 
-
-NODE_IDS = ["comp-alpha", "P-BETA-CAP", "VAR-GAMMA-URL"]
-EXPECTED_EDGES = {
-    frozenset(("comp-alpha", "P-BETA-CAP")),
-    frozenset(("comp-alpha", "VAR-GAMMA-URL")),
-}
-
-VOID_TAGS = {
-    "area", "base", "br", "col", "embed", "hr", "img", "input", "link",
-    "meta", "param", "source", "track", "wbr",
-}
-SKIP_TAGS = {"script", "style", "template", "noscript"}
-
-
-@dataclass
-class FakeCorpusGraph:
-    nodes: dict = dc_field(default_factory=dict)
-    edges: list = dc_field(default_factory=list)
-    aggregates: dict = dc_field(default_factory=dict)
+@dataclasses.dataclass
+class StandInCorpusGraph:
+    nodes: dict
+    edges: list
+    aggregates: dict
 
     def to_dict(self):
         return {
@@ -42,140 +26,84 @@ class FakeCorpusGraph:
             + "\n"
         ).encode("utf-8")
 
-    def __getitem__(self, key):
-        return self.to_dict()[key]
+
+class DagParser(HTMLParser):
+    def __init__(self):
+        super().__init__()
+        self.ul_stack = []
+        self.node_items = []
+        self.edge_items = []
+
+    def handle_starttag(self, tag, attrs):
+        attrs = dict(attrs)
+        if tag == "ul":
+            self.ul_stack.append(attrs.get("id"))
+            return
+        if tag == "li" and self.ul_stack:
+            classes = (attrs.get("class") or "").split()
+            current = self.ul_stack[-1]
+            if current == "nodes" and "node" in classes:
+                self.node_items.append(attrs)
+            elif current == "edges" and "edge" in classes:
+                self.edge_items.append(attrs)
+
+    def handle_endtag(self, tag):
+        if tag == "ul" and self.ul_stack:
+            self.ul_stack.pop()
 
 
 def make_graph():
     nodes = {
-        "comp-alpha": {
+        "P-ZERO-EDIT": {"type": "capability"},
+        "comp-foo": {
             "type": "component",
             "verification": None,
             "provenance": None,
             "size_status": "ok",
             "sealed": False,
             "pinned_overrides": [],
-            "owners": ["docs-team"],
-            "documents": {
-                "component.md": "---\nid: comp-alpha\ntitle: Alpha\nstatus: draft\n---\n\n# Alpha\n\nA component.\n",
-            },
+            "owners": ["pipeline-team"],
+            "documents": {"component.md": "# Foo\n"},
         },
-        "P-BETA-CAP": {"type": "capability"},
-        "VAR-GAMMA-URL": {"type": "var"},
+        "VAR-FOO-URL": {"type": "var"},
     }
     edges = [
-        {"from": "comp-alpha", "to": "P-BETA-CAP", "kind": "realizes"},
-        {"from": "comp-alpha", "to": "VAR-GAMMA-URL", "kind": "uses_var"},
+        {"from": "comp-foo", "to": "P-ZERO-EDIT", "kind": "realizes"},
+        {"from": "comp-foo", "to": "VAR-FOO-URL", "kind": "uses_var"},
     ]
     aggregates = {
         "orphan_capability_rate": 0.0,
         "orphan_component_rate": 0.0,
         "orphan_var_rate": 0.0,
     }
-    return FakeCorpusGraph(nodes=nodes, edges=edges, aggregates=aggregates)
-
-
-def ids_in(text):
-    return {nid for nid in NODE_IDS if nid in text}
-
-
-class ElementCollector(HTMLParser):
-    """Collects, per element, its attribute values plus its own direct text
-    (excluding script/style content)."""
-
-    def __init__(self):
-        super().__init__(convert_charrefs=True)
-        self.stack = []
-        self.elements = []
-        self.skip_depth = 0
-
-    def _finish(self, entry):
-        self.elements.append(entry)
-
-    def handle_starttag(self, tag, attrs):
-        tag = tag.lower()
-        if tag in SKIP_TAGS:
-            self.skip_depth += 1
-            self.stack.append({"tag": tag, "text": [], "attrs": [], "skip": True})
-            return
-        attr_text = [v for _, v in attrs if v]
-        entry = {"tag": tag, "text": [], "attrs": attr_text, "skip": False}
-        if tag in VOID_TAGS:
-            self._finish(entry)
-            return
-        self.stack.append(entry)
-
-    def handle_startendtag(self, tag, attrs):
-        tag = tag.lower()
-        attr_text = [v for _, v in attrs if v]
-        self._finish({"tag": tag, "text": [], "attrs": attr_text, "skip": False})
-
-    def handle_endtag(self, tag):
-        tag = tag.lower()
-        if not any(e["tag"] == tag for e in self.stack):
-            return
-        while self.stack:
-            entry = self.stack.pop()
-            if entry["skip"]:
-                self.skip_depth -= 1
-            else:
-                self._finish(entry)
-            if entry["tag"] == tag:
-                break
-
-    def handle_data(self, data):
-        if self.skip_depth > 0 or not self.stack:
-            return
-        self.stack[-1]["text"].append(data)
-
-    def close(self):
-        super().close()
-        while self.stack:
-            entry = self.stack.pop()
-            if not entry["skip"]:
-                self._finish(entry)
-
-
-def analyse_page(html_text):
-    parser = ElementCollector()
-    parser.feed(html_text)
-    parser.close()
-    node_ids = set()
-    edge_pairs = set()
-    for entry in parser.elements:
-        blob = " ".join(entry["attrs"]) + " " + "".join(entry["text"])
-        found = ids_in(blob)
-        if len(found) == 1:
-            node_ids |= found
-        elif len(found) == 2:
-            edge_pairs.add(frozenset(found))
-    return node_ids, edge_pairs
+    return StandInCorpusGraph(nodes=nodes, edges=edges, aggregates=aggregates)
 
 
 def test_ac_docs_001_dag_view_has_three_nodes_and_two_edges(tmp_path):
     graph = make_graph()
     out_dir = tmp_path / "site"
+    out_dir.mkdir()
 
-    result = docs_site_renderer.render_docs_site(graph, out_dir)
-    assert result is None
+    docs_site_renderer.render_docs_site(graph, out_dir)
 
-    assert out_dir.is_dir(), "render_docs_site did not create the output directory"
-    pages = sorted(
-        p for p in out_dir.rglob("*") if p.is_file() and p.suffix.lower() in (".html", ".htm")
+    index = Path(out_dir) / "index.html"
+    assert index.is_file()
+    html_text = index.read_text(encoding="utf-8")
+
+    parser = DagParser()
+    parser.feed(html_text)
+    parser.close()
+
+    assert len(parser.node_items) == 3
+    assert len(parser.edge_items) == 2
+
+    assert [item.get("data-id") for item in parser.node_items] == sorted(
+        ["P-ZERO-EDIT", "comp-foo", "VAR-FOO-URL"]
     )
-    assert pages, "no HTML pages were rendered"
-
-    summaries = []
-    matching = []
-    for page in pages:
-        text = page.read_text(encoding="utf-8", errors="replace")
-        node_ids, edge_pairs = analyse_page(text)
-        summaries.append((str(page.relative_to(out_dir)), sorted(node_ids),
-                          sorted(sorted(p) for p in edge_pairs)))
-        if node_ids == set(NODE_IDS) and edge_pairs == EXPECTED_EDGES:
-            matching.append(page)
-
-    assert matching, (
-        "no rendered page is a DAG view holding exactly the three node elements "
-        "and the two edge elements; per-page findings: " + repr(summaries)
-    )
+    assert [
+        (item.get("data-from"), item.get("data-to"), item.get("data-kind"))
+        for item in parser.edge_items
+    ] == [
+        ("comp-foo", "P-ZERO-EDIT", "realizes"),
+        ("comp-foo", "VAR-FOO-URL", "uses_var"),
+    ]
