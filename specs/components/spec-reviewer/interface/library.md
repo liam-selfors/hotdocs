@@ -33,8 +33,7 @@ and returns `(conflicts, rationale)` from a reply holding the JSON object
 `{"conflicts": <bool>, "rationale": "<text>"}`, or `None` for any other
 reply or a `model_call_error`: `spec-linter`'s judge shape.
 
-Test fixtures: a synthetic corpus as `spec-bundle-assembler`'s
-`interface/library.md` describes, which must lint clean. A mock model is
+Test fixtures: a synthetic corpus that lints clean (`testing.md`). A mock model is
 an `llm_backend(prompt, model, **params)` callable returning
 `{"text": ..., "model": ..., "backend": "mock", "model_call_error": None}`.
 
