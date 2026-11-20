@@ -628,7 +628,8 @@ def _reuse_committed(component_id: str, sandbox: Path) -> None:
 
 
 def run(component_id: str, model: str, seed: int, retry_feedback: list[str] | None, keep_sandbox: bool,
-        hand_suite: bool = False, sealed_install: bool = False, resume: Path | None = None) -> int:
+        hand_suite: bool = False, sealed_install: bool = False, resume: Path | None = None,
+        reuse_candidate: bool = False, candidate_bundle_hash: str | None = None) -> int:
     code_rel = None
     if sealed_install:
         code_rel = _sealed_source_path(component_id)
@@ -651,9 +652,32 @@ def run(component_id: str, model: str, seed: int, retry_feedback: list[str] | No
     if resume is None:
         _carry_tests(component_id, sandbox, bundle)
 
-    # Never generate beside the target's old code (see _build_sandbox).
-    shutil.rmtree(sandbox / "gen" / _slug(component_id), ignore_errors=True)
-    result = generator.generate(bundle, model, retry_feedback, repo_root=sandbox, llm_backend=None)
+    marker = sandbox / ".candidate.json"
+    if reuse_candidate:
+        # Re-verify the candidate a kept sandbox already holds instead of
+        # generating another: only when the spec bundle is exactly the one
+        # it was generated from, so what provenance records stays true.
+        recorded = json.loads(marker.read_text())["spec_bundle_hash"] if marker.is_file() else candidate_bundle_hash
+        if recorded != _get(bundle, "spec_bundle_hash"):
+            print(f"FAIL: --reuse-candidate needs the candidate's spec bundle {recorded}, now {_get(bundle, 'spec_bundle_hash')}.")
+            return 2
+        code_dir = sandbox / "gen" / _slug(component_id)
+        files = {str(p.relative_to(code_dir)): p.read_text(encoding="utf-8")
+                 for p in sorted(code_dir.rglob("*")) if p.is_file() and "__pycache__" not in p.parts
+                 and not p.name.startswith(".")}
+        result = generator.GenerationResult(
+            component_id=component_id, spec_bundle_hash=_get(bundle, "spec_bundle_hash"), model=model,
+            prompt_version=generator.PROMPT_VERSION, cache_hit=False, files=files, model_call_error=None,
+            refused=None, retry_feedback=retry_feedback, mode="single", transcript_sha256=None, turns=1,
+            tool_calls=0, isolation=None)
+        print(f"reusing the kept candidate ({len(files)} file(s)) generated from this same spec bundle")
+    else:
+        # Never generate beside the target's old code (see _build_sandbox).
+        shutil.rmtree(sandbox / "gen" / _slug(component_id), ignore_errors=True)
+        result = generator.generate(bundle, model, retry_feedback, repo_root=sandbox, llm_backend=None)
+        if _get(result, "files"):
+            marker.write_text(json.dumps({"spec_bundle_hash": _get(bundle, "spec_bundle_hash"), "model": model,
+                                          "prompt_version": _get(result, "prompt_version")}))
     # Forget every module this process loaded from the sandbox before the
     # candidate existed (e.g. the old graph-query-engine that spec-linter
     # imported by name), so later loads see the candidate, not stale code.
@@ -769,12 +793,20 @@ def main(argv=None) -> int:
     parser.add_argument("--sealed-install", action="store_true",
                         help="for a sealed component: generate it unsealed in the sandbox, require its hand-maintained "
                              "characterization suite too, and install the result at its source_path")
+    parser.add_argument("--reuse-candidate", action="store_true",
+                        help="with --resume-sandbox: verify the candidate the sandbox already holds instead of "
+                             "generating again, only if the spec bundle equals the one it was generated from")
+    parser.add_argument("--candidate-bundle-hash", default=None,
+                        help="the candidate's spec_bundle_hash, for a sandbox from before .candidate.json existed")
     args = parser.parse_args(argv)
+    if args.reuse_candidate and not args.resume_sandbox:
+        parser.error("--reuse-candidate needs --resume-sandbox")
 
     retry_feedback = args.retry_feedback.split(",") if args.retry_feedback else None
     return run(args.component_id, args.model, args.seed, retry_feedback, args.keep_sandbox,
                hand_suite=args.hand_suite, sealed_install=args.sealed_install,
-               resume=Path(args.resume_sandbox) if args.resume_sandbox else None)
+               resume=Path(args.resume_sandbox) if args.resume_sandbox else None,
+               reuse_candidate=args.reuse_candidate, candidate_bundle_hash=args.candidate_bundle_hash)
 
 
 if __name__ == "__main__":

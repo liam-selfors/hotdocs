@@ -177,12 +177,12 @@ def test_ac_verify_010_no_cache_no_test_author_fails_not_skipped(repo_root):
 
 def test_ac_verify_011_requirement_results_projection_is_content_free(repo_root):
     second_r001_ac = acceptance_md(
-        "AC-FOO-001B", "R-FOO-001", "compiled",
+        "AC-FOO-001b", "R-FOO-001", "compiled",
         "Given a x is 1\nWhen do_the_thing is invoked with x\nThen value equals 2",
     )
     write_foo(repo_root, extra_acceptance={
         "AC-FOO-001.md": COMPILED_AC,
-        "AC-FOO-001B.md": second_r001_ac,
+        "AC-FOO-001b.md": second_r001_ac,
         "AC-FOO-002.md": GENTEST_AC,  # no cache, no test_author -> fail -> R-FOO-002 fail
         "AC-FOO-003.md": JUDGE_AC,  # no judge -> skipped -> R-FOO-003 fail
     })
