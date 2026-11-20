@@ -1,19 +1,29 @@
 {
   "spec_bundle_hash": "sha256:8a733403e9c276a7c4f7dc274fb2a1892f80edd2270ca322baa31546b5c41a38",
   "model_pin": "claude-opus-5-5",
-  "prompt_version": "v11",
+  "prompt_version": "v12",
   "retry_feedback": null,
+  "generation": {
+    "mode": "single",
+    "generator_version": "generator@3.2.0+v12",
+    "transcript_sha256": null,
+    "turns": 1,
+    "tool_calls": 0,
+    "isolation": null
+  },
+  "attempts": 1,
+  "attempt_history": [],
   "pipeline_version": "v1",
   "gate_versions": {
     "compiler": "criterion-compiler@1.0.0",
-    "generated_test": "generated_test@1.2.0",
-    "verifier": "verifier-orchestrator@2.3.0",
+    "generated_test": "generated_test@3.0.0",
+    "verifier": "verifier-orchestrator@3.5.0",
     "license_scanner": "license_scanner@4.0.0-no-reference-corpus",
     "secret_scanner": "secret_scanner@3.1.0+detect-secrets.1.5.0",
-    "generator": "generator@3.0.0+v11"
+    "generator": "generator@3.2.0+v12"
   },
   "provenance_hit": false,
-  "generated_at": "2026-11-19T13:28:01Z",
+  "generated_at": "2026-11-20T22:43:21Z",
   "verification_run_id": "kind-python-attempt-1",
   "verification_report": {
     "component_id": "comp-kind-python",
@@ -22,49 +32,25 @@
         "id": "AC-KPY-001",
         "covers": "R-KPY-001",
         "kind": "generated-test",
-        "result": "pass",
-        "test_authoring": {
-          "model": "claude-opus-5-5",
-          "seed": 1,
-          "prompt_version": "v1",
-          "cache_hit": false
-        }
+        "result": "pass"
       },
       {
         "id": "AC-KPY-002",
         "covers": "R-KPY-002",
         "kind": "generated-test",
-        "result": "pass",
-        "test_authoring": {
-          "model": "claude-opus-5-5",
-          "seed": 1,
-          "prompt_version": "v1",
-          "cache_hit": false
-        }
+        "result": "pass"
       },
       {
         "id": "AC-KPY-003",
         "covers": "R-KPY-003",
         "kind": "generated-test",
-        "result": "pass",
-        "test_authoring": {
-          "model": "claude-opus-5-5",
-          "seed": 1,
-          "prompt_version": "v1",
-          "cache_hit": false
-        }
+        "result": "pass"
       },
       {
         "id": "AC-KPY-004",
         "covers": "R-KPY-006",
         "kind": "generated-test",
-        "result": "pass",
-        "test_authoring": {
-          "model": "claude-opus-5-5",
-          "seed": 1,
-          "prompt_version": "v1",
-          "cache_hit": false
-        }
+        "result": "pass"
       },
       {
         "id": "AC-KPY-005",
@@ -82,97 +68,49 @@
         "id": "AC-KPY-006",
         "covers": "R-KPY-004",
         "kind": "generated-test",
-        "result": "pass",
-        "test_authoring": {
-          "model": "claude-opus-5-5",
-          "seed": 1,
-          "prompt_version": "v1",
-          "cache_hit": false
-        }
+        "result": "pass"
       },
       {
         "id": "AC-KPY-007",
         "covers": "R-KPY-005",
         "kind": "generated-test",
-        "result": "pass",
-        "test_authoring": {
-          "model": "claude-opus-5-5",
-          "seed": 1,
-          "prompt_version": "v1",
-          "cache_hit": false
-        }
+        "result": "pass"
       },
       {
         "id": "AC-KPY-008",
         "covers": "R-KPY-005",
         "kind": "generated-test",
-        "result": "pass",
-        "test_authoring": {
-          "model": "claude-opus-5-5",
-          "seed": 1,
-          "prompt_version": "v1",
-          "cache_hit": false
-        }
+        "result": "pass"
       },
       {
         "id": "AC-KPY-009",
         "covers": "R-KPY-007",
         "kind": "generated-test",
-        "result": "pass",
-        "test_authoring": {
-          "model": "claude-opus-5-5",
-          "seed": 1,
-          "prompt_version": "v1",
-          "cache_hit": false
-        }
+        "result": "pass"
       },
       {
         "id": "AC-KPY-010",
         "covers": "R-KPY-008",
         "kind": "generated-test",
-        "result": "pass",
-        "test_authoring": {
-          "model": "claude-opus-5-5",
-          "seed": 1,
-          "prompt_version": "v1",
-          "cache_hit": false
-        }
+        "result": "pass"
       },
       {
         "id": "AC-KPY-011",
         "covers": "R-KPY-007",
         "kind": "generated-test",
-        "result": "pass",
-        "test_authoring": {
-          "model": "claude-opus-5-5",
-          "seed": 1,
-          "prompt_version": "v1",
-          "cache_hit": false
-        }
+        "result": "pass"
       },
       {
         "id": "AC-KPY-012",
         "covers": "R-KPY-009",
         "kind": "generated-test",
-        "result": "pass",
-        "test_authoring": {
-          "model": "claude-opus-5-5",
-          "seed": 1,
-          "prompt_version": "v1",
-          "cache_hit": false
-        }
+        "result": "pass"
       },
       {
         "id": "AC-KPY-013",
         "covers": "R-KPY-004",
         "kind": "generated-test",
-        "result": "pass",
-        "test_authoring": {
-          "model": "claude-opus-5-5",
-          "seed": 1,
-          "prompt_version": "v1",
-          "cache_hit": false
-        }
+        "result": "pass"
       }
     ],
     "requirement_results": {
@@ -189,6 +127,19 @@
     "interface_drift": false,
     "mutation_score": 0.8666666666666667,
     "mutation_error": null,
+    "assets": [
+      {
+        "kind": "python",
+        "path": ".",
+        "definition_sha256": "sha256:53cb9d111b695cf184eb6fdc9c34e8cee514bab938f634dc993257e0163eb8b1",
+        "adapter_sha256": "sha256:fd6ddf7d96d53f9f80f42d158c5f580b7021bc47482b5f347e132a7778ccaecc",
+        "versions": {
+          "python": "3.14.6",
+          "packages": "sha256:fe2bf6523d4c9a1d7aad652c8447381630e076eb89d6267771e208c003c2d83b"
+        },
+        "lockfile_sha256": null
+      }
+    ],
     "overall": "pass"
   },
   "license_scan": {
@@ -465,5 +416,18 @@
     "notified": false,
     "notification_delivery_error": null,
     "cache_hit": false
-  }
+  },
+  "assets": [
+    {
+      "kind": "python",
+      "path": ".",
+      "definition_sha256": "sha256:53cb9d111b695cf184eb6fdc9c34e8cee514bab938f634dc993257e0163eb8b1",
+      "adapter_sha256": "sha256:fd6ddf7d96d53f9f80f42d158c5f580b7021bc47482b5f347e132a7778ccaecc",
+      "versions": {
+        "python": "3.14.6",
+        "packages": "sha256:fe2bf6523d4c9a1d7aad652c8447381630e076eb89d6267771e208c003c2d83b"
+      },
+      "lockfile_sha256": null
+    }
+  ]
 }
