@@ -32,7 +32,7 @@ routing `init` to `hotdocs-init`.
 and the entry module in `tools/`, hand-authored.
 
 **Loose coupling, on purpose.** The only dependency is `llm-endpoint`, for
-the configured model. Verb targets are reached by loading their `main` by
+the configured model. Verb targets are reached by loading their `main` (`init`'s `run`) by
 path from the table, not through their Python APIs, so no verb can break
 this component's interface.
 
@@ -68,3 +68,5 @@ None.
 
 - `D184`: initial design. `D185`: setup (`init`) split out to `hotdocs-init`.
 - `D346`: the `kind new` row, routed to `spec-scaffolder` as `component new` is.
+- `main(argv)` alone is the `cli-conventions.md` entry; the injectable
+  form is now `run`, and `init` is reached through `hotdocs-init`'s `run`. (`D348`)

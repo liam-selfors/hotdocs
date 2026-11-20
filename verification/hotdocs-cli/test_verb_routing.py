@@ -47,7 +47,8 @@ def test_unknown_argument_is_a_usage_error(words, tmp_path):
     argv = words.split() + ["--hotdocs-smoke-unknown"]
     code = (
         "import sys; sys.path.insert(0, sys.argv[1]); import hotdocs_cli; "
-        "sys.exit(hotdocs_cli.main(sys.argv[4:], tool_root=sys.argv[2], cwd=sys.argv[3]))"
+        "entry = getattr(hotdocs_cli, 'run', None) or hotdocs_cli.main; "
+        "sys.exit(entry(sys.argv[4:], tool_root=sys.argv[2], cwd=sys.argv[3]))"
     )
     proc = subprocess.run(
         [sys.executable, "-c", code, str(REPO_ROOT / "gen" / "hotdocs-cli"), str(REPO_ROOT), str(tmp_path), *argv],

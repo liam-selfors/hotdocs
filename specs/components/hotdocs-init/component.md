@@ -29,7 +29,7 @@ too large for a single model response (`D185`).
 **In scope:** the project skeleton, the prerequisite report, the
 provider step, and the `--example` project.
 
-**Out of scope:** routing (`hotdocs-cli` calls this component's `main`);
+**Out of scope:** routing (`hotdocs-cli` calls this component's `run`);
 installing anything (this component prints the command and never runs it).
 
 ## Definitions
@@ -68,3 +68,5 @@ None.
   the allowlist starts empty.
 - `D203`: the Python floor is 3.11. `D205`: `.hotdocs-tool.json` marks
   an initialised project.
+- `main(argv)` alone is the `cli-conventions.md` entry, deriving the tool
+  root; the injectable form, called by `hotdocs-cli`, is now `run`. (`D348`)
