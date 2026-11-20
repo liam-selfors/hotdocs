@@ -1,19 +1,18 @@
 # hotdocs-criterion: sha256:fbf24ec1b9ae463d6a864c00c47991b26aab5274a44d225639f74aa0337db20a
-"""AC-GQE-010 (covers R-GQE-002): the decision arms of `edges` read only a
-decision's frontmatter block, and a flow-style `builds_on` list yields one
-row per entry."""
+import graph_query_engine
 
 from pathlib import Path
 
 import duckdb
-import pytest
-
-import graph_query_engine
 
 
 def _write(path, text):
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text, encoding="utf-8", newline="\n")
+    path.write_bytes(text.encode("utf-8"))
+
+
+def _frontmatter(lines):
+    return "---\n" + "\n".join(lines) + "\n---\n"
 
 
 def _build_corpus(repo_root):
@@ -21,32 +20,32 @@ def _build_corpus(repo_root):
 
     _write(
         specs / "components" / "foo" / "component.md",
-        "---\n"
-        + "id: comp-foo\n"
-        + "title: Foo\n"
-        + "status: draft\n"
-        + "owners: [team]\n"
-        + "depends_on: [comp-bar]\n"
-        + "realizes: [P-X]\n"
-        + "uses_var: [VAR-X]\n"
-        + "depends_on_guarantees: [G-BAR-001]\n"
-        + "---\n"
-        + "\n"
-        + "# Foo\n"
-        + "\n"
-        + "one two three\n",
+        _frontmatter([
+            "id: comp-foo",
+            "title: Foo",
+            "status: draft",
+            "owners: [team]",
+            "sealed: true",
+            "source_path: legacy/foo/",
+            "depends_on: [comp-bar]",
+            "realizes: [P-X]",
+            "uses_var: [VAR-X]",
+            "depends_on_guarantees: [G-BAR-001]",
+        ])
+        + "\n# Foo\n\none two three\n",
     )
     _write(
         specs / "components" / "bar" / "component.md",
-        "---\n"
-        + "id: comp-bar\n"
-        + "title: Bar\n"
-        + "status: draft\n"
-        + "owners: [team]\n"
-        + "realizes: [P-X]\n"
-        + "---\n"
-        + "\n"
-        + "# Bar\n",
+        _frontmatter([
+            "id: comp-bar",
+            "title: Bar",
+            "status: draft",
+            "owners: [team]",
+            "sealed: true",
+            "source_path: legacy/bar/",
+            "realizes: [P-X]",
+        ])
+        + "\n# Bar\n",
     )
     _write(
         specs / "components" / "foo" / "requirements" / "R-FOO-001.md",
@@ -70,122 +69,112 @@ def _build_corpus(repo_root):
     )
     _write(
         specs / "product" / "x.md",
-        "---\n"
-        + "id: P-X\n"
-        + "title: X\n"
-        + "status: draft\n"
-        + "owners: [team]\n"
-        + "---\n"
-        + "\n"
-        + "# X\n"
-        + "\n"
-        + "### CS-X-001\n"
-        + "Covers: P-X\n"
-        + "\n"
-        + "### CS-X-002\n"
-        + "Covers: P-X\n",
+        _frontmatter([
+            "id: P-X",
+            "title: X",
+            "status: draft",
+            "owners: [team]",
+        ])
+        + "\n# X\n\n### CS-X-001\nCovers: P-X\n\n### CS-X-002\nCovers: P-X\n",
     )
     _write(
         specs / "vars" / "x.md",
-        "---\n"
-        + "id: VAR-X\n"
-        + "title: V\n"
-        + "status: draft\n"
-        + "owners: [team]\n"
-        + "---\n"
-        + "\n"
-        + "# V\n",
+        _frontmatter([
+            "id: VAR-X",
+            "title: V",
+            "status: draft",
+            "owners: [team]",
+        ])
+        + "\n# V\n",
     )
     _write(
         specs / "decisions" / "D1.md",
-        "---\n"
-        + "id: D1\n"
-        + "title: One\n"
-        + "status: ratified\n"
-        + "owners: [team]\n"
-        + "last_ratified_commit: 0000000\n"
-        + "---\n"
-        + "\n"
-        + "# D1\n",
+        _frontmatter([
+            "id: D1",
+            "title: One",
+            "status: ratified",
+            "owners: [team]",
+            "last_ratified_commit: 0000000",
+        ])
+        + "\n# D1\n",
     )
     _write(
         specs / "decisions" / "D2.md",
-        "---\n"
-        + "id: D2\n"
-        + "title: Two\n"
-        + "status: draft\n"
-        + "owners: [team]\n"
-        + "supersedes: D1\n"
-        + "builds_on: [D1]\n"
-        + "---\n"
-        + "\n"
-        + "# D2\n",
+        _frontmatter([
+            "id: D2",
+            "title: Two",
+            "status: draft",
+            "owners: [team]",
+        ])
+        + "\n# D2\n",
     )
-    # D3: prose quotes both fields (inline and at line starts), frontmatter
-    # declares neither.
+    # D3: prose quotes both fields (inline and at a line start), but the
+    # frontmatter declares neither.
     _write(
         specs / "decisions" / "D3.md",
-        "---\n"
-        + "id: D3\n"
-        + "title: Three\n"
-        + "status: draft\n"
-        + "owners: [team]\n"
-        + "---\n"
-        + "\n"
-        + "# D3\n"
-        + "\n"
-        + "An earlier draft of this record carried `supersedes: D1` and\n"
-        + "`builds_on: [D2]`, quoted here only as history:\n"
-        + "\n"
+        _frontmatter([
+            "id: D3",
+            "title: Three",
+            "status: draft",
+            "owners: [team]",
+        ])
+        + "\n# D3\n\n"
+        + "An earlier draft of this record proposed `supersedes: D1` and "
+        + "`builds_on: [D2]`, but neither was adopted.\n\n"
+        + "The rejected frontmatter read:\n\n"
         + "supersedes: D1\n"
         + "builds_on: [D2]\n",
     )
-    # D4: frontmatter declares builds_on with two entries.
+    # D4: frontmatter declares builds_on: [D1, D2].
     _write(
         specs / "decisions" / "D4.md",
-        "---\n"
-        + "id: D4\n"
-        + "title: Four\n"
-        + "status: draft\n"
-        + "owners: [team]\n"
-        + "builds_on: [D1, D2]\n"
-        + "---\n"
-        + "\n"
-        + "# D4\n",
+        _frontmatter([
+            "id: D4",
+            "title: Four",
+            "status: draft",
+            "owners: [team]",
+            "builds_on: [D1, D2]",
+        ])
+        + "\n# D4\n",
     )
+
     for sub in ("product", "vars", "decisions"):
         _write(specs / sub / "README.md", "# Readme\n\nNotes.\n")
 
 
-@pytest.fixture
-def con(tmp_path):
-    repo_root = Path(tmp_path) / "repo"
+def _edge_rows(tmp_path):
+    repo_root = tmp_path / "repo"
     repo_root.mkdir()
     _build_corpus(repo_root)
-    connection = duckdb.connect()
-    connection.execute("INSTALL yaml FROM community")
-    connection.execute("LOAD yaml")
-    graph_query_engine.load_views(connection, repo_root)
+    con = duckdb.connect()
     try:
-        yield connection
+        con.execute("INSTALL yaml FROM community")
+        con.execute("LOAD yaml")
+        graph_query_engine.load_views(con, repo_root)
+        rows = con.execute(
+            "SELECT source_id, target_id, edge_type FROM edges"
+        ).fetchall()
     finally:
-        connection.close()
+        con.close()
+    return [tuple(r) for r in rows]
 
 
-def test_prose_quoted_fields_produce_no_decision_edges(con):
-    rows = con.execute(
-        "SELECT source_id, target_id, edge_type FROM edges "
-        "WHERE source_id = 'D3' AND edge_type IN ('supersedes', 'builds_on')"
-    ).fetchall()
-    assert rows == []
+def test_prose_quoted_fields_produce_no_decision_edges(tmp_path):
+    edge_rows = _edge_rows(tmp_path)
+    offending = [
+        r
+        for r in edge_rows
+        if r[0] == "D3" and r[2] in ("supersedes", "builds_on")
+    ]
+    assert offending == []
 
 
-def test_builds_on_list_yields_exactly_one_row_per_entry(con):
-    rows = con.execute(
-        "SELECT source_id, target_id, edge_type FROM edges WHERE source_id = 'D4'"
-    ).fetchall()
-    assert sorted(rows) == [
+def test_declared_builds_on_list_yields_exactly_one_row_per_entry(tmp_path):
+    edge_rows = _edge_rows(tmp_path)
+    builds_on_rows = sorted(
+        r for r in edge_rows if r[0] == "D4" and r[2] == "builds_on"
+    )
+    assert builds_on_rows == [
         ("D4", "D1", "builds_on"),
         ("D4", "D2", "builds_on"),
     ]
-    assert len(rows) == 2

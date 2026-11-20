@@ -1,30 +1,22 @@
 # hotdocs-criterion: sha256:5af6febe6b4cde6b74c9ab091fb155e78698e0081855269e5a4a1385773c7a02
-"""AC-GQE-003: component_docs returns one row per component, with
-frontmatter fields joined to the component.md full raw text.
-
-Uses the fixture corpus from specs/architecture/graph-query-engine-fixture.md,
-written under a temporary repo_root.
-"""
-
 import json
 from pathlib import Path
 
 import duckdb
-import pytest
 
 import graph_query_engine
 
 
-def _write(repo_root, rel, text):
-    path = Path(repo_root) / rel
+def _write(path, text):
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_bytes(text.encode("utf-8"))
+    with open(path, "w", encoding="utf-8", newline="\n") as fh:
+        fh.write(text)
 
 
 def _build_fixture(repo_root):
+    specs = repo_root / "specs"
     _write(
-        repo_root,
-        "specs/components/foo/component.md",
+        specs / "components" / "foo" / "component.md",
         "---\n"
         "id: comp-foo\n"
         "title: Foo\n"
@@ -41,8 +33,7 @@ def _build_fixture(repo_root):
         "one two three\n",
     )
     _write(
-        repo_root,
-        "specs/components/bar/component.md",
+        specs / "components" / "bar" / "component.md",
         "---\n"
         "id: comp-bar\n"
         "title: Bar\n"
@@ -54,35 +45,29 @@ def _build_fixture(repo_root):
         "# Bar\n",
     )
     _write(
-        repo_root,
-        "specs/components/foo/requirements/R-FOO-001.md",
+        specs / "components" / "foo" / "requirements" / "R-FOO-001.md",
         "# R-FOO-001\n\nfoo MUST work.\n",
     )
     _write(
-        repo_root,
-        "specs/components/foo/requirements/R-FOO-002.md",
+        specs / "components" / "foo" / "requirements" / "R-FOO-002.md",
         "# R-FOO-002\n\nfoo MUST stop.\n",
     )
     _write(
-        repo_root,
-        "specs/components/foo/acceptance/AC-FOO-001.md",
+        specs / "components" / "foo" / "acceptance" / "AC-FOO-001.md",
         "# AC-FOO-001\n\nCovers: R-FOO-001\nKind: generated-test\n",
     )
     _write(
-        repo_root,
-        "specs/components/foo/interface/guarantees/G-FOO-001.md",
+        specs / "components" / "foo" / "interface" / "guarantees" / "G-FOO-001.md",
         "# G-FOO-001\n\nfoo never fails.\n",
     )
     _write(
-        repo_root,
-        "specs/product/x.md",
+        specs / "product" / "x.md",
         "---\n"
         "id: P-X\n"
         "title: X\n"
         "status: draft\n"
         "owners: [team]\n"
         "---\n"
-        "\n"
         "# X\n"
         "\n"
         "### CS-X-001\n"
@@ -92,33 +77,27 @@ def _build_fixture(repo_root):
         "Covers: P-X\n",
     )
     _write(
-        repo_root,
-        "specs/vars/x.md",
+        specs / "vars" / "x.md",
         "---\n"
         "id: VAR-X\n"
         "title: V\n"
         "status: draft\n"
         "owners: [team]\n"
         "---\n"
-        "\n"
         "# V\n",
     )
     _write(
-        repo_root,
-        "specs/decisions/D1.md",
+        specs / "decisions" / "D1.md",
         "---\n"
         "id: D1\n"
         "title: One\n"
         "status: ratified\n"
         "owners: [team]\n"
-        "last_ratified_commit: 0000000\n"
         "---\n"
-        "\n"
         "# D1\n",
     )
     _write(
-        repo_root,
-        "specs/decisions/D2.md",
+        specs / "decisions" / "D2.md",
         "---\n"
         "id: D2\n"
         "title: Two\n"
@@ -127,47 +106,51 @@ def _build_fixture(repo_root):
         "supersedes: D1\n"
         "builds_on: [D1]\n"
         "---\n"
-        "\n"
         "# D2\n",
     )
-    for d in ("specs/product", "specs/vars", "specs/decisions"):
-        _write(repo_root, d + "/README.md", "# Readme\n\nNotes.\n")
+    for sub in ("product", "vars", "decisions"):
+        _write(specs / sub / "README.md", "# Readme\n\nNotes.\n")
 
 
 def _as_list(value):
     if isinstance(value, (list, tuple)):
         return [str(v) for v in value]
     if isinstance(value, str):
+        text = value.strip()
         try:
-            parsed = json.loads(value)
+            parsed = json.loads(text)
         except ValueError:
-            return [value]
+            parsed = None
         if isinstance(parsed, list):
             return [str(v) for v in parsed]
-        return [str(parsed)]
+        if text.startswith("[") and text.endswith("]"):
+            inner = text[1:-1].strip()
+            if not inner:
+                return []
+            return [part.strip().strip("'\"") for part in inner.split(",")]
+        return [text]
     return value
 
 
-@pytest.fixture
-def con(tmp_path):
-    _build_fixture(tmp_path)
-    connection = duckdb.connect()
-    connection.execute("INSTALL yaml FROM community")
-    connection.execute("LOAD yaml")
-    graph_query_engine.load_views(connection, tmp_path)
-    yield connection
-    connection.close()
+def test_ac_gqe_003_component_docs(tmp_path):
+    repo_root = Path(tmp_path)
+    _build_fixture(repo_root)
 
+    con = duckdb.connect()
+    try:
+        con.execute("INSTALL yaml FROM community")
+        con.execute("LOAD yaml")
+        graph_query_engine.load_views(con, repo_root)
 
-def test_ac_gqe_003_component_docs(con):
-    cur = con.execute("SELECT * FROM component_docs")
-    rows = cur.fetchall()
-    columns = [d[0] for d in cur.description]
-    records = [dict(zip(columns, row)) for row in rows]
+        cur = con.execute("SELECT * FROM component_docs")
+        columns = [d[0] for d in cur.description]
+        rows = [dict(zip(columns, r)) for r in cur.fetchall()]
+    finally:
+        con.close()
 
-    assert len(records) == 2
+    assert len(rows) == 2
 
-    foo_rows = [r for r in records if r.get("id") == "comp-foo"]
+    foo_rows = [r for r in rows if str(r.get("id")) == "comp-foo"]
     assert len(foo_rows) == 1
     foo = foo_rows[0]
 
