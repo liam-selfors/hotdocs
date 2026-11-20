@@ -1,7 +1,6 @@
-# hotdocs-criterion: sha256:a14b581ab6248bc4a67637e2e8529cb18a904ffb26af1ffbe97c42c0a60236c9
+# hotdocs-criterion: sha256:62b47bbecc380b49fcce96eff510caf62e6e45e00d77fd34dc8ee5f67cc97913
 import hashlib
 import json
-import os
 from pathlib import Path
 
 import provenance_checker
@@ -11,105 +10,100 @@ def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def _as_plain(value):
-    if value is None or isinstance(value, (dict, list, str, int, float, bool)):
-        return value
-    to_dict = getattr(value, "to_dict", None)
-    if callable(to_dict):
-        return to_dict()
-    return value
+H = "sha256:" + "ab" * 32
+PK = "sha256:" + "a" * 64
 
 
-def test_hash_match_with_llm_judge_criterion_and_trust_true_is_hit(tmp_path):
-    repo_root = Path(tmp_path)
-    spec_bundle_hash = "sha256:" + hashlib.sha256(b"ac-provcheck-005 bundle").hexdigest()
+def _write(path, text):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
 
-    gate_versions = {
-        "compiler": "criterion-compiler@1.0.0",
-        "generated_test": "generated_test@1.1.0",
-        "verifier": "verifier-orchestrator@2.2.0",
-        "license_scanner": "license_scanner@4.0.0-no-reference-corpus",
-        "secret_scanner": "secret_scanner@3.1.0+detect-secrets.1.5.0",
+
+def _sha256_file(path):
+    return "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _build_repo(repo_root):
+    # Fake python adapter (D344), deterministic provision.
+    adapter_src = (
+        "KIND = " + repr("python") + "\n"
+        "\n"
+        "\n"
+        "def guidance():\n"
+        "    return " + repr({"generator": "", "test_author": ""}) + "\n"
+        "\n"
+        "\n"
+        "def provision(repo_root):\n"
+        "    return " + repr({
+            "ok": True,
+            "reason": "",
+            "versions": {"python": "3.12.4", "packages": PK},
+            "lockfile_sha256": None,
+            "interpreter": "/fake/python",
+        }) + "\n"
+    )
+    adapter_path = repo_root / "gen" / "kind-python" / "kind_python.py"
+    _write(adapter_path, adapter_src)
+
+    # Component frontmatter: not sealed, no assets line.
+    component_md = (
+        "---\n"
+        "id: comp-foo\n"
+        "title: Foo\n"
+        "status: draft\n"
+        "owners: [pipeline-team]\n"
+        "depends_on: []\n"
+        "---\n"
+        "\n"
+        "# Foo\n"
+        "\n"
+        "## Purpose\n"
+        "\n"
+        "A fixture component.\n"
+    )
+    _write(repo_root / "specs" / "components" / "foo" / "component.md", component_md)
+
+    pa = _sha256_file(adapter_path)
+    p_entry = {
+        "kind": "python",
+        "path": ".",
+        "definition_sha256": None,
+        "adapter_sha256": pa,
+        "versions": {"python": "3.12.4", "packages": PK},
+        "lockfile_sha256": None,
     }
 
     verification_report = {
-        "component_id": "comp-foo",
         "criteria": [
-            {"id": "AC-FOO-001", "covers": "R-FOO-001", "kind": "compiled", "result": "pass"},
             {
-                "id": "AC-FOO-002",
-                "covers": "R-FOO-002",
+                "id": "AC-FOO-001",
+                "covers": "R-FOO-001",
                 "kind": "llm-judge",
                 "result": "pass",
                 "rationale": "looks right",
-            },
-        ],
-        "requirement_results": {"R-FOO-001": "pass", "R-FOO-002": "pass"},
-        "interface_drift": False,
-        "mutation_score": 0.9,
-        "mutation_error": None,
-        "overall": "pass",
+            }
+        ]
     }
-    license_scan = {
-        "component_id": "comp-foo",
-        "gate_version": "license_scanner@4.0.0-no-reference-corpus",
-        "evaluated": False,
-        "reason": "no-reference-corpus",
-        "similarity_score": None,
-        "block_threshold": None,
-        "blocked": False,
-        "matches": [],
-        "notified": False,
-        "notification_delivery_error": None,
-        "cache_hit": False,
-    }
-    secret_scan = {
-        "scope": "full",
-        "gate_version": "secret_scanner@3.1.0+detect-secrets.1.5.0",
-        "flagged": False,
-        "matches": [],
-        "allowed": [],
-        "unused_allowlist_entries": [],
-        "notified": False,
-        "notification_delivery_error": None,
-        "cache_hit": False,
-    }
-
     manifest = {
-        "spec_bundle_hash": spec_bundle_hash,
-        "model_pin": "claude-sonnet-5",
-        "prompt_version": "v1",
-        "retry_feedback": None,
-        "pipeline_version": "v1",
-        "gate_versions": gate_versions,
-        "provenance_hit": False,
-        "generated_at": "2026-01-01T00:00:00Z",
-        "verification_run_id": "run-123",
+        "spec_bundle_hash": H,
+        "gate_versions": {},
         "verification_report": verification_report,
-        "license_scan": license_scan,
-        "secret_scan": secret_scan,
+        "license_scan": {},
+        "secret_scan": {},
+        "assets": [p_entry],
     }
+    _write(repo_root / "gen" / "foo" / ".provenance.json", json.dumps(manifest, indent=2))
+    return manifest
 
-    for sub in ("gen", "verification"):
-        d = repo_root / sub / "foo"
-        d.mkdir(parents=True, exist_ok=True)
-        (d / ".provenance.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
 
-    previous = os.environ.get("VAR_TRUST_JUDGE_PROVENANCE")
-    os.environ["VAR_TRUST_JUDGE_PROVENANCE"] = "true"
-    try:
-        result = provenance_checker.check_provenance(
-            "comp-foo", spec_bundle_hash, dict(gate_versions), repo_root
-        )
-    finally:
-        if previous is None:
-            os.environ.pop("VAR_TRUST_JUDGE_PROVENANCE", None)
-        else:
-            os.environ["VAR_TRUST_JUDGE_PROVENANCE"] = previous
+def test_ac_provcheck_005_llm_judge_trusted_hash_match_is_hit(tmp_path, monkeypatch):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    _build_repo(repo_root)
 
-    assert "VAR_TRUST_JUDGE_PROVENANCE" not in os.environ or previous is not None
+    # monkeypatch removes the variable again after the test.
+    monkeypatch.setenv("VAR_TRUST_JUDGE_PROVENANCE", "true")
+
+    result = provenance_checker.check_provenance("comp-foo", H, {}, repo_root)
 
     assert field(result, "hit") is True
-    assert _as_plain(field(result, "verification_report")) == verification_report
-    assert _as_plain(field(result, "license_scan")) == license_scan
-    assert _as_plain(field(result, "secret_scan")) == secret_scan

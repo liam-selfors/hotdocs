@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:624984df431fdfa04f17fc20aca28b3d675054c083ea9e58900784c05719047b
+# hotdocs-criterion: sha256:2cf7eba6056b83692b51da314fb859aa3949a687aa43c779660671393e512a22
 import hashlib
 from pathlib import Path
 
@@ -7,165 +7,165 @@ import pytest
 import provenance_checker
 
 
-GATE = "verifier-orchestrator@2.0.0"
-
-
 def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def write(path, data):
+PK = "sha256:" + "a" * 64
+
+
+def write(path, text):
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    if isinstance(data, str):
-        data = data.encode("utf-8")
-    path.write_bytes(data)
+    path.write_bytes(text.encode("utf-8"))
 
 
-def write_fake_verifier(repo_root):
-    src = "GATE_VERSION = " + repr(GATE) + "\n"
-    write(repo_root / "gen" / "verifier-orchestrator" / "verifier_orchestrator.py", src)
+def plant_python_adapter(repo_root):
+    src = (
+        "KIND = " + repr("python") + "\n"
+        "\n"
+        "def guidance():\n"
+        "    return " + repr({"generator": "", "test_author": ""}) + "\n"
+        "\n"
+        "def provision(repo_root):\n"
+        "    return " + repr({
+            "ok": True,
+            "reason": "",
+            "versions": {"python": "3.12.4", "packages": PK},
+            "lockfile_sha256": None,
+            "interpreter": "/fake/python",
+        }) + "\n"
+    )
+    write(repo_root / "gen" / "kind-python" / "kind_python.py", src)
 
 
-def write_component(repo_root, slug, frontmatter_lines):
-    text = (
+def plant_verifier(repo_root):
+    src = (
+        "GATE_VERSION = " + repr("verifier-orchestrator@2.0.0") + "\n"
+        "DEFAULT_TEST_TIMEOUT = 300.0\n"
+        "\n"
+        "def verify(component_id, repo_root, judge=None, test_author=None):\n"
+        "    raise RuntimeError(" + repr("verify must not be called") + ")\n"
+    )
+    write(
+        repo_root / "gen" / "verifier-orchestrator" / "verifier_orchestrator.py",
+        src,
+    )
+
+
+def component_md(slug, lines):
+    return (
         "---\n"
-        + "".join(line + "\n" for line in frontmatter_lines)
+        + "id: comp-" + slug + "\n"
+        + "title: Fixture " + slug + "\n"
+        + "status: draft\n"
+        + "".join(line + "\n" for line in lines)
         + "---\n"
         + "\n"
-        + "# Foo\n"
+        + "# Fixture " + slug + "\n"
         + "\n"
         + "## Purpose\n"
         + "\n"
-        + "Foo doubles a number.\n"
+        + "A fixture component.\n"
     )
-    write(repo_root / "specs" / "components" / slug / "component.md", text)
 
 
-def base_lines(slug="foo"):
-    return [
-        "id: comp-" + slug,
-        "title: Foo",
-        "status: draft",
-    ]
-
-
-def make_root(tmp_path, name):
-    root = tmp_path / name
-    root.mkdir(parents=True)
-    write_fake_verifier(root)
-    return root
+def plant_component(repo_root, slug, lines):
+    write(
+        repo_root / "specs" / "components" / slug / "component.md",
+        component_md(slug, lines),
+    )
 
 
 def expected_hash(entries):
     h = hashlib.sha256()
-    for rel, content in entries:
+    for rel, data in entries:
         h.update(rel.encode("utf-8"))
         h.update(b"\x00")
-        h.update(content)
+        h.update(data)
         h.update(b"\x00")
     return "sha256:" + h.hexdigest()
 
 
-def test_sealed_key_fields_and_hash(tmp_path):
-    repo_root = make_root(tmp_path, "main")
-    write_component(
-        repo_root,
+@pytest.fixture
+def repo_root(tmp_path):
+    root = tmp_path / "repo"
+    root.mkdir()
+    plant_python_adapter(root)
+    plant_verifier(root)
+    plant_component(
+        root,
         "foo",
-        base_lines()
-        + [
+        [
             "owners: [pipeline-team, alice]",
             "sealed: true",
             "source_path: pipeline/foo/",
-            "depends_on: []",
         ],
     )
-    write(repo_root / "pipeline" / "foo" / "a.py", b"A=1\n")
-    write(repo_root / "pipeline" / "foo" / "sub" / "b.py", b"B=2\n")
+    write(root / "pipeline" / "foo" / "a.py", "A=1\n")
+    write(root / "pipeline" / "foo" / "sub" / "b.py", "B=2\n")
+    return root
 
+
+def test_sealed_key_fields_and_hash(repo_root):
     key = provenance_checker.current_sealed_key("comp-foo", repo_root)
     assert key is not None
     assert list(field(key, "owners")) == ["pipeline-team", "alice"]
     assert field(key, "source_path") == "pipeline/foo/"
-    assert field(key, "verifier_version") == GATE
-
+    assert field(key, "verifier_version") == "verifier-orchestrator@2.0.0"
     want = expected_hash([("a.py", b"A=1\n"), ("sub/b.py", b"B=2\n")])
-    first_hash = field(key, "source_hash")
-    assert first_hash == want
-
-    # Excluded entries do not affect the hash.
-    write(repo_root / "pipeline" / "foo" / "__pycache__" / "x.pyc", b"\x00\x01garbage")
-    write(repo_root / "pipeline" / "foo" / ".sealed-provenance.json", b'{"anything": 1}')
-
-    key2 = provenance_checker.current_sealed_key("comp-foo", repo_root)
-    assert key2 is not None
-    assert field(key2, "source_hash") == first_hash
-
-    # A content change changes the hash.
-    write(repo_root / "pipeline" / "foo" / "a.py", b"A=2\n")
-    key3 = provenance_checker.current_sealed_key("comp-foo", repo_root)
-    assert key3 is not None
-    third_hash = field(key3, "source_hash")
-    assert third_hash != first_hash
-    assert third_hash == expected_hash([("a.py", b"A=2\n"), ("sub/b.py", b"B=2\n")])
+    assert field(key, "source_hash") == want
 
 
-def test_not_sealed_returns_none(tmp_path):
-    repo_root = make_root(tmp_path, "unsealed")
-    write_component(
+def test_pycache_and_manifest_excluded_and_content_change_detected(repo_root):
+    first = provenance_checker.current_sealed_key("comp-foo", repo_root)
+    first_hash = field(first, "source_hash")
+
+    foo = repo_root / "pipeline" / "foo"
+    (foo / "__pycache__").mkdir()
+    (foo / "__pycache__" / "x.pyc").write_bytes(b"\x00\x01garbage-bytecode")
+    (foo / ".sealed-provenance.json").write_bytes(b'{"anything": true}\n')
+
+    second = provenance_checker.current_sealed_key("comp-foo", repo_root)
+    assert field(second, "source_hash") == first_hash
+
+    (foo / "a.py").write_bytes(b"A=2\n")
+    third = provenance_checker.current_sealed_key("comp-foo", repo_root)
+    assert field(third, "source_hash") != first_hash
+    assert field(third, "source_hash") == expected_hash(
+        [("a.py", b"A=2\n"), ("sub/b.py", b"B=2\n")]
+    )
+
+
+def test_unsealed_and_missing_component_return_none(repo_root):
+    plant_component(
         repo_root,
         "bar",
-        base_lines("bar")
-        + [
+        [
             "owners: [pipeline-team]",
             "sealed: false",
             "source_path: pipeline/bar/",
-            "depends_on: []",
         ],
     )
-    write(repo_root / "pipeline" / "bar" / "a.py", b"A=1\n")
+    write(repo_root / "pipeline" / "bar" / "c.py", "C=3\n")
     assert provenance_checker.current_sealed_key("comp-bar", repo_root) is None
-
-
-def test_missing_component_md_returns_none(tmp_path):
-    repo_root = make_root(tmp_path, "missing")
-    assert not (repo_root / "specs" / "components" / "baz" / "component.md").exists()
+    assert not (repo_root / "specs" / "components" / "baz").exists()
     assert provenance_checker.current_sealed_key("comp-baz", repo_root) is None
 
 
 @pytest.mark.parametrize(
-    "case,lines",
+    "slug,lines",
     [
+        ("noowners", ["sealed: true", "source_path: pipeline/noowners/"]),
         (
-            "no_owners",
-            [
-                "sealed: true",
-                "source_path: pipeline/foo/",
-                "depends_on: []",
-            ],
+            "badowners",
+            ["owners: [Alice]", "sealed: true", "source_path: pipeline/badowners/"],
         ),
-        (
-            "bad_owner",
-            [
-                "owners: [Alice]",
-                "sealed: true",
-                "source_path: pipeline/foo/",
-                "depends_on: []",
-            ],
-        ),
-        (
-            "no_source_path",
-            [
-                "owners: [pipeline-team]",
-                "sealed: true",
-                "depends_on: []",
-            ],
-        ),
+        ("nosource", ["owners: [pipeline-team, alice]", "sealed: true"]),
     ],
 )
-def test_invalid_sealed_frontmatter_raises(tmp_path, case, lines):
-    repo_root = make_root(tmp_path, case)
-    write_component(repo_root, "foo", base_lines() + lines)
-    write(repo_root / "pipeline" / "foo" / "a.py", b"A=1\n")
+def test_invalid_sealed_frontmatter_raises(repo_root, slug, lines):
+    plant_component(repo_root, slug, lines)
+    write(repo_root / "pipeline" / slug / "m.py", "M=1\n")
     with pytest.raises(ValueError):
-        provenance_checker.current_sealed_key("comp-foo", repo_root)
+        provenance_checker.current_sealed_key("comp-" + slug, repo_root)

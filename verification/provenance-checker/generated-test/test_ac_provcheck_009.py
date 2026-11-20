@@ -1,7 +1,5 @@
-# hotdocs-criterion: sha256:ac7de7735a6e1094140ff55ce0d054a8638f9a53c459e6e53c70848dc80f9829
-import importlib.util
+# hotdocs-criterion: sha256:684cd967fa1167d601fdbc499b2fbecef682a1d2ad7cdfebf3f7214f5b8d037d
 import json
-import sys
 from pathlib import Path
 
 import pytest
@@ -9,19 +7,11 @@ import pytest
 import provenance_checker
 
 
-LOG_ENV = "PROVCHECK_AC009_LOG"
-
-
-def load_module(path, module_name):
-    spec = importlib.util.spec_from_file_location(module_name, path)
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[module_name] = module
-    spec.loader.exec_module(module)
-    return module
-
-
 def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
+
+
+PK = "sha256:" + "a" * 64
 
 
 def _write(path, text):
@@ -29,203 +19,231 @@ def _write(path, text):
     path.write_text(text, encoding="utf-8")
 
 
-def _log_helper_source():
+def _python_adapter_source():
     return (
-        "import json\n"
-        "import os\n"
+        "KIND = 'python'\n"
         "\n"
-        "def _log(kind, payload):\n"
-        "    log_path = os.environ.get(" + repr(LOG_ENV) + ")\n"
-        "    if not log_path:\n"
-        "        return\n"
-        "    with open(log_path, 'a', encoding='utf-8') as fh:\n"
-        "        fh.write(json.dumps({'kind': kind, 'payload': payload}) + '\\n')\n"
+        "def guidance():\n"
+        "    return {'generator': '', 'test_author': ''}\n"
         "\n"
+        "def provision(repo_root):\n"
+        "    return {'ok': True, 'reason': '', 'versions': {'python': '3.12.4', 'packages': "
+        + repr(PK)
+        + "}, 'lockfile_sha256': None, 'interpreter': '/fake/python'}\n"
+        "\n"
+        "def layout_errors(asset_file):\n"
+        "    return []\n"
+        "\n"
+        "def surface(asset_file):\n"
+        "    return {'names': []}\n"
+        "\n"
+        "def asset_runner(asset_file):\n"
+        "    def run(entry, args):\n"
+        "        return None\n"
+        "    return run\n"
+        "\n"
+        "def strength_sites(asset_file):\n"
+        "    return []\n"
+        "\n"
+        "def apply_site(asset_file, site):\n"
+        "    return None\n"
     )
 
 
-def _assembler_source(raise_error):
+def _assembler_source(log_path, raise_error):
     src = (
-        "import dataclasses\n"
-        + _log_helper_source()
-        + "@dataclasses.dataclass\n"
-        "class SpecBundle:\n"
-        "    component_id: str\n"
-        "    spec_bundle_hash: str\n"
-        "    spec: str\n"
-        "    interface: str\n"
-        "    constraints: str\n"
-        "    dependency_interfaces: dict = dataclasses.field(default_factory=dict)\n"
-        "    dependency_context: dict = dataclasses.field(default_factory=dict)\n"
-        "    dependency_usage: dict = dataclasses.field(default_factory=dict)\n"
-        "    vars: dict = dataclasses.field(default_factory=dict)\n"
-        "    glossary: str = ''\n"
-        "    hint_code: object = None\n"
+        "import json\n"
         "\n"
-        "    def _names(self):\n"
-        "        return [f.name for f in dataclasses.fields(self)]\n"
+        "LOG = " + repr(str(log_path)) + "\n"
+        "\n"
+        "class SpecBundle:\n"
+        "    def __init__(self, component_id):\n"
+        "        self.component_id = component_id\n"
+        "        self.spec_bundle_hash = 'sha256:abc'\n"
+        "        self.spec = ''\n"
+        "        self.interface = ''\n"
+        "        self.constraints = ''\n"
+        "        self.dependency_interfaces = {}\n"
+        "        self.dependency_context = {}\n"
+        "        self.dependency_usage = {}\n"
+        "        self.vars = {}\n"
+        "        self.glossary = ''\n"
+        "        self.hint_code = None\n"
         "\n"
         "    def __getitem__(self, key):\n"
-        "        if key not in self._names():\n"
+        "        try:\n"
+        "            return getattr(self, key)\n"
+        "        except AttributeError:\n"
         "            raise KeyError(key)\n"
-        "        return getattr(self, key)\n"
         "\n"
         "    def get(self, key, default=None):\n"
-        "        if key in self._names():\n"
-        "            return getattr(self, key)\n"
-        "        return default\n"
-        "\n"
-        "    def keys(self):\n"
-        "        return list(self._names())\n"
-        "\n"
-        "    def __iter__(self):\n"
-        "        return iter(self._names())\n"
-        "\n"
-        "    def __len__(self):\n"
-        "        return len(self._names())\n"
-        "\n"
-        "    def __contains__(self, key):\n"
-        "        return key in self._names()\n"
+        "        return getattr(self, key, default)\n"
         "\n"
         "def assemble(component_id, repo_root, mode='cold'):\n"
-        "    _log('assemble', {'component_id': component_id, 'repo_root': str(repo_root), 'mode': mode})\n"
+        "    with open(LOG, 'a', encoding='utf-8') as fh:\n"
+        "        fh.write(json.dumps({'component_id': component_id, 'repo_root': str(repo_root), 'mode': mode}) + '\\n')\n"
     )
     if raise_error:
-        src += "    raise ValueError(" + repr("fake-assemble-failure-ac009") + ")\n"
+        src += "    raise ValueError('assemble-sentinel-failure')\n"
     else:
-        src += (
-            "    return SpecBundle(\n"
-            "        component_id=component_id,\n"
-            "        spec_bundle_hash=" + repr("sha256:abc") + ",\n"
-            "        spec='spec',\n"
-            "        interface='interface',\n"
-            "        constraints='None.',\n"
-            "        dependency_interfaces={},\n"
-            "        dependency_context={},\n"
-            "        dependency_usage={},\n"
-            "        vars={},\n"
-            "        glossary='glossary',\n"
-            "        hint_code=None,\n"
-            "    )\n"
-        )
+        src += "    return SpecBundle(component_id)\n"
+    src += (
+        "\n"
+        "def assemble_criterion(component_id, criterion_id, repo_root):\n"
+        "    with open(LOG, 'a', encoding='utf-8') as fh:\n"
+        "        fh.write(json.dumps({'assemble_criterion': criterion_id}) + '\\n')\n"
+        "    raise RuntimeError('assemble_criterion must not be called')\n"
+    )
     return src
 
 
-def _constant_source(value):
-    return "GATE_VERSION = " + repr(value) + "\n"
-
-
-def _license_scanner_source():
+def _license_scanner_source(log_path):
     return (
-        _log_helper_source()
-        + "def gate_version(repo_root):\n"
-        "    return " + repr("ls@1") + "\n"
+        "LOG = " + repr(str(log_path)) + "\n"
+        "\n"
+        "def gate_version(repo_root):\n"
+        "    return 'ls@1'\n"
         "\n"
         "def scan(component_id, repo_root):\n"
-        "    _log('license_scan', {'component_id': component_id})\n"
-        "    raise AssertionError('license scan must not be called')\n"
+        "    with open(LOG, 'a', encoding='utf-8') as fh:\n"
+        "        fh.write('license scan ' + str(component_id) + '\\n')\n"
+        "    return {'component_id': component_id, 'gate_version': 'ls@1', 'evaluated': False,\n"
+        "            'reason': 'no-reference-corpus', 'similarity_score': None, 'block_threshold': None,\n"
+        "            'blocked': False, 'matches': [], 'notified': False,\n"
+        "            'notification_delivery_error': None, 'cache_hit': False}\n"
     )
 
 
-def _secret_scanner_source():
+def _secret_scanner_source(log_path):
     return (
-        _log_helper_source()
-        + "def gate_version(repo_root):\n"
-        "    return " + repr("ss@1") + "\n"
+        "LOG = " + repr(str(log_path)) + "\n"
+        "\n"
+        "def _result():\n"
+        "    return {'scope': 'full', 'gate_version': 'ss@1', 'flagged': False, 'matches': [],\n"
+        "            'allowed': [], 'unused_allowlist_entries': [], 'notified': False,\n"
+        "            'notification_delivery_error': None, 'cache_hit': False}\n"
+        "\n"
+        "def _record(what):\n"
+        "    with open(LOG, 'a', encoding='utf-8') as fh:\n"
+        "        fh.write(what + '\\n')\n"
+        "\n"
+        "def gate_version(repo_root):\n"
+        "    return 'ss@1'\n"
         "\n"
         "def scan(repo_root):\n"
-        "    _log('secret_scan', {})\n"
-        "    raise AssertionError('secret scan must not be called')\n"
+        "    _record('secret scan')\n"
+        "    return _result()\n"
         "\n"
         "def scan_files(paths, repo_root=None):\n"
-        "    _log('secret_scan_files', {})\n"
-        "    raise AssertionError('secret scan_files must not be called')\n"
+        "    _record('secret scan_files')\n"
+        "    r = _result()\n"
+        "    r['scope'] = 'precommit'\n"
+        "    return r\n"
+        "\n"
+        "def propose(repo_root):\n"
+        "    _record('secret propose')\n"
+        "    return {'allowlist': {'version': 1, 'entries': []}, 'ineligible': []}\n"
     )
 
 
-def _build_repo(repo_root, raise_error=False):
-    gen = repo_root / "gen"
+def _build_repo(tmp_path, raise_error=False):
+    repo_root = tmp_path / "repo"
+    logs = tmp_path / "logs"
+    logs.mkdir(parents=True, exist_ok=True)
+    assemble_log = logs / "assemble.log"
+    license_log = logs / "license_scan.log"
+    secret_log = logs / "secret_scan.log"
+
     _write(
-        gen / "spec-bundle-assembler" / "spec_bundle_assembler.py",
-        _assembler_source(raise_error),
-    )
-    _write(
-        repo_root / "pipeline" / "criterion-compiler" / "criterion_compiler.py",
-        _constant_source("cc@1"),
-    )
-    _write(gen / "test-author" / "test_author.py", _constant_source("ta@1"))
-    _write(
-        gen / "verifier-orchestrator" / "verifier_orchestrator.py",
-        _constant_source("vo@1"),
-    )
-    _write(gen / "license-scanner" / "license_scanner.py", _license_scanner_source())
-    _write(gen / "secret-scanner" / "secret_scanner.py", _secret_scanner_source())
-    _write(
-        repo_root / "specs" / "components" / "criterion-compiler" / "component.md",
+        repo_root / "specs" / "components" / "foo" / "component.md",
         "---\n"
-        "id: comp-criterion-compiler\n"
-        "title: Criterion Compiler\n"
+        "id: comp-foo\n"
+        "title: Foo\n"
         "status: draft\n"
         "owners: [pipeline-team]\n"
-        "sealed: true\n"
-        "source_path: pipeline/criterion-compiler/\n"
         "depends_on: []\n"
         "---\n"
         "\n"
-        "# Criterion Compiler\n"
+        "# Foo\n"
         "\n"
         "## Purpose\n"
         "\n"
-        "Compiles criteria.\n",
+        "A fixture component.\n",
     )
+    _write(repo_root / "gen" / "kind-python" / "kind_python.py", _python_adapter_source())
+    _write(
+        repo_root / "gen" / "spec-bundle-assembler" / "spec_bundle_assembler.py",
+        _assembler_source(assemble_log, raise_error),
+    )
+    _write(
+        repo_root / "pipeline" / "criterion-compiler" / "criterion_compiler.py",
+        "GATE_VERSION = " + repr("cc@1") + "\n",
+    )
+    _write(
+        repo_root / "gen" / "test-author" / "test_author.py",
+        "GATE_VERSION = " + repr("ta@1") + "\n",
+    )
+    _write(
+        repo_root / "gen" / "verifier-orchestrator" / "verifier_orchestrator.py",
+        "GATE_VERSION = " + repr("vo@1") + "\n"
+        "DEFAULT_TEST_TIMEOUT = 300.0\n",
+    )
+    _write(
+        repo_root / "gen" / "license-scanner" / "license_scanner.py",
+        _license_scanner_source(license_log),
+    )
+    _write(
+        repo_root / "gen" / "secret-scanner" / "secret_scanner.py",
+        _secret_scanner_source(secret_log),
+    )
+    _write(
+        repo_root / "gen" / "generator" / "generator.py",
+        "GATE_VERSION = " + repr("gen@3") + "\n"
+        "PROMPT_VERSION = " + repr("v11") + "\n",
+    )
+    return repo_root, assemble_log, license_log, secret_log
 
 
-def _read_log(log_path):
-    if not log_path.exists():
+def _read_lines(path):
+    if not path.exists():
         return []
-    entries = []
-    for line in log_path.read_text(encoding="utf-8").splitlines():
-        if line.strip():
-            entries.append(json.loads(line))
-    return entries
+    return [line for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
 
 
-def test_current_provenance_key_reads_bundle_hash_and_gate_versions(tmp_path, monkeypatch):
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    _build_repo(repo_root)
-    log_path = tmp_path / "calls.log"
-    monkeypatch.setenv(LOG_ENV, str(log_path))
+def test_current_provenance_key_reads_key_stand_ins(tmp_path):
+    repo_root, assemble_log, license_log, secret_log = _build_repo(tmp_path)
 
     key = provenance_checker.current_provenance_key("comp-foo", repo_root)
 
     assert field(key, "spec_bundle_hash") == "sha256:abc"
 
-    entries = _read_log(log_path)
-    assemble_calls = [e["payload"] for e in entries if e["kind"] == "assemble"]
-    assert len(assemble_calls) >= 1
-    assert all(c["component_id"] == "comp-foo" for c in assemble_calls)
-    assert all(c["mode"] == "cold" for c in assemble_calls)
+    calls = [json.loads(line) for line in _read_lines(assemble_log)]
+    assert len(calls) >= 1
+    for call in calls:
+        assert call.get("component_id") == "comp-foo"
+        assert call.get("mode") == "cold"
 
-    gate_versions = field(key, "gate_versions")
-    assert dict(gate_versions) == {
+    assert dict(field(key, "gate_versions")) == {
         "compiler": "cc@1",
         "generated_test": "ta@1",
         "verifier": "vo@1",
         "license_scanner": "ls@1",
         "secret_scanner": "ss@1",
+        "generator": "gen@3+v11",
     }
 
-    scan_kinds = {"license_scan", "secret_scan", "secret_scan_files"}
-    assert [e for e in entries if e["kind"] in scan_kinds] == []
+    assert _read_lines(license_log) == []
+    assert _read_lines(secret_log) == []
 
 
-def test_current_provenance_key_propagates_assemble_value_error(tmp_path, monkeypatch):
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    _build_repo(repo_root, raise_error=True)
-    log_path = tmp_path / "calls.log"
-    monkeypatch.setenv(LOG_ENV, str(log_path))
+def test_current_provenance_key_propagates_assemble_value_error(tmp_path):
+    repo_root, assemble_log, license_log, secret_log = _build_repo(tmp_path, raise_error=True)
 
-    with pytest.raises(ValueError, match="fake-assemble-failure-ac009"):
+    with pytest.raises(ValueError) as excinfo:
         provenance_checker.current_provenance_key("comp-foo", repo_root)
+
+    assert type(excinfo.value) is ValueError
+    assert "assemble-sentinel-failure" in str(excinfo.value)
+    assert len(_read_lines(assemble_log)) >= 1
+    assert _read_lines(license_log) == []
+    assert _read_lines(secret_log) == []
