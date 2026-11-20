@@ -1,118 +1,102 @@
-# hotdocs-criterion: sha256:637de8e71f451a75563521d9712f98324efa35363d2803233bd37a0b93e7b906
-"""AC-PROV-009: with provenance_hit true, write_provenance writes the
-verification_report / license_scan / secret_scan its ProvenanceInputs
-carries verbatim, unchanged, and performs no lookup of its own."""
-
+# hotdocs-criterion: sha256:a1fc4bf2a0af22f02a5592aebd077007bb97fee5496fbbf31c80d488a6dbcf32
 import copy
 import json
 import os
-from pathlib import Path
 
 import pytest
 
 import provenance_writer
 
 
-COMPONENT_ID = "comp-foo"
-SLUG = "foo"
+SLUG = "widget-maker"
+COMPONENT_ID = "comp-" + SLUG
+LOG_ENV = "HOTDOCS_TEST_PROV009_LOOKUP_LOG"
 
 
 def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def _write_fake_cache_manager(repo_root: Path, log_path: Path) -> None:
-    """A fake cache-manager matching its documented interface; every
-    function call appends one line to a log file the test controls."""
-    base = repo_root / "gen" / "cache-manager"
-    base.mkdir(parents=True, exist_ok=True)
-    src = (
+def _fake_module_source(label):
+    # Built by concatenation with repr() for embedded values; no temp paths embedded.
+    return (
         "import os\n"
-        "from dataclasses import dataclass\n"
         "\n"
-        "_LOG_ENV = " + repr("AC_PROV_009_LOG") + "\n"
+        "def _log(what):\n"
+        "    path = os.environ.get(" + repr(LOG_ENV) + ")\n"
+        "    if path:\n"
+        "        with open(path, 'a', encoding='utf-8') as fh:\n"
+        "            fh.write(" + repr(label) + " + ':' + what + '\\n')\n"
         "\n"
-        "def _log(name):\n"
-        "    p = os.environ.get(_LOG_ENV)\n"
-        "    if p:\n"
-        "        with open(p, " + repr("a") + ") as fh:\n"
-        "            fh.write(name + " + repr("\n") + ")\n"
-        "\n"
-        "@dataclass\n"
-        "class CacheKey:\n"
-        "    spec_bundle_hash: str\n"
-        "    gate_inputs_hash: str\n"
-        "    gate_version: str\n"
-        "    model_pin: str\n"
-        "\n"
-        "@dataclass\n"
-        "class CachedResult:\n"
-        "    gate_type: str\n"
-        "    payload: dict\n"
-        "    stored_at: str\n"
-        "\n"
-        "class Miss:\n"
-        "    def __eq__(self, other):\n"
-        "        return isinstance(other, Miss)\n"
-        "    def __hash__(self):\n"
-        "        return 0\n"
-        "\n"
-        "class SchemaValidationError(ValueError):\n"
-        "    pass\n"
+        "_log('import')\n"
         "\n"
         "def get(cache_key, *, repo_root=None):\n"
-        "    _log(" + repr("get") + ")\n"
-        "    return Miss()\n"
+        "    _log('get')\n"
+        "    return {'gate_type': 'generator', 'payload': {'decoy': True},\n"
+        "            'stored_at': '2020-01-01T00:00:00Z'}\n"
         "\n"
         "def put(cache_key, result, *, repo_root=None):\n"
-        "    _log(" + repr("put") + ")\n"
+        "    _log('put')\n"
         "    return None\n"
         "\n"
-        "def now_iso():\n"
-        "    _log(" + repr("now_iso") + ")\n"
-        "    return " + repr("2026-01-01T00:00:00Z") + "\n"
+        "def check(*args, **kwargs):\n"
+        "    _log('check')\n"
+        "    return {'hit': True, 'manifest': {'verification_report': {'decoy': True},\n"
+        "            'license_scan': {'decoy': True}, 'secret_scan': {'decoy': True}}}\n"
         "\n"
-        "def stats(*, repo_root=None):\n"
-        "    _log(" + repr("stats") + ")\n"
-        "    return {" + repr("entry_count") + ": 0}\n"
+        "def lookup(*args, **kwargs):\n"
+        "    _log('lookup')\n"
+        "    return check(*args, **kwargs)\n"
+        "\n"
+        "def find_prior_manifest(*args, **kwargs):\n"
+        "    _log('find_prior_manifest')\n"
+        "    return check(*args, **kwargs)\n"
     )
-    (base / "cache_manager.py").write_text(src, encoding="utf-8")
 
 
-def _verification_report():
+def _sourced_verification_report():
     return {
         "component_id": COMPONENT_ID,
         "criteria": [
-            {"id": "AC-FOO-001", "covers": "R-FOO-001", "kind": "compiled",
-             "result": "pass"},
-            {"id": "AC-FOO-002", "covers": "R-FOO-002", "kind": "llm-judge",
-             "result": "skipped", "rationale": None},
-            {"id": "AC-FOO-003", "covers": "R-FOO-003", "kind": "generated-test",
-             "result": "pass",
-             "test_authoring": {"model": "prior-model-marker", "seed": 7,
-                                "prompt_version": "v-prior", "cache_hit": True}},
+            {"id": "AC-WIDGET-MAKER-001", "covers": "R-WIDGET-MAKER-001",
+             "kind": "compiled", "result": "pass"},
+            {"id": "AC-WIDGET-MAKER-002", "covers": "R-WIDGET-MAKER-002",
+             "kind": "llm-judge", "result": "skipped", "rationale": None},
+            {"id": "AC-WIDGET-MAKER-003", "covers": "R-WIDGET-MAKER-003",
+             "kind": "generated-test", "result": "pass",
+             "test_authoring": {"model": "prior-model-x", "seed": 7,
+                                "prompt_version": "v9", "cache_hit": True}},
         ],
-        "requirement_results": {"R-FOO-001": "pass", "R-FOO-002": "fail",
-                                "R-FOO-003": "pass"},
+        "requirement_results": {
+            "R-WIDGET-MAKER-001": "pass",
+            "R-WIDGET-MAKER-002": "skipped",
+            "R-WIDGET-MAKER-003": "pass",
+        },
         "interface_drift": False,
-        "mutation_score": 0.8125,
+        "mutation_score": 0.875,
         "mutation_error": None,
+        "assets": [
+            {"kind": "python", "path": ".", "definition_sha256": None,
+             "adapter_sha256": "sha256:" + "ab" * 32,
+             "versions": {"python": "3.12.4"}, "lockfile_sha256": None},
+        ],
         "overall": "pass",
+        "prior_manifest_marker": "sourced-from-prior-manifest-run-41",
     }
 
 
-def _license_scan():
+def _sourced_license_scan():
     return {
         "component_id": COMPONENT_ID,
         "gate_version": "license_scanner@4.0.3+9f2c41ab07de",
         "evaluated": True,
         "reason": None,
-        "similarity_score": 0.3125,
+        "similarity_score": 0.125,
         "block_threshold": 0.7,
         "blocked": False,
         "matches": [
-            {"reference_id": "ref-prior-marker", "license_family": "gpl-3.0",
-             "risk_tier": "medium", "score": 0.3125}
+            {"reference_id": "ref-prior-77", "license_family": "mit",
+             "risk_tier": "low", "score": 0.125},
         ],
         "notified": False,
         "notification_delivery_error": None,
@@ -120,15 +104,15 @@ def _license_scan():
     }
 
 
-def _secret_scan():
+def _sourced_secret_scan():
     return {
         "scope": "full",
         "gate_version": "secret_scanner@3.1.0+detect-secrets.1.5.0",
         "flagged": False,
         "matches": [],
         "allowed": [
-            {"rule_id": "AWS Access Key", "file": "verification/foo/test_prior.py",
-             "line": 3}
+            {"rule_id": "AWS Access Key",
+             "file": "verification/widget-maker/test_x.py", "line": 3},
         ],
         "unused_allowlist_entries": [],
         "notified": False,
@@ -137,93 +121,127 @@ def _secret_scan():
     }
 
 
-def _generation_result():
+def _inputs(report, lic, sec):
     return {
         "component_id": COMPONENT_ID,
-        "spec_bundle_hash": "sha256:" + "ab" * 32,
-        "model": "claude-sonnet-5",
-        "prompt_version": "v10",
-        "cache_hit": True,
-        "files": {"foo.py": "def foo():\n    return 1\n"},
-        "model_call_error": None,
-        "refused": None,
-        "retry_feedback": None,
+        "generation_result": {
+            "component_id": COMPONENT_ID,
+            "spec_bundle_hash": "sha256:" + "cd" * 32,
+            "model": "claude-sonnet-5",
+            "prompt_version": "v12",
+            "cache_hit": True,
+            "files": {"widget_maker.py": "VALUE = 1\n"},
+            "model_call_error": None,
+            "refused": None,
+            "retry_feedback": None,
+            "mode": "single",
+            "transcript_sha256": None,
+            "turns": 1,
+            "tool_calls": 0,
+            "isolation": None,
+        },
+        "verification_report": report,
+        "license_scan_result": lic,
+        "secret_scan_result": sec,
+        "provenance_hit": True,
+        "attempts": 1,
+        "attempt_history": [],
+        "gate_versions": {"compiler": "1.0.0",
+                          "license_scanner": "k-gram@1.0.0"},
     }
 
 
-def _different_prior_manifest():
-    return {
-        "spec_bundle_hash": "sha256:" + "cd" * 32,
-        "model_pin": "other-model",
-        "prompt_version": "v0",
-        "retry_feedback": None,
-        "pipeline_version": "v0",
-        "gate_versions": {},
-        "provenance_hit": False,
-        "generated_at": "2020-01-01T00:00:00Z",
-        "verification_run_id": "run-stale",
-        "verification_report": {"component_id": COMPONENT_ID, "overall": "fail",
-                                "criteria": [], "stale_marker": True},
-        "license_scan": {"stale_marker": True},
-        "secret_scan": {"stale_marker": True},
-    }
-
-
-def test_provenance_hit_fields_written_verbatim_without_lookup(tmp_path, monkeypatch):
+@pytest.fixture
+def repo(tmp_path, monkeypatch):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
     log_path = tmp_path / "lookup.log"
-    monkeypatch.setenv("AC_PROV_009_LOG", str(log_path))
+    monkeypatch.setenv(LOG_ENV, str(log_path))
+    for slug, label in (("cache-manager", "cache_manager"),
+                        ("provenance-checker", "provenance_checker")):
+        d = repo_root / "gen" / slug
+        d.mkdir(parents=True)
+        (d / (slug.replace("-", "_") + ".py")).write_text(
+            _fake_module_source(label), encoding="utf-8")
+    return repo_root, log_path
 
-    _write_fake_cache_manager(repo_root, log_path)
 
-    # Stale, different manifests already sit at both locations: if the
-    # component looked anything up itself, these would be its source.
-    gen_manifest = repo_root / "gen" / SLUG / ".provenance.json"
-    ver_manifest = repo_root / "verification" / SLUG / ".provenance.json"
-    for p in (gen_manifest, ver_manifest):
-        p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text(json.dumps(_different_prior_manifest()), encoding="utf-8")
+def test_provenance_hit_fields_written_verbatim_without_lookup(repo):
+    repo_root, log_path = repo
 
-    report = _verification_report()
-    license_scan = _license_scan()
-    secret_scan = _secret_scan()
-
-    inputs = {
-        "component_id": COMPONENT_ID,
-        "generation_result": _generation_result(),
-        "verification_report": report,
-        "license_scan_result": license_scan,
-        "secret_scan_result": secret_scan,
-        "provenance_hit": True,
-        "attempts": 1,
-        "gate_versions": {"compiler": "1.0.0",
-                          "license_scanner": "license_scanner@4.0.3+9f2c41ab07de"},
-    }
-
+    report = _sourced_verification_report()
+    lic = _sourced_license_scan()
+    sec = _sourced_secret_scan()
     expected_report = copy.deepcopy(report)
-    expected_license = copy.deepcopy(license_scan)
-    expected_secret = copy.deepcopy(secret_scan)
+    expected_lic = copy.deepcopy(lic)
+    expected_sec = copy.deepcopy(sec)
+
+    inputs = _inputs(report, lic, sec)
 
     result = provenance_writer.write_provenance(COMPONENT_ID, inputs, repo_root)
     assert result is None
 
-    for p in (gen_manifest, ver_manifest):
-        assert p.is_file(), "manifest missing at " + str(p)
-        manifest = json.loads(p.read_text(encoding="utf-8"))
+    gen_manifest = repo_root / "gen" / SLUG / ".provenance.json"
+    ver_manifest = repo_root / "verification" / SLUG / ".provenance.json"
+    assert gen_manifest.is_file()
+    assert ver_manifest.is_file()
+    assert gen_manifest.read_bytes() == ver_manifest.read_bytes()
+
+    for manifest_path in (gen_manifest, ver_manifest):
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
         assert field(manifest, "provenance_hit") is True
         assert field(manifest, "verification_report") == expected_report
-        assert field(manifest, "license_scan") == expected_license
-        assert field(manifest, "secret_scan") == expected_secret
+        assert field(manifest, "license_scan") == expected_lic
+        assert field(manifest, "secret_scan") == expected_sec
+        assert field(manifest, "assets") == expected_report["assets"]
 
-    # The inputs themselves were not mutated.
+    # The inputs themselves were left unchanged.
     assert report == expected_report
-    assert license_scan == expected_license
-    assert secret_scan == expected_secret
+    assert lic == expected_lic
+    assert sec == expected_sec
 
-    # No lookup performed by this component itself.
-    calls = log_path.read_text(encoding="utf-8").splitlines() if log_path.exists() else []
-    assert "get" not in calls, "write_provenance performed a cache lookup: " + repr(calls)
-    assert calls == [] or set(calls) <= {"now_iso"}, (
-        "write_provenance called cache-manager: " + repr(calls)
-    )
+    # No lookup was performed by this component: neither decoy dependency
+    # was loaded or called.
+    if log_path.exists():
+        logged = log_path.read_text(encoding="utf-8")
+    else:
+        logged = ""
+    assert logged == "", "write_provenance performed a lookup: " + repr(logged)
+
+
+def test_provenance_hit_does_not_replace_fields_from_existing_manifest(repo):
+    repo_root, log_path = repo
+
+    # A prior manifest already sits at the target location with different
+    # values; the writer must not source anything from it.
+    decoy = {
+        "provenance_hit": False,
+        "verification_report": {"decoy": "prior-report"},
+        "license_scan": {"decoy": "prior-license"},
+        "secret_scan": {"decoy": "prior-secret"},
+    }
+    for sub in ("gen", "verification"):
+        d = repo_root / sub / SLUG
+        d.mkdir(parents=True, exist_ok=True)
+        (d / ".provenance.json").write_text(json.dumps(decoy), encoding="utf-8")
+
+    report = _sourced_verification_report()
+    lic = _sourced_license_scan()
+    sec = _sourced_secret_scan()
+    expected_report = copy.deepcopy(report)
+    expected_lic = copy.deepcopy(lic)
+    expected_sec = copy.deepcopy(sec)
+
+    provenance_writer.write_provenance(
+        COMPONENT_ID, _inputs(report, lic, sec), repo_root)
+
+    for sub in ("gen", "verification"):
+        path = repo_root / sub / SLUG / ".provenance.json"
+        manifest = json.loads(path.read_text(encoding="utf-8"))
+        assert field(manifest, "provenance_hit") is True
+        assert field(manifest, "verification_report") == expected_report
+        assert field(manifest, "license_scan") == expected_lic
+        assert field(manifest, "secret_scan") == expected_sec
+
+    logged = log_path.read_text(encoding="utf-8") if log_path.exists() else ""
+    assert logged == "", "write_provenance performed a lookup: " + repr(logged)

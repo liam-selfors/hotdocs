@@ -1,138 +1,75 @@
-# hotdocs-criterion: sha256:3426d62d0e94abd08fb100461021cf6a6552afe799e6442ddd56b233dfa4cc37
-import dataclasses
+# hotdocs-criterion: sha256:e54f674b2bb06c684b6f376adce1ef9b99e8d1b21e6f49d37461ae028fccc7a3
 import json
+import re
 from datetime import datetime, timezone
-from pathlib import Path
 
 import provenance_writer
 
 
 INTERNAL_TIMESTAMP = "2001-02-03T04:05:06Z"
-COMPONENT_ID = "comp-foo"
-SLUG = "foo"
+TIMESTAMP_RE = re.compile(r"^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$")
 
 
 def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def _generation_result():
-    return {
-        "component_id": COMPONENT_ID,
-        "spec_bundle_hash": "sha256:" + "a" * 64,
+def _inputs():
+    generation_result = {
+        "component_id": "comp-foo",
+        "spec_bundle_hash": "sha256:" + "0" * 64,
         "model": "claude-sonnet-5",
-        "prompt_version": "v10",
+        "prompt_version": "v12",
         "cache_hit": False,
-        "files": {"foo.py": "def foo():\n    return 1\n"},
-        "model_call_error": None,
+        "files": {},
+        "model_call_error": {"category": "environment", "message": "no python"},
         "refused": None,
         "retry_feedback": None,
-        # Unrelated internal timestamps carried by the upstream result.
+        "mode": "single",
+        "transcript_sha256": None,
+        "turns": 1,
+        "tool_calls": 0,
+        "isolation": None,
+        # Unrelated upstream-internal timestamps that must never be copied.
         "generated_at": INTERNAL_TIMESTAMP,
         "stored_at": INTERNAL_TIMESTAMP,
         "timestamp": INTERNAL_TIMESTAMP,
     }
-
-
-def _verification_report():
     return {
-        "component_id": COMPONENT_ID,
-        "criteria": [
-            {"id": "AC-FOO-001", "covers": "R-FOO-001", "kind": "compiled", "result": "pass"}
-        ],
-        "requirement_results": {"R-FOO-001": "pass"},
-        "interface_drift": False,
-        "mutation_score": None,
-        "mutation_error": None,
-        "overall": "pass",
-    }
-
-
-def _license_scan_result():
-    return {
-        "component_id": COMPONENT_ID,
-        "gate_version": "license_scanner@4.0.0-no-reference-corpus",
-        "evaluated": False,
-        "reason": "no-reference-corpus",
-        "similarity_score": None,
-        "block_threshold": None,
-        "blocked": False,
-        "matches": [],
-        "notified": False,
-        "notification_delivery_error": None,
-        "cache_hit": False,
-    }
-
-
-def _secret_scan_result():
-    return {
-        "scope": "full",
-        "gate_version": "secret_scanner@3.1.0+detect-secrets.1.5.0",
-        "flagged": False,
-        "matches": [],
-        "allowed": [],
-        "unused_allowlist_entries": [],
-        "notified": False,
-        "notification_delivery_error": None,
-        "cache_hit": False,
-    }
-
-
-def _inputs():
-    data = {
-        "component_id": COMPONENT_ID,
-        "generation_result": _generation_result(),
-        "verification_report": _verification_report(),
-        "license_scan_result": _license_scan_result(),
-        "secret_scan_result": _secret_scan_result(),
+        "component_id": "comp-foo",
+        "generation_result": generation_result,
+        "verification_report": None,
+        "license_scan_result": {},
+        "secret_scan_result": {},
         "provenance_hit": False,
         "attempts": 1,
-        "gate_versions": {"compiler": "1.0.0", "license_scanner": "k-gram@1.0.0"},
+        "attempt_history": [],
+        "gate_versions": {},
     }
-    cls = getattr(provenance_writer, "ProvenanceInputs", None)
-    if cls is not None and dataclasses.is_dataclass(cls):
-        names = {f.name for f in dataclasses.fields(cls)}
-        return cls(**{k: v for k, v in data.items() if k in names})
-    return data
 
 
 def _parse(ts):
-    assert isinstance(ts, str), "generated_at must be a string, got " + repr(ts)
-    text = ts[:-1] + "+00:00" if ts.endswith("Z") else ts
-    parsed = datetime.fromisoformat(text)
-    if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=timezone.utc)
-    return parsed.astimezone(timezone.utc).replace(microsecond=0)
+    return datetime.strptime(ts, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
 
 
 def test_generated_at_is_own_write_time_not_upstream_timestamp(tmp_path):
-    repo_root = Path(tmp_path)
-
     before = datetime.now(timezone.utc).replace(microsecond=0)
-    provenance_writer.write_provenance(COMPONENT_ID, _inputs(), repo_root)
+    provenance_writer.write_provenance("comp-foo", _inputs(), tmp_path)
     after = datetime.now(timezone.utc).replace(microsecond=0)
 
-    manifest_paths = [
-        repo_root / "gen" / SLUG / ".provenance.json",
-        repo_root / "verification" / SLUG / ".provenance.json",
+    paths = [
+        tmp_path / "gen" / "foo" / ".provenance.json",
+        tmp_path / "verification" / "foo" / ".provenance.json",
     ]
-    for path in manifest_paths:
-        assert path.is_file(), "missing manifest at " + str(path)
+    for path in paths:
+        assert path.is_file(), "manifest missing at " + str(path)
         manifest = json.loads(path.read_text(encoding="utf-8"))
         generated_at = field(manifest, "generated_at")
-
-        assert generated_at != INTERNAL_TIMESTAMP, (
-            "generated_at was copied from the upstream internal timestamp in " + str(path)
-        )
-        parsed = _parse(generated_at)
-        assert parsed != _parse(INTERNAL_TIMESTAMP)
-        assert before <= parsed <= after, (
-            "generated_at "
-            + repr(generated_at)
-            + " not within write window ["
-            + before.isoformat()
-            + ", "
-            + after.isoformat()
-            + "] in "
-            + str(path)
+        assert isinstance(generated_at, str)
+        assert TIMESTAMP_RE.match(generated_at), generated_at
+        assert generated_at != INTERNAL_TIMESTAMP
+        written = _parse(generated_at)
+        assert before <= written <= after, (
+            "generated_at " + generated_at + " not within write window "
+            + before.isoformat() + " .. " + after.isoformat()
         )

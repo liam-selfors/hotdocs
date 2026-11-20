@@ -1,11 +1,6 @@
-# hotdocs-criterion: sha256:8a9eaaef57e1f5fe95c5c1c9d4aa7926b30f534af9549a337a2229466ae390b1
-"""AC-PROV-019: write_sealed_provenance validates before writing, never invents.
-
-Covers R-PROV-019.
-"""
+# hotdocs-criterion: sha256:c0e553b91c3281ab404e81bbed63c513fc4536a98f5797e440eada31e62c5d7b
 import copy
 import json
-import os
 from pathlib import Path
 
 import pytest
@@ -14,31 +9,22 @@ import provenance_writer
 
 
 VALID_HASH = "sha256:" + "0123456789abcdef" * 4
-VALID_VERIFIER = "verifier-orchestrator@2.0.0"
-SOURCE_PATH = "pipeline/foo/"
 
 
-def field(value, name):
-    return value[name] if isinstance(value, dict) else getattr(value, name)
-
-
-def _report(criteria_results, overall):
-    criteria = []
-    requirement_results = {}
-    for i, result in enumerate(criteria_results, start=1):
-        cid = "AC-FOO-" + str(i).zfill(3)
-        rid = "R-FOO-" + str(i).zfill(3)
-        criteria.append(
-            {"id": cid, "covers": rid, "kind": "compiled", "result": result}
-        )
-        requirement_results[rid] = "pass" if result == "pass" else "fail"
+def _report(criteria=None, overall="pass"):
+    if criteria is None:
+        criteria = [
+            {"id": "AC-FOO-001", "covers": "R-FOO-001", "kind": "compiled", "result": "pass"},
+            {"id": "AC-FOO-002", "covers": "R-FOO-002", "kind": "generated-test", "result": "pass"},
+        ]
     return {
         "component_id": "comp-foo",
         "criteria": criteria,
-        "requirement_results": requirement_results,
+        "requirement_results": {c["covers"]: c["result"] for c in criteria},
         "interface_drift": False,
         "mutation_score": None,
         "mutation_error": None,
+        "assets": [],
         "overall": overall,
     }
 
@@ -47,126 +33,107 @@ def _valid_inputs():
     return {
         "component_id": "comp-foo",
         "owners": ["pipeline-team"],
-        "source_path": SOURCE_PATH,
+        "source_path": "pipeline/foo/",
         "source_hash": VALID_HASH,
-        "verifier_version": VALID_VERIFIER,
-        "verification_report": _report(["pass", "pass", "pass"], "pass"),
+        "verifier_version": "verifier-orchestrator@2.0.0",
+        "verification_report": _report(),
     }
 
 
-def _existing_manifest_bytes():
-    manifest = {
-        "kind": "sealed-provenance",
-        "version": 1,
-        "component_id": "comp-foo",
-        "owners": ["pipeline-team"],
-        "source_path": SOURCE_PATH,
-        "source_hash": VALID_HASH,
-        "verifier_version": VALID_VERIFIER,
-        "characterization": {
-            "overall": "pass",
-            "criteria_passed": 3,
-            "criteria_total": 3,
-        },
-        "written_at": "2026-11-02T00:00:00Z",
-    }
-    return (json.dumps(manifest, indent=2, sort_keys=True) + "\n").encode("utf-8")
+EXISTING_MANIFEST = {
+    "kind": "sealed-provenance",
+    "version": 1,
+    "component_id": "comp-foo",
+    "owners": ["pipeline-team"],
+    "source_path": "pipeline/foo/",
+    "source_hash": VALID_HASH,
+    "verifier_version": "verifier-orchestrator@1.0.0",
+    "characterization": {"overall": "pass", "criteria_passed": 2, "criteria_total": 2},
+    "written_at": "2026-01-01T00:00:00Z",
+}
 
 
-def _snapshot(root):
-    """Map every file under root (hidden files included) to its bytes."""
-    result = {}
-    for dirpath, _dirnames, filenames in os.walk(str(root)):
-        for name in filenames:
-            p = Path(dirpath) / name
-            result[str(p.relative_to(root))] = p.read_bytes()
-    return result
+def _all_files(root):
+    return sorted(str(p.relative_to(root)) for p in Path(root).rglob("*") if p.is_file())
 
 
-def _variant_inputs(variant):
-    inputs = _valid_inputs()
-    component_arg = "comp-foo"
-    if variant == "source_path_escape":
-        inputs["source_path"] = "../escape/"
-    elif variant == "source_path_gen":
-        inputs["source_path"] = "gen/foo/"
-    elif variant == "source_path_absolute":
-        inputs["source_path"] = "/abs/path/"
-    elif variant == "owners_empty":
-        inputs["owners"] = []
-    elif variant == "owner_uppercase":
-        inputs["owners"] = ["Alice"]
-    elif variant == "source_hash_short":
-        inputs["source_hash"] = "sha256:abc"
-    elif variant == "verifier_version_bad":
-        inputs["verifier_version"] = "v2"
-    elif variant == "criteria_empty":
-        report = copy.deepcopy(inputs["verification_report"])
-        report["criteria"] = []
-        report["requirement_results"] = {}
-        inputs["verification_report"] = report
-    elif variant == "component_id_mismatch":
-        component_arg = "comp-bar"
-    elif variant == "source_hash_missing":
-        del inputs["source_hash"]
-    else:  # pragma: no cover
-        raise AssertionError("unknown variant " + repr(variant))
-    return component_arg, inputs
+def _with(field, value):
+    def make():
+        inputs = _valid_inputs()
+        inputs[field] = value
+        return "comp-foo", inputs
+    return make
 
 
-VARIANTS = [
-    "source_path_escape",
-    "source_path_gen",
-    "source_path_absolute",
-    "owners_empty",
-    "owner_uppercase",
-    "source_hash_short",
-    "verifier_version_bad",
-    "criteria_empty",
-    "component_id_mismatch",
-    "source_hash_missing",
+def _without(field):
+    def make():
+        inputs = _valid_inputs()
+        del inputs[field]
+        return "comp-foo", inputs
+    return make
+
+
+def _mismatched_id():
+    return "comp-bar", _valid_inputs()
+
+
+BAD_CASES = [
+    ("source_path_escape", _with("source_path", "../escape/")),
+    ("source_path_gen", _with("source_path", "gen/foo/")),
+    ("source_path_absolute", _with("source_path", "/abs/path/")),
+    ("owners_empty", _with("owners", [])),
+    ("owner_uppercase", _with("owners", ["Alice"])),
+    ("source_hash_short", _with("source_hash", "sha256:abc")),
+    ("verifier_version_bad", _with("verifier_version", "v2")),
+    ("report_no_criteria", _with("verification_report", _report(criteria=[]))),
+    ("component_id_mismatch", _mismatched_id),
+    ("source_hash_missing", _without("source_hash")),
 ]
 
 
-@pytest.mark.parametrize("variant", VARIANTS)
-def test_invalid_input_raises_and_existing_manifest_untouched(tmp_path, variant):
+def test_valid_inputs_baseline_writes_manifest(tmp_path):
+    # Sanity check: the same inputs, unmodified, are accepted, so each
+    # rejection below is due to the one field that was made bad.
     repo_root = tmp_path / "repo"
-    manifest_dir = repo_root / "pipeline" / "foo"
-    manifest_dir.mkdir(parents=True)
-    manifest_path = manifest_dir / ".sealed-provenance.json"
-    original = _existing_manifest_bytes()
-    manifest_path.write_bytes(original)
-
-    before = _snapshot(repo_root)
-
-    component_arg, inputs = _variant_inputs(variant)
-
-    with pytest.raises(provenance_writer.InvalidSealedInputError):
-        provenance_writer.write_sealed_provenance(component_arg, inputs, repo_root)
-
+    repo_root.mkdir()
+    provenance_writer.write_sealed_provenance("comp-foo", _valid_inputs(), repo_root)
+    manifest_path = repo_root / "pipeline" / "foo" / ".sealed-provenance.json"
     assert manifest_path.is_file()
-    assert manifest_path.read_bytes() == original
-    # Nothing else was written anywhere under repo_root either.
-    assert _snapshot(repo_root) == before
-    # The escaping path must not have produced a manifest outside repo_root.
-    assert not (tmp_path / "escape" / ".sealed-provenance.json").exists()
-    assert not (repo_root / "gen" / "foo" / ".sealed-provenance.json").exists()
+    data = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert data["component_id"] == "comp-foo"
 
 
-def test_overall_pass_with_failing_entry_raises_and_writes_nothing(tmp_path):
+@pytest.mark.parametrize("make", [c[1] for c in BAD_CASES], ids=[c[0] for c in BAD_CASES])
+def test_invalid_sealed_input_raises_and_leaves_existing_manifest(tmp_path, make):
     repo_root = tmp_path / "repo"
     manifest_dir = repo_root / "pipeline" / "foo"
     manifest_dir.mkdir(parents=True)
     manifest_path = manifest_dir / ".sealed-provenance.json"
+    original_bytes = (json.dumps(EXISTING_MANIFEST, indent=2) + "\n").encode("utf-8")
+    manifest_path.write_bytes(original_bytes)
+    files_before = _all_files(repo_root)
 
+    component_id, inputs = make()
+    with pytest.raises(provenance_writer.InvalidSealedInputError):
+        provenance_writer.write_sealed_provenance(component_id, copy.deepcopy(inputs), repo_root)
+
+    assert manifest_path.read_bytes() == original_bytes
+    assert _all_files(repo_root) == files_before
+    assert not (tmp_path / "escape").exists()
+
+
+def test_overall_pass_with_failed_criterion_raises_and_writes_nothing(tmp_path):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    criteria = [
+        {"id": "AC-FOO-001", "covers": "R-FOO-001", "kind": "compiled", "result": "pass"},
+        {"id": "AC-FOO-002", "covers": "R-FOO-002", "kind": "generated-test", "result": "fail"},
+    ]
     inputs = _valid_inputs()
-    inputs["verification_report"] = _report(["pass", "fail", "pass"], "pass")
-
-    before = _snapshot(repo_root)
-    assert before == {}
+    inputs["verification_report"] = _report(criteria=criteria, overall="pass")
 
     with pytest.raises(provenance_writer.InvalidSealedInputError):
         provenance_writer.write_sealed_provenance("comp-foo", inputs, repo_root)
 
-    assert not manifest_path.exists()
-    assert _snapshot(repo_root) == {}
+    assert not (repo_root / "pipeline" / "foo" / ".sealed-provenance.json").exists()
+    assert _all_files(repo_root) == []
