@@ -1,7 +1,5 @@
-# hotdocs-criterion: sha256:ed6a5fa728217bc2c2af8b01333376dbb827b88bb03e45060e05dee341bc4c0e
-import hashlib
+# hotdocs-criterion: sha256:c739cb0f4c7b76f13b3d5b363912ae1d54685cf3500ba890e0fea47b373494b0
 import json
-import os
 from pathlib import Path
 
 import provenance_tracker_ui
@@ -15,82 +13,81 @@ def _verification_report(component_id):
     return {
         "component_id": component_id,
         "criteria": [
-            {"id": "AC-X-001", "covers": "R-X-001", "kind": "compiled", "result": "pass"}
+            {"id": "AC-FOO-001", "covers": "R-FOO-001", "kind": "compiled", "result": "pass"}
         ],
-        "requirement_results": {"R-X-001": "pass"},
+        "requirement_results": {"R-FOO-001": "pass"},
         "interface_drift": False,
-        "mutation_score": None,
+        "mutation_score": 0.92,
         "mutation_error": None,
+        "assets": [
+            {
+                "kind": "python",
+                "path": ".",
+                "definition_sha256": None,
+                "adapter_sha256": "sha256:00",
+                "versions": {"python": "3.12.4"},
+                "lockfile_sha256": None,
+            }
+        ],
         "overall": "pass",
     }
 
 
-def _provenance_check_result(component_id):
+def _report():
     return {
-        "hit": True,
-        "verification_report": _verification_report(component_id),
-        "license_scan": {"blocked": False, "findings": []},
-        "secret_scan": {"flagged": False, "findings": []},
-    }
-
-
-def _component_node():
-    return {
-        "type": "component",
-        "verification": None,
-        "provenance": None,
-        "size_status": "unknown",
-        "sealed": False,
-        "pinned_overrides": [],
-        "owners": ["test-team"],
-        "documents": {},
+        "scope": "whole-corpus",
+        "ready": False,
+        "components": {
+            "comp-foo": {
+                "hit": True,
+                "reason": None,
+                "verification_report": _verification_report("comp-foo"),
+                "license_scan": {"blocked": False},
+                "secret_scan": {"flagged": False},
+            },
+            "comp-bar": {
+                "hit": False,
+                "reason": "no manifest",
+                "verification_report": None,
+                "license_scan": None,
+                "secret_scan": None,
+            },
+        },
+        "capabilities": {
+            "P-ZERO-EDIT": {
+                "hit": True,
+                "capability_scenario_report": {
+                    "P-ZERO-EDIT": {"overall": "pass", "scenarios": []}
+                },
+            }
+        },
+        "not_ready_reasons": [
+            "comp-bar: no provenance for current spec state — run hotdocs generate comp-bar"
+        ],
     }
 
 
 def _write_fake_tracker(repo_root, log_path):
-    components = {
-        "comp-foo": _provenance_check_result("comp-foo"),
-        "comp-bar": _provenance_check_result("comp-bar"),
-    }
-    capabilities = {
-        "P-ZERO-EDIT": {
-            "hit": True,
-            "capability_scenario_report": {
-                "P-ZERO-EDIT": {"overall": "pass", "scenarios": []}
-            },
-        }
-    }
+    fake_dir = repo_root / "gen" / "provenance-tracker"
+    fake_dir.mkdir(parents=True)
     src = (
-        "import copy\n"
-        "\n"
-        "_LOG = " + repr(str(log_path)) + "\n"
-        "_COMPONENTS = " + repr(components) + "\n"
-        "_CAPABILITIES = " + repr(capabilities) + "\n"
-        "\n"
+        "REPORT = " + repr(_report()) + "\n"
+        "LOG = " + repr(str(log_path)) + "\n"
         "\n"
         "def _log(line):\n"
-        "    with open(_LOG, 'a', encoding='utf-8') as fh:\n"
+        "    with open(LOG, 'a', encoding='utf-8') as fh:\n"
         "        fh.write(line + '\\n')\n"
-        "\n"
         "\n"
         "def check_readiness(repo_root, changed_ids=None, model=None, seed=0, llm_backend=None):\n"
         "    _log('check_readiness')\n"
-        "    return {\n"
-        "        'scope': 'whole-corpus' if changed_ids is None else 'blast-radius',\n"
-        "        'ready': True,\n"
-        "        'components': copy.deepcopy(_COMPONENTS),\n"
-        "        'capabilities': copy.deepcopy(_CAPABILITIES),\n"
-        "        'not_ready_reasons': [],\n"
-        "    }\n"
-        "\n"
+        "    import copy\n"
+        "    return copy.deepcopy(REPORT)\n"
         "\n"
         "def last_requirement_failures(component_id, repo_root):\n"
         "    _log('last_requirement_failures ' + str(component_id))\n"
         "    return []\n"
     )
-    d = repo_root / "gen" / "provenance-tracker"
-    d.mkdir(parents=True)
-    (d / "provenance_tracker.py").write_text(src, encoding="utf-8")
+    (fake_dir / "provenance_tracker.py").write_text(src, encoding="utf-8")
 
 
 def _write_corpus_graph(repo_root):
@@ -98,8 +95,26 @@ def _write_corpus_graph(repo_root):
         "nodes": {
             "P-ZERO-EDIT": {"type": "capability"},
             "VAR-FOO-URL": {"type": "var"},
-            "comp-bar": _component_node(),
-            "comp-foo": _component_node(),
+            "comp-bar": {
+                "type": "component",
+                "verification": None,
+                "provenance": None,
+                "size_status": "ok",
+                "sealed": False,
+                "pinned_overrides": [],
+                "owners": ["pipeline-team"],
+                "documents": {"component.md": "bar"},
+            },
+            "comp-foo": {
+                "type": "component",
+                "verification": None,
+                "provenance": None,
+                "size_status": "ok",
+                "sealed": False,
+                "pinned_overrides": [],
+                "owners": ["pipeline-team"],
+                "documents": {"component.md": "foo"},
+            },
         },
         "edges": [
             {"from": "comp-foo", "to": "P-ZERO-EDIT", "kind": "realizes"},
@@ -112,73 +127,67 @@ def _write_corpus_graph(repo_root):
             "orphan_var_rate": 0.0,
         },
     }
-    v = repo_root / "verification"
-    v.mkdir(parents=True)
-    (v / "corpus-graph.json").write_text(
+    vdir = repo_root / "verification"
+    vdir.mkdir(parents=True)
+    (vdir / "corpus-graph.json").write_text(
         json.dumps(graph, sort_keys=True, indent=2, ensure_ascii=True) + "\n",
         encoding="utf-8",
     )
 
 
-def _snapshot(root, label):
-    result = {}
-    root = Path(root)
-    if not root.exists():
-        return result
-    for dirpath, dirnames, filenames in os.walk(root):
-        dirnames[:] = [d for d in dirnames if d != "__pycache__"]
-        for name in filenames:
-            p = Path(dirpath) / name
-            if "__pycache__" in p.relative_to(root).parts:
+def _snapshot(*roots):
+    files = {}
+    for root in roots:
+        if not root.exists():
+            continue
+        for p in root.rglob("*"):
+            rel = p.relative_to(root)
+            if "__pycache__" in rel.parts:
                 continue
-            st = p.stat()
-            digest = hashlib.sha256(p.read_bytes()).hexdigest()
-            result[(label, p.relative_to(root).as_posix())] = (st.st_mtime_ns, st.st_size, digest)
-    return result
+            if p.is_file():
+                files[p.resolve()] = p.read_bytes()
+    return files
 
 
-def test_ac_ui_004_edges_and_only_index_html_written(tmp_path):
-    repo_root = tmp_path / "repo"
-    out_dir = tmp_path / "out"
-    log_dir = tmp_path / "logs"
+def test_ac_ui_004_edges_and_only_write(tmp_path):
+    base = tmp_path.resolve()
+    repo_root = base / "repo"
+    out_dir = base / "out"
     repo_root.mkdir()
-    log_dir.mkdir()
-    log_path = log_dir / "calls.log"
+    out_dir.mkdir()
+    log_path = base / "calls.log"
 
     _write_fake_tracker(repo_root, log_path)
     _write_corpus_graph(repo_root)
 
-    before = {}
-    before.update(_snapshot(repo_root, "repo"))
-    before.update(_snapshot(out_dir, "out"))
+    before = _snapshot(repo_root, out_dir)
 
     snapshot = provenance_tracker_ui.render_tracker_ui(out_dir, repo_root)
 
-    after = {}
-    after.update(_snapshot(repo_root, "repo"))
-    after.update(_snapshot(out_dir, "out"))
+    after = _snapshot(repo_root, out_dir)
 
-    # The fake tracker was actually used.
-    assert log_path.is_file()
-    calls = log_path.read_text(encoding="utf-8").splitlines()
-    assert calls.count("check_readiness") == 1
+    # The fake was really used.
+    lines = log_path.read_text(encoding="utf-8").splitlines()
+    assert lines.count("check_readiness") == 1
 
-    # Edges: exactly depends_on and realizes, never the uses_var edge.
     edges = field(snapshot, "edges")
     got = sorted(
         (field(e, "from"), field(e, "to"), field(e, "kind")) for e in edges
     )
-    assert len(edges) == 2
-    assert got == sorted([
-        ("comp-foo", "comp-bar", "depends_on"),
-        ("comp-foo", "P-ZERO-EDIT", "realizes"),
-    ])
-    assert all(t[1] != "VAR-FOO-URL" and t[2] != "uses_var" for t in got)
+    assert len(got) == len(list(edges))
+    assert got == sorted(
+        [
+            ("comp-foo", "comp-bar", "depends_on"),
+            ("comp-foo", "P-ZERO-EDIT", "realizes"),
+        ]
+    )
+    assert all(kind != "uses_var" for _, _, kind in got)
+    assert all(to != "VAR-FOO-URL" for _, to, _ in got)
 
-    # Only out_dir/index.html created or changed.
-    created = set(after) - set(before)
-    removed = set(before) - set(after)
-    changed = {k for k in set(before) & set(after) if before[k] != after[k]}
-    assert (out_dir / "index.html").is_file()
-    assert created | changed == {("out", "index.html")}
-    assert removed == set()
+    changed = set()
+    for path in set(before) | set(after):
+        if before.get(path) != after.get(path):
+            changed.add(path)
+    index = (out_dir / "index.html").resolve()
+    assert changed == {index}
+    assert index.is_file()
