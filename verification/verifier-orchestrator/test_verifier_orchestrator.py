@@ -553,8 +553,15 @@ def test_ac_verify_025_failing_baseline_scores_nothing(repo_root):
 
     report = verify("comp-foo", repo_root)
 
+    # D341 (specs/architecture/test-reuse.md, Mutation runs): a test that
+    # passes its criterion but fails alone in the sandbox is faulty: its
+    # criterion fails with origin "test", its cached file is deleted, and with
+    # no file left nothing more runs.
     by_id = {c["id"]: c for c in report.criteria}
-    assert by_id["AC-FOO-002"]["result"] == "pass"
+    assert by_id["AC-FOO-002"]["result"] == "fail"
+    assert by_id["AC-FOO-002"]["failure_origin"] == "test"
+    assert by_id["AC-FOO-002"]["failure_detail"]["message"] == "test fails in the mutation sandbox"
     assert report.mutation_score is None
+    assert report.mutation_error is None
     assert report.overall == "fail"
-    assert report.mutation_error == "mutation baseline failed in the sandbox: pytest exited 1"
+    assert not (repo_root / "verification" / "foo" / "generated-test" / "test_ac_foo_002.py").exists()

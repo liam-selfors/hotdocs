@@ -26,7 +26,12 @@ def stamped(repo_root: Path, criterion_id: str, source: str, component_id: str =
     def field(name):
         return bundle[name] if isinstance(bundle, dict) else getattr(bundle, name)
 
-    digest = hashlib.sha256((field("criterion_text") + "\n" + field("requirement_text")).encode("utf-8")).hexdigest()
+    # D341: the header hashes the whole criterion bundle view
+    # (specs/architecture/test-reuse.md), not criterion + requirement text.
+    import json
+    view = {k: field(k) or "" for k in ("criterion_text", "requirement_text", "interface", "glossary", "testing")}
+    text = json.dumps(view, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+    digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
     return "# hotdocs-criterion: sha256:" + digest + "\n" + source
 
 FOO_COMPONENT_MD_TEMPLATE = """---
