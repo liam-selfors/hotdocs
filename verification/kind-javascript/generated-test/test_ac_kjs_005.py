@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:5864f290f7f93437ad63f4adda738bb8c9289d176e5ee5df34718412dee2da99
+# hotdocs-criterion: sha256:269dbd3ebaa8d8b26ce6bb3e477a536446b6359d6b929fd2784a6f8cb2c6eeca
 import kind_javascript
 
 
@@ -10,28 +10,24 @@ SOURCE = (
 )
 
 
-def test_ac_kjs_005_run_decodes_json_results(tmp_path):
-    asset = tmp_path / "m.js"
-    asset.write_text(SOURCE, encoding="utf-8")
+def test_ac_kjs_005_run_decodes_results(tmp_path):
+    path = tmp_path / "m.js"
+    path.write_text(SOURCE, encoding="utf-8")
 
-    run = kind_javascript.asset_runner(asset)
+    run = kind_javascript.asset_runner(path)
     assert callable(run)
 
     result = run("add", [1, 2])
     assert result == 3
-    assert isinstance(result, int) and not isinstance(result, bool)
+    assert not isinstance(result, bool)
 
-    result = run("add", ["a", "b"])
-    assert result == "ab"
-    assert isinstance(result, str)
+    assert run("add", ["a", "b"]) == "ab"
 
     assert run("nothing", []) is None
 
-    result = run("later", [5])
-    assert result == [5, {"k": None}, True]
-    assert isinstance(result, list)
-    assert result[2] is True
-    assert result[1]["k"] is None
+    later = run("later", [5])
+    assert later == [5, {"k": None}, True]
+    assert later[1]["k"] is None
+    assert later[2] is True
 
-    result = run("noisy", [])
-    assert result == "ok"
+    assert run("noisy", []) == "ok"

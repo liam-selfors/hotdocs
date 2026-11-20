@@ -1,4 +1,4 @@
-"""Adapter for the `javascript` asset kind."""
+"""Adapter for the ``javascript`` asset kind."""
 
 import json
 import os
@@ -11,43 +11,14 @@ from pathlib import Path
 KIND = "javascript"
 GATE_VERSION = "kind-javascript@1.0.0"
 
-
-class AssetError(Exception):
-    """A failure of the asset or of Node."""
-
-
 _NEEDS = "javascript needs node >= 24"
 _TIMEOUT = 30
 
+_NAMES_SCRIPT = "console.log(JSON.stringify(Object.keys(await import(process.argv[2]))))"
+
 _DRIVER = "let r,[,,f,e,a]=process.argv;try{let g=(await import(f))[e];r=typeof g=='function'?{v:await g(...JSON.parse(a))}:{e:'no export '+e}}catch(x){r={e:''+(x?.message??x)}}console.log(JSON.stringify(r))"
 
-_NAMES = "console.log(JSON.stringify(Object.keys(await import(process.argv[2]))))"
-
-_GENERATOR = """Write the asset as an ES module of pure functions over JSON values,
-each exported with `export function <name>(...)`, plus at most one
-export `init(document)` that only wires browser events to those
-functions: `init` contains no comparison, logical or arithmetic
-operator, no `true` or `false` and no condition, so every decision, and
-every mutation site, is in a pure export that tests call. No imports, no network, no `eval`, no globals beyond the
-module's own, and no regular expression literals (write
-`new RegExp("...")`), which the strength check's scan does not read.
-The text `</script` appears nowhere in the file, so a page can inline it.
-A page using the asset inlines its text in
-`<script type="module">` followed by `init(document);`."""
-
-_TEST_AUTHOR = """Call the asset only through the `asset_runner` fixture:
-`run = asset_runner("<declared path>")`, then `run("<export>", [args])`,
-and compare the returned JSON with exact expected values. Every argument
-is plain JSON (dicts, lists, strings, numbers, booleans, `None`). Never
-start `node` yourself or search the `.js` file's text for words: a test
-that passes because a word is present checks nothing. Reading the file
-is allowed only to compare its whole text with something that must
-contain it verbatim, such as a page that inlines it. An
-export that takes a DOM object, such as `init(document)`, is not called
-by tests. Catch failures as `pytest.raises(Exception, match=...)` on the
-thrown message; the exception type is the adapter's."""
-
-_OPS = sorted(
+_OPERATORS = sorted(
     [
         ">>>=", "===", "!==", ">>>", "**=", "...", "<<=", ">>=", "&&=", "||=",
         "??=", "=>", "==", "!=", "<=", ">=", "&&", "||", "??", "++", "--",
@@ -58,8 +29,7 @@ _OPS = sorted(
 )
 
 _NAME_RE = re.compile(r"[A-Za-z_$][A-Za-z0-9_$]*")
-_NUM_RE = re.compile(r"[0-9][A-Za-z0-9_.]*")
-_VERSION_RE = re.compile(r"\d+\.\d+\.\d+")
+_NUMBER_RE = re.compile(r"[0-9][A-Za-z0-9_.]*")
 
 _SWAPS = {
     "===": "!==",
@@ -75,6 +45,7 @@ _SWAPS = {
     "+": "-",
     "-": "+",
 }
+
 _BOOL_SWAPS = {"true": "false", "false": "true"}
 
 _UNARY_KEYWORDS = {
@@ -82,9 +53,36 @@ _UNARY_KEYWORDS = {
     "instanceof", "case", "do", "else", "yield", "await",
 }
 
+_GENERATOR_GUIDANCE = """Write the asset as an ES module of pure functions over JSON values,
+each exported with `export function <name>(...)`, plus at most one
+export `init(document)` that only wires browser events to those
+functions: `init` contains no comparison, logical or arithmetic
+operator, no `true` or `false` and no condition, so every decision, and
+every mutation site, is in a pure export that tests call. No imports, no network, no `eval`, no globals beyond the
+module's own, and no regular expression literals (write
+`new RegExp("...")`), which the strength check's scan does not read.
+The text `</script` appears nowhere in the file, so a page can inline it.
+A page using the asset inlines its text in
+`<script type="module">` followed by `init(document);`."""
+
+_TEST_AUTHOR_GUIDANCE = """Call the asset only through the `asset_runner` fixture:
+`run = asset_runner("<declared path>")`, then `run("<export>", [args])`,
+and compare the returned JSON with exact expected values. Every argument
+is plain JSON (dicts, lists, strings, numbers, booleans, `None`). Never
+start `node` yourself or search the `.js` file's text for words: a test
+that passes because a word is present checks nothing. Reading the file
+is allowed only to compare its whole text with something that must
+contain it verbatim, such as a page that inlines it. An
+export that takes a DOM object, such as `init(document)`, is not called
+by tests. Catch failures as `pytest.raises(Exception, match=...)` on the
+thrown message; the exception type is the adapter's."""
+
+
+class AssetError(Exception):
+    """A failure of the asset or of Node."""
+
 
 def _scan(text):
-    """Return a list of (kind, token, offset) tuples."""
     tokens = []
     i = 0
     n = len(text)
@@ -111,147 +109,150 @@ def _scan(text):
             continue
         m = _NAME_RE.match(text, i)
         if m:
-            tokens.append(("name", m.group(0), i))
+            tokens.append(("name", m.group(), i))
             i = m.end()
             continue
-        m = _NUM_RE.match(text, i)
+        m = _NUMBER_RE.match(text, i)
         if m:
-            tokens.append(("number", m.group(0), i))
+            tokens.append(("number", m.group(), i))
             i = m.end()
             continue
-        op = next((o for o in _OPS if text.startswith(o, i)), c)
+        op = c
+        for candidate in _OPERATORS:
+            if text.startswith(candidate, i):
+                op = candidate
+                break
         tokens.append(("op", op, i))
         i += len(op)
     return tokens
 
 
-def _env():
+def _node_env():
     return {"PATH": os.environ.get("PATH", "")}
 
 
-def _run_node(cmd):
+def _run_node(node, args):
     return subprocess.run(
-        cmd,
-        env=_env(),
+        [node] + args,
+        env=_node_env(),
         capture_output=True,
         text=True,
         timeout=_TIMEOUT,
     )
 
 
-def _tmpdir():
+def _mkdtemp():
     return Path(tempfile.mkdtemp()).resolve()
 
 
-def _nonempty(lines_text):
-    return [line.strip() for line in lines_text.splitlines() if line.strip()]
+def _last_nonempty(text):
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    return lines[-1] if lines else ""
 
 
-def layout_errors(asset_file):
-    asset_file = Path(asset_file)
-    data = asset_file.read_bytes()
-    try:
-        text = data.decode("utf-8")
-    except UnicodeDecodeError:
-        return ["parse error: not UTF-8"]
-
-    errors = []
-    node = shutil.which("node")
+def _parse_error(asset_file, node):
     if node is None:
-        errors.append(_NEEDS)
-    else:
-        tmp = _tmpdir()
-        try:
-            copy = tmp / (asset_file.stem + ".mjs")
-            copy.write_bytes(data)
-            try:
-                proc = _run_node([node, "--check", str(copy)])
-            except subprocess.TimeoutExpired:
-                errors.append("parse error: timed out after 30 seconds")
-            else:
-                if proc.returncode != 0:
-                    lines = _nonempty(proc.stderr or "")
-                    line = next(
-                        (l for l in lines if l.startswith("SyntaxError:")),
-                        lines[0] if lines else "",
-                    )
-                    errors.append("parse error: " + line)
-        finally:
-            shutil.rmtree(tmp, ignore_errors=True)
-
-    tokens = _scan(text)
-    for idx, (kind, tok, _offset) in enumerate(tokens):
-        if kind != "name":
-            continue
-        if tok in ("import", "XMLHttpRequest", "WebSocket"):
-            errors.append("forbidden: " + tok)
-        elif tok in ("require", "fetch"):
-            nxt = tokens[idx + 1] if idx + 1 < len(tokens) else None
-            if nxt is not None and nxt[0] == "op" and nxt[1] == "(":
-                errors.append("forbidden: " + tok + "(")
-    return errors
-
-
-def surface(asset_file):
-    asset_file = Path(asset_file)
-    names = []
-    node = shutil.which("node")
-    if node is None:
-        return {"names": names}
-    tmp = _tmpdir()
+        return _NEEDS
+    tmp = _mkdtemp()
     try:
-        copy = tmp / "asset.mjs"
+        copy = tmp / (Path(asset_file).stem + ".mjs")
         shutil.copyfile(asset_file, copy)
-        script = tmp / "names.mjs"
-        script.write_text(_NAMES, encoding="utf-8")
-        cmd = [
-            node,
-            "--permission",
-            "--allow-fs-read=" + str(copy),
-            "--allow-fs-read=" + str(script),
-            str(script),
-            str(copy),
-        ]
         try:
-            proc = _run_node(cmd)
+            proc = _run_node(node, ["--check", str(copy)])
         except subprocess.TimeoutExpired:
-            return {"names": names}
-        if proc.returncode != 0:
-            return {"names": names}
-        lines = _nonempty(proc.stdout or "")
-        if not lines:
-            return {"names": names}
-        try:
-            value = json.loads(lines[-1])
-        except ValueError:
-            return {"names": names}
-        if isinstance(value, list):
-            names = sorted(str(v) for v in value)
-        return {"names": names}
+            return "parse error: timed out after 30 seconds"
+        if proc.returncode == 0:
+            return None
+        lines = [line.strip() for line in proc.stderr.splitlines()]
+        chosen = next((line for line in lines if line.startswith("SyntaxError:")), None)
+        if chosen is None:
+            chosen = next((line for line in lines if line), "")
+        return "parse error: " + chosen
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
 
-def provision(repo_root):
-    def fail(reason):
-        return {"ok": False, "reason": reason, "versions": {}, "lockfile_sha256": None}
+def layout_errors(asset_file):
+    asset_file = Path(asset_file)
+    try:
+        text = asset_file.read_bytes().decode("utf-8")
+    except UnicodeDecodeError:
+        return ["parse error: not UTF-8"]
+    errors = []
+    parse = _parse_error(asset_file, shutil.which("node"))
+    if parse is not None:
+        errors.append(parse)
+    tokens = _scan(text)
+    for index, (kind, value, _offset) in enumerate(tokens):
+        if kind != "name":
+            continue
+        if value in ("import", "XMLHttpRequest", "WebSocket"):
+            errors.append("forbidden: " + value)
+        elif value in ("require", "fetch"):
+            if index + 1 < len(tokens) and tokens[index + 1][1] == "(":
+                errors.append("forbidden: " + value + "(")
+    return errors
 
+
+def surface(asset_file):
     node = shutil.which("node")
     if node is None:
-        return fail(_NEEDS)
+        return {"names": []}
+    tmp = _mkdtemp()
     try:
-        proc = _run_node([node, "--version"])
+        copy = tmp / "asset.mjs"
+        shutil.copyfile(Path(asset_file), copy)
+        script = tmp / "names.mjs"
+        script.write_text(_NAMES_SCRIPT, encoding="utf-8")
+        try:
+            proc = _run_node(
+                node,
+                [
+                    "--permission",
+                    "--allow-fs-read=" + str(copy),
+                    "--allow-fs-read=" + str(script),
+                    str(script),
+                    str(copy),
+                ],
+            )
+        except subprocess.TimeoutExpired:
+            return {"names": []}
+        if proc.returncode != 0:
+            return {"names": []}
+        try:
+            names = json.loads(_last_nonempty(proc.stdout))
+        except ValueError:
+            return {"names": []}
+        if not isinstance(names, list):
+            return {"names": []}
+        return {"names": sorted(names)}
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def _provision_result(ok, reason, versions):
+    return {"ok": ok, "reason": reason, "versions": versions, "lockfile_sha256": None}
+
+
+def provision(repo_root):
+    node = shutil.which("node")
+    if node is None:
+        return _provision_result(False, _NEEDS, {})
+    try:
+        proc = _run_node(node, ["--version"])
     except subprocess.TimeoutExpired:
-        return fail("javascript environment: node --version failed")
+        return _provision_result(False, "javascript environment: node --version failed", {})
     if proc.returncode != 0:
-        return fail("javascript environment: node --version failed")
-    out = (proc.stdout or "").strip()
-    version = out[1:] if out.startswith("v") else out
-    if not _VERSION_RE.fullmatch(version):
-        return fail("javascript environment: node --version printed " + out)
+        return _provision_result(False, "javascript environment: node --version failed", {})
+    stripped = proc.stdout.strip()
+    version = stripped[1:] if stripped.startswith("v") else stripped
+    if not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", version):
+        return _provision_result(
+            False, "javascript environment: node --version printed " + stripped, {}
+        )
     if int(version.split(".")[0]) < 24:
-        return fail(_NEEDS)
-    return {"ok": True, "reason": "", "versions": {"node": version}, "lockfile_sha256": None}
+        return _provision_result(False, _NEEDS, {})
+    return _provision_result(True, "", {"node": version})
 
 
 def asset_runner(asset_file):
@@ -261,41 +262,39 @@ def asset_runner(asset_file):
         node = shutil.which("node")
         if node is None:
             raise AssetError(_NEEDS)
-        tmp = _tmpdir()
+        tmp = _mkdtemp()
         try:
             copy = tmp / "asset.mjs"
             shutil.copyfile(asset_file, copy)
             driver = tmp / "driver.mjs"
             driver.write_text(_DRIVER, encoding="utf-8")
-            cmd = [
-                node,
-                "--permission",
-                "--allow-fs-read=" + str(copy),
-                "--allow-fs-read=" + str(driver),
-                str(driver),
-                str(copy),
-                entry,
-                json.dumps(args),
-            ]
             try:
-                proc = _run_node(cmd)
+                proc = _run_node(
+                    node,
+                    [
+                        "--permission",
+                        "--allow-fs-read=" + str(copy),
+                        "--allow-fs-read=" + str(driver),
+                        str(driver),
+                        str(copy),
+                        entry,
+                        json.dumps(args),
+                    ],
+                )
             except subprocess.TimeoutExpired:
                 raise AssetError("timed out after 30 seconds")
-            lines = _nonempty(proc.stdout or "")
-            obj = None
-            if lines:
-                try:
-                    obj = json.loads(lines[-1])
-                except ValueError:
-                    obj = None
-            if not isinstance(obj, dict):
-                err_lines = _nonempty(proc.stderr or "")
-                last = err_lines[-1] if err_lines else ""
-                raise AssetError("node exited %s: %s" % (proc.returncode, last))
-            if "v" in obj:
-                return obj["v"]
-            if "e" in obj:
-                raise AssetError(obj["e"])
+            try:
+                result = json.loads(_last_nonempty(proc.stdout))
+            except ValueError:
+                result = None
+            if not isinstance(result, dict):
+                raise AssetError(
+                    "node exited %s: %s" % (proc.returncode, _last_nonempty(proc.stderr))
+                )
+            if "v" in result:
+                return result["v"]
+            if "e" in result:
+                raise AssetError(result["e"])
             return None
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
@@ -303,56 +302,57 @@ def asset_runner(asset_file):
     return run
 
 
+def _swap_for(tokens, index):
+    kind, value, _offset = tokens[index]
+    if kind == "name":
+        return _BOOL_SWAPS.get(value)
+    if kind != "op":
+        return None
+    swap = _SWAPS.get(value)
+    if value in ("+", "-"):
+        if index == 0:
+            return None
+        prev_kind, prev_value, _ = tokens[index - 1]
+        binary = (
+            prev_kind == "number"
+            or prev_value in (")", "]")
+            or (prev_kind == "name" and prev_value not in _UNARY_KEYWORDS)
+        )
+        if not binary:
+            return None
+    return swap
+
+
 def strength_sites(asset_file):
     text = Path(asset_file).read_bytes().decode("utf-8")
     tokens = _scan(text)
     sites = []
-    for idx, (kind, tok, offset) in enumerate(tokens):
-        swap = None
-        if kind == "name":
-            swap = _BOOL_SWAPS.get(tok)
-        elif kind == "op":
-            swap = _SWAPS.get(tok)
-            if tok in ("+", "-"):
-                prev = tokens[idx - 1] if idx > 0 else None
-                binary = prev is not None and (
-                    prev[0] == "number"
-                    or (prev[0] == "op" and prev[1] in (")", "]"))
-                    or (prev[0] == "name" and prev[1] not in _UNARY_KEYWORDS)
-                )
-                if not binary:
-                    swap = None
+    for index, (_kind, value, offset) in enumerate(tokens):
+        swap = _swap_for(tokens, index)
         if swap is None:
             continue
-        line = 1 + text.count("\n", 0, offset)
+        line = text.count("\n", 0, offset) + 1
         sites.append(
             {
-                "description": "%d: %s -> %s" % (line, tok, swap),
+                "description": "%d: %s -> %s" % (line, value, swap),
                 "offset": offset,
-                "token": tok,
+                "token": value,
                 "swap": swap,
             }
         )
     return sites
 
 
-def _get(obj, key):
-    if isinstance(obj, dict):
-        return obj[key]
-    return getattr(obj, key)
-
-
 def apply_site(asset_file, site):
     asset_file = Path(asset_file)
     text = asset_file.read_bytes().decode("utf-8")
-    offset = _get(site, "offset")
-    token = _get(site, "token")
-    swap = _get(site, "swap")
+    token = site["token"]
+    offset = site["offset"]
     if text[offset:offset + len(token)] != token:
-        raise ValueError("site token %r not found at offset %d" % (token, offset))
-    new_text = text[:offset] + swap + text[offset + len(token):]
-    asset_file.write_bytes(new_text.encode("utf-8"))
+        raise ValueError("site token not found at offset %s" % offset)
+    mutated = text[:offset] + site["swap"] + text[offset + len(token):]
+    asset_file.write_bytes(mutated.encode("utf-8"))
 
 
 def guidance():
-    return {"generator": _GENERATOR.strip(), "test_author": _TEST_AUTHOR.strip()}
+    return {"generator": _GENERATOR_GUIDANCE, "test_author": _TEST_AUTHOR_GUIDANCE}

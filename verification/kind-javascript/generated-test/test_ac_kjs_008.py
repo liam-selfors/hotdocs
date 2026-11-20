@@ -1,9 +1,5 @@
-# hotdocs-criterion: sha256:d0631e70595def894e562d437f2fc994a9ad4ff6d5881b863d2bc3f98ef93904
+# hotdocs-criterion: sha256:e607b949d7ed87901e343f6c8b9eb9e4b5b13d8d54af61f89a6756750b0fc788
 import re
-import shutil
-import subprocess
-
-import pytest
 
 import kind_javascript
 
@@ -12,36 +8,9 @@ def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def _node_major():
-    node = shutil.which("node")
-    if node is None:
-        return None
-    try:
-        proc = subprocess.run(
-            [node, "--version"],
-            capture_output=True,
-            text=True,
-            timeout=30,
-        )
-    except Exception:
-        return None
-    if proc.returncode != 0:
-        return None
-    out = proc.stdout.strip()
-    if out.startswith("v"):
-        out = out[1:]
-    m = re.match(r"^(\d+)\.\d+\.\d+$", out)
-    if not m:
-        return None
-    return int(m.group(1))
-
-
-def test_ac_kjs_008_provision_ok_with_node_24_or_later(tmp_path):
-    major = _node_major()
-    if major is None or major < 24:
-        pytest.skip("precondition not met: Node 24 or later is not on PATH")
-
-    assert list(tmp_path.iterdir()) == []
+def test_ac_kjs_008_provision_with_node_24_or_later(tmp_path):
+    before = sorted(p.name for p in tmp_path.iterdir())
+    assert before == []
 
     result = kind_javascript.provision(tmp_path)
 
@@ -56,9 +25,12 @@ def test_ac_kjs_008_provision_ok_with_node_24_or_later(tmp_path):
     versions = field(result, "versions")
     assert isinstance(versions, dict)
     assert list(versions.keys()) == ["node"]
-    version = versions["node"]
-    assert isinstance(version, str)
-    assert re.match(r"^\d+\.\d+\.\d+$", version) is not None
-    assert int(version.split(".")[0]) >= 24
+    node_version = versions["node"]
+    assert isinstance(node_version, str)
+    assert re.match(r"^\d+\.\d+\.\d+$", node_version), node_version
+    assert re.fullmatch(r"\d+\.\d+\.\d+", node_version), node_version
+    major = int(node_version.split(".")[0])
+    assert major >= 24
 
-    assert list(tmp_path.iterdir()) == []
+    after = sorted(p.name for p in tmp_path.iterdir())
+    assert after == []

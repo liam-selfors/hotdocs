@@ -1,44 +1,36 @@
-# hotdocs-criterion: sha256:41dd38ffd29ef1a82706f5a615949b844e0936b045ec1811cd0131479125c4c4
-import shutil
+# hotdocs-criterion: sha256:5e8ce97bd3b54b4d801a522c53f6bdbe9ed4f2629763a47c033f93f17a02af19
 from pathlib import Path
-
-import pytest
 
 import kind_javascript
 
 
-def _write(path, text):
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_bytes(text.encode("utf-8"))
-    return path
+CLEAN_TEXT = (
+    "// import x from 'y'; fetch(\n"
+    "const s = \"require('fs') and new WebSocket(u)\";\n"
+    "export function f(a) { return a + 1; }\n"
+)
+
+FORBIDDEN_TEXT = (
+    "import x from './x.js';\n"
+    "export function g(u) { fetch(u); require (u); return new XMLHttpRequest(); }\n"
+    "export const h = () => import('./y.js') && new WebSocket('ws://a');\n"
+)
 
 
-@pytest.fixture
-def need_node():
-    if shutil.which("node") is None:
-        pytest.skip("node is not on PATH; the parse check needs it")
+def test_ac_kjs_002_forbidden_words_only_outside_strings_and_comments(tmp_path):
+    clean = tmp_path / "app.js"
+    clean.write_text(CLEAN_TEXT, encoding="utf-8")
 
-
-def test_ac_kjs_002_forbidden_words_only_outside_strings_and_comments(tmp_path, need_node):
-    clean_text = (
-        "// import x from 'y'; fetch(\n"
-        "const s = \"require('fs') and new WebSocket(u)\";\n"
-        "export function f(a) { return a + 1; }\n"
-    )
-    clean = _write(tmp_path / "app.js", clean_text)
-
-    result = kind_javascript.layout_errors(Path(clean))
+    result = kind_javascript.layout_errors(clean)
     assert list(result) == []
 
-    dirty_text = (
-        "import x from './x.js';\n"
-        "export function g(u) { fetch(u); require (u); return new XMLHttpRequest(); }\n"
-        "export const h = () => import('./y.js') && new WebSocket('ws://a');\n"
-    )
-    dirty = _write(tmp_path / "other" / "app.js", dirty_text)
+    other_dir = tmp_path / "other"
+    other_dir.mkdir()
+    bad = other_dir / "app.js"
+    bad.write_text(FORBIDDEN_TEXT, encoding="utf-8")
 
-    result = kind_javascript.layout_errors(Path(dirty))
-    assert list(result) == [
+    result2 = kind_javascript.layout_errors(bad)
+    assert list(result2) == [
         "forbidden: import",
         "forbidden: fetch(",
         "forbidden: require(",

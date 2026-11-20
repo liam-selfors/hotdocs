@@ -1,19 +1,29 @@
 {
-  "spec_bundle_hash": "sha256:9c61104058bb684306e059c0f124598445d894d549e0c04648acac3a542a5557",
+  "spec_bundle_hash": "sha256:cee534e0e6e96ff718c87ff50aba54baab360e19cfd3c00664959f087b2ac93e",
   "model_pin": "claude-opus-5-5",
-  "prompt_version": "v11",
+  "prompt_version": "v12",
   "retry_feedback": null,
+  "generation": {
+    "mode": "single",
+    "generator_version": "generator@3.2.0+v12",
+    "transcript_sha256": null,
+    "turns": 1,
+    "tool_calls": 0,
+    "isolation": null
+  },
+  "attempts": 1,
+  "attempt_history": [],
   "pipeline_version": "v1",
   "gate_versions": {
     "compiler": "criterion-compiler@1.0.0",
-    "generated_test": "generated_test@1.2.0",
-    "verifier": "verifier-orchestrator@2.3.0",
+    "generated_test": "generated_test@3.0.0",
+    "verifier": "verifier-orchestrator@3.5.0",
     "license_scanner": "license_scanner@4.0.0-no-reference-corpus",
     "secret_scanner": "secret_scanner@3.1.0+detect-secrets.1.5.0",
-    "generator": "generator@3.0.0+v11"
+    "generator": "generator@3.2.0+v12"
   },
   "provenance_hit": false,
-  "generated_at": "2026-11-19T12:36:22Z",
+  "generated_at": "2026-11-20T22:35:57Z",
   "verification_run_id": "kind-javascript-attempt-1",
   "verification_report": {
     "component_id": "comp-kind-javascript",
@@ -199,8 +209,21 @@
       "R-KJS-009": "pass"
     },
     "interface_drift": false,
-    "mutation_score": 0.8953488372093024,
+    "mutation_score": 0.8765432098765432,
     "mutation_error": null,
+    "assets": [
+      {
+        "kind": "python",
+        "path": ".",
+        "definition_sha256": "sha256:53cb9d111b695cf184eb6fdc9c34e8cee514bab938f634dc993257e0163eb8b1",
+        "adapter_sha256": "sha256:fd6ddf7d96d53f9f80f42d158c5f580b7021bc47482b5f347e132a7778ccaecc",
+        "versions": {
+          "python": "3.14.6",
+          "packages": "sha256:fe2bf6523d4c9a1d7aad652c8447381630e076eb89d6267771e208c003c2d83b"
+        },
+        "lockfile_sha256": null
+      }
+    ],
     "overall": "pass"
   },
   "license_scan": {
@@ -477,5 +500,18 @@
     "notified": false,
     "notification_delivery_error": null,
     "cache_hit": false
-  }
+  },
+  "assets": [
+    {
+      "kind": "python",
+      "path": ".",
+      "definition_sha256": "sha256:53cb9d111b695cf184eb6fdc9c34e8cee514bab938f634dc993257e0163eb8b1",
+      "adapter_sha256": "sha256:fd6ddf7d96d53f9f80f42d158c5f580b7021bc47482b5f347e132a7778ccaecc",
+      "versions": {
+        "python": "3.14.6",
+        "packages": "sha256:fe2bf6523d4c9a1d7aad652c8447381630e076eb89d6267771e208c003c2d83b"
+      },
+      "lockfile_sha256": null
+    }
+  ]
 }
