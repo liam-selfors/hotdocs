@@ -40,8 +40,12 @@ temporary `repo_root`, so no real environment (Node) is needed:
   module's source. Its bytes' SHA-256 is the expected `adapter_sha256`;
   compute both expected hashes after the last rewrite.
 - `<repo_root>/specs/components/foo/component.md`: frontmatter with
-  `id: comp-foo` and `assets: [fake:static/a.fake]`. The asset file
-  itself need not exist: the checker never reads it.
+  `id: comp-foo` and `assets: [fake:static/a.fake]`, and never
+  `sealed: true` unless a scenario is about a sealed component (a
+  sealed component's assets value is `[]` and no adapter is called,
+  `R-PROVCHECK-009`). A scenario with no fake kind omits the `assets`
+  line; the checker reads only this frontmatter, so nothing else is
+  needed. The asset file itself need not exist.
 - `<repo_root>/gen/foo/.provenance.json`: the manifest, with
   `spec_bundle_hash`, `gate_versions` `{}`, `verification_report`
   `{"criteria": []}`, `license_scan` and `secret_scan` `{}`, and
