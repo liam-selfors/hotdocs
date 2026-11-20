@@ -7,11 +7,11 @@
   ],
   "source_path": "pipeline/criterion-compiler/",
   "source_hash": "sha256:f3276bfa8fe5b1272ae591faba4063270c96c0a206628ebfaa7c24ec37f65b89",
-  "verifier_version": "verifier-orchestrator@2.3.0",
+  "verifier_version": "verifier-orchestrator@3.5.0",
   "characterization": {
     "overall": "pass",
     "criteria_passed": 16,
     "criteria_total": 16
   },
-  "written_at": "2026-11-19T16:10:03Z"
+  "written_at": "2026-11-20T22:26:30Z"
 }
