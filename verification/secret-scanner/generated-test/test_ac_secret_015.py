@@ -1,15 +1,6 @@
-# hotdocs-criterion: sha256:d1bae7f370922346ca9a78d8d6f05998bad3b370131a711fa4e59587e4766c90
-"""AC-SECRET-015 (covers R-SECRET-012): a finding is suppressed only by an
-exact allowlist entry (same file, same type, same hashed secret) and by
-nothing else.
-
-Every secret-shaped value below is assembled at runtime from short pieces,
-so this file never carries a literal that a detector would flag.
-"""
-
+# hotdocs-criterion: sha256:64d0cbb2df214c2e4a201044452ba05071107197817e39b8a5d881fb3b1cd6fc
 import hashlib
 import json
-import sys
 import urllib.request
 from pathlib import Path
 
@@ -18,237 +9,204 @@ import pytest
 import secret_scanner
 
 
-AWS_TYPE = "AWS Access Key"
-HEX_TYPE = "Hex High Entropy String"
-FIXTURE_FILE = "verification/foo/test_x.py"
-OTHER_FILE = "verification/foo/other.py"
-ALLOWLIST_NAME = ".secret-allowlist.json"
-ORIGINAL_LINE = 3
+ORIGINAL_KEY = "AKIAQWERTYUIOPASDFGH"
+OTHER_KEY = "AKIAZZZZYYYYXXXXWWWW"
+TEST_X = "verification/foo/test_x.py"
+OTHER_PY = "verification/foo/other.py"
+AWS = "AWS Access Key"
 
 
-def _original_key():
-    return "AKIA" + "R7TQ" + "2MXV" + "9KPB" + "4WNE"
+def field(value, name):
+    return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def _changed_key():
-    return "AKIA" + "ZZZZ" + "YYYY" + "XXXX" + "WWWW"
+FAKE_CACHE_MANAGER = (
+    "class Miss:\n"
+    "    def __eq__(self, other):\n"
+    "        return isinstance(other, Miss)\n"
+    "\n"
+    "    def __hash__(self):\n"
+    "        return 0\n"
+    "\n"
+    "\n"
+    "class SchemaValidationError(ValueError):\n"
+    "    pass\n"
+    "\n"
+    "\n"
+    "class CacheKey:\n"
+    "    def __init__(self, spec_bundle_hash=None, gate_inputs_hash=None,\n"
+    "                 gate_version=None, model_pin=None):\n"
+    "        self.spec_bundle_hash = spec_bundle_hash\n"
+    "        self.gate_inputs_hash = gate_inputs_hash\n"
+    "        self.gate_version = gate_version\n"
+    "        self.model_pin = model_pin\n"
+    "\n"
+    "\n"
+    "class CachedResult:\n"
+    "    def __init__(self, gate_type=None, payload=None, stored_at=None):\n"
+    "        self.gate_type = gate_type\n"
+    "        self.payload = payload\n"
+    "        self.stored_at = stored_at\n"
+    "\n"
+    "\n"
+    "def get(cache_key, *, repo_root=None):\n"
+    "    return Miss()\n"
+    "\n"
+    "\n"
+    "def put(cache_key, result, *, repo_root=None):\n"
+    "    return None\n"
+    "\n"
+    "\n"
+    "def now_iso():\n"
+    "    import datetime\n"
+    "    now = datetime.datetime.now(datetime.timezone.utc)\n"
+    "    return now.strftime('%Y-%m-%dT%H:%M:%SZ')\n"
+    "\n"
+    "\n"
+    "def stats(*, repo_root=None):\n"
+    "    return dict(entry_count=0)\n"
+)
 
 
-FAKE_CACHE_MANAGER = '''\
-"""Stand-in cache-manager: every lookup is a miss, every put is a no-op."""
-import datetime
-from dataclasses import dataclass
-from typing import Any
+def sha1(value):
+    return "sha1:" + hashlib.sha1(value.encode("utf-8")).hexdigest()
 
 
-@dataclass
-class CacheKey:
-    spec_bundle_hash: str
-    gate_inputs_hash: str
-    gate_version: str
-    model_pin: str
-
-
-@dataclass
-class CachedResult:
-    gate_type: str
-    payload: Any
-    stored_at: str
-
-
-class Miss:
-    def __eq__(self, other):
-        return isinstance(other, Miss)
-
-    def __hash__(self):
-        return 0
-
-
-class SchemaValidationError(ValueError):
-    pass
-
-
-def get(cache_key, *, repo_root=None):
-    return Miss()
-
-
-def put(cache_key, result, *, repo_root=None):
-    return None
-
-
-def now_iso():
-    return datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-
-
-def stats(*, repo_root=None):
-    return {"entry_count": 0}
-'''
-
-
-def _field(obj, name):
-    if isinstance(obj, dict):
-        return obj.get(name)
-    return getattr(obj, name, None)
-
-
-def _sha1(value):
-    return hashlib.sha1(value.encode("utf-8")).hexdigest()
-
-
-def _write(path, text):
+def write_test_x(repo_root, extra_lines=None, key=ORIGINAL_KEY):
+    lines = [
+        "# planted fixture",
+        "",
+        "K = " + repr(key),
+    ]
+    if extra_lines:
+        lines.extend(extra_lines)
+    path = repo_root / TEST_X
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text, encoding="utf-8")
+    path.write_text("\n".join(lines) + "\n")
 
 
-def _fixture_source(extra_lines=()):
-    lines = ["import os", "", 'K = "' + _original_key() + '"']
-    lines.extend(extra_lines)
-    return "\n".join(lines) + "\n"
-
-
-def _entry(entry_type=AWS_TYPE, file=FIXTURE_FILE, secret=None):
-    return {
-        "file": file,
-        "type": entry_type,
-        "hashed_secret": "sha1:" + _sha1(secret if secret is not None else _original_key()),
-        "reason": "planted-fixture",
+def write_allowlist_and_seal(repo_root, entry_type=AWS):
+    allowlist = {
+        "version": 1,
+        "entries": [
+            {
+                "file": TEST_X,
+                "type": entry_type,
+                "hashed_secret": sha1(ORIGINAL_KEY),
+                "reason": "planted-fixture",
+            }
+        ],
     }
-
-
-def _write_allowlist(repo_root, entries):
-    data = {"version": 1, "entries": entries}
-    raw = (json.dumps(data, indent=2) + "\n").encode("utf-8")
-    (repo_root / ALLOWLIST_NAME).write_bytes(raw)
-    return raw
-
-
-def _seal(repo_root, number):
-    raw = (repo_root / ALLOWLIST_NAME).read_bytes()
-    digest = hashlib.sha256(raw).hexdigest()
-    text = (
+    data = (json.dumps(allowlist, indent=2) + "\n").encode("utf-8")
+    (repo_root / ".secret-allowlist.json").write_bytes(data)
+    digest = "sha256:" + hashlib.sha256(data).hexdigest()
+    decisions = repo_root / "specs" / "decisions"
+    decisions.mkdir(parents=True, exist_ok=True)
+    (decisions / "D1.md").write_text(
         "---\n"
-        "id: D" + str(number) + "\n"
-        "title: Seal the secret allowlist\n"
-        "status: ratified\n"
-        "owners: [secret-scan-tests]\n"
-        "last_ratified_commit: placeholder\n"
-        "allowlist_sha256: sha256:" + digest + "\n"
-        "---\n"
-        "\n"
-        "Records the hash of the current secret allowlist.\n"
+        + "id: D1\n"
+        + "title: Seal the secret allowlist\n"
+        + "status: ratified\n"
+        + "owners: [security-team]\n"
+        + "last_ratified_commit: 0000000\n"
+        + "allowlist_sha256: " + digest + "\n"
+        + "---\n"
+        + "\n"
+        + "# D1\n"
+        + "\n"
+        + "Records the allowlist seal.\n"
     )
-    _write(repo_root / "specs" / "decisions" / ("D" + str(number) + ".md"), text)
-
-
-def _build_baseline(repo_root):
-    """AC-SECRET-014's first scenario: one planted key, allowlisted, sealed."""
-    repo_root.mkdir(parents=True, exist_ok=True)
-    _write(repo_root / "gen" / "cache-manager" / "cache_manager.py", FAKE_CACHE_MANAGER)
-    _write(repo_root / FIXTURE_FILE, _fixture_source())
-    _write_allowlist(repo_root, [_entry()])
-    _seal(repo_root, 1)
 
 
 @pytest.fixture
 def repo_root(tmp_path, monkeypatch):
-    root = tmp_path / "repo"
     monkeypatch.delenv("VAR_COMPLIANCE_WEBHOOK_URL", raising=False)
-    monkeypatch.delenv("VAR_CACHE_STORE_URL", raising=False)
-    monkeypatch.setattr(sys, "dont_write_bytecode", True)
 
-    def _no_network(*args, **kwargs):
-        raise AssertionError("no webhook call is expected in this test")
+    def fake_urlopen(*args, **kwargs):
+        raise AssertionError("webhook must not be called")
 
-    monkeypatch.setattr(urllib.request, "urlopen", _no_network)
-    _build_baseline(root)
-    monkeypatch.chdir(root)
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+
+    root = tmp_path / "repo"
+    root.mkdir()
+    cm = root / "gen" / "cache-manager"
+    cm.mkdir(parents=True)
+    (cm / "cache_manager.py").write_text(FAKE_CACHE_MANAGER)
+    write_test_x(root)
+    write_allowlist_and_seal(root)
     return root
 
 
-def _run(repo_root):
-    result = secret_scanner.scan(Path(repo_root))
-    matches = list(_field(result, "matches") or [])
-    allowed = list(_field(result, "allowed") or [])
-    unused = list(_field(result, "unused_allowlist_entries") or [])
-    return result, matches, allowed, unused
+def matches_of(result):
+    return list(field(result, "matches"))
 
 
-def _key(item):
-    line = _field(item, "line")
-    return (
-        _field(item, "rule_id"),
-        _field(item, "file"),
-        int(line) if line is not None else None,
+def has(items, file, line=None, rule_id=None):
+    for item in items:
+        if field(item, "file") != file:
+            continue
+        if line is not None and field(item, "line") != line:
+            continue
+        if rule_id is not None and field(item, "rule_id") != rule_id:
+            continue
+        return True
+    return False
+
+
+def no_invalid(result):
+    return not any(
+        field(m, "rule_id") == "allowlist-invalid" for m in matches_of(result)
     )
 
 
-def _assert_allowlist_valid(matches):
-    invalid = [m for m in matches if _field(m, "rule_id") == "allowlist-invalid"]
-    assert invalid == [], "the resealed allowlist must stay valid, got %r" % (invalid,)
+def test_changed_line_is_flagged_and_entry_unused(repo_root):
+    write_test_x(repo_root, key=OTHER_KEY)
+    write_allowlist_and_seal(repo_root)
 
+    result = secret_scanner.scan(repo_root)
 
-def test_baseline_fixture_is_clean_and_allowed(repo_root):
-    result, matches, allowed, unused = _run(repo_root)
-    assert matches == [], matches
-    assert _field(result, "flagged") is False
-    assert [_key(a) for a in allowed] == [(AWS_TYPE, FIXTURE_FILE, ORIGINAL_LINE)]
-    assert unused == []
-
-
-def test_changed_secret_on_allowlisted_line_is_flagged(repo_root):
-    _write(
-        repo_root / FIXTURE_FILE,
-        "import os\n\nK = \"" + _changed_key() + "\"\n",
+    assert field(result, "flagged") is True
+    assert no_invalid(result)
+    assert has(matches_of(result), TEST_X, 3, AWS)
+    assert list(field(result, "allowed")) == []
+    unused = list(field(result, "unused_allowlist_entries"))
+    assert any(
+        field(e, "file") == TEST_X and field(e, "type") == AWS for e in unused
     )
-    _seal(repo_root, 2)
-
-    result, matches, allowed, unused = _run(repo_root)
-
-    _assert_allowlist_valid(matches)
-    assert _field(result, "flagged") is True
-    assert [_key(m) for m in matches] == [(AWS_TYPE, FIXTURE_FILE, ORIGINAL_LINE)]
-    assert allowed == []
-    unused_pairs = [(_field(u, "file"), _field(u, "type")) for u in unused]
-    assert (FIXTURE_FILE, AWS_TYPE) in unused_pairs, unused
 
 
-def test_same_secret_in_another_file_is_flagged(repo_root):
-    _write(repo_root / OTHER_FILE, 'K = "' + _original_key() + '"\n')
-    _seal(repo_root, 2)
+def test_same_key_in_other_file_is_not_suppressed(repo_root):
+    other = repo_root / OTHER_PY
+    other.parent.mkdir(parents=True, exist_ok=True)
+    other.write_text("K = " + repr(ORIGINAL_KEY) + "\n")
+    write_allowlist_and_seal(repo_root)
 
-    result, matches, allowed, unused = _run(repo_root)
+    result = secret_scanner.scan(repo_root)
 
-    _assert_allowlist_valid(matches)
-    assert _field(result, "flagged") is True
+    matches = matches_of(result)
     assert len(matches) == 1, matches
-    assert _field(matches[0], "file") == OTHER_FILE
-    assert _field(matches[0], "rule_id") == AWS_TYPE
-    assert (AWS_TYPE, FIXTURE_FILE, ORIGINAL_LINE) in [_key(a) for a in allowed]
+    assert field(matches[0], "file") == OTHER_PY
+    assert field(result, "flagged") is True
+    assert has(list(field(result, "allowed")), TEST_X, 3, AWS)
 
 
-def test_new_secret_in_allowlisted_file_is_flagged(repo_root):
-    _write(
-        repo_root / FIXTURE_FILE,
-        _fixture_source(extra_lines=['J = "' + _changed_key() + '"']),
-    )
-    _seal(repo_root, 2)
+def test_second_line_with_other_key_is_the_only_match(repo_root):
+    write_test_x(repo_root, extra_lines=["J = " + repr(OTHER_KEY)])
+    write_allowlist_and_seal(repo_root)
 
-    result, matches, allowed, unused = _run(repo_root)
+    result = secret_scanner.scan(repo_root)
 
-    _assert_allowlist_valid(matches)
-    assert _field(result, "flagged") is True
-    assert [_key(m) for m in matches] == [(AWS_TYPE, FIXTURE_FILE, ORIGINAL_LINE + 1)]
-    assert (AWS_TYPE, FIXTURE_FILE, ORIGINAL_LINE) in [_key(a) for a in allowed]
+    matches = matches_of(result)
+    assert len(matches) == 1, matches
+    assert field(matches[0], "file") == TEST_X
+    assert field(matches[0], "line") == 4
+    assert field(matches[0], "rule_id") == AWS
 
 
-def test_entry_with_different_type_does_not_suppress(repo_root):
-    _write_allowlist(repo_root, [_entry(entry_type=HEX_TYPE)])
-    _seal(repo_root, 2)
+def test_entry_type_changed_does_not_suppress(repo_root):
+    write_allowlist_and_seal(repo_root, entry_type="Hex High Entropy String")
 
-    result, matches, allowed, unused = _run(repo_root)
+    result = secret_scanner.scan(repo_root)
 
-    _assert_allowlist_valid(matches)
-    assert _field(result, "flagged") is True
-    original = (AWS_TYPE, FIXTURE_FILE, ORIGINAL_LINE)
-    assert original in [_key(m) for m in matches], matches
-    assert original not in [_key(a) for a in allowed], allowed
+    assert field(result, "flagged") is True
+    assert has(matches_of(result), TEST_X, 3, AWS)

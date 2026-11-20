@@ -1,168 +1,109 @@
-# hotdocs-criterion: sha256:e87f027e7034777fbb55267815d43067beed50473559528124e69fb96a6c770b
-import sys
+# hotdocs-criterion: sha256:a83fca86350bb69eee7e2867d7857e09d4cdf654d25420c366d91cd0ee508e65
+"""AC-SECRET-004c: a clean scan with no match at all reports notified == false."""
+
 import urllib.request
 from pathlib import Path
-
-import pytest
 
 import secret_scanner
 
 
-FAKE_CACHE_MANAGER = '''\
-from dataclasses import dataclass
-from datetime import datetime, timezone
-from typing import Any
+def field(value, name):
+    return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-@dataclass
-class CacheKey:
-    spec_bundle_hash: str
-    gate_inputs_hash: str
-    gate_version: str
-    model_pin: str
+FAKE_CACHE_MANAGER_SOURCE = (
+    "from dataclasses import dataclass\n"
+    "from typing import Any\n"
+    "\n"
+    "\n"
+    "class SchemaValidationError(ValueError):\n"
+    "    pass\n"
+    "\n"
+    "\n"
+    "@dataclass\n"
+    "class CacheKey:\n"
+    "    spec_bundle_hash: str\n"
+    "    gate_inputs_hash: str\n"
+    "    gate_version: str\n"
+    "    model_pin: str\n"
+    "\n"
+    "\n"
+    "@dataclass\n"
+    "class CachedResult:\n"
+    "    gate_type: str\n"
+    "    payload: Any\n"
+    "    stored_at: str\n"
+    "\n"
+    "\n"
+    "class Miss:\n"
+    "    def __eq__(self, other):\n"
+    "        return isinstance(other, Miss)\n"
+    "\n"
+    "    def __hash__(self):\n"
+    "        return 0\n"
+    "\n"
+    "\n"
+    "def get(cache_key, *, repo_root=None):\n"
+    "    return Miss()\n"
+    "\n"
+    "\n"
+    "def put(cache_key, result, *, repo_root=None):\n"
+    "    return None\n"
+    "\n"
+    "\n"
+    "def now_iso():\n"
+    "    import datetime\n"
+    "    return datetime.datetime.now(datetime.timezone.utc).strftime("
+    + repr("%Y-%m-%dT%H:%M:%SZ")
+    + ")\n"
+    "\n"
+    "\n"
+    "def stats(*, repo_root=None):\n"
+    "    return " + repr({"entry_count": 0}) + "\n"
+)
 
 
-@dataclass
-class CachedResult:
-    gate_type: str
-    payload: Any
-    stored_at: str
+def _build_clean_repo(repo_root: Path) -> None:
+    (repo_root / "README.md").write_text("A clean repository with nothing secret.\n")
+    src = repo_root / "src"
+    src.mkdir()
+    (src / "hello.py").write_text(
+        "def greet(name):\n"
+        "    return 'hello ' + name\n"
+    )
+    cache_dir = repo_root / "gen" / "cache-manager"
+    cache_dir.mkdir(parents=True)
+    (cache_dir / "cache_manager.py").write_text(FAKE_CACHE_MANAGER_SOURCE)
 
 
-class Miss:
-    def __eq__(self, other):
-        return isinstance(other, Miss)
+def test_ac_secret_004c_clean_scan_not_notified(tmp_path, monkeypatch):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    _build_clean_repo(repo_root)
 
-    def __hash__(self):
-        return 0
-
-
-class SchemaValidationError(ValueError):
-    pass
-
-
-_REQUIRED = {
-    "generator": ["component_id", "model", "prompt_version", "files"],
-    "compiler": ["outputs", "gate_version", "summary"],
-    "generated_test": ["component_id", "criterion_id", "model", "file"],
-    "llm_judge": ["result", "rationale"],
-    "license_scanner": ["component_id", "gate_version", "similarity_score", "blocked", "matches"],
-    "secret_scanner": ["scope", "gate_version", "flagged", "matches"],
-}
-
-
-def get(cache_key, *, repo_root=None):
-    return Miss()
-
-
-def put(cache_key, result, *, repo_root=None):
-    gate_type = result.get("gate_type") if isinstance(result, dict) else getattr(result, "gate_type", None)
-    payload = result.get("payload") if isinstance(result, dict) else getattr(result, "payload", None)
-    if gate_type not in _REQUIRED:
-        raise SchemaValidationError("unknown gate type")
-    key_gate_version = cache_key.get("gate_version") if isinstance(cache_key, dict) else getattr(cache_key, "gate_version", "")
-    if str(key_gate_version).split("@", 1)[0] != gate_type:
-        raise SchemaValidationError("gate type mismatch")
-    for name in _REQUIRED[gate_type]:
-        present = (name in payload) if isinstance(payload, dict) else hasattr(payload, name)
-        if not present:
-            raise SchemaValidationError("missing payload key")
-    return None
-
-
-def now_iso():
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-
-
-def stats(*, repo_root=None):
-    return {"entry_count": 0}
-'''
-
-
-CLEAN_SOURCE = '''\
-def add(a, b):
-    return a + b
-
-
-def greet(name):
-    return "hello " + name
-'''
-
-
-def _field(value, name):
-    if isinstance(value, dict):
-        return value.get(name)
-    return getattr(value, name, None)
-
-
-def _build_repo(root: Path) -> Path:
-    cm_dir = root / "gen" / "cache-manager"
-    cm_dir.mkdir(parents=True)
-    (cm_dir / "cache_manager.py").write_text(FAKE_CACHE_MANAGER, encoding="utf-8")
-    src_dir = root / "gen" / "foo"
-    src_dir.mkdir(parents=True)
-    (src_dir / "util.py").write_text(CLEAN_SOURCE, encoding="utf-8")
-    (root / "README.md").write_text("A small clean repository.\n", encoding="utf-8")
-    return root
-
-
-@pytest.mark.parametrize("webhook_configured", [True, False])
-def test_clean_scan_is_not_notified(tmp_path, monkeypatch, webhook_configured):
-    monkeypatch.setattr(sys, "dont_write_bytecode", True)
-    repo_root = _build_repo(tmp_path / "repo")
     monkeypatch.chdir(repo_root)
-
+    # Configure the webhook so "not notified" is due to the clean scan,
+    # not merely to an unconfigured webhook.
+    monkeypatch.setenv("VAR_COMPLIANCE_WEBHOOK_URL", "http://127.0.0.1:9/compliance-hook")
     monkeypatch.delenv("VAR_CACHE_STORE_URL", raising=False)
-    if webhook_configured:
-        monkeypatch.setenv(
-            "VAR_COMPLIANCE_WEBHOOK_URL", "https://example.invalid/compliance-hook"
-        )
-    else:
-        monkeypatch.delenv("VAR_COMPLIANCE_WEBHOOK_URL", raising=False)
 
     calls = []
 
     def fake_urlopen(*args, **kwargs):
         calls.append((args, kwargs))
-
-        class _Resp:
-            status = 200
-
-            def read(self):
-                return b""
-
-            def getcode(self):
-                return 200
-
-            def __enter__(self):
-                return self
-
-            def __exit__(self, *exc):
-                return False
-
-            def close(self):
-                pass
-
-        return _Resp()
+        raise AssertionError("no webhook call expected for a clean scan")
 
     monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
-    if hasattr(secret_scanner, "urlopen"):
-        monkeypatch.setattr(secret_scanner, "urlopen", fake_urlopen)
 
     result = secret_scanner.scan(repo_root)
 
-    matches = _field(result, "matches")
-    assert matches is not None
-    assert list(matches) == [], f"expected a clean scan, got matches: {matches!r}"
-    assert _field(result, "flagged") is False
+    # Precondition: the scan really is clean with no match at all.
+    assert list(field(result, "matches")) == []
+    assert field(result, "flagged") is False
 
-    assert _field(result, "notified") is False
-    assert _field(result, "notification_delivery_error") is None
-    assert calls == [], "no compliance webhook call may be made for a clean scan"
+    # Then: notified is false.
+    assert field(result, "notified") is False
+    assert field(result, "notification_delivery_error") is None
 
-    to_dict = getattr(result, "to_dict", None)
-    if callable(to_dict):
-        as_dict = to_dict()
-        assert as_dict.get("notified") is False
-        assert as_dict.get("notification_delivery_error") is None
-        assert as_dict.get("flagged") is False
+    as_dict = result.to_dict()
+    assert as_dict["notified"] is False

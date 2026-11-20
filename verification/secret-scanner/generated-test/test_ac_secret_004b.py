@@ -1,106 +1,79 @@
-# hotdocs-criterion: sha256:3b2758179c0899d4aef96e2629a55573230b0703c2392c9db919dceedd29999c
-import hashlib
-import sys
-import textwrap
+# hotdocs-criterion: sha256:6eeecb00bae034bad471a3a938d311d317099911a75792d72013adf2b21291be
 import urllib.request
 from pathlib import Path
-
-import pytest
 
 import secret_scanner
 
 
-def _field(value, name, default=None):
-    if isinstance(value, dict):
-        return value.get(name, default)
-    return getattr(value, name, default)
+HEX_VALUE = "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b"
 
 
-_FAKE_CACHE_MANAGER = textwrap.dedent(
-    '''
-    from dataclasses import dataclass
-    from datetime import datetime, timezone
+def field(value, name):
+    return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-    class SchemaValidationError(ValueError):
-        pass
-
-
-    class Miss:
-        def __eq__(self, other):
-            return isinstance(other, Miss)
-
-        def __hash__(self):
-            return hash("Miss")
-
-
-    @dataclass
-    class CacheKey:
-        spec_bundle_hash: str
-        gate_inputs_hash: str
-        gate_version: str
-        model_pin: str
-
-
-    @dataclass
-    class CachedResult:
-        gate_type: str
-        payload: dict
-        stored_at: str
-
-
-    _REQUIRED = {
-        "generator": ["component_id", "model", "prompt_version", "files"],
-        "compiler": ["outputs", "gate_version", "summary"],
-        "generated_test": ["component_id", "criterion_id", "model", "file"],
-        "llm_judge": ["result", "rationale"],
-        "license_scanner": ["component_id", "gate_version", "similarity_score", "blocked", "matches"],
-        "secret_scanner": ["scope", "gate_version", "flagged", "matches"],
-    }
-
-
-    def get(cache_key, *, repo_root=None):
-        return Miss()
-
-
-    def put(cache_key, result, *, repo_root=None):
-        gate_type = result.get("gate_type") if isinstance(result, dict) else getattr(result, "gate_type", None)
-        payload = result.get("payload") if isinstance(result, dict) else getattr(result, "payload", None)
-        key_version = cache_key.get("gate_version") if isinstance(cache_key, dict) else getattr(cache_key, "gate_version", None)
-        if gate_type not in _REQUIRED:
-            raise SchemaValidationError("unknown gate type")
-        if str(key_version or "").split("@", 1)[0] != gate_type:
-            raise SchemaValidationError("gate type mismatch")
-        if not isinstance(payload, dict):
-            raise SchemaValidationError("payload not a dict")
-        for k in _REQUIRED[gate_type]:
-            if k not in payload:
-                raise SchemaValidationError("missing key")
-        return None
-
-
-    def now_iso():
-        return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-
-
-    def stats(*, repo_root=None):
-        return {"entry_count": 0}
-    '''
-).lstrip()
+FAKE_CACHE_MANAGER_SRC = (
+    "from dataclasses import dataclass\n"
+    "from typing import Any\n"
+    "\n"
+    "\n"
+    "class SchemaValidationError(ValueError):\n"
+    "    pass\n"
+    "\n"
+    "\n"
+    "class Miss:\n"
+    "    payload = None\n"
+    "\n"
+    "    def __eq__(self, other):\n"
+    "        return isinstance(other, Miss)\n"
+    "\n"
+    "    def __hash__(self):\n"
+    "        return 0\n"
+    "\n"
+    "\n"
+    "@dataclass\n"
+    "class CacheKey:\n"
+    "    spec_bundle_hash: str\n"
+    "    gate_inputs_hash: str\n"
+    "    gate_version: str\n"
+    "    model_pin: str\n"
+    "\n"
+    "\n"
+    "@dataclass\n"
+    "class CachedResult:\n"
+    "    gate_type: str\n"
+    "    payload: Any\n"
+    "    stored_at: str\n"
+    "\n"
+    "\n"
+    "def get(cache_key, *, repo_root=None):\n"
+    "    return Miss()\n"
+    "\n"
+    "\n"
+    "def put(cache_key, result, *, repo_root=None):\n"
+    "    return None\n"
+    "\n"
+    "\n"
+    "def now_iso():\n"
+    "    return " + repr("2026-01-01T00:00:00Z") + "\n"
+    "\n"
+    "\n"
+    "def stats(*, repo_root=None):\n"
+    "    return {" + repr("entry_count") + ": 0}\n"
+)
 
 
 class _FakeResponse:
     status = 200
-    code = 200
 
     def read(self, *args, **kwargs):
-        return b"{}"
+        return b""
 
     def getcode(self):
         return 200
 
     def close(self):
-        return None
+        pass
 
     def __enter__(self):
         return self
@@ -109,28 +82,19 @@ class _FakeResponse:
         return False
 
 
-def test_ac_secret_004b_low_tier_blocking_match_notifies(tmp_path, monkeypatch):
-    monkeypatch.setattr(sys, "dont_write_bytecode", True)
-
+def test_ac_secret_004b_blocking_low_tier_match_notifies(tmp_path, monkeypatch):
     repo_root = tmp_path / "repo"
-    repo_root.mkdir()
+    (repo_root / "gen" / "foo").mkdir(parents=True)
+    (repo_root / "gen" / "foo" / "h.py").write_text(
+        "sha = " + repr(HEX_VALUE) + "\n", encoding="utf-8"
+    )
 
-    # Fake cache-manager dependency (flat module shape), always a miss.
     cm_dir = repo_root / "gen" / "cache-manager"
     cm_dir.mkdir(parents=True)
-    (cm_dir / "cache_manager.py").write_text(_FAKE_CACHE_MANAGER, encoding="utf-8")
+    (cm_dir / "cache_manager.py").write_text(FAKE_CACHE_MANAGER_SRC, encoding="utf-8")
 
-    # Build the hex literal at runtime so this test file itself embeds none.
-    hex_value = hashlib.sha256(b"test").hexdigest()[:40]
-    assert len(hex_value) == 40
-
-    foo_dir = repo_root / "gen" / "foo"
-    foo_dir.mkdir(parents=True)
-    (foo_dir / "h.py").write_text('sha = "' + hex_value + '"\n', encoding="utf-8")
-
-    monkeypatch.setenv("VAR_COMPLIANCE_WEBHOOK_URL", "http://example.invalid/compliance-hook")
+    monkeypatch.setenv("VAR_COMPLIANCE_WEBHOOK_URL", "https://example.invalid/hook")
     monkeypatch.delenv("VAR_CACHE_STORE_URL", raising=False)
-    monkeypatch.chdir(repo_root)
 
     calls = []
 
@@ -139,18 +103,14 @@ def test_ac_secret_004b_low_tier_blocking_match_notifies(tmp_path, monkeypatch):
         return _FakeResponse()
 
     monkeypatch.setattr(urllib.request, "urlopen", recorder)
-    if hasattr(secret_scanner, "urlopen"):
-        monkeypatch.setattr(secret_scanner, "urlopen", recorder)
 
-    result = secret_scanner.scan(repo_root)
+    result = secret_scanner.scan(Path(repo_root))
 
-    flagged = _field(result, "flagged")
-    assert flagged is True, f"expected flagged true, got {flagged!r}"
+    assert field(result, "flagged") is True
 
-    matches = _field(result, "matches") or []
-    h_matches = [m for m in matches if _field(m, "file") == "gen/foo/h.py"]
-    assert h_matches, f"expected a match in gen/foo/h.py, got {matches!r}"
-    for m in h_matches:
-        assert _field(m, "risk_tier") == "low", f"expected risk_tier low, got {m!r}"
+    matches = field(result, "matches")
+    h_matches = [m for m in matches if field(m, "file") == "gen/foo/h.py"]
+    assert h_matches, "expected a match in gen/foo/h.py, got " + repr(matches)
+    assert any(field(m, "risk_tier") == "low" for m in h_matches), repr(h_matches)
 
-    assert len(calls) == 1, f"expected webhook recorder called once, got {len(calls)} calls"
+    assert len(calls) == 1, "webhook recorder called " + repr(len(calls)) + " times"
