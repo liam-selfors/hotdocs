@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:61b96f4bf97ad131ffe023d44365ed9d89d446893b241e1a9165df469857a10b
+# hotdocs-criterion: sha256:4360fb4f43c01dd1db087f5c6dde5af1ba792fbb622909fa01dbf47835ad1e15
 import builtins
 import json
 import os
@@ -7,49 +7,60 @@ from pathlib import Path
 import hotdocs_cli
 
 
-def _write_fake_init(tool_root):
-    log_path = tool_root / "calls.log"
-    fake_dir = tool_root / "gen" / "hotdocs-init"
-    fake_dir.mkdir(parents=True, exist_ok=True)
-    source = (
+def _fake_source(log_path):
+    return (
+        "import builtins\n"
         "import json\n"
         "import os\n"
         "\n"
-        "LOG = " + repr(str(log_path)) + "\n"
+        "LOG_PATH = " + repr(str(log_path)) + "\n"
         "\n"
-        "def main(argv, **kwargs):\n"
-        "    env = kwargs.get('env')\n"
-        "    rec = {\n"
-        "        'argv': list(argv),\n"
-        "        'keys': sorted(kwargs.keys()),\n"
-        "        'ids': dict((k, id(v)) for k, v in kwargs.items()),\n"
-        "        'tool_root': None if kwargs.get('tool_root') is None else str(kwargs.get('tool_root')),\n"
-        "        'cwd': None if kwargs.get('cwd') is None else str(kwargs.get('cwd')),\n"
-        "        'env': None if env is None else dict((str(k), str(v)) for k, v in dict(env).items()),\n"
-        "        'process_var_config': os.environ.get('VAR_HOTDOCS_CONFIG'),\n"
-        "    }\n"
-        "    with open(LOG, 'a', encoding='utf-8') as fh:\n"
-        "        fh.write(json.dumps(rec) + '\\n')\n"
+        "def run(argv, **keywords):\n"
+        "    record = {}\n"
+        "    record['argv'] = list(argv)\n"
+        "    record['keys'] = sorted(keywords.keys())\n"
+        "    tr = keywords.get('tool_root')\n"
+        "    record['tool_root'] = None if tr is None else os.fspath(tr)\n"
+        "    cw = keywords.get('cwd')\n"
+        "    record['cwd'] = None if cw is None else os.fspath(cw)\n"
+        "    record['input_fn_id'] = id(keywords.get('input_fn'))\n"
+        "    record['output_fn_id'] = id(keywords.get('output_fn'))\n"
+        "    record['env_id'] = id(keywords.get('env'))\n"
+        "    record['input_is_builtin'] = keywords.get('input_fn') is builtins.input\n"
+        "    record['output_is_builtin'] = keywords.get('output_fn') is builtins.print\n"
+        "    env = keywords.get('env')\n"
+        "    record['env_is_os_environ'] = env is os.environ\n"
+        "    try:\n"
+        "        record['env_equals_os_environ'] = dict(env) == dict(os.environ)\n"
+        "    except Exception:\n"
+        "        record['env_equals_os_environ'] = False\n"
+        "    with open(LOG_PATH, 'a', encoding='utf-8') as fh:\n"
+        "        fh.write(json.dumps(record) + '\\n')\n"
         "    return 7\n"
     )
-    (fake_dir / "hotdocs_init.py").write_text(source, encoding="utf-8")
-    return log_path
+
+
+def _make_tool_root(tmp_path, log_path):
+    tool_root = tmp_path / "toolroot"
+    fake_dir = tool_root / "gen" / "hotdocs-init"
+    fake_dir.mkdir(parents=True)
+    (fake_dir / "hotdocs_init.py").write_text(_fake_source(log_path), encoding="utf-8")
+    return tool_root
 
 
 def _read_log(log_path):
-    lines = [l for l in log_path.read_text(encoding="utf-8").splitlines() if l.strip()]
-    return [json.loads(l) for l in lines]
+    assert log_path.is_file(), "fake hotdocs_init.run was never called"
+    lines = [ln for ln in log_path.read_text(encoding="utf-8").splitlines() if ln.strip()]
+    return [json.loads(ln) for ln in lines]
 
 
-EXPECTED_KEYS = sorted(["tool_root", "input_fn", "output_fn", "env", "cwd"])
+def _same_path(a, b):
+    return os.path.realpath(os.fspath(a)) == os.path.realpath(os.fspath(b))
 
 
-def test_init_loaded_from_tool_root_with_explicit_keywords(tmp_path, monkeypatch):
-    monkeypatch.delenv("VAR_HOTDOCS_CONFIG", raising=False)
-    tool_root = tmp_path / "tool"
-    tool_root.mkdir()
-    log_path = _write_fake_init(tool_root)
-
+def test_init_forwards_exact_keywords_and_tokens(tmp_path):
+    log_path = tmp_path / "calls.log"
+    tool_root = _make_tool_root(tmp_path, log_path)
     project = tmp_path / "project"
     project.mkdir()
     assert not (project / "gen").exists()
@@ -60,66 +71,53 @@ def test_init_loaded_from_tool_root_with_explicit_keywords(tmp_path, monkeypatch
     def g(*args, **kwargs):
         return None
 
-    e = {"HOTDOCS_TEST_MARK": "1"}
-    c = project
+    e = {"HOTDOCS_TEST_ENV": "1"}
 
-    rc = hotdocs_cli.main(
+    code = hotdocs_cli.run(
         ["init", "dir", "--yes"],
-        tool_root=tool_root,
+        tool_root=str(tool_root),
         input_fn=f,
         output_fn=g,
         env=e,
-        cwd=c,
+        cwd=str(project),
     )
 
-    assert log_path.is_file(), "fake init component in tool root was not called"
     records = _read_log(log_path)
     assert len(records) == 1
     rec = records[0]
-
     assert rec["argv"] == ["dir", "--yes"]
-    assert "--repo-root" not in rec["argv"]
-    assert rec["keys"] == EXPECTED_KEYS
-
-    assert rec["ids"]["input_fn"] == id(f)
-    assert rec["ids"]["output_fn"] == id(g)
-    assert rec["ids"]["env"] == id(e) or rec["env"] == e
-    assert rec["env"] == {"HOTDOCS_TEST_MARK": "1"}
-    assert "VAR_HOTDOCS_CONFIG" not in e
-    assert rec["process_var_config"] is None
-    assert Path(rec["tool_root"]).resolve() == tool_root.resolve()
-    assert Path(rec["cwd"]).resolve() == project.resolve()
-
-    assert rc == 7
+    assert not any(tok.startswith("--repo-root") for tok in rec["argv"])
+    assert rec["keys"] == sorted(["tool_root", "input_fn", "output_fn", "env", "cwd"])
+    assert _same_path(rec["tool_root"], tool_root)
+    assert _same_path(rec["cwd"], project)
+    assert rec["input_fn_id"] == id(f)
+    assert rec["output_fn_id"] == id(g)
+    assert rec["env_id"] == id(e)
+    assert code == 7
 
 
 def test_init_defaults_filled_in(tmp_path, monkeypatch):
-    monkeypatch.delenv("VAR_HOTDOCS_CONFIG", raising=False)
-    tool_root = tmp_path / "tool"
-    tool_root.mkdir()
-    log_path = _write_fake_init(tool_root)
-
+    log_path = tmp_path / "calls.log"
+    tool_root = _make_tool_root(tmp_path, log_path)
     project = tmp_path / "project"
     project.mkdir()
     monkeypatch.chdir(project)
 
-    rc = hotdocs_cli.main(["init"], tool_root=tool_root)
+    # tool_root is supplied only so the fake can be located; input_fn,
+    # output_fn, env and cwd are left to their defaults.
+    code = hotdocs_cli.run(["init"], tool_root=str(tool_root))
 
-    assert log_path.is_file(), "fake init component in tool root was not called"
     records = _read_log(log_path)
     assert len(records) == 1
     rec = records[0]
-
     assert rec["argv"] == []
-    assert rec["keys"] == EXPECTED_KEYS
-
-    assert rec["ids"]["input_fn"] == id(builtins.input)
-    assert rec["ids"]["output_fn"] == id(builtins.print)
-    expected_env = dict((str(k), str(v)) for k, v in os.environ.items())
-    assert rec["ids"]["env"] == id(os.environ) or rec["env"] == expected_env
-    assert rec["env"] == expected_env
+    assert rec["keys"] == sorted(["tool_root", "input_fn", "output_fn", "env", "cwd"])
+    assert rec["input_is_builtin"] is True
+    assert rec["input_fn_id"] == id(builtins.input)
+    assert rec["output_is_builtin"] is True
+    assert rec["output_fn_id"] == id(builtins.print)
+    assert rec["env_is_os_environ"] or rec["env_equals_os_environ"]
     assert rec["cwd"] is not None
-    assert Path(rec["cwd"]).resolve() == Path.cwd().resolve()
-    assert Path(rec["tool_root"]).resolve() == tool_root.resolve()
-
-    assert rc == 7
+    assert _same_path(rec["cwd"], project)
+    assert _same_path(rec["cwd"], Path(os.getcwd()))
+    assert code == 7

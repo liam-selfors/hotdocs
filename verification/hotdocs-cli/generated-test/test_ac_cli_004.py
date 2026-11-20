@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:f62814e0a3cf92033b2a7cc59ffe8c82d88fcb98431f80c31267682d165b084f
+# hotdocs-criterion: sha256:318a7a7534c7a023298e0c6d41980bbf2da50f9e69babeb828a3e4c07669ec60
 import os
 
 import pytest
@@ -27,84 +27,87 @@ VERBS = [
     ("docs-site build", "render the docs site"),
     ("corpus-graph build", "build the corpus graph"),
     ("assist", "review a spec change"),
+    ("spec check", "check criteria from their test authors' view"),
+    ("decision new", "draft the next decision record"),
+    ("decision ratify", "ratify a decision record"),
+    ("decision record-commit", "record the commit that landed a decision"),
+    ("component new", "lay out a new component"),
+    ("kind new", "scaffold a new asset kind"),
     ("init", "set up a new project"),
 ]
 
 
-def _make_dirs(tmp_path):
-    project = tmp_path / "project"
-    project.mkdir()
-    tool_root = tmp_path / "toolroot"
-    tool_root.mkdir()
-    return project, tool_root
+class Collector:
+    def __init__(self):
+        self.lines = []
+
+    def __call__(self, *args, **kwargs):
+        sep = kwargs.get("sep", " ")
+        self.lines.append(sep.join(str(a) for a in args))
+
+    def text(self):
+        return "\n".join(self.lines)
 
 
-def _run(argv, project, tool_root, capsys):
-    captured = []
-
-    def out(*args, **kwargs):
-        captured.append(" ".join(str(a) for a in args))
-
-    def no_input(*args, **kwargs):
-        raise AssertionError("input_fn should not be called")
-
-    rc = hotdocs_cli.main(
-        argv,
-        tool_root=tool_root,
-        input_fn=no_input,
-        output_fn=out,
-        env=dict(os.environ),
-        cwd=project,
-    )
-    std = capsys.readouterr()
-    return rc, "\n".join(captured) + "\n" + std.out, std.err
+def _run(argv, project, capsys, tool_root=None):
+    out = Collector()
+    kwargs = dict(output_fn=out, env=dict(os.environ), cwd=str(project))
+    if tool_root is not None:
+        kwargs["tool_root"] = str(tool_root)
+    code = hotdocs_cli.run(argv, **kwargs)
+    captured = capsys.readouterr()
+    return code, out.text() + "\n" + captured.out, captured.err
 
 
 def _assert_verb_list(text):
     for words, summary in VERBS:
-        assert words in text, "verb missing from list: " + repr(words)
-        assert summary in text, "summary missing from list: " + repr(summary)
+        assert words in text, "verb missing: " + words
+        assert summary in text, "summary missing: " + summary
 
 
 @pytest.mark.parametrize("argv", [[], ["--help"], ["-h"], ["help"]])
-def test_help_prints_version_and_every_verb(tmp_path, capsys, argv):
-    project, tool_root = _make_dirs(tmp_path)
-    rc, out, err = _run(argv, project, tool_root, capsys)
-    assert rc == 0
-    combined = out + "\n" + err
-    assert "hotdocs 0.1.0" in combined
-    _assert_verb_list(combined)
-    assert "init" in combined
+def test_help_prints_version_and_all_verbs(argv, tmp_path, capsys):
+    project = tmp_path / "project"
+    project.mkdir()
+    code, out, err = _run(argv, project, capsys)
+    assert code == 0
+    assert "hotdocs 0.1.0" in out
+    _assert_verb_list(out)
 
 
-def test_version_prints_version_and_returns_zero(tmp_path, capsys):
-    project, tool_root = _make_dirs(tmp_path)
-    rc, out, err = _run(["--version"], project, tool_root, capsys)
-    assert rc == 0
-    assert "hotdocs 0.1.0" in out + "\n" + err
+def test_version(tmp_path, capsys):
+    project = tmp_path / "project"
+    project.mkdir()
+    code, out, err = _run(["--version"], project, capsys)
+    assert code == 0
+    assert "hotdocs 0.1.0" in out
 
 
-def test_unknown_verb_returns_two_with_verb_list_on_stderr(tmp_path, capsys):
-    project, tool_root = _make_dirs(tmp_path)
-    rc, out, err = _run(["frobnicate"], project, tool_root, capsys)
-    assert rc == 2
+def test_unknown_verb(tmp_path, capsys):
+    project = tmp_path / "project"
+    project.mkdir()
+    code, out, err = _run(["frobnicate"], project, capsys)
+    assert code == 2
     assert "unknown verb: frobnicate" in err
     _assert_verb_list(err)
 
 
-def test_lint_missing_under_both_roots_returns_two_naming_path(tmp_path, capsys):
-    project, tool_root = _make_dirs(tmp_path)
-    rc, out, err = _run(["lint"], project, tool_root, capsys)
-    assert rc == 2
-    combined = (out + "\n" + err).replace("\\", "/")
-    assert "gen/spec-linter/spec_linter.py" in combined
+def test_lint_missing_module_everywhere(tmp_path, capsys):
+    project = tmp_path / "project"
+    project.mkdir()
+    tool_root = tmp_path / "toolroot"
+    tool_root.mkdir()
+    code, out, err = _run(["lint"], project, capsys, tool_root=tool_root)
+    assert code == 2
+    assert "gen/spec-linter/spec_linter.py" in (out + "\n" + err)
 
 
-def test_lint_module_without_main_returns_two(tmp_path, capsys):
-    project, tool_root = _make_dirs(tmp_path)
-    fake_dir = project / "gen" / "spec-linter"
-    fake_dir.mkdir(parents=True)
-    source = "# fake spec-linter with no main\n" + "VALUE = " + repr(1) + "\n"
-    (fake_dir / "spec_linter.py").write_text(source)
-    rc, out, err = _run(["lint"], project, tool_root, capsys)
-    assert rc == 2
+def test_lint_module_without_main(tmp_path, capsys):
+    project = tmp_path / "project"
+    (project / "gen" / "spec-linter").mkdir(parents=True)
+    source = "VALUE = " + repr("no main here") + "\n"
+    (project / "gen" / "spec-linter" / "spec_linter.py").write_text(source)
+    tool_root = tmp_path / "toolroot"
+    tool_root.mkdir()
+    code, out, err = _run(["lint"], project, capsys, tool_root=tool_root)
+    assert code == 2
