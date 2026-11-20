@@ -1,148 +1,198 @@
-# hotdocs-criterion: sha256:e9cbfb0817834814dd5083b7781efaa8e3662cb79b762407d2cde256e2780984
+# hotdocs-criterion: sha256:c1793b492e989eb9dfb21bf6be6d8c001a378324a71be3af133ecdb767af3bcc
 import importlib.metadata
-import os
+import json
 from pathlib import Path
 
 import hotdocs_init
 
 
-FAKE_ENDPOINT_HEAD = (
-    "import json\n"
-    "from pathlib import Path\n"
-    "\n"
-)
+FAKE_ENDPOINT_BODY = '''
+import json
+from pathlib import Path
 
-FAKE_ENDPOINT_BODY = (
-    "PROVIDERS = {\n"
-    "    'claude-cli': {'default_base_url': None, 'default_api_key_env': None, 'needs_base_url': False, 'suggested_model': 'claude-sonnet-5'},\n"
-    "    'anthropic': {'default_base_url': 'https://api.anthropic.com', 'default_api_key_env': 'ANTHROPIC_API_KEY', 'needs_base_url': False, 'suggested_model': 'claude-sonnet-5'},\n"
-    "    'openai': {'default_base_url': 'https://api.openai.com/v1', 'default_api_key_env': 'OPENAI_API_KEY', 'needs_base_url': False, 'suggested_model': 'gpt-6-astra'},\n"
-    "    'openai-compatible': {'default_base_url': None, 'default_api_key_env': None, 'needs_base_url': True, 'suggested_model': ''},\n"
-    "    'gemini': {'default_base_url': 'https://generativelanguage.googleapis.com', 'default_api_key_env': 'GEMINI_API_KEY', 'needs_base_url': False, 'suggested_model': 'gemini-4-argon'},\n"
-    "    'ollama': {'default_base_url': 'http://localhost:11434', 'default_api_key_env': None, 'needs_base_url': False, 'suggested_model': 'llama3.2'},\n"
-    "}\n"
-    "\n"
-    "def _log(name, **kwargs):\n"
-    "    Path(LOG_PATH).parent.mkdir(parents=True, exist_ok=True)\n"
-    "    with open(LOG_PATH, 'a', encoding='utf-8') as fh:\n"
-    "        fh.write(name + ' ' + repr(sorted((k, str(v)) for k, v in kwargs.items())) + '\\n')\n"
-    "\n"
-    "def detect_providers(env=None, probe_ollama=True):\n"
-    "    _log('detect_providers', probe_ollama=probe_ollama)\n"
-    "    out = []\n"
-    "    for name, info in PROVIDERS.items():\n"
-    "        out.append({\n"
-    "            'provider': name,\n"
-    "            'available': name == 'openai',\n"
-    "            'reason': 'fake',\n"
-    "            'suggested_model': info['suggested_model'],\n"
-    "            'api_key_env': info['default_api_key_env'],\n"
-    "        })\n"
-    "    return out\n"
-    "\n"
-    "def check_connection(provider, model, base_url=None, api_key_env=None, timeout_seconds=30, auth=None):\n"
-    "    _log('check_connection', provider=provider, model=model)\n"
-    "    if provider not in PROVIDERS:\n"
-    "        raise ValueError('unknown provider')\n"
-    "    if PROVIDERS[provider]['needs_base_url'] and not base_url:\n"
-    "        raise ValueError('base_url required')\n"
-    "    return {'ok': True, 'error': None}\n"
-    "\n"
-    "def save_config(config_path, provider, model, base_url=None, api_key_env=None, timeout_seconds=None, auth=None):\n"
-    "    _log('save_config', provider=provider, model=model)\n"
-    "    if provider not in PROVIDERS or not model:\n"
-    "        raise ValueError('invalid')\n"
-    "    p = Path(config_path)\n"
-    "    p.parent.mkdir(parents=True, exist_ok=True)\n"
-    "    kept = []\n"
-    "    if p.exists():\n"
-    "        skipping = False\n"
-    "        for line in p.read_text(encoding='utf-8').splitlines():\n"
-    "            s = line.strip()\n"
-    "            if s.startswith('[') and s.endswith(']'):\n"
-    "                skipping = (s == '[llm]')\n"
-    "            if not skipping:\n"
-    "                kept.append(line)\n"
-    "    lines = ['[llm]', 'provider = ' + json.dumps(provider), 'model = ' + json.dumps(model)]\n"
-    "    if base_url is not None:\n"
-    "        lines.append('base_url = ' + json.dumps(base_url))\n"
-    "    if api_key_env is not None:\n"
-    "        lines.append('api_key_env = ' + json.dumps(api_key_env))\n"
-    "    if timeout_seconds is not None:\n"
-    "        lines.append('timeout_seconds = ' + str(int(timeout_seconds)))\n"
-    "    if auth is not None:\n"
-    "        lines.append('auth = ' + json.dumps(auth))\n"
-    "    text = '\\n'.join(kept + lines) + '\\n'\n"
-    "    p.write_text(text, encoding='utf-8')\n"
-    "\n"
-    "def load_config(config_path=None):\n"
-    "    _log('load_config')\n"
-    "    if config_path is None:\n"
-    "        return None\n"
-    "    p = Path(config_path)\n"
-    "    if not p.exists():\n"
-    "        return None\n"
-    "    result = {'provider': None, 'model': None, 'base_url': None, 'api_key_env': None, 'timeout_seconds': None, 'auth': None}\n"
-    "    in_llm = False\n"
-    "    found = False\n"
-    "    for line in p.read_text(encoding='utf-8').splitlines():\n"
-    "        s = line.strip()\n"
-    "        if s.startswith('[') and s.endswith(']'):\n"
-    "            in_llm = (s == '[llm]')\n"
-    "            found = found or in_llm\n"
-    "            continue\n"
-    "        if in_llm and '=' in s:\n"
-    "            k, v = s.split('=', 1)\n"
-    "            k = k.strip()\n"
-    "            v = v.strip()\n"
-    "            if k == 'timeout_seconds':\n"
-    "                result[k] = int(v)\n"
-    "            elif k in result:\n"
-    "                result[k] = json.loads(v)\n"
-    "    if not found:\n"
-    "        return None\n"
-    "    return result\n"
-)
 
-EXAMPLE_TEXT = "# Slugs\n\nexample slugs spec from the tool root\n"
+def _log(name, **kwargs):
+    entry = {"call": name}
+    entry.update(kwargs)
+    with open(LOG, "a", encoding="utf-8") as fh:
+        fh.write(json.dumps(entry, default=str) + "\\n")
+
+
+PROVIDERS = {
+    "claude-cli": {
+        "default_base_url": None,
+        "default_api_key_env": None,
+        "needs_base_url": False,
+        "suggested_model": "claude-sonnet-5",
+    },
+    "anthropic": {
+        "default_base_url": "https://api.anthropic.com",
+        "default_api_key_env": "ANTHROPIC_API_KEY",
+        "needs_base_url": False,
+        "suggested_model": "claude-sonnet-5",
+    },
+    "openai": {
+        "default_base_url": "https://api.openai.com/v1",
+        "default_api_key_env": "OPENAI_API_KEY",
+        "needs_base_url": False,
+        "suggested_model": "gpt-6-astra",
+    },
+    "openai-compatible": {
+        "default_base_url": None,
+        "default_api_key_env": None,
+        "needs_base_url": True,
+        "suggested_model": "",
+    },
+    "gemini": {
+        "default_base_url": "https://generativelanguage.googleapis.com",
+        "default_api_key_env": "GEMINI_API_KEY",
+        "needs_base_url": False,
+        "suggested_model": "gemini-4-argon",
+    },
+    "ollama": {
+        "default_base_url": "http://localhost:11434",
+        "default_api_key_env": None,
+        "needs_base_url": False,
+        "suggested_model": "llama3.2",
+    },
+}
+
+
+def detect_providers(env=None, probe_ollama=True):
+    _log("detect_providers", env_given=env is not None, probe_ollama=probe_ollama)
+    out = []
+    for name, info in PROVIDERS.items():
+        out.append({
+            "provider": name,
+            "available": name == "openai",
+            "reason": "fake",
+            "suggested_model": info["suggested_model"],
+            "api_key_env": info["default_api_key_env"],
+        })
+    return out
+
+
+def check_connection(provider, model, base_url=None, api_key_env=None,
+                     timeout_seconds=30, auth=None):
+    _log("check_connection", provider=provider, model=model)
+    if provider not in PROVIDERS:
+        raise ValueError("unknown provider")
+    if PROVIDERS[provider]["needs_base_url"] and not base_url:
+        raise ValueError("base_url required")
+    return {"ok": True, "error": None}
+
+
+def _strip_llm(text):
+    kept = []
+    in_llm = False
+    for line in text.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("[") and stripped.endswith("]"):
+            in_llm = stripped == "[llm]"
+            if in_llm:
+                continue
+        if not in_llm:
+            kept.append(line)
+    return "\\n".join(kept).strip()
+
+
+def save_config(config_path, provider, model, base_url=None,
+                api_key_env=None, timeout_seconds=None, auth=None):
+    _log("save_config", config_path=str(config_path), provider=provider,
+         model=model)
+    if provider not in PROVIDERS:
+        raise ValueError("unknown provider")
+    if not model:
+        raise ValueError("model required")
+    path = Path(config_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    existing = path.read_text(encoding="utf-8") if path.exists() else ""
+    rest = _strip_llm(existing)
+    lines = ["[llm]", "provider = " + json.dumps(provider),
+             "model = " + json.dumps(model)]
+    if base_url is not None:
+        lines.append("base_url = " + json.dumps(base_url))
+    if api_key_env is not None:
+        lines.append("api_key_env = " + json.dumps(api_key_env))
+    if timeout_seconds is not None:
+        lines.append("timeout_seconds = " + str(int(timeout_seconds)))
+    if auth is not None:
+        lines.append("auth = " + json.dumps(auth))
+    text = ""
+    if rest:
+        text = rest + "\\n\\n"
+    text += "\\n".join(lines) + "\\n"
+    path.write_text(text, encoding="utf-8")
+
+
+def load_config(config_path=None):
+    _log("load_config", config_path=str(config_path))
+    if config_path is None:
+        return None
+    path = Path(config_path)
+    if not path.exists():
+        return None
+    result = {"provider": None, "model": None, "base_url": None,
+              "api_key_env": None, "timeout_seconds": None, "auth": None}
+    in_llm = False
+    found = False
+    for line in path.read_text(encoding="utf-8").splitlines():
+        stripped = line.strip()
+        if stripped.startswith("[") and stripped.endswith("]"):
+            in_llm = stripped == "[llm]"
+            found = found or in_llm
+            continue
+        if in_llm and "=" in stripped:
+            key, value = stripped.split("=", 1)
+            key = key.strip()
+            if key in result:
+                result[key] = json.loads(value.strip())
+    if not found:
+        return None
+    return result
+'''
+
+EXAMPLE_TEXT = "# Slugs\n\nExample product spec for slugify.\n"
+
+
+def field(value, name):
+    return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
 def make_tool_root(base, log_path, with_endpoint=True):
-    root = Path(base)
+    root = base
     root.mkdir(parents=True, exist_ok=True)
     if with_endpoint:
         ep = root / "gen" / "llm-endpoint"
         ep.mkdir(parents=True, exist_ok=True)
-        src = FAKE_ENDPOINT_HEAD + "LOG_PATH = " + repr(str(log_path)) + "\n\n" + FAKE_ENDPOINT_BODY
-        (ep / "llm_endpoint.py").write_text(src, encoding="utf-8")
+        (ep / "llm_endpoint.py").write_text(
+            "LOG = " + repr(str(log_path)) + "\n" + FAKE_ENDPOINT_BODY,
+            encoding="utf-8",
+        )
     other = root / "gen" / "slugify"
     other.mkdir(parents=True, exist_ok=True)
-    (other / "slugify.py").write_text("def slugify(text):\n    return text.lower()\n", encoding="utf-8")
+    (other / "slugify.py").write_text(
+        "def slugify(text):\n    return " + repr("x") + "\n", encoding="utf-8"
+    )
     ex = root / "examples" / "slugify" / "specs" / "product"
     ex.mkdir(parents=True, exist_ok=True)
     (ex / "slugs.md").write_text(EXAMPLE_TEXT, encoding="utf-8")
     (root / "requirements.txt").write_text(
-        "pytest==" + importlib.metadata.version("pytest") + "\n", encoding="utf-8"
+        "pytest==" + importlib.metadata.version("pytest") + "\n",
+        encoding="utf-8",
     )
     return root
 
 
-def snapshot(root):
-    root = Path(root)
-    files = {}
-    dirs = set()
-    if not root.exists():
-        return files, dirs
-    for p in root.rglob("*"):
-        rel = p.relative_to(root).as_posix()
-        if p.is_dir():
-            dirs.add(rel)
-        else:
-            files[rel] = p.read_bytes()
-    return files, dirs
+def setup(tmp_path, with_endpoint=True, name="tool"):
+    log_dir = tmp_path / "logs"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    log_path = log_dir / (name + "-calls.log")
+    tool_root = make_tool_root(tmp_path / name, log_path, with_endpoint)
+    return tool_root, log_path
 
 
-class Capture:
+class Out:
     def __init__(self):
         self.chunks = []
 
@@ -154,158 +204,177 @@ class Capture:
         return "\n".join(self.chunks)
 
     def lines(self):
-        return [ln for ln in self.text().splitlines() if ln.strip()]
+        return self.text().splitlines()
 
 
-def run(argv, tool_root, cwd):
-    out = Capture()
-    rc = hotdocs_init.main(
+def do_run(argv, tool_root, tmp_path):
+    out = Out()
+    rc = hotdocs_init.run(
         argv,
         tool_root=tool_root,
         input_fn=lambda prompt: "",
         output_fn=out,
-        env={"PATH": os.environ.get("PATH", "")},
-        cwd=cwd,
+        env={},
+        cwd=tmp_path,
     )
     return rc, out
 
 
-def test_example_copies_slugs_and_prints_next_steps(tmp_path):
-    log = tmp_path / "logs" / "llm.log"
-    tool = make_tool_root(tmp_path / "tool", log)
-    proj = tmp_path / "proj"
-    proj.mkdir()
+def snapshot(root):
+    snap = {}
+    root = Path(root)
+    if not root.exists():
+        return snap
+    for p in sorted(root.rglob("*")):
+        rel = p.relative_to(root).as_posix()
+        if p.is_dir():
+            snap[rel] = "<dir>"
+        else:
+            snap[rel] = p.read_bytes()
+    return snap
 
-    rc, out = run([str(proj), "--example", "--yes"], tool, tmp_path)
-    assert rc in (0, 3), out.text()
 
-    copied = proj / "specs" / "product" / "slugs.md"
+def read_log(log_path):
+    if not log_path.exists():
+        return []
+    return [json.loads(l) for l in log_path.read_text(encoding="utf-8").splitlines() if l.strip()]
+
+
+def test_example_copies_slugs_and_prints_next_steps(tmp_path, capsys):
+    tool_root, _ = setup(tmp_path)
+    project = tmp_path / "project"
+    project.mkdir()
+
+    rc, out = do_run([str(project), "--example", "--yes"], tool_root, tmp_path)
+    assert rc in (0, 3), rc
+
+    copied = project / "specs" / "product" / "slugs.md"
     assert copied.is_file()
     assert copied.read_text(encoding="utf-8") == EXAMPLE_TEXT
-    assert not (proj / "examples").exists()
+    assert not (project / "examples").exists()
+
+    # the tool's own example is untouched
+    assert (tool_root / "examples" / "slugify" / "specs" / "product" / "slugs.md").read_text(
+        encoding="utf-8"
+    ) == EXAMPLE_TEXT
 
     lines = out.lines()
-    idx = max(i for i, ln in enumerate(lines) if "hotdocs lint" in ln)
-    tail = "\n".join(lines[idx:])
+    lint_idx = [i for i, l in enumerate(lines) if "hotdocs lint" in l]
+    assert lint_idx, out.text()
+    tail = "\n".join(lines[lint_idx[-1]:])
     for needle in ("hotdocs lint", "hotdocs generate comp-slugify", "hotdocs verify", "QUICKSTART.md"):
-        assert needle in tail, out.text()
-    assert "QUICKSTART.md" in "\n".join(lines[-3:]) or lines[-1].find("hotdocs") >= 0 or "QUICKSTART.md" in tail
+        assert needle in tail, (needle, out.text())
 
 
 def test_example_never_overwrites_existing_file(tmp_path):
-    log = tmp_path / "logs" / "llm.log"
-    tool = make_tool_root(tmp_path / "tool", log)
-    proj = tmp_path / "proj"
-    existing = proj / "specs" / "product" / "slugs.md"
-    existing.parent.mkdir(parents=True)
-    existing.write_text("my own slugs\n", encoding="utf-8")
+    tool_root, _ = setup(tmp_path)
+    project = tmp_path / "project"
+    target = project / "specs" / "product" / "slugs.md"
+    target.parent.mkdir(parents=True)
+    mine = "# My own slugs\n"
+    target.write_text(mine, encoding="utf-8")
 
-    run([str(proj), "--example", "--yes"], tool, tmp_path)
+    rc, out = do_run([str(project), "--example", "--yes"], tool_root, tmp_path)
+    assert rc != 2, out.text()
+    assert target.read_text(encoding="utf-8") == mine
+    assert not (project / "examples").exists()
 
-    assert existing.read_text(encoding="utf-8") == "my own slugs\n"
-    assert not (proj / "examples").exists()
 
+def test_no_example_next_steps_omit_comp_slugify(tmp_path, capsys):
+    tool_root, _ = setup(tmp_path)
+    project = tmp_path / "project"
+    project.mkdir()
 
-def test_no_example_does_not_mention_comp_slugify(tmp_path):
-    log = tmp_path / "logs" / "llm.log"
-    tool = make_tool_root(tmp_path / "tool", log)
-    proj = tmp_path / "proj"
-    proj.mkdir()
-
-    rc, out = run([str(proj), "--yes"], tool, tmp_path)
-    assert rc in (0, 3), out.text()
-    text = out.text()
-    assert "comp-slugify" not in text
-    assert "hotdocs lint" in text
-    assert "hotdocs verify" in text
-    assert "QUICKSTART.md" in text
+    rc, out = do_run([str(project), "--yes"], tool_root, tmp_path)
+    assert rc in (0, 3), rc
+    captured = capsys.readouterr()
+    assert "comp-slugify" not in out.text()
+    assert "comp-slugify" not in captured.out
+    assert "hotdocs lint" in out.text()
+    assert "hotdocs verify" in out.text()
+    assert "QUICKSTART.md" in out.text()
+    assert not (project / "specs" / "product" / "slugs.md").exists()
 
 
 def test_reconfigure_changes_only_hotdocs_toml(tmp_path):
-    log = tmp_path / "logs" / "llm.log"
-    tool = make_tool_root(tmp_path / "tool", log)
-    proj = tmp_path / "proj"
-    proj.mkdir()
+    tool_root, log_path = setup(tmp_path)
+    project = tmp_path / "project"
+    project.mkdir()
 
-    rc, out = run(
-        [str(proj), "--yes", "--provider", "openai", "--model", "first-model", "--no-test"],
-        tool,
+    rc, out = do_run(
+        [str(project), "--yes", "--provider", "openai", "--model", "m0", "--no-test"],
+        tool_root,
         tmp_path,
     )
-    assert rc in (0, 3), out.text()
-    assert (proj / ".hotdocs-tool.json").is_file()
-    assert (proj / "hotdocs.toml").is_file()
+    assert rc in (0, 3), (rc, out.text())
+    assert (project / ".hotdocs-tool.json").is_file()
+    assert (project / "hotdocs.toml").is_file()
 
-    before_files, before_dirs = snapshot(proj)
-    tool_before = snapshot(tool)
-    log_before = log.read_text(encoding="utf-8") if log.exists() else ""
+    before = snapshot(project)
+    before_tool = snapshot(tool_root)
+    log_lines_before = len(read_log(log_path))
 
-    rc, out = run(
-        [str(proj), "--reconfigure", "--provider", "openai", "--model", "m", "--no-test"],
-        tool,
+    rc, out = do_run(
+        [str(project), "--reconfigure", "--provider", "openai", "--model", "m", "--no-test"],
+        tool_root,
         tmp_path,
     )
-    assert rc == 0, out.text()
+    assert rc == 0, (rc, out.text())
 
-    after_files, after_dirs = snapshot(proj)
-    assert after_dirs == before_dirs
-    assert set(after_files) == set(before_files)
-    changed = sorted(k for k in after_files if after_files[k] != before_files[k])
-    assert changed == ["hotdocs.toml"]
-    assert snapshot(tool) == tool_before
+    after = snapshot(project)
+    changed = {k for k in set(before) | set(after) if before.get(k) != after.get(k)}
+    assert changed == {"hotdocs.toml"}, changed
+    assert snapshot(tool_root) == before_tool
 
-    new_log = (log.read_text(encoding="utf-8") if log.exists() else "")[len(log_before):]
-    assert any(
-        ln.startswith("save_config ") and "'m'" in ln for ln in new_log.splitlines()
-    ), new_log
+    new_calls = read_log(log_path)[log_lines_before:]
+    saves = [c for c in new_calls if c["call"] == "save_config"]
+    assert saves, new_calls
+    assert saves[-1]["provider"] == "openai"
+    assert saves[-1]["model"] == "m"
+    assert Path(saves[-1]["config_path"]).resolve() == (project / "hotdocs.toml").resolve()
 
 
-def test_reconfigure_without_endpoint_file_returns_1(tmp_path):
-    log = tmp_path / "logs" / "llm.log"
-    tool = make_tool_root(tmp_path / "tool", log)
-    proj = tmp_path / "proj"
-    proj.mkdir()
+def test_reconfigure_without_llm_endpoint_returns_1(tmp_path):
+    tool_root, _ = setup(tmp_path)
+    project = tmp_path / "project"
+    project.mkdir()
 
-    rc, out = run(
-        [str(proj), "--yes", "--provider", "openai", "--model", "first-model", "--no-test"],
-        tool,
+    rc, out = do_run(
+        [str(project), "--yes", "--provider", "openai", "--model", "m0", "--no-test"],
+        tool_root,
         tmp_path,
     )
-    assert rc in (0, 3), out.text()
-    assert (proj / ".hotdocs-tool.json").is_file()
-    assert (proj / "hotdocs.toml").is_file()
+    assert rc in (0, 3), (rc, out.text())
+    assert (project / ".hotdocs-tool.json").is_file()
+    assert (project / "hotdocs.toml").is_file()
 
-    bare_tool = make_tool_root(tmp_path / "bare-tool", log, with_endpoint=False)
-    assert not (bare_tool / "gen" / "llm-endpoint" / "llm_endpoint.py").exists()
+    bare_root, _ = setup(tmp_path, with_endpoint=False, name="bare-tool")
+    assert not (bare_root / "gen" / "llm-endpoint" / "llm_endpoint.py").exists()
+    assert not (bare_root / "gen" / "llm-endpoint" / "llm_endpoint" / "__init__.py").exists()
 
-    rc, out = run(
-        [str(proj), "--reconfigure", "--provider", "openai", "--model", "m", "--no-test"],
-        bare_tool,
+    rc, out = do_run(
+        [str(project), "--reconfigure", "--provider", "openai", "--model", "m", "--no-test"],
+        bare_root,
         tmp_path,
     )
-    assert rc == 1
+    assert rc == 1, (rc, out.text())
 
 
-def test_reconfigure_on_uninitialised_dir_returns_1_and_writes_nothing(tmp_path, capsys):
-    log = tmp_path / "logs" / "llm.log"
-    tool = make_tool_root(tmp_path / "tool", log)
-    proj = tmp_path / "proj"
-    spec = proj / "specs" / "product" / "thing.md"
-    spec.parent.mkdir(parents=True)
-    spec.write_text("# Thing\n", encoding="utf-8")
+def test_reconfigure_on_uninitialised_dir_returns_1_and_writes_nothing(tmp_path):
+    tool_root, _ = setup(tmp_path)
+    project = tmp_path / "project"
+    (project / "specs").mkdir(parents=True)
 
-    before = snapshot(proj)
-    tool_before = snapshot(tool)
+    before = snapshot(project)
+    before_tool = snapshot(tool_root)
 
-    rc, out = run(
-        [str(proj), "--reconfigure", "--provider", "openai", "--model", "m", "--no-test"],
-        tool,
+    rc, out = do_run(
+        [str(project), "--reconfigure", "--provider", "openai", "--model", "m", "--no-test"],
+        tool_root,
         tmp_path,
     )
-    captured = capsys.readouterr()
-    assert rc == 1
-    assert snapshot(proj) == before
-    assert snapshot(tool) == tool_before
-    assert not (proj / "hotdocs.toml").exists()
-    assert not (proj / ".hotdocs-tool.json").exists()
-    assert (captured.err + out.text()).strip()
+    assert rc == 1, (rc, out.text())
+    assert snapshot(project) == before
+    assert snapshot(tool_root) == before_tool
+    assert not (project / "hotdocs.toml").exists()
+    assert not (project / ".hotdocs-tool.json").exists()
