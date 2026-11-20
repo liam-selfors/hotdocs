@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:f28a302167962bcb04f08c3fede73e118760d58a2ecbbc7d30eb2fabe782e4f4
+# hotdocs-criterion: sha256:508dabc146c2eae46b0e717f3fbe57f47400b35f05dc0862462015d6226acde9
 """AC-COMPILE-002 (covers R-COMPILE-002).
 
 Given an acceptance/ step that references a function name not declared in

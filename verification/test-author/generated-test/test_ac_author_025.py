@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:a17a1338fa65f1072fe7aecaf64c95dcc44a597b62d013a882a76247cc80438f
+# hotdocs-criterion: sha256:e3e24324b477363a859498c64a754d19de3181b99de4bf38d2da344f24421ee8
 import re
 
 import pytest

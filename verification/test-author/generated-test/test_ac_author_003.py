@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:5123928a026b5c217d17398d0e0b2f4058e66e641676fc4c14ef6c3d3918c0ef
+# hotdocs-criterion: sha256:40d9e31f06eb8399edca2500cd9cc2301f91e91a588ff45c754b206e5598ccc1
 import json
 import re
 

@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:e80ed4e20086f353708d8b57504214f0b57e898ece05d67abe642766ffbb0ca1
+# hotdocs-criterion: sha256:1dc0c662c86357a9954c0b2d0f4102b1cb3e156a740af197a3115e436aa2e510
 """AC-LINT-016: a unit file carrying YAML frontmatter is a fail-severity
 finding for rule R-LINT-016."""
 

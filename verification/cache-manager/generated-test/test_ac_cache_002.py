@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:94d46df8610db6edbb8312679ddd5f626fb4262ba7128ca6b80701b52008d07d
+# hotdocs-criterion: sha256:c80b77584516a8ea0a564310e292d20fa5bb28203479dcf82d7d1df8d974eb9a
 """AC-CACHE-002: the same four key components supplied by two different
 calling components produce byte-identical serialized cache keys.
 

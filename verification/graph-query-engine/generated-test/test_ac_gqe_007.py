@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:aefe9120909ff6ff02a493886d2b6ed5a070ce39ecfbe5fdd16d16dac86aa6d6
+# hotdocs-criterion: sha256:fba3042d1004190a9e31c61aa69cff3514b3955df9aade71aaa4158cbd7dcd94
 """AC-GQE-007: load_views is idempotent on the same DuckDB connection.
 
 Given a DuckDB connection with load_views already called once,

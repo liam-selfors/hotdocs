@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:ed7e39428a3b87dddffa455a41f02784a41cddbdc9eab66357e0bcd17c4597f5
+# hotdocs-criterion: sha256:ba0dd245fc3466e4c5d0f1897952f5c55ba719edad8b7ea65ced9c5639d4a30c
 import importlib.util
 import sys
 from collections.abc import Mapping

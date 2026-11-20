@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:6103083fa1fd08cde3c042da9b13c8ca9df37e3dfe16ab602b0cb6e0e4df5ed1
+# hotdocs-criterion: sha256:b1d328bbc3c7fe1f3a940cd160ab067e6e146f3ecb68edf72792128739183a9e
 """AC-GEN-012 (covers R-GEN-011): generate never retries an llm-endpoint call.
 
 A mock model that "hangs" until the SDK's own default timeout gives up is

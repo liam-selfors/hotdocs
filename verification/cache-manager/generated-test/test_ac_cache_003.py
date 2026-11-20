@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:94e2c625582cc00833e4d8954a11ab855f68dbf8713b1d862c210f221eb13dda
+# hotdocs-criterion: sha256:cc0618940afc954438e222e2fb6bb90dcadb387c4ff18858e4b4f95ab3597f8a
 import threading
 
 import pytest

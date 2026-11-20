@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:223664921c8c4b2aa1d9ff73f98ca06fcdd84f01f25f83e6dfc91ecdfb3111f8
+# hotdocs-criterion: sha256:e3dbd054160223f26c6afbeb1de084041ca4b5b176a29d47639ea890bf05d5dd
 """AC-GQE-006: component_size returns foo's word_count 26 and bar's 2 for the fixture corpus."""
 
 from pathlib import Path

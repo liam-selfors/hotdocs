@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:207220b768bcd6c5bc93b4591d906c39bc4c7f3b9f702d5ee2212bbf5db5d1d6
+# hotdocs-criterion: sha256:3600c648cc321d62fe3332405b632115768ed4704592ad20979c947db5209108
 import pytest
 
 import llm_endpoint

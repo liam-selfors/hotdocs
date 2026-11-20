@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:d5848df6bcecdea0a408c32ffc387b8da1f5b500a35b9a1f489672d9ea38b3f4
+# hotdocs-criterion: sha256:ea50adf41505c9f22d32def788f48535b67c1ef7ddb95858f8ff94e376f70517
 import re
 from dataclasses import dataclass, field as dc_field
 from pathlib import Path

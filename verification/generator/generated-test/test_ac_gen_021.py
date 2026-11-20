@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:70b0ded720285dc02f790ebbf1d4cccc64021a71efaba740216c2fc605e0fddb
+# hotdocs-criterion: sha256:8adf0001273afc513bf56800b5ab34c590601fa5088db558530c91d0288a622d
 import hashlib
 import re
 import uuid

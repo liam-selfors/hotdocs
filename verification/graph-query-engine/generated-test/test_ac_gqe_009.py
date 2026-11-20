@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:f98f6aaf6074c4ed14c5396f1cd0583627bbba82435442d6185dc98841bd2d0e
+# hotdocs-criterion: sha256:c9fceac75f277af820af44af515049c5c231c1a40df2e34eb0d8ebf5bd5c0382
 """AC-GQE-009: a decision's scalar `supersedes:` frontmatter line yields
 exactly one `supersedes` edge, and both decisions appear in `nodes` with
 kind "decision" (R-GQE-001)."""

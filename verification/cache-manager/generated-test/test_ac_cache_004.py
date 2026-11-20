@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:762e8b3f7f4fea01e84277a11f9f61e426dec411a6332a75d570825bf2451807
+# hotdocs-criterion: sha256:4c6c3ed298051302c982b4bf6e4e259a2bd4ccb7a390cec47fc530c97091830a
 import socket
 
 import pytest

@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:b1c690e4752c8972b48ed08820ffbb5b82eccbf003369d902ee61d6113418a59
+# hotdocs-criterion: sha256:ff586f8c2ef1281c46d7176f6153d6b2f2a2a0d9302acecbd51dff3787967184
 import dataclasses
 import json
 import logging

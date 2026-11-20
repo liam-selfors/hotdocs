@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:4a498e8d1eb4de643cb31b3b665e63cbe9c26783848a02a22891cc362840f79f
+# hotdocs-criterion: sha256:dde5479585be31a6bf8df5ab9d0eaf7a19425e89dd8cb291dab5061f11f1f2cd
 import json
 
 import llm_endpoint

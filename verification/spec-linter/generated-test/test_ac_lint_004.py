@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:62c2a8b21f3f6ebe8d5bdc55cfcd80f469e4d074f543e01fe7e9a355d088a3a9
+# hotdocs-criterion: sha256:9f10595e2fe8b271d76759c5acbede70c0a7448eff0283bafde928fc8e26205d
 import spec_linter
 
 

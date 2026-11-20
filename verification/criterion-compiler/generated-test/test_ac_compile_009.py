@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:a461be5e27324d62ee35ef17872a075b470ab069c50a8b70974dd26059bd74d5
+# hotdocs-criterion: sha256:d251642ab105bea1a783082b9f3534a5002afa2208c85ec25743368225aede40
 import os
 import time
 from pathlib import Path

@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:c20a249cc890304dbeddaa0f0de1b50e814f848b1f6ea42a33c9a5da2ca3e85f
+# hotdocs-criterion: sha256:dd27bea6612d3ff27cf450c65aa629ed8a205eda233ad04f80f1ed7ffbe60672
 import ast
 from pathlib import Path
 

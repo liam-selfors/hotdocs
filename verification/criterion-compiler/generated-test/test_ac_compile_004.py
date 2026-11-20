@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:0610f09828995caf11b5e42132b49f0b43b743d78675d946f6b46faeab2a8578
+# hotdocs-criterion: sha256:706567335990459fa0c076699e1810af587bc6ac2670437eee9f87a6c11e5dcf
 """AC-COMPILE-004: compiled output carries the criterion's Covers: id as metadata.
 
 Covers: R-COMPILE-004

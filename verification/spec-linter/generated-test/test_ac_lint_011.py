@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:4457a902a8b939a7d2fd903318d1534b576e54f249d22a248c84b9f7bac5583a
+# hotdocs-criterion: sha256:9ec34baac2dbe1aae70d1ea9e7c4bbf9818d85925543b3cc8bf3372018277f9d
 """AC-LINT-011: a Definitions entry that near-verbatim restates a glossary
 term's definition (token-overlap ratio >= 0.8) is a fail-severity finding
 for rule R-LINT-011."""

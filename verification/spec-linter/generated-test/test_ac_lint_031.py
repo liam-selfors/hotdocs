@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:f30fe440434d1920aa5442f0511f5561378e5aa04069d3bb390663d1a32d3a10
+# hotdocs-criterion: sha256:1163af59f0ff8f110eff0d71dadaebbde6ab5972372c6d3b5741aedeb988b11c
 from pathlib import Path
 
 import spec_linter

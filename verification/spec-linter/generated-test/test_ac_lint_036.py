@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:005e04446b7892a69e1122143bcbe27c49410fcc24f80e0dfb69397aa37aee01
+# hotdocs-criterion: sha256:9038b2d13d344835f78aca217362a366be25997682781878d20192f495b749c6
 """AC-LINT-036 (covers R-LINT-014): no glossary-split finding when a split is
 recorded at architecture level, or when there is only one glossary file."""
 

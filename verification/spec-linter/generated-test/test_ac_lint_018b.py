@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:64eba2eeba5325607c2e47f3b215a9fc4bd156ba5b225a9216b611f46af7d964
+# hotdocs-criterion: sha256:084762a47449e0c0c6c1cb1c9b622b76637ce1838e2d8cc0e862c9578d19d36f
 """AC-LINT-018b: a depends_on_guarantees entry that does not resolve to an
 existing G-<comp>-NNN id produces a fail-severity R-LINT-018 finding."""
 

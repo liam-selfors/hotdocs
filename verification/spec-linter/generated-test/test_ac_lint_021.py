@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:c01b30487dd9a1c93447acbfa52f2db02f321adec7d89fbae0f742dae6236564
+# hotdocs-criterion: sha256:4e8127bf0adeeff213cde439d804005724b9839a3bcffd43b1a293bf149e04b1
 """AC-LINT-021: forward/backward traceability findings over nodes/edges.
 
 comp-foo has R-FOO-001 with no covering acceptance criterion; comp-bar has

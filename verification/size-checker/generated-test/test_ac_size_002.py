@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:e5286c564cdef92e4a1895c5b25ac087612e6d291e3230ff69114d6e2624a28b
+# hotdocs-criterion: sha256:215cdd2b0f521558387bfe3f181c1ce48eaaeaa4515f84d8cec910afd241495a
 """AC-SIZE-002: a distinct R-SIZE-002 warning fires only when two or more
 size-cap dimensions are over their warn threshold for the same component."""
 

@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:86e2b8a38332a541223b65b64e2e521f3048f1df9945e786ad7bd4b6efba1ed7
+# hotdocs-criterion: sha256:97b44ff92cb79dd5da41cc414057036bbb782d07b110f86ee70146a56812621a
 from pathlib import Path
 
 import corpus_loader

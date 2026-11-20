@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:18597e4dfc9e42978b9b2ba8877c593e53facf663710dd2997a7952bd93cd5dd
+# hotdocs-criterion: sha256:05301b2086de08edd923b27460f836eeb1cd2e3c95045941649726545e4d7d1d
 import ast
 
 import criterion_compiler

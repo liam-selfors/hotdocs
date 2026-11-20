@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:5bb371cba3a931e2d6632ed04521df38955356b0970a4ceb18ea668a97f3e336
+# hotdocs-criterion: sha256:b33a5ab14e82c35a4d4f711beba8b5f6d5d889eb65581c9db94f878742ea48a8
 import io
 import json
 import contextlib

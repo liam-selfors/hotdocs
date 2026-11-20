@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:19d1a84fd017087bce62b846790baf93980a6d449aaee5ebd075b0ee1cccfe33
+# hotdocs-criterion: sha256:b064c9d1c9a05946abc95dbeed6c058f9a270b05004024bc94a013a54ccf97cd
 """AC-LINT-001: a component.md with no `owners` field in its frontmatter
 produces a fail-severity finding for rule R-LINT-001."""
 

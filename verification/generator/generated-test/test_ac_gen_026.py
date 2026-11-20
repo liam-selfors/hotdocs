@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:da5f33c49d7ddcd95314b14076e27731d1950a9bfb1961f824d9871bff934294
+# hotdocs-criterion: sha256:df060afc53ebb2726fe2725025937b77758f250f4eaa5367931ae727c5d70636
 from pathlib import Path
 
 import generator

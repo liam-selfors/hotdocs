@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:a683f08f6db2027e30a988611a2f75eab0698c7eef93dc8cb97092ab5d2f305f
+# hotdocs-criterion: sha256:2bcf2fab3e12c230828c0b638826771a547b98baf5595c8222926226145dd4bf
 import json
 import os
 import socket

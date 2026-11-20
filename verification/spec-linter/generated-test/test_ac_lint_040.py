@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:d6f8d571f2928c199e93c25e1513bd68da0efb8405948d6610381e91b102e0b8
+# hotdocs-criterion: sha256:cfddad9c83cacfe5114820a157d8771dfadb4379ac46f5b761667dab7ba0adb6
 """AC-LINT-040 (covers R-LINT-034): asset-kind findings for a component's `assets`."""
 
 from pathlib import Path

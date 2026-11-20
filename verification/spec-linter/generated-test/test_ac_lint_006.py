@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:d516809a8bcf9286c75d36dde92f2bacdd1457f33090ecbeea291f6aabff357c
+# hotdocs-criterion: sha256:5839e4eafc5930193f0ae1045b9ab4b9a5b82b91712007c8875bde6b328c7af1
 import pytest
 from pathlib import Path
 

@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:3ced0b378a13d9ba20421183e2dfd320710fb2908335b559029b2838fd00af11
+# hotdocs-criterion: sha256:a3ce6b47e4f1dba87665b95dcfe0aec656ac346ef7ed0d7a41a1a3f22de954da
 import os
 import tempfile
 from pathlib import Path

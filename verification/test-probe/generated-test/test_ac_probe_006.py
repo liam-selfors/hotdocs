@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:05dc45b644e384ed9d6ae5ed1d843ef32726da26bfd76f84003db1a4ed5af55d
+# hotdocs-criterion: sha256:5a1b2472211e4c76e3ab9a50dbb7ba0c9edd66d14ddea24ee3f8bfc8d2adac22
 import os
 import tempfile
 

@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:8f8fd1cce858dc1d2ccf715f2ac3249e5ce4bf369339c2fa86761ba8432aa663
+# hotdocs-criterion: sha256:63e9e5a724b226d40ec41ae662cba8826c6cab9f6a31e15863f1c57c4932728d
 from pathlib import Path
 
 import duckdb

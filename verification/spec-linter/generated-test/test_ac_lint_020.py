@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:a2c026f248489e34630d928e971ca850ece728c653de287bd659a9bc0549649e
+# hotdocs-criterion: sha256:3eaf0ef739ca02059572fc91b80d5828f9922d8317109246e5cde15f34ee6e6c
 """AC-LINT-020: a depends_on_guarantees entry whose owning component (derived
 from the guarantee file's path, since guarantee files carry no frontmatter) is
 not listed in depends_on fails with R-LINT-018."""

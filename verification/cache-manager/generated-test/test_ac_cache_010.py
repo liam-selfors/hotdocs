@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:78432b79dea04e80ef4b17c1fcde7e36c492373274cd39277fe0c55223321ada
+# hotdocs-criterion: sha256:90631b53a483d8e28110868977c75ad1a1df9448df7cee7903aaaf15fdb87f8d
 """AC-CACHE-010 (covers R-CACHE-009).
 
 Given VAR-CACHE-STORE-URL is absent

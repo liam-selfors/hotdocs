@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:a7a4e22c2f817db4292205edac23f8064653076c1f37444061a67680fa4e7ae7
+# hotdocs-criterion: sha256:76bda1c94c414601882f322950db490b618f25acc3fd9df16b94128cdd65d935
 import re
 
 import test_author

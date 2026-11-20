@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:62658c384b0d81e29bde1789ebe40feca12058f202b351fc9d316ae8691ba8c1
+# hotdocs-criterion: sha256:6ee991347726be10bf8cf42eb2039acfc6d862e8edea525ebf885d661e3a4faa
 from pathlib import Path
 
 import size_checker

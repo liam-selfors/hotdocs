@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:3047043b28c882245269d27a1dda4a275a385d64ec0dd9816495b4d27315f0c0
+# hotdocs-criterion: sha256:1224a7c17b67164c9d2f6756de0911caa27c9b7ea2c034f00d1fc097752da77b
 """AC-CACHE-007: put rejects a payload whose shape does not match the schema
 for the cache_key's declared gate_version, and stores nothing."""
 

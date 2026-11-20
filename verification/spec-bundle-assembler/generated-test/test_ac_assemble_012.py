@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:658b50055eb862e1025458ff3bf9cbc2bb3cab3da659dd72ed18b2a2748fc343
+# hotdocs-criterion: sha256:0be2f2e8f819a55db495834ed7e385b576010668f7128c23720f0f21cfe40a40
 import importlib.util
 import sys
 from pathlib import Path

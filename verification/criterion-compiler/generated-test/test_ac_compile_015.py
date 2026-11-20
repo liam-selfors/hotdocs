@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:08d3cc23d17c60e2b8f3ea85f44d170f2c4856105f2d61dab5a22e1dabdb2491
+# hotdocs-criterion: sha256:27b3676172c3d9a75fe9ebfe38787fe3c2c9c30dd304a53721bcb6641fc1ec1e
 import importlib
 import importlib.abc
 import shutil

@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:231770795ede962e21587cf46e5308f741a867b0a116046c4a1a124c70ebe92b
+# hotdocs-criterion: sha256:2bf97d1882b9a01093b02e1fb20f25fb6bc2cb575a351ee12bae195f8691f072
 import importlib.util
 import json
 import re

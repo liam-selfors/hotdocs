@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:c484d5ec82c18f08c2ed8640ed608570b88ddb5bc5f526dc139c4eacd27f1088
+# hotdocs-criterion: sha256:eef166245049ff54dc98dcfdd042e9a5090355d0e9c539e73fc283c786c060bf
 import re
 import shutil
 from pathlib import Path

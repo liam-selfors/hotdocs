@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:425580bd57220ff362ecfbcbed133b7e60113cb5d5d0e759ddc9f947df27c459
+# hotdocs-criterion: sha256:8125ba687da6914acb6d59813041e4918660f937d416ce7518613312e8639aac
 import json
 from dataclasses import replace
 

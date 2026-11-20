@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:63f58b8f258d5caf3984a43e0a827519012ed73d65199e7bbb4f20f7e990a817
+# hotdocs-criterion: sha256:9aa1aa7386097eb68a57598fa8b49ce9374dbed454a0db1761eff7ee48e288ca
 """AC-CACHE-005: gate_version is part of the lookup key itself (R-CACHE-005)."""
 
 import cache_manager

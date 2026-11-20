@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:22db957ef46cdc028242cb438ad3c9c979aa64813f62b283050962054048f3ac
+# hotdocs-criterion: sha256:771ebadf2b4473c16f558970dbf573e77e40be929c63c018a8e7055e147f7e27
 import criterion_compiler
 
 from pathlib import Path

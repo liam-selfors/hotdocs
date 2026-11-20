@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:5908af2bd458bf9e5cba755ecf625e8c67a5f7857db0a52c49301665ea80429a
+# hotdocs-criterion: sha256:5af6febe6b4cde6b74c9ab091fb155e78698e0081855269e5a4a1385773c7a02
 """AC-GQE-003: component_docs returns one row per component, with
 frontmatter fields joined to the component.md full raw text.
 

@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:f5f6fa9f92de88c5da06bcd0322a2fd26f4e4683e6b8edbd6727eec65733695d
+# hotdocs-criterion: sha256:d0d2069549cd2d6e8f34fc2514df4f476ef0fb1110ea83bcb1616899199dc82f
 import shutil
 
 import kind_python

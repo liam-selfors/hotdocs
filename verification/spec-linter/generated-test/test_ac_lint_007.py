@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:5fc4d0246fbc8b3a64252ef19c136c88bf1b8793832219122ae90606823bf0e4
+# hotdocs-criterion: sha256:a6ff56116034cec386e1a188ac1bec3aed9a13200704bc6a3f58798254151fc0
 """AC-LINT-007: a requirement with no RFC 2119 keyword yields a fail-severity
 finding for rule R-LINT-007."""
 

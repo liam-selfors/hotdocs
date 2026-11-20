@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:9eb73aaca947daba2323f06174ec579b181b848512cdfdf9547072a022128bbd
+# hotdocs-criterion: sha256:542b318d0f9b892dd14272b5ec4be8672a59c795715ca73e79b73c89f5ecf35c
 """AC-LINT-009: a Covers: tag naming a nonexistent R-id is a fail finding for R-LINT-009."""
 
 from pathlib import Path

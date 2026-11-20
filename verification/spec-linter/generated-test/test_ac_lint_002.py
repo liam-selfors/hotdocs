@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:01c1d8473761a8f0f84cc05f053a918362e8f518dc767e5bac88c18e857d5bab
+# hotdocs-criterion: sha256:deb69f149877609e3b9574697194f3699eeb1011c9c1207031cf8f288691b8db
 """AC-LINT-002: a ratified component with a non-empty "Open questions"
 section yields a fail-severity finding for rule R-LINT-002."""
 

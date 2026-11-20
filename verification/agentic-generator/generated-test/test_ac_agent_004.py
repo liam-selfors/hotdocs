@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:e03bc95add619a40923bde5ddafe0f47ef1f04d3c865d02c3172147a6dd27a47
+# hotdocs-criterion: sha256:1b91d821cf6c28db6ab3e33a0b25e9334fdbe886819b6fdbbab4b4a41f9e0557
 import json
 import os
 import sys

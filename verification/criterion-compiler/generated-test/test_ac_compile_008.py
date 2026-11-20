@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:8b103fc5192480125e9fead21c026e9c75a2289bcb083215b498bf4780a1db45
+# hotdocs-criterion: sha256:bbe014ef74a84d2cd41dfdb327c7c38feda09e7bca00a62799d54ec8c46b8edf
 import socket
 from pathlib import Path
 

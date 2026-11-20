@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:b4483fbb56e8f8b7d9644129fad9945bd804ee653fe0db55e30a3403140bedb5
+# hotdocs-criterion: sha256:77bf2b9f0f15c4cc1ebebf415892e6ea3176b19db875650c7bc34cf1cdaf3b56
 import importlib.util
 import inspect
 import sys

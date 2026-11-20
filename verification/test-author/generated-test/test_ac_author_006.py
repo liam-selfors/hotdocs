@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:714985c25761bea5b6c2bf8930a725192e98462cc8142cc3524a4ae6adb2e7d5
+# hotdocs-criterion: sha256:db60a38a6d29476554349d30e5b8a759743c0c6a8852730c74001b2e10a2038b
 import os
 import re
 from pathlib import Path, PurePosixPath

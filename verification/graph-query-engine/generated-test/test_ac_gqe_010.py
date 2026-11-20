@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:76fd641519c1926ac386c647cca0ec4a6f40f6298261b972d58b12b6705e5c2e
+# hotdocs-criterion: sha256:fbf24ec1b9ae463d6a864c00c47991b26aab5274a44d225639f74aa0337db20a
 """AC-GQE-010 (covers R-GQE-002): the decision arms of `edges` read only a
 decision's frontmatter block, and a flow-style `builds_on` list yields one
 row per entry."""

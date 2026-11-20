@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:5497a9cbf0aa5ceb255d1e115a1b76a3b6ebb889dc5a4dc89990793935fe1084
+# hotdocs-criterion: sha256:1b3c40d6cde1ff40778610023a8afad9429900fb2fcc2b07cadfafd8a0fb7839
 import json
 import os
 import shutil

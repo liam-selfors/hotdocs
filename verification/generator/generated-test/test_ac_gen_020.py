@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:661e9a182423bea16648086aeb39016e5c40c6090007be6f9b3b82fea63ed8a1
+# hotdocs-criterion: sha256:afe9141378df6f69392a823a74a37b6c7f9bd6b9bab8368931cc9aeeb978aff6
 import re
 from pathlib import Path
 

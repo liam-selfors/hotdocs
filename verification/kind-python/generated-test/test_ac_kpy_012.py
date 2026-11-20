@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:4298aacdf8f9f173d0d444bfe6d861ec6939c0953a3920427cd80882753a67b1
+# hotdocs-criterion: sha256:3571babe49a59f2653eedf79f38c228d09db8c880bc5d430fa64e27e26859491
 import kind_python
 
 

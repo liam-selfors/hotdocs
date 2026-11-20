@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:ab2dc9ea57bcb21cf1170ce9aefeb016f86b6160c625086497056e899492fcd2
+# hotdocs-criterion: sha256:bca7d68242793d141ad15d3e7b78251185bd96d632f91795a01478c5b2dd309b
 import duckdb
 
 import graph_query_engine

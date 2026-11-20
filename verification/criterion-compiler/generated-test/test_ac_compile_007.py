@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:083a9dc8ce2d4a09de0a8dddd3886b4ee949d852cb8c0faa99ae040d7115b3be
+# hotdocs-criterion: sha256:ef8af9dc01e34120f0337a32be3d47161a0f8aa83d3ac389ca013c24b62bf27c
 import importlib.util
 import io
 import json

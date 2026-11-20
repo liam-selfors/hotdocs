@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:c517311ad00dc04fb9063c273cffd794e0517e43a22411af6c6e783cbb2c4da5
+# hotdocs-criterion: sha256:b82c26fcc97c2727f8656139450bd2f86e487d3b66b69cad558ebc921ab549ff
 import json
 import urllib.request
 

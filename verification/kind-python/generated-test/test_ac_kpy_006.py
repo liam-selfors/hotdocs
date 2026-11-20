@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:b0d0aef5704df4798645739a6729713cc180a086ec61daedb693a33e18457083
+# hotdocs-criterion: sha256:839720d1e4c2bd4cf9ac8d6006ab8fa67367bce90ed076026ebfdd9c22594da3
 import json
 import platform
 import subprocess

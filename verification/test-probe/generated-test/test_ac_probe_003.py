@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:0bf76506dc7851e94c315104a40dd06d72ca78c5dc7062bedd3a1b52b028e952
+# hotdocs-criterion: sha256:d889bdbbffcd5fb4eafe80766965f8d0ff4a7ba364e3a10bd801a130961558d6
 import test_probe
 
 

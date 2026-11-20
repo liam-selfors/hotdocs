@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:a7cdba70d4b04ab452a3a3f88d8ba9766d3bca6e249268af78da01dad6260ac5
+# hotdocs-criterion: sha256:580fb6dd7b1328c770a23892793bf305761375c9eb9c45fd77e589bb8c193de4
 """AC-CACHE-008 / R-CACHE-008: an entry evicted by the backing store after a
 successful put, before any get, yields a definitive miss indistinguishable in
 shape from a backing-store error miss (R-CACHE-004) or a never-stored miss."""

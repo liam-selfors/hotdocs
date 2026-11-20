@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:61e43e9b7f6f5ac81d42b04f255164349f421c73373dfef7d9886ebaf2b7b7eb
+# hotdocs-criterion: sha256:c92b0e4f57aecaf3f486084aae4fdd9f3a5d39aeb7131472f37b20ce5d77fe9a
 """AC-LINT-011b: a Definitions entry for a glossary term that adds genuinely
 new, component-specific nuance (low textual overlap with the glossary's own
 definition) is a permitted delta, so the lint report carries no R-LINT-011

@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:a2aff241b318609daa4b7b8395449e20b7550ab8258d8d7b69e742b2f5909ab6
+# hotdocs-criterion: sha256:65ccea74caaf23a38a9bddda521b342a58504cd2d66e7d48e3289314cdb76c0f
 import os
 import stat
 import urllib.error

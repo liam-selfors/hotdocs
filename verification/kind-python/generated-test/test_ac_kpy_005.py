@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:42ed2e87ab1134fb9c1497dcb81702a9af09469125836a8a3c2fdea359113395
+# hotdocs-criterion: sha256:04ce5e4bfab9ff4f95732ddfb0796611fb599761d5cb79771627db499e530a7e
 import pytest
 
 import kind_python
