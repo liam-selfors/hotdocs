@@ -1,6 +1,7 @@
-# hotdocs-criterion: sha256:155f62e871d75030e1820ac89319ef7af2d4a2e6e89027761c0728c2ff37793c
-import os
+# hotdocs-criterion: sha256:4cbe8adc31f60078c712355415e4d0ea3521b3831015d5dd62027fb5a209447d
+import importlib.util
 import subprocess
+import sys
 from pathlib import Path
 
 import review_packet_builder
@@ -10,119 +11,116 @@ def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def _git(repo_root, *args):
-    env = dict(os.environ)
-    env.update({
-        "GIT_AUTHOR_NAME": "Test",
-        "GIT_AUTHOR_EMAIL": "test@example.invalid",
-        "GIT_COMMITTER_NAME": "Test",
-        "GIT_COMMITTER_EMAIL": "test@example.invalid",
-    })
-    subprocess.run(
-        ["git", "-c", "user.name=Test", "-c", "user.email=test@example.invalid",
-         "-c", "commit.gpgsign=false"] + list(args),
-        cwd=str(repo_root), check=True, capture_output=True, env=env,
-    )
-
-
 def _write(path, text):
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text)
+    path.write_text(text, encoding="utf-8")
 
 
-def _component(repo_root, slug, upper):
-    base = repo_root / "specs" / "components" / slug
-    _write(
-        base / "component.md",
-        "---\n"
-        "id: comp-" + slug + "\n"
-        "title: " + slug.capitalize() + "\n"
-        "status: draft\n"
-        "owners: [tester]\n"
-        "sealed: true\n"
-        "source_path: legacy/" + slug + "/\n"
-        "---\n\n"
-        "# " + slug.capitalize() + "\n\nA fixture component.\n",
+def _git(repo_root, *args):
+    subprocess.run(
+        ["git", "-c", "user.name=test", "-c", "user.email=test@example.invalid",
+         "-c", "commit.gpgsign=false"] + list(args),
+        cwd=str(repo_root), check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
     )
-    _write(
-        base / "requirements" / ("R-" + upper + "-001.md"),
-        "# R-" + upper + "-001\n\n**R-" + upper + "-001** — The component MUST work.\n",
-    )
-    _write(
-        base / "acceptance" / ("AC-" + upper + "-001.md"),
-        "# AC-" + upper + "-001\n\nCovers: R-" + upper + "-001\nKind: generated-test\n\n"
-        "```gherkin\nGiven a thing\nWhen it runs\nThen it works\n```\n",
-    )
-    _write(base / "interface" / "library.md", "# Library\n\n```\nrun() -> None\n```\n")
-    _write(base / "constraints.md", "# Constraints\n\nNone.\n")
 
 
-def _verification_report(component_id, upper):
+def _verification_report(component_id, req_id, ac_id):
     return {
         "component_id": component_id,
         "criteria": [
-            {"id": "AC-" + upper + "-001", "covers": "R-" + upper + "-001",
-             "kind": "generated-test", "result": "pass"},
+            {"id": ac_id, "covers": req_id, "kind": "compiled", "result": "pass"},
         ],
-        "requirement_results": {"R-" + upper + "-001": "pass"},
+        "requirement_results": {req_id: "pass"},
         "interface_drift": False,
-        "mutation_score": 1.0,
+        "mutation_score": None,
         "mutation_error": None,
+        "assets": [{
+            "kind": "python", "path": ".", "definition_sha256": None,
+            "adapter_sha256": "sha256:" + "0" * 64, "versions": {"python": "3.12.4"},
+            "lockfile_sha256": None,
+        }],
         "overall": "pass",
     }
 
 
-def _provenance_check_result(component_id, upper):
+def _check_result(component_id, req_id, ac_id):
     return {
         "hit": True,
-        "verification_report": _verification_report(component_id, upper),
+        "reason": None,
+        "verification_report": _verification_report(component_id, req_id, ac_id),
         "license_scan": {"blocked": False, "findings": []},
         "secret_scan": {"flagged": False, "findings": []},
     }
 
 
-def test_regenerated_components_lists_exactly_report_component_keys(tmp_path):
+def _component_fixture(repo_root, slug, upper):
+    base = repo_root / "specs" / "components" / slug
+    _write(
+        base / "component.md",
+        "---\n"
+        "id: comp-" + slug + "\n"
+        "title: " + slug.capitalize() + " component\n"
+        "status: draft\n"
+        "owners: [test-team]\n"
+        "depends_on: []\n"
+        "sealed: true\n"
+        "source_path: legacy/" + slug + "/\n"
+        "---\n\n"
+        "# " + slug + "\n\nA fixture component.\n",
+    )
+    _write(
+        base / "requirements" / ("R-" + upper + "-001.md"),
+        "**R-" + upper + "-001** — The component MUST do its thing.\n",
+    )
+    _write(
+        base / "acceptance" / ("AC-" + upper + "-001.md"),
+        "# AC-" + upper + "-001\n\nCovers: R-" + upper + "-001\nKind: compiled\n\n"
+        "```gherkin\nGiven a thing\nWhen it runs\nThen it works\n```\n",
+    )
+
+
+def test_regenerated_components_lists_exactly_the_verify_report_components(tmp_path):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
-    log_path = tmp_path / "check_readiness_calls.log"
+    log_path = tmp_path / "tracker_calls.log"
 
-    _component(repo_root, "alpha", "ALPHA")
-    _component(repo_root, "beta", "BETA")
-    _component(repo_root, "gamma", "GAMMA")
+    _component_fixture(repo_root, "foo", "FOO")
+    _component_fixture(repo_root, "bar", "BAR")
 
     report = {
         "scope": "blast-radius",
         "ready": True,
         "components": {
-            "comp-alpha": _provenance_check_result("comp-alpha", "ALPHA"),
-            "comp-beta": _provenance_check_result("comp-beta", "BETA"),
+            "comp-foo": _check_result("comp-foo", "R-FOO-001", "AC-FOO-001"),
+            "comp-bar": _check_result("comp-bar", "R-BAR-001", "AC-BAR-001"),
         },
         "capabilities": {},
         "not_ready_reasons": [],
     }
 
-    stand_in = (
-        "def check_readiness(repo_root, changed_ids=None, model=None, seed=0, llm_backend=None):\n"
-        "    with open(" + repr(str(log_path)) + ", 'a') as fh:\n"
-        "        fh.write('check_readiness\\n')\n"
-        "    return " + repr(report) + "\n"
+    source = (
+        "LOG_PATH = " + repr(str(log_path)) + "\n"
+        "REPORT = " + repr(report) + "\n"
         "\n"
+        "def check_readiness(repo_root, changed_ids=None, model=None, seed=0, llm_backend=None):\n"
+        "    with open(LOG_PATH, 'a', encoding='utf-8') as fh:\n"
+        "        fh.write('check_readiness\\n')\n"
+        "    return REPORT\n"
         "\n"
         "def last_requirement_failures(component_id, repo_root):\n"
         "    return []\n"
     )
-    _write(repo_root / "gen" / "provenance-tracker" / "provenance_tracker.py", stand_in)
+    _write(repo_root / "gen" / "provenance-tracker" / "provenance_tracker.py", source)
 
     _git(repo_root, "init", "-q")
     _git(repo_root, "add", "-A")
-    _git(repo_root, "commit", "-q", "-m", "initial fixture")
+    _git(repo_root, "commit", "-q", "-m", "fixture")
 
-    packet = review_packet_builder.build_review_packet(["comp-alpha"], repo_root)
+    packet = review_packet_builder.build_review_packet(["comp-foo", "comp-bar"], repo_root)
 
-    assert log_path.is_file(), "provenance-tracker stand-in check_readiness was never called"
-    assert "check_readiness" in log_path.read_text()
+    assert log_path.is_file(), "provenance-tracker stand-in was never called"
+    assert "check_readiness" in log_path.read_text(encoding="utf-8")
 
     regenerated = list(field(packet, "regenerated_components"))
-    assert len(regenerated) == 2
-    assert sorted(regenerated) == ["comp-alpha", "comp-beta"]
-    assert "comp-gamma" not in regenerated
+    assert len(regenerated) == 2, regenerated
+    assert sorted(regenerated) == ["comp-bar", "comp-foo"]

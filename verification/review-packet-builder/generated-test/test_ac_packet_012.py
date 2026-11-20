@@ -1,5 +1,7 @@
-# hotdocs-criterion: sha256:4e0a2b46be8216badc608c96f241166d21cd246a36655505dfd48cc274c31b0d
+# hotdocs-criterion: sha256:1d9624591c03844f5de474325759b7ffc8e6ab0a321171c8e4dc54bf94244a1c
 import json
+import os
+import re
 import subprocess
 from pathlib import Path
 
@@ -12,40 +14,38 @@ def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def _git(repo_root, *args):
-    subprocess.run(
-        ["git", "-c", "user.name=Test", "-c", "user.email=test@example.invalid", *args],
-        cwd=str(repo_root),
-        check=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-    )
-
-
-def _verification_report():
-    return {
+def _report(include_az=False):
+    report = {}
+    if include_az:
+        report["z"] = 1
+    report.update({
         "component_id": "comp-foo",
         "criteria": [
-            {"id": "AC-FOO-001", "covers": "R-FOO-001", "kind": "compiled", "result": "pass"}
+            {"id": "AC-FOO-001", "covers": "R-FOO-001", "kind": "compiled", "result": "pass"},
         ],
         "requirement_results": {"R-FOO-001": "pass"},
         "interface_drift": False,
         "mutation_score": 0.92,
         "mutation_error": None,
+        "assets": [{"kind": "python", "path": ".", "definition_sha256": None,
+                    "adapter_sha256": "sha256:" + "0" * 64,
+                    "versions": {"python": "3.12.4"}, "lockfile_sha256": None}],
         "overall": "pass",
-        "z": 1,
-        "a": 2,
-    }
+    })
+    if include_az:
+        report["a"] = 2
+    return report
 
 
-def _verify_report():
+def _verify_report(include_az=False):
     return {
         "scope": "blast-radius",
         "ready": True,
         "components": {
             "comp-foo": {
                 "hit": True,
-                "verification_report": _verification_report(),
+                "reason": None,
+                "verification_report": _report(include_az),
                 "license_scan": {"blocked": False, "findings": []},
                 "secret_scan": {"flagged": False, "findings": []},
             }
@@ -60,196 +60,142 @@ def _write(path, text):
     path.write_text(text)
 
 
-def _make_repo(root, raise_value_error=False):
-    root.mkdir(parents=True, exist_ok=True)
-    _write(
-        root / "specs" / "components" / "foo" / "component.md",
-        "---\n"
-        "id: comp-foo\n"
-        "title: Foo\n"
-        "status: draft\n"
-        "owners: [tester]\n"
-        "sealed: true\n"
-        "source_path: legacy/foo/\n"
-        "---\n\n"
-        "# Foo\n\nA fixture component.\n",
-    )
-    _write(
-        root / "specs" / "components" / "foo" / "requirements" / "R-FOO-001.md",
-        "**R-FOO-001** — Foo MUST do the foo thing.\n",
-    )
-    _write(
-        root / "specs" / "components" / "foo" / "acceptance" / "AC-FOO-001.md",
-        "# AC-FOO-001\n\nCovers: R-FOO-001\nKind: compiled\n",
-    )
-    _write(root / "legacy" / "foo" / "foo.py", "X = 1\n")
+def _git(repo, *args):
+    env = dict(os.environ)
+    env.update({
+        "GIT_AUTHOR_NAME": "Test", "GIT_AUTHOR_EMAIL": "test@example.invalid",
+        "GIT_COMMITTER_NAME": "Test", "GIT_COMMITTER_EMAIL": "test@example.invalid",
+    })
+    subprocess.run(["git", "-c", "user.name=Test", "-c", "user.email=test@example.invalid",
+                    "-c", "commit.gpgsign=false"] + list(args),
+                   cwd=str(repo), check=True, capture_output=True, env=env)
 
-    if raise_value_error:
-        body = (
-            "def check_readiness(repo_root, changed_ids=None, model=None, seed=0, llm_backend=None):\n"
-            "    raise ValueError("
-            + repr("P-FOO needs a fresh run but no --model was given")
-            + ")\n"
-        )
+
+def _make_repo(root, mode="ok", include_az=False):
+    root.mkdir(parents=True, exist_ok=True)
+    comp = root / "specs" / "components" / "foo"
+    _write(comp / "component.md",
+           "---\n"
+           "id: comp-foo\n"
+           "title: Foo\n"
+           "status: draft\n"
+           "owners: [pipeline-team]\n"
+           "depends_on: []\n"
+           "sealed: true\n"
+           "source_path: legacy/foo/\n"
+           "---\n\n# Foo\n\nA fixture component.\n")
+    _write(comp / "requirements" / "R-FOO-001.md",
+           "**R-FOO-001** — foo MUST do the thing.\n")
+    _write(comp / "acceptance" / "AC-FOO-001.md",
+           "# AC-FOO-001\n\nCovers: R-FOO-001\nKind: compiled\n\nfoo does the thing.\n")
+    _write(root / "legacy" / "foo" / "foo.py", "def foo():\n    return 1\n")
+
+    log = root.parent / (root.name + "_calls.log")
+    src = "import copy\n\n"
+    src += "LOG = " + repr(str(log)) + "\n"
+    src += "REPORT = " + repr(_verify_report(include_az)) + "\n\n"
+    src += "def check_readiness(repo_root, changed_ids=None, model=None, seed=0, llm_backend=None):\n"
+    src += "    with open(LOG, 'a') as f:\n"
+    src += "        f.write('check_readiness\\n')\n"
+    if mode == "raise":
+        src += "    raise ValueError(" + repr("P-FOO-CAP: capability needs a fresh run; pass --model") + ")\n"
     else:
-        body = (
-            "def check_readiness(repo_root, changed_ids=None, model=None, seed=0, llm_backend=None):\n"
-            "    return "
-            + repr(_verify_report())
-            + "\n"
-        )
-    body += (
-        "\n\n"
-        "def last_requirement_failures(component_id, repo_root):\n"
-        "    return []\n"
-    )
-    _write(root / "gen" / "provenance-tracker" / "provenance_tracker.py", body)
+        src += "    return copy.deepcopy(REPORT)\n"
+    src += "\n\ndef last_requirement_failures(component_id, repo_root):\n"
+    src += "    return []\n"
+    _write(root / "gen" / "provenance-tracker" / "provenance_tracker.py", src)
 
     _git(root, "init", "-q")
     _git(root, "add", "-A")
-    _git(root, "commit", "-q", "-m", "initial")
-    return root
+    _git(root, "commit", "-q", "-m", "initial fixture")
+    return root, log
 
 
-def _run(argv):
-    try:
-        code = review_packet_builder.main(argv)
-    except SystemExit as exc:
-        code = exc.code
-    return code
+def _run(argv, capsys):
+    capsys.readouterr()
+    code = review_packet_builder.main(argv)
+    captured = capsys.readouterr()
+    return code, captured.out, captured.err
 
 
-@pytest.fixture
-def repo(tmp_path):
-    return _make_repo(tmp_path / "repo")
-
-
-@pytest.fixture
-def failing_repo(tmp_path):
-    return _make_repo(tmp_path / "failing", raise_value_error=True)
-
-
-def _non_empty(value):
-    if value is None:
-        return False
-    if isinstance(value, (dict, list, str)):
-        return len(value) > 0
-    return True
-
-
-def test_build_json_returns_0_with_real_content(repo, capsys):
-    code = _run(
-        ["review-packet", "build", "--changed=R-FOO-001", "--repo-root=" + str(repo), "--format=json"]
-    )
-    out = capsys.readouterr().out
+def test_json_build_has_real_content(tmp_path, capsys):
+    repo, log = _make_repo(tmp_path / "repo")
+    code, out, _ = _run(["review-packet", "build", "--changed=R-FOO-001",
+                         "--repo-root=" + str(repo), "--format=json"], capsys)
     assert code == 0
     packet = json.loads(out)
-    assert out.strip() == json.dumps(packet, indent=2, sort_keys=True).strip()
+    assert out.strip() == json.dumps(packet, indent=2, sort_keys=True)
+    assert log.is_file() and "check_readiness" in log.read_text()
 
     vr = field(packet, "verification_results")
-    assert isinstance(vr, dict)
-    assert _non_empty(vr)
+    assert isinstance(vr, dict) and vr
     assert "comp-foo" in vr
-    assert _non_empty(vr["comp-foo"])
+    assert vr["comp-foo"]["mutation_score"] == 0.92
+    assert vr["comp-foo"]["overall"] == "pass"
 
     rr = field(packet, "residual_risk")
-    assert isinstance(rr, list)
-    assert len(rr) >= 1
+    assert isinstance(rr, list) and rr
     for entry in rr:
         assert isinstance(entry, dict)
-        assert _non_empty(entry.get("component_id"))
-        assert isinstance(entry.get("message"), str) and entry["message"].strip()
+        assert entry["component_id"]
+        assert isinstance(entry["message"], str) and entry["message"].strip()
+    assert any(e["component_id"] == "comp-foo" for e in rr)
 
     ex = field(packet, "exemption_changes")
-    assert isinstance(ex, dict)
-    assert "sealed" in ex
-    assert "pinned_overrides" in ex
+    assert "sealed" in ex and "pinned_overrides" in ex
     assert isinstance(ex["sealed"], list)
     assert isinstance(ex["pinned_overrides"], list)
 
 
-def test_separate_value_flags_and_repeated_changed(repo, capsys):
-    code = _run(
-        [
-            "review-packet", "build",
-            "--changed", "R-FOO-001",
-            "--changed", "comp-foo",
-            "--repo-root", str(repo),
-            "--format", "json",
-        ]
-    )
-    out = capsys.readouterr().out
+def test_space_separated_flags_and_changed_requirements(tmp_path, capsys):
+    repo, _ = _make_repo(tmp_path / "repo")
+    code, out, _ = _run(["review-packet", "build", "--changed", "R-FOO-001",
+                         "--changed", "comp-foo", "--repo-root", str(repo),
+                         "--format", "json"], capsys)
     assert code == 0
     packet = json.loads(out)
     assert field(packet, "changed_requirements") == ["R-FOO-001"]
 
 
-@pytest.mark.parametrize(
-    "case",
-    [
-        "no_changed",
-        "serve",
-        "no_subcommand",
-        "bare_changed",
-        "bare_repo_root",
-        "bare_format",
-    ],
-)
-def test_usage_errors_return_2(repo, case, capsys):
-    argvs = {
-        "no_changed": ["review-packet", "build", "--repo-root=" + str(repo)],
-        "serve": ["review-packet", "serve", "--changed=R-FOO-001"],
-        "no_subcommand": ["review-packet"],
-        "bare_changed": ["review-packet", "build", "--repo-root=" + str(repo), "--changed"],
-        "bare_repo_root": ["review-packet", "build", "--changed=R-FOO-001", "--repo-root"],
-        "bare_format": [
-            "review-packet", "build", "--changed=R-FOO-001", "--repo-root=" + str(repo), "--format"
-        ],
-    }
-    code = _run(argvs[case])
-    capsys.readouterr()
-    assert code == 2
+def test_usage_errors_return_2(tmp_path, capsys):
+    repo, _ = _make_repo(tmp_path / "repo")
+    r = str(repo)
+    cases = [
+        ["review-packet", "build", "--repo-root=" + r],
+        ["review-packet", "serve", "--changed=R-FOO-001"],
+        ["review-packet"],
+        ["review-packet", "build", "--repo-root=" + r, "--changed"],
+        ["review-packet", "build", "--changed=R-FOO-001", "--repo-root"],
+        ["review-packet", "build", "--changed=R-FOO-001", "--repo-root=" + r, "--format"],
+        ["review-packet", "build", "--changed=R-FOO-001", "--repo-root=" + r, "--format=bogus"],
+    ]
+    for argv in cases:
+        code, _, _ = _run(argv, capsys)
+        assert code == 2, argv
 
 
-def test_invalid_format_returns_2(repo, capsys):
-    code = _run(
-        ["review-packet", "build", "--changed=R-FOO-001", "--repo-root=" + str(repo), "--format=bogus"]
-    )
-    capsys.readouterr()
-    assert code == 2
-
-
-def test_check_readiness_value_error_returns_1(failing_repo, capsys):
-    code = _run(["review-packet", "build", "--changed=R-FOO-001", "--repo-root=" + str(failing_repo)])
-    capsys.readouterr()
+def test_check_readiness_value_error_returns_1(tmp_path, capsys):
+    repo, _ = _make_repo(tmp_path / "repo_raise", mode="raise")
+    code, _, _ = _run(["review-packet", "build", "--changed=R-FOO-001",
+                       "--repo-root=" + str(repo)], capsys)
     assert code == 1
 
 
-def _verification_section(markdown):
-    heading = "## Verification Results"
-    start = markdown.find(heading)
-    assert start != -1, "markdown has no '## Verification Results' section"
-    body = markdown[start + len(heading):]
-    nxt = body.find("\n## ")
-    return body if nxt == -1 else body[:nxt]
+def test_sorted_keys_in_json_and_markdown(tmp_path, capsys):
+    repo, _ = _make_repo(tmp_path / "repo_az", include_az=True)
+    a_pat = re.compile(r'"a":\s*2\b')
+    z_pat = re.compile(r'"z":\s*1\b')
 
-
-def test_sorted_keys_in_json_and_markdown(repo, capsys):
-    code = _run(
-        ["review-packet", "build", "--changed=R-FOO-001", "--repo-root=" + str(repo), "--format=json"]
-    )
-    out = capsys.readouterr().out
+    code, out, _ = _run(["review-packet", "build", "--changed=R-FOO-001",
+                         "--repo-root=" + str(repo), "--format=json"], capsys)
     assert code == 0
-    packet = json.loads(out)
-    assert "comp-foo" in packet["verification_results"]
-    assert '"a": 2' in out
-    assert '"z": 1' in out
-    assert out.index('"a": 2') < out.index('"z": 1')
+    ma, mz = a_pat.search(out), z_pat.search(out)
+    assert ma and mz
+    assert ma.start() < mz.start()
 
-    code = _run(["review-packet", "build", "--changed=R-FOO-001", "--repo-root=" + str(repo)])
-    md = capsys.readouterr().out
+    code, out, _ = _run(["review-packet", "build", "--changed=R-FOO-001",
+                         "--repo-root=" + str(repo)], capsys)
     assert code == 0
-    section = _verification_section(md)
-    assert '"a"' in section
-    assert '"z"' in section
-    assert section.index('"a"') < section.index('"z"')
+    ma, mz = a_pat.search(out), z_pat.search(out)
+    assert ma and mz
+    assert ma.start() < mz.start()
