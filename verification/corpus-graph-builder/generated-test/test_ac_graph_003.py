@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:a2d9c5bcab8ff694445f1b4cc250f6de81b6fccc95393590323fe22d5a03eed2
+# hotdocs-criterion: sha256:9483dc3393b016ac8651e8b8b403210d5639fa92f4b02020d6e4c1e63cc03fe5
 import json
 from pathlib import Path
 
@@ -9,65 +9,55 @@ def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def write(path, text):
+def _component_md(slug, sealed, body):
+    lines = [
+        "---",
+        "id: comp-" + slug,
+        "title: Component " + slug,
+        "status: draft",
+        "owners: [pipeline-team]",
+        "depends_on: []",
+        "realizes: []",
+        "uses_var: []",
+    ]
+    if sealed:
+        lines.append("sealed: true")
+        lines.append("source_path: legacy/" + slug + "/")
+    else:
+        lines.append("sealed: false")
+    lines.append("---")
+    return "\n".join(lines) + "\n" + body + "\n"
+
+
+def _write(path, text):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
 
 
-def component_md(slug, sealed, body):
-    lines = [
-        "---",
-        "id: comp-" + slug,
-        "title: " + slug.capitalize() + " component",
-        "status: draft",
-        "owners: [team-" + slug + "]",
-        "sealed: " + ("true" if sealed else "false"),
-    ]
-    if sealed:
-        lines.append("source_path: legacy/" + slug + "/")
-    lines += [
-        "depends_on: []",
-        "realizes: []",
-        "uses_var: []",
-        "---",
-    ]
-    return "\n".join(lines) + "\n" + body
-
-
-def build_fixture(repo_root):
+def _build_fixture(repo_root):
     comps = repo_root / "specs" / "components"
-    write(
+    _write(
         comps / "a" / "component.md",
-        component_md("a", True, "# A\n\n## Purpose\n\nA small component.\n"),
+        _component_md("a", True, "# Component a\n\n## Purpose\n\nA small component."),
     )
-    write(
+    _write(
         comps / "b" / "component.md",
-        component_md("b", False, "# B\n\n## Purpose\n\nAnother small component.\n"),
+        _component_md("b", False, "# Component b\n\n## Purpose\n\nAnother small component."),
     )
-    write(
-        comps / "big" / "component.md",
-        component_md("big", True, " ".join(["word"] * 4001) + "\n"),
-    )
+    big_body = " ".join(["word"] * 4001)
+    _write(comps / "big" / "component.md", _component_md("big", True, big_body))
 
-    write(repo_root / "gen" / "a" / ".overrides.json", json.dumps(["x.py"]))
+    _write(repo_root / "gen" / "a" / ".overrides.json", json.dumps(["x.py"]))
+
     manifest = {
         "spec_bundle_hash": "sha256:abc",
         "generated_at": "2026-11-08T00:19:53Z",
         "verification_report": {"component_id": "comp-a", "overall": "pass"},
     }
-    write(
-        repo_root / "verification" / "a" / ".provenance.json",
-        json.dumps(manifest),
-    )
+    _write(repo_root / "verification" / "a" / ".provenance.json", json.dumps(manifest))
 
 
-def test_ac_graph_003_component_node_fields(tmp_path):
-    repo_root = tmp_path
-    build_fixture(repo_root)
-
-    graph = corpus_graph_builder.build_corpus_graph(repo_root)
-    nodes = field(graph, "nodes")
-
+def _check_nodes(nodes):
     a = nodes["comp-a"]
     assert field(a, "verification") == {"component_id": "comp-a", "overall": "pass"}
     assert field(a, "provenance") == {
@@ -87,13 +77,21 @@ def test_ac_graph_003_component_node_fields(tmp_path):
     big = nodes["comp-big"]
     assert field(big, "size_status") == "over"
 
+
+def test_ac_graph_003_component_node_fields(tmp_path):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    _build_fixture(repo_root)
+
+    graph = corpus_graph_builder.build_corpus_graph(repo_root)
+
+    nodes = field(graph, "nodes")
+    _check_nodes(nodes)
+
     data = graph.to_json_bytes()
     assert isinstance(data, (bytes, bytearray))
     parsed = json.loads(data.decode("utf-8"))
-    assert parsed["nodes"]["comp-a"]["verification"] == {
-        "component_id": "comp-a",
-        "overall": "pass",
-    }
+    _check_nodes(parsed["nodes"])
 
     # build_corpus_graph writes nothing
     assert not (repo_root / "verification" / "corpus-graph.json").exists()

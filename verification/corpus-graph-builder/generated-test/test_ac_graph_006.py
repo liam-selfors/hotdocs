@@ -1,20 +1,18 @@
-# hotdocs-criterion: sha256:88b33cb2adef2963b230cb8e35a8c4babf30c01ab67c69e95f468d46cb20de8a
+# hotdocs-criterion: sha256:7876396b7b927595e6c08d5f815520632a3c9b30dab1c57268c2b20c5ee4c4d7
 from pathlib import Path
 
 import corpus_graph_builder
 
 
-def field(value, name):
-    return value[name] if isinstance(value, dict) else getattr(value, name)
-
-
-def write(path, text):
+def _write(path, text):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
 
 
-def build_fixture(repo_root):
-    component_md = (
+def _build_corpus(repo_root):
+    comp_dir = repo_root / "specs" / "components" / "a"
+    _write(
+        comp_dir / "component.md",
         "---\n"
         "id: comp-a\n"
         "title: Component A\n"
@@ -31,63 +29,59 @@ def build_fixture(repo_root):
         "\n"
         "## Purpose\n"
         "\n"
-        "A tiny fixture component.\n"
+        "A small fixture component.\n",
     )
-    write(repo_root / "specs" / "components" / "a" / "component.md", component_md)
-    write(
-        repo_root / "specs" / "components" / "a" / "requirements" / "R-A-001.md",
-        "# R-A-001\n\n**R-A-001** - Component A MUST exist.\n",
+    _write(
+        comp_dir / "requirements" / "R-A-001.md",
+        "**R-A-001** — Component A MUST exist.\n",
     )
-    write(
-        repo_root / "specs" / "components" / "a" / "acceptance" / "AC-A-001.md",
-        "# AC-A-001\n\nCovers: R-A-001\nKind: llm-judge\n\nComponent A exists.\n",
+    _write(
+        comp_dir / "acceptance" / "AC-A-001.md",
+        "# AC-A-001\n"
+        "\n"
+        "Covers: R-A-001\n"
+        "Kind: generated-test\n"
+        "\n"
+        "Given comp-a\n"
+        "Then it exists\n",
     )
 
 
-def snapshot(repo_root):
-    result = {}
+def _snapshot(repo_root):
+    snap = {}
     for p in sorted(repo_root.rglob("*")):
         if p.is_file():
-            result[p.relative_to(repo_root).as_posix()] = p.read_bytes()
-    return result
+            snap[p.relative_to(repo_root).as_posix()] = p.read_bytes()
+    return snap
 
 
-def changed_files(before, after):
-    changed = set()
-    for key, data in after.items():
-        if key not in before or before[key] != data:
-            changed.add(key)
-    for key in before:
-        if key not in after:
-            changed.add(key)
-    return changed
-
-
-def test_only_verification_corpus_graph_json_is_written(tmp_path):
+def test_ac_graph_006_only_output_file_is_written(tmp_path):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
-    build_fixture(repo_root)
+    _build_corpus(repo_root)
 
-    before = snapshot(repo_root)
+    before = _snapshot(repo_root)
+    assert before, "fixture corpus should contain files"
 
     graph = corpus_graph_builder.build_corpus_graph(repo_root)
 
-    after_build = snapshot(repo_root)
-    assert changed_files(before, after_build) == set(), (
-        "build_corpus_graph must write nothing"
-    )
+    after_build = _snapshot(repo_root)
+    assert after_build == before, "build_corpus_graph must not add or change any file"
 
-    nodes = field(graph, "nodes")
-    assert "comp-a" in nodes
-
-    returned = corpus_graph_builder.write_corpus_graph(graph, repo_root)
+    result = corpus_graph_builder.write_corpus_graph(graph, repo_root)
 
     expected = repo_root / "verification" / "corpus-graph.json"
-    assert Path(returned).resolve() == expected.resolve()
+    assert Path(result).resolve() == expected.resolve()
     assert expected.is_file()
 
-    after_write = snapshot(repo_root)
-    assert changed_files(after_build, after_write) == {
-        "verification/corpus-graph.json"
-    }
-    assert changed_files(before, after_write) == {"verification/corpus-graph.json"}
+    after_write = _snapshot(repo_root)
+
+    added = sorted(set(after_write) - set(before))
+    removed = sorted(set(before) - set(after_write))
+    changed = sorted(
+        k for k in set(before) & set(after_write) if before[k] != after_write[k]
+    )
+
+    assert removed == []
+    assert changed == []
+    assert added == ["verification/corpus-graph.json"]
