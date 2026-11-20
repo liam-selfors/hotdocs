@@ -1,136 +1,99 @@
-# hotdocs-criterion: sha256:65e51ba51f26a6a9668f452963dfce84c7d6f9182fee859aa5f996e549951b08
-import dataclasses
+# hotdocs-criterion: sha256:05c11c926a3c65037a48123441e2e5624b02f6f37073eda542468691a3bd84eb
 import hashlib
+import io
 import json
-import os
-import sys
-import textwrap
+import contextlib
 from pathlib import Path
-
-import pytest
 
 import license_scanner
 
 
-COMPONENT_ID = "comp-widget"
-COMPONENT_SLUG = "widget"
+def field(value, name):
+    return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def _field(value, name):
-    if isinstance(value, dict):
-        return value.get(name)
-    return getattr(value, name, None)
+FAKE_CACHE_MANAGER_TEMPLATE_HEAD = (
+    "import json\n"
+    "from dataclasses import dataclass, asdict, is_dataclass\n"
+    "\n"
+    "LOG_PATH = "
+)
+
+FAKE_CACHE_MANAGER_TEMPLATE_BODY = (
+    "\n"
+    "\n"
+    "@dataclass\n"
+    "class CacheKey:\n"
+    "    spec_bundle_hash: str\n"
+    "    gate_inputs_hash: str\n"
+    "    gate_version: str\n"
+    "    model_pin: str\n"
+    "\n"
+    "\n"
+    "@dataclass\n"
+    "class CachedResult:\n"
+    "    gate_type: str\n"
+    "    payload: dict\n"
+    "    stored_at: str\n"
+    "\n"
+    "\n"
+    "class Miss:\n"
+    "    def __eq__(self, other):\n"
+    "        return isinstance(other, Miss)\n"
+    "\n"
+    "    def __hash__(self):\n"
+    "        return 0\n"
+    "\n"
+    "\n"
+    "class SchemaValidationError(ValueError):\n"
+    "    pass\n"
+    "\n"
+    "\n"
+    "def _log(record):\n"
+    "    with open(LOG_PATH, 'a', encoding='utf-8') as fh:\n"
+    "        fh.write(json.dumps(record, sort_keys=True, default=str) + '\\n')\n"
+    "\n"
+    "\n"
+    "def get(cache_key, *, repo_root=None):\n"
+    "    _log({'call': 'get', 'gate_version': cache_key.gate_version})\n"
+    "    return Miss()\n"
+    "\n"
+    "\n"
+    "def put(cache_key, result, *, repo_root=None):\n"
+    "    payload = result.payload\n"
+    "    if is_dataclass(payload):\n"
+    "        payload = asdict(payload)\n"
+    "    _log({'call': 'put', 'gate_version': cache_key.gate_version,\n"
+    "          'gate_type': result.gate_type, 'payload': payload})\n"
+    "    return None\n"
+    "\n"
+    "\n"
+    "def now_iso():\n"
+    "    return '2026-01-01T00:00:00Z'\n"
+    "\n"
+    "\n"
+    "def stats(*, repo_root=None):\n"
+    "    return {'entry_count': 0}\n"
+)
 
 
-def _as_dict(value):
-    if isinstance(value, dict):
-        return dict(value)
-    if dataclasses.is_dataclass(value) and not isinstance(value, type):
-        return dataclasses.asdict(value)
-    if hasattr(value, "_asdict"):
-        return dict(value._asdict())
-    if hasattr(value, "__dict__"):
-        return dict(vars(value))
-    raise AssertionError("LicenseScanResult is neither dict-like nor object-like: %r" % (value,))
+def _build_repo(tmp_path):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
 
-
-def _write_fake_cache_manager(repo_root: Path, log_path: Path) -> None:
-    fake_dir = repo_root / "gen" / "cache-manager"
-    fake_dir.mkdir(parents=True, exist_ok=True)
-    source = textwrap.dedent(
-        """
-        import dataclasses
-        import json
-        from datetime import datetime, timezone
-
-        _LOG_PATH = {log_path!r}
-
-
-        def _log(record):
-            with open(_LOG_PATH, "a", encoding="utf-8") as fh:
-                fh.write(json.dumps(record, default=str) + "\\n")
-
-
-        @dataclasses.dataclass
-        class CacheKey:
-            spec_bundle_hash: str
-            gate_inputs_hash: str
-            gate_version: str
-            model_pin: str
-
-
-        @dataclasses.dataclass
-        class CachedResult:
-            gate_type: str
-            payload: dict
-            stored_at: str
-
-
-        class Miss:
-            def __eq__(self, other):
-                return isinstance(other, Miss)
-
-            def __hash__(self):
-                return hash("Miss")
-
-
-        class SchemaValidationError(ValueError):
-            pass
-
-
-        def get(cache_key, *, repo_root=None):
-            _log({{"call": "get", "gate_version": getattr(cache_key, "gate_version", None)}})
-            return Miss()
-
-
-        def put(cache_key, result, *, repo_root=None):
-            payload = result.get("payload") if isinstance(result, dict) else getattr(result, "payload", None)
-            _log({{"call": "put", "payload": payload}})
-            return None
-
-
-        def now_iso():
-            return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-
-
-        def stats(*, repo_root=None):
-            return {{"entry_count": 0}}
-        """
-    ).format(log_path=str(log_path))
-    (fake_dir / "cache_manager.py").write_text(source, encoding="utf-8")
-
-
-def _write_component_source(repo_root: Path) -> None:
-    gen_dir = repo_root / "gen" / COMPONENT_SLUG
-    gen_dir.mkdir(parents=True, exist_ok=True)
-    source = textwrap.dedent(
-        """
-        def compute_widget_total(alpha, beta, gamma, delta):
-            first_value = alpha + beta
-            second_value = gamma * delta
-            combined_result = first_value - second_value
-            return combined_result + 12345
-
-
-        class WidgetAccumulator:
-            def __init__(self, seed_value):
-                self.running_total = seed_value
-                self.observations = []
-
-            def record_observation(self, sample):
-                self.observations.append(sample)
-                self.running_total = self.running_total + sample
-                return self.running_total
-        """
+    # Generated component content that matches nothing in the corpus.
+    comp_dir = repo_root / "gen" / "foo"
+    comp_dir.mkdir(parents=True)
+    (comp_dir / "foo.py").write_text(
+        "def alpha(beta, gamma):\n"
+        "    return beta + gamma + delta + epsilon + zeta + eta + theta\n",
+        encoding="utf-8",
     )
-    (gen_dir / "widget.py").write_text(source, encoding="utf-8")
 
-
-def _write_nonmatching_corpus(repo_root: Path) -> bytes:
-    unrelated = [
-        hashlib.sha256(("totally-unrelated-window-%d" % i).encode("utf-8")).hexdigest()
-        for i in range(5)
-    ]
+    # Usable corpus whose hashes cannot match the component's windows.
+    unrelated = hashlib.sha256(
+        "\x1f".join(["unrelated"] * 9).encode("utf-8")
+    ).hexdigest()
     corpus = {
         "corpus_version": 3,
         "block_threshold": 0.70,
@@ -139,105 +102,93 @@ def _write_nonmatching_corpus(repo_root: Path) -> bytes:
                 "reference_id": "ref-001",
                 "license_family": "GPL",
                 "risk_tier": "high",
-                "hashes": unrelated,
+                "hashes": [unrelated],
             }
         ],
     }
-    data = json.dumps(corpus, indent=2).encode("utf-8")
-    (repo_root / "corpus.json").write_bytes(data)
-    return data
+    corpus_path = repo_root / "corpus.json"
+    corpus_bytes = json.dumps(corpus).encode("utf-8")
+    corpus_path.write_bytes(corpus_bytes)
 
-
-@pytest.fixture
-def clean_repo(tmp_path, monkeypatch):
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
+    # Fake cache-manager, flat-module shape.
     log_path = tmp_path / "cache_calls.log"
-    _write_fake_cache_manager(repo_root, log_path)
-    _write_component_source(repo_root)
-    corpus_bytes = _write_nonmatching_corpus(repo_root)
+    cm_dir = repo_root / "gen" / "cache-manager"
+    cm_dir.mkdir(parents=True)
+    (cm_dir / "cache_manager.py").write_text(
+        FAKE_CACHE_MANAGER_TEMPLATE_HEAD + repr(str(log_path)) + FAKE_CACHE_MANAGER_TEMPLATE_BODY,
+        encoding="utf-8",
+    )
 
-    monkeypatch.setenv("VAR_LICENSE_CORPUS_PATH", "corpus.json")
+    return repo_root, corpus_path, corpus_bytes, log_path
+
+
+def _read_log(log_path):
+    if not log_path.is_file():
+        return []
+    return [json.loads(line) for line in log_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+
+
+def _assert_clean_record(result, expected_gate_version):
+    assert result is not None
+    assert field(result, "component_id") == "comp-foo"
+    assert field(result, "evaluated") is True
+    assert field(result, "reason") is None
+    assert field(result, "gate_version") == expected_gate_version
+    score = field(result, "similarity_score")
+    assert score is not None
+    assert float(score) == 0.0
+    assert float(field(result, "block_threshold")) == 0.70
+    assert field(result, "blocked") is False
+    assert list(field(result, "matches")) == []
+    assert field(result, "notified") is False
+    assert field(result, "notification_delivery_error") is None
+
+
+def test_clean_scan_still_produces_full_record(tmp_path, monkeypatch):
+    repo_root, corpus_path, corpus_bytes, log_path = _build_repo(tmp_path)
+    monkeypatch.setenv("VAR_LICENSE_CORPUS_PATH", str(corpus_path))
     monkeypatch.delenv("VAR_COMPLIANCE_WEBHOOK_URL", raising=False)
-    monkeypatch.delenv("VAR_CACHE_STORE_URL", raising=False)
-    monkeypatch.chdir(repo_root)
-    return repo_root, corpus_bytes, log_path
+
+    expected_gate_version = (
+        "license_scanner@4.0.3+" + hashlib.sha256(corpus_bytes).hexdigest()[:12]
+    )
+
+    result = license_scanner.scan("comp-foo", repo_root)
+    _assert_clean_record(result, expected_gate_version)
+    assert field(result, "cache_hit") is False
+
+    # The clean result is recorded (persisted as a payload), not omitted.
+    puts = [r for r in _read_log(log_path) if r["call"] == "put"]
+    assert len(puts) == 1
+    put = puts[0]
+    assert put["gate_type"] == "license_scanner"
+    payload = put["payload"]
+    for key in ("component_id", "gate_version", "similarity_score", "blocked", "matches"):
+        assert key in payload
+    assert payload["component_id"] == "comp-foo"
+    assert payload["evaluated"] is True
+    assert payload["blocked"] is False
+    assert payload["matches"] == []
+    assert float(payload["similarity_score"]) == 0.0
 
 
-def _assert_clean_record(result, corpus_bytes):
-    assert result is not None, "a clean scan must still produce a LicenseScanResult, never nothing"
+def test_clean_scan_cli_json_emits_record(tmp_path, monkeypatch):
+    repo_root, corpus_path, corpus_bytes, log_path = _build_repo(tmp_path)
+    monkeypatch.setenv("VAR_LICENSE_CORPUS_PATH", str(corpus_path))
+    monkeypatch.delenv("VAR_COMPLIANCE_WEBHOOK_URL", raising=False)
 
-    assert _field(result, "component_id") == COMPONENT_ID
-    assert _field(result, "evaluated") is True
-    assert _field(result, "reason") is None
+    expected_gate_version = (
+        "license_scanner@4.0.3+" + hashlib.sha256(corpus_bytes).hexdigest()[:12]
+    )
 
-    expected_gate_version = "license_scanner@4.0.3+" + hashlib.sha256(corpus_bytes).hexdigest()[:12]
-    assert _field(result, "gate_version") == expected_gate_version
-
-    score = _field(result, "similarity_score")
-    threshold = _field(result, "block_threshold")
-    assert isinstance(score, (int, float)) and not isinstance(score, bool)
-    assert isinstance(threshold, (int, float)) and not isinstance(threshold, bool)
-    assert threshold == pytest.approx(0.70)
-    assert score == pytest.approx(0.0)
-    assert score < threshold
-
-    assert _field(result, "blocked") is False
-    matches = _field(result, "matches")
-    assert isinstance(matches, list)
-    assert matches == []
-    assert _field(result, "notified") is False
-    assert _field(result, "notification_delivery_error") is None
-
-
-def test_clean_scan_still_produces_full_recordable_result(clean_repo):
-    repo_root, corpus_bytes, _log_path = clean_repo
-
-    result = license_scanner.scan(COMPONENT_ID, repo_root)
-
-    _assert_clean_record(result, corpus_bytes)
-
-    record = _as_dict(result)
-    required_keys = {
-        "component_id",
-        "gate_version",
-        "evaluated",
-        "reason",
-        "similarity_score",
-        "block_threshold",
-        "blocked",
-        "matches",
-        "notified",
-        "notification_delivery_error",
-        "cache_hit",
-    }
-    missing = required_keys - set(record.keys())
-    assert not missing, "clean LicenseScanResult omits fields: %r" % sorted(missing)
-
-    # The record must be serializable as-is into the provenance manifest's
-    # `license_scan` field: a clean result is recorded, not omitted.
-    manifest = {"license_scan": record}
-    round_tripped = json.loads(json.dumps(manifest))
-    assert round_tripped["license_scan"] is not None
-    assert round_tripped["license_scan"]["blocked"] is False
-    assert round_tripped["license_scan"]["evaluated"] is True
-    assert round_tripped["license_scan"]["component_id"] == COMPONENT_ID
-
-
-def test_clean_scan_cli_json_emits_record_and_exits_zero(clean_repo, capsys):
-    repo_root, corpus_bytes, _log_path = clean_repo
-
-    try:
-        code = license_scanner.main([COMPONENT_ID, "--repo-root=%s" % repo_root, "--format=json"])
-    except SystemExit as exc:
-        code = exc.code
-    if code is None:
-        code = 0
-
-    out = capsys.readouterr().out
-    assert code == 0, "a clean, not-blocked scan must exit 0; stdout=%r" % out
-    assert out.strip(), "a clean scan must still print its LicenseScanResult, not nothing"
-
-    printed = json.loads(out.strip())
-    assert isinstance(printed, dict)
-    _assert_clean_record(printed, corpus_bytes)
+    out = io.StringIO()
+    err = io.StringIO()
+    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+        code = license_scanner.main(
+            ["comp-foo", "--repo-root=" + str(repo_root), "--format=json"]
+        )
+    assert code == 0, err.getvalue()
+    document = json.loads(out.getvalue())
+    assert isinstance(document, dict)
+    _assert_clean_record(document, expected_gate_version)
+    assert "cache_hit" in document

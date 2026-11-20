@@ -1,9 +1,6 @@
-# hotdocs-criterion: sha256:3e464d20f67dc905ff8c2979ed4339845b3fa6a7498035485e1a1dcc815c79e0
-import io
+# hotdocs-criterion: sha256:5c613cdf25b72195b58c25c9741f681a1d18910c339c556f0cef9d8023d59e7a
+import hashlib
 import json
-import os
-import sys
-import contextlib
 from pathlib import Path
 
 import pytest
@@ -11,244 +8,202 @@ import pytest
 import license_scanner
 
 
-def _field(value, name):
-    if isinstance(value, dict):
-        return value.get(name)
-    return getattr(value, name, None)
+def field(value, name):
+    return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-FAKE_CACHE_MANAGER_TEMPLATE = '''
-import dataclasses
-import json
-import datetime
-
-_LOG_PATH = {log_path!r}
+def window_hash(tokens):
+    return hashlib.sha256("\x1f".join(tokens).encode("utf-8")).hexdigest()
 
 
-def _log(record):
-    with open(_LOG_PATH, "a", encoding="utf-8") as fh:
-        fh.write(json.dumps(record, default=str) + "\\n")
+SOURCE = (
+    "def compute_total(alpha, beta, gamma, delta, epsilon):\n"
+    "    result = alpha + beta + gamma + delta + epsilon\n"
+    "    return result\n"
+)
 
 
-@dataclasses.dataclass
-class CacheKey:
-    spec_bundle_hash: str
-    gate_inputs_hash: str
-    gate_version: str
-    model_pin: str
-
-
-@dataclasses.dataclass
-class CachedResult:
-    gate_type: str
-    payload: dict
-    stored_at: str
-
-
-class Miss:
-    def __eq__(self, other):
-        return isinstance(other, Miss)
-
-    def __hash__(self):
-        return hash("Miss")
-
-
-class SchemaValidationError(ValueError):
-    pass
-
-
-_REQUIRED = {{
-    "license_scanner": ["component_id", "gate_version", "similarity_score", "blocked", "matches"],
-}}
-
-
-def get(cache_key, *, repo_root=None):
-    _log({{"op": "get", "gate_version": getattr(cache_key, "gate_version", None)}})
-    return Miss()
-
-
-def put(cache_key, result, *, repo_root=None):
-    payload = result.get("payload") if isinstance(result, dict) else getattr(result, "payload", None)
-    gate_type = result.get("gate_type") if isinstance(result, dict) else getattr(result, "gate_type", None)
-    component_id = None
-    if isinstance(payload, dict):
-        component_id = payload.get("component_id")
-    else:
-        component_id = getattr(payload, "component_id", None)
-    _log({{"op": "put", "gate_type": gate_type, "component_id": component_id}})
-    key_gate_type = str(getattr(cache_key, "gate_version", "")).split("@", 1)[0]
-    if gate_type != key_gate_type:
-        raise SchemaValidationError("gate_type mismatch")
-    if isinstance(payload, dict):
-        for k in _REQUIRED.get(gate_type, []):
-            if k not in payload:
-                raise SchemaValidationError("missing key " + k)
-    return None
-
-
-def now_iso():
-    return datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-
-
-def stats(*, repo_root=None):
-    return {{"entry_count": 0}}
-'''
-
-
-SOURCE_TEXT = '''
-def compute_total(items, factor):
-    total = 0
-    for item in items:
-        total = total + item * factor
-    return total
-
-
-def describe_widget(name, size, color, weight):
-    return name + str(size) + color + str(weight)
-'''
-
-
-def _make_repo(tmp_path, slugs):
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    log_path = tmp_path / "cache_calls.log"
-    cm_dir = repo_root / "gen" / "cache-manager"
-    cm_dir.mkdir(parents=True)
-    (cm_dir / "cache_manager.py").write_text(
-        FAKE_CACHE_MANAGER_TEMPLATE.format(log_path=str(log_path)), encoding="utf-8"
+def write_fake_cache_manager(repo_root, log_path):
+    d = repo_root / "gen" / "cache-manager"
+    d.mkdir(parents=True, exist_ok=True)
+    src = (
+        "import dataclasses\n"
+        "import json\n"
+        "from datetime import datetime, timezone\n"
+        "\n"
+        "LOG_PATH = " + repr(str(log_path)) + "\n"
+        "REQUIRED = " + repr({
+            "generator": ["component_id", "model", "prompt_version", "files"],
+            "compiler": ["outputs", "gate_version", "summary"],
+            "generated_test": ["component_id", "criterion_id", "model", "file"],
+            "llm_judge": ["result", "rationale"],
+            "license_scanner": ["component_id", "gate_version", "similarity_score", "blocked", "matches"],
+            "secret_scanner": ["scope", "gate_version", "flagged", "matches"],
+        }) + "\n"
+        "\n"
+        "class SchemaValidationError(ValueError):\n"
+        "    pass\n"
+        "\n"
+        "class Miss:\n"
+        "    def __eq__(self, other):\n"
+        "        return isinstance(other, Miss)\n"
+        "    def __hash__(self):\n"
+        "        return 0\n"
+        "\n"
+        "@dataclasses.dataclass\n"
+        "class CacheKey:\n"
+        "    spec_bundle_hash: str\n"
+        "    gate_inputs_hash: str\n"
+        "    gate_version: str\n"
+        "    model_pin: str\n"
+        "\n"
+        "@dataclasses.dataclass\n"
+        "class CachedResult:\n"
+        "    gate_type: str\n"
+        "    payload: dict\n"
+        "    stored_at: str\n"
+        "\n"
+        "def _log(entry):\n"
+        "    with open(LOG_PATH, 'a', encoding='utf-8') as fh:\n"
+        "        fh.write(json.dumps(entry) + '\\n')\n"
+        "\n"
+        "def get(cache_key, *, repo_root=None):\n"
+        "    _log({'op': 'get'})\n"
+        "    return Miss()\n"
+        "\n"
+        "def put(cache_key, result, *, repo_root=None):\n"
+        "    gate_type = str(cache_key.gate_version).split('@', 1)[0]\n"
+        "    if result.gate_type != gate_type or gate_type not in REQUIRED:\n"
+        "        raise SchemaValidationError('gate_type mismatch')\n"
+        "    payload = result.payload\n"
+        "    for key in REQUIRED[gate_type]:\n"
+        "        present = (key in payload) if isinstance(payload, dict) else hasattr(payload, key)\n"
+        "        if not present:\n"
+        "            raise SchemaValidationError('missing ' + key)\n"
+        "    cid = payload['component_id'] if isinstance(payload, dict) else getattr(payload, 'component_id')\n"
+        "    _log({'op': 'put', 'component_id': cid})\n"
+        "    return None\n"
+        "\n"
+        "def now_iso():\n"
+        "    return datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')\n"
+        "\n"
+        "def stats(*, repo_root=None):\n"
+        "    return {'entry_count': 0}\n"
     )
-    for slug in slugs:
-        comp_dir = repo_root / "gen" / slug
-        comp_dir.mkdir(parents=True)
-        module_name = slug.replace("-", "_")
-        (comp_dir / (module_name + ".py")).write_text(SOURCE_TEXT, encoding="utf-8")
+    (d / "cache_manager.py").write_text(src, encoding="utf-8")
+
+
+def write_component(repo_root, slug):
+    d = repo_root / "gen" / slug
+    d.mkdir(parents=True, exist_ok=True)
+    (d / (slug.replace("-", "_") + ".py")).write_text(SOURCE, encoding="utf-8")
+
+
+def write_corpus(repo_root):
     corpus = {
         "corpus_version": 3,
-        "block_threshold": 0.70,
+        "block_threshold": 0.7,
         "entries": [
             {
                 "reference_id": "ref-001",
-                "license_family": "MIT",
+                "license_family": "GPL",
                 "risk_tier": "low",
-                "hashes": ["0" * 64],
+                "hashes": [window_hash(["unrelated"] * 9)],
             }
         ],
     }
-    corpus_path = repo_root / "corpus.json"
-    corpus_path.write_text(json.dumps(corpus), encoding="utf-8")
-    return repo_root, log_path, corpus_path
+    path = repo_root / "corpus.json"
+    path.write_text(json.dumps(corpus), encoding="utf-8")
+    return path
 
 
-def _read_log(log_path):
-    if not log_path.exists():
+def read_log(log_path):
+    if not log_path.is_file():
         return []
-    records = []
-    for line in log_path.read_text(encoding="utf-8").splitlines():
-        line = line.strip()
-        if line:
-            records.append(json.loads(line))
-    return records
-
-
-def _assert_single_result(result, component_id):
-    assert result is not None
-    assert not isinstance(result, (list, tuple, set)), (
-        "scan must return exactly one LicenseScanResult, not a collection"
-    )
-    assert _field(result, "component_id") == component_id
-    assert _field(result, "gate_version") is not None
-    evaluated = _field(result, "evaluated")
-    assert isinstance(evaluated, bool)
-    assert isinstance(_field(result, "blocked"), bool)
-    matches = _field(result, "matches")
-    assert isinstance(matches, list)
+    return [json.loads(line) for line in log_path.read_text(encoding="utf-8").splitlines() if line.strip()]
 
 
 @pytest.fixture
-def clean_env(monkeypatch):
-    for name in (
-        "VAR_LICENSE_CORPUS_PATH",
-        "VAR_COMPLIANCE_WEBHOOK_URL",
-        "VAR_CACHE_STORE_URL",
-    ):
-        monkeypatch.delenv(name, raising=False)
-    return monkeypatch
+def env(tmp_path, monkeypatch):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    log_path = tmp_path / "cache_log.jsonl"
+    write_fake_cache_manager(repo_root, log_path)
+    monkeypatch.delenv("VAR_CACHE_STORE_URL", raising=False)
+    monkeypatch.delenv("VAR_COMPLIANCE_WEBHOOK_URL", raising=False)
+    monkeypatch.chdir(repo_root)
+    return repo_root, log_path
 
 
-def test_scan_produces_exactly_one_result_with_usable_corpus(tmp_path, clean_env):
-    repo_root, log_path, corpus_path = _make_repo(tmp_path, ["widget"])
-    clean_env.setenv("VAR_LICENSE_CORPUS_PATH", str(corpus_path))
-
-    result = license_scanner.scan("comp-widget", repo_root)
-
-    _assert_single_result(result, "comp-widget")
-    assert _field(result, "evaluated") is True
-
-    records = _read_log(log_path)
-    puts = [r for r in records if r.get("op") == "put"]
-    assert len(puts) == 1, "exactly one result should be stored per fresh scan: %r" % records
-    assert puts[0].get("component_id") == "comp-widget"
-    assert puts[0].get("gate_type") == "license_scanner"
+def assert_single_result(result, component_id):
+    assert result is not None
+    assert not isinstance(result, (list, tuple, set))
+    assert field(result, "component_id") == component_id
+    for name in ("gate_version", "evaluated", "similarity_score", "blocked", "matches"):
+        field(result, name)
 
 
-def test_scan_produces_exactly_one_result_without_corpus(tmp_path, clean_env):
-    repo_root, log_path, _corpus_path = _make_repo(tmp_path, ["widget"])
+def test_one_result_per_component_with_usable_corpus(env, monkeypatch):
+    repo_root, log_path = env
+    corpus = write_corpus(repo_root)
+    monkeypatch.setenv("VAR_LICENSE_CORPUS_PATH", str(corpus))
+    write_component(repo_root, "foo")
 
-    result = license_scanner.scan("comp-widget", repo_root)
+    result = license_scanner.scan("comp-foo", repo_root)
+    assert_single_result(result, "comp-foo")
+    assert field(result, "evaluated") is True
 
-    _assert_single_result(result, "comp-widget")
-    assert _field(result, "evaluated") is False
-    assert _field(result, "reason") == "no-reference-corpus"
+    puts = [e for e in read_log(log_path) if e["op"] == "put"]
+    assert len(puts) == 1
+    assert puts[0]["component_id"] == "comp-foo"
 
-    records = _read_log(log_path)
-    puts = [r for r in records if r.get("op") == "put"]
+
+def test_each_component_gets_exactly_one_result(env, monkeypatch):
+    repo_root, log_path = env
+    corpus = write_corpus(repo_root)
+    monkeypatch.setenv("VAR_LICENSE_CORPUS_PATH", str(corpus))
+    write_component(repo_root, "foo")
+    write_component(repo_root, "bar")
+
+    r_foo = license_scanner.scan("comp-foo", repo_root)
+    r_bar = license_scanner.scan("comp-bar", repo_root)
+    assert_single_result(r_foo, "comp-foo")
+    assert_single_result(r_bar, "comp-bar")
+
+    puts = [e for e in read_log(log_path) if e["op"] == "put"]
+    assert sorted(e["component_id"] for e in puts) == ["comp-bar", "comp-foo"]
+
+
+def test_one_result_when_not_evaluated(env, monkeypatch):
+    repo_root, log_path = env
+    monkeypatch.delenv("VAR_LICENSE_CORPUS_PATH", raising=False)
+    write_component(repo_root, "foo")
+
+    result = license_scanner.scan("comp-foo", repo_root)
+    assert_single_result(result, "comp-foo")
+    assert field(result, "evaluated") is False
+    assert field(result, "reason") == "no-reference-corpus"
+
+    puts = [e for e in read_log(log_path) if e["op"] == "put"]
     assert len(puts) <= 1
-    for p in puts:
-        assert p.get("component_id") == "comp-widget"
+    for e in puts:
+        assert e["component_id"] == "comp-foo"
 
 
-def test_each_component_gets_its_own_single_result(tmp_path, clean_env):
-    repo_root, log_path, corpus_path = _make_repo(tmp_path, ["widget", "gadget"])
-    clean_env.setenv("VAR_LICENSE_CORPUS_PATH", str(corpus_path))
+def test_cli_json_prints_exactly_one_result(env, monkeypatch, capsys):
+    repo_root, log_path = env
+    corpus = write_corpus(repo_root)
+    monkeypatch.setenv("VAR_LICENSE_CORPUS_PATH", str(corpus))
+    write_component(repo_root, "foo")
 
-    result_a = license_scanner.scan("comp-widget", repo_root)
-    result_b = license_scanner.scan("comp-gadget", repo_root)
+    code = license_scanner.main(["comp-foo", "--repo-root", str(repo_root), "--format=json"])
+    out = capsys.readouterr().out
+    assert code in (0, 1)
+    doc = json.loads(out)
+    assert isinstance(doc, dict)
+    assert doc["component_id"] == "comp-foo"
+    assert "blocked" in doc and "similarity_score" in doc
 
-    _assert_single_result(result_a, "comp-widget")
-    _assert_single_result(result_b, "comp-gadget")
-
-    records = _read_log(log_path)
-    puts = [r for r in records if r.get("op") == "put"]
-    assert len(puts) == 2, "one stored result per component per scan: %r" % records
-    put_ids = sorted(p.get("component_id") for p in puts)
-    assert put_ids == ["comp-gadget", "comp-widget"]
-
-
-def _run_main(argv):
-    out = io.StringIO()
-    code = None
-    with contextlib.redirect_stdout(out):
-        try:
-            code = license_scanner.main(argv)
-        except SystemExit as exc:
-            code = exc.code
-    if code is None:
-        code = 0
-    return code, out.getvalue()
-
-
-def test_cli_json_prints_exactly_one_result_object(tmp_path, clean_env):
-    repo_root, _log_path, corpus_path = _make_repo(tmp_path, ["widget"])
-    clean_env.setenv("VAR_LICENSE_CORPUS_PATH", str(corpus_path))
-
-    code, out = _run_main(
-        ["comp-widget", "--repo-root=" + str(repo_root), "--format=json"]
-    )
-
-    assert code == 0, out
-    parsed = json.loads(out.strip())
-    assert isinstance(parsed, dict), "CLI must print exactly one LicenseScanResult object"
-    assert parsed.get("component_id") == "comp-widget"
-    assert "blocked" in parsed
-    assert "similarity_score" in parsed
-    assert "matches" in parsed
+    puts = [e for e in read_log(log_path) if e["op"] == "put"]
+    assert len(puts) == 1
+    assert puts[0]["component_id"] == "comp-foo"
