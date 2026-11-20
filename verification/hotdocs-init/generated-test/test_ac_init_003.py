@@ -1,6 +1,7 @@
-# hotdocs-criterion: sha256:73de4bca974ee2178f56989515571c4b7670a87aa85797ccabe9f7d88a9c7f66
+# hotdocs-criterion: sha256:6704befffb63e1e49c7f220cd1fb24bb67d29dca8eb40f3257d34d42b2e1f920
 import importlib.metadata
 import os
+import stat
 import subprocess
 import sys
 from pathlib import Path
@@ -10,160 +11,122 @@ import pytest
 import hotdocs_init
 
 
-FAKE_LLM_ENDPOINT_BODY = '''
-import json
-import shutil
-from pathlib import Path
+pytestmark = pytest.mark.skipif(
+    sys.version_info < (3, 11),
+    reason="the Python 3.11 prerequisite would itself be reported missing",
+)
 
 
-def _log(name, payload):
-    with open(LOG_PATH, "a", encoding="utf-8") as fh:
-        fh.write(json.dumps({"call": name, "args": payload}, default=str) + "\\n")
-
-
-PROVIDERS = {
-    "claude-cli": {
-        "default_base_url": None,
-        "default_api_key_env": None,
-        "needs_base_url": False,
-        "suggested_model": "claude-sonnet-5",
-    },
-    "anthropic": {
-        "default_base_url": "https://api.anthropic.com",
-        "default_api_key_env": "ANTHROPIC_API_KEY",
-        "needs_base_url": False,
-        "suggested_model": "claude-sonnet-5",
-    },
-    "openai": {
-        "default_base_url": "https://api.openai.com/v1",
-        "default_api_key_env": "OPENAI_API_KEY",
-        "needs_base_url": False,
-        "suggested_model": "gpt-6-astra",
-    },
-    "openai-compatible": {
-        "default_base_url": None,
-        "default_api_key_env": None,
-        "needs_base_url": True,
-        "suggested_model": "",
-    },
-    "gemini": {
-        "default_base_url": "https://generativelanguage.googleapis.com",
-        "default_api_key_env": "GEMINI_API_KEY",
-        "needs_base_url": False,
-        "suggested_model": "gemini-4-argon",
-    },
-    "ollama": {
-        "default_base_url": "http://localhost:11434",
-        "default_api_key_env": None,
-        "needs_base_url": False,
-        "suggested_model": "llama3.2",
-    },
-}
-
-
-def detect_providers(env=None, probe_ollama=True):
-    _log("detect_providers", {"env_given": env is not None, "probe_ollama": probe_ollama})
-    path = None if env is None else env.get("PATH")
-    out = []
-    for name, info in PROVIDERS.items():
-        if name == "claude-cli":
-            found = shutil.which("claude", path=path) is not None
-            available = found
-            reason = "claude on PATH" if found else "claude not on PATH"
-        elif name == "ollama":
-            available = True
-            reason = "ollama reachable"
-        else:
-            available = False
-            reason = "not configured"
-        out.append({
-            "provider": name,
-            "available": available,
-            "reason": reason,
-            "suggested_model": info["suggested_model"],
-            "api_key_env": info["default_api_key_env"],
-        })
-    return out
-
-
-def check_connection(provider, model, base_url=None, api_key_env=None,
-                     timeout_seconds=30, auth=None):
-    _log("check_connection", {"provider": provider, "model": model})
-    if provider not in PROVIDERS:
-        raise ValueError("unknown provider")
-    if PROVIDERS[provider]["needs_base_url"] and not base_url:
-        raise ValueError("base_url required")
-    return {"ok": True, "error": None}
-
-
-_KEYS = ("provider", "model", "base_url", "api_key_env", "timeout_seconds", "auth")
-
-
-def save_config(config_path, provider, model, base_url=None,
-                api_key_env=None, timeout_seconds=None, auth=None):
-    _log("save_config", {"config_path": str(config_path), "provider": provider, "model": model})
-    if provider not in PROVIDERS:
-        raise ValueError("unknown provider")
-    if not model and provider != "openai-compatible":
-        raise ValueError("model required")
-    p = Path(config_path)
-    p.parent.mkdir(parents=True, exist_ok=True)
-    kept = []
-    if p.is_file():
-        in_llm = False
-        for line in p.read_text(encoding="utf-8").splitlines():
-            s = line.strip()
-            if s.startswith("[") and s.endswith("]"):
-                in_llm = (s == "[llm]")
-                if in_llm:
-                    continue
-            if not in_llm:
-                kept.append(line)
-    values = {
-        "provider": provider, "model": model, "base_url": base_url,
-        "api_key_env": api_key_env, "timeout_seconds": timeout_seconds, "auth": auth,
-    }
-    lines = list(kept)
-    if lines and lines[-1].strip():
-        lines.append("")
-    lines.append("[llm]")
-    for k in _KEYS:
-        v = values[k]
-        if v is None:
-            continue
-        lines.append(k + " = " + json.dumps(v))
-    p.write_text("\\n".join(lines) + "\\n", encoding="utf-8")
-
-
-def load_config(config_path=None):
-    _log("load_config", {"config_path": str(config_path)})
-    if config_path is None:
-        config_path = Path("hotdocs.toml")
-    p = Path(config_path)
-    if not p.is_file():
-        return None
-    found = False
-    in_llm = False
-    result = {k: None for k in _KEYS}
-    for line in p.read_text(encoding="utf-8").splitlines():
-        s = line.strip()
-        if s.startswith("[") and s.endswith("]"):
-            in_llm = (s == "[llm]")
-            if in_llm:
-                found = True
-            continue
-        if in_llm and "=" in s:
-            k, v = s.split("=", 1)
-            k = k.strip()
-            if k in result:
-                try:
-                    result[k] = json.loads(v.strip())
-                except Exception:
-                    raise ValueError("invalid value")
-    if not found:
-        return None
-    return result
-'''
+FAKE_LLM_ENDPOINT_BODY = (
+    "import json\n"
+    "import os\n"
+    "import tomllib\n"
+    "from pathlib import Path\n"
+    "\n"
+    "PROVIDERS = {\n"
+    "    'claude-cli': {'default_base_url': None, 'default_api_key_env': None,\n"
+    "                   'needs_base_url': False, 'suggested_model': 'claude-sonnet-5'},\n"
+    "    'anthropic': {'default_base_url': 'https://api.anthropic.com',\n"
+    "                  'default_api_key_env': 'ANTHROPIC_API_KEY',\n"
+    "                  'needs_base_url': False, 'suggested_model': 'claude-sonnet-5'},\n"
+    "    'openai': {'default_base_url': 'https://api.openai.com/v1',\n"
+    "               'default_api_key_env': 'OPENAI_API_KEY',\n"
+    "               'needs_base_url': False, 'suggested_model': 'gpt-6-astra'},\n"
+    "    'openai-compatible': {'default_base_url': None, 'default_api_key_env': None,\n"
+    "                          'needs_base_url': True, 'suggested_model': ''},\n"
+    "    'gemini': {'default_base_url': 'https://generativelanguage.googleapis.com',\n"
+    "               'default_api_key_env': 'GEMINI_API_KEY',\n"
+    "               'needs_base_url': False, 'suggested_model': 'gemini-4-argon'},\n"
+    "    'ollama': {'default_base_url': 'http://localhost:11434', 'default_api_key_env': None,\n"
+    "               'needs_base_url': False, 'suggested_model': 'llama3.2'},\n"
+    "}\n"
+    "\n"
+    "_KEYS = ('provider', 'model', 'base_url', 'api_key_env', 'timeout_seconds', 'auth')\n"
+    "\n"
+    "\n"
+    "def _log(name, **kwargs):\n"
+    "    entry = {'call': name, 'args': {k: repr(v) for k, v in kwargs.items()}}\n"
+    "    with open(LOG_PATH, 'a', encoding='utf-8') as fh:\n"
+    "        fh.write(json.dumps(entry) + '\\n')\n"
+    "\n"
+    "\n"
+    "def detect_providers(env=None, probe_ollama=True):\n"
+    "    _log('detect_providers', env=env is not None, probe_ollama=probe_ollama)\n"
+    "    out = []\n"
+    "    for name, info in PROVIDERS.items():\n"
+    "        out.append({\n"
+    "            'provider': name,\n"
+    "            'available': name == 'ollama',\n"
+    "            'reason': 'fake detection',\n"
+    "            'suggested_model': info['suggested_model'],\n"
+    "            'api_key_env': info['default_api_key_env'],\n"
+    "        })\n"
+    "    return out\n"
+    "\n"
+    "\n"
+    "def check_connection(provider, model, base_url=None, api_key_env=None,\n"
+    "                     timeout_seconds=30, auth=None):\n"
+    "    _log('check_connection', provider=provider, model=model, base_url=base_url,\n"
+    "         api_key_env=api_key_env, timeout_seconds=timeout_seconds, auth=auth)\n"
+    "    if provider not in PROVIDERS:\n"
+    "        raise ValueError('unknown provider')\n"
+    "    if PROVIDERS[provider]['needs_base_url'] and not base_url:\n"
+    "        raise ValueError('base_url required')\n"
+    "    return {'ok': True, 'error': None}\n"
+    "\n"
+    "\n"
+    "def save_config(config_path, provider, model, base_url=None, api_key_env=None,\n"
+    "                timeout_seconds=None, auth=None):\n"
+    "    _log('save_config', config_path=str(config_path), provider=provider, model=model,\n"
+    "         base_url=base_url, api_key_env=api_key_env,\n"
+    "         timeout_seconds=timeout_seconds, auth=auth)\n"
+    "    if provider not in PROVIDERS:\n"
+    "        raise ValueError('unknown provider')\n"
+    "    if not model:\n"
+    "        raise ValueError('model required')\n"
+    "    if PROVIDERS[provider]['needs_base_url'] and not base_url:\n"
+    "        raise ValueError('base_url required')\n"
+    "    path = Path(config_path)\n"
+    "    path.parent.mkdir(parents=True, exist_ok=True)\n"
+    "    kept = []\n"
+    "    if path.exists():\n"
+    "        in_llm = False\n"
+    "        for line in path.read_text(encoding='utf-8').splitlines():\n"
+    "            stripped = line.strip()\n"
+    "            if stripped.startswith('['):\n"
+    "                in_llm = stripped == '[llm]'\n"
+    "            if not in_llm:\n"
+    "                kept.append(line)\n"
+    "    values = {'provider': provider, 'model': model, 'base_url': base_url,\n"
+    "              'api_key_env': api_key_env, 'timeout_seconds': timeout_seconds,\n"
+    "              'auth': auth}\n"
+    "    lines = list(kept)\n"
+    "    if lines and lines[-1].strip():\n"
+    "        lines.append('')\n"
+    "    lines.append('[llm]')\n"
+    "    for key, value in values.items():\n"
+    "        if value is None:\n"
+    "            continue\n"
+    "        lines.append(key + ' = ' + json.dumps(value))\n"
+    "    path.write_text('\\n'.join(lines) + '\\n', encoding='utf-8')\n"
+    "\n"
+    "\n"
+    "def load_config(config_path=None):\n"
+    "    _log('load_config', config_path=None if config_path is None else str(config_path))\n"
+    "    if config_path is None:\n"
+    "        return None\n"
+    "    path = Path(config_path)\n"
+    "    if not path.is_file():\n"
+    "        return None\n"
+    "    try:\n"
+    "        data = tomllib.loads(path.read_text(encoding='utf-8'))\n"
+    "    except tomllib.TOMLDecodeError as exc:\n"
+    "        raise ValueError('invalid config') from exc\n"
+    "    llm = data.get('llm')\n"
+    "    if llm is None:\n"
+    "        return None\n"
+    "    return {key: llm.get(key) for key in _KEYS}\n"
+)
 
 
 def field(value, name):
@@ -171,83 +134,76 @@ def field(value, name):
 
 
 def make_tool_root(base, requirement_lines):
-    tool_root = base / "tool"
-    log_dir = base / "logs"
-    log_dir.mkdir(parents=True, exist_ok=True)
-    log_path = log_dir / "llm_endpoint_calls.log"
+    tool = base / "tool"
+    logs = base / "logs"
+    logs.mkdir(parents=True, exist_ok=True)
+    log_path = logs / "llm_endpoint_calls.log"
 
-    ep_dir = tool_root / "gen" / "llm-endpoint"
-    ep_dir.mkdir(parents=True)
+    fake_dir = tool / "gen" / "llm-endpoint"
+    fake_dir.mkdir(parents=True)
     source = "LOG_PATH = " + repr(str(log_path)) + "\n" + FAKE_LLM_ENDPOINT_BODY
-    (ep_dir / "llm_endpoint.py").write_text(source, encoding="utf-8")
+    (fake_dir / "llm_endpoint.py").write_text(source, encoding="utf-8")
 
-    ex_dir = tool_root / "examples" / "slugify" / "specs" / "product"
-    ex_dir.mkdir(parents=True)
-    (ex_dir / "slugs.md").write_text("# Slugs\n\nTurn titles into slugs.\n", encoding="utf-8")
+    slugs = tool / "examples" / "slugify" / "specs" / "product"
+    slugs.mkdir(parents=True)
+    (slugs / "slugs.md").write_text("# Slugs\n\nA fake example product spec.\n", encoding="utf-8")
 
-    (tool_root / "requirements.txt").write_text(
+    (tool / "requirements.txt").write_text(
         "\n".join(requirement_lines) + "\n", encoding="utf-8"
     )
-    return tool_root, log_path
+    return tool, log_path
 
 
 def installed_requirements():
     return ["pytest==" + importlib.metadata.version("pytest")]
 
 
+def make_env(base, with_claude):
+    bindir = base / "bin"
+    bindir.mkdir(parents=True, exist_ok=True)
+    if with_claude:
+        claude = bindir / "claude"
+        claude.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+        claude.chmod(claude.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+    home = base / "home"
+    home.mkdir(parents=True, exist_ok=True)
+    return {"PATH": str(bindir), "HOME": str(home)}
+
+
+class Recorder:
+    def __init__(self):
+        self.lines = []
+        self.questions = []
+
+    def output_fn(self, *args, **kwargs):
+        text = " ".join(str(a) for a in args)
+        self.lines.extend(text.split("\n"))
+
+    def input_fn(self, prompt=""):
+        self.questions.append(prompt)
+        return ""
+
+
 @pytest.fixture
 def no_commands(monkeypatch):
     calls = []
 
-    def make_recorder(name):
-        def recorder(*args, **kwargs):
-            calls.append((name, args, kwargs))
-            raise RuntimeError("command execution forbidden in test: " + name)
-        return recorder
+    def refuse(*args, **kwargs):
+        calls.append(args)
+        raise AssertionError("init ran a command: " + repr(args))
 
     for name in ("run", "Popen", "call", "check_call", "check_output", "getoutput", "getstatusoutput"):
-        monkeypatch.setattr(subprocess, name, make_recorder("subprocess." + name))
-    monkeypatch.setattr(os, "system", make_recorder("os.system"))
-    monkeypatch.setattr(os, "popen", make_recorder("os.popen"))
+        if hasattr(subprocess, name):
+            monkeypatch.setattr(subprocess, name, refuse)
+    monkeypatch.setattr(os, "system", refuse)
+    if hasattr(os, "popen"):
+        monkeypatch.setattr(os, "popen", refuse)
     return calls
 
 
-def make_io():
-    outputs = []
-    prompts = []
-
-    def output_fn(*args, **kwargs):
-        sep = kwargs.get("sep", " ")
-        outputs.append(sep.join(str(a) for a in args))
-
-    def input_fn(prompt=""):
-        prompts.append(prompt)
-        if len(prompts) > 50:
-            raise RuntimeError("too many prompts")
-        return ""
-
-    return outputs, prompts, output_fn, input_fn
-
-
-def output_lines(outputs):
-    lines = []
-    for chunk in outputs:
-        lines.extend(chunk.split("\n"))
-    return lines
-
-
-def has_consecutive(lines, first, second):
-    for i in range(len(lines) - 1):
-        if lines[i] == first and lines[i + 1] == second:
-            return True
-    return False
-
-
-def run_init(tmp_path, tool_root, project_name, provider, model, path_dir):
-    project = tmp_path / project_name
-    project.mkdir()
-    outputs, prompts, output_fn, input_fn = make_io()
-    env = {"PATH": str(path_dir)}
+def run_init(base, tool, env, provider, model, recorder):
+    project = base / "project"
+    project.mkdir(parents=True, exist_ok=True)
     argv = [
         str(project),
         "--provider", provider,
@@ -255,88 +211,89 @@ def run_init(tmp_path, tool_root, project_name, provider, model, path_dir):
         "--no-test",
         "--yes",
     ]
-    rc = hotdocs_init.main(
+    code = hotdocs_init.main(
         argv,
-        tool_root=str(tool_root),
-        input_fn=input_fn,
-        output_fn=output_fn,
+        tool_root=str(tool),
+        input_fn=recorder.input_fn,
+        output_fn=recorder.output_fn,
         env=env,
-        cwd=str(tmp_path),
+        cwd=str(base),
     )
-    return rc, project, output_lines(outputs)
+    return code, project
+
+
+def assert_consecutive(lines, first, second):
+    for i in range(len(lines) - 1):
+        if lines[i] == first and lines[i + 1] == second:
+            return
+    raise AssertionError(
+        "expected consecutive lines " + repr(first) + " / " + repr(second) + " in " + repr(lines)
+    )
 
 
 def test_missing_requirement_reported_and_returns_3(tmp_path, no_commands, capsys):
-    tool_root, _log = make_tool_root(
-        tmp_path, ["pytest==9.2.0", "no-such-pkg-xyz==1.0"]
+    tool, _log = make_tool_root(tmp_path, ["pytest==9.2.0", "no-such-pkg-xyz==1.0"])
+    env = make_env(tmp_path, with_claude=False)
+    rec = Recorder()
+
+    code, project = run_init(tmp_path, tool, env, "ollama", "llama3.2", rec)
+
+    assert code == 3, rec.lines
+    # The skeleton was still created.
+    assert project.is_dir()
+    assert any(project.iterdir()), "init created no skeleton"
+    # No example was involved.
+    assert not list(project.rglob("slugs.md"))
+
+    assert_consecutive(
+        rec.lines,
+        "missing: no-such-pkg-xyz==1.0",
+        "  fix: pip install -r " + str(tool) + "/requirements.txt",
     )
-    empty_bin = tmp_path / "emptybin"
-    empty_bin.mkdir()
-
-    rc, project, lines = run_init(
-        tmp_path, tool_root, "proj1", "ollama", "llama3.2", empty_bin
-    )
-
-    assert rc == 3
-    # The skeleton was created despite the missing prerequisite.
-    assert any(project.iterdir())
-    # No example involved.
-    assert not (project / "examples").exists()
-
-    expected_fix = "  fix: pip install -r " + str(tool_root) + "/requirements.txt"
-    assert has_consecutive(lines, "missing: no-such-pkg-xyz==1.0", expected_fix), lines
-    # pytest is installed: its line is never reported missing, whatever its version.
-    assert "missing: pytest==9.2.0" not in lines
-
+    assert "missing: pytest==9.2.0" not in rec.lines
     assert no_commands == []
-    err = capsys.readouterr().err
-    assert "missing:" not in err
+
+    captured = capsys.readouterr()
+    assert "missing:" not in captured.err
 
 
-def test_claude_cli_without_claude_on_path_returns_3(tmp_path, no_commands, capsys):
-    tool_root, _log = make_tool_root(tmp_path, installed_requirements())
-    empty_bin = tmp_path / "emptybin"
-    empty_bin.mkdir()
+def test_claude_missing_on_path_returns_3(tmp_path, no_commands, capsys):
+    tool, _log = make_tool_root(tmp_path, installed_requirements())
+    env = make_env(tmp_path, with_claude=False)
+    rec = Recorder()
 
-    rc, project, lines = run_init(
-        tmp_path, tool_root, "proj2", "claude-cli", "claude-sonnet-5", empty_bin
+    code, project = run_init(tmp_path, tool, env, "claude-cli", "claude-sonnet-5", rec)
+
+    assert code == 3, rec.lines
+    assert_consecutive(
+        rec.lines,
+        "missing: claude on PATH",
+        "  fix: install Claude Code and sign in",
     )
-
-    assert rc == 3
-    assert has_consecutive(
-        lines, "missing: claude on PATH", "  fix: install Claude Code and sign in"
-    ), lines
     assert no_commands == []
-    err = capsys.readouterr().err
-    assert "missing:" not in err
+    captured = capsys.readouterr()
+    assert "missing:" not in captured.err
 
 
-def test_claude_cli_with_claude_on_path_returns_0(tmp_path, no_commands):
-    tool_root, _log = make_tool_root(tmp_path, installed_requirements())
-    bin_dir = tmp_path / "bin"
-    bin_dir.mkdir()
-    claude = bin_dir / "claude"
-    claude.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
-    claude.chmod(0o755)
+def test_claude_present_on_path_returns_0(tmp_path, no_commands):
+    tool, _log = make_tool_root(tmp_path, installed_requirements())
+    env = make_env(tmp_path, with_claude=True)
+    rec = Recorder()
 
-    rc, project, lines = run_init(
-        tmp_path, tool_root, "proj3", "claude-cli", "claude-sonnet-5", bin_dir
-    )
+    code, project = run_init(tmp_path, tool, env, "claude-cli", "claude-sonnet-5", rec)
 
-    assert rc == 0, lines
-    assert "missing: claude on PATH" not in lines
+    assert code == 0, rec.lines
+    assert "missing: claude on PATH" not in rec.lines
     assert no_commands == []
 
 
-def test_ollama_without_claude_on_path_returns_0(tmp_path, no_commands):
-    tool_root, _log = make_tool_root(tmp_path, installed_requirements())
-    empty_bin = tmp_path / "emptybin"
-    empty_bin.mkdir()
+def test_ollama_without_claude_returns_0(tmp_path, no_commands):
+    tool, _log = make_tool_root(tmp_path, installed_requirements())
+    env = make_env(tmp_path, with_claude=False)
+    rec = Recorder()
 
-    rc, project, lines = run_init(
-        tmp_path, tool_root, "proj4", "ollama", "llama3.2", empty_bin
-    )
+    code, project = run_init(tmp_path, tool, env, "ollama", "llama3.2", rec)
 
-    assert rc == 0, lines
-    assert "missing: claude on PATH" not in lines
+    assert code == 0, rec.lines
+    assert "missing: claude on PATH" not in rec.lines
     assert no_commands == []

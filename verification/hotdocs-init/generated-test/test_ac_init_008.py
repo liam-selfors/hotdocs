@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:79d13fa08faebf628be0619782d52a7d10f287139d999febf35637b143d41620
+# hotdocs-criterion: sha256:55bae9b7d2bc5dcd68f43edaa49301f616b0b774efb25482e0fc39f5dcf559a1
 import importlib.metadata
 import json
 import os
@@ -8,14 +8,20 @@ import hotdocs_init
 
 
 FAKE_LLM_ENDPOINT_BODY = '''
-import json
-import os
-from pathlib import Path
+import json as _json
+from pathlib import Path as _Path
+
+try:
+    import tomllib as _tomllib
+except ImportError:  # pragma: no cover
+    _tomllib = None
 
 
-def _log(name, **kwargs):
-    with open(LOG_PATH, "a", encoding="utf-8") as fh:
-        fh.write(json.dumps({"call": name, "args": {k: repr(v) for k, v in kwargs.items()}}) + "\\n")
+def _log(name, payload):
+    p = _Path(LOG_PATH)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    with open(p, "a", encoding="utf-8") as fh:
+        fh.write(_json.dumps({"call": name, "args": payload}, default=str) + "\\n")
 
 
 PROVIDERS = {
@@ -59,23 +65,23 @@ PROVIDERS = {
 
 
 def detect_providers(env=None, probe_ollama=True):
-    _log("detect_providers", env=env is not None, probe_ollama=probe_ollama)
-    result = []
+    _log("detect_providers", {"env_given": env is not None, "probe_ollama": probe_ollama})
+    out = []
     for name, info in PROVIDERS.items():
         available = name == "claude-cli"
-        result.append({
+        out.append({
             "provider": name,
             "available": available,
-            "reason": "fake: available" if available else "fake: not available",
+            "reason": "found" if available else "not configured",
             "suggested_model": info["suggested_model"],
             "api_key_env": info["default_api_key_env"],
         })
-    return result
+    return out
 
 
-def check_connection(provider, model, base_url=None, api_key_env=None, timeout_seconds=30, auth=None):
-    _log("check_connection", provider=provider, model=model, base_url=base_url,
-         api_key_env=api_key_env, timeout_seconds=timeout_seconds, auth=auth)
+def check_connection(provider, model, base_url=None, api_key_env=None,
+                     timeout_seconds=30, auth=None):
+    _log("check_connection", {"provider": provider, "model": model})
     if provider not in PROVIDERS:
         raise ValueError("unknown provider")
     if PROVIDERS[provider]["needs_base_url"] and not base_url:
@@ -85,122 +91,116 @@ def check_connection(provider, model, base_url=None, api_key_env=None, timeout_s
 
 def _strip_llm(text):
     out = []
-    in_llm = False
+    skipping = False
     for line in text.splitlines():
         s = line.strip()
         if s.startswith("[") and s.endswith("]"):
-            in_llm = s == "[llm]"
-            if in_llm:
+            skipping = s == "[llm]"
+            if skipping:
                 continue
-        if not in_llm:
+        if not skipping:
             out.append(line)
-    return "\\n".join(out).strip()
+    return "\\n".join(out).rstrip()
 
 
-def save_config(config_path, provider, model, base_url=None, api_key_env=None, timeout_seconds=None, auth=None):
-    _log("save_config", config_path=str(config_path), provider=provider, model=model,
-         base_url=base_url, api_key_env=api_key_env, timeout_seconds=timeout_seconds, auth=auth)
+def save_config(config_path, provider, model, base_url=None, api_key_env=None,
+                timeout_seconds=None, auth=None):
+    _log("save_config", {"config_path": str(config_path), "provider": provider, "model": model})
     if provider not in PROVIDERS:
         raise ValueError("unknown provider")
     if not isinstance(model, str):
         raise ValueError("invalid model")
-    path = Path(config_path)
+    path = _Path(config_path)
     path.parent.mkdir(parents=True, exist_ok=True)
     existing = path.read_text(encoding="utf-8") if path.is_file() else ""
     kept = _strip_llm(existing)
-    lines = ["[llm]", "provider = " + json.dumps(provider), "model = " + json.dumps(model)]
+    lines = ["[llm]", "provider = " + _json.dumps(provider), "model = " + _json.dumps(model)]
     if base_url is not None:
-        lines.append("base_url = " + json.dumps(base_url))
+        lines.append("base_url = " + _json.dumps(base_url))
     if api_key_env is not None:
-        lines.append("api_key_env = " + json.dumps(api_key_env))
+        lines.append("api_key_env = " + _json.dumps(api_key_env))
     if timeout_seconds is not None:
         lines.append("timeout_seconds = " + str(int(timeout_seconds)))
     if auth is not None:
-        lines.append("auth = " + json.dumps(auth))
-    body = "\\n".join(lines) + "\\n"
-    if kept:
-        body = kept + "\\n\\n" + body
-    path.write_text(body, encoding="utf-8")
+        lines.append("auth = " + _json.dumps(auth))
+    body = ("\\n".join(lines)) + "\\n"
+    text = (kept + "\\n\\n" + body) if kept else body
+    path.write_text(text, encoding="utf-8")
 
 
 def load_config(config_path=None):
-    _log("load_config", config_path=str(config_path))
-    path = Path(config_path) if config_path is not None else Path("hotdocs.toml")
+    _log("load_config", {"config_path": str(config_path)})
+    path = _Path(config_path) if config_path is not None else _Path("hotdocs.toml")
     if not path.is_file():
         return None
-    result = None
-    in_llm = False
-    for line in path.read_text(encoding="utf-8").splitlines():
-        s = line.strip()
-        if not s or s.startswith("#"):
-            continue
-        if s.startswith("[") and s.endswith("]"):
-            in_llm = s == "[llm]"
-            if in_llm and result is None:
-                result = {"provider": None, "model": None, "base_url": None,
-                          "api_key_env": None, "timeout_seconds": None, "auth": None}
-            continue
-        if in_llm and "=" in s:
-            key, _, value = s.partition("=")
-            key = key.strip()
-            try:
-                parsed = json.loads(value.strip())
-            except Exception:
-                raise ValueError("invalid config value")
-            if key in result:
-                result[key] = parsed
-    return result
+    text = path.read_text(encoding="utf-8")
+    if _tomllib is None:
+        return None
+    try:
+        data = _tomllib.loads(text)
+    except Exception as exc:
+        raise ValueError("invalid config") from exc
+    llm = data.get("llm")
+    if llm is None:
+        return None
+    return {
+        "provider": llm.get("provider"),
+        "model": llm.get("model"),
+        "base_url": llm.get("base_url"),
+        "api_key_env": llm.get("api_key_env"),
+        "timeout_seconds": llm.get("timeout_seconds"),
+        "auth": llm.get("auth"),
+    }
 '''
 
 
-def _make_tool_root(base: Path) -> Path:
-    tool = base / "tool"
-    log_dir = base / "logs"
-    log_dir.mkdir(parents=True, exist_ok=True)
-    log_path = log_dir / "llm_endpoint_calls.log"
-
-    ep_dir = tool / "gen" / "llm-endpoint"
-    ep_dir.mkdir(parents=True)
+def make_tool_root(tmp_path):
+    tool_root = tmp_path / "tool"
+    log_path = tmp_path / "logs" / "llm_endpoint_calls.log"
+    llm_dir = tool_root / "gen" / "llm-endpoint"
+    llm_dir.mkdir(parents=True)
     source = "LOG_PATH = " + repr(str(log_path)) + "\n" + FAKE_LLM_ENDPOINT_BODY
-    (ep_dir / "llm_endpoint.py").write_text(source, encoding="utf-8")
+    (llm_dir / "llm_endpoint.py").write_text(source, encoding="utf-8")
 
-    slug_dir = tool / "examples" / "slugify" / "specs" / "product"
+    slug_dir = tool_root / "examples" / "slugify" / "specs" / "product"
     slug_dir.mkdir(parents=True)
     (slug_dir / "slugs.md").write_text("# Slugs\n\nTurn titles into slugs.\n", encoding="utf-8")
 
     version = importlib.metadata.version("pytest")
-    (tool / "requirements.txt").write_text("pytest==" + version + "\n", encoding="utf-8")
-    return tool
+    (tool_root / "requirements.txt").write_text("pytest==" + version + "\n", encoding="utf-8")
+    return tool_root, log_path
 
 
-def _run(project: Path, tool: Path, cwd: Path):
-    messages = []
+def run_init(tmp_path, project, tool_root):
+    outputs = []
+    prompts = []
 
     def output_fn(*args, **kwargs):
-        messages.append(" ".join(str(a) for a in args))
+        outputs.append(" ".join(str(a) for a in args))
 
     def input_fn(prompt=""):
+        prompts.append(prompt)
         return ""
 
-    env = {"PATH": os.environ.get("PATH", "")}
-    rc = hotdocs_init.main(
+    env = {"PATH": os.environ.get("PATH", ""), "HOME": str(tmp_path / "home")}
+    code = hotdocs_init.main(
         [str(project), "--yes"],
-        tool_root=tool,
+        tool_root=tool_root,
         input_fn=input_fn,
         output_fn=output_fn,
         env=env,
-        cwd=cwd,
+        cwd=str(project),
     )
-    return rc, messages
+    return code, outputs
 
 
-def test_creates_empty_allowlist_and_no_decisions(tmp_path):
-    tool = _make_tool_root(tmp_path)
+def test_ac_init_008_creates_empty_allowlist_and_no_decisions(tmp_path):
+    tool_root, _log = make_tool_root(tmp_path)
     project = tmp_path / "proj"
     project.mkdir()
 
-    rc, _messages = _run(project, tool, tmp_path)
-    assert rc in (0, 3)
+    code, _outputs = run_init(tmp_path, project, tool_root)
+    assert code in (0, 3)
 
     allowlist = project / ".secret-allowlist.json"
     assert allowlist.is_file()
@@ -209,21 +209,25 @@ def test_creates_empty_allowlist_and_no_decisions(tmp_path):
 
     decisions = project / "specs" / "decisions"
     assert decisions.is_dir()
-    contents = sorted(str(p.relative_to(decisions)) for p in decisions.rglob("*"))
-    assert contents == [".gitkeep"]
+    assert sorted(p.name for p in decisions.iterdir()) == [".gitkeep"]
 
 
-def test_existing_allowlist_is_skipped_and_unchanged(tmp_path):
-    tool = _make_tool_root(tmp_path)
+def test_ac_init_008_existing_allowlist_is_skipped(tmp_path):
+    tool_root, _log = make_tool_root(tmp_path)
     project = tmp_path / "proj"
     project.mkdir()
 
+    original = b'{\n  "version": 1,\n  "entries": [],\n  "note": "kept as is"\n}'
     allowlist = project / ".secret-allowlist.json"
-    original = b'{"version":1,"entries":[]}'
     allowlist.write_bytes(original)
 
-    rc, messages = _run(project, tool, tmp_path)
-    assert rc in (0, 3)
+    code, outputs = run_init(tmp_path, project, tool_root)
+    assert code in (0, 3)
 
     assert allowlist.read_bytes() == original
-    assert any(".secret-allowlist.json: skipped (exists)" in m for m in messages), messages
+
+    lines = []
+    for message in outputs:
+        lines.append(message)
+        lines.extend(message.splitlines())
+    assert ".secret-allowlist.json: skipped (exists)" in [line.strip() for line in lines]
