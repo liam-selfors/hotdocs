@@ -34,6 +34,13 @@
 }
 ```
 
+`compute_blast_radius` returns a `BlastRadiusReport` dataclass with the
+fields `impacted` and `precondition_error`; each entry of `impacted` is an
+`ImpactedComponent` dataclass with `component_id`, `reason`, `via` and
+`guarantee_ids` (`None` unless `transitive-guarantee`). Both are read by
+attribute (`report.impacted[0].reason`) or by item (`report["impacted"]`),
+and `to_dict()` gives the JSON above, `guarantee_ids` only where shown.
+
 `component_id` is always the full `comp-<slug>` form (`glossary.md`'s
 "Component id / component slug" entry), matching exactly what a
 caller's own `--changed` argument would use — never the bare slug,
