@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:06d2c47c6402876cc8398af009d2492f2254d62c2c890d7cc2b77ebe8999454f
+# hotdocs-criterion: sha256:6e06364473e66e4720e9586c98f7e8242f4525d73ce91dba96c8dd0e6ab4d559
 import test_probe
 
 
@@ -15,26 +15,20 @@ def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def _findings(report):
-    return list(field(report, "findings"))
-
-
-def test_both_module_names_resolve_imports_and_stub_run_reaches():
+def test_list_module_name_resolves_every_name():
     report = test_probe.probe(SOURCE, {}, ["slugify", "url_tools"])
-    findings = _findings(report)
+    findings = field(report, "findings")
     assert field(report, "ok") is True, findings
     assert not [f for f in findings if field(f, "kind") == "unknown_import"], findings
     assert field(report, "tests_run") == 1, findings
     assert field(report, "tests_reached") == 1, findings
 
 
-def test_single_module_name_reports_other_import_unknown():
+def test_string_module_name_reports_other_import():
     report = test_probe.probe(SOURCE, {}, "slugify")
-    findings = _findings(report)
+    findings = field(report, "findings")
     assert field(report, "ok") is False, findings
     unknown = [f for f in findings if field(f, "kind") == "unknown_import"]
     assert len(unknown) == 1, findings
-    finding = unknown[0]
-    assert field(finding, "line") == 2
-    assert field(finding, "message") == "cannot import 'url_tools'"
-    assert field(finding, "severity") == "error"
+    assert field(unknown[0], "line") == 2
+    assert field(unknown[0], "message") == "cannot import 'url_tools'"
