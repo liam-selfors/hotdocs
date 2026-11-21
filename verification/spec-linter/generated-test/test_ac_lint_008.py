@@ -1,5 +1,7 @@
-# hotdocs-criterion: sha256:20fe861aeb42c2d147e3b44c11d8147222c62e9adfcf67d7b04a36e409d02fa9
+# hotdocs-criterion: sha256:af8972e9e0ff7a1128e5c74f6e01be99e950cc4ace61288d1daf87b0d622e7f4
+import io
 import json
+import contextlib
 from pathlib import Path
 
 import spec_linter
@@ -9,30 +11,55 @@ def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-COMPONENT_MD = (
+PRODUCT = (
+    "---\n"
+    "id: P-FOO\n"
+    "title: Foo works\n"
+    "status: draft\n"
+    "owners: [team-a]\n"
+    "---\n"
+    "\n"
+    "# Foo works\n"
+    "\n"
+    "## Purpose\n"
+    "\n"
+    "A foo can be made.\n"
+    "\n"
+    "### CS-FOO-001\n"
+    "Covers: P-FOO\n"
+    "Kind: generated-test\n"
+    "\n"
+    "```gherkin\n"
+    "Given nothing\n"
+    "When a foo is made\n"
+    "Then it exists\n"
+    "```\n"
+)
+
+COMPONENT = (
     "---\n"
     "id: comp-foo\n"
     "title: Foo\n"
     "status: draft\n"
-    "owners: [team-foo]\n"
-    "sealed: true\n"
-    "source_path: legacy/foo/\n"
+    "owners: [team-a]\n"
+    "depends_on: []\n"
+    "realizes: [P-FOO]\n"
+    "sealed: false\n"
     "---\n"
     "\n"
     "# Foo\n"
     "\n"
     "## Purpose\n"
     "\n"
-    "Foo does a small thing for testing.\n"
+    "Makes a foo.\n"
     "\n"
     "## Scope\n"
     "\n"
-    "- In scope: the thing.\n"
-    "- Out of scope: everything else.\n"
+    "**In scope:** making a foo. **Out of scope:** everything else.\n"
     "\n"
     "## Definitions\n"
     "\n"
-    "None.\n"
+    "No deltas from `specs/glossary.md`.\n"
     "\n"
     "## Behavior\n"
     "\n"
@@ -44,7 +71,7 @@ COMPONENT_MD = (
     "\n"
     "## Data\n"
     "\n"
-    "See `interface/data/`.\n"
+    "None.\n"
     "\n"
     "## Acceptance criteria\n"
     "\n"
@@ -56,98 +83,127 @@ COMPONENT_MD = (
     "\n"
     "## Open questions\n"
     "\n"
+    "None.\n"
+    "\n"
     "## Change log\n"
     "\n"
     "- Initial draft.\n"
 )
 
+REQ_001 = (
+    "# R-FOO-001\n"
+    "\n"
+    "**R-FOO-001** \u2014 `make_foo()` MUST return the string `\"foo\"`.\n"
+)
 
-def _requirement(rid, text):
-    return "# " + rid + "\n\n**" + rid + "** — " + text + "\n"
+LIBRARY = (
+    "# Library\n"
+    "\n"
+    "One module file, `foo.py`.\n"
+    "\n"
+    "```\n"
+    "make_foo() -> str\n"
+    "```\n"
+)
 
+AC_001 = (
+    "# AC-FOO-001\n"
+    "\n"
+    "Covers: R-FOO-001\n"
+    "Kind: generated-test\n"
+    "\n"
+    "```gherkin\n"
+    "Given nothing\n"
+    "When make_foo() is called\n"
+    "Then the result is \"foo\"\n"
+    "```\n"
+)
 
-def _acceptance(acid, rid):
-    return (
-        "# " + acid + "\n"
-        "\n"
-        "Covers: " + rid + "\n"
-        "Kind: generated-test\n"
-        "\n"
-        "```gherkin\n"
-        "Given a foo\n"
-        "When the thing runs\n"
-        "Then it completes\n"
-        "```\n"
-    )
-
-
-def _build_fixture(repo_root: Path) -> None:
-    specs = repo_root / "specs"
-    comp = specs / "components" / "foo"
-    (comp / "requirements").mkdir(parents=True)
-    (comp / "acceptance").mkdir(parents=True)
-    (comp / "interface").mkdir(parents=True)
-    (comp / "component.md").write_text(COMPONENT_MD)
-    (comp / "requirements" / "R-FOO-001.md").write_text(
-        _requirement("R-FOO-001", "The foo MUST do the first thing.")
-    )
-    (comp / "requirements" / "R-FOO-002.md").write_text(
-        _requirement("R-FOO-002", "The foo MUST do the second thing.")
-    )
-    # Only R-FOO-002 is covered; R-FOO-001 has zero covering criteria.
-    (comp / "acceptance" / "AC-FOO-002.md").write_text(
-        _acceptance("AC-FOO-002", "R-FOO-002")
-    )
-    (comp / "constraints.md").write_text(
-        "# Constraints\n\n- None beyond the defaults.\n"
-    )
-    (specs / "glossary.md").write_text(
-        "# Glossary\n\n- **Thing** — a thing foo does.\n"
-    )
+CONSTRAINTS = (
+    "# Foo \u2014 Non-Functional Constraints\n"
+    "\n"
+    "- **Pure.** No I/O.\n"
+)
 
 
-def _names(finding, rid):
+def write(root, rel, text):
+    p = Path(root) / rel
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(text, encoding="utf-8")
+
+
+def build_clean(root):
+    write(root, "specs/product/foo.md", PRODUCT)
+    write(root, "specs/components/foo/component.md", COMPONENT)
+    write(root, "specs/components/foo/requirements/R-FOO-001.md", REQ_001)
+    write(root, "specs/components/foo/interface/library.md", LIBRARY)
+    write(root, "specs/components/foo/acceptance/AC-FOO-001.md", AC_001)
+    write(root, "specs/components/foo/constraints.md", CONSTRAINTS)
+
+
+def build_uncovered(root):
+    build_clean(root)
+    (Path(root) / "specs/components/foo/acceptance/AC-FOO-001.md").unlink()
+
+
+def names_req(finding, req_id):
     message = str(field(finding, "message") or "")
-    file_ = str(field(finding, "file") or "")
-    return rid in message or (rid + ".md") in file_
+    file = str(field(finding, "file") or "")
+    return req_id in message or req_id in file
 
 
-def _check_findings(findings):
-    lint8 = [f for f in findings if field(f, "rule_id") == "R-LINT-008"]
-    hits = [
-        f for f in lint8
-        if field(f, "severity") == "fail" and _names(f, "R-FOO-001")
+def lint_008_findings(report):
+    return [f for f in field(report, "findings")
+            if field(f, "rule_id") == "R-LINT-008"]
+
+
+def test_clean_corpus_has_no_forward_traceability_failure(tmp_path):
+    build_clean(tmp_path)
+    report = spec_linter.lint(None, tmp_path)
+    assert lint_008_findings(report) == []
+
+
+def test_uncovered_requirement_yields_fail_finding(tmp_path):
+    build_uncovered(tmp_path)
+    report = spec_linter.lint(None, tmp_path)
+    matches = [f for f in lint_008_findings(report)
+               if field(f, "severity") == "fail" and names_req(f, "R-FOO-001")]
+    assert matches, [
+        (field(f, "rule_id"), field(f, "severity"), field(f, "file"),
+         field(f, "message"))
+        for f in field(report, "findings")
     ]
-    assert hits, (
-        "expected a fail-severity R-LINT-008 finding naming R-FOO-001, got: "
-        + repr([(field(f, "rule_id"), field(f, "severity"), field(f, "file"),
-                 field(f, "message")) for f in findings])
-    )
-    # The covered requirement is not reported as untraced.
-    assert not [f for f in lint8 if _names(f, "R-FOO-002")]
-
-
-def test_uncovered_requirement_fails_forward_traceability(tmp_path):
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    _build_fixture(repo_root)
-
-    report = spec_linter.lint(None, repo_root)
-
-    findings = list(field(report, "findings"))
-    _check_findings(findings)
     assert field(report, "hard_failures") >= 1
 
 
-def test_uncovered_requirement_fails_via_cli_json(tmp_path, capsys):
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    _build_fixture(repo_root)
+def test_uncovered_requirement_only_named_requirement_flagged(tmp_path):
+    build_uncovered(tmp_path)
+    # A second, covered requirement must not be flagged.
+    write(tmp_path, "specs/components/foo/requirements/R-FOO-002.md",
+          "# R-FOO-002\n\n**R-FOO-002** \u2014 `make_foo()` MUST NOT raise.\n")
+    write(tmp_path, "specs/components/foo/acceptance/AC-FOO-002.md",
+          "# AC-FOO-002\n\nCovers: R-FOO-002\nKind: generated-test\n\n"
+          "```gherkin\nGiven nothing\nWhen make_foo() is called\n"
+          "Then nothing is raised\n```\n")
+    report = spec_linter.lint(None, tmp_path)
+    findings = lint_008_findings(report)
+    assert any(field(f, "severity") == "fail" and names_req(f, "R-FOO-001")
+               for f in findings)
+    assert not any(names_req(f, "R-FOO-002") and not names_req(f, "R-FOO-001")
+                   for f in findings)
 
-    code = spec_linter.main(["--format=json", "--repo-root=" + str(repo_root)])
-    out = capsys.readouterr().out
 
-    assert code == 1
-    data = json.loads(out)
-    _check_findings(data["findings"])
-    assert data["summary"]["hard_failures"] >= 1
+def test_cli_json_reports_fail_and_exits_1(tmp_path):
+    build_uncovered(tmp_path)
+    out = io.StringIO()
+    err = io.StringIO()
+    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+        code = spec_linter.main(["--format=json", "--repo-root=" + str(tmp_path)])
+    assert code == 1, err.getvalue()
+    doc = json.loads(out.getvalue())
+    matches = [f for f in doc["findings"]
+               if f["rule_id"] == "R-LINT-008" and f["severity"] == "fail"
+               and ("R-FOO-001" in str(f.get("message", ""))
+                    or "R-FOO-001" in str(f.get("file", "")))]
+    assert matches, doc
+    assert doc["summary"]["hard_failures"] >= 1

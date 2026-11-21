@@ -1,30 +1,23 @@
-# hotdocs-criterion: sha256:c92b0e4f57aecaf3f486084aae4fdd9f3a5d39aeb7131472f37b20ce5d77fe9a
-"""AC-LINT-011b: a Definitions entry for a glossary term that adds genuinely
-new, component-specific nuance (low textual overlap with the glossary's own
-definition) is a permitted delta, so the lint report carries no R-LINT-011
-finding."""
-
+# hotdocs-criterion: sha256:b1006276864728ce0e0e2cc9f3f42c84fdfb6f05b28efd8dd5068990002f5885
+import json
 from pathlib import Path
 
 import spec_linter
 
 
-TERM = "Widget"
-
-GLOSSARY_DEFINITION = (
-    "reusable rendering unit composed into dashboard pages, "
-    "refreshed every poll cycle."
-)
-
-# Shares no tokens with GLOSSARY_DEFINITION: genuinely new nuance.
-LOCAL_DELTA = (
-    "In this component, exclusively signed bundles qualify; unsigned "
-    "artifacts stay quarantined pending operator approval."
-)
-
-
 def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
+
+
+GLOSSARY_TERM = "Blast radius"
+GLOSSARY_DEF = (
+    "the minimal set of components `impact-analyzer` determines need "
+    "regeneration/re-verification for a given spec change."
+)
+NEW_NUANCE = (
+    "Here, counted only across foo widgets; sealed legacy callers stay "
+    "excluded entirely, because their behavior is frozen upstream."
+)
 
 
 def _write(path, text):
@@ -32,45 +25,32 @@ def _write(path, text):
     path.write_text(text, encoding="utf-8")
 
 
-def _build_corpus(repo_root, local_definition):
-    specs = repo_root / "specs"
-
-    _write(
-        specs / "glossary.md",
-        "# Glossary\n"
-        "\n"
-        "Canonical vocabulary.\n"
-        "\n"
-        "- **" + TERM + "** \u2014 " + GLOSSARY_DEFINITION + "\n",
-    )
-
-    comp = specs / "components" / "foo"
-    _write(
-        comp / "component.md",
+def _component_md(definitions_body):
+    return (
         "---\n"
         "id: comp-foo\n"
         "title: Foo\n"
         "status: draft\n"
-        "owners: [pipeline-team]\n"
-        "sealed: true\n"
-        "source_path: legacy/foo/\n"
+        "owners: [team-a]\n"
+        "depends_on: []\n"
+        "realizes: [P-FOO]\n"
+        "sealed: false\n"
         "---\n"
         "\n"
         "# Foo\n"
         "\n"
         "## Purpose\n"
         "\n"
-        "Foo validates incoming widgets before they are displayed.\n"
+        "Makes a foo.\n"
         "\n"
         "## Scope\n"
         "\n"
-        "- In scope: widget validation.\n"
-        "- Out of scope: rendering.\n"
+        "**In scope:** making a foo. **Out of scope:** everything else.\n"
         "\n"
         "## Definitions\n"
         "\n"
-        "- **" + TERM + "** \u2014 " + local_definition + "\n"
-        "\n"
+        + definitions_body
+        + "\n"
         "## Behavior\n"
         "\n"
         "See `requirements/`.\n"
@@ -81,7 +61,7 @@ def _build_corpus(repo_root, local_definition):
         "\n"
         "## Data\n"
         "\n"
-        "See `interface/data/`.\n"
+        "None.\n"
         "\n"
         "## Acceptance criteria\n"
         "\n"
@@ -93,65 +73,121 @@ def _build_corpus(repo_root, local_definition):
         "\n"
         "## Open questions\n"
         "\n"
+        "None.\n"
+        "\n"
         "## Change log\n"
         "\n"
-        "- Initial draft.\n",
+        "- Initial draft.\n"
     )
+
+
+def _build_corpus(repo_root, local_definition_text):
+    specs = repo_root / "specs"
     _write(
-        comp / "requirements" / "R-FOO-001.md",
-        "# R-FOO-001\n"
+        specs / "product" / "foo.md",
+        "---\n"
+        "id: P-FOO\n"
+        "title: Foo works\n"
+        "status: draft\n"
+        "owners: [team-a]\n"
+        "---\n"
         "\n"
-        "**R-FOO-001** \u2014 Foo MUST reject an unsigned widget.\n",
-    )
-    _write(
-        comp / "acceptance" / "AC-FOO-001.md",
-        "# AC-FOO-001\n"
+        "# Foo works\n"
         "\n"
-        "Covers: R-FOO-001\n"
-        "Kind: compiled\n"
+        "## Purpose\n"
+        "\n"
+        "A foo can be made.\n"
+        "\n"
+        "### CS-FOO-001\n"
+        "Covers: P-FOO\n"
+        "Kind: generated-test\n"
         "\n"
         "```gherkin\n"
-        "Given an unsigned widget\n"
-        "When foo validates it\n"
-        "Then it is rejected\n"
+        "Given nothing\n"
+        "When a foo is made\n"
+        "Then it exists\n"
+        "```\n",
+    )
+    definitions = "- **" + GLOSSARY_TERM + "** — " + local_definition_text + "\n"
+    _write(specs / "components" / "foo" / "component.md", _component_md(definitions))
+    _write(
+        specs / "components" / "foo" / "requirements" / "R-FOO-001.md",
+        "# R-FOO-001\n"
+        "\n"
+        "**R-FOO-001** — `make_foo()` MUST return the string `\"foo\"`.\n",
+    )
+    _write(
+        specs / "components" / "foo" / "interface" / "library.md",
+        "# Library\n"
+        "\n"
+        "One module file, `foo.py`.\n"
+        "\n"
+        "```\n"
+        "make_foo() -> str\n"
         "```\n",
     )
     _write(
-        comp / "constraints.md",
-        "# Constraints\n"
+        specs / "components" / "foo" / "acceptance" / "AC-FOO-001.md",
+        "# AC-FOO-001\n"
         "\n"
-        "- Validation completes within 1 second, measured by a timer.\n",
+        "Covers: R-FOO-001\n"
+        "Kind: generated-test\n"
+        "\n"
+        "```gherkin\n"
+        "Given nothing\n"
+        "When make_foo() is called\n"
+        "Then the result is \"foo\"\n"
+        "```\n",
+    )
+    _write(
+        specs / "components" / "foo" / "constraints.md",
+        "# Foo — Non-Functional Constraints\n"
+        "\n"
+        "- **Pure.** No I/O.\n",
+    )
+    _write(
+        specs / "glossary.md",
+        "# Glossary\n"
+        "\n"
+        "Canonical vocabulary.\n"
+        "\n"
+        "- **" + GLOSSARY_TERM + "** — " + GLOSSARY_DEF + "\n",
     )
 
 
-def _lint011_findings(repo_root):
-    report = spec_linter.lint(None, repo_root)
-    findings = field(report, "findings")
+def _r011(findings):
     return [f for f in findings if field(f, "rule_id") == "R-LINT-011"]
 
 
-def test_low_overlap_definitions_delta_is_not_flagged(tmp_path):
+def test_low_overlap_definition_delta_is_not_flagged(tmp_path, capsys):
     repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    _build_corpus(repo_root, LOCAL_DELTA)
+    _build_corpus(repo_root, NEW_NUANCE)
 
-    findings = _lint011_findings(repo_root)
+    report = spec_linter.lint(None, repo_root)
+    findings = list(field(report, "findings"))
+    flagged = _r011(findings)
+    assert flagged == [], "unexpected R-LINT-011 findings: " + repr(flagged)
 
-    assert findings == [], (
-        "a genuinely new, low-overlap Definitions delta must not be "
-        "reported as an R-LINT-011 redefinition, got: " + repr(findings)
-    )
+    capsys.readouterr()
+    code = spec_linter.main(["--format=json", "--repo-root=" + str(repo_root)])
+    out = capsys.readouterr().out
+    data = json.loads(out)
+    assert [f for f in data["findings"] if f["rule_id"] == "R-LINT-011"] == []
+    assert code in (0, 1)
+    if not any(f["severity"] == "fail" for f in data["findings"]):
+        assert code == 0
 
 
 def test_control_verbatim_restatement_is_flagged(tmp_path):
-    # Sanity control: the same fixture shape with the glossary text restated
-    # verbatim does trigger R-LINT-011, so the absence above is meaningful.
+    # Sanity control: the same fixture with the glossary text restated
+    # verbatim is a redefinition, so the check is demonstrably active.
     repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    _build_corpus(repo_root, GLOSSARY_DEFINITION)
+    _build_corpus(repo_root, GLOSSARY_DEF)
 
-    findings = _lint011_findings(repo_root)
-
-    assert findings, "a verbatim restatement must produce an R-LINT-011 finding"
-    for f in findings:
-        assert field(f, "severity") == "fail"
+    report = spec_linter.lint(None, repo_root)
+    flagged = _r011(list(field(report, "findings")))
+    assert len(flagged) >= 1
+    assert all(field(f, "severity") == "fail" for f in flagged)
+    assert any(
+        field(f, "file") == "specs/components/foo/component.md" for f in flagged
+    )

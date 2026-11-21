@@ -1,148 +1,221 @@
-# hotdocs-criterion: sha256:1163af59f0ff8f110eff0d71dadaebbde6ab5972372c6d3b5741aedeb988b11c
-from pathlib import Path
-
+# hotdocs-criterion: sha256:ba842ff7c2e6f149ee6556d988f94559c6c4b4aaa2edda0987e39e30385daddc
 import spec_linter
+
+from pathlib import Path
 
 
 def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-SLUGS = ["alpha-tool", "beta-tool", "gamma-tool"]
+PRODUCT = (
+    "---\n"
+    "id: P-FOO\n"
+    "title: Foo works\n"
+    "status: draft\n"
+    "owners: [team-a]\n"
+    "---\n"
+    "\n"
+    "# Foo works\n"
+    "\n"
+    "## Purpose\n"
+    "\n"
+    "A foo can be made.\n"
+    "\n"
+    "### CS-FOO-001\n"
+    "Covers: P-FOO\n"
+    "Kind: generated-test\n"
+    "\n"
+    "```gherkin\n"
+    "Given nothing\n"
+    "When a foo is made\n"
+    "Then it exists\n"
+    "```\n"
+)
 
 
-def _write(path, text):
+def component_md(slug):
+    title = slug.capitalize()
+    return (
+        "---\n"
+        "id: comp-" + slug + "\n"
+        "title: " + title + "\n"
+        "status: draft\n"
+        "owners: [team-a]\n"
+        "depends_on: []\n"
+        "realizes: [P-FOO]\n"
+        "sealed: false\n"
+        "---\n"
+        "\n"
+        "# " + title + "\n"
+        "\n"
+        "## Purpose\n"
+        "\n"
+        "Makes a " + slug + ".\n"
+        "\n"
+        "## Scope\n"
+        "\n"
+        "**In scope:** making a " + slug + ". **Out of scope:** everything else.\n"
+        "\n"
+        "## Definitions\n"
+        "\n"
+        "No deltas from `specs/glossary.md`.\n"
+        "\n"
+        "## Behavior\n"
+        "\n"
+        "See `requirements/`.\n"
+        "\n"
+        "## Interfaces\n"
+        "\n"
+        "See `interface/`.\n"
+        "\n"
+        "## Data\n"
+        "\n"
+        "None.\n"
+        "\n"
+        "## Acceptance criteria\n"
+        "\n"
+        "See `acceptance/`.\n"
+        "\n"
+        "## Non-functional constraints\n"
+        "\n"
+        "See `constraints.md`.\n"
+        "\n"
+        "## Open questions\n"
+        "\n"
+        "None.\n"
+        "\n"
+        "## Change log\n"
+        "\n"
+        "- Initial draft.\n"
+    )
+
+
+def plain_requirement(rid, func):
+    return (
+        "# " + rid + "\n"
+        "\n"
+        "**" + rid + "** — `" + func + "()` MUST return the string `\"x\"`.\n"
+    )
+
+
+def cli_requirement(rid, slug):
+    return (
+        "# " + rid + "\n"
+        "\n"
+        "**" + rid + "** — The command in `interface/cli.md` MUST accept "
+        "`--format=json` and `--format json`, MUST treat `--format` with no "
+        "value or an unknown argument as a usage error, and MUST exit `0` on "
+        "success and `2` on a usage error.\n"
+    )
+
+
+def acceptance(acid, rid):
+    return (
+        "# " + acid + "\n"
+        "\n"
+        "Covers: " + rid + "\n"
+        "Kind: generated-test\n"
+        "\n"
+        "```gherkin\n"
+        "Given nothing\n"
+        "When the behavior is exercised\n"
+        "Then it holds\n"
+        "```\n"
+    )
+
+
+def library_md(slug):
+    mod = slug.replace("-", "_")
+    return (
+        "# Library\n"
+        "\n"
+        "One module file, `" + mod + ".py`.\n"
+        "\n"
+        "```\n"
+        "make_" + mod + "() -> str\n"
+        "```\n"
+    )
+
+
+def cli_md(slug):
+    return (
+        "# CLI\n"
+        "\n"
+        "```\n"
+        + slug + " [--format=json|text]\n"
+        "```\n"
+    )
+
+
+CONSTRAINTS = "# Constraints\n\n- **Pure.** No I/O.\n"
+
+
+def write(path, text):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
 
 
-def _component_md(slug, name):
-    return (
-        "---\n"
-        + "id: comp-" + slug + "\n"
-        + "title: " + name + "\n"
-        + "status: draft\n"
-        + "owners: [test-team]\n"
-        + "depends_on: []\n"
-        + "sealed: true\n"
-        + "source_path: legacy/" + slug + "/\n"
-        + "---\n"
-        + "\n"
-        + "# " + name + "\n"
-        + "\n"
-        + "## Purpose\n\nA small command-line tool used as a test fixture.\n\n"
-        + "## Scope\n\n- In scope: its command line.\n- Out of scope: everything else.\n\n"
-        + "## Definitions\n\nNone.\n\n"
-        + "## Behavior\n\nSee `requirements/`.\n\n"
-        + "## Interfaces\n\nSee `interface/`.\n\n"
-        + "## Data\n\nSee `interface/data/`.\n\n"
-        + "## Acceptance criteria\n\nSee `acceptance/`.\n\n"
-        + "## Non-functional constraints\n\nSee `constraints.md`.\n\n"
-        + "## Open questions\n\n"
-        + "## Change log\n\n- Initial draft.\n"
-    )
+def build_component(repo_root, slug, mode):
+    up = slug.upper()
+    base = repo_root / "specs" / "components" / slug
+    write(base / "component.md", component_md(slug))
+    write(base / "interface" / "library.md", library_md(slug))
+    write(base / "interface" / "cli.md", cli_md(slug))
+    write(base / "constraints.md", CONSTRAINTS)
+    r1 = "R-" + up + "-001"
+    a1 = "AC-" + up + "-001"
+    if mode == "covered":
+        write(base / "requirements" / (r1 + ".md"), cli_requirement(r1, slug))
+        write(base / "acceptance" / (a1 + ".md"), acceptance(a1, r1))
+    elif mode == "uncovered":
+        write(base / "requirements" / (r1 + ".md"),
+              plain_requirement(r1, "make_" + slug))
+        write(base / "acceptance" / (a1 + ".md"), acceptance(a1, r1))
+        r2 = "R-" + up + "-002"
+        write(base / "requirements" / (r2 + ".md"), cli_requirement(r2, slug))
+    else:
+        write(base / "requirements" / (r1 + ".md"),
+              plain_requirement(r1, "make_" + slug))
+        write(base / "acceptance" / (a1 + ".md"), acceptance(a1, r1))
 
 
-def _cli_md(slug):
-    return (
-        "# CLI\n\n```\n"
-        + slug + " [--format=json|text]\n"
-        + "```\n\nPrints a greeting.\n"
-    )
-
-
-def _citing_requirement(rid, slug):
-    return (
-        "# " + rid + "\n\n"
-        + "**" + rid + "** — The command line documented in `interface/cli.md` "
-        + "MUST accept `--format=json` and `--format json`, MUST treat `--format` "
-        + "given with no value as a usage error, MUST reject an unknown argument "
-        + "as a usage error, and MUST exit `0` on success and `2` on a usage error.\n"
-    )
-
-
-def _plain_requirement(rid):
-    return (
-        "# " + rid + "\n\n"
-        + "**" + rid + "** — The tool MUST print the greeting `hello` when run.\n"
-    )
-
-
-def _acceptance(aid, rid):
-    return (
-        "# " + aid + "\n\n"
-        + "Covers: " + rid + "\n"
-        + "Kind: generated-test\n\n"
-        + "```gherkin\n"
-        + "Given the tool\n"
-        + "When it runs\n"
-        + "Then it behaves as " + rid + " states\n"
-        + "```\n"
-    )
-
-
-def _build_corpus(repo_root):
-    specs = repo_root / "specs"
-    _write(specs / "glossary.md", "# Glossary\n\n- **Fixture** — a test corpus.\n")
-
-    # Component 1: citing requirement, covered by a criterion.
-    a = specs / "components" / "alpha-tool"
-    _write(a / "component.md", _component_md("alpha-tool", "Alpha Tool"))
-    _write(a / "interface" / "cli.md", _cli_md("alpha-tool"))
-    _write(a / "requirements" / "R-ALPHA-001.md", _citing_requirement("R-ALPHA-001", "alpha-tool"))
-    _write(a / "acceptance" / "AC-ALPHA-001.md", _acceptance("AC-ALPHA-001", "R-ALPHA-001"))
-    _write(a / "constraints.md", "# Constraints\n\nNone.\n")
-
-    # Component 2: citing requirement with no covering criterion.
-    b = specs / "components" / "beta-tool"
-    _write(b / "component.md", _component_md("beta-tool", "Beta Tool"))
-    _write(b / "interface" / "cli.md", _cli_md("beta-tool"))
-    _write(b / "requirements" / "R-BETA-001.md", _citing_requirement("R-BETA-001", "beta-tool"))
-    _write(b / "requirements" / "R-BETA-002.md", _plain_requirement("R-BETA-002"))
-    _write(b / "acceptance" / "AC-BETA-001.md", _acceptance("AC-BETA-001", "R-BETA-002"))
-    _write(b / "constraints.md", "# Constraints\n\nNone.\n")
-
-    # Component 3: no requirement cites interface/cli.md.
-    c = specs / "components" / "gamma-tool"
-    _write(c / "component.md", _component_md("gamma-tool", "Gamma Tool"))
-    _write(c / "interface" / "cli.md", _cli_md("gamma-tool"))
-    _write(c / "requirements" / "R-GAMMA-001.md", _plain_requirement("R-GAMMA-001"))
-    _write(c / "acceptance" / "AC-GAMMA-001.md", _acceptance("AC-GAMMA-001", "R-GAMMA-001"))
-    _write(c / "constraints.md", "# Constraints\n\nNone.\n")
-
-
-def _owning_slug(finding):
-    file_value = field(finding, "file")
-    file_text = str(file_value).replace("\\", "/") if file_value is not None else ""
-    message = str(field(finding, "message") or "")
-    for slug in SLUGS:
-        if "components/" + slug + "/" in file_text:
+def owning_slug(finding, slugs):
+    file_value = str(field(finding, "file")).replace("\\", "/")
+    message = str(field(finding, "message"))
+    for slug in slugs:
+        if "/components/" + slug + "/" in "/" + file_value:
             return slug
-    for slug in SLUGS:
-        if "comp-" + slug in message:
+    for slug in slugs:
+        if ("comp-" + slug) in message:
             return slug
     return None
 
 
-def test_r_lint_031_warns_only_for_uncovered_or_uncited_cli(tmp_path):
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    _build_corpus(repo_root)
+def test_ac_lint_031_cli_without_covered_citing_requirement_warns(tmp_path):
+    repo_root = tmp_path
+    write(repo_root / "specs" / "product" / "foo.md", PRODUCT)
+    build_component(repo_root, "alpha", "covered")
+    build_component(repo_root, "beta", "uncovered")
+    build_component(repo_root, "gamma", "none")
 
     report = spec_linter.lint(None, repo_root)
     findings = list(field(report, "findings"))
-    cli_findings = [f for f in findings if field(f, "rule_id") == "R-LINT-031"]
+    lint031 = [f for f in findings if field(f, "rule_id") == "R-LINT-031"]
 
+    slugs = ["alpha", "beta", "gamma"]
     by_slug = {}
-    for f in cli_findings:
-        slug = _owning_slug(f)
-        assert slug is not None, "R-LINT-031 finding not attributable to a fixture component: " + repr(f)
+    for f in lint031:
+        slug = owning_slug(f, slugs)
+        assert slug is not None, "unattributable R-LINT-031 finding: %r" % (f,)
         by_slug.setdefault(slug, []).append(f)
 
-    assert set(by_slug) == {"beta-tool", "gamma-tool"}, repr(cli_findings)
-    assert "alpha-tool" not in by_slug
+    assert "alpha" not in by_slug, by_slug.get("alpha")
+    assert len(by_slug.get("beta", [])) == 1, lint031
+    assert len(by_slug.get("gamma", [])) == 1, lint031
+    assert len(lint031) == 2, lint031
 
-    for slug in ("beta-tool", "gamma-tool"):
-        assert len(by_slug[slug]) >= 1
-        for f in by_slug[slug]:
-            assert field(f, "severity") == "warn", repr(f)
+    for slug in ("beta", "gamma"):
+        f = by_slug[slug][0]
+        assert field(f, "severity") == "warn"
+        assert ("comp-" + slug) in str(field(f, "message"))
