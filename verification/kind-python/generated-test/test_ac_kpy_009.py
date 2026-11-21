@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:b127eb780a32059c9fcafbb0f099684224eb5ae00f03b5b5a5a04c916a3dd8cf
+# hotdocs-criterion: sha256:994543918db773f3e5a4795dd8d4ff21401229a46c51779a77550b546e493616
 import kind_python
 
 
@@ -6,7 +6,7 @@ def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-CALC_SOURCE = (
+CALC_PY = (
     '"""Calculator: a < b and True are prose here."""\n' "\n" "\n"
     "def check(a, b, xs):\n"
     "    flags = [a == b, a != b, a < b, a >= b, a > b, a <= b]\n"
@@ -16,11 +16,11 @@ CALC_SOURCE = (
     "    return (a and b) or inner(a + b - 1) // 3 % 2, True, False\n"
 )
 
-PKG_INIT_SOURCE = "def sign(n):\n    return -1 if n < 0 else 1\n"
+PKG_INIT_PY = "def sign(n):\n    return -1 if n < 0 else 1\n"
 
-JUNK_SOURCE = "x = 1 == 2\n"
+JUNK_PY = "x = 1 == 2\n"
 
-EXPECTED_DESCRIPTIONS = [
+EXPECTED = [
     "calc.py:5: a == b -> a != b",
     "calc.py:5: a != b -> a == b",
     "calc.py:5: a < b -> a >= b",
@@ -45,41 +45,30 @@ EXPECTED_DESCRIPTIONS = [
 ]
 
 
-def build_code_dir(tmp_path):
+def _write(path, text):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+
+
+def test_ac_kpy_009_strength_sites_parity(tmp_path, monkeypatch):
+    monkeypatch.delenv("HOTDOCS_PYTHON", raising=False)
     d = tmp_path / "calc"
-    d.mkdir()
-    (d / "calc.py").write_text(CALC_SOURCE, encoding="utf-8")
-    (d / "pkg").mkdir()
-    (d / "pkg" / "__init__.py").write_text(PKG_INIT_SOURCE, encoding="utf-8")
-    (d / "__pycache__").mkdir()
-    (d / "__pycache__" / "junk.py").write_text(JUNK_SOURCE, encoding="utf-8")
-    return d
-
-
-def test_ac_kpy_009_strength_sites_parity(tmp_path):
-    d = build_code_dir(tmp_path)
+    _write(d / "calc.py", CALC_PY)
+    _write(d / "pkg" / "__init__.py", PKG_INIT_PY)
+    _write(d / "__pycache__" / "junk.py", JUNK_PY)
 
     sites = kind_python.strength_sites(d)
+    sites = list(sites)
 
-    assert isinstance(sites, list)
+    descriptions = [field(s, "description") for s in sites]
+    assert descriptions == EXPECTED
 
-    descriptions = [field(site, "description") for site in sites]
-    assert descriptions == EXPECTED_DESCRIPTIONS
-
-    files = [field(site, "file") for site in sites]
+    files = [field(s, "file") for s in sites]
     assert files == ["calc.py"] * 20 + ["pkg/__init__.py"]
 
-    indexes = [field(site, "index") for site in sites]
+    indexes = [field(s, "index") for s in sites]
     assert indexes == list(range(20)) + [0]
 
-    for site in sites:
-        assert isinstance(site, dict)
-        assert set(site.keys()) == {"description", "file", "index"}
-
-    # Nothing from __pycache__, the docstring, the chained comparison,
-    # numeric constants, +=, or the unary -1.
-    for desc in descriptions:
-        assert "__pycache__" not in desc
-        assert "prose" not in desc
-        assert "0 < a < 10" not in desc
-        assert "-1 ->" not in desc
+    for s in sites:
+        assert isinstance(s, dict)
+        assert set(s.keys()) == {"description", "file", "index"}

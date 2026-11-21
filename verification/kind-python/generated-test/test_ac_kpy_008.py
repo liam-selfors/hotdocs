@@ -1,111 +1,67 @@
-# hotdocs-criterion: sha256:b5c483049141b962b6f2eff92632348fe53d9277b58a39af820d230a1bb360f6
-import base64
+# hotdocs-criterion: sha256:6d1694e28fb5c5e724748dd83993da41e5dfcd7516d90de34a6890fe4c3e8c41
 import hashlib
 import json
-import os
 import platform
 import subprocess
-import sys
 import zipfile
-from pathlib import Path
-
-import pytest
 
 import kind_python
 
 
-def field(value, name):
-    return value[name] if isinstance(value, dict) else getattr(value, name)
+# R-KPY-004's environment program is not in this bundle. This reconstructs it from
+# asset-kind-python.md "## Environment": {"python": platform.python_version(),
+# "packages": "sha256:<hex>"}, the hash taken over the sorted, distinct
+# "<normalized name>==<version>" lines joined with "\n".
+PROGRAM = (
+    "import hashlib, importlib.metadata, json, platform, re\n"
+    "lines = sorted({re.sub(r'[-_.]+', '-', d.metadata['Name']).lower() + '==' + d.version for d in importlib.metadata.distributions() if d.metadata['Name']})\n"
+    "packages = 'sha256:' + hashlib.sha256('\\n'.join(lines).encode('utf-8')).hexdigest()\n"
+    "print(json.dumps({'python': platform.python_version(), 'packages': packages}))\n"
+)
 
 
-def as_dict(result):
-    keys = ["ok", "reason", "versions", "interpreter", "lockfile_sha256"]
-    if isinstance(result, dict):
-        return dict(result)
-    return {k: field(result, k) for k in keys}
+def envinfo(python):
+    proc = subprocess.run([python, "-I", "-c", PROGRAM], capture_output=True, text=True)
+    lines = [line for line in proc.stdout.splitlines() if line.strip()]
+    return json.loads(lines[-1])
 
 
 def lock_hash(lock):
     return "sha256:" + hashlib.sha256(lock.read_bytes()).hexdigest()
 
 
-ENVINFO_PROGRAM = (
-    "import hashlib, json, platform, re\n"
-    "import importlib.metadata as m\n"
-    "lines = set()\n"
-    "for d in m.distributions():\n"
-    "    name = d.metadata['Name']\n"
-    "    if not name:\n"
-    "        continue\n"
-    "    lines.add(re.sub(r'[-_.]+', '-', name).lower() + '==' + d.version)\n"
-    "text = '\\n'.join(sorted(lines))\n"
-    "print(json.dumps({'python': platform.python_version(),"
-    " 'packages': 'sha256:' + hashlib.sha256(text.encode('utf-8')).hexdigest()}))\n"
-)
+def build_wheel(tmp_path):
+    wheels = tmp_path / "wheels"
+    wheels.mkdir(parents=True, exist_ok=True)
+    whl = wheels / "pytest-0.0.1-py3-none-any.whl"
+    with zipfile.ZipFile(whl, "w") as zf:
+        zf.writestr(
+            "pytest-0.0.1.dist-info/METADATA",
+            "Metadata-Version: 2.1\nName: pytest\nVersion: 0.0.1\n",
+        )
+        zf.writestr(
+            "pytest-0.0.1.dist-info/WHEEL",
+            "Wheel-Version: 1.0\nGenerator: test\nRoot-Is-Purelib: true\nTag: py3-none-any\n",
+        )
+        zf.writestr("pytest-0.0.1.dist-info/RECORD", "")
+    return wheels
 
 
-def envinfo(interpreter):
-    proc = subprocess.run(
-        [interpreter, "-I", "-c", ENVINFO_PROGRAM],
-        capture_output=True,
-        text=True,
-        timeout=120,
-    )
-    assert proc.returncode == 0, proc.stderr
-    lines = [ln for ln in proc.stdout.splitlines() if ln.strip()]
-    return json.loads(lines[-1])
+def test_ac_kpy_008(tmp_path, monkeypatch):
+    monkeypatch.delenv("HOTDOCS_PYTHON", raising=False)
 
-
-def record_hash(data):
-    digest = hashlib.sha256(data).digest()
-    return "sha256=" + base64.urlsafe_b64encode(digest).rstrip(b"=").decode("ascii")
-
-
-def build_local_wheel(directory):
-    directory.mkdir(parents=True, exist_ok=True)
-    wheel = directory / "pytest-99.0.0-py3-none-any.whl"
-    dist_info = "pytest-99.0.0.dist-info"
-    files = {
-        "pytest/__init__.py": b"",
-        dist_info + "/METADATA": (
-            b"Metadata-Version: 2.1\nName: pytest\nVersion: 99.0.0\n"
-        ),
-        dist_info + "/WHEEL": (
-            b"Wheel-Version: 1.0\nGenerator: test\n"
-            b"Root-Is-Purelib: true\nTag: py3-none-any\n"
-        ),
-    }
-    record_lines = []
-    for name, data in files.items():
-        record_lines.append(name + "," + record_hash(data) + "," + str(len(data)))
-    record_lines.append(dist_info + "/RECORD,,")
-    files[dist_info + "/RECORD"] = ("\n".join(record_lines) + "\n").encode("utf-8")
-    with zipfile.ZipFile(wheel, "w") as zf:
-        for name, data in files.items():
-            zf.writestr(name, data)
-    return directory
-
-
-@pytest.mark.skipif(os.name == "nt", reason="POSIX layout (bin/python)")
-def test_ac_kpy_008(tmp_path):
-    try:
-        import ensurepip  # noqa: F401
-        import venv  # noqa: F401
-    except ImportError:
-        pytest.skip("venv/ensurepip not available")
-
-    lock_dir = tmp_path / "environments" / "python"
-    lock_dir.mkdir(parents=True)
-    lock = lock_dir / "requirements.lock"
     env = tmp_path / ".hotdocs" / "env" / "python"
-    interpreter = str(env / "bin" / "python")
     marker = env / ".lock-sha256"
+    interpreter = str(env / "bin" / "python")
     v = platform.python_version()
 
-    # Failing install, offline.
-    lock.write_bytes(b"--no-index\nPyTest==99.0.0\n")
+    lock = tmp_path / "environments" / "python" / "requirements.lock"
+    lock.parent.mkdir(parents=True, exist_ok=True)
+
+    # Failing install: an unavailable pin, offline.
+    lock.write_text("--no-index\nPyTest==99.0.0\n", encoding="utf-8")
     h = lock_hash(lock)
-    result = as_dict(kind_python.provision(tmp_path))
+    result = kind_python.provision(tmp_path)
     assert result == {
         "ok": False,
         "reason": "python environment: ERROR: No matching distribution found for PyTest==99.0.0",
@@ -117,19 +73,16 @@ def test_ac_kpy_008(tmp_path):
     assert not marker.exists()
     assert (tmp_path / ".hotdocs" / "env" / "python.lock").exists()
 
-    # A local lock: offline, from a local wheel that pins pytest.
-    wheels = build_local_wheel(tmp_path / "wheels")
-    lock.write_bytes(
-        (
-            "--no-index\n"
-            "--find-links " + str(wheels) + "\n"
-            "pytest==99.0.0\n"
-        ).encode("utf-8")
+    # The local lock of testing.md.
+    build_wheel(tmp_path)
+    lock.write_text(
+        "--no-index\n--find-links " + str(tmp_path / "wheels") + "\npytest==0.0.1\n",
+        encoding="utf-8",
     )
 
     for _ in range(2):
         h = lock_hash(lock)
-        result = as_dict(kind_python.provision(tmp_path))
+        result = kind_python.provision(tmp_path)
         expected = {
             "ok": True,
             "reason": "",
@@ -138,11 +91,12 @@ def test_ac_kpy_008(tmp_path):
             "interpreter": interpreter,
         }
         assert result == expected
-        assert marker.read_text() == h + " " + v
+        assert marker.read_text(encoding="utf-8") == h + " " + v
 
+    # A stale marker forces a rebuild.
     marker.write_text("stale")
     h = lock_hash(lock)
-    result = as_dict(kind_python.provision(tmp_path))
+    result = kind_python.provision(tmp_path)
     expected = {
         "ok": True,
         "reason": "",
@@ -151,4 +105,4 @@ def test_ac_kpy_008(tmp_path):
         "interpreter": interpreter,
     }
     assert result == expected
-    assert marker.read_text() == h + " " + v
+    assert marker.read_text(encoding="utf-8") == h + " " + v

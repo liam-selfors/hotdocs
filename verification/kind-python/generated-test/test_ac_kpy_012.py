@@ -1,8 +1,10 @@
-# hotdocs-criterion: sha256:3571babe49a59f2653eedf79f38c228d09db8c880bc5d430fa64e27e26859491
+# hotdocs-criterion: sha256:7016c944aa16d9165b2eeec932cbd523b9db869f85c87f64e9450134a7c369c2
 import kind_python
 
 
-def test_guidance_returns_new_empty_dict_each_call():
+def test_ac_kpy_012_guidance_returns_new_empty_dict_each_call(monkeypatch):
+    monkeypatch.delenv("HOTDOCS_PYTHON", raising=False)
+
     first = kind_python.guidance()
     second = kind_python.guidance()
 
