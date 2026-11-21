@@ -30,12 +30,18 @@ When check_readiness is called
 Then every component under specs/components/ is checked via
   provenance-checker, and the report's scope is whole-corpus
 
+Given a repo_root with an empty specs/components/ and no gen/ directory
+When check_readiness(repo_root) is called
+Then the tool's own provenance-checker is loaded, and the report is
+  ready, with scope whole-corpus and an empty components map
+
 Given a provenance-checker hit carrying a verification_report whose
   requirement_results is {"R-FOO-001": "pass", "R-FOO-002": "fail"}
 When check_readiness is called
 Then that component is reported as not ready, and its
   not_ready_reasons entry contains the component id, "verification",
-  and "R-FOO-002", and no call is made to component-gate-runner
+  and "R-FOO-002" but not "R-FOO-001", and no call is made to
+  component-gate-runner
 
 Given a provenance-checker hit with a passing verification_report but
   a license_scan whose blocked is true
