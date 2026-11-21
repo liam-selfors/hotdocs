@@ -2,9 +2,12 @@
 
 **R-TRACK-009** — MUST expose `check_readiness(repo_root: Path,
   changed_ids: list[str] | None = None, model: str | None = None,
-  seed: int = 0, llm_backend=None) -> VerifyReport` (`D88`/`D93`): given
-  `changed_ids`, MUST call `impact-analyzer` to compute the blast
-  radius and check each component; given none (or an empty list), MUST
+  seed: int = 0, llm_backend=None) -> VerifyReport` (`D88`/`D93`): given `changed_ids`, MUST call `impact-analyzer` to compute the blast
+  radius and check each component, unless its report's
+  `precondition_error` is not null: the scope is then unknown, so no
+  component or capability is checked, `ready` is false, and
+  `not_ready_reasons` is exactly
+  `["blast radius unavailable: <precondition_error>"]`; given none (or an empty list), MUST
   check every directory under `specs/components/` holding a
   `component.md`, identified by that file's frontmatter `id` (parsed
   with `yaml.safe_load`, never by hand), never by the directory name.
@@ -22,10 +25,7 @@
   `<id>: sealed provenance <reason> — run hotdocs generate <id>`.
 
   **MUST NOT call `component-gate-runner` for any component, on a hit or
-  a miss** (`D93`): generating code is a deliberate, potentially
-  expensive action a developer triggers with `hotdocs generate`, never a
-  side effect of checking readiness. This half is pure and read-only, so
-  `depends_on` ordering does not matter here.
+  a miss** (`D93`).
 
   A non-sealed component whose check is a miss, or whose hit carries a
   failing `verification_report` or blocking scan, is not ready, never a

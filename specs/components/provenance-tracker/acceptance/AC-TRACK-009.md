@@ -16,6 +16,15 @@ Then the report's scope is blast-radius, its components map has
   exactly those two entries, and the missing one is named in
   not_ready_reasons, and component-gate-runner is never called
 
+Given changed_ids and impact-analyzer reporting impacted [] with
+  precondition_error "corpus did not pass spec-linter cleanly: 6
+  fail-severity finding(s)"
+When check_readiness is called with those changed_ids
+Then ready is false, not_ready_reasons is exactly ["blast radius
+  unavailable: corpus did not pass spec-linter cleanly: 6 fail-severity
+  finding(s)"], components is empty, and provenance-checker's
+  check_provenance is never called
+
 Given no changed_ids
 When check_readiness is called
 Then every component under specs/components/ is checked via

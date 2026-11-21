@@ -31,7 +31,8 @@ Covers: P-MERGE-VISIBILITY
 Kind: generated-test
 
 ```gherkin
-Given a change touching three components where two generate and verify
+Given a corpus that passes `hotdocs lint` at every step, and
+  a change touching three components where two generate and verify
   and one fails verification, followed by a spec edit to the failing
   component and a second `hotdocs generate` of it
 When a developer queries provenance-tracker after each step
