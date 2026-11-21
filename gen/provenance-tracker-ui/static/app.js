@@ -1,22 +1,24 @@
 export function hiddenByStatus(nodes, filter) {
   const result = {};
-  for (const node of nodes) {
+  nodes.forEach((node) => {
     result[node.id] = filter !== "all" && node.status !== filter;
-  }
+  });
   return result;
 }
 
 export function init(document) {
-  const buttons = document.querySelectorAll("button[data-filter]");
-  buttons.forEach(function (button) {
-    button.addEventListener("click", function () {
+  document.querySelectorAll("button[data-filter]").forEach((button) => {
+    button.addEventListener("click", () => {
       const items = document.querySelectorAll("li.node");
       const nodes = [];
-      items.forEach(function (item) {
-        nodes.push({ id: item.getAttribute("data-node-id"), status: item.getAttribute("data-status") });
+      items.forEach((item) => {
+        nodes.push({
+          id: item.getAttribute("data-node-id"),
+          status: item.getAttribute("data-status"),
+        });
       });
       const hidden = hiddenByStatus(nodes, button.getAttribute("data-filter"));
-      items.forEach(function (item) {
+      items.forEach((item) => {
         item.hidden = hidden[item.getAttribute("data-node-id")];
       });
     });
