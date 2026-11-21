@@ -1,130 +1,134 @@
-# hotdocs-criterion: sha256:08e7dd541136b29046b1f84086449df96814450d4df55ce155e36c03ca210296
-import spec_scaffolder
-
+# hotdocs-criterion: sha256:8fe1966bdccc61dc6982434602002fef2faa6a09ac558223c26ceba176e25702
 from pathlib import Path
 
 import pytest
 
-
-def _write(path, lines):
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+import spec_scaffolder
 
 
-def _closing_index(lines):
-    assert lines[0] == "---"
-    for i in range(1, len(lines)):
-        if lines[i] == "---":
-            return i
-    raise AssertionError("no closing frontmatter delimiter")
+D1_TEXT = (
+    "---\n"
+    "id: D1\n"
+    "title: First decision\n"
+    "status: ratified\n"
+    "owners: [team-a]\n"
+    "last_ratified_commit: 0000000\n"
+    "---\n"
+    "\n"
+    "# D1: First decision\n"
+    "\n"
+    "Body of the first decision.\n"
+)
+
+D2_TEXT = (
+    "---\n"
+    "id: D2\n"
+    "title: Second decision\n"
+    "status: ratified\n"
+    "owners: [team-a, team-b]\n"
+    "last_ratified_commit: 0000000\n"
+    "---\n"
+    "\n"
+    "# D2: Second decision\n"
+    "\n"
+    "Body of the second decision.\n"
+    "status: this body line is not frontmatter\n"
+)
 
 
-def _abs(repo_root, p):
-    p = Path(p)
-    if not p.is_absolute():
-        p = Path(repo_root) / p
-    return p.resolve()
-
-
-def _snapshot(repo_root):
-    root = Path(repo_root)
+def _snapshot(decisions_dir):
     return {
-        str(p.relative_to(root)): p.read_bytes()
-        for p in sorted(root.rglob("*"))
+        p.name: p.read_bytes()
+        for p in sorted(decisions_dir.iterdir())
         if p.is_file()
     }
 
 
-def _build(tmp_path):
+def _frontmatter_close_index(lines):
+    assert lines[0] == "---", "file does not start with frontmatter"
+    for i in range(1, len(lines)):
+        if lines[i] == "---":
+            return i
+    raise AssertionError("frontmatter is not closed")
+
+
+def _build_repo(tmp_path):
     repo_root = tmp_path / "repo"
     decisions = repo_root / "specs" / "decisions"
     decisions.mkdir(parents=True)
-    _write(
-        decisions / "D1.md",
-        [
-            "---",
-            "id: D1",
-            "title: First decision",
-            "status: ratified",
-            "owners: [team-a]",
-            "last_ratified_commit: 0000000",
-            "---",
-            "",
-            "# D1",
-            "",
-            "Body one.",
-        ],
-    )
-    _write(
-        decisions / "D2.md",
-        [
-            "---",
-            "id: D2",
-            "title: Second decision",
-            "status: ratified",
-            "owners: [team-a, team-b]",
-            "last_ratified_commit: 0000000",
-            "---",
-            "",
-            "# D2",
-            "",
-            "Body two.",
-        ],
-    )
-    d3 = spec_scaffolder.new_decision(repo_root, "Replace two", supersedes="D2")
-    d3_abs = _abs(repo_root, d3)
-    assert d3_abs == (decisions / "D3.md").resolve()
+    (decisions / "D1.md").write_text(D1_TEXT)
+    (decisions / "D2.md").write_text(D2_TEXT)
     return repo_root, decisions
 
 
-def test_ac_scaffold_003_ratify_and_deprecate_superseded(tmp_path):
-    repo_root, decisions = _build(tmp_path)
-    d2_path = decisions / "D2.md"
-    d3_path = decisions / "D3.md"
+def test_ac_scaffold_003(tmp_path):
+    repo_root, decisions = _build_repo(tmp_path)
 
-    d2_before = d2_path.read_text(encoding="utf-8").split("\n")
-    d3_before = d3_path.read_text(encoding="utf-8").split("\n")
-    assert "status: draft" in d3_before[: _closing_index(d3_before)]
+    d3_path = spec_scaffolder.new_decision(repo_root, "Replace two", supersedes="D2")
+    d3_path = Path(d3_path)
+    if not d3_path.is_absolute():
+        d3_path = repo_root / d3_path
+    assert d3_path.name == "D3.md"
+    assert d3_path.resolve() == (decisions / "D3.md").resolve()
+
+    d3_before = (decisions / "D3.md").read_text()
+    d2_before = (decisions / "D2.md").read_text()
+    d1_before_bytes = (decisions / "D1.md").read_bytes()
+
+    d3_before_lines = d3_before.split("\n")
+    assert "status: draft" in d3_before_lines
+    assert "supersedes: D2" in d3_before_lines
 
     result = spec_scaffolder.ratify(repo_root, "D3")
 
-    result_abs = [_abs(repo_root, p) for p in result]
-    assert result_abs == [d3_path.resolve(), d2_path.resolve()]
+    result_paths = []
+    for p in result:
+        p = Path(p)
+        if not p.is_absolute():
+            p = repo_root / p
+        result_paths.append(p.resolve())
+    assert result_paths == [
+        (decisions / "D3.md").resolve(),
+        (decisions / "D2.md").resolve(),
+    ]
 
-    d3_after = d3_path.read_text(encoding="utf-8").split("\n")
-    d2_after = d2_path.read_text(encoding="utf-8").split("\n")
+    # D3: status changed, last_ratified_commit appended as last frontmatter line.
+    d3_after_lines = (decisions / "D3.md").read_text().split("\n")
+    expected_d3 = [
+        "status: ratified" if line == "status: draft" else line
+        for line in d3_before_lines
+    ]
+    close = _frontmatter_close_index(expected_d3)
+    expected_d3.insert(close, "last_ratified_commit: PENDING-COMMIT")
+    assert d3_after_lines == expected_d3
 
-    # Expected D3: status line flipped, PENDING-COMMIT added as last frontmatter line.
-    close3 = _closing_index(d3_before)
-    expected_d3 = list(d3_before)
-    idx = expected_d3.index("status: draft")
-    assert idx < close3
-    expected_d3[idx] = "status: ratified"
-    expected_d3.insert(close3, "last_ratified_commit: PENDING-COMMIT")
-    assert d3_after == expected_d3
+    after_close = _frontmatter_close_index(d3_after_lines)
+    assert d3_after_lines[after_close - 1] == "last_ratified_commit: PENDING-COMMIT"
+    assert "status: ratified" in d3_after_lines[:after_close]
 
-    close3_after = _closing_index(d3_after)
-    assert d3_after[close3_after - 1] == "last_ratified_commit: PENDING-COMMIT"
-    assert "status: ratified" in d3_after[:close3_after]
+    # D2: only its frontmatter status line changed to deprecated.
+    d2_before_lines = d2_before.split("\n")
+    d2_after_lines = (decisions / "D2.md").read_text().split("\n")
+    d2_close = _frontmatter_close_index(d2_before_lines)
+    expected_d2 = list(d2_before_lines)
+    for i in range(1, d2_close):
+        if expected_d2[i].startswith("status:"):
+            expected_d2[i] = "status: deprecated"
+            break
+    assert d2_after_lines == expected_d2
+    assert "status: deprecated" in d2_after_lines
 
-    # Expected D2: only the status line changes, to deprecated.
-    expected_d2 = list(d2_before)
-    idx2 = expected_d2.index("status: ratified")
-    assert idx2 < _closing_index(d2_before)
-    expected_d2[idx2] = "status: deprecated"
-    assert d2_after == expected_d2
+    # Unrelated record untouched.
+    assert (decisions / "D1.md").read_bytes() == d1_before_bytes
 
-
-def test_ac_scaffold_003_already_ratified_and_unknown_raise(tmp_path):
-    repo_root, decisions = _build(tmp_path)
-    spec_scaffolder.ratify(repo_root, "D3")
-
-    before = _snapshot(repo_root)
+    # Second part: re-ratifying D3 and ratifying a missing D40 both raise, changing nothing.
+    snapshot = _snapshot(decisions)
 
     with pytest.raises(LookupError):
         spec_scaffolder.ratify(repo_root, "D3")
-    assert _snapshot(repo_root) == before
+    assert _snapshot(decisions) == snapshot
 
     with pytest.raises(LookupError):
         spec_scaffolder.ratify(repo_root, "D40")
-    assert _snapshot(repo_root) == before
+    assert _snapshot(decisions) == snapshot
+    assert not (decisions / "D40.md").exists()

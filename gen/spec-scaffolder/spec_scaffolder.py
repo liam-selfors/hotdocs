@@ -1,97 +1,74 @@
-"""Spec Scaffolder: mechanical scaffolding of decisions, components and asset kinds."""
+"""Spec Scaffolder: writes the structure and frontmatter of specbase files."""
 
-import os
+from __future__ import annotations
+
 import re
 import subprocess
 import sys
 from pathlib import Path
 
-_DECISION_FILE_RE = re.compile(r"^D([1-9][0-9]*)\.md$")
-_DECISION_ID_RE = re.compile(r"^D[1-9][0-9]*$")
-_SLUG_RE = re.compile(r"^[a-z][a-z0-9]*(-[a-z0-9]+)*$")
-_KIND_RE = re.compile(r"^[a-z][a-z0-9]*$")
-
-_PENDING = "PENDING-COMMIT"
-
-
-def _decisions_dir(repo_root):
-    return Path(repo_root) / "specs" / "decisions"
+_KEBAB = re.compile(r"^[a-z][a-z0-9]*(-[a-z0-9]+)*$")
+_DECISION_FILE = re.compile(r"^D([1-9][0-9]*)\.md$")
+_DECISION_ID = re.compile(r"^D[1-9][0-9]*$")
+_PENDING_LINE = "last_ratified_commit: PENDING-COMMIT\n"
 
 
 def _flow(items):
     return "[" + ", ".join(items) + "]"
 
 
-def _write_new(path, text):
-    with open(path, "x", encoding="utf-8", newline="") as fh:
-        fh.write(text)
+def _owners(owners):
+    return ["unassigned"] if owners is None else list(owners)
 
 
-def _read(path):
-    with open(path, "r", encoding="utf-8", newline="") as fh:
-        return fh.read()
+def _decisions_dir(repo_root):
+    return Path(repo_root) / "specs" / "decisions"
 
 
-def _write(path, text):
-    with open(path, "w", encoding="utf-8", newline="") as fh:
-        fh.write(text)
-
-
-def _eol(line):
-    return line[len(line.rstrip("\r\n")):]
-
-
-def _frontmatter_end(lines):
-    for i in range(1, len(lines)):
-        if lines[i].rstrip("\r\n") == "---":
-            return i
-    return len(lines)
-
-
-def _check_decision_id(decision_id):
-    if not _DECISION_ID_RE.match(decision_id):
-        raise ValueError(f"invalid decision id: {decision_id!r}")
-
-
-def _record_lines(repo_root, decision_id):
-    _check_decision_id(decision_id)
+def _record_path(repo_root, decision_id):
+    if not _DECISION_ID.match(decision_id):
+        raise ValueError(f"decision id {decision_id!r} is not of the form D<N>")
     path = _decisions_dir(repo_root) / f"{decision_id}.md"
     if not path.is_file():
-        raise LookupError(f"no decision record: {decision_id}")
-    lines = _read(path).splitlines(keepends=True)
-    return path, lines, _frontmatter_end(lines)
+        raise LookupError(f"no decision record {decision_id}")
+    return path
 
 
-def next_decision_id(repo_root):
-    ddir = _decisions_dir(repo_root)
+def _read_lines(path):
+    lines = path.read_text(encoding="utf-8").splitlines(keepends=True)
+    end = lines.index("---\n", 1)
+    return lines, end
+
+
+def next_decision_id(repo_root: Path) -> str:
+    directory = _decisions_dir(repo_root)
     largest = 0
-    if ddir.is_dir():
-        for entry in ddir.iterdir():
-            m = _DECISION_FILE_RE.match(entry.name)
-            if m and entry.is_file():
-                largest = max(largest, int(m.group(1)))
+    if directory.is_dir():
+        for entry in directory.iterdir():
+            match = _DECISION_FILE.match(entry.name)
+            if match:
+                largest = max(largest, int(match.group(1)))
     return f"D{largest + 1}"
 
 
-def new_decision(repo_root, title, owners=None, builds_on=None, supersedes=None):
-    owners = ["unassigned"] if owners is None else list(owners)
-    builds_on = [] if builds_on is None else list(builds_on)
+def new_decision(repo_root: Path, title: str, owners: list[str] | None = None,
+                 builds_on: list[str] | None = None,
+                 supersedes: str | None = None) -> Path:
     if not title:
         raise ValueError("title must not be empty")
-    ddir = _decisions_dir(repo_root)
-    referenced = list(builds_on)
-    if supersedes is not None:
-        referenced.append(supersedes)
+    directory = _decisions_dir(repo_root)
+    builds_on = list(builds_on or [])
+    referenced = builds_on + ([supersedes] if supersedes is not None else [])
     for ref in referenced:
-        if not (ddir / f"{ref}.md").is_file():
-            raise ValueError(f"no decision record for {ref!r}")
+        if not (directory / f"{ref}.md").is_file():
+            raise ValueError(f"no decision record {ref} under specs/decisions/")
     decision_id = next_decision_id(repo_root)
     lines = [
         "---",
         f"id: {decision_id}",
         f"title: {title}",
         "status: draft",
-        f"owners: {_flow(owners)}",
+        f"owners: {_flow(_owners(owners))}",
     ]
     if builds_on:
         lines.append(f"builds_on: {_flow(builds_on)}")
@@ -114,83 +91,82 @@ def new_decision(repo_root, title, owners=None, builds_on=None, supersedes=None)
         "",
         "TODO.",
     ]
-    ddir.mkdir(parents=True, exist_ok=True)
-    path = ddir / f"{decision_id}.md"
-    _write_new(path, "".join(line + "\n" for line in lines))
+    directory.mkdir(parents=True, exist_ok=True)
+    path = directory / f"{decision_id}.md"
+    with open(path, "x", encoding="utf-8") as handle:
+        handle.write("".join(line + "\n" for line in lines))
     return path
 
 
-def ratify(repo_root, decision_id):
-    path, lines, end = _record_lines(repo_root, decision_id)
-    front = [line.rstrip("\r\n") for line in lines[1:end]]
-    if "status: ratified" in front:
+def ratify(repo_root: Path, decision_id: str) -> list[Path]:
+    path = _record_path(repo_root, decision_id)
+    lines, end = _read_lines(path)
+    frontmatter = lines[1:end]
+    if "status: draft\n" not in frontmatter:
         raise LookupError(f"decision {decision_id} is already ratified")
-    new_lines = list(lines)
-    superseded = None
+    status_index = lines.index("status: draft\n", 1)
+    lines[status_index] = "status: ratified\n"
+    lines.insert(end, _PENDING_LINE)
+    changed = [path]
+    writes = [(path, lines)]
+    for line in frontmatter:
+        if line.startswith("supersedes: "):
+            old_id = line[len("supersedes: "):].strip()
+            old_path = _decisions_dir(repo_root) / f"{old_id}.md"
+            old_lines, old_end = _read_lines(old_path)
+            for index in range(1, old_end):
+                if old_lines[index].startswith("status:"):
+                    old_lines[index] = "status: deprecated\n"
+            changed.append(old_path)
+            writes.append((old_path, old_lines))
+    for target, content in writes:
+        target.write_text("".join(content), encoding="utf-8")
+    return changed
+
+
+def record_commit(repo_root: Path, decision_id: str, commit: str | None = None) -> str:
+    path = _record_path(repo_root, decision_id)
+    lines, end = _read_lines(path)
+    index = None
     for i in range(1, end):
-        bare = lines[i].rstrip("\r\n")
-        if bare == "status: draft":
-            new_lines[i] = "status: ratified" + _eol(lines[i])
-        elif bare.startswith("supersedes: "):
-            superseded = bare[len("supersedes: "):].strip()
-    new_lines.insert(end, f"last_ratified_commit: {_PENDING}\n")
-    changes = [(path, "".join(new_lines))]
-    if superseded is not None:
-        old_path = _decisions_dir(repo_root) / f"{superseded}.md"
-        old_lines = _read(old_path).splitlines(keepends=True)
-        old_end = _frontmatter_end(old_lines)
-        for i in range(1, old_end):
-            if old_lines[i].startswith("status:"):
-                old_lines[i] = "status: deprecated" + _eol(old_lines[i])
-        changes.append((old_path, "".join(old_lines)))
-    for target, text in changes:
-        _write(target, text)
-    return [target for target, _ in changes]
-
-
-def record_commit(repo_root, decision_id, commit=None):
-    path, lines, end = _record_lines(repo_root, decision_id)
-    front = [line.rstrip("\r\n") for line in lines[1:end]]
-    if "status: ratified" not in front:
+        if lines[i].startswith("last_ratified_commit:"):
+            index = i
+    if index is None:
         raise LookupError(f"decision {decision_id} is not ratified")
-    pending_line = f"last_ratified_commit: {_PENDING}"
-    if pending_line not in front:
-        raise LookupError(f"decision {decision_id} already has a recorded commit")
+    if lines[index] != _PENDING_LINE:
+        raise LookupError(f"decision {decision_id} already records a commit")
     if commit is None:
-        proc = subprocess.run(
+        result = subprocess.run(
             ["git", "log", "-1", "--format=%h", "--",
              f"specs/decisions/{decision_id}.md"],
             cwd=str(repo_root), capture_output=True, text=True,
         )
-        commit = proc.stdout.strip()
+        commit = result.stdout.strip()
         if not commit:
-            raise LookupError(f"no commit touches decision {decision_id}")
-    index = 1 + front.index(pending_line)
-    lines[index] = f"last_ratified_commit: {commit}" + _eol(lines[index])
-    _write(path, "".join(lines))
+            raise LookupError(f"no commit touches specs/decisions/{decision_id}.md")
+    lines[index] = f"last_ratified_commit: {commit}\n"
+    path.write_text("".join(lines), encoding="utf-8")
     return commit
 
 
-def new_component(repo_root, slug, title=None, owners=None, depends_on=None,
-                  realizes=None, sealed=False):
-    if not _SLUG_RE.match(slug):
-        raise ValueError(f"slug is not kebab-case: {slug!r}")
-    cdir = Path(repo_root) / "specs" / "components" / slug
-    if cdir.exists():
-        raise FileExistsError(f"component directory already exists: {slug}")
+def new_component(repo_root: Path, slug: str, title: str | None = None,
+                  owners: list[str] | None = None, depends_on: list[str] | None = None,
+                  realizes: list[str] | None = None, sealed: bool = False) -> Path:
+    if not _KEBAB.match(slug):
+        raise ValueError(f"slug {slug!r} is not kebab-case")
+    directory = Path(repo_root) / "specs" / "components" / slug
+    if directory.exists():
+        raise FileExistsError(f"{directory} already exists")
     if title is None:
         title = " ".join(word.capitalize() for word in slug.split("-"))
-    owners = ["unassigned"] if owners is None else list(owners)
-    depends_on = [] if depends_on is None else list(depends_on)
-    realizes = [] if realizes is None else list(realizes)
-    component_lines = [
+    lines = [
         "---",
         f"id: comp-{slug}",
         f"title: {title}",
         "status: draft",
-        f"owners: {_flow(owners)}",
-        f"depends_on: {_flow(depends_on)}",
-        f"realizes: {_flow(realizes)}",
+        f"owners: {_flow(_owners(owners))}",
+        f"depends_on: {_flow(depends_on or [])}",
+        f"realizes: {_flow(realizes or [])}",
         f"sealed: {'true' if sealed else 'false'}",
         "---",
         "",
@@ -236,31 +212,39 @@ def new_component(repo_root, slug, title=None, owners=None, depends_on=None,
         "",
         "- Initial draft.",
     ]
-    constraints_lines = [
-        f"# {title} — Non-Functional Constraints",
-        "",
-        "- TODO.",
-    ]
-    cdir.mkdir(parents=True)
-    _write_new(cdir / "component.md",
-               "".join(line + "\n" for line in component_lines))
-    _write_new(cdir / "constraints.md",
-               "".join(line + "\n" for line in constraints_lines))
-    for sub in ("requirements", "acceptance", "interface",
-                os.path.join("interface", "data")):
-        sdir = cdir / sub
-        sdir.mkdir(parents=True, exist_ok=True)
-        _write_new(sdir / ".gitkeep", "")
-    return cdir
+    directory.mkdir(parents=True)
+    (directory / "component.md").write_text(
+        "".join(line + "\n" for line in lines), encoding="utf-8")
+    (directory / "constraints.md").write_text(
+        f"# {title} — Non-Functional Constraints\n\n- TODO.\n", encoding="utf-8")
+    for sub in ("requirements", "acceptance", "interface", "interface/data"):
+        sub_dir = directory / sub
+        sub_dir.mkdir(parents=True)
+        (sub_dir / ".gitkeep").write_text("", encoding="utf-8")
+    return directory
 
 
-def _definition_text(kind, title, owners):
-    lines = [
+def new_kind(repo_root: Path, kind: str, title: str | None = None,
+             owners: list[str] | None = None,
+             realizes: list[str] | None = None) -> list[Path]:
+    if not _KEBAB.match(kind) or kind == "python":
+        raise ValueError(f"kind {kind!r} is not a kebab-case kind other than python")
+    root = Path(repo_root)
+    definition = root / "specs" / "architecture" / f"asset-kind-{kind}.md"
+    component_dir = root / "specs" / "components" / f"kind-{kind}"
+    for target in (definition, component_dir):
+        if target.exists():
+            raise FileExistsError(f"{target} already exists")
+    if title is None:
+        title = kind
+    module = kind.replace("-", "_")
+    upper = kind.upper()
+    definition_lines = [
         "---",
         f"id: arch-asset-kind-{kind}",
         f"title: Asset kind {title}",
         "status: draft",
-        f"owners: {_flow(owners)}",
+        f"owners: {_flow(_owners(owners))}",
         "depends_on: []",
         "---",
         "",
@@ -296,20 +280,14 @@ def _definition_text(kind, title, owners):
         "",
         "TODO: state exactly the text `guidance()[\"generator\"]` returns: the conventions the asset must follow, never test mechanics.",
     ]
-    return "".join(line + "\n" for line in lines)
-
-
-def _adapter_files(kind):
-    module = kind.replace("-", "_")
-    upper = kind.upper()
-    library = [
+    library_lines = [
         "# Library",
         "",
         f"One module file, `kind_{module}.py`, never a package.",
         "",
         "```",
-        "KIND: str           # \"" + kind + "\"",
-        "GATE_VERSION: str   # \"kind-" + kind + "@0.1.0\"",
+        f"KIND: str           # \"{kind}\"",
+        f"GATE_VERSION: str   # \"kind-{kind}@0.1.0\"",
         "class AssetError(Exception)",
         "layout_errors(asset_file: Path) -> list[str]",
         "surface(asset_file: Path) -> dict",
@@ -322,12 +300,12 @@ def _adapter_files(kind):
         "",
         f"Implements: `specs/architecture/asset-kinds.md`, `specs/architecture/asset-kind-{kind}.md`",
     ]
-    requirement = [
+    requirement_lines = [
         f"# R-KIND-{upper}-001",
         "",
         f"**R-KIND-{upper}-001** — TODO: `kind_{module}` MUST carry out `specs/architecture/asset-kind-{kind}.md`; replace this with one requirement per behaviour the definition states.",
     ]
-    acceptance = [
+    acceptance_lines = [
         f"# AC-KIND-{upper}-001",
         "",
         f"Covers: R-KIND-{upper}-001",
@@ -339,52 +317,35 @@ def _adapter_files(kind):
         "Then the correct suite kills at least the bar's share of the sites and the weak suite fewer",
         "```",
     ]
-    return [
-        (os.path.join("interface", "library.md"), library),
-        (os.path.join("requirements", f"R-KIND-{upper}-001.md"), requirement),
-        (os.path.join("acceptance", f"AC-KIND-{upper}-001.md"), acceptance),
+    definition.parent.mkdir(parents=True, exist_ok=True)
+    definition.write_text("".join(line + "\n" for line in definition_lines), encoding="utf-8")
+    directory = new_component(root, f"kind-{kind}", title=f"Kind {title}",
+                              owners=owners, realizes=realizes)
+    extras = [
+        (directory / "interface" / "library.md", library_lines),
+        (directory / "requirements" / f"R-KIND-{upper}-001.md", requirement_lines),
+        (directory / "acceptance" / f"AC-KIND-{upper}-001.md", acceptance_lines),
     ]
-
-
-def new_kind(repo_root, kind, title=None, owners=None, realizes=None):
-    if not _KIND_RE.match(kind) or kind == "python":
-        raise ValueError(f"invalid asset kind: {kind!r}")
-    root = Path(repo_root)
-    arch_dir = root / "specs" / "architecture"
-    definition = arch_dir / f"asset-kind-{kind}.md"
-    cdir = root / "specs" / "components" / f"kind-{kind}"
-    if definition.exists() or cdir.exists():
-        raise FileExistsError(f"asset kind already exists: {kind}")
-    if title is None:
-        title = kind
-    owners = ["unassigned"] if owners is None else list(owners)
-    arch_dir.mkdir(parents=True, exist_ok=True)
-    _write_new(definition, _definition_text(kind, title, owners))
-    component_dir = new_component(root, f"kind-{kind}", title=f"Kind {title}",
-                                  owners=owners, realizes=realizes)
-    for rel, lines in _adapter_files(kind):
-        _write_new(component_dir / rel, "".join(line + "\n" for line in lines))
+    for target, content in extras:
+        target.write_text("".join(line + "\n" for line in content), encoding="utf-8")
     decision = new_decision(root, f"Asset kind {kind}", owners=owners)
-    return [definition, component_dir, decision]
+    return [definition, directory, decision]
 
-
-# ---------------------------------------------------------------- CLI
 
 _USAGE = {
-    ("decision", "new"): "hotdocs decision new <title> [--owners=<a,b>] [--builds-on=<D1,D2>] [--supersedes=<D<N>>] [--repo-root=<dir>]",
-    ("decision", "ratify"): "hotdocs decision ratify <D<N>> [--repo-root=<dir>]",
-    ("decision", "record-commit"): "hotdocs decision record-commit <D<N>> [--commit=<hash>] [--repo-root=<dir>]",
-    ("component", "new"): "hotdocs component new <slug> [--title=<title>] [--owners=<a,b>] [--depends-on=<comp-a,comp-b>] [--realizes=<P-a,P-b>] [--sealed] [--repo-root=<dir>]",
-    ("kind", "new"): "hotdocs kind new <kind> [--title=<title>] [--owners=<a,b>] [--realizes=<P-a,P-b>] [--repo-root=<dir>]",
+    ("decision", "new"): "usage: hotdocs decision new <title> [--owners=<a,b>] [--builds-on=<D1,D2>] [--supersedes=<D<N>>] [--repo-root=<dir>]",
+    ("decision", "ratify"): "usage: hotdocs decision ratify <D<N>> [--repo-root=<dir>]",
+    ("decision", "record-commit"): "usage: hotdocs decision record-commit <D<N>> [--commit=<hash>] [--repo-root=<dir>]",
+    ("component", "new"): "usage: hotdocs component new <slug> [--title=<title>] [--owners=<a,b>] [--depends-on=<comp-a,comp-b>] [--realizes=<P-a,P-b>] [--sealed] [--repo-root=<dir>]",
+    ("kind", "new"): "usage: hotdocs kind new <kind> [--title=<title>] [--owners=<a,b>] [--realizes=<P-a,P-b>] [--repo-root=<dir>]",
 }
 
-_FLAGS = {
-    ("decision", "new"): (("--owners", "--builds-on", "--supersedes", "--repo-root"), ()),
-    ("decision", "ratify"): (("--repo-root",), ()),
-    ("decision", "record-commit"): (("--commit", "--repo-root"), ()),
-    ("component", "new"): (("--title", "--owners", "--depends-on", "--realizes",
-                            "--repo-root"), ("--sealed",)),
-    ("kind", "new"): (("--title", "--owners", "--realizes", "--repo-root"), ()),
+_SPECS = {
+    ("decision", "new"): ("<title>", ("owners", "builds-on", "supersedes", "repo-root"), ()),
+    ("decision", "ratify"): ("<D<N>>", ("repo-root",), ()),
+    ("decision", "record-commit"): ("<D<N>>", ("commit", "repo-root"), ()),
+    ("component", "new"): ("<slug>", ("title", "owners", "depends-on", "realizes", "repo-root"), ("sealed",)),
+    ("kind", "new"): ("<kind>", ("title", "owners", "realizes", "repo-root"), ()),
 }
 
 
@@ -392,92 +353,88 @@ class _UsageError(Exception):
     pass
 
 
-def _parse(tokens, value_flags, bool_flags):
-    positionals = []
+def _parse(tokens, positional_name, value_flags, bool_flags):
     opts = {}
+    positionals = []
     i = 0
     while i < len(tokens):
-        tok = tokens[i]
-        if tok.startswith("--"):
-            name, eq, value = tok.partition("=")
+        token = tokens[i]
+        if token.startswith("--"):
+            name, eq, value = token[2:].partition("=")
             if name in value_flags:
                 if not eq:
-                    if i + 1 >= len(tokens):
-                        raise _UsageError(f"{name} needs a value")
                     i += 1
+                    if i == len(tokens):
+                        raise _UsageError(f"--{name} requires a value")
                     value = tokens[i]
                 opts[name] = value
             elif name in bool_flags and not eq:
                 opts[name] = True
             else:
-                raise _UsageError(f"unknown argument {tok}")
+                raise _UsageError(f"unrecognized argument: {token}")
         else:
-            positionals.append(tok)
+            positionals.append(token)
         i += 1
     if not positionals:
-        raise _UsageError("missing required argument")
+        raise _UsageError(f"missing required argument {positional_name}")
     if len(positionals) > 1:
-        raise _UsageError(f"unknown argument {positionals[1]}")
+        raise _UsageError(f"unrecognized argument: {positionals[1]}")
     return positionals[0], opts
 
 
 def _split(value):
     if value is None:
         return None
-    return [part.strip() for part in value.split(",")]
+    return [item.strip() for item in value.split(",")]
 
 
-def _rel(path, root):
-    return Path(path).relative_to(root).as_posix()
+def _rel(path, repo_root):
+    return Path(path).relative_to(repo_root).as_posix()
 
 
-def _run(command, arg, opts):
-    root = Path(opts.get("--repo-root", os.getcwd()))
-    if command == ("decision", "new"):
-        path = new_decision(root, arg, owners=_split(opts.get("--owners")),
-                            builds_on=_split(opts.get("--builds-on")),
-                            supersedes=opts.get("--supersedes"))
-        return [_rel(path, root)]
-    if command == ("decision", "ratify"):
-        return [_rel(p, root) for p in ratify(root, arg)]
-    if command == ("decision", "record-commit"):
-        return [record_commit(root, arg, commit=opts.get("--commit"))]
-    if command == ("component", "new"):
-        path = new_component(root, arg, title=opts.get("--title"),
-                             owners=_split(opts.get("--owners")),
-                             depends_on=_split(opts.get("--depends-on")),
-                             realizes=_split(opts.get("--realizes")),
-                             sealed=bool(opts.get("--sealed", False)))
-        return [_rel(path, root) + "/"]
-    definition, cdir, decision = new_kind(root, arg, title=opts.get("--title"),
-                                          owners=_split(opts.get("--owners")),
-                                          realizes=_split(opts.get("--realizes")))
-    return [_rel(definition, root), _rel(cdir, root) + "/", _rel(decision, root)]
-
-
-def main(argv=None):
+def main(argv: list[str] | None = None) -> int:
     if argv is None:
         argv = sys.argv[1:]
-    argv = list(argv)
     command = tuple(argv[:2])
-    if command not in _USAGE:
-        cause = "unknown command " + " ".join(argv[:2]) if argv else "missing command"
-        print(f"usage error: {cause}", file=sys.stderr)
-        for line in _USAGE.values():
-            print(f"usage: {line}", file=sys.stderr)
+    if command not in _SPECS:
+        print(f"usage error: unknown command: {' '.join(argv[:2]) or '(none)'}", file=sys.stderr)
+        print("\n".join(_USAGE.values()), file=sys.stderr)
         return 2
-    value_flags, bool_flags = _FLAGS[command]
+    positional_name, value_flags, bool_flags = _SPECS[command]
     try:
-        arg, opts = _parse(argv[2:], value_flags, bool_flags)
+        arg, opts = _parse(argv[2:], positional_name, value_flags, bool_flags)
     except _UsageError as exc:
         print(f"usage error: {exc}", file=sys.stderr)
-        print(f"usage: {_USAGE[command]}", file=sys.stderr)
+        print(_USAGE[command], file=sys.stderr)
         return 2
+    repo_root = Path(opts.get("repo-root", "."))
     try:
-        output = _run(command, arg, opts)
+        if command == ("decision", "new"):
+            path = new_decision(repo_root, arg, owners=_split(opts.get("owners")),
+                                builds_on=_split(opts.get("builds-on")),
+                                supersedes=opts.get("supersedes"))
+            print(_rel(path, repo_root))
+        elif command == ("decision", "ratify"):
+            for path in ratify(repo_root, arg):
+                print(_rel(path, repo_root))
+        elif command == ("decision", "record-commit"):
+            print(record_commit(repo_root, arg, commit=opts.get("commit")))
+        elif command == ("component", "new"):
+            path = new_component(repo_root, arg, title=opts.get("title"),
+                                 owners=_split(opts.get("owners")),
+                                 depends_on=_split(opts.get("depends-on")),
+                                 realizes=_split(opts.get("realizes")),
+                                 sealed=bool(opts.get("sealed", False)))
+            print(_rel(path, repo_root) + "/")
+        else:
+            definition, directory, decision = new_kind(
+                repo_root, arg, title=opts.get("title"),
+                owners=_split(opts.get("owners")),
+                realizes=_split(opts.get("realizes")))
+            print(_rel(definition, repo_root))
+            print(_rel(directory, repo_root) + "/")
+            print(_rel(decision, repo_root))
     except (ValueError, FileExistsError, LookupError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
-    for line in output:
-        print(line)
     return 0
