@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:dd27bea6612d3ff27cf450c65aa629ed8a205eda233ad04f80f1ed7ffbe60672
+# hotdocs-criterion: sha256:3434c00264948afdcd495f6950feee36d43019e6e8f3b2092482c2c175d42046
 import ast
 from pathlib import Path
 
@@ -24,7 +24,7 @@ def _parse(path):
 
 
 def _top(name):
-    return name.split(".")[0] if name else ""
+    return (name or "").split(".")[0]
 
 
 def _forbidden_imports(tree):
@@ -35,45 +35,39 @@ def _forbidden_imports(tree):
                 if _top(alias.name) in FORBIDDEN:
                     found.append((node.lineno, alias.name))
         elif isinstance(node, ast.ImportFrom):
-            if (node.level or 0) == 0 and node.module and _top(node.module) in FORBIDDEN:
+            if node.level == 0 and _top(node.module) in FORBIDDEN:
                 found.append((node.lineno, node.module))
-        elif isinstance(node, ast.Call):
-            func = node.func
-            fname = None
-            if isinstance(func, ast.Name):
-                fname = func.id
-            elif isinstance(func, ast.Attribute):
-                fname = func.attr
-            if fname in ("import_module", "__import__") and node.args:
-                first = node.args[0]
-                if isinstance(first, ast.Constant) and isinstance(first.value, str):
-                    if _top(first.value) in FORBIDDEN:
-                        found.append((node.lineno, first.value))
     return found
 
 
-def _has_load_corpus_attribute_call(tree):
+def _calls_load_corpus_attribute(tree):
     for node in ast.walk(tree):
-        if isinstance(node, ast.Call):
-            func = node.func
-            if isinstance(func, ast.Attribute) and func.attr == "load_corpus":
-                return True
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "load_corpus"
+        ):
+            return True
     return False
 
 
-def test_no_forbidden_parser_imports_and_load_corpus_is_called():
+def test_no_forbidden_parser_imports_and_load_corpus_called_via_attribute():
     files = _module_files()
-    offenders = []
-    any_load_corpus = False
+    offenders = {}
+    any_load_corpus_call = False
     for path in files:
         tree = _parse(path)
-        for lineno, name in _forbidden_imports(tree):
-            offenders.append(str(path) + ":" + str(lineno) + " imports " + name)
-        if _has_load_corpus_attribute_call(tree):
-            any_load_corpus = True
+        bad = _forbidden_imports(tree)
+        if bad:
+            offenders[str(path)] = bad
+        if _calls_load_corpus_attribute(tree):
+            any_load_corpus_call = True
 
-    assert offenders == [], "forbidden third-party parser imports found: " + repr(offenders)
-    assert any_load_corpus, (
-        "no call whose function is an attribute named load_corpus found in "
-        + repr([str(p) for p in files])
+    assert offenders == {}, (
+        "module under test imports a forbidden third-party parser: "
+        + repr(offenders)
+    )
+    assert any_load_corpus_call, (
+        "no .py file of spec_bundle_assembler contains a call whose function "
+        "is an attribute named load_corpus"
     )

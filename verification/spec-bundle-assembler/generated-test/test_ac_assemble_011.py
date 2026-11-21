@@ -1,14 +1,10 @@
-# hotdocs-criterion: sha256:77bf2b9f0f15c4cc1ebebf415892e6ea3176b19db875650c7bc34cf1cdaf3b56
+# hotdocs-criterion: sha256:396cd7986ceb8b3ddfe3b7e9297a4818107b172fbffccd77e65614ecc883a69c
 import importlib.util
 import inspect
 import sys
 from pathlib import Path
 
 import spec_bundle_assembler
-
-
-def field(value, name):
-    return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
 def load_module(path, module_name):
@@ -19,21 +15,26 @@ def load_module(path, module_name):
     return module
 
 
-def write(path, text):
+def field(value, name):
+    return value[name] if isinstance(value, dict) else getattr(value, name)
+
+
+def _write(path, text):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
 
 
-def component_md(cid, title, slug, depends, purpose):
-    return (
+def _component(repo_root, slug, title, upper, purpose, depends_on, signature):
+    base = repo_root / "specs" / "components" / slug
+    comp_md = (
         "---\n"
-        + "id: " + cid + "\n"
+        + "id: comp-" + slug + "\n"
         + "title: " + title + "\n"
         + "status: draft\n"
         + "owners: [team-a]\n"
         + "sealed: true\n"
         + "source_path: legacy/" + slug + "/\n"
-        + "depends_on: [" + depends + "]\n"
+        + "depends_on: [" + ", ".join(depends_on) + "]\n"
         + "---\n"
         + "\n"
         + "# " + title + "\n"
@@ -42,16 +43,15 @@ def component_md(cid, title, slug, depends, purpose):
         + "\n"
         + purpose + "\n"
     )
-
-
-def build_component(repo_root, slug, cid, title, depends, purpose, rid, acid, req_text, signature):
-    base = repo_root / "specs" / "components" / slug
-    write(base / "component.md", component_md(cid, title, slug, depends, purpose))
-    write(
+    _write(base / "component.md", comp_md)
+    rid = "R-" + upper + "-001"
+    acid = "AC-" + upper + "-001"
+    _write(
         base / "requirements" / (rid + ".md"),
-        "# " + rid + "\n\n**" + rid + "** — " + req_text + "\n",
+        "# " + rid + "\n\n**" + rid + "** — `" + signature.split("(")[0]
+        + "(x)` MUST return a value.\n",
     )
-    write(
+    _write(
         base / "acceptance" / (acid + ".md"),
         "# " + acid + "\n"
         + "\n"
@@ -59,49 +59,19 @@ def build_component(repo_root, slug, cid, title, depends, purpose, rid, acid, re
         + "Kind: generated-test\n"
         + "\n"
         + "```gherkin\n"
-        + "Given an input\n"
+        + "Given x = 2\n"
         + "When it is called\n"
-        + "Then it returns the expected value\n"
+        + "Then it returns a value\n"
         + "```\n",
     )
-    write(
+    _write(
         base / "interface" / "library.md",
         "# Library\n\n```\n" + signature + "\n```\n",
     )
-    write(base / "constraints.md", "# Constraints\n\nNone.\n")
+    _write(base / "constraints.md", "# Constraints\n\nNone.\n")
 
 
-def build_corpus(repo_root):
-    write(
-        repo_root / "specs" / "glossary.md",
-        "# Glossary\n\n- **Foo** — a test term.\n",
-    )
-    build_component(
-        repo_root, "foo", "comp-foo", "Foo", "comp-bar, comp-baz",
-        "Foo doubles a number.", "R-FOO-001", "AC-FOO-001",
-        "`foo(x)` MUST return `2 * x`.", "foo(x: int) -> int",
-    )
-    build_component(
-        repo_root, "bar", "comp-bar", "Bar", "",
-        "Bar looks up values.", "R-BAR-001", "AC-BAR-001",
-        "`bar_get(key)` MUST return the stored value.", "bar_get(key: str) -> str",
-    )
-    build_component(
-        repo_root, "baz", "comp-baz", "Baz", "",
-        "Baz stores values.", "R-BAZ-001", "AC-BAZ-001",
-        "`baz_put(key)` MUST store a value.", "baz_put(key: str) -> None",
-    )
-    bar_source = (
-        "def bar_get(key: str) -> str:\n"
-        + "    " + repr("Return the value stored under the given key.\n\n    Further detail that is not the first line.\n    ") + "\n"
-        + "    return " + repr("v") + "\n"
-    )
-    write(repo_root / "legacy" / "bar" / "bar.py", bar_source)
-    (repo_root / "legacy" / "foo").mkdir(parents=True, exist_ok=True)
-    (repo_root / "legacy" / "baz").mkdir(parents=True, exist_ok=True)
-
-
-def lint_fixture(repo_root):
+def _lint(repo_root):
     gen = next(p for p in Path(spec_bundle_assembler.__file__).resolve().parents if p.name == "gen")
     base = gen / "spec-linter"
     path = base / "spec_linter.py" if (base / "spec_linter.py").is_file() else base / "spec_linter" / "__init__.py"
@@ -109,34 +79,67 @@ def lint_fixture(repo_root):
     spec_linter = importlib.util.module_from_spec(spec)
     sys.modules["spec_linter"] = spec_linter
     spec.loader.exec_module(spec_linter)
-    assert spec_linter.lint(None, repo_root).hard_failures == 0
+    report = spec_linter.lint(None, repo_root)
+    assert report.hard_failures == 0, [
+        getattr(f, "message", f) for f in getattr(report, "findings", [])
+    ]
+
+
+def _build_corpus(repo_root):
+    _write(
+        repo_root / "specs" / "glossary.md",
+        "# Glossary\n\n- **Foo** — a test term.\n",
+    )
+    _component(repo_root, "foo", "Foo", "FOO", "Foo doubles a number.",
+               ["comp-bar", "comp-baz"], "foo(x: int) -> int")
+    _component(repo_root, "bar", "Bar", "BAR", "Bar looks up a value.",
+               [], "bar_get(key: str) -> str")
+    _component(repo_root, "baz", "Baz", "BAZ", "Baz does nothing yet.",
+               [], "baz(x: int) -> int")
+    bar_src = (
+        "def bar_get(key: str) -> str:\n"
+        + "    " + repr("Return the value stored for key.\n\n    More detail on a second paragraph.\n    ") + "\n"
+        + "    return 'v:' + key\n"
+    )
+    # Use a real docstring literal (triple-quoted) for clarity.
+    bar_src = (
+        "def bar_get(key: str) -> str:\n"
+        + '    """Return the value stored for key.\n'
+        + "\n"
+        + "    More detail on a second paragraph.\n"
+        + '    """\n'
+        + "    return " + repr("v:") + " + key\n"
+    )
+    bar_path = repo_root / "legacy" / "bar" / "bar.py"
+    _write(bar_path, bar_src)
+    return bar_path
 
 
 def test_ac_assemble_011_dependency_usage_card(tmp_path):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
-    build_corpus(repo_root)
-    lint_fixture(repo_root)
+    bar_path = _build_corpus(repo_root)
+    _lint(repo_root)
 
-    expected_mod = load_module(
-        repo_root / "legacy" / "bar" / "bar.py", "bar_ac_assemble_011_expected"
-    )
-    bar_get = expected_mod.bar_get
-    expected_signature = str(inspect.signature(bar_get))
-    expected_doc_first_line = inspect.getdoc(bar_get).splitlines()[0]
+    bar_module = load_module(bar_path, "bar")
+    bar_get = bar_module.bar_get
+    sig_text = str(inspect.signature(bar_get))
+    doc_first = inspect.getdoc(bar_get).splitlines()[0]
+    assert sig_text == "(key: str) -> str"
+    assert doc_first == "Return the value stored for key."
 
     bundle = spec_bundle_assembler.assemble("comp-foo", repo_root)
-
     usage = field(bundle, "dependency_usage")
+
     assert "comp-bar" in usage
-    bar_card = usage["comp-bar"]
-    assert isinstance(bar_card, str)
-    assert "bar" in bar_card
-    assert "legacy/bar/" in bar_card
-    assert "bar_get" in bar_card
-    assert expected_signature in bar_card
-    assert expected_doc_first_line in bar_card
-    assert "Further detail that is not the first line." not in bar_card
+    card = usage["comp-bar"]
+    assert isinstance(card, str)
+    assert "bar" in card
+    assert "legacy/bar/" in card
+    assert "bar_get" in card
+    assert sig_text in card
+    assert doc_first in card
+    assert "More detail on a second paragraph." not in card
 
     assert "comp-baz" in usage
     assert usage["comp-baz"] == ""

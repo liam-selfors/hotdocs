@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:ba0dd245fc3466e4c5d0f1897952f5c55ba719edad8b7ea65ced9c5639d4a30c
+# hotdocs-criterion: sha256:7da98b09f35d1498ed245d09b3aedf5ded89bd832fb3ed4136778ecb185a577e
 import importlib.util
 import sys
 from collections.abc import Mapping
@@ -11,7 +11,7 @@ def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def load_linter():
+def load_spec_linter():
     gen = next(p for p in Path(spec_bundle_assembler.__file__).resolve().parents if p.name == "gen")
     base = gen / "spec-linter"
     path = base / "spec_linter.py" if (base / "spec_linter.py").is_file() else base / "spec_linter" / "__init__.py"
@@ -27,7 +27,7 @@ def write(path, text):
     path.write_text(text, encoding="utf-8")
 
 
-GLOSSARY = "# Glossary\n\n- **Foo** — a test term.\n"
+GLOSSARY = "# Glossary\n\n- **Foo** \u2014 a test term.\n"
 
 
 def component_md(comp_id, title, source_path, depends_on, purpose):
@@ -50,8 +50,8 @@ def component_md(comp_id, title, source_path, depends_on, purpose):
     )
 
 
-def requirement_md(rid, text):
-    return "# " + rid + "\n\n**" + rid + "** — " + text + "\n"
+def requirement_md(rid, sentence):
+    return "# " + rid + "\n\n**" + rid + "** \u2014 " + sentence + "\n"
 
 
 def acceptance_md(acid, rid, given, when, then):
@@ -69,54 +69,56 @@ def acceptance_md(acid, rid, given, when, then):
     )
 
 
-FOO_COMPONENT = component_md(
-    "comp-foo", "Foo", "legacy/foo/", "[]", "Foo doubles a number."
-)
-FOO_REQUIREMENT = requirement_md("R-FOO-001", "`foo(x)` MUST return `2 * x`.")
-FOO_ACCEPTANCE = acceptance_md(
-    "AC-FOO-001", "R-FOO-001", "x = 2", "foo(x) is called", "it returns 4"
-)
-FOO_LIBRARY = "# Library\n\n```\nfoo(x: int) -> int\n```\n"
-FOO_CONSTRAINTS = "# Constraints\n\nNone.\n"
+def library_md(signature):
+    return "# Library\n\n```\n" + signature + "\n```\n"
 
-BAR_COMPONENT = component_md(
-    "comp-bar", "Bar", "legacy/bar/", "[comp-foo]", "Bar triples a number."
-)
-BAR_REQUIREMENT = requirement_md("R-BAR-001", "`bar(x)` MUST return `3 * x`.")
-BAR_ACCEPTANCE = acceptance_md(
-    "AC-BAR-001", "R-BAR-001", "x = 2", "bar(x) is called", "it returns 6"
-)
-BAR_LIBRARY = "# Library\n\n```\nbar(x: int) -> int\n```\n"
-BAR_CONSTRAINTS = "# Constraints\n\nNone.\n"
+
+CONSTRAINTS = "# Constraints\n\nNone.\n"
+
+FOO_COMPONENT = component_md("comp-foo", "Foo", "legacy/foo/", "[]", "Foo doubles a number.")
+FOO_REQ = requirement_md("R-FOO-001", "`foo(x)` MUST return `2 * x`.")
+FOO_AC = acceptance_md("AC-FOO-001", "R-FOO-001", "x = 2", "foo(x) is called", "it returns 4")
+FOO_LIB = library_md("foo(x: int) -> int")
+
+BAR_COMPONENT = component_md("comp-bar", "Bar", "legacy/bar/", "[comp-foo]", "Bar triples a number.")
+BAR_REQ = requirement_md("R-BAR-001", "`bar(x)` MUST return `3 * x`.")
+BAR_AC = acceptance_md("AC-BAR-001", "R-BAR-001", "x = 2", "bar(x) is called", "it returns 6")
+BAR_LIB = library_md("bar(x: int) -> int")
 
 
 def build_foo(repo_root):
     write(repo_root / "specs" / "glossary.md", GLOSSARY)
-    base = repo_root / "specs" / "components" / "foo"
-    write(base / "component.md", FOO_COMPONENT)
-    write(base / "requirements" / "R-FOO-001.md", FOO_REQUIREMENT)
-    write(base / "acceptance" / "AC-FOO-001.md", FOO_ACCEPTANCE)
-    write(base / "interface" / "library.md", FOO_LIBRARY)
-    write(base / "constraints.md", FOO_CONSTRAINTS)
+    c = repo_root / "specs" / "components" / "foo"
+    write(c / "component.md", FOO_COMPONENT)
+    write(c / "requirements" / "R-FOO-001.md", FOO_REQ)
+    write(c / "acceptance" / "AC-FOO-001.md", FOO_AC)
+    write(c / "interface" / "library.md", FOO_LIB)
+    write(c / "constraints.md", CONSTRAINTS)
 
 
 def build_bar(repo_root):
-    base = repo_root / "specs" / "components" / "bar"
-    write(base / "component.md", BAR_COMPONENT)
-    write(base / "requirements" / "R-BAR-001.md", BAR_REQUIREMENT)
-    write(base / "acceptance" / "AC-BAR-001.md", BAR_ACCEPTANCE)
-    write(base / "interface" / "library.md", BAR_LIBRARY)
-    write(base / "constraints.md", BAR_CONSTRAINTS)
+    c = repo_root / "specs" / "components" / "bar"
+    write(c / "component.md", BAR_COMPONENT)
+    write(c / "requirements" / "R-BAR-001.md", BAR_REQ)
+    write(c / "acceptance" / "AC-BAR-001.md", BAR_AC)
+    write(c / "interface" / "library.md", BAR_LIB)
+    write(c / "constraints.md", CONSTRAINTS)
 
 
-def test_dependency_interfaces_holds_dependency_interface_only(tmp_path):
+def assert_lint_clean(repo_root):
+    spec_linter = load_spec_linter()
+    assert spec_linter.lint(None, repo_root).hard_failures == 0
+
+
+def body_lines(text):
+    return [line.strip() for line in text.splitlines() if line.strip()]
+
+
+def test_dependency_interfaces_holds_only_dependency_interface(tmp_path):
     repo_root = tmp_path / "repo"
-    repo_root.mkdir()
     build_foo(repo_root)
     build_bar(repo_root)
-
-    spec_linter = load_linter()
-    assert spec_linter.lint(None, repo_root).hard_failures == 0
+    assert_lint_clean(repo_root)
 
     bundle = spec_bundle_assembler.assemble_criterion("comp-bar", "AC-BAR-001", repo_root)
     deps = field(bundle, "dependency_interfaces")
@@ -126,42 +128,34 @@ def test_dependency_interfaces_holds_dependency_interface_only(tmp_path):
     value = deps["comp-foo"]
     assert isinstance(value, str)
 
-    # Contains the text of each of the dependency's interface/ files.
-    interface_files = [FOO_LIBRARY]
-    for text in interface_files:
-        assert text.strip() in value
+    # Contains the text of each of foo's interface/ files.
+    assert FOO_LIB.strip() in value
+    for line in body_lines(FOO_LIB):
+        assert line in value
 
-    # Contains no line unique to component.md, requirements/ or constraints.md.
-    interface_lines = set()
-    for text in interface_files:
-        for line in text.splitlines():
-            if line.strip():
-                interface_lines.add(line.strip())
-
-    value_lines = set(line.strip() for line in value.splitlines() if line.strip())
-
-    for other in (FOO_COMPONENT, FOO_REQUIREMENT, FOO_CONSTRAINTS):
-        for line in other.splitlines():
-            stripped = line.strip()
-            if not stripped or stripped in interface_lines:
+    # Contains no line unique to foo's component.md, requirements/ or constraints.md.
+    interface_lines = set(body_lines(FOO_LIB))
+    for source in (FOO_COMPONENT, FOO_REQ, CONSTRAINTS):
+        for line in body_lines(source):
+            if line in interface_lines:
                 continue
-            assert stripped not in value_lines, (
-                "dependency_interfaces leaked non-interface line: " + repr(stripped)
-            )
+            if line == "---":
+                continue
+            assert line not in value.splitlines() and line not in {
+                l.strip() for l in value.splitlines()
+            }, "dependency_interfaces leaked line: " + repr(line)
 
-    # Distinctive content must not leak even as a substring.
+    # Distinctive content of the non-interface docs never appears at all.
     assert "Foo doubles a number." not in value
     assert "MUST return `2 * x`" not in value
-    assert "R-FOO-001" not in value
+    assert "# Constraints" not in value
+    assert "source_path: legacy/foo/" not in value
 
 
 def test_no_depends_on_gives_empty_mapping(tmp_path):
     repo_root = tmp_path / "repo"
-    repo_root.mkdir()
     build_foo(repo_root)
-
-    spec_linter = load_linter()
-    assert spec_linter.lint(None, repo_root).hard_failures == 0
+    assert_lint_clean(repo_root)
 
     bundle = spec_bundle_assembler.assemble_criterion("comp-foo", "AC-FOO-001", repo_root)
     deps = field(bundle, "dependency_interfaces")

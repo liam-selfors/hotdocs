@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:97793ec01f1f409baf68724f0a847e1921ad8dfcd12f7536eb522e7566d8d46a
+# hotdocs-criterion: sha256:90070d28cc670f3abd3d9bea156c71172e31e92b26adaea017b652b421baec34
 import importlib.util
 import sys
 from pathlib import Path
@@ -18,26 +18,20 @@ def load_module(path, module_name):
     return module
 
 
-def _tool_gen():
-    return next(
-        p for p in Path(spec_bundle_assembler.__file__).resolve().parents
-        if p.name == "gen"
-    )
-
-
 def _write(path, text):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
 
 
 def _build_fixture(repo_root):
+    specs = repo_root / "specs"
     _write(
-        repo_root / "specs" / "glossary.md",
+        specs / "glossary.md",
         "# Glossary\n"
         "\n"
         "- **Foo** — a test term.\n",
     )
-    comp = repo_root / "specs" / "components" / "foo"
+    comp = specs / "components" / "foo"
     _write(
         comp / "component.md",
         "---\n"
@@ -91,40 +85,48 @@ def _build_fixture(repo_root):
     )
 
 
-def test_assemble_without_repo_gen_uses_tool_root_dependencies(tmp_path):
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    _build_fixture(repo_root)
-
-    assert not (repo_root / "gen").exists()
-
-    gen = _tool_gen()
-    # The dependencies exist under the tool root, the only place they can come from.
-    for slug in ("spec-linter", "graph-query-engine"):
-        mod = slug.replace("-", "_")
-        base = gen / slug
-        assert (base / (mod + ".py")).is_file() or (base / mod / "__init__.py").is_file()
-
+def _load_tool_linter():
+    gen = next(
+        p for p in Path(spec_bundle_assembler.__file__).resolve().parents
+        if p.name == "gen"
+    )
     base = gen / "spec-linter"
     path = (
         base / "spec_linter.py"
         if (base / "spec_linter.py").is_file()
         else base / "spec_linter" / "__init__.py"
     )
-    spec_linter = load_module(path, "spec_linter")
+    return load_module(path, "spec_linter")
+
+
+def test_ac_assemble_017_falls_back_to_tool_root_without_gen(tmp_path):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    _build_fixture(repo_root)
+
+    assert not (repo_root / "gen").exists()
+
+    spec_linter = _load_tool_linter()
     assert spec_linter.lint(None, repo_root).hard_failures == 0
+    assert not (repo_root / "gen").exists()
 
     bundle = spec_bundle_assembler.assemble("comp-foo", repo_root)
     assert field(bundle, "component_id") == "comp-foo"
+    assert "Foo doubles a number." in field(bundle, "spec")
     assert "R-FOO-001" in field(bundle, "spec")
     assert "foo(x: int) -> int" in field(bundle, "interface")
+    assert "a test term" in field(bundle, "glossary")
+    assert str(field(bundle, "spec_bundle_hash")).startswith("sha256:")
 
-    criterion_bundle = spec_bundle_assembler.assemble_criterion(
+    crit = spec_bundle_assembler.assemble_criterion(
         "comp-foo", "AC-FOO-001", repo_root
     )
-    assert field(criterion_bundle, "component_id") == "comp-foo"
-    assert field(criterion_bundle, "criterion_id") == "AC-FOO-001"
-    assert field(criterion_bundle, "covers") == "R-FOO-001"
-    assert "foo(x: int) -> int" in field(criterion_bundle, "interface")
+    assert field(crit, "component_id") == "comp-foo"
+    assert field(crit, "criterion_id") == "AC-FOO-001"
+    assert field(crit, "covers") == "R-FOO-001"
+    assert "Then it returns 4" in field(crit, "criterion_text")
+    assert "MUST return `2 * x`" in field(crit, "requirement_text")
+    assert "foo(x: int) -> int" in field(crit, "interface")
+    assert "a test term" in field(crit, "glossary")
 
     assert not (repo_root / "gen").exists()
