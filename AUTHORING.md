@@ -117,7 +117,29 @@ Each of these failed a real generation and was fixed in the spec:
 | A decision's `supersedes` was written as a list in one spec and a single id in another; the test followed the wrong one | Both state the scalar form |
 | A criterion said "within a minute"; a test author built a fixture too slow for the verifier's limit | The criterion states the exact bound and fixture size |
 
-## 5. Size limits
+## 5. Files in other languages
+
+When a component produces something other than Python, such as the
+JavaScript a page runs, declare it as an asset (`assets:
+[javascript:static/app.js]` in `component.md`) instead of keeping it in
+Python strings. Then:
+
+- list its interface the way the kind's definition asks: for
+  `javascript`, one `export function` signature per line in a fenced
+  block of the interface file;
+- write criteria that call it through the `asset_runner` fixture with
+  concrete JSON arguments and an exact expected result, so its tests can
+  be mutation-tested on the asset itself;
+- keep the asset's logic in pure functions over JSON values, and leave
+  wiring (event handlers, the DOM) thin, since only functions a criterion
+  can call are checked.
+
+The kind's definition (`specs/architecture/asset-kind-<kind>.md`) gives
+its test author and its generator their own guidance, so a criterion only
+needs the facts specific to this component. `QUICKSTART.md` §5 covers
+declaring assets, `hotdocs kind new` and the project Python environment.
+
+## 6. Size limits
 
 The linter fails a component's docs above 4,000 words, any single
 requirement or criterion file above 500 words, and a `Purpose` section above
@@ -131,7 +153,7 @@ requirement or criterion file above 500 words, and a `Purpose` section above
 `hotdocs lint` also warns when several size dimensions are high at once:
 that is a decomposition signal, not just a length problem.
 
-## 6. Recording decisions
+## 7. Recording decisions
 
 A decision record (`specs/decisions/D<N>.md`) explains why the spec says
 what it says. Records are immutable once ratified: a change is a new
@@ -148,7 +170,7 @@ hotdocs decision record-commit D7                   # fills last_ratified_commit
 filled in by a follow-up commit. Cite a decision from a spec by its id in
 backticks, such as `` `D7` ``.
 
-## 7. Checking before you generate
+## 8. Checking before you generate
 
 ```
 hotdocs lint                         # structure, coverage, sizes, citations

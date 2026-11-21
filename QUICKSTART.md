@@ -1,15 +1,17 @@
 # Quickstart
 
-hotdocs turns written specs into verified Python code: you write what a
+hotdocs turns written specs into verified code: you write what a
 component must do and how to check it, `hotdocs generate` has a model write
 the code and its tests, and `hotdocs verify` says whether everything is
-ready. Python projects only.
+ready. A component's code is Python; it can also declare files of other
+kinds, such as a JavaScript module (section 5).
 
 ## 1. Install
 
 You need Python 3.11 or newer and a model provider: the `claude` command
 signed in, or an API key in an environment variable (Anthropic, OpenAI,
-Gemini, any OpenAI-compatible server, or a local Ollama).
+Gemini, any OpenAI-compatible server, or a local Ollama). Node 24 or
+newer is needed only if a component declares a JavaScript asset.
 
 ```
 git clone <this repository> hotdocs && cd hotdocs
@@ -54,8 +56,9 @@ with `claude-cli`: Claude Code sets `ANTHROPIC_API_KEY` for the commands
 it starts, and that key does not work for a separate `claude -p` call.
 Use your claude.ai login instead with `hotdocs init --provider claude-cli
 --auth login`, or add `auth = "login"` to the `[llm]` table of
-`hotdocs.toml`. Make the project a git repository with a `main`
-branch: `hotdocs impact` and `hotdocs assist` diff against it.
+`hotdocs.toml`. Make the project a git repository: `hotdocs impact` and
+`hotdocs assist` diff against its default branch (`origin/HEAD`'s target,
+else `main`, else `master`).
 
 ## 3. Generate and verify
 
@@ -127,7 +130,42 @@ A component's docs are capped at 4,000 words and each file at 500.
 testable criteria, shared rules in `specs/architecture/`, decision
 records, and when to split a component.
 
-## 5. Reading a failure
+## 5. Other languages and files: asset kinds
+
+A component's Python code is its implicit `python` asset. Anything else it
+produces is declared in `component.md`'s frontmatter, one line, as
+`<kind>:<path>` relative to the component's `gen/` directory:
+
+```
+assets: [javascript:static/app.js]
+```
+
+Each kind has a definition (`specs/architecture/asset-kind-<kind>.md`:
+layout, environment, how criteria call it, how its tests are
+strength-checked, and guidance for the model) and an adapter component,
+`comp-kind-<kind>`, that the pipeline runs. The built-in kinds are
+`python` and `javascript` (one ES module of pure functions over JSON
+values, run in Node 24 or newer); a criterion calls an exported function
+through the `asset_runner` fixture, and its tests are mutation-tested on
+the JavaScript itself. Never hide another language inside Python strings:
+declare it as an asset. An undeclared kind fails `hotdocs lint`.
+
+To add a kind, `hotdocs kind new <kind>` lays out its definition, its
+adapter component and a draft decision; the `hotdocs-asset-kind` skill in
+`agent-skills/` walks an agent through filling them in.
+
+**The Python environment.** By default a project's code runs in the
+environment `hotdocs` runs in. To give it its own, commit
+`environments/python/requirements.lock` (it must pin `pytest`): `hotdocs`
+builds `.hotdocs/env/python/` from it on first use, so the code cannot
+import a package the project never declared. To require a Python version,
+put a prefix such as `3.14` in `environments/python/python-version`.
+Provenance records the Python version and a fingerprint of the installed
+packages, so a component generated under one environment misses under
+another, with the reason `environment differs`. `hotdocs generate` then
+re-verifies the committed code first and regenerates only if that fails.
+
+## 6. Reading a failure
 
 `hotdocs generate` lists each attempt and, if none passed, ends with
 `blocked` and a reason:
@@ -140,6 +178,9 @@ records, and when to split a component.
   out.
 - `surface_check_failed` — the code did not import, used a name a
   dependency lacks, or mishandled an unknown command-line argument.
+- An environment failure (`javascript needs node >= 24`, `python
+  environment: needs Python 3.14, found 3.12.4`) stops at once with no
+  retry: fix the machine or the pin, then run it again.
 - `test_authoring_failed` — code was produced but a criterion's test
   could not be written (a model call dropped twice): run it again;
   nothing shows the code wrong.
@@ -162,7 +203,7 @@ that reads files relative to the current directory is the usual cause.
 `hotdocs verify` without `--model` reports every component and lists a
 capability that needs a fresh run as `needs a fresh run; pass --model`.
 
-## 6. Known limits
+## 7. Known limits
 
 - The secret scan finds API keys, tokens and other high-entropy or
   provider-shaped strings, not ordinary passwords: a low-entropy value like
@@ -175,5 +216,6 @@ capability that needs a fresh run as `needs a fresh run; pass --model`.
   `HOTDOCS_LIVE=1 pytest verification/llm-endpoint/test_live_providers.py
   verification/llm-tool-endpoint/test_live_tool_loop.py
   verification/agentic-generator/test_live_slugify.py`.
-- `hotdocs assist` and `hotdocs impact` need a git repository with a
-  `main` or `master` branch.
+- `hotdocs assist` and `hotdocs impact` need a git repository; without a
+  default branch or a merge-base every file counts as changed.
+- An asset kind's name has no hyphen yet (`sql`, not `data-schema`).
