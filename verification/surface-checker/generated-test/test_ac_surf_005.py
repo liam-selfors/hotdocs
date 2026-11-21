@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:e9b7fe009f3fb8b79ae41f4f84031ba11cd96ebf053958662696b7e24f9c54d3
+# hotdocs-criterion: sha256:fd738218e9ab0cceafd4d53b93bbe802fd8ee2e112a1a1d6c62389f3d429a7e6
 import sys
 from pathlib import Path
 
@@ -7,12 +7,6 @@ import surface_checker
 
 def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
-
-
-def write(path, text):
-    path = Path(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text)
 
 
 PYTHON_ADAPTER = (
@@ -26,11 +20,11 @@ PYTHON_ADAPTER = (
 )
 
 FAKE_ADAPTER = (
-    "KIND = \"fake\"\n"
+    "KIND = " + repr("fake") + "\n"
     "\n"
     "\n"
     "def surface(asset_file):\n"
-    "    return {\"names\": [\"a\", \"b\"]}\n"
+    "    return {\"names\": " + repr(["a", "b"]) + "}\n"
     "\n"
     "\n"
     "def provision(repo_root):\n"
@@ -38,42 +32,51 @@ FAKE_ADAPTER = (
 )
 
 
-def build_repo(repo_root, stated_lines):
-    repo_root = Path(repo_root)
-    write(
-        repo_root / "specs" / "components" / "widget" / "component.md",
+def build_repo(root, block_lines):
+    root = Path(root)
+    comp = root / "specs" / "components" / "widget"
+    (comp / "interface" / "assets").mkdir(parents=True)
+    (comp / "component.md").write_text(
         "---\n"
         "id: comp-widget\n"
         "title: Widget\n"
         "status: draft\n"
-        "owners: [pipeline-team]\n"
+        "owners: [test-team]\n"
         "depends_on: []\n"
         "assets: [fake:static/app.js]\n"
         "---\n"
         "\n"
-        "# Widget\n",
+        "# Widget\n"
     )
-    write(
-        repo_root / "specs" / "components" / "widget" / "interface" / "library.md",
-        "# Library\n",
-    )
-    write(
-        repo_root / "specs" / "components" / "widget" / "interface" / "assets" / "app.js.md",
+    (comp / "interface" / "library.md").write_text("# Library\n")
+    (comp / "interface" / "assets" / "app.js.md").write_text(
         "# app.js\n"
         "\n"
         "```\n"
-        + "".join(line + "\n" for line in stated_lines)
-        + "```\n",
+        + "".join(line + "\n" for line in block_lines)
+        + "```\n"
     )
-    write(repo_root / "specs" / "architecture" / "asset-kind-fake.md", "# Fake kind\n")
-    write(repo_root / "gen" / "kind-python" / "kind_python.py", PYTHON_ADAPTER)
-    write(repo_root / "gen" / "kind-fake" / "kind_fake.py", FAKE_ADAPTER)
-    write(repo_root / "gen" / "widget" / "widget.py", "X = 1\n")
-    write(repo_root / "gen" / "widget" / "static" / "app.js", "export function a(x) { return x; }\n")
-    return repo_root
+
+    gen_widget = root / "gen" / "widget"
+    (gen_widget / "static").mkdir(parents=True)
+    (gen_widget / "widget.py").write_text("X = 1\n")
+    (gen_widget / "static" / "app.js").write_text("// any text\n")
+
+    arch = root / "specs" / "architecture"
+    arch.mkdir(parents=True)
+    (arch / "asset-kind-fake.md").write_text("# Asset kind: fake\n")
+
+    kind_python = root / "gen" / "kind-python"
+    kind_python.mkdir(parents=True)
+    (kind_python / "kind_python.py").write_text(PYTHON_ADAPTER)
+
+    kind_fake = root / "gen" / "kind-fake"
+    kind_fake.mkdir(parents=True)
+    (kind_fake / "kind_fake.py").write_text(FAKE_ADAPTER)
+    return root
 
 
-def test_missing_stated_names_give_sorted_distinct_findings(tmp_path):
+def test_stated_names_not_provided_give_sorted_distinct_findings(tmp_path):
     repo_root = build_repo(
         tmp_path / "repo",
         [
@@ -84,20 +87,30 @@ def test_missing_stated_names_give_sorted_distinct_findings(tmp_path):
             "export function c(q)",
         ],
     )
+
     report = surface_checker.check_surface("comp-widget", repo_root)
-    findings = field(report, "findings")
-    simplified = [
-        {"kind": field(f, "kind"), "message": field(f, "message")} for f in findings
-    ]
-    assert simplified == [
-        {"kind": "asset_name_missing", "message": "static/app.js has no c, which its interface states"},
-        {"kind": "asset_name_missing", "message": "static/app.js has no zeta, which its interface states"},
-    ]
+
     assert field(report, "ok") is False
+    findings = [
+        {"kind": field(f, "kind"), "message": field(f, "message")}
+        for f in field(report, "findings")
+    ]
+    assert findings == [
+        {
+            "kind": "asset_name_missing",
+            "message": "static/app.js has no c, which its interface states",
+        },
+        {
+            "kind": "asset_name_missing",
+            "message": "static/app.js has no zeta, which its interface states",
+        },
+    ]
 
 
-def test_all_stated_names_provided_gives_ok(tmp_path):
+def test_all_stated_names_provided_gives_no_findings(tmp_path):
     repo_root = build_repo(tmp_path / "repo", ["export function a(x)"])
+
     report = surface_checker.check_surface("comp-widget", repo_root)
-    assert list(field(report, "findings")) == []
+
     assert field(report, "ok") is True
+    assert list(field(report, "findings")) == []

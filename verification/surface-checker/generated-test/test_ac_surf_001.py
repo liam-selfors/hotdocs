@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:2b6c07e692943368c565f82ce3998c1852e8f2263e89159df3bcd5cc37868e68
+# hotdocs-criterion: sha256:edbc65fe967689e661b7fa9c8e63509233cc3478895b3d56b4397589f15032a9
 import sys
 from pathlib import Path
 
@@ -20,43 +20,41 @@ PYTHON_ADAPTER = (
 )
 
 
-def build_repo(repo_root, module_source):
+def build_repo(repo_root, widget_source):
     repo_root = Path(repo_root)
     comp_dir = repo_root / "specs" / "components" / "widget"
-    (comp_dir / "interface").mkdir(parents=True, exist_ok=True)
+    (comp_dir / "interface").mkdir(parents=True)
     (comp_dir / "component.md").write_text(
         "---\n"
-        "id: comp-widget\n"
-        "title: Widget\n"
-        "status: draft\n"
-        "owners: [pipeline-team]\n"
-        "depends_on: []\n"
-        "sealed: true\n"
-        "source_path: legacy/widget/\n"
-        "---\n"
-        "\n"
-        "# Widget\n"
+        + "id: comp-widget\n"
+        + "title: Widget\n"
+        + "status: draft\n"
+        + "owners: [test-team]\n"
+        + "depends_on: []\n"
+        + "---\n"
+        + "\n"
+        + "# Widget\n"
     )
     (comp_dir / "interface" / "library.md").write_text("# Library\n")
 
-    adapter_dir = repo_root / "gen" / "kind-python"
-    adapter_dir.mkdir(parents=True, exist_ok=True)
-    (adapter_dir / "kind_python.py").write_text(PYTHON_ADAPTER)
+    gen_widget = repo_root / "gen" / "widget"
+    gen_widget.mkdir(parents=True)
+    (gen_widget / "widget.py").write_text(widget_source)
 
-    code_dir = repo_root / "gen" / "widget"
-    code_dir.mkdir(parents=True, exist_ok=True)
-    (code_dir / "widget.py").write_text(module_source)
+    adapter_dir = repo_root / "gen" / "kind-python"
+    adapter_dir.mkdir(parents=True)
+    (adapter_dir / "kind_python.py").write_text(PYTHON_ADAPTER)
     return repo_root
 
 
-def test_import_error_gives_one_import_error_finding(tmp_path):
+def test_import_failure_gives_one_import_error_finding(tmp_path):
     repo_root = build_repo(tmp_path / "repo", "import nosuchmodule_xyz\n")
 
     report = surface_checker.check_surface("comp-widget", repo_root)
 
     assert field(report, "ok") is False
-    findings = list(field(report, "findings"))
-    assert len(findings) == 1, findings
+    findings = field(report, "findings")
+    assert len(findings) == 1
     finding = findings[0]
     assert field(finding, "kind") == "import_error"
     assert "nosuchmodule_xyz" in field(finding, "message")

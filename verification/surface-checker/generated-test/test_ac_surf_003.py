@@ -1,8 +1,11 @@
-# hotdocs-criterion: sha256:f1dd5e2ba31835d4b5fb07ab9041955aaee125cc3b920de02dd0563a8293e5df
+# hotdocs-criterion: sha256:2c6f2550d886010302a0c4528dcc5380372637b3a96c0f2a01d7bd2b1b75db7d
 import sys
 from pathlib import Path
 
 import surface_checker
+
+
+IMPLEMENTS_LINE = "Implements: `specs/architecture/cli-conventions.md`"
 
 
 def field(value, name):
@@ -29,74 +32,82 @@ GOOD_MAIN = (
 )
 
 RAISING_MAIN = (
-    "import sys\n"
-    "\n"
-    "\n"
     "def main(argv):\n"
-    "    raise ValueError(" + repr("unknown argument") + ")\n"
+    "    raise ValueError(" + repr("unknown argument") + " + ': ' + repr(argv))\n"
 )
 
-IMPLEMENTS_LIBRARY = (
-    "# Library\n"
-    "\n"
-    "main(argv: list[str]) -> int\n"
-    "\n"
-    "Implements: `specs/architecture/cli-conventions.md`\n"
-)
 
-PLAIN_LIBRARY = "# Library\n\nmain(argv: list[str]) -> int\n"
+def build_repo(repo_root, main_source, with_implements):
+    repo_root = Path(repo_root)
 
+    adapter_dir = repo_root / "gen" / "kind-python"
+    adapter_dir.mkdir(parents=True, exist_ok=True)
+    (adapter_dir / "kind_python.py").write_text(PYTHON_ADAPTER)
 
-def build_repo(root, main_source, library_text):
-    root = Path(root)
-    comp_dir = root / "specs" / "components" / "tool"
-    (comp_dir / "interface").mkdir(parents=True)
+    comp_dir = repo_root / "specs" / "components" / "tool"
+    (comp_dir / "interface").mkdir(parents=True, exist_ok=True)
     (comp_dir / "component.md").write_text(
         "---\n"
         "id: comp-tool\n"
         "title: Tool\n"
         "status: draft\n"
-        "owners: [pipeline-team]\n"
+        "owners: [test-team]\n"
         "depends_on: []\n"
+        "sealed: true\n"
+        "source_path: legacy/tool/\n"
         "---\n"
         "\n"
         "# Tool\n"
     )
-    (comp_dir / "interface" / "library.md").write_text(library_text)
-    arch = root / "specs" / "architecture"
-    arch.mkdir(parents=True)
-    (arch / "cli-conventions.md").write_text("# CLI conventions\n")
-    adapter_dir = root / "gen" / "kind-python"
-    adapter_dir.mkdir(parents=True)
-    (adapter_dir / "kind_python.py").write_text(PYTHON_ADAPTER)
-    code_dir = root / "gen" / "tool"
-    code_dir.mkdir(parents=True)
+    library = "# Library\n"
+    if with_implements:
+        library = library + "\n" + IMPLEMENTS_LINE + "\n"
+    (comp_dir / "interface" / "library.md").write_text(library)
+
+    code_dir = repo_root / "gen" / "tool"
+    code_dir.mkdir(parents=True, exist_ok=True)
     (code_dir / "tool.py").write_text(main_source)
-    return root, code_dir
+
+    legacy_dir = repo_root / "legacy" / "tool"
+    legacy_dir.mkdir(parents=True, exist_ok=True)
+    (legacy_dir / "tool.py").write_text(main_source)
+
+    return code_dir
 
 
-def test_cli_usage_conforming_main_passes(tmp_path):
-    repo_root, code_dir = build_repo(tmp_path, GOOD_MAIN, IMPLEMENTS_LIBRARY)
-    report = surface_checker.check_surface("comp-tool", repo_root)
-    assert field(report, "findings") == []
-    assert field(report, "ok") is True
+def test_conforming_main_gives_ok(tmp_path):
+    repo_root = tmp_path / "repo"
+    code_dir = build_repo(repo_root, GOOD_MAIN, with_implements=True)
 
+    report = surface_checker.check_surface("comp-tool", repo_root, code_dir)
 
-def test_cli_usage_raising_main_gives_one_finding(tmp_path):
-    repo_root, code_dir = build_repo(tmp_path, RAISING_MAIN, IMPLEMENTS_LIBRARY)
-    report = surface_checker.check_surface("comp-tool", repo_root)
     findings = field(report, "findings")
+    assert field(report, "ok") is True, findings
+    assert list(findings) == []
+
+
+def test_raising_main_gives_one_cli_usage_finding(tmp_path):
+    repo_root = tmp_path / "repo"
+    code_dir = build_repo(repo_root, RAISING_MAIN, with_implements=True)
+
+    report = surface_checker.check_surface("comp-tool", repo_root, code_dir)
+
+    findings = list(field(report, "findings"))
+    assert field(report, "ok") is False
     assert len(findings) == 1, findings
     finding = findings[0]
     assert field(finding, "kind") == "cli_usage"
     message = field(finding, "message")
     assert "exit 1" in message
     assert "traceback" in message
-    assert field(report, "ok") is False
 
 
-def test_cli_usage_not_checked_without_implements_line(tmp_path):
-    repo_root, code_dir = build_repo(tmp_path, RAISING_MAIN, PLAIN_LIBRARY)
-    report = surface_checker.check_surface("comp-tool", repo_root)
-    assert field(report, "findings") == []
-    assert field(report, "ok") is True
+def test_raising_main_without_implements_line_gives_ok(tmp_path):
+    repo_root = tmp_path / "repo"
+    code_dir = build_repo(repo_root, RAISING_MAIN, with_implements=False)
+
+    report = surface_checker.check_surface("comp-tool", repo_root, code_dir)
+
+    findings = field(report, "findings")
+    assert field(report, "ok") is True, findings
+    assert list(findings) == []
