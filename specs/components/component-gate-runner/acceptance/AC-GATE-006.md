@@ -18,8 +18,8 @@ Then write_provenance was called once, after both scans, with inputs
   generation_result, verification_report, license_scan_result and
   secret_scan_result are the faked dependencies' results
 
-Given instead the loop returns passed false and its last generation
-  result has files {} and model_call_error {"category": "network",
+Given instead the loop returns passed false, its last attempt's outcome
+  is "generation_failed", and its last generation result has files {} and model_call_error {"category": "network",
   "message": "down"}
 When run_component_gates is called
 Then write_provenance was never called
