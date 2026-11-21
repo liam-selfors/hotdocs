@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:31aee153d4c55e2818e6a00885b59536158faa05ffd3953db6ea2f522f157c46
+# hotdocs-criterion: sha256:71a2b06b975e7e351c14dc02f60410c0aa4b3fd06dd356013315d2709e215c3f
 import hashlib
 import json
 from pathlib import Path
@@ -9,54 +9,47 @@ import provenance_checker
 
 
 PK = "sha256:" + "a" * 64
+GATE_VERSIONS_JSON = json.dumps({"license_scanner": "1"})
 
 
 def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def _sha(path):
+def _sha256_file(path):
     return "sha256:" + hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
 
-def _build_repo(root):
-    root = Path(root)
-    # Fake python adapter
-    adapter_dir = root / "gen" / "kind-python"
+def _write_python_adapter(repo_root):
+    adapter_dir = repo_root / "gen" / "kind-python"
     adapter_dir.mkdir(parents=True, exist_ok=True)
-    provision_value = {
+    provision_result = {
         "ok": True,
         "reason": "",
         "versions": {"python": "3.12.4", "packages": PK},
         "lockfile_sha256": None,
         "interpreter": "/fake/python",
     }
-    adapter_src = (
+    source = (
         "KIND = " + repr("python") + "\n"
+        "\n"
         "\n"
         "def guidance():\n"
         "    return " + repr({"generator": "", "test_author": ""}) + "\n"
         "\n"
+        "\n"
         "def provision(repo_root):\n"
-        "    return " + repr(provision_value) + "\n"
+        "    return " + repr(provision_result) + "\n"
     )
-    adapter_path = adapter_dir / "kind_python.py"
-    adapter_path.write_text(adapter_src, encoding="utf-8")
-    pa = _sha(adapter_path)
+    path = adapter_dir / "kind_python.py"
+    path.write_text(source, encoding="utf-8")
+    return path
 
-    p_entry = {
-        "kind": "python",
-        "path": ".",
-        "definition_sha256": None,
-        "adapter_sha256": pa,
-        "versions": {"python": "3.12.4", "packages": PK},
-        "lockfile_sha256": None,
-    }
 
-    # Component spec (no assets line, not sealed)
-    comp_dir = root / "specs" / "components" / "foo"
+def _write_component_md(repo_root):
+    comp_dir = repo_root / "specs" / "components" / "foo"
     comp_dir.mkdir(parents=True, exist_ok=True)
-    comp_md = (
+    text = (
         "---\n"
         "id: comp-foo\n"
         "title: Foo\n"
@@ -66,119 +59,161 @@ def _build_repo(root):
         "---\n"
         "\n"
         "# Foo\n"
+        "\n"
+        "## Purpose\n"
+        "\n"
+        "A fixture component.\n"
     )
-    (comp_dir / "component.md").write_text(comp_md, encoding="utf-8")
+    (comp_dir / "component.md").write_text(text, encoding="utf-8")
 
-    # Manifest
-    verification_report = {
-        "component_id": "comp-foo",
-        "criteria": [],
-        "requirement_results": {},
-        "interface_drift": False,
-        "mutation_score": 0.92,
-        "mutation_error": None,
-        "assets": [p_entry],
-        "overall": "pass",
-    }
+
+def _write_manifest(repo_root, python_entry):
+    gen_dir = repo_root / "gen" / "foo"
+    gen_dir.mkdir(parents=True, exist_ok=True)
     manifest = {
         "spec_bundle_hash": "sha256:0a1b",
         "gate_versions": {"license_scanner": "1"},
-        "verification_report": verification_report,
+        "verification_report": {
+            "component_id": "comp-foo",
+            "criteria": [
+                {
+                    "id": "AC-FOO-001",
+                    "covers": "R-FOO-001",
+                    "kind": "generated-test",
+                    "result": "pass",
+                }
+            ],
+            "requirement_results": {"R-FOO-001": "pass"},
+            "interface_drift": False,
+            "mutation_score": 1.0,
+            "mutation_error": None,
+            "assets": [python_entry],
+            "overall": "pass",
+        },
         "license_scan": {},
         "secret_scan": {},
-        "assets": [p_entry],
+        "assets": [python_entry],
     }
-    text = json.dumps(manifest, indent=2)
-    for sub in ("gen", "verification"):
-        d = root / sub / "foo"
-        d.mkdir(parents=True, exist_ok=True)
-        (d / ".provenance.json").write_text(text, encoding="utf-8")
-    return root
+    (gen_dir / ".provenance.json").write_text(json.dumps(manifest), encoding="utf-8")
 
 
 @pytest.fixture
 def repo_root(tmp_path, monkeypatch):
     root = tmp_path / "repo"
     root.mkdir()
-    _build_repo(root)
-    work = tmp_path / "cwd"
-    work.mkdir()
-    monkeypatch.chdir(work)
+    adapter_path = _write_python_adapter(root)
+    _write_component_md(root)
+    pa = _sha256_file(adapter_path)
+    python_entry = {
+        "kind": "python",
+        "path": ".",
+        "definition_sha256": None,
+        "adapter_sha256": pa,
+        "versions": {"python": "3.12.4", "packages": PK},
+        "lockfile_sha256": None,
+    }
+    _write_manifest(root, python_entry)
+    monkeypatch.delenv("VAR_TRUST_JUDGE_PROVENANCE", raising=False)
+    monkeypatch.chdir(root)
     return root
 
 
-def test_json_hit_with_equals_form(repo_root, capsys):
-    rc = provenance_checker.main([
+def test_json_equals_form_reports_hit(repo_root, capsys):
+    argv = [
         "check",
         "comp-foo",
         "--spec-bundle-hash=sha256:0a1b",
-        "--gate-versions=" + json.dumps({"license_scanner": "1"}),
+        "--gate-versions=" + GATE_VERSIONS_JSON,
         "--repo-root=" + str(repo_root),
         "--format=json",
-    ])
-    captured = capsys.readouterr()
-    assert rc == 0, captured.err
-    doc = json.loads(captured.out)
+    ]
+    code = provenance_checker.main(argv)
+    out = capsys.readouterr().out
+    assert code == 0
+    doc = json.loads(out)
     assert field(doc, "hit") is True
 
 
-def test_text_miss_with_separate_value_form(repo_root, capsys):
-    rc = provenance_checker.main([
+def test_text_separate_form_reports_miss(repo_root, capsys):
+    argv = [
         "check",
         "comp-foo",
         "--spec-bundle-hash",
         "sha256:ffff",
         "--gate-versions",
-        json.dumps({"license_scanner": "1"}),
+        GATE_VERSIONS_JSON,
         "--repo-root",
         str(repo_root),
         "--format",
         "text",
-    ])
-    captured = capsys.readouterr()
-    assert rc == 0, captured.err
-    assert "miss" in captured.out
+    ]
+    code = provenance_checker.main(argv)
+    out = capsys.readouterr().out
+    assert code == 0
+    assert "miss" in out
 
 
-def _usage_cases(repo_root):
-    gv = "--gate-versions=" + json.dumps({"license_scanner": "1"})
-    rr = "--repo-root=" + str(repo_root)
+def _usage_cases(root):
+    r = str(root)
     return {
-        "missing_spec_bundle_hash": [
-            "check", "comp-foo", gv, rr, "--format=json",
+        "missing-spec-bundle-hash": [
+            "check", "comp-foo",
+            "--gate-versions=" + GATE_VERSIONS_JSON,
+            "--repo-root=" + r,
+            "--format=json",
         ],
-        "hash_without_prefix": [
-            "check", "comp-foo", "--spec-bundle-hash=0a1b", gv, rr, "--format=json",
+        "hash-without-prefix": [
+            "check", "comp-foo",
+            "--spec-bundle-hash=0a1b",
+            "--gate-versions=" + GATE_VERSIONS_JSON,
+            "--repo-root=" + r,
+            "--format=json",
         ],
-        "gate_versions_not_object": [
-            "check", "comp-foo", "--spec-bundle-hash=sha256:0a1b",
-            "--gate-versions", "[1]", rr, "--format=json",
+        "gate-versions-not-object": [
+            "check", "comp-foo",
+            "--spec-bundle-hash=sha256:0a1b",
+            "--gate-versions", "[1]",
+            "--repo-root=" + r,
+            "--format=json",
         ],
-        "bogus_format": [
-            "check", "comp-foo", "--spec-bundle-hash=sha256:0a1b", gv, rr,
+        "bogus-format": [
+            "check", "comp-foo",
+            "--spec-bundle-hash=sha256:0a1b",
+            "--gate-versions=" + GATE_VERSIONS_JSON,
+            "--repo-root=" + r,
             "--format=bogus",
         ],
-        "unknown_argument": [
-            "check", "comp-foo", "--spec-bundle-hash=sha256:0a1b", gv, rr,
-            "--format=json", "--hotdocs-smoke-unknown",
+        "unknown-argument": [
+            "check", "comp-foo",
+            "--spec-bundle-hash=sha256:0a1b",
+            "--gate-versions=" + GATE_VERSIONS_JSON,
+            "--repo-root=" + r,
+            "--format=json",
+            "--hotdocs-smoke-unknown",
         ],
-        "repo_root_last_without_value": [
-            "check", "comp-foo", "--spec-bundle-hash=sha256:0a1b", gv,
-            "--format=json", "--repo-root",
+        "repo-root-last-no-value": [
+            "check", "comp-foo",
+            "--spec-bundle-hash=sha256:0a1b",
+            "--gate-versions=" + GATE_VERSIONS_JSON,
+            "--format=json",
+            "--repo-root",
         ],
     }
 
 
-@pytest.mark.parametrize("case", [
-    "missing_spec_bundle_hash",
-    "hash_without_prefix",
-    "gate_versions_not_object",
-    "bogus_format",
-    "unknown_argument",
-    "repo_root_last_without_value",
-])
+@pytest.mark.parametrize(
+    "case",
+    [
+        "missing-spec-bundle-hash",
+        "hash-without-prefix",
+        "gate-versions-not-object",
+        "bogus-format",
+        "unknown-argument",
+        "repo-root-last-no-value",
+    ],
+)
 def test_usage_errors_return_2(repo_root, capsys, case):
     argv = _usage_cases(repo_root)[case]
-    rc = provenance_checker.main(argv)
+    code = provenance_checker.main(argv)
     capsys.readouterr()
-    assert rc == 2
+    assert code == 2

@@ -1,31 +1,31 @@
-# hotdocs-criterion: sha256:62b47bbecc380b49fcce96eff510caf62e6e45e00d77fd34dc8ee5f67cc97913
+# hotdocs-criterion: sha256:ecdb62ad336ac033edb00ede3443c43d65e804d2f82944fbda0227ffaceb391b
 import hashlib
 import json
+import os
 from pathlib import Path
 
 import provenance_checker
+
+
+PK = "sha256:" + "a" * 64
+H = "sha256:" + hashlib.sha256(b"AC-PROVCHECK-005 bundle").hexdigest()
 
 
 def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-H = "sha256:" + "ab" * 32
-PK = "sha256:" + "a" * 64
-
-
-def _write(path, text):
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text, encoding="utf-8")
-
-
-def _sha256_file(path):
-    return "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()
-
-
-def _build_repo(repo_root):
-    # Fake python adapter (D344), deterministic provision.
-    adapter_src = (
+def _write_python_adapter(repo_root):
+    adapter_dir = repo_root / "gen" / "kind-python"
+    adapter_dir.mkdir(parents=True, exist_ok=True)
+    provision_result = {
+        "ok": True,
+        "reason": "",
+        "versions": {"python": "3.12.4", "packages": PK},
+        "lockfile_sha256": None,
+        "interpreter": "/fake/python",
+    }
+    source = (
         "KIND = " + repr("python") + "\n"
         "\n"
         "\n"
@@ -34,19 +34,17 @@ def _build_repo(repo_root):
         "\n"
         "\n"
         "def provision(repo_root):\n"
-        "    return " + repr({
-            "ok": True,
-            "reason": "",
-            "versions": {"python": "3.12.4", "packages": PK},
-            "lockfile_sha256": None,
-            "interpreter": "/fake/python",
-        }) + "\n"
+        "    return " + repr(provision_result) + "\n"
     )
-    adapter_path = repo_root / "gen" / "kind-python" / "kind_python.py"
-    _write(adapter_path, adapter_src)
+    path = adapter_dir / "kind_python.py"
+    path.write_text(source, encoding="utf-8")
+    return path
 
-    # Component frontmatter: not sealed, no assets line.
-    component_md = (
+
+def _write_component_md(repo_root):
+    comp_dir = repo_root / "specs" / "components" / "foo"
+    comp_dir.mkdir(parents=True, exist_ok=True)
+    text = (
         "---\n"
         "id: comp-foo\n"
         "title: Foo\n"
@@ -56,15 +54,15 @@ def _build_repo(repo_root):
         "---\n"
         "\n"
         "# Foo\n"
-        "\n"
-        "## Purpose\n"
-        "\n"
-        "A fixture component.\n"
     )
-    _write(repo_root / "specs" / "components" / "foo" / "component.md", component_md)
+    (comp_dir / "component.md").write_text(text, encoding="utf-8")
 
-    pa = _sha256_file(adapter_path)
-    p_entry = {
+
+def _build_repo(repo_root):
+    adapter_path = _write_python_adapter(repo_root)
+    _write_component_md(repo_root)
+    pa = "sha256:" + hashlib.sha256(adapter_path.read_bytes()).hexdigest()
+    python_entry = {
         "kind": "python",
         "path": ".",
         "definition_sha256": None,
@@ -72,7 +70,6 @@ def _build_repo(repo_root):
         "versions": {"python": "3.12.4", "packages": PK},
         "lockfile_sha256": None,
     }
-
     verification_report = {
         "criteria": [
             {
@@ -90,20 +87,23 @@ def _build_repo(repo_root):
         "verification_report": verification_report,
         "license_scan": {},
         "secret_scan": {},
-        "assets": [p_entry],
+        "assets": [python_entry],
     }
-    _write(repo_root / "gen" / "foo" / ".provenance.json", json.dumps(manifest, indent=2))
-    return manifest
+    gen_foo = repo_root / "gen" / "foo"
+    gen_foo.mkdir(parents=True, exist_ok=True)
+    (gen_foo / ".provenance.json").write_text(json.dumps(manifest), encoding="utf-8")
 
 
-def test_ac_provcheck_005_llm_judge_trusted_hash_match_is_hit(tmp_path, monkeypatch):
+def test_llm_judge_hash_match_is_hit_when_judge_provenance_trusted(tmp_path, monkeypatch):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
     _build_repo(repo_root)
 
-    # monkeypatch removes the variable again after the test.
     monkeypatch.setenv("VAR_TRUST_JUDGE_PROVENANCE", "true")
+    try:
+        result = provenance_checker.check_provenance("comp-foo", H, {}, repo_root)
+    finally:
+        monkeypatch.delenv("VAR_TRUST_JUDGE_PROVENANCE", raising=False)
 
-    result = provenance_checker.check_provenance("comp-foo", H, {}, repo_root)
-
+    assert "VAR_TRUST_JUDGE_PROVENANCE" not in os.environ
     assert field(result, "hit") is True
