@@ -1,6 +1,5 @@
-# hotdocs-criterion: sha256:b8d76f22bfb1e756d67387716b14576075da8ed88b0391c729b80c1f43548557
+# hotdocs-criterion: sha256:be65a515f8a3615f8224d83d98234f1d648c76a836b91063b5e707ce7edf6f2e
 import os
-import stat
 
 import pytest
 
@@ -8,10 +7,27 @@ import kind_javascript
 
 
 NEEDS = "javascript needs node >= 24"
+EXPECTED_NO_NODE = {
+    "ok": False,
+    "reason": NEEDS,
+    "versions": {},
+    "lockfile_sha256": None,
+}
 
 
 def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
+
+
+def as_plain(value):
+    if isinstance(value, dict):
+        return dict(value)
+    return {
+        "ok": field(value, "ok"),
+        "reason": field(value, "reason"),
+        "versions": field(value, "versions"),
+        "lockfile_sha256": field(value, "lockfile_sha256"),
+    }
 
 
 def make_fake_node(directory, line):
@@ -22,59 +38,47 @@ def make_fake_node(directory, line):
     return directory
 
 
-def expected_needs():
-    return {
-        "ok": False,
-        "reason": NEEDS,
-        "versions": {},
-        "lockfile_sha256": None,
-    }
-
-
 def test_no_node_on_path(tmp_path, monkeypatch):
     empty_dir = tmp_path / "empty_bin"
     empty_dir.mkdir()
+    monkeypatch.setenv("PATH", str(empty_dir))
+
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
-    monkeypatch.setenv("PATH", str(empty_dir))
-
     result = kind_javascript.provision(repo_root)
-    assert result == expected_needs()
+    assert isinstance(result, dict)
+    assert result == EXPECTED_NO_NODE
 
-
-def test_asset_runner_without_node_raises(tmp_path, monkeypatch):
-    empty_dir = tmp_path / "empty_bin"
-    empty_dir.mkdir()
-    asset = tmp_path / "asset" / "app.js"
-    asset.parent.mkdir()
-    asset.write_text("export function f() { return 1; }\n", encoding="utf-8")
-    monkeypatch.setenv("PATH", str(empty_dir))
-
+    asset = tmp_path / "app.js"
+    asset.write_text(
+        "export function f() {\n  return 1;\n}\n", encoding="utf-8"
+    )
     with pytest.raises(kind_javascript.AssetError) as excinfo:
-        run = kind_javascript.asset_runner(asset)
-        run("f", [])
+        kind_javascript.asset_runner(asset)("f", [])
     assert str(excinfo.value) == NEEDS
 
 
-def test_old_node_gives_same_result(tmp_path, monkeypatch):
-    bin_dir = make_fake_node(tmp_path / "fake_bin", "v18.2.0")
+def test_old_node_on_path(tmp_path, monkeypatch):
+    fake_dir = make_fake_node(tmp_path / "fake_bin", "v18.2.0")
+    monkeypatch.setenv("PATH", str(fake_dir))
+
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
-    monkeypatch.setenv("PATH", str(bin_dir))
-
     result = kind_javascript.provision(repo_root)
-    assert result == expected_needs()
+    assert isinstance(result, dict)
+    assert result == EXPECTED_NO_NODE
 
 
-def test_unparseable_version_output(tmp_path, monkeypatch):
-    bin_dir = make_fake_node(tmp_path / "fake_bin", "hello")
+def test_unparseable_node_version(tmp_path, monkeypatch):
+    fake_dir = make_fake_node(tmp_path / "fake_bin", "hello")
+    monkeypatch.setenv("PATH", str(fake_dir))
+
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
-    monkeypatch.setenv("PATH", str(bin_dir))
-
     result = kind_javascript.provision(repo_root)
     assert field(result, "ok") is False
     assert field(result, "versions") == {}
-    assert field(result, "reason") == (
-        "javascript environment: node --version printed hello"
+    assert (
+        field(result, "reason")
+        == "javascript environment: node --version printed hello"
     )

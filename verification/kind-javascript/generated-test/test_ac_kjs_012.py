@@ -1,27 +1,27 @@
-# hotdocs-criterion: sha256:cac741d0b723283061368bc190e755898312dc6207da45e7bdbe246a1c51fa2b
+# hotdocs-criterion: sha256:0be7650560d613981bc89ab8a9bf9b9a1bb290226605b7024caded484536db2b
 import shutil
-from pathlib import Path
 
 import kind_javascript
 
 
-C_JS = (
-    "export function grade(score) {\n"
-    "  if (score >= 90) return \"A\";\n"
-    "  if (score >= 75) return \"B\";\n"
-    "  return \"C\";\n"
-    "}\n"
-    "\n"
-    "export function both(a, b) {\n"
-    "  return a === b && a > 0;\n"
-    "}\n"
-    "\n"
-    "export function total(xs) {\n"
-    "  let s = 0;\n"
-    "  for (const x of xs) s = s + x;\n"
-    "  return s;\n"
-    "}\n"
-)
+C_JS_LINES = [
+    "export function grade(score) {\n",
+    "  if (score >= 90) return \"A\";\n",
+    "  if (score >= 75) return \"B\";\n",
+    "  return \"C\";\n",
+    "}\n",
+    "\n",
+    "export function both(a, b) {\n",
+    "  return a === b && a > 0;\n",
+    "}\n",
+    "\n",
+    "export function total(xs) {\n",
+    "  let s = 0;\n",
+    "  for (const x of xs) s = s + x;\n",
+    "  return s;\n",
+    "}\n",
+]
+C_JS = "".join(C_JS_LINES)
 
 STRONG = [
     ("grade", [95], "A"),
@@ -54,15 +54,32 @@ def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def kills(run, suite):
+def suite_kills(run, suite):
     for entry, args, expected in suite:
         try:
-            result = run(entry, args)
+            result = run(entry, list(args))
         except kind_javascript.AssetError:
             return True
         if result != expected:
             return True
     return False
+
+
+def score_suite(tmp_path, original, sites, suite, label):
+    killed = []
+    survivors = []
+    for index, site in enumerate(sites):
+        copy_dir = tmp_path / ("mutant_" + label + "_" + str(index))
+        copy_dir.mkdir()
+        copy = copy_dir / "c.js"
+        shutil.copyfile(original, copy)
+        kind_javascript.apply_site(copy, site)
+        run = kind_javascript.asset_runner(copy)
+        if suite_kills(run, suite):
+            killed.append(field(site, "description"))
+        else:
+            survivors.append(field(site, "description"))
+    return killed, survivors
 
 
 def test_ac_kjs_012_calibration_pair(tmp_path):
@@ -77,30 +94,17 @@ def test_ac_kjs_012_calibration_pair(tmp_path):
     run = kind_javascript.asset_runner(c_js)
     for suite in (STRONG, WEAK):
         for entry, args, expected in suite:
-            assert run(entry, args) == expected, (entry, args, expected)
+            assert run(entry, list(args)) == expected
 
-    strong_killed = []
-    weak_killed = []
-    for index, site in enumerate(sites):
-        site_dir = tmp_path / ("mutant_" + str(index))
-        site_dir.mkdir()
-        copy = site_dir / "c.js"
-        shutil.copyfile(c_js, copy)
-        kind_javascript.apply_site(copy, site)
-        mutant_run = kind_javascript.asset_runner(copy)
-        description = field(site, "description")
-        if kills(mutant_run, STRONG):
-            strong_killed.append(description)
-        if kills(mutant_run, WEAK):
-            weak_killed.append(description)
+    # The original file is unchanged by the checks.
+    assert c_js.read_text(encoding="utf-8") == C_JS
 
-    total = len(sites)
-    assert total == 6
-
+    strong_killed, strong_survivors = score_suite(tmp_path, c_js, sites, STRONG, "strong")
     assert len(strong_killed) == 6
-    assert len(strong_killed) / total >= 0.8
+    assert strong_survivors == []
+    assert len(strong_killed) / len(sites) >= 0.8
 
+    weak_killed, weak_survivors = score_suite(tmp_path, c_js, sites, WEAK, "weak")
     assert len(weak_killed) == 4
-    assert len(weak_killed) / total < 0.8
-    survivors = [d for d in descriptions if d not in weak_killed]
-    assert survivors == ["8: && -> ||", "13: + -> -"]
+    assert len(weak_killed) / len(sites) < 0.8
+    assert weak_survivors == ["8: && -> ||", "13: + -> -"]

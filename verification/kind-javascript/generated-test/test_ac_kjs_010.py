@@ -1,9 +1,5 @@
-# hotdocs-criterion: sha256:5971e46d97e19b61ac01a3d4a9c8f8d04b793723c52529f2a8ae0114ba53efd1
+# hotdocs-criterion: sha256:d004da4af02b7c6a8ef892828670c15c982740aa6a0b0077ef036146b237afc2
 import kind_javascript
-
-
-def field(value, name):
-    return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
 LINES = [
@@ -26,23 +22,24 @@ EXPECTED = [
 ]
 
 
-def test_ac_kjs_010_strength_sites(tmp_path):
+def field(value, name):
+    return value[name] if isinstance(value, dict) else getattr(value, name)
+
+
+def test_ac_kjs_010_strength_sites_skip_strings_comments_unary_and_long_operators(tmp_path):
     text = "".join(line + "\n" for line in LINES)
     path = tmp_path / "a.js"
-    path.write_bytes(text.encode("utf-8"))
+    path.write_text(text, encoding="utf-8")
 
     sites = kind_javascript.strength_sites(path)
 
-    assert isinstance(sites, list)
     descriptions = [field(site, "description") for site in sites]
     assert descriptions == EXPECTED
 
-    decoded = path.read_bytes().decode("utf-8")
     for site in sites:
         assert isinstance(site, dict)
         assert set(site.keys()) == {"description", "offset", "token", "swap"}
-        offset = field(site, "offset")
-        token = field(site, "token")
+        offset = site["offset"]
+        token = site["token"]
         assert isinstance(offset, int)
-        assert isinstance(token, str)
-        assert decoded[offset:offset + len(token)] == token
+        assert text[offset:offset + len(token)] == token
