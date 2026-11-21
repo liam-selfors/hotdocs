@@ -1,5 +1,5 @@
-# hotdocs-criterion: sha256:d53416de699f4c79db0db8f3c7b972b8e2ef06cad58a361e6b6135e1a273000a
-import json
+# hotdocs-criterion: sha256:163642fa4c17da224d2f1b6caf1b50f8a439831aefce46eca93927dfda3768b6
+import shutil
 from pathlib import Path
 
 import verifier_orchestrator
@@ -14,11 +14,11 @@ ASSEMBLER_SOURCE = (
     "    return {\n"
     "        'component_id': component_id,\n"
     "        'criterion_id': criterion_id,\n"
-    "        'covers': 'R-FOO-001',\n"
-    "        'criterion_text': 'criterion text',\n"
-    "        'requirement_text': 'requirement text',\n"
-    "        'interface': 'compute_total(a: int, b: int) -> int',\n"
-    "        'glossary': '',\n"
+    "        'covers': 'R-WIDGET-001',\n"
+    "        'criterion_text': 'Given a widget When made Then it is made',\n"
+    "        'requirement_text': 'R-WIDGET-001 widget_make MUST make a widget.',\n"
+    "        'interface': 'widget_make(size: int, color: str) -> dict',\n"
+    "        'glossary': '# Glossary',\n"
     "        'dependency_interfaces': {},\n"
     "        'testing': '',\n"
     "    }\n"
@@ -39,26 +39,29 @@ PROBE_SOURCE = (
     "\n"
     "def probe(test_source, criterion_bundle, module_name, *, timeout=60.0, interpreter=None):\n"
     "    return ProbeReport()\n"
+    "\n"
+    "\n"
+    "GATE_VERSION = 'test-probe@1.3.0'\n"
 )
 
 COMPONENT_MD = (
     "---\n"
-    "id: comp-foo\n"
-    "title: Foo\n"
+    "id: comp-widget\n"
+    "title: Widget\n"
     "status: draft\n"
-    "owners: [team]\n"
-    "realizes: [P-FOO]\n"
+    "owners: [pipeline-team]\n"
+    "realizes: [P-WIDGET]\n"
     "---\n"
     "\n"
-    "# Foo\n"
+    "# Widget\n"
     "\n"
     "## Purpose\n"
     "\n"
-    "Computes totals.\n"
+    "Makes widgets.\n"
     "\n"
     "## Scope\n"
     "\n"
-    "- In scope: totals.\n"
+    "- In scope: making widgets.\n"
     "\n"
     "## Definitions\n"
     "\n"
@@ -93,128 +96,148 @@ COMPONENT_MD = (
 
 PRODUCT_MD = (
     "---\n"
-    "id: P-FOO\n"
-    "title: Foo capability\n"
+    "id: P-WIDGET\n"
+    "title: Widgets\n"
     "status: draft\n"
-    "owners: [team]\n"
+    "owners: [pipeline-team]\n"
     "---\n"
     "\n"
-    "# Foo capability\n"
+    "# Widgets\n"
     "\n"
     "## Purpose\n"
     "\n"
-    "Totals.\n"
+    "Widgets exist.\n"
     "\n"
     "## Scope\n"
     "\n"
-    "- Totals.\n"
+    "- Widgets.\n"
+    "\n"
+    "### CS-WIDGET-001\n"
+    "\n"
+    "Covers: P-WIDGET\n"
+    "\n"
+    "```gherkin\n"
+    "Given a size is 1\n"
+    "When widget_make is invoked with [1, \"red\"]\n"
+    "Then size equals 1\n"
+    "```\n"
 )
 
 LIBRARY_MD = (
     "# Library\n"
     "\n"
     "```\n"
-    "compute_total(a: int, b: int) -> int\n"
+    "widget_make(size: int, color: str) -> dict\n"
     "```\n"
     "\n"
-    "`compute_total` returns the sum of `a` and `b`.\n"
+    "`widget_make` returns a dict describing the widget.\n"
 )
 
 REQUIREMENT_MD = (
-    "# R-FOO-001\n"
+    "# R-WIDGET-001\n"
     "\n"
-    "**R-FOO-001** — `compute_total` MUST return the sum of its arguments.\n"
+    "**R-WIDGET-001** — `widget_make` MUST return a dict describing the widget.\n"
 )
 
 ACCEPTANCE_MD = (
-    "# AC-FOO-001\n"
+    "# AC-WIDGET-001\n"
     "\n"
-    "Covers: R-FOO-001\n"
+    "Covers: R-WIDGET-001\n"
     "Kind: llm-judge\n"
     "\n"
     "```gherkin\n"
-    "Given the component's interface\n"
-    "When it is read\n"
+    "Given a widget spec\n"
+    "When a reviewer reads it\n"
     "Then it is clear\n"
     "```\n"
 )
 
 
-def build_fixture(root, module_source):
-    root = Path(root)
-    comp = root / "specs" / "components" / "foo"
-    (comp / "requirements").mkdir(parents=True)
-    (comp / "interface").mkdir(parents=True)
-    (comp / "acceptance").mkdir(parents=True)
-    (comp / "component.md").write_text(COMPONENT_MD)
-    (comp / "requirements" / "R-FOO-001.md").write_text(REQUIREMENT_MD)
-    (comp / "interface" / "library.md").write_text(LIBRARY_MD)
-    (comp / "acceptance" / "AC-FOO-001.md").write_text(ACCEPTANCE_MD)
-    (comp / "constraints.md").write_text("# Constraints\n\nNone.\n")
-    (root / "specs" / "product").mkdir(parents=True)
-    (root / "specs" / "product" / "foo.md").write_text(PRODUCT_MD)
-    (root / "specs" / "glossary.md").write_text("# Glossary\n")
-
-    gen = root / "gen"
-    (gen / "foo").mkdir(parents=True)
-    (gen / "foo" / "foo.py").write_text(module_source)
-    (gen / "spec-bundle-assembler").mkdir(parents=True)
-    (gen / "spec-bundle-assembler" / "spec_bundle_assembler.py").write_text(ASSEMBLER_SOURCE)
-    (gen / "test-probe").mkdir(parents=True)
-    (gen / "test-probe" / "test_probe.py").write_text(PROBE_SOURCE)
-    return root
+def write(path, text):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
 
 
-def make_judge(log_path):
-    def judge(bundle):
-        with open(log_path, "a") as fh:
-            fh.write("called\n")
-        return {"result": "pass", "rationale": "clear"}
+def copy_live_compiler(repo_root):
+    live = (
+        Path(verifier_orchestrator.__file__).resolve().parents[1] / "spec-bundle-assembler"
+    ).resolve().parents[1]
+    src = live / "pipeline" / "criterion-compiler"
+    if src.is_dir():
+        shutil.copytree(
+            src,
+            repo_root / "pipeline" / "criterion-compiler",
+            ignore=shutil.ignore_patterns("__pycache__"),
+        )
 
-    return judge
 
-
-def run_verify(tmp_path, module_source):
-    repo_root = build_fixture(tmp_path / "repo", module_source)
-    log_path = tmp_path / "judge.log"
-    report = verifier_orchestrator.verify(
-        "comp-foo", repo_root, judge=make_judge(log_path), test_author=None
+def build_fixture(repo_root, module_source):
+    comp = repo_root / "specs" / "components" / "widget"
+    write(comp / "component.md", COMPONENT_MD)
+    write(comp / "requirements" / "R-WIDGET-001.md", REQUIREMENT_MD)
+    write(comp / "acceptance" / "AC-WIDGET-001.md", ACCEPTANCE_MD)
+    write(comp / "interface" / "library.md", LIBRARY_MD)
+    write(comp / "constraints.md", "# Constraints\n\nNone.\n")
+    write(repo_root / "specs" / "product" / "widget.md", PRODUCT_MD)
+    write(repo_root / "specs" / "glossary.md", "# Glossary\n\n- **Widget** — a thing.\n")
+    write(repo_root / "gen" / "widget" / "widget.py", module_source)
+    write(
+        repo_root / "gen" / "spec-bundle-assembler" / "spec_bundle_assembler.py",
+        ASSEMBLER_SOURCE,
     )
-    return report
+    write(repo_root / "gen" / "test-probe" / "test_probe.py", PROBE_SOURCE)
+    copy_live_compiler(repo_root)
+    return repo_root
+
+
+def passing_judge(bundle):
+    return {"result": "pass", "rationale": "clear enough"}
+
+
+def run_verify(repo_root):
+    return verifier_orchestrator.verify("comp-widget", repo_root, judge=passing_judge)
 
 
 def test_parameter_mismatch_is_drift_and_fails(tmp_path):
-    source = (
-        "def compute_total(a):\n"
-        "    return a\n"
+    repo_root = build_fixture(
+        tmp_path / "repo",
+        "def widget_make(size):\n    return {'size': size}\n",
     )
-    report = run_verify(tmp_path, source)
+    report = run_verify(repo_root)
     assert field(report, "interface_drift") is True
     assert field(report, "overall") == "fail"
-    as_dict = report.to_dict()
-    assert as_dict["interface_drift"] is True
-    assert as_dict["overall"] == "fail"
-    json.dumps(as_dict)
 
 
 def test_missing_callable_is_drift_and_fails(tmp_path):
-    source = (
-        "def other_name(a, b):\n"
-        "    return a + b\n"
+    repo_root = build_fixture(
+        tmp_path / "repo",
+        "def widget_other(size, color):\n    return {'size': size, 'color': color}\n",
     )
-    report = run_verify(tmp_path, source)
+    report = run_verify(repo_root)
+    assert field(report, "interface_drift") is True
+    assert field(report, "overall") == "fail"
+
+
+def test_extra_parameter_is_drift_and_fails(tmp_path):
+    repo_root = build_fixture(
+        tmp_path / "repo",
+        "def widget_make(size, color, shape):\n"
+        "    return {'size': size, 'color': color, 'shape': shape}\n",
+    )
+    report = run_verify(repo_root)
     assert field(report, "interface_drift") is True
     assert field(report, "overall") == "fail"
 
 
 def test_matching_interface_is_not_drift(tmp_path):
-    source = (
-        "def compute_total(a, b):\n"
-        "    return a + b\n"
+    repo_root = build_fixture(
+        tmp_path / "repo",
+        "def widget_make(size, color):\n"
+        "    return {'size': size, 'color': color}\n"
         "\n"
         "\n"
-        "def helper_extra(x):\n"
-        "    return x\n"
+        "def extra_helper(x):\n"
+        "    return x\n",
     )
-    report = run_verify(tmp_path, source)
+    report = run_verify(repo_root)
     assert field(report, "interface_drift") is False

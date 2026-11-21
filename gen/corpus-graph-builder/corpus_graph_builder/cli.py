@@ -1,4 +1,4 @@
-"""`hotdocs corpus-graph build` command."""
+"""CLI for `hotdocs corpus-graph build`."""
 
 from __future__ import annotations
 
@@ -18,6 +18,7 @@ def main(argv: list[str] | None = None) -> int:
     if argv is None:
         argv = sys.argv[1:]
     argv = list(argv)
+
     if not argv or argv[0] != "build":
         return _usage_error("expected 'build'")
 
@@ -45,5 +46,6 @@ def main(argv: list[str] | None = None) -> int:
     except Exception as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
+
     print(path)
     return 0

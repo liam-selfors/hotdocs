@@ -5,8 +5,8 @@
   `outcome`: `generation_failed` gives `"model_call_error"` (with
   `model_call_error` the last generation result's), `surface_failed`
   gives `"surface_check_failed"`, `refused` gives `"refused"`, and
-  `verification_failed` gives `"test_authoring_failed"` when every
-  criterion of that attempt's `VerificationReport` whose `result` is
-  `"fail"` has `failure_origin` `"test"` (no test could be written, so
-  nothing shows the code wrong, `D319`), else `"verification_failed"`.
+  `verification_failed` gives `"test_authoring_failed"` when that
+  attempt's `VerificationReport` has at least one criterion whose
+  `result` is `"fail"` and every such criterion has `failure_origin`
+  `"test"` (`D319`), else `"verification_failed"`.
   Overall merge readiness stays `provenance-tracker`'s decision.

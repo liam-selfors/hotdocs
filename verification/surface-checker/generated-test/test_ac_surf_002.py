@@ -1,7 +1,8 @@
-# hotdocs-criterion: sha256:efdaed6aab61e501f83bdf8ac83f4e4c5cf02ea775b41f5a43ec633401f140e9
-import surface_checker
-
+# hotdocs-criterion: sha256:471c37a92a4f7d0ecf283c263a58e0d75727de9f9b7cd577c9453056fd94a366
+import sys
 from pathlib import Path
+
+import surface_checker
 
 
 def field(value, name):
@@ -40,90 +41,88 @@ WIDGET_SOURCE = (
 )
 
 
-def write(path, text):
+def _write(path, text):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text)
 
 
-def component_md(lines):
+def _component_md(lines):
     return "---\n" + "".join(line + "\n" for line in lines) + "---\n\n# Component\n"
 
 
-def build_repo(repo_root, bar_sealed):
-    write(repo_root / "gen" / "kind-python" / "kind_python.py", PYTHON_ADAPTER)
-
-    write(
+def _base_repo(repo_root):
+    _write(repo_root / "gen" / "kind-python" / "kind_python.py", PYTHON_ADAPTER)
+    _write(
         repo_root / "specs" / "components" / "widget" / "component.md",
-        component_md([
+        _component_md([
             "id: comp-widget",
             "title: Widget",
             "status: draft",
-            "owners: [test-team]",
+            "owners: [team-a]",
             "depends_on: [comp-bar]",
         ]),
     )
-    write(
+    _write(
         repo_root / "specs" / "components" / "widget" / "interface" / "library.md",
         "# Library\n",
     )
-    write(repo_root / "gen" / "widget" / "widget.py", WIDGET_SOURCE)
+    _write(repo_root / "gen" / "widget" / "widget.py", WIDGET_SOURCE)
 
-    bar_lines = [
-        "id: comp-bar",
-        "title: Bar",
-        "status: draft",
-        "owners: [test-team]",
-        "depends_on: []",
-    ]
-    if bar_sealed:
-        bar_lines += ["sealed: true", "source_path: legacy/bar/"]
-    write(
+
+def test_missing_name_through_load_helper_alias(tmp_path):
+    repo_root = tmp_path / "repo"
+    _base_repo(repo_root)
+    _write(
         repo_root / "specs" / "components" / "bar" / "component.md",
-        component_md(bar_lines),
+        _component_md([
+            "id: comp-bar",
+            "title: Bar",
+            "status: draft",
+            "owners: [team-a]",
+            "depends_on: []",
+        ]),
     )
-    write(
+    _write(
         repo_root / "specs" / "components" / "bar" / "interface" / "library.md",
         "# Library\n",
     )
-
-    if bar_sealed:
-        write(
-            repo_root / "legacy" / "bar" / "bar.py",
-            "def fetch_one(x):\n"
-            "    return x\n"
-            "\n"
-            "\n"
-            "def fetch_all():\n"
-            "    return []\n",
-        )
-    else:
-        write(
-            repo_root / "gen" / "bar" / "bar.py",
-            "def fetch_one(x):\n"
-            "    return x\n",
-        )
-
-
-def test_missing_dependency_name_via_load_helper_alias(tmp_path):
-    repo_root = tmp_path / "repo"
-    build_repo(repo_root, bar_sealed=False)
+    _write(
+        repo_root / "gen" / "bar" / "bar.py",
+        "def fetch_one(key):\n    return key\n",
+    )
 
     report = surface_checker.check_surface("comp-widget", repo_root)
-
     findings = list(field(report, "findings"))
     assert len(findings) == 1, findings
-    finding = findings[0]
-    assert field(finding, "kind") == "dependency_name"
-    assert field(finding, "message") == "bar has no fetch_all, which the candidate uses"
+    assert field(findings[0], "kind") == "dependency_name"
+    assert field(findings[0], "message") == "bar has no fetch_all, which the candidate uses"
     assert field(report, "ok") is False
 
 
 def test_sealed_dependency_with_all_names_passes(tmp_path):
     repo_root = tmp_path / "repo"
-    build_repo(repo_root, bar_sealed=True)
+    _base_repo(repo_root)
+    _write(
+        repo_root / "specs" / "components" / "bar" / "component.md",
+        _component_md([
+            "id: comp-bar",
+            "title: Bar",
+            "status: draft",
+            "owners: [team-a]",
+            "depends_on: []",
+            "sealed: true",
+            "source_path: legacy/bar/",
+        ]),
+    )
+    _write(
+        repo_root / "specs" / "components" / "bar" / "interface" / "library.md",
+        "# Library\n",
+    )
+    _write(
+        repo_root / "legacy" / "bar" / "bar.py",
+        "def fetch_one(key):\n    return key\n\n\ndef fetch_all():\n    return []\n",
+    )
     assert not (repo_root / "gen" / "bar").exists()
 
     report = surface_checker.check_surface("comp-widget", repo_root)
-
-    assert list(field(report, "findings")) == []
-    assert field(report, "ok") is True
+    assert field(report, "ok") is True, field(report, "findings")

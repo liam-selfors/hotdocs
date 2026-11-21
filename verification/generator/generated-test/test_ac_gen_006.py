@@ -1,5 +1,6 @@
-# hotdocs-criterion: sha256:b7d1c903f6fa5edfb11e2066cd50b06bde48fd8fa4a65caa505774c6398919af
-import dataclasses
+# hotdocs-criterion: sha256:092f7672f8827a0e7f861dee1d65a5317d6854dbe9695db327c2b37d9e47e0e7
+import generator
+
 import hashlib
 import importlib.util
 import json
@@ -7,13 +8,11 @@ import re
 import sys
 from pathlib import Path
 
-import generator
+import pytest
 
 
-SPEC_HASH = "sha256:" + hashlib.sha256(b"widget-maker-bundle-ac-gen-006").hexdigest()
-MODEL = "mock-model"
-RETRY = ["R-WID-001"]
-FILES = {"widget_maker.py": "def make():\n    return 1\n"}
+COMPONENT_ID = "comp-widget-maker"
+MODEL = "claude-sonnet-5"
 
 
 def field(value, name):
@@ -36,31 +35,7 @@ def load_cache_manager():
     return load_module(path, "cache_manager")
 
 
-class Bundle(dict):
-    def __getattr__(self, name):
-        try:
-            return self[name]
-        except KeyError:
-            raise AttributeError(name)
-
-
-def make_bundle():
-    return Bundle(
-        component_id="comp-widget-maker",
-        spec_bundle_hash=SPEC_HASH,
-        spec="# Widget Maker\n\nR-WID-001: make() MUST return 1.",
-        interface="make() -> int",
-        constraints="None.",
-        dependency_interfaces={},
-        dependency_context={},
-        dependency_usage={},
-        vars={},
-        glossary="",
-        hint_code=None,
-    )
-
-
-PYTHON_ADAPTER = (
+FAKE_PYTHON_ADAPTER = (
     "from pathlib import Path\n"
     "\n"
     "KIND = \"python\"\n"
@@ -89,99 +64,145 @@ COMPONENT_MD = (
 )
 
 
-def plant_repo(repo_root):
-    adapter = repo_root / "gen" / "kind-python" / "kind_python.py"
+def make_repo(root):
+    root.mkdir(parents=True, exist_ok=True)
+    adapter = root / "gen" / "kind-python" / "kind_python.py"
     adapter.parent.mkdir(parents=True, exist_ok=True)
-    adapter.write_text(PYTHON_ADAPTER, encoding="utf-8")
-    comp = repo_root / "specs" / "components" / "widget-maker" / "component.md"
+    adapter.write_text(FAKE_PYTHON_ADAPTER, encoding="utf-8")
+    comp = root / "specs" / "components" / "widget-maker" / "component.md"
     comp.parent.mkdir(parents=True, exist_ok=True)
     comp.write_text(COMPONENT_MD, encoding="utf-8")
+    return root
 
 
-def make_backend(calls):
-    def backend(prompt, model, **params):
-        calls.append(model)
-        nonce = re.search(r"-----BEGIN FILE ([0-9a-f]{32}):", prompt).group(1)
-        parts = []
-        for path, content in FILES.items():
-            parts.append("-----BEGIN FILE " + nonce + ": " + path + "-----\n")
-            parts.append(content)
-            parts.append("-----END FILE " + nonce + "-----\n")
-        parts.append("-----END REPLY " + nonce + "-----\n")
-        return {"text": "".join(parts), "model": model, "backend": "mock", "model_call_error": None}
+def make_bundle(hash_seed):
+    return {
+        "component_id": COMPONENT_ID,
+        "spec_bundle_hash": "sha256:" + hashlib.sha256(hash_seed.encode("utf-8")).hexdigest(),
+        "spec": "Widget maker spec.",
+        "interface": "VALUE: int",
+        "constraints": "None.",
+        "dependency_interfaces": {},
+        "dependency_context": {},
+        "dependency_usage": {},
+        "vars": {},
+        "glossary": "",
+        "hint_code": None,
+    }
 
-    return backend
 
-
-def make_key(cm, model, retry_feedback):
+def make_key(cache_manager, bundle, retry_feedback, model):
     digest = hashlib.sha256(
         json.dumps(sorted(retry_feedback or []), sort_keys=True).encode("utf-8")
     ).hexdigest()
-    return cm.CacheKey(
-        spec_bundle_hash=SPEC_HASH,
+    return cache_manager.CacheKey(
+        spec_bundle_hash=bundle["spec_bundle_hash"],
         gate_inputs_hash="sha256:" + digest,
         gate_version=generator.GATE_VERSION,
         model_pin=model,
     )
 
 
-def with_error(result):
-    err = {"category": "network", "message": "mock failure"}
-    if isinstance(result, dict):
-        out = dict(result)
-        out.update(files={}, model_call_error=err, refused=None, cache_hit=False, model="mock-model-err")
-        return out
-    return dataclasses.replace(
-        result, files={}, model_call_error=err, refused=None, cache_hit=False, model="mock-model-err"
-    )
+def is_miss(cache_manager, value):
+    return isinstance(value, cache_manager.Miss) or type(value).__name__ == "Miss"
 
 
-def test_ac_gen_006_only_commit_cache_writes_cache(tmp_path, monkeypatch):
+def make_backend(log_path, fail=False):
+    def backend(prompt, model, **params):
+        with open(log_path, "a", encoding="utf-8") as fh:
+            fh.write("call\n")
+        if fail:
+            return {
+                "text": None,
+                "model": model,
+                "backend": "mock",
+                "model_call_error": {"category": "network", "message": "mock network failure"},
+            }
+        nonce = re.search(r"-----BEGIN FILE ([0-9a-f]{32}):", prompt).group(1)
+        text = (
+            "-----BEGIN FILE " + nonce + ": widget_maker.py-----\n"
+            + "VALUE = 1\n"
+            + "-----END FILE " + nonce + "-----\n"
+            + "-----END REPLY " + nonce + "-----\n"
+        )
+        return {"text": text, "model": model, "backend": "mock", "model_call_error": None}
+
+    return backend
+
+
+def call_count(log_path):
+    if not Path(log_path).exists():
+        return 0
+    return len([l for l in Path(log_path).read_text(encoding="utf-8").splitlines() if l.strip()])
+
+
+@pytest.fixture
+def env(tmp_path, monkeypatch):
     monkeypatch.delenv("VAR_CACHE_STORE_URL", raising=False)
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
     monkeypatch.chdir(tmp_path)
-    plant_repo(repo_root)
+    return tmp_path
 
-    cm = load_cache_manager()
-    key = make_key(cm, MODEL, RETRY)
 
-    assert isinstance(cm.get(key, repo_root=repo_root), cm.Miss)
+def test_generate_does_not_write_cache_and_commit_cache_does(env):
+    cache_manager = load_cache_manager()
+    repo_root = make_repo(env / "repo")
+    log_path = env / "model_calls.log"
+    bundle = make_bundle("ac-gen-006-success")
+    retry_feedback = ["R-WIDGET-002", "R-WIDGET-001"]
+    key = make_key(cache_manager, bundle, retry_feedback, MODEL)
 
-    # Scenario 1: generate does not write the cache.
-    calls = []
-    bundle = make_bundle()
+    assert is_miss(cache_manager, cache_manager.get(key, repo_root=repo_root))
+
+    backend = make_backend(log_path)
     result = generator.generate(
-        bundle, MODEL, list(RETRY), repo_root=repo_root, llm_backend=make_backend(calls)
+        bundle, MODEL, list(retry_feedback), repo_root=repo_root, llm_backend=backend
     )
-    assert len(calls) == 1
+
+    assert call_count(log_path) == 1
     assert field(result, "model_call_error") is None
     assert field(result, "refused") is None
-    assert dict(field(result, "files")) == FILES
     assert field(result, "cache_hit") is False
-    assert isinstance(cm.get(key, repo_root=repo_root), cm.Miss)
-    assert cm.stats(repo_root=repo_root)["entry_count"] == 0
+    files = field(result, "files")
+    assert files
+    assert "widget_maker.py" in files
+    assert files["widget_maker.py"] == "VALUE = 1\n"
 
-    # Scenario 2: commit_cache writes it; a second generate is a hit.
+    # generate() itself must not have written the cache
+    assert is_miss(cache_manager, cache_manager.get(key, repo_root=repo_root))
+
     generator.commit_cache(result, repo_root)
-    stored = cm.get(key, repo_root=repo_root)
-    assert not isinstance(stored, cm.Miss)
+
+    stored = cache_manager.get(key, repo_root=repo_root)
+    assert not is_miss(cache_manager, stored)
     assert field(stored, "gate_type") == "generator"
-    entries_after_commit = cm.stats(repo_root=repo_root)["entry_count"]
-    assert entries_after_commit >= 1
+    payload = field(stored, "payload")
+    assert field(payload, "files") == files
 
-    calls2 = []
     second = generator.generate(
-        make_bundle(), MODEL, list(RETRY), repo_root=repo_root, llm_backend=make_backend(calls2)
+        bundle, MODEL, list(retry_feedback), repo_root=repo_root, llm_backend=backend
     )
-    assert calls2 == []
+    assert call_count(log_path) == 1
     assert field(second, "cache_hit") is True
-    assert dict(field(second, "files")) == FILES
+    assert field(second, "files") == files
+    assert field(second, "model_call_error") is None
+    assert field(second, "refused") is None
 
-    # Scenario 3: a result with model_call_error is never written.
-    err_result = with_error(result)
-    err_key = make_key(cm, "mock-model-err", RETRY)
-    assert isinstance(cm.get(err_key, repo_root=repo_root), cm.Miss)
-    generator.commit_cache(err_result, repo_root)
-    assert isinstance(cm.get(err_key, repo_root=repo_root), cm.Miss)
-    assert cm.stats(repo_root=repo_root)["entry_count"] == entries_after_commit
+
+def test_commit_cache_writes_nothing_for_model_call_error(env):
+    cache_manager = load_cache_manager()
+    repo_root = make_repo(env / "repo_err")
+    log_path = env / "model_calls_err.log"
+    bundle = make_bundle("ac-gen-006-error")
+    key = make_key(cache_manager, bundle, None, MODEL)
+
+    result = generator.generate(
+        bundle, MODEL, None, repo_root=repo_root, llm_backend=make_backend(log_path, fail=True)
+    )
+    assert field(result, "model_call_error") is not None
+    assert field(result, "files") == {}
+    assert field(result, "cache_hit") is False
+
+    generator.commit_cache(result, repo_root)
+
+    assert is_miss(cache_manager, cache_manager.get(key, repo_root=repo_root))
+    assert field(cache_manager.stats(repo_root=repo_root), "entry_count") == 0

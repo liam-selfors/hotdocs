@@ -1,8 +1,7 @@
-# hotdocs-criterion: sha256:debfbc8a84b1b9376e60c600fa701b857f3c236e6d4a39d4227fb8ec5fc4f72c
+# hotdocs-criterion: sha256:a1f12c2849dd1f48b80d8a39d2f208c9074ff3c7423d003709fb456289450ce3
 import hashlib
 import platform
 import sys
-from pathlib import Path
 
 import kind_python
 
@@ -11,17 +10,23 @@ def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def _pin_dir(repo_root):
-    d = Path(repo_root) / "environments" / "python"
-    d.mkdir(parents=True, exist_ok=True)
-    return d
+def _pin_path(repo_root):
+    return repo_root / "environments" / "python" / "python-version"
 
 
-def test_ac_kpy_013_pin_matches_major_minor(tmp_path):
+def _lock_path(repo_root):
+    return repo_root / "environments" / "python" / "requirements.lock"
+
+
+def _write(path, text):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+
+
+def test_pin_major_minor_matches(tmp_path, monkeypatch):
+    monkeypatch.delenv("HOTDOCS_PYTHON", raising=False)
     mm = "%d.%d" % sys.version_info[:2]
-    d = _pin_dir(tmp_path)
-    (d / "python-version").write_text(mm + "\n")
-    assert not (d / "requirements.lock").exists()
+    _write(_pin_path(tmp_path), mm + "\n")
 
     result = kind_python.provision(tmp_path)
 
@@ -30,10 +35,10 @@ def test_ac_kpy_013_pin_matches_major_minor(tmp_path):
     assert field(result, "interpreter") == sys.executable
 
 
-def test_ac_kpy_013_pin_matches_full_version(tmp_path):
+def test_pin_full_version_matches(tmp_path, monkeypatch):
+    monkeypatch.delenv("HOTDOCS_PYTHON", raising=False)
     pv = platform.python_version()
-    d = _pin_dir(tmp_path)
-    (d / "python-version").write_text(pv)
+    _write(_pin_path(tmp_path), pv)
 
     result = kind_python.provision(tmp_path)
 
@@ -42,14 +47,14 @@ def test_ac_kpy_013_pin_matches_full_version(tmp_path):
     assert field(result, "interpreter") == sys.executable
 
 
-def test_ac_kpy_013_text_prefix_is_not_version_prefix(tmp_path):
+def test_pin_text_prefix_but_not_version_prefix_fails(tmp_path, monkeypatch):
+    monkeypatch.delenv("HOTDOCS_PYTHON", raising=False)
     pv = platform.python_version()
-    d = _pin_dir(tmp_path)
-    (d / "python-version").write_text("3.1\n")
+    _write(_pin_path(tmp_path), "3.1\n")
 
     result = kind_python.provision(tmp_path)
 
-    assert result == {
+    assert dict(result) == {
         "ok": False,
         "reason": "python environment: needs Python 3.1, found " + pv,
         "versions": {},
@@ -58,17 +63,19 @@ def test_ac_kpy_013_text_prefix_is_not_version_prefix(tmp_path):
     }
 
 
-def test_ac_kpy_013_pin_mismatch_with_lock_creates_nothing(tmp_path):
+def test_pin_mismatch_with_lock_reports_lock_hash_and_creates_nothing(
+    tmp_path, monkeypatch
+):
+    monkeypatch.delenv("HOTDOCS_PYTHON", raising=False)
     pv = platform.python_version()
-    d = _pin_dir(tmp_path)
-    (d / "python-version").write_text("2.7")
-    lock = d / "requirements.lock"
-    lock.write_bytes(b"--no-index\npytest==8.0.0\n")
+    _write(_pin_path(tmp_path), "2.7")
+    lock = _lock_path(tmp_path)
+    _write(lock, "--no-index\npytest==8.0.0\n")
     lock_bytes = lock.read_bytes()
 
     result = kind_python.provision(tmp_path)
 
-    assert result == {
+    assert dict(result) == {
         "ok": False,
         "reason": "python environment: needs Python 2.7, found " + pv,
         "versions": {},

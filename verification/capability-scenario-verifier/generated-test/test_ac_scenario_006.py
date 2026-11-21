@@ -1,5 +1,6 @@
-# hotdocs-criterion: sha256:0e01858072a729b5a480a6262f3caca16c185cfbe12d821ff07c9aaad33d9933
+# hotdocs-criterion: sha256:a3ea909f2be7f04f938154851f23cfbaeeeda647f4e14211be59b065ed31de55
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -12,21 +13,33 @@ def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-TEST_REL_PATH = "verification/capabilities/P-X/generated-test/test_cs_x_001.py"
+def entry(report, key):
+    if isinstance(report, dict):
+        return report[key]
+    return getattr(report, key)
 
 
-def _write(path, text):
+def write(path, text):
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text)
 
 
-def _build_repo(repo_root, call_log, run_log):
+def snapshot(root):
+    files = {}
+    for p in Path(root).rglob("*"):
+        if "__pycache__" in p.parts or p.suffix == ".pyc":
+            continue
+        if p.is_file():
+            files[str(p.relative_to(root))] = p.read_bytes()
+    return files
+
+
+def build_fixture(repo_root, author_log, endpoint_log, run_log):
     repo_root = Path(repo_root)
-    repo_root.mkdir(parents=True, exist_ok=True)
 
     # Planted python adapter.
-    _write(
+    write(
         repo_root / "gen" / "kind-python" / "kind_python.py",
         "import sys\n"
         "\n"
@@ -37,7 +50,7 @@ def _build_repo(repo_root, call_log, run_log):
     )
 
     # One realizing component.
-    _write(
+    write(
         repo_root / "specs" / "components" / "foo" / "component.md",
         "---\n"
         "id: comp-foo\n"
@@ -51,37 +64,16 @@ def _build_repo(repo_root, call_log, run_log):
         "\n"
         "# Foo\n"
         "\n"
-        "A fixture component.\n",
+        "A component realizing P-X.\n",
     )
-    _write(
-        repo_root / "specs" / "components" / "foo" / "requirements" / "R-FOO-001.md",
-        "**R-FOO-001** — MUST expose `foo()` returning 1.\n",
+    write(
+        repo_root / "gen" / "foo" / "foo.py",
+        "def value():\n"
+        "    return 1\n",
     )
-    _write(
-        repo_root / "specs" / "components" / "foo" / "acceptance" / "AC-FOO-001.md",
-        "# AC-FOO-001\n"
-        "\n"
-        "Covers: R-FOO-001\n"
-        "Kind: generated-test\n"
-        "\n"
-        "```gherkin\n"
-        "Given nothing\n"
-        "When foo is called\n"
-        "Then it returns 1\n"
-        "```\n",
-    )
-    _write(
-        repo_root / "specs" / "components" / "foo" / "interface" / "library.md",
-        "# Library\n"
-        "\n"
-        "```\n"
-        "foo() -> int\n"
-        "```\n",
-    )
-    _write(repo_root / "gen" / "foo" / "foo.py", "def foo():\n    return 1\n")
 
     # One capability with one generated-test scenario.
-    _write(
+    write(
         repo_root / "specs" / "product" / "x.md",
         "---\n"
         "id: P-X\n"
@@ -98,113 +90,96 @@ def _build_repo(repo_root, call_log, run_log):
         "Kind: generated-test\n"
         "\n"
         "```gherkin\n"
-        "Given a thing\n"
-        "When it is used\n"
-        "Then it works\n"
+        "Given a foo component\n"
+        "When its value is read\n"
+        "Then the value is 1\n"
         "```\n",
     )
 
-    # The generated test content: records that it ran.
     test_content = (
         "def test_x():\n"
-        "    with open(" + repr(str(run_log)) + ", 'a') as f:\n"
-        "        f.write('ran\\n')\n"
+        "    with open(" + repr(str(run_log)) + ", \"a\") as f:\n"
+        "        f.write(\"ran\\n\")\n"
         "    assert True\n"
     )
 
     # Fake test-author.
-    _write(
+    write(
         repo_root / "gen" / "test-author" / "test_author.py",
-        "import json\n"
         "from pathlib import Path\n"
         "\n"
-        "LOG = " + repr(str(call_log)) + "\n"
-        "PATH = " + repr(TEST_REL_PATH) + "\n"
+        "LOG = " + repr(str(author_log)) + "\n"
+        "PATH = " + repr("verification/capabilities/P-X/generated-test/test_cs_x_001.py") + "\n"
         "CONTENT = " + repr(test_content) + "\n"
         "\n"
         "\n"
         "def author_test(bundle, model, seed=0, *, repo_root=None, llm_backend=None):\n"
-        "    with open(LOG, 'a') as f:\n"
-        "        f.write(json.dumps({'fn': 'author_test', 'criterion_id': bundle['criterion_id'],\n"
-        "                            'model': model, 'seed': seed}) + '\\n')\n"
+        "    with open(LOG, \"a\") as f:\n"
+        "        f.write(\"author_test \" + str(model) + \" \" + str(seed) + \"\\n\")\n"
         "    if repo_root is not None:\n"
         "        target = Path(repo_root) / PATH\n"
         "        target.parent.mkdir(parents=True, exist_ok=True)\n"
         "        target.write_text(CONTENT)\n"
+        "    criterion_id = bundle.get(\"criterion_id\") if isinstance(bundle, dict) else None\n"
         "    return {\n"
-        "        'component_id': 'comp-foo',\n"
-        "        'criterion_id': bundle['criterion_id'],\n"
-        "        'model': model,\n"
-        "        'seed': seed,\n"
-        "        'prompt_version': 'v1',\n"
-        "        'cache_hit': False,\n"
-        "        'file': {'path': PATH, 'content': CONTENT},\n"
-        "        'model_call_error': None,\n"
-        "        'repair_attempts': 0,\n"
-        "        'probe_findings': [],\n"
+        "        \"component_id\": \"comp-foo\",\n"
+        "        \"criterion_id\": criterion_id,\n"
+        "        \"model\": model,\n"
+        "        \"seed\": seed,\n"
+        "        \"prompt_version\": \"v1\",\n"
+        "        \"cache_hit\": False,\n"
+        "        \"file\": {\"path\": PATH, \"content\": CONTENT},\n"
+        "        \"model_call_error\": None,\n"
+        "        \"repair_attempts\": 0,\n"
+        "        \"probe_findings\": [],\n"
         "    }\n",
     )
 
     # Fake llm-endpoint.
-    _write(
+    write(
         repo_root / "gen" / "llm-endpoint" / "llm_endpoint.py",
-        "import json\n"
-        "\n"
-        "LOG = " + repr(str(call_log)) + "\n"
+        "LOG = " + repr(str(endpoint_log)) + "\n"
         "\n"
         "\n"
         "def complete(prompt, model, *, backend=None, **params):\n"
-        "    with open(LOG, 'a') as f:\n"
-        "        f.write(json.dumps({'fn': 'complete', 'model': model}) + '\\n')\n"
-        "    return {'text': 'pass', 'model': model, 'backend': 'fake',\n"
-        "            'model_call_error': None}\n",
-    )
-    return repo_root
-
-
-def _read_log(path):
-    path = Path(path)
-    if not path.exists():
-        return []
-    return [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
-
-
-def _snapshot(root):
-    root = Path(root)
-    return {
-        str(p.relative_to(root)): p.read_bytes()
-        for p in sorted(root.rglob("*"))
-        if p.is_file()
-    }
-
-
-def test_ac_scenario_006_fresh_run_records_then_hits(tmp_path):
-    call_log = tmp_path / "calls.log"
-    run_log = tmp_path / "ran.log"
-    repo_root = _build_repo(tmp_path / "repo", call_log, run_log)
-
-    result = capability_scenario_verifier.run_capability_gates(
-        "P-X", repo_root, "m", seed=2
+        "    with open(LOG, \"a\") as f:\n"
+        "        f.write(\"complete \" + str(model) + \"\\n\")\n"
+        "    return {\"text\": \"pass\", \"model\": model, \"backend\": \"fake\",\n"
+        "            \"model_call_error\": None}\n",
     )
 
-    # The scenario's test was authored and actually run.
-    calls = _read_log(call_log)
-    author_calls = [c for c in calls if c["fn"] == "author_test"]
-    assert author_calls, "fake author_test was never called"
-    assert author_calls[0]["criterion_id"] == "CS-X-001"
-    assert run_log.exists() and "ran" in run_log.read_text(), "scenario test was not run"
+
+def test_fresh_run_records_and_then_hits(tmp_path):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    logs = tmp_path / "logs"
+    logs.mkdir()
+    author_log = logs / "author.log"
+    endpoint_log = logs / "endpoint.log"
+    run_log = logs / "run.log"
+    build_fixture(repo_root, author_log, endpoint_log, run_log)
+
+    record_path = repo_root / "verification" / "capabilities" / "P-X" / ".provenance.json"
+    assert not record_path.exists()
+
+    result = capability_scenario_verifier.run_capability_gates("P-X", repo_root, "m", seed=2)
+
+    # The scenario's test was authored and run.
+    assert author_log.is_file()
+    assert author_log.read_text().strip() != ""
+    assert run_log.is_file()
+    assert "ran" in run_log.read_text()
 
     assert field(result, "hit") is False
     report = field(result, "capability_scenario_report")
-    assert report is not None
-    entry = field(report, "P-X")
-    assert field(entry, "overall") == "pass"
-    scenarios = field(entry, "scenarios")
+    px = entry(report, "P-X")
+    assert field(px, "overall") == "pass"
+    scenarios = field(px, "scenarios")
     assert len(scenarios) == 1
     assert field(scenarios[0], "id") == "CS-X-001"
+    assert field(scenarios[0], "kind") == "generated-test"
     assert field(scenarios[0], "result") == "pass"
 
-    record_path = repo_root / "verification" / "capabilities" / "P-X" / ".provenance.json"
     assert record_path.is_file()
     record = json.loads(record_path.read_text())
     assert isinstance(record, dict)
@@ -221,27 +196,36 @@ def test_ac_scenario_006_fresh_run_records_then_hits(tmp_path):
     assert record["gate_version"] == capability_scenario_verifier.GATE_VERSION
     assert isinstance(record["content_hash"], str) and record["content_hash"]
     assert record["realizing_components"] == ["comp-foo"]
-    assert record["capability_scenario_report"]["P-X"]["overall"] == "pass"
     assert record["model"] == "m"
     assert record["seed"] == 2
+    assert record["capability_scenario_report"]["P-X"]["overall"] == "pass"
 
-    # Given that record now exists: a check is a hit.
+    # Given that record now exists, a check is a hit.
     check = capability_scenario_verifier.check_capability_provenance("P-X", repo_root)
     assert field(check, "hit") is True
+    check_report = field(check, "capability_scenario_report")
+    assert field(entry(check_report, "P-X"), "overall") == "pass"
 
 
-def test_ac_scenario_006_model_none_on_miss_raises(tmp_path):
-    call_log = tmp_path / "calls.log"
-    run_log = tmp_path / "ran.log"
-    repo_root = _build_repo(tmp_path / "repo", call_log, run_log)
+def test_miss_with_no_model_raises_before_anything(tmp_path):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    logs = tmp_path / "logs"
+    logs.mkdir()
+    author_log = logs / "author.log"
+    endpoint_log = logs / "endpoint.log"
+    run_log = logs / "run.log"
+    build_fixture(repo_root, author_log, endpoint_log, run_log)
 
-    before = _snapshot(repo_root)
+    before = snapshot(repo_root)
 
     with pytest.raises(capability_scenario_verifier.ModelRequiredError):
         capability_scenario_verifier.run_capability_gates("P-X", repo_root, None)
 
-    assert _read_log(call_log) == [], "a fake module was called"
+    assert not author_log.exists()
+    assert not endpoint_log.exists()
     assert not run_log.exists()
-    after = _snapshot(repo_root)
-    assert after == before, "a file was written"
-    assert not (repo_root / "verification").exists()
+
+    after = snapshot(repo_root)
+    assert after == before
+    assert not (repo_root / "verification" / "capabilities" / "P-X" / ".provenance.json").exists()

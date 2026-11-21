@@ -69,7 +69,7 @@ environment otherwise kept; an adapter's own subprocesses are
    such line means none. Per asset, the first of these that applies
    gives one `asset_error` finding and ends that asset's check:
    - no adapter (Lookup, `specs/architecture/asset-kinds.md`:
-     `<repo_root>/gen/kind-<kind>/kind_<kind>.py`, else the same path
+     `<repo_root>/gen/kind-<kind>/kind_<module>.py`, else the same path
      under the tool root, the parent of the nearest directory named
      `gen` above `surface_checker.py`): `unknown asset kind: <kind>`;
    - the adapter's `provision(<repo_root>)`, called once per kind in a

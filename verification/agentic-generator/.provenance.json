@@ -1,5 +1,5 @@
 {
-  "spec_bundle_hash": "sha256:3a125b2d93d77e14b8de3e8ea6133a485510530e7d2958274d2b25dee8e40b66",
+  "spec_bundle_hash": "sha256:6aac50bf5b6b4925a717b3c18964b77b5a82201f401da03e4f6a699b4f045e31",
   "model_pin": "claude-opus-5-5",
   "prompt_version": "v12",
   "retry_feedback": null,
@@ -23,7 +23,7 @@
     "generator": "generator@3.2.0+v12"
   },
   "provenance_hit": false,
-  "generated_at": "2026-11-20T23:22:49Z",
+  "generated_at": "2026-11-21T13:59:54Z",
   "verification_run_id": "agentic-generator-attempt-1",
   "verification_report": {
     "component_id": "comp-agentic-generator",
@@ -32,37 +32,19 @@
         "id": "AC-AGENT-001",
         "covers": "R-AGENT-001",
         "kind": "generated-test",
-        "result": "pass",
-        "test_authoring": {
-          "model": "claude-opus-5-5",
-          "seed": 2,
-          "prompt_version": "v1",
-          "cache_hit": false
-        }
+        "result": "pass"
       },
       {
         "id": "AC-AGENT-002",
         "covers": "R-AGENT-002",
         "kind": "generated-test",
-        "result": "pass",
-        "test_authoring": {
-          "model": "claude-opus-5-5",
-          "seed": 2,
-          "prompt_version": "v1",
-          "cache_hit": false
-        }
+        "result": "pass"
       },
       {
         "id": "AC-AGENT-003",
         "covers": "R-AGENT-003",
         "kind": "generated-test",
-        "result": "pass",
-        "test_authoring": {
-          "model": "claude-opus-5-5",
-          "seed": 2,
-          "prompt_version": "v1",
-          "cache_hit": false
-        }
+        "result": "pass"
       },
       {
         "id": "AC-AGENT-004",
@@ -80,73 +62,37 @@
         "id": "AC-AGENT-005",
         "covers": "R-AGENT-005",
         "kind": "generated-test",
-        "result": "pass",
-        "test_authoring": {
-          "model": "claude-opus-5-5",
-          "seed": 2,
-          "prompt_version": "v1",
-          "cache_hit": false
-        }
+        "result": "pass"
       },
       {
         "id": "AC-AGENT-006",
         "covers": "R-AGENT-006",
         "kind": "generated-test",
-        "result": "pass",
-        "test_authoring": {
-          "model": "claude-opus-5-5",
-          "seed": 2,
-          "prompt_version": "v1",
-          "cache_hit": false
-        }
+        "result": "pass"
       },
       {
         "id": "AC-AGENT-007",
         "covers": "R-AGENT-007",
         "kind": "generated-test",
-        "result": "pass",
-        "test_authoring": {
-          "model": "claude-opus-5-5",
-          "seed": 2,
-          "prompt_version": "v1",
-          "cache_hit": false
-        }
+        "result": "pass"
       },
       {
         "id": "AC-AGENT-008",
         "covers": "R-AGENT-008",
         "kind": "generated-test",
-        "result": "pass",
-        "test_authoring": {
-          "model": "claude-opus-5-5",
-          "seed": 2,
-          "prompt_version": "v1",
-          "cache_hit": false
-        }
+        "result": "pass"
       },
       {
         "id": "AC-AGENT-009",
         "covers": "R-AGENT-003",
         "kind": "generated-test",
-        "result": "pass",
-        "test_authoring": {
-          "model": "claude-opus-5-5",
-          "seed": 2,
-          "prompt_version": "v1",
-          "cache_hit": false
-        }
+        "result": "pass"
       },
       {
         "id": "AC-AGENT-010",
         "covers": "R-AGENT-005",
         "kind": "generated-test",
-        "result": "pass",
-        "test_authoring": {
-          "model": "claude-opus-5-5",
-          "seed": 2,
-          "prompt_version": "v1",
-          "cache_hit": false
-        }
+        "result": "pass"
       }
     ],
     "requirement_results": {
@@ -160,14 +106,14 @@
       "R-AGENT-008": "pass"
     },
     "interface_drift": false,
-    "mutation_score": 0.8117647058823529,
+    "mutation_score": 0.8571428571428571,
     "mutation_error": null,
     "assets": [
       {
         "kind": "python",
         "path": ".",
         "definition_sha256": "sha256:53cb9d111b695cf184eb6fdc9c34e8cee514bab938f634dc993257e0163eb8b1",
-        "adapter_sha256": "sha256:fd6ddf7d96d53f9f80f42d158c5f580b7021bc47482b5f347e132a7778ccaecc",
+        "adapter_sha256": "sha256:801043604808d3099fb5da7f57427ec21eecae06ae5a6adee2854de955e1db13",
         "versions": {
           "python": "3.14.6",
           "packages": "sha256:fe2bf6523d4c9a1d7aad652c8447381630e076eb89d6267771e208c003c2d83b"
@@ -199,7 +145,7 @@
       {
         "rule_id": "Hex High Entropy String",
         "file": "gen/review-packet-builder/review_packet_builder.py",
-        "line": 14
+        "line": 20
       },
       {
         "rule_id": "AWS Access Key",
@@ -303,8 +249,23 @@
       },
       {
         "rule_id": "Hex High Entropy String",
+        "file": "verification/provenance-checker/generated-test/test_ac_provcheck_001.py",
+        "line": 22
+      },
+      {
+        "rule_id": "Hex High Entropy String",
+        "file": "verification/provenance-checker/generated-test/test_ac_provcheck_004.py",
+        "line": 14
+      },
+      {
+        "rule_id": "Hex High Entropy String",
+        "file": "verification/provenance-tracker/generated-test/test_ac_track_013.py",
+        "line": 9
+      },
+      {
+        "rule_id": "Hex High Entropy String",
         "file": "verification/provenance-writer/generated-test/test_ac_prov_018.py",
-        "line": 10
+        "line": 22
       },
       {
         "rule_id": "Hex High Entropy String",
@@ -314,12 +275,12 @@
       {
         "rule_id": "Hex High Entropy String",
         "file": "verification/provenance-writer/generated-test/test_ac_prov_020.py",
-        "line": 11
+        "line": 98
       },
       {
         "rule_id": "Hex High Entropy String",
         "file": "verification/provenance-writer/generated-test/test_ac_prov_020.py",
-        "line": 114
+        "line": 116
       },
       {
         "rule_id": "AWS Access Key",
@@ -392,7 +353,12 @@
         "line": 13
       }
     ],
-    "unused_allowlist_entries": [],
+    "unused_allowlist_entries": [
+      {
+        "file": "verification/provenance-writer/generated-test/test_ac_prov_020.py",
+        "type": "Hex High Entropy String"
+      }
+    ],
     "notified": false,
     "notification_delivery_error": null,
     "cache_hit": false
@@ -402,7 +368,7 @@
       "kind": "python",
       "path": ".",
       "definition_sha256": "sha256:53cb9d111b695cf184eb6fdc9c34e8cee514bab938f634dc993257e0163eb8b1",
-      "adapter_sha256": "sha256:fd6ddf7d96d53f9f80f42d158c5f580b7021bc47482b5f347e132a7778ccaecc",
+      "adapter_sha256": "sha256:801043604808d3099fb5da7f57427ec21eecae06ae5a6adee2854de955e1db13",
       "versions": {
         "python": "3.14.6",
         "packages": "sha256:fe2bf6523d4c9a1d7aad652c8447381630e076eb89d6267771e208c003c2d83b"

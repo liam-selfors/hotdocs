@@ -1,33 +1,12 @@
-# hotdocs-criterion: sha256:9ec34baac2dbe1aae70d1ea9e7c4bbf9818d85925543b3cc8bf3372018277f9d
-"""AC-LINT-011: a Definitions entry that near-verbatim restates a glossary
-term's definition (token-overlap ratio >= 0.8) is a fail-severity finding
-for rule R-LINT-011."""
-
+# hotdocs-criterion: sha256:0513348de928fd3f41b4696240925be17b6882fa9cd3e1d9646de704ab40999a
 from pathlib import Path
 
 import spec_linter
 
 
-TERM = "Frobnication window"
-
-GLOSSARY_DEFINITION = (
-    "the bounded interval during which a widget accepts incoming "
-    "frobnication requests from its upstream scheduler before it closes "
-    "and rejects every later request outright."
-)
-
-# Near-verbatim copy: one word changed ("outright" -> "immediately"),
-# far above a 0.8 token-overlap ratio under any reasonable normalization.
-NEAR_VERBATIM_LOCAL = (
-    "the bounded interval during which a widget accepts incoming "
-    "frobnication requests from its upstream scheduler before it closes "
-    "and rejects every later request immediately."
-)
-
-# A genuine delta: shares almost no tokens with the glossary definition.
-GENUINE_DELTA_LOCAL = (
-    "in this component, measured in milliseconds; zero disables "
-    "batching entirely."
+GLOSSARY_DEF = (
+    "a reusable unit of foo output that the pipeline stores under the gen "
+    "directory and verifies exactly once per generation run"
 )
 
 
@@ -35,50 +14,63 @@ def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def write(path, text):
+def _write(path, text):
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text, encoding="utf-8")
+    path.write_text(text)
 
 
-def build_corpus(repo_root, local_definition):
-    specs = repo_root / "specs"
+PRODUCT = (
+    "---\n"
+    "id: P-FOO\n"
+    "title: Foo works\n"
+    "status: draft\n"
+    "owners: [team-a]\n"
+    "---\n"
+    "\n"
+    "# Foo works\n"
+    "\n"
+    "## Purpose\n"
+    "\n"
+    "A foo can be made.\n"
+    "\n"
+    "### CS-FOO-001\n"
+    "Covers: P-FOO\n"
+    "Kind: generated-test\n"
+    "\n"
+    "```gherkin\n"
+    "Given nothing\n"
+    "When a foo is made\n"
+    "Then it exists\n"
+    "```\n"
+)
 
-    write(
-        specs / "glossary.md",
-        "# Glossary\n"
-        "\n"
-        "Canonical vocabulary for this fixture corpus.\n"
-        "\n"
-        "- **" + TERM + "** \u2014 " + GLOSSARY_DEFINITION + "\n"
-        "- **Widget** \u2014 a unit of fixture behavior used only in tests.\n",
-    )
 
-    comp = specs / "components" / "widget"
-    write(
-        comp / "component.md",
+def _component(definitions_text):
+    return (
         "---\n"
-        "id: comp-widget\n"
-        "title: Widget\n"
+        "id: comp-foo\n"
+        "title: Foo\n"
         "status: draft\n"
-        "owners: [fixture-team]\n"
-        "sealed: true\n"
-        "source_path: legacy/widget/\n"
+        "owners: [team-a]\n"
+        "depends_on: []\n"
+        "realizes: [P-FOO]\n"
+        "sealed: false\n"
         "---\n"
         "\n"
-        "# Widget\n"
+        "# Foo\n"
         "\n"
         "## Purpose\n"
         "\n"
-        "Accepts frobnication requests for the fixture corpus.\n"
+        "Makes a foo.\n"
         "\n"
         "## Scope\n"
         "\n"
-        "- In scope: accepting requests.\n"
-        "- Out of scope: everything else.\n"
+        "**In scope:** making a foo. **Out of scope:** everything else.\n"
         "\n"
         "## Definitions\n"
         "\n"
-        "- **" + TERM + "** \u2014 " + local_definition + "\n"
+        + definitions_text
+        + "\n"
         "\n"
         "## Behavior\n"
         "\n"
@@ -90,7 +82,7 @@ def build_corpus(repo_root, local_definition):
         "\n"
         "## Data\n"
         "\n"
-        "See `interface/data/`.\n"
+        "None.\n"
         "\n"
         "## Acceptance criteria\n"
         "\n"
@@ -102,73 +94,103 @@ def build_corpus(repo_root, local_definition):
         "\n"
         "## Open questions\n"
         "\n"
+        "None.\n"
+        "\n"
         "## Change log\n"
         "\n"
-        "- Initial draft.\n",
-    )
-    write(
-        comp / "requirements" / "R-WIDGET-001.md",
-        "# R-WIDGET-001\n"
-        "\n"
-        "**R-WIDGET-001** \u2014 The widget MUST accept a request while its "
-        "frobnication window is open.\n",
-    )
-    write(
-        comp / "acceptance" / "AC-WIDGET-001.md",
-        "# AC-WIDGET-001\n"
-        "\n"
-        "Covers: R-WIDGET-001\n"
-        "Kind: compiled\n"
-        "\n"
-        "```gherkin\n"
-        "Given an open frobnication window\n"
-        "When a request arrives\n"
-        "Then the widget accepts it\n"
-        "```\n",
-    )
-    write(
-        comp / "constraints.md",
-        "# Constraints\n"
-        "\n"
-        "- None beyond the defaults.\n",
+        "- Initial draft.\n"
     )
 
 
-def lint_findings(repo_root):
+REQ = (
+    "# R-FOO-001\n"
+    "\n"
+    "**R-FOO-001** \u2014 `make_foo()` MUST return the string `\"foo\"`.\n"
+)
+
+LIBRARY = (
+    "# Library\n"
+    "\n"
+    "One module file, `foo.py`.\n"
+    "\n"
+    "```\n"
+    "make_foo() -> str\n"
+    "```\n"
+)
+
+AC = (
+    "# AC-FOO-001\n"
+    "\n"
+    "Covers: R-FOO-001\n"
+    "Kind: generated-test\n"
+    "\n"
+    "```gherkin\n"
+    "Given nothing\n"
+    "When make_foo() is called\n"
+    "Then the result is \"foo\"\n"
+    "```\n"
+)
+
+CONSTRAINTS = (
+    "# Foo \u2014 Non-Functional Constraints\n"
+    "\n"
+    "- **Pure.** No I/O.\n"
+)
+
+GLOSSARY = (
+    "# Glossary\n"
+    "\n"
+    "Canonical vocabulary.\n"
+    "\n"
+    "- **Widget** \u2014 " + GLOSSARY_DEF + ".\n"
+)
+
+
+def _build(repo_root, local_text):
+    specs = repo_root / "specs"
+    _write(specs / "product" / "foo.md", PRODUCT)
+    comp = specs / "components" / "foo"
+    _write(comp / "component.md", _component("- **Widget** \u2014 " + local_text))
+    _write(comp / "requirements" / "R-FOO-001.md", REQ)
+    _write(comp / "interface" / "library.md", LIBRARY)
+    _write(comp / "acceptance" / "AC-FOO-001.md", AC)
+    _write(comp / "constraints.md", CONSTRAINTS)
+    _write(specs / "glossary.md", GLOSSARY)
+
+
+def _lint011_fails(repo_root):
     report = spec_linter.lint(None, repo_root)
-    return report, list(field(report, "findings"))
-
-
-def r_lint_011_findings(findings):
-    return [f for f in findings if field(f, "rule_id") == "R-LINT-011"]
-
-
-def test_near_verbatim_glossary_restatement_fails_r_lint_011(tmp_path):
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    build_corpus(repo_root, NEAR_VERBATIM_LOCAL)
-
-    report, findings = lint_findings(repo_root)
-    hits = r_lint_011_findings(findings)
-
-    assert hits, (
-        "expected an R-LINT-011 finding for a near-verbatim restatement; got "
-        + repr([(field(f, "rule_id"), field(f, "severity"), field(f, "message")) for f in findings])
-    )
-    assert any(field(f, "severity") == "fail" for f in hits), repr(
-        [(field(f, "severity"), field(f, "message")) for f in hits]
-    )
-    assert field(report, "hard_failures") >= 1
-
-
-def test_genuine_delta_is_not_flagged_by_r_lint_011(tmp_path):
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    build_corpus(repo_root, GENUINE_DELTA_LOCAL)
-
-    _report, findings = lint_findings(repo_root)
-    hits = [
-        f for f in r_lint_011_findings(findings) if field(f, "severity") == "fail"
+    findings = field(report, "findings")
+    return [
+        f
+        for f in findings
+        if str(field(f, "rule_id")) == "R-LINT-011"
+        and str(field(f, "severity")).split(".")[-1].lower() == "fail"
     ]
 
-    assert hits == [], repr([(field(f, "file"), field(f, "message")) for f in hits])
+
+def test_verbatim_definition_copy_fails_r_lint_011(tmp_path):
+    repo_root = Path(tmp_path)
+    _build(repo_root, GLOSSARY_DEF + ".")
+    hits = _lint011_fails(repo_root)
+    assert len(hits) >= 1
+
+
+def test_near_verbatim_definition_copy_fails_r_lint_011(tmp_path):
+    repo_root = Path(tmp_path)
+    # One extra word: token overlap well above 0.8.
+    near = GLOSSARY_DEF.replace("reusable unit", "reusable small unit") + "."
+    _build(repo_root, near)
+    hits = _lint011_fails(repo_root)
+    assert len(hits) >= 1
+
+
+def test_genuine_delta_does_not_fail_r_lint_011(tmp_path):
+    repo_root = Path(tmp_path)
+    _build(
+        repo_root,
+        "in this component only, widgets are cached in memory for a "
+        "single call rather than persisted.",
+    )
+    hits = _lint011_fails(repo_root)
+    assert hits == []

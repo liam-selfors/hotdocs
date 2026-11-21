@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:054c961092aed10f36514cb0dd614effa78944e99889633faa173585ff2c721a
+# hotdocs-criterion: sha256:948af14e4b3e7c8a296ca94e1f47434841a69e6dd67304afd2659fea0f55fee6
 import json
 from pathlib import Path
 
@@ -33,17 +33,8 @@ def make_inputs():
         "secret_scan_result": {},
         "provenance_hit": False,
         "attempts": 2,
-        "attempt_history": [
-            {
-                "number": 1,
-                "outcome": "passed",
-                "retry_feedback": [],
-                "error_category": None,
-                "failed_requirements": [],
-                "transcript_sha256": None,
-            }
-        ],
-        "gate_versions": {"compiler": "1.0.0", "license_scanner": "k-gram@1.0.0"},
+        "attempt_history": [],
+        "gate_versions": {},
     }
 
 
@@ -58,24 +49,30 @@ def read_manifests(repo_root):
     )
 
 
-def test_ac_prov_013_verification_run_id_is_deterministic(tmp_path):
+def test_verification_run_id_is_deterministic_slug_attempt(tmp_path):
     root_a = tmp_path / "a"
-    root_b = tmp_path / "b"
     root_a.mkdir()
-    root_b.mkdir()
-
     provenance_writer.write_provenance("comp-foo", make_inputs(), root_a)
     gen_a, ver_a = read_manifests(root_a)
+
     assert field(gen_a, "verification_run_id") == "foo-attempt-2"
     assert field(ver_a, "verification_run_id") == "foo-attempt-2"
 
+    root_b = tmp_path / "b"
+    root_b.mkdir()
     provenance_writer.write_provenance("comp-foo", make_inputs(), root_b)
     gen_b, ver_b = read_manifests(root_b)
+
     assert field(gen_b, "verification_run_id") == field(gen_a, "verification_run_id")
     assert field(ver_b, "verification_run_id") == field(ver_a, "verification_run_id")
+    assert field(gen_b, "verification_run_id") == "foo-attempt-2"
 
-    # Running again into the same repo_root also yields the identical id.
-    provenance_writer.write_provenance("comp-foo", make_inputs(), root_a)
-    gen_a2, ver_a2 = read_manifests(root_a)
-    assert field(gen_a2, "verification_run_id") == "foo-attempt-2"
-    assert field(ver_a2, "verification_run_id") == "foo-attempt-2"
+
+def test_verification_run_id_identical_on_rewrite_same_root(tmp_path):
+    provenance_writer.write_provenance("comp-foo", make_inputs(), tmp_path)
+    first, _ = read_manifests(tmp_path)
+    provenance_writer.write_provenance("comp-foo", make_inputs(), tmp_path)
+    second, _ = read_manifests(tmp_path)
+
+    assert field(first, "verification_run_id") == "foo-attempt-2"
+    assert field(second, "verification_run_id") == field(first, "verification_run_id")

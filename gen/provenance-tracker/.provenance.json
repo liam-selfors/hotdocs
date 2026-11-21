@@ -1,5 +1,5 @@
 {
-  "spec_bundle_hash": "sha256:3d776cbaedfc54da9b75cdc770a77a0374582d078e1055039d889e2c8eafe84b",
+  "spec_bundle_hash": "sha256:26b2f124751aaf539529a8c8925ad6bc0acb7b4bc4db18ad7d016b44f8e78934",
   "model_pin": "claude-opus-5-5",
   "prompt_version": "v12",
   "retry_feedback": null,
@@ -23,7 +23,7 @@
     "generator": "generator@3.2.0+v12"
   },
   "provenance_hit": false,
-  "generated_at": "2026-11-21T02:30:37Z",
+  "generated_at": "2026-11-21T17:14:31Z",
   "verification_run_id": "provenance-tracker-attempt-1",
   "verification_report": {
     "component_id": "comp-provenance-tracker",
@@ -53,7 +53,7 @@
         "result": "pass",
         "test_authoring": {
           "model": "claude-opus-5-5",
-          "seed": 1,
+          "seed": 2,
           "prompt_version": "v1",
           "cache_hit": false
         }
@@ -80,25 +80,13 @@
         "id": "AC-TRACK-013",
         "covers": "R-TRACK-009",
         "kind": "generated-test",
-        "result": "pass",
-        "test_authoring": {
-          "model": "claude-opus-5-5",
-          "seed": 1,
-          "prompt_version": "v1",
-          "cache_hit": false
-        }
+        "result": "pass"
       },
       {
         "id": "AC-TRACK-014",
         "covers": "R-TRACK-009",
         "kind": "generated-test",
-        "result": "pass",
-        "test_authoring": {
-          "model": "claude-opus-5-5",
-          "seed": 1,
-          "prompt_version": "v1",
-          "cache_hit": false
-        }
+        "result": "pass"
       },
       {
         "id": "AC-TRACK-015",
@@ -117,14 +105,14 @@
       "R-TRACK-012": "pass"
     },
     "interface_drift": false,
-    "mutation_score": 0.8360655737704918,
+    "mutation_score": 0.8596491228070176,
     "mutation_error": null,
     "assets": [
       {
         "kind": "python",
         "path": ".",
         "definition_sha256": "sha256:53cb9d111b695cf184eb6fdc9c34e8cee514bab938f634dc993257e0163eb8b1",
-        "adapter_sha256": "sha256:fd6ddf7d96d53f9f80f42d158c5f580b7021bc47482b5f347e132a7778ccaecc",
+        "adapter_sha256": "sha256:801043604808d3099fb5da7f57427ec21eecae06ae5a6adee2854de955e1db13",
         "versions": {
           "python": "3.14.6",
           "packages": "sha256:fe2bf6523d4c9a1d7aad652c8447381630e076eb89d6267771e208c003c2d83b"
@@ -156,7 +144,7 @@
       {
         "rule_id": "Hex High Entropy String",
         "file": "gen/review-packet-builder/review_packet_builder.py",
-        "line": 17
+        "line": 20
       },
       {
         "rule_id": "AWS Access Key",
@@ -260,13 +248,23 @@
       },
       {
         "rule_id": "Hex High Entropy String",
+        "file": "verification/provenance-checker/generated-test/test_ac_provcheck_001.py",
+        "line": 22
+      },
+      {
+        "rule_id": "Hex High Entropy String",
+        "file": "verification/provenance-checker/generated-test/test_ac_provcheck_004.py",
+        "line": 14
+      },
+      {
+        "rule_id": "Hex High Entropy String",
         "file": "verification/provenance-tracker/generated-test/test_ac_track_013.py",
         "line": 9
       },
       {
         "rule_id": "Hex High Entropy String",
         "file": "verification/provenance-writer/generated-test/test_ac_prov_018.py",
-        "line": 10
+        "line": 22
       },
       {
         "rule_id": "Hex High Entropy String",
@@ -276,12 +274,12 @@
       {
         "rule_id": "Hex High Entropy String",
         "file": "verification/provenance-writer/generated-test/test_ac_prov_020.py",
-        "line": 11
+        "line": 98
       },
       {
         "rule_id": "Hex High Entropy String",
         "file": "verification/provenance-writer/generated-test/test_ac_prov_020.py",
-        "line": 114
+        "line": 116
       },
       {
         "rule_id": "AWS Access Key",
@@ -354,7 +352,12 @@
         "line": 13
       }
     ],
-    "unused_allowlist_entries": [],
+    "unused_allowlist_entries": [
+      {
+        "file": "verification/provenance-writer/generated-test/test_ac_prov_020.py",
+        "type": "Hex High Entropy String"
+      }
+    ],
     "notified": false,
     "notification_delivery_error": null,
     "cache_hit": false
@@ -364,7 +367,7 @@
       "kind": "python",
       "path": ".",
       "definition_sha256": "sha256:53cb9d111b695cf184eb6fdc9c34e8cee514bab938f634dc993257e0163eb8b1",
-      "adapter_sha256": "sha256:fd6ddf7d96d53f9f80f42d158c5f580b7021bc47482b5f347e132a7778ccaecc",
+      "adapter_sha256": "sha256:801043604808d3099fb5da7f57427ec21eecae06ae5a6adee2854de955e1db13",
       "versions": {
         "python": "3.14.6",
         "packages": "sha256:fe2bf6523d4c9a1d7aad652c8447381630e076eb89d6267771e208c003c2d83b"

@@ -218,4 +218,3 @@ capability that needs a fresh run as `needs a fresh run; pass --model`.
   verification/agentic-generator/test_live_slugify.py`.
 - `hotdocs assist` and `hotdocs impact` need a git repository; without a
   default branch or a merge-base every file counts as changed.
-- An asset kind's name has no hyphen yet (`sql`, not `data-schema`).

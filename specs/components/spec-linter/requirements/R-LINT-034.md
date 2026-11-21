@@ -20,9 +20,9 @@
     `asset '<entry>': python is never declared`; no further check of
     that entry.
   - Neither `<repo_root>/specs/architecture/asset-kind-<kind>.md` nor an
-    adapter `gen/kind-<kind>/kind_<kind>.py` under `repo_root` or the
+    adapter `gen/kind-<kind>/kind_<module>.py` under `repo_root` or the
     tool root (as in R-LINT-032) exists:
-    `asset kind '<kind>' has no definition`.
+    `asset kind '<kind>' has no definition; run hotdocs kind new <kind>`.
   - In the repository's definition, if any, for each of
     `Layout`, `Environment`, `Surface`, `Running criteria`,
     `Strength check`, `Test author guidance`, `Generator guidance`, no

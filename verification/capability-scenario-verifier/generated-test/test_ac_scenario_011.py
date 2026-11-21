@@ -1,6 +1,5 @@
-# hotdocs-criterion: sha256:4a73d9fe9aa2ada4ef2e174defe98a70e2b9bfc1484c46217555e2e6e8774c8a
+# hotdocs-criterion: sha256:6592f2a9c6bc8d895208ee2bd570704bbe2c17117262d9c0661768fc71b9eb1f
 import json
-import sys
 from pathlib import Path
 
 import pytest
@@ -12,45 +11,52 @@ def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-class _Sentinel:
-    def __repr__(self):
-        return "<sentinel-backend>"
+FENCE = "`" * 3
+
+PASS_PAYLOAD = json.dumps({"result": "pass", "rationale": "ok"})
+
+FENCED_TEXT = "Verdict:\n" + FENCE + "json\n" + PASS_PAYLOAD + "\n" + FENCE + "\nDone."
 
 
-FENCED_REPLY = (
-    "Verdict:\n```json\n"
-    + json.dumps({"result": "pass", "rationale": "ok"})
-    + "\n```\nDone."
-)
-BARE_REPLY = json.dumps({"result": "pass", "rationale": "ok"})
+def _ok_response(text):
+    return {"text": text, "model": "m", "backend": "fake", "model_call_error": None}
 
 
-def _write(path, text):
+def _error_response():
+    return {
+        "text": None,
+        "model": "m",
+        "backend": "fake",
+        "model_call_error": {"category": "network", "message": "connection dropped"},
+    }
+
+
+def _write(path, content):
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text)
+    path.write_text(content)
 
 
-def _build_repo(repo_root, log_path, reply_text, error):
-    # Planted python adapter.
+def _build_repo(repo_root, log_path, response):
+    # python adapter
     _write(
         repo_root / "gen" / "kind-python" / "kind_python.py",
         "import sys\n"
         "\n"
         "\n"
         "def provision(repo_root):\n"
-        "    return {\"ok\": True, \"reason\": \"\", \"versions\": {}, "
-        "\"lockfile_sha256\": None,\n"
+        "    return {\"ok\": True, \"reason\": \"\", \"versions\": {}, \"lockfile_sha256\": None,\n"
         "            \"interpreter\": sys.executable}\n",
     )
 
-    # Realizing component.
+    # realizing component
     _write(
         repo_root / "specs" / "components" / "foo" / "component.md",
         "---\n"
         "id: comp-foo\n"
         "title: Foo\n"
         "status: draft\n"
-        "owners: [team-a]\n"
+        "owners: [pipeline-team]\n"
+        "depends_on: []\n"
         "realizes: [P-X]\n"
         "sealed: false\n"
         "---\n"
@@ -59,19 +65,21 @@ def _build_repo(repo_root, log_path, reply_text, error):
     )
     _write(
         repo_root / "gen" / "foo" / "foo.py",
-        "# MARKER_SOURCE\n"
-        "def foo():\n"
-        "    return 'MARKER_SOURCE'\n",
+        "MARKER = " + repr("MARKER_SOURCE") + "\n"
+        "\n"
+        "\n"
+        "def run():\n"
+        "    return MARKER\n",
     )
 
-    # Capability with one llm-judge scenario.
+    # capability with one llm-judge scenario
     _write(
         repo_root / "specs" / "product" / "x.md",
         "---\n"
         "id: P-X\n"
         "title: Capability X\n"
         "status: draft\n"
-        "owners: [team-a]\n"
+        "owners: [pipeline-team]\n"
         "---\n"
         "\n"
         "# Capability X\n"
@@ -81,104 +89,85 @@ def _build_repo(repo_root, log_path, reply_text, error):
         "Covers: P-X\n"
         "Kind: llm-judge\n"
         "\n"
-        "```gherkin\n"
-        "Given MARKER_GHERKIN is present in the system\n"
-        "When the capability is exercised\n"
-        "Then it behaves as described\n"
-        "```\n",
+        + FENCE + "gherkin\n"
+        "Given a foo holding MARKER_GHERKIN\n"
+        "When it runs\n"
+        "Then it behaves\n"
+        + FENCE + "\n",
     )
 
-    # Fake llm-endpoint.
-    if error:
-        ret = (
-            "    return {\"text\": None, \"model\": model, \"backend\": \"fake\",\n"
-            "            \"model_call_error\": {\"category\": \"network\", "
-            "\"message\": \"backend down\"}}\n"
-        )
-    else:
-        ret = (
-            "    return {\"text\": " + repr(reply_text) + ", \"model\": model,\n"
-            "            \"backend\": \"fake\", \"model_call_error\": None}\n"
-        )
+    # fake llm-endpoint
     _write(
         repo_root / "gen" / "llm-endpoint" / "llm_endpoint.py",
         "import json\n"
         "\n"
+        "LOG = " + repr(str(log_path)) + "\n"
+        "RESPONSE = " + repr(response) + "\n"
+        "\n"
         "\n"
         "def complete(prompt, model, *, backend=None, **params):\n"
-        "    with open(" + repr(str(log_path)) + ", 'a') as fh:\n"
-        "        fh.write(json.dumps({'prompt': prompt, 'model': model,\n"
-        "                             'backend_id': id(backend),\n"
-        "                             'backend_repr': repr(backend)}) + '\\n')\n"
-        + ret,
-    )
-
-    # Fake test-author (not expected to be used for an llm-judge scenario).
-    _write(
-        repo_root / "gen" / "test-author" / "test_author.py",
-        "def author_test(bundle, model, seed=0, *, repo_root=None, llm_backend=None):\n"
-        "    return {\"component_id\": \"comp-foo\",\n"
-        "            \"criterion_id\": bundle[\"criterion_id\"],\n"
-        "            \"model\": model, \"seed\": seed, \"prompt_version\": \"v1\",\n"
-        "            \"cache_hit\": False,\n"
-        "            \"file\": {\"path\": \"verification/capabilities/P-X/generated-test/test_cs_x_001.py\",\n"
-        "                     \"content\": \"def test_x():\\n    assert True\\n\"},\n"
-        "            \"model_call_error\": None, \"repair_attempts\": 0,\n"
-        "            \"probe_findings\": []}\n",
+        "    with open(LOG, \"a\") as handle:\n"
+        "        handle.write(json.dumps({\"prompt\": prompt, \"model\": model,\n"
+        "                                 \"backend_id\": id(backend)}) + \"\\n\")\n"
+        "    out = dict(RESPONSE)\n"
+        "    out[\"model\"] = model\n"
+        "    return out\n",
     )
 
 
-def _run(tmp_path, reply_text, error=False):
-    repo_root = tmp_path / "repo"
+def _run(tmp_path, name, response):
+    repo_root = tmp_path / name
     repo_root.mkdir()
-    log_path = tmp_path / "complete_calls.log"
-    _build_repo(repo_root, log_path, reply_text, error)
-    sentinel = _Sentinel()
+    log_path = tmp_path / (name + "-calls.log")
+    _build_repo(repo_root, log_path, response)
+    sentinel = object()
     result = capability_scenario_verifier.run_capability_gates(
         "P-X", repo_root, "m", llm_backend=sentinel
     )
-    calls = []
-    if log_path.exists():
-        calls = [json.loads(line) for line in log_path.read_text().splitlines() if line.strip()]
     report = field(result, "capability_scenario_report")
     entry = report["P-X"] if isinstance(report, dict) else getattr(report, "P-X")
     scenarios = field(entry, "scenarios")
     matching = [s for s in scenarios if field(s, "id") == "CS-X-001"]
     assert len(matching) == 1, scenarios
-    return sentinel, calls, matching[0]
+    calls = []
+    if log_path.exists():
+        calls = [json.loads(line) for line in log_path.read_text().splitlines() if line.strip()]
+    return matching[0], calls, sentinel
 
 
-def test_fenced_reply_passes_and_complete_called_once_with_prompt(tmp_path):
-    sentinel, calls, scenario = _run(tmp_path, FENCED_REPLY)
+def test_fenced_reply_dispatches_once_and_passes(tmp_path):
+    scenario, calls, sentinel = _run(tmp_path, "fenced", _ok_response(FENCED_TEXT))
+
     assert len(calls) == 1, calls
     call = calls[0]
     assert call["model"] == "m"
     assert call["backend_id"] == id(sentinel)
-    assert call["backend_repr"] == "<sentinel-backend>"
     assert "MARKER_SOURCE" in call["prompt"]
     assert "MARKER_GHERKIN" in call["prompt"]
+
     assert field(scenario, "result") == "pass"
     assert field(scenario, "rationale") == "ok"
 
 
-def test_unfenced_json_reply_passes(tmp_path):
-    sentinel, calls, scenario = _run(tmp_path, BARE_REPLY)
+def test_unfenced_reply_passes(tmp_path):
+    scenario, calls, _ = _run(tmp_path, "plain", _ok_response(PASS_PAYLOAD))
+
     assert len(calls) == 1, calls
     assert field(scenario, "result") == "pass"
     assert field(scenario, "rationale") == "ok"
 
 
 @pytest.mark.parametrize(
-    "reply_text,error",
+    "name,response",
     [
-        (None, True),
-        ("not json", False),
-        (json.dumps({"result": "maybe"}), False),
+        ("error", _error_response()),
+        ("notjson", _ok_response("not json")),
+        ("maybe", _ok_response(json.dumps({"result": "maybe"}))),
     ],
-    ids=["model_call_error", "not_json", "result_maybe"],
 )
-def test_unusable_reply_fails_with_judge_unavailable(tmp_path, reply_text, error):
-    sentinel, calls, scenario = _run(tmp_path, reply_text, error=error)
+def test_unusable_reply_fails_as_judge_unavailable(tmp_path, name, response):
+    scenario, calls, _ = _run(tmp_path, name, response)
+
     assert len(calls) == 1, calls
     assert field(scenario, "result") == "fail"
     rationale = field(scenario, "rationale")

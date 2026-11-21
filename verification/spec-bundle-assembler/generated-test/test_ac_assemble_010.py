@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:2bf97d1882b9a01093b02e1fb20f25fb6bc2cb575a351ee12bae195f8691f072
+# hotdocs-criterion: sha256:46bd6d5a851432daffaad76435dacbe257508d4929dd1bbe9d129c8db7b868b8
 import importlib.util
 import json
 import re
@@ -12,31 +12,34 @@ def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
+def load_module(path, module_name):
+    spec = importlib.util.spec_from_file_location(module_name, path)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
 def load_spec_linter():
     gen = next(p for p in Path(spec_bundle_assembler.__file__).resolve().parents if p.name == "gen")
     base = gen / "spec-linter"
     path = base / "spec_linter.py" if (base / "spec_linter.py").is_file() else base / "spec_linter" / "__init__.py"
-    spec = importlib.util.spec_from_file_location("spec_linter", path)
-    spec_linter = importlib.util.module_from_spec(spec)
-    sys.modules["spec_linter"] = spec_linter
-    spec.loader.exec_module(spec_linter)
-    return spec_linter
+    return load_module(path, "spec_linter")
 
 
-def write(path, text):
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text, encoding="utf-8")
+def write(root, rel, text):
+    p = root / rel
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(text, encoding="utf-8")
 
 
-RATIONALE_MARKER = "ZQXRationaleMarkerText"
+RATIONALE_PHRASE = "Cached lookups were chosen under D13 for speed."
 
 
-def build_component(repo_root, slug, comp_id, title, req_prefix, purpose, depends_on, extra_body, func):
-    comp_dir = repo_root / "specs" / "components" / slug
-    write(
-        comp_dir / "component.md",
+def component_md(cid, title, slug, depends_on, purpose, extra=""):
+    return (
         "---\n"
-        "id: " + comp_id + "\n"
+        "id: " + cid + "\n"
         "title: " + title + "\n"
         "status: draft\n"
         "owners: [team-a]\n"
@@ -50,21 +53,26 @@ def build_component(repo_root, slug, comp_id, title, req_prefix, purpose, depend
         "## Purpose\n"
         "\n"
         + purpose + "\n"
-        + extra_body,
+        + extra
     )
-    req_id = "R-" + req_prefix + "-001"
-    ac_id = "AC-" + req_prefix + "-001"
+
+
+def write_component(root, slug, cid, title, prefix, func, depends_on, purpose, extra=""):
+    base = "specs/components/" + slug + "/"
+    write(root, base + "component.md", component_md(cid, title, slug, depends_on, purpose, extra))
+    rid = "R-" + prefix + "-001"
+    aid = "AC-" + prefix + "-001"
     write(
-        comp_dir / "requirements" / (req_id + ".md"),
-        "# " + req_id + "\n"
-        "\n"
-        "**" + req_id + "** — `" + func + "(x)` MUST return `2 * x`.\n",
+        root,
+        base + "requirements/" + rid + ".md",
+        "# " + rid + "\n\n**" + rid + "** — `" + func + "(x)` MUST return `2 * x`.\n",
     )
     write(
-        comp_dir / "acceptance" / (ac_id + ".md"),
-        "# " + ac_id + "\n"
+        root,
+        base + "acceptance/" + aid + ".md",
+        "# " + aid + "\n"
         "\n"
-        "Covers: " + req_id + "\n"
+        "Covers: " + rid + "\n"
         "Kind: generated-test\n"
         "\n"
         "```gherkin\n"
@@ -74,106 +82,46 @@ def build_component(repo_root, slug, comp_id, title, req_prefix, purpose, depend
         "```\n",
     )
     write(
-        comp_dir / "interface" / "library.md",
-        "# Library\n"
-        "\n"
-        "```\n"
-        + func + "(x: int) -> int\n"
-        "```\n",
+        root,
+        base + "interface/library.md",
+        "# Library\n\n```\n" + func + "(x: int) -> int\n```\n",
     )
-    write(
-        comp_dir / "constraints.md",
-        "# Constraints\n"
-        "\n"
-        "None.\n",
-    )
+    write(root, base + "constraints.md", "# Constraints\n\nNone.\n")
 
 
-def build_corpus(repo_root):
+def build_fixture(root):
+    write(root, "specs/glossary.md", "# Glossary\n\n- **Foo** — a test term.\n")
     write(
-        repo_root / "specs" / "glossary.md",
-        "# Glossary\n"
-        "\n"
-        "- **Foo** — a test term.\n",
-    )
-    write(
-        repo_root / "specs" / "decisions" / "D13.md",
+        root,
+        "specs/decisions/D13.md",
         "---\n"
         "id: D13\n"
-        "title: Cache results\n"
+        "title: Cache lookups\n"
         "status: draft\n"
         "owners: [team-a]\n"
         "---\n"
         "\n"
-        "# D13: Cache results\n"
-        "\n"
-        "## Context\n"
-        "\n"
-        "Results are expensive to compute.\n"
+        "# D13 — Cache lookups\n"
         "\n"
         "## Decision\n"
         "\n"
-        "Cache them.\n"
-        "\n"
-        "## Consequences\n"
-        "\n"
-        "Results are cached.\n",
+        "Bar caches lookups.\n",
     )
-    build_component(
-        repo_root,
-        "bar",
-        "comp-bar",
-        "Bar",
-        "BAR",
+    write_component(
+        root, "bar", "comp-bar", "Bar", "BAR", "bar", "[]",
         "Caches results.",
-        "[]",
-        "\n"
-        "## Rationale\n"
-        "\n"
-        "Bar caches results because of `D13`; " + RATIONALE_MARKER + ".\n",
-        "bar",
+        "\n## Rationale\n\n" + RATIONALE_PHRASE + "\n",
     )
-    build_component(
-        repo_root,
-        "foo",
-        "comp-foo",
-        "Foo",
-        "FOO",
+    write_component(
+        root, "foo", "comp-foo", "Foo", "FOO", "foo", "[comp-bar]",
         "Foo doubles a number.",
-        "[comp-bar]",
-        "",
-        "foo",
     )
 
 
-def bundle_text(bundle):
-    names = [
-        "component_id",
-        "spec_bundle_hash",
-        "spec",
-        "interface",
-        "constraints",
-        "dependency_interfaces",
-        "dependency_context",
-        "dependency_usage",
-        "vars",
-        "glossary",
-        "hint_code",
-    ]
-    parts = []
-    for name in names:
-        try:
-            value = field(bundle, name)
-        except (KeyError, AttributeError):
-            continue
-        parts.append(json.dumps(value, default=str, ensure_ascii=False))
-    return "\n".join(parts)
-
-
-def test_dependency_context_is_exactly_purpose_without_rationale(tmp_path):
+def test_ac_assemble_010_dependency_context_is_purpose_only(tmp_path):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
-    build_corpus(repo_root)
+    build_fixture(repo_root)
 
     spec_linter = load_spec_linter()
     assert spec_linter.lint(None, repo_root).hard_failures == 0
@@ -183,7 +131,16 @@ def test_dependency_context_is_exactly_purpose_without_rationale(tmp_path):
     dependency_context = field(bundle, "dependency_context")
     assert dependency_context["comp-bar"] == "Caches results."
 
-    text = bundle_text(bundle)
-    assert re.search(r"\bD13\b", text) is None
-    assert RATIONALE_MARKER not in text
-    assert "Bar caches results because of" not in text
+    names = [
+        "component_id", "spec_bundle_hash", "spec", "interface", "constraints",
+        "dependency_interfaces", "dependency_context", "dependency_usage",
+        "vars", "glossary", "hint_code",
+    ]
+    d13 = re.compile(r"\bD13\b")
+    for name in names:
+        value = field(bundle, name)
+        text = value if isinstance(value, str) else json.dumps(value, ensure_ascii=False)
+        assert not d13.search(text), "D13 found in bundle field " + repr(name)
+        assert "Rationale" not in text, "Rationale content found in bundle field " + repr(name)
+        assert RATIONALE_PHRASE not in text, "Rationale text found in bundle field " + repr(name)
+        assert "speed" not in text, "Rationale text found in bundle field " + repr(name)

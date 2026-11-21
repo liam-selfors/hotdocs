@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:c2c5ce58f4aac0d3718c0986387966afc7d74c131b04df5378187b84f7589fd0
+# hotdocs-criterion: sha256:223622a80c2d581ecdc5afd33db1e6b2b4db32001befd8ad8df97689e68df70d
 import importlib.util
 import sys
 from pathlib import Path
@@ -11,9 +11,16 @@ def field(value, name):
 
 
 def load_spec_linter():
-    gen = next(p for p in Path(spec_bundle_assembler.__file__).resolve().parents if p.name == "gen")
+    gen = next(
+        p for p in Path(spec_bundle_assembler.__file__).resolve().parents
+        if p.name == "gen"
+    )
     base = gen / "spec-linter"
-    path = base / "spec_linter.py" if (base / "spec_linter.py").is_file() else base / "spec_linter" / "__init__.py"
+    path = (
+        base / "spec_linter.py"
+        if (base / "spec_linter.py").is_file()
+        else base / "spec_linter" / "__init__.py"
+    )
     spec = importlib.util.spec_from_file_location("spec_linter", path)
     spec_linter = importlib.util.module_from_spec(spec)
     sys.modules["spec_linter"] = spec_linter
@@ -28,26 +35,22 @@ def write(path, text):
 
 VAR_BODY_LINES = [
     "# VAR-FOO-URL",
-    "",
     "Name: VAR-FOO-URL",
-    "",
-    "Type: url",
-    "",
-    "Required: optional",
-    "",
-    "Description: The base URL foo reports its doubled numbers to.",
-    "",
-    "Sensitivity: public",
+    "Type: string (URL)",
+    "Required: required",
+    "Sensitivity: non-sensitive",
+    "Description: The base URL foo calls to fetch its multiplier.",
 ]
 
 
-def build_corpus(repo_root):
+def build_fixture(repo_root):
     specs = repo_root / "specs"
+
     write(
         specs / "glossary.md",
         "# Glossary\n"
         "\n"
-        "- **Foo** — a test term.\n",
+        "- **Foo** \u2014 a test term.\n",
     )
 
     write(
@@ -59,8 +62,17 @@ def build_corpus(repo_root):
         "owners: [team-a]\n"
         "---\n"
         "\n"
-        + "\n".join(VAR_BODY_LINES)
-        + "\n",
+        + VAR_BODY_LINES[0] + "\n"
+        "\n"
+        + VAR_BODY_LINES[1] + "\n"
+        "\n"
+        + VAR_BODY_LINES[2] + "\n"
+        "\n"
+        + VAR_BODY_LINES[3] + "\n"
+        "\n"
+        + VAR_BODY_LINES[4] + "\n"
+        "\n"
+        + VAR_BODY_LINES[5] + "\n",
     )
 
     comp = specs / "components" / "foo"
@@ -87,7 +99,7 @@ def build_corpus(repo_root):
         comp / "requirements" / "R-FOO-001.md",
         "# R-FOO-001\n"
         "\n"
-        "**R-FOO-001** — `foo(x)` MUST return `2 * x`.\n",
+        "**R-FOO-001** \u2014 `foo(x)` MUST return `2 * x`.\n",
     )
     write(
         comp / "acceptance" / "AC-FOO-001.md",
@@ -121,7 +133,7 @@ def build_corpus(repo_root):
 def test_ac_assemble_003_vars_contains_full_declaration(tmp_path):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
-    build_corpus(repo_root)
+    build_fixture(repo_root)
 
     spec_linter = load_spec_linter()
     assert spec_linter.lint(None, repo_root).hard_failures == 0
@@ -129,12 +141,9 @@ def test_ac_assemble_003_vars_contains_full_declaration(tmp_path):
     bundle = spec_bundle_assembler.assemble("comp-foo", repo_root)
 
     vars_field = field(bundle, "vars")
-    assert "VAR-FOO-URL" in vars_field
+    assert "VAR-FOO-URL" in vars_field, vars_field
     content = vars_field["VAR-FOO-URL"]
     assert isinstance(content, str)
 
     for line in VAR_BODY_LINES:
-        if line.strip():
-            assert line.strip() in content, (
-                "missing declaration line " + repr(line) + " in " + repr(content)
-            )
+        assert line in content, (line, content)

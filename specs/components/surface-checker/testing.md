@@ -5,7 +5,7 @@ each kind it names in its synthetic `repo_root`:
 
 - `specs/architecture/asset-kind-<kind>.md`, any text (`check_surface` does not
   read it);
-- `gen/kind-<kind>/kind_<kind>.py`, plain Python, for example
+- `gen/kind-<kind>/kind_<module>.py`, plain Python, for example
 
   ```python
   KIND = "fake"

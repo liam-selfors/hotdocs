@@ -1,4 +1,5 @@
-# hotdocs-criterion: sha256:856eef1f12da722c6a8899f9c7089ca900c95ab0b942fd2d5100fa431e62bfda
+# hotdocs-criterion: sha256:142a24f6b07b727caa6d8c04b80521c2e1c28a1e5a6d0126b7ff5e4415dcb342
+import hashlib
 import re
 from pathlib import Path
 
@@ -22,26 +23,13 @@ COMPONENT_MD = (
 FAKE_DEFINITION = (
     "# Fake\n"
     "\n"
-    "## Layout\n"
-    "x\n"
-    "\n"
-    "## Environment\n"
-    "x\n"
-    "\n"
-    "## Surface\n"
-    "x\n"
-    "\n"
-    "## Running criteria\n"
-    "x\n"
-    "\n"
-    "## Strength check\n"
-    "x\n"
-    "\n"
-    "## Test author guidance\n"
-    "x\n"
-    "\n"
-    "## Generator guidance\n"
-    "x\n"
+    "## Layout\nx\n\n"
+    "## Environment\nx\n\n"
+    "## Surface\nx\n\n"
+    "## Running criteria\nx\n\n"
+    "## Strength check\nx\n\n"
+    "## Test author guidance\nx\n\n"
+    "## Generator guidance\nx\n"
 )
 
 FAKE_ADAPTER = (
@@ -75,12 +63,16 @@ PYTHON_ADAPTER = (
 )
 
 
+def field(value, name):
+    return value[name] if isinstance(value, dict) else getattr(value, name)
+
+
 def _write(path, text):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
 
 
-def _plant(repo_root):
+def _plant_repo(repo_root):
     _write(repo_root / "specs" / "components" / "widget-maker" / "component.md", COMPONENT_MD)
     _write(repo_root / "specs" / "architecture" / "asset-kind-fake.md", FAKE_DEFINITION)
     _write(repo_root / "gen" / "kind-fake" / "kind_fake.py", FAKE_ADAPTER)
@@ -88,12 +80,13 @@ def _plant(repo_root):
 
 
 def _bundle():
+    spec_text = "# Widget Maker\n\nThe component makes widgets."
     return {
         "component_id": "comp-widget-maker",
-        "spec_bundle_hash": "sha256:" + "a" * 64,
-        "spec": "Widget Maker makes widgets.",
-        "interface": "make() -> int",
-        "constraints": "None.",
+        "spec_bundle_hash": "sha256:" + hashlib.sha256(b"ac-gen-025 bundle").hexdigest(),
+        "spec": spec_text,
+        "interface": "# Library\n\nmake() -> str",
+        "constraints": "No constraints.",
         "dependency_interfaces": {},
         "dependency_context": {},
         "dependency_usage": {},
@@ -103,11 +96,12 @@ def _bundle():
     }
 
 
-def test_prompt_names_module_and_asset_before_spec(tmp_path, monkeypatch):
+def test_ac_gen_025_prompt_names_module_and_asset_before_spec(tmp_path, monkeypatch):
     monkeypatch.delenv("VAR_CACHE_STORE_URL", raising=False)
+    monkeypatch.chdir(tmp_path)
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
-    _plant(repo_root)
+    _plant_repo(repo_root)
 
     prompts = []
 
@@ -116,35 +110,27 @@ def test_prompt_names_module_and_asset_before_spec(tmp_path, monkeypatch):
         nonce = re.search(r"-----BEGIN FILE ([0-9a-f]{32}):", prompt).group(1)
         reply = (
             "-----BEGIN FILE " + nonce + ": widget_maker.py-----\n"
-            "def make():\n"
-            "    return 1\n"
+            "VALUE = 1\n"
             "-----END FILE " + nonce + "-----\n"
             "-----BEGIN FILE " + nonce + ": static/app.txt-----\n"
             "ok\n"
             "-----END FILE " + nonce + "-----\n"
             "-----END REPLY " + nonce + "-----\n"
         )
-        return {
-            "text": reply,
-            "model": model,
-            "backend": "mock",
-            "model_call_error": None,
-        }
+        return {"text": reply, "model": model, "backend": "mock", "model_call_error": None}
 
-    generator.generate(
-        _bundle(),
-        "claude-sonnet-5",
-        repo_root=repo_root,
-        llm_backend=mock_backend,
+    result = generator.generate(
+        _bundle(), "claude-sonnet-5", repo_root=repo_root, llm_backend=mock_backend
     )
 
-    assert prompts, "mock model was never called"
-    prompt = prompts[0]
+    assert field(result, "refused") is None
+    assert len(prompts) >= 1, "the mock model was never called"
 
+    prompt = prompts[0]
     lines = prompt.split("\n")
     assert "## SPEC" in lines, "prompt has no '## SPEC' line"
     spec_index = lines.index("## SPEC")
-    before = "\n".join(lines[:spec_index])
+    preamble = "\n".join(lines[:spec_index])
 
-    assert "widget_maker.py" in before
-    assert "static/app.txt" in before
+    assert "widget_maker.py" in preamble
+    assert "static/app.txt" in preamble

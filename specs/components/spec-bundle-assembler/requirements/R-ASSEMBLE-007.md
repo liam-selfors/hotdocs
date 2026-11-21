@@ -11,7 +11,7 @@
     under its `requirements/` and `interface/`;
   - each document `R-ASSEMBLE-014` appends;
   - each asset-kind adapter `R-ASSEMBLE-016` loads, under the path
-    `gen/kind-<kind>/kind_<kind>.py` whichever root it was read from;
+    `gen/kind-<kind>/kind_<module>.py` whichever root it was read from;
   - for each `depends_on` component, its `component.md`, every `.md` file
     under its `interface/`, and every file under its code directory
     (`source_path` when sealed, else `gen/<slug>/`);

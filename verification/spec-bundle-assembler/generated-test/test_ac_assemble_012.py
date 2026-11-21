@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:0be2f2e8f819a55db495834ed7e385b576010668f7128c23720f0f21cfe40a40
+# hotdocs-criterion: sha256:2aa977f6fe2793585384726dc2cbe59325804527964eb88cda672a6c0ba4a82d
 import importlib.util
 import sys
 from pathlib import Path
@@ -6,15 +6,23 @@ from pathlib import Path
 import spec_bundle_assembler
 
 
-PURPOSE_TEXT = "Foo doubles a number, marked quixoticpurposemarker."
-SCOPE_TEXT = "Foo covers integer input, marked quixoticscopemarker."
-RATIONALE_TEXT = "Doubling was chosen long ago, marked quixoticrationalemarker."
-OPEN_QUESTIONS_TEXT = "Whether tripling is wanted, marked quixoticopenquestionmarker."
-CHANGE_LOG_TEXT = "Initial version written, marked quixoticchangelogmarker."
+PURPOSE_TEXT = "Foo doubles a number, as the amber heron purpose phrase says."
+SCOPE_TEXT = "Foo handles integers only, within the cobalt lantern scope phrase."
+RATIONALE_TEXT = "Doubling was chosen because of the quixotic walrus rationale phrase."
+OPEN_QUESTIONS_TEXT = "- Whether to triple instead, the velvet glacier question phrase."
+CHANGE_LOG_TEXT = "- Initial version, the saffron marmot changelog phrase."
 
 
 def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
+
+
+def load_module(path, module_name):
+    spec = importlib.util.spec_from_file_location(module_name, path)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    spec.loader.exec_module(module)
+    return module
 
 
 def write(path, text):
@@ -22,7 +30,7 @@ def write(path, text):
     path.write_text(text, encoding="utf-8")
 
 
-def build_corpus(repo_root):
+def build_fixture(repo_root):
     write(
         repo_root / "specs" / "glossary.md",
         "# Glossary\n"
@@ -58,11 +66,11 @@ def build_corpus(repo_root):
         "\n"
         "## Open questions\n"
         "\n"
-        "- " + OPEN_QUESTIONS_TEXT + "\n"
+        + OPEN_QUESTIONS_TEXT + "\n"
         "\n"
         "## Change log\n"
         "\n"
-        "- " + CHANGE_LOG_TEXT + "\n",
+        + CHANGE_LOG_TEXT + "\n",
     )
     write(
         comp / "requirements" / "R-FOO-001.md",
@@ -110,28 +118,27 @@ def load_spec_linter():
         if (base / "spec_linter.py").is_file()
         else base / "spec_linter" / "__init__.py"
     )
-    spec = importlib.util.spec_from_file_location("spec_linter", path)
-    spec_linter = importlib.util.module_from_spec(spec)
-    sys.modules["spec_linter"] = spec_linter
-    spec.loader.exec_module(spec_linter)
-    return spec_linter
+    return load_module(path, "spec_linter")
 
 
-def test_cold_spec_excludes_rationale_open_questions_and_change_log(tmp_path):
+def test_ac_assemble_012_cold_spec_excludes_rationale_open_questions_change_log(tmp_path):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
-    build_corpus(repo_root)
+    build_fixture(repo_root)
 
     spec_linter = load_spec_linter()
     assert spec_linter.lint(None, repo_root).hard_failures == 0
 
     bundle = spec_bundle_assembler.assemble("comp-foo", repo_root, mode="cold")
     spec_text = field(bundle, "spec")
-
     assert isinstance(spec_text, str)
-    assert "quixoticpurposemarker" in spec_text
-    assert "quixoticscopemarker" in spec_text
 
-    assert "quixoticrationalemarker" not in spec_text
-    assert "quixoticopenquestionmarker" not in spec_text
-    assert "quixoticchangelogmarker" not in spec_text
+    assert PURPOSE_TEXT in spec_text
+    assert SCOPE_TEXT in spec_text
+
+    assert "quixotic walrus" not in spec_text
+    assert "velvet glacier" not in spec_text
+    assert "saffron marmot" not in spec_text
+    assert "## Rationale" not in spec_text
+    assert "## Open questions" not in spec_text
+    assert "## Change log" not in spec_text

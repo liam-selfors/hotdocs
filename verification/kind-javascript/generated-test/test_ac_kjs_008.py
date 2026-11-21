@@ -1,36 +1,28 @@
-# hotdocs-criterion: sha256:e607b949d7ed87901e343f6c8b9eb9e4b5b13d8d54af61f89a6756750b0fc788
+# hotdocs-criterion: sha256:a695848b21508b518061e19619e0731e9f99fa3f9145b014016013cd585013c0
 import re
 
 import kind_javascript
 
 
-def field(value, name):
-    return value[name] if isinstance(value, dict) else getattr(value, name)
-
-
-def test_ac_kjs_008_provision_with_node_24_or_later(tmp_path):
-    before = sorted(p.name for p in tmp_path.iterdir())
-    assert before == []
-
+def test_provision_with_node_24_or_later_reports_ok(tmp_path):
     result = kind_javascript.provision(tmp_path)
 
     assert isinstance(result, dict)
     assert set(result.keys()) == {"ok", "reason", "versions", "lockfile_sha256"}
     assert len(result) == 4
 
-    assert field(result, "ok") is True
-    assert field(result, "reason") == ""
-    assert field(result, "lockfile_sha256") is None
+    assert result["ok"] is True
+    assert result["reason"] == ""
+    assert result["lockfile_sha256"] is None
 
-    versions = field(result, "versions")
+    versions = result["versions"]
     assert isinstance(versions, dict)
     assert list(versions.keys()) == ["node"]
-    node_version = versions["node"]
-    assert isinstance(node_version, str)
-    assert re.match(r"^\d+\.\d+\.\d+$", node_version), node_version
-    assert re.fullmatch(r"\d+\.\d+\.\d+", node_version), node_version
-    major = int(node_version.split(".")[0])
+    version = versions["node"]
+    assert isinstance(version, str)
+    assert re.match(r"^\d+\.\d+\.\d+$", version), version
+    assert re.fullmatch(r"\d+\.\d+\.\d+", version), version
+    major = int(version.split(".")[0])
     assert major >= 24
 
-    after = sorted(p.name for p in tmp_path.iterdir())
-    assert after == []
+    assert list(tmp_path.iterdir()) == []

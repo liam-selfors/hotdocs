@@ -1,15 +1,34 @@
-# hotdocs-criterion: sha256:a673c693ab86786157223da176cdbe4696e5b0002624c4018766ff9d2b0f5b5f
+# hotdocs-criterion: sha256:63d36ad10add9265a47c5b54accc5eaf8afe599ed6951aa1d2614501cf2e44b5
+import hashlib
 import importlib.util
+import json
 import re
 import sys
 from pathlib import Path
 
-import pytest
-
 import generator
 
 
-FAKE_KIND_ADAPTER = '''from pathlib import Path
+def field(value, name):
+    return value[name] if isinstance(value, dict) else getattr(value, name)
+
+
+def load_module(path, module_name):
+    spec = importlib.util.spec_from_file_location(module_name, path)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def load_cache_manager():
+    gen = next(p for p in Path(generator.__file__).resolve().parents if p.name == "gen")
+    base = gen / "cache-manager"
+    path = base / "cache_manager.py" if (base / "cache_manager.py").is_file() else base / "cache_manager" / "__init__.py"
+    return load_module(path, "cache_manager")
+
+
+FAKE_ADAPTER = '''from pathlib import Path
 
 KIND = "fake"
 
@@ -24,7 +43,7 @@ def provision(repo_root):
     return {"ok": True, "reason": "", "versions": {"fakeprog": "2.0.0"}, "lockfile_sha256": None}
 '''
 
-FAKE_PYTHON_ADAPTER = '''from pathlib import Path
+PYTHON_ADAPTER = '''from pathlib import Path
 
 KIND = "python"
 
@@ -48,28 +67,9 @@ SECTIONS = [
 ]
 
 
-def field(value, name):
-    return value[name] if isinstance(value, dict) else getattr(value, name)
-
-
-def load_module(path, module_name):
-    spec = importlib.util.spec_from_file_location(module_name, path)
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[module_name] = module
-    spec.loader.exec_module(module)
-    return module
-
-
-def load_cache_manager():
-    gen = next(p for p in Path(generator.__file__).resolve().parents if p.name == "gen")
-    base = gen / "cache-manager"
-    path = base / "cache_manager.py" if (base / "cache_manager.py").is_file() else base / "cache_manager" / "__init__.py"
-    return load_module(path, "cache_manager")
-
-
-def make_repo(repo_root, kind="fake"):
+def plant_repo(repo_root, kind="fake"):
     comp_dir = repo_root / "specs" / "components" / "widget-maker"
-    comp_dir.mkdir(parents=True)
+    comp_dir.mkdir(parents=True, exist_ok=True)
     component_md = (
         "---\n"
         "id: comp-widget-maker\n"
@@ -86,131 +86,142 @@ def make_repo(repo_root, kind="fake"):
     (comp_dir / "component.md").write_text(component_md, encoding="utf-8")
 
     arch = repo_root / "specs" / "architecture"
-    arch.mkdir(parents=True)
+    arch.mkdir(parents=True, exist_ok=True)
     definition = "# Fake\n"
     for s in SECTIONS:
-        definition += "\n## " + s + "\nx\n"
+        definition += "\n## " + s + "\n\nx\n"
     (arch / "asset-kind-fake.md").write_text(definition, encoding="utf-8")
 
     fake_dir = repo_root / "gen" / "kind-fake"
-    fake_dir.mkdir(parents=True)
-    (fake_dir / "kind_fake.py").write_text(FAKE_KIND_ADAPTER, encoding="utf-8")
+    fake_dir.mkdir(parents=True, exist_ok=True)
+    (fake_dir / "kind_fake.py").write_text(FAKE_ADAPTER, encoding="utf-8")
 
     py_dir = repo_root / "gen" / "kind-python"
-    py_dir.mkdir(parents=True)
-    (py_dir / "kind_python.py").write_text(FAKE_PYTHON_ADAPTER, encoding="utf-8")
+    py_dir.mkdir(parents=True, exist_ok=True)
+    (py_dir / "kind_python.py").write_text(PYTHON_ADAPTER, encoding="utf-8")
 
 
-def make_bundle(tag):
-    return {
-        "component_id": "comp-widget-maker",
-        "spec_bundle_hash": "sha256:" + ("%064x" % tag),
-        "spec": "Widget Maker spec",
-        "interface": "Widget Maker interface",
-        "constraints": "",
-        "dependency_interfaces": {},
-        "dependency_context": {},
-        "dependency_usage": {},
-        "vars": {},
-        "glossary": "",
-        "hint_code": None,
-    }
+class Bundle(dict):
+    def __getattr__(self, name):
+        try:
+            return self[name]
+        except KeyError:
+            raise AttributeError(name)
+
+
+SPEC_HASH = "sha256:" + "ab" * 32
+MODEL = "mock-model"
+
+
+def make_bundle():
+    return Bundle(
+        component_id="comp-widget-maker",
+        spec_bundle_hash=SPEC_HASH,
+        spec="Widget maker spec.",
+        interface="Widget maker interface.",
+        constraints="",
+        dependency_interfaces={},
+        dependency_context={},
+        dependency_usage={},
+        vars={},
+        glossary="",
+        hint_code=None,
+    )
 
 
 def make_backend(blocks):
     def backend(prompt, model, **params):
         nonce = re.search(r"-----BEGIN FILE ([0-9a-f]{32}):", prompt).group(1)
-        text = ""
+        lines = []
         for path, content in blocks:
-            text += "-----BEGIN FILE " + nonce + ": " + path + "-----\n"
-            text += content
-            text += "-----END FILE " + nonce + "-----\n"
-        text += "-----END REPLY " + nonce + "-----\n"
-        return {"text": text, "model": model, "backend": "mock", "model_call_error": None}
+            lines.append("-----BEGIN FILE " + nonce + ": " + path + "-----")
+            lines.append(content)
+            lines.append("-----END FILE " + nonce + "-----")
+        lines.append("-----END REPLY " + nonce + "-----")
+        return {
+            "text": "\n".join(lines) + "\n",
+            "model": model,
+            "backend": "mock",
+            "model_call_error": None,
+        }
 
     return backend
 
 
+def cache_key(cache_manager):
+    digest = hashlib.sha256(json.dumps(sorted([]), sort_keys=True).encode("utf-8")).hexdigest()
+    return cache_manager.CacheKey(
+        spec_bundle_hash=SPEC_HASH,
+        gate_inputs_hash="sha256:" + digest,
+        gate_version=generator.GATE_VERSION,
+        model_pin=MODEL,
+    )
+
+
 def assert_nothing_cached(repo_root):
     cache_manager = load_cache_manager()
-    stats = cache_manager.stats(repo_root=repo_root)
-    assert field(stats, "entry_count") == 0
+    got = cache_manager.get(cache_key(cache_manager), repo_root=repo_root)
+    assert isinstance(got, cache_manager.Miss)
+    assert cache_manager.stats(repo_root=repo_root)["entry_count"] == 0
 
 
-@pytest.fixture(autouse=True)
-def _no_cache_store(monkeypatch):
-    monkeypatch.delenv("VAR_CACHE_STORE_URL", raising=False)
-
-
-def test_missing_asset(tmp_path):
-    repo_root = tmp_path / "repo"
-    make_repo(repo_root)
-    backend = make_backend([("widget_maker.py", "A = 1\n")])
-    result = generator.generate(
-        make_bundle(1), "claude-sonnet-5", repo_root=repo_root, llm_backend=backend
+def run(repo_root, blocks):
+    return generator.generate(
+        make_bundle(), MODEL, None, repo_root=repo_root, llm_backend=make_backend(blocks)
     )
+
+
+def test_missing_asset(tmp_path, monkeypatch):
+    monkeypatch.delenv("VAR_CACHE_STORE_URL", raising=False)
+    plant_repo(tmp_path)
+    result = run(tmp_path, [("widget_maker.py", "A = 1")])
     assert field(result, "model_call_error") == {
         "category": "missing_asset",
         "message": "missing asset: static/app.txt",
     }
     assert field(result, "files") == {}
-    assert not (repo_root / "gen" / "widget-maker").exists()
-    assert_nothing_cached(repo_root)
+    assert not (tmp_path / "gen" / "widget-maker").exists()
+    assert_nothing_cached(tmp_path)
 
 
-def test_asset_layout_error(tmp_path):
-    repo_root = tmp_path / "repo"
-    make_repo(repo_root)
-    backend = make_backend([
-        ("widget_maker.py", "A = 1\n"),
-        ("static/app.txt", "bad\n"),
-    ])
-    result = generator.generate(
-        make_bundle(2), "claude-sonnet-5", repo_root=repo_root, llm_backend=backend
-    )
+def test_asset_layout_error(tmp_path, monkeypatch):
+    monkeypatch.delenv("VAR_CACHE_STORE_URL", raising=False)
+    plant_repo(tmp_path)
+    result = run(tmp_path, [("widget_maker.py", "A = 1"), ("static/app.txt", "bad")])
     assert field(result, "model_call_error") == {
         "category": "malformed_layout",
         "message": "static/app.txt: bad",
     }
     assert field(result, "files") == {}
-    assert not (repo_root / "gen" / "widget-maker").exists()
-    assert_nothing_cached(repo_root)
+    assert not (tmp_path / "gen" / "widget-maker").exists()
+    assert_nothing_cached(tmp_path)
 
 
-def test_valid_asset_with_prefix_written(tmp_path):
-    repo_root = tmp_path / "repo"
-    make_repo(repo_root)
-    backend = make_backend([
-        ("widget_maker.py", "A = 1\n"),
-        ("widget-maker/static/app.txt", "ok\n"),
-    ])
-    result = generator.generate(
-        make_bundle(3), "claude-sonnet-5", repo_root=repo_root, llm_backend=backend
+def test_valid_asset_written(tmp_path, monkeypatch):
+    monkeypatch.delenv("VAR_CACHE_STORE_URL", raising=False)
+    plant_repo(tmp_path)
+    result = run(
+        tmp_path,
+        [("widget_maker.py", "A = 1"), ("widget-maker/static/app.txt", "ok")],
     )
     assert field(result, "model_call_error") is None
     assert field(result, "files") == {
         "widget_maker.py": "A = 1\n",
         "static/app.txt": "ok\n",
     }
-    asset = repo_root / "gen" / "widget-maker" / "static" / "app.txt"
+    asset = tmp_path / "gen" / "widget-maker" / "static" / "app.txt"
     assert asset.is_file()
     assert asset.read_text(encoding="utf-8") == "ok\n"
 
 
-def test_unknown_asset_kind(tmp_path):
-    repo_root = tmp_path / "repo"
-    make_repo(repo_root, kind="nosuchkind")
-    backend = make_backend([
-        ("widget_maker.py", "A = 1\n"),
-        ("static/app.txt", "ok\n"),
-    ])
-    result = generator.generate(
-        make_bundle(4), "claude-sonnet-5", repo_root=repo_root, llm_backend=backend
-    )
+def test_unknown_asset_kind(tmp_path, monkeypatch):
+    monkeypatch.delenv("VAR_CACHE_STORE_URL", raising=False)
+    plant_repo(tmp_path, kind="nosuchkind")
+    result = run(tmp_path, [("widget_maker.py", "A = 1"), ("static/app.txt", "ok")])
     assert field(result, "model_call_error") == {
         "category": "environment",
         "message": "unknown asset kind: nosuchkind",
     }
     assert field(result, "files") == {}
-    assert not (repo_root / "gen" / "widget-maker").exists()
-    assert_nothing_cached(repo_root)
+    assert not (tmp_path / "gen" / "widget-maker").exists()
+    assert_nothing_cached(tmp_path)

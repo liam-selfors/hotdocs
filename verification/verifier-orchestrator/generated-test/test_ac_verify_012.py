@@ -1,6 +1,6 @@
-# hotdocs-criterion: sha256:d032c613d06c2c2f37d5c36def981d48205e4fac1c7f494519ba8e528349ac72
-import importlib.util
-import sys
+# hotdocs-criterion: sha256:7270877e6a5a0a31f4d3c491ed5cffe22031d0717473ed835df7ca623fbe8a7c
+# Test for AC-VERIFY-012 (covers R-VERIFY-003): an llm-judge-kind criterion
+# invokes the injected judge exactly once.
 from pathlib import Path
 
 import verifier_orchestrator
@@ -17,6 +17,37 @@ def write(path, text):
 
 def build_fixture(repo_root):
     comp = repo_root / "specs" / "components" / "widget"
+
+    write(
+        repo_root / "specs" / "product" / "widget-capability.md",
+        "---\n"
+        "id: P-WIDGET\n"
+        "title: Widget capability\n"
+        "status: draft\n"
+        "owners: [team]\n"
+        "---\n"
+        "\n"
+        "# Widget capability\n"
+        "\n"
+        "## Purpose\n"
+        "\n"
+        "Widgets exist.\n"
+        "\n"
+        "## Scope\n"
+        "\n"
+        "- Widgets.\n"
+        "\n"
+        "### CS-WIDGET-001\n"
+        "\n"
+        "Covers: P-WIDGET\n"
+        "\n"
+        "```gherkin\n"
+        "Given a widget_input is 1\n"
+        "When widget_size is invoked with [widget_input]\n"
+        "Then result equals 1\n"
+        "```\n",
+    )
+
     write(
         comp / "component.md",
         "---\n"
@@ -31,11 +62,11 @@ def build_fixture(repo_root):
         "\n"
         "## Purpose\n"
         "\n"
-        "Renders widgets.\n"
+        "Computes the size of a widget.\n"
         "\n"
         "## Scope\n"
         "\n"
-        "- In scope: rendering.\n"
+        "- In scope: widget sizes.\n"
         "\n"
         "## Definitions\n"
         "\n"
@@ -67,10 +98,23 @@ def build_fixture(repo_root):
         "\n"
         "- Initial.\n",
     )
+
     write(
         comp / "requirements" / "R-WIDGET-001.md",
-        "**R-WIDGET-001** — The widget spec MUST be clear and unambiguous.\n",
+        "**R-WIDGET-001** — The widget documentation MUST be clear.\n",
     )
+
+    write(
+        comp / "interface" / "library.md",
+        "# Library\n"
+        "\n"
+        "```\n"
+        "widget_size(x: int) -> int\n"
+        "```\n",
+    )
+
+    write(comp / "constraints.md", "# Constraints\n\nNone.\n")
+
     write(
         comp / "acceptance" / "AC-WIDGET-001.md",
         "# AC-WIDGET-001\n"
@@ -79,57 +123,36 @@ def build_fixture(repo_root):
         "Kind: llm-judge\n"
         "\n"
         "```gherkin\n"
-        "Given the widget spec\n"
+        "Given the widget documentation\n"
         "When a reviewer reads it\n"
-        "Then it is clear and unambiguous\n"
+        "Then it is clear\n"
         "```\n",
     )
-    write(
-        comp / "interface" / "library.md",
-        "# Library\n"
-        "\n"
-        "```\n"
-        "render_widget(name: str) -> str\n"
-        "```\n",
-    )
-    write(comp / "constraints.md", "# Constraints\n\nNone.\n")
-    write(
-        repo_root / "specs" / "product" / "widget.md",
-        "---\n"
-        "id: P-WIDGET\n"
-        "title: Widget capability\n"
-        "status: draft\n"
-        "owners: [team]\n"
-        "---\n"
-        "\n"
-        "# Widget capability\n"
-        "\n"
-        "## Purpose\n"
-        "\n"
-        "Widgets.\n",
-    )
+
     write(repo_root / "specs" / "glossary.md", "# Glossary\n")
+
+    # The component's own (empty) code.
     write(repo_root / "gen" / "widget" / "widget.py", "")
 
-    bundle_literal = {
-        "component_id": "comp-widget",
-        "criterion_id": "AC-WIDGET-001",
-        "covers": "R-WIDGET-001",
-        "criterion_text": "Given the widget spec\nWhen a reviewer reads it\nThen it is clear and unambiguous",
-        "requirement_text": "**R-WIDGET-001** — The widget spec MUST be clear and unambiguous.",
-        "interface": "render_widget(name: str) -> str",
-        "glossary": "# Glossary",
-        "dependency_interfaces": {},
-        "testing": "",
-    }
+    # Fake spec-bundle-assembler: assemble_criterion returns every
+    # CriterionBundle key.
     write(
         repo_root / "gen" / "spec-bundle-assembler" / "spec_bundle_assembler.py",
         "def assemble_criterion(component_id, criterion_id, repo_root):\n"
-        "    bundle = dict(" + repr(bundle_literal) + ")\n"
-        "    bundle['component_id'] = component_id\n"
-        "    bundle['criterion_id'] = criterion_id\n"
-        "    return bundle\n",
+        "    return {\n"
+        "        'component_id': component_id,\n"
+        "        'criterion_id': criterion_id,\n"
+        "        'covers': " + repr("R-WIDGET-001") + ",\n"
+        "        'criterion_text': " + repr("Given the widget documentation") + ",\n"
+        "        'requirement_text': " + repr("The widget documentation MUST be clear.") + ",\n"
+        "        'interface': " + repr("widget_size(x: int) -> int") + ",\n"
+        "        'glossary': " + repr("# Glossary") + ",\n"
+        "        'dependency_interfaces': {},\n"
+        "        'testing': '',\n"
+        "    }\n",
     )
+
+    # Fake test-probe: always ok, no findings.
     write(
         repo_root / "gen" / "test-probe" / "test_probe.py",
         "class _Report:\n"
@@ -149,23 +172,25 @@ def build_fixture(repo_root):
     )
 
 
+def make_counting_judge(log_path):
+    def judge(bundle):
+        with open(log_path, "a", encoding="utf-8") as fh:
+            fh.write("called\n")
+        return {"result": "pass", "rationale": "clear enough"}
+
+    return judge
+
+
 def test_llm_judge_called_exactly_once(tmp_path):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
     build_fixture(repo_root)
 
-    log = tmp_path / "judge_calls.log"
-
-    def judge(bundle):
-        with open(log, "a", encoding="utf-8") as fh:
-            fh.write("called\n")
-        return {"result": "pass", "rationale": "clear enough"}
+    log_path = tmp_path / "judge_calls.log"
+    judge = make_counting_judge(log_path)
 
     report = verifier_orchestrator.verify("comp-widget", repo_root, judge=judge)
 
-    calls = log.read_text(encoding="utf-8").splitlines() if log.exists() else []
-    assert len(calls) == 1, "judge called " + str(len(calls)) + " times"
-
-    criteria = field(report, "criteria")
-    ids = [field(c, "id") for c in criteria]
-    assert "AC-WIDGET-001" in ids
+    assert report is not None
+    calls = log_path.read_text(encoding="utf-8").splitlines() if log_path.exists() else []
+    assert calls == ["called"], "judge was called " + str(len(calls)) + " times"

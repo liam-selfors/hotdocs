@@ -1,27 +1,27 @@
-# hotdocs-criterion: sha256:7d8fa62ffd8db85c3457b7aad2f7373b37b2dd28e1a0196c26d480fc2bdd69a7
+# hotdocs-criterion: sha256:146399e5698d0bd7f86aa0b29f58e086f44835f8f853d638ad51726b54e97d0f
 from pathlib import Path
 
 import spec_scaffolder
 
 
-def _tree(root):
+def _files(root):
     root = Path(root)
-    out = {}
-    for p in sorted(root.rglob("*")):
-        if p.is_file():
-            out[p.relative_to(root).as_posix()] = p.read_bytes()
-    return out
+    return {
+        p.relative_to(root).as_posix(): p.read_bytes()
+        for p in root.rglob("*")
+        if p.is_file()
+    }
 
 
-def _library_md(kind, module):
+def _expected_library(kind, module):
     lines = [
         "# Library",
         "",
         "One module file, `kind_" + module + ".py`, never a package.",
         "",
         "```",
-        'KIND: str           # "' + kind + '"',
-        'GATE_VERSION: str   # "kind-' + kind + '@0.1.0"',
+        "KIND: str           # \"" + kind + "\"",
+        "GATE_VERSION: str   # \"kind-" + kind + "@0.1.0\"",
         "class AssetError(Exception)",
         "layout_errors(asset_file: Path) -> list[str]",
         "surface(asset_file: Path) -> dict",
@@ -39,23 +39,25 @@ def _library_md(kind, module):
     return "".join(line + "\n" for line in lines)
 
 
-def _requirement_md(kind, module, upper):
+def _expected_requirement(kind, module, upper):
     rid = "R-KIND-" + upper + "-001"
     lines = [
         "# " + rid,
         "",
-        "**" + rid + "** \u2014 TODO: `kind_" + module
+        "**" + rid + "** — TODO: `kind_" + module
         + "` MUST carry out `specs/architecture/asset-kind-" + kind
         + ".md`; replace this with one requirement per behaviour the definition states.",
     ]
     return "".join(line + "\n" for line in lines)
 
 
-def _acceptance_md(upper):
+def _expected_acceptance(upper):
+    aid = "AC-KIND-" + upper + "-001"
+    rid = "R-KIND-" + upper + "-001"
     lines = [
-        "# AC-KIND-" + upper + "-001",
+        "# " + aid,
         "",
-        "Covers: R-KIND-" + upper + "-001",
+        "Covers: " + rid,
         "Kind: generated-test",
         "",
         "```gherkin",
@@ -74,19 +76,21 @@ def test_new_kind_matches_new_component_plus_three_files(tmp_path):
     (b / "specs").mkdir(parents=True)
 
     spec_scaffolder.new_kind(a, "yaml", title="YAML", realizes=["P-DATA"])
-    spec_scaffolder.new_component(b, "kind-yaml", title="Kind YAML", realizes=["P-DATA"])
+    spec_scaffolder.new_component(
+        b, "kind-yaml", title="Kind YAML", realizes=["P-DATA"]
+    )
 
     a_dir = a / "specs" / "components" / "kind-yaml"
     b_dir = b / "specs" / "components" / "kind-yaml"
     assert a_dir.is_dir()
     assert b_dir.is_dir()
 
-    a_files = _tree(a_dir)
-    b_files = _tree(b_dir)
+    a_files = _files(a_dir)
+    b_files = _files(b_dir)
 
-    for rel, data in b_files.items():
-        assert rel in a_files, "missing in new_kind output: " + rel
-        assert a_files[rel] == data, "bytes differ: " + rel
+    for rel, content in b_files.items():
+        assert rel in a_files, rel
+        assert a_files[rel] == content, rel
 
     extra = set(a_files) - set(b_files)
     assert extra == {
@@ -95,22 +99,23 @@ def test_new_kind_matches_new_component_plus_three_files(tmp_path):
         "acceptance/AC-KIND-YAML-001.md",
     }
 
-    library = a_files["interface/library.md"].decode("utf-8")
-    assert library == _library_md("yaml", "yaml")
-    lib_lines = library.splitlines()
+    library = a_files["interface/library.md"]
+    requirement = a_files["requirements/R-KIND-YAML-001.md"]
+    acceptance = a_files["acceptance/AC-KIND-YAML-001.md"]
+
+    assert library == _expected_library("yaml", "yaml").encode("utf-8")
+    assert requirement == _expected_requirement("yaml", "yaml", "YAML").encode("utf-8")
+    assert acceptance == _expected_acceptance("YAML").encode("utf-8")
+
+    lib_lines = library.decode("utf-8").splitlines()
     assert "One module file, `kind_yaml.py`, never a package." in lib_lines
-    assert 'GATE_VERSION: str   # "kind-yaml@0.1.0"' in lib_lines
+    assert "GATE_VERSION: str   # \"kind-yaml@0.1.0\"" in lib_lines
     assert (
         "Implements: `specs/architecture/asset-kinds.md`, `specs/architecture/asset-kind-yaml.md`"
         in lib_lines
     )
 
-    requirement = a_files["requirements/R-KIND-YAML-001.md"].decode("utf-8")
-    assert requirement == _requirement_md("yaml", "yaml", "YAML")
-
-    acceptance = a_files["acceptance/AC-KIND-YAML-001.md"].decode("utf-8")
-    assert acceptance == _acceptance_md("YAML")
-    ac_lines = acceptance.splitlines()
+    ac_lines = acceptance.decode("utf-8").splitlines()
     assert ac_lines[2] == "Covers: R-KIND-YAML-001"
     assert ac_lines[3] == "Kind: generated-test"
 
@@ -122,15 +127,13 @@ def test_new_kind_defaults(tmp_path):
     spec_scaffolder.new_kind(repo_root, "sql")
 
     comp_dir = repo_root / "specs" / "components" / "kind-sql"
-    component_md = (comp_dir / "component.md").read_text(encoding="utf-8")
-    lines = component_md.splitlines()
-    assert "id: comp-kind-sql" in lines
-    assert "title: Kind sql" in lines
-    assert "owners: [unassigned]" in lines
-    assert "realizes: []" in lines
+    component_lines = (comp_dir / "component.md").read_text(encoding="utf-8").splitlines()
+    assert "id: comp-kind-sql" in component_lines
+    assert "title: Kind sql" in component_lines
+    assert "owners: [unassigned]" in component_lines
+    assert "realizes: []" in component_lines
 
-    req_dir = comp_dir / "requirements"
-    req_files = sorted(p.name for p in req_dir.iterdir() if p.is_file() and p.name != ".gitkeep")
-    assert req_files == ["R-KIND-SQL-001.md"]
-    req_text = (req_dir / "R-KIND-SQL-001.md").read_text(encoding="utf-8")
-    assert req_text.splitlines()[0] == "# R-KIND-SQL-001"
+    req = comp_dir / "requirements" / "R-KIND-SQL-001.md"
+    assert req.is_file()
+    first_line = req.read_text(encoding="utf-8").splitlines()[0]
+    assert first_line == "# R-KIND-SQL-001"

@@ -35,6 +35,13 @@ Then it raises FileExistsError, and neither specs/architecture/ nor
 
 Given a repo_root with a specs/ directory
 When new_kind is called with each of "python", "Data_Schema", "9x",
-  "sql-", "a--b" and "data-schema"
+  "sql-" and "a--b"
 Then each raises ValueError, and specs/ holds nothing new afterwards
+
+Given a repo_root with a specs/ directory
+When new_kind(repo_root, "data-schema") is called
+Then it returns [specs/architecture/asset-kind-data-schema.md,
+  specs/components/kind-data-schema, specs/decisions/D1.md], and
+  specs/components/kind-data-schema/interface/library.md names the module
+  file kind_data_schema.py
 ```

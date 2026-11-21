@@ -1,39 +1,61 @@
-# hotdocs-criterion: sha256:56bfa016bcd5ee5527a1afb7dc9c2c7ddfdc7d9da7d48a2f30a42f7bac568d9d
+# hotdocs-criterion: sha256:e72f0eabeba9a2bdef90727187a5541a18a06627096290ff70a4c73e527cd9ed
 import re
+import uuid
 from pathlib import Path
 
 import generator
 
 
-PYTHON_ADAPTER = (
+FAKE_PYTHON_ADAPTER = (
     "from pathlib import Path\n"
     "\n"
-    "KIND = \"python\"\n"
+    "KIND = " + repr("python") + "\n"
     "\n"
     "\n"
     "def layout_errors(code_dir):\n"
-    "    return [\"bad.py:1: SyntaxError: x\"] if (Path(code_dir) / \"bad.py\").exists() else []\n"
+    "    return [" + repr("bad.py:1: SyntaxError: x") + "] if (Path(code_dir) / " + repr("bad.py") + ").exists() else []\n"
     "\n"
     "\n"
     "def provision(repo_root):\n"
-    "    return {\"ok\": True, \"reason\": \"\", \"versions\": {\"python\": \"3.12\"}, "
-    "\"lockfile_sha256\": None, \"interpreter\": \"/fake/python\"}\n"
+    "    return {" + repr("ok") + ": True, " + repr("reason") + ": " + repr("") + ", "
+    + repr("versions") + ": {" + repr("python") + ": " + repr("3.12") + "}, "
+    + repr("lockfile_sha256") + ": None, " + repr("interpreter") + ": " + repr("/fake/python") + "}\n"
+)
+
+COMPONENT_MD = (
+    "---\n"
+    "id: comp-widget-maker\n"
+    "title: Widget Maker\n"
+    "status: draft\n"
+    "owners: [pipeline-team]\n"
+    "depends_on: []\n"
+    "sealed: false\n"
+    "---\n"
+    "\n"
+    "# Widget Maker\n"
 )
 
 
-def _plant_python_adapter(repo_root):
-    adapter_dir = Path(repo_root) / "gen" / "kind-python"
-    adapter_dir.mkdir(parents=True, exist_ok=True)
-    (adapter_dir / "kind_python.py").write_text(PYTHON_ADAPTER, encoding="utf-8")
+def field(value, name):
+    return value[name] if isinstance(value, dict) else getattr(value, name)
+
+
+def _plant_repo(repo_root):
+    adapter_dir = repo_root / "gen" / "kind-python"
+    adapter_dir.mkdir(parents=True)
+    (adapter_dir / "kind_python.py").write_text(FAKE_PYTHON_ADAPTER, encoding="utf-8")
+    comp_dir = repo_root / "specs" / "components" / "widget-maker"
+    comp_dir.mkdir(parents=True)
+    (comp_dir / "component.md").write_text(COMPONENT_MD, encoding="utf-8")
 
 
 def _bundle():
     return {
         "component_id": "comp-widget-maker",
-        "spec_bundle_hash": "sha256:" + "ab" * 32,
+        "spec_bundle_hash": "sha256:" + uuid.uuid4().hex + uuid.uuid4().hex,
         "spec": "# Widget Maker\n\nMakes widgets.",
         "interface": "make_widget() -> str",
-        "constraints": "None.",
+        "constraints": "No network.",
         "dependency_interfaces": {},
         "dependency_context": {},
         "dependency_usage": {},
@@ -43,11 +65,11 @@ def _bundle():
     }
 
 
-def test_prompt_instructs_nothing_more_and_mentions_mutation_testing(tmp_path, monkeypatch):
+def test_ac_gen_022_prompt_says_nothing_more_and_mutation_testing(tmp_path, monkeypatch):
     monkeypatch.delenv("VAR_CACHE_STORE_URL", raising=False)
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
-    _plant_python_adapter(repo_root)
+    _plant_repo(repo_root)
 
     prompts = []
 
@@ -57,20 +79,27 @@ def test_prompt_instructs_nothing_more_and_mentions_mutation_testing(tmp_path, m
         text = (
             "-----BEGIN FILE " + nonce + ": widget_maker.py-----\n"
             "def make_widget():\n"
-            "    return \"widget\"\n"
+            "    return 'widget'\n"
             "-----END FILE " + nonce + "-----\n"
             "-----END REPLY " + nonce + "-----\n"
         )
-        return {"text": text, "model": model, "backend": "mock", "model_call_error": None}
+        return {
+            "text": text,
+            "model": model,
+            "backend": "mock",
+            "model_call_error": None,
+        }
 
-    generator.generate(
+    result = generator.generate(
         _bundle(),
-        "mock-model",
+        "mock:model-" + uuid.uuid4().hex,
+        None,
         repo_root=repo_root,
         llm_backend=mock_backend,
     )
 
-    assert len(prompts) >= 1
+    assert field(result, "cache_hit") is False
+    assert len(prompts) == 1
     prompt = prompts[0]
     assert "nothing more" in prompt
     assert "mutation testing" in prompt

@@ -1,5 +1,5 @@
 {
-  "spec_bundle_hash": "sha256:1d25ad38862706f92a558a6b7abadf5a2fe2086c265b4da33128dc6b5f25a3c0",
+  "spec_bundle_hash": "sha256:9447afe880d7a6155ceeddfa9b5db6c095d6a0c2a01c266fd4b515be4005f002",
   "model_pin": "claude-opus-5-5",
   "prompt_version": "v12",
   "retry_feedback": null,
@@ -7,8 +7,8 @@
     "mode": "single",
     "generator_version": "generator@3.2.0+v12",
     "transcript_sha256": null,
-    "turns": 1,
-    "tool_calls": 0,
+    "turns": null,
+    "tool_calls": null,
     "isolation": null
   },
   "attempts": 1,
@@ -23,7 +23,7 @@
     "generator": "generator@3.2.0+v12"
   },
   "provenance_hit": false,
-  "generated_at": "2026-11-20T22:46:38Z",
+  "generated_at": "2026-11-21T17:18:47Z",
   "verification_run_id": "docs-site-renderer-attempt-1",
   "verification_report": {
     "component_id": "comp-docs-site-renderer",
@@ -107,14 +107,14 @@
       "R-DOCS-009": "pass"
     },
     "interface_drift": false,
-    "mutation_score": 0.9272727272727272,
+    "mutation_score": 0.868421052631579,
     "mutation_error": null,
     "assets": [
       {
         "kind": "python",
         "path": ".",
         "definition_sha256": "sha256:53cb9d111b695cf184eb6fdc9c34e8cee514bab938f634dc993257e0163eb8b1",
-        "adapter_sha256": "sha256:fd6ddf7d96d53f9f80f42d158c5f580b7021bc47482b5f347e132a7778ccaecc",
+        "adapter_sha256": "sha256:801043604808d3099fb5da7f57427ec21eecae06ae5a6adee2854de955e1db13",
         "versions": {
           "python": "3.14.6",
           "packages": "sha256:fe2bf6523d4c9a1d7aad652c8447381630e076eb89d6267771e208c003c2d83b"
@@ -125,7 +125,7 @@
         "kind": "javascript",
         "path": "static/app.js",
         "definition_sha256": "sha256:d2f09824acce8d89c52a8aca03208100bf2394ead1badbcf74f9579121e57e24",
-        "adapter_sha256": "sha256:c09f8f18021cda03fee69e8d32d755747839181a3503bf65d05ed968ec7dd11b",
+        "adapter_sha256": "sha256:0dcef0425f8f30ed8a6c3a848b365a03fc45655de4bc3b2c6dd79cda3801bd37",
         "versions": {
           "node": "26.0.0"
         },
@@ -153,6 +153,11 @@
     "flagged": false,
     "matches": [],
     "allowed": [
+      {
+        "rule_id": "Hex High Entropy String",
+        "file": "gen/review-packet-builder/review_packet_builder.py",
+        "line": 20
+      },
       {
         "rule_id": "AWS Access Key",
         "file": "specs/components/secret-scanner/acceptance/AC-SECRET-001.md",
@@ -237,172 +242,132 @@
         "rule_id": "AWS Access Key",
         "file": "specs/components/secret-scanner/acceptance/AC-SECRET-018.md",
         "line": 7
+      },
+      {
+        "rule_id": "AWS Access Key",
+        "file": "verification/corpus-graph.json",
+        "line": 10359
+      },
+      {
+        "rule_id": "AWS Access Key",
+        "file": "verification/corpus-graph.json",
+        "line": 10368
+      },
+      {
+        "rule_id": "Base64 High Entropy String",
+        "file": "verification/corpus-graph.json",
+        "line": 10370
+      },
+      {
+        "rule_id": "Hex High Entropy String",
+        "file": "verification/provenance-checker/generated-test/test_ac_provcheck_001.py",
+        "line": 22
+      },
+      {
+        "rule_id": "Hex High Entropy String",
+        "file": "verification/provenance-checker/generated-test/test_ac_provcheck_004.py",
+        "line": 14
+      },
+      {
+        "rule_id": "Hex High Entropy String",
+        "file": "verification/provenance-tracker/generated-test/test_ac_track_013.py",
+        "line": 9
+      },
+      {
+        "rule_id": "Hex High Entropy String",
+        "file": "verification/provenance-writer/generated-test/test_ac_prov_018.py",
+        "line": 22
+      },
+      {
+        "rule_id": "Hex High Entropy String",
+        "file": "verification/provenance-writer/generated-test/test_ac_prov_019.py",
+        "line": 11
+      },
+      {
+        "rule_id": "Hex High Entropy String",
+        "file": "verification/provenance-writer/generated-test/test_ac_prov_020.py",
+        "line": 98
+      },
+      {
+        "rule_id": "Hex High Entropy String",
+        "file": "verification/provenance-writer/generated-test/test_ac_prov_020.py",
+        "line": 116
+      },
+      {
+        "rule_id": "AWS Access Key",
+        "file": "verification/secret-scanner/generated-test/test_ac_secret_001.py",
+        "line": 10
+      },
+      {
+        "rule_id": "Hex High Entropy String",
+        "file": "verification/secret-scanner/generated-test/test_ac_secret_004b.py",
+        "line": 8
+      },
+      {
+        "rule_id": "AWS Access Key",
+        "file": "verification/secret-scanner/generated-test/test_ac_secret_008.py",
+        "line": 104
+      },
+      {
+        "rule_id": "AWS Access Key",
+        "file": "verification/secret-scanner/generated-test/test_ac_secret_008.py",
+        "line": 105
+      },
+      {
+        "rule_id": "AWS Access Key",
+        "file": "verification/secret-scanner/generated-test/test_ac_secret_009.py",
+        "line": 166
+      },
+      {
+        "rule_id": "Base64 High Entropy String",
+        "file": "verification/secret-scanner/generated-test/test_ac_secret_010.py",
+        "line": 10
+      },
+      {
+        "rule_id": "Hex High Entropy String",
+        "file": "verification/secret-scanner/generated-test/test_ac_secret_010.py",
+        "line": 11
+      },
+      {
+        "rule_id": "AWS Access Key",
+        "file": "verification/secret-scanner/generated-test/test_ac_secret_014.py",
+        "line": 12
+      },
+      {
+        "rule_id": "Hex High Entropy String",
+        "file": "verification/secret-scanner/generated-test/test_ac_secret_014.py",
+        "line": 13
+      },
+      {
+        "rule_id": "AWS Access Key",
+        "file": "verification/secret-scanner/generated-test/test_ac_secret_015.py",
+        "line": 12
+      },
+      {
+        "rule_id": "AWS Access Key",
+        "file": "verification/secret-scanner/generated-test/test_ac_secret_015.py",
+        "line": 13
+      },
+      {
+        "rule_id": "AWS Access Key",
+        "file": "verification/secret-scanner/generated-test/test_ac_secret_016.py",
+        "line": 12
+      },
+      {
+        "rule_id": "AWS Access Key",
+        "file": "verification/secret-scanner/generated-test/test_ac_secret_016.py",
+        "line": 13
+      },
+      {
+        "rule_id": "Hex High Entropy String",
+        "file": "verification/secret-scanner/generated-test/test_ac_secret_017.py",
+        "line": 13
       }
     ],
     "unused_allowlist_entries": [
       {
-        "file": "gen/review-packet-builder/review_packet_builder.py",
-        "type": "Hex High Entropy String"
-      },
-      {
-        "file": "verification/corpus-graph.json",
-        "type": "AWS Access Key"
-      },
-      {
-        "file": "verification/corpus-graph.json",
-        "type": "AWS Access Key"
-      },
-      {
-        "file": "verification/corpus-graph.json",
-        "type": "Base64 High Entropy String"
-      },
-      {
-        "file": "verification/generator/generated-test/test_ac_gen_018.py",
-        "type": "Hex High Entropy String"
-      },
-      {
-        "file": "verification/graph-query-engine/generated-test/test_ac_gqe_008.py",
-        "type": "Hex High Entropy String"
-      },
-      {
-        "file": "verification/provenance-checker/generated-test/test_ac_provcheck_003.py",
-        "type": "Hex High Entropy String"
-      },
-      {
-        "file": "verification/provenance-checker/generated-test/test_ac_provcheck_013.py",
-        "type": "Hex High Entropy String"
-      },
-      {
-        "file": "verification/provenance-checker/generated-test/test_ac_provcheck_013.py",
-        "type": "Hex High Entropy String"
-      },
-      {
-        "file": "verification/provenance-writer/generated-test/test_ac_prov_017.py",
-        "type": "Hex High Entropy String"
-      },
-      {
-        "file": "verification/provenance-writer/generated-test/test_ac_prov_018.py",
-        "type": "Hex High Entropy String"
-      },
-      {
-        "file": "verification/provenance-writer/generated-test/test_ac_prov_019.py",
-        "type": "Hex High Entropy String"
-      },
-      {
         "file": "verification/provenance-writer/generated-test/test_ac_prov_020.py",
         "type": "Hex High Entropy String"
-      },
-      {
-        "file": "verification/provenance-writer/generated-test/test_ac_prov_021.py",
-        "type": "Hex High Entropy String"
-      },
-      {
-        "file": "verification/provenance-writer/generated-test/test_ac_prov_021.py",
-        "type": "Hex High Entropy String"
-      },
-      {
-        "file": "verification/secret-scanner/generated-test/test_ac_secret_001.py",
-        "type": "AWS Access Key"
-      },
-      {
-        "file": "verification/secret-scanner/generated-test/test_ac_secret_002.py",
-        "type": "AWS Access Key"
-      },
-      {
-        "file": "verification/secret-scanner/generated-test/test_ac_secret_004.py",
-        "type": "AWS Access Key"
-      },
-      {
-        "file": "verification/secret-scanner/generated-test/test_ac_secret_004b.py",
-        "type": "Hex High Entropy String"
-      },
-      {
-        "file": "verification/secret-scanner/generated-test/test_ac_secret_007.py",
-        "type": "AWS Access Key"
-      },
-      {
-        "file": "verification/secret-scanner/generated-test/test_ac_secret_008.py",
-        "type": "AWS Access Key"
-      },
-      {
-        "file": "verification/secret-scanner/generated-test/test_ac_secret_008.py",
-        "type": "AWS Access Key"
-      },
-      {
-        "file": "verification/secret-scanner/generated-test/test_ac_secret_008.py",
-        "type": "AWS Access Key"
-      },
-      {
-        "file": "verification/secret-scanner/generated-test/test_ac_secret_009.py",
-        "type": "AWS Access Key"
-      },
-      {
-        "file": "verification/secret-scanner/generated-test/test_ac_secret_010.py",
-        "type": "Base64 High Entropy String"
-      },
-      {
-        "file": "verification/secret-scanner/generated-test/test_ac_secret_010.py",
-        "type": "Hex High Entropy String"
-      },
-      {
-        "file": "verification/secret-scanner/generated-test/test_ac_secret_011.py",
-        "type": "AWS Access Key"
-      },
-      {
-        "file": "verification/secret-scanner/generated-test/test_ac_secret_012.py",
-        "type": "AWS Access Key"
-      },
-      {
-        "file": "verification/secret-scanner/generated-test/test_ac_secret_013.py",
-        "type": "AWS Access Key"
-      },
-      {
-        "file": "verification/secret-scanner/generated-test/test_ac_secret_014.py",
-        "type": "AWS Access Key"
-      },
-      {
-        "file": "verification/secret-scanner/generated-test/test_ac_secret_014.py",
-        "type": "AWS Access Key"
-      },
-      {
-        "file": "verification/secret-scanner/generated-test/test_ac_secret_014.py",
-        "type": "Hex High Entropy String"
-      },
-      {
-        "file": "verification/secret-scanner/generated-test/test_ac_secret_015.py",
-        "type": "AWS Access Key"
-      },
-      {
-        "file": "verification/secret-scanner/generated-test/test_ac_secret_015.py",
-        "type": "AWS Access Key"
-      },
-      {
-        "file": "verification/secret-scanner/generated-test/test_ac_secret_016.py",
-        "type": "AWS Access Key"
-      },
-      {
-        "file": "verification/secret-scanner/generated-test/test_ac_secret_016.py",
-        "type": "AWS Access Key"
-      },
-      {
-        "file": "verification/secret-scanner/generated-test/test_ac_secret_017.py",
-        "type": "AWS Access Key"
-      },
-      {
-        "file": "verification/secret-scanner/generated-test/test_ac_secret_017.py",
-        "type": "AWS Access Key"
-      },
-      {
-        "file": "verification/secret-scanner/generated-test/test_ac_secret_017.py",
-        "type": "Hex High Entropy String"
-      },
-      {
-        "file": "verification/secret-scanner/generated-test/test_ac_secret_018.py",
-        "type": "AWS Access Key"
-      },
-      {
-        "file": "verification/test-author/generated-test/test_ac_author_008.py",
-        "type": "Base64 High Entropy String"
       }
     ],
     "notified": false,
@@ -414,7 +379,7 @@
       "kind": "python",
       "path": ".",
       "definition_sha256": "sha256:53cb9d111b695cf184eb6fdc9c34e8cee514bab938f634dc993257e0163eb8b1",
-      "adapter_sha256": "sha256:fd6ddf7d96d53f9f80f42d158c5f580b7021bc47482b5f347e132a7778ccaecc",
+      "adapter_sha256": "sha256:801043604808d3099fb5da7f57427ec21eecae06ae5a6adee2854de955e1db13",
       "versions": {
         "python": "3.14.6",
         "packages": "sha256:fe2bf6523d4c9a1d7aad652c8447381630e076eb89d6267771e208c003c2d83b"
@@ -425,7 +390,7 @@
       "kind": "javascript",
       "path": "static/app.js",
       "definition_sha256": "sha256:d2f09824acce8d89c52a8aca03208100bf2394ead1badbcf74f9579121e57e24",
-      "adapter_sha256": "sha256:c09f8f18021cda03fee69e8d32d755747839181a3503bf65d05ed968ec7dd11b",
+      "adapter_sha256": "sha256:0dcef0425f8f30ed8a6c3a848b365a03fc45655de4bc3b2c6dd79cda3801bd37",
       "versions": {
         "node": "26.0.0"
       },

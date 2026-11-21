@@ -1,6 +1,4 @@
-# hotdocs-criterion: sha256:cfddad9c83cacfe5114820a157d8771dfadb4379ac46f5b761667dab7ba0adb6
-"""AC-LINT-040 (covers R-LINT-034): asset-kind findings for a component's `assets`."""
-
+# hotdocs-criterion: sha256:d7bc8511809a52933a000629a593260fc026f74c34781560b5fe8d112904bfb9
 from pathlib import Path
 
 import spec_linter
@@ -10,157 +8,277 @@ def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def _write(path, text):
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text, encoding="utf-8")
+PRODUCT_FOO = """---
+id: P-FOO
+title: Foo works
+status: draft
+owners: [team-a]
+---
+
+# Foo works
+
+## Purpose
+
+A foo can be made.
+
+### CS-FOO-001
+Covers: P-FOO
+Kind: generated-test
+
+```gherkin
+Given nothing
+When a foo is made
+Then it exists
+```
+"""
+
+FOO_COMPONENT = """---
+id: comp-foo
+title: Foo
+status: draft
+owners: [team-a]
+depends_on: []
+realizes: [P-FOO]
+sealed: false
+---
+
+# Foo
+
+## Purpose
+
+Makes a foo.
+
+## Scope
+
+**In scope:** making a foo. **Out of scope:** everything else.
+
+## Definitions
+
+No deltas from `specs/glossary.md`.
+
+## Behavior
+
+See `requirements/`.
+
+## Interfaces
+
+See `interface/`.
+
+## Data
+
+None.
+
+## Acceptance criteria
+
+See `acceptance/`.
+
+## Non-functional constraints
+
+See `constraints.md`.
+
+## Open questions
+
+None.
+
+## Change log
+
+- Initial draft.
+"""
+
+FOO_REQ = """# R-FOO-001
+
+**R-FOO-001** — `make_foo()` MUST return the string `"foo"`.
+"""
+
+FOO_LIB = """# Library
+
+One module file, `foo.py`.
+
+```
+make_foo() -> str
+```
+"""
+
+FOO_AC = """# AC-FOO-001
+
+Covers: R-FOO-001
+Kind: generated-test
+
+```gherkin
+Given nothing
+When make_foo() is called
+Then the result is "foo"
+```
+"""
+
+FOO_CONSTRAINTS = """# Foo — Non-Functional Constraints
+
+- **Pure.** No I/O.
+"""
+
+WEB_FRONTMATTER_LINES = [
+    "---",
+    "id: comp-web",
+    "title: Web",
+    "status: draft",
+    "owners: [team-a]",
+    "depends_on: []",
+    "assets: [nosuchkind-x9:a.js, demo:b.js]",
+    "sealed: true",
+    "source_path: legacy/web/",
+    "---",
+]
+
+WEB_BODY = """
+# Web
+
+## Purpose
+
+Serves a web page.
+
+## Scope
+
+**In scope:** serving a page. **Out of scope:** everything else.
+
+## Definitions
+
+No deltas from `specs/glossary.md`.
+
+## Behavior
+
+See `requirements/`.
+
+## Interfaces
+
+See `interface/`.
+
+## Data
+
+None.
+
+## Acceptance criteria
+
+See `acceptance/`.
+
+## Non-functional constraints
+
+See `constraints.md`.
+
+## Open questions
+
+None.
+
+## Change log
+
+- Initial draft.
+"""
+
+WEB_REQ = """# R-WEB-001
+
+**R-WEB-001** — `serve()` MUST return the string `"page"`.
+"""
+
+WEB_AC = """# AC-WEB-001
+
+Covers: R-WEB-001
+Kind: generated-test
+
+```gherkin
+Given nothing
+When serve() is called
+Then the result is "page"
+```
+"""
+
+WEB_CONSTRAINTS = """# Web — Non-Functional Constraints
+
+- **Pure.** No I/O.
+"""
+
+DEMO_KIND = """---
+id: arch-asset-kind-demo
+title: Asset Kind demo
+status: draft
+owners: [team-a]
+---
+
+# Asset Kind demo
+
+## Layout
+
+One text file.
+
+## Environment
+
+No programs needed.
+
+## Running criteria
+
+The runner takes an entry point and arguments and returns a value.
+
+## Strength check
+## Test author guidance
+
+Call asset_runner with the declared path.
+
+## Generator guidance
+
+Write plain text.
+"""
 
 
-def _build_corpus(repo_root):
-    specs = repo_root / "specs"
+def write(root, rel, text):
+    p = root / rel
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(text, encoding="utf-8")
 
-    _write(
-        specs / "glossary.md",
-        "# Glossary\n"
-        "\n"
-        "- **Widget** — a thing used in tests.\n",
-    )
 
-    component_md = (
-        "---\n"
-        "id: comp-web\n"
-        "title: Web\n"
-        "status: draft\n"
-        "owners: [test-team]\n"
-        "depends_on: []\n"
-        "sealed: true\n"
-        "source_path: legacy/web/\n"
-        "assets: [nosuchkind-x9:a.js, demo:b.js]\n"
-        "---\n"
-        "\n"
-        "# Web\n"
-        "\n"
-        "## Purpose\n"
-        "\n"
-        "Serves a small web page for tests.\n"
-        "\n"
-        "## Scope\n"
-        "\n"
-        "- In scope: the page.\n"
-        "- Out of scope: everything else.\n"
-        "\n"
-        "## Definitions\n"
-        "\n"
-        "None.\n"
-        "\n"
-        "## Behavior\n"
-        "\n"
-        "See `requirements/`.\n"
-        "\n"
-        "## Interfaces\n"
-        "\n"
-        "See `interface/`.\n"
-        "\n"
-        "## Data\n"
-        "\n"
-        "See `interface/data/`.\n"
-        "\n"
-        "## Acceptance criteria\n"
-        "\n"
-        "See `acceptance/`.\n"
-        "\n"
-        "## Non-functional constraints\n"
-        "\n"
-        "See `constraints.md`.\n"
-        "\n"
-        "## Open questions\n"
-        "\n"
-        "## Change log\n"
-        "\n"
-        "- Initial draft.\n"
-    )
-    _write(specs / "components" / "web" / "component.md", component_md)
+def build_corpus(root):
+    write(root, "specs/product/foo.md", PRODUCT_FOO)
+    write(root, "specs/components/foo/component.md", FOO_COMPONENT)
+    write(root, "specs/components/foo/requirements/R-FOO-001.md", FOO_REQ)
+    write(root, "specs/components/foo/interface/library.md", FOO_LIB)
+    write(root, "specs/components/foo/acceptance/AC-FOO-001.md", FOO_AC)
+    write(root, "specs/components/foo/constraints.md", FOO_CONSTRAINTS)
 
-    _write(
-        specs / "components" / "web" / "requirements" / "R-WEB-001.md",
-        "# R-WEB-001\n"
-        "\n"
-        "**R-WEB-001** — The page MUST render a greeting.\n",
-    )
-    _write(
-        specs / "components" / "web" / "acceptance" / "AC-WEB-001.md",
-        "# AC-WEB-001\n"
-        "\n"
-        "Covers: R-WEB-001\n"
-        "Kind: generated-test\n"
-        "\n"
-        "The page renders a greeting.\n",
-    )
-    _write(
-        specs / "components" / "web" / "constraints.md",
-        "# Constraints\n"
-        "\n"
-        "- None beyond the defaults.\n",
-    )
+    web_text = "\n".join(WEB_FRONTMATTER_LINES) + "\n" + WEB_BODY
+    write(root, "specs/components/web/component.md", web_text)
+    write(root, "specs/components/web/requirements/R-WEB-001.md", WEB_REQ)
+    write(root, "specs/components/web/acceptance/AC-WEB-001.md", WEB_AC)
+    write(root, "specs/components/web/constraints.md", WEB_CONSTRAINTS)
 
-    # Seven sections except: "## Surface" absent, and "## Strength check"
-    # followed directly by "## Test author guidance" (empty section).
-    definition = (
-        "---\n"
-        "id: arch-asset-kind-demo\n"
-        "title: Asset Kind demo\n"
-        "status: draft\n"
-        "owners: [test-team]\n"
-        "depends_on: []\n"
-        "---\n"
-        "\n"
-        "# Asset kind demo\n"
-        "\n"
-        "## Layout\n"
-        "\n"
-        "One demo file at path.\n"
-        "\n"
-        "## Environment\n"
-        "\n"
-        "No programs needed.\n"
-        "\n"
-        "## Running criteria\n"
-        "\n"
-        "asset_runner takes an entry point and arguments.\n"
-        "\n"
-        "## Strength check\n"
-        "## Test author guidance\n"
-        "\n"
-        "Call asset_runner from tests.\n"
-        "\n"
-        "## Generator guidance\n"
-        "\n"
-        "Write a demo file.\n"
-    )
-    _write(specs / "architecture" / "asset-kind-demo.md", definition)
+    write(root, "specs/architecture/asset-kind-demo.md", DEMO_KIND)
+
+    assets_line = WEB_FRONTMATTER_LINES.index(
+        "assets: [nosuchkind-x9:a.js, demo:b.js]"
+    ) + 1
+    return assets_line
 
 
 def test_ac_lint_040_asset_kind_findings_in_order(tmp_path):
-    repo_root = Path(tmp_path) / "repo"
-    repo_root.mkdir()
-    _build_corpus(repo_root)
+    repo_root = Path(tmp_path)
+    assets_line = build_corpus(repo_root)
 
     report = spec_linter.lint(None, repo_root)
+    findings = field(report, "findings")
 
     target_file = "specs/components/web/component.md"
-    findings = [
+    relevant = [
         f
-        for f in field(report, "findings")
+        for f in findings
         if field(f, "rule_id") == "R-LINT-034"
+        and field(f, "severity") == "fail"
         and str(field(f, "file")).replace("\\", "/") == target_file
     ]
 
-    for f in findings:
-        assert field(f, "severity") == "fail"
-
-    messages = [field(f, "message") for f in findings]
-    assert messages == [
-        "asset kind 'nosuchkind-x9' has no definition",
+    messages = [field(f, "message") for f in relevant]
+    expected = [
+        "asset kind 'nosuchkind-x9' has no definition; run hotdocs kind new nosuchkind-x9",
         "asset kind 'demo' definition lacks section 'Surface'",
         "asset kind 'demo' definition has empty section 'Strength check'",
         "asset kind 'demo' is defined in this repository; depends_on must list comp-kind-demo",
     ]
+    assert messages == expected
+
+    for f in relevant:
+        assert field(f, "line") == assets_line

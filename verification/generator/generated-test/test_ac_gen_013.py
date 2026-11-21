@@ -1,11 +1,11 @@
-# hotdocs-criterion: sha256:301376185f8146df8bf1077a40119783dcfca15090d678d2ba7211350cedb1fd
+# hotdocs-criterion: sha256:48d6f74423b04914b9b8bd0f8a7adde6ef2b1ff43146ff0073791f1e58a202ec
 import re
 from pathlib import Path
 
 import generator
 
 
-FAKE_PYTHON_ADAPTER = (
+PYTHON_ADAPTER = (
     "from pathlib import Path\n"
     "\n"
     "KIND = \"python\"\n"
@@ -16,8 +16,7 @@ FAKE_PYTHON_ADAPTER = (
     "\n"
     "\n"
     "def provision(repo_root):\n"
-    "    return {\"ok\": True, \"reason\": \"\", \"versions\": {\"python\": \"3.12\"}, "
-    "\"lockfile_sha256\": None, \"interpreter\": \"/fake/python\"}\n"
+    "    return {\"ok\": True, \"reason\": \"\", \"versions\": {\"python\": \"3.12\"}, \"lockfile_sha256\": None, \"interpreter\": \"/fake/python\"}\n"
 )
 
 
@@ -32,33 +31,30 @@ def section(prompt, heading):
     return "\n".join(lines[start:end]).rstrip("\n")
 
 
-def _plant_python_adapter(repo_root):
-    adapter_dir = repo_root / "gen" / "kind-python"
-    adapter_dir.mkdir(parents=True, exist_ok=True)
-    (adapter_dir / "kind_python.py").write_text(FAKE_PYTHON_ADAPTER, encoding="utf-8")
-
-
-def _cold_bundle():
+def _bundle():
     return {
         "component_id": "comp-foo",
-        "spec_bundle_hash": "sha256:" + "a" * 64,
-        "spec": "Foo component body. The foo function returns a greeting.",
-        "interface": "foo() -> str",
-        "constraints": "Pure Python only.",
+        "spec_bundle_hash": "sha256:" + "ab" * 32,
+        "spec": "Foo component spec body. It provides a constant X.",
+        "interface": "Library: X: int",
+        "constraints": "No network access.",
         "dependency_interfaces": {},
         "dependency_context": {},
         "dependency_usage": {},
         "vars": {},
-        "glossary": "Foo: a greeting producer.",
+        "glossary": "- **Foo** - a thing.",
         "hint_code": None,
     }
 
 
-def test_retry_feedback_is_distinct_bare_id_section_and_echoed(tmp_path, monkeypatch):
+def test_ac_gen_013_retry_feedback_is_bare_ids_in_own_section(tmp_path, monkeypatch):
     monkeypatch.delenv("VAR_CACHE_STORE_URL", raising=False)
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    _plant_python_adapter(repo_root)
+    monkeypatch.chdir(tmp_path)
+    repo_root = tmp_path
+
+    adapter = repo_root / "gen" / "kind-python" / "kind_python.py"
+    adapter.parent.mkdir(parents=True, exist_ok=True)
+    adapter.write_text(PYTHON_ADAPTER, encoding="utf-8")
 
     recorded = []
 
@@ -67,67 +63,52 @@ def test_retry_feedback_is_distinct_bare_id_section_and_echoed(tmp_path, monkeyp
         nonce = re.search(r"-----BEGIN FILE ([0-9a-f]{32}):", prompt).group(1)
         text = (
             "-----BEGIN FILE " + nonce + ": foo.py-----\n"
-            "def foo():\n"
-            "    return 'hi'\n"
-            "-----END FILE " + nonce + "-----\n"
-            "-----END REPLY " + nonce + "-----\n"
+            + "X = 1\n"
+            + "-----END FILE " + nonce + "-----\n"
+            + "-----END REPLY " + nonce + "-----\n"
         )
-        return {
-            "text": text,
-            "model": model,
-            "backend": "mock",
-            "model_call_error": None,
-        }
+        return {"text": text, "model": model, "backend": "mock", "model_call_error": None}
 
     result = generator.generate(
-        _cold_bundle(),
+        _bundle(),
         "claude-sonnet-5",
         ["R-FOO-003"],
         repo_root=repo_root,
         llm_backend=mock_backend,
     )
 
-    assert len(recorded) >= 1, "mock model was never called"
-    prompt = recorded[-1]
+    assert len(recorded) == 1, "mock model should have been called exactly once"
+    prompt = recorded[0]
     lines = prompt.split("\n")
 
-    # A distinctly labeled section exists, after the bundle-derived sections.
+    # Distinct, labeled section.
     assert "## RETRY_FEEDBACK" in lines
+    assert "## GLOSSARY" in lines
     assert lines.index("## RETRY_FEEDBACK") > lines.index("## GLOSSARY")
-    assert lines.index("## RETRY_FEEDBACK") > lines.index("## SPEC")
 
-    retry = section(prompt, "## RETRY_FEEDBACK")
-    retry_lines = [ln for ln in retry.split("\n") if ln.strip()]
-    id_lines = [ln for ln in retry_lines if ln.startswith("- ")]
+    fb = section(prompt, "## RETRY_FEEDBACK")
+    fb_lines = [ln for ln in fb.split("\n") if ln.strip()]
+    id_lines = [ln for ln in fb_lines if ln.startswith("- ")]
     assert id_lines == ["- R-FOO-003"]
-    # One sentence, then exactly one id line: nothing else in the section.
-    assert len(retry_lines) == 2
-    assert re.findall(r"\bR-[A-Z]+-\d+\b", retry) == ["R-FOO-003"]
+    other_lines = [ln for ln in fb_lines if not ln.startswith("- ")]
+    assert len(other_lines) <= 1, "only one introductory sentence expected besides id lines"
+    for ln in other_lines:
+        assert not re.search(r"R-[A-Z0-9]+-\d+", ln)
 
-    # Not merged into any SpecBundle-derived section.
-    for heading in (
-        "## SPEC",
-        "## INTERFACE",
-        "## CONSTRAINTS",
-        "## DEPENDENCY INTERFACES",
-        "## DEPENDENCY CONTEXT",
-        "## VARS",
-        "## GLOSSARY",
-    ):
-        assert "R-FOO-003" not in section(prompt, heading)
+    # The id appears only in its own section, never merged into bundle fields.
     assert prompt.count("R-FOO-003") == 1
 
-    # No acceptance-criterion content anywhere in the prompt.
+    # No Gherkin text, rationale, or expected/actual values anywhere.
     assert "```gherkin" not in prompt
-    for ln in lines:
-        stripped = ln.strip()
-        for keyword in ("Given ", "Then ", "Scenario:", "Feature:"):
-            assert not stripped.startswith(keyword), ln
-    lowered = prompt.lower()
-    assert "rationale" not in lowered
-    assert "expected:" not in lowered
-    assert "actual:" not in lowered
-    assert "AC-FOO" not in prompt
+    assert not re.search(r"(?m)^\s*(Given|Then|Scenario:|Feature:)\b", prompt)
+    assert "rationale" not in prompt.lower()
+    assert not re.search(r"(?i)\bexpected\s*:", prompt)
+    assert not re.search(r"(?i)\bactual\s*:", prompt)
+    assert "AC-FOO-" not in prompt
 
-    # The result echoes the caller's retry_feedback.
+    # Result echoes retry_feedback.
     assert field(result, "retry_feedback") == ["R-FOO-003"]
+    assert field(result, "cache_hit") is False
+    assert field(result, "refused") is None
+    assert field(result, "model_call_error") is None
+    assert field(result, "files")

@@ -1,58 +1,68 @@
-# hotdocs-criterion: sha256:b33a5ab14e82c35a4d4f711beba8b5f6d5d889eb65581c9db94f878742ea48a8
-import io
+# hotdocs-criterion: sha256:8b340cfbcb16680c94094e81955d375c6be8433fa6227f386e2beb4999536c55
 import json
-import contextlib
 from pathlib import Path
 
 import spec_linter
 
 
-DANGLING_ID = "comp-nonexistent-dangling-target"
+DANGLING_ID = "comp-ghost-nowhere"
 
 
 def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def _write(path: Path, text: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text, encoding="utf-8")
+PRODUCT_FOO = (
+    "---\n"
+    "id: P-FOO\n"
+    "title: Foo works\n"
+    "status: draft\n"
+    "owners: [team-a]\n"
+    "---\n"
+    "\n"
+    "# Foo works\n"
+    "\n"
+    "## Purpose\n"
+    "\n"
+    "A foo can be made.\n"
+    "\n"
+    "### CS-FOO-001\n"
+    "Covers: P-FOO\n"
+    "Kind: generated-test\n"
+    "\n"
+    "```gherkin\n"
+    "Given nothing\n"
+    "When a foo is made\n"
+    "Then it exists\n"
+    "```\n"
+)
 
 
-def _build_corpus(repo_root: Path) -> None:
-    specs = repo_root / "specs"
-    _write(
-        specs / "glossary.md",
-        "# Glossary\n\n"
-        "- **Widget** — a small thing used only by this test fixture.\n",
-    )
-
-    comp_dir = specs / "components" / "foo"
-    component_md = (
+def component_md(depends_on_line):
+    return (
         "---\n"
         "id: comp-foo\n"
         "title: Foo\n"
         "status: draft\n"
-        "owners: [test-team]\n"
-        "depends_on: [" + DANGLING_ID + "]\n"
-        "sealed: true\n"
-        "source_path: legacy/foo/\n"
+        "owners: [team-a]\n"
+        + depends_on_line + "\n"
+        "realizes: [P-FOO]\n"
+        "sealed: false\n"
         "---\n"
         "\n"
         "# Foo\n"
         "\n"
         "## Purpose\n"
         "\n"
-        "Foo does one small thing for this fixture.\n"
+        "Makes a foo.\n"
         "\n"
         "## Scope\n"
         "\n"
-        "- In scope: the one small thing.\n"
-        "- Out of scope: everything else.\n"
+        "**In scope:** making a foo. **Out of scope:** everything else.\n"
         "\n"
         "## Definitions\n"
         "\n"
-        "None.\n"
+        "No deltas from `specs/glossary.md`.\n"
         "\n"
         "## Behavior\n"
         "\n"
@@ -64,7 +74,7 @@ def _build_corpus(repo_root: Path) -> None:
         "\n"
         "## Data\n"
         "\n"
-        "See `interface/data/`.\n"
+        "None.\n"
         "\n"
         "## Acceptance criteria\n"
         "\n"
@@ -76,84 +86,112 @@ def _build_corpus(repo_root: Path) -> None:
         "\n"
         "## Open questions\n"
         "\n"
+        "None.\n"
+        "\n"
         "## Change log\n"
         "\n"
         "- Initial draft.\n"
     )
-    _write(comp_dir / "component.md", component_md)
-    _write(
-        comp_dir / "requirements" / "R-FOO-001.md",
-        "# R-FOO-001\n\n"
-        "**R-FOO-001** — The component MUST match existing behavior.\n",
-    )
-    _write(
-        comp_dir / "acceptance" / "AC-FOO-001.md",
-        "# AC-FOO-001\n\n"
-        "Covers: R-FOO-001\n"
-        "Kind: compiled\n\n"
-        "```gherkin\n"
-        "Given the existing behavior\n"
-        "When foo runs\n"
-        "Then the behavior is unchanged\n"
-        "```\n",
-    )
-    _write(
-        comp_dir / "constraints.md",
-        "# Constraints\n\nNone.\n",
-    )
 
 
-def _matching_findings(findings):
-    out = []
+REQUIREMENT = (
+    "# R-FOO-001\n"
+    "\n"
+    "**R-FOO-001** \u2014 `make_foo()` MUST return the string `\"foo\"`.\n"
+)
+
+LIBRARY = (
+    "# Library\n"
+    "\n"
+    "One module file, `foo.py`.\n"
+    "\n"
+    "```\n"
+    "make_foo() -> str\n"
+    "```\n"
+)
+
+ACCEPTANCE = (
+    "# AC-FOO-001\n"
+    "\n"
+    "Covers: R-FOO-001\n"
+    "Kind: generated-test\n"
+    "\n"
+    "```gherkin\n"
+    "Given nothing\n"
+    "When make_foo() is called\n"
+    "Then the result is \"foo\"\n"
+    "```\n"
+)
+
+CONSTRAINTS = (
+    "# Foo \u2014 Non-Functional Constraints\n"
+    "\n"
+    "- **Pure.** No I/O.\n"
+)
+
+
+def write(path, text):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+
+
+def build_corpus(repo_root, depends_on_line):
+    specs = repo_root / "specs"
+    write(specs / "product" / "foo.md", PRODUCT_FOO)
+    comp = specs / "components" / "foo"
+    write(comp / "component.md", component_md(depends_on_line))
+    write(comp / "requirements" / "R-FOO-001.md", REQUIREMENT)
+    write(comp / "interface" / "library.md", LIBRARY)
+    write(comp / "acceptance" / "AC-FOO-001.md", ACCEPTANCE)
+    write(comp / "constraints.md", CONSTRAINTS)
+
+
+def r_lint_003_fails_naming(findings):
+    matches = []
     for f in findings:
         if (
             field(f, "rule_id") == "R-LINT-003"
             and field(f, "severity") == "fail"
             and DANGLING_ID in str(field(f, "message"))
         ):
-            out.append(f)
-    return out
+            matches.append(f)
+    return matches
 
 
-def test_dangling_depends_on_is_r_lint_003_fail_finding(tmp_path):
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    _build_corpus(repo_root)
+def test_clean_corpus_precondition(tmp_path):
+    build_corpus(tmp_path, "depends_on: []")
+    report = spec_linter.lint(None, tmp_path)
+    assert field(report, "hard_failures") == 0
 
-    # Sanity: the dangling id has no spec file anywhere under specs/.
-    for p in (repo_root / "specs").rglob("*.md"):
-        assert p.stem != DANGLING_ID
 
-    report = spec_linter.lint(None, repo_root)
+def test_dangling_depends_on_reports_r_lint_003_fail(tmp_path):
+    build_corpus(tmp_path, "depends_on: []")
+    assert field(spec_linter.lint(None, tmp_path), "hard_failures") == 0
+
+    build_corpus(tmp_path, "depends_on: [" + DANGLING_ID + "]")
+    report = spec_linter.lint(None, tmp_path)
     findings = list(field(report, "findings"))
 
-    matches = _matching_findings(findings)
+    matches = r_lint_003_fails_naming(findings)
     assert matches, (
         "expected a fail-severity R-LINT-003 finding naming "
         + repr(DANGLING_ID)
-        + "; got "
-        + repr(
-            [
-                (field(f, "rule_id"), field(f, "severity"), field(f, "message"))
-                for f in findings
-            ]
-        )
+        + ", got "
+        + repr(findings)
     )
     assert field(report, "hard_failures") >= 1
+    for f in matches:
+        assert str(field(f, "file")).replace("\\", "/").endswith(
+            "specs/components/foo/component.md"
+        )
 
 
-def test_cli_json_report_contains_dangling_depends_on_finding(tmp_path):
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    _build_corpus(repo_root)
-
-    out = io.StringIO()
-    err = io.StringIO()
-    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
-        code = spec_linter.main(["--format=json", "--repo-root=" + str(repo_root)])
-
-    assert code == 1, "stderr: " + err.getvalue()
-    doc = json.loads(out.getvalue())
-    matches = _matching_findings(doc["findings"])
-    assert matches, "findings: " + repr(doc["findings"])
-    assert doc["summary"]["hard_failures"] >= 1
+def test_dangling_depends_on_via_cli_json(tmp_path, capsys):
+    build_corpus(tmp_path, "depends_on: [" + DANGLING_ID + "]")
+    code = spec_linter.main(["--format=json", "--repo-root=" + str(tmp_path)])
+    out = capsys.readouterr().out
+    assert code == 1
+    data = json.loads(out)
+    matches = r_lint_003_fails_naming(data["findings"])
+    assert matches, "no R-LINT-003 fail naming the dangling id in " + repr(data)
+    assert data["summary"]["hard_failures"] >= 1

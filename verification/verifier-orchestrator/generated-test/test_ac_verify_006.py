@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:b3540c1b261c8547479642959b54ef586b06c481c30f4a315e0b30f357dfb90e
+# hotdocs-criterion: sha256:bb159dde5774205961839a535852706703f9782f21c873fdbc3d7b41f18a8d82
 import hashlib
 import json
 from pathlib import Path
@@ -6,50 +6,38 @@ from pathlib import Path
 import verifier_orchestrator
 
 
-SLUG = "widget"
-COMPONENT_ID = "comp-widget"
-CRITERION_ID = "AC-WIDGET-001"
-REQUIREMENT_ID = "R-WIDGET-001"
-
-BUNDLE = {
-    "component_id": COMPONENT_ID,
-    "criterion_id": CRITERION_ID,
-    "covers": REQUIREMENT_ID,
-    "criterion_text": "Given a widget\nWhen add is invoked with [2, 3]\nThen result equals 5",
-    "requirement_text": "R-WIDGET-001: add MUST return the sum of its two arguments.",
-    "interface": "add(a, b) -> int\nis_big(x) -> bool\nis_small(x) -> bool\nenabled() -> bool",
-    "glossary": "Widget glossary.",
-    "dependency_interfaces": {},
-    "testing": "",
-}
-
-# Four mutation sites (python adapter's strength check): `+`, `>`, `<`, `True`.
-# The authored test only kills the `+` mutant, so the score is 1/4 = 0.25.
-WIDGET_SOURCE = (
-    "def add(a, b):\n"
-    "    return a + b\n"
-    "\n"
-    "\n"
-    "def is_big(x):\n"
-    "    return x > 10\n"
-    "\n"
-    "\n"
-    "def is_small(x):\n"
-    "    return x < 3\n"
-    "\n"
-    "\n"
-    "def enabled():\n"
-    "    return True\n"
-)
+COMPONENT_ID = "comp-foo"
+SLUG = "foo"
+CRITERION_ID = "AC-FOO-001"
+REQ_ID = "R-FOO-001"
 
 
 def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def criterion_header():
+def write(path, text):
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+
+
+BUNDLE = {
+    "component_id": COMPONENT_ID,
+    "criterion_id": CRITERION_ID,
+    "covers": REQ_ID,
+    "criterion_text": "Given a combine function\nWhen it is called\nThen it adds",
+    "requirement_text": "R-FOO-001 - combine MUST add its two arguments.",
+    "interface": "# Library\n\ncombine(a, b) -> int\nis_big(x) -> bool\n",
+    "glossary": "# Glossary\n",
+    "dependency_interfaces": {},
+    "testing": "",
+}
+
+
+def header_for(bundle):
     payload = json.dumps(
-        {k: BUNDLE[k] for k in ("criterion_text", "requirement_text", "interface", "glossary", "testing")},
+        {k: bundle[k] for k in ("criterion_text", "requirement_text", "interface", "glossary", "testing")},
         sort_keys=True,
         ensure_ascii=False,
         separators=(",", ":"),
@@ -57,27 +45,20 @@ def criterion_header():
     return "# hotdocs-criterion: sha256:" + hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
-def write(path, text):
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text, encoding="utf-8")
-
-
 def build_fixture(repo_root):
     comp = repo_root / "specs" / "components" / SLUG
     write(
         comp / "component.md",
         "---\n"
-        "id: " + COMPONENT_ID + "\n"
-        "title: Widget\n"
+        "id: comp-foo\n"
+        "title: Foo\n"
         "status: draft\n"
-        "owners: [test-team]\n"
-        "realizes: [P-WIDGET]\n"
-        "---\n"
-        "\n"
-        "# Widget\n"
-        "\n"
-        "## Purpose\n\nAdds numbers.\n\n"
-        "## Scope\n\n- In scope: adding.\n\n"
+        "owners: [team]\n"
+        "realizes: [P-FOO]\n"
+        "---\n\n"
+        "# Foo\n\n"
+        "## Purpose\n\nCombines numbers.\n\n"
+        "## Scope\n\n- In scope: combining.\n\n"
         "## Definitions\n\nNone.\n\n"
         "## Behavior\n\nSee `requirements/`.\n\n"
         "## Interfaces\n\nSee `interface/`.\n\n"
@@ -88,59 +69,69 @@ def build_fixture(repo_root):
         "## Change log\n\n- Initial.\n",
     )
     write(
-        comp / "requirements" / (REQUIREMENT_ID + ".md"),
-        "# " + REQUIREMENT_ID + "\n\n**" + REQUIREMENT_ID + "** — `add` MUST return the sum of its two arguments.\n",
-    )
-    write(
-        comp / "acceptance" / (CRITERION_ID + ".md"),
-        "# " + CRITERION_ID + "\n"
-        "\n"
-        "Covers: " + REQUIREMENT_ID + "\n"
-        "Kind: generated-test\n"
-        "\n"
-        "```gherkin\n"
-        "Given a widget\n"
-        "When add is invoked with [2, 3]\n"
-        "Then result equals 5\n"
-        "```\n",
+        comp / "requirements" / "R-FOO-001.md",
+        "# R-FOO-001\n\n**R-FOO-001** - `combine` MUST add its two arguments.\n",
     )
     write(
         comp / "interface" / "library.md",
-        "# Library\n\n```\nadd(a, b) -> int\nis_big(x) -> bool\nis_small(x) -> bool\nenabled() -> bool\n```\n",
+        "# Library\n\n```\ncombine(a, b) -> int\nis_big(x) -> bool\n```\n",
     )
     write(comp / "constraints.md", "# Constraints\n\nNone.\n")
     write(
-        repo_root / "specs" / "product" / "widget.md",
+        comp / "acceptance" / "AC-FOO-001.md",
+        "# AC-FOO-001\n\n"
+        "Covers: R-FOO-001\n"
+        "Kind: generated-test\n\n"
+        "```gherkin\n"
+        "Given a combine function\n"
+        "When it is called with two numbers\n"
+        "Then it returns their sum\n"
+        "```\n",
+    )
+    write(
+        repo_root / "specs" / "product" / "foo.md",
         "---\n"
-        "id: P-WIDGET\n"
-        "title: Widget capability\n"
+        "id: P-FOO\n"
+        "title: Foo capability\n"
         "status: draft\n"
-        "owners: [test-team]\n"
-        "---\n"
+        "owners: [team]\n"
+        "---\n\n"
+        "# Foo capability\n\n## Purpose\n\nFoo.\n",
+    )
+    write(repo_root / "specs" / "glossary.md", "# Glossary\n")
+
+    # Code under test with several mutation sites.
+    write(
+        repo_root / "gen" / SLUG / "foo.py",
+        "def combine(a, b):\n"
+        "    return a + b\n"
         "\n"
-        "# Widget capability\n\n## Purpose\n\nWidgets.\n",
+        "\n"
+        "def is_big(x):\n"
+        "    return x > 10\n"
+        "\n"
+        "\n"
+        "def scale(a, b):\n"
+        "    return a * b\n",
     )
 
-    # The component's own code.
-    write(repo_root / "gen" / SLUG / "widget.py", WIDGET_SOURCE)
-
-    # spec-bundle-assembler stand-in.
+    # Fake spec-bundle-assembler.
     write(
         repo_root / "gen" / "spec-bundle-assembler" / "spec_bundle_assembler.py",
         "BUNDLE = " + repr(BUNDLE) + "\n"
         "\n"
         "\n"
         "def assemble_criterion(component_id, criterion_id, repo_root):\n"
-        "    return dict(BUNDLE)\n",
+        "    out = dict(BUNDLE)\n"
+        "    out['component_id'] = component_id\n"
+        "    out['criterion_id'] = criterion_id\n"
+        "    return out\n",
     )
 
-    # test-probe stand-in: always ok, no findings.
+    # Fake test-probe: always ok, no findings.
     write(
         repo_root / "gen" / "test-probe" / "test_probe.py",
-        "GATE_VERSION = 'test-probe@1.3.0'\n"
-        "\n"
-        "\n"
-        "class ProbeReport:\n"
+        "class _Report:\n"
         "    def __init__(self):\n"
         "        self.ok = True\n"
         "        self.findings = []\n"
@@ -152,39 +143,46 @@ def build_fixture(repo_root):
         "                'tests_run': self.tests_run, 'tests_reached': self.tests_reached}\n"
         "\n"
         "\n"
-        "def probe(test_source, criterion_bundle, module_name, *, timeout=60.0, interpreter=None):\n"
-        "    return ProbeReport()\n",
+        "GATE_VERSION = 'test-probe@1.3.0'\n"
+        "\n"
+        "\n"
+        "def probe(test_source, criterion_bundle, module_name, *, timeout=60.0, interpreter=None, **kwargs):\n"
+        "    return _Report()\n",
     )
 
 
-def weak_test_source():
-    return (
-        criterion_header() + "\n"
-        "import widget\n"
-        "\n"
-        "\n"
-        "def test_add():\n"
-        "    assert widget.add(2, 3) == 5\n"
-    )
+WEAK_TEST_BODY = (
+    "import foo\n"
+    "\n"
+    "\n"
+    "def test_combine_exists():\n"
+    "    assert hasattr(foo, 'combine')\n"
+)
 
 
 def make_test_author(log_path):
-    def author(bundle):
+    content = header_for(BUNDLE) + "\n" + WEAK_TEST_BODY
+
+    def test_author(bundle):
         with open(log_path, "a", encoding="utf-8") as fh:
             fh.write("called\n")
         return {
+            "component_id": COMPONENT_ID,
+            "criterion_id": CRITERION_ID,
             "model": "fake-model",
             "seed": 0,
             "prompt_version": "v1",
             "cache_hit": False,
-            "model_call_error": None,
             "file": {
-                "path": "verification/widget/generated-test/test_ac_widget_001.py",
-                "content": weak_test_source(),
+                "path": "verification/foo/generated-test/test_ac_foo_001.py",
+                "content": content,
             },
+            "model_call_error": None,
+            "repair_attempts": 0,
+            "probe_findings": [],
         }
 
-    return author
+    return test_author
 
 
 def test_mutation_score_below_bar_fails_overall(tmp_path):
@@ -197,7 +195,7 @@ def test_mutation_score_below_bar_fails_overall(tmp_path):
         COMPONENT_ID, repo_root, judge=None, test_author=make_test_author(log_path)
     )
 
-    # The fake test author actually supplied the test.
+    # The test author stand-in actually ran.
     assert log_path.is_file()
     assert log_path.read_text(encoding="utf-8").count("called") >= 1
 
@@ -206,19 +204,24 @@ def test_mutation_score_below_bar_fails_overall(tmp_path):
     assert len(entries) == 1
     entry = entries[0]
     assert field(entry, "kind") == "generated-test"
-    # The test passes on the unmutated code; the mutation score changes only
-    # the overall verdict, never the criterion's own result.
+    # The weak test passes on the unmutated code: mutation score never
+    # changes a criterion's own result.
     assert field(entry, "result") == "pass"
 
-    # The shortfall is reported: a real score, below the 0.8 bar, no error.
+    # The mutation score is computed and reported, and is below the bar.
     score = field(report, "mutation_score")
     assert score is not None
+    assert isinstance(score, (int, float))
     assert score < 0.8
-    assert abs(score - 0.25) < 1e-9
+    # No mutant is killed by a test that only checks a name exists.
+    assert score == 0.0
+    # The shortfall is the cause, not a sandbox/adapter error.
     assert field(report, "mutation_error") is None
 
+    # Overall verdict is fail.
     assert field(report, "overall") == "fail"
 
+    # The JSON form agrees.
     as_dict = report.to_dict()
     assert as_dict["overall"] == "fail"
     assert as_dict["mutation_score"] is not None

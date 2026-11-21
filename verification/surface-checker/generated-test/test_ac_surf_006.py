@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:e675cc3803ccdd58f372852f2a49baded467e8098f969c2bc6e2caf4decc4d1d
+# hotdocs-criterion: sha256:16d911175fc2324e98c5f0e7fd50002d29f7f093ef3e891ba12b17f4de404240
 import sys
 from pathlib import Path
 
@@ -19,86 +19,59 @@ PYTHON_ADAPTER = (
     "import sys\n"
     "from pathlib import Path\n"
     "\n"
-    "KIND = " + repr("python") + "\n"
-    "\n"
     "\n"
     "def provision(repo_root):\n"
-    "    return {" + repr("ok") + ": True, " + repr("reason") + ": " + repr("") + ", "
-    + repr("versions") + ": {}, " + repr("lockfile_sha256") + ": None,\n"
-    "            " + repr("interpreter") + ": sys.executable}\n"
+    "    return {'ok': True, 'reason': '', 'versions': {}, 'lockfile_sha256': None,\n"
+    "            'interpreter': sys.executable}\n"
 )
 
 
-def ok_provision():
-    return (
-        "def provision(repo_root):\n"
-        "    return {" + repr("ok") + ": True, " + repr("reason") + ": " + repr("") + ", "
-        + repr("versions") + ": {}, " + repr("lockfile_sha256") + ": None, "
-        + repr("interpreter") + ": None}\n"
-    )
-
-
-def fake_adapter(kind):
+def kind_adapter(kind, surface_body, ok, reason):
     return (
         "KIND = " + repr(kind) + "\n"
         "\n"
         "\n"
         "def surface(asset_file):\n"
-        "    return {" + repr("names") + ": [" + repr("a") + ", " + repr("b") + "]}\n"
-        "\n"
-        "\n"
-        + ok_provision()
-    )
-
-
-def fakebad_adapter():
-    return (
-        "KIND = " + repr("fakebad") + "\n"
-        "\n"
-        "\n"
-        "def surface(asset_file):\n"
-        "    raise RuntimeError(" + repr("boom") + ")\n"
-        "\n"
-        "\n"
-        + ok_provision()
-    )
-
-
-def fakeoff_adapter():
-    return (
-        "KIND = " + repr("fakeoff") + "\n"
-        "\n"
-        "\n"
-        "def surface(asset_file):\n"
-        "    return {" + repr("names") + ": [" + repr("a") + ", " + repr("b") + "]}\n"
+        "    " + surface_body + "\n"
         "\n"
         "\n"
         "def provision(repo_root):\n"
-        "    return {" + repr("ok") + ": False, " + repr("reason") + ": "
-        + repr("fakeoff needs fakeprog >= 2") + ", "
-        + repr("versions") + ": {}, " + repr("lockfile_sha256") + ": None, "
-        + repr("interpreter") + ": None}\n"
+        "    return {'ok': " + repr(ok) + ", 'reason': " + repr(reason) + ",\n"
+        "            'versions': {}, 'lockfile_sha256': None, 'interpreter': None}\n"
     )
 
 
 def build_repo(repo_root):
     repo_root = Path(repo_root)
 
-    # Adapters
+    # Planted python adapter, so no criterion depends on the tool's own.
     write(repo_root / "gen" / "kind-python" / "kind_python.py", PYTHON_ADAPTER)
-    write(repo_root / "gen" / "kind-fake" / "kind_fake.py", fake_adapter("fake"))
-    write(repo_root / "gen" / "kind-fakebad" / "kind_fakebad.py", fakebad_adapter())
-    write(repo_root / "gen" / "kind-fakeoff" / "kind_fakeoff.py", fakeoff_adapter())
+    write(repo_root / "specs" / "architecture" / "asset-kind-python.md", "# python\n")
+
+    # Planted kinds: fake, fakebad, fakeoff. nokind_q is not planted.
+    ok_surface = "return {'names': ['a', 'b']}"
+    write(
+        repo_root / "gen" / "kind-fake" / "kind_fake.py",
+        kind_adapter("fake", ok_surface, True, ""),
+    )
+    write(
+        repo_root / "gen" / "kind-fakebad" / "kind_fakebad.py",
+        kind_adapter("fakebad", "raise RuntimeError(" + repr("boom") + ")", True, ""),
+    )
+    write(
+        repo_root / "gen" / "kind-fakeoff" / "kind_fakeoff.py",
+        kind_adapter("fakeoff", ok_surface, False, "fakeoff needs fakeprog >= 2"),
+    )
     for kind in ("fake", "fakebad", "fakeoff"):
         write(
             repo_root / "specs" / "architecture" / ("asset-kind-" + kind + ".md"),
-            "# Asset kind " + kind + "\n",
+            "# " + kind + "\n",
         )
 
-    # Component spec
-    comp = repo_root / "specs" / "components" / "widget"
+    # Component comp-widget.
+    comp_dir = repo_root / "specs" / "components" / "widget"
     write(
-        comp / "component.md",
+        comp_dir / "component.md",
         "---\n"
         "id: comp-widget\n"
         "title: Widget\n"
@@ -111,11 +84,12 @@ def build_repo(repo_root):
         "\n"
         "# Widget\n",
     )
-    write(comp / "interface" / "library.md", "# Library\n")
-    fence = "`" * 3
+    write(comp_dir / "interface" / "library.md", "# Library\n")
+
+    fence = "```"
     for name in ("x.js", "off.js", "gone.js", "bad.js", "app.js"):
         write(
-            comp / "interface" / "assets" / (name + ".md"),
+            comp_dir / "interface" / "assets" / (name + ".md"),
             "# " + name + "\n"
             "\n"
             + fence + "\n"
@@ -123,17 +97,18 @@ def build_repo(repo_root):
             + fence + "\n",
         )
 
-    # Code
-    code = repo_root / "gen" / "widget"
-    write(code / "widget.py", "X = 1\n")
+    # Candidate code.
+    code_dir = repo_root / "gen" / "widget"
+    write(code_dir / "widget.py", "X = 1\n")
     for name in ("x.js", "off.js", "noiface.js", "bad.js", "app.js"):
-        write(code / "static" / name, "// " + name + "\n")
+        write(code_dir / "static" / name, "// asset " + name + "\n")
+
+    return repo_root
 
 
-def test_ac_surf_006_asset_errors_and_missing_names(tmp_path):
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    build_repo(repo_root)
+def test_ac_surf_006_asset_errors_and_missing_names_in_declaration_order(tmp_path):
+    repo_root = build_repo(tmp_path)
+    assert not (repo_root / "gen" / "widget" / "static" / "gone.js").exists()
 
     report = surface_checker.check_surface("comp-widget", repo_root)
 
@@ -143,7 +118,10 @@ def test_ac_surf_006_asset_errors_and_missing_names(tmp_path):
         ("asset_error", "unknown asset kind: nokind_q"),
         ("asset_error", "static/off.js: fakeoff needs fakeprog >= 2"),
         ("asset_error", "static/gone.js: no such asset file"),
-        ("asset_error", "static/noiface.js: no interface file interface/assets/noiface.js.md"),
+        (
+            "asset_error",
+            "static/noiface.js: no interface file interface/assets/noiface.js.md",
+        ),
         ("asset_error", "static/bad.js: surface failed: RuntimeError: boom"),
         ("asset_name_missing", "static/app.js has no zz, which its interface states"),
     ]

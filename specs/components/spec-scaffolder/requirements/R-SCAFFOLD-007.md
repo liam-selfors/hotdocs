@@ -54,10 +54,9 @@
   TODO: state exactly the text `guidance()["generator"]` returns: the conventions the asset must follow, never test mechanics.
   ```
 
-  It MUST raise `ValueError` when `kind` does not match `^[a-z][a-z0-9]*$`
-  (no hyphen: asset-kinds.md's Lookup names the adapter
-  `kind_<kind>.py`, which differs from a hyphenated kind's module name)
-  or is `python`, and
+  It MUST raise `ValueError` when `kind` is not kebab-case
+  (`^[a-z][a-z0-9]*(-[a-z0-9]+)*$`; a hyphenated kind's adapter module
+  is `kind_<module>`, `R-SCAFFOLD-008`) or is `python`, and
   `FileExistsError` when the definition or the component directory
   already exists, writing nothing, the decision record included, in any
   case.

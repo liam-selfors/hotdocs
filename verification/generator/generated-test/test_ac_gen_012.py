@@ -1,14 +1,5 @@
-# hotdocs-criterion: sha256:b1d328bbc3c7fe1f3a940cd160ab067e6e146f3ecb68edf72792128739183a9e
-"""AC-GEN-012 (covers R-GEN-011): generate never retries an llm-endpoint call.
-
-A mock model that "hangs" until the SDK's own default timeout gives up is
-simulated by a backend that blocks briefly and then reports the timeout
-the endpoint's default timeout would produce. generate must complete with
-model_call_error set, and the mock must record exactly one call attempt.
-"""
-
+# hotdocs-criterion: sha256:3e0f3c8962e4ab6a3665679b3052c0945a1cbec4f1770d09a650592afee9620d
 import threading
-import time
 from pathlib import Path
 
 import generator
@@ -18,7 +9,7 @@ def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-PYTHON_ADAPTER = (
+FAKE_PYTHON_ADAPTER = (
     "from pathlib import Path\n"
     "\n"
     "KIND = \"python\"\n"
@@ -47,22 +38,22 @@ COMPONENT_MD = (
 )
 
 
-def _make_repo(repo_root):
+def _plant_repo(repo_root):
+    adapter_dir = repo_root / "gen" / "kind-python"
+    adapter_dir.mkdir(parents=True)
+    (adapter_dir / "kind_python.py").write_text(FAKE_PYTHON_ADAPTER, encoding="utf-8")
     comp_dir = repo_root / "specs" / "components" / "widget-maker"
     comp_dir.mkdir(parents=True)
     (comp_dir / "component.md").write_text(COMPONENT_MD, encoding="utf-8")
-    adapter_dir = repo_root / "gen" / "kind-python"
-    adapter_dir.mkdir(parents=True)
-    (adapter_dir / "kind_python.py").write_text(PYTHON_ADAPTER, encoding="utf-8")
 
 
 def _bundle():
     return {
         "component_id": "comp-widget-maker",
-        "spec_bundle_hash": "sha256:" + "ac0012" * 10 + "abcd",
-        "spec": "# Widget Maker\n\nMakes widgets.",
+        "spec_bundle_hash": "sha256:" + "ab" * 32,
+        "spec": "Widget Maker makes widgets.",
         "interface": "make_widget() -> str",
-        "constraints": "None.",
+        "constraints": "",
         "dependency_interfaces": {},
         "dependency_context": {},
         "dependency_usage": {},
@@ -72,27 +63,24 @@ def _bundle():
     }
 
 
-def test_ac_gen_012_hanging_model_called_once_no_retry(tmp_path, monkeypatch):
+def test_ac_gen_012_hanging_model_no_internal_retry(tmp_path, monkeypatch):
     monkeypatch.delenv("VAR_CACHE_STORE_URL", raising=False)
-
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
-    _make_repo(repo_root)
-
-    call_log = tmp_path / "calls.log"
-    call_log.write_text("", encoding="utf-8")
+    _plant_repo(repo_root)
+    log_path = tmp_path / "calls.log"
 
     def hanging_backend(prompt, model, **params):
-        # Record the attempt first, then "hang" until the SDK's own default
-        # timeout gives up, reported as the endpoint's timeout error.
-        with open(call_log, "a", encoding="utf-8") as fh:
+        # Record the attempt, then behave as the SDK does once its own
+        # default timeout elapses on a model that never responds.
+        with open(str(log_path), "a", encoding="utf-8") as fh:
             fh.write("call\n")
-        time.sleep(0.5)
+        threading.Event().wait(0.2)
         return {
             "text": None,
             "model": model,
             "backend": "mock-hang",
-            "model_call_error": {"category": "timeout", "message": "model call timed out"},
+            "model_call_error": {"category": "timeout", "message": "timed out"},
         }
 
     outcome = {}
@@ -101,11 +89,12 @@ def test_ac_gen_012_hanging_model_called_once_no_retry(tmp_path, monkeypatch):
         try:
             outcome["result"] = generator.generate(
                 _bundle(),
-                "claude-sonnet-5",
+                "anthropic:claude-sonnet-5",
+                None,
                 repo_root=repo_root,
                 llm_backend=hanging_backend,
             )
-        except BaseException as exc:  # surfaced below
+        except BaseException as exc:  # pragma: no cover - reported below
             outcome["error"] = exc
 
     worker = threading.Thread(target=run, daemon=True)
@@ -114,13 +103,13 @@ def test_ac_gen_012_hanging_model_called_once_no_retry(tmp_path, monkeypatch):
 
     assert not worker.is_alive(), "generate did not complete: unbounded hang"
     assert "error" not in outcome, "generate raised: " + repr(outcome.get("error"))
-
     result = outcome["result"]
-    error = field(result, "model_call_error")
-    assert error is not None, "expected model_call_error to be set"
+
+    assert field(result, "model_call_error") is not None
     assert field(result, "files") == {}
     assert field(result, "cache_hit") is False
     assert field(result, "refused") is None
 
-    calls = [line for line in call_log.read_text(encoding="utf-8").splitlines() if line.strip()]
-    assert len(calls) == 1, "expected exactly one model call attempt, got " + repr(len(calls))
+    assert log_path.exists(), "mock model was never called"
+    calls = [line for line in log_path.read_text(encoding="utf-8").splitlines() if line]
+    assert len(calls) == 1, "expected exactly one call attempt, got " + repr(len(calls))

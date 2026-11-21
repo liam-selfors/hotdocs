@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:1b4daa68635347bd2b595ea216a79620c27916145fd93a786aff7cf91186f92e
+# hotdocs-criterion: sha256:a87f095969ec821f9eaf4ce4fd8518e8b945658e3b617c36a5c44379223e38ab
 import inspect
 
 import kind_javascript
@@ -15,12 +15,12 @@ def test_gate_version_constant():
 
 
 def test_asset_error_is_exception_class():
-    error_type = kind_javascript.AssetError
-    assert inspect.isclass(error_type)
-    assert issubclass(error_type, Exception) is True
+    asset_error = kind_javascript.AssetError
+    assert inspect.isclass(asset_error)
+    assert issubclass(asset_error, Exception) is True
 
 
 def test_asset_error_str_is_message():
     err = kind_javascript.AssetError("x")
-    assert str(err) == "x"
     assert isinstance(err, Exception)
+    assert str(err) == "x"

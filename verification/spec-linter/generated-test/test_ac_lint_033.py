@@ -1,80 +1,66 @@
-# hotdocs-criterion: sha256:7e5acb96f1fc294d9d9646c66159dce22e06bbd893bbb0d59e2117da4dc6965e
-from pathlib import Path
-
+# hotdocs-criterion: sha256:fe944dcdf22c53a8ad4629a89268c0ba28c1665040d42ebce95a728cdde93988
 import spec_linter
 
-
-COMPONENT_REL = "specs/components/foo/component.md"
+from pathlib import Path
 
 
 def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def _write(path, text):
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text, encoding="utf-8")
+PRODUCT = (
+    "---\n"
+    "id: P-FOO\n"
+    "title: Foo works\n"
+    "status: draft\n"
+    "owners: [team-a]\n"
+    "---\n"
+    "\n"
+    "# Foo works\n"
+    "\n"
+    "## Purpose\n"
+    "\n"
+    "A foo can be made.\n"
+    "\n"
+    "### CS-FOO-001\n"
+    "Covers: P-FOO\n"
+    "Kind: generated-test\n"
+    "\n"
+    "```gherkin\n"
+    "Given nothing\n"
+    "When a foo is made\n"
+    "Then it exists\n"
+    "```\n"
+)
+
+PURPOSE_TEXT = "Makes a foo. " + " ".join(["foo"] * 157)
 
 
-def _build_corpus(repo_root):
-    specs = repo_root / "specs"
-
-    _write(
-        specs / "glossary.md",
-        "# Glossary\n"
-        "\n"
-        "Canonical vocabulary.\n"
-        "\n"
-        "- **Widget** — a small thing this fixture talks about.\n",
-    )
-
-    _write(
-        specs / "decisions" / "D1.md",
-        "---\n"
-        "id: D1\n"
-        "title: First decision\n"
-        "status: draft\n"
-        "owners: [team-a]\n"
-        "---\n"
-        "\n"
-        "# D1 First decision\n"
-        "\n"
-        "The foo component exists to format widgets.\n",
-    )
-
-    purpose_words = " ".join(["widget"] * 160)
-    assert len(purpose_words.split()) == 160
-
-    _write(
-        repo_root / COMPONENT_REL,
+def component_md():
+    return (
         "---\n"
         "id: comp-foo\n"
         "title: Foo\n"
         "status: draft\n"
         "owners: [team-a]\n"
-        "sealed: true\n"
-        "source_path: legacy/foo/\n"
+        "depends_on: []\n"
+        "realizes: [P-FOO]\n"
+        "sealed: false\n"
         "---\n"
         "\n"
         "# Foo\n"
         "\n"
         "## Purpose\n"
         "\n"
-        + purpose_words
-        + "\n"
-        "\n"
-        "## Rationale\n"
-        "\n"
-        "This design follows `D999`.\n"
+        + PURPOSE_TEXT + "\n"
         "\n"
         "## Scope\n"
         "\n"
-        "- In scope: formatting widgets.\n"
-        "- Out of scope: storing widgets.\n"
+        "**In scope:** making a foo. **Out of scope:** everything else.\n"
         "\n"
         "## Definitions\n"
         "\n"
-        "None beyond the glossary.\n"
+        "No deltas from `specs/glossary.md`.\n"
         "\n"
         "## Behavior\n"
         "\n"
@@ -86,7 +72,7 @@ def _build_corpus(repo_root):
         "\n"
         "## Data\n"
         "\n"
-        "See `interface/data/`.\n"
+        "None.\n"
         "\n"
         "## Acceptance criteria\n"
         "\n"
@@ -98,95 +84,119 @@ def _build_corpus(repo_root):
         "\n"
         "## Open questions\n"
         "\n"
+        "None.\n"
+        "\n"
         "## Change log\n"
         "\n"
-        "- Initial draft.\n",
-    )
-
-    comp = specs / "components" / "foo"
-    _write(
-        comp / "requirements" / "R-FOO-001.md",
-        "# R-FOO-001\n"
-        "\n"
-        "**R-FOO-001** — `format_widget` MUST return the widget name "
-        "unchanged (`D1`).\n",
-    )
-    _write(
-        comp / "acceptance" / "AC-FOO-001.md",
-        "# AC-FOO-001\n"
-        "\n"
-        "Covers: R-FOO-001\n"
-        "Kind: generated-test\n"
-        "\n"
-        "```gherkin\n"
-        "Given a widget named \"a\"\n"
-        "When format_widget runs\n"
-        "Then it returns \"a\"\n"
-        "```\n",
-    )
-    _write(
-        comp / "interface" / "library.md",
-        "# Library\n"
-        "\n"
-        "```\n"
-        "format_widget(name: str) -> str\n"
-        "```\n"
-        "\n"
-        "Returns the widget name unchanged.\n",
-    )
-    _write(
-        comp / "interface" / "data" / "Widget.md",
-        "# `Widget`\n"
-        "\n"
-        "A widget is identified by its name, a `str`.\n",
-    )
-    _write(
-        comp / "constraints.md",
-        "# Constraints\n"
-        "\n"
-        "- `format_widget` returns within 10 ms, measured by timing 100 calls.\n",
+        "- Initial draft (`D999`).\n"
     )
 
 
-def test_lint_includes_citation_and_size_findings_and_load_corpus(tmp_path):
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    _build_corpus(repo_root)
+REQ = (
+    "# R-FOO-001\n"
+    "\n"
+    "**R-FOO-001** \u2014 `make_foo()` MUST return the string `\"foo\"`.\n"
+)
+
+LIBRARY = (
+    "# Library\n"
+    "\n"
+    "One module file, `foo.py`.\n"
+    "\n"
+    "```\n"
+    "make_foo() -> str\n"
+    "```\n"
+)
+
+AC = (
+    "# AC-FOO-001\n"
+    "\n"
+    "Covers: R-FOO-001\n"
+    "Kind: generated-test\n"
+    "\n"
+    "```gherkin\n"
+    "Given nothing\n"
+    "When make_foo() is called\n"
+    "Then the result is \"foo\"\n"
+    "```\n"
+)
+
+CONSTRAINTS = (
+    "# Foo \u2014 Non-Functional Constraints\n"
+    "\n"
+    "- **Pure.** No I/O.\n"
+)
+
+
+def write(root, rel, text):
+    p = root / rel
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(text, encoding="utf-8")
+
+
+def build_corpus(repo_root):
+    write(repo_root, "specs/product/foo.md", PRODUCT)
+    write(repo_root, "specs/components/foo/component.md", component_md())
+    write(repo_root, "specs/components/foo/requirements/R-FOO-001.md", REQ)
+    write(repo_root, "specs/components/foo/interface/library.md", LIBRARY)
+    write(repo_root, "specs/components/foo/acceptance/AC-FOO-001.md", AC)
+    write(repo_root, "specs/components/foo/constraints.md", CONSTRAINTS)
+
+
+COMPONENT_FILE = "specs/components/foo/component.md"
+
+
+def norm(path):
+    return str(path).replace("\\", "/")
+
+
+def test_purpose_word_count_is_160():
+    assert len(PURPOSE_TEXT.split()) == 160
+
+
+def test_lint_includes_citation_and_size_findings(tmp_path):
+    repo_root = tmp_path
+    build_corpus(repo_root)
 
     report = spec_linter.lint(None, repo_root)
     findings = list(field(report, "findings"))
-    summary = [
-        (field(f, "rule_id"), field(f, "severity"), field(f, "file"), field(f, "message"))
-        for f in findings
-    ]
 
     cite = [
-        f
-        for f in findings
+        f for f in findings
         if field(f, "rule_id") == "R-CITE-001"
         and field(f, "severity") == "fail"
-        and field(f, "file") == COMPONENT_REL
+        and norm(field(f, "file")) == COMPONENT_FILE
     ]
-    assert cite, summary
-
     size = [
-        f
-        for f in findings
+        f for f in findings
         if field(f, "rule_id") == "R-SIZE-004"
         and field(f, "severity") == "fail"
-        and field(f, "file") == COMPONENT_REL
+        and norm(field(f, "file")) == COMPONENT_FILE
     ]
-    assert size, summary
-
+    summary = [
+        (field(f, "rule_id"), field(f, "severity"), norm(field(f, "file")))
+        for f in findings
+    ]
+    assert len(cite) == 1, summary
+    assert len(size) == 1, summary
     for f in cite + size:
-        assert not isinstance(f, dict), summary
-        assert type(f).__name__ == "Finding", summary
-        if hasattr(spec_linter, "Finding"):
-            assert isinstance(f, spec_linter.Finding), summary
+        assert isinstance(f, spec_linter.Finding), type(f)
 
     assert field(report, "hard_failures") == 2, summary
 
-    corpus = spec_linter.load_corpus(repo_root)
+
+def test_load_corpus_returns_corpus_with_component(tmp_path):
+    repo_root = tmp_path
+    build_corpus(repo_root)
+
+    load_corpus = spec_linter.load_corpus
+    assert callable(load_corpus)
+    corpus = load_corpus(repo_root)
+
     assert type(corpus).__name__ == "Corpus"
     components = field(corpus, "components")
     assert "foo" in components
+    comp = components["foo"]
+    root = field(comp, "root")
+    assert root is not None
+    assert norm(field(root, "rel_path")) == COMPONENT_FILE

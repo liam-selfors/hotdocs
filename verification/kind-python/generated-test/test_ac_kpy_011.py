@@ -1,10 +1,12 @@
-# hotdocs-criterion: sha256:d0d2069549cd2d6e8f34fc2514df4f476ef0fb1110ea83bcb1616899199dc82f
+# hotdocs-criterion: sha256:5171bf042ec15278f2eb684c2e3e76234cd331b4b335a0a03fe38327c9a77a00
 import shutil
+
+import pytest
 
 import kind_python
 
 
-GRADE_SOURCE = (
+GRADE_SRC = (
     "def grade(score):\n"
     "    if score >= 90:\n"
     "        return \"A\"\n"
@@ -50,8 +52,6 @@ EXPECTED_DESCRIPTIONS = [
     "grade.py:16: s + x -> s - x",
 ]
 
-BAR = 0.8
-
 
 def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
@@ -70,48 +70,50 @@ def suite_kills(run, suite):
 
 def test_ac_kpy_011_calibration_pair(tmp_path, monkeypatch):
     monkeypatch.delenv("HOTDOCS_PYTHON", raising=False)
-    monkeypatch.setenv("PYTHONDONTWRITEBYTECODE", "1")
 
     code_dir = tmp_path / "grade"
-    code_dir.mkdir()
-    (code_dir / "grade.py").write_text(GRADE_SOURCE, encoding="utf-8")
+    code_dir.mkdir(parents=True)
+    (code_dir / "grade.py").write_text(GRADE_SRC, encoding="utf-8")
 
     sites = kind_python.strength_sites(code_dir)
-    descriptions = [field(site, "description") for site in sites]
+    descriptions = [field(s, "description") for s in sites]
     assert descriptions == EXPECTED_DESCRIPTIONS
 
     # Each suite passes unmutated.
     run = kind_python.asset_runner(code_dir)
-    for suite in (STRONG, WEAK):
-        for entry, args, expected in suite:
-            assert run(entry, list(args)) == expected, (entry, args, expected)
+    for entry, args, expected in STRONG + WEAK:
+        assert run(entry, list(args)) == expected
 
     strong_killed = []
-    weak_survivors = []
     weak_killed = []
+    weak_survivors = []
     for i, site in enumerate(sites):
-        copy_dir = tmp_path / ("m" + str(i)) / "grade"
+        mutant_parent = tmp_path / ("m" + str(i))
+        mutant_parent.mkdir(parents=True)
+        mutant_dir = mutant_parent / "grade"
         shutil.copytree(
-            code_dir, copy_dir, ignore=shutil.ignore_patterns("__pycache__")
+            code_dir,
+            mutant_dir,
+            ignore=shutil.ignore_patterns("__pycache__"),
         )
-        kind_python.apply_site(copy_dir, site)
-        mutant_run = kind_python.asset_runner(copy_dir)
-        description = field(site, "description")
+        kind_python.apply_site(mutant_dir, site)
+        mutant_run = kind_python.asset_runner(mutant_dir)
+        desc = field(site, "description")
         if suite_kills(mutant_run, STRONG):
-            strong_killed.append(description)
+            strong_killed.append(desc)
         if suite_kills(mutant_run, WEAK):
-            weak_killed.append(description)
+            weak_killed.append(desc)
         else:
-            weak_survivors.append(description)
+            weak_survivors.append(desc)
 
-    total = len(sites)
-    assert total == 6
+    total_sites = len(sites)
+    assert total_sites == 6
 
-    assert len(strong_killed) == 6, strong_killed
-    assert len(strong_killed) / total >= BAR
+    assert len(strong_killed) == 6
+    assert len(strong_killed) / total_sites >= 0.8
 
-    assert len(weak_killed) == 4, weak_killed
-    assert len(weak_killed) / total < BAR
+    assert len(weak_killed) == 4
+    assert len(weak_killed) / total_sites < 0.8
     assert weak_survivors == [
         "grade.py:10: a == b and a > 0 -> a == b or a > 0",
         "grade.py:16: s + x -> s - x",

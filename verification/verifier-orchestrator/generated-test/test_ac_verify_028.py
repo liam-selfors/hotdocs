@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:2e383cb05d82c44d2b8e8f99446efd9df132a524c17e733ccc891a2dd3da25ac
+# hotdocs-criterion: sha256:d043c7867b3713583b4f68c6007ea69ab8b31badbf16430430cebc3c0bce4b9c
 import hashlib
 import json
 import os
@@ -19,93 +19,154 @@ def write(path, text):
     path.write_text(text, encoding="utf-8")
 
 
-CRITERION_TEXT = (
-    "Given a qux process that sleeps\n"
-    "When qux_run is invoked\n"
-    "Then it times out"
-)
-REQUIREMENT_TEXT = "**R-QUX-001** - qux_run MUST run."
-INTERFACE_TEXT = "# Library\n\n```\nqux_run() -> None\n```\n"
+def pid_running(pid):
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    try:
+        out = subprocess.run(
+            ["ps", "-o", "stat=", "-p", str(pid)],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        ).stdout.strip()
+    except Exception:
+        return True
+    if out == "":
+        return False
+    if out.startswith("Z"):
+        return False
+    return True
 
 
-def bundle_dict():
-    return {
-        "component_id": "comp-qux",
-        "criterion_id": "AC-QUX-001",
-        "covers": "R-QUX-001",
-        "criterion_text": CRITERION_TEXT,
-        "requirement_text": REQUIREMENT_TEXT,
-        "interface": INTERFACE_TEXT,
-        "glossary": "",
-        "dependency_interfaces": {},
-        "testing": "",
-    }
-
-
-def header_for(bundle):
-    payload = json.dumps(
-        {k: bundle[k] for k in ("criterion_text", "requirement_text", "interface", "glossary", "testing")},
-        sort_keys=True,
-        ensure_ascii=False,
-        separators=(",", ":"),
-    )
-    return "# hotdocs-criterion: sha256:" + hashlib.sha256(payload.encode("utf-8")).hexdigest()
-
-
-def cached_test_source(bundle, pid_file):
-    return (
-        header_for(bundle) + "\n"
-        "import subprocess\n"
-        "import sys\n"
-        "import time\n"
-        "\n"
-        "\n"
-        "def test_spawns_and_sleeps():\n"
-        "    child = subprocess.Popen(\n"
-        "        [sys.executable, '-c', 'import time; time.sleep(600)'],\n"
-        "        start_new_session=True,\n"
-        "    )\n"
-        "    with open(" + repr(str(pid_file)) + ", 'w') as fh:\n"
-        "        fh.write(str(child.pid))\n"
-        "    time.sleep(600)\n"
-    )
-
-
-def build_fixture(repo_root, pid_file, author_log):
-    bundle = bundle_dict()
-
+def build_fixture(repo_root, pidfile, author_log):
     write(
         repo_root / "specs" / "product" / "qux.md",
-        "---\nid: P-QUX\ntitle: Qux capability\nstatus: draft\nowners: [team]\n---\n\n"
-        "# Qux capability\n\n## Purpose\n\nQux.\n\n## Scope\n\n- qux\n",
+        "---\n"
+        "id: P-QUX\n"
+        "title: Qux capability\n"
+        "status: draft\n"
+        "owners: [team]\n"
+        "---\n"
+        "\n"
+        "# Qux capability\n"
+        "\n"
+        "## Purpose\n"
+        "\n"
+        "Provides qux.\n"
+        "\n"
+        "## Scope\n"
+        "\n"
+        "- qux\n",
     )
-    write(repo_root / "specs" / "glossary.md", "# Glossary\n")
     comp = repo_root / "specs" / "components" / "qux"
     write(
         comp / "component.md",
-        "---\nid: comp-qux\ntitle: Qux\nstatus: draft\nowners: [team]\nrealizes: [P-QUX]\n---\n\n"
-        "# Qux\n\n## Purpose\n\nRuns qux.\n\n## Scope\n\n- In scope: qux.\n\n"
-        "## Definitions\n\nNone.\n\n## Behavior\n\nSee `requirements/`.\n\n"
-        "## Interfaces\n\nSee `interface/`.\n\n## Data\n\nSee `interface/data/`.\n\n"
-        "## Acceptance criteria\n\nSee `acceptance/`.\n\n"
-        "## Non-functional constraints\n\nSee `constraints.md`.\n\n"
-        "## Open questions\n\n## Change log\n\n- Initial.\n",
+        "---\n"
+        "id: comp-qux\n"
+        "title: Qux\n"
+        "status: draft\n"
+        "owners: [team]\n"
+        "realizes: [P-QUX]\n"
+        "---\n"
+        "\n"
+        "# Qux\n"
+        "\n"
+        "## Purpose\n"
+        "\n"
+        "Computes qux values.\n"
+        "\n"
+        "## Scope\n"
+        "\n"
+        "- In scope: qux.\n"
+        "\n"
+        "## Definitions\n"
+        "\n"
+        "None.\n"
+        "\n"
+        "## Behavior\n"
+        "\n"
+        "See `requirements/`.\n"
+        "\n"
+        "## Interfaces\n"
+        "\n"
+        "See `interface/`.\n"
+        "\n"
+        "## Data\n"
+        "\n"
+        "See `interface/data/`.\n"
+        "\n"
+        "## Acceptance criteria\n"
+        "\n"
+        "See `acceptance/`.\n"
+        "\n"
+        "## Non-functional constraints\n"
+        "\n"
+        "See `constraints.md`.\n"
+        "\n"
+        "## Open questions\n"
+        "\n"
+        "## Change log\n"
+        "\n"
+        "- Initial.\n",
     )
-    write(comp / "requirements" / "R-QUX-001.md", "# R-QUX-001\n\n" + REQUIREMENT_TEXT + "\n")
-    write(comp / "interface" / "library.md", INTERFACE_TEXT)
-    write(comp / "constraints.md", "# Constraints\n\nNone.\n")
+    write(
+        comp / "requirements" / "R-QUX-001.md",
+        "**R-QUX-001** — `qux_run` MUST return an integer.\n",
+    )
     write(
         comp / "acceptance" / "AC-QUX-001.md",
-        "# AC-QUX-001\n\nCovers: R-QUX-001\nKind: generated-test\n\n"
-        "```gherkin\n" + CRITERION_TEXT + "\n```\n",
+        "# AC-QUX-001\n"
+        "\n"
+        "Covers: R-QUX-001\n"
+        "Kind: generated-test\n"
+        "\n"
+        "```gherkin\n"
+        "Given a qux input of 1\n"
+        "When qux_run is called\n"
+        "Then it returns an integer\n"
+        "```\n",
     )
+    write(
+        comp / "interface" / "library.md",
+        "# Library\n"
+        "\n"
+        "```\n"
+        "qux_run(x) -> int\n"
+        "```\n",
+    )
+    write(comp / "constraints.md", "# Constraints\n\nNone.\n")
+    write(repo_root / "specs" / "glossary.md", "# Glossary\n")
 
     write(repo_root / "gen" / "qux" / "qux.py", "")
 
+    bundle = {
+        "component_id": "comp-qux",
+        "criterion_id": "AC-QUX-001",
+        "covers": "R-QUX-001",
+        "criterion_text": "Given a qux input of 1 When qux_run is called Then it returns an integer",
+        "requirement_text": "R-QUX-001 qux_run MUST return an integer.",
+        "interface": "qux_run(x) -> int",
+        "glossary": "# Glossary",
+        "dependency_interfaces": {},
+        "testing": "",
+    }
     write(
         repo_root / "gen" / "spec-bundle-assembler" / "spec_bundle_assembler.py",
+        "import copy\n"
+        "\n"
+        "BUNDLE = " + repr(bundle) + "\n"
+        "\n"
+        "\n"
         "def assemble_criterion(component_id, criterion_id, repo_root):\n"
-        "    return dict(" + repr(bundle) + ")\n",
+        "    return copy.deepcopy(BUNDLE)\n"
+        "\n"
+        "\n"
+        "def assemble(component_id, repo_root, mode='cold'):\n"
+        "    raise RuntimeError('not used')\n",
     )
     write(
         repo_root / "gen" / "test-probe" / "test_probe.py",
@@ -128,12 +189,34 @@ def build_fixture(repo_root, pid_file, author_log):
         "    return ProbeReport()\n",
     )
 
+    payload = json.dumps(
+        {k: bundle[k] for k in ("criterion_text", "requirement_text", "interface", "glossary", "testing")},
+        sort_keys=True,
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+    header = "# hotdocs-criterion: sha256:" + hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+    test_source = (
+        header + "\n"
+        "import subprocess\n"
+        "import sys\n"
+        "import time\n"
+        "\n"
+        "\n"
+        "def test_spawns_detached_child():\n"
+        "    child = subprocess.Popen(\n"
+        "        [sys.executable, '-c', 'import time; time.sleep(600)'],\n"
+        "        start_new_session=True,\n"
+        "    )\n"
+        "    with open(" + repr(str(pidfile)) + ", 'w') as fh:\n"
+        "        fh.write(str(child.pid))\n"
+        "    time.sleep(600)\n"
+    )
     write(
         repo_root / "verification" / "qux" / "generated-test" / "test_ac_qux_001.py",
-        cached_test_source(bundle, pid_file),
+        test_source,
     )
-
-    content = cached_test_source(bundle, pid_file)
 
     def test_author(b):
         with open(author_log, "a", encoding="utf-8") as fh:
@@ -144,70 +227,50 @@ def build_fixture(repo_root, pid_file, author_log):
             "prompt_version": "v1",
             "cache_hit": False,
             "model_call_error": None,
-            "file": {"path": "verification/qux/generated-test/test_ac_qux_001.py", "content": content},
+            "file": {
+                "path": "verification/qux/generated-test/test_ac_qux_001.py",
+                "content": test_source,
+            },
         }
 
-    def judge(b):
-        return {"result": "pass", "rationale": "fake"}
-
-    return test_author, judge
+    return test_author
 
 
-def pid_running(pid):
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        return True
-    try:
-        out = subprocess.run(
-            ["ps", "-o", "stat=", "-p", str(pid)], capture_output=True, text=True, timeout=10
-        ).stdout.strip()
-    except Exception:
-        return True
-    if not out:
-        return False
-    return not out.startswith("Z")
-
-
-def test_ac_verify_028_timeout_kills_whole_process_tree(tmp_path, monkeypatch):
+def test_timeout_kills_whole_process_tree(tmp_path, monkeypatch):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
-    pid_file = tmp_path / "child.pid"
+    pidfile = tmp_path / "child.pid"
     author_log = tmp_path / "author.log"
-    test_author, judge = build_fixture(repo_root, pid_file, author_log)
+    test_author = build_fixture(repo_root, pidfile, author_log)
 
     monkeypatch.setattr(verifier_orchestrator, "DEFAULT_TEST_TIMEOUT", 5)
 
-    child_pid = None
+    pid = None
     try:
         start = time.monotonic()
-        report = verifier_orchestrator.verify(
-            "comp-qux", repo_root, judge=judge, test_author=test_author
-        )
+        report = verifier_orchestrator.verify("comp-qux", repo_root, judge=None, test_author=test_author)
         elapsed = time.monotonic() - start
 
         criteria = field(report, "criteria")
         matching = [c for c in criteria if field(c, "id") == "AC-QUX-001"]
-        assert len(matching) == 1, criteria
-        assert field(matching[0], "result") == "fail", matching[0]
+        assert len(matching) == 1
+        assert field(matching[0], "result") == "fail"
 
-        assert elapsed < 60, elapsed
+        assert elapsed < 60, "verify took " + repr(elapsed) + " seconds"
 
-        assert pid_file.is_file(), "the cached test never wrote child.pid"
-        child_pid = int(pid_file.read_text().strip())
+        assert pidfile.is_file(), "the cached test never wrote child.pid"
+        pid = int(pidfile.read_text(encoding="utf-8").strip())
 
         time.sleep(2)
-        assert not pid_running(child_pid), "child pid " + str(child_pid) + " is still running"
+        assert not pid_running(pid), "child process " + repr(pid) + " is still running"
     finally:
-        if child_pid is None and pid_file.is_file():
+        if pid is None and pidfile.is_file():
             try:
-                child_pid = int(pid_file.read_text().strip())
+                pid = int(pidfile.read_text(encoding="utf-8").strip())
             except ValueError:
-                child_pid = None
-        if child_pid is not None and pid_running(child_pid):
+                pid = None
+        if pid is not None and pid_running(pid):
             try:
-                os.kill(child_pid, signal.SIGKILL)
+                os.kill(pid, signal.SIGKILL)
             except (ProcessLookupError, PermissionError):
                 pass
