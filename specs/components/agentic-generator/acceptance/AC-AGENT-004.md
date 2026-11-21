@@ -10,11 +10,17 @@ Given a generator stand-in, platform macOS with /usr/bin/sandbox-exec,
   "scratch/test_w.py" with a test asserting widget.KEY is None and that
   socket.create_connection(("1.1.1.1", 80), timeout=3) raises OSError;
   check_import; run_scratch_tests; finish
-When generate_agentic(bundle for comp-widget, ...) is called with
-  ANTHROPIC_API_KEY set to "k" in the test's environment
+When generate_agentic(bundle for comp-widget, ...) is called with a
+  repo_root holding no gen/ directory (so the tool root's python adapter
+  is used) and ANTHROPIC_API_KEY set to "k" in the test's environment
 Then check_import's result starts "0\n", run_scratch_tests' result
   starts "0\n", and the result's isolation is "sandbox-exec" (a test on
   a platform without sandbox-exec skips this scenario)
+
+Given the same platform and a loop stand-in whose script is only finish
+When generate_agentic is called
+Then the result's isolation is "sandbox-exec", the level a run would have
+  used
 
 Given SANDBOX_EXEC and BWRAP set to "/nonexistent/sandbox"
 When generate_agentic is called with the same script
