@@ -1,72 +1,80 @@
-# hotdocs-criterion: sha256:01a445c3cb51513fee68906229ba1414e124bcb4dc27e37918c3d1d02714e4ae
-import json
+# hotdocs-criterion: sha256:7e5acb96f1fc294d9d9646c66159dce22e06bbd893bbb0d59e2117da4dc6965e
 from pathlib import Path
 
 import spec_linter
 
 
-COMPONENT_REL = "specs/components/widget/component.md"
+COMPONENT_REL = "specs/components/foo/component.md"
 
 
-def _get(value, name, default=None):
-    if isinstance(value, dict):
-        return value.get(name, default)
-    return getattr(value, name, default)
+def field(value, name):
+    return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def _norm_str(value):
-    inner = getattr(value, "value", value)
-    return str(inner)
-
-
-def _norm_path(value):
-    return str(value).replace("\\", "/")
-
-
-def _purpose_text():
-    sentence = "This component formats widget records into stable plain text output."
-    words = (sentence + " ") * 16
-    tokens = words.split()
-    assert len(tokens) == 160
-    return " ".join(tokens)
-
-
-def _write(path: Path, text: str):
+def _write(path, text):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
 
 
-def _build_corpus(repo_root: Path):
-    comp_dir = repo_root / "specs" / "components" / "widget"
-    component_md = (
+def _build_corpus(repo_root):
+    specs = repo_root / "specs"
+
+    _write(
+        specs / "glossary.md",
+        "# Glossary\n"
+        "\n"
+        "Canonical vocabulary.\n"
+        "\n"
+        "- **Widget** — a small thing this fixture talks about.\n",
+    )
+
+    _write(
+        specs / "decisions" / "D1.md",
         "---\n"
-        "id: comp-widget\n"
-        "title: Widget\n"
+        "id: D1\n"
+        "title: First decision\n"
         "status: draft\n"
-        "owners: [alice]\n"
-        "sealed: true\n"
-        "source_path: legacy/widget.py\n"
+        "owners: [team-a]\n"
         "---\n"
         "\n"
-        "# Widget\n"
+        "# D1 First decision\n"
+        "\n"
+        "The foo component exists to format widgets.\n",
+    )
+
+    purpose_words = " ".join(["widget"] * 160)
+    assert len(purpose_words.split()) == 160
+
+    _write(
+        repo_root / COMPONENT_REL,
+        "---\n"
+        "id: comp-foo\n"
+        "title: Foo\n"
+        "status: draft\n"
+        "owners: [team-a]\n"
+        "sealed: true\n"
+        "source_path: legacy/foo/\n"
+        "---\n"
+        "\n"
+        "# Foo\n"
         "\n"
         "## Purpose\n"
         "\n"
-        + _purpose_text()
+        + purpose_words
         + "\n"
         "\n"
         "## Rationale\n"
         "\n"
-        "This design follows D999.\n"
+        "This design follows `D999`.\n"
         "\n"
         "## Scope\n"
         "\n"
-        "- In scope: formatting widget records.\n"
-        "- Out of scope: everything else.\n"
+        "- In scope: formatting widgets.\n"
+        "- Out of scope: storing widgets.\n"
         "\n"
         "## Definitions\n"
         "\n"
-        "None.\n"
+        "None beyond the glossary.\n"
         "\n"
         "## Behavior\n"
         "\n"
@@ -92,139 +100,93 @@ def _build_corpus(repo_root: Path):
         "\n"
         "## Change log\n"
         "\n"
-        "- Initial draft.\n"
+        "- Initial draft.\n",
     )
-    _write(comp_dir / "component.md", component_md)
+
+    comp = specs / "components" / "foo"
     _write(
-        comp_dir / "requirements" / "R-WIDGET-001.md",
-        "# R-WIDGET-001\n\n**R-WIDGET-001** — The widget MUST format each record as plain text.\n",
+        comp / "requirements" / "R-FOO-001.md",
+        "# R-FOO-001\n"
+        "\n"
+        "**R-FOO-001** — `format_widget` MUST return the widget name "
+        "unchanged (`D1`).\n",
     )
     _write(
-        comp_dir / "acceptance" / "AC-WIDGET-001.md",
-        "# AC-WIDGET-001\n\n"
-        "Covers: R-WIDGET-001\n"
-        "Kind: generated-test\n\n"
+        comp / "acceptance" / "AC-FOO-001.md",
+        "# AC-FOO-001\n"
+        "\n"
+        "Covers: R-FOO-001\n"
+        "Kind: generated-test\n"
+        "\n"
         "```gherkin\n"
-        "Given a record\n"
-        "When the widget formats it\n"
-        "Then the output is plain text\n"
+        "Given a widget named \"a\"\n"
+        "When format_widget runs\n"
+        "Then it returns \"a\"\n"
         "```\n",
     )
     _write(
-        comp_dir / "interface" / "library.md",
-        "# Library\n\n```\nformat(record: dict) -> str\n```\n\nFormats a record as plain text.\n",
+        comp / "interface" / "library.md",
+        "# Library\n"
+        "\n"
+        "```\n"
+        "format_widget(name: str) -> str\n"
+        "```\n"
+        "\n"
+        "Returns the widget name unchanged.\n",
     )
     _write(
-        comp_dir / "constraints.md",
-        "# Constraints\n\n- Formatting one record takes under 10 ms, measured by a timing test.\n",
+        comp / "interface" / "data" / "Widget.md",
+        "# `Widget`\n"
+        "\n"
+        "A widget is identified by its name, a `str`.\n",
     )
     _write(
-        repo_root / "specs" / "glossary.md",
-        "# Glossary\n\n- **Gizmo** — an unrelated example term.\n",
+        comp / "constraints.md",
+        "# Constraints\n"
+        "\n"
+        "- `format_widget` returns within 10 ms, measured by timing 100 calls.\n",
     )
 
 
-def _write_fake_checker(repo_root: Path, slug: str, module_name: str, finding: dict, log_path: Path):
-    source = (
-        "import json\n"
-        "\n"
-        "_LOG = " + repr(str(log_path)) + "\n"
-        "_FINDING = " + repr(finding) + "\n"
-        "\n"
-        "def check(repo_root):\n"
-        "    with open(_LOG, 'a', encoding='utf-8') as fh:\n"
-        "        fh.write(json.dumps({'module': " + repr(module_name) + ", 'repo_root': str(repo_root)}) + '\\n')\n"
-        "    return [dict(_FINDING)]\n"
-    )
-    _write(repo_root / "gen" / slug / (module_name + ".py"), source)
-
-
-CITE_FINDING = {
-    "rule_id": "R-CITE-001",
-    "severity": "fail",
-    "file": COMPONENT_REL,
-    "line": 17,
-    "message": "cites D999, which has no decision file",
-}
-
-SIZE_FINDING = {
-    "rule_id": "R-SIZE-004",
-    "severity": "fail",
-    "file": COMPONENT_REL,
-    "line": 12,
-    "message": "Purpose section is 160 words, above the 150-word hard cap",
-}
-
-
-def _setup(tmp_path: Path):
+def test_lint_includes_citation_and_size_findings_and_load_corpus(tmp_path):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
     _build_corpus(repo_root)
-    log_path = tmp_path / "checker_calls.log"
-    _write_fake_checker(repo_root, "citation-checker", "citation_checker", CITE_FINDING, log_path)
-    _write_fake_checker(repo_root, "size-checker", "size_checker", SIZE_FINDING, log_path)
-    return repo_root, log_path
-
-
-def _hard_failures(report):
-    value = _get(report, "hard_failures", None)
-    if value is None:
-        summary = _get(report, "summary", None)
-        if summary is not None:
-            value = _get(summary, "hard_failures", None)
-    return value
-
-
-def _is_finding(obj):
-    finding_cls = getattr(spec_linter, "Finding", None)
-    if isinstance(finding_cls, type):
-        return isinstance(obj, finding_cls)
-    return type(obj).__name__ == "Finding"
-
-
-def test_lint_includes_citation_and_size_checker_findings_as_findings(tmp_path):
-    repo_root, log_path = _setup(tmp_path)
 
     report = spec_linter.lint(None, repo_root)
+    findings = list(field(report, "findings"))
+    summary = [
+        (field(f, "rule_id"), field(f, "severity"), field(f, "file"), field(f, "message"))
+        for f in findings
+    ]
 
-    findings = list(_get(report, "findings", []) or [])
+    cite = [
+        f
+        for f in findings
+        if field(f, "rule_id") == "R-CITE-001"
+        and field(f, "severity") == "fail"
+        and field(f, "file") == COMPONENT_REL
+    ]
+    assert cite, summary
 
-    cite = [f for f in findings if _norm_str(_get(f, "rule_id")) == "R-CITE-001"]
-    size = [f for f in findings if _norm_str(_get(f, "rule_id")) == "R-SIZE-004"]
+    size = [
+        f
+        for f in findings
+        if field(f, "rule_id") == "R-SIZE-004"
+        and field(f, "severity") == "fail"
+        and field(f, "file") == COMPONENT_REL
+    ]
+    assert size, summary
 
-    assert len(cite) == 1, findings
-    assert len(size) == 1, findings
+    for f in cite + size:
+        assert not isinstance(f, dict), summary
+        assert type(f).__name__ == "Finding", summary
+        if hasattr(spec_linter, "Finding"):
+            assert isinstance(f, spec_linter.Finding), summary
 
-    for found, expected in ((cite[0], CITE_FINDING), (size[0], SIZE_FINDING)):
-        assert _is_finding(found), type(found)
-        assert not isinstance(found, dict)
-        assert _norm_str(_get(found, "severity")) == "fail"
-        assert _norm_path(_get(found, "file")) == COMPONENT_REL
-        assert _get(found, "line") == expected["line"]
-        assert _get(found, "message") == expected["message"]
+    assert field(report, "hard_failures") == 2, summary
 
-    # citation-checker's findings come before size-checker's
-    assert findings.index(cite[0]) < findings.index(size[0])
-
-    assert _hard_failures(report) == 2
-
-    # Both dependency checkers really ran, against this repo_root
-    assert log_path.exists()
-    records = [json.loads(line) for line in log_path.read_text(encoding="utf-8").splitlines() if line.strip()]
-    modules = [r["module"] for r in records]
-    assert "citation_checker" in modules
-    assert "size_checker" in modules
-    for r in records:
-        assert Path(r["repo_root"]).resolve() == repo_root.resolve()
-
-
-def test_load_corpus_returns_corpus_with_component(tmp_path):
-    repo_root, _ = _setup(tmp_path)
-
-    assert callable(getattr(spec_linter, "load_corpus", None))
     corpus = spec_linter.load_corpus(repo_root)
-
     assert type(corpus).__name__ == "Corpus"
-    components = _get(corpus, "components", None)
-    assert components is not None
-    assert "widget" in components
+    components = field(corpus, "components")
+    assert "foo" in components

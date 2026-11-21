@@ -5,7 +5,7 @@ hotdocs <verb words> [args...]
 hotdocs [--help | -h | help | --version]
 ```
 
-`main(argv)` receives everything after the `hotdocs` word. Verbs route per
+`main(argv)` and `run(argv, ...)` receive everything after the `hotdocs` word. Verbs route per
 `interface/data/VerbTable.md` (`R-CLI-001`–`005`), `init` included; help and
 version are `R-CLI-004`.
 
@@ -19,6 +19,6 @@ version are `R-CLI-004`.
 
 `llm-endpoint`'s `ModelResolutionError` means the `--model` given names
 no provider. Components load their own copies of `llm-endpoint`, so it is
-matched by class name, never by identity: `main` prints
+matched by class name, never by identity: `run` prints
 `usage error: <its message>` to stderr, one line, never a traceback, and
 returns `2`. Any other exception propagates.

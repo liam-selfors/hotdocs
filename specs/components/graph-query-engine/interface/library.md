@@ -20,4 +20,4 @@ separately to run its own traversal queries against the resulting
 `nodes`/`edges` tables (see `specs/architecture/
 graph-query-engine.md` for why these two extensions specifically).
 
-Implements: `specs/architecture/graph-query-engine.md`
+Implements: `specs/architecture/graph-query-engine.md`, `specs/architecture/graph-query-engine-fixture.md`

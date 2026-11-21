@@ -4,10 +4,8 @@
 hotdocs provenance check <component-id> --spec-bundle-hash=<h> --gate-versions=<json> [--repo-root=<dir>] [--format=json|text]
 ```
 
-Reports hit/miss for the given component and hash, same shape and
-intent as `cache-manager`'s own `hotdocs cache inspect` — a developer
-debugging why a component did or didn't skip regeneration can check
-this directly.
+Reports hit/miss for the given component and hash, for a developer
+debugging why a component did or didn't skip regeneration.
 
 `main(argv)` receives `argv` beginning `["check", ...]` (the
 `provenance` verb is already consumed). Every flag takes its value

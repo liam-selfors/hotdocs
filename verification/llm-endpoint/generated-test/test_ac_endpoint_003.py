@@ -1,9 +1,6 @@
-# hotdocs-criterion: sha256:ae834c0001bde20a3d00ac73d7528a53a8f1d5d3abcdb4f75ce2aea5a9c53d90
+# hotdocs-criterion: sha256:9f3d320d2dbecaf840ba7eaf8a9db4b300abb8cd1686520d3786814f096c9e2e
 import io
-import json
 import urllib.error
-
-import pytest
 
 import llm_endpoint
 
@@ -12,19 +9,16 @@ def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-@pytest.fixture
-def isolated_cwd(tmp_path, monkeypatch):
-    work = tmp_path / "work"
-    work.mkdir()
-    monkeypatch.chdir(work)
+def test_ac_endpoint_003_http_429_is_rate_limit_without_retry(tmp_path, monkeypatch):
+    # complete() writes its call log under .hotdocs/calls/ in the current
+    # directory; keep that inside a fresh temporary directory.
+    monkeypatch.chdir(tmp_path)
     monkeypatch.delenv("VAR_HOTDOCS_CONFIG", raising=False)
-    return tmp_path
 
+    calls = []
 
-def _make_raising_backend(log_path):
-    def backend(prompt, model, **params):
-        with open(log_path, "a", encoding="utf-8") as fh:
-            fh.write(json.dumps({"prompt": prompt, "model": model}) + "\n")
+    def mock_backend(prompt, model, **params):
+        calls.append((prompt, model, dict(params)))
         raise urllib.error.HTTPError(
             "https://example.invalid/v1/messages",
             429,
@@ -33,36 +27,21 @@ def _make_raising_backend(log_path):
             io.BytesIO(b'{"error": "rate limited"}'),
         )
 
-    return backend
+    model = "anthropic:claude-sonnet-5"
+    response = llm_endpoint.complete("hello", model, backend=mock_backend)
 
+    # Exactly one call: no internal retry loop.
+    assert len(calls) == 1
 
-def _read_calls(log_path):
-    if not log_path.exists():
-        return []
-    return [
-        json.loads(line)
-        for line in log_path.read_text(encoding="utf-8").splitlines()
-        if line.strip()
-    ]
+    # Text is null on failure.
+    assert field(response, "text") is None
 
-
-def test_ac_endpoint_003_http_429_is_rate_limit_with_no_retry(isolated_cwd):
-    log_path = isolated_cwd / "backend_calls.jsonl"
-    backend = _make_raising_backend(log_path)
-
-    response = llm_endpoint.complete(
-        "Say hello.", "anthropic:claude-sonnet-5", backend=backend
-    )
-
-    # The failure is captured as structured data, not a boolean.
+    # The failure is structured data, with the exact category.
     error = field(response, "model_call_error")
     assert error is not None
     assert not isinstance(error, bool)
-    assert field(error, "category") == "rate_limit"
+    category = field(error, "category")
+    assert category == "rate_limit"
 
-    # text is null on failure.
-    assert field(response, "text") is None
-
-    # Exactly one call to the backend: no internal retry loop.
-    calls = _read_calls(log_path)
-    assert len(calls) == 1, f"expected exactly one backend call, got {len(calls)}"
+    # Still no second call after the response has been built.
+    assert len(calls) == 1

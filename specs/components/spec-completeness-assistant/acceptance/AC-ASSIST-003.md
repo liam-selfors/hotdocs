@@ -4,17 +4,18 @@ Covers: R-ASSIST-003
 Kind: generated-test
 
 ```gherkin
-Given a repo_root with a faked spec-linter returning no findings, a
-  faked impact-analyzer whose blast radius is exactly comp-foo, a faked
-  llm-endpoint, and faked spec-bundle-assembler and generator modules
-  that each record every call to a log file the test controls
-When assist(changed_ids, repo_root, model="fake-model") runs
-Then hint_previews has exactly one key, comp-foo, and the log shows
-  assemble called for comp-foo with mode "hint" (never "cold") and
-  generate called once with that bundle
+Given a repo_root with stand-ins for all four dependencies that record
+  every call to a log file the test controls: lint returning no
+  findings, a blast radius of comp-foo then comp-bar, and a check that
+  returns an object whose to_dict() is {"findings": [], "target": <the
+  first target>} for comp-foo and raises RuntimeError("boom") for comp-bar
+When assist(["R-FOO-001"], repo_root, model="fake-model") runs
+Then criterion_reviews is {"comp-foo": {"findings": [], "target":
+  "comp-foo"}, "comp-bar": {"error": "boom"}}, and the log shows check
+  called with ["comp-foo"] then ["comp-bar"], each with no model
 
 Given the same setup
-When assist(changed_ids, repo_root) runs with no model
-Then hint_previews still has exactly one key, comp-foo, the log shows
-  assemble called with mode "hint", and shows no generate call
+When assist(["R-FOO-001"], repo_root) runs with no model
+Then criterion_reviews has the same two keys and the log shows no
+  complete call
 ```

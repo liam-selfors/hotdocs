@@ -1,181 +1,155 @@
-# hotdocs-criterion: sha256:2a791eb73d0cb78fa13a71c009c1af2580a5fc93965c29b18aab077e91ac83c8
+# hotdocs-criterion: sha256:67ce959c4db14d3e642f0f7c8a86932de1549973905d5218d2ca679cffe874a0
+import provenance_tracker_ui
+
 import json
 from html.parser import HTMLParser
 from pathlib import Path
 
-import provenance_tracker_ui
+
+ATTEMPT_A = "2026-10-01T00:00:00Z-aaaaaa"
+ATTEMPT_B = "2026-10-02T00:00:00Z-bbbbbb"
 
 
 def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-VOID_TAGS = {
-    "area", "base", "br", "col", "embed", "hr", "img", "input", "link",
-    "meta", "param", "source", "track", "wbr",
-}
-
-
-class Element:
-    def __init__(self, tag, attrs, parent):
-        self.tag = tag
-        self.attrs = attrs
-        self.parent = parent
-        self.children = []
-        self.texts = []
-
-    def iter(self):
-        yield self
-        for child in self.children:
-            if isinstance(child, Element):
-                yield from child.iter()
-
-    def text(self):
-        parts = []
-        for child in self.children:
-            if isinstance(child, Element):
-                parts.append(child.text())
-            else:
-                parts.append(child)
-        return "".join(parts)
-
-    def classes(self):
-        return (self.attrs.get("class") or "").split()
-
-
-class TreeBuilder(HTMLParser):
-    def __init__(self):
-        super().__init__(convert_charrefs=True)
-        self.root = Element("#root", {}, None)
-        self.stack = [self.root]
-
-    def handle_starttag(self, tag, attrs):
-        attr_map = {k: (v if v is not None else "") for k, v in attrs}
-        el = Element(tag, attr_map, self.stack[-1])
-        self.stack[-1].children.append(el)
-        if tag not in VOID_TAGS:
-            self.stack.append(el)
-
-    def handle_startendtag(self, tag, attrs):
-        attr_map = {k: (v if v is not None else "") for k, v in attrs}
-        el = Element(tag, attr_map, self.stack[-1])
-        self.stack[-1].children.append(el)
-
-    def handle_endtag(self, tag):
-        for i in range(len(self.stack) - 1, 0, -1):
-            if self.stack[i].tag == tag:
-                del self.stack[i:]
-                return
-
-    def handle_data(self, data):
-        self.stack[-1].children.append(data)
-
-
-def parse_html(text):
-    builder = TreeBuilder()
-    builder.feed(text)
-    builder.close()
-    return builder.root
-
-
-def elements_tagged_with(root, value):
-    out = []
-    for el in root.iter():
-        for name, attr_value in el.attrs.items():
-            if name == "data-attempt-id":
-                continue
-            if attr_value == value:
-                out.append(el)
-                break
-    return out
-
-
-def attempt_ids_in(el):
-    return [e.attrs["data-attempt-id"] for e in el.iter() if "data-attempt-id" in e.attrs]
-
-
-def retry_feedback_texts_in(el):
-    return [e.text().strip() for e in el.iter() if "retry-feedback" in e.classes()]
-
-
-ATTEMPT_OLD = "2026-10-01T00:00:00Z-aaaaaa"
-ATTEMPT_NEW = "2026-10-02T00:00:00Z-bbbbbb"
-
-
-def verification_report(component_id, overall, results):
+def _verification_report(component_id, overall, requirement_results):
     criteria = []
-    for i, (rid, res) in enumerate(sorted(results.items()), start=1):
+    for i, (rid, res) in enumerate(sorted(requirement_results.items()), start=1):
         crit = {
-            "id": "AC-" + rid[2:],
+            "id": "AC-" + rid[2:-4] + "-" + str(i).zfill(3) if False else "AC-FOO-" + str(i).zfill(3),
             "covers": rid,
             "kind": "compiled",
             "result": res,
         }
         if res == "fail":
+            crit["failure_detail"] = {"message": "failed", "expected": 1, "actual": 2}
             crit["failure_origin"] = "implementation"
-            crit["failure_detail"] = {"message": "failed", "expected": 1, "actual": 0}
         criteria.append(crit)
     return {
         "component_id": component_id,
         "criteria": criteria,
-        "requirement_results": dict(results),
+        "requirement_results": dict(requirement_results),
         "interface_drift": False,
         "mutation_score": None,
         "mutation_error": None,
+        "assets": [{
+            "kind": "python", "path": ".", "definition_sha256": None,
+            "adapter_sha256": "sha256:00", "versions": {"python": "3.12.4"},
+            "lockfile_sha256": None,
+        }],
         "overall": overall,
     }
 
 
-def attempt_record(attempt_id, component_id):
-    timestamp = attempt_id.rsplit("-", 1)[0]
+def _generation_result(component_id):
     return {
-        "attempt_id": attempt_id,
         "component_id": component_id,
-        "timestamp": timestamp,
-        "spec_bundle_hash": "sha256:" + "0" * 64,
-        "generation": {
-            "component_id": component_id,
-            "spec_bundle_hash": "sha256:" + "0" * 64,
-            "model": "claude-sonnet-5",
-            "prompt_version": "v1",
-            "cache_hit": False,
-            "files": {"foo.py": "x = 1\n"},
-            "model_call_error": None,
-            "refused": None,
-            "retry_feedback": None,
-        },
-        "verification": verification_report(
-            component_id, "fail", {"R-FOO-001": "pass", "R-FOO-002": "fail"}
-        ),
+        "spec_bundle_hash": "sha256:abc",
+        "model": "claude-sonnet-5",
+        "prompt_version": "v12",
+        "cache_hit": False,
+        "files": {"foo.py": "x = 1\n"},
+        "model_call_error": None,
+        "refused": None,
+        "retry_feedback": None,
+        "mode": "single",
+        "transcript_sha256": None,
+        "turns": 1,
+        "tool_calls": 0,
+        "isolation": None,
     }
 
 
-def build_fixture(tmp_path):
+def _attempt_record(attempt_id, component_id, failing):
+    results = {"R-FOO-001": "pass", "R-FOO-002": "fail" if failing else "pass"}
+    return {
+        "attempt_id": attempt_id,
+        "component_id": component_id,
+        "timestamp": attempt_id[:20],
+        "spec_bundle_hash": "sha256:abc",
+        "generation": _generation_result(component_id),
+        "verification": _verification_report(component_id, "fail", results),
+    }
+
+
+def _build_repo(tmp_path):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
-    log_path = tmp_path / "fake_calls.log"
+    log_path = tmp_path / "calls.log"
 
-    # Corpus graph
+    foo_vr = _verification_report(
+        "comp-foo", "fail", {"R-FOO-001": "pass", "R-FOO-002": "fail"})
+    ok_vr = _verification_report(
+        "comp-ok", "pass", {"R-FOO-001": "pass"})
+    report = {
+        "scope": "whole-corpus",
+        "ready": False,
+        "components": {
+            "comp-foo": {
+                "hit": True,
+                "reason": None,
+                "verification_report": foo_vr,
+                "license_scan": {"blocked": False},
+                "secret_scan": {"flagged": False},
+            },
+            "comp-ok": {
+                "hit": True,
+                "reason": None,
+                "verification_report": ok_vr,
+                "license_scan": {"blocked": False},
+                "secret_scan": {"flagged": False},
+            },
+        },
+        "capabilities": {},
+        "not_ready_reasons": ["comp-foo: verification failed"],
+    }
+
+    fake_dir = repo_root / "gen" / "provenance-tracker"
+    fake_dir.mkdir(parents=True)
+    src = (
+        "import copy\n"
+        "\n"
+        "_LOG = " + repr(str(log_path)) + "\n"
+        "_REPORT = " + repr(report) + "\n"
+        "\n"
+        "def _log(line):\n"
+        "    with open(_LOG, 'a', encoding='utf-8') as fh:\n"
+        "        fh.write(line + '\\n')\n"
+        "\n"
+        "def check_readiness(repo_root, changed_ids=None, model=None, seed=0, llm_backend=None):\n"
+        "    _log('check_readiness')\n"
+        "    return copy.deepcopy(_REPORT)\n"
+        "\n"
+        "def last_requirement_failures(component_id, repo_root):\n"
+        "    _log('last_requirement_failures ' + str(component_id))\n"
+        "    if component_id == " + repr("comp-foo") + ":\n"
+        "        return [" + repr("R-FOO-002") + "]\n"
+        "    return []\n"
+    )
+    (fake_dir / "provenance_tracker.py").write_text(src, encoding="utf-8")
+
     graph = {
         "nodes": {
             "comp-foo": {
                 "type": "component",
-                "verification": None,
-                "provenance": None,
+                "verification": foo_vr,
+                "provenance": {},
                 "size_status": "ok",
                 "sealed": True,
                 "pinned_overrides": [],
-                "owners": ["team-a"],
+                "owners": ["pipeline-team"],
                 "documents": {},
             },
-            "comp-pass": {
+            "comp-ok": {
                 "type": "component",
-                "verification": None,
-                "provenance": None,
+                "verification": ok_vr,
+                "provenance": {},
                 "size_status": "ok",
                 "sealed": True,
                 "pinned_overrides": [],
-                "owners": ["team-a"],
+                "owners": ["pipeline-team"],
                 "documents": {},
             },
         },
@@ -188,121 +162,130 @@ def build_fixture(tmp_path):
     }
     (repo_root / "verification").mkdir()
     (repo_root / "verification" / "corpus-graph.json").write_text(
-        json.dumps(graph, sort_keys=True, indent=2) + "\n", encoding="utf-8"
-    )
+        json.dumps(graph, sort_keys=True, indent=2) + "\n", encoding="utf-8")
 
-    # Attempt records (newer written first, so ordering can't come from write order)
     attempts_dir = repo_root / ".hotdocs" / "attempts" / "comp-foo"
     attempts_dir.mkdir(parents=True)
-    for aid in (ATTEMPT_NEW, ATTEMPT_OLD):
+    # Write the newer one first so ordering cannot come from write order.
+    for aid in (ATTEMPT_B, ATTEMPT_A):
+        rec = _attempt_record(aid, "comp-foo", failing=True)
         (attempts_dir / (aid + ".json")).write_text(
-            json.dumps(attempt_record(aid, "comp-foo"), indent=2), encoding="utf-8"
-        )
-
-    # Fake provenance-tracker
-    report = {
-        "scope": "whole-corpus",
-        "ready": False,
-        "components": {
-            "comp-foo": {
-                "hit": True,
-                "verification_report": verification_report(
-                    "comp-foo", "fail", {"R-FOO-001": "pass", "R-FOO-002": "fail"}
-                ),
-                "license_scan": {"blocked": False, "findings": []},
-                "secret_scan": {"flagged": False, "findings": []},
-            },
-            "comp-pass": {
-                "hit": True,
-                "verification_report": verification_report(
-                    "comp-pass", "pass", {"R-PASS-001": "pass"}
-                ),
-                "license_scan": {"blocked": False, "findings": []},
-                "secret_scan": {"flagged": False, "findings": []},
-            },
-        },
-        "capabilities": {},
-        "not_ready_reasons": [
-            "comp-foo: verification failed — run hotdocs generate comp-foo"
-        ],
-    }
-
-    fake_dir = repo_root / "gen" / "provenance-tracker"
-    fake_dir.mkdir(parents=True)
-    source = (
-        "import json\n"
-        "\n"
-        "_LOG_PATH = " + repr(str(log_path)) + "\n"
-        "_REPORT_JSON = " + repr(json.dumps(report)) + "\n"
-        "\n"
-        "\n"
-        "def _log(line):\n"
-        "    with open(_LOG_PATH, 'a', encoding='utf-8') as fh:\n"
-        "        fh.write(line + '\\n')\n"
-        "\n"
-        "\n"
-        "def check_readiness(repo_root, changed_ids=None, model=None, seed=0, llm_backend=None):\n"
-        "    _log('check_readiness')\n"
-        "    return json.loads(_REPORT_JSON)\n"
-        "\n"
-        "\n"
-        "def last_requirement_failures(component_id, repo_root):\n"
-        "    _log('last_requirement_failures ' + str(component_id))\n"
-        "    if component_id == " + repr("comp-foo") + ":\n"
-        "        return [" + repr("R-FOO-002") + "]\n"
-        "    return []\n"
-    )
-    (fake_dir / "provenance_tracker.py").write_text(source, encoding="utf-8")
+            json.dumps(rec, indent=2) + "\n", encoding="utf-8")
 
     return repo_root, log_path
 
 
+VOID = {"area", "base", "br", "col", "embed", "hr", "img", "input", "link",
+        "meta", "param", "source", "track", "wbr"}
+
+
+class _Elem:
+    def __init__(self, tag, attrs, parent):
+        self.tag = tag
+        self.attrs = dict(attrs)
+        self.parent = parent
+        self.children = []
+        self.text_parts = []
+
+    @property
+    def text(self):
+        return "".join(self.text_parts)
+
+    def classes(self):
+        return (self.attrs.get("class") or "").split()
+
+    def descendants(self):
+        out = []
+        for c in self.children:
+            out.append(c)
+            out.extend(c.descendants())
+        return out
+
+
+class _TreeParser(HTMLParser):
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.root = _Elem("#root", [], None)
+        self.stack = [self.root]
+
+    def handle_starttag(self, tag, attrs):
+        el = _Elem(tag, attrs, self.stack[-1])
+        self.stack[-1].children.append(el)
+        if tag not in VOID:
+            self.stack.append(el)
+
+    def handle_startendtag(self, tag, attrs):
+        el = _Elem(tag, attrs, self.stack[-1])
+        self.stack[-1].children.append(el)
+
+    def handle_endtag(self, tag):
+        for i in range(len(self.stack) - 1, 0, -1):
+            if self.stack[i].tag == tag:
+                del self.stack[i:]
+                return
+
+    def handle_data(self, data):
+        for el in self.stack:
+            el.text_parts.append(data)
+
+
+def _parse(html_text):
+    p = _TreeParser()
+    p.feed(html_text)
+    p.close()
+    return p.root
+
+
+def _node_element(root, node_id):
+    candidates = [e for e in root.descendants()
+                  if e.attrs.get("data-node-id") == node_id]
+    assert candidates, "no element with data-node-id " + repr(node_id)
+    preferred = [e for e in candidates if "node" in e.classes()]
+    if preferred:
+        return preferred[0]
+    return candidates[0]
+
+
 def test_ac_ui_008_attempt_history_and_retry_feedback(tmp_path):
-    repo_root, log_path = build_fixture(tmp_path)
+    repo_root, log_path = _build_repo(tmp_path)
     out_dir = tmp_path / "out"
 
     snapshot = provenance_tracker_ui.render_tracker_ui(out_dir, repo_root)
 
-    # The fake provenance-tracker was the one consulted
-    assert log_path.is_file(), "fake provenance_tracker was never called"
-    log_lines = log_path.read_text(encoding="utf-8").splitlines()
-    assert "check_readiness" in log_lines
-
     # Snapshot assertions
-    nodes = field(snapshot, "nodes")
-    by_id = {field(n, "id"): n for n in nodes}
-    assert "comp-foo" in by_id
-    foo = by_id["comp-foo"]
+    nodes = {field(n, "id"): n for n in field(snapshot, "nodes")}
+    assert "comp-foo" in nodes
+    assert "comp-ok" in nodes
+    foo = nodes["comp-foo"]
     assert field(foo, "status") == "failing"
-    attempts = field(foo, "attempts")
-    assert [field(a, "attempt_id") for a in attempts] == [ATTEMPT_OLD, ATTEMPT_NEW]
+    attempt_ids = [field(a, "attempt_id") for a in field(foo, "attempts")]
+    assert attempt_ids == [ATTEMPT_A, ATTEMPT_B]
     assert list(field(foo, "retry_feedback")) == ["R-FOO-002"]
 
-    # HTML assertions
-    index = out_dir / "index.html"
-    assert index.is_file()
-    root = parse_html(index.read_text(encoding="utf-8"))
+    ok = nodes["comp-ok"]
+    assert field(ok, "status") == "passing"
+    assert list(field(ok, "attempts")) == []
+    assert list(field(ok, "retry_feedback")) == []
 
-    foo_candidates = elements_tagged_with(root, "comp-foo")
-    assert foo_candidates, "no element identifies comp-foo's node"
-    expected_feedback = "--retry-feedback=R-FOO-002"
-    matching = [
-        el for el in foo_candidates
-        if attempt_ids_in(el) == [ATTEMPT_OLD, ATTEMPT_NEW]
-        and retry_feedback_texts_in(el) == [expected_feedback]
-    ]
-    assert matching, (
-        "no comp-foo node element contains exactly the two data-attempt-id "
-        "elements in oldest-first order and one retry-feedback element with text "
-        + repr(expected_feedback)
-        + "; candidates: "
-        + repr([(attempt_ids_in(el), retry_feedback_texts_in(el)) for el in foo_candidates])
-    )
+    # The fake's last_requirement_failures was consulted for comp-foo once
+    log_lines = log_path.read_text(encoding="utf-8").splitlines()
+    assert log_lines.count("last_requirement_failures comp-foo") == 1
 
-    # Passing component: no retry-feedback element in its node
-    pass_candidates = elements_tagged_with(root, "comp-pass")
-    assert pass_candidates, "no element identifies comp-pass's node"
-    for el in pass_candidates:
-        assert retry_feedback_texts_in(el) == [], (
-            "passing component's node contains a retry-feedback element"
-        )
+    # Page assertions
+    html_text = (Path(out_dir) / "index.html").read_text(encoding="utf-8")
+    root = _parse(html_text)
+
+    foo_el = _node_element(root, "comp-foo")
+    foo_desc = foo_el.descendants()
+    page_attempt_ids = [e.attrs["data-attempt-id"] for e in foo_desc
+                        if "data-attempt-id" in e.attrs]
+    assert page_attempt_ids == [ATTEMPT_A, ATTEMPT_B]
+
+    feedback = [e for e in foo_desc if "retry-feedback" in e.classes()]
+    assert len(feedback) == 1
+    assert feedback[0].text.strip() == "--retry-feedback=R-FOO-002"
+
+    ok_el = _node_element(root, "comp-ok")
+    ok_feedback = [e for e in ok_el.descendants() if "retry-feedback" in e.classes()]
+    assert ok_feedback == []
+    assert "retry-feedback" not in ok_el.classes()

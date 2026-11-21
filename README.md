@@ -9,13 +9,16 @@ You write what a component must do and how to check it. `hotdocs generate`
 has a model write the code and a test per acceptance criterion, then runs
 those tests, mutation-tests them, and scans the result for licenses and
 secrets. `hotdocs verify` says whether everything in a change is ready.
-Python projects only.
+Code is Python; a component can also declare files of other kinds, such as
+a JavaScript module, each with its own definition and checks
+(`specs/architecture/asset-kinds.md`).
 
 ## Try it
 
 See `QUICKSTART.md`: install this checkout once, run `hotdocs init` in a
 project, and generate the example component. The tool's own components stay
-in this checkout; a project holds only its own (`D199`).
+in this checkout; a project holds only its own (`D199`). `AUTHORING.md`
+explains how to write specs that generate correctly the first time.
 
 ## How it works
 
@@ -45,11 +48,13 @@ The everyday commands:
 | --- | --- |
 | `hotdocs init [--example]` | set up a project and choose a model provider |
 | `hotdocs lint` | validate the spec corpus |
+| `hotdocs spec check comp-<name>` | can each criterion's test be written from what its author sees? |
 | `hotdocs generate comp-<name>` | generate and verify one component |
 | `hotdocs verify [--changed=...]` | is everything ready |
 | `hotdocs impact --changed=...` | blast radius of a spec change |
 | `hotdocs assist --changed=...` | a model's review of a spec change |
 | `hotdocs track feedback comp-<name>` | the last attempt's failing requirements |
+| `hotdocs decision new "<title>"`, `component new <name>`, `kind new <kind>` | scaffold a decision, a component or an asset kind |
 | `hotdocs track ui build` | a readiness page for the corpus |
 | `hotdocs corpus-graph build`, `docs-site build` | the corpus graph and a browsable site |
 
@@ -58,7 +63,7 @@ The everyday commands:
 ## Status
 
 This repository is the worked example: the tool is built from its own
-specs. Every one of the 28 components under `specs/components/` is
+specs. Every one of the 37 components under `specs/components/` is
 generated from its spec on `claude-opus-5-5` and verified the same way a
 project's are, each with a provenance manifest that `hotdocs verify` checks.
 The hand-written versions that bootstrapped the chain (`generator`,
@@ -68,11 +73,11 @@ used to generate their own replacements, then swapped out once those passed.
 `pipeline/` and is checked against hand-maintained characterization tests,
 since trusting a compiled criterion means trusting its compiler.
 
-`QUICKSTART.md` §6 lists the known limits of this release.
+`QUICKSTART.md` §7 lists the known limits of this release.
 `notes/bootstrap-history.md` tells how each component first landed;
 `verification/<slug>/BOOTSTRAP.md` has each one's full account.
 
-Decisions are ADRs in `specs/decisions/`, `D1` through `D331` (`D1`–`D75`
+Decisions are ADRs in `specs/decisions/`, `D1` through `D351` (`D1`–`D75`
 from the 2026-10 baseline reset, the rest recorded as they were made).
 `notes/initial-ideas.md` holds the original brainstorm, with its own
 informal numbering.

@@ -65,11 +65,6 @@ See `interface/data/`.
 
 See `acceptance/`.
 
-Every criterion below is `kind: compiled` — blast-radius computation is a
-pure graph traversal over corpus state, the same demonstration `spec-linter`
-already made for the "prefer `compiled` whenever possible" guidance, applied
-to a second real component.
-
 ## Non-functional constraints
 
 See `constraints.md`.
@@ -78,34 +73,21 @@ See `constraints.md`.
 
 None. The two originally recorded here are both resolved:
 
-- ~~R-IMPACT-002/003 define contract-change detection as "is `interface.md`
-  byte-identical" — blunt~~ — resolved by `D1` (one-file-per-unit hashing,
-  no semantic diffing needed) and sharpened further by `D2`: true semantic
-  diffing *within* one `interface/` file (e.g. a typo fix in `library.md`'s
-  prose still forcing propagation) remains unsolved for `cli.md`/
-  `library.md`/`data/*.md` — accepted as safe-but-wasteful, same as
-  before — but for behavioral guarantees specifically, `D2`'s
-  `interface/guarantees/` + `depends_on_guarantees` narrowing solves the
-  *coarser* version of this same problem: a dependent that only cares
-  about one guarantee no longer pays for changes to unrelated ones.
-- ~~Should `R-IMPACT-004`/`005`'s transitive inclusion cascade further?~~ —
-  resolved: stays one-hop, by design, **not** because the residual risk
-  was dismissed, but because it's covered by a different, better-suited
-  mechanism. One-hop risks a second-order change (e.g., component A's
-  *behavior* shifting as a side effect of a var/capability-driven
-  regeneration) going uncaught this merge if A's dependents aren't pulled
-  in too. `D2` closes this two ways: (1) `interface/guarantees/` makes any
-  *foreseen* behavioral dependency explicit and propagating, the same
-  one-hop mechanism everything else uses — no cascading needed once the
-  guarantee itself is visible; (2) `capability-scenario-verifier`, run
-  as part of `hotdocs verify` once its realizing components pass
-  (`D89`/`D92`/`D93`), is the permanent backstop for whatever wasn't foreseen,
-  tested against the real regenerated system rather than guessed at here.
-  Eager multi-hop cascading from every `transitive-var`/
-  `transitive-capability` edge was rejected as the alternative — it would
-  trade this bounded, already-covered risk for routinely ballooning the
-  blast radius on pure speculation, undermining the methodology's own
-  cost-containment premise (`P-ZERO-EDIT`).
+- ~~R-IMPACT-002/003's whole-`interface.md` byte comparison is
+  blunt~~ — resolved by `D1` (one file per unit) and `D2`
+  (`interface/guarantees/` + `depends_on_guarantees` narrowing). A
+  prose-only edit to `cli.md`/`library.md`/`data/*.md` still propagates:
+  accepted as safe-but-wasteful.
+- ~~Should `R-IMPACT-004`/`005`'s transitive inclusion cascade
+  further?~~ — resolved: it stays one-hop by design. A second-order
+  change (a component's behaviour shifting as a side effect of a
+  var/capability-driven regeneration) is covered two ways (`D2`):
+  `interface/guarantees/` makes a foreseen behavioural dependency
+  explicit and propagating, and `capability-scenario-verifier`, run in
+  `hotdocs verify` (`D89`/`D92`/`D93`), is the permanent backstop for the
+  unforeseen. Eager multi-hop cascading was rejected: it would routinely
+  balloon the blast radius on speculation, against `P-ZERO-EDIT`'s
+  cost-containment premise.
 
 ## Change log
 
@@ -124,3 +106,9 @@ None. The two originally recorded here are both resolved:
   `AC-IMPACT-*` criteria for real — first successful implementation.
   `gen/impact-analyzer/impact_analyzer.py` is now that candidate. See
   `verification/impact-analyzer/BOOTSTRAP.md` for the full account.
+- `D329`, `D347`: pinned behaviour a candidate left unpinned (surviving
+  mutants): guarantee-file selection (`R-IMPACT-008`), the default
+  branch and no-merge-base fallback (`R-IMPACT-010`), report order and
+  reason precedence, the CLI's parsing and text output
+  (`R-IMPACT-011`, `AC-IMPACT-013`–`015`); `testing.md` gives the git
+  fixture recipe.

@@ -1,5 +1,5 @@
-# hotdocs-criterion: sha256:c7c1cbd1bfafd810e7c71f1bdfa14117b9bd2da1101f75dedb8a2e282861244d
-import dataclasses
+# hotdocs-criterion: sha256:d8b68645e7beb71bc8948d4a60eff138709e982925020053a1967b30a91397f7
+import hashlib
 import re
 from pathlib import Path
 
@@ -8,96 +8,63 @@ import pytest
 import generator
 
 
+PYTHON_ADAPTER = (
+    "from pathlib import Path\n"
+    "\n"
+    "KIND = \"python\"\n"
+    "\n"
+    "\n"
+    "def layout_errors(code_dir):\n"
+    "    return [\"bad.py:1: SyntaxError: x\"] if (Path(code_dir) / \"bad.py\").exists() else []\n"
+    "\n"
+    "\n"
+    "def provision(repo_root):\n"
+    "    return {\"ok\": True, \"reason\": \"\", \"versions\": {\"python\": \"3.12\"}, "
+    "\"lockfile_sha256\": None, \"interpreter\": \"/fake/python\"}\n"
+)
+
+
 def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-@dataclasses.dataclass
-class Bundle:
-    component_id: str
-    spec_bundle_hash: str
-    spec: str
-    interface: str
-    constraints: str
-    dependency_interfaces: dict = dataclasses.field(default_factory=dict)
-    dependency_context: dict = dataclasses.field(default_factory=dict)
-    dependency_usage: dict = dataclasses.field(default_factory=dict)
-    vars: dict = dataclasses.field(default_factory=dict)
-    glossary: str = ""
-    hint_code: object = None
+class Bundle(dict):
+    """A mapping that also exposes its keys as attributes."""
 
-    def __getitem__(self, key):
-        if key not in self.keys():
-            raise KeyError(key)
-        return getattr(self, key)
-
-    def get(self, key, default=None):
-        if key in self.keys():
-            return getattr(self, key)
-        return default
-
-    def keys(self):
-        return [f.name for f in dataclasses.fields(self)]
-
-    def __iter__(self):
-        return iter(self.keys())
-
-    def __contains__(self, key):
-        return key in self.keys()
-
-    def __len__(self):
-        return len(self.keys())
+    def __getattr__(self, name):
+        try:
+            return self[name]
+        except KeyError:
+            raise AttributeError(name)
 
 
-def make_bundle(hash_char):
+def make_bundle(tag):
+    digest = hashlib.sha256(("ac-gen-019-" + tag).encode("utf-8")).hexdigest()
     return Bundle(
-        component_id="comp-foo",
-        spec_bundle_hash="sha256:" + hash_char * 64,
-        spec="# Foo\n\n## Purpose\n\nFoo doubles a number.\n\n# R-FOO-001\n\n**R-FOO-001** \u2014 `foo(x)` MUST return `2 * x`.",
-        interface="# Library\n\n```\nfoo(x: int) -> int\n```",
-        constraints="# Constraints\n\nNone.",
+        component_id="comp-widget-maker",
+        spec_bundle_hash="sha256:" + digest,
+        spec="Widget Maker makes widgets.\n\nR-WIDGET-001: make() returns 1.",
+        interface="make() -> int",
+        constraints="Keep it small.",
         dependency_interfaces={},
         dependency_context={},
         dependency_usage={},
         vars={},
-        glossary="# Glossary\n\n- **Foo** \u2014 a test term.",
+        glossary="Widget: a thing.",
         hint_code=None,
     )
 
 
-def write_component(repo_root):
-    comp_dir = repo_root / "specs" / "components" / "foo"
-    comp_dir.mkdir(parents=True, exist_ok=True)
-    text = (
-        "---\n"
-        "id: comp-foo\n"
-        "title: Foo\n"
-        "status: draft\n"
-        "owners: [team-a]\n"
-        "sealed: false\n"
-        "depends_on: []\n"
-        "---\n"
-        "\n"
-        "# Foo\n"
-        "\n"
-        "## Purpose\n"
-        "\n"
-        "Foo doubles a number.\n"
-    )
-    (comp_dir / "component.md").write_text(text, encoding="utf-8")
-
-
-def make_backend(recorded):
+def make_backend(calls):
     def backend(prompt, model, **params):
-        recorded.append(prompt)
-        m = re.search(r"-----BEGIN FILE ([0-9a-f]{32})", prompt)
-        assert m is not None, "prompt does not state a nonce in the reply-format markers"
-        nonce = m.group(1)
+        calls.append(prompt)
+        nonce = re.search(r"-----BEGIN FILE ([0-9a-f]{32}):", prompt).group(1)
         text = (
-            "-----BEGIN FILE " + nonce + ": foo.py-----\n"
-            + "def foo(x):\n"
-            + "    return 2 * x\n"
-            + "-----END FILE " + nonce + "-----\n"
+            "-----BEGIN FILE " + nonce + ": widget_maker.py-----\n"
+            "def make():\n"
+            "    return 1\n"
+            "-----END FILE " + nonce + "-----\n"
+            "-----END REPLY " + nonce + "-----\n"
         )
         return {
             "text": text,
@@ -109,55 +76,53 @@ def make_backend(recorded):
     return backend
 
 
-@pytest.fixture(autouse=True)
-def _no_remote_cache(monkeypatch):
+def test_prompt_instructs_dynamic_loads_resolve_from_repo_root(tmp_path, monkeypatch):
     monkeypatch.delenv("VAR_CACHE_STORE_URL", raising=False)
+    repo_root = tmp_path / "repo"
+    adapter = repo_root / "gen" / "kind-python" / "kind_python.py"
+    adapter.parent.mkdir(parents=True)
+    adapter.write_text(PYTHON_ADAPTER, encoding="utf-8")
 
-
-def test_prompt_instructs_dynamic_dependency_loads_resolve_from_repo_root(tmp_path):
-    repo_root = tmp_path
-    write_component(repo_root)
-    recorded = []
-    bundle = make_bundle("a")
-
-    result = generator.generate(
-        bundle, "claude-sonnet-5", repo_root=repo_root, llm_backend=make_backend(recorded)
+    calls = []
+    bundle = make_bundle("prompt")
+    generator.generate(
+        bundle, "mock-model", repo_root=repo_root, llm_backend=make_backend(calls)
     )
 
-    assert recorded, "mock model was never called"
-    prompt = recorded[0]
-    lowered = prompt.lower()
+    assert len(calls) == 1
+    prompt = calls[0]
 
-    # The instruction must hold regardless of depends_on: this bundle has no
-    # dependencies at all, so the instruction must come from the fixed prompt.
-    assert "repo_root" in prompt
-    assert "import" in lowered
+    # The bundle itself mentions none of these terms, so they come from the
+    # prompt's own instructions.
     assert "sys.modules" in prompt
     assert "__file__" in prompt
-    assert "gen/" in prompt
-    assert "tool" in lowered
+    assert "repo_root" in prompt
+    assert re.search(r"\bimport\b", prompt)
+    assert re.search(r"tool[ _]root", prompt, re.IGNORECASE)
 
-    assert field(result, "refused") is None
-    assert field(result, "model_call_error") is None
+    paragraphs = re.split(r"\n\s*\n", prompt)
+    assert any(
+        "sys.modules" in p and "__file__" in p and "repo_root" in p
+        for p in paragraphs
+    ), "no single instruction ties sys.modules, __file__ and repo_root together"
 
 
-def test_generate_completes_without_gen_dir_in_repo_root(tmp_path):
-    repo_root = tmp_path
-    write_component(repo_root)
+def test_generate_completes_without_gen_dir_in_repo_root(tmp_path, monkeypatch):
+    monkeypatch.delenv("VAR_CACHE_STORE_URL", raising=False)
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
     assert not (repo_root / "gen").exists()
-    recorded = []
-    bundle = make_bundle("b")
 
+    calls = []
+    bundle = make_bundle("no-gen")
     result = generator.generate(
-        bundle, "claude-sonnet-5", repo_root=repo_root, llm_backend=make_backend(recorded)
+        bundle, "mock-model", repo_root=repo_root, llm_backend=make_backend(calls)
     )
 
-    assert len(recorded) >= 1
-    assert field(result, "refused") is None
+    assert result is not None
+    assert len(calls) == 1
     assert field(result, "model_call_error") is None
+    assert field(result, "refused") is None
     files = field(result, "files")
-    assert files, "expected non-empty files"
-    assert "foo.py" in files
-    assert "return 2 * x" in files["foo.py"]
-    assert field(result, "component_id") == "comp-foo"
-    assert field(result, "spec_bundle_hash") == bundle.spec_bundle_hash
+    assert files
+    assert any(path.endswith("widget_maker.py") for path in files)

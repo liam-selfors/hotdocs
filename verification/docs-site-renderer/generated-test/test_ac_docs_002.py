@@ -1,6 +1,9 @@
-# hotdocs-criterion: sha256:0ff6f223686dccbc5c9f5db7dc4b02fed3ca45c10194385d2648c89d0843d0f8
-import re
-from dataclasses import dataclass, field as dc_field
+# hotdocs-criterion: sha256:88b746db66fc4bedaafaa4927721b10feff393b3aeaf116685cd0fa15f613f8f
+import dataclasses
+import html
+import importlib.util
+import json
+import sys
 from pathlib import Path
 
 import docs_site_renderer
@@ -10,175 +13,184 @@ def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-@dataclass
-class FakeCorpusGraph:
-    nodes: dict = dc_field(default_factory=dict)
-    edges: list = dc_field(default_factory=list)
-    aggregates: dict = dc_field(default_factory=dict)
+def load_module(path, module_name):
+    spec = importlib.util.spec_from_file_location(module_name, path)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+@dataclasses.dataclass
+class _FallbackCorpusGraph:
+    nodes: dict
+    edges: list
+    aggregates: dict
 
     def to_dict(self):
-        return {
-            "nodes": self.nodes,
-            "edges": self.edges,
-            "aggregates": self.aggregates,
-        }
+        return {"nodes": self.nodes, "edges": self.edges, "aggregates": self.aggregates}
 
     def to_json_bytes(self):
-        import json
-
         return (
-            json.dumps(self.to_dict(), sort_keys=True, indent=2, ensure_ascii=True)
-            + "\n"
+            json.dumps(self.to_dict(), sort_keys=True, indent=2, ensure_ascii=True) + "\n"
         ).encode("utf-8")
 
 
-COMPONENT_ID = "comp-zqwidget"
+def _corpus_graph_class():
+    try:
+        gen = next(
+            p for p in Path(docs_site_renderer.__file__).resolve().parents if p.name == "gen"
+        )
+    except StopIteration:
+        return _FallbackCorpusGraph
+    base = gen / "corpus-graph-builder"
+    flat = base / "corpus_graph_builder.py"
+    pkg = base / "corpus_graph_builder" / "__init__.py"
+    try:
+        if flat.is_file():
+            module = load_module(flat, "corpus_graph_builder")
+        elif pkg.is_file():
+            spec = importlib.util.spec_from_file_location(
+                "corpus_graph_builder", pkg, submodule_search_locations=[str(pkg.parent)]
+            )
+            module = importlib.util.module_from_spec(spec)
+            sys.modules["corpus_graph_builder"] = module
+            spec.loader.exec_module(module)
+        else:
+            return _FallbackCorpusGraph
+        cls = getattr(module, "CorpusGraph", None)
+        if cls is None:
+            return _FallbackCorpusGraph
+        cls(nodes={}, edges=[], aggregates={})
+        return cls
+    except Exception:
+        return _FallbackCorpusGraph
 
-DOC_COMPONENT = "zqcomponenttext4411"
-DOC_REQUIREMENT = "zqrequirementtext4412"
-DOC_INTERFACE = "zqinterfacetext4413"
-DOC_ACCEPTANCE = "zqacceptancetext4414"
-DOC_CONSTRAINTS = "zqconstraintstext4415"
 
-REQ_ID = "R-ZQWIDGET-001"
-REQ_STATUS = "zqreqstatus4421"
-CRIT_ID = "AC-ZQWIDGET-001"
+COMP_ID = "comp-zqmark"
+OTHER_ID = "comp-plainother"
+
+DOC_COMPONENT = "Component body docmarkalpha91 text"
+DOC_REQ = "Requirement body reqdocmarkbeta92 text"
+DOC_IFACE = "Interface body ifacemarkgamma93 text"
+DOC_ACC = "Acceptance body accmarkdelta94 text"
+DOC_CONSTRAINTS = "Constraints body consmarkeps95 text"
+
+REQ_ID = "R-ZQMARK-777"
+REQ_STATUS = "reqstatusmark31"
+CRIT_ID = "AC-ZQMARK-888"
 CRIT_KIND = "generated-test"
-CRIT_RESULT = "zqcritresult4422"
+CRIT_RESULT = "critresultmark42"
 
-MODEL_PIN = "anthropic:zqmodelpin4431"
-PROMPT_VERSION = "zqpromptversion4432"
-GENERATED_AT = "2026-03-04T05:06:07Z"
+MODEL = "anthropic:modelpinmark-q9"
+PROMPT_VERSION = "promptvermark-v53"
+GENERATED_AT = "2031-04-05T06:07:08Z"
 
 SIZE_STATUS = "over"
-PINNED_OVERRIDE = "zqpinnedoverride4441"
-OWNER = "zqownerteam4451"
+PINNED = "src/pinnedmark_file64.py"
+OWNER = "ownermark-team75"
 
 
-def build_graph():
-    component_md = (
-        "---\n"
-        "id: " + COMPONENT_ID + "\n"
-        "title: Zq Widget\n"
-        "status: draft\n"
-        "owners: [" + OWNER + "]\n"
-        "sealed: true\n"
-        "source_path: legacy/zqwidget/\n"
-        "depends_on: []\n"
-        "realizes: []\n"
-        "uses_var: []\n"
-        "---\n"
-        "\n"
-        "# Zq Widget\n"
-        "\n"
-        "Purpose " + DOC_COMPONENT + " here.\n"
-    )
-    documents = {
-        "acceptance/AC-ZQWIDGET-001.md": (
-            "# " + CRIT_ID + "\n\nCovers: " + REQ_ID + "\n\nText " + DOC_ACCEPTANCE + " here.\n"
-        ),
-        "component.md": component_md,
-        "constraints.md": "# Constraints\n\nText " + DOC_CONSTRAINTS + " here.\n",
-        "interface/library.md": "# Library\n\nText " + DOC_INTERFACE + " here.\n",
-        "requirements/R-ZQWIDGET-001.md": (
-            "**" + REQ_ID + "** - Text " + DOC_REQUIREMENT + " here.\n"
-        ),
-    }
-    node = {
+def _component_node(sealed):
+    return {
         "type": "component",
         "verification": {
             "criteria": [
-                {
-                    "criterion_id": CRIT_ID,
-                    "kind": CRIT_KIND,
-                    "result": CRIT_RESULT,
-                }
+                {"id": CRIT_ID, "kind": CRIT_KIND, "result": CRIT_RESULT, "covers": [REQ_ID]}
             ],
             "requirement_results": {REQ_ID: REQ_STATUS},
         },
         "provenance": {
-            "model": MODEL_PIN,
+            "model": MODEL,
             "prompt_version": PROMPT_VERSION,
             "generated_at": GENERATED_AT,
         },
         "size_status": SIZE_STATUS,
-        "sealed": True,
-        "pinned_overrides": [PINNED_OVERRIDE],
+        "sealed": sealed,
+        "pinned_overrides": [PINNED],
         "owners": [OWNER],
-        "documents": documents,
-    }
-    return FakeCorpusGraph(
-        nodes={COMPONENT_ID: node},
-        edges=[],
-        aggregates={
-            "orphan_capability_rate": 0.0,
-            "orphan_component_rate": 0.0,
-            "orphan_var_rate": 0.0,
+        "documents": {
+            "acceptance/AC-ZQMARK-888.md": DOC_ACC,
+            "component.md": DOC_COMPONENT,
+            "constraints.md": DOC_CONSTRAINTS,
+            "interface/library.md": DOC_IFACE,
+            "requirements/R-ZQMARK-777.md": DOC_REQ,
         },
-    )
+    }
 
 
-def _read_text_files(out_dir):
-    result = {}
-    for p in sorted(Path(out_dir).rglob("*")):
-        if p.is_file():
-            try:
-                result[p] = p.read_text(encoding="utf-8")
-            except (UnicodeDecodeError, OSError):
-                continue
-    return result
+def _graph(sealed):
+    cls = _corpus_graph_class()
+    nodes = {
+        COMP_ID: _component_node(sealed),
+        OTHER_ID: {
+            "type": "component",
+            "verification": None,
+            "provenance": None,
+            "size_status": "ok",
+            "sealed": False,
+            "pinned_overrides": [],
+            "owners": [],
+            "documents": {"component.md": "Plain other component"},
+        },
+    }
+    edges = [{"from": COMP_ID, "to": OTHER_ID, "kind": "depends_on"}]
+    aggregates = {
+        "orphan_capability_rate": 0.0,
+        "orphan_component_rate": 0.0,
+        "orphan_var_rate": 0.0,
+    }
+    return cls(nodes=nodes, edges=edges, aggregates=aggregates)
 
 
-def test_detail_view_includes_every_component_field_value(tmp_path):
-    graph = build_graph()
-    out_dir = tmp_path / "out"
+def _detail_page(out_dir):
+    pages = []
+    for p in sorted(Path(out_dir).rglob("*.html")):
+        text = html.unescape(p.read_text(encoding="utf-8"))
+        if "docmarkalpha91" in text and p.name != "index.html":
+            pages.append(text)
+    if not pages:
+        for p in sorted(Path(out_dir).rglob("*.html")):
+            text = html.unescape(p.read_text(encoding="utf-8"))
+            if "docmarkalpha91" in text:
+                pages.append(text)
+    assert pages, "no detail page containing the component's documents was rendered"
+    return pages[0]
 
-    docs_site_renderer.render_docs_site(graph, out_dir)
 
-    assert out_dir.is_dir(), "render_docs_site did not create out_dir"
-    files = _read_text_files(out_dir)
-    assert files, "render_docs_site wrote no files"
+def test_ac_docs_002_detail_view_shows_every_field(tmp_path):
+    out_dir = tmp_path / "site"
+    docs_site_renderer.render_docs_site(_graph(True), out_dir)
+    page = _detail_page(out_dir)
 
-    plain_values = [
-        DOC_COMPONENT,
-        DOC_REQUIREMENT,
-        DOC_INTERFACE,
-        DOC_ACCEPTANCE,
-        DOC_CONSTRAINTS,
+    expected = [
+        COMP_ID,
+        "docmarkalpha91",
+        "reqdocmarkbeta92",
+        "ifacemarkgamma93",
+        "accmarkdelta94",
+        "consmarkeps95",
         REQ_ID,
         REQ_STATUS,
         CRIT_ID,
         CRIT_KIND,
         CRIT_RESULT,
-        MODEL_PIN,
+        MODEL,
         PROMPT_VERSION,
         GENERATED_AT,
-        PINNED_OVERRIDE,
+        SIZE_STATUS,
+        PINNED,
         OWNER,
     ]
+    missing = [v for v in expected if v not in page]
+    assert not missing, "detail view lacks values: " + repr(missing)
 
-    def missing_in(text):
-        missing = [v for v in plain_values if v not in text]
-        if not re.search(r"\b" + re.escape(SIZE_STATUS) + r"\b", text):
-            missing.append("size_status=" + SIZE_STATUS)
-        if "sealed" not in text.lower():
-            missing.append("sealed")
-        return missing
 
-    candidates = {p: t for p, t in files.items() if DOC_COMPONENT in t}
-    assert candidates, (
-        "no rendered file contains the component's component.md content; files: "
-        + repr([str(p.relative_to(out_dir)) for p in files])
-    )
-
-    report = {}
-    for p, text in candidates.items():
-        missing = missing_in(text)
-        if not missing:
-            return
-        report[str(p.relative_to(out_dir))] = missing
-
-    raise AssertionError(
-        "no detail view for " + COMPONENT_ID + " includes every value; missing per file: "
-        + repr(report)
-    )
+def test_ac_docs_002_detail_view_reflects_sealed(tmp_path):
+    out_sealed = tmp_path / "sealed"
+    out_unsealed = tmp_path / "unsealed"
+    docs_site_renderer.render_docs_site(_graph(True), out_sealed)
+    docs_site_renderer.render_docs_site(_graph(False), out_unsealed)
+    sealed_page = _detail_page(out_sealed)
+    unsealed_page = _detail_page(out_unsealed)
+    assert sealed_page != unsealed_page, "sealed status is not shown in the detail view"

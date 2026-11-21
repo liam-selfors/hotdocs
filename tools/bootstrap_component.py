@@ -22,6 +22,10 @@ usage error.
 from __future__ import annotations
 
 import argparse
+import copy
+import dataclasses
+import hashlib
+import json
 import re
 import shutil
 import subprocess
@@ -137,6 +141,8 @@ _NOT_CONSUMER_NAMES = {
     "test-author": {"ParsedCriterion", "compile_criterion", "complete"},
     # The bootstrap's own timeout adjustment, read with a getattr fallback.
     "verifier-orchestrator": {"DEFAULT_TEST_TIMEOUT"},
+    # A local list named `assembler` that caches the loaded module (D339).
+    "spec-bundle-assembler": {"append"},
 }
 
 
@@ -339,6 +345,11 @@ def _build_sandbox(component_id: str) -> Path:
     # on it (decision-drift-detector) first had a generated-test criterion.
     infra = {"cache-manager", "llm-endpoint", "spec-bundle-assembler"}
     needed = set(_depends_on_slugs(component_id)) | infra
+    # Asset-kind adapters are found by path, never through depends_on
+    # (D343, D344): every component has the implicit python asset, and
+    # code under test inside the sandbox resolves its tool root to the
+    # sandbox itself, so each committed gen/kind-*/ must be there too.
+    needed |= {d.name for d in (REAL_REPO / "gen").glob("kind-*") if d.is_dir()}
     for infra_slug in infra:
         # the machinery's own dependencies: an in-sandbox copy of the
         # assembler resolves its tool root to the sandbox itself (D213)
@@ -439,6 +450,11 @@ def _write_provenance(component_id: str, bundle, result, report, license_result,
         print(f"provenance: NOT written -- spec_bundle_hash changed during the run ({current_hash})")
         return False
     gate_versions = _get(key, "gate_versions")
+    # D313: the key names the generator that produced the code. Until the
+    # provenance-checker that computes it lands, record the version of the
+    # generator this run actually used.
+    if "generator" not in gate_versions and hasattr(generator, "PROMPT_VERSION"):
+        gate_versions = {**gate_versions, "generator": f"{generator.GATE_VERSION}+{generator.PROMPT_VERSION}"}
     pw.write_provenance(component_id, {
         "component_id": component_id,
         "generation_result": result,
@@ -477,8 +493,143 @@ def _write_sealed_provenance(component_id: str) -> bool:
     return _get(report, "overall") == "pass"
 
 
+CARRY_FILE = "carry.json"
+
+
+def _test_author_hash() -> str:
+    """Hash of the real test-author code: a test written by other code is
+    never carried over."""
+    digest = hashlib.sha256()
+    for path in sorted((REAL_REPO / "gen" / "test-author").rglob("*.py")):
+        if "__pycache__" not in path.parts:
+            digest.update(path.relative_to(REAL_REPO).as_posix().encode() + b"\0" + path.read_bytes())
+    return "sha256:" + digest.hexdigest()
+
+
+def _record_carry(component_id: str, sandbox: Path, bundle, report) -> None:
+    """Note in a failed seed's sandbox which generated tests passed, so the
+    next seed reuses them instead of authoring them again. Tests are written
+    from the spec alone, so one that passed stays valid while the spec bundle
+    and test-author are unchanged. A failed mutation baseline cannot be
+    pinned on one test, so then nothing is carried."""
+    if getattr(report, "mutation_error", None):
+        return
+    # A score under the bar is carried too: each passing test still checks
+    # its criterion, the next seed's code brings different mutants, and
+    # survivors come from criteria that leave behaviour unpinned, which
+    # authoring the same criteria again does not change.
+    passed = [_get(e, "id") for e in report.criteria
+              if _get(e, "kind") == "generated-test" and _get(e, "result") == "pass"]
+    (sandbox / CARRY_FILE).write_text(json.dumps({
+        "component_id": component_id,
+        "spec_bundle_hash": _get(bundle, "spec_bundle_hash"),
+        "test_author": _test_author_hash(),
+        "passed": passed,
+    }, indent=2))
+
+
+def _carry_tests(component_id: str, sandbox: Path, bundle) -> None:
+    """Copy into a fresh sandbox the passing generated tests of the newest
+    earlier seed of this component whose spec bundle and test-author match;
+    verify reuses each one whose header is current (R-VERIFY-019)."""
+    slug = _slug(component_id)
+    want = (_get(bundle, "spec_bundle_hash"), _test_author_hash())
+    earlier = sorted(Path(tempfile.gettempdir()).glob(f"bootstrap_{slug}_*/{CARRY_FILE}"),
+                     key=lambda p: p.stat().st_mtime, reverse=True)
+    for carry_path in earlier:
+        if carry_path.parent == sandbox:
+            continue
+        try:
+            carry = json.loads(carry_path.read_text())
+        except (OSError, ValueError):
+            continue
+        if carry.get("component_id") != component_id or (carry.get("spec_bundle_hash"), carry.get("test_author")) != want:
+            continue
+        src_dir = carry_path.parent / "verification" / slug / "generated-test"
+        dest_dir = sandbox / "verification" / slug / "generated-test"
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        copied = []
+        for cid in carry.get("passed", []):
+            name = "test_" + cid.lower().replace("-", "_") + ".py"  # verify's naming
+            if (src_dir / name).is_file():
+                shutil.copy2(src_dir / name, dest_dir / name)
+                copied.append(cid)
+        print(f"carried {len(copied)} passing test(s) from {carry_path.parent.name}: {', '.join(copied)}")
+        return
+    _reuse_committed(component_id, sandbox)
+
+
+_BUNDLE_FIELDS = ("criterion_text", "requirement_text", "interface", "glossary", "testing")
+
+
+def _criterion_header(bundle) -> str:
+    """The header line the real verifier expects (R-VERIFY-019): the
+    whole-bundle hash from verifier-orchestrator@3.3.0 on (D341), the
+    criterion-and-requirement hash before."""
+    version = str(getattr(verifier_orchestrator, "GATE_VERSION", ""))
+    major_minor = tuple(int(x) for x in re.findall(r"@(\d+)\.(\d+)", version)[0]) if "@" in version else (0, 0)
+    if major_minor >= (3, 3):
+        text = json.dumps({k: _get(bundle, k) or "" for k in _BUNDLE_FIELDS},
+                          sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+    else:
+        text = _get(bundle, "criterion_text") + "\n" + _get(bundle, "requirement_text")
+    return "# hotdocs-criterion: sha256:" + hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def _bundle_view(component_id: str, criterion_id: str, root: Path) -> str | None:
+    try:
+        b = spec_bundle_assembler.assemble_criterion(component_id, criterion_id, root)
+    except Exception:
+        return None
+    return json.dumps({k: _get(b, k) for k in _BUNDLE_FIELDS}, sort_keys=True, default=str)
+
+
+def _reuse_committed(component_id: str, sandbox: Path) -> None:
+    """With no earlier seed to carry from, start from the committed generated
+    tests whose criterion, covered requirement, interface (with its
+    Implements: documents) and glossary are what they were when the test was
+    last committed. A dependency's interface may have changed (a version
+    string, a reworded paragraph): a test whose fakes no longer fit fails,
+    and the next seed authors that one test again."""
+    slug = _slug(component_id)
+    real_dir = REAL_REPO / "verification" / slug / "generated-test"
+    dest_dir = sandbox / "verification" / slug / "generated-test"
+    by_name = {"test_" + p.stem.lower().replace("-", "_") + ".py": p.stem
+               for p in (REAL_REPO / "specs" / "components" / slug / "acceptance").glob("AC-*.md")}
+    snapshots: dict[str, Path] = {}
+    reused = []
+    for test in sorted(real_dir.glob("test_*.py")):
+        criterion_id = by_name.get(test.name)
+        git = lambda *a: subprocess.run(["git", *a], cwd=REAL_REPO, capture_output=True)
+        if not criterion_id or git("diff", "--quiet", "HEAD", "--", str(test)).returncode != 0:
+            continue
+        commit = git("log", "-1", "--format=%H", "--", str(test)).stdout.decode().strip()
+        if not commit:
+            continue
+        if commit not in snapshots:
+            snap = Path(tempfile.mkdtemp(prefix="bootstrap_snapshot_"))
+            archive = git("archive", commit, "specs", "SPEC_GUIDELINES.md").stdout
+            subprocess.run(["tar", "-x", "-C", str(snap)], input=archive, check=True)
+            snapshots[commit] = snap
+        then = _bundle_view(component_id, criterion_id, snapshots[commit])
+        if then is not None and then == _bundle_view(component_id, criterion_id, REAL_REPO):
+            dest_dir.mkdir(parents=True, exist_ok=True)
+            # Stamp the header the running verifier expects: the bundle is
+            # unchanged since this test was committed, so it is current.
+            lines = test.read_text(encoding="utf-8").split("\n")
+            if lines and lines[0].startswith("# hotdocs-criterion:"):
+                lines = lines[1:]
+            current = spec_bundle_assembler.assemble_criterion(component_id, criterion_id, REAL_REPO)
+            (dest_dir / test.name).write_text(_criterion_header(current) + "\n" + "\n".join(lines), encoding="utf-8")
+            reused.append(criterion_id)
+    for snap in snapshots.values():
+        shutil.rmtree(snap, ignore_errors=True)
+    print(f"reused {len(reused)} committed test(s) whose criterion bundle is unchanged: {', '.join(reused)}")
+
+
 def run(component_id: str, model: str, seed: int, retry_feedback: list[str] | None, keep_sandbox: bool,
-        hand_suite: bool = False, sealed_install: bool = False, resume: Path | None = None) -> int:
+        hand_suite: bool = False, sealed_install: bool = False, resume: Path | None = None,
+        reuse_candidate: bool = False, candidate_bundle_hash: str | None = None) -> int:
     code_rel = None
     if sealed_install:
         code_rel = _sealed_source_path(component_id)
@@ -498,10 +649,35 @@ def run(component_id: str, model: str, seed: int, retry_feedback: list[str] | No
 
     bundle = spec_bundle_assembler.assemble(component_id, repo_root=sandbox, mode="cold")
     print(f"spec_bundle_hash: {_get(bundle, 'spec_bundle_hash')}")
+    if resume is None:
+        _carry_tests(component_id, sandbox, bundle)
 
-    # Never generate beside the target's old code (see _build_sandbox).
-    shutil.rmtree(sandbox / "gen" / _slug(component_id), ignore_errors=True)
-    result = generator.generate(bundle, model, retry_feedback, repo_root=sandbox, llm_backend=None)
+    marker = sandbox / ".candidate.json"
+    if reuse_candidate:
+        # Re-verify the candidate a kept sandbox already holds instead of
+        # generating another: only when the spec bundle is exactly the one
+        # it was generated from, so what provenance records stays true.
+        recorded = json.loads(marker.read_text())["spec_bundle_hash"] if marker.is_file() else candidate_bundle_hash
+        if recorded != _get(bundle, "spec_bundle_hash"):
+            print(f"FAIL: --reuse-candidate needs the candidate's spec bundle {recorded}, now {_get(bundle, 'spec_bundle_hash')}.")
+            return 2
+        code_dir = sandbox / "gen" / _slug(component_id)
+        files = {str(p.relative_to(code_dir)): p.read_text(encoding="utf-8")
+                 for p in sorted(code_dir.rglob("*")) if p.is_file() and "__pycache__" not in p.parts
+                 and not p.name.startswith(".")}
+        result = generator.GenerationResult(
+            component_id=component_id, spec_bundle_hash=_get(bundle, "spec_bundle_hash"), model=model,
+            prompt_version=generator.PROMPT_VERSION, cache_hit=False, files=files, model_call_error=None,
+            refused=None, retry_feedback=retry_feedback, mode="single", transcript_sha256=None, turns=1,
+            tool_calls=0, isolation=None)
+        print(f"reusing the kept candidate ({len(files)} file(s)) generated from this same spec bundle")
+    else:
+        # Never generate beside the target's old code (see _build_sandbox).
+        shutil.rmtree(sandbox / "gen" / _slug(component_id), ignore_errors=True)
+        result = generator.generate(bundle, model, retry_feedback, repo_root=sandbox, llm_backend=None)
+        if _get(result, "files"):
+            marker.write_text(json.dumps({"spec_bundle_hash": _get(bundle, "spec_bundle_hash"), "model": model,
+                                          "prompt_version": _get(result, "prompt_version")}))
     # Forget every module this process loaded from the sandbox before the
     # candidate existed (e.g. the old graph-query-engine that spec-linter
     # imported by name), so later loads see the candidate, not stale code.
@@ -529,7 +705,23 @@ def run(component_id: str, model: str, seed: int, retry_feedback: list[str] | No
         print(f"Sandbox kept at {sandbox} for inspection.")
         return 1
 
+    # A test-author that predates D341 ignores CriterionBundle.testing, so
+    # until test-author itself is regenerated its authors would never see a
+    # component's testing.md. Hand it over inside the interface text, which
+    # every test-author shows, with a heading saying what it is.
+    author_reads_testing = "testing" in Path(test_author.__file__).read_text(encoding="utf-8")
+
     def test_author_closure(crit_bundle):
+        testing = _get(crit_bundle, "testing") or ""
+        if testing and not author_reads_testing:
+            extra = "\n\n## Test spec (testing.md: test mechanics only)\n\n" + testing
+            if isinstance(crit_bundle, dict):
+                crit_bundle = {**crit_bundle, "interface": (crit_bundle.get("interface") or "") + extra}
+            elif dataclasses.is_dataclass(crit_bundle):
+                crit_bundle = dataclasses.replace(crit_bundle, interface=(crit_bundle.interface or "") + extra)
+            else:
+                crit_bundle = copy.copy(crit_bundle)
+                crit_bundle.interface = (getattr(crit_bundle, "interface", "") or "") + extra
         return test_author.author_test(crit_bundle, model, seed=seed, repo_root=sandbox, llm_backend=None)
 
     # A verifier-orchestrator candidate's own tests call verify(), which runs
@@ -558,6 +750,7 @@ def run(component_id: str, model: str, seed: int, retry_feedback: list[str] | No
     print(f"secret_scan: flagged={_get(secret_result, 'flagged')} (informational at this gate; blocking handled elsewhere)")
 
     passed = report.overall == "pass" and not _get(license_result, 'blocked')
+    _record_carry(component_id, sandbox, bundle, report)
     if not passed:
         print(f"FAIL: not swapped in -- real gen/{_slug(component_id)}/ and verification/ left untouched.")
         print(f"Sandbox kept at {sandbox} for inspection.")
@@ -568,6 +761,10 @@ def run(component_id: str, model: str, seed: int, retry_feedback: list[str] | No
         print(f"Sandbox kept at {sandbox} for inspection.")
         return 1
 
+    # Since D305 generate() never caches; a candidate is cached only once
+    # it has passed, so a --resume-sandbox run still hits it.
+    if hasattr(generator, "commit_cache"):
+        generator.commit_cache(result, repo_root=sandbox)
     _swap_in(component_id, sandbox, code_rel)
     if sealed_install:
         provenance_ok = _write_sealed_provenance(component_id)
@@ -596,12 +793,20 @@ def main(argv=None) -> int:
     parser.add_argument("--sealed-install", action="store_true",
                         help="for a sealed component: generate it unsealed in the sandbox, require its hand-maintained "
                              "characterization suite too, and install the result at its source_path")
+    parser.add_argument("--reuse-candidate", action="store_true",
+                        help="with --resume-sandbox: verify the candidate the sandbox already holds instead of "
+                             "generating again, only if the spec bundle equals the one it was generated from")
+    parser.add_argument("--candidate-bundle-hash", default=None,
+                        help="the candidate's spec_bundle_hash, for a sandbox from before .candidate.json existed")
     args = parser.parse_args(argv)
+    if args.reuse_candidate and not args.resume_sandbox:
+        parser.error("--reuse-candidate needs --resume-sandbox")
 
     retry_feedback = args.retry_feedback.split(",") if args.retry_feedback else None
     return run(args.component_id, args.model, args.seed, retry_feedback, args.keep_sandbox,
                hand_suite=args.hand_suite, sealed_install=args.sealed_install,
-               resume=Path(args.resume_sandbox) if args.resume_sandbox else None)
+               resume=Path(args.resume_sandbox) if args.resume_sandbox else None,
+               reuse_candidate=args.reuse_candidate, candidate_bundle_hash=args.candidate_bundle_hash)
 
 
 if __name__ == "__main__":

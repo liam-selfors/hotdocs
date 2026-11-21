@@ -1,23 +1,23 @@
-# hotdocs-criterion: sha256:5c88050ddb651d4ee27c67e294631f736ea7b20dde8e2945c21946f04d872775
+# hotdocs-criterion: sha256:5f5158f28d120828c5774cfc1acebf35e9919b2346141377ab60de444bc65180
 import copy
 import threading
-from pathlib import Path
 
 import pytest
 
 import cache_manager
 
 
-def _field(value, name):
-    if isinstance(value, dict):
-        return value.get(name)
-    return getattr(value, name, None)
+def field(value, name):
+    return value[name] if isinstance(value, dict) else getattr(value, name)
+
+
+TRIALS = 20
 
 
 def _make_key():
     return cache_manager.CacheKey(
-        spec_bundle_hash="sha256:" + "1" * 64,
-        gate_inputs_hash="sha256:" + "2" * 64,
+        spec_bundle_hash="sha256:" + "a" * 64,
+        gate_inputs_hash="sha256:" + "b" * 64,
         gate_version="generator@1.0.0",
         model_pin="claude-sonnet-5",
     )
@@ -28,94 +28,82 @@ def _payload(files):
         "component_id": "comp-example",
         "model": "anthropic:claude-sonnet-5",
         "prompt_version": "v1",
-        "files": dict(files),
+        "files": files,
     }
 
 
 def _make_result(payload):
     return cache_manager.CachedResult(
         gate_type="generator",
-        payload=copy.deepcopy(payload),
+        payload=payload,
         stored_at=cache_manager.now_iso(),
     )
 
 
-def _run_trial(repo_root: Path):
-    payload_a = _payload({"a.py": "A"})
-    payload_b = _payload({"b.py": "B"})
-    key_a = _make_key()
-    key_b = _make_key()
-    result_a = _make_result(payload_a)
-    result_b = _make_result(payload_b)
-
-    barrier = threading.Barrier(2)
-    errors = []
-    errors_lock = threading.Lock()
-
-    def writer(key, result):
-        try:
-            barrier.wait(timeout=10)
-            cache_manager.put(key, result, repo_root=repo_root)
-        except BaseException as exc:  # noqa: BLE001
-            with errors_lock:
-                errors.append(exc)
-
-    t1 = threading.Thread(target=writer, args=(key_a, result_a))
-    t2 = threading.Thread(target=writer, args=(key_b, result_b))
-    t1.start()
-    t2.start()
-    t1.join(timeout=30)
-    t2.join(timeout=30)
-
-    assert not t1.is_alive() and not t2.is_alive(), "concurrent put calls did not finish"
-    assert errors == [], f"concurrent put raised: {errors!r}"
-
-    got = cache_manager.get(_make_key(), repo_root=repo_root)
-    return got, payload_a, payload_b
-
-
-def test_ac_cache_009_concurrent_puts_never_merge_or_corrupt(tmp_path, monkeypatch):
+@pytest.fixture(autouse=True)
+def _local_store(monkeypatch):
+    # Force the local `.hotdocs/cache/` fallback under each trial's repo_root.
     monkeypatch.delenv("VAR_CACHE_STORE_URL", raising=False)
 
-    for trial in range(20):
-        repo_root = tmp_path / f"trial_{trial}"
+
+def test_concurrent_puts_same_key_never_merge_or_corrupt(tmp_path):
+    payload_a = _payload({"a.py": "A"})
+    payload_b = _payload({"b.py": "B"})
+    expected_a = copy.deepcopy(payload_a)
+    expected_b = copy.deepcopy(payload_b)
+
+    for trial in range(TRIALS):
+        repo_root = tmp_path / ("trial_" + str(trial))
         repo_root.mkdir()
 
-        got, payload_a, payload_b = _run_trial(repo_root)
+        key = _make_key()
+        result_a = _make_result(copy.deepcopy(payload_a))
+        result_b = _make_result(copy.deepcopy(payload_b))
 
+        barrier = threading.Barrier(2)
+        errors = []
+
+        def writer(result):
+            try:
+                barrier.wait(timeout=10)
+                cache_manager.put(key, result, repo_root=repo_root)
+            except BaseException as exc:  # noqa: BLE001
+                errors.append(exc)
+
+        threads = [
+            threading.Thread(target=writer, args=(result_a,)),
+            threading.Thread(target=writer, args=(result_b,)),
+        ]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout=30)
+            assert not t.is_alive(), "put thread did not finish in trial " + str(trial)
+
+        assert errors == [], "put raised in trial " + str(trial) + ": " + repr(errors)
+
+        got = cache_manager.get(key, repo_root=repo_root)
         assert not isinstance(got, cache_manager.Miss), (
-            f"trial {trial}: get returned Miss after two concurrent puts"
-        )
-        assert got is not None, f"trial {trial}: get returned None"
-
-        gate_type = _field(got, "gate_type")
-        assert gate_type == "generator", (
-            f"trial {trial}: unexpected gate_type {gate_type!r}"
+            "entry missing after concurrent puts in trial " + str(trial)
         )
 
-        payload = _field(got, "payload")
+        assert field(got, "gate_type") == "generator"
+        payload = field(got, "payload")
         assert isinstance(payload, dict), (
-            f"trial {trial}: payload is not a dict: {payload!r}"
+            "payload is not a dict in trial " + str(trial) + ": " + repr(payload)
         )
 
         files = payload.get("files")
         assert isinstance(files, dict), (
-            f"trial {trial}: payload files missing or not a dict: {files!r}"
+            "files missing or malformed in trial " + str(trial) + ": " + repr(payload)
         )
         assert not ("a.py" in files and "b.py" in files), (
-            f"trial {trial}: payload merged both writes: {files!r}"
+            "payloads were merged in trial " + str(trial) + ": " + repr(payload)
         )
 
-        for required in ("component_id", "model", "prompt_version", "files"):
-            assert required in payload, (
-                f"trial {trial}: payload missing required key {required!r}: {payload!r}"
-            )
-
-        assert payload == payload_a or payload == payload_b, (
-            f"trial {trial}: payload matches neither written payload: {payload!r}"
-        )
-
-        stored_at = _field(got, "stored_at")
-        assert isinstance(stored_at, str) and stored_at, (
-            f"trial {trial}: stored_at missing or truncated: {stored_at!r}"
+        assert payload == expected_a or payload == expected_b, (
+            "payload is neither written payload exactly in trial "
+            + str(trial)
+            + ": "
+            + repr(payload)
         )

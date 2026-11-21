@@ -1,43 +1,42 @@
-# hotdocs-criterion: sha256:1cd2506c2c779d3c7b8aab44f2696294f0a8ac59b0501a460f5a40a5d199163e
-import json
+# hotdocs-criterion: sha256:e68cbbb56570234af3167d08201609e5d0a7e1c948c399594a922b0d03498d8a
 from pathlib import Path
 
 import spec_linter
 
 
-def _get(value, key, default=None):
-    if isinstance(value, dict):
-        return value.get(key, default)
-    return getattr(value, key, default)
+def field(value, name):
+    return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def _write(path: Path, text: str) -> None:
+def write(path, text):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
 
 
-def _build_base_corpus(root: Path) -> None:
-    comp = root / "specs" / "components" / "widget"
-    _write(
+def build_fixture(repo_root):
+    specs = repo_root / "specs"
+    comp = specs / "components" / "foo"
+
+    write(
         comp / "component.md",
         "---\n"
-        "id: comp-widget\n"
-        "title: Widget\n"
+        "id: comp-foo\n"
+        "title: Foo\n"
         "status: draft\n"
-        "owners: [alice]\n"
+        "owners: [team-a]\n"
         "sealed: true\n"
-        "source_path: legacy/widget\n"
+        "source_path: legacy/foo/\n"
         "---\n"
         "\n"
-        "# Widget\n"
+        "# Foo\n"
         "\n"
         "## Purpose\n"
         "\n"
-        "Provides a widget for test purposes.\n"
+        "Foo does a small thing for the fixture.\n"
         "\n"
         "## Scope\n"
         "\n"
-        "- In scope: widgets.\n"
+        "- In scope: the small thing.\n"
         "- Out of scope: everything else.\n"
         "\n"
         "## Definitions\n"
@@ -70,103 +69,70 @@ def _build_base_corpus(root: Path) -> None:
         "\n"
         "- Initial draft.\n",
     )
-    _write(
-        comp / "requirements" / "R-WIDGET-001.md",
-        "# R-WIDGET-001\n\n**R-WIDGET-001** — The widget MUST exist.\n",
+    write(
+        comp / "requirements" / "R-FOO-001.md",
+        "# R-FOO-001\n\n**R-FOO-001** — Foo MUST match existing behavior.\n",
     )
-    _write(
-        comp / "acceptance" / "AC-WIDGET-001.md",
-        "# AC-WIDGET-001\n"
+    write(
+        comp / "acceptance" / "AC-FOO-001.md",
+        "# AC-FOO-001\n"
         "\n"
-        "Covers: R-WIDGET-001\n"
-        "Kind: generated-test\n"
+        "Covers: R-FOO-001\n"
+        "Kind: compiled\n"
         "\n"
         "```gherkin\n"
-        "Given a widget\n"
-        "When it is checked\n"
-        "Then it exists\n"
+        "Given foo\n"
+        "When it runs\n"
+        "Then it matches existing behavior\n"
         "```\n",
     )
-    _write(
+    write(
         comp / "constraints.md",
         "# Constraints\n\nNone.\n",
     )
-    _write(
-        root / "specs" / "glossary.md",
+
+    # Two files under specs/ that both declare themselves a corpus glossary.
+    write(
+        specs / "glossary.md",
         "# Glossary\n"
         "\n"
         "Canonical vocabulary for this spec corpus.\n"
         "\n"
-        "- **Widget** — a thing the widget component provides.\n",
+        "- **Widget** — a small thing the fixture talks about.\n",
     )
-
-
-def _add_second_glossary(root: Path) -> None:
-    _write(
-        root / "specs" / "glossary-billing.md",
+    write(
+        specs / "glossary-billing.md",
         "# Glossary\n"
         "\n"
-        "Canonical vocabulary for this spec corpus.\n"
+        "Canonical vocabulary for this spec corpus's billing subsystem.\n"
         "\n"
-        "- **Invoice** — a billing document.\n",
+        "- **Invoice** — a request for payment.\n",
     )
+    # No specs/architecture/ document records a bounded-context split.
 
 
-def _lint014_fail_findings(report):
-    findings = _get(report, "findings", []) or []
-    out = []
-    for f in findings:
-        if _get(f, "rule_id") == "R-LINT-014" and _get(f, "severity") == "fail":
-            out.append(f)
-    return out
+def test_two_glossaries_without_split_decision_fail_r_lint_014(tmp_path):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    build_fixture(repo_root)
 
+    assert not (repo_root / "specs" / "architecture").exists()
 
-def test_two_glossaries_without_bounded_context_decision_fails(tmp_path):
-    root = tmp_path / "repo"
-    root.mkdir()
-    _build_base_corpus(root)
-    _add_second_glossary(root)
+    report = spec_linter.lint(None, repo_root)
 
-    report = spec_linter.lint(None, root)
-
-    hits = _lint014_fail_findings(report)
-    assert hits, (
-        "expected a fail-severity R-LINT-014 finding, got: "
-        + repr(_get(report, "findings"))
-    )
-    hard_failures = _get(report, "hard_failures")
-    if hard_failures is None:
-        summary = _get(report, "summary")
-        if summary is not None:
-            hard_failures = _get(summary, "hard_failures")
-    if hard_failures is not None:
-        assert hard_failures >= 1
-
-
-def test_single_glossary_has_no_lint014_failure(tmp_path):
-    root = tmp_path / "repo"
-    root.mkdir()
-    _build_base_corpus(root)
-
-    report = spec_linter.lint(None, root)
-
-    hits = _lint014_fail_findings(report)
-    assert not hits, "unexpected R-LINT-014 finding with one glossary: " + repr(hits)
-
-
-def test_cli_reports_lint014_and_exits_one(tmp_path, capsys):
-    root = tmp_path / "repo"
-    root.mkdir()
-    _build_base_corpus(root)
-    _add_second_glossary(root)
-
-    code = spec_linter.main(["--format=json", "--repo-root=" + str(root)])
-    assert code == 1
-
-    out = capsys.readouterr().out
-    data = json.loads(out)
-    findings = data.get("findings", []) if isinstance(data, dict) else []
-    assert any(
-        f.get("rule_id") == "R-LINT-014" and f.get("severity") == "fail"
+    findings = list(field(report, "findings"))
+    matching = [
+        f
         for f in findings
-    ), "expected R-LINT-014 fail finding in JSON output: " + out
+        if field(f, "rule_id") == "R-LINT-014" and field(f, "severity") == "fail"
+    ]
+    assert matching, (
+        "expected a fail-severity R-LINT-014 finding, got: "
+        + repr(
+            [
+                (field(f, "rule_id"), field(f, "severity"), field(f, "file"), field(f, "message"))
+                for f in findings
+            ]
+        )
+    )
+    assert field(report, "hard_failures") >= 1

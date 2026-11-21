@@ -1,68 +1,84 @@
-# hotdocs-criterion: sha256:4457a902a8b939a7d2fd903318d1534b576e54f249d22a248c84b9f7bac5583a
-import json
+# hotdocs-criterion: sha256:9ec34baac2dbe1aae70d1ea9e7c4bbf9818d85925543b3cc8bf3372018277f9d
+"""AC-LINT-011: a Definitions entry that near-verbatim restates a glossary
+term's definition (token-overlap ratio >= 0.8) is a fail-severity finding
+for rule R-LINT-011."""
+
 from pathlib import Path
 
 import spec_linter
 
 
-GLOSSARY_TERM = "Widget"
+TERM = "Frobnication window"
+
 GLOSSARY_DEFINITION = (
-    "a reusable rendering unit that the dashboard assembles from declarative "
-    "configuration files at startup and caches in memory for subsequent "
-    "requests until the configuration changes"
+    "the bounded interval during which a widget accepts incoming "
+    "frobnication requests from its upstream scheduler before it closes "
+    "and rejects every later request outright."
+)
+
+# Near-verbatim copy: one word changed ("outright" -> "immediately"),
+# far above a 0.8 token-overlap ratio under any reasonable normalization.
+NEAR_VERBATIM_LOCAL = (
+    "the bounded interval during which a widget accepts incoming "
+    "frobnication requests from its upstream scheduler before it closes "
+    "and rejects every later request immediately."
+)
+
+# A genuine delta: shares almost no tokens with the glossary definition.
+GENUINE_DELTA_LOCAL = (
+    "in this component, measured in milliseconds; zero disables "
+    "batching entirely."
 )
 
 
-def _get(value, name, default=None):
-    if isinstance(value, dict):
-        return value.get(name, default)
-    return getattr(value, name, default)
+def field(value, name):
+    return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def _write(path: Path, text: str) -> None:
+def write(path, text):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
 
 
-def _build_corpus(root: Path, definitions_entry_text: str) -> Path:
-    specs = root / "specs"
+def build_corpus(repo_root, local_definition):
+    specs = repo_root / "specs"
 
-    _write(
+    write(
         specs / "glossary.md",
         "# Glossary\n"
         "\n"
-        "Canonical vocabulary for this test corpus.\n"
+        "Canonical vocabulary for this fixture corpus.\n"
         "\n"
-        f"- **{GLOSSARY_TERM}** — {GLOSSARY_DEFINITION}.\n"
-        "- **Gadget** — a small helper object owned by exactly one widget.\n",
+        "- **" + TERM + "** \u2014 " + GLOSSARY_DEFINITION + "\n"
+        "- **Widget** \u2014 a unit of fixture behavior used only in tests.\n",
     )
 
-    comp_dir = specs / "components" / "foo"
-    _write(
-        comp_dir / "component.md",
+    comp = specs / "components" / "widget"
+    write(
+        comp / "component.md",
         "---\n"
-        "id: comp-foo\n"
-        "title: Foo\n"
+        "id: comp-widget\n"
+        "title: Widget\n"
         "status: draft\n"
-        "owners: [alice]\n"
+        "owners: [fixture-team]\n"
         "sealed: true\n"
-        "source_path: legacy/foo\n"
+        "source_path: legacy/widget/\n"
         "---\n"
         "\n"
-        "# Foo\n"
+        "# Widget\n"
         "\n"
         "## Purpose\n"
         "\n"
-        "Renders widgets for the dashboard.\n"
+        "Accepts frobnication requests for the fixture corpus.\n"
         "\n"
         "## Scope\n"
         "\n"
-        "- In scope: rendering widgets.\n"
-        "- Out of scope: storing configuration.\n"
+        "- In scope: accepting requests.\n"
+        "- Out of scope: everything else.\n"
         "\n"
         "## Definitions\n"
         "\n"
-        f"- **{GLOSSARY_TERM}** — {definitions_entry_text}\n"
+        "- **" + TERM + "** \u2014 " + local_definition + "\n"
         "\n"
         "## Behavior\n"
         "\n"
@@ -90,95 +106,69 @@ def _build_corpus(root: Path, definitions_entry_text: str) -> Path:
         "\n"
         "- Initial draft.\n",
     )
-    _write(
-        comp_dir / "requirements" / "R-FOO-001.md",
-        "# R-FOO-001\n"
+    write(
+        comp / "requirements" / "R-WIDGET-001.md",
+        "# R-WIDGET-001\n"
         "\n"
-        "**R-FOO-001** — The component MUST render every configured widget.\n",
+        "**R-WIDGET-001** \u2014 The widget MUST accept a request while its "
+        "frobnication window is open.\n",
     )
-    _write(
-        comp_dir / "acceptance" / "AC-FOO-001.md",
-        "# AC-FOO-001\n"
+    write(
+        comp / "acceptance" / "AC-WIDGET-001.md",
+        "# AC-WIDGET-001\n"
         "\n"
-        "Covers: R-FOO-001\n"
+        "Covers: R-WIDGET-001\n"
         "Kind: compiled\n"
         "\n"
         "```gherkin\n"
-        "Given a configured widget\n"
-        "When the dashboard renders\n"
-        "Then the widget is rendered\n"
+        "Given an open frobnication window\n"
+        "When a request arrives\n"
+        "Then the widget accepts it\n"
         "```\n",
     )
-    _write(
-        comp_dir / "constraints.md",
+    write(
+        comp / "constraints.md",
         "# Constraints\n"
         "\n"
-        "- Rendering MUST complete within 100 ms, measured by a benchmark.\n",
-    )
-    return root
-
-
-def _findings(report):
-    findings = _get(report, "findings", None)
-    assert findings is not None, "LintReport has no findings field"
-    return list(findings)
-
-
-def _lint_011(report):
-    return [f for f in _findings(report) if _get(f, "rule_id") == "R-LINT-011"]
-
-
-def test_verbatim_copy_of_glossary_definition_fails_r_lint_011(tmp_path):
-    root = _build_corpus(tmp_path / "repo", GLOSSARY_DEFINITION + ".")
-    report = spec_linter.lint(None, root)
-
-    hits = _lint_011(report)
-    assert hits, "expected an R-LINT-011 finding for a verbatim glossary copy"
-    fails = [f for f in hits if _get(f, "severity") == "fail"]
-    assert fails, f"expected fail severity for R-LINT-011, got {[_get(f, 'severity') for f in hits]}"
-
-    files = [str(_get(f, "file") or "").replace("\\", "/") for f in fails]
-    assert any(p.endswith("specs/components/foo/component.md") for p in files), files
-
-    hard_failures = _get(report, "hard_failures")
-    if hard_failures is None:
-        summary = _get(report, "summary") or {}
-        hard_failures = _get(summary, "hard_failures")
-    assert hard_failures is not None and hard_failures >= 1
-
-
-def test_near_verbatim_copy_one_word_changed_fails_r_lint_011(tmp_path):
-    near = GLOSSARY_DEFINITION.replace("dashboard", "console") + "."
-    assert near.rstrip(".") != GLOSSARY_DEFINITION
-    root = _build_corpus(tmp_path / "repo", near)
-    report = spec_linter.lint(None, root)
-
-    fails = [f for f in _lint_011(report) if _get(f, "severity") == "fail"]
-    assert fails, "expected a fail-severity R-LINT-011 finding for a near-verbatim copy"
-
-
-def test_genuine_delta_does_not_trigger_r_lint_011(tmp_path):
-    delta = (
-        "here, only plugin-supplied entries loaded via the extensions folder "
-        "count; built-in ones are ignored entirely."
-    )
-    root = _build_corpus(tmp_path / "repo", delta)
-    report = spec_linter.lint(None, root)
-
-    assert _lint_011(report) == [], (
-        "a genuine delta must not be reported under R-LINT-011"
+        "- None beyond the defaults.\n",
     )
 
 
-def test_cli_reports_r_lint_011_fail_in_json(tmp_path, capsys):
-    root = _build_corpus(tmp_path / "repo", GLOSSARY_DEFINITION + ".")
-    code = spec_linter.main([f"--repo-root={root}", "--format=json"])
-    out = capsys.readouterr().out
+def lint_findings(repo_root):
+    report = spec_linter.lint(None, repo_root)
+    return report, list(field(report, "findings"))
 
-    assert code == 1
-    data = json.loads(out)
-    findings = data.get("findings", [])
-    assert any(
-        f.get("rule_id") == "R-LINT-011" and f.get("severity") == "fail"
-        for f in findings
-    ), findings
+
+def r_lint_011_findings(findings):
+    return [f for f in findings if field(f, "rule_id") == "R-LINT-011"]
+
+
+def test_near_verbatim_glossary_restatement_fails_r_lint_011(tmp_path):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    build_corpus(repo_root, NEAR_VERBATIM_LOCAL)
+
+    report, findings = lint_findings(repo_root)
+    hits = r_lint_011_findings(findings)
+
+    assert hits, (
+        "expected an R-LINT-011 finding for a near-verbatim restatement; got "
+        + repr([(field(f, "rule_id"), field(f, "severity"), field(f, "message")) for f in findings])
+    )
+    assert any(field(f, "severity") == "fail" for f in hits), repr(
+        [(field(f, "severity"), field(f, "message")) for f in hits]
+    )
+    assert field(report, "hard_failures") >= 1
+
+
+def test_genuine_delta_is_not_flagged_by_r_lint_011(tmp_path):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    build_corpus(repo_root, GENUINE_DELTA_LOCAL)
+
+    _report, findings = lint_findings(repo_root)
+    hits = [
+        f for f in r_lint_011_findings(findings) if field(f, "severity") == "fail"
+    ]
+
+    assert hits == [], repr([(field(f, "file"), field(f, "message")) for f in hits])

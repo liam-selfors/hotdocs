@@ -9,12 +9,13 @@
   "requirement_text": "<the covered R-id's own text from requirements/>",
   "interface": "<interface/ content>",
   "glossary": "<specs/glossary.md body>",
-  "dependency_interfaces": { "comp-bar": "<bar/interface/ content>" }
+  "dependency_interfaces": { "comp-bar": "<bar/interface/ content>" },
+  "testing": "<testing.md, its Uses: documents and asset-kind test author guidance (R-ASSEMBLE-016), or \"\">"
 }
 ```
 
 A dataclass with these fields in this order, `dependency_interfaces`
-defaulting to `{}`, that also reads as a mapping (`bundle["covers"]`,
+defaulting to `{}` and `testing` to `""`, that also reads as a mapping (`bundle["covers"]`,
 `bundle.get("covers")`), as `SpecBundle` does.
 
 Narrower than `SpecBundle` by design (R-ASSEMBLE-009) — `test-author`'s

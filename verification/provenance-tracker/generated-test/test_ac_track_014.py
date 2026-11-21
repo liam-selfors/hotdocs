@@ -1,84 +1,69 @@
-# hotdocs-criterion: sha256:b18a8bd80c5c6b8ec59f01f3c1e9eecf94f258179a9c91019dffd13032091eb2
+# hotdocs-criterion: sha256:5ebc8e2f67c4b0889d6927486fee6791f332b733167f4a55eded9f93f38140b3
 import inspect
 import json
-from pathlib import Path
 
 import pytest
 
 import provenance_tracker
 
 
-def field(value, name):
-    return value[name] if isinstance(value, dict) else getattr(value, name)
+def _check_readiness_ref(repo_root, changed_ids=None, model=None, seed=0, llm_backend=None):
+    pass
 
 
-def _reference_check_readiness(repo_root, changed_ids=None, model=None, seed=0, llm_backend=None):
-    return None
+def _last_requirement_failures_ref(component_id, repo_root):
+    pass
 
 
-def _reference_last_requirement_failures(component_id, repo_root):
-    return None
-
-
-def _bind(reference, args, kwargs):
-    bound = inspect.signature(reference).bind(*args, **kwargs)
+def _bind(ref, args, kwargs):
+    bound = inspect.signature(ref).bind(*args, **kwargs)
     bound.apply_defaults()
     return dict(bound.arguments)
 
 
-def _run_main(argv):
-    try:
-        return provenance_tracker.main(argv)
-    except SystemExit as exc:
-        code = exc.code
-        return code
-
-
 class Recorder:
-    def __init__(self):
+    def __init__(self, monkeypatch, readiness_reports=None, feedback_results=None):
         self.readiness_calls = []
         self.feedback_calls = []
+        self._readiness_reports = list(readiness_reports or [])
+        self._feedback_results = list(feedback_results or [])
+
+        def fake_check_readiness(*args, **kwargs):
+            self.readiness_calls.append(_bind(_check_readiness_ref, args, kwargs))
+            return self._readiness_reports.pop(0)
+
+        def fake_last_requirement_failures(*args, **kwargs):
+            self.feedback_calls.append(_bind(_last_requirement_failures_ref, args, kwargs))
+            return self._feedback_results.pop(0)
+
+        monkeypatch.setattr(provenance_tracker, "check_readiness", fake_check_readiness)
+        monkeypatch.setattr(
+            provenance_tracker, "last_requirement_failures", fake_last_requirement_failures
+        )
 
 
-def _install(monkeypatch, report=None, feedback_results=None):
-    rec = Recorder()
-    results = list(feedback_results or [])
-
-    def fake_check_readiness(*args, **kwargs):
-        rec.readiness_calls.append(_bind(_reference_check_readiness, args, kwargs))
-        return report
-
-    def fake_last_requirement_failures(*args, **kwargs):
-        rec.feedback_calls.append(_bind(_reference_last_requirement_failures, args, kwargs))
-        if results:
-            return results.pop(0)
-        return []
-
-    monkeypatch.setattr(provenance_tracker, "check_readiness", fake_check_readiness)
-    monkeypatch.setattr(
-        provenance_tracker, "last_requirement_failures", fake_last_requirement_failures
-    )
-    return rec
-
-
-def test_verify_not_ready_text_passes_changed_model_seed(monkeypatch, tmp_path, capsys):
-    report = {
-        "scope": "blast-radius",
-        "ready": False,
-        "components": {
-            "comp-a": {
-                "hit": False,
-                "verification_report": None,
-                "license_scan": None,
-                "secret_scan": None,
-            }
-        },
+def _report(scope, ready, reasons):
+    return {
+        "scope": scope,
+        "ready": ready,
+        "components": {},
         "capabilities": {},
-        "not_ready_reasons": ["comp-a: provenance miss"],
+        "not_ready_reasons": list(reasons),
     }
-    rec = _install(monkeypatch, report=report)
 
-    code = _run_main(
+
+def field(value, name):
+    return value[name] if isinstance(value, dict) else getattr(value, name)
+
+
+def test_verify_not_ready_text_with_changed_model_seed(monkeypatch, capsys, tmp_path):
+    rec = Recorder(
+        monkeypatch,
+        readiness_reports=[
+            _report("blast-radius", False, ["comp-a: provenance miss"])
+        ],
+    )
+    code = provenance_tracker.main(
         [
             "verify",
             "--changed",
@@ -91,60 +76,49 @@ def test_verify_not_ready_text_passes_changed_model_seed(monkeypatch, tmp_path, 
         ]
     )
     out = capsys.readouterr().out
-
     assert code == 1
-    lines = [line.strip() for line in out.splitlines()]
+    lines = [line.strip() for line in out.splitlines() if line.strip()]
     assert "not ready" in lines
     assert "comp-a: provenance miss" in lines
-
     assert len(rec.readiness_calls) == 1
     call = rec.readiness_calls[0]
     assert list(call["changed_ids"]) == ["comp-a", "comp-b"]
     assert call["model"] == "m"
     assert call["seed"] == 3
-    assert not isinstance(call["seed"], bool)
-    assert Path(call["repo_root"]).resolve() == tmp_path.resolve()
+    assert isinstance(call["seed"], int) and not isinstance(call["seed"], bool)
     assert rec.feedback_calls == []
 
 
-def test_verify_ready_json_without_changed(monkeypatch, tmp_path, capsys):
-    report = {
-        "scope": "whole-corpus",
-        "ready": True,
-        "components": {},
-        "capabilities": {},
-        "not_ready_reasons": [],
-    }
-    rec = _install(monkeypatch, report=report)
-
-    code = _run_main(["verify", "--format=json", "--repo-root", str(tmp_path)])
+def test_verify_ready_json_without_changed(monkeypatch, capsys, tmp_path):
+    rec = Recorder(
+        monkeypatch,
+        readiness_reports=[_report("whole-corpus", True, [])],
+    )
+    code = provenance_tracker.main(
+        ["verify", "--format=json", "--repo-root", str(tmp_path)]
+    )
     out = capsys.readouterr().out
-
     assert code == 0
-    parsed = json.loads(out)
-    assert field(parsed, "ready") is True
-
+    doc = json.loads(out)
+    assert field(doc, "ready") is True
     assert len(rec.readiness_calls) == 1
-    call = rec.readiness_calls[0]
-    assert not call["changed_ids"]
-    assert Path(call["repo_root"]).resolve() == tmp_path.resolve()
+    assert not rec.readiness_calls[0]["changed_ids"]
     assert rec.feedback_calls == []
 
 
-def test_track_feedback_prints_failures_then_nothing(monkeypatch, tmp_path, capsys):
-    monkeypatch.chdir(tmp_path)
-    rec = _install(monkeypatch, feedback_results=[["R-A-001", "R-A-002"], []])
-
-    code1 = _run_main(["track", "feedback", "comp-a"])
+def test_track_feedback_prints_failures_then_nothing(monkeypatch, capsys):
+    rec = Recorder(
+        monkeypatch,
+        feedback_results=[["R-A-001", "R-A-002"], []],
+    )
+    code1 = provenance_tracker.main(["track", "feedback", "comp-a"])
     out1 = capsys.readouterr().out
-    code2 = _run_main(["track", "feedback", "comp-a"])
+    code2 = provenance_tracker.main(["track", "feedback", "comp-a"])
     out2 = capsys.readouterr().out
-
     assert code1 == 0
     assert code2 == 0
     assert out1.strip() == "R-A-001,R-A-002"
     assert out2.strip() == ""
-
     assert len(rec.feedback_calls) == 2
     for call in rec.feedback_calls:
         assert call["component_id"] == "comp-a"
@@ -162,20 +136,15 @@ def test_track_feedback_prints_failures_then_nothing(monkeypatch, tmp_path, caps
         ["build"],
     ],
 )
-def test_usage_errors_return_2_without_calling_fakes(monkeypatch, tmp_path, capsys, argv):
-    monkeypatch.chdir(tmp_path)
-    report = {
-        "scope": "whole-corpus",
-        "ready": True,
-        "components": {},
-        "capabilities": {},
-        "not_ready_reasons": [],
-    }
-    rec = _install(monkeypatch, report=report, feedback_results=[["R-X-001"]])
-
-    code = _run_main(list(argv))
-    capsys.readouterr()
-
+def test_usage_errors_return_2_and_call_nothing(monkeypatch, capsys, argv):
+    rec = Recorder(
+        monkeypatch,
+        readiness_reports=[_report("whole-corpus", True, [])],
+        feedback_results=[[]],
+    )
+    code = provenance_tracker.main(list(argv))
+    captured = capsys.readouterr()
     assert code == 2
     assert rec.readiness_calls == []
     assert rec.feedback_calls == []
+    assert "Traceback" not in captured.err

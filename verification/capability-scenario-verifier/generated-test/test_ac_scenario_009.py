@@ -1,15 +1,15 @@
-# hotdocs-criterion: sha256:103f87d46bbcf651df4605af937c8db4704426e5f125a30ae16d25c4aad20a35
+# hotdocs-criterion: sha256:b0da5a97e89bde6d9051a804fb08228d14ef56e0dc2c4f2dc036c0d9bbd72905
+import os
 import shutil
+import sys
 from pathlib import Path
-
-import pytest
 
 import capability_scenario_verifier
 
 
-COMPILED_REL = Path("verification") / "capabilities" / "P-X" / "compiled"
-COMPILED_FILE_REL = COMPILED_REL / "test_cs_x_001.py"
 GHERKIN = "Given a x is 1\nThen x equals 1"
+COMPILED_REL = Path("verification") / "capabilities" / "P-X" / "compiled"
+TEST_FILE_NAME = "test_cs_x_001.py"
 
 
 def field(value, name):
@@ -17,40 +17,51 @@ def field(value, name):
 
 
 def _write(path, text):
+    path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
+    return path
+
+
+def _plant_python_adapter(repo_root):
+    src = (
+        "import sys\n"
+        "\n"
+        "\n"
+        "def provision(repo_root):\n"
+        "    return {\"ok\": True, \"reason\": \"\", \"versions\": {}, \"lockfile_sha256\": None,\n"
+        "            \"interpreter\": sys.executable}\n"
+    )
+    _write(repo_root / "gen" / "kind-python" / "kind_python.py", src)
 
 
 def _build_corpus(repo_root):
-    # A non-sealed component realizing P-X, with its code under gen/foo/.
-    _write(
-        repo_root / "specs" / "components" / "foo" / "component.md",
+    _plant_python_adapter(repo_root)
+    component_md = (
         "---\n"
         "id: comp-foo\n"
         "title: Foo\n"
         "status: draft\n"
-        "owners: [tester]\n"
+        "owners: [pipeline-team]\n"
         "realizes: [P-X]\n"
         "sealed: false\n"
         "---\n"
         "\n"
         "# Foo\n"
         "\n"
-        "A fixture component.\n",
+        "A component realizing P-X.\n"
     )
+    _write(repo_root / "specs" / "components" / "foo" / "component.md", component_md)
     _write(repo_root / "gen" / "foo" / "foo.py", "VALUE = 1\n")
-
-    # The product capability with one compiled scenario.
-    _write(
-        repo_root / "specs" / "product" / "x.md",
+    product_md = (
         "---\n"
         "id: P-X\n"
-        "title: X\n"
+        "title: X capability\n"
         "status: draft\n"
-        "owners: [tester]\n"
+        "owners: [pipeline-team]\n"
         "---\n"
         "\n"
-        "# X\n"
+        "# X capability\n"
         "\n"
         "### CS-X-001\n"
         "\n"
@@ -58,43 +69,14 @@ def _build_corpus(repo_root):
         "Kind: compiled\n"
         "\n"
         "```gherkin\n"
-        + GHERKIN
-        + "\n```\n",
+        + GHERKIN + "\n"
+        "```\n"
     )
-
-    # Fake test-author and llm-endpoint, matching their documented shapes.
-    _write(
-        repo_root / "gen" / "test-author" / "test_author.py",
-        "def author_test(bundle, model, seed=0, *, repo_root=None, llm_backend=None):\n"
-        "    return {\n"
-        "        'component_id': 'comp-foo',\n"
-        "        'criterion_id': bundle['criterion_id'],\n"
-        "        'model': model,\n"
-        "        'seed': seed,\n"
-        "        'prompt_version': 'v1',\n"
-        "        'cache_hit': False,\n"
-        "        'file': {\n"
-        "            'path': 'verification/capabilities/P-X/generated-test/test_cs_x_001.py',\n"
-        "            'content': 'def test_x():\\n    assert True\\n',\n"
-        "        },\n"
-        "        'model_call_error': None,\n"
-        "    }\n",
-    )
-    _write(
-        repo_root / "gen" / "llm-endpoint" / "llm_endpoint.py",
-        "def complete(prompt, model, *, backend=None, **params):\n"
-        "    return {'text': 'pass', 'model': model, 'backend': 'fake', 'model_call_error': None}\n",
-    )
+    _write(repo_root / "specs" / "product" / "x.md", product_md)
 
 
-def _write_fake_compiler(repo_root, result, log_path):
-    _write(
-        repo_root / "pipeline" / "criterion-compiler" / "criterion_compiler.py",
-        "GATE_VERSION = 'criterion-compiler@1.0.0'\n"
-        "RESULT = " + repr(result) + "\n"
-        "LOG = " + repr(str(log_path)) + "\n"
-        "\n"
-        "\n"
+def _plant_fake_compiler(repo_root, result, log_path):
+    src = (
         "class ParsedCriterion:\n"
         "    def __init__(self, criterion_id=None, covers=None, kind=None, gherkin=None, file=None):\n"
         "        self.criterion_id = criterion_id\n"
@@ -104,19 +86,24 @@ def _write_fake_compiler(repo_root, result, log_path):
         "        self.file = file\n"
         "\n"
         "\n"
+        "LOG_PATH = " + repr(str(log_path)) + "\n"
+        "RESULT = " + repr(result) + "\n"
+        "\n"
+        "\n"
         "def compile_criterion(parsed, surface=None):\n"
-        "    with open(LOG, 'a', encoding='utf-8') as fh:\n"
-        "        fh.write(str(getattr(parsed, 'criterion_id', '')) + '\\n')\n"
-        "    return dict(RESULT)\n",
+        "    with open(LOG_PATH, 'a') as handle:\n"
+        "        handle.write(str(parsed.criterion_id) + '\\n')\n"
+        "    return dict(RESULT)\n"
     )
+    _write(repo_root / "pipeline" / "criterion-compiler" / "criterion_compiler.py", src)
 
 
-def _scenario_result(report):
-    cap = field(report, "P-X")
-    scenarios = list(field(cap, "scenarios"))
-    matching = [s for s in scenarios if field(s, "id") == "CS-X-001"]
-    assert len(matching) == 1, scenarios
-    return field(matching[0], "result")
+def _scenario_result(report, scenario_id="CS-X-001"):
+    cap = report["P-X"]
+    scenarios = field(cap, "scenarios")
+    matches = [s for s in scenarios if field(s, "id") == scenario_id]
+    assert len(matches) == 1, scenarios
+    return field(matches[0], "result")
 
 
 def _run(repo_root):
@@ -125,78 +112,76 @@ def _run(repo_root):
     )
 
 
-def test_compiled_passing_source_is_written_run_and_passes(tmp_path):
+def test_compiled_true_source_is_written_run_and_passes(tmp_path):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
+    log_path = tmp_path / "compiler.log"
     _build_corpus(repo_root)
-    log = tmp_path / "compiler.log"
     source = "def test_x():\n    assert True\n"
-    _write_fake_compiler(repo_root, {"status": "compiled", "source": source}, log)
+    _plant_fake_compiler(repo_root, {"status": "compiled", "source": source}, log_path)
 
     report = _run(repo_root)
 
-    assert log.is_file() and log.read_text(encoding="utf-8").strip() != ""
-    written = repo_root / COMPILED_FILE_REL
+    assert log_path.is_file()
+    assert "CS-X-001" in log_path.read_text().splitlines()
+    written = repo_root / COMPILED_REL / TEST_FILE_NAME
     assert written.is_file()
-    assert written.read_text(encoding="utf-8") == source
+    assert written.read_text() == source
     assert _scenario_result(report) == "pass"
 
 
-def test_compiled_failing_source_is_written_and_fails(tmp_path):
+def test_compiled_false_source_is_written_and_fails(tmp_path):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
+    log_path = tmp_path / "compiler.log"
     _build_corpus(repo_root)
-    log = tmp_path / "compiler.log"
     source = "def test_x():\n    assert False\n"
-    _write_fake_compiler(repo_root, {"status": "compiled", "source": source}, log)
+    _plant_fake_compiler(repo_root, {"status": "compiled", "source": source}, log_path)
 
     report = _run(repo_root)
 
-    written = repo_root / COMPILED_FILE_REL
+    assert log_path.is_file()
+    assert "CS-X-001" in log_path.read_text().splitlines()
+    written = repo_root / COMPILED_REL / TEST_FILE_NAME
     assert written.is_file()
-    assert written.read_text(encoding="utf-8") == source
+    assert written.read_text() == source
     assert _scenario_result(report) == "fail"
 
 
 def test_compile_error_fails_and_writes_nothing(tmp_path):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
+    log_path = tmp_path / "compiler.log"
     _build_corpus(repo_root)
-    log = tmp_path / "compiler.log"
-    _write_fake_compiler(repo_root, {"status": "error", "message": "bad step"}, log)
+    _plant_fake_compiler(repo_root, {"status": "error", "message": "bad step"}, log_path)
 
     report = _run(repo_root)
 
-    assert log.is_file() and log.read_text(encoding="utf-8").strip() != ""
+    assert log_path.is_file()
+    assert "CS-X-001" in log_path.read_text().splitlines()
     assert _scenario_result(report) == "fail"
     compiled_dir = repo_root / COMPILED_REL
     if compiled_dir.exists():
-        assert [p for p in compiled_dir.rglob("*") if p.is_file()] == []
-
-
-def _find_live_compiler_dir():
-    here = Path(capability_scenario_verifier.__file__).resolve()
-    for parent in here.parents:
-        candidate = parent / "pipeline" / "criterion-compiler"
-        if candidate.is_dir() and (
-            (candidate / "criterion_compiler.py").is_file()
-            or (candidate / "criterion_compiler" / "__init__.py").is_file()
-        ):
-            return candidate
-    return None
+        files = [p for p in compiled_dir.rglob("*") if p.is_file()]
+        assert files == []
 
 
 def test_real_compiler_compiling_alone_is_not_a_pass(tmp_path):
-    live = _find_live_compiler_dir()
-    if live is None:
-        pytest.skip("live repository's pipeline/criterion-compiler/ not found")
-
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
     _build_corpus(repo_root)
-    dest = repo_root / "pipeline" / "criterion-compiler"
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copytree(live, dest, ignore=shutil.ignore_patterns("__pycache__"))
+
+    live = (
+        Path(capability_scenario_verifier.__file__).resolve().parents[1]
+        / "llm-endpoint"
+    ).resolve().parents[1]
+    live_compiler = live / "pipeline" / "criterion-compiler"
+    assert live_compiler.is_dir(), live_compiler
+    shutil.copytree(
+        live_compiler,
+        repo_root / "pipeline" / "criterion-compiler",
+        ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
+    )
 
     report = _run(repo_root)
 

@@ -20,12 +20,7 @@ exactly one candidate per invocation.
 
 ## Rationale
 
-`hint_code` is a feature-branch-only exception. Declares
-`depends_on_guarantees: [G-CACHE-001]` (`D2`): R-GEN-005/006 trusts a
-`get` hit as authoritative with no locking, safe only because
-concurrent writers are last-write-wins-safe — not on `cache-manager`'s
-other properties, so a change there won't pull in an unrelated blast
-radius.
+`hint_code` is a feature-branch-only exception. `G-CACHE-001`: see `D2`.
 
 ## Scope
 
@@ -35,10 +30,8 @@ cache first; in `cold` mode only, writing the result to
 `gen/<component>/` and the cache (`R-GEN-016` — `hint` mode writes
 neither); recording provenance.
 
-**Out of scope (why `depends_on` excludes `verifier-orchestrator`):**
-any retry of its own — exactly one candidate per call, single-shot.
-`D3` retired the best-of-k loop; a human re-running
-`hotdocs generate` is the only path back for a failed one.
+**Out of scope:** any retry of its own; `generation-loop` retries
+(`D310`).
 
 ## Definitions
 
@@ -70,4 +63,7 @@ See `constraints.md`.
 
 ## Change log
 
-- `D35`–`D209`: see the decisions; `D268` states the reply format.
+`D35` onward: see the decisions.
+
+- `D343`: declared assets (R-GEN-015, R-GEN-021); `generator@3.1.0`, `v12`.
+- `D344`: the implicit `python` kind (R-GEN-021); `generator@3.2.0`.

@@ -5,28 +5,77 @@ generate(
     bundle: SpecBundle, model: str, retry_feedback: list[str] | None = None,
     *, repo_root: Path = None, llm_backend=None,
 ) -> GenerationResult
+commit_cache(result: GenerationResult, repo_root: Path = None) -> None
+check_write_allowed(bundle: SpecBundle, repo_root: Path = None) -> str | None
+render_prompt_sections(bundle: SpecBundle, retry_feedback: list[str] | None = None) -> list[tuple[str, str]]
+write_files(component_id: str, files: dict[str, str], repo_root: Path = None) -> None
+check_assets(component_id: str, files: dict[str, str], repo_root: Path = None) -> tuple[str | None, list[str]]
+check_asset_environment(component_id: str, repo_root: Path = None) -> tuple[str | None, list[str]]
 ```
 
-Not a pure function — this is the one component in the corpus whose job
-requires an external call. Side effects: in `cold` mode, writes
-`gen/<component>/` and writes through `cache-manager`; in `hint` mode,
-reads through `cache-manager` but writes to neither destination
-(`R-GEN-016`).
+The library is the module `generator` (`from generator import generate,
+commit_cache, GATE_VERSION`).
 
-`repo_root` locates `component.md`'s `sealed`/`source_path` and
-`gen/<component>/.overrides.json` for `R-GEN-009`, and is where
-`gen/<component>/` is written. `llm_backend` goes straight to
-`llm-endpoint`'s `backend` parameter: the criteria's injected mock model.
+Side effects: in `cold` mode, `generate`
+writes `gen/<component>/`; in `hint` mode it writes nothing
+(`R-GEN-016`). The mode is `cold` when `bundle.hint_code` is `None` and
+`hint` otherwise. Only `commit_cache` writes the cache (`R-GEN-006`).
+
+Before any model call, `generate` looks up the `R-GEN-005` key with
+`cache_manager.get`; on a hit it returns the stored `files` with
+`cache_hit` `true` and never calls `llm-endpoint`. `generate` and
+`commit_cache` pass `repo_root` through to `cache_manager.get`/`put`.
+
+`repo_root` locates `specs/components/<slug>/component.md`'s
+`sealed`/`source_path` and `assets` and `gen/<component>/.overrides.json`,
+and is where `gen/<component>/` is written. An absent
+`component.md`, or one without `sealed: true`, is unsealed; an absent
+`.overrides.json` pins nothing. `llm_backend` goes straight to `llm-endpoint`'s
+`backend` parameter: the criteria's injected mock model.
+
+Helpers `generate` itself uses, shared with other generation modes:
+
+- `check_write_allowed` returns `R-GEN-009`'s refusal reason
+  (`"sealed-component"`, `"pinned-override"`) or `None`;
+- `render_prompt_sections` returns the prompt's bundle-derived sections
+  as `(title, text)` pairs in prompt order, `retry_feedback`'s last when
+  given, without the reply-format instructions;
+- `write_files` writes `files` (paths relative to `gen/<component>/`,
+  `R-GEN-015`'s prefix stripped) into `gen/<component>/`;
+- `check_assets` applies `R-GEN-021`'s asset checks to `files` (same
+  paths), writing nothing under `repo_root`: each asset is checked as a
+  file, and the `.py` files as one code directory, under a temporary
+  directory, removed afterwards.
+
+## Assets
+
+Declared assets, the tool root and adapter lookup are as
+`asset-kinds.md` states; an adapter is registered in `sys.modules` under
+a unique name before it runs (`R-GEN-014`). `check_asset_environment`
+calls `provision(repo_root)` of the implicit `python` kind, then of each
+declared kind once, in order of first declaration (`D344`), returning
+`("environment", [message])` for the first kind with no adapter
+(`unknown asset kind: <kind>`) or `ok` false (its `reason`), else
+`(None, [])`. `check_assets` calls only `layout_errors`, on a fresh
+reply, never on a cache hit; with no `python` adapter it returns
+`("environment", ["unknown asset kind: python"])`.
+
+## Reply format
 
 The model's reply, a mock's included, wraps each file as a line
-`-----BEGIN FILE <nonce>: <path>-----`, the file's content, then a line
-`-----END FILE <nonce>-----`: `<path>` relative to `gen/<component>/`,
-`<nonce>` the fresh `uuid.uuid4().hex` the prompt states for this call.
-Text outside the blocks is ignored.
+`-----BEGIN FILE <nonce>: <path>-----`, the file's content (the lines
+between the markers, endings kept: `ok` is `"ok\n"`), then a line
+`-----END FILE <nonce>-----`, and ends with the line
+`-----END REPLY <nonce>-----` (`R-GEN-021`): `<path>` relative to
+`gen/<component>/`, `<nonce>` the fresh `uuid.uuid4().hex` the prompt
+states for this call. Text outside the blocks is ignored.
+
+The prompt's reply-format instructions precede every bundle-derived
+section and show the begin marker with this call's nonce filled in.
 
 ```
-GATE_VERSION = "generator@2.0.0"
-PROMPT_VERSION = "v10"
+GATE_VERSION = "generator@3.2.0"
+PROMPT_VERSION = "v12"
 ```
 
 The cache key (`R-GEN-005`) is `cache-manager`'s `CacheKey` with
@@ -36,4 +85,4 @@ plus the SHA-256 hex digest of
 `json.dumps(sorted(retry_feedback or []), sort_keys=True)` encoded as
 UTF-8. Every result's `prompt_version` is `PROMPT_VERSION`.
 
-Implements: `specs/architecture/generator-prompt.md`
+Implements: `specs/architecture/generator-prompt.md`, `specs/architecture/asset-kinds.md`

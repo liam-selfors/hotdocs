@@ -1,10 +1,8 @@
-# hotdocs-criterion: sha256:2661491a3726dc87d0a772fce8585cbd6cc854422aebc72adb032dd0725d5e52
-"""AC-GEN-018 / R-GEN-017: GenerationResult.spec_bundle_hash echoes bundle.spec_bundle_hash."""
-
+# hotdocs-criterion: sha256:c6b3ca479dae8453ac7cea7b80bdd1695bef2442fc5fd4ae14c72953d2d12efe
+import dataclasses
+import hashlib
 import re
 from pathlib import Path
-
-import pytest
 
 import generator
 
@@ -13,82 +11,96 @@ def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-class Bundle(dict):
-    """A SpecBundle stand-in readable both as a mapping and by attribute."""
+@dataclasses.dataclass
+class FakeSpecBundle:
+    component_id: str
+    spec_bundle_hash: str
+    spec: str
+    interface: str
+    constraints: str
+    dependency_interfaces: dict = dataclasses.field(default_factory=dict)
+    dependency_context: dict = dataclasses.field(default_factory=dict)
+    dependency_usage: dict = dataclasses.field(default_factory=dict)
+    vars: dict = dataclasses.field(default_factory=dict)
+    glossary: str = ""
+    hint_code: object = None
 
-    def __getattr__(self, name):
+    def __getitem__(self, key):
+        names = [f.name for f in dataclasses.fields(self)]
+        if key not in names:
+            raise KeyError(key)
+        return getattr(self, key)
+
+    def get(self, key, default=None):
         try:
-            return self[name]
+            return self[key]
         except KeyError:
-            raise AttributeError(name)
+            return default
+
+    def keys(self):
+        return [f.name for f in dataclasses.fields(self)]
+
+    def items(self):
+        return [(k, getattr(self, k)) for k in self.keys()]
+
+    def __iter__(self):
+        return iter(self.keys())
+
+    def __len__(self):
+        return len(self.keys())
+
+    def __contains__(self, key):
+        return key in self.keys()
 
 
-def write(path, text):
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text, encoding="utf-8")
+PYTHON_ADAPTER = (
+    "from pathlib import Path\n"
+    "\n"
+    "KIND = \"python\"\n"
+    "\n"
+    "\n"
+    "def layout_errors(code_dir):\n"
+    "    return [\"bad.py:1: SyntaxError: x\"] if (Path(code_dir) / \"bad.py\").exists() else []\n"
+    "\n"
+    "\n"
+    "def provision(repo_root):\n"
+    "    return {\"ok\": True, \"reason\": \"\", \"versions\": {\"python\": \"3.12\"}, "
+    "\"lockfile_sha256\": None, \"interpreter\": \"/fake/python\"}\n"
+)
 
 
-def build_fixture(repo_root):
-    write(
-        repo_root / "specs" / "glossary.md",
-        "# Glossary\n\n- **Foo** — a test term.\n",
+def test_generation_result_spec_bundle_hash_equals_bundle_hash(tmp_path, monkeypatch):
+    monkeypatch.delenv("VAR_CACHE_STORE_URL", raising=False)
+
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    adapter = repo_root / "gen" / "kind-python" / "kind_python.py"
+    adapter.parent.mkdir(parents=True)
+    adapter.write_text(PYTHON_ADAPTER, encoding="utf-8")
+
+    known_hash = "sha256:" + hashlib.sha256(b"ac-gen-018 widget-maker bundle").hexdigest()
+    bundle = FakeSpecBundle(
+        component_id="comp-widget-maker",
+        spec_bundle_hash=known_hash,
+        spec="# Widget Maker\n\nMakes widgets.",
+        interface="make_widget() -> str",
+        constraints="None.",
+        glossary="",
+        hint_code=None,
     )
-    comp = repo_root / "specs" / "components" / "foo"
-    write(
-        comp / "component.md",
-        "---\n"
-        "id: comp-foo\n"
-        "title: Foo\n"
-        "status: draft\n"
-        "owners: [team-a]\n"
-        "sealed: false\n"
-        "depends_on: []\n"
-        "---\n"
-        "\n"
-        "# Foo\n"
-        "\n"
-        "## Purpose\n"
-        "\n"
-        "Foo doubles a number.\n",
-    )
-    write(
-        comp / "requirements" / "R-FOO-001.md",
-        "# R-FOO-001\n\n**R-FOO-001** — `foo(x)` MUST return `2 * x`.\n",
-    )
-    write(
-        comp / "acceptance" / "AC-FOO-001.md",
-        "# AC-FOO-001\n"
-        "\n"
-        "Covers: R-FOO-001\n"
-        "Kind: generated-test\n"
-        "\n"
-        "```gherkin\n"
-        "Given x = 2\n"
-        "When foo(x) is called\n"
-        "Then it returns 4\n"
-        "```\n",
-    )
-    write(
-        comp / "interface" / "library.md",
-        "# Library\n\n```\nfoo(x: int) -> int\n```\n",
-    )
-    write(comp / "constraints.md", "# Constraints\n\nNone.\n")
 
+    log_path = tmp_path / "calls.log"
 
-def make_backend(log_path):
-    def backend(prompt, model, **params):
+    def mock_backend(prompt, model, **params):
         with open(log_path, "a", encoding="utf-8") as fh:
-            fh.write("call\n")
-        m = re.search(r"BEGIN FILE ([0-9a-f]{32})", prompt)
-        if m is None:
-            m = re.search(r"(?<![0-9a-f])([0-9a-f]{32})(?![0-9a-f])", prompt)
-        nonce = m.group(1) if m else "nonce"
+            fh.write("called\n")
+        nonce = re.search(r"-----BEGIN FILE ([0-9a-f]{32}):", prompt).group(1)
+        content = "def make_widget():\n    return \"widget\"\n"
         text = (
-            "Here is the implementation.\n"
-            "-----BEGIN FILE " + nonce + ": foo.py-----\n"
-            "def foo(x):\n"
-            "    return 2 * x\n"
-            "-----END FILE " + nonce + "-----\n"
+            "-----BEGIN FILE " + nonce + ": widget_maker.py-----\n"
+            + content
+            + "-----END FILE " + nonce + "-----\n"
+            + "-----END REPLY " + nonce + "-----\n"
         )
         return {
             "text": text,
@@ -97,55 +109,13 @@ def make_backend(log_path):
             "model_call_error": None,
         }
 
-    return backend
-
-
-def make_bundle(spec_bundle_hash):
-    return Bundle(
-        component_id="comp-foo",
-        spec_bundle_hash=spec_bundle_hash,
-        spec="# Foo\n\n## Purpose\n\nFoo doubles a number.\n\n# R-FOO-001\n\n**R-FOO-001** — `foo(x)` MUST return `2 * x`.",
-        interface="# Library\n\n```\nfoo(x: int) -> int\n```",
-        constraints="# Constraints\n\nNone.",
-        dependency_interfaces={},
-        dependency_context={},
-        dependency_usage={},
-        vars={},
-        glossary="# Glossary\n\n- **Foo** — a test term.",
-        hint_code=None,
-    )
-
-
-@pytest.mark.parametrize(
-    "known_hash",
-    [
-        "sha256:" + "ab" * 32,
-        "sha256:" + "0123456789abcdef" * 4,
-    ],
-)
-def test_generation_result_echoes_bundle_spec_bundle_hash(tmp_path, monkeypatch, known_hash):
-    monkeypatch.delenv("VAR_CACHE_STORE_URL", raising=False)
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    build_fixture(repo_root)
-    log_path = tmp_path / "backend_calls.log"
-
-    bundle = make_bundle(known_hash)
     result = generator.generate(
         bundle,
-        "mock:model",
+        "mock-model",
         repo_root=repo_root,
-        llm_backend=make_backend(log_path),
+        llm_backend=mock_backend,
     )
 
-    # The mock model was actually called and produced valid files.
-    assert log_path.is_file()
-    assert log_path.read_text(encoding="utf-8").count("call") >= 1
-    assert field(result, "model_call_error") is None
-    assert field(result, "refused") is None
-    files = field(result, "files")
-    assert files
-
-    # The Then clause: exact echo of the bundle's own spec_bundle_hash.
-    assert field(result, "spec_bundle_hash") == known_hash
+    assert log_path.exists(), "mock model was never called"
     assert field(result, "spec_bundle_hash") == bundle.spec_bundle_hash
+    assert field(result, "spec_bundle_hash") == known_hash

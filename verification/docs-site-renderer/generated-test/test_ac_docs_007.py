@@ -1,6 +1,4 @@
-# hotdocs-criterion: sha256:a7892587ea91bd3e43e927312ba2c5f774001b9813be251d05c8235243671047
-"""AC-DOCS-007: cli.main exit codes (0 after rendering, 1 on missing graph, 2 on usage error)."""
-
+# hotdocs-criterion: sha256:484ee667e541281b2830e5c7f493d187b5d1b661433e79252f9ca89360fd2179
 import importlib
 import json
 from pathlib import Path
@@ -8,8 +6,12 @@ from pathlib import Path
 import docs_site_renderer
 
 
-def _cli():
-    return importlib.import_module("docs_site_renderer.cli")
+def _cli_main():
+    try:
+        cli = importlib.import_module("docs_site_renderer.cli")
+        return cli.main
+    except Exception:
+        return docs_site_renderer.main
 
 
 def _valid_graph():
@@ -26,7 +28,6 @@ def _valid_graph():
                 "owners": ["pipeline-team"],
                 "documents": {
                     "component.md": "---\nid: comp-foo\ntitle: Foo\nstatus: draft\nowners: [pipeline-team]\n---\n\n# Foo\n",
-                    "requirements/R-FOO-001.md": "**R-FOO-001** - Foo MUST work.\n",
                 },
             },
             "comp-bar": {
@@ -54,55 +55,44 @@ def _valid_graph():
     }
 
 
-def _write_graph(repo_root: Path):
-    verification = repo_root / "verification"
-    verification.mkdir(parents=True, exist_ok=True)
-    data = json.dumps(_valid_graph(), sort_keys=True, indent=2, ensure_ascii=True) + "\n"
-    (verification / "corpus-graph.json").write_bytes(data.encode("utf-8"))
-
-
-def test_valid_graph_renders_and_returns_0(tmp_path, monkeypatch):
+def test_valid_graph_renders_site_and_returns_0(tmp_path, monkeypatch):
     repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    _write_graph(repo_root)
+    (repo_root / "verification").mkdir(parents=True)
+    graph_bytes = json.dumps(_valid_graph(), sort_keys=True, indent=2, ensure_ascii=True) + "\n"
+    (repo_root / "verification" / "corpus-graph.json").write_text(graph_bytes, encoding="utf-8")
     out = tmp_path / "out"
     monkeypatch.chdir(tmp_path)
 
-    rc = _cli().main(["--repo-root=" + str(repo_root), "--out=" + str(out)])
+    main = _cli_main()
+    code = main(["--repo-root=" + str(repo_root), "--out=" + str(out)])
 
-    assert rc == 0
+    assert code == 0
     assert out.is_dir()
-    files = [p for p in out.rglob("*") if p.is_file()]
-    assert files, "expected rendered site files under --out"
+    index = out / "index.html"
+    assert index.is_file()
+    text = index.read_text(encoding="utf-8")
+    assert text.strip() != ""
+    assert "comp-foo" in text
 
 
-def test_missing_graph_returns_1(tmp_path, monkeypatch):
+def test_missing_corpus_graph_returns_1(tmp_path, monkeypatch):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
     monkeypatch.chdir(tmp_path)
 
-    rc = _cli().main(["--repo-root=" + str(repo_root)])
+    main = _cli_main()
+    code = main(["--repo-root=" + str(repo_root)])
 
-    assert rc == 1
+    assert code == 1
 
 
 def test_unknown_flag_returns_2(tmp_path, monkeypatch):
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    _write_graph(repo_root)
-    monkeypatch.chdir(repo_root)
-
-    rc = _cli().main(["--bogus"])
-
-    assert rc == 2
+    monkeypatch.chdir(tmp_path)
+    main = _cli_main()
+    assert main(["--bogus"]) == 2
 
 
 def test_flag_without_value_returns_2(tmp_path, monkeypatch):
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    _write_graph(repo_root)
-    monkeypatch.chdir(repo_root)
-
-    rc = _cli().main(["--out"])
-
-    assert rc == 2
+    monkeypatch.chdir(tmp_path)
+    main = _cli_main()
+    assert main(["--out"]) == 2

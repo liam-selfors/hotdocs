@@ -1,189 +1,129 @@
-# hotdocs-criterion: sha256:aea07dab335418745a53d427fba2165a819f0ca756f1e9e0f57583c100d38ced
-import dataclasses
-import importlib.util
+# hotdocs-criterion: sha256:c6795dc184b210f9dedc4e0b553ece26d49f8ed986c27eec17d1abc0eab1f5db
 import re
-import sys
-from pathlib import Path
+
+import pytest
 
 import test_author
 
 
-MARKER = "GENONLY_SENTINEL_9b41e2c7"
-MARKER_FN = "genonly_hidden_helper_5d03aa"
+GEN_SENTINEL = "GENSENTINELQ7X9Z3VK"
+GEN_SENTINEL_FUNC = "gen_only_helper_q7x9z3vk"
+INTERFACE_MARKER = "IFACEMARKERW4P8L2"
 
 
 def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def load_module(path, module_name):
-    spec = importlib.util.spec_from_file_location(module_name, path)
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[module_name] = module
-    spec.loader.exec_module(module)
-    return module
-
-
-def write(path, text):
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text, encoding="utf-8")
-
-
-def build_fixture(repo_root):
-    write(
-        repo_root / "specs" / "glossary.md",
-        "# Glossary\n\n- **Foo** — a test term.\n",
-    )
-    comp = repo_root / "specs" / "components" / "foo"
-    write(
-        comp / "component.md",
-        "---\n"
-        "id: comp-foo\n"
-        "title: Foo\n"
-        "status: draft\n"
-        "owners: [team-a]\n"
-        "sealed: true\n"
-        "source_path: legacy/foo/\n"
-        "depends_on: []\n"
-        "---\n"
+def _write_probe_stand_in(repo_root, log_path):
+    probe_dir = repo_root / "gen" / "test-probe"
+    probe_dir.mkdir(parents=True, exist_ok=True)
+    src = (
+        "class _Report:\n"
+        "    def __init__(self):\n"
+        "        self.ok = True\n"
+        "        self.findings = []\n"
+        "        self.tests_run = 1\n"
+        "        self.tests_reached = 1\n"
         "\n"
-        "# Foo\n"
+        "    def to_dict(self):\n"
+        "        return {'ok': self.ok, 'findings': list(self.findings),\n"
+        "                'tests_run': self.tests_run, 'tests_reached': self.tests_reached}\n"
         "\n"
-        "## Purpose\n"
         "\n"
-        "Foo doubles a number.\n",
+        "def probe(test_source, criterion_bundle, module_name, *, timeout=60.0, interpreter=None):\n"
+        "    with open(" + repr(str(log_path)) + ", 'a', encoding='utf-8') as fh:\n"
+        "        fh.write(repr(criterion_bundle).replace('\\n', ' ') + ' || ' + repr(test_source).replace('\\n', ' ') + '\\n')\n"
+        "    return _Report()\n"
     )
-    write(
-        comp / "requirements" / "R-FOO-001.md",
-        "# R-FOO-001\n\n**R-FOO-001** — `foo(x)` MUST return `2 * x`.\n",
-    )
-    write(
-        comp / "acceptance" / "AC-FOO-001.md",
-        "# AC-FOO-001\n"
+    (probe_dir / "test_probe.py").write_text(src, encoding="utf-8")
+
+
+def _write_component_gen_code(repo_root):
+    gen_dir = repo_root / "gen" / "widget-maker"
+    gen_dir.mkdir(parents=True, exist_ok=True)
+    src = (
+        "# " + GEN_SENTINEL + "\n"
+        "SECRET_IMPL = " + repr(GEN_SENTINEL) + "\n"
         "\n"
-        "Covers: R-FOO-001\n"
-        "Kind: generated-test\n"
         "\n"
-        "```gherkin\n"
-        "Given x = 2\n"
-        "When foo(x) is called\n"
-        "Then it returns 4\n"
-        "```\n",
-    )
-    write(
-        comp / "interface" / "library.md",
-        "# Library\n\n```\nfoo(x: int) -> int\n```\n",
-    )
-    write(comp / "constraints.md", "# Constraints\n\nNone.\n")
-    # The sealed component's real code lives at its source_path.
-    write(
-        repo_root / "legacy" / "foo" / "foo.py",
-        "def foo(x):\n    return 2 * x\n",
-    )
-    # Existing gen/<component>/ content, carrying distinctive markers that
-    # appear nowhere in the spec corpus.
-    write(
-        repo_root / "gen" / "foo" / "foo.py",
-        "# " + MARKER + "\n"
-        "def " + MARKER_FN + "(x):\n"
-        "    return x + x\n"
+        "def " + GEN_SENTINEL_FUNC + "():\n"
+        "    return SECRET_IMPL\n"
         "\n"
-        "def foo(x):\n"
-        "    " + repr(MARKER) + "\n"
-        "    return " + MARKER_FN + "(x)\n",
+        "\n"
+        "def make():\n"
+        "    return " + GEN_SENTINEL_FUNC + "()\n"
     )
-    write(
-        repo_root / "gen" / "foo" / "NOTES.md",
-        "Implementation notes: " + MARKER + "\n",
-    )
+    (gen_dir / "widget_maker.py").write_text(src, encoding="utf-8")
+    (gen_dir / "notes.txt").write_text(GEN_SENTINEL + " notes\n", encoding="utf-8")
 
 
-def tool_gen():
-    return next(p for p in Path(test_author.__file__).resolve().parents if p.name == "gen")
-
-
-def lint_fixture(repo_root):
-    gen = next(p for p in Path(test_author.__file__).resolve().parents if p.name == "gen")
-    base = gen / "spec-linter"
-    path = base / "spec_linter.py" if (base / "spec_linter.py").is_file() else base / "spec_linter" / "__init__.py"
-    spec = importlib.util.spec_from_file_location("spec_linter", path)
-    spec_linter = importlib.util.module_from_spec(spec)
-    sys.modules["spec_linter"] = spec_linter
-    spec.loader.exec_module(spec_linter)
-    assert spec_linter.lint(None, repo_root).hard_failures == 0
-
-
-def load_assembler():
-    base = tool_gen() / "spec-bundle-assembler"
-    flat = base / "spec_bundle_assembler.py"
-    path = flat if flat.is_file() else base / "spec_bundle_assembler" / "__init__.py"
-    return load_module(path, "spec_bundle_assembler")
-
-
-def bundle_items(bundle):
-    if dataclasses.is_dataclass(bundle):
-        return {f.name: getattr(bundle, f.name) for f in dataclasses.fields(bundle)}
-    if isinstance(bundle, dict):
-        return dict(bundle)
-    return dict(vars(bundle))
-
-
-def flatten(value):
-    if isinstance(value, dict):
-        return "\n".join(str(k) + "\n" + flatten(v) for k, v in value.items())
-    if isinstance(value, (list, tuple, set)):
-        return "\n".join(flatten(v) for v in value)
-    return "" if value is None else str(value)
-
-
-def test_criterion_bundle_has_no_gen_content(tmp_path, monkeypatch):
-    monkeypatch.delenv("VAR_CACHE_STORE_URL", raising=False)
+def test_criterion_bundle_carries_no_gen_component_content(tmp_path, monkeypatch):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
     monkeypatch.chdir(repo_root)
-    build_fixture(repo_root)
+    monkeypatch.delenv("VAR_CACHE_STORE_URL", raising=False)
 
-    lint_fixture(repo_root)
+    _write_component_gen_code(repo_root)
+    probe_log = tmp_path / "probe_calls.log"
+    _write_probe_stand_in(repo_root, probe_log)
 
-    assembler = load_assembler()
-    bundle = assembler.assemble_criterion("comp-foo", "AC-FOO-001", repo_root)
+    bundle = {
+        "component_id": "comp-widget-maker",
+        "criterion_id": "AC-WIDGET-MAKER-001",
+        "covers": "R-WIDGET-MAKER-001",
+        "criterion_text": "Given a widget\nWhen it is made\nThen it exists",
+        "requirement_text": "R-WIDGET-MAKER-001 - make() MUST return a widget.",
+        "interface": "# Library\n\nmake() -> str  " + INTERFACE_MARKER + "\n",
+        "glossary": "",
+        "dependency_interfaces": {},
+    }
 
-    items = bundle_items(bundle)
-    assert items, "bundle exposes no fields"
-    # The bundle carries the documented spec-derived fields...
-    assert field(bundle, "component_id") == "comp-foo"
-    assert field(bundle, "criterion_id") == "AC-FOO-001"
-    assert "foo(x: int) -> int" in field(bundle, "interface")
-    # ...and no field derived from gen/foo/ content.
-    assert "hint_code" not in items or not items["hint_code"]
-    for name, value in items.items():
-        text = flatten(value)
-        assert MARKER not in text, "field " + repr(name) + " holds gen/ content"
-        assert MARKER_FN not in text, "field " + repr(name) + " holds gen/ content"
+    prompts = []
+    test_body = "import widget_maker\n\n\ndef test_make():\n    assert widget_maker.make()\n"
 
-    # Inspect what test-author actually sends to the model for that bundle.
-    prompt_log = tmp_path / "prompts.log"
-    reply_body = "def test_placeholder():\n    assert True"
-
-    def backend(prompt, model, **params):
-        with open(prompt_log, "a", encoding="utf-8") as fh:
-            fh.write(prompt.replace("\n", "\\n") + "\n")
-        m = re.search(r"-----BEGIN FILE ([0-9a-f]{32})-----", prompt)
-        nonce = m.group(1) if m else "0" * 32
-        return {
-            "text": "-----BEGIN FILE " + nonce + "-----\n" + reply_body + "\n-----END FILE " + nonce + "-----",
-            "model": model,
-            "backend": "mock",
-            "model_call_error": None,
-        }
+    def mock_backend(prompt, model, **params):
+        prompts.append(prompt)
+        nonce = re.findall(r"-----BEGIN FILE ([0-9a-f]{32})-----", prompt)[-1]
+        text = (
+            "-----BEGIN FILE " + nonce + "-----\n"
+            + test_body
+            + "\n-----END FILE " + nonce + "-----"
+        )
+        return {"text": text, "model": model, "backend": "mock", "model_call_error": None}
 
     result = test_author.author_test(
-        bundle, "claude-sonnet-5", 0, repo_root=repo_root, llm_backend=backend
+        bundle, "mock", 0, repo_root=repo_root, llm_backend=mock_backend
     )
-    assert field(result, "model_call_error") is None
 
-    assert prompt_log.is_file(), "mock backend was never called"
-    logged = prompt_log.read_text(encoding="utf-8")
-    assert logged.strip(), "mock backend was never called"
-    assert MARKER not in logged
-    assert MARKER_FN not in logged
+    assert field(result, "model_call_error") is None
+    assert prompts, "the model was never called"
+
+    # Positive control: the bundle's interface content does reach the prompt.
+    assert any(INTERFACE_MARKER in p for p in prompts)
+
+    # No prompt contains anything derived from gen/widget-maker/ content.
+    for p in prompts:
+        assert GEN_SENTINEL not in p
+        assert GEN_SENTINEL_FUNC not in p
+        assert "SECRET_IMPL" not in p
+
+    # The bundle handed on to test-probe carries no gen/ content either.
+    assert probe_log.is_file(), "test-probe stand-in was never called"
+    log_text = probe_log.read_text(encoding="utf-8")
+    assert log_text.strip()
+    assert GEN_SENTINEL not in log_text
+    assert GEN_SENTINEL_FUNC not in log_text
+    assert "SECRET_IMPL" not in log_text
+
+    # The returned and written file hold no gen/ content.
+    file_value = field(result, "file")
+    assert file_value is not None
+    content = field(file_value, "content")
+    assert GEN_SENTINEL not in content
+    assert GEN_SENTINEL_FUNC not in content
+    written = repo_root / field(file_value, "path")
+    assert written.is_file()
+    written_text = written.read_text(encoding="utf-8")
+    assert GEN_SENTINEL not in written_text
+    assert GEN_SENTINEL_FUNC not in written_text

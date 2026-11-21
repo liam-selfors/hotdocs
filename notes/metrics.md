@@ -247,3 +247,21 @@ Metrics about the system's own agents, not the product being built.
   edits. The headline claim of the whole methodology. `[stk] [dev]`
 - **Assist-agent acceptance rate** — how often a developer accepts vs. overrides
   the authoring agent's completeness suggestions. `[agt] [dev]`
+
+---
+
+## Baselines
+
+### 2026-11-16, before the authoring and agentic hardening round (`26a90f1`)
+
+- `hotdocs lint`: 0 hard failures, 48 warnings (29 `R-SIZE-001`, 11
+  `R-SIZE-003`, 3 `R-SIZE-002`, 5 `R-LINT-031`); `R-LINT-015` never runs
+  (no judge is passed).
+- `hotdocs verify --model=claude-opus-5-5`: ready; 28 of 28 provenance
+  checks hit.
+- Largest components (doc words, cap 4,000): secret-scanner 3,998,
+  verifier-orchestrator 3,997, test-author 3,997,
+  capability-scenario-verifier 3,994, criterion-compiler 3,961,
+  spec-bundle-assembler 3,959.
+- Generation: one attempt per `hotdocs generate`; recorded attempt counts
+  are always 0 (the counter reads the wrong directory).

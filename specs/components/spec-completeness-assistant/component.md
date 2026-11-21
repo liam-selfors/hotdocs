@@ -3,7 +3,7 @@ id: comp-spec-completeness-assistant
 title: Spec Completeness Assistant
 status: draft
 owners: [pipeline-team]
-depends_on: [comp-spec-linter, comp-impact-analyzer, comp-spec-bundle-assembler, comp-generator, comp-llm-endpoint]
+depends_on: [comp-spec-linter, comp-impact-analyzer, comp-spec-reviewer, comp-llm-endpoint]
 realizes: [P-AMBIGUITY-GATE]
 model_pin: claude-opus-5-5
 sealed: false
@@ -14,22 +14,23 @@ sealed: false
 ## Purpose
 
 Helps a developer land a *complete* spec change on a feature branch —
-dependencies updated, no logical discrepancies, no redundancies — using
-hint-mode previews to evaluate completeness **before** a change is even
-submitted to the real merge pipeline.
+dependencies updated, no logical discrepancies, no redundancies — by
+checking each affected component's criteria from their test authors'
+view and judging the change against the criteria that cover it,
+**before** a change is even submitted to the real merge pipeline.
 
 ## Rationale
 
-The assist agent the original brainstorm describes but never names. This is the component
-`notes/metrics.md` already assumes exists (its "Completeness-agent
-confidence" and "Assist-agent acceptance rate" metrics predate this
-spec) but that, until now, had never actually been specced.
+The assist agent `notes/metrics.md` already assumes (its
+"Completeness-agent confidence" and "Assist-agent acceptance rate"
+metrics predate this spec).
 
 ## Scope
 
 **In scope:** running the cheap, deterministic checks first (lint, blast
-radius); producing a hint-mode preview; producing a judgment-based
-completeness assessment and a redundancy/overlap check.
+radius, `spec-reviewer`'s deterministic criterion check for each
+affected component); producing a judgment-based completeness assessment
+and a corpus-wide redundancy/overlap check.
 
 **Out of scope, and load-bearing, not incidental:** gating anything. This
 component's output is advisory only — it is never read by
@@ -64,13 +65,8 @@ See `interface/data/`.
 
 See `acceptance/`.
 
-Mixed `kind`, and deliberately the opposite mix from most of this corpus:
-every criterion is a `generated-test` except R-ASSIST-004/005 — this
-component's actual reason to exist — which are `llm-judge`. Unlike every coordination component specced so far
-(`verifier-orchestrator`, `merge-orchestrator`), this one's core value
-genuinely *is* judgment, not dispatch around it — a useful contrast case
-against the corpus's usual "prefer compiled" guidance rather than
-another confirmation of it.
+Every criterion is a `generated-test`, the judgment calls checked
+through a faked `llm-endpoint`.
 
 ## Non-functional constraints
 
@@ -92,3 +88,9 @@ None.
   (`mutation_score` 0.81).
 - `D201`: `R-ASSIST-011` covers the tool-root fallback (`D199`);
   dependencies are flat modules; more response-parsing cases.
+- `D301`: previews come from `spec-reviewer`, not `generator`; lint
+  halts only on a failure inside the change; the completeness prompt
+  carries the covering criteria; redundancy is checked corpus-wide from
+  deterministic candidates; a model makes lint run its glossary judge.
+- Visibility pass: shared fixture facts, reply shapes, the inside-a-
+  component match and the no-write rule moved into `interface/`.

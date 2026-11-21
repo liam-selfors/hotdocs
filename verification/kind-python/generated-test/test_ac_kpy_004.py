@@ -1,0 +1,37 @@
+# hotdocs-criterion: sha256:4fbddf5be9a106e90aa851a59aa7b9bcb4aa7a7341b0f404c1ba830662b9e59c
+import pytest
+
+import kind_python
+
+
+def test_ac_kpy_004_asset_runner_runs_code_at_call_time(tmp_path, monkeypatch):
+    monkeypatch.delenv("HOTDOCS_PYTHON", raising=False)
+
+    code_dir = tmp_path / "calc"
+    code_dir.mkdir()
+    module_file = code_dir / "calc.py"
+    module_file.write_text(
+        "def add(a, b):\n    return a + b\n\n\n"
+        "def nothing():\n    pass\n\n\n"
+        "def pair(x):\n    print('noise', end='')\n    return [x, {'k': None}, True]\n"
+    )
+
+    run = kind_python.asset_runner(code_dir)
+    assert callable(run)
+
+    assert run("add", [1, 2]) == 3
+    assert run("add", ["a", "b"]) == "ab"
+    assert run("nothing", []) is None
+    assert run("pair", [5]) == [5, {"k": None}, True]
+
+    module_file.write_text("def add(a, b):\n    return 'new'\n")
+    assert run("add", [1, 2]) == "new"
+
+    missing = str(tmp_path / "nope")
+    monkeypatch.setenv("HOTDOCS_PYTHON", missing)
+
+    with pytest.raises(kind_python.AssetError) as excinfo:
+        run("add", [1, 2])
+    assert str(excinfo.value) == "cannot start " + missing
+
+    assert kind_python.surface(code_dir) == {"names": []}

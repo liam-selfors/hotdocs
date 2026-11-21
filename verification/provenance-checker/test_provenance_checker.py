@@ -70,7 +70,9 @@ def test_ac_provcheck_006_read_only_never_touches_the_manifest(repo_root):
 
     assert path.read_bytes() == content_before
     assert path.stat().st_mtime_ns == mtime_before
-    assert list(repo_root.rglob("*")) == [repo_root / "gen", repo_root / "gen" / "foo", path]
+    adapter = repo_root / "gen" / "kind-python" / "kind_python.py"  # planted by the fixture (D344)
+    assert sorted(repo_root.rglob("*")) == sorted([repo_root / "gen", repo_root / "gen" / "foo", path,
+                                                   adapter.parent, adapter])
 
 
 def test_ac_provcheck_007_comparison_uses_exactly_the_caller_supplied_hash(repo_root):

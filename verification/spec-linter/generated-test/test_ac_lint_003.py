@@ -1,28 +1,17 @@
-# hotdocs-criterion: sha256:5bb371cba3a931e2d6632ed04521df38955356b0970a4ceb18ea668a97f3e336
+# hotdocs-criterion: sha256:b33a5ab14e82c35a4d4f711beba8b5f6d5d889eb65581c9db94f878742ea48a8
+import io
 import json
+import contextlib
 from pathlib import Path
-
-import pytest
 
 import spec_linter
 
 
-DANGLING_ID = "comp-ghost-does-not-exist"
+DANGLING_ID = "comp-nonexistent-dangling-target"
 
 
-def _get(obj, key, default=None):
-    if isinstance(obj, dict):
-        return obj.get(key, default)
-    return getattr(obj, key, default)
-
-
-def _norm(value):
-    if value is None:
-        return None
-    inner = getattr(value, "value", None)
-    if isinstance(inner, str):
-        return inner.lower()
-    return str(value).lower()
+def field(value, name):
+    return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
 def _write(path: Path, text: str) -> None:
@@ -30,28 +19,35 @@ def _write(path: Path, text: str) -> None:
     path.write_text(text, encoding="utf-8")
 
 
-def _component_md(comp_id: str, title: str, depends_on: list) -> str:
-    deps = "[" + ", ".join(depends_on) + "]"
-    return (
+def _build_corpus(repo_root: Path) -> None:
+    specs = repo_root / "specs"
+    _write(
+        specs / "glossary.md",
+        "# Glossary\n\n"
+        "- **Widget** — a small thing used only by this test fixture.\n",
+    )
+
+    comp_dir = specs / "components" / "foo"
+    component_md = (
         "---\n"
-        f"id: {comp_id}\n"
-        f"title: {title}\n"
+        "id: comp-foo\n"
+        "title: Foo\n"
         "status: draft\n"
-        "owners: [alice]\n"
-        f"depends_on: {deps}\n"
+        "owners: [test-team]\n"
+        "depends_on: [" + DANGLING_ID + "]\n"
         "sealed: true\n"
-        f"source_path: legacy/{comp_id}\n"
+        "source_path: legacy/foo/\n"
         "---\n"
         "\n"
-        f"# {title}\n"
+        "# Foo\n"
         "\n"
         "## Purpose\n"
         "\n"
-        "Provides a small widget for test purposes.\n"
+        "Foo does one small thing for this fixture.\n"
         "\n"
         "## Scope\n"
         "\n"
-        "- In scope: widgets.\n"
+        "- In scope: the one small thing.\n"
         "- Out of scope: everything else.\n"
         "\n"
         "## Definitions\n"
@@ -84,127 +80,80 @@ def _component_md(comp_id: str, title: str, depends_on: list) -> str:
         "\n"
         "- Initial draft.\n"
     )
-
-
-def _write_component(repo_root: Path, slug: str, prefix: str, depends_on: list) -> Path:
-    base = repo_root / "specs" / "components" / slug
-    comp_md = base / "component.md"
-    _write(comp_md, _component_md(f"comp-{slug}", slug.capitalize(), depends_on))
+    _write(comp_dir / "component.md", component_md)
     _write(
-        base / "requirements" / f"R-{prefix}-001.md",
-        f"# R-{prefix}-001\n\n**R-{prefix}-001** — The component MUST produce a widget.\n",
+        comp_dir / "requirements" / "R-FOO-001.md",
+        "# R-FOO-001\n\n"
+        "**R-FOO-001** — The component MUST match existing behavior.\n",
     )
     _write(
-        base / "acceptance" / f"AC-{prefix}-001.md",
-        f"# AC-{prefix}-001\n\n"
-        f"Covers: R-{prefix}-001\n"
+        comp_dir / "acceptance" / "AC-FOO-001.md",
+        "# AC-FOO-001\n\n"
+        "Covers: R-FOO-001\n"
         "Kind: compiled\n\n"
         "```gherkin\n"
-        "Given a request\n"
-        "When the component runs\n"
-        "Then a widget is produced\n"
+        "Given the existing behavior\n"
+        "When foo runs\n"
+        "Then the behavior is unchanged\n"
         "```\n",
     )
     _write(
-        base / "constraints.md",
-        "# Constraints\n\n- Latency: under 1s, measured by timing a call.\n",
+        comp_dir / "constraints.md",
+        "# Constraints\n\nNone.\n",
     )
-    return comp_md
 
 
-def _build_corpus(repo_root: Path, foo_depends_on: list) -> None:
-    _write(
-        repo_root / "specs" / "glossary.md",
-        "# Glossary\n\n- **Widget** — a small thing produced by a component.\n",
-    )
-    _write_component(repo_root, "bar", "BAR", [])
-    _write_component(repo_root, "foo", "FOO", foo_depends_on)
+def _matching_findings(findings):
+    out = []
+    for f in findings:
+        if (
+            field(f, "rule_id") == "R-LINT-003"
+            and field(f, "severity") == "fail"
+            and DANGLING_ID in str(field(f, "message"))
+        ):
+            out.append(f)
+    return out
 
 
-def _lint_findings(repo_root: Path):
-    report = spec_linter.lint(None, repo_root)
-    findings = _get(report, "findings")
-    assert findings is not None, "LintReport must expose findings"
-    return list(findings)
-
-
-def _r_lint_003(findings):
-    return [f for f in findings if _norm(_get(f, "rule_id")) == "r-lint-003"]
-
-
-def test_dangling_depends_on_produces_fail_finding_naming_id(tmp_path, monkeypatch):
+def test_dangling_depends_on_is_r_lint_003_fail_finding(tmp_path):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
-    _build_corpus(repo_root, ["comp-bar", DANGLING_ID])
-    monkeypatch.chdir(repo_root)
+    _build_corpus(repo_root)
 
-    findings = _lint_findings(repo_root)
-    r003 = _r_lint_003(findings)
+    # Sanity: the dangling id has no spec file anywhere under specs/.
+    for p in (repo_root / "specs").rglob("*.md"):
+        assert p.stem != DANGLING_ID
 
-    naming = [
-        f for f in r003 if DANGLING_ID in str(_get(f, "message", "") or "")
-    ]
-    assert naming, (
-        "expected an R-LINT-003 finding naming the dangling id; got: "
-        + repr([(_get(f, "rule_id"), _get(f, "message")) for f in findings])
-    )
-    assert any(_norm(_get(f, "severity")) == "fail" for f in naming), (
-        "the R-LINT-003 finding naming the dangling id must have fail severity; got "
-        + repr([_get(f, "severity") for f in naming])
-    )
+    report = spec_linter.lint(None, repo_root)
+    findings = list(field(report, "findings"))
 
-    # The resolvable dependency must not be reported as dangling.
-    for f in r003:
-        msg = str(_get(f, "message", "") or "")
-        assert "'comp-bar'" not in msg and '"comp-bar"' not in msg, (
-            f"resolvable depends_on entry comp-bar wrongly flagged: {msg}"
+    matches = _matching_findings(findings)
+    assert matches, (
+        "expected a fail-severity R-LINT-003 finding naming "
+        + repr(DANGLING_ID)
+        + "; got "
+        + repr(
+            [
+                (field(f, "rule_id"), field(f, "severity"), field(f, "message"))
+                for f in findings
+            ]
         )
-
-    report = spec_linter.lint(None, repo_root)
-    hard = _get(report, "hard_failures")
-    if hard is not None:
-        assert hard >= 1
-
-
-def test_no_dangling_finding_when_all_depends_on_resolve(tmp_path, monkeypatch):
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    _build_corpus(repo_root, ["comp-bar"])
-    monkeypatch.chdir(repo_root)
-
-    findings = _lint_findings(repo_root)
-    r003 = _r_lint_003(findings)
-    assert not r003, (
-        "no R-LINT-003 finding expected when every depends_on resolves; got: "
-        + repr([_get(f, "message") for f in r003])
     )
+    assert field(report, "hard_failures") >= 1
 
 
-def test_cli_json_reports_dangling_depends_on_and_exits_1(tmp_path, monkeypatch, capsys):
+def test_cli_json_report_contains_dangling_depends_on_finding(tmp_path):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
-    _build_corpus(repo_root, [DANGLING_ID])
-    monkeypatch.chdir(repo_root)
+    _build_corpus(repo_root)
 
-    code = spec_linter.main(["--format=json", f"--repo-root={repo_root}"])
-    out = capsys.readouterr().out
-    assert code == 1, f"expected exit code 1 for a fail-severity finding, got {code}"
+    out = io.StringIO()
+    err = io.StringIO()
+    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+        code = spec_linter.main(["--format=json", "--repo-root=" + str(repo_root)])
 
-    try:
-        data = json.loads(out)
-    except ValueError:
-        start = out.index("{")
-        end = out.rindex("}")
-        data = json.loads(out[start : end + 1])
-
-    findings = data.get("findings", [])
-    matching = [
-        f
-        for f in findings
-        if f.get("rule_id") == "R-LINT-003"
-        and f.get("severity") == "fail"
-        and DANGLING_ID in str(f.get("message", ""))
-    ]
-    assert matching, f"expected R-LINT-003 fail finding naming {DANGLING_ID}; got {findings!r}"
-    summary = data.get("summary", {})
-    assert summary.get("hard_failures", 0) >= 1
+    assert code == 1, "stderr: " + err.getvalue()
+    doc = json.loads(out.getvalue())
+    matches = _matching_findings(doc["findings"])
+    assert matches, "findings: " + repr(doc["findings"])
+    assert doc["summary"]["hard_failures"] >= 1

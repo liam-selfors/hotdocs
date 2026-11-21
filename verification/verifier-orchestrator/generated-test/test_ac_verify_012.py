@@ -1,5 +1,6 @@
-# hotdocs-criterion: sha256:590cee13fb5272544f5b437fdbba064327f47ee7a9c59a50552e814a14200300
-import json
+# hotdocs-criterion: sha256:d032c613d06c2c2f37d5c36def981d48205e4fac1c7f494519ba8e528349ac72
+import importlib.util
+import sys
 from pathlib import Path
 
 import verifier_orchestrator
@@ -14,34 +15,7 @@ def write(path, text):
     path.write_text(text, encoding="utf-8")
 
 
-CRITERION_TEXT = (
-    "Given a widget is 2\n"
-    "When make_widget is invoked with [widget]\n"
-    "Then the widget documentation is clear and unambiguous"
-)
-REQUIREMENT_TEXT = "**R-WIDGET-001** — The widget docs MUST be clear."
-
-
-def build_fixture(repo_root, assembler_log):
-    write(
-        repo_root / "specs" / "glossary.md",
-        "# Glossary\n\n- **Widget** — a test term.\n",
-    )
-    write(
-        repo_root / "specs" / "product" / "widgets.md",
-        "---\n"
-        "id: P-WIDGETS\n"
-        "title: Widgets\n"
-        "status: draft\n"
-        "owners: [team-a]\n"
-        "---\n"
-        "\n"
-        "# Widgets\n"
-        "\n"
-        "## Purpose\n"
-        "\n"
-        "Make widgets.\n",
-    )
+def build_fixture(repo_root):
     comp = repo_root / "specs" / "components" / "widget"
     write(
         comp / "component.md",
@@ -49,20 +23,53 @@ def build_fixture(repo_root, assembler_log):
         "id: comp-widget\n"
         "title: Widget\n"
         "status: draft\n"
-        "owners: [team-a]\n"
-        "depends_on: []\n"
-        "realizes: [P-WIDGETS]\n"
+        "owners: [team]\n"
+        "realizes: [P-WIDGET]\n"
         "---\n"
         "\n"
         "# Widget\n"
         "\n"
         "## Purpose\n"
         "\n"
-        "Widget doubles a number.\n",
+        "Renders widgets.\n"
+        "\n"
+        "## Scope\n"
+        "\n"
+        "- In scope: rendering.\n"
+        "\n"
+        "## Definitions\n"
+        "\n"
+        "None.\n"
+        "\n"
+        "## Behavior\n"
+        "\n"
+        "See `requirements/`.\n"
+        "\n"
+        "## Interfaces\n"
+        "\n"
+        "See `interface/`.\n"
+        "\n"
+        "## Data\n"
+        "\n"
+        "See `interface/data/`.\n"
+        "\n"
+        "## Acceptance criteria\n"
+        "\n"
+        "See `acceptance/`.\n"
+        "\n"
+        "## Non-functional constraints\n"
+        "\n"
+        "See `constraints.md`.\n"
+        "\n"
+        "## Open questions\n"
+        "\n"
+        "## Change log\n"
+        "\n"
+        "- Initial.\n",
     )
     write(
         comp / "requirements" / "R-WIDGET-001.md",
-        "# R-WIDGET-001\n\n" + REQUIREMENT_TEXT + "\n",
+        "**R-WIDGET-001** — The widget spec MUST be clear and unambiguous.\n",
     )
     write(
         comp / "acceptance" / "AC-WIDGET-001.md",
@@ -71,69 +78,94 @@ def build_fixture(repo_root, assembler_log):
         "Covers: R-WIDGET-001\n"
         "Kind: llm-judge\n"
         "\n"
-        "```gherkin\n" + CRITERION_TEXT + "\n```\n",
+        "```gherkin\n"
+        "Given the widget spec\n"
+        "When a reviewer reads it\n"
+        "Then it is clear and unambiguous\n"
+        "```\n",
     )
     write(
         comp / "interface" / "library.md",
-        "# Library\n\n```\nmake_widget(x: int) -> int\n```\n",
+        "# Library\n"
+        "\n"
+        "```\n"
+        "render_widget(name: str) -> str\n"
+        "```\n",
     )
     write(comp / "constraints.md", "# Constraints\n\nNone.\n")
-
     write(
-        repo_root / "gen" / "widget" / "widget.py",
-        "def make_widget(x):\n    return 2 * x\n",
+        repo_root / "specs" / "product" / "widget.md",
+        "---\n"
+        "id: P-WIDGET\n"
+        "title: Widget capability\n"
+        "status: draft\n"
+        "owners: [team]\n"
+        "---\n"
+        "\n"
+        "# Widget capability\n"
+        "\n"
+        "## Purpose\n"
+        "\n"
+        "Widgets.\n",
     )
+    write(repo_root / "specs" / "glossary.md", "# Glossary\n")
+    write(repo_root / "gen" / "widget" / "widget.py", "")
 
-    bundle = {
+    bundle_literal = {
         "component_id": "comp-widget",
         "criterion_id": "AC-WIDGET-001",
         "covers": "R-WIDGET-001",
-        "criterion_text": CRITERION_TEXT,
-        "requirement_text": REQUIREMENT_TEXT,
-        "interface": "# Library\n\n```\nmake_widget(x: int) -> int\n```",
-        "glossary": "# Glossary\n\n- **Widget** — a test term.",
+        "criterion_text": "Given the widget spec\nWhen a reviewer reads it\nThen it is clear and unambiguous",
+        "requirement_text": "**R-WIDGET-001** — The widget spec MUST be clear and unambiguous.",
+        "interface": "render_widget(name: str) -> str",
+        "glossary": "# Glossary",
         "dependency_interfaces": {},
+        "testing": "",
     }
-    source = (
-        "import json\n"
-        "\n"
-        "LOG = " + repr(str(assembler_log)) + "\n"
-        "BUNDLE = json.loads(" + repr(json.dumps(bundle)) + ")\n"
-        "\n"
-        "def assemble_criterion(component_id, criterion_id, repo_root):\n"
-        "    with open(LOG, 'a', encoding='utf-8') as fh:\n"
-        "        fh.write(str(criterion_id) + '\\n')\n"
-        "    result = dict(BUNDLE)\n"
-        "    result['component_id'] = component_id\n"
-        "    result['criterion_id'] = criterion_id\n"
-        "    return result\n"
-    )
     write(
         repo_root / "gen" / "spec-bundle-assembler" / "spec_bundle_assembler.py",
-        source,
+        "def assemble_criterion(component_id, criterion_id, repo_root):\n"
+        "    bundle = dict(" + repr(bundle_literal) + ")\n"
+        "    bundle['component_id'] = component_id\n"
+        "    bundle['criterion_id'] = criterion_id\n"
+        "    return bundle\n",
+    )
+    write(
+        repo_root / "gen" / "test-probe" / "test_probe.py",
+        "class _Report:\n"
+        "    def __init__(self):\n"
+        "        self.ok = True\n"
+        "        self.findings = []\n"
+        "        self.tests_run = 0\n"
+        "        self.tests_reached = 0\n"
+        "\n"
+        "    def to_dict(self):\n"
+        "        return {'ok': self.ok, 'findings': list(self.findings),\n"
+        "                'tests_run': self.tests_run, 'tests_reached': self.tests_reached}\n"
+        "\n"
+        "\n"
+        "def probe(test_source, criterion_bundle, module_name, *, timeout=60.0, interpreter=None):\n"
+        "    return _Report()\n",
     )
 
 
 def test_llm_judge_called_exactly_once(tmp_path):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
-    assembler_log = tmp_path / "assembler_calls.log"
-    build_fixture(repo_root, assembler_log)
+    build_fixture(repo_root)
 
-    calls = []
+    log = tmp_path / "judge_calls.log"
 
     def judge(bundle):
-        calls.append(bundle)
+        with open(log, "a", encoding="utf-8") as fh:
+            fh.write("called\n")
         return {"result": "pass", "rationale": "clear enough"}
 
     report = verifier_orchestrator.verify("comp-widget", repo_root, judge=judge)
 
-    # The judge was configured, so it must be called; and exactly once —
-    # no second, disagreement-style call.
+    calls = log.read_text(encoding="utf-8").splitlines() if log.exists() else []
     assert len(calls) == 1, "judge called " + str(len(calls)) + " times"
 
-    assert field(calls[0], "criterion_id") == "AC-WIDGET-001"
-
     criteria = field(report, "criteria")
-    ids = [c["id"] for c in criteria]
-    assert ids.count("AC-WIDGET-001") == 1
+    ids = [field(c, "id") for c in criteria]
+    assert "AC-WIDGET-001" in ids

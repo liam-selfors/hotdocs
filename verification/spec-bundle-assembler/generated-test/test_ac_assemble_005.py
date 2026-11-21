@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:800ad8f8fc3f120a2e255c76da72da06e7b927eef3a95cff613860aa945cb17f
+# hotdocs-criterion: sha256:c7606b563785bc1064b7f408a4c9a88304bd3ddcbcd56735784dbc23fd9c40c9
 import importlib.util
 import sys
 from pathlib import Path
@@ -8,203 +8,141 @@ import pytest
 import spec_bundle_assembler
 
 
-_SPEC_LINTER = None
+def field(value, name):
+    return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def _load_spec_linter():
-    global _SPEC_LINTER
-    if _SPEC_LINTER is not None:
-        return _SPEC_LINTER
-    gen = next(
-        p
-        for p in Path(spec_bundle_assembler.__file__).resolve().parents
-        if p.name == "gen"
-    )
+def load_spec_linter():
+    gen = next(p for p in Path(spec_bundle_assembler.__file__).resolve().parents if p.name == "gen")
     base = gen / "spec-linter"
-    path = (
-        base / "spec_linter.py"
-        if (base / "spec_linter.py").is_file()
-        else base / "spec_linter" / "__init__.py"
-    )
+    path = base / "spec_linter.py" if (base / "spec_linter.py").is_file() else base / "spec_linter" / "__init__.py"
     spec = importlib.util.spec_from_file_location("spec_linter", path)
-    module = importlib.util.module_from_spec(spec)
-    sys.modules["spec_linter"] = module
-    spec.loader.exec_module(module)
-    _SPEC_LINTER = module
-    return module
+    spec_linter = importlib.util.module_from_spec(spec)
+    sys.modules["spec_linter"] = spec_linter
+    spec.loader.exec_module(spec_linter)
+    return spec_linter
 
 
-def _field(value, name):
-    if isinstance(value, dict):
-        return value.get(name)
-    try:
-        return value.get(name)
-    except Exception:
-        pass
-    return getattr(value, name, None)
-
-
-def _hard_failures(report):
-    if isinstance(report, dict):
-        summary = report.get("summary") or {}
-        if "hard_failures" in report:
-            return report["hard_failures"]
-        return summary.get("hard_failures")
-    return getattr(report, "hard_failures", None)
-
-
-def _write(path, text):
+def write(path, text):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
 
 
-GLOSSARY = "# Glossary\n\n- **Foo** — a test term.\n"
-
-
-def _component_md(comp_id, title, source_path, depends_on, purpose):
-    return (
+def build_component(repo_root, slug, title, upper, purpose, func):
+    comp_dir = repo_root / "specs" / "components" / slug
+    write(
+        comp_dir / "component.md",
         "---\n"
-        "id: " + comp_id + "\n"
+        "id: comp-" + slug + "\n"
         "title: " + title + "\n"
         "status: draft\n"
         "owners: [team-a]\n"
         "sealed: true\n"
-        "source_path: " + source_path + "\n"
-        "depends_on: " + depends_on + "\n"
+        "source_path: legacy/" + slug + "/\n"
+        "depends_on: []\n"
         "---\n"
         "\n"
         "# " + title + "\n"
         "\n"
         "## Purpose\n"
-        "\n" + purpose + "\n"
+        "\n"
+        + purpose + "\n",
     )
-
-
-def _requirement(rid, text):
-    return "# " + rid + "\n\n**" + rid + "** — " + text + "\n"
-
-
-def _acceptance(acid, rid, given, when, then):
-    return (
+    rid = "R-" + upper + "-001"
+    acid = "AC-" + upper + "-001"
+    write(
+        comp_dir / "requirements" / (rid + ".md"),
+        "# " + rid + "\n"
+        "\n"
+        "**" + rid + "** — `" + func + "(x)` MUST return `2 * x`.\n",
+    )
+    write(
+        comp_dir / "acceptance" / (acid + ".md"),
         "# " + acid + "\n"
         "\n"
         "Covers: " + rid + "\n"
         "Kind: generated-test\n"
         "\n"
         "```gherkin\n"
-        "Given " + given + "\n"
-        "When " + when + "\n"
-        "Then " + then + "\n"
+        "Given x = 2\n"
+        "When " + func + "(x) is called\n"
+        "Then it returns 4\n"
+        "```\n",
+    )
+    write(
+        comp_dir / "interface" / "library.md",
+        "# Library\n"
+        "\n"
         "```\n"
+        + func + "(x: int) -> int\n"
+        "```\n",
     )
-
-
-def _library(sig):
-    return "# Library\n\n```\n" + sig + "\n```\n"
-
-
-CONSTRAINTS = "# Constraints\n\nNone.\n"
-
-
-def _build_corpus(repo_root):
-    specs = repo_root / "specs"
-    _write(specs / "glossary.md", GLOSSARY)
-
-    foo = specs / "components" / "foo"
-    _write(
-        foo / "component.md",
-        _component_md("comp-foo", "Foo", "legacy/foo/", "[]", "Foo doubles a number."),
+    write(
+        comp_dir / "constraints.md",
+        "# Constraints\n"
+        "\n"
+        "None.\n",
     )
-    _write(
-        foo / "requirements" / "R-FOO-001.md",
-        _requirement("R-FOO-001", "`foo(x)` MUST return `2 * x`."),
+    return comp_dir / "acceptance" / (acid + ".md")
+
+
+def build_corpus(repo_root):
+    write(
+        repo_root / "specs" / "glossary.md",
+        "# Glossary\n"
+        "\n"
+        "- **Foo** — a test term.\n",
     )
-    _write(
-        foo / "acceptance" / "AC-FOO-001.md",
-        _acceptance("AC-FOO-001", "R-FOO-001", "x = 2", "foo(x) is called", "it returns 4"),
-    )
-    _write(foo / "interface" / "library.md", _library("foo(x: int) -> int"))
-    _write(foo / "constraints.md", CONSTRAINTS)
-
-    bar = specs / "components" / "bar"
-    _write(
-        bar / "component.md",
-        _component_md(
-            "comp-bar", "Bar", "legacy/bar/", "[comp-foo]", "Bar triples a number."
-        ),
-    )
-    _write(
-        bar / "requirements" / "R-BAR-001.md",
-        _requirement("R-BAR-001", "`bar(x)` MUST return `3 * x`."),
-    )
-    _write(
-        bar / "acceptance" / "AC-BAR-001.md",
-        _acceptance("AC-BAR-001", "R-BAR-001", "x = 2", "bar(x) is called", "it returns 6"),
-    )
-    _write(bar / "interface" / "library.md", _library("bar(x: int) -> int"))
-    _write(bar / "constraints.md", CONSTRAINTS)
+    build_component(repo_root, "foo", "Foo", "FOO", "Foo doubles a number.", "foo")
+    bar_ac = build_component(repo_root, "bar", "Bar", "BAR", "Bar doubles a number.", "bar")
+    return bar_ac
 
 
-def _break_acceptance(repo_root, slug, acid):
-    path = repo_root / "specs" / "components" / slug / "acceptance" / (acid + ".md")
-    lines = path.read_text(encoding="utf-8").splitlines(keepends=True)
-    kept = [ln for ln in lines if not ln.startswith("Kind:")]
-    assert len(kept) == len(lines) - 1
-    path.write_text("".join(kept), encoding="utf-8")
-
-
-_BUG_EXCEPTIONS = (TypeError, AttributeError, NameError, ImportError, SyntaxError)
-
-
-def _assert_refused(component_id, repo_root):
-    try:
-        result = spec_bundle_assembler.assemble(component_id, repo_root)
-    except _BUG_EXCEPTIONS:
-        raise
-    except Exception:
-        return  # refused with a precondition failure, no bundle produced
-
-    # If it returned instead of raising, it must not be a (partial) bundle.
-    if isinstance(result, bool):
-        assert result is False
-        return
-    if isinstance(result, int):
-        assert result != 0
-        return
-    if result is None:
-        return
-    for name in ("spec", "interface", "constraints", "spec_bundle_hash"):
-        assert not _field(result, name), (
-            "assemble returned bundle content in field %r despite a "
-            "non-lint-clean corpus" % name
-        )
-
-
-@pytest.mark.parametrize(
-    "broken_slug,broken_ac,assembled_id",
-    [
-        ("foo", "AC-FOO-001", "comp-foo"),
-        ("foo", "AC-FOO-001", "comp-bar"),
-        ("bar", "AC-BAR-001", "comp-foo"),
-        ("bar", "AC-BAR-001", "comp-bar"),
-    ],
-)
-def test_assembly_refused_when_corpus_has_hard_lint_failure(
-    tmp_path, broken_slug, broken_ac, assembled_id
-):
+def test_assemble_refuses_corpus_with_hard_lint_failure(tmp_path, capsys):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
-    _build_corpus(repo_root)
+    bar_ac = build_corpus(repo_root)
 
-    spec_linter = _load_spec_linter()
-    assert _hard_failures(spec_linter.lint(None, repo_root)) == 0
+    spec_linter = load_spec_linter()
+    assert spec_linter.lint(None, repo_root).hard_failures == 0
 
-    # Sanity: the clean corpus assembles, so any later failure is lint-driven.
-    good = spec_bundle_assembler.assemble(assembled_id, repo_root)
-    assert _field(good, "component_id") == assembled_id
-    assert _field(good, "spec")
+    # Introduce a hard-fail finding in a component other than the one assembled.
+    text = bar_ac.read_text(encoding="utf-8")
+    lines = [ln for ln in text.splitlines(True) if not ln.startswith("Kind:")]
+    bar_ac.write_text("".join(lines), encoding="utf-8")
+    assert spec_linter.lint(None, repo_root).hard_failures > 0
 
-    _break_acceptance(repo_root, broken_slug, broken_ac)
-    assert (_hard_failures(spec_linter.lint(None, repo_root)) or 0) > 0
+    # Library: must not produce a bundle.
+    raised = None
+    result = None
+    try:
+        result = spec_bundle_assembler.assemble("comp-foo", repo_root)
+    except Exception as exc:  # precondition failure may be signalled by raising
+        raised = exc
 
-    _assert_refused(assembled_id, repo_root)
+    if raised is not None:
+        assert not isinstance(
+            raised, (TypeError, AttributeError, NameError, ImportError, SyntaxError)
+        ), "assemble crashed instead of reporting a precondition failure: " + repr(raised)
+    else:
+        type_name = type(result).__name__.lower()
+        assert type(result).__name__ != "SpecBundle", "assemble produced a bundle for a non-lint-clean corpus"
+        assert "precondition" in type_name or "precondition" in repr(result).lower() or "fail" in type_name, (
+            "assemble did not return a precondition-failure result: " + repr(result)
+        )
+        spec_value = None
+        try:
+            spec_value = field(result, "spec")
+        except (KeyError, AttributeError, TypeError):
+            spec_value = None
+        assert not spec_value, "a partial bundle was returned"
+
+    # CLI: precondition failure is exit code 1.
+    code = spec_bundle_assembler.main(["comp-foo", "--repo-root=" + str(repo_root)])
+    capsys.readouterr()
+    assert code == 1
+
+    code_json = spec_bundle_assembler.main(["comp-foo", "--repo-root=" + str(repo_root), "--format=json"])
+    out = capsys.readouterr().out
+    assert code_json == 1
+    assert "spec_bundle_hash" not in out

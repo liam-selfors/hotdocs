@@ -1,50 +1,46 @@
-# hotdocs-criterion: sha256:c484d5ec82c18f08c2ed8640ed608570b88ddb5bc5f526dc139c4eacd27f1088
-import json
+# hotdocs-criterion: sha256:eef166245049ff54dc98dcfdd042e9a5090355d0e9c539e73fc283c786c060bf
+import re
+import shutil
 from pathlib import Path
-
-import pytest
 
 import spec_linter
 
 
-RULE = "R-LINT-032"
+def field(value, name):
+    return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def _get(value, name, default=None):
-    if isinstance(value, dict):
-        return value.get(name, default)
-    return getattr(value, name, default)
+def _tool_gen():
+    return next(
+        p for p in Path(spec_linter.__file__).resolve().parents if p.name == "gen"
+    )
 
 
-def _tool_root():
-    here = Path(spec_linter.__file__).resolve()
-    for parent in here.parents:
-        if parent.name == "gen" and parent.is_dir():
-            return parent.parent
-    return None
+def _write(path, text):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
 
 
 def _component_md(slug):
     return (
         "---\n"
-        f"id: comp-{slug}\n"
-        f"title: {slug} fixture\n"
+        "id: comp-" + slug + "\n"
+        "title: " + slug + " component\n"
         "status: draft\n"
-        "owners: [alice]\n"
+        "owners: [test-team]\n"
         "sealed: true\n"
-        f"source_path: legacy/{slug}\n"
+        "source_path: legacy/" + slug + "/\n"
         "---\n"
         "\n"
-        f"# {slug}\n"
+        "# " + slug + "\n"
         "\n"
         "## Purpose\n"
         "\n"
-        "A small fixture component used only for testing.\n"
+        "A small fixture component used for testing.\n"
         "\n"
         "## Scope\n"
         "\n"
         "- In scope: nothing.\n"
-        "- Out of scope: everything.\n"
         "\n"
         "## Definitions\n"
         "\n"
@@ -78,113 +74,62 @@ def _component_md(slug):
     )
 
 
-def _build_project(root, slugs, with_marker):
-    root.mkdir(parents=True, exist_ok=True)
-    specs = root / "specs"
-    (specs / "components").mkdir(parents=True, exist_ok=True)
-    (specs / "glossary.md").write_text(
-        "# Glossary\n\n- **Fixture** — a test-only term.\n", encoding="utf-8"
+def _build_project(repo_root, with_tool_marker):
+    for slug in ("foo", "cache-manager"):
+        _write(repo_root / "specs" / "components" / slug / "component.md", _component_md(slug))
+    _write(
+        repo_root / "specs" / "glossary.md",
+        "# Glossary\n\n- **Widget** — a fixture term.\n",
     )
-    for slug in slugs:
-        cdir = specs / "components" / slug
-        cdir.mkdir(parents=True, exist_ok=True)
-        (cdir / "component.md").write_text(_component_md(slug), encoding="utf-8")
-    if with_marker:
-        (root / ".hotdocs-tool.json").write_text(json.dumps({}), encoding="utf-8")
-    return root
+    if with_tool_marker:
+        _write(repo_root / ".hotdocs-tool.json", "{}\n")
 
 
-def _rule_findings(report):
-    findings = _get(report, "findings", None) or []
-    return [f for f in findings if _get(f, "rule_id") == RULE]
-
-
-def _text_of(finding):
-    return f"{_get(finding, 'message', '') or ''} {_get(finding, 'file', '') or ''}"
-
-
-def _pick_shadowing_slug(tool_root):
-    gen = tool_root / "gen"
-    if (gen / "cache-manager").is_dir():
-        return "cache-manager"
-    for child in sorted(gen.iterdir()):
-        if child.is_dir() and not child.name.startswith(".") and child.name != "foo":
-            return child.name
-    return None
-
-
-@pytest.fixture
-def tool_root():
-    root = _tool_root()
-    if root is None:
-        pytest.skip("linter is not installed under a gen/ directory")
-    return root
-
-
-def test_project_with_marker_flags_shadowing_component_only(tmp_path, tool_root):
-    if (tool_root / "gen" / "foo").exists():
-        pytest.skip("tool root unexpectedly has gen/foo")
-    shadow = _pick_shadowing_slug(tool_root)
-    if shadow is None:
-        pytest.skip("tool root has no gen/ component directories")
-
-    repo_root = _build_project(
-        tmp_path.resolve() / "project", ["foo", shadow], with_marker=True
-    )
+def _lint032(repo_root):
     report = spec_linter.lint(None, repo_root)
-    found = _rule_findings(report)
-
-    shadow_findings = [f for f in found if shadow in _text_of(f)]
-    assert shadow_findings, f"expected an {RULE} finding naming {shadow!r}, got {found!r}"
-    for f in shadow_findings:
-        assert _get(f, "severity") == "fail"
-    assert any(shadow in (_get(f, "message", "") or "") for f in shadow_findings)
-
-    foo_findings = [
-        f for f in found
-        if "'foo'" in _text_of(f)
-        or '"foo"' in _text_of(f)
-        or "/foo/" in _text_of(f)
-        or _text_of(f).strip().endswith("foo")
-        or " foo " in f" {_get(f, 'message', '') or ''} "
-    ]
-    assert not foo_findings, f"'foo' must get no {RULE} finding, got {foo_findings!r}"
-    assert len(found) == 1, f"expected exactly one {RULE} finding, got {found!r}"
-
-    hard = _get(report, "hard_failures")
-    if hard is None and isinstance(report, dict):
-        hard = (report.get("summary") or {}).get("hard_failures")
-    if hard is not None:
-        assert hard >= 1
+    findings = field(report, "findings")
+    return [f for f in findings if field(f, "rule_id") == "R-LINT-032"]
 
 
-def test_project_without_marker_has_no_finding(tmp_path, tool_root):
-    shadow = _pick_shadowing_slug(tool_root) or "cache-manager"
-    repo_root = _build_project(
-        tmp_path.resolve() / "project", ["foo", shadow], with_marker=False
-    )
-    report = spec_linter.lint(None, repo_root)
-    found = _rule_findings(report)
-    assert found == [], f"no {RULE} finding expected without .hotdocs-tool.json, got {found!r}"
+def _names_slug(finding, slug, repo_root):
+    text = str(field(finding, "message")) + " " + str(field(finding, "file"))
+    text = text.replace(str(repo_root), "")
+    pattern = r"(?<![\w-])" + re.escape(slug) + r"(?![\w-])"
+    return re.search(pattern, text) is not None
 
 
-def test_marker_removed_after_finding_clears_it(tmp_path, tool_root):
-    shadow = _pick_shadowing_slug(tool_root)
-    if shadow is None:
-        pytest.skip("tool root has no gen/ component directories")
-    repo_root = _build_project(
-        tmp_path.resolve() / "project", ["foo", shadow], with_marker=True
-    )
-    first = _rule_findings(spec_linter.lint(None, repo_root))
-    assert first, f"expected an {RULE} finding while .hotdocs-tool.json is present"
-    (repo_root / ".hotdocs-tool.json").unlink()
-    second = _rule_findings(spec_linter.lint(None, repo_root))
-    assert second == []
+def test_ac_lint_032_project_component_shadowing_tool_component(tmp_path):
+    tool_gen = _tool_gen()
+    tool_root = tool_gen.parent
+    cache_dir = tool_gen / "cache-manager"
+    created = False
+    if not cache_dir.is_dir():
+        cache_dir.mkdir()
+        created = True
+    try:
+        assert not (tool_gen / "foo").is_dir()
 
+        repo_root = tmp_path / "proj"
+        repo_root.mkdir()
+        _build_project(repo_root, with_tool_marker=True)
 
-def test_tool_own_repository_has_no_finding(tool_root):
-    if not (tool_root / "specs").is_dir():
-        pytest.skip("tool root has no specs/ tree")
-    report = spec_linter.lint(None, tool_root)
-    found = _rule_findings(report)
-    assert found == [], f"the tool's own repository must get no {RULE} finding, got {found!r}"
+        found = _lint032(repo_root)
+        cache_fails = [
+            f
+            for f in found
+            if field(f, "severity") == "fail" and _names_slug(f, "cache-manager", repo_root)
+        ]
+        assert len(cache_fails) >= 1, found
+        foo_findings = [f for f in found if _names_slug(f, "foo", repo_root)]
+        assert foo_findings == [], foo_findings
+
+        # Same project without .hotdocs-tool.json: no R-LINT-032 finding.
+        (repo_root / ".hotdocs-tool.json").unlink()
+        assert _lint032(repo_root) == []
+
+        # The tool's own repository: no R-LINT-032 finding.
+        if (tool_root / "specs").is_dir() and not (tool_root / ".hotdocs-tool.json").exists():
+            assert _lint032(tool_root) == []
+    finally:
+        if created:
+            shutil.rmtree(cache_dir, ignore_errors=True)

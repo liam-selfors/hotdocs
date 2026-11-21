@@ -30,7 +30,7 @@ def _rf(result, key):
 
 
 def _body(content):
-    """R-AUTHOR-028 (D320): the file is a header line, then the test."""
+    """R-AUTHOR-028: the written file is a header line, then the test."""
     first, _, rest = content.partition("\n")
     assert first.startswith("# hotdocs-criterion: sha256:"), content
     return rest
@@ -369,14 +369,37 @@ def test_ac_author_019_never_forwards_seed_to_the_backend(repo_root):
     assert "seed" not in params
 
 
+def _rejected(result, kind):
+    """D303: test-probe rejects the test, both repairs (R-AUTHOR-027) are
+    rejected too, and nothing is written."""
+    assert _rf(result, "file") is None
+    assert _rf(result, "model_call_error")["category"] == "test_probe_failed"
+    assert _rf(result, "repair_attempts") == 2
+    kinds = [f["kind"] for f in _rf(result, "probe_findings")]
+    assert kind in kinds, kinds
+    return [f for f in _rf(result, "probe_findings") if f["kind"] == kind]
+
+
 def test_ac_author_020_rejects_malformed_code(repo_root):
-    backend = MockBackend([file_block("def test_x(: this is not valid python")])
+    backend = MockBackend([file_block("def test_x(: this is not valid python")] * 3)
     bundle = fake_bundle()
     result = author_test(bundle, "claude-sonnet-5", repo_root=repo_root, llm_backend=backend)
 
-    assert _rf(result, "file") is None
-    assert _rf(result, "model_call_error")["category"] == "malformed_code"
+    _rejected(result, "syntax_error")
+    assert len(backend.calls) == 3
     assert not (repo_root / "verification" / "foo" / "generated-test").exists()
+
+
+def test_ac_author_027_repair_reply_is_accepted(repo_root):
+    backend = MockBackend([file_block("def test_x(: broken"), file_block("def test_x(): pass")])
+    result = author_test(fake_bundle(), "claude-sonnet-5", repo_root=repo_root, llm_backend=backend)
+
+    assert _rf(result, "model_call_error") is None
+    assert _rf(result, "repair_attempts") == 1
+    assert _body(_file_field(_rf(result, "file"), "content")) == "def test_x(): pass"
+    repair_prompt = backend.calls[1][0]
+    assert "def test_x(: broken" in repair_prompt
+    assert "syntax_error (line 1)" in repair_prompt
 
 
 def test_ac_author_020_rejects_fake_with_wrong_arity(repo_root):
@@ -384,15 +407,14 @@ def test_ac_author_020_rejects_fake_with_wrong_arity(repo_root):
         dependency_interfaces={"comp-bar": "do_thing(a: int, b: str, c: dict[str, str]) -> bool"}
     )
     backend = MockBackend([file_block(
+        "import foo\n"  # the component's own module, which the probe's stub answers
         "def _fake_do_thing(a, b): pass\n"
-        "do_thing = _fake_do_thing\n"
-        "def test_x(): pass"
-    )])
+        "def test_x(monkeypatch):\n"
+        "    monkeypatch.setattr(foo, \"do_thing\", _fake_do_thing)"
+    )] * 3)
     result = author_test(bundle, "claude-sonnet-5", repo_root=repo_root, llm_backend=backend)
 
-    assert _rf(result, "file") is None
-    assert _rf(result, "model_call_error")["category"] == "fake_signature_mismatch"
-    assert "do_thing" in _rf(result, "model_call_error")["message"]
+    assert any("do_thing" in f["message"] for f in _rejected(result, "fake_signature_mismatch"))
 
 
 def test_ac_author_020_accepts_fake_with_matching_arity(repo_root):
@@ -400,9 +422,10 @@ def test_ac_author_020_accepts_fake_with_matching_arity(repo_root):
         dependency_interfaces={"comp-bar": "do_thing(a: int, b: str, c: dict[str, str]) -> bool"}
     )
     backend = MockBackend([file_block(
+        "import foo\n"  # the component's own module, which the probe's stub answers
         "def _fake_do_thing(a, b, c): pass\n"
-        "do_thing = _fake_do_thing\n"
-        "def test_x(): pass"
+        "def test_x(monkeypatch):\n"
+        "    monkeypatch.setattr(foo, \"do_thing\", _fake_do_thing)"
     )])
     result = author_test(bundle, "claude-sonnet-5", repo_root=repo_root, llm_backend=backend)
 
@@ -424,12 +447,10 @@ def test_ac_author_020_rejects_wrong_arity_fake_written_as_a_string_literal(repo
         "    return True\n"
         '"""\n'
     )
-    backend = MockBackend([file_block(fake_source_literal + "\ndef test_x(): pass")])
+    backend = MockBackend([file_block(fake_source_literal + "\ndef test_x(): pass")] * 3)
     result = author_test(bundle, "claude-sonnet-5", repo_root=repo_root, llm_backend=backend)
 
-    assert _rf(result, "file") is None
-    assert _rf(result, "model_call_error")["category"] == "fake_signature_mismatch"
-    assert "do_thing" in _rf(result, "model_call_error")["message"]
+    assert any("do_thing" in f["message"] for f in _rejected(result, "fake_signature_mismatch"))
 
 
 def test_ac_author_021_prompt_states_dual_access_for_targets_own_return_value(repo_root):
@@ -479,6 +500,36 @@ def test_ac_author_024_prompt_states_file_based_invocation_log(repo_root):
     assert _block("R-AUTHOR-024", "foo") in backend.calls[0][0]
 
 
+_PROMPT_DOC = REPO_ROOT / "specs" / "architecture" / "test-author-prompt.md"
+
+
+def _block(req_id, module):
+    """One block of specs/architecture/test-author-prompt.md, as the
+    prompt must hold it (D316)."""
+    text = _PROMPT_DOC.read_text(encoding="utf-8")
+    m = re.search(r"### Block " + re.escape(req_id) + r"\n\n```text\n(.*?)\n```\n", text, re.DOTALL)
+    assert m, req_id
+    return m.group(1).replace("@MODULE@", module)
+
+
+_BLOCK_IDS = re.findall(r"^### Block (R-AUTHOR-\d+)$", _PROMPT_DOC.read_text(encoding="utf-8"), re.MULTILINE)
+
+
+@pytest.mark.parametrize("req_id", _BLOCK_IDS)
+def test_d316_prompt_holds_every_block_exactly_once(repo_root, req_id):
+    backend = MockBackend([file_block("def test_x(): pass")])
+    author_test(fake_bundle(component_id="comp-widget-maker"), "claude-sonnet-5",
+                repo_root=repo_root, llm_backend=backend)
+    assert backend.calls[0][0].count(_block(req_id, "widget_maker")) == 1
+
+
+def test_d316_blocks_use_the_first_explicit_module_name(repo_root):
+    backend = MockBackend([file_block("def test_x(): pass")])
+    author_test(fake_bundle(module_names=["alpha_mod", "beta_mod"]), "claude-sonnet-5",
+                repo_root=repo_root, llm_backend=backend)
+    assert _block("R-AUTHOR-015", "alpha_mod") in backend.calls[0][0]
+
+
 @pytest.mark.parametrize("fake, ok", [
     ("def scan(component_id, repo_root): pass", True),
     ("def scan(repo_root): pass", True),
@@ -494,13 +545,50 @@ def test_ac_author_020_name_shared_by_two_dependencies_accepts_either_arity(repo
     }
     # One fresh repo_root per case: a shared one would serve later cases
     # from test-author's own cache without re-validating them.
-    backend = MockBackend([file_block(fake + "\ndef test_x(): pass")])
+    # The fake is a fake module's source, written as a string (D113, D334).
+    backend = MockBackend([file_block("FAKE = " + repr(fake + "\n") + "\ndef test_x(): pass")] * 3)
     result = author_test(fake_bundle(dependency_interfaces=interfaces), "claude-sonnet-5",
                          repo_root=repo_root, llm_backend=backend)
     if ok:
         assert _rf(result, "model_call_error") is None, fake
     else:
-        assert _rf(result, "model_call_error")["category"] == "fake_signature_mismatch"
+        _rejected(result, "fake_signature_mismatch")
+
+
+def test_d334_helper_sharing_a_dependency_name_is_not_a_fake(repo_root):
+    """D334, issue #12 -- a top-level helper installed nowhere is never
+    checked against a dependency function of the same name."""
+    bundle = fake_bundle(
+        dependency_interfaces={"comp-erd-graph": "build_graph(manifest, *, plan=None, dbt_links=None) -> dict"}
+    )
+    backend = MockBackend([file_block(
+        "def build_graph():\n"
+        "    return {\"nodes\": [], \"edges\": []}\n"
+        "def test_x():\n"
+        "    assert build_graph()[\"nodes\"] == []"
+    )])
+    result = author_test(bundle, "claude-sonnet-5", repo_root=repo_root, llm_backend=backend)
+
+    assert _rf(result, "model_call_error") is None
+    assert _rf(result, "file") is not None
+
+
+def test_d334_helper_sharing_a_dependency_name_is_not_a_fake(repo_root):
+    """D334, issue #12 -- a top-level helper installed nowhere is never
+    checked against a dependency function of the same name."""
+    bundle = fake_bundle(
+        dependency_interfaces={"comp-erd-graph": "build_graph(manifest, *, plan=None, dbt_links=None) -> dict"}
+    )
+    backend = MockBackend([file_block(
+        "def build_graph():\n"
+        "    return {\"nodes\": [], \"edges\": []}\n"
+        "def test_x():\n"
+        "    assert build_graph()[\"nodes\"] == []"
+    )])
+    result = author_test(bundle, "claude-sonnet-5", repo_root=repo_root, llm_backend=backend)
+
+    assert _rf(result, "model_call_error") is None
+    assert _rf(result, "file") is not None
 
 
 @pytest.mark.parametrize("component_id, module", [("comp-foo-bar", "foo_bar"), ("comp-semver", "semver")])
@@ -547,33 +635,3 @@ def test_d199_dependencies_fall_back_to_the_tool_root(tmp_path, monkeypatch):
     result = author_test(fake_bundle(), "claude-sonnet-5", repo_root=tmp_path, llm_backend=backend)
     assert _rf(result, "model_call_error") is None
     assert _rf(result, "file") is not None
-
-
-_PROMPT_DOC = REPO_ROOT / "specs" / "architecture" / "test-author-prompt.md"
-
-
-def _block(req_id, module):
-    """One block of specs/architecture/test-author-prompt.md, as the
-    prompt must hold it (D316)."""
-    text = _PROMPT_DOC.read_text(encoding="utf-8")
-    m = re.search(r"### Block " + re.escape(req_id) + r"\n\n```text\n(.*?)\n```\n", text, re.DOTALL)
-    assert m, req_id
-    return m.group(1).replace("@MODULE@", module)
-
-
-_BLOCK_IDS = re.findall(r"^### Block (R-AUTHOR-\d+)$", _PROMPT_DOC.read_text(encoding="utf-8"), re.MULTILINE)
-
-
-@pytest.mark.parametrize("req_id", _BLOCK_IDS)
-def test_d316_prompt_holds_every_block_exactly_once(repo_root, req_id):
-    backend = MockBackend([file_block("def test_x(): pass")])
-    author_test(fake_bundle(component_id="comp-widget-maker"), "claude-sonnet-5",
-                repo_root=repo_root, llm_backend=backend)
-    assert backend.calls[0][0].count(_block(req_id, "widget_maker")) == 1
-
-
-def test_d316_blocks_use_the_first_explicit_module_name(repo_root):
-    backend = MockBackend([file_block("def test_x(): pass")])
-    author_test(fake_bundle(module_names=["alpha_mod", "beta_mod"]), "claude-sonnet-5",
-                repo_root=repo_root, llm_backend=backend)
-    assert _block("R-AUTHOR-015", "alpha_mod") in backend.calls[0][0]

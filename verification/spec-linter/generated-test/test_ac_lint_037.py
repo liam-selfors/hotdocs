@@ -1,21 +1,7 @@
-# hotdocs-criterion: sha256:a91c207f3d1ac566fec0bd5c7fe10171f61b8b286d891b8dbbaac09c2c585a6e
-"""AC-LINT-037 (covers R-LINT-003).
-
-Given specs/architecture/x.md with id arch-x and depends_on
-  [arch-gone, arch-old, arch-ok], where no spec has id arch-gone,
-  arch-old's status is deprecated and arch-ok's is draft
-When lint(None, repo_root) runs
-Then specs/architecture/x.md has exactly two R-LINT-003 fail findings,
-  one naming arch-gone with "does not exist" in its message and one
-  naming arch-old, and none naming arch-ok
-"""
-
+# hotdocs-criterion: sha256:2235baee46ad7b04a1fcc9de0c161ddd7831aa72e67230789552f5179f03793d
 from pathlib import Path
 
 import spec_linter
-
-
-TARGET_FILE = "specs/architecture/x.md"
 
 
 def field(value, name):
@@ -35,6 +21,8 @@ def _arch_doc(doc_id, title, status, depends_on=None):
         "status: " + status,
         "owners: [test-team]",
     ]
+    if status == "ratified":
+        lines.append("last_ratified_commit: 0000000")
     if depends_on is not None:
         lines.append("depends_on: [" + ", ".join(depends_on) + "]")
     lines.append("---")
@@ -44,10 +32,6 @@ def _arch_doc(doc_id, title, status, depends_on=None):
     lines.append("## Purpose")
     lines.append("")
     lines.append("A test architecture document.")
-    lines.append("")
-    lines.append("## Change log")
-    lines.append("")
-    lines.append("- Initial draft.")
     lines.append("")
     return "\n".join(lines)
 
@@ -72,21 +56,7 @@ def _build_fixture(repo_root):
     )
 
 
-def _norm(path_value):
-    return str(path_value).replace("\\", "/")
-
-
-def _is_target_file(path_value, repo_root):
-    p = _norm(path_value)
-    if p == TARGET_FILE:
-        return True
-    root = _norm(Path(repo_root).resolve())
-    if p.startswith(root + "/") and p[len(root) + 1:] == TARGET_FILE:
-        return True
-    return p.endswith("/" + TARGET_FILE)
-
-
-def test_ac_lint_037_unresolved_and_deprecated_depends_on_fail(tmp_path):
+def test_ac_lint_037_depends_on_missing_and_deprecated_fail(tmp_path):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
     _build_fixture(repo_root)
@@ -97,30 +67,21 @@ def test_ac_lint_037_unresolved_and_deprecated_depends_on_fail(tmp_path):
     target = [
         f
         for f in findings
-        if field(f, "rule_id") == "R-LINT-003"
+        if field(f, "file") == "specs/architecture/x.md"
+        and field(f, "rule_id") == "R-LINT-003"
         and field(f, "severity") == "fail"
-        and _is_target_file(field(f, "file"), repo_root)
     ]
     messages = [str(field(f, "message")) for f in target]
 
-    assert len(target) == 2, (
-        "expected exactly two R-LINT-003 fail findings on "
-        + TARGET_FILE
-        + ", got: "
-        + repr(messages)
-        + " (all findings: "
-        + repr([(field(f, "rule_id"), field(f, "severity"), _norm(field(f, "file")), field(f, "message")) for f in findings])
-        + ")"
-    )
+    assert len(target) == 2, messages
 
     gone = [m for m in messages if "arch-gone" in m]
-    old = [m for m in messages if "arch-old" in m]
-    ok = [m for m in messages if "arch-ok" in m]
+    assert len(gone) == 1, messages
+    assert "does not exist" in gone[0], messages
 
-    assert len(gone) == 1, "expected one finding naming arch-gone: " + repr(messages)
-    assert "does not exist" in gone[0], (
-        "arch-gone finding should say 'does not exist': " + repr(gone[0])
-    )
-    assert len(old) == 1, "expected one finding naming arch-old: " + repr(messages)
-    assert gone[0] != old[0], "arch-gone and arch-old must be separate findings: " + repr(messages)
-    assert ok == [], "no finding should name arch-ok: " + repr(ok)
+    old = [m for m in messages if "arch-old" in m]
+    assert len(old) == 1, messages
+
+    assert gone[0] != old[0], messages
+
+    assert not any("arch-ok" in m for m in messages), messages

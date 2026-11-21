@@ -1,54 +1,47 @@
 """CLI for `hotdocs docs-site build`."""
 
-from __future__ import annotations
-
 import json
 import sys
 from pathlib import Path
 
 from . import render_docs_site
 
-_FLAGS = ("--repo-root", "--out")
+USAGE = "usage: hotdocs docs-site build [--repo-root=<dir>] [--out=<dir>]"
 
 
-def _parse(argv):
-    values = {}
+def _usage_error(cause):
+    print(f"usage error: {cause}", file=sys.stderr)
+    print(USAGE, file=sys.stderr)
+    return 2
+
+
+def main(argv: "list[str] | None" = None) -> int:
+    if argv is None:
+        argv = sys.argv[1:]
+    opts = {"--repo-root": ".", "--out": None}
     i = 0
     while i < len(argv):
         token = argv[i]
-        if "=" in token:
-            name, value = token.split("=", 1)
-        else:
-            name = token
+        name, sep, value = token.partition("=")
+        if name not in opts:
+            return _usage_error(f"unknown argument {token}")
+        if not sep:
             if i + 1 >= len(argv):
-                return None
+                return _usage_error(f"{name} requires a value")
             i += 1
             value = argv[i]
-        if name not in _FLAGS or not value:
-            return None
-        values[name] = value
+        opts[name] = value
         i += 1
-    return values
-
-
-def main(argv: list[str] | None = None) -> int:
-    if argv is None:
-        argv = sys.argv[1:]
-    values = _parse(list(argv))
-    if values is None:
-        print("usage: hotdocs docs-site build [--repo-root=<dir>] [--out=<dir>]", file=sys.stderr)
-        return 2
-    repo_root = Path(values.get("--repo-root", "."))
-    out_dir = Path(values["--out"]) if "--out" in values else repo_root / "dist" / "docs-site"
+    repo_root = Path(opts["--repo-root"])
+    out = repo_root / "dist" / "docs-site"
+    if opts["--out"] is not None:
+        out = Path(opts["--out"])
     graph_path = repo_root / "verification" / "corpus-graph.json"
     try:
-        graph = json.loads(graph_path.read_bytes().decode("utf-8"))
+        graph = json.loads(graph_path.read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
-        print("cannot read %s: %s" % (graph_path, exc), file=sys.stderr)
+        print(f"cannot read {graph_path}: {exc}", file=sys.stderr)
         return 1
-    render_docs_site(graph, out_dir)
+    render_docs_site(graph, out)
+    print(str(out))
     return 0
-
-
-if __name__ == "__main__":
-    sys.exit(main())

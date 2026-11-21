@@ -22,3 +22,5 @@ even a helper such as a timestamp function. A `get` result counts as a hit only 
 non-null `payload` (read with dual dict-or-attribute access); anything
 else is a miss — never tested against `cache-manager`'s `Miss` type. `cache-manager` being unloadable means no cache
 lookup, never a failed scan.
+
+Implements: `specs/architecture/cli-conventions.md`

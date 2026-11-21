@@ -1,10 +1,10 @@
-"""Criterion compiler: deterministic compilation of `kind: compiled`
-Given/When/Then acceptance criteria into pytest test code.
+"""Criterion compiler: deterministic Given/When/Then -> pytest compilation.
 
-No model, agent or network access is involved at any stage: the work is
-grammar parsing, interface binding, and deterministic code emission,
-structured as two phases (parse+bind, then emit) per R-COMPILE-011.
+No model, network, or code evaluation is involved at any stage. Work is split
+into a target-independent parse+bind phase and a pytest emit phase
+(R-COMPILE-011).
 """
+from __future__ import annotations
 
 import argparse
 import json
@@ -12,8 +12,8 @@ import re
 import subprocess
 import sys
 from dataclasses import asdict, dataclass, field
+from json.decoder import scanstring
 from pathlib import Path
-from typing import Optional
 
 GATE_VERSION = "criterion-compiler@1.0.0"
 
@@ -42,528 +42,458 @@ class CompileReport:
 
 
 class _CompileError(Exception):
-    pass
+    def __init__(self, line, text):
+        super().__init__(f"line {line}: {text}")
 
 
-class _Var:
-    """A reference to a value constructed by a `Given a <Type> with ...` step."""
-
-    def __init__(self, name):
-        self.name = name
-
-
-# ---------------------------------------------------------------------------
-# Grammar
-# ---------------------------------------------------------------------------
-
-_IDENT = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
-_ACCESS = re.compile(
-    r"[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*|\[[^\[\]]*\])+"
-)
-_KEYWORD = re.compile(r"(Given|When|Then) ")
-_TYPE_STEP = re.compile(r"a ([A-Z][A-Za-z0-9_]*) with\s+(.+)")
-_FIXTURE_STEP = re.compile(r"a ([A-Za-z_][A-Za-z0-9_]*) is\s+(.+)")
-_INVOKE_STEP = re.compile(
-    r"([A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*) is invoked with\s+(.+)"
-)
-_CLIENT_STEP = re.compile(r"the client calls ([A-Z]+) (\S+) with\s+(.+)")
-_FINDING_STEP = re.compile(
-    r"the (.+?) contains a ([A-Za-z]+)-severity finding for rule (\S+)"
-)
-_EQUALS_STEP = re.compile(
-    r"([A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*|\[-?\d+\])*) equals\s+(.+)"
-)
-_FIELD = re.compile(r"([A-Za-z_][A-Za-z0-9_]*)\s*:")
-_CONSTANTS = {"true": True, "false": False, "null": None}
-_DECODER = json.JSONDecoder()
-
-_KIND_RE = re.compile(
-    r"^[ \t>*_|\-]*`?Kind`?[*_` \t]*[:|][*_` \t|]*([A-Za-z0-9][\w.\-]*)",
-    re.MULTILINE | re.IGNORECASE,
-)
-_COVERS_RE = re.compile(
-    r"^[ \t>*_|\-]*`?Covers`?[*_` \t]*[:|][*_` \t|]*([A-Za-z0-9][\w.\-]*)",
-    re.MULTILINE | re.IGNORECASE,
-)
-
-
-def _slot_end(text, start, stop):
-    """End index of the value slot beginning at `start` (for error quoting)."""
-    depth = 0
-    i = start
-    n = len(text)
-    while i < n:
-        ch = text[i]
-        if ch == '"':
-            i += 1
-            while i < n and text[i] != '"':
-                i += 2 if text[i] == "\\" else 1
-        elif ch in "([{":
-            depth += 1
-        elif ch in ")]}":
-            if depth == 0:
-                return i
-            depth -= 1
-        elif depth == 0 and ch in stop:
-            return i
-        i += 1
-    return n
-
-
-class _Literal:
-    """Parses JSON-like literal data; a bare identifier in a leaf position is
-    substituted, at compile time, by the value an earlier `Given` bound."""
-
-    def __init__(self, text, line, bindings):
+class _LitError(Exception):
+    def __init__(self, text="", suffix=""):
+        super().__init__(text)
         self.text = text
-        self.line = line
-        self.bindings = bindings
-        self.pos = 0
-
-    def _ws(self):
-        while self.pos < len(self.text) and self.text[self.pos].isspace():
-            self.pos += 1
-
-    def _peek(self):
-        return self.text[self.pos:self.pos + 1]
-
-    def _malformed(self):
-        raise _CompileError(
-            f"line {self.line}: '{self.text.strip()}' is not a literal"
-        )
-
-    def _expression(self, start, stop):
-        expr = self.text[start:_slot_end(self.text, start, stop)].strip()
-        detail = ": field/index access" if _ACCESS.fullmatch(expr) else ""
-        raise _CompileError(f"line {self.line}: '{expr}' is not a literal{detail}")
-
-    def value(self, stop):
-        self._ws()
-        start = self.pos
-        if start >= len(self.text) or self.text[start] in stop:
-            self._malformed()
-        ch = self.text[start]
-        name = None
-        node = None
-        if ch == "{":
-            node = self._object()
-        elif ch == "[":
-            node = self._array()
-        elif ch == '"' or ch == "-" or ch.isdigit():
-            try:
-                node, self.pos = _DECODER.raw_decode(self.text, start)
-            except ValueError:
-                self._expression(start, stop)
-        else:
-            match = _IDENT.match(self.text, start)
-            if match is None:
-                self._expression(start, stop)
-            name = match.group()
-            self.pos = match.end()
-        self._ws()
-        if self.pos < len(self.text) and self.text[self.pos] not in stop:
-            self._expression(start, stop)
-        if name is None:
-            return node
-        if name in _CONSTANTS:
-            return _CONSTANTS[name]
-        if name not in self.bindings:
-            raise _CompileError(f"line {self.line}: unresolved reference '{name}'")
-        return self.bindings[name]
-
-    def _object(self):
-        self.pos += 1
-        result = {}
-        self._ws()
-        if self._peek() == "}":
-            self.pos += 1
-            return result
-        while True:
-            self._ws()
-            if self._peek() != '"':
-                self._malformed()
-            try:
-                key, self.pos = _DECODER.raw_decode(self.text, self.pos)
-            except ValueError:
-                self._malformed()
-            self._ws()
-            if self._peek() != ":":
-                self._malformed()
-            self.pos += 1
-            result[key] = self.value(",}")
-            if self._peek() == ",":
-                self.pos += 1
-                continue
-            if self._peek() == "}":
-                self.pos += 1
-                return result
-            self._malformed()
-
-    def _array(self):
-        self.pos += 1
-        items = []
-        self._ws()
-        if self._peek() == "]":
-            self.pos += 1
-            return items
-        while True:
-            items.append(self.value(",]"))
-            if self._peek() == ",":
-                self.pos += 1
-                continue
-            if self._peek() == "]":
-                self.pos += 1
-                return items
-            self._malformed()
-
-
-def _snake(name):
-    s = re.sub(r"([A-Z]+)([A-Z][a-z])", r"\1_\2", name)
-    return re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", s).lower()
+        self.suffix = suffix
 
 
 # ---------------------------------------------------------------------------
-# Phase 1: parse + bind (target-independent)
+# Literal parsing (data only, never evaluated)
 # ---------------------------------------------------------------------------
 
+_IDENT_RX = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+_NUMBER_RX = re.compile(r"-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?")
+_ACCESS_RX = re.compile(r"(?:\.[A-Za-z0-9_]*|\[[^\]]*\])+")
+_WS_RX = re.compile(r"\s*")
+_CONSTANTS = {"true": True, "false": False, "null": None}
 
-def _split_steps(gherkin):
+
+def _skip(s, i):
+    return _WS_RX.match(s, i).end()
+
+
+def _string(s, i):
+    if s[i:i + 1] != '"':
+        raise _LitError()
+    try:
+        return scanstring(s, i + 1)
+    except ValueError:
+        raise _LitError() from None
+
+
+def _sequence(s, i, close, item):
+    items = []
+    i = _skip(s, i)
+    if s[i:i + 1] == close:
+        return items, i + 1
+    while True:
+        node, i = item(s, i)
+        items.append(node)
+        i = _skip(s, i)
+        sep = s[i:i + 1]
+        if sep == close:
+            return items, i + 1
+        if sep != ",":
+            raise _LitError()
+        i += 1
+
+
+def _member(s, i):
+    key, i = _string(s, _skip(s, i))
+    i = _skip(s, i)
+    if s[i:i + 1] != ":":
+        raise _LitError()
+    node, i = _value(s, i + 1)
+    return (key, node), i
+
+
+def _value(s, i):
+    i = _skip(s, i)
+    head = s[i:i + 1]
+    if head == '"':
+        text, end = _string(s, i)
+        return ("lit", text), end
+    if head == "{":
+        items, end = _sequence(s, i + 1, "}", _member)
+        return ("obj", items), end
+    if head == "[":
+        items, end = _sequence(s, i + 1, "]", _value)
+        return ("arr", items), end
+    number = _NUMBER_RX.match(s, i)
+    if number:
+        return ("lit", json.loads(number.group())), number.end()
+    ident = _IDENT_RX.match(s, i)
+    if ident is None:
+        raise _LitError()
+    name = ident.group()
+    if name in _CONSTANTS:
+        return ("lit", _CONSTANTS[name]), ident.end()
+    access = _ACCESS_RX.match(s, ident.end())
+    if access:
+        raise _LitError(name + access.group(), " (field/index access)")
+    return ("ref", name), ident.end()
+
+
+def _lit_error(line, err, text):
+    return _CompileError(line, f"'{err.text or text.strip()}' is not a literal{err.suffix}")
+
+
+def _whole(text, line):
+    try:
+        node, i = _value(text, 0)
+        if _skip(text, i) != len(text):
+            raise _LitError()
+    except _LitError as err:
+        raise _lit_error(line, err, text) from None
+    return node
+
+
+def _resolve(node, bindings, line):
+    tag, val = node
+    if tag == "obj":
+        return ("obj", [(k, _resolve(v, bindings, line)) for k, v in val])
+    if tag == "arr":
+        return ("arr", [_resolve(v, bindings, line) for v in val])
+    if tag == "ref":
+        if val not in bindings:
+            raise _CompileError(line, f"unresolved reference '{val}'")
+        return bindings[val]
+    return node
+
+
+# ---------------------------------------------------------------------------
+# Parse + bind (target-independent)
+# ---------------------------------------------------------------------------
+
+_STEP_START_RX = re.compile(r"(?:Given|When|Then) ")
+_STEP_RX = re.compile(r"(?:(Given|When|Then) )?(.*)", re.S)
+_FIELD_RX = re.compile(r"\s*([A-Za-z_][A-Za-z0-9_]*)\s*:\s*")
+_PATH = r'[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*|\[(?:-?[0-9]+|"[^"\\]*")\])*'
+
+
+def _steps(gherkin):
     steps = []
     current = None
     for number, raw in enumerate(gherkin.splitlines(), 1):
-        stripped = raw.strip()
-        if not stripped:
+        text = raw.strip()
+        if not text:
             current = None
-            continue
-        match = _KEYWORD.match(raw.lstrip())
-        if match:
-            current = [number, match.group(1), raw.lstrip()[match.end():].strip()]
-            steps.append(current)
-        elif current is None:
-            current = [number, None, stripped]
+        elif current is None or _STEP_START_RX.match(text):
+            current = [number, text]
             steps.append(current)
         else:
-            current[2] += " " + stripped
+            current[1] += " " + text
     return steps
 
 
-def _unresolved(line, what, name):
-    raise _CompileError(f"line {line}: {what} '{name}' does not resolve")
+def _snake(name):
+    name = re.sub(r"([A-Z]+)([A-Z][a-z])", r"\1_\2", name)
+    return re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", name).lower()
 
 
-def _bind_construct(line, text, match, surface, bindings):
-    type_name, fields_text = match.groups()
-    if surface is None or type_name not in surface.types:
-        _unresolved(line, "type", type_name)
-    declared = surface.types[type_name]
-    parser = _Literal(fields_text, line, bindings)
-    fields = []
+def _unmatched(line, text):
+    return _CompileError(line, f"step '{text}' does not match any recognized template")
+
+
+class _Binder:
+    def __init__(self, surface):
+        self.surface = surface
+        self.bindings = {}
+
+
+def _given_fixture(st, line, text, m):
+    node = _resolve(_whole(m.group(2), line), st.bindings, line)
+    st.bindings[m.group(1)] = node
+    return ("bind", m.group(1), node)
+
+
+def _given_type(st, line, text, m):
+    type_name, rest = m.group(1), m.group(2)
+    if type_name not in st.surface.types:
+        raise _CompileError(line, f"type '{type_name}' does not resolve")
+    declared = st.surface.types[type_name]
+    args = []
+    i = 0
     while True:
-        parser._ws()
-        field_match = _FIELD.match(fields_text, parser.pos)
-        if field_match is None:
-            raise _CompileError(
-                f"line {line}: step 'Given {text}' does not match any recognized template"
-            )
-        name = field_match.group(1)
-        if name not in declared:
-            raise _CompileError(
-                f"line {line}: field '{name}' of type '{type_name}' does not resolve"
-            )
-        parser.pos = field_match.end()
-        fields.append((name, parser.value(",")))
-        if parser.pos >= len(fields_text):
+        fm = _FIELD_RX.match(rest, i)
+        if fm is None:
+            raise _unmatched(line, text)
+        fname = fm.group(1)
+        if fname not in declared:
+            raise _CompileError(line, f"field '{fname}' does not resolve")
+        try:
+            node, i = _value(rest, fm.end())
+            i = _skip(rest, i)
+            if i < len(rest) and rest[i] != ",":
+                raise _LitError()
+        except _LitError as err:
+            raise _lit_error(line, err, rest[fm.end():]) from None
+        args.append((fname, _resolve(node, st.bindings, line)))
+        if i == len(rest):
             break
-        parser.pos += 1
+        i += 1
     var = _snake(type_name)
-    bindings[var] = _Var(var)
-    return ("construct", var, type_name, fields)
+    st.bindings[var] = ("var", var)
+    return ("construct", var, type_name, args)
 
 
-def _bind_step(line, keyword, text, surface, bindings):
-    if keyword == "Given":
-        match = _TYPE_STEP.fullmatch(text)
-        if match:
-            return _bind_construct(line, text, match, surface, bindings)
-        match = _FIXTURE_STEP.fullmatch(text)
-        if match:
-            node = _Literal(match.group(2), line, bindings).value("")
-            bindings[match.group(1)] = node
-            return ("fixture", match.group(1), node)
-    elif keyword == "When":
-        match = _INVOKE_STEP.fullmatch(text)
-        if match:
-            name, args_text = match.groups()
-            if surface is None or name not in surface.functions:
-                _unresolved(line, "function", name)
-            node = _Literal(args_text, line, bindings).value("")
-            form = {"{": "kwargs", "[": "positional"}.get(args_text[0], "single")
-            return ("invoke", name, form, node)
-        match = _CLIENT_STEP.fullmatch(text)
-        if match:
-            _unresolved(line, "endpoint", f"{match.group(1)} {match.group(2)}")
-    elif keyword == "Then":
-        match = _FINDING_STEP.fullmatch(text)
-        if match:
-            return ("finding", match.group(2), match.group(3))
-        match = _EQUALS_STEP.fullmatch(text)
-        if match:
-            node = _Literal(match.group(2), line, bindings).value("")
-            return ("equals", match.group(1), node)
-    written = f"{keyword} {text}" if keyword else text
-    raise _CompileError(
-        f"line {line}: step '{written}' does not match any recognized template"
-    )
+def _when_endpoint(st, line, text, m):
+    raise _CompileError(line, f"endpoint '{m.group(1)} {m.group(2)}' does not resolve")
 
 
-def _parse_and_bind(criterion, surface):
-    bindings = {}
-    return [
-        _bind_step(line, keyword, text, surface, bindings)
-        for line, keyword, text in _split_steps(criterion.gherkin)
-    ]
+def _when_function(st, line, text, m):
+    name = m.group(1)
+    if name not in st.surface.functions:
+        raise _CompileError(line, f"function '{name}' does not resolve")
+    node = _resolve(_whole(m.group(2), line), st.bindings, line)
+    tag, val = node
+    if tag == "obj":
+        params = st.surface.functions[name]
+        for key, _ in val:
+            if key not in params:
+                raise _CompileError(line, f"parameter '{key}' does not resolve")
+        args = val
+    elif tag == "arr":
+        args = [(None, item) for item in val]
+    else:
+        args = [(None, node)]
+    return ("call", name, args)
 
 
-# ---------------------------------------------------------------------------
-# Phase 2: emit (one emitter per --target)
-# ---------------------------------------------------------------------------
-
-_FIELD_HELPER = '''def _field(obj, *names):
-    for name in names:
-        if isinstance(obj, dict) and name in obj:
-            return obj[name]
-        if not isinstance(obj, dict) and hasattr(obj, name):
-            return getattr(obj, name)
-    return None'''
+def _then_finding(st, line, text, m):
+    return ("finding", m.group(2), m.group(3))
 
 
-def _render(node):
-    if isinstance(node, bool):
-        return "True" if node else "False"
-    if node is None:
-        return "None"
-    if isinstance(node, _Var):
-        return node.name
-    if isinstance(node, dict):
-        return "{" + ", ".join(
-            f"{json.dumps(k)}: {_render(v)}" for k, v in node.items()
-        ) + "}"
-    if isinstance(node, list):
-        return "[" + ", ".join(_render(v) for v in node) + "]"
-    return json.dumps(node)
+def _then_equals(st, line, text, m):
+    return ("equals", m.group(1), _resolve(_whole(m.group(2), line), st.bindings, line))
 
 
-def _render_args(form, node):
-    if form == "kwargs":
-        return ", ".join(f"{k}={_render(v)}" for k, v in node.items())
-    if form == "positional":
-        return ", ".join(_render(v) for v in node)
-    return _render(node)
+_TEMPLATES = {
+    "Given": [
+        (re.compile(r"a ([A-Za-z_][A-Za-z0-9_]*) is (.+)", re.S), _given_fixture),
+        (re.compile(r"a ([A-Z][A-Za-z0-9_]*) with (.+)", re.S), _given_type),
+    ],
+    "When": [
+        (re.compile(r"the client calls ([A-Z]+) (\S+) with (.+)", re.S), _when_endpoint),
+        (re.compile(r"([A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*) is invoked with (.+)", re.S),
+         _when_function),
+    ],
+    "Then": [
+        (re.compile(r"the (.+?) contains a ([A-Za-z]+)-severity finding for rule (\S+)", re.S),
+         _then_finding),
+        (re.compile(f"({_PATH}) equals (.+)", re.S), _then_equals),
+    ],
+}
 
 
-def _test_name(criterion_id):
-    return "test_" + criterion_id.lower().replace("-", "_")
-
-
-def _emit_pytest(criterion, steps, module_name):
-    prefix = f"{module_name}." if module_name else ""
-    body = []
-    needs_module = False
-    needs_helper = False
-    for step in steps:
-        tag = step[0]
-        if tag == "fixture":
-            body.append(f"{step[1]} = {_render(step[2])}")
-        elif tag == "construct":
-            _, var, type_name, fields = step
-            args = ", ".join(f"{name}={_render(value)}" for name, value in fields)
-            body.append(f"{var} = {prefix}{type_name}({args})")
-            needs_module = True
-        elif tag == "invoke":
-            _, name, form, node = step
-            body.append(f"result = {prefix}{name}({_render_args(form, node)})")
-            needs_module = True
-        elif tag == "equals":
-            body.append(f"assert result.{step[1]} == {_render(step[2])}")
+def _bind(criterion, surface):
+    st = _Binder(surface)
+    ops = []
+    for line, text in _steps(criterion.gherkin):
+        step = _STEP_RX.fullmatch(text)
+        for rx, handler in _TEMPLATES.get(step.group(1), ()):
+            m = rx.fullmatch(step.group(2))
+            if m:
+                ops.append(handler(st, line, text, m))
+                break
         else:
-            _, severity, rule = step
-            body.append(
-                "assert any(_field(finding, \"severity\") == "
-                f"{json.dumps(severity)} and _field(finding, \"rule_id\", \"rule\") == "
-                f"{json.dumps(rule)} for finding in (result if isinstance(result, list) "
-                "else _field(result, \"findings\")))"
-            )
-            needs_helper = True
-    lines = [f"# Covers: {criterion.covers}"]
-    if needs_module and module_name:
+            raise _unmatched(line, text)
+    return ops
+
+
+# ---------------------------------------------------------------------------
+# Emit (pytest)
+# ---------------------------------------------------------------------------
+
+_FINDING_HELPER = [
+    "def _cc_get(obj, key):",
+    "    return obj.get(key) if isinstance(obj, dict) else getattr(obj, key, None)",
+    "",
+    "",
+    "def _cc_has_finding(result, severity, rule):",
+    "    findings = result if isinstance(result, list) else _cc_get(result, \"findings\")",
+    "    return any(",
+    "        _cc_get(f, \"severity\") == severity and rule in (_cc_get(f, \"rule\"), _cc_get(f, \"rule_id\"))",
+    "        for f in findings",
+    "    )",
+]
+
+
+def _py(node):
+    tag, val = node
+    if tag == "obj":
+        return "{" + ", ".join(json.dumps(k) + ": " + _py(v) for k, v in val) + "}"
+    if tag == "arr":
+        return "[" + ", ".join(_py(v) for v in val) + "]"
+    if tag == "var":
+        return val
+    return repr(val) if val is None or isinstance(val, bool) else json.dumps(val)
+
+
+def _py_args(args):
+    return ", ".join(_py(n) if k is None else f"{k}={_py(n)}" for k, n in args)
+
+
+_EMITTERS = {
+    "bind": lambda op, mod: f"{op[1]} = {_py(op[2])}",
+    "construct": lambda op, mod: f"{op[1]} = {mod}.{op[2]}({_py_args(op[3])})",
+    "call": lambda op, mod: f"result = {mod}.{op[1]}({_py_args(op[2])})",
+    "equals": lambda op, mod: f"assert result.{op[1]} == {_py(op[2])}",
+    "finding": lambda op, mod: f"assert _cc_has_finding(result, {json.dumps(op[1])}, {json.dumps(op[2])})",
+}
+
+
+def _test_slug(criterion_id):
+    return criterion_id.lower().replace("-", "_")
+
+
+def _emit_pytest(criterion, ops, module_name):
+    kinds = {op[0] for op in ops}
+    lines = [
+        f"# Compiled from {criterion.criterion_id} by criterion-compiler. Do not edit.",
+        f"# Covers: {criterion.covers}",
+    ]
+    if kinds & {"construct", "call"}:
         lines.append(f"import {module_name}")
-    if needs_helper:
-        lines += ["", "", _FIELD_HELPER]
-    lines += ["", "", f"def {_test_name(criterion.criterion_id)}():"]
-    lines += ["    " + line for line in (body or ["pass"])]
+    if "finding" in kinds:
+        lines += ["", "", *_FINDING_HELPER]
+    body = ["    " + _EMITTERS[op[0]](op, module_name) for op in ops] or ["    pass"]
+    lines += ["", "", f"def test_{_test_slug(criterion.criterion_id)}():", *body]
     return "\n".join(lines) + "\n"
-
-
-_EMITTERS = {"pytest": _emit_pytest}
 
 
 # ---------------------------------------------------------------------------
 # Public primitive
 # ---------------------------------------------------------------------------
 
-
-def compile_criterion(criterion: ParsedCriterion, surface: Optional[InterfaceSurface] = None) -> dict:
+def compile_criterion(criterion: ParsedCriterion, surface: InterfaceSurface | None = None) -> dict:
+    surface = surface if surface is not None else InterfaceSurface()
     try:
-        steps = _parse_and_bind(criterion, surface)
-    except _CompileError as exc:
-        return {"status": "error", "message": str(exc)}
-    module_name = surface.module_name if surface is not None else ""
-    return {"status": "compiled", "source": _EMITTERS["pytest"](criterion, steps, module_name)}
+        ops = _bind(criterion, surface)
+    except _CompileError as err:
+        return {"status": "error", "message": str(err)}
+    return {"status": "compiled", "source": _emit_pytest(criterion, ops, surface.module_name)}
 
 
 # ---------------------------------------------------------------------------
-# Corpus reading
+# Component-level compile
 # ---------------------------------------------------------------------------
 
-
-def _slug(component_id):
-    return component_id[len("comp-"):] if component_id.startswith("comp-") else component_id
-
-
-def _fenced_block(lines, opener):
-    for index, line in enumerate(lines):
-        if line.strip() == opener:
-            body = []
-            for inner in lines[index + 1:]:
-                if inner.strip().startswith("```"):
-                    break
-                body.append(inner)
-            return index + 1, body
-    return 0, []
+_COVERS_RX = re.compile(r"^[^A-Za-z\n]*covers[^A-Za-z0-9\n]*([A-Za-z0-9][^\s*`,]*)", re.I | re.M)
+_KIND_RX = re.compile(r"^[^A-Za-z\n]*kind[^A-Za-z0-9\n]*([A-Za-z][\w-]*)", re.I | re.M)
+_TYPE_HEADING_RX = re.compile(r"^# `([^`]+)`[ \t]*$", re.M)
+_JSON_BLOCK_RX = re.compile(r"^```json[ \t]*\n(.*?)^```", re.M | re.S)
+_FUNC_RX = re.compile(r"([A-Za-z_][A-Za-z0-9_.]*)\(")
 
 
-def _split_top(text):
-    parts = []
+def _rel(path, repo_root):
+    p = Path(path).resolve()
+    root = Path(repo_root).resolve()
+    return (p.relative_to(root) if p.is_relative_to(root) else p).as_posix()
+
+
+def _first(rx, text):
+    m = rx.search(text)
+    return m.group(1) if m else ""
+
+
+def _read_criterion(path, repo_root):
+    text = path.read_text(encoding="utf-8")
+    lines = text.splitlines()
+    start = next((i for i, ln in enumerate(lines) if ln.strip() == "```gherkin"), len(lines))
+    end = next((j for j in range(start + 1, len(lines)) if lines[j].strip().startswith("```")), len(lines))
+    criterion = ParsedCriterion(
+        criterion_id=path.stem,
+        covers=_first(_COVERS_RX, text),
+        kind=_first(_KIND_RX, text),
+        gherkin="\n".join(lines[start + 1:end]),
+        file=_rel(path, repo_root),
+    )
+    return criterion, start + 1
+
+
+def _params(line, i):
     depth = 0
-    current = ""
-    for ch in text:
-        if ch in "([{":
+    parts = [""]
+    for c in line[i:]:
+        if c in "([{":
             depth += 1
-        elif ch in ")]}":
-            depth -= 1
-        if ch == "," and depth == 0:
-            parts.append(current)
-            current = ""
-        else:
-            current += ch
-    parts.append(current)
-    return parts
-
-
-def _signature(line):
-    match = re.match(r"([A-Za-z_][A-Za-z0-9_.]*)\(", line)
-    if match is None:
-        return None
-    depth = 0
-    end = len(line)
-    for index in range(match.end() - 1, len(line)):
-        ch = line[index]
-        if ch in "([{":
-            depth += 1
-        elif ch in ")]}":
-            depth -= 1
+        elif c in ")]}":
             if depth == 0:
-                end = index
                 break
-    names = [re.split(r"[:=]", part, 1)[0].strip() for part in _split_top(line[match.end():end])]
-    return match.group(1), [name for name in names if name]
+            depth -= 1
+        elif c == "," and depth == 0:
+            parts.append("")
+            continue
+        parts[-1] += c
+    names = (re.split(r"[:=]", p)[0].strip() for p in parts)
+    return [n for n in names if n]
 
 
-def _read_surface(interface_dir, module_name):
-    functions = {}
-    library = interface_dir / "library.md"
-    if library.is_file():
-        in_fence = False
-        plain = False
-        for line in library.read_text(encoding="utf-8").splitlines():
-            stripped = line.strip()
-            if stripped.startswith("```"):
-                plain = not in_fence and stripped == "```"
-                in_fence = not in_fence
-                continue
-            if plain:
-                parsed = _signature(line)
-                if parsed:
-                    functions[parsed[0]] = parsed[1]
-    types = {}
-    for path in sorted((interface_dir / "data").glob("*.md")):
-        lines = path.read_text(encoding="utf-8").splitlines()
-        heading = next((line for line in lines if line.startswith("# ")), "")
-        match = re.fullmatch(r"# `([A-Za-z_][A-Za-z0-9_]*)`\s*", heading)
-        if match:
-            try:
-                example = json.loads("\n".join(_fenced_block(lines, "```json")[1]))
-            except ValueError:
-                example = None
-            types[match.group(1)] = list(example) if isinstance(example, dict) else []
-    return InterfaceSurface(functions=functions, types=types, module_name=module_name)
-
-
-def _display(path, repo_root):
-    full = Path(path).resolve()
+def _json_keys(text):
     try:
-        return full.relative_to(Path(repo_root).resolve()).as_posix()
+        obj = json.loads(text)
     except ValueError:
-        return str(full)
+        obj = None
+    return list(obj) if isinstance(obj, dict) else []
 
 
-def _first(regex, text):
-    match = regex.search(text)
-    return match.group(1) if match else ""
+def _read_surface(iface, slug):
+    functions = {}
+    lib = iface / "library.md"
+    text = lib.read_text(encoding="utf-8") if lib.is_file() else ""
+    in_block = plain = False
+    for raw in text.splitlines():
+        line = raw.strip()
+        if line.startswith("```"):
+            plain = not in_block and line == "```"
+            in_block = not in_block
+            continue
+        m = _FUNC_RX.match(line)
+        if plain and m:
+            functions[m.group(1)] = _params(line, m.end())
+    types = {}
+    for path in sorted((iface / "data").glob("*.md")):
+        data = path.read_text(encoding="utf-8")
+        heading = _TYPE_HEADING_RX.search(data)
+        if heading:
+            block = _JSON_BLOCK_RX.search(data)
+            types[heading.group(1)] = _json_keys(block.group(1) if block else "")
+    return InterfaceSurface(functions=functions, types=types, module_name=slug.replace("-", "_"))
 
 
-def compile(component_id: str, repo_root: Path, target: str = "pytest", out_dir: Optional[Path] = None) -> CompileReport:
-    if target not in _EMITTERS:
-        raise ValueError(f"unsupported --target value '{target}' (supported: pytest)")
+def _write_if_changed(path, source):
+    data = source.encode("utf-8")
+    if path.is_file() and path.read_bytes() == data:
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(data)
+
+
+def compile(component_id: str, repo_root: Path, target: str = "pytest", out_dir: Path | None = None) -> CompileReport:
+    if target != "pytest":
+        raise ValueError(f"unsupported --target value '{target}' (only 'pytest' is supported)")
     repo_root = Path(repo_root)
-    slug = _slug(component_id)
-    component_dir = repo_root / "specs" / "components" / slug
-    surface = _read_surface(component_dir / "interface", slug.replace("-", "_"))
+    slug = component_id.removeprefix("comp-")
+    comp_dir = repo_root / "specs" / "components" / slug
+    if not comp_dir.is_dir():
+        raise ValueError(f"unknown component id '{component_id}'")
     out = Path(out_dir) if out_dir is not None else repo_root / "verification" / slug / "compiled"
+    surface = _read_surface(comp_dir / "interface", slug)
     outputs = []
     summary = {"compiled": 0, "errors": 0, "skipped_non_compiled_kind": 0}
-    for path in sorted((component_dir / "acceptance").glob("*.md")):
-        text = path.read_text(encoding="utf-8")
-        kind = _first(_KIND_RE, text)
-        if kind != "compiled":
+    for path in sorted((comp_dir / "acceptance").glob("*.md")):
+        criterion, offset = _read_criterion(path, repo_root)
+        if criterion.kind != "compiled":
             summary["skipped_non_compiled_kind"] += 1
             continue
-        offset, body = _fenced_block(text.splitlines(), "```gherkin")
-        criterion = ParsedCriterion(
-            criterion_id=path.stem,
-            covers=_first(_COVERS_RE, text),
-            kind=kind,
-            gherkin="\n".join(body),
-            file=_display(path, repo_root),
-        )
         result = compile_criterion(criterion, surface)
         entry = {"criterion_id": criterion.criterion_id, "covers": criterion.covers}
         if result["status"] == "compiled":
-            target_file = out / (_test_name(criterion.criterion_id) + ".py")
-            data = result["source"].encode("utf-8")
-            if not target_file.exists() or target_file.read_bytes() != data:
-                target_file.parent.mkdir(parents=True, exist_ok=True)
-                target_file.write_bytes(data)
-            entry.update(status="compiled", file=_display(target_file, repo_root))
+            test_file = out / f"test_{_test_slug(criterion.criterion_id)}.py"
+            _write_if_changed(test_file, result["source"])
+            entry.update(status="compiled", file=_rel(test_file, repo_root))
             summary["compiled"] += 1
         else:
-            message = re.sub(
-                r"^line (\d+): ",
-                lambda m: f"line {int(m.group(1)) + offset}: ",
-                result["message"],
-                count=1,
-            )
-            entry.update(status="error", file=criterion.file, message=message)
+            number, rest = result["message"][len("line "):].split(": ", 1)
+            entry.update(status="error", file=criterion.file,
+                         message=f"line {int(number) + offset}: {rest}")
             summary["errors"] += 1
         outputs.append(entry)
     return CompileReport(outputs=outputs, gate_version=GATE_VERSION, summary=summary)
@@ -573,18 +503,12 @@ def compile(component_id: str, repo_root: Path, target: str = "pytest", out_dir:
 # CLI
 # ---------------------------------------------------------------------------
 
-
 def _git_root():
-    completed = subprocess.run(
-        ["git", "rev-parse", "--show-toplevel"],
-        capture_output=True,
-        text=True,
-        check=True,
-    )
-    return Path(completed.stdout.strip())
+    return subprocess.run(["git", "rev-parse", "--show-toplevel"],
+                          capture_output=True, text=True).stdout.strip()
 
 
-def main(argv: Optional[list] = None) -> int:
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="hotdocs compile-criteria")
     parser.add_argument("component_id")
     parser.add_argument("--target", default="pytest")
@@ -594,25 +518,12 @@ def main(argv: Optional[list] = None) -> int:
         args = parser.parse_args(argv)
     except SystemExit as exc:
         return exc.code
-    if args.target not in _EMITTERS:
-        print(
-            f"error: unsupported --target value '{args.target}' (supported: pytest)",
-            file=sys.stderr,
-        )
+    repo_root = Path(args.repo_root or _git_root())
+    try:
+        report = compile(args.component_id, repo_root, args.target,
+                         Path(args.out) if args.out else None)
+    except ValueError as exc:
+        print(f"error: {exc}", file=sys.stderr)
         return 2
-    repo_root = Path(args.repo_root) if args.repo_root else _git_root()
-    if not (repo_root / "specs" / "components" / _slug(args.component_id)).is_dir():
-        print(f"error: unknown component id '{args.component_id}'", file=sys.stderr)
-        return 2
-    report = compile(
-        args.component_id,
-        repo_root,
-        args.target,
-        Path(args.out) if args.out else None,
-    )
     print(json.dumps(asdict(report), indent=2))
     return 1 if report.summary["errors"] else 0
-
-
-if __name__ == "__main__":
-    sys.exit(main())

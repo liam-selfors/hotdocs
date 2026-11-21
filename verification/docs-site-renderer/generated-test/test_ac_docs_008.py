@@ -1,58 +1,124 @@
-# hotdocs-criterion: sha256:94ff90ba5945d0aab68fac561574d6b827fdc59df1f3982a95b4d052eb5997f8
-import json
+# hotdocs-criterion: sha256:6e9162afd94ee40faa6f31c50d567f5f482d7f2dab350cf1ee0096a2d405020b
+import importlib.util
+import sys
 from dataclasses import dataclass, field as dc_field
+from html.parser import HTMLParser
 from pathlib import Path
+from urllib.parse import unquote, urlsplit
+
+import json
 
 import docs_site_renderer
 
 
 RAW = "<script>alert(1)</script>"
 DOC_TEXT = RAW + " & more"
-ALPHA = "comp-alpha"
-BETA = "comp-beta"
-BETA_MARKER = "BetaDocMarkerText"
+
+
+def load_module(path, module_name):
+    spec = importlib.util.spec_from_file_location(module_name, path)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def field(value, name):
+    return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
 @dataclass
-class FakeCorpusGraph:
+class _StandInCorpusGraph:
     nodes: dict = dc_field(default_factory=dict)
     edges: list = dc_field(default_factory=list)
     aggregates: dict = dc_field(default_factory=dict)
 
     def to_dict(self):
-        return {
-            "nodes": self.nodes,
-            "edges": self.edges,
-            "aggregates": self.aggregates,
-        }
+        return {"nodes": self.nodes, "edges": self.edges, "aggregates": self.aggregates}
 
     def to_json_bytes(self):
         return (
-            json.dumps(self.to_dict(), sort_keys=True, indent=2, ensure_ascii=True)
-            + "\n"
+            json.dumps(self.to_dict(), sort_keys=True, indent=2, ensure_ascii=True) + "\n"
         ).encode("utf-8")
 
 
-def make_graph():
+def _make_graph(nodes, edges, aggregates):
+    try:
+        gen = next(
+            p for p in Path(docs_site_renderer.__file__).resolve().parents if p.name == "gen"
+        )
+        base = gen / "corpus-graph-builder"
+        flat = base / "corpus_graph_builder.py"
+        path = flat if flat.is_file() else base / "corpus_graph_builder" / "__init__.py"
+        module = load_module(path, "corpus_graph_builder")
+        return module.CorpusGraph(nodes=nodes, edges=edges, aggregates=aggregates)
+    except Exception:
+        return _StandInCorpusGraph(nodes=nodes, edges=edges, aggregates=aggregates)
+
+
+class _NodeLinkParser(HTMLParser):
+    def __init__(self):
+        super().__init__()
+        self.stack = []
+        self.links = {}
+
+    def handle_starttag(self, tag, attrs):
+        a = dict(attrs)
+        if tag == "li":
+            classes = (a.get("class") or "").split()
+            if "node" in classes and a.get("data-id") is not None:
+                self.stack.append(a.get("data-id"))
+            else:
+                self.stack.append(None)
+        elif tag == "a" and a.get("href"):
+            current = next((s for s in reversed(self.stack) if s is not None), None)
+            if current is not None and current not in self.links:
+                self.links[current] = a.get("href")
+
+    def handle_endtag(self, tag):
+        if tag == "li" and self.stack:
+            self.stack.pop()
+
+
+def _detail_page_text(out_dir, node_id):
+    index = out_dir / "index.html"
+    candidates = []
+    if index.is_file():
+        parser = _NodeLinkParser()
+        parser.feed(index.read_text(encoding="utf-8"))
+        href = parser.links.get(node_id)
+        if href:
+            parts = urlsplit(href)
+            rel = unquote(parts.path)
+            if rel:
+                target = (out_dir / rel.lstrip("/")) if not rel.startswith("/") else (out_dir / rel.lstrip("/"))
+                if rel.endswith("/") or target.is_dir():
+                    target = target / "index.html"
+                candidates.append(target)
+    for p in sorted(out_dir.rglob("*.html")):
+        if p.name == "index.html" and p.parent == out_dir:
+            continue
+        if node_id in str(p.relative_to(out_dir)):
+            candidates.append(p)
+    for c in candidates:
+        if c.is_file():
+            return c.read_text(encoding="utf-8")
+    raise AssertionError("no detail page found for " + node_id)
+
+
+def test_ac_docs_008_escapes_content_and_tolerates_null_fields(tmp_path):
     nodes = {
-        ALPHA: {
+        "comp-alpha": {
             "type": "component",
-            "verification": {
-                "requirement_results": {},
-                "criteria": [],
-            },
-            "provenance": {
-                "model": "anthropic:claude-sonnet-5",
-                "prompt_version": "v1",
-                "generated_at": "2026-01-01T00:00:00Z",
-            },
+            "verification": None,
+            "provenance": None,
             "size_status": "ok",
             "sealed": True,
             "pinned_overrides": [],
-            "owners": ["alpha-team"],
+            "owners": ["pipeline-team"],
             "documents": {"component.md": DOC_TEXT},
         },
-        BETA: {
+        "comp-beta": {
             "type": "component",
             "verification": None,
             "provenance": None,
@@ -60,78 +126,31 @@ def make_graph():
             "sealed": False,
             "pinned_overrides": [],
             "owners": [],
-            "documents": {"component.md": BETA_MARKER},
+            "documents": {"component.md": "Beta component text."},
         },
     }
+    edges = []
     aggregates = {
         "orphan_capability_rate": 0.0,
-        "orphan_component_rate": 1.0,
+        "orphan_component_rate": 0.0,
         "orphan_var_rate": 0.0,
     }
-    return FakeCorpusGraph(nodes=nodes, edges=[], aggregates=aggregates)
-
-
-def all_files(out_dir):
-    result = {}
-    for p in sorted(Path(out_dir).rglob("*")):
-        if p.is_file():
-            result[p] = p.read_text(encoding="utf-8", errors="replace")
-    return result
-
-
-def detail_pages(files, out_dir, node_id, other_id):
-    slug = node_id[len("comp-"):]
-    other_slug = other_id[len("comp-"):]
-    by_path = [
-        p
-        for p in files
-        if p.suffix.lower() in (".html", ".htm")
-        and (
-            node_id in str(p.relative_to(out_dir))
-            or slug in str(p.relative_to(out_dir))
-        )
-        and other_slug not in str(p.relative_to(out_dir))
-    ]
-    if by_path:
-        return by_path
-    return [
-        p
-        for p, text in files.items()
-        if p.suffix.lower() in (".html", ".htm")
-        and node_id in text
-        and other_id not in text
-    ]
-
-
-def test_ac_docs_008_escapes_values_and_tolerates_null_fields(tmp_path):
+    graph = _make_graph(nodes, edges, aggregates)
     out_dir = tmp_path / "site"
-    graph = make_graph()
 
-    docs_site_renderer.render_docs_site(graph, out_dir)
+    result = docs_site_renderer.render_docs_site(graph, out_dir)
+    assert result is None
 
-    files = all_files(out_dir)
-    assert files, "render_docs_site wrote no files"
+    alpha = _detail_page_text(out_dir, "comp-alpha")
+    assert "&lt;script&gt;" in alpha
+    assert "&amp; more" in alpha
+    assert RAW not in alpha
 
-    # The raw script tag never appears anywhere in the rendered site.
-    for p, text in files.items():
-        assert RAW not in text, "raw unescaped script found in " + str(p)
+    for p in out_dir.rglob("*"):
+        if p.is_file():
+            text = p.read_bytes().decode("utf-8", errors="replace")
+            assert RAW not in text, str(p)
 
-    alpha_pages = detail_pages(files, out_dir, ALPHA, BETA)
-    assert alpha_pages, "no detail view found for " + ALPHA
-    alpha_hits = [
-        p
-        for p in alpha_pages
-        if "&lt;script&gt;" in files[p] and "&amp; more" in files[p]
-    ]
-    assert alpha_hits, (
-        "first node's detail view lacks escaped document text: "
-        + repr([str(p) for p in alpha_pages])
-    )
-    for p in alpha_hits:
-        assert RAW not in files[p]
-
-    beta_pages = detail_pages(files, out_dir, BETA, ALPHA)
-    assert beta_pages, "no detail view found for " + BETA
-    assert any(BETA_MARKER in files[p] for p in beta_pages), (
-        "second node's detail view did not render its content"
-    )
+    beta = _detail_page_text(out_dir, "comp-beta")
+    assert isinstance(beta, str)
+    assert len(beta) > 0

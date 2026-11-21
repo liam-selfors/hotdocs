@@ -26,7 +26,8 @@ When run_capability_scenarios runs
 Then the scenario is "fail" and no file exists under
   verification/capabilities/P-X/compiled/
 
-Given the real criterion-compiler, copied from the live repository, and
+Given the real criterion-compiler, copied from <live> as
+  specs/architecture/capability-scenario-fixtures.md says, and
   a compiled scenario with gherkin "Given a x is 1\nThen x equals 1"
   (it compiles, but its test asserts on a result no step defines)
 When run_capability_scenarios runs

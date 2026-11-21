@@ -1,10 +1,16 @@
 # Library
 
 ```
-main(argv, *, tool_root, input_fn=None, output_fn=None, env=None, cwd=None) -> int
+run(argv, *, tool_root, input_fn=None, output_fn=None, env=None, cwd=None) -> int
+main(argv: list[str] | None = None) -> int
 ```
 
-`argv` is everything after the word `init`. `input_fn` defaults to `input`,
+`main` is the `cli-conventions.md` entry: it returns `run(argv,
+tool_root=<tool root>)`, `None` meaning `sys.argv[1:]`, the tool root being
+the parent of the nearest directory named `gen` above this module's own
+file. `run` is the injectable form `hotdocs-cli` calls (`R-INIT-007`).
+
+For both, `argv` is everything after the word `init`. `input_fn` defaults to `input`,
 `output_fn` to `print`, `env` to `os.environ`, `cwd` to the current
 directory. Normal messages go to `output_fn`, errors to `sys.stderr`.
 Each question is passed to `input_fn` as its text plus one trailing space,
@@ -25,7 +31,7 @@ names are used, read with dual dict-or-attribute access:
   `openai-compatible`;
 - `detect_providers(env=None, probe_ollama=True)` — one entry per provider,
   `{provider, available, reason, suggested_model, api_key_env}`; called with
-  `env=<the env given to main>`, and with no `env` when none was given;
+  `env=<the env given to run>`, and with no `env` when none was given;
 - `check_connection(provider, model, base_url=None, api_key_env=None,
   timeout_seconds=30, auth=None)` — `{ok, error}`, `error` `None` or `{category,
   message}`; raises `ValueError` for an unknown provider or a missing
@@ -47,3 +53,6 @@ among them `llm-endpoint` (fakes of the five names above that also log each
 call to a file outside both the project and the tool root, so a log never counts as a change to either),
 `examples/slugify/specs/product/slugs.md`, and a `requirements.txt` whose only line is
 `pytest==` plus `importlib.metadata.version("pytest")` (so nothing is missing). A test embeds no secret-shaped string.
+A criterion's `init runs` or `run([...])` calls `run` with a fake tool root as `tool_root`.
+
+Implements: `specs/architecture/cli-conventions.md`

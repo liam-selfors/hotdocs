@@ -1,119 +1,91 @@
-# hotdocs-criterion: sha256:425580bd57220ff362ecfbcbed133b7e60113cb5d5d0e759ddc9f947df27c459
+# hotdocs-criterion: sha256:8125ba687da6914acb6d59813041e4918660f937d416ce7518613312e8639aac
 import json
-import os
-import sys
+from dataclasses import replace
 
 import pytest
 
 import cache_manager
 
 
-def _field(value, name):
-    if isinstance(value, dict):
-        return value.get(name)
-    return getattr(value, name, None)
+def field(value, name):
+    return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def _make_key(**overrides):
-    fields = {
+def make_key(**overrides):
+    values = {
         "spec_bundle_hash": "sha256:" + "a" * 64,
         "gate_inputs_hash": "sha256:" + "b" * 64,
         "gate_version": "license_scanner@4.0.3+9f2c41ab07de",
         "model_pin": "claude-sonnet-5",
     }
-    fields.update(overrides)
-    return cache_manager.CacheKey(**fields)
-
-
-def _make_result():
-    payload = {
-        "component_id": "comp-example",
-        "gate_version": "license_scanner@4.0.3+9f2c41ab07de",
-        "similarity_score": 0.0,
-        "blocked": False,
-        "matches": [],
-    }
-    return cache_manager.CachedResult(
-        gate_type="license_scanner",
-        payload=payload,
-        stored_at=cache_manager.now_iso(),
-    )
+    values.update(overrides)
+    return cache_manager.CacheKey(**values)
 
 
 @pytest.fixture
-def isolated_repo(tmp_path, monkeypatch):
-    # Force the local fallback store (R-CACHE-009) under a fresh, empty repo root.
+def empty_repo(tmp_path, monkeypatch):
     monkeypatch.delenv("VAR_CACHE_STORE_URL", raising=False)
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    monkeypatch.chdir(repo_root)
-    return repo_root
+    monkeypatch.chdir(tmp_path)
+    return tmp_path
 
 
-def _assert_definitive_miss(result):
-    assert result is not None, "get must report a miss with a Miss instance, never None"
-    assert isinstance(result, cache_manager.Miss), (
-        "expected a Miss instance, got %r" % (result,)
-    )
-    assert not isinstance(result, cache_manager.CachedResult), (
-        "a miss must not be a (partial) CachedResult"
-    )
-    # Not a partial result: no payload / gate_type / stored_at carried on the miss.
-    assert _field(result, "payload") is None
-    assert _field(result, "gate_type") is None
-    assert _field(result, "stored_at") is None
-    # Any two Miss instances compare equal.
+def test_get_on_empty_store_returns_miss(empty_repo):
+    key = make_key()
+
+    result = cache_manager.get(key, repo_root=empty_repo)
+
+    assert result is not None
+    assert isinstance(result, cache_manager.Miss)
     assert result == cache_manager.Miss()
+    assert not isinstance(result, cache_manager.CachedResult)
 
 
-def test_get_on_empty_store_returns_miss(isolated_repo):
-    key = _make_key()
-    result = cache_manager.get(key, repo_root=isolated_repo)
-    _assert_definitive_miss(result)
+def test_get_with_unstored_key_returns_miss_not_partial_match(empty_repo):
+    stored_key = make_key()
+    stored = cache_manager.CachedResult(
+        gate_type="license_scanner",
+        payload={
+            "component_id": "comp-foo",
+            "gate_version": "license_scanner@4.0.3+9f2c41ab07de",
+            "similarity_score": 0.0,
+            "blocked": False,
+            "matches": [],
+        },
+        stored_at=cache_manager.now_iso(),
+    )
+    cache_manager.put(stored_key, stored, repo_root=empty_repo)
 
-
-def test_get_on_empty_store_with_default_repo_root_returns_miss(isolated_repo):
-    key = _make_key()
-    result = cache_manager.get(key)
-    _assert_definitive_miss(result)
-
-
-def test_get_for_unstored_key_is_miss_even_when_near_match_exists(isolated_repo):
-    stored_key = _make_key()
-    cache_manager.put(stored_key, _make_result(), repo_root=isolated_repo)
-
-    # Sanity: the stored key itself is a hit, so the store is actually working.
-    hit = cache_manager.get(stored_key, repo_root=isolated_repo)
-    assert not isinstance(hit, cache_manager.Miss)
-    assert _field(hit, "gate_type") == "license_scanner"
-
+    # Keys sharing every field but one with the stored entry: no entry is
+    # stored for any of them, so each must be a definitive Miss.
     near_keys = [
-        _make_key(spec_bundle_hash="sha256:" + "c" * 64),
-        _make_key(gate_inputs_hash="sha256:" + "d" * 64),
-        _make_key(gate_version="license_scanner@4.0.4+9f2c41ab07de"),
-        _make_key(model_pin="claude-sonnet-5-5"),
+        replace(stored_key, model_pin="claude-opus-5"),
+        replace(stored_key, spec_bundle_hash="sha256:" + "c" * 64),
+        replace(stored_key, gate_inputs_hash="sha256:" + "d" * 64),
+        replace(stored_key, gate_version="license_scanner@4.0.4+9f2c41ab07de"),
     ]
     for near_key in near_keys:
-        result = cache_manager.get(near_key, repo_root=isolated_repo)
-        _assert_definitive_miss(result)
+        result = cache_manager.get(near_key, repo_root=empty_repo)
+        assert result is not None
+        assert isinstance(result, cache_manager.Miss), near_key
+        assert result == cache_manager.Miss()
 
 
-def test_cli_inspect_on_empty_store_reports_miss(isolated_repo, capsys):
+def test_cli_inspect_on_empty_store_reports_miss(empty_repo, capsys):
     argv = [
         "inspect",
         "--spec-bundle-hash=sha256:" + "a" * 64,
         "--gate-inputs-hash=sha256:" + "b" * 64,
         "--gate-version=license_scanner@4.0.3+9f2c41ab07de",
         "--model-pin=claude-sonnet-5",
-        "--repo-root=" + str(isolated_repo),
+        "--repo-root=" + str(empty_repo),
     ]
+
     code = cache_manager.main(argv)
-    captured = capsys.readouterr()
-    assert code == 0, "a miss is an answer, not a failure: %r" % (captured,)
-    lines = [ln for ln in captured.out.splitlines() if ln.strip()]
-    assert lines, "expected one line of JSON on stdout"
-    data = json.loads(lines[-1])
-    assert data.get("result") == "miss"
-    assert "payload" not in data
-    assert "gate_type" not in data
-    assert "stored_at" not in data
+
+    assert code == 0
+    out = capsys.readouterr().out.strip()
+    lines = [line for line in out.splitlines() if line.strip()]
+    assert len(lines) == 1
+    doc = json.loads(lines[0])
+    assert field(doc, "result") == "miss"
+    assert "payload" not in doc

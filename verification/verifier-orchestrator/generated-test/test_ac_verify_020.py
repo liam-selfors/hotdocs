@@ -1,63 +1,51 @@
-# hotdocs-criterion: sha256:3e83ec43a60ed7b3e53440f88b51a5916955bfa0d7da1060325b7471fdc923bc
+# hotdocs-criterion: sha256:31024a6f3107c6e304ec59020429cc8f99e214c4ac45286d19ee5f303d0af8f2
 import hashlib
+import json
+import shutil
 from pathlib import Path
 
-import pytest
-
 import verifier_orchestrator
+
+
+COMPONENT_ID = "comp-mutfix"
+SLUG = "mutfix"
+MODULE = "mutfix"
+CRITERION_ID = "AC-MUTFIX-001"
+REQUIREMENT_ID = "R-MUTFIX-001"
+
+BUNDLE_TEXTS = {
+    "criterion_text": "Given a mutfix module\nWhen g is called with 1 and 2\nThen it returns True",
+    "requirement_text": "R-MUTFIX-001 g(a, b) MUST return whether a is less than b.",
+    "interface": "g(a, b) -> bool\nh(a, b) -> int\nm(k, d) -> bool\ndo_the_thing(x) -> object",
+    "glossary": "Fixture glossary.",
+    "testing": "",
+}
 
 
 def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-COMPONENT_ID = "comp-widget"
-SLUG = "widget"
-MODULE = "widget"
-CRITERION_ID = "AC-WIDGET-001"
-REQUIREMENT_ID = "R-WIDGET-001"
-
-CRITERION_TEXT = (
-    "Given a pair of numbers a and b\n"
-    "When g(a, b) is called\n"
-    "Then it returns whether a is less than b"
-)
-REQUIREMENT_TEXT = (
-    "**R-WIDGET-001** — `g(a, b)` MUST return whether `a` is less than `b`."
-)
-
-MODULE_SOURCE = (
-    "def g(a, b):\n"
-    "    return a < b\n"
-    "\n"
-    "\n"
-    "def h(a, b):\n"
-    "    return a // b\n"
-    "\n"
-    "\n"
-    "def m(k, d):\n"
-    "    return k in d\n"
-    "\n"
-    "\n"
-    "def do_the_thing(x):\n"
-    "    return x\n"
-)
-
-TEST_BODY = (
-    "import " + MODULE + "\n"
-    "\n"
-    "\n"
-    "def test_g_orders_pair():\n"
-    "    assert " + MODULE + ".g(1, 2) is True\n"
-    "    assert " + MODULE + ".g(2, 1) is False\n"
-)
+def header_hex():
+    keys = ("criterion_text", "requirement_text", "interface", "glossary", "testing")
+    payload = json.dumps(
+        {k: BUNDLE_TEXTS[k] for k in keys},
+        sort_keys=True,
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
-def header_line():
-    digest = hashlib.sha256(
-        (CRITERION_TEXT + "\n" + REQUIREMENT_TEXT).encode("utf-8")
-    ).hexdigest()
-    return "# hotdocs-criterion: sha256:" + digest
+def cached_test_source():
+    return (
+        "# hotdocs-criterion: sha256:" + header_hex() + "\n"
+        "import mutfix\n"
+        "\n"
+        "\n"
+        "def test_g_is_less_than():\n"
+        "    assert mutfix.g(1, 2) is True\n"
+    )
 
 
 def write(path, text):
@@ -65,61 +53,27 @@ def write(path, text):
     path.write_text(text, encoding="utf-8")
 
 
-def build_fixture(repo_root):
-    write(
-        repo_root / "specs" / "glossary.md",
-        "# Glossary\n\n- **Widget** — a test term.\n",
-    )
-    write(
-        repo_root / "specs" / "product" / "P-WIDGET.md",
-        "---\n"
-        "id: P-WIDGET\n"
-        "title: Widget capability\n"
-        "status: draft\n"
-        "owners: [team-a]\n"
-        "---\n"
-        "\n"
-        "# Widget capability\n"
-        "\n"
-        "## Purpose\n"
-        "\n"
-        "Widgets compare things.\n"
-        "\n"
-        "## Scope\n"
-        "\n"
-        "- In scope: comparing.\n"
-        "\n"
-        "### CS-WIDGET-001\n"
-        "\n"
-        "Covers: P-WIDGET\n"
-        "\n"
-        "```gherkin\n"
-        "Given a widget\n"
-        "When it compares\n"
-        "Then it answers\n"
-        "```\n",
-    )
+def build_fixture(repo_root, log_path):
     comp = repo_root / "specs" / "components" / SLUG
     write(
         comp / "component.md",
         "---\n"
         "id: " + COMPONENT_ID + "\n"
-        "title: Widget\n"
+        "title: Mutation fixture\n"
         "status: draft\n"
-        "owners: [team-a]\n"
-        "depends_on: []\n"
-        "realizes: [P-WIDGET]\n"
+        "owners: [fixture-team]\n"
+        "realizes: [P-MUTFIX]\n"
         "---\n"
         "\n"
-        "# Widget\n"
+        "# Mutation fixture\n"
         "\n"
         "## Purpose\n"
         "\n"
-        "Widget compares and divides numbers.\n"
+        "A fixture component for mutation scoring.\n"
         "\n"
         "## Scope\n"
         "\n"
-        "- In scope: comparing.\n"
+        "- In scope: g, h, m, do_the_thing.\n"
         "\n"
         "## Definitions\n"
         "\n"
@@ -153,7 +107,7 @@ def build_fixture(repo_root):
     )
     write(
         comp / "requirements" / (REQUIREMENT_ID + ".md"),
-        "# " + REQUIREMENT_ID + "\n\n" + REQUIREMENT_TEXT + "\n",
+        "**" + REQUIREMENT_ID + "** g(a, b) MUST return whether a is less than b.\n",
     )
     write(
         comp / "acceptance" / (CRITERION_ID + ".md"),
@@ -162,7 +116,11 @@ def build_fixture(repo_root):
         "Covers: " + REQUIREMENT_ID + "\n"
         "Kind: generated-test\n"
         "\n"
-        "```gherkin\n" + CRITERION_TEXT + "\n```\n",
+        "```gherkin\n"
+        "Given a mutfix module\n"
+        "When g is called with 1 and 2\n"
+        "Then it returns True\n"
+        "```\n",
     )
     write(
         comp / "interface" / "library.md",
@@ -176,75 +134,140 @@ def build_fixture(repo_root):
         "```\n",
     )
     write(comp / "constraints.md", "# Constraints\n\nNone.\n")
+    write(
+        repo_root / "specs" / "product" / "P-MUTFIX.md",
+        "---\n"
+        "id: P-MUTFIX\n"
+        "title: Mutation fixture capability\n"
+        "status: draft\n"
+        "owners: [fixture-team]\n"
+        "---\n"
+        "\n"
+        "# Mutation fixture capability\n"
+        "\n"
+        "## Purpose\n"
+        "\n"
+        "Fixture.\n",
+    )
+    write(repo_root / "specs" / "glossary.md", "# Glossary\n\n- **Fixture** - a fixture.\n")
 
-    # The component's real code: three mutation sites, one function with none.
-    write(repo_root / "gen" / SLUG / (MODULE + ".py"), MODULE_SOURCE)
+    # The component's only module: three mutation sites, one per function g, h, m.
+    write(
+        repo_root / "gen" / SLUG / (MODULE + ".py"),
+        "def g(a, b):\n"
+        "    return a < b\n"
+        "\n"
+        "\n"
+        "def h(a, b):\n"
+        "    return a // b\n"
+        "\n"
+        "\n"
+        "def m(k, d):\n"
+        "    return k in d\n"
+        "\n"
+        "\n"
+        "def do_the_thing(x):\n"
+        "    return x\n",
+    )
 
-    # Fake spec-bundle-assembler with known criterion/requirement text.
-    assembler_source = (
-        "CRITERION_TEXT = " + repr(CRITERION_TEXT) + "\n"
-        "REQUIREMENT_TEXT = " + repr(REQUIREMENT_TEXT) + "\n"
+    # spec-bundle-assembler stand-in.
+    bundle = dict(BUNDLE_TEXTS)
+    bundle["component_id"] = COMPONENT_ID
+    bundle["criterion_id"] = CRITERION_ID
+    bundle["covers"] = REQUIREMENT_ID
+    bundle["dependency_interfaces"] = {}
+    write(
+        repo_root / "gen" / "spec-bundle-assembler" / "spec_bundle_assembler.py",
+        "BUNDLE = " + repr(bundle) + "\n"
         "\n"
         "\n"
         "def assemble_criterion(component_id, criterion_id, repo_root):\n"
-        "    return {\n"
-        "        'component_id': component_id,\n"
-        "        'criterion_id': criterion_id,\n"
-        "        'covers': " + repr(REQUIREMENT_ID) + ",\n"
-        "        'criterion_text': CRITERION_TEXT,\n"
-        "        'requirement_text': REQUIREMENT_TEXT,\n"
-        "        'interface': " + repr("g(a, b) -> bool\nh(a, b) -> int\nm(k, d) -> bool\ndo_the_thing(x) -> object") + ",\n"
-        "        'glossary': " + repr("- **Widget** — a test term.") + ",\n"
-        "        'dependency_interfaces': {},\n"
-        "    }\n"
+        "    return dict(BUNDLE)\n",
     )
+
+    # test-probe stand-in: always ok, no findings.
     write(
-        repo_root / "gen" / "spec-bundle-assembler" / "spec_bundle_assembler.py",
-        assembler_source,
+        repo_root / "gen" / "test-probe" / "test_probe.py",
+        "from dataclasses import dataclass, field\n"
+        "\n"
+        "GATE_VERSION = 'test-probe@1.3.0'\n"
+        "\n"
+        "\n"
+        "@dataclass\n"
+        "class ProbeReport:\n"
+        "    ok: bool = True\n"
+        "    findings: list = field(default_factory=list)\n"
+        "    tests_run: int = 0\n"
+        "    tests_reached: int = 0\n"
+        "\n"
+        "    def to_dict(self):\n"
+        "        return {'ok': self.ok, 'findings': list(self.findings),\n"
+        "                'tests_run': self.tests_run, 'tests_reached': self.tests_reached}\n"
+        "\n"
+        "\n"
+        "def probe(test_source, criterion_bundle, module_name, *, timeout=60.0, interpreter=None):\n"
+        "    with open(" + repr(str(log_path)) + ", 'a') as fh:\n"
+        "        fh.write('probe\\n')\n"
+        "    return ProbeReport(ok=True, findings=[], tests_run=1, tests_reached=1)\n",
     )
 
-    # The one cached generated-test file, with a correct header.
-    test_name = "test_" + CRITERION_ID.lower().replace("-", "_") + ".py"
-    write(
-        repo_root / "verification" / SLUG / "generated-test" / test_name,
-        header_line() + "\n" + TEST_BODY,
-    )
+    # Real criterion-compiler copied in, never relying on the tool-root fallback.
+    live = (
+        Path(verifier_orchestrator.__file__).resolve().parents[1] / "spec-bundle-assembler"
+    ).resolve().parents[1]
+    src = live / "pipeline" / "criterion-compiler"
+    if src.is_dir():
+        shutil.copytree(
+            src,
+            repo_root / "pipeline" / "criterion-compiler",
+            ignore=shutil.ignore_patterns("__pycache__"),
+        )
+
+    # The cached, current generated test: kills only the mutant of "a < b".
+    cached = repo_root / "verification" / SLUG / "generated-test" / "test_ac_mutfix_001.py"
+    write(cached, cached_test_source())
+    return cached
 
 
-def test_mutation_score_is_one_third_with_three_sites_one_killed(tmp_path):
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    build_fixture(repo_root)
+def make_test_author(log_path):
+    content = cached_test_source()
 
-    log_path = tmp_path / "test_author_calls.log"
-
-    def stand_in_author(bundle):
-        with open(log_path, "a", encoding="utf-8") as fh:
-            fh.write("called\n")
+    def test_author_standin(bundle):
+        with open(log_path, "a") as fh:
+            fh.write("test_author\n")
         return {
-            "component_id": COMPONENT_ID,
-            "criterion_id": CRITERION_ID,
-            "model": "fake-model",
+            "model": "fixture-model",
             "seed": 0,
             "prompt_version": "v1",
             "cache_hit": False,
             "model_call_error": None,
             "file": {
-                "path": "verification/widget/generated-test/test_ac_widget_001.py",
-                "content": header_line() + "\n" + TEST_BODY,
+                "path": "verification/mutfix/generated-test/test_ac_mutfix_001.py",
+                "content": content,
             },
         }
 
+    return test_author_standin
+
+
+def test_mutation_score_is_one_third(tmp_path):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    log_path = tmp_path / "calls.log"
+    build_fixture(repo_root, log_path)
+
     report = verifier_orchestrator.verify(
-        COMPONENT_ID, repo_root, judge=None, test_author=stand_in_author
+        COMPONENT_ID, repo_root, judge=None, test_author=make_test_author(log_path)
     )
 
     criteria = field(report, "criteria")
-    matching = [c for c in criteria if field(c, "id") == CRITERION_ID]
-    assert len(matching) == 1
-    assert field(matching[0], "result") == "pass"
+    entry = next(c for c in criteria if field(c, "id") == CRITERION_ID)
+    assert field(entry, "result") == "pass", entry
 
     assert field(report, "mutation_error") is None
     score = field(report, "mutation_score")
     assert score is not None
-    assert score == pytest.approx(1 / 3, abs=1e-9)
+    # Three sites (a < b, a // b, k in d), one killed.
+    assert abs(score - 1 / 3) < 1e-9, score
+    # Below the 0.8 bar, so the overall verdict fails.
+    assert field(report, "overall") == "fail"

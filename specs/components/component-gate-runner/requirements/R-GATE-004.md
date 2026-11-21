@@ -1,14 +1,12 @@
 # R-GATE-004
 
-**R-GATE-004** — If the one generation attempt does not produce a
-  passing candidate, the result MUST be `blocked`, never silently
-  accepted, with a `block_reason` distinguishing `"model_call_error"`
-  (no candidate was ever produced, and `verifier-orchestrator` was
-  never called) from `"verification_failed"` (a candidate was produced
-  and failed) and from `"test_authoring_failed"` (a candidate was
-  produced, but every criterion of its `VerificationReport` whose
-  `result` is `"fail"` has `failure_origin` `"test"`: no test could be
-  written for it, so nothing shows the code wrong, `D319`) — different
-  facts for a developer deciding whether to re-run or fix the spec first
-  (`D19`). Overall merge readiness stays
-  `provenance-tracker`'s decision.
+**R-GATE-004** — If the loop did not pass, the result MUST be `blocked`,
+  never silently accepted, with `block_reason` from the last attempt's
+  `outcome`: `generation_failed` gives `"model_call_error"` (with
+  `model_call_error` the last generation result's), `surface_failed`
+  gives `"surface_check_failed"`, `refused` gives `"refused"`, and
+  `verification_failed` gives `"test_authoring_failed"` when every
+  criterion of that attempt's `VerificationReport` whose `result` is
+  `"fail"` has `failure_origin` `"test"` (no test could be written, so
+  nothing shows the code wrong, `D319`), else `"verification_failed"`.
+  Overall merge readiness stays `provenance-tracker`'s decision.

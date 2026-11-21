@@ -1,5 +1,4 @@
-# hotdocs-criterion: sha256:8ce9b39c3e966ea61044c092e9cccb94bc665bcf93c921809a0772b865d5e2ea
-import email.message
+# hotdocs-criterion: sha256:d6781545cbfe067bfcfb0e4966faac55b95907ccb982ea6964330f14590e6aa9
 import io
 import json
 import urllib.error
@@ -11,8 +10,7 @@ import llm_endpoint
 
 
 SECRET = "sk-SECRET-123"
-PROVIDERS = ["anthropic", "openai", "gemini"]
-KEY_VARS = ["ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY"]
+PROVIDERS_UNDER_TEST = ["anthropic", "openai", "gemini"]
 
 
 def field(value, name):
@@ -20,101 +18,94 @@ def field(value, name):
 
 
 def _dump(value):
-    """Render a returned value (dict or object) as thoroughly as possible."""
-    parts = [repr(value), str(value)]
-    if isinstance(value, dict):
-        try:
-            parts.append(json.dumps(value, default=str))
-        except Exception:
-            pass
-    else:
-        try:
-            parts.append(repr(vars(value)))
-        except TypeError:
-            pass
-    return "\n".join(parts)
-
-
-def _request_url(request):
-    if isinstance(request, str):
-        return request
-    url = getattr(request, "full_url", None)
-    if url is None:
-        url = getattr(request, "get_full_url", lambda: "")()
-    return url or ""
+    try:
+        text = json.dumps(value, default=str)
+    except Exception:
+        text = ""
+    return text + "\n" + repr(value)
 
 
 @pytest.fixture
-def isolated_env(tmp_path, monkeypatch):
+def secret_env(tmp_path, monkeypatch):
     monkeypatch.delenv("VAR_HOTDOCS_CONFIG", raising=False)
     workdir = tmp_path / "work"
     workdir.mkdir()
     monkeypatch.chdir(workdir)
-    return workdir
-
-
-def test_credential_never_appears_in_responses_logs_or_check_results(
-    isolated_env, monkeypatch
-):
-    workdir = isolated_env
-    for var in KEY_VARS:
-        monkeypatch.setenv(var, SECRET)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", SECRET)
+    monkeypatch.setenv("OPENAI_API_KEY", SECRET)
+    monkeypatch.setenv("GEMINI_API_KEY", SECRET)
 
     calls = []
 
-    def fake_urlopen(request, *args, **kwargs):
-        calls.append(request)
-        body = json.dumps(
-            {"error": {"message": "Invalid API key: " + SECRET, "key": SECRET}}
-        ).encode("utf-8")
-        hdrs = email.message.Message()
+    def fake_urlopen(request, timeout=None, *args, **kwargs):
+        url = request.full_url if hasattr(request, "full_url") else str(request)
+        calls.append(url)
+        body = ("{\"error\": \"invalid api key " + SECRET + "\"}").encode("utf-8")
         raise urllib.error.HTTPError(
-            _request_url(request), 401, "Unauthorized " + SECRET, hdrs, io.BytesIO(body)
+            url,
+            401,
+            "Unauthorized: " + SECRET,
+            {},
+            io.BytesIO(body),
         )
 
     monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    return workdir, calls
+
+
+def _call_log_texts(workdir):
+    calls_dir = workdir / ".hotdocs" / "calls"
+    texts = []
+    if calls_dir.is_dir():
+        for path in sorted(calls_dir.rglob("*")):
+            if path.is_file():
+                texts.append((path, path.read_text(encoding="utf-8", errors="replace")))
+    return texts
+
+
+def test_secret_never_in_responses_logs_or_check_results(secret_env):
+    workdir, calls = secret_env
 
     responses = []
-    for provider in PROVIDERS:
+    for provider in PROVIDERS_UNDER_TEST:
         resp = llm_endpoint.complete("hello", provider + ":m")
-        responses.append((provider, resp))
+        responses.append(resp)
 
-    # The HTTP path was actually exercised (so the 401 echo had a chance to leak).
-    assert len(calls) >= len(PROVIDERS)
+    for resp in responses:
+        assert SECRET not in _dump(resp)
+        # The 401 should surface as a model_call_error, never text.
+        err = field(resp, "model_call_error")
+        assert err is not None
+        assert SECRET not in _dump(err)
 
-    for provider, resp in responses:
-        rendered = _dump(resp)
-        assert SECRET not in rendered, (provider, rendered)
-        for name in ("text", "model", "backend", "model_call_error"):
-            assert SECRET not in repr(field(resp, name)), (provider, name)
-        assert field(resp, "model_call_error") is not None, provider
-        assert field(resp, "text") is None, provider
-
-    check_results = []
-    for provider in PROVIDERS:
+    results = []
+    for provider in PROVIDERS_UNDER_TEST:
         result = llm_endpoint.check_connection(provider, "m")
-        check_results.append((provider, result))
+        results.append(result)
 
-    for provider, result in check_results:
-        rendered = _dump(result)
-        assert SECRET not in rendered, (provider, rendered)
-        assert SECRET not in repr(field(result, "ok")), provider
-        assert SECRET not in repr(field(result, "error")), provider
+    for result in results:
+        assert SECRET not in _dump(result)
+        assert field(result, "ok") is False
+        error = field(result, "error")
+        if error is not None:
+            assert SECRET not in _dump(error)
 
-    calls_dir = workdir / ".hotdocs" / "calls"
-    assert calls_dir.is_dir()
-    files = [p for p in calls_dir.rglob("*") if p.is_file()]
-    assert len(files) >= len(PROVIDERS)
-    for path in files:
-        data = path.read_bytes()
-        assert SECRET.encode("utf-8") not in data, path
+    logs = _call_log_texts(workdir)
+    assert logs, "complete() must write call log files under .hotdocs/calls/"
+    for path, text in logs:
+        assert SECRET not in text, "secret leaked into " + str(path)
 
 
-def test_save_config_refuses_key_as_api_key_env(isolated_env, tmp_path, monkeypatch):
+def test_save_config_refuses_key_as_api_key_env(tmp_path, monkeypatch):
+    monkeypatch.delenv("VAR_HOTDOCS_CONFIG", raising=False)
     monkeypatch.setenv("OPENAI_API_KEY", SECRET)
-    target_dir = tmp_path / "cfgdir"
-    target_dir.mkdir()
-    config_path = target_dir / "hotdocs.toml"
+    workdir = tmp_path / "work"
+    workdir.mkdir()
+    monkeypatch.chdir(workdir)
+
+    config_dir = tmp_path / "cfg"
+    config_dir.mkdir()
+    config_path = config_dir / "hotdocs.toml"
 
     with pytest.raises(ValueError) as excinfo:
         llm_endpoint.save_config(config_path, "openai", "m", api_key_env=SECRET)

@@ -3,13 +3,7 @@
 Covers: R-PROVCHECK-008
 Kind: generated-test
 
-Fixture as in AC-PROVCHECK-011. Each scenario writes the manifest as
-JSON, taking source_hash from current_sealed_key unless it says otherwise.
-A valid manifest has kind "sealed-provenance", version 1, component_id
-"comp-foo", owners ["pipeline-team", "alice"], source_path
-"pipeline/foo/", verifier_version "verifier-orchestrator@2.0.0",
-characterization {"overall": "pass", "criteria_passed": 2,
-"criteria_total": 2}, and written_at "2026-11-02T00:00:00Z".
+Fixture and the valid manifest: `testing.md`, "Sealed manifests".
 
 ```gherkin
 Given a valid, current manifest

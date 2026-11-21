@@ -1,19 +1,17 @@
 # R-ASSIST-001
 
-**R-ASSIST-001** — MUST run `spec-linter` against the draft spec change
-  first. If any finding has `severity` `"fail"`, `assist` MUST return
-  immediately with `lint_findings` populated and nothing else run:
-  `predicted_blast_radius` `[]`, `hint_previews` `{}`,
+**R-ASSIST-001** — MUST run `spec-linter` over the whole corpus first and
+  put every finding, unchanged, in `lint_findings`. If any finding has
+  `severity` `"fail"` and lies inside a changed component (as
+  `interface/library.md` defines both), `assist` MUST return at once with
+  `halted` true, `predicted_blast_radius` `[]`, `criterion_reviews` `{}`,
   `completeness_score`/`completeness_rationale` `null`,
-  `redundancy_flags` `[]`, and no model call of any kind, including
-  `generator`'s hint preview. Same "cheap, deterministic gate first"
-  ordering `hotdocs generate`'s own workflow uses, on the feature-branch
-  side.
+  `redundancy_flags` `[]`, and no dependency call after `lint`; the
+  `glossary_judge` call made before `lint` with a `model` still happens,
+  and `degraded` is false exactly when a `model` was given. A `"fail"`
+  finding anywhere else is reported but does not halt, and `halted` is
+  false.
 
-  Stopping, not merely ordering, is load-bearing (`D155`): `assist`
-  returns one report, so "surfaced before" is only observable as a
-  stop, and running a paid judgment or preview against a spec that
-  already hard-fails lint spends money on a result the developer must
-  discard anyway. `degraded` still reports only whether a model was
-  configured (`R-ASSIST-007`); a caller tells a lint halt apart by the
-  `"fail"`-severity entry in `lint_findings`.
+  Judging a change whose own files fail lint wastes a model call
+  (`D155`); halting on unrelated failures made `assist` unusable
+  (`D301`).

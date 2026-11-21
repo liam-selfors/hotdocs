@@ -1,67 +1,55 @@
-# hotdocs-criterion: sha256:b74d1f8c813de94661a508aa1127c18cc33e8784be2adf4ed7177423d466b156
+# hotdocs-criterion: sha256:dd27bea6612d3ff27cf450c65aa629ed8a205eda233ad04f80f1ed7ffbe60672
 import ast
 from pathlib import Path
 
 import spec_bundle_assembler
 
 
-FORBIDDEN_TOP_LEVEL = {
-    "yaml",
-    "ruamel",
-    "markdown",
-    "mistune",
-    "frontmatter",
-    "commonmark",
-}
+FORBIDDEN = {"yaml", "ruamel", "markdown", "mistune", "frontmatter", "commonmark"}
 
 
-def _module_py_files():
+def _module_files():
     module_file = Path(spec_bundle_assembler.__file__).resolve()
     if module_file.name == "__init__.py":
-        package_dir = module_file.parent
-        files = sorted(
-            p
-            for p in package_dir.rglob("*.py")
-            if "__pycache__" not in p.parts
-        )
+        files = sorted(p for p in module_file.parent.rglob("*.py") if p.is_file())
     else:
         files = [module_file]
+    assert files, "no .py files found for spec_bundle_assembler"
     return files
 
 
-def _top_level(name):
-    if not name:
-        return ""
-    return name.split(".", 1)[0]
+def _parse(path):
+    source = path.read_text(encoding="utf-8")
+    return ast.parse(source, filename=str(path))
 
 
-def _forbidden_imports_in_tree(tree):
-    hits = []
+def _top(name):
+    return name.split(".")[0] if name else ""
+
+
+def _forbidden_imports(tree):
+    found = []
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             for alias in node.names:
-                top = _top_level(alias.name)
-                if top in FORBIDDEN_TOP_LEVEL:
-                    hits.append((getattr(node, "lineno", None), alias.name))
+                if _top(alias.name) in FORBIDDEN:
+                    found.append((node.lineno, alias.name))
         elif isinstance(node, ast.ImportFrom):
-            if (node.level or 0) == 0:
-                top = _top_level(node.module)
-                if top in FORBIDDEN_TOP_LEVEL:
-                    hits.append((getattr(node, "lineno", None), node.module))
+            if (node.level or 0) == 0 and node.module and _top(node.module) in FORBIDDEN:
+                found.append((node.lineno, node.module))
         elif isinstance(node, ast.Call):
             func = node.func
-            func_name = None
+            fname = None
             if isinstance(func, ast.Name):
-                func_name = func.id
+                fname = func.id
             elif isinstance(func, ast.Attribute):
-                func_name = func.attr
-            if func_name in ("__import__", "import_module") and node.args:
+                fname = func.attr
+            if fname in ("import_module", "__import__") and node.args:
                 first = node.args[0]
                 if isinstance(first, ast.Constant) and isinstance(first.value, str):
-                    top = _top_level(first.value)
-                    if top in FORBIDDEN_TOP_LEVEL:
-                        hits.append((getattr(node, "lineno", None), first.value))
-    return hits
+                    if _top(first.value) in FORBIDDEN:
+                        found.append((node.lineno, first.value))
+    return found
 
 
 def _has_load_corpus_attribute_call(tree):
@@ -73,28 +61,19 @@ def _has_load_corpus_attribute_call(tree):
     return False
 
 
-def test_ac_assemble_014_no_third_party_parsers_and_uses_load_corpus():
-    files = _module_py_files()
-    assert files, "no .py files found for spec_bundle_assembler"
-
-    forbidden = {}
-    any_load_corpus_call = False
-
+def test_no_forbidden_parser_imports_and_load_corpus_is_called():
+    files = _module_files()
+    offenders = []
+    any_load_corpus = False
     for path in files:
-        source = path.read_text(encoding="utf-8")
-        tree = ast.parse(source, filename=str(path))
-        hits = _forbidden_imports_in_tree(tree)
-        if hits:
-            forbidden[str(path)] = hits
+        tree = _parse(path)
+        for lineno, name in _forbidden_imports(tree):
+            offenders.append(str(path) + ":" + str(lineno) + " imports " + name)
         if _has_load_corpus_attribute_call(tree):
-            any_load_corpus_call = True
+            any_load_corpus = True
 
-    assert not forbidden, (
-        "spec_bundle_assembler imports a forbidden YAML/Markdown/frontmatter "
-        "parser (R-ASSEMBLE-012): %r" % (forbidden,)
-    )
-    assert any_load_corpus_call, (
-        "no .py file of spec_bundle_assembler contains a call whose function "
-        "is an attribute named load_corpus (R-ASSEMBLE-012); files scanned: %r"
-        % ([str(p) for p in files],)
+    assert offenders == [], "forbidden third-party parser imports found: " + repr(offenders)
+    assert any_load_corpus, (
+        "no call whose function is an attribute named load_corpus found in "
+        + repr([str(p) for p in files])
     )

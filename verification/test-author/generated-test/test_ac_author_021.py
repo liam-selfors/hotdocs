@@ -1,94 +1,61 @@
-# hotdocs-criterion: sha256:701c0fd9c94fcc19e8be7fb082233a6d4ab1de66d776c968d194d86a02cdb754
+# hotdocs-criterion: sha256:da1b4cc9ad36596a94fbed9c9bf0e9193c5ce54ec7e08025e55cb06b80d399e9
 import re
+from pathlib import Path
 
 import test_author
 
 
-DUAL_ACCESS_LINE = "        return value[name] if isinstance(value, dict) else getattr(value, name)"
-DUAL_ACCESS_RULE = "MUST use dual dict-or-attribute access, never one assumed shape:"
+def field(value, name):
+    return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-class Bundle:
-    """A CriterionBundle stand-in readable both by attribute and as a mapping."""
-
-    _FIELDS = (
-        "component_id",
-        "criterion_id",
-        "covers",
-        "criterion_text",
-        "requirement_text",
-        "interface",
-        "glossary",
-        "dependency_interfaces",
+def _write_probe_stand_in(repo_root, log_path):
+    probe_dir = Path(repo_root) / "gen" / "test-probe"
+    probe_dir.mkdir(parents=True, exist_ok=True)
+    source = (
+        "class _Report:\n"
+        "    def __init__(self):\n"
+        "        self.ok = True\n"
+        "        self.findings = []\n"
+        "        self.tests_run = 1\n"
+        "        self.tests_reached = 1\n"
+        "\n"
+        "    def to_dict(self):\n"
+        "        return {\n"
+        "            'ok': self.ok,\n"
+        "            'findings': list(self.findings),\n"
+        "            'tests_run': self.tests_run,\n"
+        "            'tests_reached': self.tests_reached,\n"
+        "        }\n"
+        "\n"
+        "\n"
+        "def probe(test_source, criterion_bundle, module_name, *, timeout=60.0, interpreter=None):\n"
+        "    with open(" + repr(str(log_path)) + ", 'a', encoding='utf-8') as fh:\n"
+        "        fh.write('probe\\n')\n"
+        "    return _Report()\n"
     )
-
-    def __init__(self, **kwargs):
-        for name in self._FIELDS:
-            setattr(self, name, kwargs[name])
-
-    def __getitem__(self, key):
-        if key not in self._FIELDS:
-            raise KeyError(key)
-        return getattr(self, key)
-
-    def get(self, key, default=None):
-        if key in self._FIELDS:
-            return getattr(self, key)
-        return default
-
-    def __contains__(self, key):
-        return key in self._FIELDS
-
-    def keys(self):
-        return list(self._FIELDS)
-
-    def __iter__(self):
-        return iter(self._FIELDS)
-
-    def __len__(self):
-        return len(self._FIELDS)
-
-    def items(self):
-        return [(k, getattr(self, k)) for k in self._FIELDS]
-
-    def values(self):
-        return [getattr(self, k) for k in self._FIELDS]
-
-
-def make_bundle():
-    return Bundle(
-        component_id="comp-widget-maker",
-        criterion_id="AC-WIDGET-MAKER-001",
-        covers="R-WIDGET-MAKER-001",
-        criterion_text=(
-            "Given a width of 3\n"
-            "When make_widget(3) is called\n"
-            "Then it returns a widget of width 3"
-        ),
-        requirement_text=(
-            "# R-WIDGET-MAKER-001\n\n"
-            "**R-WIDGET-MAKER-001** — `make_widget(w)` MUST return a widget of width `w`."
-        ),
-        interface="# Library\n\n```\nmake_widget(w: int) -> dict\n```\n",
-        glossary="# Glossary\n\n- **Widget** — a test term.\n",
-        dependency_interfaces={},
-    )
+    (probe_dir / "test_probe.py").write_text(source, encoding="utf-8")
 
 
 def test_prompt_holds_dual_access_block(tmp_path, monkeypatch):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    monkeypatch.chdir(repo_root)
     monkeypatch.delenv("VAR_CACHE_STORE_URL", raising=False)
 
+    log_path = tmp_path / "probe_calls.log"
+    _write_probe_stand_in(repo_root, log_path)
+
     prompts = []
+    test_file = "def test_something():\n    assert True\n"
 
     def mock_backend(prompt, model, **params):
         prompts.append(prompt)
-        match = re.search(r"-----BEGIN FILE ([0-9a-f]+)-----", prompt)
-        nonce = match.group(1) if match else "0" * 32
+        nonce = re.findall(r"-----BEGIN FILE ([0-9a-f]{32})-----", prompt)[-1]
         text = (
             "-----BEGIN FILE " + nonce + "-----\n"
-            "def test_placeholder():\n"
-            "    assert True\n"
-            "-----END FILE " + nonce + "-----"
+            + test_file
+            + "\n-----END FILE " + nonce + "-----"
         )
         return {
             "text": text,
@@ -97,11 +64,27 @@ def test_prompt_holds_dual_access_block(tmp_path, monkeypatch):
             "model_call_error": None,
         }
 
-    test_author.author_test(
-        make_bundle(), "mock", repo_root=tmp_path, llm_backend=mock_backend
-    )
+    bundle = {
+        "component_id": "comp-widget-maker",
+        "criterion_id": "AC-WIDGET-MAKER-001",
+        "covers": "R-WIDGET-MAKER-001",
+        "criterion_text": "Given a widget, When made, Then it exists.",
+        "requirement_text": "R-WIDGET-MAKER-001 - The maker MUST make widgets.",
+        "interface": "make_widget(name: str) -> dict",
+        "glossary": "",
+        "dependency_interfaces": {},
+    }
 
-    assert prompts, "the mock model was never called"
+    result = test_author.author_test(
+        bundle, "mock", repo_root=repo_root, llm_backend=mock_backend
+    )
+    assert result is not None
+    assert field(result, "model_call_error") is None
+
+    assert len(prompts) >= 1
     first = prompts[0]
-    assert DUAL_ACCESS_LINE in first.splitlines()
-    assert DUAL_ACCESS_RULE in first
+    expected_line = (
+        "        return value[name] if isinstance(value, dict) else getattr(value, name)"
+    )
+    assert expected_line in first.splitlines()
+    assert "MUST use dual dict-or-attribute access, never one assumed shape:" in first

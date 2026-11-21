@@ -77,3 +77,5 @@ Full narrative per entry lives in its own `specs/decisions/D<N>.md`.
 - `D208`: `load_corpus` and `Corpus` specified.
 - `D242`: corpus loading, citation rules and size rules split out into
   `corpus-loader`, `citation-checker` and `size-checker`.
+- `D343`: `R-LINT-034`, frontmatter `assets` and asset kind definitions.
+- `D344`: `python` is never declared in `assets`.

@@ -1,196 +1,156 @@
-# hotdocs-criterion: sha256:9eb73aaca947daba2323f06174ec579b181b848512cdfdf9547072a022128bbd
-import json
-from pathlib import Path
+# hotdocs-criterion: sha256:542b318d0f9b892dd14272b5ec4be8672a59c795715ca73e79b73c89f5ecf35c
+"""AC-LINT-009: a Covers: tag naming a nonexistent R-id is a fail finding for R-LINT-009."""
 
-import pytest
+from pathlib import Path
 
 import spec_linter
 
 
-def _get(value, key, default=None):
-    if isinstance(value, dict):
-        return value.get(key, default)
-    return getattr(value, key, default)
+def field(value, name):
+    return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def _write(path: Path, text: str) -> None:
+COMPONENT_MD = (
+    "---\n"
+    "id: comp-foo\n"
+    "title: Foo\n"
+    "status: draft\n"
+    "owners: [test-team]\n"
+    "sealed: true\n"
+    "source_path: legacy/foo/\n"
+    "---\n"
+    "\n"
+    "# Foo\n"
+    "\n"
+    "## Purpose\n"
+    "\n"
+    "Foo returns a fixed greeting for testing the linter.\n"
+    "\n"
+    "## Scope\n"
+    "\n"
+    "- In scope: returning a greeting.\n"
+    "- Out of scope: everything else.\n"
+    "\n"
+    "## Definitions\n"
+    "\n"
+    "None.\n"
+    "\n"
+    "## Behavior\n"
+    "\n"
+    "See `requirements/`.\n"
+    "\n"
+    "## Interfaces\n"
+    "\n"
+    "See `interface/`.\n"
+    "\n"
+    "## Data\n"
+    "\n"
+    "See `interface/data/`.\n"
+    "\n"
+    "## Acceptance criteria\n"
+    "\n"
+    "See `acceptance/`.\n"
+    "\n"
+    "## Non-functional constraints\n"
+    "\n"
+    "See `constraints.md`.\n"
+    "\n"
+    "## Open questions\n"
+    "\n"
+    "## Change log\n"
+    "\n"
+    "- Initial draft.\n"
+)
+
+REQUIREMENT_MD = (
+    "# R-FOO-001\n"
+    "\n"
+    "**R-FOO-001** \u2014 Foo MUST return the greeting `hello`.\n"
+)
+
+AC_GOOD_MD = (
+    "# AC-FOO-001\n"
+    "\n"
+    "Covers: R-FOO-001\n"
+    "Kind: generated-test\n"
+    "\n"
+    "```gherkin\n"
+    "Given foo\n"
+    "When foo is called\n"
+    "Then it returns hello\n"
+    "```\n"
+)
+
+AC_DANGLING_MD = (
+    "# AC-FOO-002\n"
+    "\n"
+    "Covers: R-DOES-NOT-EXIST\n"
+    "Kind: generated-test\n"
+    "\n"
+    "```gherkin\n"
+    "Given foo\n"
+    "When foo is called\n"
+    "Then it returns hello\n"
+    "```\n"
+)
+
+CONSTRAINTS_MD = (
+    "# Constraints\n"
+    "\n"
+    "- Foo returns within 1 second, measured by a timer around the call.\n"
+)
+
+GLOSSARY_MD = (
+    "# Glossary\n"
+    "\n"
+    "- **Greeting** \u2014 the text foo returns.\n"
+)
+
+
+def _write(path, text):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
 
 
-COMPONENT_MD = """---
-id: comp-foo
-title: Foo
-status: draft
-owners: [alice]
-sealed: true
-source_path: legacy/foo
----
-
-# Foo
-
-## Purpose
-
-Foo does one small thing for testing purposes.
-
-## Scope
-
-- In scope: the one small thing.
-- Out of scope: everything else.
-
-## Definitions
-
-None.
-
-## Behavior
-
-See `requirements/`.
-
-## Interfaces
-
-See `interface/`.
-
-## Data
-
-See `interface/data/`.
-
-## Acceptance criteria
-
-See `acceptance/`.
-
-## Non-functional constraints
-
-See `constraints.md`.
-
-## Open questions
-
-## Change log
-
-- Initial draft.
-"""
-
-REQ_MD = """# R-FOO-001
-
-**R-FOO-001** — The component MUST return the one small thing.
-"""
-
-GOOD_AC_MD = """# AC-FOO-001
-
-Covers: R-FOO-001
-Kind: compiled
-
-```gherkin
-Given a request
-When foo runs
-Then it returns the one small thing
-```
-"""
-
-CONSTRAINTS_MD = """# Constraints
-
-None.
-"""
-
-GLOSSARY_MD = """# Glossary
-
-- **Foo thing** — the one small thing foo returns.
-"""
-
-
-def _bad_ac(ac_id: str, target: str) -> str:
-    return f"""# {ac_id}
-
-Covers: {target}
-Kind: compiled
-
-```gherkin
-Given a request
-When foo runs
-Then something happens
-```
-"""
-
-
-def _build_fixture(root: Path, extra_acs=None) -> Path:
-    comp = root / "specs" / "components" / "foo"
+def _build_corpus(repo_root):
+    specs = repo_root / "specs"
+    for sub in ("product", "architecture", "vars", "decisions"):
+        (specs / sub).mkdir(parents=True, exist_ok=True)
+    _write(specs / "glossary.md", GLOSSARY_MD)
+    comp = specs / "components" / "foo"
     _write(comp / "component.md", COMPONENT_MD)
-    _write(comp / "requirements" / "R-FOO-001.md", REQ_MD)
-    _write(comp / "acceptance" / "AC-FOO-001.md", GOOD_AC_MD)
+    _write(comp / "requirements" / "R-FOO-001.md", REQUIREMENT_MD)
+    _write(comp / "acceptance" / "AC-FOO-001.md", AC_GOOD_MD)
+    _write(comp / "acceptance" / "AC-FOO-002.md", AC_DANGLING_MD)
     _write(comp / "constraints.md", CONSTRAINTS_MD)
-    _write(root / "specs" / "glossary.md", GLOSSARY_MD)
-    for ac_id, target in (extra_acs or []):
-        _write(comp / "acceptance" / f"{ac_id}.md", _bad_ac(ac_id, target))
-    return root
+    (repo_root / "gen").mkdir(parents=True, exist_ok=True)
+    (repo_root / "verification").mkdir(parents=True, exist_ok=True)
 
 
-def _findings(report):
-    findings = _get(report, "findings")
-    if findings is None:
-        findings = []
-    return list(findings)
+def test_dangling_covers_tag_is_fail_finding_for_r_lint_009(tmp_path):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    _build_corpus(repo_root)
 
+    report = spec_linter.lint(None, repo_root)
 
-def _lint009_fails(report):
-    return [
-        f
-        for f in _findings(report)
-        if _get(f, "rule_id") == "R-LINT-009" and _get(f, "severity") == "fail"
+    findings = list(field(report, "findings"))
+    lint_009 = [
+        f for f in findings
+        if field(f, "rule_id") == "R-LINT-009"
+        and field(f, "severity") == "fail"
     ]
-
-
-def test_valid_covers_tag_produces_no_r_lint_009_finding(tmp_path):
-    root = _build_fixture(tmp_path)
-    report = spec_linter.lint(None, root)
-    lint009 = [f for f in _findings(report) if _get(f, "rule_id") == "R-LINT-009"]
-    assert lint009 == [], f"unexpected R-LINT-009 findings on clean fixture: {lint009}"
-
-
-def test_dangling_r_id_covers_tag_is_fail_severity_r_lint_009(tmp_path):
-    root = _build_fixture(tmp_path)
-    baseline = spec_linter.lint(None, root)
-    assert _lint009_fails(baseline) == []
-
-    _write(
-        root / "specs" / "components" / "foo" / "acceptance" / "AC-FOO-002.md",
-        _bad_ac("AC-FOO-002", "R-DOES-NOT-EXIST"),
-    )
-    report = spec_linter.lint(None, root)
-    fails = _lint009_fails(report)
-    assert fails, (
-        "expected a fail-severity R-LINT-009 finding for Covers: R-DOES-NOT-EXIST; "
-        f"got findings: {_findings(report)}"
-    )
-    files = [str(_get(f, "file") or "") for f in fails]
-    assert any("AC-FOO-002" in fp for fp in files), (
-        f"R-LINT-009 finding should point at the offending criterion file; got {files}"
-    )
-    assert not any("AC-FOO-001" in fp for fp in files), (
-        f"the valid criterion must not be flagged; got {files}"
+    assert lint_009, (
+        "expected a fail-severity R-LINT-009 finding; got: "
+        + repr([(field(f, "rule_id"), field(f, "severity"), field(f, "file"),
+                 field(f, "message")) for f in findings])
     )
 
-    hard = _get(report, "hard_failures")
-    if hard is not None:
-        assert hard >= 1
-
-
-def test_dangling_p_id_covers_tag_is_fail_severity_r_lint_009(tmp_path):
-    root = _build_fixture(tmp_path, extra_acs=[("AC-FOO-002", "P-DOES-NOT-EXIST")])
-    report = spec_linter.lint(None, root)
-    fails = _lint009_fails(report)
-    assert fails, (
-        "expected a fail-severity R-LINT-009 finding for Covers: P-DOES-NOT-EXIST; "
-        f"got findings: {_findings(report)}"
+    # The finding concerns the criterion carrying the dangling Covers: tag.
+    assert any("AC-FOO-002" in str(field(f, "file")) for f in lint_009), (
+        "expected an R-LINT-009 fail finding on AC-FOO-002.md; got: "
+        + repr([(field(f, "file"), field(f, "message")) for f in lint_009])
     )
 
-
-def test_cli_reports_r_lint_009_and_exits_1(tmp_path, capsys):
-    root = _build_fixture(tmp_path, extra_acs=[("AC-FOO-002", "R-DOES-NOT-EXIST")])
-    rc = spec_linter.main(["--format=json", f"--repo-root={root}"])
-    out = capsys.readouterr().out
-    assert rc == 1, f"expected exit code 1 with a fail-severity finding, got {rc}"
-    data = json.loads(out)
-    findings = data.get("findings", []) if isinstance(data, dict) else []
-    assert any(
-        f.get("rule_id") == "R-LINT-009" and f.get("severity") == "fail"
-        for f in findings
-    ), f"JSON report lacks a fail-severity R-LINT-009 finding: {findings}"
+    # A fail finding counts as a hard failure.
+    assert field(report, "hard_failures") >= 1

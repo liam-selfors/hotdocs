@@ -34,8 +34,6 @@ def test_ac_gen_001_cold_prompt_contains_exactly_cold_fields(repo_root):
     assert "FAKE INTERFACE TEXT" in sent_prompt
     assert "FAKE CONSTRAINTS TEXT" in sent_prompt
     assert "FAKE GLOSSARY TEXT" in sent_prompt
-    assert "## HINT_CODE" not in sent_prompt
-    assert "## RETRY_FEEDBACK" not in sent_prompt
 
 
 def test_ac_gen_002_hint_code_is_a_distinct_section(repo_root):
@@ -44,8 +42,11 @@ def test_ac_gen_002_hint_code_is_a_distinct_section(repo_root):
     generate(bundle, "claude-sonnet-5", repo_root=repo_root, llm_backend=backend)
 
     sent_prompt = backend.calls[0][0]
-    assert "## HINT_CODE" in sent_prompt
-    assert "foo.py" in sent_prompt and "x = 0" in sent_prompt
+    # R-GEN-002: its own section; the spec names no exact heading.
+    hint_headings = [l for l in sent_prompt.splitlines() if l.startswith("#") and "hint" in l.lower()]
+    assert hint_headings, "no section heading naming hint_code"
+    hint_section = sent_prompt[sent_prompt.index(hint_headings[0]):]
+    assert "foo.py" in hint_section and "x = 0" in hint_section
 
 
 def test_ac_gen_003_prompt_version_matches_frozen_template(repo_root):
@@ -88,10 +89,11 @@ def test_ac_gen_005_cache_hit_skips_the_model(repo_root):
     assert backend.calls == []
 
 
-def test_ac_gen_006_successful_call_is_cached(repo_root):
+def test_ac_gen_006_only_commit_cache_writes_the_cache(repo_root):
+    """D305 -- generate() never caches; commit_cache does, after a pass."""
     backend = MockBackend([file_block("foo.py", "x = 1")])
     bundle = FakeBundle()
-    generate(bundle, "claude-sonnet-5", repo_root=repo_root, llm_backend=backend)
+    result = generate(bundle, "claude-sonnet-5", repo_root=repo_root, llm_backend=backend)
 
     cache_key = cache_manager.CacheKey(
         spec_bundle_hash=bundle.spec_bundle_hash,
@@ -99,6 +101,8 @@ def test_ac_gen_006_successful_call_is_cached(repo_root):
         gate_version=GATE_VERSION,
         model_pin="claude-sonnet-5",
     )
+    assert isinstance(cache_manager.get(cache_key, repo_root=repo_root), cache_manager.Miss)
+    generator.commit_cache(result, repo_root=repo_root)
     stored = cache_manager.get(cache_key, repo_root=repo_root)
     assert isinstance(stored, cache_manager.CachedResult)
     assert {k: v.rstrip("\n") for k, v in stored.payload["files"].items()} == {"foo.py": "x = 1"}
@@ -175,9 +179,10 @@ def test_ac_gen_013_retry_feedback_is_bare_and_distinct(repo_root):
     result = generate(FakeBundle(), "claude-sonnet-5", ["R-FOO-003"], repo_root=repo_root, llm_backend=backend)
 
     sent_prompt = backend.calls[0][0]
-    assert "## RETRY_FEEDBACK" in sent_prompt
+    retry_headings = [l for l in sent_prompt.splitlines() if l.startswith("#") and "retry" in l.lower()]
+    assert retry_headings, "no section heading naming retry feedback"
     assert "R-FOO-003" in sent_prompt
-    retry_section = sent_prompt[sent_prompt.index("## RETRY_FEEDBACK"):]
+    retry_section = sent_prompt[sent_prompt.index(retry_headings[0]):]
     assert "Gherkin" not in retry_section
     assert "rationale" not in retry_section.lower()
     assert result.retry_feedback == ["R-FOO-003"]
@@ -262,14 +267,18 @@ def put(cache_key, result, *, repo_root=None):
     return _real_put(cache_key, result, repo_root=repo_root)
 """, encoding="utf-8")
 
-    backend_a = MockBackend([file_block("foo.py", "x = 1")])
-    backend_b = MockBackend([file_block("foo.py", "x = 2")])
-    generate(FakeBundle(component_id="comp-one"), "claude-sonnet-5", repo_root=repo_root, llm_backend=backend_a)
+    def run(component_id, module, root, value):
+        result = generate(FakeBundle(component_id=component_id, spec_bundle_hash="sha256:" + module),
+                          "claude-sonnet-5", repo_root=root,
+                          llm_backend=MockBackend([file_block(f"{module}.py", f"x = {value}")]))
+        assert result.model_call_error is None, result.model_call_error
+        generator.commit_cache(result, repo_root=root)
+
+    run("comp-one", "one", repo_root, 1)
     assert not marker.exists()  # repo_root's own cache-manager, not other_root's
-    generate(FakeBundle(component_id="comp-two"), "claude-sonnet-5", repo_root=other_root, llm_backend=backend_b)
+    run("comp-two", "two", other_root, 2)
     assert marker.read_text(encoding="utf-8").split() == ["comp-two"]
-    generate(FakeBundle(component_id="comp-three"), "claude-sonnet-5", repo_root=repo_root,
-             llm_backend=MockBackend([file_block("foo.py", "x = 3")]))
+    run("comp-three", "three", repo_root, 3)
     assert marker.read_text(encoding="utf-8").split() == ["comp-two"]  # no cached-module leak back
 
 
@@ -289,6 +298,8 @@ def test_ac_gen_017_hint_mode_never_writes_gen_or_cache(repo_root):
         gate_version=GATE_VERSION,
         model_pin="claude-sonnet-5",
     )
+    assert isinstance(cache_manager.get(cache_key, repo_root=repo_root), cache_manager.Miss)
+    generator.commit_cache(result, repo_root=repo_root)  # a hint-mode result is never committed
     assert isinstance(cache_manager.get(cache_key, repo_root=repo_root), cache_manager.Miss)
 
 
@@ -345,7 +356,7 @@ def test_ac_gen_021_redundant_component_prefix_is_stripped(repo_root):
         text = "\n".join(
             f"-----BEGIN FILE {nonce}: {path}-----\n{body}\n-----END FILE {nonce}-----"
             for path, body in blocks
-        )
+        ) + f"\n-----END REPLY {nonce}-----"
         return {"text": text, "model_call_error": None}
 
     bundle = FakeBundle(component_id="comp-foo-bar")
@@ -369,3 +380,27 @@ def test_ac_gen_019_dependencies_fall_back_to_the_tool_root(tmp_path, monkeypatc
     assert result.model_call_error is None
     assert (tmp_path / "gen" / "foo" / "foo.py").read_text().strip() == "x = 1"
     assert "tool root" in backend.calls[0][0]
+
+
+def test_ac_gen_023_truncated_reply_writes_and_caches_nothing(repo_root):
+    """D304 -- a reply cut off before its end marker used to drop the
+    unclosed file silently and write the rest."""
+    from conftest import _NONCE_RE
+
+    def _cut_off(prompt, model, **params):
+        nonce = _NONCE_RE.search(prompt).group("nonce")
+        return {"text": (f"-----BEGIN FILE {nonce}: foo.py-----\nx = 1\n-----END FILE {nonce}-----\n"
+                         f"-----BEGIN FILE {nonce}: helpers.py-----\ny = "), "model_call_error": None}
+
+    result = generate(FakeBundle(), "claude-sonnet-5", repo_root=repo_root, llm_backend=MockBackend([_cut_off]))
+    assert result.model_call_error["category"] == "truncated_response"
+    assert "helpers.py" in result.model_call_error["message"]
+    assert result.files == {}
+    assert not (repo_root / "gen" / "foo").exists()
+
+
+def test_ac_gen_023_reply_without_the_module_is_missing_module(repo_root):
+    backend = MockBackend([file_block("notes.py", "x = 1")])
+    result = generate(FakeBundle(), "claude-sonnet-5", repo_root=repo_root, llm_backend=backend)
+    assert result.model_call_error["category"] == "missing_module"
+    assert not (repo_root / "gen" / "foo").exists()

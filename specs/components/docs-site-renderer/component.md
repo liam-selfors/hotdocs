@@ -3,9 +3,10 @@ id: comp-docs-site-renderer
 title: Docs Site Renderer
 status: draft
 owners: [pipeline-team]
-depends_on: [comp-corpus-graph-builder]
+depends_on: [comp-corpus-graph-builder, comp-kind-javascript]
 realizes: [P-AMBIGUITY-GATE]
 sealed: false
+assets: [javascript:static/app.js]
 ---
 
 # Docs Site Renderer
@@ -51,11 +52,13 @@ rendered site.
 
 See `acceptance/`.
 
-All six criteria are `kind: generated-test` (`D43`) — rendering
+All criteria are `kind: generated-test` (`D43`) — rendering
 already-computed data is pure, deterministic templating that needs no
 model or judgment, but none are actually written in the step-phrase
 grammar, so `kind: compiled` would not describe how they're really
-verified.
+verified. The DAG view's layout and search are pure exports of the
+`javascript` asset `static/app.js`, tested through `asset_runner`
+(`D343`).
 
 ## Non-functional constraints
 
@@ -73,3 +76,8 @@ None.
   `/dist/` entry at all — fixed there, not in this component's own
   (already-correct) code. See `verification/docs-site-renderer/
   BOOTSTRAP.md`.
+- `D343`: the DAG view's JavaScript moves out of a Python string into
+  the declared `javascript` asset `static/app.js`
+  (`interface/assets/app.js.md`), inlined once as a module script. The
+  existing by-type column layout and id search are now stated exactly:
+  new `R-DOCS-008`, `R-DOCS-009`, `AC-DOCS-009`–`AC-DOCS-011`.

@@ -1,36 +1,12 @@
-# hotdocs-criterion: sha256:bab4c8383d1885ec2bcdbd8f17863c7dad470c7c1da2ba7d0def32abe0dbe47c
+# hotdocs-criterion: sha256:36a8ad0b80f5e1af62e046dde3dc1c8ab5d6d00ca349c399e3d3814beeec627f
 import re
-import shutil
-import tempfile
-import unittest
 from pathlib import Path
 
 import size_checker
 
 
-_VOCAB = (
-    "this component validates widget records against a declared schema and "
-    "reports every structural problem it finds back to the calling tool so "
-    "that authors can correct their inputs before any later stage consumes "
-    "them while keeping the reporting format stable predictable and easy to "
-    "read for both humans and automated consumers alike across every run"
-).split()
-
-
-def _purpose_words(n):
-    words = [_VOCAB[i % len(_VOCAB)] for i in range(n)]
-    for w in words:
-        assert not re.match(r"^D\d+", w)
-    lines = []
-    for i in range(0, n, 12):
-        lines.append(" ".join(words[i:i + 12]))
-    return "\n".join(lines)
-
-
-def _field(finding, name):
-    if isinstance(finding, dict):
-        return finding.get(name)
-    return getattr(finding, name, None)
+def field(value, name):
+    return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
 def _write(path, text):
@@ -38,36 +14,31 @@ def _write(path, text):
     path.write_text(text, encoding="utf-8")
 
 
-def _build_repo(root, purpose_word_count):
-    specs = root / "specs"
-    for sub in ("product", "architecture", "vars", "decisions"):
-        (specs / sub).mkdir(parents=True, exist_ok=True)
-    _write(
-        specs / "glossary.md",
-        "# Glossary\n\n- **Widget** — a thing that is checked.\n",
-    )
-    comp = specs / "components" / "widget"
-    purpose = _purpose_words(purpose_word_count)
+def _build_fixture(repo_root):
+    words = ["word"] * 160
+    purpose_text = " ".join(words)
+    assert len(purpose_text.split()) == 160
+    assert re.search(r"\bD\d+\b", purpose_text) is None
+
     component_md = (
         "---\n"
-        "id: comp-widget\n"
-        "title: Widget\n"
+        "id: comp-foo\n"
+        "title: Foo\n"
         "status: draft\n"
         "owners: [alice]\n"
         "sealed: true\n"
-        "source_path: legacy/widget\n"
+        "source_path: legacy/foo/\n"
         "---\n"
-        "\n"
-        "# Widget\n"
+        "# Foo\n"
         "\n"
         "## Purpose\n"
         "\n"
-        f"{purpose}\n"
+        + purpose_text
+        + "\n"
         "\n"
         "## Scope\n"
         "\n"
-        "- In scope: widget validation.\n"
-        "- Out of scope: everything else.\n"
+        "- In scope: foo.\n"
         "\n"
         "## Definitions\n"
         "\n"
@@ -97,94 +68,40 @@ def _build_repo(root, purpose_word_count):
         "\n"
         "## Change log\n"
         "\n"
-        "- Initial draft.\n"
+        "- Initial.\n"
     )
-    _write(comp / "component.md", component_md)
+    comp_dir = repo_root / "specs" / "components" / "foo"
+    _write(comp_dir / "component.md", component_md)
     _write(
-        comp / "requirements" / "R-WIDGET-001.md",
-        "# R-WIDGET-001\n\n**R-WIDGET-001** — The widget checker MUST report "
-        "invalid records.\n",
-    )
-    _write(
-        comp / "acceptance" / "AC-WIDGET-001.md",
-        "# AC-WIDGET-001\n\nCovers: R-WIDGET-001\nKind: generated-test\n\n"
-        "Given an invalid record\nWhen checked\nThen it is reported\n",
+        comp_dir / "requirements" / "R-FOO-001.md",
+        "# R-FOO-001\n\n**R-FOO-001** — Foo MUST do foo.\n",
     )
     _write(
-        comp / "constraints.md",
-        "# Constraints\n\n- None beyond the defaults.\n",
+        comp_dir / "acceptance" / "AC-FOO-001.md",
+        "# AC-FOO-001\n\nCovers: R-FOO-001\nKind: compiled\n\n"
+        "```gherkin\nGiven foo\nWhen foo runs\nThen foo happens\n```\n",
     )
-    return "specs/components/widget/component.md"
+    _write(comp_dir / "constraints.md", "# Constraints\n\nNone.\n")
+    _write(
+        repo_root / "specs" / "glossary.md",
+        "# Glossary\n\n- **Foo** — a foo.\n",
+    )
 
 
-def _purpose_findings(findings, rel):
-    out = []
-    for f in findings:
-        if _field(f, "rule_id") != "R-SIZE-004":
-            continue
-        file_val = _field(f, "file")
-        if file_val is None:
-            continue
-        if str(file_val).replace("\\", "/") == rel:
-            out.append(f)
-    return out
+def test_ac_size_004_long_purpose_without_citation_fails(tmp_path):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    _build_fixture(repo_root)
 
+    findings = size_checker.check(repo_root)
 
-class TestAcSize004(unittest.TestCase):
-    def setUp(self):
-        self.tmp = Path(tempfile.mkdtemp())
+    size4 = [f for f in findings if field(f, "rule_id") == "R-SIZE-004"]
+    assert size4, "expected an R-SIZE-004 finding, got: " + repr(findings)
 
-    def tearDown(self):
-        shutil.rmtree(self.tmp, ignore_errors=True)
+    fails = [f for f in size4 if field(f, "severity") == "fail"]
+    assert fails, "expected R-SIZE-004 to fail (not merely warn): " + repr(size4)
 
-    def _run(self, n):
-        rel = _build_repo(self.tmp, n)
-        findings = size_checker.check(self.tmp)
-        self.assertIsInstance(findings, list)
-        return _purpose_findings(findings, rel)
-
-    def test_160_word_purpose_without_citation_fails(self):
-        found = self._run(160)
-        fails = [f for f in found if _field(f, "severity") == "fail"]
-        self.assertTrue(
-            fails,
-            f"expected an R-SIZE-004 fail finding for a 160-word Purpose, got {found!r}",
-        )
-        f = fails[0]
-        self.assertIn("150", str(_field(f, "message")))
-        line = _field(f, "line")
-        self.assertIsInstance(line, int)
-        self.assertNotIsInstance(line, bool)
-        self.assertGreaterEqual(line, 1)
-        if isinstance(f, dict):
-            self.assertEqual(
-                set(f.keys()), {"rule_id", "severity", "file", "line", "message"}
-            )
-
-    def test_151_word_purpose_fails(self):
-        found = self._run(151)
-        fails = [f for f in found if _field(f, "severity") == "fail"]
-        self.assertTrue(fails, f"151 words is above 150; got {found!r}")
-        self.assertIn("150", str(_field(fails[0], "message")))
-
-    def test_150_word_purpose_warns_not_fails(self):
-        found = self._run(150)
-        fails = [f for f in found if _field(f, "severity") == "fail"]
-        warns = [f for f in found if _field(f, "severity") == "warn"]
-        self.assertEqual(fails, [], f"150 words is not above 150; got {found!r}")
-        self.assertTrue(warns, f"150 words is above 80; expected warn, got {found!r}")
-
-    def test_100_word_purpose_warns_not_fails(self):
-        found = self._run(100)
-        fails = [f for f in found if _field(f, "severity") == "fail"]
-        warns = [f for f in found if _field(f, "severity") == "warn"]
-        self.assertEqual(fails, [])
-        self.assertTrue(warns, f"100 words is above 80; expected warn, got {found!r}")
-
-    def test_80_word_purpose_has_no_finding(self):
-        found = self._run(80)
-        self.assertEqual(found, [], f"80 words is within the cap; got {found!r}")
-
-
-if __name__ == "__main__":
-    unittest.main()
+    finding = fails[0]
+    assert field(finding, "file") == "specs/components/foo/component.md"
+    assert isinstance(field(finding, "line"), int)
+    assert "150" in str(field(finding, "message"))

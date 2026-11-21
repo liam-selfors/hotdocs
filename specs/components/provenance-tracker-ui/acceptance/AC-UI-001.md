@@ -11,9 +11,10 @@ When render_tracker_ui(out_dir, repo_root) runs
 Then out_dir contains exactly one file, index.html; its
   <script type="application/json" id="tracker-snapshot"> element
   parses as JSON equal to the returned TrackerSnapshot; it contains a
-  node element with data-node-id="comp-foo"; and it contains no
-  "fetch(", no "XMLHttpRequest", no "WebAssembly", and no src= or
-  href= attribute pointing at an external resource
+  node element with data-node-id="comp-foo"; and, outside the inlined
+  text of static/app.js, it contains no "fetch(", no "XMLHttpRequest",
+  no "WebAssembly", and no src= or href= attribute pointing at an
+  external resource
 
 Given a check_readiness result whose not_ready_reasons string contains
   "</script>"

@@ -1,124 +1,86 @@
-# hotdocs-criterion: sha256:01f23876761892af48a183e72e48419b2cbe11978938fe9501480af25aaea456
+# hotdocs-criterion: sha256:dc5b8ef369782519a3db5ac1a174dd3e92460afb3710d82315bfbe26633607c4
 import json
 from pathlib import Path
 
-import pytest
-
 import provenance_writer
-
-
-COMPONENT_ID = "comp-foo"
-SLUG = "foo"
 
 
 def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def _generation_result():
+def _minimal_inputs(component_id):
+    # Every gate's own result says "no hit", so a provenance_hit of true in
+    # the manifest can only come from the caller's own ProvenanceInputs field.
     return {
-        "component_id": COMPONENT_ID,
-        "spec_bundle_hash": "sha256:" + "a" * 64,
-        "model": "claude-sonnet-5",
-        "prompt_version": "v10",
-        # Deliberately false: provenance_hit must come from ProvenanceInputs,
-        # never inferred from any gate's own cache_hit.
-        "cache_hit": False,
-        "files": {"foo.py": "def foo():\n    return 1\n"},
-        "model_call_error": None,
-        "refused": None,
-        "retry_feedback": None,
+        "component_id": component_id,
+        "generation_result": {
+            "component_id": component_id,
+            "spec_bundle_hash": "sha256:" + "0" * 64,
+            "model": "claude-sonnet-5",
+            "prompt_version": "v12",
+            "cache_hit": False,
+            "files": {},
+            "model_call_error": None,
+            "refused": None,
+            "retry_feedback": None,
+            "mode": "single",
+            "transcript_sha256": None,
+            "turns": 1,
+            "tool_calls": 0,
+            "isolation": None,
+        },
+        "verification_report": None,
+        "license_scan_result": {"cache_hit": False},
+        "secret_scan_result": {"cache_hit": False},
+        "provenance_hit": True,
+        "attempts": 1,
+        "attempt_history": [],
+        "gate_versions": {},
     }
 
 
-def _verification_report():
-    return {
-        "component_id": COMPONENT_ID,
-        "criteria": [
-            {
-                "id": "AC-FOO-001",
-                "covers": "R-FOO-001",
-                "kind": "compiled",
-                "result": "pass",
-            }
-        ],
-        "requirement_results": {"R-FOO-001": "pass"},
+def _manifest_paths(repo_root, slug):
+    return [
+        repo_root / "gen" / slug / ".provenance.json",
+        repo_root / "verification" / slug / ".provenance.json",
+    ]
+
+
+def test_ac_prov_004_provenance_hit_true_is_copied_from_inputs(tmp_path):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    component_id = "comp-foo"
+    inputs = _minimal_inputs(component_id)
+
+    provenance_writer.write_provenance(component_id, inputs, repo_root)
+
+    for path in _manifest_paths(repo_root, "foo"):
+        assert path.is_file(), "manifest not written at " + str(path)
+        manifest = json.loads(path.read_text(encoding="utf-8"))
+        assert field(manifest, "provenance_hit") is True
+
+
+def test_ac_prov_004_provenance_hit_true_with_verification_report(tmp_path):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    component_id = "comp-bar"
+    inputs = _minimal_inputs(component_id)
+    inputs["generation_result"]["files"] = {"bar.py": "x = 1\n"}
+    inputs["verification_report"] = {
+        "component_id": component_id,
+        "criteria": [],
+        "requirement_results": {},
         "interface_drift": False,
-        "mutation_score": 0.9,
+        "mutation_score": None,
         "mutation_error": None,
+        "assets": [],
         "overall": "pass",
     }
 
+    provenance_writer.write_provenance(component_id, inputs, repo_root)
 
-def _license_scan_result():
-    return {
-        "component_id": COMPONENT_ID,
-        "gate_version": "license_scanner@4.0.0-no-reference-corpus",
-        "evaluated": False,
-        "reason": "no-reference-corpus",
-        "similarity_score": None,
-        "block_threshold": None,
-        "blocked": False,
-        "matches": [],
-        "notified": False,
-        "notification_delivery_error": None,
-        "cache_hit": False,
-    }
-
-
-def _secret_scan_result():
-    return {
-        "scope": "full",
-        "gate_version": "secret_scanner@3.1.0+detect-secrets.1.5.0",
-        "flagged": False,
-        "matches": [],
-        "allowed": [],
-        "unused_allowlist_entries": [],
-        "notified": False,
-        "notification_delivery_error": None,
-        "cache_hit": False,
-    }
-
-
-def _inputs_fields():
-    return {
-        "component_id": COMPONENT_ID,
-        "generation_result": _generation_result(),
-        "verification_report": _verification_report(),
-        "license_scan_result": _license_scan_result(),
-        "secret_scan_result": _secret_scan_result(),
-        "provenance_hit": True,
-        "attempts": 1,
-        "gate_versions": {
-            "compiler": "1.0.0",
-            "license_scanner": "license_scanner@4.0.0-no-reference-corpus",
-        },
-    }
-
-
-def _build_inputs():
-    fields = _inputs_fields()
-    cls = getattr(provenance_writer, "ProvenanceInputs", None)
-    if cls is not None:
-        try:
-            return cls(**fields)
-        except TypeError:
-            pass
-    return fields
-
-
-def test_provenance_hit_true_is_written_to_manifest(tmp_path):
-    repo_root = Path(tmp_path)
-    inputs = _build_inputs()
-
-    provenance_writer.write_provenance(COMPONENT_ID, inputs, repo_root)
-
-    manifest_paths = [
-        repo_root / "gen" / SLUG / ".provenance.json",
-        repo_root / "verification" / SLUG / ".provenance.json",
-    ]
-    for manifest_path in manifest_paths:
-        assert manifest_path.is_file(), "manifest missing at " + str(manifest_path)
-        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-        assert "provenance_hit" in manifest
+    for path in _manifest_paths(repo_root, "bar"):
+        assert path.is_file(), "manifest not written at " + str(path)
+        manifest = json.loads(path.read_text(encoding="utf-8"))
         assert field(manifest, "provenance_hit") is True

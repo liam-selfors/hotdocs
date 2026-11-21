@@ -1,96 +1,70 @@
-# hotdocs-criterion: sha256:9461041486b91ab9a0d85d1990794a3348688bd2810709141b243d486bf291fb
+# hotdocs-criterion: sha256:8a4da195ede3a06fb7916fbe83072b2727ad24c8f1465c176e738bc0f47cb0ae
 import json
 import re
-from pathlib import Path
-
-import pytest
 
 import generator
+
+
+PYTHON_ADAPTER_SOURCE = (
+    "from pathlib import Path\n"
+    "\n"
+    "KIND = \"python\"\n"
+    "\n"
+    "\n"
+    "def layout_errors(code_dir):\n"
+    "    return [\"bad.py:1: SyntaxError: x\"] if (Path(code_dir) / \"bad.py\").exists() else []\n"
+    "\n"
+    "\n"
+    "def provision(repo_root):\n"
+    "    return {\"ok\": True, \"reason\": \"\", \"versions\": {\"python\": \"3.12\"}, "
+    "\"lockfile_sha256\": None, \"interpreter\": \"/fake/python\"}\n"
+)
+
+COMPONENT_MD = (
+    "---\n"
+    "id: comp-widget-maker\n"
+    "title: Widget Maker\n"
+    "status: draft\n"
+    "owners: [pipeline-team]\n"
+    "depends_on: []\n"
+    "sealed: false\n"
+    "---\n"
+    "\n"
+    "# Widget Maker\n"
+)
 
 
 def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def _write(path, text):
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text, encoding="utf-8")
-
-
-def _build_fixture(repo_root):
-    _write(
-        repo_root / "specs" / "glossary.md",
-        "# Glossary\n\n- **Foo** \u2014 a test term.\n",
-    )
-    comp = repo_root / "specs" / "components" / "foo"
-    _write(
-        comp / "component.md",
-        "---\n"
-        "id: comp-foo\n"
-        "title: Foo\n"
-        "status: draft\n"
-        "owners: [team-a]\n"
-        "sealed: false\n"
-        "depends_on: []\n"
-        "---\n"
-        "\n"
-        "# Foo\n"
-        "\n"
-        "## Purpose\n"
-        "\n"
-        "Foo doubles a number.\n",
-    )
-    _write(
-        comp / "requirements" / "R-FOO-001.md",
-        "# R-FOO-001\n\n**R-FOO-001** \u2014 `foo(x)` MUST return `2 * x`.\n",
-    )
-    _write(
-        comp / "acceptance" / "AC-FOO-001.md",
-        "# AC-FOO-001\n"
-        "\n"
-        "Covers: R-FOO-001\n"
-        "Kind: generated-test\n"
-        "\n"
-        "```gherkin\n"
-        "Given x = 2\n"
-        "When foo(x) is called\n"
-        "Then it returns 4\n"
-        "```\n",
-    )
-    _write(
-        comp / "interface" / "library.md",
-        "# Library\n\n```\nfoo(x: int) -> int\n```\n",
-    )
-    _write(comp / "constraints.md", "# Constraints\n\nNone.\n")
-
-
-def _bundle():
+def make_bundle():
     return {
-        "component_id": "comp-foo",
+        "component_id": "comp-widget-maker",
         "spec_bundle_hash": "sha256:" + "ab" * 32,
-        "spec": "# Foo\n\n## Purpose\n\nFoo doubles a number.\n\n# R-FOO-001\n\n**R-FOO-001** \u2014 `foo(x)` MUST return `2 * x`.",
-        "interface": "# Library\n\n```\nfoo(x: int) -> int\n```",
-        "constraints": "# Constraints\n\nNone.",
+        "spec": "Widget Maker makes widgets.",
+        "interface": "make_widget() -> str",
+        "constraints": "None.",
         "dependency_interfaces": {},
         "dependency_context": {},
         "dependency_usage": {},
         "vars": {},
-        "glossary": "# Glossary\n\n- **Foo** \u2014 a test term.",
+        "glossary": "",
         "hint_code": None,
     }
 
 
-def _make_backend(log_path):
+def make_mock_backend(log_path):
     def backend(prompt, model, **params):
         with open(log_path, "a", encoding="utf-8") as fh:
             fh.write(json.dumps({"model": model}) + "\n")
-        m = re.search(r"BEGIN FILE ([0-9a-f]{32})", prompt)
-        nonce = m.group(1) if m else ""
+        nonce = re.search(r"-----BEGIN FILE ([0-9a-f]{32}):", prompt).group(1)
         text = (
-            "-----BEGIN FILE " + nonce + ": foo.py-----\n"
-            "def foo(x):\n"
-            "    return 2 * x\n"
+            "-----BEGIN FILE " + nonce + ": widget_maker.py-----\n"
+            "def make_widget():\n"
+            "    return \"widget\"\n"
             "-----END FILE " + nonce + "-----\n"
+            "-----END REPLY " + nonce + "-----\n"
         )
         return {
             "text": text,
@@ -102,35 +76,38 @@ def _make_backend(log_path):
     return backend
 
 
-def test_model_identifier_passed_through_unchanged(tmp_path, monkeypatch):
+def test_ac_gen_004_model_identifier_passed_through(tmp_path, monkeypatch):
     monkeypatch.delenv("VAR_CACHE_STORE_URL", raising=False)
+
     repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    _build_fixture(repo_root)
-    monkeypatch.chdir(repo_root)
+    adapter_dir = repo_root / "gen" / "kind-python"
+    adapter_dir.mkdir(parents=True)
+    (adapter_dir / "kind_python.py").write_text(PYTHON_ADAPTER_SOURCE, encoding="utf-8")
 
-    log_path = tmp_path / "model_calls.log"
-    backend = _make_backend(log_path)
+    comp_dir = repo_root / "specs" / "components" / "widget-maker"
+    comp_dir.mkdir(parents=True)
+    (comp_dir / "component.md").write_text(COMPONENT_MD, encoding="utf-8")
 
-    model_a = "anthropic:test-model-alpha-ac-gen-004"
-    model_b = "ollama:test-model-beta-ac-gen-004"
-    bundle = _bundle()
+    log_path = tmp_path / "mock_calls.log"
+    backend = make_mock_backend(log_path)
+
+    bundle = make_bundle()
+    model_a = "test-model-alpha-7781"
+    model_b = "test-model-beta-4412"
 
     result_a = generator.generate(bundle, model_a, repo_root=repo_root, llm_backend=backend)
     result_b = generator.generate(bundle, model_b, repo_root=repo_root, llm_backend=backend)
 
-    for result in (result_a, result_b):
-        assert field(result, "refused") is None
-        assert field(result, "model_call_error") is None
-        assert field(result, "cache_hit") is False
+    assert field(result_a, "model_call_error") is None
+    assert field(result_b, "model_call_error") is None
+    assert field(result_a, "refused") is None
+    assert field(result_b, "refused") is None
+    assert field(result_a, "cache_hit") is False
+    assert field(result_b, "cache_hit") is False
 
-    assert log_path.exists(), "mock model was never called"
-    recorded = [
-        json.loads(line)["model"]
-        for line in log_path.read_text(encoding="utf-8").splitlines()
-        if line.strip()
-    ]
-    assert recorded == [model_a, model_b]
-
-    assert field(result_a, "model") == model_a
-    assert field(result_b, "model") == model_b
+    lines = [l for l in log_path.read_text(encoding="utf-8").splitlines() if l.strip()]
+    assert len(lines) == 2
+    recorded = [json.loads(l)["model"] for l in lines]
+    assert recorded[0] == model_a
+    assert recorded[1] == model_b
+    assert recorded[0] != recorded[1]

@@ -1,195 +1,160 @@
-# hotdocs-criterion: sha256:e80ed4e20086f353708d8b57504214f0b57e898ece05d67abe642766ffbb0ca1
-import json
-from pathlib import Path
+# hotdocs-criterion: sha256:1dc0c662c86357a9954c0b2d0f4102b1cb3e156a740af197a3115e436aa2e510
+"""AC-LINT-016: a unit file carrying YAML frontmatter is a fail-severity
+finding for rule R-LINT-016."""
 
-import pytest
+from pathlib import Path
 
 import spec_linter
 
 
-def _get(value, name, default=None):
-    if isinstance(value, dict):
-        return value.get(name, default)
-    return getattr(value, name, default)
+def field(value, name):
+    return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def _write(path: Path, text: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text, encoding="utf-8")
+COMPONENT_MD = (
+    "---\n"
+    "id: comp-foo\n"
+    "title: Foo\n"
+    "status: draft\n"
+    "owners: [pipeline-team]\n"
+    "depends_on: []\n"
+    "sealed: true\n"
+    "source_path: legacy/foo/\n"
+    "---\n"
+    "\n"
+    "# Foo\n"
+    "\n"
+    "## Purpose\n"
+    "\n"
+    "Foo does one small thing for testing the linter.\n"
+    "\n"
+    "## Scope\n"
+    "\n"
+    "- In scope: the one small thing.\n"
+    "- Out of scope: everything else.\n"
+    "\n"
+    "## Definitions\n"
+    "\n"
+    "None.\n"
+    "\n"
+    "## Behavior\n"
+    "\n"
+    "See `requirements/`.\n"
+    "\n"
+    "## Interfaces\n"
+    "\n"
+    "See `interface/`.\n"
+    "\n"
+    "## Data\n"
+    "\n"
+    "See `interface/data/`.\n"
+    "\n"
+    "## Acceptance criteria\n"
+    "\n"
+    "See `acceptance/`.\n"
+    "\n"
+    "## Non-functional constraints\n"
+    "\n"
+    "See `constraints.md`.\n"
+    "\n"
+    "## Open questions\n"
+    "\n"
+    "## Change log\n"
+    "\n"
+    "- Initial draft.\n"
+)
+
+REQUIREMENT_BODY = (
+    "# R-FOO-001\n"
+    "\n"
+    "**R-FOO-001** — Foo MUST do the one small thing.\n"
+)
+
+REQUIREMENT_WITH_FRONTMATTER = (
+    "---\n"
+    "id: R-FOO-001\n"
+    "title: Do the thing\n"
+    "status: draft\n"
+    "---\n"
+    "\n"
+) + REQUIREMENT_BODY
+
+ACCEPTANCE_MD = (
+    "# AC-FOO-001\n"
+    "\n"
+    "Covers: R-FOO-001\n"
+    "Kind: compiled\n"
+    "\n"
+    "```gherkin\n"
+    "Given foo\n"
+    "When it runs\n"
+    "Then it does the one small thing\n"
+    "```\n"
+)
+
+CONSTRAINTS_MD = (
+    "# Constraints\n"
+    "\n"
+    "None.\n"
+)
+
+GLOSSARY_MD = (
+    "# Glossary\n"
+    "\n"
+    "- **Foo** — the component under test.\n"
+)
 
 
-COMPONENT_MD = """---
-id: comp-foo
-title: Foo
-status: draft
-owners: [alice]
-sealed: true
-source_path: legacy/foo
----
-
-# Foo
-
-## Purpose
-
-Foo does one small thing for the test fixture.
-
-## Scope
-
-- In scope: foo.
-- Out of scope: everything else.
-
-## Definitions
-
-None.
-
-## Behavior
-
-See `requirements/`.
-
-## Interfaces
-
-See `interface/`.
-
-## Data
-
-See `interface/data/`.
-
-## Acceptance criteria
-
-See `acceptance/`.
-
-## Non-functional constraints
-
-See `constraints.md`.
-
-## Open questions
-
-## Change log
-
-- Initial draft.
-"""
-
-REQUIREMENT_BODY = """# R-FOO-001
-
-**R-FOO-001** — The component MUST do foo.
-"""
-
-REQUIREMENT_WITH_FRONTMATTER = """---
-id: R-FOO-001
-title: Foo requirement
-status: draft
----
-
-""" + REQUIREMENT_BODY
-
-ACCEPTANCE_MD = """# AC-FOO-001
-
-Covers: R-FOO-001
-Kind: generated-test
-
-```gherkin
-Given foo
-When foo runs
-Then foo happens
-```
-"""
-
-CONSTRAINTS_MD = """# Constraints
-
-- None beyond the defaults.
-"""
-
-GLOSSARY_MD = """# Glossary
-
-- **Foo** — a test fixture term.
-"""
+def build_corpus(repo_root: Path, requirement_text: str) -> None:
+    specs = repo_root / "specs"
+    comp = specs / "components" / "foo"
+    (comp / "requirements").mkdir(parents=True)
+    (comp / "acceptance").mkdir(parents=True)
+    (comp / "interface").mkdir(parents=True)
+    (specs / "product").mkdir(parents=True)
+    (specs / "architecture").mkdir(parents=True)
+    (specs / "vars").mkdir(parents=True)
+    (specs / "decisions").mkdir(parents=True)
+    (specs / "glossary.md").write_text(GLOSSARY_MD)
+    (comp / "component.md").write_text(COMPONENT_MD)
+    (comp / "requirements" / "R-FOO-001.md").write_text(requirement_text)
+    (comp / "acceptance" / "AC-FOO-001.md").write_text(ACCEPTANCE_MD)
+    (comp / "constraints.md").write_text(CONSTRAINTS_MD)
 
 
-def _build_corpus(root: Path, requirement_text: str) -> Path:
-    comp = root / "specs" / "components" / "foo"
-    _write(comp / "component.md", COMPONENT_MD)
-    _write(comp / "requirements" / "R-FOO-001.md", requirement_text)
-    _write(comp / "acceptance" / "AC-FOO-001.md", ACCEPTANCE_MD)
-    _write(comp / "constraints.md", CONSTRAINTS_MD)
-    _write(root / "specs" / "glossary.md", GLOSSARY_MD)
-    return root
-
-
-def _findings(report):
-    findings = _get(report, "findings", None)
-    assert findings is not None, "LintReport has no findings field"
-    return list(findings)
-
-
-def _norm(path_value) -> str:
-    return str(path_value).replace("\\", "/")
-
-
-def _r016_findings(findings):
-    return [f for f in findings if _get(f, "rule_id") == "R-LINT-016"]
+def lint016_fail_findings(report):
+    return [
+        f
+        for f in field(report, "findings")
+        if field(f, "rule_id") == "R-LINT-016" and field(f, "severity") == "fail"
+    ]
 
 
 def test_requirement_file_with_frontmatter_fails_r_lint_016(tmp_path):
-    root = _build_corpus(tmp_path / "repo", REQUIREMENT_WITH_FRONTMATTER)
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    build_corpus(repo_root, REQUIREMENT_WITH_FRONTMATTER)
 
-    report = spec_linter.lint(None, root)
-    findings = _findings(report)
+    report = spec_linter.lint(None, repo_root)
 
-    r016 = _r016_findings(findings)
-    assert r016, (
-        "expected an R-LINT-016 finding for frontmatter in a requirement unit "
-        f"file; got rules {[_get(f, 'rule_id') for f in findings]}"
+    hits = lint016_fail_findings(report)
+    assert hits, "expected a fail-severity R-LINT-016 finding, got: " + repr(
+        [(field(f, "rule_id"), field(f, "severity"), field(f, "file")) for f in field(report, "findings")]
     )
-
-    on_requirement = [
-        f for f in r016
-        if _norm(_get(f, "file", "")).endswith("requirements/R-FOO-001.md")
-    ]
-    assert on_requirement, (
-        "expected the R-LINT-016 finding to name requirements/R-FOO-001.md; "
-        f"got files {[_get(f, 'file') for f in r016]}"
+    assert any(
+        str(field(f, "file")).replace("\\", "/").endswith("requirements/R-FOO-001.md")
+        for f in hits
+    ), "R-LINT-016 finding should name the requirement file: " + repr(
+        [field(f, "file") for f in hits]
     )
-    assert any(_get(f, "severity") == "fail" for f in on_requirement), (
-        "expected R-LINT-016 finding to have fail severity; got "
-        f"{[_get(f, 'severity') for f in on_requirement]}"
-    )
-
-    hard_failures = _get(report, "hard_failures", None)
-    if hard_failures is None:
-        summary = _get(report, "summary", None)
-        if summary is not None:
-            hard_failures = _get(summary, "hard_failures", None)
-    if hard_failures is not None:
-        assert hard_failures >= 1
+    assert field(report, "hard_failures") >= 1
 
 
-def test_component_md_frontmatter_and_clean_unit_files_not_flagged(tmp_path):
-    root = _build_corpus(tmp_path / "repo", REQUIREMENT_BODY)
+def test_requirement_file_without_frontmatter_has_no_r_lint_016(tmp_path):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    build_corpus(repo_root, REQUIREMENT_BODY)
 
-    report = spec_linter.lint(None, root)
-    findings = _findings(report)
+    report = spec_linter.lint(None, repo_root)
 
-    r016 = _r016_findings(findings)
-    assert not r016, (
-        "no unit file carries frontmatter (only component.md does), so "
-        f"R-LINT-016 must not fire; got {[(_get(f, 'file'), _get(f, 'message')) for f in r016]}"
-    )
-
-
-def test_cli_reports_r_lint_016_and_exits_1(tmp_path, capsys):
-    root = _build_corpus(tmp_path / "repo", REQUIREMENT_WITH_FRONTMATTER)
-
-    code = spec_linter.main(["--format=json", "--repo-root=" + str(root)])
-    out = capsys.readouterr().out
-
-    assert code == 1, f"expected exit code 1 for a fail-severity finding, got {code}"
-
-    data = json.loads(out)
-    findings = data.get("findings", []) if isinstance(data, dict) else []
-    r016 = [
-        f for f in findings
-        if f.get("rule_id") == "R-LINT-016"
-        and f.get("severity") == "fail"
-        and _norm(f.get("file", "")).endswith("requirements/R-FOO-001.md")
-    ]
-    assert r016, f"expected a fail-severity R-LINT-016 finding in JSON output; got {findings}"
+    assert not lint016_fail_findings(report)

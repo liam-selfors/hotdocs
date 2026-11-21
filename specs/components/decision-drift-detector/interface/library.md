@@ -16,3 +16,5 @@ exactly once.
 forward-looking question — usable on a decision before it is ever
 ratified — by walking `edges` backward from `decision_id` and
 collecting every live citation of it, unfiltered by staleness.
+
+Implements: `specs/architecture/cli-conventions.md`

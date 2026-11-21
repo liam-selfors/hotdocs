@@ -18,5 +18,6 @@
   "pass"|"fail"` string mapping** (`D95`, `AttemptRecord.md`). An
   `R-id` it marks `"fail"` is left out when every entry of
   `verification.criteria` that covers it and whose `result` is not
-  `"pass"` has `failure_origin` `"test"`: no test could be written for
-  it, so it is no feedback for the next generation (`D319`).
+  `"pass"` has `failure_origin` `"test"` or `"environment"`: no test
+  could be written or run for it, so it is no feedback for the next
+  generation (`D319`, `D343`).

@@ -1,209 +1,219 @@
-"""citation-checker: checks that every citation in a spec corpus resolves.
+"""Citation checker: verifies that every citation in a spec corpus resolves."""
 
-Covers decision-number citations, section pointers into other files,
-glossary citations, and the ``supersedes`` / ``builds_on`` links between
-decision records (R-CITE-001 .. R-CITE-005).
-"""
-
-import hashlib
 import importlib.util
 import re
 import sys
 from pathlib import Path
 
-_D_CITE = re.compile(r"\bD(\d+)\b")
-_POINTER = re.compile(r"`([^`]+)`'s\s+\"([^\"]+)\"\s+section")
-_GLOSSARY_CITE = re.compile(r"the\s+glossary's\s+\"([^\"]*)\"")
-_GLOSSARY_ENTRY = re.compile(r"^- \*\*(.+?)\*\*", re.MULTILINE)
-_HEADING = re.compile(r"^#+[ \t]+(.*?)[ \t]*$", re.MULTILINE)
-_FROZEN = re.compile(r"D(\d+)")
+_DEP_SLUG = "corpus-loader"
+_DEP_MODULE = "corpus_loader"
+
+_D_CITE_RE = re.compile(r"(?<![A-Za-z0-9_\-])D(\d+)(?![A-Za-z0-9_])")
+_POINTER_RE = re.compile(r"`([^`]+)`'s\s+\"([^\"]+)\"\s+section")
+_GLOSSARY_CITE_RE = re.compile(r"the\s+glossary's\s+\"([^\"]*)\"")
+_GLOSSARY_HEADER_RE = re.compile(r"^- \*\*(.+?)\*\*")
+_HEADING_RE = re.compile(r"^#+\s+(.*)$")
+_D_ID_RE = re.compile(r"^D(\d+)$")
 
 
 def _get(obj, name):
     if isinstance(obj, dict):
-        return obj.get(name)
-    return getattr(obj, name, None)
+        return obj[name]
+    return getattr(obj, name)
 
 
 def _tool_root():
-    for parent in Path(__file__).resolve().parents:
+    here = Path(__file__).resolve()
+    for parent in here.parents:
         if parent.name == "gen":
             return parent.parent
+    return here.parent
 
 
-def _load_dependency(repo_root, slug, module_name):
-    base = repo_root / "gen" / slug
-    if not base.is_dir():
-        base = _tool_root() / "gen" / slug
-    digest = hashlib.sha256(str(base.resolve()).encode("utf-8")).hexdigest()[:16]
-    load_name = f"_citation_checker__{module_name}_{digest}"
-    flat = base / f"{module_name}.py"
+def _load_dependency(repo_root):
+    dep_dir = repo_root / "gen" / _DEP_SLUG
+    if not dep_dir.is_dir():
+        dep_dir = _tool_root() / "gen" / _DEP_SLUG
+    flat = dep_dir / f"{_DEP_MODULE}.py"
     if flat.is_file():
-        spec = importlib.util.spec_from_file_location(load_name, flat)
+        spec = importlib.util.spec_from_file_location(_DEP_MODULE, flat)
     else:
-        pkg = base / module_name
+        pkg = dep_dir / _DEP_MODULE
         spec = importlib.util.spec_from_file_location(
-            load_name, pkg / "__init__.py", submodule_search_locations=[str(pkg)]
+            _DEP_MODULE, pkg / "__init__.py", submodule_search_locations=[str(pkg)]
         )
     module = importlib.util.module_from_spec(spec)
-    sys.modules[load_name] = module
+    sys.modules[_DEP_MODULE] = module
     spec.loader.exec_module(module)
     return module
 
 
-def _finding(rule_id, rel, line, message):
+def _exempt(value):
+    m = _D_ID_RE.match(value)
+    return bool(m) and 1 <= int(m.group(1)) <= 14
+
+
+def _finding(rule_id, file, line, message):
     return {
         "rule_id": rule_id,
         "severity": "fail",
-        "file": rel,
+        "file": file,
         "line": line,
         "message": message,
     }
 
 
-def _line_of(text, pos):
-    return text.count("\n", 0, pos) + 1
-
-
 def _field_line(text, field):
-    for number, line in enumerate(text.splitlines(), 1):
+    for i, line in enumerate(text.splitlines()):
         if line.startswith(field + ":"):
-            return number
+            return i + 1
     return 1
 
 
-def _frozen(value):
-    m = _FROZEN.fullmatch(value)
-    return bool(m) and 1 <= int(m.group(1)) <= 14
-
-
 def _as_list(value):
-    if value is None:
-        return []
     if isinstance(value, list):
         return value
     return [value]
 
 
-def _decision_key(value):
-    return f"specs/decisions/{value}.md"
+def _headings(text):
+    found = set()
+    for line in text.splitlines():
+        m = _HEADING_RE.match(line)
+        if m:
+            found.add(m.group(1).strip())
+    return found
 
 
-def _glossary_terms(repo_root):
+def _glossary_headers(repo_root):
     path = repo_root / "specs" / "glossary.md"
-    if not path.is_file():
-        return set()
-    text = path.read_text(encoding="utf-8")
-    return {" ".join(m.group(1).split()) for m in _GLOSSARY_ENTRY.finditer(text)}
+    headers = set()
+    if path.is_file():
+        for line in path.read_text(encoding="utf-8").splitlines():
+            m = _GLOSSARY_HEADER_RE.match(line)
+            if m:
+                headers.add(" ".join(m.group(1).split()))
+    return headers
 
 
-def _headings(path):
-    text = path.read_text(encoding="utf-8")
-    return {m.group(1) for m in _HEADING.finditer(text)}
+def _decision_exists(repo_root, value):
+    return (repo_root / "specs" / "decisions" / f"{value}.md").is_file()
 
 
-def _check_live(repo_root, rel, text, decisions, glossary_terms):
-    findings = []
-    for m in _D_CITE.finditer(text):
-        cited = m.group(0)
-        if _frozen(cited):
+def _check_live(repo_root, rel, text, body, glossary, findings):
+    offset = max(0, len(text.splitlines()) - len(body.split("\n")))
+
+    def line_at(pos):
+        return offset + body.count("\n", 0, pos) + 1
+
+    for m in _D_CITE_RE.finditer(body):
+        value = f"D{m.group(1)}"
+        if _exempt(value) or _decision_exists(repo_root, value):
             continue
-        if _decision_key(cited) not in decisions:
-            findings.append(_finding(
-                "R-CITE-001", rel, _line_of(text, m.start()),
-                f"{cited} does not resolve to {_decision_key(cited)}",
-            ))
-    for m in _POINTER.finditer(text):
+        findings.append(_finding(
+            "R-CITE-001", rel, line_at(m.start()),
+            f"citation {value} does not resolve to specs/decisions/{value}.md",
+        ))
+
+    for m in _POINTER_RE.finditer(body):
         target = re.sub(r"\s+", "", m.group(1))
         if target.startswith("<"):
             continue
         section = m.group(2)
         path = repo_root / target
-        line = _line_of(text, m.start())
         if not path.is_file():
             findings.append(_finding(
-                "R-CITE-002", rel, line,
-                f"pointer to {target}'s \"{section}\" section: file {target} does not exist",
+                "R-CITE-002", rel, line_at(m.start()),
+                f"pointer to {target}: file does not exist",
             ))
-        elif section not in _headings(path):
+        elif section not in _headings(path.read_text(encoding="utf-8")):
             findings.append(_finding(
-                "R-CITE-002", rel, line,
-                f"pointer to {target}'s \"{section}\" section: no heading \"{section}\" in {target}",
+                "R-CITE-002", rel, line_at(m.start()),
+                f"pointer to {target}: no heading \"{section}\"",
             ))
-    for m in _GLOSSARY_CITE.finditer(text):
-        raw = m.group(1)
-        if not raw[:1].isalnum():
+
+    for m in _GLOSSARY_CITE_RE.finditer(body):
+        term = " ".join(m.group(1).split())
+        if term[-1:] in (",", ".", ";", ":"):
+            term = term[:-1]
+        if not term[:1].isalnum():
             continue
-        term = raw[:-1] if raw[-1] in ",.;:" else raw
-        term = " ".join(term.split())
-        if term not in glossary_terms:
+        if term not in glossary:
             findings.append(_finding(
-                "R-CITE-003", rel, _line_of(text, m.start()),
-                f"the glossary's \"{term}\" does not resolve to an entry in specs/glossary.md",
+                "R-CITE-003", rel, line_at(m.start()),
+                f"glossary citation \"{term}\" does not resolve to a glossary entry",
             ))
-    return findings
 
 
-def _check_decision(doc, rel, text, decisions, superseders):
-    findings = []
-    fm = _get(doc, "frontmatter")
-    for value in _as_list(_get(fm, "supersedes")):
-        if _frozen(value):
-            continue
-        target = decisions.get(_decision_key(value))
+def _check_decision(repo_root, rel, text, fm, decisions_by_rel, findings):
+    if "supersedes" in fm:
         line = _field_line(text, "supersedes")
-        if target is None:
-            findings.append(_finding(
-                "R-CITE-004", rel, line,
-                f"supersedes {value}, which does not resolve to {_decision_key(value)}",
-            ))
-        else:
-            status = _get(_get(target, "frontmatter"), "status")
+        for value in _as_list(fm["supersedes"]):
+            value = str(value)
+            if not _D_ID_RE.match(value) or _exempt(value):
+                continue
+            target_rel = f"specs/decisions/{value}.md"
+            if not _decision_exists(repo_root, value):
+                findings.append(_finding(
+                    "R-CITE-004", rel, line,
+                    f"supersedes {value} does not resolve to {target_rel}",
+                ))
+                continue
+            target = decisions_by_rel.get(target_rel)
+            status = _get(target, "frontmatter").get("status") if target is not None else None
             if status != "deprecated":
                 findings.append(_finding(
                     "R-CITE-004", rel, line,
-                    f"supersedes {value}, whose status is {status!r}, not 'deprecated'",
+                    f"supersedes {value}, but {target_rel} is not status: deprecated",
                 ))
-    if _get(fm, "status") == "deprecated":
-        named_by = [s for s in superseders.get(Path(rel).stem, []) if s != rel]
-        if not named_by:
+
+    if "builds_on" in fm:
+        line = _field_line(text, "builds_on")
+        for value in _as_list(fm["builds_on"]):
+            value = str(value)
+            if _exempt(value) or _decision_exists(repo_root, value):
+                continue
             findings.append(_finding(
-                "R-CITE-004", rel, _field_line(text, "status"),
-                "status is deprecated but no other decision's supersedes names it",
+                "R-CITE-005", rel, line,
+                f"builds_on {value} does not resolve to specs/decisions/{value}.md",
             ))
-    for value in _as_list(_get(fm, "builds_on")):
-        if _frozen(value):
-            continue
-        if _decision_key(value) not in decisions:
-            findings.append(_finding(
-                "R-CITE-005", rel, _field_line(text, "builds_on"),
-                f"builds_on {value}, which does not resolve to {_decision_key(value)}",
-            ))
-    return findings
 
 
 def check(repo_root):
     repo_root = Path(repo_root)
-    loader = _load_dependency(repo_root, "corpus-loader", "corpus_loader")
+    loader = _load_dependency(repo_root)
     corpus = loader.load_corpus(repo_root)
-    docs = _get(corpus, "docs")
-    decisions = {
-        _get(doc, "rel_path"): doc
-        for doc in docs
-        if _get(doc, "doc_type") == "decision"
-    }
-    superseders = {}
-    for rel, doc in decisions.items():
-        for value in _as_list(_get(_get(doc, "frontmatter"), "supersedes")):
-            superseders.setdefault(value, []).append(rel)
-    glossary_terms = _glossary_terms(repo_root)
+    docs = list(_get(corpus, "docs"))
+    glossary = _glossary_headers(repo_root)
+
+    decisions = [d for d in docs if _get(d, "doc_type") == "decision"]
+    decisions_by_rel = {_get(d, "rel_path"): d for d in decisions}
+
+    superseded_by = {}
+    for d in decisions:
+        fm = _get(d, "frontmatter")
+        if "supersedes" in fm:
+            for value in _as_list(fm["supersedes"]):
+                superseded_by.setdefault(str(value), set()).add(_get(d, "rel_path"))
 
     findings = []
     for doc in docs:
         rel = _get(doc, "rel_path")
         text = Path(_get(doc, "path")).read_text(encoding="utf-8")
-        if _get(doc, "doc_type") == "decision":
-            findings.extend(_check_decision(doc, rel, text, decisions, superseders))
-        else:
-            findings.extend(_check_live(repo_root, rel, text, decisions, glossary_terms))
+        body = _get(doc, "body")
+        fm = _get(doc, "frontmatter")
+        if _get(doc, "doc_type") != "decision":
+            _check_live(repo_root, rel, text, body, glossary, findings)
+            continue
+        _check_decision(repo_root, rel, text, fm, decisions_by_rel, findings)
+        if fm.get("status") == "deprecated":
+            stem = Path(rel).stem
+            others = superseded_by.get(stem, set()) - {rel}
+            if not others:
+                findings.append(_finding(
+                    "R-CITE-004", rel, _field_line(text, "status"),
+                    f"{stem} is status: deprecated but no other decision supersedes it",
+                ))
+
+    findings.sort(key=lambda f: f["file"])
     return findings

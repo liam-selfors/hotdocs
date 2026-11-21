@@ -1,619 +1,420 @@
-# hotdocs-criterion: sha256:b0c0b9d6c57a078703776118106a1cbd294c23423b25b69e5cc8a2d213b836e6
+# hotdocs-criterion: sha256:403168a8d83d561d46647ca15937f507ad3091d7b57b0589af9d81546ca3ba0d
 import json
-import os
-from pathlib import Path
 
 import pytest
 
 import component_gate_runner
 
 
-LOG_ENV = "GATE010_LOG_DIR"
+LOG_ENV = "CGR_AC_GATE_010_LOG"
+
+GATE_VERSIONS = {
+    "compiler": "criterion-compiler@1.0.0",
+    "generated_test": "generated_test@1.0.0",
+    "verifier": "verifier-orchestrator@2.0.0",
+    "license_scanner": "license_scanner@4.0.0-no-reference-corpus",
+    "secret_scanner": "secret_scanner@0.0.0",
+    "generator": "generator@3.0.0+v11",
+}
+
+ASSETS = [
+    {
+        "kind": "python",
+        "path": ".",
+        "definition_sha256": None,
+        "adapter_sha256": "sha256:ab",
+        "versions": {"python": "3.12.4"},
+        "lockfile_sha256": None,
+    }
+]
+
+VERIFICATION_REPORT = {
+    "component_id": "comp-foo",
+    "criteria": [
+        {"id": "AC-FOO-001", "covers": "R-FOO-001", "kind": "compiled", "result": "pass"}
+    ],
+    "requirement_results": {"R-FOO-001": "pass"},
+    "interface_drift": False,
+    "mutation_score": 0.9,
+    "mutation_error": None,
+    "assets": ASSETS,
+    "overall": "pass",
+}
+
+GENERATION_RESULT = {
+    "component_id": "comp-foo",
+    "spec_bundle_hash": "sha256:ab",
+    "model": "m",
+    "prompt_version": "v1",
+    "cache_hit": False,
+    "files": {"foo.py": "X = 1\n"},
+    "model_call_error": None,
+    "refused": None,
+    "retry_feedback": None,
+    "mode": "single",
+    "transcript_sha256": None,
+    "turns": 1,
+    "tool_calls": 0,
+    "isolation": None,
+}
+
+LOOP_RESULT = {
+    "passed": True,
+    "stop_reason": "passed",
+    "attempts": [
+        {
+            "number": 1,
+            "outcome": "passed",
+            "retry_feedback": [],
+            "error_category": None,
+            "surface_ok": True,
+            "overall": "pass",
+            "failed_requirements": [],
+            "transcript_sha256": None,
+            "reauthored_tests": [],
+        }
+    ],
+    "generation_result": GENERATION_RESULT,
+    "verification_report": VERIFICATION_REPORT,
+    "surface_report": {"ok": True, "findings": []},
+}
+
+LICENSE_RESULT = {
+    "component_id": "comp-foo",
+    "gate_version": "license_scanner@4.0.0-no-reference-corpus",
+    "evaluated": False,
+    "reason": "no-reference-corpus",
+    "similarity_score": None,
+    "block_threshold": None,
+    "blocked": False,
+    "matches": [],
+    "notified": False,
+    "notification_delivery_error": None,
+    "cache_hit": False,
+}
+
+SECRET_RESULT = {
+    "scope": "full",
+    "gate_version": "secret_scanner@0.0.0",
+    "flagged": False,
+    "matches": [],
+    "allowed": [],
+    "unused_allowlist_entries": [],
+    "notified": False,
+    "notification_delivery_error": None,
+    "cache_hit": False,
+}
+
+SPEC_BUNDLE = {
+    "component_id": "comp-foo",
+    "spec_bundle_hash": "sha256:ab",
+    "spec": "",
+    "interface": "",
+    "constraints": "",
+    "dependency_interfaces": {},
+    "dependency_context": {},
+    "dependency_usage": {},
+    "vars": {},
+    "glossary": "",
+    "hint_code": None,
+}
+
+ATTEMPT_RECORD = {
+    "attempt_id": "2026-01-01T00:00:00Z-a1b2c3",
+    "component_id": "comp-foo",
+    "timestamp": "2026-01-01T00:00:00Z",
+    "spec_bundle_hash": "sha256:ab",
+    "generation": GENERATION_RESULT,
+    "verification": VERIFICATION_REPORT,
+}
+
+HEADER = (
+    "import json\n"
+    "import os\n"
+    "\n"
+    "\n"
+    "def _log(fn, **kw):\n"
+    "    rec = dict(kw)\n"
+    "    rec['fn'] = fn\n"
+    "    with open(os.environ[" + repr(LOG_ENV) + "], 'a') as f:\n"
+    "        f.write(json.dumps(rec, default=str) + '\\n')\n"
+    "\n"
+    "\n"
+)
 
 
-def field(value, name):
-    return value[name] if isinstance(value, dict) else getattr(value, name)
+def _provenance_checker_src():
+    return (
+        HEADER
+        + "class _Key:\n"
+        + "    def __init__(self):\n"
+        + "        self.spec_bundle_hash = 'sha256:ab'\n"
+        + "        self.gate_versions = " + repr(GATE_VERSIONS) + "\n"
+        + "        self.assets = " + repr(ASSETS) + "\n"
+        + "\n\n"
+        + "def current_sealed_key(component_id, repo_root):\n"
+        + "    _log('current_sealed_key', component_id=component_id)\n"
+        + "    return None\n"
+        + "\n\n"
+        + "def current_provenance_key(component_id, repo_root):\n"
+        + "    _log('current_provenance_key', component_id=component_id)\n"
+        + "    return _Key()\n"
+        + "\n\n"
+        + "def check_provenance(component_id, spec_bundle_hash, gate_versions, repo_root):\n"
+        + "    _log('check_provenance', component_id=component_id)\n"
+        + "    return {'hit': False, 'reason': 'no manifest', 'verification_report': None,\n"
+        + "            'license_scan': None, 'secret_scan': None}\n"
+        + "\n\n"
+        + "def check_sealed_provenance(component_id, repo_root):\n"
+        + "    _log('check_sealed_provenance', component_id=component_id)\n"
+        + "    return {'hit': False, 'sealed': False, 'reason': 'not_sealed',\n"
+        + "            'verification_report': None, 'license_scan': None, 'secret_scan': None,\n"
+        + "            'owners': None, 'source_hash': None, 'written_at': None}\n"
+    )
 
 
-def write(path, text):
-    path = Path(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text, encoding="utf-8")
+def _spec_bundle_assembler_src():
+    return (
+        HEADER
+        + "def assemble(component_id, repo_root, mode='cold'):\n"
+        + "    _log('assemble', component_id=component_id, mode=mode)\n"
+        + "    return dict(" + repr(SPEC_BUNDLE) + ")\n"
+        + "\n\n"
+        + "def assemble_criterion(component_id, criterion_id, repo_root):\n"
+        + "    _log('assemble_criterion', component_id=component_id)\n"
+        + "    return {'component_id': component_id, 'criterion_id': criterion_id,\n"
+        + "            'covers': 'R-FOO-001', 'criterion_text': '', 'requirement_text': '',\n"
+        + "            'interface': '', 'glossary': '', 'dependency_interfaces': {}, 'testing': ''}\n"
+    )
 
 
-def write_fake(repo_root, slug, source):
-    module_name = slug.replace("-", "_")
-    write(Path(repo_root) / "gen" / slug / (module_name + ".py"), source)
+def _generation_loop_src():
+    return (
+        HEADER
+        + "RETRIED_CATEGORIES = ('truncated_response', 'missing_module', 'empty_response',\n"
+        + "                      'agent_budget_exhausted', 'agent_unfinished', 'undecodable_file',\n"
+        + "                      'missing_asset', 'malformed_layout')\n"
+        + "\n\n"
+        + "def run_attempts(component_id, bundle, repo_root, model, *, mode='single',\n"
+        + "                 max_attempts=3, retry_feedback=None, seed=0, llm_backend=None,\n"
+        + "                 allow_unisolated_exec=False, on_attempt=None):\n"
+        + "    _log('run_attempts', component_id=component_id, model=model, mode=mode,\n"
+        + "         max_attempts=max_attempts, max_attempts_type=type(max_attempts).__name__)\n"
+        + "    return " + repr(LOOP_RESULT) + "\n"
+        + "\n\n"
+        + "def make_closures(model, seed, repo_root, llm_backend=None):\n"
+        + "    _log('make_closures', model=model)\n"
+        + "    def test_author(bundle):\n"
+        + "        return {'model_call_error': None, 'file': None}\n"
+        + "    def judge(bundle):\n"
+        + "        return {'result': 'pass', 'rationale': None}\n"
+        + "    return (test_author, judge)\n"
+    )
 
 
-GLOSSARY = "# Glossary\n\n- **Foo** \u2014 a test term.\n"
+def _provenance_tracker_src():
+    return (
+        HEADER
+        + "def write_attempt_record(component_id, generation_result, verification_report,\n"
+        + "                         spec_bundle_hash, repo_root):\n"
+        + "    _log('write_attempt_record', component_id=component_id)\n"
+        + "    return " + repr(ATTEMPT_RECORD) + "\n"
+        + "\n\n"
+        + "def check_readiness(repo_root, changed_ids=None, model=None, seed=0, llm_backend=None):\n"
+        + "    _log('check_readiness')\n"
+        + "    return {'scope': 'whole-corpus', 'ready': True, 'components': {},\n"
+        + "            'capabilities': {}, 'not_ready_reasons': []}\n"
+        + "\n\n"
+        + "def last_requirement_failures(component_id, repo_root):\n"
+        + "    _log('last_requirement_failures', component_id=component_id)\n"
+        + "    return []\n"
+    )
+
+
+def _verifier_orchestrator_src():
+    return (
+        HEADER
+        + "GATE_VERSION = 'verifier-orchestrator@3.5.0'\n"
+        + "DEFAULT_TEST_TIMEOUT = 300.0\n"
+        + "\n\n"
+        + "def verify(component_id, repo_root, judge=None, test_author=None):\n"
+        + "    _log('verify', component_id=component_id)\n"
+        + "    return " + repr(VERIFICATION_REPORT) + "\n"
+    )
+
+
+def _license_scanner_src():
+    return (
+        HEADER
+        + "def scan(component_id, repo_root):\n"
+        + "    _log('license_scan', component_id=component_id)\n"
+        + "    return " + repr(LICENSE_RESULT) + "\n"
+        + "\n\n"
+        + "def gate_version(repo_root):\n"
+        + "    return 'license_scanner@4.0.0-no-reference-corpus'\n"
+    )
+
+
+def _secret_scanner_src():
+    return (
+        HEADER
+        + "class AllowlistInvalidError(Exception):\n"
+        + "    pass\n"
+        + "\n\n"
+        + "def scan(repo_root):\n"
+        + "    _log('secret_scan')\n"
+        + "    return " + repr(SECRET_RESULT) + "\n"
+        + "\n\n"
+        + "def scan_files(paths, repo_root=None):\n"
+        + "    _log('secret_scan_files')\n"
+        + "    r = " + repr(SECRET_RESULT) + "\n"
+        + "    r['scope'] = 'precommit'\n"
+        + "    return r\n"
+        + "\n\n"
+        + "def gate_version(repo_root):\n"
+        + "    return 'secret_scanner@0.0.0'\n"
+        + "\n\n"
+        + "def propose(repo_root):\n"
+        + "    return {'allowlist': {'version': 1, 'entries': []}, 'ineligible': []}\n"
+    )
+
+
+def _provenance_writer_src():
+    return (
+        HEADER
+        + "class InvalidSealedInputError(Exception):\n"
+        + "    pass\n"
+        + "\n\n"
+        + "class MissingInputError(Exception):\n"
+        + "    pass\n"
+        + "\n\n"
+        + "def write_provenance(component_id, inputs, repo_root):\n"
+        + "    _log('write_provenance', component_id=component_id)\n"
+        + "    return None\n"
+        + "\n\n"
+        + "def write_sealed_provenance(component_id, inputs, repo_root):\n"
+        + "    _log('write_sealed_provenance', component_id=component_id)\n"
+        + "    return None\n"
+    )
+
+
+FAKES = {
+    "provenance-checker": _provenance_checker_src,
+    "spec-bundle-assembler": _spec_bundle_assembler_src,
+    "generation-loop": _generation_loop_src,
+    "provenance-tracker": _provenance_tracker_src,
+    "verifier-orchestrator": _verifier_orchestrator_src,
+    "license-scanner": _license_scanner_src,
+    "secret-scanner": _secret_scanner_src,
+    "provenance-writer": _provenance_writer_src,
+}
 
 COMPONENT_MD = (
     "---\n"
     "id: comp-foo\n"
     "title: Foo\n"
     "status: draft\n"
-    "owners: [team-a]\n"
+    "owners: [pipeline-team]\n"
+    "depends_on: []\n"
     "sealed: true\n"
     "source_path: legacy/foo/\n"
-    "depends_on: []\n"
     "---\n"
     "\n"
     "# Foo\n"
     "\n"
     "## Purpose\n"
     "\n"
-    "Foo doubles a number.\n"
+    "A fixture component.\n"
 )
 
-REQ = "# R-FOO-001\n\n**R-FOO-001** \u2014 `foo(x)` MUST return `2 * x`.\n"
+VALID_TOML = "[generate]\nmax_attempts = 5\nmode = \"agentic\"\n"
+TURBO_TOML = "[generate]\nmode = \"turbo\"\n"
 
-ACC = (
-    "# AC-FOO-001\n"
-    "\n"
-    "Covers: R-FOO-001\n"
-    "Kind: llm-judge\n"
-    "\n"
-    "```gherkin\n"
-    "Given x = 2\n"
-    "When foo(x) is called\n"
-    "Then it returns 4\n"
-    "```\n"
-)
 
-IFACE = "# Library\n\n```\nfoo(x: int) -> int\n```\n"
-
-CONSTRAINTS = "# Constraints\n\nNone.\n"
-
-
-FAKE_PROVENANCE_CHECKER = '''
-class _Key:
-    def __init__(self, spec_bundle_hash, gate_versions):
-        self.spec_bundle_hash = spec_bundle_hash
-        self.gate_versions = gate_versions
-
-
-def current_sealed_key(component_id, repo_root):
-    return None
-
-
-def current_provenance_key(component_id, repo_root):
-    return _Key(
-        "sha256:" + "0" * 64,
-        {
-            "compiler": "criterion-compiler@1.0.0",
-            "generated_test": "generated_test@1.1.0",
-            "verifier": "verifier-orchestrator@2.2.0",
-            "license_scanner": "license_scanner@4.0.0-no-reference-corpus",
-            "secret_scanner": "secret_scanner@0.0.0",
-        },
-    )
-
-
-def check_provenance(component_id, spec_bundle_hash, gate_versions, repo_root):
-    return {
-        "hit": False,
-        "verification_report": None,
-        "license_scan": None,
-        "secret_scan": None,
-    }
-
-
-def check_sealed_provenance(component_id, repo_root):
-    return {
-        "hit": False,
-        "sealed": False,
-        "reason": "not_sealed",
-        "verification_report": None,
-        "license_scan": None,
-        "secret_scan": None,
-        "owners": None,
-        "source_hash": None,
-        "written_at": None,
-    }
-'''
-
-
-FAKE_ASSEMBLER = '''
-from dataclasses import dataclass, field
-
-
-@dataclass
-class SpecBundle:
-    component_id: str
-    spec_bundle_hash: str
-    spec: str
-    interface: str
-    constraints: str
-    dependency_interfaces: dict = field(default_factory=dict)
-    dependency_context: dict = field(default_factory=dict)
-    dependency_usage: dict = field(default_factory=dict)
-    vars: dict = field(default_factory=dict)
-    glossary: str = ""
-    hint_code: object = None
-
-    def __getitem__(self, key):
-        return getattr(self, key)
-
-    def get(self, key, default=None):
-        return getattr(self, key, default)
-
-
-@dataclass
-class CriterionBundle:
-    component_id: str
-    criterion_id: str
-    covers: str
-    criterion_text: str
-    requirement_text: str
-    interface: str
-    glossary: str
-    dependency_interfaces: dict = field(default_factory=dict)
-
-    def __getitem__(self, key):
-        return getattr(self, key)
-
-    def get(self, key, default=None):
-        return getattr(self, key, default)
-
-
-def assemble(component_id, repo_root, mode="cold"):
-    return SpecBundle(
-        component_id=component_id,
-        spec_bundle_hash="sha256:" + "0" * 64,
-        spec="Foo doubles a number.",
-        interface="foo(x: int) -> int",
-        constraints="None.",
-        glossary="Foo",
-        hint_code=None,
-    )
-
-
-def assemble_criterion(component_id, criterion_id, repo_root):
-    return CriterionBundle(
-        component_id=component_id,
-        criterion_id=criterion_id,
-        covers="R-FOO-001",
-        criterion_text="MARKER_CRIT",
-        requirement_text="MARKER_REQ",
-        interface="MARKER_IFACE",
-        glossary="Foo",
-    )
-'''
-
-
-FAKE_GENERATOR = '''
-import os
-from dataclasses import dataclass
-
-GATE_VERSION = "generator@2.0.0"
-PROMPT_VERSION = "v10"
-
-
-@dataclass
-class GenerationResult:
-    component_id: str
-    spec_bundle_hash: str
-    model: str
-    prompt_version: str
-    cache_hit: bool
-    files: dict
-    model_call_error: object
-    refused: object
-    retry_feedback: object
-
-
-def generate(bundle, model, retry_feedback=None, *, repo_root=None, llm_backend=None):
-    if isinstance(bundle, dict):
-        component_id = bundle["component_id"]
-        sbh = bundle["spec_bundle_hash"]
-    else:
-        component_id = bundle.component_id
-        sbh = bundle.spec_bundle_hash
-    slug = component_id[len("comp-"):] if component_id.startswith("comp-") else component_id
-    target = os.path.join(str(repo_root), "gen", slug)
-    os.makedirs(target, exist_ok=True)
-    with open(os.path.join(target, "foo.py"), "w", encoding="utf-8") as fh:
-        fh.write("MARKER_SOURCE = 1\\n")
-    return GenerationResult(
-        component_id=component_id,
-        spec_bundle_hash=sbh,
-        model=model,
-        prompt_version=PROMPT_VERSION,
-        cache_hit=False,
-        files={"foo.py": "MARKER_SOURCE = 1\\n"},
-        model_call_error=None,
-        refused=None,
-        retry_feedback=retry_feedback,
-    )
-'''
-
-
-FAKE_VERIFIER = '''
-import json
-import os
-from dataclasses import dataclass
-
-GATE_VERSION = "verifier-orchestrator@2.2.0"
-
-
-@dataclass
-class VerificationReport:
-    component_id: str
-    criteria: list
-    requirement_results: dict
-    interface_drift: bool
-    mutation_score: object
-    mutation_error: object
-    overall: str
-
-    def to_dict(self):
-        return {
-            "component_id": self.component_id,
-            "criteria": list(self.criteria),
-            "requirement_results": dict(self.requirement_results),
-            "interface_drift": self.interface_drift,
-            "mutation_score": self.mutation_score,
-            "mutation_error": self.mutation_error,
-            "overall": self.overall,
-        }
-
-
-def _get(value, name):
-    if isinstance(value, dict):
-        return value.get(name)
-    return getattr(value, name, None)
-
-
-def verify(component_id, repo_root, judge=None, test_author=None):
-    log_dir = os.environ["GATE010_LOG_DIR"]
-    bundle = {
-        "component_id": component_id,
-        "criterion_id": "AC-FOO-001",
-        "covers": "R-FOO-001",
-        "criterion_text": "MARKER_CRIT",
-        "requirement_text": "MARKER_REQ",
-        "interface": "MARKER_IFACE",
-        "glossary": "Foo",
-        "dependency_interfaces": {},
-    }
-    if judge is None:
-        record = {"result": None, "rationale": "no judge given", "error": "judge missing"}
-    else:
-        try:
-            outcome = judge(bundle)
-            record = {"result": _get(outcome, "result"), "rationale": _get(outcome, "rationale")}
-        except Exception as exc:
-            record = {"result": None, "rationale": None, "error": "raised: " + repr(exc)}
-    with open(os.path.join(log_dir, "judge_outcome.json"), "w", encoding="utf-8") as fh:
-        json.dump(record, fh)
-    result = record.get("result") if record.get("result") in ("pass", "fail") else "fail"
-    criterion = {
-        "id": "AC-FOO-001",
-        "covers": "R-FOO-001",
-        "kind": "llm-judge",
-        "result": result,
-        "rationale": record.get("rationale"),
-    }
-    return VerificationReport(
-        component_id=component_id,
-        criteria=[criterion],
-        requirement_results={"R-FOO-001": result},
-        interface_drift=False,
-        mutation_score=None,
-        mutation_error=None,
-        overall=result,
-    )
-'''
-
-
-FAKE_LICENSE = '''
-GV = "license_scanner@4.0.0-no-reference-corpus"
-
-
-def gate_version(repo_root):
-    return GV
-
-
-def scan(component_id, repo_root):
-    return {
-        "component_id": component_id,
-        "gate_version": GV,
-        "evaluated": False,
-        "reason": "no-reference-corpus",
-        "similarity_score": None,
-        "block_threshold": None,
-        "blocked": False,
-        "matches": [],
-        "notified": False,
-        "notification_delivery_error": None,
-        "cache_hit": False,
-    }
-'''
-
-
-FAKE_SECRET = '''
-from dataclasses import dataclass, field
-
-GV = "secret_scanner@0.0.0"
-
-
-class AllowlistInvalidError(Exception):
-    pass
-
-
-@dataclass
-class SecretScanResult:
-    scope: str
-    gate_version: str
-    flagged: bool
-    matches: list = field(default_factory=list)
-    allowed: list = field(default_factory=list)
-    unused_allowlist_entries: list = field(default_factory=list)
-    notified: bool = False
-    notification_delivery_error: object = None
-    cache_hit: bool = False
-
-    def to_dict(self):
-        return {
-            "scope": self.scope,
-            "gate_version": self.gate_version,
-            "flagged": self.flagged,
-            "matches": list(self.matches),
-            "allowed": list(self.allowed),
-            "unused_allowlist_entries": list(self.unused_allowlist_entries),
-            "notified": self.notified,
-            "notification_delivery_error": self.notification_delivery_error,
-            "cache_hit": self.cache_hit,
-        }
-
-
-def gate_version(repo_root):
-    return GV
-
-
-def scan(repo_root):
-    return SecretScanResult(scope="full", gate_version=GV, flagged=False)
-
-
-def scan_files(paths, repo_root=None):
-    return SecretScanResult(scope="precommit", gate_version=GV, flagged=False)
-
-
-def propose(repo_root):
-    return {"allowlist": {"version": 1, "entries": []}, "ineligible": []}
-'''
-
-
-FAKE_TRACKER = '''
-import json
-import os
-import uuid
-
-
-def _plain(value):
-    if value is None or isinstance(value, (str, int, float, bool)):
-        return value
-    if isinstance(value, dict):
-        return {str(k): _plain(v) for k, v in value.items()}
-    if isinstance(value, (list, tuple)):
-        return [_plain(v) for v in value]
-    if hasattr(value, "to_dict") and callable(value.to_dict):
-        return _plain(value.to_dict())
-    if hasattr(value, "__dict__"):
-        return {k: _plain(v) for k, v in vars(value).items() if not k.startswith("_")}
-    return repr(value)
-
-
-def write_attempt_record(component_id, generation_result, verification_report, spec_bundle_hash, repo_root):
-    slug = component_id[len("comp-"):] if component_id.startswith("comp-") else component_id
-    d = os.path.join(str(repo_root), ".hotdocs", "attempts", slug)
-    os.makedirs(d, exist_ok=True)
-    ts = "2026-11-17T00:00:00Z"
-    attempt_id = ts + "-" + uuid.uuid4().hex[:6]
-    record = {
-        "attempt_id": attempt_id,
-        "component_id": component_id,
-        "timestamp": ts,
-        "spec_bundle_hash": spec_bundle_hash,
-        "generation": _plain(generation_result),
-        "verification": _plain(verification_report),
-    }
-    with open(os.path.join(d, attempt_id.replace(":", "-") + ".json"), "w", encoding="utf-8") as fh:
-        json.dump(record, fh)
-    return record
-
-
-def check_readiness(repo_root, changed_ids=None, model=None, seed=0, llm_backend=None):
-    return {
-        "scope": "whole-corpus",
-        "ready": True,
-        "components": {},
-        "capabilities": {},
-        "not_ready_reasons": [],
-    }
-
-
-def last_requirement_failures(component_id, repo_root):
-    return []
-'''
-
-
-FAKE_WRITER = '''
-class InvalidSealedInputError(Exception):
-    pass
-
-
-class MissingInputError(Exception):
-    pass
-
-
-def write_provenance(component_id, inputs, repo_root):
-    return None
-
-
-def write_sealed_provenance(component_id, inputs, repo_root):
-    return None
-'''
-
-
-FAKE_TEST_AUTHOR = '''
-GATE_VERSION = "generated_test@1.1.0"
-
-
-def author_test(bundle, model, seed=0, *, repo_root=None, llm_backend=None):
-    return {
-        "component_id": "comp-foo",
-        "criterion_id": "AC-FOO-001",
-        "model": model,
-        "seed": seed,
-        "prompt_version": "v1",
-        "cache_hit": False,
-        "file": None,
-        "model_call_error": {"category": "network", "message": "not used"},
-    }
-'''
-
-
-FAKE_LLM = '''
-import json
-import os
-
-DEFAULT_TIMEOUT_SECONDS = 600
-
-PROVIDERS = {
-    "claude-cli": {"default_base_url": None, "default_api_key_env": None, "needs_base_url": False, "suggested_model": "claude-sonnet-5"},
-    "anthropic": {"default_base_url": "https://api.anthropic.com", "default_api_key_env": "ANTHROPIC_API_KEY", "needs_base_url": False, "suggested_model": "claude-sonnet-5"},
-    "openai": {"default_base_url": "https://api.openai.com/v1", "default_api_key_env": "OPENAI_API_KEY", "needs_base_url": False, "suggested_model": "gpt-6-astra"},
-    "openai-compatible": {"default_base_url": None, "default_api_key_env": None, "needs_base_url": True, "suggested_model": ""},
-    "gemini": {"default_base_url": "https://generativelanguage.googleapis.com", "default_api_key_env": "GEMINI_API_KEY", "needs_base_url": False, "suggested_model": "gemini-4-argon"},
-    "ollama": {"default_base_url": "http://localhost:11434", "default_api_key_env": None, "needs_base_url": False, "suggested_model": "llama3.2"},
-}
-
-
-class ModelResolutionError(Exception):
-    pass
-
-
-def parse_model(model):
-    if ":" in model:
-        head, rest = model.split(":", 1)
-        if head in PROVIDERS:
-            return head, rest
-    return None, model
-
-
-def resolve_provider(model, config=None):
-    provider, name = parse_model(model)
-    provider = provider or "anthropic"
-    p = PROVIDERS[provider]
-    return {
-        "provider": provider,
-        "model": name,
-        "base_url": p["default_base_url"],
-        "api_key_env": p["default_api_key_env"],
-        "timeout_seconds": DEFAULT_TIMEOUT_SECONDS,
-        "auth": None,
-    }
-
-
-def complete(prompt, model, *, backend=None, **params):
-    log_dir = os.environ["GATE010_LOG_DIR"]
-    with open(os.path.join(log_dir, "complete_calls.jsonl"), "a", encoding="utf-8") as fh:
-        fh.write(json.dumps({"prompt": prompt, "model": model}) + "\\n")
-    with open(os.path.join(log_dir, "mode.txt"), encoding="utf-8") as fh:
-        mode = fh.read().strip()
-    if mode == "error":
-        return {
-            "text": None,
-            "model": model,
-            "backend": "fake",
-            "model_call_error": {"category": "network", "message": "backend down"},
-        }
-    if mode == "not_json":
-        text = "not json"
-    elif mode == "maybe":
-        text = json.dumps({"result": "maybe"})
-    else:
-        text = "```json\\n" + json.dumps({"result": "pass", "rationale": "ok"}) + "\\n```"
-    return {"text": text, "model": model, "backend": "fake", "model_call_error": None}
-'''
-
-
-def build_repo(repo_root, log_dir, mode):
-    repo_root = Path(repo_root)
-    write(repo_root / "specs" / "glossary.md", GLOSSARY)
-    comp = repo_root / "specs" / "components" / "foo"
-    write(comp / "component.md", COMPONENT_MD)
-    write(comp / "requirements" / "R-FOO-001.md", REQ)
-    write(comp / "acceptance" / "AC-FOO-001.md", ACC)
-    write(comp / "interface" / "library.md", IFACE)
-    write(comp / "constraints.md", CONSTRAINTS)
-
-    write(repo_root / "gen" / "foo" / "foo.py", "MARKER_SOURCE = 1\n")
-
-    write_fake(repo_root, "provenance-checker", FAKE_PROVENANCE_CHECKER)
-    write_fake(repo_root, "spec-bundle-assembler", FAKE_ASSEMBLER)
-    write_fake(repo_root, "generator", FAKE_GENERATOR)
-    write_fake(repo_root, "verifier-orchestrator", FAKE_VERIFIER)
-    write_fake(repo_root, "license-scanner", FAKE_LICENSE)
-    write_fake(repo_root, "secret-scanner", FAKE_SECRET)
-    write_fake(repo_root, "provenance-tracker", FAKE_TRACKER)
-    write_fake(repo_root, "provenance-writer", FAKE_WRITER)
-    write_fake(repo_root, "test-author", FAKE_TEST_AUTHOR)
-    write_fake(repo_root, "llm-endpoint", FAKE_LLM)
-
-    Path(log_dir).mkdir(parents=True, exist_ok=True)
-    write(Path(log_dir) / "mode.txt", mode)
-
-
-def read_calls(log_dir):
-    path = Path(log_dir) / "complete_calls.jsonl"
-    if not path.is_file():
-        return []
-    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
-
-
-def read_outcome(log_dir):
-    path = Path(log_dir) / "judge_outcome.json"
-    assert path.is_file(), "the faked verify never recorded a judge outcome"
-    return json.loads(path.read_text(encoding="utf-8"))
-
-
-def run(tmp_path, monkeypatch, mode):
+@pytest.fixture
+def repo(tmp_path, monkeypatch):
     repo_root = tmp_path / "repo"
-    log_dir = tmp_path / "logs"
-    build_repo(repo_root, log_dir, mode)
-    monkeypatch.setenv(LOG_ENV, str(log_dir))
-    result = component_gate_runner.run_component_gates(
-        "comp-foo", repo_root, "fake-model", seed=0, llm_backend=None
+    comp_dir = repo_root / "specs" / "components" / "foo"
+    comp_dir.mkdir(parents=True)
+    (comp_dir / "component.md").write_text(COMPONENT_MD)
+    for slug, src in FAKES.items():
+        d = repo_root / "gen" / slug
+        d.mkdir(parents=True)
+        (d / (slug.replace("-", "_") + ".py")).write_text(src())
+    log_path = tmp_path / "calls.log"
+    log_path.write_text("")
+    monkeypatch.setenv(LOG_ENV, str(log_path))
+    return repo_root, log_path
+
+
+def _calls(log_path, fn):
+    out = []
+    for line in log_path.read_text().splitlines():
+        if line.strip():
+            rec = json.loads(line)
+            if rec.get("fn") == fn:
+                out.append(rec)
+    return out
+
+
+def test_file_values_reach_run_attempts(repo):
+    repo_root, log_path = repo
+    (repo_root / "hotdocs.toml").write_text(VALID_TOML)
+
+    component_gate_runner.main(
+        ["generate", "comp-foo", "--model=m", "--repo-root=" + str(repo_root)]
     )
-    return result, log_dir
+
+    calls = _calls(log_path, "run_attempts")
+    assert len(calls) == 1
+    assert calls[0]["max_attempts"] == 5
+    assert calls[0]["max_attempts_type"] == "int"
+    assert calls[0]["mode"] == "agentic"
 
 
-def test_judge_makes_one_complete_call_with_all_markers_and_unwraps_fence(tmp_path, monkeypatch):
-    result, log_dir = run(tmp_path, monkeypatch, "fenced_pass")
+def test_flags_override_file_values(repo):
+    repo_root, log_path = repo
+    (repo_root / "hotdocs.toml").write_text(VALID_TOML)
 
-    assert field(result, "provenance_hit") is False
+    component_gate_runner.main(
+        [
+            "generate",
+            "comp-foo",
+            "--model=m",
+            "--repo-root=" + str(repo_root),
+            "--max-attempts=1",
+            "--mode=single",
+        ]
+    )
 
-    calls = read_calls(log_dir)
-    assert len(calls) == 1, calls
-    prompt = calls[0]["prompt"]
-    for marker in ("MARKER_SOURCE", "MARKER_CRIT", "MARKER_REQ", "MARKER_IFACE"):
-        assert marker in prompt, marker
-
-    outcome = read_outcome(log_dir)
-    assert "error" not in outcome, outcome
-    assert outcome["result"] == "pass"
-    assert outcome["rationale"] == "ok"
+    calls = _calls(log_path, "run_attempts")
+    assert len(calls) == 1
+    assert calls[0]["max_attempts"] == 1
+    assert calls[0]["max_attempts_type"] == "int"
+    assert calls[0]["mode"] == "single"
 
 
-@pytest.mark.parametrize("mode", ["error", "not_json", "maybe"])
-def test_judge_unavailable_is_fail_never_raised(tmp_path, monkeypatch, mode):
-    result, log_dir = run(tmp_path, monkeypatch, mode)
+@pytest.mark.parametrize(
+    "toml_text, extra",
+    [
+        (TURBO_TOML, []),
+        (None, ["--max-attempts=0"]),
+        (None, ["--mode=turbo"]),
+    ],
+    ids=["file-mode-turbo", "flag-max-attempts-0", "flag-mode-turbo"],
+)
+def test_invalid_values_are_usage_errors(repo, capsys, toml_text, extra):
+    repo_root, log_path = repo
+    if toml_text is not None:
+        (repo_root / "hotdocs.toml").write_text(toml_text)
 
-    outcome = read_outcome(log_dir)
-    assert "error" not in outcome, outcome
-    assert outcome["result"] == "fail"
-    assert isinstance(outcome["rationale"], str)
-    assert outcome["rationale"].startswith("judge unavailable"), outcome["rationale"]
+    rc = component_gate_runner.main(
+        ["generate", "comp-foo", "--model=m", "--repo-root=" + str(repo_root)] + extra
+    )
+
+    err = capsys.readouterr().err
+    assert rc == 2
+    lines = err.splitlines()
+    assert lines, "expected a usage error on stderr"
+    assert lines[0].startswith("usage error: ")
+    assert _calls(log_path, "run_attempts") == []

@@ -1,63 +1,68 @@
-"""Spec linter: mechanically validates a spec corpus against SPEC_GUIDELINES.md.
+"""Spec Linter: mechanically validates a spec corpus against SPEC_GUIDELINES.md."""
+from __future__ import annotations
 
-Library: ``lint(paths, repo_root, strict=False, judge=None) -> LintReport`` and
-``load_corpus`` (corpus-loader's own function, re-exported unchanged).
-CLI: ``main(argv)`` -- the tokens after ``hotdocs lint``.
-"""
-import argparse
 import importlib.util
 import json
 import re
 import subprocess
 import sys
+from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import List, Optional
-
-# --------------------------------------------------------------------------
-# Dependency loading (repo_root first, then the tool root)
-# --------------------------------------------------------------------------
-
-_MODULES = {}
 
 
-def _tool_root():
+# ---------------------------------------------------------------------------
+# Dependency loading
+# ---------------------------------------------------------------------------
+
+_LOADED: dict = {}
+
+
+def _tool_root() -> Path:
     for parent in Path(__file__).resolve().parents:
         if parent.name == "gen":
             return parent.parent
     return None
 
 
-def _dep(repo_root, slug, module_name):
-    directory = Path(repo_root) / "gen" / slug
-    if not directory.is_dir():
-        directory = _tool_root() / "gen" / slug
-    flat = directory / f"{module_name}.py"
-    target = flat if flat.is_file() else directory / module_name / "__init__.py"
+def _load_path(base: Path, name: str):
+    flat = base / f"{name}.py"
+    target = flat if flat.exists() else base / name / "__init__.py"
     key = str(target.resolve())
-    if key not in _MODULES:
-        locations = None if target == flat else [str(target.parent)]
+    mod = _LOADED.get(key)
+    if mod is None:
         spec = importlib.util.spec_from_file_location(
-            module_name, target, submodule_search_locations=locations
+            name,
+            target,
+            submodule_search_locations=None if target == flat else [str(target.parent)],
         )
-        module = importlib.util.module_from_spec(spec)
-        sys.modules[module_name] = module
-        spec.loader.exec_module(module)
-        _MODULES[key] = module
-    return _MODULES[key]
+        mod = importlib.util.module_from_spec(spec)
+        sys.modules[name] = mod
+        spec.loader.exec_module(mod)
+        _LOADED[key] = mod
+    sys.modules[name] = mod
+    return mod
 
 
-def _get(obj, name, default=None):
+def _load_dep(slug: str, repo_root: Path):
+    base = Path(repo_root) / "gen" / slug
+    if not base.is_dir():
+        base = _tool_root() / "gen" / slug
+    return _load_path(base, slug.replace("-", "_"))
+
+
+def _g(obj, name, default=None):
     if isinstance(obj, dict):
         return obj.get(name, default)
     return getattr(obj, name, default)
 
 
-load_corpus = _dep(_tool_root(), "corpus-loader", "corpus_loader").load_corpus
+load_corpus = _load_path(_tool_root() / "gen" / "corpus-loader", "corpus_loader").load_corpus
 
-# --------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
 # Report types
-# --------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
 
 
 @dataclass
@@ -67,10 +72,10 @@ class Finding:
     file: str
     line: int
     message: str
-    rationale: Optional[str] = None
+    rationale: object = None
 
-    def to_json(self):
-        data = {
+    def to_json(self) -> dict:
+        out = {
             "rule_id": self.rule_id,
             "severity": self.severity,
             "file": self.file,
@@ -78,31 +83,31 @@ class Finding:
             "message": self.message,
         }
         if self.rationale is not None:
-            data["rationale"] = self.rationale
-        return data
+            out["rationale"] = self.rationale
+        return out
 
 
 @dataclass
 class LintReport:
-    findings: List[Finding] = field(default_factory=list)
+    findings: list = field(default_factory=list)
     strict: bool = False
 
     @property
-    def hard_failures(self):
+    def hard_failures(self) -> int:
         return sum(
             f.severity == "fail" or (self.strict and f.severity == "warn")
             for f in self.findings
         )
 
     @property
-    def warnings(self):
+    def warnings(self) -> int:
         return sum(f.severity == "warn" for f in self.findings)
 
     @property
-    def skipped(self):
+    def skipped(self) -> int:
         return sum(f.severity == "skipped" for f in self.findings)
 
-    def to_json(self):
+    def to_json(self) -> dict:
         return {
             "findings": [f.to_json() for f in self.findings],
             "summary": {
@@ -113,13 +118,12 @@ class LintReport:
         }
 
 
-# --------------------------------------------------------------------------
-# Shared helpers
-# --------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# Context and text helpers
+# ---------------------------------------------------------------------------
 
-_RFC2119 = re.compile(r"\b(MUST|SHOULD|MAY|SHALL|REQUIRED|RECOMMENDED|OPTIONAL)\b")
-_FM_TYPES = ("component-root", "product", "architecture", "var", "decision")
-_UNIT_TYPES = (
+FM_TYPES = {"component-root", "product", "architecture", "var", "decision"}
+UNIT_TYPES = {
     "component-requirement",
     "component-interface-cli",
     "component-interface-library",
@@ -127,520 +131,597 @@ _UNIT_TYPES = (
     "component-interface-guarantee",
     "component-acceptance",
     "component-constraints",
+}
+LIST_FIELDS = ("depends_on", "realizes", "uses_var", "depends_on_guarantees", "builds_on")
+RFC = re.compile(r"\b(MUST|SHALL|SHOULD|MAY|REQUIRED|RECOMMENDED|OPTIONAL)\b")
+ENTRY = re.compile(r"^\s*[-*]\s+\*\*(.+?)\*\*(.*)$")
+BULLET = re.compile(r"^\s*[-*]\s+[`*]*([A-Za-z_]+)[`*]*\s*:\s*(.*)$")
+KIND_LINE = re.compile(r"^Kind:\s*(compiled|generated-test|llm-judge)\s*$")
+KIND_NAME = re.compile(r"[a-z][a-z0-9-]*")
+DECISION = re.compile(r"\bD\d+\b")
+ASSET_SECTIONS = (
+    "Layout",
+    "Environment",
+    "Surface",
+    "Running criteria",
+    "Strength check",
+    "Test author guidance",
+    "Generator guidance",
 )
-_ALWAYS = ("id", "title", "status", "owners")
-_LIST_FIELDS = ("depends_on", "realizes", "uses_var", "depends_on_guarantees", "builds_on")
 
 
 class _Ctx:
-    def __init__(self, root, corpus, judge):
-        self.root = root
-        self.docs = list(_get(corpus, "docs"))
-        self.components = _get(corpus, "components")
-        self.id_index = _get(corpus, "id_index")
-        self.glossary_defs = _get(corpus, "glossary_defs")
-        self.glossary_files = _get(corpus, "glossary_files")
-        self.graph = _get(corpus, "graph")
+    def __init__(self, repo_root: Path, corpus, judge):
+        self.repo_root = repo_root
+        self.corpus = corpus
         self.judge = judge
+        self.docs = list(_g(corpus, "docs"))
+        self.graph = _g(corpus, "graph")
+        self.findings: list = []
+        self._cache: dict = {}
 
-    def of_type(self, *types):
-        return [d for d in self.docs if _get(d, "doc_type") in types]
+    def add(self, rule_id, severity, file, line, message, rationale=None):
+        self.findings.append(Finding(rule_id, severity, file, line, message, rationale))
 
-    def query(self, sql):
+    def q(self, sql):
         return self.graph.execute(sql).fetchall()
 
+    def lines(self, rel):
+        if rel not in self._cache:
+            self._cache[rel] = (self.repo_root / rel).read_text(encoding="utf-8").splitlines()
+        return self._cache[rel]
 
-def _f(rule_id, file, line, message, severity="fail", rationale=None):
-    return Finding(rule_id, severity, file, line, message, rationale)
+    def key_line(self, rel, key):
+        lines = self.lines(rel)
+        if lines and lines[0].strip() == "---":
+            for i in range(1, len(lines)):
+                if lines[i].strip() == "---":
+                    break
+                if lines[i].startswith(key + ":"):
+                    return i + 1
+        return 1
 
-
-def _lines(doc):
-    return Path(_get(doc, "path")).read_text(encoding="utf-8").splitlines()
-
-
-def _rel(doc):
-    return _get(doc, "rel_path")
-
-
-def _fm(doc):
-    return _get(doc, "frontmatter")
-
-
-def _list(fm, key):
-    value = fm.get(key)
-    return value if isinstance(value, list) else []
+    def of_type(self, *types):
+        return [d for d in self.docs if _g(d, "doc_type") in types]
 
 
-def _fm_line(lines, name):
-    if [l.strip() for l in lines[:1]] == ["---"]:
-        for number, line in enumerate(lines[1:], 2):
-            if line.strip() == "---":
-                break
-            if re.match(rf"{re.escape(name)}\s*:", line):
-                return number
-    return 1
+def _section(lines, name):
+    for i, line in enumerate(lines):
+        if line.strip() == f"## {name}":
+            out = []
+            for j in range(i + 1, len(lines)):
+                if lines[j].startswith("## "):
+                    break
+                out.append((j + 1, lines[j]))
+            return i + 1, out
+    return None, []
 
 
-def _section(lines, title):
-    head, body, inside = 0, [], False
-    for number, line in enumerate(lines, 1):
-        m = re.match(r"#{1,2}\s+(.*?)\s*$", line)
-        if m:
-            inside = m.group(1).lower() == title.lower()
-            head = number if inside else head
-        elif inside:
-            body.append((number, line))
-    return head, body
+def _comp_file(comp_id: str) -> str:
+    return f"specs/components/{comp_id.removeprefix('comp-')}/component.md"
 
 
-def _ref_finding(rule_id, doc, edge_type, target, missing):
-    state = "does not exist" if missing else "is deprecated"
-    return _f(
-        rule_id,
-        _rel(doc),
-        _fm_line(_lines(doc), edge_type),
-        f"{edge_type} references '{target}', which {state}",
-    )
-
-
-def _native_sccs(adj):
+def _native_cycles(pairs):
+    graph: dict = {}
+    for a, b in pairs:
+        graph.setdefault(a, set()).add(b)
     reach = {}
-    for start in adj:
-        seen, stack = set(), list(adj[start])
+    for a in graph:
+        seen: set = set()
+        stack = list(graph[a])
         while stack:
-            node = stack.pop()
-            if node not in seen:
-                seen.add(node)
-                stack.extend(adj.get(node, []))
-        reach[start] = seen
+            x = stack.pop()
+            if x not in seen:
+                seen.add(x)
+                stack.extend(graph.get(x, ()))
+        reach[a] = seen
     return sorted(
         {
-            tuple(sorted(b for b in reach[a] if a in reach.get(b, ())))
+            tuple(sorted(b for b in reach if a in reach[b] and b in reach[a]))
             for a in reach
             if a in reach[a]
         }
     )
 
 
-def _tokens(text):
-    return set(re.findall(r"[a-z0-9]+", text.lower()))
-
-
-def _definitions(lines):
-    _, body = _section(lines, "Definitions")
-    entries = []
-    for number, line in body:
-        m = re.match(r"- \*\*(.+?)\*\*(.*)$", line)
-        if m:
-            entries.append([number, m.group(1), [m.group(2)]])
-        elif entries:
-            entries[-1][2].append(line)
-    return [
-        (number, term, "\n".join(parts).lstrip("—- \t\r\n").rstrip())
-        for number, term, parts in entries
-    ]
-
-
-def _covers_line(lines, start):
-    return next(
-        (n for n, l in enumerate(lines, 1) if n >= start and "Covers:" in l), start
-    )
-
-
-# --------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
 # Rules
-# --------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
 
 
-def _r001(ctx):
-    out = []
-    for doc in ctx.of_type(*_FM_TYPES):
-        fm, lines = _fm(doc), _lines(doc)
-        for name in _ALWAYS:
-            if name not in fm:
-                out.append(_f("R-LINT-001", _rel(doc), 1, f"missing required frontmatter field '{name}'"))
-        for name in _LIST_FIELDS:
-            if name in fm and not isinstance(fm[name], list):
-                out.append(_f("R-LINT-001", _rel(doc), _fm_line(lines, name), f"frontmatter field '{name}' must be a list"))
+def rule_001(ctx):
+    for d in ctx.of_type(*FM_TYPES):
+        fm = _g(d, "frontmatter")
+        rel = _g(d, "rel_path")
+        for f in ("id", "title", "status", "owners"):
+            if f not in fm:
+                ctx.add("R-LINT-001", "fail", rel, 1, f"missing required frontmatter field '{f}'")
+        for f in LIST_FIELDS:
+            if f in fm and not isinstance(fm[f], list):
+                ctx.add("R-LINT-001", "fail", rel, ctx.key_line(rel, f),
+                        f"frontmatter field '{f}' must be a list")
         if "sealed" in fm and not isinstance(fm["sealed"], bool):
-            out.append(_f("R-LINT-001", _rel(doc), _fm_line(lines, "sealed"), "frontmatter field 'sealed' must be a boolean"))
-    return out
+            ctx.add("R-LINT-001", "fail", rel, ctx.key_line(rel, "sealed"),
+                    "frontmatter field 'sealed' must be a boolean")
 
 
-def _r002(ctx):
-    out = []
-    for doc in ctx.of_type(*_FM_TYPES):
-        fm = _fm(doc)
+def rule_002(ctx):
+    for d in ctx.of_type(*FM_TYPES):
+        fm = _g(d, "frontmatter")
+        rel = _g(d, "rel_path")
         if fm.get("status") == "ratified":
-            lines = _lines(doc)
-            head, body = _section(lines, "Open questions")
-            if any(text.strip() for _, text in body):
-                out.append(_f("R-LINT-002", _rel(doc), head, "status: ratified with a non-empty Open questions section"))
+            heading, sec = _section(ctx.lines(rel), "Open questions")
+            if any(t.strip() for _, t in sec):
+                ctx.add("R-LINT-002", "fail", rel, heading,
+                        "status: ratified with a non-empty Open questions section")
             if not fm.get("last_ratified_commit"):
-                out.append(_f("R-LINT-002", _rel(doc), _fm_line(lines, "status"), "status: ratified without last_ratified_commit"))
-    return out
+                ctx.add("R-LINT-002", "fail", rel, ctx.key_line(rel, "status"),
+                        "status: ratified without last_ratified_commit")
 
 
-def _r003(ctx):
-    out = []
-    rows = ctx.query(
-        "SELECT e.edge_type, e.source_id, e.target_id, n.id "
+def rule_003(ctx):
+    rows = ctx.q(
+        "SELECT DISTINCT e.source_id, e.target_id, e.edge_type, n.status "
         "FROM edges e LEFT JOIN nodes n ON n.id = e.target_id "
         "WHERE e.edge_type IN ('depends_on', 'realizes', 'uses_var') "
         "AND (n.id IS NULL OR n.status = 'deprecated') "
         "ORDER BY e.source_id, e.edge_type, e.target_id"
     )
-    for edge_type, source, target, node in rows:
-        out.append(_ref_finding("R-LINT-003", ctx.id_index[source], edge_type, target, node is None))
-    # D13 residual: architecture docs' own depends_on (not in nodes/edges).
-    for doc in ctx.of_type("architecture"):
-        for target in _list(_fm(doc), "depends_on"):
-            found = ctx.id_index.get(target)
-            if found is None or _fm(found).get("status") == "deprecated":
-                out.append(_ref_finding("R-LINT-003", doc, "depends_on", target, found is None))
-    return out
+    for src, tgt, etype, status in rows:
+        rel = _comp_file(src)
+        what = "is deprecated" if status == "deprecated" else "does not exist"
+        ctx.add("R-LINT-003", "fail", rel, ctx.key_line(rel, etype),
+                f"{etype} references '{tgt}', which {what}")
+    # Residual native check (D13): architecture-doc depends_on.
+    id_index = _g(ctx.corpus, "id_index")
+    for d in ctx.of_type("architecture"):
+        rel = _g(d, "rel_path")
+        for dep in _g(d, "frontmatter").get("depends_on") or []:
+            target = id_index.get(dep)
+            if target is None:
+                ctx.add("R-LINT-003", "fail", rel, ctx.key_line(rel, "depends_on"),
+                        f"depends_on references '{dep}', which does not exist")
+            elif _g(target, "frontmatter").get("status") == "deprecated":
+                ctx.add("R-LINT-003", "fail", rel, ctx.key_line(rel, "depends_on"),
+                        f"depends_on references '{dep}', which is deprecated")
 
 
-def _r004(ctx):
-    out = []
-    rows = ctx.query(
-        "WITH RECURSIVE dep AS ("
-        "  SELECT DISTINCT source_id, target_id FROM edges WHERE edge_type = 'depends_on'"
-        "), reach(start_id, cur_id) AS ("
-        "  SELECT source_id, target_id FROM dep"
-        "  UNION"
-        "  SELECT r.start_id, d.target_id FROM reach r JOIN dep d ON d.source_id = r.cur_id"
-        ") "
-        "SELECT a.start_id, a.cur_id FROM reach a "
-        "JOIN reach b ON a.start_id = b.cur_id AND a.cur_id = b.start_id "
+def rule_004(ctx):
+    rows = ctx.q(
+        "WITH RECURSIVE reach(src, dst) AS ("
+        " SELECT source_id, target_id FROM edges WHERE edge_type = 'depends_on'"
+        " UNION"
+        " SELECT r.src, e.target_id FROM reach r JOIN edges e"
+        " ON e.source_id = r.dst AND e.edge_type = 'depends_on'"
+        ") SELECT a.src, a.dst FROM reach a JOIN reach b"
+        " ON a.src = b.dst AND a.dst = b.src"
+    )
+    mutual: dict = {}
+    for a, b in rows:
+        mutual.setdefault(a, set()).add(b)
+    for cycle in sorted({tuple(sorted(s)) for s in mutual.values()}):
+        rel = _comp_file(cycle[0])
+        ctx.add("R-LINT-004", "fail", rel, ctx.key_line(rel, "depends_on"),
+                "depends_on cycle: " + ", ".join(cycle))
+    # Residual native check (D13): architecture-doc depends_on.
+    arch = {_g(d, "doc_id"): _g(d, "rel_path") for d in ctx.of_type("architecture")}
+    pairs = [
+        (_g(d, "doc_id"), dep)
+        for d in ctx.of_type("architecture")
+        for dep in _g(d, "frontmatter").get("depends_on") or []
+    ]
+    for cycle in _native_cycles(pairs):
+        rel = arch[cycle[0]]
+        ctx.add("R-LINT-004", "fail", rel, ctx.key_line(rel, "depends_on"),
+                "depends_on cycle: " + ", ".join(cycle))
+
+
+def rule_005_006(ctx):
+    for d in ctx.of_type("component-root"):
+        fm = _g(d, "frontmatter")
+        rel = _g(d, "rel_path")
+        sealed = fm.get("sealed") is True
+        if sealed and not fm.get("source_path"):
+            ctx.add("R-LINT-005", "fail", rel, ctx.key_line(rel, "sealed"),
+                    "sealed: true without source_path")
+        if not sealed and "source_path" in fm:
+            ctx.add("R-LINT-005", "fail", rel, ctx.key_line(rel, "source_path"),
+                    "source_path set but sealed is not true")
+        if not sealed and not fm.get("realizes"):
+            ctx.add("R-LINT-006", "fail", rel, ctx.key_line(rel, "realizes"),
+                    "non-sealed component has no realizes entries")
+
+
+def _unit_ids(ctx, rule_id, doc_type, prefix):
+    pat = re.compile(rf"^{prefix}-[A-Z][A-Z0-9]*(?:-[A-Z0-9]+)*-\d{{3}}$")
+    units = ctx.of_type(doc_type)
+    counts = Counter(Path(_g(d, "rel_path")).stem for d in units)
+    for d in units:
+        rel = _g(d, "rel_path")
+        stem = Path(rel).stem
+        lines = ctx.lines(rel)
+        if not pat.match(stem):
+            ctx.add(rule_id, "fail", rel, 1, f"filename '{stem}' is not a {prefix}-<comp>-NNN id")
+        if counts[stem] > 1:
+            ctx.add(rule_id, "fail", rel, 1, f"id '{stem}' is not unique")
+        line_no, heading = next(
+            ((i + 1, l) for i, l in enumerate(lines) if l.startswith("# ")), (1, "")
+        )
+        if heading[2:].strip() != stem:
+            ctx.add(rule_id, "fail", rel, line_no, f"heading does not match filename '{stem}'")
+        if not RFC.search("\n".join(lines)):
+            ctx.add(rule_id, "fail", rel, 1, f"'{stem}' uses no RFC 2119 keyword")
+
+
+def rule_007(ctx):
+    _unit_ids(ctx, "R-LINT-007", "component-requirement", "R")
+
+
+def rule_017(ctx):
+    _unit_ids(ctx, "R-LINT-017", "component-interface-guarantee", "G")
+
+
+def rule_008(ctx):
+    files = {_g(d, "doc_id"): _g(d, "rel_path") for d in ctx.of_type("component-requirement")}
+    rows = ctx.q(
+        "SELECT DISTINCT n.id FROM nodes n WHERE n.kind = 'requirement' "
+        "AND n.id NOT IN (SELECT target_id FROM edges "
+        "WHERE edge_type = 'covers' AND target_id IS NOT NULL) ORDER BY n.id"
+    )
+    for (rid,) in rows:
+        ctx.add("R-LINT-008", "fail", files[rid], 1,
+                f"{rid} has no covering acceptance criterion")
+
+
+def rule_009(ctx):
+    locs = {}
+    for d in ctx.of_type("component-acceptance"):
+        rel = _g(d, "rel_path")
+        lines = ctx.lines(rel)
+        idx = next((i for i, l in enumerate(lines) if "Covers:" in l), 0)
+        locs[_g(d, "doc_id")] = (rel, idx + 1)
+    for d in ctx.of_type("product"):
+        rel = _g(d, "rel_path")
+        lines = ctx.lines(rel)
+        for i, l in enumerate(lines):
+            m = re.match(r"^###\s+(CS-[\w-]+)", l)
+            if m:
+                line_no = i + 1
+                for j in range(i + 1, len(lines)):
+                    if lines[j].startswith("#"):
+                        break
+                    if "Covers:" in lines[j]:
+                        line_no = j + 1
+                        break
+                locs[m.group(1)] = (rel, line_no)
+    rows = ctx.q(
+        "SELECT DISTINCT e.source_id, e.target_id FROM edges e "
+        "WHERE e.edge_type = 'covers' AND e.target_id NOT IN "
+        "(SELECT id FROM nodes WHERE kind IN ('requirement', 'capability')) "
         "ORDER BY 1, 2"
     )
-    groups = {}
-    for a, b in rows:
-        groups.setdefault(a, set()).add(b)
-    for members in sorted({tuple(sorted(m)) for m in groups.values()}):
-        doc = ctx.id_index[members[0]]
-        out.append(_f("R-LINT-004", _rel(doc), _fm_line(_lines(doc), "depends_on"), "depends_on cycle among " + ", ".join(members)))
-    # D13 residual: architecture docs' own depends_on.
-    arch = {_get(d, "doc_id"): d for d in ctx.of_type("architecture")}
-    adj = {i: _list(_fm(d), "depends_on") for i, d in arch.items()}
-    for members in _native_sccs(adj):
-        doc = arch[members[0]]
-        out.append(_f("R-LINT-004", _rel(doc), _fm_line(_lines(doc), "depends_on"), "depends_on cycle among " + ", ".join(members)))
-    return out
-
-
-def _r005_006(ctx):
-    out = []
-    for doc in ctx.of_type("component-root"):
-        fm, lines = _fm(doc), _lines(doc)
-        sealed = fm.get("sealed") is True
-        source = bool(fm.get("source_path"))
-        if sealed and not source:
-            out.append(_f("R-LINT-005", _rel(doc), _fm_line(lines, "sealed"), "sealed: true without source_path"))
-        if source and not sealed:
-            out.append(_f("R-LINT-005", _rel(doc), _fm_line(lines, "source_path"), "source_path set but sealed is not true"))
-        if not sealed and not _list(fm, "realizes"):
-            out.append(_f("R-LINT-006", _rel(doc), _fm_line(lines, "realizes"), "non-sealed component has no realizes entries"))
-    return out
-
-
-def _unit_ids(ctx, rule_id, subdir, prefix):
-    pattern = re.compile(rf"{prefix}-[A-Z0-9]+(?:-[A-Z0-9]+)*-\d{{3}}")
-    out, seen = [], set()
-    for name in sorted(ctx.components):
-        for path in sorted((ctx.root / "specs" / "components" / name / subdir).glob("*.md")):
-            if path.name == "README.md":
-                continue
-            rel = path.relative_to(ctx.root).as_posix()
-            lines = path.read_text(encoding="utf-8").splitlines()
-            stem = path.stem
-            if not pattern.fullmatch(stem):
-                out.append(_f(rule_id, rel, 1, f"filename '{path.name}' is not a {prefix}-<comp>-NNN id"))
-            elif stem in seen:
-                out.append(_f(rule_id, rel, 1, f"duplicate id '{stem}'"))
-            seen.add(stem)
-            number, heading = next(
-                ((n, l) for n, l in enumerate(lines, 1) if l.startswith("# ")), (1, "")
-            )
-            if heading[2:].strip() != stem:
-                out.append(_f(rule_id, rel, number, f"heading does not match id '{stem}'"))
-            if not _RFC2119.search("\n".join(lines)):
-                out.append(_f(rule_id, rel, 1, "no RFC 2119 keyword"))
-    return out
-
-
-def _r007(ctx):
-    return _unit_ids(ctx, "R-LINT-007", "requirements", "R")
-
-
-def _r017(ctx):
-    return _unit_ids(ctx, "R-LINT-017", "interface/guarantees", "G")
-
-
-def _r008(ctx):
-    files = {_get(d, "doc_id"): _rel(d) for d in ctx.of_type("component-requirement")}
-    rows = ctx.query(
-        "SELECT n.id FROM nodes n WHERE n.kind = 'requirement' "
-        "AND NOT EXISTS (SELECT 1 FROM edges e WHERE e.edge_type = 'covers' AND e.target_id = n.id) "
-        "ORDER BY n.id"
-    )
-    return [
-        _f("R-LINT-008", files[rid], 1, f"{rid} has no covering acceptance criterion")
-        for (rid,) in rows
-    ]
-
-
-def _r009(ctx):
-    locations = {}
-    for doc in ctx.of_type("component-acceptance"):
-        locations[_get(doc, "doc_id")] = (_rel(doc), _covers_line(_lines(doc), 1))
-    for doc in ctx.of_type("product"):
-        lines = _lines(doc)
-        for number, line in enumerate(lines, 1):
-            m = re.match(r"###\s+(CS-[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*)", line)
-            if m:
-                locations[m.group(1)] = (_rel(doc), _covers_line(lines, number))
-    rows = ctx.query(
-        "SELECT e.source_id, e.target_id FROM edges e WHERE e.edge_type = 'covers' "
-        "AND NOT EXISTS (SELECT 1 FROM nodes n WHERE n.id = e.target_id "
-        "AND n.kind IN ('requirement', 'capability')) "
-        "ORDER BY e.source_id, e.target_id"
-    )
-    out = []
-    for source, target in rows:
-        file, line = locations.get(source, (source, 1))
-        if target.startswith("R-"):
-            message = f"Covers: references R-id '{target}', which does not exist"
-        elif target.startswith("P-"):
-            message = f"Covers: references P-id '{target}', which does not exist"
+    for src, tgt in rows:
+        rel, line_no = locs[src]
+        if tgt.startswith("R-"):
+            msg = f"Covers: '{tgt}' does not resolve to a real R-id"
+        elif tgt.startswith("P-"):
+            msg = f"Covers: '{tgt}' does not resolve to a real P-id"
         else:
-            message = f"Covers: target '{target}' is neither an R-id nor a P-id"
-        out.append(_f("R-LINT-009", file, line, message))
-    return out
+            msg = f"Covers: '{tgt}' is neither an R-id nor a P-id"
+        ctx.add("R-LINT-009", "fail", rel, line_no, msg)
 
 
-def _r010(ctx):
-    out = []
-    for doc in ctx.of_type("component-acceptance"):
-        text = "\n".join(_lines(doc))
-        if not re.search(r"^Kind:\s*(compiled|generated-test|llm-judge)\s*$", text, re.M):
-            out.append(_f("R-LINT-010", _rel(doc), 1, "acceptance criterion has no Kind:"))
-        missing = [kw for kw in ("Given", "When", "Then") if not re.search(rf"^\s*{kw}\b", text, re.M)]
-        if missing:
-            out.append(_f("R-LINT-010", _rel(doc), 1, "incomplete Given/When/Then block, missing " + ", ".join(missing)))
-    return out
+def rule_010(ctx):
+    for d in ctx.of_type("component-acceptance"):
+        rel = _g(d, "rel_path")
+        lines = ctx.lines(rel)
+        ci = next((i for i, l in enumerate(lines) if "Covers:" in l), 0)
+        if not any(KIND_LINE.match(l) for l in lines[ci:]):
+            ctx.add("R-LINT-010", "fail", rel, 1, "acceptance criterion has no Kind: line")
+        text = "\n".join(lines)
+        for kw in ("Given", "When", "Then"):
+            if not re.search(rf"^\s*{kw}\b", text, re.M):
+                ctx.add("R-LINT-010", "fail", rel, 1,
+                        f"acceptance criterion's Given/When/Then block has no {kw} step")
 
 
-def _r011_015(ctx):
-    out = []
-    for doc in ctx.of_type("component-root"):
-        for number, term, text in _definitions(_lines(doc)):
-            gloss = ctx.glossary_defs.get(term.lower())
-            if gloss is None:
+def _definition_entries(sec):
+    entries = []
+    for line_no, text in sec:
+        m = ENTRY.match(text)
+        if m:
+            entries.append([m.group(1).strip(), line_no, [m.group(2).lstrip("—- \t")]])
+        elif entries:
+            entries[-1][2].append(text)
+    return [(t, ln, "\n".join(parts).strip()) for t, ln, parts in entries]
+
+
+def rule_011_015(ctx):
+    glossary = _g(ctx.corpus, "glossary_defs")
+    for d in ctx.of_type("component-root"):
+        rel = _g(d, "rel_path")
+        _, sec = _section(ctx.lines(rel), "Definitions")
+        for term, line_no, local in _definition_entries(sec):
+            key = term.lower()
+            if key not in glossary:
                 continue
-            gloss_tokens = _tokens(gloss)
-            ratio = len(_tokens(text) & gloss_tokens) / max(len(gloss_tokens), 1)
-            if ratio >= 0.8:
-                out.append(_f("R-LINT-011", _rel(doc), number, f"Definitions entry '{term}' restates the glossary definition (overlap {ratio:.2f})"))
-            elif ctx.judge is None:
-                out.append(_f("R-LINT-015", _rel(doc), number, f"skipped: no model configured to judge Definitions entry '{term}'", "skipped"))
-            else:
-                verdict = ctx.judge(term, text, gloss)
-                if verdict is None:
-                    out.append(_f("R-LINT-015", _rel(doc), number, f"skipped: judge could not evaluate Definitions entry '{term}'", "skipped"))
-                else:
-                    conflicts, rationale = verdict
-                    if conflicts:
-                        out.append(_f("R-LINT-015", _rel(doc), number, f"Definitions entry '{term}' conflicts with the glossary definition", "fail", rationale))
-    return out
+            gloss = glossary[key]
+            g_tokens = set(re.findall(r"\w+", gloss.lower()))
+            l_tokens = set(re.findall(r"\w+", local.lower()))
+            if len(g_tokens & l_tokens) / max(len(g_tokens), 1) >= 0.8:
+                ctx.add("R-LINT-011", "fail", rel, line_no,
+                        f"Definitions entry for '{term}' restates the glossary definition")
+                continue
+            if ctx.judge is None:
+                ctx.add("R-LINT-015", "skipped", rel, line_no,
+                        f"meaning check for '{term}' skipped: no model configured")
+                continue
+            result = ctx.judge(term, local, gloss)
+            if result is None:
+                ctx.add("R-LINT-015", "skipped", rel, line_no,
+                        f"meaning check for '{term}' skipped: the judge could not decide")
+                continue
+            conflicts, rationale = result
+            if conflicts:
+                ctx.add("R-LINT-015", "fail", rel, line_no,
+                        f"Definitions entry for '{term}' conflicts with the glossary definition",
+                        rationale)
 
 
-def _r013(ctx):
-    out = []
-    for doc in ctx.of_type("var"):
-        fields = {}
-        for number, line in enumerate(_lines(doc), 1):
-            m = re.match(r"\s*-\s+(\w+)\s*:\s*(.*)$", re.sub(r"[*`]", "", line))
+def rule_013(ctx):
+    for d in ctx.of_type("var"):
+        rel = _g(d, "rel_path")
+        fields: dict = {}
+        for i, l in enumerate(ctx.lines(rel)):
+            m = BULLET.match(l)
             if m:
-                fields.setdefault(m.group(1).lower(), (number, m.group(2).strip().lower()))
-        if fields.get("sensitivity", (0, ""))[1].startswith("secret"):
-            for name in ("example", "default"):
-                if name in fields:
-                    out.append(_f("R-LINT-013", _rel(doc), fields[name][0], f"sensitivity: secret declaration carries '{name}'"))
-    return out
+                fields.setdefault(m.group(1).lower(), (i + 1, m.group(2).strip(" `*")))
+        if fields.get("sensitivity", (0, ""))[1] == "secret":
+            for f in ("example", "default"):
+                if f in fields:
+                    ctx.add("R-LINT-013", "fail", rel, fields[f][0],
+                            f"sensitivity: secret declaration carries a '{f}' field")
 
 
-def _abs_rel(ctx, path):
-    return Path(path).resolve().relative_to(ctx.root.resolve()).as_posix()
-
-
-def _r014(ctx):
-    files = sorted(Path(p) for p in ctx.glossary_files)
-    split = any(
-        re.search(r"bounded[- ]context", _get(d, "body"), re.I)
-        for d in ctx.of_type("architecture")
+def rule_014(ctx):
+    files = sorted(
+        Path(p).resolve().relative_to(ctx.repo_root).as_posix()
+        for p in _g(ctx.corpus, "glossary_files")
     )
-    if len(files) > 1 and not split:
-        return [
-            _f("R-LINT-014", _abs_rel(ctx, p), 1, "more than one glossary file without an architecture-level bounded-context split decision")
-            for p in files
-            if p.name != "glossary.md"
-        ]
-    return []
+    if len(files) > 1:
+        split = any(
+            re.search(r"bounded[- ]context", _g(d, "body").lower())
+            for d in ctx.of_type("architecture")
+        )
+        if not split:
+            ctx.add("R-LINT-014", "fail", files[1], 1,
+                    "more than one glossary file (" + ", ".join(files)
+                    + ") without an architecture-level bounded-context split decision")
 
 
-def _r016(ctx):
-    return [
-        _f("R-LINT-016", _rel(doc), 1, "unit file carries a frontmatter block")
-        for doc in ctx.of_type(*_UNIT_TYPES)
-        if _get(doc, "has_frontmatter")
-    ]
+def rule_016(ctx):
+    for d in ctx.of_type(*UNIT_TYPES):
+        if _g(d, "has_frontmatter"):
+            ctx.add("R-LINT-016", "fail", _g(d, "rel_path"), 1,
+                    "unit file carries a frontmatter block")
 
 
-def _r018(ctx):
-    rows = ctx.query(
-        "SELECT e.source_id, e.target_id, n.owner_component_id, "
+def rule_018(ctx):
+    rows = ctx.q(
+        "SELECT DISTINCT e.source_id, e.target_id, n.id, n.owner_component_id, "
         "EXISTS (SELECT 1 FROM edges d WHERE d.edge_type = 'depends_on' "
-        "AND d.source_id = e.source_id AND d.target_id = n.owner_component_id) AS listed "
+        "AND d.source_id = e.source_id AND d.target_id = n.owner_component_id) "
         "FROM edges e LEFT JOIN nodes n ON n.id = e.target_id AND n.kind = 'guarantee' "
-        "WHERE e.edge_type = 'depends_on_guarantees' "
-        "ORDER BY e.source_id, e.target_id"
+        "WHERE e.edge_type = 'depends_on_guarantees' ORDER BY 1, 2"
     )
-    out = []
-    for source, target, owner, listed in rows:
-        doc = ctx.id_index[source]
-        line = _fm_line(_lines(doc), "depends_on_guarantees")
-        if owner is None:
-            out.append(_f("R-LINT-018", _rel(doc), line, f"depends_on_guarantees references '{target}', which does not exist"))
+    for src, tgt, nid, owner, listed in rows:
+        rel = _comp_file(src)
+        line_no = ctx.key_line(rel, "depends_on_guarantees")
+        if nid is None:
+            ctx.add("R-LINT-018", "fail", rel, line_no,
+                    f"depends_on_guarantees references '{tgt}', which does not exist")
         elif not listed:
-            out.append(_f("R-LINT-018", _rel(doc), line, f"depends_on_guarantees references '{target}', owned by {owner}, which is not in depends_on"))
-    return out
+            ctx.add("R-LINT-018", "fail", rel, line_no,
+                    f"depends_on_guarantees references '{tgt}', owned by {owner}, "
+                    f"which is not in depends_on")
 
 
-def _r019(ctx):
-    files = [(_rel(d), Path(_get(d, "path"))) for d in ctx.docs]
-    files += [(_abs_rel(ctx, p), Path(p)) for p in ctx.glossary_files]
-    out = []
-    for rel, path in files:
-        for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
-            if line != line.rstrip():
-                out.append(_f("R-LINT-019", rel, number, "trailing whitespace"))
-    return out
+def rule_019(ctx):
+    rels = [_g(d, "rel_path") for d in ctx.docs] + [
+        Path(p).resolve().relative_to(ctx.repo_root).as_posix()
+        for p in _g(ctx.corpus, "glossary_files")
+    ]
+    for rel in rels:
+        for i, l in enumerate(ctx.lines(rel)):
+            if l != l.rstrip():
+                ctx.add("R-LINT-019", "fail", rel, i + 1, "line ends in trailing whitespace")
 
 
-def _r024(ctx):
-    out = []
-    for doc in ctx.of_type("component-root"):
-        _, body = _section(_lines(doc), "Purpose")
-        for number, line in body:
-            if re.search(r"\bD\d+\b", line):
-                out.append(_f("R-LINT-024", _rel(doc), number, "Purpose cites a decision id; move it to Rationale"))
-    return out
+def rule_024(ctx):
+    for d in ctx.of_type("component-root"):
+        rel = _g(d, "rel_path")
+        _, sec = _section(ctx.lines(rel), "Purpose")
+        for line_no, text in sec:
+            for m in DECISION.finditer(text):
+                ctx.add("R-LINT-024", "fail", rel, line_no,
+                        f"Purpose cites decision {m.group(0)}; move it to Rationale")
 
 
-def _r031(ctx):
-    covered = {t for (t,) in ctx.query("SELECT DISTINCT target_id FROM edges WHERE edge_type = 'covers'")}
-    out = []
-    for name in sorted(ctx.components):
-        comp = ctx.components[name]
-        cli = _get(comp, "interface_cli")
+def rule_031(ctx):
+    covered = {r[0] for r in ctx.q("SELECT DISTINCT target_id FROM edges WHERE edge_type = 'covers'")}
+    for slug, comp in sorted(_g(ctx.corpus, "components").items()):
+        cli = _g(comp, "interface_cli")
         if cli is None:
             continue
-        requirements = _get(comp, "requirements")
-        if not any(
-            rid in covered and "interface/cli.md" in _get(req, "body")
-            for rid, req in requirements.items()
-        ):
-            out.append(_f("R-LINT-031", _rel(cli), 1, f"comp-{name}: no covered requirement cites interface/cli.md (see SPEC_GUIDELINES.md §5)", "warn"))
-    return out
+        ok = any(
+            "interface/cli.md" in _g(r, "body") and _g(r, "doc_id") in covered
+            for r in _g(comp, "requirements").values()
+        )
+        if not ok:
+            ctx.add("R-LINT-031", "warn", _g(cli, "rel_path"), 1,
+                    f"comp-{slug} has interface/cli.md but no covered requirement citing it "
+                    f"(SPEC_GUIDELINES.md §5)")
 
 
-def _r032(ctx):
-    out = []
-    if (ctx.root / ".hotdocs-tool.json").exists():
-        tool_gen = _tool_root() / "gen"
-        for name in sorted(ctx.components):
-            if (tool_gen / name).is_dir():
-                out.append(_f("R-LINT-032", f"specs/components/{name}/component.md", 1, f"component '{name}' would shadow the tool's own gen/{name}/"))
-    return out
+def rule_032(ctx):
+    if (ctx.repo_root / ".hotdocs-tool.json").exists():
+        gen = _tool_root() / "gen"
+        for slug in sorted(_g(ctx.corpus, "components")):
+            if (gen / slug).is_dir():
+                ctx.add("R-LINT-032", "fail", f"specs/components/{slug}/component.md", 1,
+                        f"component '{slug}' would shadow the tool's gen/{slug}/")
+
+
+def rule_034(ctx):
+    tool = _tool_root()
+    for d in ctx.of_type("component-root"):
+        fm = _g(d, "frontmatter")
+        if "assets" not in fm:
+            continue
+        rel = _g(d, "rel_path")
+        line_no = ctx.key_line(rel, "assets")
+
+        def add(msg):
+            ctx.add("R-LINT-034", "fail", rel, line_no, msg)
+
+        assets = fm["assets"]
+        if not isinstance(assets, list):
+            add("assets must be a list of <kind>:<path> strings")
+            continue
+        deps = fm.get("depends_on") or []
+        seen: set = set()
+        for entry in assets:
+            kind, sep, path = entry.partition(":")
+            if not sep or not KIND_NAME.fullmatch(kind) or not path:
+                add(f"asset '{entry}' is not <kind>:<path>")
+                continue
+            if path.startswith("/") or "\\" in path:
+                add(f"asset '{entry}': path must be relative with / separators")
+            if ".." in path.split("/"):
+                add(f"asset '{entry}': path contains ..")
+            if path.endswith(".py"):
+                add(f"asset '{entry}': path ends in .py")
+            if kind == "python":
+                add(f"asset '{entry}': python is never declared")
+                continue
+            if kind in seen:
+                continue
+            seen.add(kind)
+            defn = ctx.repo_root / "specs" / "architecture" / f"asset-kind-{kind}.md"
+            adapter = Path("gen") / f"kind-{kind}" / f"kind_{kind}.py"
+            if not defn.exists() and not (ctx.repo_root / adapter).exists() \
+                    and not (tool / adapter).exists():
+                add(f"asset kind '{kind}' has no definition")
+            if defn.exists():
+                dl = defn.read_text(encoding="utf-8").splitlines()
+                for name in ASSET_SECTIONS:
+                    heading, sec = _section(dl, name)
+                    if heading is None:
+                        add(f"asset kind '{kind}' definition lacks section '{name}'")
+                    elif not any(t.strip() for _, t in sec):
+                        add(f"asset kind '{kind}' definition has empty section '{name}'")
+                if f"comp-kind-{kind}" not in deps:
+                    add(f"asset kind '{kind}' is defined in this repository; "
+                        f"depends_on must list comp-kind-{kind}")
 
 
 _RULES = (
-    _r001, _r002, _r003, _r004, _r005_006, _r007, _r008, _r009, _r010,
-    _r011_015, _r013, _r014, _r016, _r017, _r018, _r019, _r024, _r031, _r032,
+    rule_001, rule_002, rule_003, rule_004, rule_005_006, rule_007, rule_008,
+    rule_009, rule_010, rule_011_015, rule_013, rule_014, rule_016, rule_017,
+    rule_018, rule_019, rule_024, rule_031, rule_032, rule_034,
 )
 
-# --------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
 # Library entry point
-# --------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
 
 
-def _within(target, scopes):
-    return any(target == scope or scope in target.parents for scope in scopes)
-
-
-def lint(paths: Optional[List[Path]], repo_root: Path, strict: bool = False, judge=None) -> LintReport:
-    root = Path(repo_root)
-    corpus = _dep(root, "corpus-loader", "corpus_loader").load_corpus(root)
-    ctx = _Ctx(root, corpus, judge)
-    findings = sorted(
-        (f for rule in _RULES for f in rule(ctx)),
-        key=lambda f: (f.file, f.line, f.rule_id, f.message),
-    )
-    for slug, module_name in (("citation-checker", "citation_checker"), ("size-checker", "size_checker")):
-        for item in _dep(root, slug, module_name).check(root):
-            findings.append(
-                Finding(
-                    _get(item, "rule_id"),
-                    _get(item, "severity"),
-                    _get(item, "file"),
-                    _get(item, "line"),
-                    _get(item, "message"),
-                )
-            )
+def lint(paths, repo_root, strict: bool = False, judge=None) -> LintReport:
+    repo_root = Path(repo_root).resolve()
+    corpus = _load_dep("corpus-loader", repo_root).load_corpus(repo_root)
+    ctx = _Ctx(repo_root, corpus, judge)
+    for rule in _RULES:
+        rule(ctx)
+    findings = ctx.findings
+    for slug in ("citation-checker", "size-checker"):
+        for item in _load_dep(slug, repo_root).check(repo_root):
+            findings.append(Finding(
+                _g(item, "rule_id"), _g(item, "severity"), _g(item, "file"),
+                _g(item, "line"), _g(item, "message"),
+            ))
     if paths is not None:
-        scopes = [(root / p).resolve() for p in paths]
-        findings = [f for f in findings if _within((root / f.file).resolve(), scopes)]
+        roots = [(Path(p) if Path(p).is_absolute() else repo_root / p).resolve() for p in paths]
+
+        def within(f):
+            target = (repo_root / f.file).resolve()
+            return any(target == r or r in target.parents for r in roots)
+
+        findings = [f for f in findings if within(f)]
     return LintReport(findings, strict)
 
 
-# --------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
 # CLI
-# --------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+
+USAGE = "usage: hotdocs lint [<path>...] [--format=json|text] [--strict] [--repo-root=<dir>]"
 
 
-def _git_root():
-    return subprocess.run(
-        ["git", "rev-parse", "--show-toplevel"], capture_output=True, text=True
-    ).stdout.strip()
+def _usage(cause: str) -> int:
+    print(f"usage error: {cause}", file=sys.stderr)
+    print(USAGE, file=sys.stderr)
+    return 2
 
 
 def main(argv=None) -> int:
-    parser = argparse.ArgumentParser(prog="hotdocs lint")
-    parser.add_argument("paths", nargs="*")
-    parser.add_argument("--format", choices=("json", "text"), default="text")
-    parser.add_argument("--strict", action="store_true")
-    parser.add_argument("--repo-root")
-    try:
-        args = parser.parse_args(sys.argv[1:] if argv is None else argv)
-    except SystemExit:
-        return 2
-    repo_root = Path(args.repo_root or _git_root())
-    paths = [Path(p).resolve() for p in args.paths]
-    if not repo_root.is_dir() or any(not p.exists() for p in paths):
-        print("hotdocs lint: unreadable path", file=sys.stderr)
-        return 2
-    report = lint(paths or None, repo_root, strict=args.strict)
-    if args.format == "json":
+    args = sys.argv[1:] if argv is None else list(argv)
+    fmt = "text"
+    strict = False
+    repo = None
+    paths = []
+    i = 0
+    while i < len(args):
+        arg = args[i]
+        name, eq, val = arg.partition("=")
+        if arg == "--strict":
+            strict = True
+        elif name in ("--format", "--repo-root"):
+            if not eq:
+                if i + 1 >= len(args):
+                    return _usage(f"{name} needs a value")
+                i += 1
+                val = args[i]
+            if name == "--format":
+                if val not in ("json", "text"):
+                    return _usage(f"--format must be json or text, not '{val}'")
+                fmt = val
+            else:
+                repo = Path(val)
+        elif arg.startswith("-"):
+            return _usage(f"unknown argument '{arg}'")
+        else:
+            paths.append(Path(arg))
+        i += 1
+    if repo is None:
+        out = subprocess.run(["git", "rev-parse", "--show-toplevel"],
+                             capture_output=True, text=True)
+        if out.returncode != 0:
+            return _usage("not in a git repository; pass --repo-root")
+        repo = Path(out.stdout.strip())
+    if not repo.is_dir():
+        return _usage(f"unreadable path '{repo}'")
+    for p in paths:
+        if not (p if p.is_absolute() else repo / p).exists():
+            return _usage(f"unreadable path '{p}'")
+    report = lint(paths or None, repo, strict=strict)
+    if fmt == "json":
         print(json.dumps(report.to_json(), indent=2))
     else:
         for f in report.findings:
-            print(f"{f.file}:{f.line}: {f.severity} {f.rule_id}: {f.message}")
-        print(
-            f"{report.hard_failures} hard failure(s), "
-            f"{report.warnings} warning(s), {report.skipped} skipped"
-        )
+            print(f"{f.file}:{f.line}: {f.severity} {f.rule_id} {f.message}")
+        print(f"{report.hard_failures} hard failure(s), {report.warnings} warning(s), "
+              f"{report.skipped} skipped")
     return 1 if report.hard_failures else 0
 
 

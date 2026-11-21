@@ -7,7 +7,7 @@
   `capability_id` — no `specs/product/*.md` whose frontmatter `id` is it
   — raises `UnknownCapabilityError` from both.
 
-  `check_capability_provenance` is a pure read. It returns `hit` `true`
+  `check_capability_provenance` is a pure read, `provision` aside. It returns `hit` `true`
   iff the committed record (`R-SCENARIO-006`) is a readable JSON object
   whose `gate_version` and `content_hash` both equal the current ones,
   and then carries the record's `capability_scenario_report`. Any other

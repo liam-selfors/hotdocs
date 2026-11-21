@@ -9,6 +9,4 @@
   never the component's current `gen/<component>/` content from any
   other source.
 
-  `retry_feedback` (`R-GEN-012`) is no exception: it carries no code,
-  only a bare `R-id` list a caller supplies, so a `cold` call that
-  includes it is still built from nothing but the current bundle.
+  `retry_feedback` (`R-GEN-012`), a bare `R-id` list, is allowed.

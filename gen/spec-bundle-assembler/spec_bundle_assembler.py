@@ -1,6 +1,5 @@
-"""Spec Bundle Assembler: builds a component's SpecBundle or CriterionBundle from the spec corpus."""
+"""Spec Bundle Assembler: builds a component's SpecBundle and CriterionBundle."""
 
-import argparse
 import dataclasses
 import hashlib
 import importlib.util
@@ -8,63 +7,57 @@ import inspect
 import json
 import re
 import sys
-from collections.abc import Mapping
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
 
-__all__ = [
-    "PreconditionFailure",
-    "UsageError",
-    "SpecBundle",
-    "CriterionBundle",
-    "assemble",
-    "assemble_criterion",
-    "main",
-]
+USAGE = (
+    "usage: hotdocs assemble <component-id> [--mode=cold|hint] "
+    "[--repo-root=<dir>] [--format=json|text]"
+)
+
+_EXCLUDED_SECTIONS = {"Rationale", "Open questions", "Change log"}
+_IDENTIFIER = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+_BACKTICKED = re.compile(r"`([^`]+)`")
 
 
 class PreconditionFailure(Exception):
-    """Assembly refused: the corpus is not lint-clean or a named document is missing."""
+    """Raised when a bundle cannot be assembled from the corpus as it stands."""
 
 
-class UsageError(ValueError):
-    """The requested component id does not exist in the corpus."""
+class UnknownComponentError(LookupError):
+    """Raised when the requested component id names no component in the corpus."""
 
 
-class _ReadOnlyMapping(Mapping):
-    """Read-only mapping view over a dataclass's fields, in field order."""
-
+class _ReadOnlyMapping:
     def __getitem__(self, key):
-        return {f.name: getattr(self, f.name) for f in dataclasses.fields(self)}[key]
+        if key in {f.name for f in dataclasses.fields(self)}:
+            return getattr(self, key)
+        raise KeyError(key)
 
-    def __iter__(self):
-        return iter([f.name for f in dataclasses.fields(self)])
+    def get(self, key, default=None):
+        try:
+            return self[key]
+        except KeyError:
+            return default
 
-    def __len__(self):
-        return len(dataclasses.fields(self))
 
-
-@dataclasses.dataclass
+@dataclass
 class SpecBundle(_ReadOnlyMapping):
-    """A component's full generation input (R-ASSEMBLE-001..014)."""
-
     component_id: str
     spec_bundle_hash: str
     spec: str
     interface: str
     constraints: str
-    dependency_interfaces: dict = dataclasses.field(default_factory=dict)
-    dependency_context: dict = dataclasses.field(default_factory=dict)
-    dependency_usage: dict = dataclasses.field(default_factory=dict)
-    vars: dict = dataclasses.field(default_factory=dict)
+    dependency_interfaces: dict = field(default_factory=dict)
+    dependency_context: dict = field(default_factory=dict)
+    dependency_usage: dict = field(default_factory=dict)
+    vars: dict = field(default_factory=dict)
     glossary: str = ""
-    hint_code: Optional[dict] = None
+    hint_code: dict = None
 
 
-@dataclasses.dataclass
+@dataclass
 class CriterionBundle(_ReadOnlyMapping):
-    """One acceptance criterion's narrow authoring input (R-ASSEMBLE-009)."""
-
     component_id: str
     criterion_id: str
     covers: str
@@ -72,293 +65,345 @@ class CriterionBundle(_ReadOnlyMapping):
     requirement_text: str
     interface: str
     glossary: str
-    dependency_interfaces: dict = dataclasses.field(default_factory=dict)
+    dependency_interfaces: dict = field(default_factory=dict)
+    testing: str = ""
 
 
-# ---------------------------------------------------------------------------
-# Dependency loading (R-ASSEMBLE-015)
-# ---------------------------------------------------------------------------
-
-_TOOL_MODULES = {}
-
-_IDENT = re.compile(r"(?<![A-Za-z0-9_])[A-Za-z_][A-Za-z0-9_]*")
-_DROPPED_SECTION = re.compile(r"^##\s+(Rationale|Open questions|Change log)\s*$")
-_SECTION_HEADING = re.compile(r"^#{1,2}\s")
+# --------------------------------------------------------------------------
+# helpers
 
 
-def _get(obj, name, default=None):
-    if isinstance(obj, Mapping):
-        return obj.get(name, default)
-    return getattr(obj, name, default)
+def _get(obj, key, default=None):
+    if isinstance(obj, dict):
+        return obj.get(key, default)
+    return getattr(obj, key, default)
 
 
 def _tool_root():
-    return next(p for p in Path(__file__).resolve().parents if p.name == "gen").parent
+    for parent in Path(__file__).absolute().parents:
+        if parent.name == "gen":
+            return parent.parent
 
 
-def _module_file(base, module_name):
-    flat = base / f"{module_name}.py"
-    return flat if flat.is_file() else base / module_name / "__init__.py"
+def _resolve_dir(repo_root, rel):
+    directory = repo_root / rel
+    if directory.is_dir():
+        return directory
+    return _tool_root() / rel
 
 
-def _exec_module(load_name, path):
-    spec = importlib.util.spec_from_file_location(load_name, path)
+def _find_module(directory, name):
+    for candidate in (
+        directory / f"{name}.py",
+        directory / name / "__init__.py",
+        directory / "__init__.py",
+    ):
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+def _exec_module(name, path):
+    spec = importlib.util.spec_from_file_location(name, path)
     module = importlib.util.module_from_spec(spec)
-    sys.modules[load_name] = module
+    sys.modules[name] = module
     spec.loader.exec_module(module)
     return module
 
 
-def _load_tool(slug, repo_root):
-    base = repo_root / "gen" / slug
-    if not base.is_dir():
-        base = _tool_root() / "gen" / slug
-    module_name = slug.replace("-", "_")
-    path = _module_file(base, module_name).resolve()
-    key = str(path)
-    if key not in _TOOL_MODULES:
-        digest = hashlib.sha256(key.encode("utf-8")).hexdigest()[:16]
-        _TOOL_MODULES[key] = _exec_module(f"_spec_bundle_assembler__{module_name}_{digest}", path)
-    return _TOOL_MODULES[key]
+def _load_dependency(slug, repo_root):
+    name = slug.replace("-", "_")
+    directory = _resolve_dir(repo_root, f"gen/{slug}")
+    return _exec_module(name, _find_module(directory, name))
 
 
-def _prepare(repo_root):
-    linter = _load_tool("spec-linter", repo_root)
-    engine = _load_tool("graph-query-engine", repo_root)
-    report = linter.lint(None, repo_root)
-    failures = _get(report, "hard_failures")
-    if failures:
-        raise PreconditionFailure(f"corpus is not lint-clean: {failures} hard failure(s)")
-    corpus = linter.load_corpus(repo_root)
-    engine.load_views(_get(corpus, "graph"), repo_root)
-    return corpus
+def _join(parts):
+    stripped = [p.strip() for p in parts]
+    return "\n\n".join(p for p in stripped if p)
 
 
-# ---------------------------------------------------------------------------
-# Corpus helpers
-# ---------------------------------------------------------------------------
+def _read(path):
+    if path.is_file():
+        return path.read_text(encoding="utf-8")
+    return ""
 
 
-def _component_index(corpus):
-    index = {}
-    components = _get(corpus, "components")
-    for name in sorted(components):
-        comp = _get(components, name)
-        fm = _get(_get(comp, "root"), "frontmatter")
-        index[_get(fm, "id")] = (name, comp, fm)
-    return index
+def _backticked(line):
+    return _BACKTICKED.findall(line)
 
 
-def _lookup(index, component_id):
-    if component_id not in index:
-        raise UsageError(f"unknown component id: {component_id}")
-    return index[component_id]
+def _named_docs(paths, repo_root):
+    docs = []
+    for rel in paths:
+        path = repo_root / rel
+        if not path.is_file():
+            raise PreconditionFailure(f"named document does not exist: {rel}")
+        docs.append((rel, path.read_text(encoding="utf-8")))
+    return docs
 
 
-def _join(texts):
-    return "\n\n".join(t.strip() for t in texts if t.strip())
-
-
-def _interface_docs(comp):
-    docs = [_get(comp, "interface_cli"), _get(comp, "interface_library")]
-    for key in ("interface_data", "interface_guarantees"):
-        group = _get(comp, key)
-        docs.extend(_get(group, k) for k in sorted(group))
-    return [d for d in docs if d is not None]
-
-
-def _strip_sections(body):
+def _drop_sections(body):
     kept = []
-    dropping = False
+    skipping = False
     for line in body.splitlines():
-        if _SECTION_HEADING.match(line):
-            dropping = bool(_DROPPED_SECTION.match(line))
-        if not dropping:
+        if line.startswith("## "):
+            skipping = line[3:].strip() in _EXCLUDED_SECTIONS
+        if not skipping:
             kept.append(line)
     return "\n".join(kept)
 
 
-def _interface_text(repo_root, comp):
-    text = _join([_get(d, "body") for d in _interface_docs(comp)])
-    library_body = _get(_get(comp, "interface_library"), "body") or ""
-    named = []
-    for line in library_body.splitlines():
-        if line.startswith("Implements:"):
-            named.extend(re.findall(r"`([^`]+)`", line))
-    for rel in named:
-        path = repo_root / rel
-        if not path.is_file():
-            raise PreconditionFailure(f"Implements: names {rel}, which does not exist")
-        text = f"{text}\n\n## Implements: {rel}\n\n{path.read_text(encoding='utf-8')}"
-    return text, named
+def _component_dir(repo_root, name):
+    return repo_root / "specs" / "components" / name
 
 
-def _dependency_interfaces(corpus, index, fm):
-    type_owners = {}
-    components = _get(corpus, "components")
-    for name in sorted(components):
-        comp = _get(components, name)
-        for stem in sorted(_get(comp, "interface_data")):
-            type_owners.setdefault(stem, []).append(comp)
-
-    result = {}
-    type_paths = []
-    for dep_id in _get(fm, "depends_on", []):
-        _, dep, _ = index[dep_id]
-        parts = [_get(d, "body") for d in _interface_docs(dep)]
-        names = set(_IDENT.findall("\n".join(parts))) - set(_get(dep, "interface_data"))
-        for ident in sorted(names):
-            owners = type_owners.get(ident, [])
-            if len(owners) == 1:
-                owner = owners[0]
-                doc = _get(_get(owner, "interface_data"), ident)
-                owner_id = _get(_get(_get(owner, "root"), "frontmatter"), "id")
-                parts.append(f"## Type: {ident} (owned by {owner_id})\n\n{_get(doc, 'body').strip()}")
-                type_paths.append(_get(doc, "rel_path"))
-        result[dep_id] = _join(parts)
-    return result, type_paths
+def _frontmatter(comp):
+    return _get(_get(comp, "root"), "frontmatter")
 
 
-def _glossary(repo_root):
-    return (repo_root / "specs" / "glossary.md").read_text(encoding="utf-8").strip()
-
-
-# ---------------------------------------------------------------------------
-# Filesystem / hashing helpers (R-ASSEMBLE-007)
-# ---------------------------------------------------------------------------
-
-
-def _md_files(repo_root, directory):
-    return [p.relative_to(repo_root).as_posix() for p in directory.rglob("*.md") if p.is_file()]
+def _interface_parts(comp, comp_dir):
+    parts = []
+    for key in ("interface_cli", "interface_library"):
+        doc = _get(comp, key)
+        if doc is not None:
+            parts.append(_get(doc, "body"))
+    for key in ("interface_data", "interface_guarantees"):
+        docs = _get(comp, key)
+        for doc_key in sorted(docs):
+            parts.append(_get(docs[doc_key], "body"))
+    for path in sorted((comp_dir / "interface" / "assets").glob("*.md")):
+        parts.append(path.read_text(encoding="utf-8"))
+    return parts
 
 
 def _code_files(directory):
-    return sorted(
+    return [
         p
-        for p in directory.rglob("*")
+        for p in sorted(directory.rglob("*"))
         if p.is_file()
         and not p.name.startswith(".")
         and "__pycache__" not in p.relative_to(directory).parts
-    )
+    ]
 
 
-def _hash(mode, repo_root, rel_paths):
-    digest = hashlib.sha256()
-    digest.update(mode.encode("utf-8") + b"\0")
-    for rel in sorted(set(rel_paths)):
-        path = repo_root / rel
+def _add_file(files, repo_root, rel):
+    path = repo_root / rel
+    if path.is_file():
+        files[rel] = path.read_bytes()
+
+
+def _add_md_tree(files, repo_root, rel_dir):
+    for path in (repo_root / rel_dir).rglob("*.md"):
         if path.is_file():
-            digest.update(rel.encode("utf-8") + b"\0" + path.read_bytes() + b"\0")
+            files[path.relative_to(repo_root).as_posix()] = path.read_bytes()
+
+
+def _add_code_dir(files, repo_root, rel_dir):
+    directory = repo_root / rel_dir
+    for path in _code_files(directory):
+        files[f"{rel_dir}/{path.relative_to(directory).as_posix()}"] = path.read_bytes()
+
+
+def _hash(mode, files):
+    digest = hashlib.sha256(mode.encode("utf-8") + b"\0")
+    for rel in sorted(files):
+        digest.update(rel.encode("utf-8") + b"\0" + files[rel] + b"\0")
     return "sha256:" + digest.hexdigest()
 
 
-# ---------------------------------------------------------------------------
-# Usage cards (R-ASSEMBLE-011)
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------
+# assembly steps
 
 
-def _usage_card(code_dir, rel_dir, module_name):
-    path = _module_file(code_dir, module_name)
-    if not path.is_file():
-        return ""
-    module = _exec_module(module_name, path)
-    lines = [f"Importable as: `{module_name}` (module path `{rel_dir}`)."]
-    namespace = module.__dict__
-    for name in sorted(namespace):
-        obj = namespace[name]
-        if name.startswith("_"):
+def _prepare(component_id, repo_root):
+    _load_dependency("graph-query-engine", repo_root)
+    linter = _load_dependency("spec-linter", repo_root)
+    report = linter.lint(None, repo_root)
+    failures = [f for f in _get(report, "findings") if _get(f, "severity") == "fail"]
+    if failures:
+        raise PreconditionFailure(
+            f"corpus is not lint-clean: {len(failures)} hard-fail finding(s)"
+        )
+    corpus = linter.load_corpus(repo_root)
+    components = _get(corpus, "components")
+    slug = component_id.removeprefix("comp-")
+    if slug not in components:
+        raise UnknownComponentError(f"unknown component id: {component_id}")
+    return corpus, components, slug, components[slug]
+
+
+def _adapters(comp, repo_root):
+    assets = _get(_frontmatter(comp), "assets") or []
+    kinds = sorted({str(item).split(":", 1)[0] for item in assets})
+    adapters = []
+    for kind in kinds:
+        rel = f"gen/kind-{kind}/kind_{kind}.py"
+        path = repo_root / rel
+        if not path.is_file():
+            path = _tool_root() / rel
+        if not path.is_file():
+            raise PreconditionFailure(f"unknown asset kind: {kind}")
+        module = _exec_module(f"kind_{kind}", path)
+        adapters.append((kind, rel, path, module.guidance()))
+    return adapters
+
+
+def _target_interface(comp, slug, repo_root):
+    base = _join(_interface_parts(comp, _component_dir(repo_root, slug)))
+    body = _get(_get(comp, "interface_library"), "body") or ""
+    paths = []
+    for line in body.splitlines():
+        if line.startswith("Implements:"):
+            paths.extend(_backticked(line))
+    docs = _named_docs(paths, repo_root)
+    text = base + "".join(
+        f"\n\n## Implements: {rel}\n\n{doc.strip()}" for rel, doc in docs
+    )
+    return text, paths
+
+
+def _dependency_ids(comp):
+    return sorted(set(_get(_frontmatter(comp), "depends_on") or []))
+
+
+def _type_owners(components):
+    owners = {}
+    for name in sorted(components):
+        for stem in _get(components[name], "interface_data"):
+            owners.setdefault(stem, []).append(name)
+    return owners
+
+
+def _dependency_interface(dep_id, components, owners, repo_root):
+    name = dep_id.removeprefix("comp-")
+    dep = components[name]
+    parts = _interface_parts(dep, _component_dir(repo_root, name))
+    own = set(_get(dep, "interface_data"))
+    type_parts = []
+    type_files = []
+    for ident in sorted(set(_IDENTIFIER.findall("\n".join(parts)))):
+        found = owners.get(ident, [])
+        if ident in own or len(found) != 1:
             continue
+        owner = found[0]
+        doc = _get(components[owner], "interface_data")[ident]
+        type_parts.append(f"## Type: {ident} (owned by comp-{owner})\n\n{_get(doc, 'body').strip()}")
+        type_files.append(_get(doc, "rel_path"))
+    return _join(parts + type_parts), type_files
+
+
+def _code_dir_rel(name, comp):
+    source_path = _get(_frontmatter(comp), "source_path")
+    if source_path:
+        return str(source_path).rstrip("/")
+    return f"gen/{name}"
+
+
+def _usage_card(name, comp, repo_root):
+    rel = _code_dir_rel(name, comp)
+    module_name = name.replace("-", "_")
+    module_file = _find_module(_resolve_dir(repo_root, rel), module_name)
+    if module_file is None:
+        return ""
+    module = _exec_module(module_name, module_file)
+    lines = [f"Importable as: `{module_name}` (module path `{rel}/`)."]
+    for attr in sorted(vars(module)):
+        if attr.startswith("_"):
+            continue
+        obj = getattr(module, attr)
         if not (inspect.isfunction(obj) or inspect.isclass(obj)):
             continue
-        if obj.__module__ != module.__name__:
+        owner = obj.__module__
+        if owner != module_name and not owner.startswith(module_name + "."):
             continue
         try:
             signature = str(inspect.signature(obj))
         except (TypeError, ValueError):
             continue
-        line = f"- `{name}{signature}`"
-        doc_lines = (obj.__doc__ or "").strip().splitlines()
-        if doc_lines:
-            line += f" -- {doc_lines[0].strip()}"
+        line = f"- `{attr}{signature}`"
+        doc = (obj.__doc__ or "").strip()
+        if doc:
+            line += " -- " + doc.splitlines()[0].strip()
         lines.append(line)
     return "\n".join(lines)
 
 
-# ---------------------------------------------------------------------------
-# Public entry points
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------
+# public entry points
 
 
 def assemble(component_id, repo_root, mode="cold"):
-    """Assemble the SpecBundle for `component_id` from the corpus at `repo_root`."""
+    """Assemble the SpecBundle for one component."""
     repo_root = Path(repo_root)
-    corpus = _prepare(repo_root)
-    index = _component_index(corpus)
-    name, comp, fm = _lookup(index, component_id)
+    corpus, components, slug, comp = _prepare(component_id, repo_root)
+    adapters = _adapters(comp, repo_root)
+    files = {}
+    comp_rel = f"specs/components/{slug}"
 
-    comp_dir = repo_root / "specs" / "components" / name
-    hash_paths = [
-        f"specs/components/{name}/component.md",
-        f"specs/components/{name}/constraints.md",
-    ]
-    hash_paths += _md_files(repo_root, comp_dir / "requirements")
-    hash_paths += _md_files(repo_root, comp_dir / "interface")
-
+    root = _get(comp, "root")
     requirements = _get(comp, "requirements")
     spec = _join(
-        [_strip_sections(_get(_get(comp, "root"), "body"))]
-        + [_get(_get(requirements, k), "body") for k in sorted(requirements)]
+        [_drop_sections(_get(root, "body"))]
+        + [_get(requirements[key], "body") for key in sorted(requirements)]
     )
-    interface, implements = _interface_text(repo_root, comp)
-    hash_paths += implements
-    constraints = _join([_get(_get(comp, "constraints"), "body") or ""])
+    constraints_doc = _get(comp, "constraints")
+    constraints = _join([_get(constraints_doc, "body") or ""])
+    _add_file(files, repo_root, f"{comp_rel}/component.md")
+    _add_file(files, repo_root, f"{comp_rel}/constraints.md")
+    _add_md_tree(files, repo_root, f"{comp_rel}/requirements")
+    _add_md_tree(files, repo_root, f"{comp_rel}/interface")
 
-    dependency_interfaces, type_paths = _dependency_interfaces(corpus, index, fm)
-    hash_paths += type_paths
+    interface, implements = _target_interface(comp, slug, repo_root)
+    for rel in implements:
+        _add_file(files, repo_root, rel)
+    for kind, rel, path, guide in adapters:
+        interface += "\n\n## Asset kind: " + kind + "\n\n" + _get(guide, "generator").strip()
+        files[rel] = path.read_bytes()
 
-    graph = _get(corpus, "graph")
+    owners = _type_owners(components)
+    rows = _get(corpus, "graph").execute(
+        "SELECT component_id, purpose FROM component_context"
+    ).fetchall()
+    purposes = {row[0]: row[1] for row in rows}
+    dependency_interfaces = {}
     dependency_context = {}
     dependency_usage = {}
-    for dep_id in _get(fm, "depends_on", []):
-        dep_name, _, dep_fm = index[dep_id]
-        dep_dir = repo_root / "specs" / "components" / dep_name
-        hash_paths.append(f"specs/components/{dep_name}/component.md")
-        hash_paths += _md_files(repo_root, dep_dir / "interface")
-        row = graph.execute(
-            "SELECT purpose FROM component_context WHERE component_id = ?", [dep_id]
-        ).fetchone()
-        dependency_context[dep_id] = row[0].strip()
-        if _get(dep_fm, "sealed"):
-            rel_dir = _get(dep_fm, "source_path").rstrip("/") + "/"
-        else:
-            rel_dir = f"gen/{dep_name}/"
-        code_dir = repo_root / rel_dir
-        hash_paths += [p.relative_to(repo_root).as_posix() for p in _code_files(code_dir)]
-        dependency_usage[dep_id] = _usage_card(code_dir, rel_dir, dep_name.replace("-", "_"))
+    for dep_id in _dependency_ids(comp):
+        name = dep_id.removeprefix("comp-")
+        dep = components[name]
+        text, type_files = _dependency_interface(dep_id, components, owners, repo_root)
+        dependency_interfaces[dep_id] = text
+        dependency_context[dep_id] = (purposes.get(dep_id) or "").strip()
+        dependency_usage[dep_id] = _usage_card(name, dep, repo_root)
+        _add_file(files, repo_root, f"specs/components/{name}/component.md")
+        _add_md_tree(files, repo_root, f"specs/components/{name}/interface")
+        _add_code_dir(files, repo_root, _code_dir_rel(name, dep))
+        for rel in type_files:
+            _add_file(files, repo_root, rel)
 
     id_index = _get(corpus, "id_index")
     var_texts = {}
-    for var_id in _get(fm, "uses_var", []):
-        doc = _get(id_index, var_id)
-        var_texts[var_id] = Path(_get(doc, "path")).read_text(encoding="utf-8")
-        hash_paths.append(_get(doc, "rel_path"))
+    for var_id in sorted(set(_get(_frontmatter(comp), "uses_var") or [])):
+        doc = id_index[var_id]
+        raw = Path(_get(doc, "path")).read_bytes()
+        var_texts[var_id] = raw.decode("utf-8").strip()
+        files[_get(doc, "rel_path")] = raw
 
-    hash_paths.append("specs/glossary.md")
-    glossary = _glossary(repo_root)
+    glossary = _read(repo_root / "specs" / "glossary.md").strip()
+    _add_file(files, repo_root, "specs/glossary.md")
 
     hint_code = None
     if mode == "hint":
-        gen_dir = repo_root / "gen" / name
-        files = _code_files(gen_dir)
+        code_dir = repo_root / "gen" / slug
         hint_code = {
-            p.relative_to(gen_dir).as_posix(): p.read_text(encoding="utf-8", errors="replace")
-            for p in files
+            p.relative_to(code_dir).as_posix(): p.read_text(encoding="utf-8", errors="replace")
+            for p in _code_files(code_dir)
         }
-        hash_paths += [p.relative_to(repo_root).as_posix() for p in files]
+        _add_code_dir(files, repo_root, f"gen/{slug}")
 
     return SpecBundle(
         component_id=component_id,
-        spec_bundle_hash=_hash(mode, repo_root, hash_paths),
+        spec_bundle_hash=_hash(mode, files),
         spec=spec,
         interface=interface,
         constraints=constraints,
@@ -372,72 +417,104 @@ def assemble(component_id, repo_root, mode="cold"):
 
 
 def assemble_criterion(component_id, criterion_id, repo_root):
-    """Assemble the CriterionBundle for one acceptance criterion of `component_id`."""
+    """Assemble the narrower CriterionBundle for one acceptance criterion."""
     repo_root = Path(repo_root)
-    corpus = _prepare(repo_root)
-    index = _component_index(corpus)
-    _, comp, fm = _lookup(index, component_id)
+    corpus, components, slug, comp = _prepare(component_id, repo_root)
+    adapters = _adapters(comp, repo_root)
 
-    criterion = _get(_get(comp, "acceptance"), criterion_id)
-    rows = _get(corpus, "graph").execute(
-        "SELECT target_id FROM edges WHERE source_id = ? AND edge_type = 'covers' ORDER BY target_id",
+    criterion = _get(comp, "acceptance")[criterion_id]
+    covers = _get(corpus, "graph").execute(
+        "SELECT target_id FROM edges WHERE source_id = ? AND edge_type = 'covers' "
+        "ORDER BY target_id",
         [criterion_id],
-    ).fetchall()
-    covered = [row[0] for row in rows]
-    requirements = _get(comp, "requirements")
-    interface, _ = _interface_text(repo_root, comp)
-    dependency_interfaces, _ = _dependency_interfaces(corpus, index, fm)
+    ).fetchone()[0]
+    requirement = _get(comp, "requirements")[covers]
+
+    interface, _ = _target_interface(comp, slug, repo_root)
+    owners = _type_owners(components)
+    dependency_interfaces = {
+        dep_id: _dependency_interface(dep_id, components, owners, repo_root)[0]
+        for dep_id in _dependency_ids(comp)
+    }
+
+    text = _read(_component_dir(repo_root, slug) / "testing.md")
+    first = text.split("\n", 1)[0]
+    uses = _named_docs(_backticked(first) if first.startswith("Uses:") else [], repo_root)
+    testing = (
+        text
+        + "".join(f"\n## Uses: {rel}\n\n{doc}" for rel, doc in uses)
+        + "".join(
+            f"\n## Asset kind: {kind}\n\n{_get(guide, 'test_author').strip()}"
+            for kind, _rel, _path, guide in adapters
+        )
+    )
 
     return CriterionBundle(
         component_id=component_id,
         criterion_id=criterion_id,
-        covers=", ".join(covered),
-        criterion_text=_join([_get(criterion, "body")]),
-        requirement_text=_join([_get(_get(requirements, r), "body") for r in covered]),
+        covers=covers,
+        criterion_text=_get(criterion, "body").strip(),
+        requirement_text=_get(requirement, "body").strip(),
         interface=interface,
-        glossary=_glossary(repo_root),
+        glossary=_read(repo_root / "specs" / "glossary.md").strip(),
         dependency_interfaces=dependency_interfaces,
+        testing=testing,
     )
 
 
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------
 # CLI
-# ---------------------------------------------------------------------------
 
 
-def _summary(bundle):
-    return "\n".join(
-        [
-            f"component: {bundle.component_id}",
-            f"spec_bundle_hash: {bundle.spec_bundle_hash}",
-            f"dependencies: {', '.join(bundle.dependency_interfaces)}",
-            f"vars: {', '.join(bundle.vars)}",
-        ]
-    )
+def _usage_error(cause):
+    print(f"usage error: {cause}", file=sys.stderr)
+    print(USAGE, file=sys.stderr)
+    return 2
 
 
 def main(argv=None):
-    """Run `hotdocs assemble`; returns the exit code (0 ok, 1 precondition failure, 2 usage error)."""
-    parser = argparse.ArgumentParser(prog="hotdocs assemble")
-    parser.add_argument("component_id")
-    parser.add_argument("--mode", choices=["cold", "hint"], default="cold")
-    parser.add_argument("--repo-root", default=".")
-    parser.add_argument("--format", choices=["json", "text"], default="text")
-    args = parser.parse_args(argv)
+    """Run `hotdocs assemble`; returns the exit code."""
+    args = sys.argv[1:] if argv is None else list(argv)
+    options = {"--mode": "cold", "--repo-root": None, "--format": "text"}
+    choices = {"--mode": ("cold", "hint"), "--format": ("json", "text")}
+    positional = []
+    i = 0
+    while i < len(args):
+        token = args[i]
+        if token.startswith("-"):
+            name, eq, value = token.partition("=")
+            if name not in options:
+                return _usage_error(f"unknown argument: {token}")
+            if not eq:
+                i += 1
+                if i >= len(args):
+                    return _usage_error(f"{name} requires a value")
+                value = args[i]
+            if name in choices and value not in choices[name]:
+                return _usage_error(f"invalid value for {name}: {value}")
+            options[name] = value
+        else:
+            positional.append(token)
+        i += 1
+    if not positional:
+        return _usage_error("missing <component-id>")
+    if len(positional) > 1:
+        return _usage_error(f"unexpected argument: {positional[1]}")
+
+    repo_root = Path(options["--repo-root"]) if options["--repo-root"] else Path.cwd()
     try:
-        bundle = assemble(args.component_id, Path(args.repo_root), args.mode)
+        bundle = assemble(positional[0], repo_root, options["--mode"])
+    except UnknownComponentError:
+        return _usage_error(f"unknown component id: {positional[0]}")
     except PreconditionFailure as exc:
-        print(f"precondition failure: {exc}", file=sys.stderr)
+        print(f"error: {exc}", file=sys.stderr)
         return 1
-    except UsageError as exc:
-        print(f"usage error: {exc}", file=sys.stderr)
-        return 2
-    if args.format == "json":
+
+    if options["--format"] == "json":
         print(json.dumps(dataclasses.asdict(bundle), indent=2))
     else:
-        print(_summary(bundle))
+        print(f"component: {bundle.component_id}")
+        print(f"mode: {options['--mode']}")
+        print(f"spec_bundle_hash: {bundle.spec_bundle_hash}")
+        print(f"dependencies: {', '.join(bundle.dependency_interfaces)}")
     return 0
-
-
-if __name__ == "__main__":
-    sys.exit(main())

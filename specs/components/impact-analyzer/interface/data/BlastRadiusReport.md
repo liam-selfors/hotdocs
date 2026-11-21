@@ -34,6 +34,13 @@
 }
 ```
 
+`compute_blast_radius` returns a `BlastRadiusReport` dataclass with the
+fields `impacted` and `precondition_error`; each entry of `impacted` is an
+`ImpactedComponent` dataclass with `component_id`, `reason`, `via` and
+`guarantee_ids` (`None` unless `transitive-guarantee`). Both are read by
+attribute (`report.impacted[0].reason`) or by item (`report["impacted"]`),
+and `to_dict()` gives the JSON above, `guarantee_ids` only where shown.
+
 `component_id` is always the full `comp-<slug>` form (`glossary.md`'s
 "Component id / component slug" entry), matching exactly what a
 caller's own `--changed` argument would use — never the bare slug,
@@ -41,7 +48,13 @@ even though some of this component's own internal data (e.g.
 `spec-linter`'s `corpus.components` dict) is keyed by the bare form.
 
 Each component appears at most once. One named in the changed ids is
-always `direct`, whatever else would also include it. `reason` is always one of `direct` | `transitive-interface` |
+always `direct`, whatever else would also include it. `impacted`
+lists the `direct` entries first, then the rest, each part sorted by
+`component_id`. When several transitive reasons would include one
+component, the entry kept is the first found in this order: each
+changed component in id order, its `transitive-interface` before its
+`transitive-guarantee`; then each changed var in id order; then each
+changed capability in id order. `reason` is always one of `direct` | `transitive-interface` |
 `transitive-var` | `transitive-capability` | `transitive-guarantee`
 (R-IMPACT-001/003/004/005/008). `via` names the specific upstream id that
 triggered inclusion, `null` only for `direct`. `guarantee_ids` is present

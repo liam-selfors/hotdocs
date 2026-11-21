@@ -1,6 +1,6 @@
 # R-GEN-018
 
-**R-GEN-018** — Regardless of `depends_on`, the prompt MUST always
+**R-GEN-018** — The prompt MUST always
   instruct the candidate that any dynamic runtime load of a
   dependency module — bare `import <module_name>`, a `sys.modules`
   lookup on that bare name, or a path relative to the candidate's own

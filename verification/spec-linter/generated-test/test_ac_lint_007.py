@@ -1,209 +1,135 @@
-# hotdocs-criterion: sha256:5fc4d0246fbc8b3a64252ef19c136c88bf1b8793832219122ae90606823bf0e4
-import json
-import sys
-import tempfile
-from pathlib import Path
+# hotdocs-criterion: sha256:a6ff56116034cec386e1a188ac1bec3aed9a13200704bc6a3f58798254151fc0
+"""AC-LINT-007: a requirement with no RFC 2119 keyword yields a fail-severity
+finding for rule R-LINT-007."""
 
-import pytest
+from pathlib import Path
 
 import spec_linter
 
 
-def _get(value, name, default=None):
-    if isinstance(value, dict):
-        return value.get(name, default)
-    return getattr(value, name, default)
+def field(value, name):
+    return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def _write(path: Path, text: str) -> None:
+COMPONENT_MD = (
+    "---\n"
+    "id: comp-foo\n"
+    "title: Foo\n"
+    "status: draft\n"
+    "owners: [team-a]\n"
+    "sealed: true\n"
+    "source_path: legacy/foo/\n"
+    "---\n"
+    "\n"
+    "# Foo\n"
+    "\n"
+    "## Purpose\n"
+    "\n"
+    "Foo echoes its input back to the caller.\n"
+    "\n"
+    "## Scope\n"
+    "\n"
+    "- In scope: echoing input.\n"
+    "- Out of scope: everything else.\n"
+    "\n"
+    "## Definitions\n"
+    "\n"
+    "None.\n"
+    "\n"
+    "## Behavior\n"
+    "\n"
+    "See `requirements/`.\n"
+    "\n"
+    "## Interfaces\n"
+    "\n"
+    "See `interface/`.\n"
+    "\n"
+    "## Data\n"
+    "\n"
+    "See `interface/data/`.\n"
+    "\n"
+    "## Acceptance criteria\n"
+    "\n"
+    "See `acceptance/`.\n"
+    "\n"
+    "## Non-functional constraints\n"
+    "\n"
+    "See `constraints.md`.\n"
+    "\n"
+    "## Open questions\n"
+    "\n"
+    "## Change log\n"
+    "\n"
+    "- Initial draft.\n"
+)
+
+# Deliberately free of every RFC 2119 keyword, in any case.
+REQUIREMENT_MD = (
+    "# R-FOO-001\n"
+    "\n"
+    "- **R-FOO-001** — The component returns its input unchanged to the caller.\n"
+)
+
+ACCEPTANCE_MD = (
+    "# AC-FOO-001\n"
+    "\n"
+    "Covers: R-FOO-001\n"
+    "Kind: compiled\n"
+    "\n"
+    "```gherkin\n"
+    "Given an input of \"abc\"\n"
+    "When foo runs\n"
+    "Then the output is \"abc\"\n"
+    "```\n"
+)
+
+CONSTRAINTS_MD = (
+    "# Constraints\n"
+    "\n"
+    "- Echo completes in under 1 second, measured by a timer around the call.\n"
+)
+
+GLOSSARY_MD = (
+    "# Glossary\n"
+    "\n"
+    "- **Echo** — returning the input unchanged.\n"
+)
+
+
+def _write(path, text):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
 
 
-COMPONENT_MD = """---
-id: comp-foo
-title: Foo
-status: draft
-owners: [alice]
-sealed: true
-source_path: legacy/foo
----
-
-# Foo
-
-## Purpose
-
-Adds two integers together and reports the result.
-
-## Scope
-
-- In scope: adding two integers.
-- Out of scope: everything else.
-
-## Definitions
-
-None.
-
-## Behavior
-
-See `requirements/`.
-
-## Interfaces
-
-See `interface/`.
-
-## Data
-
-See `interface/data/`.
-
-## Acceptance criteria
-
-See `acceptance/`.
-
-## Non-functional constraints
-
-See `constraints.md`.
-
-## Open questions
-
-## Change log
-
-- Initial draft.
-"""
-
-GLOSSARY_MD = """# Glossary
-
-- **Widget** — a thing used only by this fixture.
-"""
-
-CONSTRAINTS_MD = """# Constraints
-
-- Latency: under one second, measured by a local timer.
-"""
-
-KEYWORDLESS_REQ = """# R-FOO-001
-
-- **R-FOO-001** — The foo component returns the sum of its two integer
-  inputs to its caller.
-"""
-
-COMPLIANT_REQ_1 = """# R-FOO-001
-
-- **R-FOO-001** — The foo component MUST return the sum of its two integer
-  inputs to its caller.
-"""
-
-COMPLIANT_REQ_2 = """# R-FOO-002
-
-- **R-FOO-002** — The foo component MUST reject a non-integer input.
-"""
-
-
-def _acceptance(ac_id: str, req_id: str) -> str:
-    return (
-        f"# {ac_id}\n\n"
-        f"Covers: {req_id}\n"
-        "Kind: generated-test\n\n"
-        "```gherkin\n"
-        "Given two integers\n"
-        "When foo runs\n"
-        "Then the result is their sum\n"
-        "```\n"
-    )
-
-
-def _build_corpus(root: Path, req1_text: str) -> None:
-    specs = root / "specs"
-    comp = specs / "components" / "foo"
-    _write(specs / "glossary.md", GLOSSARY_MD)
+def _build_fixture(repo_root):
+    comp = repo_root / "specs" / "components" / "foo"
     _write(comp / "component.md", COMPONENT_MD)
+    _write(comp / "requirements" / "R-FOO-001.md", REQUIREMENT_MD)
+    _write(comp / "acceptance" / "AC-FOO-001.md", ACCEPTANCE_MD)
     _write(comp / "constraints.md", CONSTRAINTS_MD)
-    _write(comp / "requirements" / "R-FOO-001.md", req1_text)
-    _write(comp / "requirements" / "R-FOO-002.md", COMPLIANT_REQ_2)
-    _write(comp / "acceptance" / "AC-FOO-001.md", _acceptance("AC-FOO-001", "R-FOO-001"))
-    _write(comp / "acceptance" / "AC-FOO-002.md", _acceptance("AC-FOO-002", "R-FOO-002"))
+    _write(repo_root / "specs" / "glossary.md", GLOSSARY_MD)
 
 
-def _findings(report):
-    findings = _get(report, "findings")
-    assert findings is not None, "LintReport has no findings field"
-    return list(findings)
+def test_requirement_without_rfc2119_keyword_fails_r_lint_007(tmp_path):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    _build_fixture(repo_root)
 
+    report = spec_linter.lint(None, repo_root)
 
-def _lint007(findings):
-    return [f for f in findings if _get(f, "rule_id") == "R-LINT-007"]
-
-
-def _norm(p):
-    return str(p or "").replace("\\", "/")
-
-
-def test_requirement_without_rfc2119_keyword_yields_fail_finding():
-    with tempfile.TemporaryDirectory() as tmp:
-        root = Path(tmp)
-        _build_corpus(root, KEYWORDLESS_REQ)
-
-        report = spec_linter.lint(None, root)
-        findings = _findings(report)
-        lint7 = _lint007(findings)
-        fails = [f for f in lint7 if _get(f, "severity") == "fail"]
-
-        assert fails, (
-            "expected a fail-severity R-LINT-007 finding; got: "
-            + repr([(_get(f, "rule_id"), _get(f, "severity"), _get(f, "file")) for f in findings])
+    findings = list(field(report, "findings"))
+    matching = [
+        f
+        for f in findings
+        if field(f, "rule_id") == "R-LINT-007" and field(f, "severity") == "fail"
+    ]
+    assert matching, (
+        "expected a fail-severity R-LINT-007 finding, got: "
+        + repr(
+            [
+                (field(f, "rule_id"), field(f, "severity"), field(f, "file"), field(f, "message"))
+                for f in findings
+            ]
         )
-        assert any(_norm(_get(f, "file")).endswith("R-FOO-001.md") for f in fails), (
-            "expected the R-LINT-007 failure to point at R-FOO-001.md; got files "
-            + repr([_get(f, "file") for f in fails])
-        )
-        # The compliant sibling requirement is not flagged.
-        assert not any(_norm(_get(f, "file")).endswith("R-FOO-002.md") for f in fails)
-
-        hard = _get(report, "hard_failures")
-        if hard is None and not isinstance(report, dict):
-            summary = None
-        else:
-            summary = None
-        if hard is None:
-            summary = _get(report, "summary")
-            if summary is not None:
-                hard = _get(summary, "hard_failures")
-        if hard is not None:
-            assert hard >= 1
-
-
-def test_requirements_with_rfc2119_keywords_yield_no_lint007_fail():
-    with tempfile.TemporaryDirectory() as tmp:
-        root = Path(tmp)
-        _build_corpus(root, COMPLIANT_REQ_1)
-
-        report = spec_linter.lint(None, root)
-        findings = _findings(report)
-        fails = [f for f in _lint007(findings) if _get(f, "severity") == "fail"]
-        assert not fails, (
-            "no R-LINT-007 failure expected when every requirement uses an "
-            "RFC 2119 keyword; got: "
-            + repr([(_get(f, "file"), _get(f, "message")) for f in fails])
-        )
-
-
-def test_cli_json_report_contains_lint007_fail_and_exit_code_1(capsys):
-    with tempfile.TemporaryDirectory() as tmp:
-        root = Path(tmp)
-        _build_corpus(root, KEYWORDLESS_REQ)
-
-        capsys.readouterr()
-        code = spec_linter.main(["--format=json", f"--repo-root={root}"])
-        out = capsys.readouterr().out
-
-        assert code == 1
-        data = json.loads(out)
-        findings = data.get("findings") if isinstance(data, dict) else None
-        assert findings is not None
-        fails = [
-            f
-            for f in findings
-            if f.get("rule_id") == "R-LINT-007" and f.get("severity") == "fail"
-        ]
-        assert fails
-        assert any(_norm(f.get("file")).endswith("R-FOO-001.md") for f in fails)
+    )
+    assert field(report, "hard_failures") >= 1

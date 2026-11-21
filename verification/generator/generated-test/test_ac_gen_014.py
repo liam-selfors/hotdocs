@@ -1,51 +1,47 @@
-# hotdocs-criterion: sha256:f5e04eb5c26b9c20fabb6de5037beb8fb9910f1363156f8b634e12d5595f8950
+# hotdocs-criterion: sha256:1eec19f59e14d127b78a0671089c1fb19670f96a88441131c27133cbbaf242e1
 import re
 from pathlib import Path
 
 import generator
 
 
+PYTHON_ADAPTER = (
+    "from pathlib import Path\n"
+    "\n"
+    "KIND = " + repr("python") + "\n"
+    "\n"
+    "\n"
+    "def layout_errors(code_dir):\n"
+    "    return [" + repr("bad.py:1: SyntaxError: x") + "] if (Path(code_dir) / "
+    + repr("bad.py") + ").exists() else []\n"
+    "\n"
+    "\n"
+    "def provision(repo_root):\n"
+    "    return {" + repr("ok") + ": True, " + repr("reason") + ": " + repr("")
+    + ", " + repr("versions") + ": {" + repr("python") + ": " + repr("3.12") + "}, "
+    + repr("lockfile_sha256") + ": None, " + repr("interpreter") + ": "
+    + repr("/fake/python") + "}\n"
+)
+
 COMPONENT_MD = (
     "---\n"
-    "id: comp-foo\n"
-    "title: Foo\n"
+    "id: comp-widget-maker\n"
+    "title: Widget Maker\n"
     "status: draft\n"
-    "owners: [team-a]\n"
-    "sealed: false\n"
+    "owners: [pipeline-team]\n"
     "depends_on: [comp-bar]\n"
-    "---\n"
-    "\n"
-    "# Foo\n"
-    "\n"
-    "## Purpose\n"
-    "\n"
-    "Foo doubles a number using bar.\n"
-)
-
-BAR_COMPONENT_MD = (
-    "---\n"
-    "id: comp-bar\n"
-    "title: Bar\n"
-    "status: draft\n"
-    "owners: [team-a]\n"
     "sealed: false\n"
-    "depends_on: []\n"
     "---\n"
     "\n"
-    "# Bar\n"
-    "\n"
-    "## Purpose\n"
-    "\n"
-    "Bar stores values.\n"
+    "# Widget Maker\n"
 )
 
-INTERFACE_TEXT = "# Library\n\nINTERFACE_MARKER_BAR bar_lookup(key: str) -> Entry"
 USAGE_TEXT = (
-    "module: bar\n"
-    "\n"
+    "Module: bar_lib\n"
     "def bar_get(key: str) -> dict\n"
-    "    USAGE_MARKER_BAR Return the stored entry for key."
+    "    USAGE_MARKER_7f3a: Return the entry stored under key."
 )
+INTERFACE_TEXT = "INTERFACE_MARKER_91c2: bar_get(key: str) -> Entry"
 
 
 def field(value, name):
@@ -55,112 +51,62 @@ def field(value, name):
 def section(prompt, heading):
     lines = prompt.split("\n")
     start = lines.index(heading) + 1
-    end = next(
-        (i for i in range(start, len(lines)) if lines[i].startswith("## ")),
-        len(lines),
-    )
+    end = next((i for i in range(start, len(lines)) if lines[i].startswith("## ")), len(lines))
     return "\n".join(lines[start:end]).rstrip("\n")
 
 
-def write(path, text):
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text, encoding="utf-8")
-
-
-def build_fixture(repo_root):
-    write(repo_root / "specs" / "glossary.md", "# Glossary\n\n- **Foo** — a test term.\n")
-    for slug, md in (("foo", COMPONENT_MD), ("bar", BAR_COMPONENT_MD)):
-        base = repo_root / "specs" / "components" / slug
-        upper = slug.upper()
-        write(base / "component.md", md)
-        write(
-            base / "requirements" / ("R-" + upper + "-001.md"),
-            "# R-" + upper + "-001\n\n**R-" + upper + "-001** — `" + slug
-            + "(x)` MUST return `2 * x`.\n",
-        )
-        write(
-            base / "acceptance" / ("AC-" + upper + "-001.md"),
-            "# AC-" + upper + "-001\n\nCovers: R-" + upper + "-001\n"
-            "Kind: generated-test\n\n```gherkin\nGiven x = 2\nWhen " + slug
-            + "(x) is called\nThen it returns 4\n```\n",
-        )
-        write(base / "interface" / "library.md", "# Library\n\n```\n" + slug + "(x: int) -> int\n```\n")
-        write(base / "constraints.md", "# Constraints\n\nNone.\n")
-
-
-def test_dependency_usage_is_distinct_labeled_section(tmp_path, monkeypatch):
+def test_dependency_usage_is_its_own_section(tmp_path, monkeypatch):
     monkeypatch.delenv("VAR_CACHE_STORE_URL", raising=False)
-    repo_root = tmp_path
-    build_fixture(repo_root)
+    monkeypatch.chdir(tmp_path)
+    repo_root = tmp_path / "repo"
+    (repo_root / "gen" / "kind-python").mkdir(parents=True)
+    (repo_root / "gen" / "kind-python" / "kind_python.py").write_text(PYTHON_ADAPTER, encoding="utf-8")
+    comp_dir = repo_root / "specs" / "components" / "widget-maker"
+    comp_dir.mkdir(parents=True)
+    (comp_dir / "component.md").write_text(COMPONENT_MD, encoding="utf-8")
 
     bundle = {
-        "component_id": "comp-foo",
+        "component_id": "comp-widget-maker",
         "spec_bundle_hash": "sha256:" + "ab" * 32,
-        "spec": "# Foo\n\nFoo doubles a number using bar.\n\n**R-FOO-001** — `foo(x)` MUST return `2 * x`.",
-        "interface": "# Library\n\nfoo(x: int) -> int",
-        "constraints": "# Constraints\n\nNone.",
+        "spec": "Widget maker spec.",
+        "interface": "make_widget() -> str",
+        "constraints": "No constraints.",
         "dependency_interfaces": {"comp-bar": INTERFACE_TEXT},
-        "dependency_context": {"comp-bar": "Bar stores values."},
+        "dependency_context": {"comp-bar": "Bar stores entries."},
         "dependency_usage": {"comp-bar": USAGE_TEXT},
         "vars": {},
-        "glossary": "# Glossary\n\n- **Foo** — a test term.",
+        "glossary": "",
         "hint_code": None,
     }
 
-    log_path = tmp_path / "mock_calls.log"
     recorded = []
 
     def mock_backend(prompt, model, **params):
         recorded.append(prompt)
-        with open(log_path, "a", encoding="utf-8") as fh:
-            fh.write("call\n")
-        m = re.search(r"BEGIN FILE ([0-9a-f]{32})", prompt)
-        if m is None:
-            m = re.search(r"\b([0-9a-f]{32})\b", prompt)
-        nonce = m.group(1) if m else "0" * 32
+        nonce = re.search(r"-----BEGIN FILE ([0-9a-f]{32}):", prompt).group(1)
         text = (
-            "-----BEGIN FILE " + nonce + ": foo.py-----\n"
-            "def foo(x):\n"
-            "    return 2 * x\n"
+            "-----BEGIN FILE " + nonce + ": widget_maker.py-----\n"
+            "def make_widget():\n"
+            "    return 'w'\n"
             "-----END FILE " + nonce + "-----\n"
+            "-----END REPLY " + nonce + "-----\n"
         )
-        return {
-            "text": text,
-            "model": model,
-            "backend": "mock",
-            "model_call_error": None,
-        }
+        return {"text": text, "model": model, "backend": "mock", "model_call_error": None}
 
-    result = generator.generate(
-        bundle,
-        "claude-sonnet-5",
-        None,
-        repo_root=repo_root,
-        llm_backend=mock_backend,
-    )
+    generator.generate(bundle, "mock-model", repo_root=repo_root, llm_backend=mock_backend)
 
-    assert field(result, "refused") is None
-    assert log_path.is_file()
-    assert recorded, "mock model was never called"
+    assert len(recorded) >= 1
     prompt = recorded[0]
     lines = prompt.split("\n")
-
     assert "## DEPENDENCY USAGE" in lines
     assert "## DEPENDENCY INTERFACES" in lines
 
     usage = section(prompt, "## DEPENDENCY USAGE")
     interfaces = section(prompt, "## DEPENDENCY INTERFACES")
 
-    # dependency_usage content lives in its own section, labeled per dependency
     assert "### comp-bar" in usage.split("\n")
-    assert "USAGE_MARKER_BAR" in usage
-    assert "def bar_get(key: str) -> dict" in usage
+    assert USAGE_TEXT in usage
+    assert "INTERFACE_MARKER_91c2" not in usage
 
-    # never merged with dependency_interfaces
-    assert "USAGE_MARKER_BAR" not in interfaces
-    assert "bar_get" not in interfaces
-    assert "INTERFACE_MARKER_BAR" in interfaces
-    assert "INTERFACE_MARKER_BAR" not in usage
-
-    # the two sections are separate headings at different positions
-    assert lines.index("## DEPENDENCY USAGE") != lines.index("## DEPENDENCY INTERFACES")
+    assert INTERFACE_TEXT in interfaces
+    assert "USAGE_MARKER_7f3a" not in interfaces

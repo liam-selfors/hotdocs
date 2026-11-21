@@ -1,9 +1,8 @@
-# hotdocs-criterion: sha256:3ce1427643cdd075e9ec6ce15ceeb478c92121a66598b1405bd56dabe50ae23b
+# hotdocs-criterion: sha256:9148175ab76786b16712d51371bcc91d368255ce38db5786cba6baf39faab47b
+import dataclasses
 import importlib.util
 import json
-import os
 import sys
-import time
 from pathlib import Path
 
 import spec_bundle_assembler
@@ -24,168 +23,146 @@ FIELDS = [
 ]
 
 
-GLOSSARY = "# Glossary\n\n- **Foo** — a test term.\n"
-
-COMPONENT_MD = (
-    "---\n"
-    "id: comp-foo\n"
-    "title: Foo\n"
-    "status: draft\n"
-    "owners: [team-a]\n"
-    "sealed: true\n"
-    "source_path: legacy/foo/\n"
-    "depends_on: []\n"
-    "---\n"
-    "\n"
-    "# Foo\n"
-    "\n"
-    "## Purpose\n"
-    "\n"
-    "Foo doubles a number.\n"
-)
-
-REQUIREMENT_MD = "# R-FOO-001\n\n**R-FOO-001** — `foo(x)` MUST return `2 * x`.\n"
-
-ACCEPTANCE_MD = (
-    "# AC-FOO-001\n"
-    "\n"
-    "Covers: R-FOO-001\n"
-    "Kind: generated-test\n"
-    "\n"
-    "```gherkin\n"
-    "Given x = 2\n"
-    "When foo(x) is called\n"
-    "Then it returns 4\n"
-    "```\n"
-)
-
-LIBRARY_MD = "# Library\n\n```\nfoo(x: int) -> int\n```\n"
-
-CONSTRAINTS_MD = "# Constraints\n\nNone.\n"
+def field(value, name):
+    return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def _write(path: Path, text: str) -> None:
+def load_module(path, module_name):
+    spec = importlib.util.spec_from_file_location(module_name, path)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def load_spec_linter():
+    gen = next(
+        p for p in Path(spec_bundle_assembler.__file__).resolve().parents
+        if p.name == "gen"
+    )
+    base = gen / "spec-linter"
+    if (base / "spec_linter.py").is_file():
+        path = base / "spec_linter.py"
+    else:
+        path = base / "spec_linter" / "__init__.py"
+    return load_module(path, "spec_linter")
+
+
+def write(path, text):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
 
 
-def _build_corpus(repo_root: Path) -> None:
-    _write(repo_root / "specs" / "glossary.md", GLOSSARY)
-    comp = repo_root / "specs" / "components" / "foo"
-    _write(comp / "component.md", COMPONENT_MD)
-    _write(comp / "requirements" / "R-FOO-001.md", REQUIREMENT_MD)
-    _write(comp / "acceptance" / "AC-FOO-001.md", ACCEPTANCE_MD)
-    _write(comp / "interface" / "library.md", LIBRARY_MD)
-    _write(comp / "constraints.md", CONSTRAINTS_MD)
-
-
-def _load_spec_linter():
-    gen = next(
-        p
-        for p in Path(spec_bundle_assembler.__file__).resolve().parents
-        if p.name == "gen"
+def build_component(repo_root, slug, upper, title, purpose, depends_on, req_text):
+    comp_dir = repo_root / "specs" / "components" / slug
+    write(
+        comp_dir / "component.md",
+        "---\n"
+        + "id: comp-" + slug + "\n"
+        + "title: " + title + "\n"
+        + "status: draft\n"
+        + "owners: [team-a]\n"
+        + "sealed: true\n"
+        + "source_path: legacy/" + slug + "/\n"
+        + "depends_on: " + depends_on + "\n"
+        + "---\n"
+        + "\n"
+        + "# " + title + "\n"
+        + "\n"
+        + "## Purpose\n"
+        + "\n"
+        + purpose + "\n",
     )
-    base = gen / "spec-linter"
-    path = (
-        base / "spec_linter.py"
-        if (base / "spec_linter.py").is_file()
-        else base / "spec_linter" / "__init__.py"
+    rid = "R-" + upper + "-001"
+    acid = "AC-" + upper + "-001"
+    write(
+        comp_dir / "requirements" / (rid + ".md"),
+        "# " + rid + "\n"
+        + "\n"
+        + "**" + rid + "** \u2014 " + req_text + "\n",
     )
-    spec = importlib.util.spec_from_file_location("spec_linter", path)
-    spec_linter = importlib.util.module_from_spec(spec)
-    sys.modules["spec_linter"] = spec_linter
-    spec.loader.exec_module(spec_linter)
-    return spec_linter
-
-
-def _field(value, name):
-    if isinstance(value, dict):
-        return value.get(name)
-    return getattr(value, name, None)
-
-
-def _to_plain(value):
-    if isinstance(value, dict):
-        return {str(k): _to_plain(v) for k, v in value.items()}
-    if isinstance(value, (list, tuple)):
-        return [_to_plain(v) for v in value]
-    if isinstance(value, Path):
-        return str(value)
-    return value
-
-
-def _bundle_bytes(bundle) -> bytes:
-    data = {name: _to_plain(_field(bundle, name)) for name in FIELDS}
-    return json.dumps(data, sort_keys=True, ensure_ascii=False, default=str).encode(
-        "utf-8"
+    write(
+        comp_dir / "acceptance" / (acid + ".md"),
+        "# " + acid + "\n"
+        + "\n"
+        + "Covers: " + rid + "\n"
+        + "Kind: generated-test\n"
+        + "\n"
+        + "```gherkin\n"
+        + "Given x = 2\n"
+        + "When " + slug + "(x) is called\n"
+        + "Then it returns 4\n"
+        + "```\n",
+    )
+    write(
+        comp_dir / "interface" / "library.md",
+        "# Library\n"
+        + "\n"
+        + "```\n"
+        + slug + "(x: int) -> int\n"
+        + "```\n",
+    )
+    write(
+        comp_dir / "constraints.md",
+        "# Constraints\n"
+        + "\n"
+        + "None.\n",
     )
 
 
-def _assert_lint_clean(repo_root: Path) -> None:
-    spec_linter = _load_spec_linter()
-    report = spec_linter.lint(None, repo_root)
-    hard = (
-        report.get("hard_failures")
-        if isinstance(report, dict)
-        else getattr(report, "hard_failures", None)
+def build_corpus(repo_root):
+    write(
+        repo_root / "specs" / "glossary.md",
+        "# Glossary\n"
+        + "\n"
+        + "- **Foo** \u2014 a test term.\n",
     )
-    assert hard == 0, f"fixture corpus is not lint-clean: {report}"
+    build_component(
+        repo_root, "foo", "FOO", "Foo", "Foo doubles a number.", "[]",
+        "`foo(x)` MUST return `2 * x`.",
+    )
+    build_component(
+        repo_root, "bar", "BAR", "Bar", "Bar doubles a number using Foo.",
+        "[comp-foo]",
+        "`bar(x)` MUST return `2 * x`.",
+    )
 
 
-def _snapshot(repo_root: Path) -> dict:
-    return {
-        str(p.relative_to(repo_root)): p.read_bytes()
-        for p in sorted(repo_root.rglob("*"))
-        if p.is_file() and "specs" in p.relative_to(repo_root).parts
-    }
+def serialize(bundle):
+    data = {}
+    for name in FIELDS:
+        data[name] = field(bundle, name)
+    return json.dumps(data, ensure_ascii=False, default=repr).encode("utf-8")
+
+
+def snapshot(repo_root):
+    files = {}
+    for p in sorted(repo_root.rglob("*")):
+        if p.is_file():
+            files[p.relative_to(repo_root).as_posix()] = p.read_bytes()
+    return files
 
 
 def test_assemble_twice_on_unchanged_corpus_is_byte_identical(tmp_path):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
-    _build_corpus(repo_root)
-    _assert_lint_clean(repo_root)
+    build_corpus(repo_root)
 
-    before = _snapshot(repo_root)
+    spec_linter = load_spec_linter()
+    assert spec_linter.lint(None, repo_root).hard_failures == 0
 
-    first = spec_bundle_assembler.assemble("comp-foo", repo_root)
-    second = spec_bundle_assembler.assemble("comp-foo", repo_root)
+    for component_id in ("comp-foo", "comp-bar"):
+        before = snapshot(repo_root)
+        first = spec_bundle_assembler.assemble(component_id, repo_root)
+        second = spec_bundle_assembler.assemble(component_id, repo_root)
+        # The corpus really is unchanged between the two runs.
+        assert snapshot(repo_root) == before
 
-    # Corpus really was unchanged between (and by) the two runs.
-    assert _snapshot(repo_root) == before
+        assert field(first, "component_id") == component_id
+        assert field(first, "spec_bundle_hash") == field(second, "spec_bundle_hash")
+        for name in FIELDS:
+            assert field(first, name) == field(second, name), name
+        assert serialize(first) == serialize(second)
 
-    assert _field(first, "component_id") == "comp-foo"
-    assert _field(second, "component_id") == "comp-foo"
-
-    first_hash = _field(first, "spec_bundle_hash")
-    second_hash = _field(second, "spec_bundle_hash")
-    assert first_hash, "spec_bundle_hash must be populated"
-    assert first_hash == second_hash
-
-    for name in FIELDS:
-        assert _to_plain(_field(first, name)) == _to_plain(_field(second, name)), (
-            f"field {name!r} differs between two assemble runs"
-        )
-
-    assert _bundle_bytes(first) == _bundle_bytes(second)
-
-
-def test_assemble_is_unaffected_by_mtime_only_changes(tmp_path):
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    _build_corpus(repo_root)
-    _assert_lint_clean(repo_root)
-
-    first = spec_bundle_assembler.assemble("comp-foo", repo_root)
-
-    # Touch every file without changing content: bytes are unchanged,
-    # so the bundle must be too.
-    future = time.time() + 3600
-    for p in repo_root.rglob("*"):
-        if p.is_file():
-            os.utime(p, (future, future))
-
-    second = spec_bundle_assembler.assemble("comp-foo", repo_root)
-
-    assert _field(first, "spec_bundle_hash") == _field(second, "spec_bundle_hash")
-    assert _bundle_bytes(first) == _bundle_bytes(second)
+        if dataclasses.is_dataclass(first) and dataclasses.is_dataclass(second):
+            assert dataclasses.asdict(first) == dataclasses.asdict(second)

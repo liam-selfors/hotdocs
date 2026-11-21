@@ -1,7 +1,7 @@
-# hotdocs-criterion: sha256:b07eaa22d2ca2726d21d285d3fd69cd5dbb4fecbc563631baae9edb421d34408
+# hotdocs-criterion: sha256:138f291ce3e191007e96fced80166969279376e0e7aa96895b5880fdc86fd06a
 import importlib.metadata
+import json
 import os
-import time
 from pathlib import Path
 
 import hotdocs_init
@@ -25,224 +25,218 @@ ALL_PATHS = DIRS + GITKEEPS + FILES
 GITIGNORE_LINES = ["/.hotdocs/", "__pycache__/", "*.pyc", ".venv/"]
 
 
-FAKE_LLM_ENDPOINT_BODY = (
-    "import json\n"
-    "from pathlib import Path\n"
-    "\n"
-    "PROVIDERS = {\n"
-    "    'claude-cli': {'default_base_url': None, 'default_api_key_env': None,\n"
-    "                   'needs_base_url': False, 'suggested_model': 'claude-sonnet-5'},\n"
-    "    'anthropic': {'default_base_url': 'https://api.anthropic.com',\n"
-    "                  'default_api_key_env': 'ANTHROPIC_API_KEY',\n"
-    "                  'needs_base_url': False, 'suggested_model': 'claude-sonnet-5'},\n"
-    "    'openai': {'default_base_url': 'https://api.openai.com/v1',\n"
-    "               'default_api_key_env': 'OPENAI_API_KEY',\n"
-    "               'needs_base_url': False, 'suggested_model': 'gpt-6-astra'},\n"
-    "    'openai-compatible': {'default_base_url': None, 'default_api_key_env': None,\n"
-    "                          'needs_base_url': True, 'suggested_model': ''},\n"
-    "    'gemini': {'default_base_url': 'https://generativelanguage.googleapis.com',\n"
-    "               'default_api_key_env': 'GEMINI_API_KEY',\n"
-    "               'needs_base_url': False, 'suggested_model': 'gemini-4-argon'},\n"
-    "    'ollama': {'default_base_url': 'http://localhost:11434', 'default_api_key_env': None,\n"
-    "               'needs_base_url': False, 'suggested_model': 'llama3.2'},\n"
-    "}\n"
-    "\n"
-    "_KEYS = ['provider', 'model', 'base_url', 'api_key_env', 'timeout_seconds', 'auth']\n"
-    "\n"
-    "\n"
-    "def _log(line):\n"
-    "    with open(LOG_PATH, 'a', encoding='utf-8') as fh:\n"
-    "        fh.write(line + '\\n')\n"
-    "\n"
-    "\n"
-    "def detect_providers(env=None, probe_ollama=True):\n"
-    "    _log('detect_providers')\n"
-    "    out = []\n"
-    "    for name, info in PROVIDERS.items():\n"
-    "        available = name == 'ollama'\n"
-    "        out.append({\n"
-    "            'provider': name,\n"
-    "            'available': available,\n"
-    "            'reason': 'running' if available else 'not found',\n"
-    "            'suggested_model': info['suggested_model'],\n"
-    "            'api_key_env': info['default_api_key_env'],\n"
-    "        })\n"
-    "    return out\n"
-    "\n"
-    "\n"
-    "def check_connection(provider, model, base_url=None, api_key_env=None,\n"
-    "                     timeout_seconds=30, auth=None):\n"
-    "    _log('check_connection')\n"
-    "    if provider not in PROVIDERS:\n"
-    "        raise ValueError('unknown provider')\n"
-    "    if PROVIDERS[provider]['needs_base_url'] and not base_url:\n"
-    "        raise ValueError('base_url required')\n"
-    "    return {'ok': True, 'error': None}\n"
-    "\n"
-    "\n"
-    "def _strip_llm(text):\n"
-    "    kept = []\n"
-    "    in_llm = False\n"
-    "    for line in text.splitlines():\n"
-    "        s = line.strip()\n"
-    "        if s.startswith('[') and s.endswith(']'):\n"
-    "            in_llm = s == '[llm]'\n"
-    "            if in_llm:\n"
-    "                continue\n"
-    "        if not in_llm:\n"
-    "            kept.append(line)\n"
-    "    return kept\n"
-    "\n"
-    "\n"
-    "def save_config(config_path, provider, model, base_url=None, api_key_env=None,\n"
-    "                timeout_seconds=None, auth=None):\n"
-    "    _log('save_config')\n"
-    "    if provider not in PROVIDERS:\n"
-    "        raise ValueError('unknown provider')\n"
-    "    p = Path(config_path)\n"
-    "    p.parent.mkdir(parents=True, exist_ok=True)\n"
-    "    old = p.read_text(encoding='utf-8') if p.exists() else ''\n"
-    "    lines = _strip_llm(old)\n"
-    "    while lines and not lines[-1].strip():\n"
-    "        lines.pop()\n"
-    "    if lines:\n"
-    "        lines.append('')\n"
-    "    lines.append('[llm]')\n"
-    "    vals = {'provider': provider, 'model': model, 'base_url': base_url,\n"
-    "            'api_key_env': api_key_env, 'timeout_seconds': timeout_seconds, 'auth': auth}\n"
-    "    for k in _KEYS:\n"
-    "        if vals[k] is not None:\n"
-    "            lines.append(k + ' = ' + json.dumps(vals[k]))\n"
-    "    new = '\\n'.join(lines) + '\\n'\n"
-    "    if new != old:\n"
-    "        p.write_text(new, encoding='utf-8')\n"
-    "\n"
-    "\n"
-    "def load_config(config_path=None):\n"
-    "    _log('load_config')\n"
-    "    if config_path is None:\n"
-    "        return None\n"
-    "    p = Path(config_path)\n"
-    "    if not p.is_file():\n"
-    "        return None\n"
-    "    result = None\n"
-    "    in_llm = False\n"
-    "    for line in p.read_text(encoding='utf-8').splitlines():\n"
-    "        s = line.strip()\n"
-    "        if s.startswith('[') and s.endswith(']'):\n"
-    "            in_llm = s == '[llm]'\n"
-    "            if in_llm and result is None:\n"
-    "                result = {k: None for k in _KEYS}\n"
-    "            continue\n"
-    "        if in_llm and '=' in s:\n"
-    "            k, v = s.split('=', 1)\n"
-    "            k = k.strip()\n"
-    "            if k in _KEYS:\n"
-    "                result[k] = json.loads(v.strip())\n"
-    "    return result\n"
-)
+def _fake_llm_endpoint_source(log_path):
+    return (
+        "import json\n"
+        "from pathlib import Path\n"
+        "\n"
+        "_LOG = " + repr(str(log_path)) + "\n"
+        "\n"
+        "def _log(name, **kw):\n"
+        "    p = Path(_LOG)\n"
+        "    p.parent.mkdir(parents=True, exist_ok=True)\n"
+        "    with open(p, 'a', encoding='utf-8') as fh:\n"
+        "        fh.write(json.dumps({'call': name, 'args': {k: repr(v) for k, v in kw.items()}}) + '\\n')\n"
+        "\n"
+        "PROVIDERS = {\n"
+        "    'claude-cli': {'default_base_url': None, 'default_api_key_env': None, 'needs_base_url': False, 'suggested_model': 'claude-sonnet-5'},\n"
+        "    'anthropic': {'default_base_url': 'https://api.anthropic.com', 'default_api_key_env': 'ANTHROPIC_API_KEY', 'needs_base_url': False, 'suggested_model': 'claude-sonnet-5'},\n"
+        "    'openai': {'default_base_url': 'https://api.openai.com/v1', 'default_api_key_env': 'OPENAI_API_KEY', 'needs_base_url': False, 'suggested_model': 'gpt-6-astra'},\n"
+        "    'openai-compatible': {'default_base_url': None, 'default_api_key_env': None, 'needs_base_url': True, 'suggested_model': ''},\n"
+        "    'gemini': {'default_base_url': 'https://generativelanguage.googleapis.com', 'default_api_key_env': 'GEMINI_API_KEY', 'needs_base_url': False, 'suggested_model': 'gemini-4-argon'},\n"
+        "    'ollama': {'default_base_url': 'http://localhost:11434', 'default_api_key_env': None, 'needs_base_url': False, 'suggested_model': 'llama3.2'},\n"
+        "}\n"
+        "\n"
+        "def detect_providers(env=None, probe_ollama=True):\n"
+        "    _log('detect_providers', env=env is not None, probe_ollama=probe_ollama)\n"
+        "    out = []\n"
+        "    for name, info in PROVIDERS.items():\n"
+        "        available = name == 'claude-cli'\n"
+        "        out.append({\n"
+        "            'provider': name,\n"
+        "            'available': available,\n"
+        "            'reason': 'found' if available else 'not found',\n"
+        "            'suggested_model': info['suggested_model'],\n"
+        "            'api_key_env': info['default_api_key_env'],\n"
+        "        })\n"
+        "    return out\n"
+        "\n"
+        "def check_connection(provider, model, base_url=None, api_key_env=None, timeout_seconds=30, auth=None):\n"
+        "    _log('check_connection', provider=provider, model=model, base_url=base_url, api_key_env=api_key_env, timeout_seconds=timeout_seconds, auth=auth)\n"
+        "    if provider not in PROVIDERS:\n"
+        "        raise ValueError('unknown provider')\n"
+        "    if PROVIDERS[provider]['needs_base_url'] and not base_url:\n"
+        "        raise ValueError('base_url required')\n"
+        "    return {'ok': True, 'error': None}\n"
+        "\n"
+        "_KEYS = ['provider', 'model', 'base_url', 'api_key_env', 'timeout_seconds', 'auth']\n"
+        "\n"
+        "def save_config(config_path, provider, model, base_url=None, api_key_env=None, timeout_seconds=None, auth=None):\n"
+        "    _log('save_config', config_path=str(config_path), provider=provider, model=model, base_url=base_url, api_key_env=api_key_env, timeout_seconds=timeout_seconds, auth=auth)\n"
+        "    if provider not in PROVIDERS or not model:\n"
+        "        raise ValueError('invalid config')\n"
+        "    path = Path(config_path)\n"
+        "    path.parent.mkdir(parents=True, exist_ok=True)\n"
+        "    existing = path.read_text(encoding='utf-8') if path.is_file() else ''\n"
+        "    head = existing.split('[llm]')[0]\n"
+        "    values = {'provider': provider, 'model': model, 'base_url': base_url, 'api_key_env': api_key_env, 'timeout_seconds': timeout_seconds, 'auth': auth}\n"
+        "    body = '[llm]\\n'\n"
+        "    for k in _KEYS:\n"
+        "        if values[k] is not None:\n"
+        "            body += k + ' = ' + json.dumps(values[k]) + '\\n'\n"
+        "    new = head + body\n"
+        "    if new != existing:\n"
+        "        path.write_text(new, encoding='utf-8')\n"
+        "\n"
+        "def load_config(config_path=None):\n"
+        "    _log('load_config', config_path=None if config_path is None else str(config_path))\n"
+        "    if config_path is None:\n"
+        "        return None\n"
+        "    path = Path(config_path)\n"
+        "    if not path.is_file():\n"
+        "        return None\n"
+        "    text = path.read_text(encoding='utf-8')\n"
+        "    if '[llm]' not in text:\n"
+        "        return None\n"
+        "    result = {k: None for k in _KEYS}\n"
+        "    for line in text.split('[llm]', 1)[1].splitlines():\n"
+        "        line = line.strip()\n"
+        "        if line.startswith('['):\n"
+        "            break\n"
+        "        if '=' not in line:\n"
+        "            continue\n"
+        "        key, _, val = line.partition('=')\n"
+        "        key = key.strip()\n"
+        "        if key in result:\n"
+        "            try:\n"
+        "                result[key] = json.loads(val.strip())\n"
+        "            except Exception:\n"
+        "                raise ValueError('invalid config')\n"
+        "    if result['provider'] is None or result['model'] is None:\n"
+        "        raise ValueError('invalid config')\n"
+        "    return result\n"
+    )
 
 
-def make_tool_root(tmp_path):
-    tool = tmp_path / "tool"
-    log_dir = tmp_path / "logs"
-    log_dir.mkdir(parents=True, exist_ok=True)
-    log_path = log_dir / "llm_endpoint_calls.log"
-
-    ep_dir = tool / "gen" / "llm-endpoint"
-    ep_dir.mkdir(parents=True)
-    src = "LOG_PATH = " + repr(str(log_path)) + "\n" + FAKE_LLM_ENDPOINT_BODY
-    (ep_dir / "llm_endpoint.py").write_text(src, encoding="utf-8")
-
-    ex = tool / "examples" / "slugify" / "specs" / "product"
-    ex.mkdir(parents=True)
-    (ex / "slugs.md").write_text("# Slugs\n\nExample product spec.\n", encoding="utf-8")
-
-    version = importlib.metadata.version("pytest")
-    (tool / "requirements.txt").write_text("pytest==" + version + "\n", encoding="utf-8")
-    return tool
+def _make_tool_root(base):
+    tool_root = base / "toolroot"
+    log_path = base / "logs" / "llm_endpoint.log"
+    ep = tool_root / "gen" / "llm-endpoint"
+    ep.mkdir(parents=True)
+    (ep / "llm_endpoint.py").write_text(_fake_llm_endpoint_source(log_path), encoding="utf-8")
+    slugs = tool_root / "examples" / "slugify" / "specs" / "product"
+    slugs.mkdir(parents=True)
+    (slugs / "slugs.md").write_text("# Slugs\n\nTurn titles into slugs.\n", encoding="utf-8")
+    (tool_root / "requirements.txt").write_text(
+        "pytest==" + importlib.metadata.version("pytest") + "\n", encoding="utf-8"
+    )
+    return tool_root
 
 
-def run_init(project, tool, cwd):
+def _invoke(project, tool_root, cwd):
     lines = []
 
-    def out(*args, **kwargs):
+    def output_fn(*args, **kwargs):
         text = " ".join(str(a) for a in args)
-        lines.extend(text.splitlines())
+        lines.extend(text.split("\n"))
 
-    def inp(prompt=""):
+    def input_fn(prompt=""):
         return ""
 
-    rc = hotdocs_init.main(
+    env = {"PATH": os.environ.get("PATH", "")}
+    rc = hotdocs_init.run(
         [str(project), "--yes"],
-        tool_root=tool,
-        input_fn=inp,
-        output_fn=out,
-        env=dict(os.environ),
+        tool_root=tool_root,
+        input_fn=input_fn,
+        output_fn=output_fn,
+        env=env,
         cwd=cwd,
     )
     return rc, lines
 
 
-def snapshot(root):
+def _snapshot(root):
     snap = {}
-    for p in sorted(Path(root).rglob("*")):
+    for p in sorted(root.rglob("*")):
         rel = p.relative_to(root).as_posix()
-        st = p.stat()
         if p.is_file():
+            st = p.stat()
             snap[rel] = ("file", p.read_bytes(), st.st_mtime_ns)
         elif p.is_dir():
             snap[rel] = ("dir",)
     return snap
 
 
-def test_init_creates_skips_and_preserves(tmp_path):
-    tool = make_tool_root(tmp_path)
+def _gitignore_lines(project):
+    return (project / ".gitignore").read_text(encoding="utf-8").splitlines()
+
+
+def test_ac_init_001_fresh_run_creates_everything(tmp_path):
+    tool_root = _make_tool_root(tmp_path)
     project = tmp_path / "proj"
     project.mkdir()
 
-    # First run on an empty directory
-    rc, lines = run_init(project, tool, tmp_path)
+    rc, lines = _invoke(project, tool_root, tmp_path)
     assert rc in (0, 3), lines
 
     for d in DIRS:
         assert (project / d).is_dir(), d
     for g in GITKEEPS:
         assert (project / g).is_file(), g
-        assert (project / g).read_bytes() == b"", g
-    glossary = (project / "specs" / "glossary.md").read_text(encoding="utf-8")
-    assert glossary.startswith("# Glossary")
+        assert (project / g).stat().st_size == 0, g
+    assert (project / "specs" / "glossary.md").read_text(encoding="utf-8").startswith("# Glossary")
     assert (project / ".secret-allowlist.json").is_file()
-    gi_lines = (project / ".gitignore").read_text(encoding="utf-8").splitlines()
+    gi = _gitignore_lines(project)
     for line in GITIGNORE_LINES:
-        assert gi_lines.count(line) == 1, (line, gi_lines)
+        assert gi.count(line) == 1, (line, gi)
 
     for path in ALL_PATHS:
         assert (path + ": created") in lines, (path, lines)
 
-    # Second run: nothing changes
-    before = snapshot(project)
-    assert ".hotdocs-tool.json" in before
-    time.sleep(0.05)
-    rc2, lines2 = run_init(project, tool, tmp_path)
-    assert rc2 in (0, 3), lines2
-    after = snapshot(project)
+
+def test_ac_init_001_second_run_changes_nothing(tmp_path):
+    tool_root = _make_tool_root(tmp_path)
+    project = tmp_path / "proj"
+    project.mkdir()
+
+    rc1, _ = _invoke(project, tool_root, tmp_path)
+    assert rc1 in (0, 3)
+
+    tool_json = project / ".hotdocs-tool.json"
+    tool_json_existed = tool_json.is_file()
+    if tool_json_existed:
+        tj_bytes = tool_json.read_bytes()
+        tj_mtime = tool_json.stat().st_mtime_ns
+
+    before = _snapshot(project)
+    rc2, lines = _invoke(project, tool_root, tmp_path)
+    assert rc2 in (0, 3), lines
+    after = _snapshot(project)
+
     assert after == before
+    assert tool_json.is_file() == tool_json_existed
+    if tool_json_existed:
+        assert tool_json.read_bytes() == tj_bytes
+        assert tool_json.stat().st_mtime_ns == tj_mtime
 
     for path in ALL_PATHS:
-        assert (path + ": skipped (exists)") in lines2, (path, lines2)
-        assert (path + ": created") not in lines2, (path, lines2)
+        assert (path + ": skipped (exists)") in lines, (path, lines)
+        assert (path + ": created") not in lines, (path, lines)
 
-    # Existing glossary and partial .gitignore are preserved
-    project2 = tmp_path / "proj2"
-    (project2 / "specs").mkdir(parents=True)
-    (project2 / "specs" / "glossary.md").write_text("mine", encoding="utf-8")
-    (project2 / ".gitignore").write_text("/.hotdocs/\n", encoding="utf-8")
 
-    rc3, lines3 = run_init(project2, tool, tmp_path)
-    assert rc3 in (0, 3), lines3
-    assert (project2 / "specs" / "glossary.md").read_text(encoding="utf-8") == "mine"
-    gi2 = (project2 / ".gitignore").read_text(encoding="utf-8").splitlines()
-    assert gi2.count("/.hotdocs/") == 1, gi2
+def test_ac_init_001_existing_files_preserved(tmp_path):
+    tool_root = _make_tool_root(tmp_path)
+    project = tmp_path / "proj"
+    (project / "specs").mkdir(parents=True)
+    (project / "specs" / "glossary.md").write_text("mine", encoding="utf-8")
+    (project / ".gitignore").write_text("/.hotdocs/\n", encoding="utf-8")
+
+    rc, lines = _invoke(project, tool_root, tmp_path)
+    assert rc in (0, 3), lines
+
+    assert (project / "specs" / "glossary.md").read_text(encoding="utf-8") == "mine"
+    gi = _gitignore_lines(project)
+    assert gi.count("/.hotdocs/") == 1, gi
     for line in ["__pycache__/", "*.pyc", ".venv/"]:
-        assert gi2.count(line) == 1, (line, gi2)
+        assert gi.count(line) == 1, (line, gi)
+    assert "specs/glossary.md: skipped (exists)" in lines, lines

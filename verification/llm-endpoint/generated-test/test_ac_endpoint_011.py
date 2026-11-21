@@ -1,9 +1,9 @@
-# hotdocs-criterion: sha256:7b3bb5c43bd2c4e0c4d47629488121f28b07967b69533996b71ca8009ff6c3c8
+# hotdocs-criterion: sha256:20ff1c95bfab1f2490fb155260635c416abb31a7c8ba0d1c14659310cc518f1d
 import json
-import os
-import urllib.request
+from pathlib import Path
 
 import pytest
+import urllib.request
 
 import llm_endpoint
 
@@ -13,71 +13,56 @@ def field(value, name):
 
 
 @pytest.fixture
-def clean_env(tmp_path, monkeypatch):
-    workdir = tmp_path / "work"
-    workdir.mkdir()
+def isolated(tmp_path, monkeypatch):
     monkeypatch.delenv("VAR_HOTDOCS_CONFIG", raising=False)
-    monkeypatch.chdir(workdir)
-    return workdir
+    work = tmp_path / "work"
+    work.mkdir()
+    monkeypatch.chdir(work)
+    return work
 
 
-# --- Given 1: prefix counts only when it names a provider -----------------
+def test_ollama_tag_colon_is_part_of_model_name(isolated):
+    assert tuple(llm_endpoint.parse_model("ollama:llama3.1:8b")) == ("ollama", "llama3.1:8b")
+    assert tuple(llm_endpoint.parse_model("llama3.1:8b")) == (None, "llama3.1:8b")
 
-def test_ollama_prefix_and_bare_ollama_tag(clean_env):
-    provider, model = llm_endpoint.parse_model("ollama:llama3.1:8b")
-    assert provider == "ollama"
-    assert model == "llama3.1:8b"
-
-    provider, model = llm_endpoint.parse_model("llama3.1:8b")
-    assert provider is None
-    assert model == "llama3.1:8b"
+    resolved = llm_endpoint.resolve_provider("ollama:llama3.1:8b", None)
+    assert field(resolved, "provider") == "ollama"
+    assert field(resolved, "model") == "llama3.1:8b"
 
 
-# --- Given 2: bare name uses the configured provider; another prefix uses
-#     that provider's defaults ---------------------------------------------
-
-def _write_config(directory):
-    path = directory / "hotdocs.toml"
-    path.write_text(
+def test_bare_name_uses_config_and_other_prefix_uses_its_defaults(isolated):
+    cfg_dir = isolated / "cfg"
+    cfg_dir.mkdir()
+    cfg_path = cfg_dir / "hotdocs.toml"
+    cfg_path.write_text(
         "[llm]\n"
-        'provider = "openai"\n'
-        'model = "gpt-6-astra"\n'
-        'api_key_env = "MY_KEY"\n'
-        "timeout_seconds = 400\n",
-        encoding="utf-8",
+        + "provider = " + json.dumps("openai") + "\n"
+        + "model = " + json.dumps("gpt-6-astra") + "\n"
+        + "api_key_env = " + json.dumps("MY_KEY") + "\n"
+        + "timeout_seconds = 400\n"
     )
-    return path
-
-
-def test_bare_name_uses_config_and_gemini_prefix_uses_defaults(clean_env):
-    path = _write_config(clean_env)
-    config = llm_endpoint.load_config(path)
+    config = llm_endpoint.load_config(cfg_path)
     assert config is not None
 
-    bare = llm_endpoint.resolve_provider("gpt-6-nova", config)
+    bare = llm_endpoint.resolve_provider("gpt-6-astra-mini", config)
     assert field(bare, "provider") == "openai"
-    assert field(bare, "model") == "gpt-6-nova"
+    assert field(bare, "model") == "gpt-6-astra-mini"
     assert field(bare, "api_key_env") == "MY_KEY"
     assert field(bare, "timeout_seconds") == 400
 
     gem = llm_endpoint.resolve_provider("gemini:gemini-4-argon", config)
     assert field(gem, "provider") == "gemini"
     assert field(gem, "model") == "gemini-4-argon"
-    assert field(gem, "base_url") == "https://generativelanguage.googleapis.com"
     assert field(gem, "api_key_env") == "GEMINI_API_KEY"
+    assert field(gem, "base_url") == "https://generativelanguage.googleapis.com"
     assert field(gem, "timeout_seconds") == llm_endpoint.DEFAULT_TIMEOUT_SECONDS
-    assert field(gem, "timeout_seconds") == 600
+    assert llm_endpoint.DEFAULT_TIMEOUT_SECONDS == 600
 
 
-# --- Given 3: provider receives only the part after the prefix, but
-#     ModelResponse.model is the identifier as passed ---------------------
-
-class _FakeReply:
+class _FakeResponse:
     def __init__(self, body):
         self._body = body
         self.status = 200
-        self.code = 200
-        self.headers = {"Content-Type": "application/json"}
 
     def read(self, *args, **kwargs):
         return self._body
@@ -92,59 +77,49 @@ class _FakeReply:
         return False
 
 
-def _request_body(request, args, kwargs):
-    data = getattr(request, "data", None)
-    if data is None and len(args) > 1:
-        data = args[1]
-    if data is None:
-        data = kwargs.get("data")
-    if isinstance(data, (bytes, bytearray)):
-        data = data.decode("utf-8")
-    return json.loads(data) if data else None
-
-
-def test_complete_strips_prefix_for_provider_but_returns_identifier(
-    clean_env, monkeypatch
-):
+def test_provider_gets_stripped_model_but_response_keeps_identifier(isolated, monkeypatch):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test-not-real")
     recorded = []
 
-    reply_body = json.dumps(
-        {
-            "id": "msg_test",
-            "type": "message",
-            "role": "assistant",
-            "model": "claude-sonnet-5-5",
-            "content": [{"type": "text", "text": "hello"}],
-            "stop_reason": "end_turn",
-            "stop_sequence": None,
-            "usage": {"input_tokens": 1, "output_tokens": 1},
-        }
-    ).encode("utf-8")
+    reply = {
+        "id": "msg_test",
+        "type": "message",
+        "role": "assistant",
+        "model": "claude-sonnet-5-5",
+        "content": [{"type": "text", "text": "hello"}],
+        "stop_reason": "end_turn",
+        "stop_sequence": None,
+        "usage": {"input_tokens": 1, "output_tokens": 1},
+    }
 
-    def recorder(request, *args, **kwargs):
-        recorded.append(_request_body(request, args, kwargs))
-        return _FakeReply(reply_body)
+    def fake_urlopen(request, *args, **kwargs):
+        recorded.append(request)
+        return _FakeResponse(json.dumps(reply).encode("utf-8"))
 
-    monkeypatch.setattr(urllib.request, "urlopen", recorder)
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
 
-    response = llm_endpoint.complete("hi", "anthropic:claude-sonnet-5-5")
+    identifier = "anthropic:claude-sonnet-5-5"
+    resp = llm_endpoint.complete("hi", identifier)
 
-    assert recorded, "urllib.request.urlopen was never called"
-    bodies = [b for b in recorded if isinstance(b, dict)]
-    assert bodies, "no JSON request body was recorded"
-    assert bodies[-1]["model"] == "claude-sonnet-5-5"
+    with_body = [r for r in recorded if getattr(r, "data", None)]
+    assert with_body, "no request with a body was recorded"
+    data = with_body[-1].data
+    if isinstance(data, (bytes, bytearray)):
+        data = data.decode("utf-8")
+    body = json.loads(data)
+    assert body["model"] == "claude-sonnet-5-5"
 
-    assert field(response, "model") == "anthropic:claude-sonnet-5-5"
-    assert field(response, "text") == "hello"
-    assert field(response, "model_call_error") is None
+    assert field(resp, "model") == identifier
+    assert field(resp, "model_call_error") is None
+    assert field(resp, "text") == "hello"
 
 
-def test_injected_backend_receives_identifier_unchanged(clean_env, tmp_path):
-    log_path = tmp_path / "backend_calls.jsonl"
+def test_injected_backend_receives_identifier_unchanged(isolated):
+    log = isolated / "backend_calls.log"
+    identifier = "anthropic:claude-sonnet-5-5"
 
     def backend(prompt, model, **params):
-        with open(log_path, "a", encoding="utf-8") as fh:
+        with open(log, "a") as fh:
             fh.write(json.dumps({"prompt": prompt, "model": model}) + "\n")
         return {
             "text": "ok",
@@ -153,15 +128,10 @@ def test_injected_backend_receives_identifier_unchanged(clean_env, tmp_path):
             "model_call_error": None,
         }
 
-    response = llm_endpoint.complete(
-        "hi", "anthropic:claude-sonnet-5-5", backend=backend
-    )
+    resp = llm_endpoint.complete("hi", identifier, backend=backend)
 
-    lines = [
-        json.loads(line)
-        for line in log_path.read_text(encoding="utf-8").splitlines()
-        if line.strip()
-    ]
+    lines = [json.loads(l) for l in Path(log).read_text().splitlines() if l.strip()]
     assert len(lines) == 1
-    assert lines[0]["model"] == "anthropic:claude-sonnet-5-5"
-    assert field(response, "model") == "anthropic:claude-sonnet-5-5"
+    assert lines[0]["model"] == identifier
+    assert lines[0]["prompt"] == "hi"
+    assert field(resp, "model") == identifier

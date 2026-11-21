@@ -13,45 +13,36 @@
   "interface_drift": false,
   "mutation_score": 0.92,
   "mutation_error": null,
+  "assets": [{ "kind": "python", "path": ".", "definition_sha256": null,
+    "adapter_sha256": "sha256:<hex>", "versions": { "python": "3.12.4" },
+    "lockfile_sha256": null }],
   "overall": "pass"
 }
 ```
 
-`mutation_score` is `null` for a sealed component (`R-VERIFY-017`) and
-when `mutation_error`, a failed baseline's message
-(`specs/architecture/mutation-runs.md`), is set.
+`mutation_score` is `null` for a sealed component (`R-VERIFY-017`),
+when `mutation_error` is set (`specs/architecture/mutation-runs.md`) and
+when an environment failed (`R-VERIFY-020`).
 
-`result` is one of `pass` / `fail` / `skipped`, `spec-linter`'s
-`severity` vocabulary. `test_authoring` is present only on
-`generated-test` criteria that actually dispatched to `test_author` this
-run (absent on a cache hit with no fresh authoring call, and absent on
-every other `kind`): it carries `test-author`'s provenance to
-`provenance-writer` inside this report, as `rationale` does for
-`llm-judge`.
+`result` is `pass`, `fail` or `skipped`. `test_authoring` appears only
+on a `generated-test` criterion that called `test_author` this run.
 
-`covers` (R-VERIFY-011) is each criterion's own `Covers:` value.
-`requirement_results` (R-VERIFY-011) projects `criteria` onto `R-id`s via
-`covers`: `pass` only if every covering criterion is `pass`, `fail`
-otherwise (a `skipped` `llm-judge` criterion counts as `fail` here). It is
-**boolean-only**: nothing in it discloses what a test checked.
+`covers` is the criterion's own `Covers:` value; `requirement_results`
+is R-VERIFY-011's projection.
 
-That rule is independent of `overall`'s (R-VERIFY-005: a `skipped`
-`llm-judge` finding alone never fails `overall`), so in the example
-`R-FOO-002` is `fail` while `overall` is `pass`.
-
-**`failure_detail`** (R-VERIFY-012) — present only on a `compiled` or
-`generated-test` criterion whose `result` is `fail`:
+**`failure_detail`** (R-VERIFY-012), only on a failed `compiled` or
+`generated-test` criterion:
 
 ```json
 { "id": "AC-FOO-004", "covers": "R-FOO-004", "kind": "compiled", "result": "fail",
   "failure_detail": { "message": "result.foo equals 5 failed", "expected": 5, "actual": 3 } }
 ```
 
-Exposed for provenance, review packets and people only: it never
-reaches `requirement_results` or `retry_feedback` (`R-GEN-012`).
+**`failure_origin`** (R-VERIFY-019), exactly on a failed `compiled` or
+`generated-test` criterion: `"test"` when no sound test could run for it,
+`"environment"` when an asset's kind is unknown or unprovisioned
+(`R-VERIFY-020`), `"implementation"` when a test ran and failed.
 
-**`failure_origin`** (R-VERIFY-019) — present exactly on a `compiled` or
-`generated-test` criterion whose `result` is `fail`: `"test"` when no
-test could run for it (none authored, or authoring failed),
-`"implementation"` when a test ran and failed. A retry attends only to
-`"implementation"` failures.
+**`assets`** (R-VERIFY-020), the implicit `python` asset first, then
+one entry per declared asset in declaration order, as
+`specs/architecture/asset-kinds.md`'s Provenance bullet states.

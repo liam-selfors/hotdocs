@@ -1,161 +1,123 @@
-# hotdocs-criterion: sha256:4fed220facd32d923d3756fb381907d2c25560400e2567523770ab79c99b945b
-import json
+# hotdocs-criterion: sha256:87a8a74400115dfadf570aa923f65992a8e96b84ad19eeb9634d84c39ca2f032
+import importlib.util
+import sys
 from pathlib import Path
-
-import pytest
 
 import spec_linter
 
 
-def _get(value, name, default=None):
-    if isinstance(value, dict):
-        return value.get(name, default)
-    return getattr(value, name, default)
+def field(value, name):
+    return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def _findings(report):
-    findings = _get(report, "findings")
-    assert findings is not None, "LintReport must expose findings"
-    return list(findings)
+def _load_linter():
+    gen = next(
+        (p for p in Path(spec_linter.__file__).resolve().parents if p.name == "gen"),
+        None,
+    )
+    if gen is None:
+        return spec_linter
+    base = gen / "spec-linter"
+    path = (
+        base / "spec_linter.py"
+        if (base / "spec_linter.py").is_file()
+        else base / "spec_linter" / "__init__.py"
+    )
+    if not path.is_file():
+        return spec_linter
+    spec = importlib.util.spec_from_file_location("spec_linter", path)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules["spec_linter"] = module
+    spec.loader.exec_module(module)
+    return module
 
 
-def _hard_failures(report):
-    if isinstance(report, dict):
-        if "hard_failures" in report:
-            return report["hard_failures"]
-        summary = report.get("summary") or {}
-        return summary.get("hard_failures")
-    value = getattr(report, "hard_failures", None)
-    if value is None:
-        summary = getattr(report, "summary", None)
-        if summary is not None:
-            value = _get(summary, "hard_failures")
-    return value
-
-
-def _norm(path_value):
-    return str(path_value).replace("\\", "/")
-
-
-def _write(path: Path, text: str) -> Path:
+def _write(path, text):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
-    return path
 
 
-def _var_doc(var_id, sensitivity, extra_bullets):
-    lines = [
-        "---",
-        f"id: {var_id}",
-        f"title: {var_id} declaration",
-        "status: draft",
-        "owners: [alice]",
-        "---",
-        "",
-        f"# {var_id}",
-        "",
-        f"- name: {var_id}",
-        "- required",
-        "- type: string",
-        "- description: A test configuration parameter.",
-        f"- sensitivity: {sensitivity}",
-    ]
-    lines.extend(extra_bullets)
-    lines.append("")
-    return "\n".join(lines)
+def _var_doc(var_id, bullets):
+    return (
+        "---\n"
+        + "id: " + var_id + "\n"
+        + "title: Secret token " + var_id + "\n"
+        + "status: draft\n"
+        + "owners: [pipeline-team]\n"
+        + "---\n"
+        + "\n"
+        + "# " + var_id + "\n"
+        + "\n"
+        + bullets
+    )
 
 
-def _make_repo(tmp_path: Path, var_id, sensitivity, extra_bullets):
-    repo_root = tmp_path / "repo"
-    (repo_root / "specs").mkdir(parents=True, exist_ok=True)
+def _build_fixture(repo_root):
+    specs = repo_root / "specs"
     _write(
-        repo_root / "specs" / "glossary.md",
-        "# Glossary\n\n- **Widget** — a test term.\n",
+        specs / "glossary.md",
+        "# Glossary\n\n- **Token** — a credential used for testing.\n",
     )
-    rel = f"specs/vars/{var_id}.md"
-    _write(repo_root / rel, _var_doc(var_id, sensitivity, extra_bullets))
-    return repo_root, rel
+
+    var_files = {
+        "specs/vars/VAR-ALPHA-TOKEN.md": _var_doc(
+            "VAR-ALPHA-TOKEN",
+            "- name: VAR-ALPHA-TOKEN\n"
+            "- required\n"
+            "- type: secret-ref\n"
+            "- description: A token used to authenticate to the alpha service.\n"
+            "- sensitivity: secret\n"
+            "- default: hunter2\n",
+        ),
+        "specs/vars/VAR-BETA-TOKEN.md": _var_doc(
+            "VAR-BETA-TOKEN",
+            "- **name**: `VAR-BETA-TOKEN`\n"
+            "- **required**\n"
+            "- **type**: `secret-ref`\n"
+            "- **description**: A token used to authenticate to the beta service.\n"
+            "- **sensitivity**: `secret`\n"
+            "- **default**: `hunter2`\n",
+        ),
+        "specs/vars/VAR-GAMMA-TOKEN.md": _var_doc(
+            "VAR-GAMMA-TOKEN",
+            "- `name`: `VAR-GAMMA-TOKEN`\n"
+            "- `required`\n"
+            "- `type`: `secret-ref`\n"
+            "- `description`: A token used to authenticate to the gamma service.\n"
+            "- `sensitivity`: `secret`\n"
+            "- `default`: `hunter2`\n",
+        ),
+    }
+    for rel, text in var_files.items():
+        _write(repo_root / rel, text)
+    return set(var_files)
 
 
-def _lint013_findings_for(report, rel):
-    out = []
-    for f in _findings(report):
-        if _get(f, "rule_id") != "R-LINT-013":
+def test_ac_lint_013_secret_var_with_default_fails(tmp_path):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    var_rel_paths = _build_fixture(repo_root)
+
+    linter = _load_linter()
+    report = linter.lint(None, repo_root)
+
+    findings = list(field(report, "findings"))
+    matching = []
+    for finding in findings:
+        if field(finding, "rule_id") != "R-LINT-013":
             continue
-        file_value = _get(f, "file")
-        if file_value is not None and _norm(file_value).endswith(rel):
-            out.append(f)
-    return out
+        if field(finding, "severity") != "fail":
+            continue
+        file_value = str(field(finding, "file")).replace("\\", "/")
+        if any(file_value.endswith(rel) for rel in var_rel_paths):
+            matching.append(finding)
 
-
-def test_secret_var_with_default_fails_r_lint_013(tmp_path):
-    repo_root, rel = _make_repo(
-        tmp_path, "VAR-SECRET-TOKEN", "secret", ["- default: hunter2"]
+    summary = [
+        (field(f, "rule_id"), field(f, "severity"), field(f, "file"), field(f, "message"))
+        for f in findings
+    ]
+    assert matching, (
+        "expected a fail-severity R-LINT-013 finding for a secret var "
+        "declaration carrying a default field; got: " + repr(summary)
     )
-    report = spec_linter.lint(None, repo_root)
-
-    matches = _lint013_findings_for(report, rel)
-    assert matches, (
-        "expected an R-LINT-013 finding on the secret var with a default; got "
-        + repr([(_get(f, "rule_id"), _get(f, "file")) for f in _findings(report)])
-    )
-    for f in matches:
-        assert _get(f, "severity") == "fail"
-        line = _get(f, "line")
-        assert isinstance(line, int)
-        assert line >= 1
-        message = _get(f, "message")
-        assert isinstance(message, str) and message.strip()
-
-    hard = _hard_failures(report)
-    assert hard is not None and hard >= 1
-
-
-def test_secret_var_with_example_also_fails_r_lint_013(tmp_path):
-    repo_root, rel = _make_repo(
-        tmp_path, "VAR-SECRET-KEY", "secret", ["- example: sk-test-123"]
-    )
-    report = spec_linter.lint(None, repo_root)
-    matches = _lint013_findings_for(report, rel)
-    assert matches
-    assert all(_get(f, "severity") == "fail" for f in matches)
-
-
-def test_secret_var_without_default_or_example_has_no_r_lint_013(tmp_path):
-    repo_root, rel = _make_repo(tmp_path, "VAR-SECRET-PLAIN", "secret", [])
-    report = spec_linter.lint(None, repo_root)
-    assert not _lint013_findings_for(report, rel)
-    assert not [f for f in _findings(report) if _get(f, "rule_id") == "R-LINT-013"]
-
-
-def test_non_secret_var_with_default_has_no_r_lint_013(tmp_path):
-    repo_root, rel = _make_repo(
-        tmp_path, "VAR-PUBLIC-URL", "non-secret", ["- default: http://localhost"]
-    )
-    report = spec_linter.lint(None, repo_root)
-    assert not _lint013_findings_for(report, rel)
-    assert not [f for f in _findings(report) if _get(f, "rule_id") == "R-LINT-013"]
-
-
-def test_cli_reports_r_lint_013_and_exits_1(tmp_path, capsys):
-    repo_root, rel = _make_repo(
-        tmp_path, "VAR-SECRET-TOKEN", "secret", ["- default: hunter2"]
-    )
-    code = spec_linter.main(["--format=json", f"--repo-root={repo_root}"])
-    assert code == 1
-    out = capsys.readouterr().out
-    assert "R-LINT-013" in out
-    try:
-        data = json.loads(out)
-    except ValueError:
-        data = None
-    if isinstance(data, dict):
-        found = [
-            f
-            for f in data.get("findings", [])
-            if f.get("rule_id") == "R-LINT-013"
-            and _norm(f.get("file", "")).endswith(rel)
-        ]
-        assert found
-        assert all(f.get("severity") == "fail" for f in found)
-        assert data.get("summary", {}).get("hard_failures", 0) >= 1
+    assert field(report, "hard_failures") >= 1

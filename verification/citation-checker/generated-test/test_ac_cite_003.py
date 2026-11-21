@@ -1,184 +1,133 @@
-# hotdocs-criterion: sha256:4afabea7a812311e37279498436751cdb210eeb730895762b596db2ba7b7414e
-import citation_checker
-
+# hotdocs-criterion: sha256:7d5c7bf54e43ad0a2366fb26ed2f5c004587010d5abb9df574471abdc6e2d8eb
 from pathlib import Path
 
-
-RULE = "R-CITE-003"
-
-
-def _get(value, key):
-    return value.get(key) if isinstance(value, dict) else getattr(value, key, None)
+import citation_checker
 
 
-def _write(root, rel, text):
-    path = Path(root) / rel
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text, encoding="utf-8")
-    return path
+def field(value, name):
+    return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-COMPONENT_MD = """---
-id: comp-demo
-title: Demo
-status: draft
-owners: [alice]
-sealed: true
-source_path: legacy/demo
----
+GLOSSARY = (
+    "# Glossary\n"
+    "\n"
+    "Canonical vocabulary for this fixture corpus.\n"
+    "\n"
+    "- **Widget** — a small fixture thing used by tests.\n"
+    "- **Criterion test filename** — the deterministic filename of a\n"
+    "  criterion's test file.\n"
+)
 
-# Demo
+COMPONENT_MD = (
+    "---\n"
+    "id: comp-foo\n"
+    "title: Foo\n"
+    "status: ratified\n"
+    "owners: [team-a]\n"
+    "sealed: true\n"
+    "source_path: legacy/foo/\n"
+    "last_ratified_commit: 0000000\n"
+    "---\n"
+    "# Foo\n"
+    "\n"
+    "## Purpose\n"
+    "\n"
+    "Does a small fixture job.\n"
+    "\n"
+    "## Scope\n"
+    "\n"
+    "- In scope: the fixture job.\n"
+    "\n"
+    "## Definitions\n"
+    "\n"
+    "None.\n"
+    "\n"
+    "## Behavior\n"
+    "\n"
+    "See `requirements/`.\n"
+    "\n"
+    "## Interfaces\n"
+    "\n"
+    "See `interface/`.\n"
+    "\n"
+    "## Data\n"
+    "\n"
+    "See `interface/data/`.\n"
+    "\n"
+    "## Acceptance criteria\n"
+    "\n"
+    "See `acceptance/`.\n"
+    "\n"
+    "## Non-functional constraints\n"
+    "\n"
+    "See `constraints.md`.\n"
+    "\n"
+    "## Open questions\n"
+    "\n"
+    "## Change log\n"
+    "\n"
+    "- Initial version.\n"
+)
 
-## Purpose
 
-A demo fixture component used only by this test.
-
-## Scope
-
-- In scope: fixture behavior.
-- Out of scope: everything else.
-
-## Definitions
-
-None.
-
-## Behavior
-
-See the requirements directory.
-
-## Interfaces
-
-See the interface directory.
-
-## Data
-
-None.
-
-## Acceptance criteria
-
-See the acceptance directory.
-
-## Non-functional constraints
-
-None.
-
-## Open questions
-
-## Change log
-
-- Created as a test fixture.
-"""
-
-
-def _build_repo(root, glossary_entries, requirements):
-    root = Path(root)
-    glossary_lines = ["# Glossary", "", "Canonical vocabulary for the fixture.", ""]
-    for term, definition in glossary_entries:
-        glossary_lines.append("- **%s** — %s" % (term, definition))
-    glossary_lines.append("")
-    _write(root, "specs/glossary.md", "\n".join(glossary_lines))
-    _write(root, "specs/components/demo/component.md", COMPONENT_MD)
-    for req_id, text in requirements:
-        _write(root, "specs/components/demo/requirements/%s.md" % req_id, text)
-        ac_id = req_id.replace("R-", "AC-", 1)
-        _write(
-            root,
-            "specs/components/demo/acceptance/%s.md" % ac_id,
-            "# %s\n\nCovers: %s\nKind: llm-judge\n\nThe demo behaves as stated.\n"
-            % (ac_id, req_id),
+def build_fixture(repo_root, requirements):
+    specs = repo_root / "specs"
+    specs.mkdir(parents=True)
+    (specs / "glossary.md").write_text(GLOSSARY)
+    comp = specs / "components" / "foo"
+    (comp / "requirements").mkdir(parents=True)
+    (comp / "acceptance").mkdir(parents=True)
+    (comp / "component.md").write_text(COMPONENT_MD)
+    for i, body in enumerate(requirements, start=1):
+        rid = "R-FOO-%03d" % i
+        aid = "AC-FOO-%03d" % i
+        (comp / "requirements" / (rid + ".md")).write_text(
+            "# " + rid + "\n\n**" + rid + "** — " + body + "\n"
         )
-    return root
+        (comp / "acceptance" / (aid + ".md")).write_text(
+            "# " + aid + "\n\nCovers: " + rid + "\nKind: llm-judge\n\n"
+            "The requirement holds.\n"
+        )
 
 
-def _rel(path_value):
-    return str(path_value).replace("\\", "/")
+def req_path(n):
+    return "specs/components/foo/requirements/R-FOO-%03d.md" % n
 
 
-def _cite_findings(findings):
-    assert isinstance(findings, list)
-    return [f for f in findings if _get(f, "rule_id") == RULE]
+def cite_findings(repo_root):
+    findings = citation_checker.check(repo_root)
+    out = []
+    for f in findings:
+        if field(f, "rule_id") == "R-CITE-003":
+            out.append(str(field(f, "file")).replace("\\", "/"))
+    return out
 
 
-def _req_path(req_id):
-    return "specs/components/demo/requirements/%s.md" % req_id
-
-
-def test_only_missing_glossary_entry_is_flagged(tmp_path):
-    repo = _build_repo(
-        tmp_path,
-        [("Widget", "a small part used by the fixture.")],
+def test_missing_glossary_entry_is_flagged_existing_is_not(tmp_path):
+    repo_root = tmp_path / "repo"
+    build_fixture(
+        repo_root,
         [
-            (
-                "R-DEMO-001",
-                "# R-DEMO-001\n\n"
-                "**R-DEMO-001** — The demo MUST follow the glossary's \"Widget\" definition.\n",
-            ),
-            (
-                "R-DEMO-002",
-                "# R-DEMO-002\n\n"
-                "**R-DEMO-002** — The demo MUST follow the glossary's \"Gizmo\" definition.\n",
-            ),
+            "The component MUST treat each input as the glossary's \"Widget\" defines it.",
+            "The component MUST treat each output as the glossary's \"Gizmo\" defines it.",
         ],
     )
-
-    findings = citation_checker.check(repo)
-    cite = _cite_findings(findings)
-
-    assert len(cite) == 1, cite
-    finding = cite[0]
-    assert _rel(_get(finding, "file")) == _req_path("R-DEMO-002")
-    line = _get(finding, "line")
-    assert isinstance(line, int) and not isinstance(line, bool)
-    assert line == 3
-    assert _get(finding, "severity") in ("fail", "warn")
-    assert isinstance(_get(finding, "message"), str)
-
-    flagged_files = {_rel(_get(f, "file")) for f in cite}
-    assert _req_path("R-DEMO-001") not in flagged_files
+    files = cite_findings(Path(repo_root))
+    assert files == [req_path(2)]
 
 
-def test_wrap_trailing_punctuation_case_and_placeholder(tmp_path):
-    repo = _build_repo(
-        tmp_path,
-        [("Widget frame", "the frame that holds a widget.")],
+def test_wrap_punctuation_case_and_placeholder(tmp_path):
+    repo_root = tmp_path / "repo"
+    build_fixture(
+        repo_root,
         [
-            (
-                "R-DEMO-001",
-                "# R-DEMO-001\n\n"
-                "**R-DEMO-001** — The demo MUST follow the glossary's \"Widget\n"
-                "  frame\" definition when building.\n",
-            ),
-            (
-                "R-DEMO-002",
-                "# R-DEMO-002\n\n"
-                "**R-DEMO-002** — The demo MUST follow the glossary's \"Widget frame,\" and\n"
-                "nothing else.\n",
-            ),
-            (
-                "R-DEMO-003",
-                "# R-DEMO-003\n\n"
-                "**R-DEMO-003** — The demo MUST follow the glossary's \"widget frame\" definition.\n",
-            ),
-            (
-                "R-DEMO-004",
-                "# R-DEMO-004\n\n"
-                "**R-DEMO-004** — A citation has the form the glossary's \"<Term>\" in prose.\n",
-            ),
+            "The component MUST name each file per the glossary's \"Criterion test\n"
+            "  filename\" exactly.",
+            "The component MUST treat each input as the glossary's \"Widget,\" never\n"
+            "  as anything else.",
+            "The component MUST treat each input as the glossary's \"widget\" defines it.",
+            "A citation takes the form the glossary's \"<Term>\" in prose.",
         ],
     )
-
-    findings = citation_checker.check(repo)
-    cite = _cite_findings(findings)
-
-    flagged_files = [_rel(_get(f, "file")) for f in cite]
-    assert flagged_files == [_req_path("R-DEMO-003")], cite
-
-    finding = cite[0]
-    line = _get(finding, "line")
-    assert isinstance(line, int) and not isinstance(line, bool)
-    assert line == 3
-    assert _get(finding, "severity") in ("fail", "warn")
-
-    assert _req_path("R-DEMO-001") not in flagged_files
-    assert _req_path("R-DEMO-002") not in flagged_files
-    assert _req_path("R-DEMO-004") not in flagged_files
+    files = cite_findings(Path(repo_root))
+    assert files == [req_path(3)]

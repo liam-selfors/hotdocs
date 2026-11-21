@@ -1,21 +1,15 @@
-# hotdocs-criterion: sha256:36189670b5334f5d814847c8b17867c5ad10e000b54a2743dba2316cdcf7dee5
+# hotdocs-criterion: sha256:8e318049a9fa28cb97a30cf68baa60c9bfcaa618d13aef8ba6fd9aa041842903
 import hashlib
+import json
 from pathlib import Path
 
 import verifier_orchestrator
 
 
-CRITERION_ID = "AC-WIDGET-001"
-REQUIREMENT_ID = "R-WIDGET-001"
-COMPONENT_ID = "comp-widget"
 SLUG = "widget"
-
-CRITERION_TEXT = (
-    "Given a number 2\n"
-    "When double is called with it\n"
-    "Then it returns 4"
-)
-REQUIREMENT_TEXT = "**R-WIDGET-001** — `double(x)` MUST return `2 * x`."
+COMPONENT_ID = "comp-widget"
+CRITERION_ID = "AC-WIDGET-001"
+HASH_KEYS = ("criterion_text", "requirement_text", "interface", "glossary", "testing")
 
 
 def field(value, name):
@@ -27,41 +21,79 @@ def write(path, text):
     path.write_text(text, encoding="utf-8")
 
 
-def build_fixture(repo_root, implementation_source):
-    write(
-        repo_root / "specs" / "glossary.md",
-        "# Glossary\n\n- **Widget** — a test term.\n",
+def criterion_bundle():
+    return {
+        "component_id": COMPONENT_ID,
+        "criterion_id": CRITERION_ID,
+        "covers": "R-WIDGET-001",
+        "criterion_text": "Given a number 3\nWhen double is called with it\nThen it returns 6",
+        "requirement_text": "**R-WIDGET-001** - `double` MUST return twice its argument.",
+        "interface": "# Library\n\ndouble(x: int) -> int",
+        "glossary": "# Glossary",
+        "dependency_interfaces": {},
+        "testing": "",
+    }
+
+
+def header_for(bundle):
+    payload = json.dumps(
+        {k: bundle[k] for k in HASH_KEYS},
+        sort_keys=True,
+        ensure_ascii=False,
+        separators=(",", ":"),
     )
+    digest = hashlib.sha256(payload.encode("utf-8")).hexdigest()
+    return "# hotdocs-criterion: sha256:" + digest
+
+
+def cached_test_source(bundle, expected, marker):
+    return (
+        header_for(bundle) + "\n"
+        + "import widget\n"
+        + "\n"
+        + "\n"
+        + "def test_double_value():\n"
+        + "    with open(" + repr(str(marker)) + ", \"a\") as handle:\n"
+        + "        handle.write(\"ran\\n\")\n"
+        + "    assert widget.double(3) == " + repr(expected) + "\n"
+    )
+
+
+def build_fixture(repo_root, expected, marker):
+    bundle = criterion_bundle()
+
     write(
-        repo_root / "specs" / "product" / "widgeting.md",
+        repo_root / "specs" / "product" / "widget.md",
         "---\n"
         "id: P-WIDGET\n"
-        "title: Widgeting\n"
+        "title: Widget capability\n"
         "status: draft\n"
-        "owners: [team-a]\n"
+        "owners: [team]\n"
         "---\n"
         "\n"
-        "# Widgeting\n"
+        "# Widget capability\n"
         "\n"
         "## Purpose\n"
         "\n"
-        "Widgets double numbers.\n"
+        "Doubles numbers.\n"
         "\n"
         "## Scope\n"
         "\n"
-        "- In scope: doubling.\n"
+        "- Doubling.\n"
         "\n"
         "### CS-WIDGET-001\n"
         "\n"
         "Covers: P-WIDGET\n"
-        "Kind: generated-test\n"
+        "Kind: compiled\n"
         "\n"
         "```gherkin\n"
-        "Given a number 2\n"
-        "When it is doubled\n"
-        "Then the result is 4\n"
+        "Given a x is 3\n"
+        "When widget.double is invoked with [3]\n"
+        "Then result equals 6\n"
         "```\n",
     )
+    write(repo_root / "specs" / "glossary.md", "# Glossary\n")
+
     comp = repo_root / "specs" / "components" / SLUG
     write(
         comp / "component.md",
@@ -69,8 +101,7 @@ def build_fixture(repo_root, implementation_source):
         "id: comp-widget\n"
         "title: Widget\n"
         "status: draft\n"
-        "owners: [team-a]\n"
-        "depends_on: []\n"
+        "owners: [team]\n"
         "realizes: [P-WIDGET]\n"
         "---\n"
         "\n"
@@ -78,7 +109,7 @@ def build_fixture(repo_root, implementation_source):
         "\n"
         "## Purpose\n"
         "\n"
-        "Widget doubles a number.\n"
+        "Doubles a number.\n"
         "\n"
         "## Scope\n"
         "\n"
@@ -115,17 +146,21 @@ def build_fixture(repo_root, implementation_source):
         "- Initial.\n",
     )
     write(
-        comp / "requirements" / (REQUIREMENT_ID + ".md"),
-        "# " + REQUIREMENT_ID + "\n\n" + REQUIREMENT_TEXT + "\n",
+        comp / "requirements" / "R-WIDGET-001.md",
+        "# R-WIDGET-001\n\n**R-WIDGET-001** - `double` MUST return twice its argument.\n",
     )
     write(
-        comp / "acceptance" / (CRITERION_ID + ".md"),
-        "# " + CRITERION_ID + "\n"
+        comp / "acceptance" / "AC-WIDGET-001.md",
+        "# AC-WIDGET-001\n"
         "\n"
-        "Covers: " + REQUIREMENT_ID + "\n"
+        "Covers: R-WIDGET-001\n"
         "Kind: generated-test\n"
         "\n"
-        "```gherkin\n" + CRITERION_TEXT + "\n```\n",
+        "```gherkin\n"
+        "Given a number 3\n"
+        "When double is called with it\n"
+        "Then it returns 6\n"
+        "```\n",
     )
     write(
         comp / "interface" / "library.md",
@@ -133,68 +168,65 @@ def build_fixture(repo_root, implementation_source):
     )
     write(comp / "constraints.md", "# Constraints\n\nNone.\n")
 
-    # Real code under gen/<slug>/
-    write(repo_root / "gen" / SLUG / "widget.py", implementation_source)
+    write(
+        repo_root / "gen" / SLUG / "widget.py",
+        "def double(x):\n    return x * 2\n",
+    )
 
-    # spec-bundle-assembler stand-in
-    assembler_source = (
-        "CRITERION_TEXT = " + repr(CRITERION_TEXT) + "\n"
-        "REQUIREMENT_TEXT = " + repr(REQUIREMENT_TEXT) + "\n"
+    write(
+        repo_root / "gen" / "spec-bundle-assembler" / "spec_bundle_assembler.py",
+        "BUNDLE = " + repr(bundle) + "\n"
         "\n"
         "\n"
         "def assemble_criterion(component_id, criterion_id, repo_root):\n"
-        "    return {\n"
-        "        'component_id': component_id,\n"
-        "        'criterion_id': criterion_id,\n"
-        "        'covers': " + repr(REQUIREMENT_ID) + ",\n"
-        "        'criterion_text': CRITERION_TEXT,\n"
-        "        'requirement_text': REQUIREMENT_TEXT,\n"
-        "        'interface': " + repr("# Library\n\n```\ndouble(x: int) -> int\n```") + ",\n"
-        "        'glossary': " + repr("# Glossary\n\n- **Widget** — a test term.") + ",\n"
-        "        'dependency_interfaces': {},\n"
-        "    }\n"
-    )
-    write(
-        repo_root / "gen" / "spec-bundle-assembler" / "spec_bundle_assembler.py",
-        assembler_source,
+        "    return dict(BUNDLE)\n",
     )
 
-    # Already-generated (cached) test file with a correct header
-    digest = hashlib.sha256(
-        (CRITERION_TEXT + "\n" + REQUIREMENT_TEXT).encode("utf-8")
-    ).hexdigest()
-    cached_test = (
-        "# hotdocs-criterion: sha256:" + digest + "\n"
-        "import widget\n"
+    write(
+        repo_root / "gen" / "test-probe" / "test_probe.py",
+        "GATE_VERSION = \"test-probe@1.3.0\"\n"
         "\n"
         "\n"
-        "def test_double_two():\n"
-        "    assert widget.double(2) == 4\n"
+        "class _Report:\n"
+        "    def __init__(self):\n"
+        "        self.ok = True\n"
+        "        self.findings = []\n"
+        "        self.tests_run = 0\n"
+        "        self.tests_reached = 0\n"
+        "\n"
+        "    def to_dict(self):\n"
+        "        return {\"ok\": self.ok, \"findings\": list(self.findings),\n"
+        "                \"tests_run\": self.tests_run, \"tests_reached\": self.tests_reached}\n"
+        "\n"
+        "\n"
+        "def probe(test_source, criterion_bundle, module_name, *, timeout=60.0, interpreter=None):\n"
+        "    return _Report()\n",
     )
+
     write(
-        repo_root
-        / "verification"
-        / SLUG
-        / "generated-test"
-        / "test_ac_widget_001.py",
-        cached_test,
+        repo_root / "verification" / SLUG / "generated-test" / "test_ac_widget_001.py",
+        cached_test_source(bundle, expected, marker),
     )
+    return bundle
 
 
-def make_test_author(log_path):
-    def test_author_stub(bundle):
-        with open(log_path, "a", encoding="utf-8") as fh:
-            fh.write("called\n")
+def make_author(log_path, bundle, marker):
+    def author(b):
+        with open(log_path, "a") as handle:
+            handle.write("called\n")
         return {
-            "model": "stub-model",
+            "model": "fake-model",
             "seed": 0,
             "prompt_version": "v1",
             "cache_hit": False,
-            "model_call_error": {"category": "stub", "message": "should not be called"},
-            "file": None,
+            "model_call_error": None,
+            "file": {
+                "path": "verification/widget/generated-test/test_ac_widget_001.py",
+                "content": cached_test_source(bundle, 6, marker),
+            },
         }
 
-    return test_author_stub
+    return author
 
 
 def find_criterion(report):
@@ -204,30 +236,33 @@ def find_criterion(report):
     return matches[0]
 
 
-def run_verify(tmp_path, implementation_source):
+def run_case(tmp_path, expected):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
-    build_fixture(repo_root, implementation_source)
-    log_path = tmp_path / "author_calls.log"
+    marker = tmp_path / "ran.log"
+    author_log = tmp_path / "author.log"
+    bundle = build_fixture(repo_root, expected, marker)
     report = verifier_orchestrator.verify(
-        COMPONENT_ID, repo_root, test_author=make_test_author(log_path)
+        COMPONENT_ID, repo_root, judge=None, test_author=make_author(author_log, bundle, marker)
     )
-    calls = log_path.read_text(encoding="utf-8") if log_path.exists() else ""
-    return report, calls
+    return report, marker, author_log
 
 
-def test_cached_generated_test_passes_against_correct_implementation(tmp_path):
-    report, calls = run_verify(tmp_path, "def double(x):\n    return 2 * x\n")
+def test_cached_generated_test_passes_and_is_reported(tmp_path):
+    report, marker, author_log = run_case(tmp_path, 6)
     entry = find_criterion(report)
     assert field(entry, "kind") == "generated-test"
-    assert field(entry, "result") == "pass"
-    # The cached file was used, so no authoring dispatch happened.
-    assert calls == ""
+    assert field(entry, "result") == "pass", entry
+    assert marker.is_file()
+    assert marker.read_text().count("ran") >= 1
+    assert not author_log.exists() or author_log.read_text() == ""
 
 
-def test_cached_generated_test_fails_against_wrong_implementation(tmp_path):
-    report, calls = run_verify(tmp_path, "def double(x):\n    return 2 * x + 1\n")
+def test_cached_generated_test_fails_and_is_reported(tmp_path):
+    report, marker, author_log = run_case(tmp_path, 7)
     entry = find_criterion(report)
     assert field(entry, "kind") == "generated-test"
-    assert field(entry, "result") == "fail"
-    assert calls == ""
+    assert field(entry, "result") == "fail", entry
+    assert marker.is_file()
+    assert marker.read_text().count("ran") >= 1
+    assert not author_log.exists() or author_log.read_text() == ""

@@ -1,108 +1,107 @@
-# hotdocs-criterion: sha256:6b331b90b7ec95d4b0f51c7299165b0a9bcfa8e56c04eec8ef9537cf0b76fa97
+# hotdocs-criterion: sha256:8adf0001273afc513bf56800b5ab34c590601fa5088db558530c91d0288a622d
+import hashlib
 import re
+import uuid
 from pathlib import Path
 
 import generator
+
+
+PYTHON_ADAPTER = (
+    "from pathlib import Path\n"
+    "\n"
+    "KIND = \"python\"\n"
+    "\n"
+    "\n"
+    "def layout_errors(code_dir):\n"
+    "    return [\"bad.py:1: SyntaxError: x\"] if (Path(code_dir) / \"bad.py\").exists() else []\n"
+    "\n"
+    "\n"
+    "def provision(repo_root):\n"
+    "    return {\"ok\": True, \"reason\": \"\", \"versions\": {\"python\": \"3.12\"}, "
+    "\"lockfile_sha256\": None, \"interpreter\": \"/fake/python\"}\n"
+)
+
+COMPONENT_MD = (
+    "---\n"
+    "id: comp-foo-bar\n"
+    "title: Foo Bar\n"
+    "status: draft\n"
+    "owners: [pipeline-team]\n"
+    "depends_on: []\n"
+    "sealed: false\n"
+    "---\n"
+    "\n"
+    "# Foo Bar\n"
+)
 
 
 def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-class Bundle(dict):
-    """A SpecBundle-shaped object readable both as a mapping and by attribute."""
-
-    def __getattr__(self, name):
-        try:
-            return self[name]
-        except KeyError:
-            raise AttributeError(name)
-
-
-def make_bundle():
-    return Bundle(
-        component_id="comp-foo-bar",
-        spec_bundle_hash="sha256:" + "ab" * 32,
-        spec="# Foo Bar\n\n## Purpose\n\nFoo bar doubles a number.\n\n# R-FOO-BAR-001\n\n**R-FOO-BAR-001** — `foo_bar(x)` MUST return `2 * x`.",
-        interface="# Library\n\n```\nfoo_bar(x: int) -> int\n```",
-        constraints="# Constraints\n\nNone.",
-        dependency_interfaces={},
-        dependency_context={},
-        dependency_usage={},
-        vars={},
-        glossary="# Glossary\n\n- **Foo** — a test term.",
-        hint_code=None,
-    )
+def _setup_repo(repo_root):
+    adapter = repo_root / "gen" / "kind-python" / "kind_python.py"
+    adapter.parent.mkdir(parents=True, exist_ok=True)
+    adapter.write_text(PYTHON_ADAPTER, encoding="utf-8")
+    comp = repo_root / "specs" / "components" / "foo-bar" / "component.md"
+    comp.parent.mkdir(parents=True, exist_ok=True)
+    comp.write_text(COMPONENT_MD, encoding="utf-8")
 
 
-def write_component(repo_root):
-    comp_dir = repo_root / "specs" / "components" / "foo-bar"
-    comp_dir.mkdir(parents=True, exist_ok=True)
-    (comp_dir / "component.md").write_text(
-        "---\n"
-        "id: comp-foo-bar\n"
-        "title: Foo Bar\n"
-        "status: draft\n"
-        "owners: [team-a]\n"
-        "sealed: false\n"
-        "depends_on: []\n"
-        "---\n"
-        "\n"
-        "# Foo Bar\n"
-        "\n"
-        "## Purpose\n"
-        "\n"
-        "Foo bar doubles a number.\n",
-        encoding="utf-8",
-    )
+def _bundle():
+    digest = hashlib.sha256(uuid.uuid4().hex.encode("utf-8")).hexdigest()
+    return {
+        "component_id": "comp-foo-bar",
+        "spec_bundle_hash": "sha256:" + digest,
+        "spec": "# Foo Bar\n\nProvides foo_bar.",
+        "interface": "def foo_bar() -> int",
+        "constraints": "",
+        "dependency_interfaces": {},
+        "dependency_context": {},
+        "dependency_usage": {},
+        "vars": {},
+        "glossary": "",
+        "hint_code": None,
+    }
 
 
-def find_nonce(prompt):
-    m = re.search(r"-----BEGIN FILE ([0-9a-f]{32})\b", prompt)
-    if m:
-        return m.group(1)
-    candidates = re.findall(r"(?<![0-9a-fA-F])([0-9a-f]{32})(?![0-9a-fA-F])", prompt)
-    assert candidates, "no nonce found in prompt"
-    return candidates[0]
+REPLY_FILES = {
+    "foo-bar/foo_bar.py": "def foo_bar():\n    return 1\n",
+    "gen/foo-bar/helpers/__init__.py": "HELPER = 2\n",
+    "foo_bar_extra.py": "EXTRA = 3\n",
+}
 
 
-def test_ac_gen_021_redundant_component_prefix_is_stripped(tmp_path, monkeypatch):
+def _mock_backend(prompt, model, **params):
+    nonce = re.search(r"-----BEGIN FILE ([0-9a-f]{32}):", prompt).group(1)
+    parts = []
+    for path, content in REPLY_FILES.items():
+        parts.append("-----BEGIN FILE " + nonce + ": " + path + "-----\n")
+        parts.append(content)
+        parts.append("-----END FILE " + nonce + "-----\n")
+    parts.append("-----END REPLY " + nonce + "-----\n")
+    return {
+        "text": "".join(parts),
+        "model": model,
+        "backend": "mock",
+        "model_call_error": None,
+    }
+
+
+def test_ac_gen_021_strips_redundant_component_prefix(tmp_path, monkeypatch):
     monkeypatch.delenv("VAR_CACHE_STORE_URL", raising=False)
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
-    write_component(repo_root)
-
-    log_path = tmp_path / "backend_calls.log"
-
-    returned = {
-        "foo-bar/foo_bar.py": "def foo_bar(x):\n    return 2 * x\n",
-        "gen/foo-bar/helpers/__init__.py": "HELPER = 1\n",
-        "foo_bar_extra.py": "EXTRA = 2\n",
-    }
-
-    def backend(prompt, model, **params):
-        with open(log_path, "a", encoding="utf-8") as fh:
-            fh.write("call\n")
-        nonce = find_nonce(prompt)
-        parts = ["Here are the files.\n"]
-        for path, content in returned.items():
-            parts.append("-----BEGIN FILE " + nonce + ": " + path + "-----\n")
-            parts.append(content)
-            if not content.endswith("\n"):
-                parts.append("\n")
-            parts.append("-----END FILE " + nonce + "-----\n")
-        return {
-            "text": "".join(parts),
-            "model": model,
-            "backend": "mock",
-            "model_call_error": None,
-        }
+    _setup_repo(repo_root)
 
     result = generator.generate(
-        make_bundle(), "mock-model", repo_root=repo_root, llm_backend=backend
+        _bundle(),
+        "claude-sonnet-5",
+        repo_root=repo_root,
+        llm_backend=_mock_backend,
     )
 
-    assert log_path.exists(), "mock model was never called"
     assert field(result, "model_call_error") is None
     assert field(result, "refused") is None
 
@@ -111,9 +110,9 @@ def test_ac_gen_021_redundant_component_prefix_is_stripped(tmp_path, monkeypatch
     assert (out / "helpers" / "__init__.py").is_file()
     assert (out / "foo_bar_extra.py").is_file()
 
-    assert (out / "foo_bar.py").read_text(encoding="utf-8").strip() == "def foo_bar(x):\n    return 2 * x"
-    assert (out / "helpers" / "__init__.py").read_text(encoding="utf-8").strip() == "HELPER = 1"
-    assert (out / "foo_bar_extra.py").read_text(encoding="utf-8").strip() == "EXTRA = 2"
+    assert (out / "foo_bar.py").read_text(encoding="utf-8") == REPLY_FILES["foo-bar/foo_bar.py"]
+    assert (out / "helpers" / "__init__.py").read_text(encoding="utf-8") == REPLY_FILES["gen/foo-bar/helpers/__init__.py"]
+    assert (out / "foo_bar_extra.py").read_text(encoding="utf-8") == REPLY_FILES["foo_bar_extra.py"]
 
-    assert not (out / "foo-bar").exists(), "nothing may be written under gen/foo-bar/foo-bar/"
-    assert not (out / "gen").exists(), "nothing may be written under gen/foo-bar/gen/"
+    assert not (out / "foo-bar").exists()
+    assert not (out / "gen").exists()

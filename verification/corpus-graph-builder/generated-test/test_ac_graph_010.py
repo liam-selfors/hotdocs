@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:9e69cf5fecf8c6836b1e674b9db91ff747a6c220cd7f6c735df0b685dfaf33c7
+# hotdocs-criterion: sha256:13d017bc2962e352e2e9bce8a353012e5664d3b4a2019c15028c5754d30480f2
 import sys
 from pathlib import Path
 
@@ -20,7 +20,7 @@ def _build_fixture(repo_root):
         + "id: comp-a\n"
         + "title: Component A\n"
         + "status: draft\n"
-        + "owners: [team-a]\n"
+        + "owners: [pipeline-team]\n"
         + "depends_on: []\n"
         + "realizes: []\n"
         + "uses_var: []\n"
@@ -28,33 +28,35 @@ def _build_fixture(repo_root):
         + "source_path: legacy/a/\n"
         + "---\n"
         + "\n"
-        + "# comp-a\n"
+        + "# Component A\n"
         + "\n"
         + "## Purpose\n"
         + "\n"
-        + "A small fixture component.\n"
+        + "A tiny fixture component used to build a corpus graph.\n"
     )
     _write(repo_root / "specs" / "components" / "a" / "component.md", component_md)
 
 
-def _names_gqe(entry):
-    text = str(entry)
-    return "graph-query-engine" in text or "graph_query_engine" in text
-
-
-def test_build_corpus_graph_loads_gqe_without_sys_path(tmp_path, monkeypatch):
+def test_ac_graph_010_loads_graph_query_engine_by_path(tmp_path, monkeypatch):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
     _build_fixture(repo_root)
     assert not (repo_root / "gen").exists()
 
-    monkeypatch.setattr(sys, "path", [p for p in sys.path if not _names_gqe(p)])
+    cleaned_path = [p for p in sys.path if "graph-query-engine" not in str(p)]
+    monkeypatch.setattr(sys, "path", cleaned_path)
     monkeypatch.delitem(sys.modules, "graph_query_engine", raising=False)
 
-    assert not any(_names_gqe(p) for p in sys.path)
+    assert not any("graph-query-engine" in str(p) for p in sys.path)
     assert "graph_query_engine" not in sys.modules
 
     graph = corpus_graph_builder.build_corpus_graph(repo_root)
 
     nodes = field(graph, "nodes")
-    assert "comp-a" in nodes
+    if isinstance(nodes, dict):
+        node_ids = set(nodes.keys())
+    else:
+        node_ids = set()
+        for node in nodes:
+            node_ids.add(field(node, "id"))
+    assert "comp-a" in node_ids

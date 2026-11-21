@@ -16,4 +16,8 @@ Given comp-foo's most recent AttemptRecord whose requirement_results is
   AC-FOO-002 covering R-FOO-002, "fail", failure_origin "implementation"
 When last_requirement_failures("comp-foo", repo_root) is called
 Then it returns exactly ["R-FOO-002"]
+
+Given both fail, R-FOO-001 covered by a "pass" and an "environment"
+  failure, R-FOO-002 by a "test" failure and one with no failure_origin
+Then it returns exactly ["R-FOO-002"]
 ```

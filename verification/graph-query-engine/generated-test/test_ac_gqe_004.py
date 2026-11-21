@@ -1,244 +1,209 @@
-# hotdocs-criterion: sha256:ab2dc9ea57bcb21cf1170ce9aefeb016f86b6160c625086497056e899492fcd2
-import json
-from pathlib import Path
-
-import pytest
-
-duckdb = pytest.importorskip("duckdb")
+# hotdocs-criterion: sha256:bca7d68242793d141ad15d3e7b78251185bd96d632f91795a01478c5b2dd309b
+import duckdb
 
 import graph_query_engine
 
 
 PURPOSE_LINES = [
-    "This component exists to exercise multi-line Purpose extraction.",
-    "Its Purpose section deliberately spans several lines of prose,",
-    "so that a regex lacking the DOTALL flag would silently extract",
-    "an empty string instead of this full text.",
+    "Foo keeps the first line of its purpose here.",
+    "It continues the same purpose on a second line.",
+    "And finishes it on a third line.",
 ]
-EXPECTED_PURPOSE = "\n".join(PURPOSE_LINES)
+
+BAR_PURPOSE_LINES = [
+    "Bar has a purpose too.",
+    "It also spans two lines.",
+]
 
 
-def _write(path: Path, text: str) -> None:
+def _write(path, text):
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text, encoding="utf-8")
+    path.write_text(text, encoding="utf-8", newline="\n")
 
 
-def _build_corpus(repo_root: Path) -> None:
+def _build_corpus(repo_root):
     specs = repo_root / "specs"
 
-    # Component under examination: multi-line Purpose followed by another section.
-    alpha_dir = specs / "components" / "alpha"
-    _write(
-        alpha_dir / "component.md",
+    foo_md = (
         "---\n"
-        "id: comp-alpha\n"
-        "title: Alpha\n"
+        "id: comp-foo\n"
+        "title: Foo\n"
         "status: draft\n"
-        "owners: [test-team]\n"
-        "depends_on: [comp-beta]\n"
-        "realizes: []\n"
-        "uses_var: [VAR-FOO]\n"
-        "depends_on_guarantees: []\n"
+        "owners: [team]\n"
         "sealed: true\n"
-        "source_path: legacy/alpha\n"
+        "source_path: legacy/foo/\n"
+        "depends_on: [comp-bar]\n"
+        "realizes: [P-X]\n"
+        "uses_var: [VAR-X]\n"
+        "depends_on_guarantees: [G-BAR-001]\n"
         "---\n"
         "\n"
-        "# Alpha\n"
+        "# Foo\n"
         "\n"
         "## Purpose\n"
         "\n"
-        + EXPECTED_PURPOSE
+        + "\n".join(PURPOSE_LINES)
         + "\n"
         "\n"
-        "## Definitions\n"
+        "## Notes\n"
         "\n"
-        "Nothing extra.\n",
+        "one two three\n"
     )
-    _write(alpha_dir / "constraints.md", "# Constraints\n\nNone.\n")
-    _write(
-        alpha_dir / "requirements" / "R-ALPHA-001.md",
-        "# R-ALPHA-001\n\n**R-ALPHA-001** — Alpha MUST do a thing.\n",
-    )
-    _write(
-        alpha_dir / "acceptance" / "AC-ALPHA-001.md",
-        "# AC-ALPHA-001\n\nCovers: R-ALPHA-001\nKind: generated-test\n\n"
-        "```gherkin\nGiven x\nWhen y\nThen z\n```\n",
-    )
-    _write(alpha_dir / "interface" / "library.md", "# Library\n\n```\nalpha() -> None\n```\n")
+    _write(specs / "components" / "foo" / "component.md", foo_md)
 
-    # A second component so frontmatter list columns have varied content.
-    beta_dir = specs / "components" / "beta"
-    _write(
-        beta_dir / "component.md",
+    bar_md = (
         "---\n"
-        "id: comp-beta\n"
-        "title: Beta\n"
+        "id: comp-bar\n"
+        "title: Bar\n"
         "status: draft\n"
-        "owners: [test-team]\n"
-        "depends_on: []\n"
-        "realizes: []\n"
-        "uses_var: []\n"
-        "depends_on_guarantees: []\n"
+        "owners: [team]\n"
         "sealed: true\n"
-        "source_path: legacy/beta\n"
+        "source_path: legacy/bar/\n"
+        "realizes: [P-X]\n"
         "---\n"
         "\n"
-        "# Beta\n"
+        "# Bar\n"
         "\n"
         "## Purpose\n"
         "\n"
-        "Beta is a single-line dependency.\n"
+        + "\n".join(BAR_PURPOSE_LINES)
+        + "\n"
         "\n"
-        "## Definitions\n"
+        "## Notes\n"
         "\n"
-        "None.\n",
+        "Nothing else.\n"
     )
-    _write(beta_dir / "constraints.md", "# Constraints\n\nNone.\n")
-    _write(
-        beta_dir / "requirements" / "R-BETA-001.md",
-        "# R-BETA-001\n\n**R-BETA-001** — Beta MUST do a thing.\n",
-    )
-    _write(
-        beta_dir / "acceptance" / "AC-BETA-001.md",
-        "# AC-BETA-001\n\nCovers: R-BETA-001\nKind: generated-test\n\n"
-        "```gherkin\nGiven x\nWhen y\nThen z\n```\n",
-    )
-    _write(beta_dir / "interface" / "library.md", "# Library\n\n```\nbeta() -> None\n```\n")
+    _write(specs / "components" / "bar" / "component.md", bar_md)
 
-    # Product capability, var, and decisions so every view's source glob has files.
+    foo = specs / "components" / "foo"
+    _write(foo / "requirements" / "R-FOO-001.md", "# R-FOO-001\n\nfoo MUST work.\n")
+    _write(foo / "requirements" / "R-FOO-002.md", "# R-FOO-002\n\nfoo MUST stop.\n")
     _write(
-        specs / "product" / "P-FOO.md",
-        "---\n"
-        "id: P-FOO\n"
-        "title: Foo capability\n"
-        "status: draft\n"
-        "owners: [test-team]\n"
-        "---\n"
-        "\n"
-        "# Foo\n\n## Purpose\n\nA capability.\n\n## Scenarios\n\nNone.\n",
+        foo / "acceptance" / "AC-FOO-001.md",
+        "# AC-FOO-001\n\nCovers: R-FOO-001\nKind: generated-test\n",
     )
     _write(
-        specs / "vars" / "VAR-FOO.md",
+        foo / "acceptance" / "AC-FOO-002.md",
+        "# AC-FOO-002\n\nCovers: R-FOO-002\nKind: generated-test\n",
+    )
+    _write(
+        foo / "interface" / "guarantees" / "G-FOO-001.md",
+        "# G-FOO-001\n\nfoo never fails.\n",
+    )
+
+    _write(
+        specs / "product" / "x.md",
         "---\n"
-        "id: VAR-FOO\n"
-        "title: Foo var\n"
+        "id: P-X\n"
+        "title: X\n"
         "status: draft\n"
-        "owners: [test-team]\n"
+        "owners: [team]\n"
         "---\n"
+        "# X\n"
         "\n"
-        "# VAR-FOO\n\nA variable.\n",
+        "### CS-X-001\n"
+        "Covers: P-X\n"
+        "\n"
+        "### CS-X-002\n"
+        "Covers: P-X\n",
+    )
+    _write(
+        specs / "vars" / "x.md",
+        "---\n"
+        "id: VAR-X\n"
+        "title: V\n"
+        "status: draft\n"
+        "owners: [team]\n"
+        "---\n"
+        "# V\n",
     )
     _write(
         specs / "decisions" / "D1.md",
         "---\n"
         "id: D1\n"
-        "title: First decision\n"
+        "title: One\n"
         "status: ratified\n"
-        "owners: [test-team]\n"
-        "last_ratified_commit: 0000000000000000000000000000000000000000\n"
-        "supersedes: []\n"
-        "builds_on: []\n"
+        "owners: [team]\n"
+        "last_ratified_commit: 0000000\n"
         "---\n"
-        "\n"
-        "# D1\n\nFirst.\n",
+        "# D1\n",
     )
     _write(
         specs / "decisions" / "D2.md",
         "---\n"
         "id: D2\n"
-        "title: Second decision\n"
+        "title: Two\n"
         "status: draft\n"
-        "owners: [test-team]\n"
-        "supersedes: []\n"
+        "owners: [team]\n"
+        "supersedes: D1\n"
         "builds_on: [D1]\n"
         "---\n"
-        "\n"
-        "# D2\n\nSecond.\n",
+        "# D2\n",
     )
-
-    # Provenance manifests so component_provenance has something to read.
-    for slug in ("alpha", "beta"):
-        manifest = {
-            "component_id": "comp-" + slug,
-            "spec_bundle_hash": "deadbeef",
-            "verification_report": {"result": "pass"},
-            "license_scan": {"result": "pass"},
-            "secret_scan": {"result": "pass"},
-            "provenance_hit": False,
-        }
-        _write(repo_root / "gen" / slug / ".provenance.json", json.dumps(manifest, indent=2))
+    for sub in ("product", "vars", "decisions"):
+        _write(specs / sub / "README.md", "# Readme\n\nNotes.\n")
 
 
-def _connect_with_yaml():
+def _load(repo_root):
     con = duckdb.connect()
-    try:
-        con.execute("INSTALL yaml FROM community")
-        con.execute("LOAD yaml")
-    except Exception as exc:  # pragma: no cover - environment-dependent
-        con.close()
-        pytest.skip(f"DuckDB community 'yaml' extension unavailable: {exc}")
+    con.execute("INSTALL yaml FROM community")
+    con.execute("LOAD yaml")
+    graph_query_engine.load_views(con, repo_root)
     return con
 
 
-def test_ac_gqe_004_multiline_purpose_extracted_in_full(tmp_path):
+def _purposes(con):
+    rows = con.execute(
+        "SELECT component_id, purpose FROM component_context"
+    ).fetchall()
+    return rows
+
+
+def test_multiline_purpose_is_extracted_in_full(tmp_path):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
     _build_corpus(repo_root)
 
-    con = _connect_with_yaml()
+    con = _load(repo_root)
     try:
-        result = graph_query_engine.load_views(con, repo_root)
-        assert result is None
-
-        rows = con.execute(
-            "SELECT component_id, purpose FROM component_context WHERE component_id = ?",
-            ["comp-alpha"],
-        ).fetchall()
-
-        assert len(rows) == 1, f"expected exactly one component_context row for comp-alpha, got {rows!r}"
-        component_id, purpose = rows[0]
-        assert component_id == "comp-alpha"
-
-        assert purpose is not None, "purpose must not be NULL for a multi-line Purpose section"
-        assert purpose != "", "purpose extracted to an empty string (missing DOTALL flag?)"
-        assert purpose.strip() != ""
-
-        # Full multi-line text, verbatim (modulo surrounding blank-line whitespace).
-        assert "\n" in purpose.strip(), "purpose should retain its internal newlines"
-        assert purpose.strip() == EXPECTED_PURPOSE
-
-        for line in PURPOSE_LINES:
-            assert line in purpose
-
-        # Must stop at the next section, not swallow it.
-        assert "## Definitions" not in purpose
-        assert "Nothing extra." not in purpose
-        assert "## Purpose" not in purpose
+        rows = _purposes(con)
     finally:
         con.close()
 
+    foo_rows = [r for r in rows if r[0] == "comp-foo"]
+    assert len(foo_rows) == 1, rows
+    purpose = foo_rows[0][1]
 
-def test_ac_gqe_004_one_row_per_component(tmp_path):
+    assert purpose is not None
+    assert purpose != ""
+    assert purpose.strip() != ""
+    # Spans multiple lines: every line is present and newlines are kept.
+    assert "\n" in purpose.strip()
+    for line in PURPOSE_LINES:
+        assert line in purpose, (line, purpose)
+    assert purpose.strip() == "\n".join(PURPOSE_LINES)
+    # Stops at the next section, does not swallow it.
+    assert "## Notes" not in purpose
+    assert "one two three" not in purpose
+
+
+def test_every_component_with_multiline_purpose_gets_full_text(tmp_path):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
     _build_corpus(repo_root)
 
-    con = _connect_with_yaml()
+    con = _load(repo_root)
     try:
-        graph_query_engine.load_views(con, repo_root)
-
-        rows = con.execute(
-            "SELECT component_id, purpose FROM component_context ORDER BY component_id"
-        ).fetchall()
-        by_id = {}
-        for cid, purpose in rows:
-            assert cid not in by_id, f"duplicate component_context row for {cid}"
-            by_id[cid] = purpose
-
-        assert set(by_id) == {"comp-alpha", "comp-beta"}
-        assert by_id["comp-alpha"] is not None
-        assert by_id["comp-alpha"].strip() == EXPECTED_PURPOSE
-        assert by_id["comp-beta"] is not None
-        assert by_id["comp-beta"].strip() == "Beta is a single-line dependency."
+        rows = _purposes(con)
     finally:
         con.close()
+
+    by_id = {}
+    for component_id, purpose in rows:
+        assert component_id not in by_id, rows
+        by_id[component_id] = purpose
+
+    assert set(by_id) == {"comp-foo", "comp-bar"}, rows
+    assert by_id["comp-bar"] is not None
+    assert by_id["comp-bar"].strip() == "\n".join(BAR_PURPOSE_LINES)
+    assert by_id["comp-foo"].strip() == "\n".join(PURPOSE_LINES)

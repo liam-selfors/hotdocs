@@ -1,5 +1,4 @@
-# hotdocs-criterion: sha256:64a73c2d3462f8544bc75dec7e83533961161335ef12f08399f71f829780157f
-import dataclasses
+# hotdocs-criterion: sha256:3b9d01bf9be4e6176129b95a36a0565039174a553ed2d8f472697f22d63634d3
 import re
 
 import test_author
@@ -9,91 +8,88 @@ def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-@dataclasses.dataclass
-class FakeCriterionBundle:
-    component_id: str
-    criterion_id: str
-    covers: str
-    criterion_text: str
-    requirement_text: str
-    interface: str
-    glossary: str
-    dependency_interfaces: dict = dataclasses.field(default_factory=dict)
-    module_names: list = dataclasses.field(default_factory=list)
-
-    def __getitem__(self, key):
-        try:
-            return getattr(self, key)
-        except AttributeError:
-            raise KeyError(key)
-
-    def get(self, key, default=None):
-        return getattr(self, key, default)
-
-    def keys(self):
-        return [f.name for f in dataclasses.fields(self)]
-
-    def __iter__(self):
-        return iter(self.keys())
-
-    def __contains__(self, key):
-        return key in self.keys()
-
-    def __len__(self):
-        return len(self.keys())
-
-
-def make_bundle():
-    return FakeCriterionBundle(
-        component_id="comp-foo",
-        criterion_id="AC-FOO-001",
-        covers="R-FOO-001",
-        criterion_text=(
-            "# AC-FOO-001\n\nCovers: R-FOO-001\nKind: generated-test\n\n"
-            "```gherkin\nGiven x = 2\nWhen foo(x) is called\nThen it returns 4\n```\n"
-        ),
-        requirement_text="# R-FOO-001\n\n**R-FOO-001** \u2014 `foo(x)` MUST return `2 * x`.\n",
-        interface="# Library\n\n```\nfoo(x: int) -> int\n```\n",
-        glossary="# Glossary\n\n- **Foo** \u2014 a test term.\n",
-        dependency_interfaces={},
-        module_names=["foo"],
+def write_probe_stand_in(repo_root, log_path):
+    probe_dir = repo_root / "gen" / "test-probe"
+    probe_dir.mkdir(parents=True, exist_ok=True)
+    source = (
+        "import dataclasses\n"
+        "\n"
+        "GATE_VERSION = " + repr("test-probe@1.3.0") + "\n"
+        "LOG_PATH = " + repr(str(log_path)) + "\n"
+        "\n"
+        "\n"
+        "@dataclasses.dataclass\n"
+        "class ProbeReport:\n"
+        "    ok: bool\n"
+        "    findings: list\n"
+        "    tests_run: int\n"
+        "    tests_reached: int\n"
+        "\n"
+        "    def to_dict(self):\n"
+        "        return {\n"
+        "            " + repr("ok") + ": self.ok,\n"
+        "            " + repr("findings") + ": list(self.findings),\n"
+        "            " + repr("tests_run") + ": self.tests_run,\n"
+        "            " + repr("tests_reached") + ": self.tests_reached,\n"
+        "        }\n"
+        "\n"
+        "\n"
+        "def probe(test_source, criterion_bundle, module_name, *, timeout=60.0, interpreter=None):\n"
+        "    with open(LOG_PATH, " + repr("a") + ") as fh:\n"
+        "        fh.write(" + repr("probe\n") + ")\n"
+        "    return ProbeReport(ok=True, findings=[], tests_run=1, tests_reached=1)\n"
     )
+    (probe_dir / "test_probe.py").write_text(source)
 
 
-NONCE_RE = re.compile(r"-----BEGIN FILE ([0-9a-fA-F]+)-----")
-
-
-def test_backend_called_with_only_prompt_and_model_no_seed(tmp_path, monkeypatch):
+def test_backend_never_receives_seed(tmp_path, monkeypatch):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    monkeypatch.chdir(repo_root)
     monkeypatch.delenv("VAR_CACHE_STORE_URL", raising=False)
 
+    probe_log = tmp_path / "probe_calls.log"
+    write_probe_stand_in(repo_root, probe_log)
+
     calls = []
+    test_file = "def test_placeholder():\n    assert True\n"
 
     def spy_backend(*args, **kwargs):
         calls.append((args, dict(kwargs)))
         prompt = args[0] if args else kwargs.get("prompt", "")
-        model_arg = args[1] if len(args) > 1 else kwargs.get("model")
-        match = NONCE_RE.search(prompt or "")
-        nonce = match.group(1) if match else "0" * 32
+        nonce = re.findall(r"-----BEGIN FILE ([0-9a-f]{32})-----", prompt)[-1]
         text = (
             "-----BEGIN FILE " + nonce + "-----\n"
-            "def test_x():\n    assert True\n"
-            "-----END FILE " + nonce + "-----"
+            + test_file
+            + "\n-----END FILE " + nonce + "-----"
         )
         return {
             "text": text,
-            "model": model_arg,
-            "backend": "spy",
+            "model": "mock",
+            "backend": "mock",
             "model_call_error": None,
         }
 
-    model = "claude-sonnet-5"
-    test_author.author_test(
-        make_bundle(), model, 7, repo_root=tmp_path, llm_backend=spy_backend
+    bundle = {
+        "component_id": "comp-widget-maker",
+        "criterion_id": "AC-WIDGET-MAKER-001",
+        "covers": "R-WIDGET-MAKER-001",
+        "criterion_text": "Given a widget\nWhen it is made\nThen it exists",
+        "requirement_text": "R-WIDGET-MAKER-001 - a widget MUST be made.",
+        "interface": "make_widget() -> dict",
+        "glossary": "",
+        "dependency_interfaces": {},
+    }
+
+    result = test_author.author_test(
+        bundle, "mock", 7, repo_root=repo_root, llm_backend=spy_backend
     )
 
-    assert calls, "spy backend was never called"
+    assert field(result, "model_call_error") is None
+    assert len(calls) >= 1
+
     for args, kwargs in calls:
-        assert len(args) == 2, "expected exactly prompt and model positionally, got " + repr(args)
+        assert len(args) == 2, "backend got positional args beyond prompt and model: %r" % (args,)
         assert isinstance(args[0], str)
-        assert args[1] == model
-        assert "seed" not in kwargs, "seed was forwarded to backend: " + repr(kwargs)
+        assert args[1] == "mock"
+        assert "seed" not in kwargs, "seed was forwarded to the backend: %r" % (kwargs,)

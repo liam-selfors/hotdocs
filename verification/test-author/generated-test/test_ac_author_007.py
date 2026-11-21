@@ -1,88 +1,80 @@
-# hotdocs-criterion: sha256:1b8105e8c965f11d90e8392e4abffd42ba55b854ced07c0b1e465286d0455637
+# hotdocs-criterion: sha256:db8470f4fe503af35ed40343bec2b1e25e7d10eece2b7a80a5cd7453d92b16b7
+import os
+from pathlib import Path
+
+import pytest
+
 import test_author
-
-
-GLOSSARY = "# Glossary\n\n- **Foo** — a test term."
-
-INTERFACE = "# Library\n\n```\nfoo(x: int) -> int\n```"
-
-CRITERION_TEXT = (
-    "# AC-FOO-001\n"
-    "\n"
-    "Covers: R-FOO-001\n"
-    "Kind: generated-test\n"
-    "\n"
-    "```gherkin\n"
-    "Given x = 2\n"
-    "When foo(x) is called\n"
-    "Then it returns 4\n"
-    "```\n"
-)
-
-REQUIREMENT_TEXT = "# R-FOO-001\n\n**R-FOO-001** — `foo(x)` MUST return `2 * x`."
-
-
-class Bundle(dict):
-    """A CriterionBundle stand-in readable both as a mapping and by attribute."""
-
-    def __getattr__(self, name):
-        try:
-            return self[name]
-        except KeyError:
-            raise AttributeError(name)
 
 
 def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def make_bundle():
-    return Bundle(
-        component_id="comp-foo",
-        criterion_id="AC-FOO-001",
-        covers="R-FOO-001",
-        criterion_text=CRITERION_TEXT,
-        requirement_text=REQUIREMENT_TEXT,
-        interface=INTERFACE,
-        glossary=GLOSSARY,
-        dependency_interfaces={},
-        module_names=["foo"],
+def _bundle():
+    return {
+        "component_id": "comp-widget-maker",
+        "criterion_id": "AC-WIDGET-MAKER-001",
+        "covers": "R-WIDGET-MAKER-001",
+        "criterion_text": "Given a widget\nWhen make is called\nThen a widget is returned",
+        "requirement_text": "R-WIDGET-MAKER-001 - make MUST return a widget.",
+        "interface": "make() -> Widget",
+        "glossary": "",
+        "dependency_interfaces": {},
+    }
+
+
+def _plant_probe_stand_in(repo_root, log_path):
+    probe_dir = repo_root / "gen" / "test-probe"
+    probe_dir.mkdir(parents=True, exist_ok=True)
+    source = (
+        "class _Report:\n"
+        "    def __init__(self):\n"
+        "        self.ok = True\n"
+        "        self.findings = []\n"
+        "        self.tests_run = 1\n"
+        "        self.tests_reached = 1\n"
+        "\n"
+        "    def to_dict(self):\n"
+        "        return {'ok': self.ok, 'findings': list(self.findings),\n"
+        "                'tests_run': self.tests_run, 'tests_reached': self.tests_reached}\n"
+        "\n"
+        "\n"
+        "def probe(test_source, criterion_bundle, module_name, *, timeout=60.0, interpreter=None):\n"
+        "    with open(" + repr(str(log_path)) + ", 'a') as fh:\n"
+        "        fh.write('called\\n')\n"
+        "    return _Report()\n"
     )
+    (probe_dir / "test_probe.py").write_text(source)
 
 
-def test_model_network_error_is_reported_as_model_call_error(tmp_path, monkeypatch):
+def _raising_backend(prompt, model, **params):
+    raise ConnectionError("network unreachable")
+
+
+@pytest.fixture
+def repo_root(tmp_path, monkeypatch):
+    root = tmp_path / "repo"
+    root.mkdir()
+    monkeypatch.chdir(root)
     monkeypatch.delenv("VAR_CACHE_STORE_URL", raising=False)
+    return root
 
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    log_path = tmp_path / "backend_calls.log"
 
-    def failing_backend(prompt, model, **params):
-        with open(log_path, "a", encoding="utf-8") as fh:
-            fh.write("call\n")
-        # The documented ModelResponse shape for a failed (network) call.
-        return {
-            "text": None,
-            "model": model,
-            "backend": "mock",
-            "model_call_error": {
-                "category": "network",
-                "message": "connection failed",
-            },
-        }
+def test_network_error_reported_as_model_call_error(repo_root, tmp_path):
+    log_path = tmp_path / "probe_calls.log"
+    _plant_probe_stand_in(repo_root, log_path)
 
     result = test_author.author_test(
-        make_bundle(),
-        "claude-sonnet-5",
-        0,
-        repo_root=repo_root,
-        llm_backend=failing_backend,
+        _bundle(), "mock", 0, repo_root=repo_root, llm_backend=_raising_backend
     )
 
-    # The mock model was actually consulted (fresh repo_root: no cache hit).
-    assert log_path.is_file()
-    assert len(log_path.read_text(encoding="utf-8").splitlines()) >= 1
-
-    assert field(result, "model_call_error") is not None
+    error = field(result, "model_call_error")
+    assert error is not None
     assert field(result, "file") is None
     assert field(result, "cache_hit") is False
+
+    # Nothing written for a model-call error.
+    verification = repo_root / "verification"
+    if verification.exists():
+        assert [p for p in verification.rglob("*") if p.is_file()] == []

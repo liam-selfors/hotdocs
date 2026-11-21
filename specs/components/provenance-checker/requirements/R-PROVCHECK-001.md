@@ -8,9 +8,6 @@
   map against the supplied ones — a hit requires every value to match
   exactly, not just `spec_bundle_hash`. `check_provenance` never computes
   either value itself — both are always caller-supplied, obtained from
-  `current_provenance_key` (`R-PROVCHECK-005`), the same
-  "gate version is part of the key, not metadata checked after" rule
-  `R-CACHE-005` already established for a different store, applied
-  here for the same reason: a stale manifest must not paper over a
-  gate's own detection logic having since improved.
+  `current_provenance_key` (`R-PROVCHECK-005`), so a stale manifest
+  never papers over a gate that has since improved (`R-CACHE-005`).
 

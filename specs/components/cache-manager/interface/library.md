@@ -29,3 +29,5 @@ match what `cache_key.gate_version`'s gate type expects (R-CACHE-007).
 `.hotdocs/cache/` the local fallback (`R-CACHE-009`) reads/writes.
 Defaults to the current working directory, matching `interface/cli.md`'s
 own `--repo-root` flag, which implied this parameter existed all along.
+
+Implements: `specs/architecture/cli-conventions.md`

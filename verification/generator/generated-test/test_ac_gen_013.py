@@ -1,8 +1,24 @@
-# hotdocs-criterion: sha256:b07824e481bba04a60d4ffcc1497f1a97f5940e06573603138df7ffbcbac5729
+# hotdocs-criterion: sha256:301376185f8146df8bf1077a40119783dcfca15090d678d2ba7211350cedb1fd
 import re
-import uuid
+from pathlib import Path
 
 import generator
+
+
+FAKE_PYTHON_ADAPTER = (
+    "from pathlib import Path\n"
+    "\n"
+    "KIND = \"python\"\n"
+    "\n"
+    "\n"
+    "def layout_errors(code_dir):\n"
+    "    return [\"bad.py:1: SyntaxError: x\"] if (Path(code_dir) / \"bad.py\").exists() else []\n"
+    "\n"
+    "\n"
+    "def provision(repo_root):\n"
+    "    return {\"ok\": True, \"reason\": \"\", \"versions\": {\"python\": \"3.12\"}, "
+    "\"lockfile_sha256\": None, \"interpreter\": \"/fake/python\"}\n"
+)
 
 
 def field(value, name):
@@ -16,194 +32,102 @@ def section(prompt, heading):
     return "\n".join(lines[start:end]).rstrip("\n")
 
 
-class FakeBundle:
-    """An object with the SpecBundle fields, readable by attribute or as a mapping."""
-
-    _FIELDS = (
-        "component_id",
-        "spec_bundle_hash",
-        "spec",
-        "interface",
-        "constraints",
-        "dependency_interfaces",
-        "dependency_context",
-        "dependency_usage",
-        "vars",
-        "glossary",
-        "hint_code",
-    )
-
-    def __init__(self, **kwargs):
-        for name in self._FIELDS:
-            setattr(self, name, kwargs[name])
-
-    def __getitem__(self, key):
-        if key not in self._FIELDS:
-            raise KeyError(key)
-        return getattr(self, key)
-
-    def get(self, key, default=None):
-        if key not in self._FIELDS:
-            return default
-        return getattr(self, key)
-
-    def keys(self):
-        return list(self._FIELDS)
-
-    def __iter__(self):
-        return iter(self._FIELDS)
-
-    def __len__(self):
-        return len(self._FIELDS)
-
-    def __contains__(self, key):
-        return key in self._FIELDS
+def _plant_python_adapter(repo_root):
+    adapter_dir = repo_root / "gen" / "kind-python"
+    adapter_dir.mkdir(parents=True, exist_ok=True)
+    (adapter_dir / "kind_python.py").write_text(FAKE_PYTHON_ADAPTER, encoding="utf-8")
 
 
-GHERKIN_SENTINEL = "GHERKIN_SENTINEL_q7x81"
-RATIONALE_SENTINEL = "RATIONALE_SENTINEL_m3k20"
-EXPECTED_SENTINEL = "EXPECTED_SENTINEL_z9p44"
-ACTUAL_SENTINEL = "ACTUAL_SENTINEL_w5n67"
+def _cold_bundle():
+    return {
+        "component_id": "comp-foo",
+        "spec_bundle_hash": "sha256:" + "a" * 64,
+        "spec": "Foo component body. The foo function returns a greeting.",
+        "interface": "foo() -> str",
+        "constraints": "Pure Python only.",
+        "dependency_interfaces": {},
+        "dependency_context": {},
+        "dependency_usage": {},
+        "vars": {},
+        "glossary": "Foo: a greeting producer.",
+        "hint_code": None,
+    }
 
 
-def write(path, text):
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text, encoding="utf-8")
-
-
-def build_fixture(repo_root):
-    write(
-        repo_root / "specs" / "glossary.md",
-        "# Glossary\n\n- **Foo** \u2014 a test term.\n",
-    )
-    comp = repo_root / "specs" / "components" / "foo"
-    write(
-        comp / "component.md",
-        "---\n"
-        "id: comp-foo\n"
-        "title: Foo\n"
-        "status: draft\n"
-        "owners: [team-a]\n"
-        "sealed: false\n"
-        "depends_on: []\n"
-        "---\n"
-        "\n"
-        "# Foo\n"
-        "\n"
-        "## Purpose\n"
-        "\n"
-        "Foo doubles a number.\n",
-    )
-    write(
-        comp / "requirements" / "R-FOO-001.md",
-        "# R-FOO-001\n\n**R-FOO-001** \u2014 `foo(x)` MUST return `2 * x`.\n",
-    )
-    write(
-        comp / "requirements" / "R-FOO-003.md",
-        "# R-FOO-003\n\n**R-FOO-003** \u2014 `foo(0)` MUST return `0`.\n",
-    )
-    write(
-        comp / "acceptance" / "AC-FOO-001.md",
-        "# AC-FOO-001\n\nCovers: R-FOO-001\nKind: generated-test\n\n"
-        "```gherkin\nGiven x = 2\nWhen foo(x) is called\nThen it returns 4\n```\n",
-    )
-    write(
-        comp / "acceptance" / "AC-FOO-003.md",
-        "# AC-FOO-003\n\nCovers: R-FOO-003\nKind: generated-test\n\n"
-        "```gherkin\n"
-        "Given x = 0 and " + GHERKIN_SENTINEL + "\n"
-        "When foo(x) is called\n"
-        "Then it returns 0\n"
-        "```\n\n"
-        "Rationale: " + RATIONALE_SENTINEL + "\n"
-        "Expected: " + EXPECTED_SENTINEL + "\n"
-        "Actual: " + ACTUAL_SENTINEL + "\n",
-    )
-    write(comp / "interface" / "library.md", "# Library\n\n```\nfoo(x: int) -> int\n```\n")
-    write(comp / "constraints.md", "# Constraints\n\nNone.\n")
-
-
-def test_ac_gen_013_retry_feedback_is_separate_and_ids_only(tmp_path, monkeypatch):
+def test_retry_feedback_is_distinct_bare_id_section_and_echoed(tmp_path, monkeypatch):
     monkeypatch.delenv("VAR_CACHE_STORE_URL", raising=False)
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
-    build_fixture(repo_root)
-
-    spec_text = (
-        "# Foo\n\n## Purpose\n\nFoo doubles a number.\n\n"
-        "# R-FOO-001\n\n**R-FOO-001** \u2014 `foo(x)` MUST return `2 * x`."
-    )
-    bundle = FakeBundle(
-        component_id="comp-foo",
-        spec_bundle_hash="sha256:" + uuid.uuid4().hex + uuid.uuid4().hex,
-        spec=spec_text,
-        interface="# Library\n\n```\nfoo(x: int) -> int\n```",
-        constraints="# Constraints\n\nNone.",
-        dependency_interfaces={},
-        dependency_context={},
-        dependency_usage={},
-        vars={},
-        glossary="# Glossary\n\n- **Foo** \u2014 a test term.",
-        hint_code=None,
-    )
+    _plant_python_adapter(repo_root)
 
     recorded = []
 
     def mock_backend(prompt, model, **params):
         recorded.append(prompt)
-        nonces = re.findall(r"BEGIN FILE ([0-9a-f]{32})", prompt)
-        if not nonces:
-            nonces = re.findall(r"(?<![0-9a-f])([0-9a-f]{32})(?![0-9a-f])", prompt)
-        blocks = []
-        for nonce in dict.fromkeys(nonces):
-            blocks.append(
-                "-----BEGIN FILE " + nonce + ": foo.py-----\n"
-                "def foo(x):\n"
-                "    return 2 * x\n"
-                "-----END FILE " + nonce + "-----\n"
-            )
+        nonce = re.search(r"-----BEGIN FILE ([0-9a-f]{32}):", prompt).group(1)
+        text = (
+            "-----BEGIN FILE " + nonce + ": foo.py-----\n"
+            "def foo():\n"
+            "    return 'hi'\n"
+            "-----END FILE " + nonce + "-----\n"
+            "-----END REPLY " + nonce + "-----\n"
+        )
         return {
-            "text": "Here you go.\n" + "".join(blocks),
+            "text": text,
             "model": model,
             "backend": "mock",
             "model_call_error": None,
         }
 
     result = generator.generate(
-        bundle,
-        "mock-model",
+        _cold_bundle(),
+        "claude-sonnet-5",
         ["R-FOO-003"],
         repo_root=repo_root,
         llm_backend=mock_backend,
     )
 
-    assert len(recorded) == 1, "the mock model should have been called exactly once"
-    prompt = recorded[0]
-    assert isinstance(prompt, str)
+    assert len(recorded) >= 1, "mock model was never called"
+    prompt = recorded[-1]
+    lines = prompt.split("\n")
 
-    # retry_feedback appears as its own distinctly labeled section
-    assert "## RETRY_FEEDBACK" in prompt.split("\n")
-    fb = section(prompt, "## RETRY_FEEDBACK")
-    non_empty = [line for line in fb.split("\n") if line.strip()]
-    assert len(non_empty) == 2, fb
-    assert non_empty[-1] == "- R-FOO-003"
-    bullets = [line for line in non_empty if line.startswith("- ")]
-    assert bullets == ["- R-FOO-003"]
-    assert re.findall(r"R-[A-Z0-9]+-\d+", fb) == ["R-FOO-003"]
+    # A distinctly labeled section exists, after the bundle-derived sections.
+    assert "## RETRY_FEEDBACK" in lines
+    assert lines.index("## RETRY_FEEDBACK") > lines.index("## GLOSSARY")
+    assert lines.index("## RETRY_FEEDBACK") > lines.index("## SPEC")
 
-    # the R-id is not merged into any bundle field section
-    assert prompt.count("R-FOO-003") == fb.count("R-FOO-003")
-    for heading in ("## SPEC", "## INTERFACE", "## CONSTRAINTS", "## GLOSSARY"):
+    retry = section(prompt, "## RETRY_FEEDBACK")
+    retry_lines = [ln for ln in retry.split("\n") if ln.strip()]
+    id_lines = [ln for ln in retry_lines if ln.startswith("- ")]
+    assert id_lines == ["- R-FOO-003"]
+    # One sentence, then exactly one id line: nothing else in the section.
+    assert len(retry_lines) == 2
+    assert re.findall(r"\bR-[A-Z]+-\d+\b", retry) == ["R-FOO-003"]
+
+    # Not merged into any SpecBundle-derived section.
+    for heading in (
+        "## SPEC",
+        "## INTERFACE",
+        "## CONSTRAINTS",
+        "## DEPENDENCY INTERFACES",
+        "## DEPENDENCY CONTEXT",
+        "## VARS",
+        "## GLOSSARY",
+    ):
         assert "R-FOO-003" not in section(prompt, heading)
+    assert prompt.count("R-FOO-003") == 1
 
-    # no acceptance-criterion content anywhere in the prompt
-    for sentinel in (GHERKIN_SENTINEL, RATIONALE_SENTINEL, EXPECTED_SENTINEL, ACTUAL_SENTINEL):
-        assert sentinel not in prompt
+    # No acceptance-criterion content anywhere in the prompt.
     assert "```gherkin" not in prompt
-    assert "AC-FOO-003" not in prompt
-    assert "AC-FOO-001" not in prompt
-    assert "Then it returns 0" not in prompt
-    assert "Then it returns 4" not in prompt
+    for ln in lines:
+        stripped = ln.strip()
+        for keyword in ("Given ", "Then ", "Scenario:", "Feature:"):
+            assert not stripped.startswith(keyword), ln
+    lowered = prompt.lower()
+    assert "rationale" not in lowered
+    assert "expected:" not in lowered
+    assert "actual:" not in lowered
+    assert "AC-FOO" not in prompt
 
-    # the result echoes retry_feedback
-    assert list(field(result, "retry_feedback")) == ["R-FOO-003"]
+    # The result echoes the caller's retry_feedback.
+    assert field(result, "retry_feedback") == ["R-FOO-003"]

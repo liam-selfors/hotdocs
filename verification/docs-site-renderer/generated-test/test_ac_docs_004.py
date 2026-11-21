@@ -1,73 +1,63 @@
-# hotdocs-criterion: sha256:5f0fb7d44491d9d9be1a9d36d01c16912e902309998b197625865011bab462ac
-"""AC-DOCS-004: given only corpus-graph.json, render_docs_site completes,
-reading nothing else (R-DOCS-004: the site is a pure function of the graph)."""
+# hotdocs-criterion: sha256:c06dd69eac80fcafad171d19326879ea8130ab3f2c968d731b51b349e56a9dee
+import docs_site_renderer
 
 import json
 import os
 import sys
+from dataclasses import dataclass, field as dc_field
 from pathlib import Path
 
-import docs_site_renderer
-import docs_site_renderer.cli
+
+@dataclass
+class CorpusGraph:
+    nodes: dict = dc_field(default_factory=dict)
+    edges: list = dc_field(default_factory=list)
+    aggregates: dict = dc_field(default_factory=dict)
+
+    def to_dict(self):
+        return {"nodes": self.nodes, "edges": self.edges, "aggregates": self.aggregates}
+
+    def to_json_bytes(self):
+        return (
+            json.dumps(self.to_dict(), sort_keys=True, indent=2, ensure_ascii=True) + "\n"
+        ).encode("utf-8")
 
 
-_STATE = {"active": False, "repo_root": None, "opened": []}
-_HOOK_INSTALLED = {"done": False}
-
-
-def _normalize(raw):
-    if isinstance(raw, int):
-        return None
-    try:
-        raw = os.fspath(raw)
-    except TypeError:
-        return None
-    if isinstance(raw, bytes):
-        try:
-            raw = os.fsdecode(raw)
-        except Exception:
-            return None
-    if not isinstance(raw, str):
-        return None
-    if not os.path.isabs(raw):
-        try:
-            raw = os.path.join(os.getcwd(), raw)
-        except Exception:
-            return None
-    try:
-        return os.path.realpath(raw)
-    except Exception:
-        return os.path.abspath(raw)
+_STATE = {"active": False, "opens": []}
 
 
 def _hook(event, args):
     if not _STATE["active"]:
         return
-    if event != "open" or not args:
-        return
-    # Avoid recursion while normalizing paths.
-    _STATE["active"] = False
-    try:
-        path = _normalize(args[0])
-        root = _STATE["repo_root"]
-        if path is not None and root is not None:
-            if path == root or path.startswith(root + os.sep):
-                _STATE["opened"].append(path)
-    finally:
-        _STATE["active"] = True
+    if event == "open":
+        _STATE["opens"].append(args)
 
 
-def _install_hook():
-    if not _HOOK_INSTALLED["done"]:
-        sys.addaudithook(_hook)
-        _HOOK_INSTALLED["done"] = True
+sys.addaudithook(_hook)
 
 
 def _graph_dict():
     return {
         "nodes": {
             "P-ZERO-EDIT": {"type": "capability"},
-            "VAR-FOO-URL": {"type": "var"},
+            "comp-foo": {
+                "type": "component",
+                "verification": {
+                    "requirement_results": {"R-FOO-001": "pass"},
+                    "criteria": [
+                        {"id": "AC-FOO-001", "kind": "generated-test", "result": "pass"}
+                    ],
+                },
+                "provenance": {"generated_at": "2026-01-01T00:00:00Z", "model": "m"},
+                "size_status": "ok",
+                "sealed": False,
+                "pinned_overrides": [],
+                "owners": ["pipeline-team"],
+                "documents": {
+                    "component.md": "# Foo\n\nThe foo component.\n",
+                    "requirements/R-FOO-001.md": "**R-FOO-001** - foo MUST work.\n",
+                },
+            },
             "comp-bar": {
                 "type": "component",
                 "verification": None,
@@ -76,21 +66,9 @@ def _graph_dict():
                 "sealed": True,
                 "pinned_overrides": [],
                 "owners": [],
-                "documents": {},
+                "documents": {"component.md": "# Bar\n"},
             },
-            "comp-foo": {
-                "type": "component",
-                "verification": None,
-                "provenance": None,
-                "size_status": "ok",
-                "sealed": True,
-                "pinned_overrides": [],
-                "owners": ["docs-team"],
-                "documents": {
-                    "component.md": "---\nid: comp-foo\ntitle: Foo\nstatus: draft\nowners: [docs-team]\n---\n\n# Foo\n\nFoo body text.\n",
-                    "requirements/R-FOO-001.md": "**R-FOO-001** — Foo MUST work.\n",
-                },
-            },
+            "VAR-FOO-URL": {"type": "var"},
         },
         "edges": [
             {"from": "comp-foo", "to": "P-ZERO-EDIT", "kind": "realizes"},
@@ -105,62 +83,65 @@ def _graph_dict():
     }
 
 
-def test_ac_docs_004_renders_from_corpus_graph_json_alone(tmp_path, monkeypatch):
+def _is_write(mode, flags):
+    if isinstance(mode, str) and any(c in mode for c in "wax+"):
+        return True
+    if isinstance(flags, int):
+        if flags & (os.O_WRONLY | os.O_RDWR | os.O_CREAT | os.O_APPEND | os.O_TRUNC):
+            return True
+    return False
+
+
+def test_ac_docs_004_reads_only_its_own_asset(tmp_path, monkeypatch):
     repo_root = tmp_path / "repo"
     (repo_root / "verification").mkdir(parents=True)
-    graph_path = repo_root / "verification" / "corpus-graph.json"
-    graph_path.write_bytes(
-        (json.dumps(_graph_dict(), sort_keys=True, indent=2, ensure_ascii=True) + "\n").encode("utf-8")
-    )
-    out_dir = tmp_path / "site"
-
-    # The only file available under repo_root is corpus-graph.json.
-    present = sorted(p for p in repo_root.rglob("*") if p.is_file())
-    assert present == [graph_path]
-
+    graph_file = repo_root / "verification" / "corpus-graph.json"
+    graph_file.write_text(json.dumps(_graph_dict(), sort_keys=True, indent=2) + "\n", encoding="utf-8")
     monkeypatch.chdir(repo_root)
 
-    real_root = os.path.realpath(str(repo_root))
-    real_graph = os.path.realpath(str(graph_path))
-    real_gen = os.path.join(real_root, "gen")
+    data = json.loads(graph_file.read_text(encoding="utf-8"))
+    graph = CorpusGraph(nodes=data["nodes"], edges=data["edges"], aggregates=data["aggregates"])
 
-    _install_hook()
-    _STATE["repo_root"] = real_root
-    _STATE["opened"] = []
+    out_dir = tmp_path / "out"
+    asset = (Path(docs_site_renderer.__file__).resolve().parent.parent / "static" / "app.js")
+    asset_real = os.path.realpath(str(asset))
+    out_real = os.path.realpath(str(out_dir))
+
+    _STATE["opens"] = []
     _STATE["active"] = True
     try:
-        code = docs_site_renderer.cli.main(
-            ["--repo-root=" + str(repo_root), "--out=" + str(out_dir)]
-        )
+        result = docs_site_renderer.render_docs_site(graph, out_dir)
     finally:
         _STATE["active"] = False
-    opened = list(_STATE["opened"])
 
-    assert code == 0
+    assert result is None
 
-    # It read nothing under repo_root other than corpus-graph.json
-    # (dependency module code under gen/ is code, not a data source).
-    others = [
-        p
-        for p in opened
-        if p != real_graph
-        and not (p.startswith(real_gen + os.sep) and p.endswith(".py"))
-    ]
-    assert others == [], "read files other than corpus-graph.json: " + repr(others)
-    assert real_graph in opened, "corpus-graph.json was never read"
+    offending = []
+    for args in _STATE["opens"]:
+        path = args[0] if len(args) > 0 else None
+        mode = args[1] if len(args) > 1 else None
+        flags = args[2] if len(args) > 2 else None
+        if path is None or isinstance(path, int):
+            continue
+        if isinstance(path, bytes):
+            path = os.fsdecode(path)
+        path = str(path)
+        real = os.path.realpath(os.path.abspath(path))
+        if real == out_real or real.startswith(out_real + os.sep):
+            continue
+        if _is_write(mode, flags):
+            continue
+        if real == asset_real:
+            continue
+        if real.endswith((".py", ".pyc", ".so", ".pyd")) or "__pycache__" in real:
+            continue
+        if os.path.isdir(real):
+            continue
+        offending.append(real)
 
-    # The site was actually rendered, from the graph's content.
-    assert out_dir.is_dir()
-    files = [p for p in out_dir.rglob("*") if p.is_file()]
-    assert files, "no site files rendered"
-    combined = ""
-    for p in files:
-        try:
-            combined += p.read_text(encoding="utf-8", errors="replace")
-        except Exception:
-            pass
-    assert "comp-foo" in combined
+    assert offending == [], "render_docs_site read files other than static/app.js: " + repr(offending)
 
-    # Still nothing else was created in the input repo.
-    after = sorted(p for p in repo_root.rglob("*") if p.is_file())
-    assert after == [graph_path]
+    index = out_dir / "index.html"
+    assert index.is_file()
+    asset_text = asset.read_text(encoding="utf-8")
+    assert asset_text in index.read_text(encoding="utf-8")

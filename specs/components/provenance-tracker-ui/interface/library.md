@@ -27,3 +27,11 @@ therefore provide both `check_readiness` and
 `last_requirement_failures`. A missing
 `.hotdocs/attempts/` directory is normal, not an error (`R-UI-005`); a
 file there that exists but fails to parse as JSON raises `ValueError`.
+
+The page's script is the declared asset `static/app.js`
+(`interface/assets/app.js.md`), read from
+`Path(__file__).parent / "static" / "app.js"` beside the flat module
+`provenance_tracker_ui.py` and inlined as `R-UI-001` states; reading
+it is the component's own file, not a fifth source under `R-UI-004`.
+
+Implements: `specs/architecture/cli-conventions.md`

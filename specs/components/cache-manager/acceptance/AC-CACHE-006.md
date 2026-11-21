@@ -19,4 +19,8 @@ Then it returns 0 and prints {"result": "miss"}
 Given main(["inspect", "--spec-bundle-hash=sha256:a"]), main([]), or
   main(["purge"])
 Then each returns 2
+
+Given the full inspect call above with any one of its four hash, version
+  or pin flags left out, or with "--model-pin=m" written as "--model=m"
+Then each returns 2
 ```

@@ -1,11 +1,7 @@
-# hotdocs-criterion: sha256:e22c5e9979e8823605823e128b02717738b98682bc5fadf725ad87943e3fd1a4
+# hotdocs-criterion: sha256:93442c4938b8900f606567eb652df020c2f0eff06d501ea9ad70bed4227da7b1
 import hashlib
-import io
 import json
-import os
 import re
-import sys
-import textwrap
 from pathlib import Path
 
 import pytest
@@ -13,270 +9,180 @@ import pytest
 import license_scanner
 
 
-COMPONENT_ID = "comp-sample"
-COMPONENT_SLUG = "sample"
+COMPONENT_ID = "comp-foo"
+COMPONENT_SLUG = "foo"
+
+IDENTIFIERS = [
+    "alpha", "bravo", "charlie", "delta", "echo", "foxtrot",
+    "golf", "hotel", "india", "juliet", "kilo", "lima",
+    "mike", "november", "oscar", "papa", "quebec", "romeo",
+]
 
 
-def _field(value, name):
-    if isinstance(value, dict):
-        return value.get(name)
-    return getattr(value, name, None)
-
-
-def _strip_comments(text):
-    text = re.sub(r"/\*.*?\*/", " ", text, flags=re.S)
-    text = re.sub(r'""".*?"""', " ", text, flags=re.S)
-    text = re.sub(r"'''.*?'''", " ", text, flags=re.S)
-    text = re.sub(r"//[^\n]*", " ", text)
-    text = re.sub(r"#[^\n]*", " ", text)
-    return text
+def field(value, name):
+    return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
 def _tokens(text):
-    stripped = _strip_comments(text)
-    return [t.lower() for t in re.findall(r"[A-Za-z_][A-Za-z0-9_]*|\d+", stripped)]
+    return [t.lower() for t in re.findall(r"[A-Za-z_][A-Za-z0-9_]*|\d+", text)]
 
 
 def _window_hashes(text):
     toks = _tokens(text)
-    out = []
+    hashes = []
     for i in range(len(toks) - 9 + 1):
         window = "\x1f".join(toks[i:i + 9])
-        out.append(hashlib.sha256(window.encode("utf-8")).hexdigest())
-    return out
+        h = hashlib.sha256(window.encode("utf-8")).hexdigest()
+        if h not in hashes:
+            hashes.append(h)
+    return hashes
 
 
 def _source_text():
-    # 18 distinct identifier tokens, no comments or string blocks -> 10
-    # distinct 9-token windows.
-    names = ["v%02d_ident" % i for i in range(18)]
+    # Simple assignments, no comments, so normalization leaves tokens intact.
     lines = []
-    for i in range(0, len(names), 2):
-        lines.append("%s = %s" % (names[i], names[i + 1]))
-    return "\n".join(lines) + "\n"
+    for i in range(0, len(IDENTIFIERS), 3):
+        a, b, c = IDENTIFIERS[i:i + 3]
+        lines.append(a + " = " + b + " + " + c + "\n")
+    return "".join(lines)
 
 
-FAKE_CACHE_MANAGER = textwrap.dedent(
-    '''
-    import json
-    from dataclasses import dataclass, asdict
-    from datetime import datetime, timezone
-
-    _LOG_PATH = __LOG_PATH__
-
-    _KNOWN = {
-        "generator": ["component_id", "model", "prompt_version", "files"],
-        "compiler": ["outputs", "gate_version", "summary"],
-        "generated_test": ["component_id", "criterion_id", "model", "file"],
-        "llm_judge": ["result", "rationale"],
-        "license_scanner": ["component_id", "gate_version", "similarity_score", "blocked", "matches"],
-        "secret_scanner": ["scope", "gate_version", "flagged", "matches"],
-    }
-
-
-    def _log(record):
-        with open(_LOG_PATH, "a", encoding="utf-8") as fh:
-            fh.write(json.dumps(record) + "\\n")
-
-
-    class SchemaValidationError(ValueError):
-        pass
-
-
-    class Miss:
-        def __eq__(self, other):
-            return isinstance(other, Miss)
-
-        def __hash__(self):
-            return 0
-
-
-    @dataclass
-    class CacheKey:
-        spec_bundle_hash: str
-        gate_inputs_hash: str
-        gate_version: str
-        model_pin: str
-
-
-    @dataclass
-    class CachedResult:
-        gate_type: str
-        payload: dict
-        stored_at: str
-
-
-    def now_iso():
-        return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-
-
-    def get(cache_key, *, repo_root=None):
-        _log({"call": "get", "gate_version": getattr(cache_key, "gate_version", None)})
-        return Miss()
-
-
-    def put(cache_key, result, *, repo_root=None):
-        gate_type = str(cache_key.gate_version).split("@", 1)[0]
-        if result.gate_type != gate_type or gate_type not in _KNOWN:
-            raise SchemaValidationError("gate_type mismatch")
-        payload = result.payload if isinstance(result.payload, dict) else {}
-        for key in _KNOWN[gate_type]:
-            if key not in payload:
-                raise SchemaValidationError("missing payload key: " + key)
-        _log({"call": "put", "gate_version": cache_key.gate_version})
-        return None
-
-
-    def stats(*, repo_root=None):
-        return {"entry_count": 0}
-
-
-    def main(argv=None):
-        return 0
-    '''
-)
-
-
-def _build_repo(tmp_path, corpus_obj):
-    root = tmp_path / "repo"
-    comp_dir = root / "gen" / COMPONENT_SLUG
-    comp_dir.mkdir(parents=True)
-    (comp_dir / "sample.py").write_text(_source_text(), encoding="utf-8")
-
-    log_path = tmp_path / "cache_calls.log"
-    cm_dir = root / "gen" / "cache-manager"
-    cm_dir.mkdir(parents=True)
-    (cm_dir / "cache_manager.py").write_text(
-        FAKE_CACHE_MANAGER.replace("__LOG_PATH__", repr(str(log_path))),
-        encoding="utf-8",
+def _write_fake_cache_manager(repo_root, log_path):
+    d = repo_root / "gen" / "cache-manager"
+    d.mkdir(parents=True, exist_ok=True)
+    src = (
+        "import dataclasses\n"
+        "from datetime import datetime, timezone\n"
+        "\n"
+        "_LOG = " + repr(str(log_path)) + "\n"
+        "\n"
+        "def _log(line):\n"
+        "    with open(_LOG, 'a') as fh:\n"
+        "        fh.write(line + '\\n')\n"
+        "\n"
+        "@dataclasses.dataclass\n"
+        "class CacheKey:\n"
+        "    spec_bundle_hash: str\n"
+        "    gate_inputs_hash: str\n"
+        "    gate_version: str\n"
+        "    model_pin: str\n"
+        "\n"
+        "@dataclasses.dataclass\n"
+        "class CachedResult:\n"
+        "    gate_type: str\n"
+        "    payload: dict\n"
+        "    stored_at: str\n"
+        "\n"
+        "class Miss:\n"
+        "    def __eq__(self, other):\n"
+        "        return isinstance(other, Miss)\n"
+        "    def __hash__(self):\n"
+        "        return 0\n"
+        "\n"
+        "class SchemaValidationError(ValueError):\n"
+        "    pass\n"
+        "\n"
+        "def get(cache_key, *, repo_root=None):\n"
+        "    _log('get')\n"
+        "    return Miss()\n"
+        "\n"
+        "def put(cache_key, result, *, repo_root=None):\n"
+        "    _log('put')\n"
+        "    return None\n"
+        "\n"
+        "def now_iso():\n"
+        "    return datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')\n"
+        "\n"
+        "def stats(*, repo_root=None):\n"
+        "    return {'entry_count': 0}\n"
     )
-
-    corpus_dir = tmp_path / "corpus"
-    corpus_dir.mkdir()
-    corpus_path = corpus_dir / "reference.json"
-    corpus_path.write_text(json.dumps(corpus_obj), encoding="utf-8")
-    return root, corpus_path
+    (d / "cache_manager.py").write_text(src)
 
 
-@pytest.fixture
-def clean_env(monkeypatch, tmp_path):
+def _setup_repo(tmp_path, monkeypatch, entry_hashes, block_threshold):
+    repo_root = tmp_path / "repo"
+    comp_dir = repo_root / "gen" / COMPONENT_SLUG
+    comp_dir.mkdir(parents=True)
+    (comp_dir / "foo.py").write_text(_source_text())
+
+    _write_fake_cache_manager(repo_root, tmp_path / "cache_calls.log")
+
+    corpus = {
+        "corpus_version": 3,
+        "block_threshold": block_threshold,
+        "entries": [
+            {
+                "reference_id": "ref-001",
+                "license_family": "GPL",
+                "risk_tier": "low",
+                "hashes": entry_hashes,
+            }
+        ],
+    }
+    corpus_path = tmp_path / "corpus.json"
+    corpus_path.write_text(json.dumps(corpus))
+
+    monkeypatch.setenv("VAR_LICENSE_CORPUS_PATH", str(corpus_path))
     monkeypatch.delenv("VAR_COMPLIANCE_WEBHOOK_URL", raising=False)
     monkeypatch.delenv("VAR_CACHE_STORE_URL", raising=False)
-    monkeypatch.delenv("VAR_LICENSE_CORPUS_PATH", raising=False)
-    monkeypatch.chdir(tmp_path)
-    return monkeypatch
+    monkeypatch.chdir(repo_root)
+    return repo_root
 
 
-def _filler_hashes(n):
-    return [hashlib.sha256(("filler-%d" % i).encode("utf-8")).hexdigest() for i in range(n)]
+def test_sanity_source_has_ten_distinct_windows():
+    assert len(_window_hashes(_source_text())) == 10
 
 
-def _run_cli(root, capsys):
-    capsys.readouterr()
-    try:
-        rc = license_scanner.main([COMPONENT_ID, "--repo-root", str(root), "--format=json"])
-    except SystemExit as exc:
-        rc = exc.code
+def test_full_match_above_threshold_is_blocked(tmp_path, monkeypatch):
+    hashes = _window_hashes(_source_text())
+    repo_root = _setup_repo(tmp_path, monkeypatch, hashes, 0.70)
+
+    result = license_scanner.scan(COMPONENT_ID, repo_root)
+
+    assert field(result, "evaluated") is True
+    score = field(result, "similarity_score")
+    threshold = field(result, "block_threshold")
+    assert threshold == pytest.approx(0.70)
+    assert score >= threshold
+    assert score == pytest.approx(1.0)
+    assert field(result, "blocked") is True
+
+
+def test_score_exactly_at_threshold_is_blocked(tmp_path, monkeypatch):
+    hashes = _window_hashes(_source_text())
+    half = hashes[:5]
+    repo_root = _setup_repo(tmp_path, monkeypatch, half, 0.5)
+
+    result = license_scanner.scan(COMPONENT_ID, repo_root)
+
+    assert field(result, "evaluated") is True
+    assert field(result, "similarity_score") == pytest.approx(0.5)
+    assert field(result, "block_threshold") == pytest.approx(0.5)
+    assert field(result, "blocked") is True
+
+
+def test_cli_json_reports_blocked_with_exit_1(tmp_path, monkeypatch, capsys):
+    hashes = _window_hashes(_source_text())
+    repo_root = _setup_repo(tmp_path, monkeypatch, hashes, 0.70)
+
+    code = license_scanner.main(
+        [COMPONENT_ID, "--repo-root=" + str(repo_root), "--format=json"]
+    )
     out = capsys.readouterr().out
-    return rc, out
+
+    assert code == 1
+    doc = json.loads(out)
+    assert doc["evaluated"] is True
+    assert doc["blocked"] is True
+    assert doc["similarity_score"] >= doc["block_threshold"]
 
 
-def test_full_copy_above_default_threshold_blocks(clean_env, tmp_path, capsys):
+def test_cli_text_reports_blocked_with_exit_1(tmp_path, monkeypatch, capsys):
     hashes = _window_hashes(_source_text())
-    assert len(set(hashes)) == 10
-    corpus = {
-        "corpus_version": 3,
-        "entries": [
-            {
-                "reference_id": "ref-copy",
-                "license_family": "MIT",
-                "risk_tier": "low",
-                "hashes": sorted(set(hashes)) + _filler_hashes(5),
-            }
-        ],
-    }
-    root, corpus_path = _build_repo(tmp_path, corpus)
-    clean_env.setenv("VAR_LICENSE_CORPUS_PATH", str(corpus_path))
+    repo_root = _setup_repo(tmp_path, monkeypatch, hashes, 0.70)
 
-    result = license_scanner.scan(COMPONENT_ID, root)
-
-    assert _field(result, "evaluated") is True
-    score = _field(result, "similarity_score")
-    threshold = _field(result, "block_threshold")
-    assert score is not None and threshold is not None
-    assert abs(float(threshold) - 0.70) < 1e-9
-    assert abs(float(score) - 1.0) < 1e-9
-    assert float(score) >= float(threshold)
-    assert _field(result, "blocked") is True
-
-    rc, out = _run_cli(root, capsys)
-    assert rc == 1
-    payload = json.loads(out)
-    assert payload.get("blocked") is True
-    assert payload.get("evaluated") is True
-
-
-def test_score_exactly_at_threshold_blocks(clean_env, tmp_path, capsys):
-    hashes = _window_hashes(_source_text())
-    distinct = list(dict.fromkeys(hashes))
-    assert len(distinct) == 10
-    # Half the component's distinct windows match -> score exactly 0.5.
-    corpus = {
-        "corpus_version": 3,
-        "block_threshold": 0.5,
-        "entries": [
-            {
-                "reference_id": "ref-half",
-                "license_family": "Apache-2.0",
-                "risk_tier": "low",
-                "hashes": distinct[:5] + _filler_hashes(20),
-            }
-        ],
-    }
-    root, corpus_path = _build_repo(tmp_path, corpus)
-    clean_env.setenv("VAR_LICENSE_CORPUS_PATH", str(corpus_path))
-
-    result = license_scanner.scan(COMPONENT_ID, root)
-
-    assert _field(result, "evaluated") is True
-    score = _field(result, "similarity_score")
-    threshold = _field(result, "block_threshold")
-    assert abs(float(threshold) - 0.5) < 1e-9
-    assert abs(float(score) - 0.5) < 1e-9
-    assert _field(result, "blocked") is True
-
-    matches = _field(result, "matches")
-    assert matches, "a flagged (blocked) result must carry its matches"
-
-    rc, out = _run_cli(root, capsys)
-    assert rc == 1
-    payload = json.loads(out)
-    assert payload.get("blocked") is True
-
-
-def test_blocked_text_output_reports_blocked(clean_env, tmp_path, capsys):
-    hashes = _window_hashes(_source_text())
-    corpus = {
-        "corpus_version": 1,
-        "block_threshold": 0.70,
-        "entries": [
-            {
-                "reference_id": "ref-copy",
-                "license_family": "BSD",
-                "risk_tier": "medium",
-                "hashes": sorted(set(hashes)),
-            }
-        ],
-    }
-    root, corpus_path = _build_repo(tmp_path, corpus)
-    clean_env.setenv("VAR_LICENSE_CORPUS_PATH", str(corpus_path))
-
-    capsys.readouterr()
-    try:
-        rc = license_scanner.main([COMPONENT_ID, "--repo-root=" + str(root)])
-    except SystemExit as exc:
-        rc = exc.code
+    code = license_scanner.main([COMPONENT_ID, "--repo-root", str(repo_root)])
     out = capsys.readouterr().out
-    assert rc == 1
+
+    assert code == 1
     assert "blocked" in out.lower()
-    assert "NOT EVALUATED" not in out

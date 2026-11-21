@@ -15,6 +15,13 @@
   `transitive-guarantee` naming the upstream component — the same safe,
   coarse default every other `interface/` file kind already has (`D2`).
 
+  A guarantee file is a `G-*.md` file directly in `interface/guarantees/`;
+  its `G-id` is the file's stem. A guarantee file added or removed counts
+  as changed. No other file there (a `README.md`, a non-`.md` file, a file
+  in a subdirectory) is a guarantee file, and a change to one triggers
+  nothing under this requirement. `guarantee_ids` lists the qualifying
+  `G-id`s sorted.
+
   **`depends_on_guarantees`'s real frontmatter shape** (`D49`, found
   missing from this bundle's own visible text, though already
   documented for humans in `SPEC_GUIDELINES.md` §2, which no

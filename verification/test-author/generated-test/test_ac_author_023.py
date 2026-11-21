@@ -1,58 +1,81 @@
-# hotdocs-criterion: sha256:d9634ae64bd7805e29fa8845ec396254cff614dd2ed940a679560181c2531721
+# hotdocs-criterion: sha256:273a7d009b69b57519ca5055b894eeee20edab5c290312f931a3a50aada3a16a
 import re
 
 import test_author
 
 
-class Bundle(dict):
-    """A CriterionBundle that reads both as a mapping and by attribute."""
+VALID_TEST = (
+    "import widget_maker\n"
+    "\n"
+    "\n"
+    "def test_make():\n"
+    "    assert widget_maker.make() is not None\n"
+)
 
-    def __getattr__(self, name):
-        try:
-            return self[name]
-        except KeyError:
-            raise AttributeError(name)
+
+def field(value, name):
+    return value[name] if isinstance(value, dict) else getattr(value, name)
+
+
+def write_probe_stand_in(repo_root, log_path):
+    probe_dir = repo_root / "gen" / "test-probe"
+    probe_dir.mkdir(parents=True, exist_ok=True)
+    source = (
+        "LOG_PATH = " + repr(str(log_path)) + "\n"
+        "\n"
+        "\n"
+        "class _Report:\n"
+        "    def __init__(self):\n"
+        "        self.ok = True\n"
+        "        self.findings = []\n"
+        "        self.tests_run = 1\n"
+        "        self.tests_reached = 1\n"
+        "\n"
+        "    def to_dict(self):\n"
+        "        return dict(ok=self.ok, findings=list(self.findings),\n"
+        "                    tests_run=self.tests_run, tests_reached=self.tests_reached)\n"
+        "\n"
+        "\n"
+        "def probe(test_source, criterion_bundle, module_name, *, timeout=60.0, interpreter=None):\n"
+        "    with open(LOG_PATH, 'a') as fh:\n"
+        "        fh.write('probe\\n')\n"
+        "    return _Report()\n"
+    )
+    (probe_dir / "test_probe.py").write_text(source)
 
 
 def make_bundle():
-    return Bundle(
-        component_id="comp-widget-maker",
-        criterion_id="AC-WIDGET-MAKER-001",
-        covers="R-WIDGET-MAKER-001",
-        criterion_text=(
-            "Given a widget spec\n"
-            "When make_widget(spec) is called\n"
-            "Then it returns a widget"
-        ),
-        requirement_text=(
-            "# R-WIDGET-MAKER-001\n\n"
-            "**R-WIDGET-MAKER-001** — `make_widget(spec)` MUST return a widget."
-        ),
-        interface="# Library\n\n```\nmake_widget(spec: dict) -> dict\n```",
-        glossary="# Glossary\n\n- **Widget** — a test term.",
-        dependency_interfaces={},
-    )
+    return {
+        "component_id": "comp-widget-maker",
+        "criterion_id": "AC-WIDGET-MAKER-001",
+        "covers": "R-WIDGET-MAKER-001",
+        "criterion_text": "Given a widget\nWhen make() is called\nThen a widget is returned",
+        "requirement_text": "R-WIDGET-MAKER-001 - make() MUST return a widget.",
+        "interface": "make() -> Widget",
+        "glossary": "",
+        "dependency_interfaces": {},
+    }
 
 
-NONCE_RE = re.compile(r"-----BEGIN FILE ([0-9a-f]{32})-----")
+def test_prompt_holds_write_time_window_precision_block(tmp_path, monkeypatch):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    monkeypatch.chdir(repo_root)
+    monkeypatch.delenv("VAR_CACHE_STORE_URL", raising=False)
 
+    probe_log = tmp_path / "probe_calls.log"
+    write_probe_stand_in(repo_root, probe_log)
 
-def make_mock(recorded):
-    def backend(prompt, model, **params):
-        recorded.append(prompt)
-        match = NONCE_RE.search(prompt)
-        nonce = match.group(1) if match else "0" * 32
-        content = (
-            "import widget_maker\n"
-            "\n"
-            "\n"
-            "def test_widget():\n"
-            "    assert widget_maker is not None\n"
-        )
+    prompts = []
+
+    def mock_backend(prompt, model, **params):
+        prompts.append(prompt)
+        nonces = re.findall(r"-----BEGIN FILE ([0-9a-f]{32})-----", prompt)
+        n = nonces[-1] if nonces else "0" * 32
         text = (
-            "-----BEGIN FILE " + nonce + "-----\n"
-            + content
-            + "-----END FILE " + nonce + "-----"
+            "-----BEGIN FILE " + n + "-----\n"
+            + VALID_TEST
+            + "\n-----END FILE " + n + "-----"
         )
         return {
             "text": text,
@@ -61,21 +84,16 @@ def make_mock(recorded):
             "model_call_error": None,
         }
 
-    return backend
-
-
-def test_prompt_holds_write_time_window_precision_block(tmp_path):
-    recorded = []
-    backend = make_mock(recorded)
-
-    test_author.author_test(
-        make_bundle(), "mock", repo_root=tmp_path, llm_backend=backend
+    result = test_author.author_test(
+        make_bundle(), "mock", repo_root=repo_root, llm_backend=mock_backend
     )
 
-    assert len(recorded) >= 1, "the mock model was never called"
-    first_prompt = recorded[0]
-    assert "(`datetime.now(timezone.utc).replace(microsecond=0)`)" in first_prompt
+    assert field(result, "model_call_error") is None
+    assert len(prompts) >= 1
+
+    first = prompts[0]
+    assert "(`datetime.now(timezone.utc).replace(microsecond=0)`)" in first
     assert (
         "never comparing a timestamp truncated on write against "
         "microsecond-precision bounds."
-    ) in first_prompt
+    ) in first

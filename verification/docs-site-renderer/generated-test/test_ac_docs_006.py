@@ -1,10 +1,17 @@
-# hotdocs-criterion: sha256:b58a432ba6a2a54a20fa28aab404c5945d2569391eb0a90224fe9c3449aed003
-import importlib.util
+# hotdocs-criterion: sha256:a1aa07ff4d3a8642531990f080a63365e1787e5d3dc85f8df5c70dfde41b14e8
+"""AC-DOCS-006: a render run makes no network call and no model call.
+
+The test runs a full render through the component's CLI (`main`) on a
+synthetic `verification/corpus-graph.json`. While it runs, every way out
+to the network is blocked and recorded: socket connect, DNS lookup and
+UDP sends. Any spawn of a model CLI is recorded too. A fake `llm-endpoint`
+is placed under the temporary repo root. Its `complete` logs every call to
+a file the test controls, so a model call through it would show up there.
+"""
+
 import json
 import socket
 import subprocess
-import sys
-from dataclasses import dataclass, field as dc_field
 from pathlib import Path
 
 import pytest
@@ -12,39 +19,39 @@ import pytest
 import docs_site_renderer
 
 
-def load_module(path, module_name):
-    spec = importlib.util.spec_from_file_location(module_name, path)
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[module_name] = module
-    spec.loader.exec_module(module)
-    return module
+MODEL_BINARIES = ("claude", "ollama", "openai", "gemini", "anthropic")
 
 
 def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-MODEL_CLI_WORDS = ("claude", "ollama", "anthropic", "openai", "gemini")
-
-
-def graph_dict():
+def _graph_dict():
     return {
         "nodes": {
-            "P-ZERO-EDIT": {"type": "capability"},
-            "comp-foo": {
+            "P-DEMO-CAP": {"type": "capability"},
+            "comp-alpha": {
                 "type": "component",
-                "verification": None,
-                "provenance": None,
+                "verification": {
+                    "requirement_results": {"R-ALPHA-001": "pass"},
+                    "criteria": [
+                        {"id": "AC-ALPHA-001", "kind": "generated-test", "result": "pass"}
+                    ],
+                },
+                "provenance": {
+                    "generated_at": "2026-01-01T00:00:00Z",
+                    "model": "anthropic:claude-sonnet-5",
+                },
                 "size_status": "ok",
-                "sealed": True,
+                "sealed": False,
                 "pinned_overrides": [],
                 "owners": ["pipeline-team"],
                 "documents": {
-                    "component.md": "---\nid: comp-foo\ntitle: Foo\nstatus: draft\n---\n# Foo <b>&\n",
-                    "requirements/R-FOO-001.md": "**R-FOO-001** - MUST foo.\n",
+                    "component.md": "# Alpha\n\nSee https://example.com/should-not-be-fetched\n",
+                    "requirements/R-ALPHA-001.md": "**R-ALPHA-001** - MUST do a thing.\n",
                 },
             },
-            "comp-bar": {
+            "comp-beta": {
                 "type": "component",
                 "verification": None,
                 "provenance": None,
@@ -52,170 +59,105 @@ def graph_dict():
                 "sealed": True,
                 "pinned_overrides": [],
                 "owners": [],
-                "documents": {},
+                "documents": {"component.md": "# Beta\n"},
             },
-            "VAR-FOO-URL": {"type": "var"},
+            "VAR-DEMO-URL": {"type": "var"},
         },
         "edges": [
-            {"from": "comp-foo", "to": "P-ZERO-EDIT", "kind": "realizes"},
-            {"from": "comp-foo", "to": "VAR-FOO-URL", "kind": "uses_var"},
-            {"from": "comp-foo", "to": "comp-bar", "kind": "depends_on"},
+            {"from": "comp-alpha", "to": "P-DEMO-CAP", "kind": "realizes"},
+            {"from": "comp-alpha", "to": "VAR-DEMO-URL", "kind": "uses_var"},
+            {"from": "comp-alpha", "to": "comp-beta", "kind": "depends_on"},
         ],
         "aggregates": {
             "orphan_capability_rate": 0.0,
-            "orphan_component_rate": 0.5,
+            "orphan_component_rate": 0.0,
             "orphan_var_rate": 0.0,
         },
     }
 
 
-@dataclass
-class _StandInCorpusGraph:
-    nodes: dict = dc_field(default_factory=dict)
-    edges: list = dc_field(default_factory=list)
-    aggregates: dict = dc_field(default_factory=dict)
-
-    def to_dict(self):
-        return {"nodes": self.nodes, "edges": self.edges, "aggregates": self.aggregates}
-
-    def to_json_bytes(self):
-        return (
-            json.dumps(self.to_dict(), sort_keys=True, indent=2, ensure_ascii=True) + "\n"
-        ).encode("utf-8")
-
-
-def make_graph():
-    d = graph_dict()
-    cls = None
-    try:
-        gen = next(
-            p for p in Path(docs_site_renderer.__file__).resolve().parents if p.name == "gen"
-        )
-        base = gen / "corpus-graph-builder"
-        flat = base / "corpus_graph_builder.py"
-        path = flat if flat.is_file() else base / "corpus_graph_builder" / "__init__.py"
-        if path.is_file():
-            mod = load_module(path, "corpus_graph_builder")
-            cls = getattr(mod, "CorpusGraph", None)
-    except Exception:
-        cls = None
-    if cls is not None:
-        try:
-            return cls(nodes=d["nodes"], edges=d["edges"], aggregates=d["aggregates"])
-        except Exception:
-            pass
-    return _StandInCorpusGraph(nodes=d["nodes"], edges=d["edges"], aggregates=d["aggregates"])
-
-
-def write_fixture(repo_root, log_path):
-    comp = repo_root / "specs" / "components" / "foo"
-    (comp / "requirements").mkdir(parents=True)
-    (comp / "acceptance").mkdir(parents=True)
-    (comp / "component.md").write_text(
-        "---\n"
-        "id: comp-foo\n"
-        "title: Foo\n"
-        "status: draft\n"
-        "owners: [pipeline-team]\n"
-        "sealed: true\n"
-        "source_path: legacy/foo/\n"
-        "depends_on: []\n"
-        "realizes: []\n"
-        "uses_var: []\n"
-        "---\n"
-        "# Foo\n"
-    )
-    (comp / "requirements" / "R-FOO-001.md").write_text("**R-FOO-001** - MUST foo.\n")
-    (comp / "acceptance" / "AC-FOO-001.md").write_text(
-        "# AC-FOO-001\n\nCovers: R-FOO-001\nKind: judged\n"
-    )
-    ver = repo_root / "verification"
-    ver.mkdir(parents=True)
-    (ver / "corpus-graph.json").write_text(
-        json.dumps(graph_dict(), sort_keys=True, indent=2, ensure_ascii=True) + "\n"
-    )
-    fake_dir = repo_root / "gen" / "llm-endpoint"
-    fake_dir.mkdir(parents=True)
-    src = (
+def _write_fake_llm_endpoint(repo_root, log_path):
+    target = repo_root / "gen" / "llm-endpoint" / "llm_endpoint.py"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    source = (
         "LOG_PATH = " + repr(str(log_path)) + "\n"
         "\n"
+        "def _log(name):\n"
+        "    with open(LOG_PATH, 'a', encoding='utf-8') as fh:\n"
+        "        fh.write(name + '\\n')\n"
+        "\n"
+        "_log('import')\n"
+        "\n"
         "def complete(*args, **kwargs):\n"
-        "    with open(LOG_PATH, 'a') as fh:\n"
-        "        fh.write('complete called' + chr(10))\n"
-        "    raise RuntimeError('model call forbidden in docs-site render')\n"
+        "    _log('complete')\n"
+        "    raise RuntimeError('model call made during docs-site render')\n"
     )
-    (fake_dir / "llm_endpoint.py").write_text(src)
+    target.write_text(source, encoding="utf-8")
 
 
-@pytest.fixture
-def guards(monkeypatch):
-    calls = {"network": [], "model_subprocess": []}
+def _install_guards(monkeypatch, attempts):
+    def blocked(kind):
+        def _raise(*args, **kwargs):
+            attempts.append((kind, repr(args)[:200]))
+            raise OSError("network access blocked by test: " + kind)
 
-    def deny(name):
-        def _deny(*args, **kwargs):
-            calls["network"].append((name, repr(args)))
-            raise OSError("network access forbidden in test: " + name)
-        return _deny
+        return _raise
 
-    monkeypatch.setattr(socket.socket, "connect", deny("socket.connect"))
-    monkeypatch.setattr(socket.socket, "connect_ex", deny("socket.connect_ex"))
-    monkeypatch.setattr(socket, "create_connection", deny("create_connection"))
-    monkeypatch.setattr(socket, "getaddrinfo", deny("getaddrinfo"))
+    monkeypatch.setattr(socket.socket, "connect", blocked("socket.connect"))
+    monkeypatch.setattr(socket.socket, "connect_ex", blocked("socket.connect_ex"))
+    monkeypatch.setattr(socket.socket, "sendto", blocked("socket.sendto"))
+    monkeypatch.setattr(socket, "create_connection", blocked("socket.create_connection"))
+    monkeypatch.setattr(socket, "getaddrinfo", blocked("socket.getaddrinfo"))
+    monkeypatch.setattr(socket, "gethostbyname", blocked("socket.gethostbyname"))
 
-    real_popen = subprocess.Popen
+    real_popen_init = subprocess.Popen.__init__
 
-    class GuardPopen(real_popen):
-        def __init__(self, args, *a, **kw):
-            text = repr(args).lower()
-            if any(w in text for w in MODEL_CLI_WORDS):
-                calls["model_subprocess"].append(text)
-                raise OSError("model CLI subprocess forbidden in test")
-            super().__init__(args, *a, **kw)
+    def guarded_popen_init(self, args, *rest, **kwargs):
+        if isinstance(args, (list, tuple)):
+            words = [str(a) for a in args]
+        else:
+            words = str(args).split()
+        if words:
+            exe = Path(words[0]).name.lower()
+            if any(exe.startswith(b) for b in MODEL_BINARIES):
+                attempts.append(("model-subprocess", repr(words)[:200]))
+                raise OSError("model CLI spawn blocked by test")
+        return real_popen_init(self, args, *rest, **kwargs)
 
-    monkeypatch.setattr(subprocess, "Popen", GuardPopen)
-
-    for var in ("ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY"):
-        monkeypatch.delenv(var, raising=False)
-    return calls
-
-
-def _files_under(d):
-    return [p for p in Path(d).rglob("*") if p.is_file()]
+    monkeypatch.setattr(subprocess.Popen, "__init__", guarded_popen_init)
 
 
-def test_library_render_makes_no_network_or_model_call(tmp_path, monkeypatch, guards):
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    log_path = tmp_path / "model_calls.log"
-    write_fixture(repo_root, log_path)
-    monkeypatch.chdir(repo_root)
+def test_ac_docs_006_render_run_makes_no_network_or_model_call(tmp_path, monkeypatch):
+    repo_root = (tmp_path / "repo").resolve()
+    (repo_root / "verification").mkdir(parents=True)
+    graph_path = repo_root / "verification" / "corpus-graph.json"
+    graph_path.write_text(
+        json.dumps(_graph_dict(), sort_keys=True, indent=2, ensure_ascii=True) + "\n",
+        encoding="utf-8",
+    )
 
-    out_dir = tmp_path / "out-lib"
-    docs_site_renderer.render_docs_site(make_graph(), out_dir)
+    log_path = tmp_path / "llm_calls.log"
+    _write_fake_llm_endpoint(repo_root, log_path)
 
-    assert guards["network"] == []
-    assert guards["model_subprocess"] == []
-    assert not log_path.exists()
-    assert out_dir.is_dir()
-    assert _files_under(out_dir)
+    out_dir = tmp_path / "site-out"
 
+    # Bogus credentials: no real model could be reached even if one were tried.
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-invalid-key")
+    monkeypatch.chdir(tmp_path)
 
-def test_cli_render_makes_no_network_or_model_call(tmp_path, monkeypatch, guards):
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    log_path = tmp_path / "model_calls.log"
-    write_fixture(repo_root, log_path)
-    monkeypatch.chdir(repo_root)
+    attempts = []
+    _install_guards(monkeypatch, attempts)
 
-    spec_path = Path(docs_site_renderer.__file__).resolve().parent / "cli.py"
-    cli = load_module(spec_path, "docs_site_renderer.cli")
+    from docs_site_renderer import cli
 
-    out_dir = tmp_path / "out-cli"
     code = cli.main(["--repo-root=" + str(repo_root), "--out=" + str(out_dir)])
 
-    assert code == 0
-    assert guards["network"] == []
-    assert guards["model_subprocess"] == []
-    assert not log_path.exists()
-    assert out_dir.is_dir()
-    assert _files_under(out_dir)
+    monkeypatch.undo()
+
+    assert code == 0, "render run did not succeed; exit code " + repr(code)
+    assert (out_dir / "index.html").is_file(), "render produced no index.html"
+
+    assert attempts == [], "network or model access attempted during render: " + repr(attempts)
+
+    calls = log_path.read_text(encoding="utf-8").splitlines() if log_path.exists() else []
+    assert "complete" not in calls, "llm-endpoint.complete was called during render: " + repr(calls)

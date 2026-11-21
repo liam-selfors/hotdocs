@@ -5,7 +5,8 @@ Kind: generated-test
 
 ```gherkin
 Given a bundle for comp-widget-maker whose dependency_interfaces is
-  {"comp-zebra-quux": "zq_lookup(x: int, y: str) -> ZqResult"}, and a mock model that records
+  {"comp-zebra-quux": "zq_lookup(x: int, y: str) -> ZqResult"}, a
+  test-probe stand-in returning ok true, and a mock model that records
   each prompt and replies with a valid marked test file
 When author_test(bundle, "mock", repo_root=<tmp>, llm_backend=<mock>)
   is called

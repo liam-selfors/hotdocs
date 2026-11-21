@@ -1,142 +1,85 @@
-# hotdocs-criterion: sha256:3047043b28c882245269d27a1dda4a275a385d64ec0dd9816495b4d27315f0c0
-import dataclasses
-import os
-from pathlib import Path
+# hotdocs-criterion: sha256:1224a7c17b67164c9d2f6756de0911caa27c9b7ea2c034f00d1fc097752da77b
+"""AC-CACHE-007: put rejects a payload whose shape does not match the schema
+for the cache_key's declared gate_version, and stores nothing."""
 
 import pytest
 
 import cache_manager
 
 
-SPEC_HASH = "sha256:" + "a" * 64
-INPUTS_HASH = "sha256:" + "b" * 64
-LICENSE_GATE_VERSION = "license_scanner@4.0.3+9f2c41ab07de"
-MODEL_PIN = "claude-sonnet-5"
+def field(value, name):
+    return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-@dataclasses.dataclass
-class _FallbackCacheKey:
-    spec_bundle_hash: str
-    gate_inputs_hash: str
-    gate_version: str
-    model_pin: str
+@pytest.fixture
+def repo_root(tmp_path, monkeypatch):
+    # Force the local fallback store under this fresh repo_root.
+    monkeypatch.delenv("VAR_CACHE_STORE_URL", raising=False)
+    monkeypatch.chdir(tmp_path)
+    return tmp_path
 
 
-@dataclasses.dataclass
-class _FallbackCachedResult:
-    gate_type: str
-    payload: dict
-    stored_at: str
-
-
-def _field(value, name):
-    if isinstance(value, dict):
-        return value.get(name)
-    return getattr(value, name, None)
-
-
-def _make_key(gate_version=LICENSE_GATE_VERSION, inputs_hash=INPUTS_HASH):
-    cls = getattr(cache_manager, "CacheKey", None) or _FallbackCacheKey
-    return cls(
-        spec_bundle_hash=SPEC_HASH,
-        gate_inputs_hash=inputs_hash,
+def _key(gate_version, suffix="a"):
+    return cache_manager.CacheKey(
+        spec_bundle_hash="sha256:" + (suffix * 64)[:64],
+        gate_inputs_hash="sha256:" + ("b" * 64),
         gate_version=gate_version,
-        model_pin=MODEL_PIN,
+        model_pin="claude-sonnet-5",
     )
-
-
-def _make_result(gate_type, payload):
-    cls = getattr(cache_manager, "CachedResult", None) or _FallbackCachedResult
-    return cls(gate_type=gate_type, payload=payload, stored_at=cache_manager.now_iso())
-
-
-def _valid_license_payload():
-    return {
-        "component_id": "comp-example",
-        "gate_version": LICENSE_GATE_VERSION,
-        "similarity_score": 0.12,
-        "blocked": False,
-        "matches": [],
-    }
 
 
 def _lint_report_payload():
     # A LintReport-shaped payload: none of license_scanner's required keys.
     return {
+        "hard_failures": 0,
+        "soft_failures": 1,
         "findings": [
-            {
-                "rule": "R-LINT-001",
-                "severity": "hard-fail",
-                "path": "specs/components/example/component.md",
-                "message": "missing frontmatter field: owners",
-            }
+            {"rule": "L-001", "path": "specs/x.md", "message": "something"}
         ],
-        "hard_fail_count": 1,
-        "passed": False,
-    }
-
-
-def _valid_compiler_payload():
-    return {
-        "outputs": [],
-        "gate_version": "compiler@1.0.0",
-        "summary": "ok",
     }
 
 
 def _entry_count(repo_root):
-    s = cache_manager.stats(repo_root=repo_root)
-    return _field(s, "entry_count")
+    return field(cache_manager.stats(repo_root=repo_root), "entry_count")
 
 
-@pytest.fixture
-def repo_root(tmp_path, monkeypatch):
-    monkeypatch.delenv("VAR_CACHE_STORE_URL", raising=False)
-    root = tmp_path / "repo"
-    root.mkdir()
-    monkeypatch.chdir(root)
-    return root
+def test_lint_report_payload_under_license_scanner_gate_version_is_rejected(repo_root):
+    key = _key("license_scanner@4.0.3+9f2c41ab07de")
+    result = cache_manager.CachedResult(
+        gate_type="license_scanner",
+        payload=_lint_report_payload(),
+        stored_at=cache_manager.now_iso(),
+    )
+
+    assert _entry_count(repo_root) == 0
+
+    with pytest.raises(cache_manager.SchemaValidationError):
+        cache_manager.put(key, result, repo_root=repo_root)
+
+    # Nothing stored.
+    got = cache_manager.get(key, repo_root=repo_root)
+    assert isinstance(got, cache_manager.Miss)
+    assert _entry_count(repo_root) == 0
 
 
-def test_schema_validation_error_is_value_error():
+def test_schema_validation_error_is_a_value_error():
     assert issubclass(cache_manager.SchemaValidationError, ValueError)
 
 
-def test_positive_control_valid_payload_is_stored(repo_root):
-    # Sanity check that the local store actually works, so the "nothing
-    # stored" assertions in the rejection tests below are meaningful.
-    key = _make_key()
-    assert _entry_count(repo_root) == 0
-    cache_manager.put(key, _make_result("license_scanner", _valid_license_payload()), repo_root=repo_root)
-    got = cache_manager.get(key, repo_root=repo_root)
-    assert not isinstance(got, cache_manager.Miss)
-    assert _field(got, "gate_type") == "license_scanner"
-    assert _field(got, "payload") == _valid_license_payload()
-    assert _entry_count(repo_root) == 1
-
-
-def test_lint_report_payload_under_license_scanner_is_rejected_and_not_stored(repo_root):
-    key = _make_key()
-    result = _make_result("license_scanner", _lint_report_payload())
-
-    with pytest.raises(cache_manager.SchemaValidationError):
-        cache_manager.put(key, result, repo_root=repo_root)
-
-    got = cache_manager.get(key, repo_root=repo_root)
-    assert isinstance(got, cache_manager.Miss)
-    assert got == cache_manager.Miss()
-    assert _entry_count(repo_root) == 0
-
-
-@pytest.mark.parametrize(
-    "missing_key",
-    ["component_id", "gate_version", "similarity_score", "blocked", "matches"],
-)
-def test_license_scanner_payload_missing_required_key_is_rejected(repo_root, missing_key):
-    key = _make_key()
-    payload = _valid_license_payload()
-    del payload[missing_key]
-    result = _make_result("license_scanner", payload)
+def test_payload_missing_one_required_key_is_rejected(repo_root):
+    key = _key("license_scanner@4.0.3+9f2c41ab07de", suffix="c")
+    payload = {
+        "component_id": "comp-foo",
+        "gate_version": "license_scanner@4.0.3+9f2c41ab07de",
+        "similarity_score": 0.0,
+        "blocked": False,
+        # "matches" deliberately missing
+    }
+    result = cache_manager.CachedResult(
+        gate_type="license_scanner",
+        payload=payload,
+        stored_at=cache_manager.now_iso(),
+    )
 
     with pytest.raises(cache_manager.SchemaValidationError):
         cache_manager.put(key, result, repo_root=repo_root)
@@ -145,9 +88,14 @@ def test_license_scanner_payload_missing_required_key_is_rejected(repo_root, mis
     assert _entry_count(repo_root) == 0
 
 
-def test_empty_payload_under_license_scanner_is_rejected(repo_root):
-    key = _make_key()
-    result = _make_result("license_scanner", {})
+def test_valid_payload_for_other_gate_type_under_license_scanner_key_is_rejected(repo_root):
+    key = _key("license_scanner@4.0.3+9f2c41ab07de", suffix="d")
+    # A well-formed llm_judge result, but the key declares license_scanner.
+    result = cache_manager.CachedResult(
+        gate_type="llm_judge",
+        payload={"result": "pass", "rationale": "looks fine"},
+        stored_at=cache_manager.now_iso(),
+    )
 
     with pytest.raises(cache_manager.SchemaValidationError):
         cache_manager.put(key, result, repo_root=repo_root)
@@ -156,52 +104,26 @@ def test_empty_payload_under_license_scanner_is_rejected(repo_root):
     assert _entry_count(repo_root) == 0
 
 
-def test_compiler_shaped_payload_under_license_scanner_gate_type_is_rejected(repo_root):
-    key = _make_key()
-    result = _make_result("license_scanner", _valid_compiler_payload())
+def test_control_matching_payload_is_stored(repo_root):
+    # Positive control: confirms the "nothing stored" checks above are meaningful.
+    key = _key("license_scanner@4.0.3+9f2c41ab07de", suffix="e")
+    payload = {
+        "component_id": "comp-foo",
+        "gate_version": "license_scanner@4.0.3+9f2c41ab07de",
+        "similarity_score": 0.0,
+        "blocked": False,
+        "matches": [],
+        "extra_key_is_permitted": True,
+    }
+    result = cache_manager.CachedResult(
+        gate_type="license_scanner",
+        payload=payload,
+        stored_at=cache_manager.now_iso(),
+    )
 
-    with pytest.raises(cache_manager.SchemaValidationError):
-        cache_manager.put(key, result, repo_root=repo_root)
-
-    assert isinstance(cache_manager.get(key, repo_root=repo_root), cache_manager.Miss)
-    assert _entry_count(repo_root) == 0
-
-
-def test_result_gate_type_mismatching_key_gate_type_is_rejected(repo_root):
-    # A self-consistent compiler result put under a license_scanner key.
-    key = _make_key()
-    result = _make_result("compiler", _valid_compiler_payload())
-
-    with pytest.raises(cache_manager.SchemaValidationError):
-        cache_manager.put(key, result, repo_root=repo_root)
-
-    assert isinstance(cache_manager.get(key, repo_root=repo_root), cache_manager.Miss)
-    assert _entry_count(repo_root) == 0
-
-
-def test_extra_keys_are_permitted(repo_root):
-    # Shallow key-presence check: extra keys must not cause rejection.
-    key = _make_key(inputs_hash="sha256:" + "c" * 64)
-    payload = _valid_license_payload()
-    payload["extra_field"] = "ignored"
-    cache_manager.put(key, _make_result("license_scanner", payload), repo_root=repo_root)
-    got = cache_manager.get(key, repo_root=repo_root)
-    assert not isinstance(got, cache_manager.Miss)
-    assert _field(got, "gate_type") == "license_scanner"
-
-
-def test_rejected_put_does_not_overwrite_existing_entry(repo_root):
-    key = _make_key()
-    good = _make_result("license_scanner", _valid_license_payload())
-    cache_manager.put(key, good, repo_root=repo_root)
-    assert _entry_count(repo_root) == 1
-
-    bad = _make_result("license_scanner", _lint_report_payload())
-    with pytest.raises(cache_manager.SchemaValidationError):
-        cache_manager.put(key, bad, repo_root=repo_root)
+    cache_manager.put(key, result, repo_root=repo_root)
 
     got = cache_manager.get(key, repo_root=repo_root)
     assert not isinstance(got, cache_manager.Miss)
-    assert _field(got, "gate_type") == "license_scanner"
-    assert _field(got, "payload") == _valid_license_payload()
+    assert field(got, "gate_type") == "license_scanner"
     assert _entry_count(repo_root) == 1

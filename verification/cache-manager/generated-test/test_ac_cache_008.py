@@ -1,31 +1,25 @@
-# hotdocs-criterion: sha256:a7cdba70d4b04ab452a3a3f88d8ba9766d3bca6e249268af78da01dad6260ac5
-"""AC-CACHE-008 (covers R-CACHE-008).
-
-Given a key that was successfully put, then evicted by the backing store
-before any get for it, when get is called with that key, then it returns a
-definitive miss, indistinguishable in shape from a backing-store error
-(R-CACHE-004) or a key that was simply never stored.
-"""
+# hotdocs-criterion: sha256:580fb6dd7b1328c770a23892793bf305761375c9eb9c45fd77e589bb8c193de4
+"""AC-CACHE-008 / R-CACHE-008: an entry evicted by the backing store after a
+successful put, before any get, yields a definitive miss indistinguishable in
+shape from a backing-store error miss (R-CACHE-004) or a never-stored miss."""
 
 import json
-import os
+import shutil
 from pathlib import Path
-
-import pytest
 
 import cache_manager
 
 
-GATE_VERSION = "license_scanner@4.0.3+9f2c41ab07de"
-MODEL_PIN = "claude-sonnet-5"
+def field(value, name):
+    return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def _key(suffix: str):
+def _key(suffix):
     return cache_manager.CacheKey(
         spec_bundle_hash="sha256:" + ("a" * 63) + suffix,
         gate_inputs_hash="sha256:" + ("b" * 63) + suffix,
-        gate_version=GATE_VERSION,
-        model_pin=MODEL_PIN,
+        gate_version="license_scanner@4.0.3+9f2c41ab07de",
+        model_pin="claude-sonnet-5",
     )
 
 
@@ -33,8 +27,8 @@ def _result():
     return cache_manager.CachedResult(
         gate_type="license_scanner",
         payload={
-            "component_id": "comp-example",
-            "gate_version": GATE_VERSION,
+            "component_id": "comp-foo",
+            "gate_version": "license_scanner@4.0.3+9f2c41ab07de",
             "similarity_score": 0.0,
             "blocked": False,
             "matches": [],
@@ -43,144 +37,78 @@ def _result():
     )
 
 
-def _field(value, name):
-    return value.get(name) if isinstance(value, dict) else getattr(value, name, None)
-
-
-def _is_miss(value):
-    return isinstance(value, cache_manager.Miss)
-
-
-def _evict_everything(repo_root: Path):
-    """Simulate the backing store evicting its entries: remove every stored
-    file under the local fallback store's directory, leaving no entry behind."""
-    cache_dir = repo_root / ".hotdocs" / "cache"
-    if not cache_dir.exists():
-        return
-    for dirpath, _dirnames, filenames in os.walk(cache_dir):
-        for name in filenames:
-            try:
-                (Path(dirpath) / name).unlink()
-            except FileNotFoundError:
-                pass
-
-
-def _cli_inspect(repo_root: Path, key, capsys):
+def _inspect(key, repo_root, capsys):
     capsys.readouterr()
     code = cache_manager.main(
         [
             "inspect",
-            "--spec-bundle-hash=" + _field(key, "spec_bundle_hash"),
-            "--gate-inputs-hash=" + _field(key, "gate_inputs_hash"),
-            "--gate-version=" + _field(key, "gate_version"),
-            "--model-pin=" + _field(key, "model_pin"),
+            "--spec-bundle-hash=" + key.spec_bundle_hash,
+            "--gate-inputs-hash=" + key.gate_inputs_hash,
+            "--gate-version=" + key.gate_version,
+            "--model-pin=" + key.model_pin,
             "--repo-root=" + str(repo_root),
         ]
     )
-    out = capsys.readouterr().out
-    lines = [ln for ln in out.splitlines() if ln.strip()]
-    assert lines, "inspect printed nothing on stdout"
-    return code, json.loads(lines[-1])
+    out = capsys.readouterr().out.strip().splitlines()
+    return code, out
 
 
-@pytest.fixture
-def isolated_env(tmp_path, monkeypatch):
-    monkeypatch.delenv("VAR_CACHE_STORE_URL", raising=False)
-    monkeypatch.chdir(tmp_path)
-    return tmp_path
-
-
-def test_evicted_key_returns_definitive_miss(isolated_env):
-    repo_root = isolated_env / "repo-evicted"
-    repo_root.mkdir()
-    key = _key("1")
-
-    cache_manager.put(key, _result(), repo_root=repo_root)
-
-    # R-CACHE-008 permits eviction at any time, so a hit here is not
-    # required; we only proceed to simulate the eviction regardless.
-    _evict_everything(repo_root)
-
-    result = cache_manager.get(key, repo_root=repo_root)
-    assert result is not None, "get must never report a miss as None"
-    assert _is_miss(result), f"expected a Miss after eviction, got {result!r}"
-
-
-def test_evicted_miss_indistinguishable_from_never_stored_and_store_error(
-    isolated_env, capsys
+def test_evicted_entry_is_plain_miss_like_error_and_never_stored(
+    tmp_path, monkeypatch, capsys
 ):
-    # Case 1: put, then evicted before any get.
-    evicted_root = isolated_env / "repo-evicted"
-    evicted_root.mkdir()
-    evicted_key = _key("2")
-    cache_manager.put(evicted_key, _result(), repo_root=evicted_root)
-    _evict_everything(evicted_root)
-    evicted = cache_manager.get(evicted_key, repo_root=evicted_root)
+    monkeypatch.delenv("VAR_CACHE_STORE_URL", raising=False)
 
-    # Case 2: a key that was simply never stored.
-    never_root = isolated_env / "repo-never"
+    # --- Case 1: put, then evicted by the backing store, before any get ---
+    evict_root = tmp_path / "evict_repo"
+    evict_root.mkdir()
+    monkeypatch.chdir(evict_root)
+    evicted_key = _key("1")
+    cache_manager.put(evicted_key, _result(), repo_root=evict_root)
+
+    cache_dir = evict_root / ".hotdocs" / "cache"
+    assert cache_dir.exists(), "local fallback store should hold the put entry"
+    stats_before = cache_manager.stats(repo_root=evict_root)
+    assert field(stats_before, "entry_count") >= 1
+
+    # Simulate the backing store evicting every entry, without notifying anyone.
+    if cache_dir.is_dir():
+        shutil.rmtree(cache_dir)
+    else:
+        cache_dir.unlink()
+    cache_dir.mkdir(parents=True)
+
+    evicted = cache_manager.get(evicted_key, repo_root=evict_root)
+
+    # --- Case 2: key never stored ---
+    never_root = tmp_path / "never_repo"
     never_root.mkdir()
-    never_key = _key("3")
-    never = cache_manager.get(never_key, repo_root=never_root)
+    never_stored = cache_manager.get(_key("2"), repo_root=never_root)
 
-    # Case 3: a backing-store error — the local store's directory path is
-    # occupied by a regular file, so the store cannot be read at all.
-    error_root = isolated_env / "repo-error"
+    # --- Case 3: backing-store error (local store unreadable / corrupt) ---
+    error_root = tmp_path / "error_repo"
     (error_root / ".hotdocs").mkdir(parents=True)
-    (error_root / ".hotdocs" / "cache").write_text("not a directory\n")
-    error_key = _key("4")
-    errored = cache_manager.get(error_key, repo_root=error_root)
+    # The cache location is a regular file holding garbage, not a store.
+    (error_root / ".hotdocs" / "cache").write_text("\x00not a cache store{{%%")
+    errored = cache_manager.get(_key("3"), repo_root=error_root)
 
-    for label, value in (
-        ("evicted", evicted),
-        ("never-stored", never),
-        ("backing-store-error", errored),
-    ):
-        assert value is not None, f"{label}: get must never return None"
-        assert _is_miss(value), f"{label}: expected a Miss, got {value!r}"
+    # All three are definitive misses, never None, never a CachedResult.
+    for outcome in (evicted, never_stored, errored):
+        assert outcome is not None
+        assert isinstance(outcome, cache_manager.Miss)
+        assert not isinstance(outcome, cache_manager.CachedResult)
 
     # Indistinguishable in shape: same type, and all compare equal.
-    assert type(evicted) is type(never) is type(errored)
-    assert evicted == never
-    assert never == errored
+    assert type(evicted) is type(never_stored) is type(errored)
+    assert evicted == never_stored
     assert evicted == errored
+    assert never_stored == errored
 
-    # The same holds at the CLI surface: identical exit code and output.
-    cli_results = [
-        _cli_inspect(evicted_root, evicted_key, capsys),
-        _cli_inspect(never_root, never_key, capsys),
-        _cli_inspect(error_root, error_key, capsys),
-    ]
-    for code, payload in cli_results:
-        assert code == 0, f"a miss is an answer, not a failure; got exit {code}"
-        assert payload == {"result": "miss"}, payload
-    assert cli_results[0] == cli_results[1] == cli_results[2]
-
-
-def test_caller_handling_identical_across_all_three_misses(isolated_env):
-    """A caller's single isinstance(result, Miss) branch handles every case."""
-
-    def caller(result):
-        if isinstance(result, cache_manager.Miss):
-            return "recompute"
-        return "use-cached"
-
-    evicted_root = isolated_env / "r-evicted"
-    evicted_root.mkdir()
-    k1 = _key("5")
-    cache_manager.put(k1, _result(), repo_root=evicted_root)
-    _evict_everything(evicted_root)
-
-    never_root = isolated_env / "r-never"
-    never_root.mkdir()
-
-    error_root = isolated_env / "r-error"
-    (error_root / ".hotdocs").mkdir(parents=True)
-    (error_root / ".hotdocs" / "cache").write_text("garbage")
-
-    outcomes = [
-        caller(cache_manager.get(k1, repo_root=evicted_root)),
-        caller(cache_manager.get(_key("6"), repo_root=never_root)),
-        caller(cache_manager.get(_key("7"), repo_root=error_root)),
-    ]
-    assert outcomes == ["recompute", "recompute", "recompute"]
+    # The CLI reports the evicted key exactly as it reports a never-stored key.
+    code_evicted, out_evicted = _inspect(evicted_key, evict_root, capsys)
+    code_never, out_never = _inspect(_key("2"), never_root, capsys)
+    assert code_evicted == 0
+    assert code_never == 0
+    assert len(out_evicted) == 1
+    assert len(out_never) == 1
+    assert json.loads(out_evicted[0]) == {"result": "miss"}
+    assert json.loads(out_evicted[0]) == json.loads(out_never[0])

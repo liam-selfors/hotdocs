@@ -1,5 +1,5 @@
-# hotdocs-criterion: sha256:d5937dffd19624d0a68f1763506c1d37b7ce12907fe1e2ae0bcbeeaba3bbfaee
-import shutil
+# hotdocs-criterion: sha256:17ed1097952481866452eb0073d8e8b6e2b5495d5962d5472f91e8808adb3fa0
+import sys
 from pathlib import Path
 
 import pytest
@@ -16,93 +16,56 @@ def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def _write(path, text):
+def write(path, text):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
-
-
-def _live_repo_root():
-    for p in Path(capability_scenario_verifier.__file__).resolve().parents:
-        if p.name == "gen":
-            return p.parent
-    return None
-
-
-FAKE_TEST_AUTHOR_SRC = (
-    "def author_test(bundle, model, seed=0, *, repo_root=None, llm_backend=None):\n"
-    "    cid = bundle['criterion_id']\n"
-    "    name = 'test_' + cid.lower().replace('-', '_') + '.py'\n"
-    "    return {\n"
-    "        'component_id': bundle.get('component_id'),\n"
-    "        'criterion_id': cid,\n"
-    "        'model': model,\n"
-    "        'seed': seed,\n"
-    "        'prompt_version': 'v1',\n"
-    "        'cache_hit': False,\n"
-    "        'file': {\n"
-    "            'path': 'verification/capabilities/P-X/generated-test/' + name,\n"
-    "            'content': " + repr("def test_x():\n    assert True\n") + ",\n"
-    "        },\n"
-    "        'model_call_error': None,\n"
-    "    }\n"
-)
-
-FAKE_LLM_ENDPOINT_SRC = (
-    "def complete(prompt, model, *, backend=None, **params):\n"
-    "    return {'text': 'pass', 'model': model, 'backend': 'fake', 'model_call_error': None}\n"
-)
 
 
 def make_repo(tmp_path):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
 
-    # Component realizing P-X, unsealed, with code under gen/foo/
-    _write(
+    # Planted python adapter.
+    write(
+        repo_root / "gen" / "kind-python" / "kind_python.py",
+        "import sys\n"
+        "\n"
+        "\n"
+        "def provision(repo_root):\n"
+        "    return {\"ok\": True, \"reason\": \"\", \"versions\": {}, \"lockfile_sha256\": None,\n"
+        "            \"interpreter\": sys.executable}\n",
+    )
+
+    # Realizing component, not sealed, with code under gen/foo/.
+    write(
         repo_root / "specs" / "components" / "foo" / "component.md",
         "---\n"
         "id: comp-foo\n"
         "title: Foo\n"
         "status: draft\n"
-        "owners: [alice]\n"
+        "owners: [team-a]\n"
         "realizes: [P-X]\n"
         "sealed: false\n"
         "---\n"
         "\n"
         "# Foo\n"
         "\n"
-        "A small fixture component.\n",
+        "A fixture component.\n",
     )
-    _write(
-        repo_root / "specs" / "components" / "foo" / "requirements" / "R-FOO-001.md",
-        "**R-FOO-001** — `value()` MUST return 7.\n",
-    )
-    _write(
-        repo_root / "specs" / "components" / "foo" / "acceptance" / "AC-FOO-001.md",
-        "# AC-FOO-001\n"
-        "\n"
-        "Covers: R-FOO-001\n"
-        "Kind: generated-test\n"
-        "\n"
-        "```gherkin\n"
-        "Given nothing\n"
-        "When value is called\n"
-        "Then it returns 7\n"
-        "```\n",
-    )
-    _write(
+    write(
         repo_root / "gen" / "foo" / "foo_mod.py",
-        "def value():\n    return 7\n",
+        "def value():\n"
+        "    return 7\n",
     )
 
-    # Capability with one generated-test scenario
-    _write(
+    # Capability with one generated-test scenario.
+    write(
         repo_root / "specs" / "product" / "x.md",
         "---\n"
         "id: P-X\n"
         "title: Capability X\n"
         "status: draft\n"
-        "owners: [alice]\n"
+        "owners: [team-a]\n"
         "---\n"
         "\n"
         "# Capability X\n"
@@ -114,25 +77,10 @@ def make_repo(tmp_path):
         "\n"
         "```gherkin\n"
         "Given a foo component\n"
-        "When value is called\n"
-        "Then it returns 7\n"
+        "When its value is read\n"
+        "Then the value is seven\n"
         "```\n",
     )
-
-    # Fake dependencies, flat-module shape
-    _write(repo_root / "gen" / "test-author" / "test_author.py", FAKE_TEST_AUTHOR_SRC)
-    _write(repo_root / "gen" / "llm-endpoint" / "llm_endpoint.py", FAKE_LLM_ENDPOINT_SRC)
-
-    # Real compiler copied from the live repository
-    live = _live_repo_root()
-    if live is not None:
-        src = live / "pipeline" / "criterion-compiler"
-        if src.is_dir():
-            shutil.copytree(
-                src,
-                repo_root / "pipeline" / "criterion-compiler",
-                ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
-            )
     return repo_root
 
 
@@ -140,87 +88,90 @@ def make_author(outcome, calls):
     def test_author(bundle):
         calls.append(bundle)
         return outcome
+
     return test_author
 
 
-def run(repo_root, outcome):
-    calls = []
-    report = capability_scenario_verifier.run_capability_scenarios(
+def run(repo_root, outcome, calls):
+    return capability_scenario_verifier.run_capability_scenarios(
         ["comp-foo"], repo_root, judge=None, test_author=make_author(outcome, calls)
     )
-    return report, calls
 
 
 def capability_entry(report):
     if isinstance(report, dict):
-        assert CAPABILITY_ID in report, report
         return report[CAPABILITY_ID]
-    return report[CAPABILITY_ID]
+    return getattr(report, CAPABILITY_ID)
 
 
 def scenario_result(report):
     entry = capability_entry(report)
     scenarios = field(entry, "scenarios")
-    matches = [s for s in scenarios if field(s, "id") == SCENARIO_ID]
-    assert len(matches) == 1, scenarios
-    return field(matches[0], "result")
+    matching = [s for s in scenarios if field(s, "id") == SCENARIO_ID]
+    assert len(matching) == 1, scenarios
+    return field(matching[0], "result"), field(entry, "overall")
 
 
-def test_failing_generated_test_fails_and_is_written(tmp_path):
+def test_failing_generated_test_is_fail_and_written(tmp_path):
     repo_root = make_repo(tmp_path)
     content = "def test_x():\n    assert False\n"
     outcome = {"model_call_error": None, "file": {"path": GOOD_PATH, "content": content}}
-
-    report, calls = run(repo_root, outcome)
-
+    calls = []
+    report = run(repo_root, outcome, calls)
+    result, overall = scenario_result(report)
     assert len(calls) >= 1
-    assert scenario_result(report) == "fail"
-    assert field(capability_entry(report), "overall") == "fail"
+    assert result == "fail"
+    assert overall == "fail"
     written = repo_root / GOOD_PATH
     assert written.is_file()
     assert written.read_text(encoding="utf-8") == content
 
 
-@pytest.mark.parametrize("kind", ["dotdot", "absolute", "notverification"])
-def test_bad_path_fails_and_writes_nothing(tmp_path, tmp_path_factory, kind):
+@pytest.mark.parametrize("which", ["dotdot", "absolute", "notverification"])
+def test_bad_path_is_fail_and_nothing_written(tmp_path, which):
     repo_root = make_repo(tmp_path)
-    if kind == "dotdot":
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    if which == "dotdot":
         returned = "../escape.py"
-        target = (repo_root / ".." / "escape.py").resolve()
-    elif kind == "absolute":
-        other = tmp_path_factory.mktemp("separate_escape_dir")
-        target = other / "escape.py"
+        targets = [repo_root.parent / "escape.py", (repo_root / returned).resolve()]
+    elif which == "absolute":
+        target = outside / "escape.py"
         returned = str(target)
+        targets = [target]
     else:
         returned = "notverification/x.py"
-        target = repo_root / "notverification" / "x.py"
-
-    assert not target.exists()
+        targets = [repo_root / "notverification" / "x.py"]
     outcome = {
         "model_call_error": None,
         "file": {"path": returned, "content": "def test_x():\n    assert True\n"},
     }
+    calls = []
+    report = run(repo_root, outcome, calls)
+    result, overall = scenario_result(report)
+    assert len(calls) >= 1
+    assert result == "fail"
+    assert overall == "fail"
+    for target in targets:
+        assert not target.exists(), str(target)
 
-    report, _calls = run(repo_root, outcome)
 
-    assert scenario_result(report) == "fail"
-    assert not target.exists()
-
-
-@pytest.mark.parametrize(
-    "outcome",
-    [
-        {"model_call_error": {"category": "network", "message": "connection failed"}, "file": None},
-        {"model_call_error": None, "file": None},
-    ],
-    ids=["model_call_error", "no_file"],
-)
-def test_model_error_or_no_file_fails(tmp_path, outcome):
+@pytest.mark.parametrize("kind", ["model_call_error", "no_file"])
+def test_model_call_error_or_no_file_is_fail(tmp_path, kind):
     repo_root = make_repo(tmp_path)
-
-    report, _calls = run(repo_root, outcome)
-
-    assert scenario_result(report) == "fail"
+    if kind == "model_call_error":
+        outcome = {
+            "model_call_error": {"category": "network", "message": "connection failed"},
+            "file": None,
+        }
+    else:
+        outcome = {"model_call_error": None, "file": None}
+    calls = []
+    report = run(repo_root, outcome, calls)
+    result, overall = scenario_result(report)
+    assert len(calls) >= 1
+    assert result == "fail"
+    assert overall == "fail"
 
 
 def test_passing_test_runs_with_component_code_on_pythonpath(tmp_path):
@@ -229,12 +180,14 @@ def test_passing_test_runs_with_component_code_on_pythonpath(tmp_path):
         "import foo_mod\n"
         "\n"
         "\n"
-        "def test_x():\n"
+        "def test_value():\n"
         "    assert foo_mod.value() == 7\n"
     )
     outcome = {"model_call_error": None, "file": {"path": GOOD_PATH, "content": content}}
-
-    report, _calls = run(repo_root, outcome)
-
-    assert scenario_result(report) == "pass"
+    calls = []
+    report = run(repo_root, outcome, calls)
+    result, overall = scenario_result(report)
+    assert len(calls) >= 1
+    assert result == "pass"
+    assert overall == "pass"
     assert (repo_root / GOOD_PATH).is_file()

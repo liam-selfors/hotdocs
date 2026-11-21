@@ -1,95 +1,118 @@
-# hotdocs-criterion: sha256:76aa352ac9947a1a9f9093497548fb09c97d9f09cb37a9bf3c6e3198354b05f7
+# hotdocs-criterion: sha256:7ded37c74d5349a692860bd957594973925327006f6deea3613a39fd214872a9
+import hashlib
 import json
 from pathlib import Path
 
 import provenance_checker
 
 
-H = "sha256:" + "ab" * 32
+H = "sha256:" + "1" * 64
+PK = "sha256:" + "a" * 64
 
 
 def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def _manifest(gate_versions):
+def _write_python_adapter(repo_root):
+    adapter_dir = repo_root / "gen" / "kind-python"
+    adapter_dir.mkdir(parents=True, exist_ok=True)
+    source = (
+        "KIND = " + repr("python") + "\n"
+        "\n"
+        "def guidance():\n"
+        "    return " + repr({"generator": "", "test_author": ""}) + "\n"
+        "\n"
+        "def provision(repo_root):\n"
+        "    return " + repr({
+            "ok": True,
+            "reason": "",
+            "versions": {"python": "3.12.4", "packages": PK},
+            "lockfile_sha256": None,
+            "interpreter": "/fake/python",
+        }) + "\n"
+    )
+    path = adapter_dir / "kind_python.py"
+    path.write_text(source, encoding="utf-8")
+    return path
+
+
+def _expected_python_entry(adapter_path):
+    pa = "sha256:" + hashlib.sha256(adapter_path.read_bytes()).hexdigest()
     return {
-        "spec_bundle_hash": H,
-        "model_pin": "claude-sonnet-5",
-        "prompt_version": "v1",
-        "retry_feedback": None,
-        "pipeline_version": "v1",
-        "gate_versions": gate_versions,
-        "provenance_hit": False,
-        "generated_at": "2026-01-01T00:00:00Z",
-        "verification_run_id": "run-123",
-        "verification_report": {
-            "component_id": "comp-foo",
-            "criteria": [
-                {"id": "AC-FOO-001", "covers": "R-FOO-001", "kind": "compiled", "result": "pass"}
-            ],
-            "requirement_results": {"R-FOO-001": "pass"},
-            "interface_drift": False,
-            "mutation_score": 0.92,
-            "mutation_error": None,
-            "overall": "pass",
-        },
-        "license_scan": {
-            "component_id": "comp-foo",
-            "gate_version": "license_scanner@4.0.0-no-reference-corpus",
-            "evaluated": False,
-            "reason": "no-reference-corpus",
-            "similarity_score": None,
-            "block_threshold": None,
-            "blocked": False,
-            "matches": [],
-            "notified": False,
-            "notification_delivery_error": None,
-            "cache_hit": False,
-        },
-        "secret_scan": {
-            "scope": "full",
-            "gate_version": "secret_scanner@3.1.0+detect-secrets.1.5.0",
-            "flagged": False,
-            "matches": [],
-            "allowed": [],
-            "unused_allowlist_entries": [],
-            "notified": False,
-            "notification_delivery_error": None,
-            "cache_hit": False,
-        },
+        "kind": "python",
+        "path": ".",
+        "definition_sha256": None,
+        "adapter_sha256": pa,
+        "versions": {"python": "3.12.4", "packages": PK},
+        "lockfile_sha256": None,
     }
 
 
-def _write_manifest(repo_root, gate_versions):
-    content = json.dumps(_manifest(gate_versions), indent=2)
-    for sub in ("gen", "verification"):
-        d = Path(repo_root) / sub / "foo"
-        d.mkdir(parents=True, exist_ok=True)
-        (d / ".provenance.json").write_text(content, encoding="utf-8")
+def _write_component_md(repo_root):
+    comp_dir = repo_root / "specs" / "components" / "foo"
+    comp_dir.mkdir(parents=True, exist_ok=True)
+    text = (
+        "---\n"
+        "id: comp-foo\n"
+        "title: Foo\n"
+        "status: draft\n"
+        "owners: [pipeline-team]\n"
+        "depends_on: []\n"
+        "---\n"
+        "\n"
+        "# Foo\n"
+    )
+    (comp_dir / "component.md").write_text(text, encoding="utf-8")
 
 
-def test_gate_version_mismatch_is_miss_even_when_spec_bundle_hash_matches(tmp_path, monkeypatch):
-    monkeypatch.delenv("VAR_TRUST_JUDGE_PROVENANCE", raising=False)
-    repo_root = tmp_path
-    _write_manifest(repo_root, {"license_scanner": "1.0.0"})
+def _write_manifest(repo_root, gate_versions, assets):
+    gen_dir = repo_root / "gen" / "foo"
+    gen_dir.mkdir(parents=True, exist_ok=True)
+    manifest = {
+        "spec_bundle_hash": H,
+        "gate_versions": gate_versions,
+        "verification_report": {"criteria": []},
+        "license_scan": {},
+        "secret_scan": {},
+        "assets": assets,
+    }
+    (gen_dir / ".provenance.json").write_text(json.dumps(manifest), encoding="utf-8")
+
+
+def _build_fixture(repo_root):
+    adapter_path = _write_python_adapter(repo_root)
+    _write_component_md(repo_root)
+    p_entry = _expected_python_entry(adapter_path)
+    _write_manifest(repo_root, {"license_scanner": "1.0.0"}, [p_entry])
+
+
+def test_ac_provcheck_008_gate_version_change_is_miss_despite_matching_hash(tmp_path):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    _build_fixture(repo_root)
 
     result = provenance_checker.check_provenance(
         "comp-foo", H, {"license_scanner": "2.0.0"}, repo_root
     )
 
     assert field(result, "hit") is False
+    assert field(result, "reason") == "gate_versions differ"
+    assert field(result, "verification_report") is None
+    assert field(result, "license_scan") is None
+    assert field(result, "secret_scan") is None
 
 
-def test_control_matching_gate_versions_and_hash_is_hit(tmp_path, monkeypatch):
-    # Sanity control: the same manifest with matching gate_versions is a hit,
-    # so the miss above is caused by the gate version difference alone.
-    monkeypatch.delenv("VAR_TRUST_JUDGE_PROVENANCE", raising=False)
-    repo_root = tmp_path
-    _write_manifest(repo_root, {"license_scanner": "1.0.0"})
+def test_ac_provcheck_008_control_matching_gate_versions_hits(tmp_path):
+    # Same fixture with matching gate_versions hits, so the miss above is
+    # caused by the gate version difference alone.
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    _build_fixture(repo_root)
 
     result = provenance_checker.check_provenance(
         "comp-foo", H, {"license_scanner": "1.0.0"}, repo_root
     )
 
     assert field(result, "hit") is True
+    assert field(result, "reason") is None

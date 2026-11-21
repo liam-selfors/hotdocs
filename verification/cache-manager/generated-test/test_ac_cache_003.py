@@ -1,5 +1,4 @@
-# hotdocs-criterion: sha256:94e2c625582cc00833e4d8954a11ab855f68dbf8713b1d862c210f221eb13dda
-import copy
+# hotdocs-criterion: sha256:cc0618940afc954438e222e2fb6bb90dcadb387c4ff18858e4b4f95ab3597f8a
 import threading
 
 import pytest
@@ -7,160 +6,128 @@ import pytest
 import cache_manager
 
 
-def _field(value, name):
-    if isinstance(value, dict):
-        return value.get(name)
-    return getattr(value, name, None)
+def field(value, name):
+    return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def _make_key(i):
+def _make_key(suffix):
     return cache_manager.CacheKey(
-        spec_bundle_hash="sha256:" + ("%064x" % (0xA000 + i)),
-        gate_inputs_hash="sha256:" + ("%064x" % (0xB000 + i)),
+        spec_bundle_hash="sha256:" + ("a" * 63) + suffix,
+        gate_inputs_hash="sha256:" + ("b" * 63) + suffix,
         gate_version="license_scanner@4.0.3+9f2c41ab07de",
         model_pin="claude-sonnet-5",
     )
 
 
-def _make_payload(i):
-    # A reasonably large payload so a partial or interleaved write would be
-    # detectable as a mismatch rather than slipping through unnoticed.
+def _make_payload():
     return {
-        "component_id": "comp-example-%d" % i,
+        "component_id": "comp-example",
         "gate_version": "license_scanner@4.0.3+9f2c41ab07de",
         "similarity_score": 0.125,
         "blocked": False,
         "matches": [
-            {
-                "license": "MIT",
-                "path": "gen/example/file_%03d.py" % n,
-                "score": n / 1000.0,
-                "snippet": ("x" * 200) + str(n),
-            }
-            for n in range(200)
+            {"path": "src/a.py", "license": "MIT", "score": 0.125},
+            {"path": "src/b.py", "license": "Apache-2.0", "score": 0.0625},
         ],
     }
 
 
-@pytest.fixture
-def repo_root(tmp_path, monkeypatch):
-    # Force the local fallback store under this temporary repo root.
-    monkeypatch.delenv("VAR_CACHE_STORE_URL", raising=False)
-    monkeypatch.chdir(tmp_path)
-    return tmp_path
+def _make_result(stored_at):
+    return cache_manager.CachedResult(
+        gate_type="license_scanner",
+        payload=_make_payload(),
+        stored_at=stored_at,
+    )
 
 
-def _concurrent_put(key, result_a, result_b, repo_root):
-    barrier = threading.Barrier(2)
+def _run_concurrent_puts(key, results, repo_root):
+    barrier = threading.Barrier(len(results))
     errors = []
 
     def worker(result):
         try:
             barrier.wait(timeout=10)
             cache_manager.put(key, result, repo_root=repo_root)
-        except Exception as exc:  # pragma: no cover - reported below
+        except BaseException as exc:  # pragma: no cover - reported below
             errors.append(exc)
 
-    threads = [
-        threading.Thread(target=worker, args=(result_a,)),
-        threading.Thread(target=worker, args=(result_b,)),
-    ]
+    threads = [threading.Thread(target=worker, args=(r,)) for r in results]
     for t in threads:
         t.start()
     for t in threads:
         t.join(timeout=30)
     for t in threads:
         assert not t.is_alive(), "a concurrent put did not complete"
-    assert errors == [], "concurrent put raised: %r" % (errors,)
+    assert errors == [], "concurrent put raised: " + repr(errors)
 
 
-def test_concurrent_identical_puts_same_key_yield_uncorrupted_result(repo_root):
+@pytest.fixture
+def repo_root(tmp_path, monkeypatch):
+    monkeypatch.delenv("VAR_CACHE_STORE_URL", raising=False)
+    monkeypatch.chdir(tmp_path)
+    return tmp_path
+
+
+def test_two_concurrent_identical_puts_yield_uncorrupted_entry(repo_root):
     stored_at = cache_manager.now_iso()
+    key = _make_key("0")
+    first = _make_result(stored_at)
+    second = _make_result(stored_at)
+    assert field(first, "payload") == field(second, "payload")
 
-    for i in range(10):
-        key = _make_key(i)
-        payload = _make_payload(i)
-
-        # Two independently constructed, identical results (G-CACHE-001's
-        # precondition: deterministic gate, identical payloads).
-        result_a = cache_manager.CachedResult(
-            gate_type="license_scanner",
-            payload=copy.deepcopy(payload),
-            stored_at=stored_at,
-        )
-        result_b = cache_manager.CachedResult(
-            gate_type="license_scanner",
-            payload=copy.deepcopy(payload),
-            stored_at=stored_at,
-        )
-
-        _concurrent_put(key, result_a, result_b, repo_root)
-
-        got = cache_manager.get(key, repo_root=repo_root)
-        assert not isinstance(got, cache_manager.Miss), (
-            "get after concurrent puts returned a Miss for round %d" % i
-        )
-
-        got_gate_type = _field(got, "gate_type")
-        got_payload = _field(got, "payload")
-        got_stored_at = _field(got, "stored_at")
-
-        assert got_gate_type == "license_scanner"
-        assert got_gate_type == _field(result_a, "gate_type")
-        assert got_gate_type == _field(result_b, "gate_type")
-
-        # Equal to both payloads: no corruption, no partial write, no merge.
-        assert got_payload == payload
-        assert got_payload == _field(result_a, "payload")
-        assert got_payload == _field(result_b, "payload")
-        assert len(got_payload["matches"]) == 200
-
-        assert got_stored_at == stored_at
-
-        # A second get from a "different caller" sees the same authoritative
-        # answer immediately.
-        again = cache_manager.get(key, repo_root=repo_root)
-        assert not isinstance(again, cache_manager.Miss)
-        assert _field(again, "payload") == payload
-        assert _field(again, "gate_type") == "license_scanner"
-
-
-def test_concurrent_puts_do_not_corrupt_a_different_key(repo_root):
-    stored_at = cache_manager.now_iso()
-
-    other_key = _make_key(999)
-    other_payload = _make_payload(999)
-    cache_manager.put(
-        other_key,
-        cache_manager.CachedResult(
-            gate_type="license_scanner",
-            payload=copy.deepcopy(other_payload),
-            stored_at=stored_at,
-        ),
-        repo_root=repo_root,
-    )
-
-    key = _make_key(500)
-    payload = _make_payload(500)
-    result_a = cache_manager.CachedResult(
-        gate_type="license_scanner",
-        payload=copy.deepcopy(payload),
-        stored_at=stored_at,
-    )
-    result_b = cache_manager.CachedResult(
-        gate_type="license_scanner",
-        payload=copy.deepcopy(payload),
-        stored_at=stored_at,
-    )
-    _concurrent_put(key, result_a, result_b, repo_root)
+    _run_concurrent_puts(key, [first, second], repo_root)
 
     got = cache_manager.get(key, repo_root=repo_root)
     assert not isinstance(got, cache_manager.Miss)
-    assert _field(got, "payload") == payload
-    assert _field(got, "gate_type") == "license_scanner"
+    assert got is not None
+    assert field(got, "gate_type") == "license_scanner"
+    assert field(got, "payload") == field(first, "payload")
+    assert field(got, "payload") == field(second, "payload")
+    assert field(got, "payload") == _make_payload()
+    assert field(got, "stored_at") == stored_at
 
-    other = cache_manager.get(other_key, repo_root=repo_root)
-    assert not isinstance(other, cache_manager.Miss)
-    assert _field(other, "payload") == other_payload
-    assert _field(other, "gate_type") == "license_scanner"
-    assert _field(other, "stored_at") == stored_at
+
+def test_repeated_concurrent_identical_puts_never_corrupt(repo_root):
+    stored_at = cache_manager.now_iso()
+    for i in range(10):
+        key = _make_key(str(i))
+        results = [_make_result(stored_at), _make_result(stored_at)]
+        _run_concurrent_puts(key, results, repo_root)
+
+        got = cache_manager.get(key, repo_root=repo_root)
+        assert not isinstance(got, cache_manager.Miss), "iteration " + repr(i)
+        assert field(got, "gate_type") == "license_scanner"
+        assert field(got, "payload") == _make_payload(), "iteration " + repr(i)
+        assert field(got, "stored_at") == stored_at
+
+        # A second read is still the same, complete entry.
+        again = cache_manager.get(key, repo_root=repo_root)
+        assert not isinstance(again, cache_manager.Miss)
+        assert field(again, "payload") == _make_payload()
+
+
+def test_concurrent_identical_puts_do_not_disturb_other_entry(repo_root):
+    stored_at = cache_manager.now_iso()
+    other_key = _make_key("x")
+    other_payload = dict(_make_payload())
+    other_payload["component_id"] = "comp-other"
+    other_result = cache_manager.CachedResult(
+        gate_type="license_scanner",
+        payload=other_payload,
+        stored_at=stored_at,
+    )
+    cache_manager.put(other_key, other_result, repo_root=repo_root)
+
+    key = _make_key("y")
+    _run_concurrent_puts(
+        key, [_make_result(stored_at), _make_result(stored_at)], repo_root
+    )
+
+    got = cache_manager.get(key, repo_root=repo_root)
+    assert not isinstance(got, cache_manager.Miss)
+    assert field(got, "payload") == _make_payload()
+
+    got_other = cache_manager.get(other_key, repo_root=repo_root)
+    assert not isinstance(got_other, cache_manager.Miss)
+    assert field(got_other, "payload") == other_payload
+    assert field(got_other, "gate_type") == "license_scanner"

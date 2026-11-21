@@ -1,6 +1,6 @@
-# hotdocs-criterion: sha256:23b6160925ef9f5414dd4773d14e84b6b16d9c3230484adbd0a9f402eb84f92e
+# hotdocs-criterion: sha256:4a73d9fe9aa2ada4ef2e174defe98a70e2b9bfc1484c46217555e2e6e8774c8a
 import json
-import shutil
+import sys
 from pathlib import Path
 
 import pytest
@@ -12,46 +12,50 @@ def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-class _SentinelBackend:
+class _Sentinel:
     def __repr__(self):
-        return "<SENTINEL-BACKEND-AC-SCENARIO-011>"
-
-    def __call__(self, prompt, model, **params):
-        raise AssertionError("sentinel backend must never be invoked by the fake")
+        return "<sentinel-backend>"
 
 
-PASS_TEXT = "```json\n" + '{"result": "pass", "rationale": "ok"}' + "\n```"
+FENCED_REPLY = (
+    "Verdict:\n```json\n"
+    + json.dumps({"result": "pass", "rationale": "ok"})
+    + "\n```\nDone."
+)
+BARE_REPLY = json.dumps({"result": "pass", "rationale": "ok"})
 
 
 def _write(path, text):
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text, encoding="utf-8")
+    path.write_text(text)
 
 
-def _live_repo_root():
-    gen = next(
-        (p for p in Path(capability_scenario_verifier.__file__).resolve().parents if p.name == "gen"),
-        None,
+def _build_repo(repo_root, log_path, reply_text, error):
+    # Planted python adapter.
+    _write(
+        repo_root / "gen" / "kind-python" / "kind_python.py",
+        "import sys\n"
+        "\n"
+        "\n"
+        "def provision(repo_root):\n"
+        "    return {\"ok\": True, \"reason\": \"\", \"versions\": {}, "
+        "\"lockfile_sha256\": None,\n"
+        "            \"interpreter\": sys.executable}\n",
     )
-    return gen.parent if gen is not None else None
 
-
-def _build_repo(repo_root, log_path, mode):
-    # Realizing component, unsealed, code under gen/foo/
+    # Realizing component.
     _write(
         repo_root / "specs" / "components" / "foo" / "component.md",
         "---\n"
         "id: comp-foo\n"
         "title: Foo\n"
         "status: draft\n"
-        "owners: [tester]\n"
+        "owners: [team-a]\n"
         "realizes: [P-X]\n"
         "sealed: false\n"
         "---\n"
         "\n"
-        "# Foo\n"
-        "\n"
-        "A fixture component.\n",
+        "# Foo\n",
     )
     _write(
         repo_root / "gen" / "foo" / "foo.py",
@@ -60,14 +64,14 @@ def _build_repo(repo_root, log_path, mode):
         "    return 'MARKER_SOURCE'\n",
     )
 
-    # Capability with one llm-judge scenario
+    # Capability with one llm-judge scenario.
     _write(
         repo_root / "specs" / "product" / "x.md",
         "---\n"
         "id: P-X\n"
         "title: Capability X\n"
         "status: draft\n"
-        "owners: [tester]\n"
+        "owners: [team-a]\n"
         "---\n"
         "\n"
         "# Capability X\n"
@@ -78,122 +82,104 @@ def _build_repo(repo_root, log_path, mode):
         "Kind: llm-judge\n"
         "\n"
         "```gherkin\n"
-        "Given a MARKER_GHERKIN situation\n"
-        "When foo is used\n"
-        "Then it behaves well\n"
+        "Given MARKER_GHERKIN is present in the system\n"
+        "When the capability is exercised\n"
+        "Then it behaves as described\n"
         "```\n",
     )
 
-    # Fake llm-endpoint
-    fake_endpoint = (
+    # Fake llm-endpoint.
+    if error:
+        ret = (
+            "    return {\"text\": None, \"model\": model, \"backend\": \"fake\",\n"
+            "            \"model_call_error\": {\"category\": \"network\", "
+            "\"message\": \"backend down\"}}\n"
+        )
+    else:
+        ret = (
+            "    return {\"text\": " + repr(reply_text) + ", \"model\": model,\n"
+            "            \"backend\": \"fake\", \"model_call_error\": None}\n"
+        )
+    _write(
+        repo_root / "gen" / "llm-endpoint" / "llm_endpoint.py",
         "import json\n"
         "\n"
-        "LOG = " + repr(str(log_path)) + "\n"
-        "MODE = " + repr(mode) + "\n"
-        "PASS_TEXT = " + repr(PASS_TEXT) + "\n"
         "\n"
         "def complete(prompt, model, *, backend=None, **params):\n"
-        "    with open(LOG, 'a', encoding='utf-8') as fh:\n"
-        "        fh.write(json.dumps({'prompt': prompt, 'model': model, 'backend': repr(backend)}) + '\\n')\n"
-        "    if MODE == 'error':\n"
-        "        return {'text': None, 'model': model, 'backend': 'fake',\n"
-        "                'model_call_error': {'category': 'network', 'message': 'fake network failure'}}\n"
-        "    if MODE == 'pass':\n"
-        "        text = PASS_TEXT\n"
-        "    elif MODE == 'not_json':\n"
-        "        text = 'not json'\n"
-        "    elif MODE == 'maybe':\n"
-        "        text = json.dumps({'result': 'maybe'})\n"
-        "    else:\n"
-        "        raise AssertionError('unknown mode')\n"
-        "    return {'text': text, 'model': model, 'backend': 'fake', 'model_call_error': None}\n"
+        "    with open(" + repr(str(log_path)) + ", 'a') as fh:\n"
+        "        fh.write(json.dumps({'prompt': prompt, 'model': model,\n"
+        "                             'backend_id': id(backend),\n"
+        "                             'backend_repr': repr(backend)}) + '\\n')\n"
+        + ret,
     )
-    _write(repo_root / "gen" / "llm-endpoint" / "llm_endpoint.py", fake_endpoint)
 
-    # Fake test-author (unused for an llm-judge scenario, supplied per fixture rules)
-    fake_author = (
+    # Fake test-author (not expected to be used for an llm-judge scenario).
+    _write(
+        repo_root / "gen" / "test-author" / "test_author.py",
         "def author_test(bundle, model, seed=0, *, repo_root=None, llm_backend=None):\n"
-        "    return {\n"
-        "        'component_id': 'comp-foo',\n"
-        "        'criterion_id': bundle['criterion_id'],\n"
-        "        'model': model,\n"
-        "        'seed': seed,\n"
-        "        'prompt_version': 'v1',\n"
-        "        'cache_hit': False,\n"
-        "        'file': {'path': 'verification/capabilities/P-X/generated-test/test_cs_x_001.py',\n"
-        "                 'content': 'def test_x():\\n    assert True\\n'},\n"
-        "        'model_call_error': None,\n"
-        "    }\n"
+        "    return {\"component_id\": \"comp-foo\",\n"
+        "            \"criterion_id\": bundle[\"criterion_id\"],\n"
+        "            \"model\": model, \"seed\": seed, \"prompt_version\": \"v1\",\n"
+        "            \"cache_hit\": False,\n"
+        "            \"file\": {\"path\": \"verification/capabilities/P-X/generated-test/test_cs_x_001.py\",\n"
+        "                     \"content\": \"def test_x():\\n    assert True\\n\"},\n"
+        "            \"model_call_error\": None, \"repair_attempts\": 0,\n"
+        "            \"probe_findings\": []}\n",
     )
-    _write(repo_root / "gen" / "test-author" / "test_author.py", fake_author)
-
-    # Real compiler copied from the live repository, when present
-    live = _live_repo_root()
-    if live is not None:
-        src = live / "pipeline" / "criterion-compiler"
-        if src.is_dir():
-            shutil.copytree(
-                src,
-                repo_root / "pipeline" / "criterion-compiler",
-                ignore=shutil.ignore_patterns("__pycache__"),
-            )
 
 
-def _read_log(log_path):
-    if not log_path.exists():
-        return []
-    return [json.loads(line) for line in log_path.read_text(encoding="utf-8").splitlines() if line.strip()]
-
-
-def _scenario(result):
-    report = field(result, "capability_scenario_report")
-    assert report is not None
-    cap = report["P-X"] if isinstance(report, dict) else getattr(report, "P-X")
-    scenarios = field(cap, "scenarios")
-    matching = [s for s in scenarios if field(s, "id") == "CS-X-001"]
-    assert len(matching) == 1, scenarios
-    return matching[0]
-
-
-def test_judge_pass_with_fenced_reply(tmp_path):
+def _run(tmp_path, reply_text, error=False):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
     log_path = tmp_path / "complete_calls.log"
-    _build_repo(repo_root, log_path, "pass")
-
-    sentinel = _SentinelBackend()
+    _build_repo(repo_root, log_path, reply_text, error)
+    sentinel = _Sentinel()
     result = capability_scenario_verifier.run_capability_gates(
         "P-X", repo_root, "m", llm_backend=sentinel
     )
+    calls = []
+    if log_path.exists():
+        calls = [json.loads(line) for line in log_path.read_text().splitlines() if line.strip()]
+    report = field(result, "capability_scenario_report")
+    entry = report["P-X"] if isinstance(report, dict) else getattr(report, "P-X")
+    scenarios = field(entry, "scenarios")
+    matching = [s for s in scenarios if field(s, "id") == "CS-X-001"]
+    assert len(matching) == 1, scenarios
+    return sentinel, calls, matching[0]
 
-    calls = _read_log(log_path)
+
+def test_fenced_reply_passes_and_complete_called_once_with_prompt(tmp_path):
+    sentinel, calls, scenario = _run(tmp_path, FENCED_REPLY)
     assert len(calls) == 1, calls
     call = calls[0]
     assert call["model"] == "m"
-    assert call["backend"] == repr(sentinel)
+    assert call["backend_id"] == id(sentinel)
+    assert call["backend_repr"] == "<sentinel-backend>"
     assert "MARKER_SOURCE" in call["prompt"]
     assert "MARKER_GHERKIN" in call["prompt"]
-
-    scenario = _scenario(result)
     assert field(scenario, "result") == "pass"
     assert field(scenario, "rationale") == "ok"
 
 
-@pytest.mark.parametrize("mode", ["error", "not_json", "maybe"])
-def test_judge_unavailable_is_fail(tmp_path, mode):
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    log_path = tmp_path / "complete_calls.log"
-    _build_repo(repo_root, log_path, mode)
+def test_unfenced_json_reply_passes(tmp_path):
+    sentinel, calls, scenario = _run(tmp_path, BARE_REPLY)
+    assert len(calls) == 1, calls
+    assert field(scenario, "result") == "pass"
+    assert field(scenario, "rationale") == "ok"
 
-    sentinel = _SentinelBackend()
-    result = capability_scenario_verifier.run_capability_gates(
-        "P-X", repo_root, "m", llm_backend=sentinel
-    )
 
-    assert len(_read_log(log_path)) >= 1
-
-    scenario = _scenario(result)
+@pytest.mark.parametrize(
+    "reply_text,error",
+    [
+        (None, True),
+        ("not json", False),
+        (json.dumps({"result": "maybe"}), False),
+    ],
+    ids=["model_call_error", "not_json", "result_maybe"],
+)
+def test_unusable_reply_fails_with_judge_unavailable(tmp_path, reply_text, error):
+    sentinel, calls, scenario = _run(tmp_path, reply_text, error=error)
+    assert len(calls) == 1, calls
     assert field(scenario, "result") == "fail"
     rationale = field(scenario, "rationale")
     assert isinstance(rationale, str)

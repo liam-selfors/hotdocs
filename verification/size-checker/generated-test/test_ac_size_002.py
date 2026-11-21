@@ -1,42 +1,37 @@
-# hotdocs-criterion: sha256:e5286c564cdef92e4a1895c5b25ac087612e6d291e3230ff69114d6e2624a28b
-import re
+# hotdocs-criterion: sha256:215cdd2b0f521558387bfe3f181c1ce48eaaeaa4515f84d8cec910afd241495a
+"""AC-SIZE-002: a distinct R-SIZE-002 warning fires only when two or more
+size-cap dimensions are over their warn threshold for the same component."""
+
 from pathlib import Path
 
 import size_checker
 
 
-DUAL = "dualheavy"
-CODE_ONLY = "loconly"
-LOC_LINES = 1000  # over the 800 warn threshold, under the 1500 hard-fail threshold
-BULK_WORDS = 2300  # over the 2000 warn threshold, comfortably under 4000
+def field(value, name):
+    return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def _get(value, key):
-    if isinstance(value, dict):
-        return value.get(key)
-    return getattr(value, key, None)
-
-
-def _write(path: Path, text: str) -> None:
+def _write(path, text):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
 
 
-def _component_md(slug: str, title: str) -> str:
+def _component_md(slug, title):
     return (
         "---\n"
-        f"id: comp-{slug}\n"
-        f"title: {title}\n"
+        "id: comp-" + slug + "\n"
+        "title: " + title + "\n"
         "status: draft\n"
-        "owners: [alice]\n"
-        "realizes: [P-SIZEFIX]\n"
+        "owners: [team-" + slug + "]\n"
+        "sealed: true\n"
+        "source_path: legacy/" + slug + "/\n"
         "---\n"
         "\n"
-        f"# {title}\n"
+        "# " + title + "\n"
         "\n"
         "## Purpose\n"
         "\n"
-        "A small synthetic component used only as a size fixture.\n"
+        "A small fixture component used for size checking.\n"
         "\n"
         "## Scope\n"
         "\n"
@@ -71,134 +66,106 @@ def _component_md(slug: str, title: str) -> str:
         "\n"
         "## Change log\n"
         "\n"
-        "- Created as a fixture.\n"
+        "- Initial draft.\n"
     )
 
 
-def _build_component(repo_root: Path, slug: str, prefix: str, bulk_words: int) -> None:
+def _build_component(repo_root, slug, title, constraint_words, code_lines):
+    upper = slug.upper()
     comp_dir = repo_root / "specs" / "components" / slug
-    _write(comp_dir / "component.md", _component_md(slug, slug.capitalize()))
+    _write(comp_dir / "component.md", _component_md(slug, title))
+    req_id = "R-" + upper + "-001"
+    ac_id = "AC-" + upper + "-001"
     _write(
-        comp_dir / "requirements" / f"R-{prefix}-001.md",
-        f"# R-{prefix}-001\n\nThe component MUST return its input unchanged.\n",
+        comp_dir / "requirements" / (req_id + ".md"),
+        "# " + req_id + "\n\n**" + req_id + "** — The component MUST do its one thing.\n",
     )
     _write(
-        comp_dir / "acceptance" / f"AC-{prefix}-001.md",
-        f"# AC-{prefix}-001\n\n"
-        f"Covers: R-{prefix}-001\n"
-        "Kind: generated-test\n\n"
-        "Given an integer\nWhen run is called\nThen the same integer is returned\n",
+        comp_dir / "acceptance" / (ac_id + ".md"),
+        "# " + ac_id + "\n\n"
+        "Covers: " + req_id + "\n"
+        "Kind: compiled\n\n"
+        "```gherkin\n"
+        "Given a fixture\n"
+        "When it runs\n"
+        "Then it does its one thing\n"
+        "```\n",
     )
-    _write(
-        comp_dir / "interface" / "library.md",
-        "# Library\n\n```\nrun(x: int) -> int\n```\n\nReturns its input.\n",
-    )
-    if bulk_words > 0:
-        vocab = ["system", "remains", "measurable", "under", "steady", "load", "always"]
-        words = [vocab[i % len(vocab)] for i in range(bulk_words)]
-        lines = []
-        for i in range(0, len(words), 20):
-            lines.append(" ".join(words[i:i + 20]))
-        body = "\n".join(lines)
-    else:
-        body = "The component responds promptly."
+    body_words = " ".join(["lorem"] * constraint_words)
     _write(
         comp_dir / "constraints.md",
-        "# Constraints\n\n## Performance\n\n" + body + "\n",
+        "# Constraints\n\n" + body_words + "\n",
     )
-    code = "".join(f"v_{i} = {i}\n" for i in range(LOC_LINES))
-    _write(repo_root / "gen" / slug / f"{slug}.py", code)
+    module_name = slug.replace("-", "_")
+    code = "".join("x" + str(i) + " = " + str(i) + "\n" for i in range(code_lines))
+    _write(repo_root / "gen" / slug / (module_name + ".py"), code)
 
 
-def _build_repo(repo_root: Path) -> None:
-    _write(
-        repo_root / "specs" / "product" / "sizefix.md",
-        "---\n"
-        "id: P-SIZEFIX\n"
-        "title: Size Fixture Capability\n"
-        "status: draft\n"
-        "owners: [alice]\n"
-        "---\n"
-        "\n"
-        "# Size Fixture Capability\n"
-        "\n"
-        "## Purpose\n\nFixture capability.\n\n"
-        "## Scope\n\n- Fixture only.\n\n"
-        "### CS-SIZEFIX-001\n\nCovers: P-SIZEFIX\nKind: llm-judge\n\n"
-        "Given the fixture\nWhen it runs\nThen nothing happens\n",
-    )
+def _build_fixture(repo_root):
+    for sub in ("product", "architecture", "vars", "decisions"):
+        (repo_root / "specs" / sub).mkdir(parents=True, exist_ok=True)
     _write(
         repo_root / "specs" / "glossary.md",
-        "# Glossary\n\n- **Fixture** — a synthetic test corpus.\n",
+        "# Glossary\n\n- **Fixture** — a test-only thing.\n",
     )
-    _build_component(repo_root, DUAL, "DUALHEAVY", BULK_WORDS)
-    _build_component(repo_root, CODE_ONLY, "LOCONLY", 0)
+    # alpha: generated_code_loc (900 > 800) AND component_doc_words (> 2000)
+    _build_component(repo_root, "alpha", "Alpha", constraint_words=2600, code_lines=900)
+    # beta: only generated_code_loc (900 > 800), docs small
+    _build_component(repo_root, "beta", "Beta", constraint_words=20, code_lines=900)
 
 
-def _belongs(finding, slug: str) -> bool:
-    file_val = str(_get(finding, "file") or "").replace("\\", "/")
-    message = str(_get(finding, "message") or "")
-    if f"specs/components/{slug}/" in file_val or f"gen/{slug}/" in file_val:
-        return True
-    if file_val.rstrip("/").endswith(f"/{slug}") or file_val == slug:
-        return True
-    return re.search(rf"(?<![\w-]){re.escape(slug)}(?![\w])", message) is not None or (
-        f"comp-{slug}" in message
+def _belongs_to(finding, slug):
+    file_value = str(field(finding, "file")).replace("\\", "/")
+    message = str(field(finding, "message"))
+    return ("components/" + slug + "/") in file_value or slug in message
+
+
+def _mentions_section_4(message):
+    lowered = message.lower()
+    return (
+        "§4" in lowered
+        or "§ 4" in lowered
+        or "section 4" in lowered
     )
 
 
-def test_multi_dimension_warn_signal_only_for_component_with_two_dimensions(tmp_path):
+def test_ac_size_002_distinct_warning_only_for_multi_dimension_component(tmp_path):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
-    _build_repo(repo_root)
+    _build_fixture(repo_root)
 
     findings = size_checker.check(repo_root)
-    findings = list(findings)
+    assert isinstance(findings, list)
 
-    for f in findings:
-        for key in ("rule_id", "severity", "file", "line", "message"):
-            assert _get(f, key) is not None, f"finding missing {key}: {f!r}"
+    size2 = [f for f in findings if field(f, "rule_id") == "R-SIZE-002"]
 
-    size002 = [f for f in findings if _get(f, "rule_id") == "R-SIZE-002"]
+    alpha_findings = [f for f in size2 if _belongs_to(f, "alpha")]
+    beta_findings = [f for f in size2 if _belongs_to(f, "beta")]
 
-    # R-SIZE-002 MUST NOT ever hard-fail.
-    for f in size002:
-        assert _get(f, "severity") == "warn", f"R-SIZE-002 finding hard-failed: {f!r}"
+    # First component gets a distinct R-SIZE-002 warning.
+    assert len(alpha_findings) >= 1, size2
+    for f in alpha_findings:
+        # MUST NOT ever hard-fail.
+        assert field(f, "severity") == "warn", f
+        assert isinstance(field(f, "line"), int)
 
-    # Fixture sanity: the code-only component really is over its LOC warn threshold.
-    code_only_findings = [f for f in findings if _belongs(f, CODE_ONLY)]
-    assert any(
-        _get(f, "rule_id") == "R-SIZE-001" for f in code_only_findings
-    ), f"expected an R-SIZE-001 finding for {CODE_ONLY}; got {findings!r}"
+    matching = []
+    for f in alpha_findings:
+        message = str(field(f, "message"))
+        normalized = message.lower().replace("_", " ")
+        names_code = "generated code" in normalized
+        names_docs = "component doc" in normalized
+        names_guide = "SPEC_GUIDELINES.md" in message
+        if names_code and names_docs and names_guide and _mentions_section_4(message):
+            matching.append(f)
+    assert matching, [str(field(f, "message")) for f in alpha_findings]
 
-    # Second component: no R-SIZE-002 finding at all.
-    code_only_002 = [f for f in size002 if _belongs(f, CODE_ONLY)]
-    assert code_only_002 == [], f"unexpected R-SIZE-002 for {CODE_ONLY}: {code_only_002!r}"
+    # Second component (only one dimension over warn) gets no R-SIZE-002 at all.
+    assert beta_findings == [], beta_findings
 
-    # First component: exactly one distinct R-SIZE-002 warning.
-    dual_002 = [f for f in size002 if _belongs(f, DUAL)]
-    assert len(dual_002) == 1, f"expected one R-SIZE-002 for {DUAL}; got {size002!r}"
-    finding = dual_002[0]
-    assert _get(finding, "severity") == "warn"
-    assert isinstance(_get(finding, "line"), int)
+    # Every R-SIZE-002 finding belongs to the first component only.
+    for f in size2:
+        assert _belongs_to(f, "alpha") and not _belongs_to(f, "beta"), f
 
-    message = str(_get(finding, "message"))
-    lowered = message.lower()
-
-    code_aliases = ["generated_code_loc", "generated code", "generated-code", "code_loc", "loc"]
-    doc_aliases = ["component_doc_words", "component doc", "component-doc", "doc_words", "doc words"]
-    assert any(a in lowered for a in code_aliases), f"code dimension not named: {message!r}"
-    assert any(a in lowered for a in doc_aliases), f"doc-words dimension not named: {message!r}"
-
-    # Current value of the generated-code dimension is named.
-    assert re.search(rf"(?<!\d){LOC_LINES}(?!\d)", message), f"LOC value not named: {message!r}"
-
-    # Points at SPEC_GUIDELINES.md Section 4.
-    assert "SPEC_GUIDELINES.md" in message, f"guidelines not referenced: {message!r}"
-    assert re.search(r"(§\s*4(?!\d)|section\s*4(?!\d))", message, re.IGNORECASE), (
-        f"Section 4 not referenced: {message!r}"
-    )
-
-    # Every R-SIZE-002 finding belongs to the dual-dimension component only.
-    for f in size002:
-        assert _belongs(f, DUAL), f"stray R-SIZE-002 finding: {f!r}"
+    # And R-SIZE-002 never produces a hard failure anywhere.
+    assert all(field(f, "severity") != "fail" for f in size2)

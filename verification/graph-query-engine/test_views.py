@@ -92,10 +92,12 @@ def test_ac_gqe_005_component_provenance_reads_a_manifest(tmp_path):
 
 def test_ac_gqe_006_component_size_counts_words_after_frontmatter(con):
     """R-GQE-006 -- word_count is every whitespace-separated word in a
-    component's .md files, frontmatter excluded, computed here
+    component's .md files except testing.md, frontmatter excluded, computed here
     independently of spec-linter (which reads this same view, D13)."""
     expected = {}
     for path in (REPO_ROOT / "specs" / "components").glob("*/**/*.md"):
+        if path.name == "testing.md":  # test-only text, outside the cap (D341)
+            continue
         name = path.relative_to(REPO_ROOT / "specs" / "components").parts[0]
         text = re.sub(r"^---\n.*?\n---\n", "", path.read_text(encoding="utf-8"), count=1, flags=re.S)
         expected[name] = expected.get(name, 0) + len(text.split())

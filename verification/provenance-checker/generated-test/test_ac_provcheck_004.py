@@ -1,4 +1,5 @@
-# hotdocs-criterion: sha256:08c16780d171af72a0986a4470da16dff5997e78006e45ce4339d003e32d827c
+# hotdocs-criterion: sha256:a3c271f1cb7f7853f532140e3f8a53be308861e794f7cdb996d89759ba01cb05
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -6,21 +7,12 @@ from pathlib import Path
 import provenance_checker
 
 
-ENV_NAME = "VAR_TRUST_JUDGE_PROVENANCE"
-
-SPEC_BUNDLE_HASH = "sha256:" + "ab12" * 16
-
-GATE_VERSIONS = {
-    "compiler": "criterion-compiler@1.0.0",
-    "generated_test": "generated_test@1.1.0",
-    "verifier": "verifier-orchestrator@2.2.0",
-    "license_scanner": "license_scanner@4.0.0-no-reference-corpus",
-    "secret_scanner": "secret_scanner@3.1.0+detect-secrets.1.5.0",
-}
-
-
 def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
+
+
+H = "sha256:" + "1" * 64
+PK = "sha256:" + "a" * 64
 
 
 def _write(path, text):
@@ -28,130 +20,92 @@ def _write(path, text):
     path.write_text(text, encoding="utf-8")
 
 
-def _build_corpus(repo_root):
-    _write(
-        repo_root / "specs" / "glossary.md",
-        "# Glossary\n\n- **Foo** \u2014 a test term.\n",
+def _sha256_file(path):
+    return "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _build_fixture(repo_root):
+    # Fake python adapter (D344): deterministic provision.
+    adapter_src = (
+        "KIND = " + repr("python") + "\n"
+        "\n"
+        "def guidance():\n"
+        "    return " + repr({"generator": "", "test_author": ""}) + "\n"
+        "\n"
+        "def provision(repo_root):\n"
+        "    return " + repr({
+            "ok": True,
+            "reason": "",
+            "versions": {"python": "3.12.4", "packages": PK},
+            "lockfile_sha256": None,
+            "interpreter": "/fake/python",
+        }) + "\n"
     )
-    comp = repo_root / "specs" / "components" / "foo"
-    _write(
-        comp / "component.md",
+    adapter_path = repo_root / "gen" / "kind-python" / "kind_python.py"
+    _write(adapter_path, adapter_src)
+    pa = _sha256_file(adapter_path)
+
+    # Component spec: not sealed, no assets line.
+    component_md = (
         "---\n"
         "id: comp-foo\n"
         "title: Foo\n"
         "status: draft\n"
-        "owners: [team-a]\n"
-        "sealed: true\n"
-        "source_path: legacy/foo/\n"
+        "owners: [pipeline-team]\n"
         "depends_on: []\n"
         "---\n"
         "\n"
         "# Foo\n"
-        "\n"
-        "## Purpose\n"
-        "\n"
-        "Foo doubles a number.\n",
     )
-    _write(
-        comp / "requirements" / "R-FOO-001.md",
-        "# R-FOO-001\n\n**R-FOO-001** \u2014 `foo(x)` MUST return `2 * x`.\n",
-    )
-    _write(
-        comp / "acceptance" / "AC-FOO-001.md",
-        "# AC-FOO-001\n"
-        "\n"
-        "Covers: R-FOO-001\n"
-        "Kind: generated-test\n"
-        "\n"
-        "```gherkin\n"
-        "Given x = 2\n"
-        "When foo(x) is called\n"
-        "Then it returns 4\n"
-        "```\n",
-    )
-    _write(
-        comp / "interface" / "library.md",
-        "# Library\n\n```\nfoo(x: int) -> int\n```\n",
-    )
-    _write(comp / "constraints.md", "# Constraints\n\nNone.\n")
+    _write(repo_root / "specs" / "components" / "foo" / "component.md", component_md)
 
-
-def _manifest():
-    verification_report = {
-        "component_id": "comp-foo",
-        "criteria": [
-            {
-                "id": "AC-FOO-001",
-                "covers": "R-FOO-001",
-                "kind": "llm-judge",
-                "result": "pass",
-                "rationale": "The implementation doubles its input.",
-            }
-        ],
-        "requirement_results": {"R-FOO-001": "pass"},
-        "interface_drift": False,
-        "mutation_score": None,
-        "mutation_error": None,
-        "overall": "pass",
-    }
-    license_scan = {
-        "component_id": "comp-foo",
-        "gate_version": GATE_VERSIONS["license_scanner"],
-        "evaluated": False,
-        "reason": "no-reference-corpus",
-        "similarity_score": None,
-        "block_threshold": None,
-        "blocked": False,
-        "matches": [],
-        "notified": False,
-        "notification_delivery_error": None,
-        "cache_hit": False,
-    }
-    secret_scan = {
-        "scope": "full",
-        "gate_version": GATE_VERSIONS["secret_scanner"],
-        "flagged": False,
-        "matches": [],
-        "allowed": [],
-        "unused_allowlist_entries": [],
-        "notified": False,
-        "notification_delivery_error": None,
-        "cache_hit": False,
-    }
-    return {
-        "spec_bundle_hash": SPEC_BUNDLE_HASH,
-        "model_pin": "claude-sonnet-5",
-        "prompt_version": "v1",
-        "retry_feedback": None,
-        "pipeline_version": "v1",
-        "gate_versions": dict(GATE_VERSIONS),
-        "provenance_hit": False,
-        "generated_at": "2026-01-01T00:00:00Z",
-        "verification_run_id": "run-123",
-        "verification_report": verification_report,
-        "license_scan": license_scan,
-        "secret_scan": secret_scan,
+    p_entry = {
+        "kind": "python",
+        "path": ".",
+        "definition_sha256": None,
+        "adapter_sha256": pa,
+        "versions": {"python": "3.12.4", "packages": PK},
+        "lockfile_sha256": None,
     }
 
+    manifest = {
+        "spec_bundle_hash": H,
+        "gate_versions": {},
+        "verification_report": {
+            "criteria": [
+                {
+                    "id": "AC-FOO-001",
+                    "covers": "R-FOO-001",
+                    "kind": "llm-judge",
+                    "result": "pass",
+                    "rationale": "looks right",
+                }
+            ]
+        },
+        "license_scan": {},
+        "secret_scan": {},
+        "assets": [p_entry],
+    }
+    _write(repo_root / "gen" / "foo" / ".provenance.json", json.dumps(manifest, indent=2))
 
-def test_llm_judge_criterion_without_trust_is_a_miss(tmp_path):
-    repo_root = Path(tmp_path)
-    _build_corpus(repo_root)
 
-    manifest_text = json.dumps(_manifest(), indent=2)
-    _write(repo_root / "gen" / "foo" / ".provenance.json", manifest_text)
-    _write(repo_root / "verification" / "foo" / ".provenance.json", manifest_text)
+def test_llm_judge_criterion_untrusted_is_definitive_miss(tmp_path):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    _build_fixture(repo_root)
 
-    os.environ[ENV_NAME] = "false"
+    previous = os.environ.get("VAR_TRUST_JUDGE_PROVENANCE")
+    os.environ["VAR_TRUST_JUDGE_PROVENANCE"] = "false"
     try:
-        result = provenance_checker.check_provenance(
-            "comp-foo", SPEC_BUNDLE_HASH, dict(GATE_VERSIONS), repo_root
-        )
+        result = provenance_checker.check_provenance("comp-foo", H, {}, repo_root)
     finally:
-        os.environ.pop(ENV_NAME, None)
+        if previous is None:
+            os.environ.pop("VAR_TRUST_JUDGE_PROVENANCE", None)
+        else:
+            os.environ["VAR_TRUST_JUDGE_PROVENANCE"] = previous
 
     assert field(result, "hit") is False
-    # A definitive miss carries no partial or best-guess values.
+    # A miss is definitive: no partial trust of the manifest's fields.
     assert field(result, "verification_report") is None
     assert field(result, "license_scan") is None
     assert field(result, "secret_scan") is None

@@ -1,204 +1,285 @@
-# hotdocs-criterion: sha256:d0acff4882d39012d0a88bccea12263cec1cf6cc5d7dc7f4279cb47ed8deda6f
+# hotdocs-criterion: sha256:94a54a930bb25ea4c73b83753d5be51466384725ad1059095b72a5a36b980875
+import hashlib
 import json
-import os
 from pathlib import Path
 
 import provenance_checker
+
+
+MANIFEST_HASH = "sha256:" + "1" * 64
+OTHER_CALLER_HASH = "sha256:" + "2" * 64
+STANDIN_ASSEMBLE_HASH = "sha256:" + "3" * 64
+PK = "sha256:" + "a" * 64
 
 
 def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-MANIFEST_HASH = "sha256:" + "a1" * 32
-ASSEMBLER_HASH = "sha256:" + "b2" * 32
-OTHER_HASH = "sha256:" + "c3" * 32
+def sha(path):
+    return "sha256:" + hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
-CALLER_GATE_VERSIONS = {
-    "compiler": "criterion-compiler@1.0.0",
-    "generated_test": "generated_test@1.1.0",
-    "verifier": "verifier-orchestrator@2.2.0",
-    "license_scanner": "license_scanner@4.0.0-no-reference-corpus",
-    "secret_scanner": "secret_scanner@3.1.0+detect-secrets.1.5.0",
-}
 
-VERIFICATION_REPORT = {
-    "component_id": "comp-foo",
-    "criteria": [
-        {"id": "AC-FOO-001", "covers": "R-FOO-001", "kind": "compiled", "result": "pass"}
-    ],
-    "requirement_results": {"R-FOO-001": "pass"},
-    "interface_drift": False,
-    "mutation_score": 0.9,
-    "mutation_error": None,
-    "overall": "pass",
-}
+def _python_adapter_source():
+    return (
+        'KIND = "python"\n'
+        "\n"
+        "\n"
+        "def guidance():\n"
+        "    return " + repr({"generator": "", "test_author": ""}) + "\n"
+        "\n"
+        "\n"
+        "def provision(repo_root):\n"
+        "    return " + repr({
+            "ok": True,
+            "reason": "",
+            "versions": {"python": "3.12.4", "packages": PK},
+            "lockfile_sha256": None,
+            "interpreter": "/fake/python",
+        }) + "\n"
+    )
 
-LICENSE_SCAN = {
-    "component_id": "comp-foo",
-    "gate_version": "license_scanner@4.0.0-no-reference-corpus",
-    "evaluated": False,
-    "reason": "no-reference-corpus",
-    "similarity_score": None,
-    "block_threshold": None,
-    "blocked": False,
-    "matches": [],
-    "notified": False,
-    "notification_delivery_error": None,
-    "cache_hit": False,
-}
 
-SECRET_SCAN = {
-    "scope": "full",
-    "gate_version": "secret_scanner@3.1.0+detect-secrets.1.5.0",
-    "flagged": False,
-    "matches": [],
-    "allowed": [],
-    "unused_allowlist_entries": [],
-    "notified": False,
-    "notification_delivery_error": None,
-    "cache_hit": False,
-}
+def _log_header(log_path, name):
+    return (
+        "LOG_PATH = " + repr(str(log_path)) + "\n"
+        "\n"
+        "\n"
+        "def _log(event):\n"
+        "    with open(LOG_PATH, 'a') as fh:\n"
+        "        fh.write(event + '\\n')\n"
+        "\n"
+        "\n"
+        "_log(" + repr("load " + name) + ")\n"
+        "\n"
+    )
+
+
+def _assembler_source(log_path):
+    return (
+        _log_header(log_path, "spec-bundle-assembler")
+        + "class SpecBundle:\n"
+        "    _FIELDS = ('component_id', 'spec_bundle_hash', 'spec', 'interface',\n"
+        "               'constraints', 'dependency_interfaces', 'dependency_context',\n"
+        "               'dependency_usage', 'vars', 'glossary', 'hint_code')\n"
+        "\n"
+        "    def __init__(self, **kw):\n"
+        "        for k in self._FIELDS:\n"
+        "            setattr(self, k, kw[k])\n"
+        "\n"
+        "    def __getitem__(self, key):\n"
+        "        if key not in self._FIELDS:\n"
+        "            raise KeyError(key)\n"
+        "        return getattr(self, key)\n"
+        "\n"
+        "    def get(self, key, default=None):\n"
+        "        return getattr(self, key) if key in self._FIELDS else default\n"
+        "\n"
+        "\n"
+        "def assemble(component_id, repo_root, mode='cold'):\n"
+        "    _log('assemble ' + str(component_id) + ' ' + str(mode))\n"
+        "    return SpecBundle(\n"
+        "        component_id=component_id,\n"
+        "        spec_bundle_hash=" + repr(STANDIN_ASSEMBLE_HASH) + ",\n"
+        "        spec='', interface='', constraints='',\n"
+        "        dependency_interfaces={}, dependency_context={},\n"
+        "        dependency_usage={}, vars={}, glossary='', hint_code=None,\n"
+        "    )\n"
+        "\n"
+        "\n"
+        "def assemble_criterion(component_id, criterion_id, repo_root):\n"
+        "    _log('assemble_criterion')\n"
+        "    raise RuntimeError('not used')\n"
+    )
+
+
+def _simple_gate_source(log_path, name, constants, functions):
+    src = _log_header(log_path, name)
+    for key, value in constants:
+        src += key + " = " + repr(value) + "\n"
+    src += "\n"
+    for fname, params in functions:
+        src += (
+            "\n"
+            "def " + fname + "(" + params + "):\n"
+            "    _log(" + repr(name + " " + fname) + ")\n"
+            "    raise RuntimeError('stand-in: not used')\n"
+        )
+    return src
+
+
+def _gate_version_fn(log_path, name, value):
+    return (
+        "\n"
+        "def gate_version(repo_root):\n"
+        "    _log(" + repr(name + " gate_version") + ")\n"
+        "    return " + repr(value) + "\n"
+    )
 
 
 def _write(path, text):
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text, encoding="utf-8")
+    path.write_text(text)
 
 
-def _log_prelude():
-    return (
-        "import os\n"
-        "def _log(line):\n"
-        "    p = os.environ.get('PROVCHECK_AC007_LOG')\n"
-        "    if p:\n"
-        "        with open(p, 'a', encoding='utf-8') as fh:\n"
-        "            fh.write(line + '\\n')\n"
+def build_repo(tmp_path):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    log_path = tmp_path / "dependency-calls.log"
+
+    # Fake python adapter (implicit asset kind).
+    adapter = repo_root / "gen" / "kind-python" / "kind_python.py"
+    _write(adapter, _python_adapter_source())
+
+    # Component frontmatter, no assets line, not sealed.
+    _write(
+        repo_root / "specs" / "components" / "foo" / "component.md",
+        "---\n"
+        "id: comp-foo\n"
+        "title: Foo\n"
+        "status: draft\n"
+        "owners: [pipeline-team]\n"
+        "depends_on: []\n"
+        "---\n"
+        "\n"
+        "# Foo\n"
+        "\n"
+        "## Purpose\n"
+        "\n"
+        "A fixture component.\n",
     )
 
-
-def _write_fakes(repo_root):
-    gen = repo_root / "gen"
+    # Dependency stand-ins: any load or call is recorded.
     _write(
-        gen / "spec-bundle-assembler" / "spec_bundle_assembler.py",
-        _log_prelude()
-        + "def assemble(component_id, repo_root, mode='cold'):\n"
-        + "    _log('assemble ' + str(component_id))\n"
-        + "    return {\n"
-        + "        'component_id': component_id,\n"
-        + "        'spec_bundle_hash': " + repr(ASSEMBLER_HASH) + ",\n"
-        + "        'spec': '',\n"
-        + "        'interface': '',\n"
-        + "        'constraints': '',\n"
-        + "        'dependency_interfaces': {},\n"
-        + "        'dependency_context': {},\n"
-        + "        'dependency_usage': {},\n"
-        + "        'vars': {},\n"
-        + "        'glossary': '',\n"
-        + "        'hint_code': None,\n"
-        + "    }\n"
-        + "def assemble_criterion(component_id, criterion_id, repo_root):\n"
-        + "    _log('assemble_criterion ' + str(component_id))\n"
-        + "    return {\n"
-        + "        'component_id': component_id,\n"
-        + "        'criterion_id': criterion_id,\n"
-        + "        'covers': '',\n"
-        + "        'criterion_text': '',\n"
-        + "        'requirement_text': '',\n"
-        + "        'interface': '',\n"
-        + "        'glossary': '',\n"
-        + "        'dependency_interfaces': {},\n"
-        + "    }\n",
+        repo_root / "gen" / "spec-bundle-assembler" / "spec_bundle_assembler.py",
+        _assembler_source(log_path),
     )
     _write(
         repo_root / "pipeline" / "criterion-compiler" / "criterion_compiler.py",
-        "GATE_VERSION = " + repr("criterion-compiler@9.9.9") + "\n",
+        _simple_gate_source(
+            log_path, "criterion-compiler",
+            [("GATE_VERSION", "cc@1")],
+            [("compile", "component_id, repo_root, target='pytest', out_dir=None"),
+             ("compile_criterion", "criterion, surface=None")],
+        ),
     )
     _write(
-        gen / "test-author" / "test_author.py",
-        "GATE_VERSION = " + repr("generated_test@9.9.9") + "\n",
+        repo_root / "gen" / "test-author" / "test_author.py",
+        _simple_gate_source(
+            log_path, "test-author",
+            [("GATE_VERSION", "ta@1")],
+            [("author_test", "bundle, model, seed=0, *, repo_root=None, llm_backend=None")],
+        ),
     )
     _write(
-        gen / "verifier-orchestrator" / "verifier_orchestrator.py",
-        "GATE_VERSION = " + repr("verifier-orchestrator@9.9.9") + "\n",
+        repo_root / "gen" / "verifier-orchestrator" / "verifier_orchestrator.py",
+        _simple_gate_source(
+            log_path, "verifier-orchestrator",
+            [("GATE_VERSION", "vo@1"), ("DEFAULT_TEST_TIMEOUT", 300.0)],
+            [("verify", "component_id, repo_root, judge=None, test_author=None")],
+        ),
     )
     _write(
-        gen / "license-scanner" / "license_scanner.py",
-        _log_prelude()
-        + "def gate_version(repo_root):\n"
-        + "    _log('license_scanner.gate_version')\n"
-        + "    return " + repr("license_scanner@4.0.9+ffffffffffff") + "\n",
+        repo_root / "gen" / "license-scanner" / "license_scanner.py",
+        _simple_gate_source(
+            log_path, "license-scanner", [],
+            [("scan", "component_id, repo_root")],
+        ) + _gate_version_fn(log_path, "license-scanner", "ls@1"),
     )
     _write(
-        gen / "secret-scanner" / "secret_scanner.py",
-        _log_prelude()
-        + "def gate_version(repo_root):\n"
-        + "    _log('secret_scanner.gate_version')\n"
-        + "    return " + repr("secret_scanner@9.9.9+detect-secrets.1.5.0") + "\n",
+        repo_root / "gen" / "secret-scanner" / "secret_scanner.py",
+        _simple_gate_source(
+            log_path, "secret-scanner", [],
+            [("scan", "repo_root"),
+             ("scan_files", "paths, repo_root=None"),
+             ("propose", "repo_root")],
+        ) + _gate_version_fn(log_path, "secret-scanner", "ss@1"),
+    )
+    _write(
+        repo_root / "gen" / "generator" / "generator.py",
+        _simple_gate_source(
+            log_path, "generator",
+            [("GATE_VERSION", "gen@3"), ("PROMPT_VERSION", "v11")],
+            [("generate", "bundle, model, retry_feedback=None, *, repo_root=None, llm_backend=None"),
+             ("commit_cache", "result, repo_root=None")],
+        ),
     )
 
+    python_entry = {
+        "kind": "python",
+        "path": ".",
+        "definition_sha256": None,
+        "adapter_sha256": sha(adapter),
+        "versions": {"python": "3.12.4", "packages": PK},
+        "lockfile_sha256": None,
+    }
 
-def _write_manifest(repo_root):
     manifest = {
         "spec_bundle_hash": MANIFEST_HASH,
-        "model_pin": "claude-sonnet-5",
-        "prompt_version": "v1",
-        "retry_feedback": None,
-        "pipeline_version": "v1",
-        "gate_versions": dict(CALLER_GATE_VERSIONS),
-        "provenance_hit": False,
-        "generated_at": "2026-01-01T00:00:00Z",
-        "verification_run_id": "run-123",
-        "verification_report": VERIFICATION_REPORT,
-        "license_scan": LICENSE_SCAN,
-        "secret_scan": SECRET_SCAN,
+        "gate_versions": {},
+        "verification_report": {"criteria": []},
+        "license_scan": {},
+        "secret_scan": {},
+        "assets": [python_entry],
     }
-    _write(repo_root / "gen" / "foo" / ".provenance.json", json.dumps(manifest, indent=2))
+    _write(repo_root / "gen" / "foo" / ".provenance.json", json.dumps(manifest))
+
+    return repo_root, log_path, manifest
 
 
-def test_comparison_uses_caller_supplied_hash_never_its_own(tmp_path, monkeypatch):
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    log_path = tmp_path / "calls.log"
-    monkeypatch.setenv("PROVCHECK_AC007_LOG", str(log_path))
-    monkeypatch.delenv("VAR_TRUST_JUDGE_PROVENANCE", raising=False)
+def _log_lines(log_path):
+    if not log_path.exists():
+        return []
+    return [line for line in log_path.read_text().splitlines() if line.strip()]
 
-    _write_fakes(repo_root)
-    _write_manifest(repo_root)
 
-    # Caller supplies exactly the manifest's hash H: a hit, even though any
-    # self-computed hash (the fake assembler's) would differ from H.
-    hit_result = provenance_checker.check_provenance(
-        "comp-foo", MANIFEST_HASH, dict(CALLER_GATE_VERSIONS), repo_root
+def test_caller_supplied_hash_matching_manifest_is_a_hit_even_though_assemble_would_differ(tmp_path):
+    repo_root, log_path, manifest = build_repo(tmp_path)
+
+    result = provenance_checker.check_provenance("comp-foo", MANIFEST_HASH, {}, repo_root)
+
+    # The caller's hash equals the manifest's own field: a hit, though the
+    # stand-in assembler would have produced a different hash.
+    assert field(result, "hit") is True
+    assert field(result, "reason") is None
+    assert field(result, "verification_report") == manifest["verification_report"]
+
+    # check_provenance never computed a spec_bundle_hash of its own: no
+    # dependency was loaded or called.
+    assert _log_lines(log_path) == []
+
+
+def test_caller_supplied_hash_differing_from_manifest_is_a_miss_even_though_assemble_would_match(tmp_path):
+    repo_root, log_path, _ = build_repo(tmp_path)
+    # Make the stand-in assembler agree with the manifest, so only the
+    # caller-supplied value can explain a miss.
+    src_path = repo_root / "gen" / "spec-bundle-assembler" / "spec_bundle_assembler.py"
+    src_path.write_text(
+        src_path.read_text().replace(repr(STANDIN_ASSEMBLE_HASH), repr(MANIFEST_HASH))
     )
-    assert field(hit_result, "hit") is True
-    assert field(hit_result, "verification_report") == VERIFICATION_REPORT
-    assert field(hit_result, "license_scan") == LICENSE_SCAN
-    assert field(hit_result, "secret_scan") == SECRET_SCAN
 
-    # Caller supplies the hash a self-computation would produce: still a miss,
-    # because only the manifest's own field is compared against.
-    assembler_result = provenance_checker.check_provenance(
-        "comp-foo", ASSEMBLER_HASH, dict(CALLER_GATE_VERSIONS), repo_root
-    )
-    assert field(assembler_result, "hit") is False
-    assert field(assembler_result, "verification_report") is None
-    assert field(assembler_result, "license_scan") is None
-    assert field(assembler_result, "secret_scan") is None
+    result = provenance_checker.check_provenance("comp-foo", OTHER_CALLER_HASH, {}, repo_root)
 
-    # Any other caller-supplied hash differing from H: a miss.
-    other_result = provenance_checker.check_provenance(
-        "comp-foo", OTHER_HASH, dict(CALLER_GATE_VERSIONS), repo_root
-    )
-    assert field(other_result, "hit") is False
-    assert field(other_result, "verification_report") is None
-    assert field(other_result, "license_scan") is None
-    assert field(other_result, "secret_scan") is None
+    assert field(result, "hit") is False
+    assert field(result, "reason") == "spec_bundle_hash differs"
+    assert field(result, "verification_report") is None
+    assert field(result, "license_scan") is None
+    assert field(result, "secret_scan") is None
+    assert _log_lines(log_path) == []
 
-    # check_provenance never computed a hash or gate version of its own.
-    calls = log_path.read_text(encoding="utf-8").splitlines() if log_path.exists() else []
-    assert calls == []
 
-    # The manifest was left untouched.
-    on_disk = json.loads((repo_root / "gen" / "foo" / ".provenance.json").read_text(encoding="utf-8"))
-    assert on_disk["spec_bundle_hash"] == MANIFEST_HASH
+def test_stand_in_assembler_is_reachable_so_its_silence_is_meaningful(tmp_path):
+    repo_root, log_path, _ = build_repo(tmp_path)
+
+    # Control: the documented key computation does reach the stand-in and
+    # yields a hash different from the manifest's, which check_provenance
+    # above never consulted.
+    key = provenance_checker.current_provenance_key("comp-foo", repo_root)
+    assert field(key, "spec_bundle_hash") == STANDIN_ASSEMBLE_HASH
+    assert field(key, "spec_bundle_hash") != MANIFEST_HASH
+    assert any(line.startswith("assemble ") for line in _log_lines(log_path))
+
+    log_path.unlink()
+    result = provenance_checker.check_provenance("comp-foo", MANIFEST_HASH, {}, repo_root)
+    assert field(result, "hit") is True
+    assert _log_lines(log_path) == []

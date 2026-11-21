@@ -1,171 +1,160 @@
-# hotdocs-criterion: sha256:f125617776b2b2e25367bc302215a0718b17087f81a72571a6df80060fb9eda6
-import os
-import re
+# hotdocs-criterion: sha256:5af6febe6b4cde6b74c9ab091fb155e78698e0081855269e5a4a1385773c7a02
+import json
 from pathlib import Path
 
-import pytest
-
-duckdb = pytest.importorskip("duckdb")
+import duckdb
 
 import graph_query_engine
 
 
-KNOWN_SLUG = "graph-query-engine"
-KNOWN_ID = "comp-graph-query-engine"
+def _write(path, text):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "w", encoding="utf-8", newline="\n") as fh:
+        fh.write(text)
 
 
-def _find_repo_root():
-    candidates = []
-    env_root = os.environ.get("HOTDOCS_REPO_ROOT") or os.environ.get("REPO_ROOT")
-    if env_root:
-        candidates.append(Path(env_root))
-    here = Path(__file__).resolve()
-    candidates.extend(here.parents)
-    cwd = Path.cwd().resolve()
-    candidates.append(cwd)
-    candidates.extend(cwd.parents)
-    seen = set()
-    for c in candidates:
+def _build_fixture(repo_root):
+    specs = repo_root / "specs"
+    _write(
+        specs / "components" / "foo" / "component.md",
+        "---\n"
+        "id: comp-foo\n"
+        "title: Foo\n"
+        "status: draft\n"
+        "owners: [team]\n"
+        "depends_on: [comp-bar]\n"
+        "realizes: [P-X]\n"
+        "uses_var: [VAR-X]\n"
+        "depends_on_guarantees: [G-BAR-001]\n"
+        "---\n"
+        "\n"
+        "# Foo\n"
+        "\n"
+        "one two three\n",
+    )
+    _write(
+        specs / "components" / "bar" / "component.md",
+        "---\n"
+        "id: comp-bar\n"
+        "title: Bar\n"
+        "status: draft\n"
+        "owners: [team]\n"
+        "realizes: [P-X]\n"
+        "---\n"
+        "\n"
+        "# Bar\n",
+    )
+    _write(
+        specs / "components" / "foo" / "requirements" / "R-FOO-001.md",
+        "# R-FOO-001\n\nfoo MUST work.\n",
+    )
+    _write(
+        specs / "components" / "foo" / "requirements" / "R-FOO-002.md",
+        "# R-FOO-002\n\nfoo MUST stop.\n",
+    )
+    _write(
+        specs / "components" / "foo" / "acceptance" / "AC-FOO-001.md",
+        "# AC-FOO-001\n\nCovers: R-FOO-001\nKind: generated-test\n",
+    )
+    _write(
+        specs / "components" / "foo" / "interface" / "guarantees" / "G-FOO-001.md",
+        "# G-FOO-001\n\nfoo never fails.\n",
+    )
+    _write(
+        specs / "product" / "x.md",
+        "---\n"
+        "id: P-X\n"
+        "title: X\n"
+        "status: draft\n"
+        "owners: [team]\n"
+        "---\n"
+        "# X\n"
+        "\n"
+        "### CS-X-001\n"
+        "Covers: P-X\n"
+        "\n"
+        "### CS-X-002\n"
+        "Covers: P-X\n",
+    )
+    _write(
+        specs / "vars" / "x.md",
+        "---\n"
+        "id: VAR-X\n"
+        "title: V\n"
+        "status: draft\n"
+        "owners: [team]\n"
+        "---\n"
+        "# V\n",
+    )
+    _write(
+        specs / "decisions" / "D1.md",
+        "---\n"
+        "id: D1\n"
+        "title: One\n"
+        "status: ratified\n"
+        "owners: [team]\n"
+        "---\n"
+        "# D1\n",
+    )
+    _write(
+        specs / "decisions" / "D2.md",
+        "---\n"
+        "id: D2\n"
+        "title: Two\n"
+        "status: draft\n"
+        "owners: [team]\n"
+        "supersedes: D1\n"
+        "builds_on: [D1]\n"
+        "---\n"
+        "# D2\n",
+    )
+    for sub in ("product", "vars", "decisions"):
+        _write(specs / sub / "README.md", "# Readme\n\nNotes.\n")
+
+
+def _as_list(value):
+    if isinstance(value, (list, tuple)):
+        return [str(v) for v in value]
+    if isinstance(value, str):
+        text = value.strip()
         try:
-            c = c.resolve()
-        except Exception:
-            continue
-        if c in seen:
-            continue
-        seen.add(c)
-        comp_dir = c / "specs" / "components"
-        if comp_dir.is_dir() and (comp_dir / KNOWN_SLUG / "component.md").is_file():
-            return c
-    return None
+            parsed = json.loads(text)
+        except ValueError:
+            parsed = None
+        if isinstance(parsed, list):
+            return [str(v) for v in parsed]
+        if text.startswith("[") and text.endswith("]"):
+            inner = text[1:-1].strip()
+            if not inner:
+                return []
+            return [part.strip().strip("'\"") for part in inner.split(",")]
+        return [text]
+    return value
 
 
-def _split_frontmatter(text):
-    lines = text.splitlines()
-    if not lines or lines[0].strip() != "---":
-        return None, text
-    for i in range(1, len(lines)):
-        if lines[i].strip() == "---":
-            return lines[1:i], "\n".join(lines[i + 1:])
-    return None, text
+def test_ac_gqe_003_component_docs(tmp_path):
+    repo_root = Path(tmp_path)
+    _build_fixture(repo_root)
 
-
-def _parse_frontmatter(text):
-    fm_lines, rest = _split_frontmatter(text)
-    fields = {}
-    if fm_lines is None:
-        return fields, rest
-    for line in fm_lines:
-        if not line or line[0].isspace():
-            continue
-        m = re.match(r"^([A-Za-z_][A-Za-z0-9_\-]*)\s*:\s*(.*)$", line)
-        if not m:
-            continue
-        key, value = m.group(1), m.group(2).strip()
-        if len(value) >= 2 and value[0] == value[-1] and value[0] in ("'", '"'):
-            value = value[1:-1]
-        fields[key] = value
-    return fields, rest
-
-
-def _connect():
     con = duckdb.connect()
     try:
         con.execute("INSTALL yaml FROM community")
         con.execute("LOAD yaml")
-    except Exception as exc:  # pragma: no cover - environment dependent
+        graph_query_engine.load_views(con, repo_root)
+
+        cur = con.execute("SELECT * FROM component_docs")
+        columns = [d[0] for d in cur.description]
+        rows = [dict(zip(columns, r)) for r in cur.fetchall()]
+    finally:
         con.close()
-        pytest.skip("yaml community extension unavailable: %r" % (exc,))
-    return con
 
+    assert len(rows) == 2
 
-def _rows(con, sql, params=None):
-    cur = con.execute(sql, params or [])
-    cols = [d[0] for d in cur.description]
-    return cols, [dict(zip(cols, r)) for r in cur.fetchall()]
+    foo_rows = [r for r in rows if str(r.get("id")) == "comp-foo"]
+    assert len(foo_rows) == 1
+    foo = foo_rows[0]
 
-
-@pytest.fixture(scope="module")
-def repo_root():
-    root = _find_repo_root()
-    if root is None:
-        pytest.skip("could not locate a real spec corpus repo root")
-    return root
-
-
-@pytest.fixture(scope="module")
-def loaded_con(repo_root):
-    con = _connect()
-    result = graph_query_engine.load_views(con, repo_root)
-    assert result is None
-    yield con
-    con.close()
-
-
-def _real_component_files(repo_root):
-    return sorted(
-        p for p in (repo_root / "specs" / "components").glob("*/component.md")
-        if p.is_file()
-    )
-
-
-def test_component_docs_row_count_equals_real_component_count(repo_root, loaded_con):
-    files = _real_component_files(repo_root)
-    assert len(files) > 0
-    count = loaded_con.execute("SELECT count(*) FROM component_docs").fetchone()[0]
-    assert count == len(files)
-
-
-def test_component_docs_one_row_per_component_id(repo_root, loaded_con):
-    expected_ids = []
-    for p in _real_component_files(repo_root):
-        fields, _ = _parse_frontmatter(p.read_text(encoding="utf-8"))
-        expected_ids.append(fields.get("id"))
-    assert all(expected_ids)
-    _, rows = _rows(loaded_con, "SELECT id FROM component_docs")
-    actual_ids = [str(r["id"]) for r in rows]
-    assert sorted(actual_ids) == sorted(expected_ids)
-    assert len(set(actual_ids)) == len(actual_ids)
-
-
-def test_known_component_frontmatter_and_body_present(repo_root, loaded_con):
-    path = repo_root / "specs" / "components" / KNOWN_SLUG / "component.md"
-    raw = path.read_text(encoding="utf-8")
-    fields, rest = _parse_frontmatter(raw)
-    assert fields.get("id") == KNOWN_ID
-
-    cols, rows = _rows(
-        loaded_con, "SELECT * FROM component_docs WHERE id = ?", [KNOWN_ID]
-    )
-    assert len(rows) == 1
-    row = rows[0]
-
-    for required in ("id", "title", "status", "body"):
-        assert required in cols, "missing column %r in %r" % (required, cols)
-
-    # Every top-level frontmatter key of the known component is passed through.
-    for key in fields:
-        assert key in cols, "frontmatter field %r not a column in %r" % (key, cols)
-
-    # Scalar frontmatter fields match the file's own values.
-    assert str(row["id"]) == KNOWN_ID
-    if "title" in fields and fields["title"]:
-        assert row["title"] is not None
-        assert str(row["title"]).strip() == fields["title"].strip()
-    if "status" in fields and fields["status"]:
-        assert row["status"] is not None
-        assert str(row["status"]).strip() == fields["status"].strip()
-
-    # Body is the full raw text, frontmatter included.
-    body = row["body"]
-    assert isinstance(body, str)
-    assert body.lstrip().startswith("---")
-    norm_body = body.replace("\r\n", "\n")
-    norm_raw = raw.replace("\r\n", "\n")
-    assert norm_body.strip() == norm_raw.strip()
-    fm_lines, _ = _split_frontmatter(raw)
-    for line in fm_lines or []:
-        if line.strip():
-            assert line.rstrip() in norm_body
-    rest_stripped = rest.replace("\r\n", "\n").strip()
-    if rest_stripped:
-        assert rest_stripped in norm_body
+    assert foo["title"] == "Foo"
+    assert _as_list(foo["depends_on"]) == ["comp-bar"]
+    assert isinstance(foo["body"], str)
+    assert "one two three" in foo["body"]

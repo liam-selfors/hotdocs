@@ -1,145 +1,97 @@
-# hotdocs-criterion: sha256:f98f6aaf6074c4ed14c5396f1cd0583627bbba82435442d6185dc98841bd2d0e
-import textwrap
+# hotdocs-criterion: sha256:c9fceac75f277af820af44af515049c5c231c1a40df2e34eb0d8ebf5bd5c0382
+"""AC-GQE-009: a decision's scalar `supersedes:` frontmatter line yields
+exactly one `supersedes` edge, and both decisions appear in `nodes` with
+kind "decision" (R-GQE-001)."""
+
 from pathlib import Path
 
-import pytest
-
-duckdb = pytest.importorskip("duckdb")
+import duckdb
 
 import graph_query_engine
 
 
-def _write(path: Path, content: str) -> None:
+def _write(path, text):
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(textwrap.dedent(content).lstrip("\n"), encoding="utf-8")
+    path.write_text(text, encoding="utf-8", newline="\n")
 
 
-def _build_fixture(repo_root: Path) -> None:
-    # One component, sealed, with every list-valued edge field present but empty
-    # (flow style), so no component-sourced edges exist.
+def _build_fixture(repo_root):
     _write(
-        repo_root / "specs" / "components" / "widget" / "component.md",
-        """
-        ---
-        id: comp-widget
-        title: Widget
-        status: draft
-        owners: [alice]
-        depends_on: []
-        realizes: []
-        uses_var: []
-        depends_on_guarantees: []
-        sealed: true
-        source_path: legacy/widget
-        ---
-
-        # Widget
-
-        ## Purpose
-
-        A synthetic component used only as a test fixture.
-        """,
+        repo_root / "specs" / "components" / "foo" / "component.md",
+        "---\n"
+        "id: comp-foo\n"
+        "title: Foo\n"
+        "status: draft\n"
+        "owners: [team]\n"
+        "sealed: true\n"
+        "source_path: legacy/foo/\n"
+        "---\n"
+        "\n"
+        "# Foo\n"
+        "\n"
+        "one two three\n",
     )
-
-    # D1 supersedes D2 via a scalar (never a list) frontmatter line.
     _write(
         repo_root / "specs" / "decisions" / "D1.md",
-        """
-        ---
-        id: D1
-        title: Decision One
-        status: draft
-        owners: [alice]
-        supersedes: D2
-        ---
-
-        # D1
-
-        Supersedes D2.
-        """,
+        "---\n"
+        "id: D1\n"
+        "title: One\n"
+        "status: draft\n"
+        "owners: [team]\n"
+        "supersedes: D2\n"
+        "---\n"
+        "\n"
+        "# D1\n",
     )
-
-    # D2 is deprecated.
     _write(
         repo_root / "specs" / "decisions" / "D2.md",
-        """
-        ---
-        id: D2
-        title: Decision Two
-        status: deprecated
-        owners: [alice]
-        ---
-
-        # D2
-
-        Deprecated in favor of D1.
-        """,
+        "---\n"
+        "id: D2\n"
+        "title: Two\n"
+        "status: deprecated\n"
+        "owners: [team]\n"
+        "---\n"
+        "\n"
+        "# D2\n",
     )
 
 
-def _connect_with_yaml():
-    con = duckdb.connect(":memory:")
-    try:
-        con.execute("INSTALL yaml FROM community")
-        con.execute("LOAD yaml")
-    except Exception as exc:  # environment lacks the community extension
-        con.close()
-        pytest.skip(f"DuckDB community 'yaml' extension unavailable: {exc}")
+def _connect():
+    con = duckdb.connect()
+    con.execute("INSTALL yaml FROM community")
+    con.execute("LOAD yaml")
     return con
 
 
-def test_ac_gqe_009_decision_nodes_and_scalar_supersedes_edge(tmp_path):
-    repo_root = tmp_path.resolve() / "repo"
-    repo_root.mkdir(parents=True)
+def test_ac_gqe_009_scalar_supersedes_edge_and_decision_nodes(tmp_path):
+    repo_root = (tmp_path / "repo").resolve()
+    repo_root.mkdir()
     _build_fixture(repo_root)
 
-    con = _connect_with_yaml()
+    con = _connect()
     try:
-        result = graph_query_engine.load_views(con, repo_root)
-        assert result is None
+        graph_query_engine.load_views(con, repo_root)
 
-        node_rows = con.execute(
-            "SELECT id, title, status, kind, owner_component_id FROM nodes"
+        decision_rows = con.execute(
+            "SELECT id, kind FROM nodes WHERE id IN ('D1', 'D2') ORDER BY id"
         ).fetchall()
-
-        decision_rows = {}
-        for row in node_rows:
-            node_id = None if row[0] is None else str(row[0])
-            if node_id in ("D1", "D2"):
-                assert node_id not in decision_rows, (
-                    f"duplicate nodes row for {node_id}: {node_rows!r}"
-                )
-                decision_rows[node_id] = row
-
-        assert set(decision_rows) == {"D1", "D2"}, (
-            f"expected a nodes row for each of D1 and D2, got {node_rows!r}"
-        )
-
-        for node_id, row in decision_rows.items():
-            _, title, status, kind, owner = row
-            assert kind == "decision", f"{node_id} kind was {kind!r}"
-            assert owner is None, f"{node_id} owner_component_id was {owner!r}"
-
-        assert decision_rows["D1"][1] == "Decision One"
-        assert decision_rows["D2"][1] == "Decision Two"
-        assert decision_rows["D2"][2] == "deprecated"
-
-        # The component itself is also present as a node.
-        component_kinds = [
-            row[3] for row in node_rows if row[0] is not None and str(row[0]) == "comp-widget"
+        assert [(str(r[0]), str(r[1])) for r in decision_rows] == [
+            ("D1", "decision"),
+            ("D2", "decision"),
         ]
-        assert component_kinds == ["component"], (
-            f"expected exactly one component node for comp-widget, got {node_rows!r}"
+
+        kind_decision_ids = sorted(
+            str(r[0])
+            for r in con.execute(
+                "SELECT id FROM nodes WHERE kind = 'decision'"
+            ).fetchall()
         )
+        assert kind_decision_ids == ["D1", "D2"]
 
         edge_rows = con.execute(
             "SELECT source_id, target_id, edge_type FROM edges"
         ).fetchall()
-        normalized_edges = [
-            tuple(None if v is None else str(v) for v in row) for row in edge_rows
-        ]
-        assert normalized_edges == [("D1", "D2", "supersedes")], (
-            f"edges must contain exactly (D1, D2, 'supersedes'), got {normalized_edges!r}"
-        )
+        edges = [(str(r[0]), str(r[1]), str(r[2])) for r in edge_rows]
+        assert edges == [("D1", "D2", "supersedes")]
     finally:
         con.close()

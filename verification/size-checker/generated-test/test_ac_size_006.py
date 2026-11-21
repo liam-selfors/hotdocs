@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:523b8f6fa2c9a569466b26fc8ea5196e01b4257ce58439391295eecb80227d17
+# hotdocs-criterion: sha256:93fff063b19ae9748e2f4be27f38f209ca09cf81eb74cfb6603fb17b98fe4ef1
 import re
 from pathlib import Path
 
@@ -9,112 +9,157 @@ def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def write(path, text):
+DEP_SLUGS = ["dep-" + str(i).zfill(2) for i in range(1, 12)]
+
+
+def _write(path, text):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
 
 
-def component_md(comp_id, title, slug, depends_on):
-    text = "---\n"
-    text += "id: " + comp_id + "\n"
-    text += "title: " + title + "\n"
-    text += "status: draft\n"
-    text += "owners: [team]\n"
+def _component_md(comp_id, title, depends_on):
+    lines = [
+        "---",
+        "id: " + comp_id,
+        "title: " + title,
+        "status: draft",
+        "owners: [team-a]",
+    ]
     if depends_on:
-        text += "depends_on: [" + ", ".join(depends_on) + "]\n"
-    text += "sealed: true\n"
-    text += "source_path: legacy/" + slug + "/\n"
-    text += "---\n\n"
-    text += "# " + title + "\n\n"
-    text += "## Purpose\n\nA small fixture component.\n\n"
-    text += "## Scope\n\n- In scope: fixture behavior.\n\n"
-    text += "## Definitions\n\nNone.\n\n"
-    text += "## Behavior\n\nSee `requirements/`.\n\n"
-    text += "## Interfaces\n\nSee `interface/`.\n\n"
-    text += "## Data\n\nSee `interface/data/`.\n\n"
-    text += "## Acceptance criteria\n\nSee `acceptance/`.\n\n"
-    text += "## Non-functional constraints\n\nSee `constraints.md`.\n\n"
-    text += "## Open questions\n\n"
-    text += "## Change log\n\n- Created.\n"
-    return text
+        lines.append("depends_on: [" + ", ".join(depends_on) + "]")
+    lines.append("sealed: true")
+    lines.append("source_path: legacy/" + comp_id + "/")
+    lines.append("---")
+    lines.append("")
+    lines.append("# " + title)
+    lines.append("")
+    lines.append("## Purpose")
+    lines.append("")
+    lines.append("A small fixture component.")
+    lines.append("")
+    lines.append("## Scope")
+    lines.append("")
+    lines.append("- In scope: fixture behavior.")
+    lines.append("")
+    lines.append("## Definitions")
+    lines.append("")
+    lines.append("None.")
+    lines.append("")
+    lines.append("## Behavior")
+    lines.append("")
+    lines.append("See `requirements/`.")
+    lines.append("")
+    lines.append("## Interfaces")
+    lines.append("")
+    lines.append("See `interface/`.")
+    lines.append("")
+    lines.append("## Data")
+    lines.append("")
+    lines.append("See `interface/data/`.")
+    lines.append("")
+    lines.append("## Acceptance criteria")
+    lines.append("")
+    lines.append("See `acceptance/`.")
+    lines.append("")
+    lines.append("## Non-functional constraints")
+    lines.append("")
+    lines.append("See `constraints.md`.")
+    lines.append("")
+    lines.append("## Open questions")
+    lines.append("")
+    lines.append("## Change log")
+    lines.append("")
+    lines.append("- Created.")
+    lines.append("")
+    return "\n".join(lines)
 
 
-def build_fixture(repo_root):
-    specs = repo_root / "specs"
-    write(specs / "glossary.md", "# Glossary\n\n- **Fixture** — a test fixture term.\n")
+def _requirement(rid):
+    return "# " + rid + "\n\n**" + rid + "** — The component MUST do a thing.\n"
 
-    hub = specs / "components" / "hub"
-    write(hub / "component.md", component_md("comp-hub", "Hub", "hub", []))
-    write(
-        hub / "requirements" / "R-HUB-001.md",
-        "# R-HUB-001\n\n**R-HUB-001** — The hub MUST answer requests.\n",
+
+def _acceptance(acid, rid):
+    return (
+        "# " + acid + "\n\n"
+        "Covers: " + rid + "\n"
+        "Kind: llm-judge\n\n"
+        "```gherkin\n"
+        "Given a thing\n"
+        "When it runs\n"
+        "Then it works\n"
+        "```\n"
     )
-    for i in range(1, 7):
-        gid = "G-HUB-" + str(i).zfill(3)
-        write(
-            hub / "interface" / "guarantees" / (gid + ".md"),
-            "# " + gid + "\n\n**" + gid + "** — The hub MUST keep promise " + str(i) + ".\n",
-        )
+
+
+def _build_corpus(repo_root):
+    comps = repo_root / "specs" / "components"
+
+    hub = comps / "hub"
+    _write(hub / "component.md", _component_md("comp-hub", "Hub", []))
+    _write(hub / "requirements" / "R-HUB-001.md", _requirement("R-HUB-001"))
     for i in range(1, 27):
         acid = "AC-HUB-" + str(i).zfill(3)
-        write(
-            hub / "acceptance" / (acid + ".md"),
-            "# " + acid + "\n\nCovers: R-HUB-001\nKind: generated-test\n\n"
-            "```gherkin\nGiven a request\nWhen the hub runs\nThen it answers\n```\n",
+        _write(hub / "acceptance" / (acid + ".md"), _acceptance(acid, "R-HUB-001"))
+    for i in range(1, 7):
+        gid = "G-HUB-" + str(i).zfill(3)
+        _write(
+            hub / "interface" / "guarantees" / (gid + ".md"),
+            "# " + gid + "\n\nThe hub MUST behave consistently.\n",
         )
+    _write(hub / "constraints.md", "# Constraints\n\nNone.\n")
 
-    for i in range(1, 12):
-        slug = "leaf-" + str(i).zfill(2)
-        write(
-            specs / "components" / slug / "component.md",
-            component_md("comp-" + slug, "Leaf " + str(i), slug, ["comp-hub"]),
-        )
+    for slug in DEP_SLUGS:
+        d = comps / slug
+        tag = slug.upper()
+        rid = "R-" + tag + "-001"
+        acid = "AC-" + tag + "-001"
+        _write(d / "component.md", _component_md("comp-" + slug, "Dep " + slug, ["comp-hub"]))
+        _write(d / "requirements" / (rid + ".md"), _requirement(rid))
+        _write(d / "acceptance" / (acid + ".md"), _acceptance(acid, rid))
+        _write(d / "constraints.md", "# Constraints\n\nNone.\n")
 
 
-def has_number(message, number):
-    return re.search(r"(?<!\d)" + str(number) + r"(?!\d)", message) is not None
+def _is_hub(finding):
+    f = str(field(finding, "file")).replace("\\", "/")
+    msg = str(field(finding, "message"))
+    return f.startswith("specs/components/hub/") or "comp-hub" in msg
 
 
-def test_ac_size_006_hub_guarantee_acceptance_fan_in_warns(tmp_path):
+def _is_dep(finding):
+    f = str(field(finding, "file")).replace("\\", "/")
+    msg = str(field(finding, "message"))
+    for slug in DEP_SLUGS:
+        if f.startswith("specs/components/" + slug + "/"):
+            return True
+        if "comp-" + slug in msg:
+            return True
+    return False
+
+
+def test_ac_size_006_hub_gets_guarantee_acceptance_fan_in_warnings(tmp_path):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
-    build_fixture(repo_root)
+    _build_corpus(repo_root)
 
     findings = size_checker.check(repo_root)
     assert isinstance(findings, list)
 
     size_findings = [f for f in findings if field(f, "rule_id") == "R-SIZE-001"]
+    hub_findings = [f for f in size_findings if _is_hub(f)]
 
-    hub_findings = [
-        f for f in size_findings
-        if str(field(f, "file")).replace("\\", "/").startswith("specs/components/hub/")
-    ]
-    hub_warns = [f for f in hub_findings if field(f, "severity") == "warn"]
+    def has(dimension, number):
+        pat = re.compile(r"(?<!\d)" + str(number) + r"(?!\d)")
+        for f in hub_findings:
+            msg = str(field(f, "message"))
+            if dimension in msg and pat.search(msg) and field(f, "severity") == "warn":
+                return True
+        return False
 
-    for dimension, number in (
-        ("guarantee_count", 6),
-        ("acceptance_count", 26),
-        ("fan_in", 11),
-    ):
-        matching = [
-            f for f in hub_warns
-            if dimension in str(field(f, "message"))
-            and has_number(str(field(f, "message")), number)
-        ]
-        assert matching, (
-            "expected a warn R-SIZE-001 finding for comp-hub naming "
-            + dimension + " with " + str(number) + "; got "
-            + repr([(field(f, "severity"), field(f, "message")) for f in hub_findings])
-        )
-        for f in matching:
-            assert isinstance(field(f, "line"), int)
+    assert has("guarantee_count", 6), [field(f, "message") for f in size_findings]
+    assert has("acceptance_count", 26), [field(f, "message") for f in size_findings]
+    assert has("fan_in", 11), [field(f, "message") for f in size_findings]
 
-    leaf_findings = [
-        f for f in size_findings
-        if str(field(f, "file")).replace("\\", "/").startswith("specs/components/leaf-")
-    ]
-    for f in leaf_findings:
-        message = str(field(f, "message"))
-        assert "fan_in" not in message and "fan_out" not in message, (
-            "unexpected fan finding for a leaf component: " + repr(message)
-        )
+    for f in size_findings:
+        msg = str(field(f, "message"))
+        if "fan_in" in msg or "fan_out" in msg:
+            assert not _is_dep(f), (field(f, "file"), msg)

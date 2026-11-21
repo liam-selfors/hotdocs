@@ -1,7 +1,6 @@
-# hotdocs-criterion: sha256:eeed03a834fcafdfc1a5bbf599ad71208c37a7efd5ef202cdb620c753d4268e1
-import hashlib
-import json
+# hotdocs-criterion: sha256:d43d722dfbeec4a4c3bc846e0a33ecd3d6a45ea9454ad8132501f2078d48af83
 import os
+import sys
 import urllib.request
 from pathlib import Path
 
@@ -11,210 +10,162 @@ import secret_scanner
 
 
 LOG_ENV = "SECRET_SCANNER_AC012_CACHE_LOG"
-URLOPEN_LOG_ENV = "SECRET_SCANNER_AC012_URLOPEN_LOG"
 
 
-FAKE_CACHE_MANAGER_SOURCE = '''\
-import json
-import os
-import time
-from dataclasses import dataclass
-from typing import Any
+def field(value, name):
+    return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def _record(name):
-    path = os.environ.get("SECRET_SCANNER_AC012_CACHE_LOG")
-    if not path:
-        return
-    with open(path, "a", encoding="utf-8") as fh:
-        fh.write(json.dumps({"call": name}) + "\\n")
+def _fake_cache_manager_source():
+    lines = [
+        "import dataclasses",
+        "import os",
+        "import time",
+        "",
+        "LOG_ENV = " + repr(LOG_ENV),
+        "",
+        "",
+        "def _log(name):",
+        "    p = os.environ.get(LOG_ENV)",
+        "    if p:",
+        "        with open(p, 'a') as fh:",
+        "            fh.write(name + chr(10))",
+        "",
+        "",
+        "class SchemaValidationError(ValueError):",
+        "    pass",
+        "",
+        "",
+        "class Miss:",
+        "    def __eq__(self, other):",
+        "        return isinstance(other, Miss)",
+        "",
+        "    def __hash__(self):",
+        "        return 0",
+        "",
+        "",
+        "@dataclasses.dataclass",
+        "class CacheKey:",
+        "    spec_bundle_hash: str",
+        "    gate_inputs_hash: str",
+        "    gate_version: str",
+        "    model_pin: str",
+        "",
+        "    def __post_init__(self):",
+        "        _log('CacheKey')",
+        "",
+        "",
+        "@dataclasses.dataclass",
+        "class CachedResult:",
+        "    gate_type: str",
+        "    payload: dict",
+        "    stored_at: str",
+        "",
+        "    def __post_init__(self):",
+        "        _log('CachedResult')",
+        "",
+        "",
+        "def get(cache_key, *, repo_root=None):",
+        "    _log('get')",
+        "    return Miss()",
+        "",
+        "",
+        "def put(cache_key, result, *, repo_root=None):",
+        "    _log('put')",
+        "    return None",
+        "",
+        "",
+        "def now_iso():",
+        "    _log('now_iso')",
+        "    return time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())",
+        "",
+        "",
+        "def stats(*, repo_root=None):",
+        "    _log('stats')",
+        "    return dict(entry_count=0)",
+        "",
+    ]
+    return "\n".join(lines)
 
 
-@dataclass
-class CacheKey:
-    spec_bundle_hash: str
-    gate_inputs_hash: str
-    gate_version: str
-    model_pin: str
-
-    def __post_init__(self):
-        _record("CacheKey")
+def _write_fake_cache_manager(repo_root):
+    d = repo_root / "gen" / "cache-manager"
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "cache_manager.py").write_text(_fake_cache_manager_source())
 
 
-@dataclass
-class CachedResult:
-    gate_type: str
-    payload: Any
-    stored_at: str
-
-    def __post_init__(self):
-        _record("CachedResult")
-
-
-class Miss:
-    def __init__(self):
-        _record("Miss")
-
-    def __eq__(self, other):
-        return isinstance(other, Miss)
-
-    def __hash__(self):
-        return 0
-
-    def __repr__(self):
-        return "Miss()"
+def _write_secret_file(repo_root):
+    # Built at runtime so this test file holds no detectable literal.
+    key = "AKIA" + "IOSFODNN7" + "EXAMPLE"
+    src = "AWS_ACCESS_KEY_ID = " + repr(key) + "\n"
+    target = repo_root / "src" / "config.py"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(src)
 
 
-class SchemaValidationError(ValueError):
-    pass
-
-
-def get(cache_key, *, repo_root=None):
-    _record("get")
-    return Miss()
-
-
-def put(cache_key, result, *, repo_root=None):
-    _record("put")
-    return None
-
-
-def now_iso():
-    _record("now_iso")
-    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-
-
-def stats(*, repo_root=None):
-    _record("stats")
-    return {"entry_count": 0}
-
-
-def main(argv=None):
-    _record("main")
-    return 0
-'''
-
-
-def _field(value, name):
-    if isinstance(value, dict):
-        return value.get(name)
-    return getattr(value, name, None)
-
-
-def _planted_secret():
-    # Built at runtime so this test file itself carries no literal key.
-    return "AKIA" + "IOSFODNN7" + "EXAMPLE"
-
-
-def _make_repo(base: Path, with_secret: bool) -> Path:
-    repo_root = base / "repo"
-    repo_root.mkdir(parents=True, exist_ok=True)
-    fake_dir = repo_root / "gen" / "cache-manager"
-    fake_dir.mkdir(parents=True, exist_ok=True)
-    (fake_dir / "cache_manager.py").write_text(FAKE_CACHE_MANAGER_SOURCE, encoding="utf-8")
-    (repo_root / "README.md").write_text("Nothing secret here.\n", encoding="utf-8")
-    if with_secret:
-        src_dir = repo_root / "gen" / "foo"
-        src_dir.mkdir(parents=True, exist_ok=True)
-        (src_dir / "config.py").write_text(
-            'AWS_ACCESS_KEY_ID = "' + _planted_secret() + '"\n', encoding="utf-8"
-        )
-    return repo_root
-
-
-def _read_log(path: Path):
-    if not path.exists():
-        return []
-    lines = [ln for ln in path.read_text(encoding="utf-8").splitlines() if ln.strip()]
-    return [json.loads(ln) for ln in lines]
-
-
-def _snapshot(root: Path):
-    dirs = set()
-    files = {}
-    for current, dirnames, filenames in os.walk(root):
-        cur = Path(current)
-        for d in dirnames:
-            dirs.add((cur / d).relative_to(root).as_posix())
-        for f in filenames:
-            p = cur / f
-            rel = p.relative_to(root).as_posix()
-            st = p.stat()
-            files[rel] = (
-                st.st_size,
-                st.st_mtime_ns,
-                hashlib.sha256(p.read_bytes()).hexdigest(),
-            )
-    return dirs, files
+def _snapshot(root):
+    snap = {}
+    st = root.stat()
+    snap["."] = ("dir", None, st.st_mtime_ns)
+    for p in sorted(root.rglob("*")):
+        rel = p.relative_to(root).as_posix()
+        st = p.stat()
+        if p.is_dir():
+            snap[rel] = ("dir", None, st.st_mtime_ns)
+        else:
+            snap[rel] = ("file", p.read_bytes(), st.st_mtime_ns)
+    return snap
 
 
 @pytest.fixture
-def isolated_env(tmp_path, monkeypatch):
-    log_dir = tmp_path / "logs"
+def env(tmp_path, monkeypatch):
+    log_dir = tmp_path / "log"
     log_dir.mkdir()
-    cache_log = log_dir / "cache_calls.jsonl"
-    urlopen_log = log_dir / "urlopen_calls.jsonl"
-    monkeypatch.setenv(LOG_ENV, str(cache_log))
-    monkeypatch.setenv(URLOPEN_LOG_ENV, str(urlopen_log))
+    log_path = log_dir / "calls.log"
+    monkeypatch.setenv(LOG_ENV, str(log_path))
     monkeypatch.delenv("VAR_COMPLIANCE_WEBHOOK_URL", raising=False)
-    monkeypatch.delenv("VAR_CACHE_STORE_URL", raising=False)
 
-    def _fake_urlopen(*args, **kwargs):
-        with open(os.environ[URLOPEN_LOG_ENV], "a", encoding="utf-8") as fh:
-            fh.write(json.dumps({"call": "urlopen"}) + "\n")
+    def _no_network(*args, **kwargs):
         raise OSError("network disabled in test")
 
-    monkeypatch.setattr(urllib.request, "urlopen", _fake_urlopen)
-    work = tmp_path / "work"
-    work.mkdir()
-    return {"base": work, "cache_log": cache_log, "urlopen_log": urlopen_log}
+    monkeypatch.setattr(urllib.request, "urlopen", _no_network)
+    monkeypatch.setattr(sys, "dont_write_bytecode", True)
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    return repo_root, log_path
 
 
 @pytest.mark.parametrize("with_secret", [False, True])
-def test_gate_version_matches_scan_result_gate_version(isolated_env, with_secret):
-    repo_root = _make_repo(isolated_env["base"], with_secret)
+def test_gate_version_matches_scan_result(env, with_secret):
+    repo_root, _log_path = env
+    _write_fake_cache_manager(repo_root)
+    if with_secret:
+        _write_secret_file(repo_root)
 
-    before = secret_scanner.gate_version(repo_root)
+    version = secret_scanner.gate_version(repo_root)
     result = secret_scanner.scan(repo_root)
-    after = secret_scanner.gate_version(repo_root)
 
-    scan_gate_version = _field(result, "gate_version")
-    assert isinstance(before, str)
-    assert before, "gate_version must not be empty"
-    assert scan_gate_version == before
-    assert after == before
-
-    # Sanity: the stand-in cache-manager is actually what scan wired to,
-    # so the "never called" assertion elsewhere is meaningful.
-    calls = [rec.get("call") for rec in _read_log(isolated_env["cache_log"])]
-    assert "get" in calls, "scan did not consult the stand-in cache-manager: %r" % calls
+    assert isinstance(version, str)
+    assert version == field(result, "gate_version")
 
 
-def test_gate_version_does_not_call_cache_manager_or_write(isolated_env):
-    repo_root = _make_repo(isolated_env["base"], with_secret=True)
-    cache_log = isolated_env["cache_log"]
-    assert not cache_log.exists()
+def test_gate_version_does_not_scan_call_cache_or_write(env):
+    repo_root, log_path = env
+    _write_fake_cache_manager(repo_root)
+    _write_secret_file(repo_root)
 
-    dirs_before, files_before = _snapshot(repo_root)
+    before = _snapshot(repo_root)
 
     version = secret_scanner.gate_version(repo_root)
 
+    after = _snapshot(repo_root)
+
     assert isinstance(version, str)
-    assert version, "gate_version must not be empty"
-
-    calls = _read_log(cache_log)
-    assert calls == [], "gate_version called the cache-manager stand-in: %r" % calls
-
-    dirs_after, files_after = _snapshot(repo_root)
-    assert dirs_after == dirs_before, "directories under repo_root changed: added=%r removed=%r" % (
-        sorted(dirs_after - dirs_before),
-        sorted(dirs_before - dirs_after),
+    calls = log_path.read_text().splitlines() if log_path.exists() else []
+    assert calls == [], "cache-manager stand-in was called: " + repr(calls)
+    assert sorted(after.keys()) == sorted(before.keys()), (
+        "files created or removed under repo_root: "
+        + repr(sorted(set(after) ^ set(before)))
     )
-    assert set(files_after) == set(files_before), "files under repo_root added/removed: added=%r removed=%r" % (
-        sorted(set(files_after) - set(files_before)),
-        sorted(set(files_before) - set(files_after)),
-    )
-    changed = sorted(k for k in files_before if files_before[k] != files_after[k])
-    assert changed == [], "files under repo_root changed: %r" % changed
-
-    assert not isolated_env["urlopen_log"].exists(), "gate_version attempted a network call"
+    for rel, entry in before.items():
+        assert after[rel] == entry, "changed under repo_root: " + repr(rel)

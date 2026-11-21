@@ -1,16 +1,21 @@
-# hotdocs-criterion: sha256:2aaa867dab99e441ae931c128301706261de8a6562fc48a21b882bb50f9e1b2c
-import copy
+# hotdocs-criterion: sha256:8743e86f6d1f7f24d9e3f9e8213126aaab5afbc1b6ef6436753caba38b6808a1
 import json
 from pathlib import Path
 
 import provenance_tracker
 
 
-def field(value, name):
-    return value[name] if isinstance(value, dict) else getattr(value, name)
+PLAIN_HASH = "sha256:" + "a" * 64
+SEAL_HASH = "sha256:" + "0123456789abcdef" * 4
 
-
-SEAL_HASH = "sha256:" + "0" * 64
+GATE_VERSIONS = {
+    "compiler": "criterion-compiler@1.0.0",
+    "generated_test": "generated_test@1.0.0",
+    "verifier": "verifier-orchestrator@2.0.0",
+    "license_scanner": "license_scanner@4.0.3+9f2c41ab07de",
+    "secret_scanner": "secret_scanner@0.0.0",
+    "generator": "generator@3.0.0+v11",
+}
 
 SEALED_HIT = {
     "hit": True,
@@ -36,61 +41,68 @@ SEALED_MISS = {
     "written_at": None,
 }
 
-PLAIN_HASH = "sha256:" + "a" * 64
+PLAIN_VERIFICATION_REPORT = {
+    "component_id": "comp-plain",
+    "criteria": [
+        {"id": "AC-PLAIN-001", "covers": "R-PLAIN-001", "kind": "compiled", "result": "pass"},
+    ],
+    "requirement_results": {"R-PLAIN-001": "pass"},
+    "interface_drift": False,
+    "mutation_score": 0.92,
+    "mutation_error": None,
+    "assets": [
+        {
+            "kind": "python",
+            "path": ".",
+            "definition_sha256": None,
+            "adapter_sha256": "sha256:" + "b" * 64,
+            "versions": {"python": "3.12.4"},
+            "lockfile_sha256": None,
+        }
+    ],
+    "overall": "pass",
+}
 
-PLAIN_GATE_VERSIONS = {
-    "compiler": "criterion-compiler@1.0.0",
-    "generated_test": "generated_test@1.0.0",
-    "verifier": "verifier-orchestrator@2.0.0",
-    "license_scanner": "license_scanner@4.0.3+9f2c41ab07de",
-    "secret_scanner": "secret_scanner@0.0.0",
+PLAIN_LICENSE_SCAN = {
+    "component_id": "comp-plain",
+    "gate_version": "license_scanner@4.0.3+9f2c41ab07de",
+    "evaluated": True,
+    "reason": None,
+    "similarity_score": 0.1,
+    "block_threshold": 0.7,
+    "blocked": False,
+    "matches": [],
+    "notified": False,
+    "notification_delivery_error": None,
+    "cache_hit": False,
+}
+
+PLAIN_SECRET_SCAN = {
+    "scope": "full",
+    "gate_version": "secret_scanner@3.1.0+detect-secrets.1.5.0",
+    "flagged": False,
+    "matches": [],
+    "allowed": [],
+    "unused_allowlist_entries": [],
+    "notified": False,
+    "notification_delivery_error": None,
+    "cache_hit": False,
 }
 
 PLAIN_HIT = {
     "hit": True,
-    "verification_report": {
-        "component_id": "comp-plain",
-        "criteria": [
-            {"id": "AC-PLAIN-001", "covers": "R-PLAIN-001", "kind": "compiled", "result": "pass"},
-        ],
-        "requirement_results": {"R-PLAIN-001": "pass"},
-        "interface_drift": False,
-        "mutation_score": 0.92,
-        "mutation_error": None,
-        "overall": "pass",
-    },
-    "license_scan": {
-        "component_id": "comp-plain",
-        "gate_version": "license_scanner@4.0.3+9f2c41ab07de",
-        "evaluated": True,
-        "reason": None,
-        "similarity_score": 0.1,
-        "block_threshold": 0.7,
-        "blocked": False,
-        "matches": [],
-        "notified": False,
-        "notification_delivery_error": None,
-        "cache_hit": False,
-    },
-    "secret_scan": {
-        "scope": "full",
-        "gate_version": "secret_scanner@0.0.0",
-        "flagged": False,
-        "matches": [],
-        "allowed": [],
-        "unused_allowlist_entries": [],
-        "notified": False,
-        "notification_delivery_error": None,
-        "cache_hit": False,
-    },
+    "reason": None,
+    "verification_report": PLAIN_VERIFICATION_REPORT,
+    "license_scan": PLAIN_LICENSE_SCAN,
+    "secret_scan": PLAIN_SECRET_SCAN,
 }
 
 FLAGGED_SECRET_SCAN = {
     "scope": "full",
-    "gate_version": "secret_scanner@0.0.0",
+    "gate_version": "secret_scanner@3.1.0+detect-secrets.1.5.0",
     "flagged": True,
     "matches": [
-        {"rule_id": "AWS Access Key", "risk_tier": "high", "file": "legacy/seal/config.py", "line": 3},
+        {"rule_id": "AWS Access Key", "risk_tier": "high", "file": "legacy/seal/config.py", "line": 12}
     ],
     "allowed": [],
     "unused_allowlist_entries": [],
@@ -100,256 +112,227 @@ FLAGGED_SECRET_SCAN = {
 }
 
 
-LOG_HELPERS = (
-    "import json\n"
-    "import copy\n"
-    "\n"
-    "class _Obj:\n"
-    "    def __init__(self, **kw):\n"
-    "        self.__dict__.update(kw)\n"
-    "\n"
-    "def _log(name, *args):\n"
-    "    with open(LOG, 'a') as f:\n"
-    "        f.write(json.dumps([name] + [a if isinstance(a, (str, int, dict, list, type(None))) else str(a) for a in args]) + '\\n')\n"
-    "\n"
-)
-
-CHECKER_BODY = (
-    "def current_sealed_key(component_id, repo_root):\n"
-    "    _log('current_sealed_key', component_id, str(repo_root))\n"
-    "    if component_id == 'comp-seal':\n"
-    "        return _Obj(owners=['pipeline-team'], source_path='legacy/seal/', source_hash=SEAL_HASH, verifier_version='verifier-orchestrator@2.0.0')\n"
-    "    return None\n"
-    "\n"
-    "def check_sealed_provenance(component_id, repo_root):\n"
-    "    _log('check_sealed_provenance', component_id, str(repo_root))\n"
-    "    return copy.deepcopy(SEALED_RESULT)\n"
-    "\n"
-    "def current_provenance_key(component_id, repo_root):\n"
-    "    _log('current_provenance_key', component_id, str(repo_root))\n"
-    "    return _Obj(spec_bundle_hash=PLAIN_HASH, gate_versions=dict(PLAIN_GATE_VERSIONS))\n"
-    "\n"
-    "def check_provenance(component_id, spec_bundle_hash, gate_versions, repo_root):\n"
-    "    _log('check_provenance', component_id, spec_bundle_hash, dict(gate_versions), str(repo_root))\n"
-    "    if component_id == 'comp-plain':\n"
-    "        return copy.deepcopy(PLAIN_HIT)\n"
-    "    return {'hit': False, 'verification_report': None, 'license_scan': None, 'secret_scan': None}\n"
-)
-
-GATE_RUNNER_BODY = (
-    "_log('component_gate_runner_loaded')\n"
-    "\n"
-    "def run_component_gates(*args, **kwargs):\n"
-    "    _log('run_component_gates')\n"
-    "    raise RuntimeError('component-gate-runner must never be called')\n"
-)
-
-CAPABILITY_BODY = (
-    "GATE_VERSION = 'capability_scenario_verifier@2.0.0'\n"
-    "\n"
-    "class UnknownCapabilityError(ValueError):\n"
-    "    pass\n"
-    "\n"
-    "class ModelRequiredError(ValueError):\n"
-    "    pass\n"
-    "\n"
-    "def check_capability_provenance(capability_id, repo_root):\n"
-    "    _log('check_capability_provenance', capability_id, str(repo_root))\n"
-    "    return {'hit': True, 'capability_scenario_report': {capability_id: {'overall': 'pass', 'scenarios': []}}}\n"
-    "\n"
-    "def run_capability_gates(capability_id, repo_root, model=None, seed=0, llm_backend=None):\n"
-    "    _log('run_capability_gates', capability_id, str(repo_root))\n"
-    "    return {'hit': True, 'capability_scenario_report': {capability_id: {'overall': 'pass', 'scenarios': []}}}\n"
-    "\n"
-    "def run_capability_scenarios(blast_radius, repo_root, judge=None, test_author=None):\n"
-    "    _log('run_capability_scenarios', str(repo_root))\n"
-    "    return {}\n"
-)
-
-SECRET_BODY = (
-    "def gate_version(repo_root):\n"
-    "    _log('secret_gate_version', str(repo_root))\n"
-    "    return 'secret_scanner@0.0.0'\n"
-    "\n"
-    "def scan_repo(repo_root, *args, **kwargs):\n"
-    "    _log('secret_scan_repo', str(repo_root))\n"
-    "    return copy.deepcopy(FLAGGED)\n"
-    "\n"
-    "def scan_files(*args, **kwargs):\n"
-    "    _log('secret_scan_files')\n"
-    "    return copy.deepcopy(FLAGGED)\n"
-    "\n"
-    "def scan(*args, **kwargs):\n"
-    "    _log('secret_scan')\n"
-    "    return copy.deepcopy(FLAGGED)\n"
-    "\n"
-    "def stored_result(*args, **kwargs):\n"
-    "    _log('secret_stored_result')\n"
-    "    return copy.deepcopy(FLAGGED)\n"
-    "\n"
-    "def load_stored_result(*args, **kwargs):\n"
-    "    _log('secret_load_stored_result')\n"
-    "    return copy.deepcopy(FLAGGED)\n"
-    "\n"
-    "def read_stored_result(*args, **kwargs):\n"
-    "    _log('secret_read_stored_result')\n"
-    "    return copy.deepcopy(FLAGGED)\n"
-)
+def field(value, name):
+    return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def _write(path, text):
+def write(path, text):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
 
 
-def _build_repo(tmp_path, sealed_result, flagged_secret=False):
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    log = tmp_path / "invocations.log"
-    log.write_text("", encoding="utf-8")
-
-    _write(
-        repo_root / "specs" / "components" / "seal" / "component.md",
+def write_component(repo_root, slug, comp_id):
+    text = (
         "---\n"
-        "id: comp-seal\n"
-        "title: Seal\n"
+        "id: " + comp_id + "\n"
+        "title: " + slug + " component\n"
         "status: draft\n"
         "owners: [pipeline-team]\n"
         "depends_on: []\n"
         "sealed: true\n"
-        "source_path: legacy/seal/\n"
+        "source_path: legacy/" + slug + "/\n"
         "---\n"
         "\n"
-        "# Seal\n",
-    )
-    _write(
-        repo_root / "specs" / "components" / "plain" / "component.md",
-        "---\n"
-        "id: comp-plain\n"
-        "title: Plain\n"
-        "status: draft\n"
-        "owners: [pipeline-team]\n"
-        "depends_on: []\n"
-        "sealed: false\n"
-        "---\n"
+        "# " + comp_id + "\n"
         "\n"
-        "# Plain\n",
+        "A fixture component.\n"
     )
-    _write(repo_root / "legacy" / "seal" / "seal.py", "VALUE = 1\n")
+    write(repo_root / "specs" / "components" / slug / "component.md", text)
 
-    header = "LOG = " + repr(str(log)) + "\n"
 
-    checker_src = (
-        header
-        + LOG_HELPERS
-        + "SEAL_HASH = " + repr(SEAL_HASH) + "\n"
+LOG_HELPER = (
+    "import json\n"
+    "import types\n"
+    "\n"
+    "def _plain(a):\n"
+    "    if isinstance(a, (dict, list, str, int, float, bool)) or a is None:\n"
+    "        return a\n"
+    "    return str(a)\n"
+    "\n"
+    "def _log(name, *args):\n"
+    "    with open(LOG, 'a', encoding='utf-8') as f:\n"
+    "        f.write(json.dumps({'name': name, 'args': [_plain(a) for a in args]}) + '\\n')\n"
+    "\n"
+)
+
+
+def write_fakes(repo_root, log_path, sealed_result, with_flagged_secret_scan=False):
+    checker = (
+        "LOG = " + repr(str(log_path)) + "\n"
+        + LOG_HELPER
+        + "SEALED_IDS = " + repr(["comp-seal"]) + "\n"
         + "SEALED_RESULT = " + repr(sealed_result) + "\n"
+        + "PLAIN_RESULT = " + repr(PLAIN_HIT) + "\n"
         + "PLAIN_HASH = " + repr(PLAIN_HASH) + "\n"
-        + "PLAIN_GATE_VERSIONS = " + repr(PLAIN_GATE_VERSIONS) + "\n"
-        + "PLAIN_HIT = " + repr(PLAIN_HIT) + "\n"
+        + "GATE_VERSIONS = " + repr(GATE_VERSIONS) + "\n"
+        + "SEAL_HASH = " + repr(SEAL_HASH) + "\n"
         + "\n"
-        + CHECKER_BODY
+        "def current_sealed_key(component_id, repo_root):\n"
+        "    _log('current_sealed_key', component_id, repo_root)\n"
+        "    if component_id in SEALED_IDS:\n"
+        "        return types.SimpleNamespace(\n"
+        "            owners=['pipeline-team'],\n"
+        "            source_path='legacy/' + component_id[len('comp-'):] + '/',\n"
+        "            source_hash=SEAL_HASH,\n"
+        "            verifier_version='verifier-orchestrator@2.0.0',\n"
+        "        )\n"
+        "    return None\n"
+        "\n"
+        "def check_sealed_provenance(component_id, repo_root):\n"
+        "    _log('check_sealed_provenance', component_id, repo_root)\n"
+        "    return dict(SEALED_RESULT)\n"
+        "\n"
+        "def current_provenance_key(component_id, repo_root):\n"
+        "    _log('current_provenance_key', component_id, repo_root)\n"
+        "    return types.SimpleNamespace(\n"
+        "        spec_bundle_hash=PLAIN_HASH,\n"
+        "        gate_versions=dict(GATE_VERSIONS),\n"
+        "        assets=[{'kind': 'python', 'path': '.', 'definition_sha256': None,\n"
+        "                 'adapter_sha256': 'sha256:' + 'b' * 64,\n"
+        "                 'versions': {'python': '3.12.4'}, 'lockfile_sha256': None}],\n"
+        "    )\n"
+        "\n"
+        "def check_provenance(component_id, spec_bundle_hash, gate_versions, repo_root):\n"
+        "    _log('check_provenance', component_id, spec_bundle_hash, gate_versions, repo_root)\n"
+        "    if component_id in SEALED_IDS:\n"
+        "        return {'hit': False, 'reason': 'no manifest', 'verification_report': None,\n"
+        "                'license_scan': None, 'secret_scan': None}\n"
+        "    return json.loads(json.dumps(PLAIN_RESULT))\n"
     )
-    _write(repo_root / "gen" / "provenance-checker" / "provenance_checker.py", checker_src)
+    write(repo_root / "gen" / "provenance-checker" / "provenance_checker.py", checker)
 
-    _write(
-        repo_root / "gen" / "component-gate-runner" / "component_gate_runner.py",
-        header + LOG_HELPERS + GATE_RUNNER_BODY,
+    gate_runner = (
+        "LOG = " + repr(str(log_path)) + "\n"
+        + LOG_HELPER
+        + "_log('LOADED component-gate-runner')\n"
+        "\n"
+        "def run_component_gates(*args, **kwargs):\n"
+        "    _log('run_component_gates', *args)\n"
+        "    raise RuntimeError('component-gate-runner must never be called')\n"
     )
-    _write(
+    write(repo_root / "gen" / "component-gate-runner" / "component_gate_runner.py", gate_runner)
+
+    capability = (
+        "LOG = " + repr(str(log_path)) + "\n"
+        + LOG_HELPER
+        + "GATE_VERSION = 'capability_scenario_verifier@2.2.0'\n"
+        "\n"
+        "class UnknownCapabilityError(ValueError):\n"
+        "    pass\n"
+        "\n"
+        "class ModelRequiredError(ValueError):\n"
+        "    pass\n"
+        "\n"
+        "def check_capability_provenance(capability_id, repo_root):\n"
+        "    _log('check_capability_provenance', capability_id, repo_root)\n"
+        "    return {'hit': True, 'capability_scenario_report': {capability_id: {'overall': 'pass', 'scenarios': []}}}\n"
+        "\n"
+        "def run_capability_gates(capability_id, repo_root, model=None, seed=0, llm_backend=None):\n"
+        "    _log('run_capability_gates', capability_id, repo_root)\n"
+        "    return {'hit': True, 'capability_scenario_report': {capability_id: {'overall': 'pass', 'scenarios': []}}}\n"
+        "\n"
+        "def run_capability_scenarios(blast_radius, repo_root, judge=None, test_author=None):\n"
+        "    _log('run_capability_scenarios', blast_radius, repo_root)\n"
+        "    return {}\n"
+    )
+    write(
         repo_root / "gen" / "capability-scenario-verifier" / "capability_scenario_verifier.py",
-        header + LOG_HELPERS + CAPABILITY_BODY,
+        capability,
     )
 
-    if flagged_secret:
-        _write(
-            repo_root / "gen" / "secret-scanner" / "secret_scanner.py",
-            header + LOG_HELPERS + "FLAGGED = " + repr(FLAGGED_SECRET_SCAN) + "\n\n" + SECRET_BODY,
+    if with_flagged_secret_scan:
+        scanner = (
+            "LOG = " + repr(str(log_path)) + "\n"
+            + LOG_HELPER
+            + "FLAGGED = " + repr(FLAGGED_SECRET_SCAN) + "\n"
+            "\n"
+            "def gate_version(repo_root):\n"
+            "    _log('secret_scanner.gate_version', repo_root)\n"
+            "    return FLAGGED['gate_version']\n"
+            "\n"
+            "def stored_result(repo_root):\n"
+            "    _log('secret_scanner.stored_result', repo_root)\n"
+            "    return dict(FLAGGED)\n"
+            "\n"
+            "def scan_repository(repo_root):\n"
+            "    _log('secret_scanner.scan_repository', repo_root)\n"
+            "    return dict(FLAGGED)\n"
         )
-        stored = json.dumps(FLAGGED_SECRET_SCAN)
-        _write(repo_root / ".hotdocs" / "secret-scan.json", stored)
-        _write(repo_root / ".hotdocs" / "secret-scanner" / "result.json", stored)
-
-    return repo_root, log
-
-
-def _read_log(log):
-    entries = []
-    for line in log.read_text(encoding="utf-8").splitlines():
-        line = line.strip()
-        if line:
-            entries.append(json.loads(line))
-    return entries
+        write(repo_root / "gen" / "secret-scanner" / "secret_scanner.py", scanner)
+        write(
+            repo_root / ".hotdocs" / "secret-scan" / "result.json",
+            json.dumps(FLAGGED_SECRET_SCAN),
+        )
 
 
-def _calls(entries, name):
-    return [e for e in entries if e[0] == name]
+def read_log(log_path):
+    if not log_path.exists():
+        return []
+    return [json.loads(line) for line in log_path.read_text(encoding="utf-8").splitlines() if line.strip()]
 
 
-def _assert_gate_runner_never_loaded(entries):
-    assert _calls(entries, "component_gate_runner_loaded") == []
-    assert _calls(entries, "run_component_gates") == []
+def ids_for(entries, name):
+    return [e["args"][0] for e in entries if e["name"] == name]
 
 
-def test_sealed_component_hit_routes_through_sealed_path(tmp_path):
-    repo_root, log = _build_repo(tmp_path, copy.deepcopy(SEALED_HIT))
+def build(tmp_path, sealed_result, with_flagged_secret_scan=False):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    log_path = tmp_path / "invocations.log"
+    write_component(repo_root, "seal", "comp-seal")
+    write_component(repo_root, "plain", "comp-plain")
+    write_fakes(repo_root, log_path, sealed_result, with_flagged_secret_scan)
+    return repo_root, log_path
+
+
+def test_sealed_component_routed_to_sealed_check_and_hit_is_ready(tmp_path):
+    repo_root, log_path = build(tmp_path, SEALED_HIT)
 
     report = provenance_tracker.check_readiness(repo_root)
 
     assert field(report, "ready") is True
-
-    entries = _read_log(log)
-
-    sealed_calls = _calls(entries, "check_sealed_provenance")
-    assert [c[1] for c in sealed_calls] == ["comp-seal"]
-
-    prov_calls = _calls(entries, "check_provenance")
-    assert [c[1] for c in prov_calls] == ["comp-plain"]
-    assert prov_calls[0][2] == PLAIN_HASH
-    assert prov_calls[0][3] == PLAIN_GATE_VERSIONS
-
-    key_calls = _calls(entries, "current_provenance_key")
-    assert [c[1] for c in key_calls] == ["comp-plain"]
+    entries = read_log(log_path)
+    assert ids_for(entries, "check_sealed_provenance") == ["comp-seal"]
+    assert ids_for(entries, "check_provenance") == ["comp-plain"]
+    assert ids_for(entries, "current_provenance_key") == ["comp-plain"]
 
     components = field(report, "components")
     assert components["comp-seal"] == SEALED_HIT
 
-    _assert_gate_runner_never_loaded(entries)
+    names = [e["name"] for e in entries]
+    assert "LOADED component-gate-runner" not in names
+    assert "run_component_gates" not in names
 
 
-def test_sealed_component_miss_reports_reason(tmp_path):
-    repo_root, log = _build_repo(tmp_path, copy.deepcopy(SEALED_MISS))
+def test_sealed_miss_reports_sealed_provenance_reason(tmp_path):
+    repo_root, log_path = build(tmp_path, SEALED_MISS)
 
     report = provenance_tracker.check_readiness(repo_root)
 
     assert field(report, "ready") is False
-
     reasons = list(field(report, "not_ready_reasons"))
     seal_reasons = [r for r in reasons if "comp-seal" in r]
     assert seal_reasons == [
         "comp-seal: sealed provenance source_changed — run hotdocs generate comp-seal"
     ]
 
-    entries = _read_log(log)
-    assert [c[1] for c in _calls(entries, "check_sealed_provenance")] == ["comp-seal"]
-    assert all(c[1] != "comp-seal" for c in _calls(entries, "check_provenance"))
-    assert all(c[1] != "comp-seal" for c in _calls(entries, "current_provenance_key"))
-
-    _assert_gate_runner_never_loaded(entries)
+    names = [e["name"] for e in read_log(log_path)]
+    assert "LOADED component-gate-runner" not in names
+    assert "run_component_gates" not in names
 
 
-def test_sealed_component_ignores_flagged_secret_scan(tmp_path):
-    repo_root, log = _build_repo(tmp_path, copy.deepcopy(SEALED_HIT), flagged_secret=True)
+def test_sealed_readiness_ignores_flagged_repository_secret_scan(tmp_path):
+    repo_root, log_path = build(tmp_path, SEALED_HIT, with_flagged_secret_scan=True)
 
     report = provenance_tracker.check_readiness(repo_root)
 
     components = field(report, "components")
     assert components["comp-seal"] == SEALED_HIT
-
     reasons = list(field(report, "not_ready_reasons"))
     assert [r for r in reasons if "comp-seal" in r] == []
 
-    entries = _read_log(log)
-    assert [c[1] for c in _calls(entries, "check_sealed_provenance")] == ["comp-seal"]
-
-    _assert_gate_runner_never_loaded(entries)
+    entries = read_log(log_path)
+    assert ids_for(entries, "check_sealed_provenance") == ["comp-seal"]
+    names = [e["name"] for e in entries]
+    assert "LOADED component-gate-runner" not in names
+    assert "run_component_gates" not in names

@@ -25,8 +25,8 @@ per-attempt level.
 mapping each `R-id` string to `"pass"` or `"fail"`, such as
 `{"R-FOO-001": "pass", "R-FOO-002": "fail"}`; and `criteria`, a list of
 objects each with `covers` (one `R-id`), `result` (`"pass"`, `"fail"` or
-`"skipped"`) and, on a failed one, `failure_origin` (`"test"` or
-`"implementation"`; absent means `"implementation"`).
+`"skipped"`) and, on a failed one, `failure_origin` (`"test"`,
+`"environment"` or `"implementation"`; absent means `"implementation"`).
 
 Never mutated once written, append-only — a later, separate
 `hotdocs generate` attempt on the same component writes its own new

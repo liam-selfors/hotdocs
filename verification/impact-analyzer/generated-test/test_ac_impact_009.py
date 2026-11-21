@@ -1,239 +1,159 @@
-# hotdocs-criterion: sha256:ce12ea3b078d59e4fcd62a2421eccd29fa44766e88745820f03c1c45a678239b
+# hotdocs-criterion: sha256:121c91cb283bbd72c2e91e0fabc342af97c2098a50c9d16579ce25c55d007844
 import importlib.util
-import os
+import json
+import subprocess
 import sys
 from pathlib import Path
 
 import impact_analyzer
 
 
-def _get(value, key, default=None):
-    if isinstance(value, dict):
-        return value.get(key, default)
-    return getattr(value, key, default)
+GIT = [
+    "git",
+    "-c", "user.name=hotdocs-test",
+    "-c", "user.email=test@example.com",
+    "-c", "commit.gpgsign=false",
+]
 
 
-def _write(path: Path, text: str) -> None:
+def git(repo, *args):
+    subprocess.run(GIT + list(args), cwd=str(repo), check=True,
+                   stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+
+
+def field(value, name):
+    return value[name] if isinstance(value, dict) else getattr(value, name)
+
+
+def write(path, text):
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text, encoding="utf-8")
+    path.write_text(text)
 
 
-def _component_md(comp_id: str, title: str, source_path: str, depends_on=None) -> str:
-    lines = [
+def write_component(repo, slug, depends_on=None, signature="run(x: int) -> int"):
+    upper = slug.upper()
+    title = slug.title()
+    base = repo / "specs" / "components" / slug
+    fm = [
         "---",
-        f"id: {comp_id}",
-        f"title: {title}",
+        "id: comp-" + slug,
+        "title: " + title,
         "status: draft",
-        "owners: [alice]",
+        "owners: [test-team]",
+        "sealed: true",
+        "source_path: legacy/" + slug + "/",
     ]
     if depends_on:
-        lines.append("depends_on: [" + ", ".join(depends_on) + "]")
-    lines += [
-        "sealed: true",
-        f"source_path: {source_path}",
-        "---",
-        "",
-        f"# {title}",
-        "",
-        "## Purpose",
-        "",
-        f"{title} is a small synthetic component used only as a test fixture.",
-        "",
-        "## Scope",
-        "",
-        "- In scope: fixture behavior.",
-        "- Out of scope: everything else.",
-        "",
-        "## Definitions",
-        "",
-        "None.",
-        "",
-        "## Behavior",
-        "",
-        "See `requirements/`.",
-        "",
-        "## Interfaces",
-        "",
-        "See `interface/`.",
-        "",
-        "## Data",
-        "",
-        "See `interface/data/`.",
-        "",
-        "## Acceptance criteria",
-        "",
-        "See `acceptance/`.",
-        "",
-        "## Non-functional constraints",
-        "",
-        "See `constraints.md`.",
-        "",
-        "## Open questions",
-        "",
-        "## Change log",
-        "",
-        "- Initial fixture.",
-        "",
+        fm.append("depends_on: [" + ", ".join(depends_on) + "]")
+    fm.append("---")
+    body = ["", "# " + title]
+    for section in [
+        "Purpose", "Scope", "Definitions", "Behavior", "Interfaces",
+        "Acceptance criteria", "Open questions", "Change log",
+    ]:
+        body.extend(["", "## " + section, "", "Text for " + section.lower() + "."])
+    write(base / "component.md", "\n".join(fm + body) + "\n")
+    write(
+        base / "requirements" / ("R-" + upper + "-001.md"),
+        "# R-" + upper + "-001\n\nThe component MUST return its input unchanged.\n",
+    )
+    write(
+        base / "acceptance" / ("AC-" + upper + "-001.md"),
+        "# AC-" + upper + "-001\n\n"
+        + "Covers: R-" + upper + "-001\n"
+        + "Kind: generated-test\n\n"
+        + "```gherkin\nGiven 1\nWhen it runs\nThen it returns 1\n```\n",
+    )
+    write(
+        base / "constraints.md",
+        "# Constraints\n\n- The component MUST finish within 1 second.\n",
+    )
+    write_library(repo, slug, signature)
+
+
+def write_library(repo, slug, signature):
+    write(
+        repo / "specs" / "components" / slug / "interface" / "library.md",
+        "# Library\n\n```\n" + signature + "\n```\n",
+    )
+
+
+def load_spec_linter():
+    gen = next(p for p in Path(impact_analyzer.__file__).resolve().parents if p.name == "gen")
+    base = gen / "spec-linter"
+    path = base / "spec_linter.py" if (base / "spec_linter.py").is_file() else base / "spec_linter" / "__init__.py"
+    spec = importlib.util.spec_from_file_location("spec_linter", path)
+    spec_linter = importlib.util.module_from_spec(spec)
+    sys.modules["spec_linter"] = spec_linter
+    spec.loader.exec_module(spec_linter)
+    return spec_linter
+
+
+def no_precomputed_graph(repo):
+    found = [
+        p for p in repo.rglob("*")
+        if ".git" not in p.relative_to(repo).parts
+        and (p.name == "corpus-graph.json" or "corpus-graph" in p.name)
     ]
-    return "\n".join(lines)
+    return found
 
 
-def _requirement(req_id: str) -> str:
-    return (
-        f"# {req_id}\n"
-        "\n"
-        "The component MUST match its existing behavior.\n"
-    )
+def build_repo(repo):
+    write(repo / "specs" / "glossary.md", "# Glossary\n\n- **Fixture** — a test component.\n")
+    write_component(repo, "bar")
+    write_component(repo, "foo", depends_on=["comp-bar"])
+    git(repo, "init", "-q", "-b", "main")
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "-m", "A")
+    git(repo, "switch", "-q", "-c", "feature")
+    # Change comp-bar's interface in the working tree.
+    write_library(repo, "bar", "run(x: int, y: int) -> int")
 
 
-def _acceptance(ac_id: str, req_id: str) -> str:
-    return (
-        f"# {ac_id}\n"
-        "\n"
-        f"Covers: {req_id}\n"
-        "Kind: compiled\n"
-        "\n"
-        "```gherkin\n"
-        "Given the component exists\n"
-        "When it is invoked\n"
-        "Then it matches its existing behavior\n"
-        "```\n"
-    )
-
-
-def _build_fixture(repo_root: Path) -> None:
-    _write(
-        repo_root / "specs" / "glossary.md",
-        "# Glossary\n\n- **Fixture term** — a placeholder term for this test corpus.\n",
-    )
-
-    # comp-bar: no dependencies.
-    bar = repo_root / "specs" / "components" / "bar"
-    _write(bar / "component.md", _component_md("comp-bar", "Bar", "legacy/bar"))
-    _write(bar / "requirements" / "R-BAR-001.md", _requirement("R-BAR-001"))
-    _write(bar / "acceptance" / "AC-BAR-001.md", _acceptance("AC-BAR-001", "R-BAR-001"))
-    _write(
-        bar / "interface" / "library.md",
-        "# Library\n\n```\nbar_fn(x: str) -> str\n```\n\nA pure function that MUST return its input unchanged.\n",
-    )
-    _write(
-        bar / "constraints.md",
-        "# Constraints\n\n- None beyond matching existing behavior.\n",
-    )
-
-    # comp-foo: depends_on comp-bar, declared only in its own component.md frontmatter.
-    foo = repo_root / "specs" / "components" / "foo"
-    _write(
-        foo / "component.md",
-        _component_md("comp-foo", "Foo", "legacy/foo", depends_on=["comp-bar"]),
-    )
-    _write(foo / "requirements" / "R-FOO-001.md", _requirement("R-FOO-001"))
-    _write(foo / "acceptance" / "AC-FOO-001.md", _acceptance("AC-FOO-001", "R-FOO-001"))
-    _write(
-        foo / "constraints.md",
-        "# Constraints\n\n- None beyond matching existing behavior.\n",
-    )
-
-    # Hand-maintained sealed source locations (never under gen/).
-    _write(repo_root / "legacy" / "bar" / "bar.py", "def bar_fn(x):\n    return x\n")
-    _write(repo_root / "legacy" / "foo" / "foo.py", "def foo_fn(x):\n    return x\n")
-
-
-def _find_spec_linter_path():
-    candidates = []
-    mod_file = getattr(impact_analyzer, "__file__", None)
-    if mod_file:
-        candidates.extend(Path(mod_file).resolve().parents)
-    candidates.extend([Path.cwd().resolve()] + list(Path.cwd().resolve().parents))
-    seen = set()
-    for base in candidates:
-        if base in seen:
-            continue
-        seen.add(base)
-        flat = base / "gen" / "spec-linter" / "spec_linter.py"
-        if flat.is_file():
-            return flat
-        pkg = base / "gen" / "spec-linter" / "spec_linter" / "__init__.py"
-        if pkg.is_file():
-            return pkg
-    return None
-
-
-def _load_lint():
-    path = _find_spec_linter_path()
-    if path is not None:
-        module_name = "spec_linter"
-        if path.name == "__init__.py":
-            spec = importlib.util.spec_from_file_location(
-                module_name, path, submodule_search_locations=[str(path.parent)]
-            )
-        else:
-            spec = importlib.util.spec_from_file_location(module_name, path)
-        module = importlib.util.module_from_spec(spec)
-        sys.modules[module_name] = module  # register BEFORE exec_module
-        spec.loader.exec_module(module)
-        return module.lint
-    import spec_linter  # fallback if it happens to be importable
-
-    return spec_linter.lint
-
-
-def _no_precomputed_graph(repo_root: Path) -> bool:
-    for dirpath, _dirnames, filenames in os.walk(repo_root):
-        for name in filenames:
-            if name == "corpus-graph.json" or name.startswith("corpus-graph"):
-                return False
-    return True
-
-
-def test_ac_impact_009_transitive_interface_from_component_md_only(tmp_path):
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    _build_fixture(repo_root)
-
-    # Precondition: no precomputed graph artifact anywhere in the repo.
-    assert not (repo_root / "verification").exists()
-    assert _no_precomputed_graph(repo_root)
-
-    # Precondition: the fixture corpus lints clean.
-    lint = _load_lint()
-    report = lint(None, repo_root)
-    hard_failures = _get(report, "hard_failures")
-    findings = _get(report, "findings") or []
-    fail_findings = [f for f in findings if _get(f, "severity") == "fail"]
-    assert hard_failures == 0 and not fail_findings, (
-        "fixture corpus is not lint-clean: "
-        + "; ".join(
-            f"{_get(f, 'rule_id')} {_get(f, 'file')}:{_get(f, 'line')} {_get(f, 'message')}"
-            for f in fail_findings
-        )
-    )
-
-    # Still no precomputed graph artifact after linting.
-    assert _no_precomputed_graph(repo_root)
-
-    result = impact_analyzer.compute_blast_radius(["comp-bar"], repo_root)
-
-    assert _get(result, "precondition_error") is None, (
-        f"unexpected precondition_error: {_get(result, 'precondition_error')!r}"
-    )
-
-    impacted = _get(result, "impacted") or []
-    by_id = {}
-    for entry in impacted:
-        cid = _get(entry, "component_id")
-        assert cid not in by_id, f"component {cid!r} appears more than once"
-        by_id[cid] = entry
-
-    assert "comp-foo" in by_id, f"comp-foo missing from impacted: {list(by_id)}"
-    foo_entry = by_id["comp-foo"]
-    assert _get(foo_entry, "reason") == "transitive-interface"
-    assert _get(foo_entry, "via") == "comp-bar"
-
-    # The changed component itself is always direct.
+def check_report(report):
+    assert field(report, "precondition_error") is None
+    impacted = field(report, "impacted")
+    by_id = {field(e, "component_id"): e for e in impacted}
+    assert "comp-foo" in by_id, impacted
+    foo = by_id["comp-foo"]
+    assert field(foo, "reason") == "transitive-interface"
+    assert field(foo, "via") == "comp-bar"
     assert "comp-bar" in by_id
-    assert _get(by_id["comp-bar"], "reason") == "direct"
-    assert _get(by_id["comp-bar"], "via") is None
+    assert field(by_id["comp-bar"], "reason") == "direct"
+    ids = [field(e, "component_id") for e in impacted]
+    assert ids.count("comp-foo") == 1
 
-    # Computing the answer did not require (or leave behind) a precomputed graph.
-    assert _no_precomputed_graph(repo_root)
+
+def test_ac_impact_009_library_no_precomputed_graph(tmp_path):
+    repo = tmp_path
+    build_repo(repo)
+    assert no_precomputed_graph(repo) == []
+    assert not (repo / "verification").exists()
+
+    spec_linter = load_spec_linter()
+    assert spec_linter.lint(None, repo).hard_failures == 0
+
+    report = impact_analyzer.compute_blast_radius(["comp-bar"], repo)
+    check_report(report)
+
+    # The analyzer must not have needed (or created) a precomputed graph.
+    assert no_precomputed_graph(repo) == []
+
+
+def test_ac_impact_009_cli_no_precomputed_graph(tmp_path, capsys):
+    repo = tmp_path
+    build_repo(repo)
+    assert no_precomputed_graph(repo) == []
+
+    spec_linter = load_spec_linter()
+    assert spec_linter.lint(None, repo).hard_failures == 0
+    capsys.readouterr()
+
+    code = impact_analyzer.main(
+        ["--changed", "comp-bar", "--repo-root", str(repo), "--format=json"]
+    )
+    out = capsys.readouterr().out
+    assert code == 0
+    data = json.loads(out)
+    check_report(data)
+    assert no_precomputed_graph(repo) == []

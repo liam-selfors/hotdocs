@@ -1,219 +1,168 @@
-# hotdocs-criterion: sha256:59e999dd9104751b1065f3be1bc68cc6c61f79774abe723c7f5177e13e4d0be1
-import json
+# hotdocs-criterion: sha256:01168adc2b19ef8b7a83819c9d273321b6db37476dcbd87b3ac40cd7894af5ae
 from pathlib import Path
 
 import spec_linter
 
 
-def _get(obj, key):
-    if isinstance(obj, dict):
-        return obj.get(key)
-    return getattr(obj, key, None)
+def field(value, name):
+    return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def _write(path: Path, text: str) -> None:
+def write(path, text):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
 
 
-def _component_md(slug: str, purpose: str, rationale: str | None) -> str:
-    parts = [
-        "---",
-        f"id: comp-{slug}",
-        f"title: {slug.capitalize()} Formatter",
-        "status: draft",
-        "owners: [alice]",
-        "sealed: true",
-        f"source_path: legacy/{slug}",
-        "---",
-        "",
-        f"# {slug.capitalize()} Formatter",
-        "",
-        "## Purpose",
-        "",
-        purpose,
-        "",
-    ]
+def component_md(slug, purpose, rationale=None):
+    text = (
+        "---\n"
+        "id: comp-" + slug + "\n"
+        "title: " + slug.capitalize() + "\n"
+        "status: draft\n"
+        "owners: [team-a]\n"
+        "sealed: true\n"
+        "source_path: legacy/" + slug + "/\n"
+        "---\n"
+        "\n"
+        "# " + slug.capitalize() + "\n"
+        "\n"
+        "## Purpose\n"
+        "\n"
+        + purpose + "\n"
+        "\n"
+    )
     if rationale is not None:
-        parts += ["## Rationale", "", rationale, ""]
-    parts += [
-        "## Scope",
-        "",
-        f"- In scope: formatting {slug} records.",
-        "- Out of scope: parsing.",
-        "",
-        "## Definitions",
-        "",
-        "None.",
-        "",
-        "## Behavior",
-        "",
-        "See `requirements/`.",
-        "",
-        "## Interfaces",
-        "",
-        "See `interface/`.",
-        "",
-        "## Data",
-        "",
-        "See `interface/data/`.",
-        "",
-        "## Acceptance criteria",
-        "",
-        "See `acceptance/`.",
-        "",
-        "## Non-functional constraints",
-        "",
-        "See `constraints.md`.",
-        "",
-        "## Open questions",
-        "",
-        "## Change log",
-        "",
-        "- Initial draft.",
-        "",
-    ]
-    return "\n".join(parts)
+        text += "## Rationale\n\n" + rationale + "\n\n"
+    text += (
+        "## Scope\n"
+        "\n"
+        "- In scope: parsing widget files.\n"
+        "- Out of scope: writing widget files.\n"
+        "\n"
+        "## Definitions\n"
+        "\n"
+        "None.\n"
+        "\n"
+        "## Behavior\n"
+        "\n"
+        "See `requirements/`.\n"
+        "\n"
+        "## Interfaces\n"
+        "\n"
+        "See `interface/`.\n"
+        "\n"
+        "## Data\n"
+        "\n"
+        "See `interface/data/`.\n"
+        "\n"
+        "## Acceptance criteria\n"
+        "\n"
+        "See `acceptance/`.\n"
+        "\n"
+        "## Non-functional constraints\n"
+        "\n"
+        "See `constraints.md`.\n"
+        "\n"
+        "## Open questions\n"
+        "\n"
+        "## Change log\n"
+        "\n"
+        "- Initial draft.\n"
+    )
+    return text
 
 
-def _make_component(repo: Path, slug: str, purpose: str, rationale: str | None) -> None:
+def build_component(repo_root, slug, purpose, rationale=None):
     upper = slug.upper()
-    base = repo / "specs" / "components" / slug
-    _write(base / "component.md", _component_md(slug, purpose, rationale))
-    _write(
-        base / "requirements" / f"R-{upper}-001.md",
-        f"# R-{upper}-001\n\n**R-{upper}-001** — The formatter MUST return a "
-        f"non-empty string for every {slug} record.\n",
+    comp_dir = repo_root / "specs" / "components" / slug
+    write(comp_dir / "component.md", component_md(slug, purpose, rationale))
+    write(
+        comp_dir / "requirements" / ("R-" + upper + "-001.md"),
+        "# R-" + upper + "-001\n\n"
+        "**R-" + upper + "-001** — The component MUST parse each widget file "
+        "into one record.\n",
     )
-    _write(
-        base / "acceptance" / f"AC-{upper}-001.md",
-        f"# AC-{upper}-001\n\nCovers: R-{upper}-001\nKind: compiled\n\n"
-        "```gherkin\nGiven a record\nWhen it is formatted\n"
-        "Then the result is a non-empty string\n```\n",
+    write(
+        comp_dir / "acceptance" / ("AC-" + upper + "-001.md"),
+        "# AC-" + upper + "-001\n\n"
+        "Covers: R-" + upper + "-001\n"
+        "Kind: compiled\n\n"
+        "```gherkin\n"
+        "Given a widget file\n"
+        "When the component parses it\n"
+        "Then it returns one record\n"
+        "```\n",
     )
-    _write(
-        base / "constraints.md",
-        "# Constraints\n\n- Formatting one record MUST take under 10 ms, "
-        "measured by a benchmark.\n",
+    write(
+        comp_dir / "constraints.md",
+        "# Constraints\n\n- Parses a widget file in under 1 second, measured by a timer.\n",
     )
+    return "specs/components/" + slug + "/component.md"
 
 
-def _write_decision(repo: Path) -> None:
-    _write(
-        repo / "specs" / "decisions" / "D30.md",
-        "---\nid: D30\ntitle: Split parsing from formatting\nstatus: draft\n"
-        "owners: [alice]\n---\n\n# D30\n\nParsing and formatting were "
-        "coupled; split them.\n",
+def build_base(repo_root):
+    write(
+        repo_root / "specs" / "glossary.md",
+        "# Glossary\n\n- **Widget** — a file the component parses.\n",
     )
-
-
-def _write_glossary(repo: Path) -> None:
-    _write(
-        repo / "specs" / "glossary.md",
-        "# Glossary\n\n- **Record** — one input item.\n",
-    )
-
-
-CITING_PURPOSE = (
-    "Formats widget records for display. This unit was extracted once "
-    "D30 found a real coupling between parsing and formatting."
-)
-CLEAN_PURPOSE = "Formats gadget records for display."
-MOVED_RATIONALE = (
-    "This unit was extracted once D30 found a real coupling between "
-    "parsing and formatting."
-)
-
-
-def _lint024(report):
-    findings = _get(report, "findings") or []
-    return [f for f in findings if _get(f, "rule_id") == "R-LINT-024"]
-
-
-def _norm(p) -> str:
-    return str(p or "").replace("\\", "/")
-
-
-def _build_two_component_repo(repo: Path) -> None:
-    _write_glossary(repo)
-    _write_decision(repo)
-    _make_component(repo, "alpha", CITING_PURPOSE, None)
-    _make_component(repo, "beta", CLEAN_PURPOSE, MOVED_RATIONALE)
-
-
-def test_purpose_citation_fails_and_rationale_citation_does_not(tmp_path):
-    repo = tmp_path / "repo"
-    _build_two_component_repo(repo)
-
-    report = spec_linter.lint(None, repo)
-    hits = _lint024(report)
-
-    alpha_hits = [
-        f for f in hits
-        if _norm(_get(f, "file")).endswith("specs/components/alpha/component.md")
-    ]
-    assert alpha_hits, f"expected an R-LINT-024 finding on alpha's component.md, got {hits!r}"
-    for f in alpha_hits:
-        assert _get(f, "severity") == "fail"
-
-    beta_hits = [
-        f for f in hits
-        if "specs/components/beta/" in _norm(_get(f, "file"))
-    ]
-    assert beta_hits == [], f"beta's Purpose has no citation, yet got {beta_hits!r}"
-
-    hard = _get(report, "hard_failures")
-    assert hard is not None and hard >= 1
-
-
-def test_component_with_citation_only_in_rationale_has_no_finding(tmp_path):
-    repo = tmp_path / "repo"
-    _write_glossary(repo)
-    _write_decision(repo)
-    _make_component(repo, "beta", CLEAN_PURPOSE, MOVED_RATIONALE)
-
-    report = spec_linter.lint(None, repo)
-    assert _lint024(report) == []
-
-
-def test_backtick_wrapped_citation_in_purpose_also_fails(tmp_path):
-    repo = tmp_path / "repo"
-    _write_glossary(repo)
-    _write_decision(repo)
-    _make_component(
-        repo,
-        "gamma",
-        "Formats gamma records for display. This unit was extracted once "
-        "`D30` found a real coupling between parsing and formatting.",
-        None,
+    write(
+        repo_root / "specs" / "decisions" / "D30.md",
+        "---\n"
+        "id: D30\n"
+        "title: Extract widget parsing\n"
+        "status: draft\n"
+        "owners: [team-a]\n"
+        "---\n"
+        "\n"
+        "# D30\n"
+        "\n"
+        "Widget parsing is extracted into its own component.\n",
     )
 
-    report = spec_linter.lint(None, repo)
-    hits = [
-        f for f in _lint024(report)
-        if _norm(_get(f, "file")).endswith("specs/components/gamma/component.md")
-    ]
-    assert hits
-    assert all(_get(f, "severity") == "fail" for f in hits)
+
+def lint_findings(repo_root):
+    report = spec_linter.lint(None, repo_root)
+    return report, list(field(report, "findings"))
 
 
-def test_cli_reports_r_lint_024_and_exits_1(tmp_path, capsys, monkeypatch):
-    repo = tmp_path / "repo"
-    _build_two_component_repo(repo)
-    monkeypatch.chdir(repo)
+def r024(findings):
+    return [f for f in findings if field(f, "rule_id") == "R-LINT-024"]
 
-    code = spec_linter.main(["--format=json", f"--repo-root={repo}"])
-    out = capsys.readouterr().out
-    assert code == 1
 
-    data = json.loads(out.strip())
-    findings = data.get("findings", [])
-    rule_hits = [f for f in findings if f.get("rule_id") == "R-LINT-024"]
+def test_purpose_with_decision_citation_fails_and_rationale_citation_does_not(tmp_path):
+    # Component whose Purpose cites D30.
+    bad_root = tmp_path / "bad"
+    build_base(bad_root)
+    bad_file = build_component(
+        bad_root,
+        "alpha",
+        "Alpha parses widget files into records. It was extracted once D30 found a real coupling.",
+    )
+    report, findings = lint_findings(bad_root)
+    bad = r024(findings)
+    assert bad, "expected an R-LINT-024 finding for a Purpose citing D30"
     assert any(
-        _norm(f.get("file")).endswith("specs/components/alpha/component.md")
-        and f.get("severity") == "fail"
-        for f in rule_hits
+        field(f, "severity") == "fail"
+        and str(field(f, "file")).replace("\\", "/").endswith(bad_file)
+        for f in bad
+    ), bad
+    assert all(field(f, "severity") == "fail" for f in bad)
+    assert field(report, "hard_failures") >= 1
+
+    # Component whose Purpose is clean, with the citation moved to Rationale.
+    good_root = tmp_path / "good"
+    build_base(good_root)
+    good_file = build_component(
+        good_root,
+        "beta",
+        "Beta parses widget files into records.",
+        rationale="Beta was extracted once D30 found a real coupling.",
     )
+    _, good_findings = lint_findings(good_root)
+    good = r024(good_findings)
+    assert good == [], good
     assert not any(
-        "specs/components/beta/" in _norm(f.get("file")) for f in rule_hits
+        str(field(f, "file")).replace("\\", "/").endswith(good_file)
+        and field(f, "rule_id") == "R-LINT-024"
+        for f in good_findings
     )

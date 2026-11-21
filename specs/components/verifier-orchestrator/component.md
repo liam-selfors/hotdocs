@@ -3,7 +3,7 @@ id: comp-verifier-orchestrator
 title: Verifier Orchestrator
 status: draft
 owners: [pipeline-team]
-depends_on: [comp-criterion-compiler, comp-generator, comp-test-author, comp-spec-bundle-assembler]
+depends_on: [comp-criterion-compiler, comp-generator, comp-test-author, comp-spec-bundle-assembler, comp-test-probe]
 realizes: [P-ZERO-EDIT, P-AMBIGUITY-GATE]
 model_pin: claude-opus-5-5
 sealed: false
@@ -13,24 +13,20 @@ sealed: false
 
 ## Purpose
 
-Runs every applicable verification gate against one component's generated
-output and produces a single, structured pass/fail verdict: `compiled`
-criteria (via `criterion-compiler`), `generated-test` criteria, `llm-judge`
-criteria, the contract/property tests derived from `interface/`, and the
-interface drift check.
+Runs every verification gate against one component's generated
+output and its assets, and produces one structured verdict:
+`compiled`, `generated-test` and `llm-judge` criteria, the mutation
+score and the interface drift check.
 
 ## Scope
 
-**In scope:** dispatching each acceptance criterion to the right checking
-mechanism by its declared `kind`; running the interface drift check;
-aggregating mutation scores; producing one `VerificationReport`.
+**In scope:** dispatching each criterion by its `kind`; the drift check;
+the mutation score; provisioning asset environments; one
+`VerificationReport`.
 
-**Out of scope:** the license/secret scans (separate components);
-*performing* an `llm-judge` evaluation or *authoring*
-`generated-test` code (this component dispatches to an injectable judge and
-an injectable `test_author` and records their results — it does not itself
-judge or author anything); **re-deciding a criterion's declared `kind`**,
-which is fixed in `acceptance/` and lint-checked (R-LINT-010).
+**Out of scope:** the license/secret scans; judging or authoring
+anything (it dispatches to an injectable judge and `test_author` and
+records their results).
 
 ## Definitions
 
@@ -52,9 +48,6 @@ See `interface/data/`.
 
 See `acceptance/`.
 
-Deterministic dispatch-and-record logic, testable by mocking
-`criterion-compiler`, the judge and `test_author`.
-
 ## Non-functional constraints
 
 See `constraints.md`.
@@ -63,4 +56,7 @@ See `constraints.md`.
 
 ## Change log
 
-See the decisions, `D27` onward, through `D320` and `D324`.
+See the decisions, `D27` onward; latest `D343` (declared assets),
+`D344` (`python` an asset kind: its adapter's mutation sites,
+provisioned first, its `interpreter` for every pytest run, first in
+`assets`; `GATE_VERSION` 3.5.0).

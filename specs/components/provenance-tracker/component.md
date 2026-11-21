@@ -23,33 +23,15 @@ component's provenance check is currently failing.
 
 ## Rationale
 
-(`D88`, renamed from `merge-tracker`.) `merge-orchestrator`'s removal
-(`D87`) left nothing that still needed a per-merge-attempt log —
-`TrackingRecord` existed specifically to record outcomes of an
-automated action that no longer exists. What a developer actually
-needs is different: a live answer to "is everything ready," not a
-history of past attempts at something no component does automatically
-anymore. The per-component attempt history (`AttemptRecord`) is kept —
-a developer running `hotdocs generate` still benefits from seeing why a
-prior attempt failed, same as always.
-
-`D92` briefly combined `hotdocs generate`/`check-capability`/`verify`
-into one `hotdocs build` command, reasoning that this component
-already had to compute whether provenance was current for every item
-in scope — the only thing missing was acting on a miss. `D93` reversed
-the component half of that: a developer genuinely wants `generate` and
-`verify` as independently runnable commands, since generating new code
-is a deliberate, potentially expensive action that `verify` should
-never spring as a side effect. The capability half of `D92`'s
-reasoning stands, unreversed: `verify` still checks-then-runs
-`capability-scenario-verifier`'s own gauntlet for every intersecting
-capability, since capability-scenario verification never produces new
-source code, only exercises what already exists — triggering it from
-`verify` costs a developer nothing they wouldn't expect. `D93` also
-removes the dependency cycle `D92` introduced: this component no
-longer calls `component-gate-runner` for anything, so
-`component-gate-runner` can safely depend on this component again (to
-call `write_attempt_record`) without creating a two-node cycle.
+(`D88`, renamed from `merge-tracker`.) A developer needs a live answer
+to "is everything ready", not a log of merge attempts (`D87`); the
+per-component attempt history stays, to show why a prior attempt
+failed. `verify` never generates code (`D93`, reversing the component
+half of `D92`), but it does check-then-run capability scenarios, which
+only exercise existing code. Because this component never calls
+`component-gate-runner`, that component can depend on this one without
+a cycle. An unanswerable blast radius is reported as not ready, never
+as an empty, ready scope (`D350`).
 
 ## Scope
 

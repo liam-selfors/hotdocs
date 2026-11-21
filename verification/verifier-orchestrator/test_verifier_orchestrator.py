@@ -177,12 +177,12 @@ def test_ac_verify_010_no_cache_no_test_author_fails_not_skipped(repo_root):
 
 def test_ac_verify_011_requirement_results_projection_is_content_free(repo_root):
     second_r001_ac = acceptance_md(
-        "AC-FOO-001B", "R-FOO-001", "compiled",
+        "AC-FOO-001b", "R-FOO-001", "compiled",
         "Given a x is 1\nWhen do_the_thing is invoked with x\nThen value equals 2",
     )
     write_foo(repo_root, extra_acceptance={
         "AC-FOO-001.md": COMPILED_AC,
-        "AC-FOO-001B.md": second_r001_ac,
+        "AC-FOO-001b.md": second_r001_ac,
         "AC-FOO-002.md": GENTEST_AC,  # no cache, no test_author -> fail -> R-FOO-002 fail
         "AC-FOO-003.md": JUDGE_AC,  # no judge -> skipped -> R-FOO-003 fail
     })
@@ -323,7 +323,7 @@ def test_ac_verify_017_gate_version_readable_without_verify():
     # D163: a provenance key names this gate's version without running it.
     import verifier_orchestrator
 
-    assert verifier_orchestrator.GATE_VERSION == "verifier-orchestrator@2.2.0"
+    assert verifier_orchestrator.GATE_VERSION == "verifier-orchestrator@3.5.0"
 
 
 def test_ac_verify_018_lettered_criterion_id_kept_exactly(repo_root):
@@ -553,8 +553,15 @@ def test_ac_verify_025_failing_baseline_scores_nothing(repo_root):
 
     report = verify("comp-foo", repo_root)
 
+    # D341 (specs/architecture/test-reuse.md, Mutation runs): a test that
+    # passes its criterion but fails alone in the sandbox is faulty: its
+    # criterion fails with origin "test", its cached file is deleted, and with
+    # no file left nothing more runs.
     by_id = {c["id"]: c for c in report.criteria}
-    assert by_id["AC-FOO-002"]["result"] == "pass"
+    assert by_id["AC-FOO-002"]["result"] == "fail"
+    assert by_id["AC-FOO-002"]["failure_origin"] == "test"
+    assert by_id["AC-FOO-002"]["failure_detail"]["message"] == "test fails in the mutation sandbox"
     assert report.mutation_score is None
+    assert report.mutation_error is None
     assert report.overall == "fail"
-    assert report.mutation_error == "mutation baseline failed in the sandbox: pytest exited 1"
+    assert not (repo_root / "verification" / "foo" / "generated-test" / "test_ac_foo_002.py").exists()

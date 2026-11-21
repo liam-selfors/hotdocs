@@ -51,4 +51,4 @@ lookup for a human deciding what to pass as `--retry-feedback` on
 their next `hotdocs generate` call — never called by any component
 itself.
 
-Implements: `specs/architecture/json-values.md`
+Implements: `specs/architecture/cli-conventions.md`, `specs/architecture/json-values.md`

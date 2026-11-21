@@ -1,103 +1,76 @@
-# hotdocs-criterion: sha256:fd31aa524571c8746ee162f860de81fb55c923838df84727c54fc3733477189e
+# hotdocs-criterion: sha256:56bfa016bcd5ee5527a1afb7dc9c2c7ddfdc7d9da7d48a2f30a42f7bac568d9d
 import re
-import uuid
 from pathlib import Path
 
 import generator
 
 
-COMPONENT_MD = (
-    "---\n"
-    "id: comp-foo\n"
-    "title: Foo\n"
-    "status: draft\n"
-    "owners: [team-a]\n"
-    "sealed: false\n"
-    "depends_on: []\n"
-    "---\n"
+PYTHON_ADAPTER = (
+    "from pathlib import Path\n"
     "\n"
-    "# Foo\n"
+    "KIND = \"python\"\n"
     "\n"
-    "## Purpose\n"
     "\n"
-    "Foo doubles a number.\n"
+    "def layout_errors(code_dir):\n"
+    "    return [\"bad.py:1: SyntaxError: x\"] if (Path(code_dir) / \"bad.py\").exists() else []\n"
+    "\n"
+    "\n"
+    "def provision(repo_root):\n"
+    "    return {\"ok\": True, \"reason\": \"\", \"versions\": {\"python\": \"3.12\"}, "
+    "\"lockfile_sha256\": None, \"interpreter\": \"/fake/python\"}\n"
 )
 
 
-def field(value, name):
-    return value[name] if isinstance(value, dict) else getattr(value, name)
+def _plant_python_adapter(repo_root):
+    adapter_dir = Path(repo_root) / "gen" / "kind-python"
+    adapter_dir.mkdir(parents=True, exist_ok=True)
+    (adapter_dir / "kind_python.py").write_text(PYTHON_ADAPTER, encoding="utf-8")
 
 
-def _make_bundle():
+def _bundle():
     return {
-        "component_id": "comp-foo",
-        "spec_bundle_hash": "sha256:" + uuid.uuid4().hex + uuid.uuid4().hex,
-        "spec": "# Foo\n\nFoo doubles a number.\n\n# R-FOO-001\n\n**R-FOO-001** \u2014 `foo(x)` MUST return `2 * x`.",
-        "interface": "# Library\n\n```\nfoo(x: int) -> int\n```",
-        "constraints": "# Constraints\n\nNone.",
+        "component_id": "comp-widget-maker",
+        "spec_bundle_hash": "sha256:" + "ab" * 32,
+        "spec": "# Widget Maker\n\nMakes widgets.",
+        "interface": "make_widget() -> str",
+        "constraints": "None.",
         "dependency_interfaces": {},
         "dependency_context": {},
         "dependency_usage": {},
         "vars": {},
-        "glossary": "# Glossary\n\n- **Foo** \u2014 a test term.",
+        "glossary": "",
         "hint_code": None,
     }
 
 
-def _write_fixture(repo_root):
-    comp_dir = Path(repo_root) / "specs" / "components" / "foo"
-    comp_dir.mkdir(parents=True, exist_ok=True)
-    (comp_dir / "component.md").write_text(COMPONENT_MD, encoding="utf-8")
-    glossary = Path(repo_root) / "specs" / "glossary.md"
-    glossary.write_text("# Glossary\n\n- **Foo** \u2014 a test term.\n", encoding="utf-8")
-
-
-def _extract_nonce(prompt):
-    m = re.search(r"BEGIN FILE ([0-9a-f]{32})", prompt)
-    if m:
-        return m.group(1)
-    m = re.search(r"(?<![0-9a-f])([0-9a-f]{32})(?![0-9a-f])", prompt)
-    if m:
-        return m.group(1)
-    return uuid.uuid4().hex
-
-
-def test_prompt_contains_nothing_more_and_mutation_testing(tmp_path, monkeypatch):
+def test_prompt_instructs_nothing_more_and_mentions_mutation_testing(tmp_path, monkeypatch):
     monkeypatch.delenv("VAR_CACHE_STORE_URL", raising=False)
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
-    _write_fixture(repo_root)
+    _plant_python_adapter(repo_root)
 
-    received = []
+    prompts = []
 
     def mock_backend(prompt, model, **params):
-        received.append(prompt)
-        nonce = _extract_nonce(prompt)
+        prompts.append(prompt)
+        nonce = re.search(r"-----BEGIN FILE ([0-9a-f]{32}):", prompt).group(1)
         text = (
-            "-----BEGIN FILE " + nonce + ": foo.py-----\n"
-            "def foo(x):\n"
-            "    return 2 * x\n"
+            "-----BEGIN FILE " + nonce + ": widget_maker.py-----\n"
+            "def make_widget():\n"
+            "    return \"widget\"\n"
             "-----END FILE " + nonce + "-----\n"
+            "-----END REPLY " + nonce + "-----\n"
         )
-        return {
-            "text": text,
-            "model": model,
-            "backend": "mock",
-            "model_call_error": None,
-        }
+        return {"text": text, "model": model, "backend": "mock", "model_call_error": None}
 
-    bundle = _make_bundle()
-    result = generator.generate(
-        bundle,
-        "claude-sonnet-5",
-        None,
+    generator.generate(
+        _bundle(),
+        "mock-model",
         repo_root=repo_root,
         llm_backend=mock_backend,
     )
 
-    assert result is not None
-    assert len(received) >= 1, "mock model was never called"
-    prompt = received[0]
-    assert isinstance(prompt, str)
+    assert len(prompts) >= 1
+    prompt = prompts[0]
     assert "nothing more" in prompt
     assert "mutation testing" in prompt

@@ -46,6 +46,18 @@ split.
   one addressable thing (one requirement, one interface section, one
   criterion), identified by its filename, with no frontmatter of its own
   (D1).
+- **Attempt** (`D310`) — one generation of a component followed, when it
+  produced files, by a surface check and, when that passed, a
+  verification. `hotdocs generate` makes up to `max_attempts` of them;
+  each is recorded under `.hotdocs/attempts/<component_id>/`.
+- **Retry feedback** — the sorted list of bare requirement ids an attempt
+  passes to the generator as having failed before: a developer's
+  `--retry-feedback` and the failed covered ids of earlier attempts,
+  never criterion text (`R-GEN-012`).
+- **Agentic generation** (`D309`) — generation in which the model works
+  through tools in a sandbox holding only its spec bundle, writing and
+  running its own code and tests before it finishes, as opposed to
+  single-shot generation from one reply.
 - **Blast radius** — the minimal set of components `impact-analyzer`
   determines need regeneration/re-verification for a given spec change.
 - **Gate** — one verification step in the pipeline (lint, a `kind`-specific

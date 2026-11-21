@@ -1,113 +1,76 @@
-# hotdocs-criterion: sha256:299e5ce5aaf366b4fde5f4a9b8fd059fb9b5826647d34a63b64336a1b828c791
-import importlib.util
+# hotdocs-criterion: sha256:3e5b6b7b6843d47e35c6607beb1660ae2edff240d780f1c12eb1715d34410e79
 import re
-import sys
 from pathlib import Path
 
 import test_author
 
 
-def load_module(path, module_name):
-    spec = importlib.util.spec_from_file_location(module_name, path)
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[module_name] = module
-    spec.loader.exec_module(module)
-    return module
+CRITERION_TEXT = (
+    "Given a widget blueprint zq7-alpha When make_widget is called "
+    "Then the returned widget carries the blueprint marker zq7-alpha"
+)
+REQUIREMENT_TEXT = (
+    "R-WIDGET-MAKER-001 The widget maker MUST stamp every widget with "
+    "its blueprint marker, requirement-token rq9-bravo"
+)
+INTERFACE_TEXT = (
+    "make_widget(blueprint: str) -> Widget  interface-token if4-charlie"
+)
+GLOSSARY_TEXT = (
+    "Widget: a stamped artifact produced by the widget maker, "
+    "glossary-token gl2-delta"
+)
 
 
 def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-class _MappingBundle(dict):
-    """Fallback bundle that reads both as a mapping and by attribute."""
-
-    def __getattr__(self, name):
-        try:
-            return self[name]
-        except KeyError as exc:
-            raise AttributeError(name) from exc
-
-
-CRITERION_TEXT = (
-    "Given x = 2 ZQXCRITERIONMARKER\n"
-    "When foo(x) is called\n"
-    "Then it returns 4"
-)
-REQUIREMENT_TEXT = (
-    "# R-FOO-001\n\n"
-    "**R-FOO-001** \u2014 `foo(x)` MUST return `2 * x`. ZQXREQUIREMENTMARKER"
-)
-INTERFACE_TEXT = (
-    "# Library\n\n"
-    "```\n"
-    "foo(x: int) -> int  # ZQXINTERFACEMARKER\n"
-    "```"
-)
-GLOSSARY_TEXT = (
-    "# Glossary\n\n"
-    "- **Foo** \u2014 a test term. ZQXGLOSSARYMARKER"
-)
+def _write_probe_stand_in(repo_root, log_path):
+    probe_dir = repo_root / "gen" / "test-probe"
+    probe_dir.mkdir(parents=True, exist_ok=True)
+    source = (
+        "class _Report:\n"
+        "    def __init__(self):\n"
+        "        self.ok = True\n"
+        "        self.findings = []\n"
+        "        self.tests_run = 1\n"
+        "        self.tests_reached = 1\n"
+        "\n"
+        "    def to_dict(self):\n"
+        "        return {\n"
+        "            'ok': self.ok,\n"
+        "            'findings': list(self.findings),\n"
+        "            'tests_run': self.tests_run,\n"
+        "            'tests_reached': self.tests_reached,\n"
+        "        }\n"
+        "\n"
+        "\n"
+        "def probe(test_source, criterion_bundle, module_name, *, timeout=60.0, interpreter=None):\n"
+        "    with open(" + repr(str(log_path)) + ", 'a', encoding='utf-8') as fh:\n"
+        "        fh.write('probe\\n')\n"
+        "    return _Report()\n"
+    )
+    (probe_dir / "test_probe.py").write_text(source, encoding="utf-8")
 
 
-def _bundle_fields():
-    return {
-        "component_id": "comp-foo",
-        "criterion_id": "AC-FOO-001",
-        "covers": "R-FOO-001",
-        "criterion_text": CRITERION_TEXT,
-        "requirement_text": REQUIREMENT_TEXT,
-        "interface": INTERFACE_TEXT,
-        "glossary": GLOSSARY_TEXT,
-        "dependency_interfaces": {},
-    }
-
-
-def _make_bundle():
-    fields = _bundle_fields()
-    try:
-        gen = next(
-            p for p in Path(test_author.__file__).resolve().parents if p.name == "gen"
-        )
-        base = gen / "spec-bundle-assembler"
-        flat = base / "spec_bundle_assembler.py"
-        path = flat if flat.is_file() else base / "spec_bundle_assembler" / "__init__.py"
-        if path.is_file():
-            sba = load_module(path, "spec_bundle_assembler")
-            cls = getattr(sba, "CriterionBundle", None)
-            if cls is not None:
-                try:
-                    return cls(module_names=["foo"], **fields)
-                except TypeError:
-                    return cls(**fields)
-    except StopIteration:
-        pass
-    except Exception:
-        pass
-    fields["module_names"] = ["foo"]
-    return _MappingBundle(fields)
-
-
-def test_author_test_sends_criterion_requirement_interface_and_glossary(tmp_path):
+def test_prompt_contains_criterion_requirement_interface_and_glossary(tmp_path, monkeypatch):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
-    log_dir = tmp_path / "prompts"
-    log_dir.mkdir()
+    monkeypatch.chdir(repo_root)
+    monkeypatch.delenv("VAR_CACHE_STORE_URL", raising=False)
 
-    reply_body = "import foo\n\n\ndef test_placeholder():\n    assert True\n"
+    probe_log = tmp_path / "probe_calls.log"
+    _write_probe_stand_in(repo_root, probe_log)
+
+    recorded = []
 
     def mock_backend(prompt, model, **params):
-        index = len(list(log_dir.iterdir()))
-        (log_dir / ("prompt_" + str(index).zfill(4) + ".txt")).write_text(
-            prompt, encoding="utf-8"
-        )
+        recorded.append(prompt)
         nonces = re.findall(r"-----BEGIN FILE ([0-9a-f]{32})-----", prompt)
-        nonce = nonces[-1] if nonces else "0" * 32
-        text = (
-            "-----BEGIN FILE " + nonce + "-----\n"
-            + reply_body
-            + "\n-----END FILE " + nonce + "-----"
-        )
+        n = nonces[-1] if nonces else "0" * 32
+        body = "def test_placeholder():\n    assert True\n"
+        text = "-----BEGIN FILE " + n + "-----\n" + body + "\n-----END FILE " + n + "-----"
         return {
             "text": text,
             "model": model,
@@ -115,20 +78,26 @@ def test_author_test_sends_criterion_requirement_interface_and_glossary(tmp_path
             "model_call_error": None,
         }
 
-    bundle = _make_bundle()
+    bundle = {
+        "component_id": "comp-widget-maker",
+        "criterion_id": "AC-WIDGET-MAKER-001",
+        "covers": "R-WIDGET-MAKER-001",
+        "criterion_text": CRITERION_TEXT,
+        "requirement_text": REQUIREMENT_TEXT,
+        "interface": INTERFACE_TEXT,
+        "glossary": GLOSSARY_TEXT,
+        "dependency_interfaces": {},
+    }
+
     result = test_author.author_test(
-        bundle,
-        "claude-sonnet-5",
-        0,
-        repo_root=repo_root,
-        llm_backend=mock_backend,
+        bundle, "mock", 0, repo_root=repo_root, llm_backend=mock_backend
     )
+
     assert result is not None
+    assert len(recorded) >= 1, "the mock model was never called"
 
-    prompt_files = sorted(log_dir.iterdir())
-    assert prompt_files, "the mock model was never called"
-    first_prompt = prompt_files[0].read_text(encoding="utf-8")
-
+    first_prompt = recorded[0]
+    assert isinstance(first_prompt, str)
     assert CRITERION_TEXT in first_prompt
     assert REQUIREMENT_TEXT in first_prompt
     assert INTERFACE_TEXT in first_prompt

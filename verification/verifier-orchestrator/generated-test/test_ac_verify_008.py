@@ -1,8 +1,13 @@
-# hotdocs-criterion: sha256:686b95bb0cb3e9f5d47eb7f4cf258cd69ba1bda01e7e10869277d725574d14f1
+# hotdocs-criterion: sha256:1c21118bb3c268495525ef26f34826ec1209f8cc1881f1d236ef6b4c6e2de4c7
 import json
 from pathlib import Path
 
 import verifier_orchestrator
+
+
+COMPONENT_ID = "comp-fixwidget"
+SLUG = "fixwidget"
+MODULE = "fixwidget"
 
 
 def field(value, name):
@@ -10,189 +15,247 @@ def field(value, name):
 
 
 def write(path, text):
+    path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
 
 
-CRITERIA = {
-    "AC-WIDGET-001": {
-        "covers": "R-WIDGET-001",
-        "criterion_text": "Given the widget spec\nWhen it is read\nThen it is clear",
-        "requirement_text": "**R-WIDGET-001** — The widget spec MUST be clear.",
-    },
-    "AC-WIDGET-002": {
-        "covers": "R-WIDGET-002",
-        "criterion_text": "Given n = 2\nWhen make_widget(n) is called\nThen it returns 3",
-        "requirement_text": "**R-WIDGET-002** — `make_widget(n)` MUST return `n + 1`.",
-    },
-}
-
-INTERFACE_TEXT = "# Library\n\n```\nmake_widget(n: int) -> int\n```\n"
+GENERATED_TEST_SOURCE = (
+    "import " + MODULE + "\n"
+    "\n"
+    "\n"
+    "def test_widget_value_is_one():\n"
+    "    assert " + MODULE + ".widget_value() == 1\n"
+)
 
 
 def build_fixture(repo_root):
-    write(repo_root / "specs" / "glossary.md", "# Glossary\n\n- **Widget** — a test term.\n")
+    repo_root = Path(repo_root)
+    comp = repo_root / "specs" / "components" / SLUG
+
     write(
-        repo_root / "specs" / "product" / "widgets.md",
+        repo_root / "specs" / "product" / "fixwidget.md",
         "---\n"
-        "id: P-WIDGETS\n"
-        "title: Widgets\n"
+        "id: P-FIXWIDGET\n"
+        "title: Fix widget capability\n"
         "status: draft\n"
-        "owners: [team-a]\n"
+        "owners: [test-team]\n"
         "---\n"
         "\n"
-        "# Widgets\n"
+        "# Fix widget capability\n"
         "\n"
         "## Purpose\n"
         "\n"
-        "Widgets exist.\n",
+        "A fixture capability.\n",
     )
-    comp = repo_root / "specs" / "components" / "widget"
+
     write(
         comp / "component.md",
         "---\n"
-        "id: comp-widget\n"
-        "title: Widget\n"
+        "id: " + COMPONENT_ID + "\n"
+        "title: Fix widget\n"
         "status: draft\n"
-        "owners: [team-a]\n"
-        "realizes: [P-WIDGETS]\n"
-        "depends_on: []\n"
+        "owners: [test-team]\n"
+        "realizes: [P-FIXWIDGET]\n"
         "---\n"
         "\n"
-        "# Widget\n"
+        "# Fix widget\n"
         "\n"
         "## Purpose\n"
         "\n"
-        "Widget increments a number.\n",
-    )
-    write(
-        comp / "requirements" / "R-WIDGET-001.md",
-        "# R-WIDGET-001\n\n" + CRITERIA["AC-WIDGET-001"]["requirement_text"] + "\n",
-    )
-    write(
-        comp / "requirements" / "R-WIDGET-002.md",
-        "# R-WIDGET-002\n\n" + CRITERIA["AC-WIDGET-002"]["requirement_text"] + "\n",
-    )
-    write(
-        comp / "acceptance" / "AC-WIDGET-001.md",
-        "# AC-WIDGET-001\n"
+        "Returns a fixed widget value.\n"
         "\n"
-        "Covers: R-WIDGET-001\n"
-        "Kind: llm-judge\n"
+        "## Scope\n"
         "\n"
-        "```gherkin\n"
-        "Given the widget spec\n"
-        "When it is read\n"
-        "Then it is clear\n"
-        "```\n",
+        "- In scope: widget_value.\n"
+        "\n"
+        "## Definitions\n"
+        "\n"
+        "None.\n"
+        "\n"
+        "## Behavior\n"
+        "\n"
+        "See `requirements/`.\n"
+        "\n"
+        "## Interfaces\n"
+        "\n"
+        "See `interface/`.\n"
+        "\n"
+        "## Data\n"
+        "\n"
+        "See `interface/data/`.\n"
+        "\n"
+        "## Acceptance criteria\n"
+        "\n"
+        "See `acceptance/`.\n"
+        "\n"
+        "## Non-functional constraints\n"
+        "\n"
+        "See `constraints.md`.\n"
+        "\n"
+        "## Open questions\n"
+        "\n"
+        "## Change log\n"
+        "\n"
+        "- Initial fixture.\n",
+    )
+
+    write(
+        comp / "requirements" / "R-FIXWIDGET-001.md",
+        "# R-FIXWIDGET-001\n\n"
+        "**R-FIXWIDGET-001** - `widget_value()` MUST return 1.\n",
     )
     write(
-        comp / "acceptance" / "AC-WIDGET-002.md",
-        "# AC-WIDGET-002\n"
+        comp / "requirements" / "R-FIXWIDGET-002.md",
+        "# R-FIXWIDGET-002\n\n"
+        "**R-FIXWIDGET-002** - The spec MUST be clear.\n",
+    )
+
+    write(
+        comp / "interface" / "library.md",
+        "# Library\n\n```\nwidget_value() -> int\n```\n",
+    )
+
+    write(comp / "constraints.md", "# Constraints\n\nNone.\n")
+
+    write(
+        comp / "acceptance" / "AC-FIXWIDGET-001.md",
+        "# AC-FIXWIDGET-001\n"
         "\n"
-        "Covers: R-WIDGET-002\n"
+        "Covers: R-FIXWIDGET-001\n"
         "Kind: generated-test\n"
         "\n"
         "```gherkin\n"
-        "Given n = 2\n"
-        "When make_widget(n) is called\n"
-        "Then it returns 3\n"
+        "Given the fixwidget module\n"
+        "When widget_value is called\n"
+        "Then it returns 1\n"
         "```\n",
     )
-    write(comp / "interface" / "library.md", INTERFACE_TEXT)
-    write(comp / "constraints.md", "# Constraints\n\nNone.\n")
-
-    # The component's own generated code (empty: the authored test imports nothing).
-    write(repo_root / "gen" / "widget" / "widget.py", "")
-
-    # Fake spec-bundle-assembler, flat-module shape.
-    assembler_src = (
-        "CRITERIA = " + repr(CRITERIA) + "\n"
-        "INTERFACE_TEXT = " + repr(INTERFACE_TEXT) + "\n"
-        "GLOSSARY_TEXT = " + repr("# Glossary\n\n- **Widget** — a test term.") + "\n"
+    write(
+        comp / "acceptance" / "AC-FIXWIDGET-002.md",
+        "# AC-FIXWIDGET-002\n"
         "\n"
+        "Covers: R-FIXWIDGET-002\n"
+        "Kind: llm-judge\n"
+        "\n"
+        "```gherkin\n"
+        "Given the fixwidget spec\n"
+        "When a reviewer reads it\n"
+        "Then it is clear\n"
+        "```\n",
+    )
+
+    write(repo_root / "specs" / "glossary.md", "# Glossary\n\n- **Widget** - a thing.\n")
+
+    # The component's own code: no mutation sites (numeric constants are never mutated).
+    write(
+        repo_root / "gen" / SLUG / (MODULE + ".py"),
+        "def widget_value():\n    return 1\n",
+    )
+
+    # spec-bundle-assembler stand-in.
+    write(
+        repo_root / "gen" / "spec-bundle-assembler" / "spec_bundle_assembler.py",
         "def assemble_criterion(component_id, criterion_id, repo_root):\n"
-        "    c = CRITERIA[criterion_id]\n"
+        "    covers = {" + repr("AC-FIXWIDGET-001") + ": " + repr("R-FIXWIDGET-001") + ", "
+        + repr("AC-FIXWIDGET-002") + ": " + repr("R-FIXWIDGET-002") + "}.get(criterion_id, '')\n"
         "    return {\n"
         "        'component_id': component_id,\n"
         "        'criterion_id': criterion_id,\n"
-        "        'covers': c['covers'],\n"
-        "        'criterion_text': c['criterion_text'],\n"
-        "        'requirement_text': c['requirement_text'],\n"
-        "        'interface': INTERFACE_TEXT,\n"
-        "        'glossary': GLOSSARY_TEXT,\n"
+        "        'covers': covers,\n"
+        "        'criterion_text': 'criterion text for ' + criterion_id,\n"
+        "        'requirement_text': 'requirement text for ' + covers,\n"
+        "        'interface': " + repr("# Library\n\n```\nwidget_value() -> int\n```") + ",\n"
+        "        'glossary': " + repr("# Glossary") + ",\n"
         "        'dependency_interfaces': {},\n"
-        "    }\n"
+        "        'testing': '',\n"
+        "    }\n",
     )
+
+    # test-probe stand-in: always ok, no findings.
     write(
-        repo_root / "gen" / "spec-bundle-assembler" / "spec_bundle_assembler.py",
-        assembler_src,
+        repo_root / "gen" / "test-probe" / "test_probe.py",
+        "class ProbeReport:\n"
+        "    def __init__(self):\n"
+        "        self.ok = True\n"
+        "        self.findings = []\n"
+        "        self.tests_run = 1\n"
+        "        self.tests_reached = 1\n"
+        "\n"
+        "    def to_dict(self):\n"
+        "        return {'ok': self.ok, 'findings': list(self.findings),\n"
+        "                'tests_run': self.tests_run, 'tests_reached': self.tests_reached}\n"
+        "\n"
+        "\n"
+        "def probe(test_source, criterion_bundle, module_name, *, timeout=60.0, interpreter=None):\n"
+        "    return ProbeReport()\n",
     )
 
 
 def make_judge(log_path):
     def judge(bundle):
         with open(log_path, "a", encoding="utf-8") as fh:
-            fh.write(str(field(bundle, "criterion_id")) + "\n")
-        return {"result": "pass", "rationale": "consistent verdict"}
+            fh.write("judge\n")
+        return {"result": "pass", "rationale": "The spec is clear."}
 
     return judge
 
 
-def make_author(log_path):
-    content = "def test_widget_ok():\n    assert 1 + 1 == 2\n"
-
-    def author(bundle):
-        criterion_id = field(bundle, "criterion_id")
+def make_test_author(log_path):
+    def test_author(bundle):
         with open(log_path, "a", encoding="utf-8") as fh:
-            fh.write(str(criterion_id) + "\n")
-        filename = "test_" + criterion_id.lower().replace("-", "_") + ".py"
+            fh.write("test_author\n")
         return {
-            "component_id": field(bundle, "component_id"),
-            "criterion_id": criterion_id,
             "model": "fake-model",
             "seed": 0,
             "prompt_version": "v1",
             "cache_hit": False,
-            "file": {
-                "path": "verification/widget/generated-test/" + filename,
-                "content": content,
-            },
             "model_call_error": None,
+            "file": {
+                "path": "verification/fixwidget/generated-test/test_ac_fixwidget_001.py",
+                "content": GENERATED_TEST_SOURCE,
+            },
         }
 
-    return author
+    return test_author
 
 
-def test_verify_twice_yields_identical_reports(tmp_path):
+def test_verify_twice_gives_identical_reports(tmp_path):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
     build_fixture(repo_root)
 
-    logs = tmp_path / "logs"
-    logs.mkdir()
-    judge = make_judge(logs / "judge.log")
-    author = make_author(logs / "author.log")
+    judge_log = tmp_path / "judge.log"
+    author_log = tmp_path / "author.log"
+    judge = make_judge(judge_log)
+    test_author = make_test_author(author_log)
 
-    first = verifier_orchestrator.verify(
-        "comp-widget", repo_root, judge=judge, test_author=author
+    report1 = verifier_orchestrator.verify(
+        COMPONENT_ID, repo_root, judge=judge, test_author=test_author
     )
-    second = verifier_orchestrator.verify(
-        "comp-widget", repo_root, judge=judge, test_author=author
+    report2 = verifier_orchestrator.verify(
+        COMPONENT_ID, repo_root, judge=judge, test_author=test_author
     )
 
-    first_dict = first.to_dict()
-    second_dict = second.to_dict()
+    d1 = report1.to_dict()
+    d2 = report2.to_dict()
 
-    ids = [field(c, "id") for c in field(first, "criteria")]
-    assert "AC-WIDGET-001" in ids
-    assert "AC-WIDGET-002" in ids
+    # The two reports are identical.
+    assert d1 == d2
+    assert json.dumps(d1, sort_keys=True) == json.dumps(d2, sort_keys=True)
+    assert report1 == report2
+    assert field(report1, "overall") == field(report2, "overall")
+    assert field(report1, "criteria") == field(report2, "criteria")
+    assert field(report1, "requirement_results") == field(report2, "requirement_results")
 
-    assert first_dict == second_dict
-    assert json.dumps(first_dict, sort_keys=True, default=str) == json.dumps(
-        second_dict, sort_keys=True, default=str
-    )
-    assert field(first, "overall") == field(second, "overall")
-    assert field(first, "criteria") == field(second, "criteria")
-    assert field(first, "requirement_results") == field(second, "requirement_results")
-    assert first == second
+    # Sanity: the fixture really exercised both criteria in both runs.
+    ids = sorted(field(c, "id") for c in field(report1, "criteria"))
+    assert ids == ["AC-FIXWIDGET-001", "AC-FIXWIDGET-002"]
+    results = {field(c, "id"): field(c, "result") for c in field(report1, "criteria")}
+    assert results["AC-FIXWIDGET-001"] == "pass"
+    assert results["AC-FIXWIDGET-002"] == "pass"
+    assert d1["component_id"] == COMPONENT_ID
+
+    judge_calls = judge_log.read_text(encoding="utf-8").splitlines() if judge_log.exists() else []
+    assert len(judge_calls) >= 2
+    assert len(judge_calls) % 2 == 0
