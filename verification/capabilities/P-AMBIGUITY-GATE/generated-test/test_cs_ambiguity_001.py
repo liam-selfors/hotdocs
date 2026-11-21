@@ -1,8 +1,4 @@
-# hotdocs-criterion: sha256:72f18b70ecaf5786a29b49c9e991944737cbbc8e14185c56734fe64409fb1257
-import importlib.util
-import sys
-from pathlib import Path
-
+# hotdocs-criterion: sha256:902e17de8887c9e2b7798f68d306d9b6e72d05a2094d85ee83ab142f30b43826
 import capability_scenario_verifier
 import citation_checker
 import corpus_graph_builder
@@ -13,15 +9,13 @@ import llm_endpoint
 import size_checker
 import spec_completeness_assistant
 import spec_linter
+import spec_reviewer
 import test_author
 import verifier_orchestrator
 
-
-REQ_ID = "R-FOO-001"
-
-
-def field(value, name):
-    return value[name] if isinstance(value, dict) else getattr(value, name)
+import importlib.util
+import sys
+from pathlib import Path
 
 
 def load_module(path, module_name):
@@ -32,151 +26,191 @@ def load_module(path, module_name):
     return module
 
 
-def load_real_spec_linter():
+def field(value, name):
+    return value[name] if isinstance(value, dict) else getattr(value, name)
+
+
+def _load_real_spec_linter():
     gen = next(
-        p
-        for p in Path(capability_scenario_verifier.__file__).resolve().parents
+        p for p in Path(capability_scenario_verifier.__file__).resolve().parents
         if p.name == "gen"
     )
     base = gen / "spec-linter"
-    if (base / "spec_linter.py").is_file():
-        path = base / "spec_linter.py"
-    else:
-        path = base / "spec_linter" / "__init__.py"
+    path = (
+        base / "spec_linter.py"
+        if (base / "spec_linter.py").is_file()
+        else base / "spec_linter" / "__init__.py"
+    )
     return load_module(path, "spec_linter")
 
 
-def write(path, text):
+def _write(path, text):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
 
 
-def build_corpus(repo_root):
+def _build_clean_corpus(repo_root):
     specs = repo_root / "specs"
-    write(
+    _write(
         specs / "glossary.md",
         "# Glossary\n"
         "\n"
-        "- **Widget** \u2014 a small unit of work handled by the foo component.\n",
+        "Canonical vocabulary for this fixture corpus.\n"
+        "\n"
+        "- **Widget** — a thing `foo` produces.\n",
     )
     comp = specs / "components" / "foo"
-    write(
+    _write(
         comp / "component.md",
         "---\n"
         "id: comp-foo\n"
         "title: Foo\n"
         "status: draft\n"
         "owners: [pipeline-team]\n"
-        "sealed: true\n"
-        "source_path: legacy/foo/\n"
         "depends_on: []\n"
         "realizes: []\n"
         "uses_var: []\n"
+        "sealed: true\n"
+        "source_path: legacy/foo/\n"
         "---\n"
         "\n"
         "# Foo\n"
         "\n"
         "## Purpose\n"
         "\n"
-        "Foo doubles a number.\n"
+        "Foo produces a widget.\n"
         "\n"
         "## Behavior\n"
         "\n"
-        "- `" + REQ_ID + "`: doubling returns twice its input.\n",
+        "- `R-FOO-001` — `make_widget` returns a widget.\n"
+        "- `R-FOO-002` — `make_widget` rejects an empty name.\n",
     )
-    write(
-        comp / "requirements" / (REQ_ID + ".md"),
-        "# " + REQ_ID + "\n"
+    _write(
+        comp / "requirements" / "R-FOO-001.md",
+        "# R-FOO-001\n"
         "\n"
-        "`double(x)` MUST return twice `x`.\n",
+        "`make_widget(name)` MUST return a dict whose `name` is `name`.\n",
     )
-    write(
+    _write(
+        comp / "requirements" / "R-FOO-002.md",
+        "# R-FOO-002\n"
+        "\n"
+        "`make_widget(name)` MUST raise `ValueError` when `name` is empty.\n",
+    )
+    _write(
         comp / "interface" / "library.md",
         "# Library\n"
         "\n"
         "```\n"
-        "double(x: int) -> int\n"
+        "make_widget(name: str) -> dict\n"
         "```\n",
     )
-    write(
+    _write(
         comp / "acceptance" / "AC-FOO-001.md",
         "# AC-FOO-001\n"
         "\n"
-        "Covers: " + REQ_ID + "\n"
+        "Covers: R-FOO-001\n"
         "Kind: generated-test\n"
         "\n"
         "```gherkin\n"
-        "Given the number 2\n"
-        "When double is called with it\n"
-        "Then the result is 4\n"
+        "Given a name \"w\"\n"
+        "When make_widget is called with it\n"
+        "Then the result's name is \"w\"\n"
         "```\n",
     )
-    write(repo_root / "legacy" / "foo" / "foo.py", "def double(x):\n    return 2 * x\n")
+    _write(
+        comp / "acceptance" / "AC-FOO-002.md",
+        "# AC-FOO-002\n"
+        "\n"
+        "Covers: R-FOO-002\n"
+        "Kind: generated-test\n"
+        "\n"
+        "```gherkin\n"
+        "Given an empty name\n"
+        "When make_widget is called with it\n"
+        "Then it raises ValueError\n"
+        "```\n",
+    )
     return comp
 
 
-def fail_findings(report):
+def _fail_findings(report):
     return [f for f in field(report, "findings") if field(f, "severity") == "fail"]
 
 
-def mentions_req(finding):
-    text = str(field(finding, "file")) + " " + str(field(finding, "message"))
-    return REQ_ID in text or "foo" in str(field(finding, "file"))
-
-
-def test_uncovered_requirement_fails_lint_and_blocks_before_generation(tmp_path, capsys):
+def test_cs_ambiguity_001_uncovered_requirement_blocks_merge(tmp_path, capsys):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
-    comp = build_corpus(repo_root)
-    linter = load_real_spec_linter()
+    comp = _build_clean_corpus(repo_root)
 
-    # Precondition: the corpus with full coverage is lint-clean.
-    baseline = linter.lint(None, repo_root)
-    assert field(baseline, "hard_failures") == 0, [
-        (field(f, "rule_id"), field(f, "file"), field(f, "message"))
-        for f in fail_findings(baseline)
-    ]
+    linter = _load_real_spec_linter()
 
-    # The spec change: the requirement loses its only covering criterion.
-    (comp / "acceptance" / "AC-FOO-001.md").unlink()
+    # The corpus is otherwise lint-clean.
+    assert field(linter.lint(None, repo_root), "hard_failures") == 0
 
-    # Then: spec-linter reports a fail-severity finding.
+    # Introduce the defect: R-FOO-002 loses its only covering criterion.
+    (comp / "acceptance" / "AC-FOO-002.md").unlink()
+
     report = linter.lint(None, repo_root)
-    fails = fail_findings(report)
+    fails = _fail_findings(report)
     assert field(report, "hard_failures") >= 1
     assert fails, "expected a fail-severity finding for the uncovered requirement"
-    assert any(mentions_req(f) for f in fails), [
-        (field(f, "rule_id"), field(f, "file"), field(f, "message")) for f in fails
-    ]
+    assert any(
+        "R-FOO-002" in str(field(f, "message")) or "R-FOO-002" in str(field(f, "file"))
+        for f in fails
+    )
+    assert all(
+        str(field(f, "file")).replace("\\", "/").startswith("specs/components/foo/")
+        for f in fails
+    )
 
-    # The lint gate blocks the merge: exit code 1.
-    code = linter.main(["--repo-root=" + str(repo_root), "--format=json"])
+    # The lint gate blocks the merge: non-zero exit for fail severity.
+    code = linter.main(["--format=json", "--repo-root=" + str(repo_root)])
     capsys.readouterr()
     assert code == 1
 
-    # Submitted to the pipeline with a model configured: the lint failure
-    # stops it before any generation (no model call is ever made).
-    log_path = tmp_path / "backend_calls.log"
-
-    def backend(prompt, model, **params):
-        with open(log_path, "a", encoding="utf-8") as fh:
-            fh.write("called\n")
-        return {
-            "text": "{}",
-            "model": model,
-            "backend": "mock",
-            "model_call_error": None,
-        }
-
-    assist_report = spec_completeness_assistant.assist(
-        [REQ_ID], repo_root, model="claude-sonnet-5", llm_backend=backend
+    # Submitted to the pipeline, the run halts at lint, before anything downstream.
+    log_path = tmp_path / "downstream_calls.log"
+    _write(
+        repo_root / "gen" / "impact-analyzer" / "impact_analyzer.py",
+        "from pathlib import Path\n"
+        "\n"
+        "LOG = Path(" + repr(str(log_path)) + ")\n"
+        "\n"
+        "def compute_blast_radius(changed_ids, repo_root):\n"
+        "    with LOG.open('a', encoding='utf-8') as fh:\n"
+        "        fh.write('compute_blast_radius\\n')\n"
+        "    return {'impacted': [{'component_id': 'comp-foo'}], 'precondition_error': None}\n",
     )
-    capsys.readouterr()
+    _write(
+        repo_root / "gen" / "spec-reviewer" / "spec_reviewer.py",
+        "from pathlib import Path\n"
+        "\n"
+        "LOG = Path(" + repr(str(log_path)) + ")\n"
+        "\n"
+        "class _Report:\n"
+        "    def to_dict(self):\n"
+        "        return {'targets': [], 'criteria_checked': [], 'findings': [], 'gaps': [],\n"
+        "                'writable': {}, 'lint_findings': [], 'proposals': [], 'degraded': True}\n"
+        "\n"
+        "def check(targets, repo_root, model=None, *, llm_backend=None, write_proposals=False):\n"
+        "    with LOG.open('a', encoding='utf-8') as fh:\n"
+        "        fh.write('check\\n')\n"
+        "    return _Report()\n"
+        "\n"
+        "def glossary_judge(model, llm_backend=None):\n"
+        "    with LOG.open('a', encoding='utf-8') as fh:\n"
+        "        fh.write('glossary_judge\\n')\n"
+        "    return lambda term, local_text, glossary_text: None\n",
+    )
 
-    lint_findings = field(assist_report, "lint_findings")
-    assist_fails = [f for f in lint_findings if field(f, "severity") == "fail"]
-    assert assist_fails, "pipeline should surface the fail-severity lint finding"
-
+    assist_report = spec_completeness_assistant.assist(["comp-foo"], repo_root)
+    assert field(assist_report, "halted") is True
+    assist_fails = [
+        f for f in field(assist_report, "lint_findings") if field(f, "severity") == "fail"
+    ]
+    assert assist_fails
+    assert field(assist_report, "predicted_blast_radius") == []
     calls = log_path.read_text(encoding="utf-8").splitlines() if log_path.exists() else []
-    assert calls == [], "generation/model calls ran despite a blocking lint failure"
-    assert not (repo_root / "gen" / "foo").exists()
+    assert "compute_blast_radius" not in calls
+    assert "check" not in calls
