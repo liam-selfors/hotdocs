@@ -3,10 +3,11 @@
 
 HAND-AUTHORED REPO TOOL, not a spec-driven component (SPEC_GUIDELINES.md
 §1's `tools/` entry). It does one thing: load the `hotdocs-cli`
-component's module by path from this repository's `gen/hotdocs-cli/` and
-hand `argv` to its `run`, passing this repository as the `tool_root` every
-project's components fall back to (D199). Needs an editable install
-(`pip install -e <repo>`), since the components are data in this tree.
+component's module by path from the tool root's `gen/hotdocs-cli/` and
+hand `argv` to its `run`, passing the tool root every project's
+components fall back to (D199). The tool root is the `_tool/` directory
+beside this file in an installed package (`tools/build_dist.py`, D358),
+else this repository, for an editable install (`pip install -e <repo>`).
 """
 
 from __future__ import annotations
@@ -15,16 +16,18 @@ import importlib.util
 import sys
 from pathlib import Path
 
-TOOL_ROOT = Path(__file__).resolve().parents[1]
+_PACKAGED = Path(__file__).resolve().parent / "_tool"
+TOOL_ROOT = _PACKAGED if _PACKAGED.is_dir() else Path(__file__).resolve().parents[1]
 _MODULE_PATH = TOOL_ROOT / "gen" / "hotdocs-cli" / "hotdocs_cli.py"
 
 
 def main(argv: list[str] | None = None) -> int:
     if not _MODULE_PATH.is_file():
         print(
-            f"hotdocs: the hotdocs-cli component is missing from this tool "
-            f"checkout ({_MODULE_PATH}). Use an editable install of a complete "
-            f"checkout: `pip install -e <path to the hotdocs repository>`.",
+            f"hotdocs: the hotdocs-cli component is missing from the tool root "
+            f"({_MODULE_PATH}). Reinstall the hotdocs package, or use an editable "
+            f"install of a complete checkout: `pip install -e <path to the "
+            f"hotdocs repository>`.",
             file=sys.stderr,
         )
         return 2

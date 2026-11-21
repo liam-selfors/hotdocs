@@ -15,9 +15,10 @@ a JavaScript module, each with its own definition and checks
 
 ## Try it
 
-See `QUICKSTART.md`: install this checkout once, run `hotdocs init` in a
-project, and generate the example component. The tool's own components stay
-in this checkout; a project holds only its own (`D199`). `AUTHORING.md`
+`pipx install hotdocs` (or `uv tool install hotdocs`), then see
+`QUICKSTART.md`: run `hotdocs init --example` in a project and generate the
+example component. The tool's own components ship inside the package; a
+project holds only its own (`D199`, `D358`). `AUTHORING.md`
 explains how to write specs that generate correctly the first time.
 
 ## How it works
