@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:eaf213c7d296149eb6c519a1d871d215844f5eba995f78b463a4eeb3416faa0f
+# hotdocs-criterion: sha256:4d233e81ed751ac3eedf099cc1e5b9ac7f00560cc34c1c7bbc6bd0070ff9701f
 import json
 from pathlib import Path
 
@@ -11,107 +11,117 @@ def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-GENERATOR_TEMPLATE_HEAD = (
-    "import json\n"
-    "from dataclasses import dataclass, field\n"
-    "from pathlib import Path\n"
-    "\n"
-)
+def _generator_source(gen_log, write_log, repo_root):
+    lines = [
+        "import json",
+        "import os",
+        "from dataclasses import dataclass, field",
+        "",
+        "GEN_LOG = " + repr(str(gen_log)),
+        "WRITE_LOG = " + repr(str(write_log)),
+        "",
+        "",
+        "def _log(path, kind, payload):",
+        "    with open(path, 'a', encoding='utf-8') as fh:",
+        "        fh.write(json.dumps([kind, payload], default=str) + '\\n')",
+        "",
+        "",
+        "@dataclass",
+        "class GenerationResult:",
+        "    component_id: str = ''",
+        "    spec_bundle_hash: str = ''",
+        "    model: str = ''",
+        "    prompt_version: str = ''",
+        "    cache_hit: bool = False",
+        "    files: dict = field(default_factory=dict)",
+        "    model_call_error: object = None",
+        "    refused: object = None",
+        "    retry_feedback: object = None",
+        "    mode: str = 'single'",
+        "    transcript_sha256: object = None",
+        "    turns: int = 1",
+        "    tool_calls: int = 0",
+        "    isolation: object = None",
+        "",
+        "",
+        "def check_write_allowed(bundle, repo_root=None):",
+        "    _log(GEN_LOG, 'check_write_allowed', {'repo_root': repo_root})",
+        "    return None",
+        "",
+        "",
+        "def render_prompt_sections(bundle, retry_feedback=None):",
+        "    _log(GEN_LOG, 'render_prompt_sections', {'retry_feedback': retry_feedback})",
+        "    return [('Spec', 'SPEC TEXT'), ('Component interface', 'IFACE TEXT')]",
+        "",
+        "",
+        "def write_files(component_id, files, repo_root=None):",
+        "    _log(WRITE_LOG, 'write_files', {'component_id': component_id, 'files': files, 'repo_root': repo_root})",
+        "",
+        "",
+        "def check_assets(component_id, files, repo_root=None):",
+        "    _log(GEN_LOG, 'check_assets', {'component_id': component_id, 'files': files, 'repo_root': repo_root})",
+        "    for content in files.values():",
+        "        if 'bad' in content:",
+        "            return ('malformed_layout', ['static/app.txt: bad'])",
+        "    return (None, [])",
+        "",
+        "",
+        "def check_asset_environment(component_id, repo_root=None):",
+        "    _log(GEN_LOG, 'check_asset_environment', {'component_id': component_id, 'repo_root': repo_root})",
+        "    root = repo_root if repo_root is not None else " + repr(str(repo_root)),
+        "    if os.path.exists(os.path.join(str(root), 'NO_ENV')):",
+        "        return ('environment', ['fake needs fakeprog >= 2'])",
+        "    return (None, [])",
+        "",
+    ]
+    return "\n".join(lines)
 
-GENERATOR_BODY = (
-    "\n"
-    "@dataclass\n"
-    "class GenerationResult:\n"
-    "    component_id: str = ''\n"
-    "    spec_bundle_hash: str = ''\n"
-    "    model: str = ''\n"
-    "    prompt_version: str = ''\n"
-    "    cache_hit: bool = False\n"
-    "    files: dict = field(default_factory=dict)\n"
-    "    model_call_error: object = None\n"
-    "    refused: object = None\n"
-    "    retry_feedback: object = None\n"
-    "    mode: str = 'single'\n"
-    "    transcript_sha256: object = None\n"
-    "    turns: int = 1\n"
-    "    tool_calls: int = 0\n"
-    "    isolation: object = None\n"
-    "\n"
-    "\n"
-    "def _log(path, record):\n"
-    "    with open(path, 'a', encoding='utf-8') as fh:\n"
-    "        fh.write(json.dumps(record, default=repr) + '\\n')\n"
-    "\n"
-    "\n"
-    "def check_write_allowed(bundle, repo_root=None):\n"
-    "    return None\n"
-    "\n"
-    "\n"
-    "def render_prompt_sections(bundle, retry_feedback=None):\n"
-    "    return [('Spec', 'SPEC TEXT'), ('Component interface', 'IFACE TEXT')]\n"
-    "\n"
-    "\n"
-    "def write_files(component_id, files, repo_root=None):\n"
-    "    _log(WRITE_LOG, {'component_id': component_id, 'files': files, 'repo_root': str(repo_root)})\n"
-    "\n"
-    "\n"
-    "def check_assets(component_id, files, repo_root=None):\n"
-    "    _log(ASSETS_LOG, {'component_id': component_id, 'files': files, 'repo_root': str(repo_root)})\n"
-    "    for content in files.values():\n"
-    "        if 'bad' in content:\n"
-    "            return ('malformed_layout', ['static/app.txt: bad'])\n"
-    "    return (None, [])\n"
-    "\n"
-    "\n"
-    "def check_asset_environment(component_id, repo_root=None):\n"
-    "    if repo_root is not None and (Path(repo_root) / 'NO_ENV').exists():\n"
-    "        return ('environment', ['fake needs fakeprog >= 2'])\n"
-    "    return (None, [])\n"
-)
 
-LOOP_HEAD = (
-    "import json\n"
-    "from dataclasses import dataclass, field, asdict\n"
-    "\n"
-)
+def _loop_source(script_path, loop_log):
+    lines = [
+        "import json",
+        "import types",
+        "",
+        "SCRIPT = " + repr(str(script_path)),
+        "LOOP_LOG = " + repr(str(loop_log)),
+        "",
+        "",
+        "def _log(kind, payload):",
+        "    with open(LOOP_LOG, 'a', encoding='utf-8') as fh:",
+        "        fh.write(json.dumps([kind, payload], default=str) + '\\n')",
+        "",
+        "",
+        "def run_tool_loop(system, prompt, model, tools, execute, *, max_turns=40,",
+        "                  max_tool_calls=120, wall_seconds=1800.0, repo_root=None,",
+        "                  claude_command='claude'):",
+        "    _log('args', {'system': system, 'prompt': prompt, 'model': model,",
+        "                  'tools': tools, 'max_turns': max_turns,",
+        "                  'max_tool_calls': max_tool_calls, 'wall_seconds': wall_seconds,",
+        "                  'repo_root': repo_root, 'claude_command': claude_command})",
+        "    with open(SCRIPT, encoding='utf-8') as fh:",
+        "        script = json.load(fh)",
+        "    calls = 0",
+        "    for step in script['steps']:",
+        "        calls += 1",
+        "        text, is_error = execute(step['name'], step['arguments'])",
+        "        _log('result', [step['name'], step['arguments'], text, is_error])",
+        "    return types.SimpleNamespace(",
+        "        text=script.get('text', ''),",
+        "        transcript=[],",
+        "        turns=1,",
+        "        tool_calls=calls,",
+        "        stop=script['stop'],",
+        "        model_call_error=script['model_call_error'],",
+        "    )",
+        "",
+    ]
+    return "\n".join(lines)
 
-LOOP_BODY = (
-    "\n"
-    "@dataclass\n"
-    "class ToolLoopResult:\n"
-    "    text: str = ''\n"
-    "    transcript: list = field(default_factory=list)\n"
-    "    turns: int = 1\n"
-    "    tool_calls: int = 0\n"
-    "    stop: str = 'end_turn'\n"
-    "    model_call_error: object = None\n"
-    "\n"
-    "    def to_dict(self):\n"
-    "        return asdict(self)\n"
-    "\n"
-    "\n"
-    "def run_tool_loop(system, prompt, model, tools, execute, *, max_turns=40,\n"
-    "                  max_tool_calls=120, wall_seconds=1800.0, repo_root=None,\n"
-    "                  claude_command='claude'):\n"
-    "    with open(ARGS_LOG, 'a', encoding='utf-8') as fh:\n"
-    "        fh.write(json.dumps({'system': system, 'prompt': prompt, 'model': model,\n"
-    "                             'tools': tools, 'max_turns': max_turns,\n"
-    "                             'max_tool_calls': max_tool_calls,\n"
-    "                             'wall_seconds': wall_seconds,\n"
-    "                             'repo_root': str(repo_root),\n"
-    "                             'claude_command': claude_command}, default=repr) + '\\n')\n"
-    "    with open(SCRIPT, encoding='utf-8') as fh:\n"
-    "        script = json.load(fh)\n"
-    "    calls = 0\n"
-    "    for step in script['steps']:\n"
-    "        text, is_error = execute(step['name'], step['arguments'])\n"
-    "        calls += 1\n"
-    "        with open(RESULTS_LOG, 'a', encoding='utf-8') as fh:\n"
-    "            fh.write(json.dumps([step['name'], step['arguments'], text, is_error], default=repr) + '\\n')\n"
-    "    return ToolLoopResult(text='', transcript=[{'role': 'user', 'content': prompt}],\n"
-    "                          turns=calls + 1, tool_calls=calls, stop=script['stop'],\n"
-    "                          model_call_error=script['model_call_error'])\n"
-)
+
+def _read_log(path):
+    if not path.exists():
+        return []
+    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
 
 
 @pytest.mark.parametrize(
@@ -122,38 +132,24 @@ LOOP_BODY = (
         ("error", "rate_limit"),
     ],
 )
-def test_no_finish_writes_nothing_and_sets_error(tmp_path, monkeypatch, stop, category):
-    monkeypatch.setattr(agentic_generator, "SANDBOX_EXEC", str(tmp_path / "no-such-sandbox-exec"))
-    monkeypatch.setattr(agentic_generator, "BWRAP", str(tmp_path / "no-such-bwrap"))
-
+def test_ac_agent_006_unfinished_writes_nothing(tmp_path, monkeypatch, stop, category):
     repo_root = tmp_path / "repo"
     logs = tmp_path / "logs"
     logs.mkdir()
+    gen_log = logs / "generator.log"
     write_log = logs / "write_files.log"
-    assets_log = logs / "check_assets.log"
-    args_log = logs / "loop_args.log"
-    results_log = logs / "loop_results.log"
+    loop_log = logs / "loop.log"
     script_path = logs / "script.json"
 
     gen_dir = repo_root / "gen" / "generator"
     gen_dir.mkdir(parents=True)
     (gen_dir / "generator.py").write_text(
-        GENERATOR_TEMPLATE_HEAD
-        + "WRITE_LOG = " + repr(str(write_log)) + "\n"
-        + "ASSETS_LOG = " + repr(str(assets_log)) + "\n"
-        + GENERATOR_BODY,
-        encoding="utf-8",
+        _generator_source(gen_log, write_log, repo_root), encoding="utf-8"
     )
-
     loop_dir = repo_root / "gen" / "llm-tool-endpoint"
     loop_dir.mkdir(parents=True)
     (loop_dir / "llm_tool_endpoint.py").write_text(
-        LOOP_HEAD
-        + "SCRIPT = " + repr(str(script_path)) + "\n"
-        + "ARGS_LOG = " + repr(str(args_log)) + "\n"
-        + "RESULTS_LOG = " + repr(str(results_log)) + "\n"
-        + LOOP_BODY,
-        encoding="utf-8",
+        _loop_source(script_path, loop_log), encoding="utf-8"
     )
 
     loop_error = {"category": "rate_limit", "message": "m"} if stop == "error" else None
@@ -161,13 +157,18 @@ def test_no_finish_writes_nothing_and_sets_error(tmp_path, monkeypatch, stop, ca
         "steps": [
             {
                 "name": "write_file",
-                "arguments": {"path": "work/widget.py", "content": "def f():\n    return 1\n"},
+                "arguments": {"path": "work/widget.py", "content": "VALUE = 1\n"},
             }
         ],
         "stop": stop,
         "model_call_error": loop_error,
+        "text": "",
     }
     script_path.write_text(json.dumps(script), encoding="utf-8")
+
+    missing = str(tmp_path / "does-not-exist" / "sandbox")
+    monkeypatch.setattr(agentic_generator, "SANDBOX_EXEC", missing)
+    monkeypatch.setattr(agentic_generator, "BWRAP", missing)
 
     bundle = {
         "component_id": "comp-widget",
@@ -176,20 +177,31 @@ def test_no_finish_writes_nothing_and_sets_error(tmp_path, monkeypatch, stop, ca
     }
 
     result = agentic_generator.generate_agentic(
-        bundle, "anthropic:claude-test", None, repo_root=repo_root
+        bundle, "anthropic:claude-sonnet-5", repo_root=repo_root
     )
 
-    # The loop stand-in actually ran its script.
-    assert args_log.exists()
-    assert results_log.exists()
+    # The loop stand-in ran and the write itself succeeded inside the sandbox.
+    results = [entry[1] for entry in _read_log(loop_log) if entry[0] == "result"]
+    assert len(results) == 1
+    name, arguments, text, is_error = results[0]
+    assert name == "write_file"
+    assert arguments["path"] == "work/widget.py"
+    assert text == "wrote work/widget.py"
+    assert is_error is False
 
-    files = field(result, "files")
-    assert not files
-    assert dict(files) == {}
+    # Then: files is empty, write_files was never called.
+    assert field(result, "files") == {}
+    assert _read_log(write_log) == []
+    assert not (repo_root / "gen" / "widget").exists()
 
-    write_calls = write_log.read_text(encoding="utf-8").strip() if write_log.exists() else ""
-    assert write_calls == ""
-
+    # And model_call_error's category is <category>.
     error = field(result, "model_call_error")
     assert error is not None
     assert field(error, "category") == category
+    message = field(error, "message")
+    assert isinstance(message, str)
+    if stop == "error":
+        assert error == {"category": "rate_limit", "message": "m"}
+    else:
+        assert message != ""
+        assert stop in message
