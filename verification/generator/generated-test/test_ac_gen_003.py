@@ -1,13 +1,18 @@
-# hotdocs-criterion: sha256:1240c15bf7132762fd4ce35b9fe998f447edfb6b942ba80b1b269311cf7eb358
+# hotdocs-criterion: sha256:553be697c52e50c77e809f8d009eb8c35857094100f8b01663a61471ffa60e0e
+"""AC-GEN-003: every GenerationResult's prompt_version matches the frozen
+template's declared version (R-GEN-003)."""
+
 import re
-from pathlib import Path
 
 import pytest
 
 import generator
 
 
-PYTHON_ADAPTER = (
+DECLARED_PROMPT_VERSION = "v12"
+NONCE_RE = r"-----BEGIN FILE ([0-9a-f]{32}):"
+
+FAKE_PYTHON_ADAPTER = (
     "from pathlib import Path\n"
     "\n"
     "KIND = \"python\"\n"
@@ -22,112 +27,170 @@ PYTHON_ADAPTER = (
     "\"lockfile_sha256\": None, \"interpreter\": \"/fake/python\"}\n"
 )
 
-COMPONENT_MD = (
-    "---\n"
-    "id: comp-widget-maker\n"
-    "title: Widget Maker\n"
-    "status: draft\n"
-    "owners: [pipeline-team]\n"
-    "depends_on: []\n"
-    "sealed: false\n"
-    "---\n"
-    "\n"
-    "# Widget Maker\n"
-)
-
 
 def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def make_repo(tmp_path):
+def make_repo(tmp_path, sealed=False):
     repo_root = tmp_path / "repo"
-    adapter = repo_root / "gen" / "kind-python" / "kind_python.py"
-    adapter.parent.mkdir(parents=True, exist_ok=True)
-    adapter.write_text(PYTHON_ADAPTER, encoding="utf-8")
-    comp = repo_root / "specs" / "components" / "widget-maker" / "component.md"
-    comp.parent.mkdir(parents=True, exist_ok=True)
-    comp.write_text(COMPONENT_MD, encoding="utf-8")
+    adapter_dir = repo_root / "gen" / "kind-python"
+    adapter_dir.mkdir(parents=True)
+    (adapter_dir / "kind_python.py").write_text(FAKE_PYTHON_ADAPTER, encoding="utf-8")
+    comp_dir = repo_root / "specs" / "components" / "widget-maker"
+    comp_dir.mkdir(parents=True)
+    lines = [
+        "---",
+        "id: comp-widget-maker",
+        "title: Widget Maker",
+        "status: draft",
+        "owners: [pipeline-team]",
+        "depends_on: []",
+    ]
+    if sealed:
+        lines.append("sealed: true")
+        lines.append("source_path: legacy/widget-maker/")
+    else:
+        lines.append("sealed: false")
+    lines += ["---", "", "# Widget Maker", ""]
+    (comp_dir / "component.md").write_text("\n".join(lines), encoding="utf-8")
     return repo_root
 
 
-def make_backend(prompts):
-    def backend(prompt, model, **params):
-        prompts.append(prompt)
-        nonce = re.search(r"-----BEGIN FILE ([0-9a-f]{32}):", prompt).group(1)
-        text = (
-            "-----BEGIN FILE " + nonce + ": widget_maker.py-----\n"
-            "X = 1\n"
-            "-----END FILE " + nonce + "-----\n"
-            "-----END REPLY " + nonce + "-----\n"
-        )
-        return {
-            "text": text,
-            "model": model,
-            "backend": "mock",
-            "model_call_error": None,
-        }
-
-    return backend
-
-
-def make_bundle(variant):
-    bundle = {
+def make_bundle(hint_code=None, spec="Make widgets."):
+    return {
         "component_id": "comp-widget-maker",
-        "spec_bundle_hash": "sha256:" + ("ab" * 32) if variant != "hint" else "sha256:" + ("cd" * 32),
-        "spec": "# Widget Maker\n\nMakes widgets.",
+        "spec_bundle_hash": "sha256:" + "ab" * 32,
+        "spec": spec,
         "interface": "make_widget() -> str",
-        "constraints": "",
+        "constraints": "No network.",
         "dependency_interfaces": {},
         "dependency_context": {},
         "dependency_usage": {},
         "vars": {},
         "glossary": "",
-        "hint_code": None,
+        "hint_code": hint_code,
     }
-    if variant == "rich":
-        bundle["spec_bundle_hash"] = "sha256:" + ("ef" * 32)
-        bundle["constraints"] = "Be fast."
-        bundle["dependency_interfaces"] = {"comp-bar": "bar() -> int"}
-        bundle["dependency_context"] = {"comp-bar": "Bar does bars."}
-        bundle["vars"] = {"VAR-FOO-URL": "A URL."}
-        bundle["glossary"] = "- **Widget** - a thing."
-    if variant == "hint":
-        bundle["hint_code"] = {"widget_maker.py": "X = 0\n"}
-    return bundle
 
 
-@pytest.mark.parametrize(
-    "variant, retry_feedback",
-    [
-        ("plain", None),
-        ("rich", ["R-WIDGET-002", "R-WIDGET-001"]),
-        ("hint", None),
-    ],
-)
-def test_prompt_version_matches_frozen_template(tmp_path, monkeypatch, variant, retry_feedback):
-    monkeypatch.delenv("VAR_CACHE_STORE_URL", raising=False)
-    repo_root = make_repo(tmp_path)
-    monkeypatch.chdir(repo_root)
-
-    prompts = []
-    bundle = make_bundle(variant)
-    result = generator.generate(
-        bundle,
-        "mock-model",
-        retry_feedback,
-        repo_root=repo_root,
-        llm_backend=make_backend(prompts),
+def ok_reply(prompt):
+    nonce = re.search(NONCE_RE, prompt).group(1)
+    return (
+        "-----BEGIN FILE " + nonce + ": widget_maker.py-----\n"
+        + "def make_widget():\n"
+        + "    return 'widget'\n"
+        + "-----END FILE " + nonce + "-----\n"
+        + "-----END REPLY " + nonce + "-----\n"
     )
 
-    declared = generator.PROMPT_VERSION
-    assert declared == "v12"
 
-    # The model was actually called with the frozen template, which declares its version.
-    assert len(prompts) == 1
-    lines = [line.strip() for line in prompts[0].split("\n")]
-    assert "PROMPT_VERSION: " + declared in lines
+def make_ok_backend(prompts):
+    def backend(prompt, model, **params):
+        prompts.append(prompt)
+        return {"text": ok_reply(prompt), "model": model, "backend": "mock", "model_call_error": None}
 
-    assert field(result, "refused") is None
-    assert field(result, "model_call_error") is None
-    assert field(result, "prompt_version") == declared
+    return backend
+
+
+def make_error_backend(prompts):
+    def backend(prompt, model, **params):
+        prompts.append(prompt)
+        return {
+            "text": None,
+            "model": model,
+            "backend": "mock",
+            "model_call_error": {"category": "network", "message": "backend unreachable"},
+        }
+
+    return backend
+
+
+@pytest.fixture(autouse=True)
+def _no_remote_cache(monkeypatch):
+    monkeypatch.delenv("VAR_CACHE_STORE_URL", raising=False)
+
+
+def assert_version(result):
+    assert field(result, "prompt_version") == generator.PROMPT_VERSION
+    assert field(result, "prompt_version") == DECLARED_PROMPT_VERSION
+
+
+def assert_prompt_declares_version(prompts):
+    assert prompts, "the mock model was never called"
+    declared_line = "PROMPT_VERSION: " + generator.PROMPT_VERSION
+    for prompt in prompts:
+        assert declared_line in prompt.split("\n")
+
+
+def test_declared_constant_is_frozen_version():
+    assert generator.PROMPT_VERSION == DECLARED_PROMPT_VERSION
+
+
+@pytest.mark.parametrize("retry_feedback", [None, [], ["R-WIDGET-002", "R-WIDGET-001"]])
+def test_cold_generation_records_prompt_version(tmp_path, retry_feedback):
+    repo_root = make_repo(tmp_path)
+    prompts = []
+    result = generator.generate(
+        make_bundle(), "mock-model", retry_feedback,
+        repo_root=repo_root, llm_backend=make_ok_backend(prompts),
+    )
+    assert field(result, "files")
+    assert field(result, "cache_hit") is False
+    assert_version(result)
+    assert_prompt_declares_version(prompts)
+
+
+def test_hint_generation_records_prompt_version(tmp_path):
+    repo_root = make_repo(tmp_path)
+    prompts = []
+    bundle = make_bundle(hint_code={"widget_maker.py": "def make_widget():\n    return 'old'\n"})
+    result = generator.generate(
+        bundle, "mock-model", None, repo_root=repo_root, llm_backend=make_ok_backend(prompts),
+    )
+    assert field(result, "files")
+    assert_version(result)
+    assert_prompt_declares_version(prompts)
+
+
+def test_model_call_error_records_prompt_version(tmp_path):
+    repo_root = make_repo(tmp_path)
+    prompts = []
+    result = generator.generate(
+        make_bundle(spec="Error case."), "mock-model", None,
+        repo_root=repo_root, llm_backend=make_error_backend(prompts),
+    )
+    assert field(result, "model_call_error") is not None
+    assert_version(result)
+    assert_prompt_declares_version(prompts)
+
+
+def test_refused_generation_records_prompt_version(tmp_path):
+    repo_root = make_repo(tmp_path, sealed=True)
+    prompts = []
+    result = generator.generate(
+        make_bundle(spec="Sealed case."), "mock-model", None,
+        repo_root=repo_root, llm_backend=make_ok_backend(prompts),
+    )
+    assert field(result, "refused") is not None
+    assert prompts == []
+    assert_version(result)
+
+
+def test_cache_hit_records_prompt_version(tmp_path):
+    repo_root = make_repo(tmp_path)
+    prompts = []
+    bundle = make_bundle(spec="Cache case.")
+    first = generator.generate(
+        bundle, "mock-model", None, repo_root=repo_root, llm_backend=make_ok_backend(prompts),
+    )
+    assert field(first, "files")
+    assert_version(first)
+    generator.commit_cache(first, repo_root=repo_root)
+
+    second_prompts = []
+    second = generator.generate(
+        bundle, "mock-model", None, repo_root=repo_root, llm_backend=make_ok_backend(second_prompts),
+    )
+    assert field(second, "cache_hit") is True
+    assert second_prompts == []
+    assert_version(second)

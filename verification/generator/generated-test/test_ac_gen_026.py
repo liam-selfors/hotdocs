@@ -1,8 +1,11 @@
-# hotdocs-criterion: sha256:df060afc53ebb2726fe2725025937b77758f250f4eaa5367931ae727c5d70636
+# hotdocs-criterion: sha256:9c73e70d1324d0b0b8aa23fd4af874103898372980c95f59a0adddb62e245a18
+import sys
 from pathlib import Path
 
 import generator
 
+
+COMPONENT_ID = "comp-widget-maker"
 
 SECTIONS = [
     "Layout",
@@ -14,49 +17,81 @@ SECTIONS = [
     "Generator guidance",
 ]
 
+FAKE_ADAPTER_HEAD = (
+    "from pathlib import Path\n"
+    "\n"
+    "KIND = \"fake\"\n"
+    "\n"
+    "\n"
+    "def layout_errors(asset_file):\n"
+    "    return [\"bad\"] if \"bad\" in Path(asset_file).read_text(encoding=\"utf-8\") else []\n"
+    "\n"
+    "\n"
+)
 
-def _python_adapter_source(log_path):
+FAKE_PROVISION_BODY = (
+    "    if (Path(repo_root) / \"NO_ENV\").exists():\n"
+    "        return {\"ok\": False, \"reason\": \"fake needs fakeprog >= 2\", \"versions\": {}, \"lockfile_sha256\": None}\n"
+    "    return {\"ok\": True, \"reason\": \"\", \"versions\": {\"fakeprog\": \"2.0.0\"}, \"lockfile_sha256\": None}\n"
+)
+
+PYTHON_ADAPTER_HEAD = (
+    "from pathlib import Path\n"
+    "\n"
+    "KIND = \"python\"\n"
+    "\n"
+    "\n"
+    "def layout_errors(code_dir):\n"
+    "    return [\"bad.py:1: SyntaxError: x\"] if (Path(code_dir) / \"bad.py\").exists() else []\n"
+    "\n"
+    "\n"
+)
+
+PYTHON_PROVISION_BODY = (
+    "    return {\"ok\": True, \"reason\": \"\", \"versions\": {\"python\": \"3.12\"}, \"lockfile_sha256\": None, \"interpreter\": \"/fake/python\"}\n"
+)
+
+
+def _log_lines(log_path, label):
+    if log_path is None:
+        return ""
     return (
-        "from pathlib import Path\n"
-        "\n"
-        'KIND = "python"\n'
-        "LOG = " + repr(str(log_path)) + "\n"
-        "\n"
-        "\n"
-        "def layout_errors(code_dir):\n"
-        '    return ["bad.py:1: SyntaxError: x"] if (Path(code_dir) / "bad.py").exists() else []\n'
-        "\n"
-        "\n"
-        "def provision(repo_root):\n"
-        '    with open(LOG, "a", encoding="utf-8") as f:\n'
-        '        f.write("python\\n")\n'
-        '    return {"ok": True, "reason": "", "versions": {"python": "3.12"}, "lockfile_sha256": None, "interpreter": "/fake/python"}\n'
+        "    with open(" + repr(str(log_path)) + ", \"a\", encoding=\"utf-8\") as _f:\n"
+        "        _f.write(" + repr(label + "\n") + ")\n"
     )
 
 
-def _fake_adapter_source(log_path):
-    return (
-        "from pathlib import Path\n"
-        "\n"
-        'KIND = "fake"\n'
-        "LOG = " + repr(str(log_path)) + "\n"
-        "\n"
-        "\n"
-        "def layout_errors(asset_file):\n"
-        '    return ["bad"] if "bad" in Path(asset_file).read_text(encoding="utf-8") else []\n'
-        "\n"
-        "\n"
-        "def provision(repo_root):\n"
-        '    with open(LOG, "a", encoding="utf-8") as f:\n'
-        '        f.write("fake\\n")\n'
-        '    if (Path(repo_root) / "NO_ENV").exists():\n'
-        '        return {"ok": False, "reason": "fake needs fakeprog >= 2", "versions": {}, "lockfile_sha256": None}\n'
-        '    return {"ok": True, "reason": "", "versions": {"fakeprog": "2.0.0"}, "lockfile_sha256": None}\n'
+def _write(path, text):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+
+
+def plant_python_adapter(repo_root, log_path=None):
+    source = (
+        PYTHON_ADAPTER_HEAD
+        + "def provision(repo_root):\n"
+        + _log_lines(log_path, "python")
+        + PYTHON_PROVISION_BODY
     )
+    _write(repo_root / "gen" / "kind-python" / "kind_python.py", source)
 
 
-def _component_md(kind):
-    return (
+def plant_fake_kind(repo_root, log_path=None):
+    definition = "# Fake\n"
+    for name in SECTIONS:
+        definition += "\n## " + name + "\n\nx\n"
+    _write(repo_root / "specs" / "architecture" / "asset-kind-fake.md", definition)
+    source = (
+        FAKE_ADAPTER_HEAD
+        + "def provision(repo_root):\n"
+        + _log_lines(log_path, "fake")
+        + FAKE_PROVISION_BODY
+    )
+    _write(repo_root / "gen" / "kind-fake" / "kind_fake.py", source)
+
+
+def plant_component(repo_root, kind="fake"):
+    text = (
         "---\n"
         "id: comp-widget-maker\n"
         "title: Widget Maker\n"
@@ -69,132 +104,108 @@ def _component_md(kind):
         "\n"
         "# Widget Maker\n"
     )
+    _write(repo_root / "specs" / "components" / "widget-maker" / "component.md", text)
 
 
-def make_repo(tmp_path, kind="fake", component=True):
+def make_repo(tmp_path, kind="fake", log_path=None, component=True):
     repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    log_path = tmp_path / "provision_calls.log"
-
-    py_dir = repo_root / "gen" / "kind-python"
-    py_dir.mkdir(parents=True)
-    (py_dir / "kind_python.py").write_text(_python_adapter_source(log_path), encoding="utf-8")
-
+    repo_root.mkdir(parents=True, exist_ok=True)
+    plant_python_adapter(repo_root, log_path)
     if component:
-        comp_dir = repo_root / "specs" / "components" / "widget-maker"
-        comp_dir.mkdir(parents=True)
-        (comp_dir / "component.md").write_text(_component_md(kind), encoding="utf-8")
-
-        arch = repo_root / "specs" / "architecture"
-        arch.mkdir(parents=True)
-        definition = "# Fake\n"
-        for name in SECTIONS:
-            definition += "\n## " + name + "\n\nx\n"
-        (arch / "asset-kind-fake.md").write_text(definition, encoding="utf-8")
-
-        fake_dir = repo_root / "gen" / "kind-fake"
-        fake_dir.mkdir(parents=True)
-        (fake_dir / "kind_fake.py").write_text(_fake_adapter_source(log_path), encoding="utf-8")
-
-    return repo_root, log_path
+        plant_fake_kind(repo_root, log_path)
+        plant_component(repo_root, kind)
+    return repo_root
 
 
 def snapshot(repo_root):
-    return {
-        str(p.relative_to(repo_root))
-        for p in repo_root.rglob("*")
-        if "__pycache__" not in p.parts
-    }
+    result = set()
+    for p in repo_root.rglob("*"):
+        rel = p.relative_to(repo_root)
+        if "__pycache__" in rel.parts or p.suffix == ".pyc":
+            continue
+        result.add(rel.as_posix())
+    return result
 
 
-def norm(result):
+def normalize(result):
     category, messages = result
     return (category, list(messages))
 
 
 def test_undeclared_files_sorted_and_nothing_written(tmp_path):
-    repo_root, _ = make_repo(tmp_path)
+    repo_root = make_repo(tmp_path)
     before = snapshot(repo_root)
-    result = generator.check_assets(
-        "comp-widget-maker",
-        {"widget_maker.py": "", "static/app.txt": "ok", "b.md": "", "a.json": ""},
-        repo_root=repo_root,
-    )
-    assert norm(result) == (
+    files = {"widget_maker.py": "", "static/app.txt": "ok", "b.md": "", "a.json": ""}
+    result = generator.check_assets(COMPONENT_ID, files, repo_root=repo_root)
+    assert normalize(result) == (
         "malformed_layout",
         ["undeclared file: a.json", "undeclared file: b.md"],
     )
     assert snapshot(repo_root) == before
-    assert not (repo_root / "gen" / "widget-maker").exists()
 
 
 def test_package_layout_passes(tmp_path):
-    repo_root, _ = make_repo(tmp_path)
-    result = generator.check_assets(
-        "comp-widget-maker",
-        {"widget_maker/__init__.py": "", "static/app.txt": "ok"},
-        repo_root=repo_root,
-    )
-    assert norm(result) == (None, [])
+    repo_root = make_repo(tmp_path)
+    before = snapshot(repo_root)
+    files = {"widget_maker/__init__.py": "", "static/app.txt": "ok"}
+    result = generator.check_assets(COMPONENT_ID, files, repo_root=repo_root)
+    assert normalize(result) == (None, [])
+    assert snapshot(repo_root) == before
 
 
-def test_python_layout_errors_and_declared_assets_first(tmp_path):
-    repo_root, _ = make_repo(tmp_path)
-    result = generator.check_assets(
-        "comp-widget-maker",
-        {"widget_maker.py": "", "bad.py": "", "static/app.txt": "ok"},
-        repo_root=repo_root,
-    )
-    assert norm(result) == ("malformed_layout", ["bad.py:1: SyntaxError: x"])
-
-    result = generator.check_assets(
-        "comp-widget-maker",
-        {"widget_maker.py": "", "bad.py": "", "static/app.txt": "bad"},
-        repo_root=repo_root,
-    )
-    assert norm(result) == ("malformed_layout", ["static/app.txt: bad"])
+def test_python_layout_errors(tmp_path):
+    repo_root = make_repo(tmp_path)
+    files = {"widget_maker.py": "", "bad.py": "", "static/app.txt": "ok"}
+    result = generator.check_assets(COMPONENT_ID, files, repo_root=repo_root)
+    assert normalize(result) == ("malformed_layout", ["bad.py:1: SyntaxError: x"])
 
 
-def test_missing_declared_asset(tmp_path):
-    repo_root, _ = make_repo(tmp_path)
-    result = generator.check_assets(
-        "comp-widget-maker",
-        {"widget_maker.py": ""},
-        repo_root=repo_root,
-    )
-    assert norm(result) == ("missing_asset", ["missing asset: static/app.txt"])
+def test_declared_asset_layout_errors_first(tmp_path):
+    repo_root = make_repo(tmp_path)
+    files = {"widget_maker.py": "", "bad.py": "", "static/app.txt": "bad"}
+    result = generator.check_assets(COMPONENT_ID, files, repo_root=repo_root)
+    assert normalize(result) == ("malformed_layout", ["static/app.txt: bad"])
+
+
+def test_missing_asset(tmp_path):
+    repo_root = make_repo(tmp_path)
+    files = {"widget_maker.py": ""}
+    result = generator.check_assets(COMPONENT_ID, files, repo_root=repo_root)
+    assert normalize(result) == ("missing_asset", ["missing asset: static/app.txt"])
 
 
 def test_bare_repo_root_without_component_md(tmp_path):
-    repo_root, _ = make_repo(tmp_path, component=False)
-    result = generator.check_assets(
-        "comp-widget-maker",
-        {"widget_maker.py": ""},
-        repo_root=repo_root,
-    )
-    assert norm(result) == (None, [])
+    repo_root = make_repo(tmp_path, component=False)
+    assert not (repo_root / "specs" / "components" / "widget-maker" / "component.md").exists()
+    files = {"widget_maker.py": ""}
+    result = generator.check_assets(COMPONENT_ID, files, repo_root=repo_root)
+    assert normalize(result) == (None, [])
 
 
-def test_check_asset_environment(tmp_path):
-    repo_root, log_path = make_repo(tmp_path)
+def test_check_asset_environment_before_and_after_no_env(tmp_path):
+    log_path = tmp_path / "provision.log"
+    repo_root = make_repo(tmp_path, log_path=log_path)
 
-    result = generator.check_asset_environment("comp-widget-maker", repo_root=repo_root)
-    assert norm(result) == (None, [])
+    first = generator.check_asset_environment(COMPONENT_ID, repo_root=repo_root)
+    assert normalize(first) == (None, [])
+    lines = log_path.read_text(encoding="utf-8").splitlines()
+    assert lines, "no provision was called"
+    assert lines[0] == "python"
+    assert "fake" in lines
+    assert lines.index("python") < lines.index("fake")
 
     (repo_root / "NO_ENV").write_text("", encoding="utf-8")
-    if log_path.exists():
-        log_path.unlink()
+    log_path.write_text("", encoding="utf-8")
 
-    result = generator.check_asset_environment("comp-widget-maker", repo_root=repo_root)
-    assert norm(result) == ("environment", ["fake needs fakeprog >= 2"])
-
-    calls = log_path.read_text(encoding="utf-8").splitlines()
-    assert "python" in calls
-    assert "fake" in calls
-    assert calls.index("python") < calls.index("fake")
+    second = generator.check_asset_environment(COMPONENT_ID, repo_root=repo_root)
+    assert normalize(second) == ("environment", ["fake needs fakeprog >= 2"])
+    lines = log_path.read_text(encoding="utf-8").splitlines()
+    assert lines and lines[0] == "python"
+    assert "fake" in lines
+    assert lines.index("python") < lines.index("fake")
 
 
 def test_check_asset_environment_unknown_kind(tmp_path):
-    repo_root, _ = make_repo(tmp_path, kind="nosuchkind")
-    result = generator.check_asset_environment("comp-widget-maker", repo_root=repo_root)
-    assert norm(result) == ("environment", ["unknown asset kind: nosuchkind"])
+    repo_root = make_repo(tmp_path, kind="nosuchkind")
+    result = generator.check_asset_environment(COMPONENT_ID, repo_root=repo_root)
+    assert normalize(result) == ("environment", ["unknown asset kind: nosuchkind"])

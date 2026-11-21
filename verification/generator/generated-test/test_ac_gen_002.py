@@ -1,11 +1,11 @@
-# hotdocs-criterion: sha256:7a8375c6e3b2c4287f1dafb3c477d337dc2f5b11327fd1b71359501aa43429b0
+# hotdocs-criterion: sha256:7c0b214befce634469e3345f470c1b6bc7adc92d44067c77af724681363262a1
 import re
 from pathlib import Path
 
 import generator
 
 
-PY_ADAPTER = (
+PYTHON_ADAPTER_SOURCE = (
     "from pathlib import Path\n"
     "\n"
     "KIND = \"python\"\n"
@@ -16,7 +16,8 @@ PY_ADAPTER = (
     "\n"
     "\n"
     "def provision(repo_root):\n"
-    "    return {\"ok\": True, \"reason\": \"\", \"versions\": {\"python\": \"3.12\"}, \"lockfile_sha256\": None, \"interpreter\": \"/fake/python\"}\n"
+    "    return {\"ok\": True, \"reason\": \"\", \"versions\": {\"python\": \"3.12\"}, "
+    "\"lockfile_sha256\": None, \"interpreter\": \"/fake/python\"}\n"
 )
 
 
@@ -31,75 +32,105 @@ def section(prompt, heading):
     return "\n".join(lines[start:end]).rstrip("\n")
 
 
-def test_ac_gen_002_hint_code_in_own_labeled_section(tmp_path, monkeypatch):
-    monkeypatch.delenv("VAR_CACHE_STORE_URL", raising=False)
-    repo_root = tmp_path / "repo"
-    adapter_dir = repo_root / "gen" / "kind-python"
-    adapter_dir.mkdir(parents=True)
-    (adapter_dir / "kind_python.py").write_text(PY_ADAPTER, encoding="utf-8")
+def _plant_repo(repo_root):
+    adapter = repo_root / "gen" / "kind-python" / "kind_python.py"
+    adapter.parent.mkdir(parents=True, exist_ok=True)
+    adapter.write_text(PYTHON_ADAPTER_SOURCE, encoding="utf-8")
 
-    hint_a = "HINT_TOKEN_ALPHA_7f3a = 1\n"
-    hint_b = "HINT_TOKEN_BETA_9c2d = 2\n"
-    bundle = {
-        "component_id": "comp-hintee",
-        "spec_bundle_hash": "sha256:" + "ab" * 32,
-        "spec": "SPEC_TOKEN_ONE describes the component.",
-        "interface": "INTERFACE_TOKEN_TWO def run() -> int",
-        "constraints": "CONSTRAINTS_TOKEN_THREE",
-        "dependency_interfaces": {},
-        "dependency_context": {},
-        "dependency_usage": {},
-        "vars": {},
-        "glossary": "GLOSSARY_TOKEN_FOUR",
-        "hint_code": {"zeta.py": hint_b, "alpha.py": hint_a},
-    }
 
-    prompts = []
-
+def _make_mock(log_path, calls):
     def backend(prompt, model, **params):
-        prompts.append(prompt)
+        calls.append(prompt)
+        with open(log_path, "a", encoding="utf-8") as fh:
+            fh.write("call\n")
         nonce = re.search(r"-----BEGIN FILE ([0-9a-f]{32}):", prompt).group(1)
         text = (
-            "-----BEGIN FILE " + nonce + ": hintee.py-----\n"
-            "def run():\n"
-            "    return 1\n"
+            "-----BEGIN FILE " + nonce + ": widget_maker.py-----\n"
+            "VALUE = 1\n"
             "-----END FILE " + nonce + "-----\n"
             "-----END REPLY " + nonce + "-----\n"
         )
         return {"text": text, "model": model, "backend": "mock", "model_call_error": None}
 
-    generator.generate(bundle, "mock-model", repo_root=repo_root, llm_backend=backend)
+    return backend
 
-    assert len(prompts) >= 1
-    prompt = prompts[0]
+
+def test_ac_gen_002_hint_code_in_own_labeled_section(tmp_path, monkeypatch):
+    monkeypatch.delenv("VAR_CACHE_STORE_URL", raising=False)
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    _plant_repo(repo_root)
+    monkeypatch.chdir(repo_root)
+
+    log_path = tmp_path / "model_calls.log"
+    calls = []
+    backend = _make_mock(log_path, calls)
+
+    hint_code = {
+        "zeta_mod.py": "HINTMARKERZETA = 2\n",
+        "alpha_mod.py": "HINTMARKERALPHA = 1\n",
+    }
+    bundle = {
+        "component_id": "comp-widget-maker",
+        "spec_bundle_hash": "sha256:" + "ab" * 32,
+        "spec": "COLDSPECMARKER the widget maker makes widgets.",
+        "interface": "COLDINTERFACEMARKER make_widget() -> str",
+        "constraints": "COLDCONSTRAINTSMARKER no network.",
+        "dependency_interfaces": {},
+        "dependency_context": {},
+        "dependency_usage": {},
+        "vars": {},
+        "glossary": "COLDGLOSSARYMARKER widget: a thing.",
+        "hint_code": hint_code,
+    }
+
+    generator.generate(
+        bundle,
+        "anthropic:claude-sonnet-5",
+        None,
+        repo_root=repo_root,
+        llm_backend=backend,
+    )
+
+    assert log_path.exists(), "mock model was never called"
+    assert len(calls) >= 1
+    prompt = calls[-1]
     lines = prompt.split("\n")
 
-    # hint_code has its own distinctly labeled section
+    # hint_code has its own, distinctly labeled section
     assert "## HINT_CODE" in lines
-    hint_section = section(prompt, "## HINT_CODE")
-    assert "--- hint file: alpha.py ---" in hint_section
-    assert "--- end hint file: alpha.py ---" in hint_section
-    assert "--- hint file: zeta.py ---" in hint_section
-    assert "--- end hint file: zeta.py ---" in hint_section
-    assert "HINT_TOKEN_ALPHA_7f3a = 1" in hint_section
-    assert "HINT_TOKEN_BETA_9c2d = 2" in hint_section
-    # files sorted by path
-    assert hint_section.index("--- hint file: alpha.py ---") < hint_section.index("--- hint file: zeta.py ---")
+    hint_text = section(prompt, "## HINT_CODE")
 
-    # hint section is separate from cold bundle fields
-    cold_headings = ["## SPEC", "## INTERFACE", "## CONSTRAINTS", "## GLOSSARY"]
-    cold_tokens = ["SPEC_TOKEN_ONE", "INTERFACE_TOKEN_TWO", "CONSTRAINTS_TOKEN_THREE", "GLOSSARY_TOKEN_FOUR"]
-    for heading, token in zip(cold_headings, cold_tokens):
+    # each hint file is labeled and present, sorted by path
+    a_begin = hint_text.index("--- hint file: alpha_mod.py ---")
+    a_end = hint_text.index("--- end hint file: alpha_mod.py ---")
+    z_begin = hint_text.index("--- hint file: zeta_mod.py ---")
+    z_end = hint_text.index("--- end hint file: zeta_mod.py ---")
+    assert a_begin < a_end < z_begin < z_end
+    assert "HINTMARKERALPHA = 1" in hint_text[a_begin:a_end]
+    assert "HINTMARKERZETA = 2" in hint_text[z_begin:z_end]
+
+    # hint content appears only in the HINT_CODE section
+    assert prompt.count("HINTMARKERALPHA") == 1
+    assert prompt.count("HINTMARKERZETA") == 1
+
+    # cold bundle fields remain in their own sections, separate from hint_code
+    cold = {
+        "## SPEC": "COLDSPECMARKER",
+        "## INTERFACE": "COLDINTERFACEMARKER",
+        "## CONSTRAINTS": "COLDCONSTRAINTSMARKER",
+        "## GLOSSARY": "COLDGLOSSARYMARKER",
+    }
+    for heading, marker in cold.items():
         assert heading in lines
-        cold_text = section(prompt, heading)
-        assert token in cold_text
-        assert "HINT_TOKEN_ALPHA_7f3a" not in cold_text
-        assert "HINT_TOKEN_BETA_9c2d" not in cold_text
-        assert "hint file:" not in cold_text
-        assert token not in hint_section
+        text = section(prompt, heading)
+        assert marker in text
+        assert "HINTMARKERALPHA" not in text
+        assert "HINTMARKERZETA" not in text
+        assert "--- hint file:" not in text
+        assert marker not in hint_text
 
-    # hint code appears only within its own section
-    assert prompt.count("HINT_TOKEN_ALPHA_7f3a") == 1
-    assert prompt.count("HINT_TOKEN_BETA_9c2d") == 1
-    # and that section comes after the cold sections
-    assert lines.index("## HINT_CODE") > lines.index("## GLOSSARY")
+    # the HINT_CODE section is distinct from, and after, the cold sections
+    hint_idx = lines.index("## HINT_CODE")
+    for heading in cold:
+        assert lines.index(heading) < hint_idx
