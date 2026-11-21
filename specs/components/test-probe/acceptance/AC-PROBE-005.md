@@ -25,6 +25,13 @@ When probe(source, {}, "slugify") is called
 Then tests_run is 2, tests_reached is 1, the findings are empty and ok
   is True
 
+Given a test source that imports pytest and defines a fixture run that
+  raises AssertionError() and one test, test_x(run), reaching nothing
+  before it
+When probe(source, {}, "slugify") is called
+Then the findings are exactly one test_bug finding whose message is
+  'test_x: failed on setup with "AssertionError"'
+
 Given a test source whose only test calls time.sleep(30)
 When probe(source, {}, "slugify", timeout=2) is called
 Then the findings are exactly one probe_timeout finding and ok is False

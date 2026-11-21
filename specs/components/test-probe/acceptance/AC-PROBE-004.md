@@ -16,6 +16,13 @@ Then the findings hold exactly one fake_signature_mismatch finding, on
   bar_get's def line, with message
   "bar_get takes 1 parameters; the interface of comp-bar gives 2"
 
+Given the same bundle and the same top-level defs, installed instead by
+  'setattr(target, "bar_get", alias)', 'target.bar_put = bar_put' and
+  'monkeypatch.setattr(target, "other", other)'
+When probe(source, bundle, "slugify") is called
+Then the findings hold exactly the same one fake_signature_mismatch
+  finding
+
 Given the same bundle and a source whose fake, installed the same way,
   is "def bar_get(*args):"
 When probe(source, bundle, "slugify") is called
