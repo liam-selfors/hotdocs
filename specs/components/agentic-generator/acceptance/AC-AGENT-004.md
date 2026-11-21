@@ -22,4 +22,15 @@ Then check_import's result is the error
   "no OS sandbox available: code is not run" and isolation is "none";
   and with allow_unisolated_exec=True check_import starts "0\n" and
   isolation is "unisolated"
+
+Given repo_root/gen/kind-python/kind_python.py, a stand-in adapter whose
+  provision(repo_root) returns ok true, versions {}, lockfile_sha256
+  None and interpreter a shell script outside repo_root that appends one
+  line to a log file beside it and then runs the test's own
+  sys.executable with its arguments, and SANDBOX_EXEC and BWRAP set to
+  "/nonexistent/sandbox"
+When generate_agentic is called with the same script, that repo_root
+  and allow_unisolated_exec=True
+Then check_import's result starts "0\n", and the log holds exactly two
+  lines, one for check_import and one for run_scratch_tests
 ```

@@ -12,7 +12,7 @@
   `component.md` frontmatter `assets` (read through `load_corpus`'s
   `Component`, `R-ASSEMBLE-012`), the text before its first `:`,
   de-duplicated and sorted; none when the key is absent. A kind's
-  adapter is `<repo_root>/gen/kind-<kind>/kind_<kind>.py`, or, when that
+  adapter is `<repo_root>/gen/kind-<kind>/kind_<module>.py`, or, when that
   file does not exist, the same path under the tool root
   (`R-ASSEMBLE-015`), loaded by path afresh on each call. With neither,
   both functions raise `PreconditionFailure` with the message

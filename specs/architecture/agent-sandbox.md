@@ -80,8 +80,13 @@ tool is the error result `<tool> failed: <message>`.
 `check_import` runs `<python> -c "import <module>"` and
 `run_scratch_tests` runs
 `<python> -m pytest -q -p no:cacheprovider --noconftest scratch`, each
-with current directory `<root>`, `<python>` being `sys.executable`. The
-environment is exactly: `PATH=/usr/bin:/bin`, `HOME` and `TMPDIR`
+with current directory `<root>`, `<python>` being the `interpreter`
+that the `python` adapter's `provision(repo_root)` reports
+(`asset-kinds.md`'s Lookup; the project's own environment when it
+commits `environments/python/requirements.lock`, else `sys.executable`,
+`D355`), provisioned once per `generate_agentic` call (a failing `provision`
+has already ended generation, as `asset-kinds.md`'s Layout step says).
+The environment is exactly: `PATH=/usr/bin:/bin`, `HOME` and `TMPDIR`
 `<root>/tmp`, `PYTHONPATH` `<root>/work`, `PYTHONDONTWRITEBYTECODE=1`,
 and nothing else. Before exec the child sets `RLIMIT_CPU` to 60 seconds
 and `RLIMIT_NOFILE` to 256, and the run is killed after 60 seconds of
@@ -91,8 +96,10 @@ The command runs inside an OS sandbox that denies network access, writes
 outside `<root>`, and reads of the repository's content:
 
 - **macOS:** `/usr/bin/sandbox-exec -f <root>.sb -D ROOT=<root>
-  -D REPO=<repo_root real path> -D PREFIX=<sys.prefix real path> <command>`
-  with the profile
+  -D REPO=<repo_root real path> -D PREFIX=<prefix> <command>`
+  with the profile, `<prefix>` being the real path of `<python>`'s own
+  `sys.prefix`, printed by `<python> -I -c "import sys; print(sys.prefix)"`
+  (inside the repository when the environment is the project's)
 
   ```
   (version 1)

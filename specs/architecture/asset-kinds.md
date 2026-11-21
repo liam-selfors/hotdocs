@@ -49,9 +49,10 @@ provenance treat every kind alike (`D340`, `D343`). A project built with
 ## Lookup
 
 An adapter is loaded by path, never imported by name:
-`<repo_root>/gen/kind-<kind>/kind_<kind>.py`, or, when that file does
-not exist, `<tool_root>/gen/kind-<kind>/kind_<kind>.py`, the **tool
-root** being the parent of the nearest directory named `gen` above the
+`<repo_root>/gen/kind-<kind>/kind_<module>.py`, or, when that file does
+not exist, `<tool_root>/gen/kind-<kind>/kind_<module>.py`, `<module>`
+being the kind with each `-` replaced by `_` (`kind_data_schema.py` for
+`data-schema`, `D354`), the **tool being the parent of the nearest directory named `gen` above the
 reading module's own file. Pipeline components never list an adapter in
 `depends_on`, so adding or changing a kind regenerates the kind and the
 components that declare it, never the pipeline. `python` is the one
@@ -174,7 +175,7 @@ instead, verified by evaluation, regenerating only the adapter.
 
 ## The adapter interface
 
-`comp-kind-<kind>` provides a module `kind_<kind>` with:
+`comp-kind-<kind>` provides a module `kind_<module>` with:
 
 ```
 KIND: str

@@ -6,11 +6,17 @@
   `interface/library.md` gives, and classify each `testcase` of the
   report:
 
-  - a `failure` whose `message` contains `HotdocsProbeStubReached` reached
-    the code under test: no finding;
+  - a `failure` or `error` child whose `message` contains
+    `HotdocsProbeStubReached` reached the code under test (an `error`
+    one in a fixture): no finding;
+  - an `error` child whose `message` is exactly
+    `failed on setup with "AssertionError"`, after a `testcase` whose
+    setup reached the code under test, reached nothing: pytest cannot set
+    up later tests once that `BaseException` ends a setup (`D353`); no
+    finding;
   - a `failure` whose `message` begins with `NameError`,
     `UnboundLocalError`, `ImportError` or `ModuleNotFoundError`, or any
-    `error` child, is a `test_bug` finding whose message is
+    other `error` child, is a `test_bug` finding whose message is
     `<testcase name>: <message>`;
   - a `testcase` with no `failure`, `error` or `skipped` child passed
     without reaching the code under test: a `vacuous` finding, severity

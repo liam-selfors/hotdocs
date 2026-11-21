@@ -12,7 +12,8 @@ Given a corpus whose component "web" has depends_on [] and assets
 When lint(None, repo_root) runs
 Then specs/components/web/component.md has exactly these R-LINT-034 fail
   findings, in this order:
-  "asset kind 'nosuchkind-x9' has no definition",
+  "asset kind 'nosuchkind-x9' has no definition; run hotdocs kind new
+  nosuchkind-x9",
   "asset kind 'demo' definition lacks section 'Surface'",
   "asset kind 'demo' definition has empty section 'Strength check'",
   "asset kind 'demo' is defined in this repository; depends_on must list comp-kind-demo"

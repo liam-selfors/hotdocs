@@ -24,8 +24,7 @@ at `<repo_root>/specs/components/<slug>/`. `owners` defaults to
 
 - `ValueError` for an invalid argument: an empty `title`; a `slug` that is
   not kebab-case (`^[a-z][a-z0-9]*(-[a-z0-9]+)*$`); a `decision_id` not of
-  the form `D<N>`; a `kind` not matching `^[a-z][a-z0-9]*$`, or
-  `python`; a `builds_on` or `supersedes` id with no file under
+  the form `D<N>`; a `kind` not kebab-case, or `python`; a `builds_on` or `supersedes` id with no file under
   `specs/decisions/`.
 - `FileExistsError` when `new_decision`'s or `new_component`'s target
   already exists, or `new_kind`'s definition or component directory does.
