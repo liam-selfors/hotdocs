@@ -13,19 +13,31 @@ signed in, or an API key in an environment variable (Anthropic, OpenAI,
 Gemini, any OpenAI-compatible server, or a local Ollama). Node 24 or
 newer is needed only if a component declares a JavaScript asset.
 
+From PyPI, as an isolated command-line tool:
+
+```
+pipx install hotdocs          # or: uv tool install hotdocs
+```
+
+With Homebrew, from the tap: `brew install <owner>/hotdocs/hotdocs`
+(`packaging/homebrew/hotdocs.rb`). Either way the tool's own components
+ship inside the package, read-only, and every project uses them from there.
+
+To work on hotdocs itself, install a checkout instead:
+
 ```
 git clone <this repository> hotdocs && cd hotdocs
 python3 -m venv .venv && . .venv/bin/activate
 pip install -e .
 ```
 
-This is the one environment hotdocs uses. The editable install matters:
-the tool's components are files in this checkout, and every project uses
-them from here. Updating the checkout (`git pull`) updates the tool for all
-your projects. Keep this environment active in every project (or put its
-`bin/` on `PATH`); a project has no environment of its own. Dependencies
-are pinned in `requirements.txt`, the list `pip install -e .` installs and
-`hotdocs init` checks.
+The editable install matters here: the tool's components are files in the
+checkout, so `git pull` updates the tool for every project that uses this
+environment. Keep it active in each project, or put its `bin/` on `PATH`.
+
+Dependencies are pinned exactly in `requirements.txt`, which both installs
+use and `hotdocs init` checks. `hotdocs lint` and the graph views load
+DuckDB's `yaml` extension on first use, which needs network access once.
 
 ## 2. Create a project
 

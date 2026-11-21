@@ -15,9 +15,10 @@ a JavaScript module, each with its own definition and checks
 
 ## Try it
 
-See `QUICKSTART.md`: install this checkout once, run `hotdocs init` in a
-project, and generate the example component. The tool's own components stay
-in this checkout; a project holds only its own (`D199`). `AUTHORING.md`
+`pipx install hotdocs` (or `uv tool install hotdocs`), then see
+`QUICKSTART.md`: run `hotdocs init --example` in a project and generate the
+example component. The tool's own components ship inside the package; a
+project holds only its own (`D199`, `D358`). `AUTHORING.md`
 explains how to write specs that generate correctly the first time.
 
 ## How it works
@@ -77,7 +78,7 @@ since trusting a compiled criterion means trusting its compiler.
 `notes/bootstrap-history.md` tells how each component first landed;
 `verification/<slug>/BOOTSTRAP.md` has each one's full account.
 
-Decisions are ADRs in `specs/decisions/`, `D1` through `D357` (`D1`–`D75`
+Decisions are ADRs in `specs/decisions/`, `D1` through `D358` (`D1`–`D75`
 from the 2026-10 baseline reset, the rest recorded as they were made).
 `notes/initial-ideas.md` holds the original brainstorm, with its own
 informal numbering.
