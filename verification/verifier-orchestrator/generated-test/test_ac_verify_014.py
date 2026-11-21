@@ -1,19 +1,30 @@
-# hotdocs-criterion: sha256:9e63b4100800dcd25594994653799b91ff474963cde0882bd6a87be9b016e562
-# AC-VERIFY-014: two repo_roots with a same-slug component, verified in turn in
-# one process, each get results reflecting their own code (R-VERIFY-013).
+# hotdocs-criterion: sha256:3685e82736058e2c4b76b799d9870eee94675ccba1f61b1760d9d191d48178d2
+# AC-VERIFY-014 (covers R-VERIFY-013): two repo_roots holding a component
+# with the same slug but different code, verified one after the other in
+# the same process, each get results reflecting their own code.
+
 import shutil
 from pathlib import Path
+
+import pytest
 
 import verifier_orchestrator
 
 
-SLUG = "widget"
-COMPONENT_ID = "comp-widget"
-CRITERION_ID = "AC-WIDGET-001"
+SLUG = "pair-tool"
+COMPONENT_ID = "comp-" + SLUG
+MODULE = "pair_tool"
+CRITERION_ID = "AC-PAIR-001"
+REQUIREMENT_ID = "R-PAIR-001"
 
 
 def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
+
+
+def live_root():
+    gen_dir = Path(verifier_orchestrator.__file__).resolve().parents[1]
+    return (gen_dir / "spec-bundle-assembler").resolve().parents[1]
 
 
 def write(path, text):
@@ -21,184 +32,201 @@ def write(path, text):
     path.write_text(text, encoding="utf-8")
 
 
-def live_root():
+def good_module_source():
     return (
-        Path(verifier_orchestrator.__file__).resolve().parents[1]
-        / "spec-bundle-assembler"
-    ).resolve().parents[1]
+        "import types as _types\n"
+        "\n"
+        "\n"
+        "def compute_pair(x):\n"
+        "    return _types.SimpleNamespace(value=x * 2)\n"
+        "\n"
+        "\n"
+        "def helper_name(y):\n"
+        "    return y\n"
+    )
 
 
-CODE_A = (
-    "from types import SimpleNamespace\n"
-    "\n"
-    "\n"
-    "def get_info(x):\n"
-    "    return SimpleNamespace(value=x + 1)\n"
-    "\n"
-    "\n"
-    "def extra_name(y):\n"
-    "    return y\n"
-)
-
-CODE_B = (
-    "from types import SimpleNamespace\n"
-    "\n"
-    "\n"
-    "def get_info(x):\n"
-    "    return SimpleNamespace(value=x + 100)\n"
-)
-
-LIBRARY_MD = (
-    "# Library\n"
-    "\n"
-    "```\n"
-    "get_info(x: int) -> Info\n"
-    "extra_name(y: int) -> int\n"
-    "```\n"
-    "\n"
-    "`get_info` returns an object whose `value` attribute is `x + 1`.\n"
-)
-
-COMPONENT_MD = (
-    "---\n"
-    "id: comp-widget\n"
-    "title: Widget\n"
-    "status: draft\n"
-    "owners: [test-team]\n"
-    "realizes: [P-WIDGET]\n"
-    "---\n"
-    "\n"
-    "# Widget\n"
-    "\n"
-    "## Purpose\n"
-    "\n"
-    "Computes widget information.\n"
-    "\n"
-    "## Scope\n"
-    "\n"
-    "- In scope: get_info.\n"
-    "\n"
-    "## Definitions\n"
-    "\n"
-    "None.\n"
-    "\n"
-    "## Behavior\n"
-    "\n"
-    "See `requirements/`.\n"
-    "\n"
-    "## Interfaces\n"
-    "\n"
-    "See `interface/`.\n"
-    "\n"
-    "## Data\n"
-    "\n"
-    "See `interface/data/`.\n"
-    "\n"
-    "## Acceptance criteria\n"
-    "\n"
-    "See `acceptance/`.\n"
-    "\n"
-    "## Non-functional constraints\n"
-    "\n"
-    "See `constraints.md`.\n"
-    "\n"
-    "## Open questions\n"
-    "\n"
-    "## Change log\n"
-    "\n"
-    "- Initial.\n"
-)
-
-PRODUCT_MD = (
-    "---\n"
-    "id: P-WIDGET\n"
-    "title: Widget capability\n"
-    "status: draft\n"
-    "owners: [test-team]\n"
-    "---\n"
-    "\n"
-    "# Widget capability\n"
-    "\n"
-    "## Purpose\n"
-    "\n"
-    "Widgets.\n"
-)
-
-REQUIREMENT_MD = (
-    "# R-WIDGET-001\n"
-    "\n"
-    "**R-WIDGET-001** - `get_info(x)` MUST return an object whose `value`\n"
-    "is `x + 1`.\n"
-)
-
-ACCEPTANCE_MD = (
-    "# AC-WIDGET-001\n"
-    "\n"
-    "Covers: R-WIDGET-001\n"
-    "Kind: compiled\n"
-    "\n"
-    "```gherkin\n"
-    "Given a n is 1\n"
-    "When get_info is invoked with {\"x\": n}\n"
-    "Then value equals 2\n"
-    "```\n"
-)
-
-CONSTRAINTS_MD = "# Constraints\n\nNone.\n"
-
-ASSEMBLER_SRC = (
-    "def assemble_criterion(component_id, criterion_id, repo_root):\n"
-    "    return {\n"
-    "        'component_id': component_id,\n"
-    "        'criterion_id': criterion_id,\n"
-    "        'covers': 'R-WIDGET-001',\n"
-    "        'criterion_text': 'criterion',\n"
-    "        'requirement_text': 'requirement',\n"
-    "        'interface': 'interface',\n"
-    "        'glossary': '',\n"
-    "        'dependency_interfaces': {},\n"
-    "        'testing': '',\n"
-    "    }\n"
-)
-
-PROBE_SRC = (
-    "class _Report:\n"
-    "    def __init__(self):\n"
-    "        self.ok = True\n"
-    "        self.findings = []\n"
-    "        self.tests_run = 0\n"
-    "        self.tests_reached = 0\n"
-    "\n"
-    "    def to_dict(self):\n"
-    "        return {'ok': self.ok, 'findings': list(self.findings),\n"
-    "                'tests_run': self.tests_run, 'tests_reached': self.tests_reached}\n"
-    "\n"
-    "\n"
-    "def probe(test_source, criterion_bundle, module_name, *, timeout=60.0, interpreter=None):\n"
-    "    return _Report()\n"
-)
+def bad_module_source():
+    # Same slug and module name, different code: compute_pair gives the
+    # wrong value and the declared helper_name is missing (interface drift).
+    return (
+        "import types as _types\n"
+        "\n"
+        "\n"
+        "def compute_pair(x):\n"
+        "    return _types.SimpleNamespace(value=x * 3)\n"
+    )
 
 
-def build_fixture(repo_root, code):
+def assembler_source():
+    return (
+        "def assemble_criterion(component_id, criterion_id, repo_root):\n"
+        "    return {\n"
+        "        'component_id': component_id,\n"
+        "        'criterion_id': criterion_id,\n"
+        "        'covers': " + repr(REQUIREMENT_ID) + ",\n"
+        "        'criterion_text': 'criterion text',\n"
+        "        'requirement_text': 'requirement text',\n"
+        "        'interface': 'compute_pair(x) -> object',\n"
+        "        'glossary': '',\n"
+        "        'dependency_interfaces': {},\n"
+        "        'testing': '',\n"
+        "    }\n"
+    )
+
+
+def probe_source():
+    return (
+        "class _Report:\n"
+        "    def __init__(self):\n"
+        "        self.ok = True\n"
+        "        self.findings = []\n"
+        "        self.tests_run = 0\n"
+        "        self.tests_reached = 0\n"
+        "\n"
+        "    def to_dict(self):\n"
+        "        return {'ok': True, 'findings': [], 'tests_run': 0, 'tests_reached': 0}\n"
+        "\n"
+        "\n"
+        "def probe(test_source, criterion_bundle, module_name, *, timeout=60.0, interpreter=None):\n"
+        "    return _Report()\n"
+    )
+
+
+def build_fixture(repo_root, module_source):
     comp = repo_root / "specs" / "components" / SLUG
-    write(comp / "component.md", COMPONENT_MD)
-    write(comp / "requirements" / "R-WIDGET-001.md", REQUIREMENT_MD)
-    write(comp / "acceptance" / "AC-WIDGET-001.md", ACCEPTANCE_MD)
-    write(comp / "interface" / "library.md", LIBRARY_MD)
-    write(comp / "constraints.md", CONSTRAINTS_MD)
-    write(repo_root / "specs" / "product" / "P-WIDGET.md", PRODUCT_MD)
+
+    write(
+        repo_root / "specs" / "product" / "pair.md",
+        "---\n"
+        "id: P-PAIR\n"
+        "title: Pair capability\n"
+        "status: draft\n"
+        "owners: [test-team]\n"
+        "---\n"
+        "\n"
+        "# Pair capability\n"
+        "\n"
+        "## Purpose\n"
+        "\n"
+        "Doubles numbers.\n"
+        "\n"
+        "## Scope\n"
+        "\n"
+        "- Doubling.\n"
+        "\n"
+        "### CS-PAIR-001\n"
+        "\n"
+        "Covers: P-PAIR\n"
+        "\n"
+        "```gherkin\n"
+        "Given a seed is 2\n"
+        "When compute_pair is invoked with [seed]\n"
+        "Then value equals 4\n"
+        "```\n",
+    )
+
+    write(
+        comp / "component.md",
+        "---\n"
+        "id: " + COMPONENT_ID + "\n"
+        "title: Pair tool\n"
+        "status: draft\n"
+        "owners: [test-team]\n"
+        "realizes: [P-PAIR]\n"
+        "---\n"
+        "\n"
+        "# Pair tool\n"
+        "\n"
+        "## Purpose\n"
+        "\n"
+        "Computes a doubled value.\n"
+        "\n"
+        "## Scope\n"
+        "\n"
+        "- In scope: doubling.\n"
+        "\n"
+        "## Definitions\n"
+        "\n"
+        "None.\n"
+        "\n"
+        "## Behavior\n"
+        "\n"
+        "See `requirements/`.\n"
+        "\n"
+        "## Interfaces\n"
+        "\n"
+        "See `interface/`.\n"
+        "\n"
+        "## Data\n"
+        "\n"
+        "See `interface/data/`.\n"
+        "\n"
+        "## Acceptance criteria\n"
+        "\n"
+        "See `acceptance/`.\n"
+        "\n"
+        "## Non-functional constraints\n"
+        "\n"
+        "See `constraints.md`.\n"
+        "\n"
+        "## Open questions\n"
+        "\n"
+        "## Change log\n"
+        "\n"
+        "- Initial.\n",
+    )
+
+    write(
+        comp / "requirements" / (REQUIREMENT_ID + ".md"),
+        "# " + REQUIREMENT_ID + "\n"
+        "\n"
+        "**" + REQUIREMENT_ID + "** - `compute_pair(x)` MUST return an object "
+        "whose `value` is `x * 2`.\n",
+    )
+
+    write(
+        comp / "interface" / "library.md",
+        "# Library\n"
+        "\n"
+        "```\n"
+        "compute_pair(x) -> object\n"
+        "helper_name(y) -> object\n"
+        "```\n"
+        "\n"
+        "`compute_pair` returns an object with attribute `value`, `x * 2`.\n"
+        "`helper_name` returns `y`.\n",
+    )
+
+    write(
+        comp / "acceptance" / (CRITERION_ID + ".md"),
+        "# " + CRITERION_ID + "\n"
+        "\n"
+        "Covers: " + REQUIREMENT_ID + "\n"
+        "Kind: compiled\n"
+        "\n"
+        "```gherkin\n"
+        "Given a seed is 2\n"
+        "When compute_pair is invoked with [seed]\n"
+        "Then value equals 4\n"
+        "```\n",
+    )
+
+    write(comp / "constraints.md", "# Constraints\n\nNone.\n")
     write(repo_root / "specs" / "glossary.md", "# Glossary\n")
-    write(repo_root / "gen" / SLUG / "widget.py", code)
+
+    write(repo_root / "gen" / SLUG / (MODULE + ".py"), module_source)
+
     write(
         repo_root / "gen" / "spec-bundle-assembler" / "spec_bundle_assembler.py",
-        ASSEMBLER_SRC,
+        assembler_source(),
     )
-    write(repo_root / "gen" / "test-probe" / "test_probe.py", PROBE_SRC)
-    shutil.copytree(
-        live_root() / "pipeline" / "criterion-compiler",
-        repo_root / "pipeline" / "criterion-compiler",
-        ignore=shutil.ignore_patterns("__pycache__"),
-    )
+    write(repo_root / "gen" / "test-probe" / "test_probe.py", probe_source())
+
+    src = live_root() / "pipeline" / "criterion-compiler"
+    dst = repo_root / "pipeline" / "criterion-compiler"
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copytree(src, dst, ignore=shutil.ignore_patterns("__pycache__"))
 
 
 def criterion_result(report):
@@ -208,26 +236,30 @@ def criterion_result(report):
     return field(matches[0], "result")
 
 
-def test_same_slug_in_two_repo_roots_never_share_modules(tmp_path):
-    repo_a = tmp_path / "repo_a"
-    repo_b = tmp_path / "repo_b"
-    build_fixture(repo_a, CODE_A)
-    build_fixture(repo_b, CODE_B)
+@pytest.mark.parametrize("order", ["good_first", "bad_first"])
+def test_same_slug_in_two_repo_roots_never_shares_a_module(tmp_path, order):
+    good_root = tmp_path / "good"
+    bad_root = tmp_path / "bad"
+    good_root.mkdir()
+    bad_root.mkdir()
+    build_fixture(good_root, good_module_source())
+    build_fixture(bad_root, bad_module_source())
 
-    report_a = verifier_orchestrator.verify(COMPONENT_ID, repo_a)
-    report_b = verifier_orchestrator.verify(COMPONENT_ID, repo_b)
-    report_a_again = verifier_orchestrator.verify(COMPONENT_ID, repo_a)
+    if order == "good_first":
+        sequence = [("good", good_root), ("bad", bad_root)]
+    else:
+        sequence = [("bad", bad_root), ("good", good_root)]
 
-    # repo_a's code satisfies the interface and the compiled criterion.
-    assert field(report_a, "interface_drift") is False
-    assert criterion_result(report_a) == "pass"
+    reports = {}
+    for name, root in sequence:
+        reports[name] = verifier_orchestrator.verify(COMPONENT_ID, root)
 
-    # repo_b's code lacks a declared function and returns the wrong value:
-    # its results must reflect its own code, not repo_a's cached module.
-    assert field(report_b, "interface_drift") is True
-    assert criterion_result(report_b) == "fail"
-    assert field(report_b, "overall") == "fail"
+    good = reports["good"]
+    bad = reports["bad"]
 
-    # Going back to repo_a must not reuse repo_b's module either.
-    assert field(report_a_again, "interface_drift") is False
-    assert criterion_result(report_a_again) == "pass"
+    assert field(good, "interface_drift") is False
+    assert criterion_result(good) == "pass"
+
+    assert field(bad, "interface_drift") is True
+    assert criterion_result(bad) == "fail"
+    assert field(bad, "overall") == "fail"

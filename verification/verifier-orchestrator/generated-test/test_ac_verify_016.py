@@ -1,11 +1,21 @@
-# hotdocs-criterion: sha256:44a3f920e3dc0e7046e6b413cd1873448d4e290cc94a34d768058da7a4d99c41
-import importlib.util
-import sys
+# hotdocs-criterion: sha256:38afd8ec740f1485e11dcdc9867687e668c0c00fffd166e6b14c2b1f137f0d05
+# Test for AC-VERIFY-016 (covers R-VERIFY-014):
+# A mutant whose loop never terminates is killed by its per-mutant timeout,
+# and verify returns within ten seconds.
+import hashlib
+import json
 import threading
 import time
 from pathlib import Path
 
 import verifier_orchestrator
+
+
+SLUG = "loop-counter"
+MODULE = "loop_counter"
+COMPONENT_ID = "comp-loop-counter"
+CRITERION_ID = "AC-LOOP-001"
+REQUIREMENT_ID = "R-LOOP-001"
 
 
 def field(value, name):
@@ -18,14 +28,23 @@ def write(path, text):
 
 
 CRITERION_TEXT = (
-    "Given a loopy count is 3\n"
+    "# AC-LOOP-001\n"
+    "\n"
+    "Covers: R-LOOP-001\n"
+    "Kind: generated-test\n"
+    "\n"
+    "```gherkin\n"
+    "Given a number is 3\n"
     "When count_up is invoked with 3\n"
-    "Then the result equals 3\n"
+    "Then result equals 3\n"
+    "```\n"
 )
 
 REQUIREMENT_TEXT = (
-    "**R-LOOPY-001** - `count_up(x)` MUST return `x` for a non-negative "
-    "integer `x`, by counting up from zero.\n"
+    "# R-LOOP-001\n"
+    "\n"
+    "**R-LOOP-001** - `count_up(x)` MUST count from 0 up to `x` one step\n"
+    "at a time and return the final count.\n"
 )
 
 INTERFACE_TEXT = (
@@ -36,13 +55,7 @@ INTERFACE_TEXT = (
     "```\n"
 )
 
-GENERATED_TEST = (
-    "import loopy\n"
-    "\n"
-    "\n"
-    "def test_count_up_three():\n"
-    "    assert loopy.count_up(3) == 3\n"
-)
+GLOSSARY_TEXT = "# Glossary\n\n- **Count** - a number reached by counting.\n"
 
 MODULE_SOURCE = (
     "def count_up(x):\n"
@@ -53,34 +66,55 @@ MODULE_SOURCE = (
 )
 
 
-def build_fixture(repo_root, log_dir):
-    write(
-        repo_root / "specs" / "product" / "loopy.md",
-        "---\n"
-        "id: P-LOOPY\n"
-        "title: Loopy capability\n"
-        "status: draft\n"
-        "owners: [test-team]\n"
-        "---\n"
-        "\n"
-        "# Loopy capability\n"
-        "\n"
-        "## Purpose\n"
-        "\n"
-        "Counting up.\n",
+def bundle_dict():
+    return {
+        "component_id": COMPONENT_ID,
+        "criterion_id": CRITERION_ID,
+        "covers": REQUIREMENT_ID,
+        "criterion_text": CRITERION_TEXT,
+        "requirement_text": REQUIREMENT_TEXT,
+        "interface": INTERFACE_TEXT,
+        "glossary": GLOSSARY_TEXT,
+        "dependency_interfaces": {},
+        "testing": "",
+    }
+
+
+def header_line(bundle):
+    keys = ("criterion_text", "requirement_text", "interface", "glossary", "testing")
+    payload = json.dumps(
+        {k: bundle[k] for k in keys},
+        sort_keys=True,
+        ensure_ascii=False,
+        separators=(",", ":"),
     )
-    comp = repo_root / "specs" / "components" / "loopy"
+    return "# hotdocs-criterion: sha256:" + hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def generated_test_source():
+    return (
+        header_line(bundle_dict()) + "\n"
+        "import " + MODULE + "\n"
+        "\n"
+        "\n"
+        "def test_count_up_reaches_three():\n"
+        "    assert " + MODULE + ".count_up(3) == 3\n"
+    )
+
+
+def build_fixture(repo_root):
+    comp = repo_root / "specs" / "components" / SLUG
     write(
         comp / "component.md",
         "---\n"
-        "id: comp-loopy\n"
-        "title: Loopy\n"
+        "id: " + COMPONENT_ID + "\n"
+        "title: Loop counter\n"
         "status: draft\n"
         "owners: [test-team]\n"
-        "realizes: [P-LOOPY]\n"
+        "realizes: [P-LOOP]\n"
         "---\n"
         "\n"
-        "# Loopy\n"
+        "# Loop counter\n"
         "\n"
         "## Purpose\n"
         "\n"
@@ -118,51 +152,57 @@ def build_fixture(repo_root, log_dir):
         "\n"
         "## Change log\n"
         "\n"
-        "- Initial.\n",
+        "- Initial draft.\n",
     )
-    write(comp / "requirements" / "R-LOOPY-001.md", "# R-LOOPY-001\n\n" + REQUIREMENT_TEXT)
+    write(comp / "requirements" / (REQUIREMENT_ID + ".md"), REQUIREMENT_TEXT)
+    write(comp / "acceptance" / (CRITERION_ID + ".md"), CRITERION_TEXT)
     write(comp / "interface" / "library.md", INTERFACE_TEXT)
     write(comp / "constraints.md", "# Constraints\n\nNone.\n")
     write(
-        comp / "acceptance" / "AC-LOOPY-001.md",
-        "# AC-LOOPY-001\n"
+        repo_root / "specs" / "product" / "loop.md",
+        "---\n"
+        "id: P-LOOP\n"
+        "title: Loop capability\n"
+        "status: draft\n"
+        "owners: [test-team]\n"
+        "---\n"
         "\n"
-        "Covers: R-LOOPY-001\n"
-        "Kind: generated-test\n"
+        "# Loop capability\n"
         "\n"
-        "```gherkin\n" + CRITERION_TEXT + "```\n",
+        "## Purpose\n"
+        "\n"
+        "Counting.\n"
+        "\n"
+        "## Scope\n"
+        "\n"
+        "- Counting.\n"
+        "\n"
+        "### CS-LOOP-001\n"
+        "\n"
+        "Covers: P-LOOP\n"
+        "\n"
+        "```gherkin\n"
+        "Given a number is 3\n"
+        "When count_up is invoked with 3\n"
+        "Then result equals 3\n"
+        "```\n",
     )
+    write(repo_root / "specs" / "glossary.md", GLOSSARY_TEXT)
 
-    write(repo_root / "gen" / "loopy" / "loopy.py", MODULE_SOURCE)
+    # The component's code: one short function with the loop under test.
+    write(repo_root / "gen" / SLUG / (MODULE + ".py"), MODULE_SOURCE)
 
-    bundle_literal = {
-        "component_id": "comp-loopy",
-        "criterion_id": "AC-LOOPY-001",
-        "covers": "R-LOOPY-001",
-        "criterion_text": CRITERION_TEXT,
-        "requirement_text": REQUIREMENT_TEXT,
-        "interface": INTERFACE_TEXT,
-        "glossary": "",
-        "dependency_interfaces": {},
-        "testing": "",
-    }
-    assembler_log = str(log_dir / "assembler.log")
+    # spec-bundle-assembler stand-in.
     write(
         repo_root / "gen" / "spec-bundle-assembler" / "spec_bundle_assembler.py",
+        "BUNDLE = " + repr(bundle_dict()) + "\n"
+        "\n"
+        "\n"
         "def assemble_criterion(component_id, criterion_id, repo_root):\n"
-        "    with open(" + repr(assembler_log) + ", 'a') as fh:\n"
-        "        fh.write(str(criterion_id) + '\\n')\n"
-        "    bundle = dict(" + repr(bundle_literal) + ")\n"
-        "    bundle['component_id'] = component_id\n"
-        "    bundle['criterion_id'] = criterion_id\n"
-        "    return bundle\n"
-        "\n"
-        "\n"
-        "def assemble(component_id, repo_root, mode='cold'):\n"
-        "    raise RuntimeError('assemble is not used by verify')\n",
+        "    return dict(BUNDLE)\n",
     )
 
-    probe_log = str(log_dir / "probe.log")
+    # test-probe stand-in: always ok, no findings.
     write(
         repo_root / "gen" / "test-probe" / "test_probe.py",
         "GATE_VERSION = 'test-probe@1.3.0'\n"
@@ -181,71 +221,75 @@ def build_fixture(repo_root, log_dir):
         "\n"
         "\n"
         "def probe(test_source, criterion_bundle, module_name, *, timeout=60.0, interpreter=None):\n"
-        "    with open(" + repr(probe_log) + ", 'a') as fh:\n"
-        "        fh.write('probe\\n')\n"
         "    return ProbeReport()\n",
     )
 
 
-def make_test_author(log_path):
-    def test_author_stand_in(bundle):
-        with open(log_path, "a") as fh:
+def make_author(log_path):
+    content = generated_test_source()
+
+    def author(bundle):
+        with open(log_path, "a", encoding="utf-8") as fh:
             fh.write("called\n")
         return {
+            "component_id": COMPONENT_ID,
+            "criterion_id": CRITERION_ID,
             "model": "fake-model",
             "seed": 0,
             "prompt_version": "v1",
             "cache_hit": False,
             "model_call_error": None,
             "file": {
-                "path": "verification/loopy/generated-test/test_ac_loopy_001.py",
-                "content": GENERATED_TEST,
+                "path": "verification/" + SLUG + "/generated-test/test_ac_loop_001.py",
+                "content": content,
             },
+            "repair_attempts": 0,
+            "probe_findings": [],
         }
 
-    return test_author_stand_in
+    return author
 
 
 def test_non_terminating_mutant_is_killed_within_ten_seconds(tmp_path):
     repo_root = tmp_path / "repo"
-    log_dir = tmp_path / "logs"
     repo_root.mkdir()
-    log_dir.mkdir()
-    build_fixture(repo_root, log_dir)
-    author_log = log_dir / "author.log"
-    author = make_test_author(str(author_log))
+    build_fixture(repo_root)
+    log_path = tmp_path / "author.log"
+    author = make_author(log_path)
 
     outcome = {}
 
-    def run():
+    def run_verify():
         try:
-            outcome["report"] = verifier_orchestrator.verify("comp-loopy", repo_root, test_author=author)
+            outcome["report"] = verifier_orchestrator.verify(
+                COMPONENT_ID, repo_root, judge=None, test_author=author
+            )
         except BaseException as exc:  # noqa: BLE001
             outcome["error"] = exc
 
+    worker = threading.Thread(target=run_verify, daemon=True)
     start = time.monotonic()
-    worker = threading.Thread(target=run, daemon=True)
     worker.start()
-    worker.join(60)
+    worker.join(120)
     elapsed = time.monotonic() - start
 
-    assert not worker.is_alive(), "verify did not return within 60 seconds"
-    if "error" in outcome:
-        raise outcome["error"]
-    assert elapsed < 10.0, "verify took " + repr(elapsed) + " seconds"
-
+    assert not worker.is_alive(), "verify did not return (still running after 120 seconds)"
+    assert "error" not in outcome, "verify raised: " + repr(outcome.get("error"))
     report = outcome["report"]
 
-    # The test author was actually used for the criterion.
-    assert author_log.is_file()
-    assert author_log.read_text().count("called") >= 1
+    # It returns within ten seconds.
+    assert elapsed < 10.0, "verify took " + repr(elapsed) + " seconds"
 
+    # The generated test was authored by our stand-in and passed on unmutated code.
+    assert log_path.read_text(encoding="utf-8").splitlines() == ["called"]
     criteria = field(report, "criteria")
-    entry = next(c for c in criteria if field(c, "id") == "AC-LOOPY-001")
-    assert field(entry, "result") == "pass"
+    entries = [c for c in criteria if field(c, "id") == CRITERION_ID]
+    assert len(entries) == 1
+    assert field(entries[0], "result") == "pass"
 
-    # Two mutants exist (`i < x` -> `i >= x`, and the non-terminating
-    # `i + 1` -> `i - 1`); a score of 1.0 means the non-terminating one,
-    # whose run times out, counts as killed.
+    # The mutation run completed without error, and every mutant - including
+    # `i = i - 1`, which never terminates - counts as killed.
     assert field(report, "mutation_error") is None
-    assert field(report, "mutation_score") == 1.0
+    score = field(report, "mutation_score")
+    assert score is not None
+    assert score == 1.0

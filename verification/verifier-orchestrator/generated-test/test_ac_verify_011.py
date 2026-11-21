@@ -1,6 +1,8 @@
-# hotdocs-criterion: sha256:793b6ba2afc759e44c1ceb3be8eac721c5296d2f9140257d3654bff3d53aa5b3
+# hotdocs-criterion: sha256:51547c676f524efa5ac3043a0c8b41799bc657d4d2281f91ac16145e9c049d41
+# Test for AC-VERIFY-011 (covers R-VERIFY-011): requirement_results is the
+# per-R-id pass/fail projection, holding only R-id keys and pass/fail values.
+import hashlib
 import json
-import re
 from pathlib import Path
 
 import verifier_orchestrator
@@ -15,24 +17,91 @@ def write(path, text):
     path.write_text(text, encoding="utf-8")
 
 
-CRITERIA = [
-    ("AC-FOO-001", "R-FOO-001", "generated-test"),
-    ("AC-FOO-002", "R-FOO-001", "generated-test"),
-    ("AC-FOO-003", "R-FOO-002", "generated-test"),
-    ("AC-FOO-004", "R-FOO-003", "llm-judge"),
-]
-
-GHERKIN = {
-    "AC-FOO-001": "Given a widget is 1\nWhen bar_value is invoked with 1\nThen result equals 1",
-    "AC-FOO-002": "Given a widget is 2\nWhen bar_value is invoked with 2\nThen result equals 2",
-    "AC-FOO-003": "Given a widget is 3\nWhen bar_value is invoked with 3\nThen result equals 3",
-    "AC-FOO-004": "Given the spec is clear\nWhen a reader reads it\nThen it has no contradiction",
+CRITERIA = {
+    "AC-FOO-001": ("R-FOO-001", "generated-test"),
+    "AC-FOO-002": ("R-FOO-001", "generated-test"),
+    "AC-FOO-003": ("R-FOO-002", "generated-test"),
+    "AC-FOO-004": ("R-FOO-003", "llm-judge"),
 }
 
-PASSING_TEST = "def test_ok():\n    assert 1 == 1\n"
-FAILING_TEST = "def test_bad():\n    expected = 5\n    actual = 3\n    assert expected == actual\n"
+PASSING_TEST = "def test_passes():\n    assert 1 + 1 == 2\n"
+FAILING_TEST = "def test_fails():\n    assert 1 + 1 == 3\n"
 
-INTERFACE_TEXT = "# Library\n\n```\nbar_value(x: int) -> int\n```\n"
+
+def criterion_gherkin(criterion_id):
+    return (
+        "Given a widget_input is 3\n"
+        "When widget_compute is invoked with [widget_input]\n"
+        "Then value equals 3\n"
+    )
+
+
+def acceptance_text(criterion_id, covers, kind):
+    return (
+        "# " + criterion_id + "\n\n"
+        "Covers: " + covers + "\n"
+        "Kind: " + kind + "\n\n"
+        "```gherkin\n" + criterion_gherkin(criterion_id) + "```\n"
+    )
+
+
+def assembler_source():
+    criteria = {cid: covers for cid, (covers, _kind) in CRITERIA.items()}
+    return (
+        "def assemble_criterion(component_id, criterion_id, repo_root):\n"
+        "    covers = " + repr(criteria) + "[criterion_id]\n"
+        "    return {\n"
+        "        'component_id': component_id,\n"
+        "        'criterion_id': criterion_id,\n"
+        "        'covers': covers,\n"
+        "        'criterion_text': 'criterion text for ' + criterion_id,\n"
+        "        'requirement_text': 'requirement text for ' + covers,\n"
+        "        'interface': 'widget_compute(x) -> int',\n"
+        "        'glossary': 'glossary text',\n"
+        "        'dependency_interfaces': {},\n"
+        "        'testing': '',\n"
+        "    }\n"
+    )
+
+
+def probe_source():
+    return (
+        "class _Report:\n"
+        "    def __init__(self):\n"
+        "        self.ok = True\n"
+        "        self.findings = []\n"
+        "        self.tests_run = 1\n"
+        "        self.tests_reached = 1\n"
+        "\n"
+        "    def to_dict(self):\n"
+        "        return {'ok': self.ok, 'findings': list(self.findings),\n"
+        "                'tests_run': self.tests_run, 'tests_reached': self.tests_reached}\n"
+        "\n"
+        "\n"
+        "GATE_VERSION = 'test-probe@1.3.0'\n"
+        "\n"
+        "\n"
+        "def probe(test_source, criterion_bundle, module_name, *, timeout=60.0, interpreter=None):\n"
+        "    return _Report()\n"
+    )
+
+
+def bundle_get(bundle, key):
+    if isinstance(bundle, dict):
+        return bundle[key]
+    try:
+        return bundle[key]
+    except Exception:
+        return getattr(bundle, key)
+
+
+def header_for(bundle):
+    payload = {
+        k: bundle_get(bundle, k)
+        for k in ("criterion_text", "requirement_text", "interface", "glossary", "testing")
+    }
+    text = json.dumps(payload, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+    return "# hotdocs-criterion: sha256:" + hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
 def build_fixture(repo_root):
@@ -43,12 +112,12 @@ def build_fixture(repo_root):
         "id: comp-foo\n"
         "title: Foo\n"
         "status: draft\n"
-        "owners: [team-foo]\n"
+        "owners: [test-team]\n"
         "realizes: [P-FOO]\n"
         "---\n\n"
         "# Foo\n\n"
-        "## Purpose\n\nA fixture component.\n\n"
-        "## Scope\n\n- In scope: fixtures.\n\n"
+        "## Purpose\n\nComputes widgets.\n\n"
+        "## Scope\n\n- In scope: widgets.\n\n"
         "## Definitions\n\nNone.\n\n"
         "## Behavior\n\nSee `requirements/`.\n\n"
         "## Interfaces\n\nSee `interface/`.\n\n"
@@ -61,108 +130,59 @@ def build_fixture(repo_root):
     for rid in ("R-FOO-001", "R-FOO-002", "R-FOO-003"):
         write(
             comp / "requirements" / (rid + ".md"),
-            "# " + rid + "\n\n**" + rid + "** - The component MUST behave.\n",
+            "# " + rid + "\n\n**" + rid + "** — widget_compute MUST return its input.\n",
         )
-    for cid, covers, kind in CRITERIA:
-        write(
-            comp / "acceptance" / (cid + ".md"),
-            "# " + cid + "\n\n"
-            "Covers: " + covers + "\n"
-            "Kind: " + kind + "\n\n"
-            "```gherkin\n" + GHERKIN[cid] + "\n```\n",
-        )
-    write(comp / "interface" / "library.md", INTERFACE_TEXT)
+    for cid, (covers, kind) in CRITERIA.items():
+        write(comp / "acceptance" / (cid + ".md"), acceptance_text(cid, covers, kind))
+    write(
+        comp / "interface" / "library.md",
+        "# Library\n\n```\nwidget_compute(x) -> int\n```\n",
+    )
     write(comp / "constraints.md", "# Constraints\n\nNone.\n")
     write(
-        repo_root / "specs" / "product" / "foo.md",
+        repo_root / "specs" / "product" / "P-FOO.md",
         "---\n"
         "id: P-FOO\n"
         "title: Foo capability\n"
         "status: draft\n"
-        "owners: [team-foo]\n"
+        "owners: [test-team]\n"
         "---\n\n"
-        "# Foo capability\n\n## Purpose\n\nFixture.\n\n## Scope\n\n- Fixture.\n",
+        "# Foo capability\n\n## Purpose\n\nWidgets.\n\n## Scope\n\n- Widgets.\n",
     )
-    write(repo_root / "specs" / "glossary.md", "# Glossary\n")
+    write(repo_root / "specs" / "glossary.md", "# Glossary\n\n- **Widget** — a thing.\n")
     write(repo_root / "gen" / "foo" / "foo.py", "")
-
-    bundles = {}
-    for cid, covers, kind in CRITERIA:
-        bundles[cid] = {
-            "component_id": "comp-foo",
-            "criterion_id": cid,
-            "covers": covers,
-            "criterion_text": GHERKIN[cid],
-            "requirement_text": "**" + covers + "** - The component MUST behave.",
-            "interface": INTERFACE_TEXT,
-            "glossary": "# Glossary",
-            "dependency_interfaces": {},
-            "testing": "",
-        }
     write(
         repo_root / "gen" / "spec-bundle-assembler" / "spec_bundle_assembler.py",
-        "BUNDLES = " + repr(bundles) + "\n\n\n"
-        "def assemble_criterion(component_id, criterion_id, repo_root):\n"
-        "    return dict(BUNDLES[criterion_id])\n",
+        assembler_source(),
     )
-    write(
-        repo_root / "gen" / "test-probe" / "test_probe.py",
-        "GATE_VERSION = 'test-probe@1.3.0'\n\n\n"
-        "class ProbeReport:\n"
-        "    def __init__(self):\n"
-        "        self.ok = True\n"
-        "        self.findings = []\n"
-        "        self.tests_run = 1\n"
-        "        self.tests_reached = 1\n\n"
-        "    def to_dict(self):\n"
-        "        return {'ok': self.ok, 'findings': list(self.findings),\n"
-        "                'tests_run': self.tests_run, 'tests_reached': self.tests_reached}\n\n\n"
-        "def probe(test_source, criterion_bundle, module_name, *, timeout=60.0, interpreter=None):\n"
-        "    return ProbeReport()\n",
-    )
+    write(repo_root / "gen" / "test-probe" / "test_probe.py", probe_source())
 
 
 def make_test_author(log_path):
-    def test_author_stand_in(bundle):
-        cid = bundle["criterion_id"] if isinstance(bundle, dict) else getattr(bundle, "criterion_id")
+    def test_author(bundle):
+        criterion_id = bundle_get(bundle, "criterion_id")
         with open(log_path, "a", encoding="utf-8") as fh:
-            fh.write(str(cid) + "\n")
-        content = FAILING_TEST if cid == "AC-FOO-003" else PASSING_TEST
-        name = "test_" + str(cid).lower().replace("-", "_") + ".py"
+            fh.write(str(criterion_id) + "\n")
+        body = FAILING_TEST if criterion_id == "AC-FOO-003" else PASSING_TEST
+        content = header_for(bundle) + "\n" + body
         return {
-            "component_id": "comp-foo",
-            "criterion_id": cid,
             "model": "fake-model",
             "seed": 0,
             "prompt_version": "v1",
             "cache_hit": False,
-            "file": {"path": "verification/foo/generated-test/" + name, "content": content},
             "model_call_error": None,
-            "repair_attempts": 0,
-            "probe_findings": [],
+            "file": {
+                "path": "verification/foo/generated-test/test_"
+                + str(criterion_id).lower().replace("-", "_")
+                + ".py",
+                "content": content,
+            },
         }
 
-    return test_author_stand_in
+    return test_author
 
 
-def check_projection(rr):
-    assert isinstance(rr, dict)
-    assert rr == {"R-FOO-001": "pass", "R-FOO-002": "fail", "R-FOO-003": "fail"}
-    for key, value in rr.items():
-        assert isinstance(key, str) and re.fullmatch(r"R-[A-Z0-9]+-\d{3}", key)
-        assert value in ("pass", "fail")
-    dumped = json.dumps(rr)
-    for forbidden in (
-        "Given", "When", "Then", "gherkin", "rationale",
-        "expected", "actual", "failure_detail", "message", "AC-FOO",
-    ):
-        assert forbidden not in dumped
-    for gherkin in GHERKIN.values():
-        for line in gherkin.splitlines():
-            assert line not in dumped
-
-
-def test_requirement_results_projection(tmp_path):
+def test_requirement_results_is_pass_fail_projection(tmp_path):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
     build_fixture(repo_root)
@@ -172,12 +192,31 @@ def test_requirement_results_projection(tmp_path):
         "comp-foo", repo_root, judge=None, test_author=make_test_author(log_path)
     )
 
-    criteria = field(report, "criteria")
-    results = {field(c, "id"): field(c, "result") for c in criteria}
-    assert results["AC-FOO-001"] == "pass"
-    assert results["AC-FOO-002"] == "pass"
-    assert results["AC-FOO-003"] == "fail"
-    assert results["AC-FOO-004"] == "skipped"
+    # Sanity: the criteria came out as the Given describes.
+    results = {field(c, "id"): field(c, "result") for c in field(report, "criteria")}
+    assert results.get("AC-FOO-001") == "pass"
+    assert results.get("AC-FOO-002") == "pass"
+    assert results.get("AC-FOO-003") == "fail"
+    assert results.get("AC-FOO-004") == "skipped"
 
-    check_projection(field(report, "requirement_results"))
-    check_projection(report.to_dict()["requirement_results"])
+    expected = {"R-FOO-001": "pass", "R-FOO-002": "fail", "R-FOO-003": "fail"}
+
+    requirement_results = field(report, "requirement_results")
+    assert isinstance(requirement_results, dict)
+    assert requirement_results == expected
+
+    as_dict = report.to_dict()
+    assert as_dict["requirement_results"] == expected
+
+    for rr in (requirement_results, as_dict["requirement_results"]):
+        for key, value in rr.items():
+            assert isinstance(key, str) and key.startswith("R-")
+            assert value in ("pass", "fail")
+            assert not isinstance(value, (dict, list))
+        serialized = json.dumps(rr)
+        for forbidden in (
+            "Given", "When", "Then", "gherkin", "rationale",
+            "expected", "actual", "failure_detail", "message",
+            "AC-FOO",
+        ):
+            assert forbidden not in serialized
