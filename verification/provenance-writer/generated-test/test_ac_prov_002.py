@@ -1,25 +1,36 @@
-# hotdocs-criterion: sha256:495b99fb1b620fcbb49a421f09e4df6f0cfde12b1a751d5263211f5888508c5b
+# hotdocs-criterion: sha256:50925742fb525683ac5afae511e26f3ee5482fc4cc66d1b5ed7062bf286a23bd
 import json
 from pathlib import Path
 
 import provenance_writer
 
 
-def _walk_keys(value):
-    """Yield every dict key found anywhere in a parsed JSON value."""
+def field(value, name):
+    return value[name] if isinstance(value, dict) else getattr(value, name)
+
+
+def _contains_key(value, key):
     if isinstance(value, dict):
-        for key, item in value.items():
-            yield key
-            yield from _walk_keys(item)
-    elif isinstance(value, list):
-        for item in value:
-            yield from _walk_keys(item)
+        for k, v in value.items():
+            if k == key:
+                return True
+            if _contains_key(v, key):
+                return True
+        return False
+    if isinstance(value, list):
+        return any(_contains_key(item, key) for item in value)
+    return False
 
 
-def _generation_result():
-    return {
+def _contains_text(text, needle):
+    return needle in text
+
+
+def test_ac_prov_002_generation_fields_copied_and_no_sample_index(tmp_path):
+    repo_root = Path(tmp_path)
+    generation_result = {
         "component_id": "comp-foo",
-        "spec_bundle_hash": "sha256:" + "a" * 64,
+        "spec_bundle_hash": "sha256:" + "0" * 64,
         "model": "claude-sonnet-5",
         "prompt_version": "v1",
         "cache_hit": False,
@@ -33,28 +44,15 @@ def _generation_result():
         "tool_calls": 0,
         "isolation": None,
     }
-
-
-def test_ac_prov_002_fields_copied_and_no_sample_index(tmp_path):
-    repo_root = Path(tmp_path)
     inputs = {
         "component_id": "comp-foo",
-        "generation_result": _generation_result(),
+        "generation_result": generation_result,
         "verification_report": None,
         "license_scan_result": {},
         "secret_scan_result": {},
         "provenance_hit": False,
         "attempts": 1,
-        "attempt_history": [
-            {
-                "number": 1,
-                "outcome": "model_call_error",
-                "retry_feedback": ["R-FOO-002"],
-                "error_category": "network",
-                "failed_requirements": [],
-                "transcript_sha256": None,
-            }
-        ],
+        "attempt_history": [],
         "gate_versions": {},
     }
 
@@ -65,15 +63,15 @@ def test_ac_prov_002_fields_copied_and_no_sample_index(tmp_path):
         repo_root / "verification" / "foo" / ".provenance.json",
     ]
     for path in paths:
-        assert path.is_file(), "manifest missing at " + str(path)
+        assert path.is_file(), "manifest not written at " + repr(str(path))
         text = path.read_text(encoding="utf-8")
         manifest = json.loads(text)
         assert isinstance(manifest, dict)
-
-        assert manifest["model_pin"] == "claude-sonnet-5"
-        assert manifest["prompt_version"] == "v1"
-        assert manifest["retry_feedback"] == ["R-FOO-002"]
-
-        keys = set(_walk_keys(manifest))
-        assert "sample_index" not in keys, "sample_index found in " + str(path)
-        assert "sample_index" not in text
+        assert field(manifest, "model_pin") == "claude-sonnet-5"
+        assert field(manifest, "prompt_version") == "v1"
+        assert field(manifest, "retry_feedback") == ["R-FOO-002"]
+        assert field(manifest, "spec_bundle_hash") == "sha256:" + "0" * 64
+        assert not _contains_key(manifest, "sample_index"), (
+            "sample_index field present in " + repr(str(path))
+        )
+        assert not _contains_text(text, '"sample_index"')

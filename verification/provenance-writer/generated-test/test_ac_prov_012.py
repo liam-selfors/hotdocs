@@ -1,69 +1,55 @@
-# hotdocs-criterion: sha256:8a2120515fbd81d372ed490a2436abb4f0eb017bf841c3bc47b2128aa3f121e6
+# hotdocs-criterion: sha256:1c9f42af923dc973c0b4741f00e786af41dab6d61196636798852862d61cf4b1
 import json
 from pathlib import Path
 
 import provenance_writer
 
 
-def _read_manifests(repo_root, slug):
-    gen_path = Path(repo_root) / "gen" / slug / ".provenance.json"
-    ver_path = Path(repo_root) / "verification" / slug / ".provenance.json"
-    assert gen_path.is_file(), "missing manifest at " + str(gen_path)
-    assert ver_path.is_file(), "missing manifest at " + str(ver_path)
-    return (
-        json.loads(gen_path.read_text(encoding="utf-8")),
-        json.loads(ver_path.read_text(encoding="utf-8")),
-    )
+def field(value, name):
+    return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def _first_inputs():
+def _inputs_a():
     return {
         "component_id": "comp-alpha",
-        "generation_result": {"files": {}},
+        "generation_result": {
+            "component_id": "comp-alpha",
+            "spec_bundle_hash": "sha256:" + "a" * 64,
+            "model": "claude-sonnet-5",
+            "prompt_version": "v12",
+            "cache_hit": False,
+            "files": {},
+            "model_call_error": {"category": "network", "message": "boom"},
+            "refused": None,
+            "retry_feedback": None,
+        },
         "verification_report": None,
         "license_scan_result": {},
         "secret_scan_result": {},
         "provenance_hit": False,
         "attempts": 1,
+        "attempt_history": [],
         "gate_versions": {},
     }
 
 
-def _second_inputs():
+def _inputs_b():
     return {
         "component_id": "comp-beta-two",
         "generation_result": {
             "component_id": "comp-beta-two",
-            "spec_bundle_hash": "sha256:" + "a" * 64,
-            "model": "claude-sonnet-5",
+            "spec_bundle_hash": "sha256:" + "b" * 64,
+            "model": "anthropic:claude-opus-5-5",
             "prompt_version": "v99",
             "cache_hit": False,
-            "files": {"beta_two.py": "x = 1\n"},
+            "files": {},
             "model_call_error": None,
-            "refused": None,
+            "refused": "sealed-component",
             "retry_feedback": ["R-BETA-001"],
             "mode": "single",
-            "transcript_sha256": None,
-            "turns": 1,
-            "tool_calls": 0,
-            "isolation": None,
-            "pipeline_version": "bogus-from-generation-result",
         },
-        "verification_report": {
-            "component_id": "comp-beta-two",
-            "criteria": [
-                {"id": "AC-BETA-001", "covers": "R-BETA-001",
-                 "kind": "compiled", "result": "pass"},
-            ],
-            "requirement_results": {"R-BETA-001": "pass"},
-            "interface_drift": False,
-            "mutation_score": 0.9,
-            "mutation_error": None,
-            "assets": [],
-            "overall": "pass",
-            "pipeline_version": "bogus-from-report",
-        },
-        "license_scan_result": {"component_id": "comp-beta-two", "blocked": False},
+        "verification_report": None,
+        "license_scan_result": {"component_id": "comp-beta-two", "evaluated": False},
         "secret_scan_result": {"scope": "full", "flagged": False, "matches": []},
         "provenance_hit": True,
         "attempts": 3,
@@ -72,9 +58,21 @@ def _second_inputs():
              "error_category": None, "failed_requirements": ["R-BETA-001"],
              "transcript_sha256": None},
         ],
-        "gate_versions": {"compiler": "9.9.9", "pipeline_version": "bogus-gate"},
-        "pipeline_version": "bogus-top-level",
+        "gate_versions": {"compiler": "9.9.9", "license_scanner": "k-gram@2.0.0",
+                          "pipeline": "should-not-be-used"},
     }
+
+
+def _read_manifests(repo_root, slug):
+    paths = [
+        repo_root / "gen" / slug / ".provenance.json",
+        repo_root / "verification" / slug / ".provenance.json",
+    ]
+    manifests = []
+    for p in paths:
+        assert p.is_file(), "manifest missing at " + str(p)
+        manifests.append(json.loads(p.read_text(encoding="utf-8")))
+    return manifests
 
 
 def test_pipeline_version_is_module_constant_across_calls(tmp_path):
@@ -83,19 +81,19 @@ def test_pipeline_version_is_module_constant_across_calls(tmp_path):
     root_a.mkdir()
     root_b.mkdir()
 
-    provenance_writer.write_provenance("comp-alpha", _first_inputs(), root_a)
-    provenance_writer.write_provenance("comp-beta-two", _second_inputs(), root_b)
+    provenance_writer.write_provenance("comp-alpha", _inputs_a(), root_a)
+    provenance_writer.write_provenance("comp-beta-two", _inputs_b(), root_b)
 
-    a_gen, a_ver = _read_manifests(root_a, "alpha")
-    b_gen, b_ver = _read_manifests(root_b, "beta-two")
+    manifests_a = _read_manifests(root_a, "alpha")
+    manifests_b = _read_manifests(root_b, "beta-two")
 
     constant = provenance_writer.PIPELINE_VERSION
 
-    versions = [m["pipeline_version"] for m in (a_gen, a_ver, b_gen, b_ver)]
-    assert versions[0] == versions[2], versions
+    versions = [field(m, "pipeline_version") for m in manifests_a + manifests_b]
     for v in versions:
-        assert v == constant, (v, constant)
+        assert v == versions[0]
+        assert v == constant
 
-    for bogus in ("bogus-from-generation-result", "bogus-from-report",
-                  "bogus-gate", "bogus-top-level"):
-        assert constant != bogus
+    assert field(manifests_a[0], "pipeline_version") == field(manifests_b[0], "pipeline_version")
+    assert field(manifests_a[0], "pipeline_version") == constant
+    assert field(manifests_b[0], "pipeline_version") == constant

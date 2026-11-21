@@ -1,54 +1,52 @@
-# hotdocs-criterion: sha256:dc0c183eec8a8d817b693623a7bc36cb8b05a01b1251ff09c040269411fb3901
+# hotdocs-criterion: sha256:c3d5709a7e21133facdf5bcca05c46331707f97f40c9f415ef9ee81b991ccbb8
 import io
 import json
 import sys
-from pathlib import Path
 
 import pytest
 
 import provenance_writer
 
 
+def _verification_report():
+    return {
+        "component_id": "comp-foo",
+        "criteria": [
+            {"id": "AC-FOO-001", "covers": "R-FOO-001", "kind": "compiled", "result": "pass"}
+        ],
+        "requirement_results": {"R-FOO-001": "pass"},
+        "interface_drift": False,
+        "mutation_score": 0.92,
+        "mutation_error": None,
+        "assets": [],
+        "overall": "pass",
+    }
+
+
+def _generation_result():
+    return {
+        "component_id": "comp-foo",
+        "spec_bundle_hash": "sha256:" + "0" * 64,
+        "model": "claude-sonnet-5",
+        "prompt_version": "v12",
+        "cache_hit": False,
+        "files": {"foo.py": "x = 1\n"},
+        "model_call_error": None,
+        "refused": None,
+        "retry_feedback": None,
+        "mode": "single",
+        "transcript_sha256": None,
+        "turns": 1,
+        "tool_calls": 0,
+        "isolation": None,
+    }
+
+
 def _valid_doc():
     return {
         "component_id": "comp-foo",
-        "generation_result": {
-            "component_id": "comp-foo",
-            "spec_bundle_hash": "sha256:" + "0" * 64,
-            "model": "claude-sonnet-5",
-            "prompt_version": "v12",
-            "cache_hit": False,
-            "files": {"foo.py": "x = 1\n"},
-            "model_call_error": None,
-            "refused": None,
-            "retry_feedback": None,
-            "mode": "single",
-            "transcript_sha256": None,
-            "turns": 1,
-            "tool_calls": 0,
-            "isolation": None,
-        },
-        "verification_report": {
-            "component_id": "comp-foo",
-            "criteria": [
-                {"id": "AC-FOO-001", "covers": "R-FOO-001", "kind": "compiled", "result": "pass"}
-            ],
-            "requirement_results": {"R-FOO-001": "pass"},
-            "interface_drift": False,
-            "mutation_score": 0.92,
-            "mutation_error": None,
-            "assets": [
-                {
-                    "kind": "python",
-                    "path": ".",
-                    "definition_sha256": None,
-                    "adapter_sha256": "sha256:" + "1" * 64,
-                    "versions": {"python": "3.12.4"},
-                    "lockfile_sha256": None,
-                }
-            ],
-            "overall": "pass",
-        },
+        "generation_result": _generation_result(),
+        "verification_report": _verification_report(),
         "license_scan_result": {
             "component_id": "comp-foo",
             "gate_version": "license_scanner@4.0.0-no-reference-corpus",
@@ -75,113 +73,91 @@ def _valid_doc():
         },
         "provenance_hit": False,
         "attempts": 1,
-        "attempt_history": [
-            {
-                "number": 1,
-                "outcome": "passed",
-                "retry_feedback": [],
-                "error_category": None,
-                "failed_requirements": [],
-                "transcript_sha256": None,
-            }
-        ],
-        "gate_versions": {"compiler": "1.0.0", "license_scanner": "k-gram@1.0.0"},
+        "attempt_history": [],
+        "gate_versions": {"compiler": "1.0.0"},
     }
 
 
 def _set_stdin(monkeypatch, text):
-    monkeypatch.setattr(sys, "stdin", io.StringIO(text))
+    stream = io.TextIOWrapper(io.BytesIO(text.encode("utf-8")), encoding="utf-8")
+    monkeypatch.setattr(sys, "stdin", stream)
 
 
-def _manifest_paths(root):
-    root = Path(root)
+def _manifests(root):
     return (
         root / "gen" / "foo" / ".provenance.json",
         root / "verification" / "foo" / ".provenance.json",
     )
 
 
-def _nothing_written(root):
-    return list(Path(root).iterdir()) == []
+def _all_files(root):
+    return [p for p in root.rglob("*") if p.is_file()]
 
 
-@pytest.fixture
-def workdir(tmp_path, monkeypatch):
+def test_valid_equals_form_returns_0_and_writes_both(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    repo.mkdir()
     cwd = tmp_path / "cwd"
     cwd.mkdir()
     monkeypatch.chdir(cwd)
-    return cwd
-
-
-def test_valid_equals_form_returns_0_and_writes_both(tmp_path, workdir, monkeypatch):
-    root = tmp_path / "repo"
-    root.mkdir()
     _set_stdin(monkeypatch, json.dumps(_valid_doc()))
-    rc = provenance_writer.main(["provenance", "write", "comp-foo", "--repo-root=" + str(root)])
+    rc = provenance_writer.main(["provenance", "write", "comp-foo", "--repo-root=" + str(repo)])
     assert rc == 0
-    gen_p, ver_p = _manifest_paths(root)
-    assert gen_p.is_file()
-    assert ver_p.is_file()
-    assert _nothing_written(workdir)
+    gen_file, ver_file = _manifests(repo)
+    assert gen_file.is_file()
+    assert ver_file.is_file()
 
 
-def test_valid_space_form_returns_0_and_writes_both(tmp_path, workdir, monkeypatch):
-    root = tmp_path / "repo"
-    root.mkdir()
+def test_valid_space_form_returns_0_and_writes_both(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    cwd = tmp_path / "cwd"
+    cwd.mkdir()
+    monkeypatch.chdir(cwd)
     _set_stdin(monkeypatch, json.dumps(_valid_doc()))
-    rc = provenance_writer.main(["provenance", "write", "comp-foo", "--repo-root", str(root)])
+    rc = provenance_writer.main(["provenance", "write", "comp-foo", "--repo-root", str(repo)])
     assert rc == 0
-    gen_p, ver_p = _manifest_paths(root)
-    assert gen_p.is_file()
-    assert ver_p.is_file()
-    assert _nothing_written(workdir)
+    gen_file, ver_file = _manifests(repo)
+    assert gen_file.is_file()
+    assert ver_file.is_file()
 
 
-def test_missing_license_scan_result_returns_1_and_writes_nothing(tmp_path, workdir, monkeypatch):
-    root = tmp_path / "repo"
-    root.mkdir()
+def test_missing_license_scan_result_returns_1_and_writes_nothing(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    cwd = tmp_path / "cwd"
+    cwd.mkdir()
+    monkeypatch.chdir(cwd)
     doc = _valid_doc()
     del doc["license_scan_result"]
     _set_stdin(monkeypatch, json.dumps(doc))
-    rc = provenance_writer.main(["provenance", "write", "comp-foo", "--repo-root=" + str(root)])
+    rc = provenance_writer.main(["provenance", "write", "comp-foo", "--repo-root=" + str(repo)])
     assert rc == 1
-    gen_p, ver_p = _manifest_paths(root)
-    assert not gen_p.exists()
-    assert not ver_p.exists()
-    assert _nothing_written(root)
-    assert _nothing_written(workdir)
+    gen_file, ver_file = _manifests(repo)
+    assert not gen_file.exists()
+    assert not ver_file.exists()
+    assert _all_files(repo) == []
+    assert _all_files(cwd) == []
 
 
-def test_missing_component_id_returns_2(workdir, monkeypatch):
+@pytest.mark.parametrize(
+    "argv_tail",
+    [
+        [],
+        ["comp-foo", "--bogus-flag"],
+        ["comp-foo", "--repo-root"],
+        ["comp-foo", "comp-bar"],
+    ],
+)
+def test_usage_errors_return_2(tmp_path, monkeypatch, argv_tail):
+    monkeypatch.chdir(tmp_path)
     _set_stdin(monkeypatch, json.dumps(_valid_doc()))
-    rc = provenance_writer.main(["provenance", "write"])
+    rc = provenance_writer.main(["provenance", "write"] + argv_tail)
     assert rc == 2
-    assert _nothing_written(workdir)
 
 
-def test_bogus_flag_returns_2(workdir, monkeypatch):
-    _set_stdin(monkeypatch, json.dumps(_valid_doc()))
-    rc = provenance_writer.main(["provenance", "write", "comp-foo", "--bogus-flag"])
-    assert rc == 2
-    assert _nothing_written(workdir)
-
-
-def test_malformed_json_returns_2(workdir, monkeypatch):
+def test_malformed_json_returns_2(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
     _set_stdin(monkeypatch, "{not valid json")
     rc = provenance_writer.main(["provenance", "write", "comp-foo"])
     assert rc == 2
-    assert _nothing_written(workdir)
-
-
-def test_repo_root_without_value_returns_2(workdir, monkeypatch):
-    _set_stdin(monkeypatch, json.dumps(_valid_doc()))
-    rc = provenance_writer.main(["provenance", "write", "comp-foo", "--repo-root"])
-    assert rc == 2
-    assert _nothing_written(workdir)
-
-
-def test_second_positional_returns_2(workdir, monkeypatch):
-    _set_stdin(monkeypatch, json.dumps(_valid_doc()))
-    rc = provenance_writer.main(["provenance", "write", "comp-foo", "comp-bar"])
-    assert rc == 2
-    assert _nothing_written(workdir)

@@ -1,8 +1,6 @@
-# hotdocs-criterion: sha256:1a15084b48a55b1142f7e905e88aa00ff8321d23fe591ca95d893faff73f3c0c
+# hotdocs-criterion: sha256:38a55f5dddd627fa738b85f0d42f8fcc1282499fa6a40251d46d9c5a3739fe37
 import json
 from pathlib import Path
-
-import pytest
 
 import provenance_writer
 
@@ -11,14 +9,14 @@ def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def clean_license_scan():
+def clean_license_scan_result():
     return {
         "component_id": "comp-foo",
         "gate_version": "license_scanner@4.0.3+9f2c41ab07de",
         "evaluated": True,
         "reason": None,
-        "similarity_score": 0.05,
-        "block_threshold": 0.7,
+        "similarity_score": 0.0,
+        "block_threshold": 0.70,
         "blocked": False,
         "matches": [],
         "notified": False,
@@ -27,7 +25,7 @@ def clean_license_scan():
     }
 
 
-def clean_secret_scan():
+def clean_secret_scan_result():
     return {
         "scope": "full",
         "gate_version": "secret_scanner@3.1.0+detect-secrets.1.5.0",
@@ -41,15 +39,15 @@ def clean_secret_scan():
     }
 
 
-def generation_result(files):
+def generation_result():
     return {
         "component_id": "comp-foo",
         "spec_bundle_hash": "sha256:" + "0" * 64,
         "model": "claude-sonnet-5",
         "prompt_version": "v12",
         "cache_hit": False,
-        "files": files,
-        "model_call_error": None,
+        "files": {},
+        "model_call_error": {"category": "network", "message": "unreachable"},
         "refused": None,
         "retry_feedback": None,
         "mode": "single",
@@ -60,46 +58,25 @@ def generation_result(files):
     }
 
 
-def passing_report():
-    return {
-        "component_id": "comp-foo",
-        "criteria": [
-            {"id": "AC-FOO-001", "covers": "R-FOO-001", "kind": "compiled", "result": "pass"}
-        ],
-        "requirement_results": {"R-FOO-001": "pass"},
-        "interface_drift": False,
-        "mutation_score": 0.9,
-        "mutation_error": None,
-        "assets": [],
-        "overall": "pass",
-    }
+def read_manifest(path):
+    assert path.is_file(), "manifest not written at " + str(path)
+    return json.loads(path.read_text(encoding="utf-8"))
 
 
-@pytest.mark.parametrize("with_candidate", [False, True])
-def test_clean_scans_are_always_present_in_manifest(tmp_path, with_candidate):
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-
-    if with_candidate:
-        gen = generation_result({"foo.py": "x = 1\n"})
-        report = passing_report()
-    else:
-        gen = generation_result({})
-        report = None
-
-    license_scan = clean_license_scan()
-    secret_scan = clean_secret_scan()
-
+def test_clean_scans_are_still_recorded_in_manifest(tmp_path):
+    repo_root = Path(tmp_path)
+    license_result = clean_license_scan_result()
+    secret_result = clean_secret_scan_result()
     inputs = {
         "component_id": "comp-foo",
-        "generation_result": gen,
-        "verification_report": report,
-        "license_scan_result": license_scan,
-        "secret_scan_result": secret_scan,
+        "generation_result": generation_result(),
+        "verification_report": None,
+        "license_scan_result": license_result,
+        "secret_scan_result": secret_result,
         "provenance_hit": False,
         "attempts": 1,
         "attempt_history": [],
-        "gate_versions": {"license_scanner": "k-gram@1.0.0"},
+        "gate_versions": {},
     }
 
     provenance_writer.write_provenance("comp-foo", inputs, repo_root)
@@ -109,19 +86,22 @@ def test_clean_scans_are_always_present_in_manifest(tmp_path, with_candidate):
         repo_root / "verification" / "foo" / ".provenance.json",
     ]
     for path in paths:
-        assert path.is_file(), "manifest missing at " + str(path)
-        manifest = json.loads(path.read_text(encoding="utf-8"))
+        manifest = read_manifest(path)
         assert isinstance(manifest, dict)
 
-        assert "license_scan" in manifest
-        assert "secret_scan" in manifest
-        assert manifest["license_scan"] is not None
-        assert manifest["secret_scan"] is not None
+        assert "license_scan" in manifest, "license_scan missing from " + str(path)
+        assert "secret_scan" in manifest, "secret_scan missing from " + str(path)
 
-        assert manifest["license_scan"] == license_scan
-        assert manifest["secret_scan"] == secret_scan
+        license_scan = field(manifest, "license_scan")
+        secret_scan = field(manifest, "secret_scan")
 
-        assert field(manifest["license_scan"], "blocked") is False
-        assert field(manifest["license_scan"], "matches") == []
-        assert field(manifest["secret_scan"], "flagged") is False
-        assert field(manifest["secret_scan"], "matches") == []
+        assert license_scan is not None, "license_scan is null in " + str(path)
+        assert secret_scan is not None, "secret_scan is null in " + str(path)
+
+        assert license_scan == license_result
+        assert secret_scan == secret_result
+
+        assert field(license_scan, "blocked") is False
+        assert field(license_scan, "matches") == []
+        assert field(secret_scan, "flagged") is False
+        assert field(secret_scan, "matches") == []

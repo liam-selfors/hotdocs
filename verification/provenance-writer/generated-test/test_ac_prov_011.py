@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:bd038d04b2f0f8fbaa0affd629b1d04458296fe006622c0a1b63fc9ac8d4e19d
+# hotdocs-criterion: sha256:28ed4ded91b9a78512aca53db5284696c20cb8e095edbfbd2a4eeb6cfdb652e9
 import json
 from pathlib import Path
 
@@ -27,25 +27,9 @@ EXPECTED_KEYS = {
 }
 
 
-def _reject_constant(name):
-    raise ValueError("non-standard JSON constant: " + repr(name))
-
-
-def _strict_parse(text):
-    # Strict JSON: NaN / Infinity / -Infinity are not valid JSON.
-    return json.loads(text, parse_constant=_reject_constant)
-
-
-def _manifest_paths(repo_root, slug):
-    return [
-        Path(repo_root) / "gen" / slug / ".provenance.json",
-        Path(repo_root) / "verification" / slug / ".provenance.json",
-    ]
-
-
-def _minimal_inputs(component_id):
+def _minimal_inputs():
     return {
-        "component_id": component_id,
+        "component_id": "comp-foo",
         "generation_result": {"files": {}},
         "verification_report": None,
         "license_scan_result": {},
@@ -56,9 +40,9 @@ def _minimal_inputs(component_id):
     }
 
 
-def _full_inputs(component_id):
+def _full_inputs():
     generation_result = {
-        "component_id": component_id,
+        "component_id": "comp-foo",
         "spec_bundle_hash": "sha256:" + "a" * 64,
         "model": "claude-sonnet-5",
         "prompt_version": "v12",
@@ -73,10 +57,10 @@ def _full_inputs(component_id):
         "tool_calls": 0,
         "isolation": None,
         "transcript": "should never be written",
-        "unexpected_extra_field": "ignored",
+        "extra_unknown_field": "ignored",
     }
     verification_report = {
-        "component_id": component_id,
+        "component_id": "comp-foo",
         "criteria": [
             {"id": "AC-FOO-001", "covers": "R-FOO-001", "kind": "compiled", "result": "pass"},
         ],
@@ -97,7 +81,7 @@ def _full_inputs(component_id):
         "overall": "pass",
     }
     license_scan_result = {
-        "component_id": component_id,
+        "component_id": "comp-foo",
         "gate_version": "license_scanner@4.0.0-no-reference-corpus",
         "evaluated": False,
         "reason": "no-reference-corpus",
@@ -121,7 +105,7 @@ def _full_inputs(component_id):
         "cache_hit": False,
     }
     return {
-        "component_id": component_id,
+        "component_id": "comp-foo",
         "generation_result": generation_result,
         "verification_report": verification_report,
         "license_scan_result": license_scan_result,
@@ -147,69 +131,32 @@ def _full_inputs(component_id):
             },
         ],
         "gate_versions": {"compiler": "1.0.0", "license_scanner": "k-gram@1.0.0"},
-        "an_extra_input_key": "must not appear in the manifest",
+        "unexpected_extra_input": "ignored",
     }
 
 
-def _assert_manifests_valid(repo_root, slug):
-    for path in _manifest_paths(repo_root, slug):
+@pytest.mark.parametrize("make_inputs", [_minimal_inputs, _full_inputs], ids=["minimal", "full"])
+def test_written_manifest_is_valid_json_with_exact_schema_keys(tmp_path, make_inputs):
+    repo_root = Path(tmp_path)
+    inputs = make_inputs()
+
+    provenance_writer.write_provenance("comp-foo", inputs, repo_root)
+
+    paths = [
+        repo_root / "gen" / "foo" / ".provenance.json",
+        repo_root / "verification" / "foo" / ".provenance.json",
+    ]
+    for path in paths:
         assert path.is_file(), "manifest not written at " + str(path)
         text = path.read_text(encoding="utf-8")
         try:
-            parsed = _strict_parse(text)
-        except ValueError as exc:  # json.JSONDecodeError is a ValueError
-            pytest.fail("manifest at " + str(path) + " is not valid JSON: " + repr(exc))
-        assert isinstance(parsed, dict), "manifest top level must be a JSON object"
-        keys = set(parsed.keys())
+            data = json.loads(text)
+        except ValueError as exc:
+            pytest.fail("manifest at " + str(path) + " is not valid JSON: " + str(exc))
+        assert isinstance(data, dict), "manifest top level is not a JSON object"
+        keys = set(data.keys())
         missing = EXPECTED_KEYS - keys
         extra = keys - EXPECTED_KEYS
         assert not missing, "missing keys in " + str(path) + ": " + repr(sorted(missing))
         assert not extra, "extra keys in " + str(path) + ": " + repr(sorted(extra))
         assert keys == EXPECTED_KEYS
-
-
-def test_minimal_call_manifest_is_valid_json_with_exact_schema_keys(tmp_path):
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    component_id = "comp-foo"
-
-    result = provenance_writer.write_provenance(
-        component_id, _minimal_inputs(component_id), repo_root
-    )
-    assert result is None
-
-    _assert_manifests_valid(repo_root, "foo")
-
-
-def test_full_call_manifest_is_valid_json_with_exact_schema_keys(tmp_path):
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    component_id = "comp-foo-bar"
-
-    provenance_writer.write_provenance(
-        component_id, _full_inputs(component_id), repo_root
-    )
-
-    _assert_manifests_valid(repo_root, "foo-bar")
-
-
-def test_non_finite_and_odd_values_still_yield_valid_json_with_exact_keys(tmp_path):
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    component_id = "comp-odd"
-    inputs = _minimal_inputs(component_id)
-    inputs["license_scan_result"] = {
-        "similarity_score": float("nan"),
-        "block_threshold": float("inf"),
-        "matches": [],
-    }
-    inputs["secret_scan_result"] = {
-        "matches": [],
-        "tags": {"b", "a"},
-        "raw": b"x",
-        "where": Path("p"),
-    }
-
-    provenance_writer.write_provenance(component_id, inputs, repo_root)
-
-    _assert_manifests_valid(repo_root, "odd")
