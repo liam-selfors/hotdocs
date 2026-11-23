@@ -1,19 +1,4 @@
-# hotdocs-criterion: sha256:6d076313320e6b12711adeb060225a2c6674fa46ac03ca707dae7862e99d9046
-# AC-GRAPH-011 (Covers: R-GRAPH-003)
-#
-# Given comp-a whose component.md has the frontmatter owners: [team-x]
-#   and whose directory also holds requirements/R-A-001.md and
-#   interface/library.md
-# When build_corpus_graph runs
-# Then comp-a's node has owners ["team-x"], and documents whose keys are
-#   exactly "component.md", "interface/library.md" and
-#   "requirements/R-A-001.md", each mapped to that file's whole text
-#
-# Note: the criterion requires the documents keys to be exactly these
-# three files, so the fixture deliberately holds no acceptance/ file
-# (any acceptance/*.md would itself be a document under the directory).
-# No spec-linter precondition is involved in this criterion.
-
+# hotdocs-criterion: sha256:d11d97ccc57e7e78f644ad3a8e012e491fcea6f224f938968adf1f4bfd238e0b
 from pathlib import Path
 
 import corpus_graph_builder
@@ -40,13 +25,13 @@ COMPONENT_MD = (
     "\n"
     "## Purpose\n"
     "\n"
-    "A small fixture component used to check owners and documents.\n"
+    "Component A exists to test the corpus graph builder.\n"
 )
 
 REQUIREMENT_MD = (
     "# R-A-001\n"
     "\n"
-    "**R-A-001** — Component A MUST do one small thing.\n"
+    "**R-A-001** \u2014 Component A MUST do one thing.\n"
 )
 
 LIBRARY_MD = (
@@ -58,48 +43,41 @@ LIBRARY_MD = (
 )
 
 
-def _write(path: Path, text: str) -> None:
+def _write(path, text):
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_bytes(text.encode("utf-8"))
+    path.write_text(text, encoding="utf-8")
 
 
-def _build_fixture(repo_root: Path) -> Path:
+def test_ac_graph_011_component_node_owners_and_documents(tmp_path):
+    repo_root = tmp_path
     comp_dir = repo_root / "specs" / "components" / "a"
     _write(comp_dir / "component.md", COMPONENT_MD)
     _write(comp_dir / "requirements" / "R-A-001.md", REQUIREMENT_MD)
     _write(comp_dir / "interface" / "library.md", LIBRARY_MD)
-    return comp_dir
 
-
-def test_ac_graph_011_owners_and_documents(tmp_path):
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    comp_dir = _build_fixture(repo_root)
-
-    graph = corpus_graph_builder.build_corpus_graph(repo_root)
+    graph = corpus_graph_builder.build_corpus_graph(Path(repo_root))
 
     nodes = field(graph, "nodes")
-    assert "comp-a" in nodes, "comp-a missing from nodes: " + repr(list(nodes))
+    assert "comp-a" in nodes
     node = nodes["comp-a"]
 
     owners = field(node, "owners")
     assert list(owners) == ["team-x"]
 
     documents = field(node, "documents")
-    expected_keys = ["component.md", "interface/library.md", "requirements/R-A-001.md"]
+    documents = dict(documents)
+    expected_keys = [
+        "component.md",
+        "interface/library.md",
+        "requirements/R-A-001.md",
+    ]
     assert sorted(documents.keys()) == expected_keys
+    assert set(documents.keys()) == set(expected_keys)
 
-    expected_texts = {
-        "component.md": (comp_dir / "component.md").read_bytes().decode("utf-8"),
-        "interface/library.md": (comp_dir / "interface" / "library.md").read_bytes().decode("utf-8"),
-        "requirements/R-A-001.md": (comp_dir / "requirements" / "R-A-001.md").read_bytes().decode("utf-8"),
-    }
-    assert expected_texts["component.md"] == COMPONENT_MD
-    assert expected_texts["interface/library.md"] == LIBRARY_MD
-    assert expected_texts["requirements/R-A-001.md"] == REQUIREMENT_MD
-
-    for key in expected_keys:
-        assert documents[key] == expected_texts[key], "document text mismatch for " + repr(key)
-
-    # build_corpus_graph writes nothing
-    assert not (repo_root / "verification" / "corpus-graph.json").exists()
+    assert documents["component.md"] == (comp_dir / "component.md").read_text(encoding="utf-8")
+    assert documents["interface/library.md"] == (
+        comp_dir / "interface" / "library.md"
+    ).read_text(encoding="utf-8")
+    assert documents["requirements/R-A-001.md"] == (
+        comp_dir / "requirements" / "R-A-001.md"
+    ).read_text(encoding="utf-8")
