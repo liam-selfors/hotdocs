@@ -7,21 +7,17 @@ export function hiddenByStatus(nodes, filter) {
 }
 
 export function init(document) {
-  const buttons = document.querySelectorAll("button[data-filter]");
-  buttons.forEach(function (button) {
-    button.addEventListener("click", function () {
-      const items = document.querySelectorAll("li.node");
-      const nodes = [];
-      items.forEach(function (item) {
-        nodes.push({
-          id: item.getAttribute("data-node-id"),
-          status: item.getAttribute("data-status"),
-        });
-      });
-      const hidden = hiddenByStatus(nodes, button.getAttribute("data-filter"));
-      items.forEach(function (item) {
-        item.hidden = hidden[item.getAttribute("data-node-id")];
-      });
+  for (const button of document.querySelectorAll("button[data-filter]")) {
+    button.addEventListener("click", () => {
+      const items = [...document.querySelectorAll("li.node")];
+      const nodes = items.map((item) => ({
+        id: item.dataset.nodeId,
+        status: item.dataset.status,
+      }));
+      const hidden = hiddenByStatus(nodes, button.dataset.filter);
+      for (const item of items) {
+        item.hidden = hidden[item.dataset.nodeId];
+      }
     });
-  });
+  }
 }

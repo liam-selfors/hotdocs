@@ -3,10 +3,8 @@
 **R-TRACK-010** — `check_readiness` (`R-TRACK-009`) MUST additionally
   check every product capability whose `realizes`-set intersects the
   component scope just resolved, through `capability-scenario-verifier`
-  (`D89`/`D92`, unreversed by `D93`), never re-deriving its hit/miss
-  logic. Unlike the component half this is check-then-run, since
-  capability verification never produces source code, only exercises
-  what exists. For each such capability, in this order:
+  (`D89`/`D92`), never re-deriving its hit/miss
+  logic. For each such capability, in this order:
 
   1. call `check_capability_provenance(capability_id, repo_root)`;
   2. if its `hit` is true, that result is the capability's result and
@@ -19,8 +17,16 @@
   4. otherwise call `run_capability_gates(capability_id, repo_root,
      model, seed, llm_backend)`, passing this function's own three values
      through unchanged (`D174`'s signature) — never
-     `run_capability_scenarios`, a different function for a different
-     purpose.
+     `run_capability_scenarios`.
+
+  A result of step 2 or 4 whose
+  `capability_scenario_report[<capability_id>]` has an `overall` other
+  than `"pass"` adds exactly one `not_ready_reasons` entry (`D368`):
+  `<capability_id>: has no capability scenarios; add a CS- scenario to its file under specs/product/`
+  when its `scenarios` list is empty, else
+  `<capability_id>: capability scenarios failed: <ids>`, `<ids>` the
+  `id` of each scenario whose `result` is `"fail"`, in list order,
+  joined by `, `.
 
   **The `realizes` edge is declared per-component, never per-capability**
   (`D77`, `D122`): scan every `specs/components/*/component.md` for its

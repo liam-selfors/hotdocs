@@ -1,4 +1,13 @@
-"""Provenance tracker: `hotdocs verify` readiness checks and attempt history."""
+"""Provenance tracker: `hotdocs verify` readiness checks and attempt history.
+
+Answers "would a merge pass right now" by checking every in-scope
+component's provenance (read-only, via provenance-checker) and
+checking-then-running every intersecting capability's scenarios (via
+capability-scenario-verifier), and keeps an append-only local history of
+`hotdocs generate` attempts under `.hotdocs/attempts/<component_id>/`.
+"""
+
+from __future__ import annotations
 
 import dataclasses
 import enum
@@ -8,58 +17,81 @@ import math
 import pathlib
 import sys
 from collections.abc import Mapping
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 
 import yaml
 
 
-class _Record(dict):
-    """A plain dict that also exposes its keys as attributes."""
-
-    def __getattr__(self, name):
-        try:
-            return self[name]
-        except KeyError:
-            raise AttributeError(name) from None
-
-
-class VerifyReport(_Record):
-    """`interface/data/VerifyReport.md`."""
-
-
-class AttemptRecord(_Record):
-    """`interface/data/AttemptRecord.md`."""
+VERIFY_USAGE = (
+    "usage: hotdocs verify [--changed=<spec-id>...] [--model=<model-id>] "
+    "[--seed=<n>] [--repo-root=<dir>] [--format=json|text]"
+)
+FEEDBACK_USAGE = "usage: hotdocs track feedback <component-id> [--repo-root=<dir>]"
 
 
 # ---------------------------------------------------------------------------
-# Shared helpers
+# Data types
+# ---------------------------------------------------------------------------
+
+
+class _ItemAccess:
+    """Lets a dataclass result be read by item as well as by attribute."""
+
+    def __getitem__(self, key):
+        return getattr(self, key)
+
+
+@dataclass
+class AttemptRecord(_ItemAccess):
+    attempt_id: str
+    component_id: str
+    timestamp: str
+    spec_bundle_hash: str
+    generation: object
+    verification: object
+
+
+@dataclass
+class VerifyReport(_ItemAccess):
+    scope: str
+    ready: bool
+    components: dict = field(default_factory=dict)
+    capabilities: dict = field(default_factory=dict)
+    not_ready_reasons: list = field(default_factory=list)
+
+
+# ---------------------------------------------------------------------------
+# Helpers
 # ---------------------------------------------------------------------------
 
 
 def _get(obj, name, default=None):
+    """Dual dict-or-attribute access."""
     if isinstance(obj, Mapping):
         return obj.get(name, default)
     return getattr(obj, name, default)
 
 
 def to_json(value):
-    """Convert `value` to plain JSON values (`specs/architecture/json-values.md`)."""
+    """Convert a value to plain JSON values (specs/architecture/json-values.md)."""
     if value is None or isinstance(value, (bool, int, str)):
         return value
     if isinstance(value, float):
         return value if math.isfinite(value) else repr(value)
     if isinstance(value, Mapping):
         return {
-            (k if isinstance(k, str) else str(k)): to_json(v) for k, v in value.items()
+            (k if isinstance(k, str) else str(k)): to_json(v)
+            for k, v in value.items()
         }
     if isinstance(value, (list, tuple)):
         return [to_json(v) for v in value]
     if isinstance(value, (set, frozenset)):
         items = [to_json(v) for v in value]
-        return sorted(items, key=lambda item: json.dumps(item, sort_keys=True))
+        return sorted(items, key=lambda i: json.dumps(i, sort_keys=True))
     if isinstance(value, (bytes, bytearray)):
-        return bytes(value).decode("utf-8", errors="replace")
+        return value.decode("utf-8", errors="replace")
     if isinstance(value, pathlib.PurePath):
         return str(value)
     if isinstance(value, enum.Enum):
@@ -67,9 +99,7 @@ def to_json(value):
     if callable(getattr(value, "to_dict", None)):
         return to_json(value.to_dict())
     if dataclasses.is_dataclass(value) and not isinstance(value, type):
-        return {
-            f.name: to_json(getattr(value, f.name)) for f in dataclasses.fields(value)
-        }
+        return {f.name: to_json(getattr(value, f.name)) for f in dataclasses.fields(value)}
     if hasattr(value, "__dict__"):
         return {
             k: to_json(v)
@@ -79,48 +109,39 @@ def to_json(value):
     return repr(value)
 
 
-def _tool_root():
-    return next(p.parent for p in Path(__file__).resolve().parents if p.name == "gen")
+def _tool_root() -> Path:
+    here = Path(__file__).resolve().parent
+    return next(d.parent for d in (here, *here.parents) if d.name == "gen")
 
 
-def _load(repo_root, slug):
-    module_name = slug.replace("-", "_")
-    directory = Path(repo_root) / "gen" / slug
-    if not directory.is_dir():
-        directory = _tool_root() / "gen" / slug
-    path = directory / f"{module_name}.py"
-    search = None
+def _load_dep(repo_root, slug: str, module_name: str):
+    """Load a dependency module afresh from repo_root (else the tool root)."""
+    base = Path(repo_root) / "gen" / slug
+    if not base.is_dir():
+        base = _tool_root() / "gen" / slug
+    path = base / f"{module_name}.py"
     if not path.is_file():
-        path = directory / module_name / "__init__.py"
-        search = [str(path.parent)]
-    spec = importlib.util.spec_from_file_location(
-        module_name, path, submodule_search_locations=search
-    )
+        path = base / module_name / "__init__.py"
+    spec = importlib.util.spec_from_file_location(module_name, path)
     module = importlib.util.module_from_spec(spec)
     sys.modules[module_name] = module
     spec.loader.exec_module(module)
     return module
 
 
-def _frontmatter(path):
-    lines = path.read_text(encoding="utf-8").splitlines()
-    if not lines or lines[0].strip() != "---":
-        return {}
-    for i in range(1, len(lines)):
-        if lines[i].strip() == "---":
-            return yaml.safe_load("\n".join(lines[1:i])) or {}
-    return {}
+def _frontmatter(path: Path) -> dict:
+    text = path.read_text(encoding="utf-8")
+    lines = text.splitlines()
+    end = lines.index("---", 1)
+    return yaml.safe_load("\n".join(lines[1:end])) or {}
 
 
-def _corpus(repo_root):
-    """Every component as (id, realizes list), in directory order."""
+def _corpus_components(repo_root: Path) -> list:
+    """(id, realizes) for every specs/components/*/component.md, by directory name."""
     entries = []
-    for path in sorted((Path(repo_root) / "specs" / "components").glob("*/component.md")):
-        fm = _frontmatter(path)
-        realizes = fm.get("realizes") or []
-        if isinstance(realizes, str):
-            realizes = [realizes]
-        entries.append((fm.get("id"), list(realizes)))
+    for comp_md in sorted((Path(repo_root) / "specs" / "components").glob("*/component.md")):
+        fm = _frontmatter(comp_md)
+        entries.append((fm.get("id"), fm.get("realizes") or []))
     return entries
 
 
@@ -129,91 +150,112 @@ def _corpus(repo_root):
 # ---------------------------------------------------------------------------
 
 
-def _check_component(pc, cid, repo_root, reasons):
+def _check_component(pc, cid, repo_root, components, reasons):
     sealed_key = pc.current_sealed_key(cid, repo_root)
-    if sealed_key is not None:
-        result = pc.check_sealed_provenance(cid, repo_root)
+    if sealed_key is None:
+        key = pc.current_provenance_key(cid, repo_root)
+        result = pc.check_provenance(
+            cid, _get(key, "spec_bundle_hash"), _get(key, "gate_versions"), repo_root
+        )
+        components[cid] = result
         if not _get(result, "hit"):
             reasons.append(
-                f"{cid}: sealed provenance {_get(result, 'reason')}"
-                f" — run hotdocs generate {cid}"
+                f"{cid}: no provenance for current spec state — run hotdocs generate {cid}"
             )
-        return result
-    key = pc.current_provenance_key(cid, repo_root)
-    result = pc.check_provenance(
-        cid, _get(key, "spec_bundle_hash"), _get(key, "gate_versions"), repo_root
-    )
+            return
+        report = _get(result, "verification_report")
+        if _get(report, "overall") != "pass":
+            failing = [
+                r for r, v in (_get(report, "requirement_results") or {}).items() if v == "fail"
+            ]
+            reason = f"{cid}: verification failed"
+            if failing:
+                reason += ": " + ", ".join(failing)
+            reasons.append(reason)
+        if _get(_get(result, "license_scan"), "blocked"):
+            reasons.append(f"{cid}: license_scan blocked")
+        if _get(_get(result, "secret_scan"), "flagged"):
+            reasons.append(f"{cid}: secret_scan flagged")
+        return
+    result = pc.check_sealed_provenance(cid, repo_root)
+    components[cid] = result
     if not _get(result, "hit"):
         reasons.append(
-            f"{cid}: no provenance for current spec state — run hotdocs generate {cid}"
+            f"{cid}: sealed provenance {_get(result, 'reason')} — run hotdocs generate {cid}"
         )
-        return result
-    report = _get(result, "verification_report")
-    if _get(report, "overall") != "pass":
-        rr = _get(report, "requirement_results") or {}
-        fails = sorted(k for k, v in rr.items() if v == "fail")
-        reasons.append(f"{cid}: verification failed: {', '.join(fails)}")
-    if _get(_get(result, "license_scan"), "blocked"):
-        reasons.append(f"{cid}: license_scan blocked")
-    if _get(_get(result, "secret_scan"), "flagged"):
-        reasons.append(f"{cid}: secret_scan flagged")
-    return result
 
 
-def _capability_passes(cap, result):
-    report = _get(result, "capability_scenario_report")
-    return _get(_get(report, cap), "overall") == "pass"
+def _capability_reason(cap_id, result):
+    entry = _get(_get(result, "capability_scenario_report"), cap_id)
+    if _get(entry, "overall") == "pass":
+        return None
+    scenarios = _get(entry, "scenarios")
+    if not scenarios:
+        return (
+            f"{cap_id}: has no capability scenarios; "
+            "add a CS- scenario to its file under specs/product/"
+        )
+    failed = [_get(s, "id") for s in scenarios if _get(s, "result") == "fail"]
+    return f"{cap_id}: capability scenarios failed: {', '.join(failed)}"
 
 
-def check_readiness(repo_root, changed_ids=None, model=None, seed=0, llm_backend=None):
-    repo_root = Path(repo_root)
-    pc = _load(repo_root, "provenance-checker")
-    reasons = []
-    corpus = _corpus(repo_root)
+def check_readiness(
+    repo_root: Path,
+    changed_ids: list | None = None,
+    model: str | None = None,
+    seed: int = 0,
+    llm_backend=None,
+) -> VerifyReport:
+    pc = _load_dep(repo_root, "provenance-checker", "provenance_checker")
+    corpus = _corpus_components(repo_root)
 
     if changed_ids:
         scope = "blast-radius"
-        ia = _load(repo_root, "impact-analyzer")
+        ia = _load_dep(repo_root, "impact-analyzer", "impact_analyzer")
         blast = ia.compute_blast_radius(list(changed_ids), repo_root)
-        error = _get(blast, "precondition_error")
-        if error is not None:
+        precondition_error = _get(blast, "precondition_error")
+        if precondition_error is not None:
             return VerifyReport(
                 scope=scope,
                 ready=False,
                 components={},
                 capabilities={},
-                not_ready_reasons=[f"blast radius unavailable: {error}"],
+                not_ready_reasons=[f"blast radius unavailable: {precondition_error}"],
             )
-        ids = [_get(entry, "component_id") for entry in _get(blast, "impacted")]
+        component_ids = [_get(e, "component_id") for e in _get(blast, "impacted")]
     else:
         scope = "whole-corpus"
-        ids = [cid for cid, _ in corpus if cid is not None]
+        component_ids = [cid for cid, _ in corpus]
 
-    components = {}
-    for cid in ids:
-        components[cid] = _check_component(pc, cid, repo_root, reasons)
+    components: dict = {}
+    reasons: list = []
+    for cid in component_ids:
+        _check_component(pc, cid, repo_root, components, reasons)
 
-    in_scope = set(ids)
-    realizers = {}
+    in_scope = set(component_ids)
+    realized_by: dict = {}
     for cid, realizes in corpus:
-        for cap in realizes:
-            realizers.setdefault(cap, set()).add(cid)
-    caps = sorted(cap for cap, comps in realizers.items() if comps & in_scope)
+        for cap_id in realizes:
+            realized_by.setdefault(cap_id, set()).add(cid)
+    cap_ids = sorted(c for c, comps in realized_by.items() if comps & in_scope)
 
-    capabilities = {}
-    if caps:
-        csv = _load(repo_root, "capability-scenario-verifier")
-        for cap in caps:
-            result = csv.check_capability_provenance(cap, repo_root)
+    capabilities: dict = {}
+    if cap_ids:
+        csv = _load_dep(
+            repo_root, "capability-scenario-verifier", "capability_scenario_verifier"
+        )
+        for cap_id in cap_ids:
+            result = csv.check_capability_provenance(cap_id, repo_root)
             if not _get(result, "hit"):
                 if model is None:
-                    capabilities[cap] = result
-                    reasons.append(f"{cap}: needs a fresh run; pass --model")
+                    capabilities[cap_id] = result
+                    reasons.append(f"{cap_id}: needs a fresh run; pass --model")
                     continue
-                result = csv.run_capability_gates(cap, repo_root, model, seed, llm_backend)
-            capabilities[cap] = result
-            if not _capability_passes(cap, result):
-                reasons.append(f"{cap}: capability scenarios failed")
+                result = csv.run_capability_gates(cap_id, repo_root, model, seed, llm_backend)
+            capabilities[cap_id] = result
+            reason = _capability_reason(cap_id, result)
+            if reason is not None:
+                reasons.append(reason)
 
     return VerifyReport(
         scope=scope,
@@ -225,22 +267,26 @@ def check_readiness(repo_root, changed_ids=None, model=None, seed=0, llm_backend
 
 
 # ---------------------------------------------------------------------------
-# Attempt history
+# Attempt records
 # ---------------------------------------------------------------------------
 
 
-def _attempts_dir(repo_root, component_id):
+def _attempts_dir(component_id: str, repo_root) -> Path:
     return Path(repo_root) / ".hotdocs" / "attempts" / component_id
 
 
 def write_attempt_record(
-    component_id, generation_result, verification_report, spec_bundle_hash, repo_root
-):
-    directory = _attempts_dir(repo_root, component_id)
+    component_id: str,
+    generation_result,
+    verification_report,
+    spec_bundle_hash: str,
+    repo_root: Path,
+) -> AttemptRecord:
+    directory = _attempts_dir(component_id, repo_root)
     directory.mkdir(parents=True, exist_ok=True)
     timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-    count = len(list(directory.glob("*.json")))
-    attempt_id = f"{timestamp}-{count:06x}"
+    sequence = len(list(directory.glob("*.json")))
+    attempt_id = f"{timestamp}-{sequence:06x}"
     record = AttemptRecord(
         attempt_id=attempt_id,
         component_id=component_id,
@@ -249,36 +295,31 @@ def write_attempt_record(
         generation=to_json(generation_result),
         verification=to_json(verification_report),
     )
-    with open(directory / f"{attempt_id}.json", "x", encoding="utf-8") as handle:
-        handle.write(json.dumps(record, indent=2))
+    (directory / f"{attempt_id}.json").write_text(
+        json.dumps(to_json(record), indent=2) + "\n", encoding="utf-8"
+    )
     return record
 
 
-def _feedback_ids(verification):
-    rr = verification.get("requirement_results") or {}
-    criteria = verification.get("criteria") or []
-    out = []
-    for rid, result in rr.items():
-        if result != "fail":
+def last_requirement_failures(component_id: str, repo_root: Path) -> list:
+    for path in sorted(_attempts_dir(component_id, repo_root).glob("*.json"), reverse=True):
+        verification = json.loads(path.read_text(encoding="utf-8")).get("verification")
+        if verification is None:
             continue
-        origins = [
-            c.get("failure_origin", "implementation")
-            for c in criteria
-            if c.get("covers") == rid and c.get("result") != "pass"
-        ]
-        if origins and all(o in ("test", "environment") for o in origins):
-            continue
-        out.append(rid)
-    return sorted(out)
-
-
-def last_requirement_failures(component_id, repo_root):
-    directory = _attempts_dir(repo_root, component_id)
-    for path in sorted(directory.glob("*.json"), reverse=True):
-        record = json.loads(path.read_text(encoding="utf-8"))
-        verification = record.get("verification")
-        if verification is not None:
-            return _feedback_ids(verification)
+        criteria = verification.get("criteria") or []
+        failures = []
+        for r_id, outcome in (verification.get("requirement_results") or {}).items():
+            if outcome != "fail":
+                continue
+            origins = [
+                c.get("failure_origin", "implementation")
+                for c in criteria
+                if c.get("covers") == r_id and c.get("result") != "pass"
+            ]
+            if origins and all(o in ("test", "environment") for o in origins):
+                continue
+            failures.append(r_id)
+        return sorted(failures)
     return []
 
 
@@ -286,98 +327,97 @@ def last_requirement_failures(component_id, repo_root):
 # CLI
 # ---------------------------------------------------------------------------
 
-_VERIFY_USAGE = (
-    "usage: hotdocs verify [--changed=<spec-id>...] [--model=<model-id>] "
-    "[--seed=<n>] [--repo-root=<dir>] [--format=json|text]"
-)
-_FEEDBACK_USAGE = "usage: hotdocs track feedback <component-id> [--repo-root=<dir>]"
-_MAIN_USAGE = f"{_VERIFY_USAGE}\n{_FEEDBACK_USAGE}"
-
 
 class _UsageError(Exception):
     pass
 
 
-def _usage(cause, usage):
-    print(f"usage error: {cause}", file=sys.stderr)
-    print(usage, file=sys.stderr)
-    return 2
-
-
 def _parse(tokens, flags):
-    values = {}
-    positionals = []
+    values: dict = {}
+    positionals: list = []
     i = 0
     while i < len(tokens):
         tok = tokens[i]
-        name, eq, val = tok.partition("=")
-        if name in flags:
+        if tok.startswith("-"):
+            name, eq, val = tok.partition("=")
+            if name not in flags:
+                raise _UsageError(f"unknown argument: {tok}")
             if not eq:
                 if i + 1 >= len(tokens):
-                    raise _UsageError(f"{tok} requires a value")
+                    raise _UsageError(f"{name} requires a value")
                 i += 1
                 val = tokens[i]
             values.setdefault(name, []).append(val)
-        elif tok.startswith("-"):
-            raise _UsageError(f"unknown argument: {tok}")
         else:
             positionals.append(tok)
         i += 1
     return values, positionals
 
 
-def _verify(tokens):
+def _usage_error(cause: str, usage: str) -> int:
+    print(f"usage error: {cause}", file=sys.stderr)
+    print(usage, file=sys.stderr)
+    return 2
+
+
+def _main_verify(tokens) -> int:
     try:
         values, positionals = _parse(
-            tokens, ("--changed", "--model", "--seed", "--repo-root", "--format")
+            tokens, {"--changed", "--model", "--seed", "--repo-root", "--format"}
         )
         if positionals:
             raise _UsageError(f"unknown argument: {positionals[0]}")
+        seed_text = values.get("--seed", ["0"])[-1]
         try:
-            seed = int(values.get("--seed", ["0"])[-1])
+            seed = int(seed_text)
         except ValueError:
-            raise _UsageError(f"--seed must be an integer: {values['--seed'][-1]}") from None
+            raise _UsageError(f"--seed must be an integer: {seed_text}")
         fmt = values.get("--format", ["text"])[-1]
         if fmt not in ("json", "text"):
             raise _UsageError(f"invalid --format: {fmt}")
     except _UsageError as exc:
-        return _usage(exc, _VERIFY_USAGE)
-    repo_root = Path(values.get("--repo-root", ["."])[-1])
-    model = values.get("--model", [None])[-1]
+        return _usage_error(str(exc), VERIFY_USAGE)
+
+    repo_root = Path(values["--repo-root"][-1]) if "--repo-root" in values else Path.cwd()
+    model = values["--model"][-1] if "--model" in values else None
     changed = values.get("--changed") or None
-    report = check_readiness(repo_root, changed, model, seed)
-    ready = bool(_get(report, "ready"))
+    result = check_readiness(repo_root, changed_ids=changed, model=model, seed=seed)
+    ready = bool(_get(result, "ready"))
     if fmt == "json":
-        print(json.dumps(to_json(report)))
+        print(json.dumps(to_json(result)))
     else:
         print("ready" if ready else "not ready")
-        for reason in _get(report, "not_ready_reasons") or []:
+        for reason in _get(result, "not_ready_reasons") or []:
             print(reason)
     return 0 if ready else 1
 
 
-def _feedback(tokens):
+def _main_feedback(tokens) -> int:
     try:
-        values, positionals = _parse(tokens, ("--repo-root",))
+        values, positionals = _parse(tokens, {"--repo-root"})
         if not positionals:
             raise _UsageError("missing <component-id>")
         if len(positionals) > 1:
             raise _UsageError(f"unknown argument: {positionals[1]}")
     except _UsageError as exc:
-        return _usage(exc, _FEEDBACK_USAGE)
-    repo_root = Path(values.get("--repo-root", ["."])[-1])
+        return _usage_error(str(exc), FEEDBACK_USAGE)
+
+    repo_root = Path(values["--repo-root"][-1]) if "--repo-root" in values else Path.cwd()
     failures = last_requirement_failures(positionals[0], repo_root)
     if failures:
         print(",".join(failures))
     return 0
 
 
-def main(argv=None):
+def main(argv: list | None = None) -> int:
     if argv is None:
         argv = sys.argv[1:]
     argv = list(argv)
     if argv[:1] == ["verify"]:
-        return _verify(argv[1:])
+        return _main_verify(argv[1:])
     if argv[:2] == ["track", "feedback"]:
-        return _feedback(argv[2:])
-    return _usage(f"unknown command: {' '.join(argv[:2])}", _MAIN_USAGE)
+        return _main_feedback(argv[2:])
+    return _usage_error(
+        f"unknown command: {' '.join(argv[:2])}",
+        VERIFY_USAGE + "\n" + FEEDBACK_USAGE,
+    )
