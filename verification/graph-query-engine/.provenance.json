@@ -23,7 +23,7 @@
     "generator": "generator@3.2.0+v12"
   },
   "provenance_hit": false,
-  "generated_at": "2026-11-21T17:20:53Z",
+  "generated_at": "2026-11-23T13:43:52Z",
   "verification_run_id": "graph-query-engine-attempt-1",
   "verification_report": {
     "component_id": "comp-graph-query-engine",
@@ -121,7 +121,7 @@
         "definition_sha256": "sha256:53cb9d111b695cf184eb6fdc9c34e8cee514bab938f634dc993257e0163eb8b1",
         "adapter_sha256": "sha256:801043604808d3099fb5da7f57427ec21eecae06ae5a6adee2854de955e1db13",
         "versions": {
-          "python": "3.14.6",
+          "python": "3.14.10",
           "packages": "sha256:fe2bf6523d4c9a1d7aad652c8447381630e076eb89d6267771e208c003c2d83b"
         },
         "lockfile_sha256": null
@@ -145,13 +145,20 @@
   "secret_scan": {
     "scope": "full",
     "gate_version": "secret_scanner@3.1.0+detect-secrets.1.5.0",
-    "flagged": false,
-    "matches": [],
+    "flagged": true,
+    "matches": [
+      {
+        "rule_id": "Hex High Entropy String",
+        "risk_tier": "low",
+        "file": "packaging/homebrew/hotdocs.rb",
+        "line": 19
+      }
+    ],
     "allowed": [
       {
         "rule_id": "Hex High Entropy String",
         "file": "gen/review-packet-builder/review_packet_builder.py",
-        "line": 20
+        "line": 13
       },
       {
         "rule_id": "AWS Access Key",
@@ -367,7 +374,7 @@
     ],
     "notified": false,
     "notification_delivery_error": null,
-    "cache_hit": false
+    "cache_hit": true
   },
   "assets": [
     {
@@ -376,7 +383,7 @@
       "definition_sha256": "sha256:53cb9d111b695cf184eb6fdc9c34e8cee514bab938f634dc993257e0163eb8b1",
       "adapter_sha256": "sha256:801043604808d3099fb5da7f57427ec21eecae06ae5a6adee2854de955e1db13",
       "versions": {
-        "python": "3.14.6",
+        "python": "3.14.10",
         "packages": "sha256:fe2bf6523d4c9a1d7aad652c8447381630e076eb89d6267771e208c003c2d83b"
       },
       "lockfile_sha256": null
