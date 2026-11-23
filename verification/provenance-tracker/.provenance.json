@@ -1,5 +1,5 @@
 {
-  "spec_bundle_hash": "sha256:ef30de3fdbdc856a9e4740df8ef9f2ae78017663ccd90deb885f3e5fc66b027b",
+  "spec_bundle_hash": "sha256:957fcd85ffc03973ef9dde85d121613c5668992ccc60decfa850e73cb4866626",
   "model_pin": "claude-opus-5-5",
   "prompt_version": "v12",
   "retry_feedback": null,
@@ -23,7 +23,7 @@
     "generator": "generator@3.2.0+v12"
   },
   "provenance_hit": false,
-  "generated_at": "2026-11-23T12:47:50Z",
+  "generated_at": "2026-11-23T19:47:00Z",
   "verification_run_id": "provenance-tracker-attempt-1",
   "verification_report": {
     "component_id": "comp-provenance-tracker",
@@ -56,13 +56,7 @@
         "id": "AC-TRACK-010",
         "covers": "R-TRACK-010",
         "kind": "generated-test",
-        "result": "pass",
-        "test_authoring": {
-          "model": "claude-opus-5-5",
-          "seed": 1,
-          "prompt_version": "v1",
-          "cache_hit": false
-        }
+        "result": "pass"
       },
       {
         "id": "AC-TRACK-011",
@@ -105,7 +99,7 @@
       "R-TRACK-012": "pass"
     },
     "interface_drift": false,
-    "mutation_score": 0.8709677419354839,
+    "mutation_score": 0.8873239436619719,
     "mutation_error": null,
     "assets": [
       {
@@ -114,7 +108,7 @@
         "definition_sha256": "sha256:53cb9d111b695cf184eb6fdc9c34e8cee514bab938f634dc993257e0163eb8b1",
         "adapter_sha256": "sha256:801043604808d3099fb5da7f57427ec21eecae06ae5a6adee2854de955e1db13",
         "versions": {
-          "python": "3.14.6",
+          "python": "3.14.10",
           "packages": "sha256:fe2bf6523d4c9a1d7aad652c8447381630e076eb89d6267771e208c003c2d83b"
         },
         "lockfile_sha256": null
@@ -345,7 +339,7 @@
       "definition_sha256": "sha256:53cb9d111b695cf184eb6fdc9c34e8cee514bab938f634dc993257e0163eb8b1",
       "adapter_sha256": "sha256:801043604808d3099fb5da7f57427ec21eecae06ae5a6adee2854de955e1db13",
       "versions": {
-        "python": "3.14.6",
+        "python": "3.14.10",
         "packages": "sha256:fe2bf6523d4c9a1d7aad652c8447381630e076eb89d6267771e208c003c2d83b"
       },
       "lockfile_sha256": null
