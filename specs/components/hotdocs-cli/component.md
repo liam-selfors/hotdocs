@@ -71,3 +71,5 @@ None.
 - `main(argv)` alone is the `cli-conventions.md` entry; the injectable
   form is now `run`, and `init` is reached through `hotdocs-init`'s `run`. (`D348`)
 - `D360`: the version is read from the tool root's `pyproject.toml`.
+- `D363`: `R-CLI-007`, `AC-CLI-007`: `--help` after a verb prints its
+  usage. `D364`: the `capability new` row.

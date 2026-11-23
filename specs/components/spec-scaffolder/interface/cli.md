@@ -7,10 +7,11 @@ hotdocs decision record-commit <D<N>> [--commit=<hash>] [--repo-root=<dir>]
 hotdocs component new <slug> [--title=<title>] [--owners=<a,b>] [--depends-on=<comp-a,comp-b>]
     [--realizes=<P-a,P-b>] [--sealed] [--repo-root=<dir>]
 hotdocs kind new <kind> [--title=<title>] [--owners=<a,b>] [--realizes=<P-a,P-b>] [--repo-root=<dir>]
+hotdocs capability new <name> [--title=<title>] [--owners=<a,b>] [--repo-root=<dir>]
 ```
 
 `main(argv)` receives `argv` beginning `["decision", ...]`,
-`["component", ...]` or `["kind", ...]`: `hotdocs-cli` strips no words for these verbs.
+`["component", ...]`, `["kind", ...]` or `["capability", ...]`: `hotdocs-cli` strips no words for these verbs.
 `--repo-root` defaults to the current directory. Comma-separated flag
 values are split on `,` with surrounding spaces removed.
 
@@ -27,6 +28,9 @@ On success each command prints to stdout and returns `0`:
   order, relative to `repo_root`, the directory ending in `/`
   (`specs/architecture/asset-kind-sql.md`, `specs/components/kind-sql/`,
   `specs/decisions/D14.md`).
+- `capability new`: two lines, the path written, relative to
+  `repo_root` (`specs/product/order-book.md`), then `id: P-<NAME>`, the
+  value `component new`'s `--realizes` takes.
 
 A `ValueError`, `FileExistsError` or `LookupError` from the library prints
 one line, `error: <message>`, to stderr and returns `1`. Usage errors

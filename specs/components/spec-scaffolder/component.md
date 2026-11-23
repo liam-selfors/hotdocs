@@ -69,3 +69,5 @@ None.
 - `D299`: initial spec.
 - `D346`: `new_kind` and `hotdocs kind new` scaffold a new asset kind
   for a person or an agent to complete.
+- `D364`: `new_capability` and `hotdocs capability new`
+  (`R-SCAFFOLD-009`).
