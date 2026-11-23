@@ -88,9 +88,10 @@ Found by installing the `0.1.0` wheel and following `QUICKSTART.md` as a
 new user would. `D359` and `D360` fixed the crash on a surface failure,
 the version literal and the missing guides; `D361` made `hotdocs spec
 check` report a declared asset with no interface file and stopped its
-model layer asking which test framework to use. `D363`–`D365` gave
-every verb a `--help`, added `hotdocs capability new`, and put `/dist/`
-in a new project's `.gitignore`. These remain.
+model layer asking which test framework to use. `D363`–`D366` gave
+every verb a `--help`, added `hotdocs capability new`, put `/dist/` in
+a new project's `.gitignore`, and made the two page builders name
+`hotdocs corpus-graph build` when the graph is missing. These remain.
 
 - **`hotdocs lint` does not look for a declared asset's interface
   file.** `interface/assets/<file name>.md` is required
@@ -111,10 +112,6 @@ in a new project's `.gitignore`. These remain.
   that `--help` and `-h` print the usage line on stdout with exit code
   0; every CLI component implements that document (26 regenerations),
   so the change waits for a full wave.
-- **`docs-site build` and `track ui build` do not name their
-  prerequisite.** Without `verification/corpus-graph.json` they fail
-  without saying to run `hotdocs corpus-graph build` first; the message
-  is each component's own. `QUICKSTART.md` now says it.
 - **Smaller.** Generated test files end without a newline.
   `hotdocs verify --no-model` describes a component never generated as
   needing a fresh run with a model, when it needs `hotdocs generate`.
