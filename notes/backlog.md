@@ -105,6 +105,12 @@ a new project's `.gitignore`, and made the two page builders name
   file, or an export the interface lists under a name the code may not
   use, fails the same way each time. `asset_error` findings whose cause
   is in the spec should end the loop like an environment failure.
+  A surface report with an `environment` finding (`R-SURF-006`: the
+  Python environment could not be provisioned) is retried the same way;
+  `R-LOOP-004` ends the loop at once only for an environment failure in
+  generation or verification. Both need the loop to read each finding's
+  `kind`, which its interface does not yet allow, so every
+  `generation-loop` test is re-authored.
 - **A component's own `main` still answers `--help` with a usage
   error.** `hotdocs-cli` turns that answer into the verb's help (`D363`),
   so `hotdocs <verb> --help` works; `compile-criteria` alone answers
