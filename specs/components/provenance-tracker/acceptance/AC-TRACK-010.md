@@ -17,11 +17,27 @@ Given every component in scope is a provenance-checker hit with a
 When check_readiness is called
 Then ready is true and not_ready_reasons is empty
 
-Given every component passes but one intersecting capability's
-  run_capability_gates call reports a failure
+Given every component passes but intersecting capability P-FOO's
+  run_capability_gates call returns hit false and the report
+  {"P-FOO": {"overall": "fail", "scenarios": [
+  {"id": "CS-FOO-001", "kind": "compiled", "result": "pass"},
+  {"id": "CS-FOO-002", "kind": "llm-judge", "result": "fail"},
+  {"id": "CS-FOO-003", "kind": "llm-judge", "result": "skipped"},
+  {"id": "CS-FOO-004", "kind": "generated-test", "result": "fail"}]}}
 When check_readiness is called
-Then ready is false and not_ready_reasons names that capability,
-  despite every component passing
+Then ready is false and not_ready_reasons is exactly the one entry
+  "P-FOO: capability scenarios failed: CS-FOO-002, CS-FOO-004"
+
+Given the same, but the report is {"P-FOO": {"overall": "fail", "scenarios": []}}
+When check_readiness is called
+Then ready is false and not_ready_reasons is exactly the one entry
+  "P-FOO: has no capability scenarios; add a CS- scenario to its file under specs/product/"
+
+Given every component passes and check_capability_provenance returns
+  hit true with that same empty-scenarios report for P-FOO
+When check_readiness is called
+Then not_ready_reasons is that same one entry and run_capability_gates
+  was never called
 
 Given every component passes and an intersecting capability P-FOO is a
   provenance miss, with model None

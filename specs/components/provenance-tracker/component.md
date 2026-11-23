@@ -75,12 +75,6 @@ See `interface/data/`.
 
 See `acceptance/`.
 
-All criteria are `kind: compiled` — sequencing already-defined calls and
-assembling their results into one report is pure, deterministic logic;
-nothing here needs a model or judgment itself (the components it calls
-may make model calls internally, but that is their own concern, not
-this one's).
-
 ## Non-functional constraints
 
 See `constraints.md`.
@@ -91,4 +85,5 @@ None.
 
 ## Change log
 
-See the decisions, `D25` onward; `D292` makes usage errors print their reason.
+See the decisions, `D25` onward; `D292` makes usage errors print their reason;
+`D368` words a capability that is not passing.

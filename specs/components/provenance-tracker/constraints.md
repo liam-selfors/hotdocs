@@ -9,13 +9,10 @@
   incurred inside its own real function call, not this component's.
 - **Never an automated gate input.** `hotdocs verify` answers a
   question; no component's own pass/fail decision reads this
-  component's output, and nothing programmatically enforces that a
-  developer ran it before committing (`D87`). It is nonetheless a
-  stated workflow MUST, not merely optional, that a developer run it
-  — over the full blast radius of whatever was just regenerated, not
-  just the one component in isolation — before committing (`D99`);
-  this component enforces none of that itself, the same absence of
-  automation `D87` already describes.
+  component's output, and nothing enforces that a developer ran it
+  before committing (`D87`). Running it over the full blast radius of
+  what was regenerated, before committing, is a workflow MUST (`D99`)
+  that this component does not enforce.
 - **`AttemptRecord` is append-only, never mutated.** Once written, it
   MUST NOT be edited or deleted by this component — history is the
   entire value of this data.
@@ -27,9 +24,6 @@
   logic, not a claim that two real `hotdocs verify` runs against a
   changing corpus, or against a capability that gets re-run, produce
   identical reports.
-- **No retention/eviction policy specified here.** `.hotdocs/attempts/`
-  growing without bound over a long-lived local checkout is a real,
-  known cost — deliberately left unaddressed in this version, the same
-  posture `cache-manager`'s own eviction-policy open question already
-  has. Local, gitignored, disposable data a developer can delete at any
-  time with no correctness consequence.
+- **No retention or eviction policy.** `.hotdocs/attempts/` grows
+  without bound; it is local, gitignored data a developer can delete at
+  any time with no correctness consequence.
