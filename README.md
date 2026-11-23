@@ -16,7 +16,8 @@ a JavaScript module, each with its own definition and checks
 ## Try it
 
 `pipx install --pip-args=--pre hotdocs` (or `uv tool install
---prerelease=allow hotdocs`), then see
+--prerelease=allow hotdocs`, or `brew install
+liam-selfors/hotdocs/hotdocs`), then see
 `QUICKSTART.md`: run `hotdocs init --example` in a project and generate the
 example component. The tool's own components ship inside the package; a
 project holds only its own (`D199`, `D358`). `AUTHORING.md`
@@ -65,8 +66,9 @@ The everyday commands:
 ## Status
 
 hotdocs is alpha software: releases are pre-releases (`0.1.0a1` is the
-first), so a plain `pipx install hotdocs` will not find one, and specs,
-commands and file formats may change between them.
+first), and specs, commands and file formats may change between them.
+Once a stable release exists, pip and uv skip pre-releases unless asked,
+which is what the `--pre` and `--prerelease=allow` above do.
 
 This repository is the worked example: the tool is built from its own
 specs. Every one of the 37 components under `specs/components/` is
@@ -83,7 +85,7 @@ since trusting a compiled criterion means trusting its compiler.
 `notes/bootstrap-history.md` tells how each component first landed;
 `verification/<slug>/BOOTSTRAP.md` has each one's full account.
 
-Decisions are ADRs in `specs/decisions/`, `D1` through `D368` (`D1`–`D75`
+Decisions are ADRs in `specs/decisions/`, `D1` through `D369` (`D1`–`D75`
 from the 2026-10 baseline reset, the rest recorded as they were made).
 `notes/initial-ideas.md` holds the original brainstorm, with its own
 informal numbering.

@@ -4,13 +4,16 @@ One module file, `test_probe.py`, never a package.
 
 ```
 probe(test_source: str, criterion_bundle, module_name: str | list[str], *,
-      timeout: float = 60.0, interpreter: str | None = None) -> ProbeReport
-GATE_VERSION: str  # "test-probe@1.3.0"
+      timeout: float = 60.0, interpreter: str | None = None,
+      assets: list[str] | None = None) -> ProbeReport
+GATE_VERSION: str  # "test-probe@1.4.0"
 ```
 
 `interpreter` is the Python that runs the component's tests, the
 `interpreter` the `python` adapter's `provision` reports
 (`specs/architecture/asset-kinds.md`); `None` means `sys.executable`.
+`assets` is the `path` of each asset the component declares, such as
+`["static/app.js"]`, or `None` when the caller does not know them.
 
 `criterion_bundle` is a `CriterionBundle` or a mapping with its keys
 (`spec-bundle-assembler`'s `interface/data/CriterionBundle.md`); only
@@ -62,8 +65,9 @@ asset plugin `hotdocs_probe_assets.py` (`R-PROBE-007`):
     -p hotdocs_probe_assets --junitxml=<tmp>/report.xml test_probe_target.py
 ```
 
-with `PYTHONPATH` set to that directory alone and the current directory
-set to it. Each `testcase` element of `report.xml` is one test; a
+with `PYTHONPATH` set to that directory alone, the current directory
+set to it, and `HOTDOCS_PROBE_ASSETS` set to `json.dumps(assets)` when
+`assets` is not `None` and removed from the environment otherwise. Each `testcase` element of `report.xml` is one test; a
 `failure` or `error` child carries a `message` attribute, which for a
 failure begins with the exception's type name, possibly module-qualified
 (`NameError: ...`, `slugify.HotdocsProbeStubReached: ...`).
@@ -95,6 +99,9 @@ def __getattr__(name):
 The asset plugin's source is exactly:
 
 ```python
+import json
+import os
+
 import pytest
 
 
@@ -102,13 +109,28 @@ class HotdocsProbeStubReached(BaseException):
     pass
 
 
+class HotdocsProbeUndeclaredAsset(KeyError):
+    pass
+
+
 def _reached(*args, **kwargs):
     raise HotdocsProbeStubReached("asset_runner")
+
+
+def _declared(path):
+    listed = os.environ.get("HOTDOCS_PROBE_ASSETS")
+    if listed is not None:
+        return path in json.loads(listed)
+    parts = path.replace("\\", "/").split("/")
+    return not (path.startswith("/") or parts[0] == "gen" or ".." in parts)
 
 
 @pytest.fixture
 def asset_runner():
     def runner(path):
+        if not _declared(path):
+            raise HotdocsProbeUndeclaredAsset(
+                f"asset_runner: {path!r} is not a declared asset path")
         return _reached
 
     return runner

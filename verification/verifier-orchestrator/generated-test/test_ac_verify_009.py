@@ -1,17 +1,16 @@
-# hotdocs-criterion: sha256:7e4075daf1346af507ca786f39663a23014dbbe904bca5a32549ec67098ec153
+# hotdocs-criterion: sha256:3cf02c6980738a165f0c8c0ba334bd26a9924d3ea4b8a0182466e97e9713542b
 import json
+import uuid
+from collections.abc import Mapping
 from pathlib import Path
-
-import pytest
 
 import verifier_orchestrator
 
 
-COMPONENT_ID = "comp-foo-thing"
-SLUG = "foo-thing"
-MODULE = "foo_thing"
-CRITERION_ID = "AC-FOOTHING-001"
-REQUIREMENT_ID = "R-FOOTHING-001"
+COMPONENT_ID = "comp-widget"
+SLUG = "widget"
+CRITERION_ID = "AC-WIDGET-001"
+REQ_ID = "R-WIDGET-001"
 
 
 def field(value, name):
@@ -23,104 +22,130 @@ def write(path, text):
     path.write_text(text, encoding="utf-8")
 
 
-def expected_bundle():
+def expected_bundle(nonce):
     return {
         "component_id": COMPONENT_ID,
         "criterion_id": CRITERION_ID,
-        "covers": REQUIREMENT_ID,
-        "criterion_text": "SENTINEL-CRITERION-TEXT-7f3a: Given a value When read Then one",
-        "requirement_text": "SENTINEL-REQUIREMENT-TEXT-91bc: the value MUST be one",
-        "interface": "SENTINEL-INTERFACE-TEXT-44de: VALUE: int",
-        "glossary": "SENTINEL-GLOSSARY-TEXT-0a1b",
-        "dependency_interfaces": {},
-        "testing": "SENTINEL-TESTING-TEXT-5c6d",
+        "covers": REQ_ID,
+        "criterion_text": "Fake criterion text " + nonce,
+        "requirement_text": "Fake requirement text " + nonce,
+        "interface": "make_widget(x) -> int " + nonce,
+        "glossary": "Fake glossary " + nonce,
+        "dependency_interfaces": {"comp-other": "other_get(key) -> str " + nonce},
+        "testing": "Fake testing " + nonce,
     }
 
 
-def build_fixture(repo_root, assembler_log):
-    comp = repo_root / "specs" / "components" / SLUG
+def build_fixture(repo_root, nonce, assembler_log, ):
+    comp_dir = repo_root / "specs" / "components" / SLUG
     write(
-        comp / "component.md",
+        comp_dir / "component.md",
         "---\n"
-        "id: " + COMPONENT_ID + "\n"
-        "title: Foo Thing\n"
+        "id: comp-widget\n"
+        "title: Widget\n"
         "status: draft\n"
-        "owners: [test-team]\n"
-        "depends_on: []\n"
-        "realizes: [P-FOOTHING]\n"
+        "owners: [team]\n"
+        "realizes: [P-WIDGET]\n"
         "---\n"
         "\n"
-        "# Foo Thing\n"
+        "# Widget\n"
         "\n"
-        "## Purpose\n\nExposes a value.\n\n"
-        "## Scope\n\n- In scope: the value.\n\n"
-        "## Definitions\n\nNone.\n\n"
-        "## Behavior\n\nSee `requirements/`.\n\n"
-        "## Interfaces\n\nSee `interface/`.\n\n"
-        "## Data\n\nSee `interface/data/`.\n\n"
-        "## Acceptance criteria\n\nSee `acceptance/`.\n\n"
-        "## Non-functional constraints\n\nSee `constraints.md`.\n\n"
-        "## Open questions\n\n"
-        "## Change log\n\n- Initial.\n",
+        "## Purpose\n"
+        "\n"
+        "Makes widgets.\n"
+        "\n"
+        "## Scope\n"
+        "\n"
+        "- In scope: widgets.\n"
+        "\n"
+        "## Definitions\n"
+        "\n"
+        "None.\n"
+        "\n"
+        "## Behavior\n"
+        "\n"
+        "See `requirements/`.\n"
+        "\n"
+        "## Interfaces\n"
+        "\n"
+        "See `interface/`.\n"
+        "\n"
+        "## Data\n"
+        "\n"
+        "See `interface/data/`.\n"
+        "\n"
+        "## Acceptance criteria\n"
+        "\n"
+        "See `acceptance/`.\n"
+        "\n"
+        "## Non-functional constraints\n"
+        "\n"
+        "See `constraints.md`.\n"
+        "\n"
+        "## Open questions\n"
+        "\n"
+        "## Change log\n"
+        "\n"
+        "- Initial.\n",
     )
     write(
-        comp / "requirements" / (REQUIREMENT_ID + ".md"),
-        "# " + REQUIREMENT_ID + "\n\n"
-        "**" + REQUIREMENT_ID + "** — The module MUST expose `VALUE` equal to 1.\n",
+        comp_dir / "requirements" / (REQ_ID + ".md"),
+        "# " + REQ_ID + "\n\n**" + REQ_ID + "** - `make_widget(x)` MUST return `x + 1`.\n",
     )
     write(
-        comp / "acceptance" / (CRITERION_ID + ".md"),
-        "# " + CRITERION_ID + "\n\n"
-        "Covers: " + REQUIREMENT_ID + "\n"
-        "Kind: generated-test\n\n"
+        comp_dir / "interface" / "library.md",
+        "# Library\n\n```\nmake_widget(x: int) -> int\n```\n",
+    )
+    write(comp_dir / "constraints.md", "# Constraints\n\nNone.\n")
+    write(
+        comp_dir / "acceptance" / (CRITERION_ID + ".md"),
+        "# " + CRITERION_ID + "\n"
+        "\n"
+        "Covers: " + REQ_ID + "\n"
+        "Kind: generated-test\n"
+        "\n"
         "```gherkin\n"
-        "Given the module foo_thing\n"
-        "When its VALUE is read\n"
-        "Then it equals 1\n"
+        "Given a widget input of 1\n"
+        "When make_widget is called with it\n"
+        "Then it returns 2\n"
         "```\n",
     )
     write(
-        comp / "interface" / "library.md",
-        "# Library\n\n```\nVALUE: int\n```\n",
-    )
-    write(comp / "constraints.md", "# Constraints\n\nNone.\n")
-    write(
-        repo_root / "specs" / "product" / "foo-thing-cap.md",
+        repo_root / "specs" / "product" / "widget.md",
         "---\n"
-        "id: P-FOOTHING\n"
-        "title: Foo thing capability\n"
+        "id: P-WIDGET\n"
+        "title: Widgets\n"
         "status: draft\n"
-        "owners: [test-team]\n"
+        "owners: [team]\n"
         "---\n"
         "\n"
-        "# Foo thing capability\n\n"
-        "## Purpose\n\nProvide a value.\n\n"
-        "## Scope\n\n- The value.\n",
+        "# Widgets\n"
+        "\n"
+        "## Purpose\n"
+        "\n"
+        "Widgets.\n",
     )
     write(repo_root / "specs" / "glossary.md", "# Glossary\n")
 
-    # Code under test: no mutation sites (numeric constants are never mutated).
-    write(repo_root / "gen" / SLUG / (MODULE + ".py"), "VALUE = 1\n")
+    write(
+        repo_root / "gen" / SLUG / "widget.py",
+        "def make_widget(x):\n    return x + 1\n",
+    )
 
-    # Fake spec-bundle-assembler.
+    bundle = expected_bundle(nonce)
     write(
         repo_root / "gen" / "spec-bundle-assembler" / "spec_bundle_assembler.py",
         "import json\n"
         "\n"
-        "LOG = " + repr(str(assembler_log)) + "\n"
-        "BUNDLE = " + repr(expected_bundle()) + "\n"
-        "\n"
         "\n"
         "def assemble_criterion(component_id, criterion_id, repo_root):\n"
-        "    with open(LOG, 'a', encoding='utf-8') as fh:\n"
-        "        fh.write(json.dumps([component_id, criterion_id]) + '\\n')\n"
-        "    return json.loads(json.dumps(BUNDLE))\n",
+        "    with open(" + repr(str(assembler_log)) + ", 'a', encoding='utf-8') as f:\n"
+        "        f.write(json.dumps({'component_id': component_id, 'criterion_id': criterion_id, 'repo_root': str(repo_root)}) + '\\n')\n"
+        "    return json.loads(" + repr(json.dumps(bundle)) + ")\n",
     )
-
-    # Fake test-probe: always ok.
     write(
         repo_root / "gen" / "test-probe" / "test_probe.py",
-        "class _ProbeReport:\n"
+        "class _Report:\n"
         "    def __init__(self):\n"
         "        self.ok = True\n"
         "        self.findings = []\n"
@@ -128,58 +153,33 @@ def build_fixture(repo_root, assembler_log):
         "        self.tests_reached = 1\n"
         "\n"
         "    def to_dict(self):\n"
-        "        return {'ok': self.ok, 'findings': list(self.findings),\n"
-        "                'tests_run': self.tests_run, 'tests_reached': self.tests_reached}\n"
+        "        return {'ok': self.ok, 'findings': list(self.findings), 'tests_run': self.tests_run, 'tests_reached': self.tests_reached}\n"
         "\n"
         "\n"
-        "def probe(test_source, criterion_bundle, module_name, *, timeout=60.0, interpreter=None):\n"
-        "    return _ProbeReport()\n",
+        "def probe(test_source, criterion_bundle, module_name, *, timeout=60.0, interpreter=None, assets=None):\n"
+        "    return _Report()\n",
     )
+    return bundle
 
 
-def authored_test_source(marker, expected_value):
-    return (
-        "import " + MODULE + "\n"
-        "\n"
-        "\n"
-        "def test_value():\n"
-        "    with open(" + repr(str(marker)) + ", 'a', encoding='utf-8') as fh:\n"
-        "        fh.write('ran\\n')\n"
-        "    assert " + MODULE + ".VALUE == " + repr(expected_value) + "\n"
-    )
+def bundle_view(bundle, keys):
+    out = {}
+    for k in keys:
+        if isinstance(bundle, Mapping):
+            out[k] = bundle[k]
+        else:
+            out[k] = getattr(bundle, k)
+    return out
 
 
-@pytest.mark.parametrize(
-    "expected_value, expected_result",
-    [(1, "pass"), (2, "fail")],
-)
-def test_generated_test_criterion_calls_test_author_with_assembled_bundle(
-    tmp_path, expected_value, expected_result
-):
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    logs = tmp_path / "logs"
-    logs.mkdir()
-    assembler_log = logs / "assembler.log"
-    author_log = logs / "author.log"
-    marker = logs / "ran.log"
-
-    build_fixture(repo_root, assembler_log)
-
-    # No cached test exists for the criterion.
-    cached = (
-        repo_root / "verification" / SLUG / "generated-test"
-        / ("test_" + CRITERION_ID.lower().replace("-", "_") + ".py")
-    )
-    assert not cached.exists()
-
-    received = []
-    source = authored_test_source(marker, expected_value)
-
-    def test_author(bundle):
-        received.append(bundle)
-        with open(author_log, "a", encoding="utf-8") as fh:
-            fh.write("called\n")
+def make_test_author(author_log, expected_keys, test_code):
+    def test_author_stub(bundle):
+        view = bundle_view(bundle, expected_keys)
+        extra = None
+        if isinstance(bundle, Mapping):
+            extra = sorted(bundle.keys())
+        with open(author_log, "a", encoding="utf-8") as f:
+            f.write(json.dumps({"bundle": view, "keys": extra}) + "\n")
         return {
             "component_id": COMPONENT_ID,
             "criterion_id": CRITERION_ID,
@@ -188,42 +188,76 @@ def test_generated_test_criterion_calls_test_author_with_assembled_bundle(
             "prompt_version": "v1",
             "cache_hit": False,
             "file": {
-                "path": "verification/" + SLUG + "/generated-test/test_ac_foothing_001.py",
-                "content": source,
+                "path": "verification/widget/generated-test/test_ac_widget_001.py",
+                "content": test_code,
             },
             "model_call_error": None,
             "repair_attempts": 0,
             "probe_findings": [],
         }
 
-    report = verifier_orchestrator.verify(COMPONENT_ID, repo_root, test_author=test_author)
+    return test_author_stub
 
-    # test_author invoked exactly once for the single criterion.
-    assert author_log.read_text(encoding="utf-8").splitlines() == ["called"]
-    assert len(received) == 1
-    bundle = received[0]
 
-    # The bundle came from assemble_criterion for this exact criterion.
-    assembler_calls = [
-        json.loads(line)
-        for line in assembler_log.read_text(encoding="utf-8").splitlines()
-        if line.strip()
-    ]
-    assert [COMPONENT_ID, CRITERION_ID] in assembler_calls
+def generated_code(marker, passes):
+    return (
+        "def test_widget_marker():\n"
+        "    with open(" + repr(str(marker)) + ", 'a', encoding='utf-8') as f:\n"
+        "        f.write('ran\\n')\n"
+        "    assert " + ("True" if passes else "False") + "\n"
+    )
 
-    # And it is exactly that bundle, not one verify built itself.
-    exp = expected_bundle()
-    for key, value in exp.items():
-        assert field(bundle, key) == value, key
 
-    # The returned test code was executed.
-    assert marker.exists()
+def run_scenario(tmp_path, passes):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    logs = tmp_path / "logs"
+    logs.mkdir()
+    assembler_log = logs / "assembler.log"
+    author_log = logs / "author.log"
+    marker = logs / "marker.log"
+    nonce = uuid.uuid4().hex
+
+    bundle = build_fixture(repo_root, nonce, assembler_log)
+    cached = repo_root / "verification" / SLUG / "generated-test" / "test_ac_widget_001.py"
+    assert not cached.exists()
+
+    keys = list(bundle.keys())
+    author = make_test_author(author_log, keys, generated_code(marker, passes))
+
+    report = verifier_orchestrator.verify(COMPONENT_ID, repo_root, test_author=author)
+
+    # test_author invoked once, with exactly the assembler's bundle
+    assert author_log.exists(), "test_author was never invoked"
+    calls = [json.loads(line) for line in author_log.read_text(encoding="utf-8").splitlines() if line.strip()]
+    assert len(calls) == 1
+    assert calls[0]["bundle"] == bundle
+    if calls[0]["keys"] is not None:
+        assert calls[0]["keys"] == sorted(keys)
+
+    # the bundle came from assemble_criterion for this criterion
+    assert assembler_log.exists(), "assemble_criterion was never called"
+    asm_calls = [json.loads(line) for line in assembler_log.read_text(encoding="utf-8").splitlines() if line.strip()]
+    assert any(
+        c["component_id"] == COMPONENT_ID and c["criterion_id"] == CRITERION_ID
+        for c in asm_calls
+    )
+
+    # the returned test code was executed
+    assert marker.exists(), "returned test code was never executed"
     assert "ran" in marker.read_text(encoding="utf-8").splitlines()
 
-    # Its run produced that criterion's result.
     criteria = field(report, "criteria")
     matching = [c for c in criteria if field(c, "id") == CRITERION_ID]
     assert len(matching) == 1
-    entry = matching[0]
-    assert field(entry, "kind") == "generated-test"
-    assert field(entry, "result") == expected_result
+    return matching[0]
+
+
+def test_ac_verify_009_returned_passing_code_gives_pass(tmp_path):
+    crit = run_scenario(tmp_path, passes=True)
+    assert field(crit, "result") == "pass"
+
+
+def test_ac_verify_009_returned_failing_code_gives_fail(tmp_path):
+    crit = run_scenario(tmp_path, passes=False)
+    assert field(crit, "result") == "fail"

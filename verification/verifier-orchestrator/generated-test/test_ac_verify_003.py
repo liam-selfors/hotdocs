@@ -1,12 +1,12 @@
-# hotdocs-criterion: sha256:ac823da7e72eb2bfd2dae523b4be3821c06fb502baf32226163a2b24b22889f5
+# hotdocs-criterion: sha256:190f0fa7e1df7528a06a3d88af352981b66a479c6c89a3cb0dac2ade71d2c178
 import socket
 from pathlib import Path
 
 import verifier_orchestrator
 
 
-COMPONENT_ID = "comp-widget"
 SLUG = "widget"
+COMPONENT_ID = "comp-widget"
 CRITERION_ID = "AC-WIDGET-001"
 REQUIREMENT_ID = "R-WIDGET-001"
 
@@ -20,11 +20,13 @@ def write(path, text):
     path.write_text(text, encoding="utf-8")
 
 
-def build_fixture(repo_root, logs):
-    comp = repo_root / "specs" / "components" / SLUG
-
+def build_fixture(repo_root, log_path):
     write(
-        repo_root / "specs" / "product" / "widget.md",
+        repo_root / "specs" / "glossary.md",
+        "# Glossary\n\n- **Widget** — a thing under test.\n",
+    )
+    write(
+        repo_root / "specs" / "product" / "widget-capability.md",
         "---\n"
         "id: P-WIDGET\n"
         "title: Widget capability\n"
@@ -36,13 +38,9 @@ def build_fixture(repo_root, logs):
         "\n"
         "## Purpose\n"
         "\n"
-        "Widgets exist.\n"
-        "\n"
-        "## Scope\n"
-        "\n"
-        "- Widgets.\n",
+        "Provide widgets.\n",
     )
-
+    comp = repo_root / "specs" / "components" / SLUG
     write(
         comp / "component.md",
         "---\n"
@@ -57,7 +55,7 @@ def build_fixture(repo_root, logs):
         "\n"
         "## Purpose\n"
         "\n"
-        "A widget component whose spec is judged for clarity.\n"
+        "Makes widgets.\n"
         "\n"
         "## Scope\n"
         "\n"
@@ -91,16 +89,17 @@ def build_fixture(repo_root, logs):
         "\n"
         "## Change log\n"
         "\n"
-        "- Initial draft.\n",
+        "- Initial.\n",
     )
-
     write(
         comp / "requirements" / (REQUIREMENT_ID + ".md"),
-        "# " + REQUIREMENT_ID + "\n"
-        "\n"
-        "**" + REQUIREMENT_ID + "** — The widget spec MUST be clear.\n",
+        "**" + REQUIREMENT_ID + "** — The widget documentation MUST be clear.\n",
     )
-
+    write(
+        comp / "interface" / "library.md",
+        "# Library\n\n```\nmake_widget(name: str) -> str\n```\n",
+    )
+    write(comp / "constraints.md", "# Constraints\n\nNone.\n")
     write(
         comp / "acceptance" / (CRITERION_ID + ".md"),
         "# " + CRITERION_ID + "\n"
@@ -109,70 +108,42 @@ def build_fixture(repo_root, logs):
         "Kind: llm-judge\n"
         "\n"
         "```gherkin\n"
-        "Given the widget spec\n"
-        "When a reviewer reads it\n"
-        "Then it states its behavior without contradiction\n"
+        "Given the widget documentation\n"
+        "When a reader reads it\n"
+        "Then it is clear and free of contradiction\n"
         "```\n",
     )
-
-    write(
-        comp / "interface" / "library.md",
-        "# Library\n"
-        "\n"
-        "```\n"
-        "make_widget(name: str) -> dict\n"
-        "```\n",
-    )
-
-    write(comp / "constraints.md", "# Constraints\n\nNone.\n")
-
-    write(repo_root / "specs" / "glossary.md", "# Glossary\n")
-
-    # The component's own (empty) code.
     write(repo_root / "gen" / SLUG / "widget.py", "")
 
-    # spec-bundle-assembler stand-in.
+    log = repr(str(log_path))
+
     write(
         repo_root / "gen" / "spec-bundle-assembler" / "spec_bundle_assembler.py",
-        "LOG = " + repr(str(logs["assembler"])) + "\n"
+        "def _log(name):\n"
+        "    with open(" + log + ", 'a', encoding='utf-8') as fh:\n"
+        "        fh.write(name + '\\n')\n"
         "\n"
         "\n"
         "def assemble_criterion(component_id, criterion_id, repo_root):\n"
-        "    with open(LOG, 'a') as f:\n"
-        "        f.write(str(criterion_id) + '\\n')\n"
+        "    _log('assemble_criterion')\n"
         "    return {\n"
         "        'component_id': component_id,\n"
         "        'criterion_id': criterion_id,\n"
         "        'covers': " + repr(REQUIREMENT_ID) + ",\n"
-        "        'criterion_text': 'Given the widget spec',\n"
-        "        'requirement_text': 'The widget spec MUST be clear.',\n"
-        "        'interface': 'make_widget(name: str) -> dict',\n"
-        "        'glossary': '',\n"
+        "        'criterion_text': 'Given the widget documentation',\n"
+        "        'requirement_text': 'The widget documentation MUST be clear.',\n"
+        "        'interface': 'make_widget(name: str) -> str',\n"
+        "        'glossary': 'Widget',\n"
         "        'dependency_interfaces': {},\n"
         "        'testing': '',\n"
-        "    }\n"
-        "\n"
-        "\n"
-        "def assemble(component_id, repo_root, mode='cold'):\n"
-        "    return {\n"
-        "        'component_id': component_id,\n"
-        "        'spec_bundle_hash': 'sha256:' + '0' * 64,\n"
-        "        'spec': '',\n"
-        "        'interface': '',\n"
-        "        'constraints': '',\n"
-        "        'dependency_interfaces': {},\n"
-        "        'dependency_context': {},\n"
-        "        'dependency_usage': {},\n"
-        "        'vars': {},\n"
-        "        'glossary': '',\n"
-        "        'hint_code': None,\n"
         "    }\n",
     )
-
-    # test-probe stand-in: always ok.
     write(
         repo_root / "gen" / "test-probe" / "test_probe.py",
-        "class _Report:\n"
+        "GATE_VERSION = 'test-probe@1.4.0'\n"
+        "\n"
+        "\n"
+        "class ProbeReport:\n"
         "    def __init__(self):\n"
         "        self.ok = True\n"
         "        self.findings = []\n"
@@ -184,92 +155,87 @@ def build_fixture(repo_root, logs):
         "                'tests_run': self.tests_run, 'tests_reached': self.tests_reached}\n"
         "\n"
         "\n"
-        "GATE_VERSION = 'test-probe@1.3.0'\n"
-        "\n"
-        "\n"
-        "def probe(test_source, criterion_bundle, module_name, *, timeout=60.0, interpreter=None):\n"
-        "    return _Report()\n",
+        "def probe(test_source, criterion_bundle, module_name, *, timeout=60.0,\n"
+        "          interpreter=None, assets=None):\n"
+        "    return ProbeReport()\n",
     )
-
-    # Model-calling stand-ins that log any call, so a call from verify is visible.
+    # Logging stand-ins for every model-calling dependency: any call means
+    # verify tried to call a model itself.
     write(
         repo_root / "gen" / "llm-endpoint" / "llm_endpoint.py",
-        "LOG = " + repr(str(logs["model"])) + "\n"
+        "def _log(name):\n"
+        "    with open(" + log + ", 'a', encoding='utf-8') as fh:\n"
+        "        fh.write(name + '\\n')\n"
         "\n"
         "\n"
         "def complete(*args, **kwargs):\n"
-        "    with open(LOG, 'a') as f:\n"
-        "        f.write('complete\\n')\n"
-        "    raise RuntimeError('no model may be called')\n",
+        "    _log('llm_endpoint.complete')\n"
+        "    raise RuntimeError('no model call allowed')\n",
     )
     write(
         repo_root / "gen" / "test-author" / "test_author.py",
-        "LOG = " + repr(str(logs["model"])) + "\n"
         "GATE_VERSION = 'generated_test@3.0.0'\n"
         "\n"
         "\n"
+        "def _log(name):\n"
+        "    with open(" + log + ", 'a', encoding='utf-8') as fh:\n"
+        "        fh.write(name + '\\n')\n"
+        "\n"
+        "\n"
         "def author_test(bundle, model, seed=0, *, repo_root=None, llm_backend=None):\n"
-        "    with open(LOG, 'a') as f:\n"
-        "        f.write('author_test\\n')\n"
-        "    raise RuntimeError('no model may be called')\n",
+        "    _log('test_author.author_test')\n"
+        "    raise RuntimeError('no model call allowed')\n",
     )
 
 
 def test_llm_judge_criterion_skipped_without_judge(tmp_path, monkeypatch):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
-    log_dir = tmp_path / "logs"
-    log_dir.mkdir()
-    logs = {
-        "assembler": log_dir / "assembler.log",
-        "model": log_dir / "model.log",
-    }
-    build_fixture(repo_root, logs)
+    log_path = tmp_path / "calls.log"
+    build_fixture(repo_root, log_path)
 
-    # No credentials for any model provider.
-    for name in (
-        "ANTHROPIC_API_KEY",
-        "OPENAI_API_KEY",
-        "GEMINI_API_KEY",
-        "GOOGLE_API_KEY",
-        "VAR_ANTHROPIC_API_KEY",
-    ):
+    for name in ("ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY"):
         monkeypatch.delenv(name, raising=False)
 
-    # Record (and refuse) any in-process network connection, as a model call would need.
     network_attempts = []
-    real_connect = socket.socket.connect
-    real_connect_ex = socket.socket.connect_ex
+    original_connect = socket.socket.connect
+    original_connect_ex = socket.socket.connect_ex
 
     def guarded_connect(self, address):
-        if getattr(socket, "AF_UNIX", None) is not None and self.family == socket.AF_UNIX:
-            return real_connect(self, address)
-        network_attempts.append(repr(address))
-        raise OSError("network disabled in test")
+        if self.family in (socket.AF_INET, socket.AF_INET6):
+            network_attempts.append(address)
+            raise OSError("network access is forbidden in this test")
+        return original_connect(self, address)
 
     def guarded_connect_ex(self, address):
-        if getattr(socket, "AF_UNIX", None) is not None and self.family == socket.AF_UNIX:
-            return real_connect_ex(self, address)
-        network_attempts.append(repr(address))
-        raise OSError("network disabled in test")
+        if self.family in (socket.AF_INET, socket.AF_INET6):
+            network_attempts.append(address)
+            raise OSError("network access is forbidden in this test")
+        return original_connect_ex(self, address)
 
     monkeypatch.setattr(socket.socket, "connect", guarded_connect)
     monkeypatch.setattr(socket.socket, "connect_ex", guarded_connect_ex)
 
-    report = verifier_orchestrator.verify(COMPONENT_ID, repo_root)
+    report = verifier_orchestrator.verify(COMPONENT_ID, repo_root, judge=None)
 
     criteria = field(report, "criteria")
     matching = [c for c in criteria if field(c, "id") == CRITERION_ID]
     assert len(matching) == 1, criteria
     entry = matching[0]
-
     assert field(entry, "kind") == "llm-judge"
     assert field(entry, "result") == "skipped"
     if isinstance(entry, dict):
         assert "rationale" in entry
     assert field(entry, "rationale") is None
 
-    # verify did not call a model itself to produce that result.
+    as_dict = report.to_dict()
+    dict_entries = [c for c in as_dict["criteria"] if c["id"] == CRITERION_ID]
+    assert len(dict_entries) == 1
+    assert dict_entries[0]["result"] == "skipped"
+    assert "rationale" in dict_entries[0]
+    assert dict_entries[0]["rationale"] is None
+
+    calls = log_path.read_text(encoding="utf-8").splitlines() if log_path.exists() else []
+    model_calls = [c for c in calls if c in ("llm_endpoint.complete", "test_author.author_test")]
+    assert model_calls == []
     assert network_attempts == []
-    model_log = logs["model"]
-    assert not model_log.exists() or model_log.read_text(encoding="utf-8") == ""

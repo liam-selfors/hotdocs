@@ -1,5 +1,5 @@
 {
-  "spec_bundle_hash": "sha256:f121f92443370238b29b2c6462dbdbca8b7479bd368f2c9014a72618742b19a4",
+  "spec_bundle_hash": "sha256:fa84bd02c085743c8e4dcd848599a4e431b24ae26970ff0aa8ceab64825cce7a",
   "model_pin": "claude-opus-5-5",
   "prompt_version": "v12",
   "retry_feedback": null,
@@ -23,7 +23,7 @@
     "generator": "generator@3.2.0+v12"
   },
   "provenance_hit": false,
-  "generated_at": "2026-11-23T12:59:17Z",
+  "generated_at": "2026-11-23T20:27:16Z",
   "verification_run_id": "review-packet-builder-attempt-1",
   "verification_report": {
     "component_id": "comp-review-packet-builder",
@@ -129,7 +129,7 @@
       "R-PACKET-013": "pass"
     },
     "interface_drift": false,
-    "mutation_score": 0.9552238805970149,
+    "mutation_score": 0.86,
     "mutation_error": null,
     "assets": [
       {
@@ -138,7 +138,7 @@
         "definition_sha256": "sha256:53cb9d111b695cf184eb6fdc9c34e8cee514bab938f634dc993257e0163eb8b1",
         "adapter_sha256": "sha256:801043604808d3099fb5da7f57427ec21eecae06ae5a6adee2854de955e1db13",
         "versions": {
-          "python": "3.14.6",
+          "python": "3.14.10",
           "packages": "sha256:fe2bf6523d4c9a1d7aad652c8447381630e076eb89d6267771e208c003c2d83b"
         },
         "lockfile_sha256": null
@@ -168,7 +168,7 @@
       {
         "rule_id": "Hex High Entropy String",
         "file": "gen/review-packet-builder/review_packet_builder.py",
-        "line": 13
+        "line": 19
       },
       {
         "rule_id": "AWS Access Key",
@@ -369,7 +369,7 @@
       "definition_sha256": "sha256:53cb9d111b695cf184eb6fdc9c34e8cee514bab938f634dc993257e0163eb8b1",
       "adapter_sha256": "sha256:801043604808d3099fb5da7f57427ec21eecae06ae5a6adee2854de955e1db13",
       "versions": {
-        "python": "3.14.6",
+        "python": "3.14.10",
         "packages": "sha256:fe2bf6523d4c9a1d7aad652c8447381630e076eb89d6267771e208c003c2d83b"
       },
       "lockfile_sha256": null

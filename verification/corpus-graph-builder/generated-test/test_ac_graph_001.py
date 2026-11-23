@@ -1,9 +1,7 @@
-# hotdocs-criterion: sha256:c1c769e48caffb78f4ecf351be1712fdbe54148f2e6d7c969e94e02056e4f9ba
-"""AC-GRAPH-001: the graph holds one node per capability, component and var."""
+# hotdocs-criterion: sha256:a1749ebee997de79a38ebee662de469e1abea68b77f30319d2a3b172b94dd5ac
+from pathlib import Path
 
 import corpus_graph_builder
-
-from pathlib import Path
 
 
 def field(value, name):
@@ -15,92 +13,99 @@ def write(path, text):
     path.write_text(text, encoding="utf-8")
 
 
-def capability_doc(cap_id, title):
+def component_md(slug):
     return (
         "---\n"
-        + "id: " + cap_id + "\n"
-        + "title: " + title + "\n"
-        + "status: draft\n"
-        + "owners: [pipeline-team]\n"
-        + "---\n"
-        + "\n"
-        + "# " + title + "\n"
-        + "\n"
-        + "A test capability.\n"
+        "id: comp-" + slug + "\n"
+        "title: Component " + slug.upper() + "\n"
+        "status: draft\n"
+        "owners: [pipeline-team]\n"
+        "depends_on: []\n"
+        "realizes: []\n"
+        "uses_var: []\n"
+        "sealed: true\n"
+        "source_path: legacy/" + slug + "/\n"
+        "---\n"
+        "\n"
+        "# Component " + slug.upper() + "\n"
+        "\n"
+        "## Purpose\n"
+        "\n"
+        "A small fixture component named " + slug + ".\n"
     )
 
 
-def component_doc(slug):
+def capability_md(cap_id, title):
     return (
         "---\n"
-        + "id: comp-" + slug + "\n"
-        + "title: Component " + slug + "\n"
-        + "status: draft\n"
-        + "owners: [pipeline-team]\n"
-        + "depends_on: []\n"
-        + "realizes: []\n"
-        + "uses_var: []\n"
-        + "sealed: true\n"
-        + "source_path: legacy/" + slug + "/\n"
-        + "---\n"
-        + "\n"
-        + "# Component " + slug + "\n"
-        + "\n"
-        + "## Purpose\n"
-        + "\n"
-        + "A test component.\n"
-    )
-
-
-def var_doc(var_id, title):
-    return (
+        "id: " + cap_id + "\n"
+        "title: " + title + "\n"
+        "status: draft\n"
+        "owners: [pipeline-team]\n"
         "---\n"
-        + "id: " + var_id + "\n"
-        + "title: " + title + "\n"
-        + "status: draft\n"
-        + "owners: [pipeline-team]\n"
-        + "---\n"
-        + "\n"
-        + "# " + title + "\n"
-        + "\n"
-        + "A test var.\n"
-    )
-
-
-def decision_doc():
-    return (
-        "---\n"
-        + "id: D1\n"
-        + "title: Decision one\n"
-        + "status: draft\n"
-        + "owners: [pipeline-team]\n"
-        + "---\n"
-        + "\n"
-        + "# Decision one\n"
-        + "\n"
-        + "A test decision.\n"
+        "\n"
+        "# " + title + "\n"
+        "\n"
+        "A fixture capability.\n"
     )
 
 
 def build_fixture(repo_root):
     specs = repo_root / "specs"
-    write(specs / "product" / "one.md", capability_doc("P-ONE", "Product one"))
-    write(specs / "product" / "two.md", capability_doc("P-TWO", "Product two"))
+    write(specs / "product" / "one.md", capability_md("P-ONE", "Capability One"))
+    write(specs / "product" / "two.md", capability_md("P-TWO", "Capability Two"))
+
     for slug in ("a", "b", "c"):
-        write(specs / "components" / slug / "component.md", component_doc(slug))
-    write(specs / "vars" / "one.md", var_doc("VAR-ONE", "Var one"))
-    write(specs / "decisions" / "D1.md", decision_doc())
+        write(specs / "components" / slug / "component.md", component_md(slug))
+
     write(
         specs / "components" / "a" / "requirements" / "R-A-001.md",
-        "# R-A-001\n\n**R-A-001** \u2014 Component a MUST do something.\n",
+        "# R-A-001\n\n**R-A-001** \u2014 Component a MUST do its job.\n",
     )
     write(
         specs / "components" / "a" / "acceptance" / "AC-A-001.md",
-        "# AC-A-001\n\nCovers: R-A-001\nKind: llm-judge\n\nComponent a does something.\n",
+        "# AC-A-001\n"
+        "\n"
+        "Covers: R-A-001\n"
+        "Kind: generated-test\n"
+        "\n"
+        "```gherkin\n"
+        "Given component a\n"
+        "When it runs\n"
+        "Then it does its job\n"
+        "```\n",
+    )
+
+    write(
+        specs / "vars" / "one.md",
+        "---\n"
+        "id: VAR-ONE\n"
+        "title: Var One\n"
+        "status: draft\n"
+        "owners: [pipeline-team]\n"
+        "---\n"
+        "\n"
+        "# VAR-ONE\n"
+        "\n"
+        "A fixture var declaration.\n",
+    )
+
+    write(
+        specs / "decisions" / "D1.md",
+        "---\n"
+        "id: D1\n"
+        "title: Decision One\n"
+        "status: draft\n"
+        "owners: [pipeline-team]\n"
+        "---\n"
+        "\n"
+        "# D1\n"
+        "\n"
+        "A fixture decision.\n",
     )
 
 
-def test_nodes_hold_exactly_capabilities_components_and_vars(tmp_path):
+def test_ac_graph_001_nodes_are_capabilities_components_and_vars(tmp_path):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
     build_fixture(repo_root)
@@ -120,11 +125,3 @@ def test_nodes_hold_exactly_capabilities_components_and_vars(tmp_path):
     assert set(nodes.keys()) == set(expected.keys())
     for node_id, node_type in expected.items():
         assert field(nodes[node_id], "type") == node_type, node_id
-
-    # Requirements, criteria and decisions never become nodes.
-    assert "R-A-001" not in nodes
-    assert "AC-A-001" not in nodes
-    assert "D1" not in nodes
-
-    # build_corpus_graph writes nothing.
-    assert not (repo_root / "verification" / "corpus-graph.json").exists()

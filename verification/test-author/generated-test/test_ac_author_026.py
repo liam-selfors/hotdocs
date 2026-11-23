@@ -4,7 +4,7 @@ import re
 import test_author
 
 
-PROBE_SOURCE = (
+PROBE_STAND_IN = (
     "class _Report:\n"
     "    def __init__(self):\n"
     "        self.ok = True\n"
@@ -17,55 +17,70 @@ PROBE_SOURCE = (
     "                'tests_run': self.tests_run, 'tests_reached': self.tests_reached}\n"
     "\n"
     "\n"
-    "def probe(test_source, criterion_bundle, module_name, *, timeout=60.0, interpreter=None):\n"
+    "def probe(test_source, criterion_bundle, module_name, *, timeout=60.0,\n"
+    "          interpreter=None, assets=None):\n"
     "    return _Report()\n"
 )
 
-TEST_BODY = "def test_ok():\n    assert True\n"
+REPLY_BODY = "def test_placeholder():\n    assert True\n"
+
+
+def field(value, name):
+    return value[name] if isinstance(value, dict) else getattr(value, name)
+
+
+def _plant_probe(repo_root):
+    probe_dir = repo_root / "gen" / "test-probe"
+    probe_dir.mkdir(parents=True, exist_ok=True)
+    (probe_dir / "test_probe.py").write_text(PROBE_STAND_IN, encoding="utf-8")
 
 
 def _make_backend(prompts):
     def backend(prompt, model, **params):
         prompts.append(prompt)
-        n = re.findall(r"-----BEGIN FILE ([0-9a-f]{32})-----", prompt)[-1]
-        text = "-----BEGIN FILE " + n + "-----\n" + TEST_BODY + "\n-----END FILE " + n + "-----"
-        return {"text": text, "model": model, "backend": "mock", "model_call_error": None}
+        nonce = re.findall(r"-----BEGIN FILE ([0-9a-f]{32})-----", prompt)[-1]
+        text = (
+            "-----BEGIN FILE " + nonce + "-----\n"
+            + REPLY_BODY
+            + "\n-----END FILE " + nonce + "-----"
+        )
+        return {
+            "text": text,
+            "model": model,
+            "backend": "mock",
+            "model_call_error": None,
+        }
 
     return backend
 
 
-def _setup_repo(repo_root, monkeypatch):
-    repo_root.mkdir(parents=True, exist_ok=True)
-    probe_dir = repo_root / "gen" / "test-probe"
-    probe_dir.mkdir(parents=True, exist_ok=True)
-    (probe_dir / "test_probe.py").write_text(PROBE_SOURCE, encoding="utf-8")
+def _run(tmp_path, monkeypatch, name, bundle):
+    repo_root = tmp_path / name
+    repo_root.mkdir()
+    _plant_probe(repo_root)
     monkeypatch.chdir(repo_root)
     monkeypatch.delenv("VAR_CACHE_STORE_URL", raising=False)
-
-
-def _bundle(component_id, criterion_id, module_names):
-    return {
-        "component_id": component_id,
-        "criterion_id": criterion_id,
-        "covers": criterion_id.replace("AC-", "R-", 1),
-        "criterion_text": "Given an input\nWhen it is processed\nThen the output is correct",
-        "requirement_text": "The component MUST process input correctly.",
-        "interface": "process(text: str) -> str",
-        "glossary": "",
-        "dependency_interfaces": {},
-        "module_names": module_names,
-    }
-
-
-def test_module_names_replace_derived_import(tmp_path, monkeypatch):
-    repo_root = tmp_path / "scenario_a"
-    _setup_repo(repo_root, monkeypatch)
     prompts = []
-    bundle = _bundle("capabilities/P-SLUGS", "AC-SLUGS-001", ["slugify", "url_tools"])
     test_author.author_test(
         bundle, "mock", 0, repo_root=repo_root, llm_backend=_make_backend(prompts)
     )
-    assert prompts, "author_test never called the model backend"
+    assert prompts, "the mock model was never called, so no prompt was observed"
+    return prompts
+
+
+def test_module_names_replace_derived_import(tmp_path, monkeypatch):
+    bundle = {
+        "component_id": "capabilities/P-SLUGS",
+        "criterion_id": "AC-SLUGS-001",
+        "covers": "R-SLUGS-001",
+        "criterion_text": "Given a title When it is slugged Then the slug is lowercase",
+        "requirement_text": "R-SLUGS-001: slugs are lowercase.",
+        "interface": "slugify(text: str) -> str\njoin_url(base: str, slug: str) -> str",
+        "glossary": "",
+        "dependency_interfaces": {},
+        "module_names": ["slugify", "url_tools"],
+    }
+    prompts = _run(tmp_path, monkeypatch, "scenario_one", bundle)
     for prompt in prompts:
         assert "import slugify" in prompt
         assert "import url_tools" in prompt
@@ -73,13 +88,17 @@ def test_module_names_replace_derived_import(tmp_path, monkeypatch):
 
 
 def test_empty_module_names_uses_derived_name(tmp_path, monkeypatch):
-    repo_root = tmp_path / "scenario_b"
-    _setup_repo(repo_root, monkeypatch)
-    prompts = []
-    bundle = _bundle("comp-semver", "AC-SEMVER-001", [])
-    test_author.author_test(
-        bundle, "mock", 0, repo_root=repo_root, llm_backend=_make_backend(prompts)
-    )
-    assert prompts, "author_test never called the model backend"
+    bundle = {
+        "component_id": "comp-semver",
+        "criterion_id": "AC-SEMVER-001",
+        "covers": "R-SEMVER-001",
+        "criterion_text": "Given two versions When compared Then the higher one wins",
+        "requirement_text": "R-SEMVER-001: versions compare numerically.",
+        "interface": "compare(a: str, b: str) -> int",
+        "glossary": "",
+        "dependency_interfaces": {},
+        "module_names": [],
+    }
+    prompts = _run(tmp_path, monkeypatch, "scenario_two", bundle)
     for prompt in prompts:
         assert "import semver" in prompt

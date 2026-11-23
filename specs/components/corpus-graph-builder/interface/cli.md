@@ -4,8 +4,8 @@
 hotdocs corpus-graph build [--repo-root=<dir>]
 ```
 
-`main` receives the tokens from `build` on: `main(["build",
-"--repo-root=/x"])`. `--repo-root <dir>` is accepted too; the default is
+`main` receives the tokens from `build` on, such as the list
+`["build", "--repo-root=/x"]`. `--repo-root <dir>` is accepted too; the default is
 the current directory. On success it writes the file and prints its
 path.
 

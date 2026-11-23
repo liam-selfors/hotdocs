@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:896f45228300dbb95afec603ebba0b4fa1138811287c76851e26014cbf2f1faf
+# hotdocs-criterion: sha256:632cccf2c2e733fb0f8bc74635af78b32763d7b97dacc158cce271f7052be164
 import test_probe
 
 
@@ -31,25 +31,13 @@ def test_undefined_name_is_the_only_finding():
     assert field(finding, "message") == "undefined name 'tmp_dir'"
 
 
-def test_unused_import_gives_no_finding():
+def test_unused_import_gives_no_finding_and_no_stub_run():
     report = test_probe.probe(SOURCE, {}, "slugify")
+
     findings = field(report, "findings")
     kinds = [field(f, "kind") for f in findings]
     assert kinds == ["undefined_name"]
-    messages = [field(f, "message") for f in findings]
-    assert not any("os" in m and "imported" in m for m in messages)
+    assert all("os" not in field(f, "message") for f in findings)
 
-
-def test_to_dict_agrees():
-    report = test_probe.probe(SOURCE, {}, "slugify")
-    if hasattr(report, "to_dict"):
-        d = report.to_dict()
-        assert d["ok"] is False
-        assert d["findings"] == [
-            {
-                "kind": "undefined_name",
-                "severity": "error",
-                "line": 5,
-                "message": "undefined name 'tmp_dir'",
-            }
-        ]
+    assert field(report, "tests_run") == 0
+    assert field(report, "tests_reached") == 0

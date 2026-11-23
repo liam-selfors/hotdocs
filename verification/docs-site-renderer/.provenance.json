@@ -1,5 +1,5 @@
 {
-  "spec_bundle_hash": "sha256:3a79910e7380f9acfefe3f4b00fe8d3bd4d26d3c5c58864ee2f19bc24621de52",
+  "spec_bundle_hash": "sha256:efcab5c93922f107aa1d67305d7337ae1ab5403e3007a45b5b74d9561d1b921a",
   "model_pin": "claude-opus-5-5",
   "prompt_version": "v12",
   "retry_feedback": null,
@@ -23,7 +23,7 @@
     "generator": "generator@3.2.0+v12"
   },
   "provenance_hit": false,
-  "generated_at": "2026-11-23T07:18:19Z",
+  "generated_at": "2026-11-23T20:12:08Z",
   "verification_run_id": "docs-site-renderer-attempt-1",
   "verification_report": {
     "component_id": "comp-docs-site-renderer",
@@ -68,13 +68,7 @@
         "id": "AC-DOCS-007",
         "covers": "R-DOCS-007",
         "kind": "generated-test",
-        "result": "pass",
-        "test_authoring": {
-          "model": "claude-opus-5-5",
-          "seed": 1,
-          "prompt_version": "v1",
-          "cache_hit": false
-        }
+        "result": "pass"
       },
       {
         "id": "AC-DOCS-008",
@@ -113,7 +107,7 @@
       "R-DOCS-009": "pass"
     },
     "interface_drift": false,
-    "mutation_score": 0.8604651162790697,
+    "mutation_score": 0.875,
     "mutation_error": null,
     "assets": [
       {
@@ -122,7 +116,7 @@
         "definition_sha256": "sha256:53cb9d111b695cf184eb6fdc9c34e8cee514bab938f634dc993257e0163eb8b1",
         "adapter_sha256": "sha256:801043604808d3099fb5da7f57427ec21eecae06ae5a6adee2854de955e1db13",
         "versions": {
-          "python": "3.14.6",
+          "python": "3.14.10",
           "packages": "sha256:fe2bf6523d4c9a1d7aad652c8447381630e076eb89d6267771e208c003c2d83b"
         },
         "lockfile_sha256": null
@@ -133,7 +127,7 @@
         "definition_sha256": "sha256:d2f09824acce8d89c52a8aca03208100bf2394ead1badbcf74f9579121e57e24",
         "adapter_sha256": "sha256:0dcef0425f8f30ed8a6c3a848b365a03fc45655de4bc3b2c6dd79cda3801bd37",
         "versions": {
-          "node": "26.0.0"
+          "node": "26.13.1"
         },
         "lockfile_sha256": null
       }
@@ -362,7 +356,7 @@
       "definition_sha256": "sha256:53cb9d111b695cf184eb6fdc9c34e8cee514bab938f634dc993257e0163eb8b1",
       "adapter_sha256": "sha256:801043604808d3099fb5da7f57427ec21eecae06ae5a6adee2854de955e1db13",
       "versions": {
-        "python": "3.14.6",
+        "python": "3.14.10",
         "packages": "sha256:fe2bf6523d4c9a1d7aad652c8447381630e076eb89d6267771e208c003c2d83b"
       },
       "lockfile_sha256": null
@@ -373,7 +367,7 @@
       "definition_sha256": "sha256:d2f09824acce8d89c52a8aca03208100bf2394ead1badbcf74f9579121e57e24",
       "adapter_sha256": "sha256:0dcef0425f8f30ed8a6c3a848b365a03fc45655de4bc3b2c6dd79cda3801bd37",
       "versions": {
-        "node": "26.0.0"
+        "node": "26.13.1"
       },
       "lockfile_sha256": null
     }

@@ -19,9 +19,10 @@ From PyPI, as an isolated command-line tool:
 pipx install --pip-args=--pre hotdocs     # or: uv tool install --prerelease=allow hotdocs
 ```
 
-Releases are alpha pre-releases for now, which pip skips unless asked.
+Releases are alpha pre-releases for now. Once a stable release exists, pip
+and uv skip pre-releases unless asked, as these commands do.
 
-With Homebrew, from the tap: `brew install <owner>/hotdocs/hotdocs`
+With Homebrew, from the tap: `brew install liam-selfors/hotdocs/hotdocs`
 (`packaging/homebrew/hotdocs.rb`). Either way the tool's own components
 ship inside the package, read-only, and every project uses them from there.
 This guide, `AUTHORING.md` and `agent-skills/` ship there too: `hotdocs

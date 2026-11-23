@@ -72,3 +72,6 @@ None.
 - `D344`: `R-PROBE-008`, `AC-PROBE-009`: `probe` takes the `interpreter`
   the `python` adapter's `provision` reports, for the stub run and import
   resolution; `test-probe@1.3.0`.
+- `D369`: `R-PROBE-005`, `R-PROBE-007`, `AC-PROBE-008`: `probe` takes
+  the declared `assets`; an undeclared `asset_runner` path is a
+  `test_bug`; `test-probe@1.4.0`.

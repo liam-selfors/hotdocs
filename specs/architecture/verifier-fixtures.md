@@ -110,7 +110,9 @@ mutation run. The plugin defines the function-scoped fixture
 equals it, it loads the module at `adapter` with
 `importlib.util.spec_from_file_location` and returns
 `module.asset_runner(Path(file))`; any other `path` raises
-`KeyError(path)`. It reads `HOTDOCS_ASSETS` when the fixture is
+`KeyError` with the message
+`asset_runner: <repr of path> is not a declared asset (declared: <each
+entry's path, joined by ", ", or none>)` (`D369`). It reads `HOTDOCS_ASSETS` when the fixture is
 requested, and imports nothing from `hotdocs`.
 
 **A fake kind.** A test concerning assets plants a kind needing no

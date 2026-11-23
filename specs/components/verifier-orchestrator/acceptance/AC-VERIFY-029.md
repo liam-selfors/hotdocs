@@ -10,4 +10,9 @@ Given comp-qux declaring assets: [fake:data/table.txt] with the fake
   asset_runner("data/other.txt") raises KeyError
 When verify runs
 Then that criterion is pass
+
+Given the same, and a test-probe stand-in that records each call's
+  keyword arguments and returns ok True
+When verify runs
+Then every recorded call has assets ["data/table.txt"]
 ```

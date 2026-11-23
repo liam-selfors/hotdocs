@@ -93,7 +93,8 @@ every verb a `--help`, added `hotdocs capability new`, put `/dist/` in
 a new project's `.gitignore`, and made the two page builders name
 `hotdocs corpus-graph build` when the graph is missing. `D367` put the
 documents the guides cite into the package, and `D368` made `hotdocs
-verify` say why a capability is not passing. These remain.
+verify` say why a capability is not passing. `D369` (issue #21) made an
+undeclared `asset_runner` path a test bug the probe catches. These remain.
 
 - **`hotdocs lint` does not look for a declared asset's interface
   file.** `interface/assets/<file name>.md` is required
@@ -120,6 +121,20 @@ verify` say why a capability is not passing. These remain.
   that `--help` and `-h` print the usage line on stdout with exit code
   0; every CLI component implements that document (26 regenerations),
   so the change waits for a full wave.
+- **`asset_runner` could accept `gen/<slug>/<path>`.** Test authors
+  reach for the repository path of a declared asset (issue #21). `D369`
+  makes that a `test_bug` the probe catches and the author repairs;
+  accepting it as the same asset changes the fixture contract in
+  `specs/architecture/asset-kinds.md`, which twelve components
+  implement, so it waits for a full wave.
+- **The drift check reads an example call in `cli.md` as a signature.**
+  The `verifier-orchestrator` regenerated for `D369` takes the first
+  `main(...)` in `interface/cli.md` as `main`'s parameter list, so an
+  example call such as `main(["build"])` drifts against `main(argv)`.
+  `R-VERIFY-004` does not say how `cli.md` documents a callable; it
+  should say that `cli.md` documents only that `main` exists, and
+  `library.md` its signature. `corpus-graph-builder`'s `cli.md` was the
+  one such example and was reworded.
 - **Smaller.** Generated test files end without a newline.
   `hotdocs verify --no-model` describes a component never generated as
   needing a fresh run with a model, when it needs `hotdocs generate`.

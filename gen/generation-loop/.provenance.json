@@ -1,5 +1,5 @@
 {
-  "spec_bundle_hash": "sha256:b91610fe94764d21a99b52c08f602a6dd2be15682ca519661d2f1c6fcbb3189e",
+  "spec_bundle_hash": "sha256:40d1cefdcce5f6341f49a86b2d6be3344a7fdf1fd8acc91158b0fec34c107e1b",
   "model_pin": "claude-opus-5-5",
   "prompt_version": "v12",
   "retry_feedback": null,
@@ -23,7 +23,7 @@
     "generator": "generator@3.2.0+v12"
   },
   "provenance_hit": false,
-  "generated_at": "2026-11-23T06:28:08Z",
+  "generated_at": "2026-11-23T19:20:18Z",
   "verification_run_id": "generation-loop-attempt-1",
   "verification_report": {
     "component_id": "comp-generation-loop",
@@ -93,7 +93,7 @@
       "R-LOOP-007": "pass"
     },
     "interface_drift": false,
-    "mutation_score": 0.8870967741935484,
+    "mutation_score": 0.8813559322033898,
     "mutation_error": null,
     "assets": [
       {
@@ -102,7 +102,7 @@
         "definition_sha256": "sha256:53cb9d111b695cf184eb6fdc9c34e8cee514bab938f634dc993257e0163eb8b1",
         "adapter_sha256": "sha256:801043604808d3099fb5da7f57427ec21eecae06ae5a6adee2854de955e1db13",
         "versions": {
-          "python": "3.14.6",
+          "python": "3.14.10",
           "packages": "sha256:fe2bf6523d4c9a1d7aad652c8447381630e076eb89d6267771e208c003c2d83b"
         },
         "lockfile_sha256": null
@@ -332,7 +332,7 @@
       "definition_sha256": "sha256:53cb9d111b695cf184eb6fdc9c34e8cee514bab938f634dc993257e0163eb8b1",
       "adapter_sha256": "sha256:801043604808d3099fb5da7f57427ec21eecae06ae5a6adee2854de955e1db13",
       "versions": {
-        "python": "3.14.6",
+        "python": "3.14.10",
         "packages": "sha256:fe2bf6523d4c9a1d7aad652c8447381630e076eb89d6267771e208c003c2d83b"
       },
       "lockfile_sha256": null
