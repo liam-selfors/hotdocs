@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:fda7a6bbf43f3c555881506a72512435f4843e2c58bfb3360fc7285e5a56e793
+# hotdocs-criterion: sha256:20a7815958c93ea2b90c243616e09c86d29e270579445231d5decda3241bacf6
 import subprocess
 from pathlib import Path
 
@@ -12,7 +12,13 @@ def field(value, name):
 
 def git(repo_root, *args):
     result = subprocess.run(
-        ["git", "-c", "commit.gpgsign=false", *args],
+        [
+            "git",
+            "-c", "user.name=Test User",
+            "-c", "user.email=test@example.invalid",
+            "-c", "commit.gpgsign=false",
+            *args,
+        ],
         cwd=str(repo_root),
         check=True,
         capture_output=True,
@@ -40,7 +46,7 @@ def frontmatter_lines(path):
     for line in lines[1:]:
         if line.strip() == "---":
             break
-        out.append(line.strip())
+        out.append(line)
     return out
 
 
@@ -48,100 +54,85 @@ def test_cs_decision_integrity_001(tmp_path):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
     git(repo_root, "init", "-q")
-    git(repo_root, "config", "user.name", "Test User")
-    git(repo_root, "config", "user.email", "test@example.invalid")
-    git(repo_root, "config", "commit.gpgsign", "false")
-
     (repo_root / "specs" / "decisions").mkdir(parents=True)
-    write(repo_root / "README.md", "fixture repo\n")
+    write(repo_root / "README.md", "fixture\n")
     commit_all(repo_root, "initial")
 
-    # The earlier decision: created, ratified, committed, commit recorded.
-    earlier_path = spec_scaffolder.new_decision(
-        repo_root, "Earlier decision", owners=["team-a"]
-    )
-    earlier_id = Path(earlier_path).stem
-    spec_scaffolder.ratify(repo_root, earlier_id)
-    commit_all(repo_root, "ratify " + earlier_id)
-    spec_scaffolder.record_commit(repo_root, earlier_id)
-    commit_all(repo_root, "record commit for " + earlier_id)
+    # Earlier decision D1, ratified and its ratifying commit recorded.
+    d1_path = spec_scaffolder.new_decision(repo_root, "Earlier decision", owners=["team-a"])
+    d1_id = Path(d1_path).stem
+    commit_all(repo_root, "add " + d1_id)
+    spec_scaffolder.ratify(repo_root, d1_id)
+    commit_all(repo_root, "ratify " + d1_id)
+    spec_scaffolder.record_commit(repo_root, d1_id)
+    commit_all(repo_root, "record " + d1_id + " commit")
 
-    # A live spec file citing the earlier decision, committed before the
-    # superseding decision exists or is ratified.
+    # A live spec file citing D1, last touched before the superseder exists.
     comp_dir = repo_root / "specs" / "components" / "foo"
     write(
         comp_dir / "component.md",
         "---\n"
-        + "id: comp-foo\n"
-        + "title: Foo\n"
-        + "status: ratified\n"
-        + "last_ratified_commit: 0000000\n"
-        + "owners: [team-a]\n"
-        + "sealed: true\n"
-        + "source_path: legacy/foo/\n"
-        + "---\n\n"
-        + "# Foo\n\n"
-        + "A small fixture component.\n",
+        "id: comp-foo\n"
+        "title: Foo\n"
+        "status: draft\n"
+        "owners: [team-a]\n"
+        "sealed: true\n"
+        "source_path: legacy/foo/\n"
+        "---\n"
+        "\n"
+        "# Foo\n"
+        "\n"
+        "A fixture component.\n",
     )
-    citing_rel = "specs/components/foo/requirements/R-FOO-001.md"
+    req_rel = "specs/components/foo/requirements/R-FOO-001.md"
     write(
-        repo_root / citing_rel,
-        "# R-FOO-001: Foo does the thing\n\n"
-        + "Foo does the thing, following `" + earlier_id + "`.\n",
+        repo_root / req_rel,
+        "# R-FOO-001\n"
+        "\n"
+        "Foo follows the conclusion of `" + d1_id + "`.\n",
     )
     write(
         comp_dir / "acceptance" / "AC-FOO-001.md",
-        "# AC-FOO-001\n\n"
-        + "Covers: R-FOO-001\n\n"
-        + "Given foo, when it runs, then it does the thing.\n",
+        "# AC-FOO-001\n"
+        "\n"
+        "Covers: R-FOO-001\n"
+        "\n"
+        "Given foo, when it runs, then it behaves.\n",
     )
-    file_commit = commit_all(repo_root, "add foo citing " + earlier_id)
+    file_commit = commit_all(repo_root, "add foo citing " + d1_id)
 
-    # The later, superseding decision: created, ratified, committed after.
-    later_path = spec_scaffolder.new_decision(
-        repo_root, "Later decision", owners=["team-a"], supersedes=earlier_id
+    # Later decision D2 superseding D1, ratified afterwards.
+    d2_path = spec_scaffolder.new_decision(
+        repo_root, "Superseding decision", owners=["team-a"], supersedes=d1_id
     )
-    later_id = Path(later_path).stem
-    assert later_id != earlier_id
-    later_abs = Path(later_path)
-    if not later_abs.is_absolute():
-        later_abs = repo_root / later_abs
-    lines = frontmatter_lines(later_abs)
-    assert ("supersedes: " + earlier_id) in lines
-    assert not any(l.startswith("supersedes: [") for l in lines)
+    d2_id = Path(d2_path).stem
+    assert d2_id != d1_id
+    commit_all(repo_root, "add " + d2_id)
+    spec_scaffolder.ratify(repo_root, d2_id)
+    commit_all(repo_root, "ratify " + d2_id)
+    spec_scaffolder.record_commit(repo_root, d2_id)
+    commit_all(repo_root, "record " + d2_id + " commit")
 
-    spec_scaffolder.ratify(repo_root, later_id)
-    ratify_commit = commit_all(repo_root, "ratify " + later_id)
-    spec_scaffolder.record_commit(repo_root, later_id)
-    commit_all(repo_root, "record commit for " + later_id)
+    # Precondition: the superseding record holds the scalar supersedes line.
+    d2_file = repo_root / "specs" / "decisions" / (d2_id + ".md")
+    fm = [line.strip() for line in frontmatter_lines(d2_file)]
+    assert ("supersedes: " + d1_id) in fm
 
-    # Sanity: the citing file's last commit is a strict ancestor of the
-    # superseding decision's ratification commit.
-    assert file_commit != ratify_commit
-    subprocess.run(
-        ["git", "merge-base", "--is-ancestor", file_commit, ratify_commit],
-        cwd=str(repo_root),
-        check=True,
-    )
+    # The cited file was last touched by file_commit, before D2's ratification.
+    last_touch = git(repo_root, "log", "-1", "--format=%H", "--", req_rel)
+    assert last_touch == file_commit
 
     report = decision_drift_detector.find_decision_drift(repo_root)
-    entries = list(field(report, "entries"))
+    entries = field(report, "entries")
 
-    def matches(entry):
-        file_value = Path(str(field(entry, "file")))
-        if file_value.is_absolute():
-            try:
-                file_value = file_value.resolve().relative_to(repo_root.resolve())
-            except ValueError:
-                return False
-        return (
-            file_value.as_posix() == citing_rel
-            and str(field(entry, "cited_decision")) == earlier_id
-        )
+    pairs = []
+    for entry in entries:
+        entry_file = str(field(entry, "file")).replace("\\", "/")
+        pairs.append((entry_file, field(entry, "cited_decision")))
 
-    assert any(matches(e) for e in entries), (
-        "expected drift entry for "
-        + repr((citing_rel, earlier_id))
-        + " in "
-        + repr(entries)
-    )
+    matching = [
+        (f, d)
+        for (f, d) in pairs
+        if d == d1_id and (f == req_rel or f.endswith("/" + req_rel) or f.endswith(req_rel))
+    ]
+    assert matching, "expected " + repr((req_rel, d1_id)) + " in drift report, got " + repr(pairs)
