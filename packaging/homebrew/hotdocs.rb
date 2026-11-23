@@ -1,27 +1,31 @@
-# Homebrew formula for a personal tap (D358), e.g. the repository
-# <owner>/homebrew-hotdocs, installed with
+# Homebrew formula for the personal tap (D358), the repository
+# liam-selfors/homebrew-hotdocs, installed with
 #
-#   brew install <owner>/hotdocs/hotdocs
+#   brew install liam-selfors/hotdocs/hotdocs
 #
-# It installs the PyPI wheel and its pinned dependencies into a private
-# virtual environment. Dependencies are installed from wheels, not built
-# from source (DuckDB's source build is impractical), so this formula suits
-# a personal tap, not homebrew-core. After each PyPI release, set `url` and
-# `sha256` to that release's sdist (`shasum -a 256 hotdocs-<v>.tar.gz`).
+# This is the tap's formula; change both together.
+# It installs the downloaded sdist, whose checksum is pinned below, and its
+# pinned dependencies from PyPI into a private virtual environment.
+# Dependencies are installed from wheels, not built from source (DuckDB's
+# source build is impractical), so this formula suits a personal tap, not
+# homebrew-core. After each PyPI release, set `url` to the sdist URL that
+# PyPI lists for it (https://pypi.org/pypi/hotdocs/<v>/json, `brew audit`
+# rejects the short /packages/source/ form) and `sha256` to that file's
+# (`shasum -a 256 hotdocs-<v>.tar.gz`).
 class Hotdocs < Formula
   desc "Spec-driven agentic development: specs in, verified code out"
   homepage "https://github.com/liam-selfors/hotdocs"
-  url "https://files.pythonhosted.org/packages/source/h/hotdocs/hotdocs-0.1.0a1.tar.gz"
-  sha256 "REPLACE_WITH_THE_RELEASED_SDIST_SHA256"
+  url "https://files.pythonhosted.org/packages/21/85/9c4b3d75d5ccc024f85d59deb542377efa3e152fb5d1a5b89837bde86913/hotdocs-0.1.0a1.tar.gz"
+  sha256 "42f9ee2deeab2e64b8e622a0cfe108d83b81b88798c850e677e85f505ada5959"
   license "Apache-2.0"
 
   depends_on "python@3.14"
   depends_on "node" => :recommended # only for components with javascript assets
 
   def install
-    python = Formula["python@3.14"].opt_bin/"python3.14"
+    python = formula_opt_bin("python@3.14")/"python3.14"
     system python, "-m", "venv", libexec
-    system libexec/"bin/pip", "install", "--no-cache-dir", "hotdocs==#{version}"
+    system libexec/"bin/pip", "install", "--no-cache-dir", buildpath
     bin.install_symlink libexec/"bin/hotdocs"
   end
 
