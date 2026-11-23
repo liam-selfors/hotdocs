@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:484ee667e541281b2830e5c7f493d187b5d1b661433e79252f9ca89360fd2179
+# hotdocs-criterion: sha256:efcc3b02ca833a536c95191e1f764400b4d58a71e735ca8f6eaeb99409363c58
 import importlib
 import json
 from pathlib import Path
@@ -6,12 +6,15 @@ from pathlib import Path
 import docs_site_renderer
 
 
-def _cli_main():
+def _main():
     try:
         cli = importlib.import_module("docs_site_renderer.cli")
-        return cli.main
-    except Exception:
-        return docs_site_renderer.main
+        fn = getattr(cli, "main", None)
+        if fn is not None:
+            return fn
+    except ImportError:
+        pass
+    return docs_site_renderer.main
 
 
 def _valid_graph():
@@ -23,11 +26,12 @@ def _valid_graph():
                 "verification": None,
                 "provenance": None,
                 "size_status": "ok",
-                "sealed": True,
+                "sealed": False,
                 "pinned_overrides": [],
                 "owners": ["pipeline-team"],
                 "documents": {
-                    "component.md": "---\nid: comp-foo\ntitle: Foo\nstatus: draft\nowners: [pipeline-team]\n---\n\n# Foo\n",
+                    "component.md": "# Foo\n\nThe foo component.\n",
+                    "requirements/R-FOO-001.md": "**R-FOO-001** - foo MUST work.\n",
                 },
             },
             "comp-bar": {
@@ -35,10 +39,10 @@ def _valid_graph():
                 "verification": None,
                 "provenance": None,
                 "size_status": "unknown",
-                "sealed": False,
+                "sealed": True,
                 "pinned_overrides": [],
                 "owners": [],
-                "documents": {},
+                "documents": {"component.md": "# Bar\n"},
             },
             "VAR-FOO-URL": {"type": "var"},
         },
@@ -55,44 +59,69 @@ def _valid_graph():
     }
 
 
-def test_valid_graph_renders_site_and_returns_0(tmp_path, monkeypatch):
+def test_valid_graph_renders_and_returns_0(tmp_path):
     repo_root = tmp_path / "repo"
     (repo_root / "verification").mkdir(parents=True)
-    graph_bytes = json.dumps(_valid_graph(), sort_keys=True, indent=2, ensure_ascii=True) + "\n"
-    (repo_root / "verification" / "corpus-graph.json").write_text(graph_bytes, encoding="utf-8")
+    graph_text = json.dumps(_valid_graph(), sort_keys=True, indent=2, ensure_ascii=True) + "\n"
+    (repo_root / "verification" / "corpus-graph.json").write_text(graph_text, encoding="utf-8")
     out = tmp_path / "out"
-    monkeypatch.chdir(tmp_path)
+    out.mkdir()
 
-    main = _cli_main()
-    code = main(["--repo-root=" + str(repo_root), "--out=" + str(out)])
+    rc = _main()(["--repo-root=" + str(repo_root), "--out=" + str(out)])
 
-    assert code == 0
-    assert out.is_dir()
-    index = out / "index.html"
-    assert index.is_file()
-    text = index.read_text(encoding="utf-8")
-    assert text.strip() != ""
-    assert "comp-foo" in text
+    assert rc == 0
+    assert (out / "index.html").is_file()
+    assert (out / "index.html").read_text(encoding="utf-8").strip() != ""
 
 
-def test_missing_corpus_graph_returns_1(tmp_path, monkeypatch):
+def test_missing_graph_returns_1_with_one_error_line(tmp_path, capsys):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    out = tmp_path / "out"
+
+    capsys.readouterr()
+    rc = _main()(["--repo-root=" + str(repo_root), "--out=" + str(out)])
+    captured = capsys.readouterr()
+
+    assert rc == 1
+    text = captured.err
+    if text.endswith("\n"):
+        text = text[:-1]
+    lines = text.split("\n")
+    assert len(lines) == 1, repr(captured.err)
+    line = lines[0]
+    assert line.startswith("error: ")
+    assert line.endswith(
+        "verification/corpus-graph.json is missing; run hotdocs corpus-graph build first"
+    )
+
+
+def test_missing_graph_default_out_returns_1(tmp_path, capsys, monkeypatch):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
     monkeypatch.chdir(tmp_path)
 
-    main = _cli_main()
-    code = main(["--repo-root=" + str(repo_root)])
+    capsys.readouterr()
+    rc = _main()(["--repo-root=" + str(repo_root)])
+    captured = capsys.readouterr()
 
-    assert code == 1
+    assert rc == 1
+    text = captured.err
+    if text.endswith("\n"):
+        text = text[:-1]
+    lines = text.split("\n")
+    assert len(lines) == 1, repr(captured.err)
+    assert lines[0].startswith("error: ")
+    assert lines[0].endswith(
+        "verification/corpus-graph.json is missing; run hotdocs corpus-graph build first"
+    )
 
 
 def test_unknown_flag_returns_2(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
-    main = _cli_main()
-    assert main(["--bogus"]) == 2
+    assert _main()(["--bogus"]) == 2
 
 
 def test_flag_without_value_returns_2(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
-    main = _cli_main()
-    assert main(["--out"]) == 2
+    assert _main()(["--out"]) == 2
