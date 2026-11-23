@@ -24,6 +24,10 @@ With Homebrew, from the tap: `brew install <owner>/hotdocs/hotdocs`
 ship inside the package, read-only, and every project uses them from there.
 This guide, `AUTHORING.md` and `agent-skills/` ship there too: `hotdocs
 init` ends by printing this guide's path, and the other two sit beside it.
+So do the documents they refer to that a project has no copy of
+(`SPEC_GUIDELINES.md`, and under `specs/architecture/` the asset-kind
+documents, `step-phrase-grammar.md` and `cli-conventions.md`), at those
+paths from this guide's directory.
 
 To work on hotdocs itself, install a checkout instead:
 
@@ -213,8 +217,8 @@ layout, environment, how criteria call it, how its tests are
 strength-checked, and guidance for the model) and an adapter component,
 `comp-kind-<kind>`, that the pipeline runs. The built-in kinds are
 `python` and `javascript` (one ES module of pure functions over JSON
-values, run in Node 24 or newer); their definitions are in the hotdocs
-repository, not in a project. A criterion calls an exported function
+values, run in Node 24 or newer); their definitions ship with the tool,
+beside this guide, not in a project. A criterion calls an exported function
 through the `asset_runner` fixture, and its tests are mutation-tested on
 the JavaScript itself. Never hide another language inside Python strings:
 declare it as an asset. An undeclared kind fails `hotdocs lint`.

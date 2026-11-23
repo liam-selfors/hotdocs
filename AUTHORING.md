@@ -3,7 +3,9 @@
 `QUICKSTART.md` gets a component generated. This guide is about writing the
 spec so it generates *correctly the first time*, from a model that has never
 seen your codebase and cannot ask you anything. `SPEC_GUIDELINES.md` is the
-normative reference; this is the practical companion.
+normative reference; this is the practical companion. In an installed
+package, `SPEC_GUIDELINES.md` and the `specs/architecture/` documents this
+guide names for the tool's own rules sit beside it, not in your project.
 
 ## 1. Each model sees only part of your spec
 

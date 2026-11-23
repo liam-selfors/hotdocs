@@ -6,7 +6,8 @@ point, the tool root the components read by path: `gen/`, `pipeline/`,
 `examples/` and `requirements.txt`, in their checkout layout, so "the parent
 of the nearest `gen` directory" still finds it. It also holds `pyproject.toml`,
 which the components read the tool version from, and the guides a project
-gets no copy of: `QUICKSTART.md`, `AUTHORING.md` and `agent-skills/` (D360).
+gets no copy of: `QUICKSTART.md`, `AUTHORING.md` and `agent-skills/` (D360),
+with the reference documents those guides cite (D367).
 This stages a package
 
     hotdocs/__init__.py      version
@@ -34,8 +35,17 @@ import tomllib
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
+# Documents the shipped guides name, at their checkout paths (D367). Reading
+# matter only: no component reads the tool root's `specs/`.
+REFERENCE_DOCS = ("SPEC_GUIDELINES.md",
+                  "specs/architecture/asset-kinds.md",
+                  "specs/architecture/asset-kind-python.md",
+                  "specs/architecture/asset-kind-javascript.md",
+                  "specs/architecture/step-phrase-grammar.md",
+                  "specs/architecture/cli-conventions.md")
 TOOL_PARTS = ("gen", "pipeline", "examples", "requirements.txt",
-              "pyproject.toml", "QUICKSTART.md", "AUTHORING.md", "agent-skills")
+              "pyproject.toml", "QUICKSTART.md", "AUTHORING.md", "agent-skills",
+              *REFERENCE_DOCS)
 SKIP_DIRS = {"__pycache__", ".hotdocs", ".pytest_cache"}
 DOCS = ("README.md", "QUICKSTART.md", "AUTHORING.md", "LICENSE")
 

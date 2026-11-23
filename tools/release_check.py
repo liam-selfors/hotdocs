@@ -9,7 +9,8 @@ hand before every upload. It
 2. runs `twine check` on both;
 3. installs the wheel into a fresh virtual environment, then makes the
    installed `hotdocs` package read-only, since an installed tool must never
-   write to its own tool root;
+   write to its own tool root, and checks that every part `build_dist.py`
+   lists is in it;
 4. in a new git project, runs the fresh-project check with the installed
    command: `hotdocs init --example`, `lint`, `spec check`, `generate
    comp-slugify` (single mode, and agentic mode with `--agentic`), and
@@ -34,6 +35,8 @@ import tempfile
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(REPO / "tools"))
+from build_dist import TOOL_PARTS  # noqa: E402
 
 
 def _run(label: str, cmd: list[str], cwd: Path, expect_out: str | None = None, env=None) -> bool:
@@ -80,6 +83,10 @@ def main(argv=None) -> int:
     if not pkg.is_dir():
         print("FAIL the installed package was not found")
         return 1
+    absent = [part for part in TOOL_PARTS if not (pkg / "_tool" / part).exists()]
+    print(f"{'ok  ' if not absent else 'FAIL'} the installed tool root holds every listed part"
+          + (f": missing {', '.join(absent)}" if absent else ""))
+    results.append(not absent)
     # pip writes bytecode at install time; anything new after this point
     # would be the tool writing into its own tool root.
     before = {p for p in pkg.rglob("*")}
