@@ -11,6 +11,13 @@
              "proposed_text": "<text>", "target_file": "<path>"}]}
   ```
 
+  The prompt MUST also hold this sentence, exactly and on one line
+  (`D361`):
+
+  ```
+  The pipeline fixes the test framework (pytest), the test file's name and location, and how the test reaches the component's code: never report any of these as a gap.
+  ```
+
   The reply's JSON is the text from its first `{` to its last `}`. A
   parsed object sets `writable[<criterion_id>]` and adds each gap, with
   `criterion_id` set, to `gaps`; a gap whose `kind` is neither allowed

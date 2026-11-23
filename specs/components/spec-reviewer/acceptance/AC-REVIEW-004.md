@@ -14,7 +14,10 @@ Given a lint-clean synthetic corpus with AC-FOO-001 and AC-FOO-002, and
 When check(["comp-foo"], repo_root, model="mock", llm_backend=backend)
   is called
 Then the backend's prompts that were not for the lint judge number
-  exactly two, the one holding "AC-FOO-001" does not hold "AC-FOO-002";
+  exactly two, the one holding "AC-FOO-001" does not hold "AC-FOO-002",
+  and each holds, on one line, the sentence R-REVIEW-004 gives that
+  starts "The pipeline fixes the test framework (pytest)" and ends
+  "never report any of these as a gap.";
   writable is {"AC-FOO-001": False, "AC-FOO-002": None}; gaps holds
   exactly the one unstated_behavior gap with criterion_id "AC-FOO-001";
   findings holds one model_unparseable finding for AC-FOO-002; and
