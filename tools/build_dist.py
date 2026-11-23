@@ -96,6 +96,7 @@ description = "{meta["description"]}"
 readme = "README.md"
 license = {{text = "Apache-2.0"}}
 requires-python = "{meta["requires-python"]}"
+classifiers = {_toml_list(meta.get("classifiers", []))}
 dependencies = {_toml_list(deps)}
 
 [project.scripts]

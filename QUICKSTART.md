@@ -16,8 +16,10 @@ newer is needed only if a component declares a JavaScript asset.
 From PyPI, as an isolated command-line tool:
 
 ```
-pipx install hotdocs          # or: uv tool install hotdocs
+pipx install --pip-args=--pre hotdocs     # or: uv tool install --prerelease=allow hotdocs
 ```
+
+Releases are alpha pre-releases for now, which pip skips unless asked.
 
 With Homebrew, from the tap: `brew install <owner>/hotdocs/hotdocs`
 (`packaging/homebrew/hotdocs.rb`). Either way the tool's own components
@@ -166,9 +168,10 @@ Kind: generated-test
 (a Given/When/Then in a `gherkin` block, as in an acceptance criterion)
 ```
 
-The scenario is optional. It is checked against the generated code of
-every component that realizes the capability, so `hotdocs verify` runs it
-only with a model.
+A capability needs at least one scenario: `hotdocs verify` never reports
+one without as ready, and says it `has no capability scenarios`. A
+scenario is checked against the generated code of every component that
+realizes the capability, so `hotdocs verify` runs it only with a model.
 
 Run `hotdocs lint` after every change, and `hotdocs spec check
 comp-<name>` before generating. The most useful habit: state concrete
@@ -223,9 +226,11 @@ through the `asset_runner` fixture, and its tests are mutation-tested on
 the JavaScript itself. Never hide another language inside Python strings:
 declare it as an asset. An undeclared kind fails `hotdocs lint`.
 
-To add a kind, `hotdocs kind new <kind>` lays out its definition, its
-adapter component and a draft decision; the `hotdocs-asset-kind` skill in
-`agent-skills/` walks an agent through filling them in.
+To add a kind, `hotdocs kind new <kind> --realizes=P-<CAPABILITY>` lays
+out its definition, its adapter component and a draft decision; as with
+`component new`, without `--realizes` the adapter fails `hotdocs lint`. The
+`hotdocs-asset-kind` skill in `agent-skills/` walks an agent through
+filling them in.
 
 **The Python environment.** By default a project's code runs in the
 environment `hotdocs` runs in. To give it its own, commit
@@ -277,6 +282,8 @@ that reads files relative to the current directory is the usual cause.
 
 `hotdocs verify` without `--model` reports every component and lists a
 capability that needs a fresh run as `needs a fresh run; pass --model`.
+With a model, a capability that does not pass is listed with the ids of
+its failed scenarios, or as having none.
 
 ## 7. Known limits
 
