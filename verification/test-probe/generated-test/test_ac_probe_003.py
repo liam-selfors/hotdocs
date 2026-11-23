@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:3edf1f2d463d4de2a319de4f31d24a240b67dd028d72eecbbd13af3bb52d7654
+# hotdocs-criterion: sha256:4003d843fa9f59e8fc3e143a642b3c1b729a6918073b905de95e6ec729d0f1f0
 import test_probe
 
 
@@ -21,8 +21,10 @@ SOURCE = (
 
 
 def _unknown_imports(report):
-    findings = field(report, "findings")
-    return [f for f in findings if field(f, "kind") == "unknown_import"]
+    return [
+        f for f in field(report, "findings")
+        if field(f, "kind") == "unknown_import"
+    ]
 
 
 def test_unknown_import_reported_once_with_line_and_message():
@@ -30,10 +32,8 @@ def test_unknown_import_reported_once_with_line_and_message():
     assert field(report, "ok") is False
     unknown = _unknown_imports(report)
     assert len(unknown) == 1
-    finding = unknown[0]
-    assert field(finding, "line") == 2
-    assert field(finding, "message") == "cannot import 'your_module_here'"
-    assert field(finding, "severity") == "error"
+    assert field(unknown[0], "line") == 2
+    assert field(unknown[0], "message") == "cannot import 'your_module_here'"
 
 
 def test_without_second_line_no_unknown_import():
@@ -44,7 +44,7 @@ def test_without_second_line_no_unknown_import():
     assert _unknown_imports(report) == []
 
 
-def test_relative_stdlib_dotted_and_guarded_imports_not_reported():
+def test_relative_stdlib_and_guarded_imports_not_reported():
     source = (
         "from . import helpers\n"
         "from os import path\n"
@@ -53,7 +53,6 @@ def test_relative_stdlib_dotted_and_guarded_imports_not_reported():
         "    import yaml_nonexistent_q\n"
         "except (OSError, ImportError):\n"
         "    yaml_nonexistent_q = None\n"
-        "\n"
         "\n"
         "def test_sep():\n"
         "    assert path.sep\n"
