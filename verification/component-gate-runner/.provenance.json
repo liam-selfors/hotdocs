@@ -1,5 +1,5 @@
 {
-  "spec_bundle_hash": "sha256:b0c683bedd3417b7a125d13f57bcf5480978085028116746c52f59805586c4a1",
+  "spec_bundle_hash": "sha256:7e67d1d77a5e2e6f520b9d2edce2c682e1ac390542427611e699efc22bd5ff3d",
   "model_pin": "claude-opus-5-5",
   "prompt_version": "v12",
   "retry_feedback": null,
@@ -23,7 +23,7 @@
     "generator": "generator@3.2.0+v12"
   },
   "provenance_hit": false,
-  "generated_at": "2026-11-23T12:51:12Z",
+  "generated_at": "2026-11-23T19:51:18Z",
   "verification_run_id": "component-gate-runner-attempt-1",
   "verification_report": {
     "component_id": "comp-component-gate-runner",
@@ -127,7 +127,7 @@
       "R-GATE-011": "pass"
     },
     "interface_drift": false,
-    "mutation_score": 0.9072164948453608,
+    "mutation_score": 0.8888888888888888,
     "mutation_error": null,
     "assets": [
       {
@@ -136,7 +136,7 @@
         "definition_sha256": "sha256:53cb9d111b695cf184eb6fdc9c34e8cee514bab938f634dc993257e0163eb8b1",
         "adapter_sha256": "sha256:801043604808d3099fb5da7f57427ec21eecae06ae5a6adee2854de955e1db13",
         "versions": {
-          "python": "3.14.6",
+          "python": "3.14.10",
           "packages": "sha256:fe2bf6523d4c9a1d7aad652c8447381630e076eb89d6267771e208c003c2d83b"
         },
         "lockfile_sha256": null
@@ -366,7 +366,7 @@
       "definition_sha256": "sha256:53cb9d111b695cf184eb6fdc9c34e8cee514bab938f634dc993257e0163eb8b1",
       "adapter_sha256": "sha256:801043604808d3099fb5da7f57427ec21eecae06ae5a6adee2854de955e1db13",
       "versions": {
-        "python": "3.14.6",
+        "python": "3.14.10",
         "packages": "sha256:fe2bf6523d4c9a1d7aad652c8447381630e076eb89d6267771e208c003c2d83b"
       },
       "lockfile_sha256": null
