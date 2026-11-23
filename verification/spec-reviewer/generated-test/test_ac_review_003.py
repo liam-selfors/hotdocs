@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:dd749050cdf78897393aaa3a2c6c80cbbca597c2634b92e09322653114da865f
+# hotdocs-criterion: sha256:2585d1ae85ce41d9d144e2b491f4a3cb783edf8d29ca8fe6092d8d88492aa3b8
 import importlib.util
 import sys
 from pathlib import Path
@@ -18,21 +18,21 @@ def load_module(path, module_name):
     return module
 
 
-def write(path, text):
+def _write(path, text):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
 
 
-def build_corpus(repo_root):
+def _build_corpus(repo_root):
     specs = repo_root / "specs"
-    write(
+    _write(
         specs / "glossary.md",
         "# Glossary\n"
         "\n"
-        "- **Foo** — a test term.\n",
+        "- **Foo** \u2014 a test term.\n",
     )
     comp = specs / "components" / "foo"
-    write(
+    _write(
         comp / "component.md",
         "---\n"
         "id: comp-foo\n"
@@ -50,13 +50,14 @@ def build_corpus(repo_root):
         "\n"
         "Foo doubles a number.\n",
     )
-    write(
+    _write(
         comp / "requirements" / "R-FOO-001.md",
         "# R-FOO-001\n"
         "\n"
-        "**R-FOO-001** — `foo(x)` MUST return `4` when given `--opt=<v>`.\n",
+        "**R-FOO-001** \u2014 `foo(x)` MUST return `2 * x`, so 4 for an x of 2, "
+        "and MUST honor `--opt=`.\n",
     )
-    write(
+    _write(
         comp / "acceptance" / "AC-FOO-001.md",
         "# AC-FOO-001\n"
         "\n"
@@ -70,7 +71,7 @@ def build_corpus(repo_root):
         "  and `--fast` again\n"
         "```\n",
     )
-    write(
+    _write(
         comp / "interface" / "library.md",
         "# Library\n"
         "\n"
@@ -78,7 +79,7 @@ def build_corpus(repo_root):
         "foo(x: int) -> int\n"
         "```\n",
     )
-    write(
+    _write(
         comp / "constraints.md",
         "# Constraints\n"
         "\n"
@@ -86,23 +87,20 @@ def build_corpus(repo_root):
     )
 
 
-def lint_clean(repo_root):
+def _load_spec_linter():
     gen = next(p for p in Path(spec_reviewer.__file__).resolve().parents if p.name == "gen")
     base = gen / "spec-linter"
-    path = (
-        base / "spec_linter.py"
-        if (base / "spec_linter.py").is_file()
-        else base / "spec_linter" / "__init__.py"
-    )
-    spec_linter = load_module(path, "spec_linter")
-    assert spec_linter.lint(None, repo_root).hard_failures == 0
+    path = base / "spec_linter.py" if (base / "spec_linter.py").is_file() else base / "spec_linter" / "__init__.py"
+    return load_module(path, "spec_linter")
 
 
-def test_ac_review_003_invisible_reference_reported_once(tmp_path):
+def test_ac_review_003_invisible_reference_only_for_when_then_tokens(tmp_path):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
-    build_corpus(repo_root)
-    lint_clean(repo_root)
+    _build_corpus(repo_root)
+
+    spec_linter = _load_spec_linter()
+    assert spec_linter.lint(None, repo_root).hard_failures == 0
 
     report = spec_reviewer.check(["AC-FOO-001"], repo_root)
 
