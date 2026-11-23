@@ -112,7 +112,8 @@ and `hotdocs docs-site build` (a browsable site of the specs, written to
 `dist/`). Those last two read `verification/corpus-graph.json`, so run
 `hotdocs corpus-graph build` first, and again after the specs change.
 Verbs that can use a model take the one in `hotdocs.toml`, saying so on
-stderr; `--no-model` skips it. `hotdocs` alone lists every verb.
+stderr; `--no-model` skips it. `hotdocs` alone lists every verb, and
+`hotdocs <verb> --help` prints one verb's usage.
 
 ## 4. Write your own component
 
@@ -128,10 +129,17 @@ A component is a directory of small files, as in the example
   a Given/When/Then with concrete values;
 - `constraints.md`.
 
-`hotdocs component new <name>` lays these out with `realizes: []`, which
-`hotdocs lint` rejects until it names a capability: what the product does
-for its user, one file in `specs/product/`. Write that file yourself, on
-the pattern of the example's `specs/product/slugs.md`:
+A component realizes a capability: what the product does for its user,
+one file in `specs/product/`. Lay out both:
+
+```
+hotdocs capability new slugs          # specs/product/slugs.md, id P-SLUGS
+hotdocs component new slugify --realizes=P-SLUGS
+```
+
+Without `--realizes`, `component new` writes `realizes: []`, which
+`hotdocs lint` rejects. A finished capability file looks like the
+example's `specs/product/slugs.md`:
 
 ```
 ---
@@ -281,9 +289,8 @@ capability that needs a fresh run as `needs a fresh run; pass --model`.
   verification/agentic-generator/test_live_slugify.py`.
 - `hotdocs assist` and `hotdocs impact` need a git repository; without a
   default branch or a merge-base every file counts as changed.
-- No verb takes `--help`: `hotdocs <verb> --help` prints that verb's usage
-  line after a `usage error`, with exit code 2. `hotdocs`
-  alone lists every verb with a one-line summary.
+- `hotdocs <verb> --help` prints the verb's summary and usage line, not a
+  description of each flag; this guide and `AUTHORING.md` hold those.
 - `license_scan not evaluated: no-reference-corpus` in `hotdocs
   generate`'s output is expected in a new project: the license scan
   compares generated code with a reference corpus of licensed code, and
