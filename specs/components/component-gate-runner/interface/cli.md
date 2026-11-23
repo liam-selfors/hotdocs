@@ -30,7 +30,8 @@ next argument.
   `reverified` (`R-GATE-011`) or the `block_reason` (`passed` when not blocked), one line per attempt,
   `attempt <number>: <outcome>`, and each scan's
   `blocked`/`flagged`; then `model_call_error: <category>: <message>`
-  when one is set, `<criterion id>: <failure_detail.message>` for each
+  when one is set, `surface: <message>` for each of `surface_report`'s
+  `findings` when `block_reason` is `"surface_check_failed"`, `<criterion id>: <failure_detail.message>` for each
   `"fail"` criterion when `block_reason` is `"test_authoring_failed"`, `mutation_error: <message>` when the
   verification report's `mutation_error` is set (`D324`), and
   `license_scan not evaluated: <reason>` when the

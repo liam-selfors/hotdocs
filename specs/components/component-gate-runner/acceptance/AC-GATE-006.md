@@ -23,4 +23,14 @@ Given instead the loop returns passed false, its last attempt's outcome
   "message": "down"}
 When run_component_gates is called
 Then write_provenance was never called
+
+Given instead the loop returns passed false, its last attempt's outcome
+  is "surface_failed", its last generation result has one file, its
+  verification_report is None, and its surface_report is {"ok": false,
+  "findings": [{"kind": "asset_error", "message": "static/a.js: no
+  interface file"}]}
+When run_component_gates is called
+Then write_provenance was never called, block_reason is
+  "surface_check_failed", verification is None, and the result's
+  surface_report is the loop's
 ```
