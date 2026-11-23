@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:7b839744972dd90eaaa75eec424fc2ebda160c2ce44705574350cf0c15275867
+# hotdocs-criterion: sha256:a2cd07bdd9640cfff633427766b93e786ec7212ecbc3fa18383e1d5ba609ee18
 import hashlib
 import json
 from pathlib import Path
@@ -10,27 +10,34 @@ def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-BUNDLE = {
-    "component_id": "comp-qux",
-    "criterion_id": "AC-QUX-001",
-    "covers": "R-QUX-001",
-    "criterion_text": "Given baz() returns 2 When qux() is called Then it returns 4",
+BUNDLE_TEXT = {
+    "criterion_text": "Given a qux When qux is called Then it returns 4",
     "requirement_text": "R-QUX-001: qux() MUST return twice baz().",
     "interface": "qux() -> int",
-    "glossary": "",
-    "dependency_interfaces": {},
+    "glossary": "Glossary text.",
     "testing": "",
 }
 
 
-def header_for(bundle):
+def header_line():
     payload = json.dumps(
-        {k: bundle[k] for k in ("criterion_text", "requirement_text", "interface", "glossary", "testing")},
+        {k: BUNDLE_TEXT[k] for k in ("criterion_text", "requirement_text", "interface", "glossary", "testing")},
         sort_keys=True,
         ensure_ascii=False,
         separators=(",", ":"),
     )
     return "# hotdocs-criterion: sha256:" + hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def generated_test_source():
+    return (
+        header_line() + "\n"
+        + "import qux\n"
+        + "\n"
+        + "\n"
+        + "def test_qux_returns_four():\n"
+        + "    assert qux.qux() == 4\n"
+    )
 
 
 def write(path, text):
@@ -39,34 +46,32 @@ def write(path, text):
 
 
 def build_fixture(repo_root, log_path):
-    comp = repo_root / "specs" / "components" / "qux"
+    # Product capability so the unsealed component resolves `realizes`.
     write(
         repo_root / "specs" / "product" / "qux.md",
         "---\n"
         "id: P-QUX\n"
         "title: Qux capability\n"
         "status: draft\n"
-        "owners: [test-team]\n"
+        "owners: [team]\n"
         "---\n"
         "\n"
-        "# Qux capability\n"
+        "# Qux\n"
         "\n"
         "## Purpose\n"
         "\n"
-        "Doubles baz.\n"
-        "\n"
-        "## Scope\n"
-        "\n"
-        "- In scope: qux.\n",
+        "Provide qux.\n",
     )
+    write(repo_root / "specs" / "glossary.md", "# Glossary\n\n- **Thing** — a thing.\n")
+
+    comp = repo_root / "specs" / "components" / "qux"
     write(
         comp / "component.md",
         "---\n"
         "id: comp-qux\n"
         "title: Qux\n"
         "status: draft\n"
-        "owners: [test-team]\n"
-        "depends_on: []\n"
+        "owners: [team]\n"
         "realizes: [P-QUX]\n"
         "---\n"
         "\n"
@@ -78,7 +83,7 @@ def build_fixture(repo_root, log_path):
         "\n"
         "## Scope\n"
         "\n"
-        "- In scope: qux().\n"
+        "- In scope: qux.\n"
         "\n"
         "## Definitions\n"
         "\n"
@@ -110,14 +115,8 @@ def build_fixture(repo_root, log_path):
         "\n"
         "- Initial.\n",
     )
-    write(
-        comp / "requirements" / "R-QUX-001.md",
-        "# R-QUX-001\n\n**R-QUX-001** - `qux()` MUST return twice `baz()`.\n",
-    )
-    write(
-        comp / "interface" / "library.md",
-        "# Library\n\n```\nqux() -> int\n```\n",
-    )
+    write(comp / "requirements" / "R-QUX-001.md", "# R-QUX-001\n\n**R-QUX-001** — `qux()` MUST return twice `baz()`.\n")
+    write(comp / "interface" / "library.md", "# Library\n\n```\nqux() -> int\n```\n")
     write(comp / "constraints.md", "# Constraints\n\nNone.\n")
     write(
         comp / "acceptance" / "AC-QUX-001.md",
@@ -127,44 +126,64 @@ def build_fixture(repo_root, log_path):
         "Kind: generated-test\n"
         "\n"
         "```gherkin\n"
-        "Given baz returns 2\n"
+        "Given a qux module\n"
         "When qux is called\n"
         "Then it returns 4\n"
         "```\n",
     )
 
-    write(
-        repo_root / "gen" / "baz" / "baz.py",
-        "def baz():\n"
-        "    return 2\n",
-    )
+    # Component code: qux loads baz by path from its own __file__.
     write(
         repo_root / "gen" / "qux" / "qux.py",
         "import importlib.util\n"
         "from pathlib import Path\n"
         "\n"
-        "_path = Path(__file__).resolve().parents[1] / 'baz' / 'baz.py'\n"
-        "_spec = importlib.util.spec_from_file_location('baz', _path)\n"
-        "_baz = importlib.util.module_from_spec(_spec)\n"
-        "_spec.loader.exec_module(_baz)\n"
+        "\n"
+        "def _load_baz():\n"
+        "    path = Path(__file__).resolve().parents[1] / \"baz\" / \"baz.py\"\n"
+        "    spec = importlib.util.spec_from_file_location(\"baz\", path)\n"
+        "    module = importlib.util.module_from_spec(spec)\n"
+        "    spec.loader.exec_module(module)\n"
+        "    return module\n"
         "\n"
         "\n"
         "def qux():\n"
-        "    return 2 * _baz.baz()\n",
+        "    return 2 * _load_baz().baz()\n",
+    )
+    write(
+        repo_root / "gen" / "baz" / "baz.py",
+        "def baz():\n"
+        "    return 2\n",
     )
 
+    # spec-bundle-assembler stand-in.
+    bundle = dict(BUNDLE_TEXT)
     write(
         repo_root / "gen" / "spec-bundle-assembler" / "spec_bundle_assembler.py",
-        "BUNDLE = " + repr(BUNDLE) + "\n"
+        "BUNDLE_TEXT = " + repr(bundle) + "\n"
         "\n"
         "\n"
         "def assemble_criterion(component_id, criterion_id, repo_root):\n"
-        "    return dict(BUNDLE)\n",
+        "    return {\n"
+        "        \"component_id\": component_id,\n"
+        "        \"criterion_id\": criterion_id,\n"
+        "        \"covers\": \"R-QUX-001\",\n"
+        "        \"criterion_text\": BUNDLE_TEXT[\"criterion_text\"],\n"
+        "        \"requirement_text\": BUNDLE_TEXT[\"requirement_text\"],\n"
+        "        \"interface\": BUNDLE_TEXT[\"interface\"],\n"
+        "        \"glossary\": BUNDLE_TEXT[\"glossary\"],\n"
+        "        \"dependency_interfaces\": {},\n"
+        "        \"testing\": BUNDLE_TEXT[\"testing\"],\n"
+        "    }\n",
     )
 
+    # test-probe stand-in: always ok.
     write(
         repo_root / "gen" / "test-probe" / "test_probe.py",
-        "class _Report:\n"
+        "GATE_VERSION = \"test-probe@1.4.0\"\n"
+        "\n"
+        "\n"
+        "class ProbeReport:\n"
         "    def __init__(self):\n"
         "        self.ok = True\n"
         "        self.findings = []\n"
@@ -172,36 +191,28 @@ def build_fixture(repo_root, log_path):
         "        self.tests_reached = 1\n"
         "\n"
         "    def to_dict(self):\n"
-        "        return {'ok': self.ok, 'findings': list(self.findings),\n"
-        "                'tests_run': self.tests_run, 'tests_reached': self.tests_reached}\n"
+        "        return {\"ok\": self.ok, \"findings\": list(self.findings),\n"
+        "                \"tests_run\": self.tests_run, \"tests_reached\": self.tests_reached}\n"
         "\n"
         "\n"
-        "GATE_VERSION = 'test-probe@1.3.0'\n"
-        "\n"
-        "\n"
-        "def probe(test_source, criterion_bundle, module_name, *, timeout=60.0, interpreter=None):\n"
-        "    return _Report()\n",
+        "def probe(test_source, criterion_bundle, module_name, *, timeout=60.0,\n"
+        "          interpreter=None, assets=None):\n"
+        "    with open(" + repr(str(log_path)) + ", \"a\") as fh:\n"
+        "        fh.write(\"probe\\n\")\n"
+        "    return ProbeReport()\n",
     )
 
-    test_body = (
-        "import qux\n"
-        "\n"
-        "\n"
-        "def test_qux_doubles_baz():\n"
-        "    assert qux.qux() == 4\n"
-    )
-    content = header_for(BUNDLE) + "\n" + test_body
+    # The one cached generated test, with a correct header.
     write(
         repo_root / "verification" / "qux" / "generated-test" / "test_ac_qux_001.py",
-        content,
+        generated_test_source(),
     )
-    return content
 
 
-def make_test_author(log_path, content):
-    def test_author_stub(bundle):
-        with open(log_path, "a", encoding="utf-8") as fh:
-            fh.write("called\n")
+def make_author(log_path):
+    def author(bundle):
+        with open(log_path, "a") as fh:
+            fh.write("author\n")
         return {
             "model": "fake-model",
             "seed": 0,
@@ -210,26 +221,26 @@ def make_test_author(log_path, content):
             "model_call_error": None,
             "file": {
                 "path": "verification/qux/generated-test/test_ac_qux_001.py",
-                "content": content,
+                "content": generated_test_source(),
             },
         }
 
-    return test_author_stub
+    return author
 
 
-def test_ac_verify_025_dependency_loaded_by_path_scores_full(tmp_path):
+def test_dependency_loaded_by_path_passes_and_scores_full(tmp_path):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
-    log_path = tmp_path / "author.log"
-    content = build_fixture(repo_root, log_path)
+    log_path = tmp_path / "calls.log"
+    build_fixture(repo_root, log_path)
 
-    report = verifier_orchestrator.verify(
-        "comp-qux", repo_root, test_author=make_test_author(log_path, content)
-    )
+    report = verifier_orchestrator.verify("comp-qux", repo_root, test_author=make_author(log_path))
 
     criteria = field(report, "criteria")
     matching = [c for c in criteria if field(c, "id") == "AC-QUX-001"]
     assert len(matching) == 1
-    assert field(matching[0], "result") == "pass"
+    criterion = matching[0]
+    assert field(criterion, "result") == "pass", criterion
+
     assert field(report, "mutation_error") is None
     assert field(report, "mutation_score") == 1.0

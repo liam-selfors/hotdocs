@@ -1,16 +1,9 @@
-# hotdocs-criterion: sha256:914ffd4f73bb8351da9062935e969f29f515dbc5eb7da17e3b45d033bfe0e476
-# AC-VERIFY-010: a generated-test criterion with no cached test and no
-# test_author configured is recorded as fail (failure_origin "test"),
-# never skipped, and the overall verdict is fail.
+# hotdocs-criterion: sha256:195cf8a3e7f7f8c61a940cda78f2cd0ccbd79ae3a5f79b0b2f36a006a38badcf
+import importlib.util
+import sys
 from pathlib import Path
 
 import verifier_orchestrator
-
-
-COMPONENT_ID = "comp-widget"
-SLUG = "widget"
-CRITERION_ID = "AC-WIDGET-001"
-REQUIREMENT_ID = "R-WIDGET-001"
 
 
 def field(value, name):
@@ -22,35 +15,49 @@ def write(path, text):
     path.write_text(text, encoding="utf-8")
 
 
-def build_fixture(repo_root, log_path):
-    comp = repo_root / "specs" / "components" / SLUG
+ASSEMBLER_SOURCE = (
+    "def assemble_criterion(component_id, criterion_id, repo_root):\n"
+    "    return {\n"
+    "        'component_id': component_id,\n"
+    "        'criterion_id': criterion_id,\n"
+    "        'covers': 'R-WIDGET-001',\n"
+    "        'criterion_text': 'Given a widget When widget_make is invoked Then it works',\n"
+    "        'requirement_text': 'R-WIDGET-001 widget_make MUST return a widget.',\n"
+    "        'interface': 'widget_make(name: str) -> dict',\n"
+    "        'glossary': '',\n"
+    "        'dependency_interfaces': {},\n"
+    "        'testing': '',\n"
+    "    }\n"
+)
 
-    write(
-        repo_root / "specs" / "product" / "widget.md",
-        "---\n"
-        "id: P-WIDGET\n"
-        "title: Widget capability\n"
-        "status: draft\n"
-        "owners: [pipeline-team]\n"
-        "---\n"
-        "\n"
-        "# Widget capability\n"
-        "\n"
-        "## Purpose\n"
-        "\n"
-        "Widgets get sized.\n",
-    )
-    write(
-        repo_root / "specs" / "glossary.md",
-        "# Glossary\n\n- **Widget** — a thing that has a size.\n",
-    )
+PROBE_SOURCE = (
+    "class _Report:\n"
+    "    def __init__(self):\n"
+    "        self.ok = True\n"
+    "        self.findings = []\n"
+    "        self.tests_run = 0\n"
+    "        self.tests_reached = 0\n"
+    "\n"
+    "    def to_dict(self):\n"
+    "        return {'ok': self.ok, 'findings': list(self.findings),\n"
+    "                'tests_run': self.tests_run, 'tests_reached': self.tests_reached}\n"
+    "\n"
+    "\n"
+    "def probe(test_source, criterion_bundle, module_name, *, timeout=60.0,\n"
+    "          interpreter=None, assets=None):\n"
+    "    return _Report()\n"
+)
+
+
+def build_fixture(repo_root):
+    comp = repo_root / "specs" / "components" / "widget"
     write(
         comp / "component.md",
         "---\n"
-        "id: " + COMPONENT_ID + "\n"
+        "id: comp-widget\n"
         "title: Widget\n"
         "status: draft\n"
-        "owners: [pipeline-team]\n"
+        "owners: [test-team]\n"
         "realizes: [P-WIDGET]\n"
         "---\n"
         "\n"
@@ -58,11 +65,11 @@ def build_fixture(repo_root, log_path):
         "\n"
         "## Purpose\n"
         "\n"
-        "Computes the size of a widget.\n"
+        "Makes widgets.\n"
         "\n"
         "## Scope\n"
         "\n"
-        "- In scope: sizing widgets.\n"
+        "- In scope: widgets.\n"
         "\n"
         "## Definitions\n"
         "\n"
@@ -92,91 +99,71 @@ def build_fixture(repo_root, log_path):
         "\n"
         "## Change log\n"
         "\n"
-        "- Initial draft.\n",
+        "- Initial.\n",
     )
     write(
-        comp / "requirements" / (REQUIREMENT_ID + ".md"),
-        "**" + REQUIREMENT_ID + "** — `widget_size(x)` MUST return `x`.\n",
+        comp / "requirements" / "R-WIDGET-001.md",
+        "**R-WIDGET-001** — `widget_make` MUST return a widget.\n",
     )
     write(
         comp / "interface" / "library.md",
-        "# Library\n\n```\nwidget_size(x: int) -> int\n```\n",
+        "# Library\n\n```\nwidget_make(name: str) -> dict\n```\n",
     )
     write(comp / "constraints.md", "# Constraints\n\nNone.\n")
     write(
-        comp / "acceptance" / (CRITERION_ID + ".md"),
-        "# " + CRITERION_ID + "\n"
+        comp / "acceptance" / "AC-WIDGET-001.md",
+        "# AC-WIDGET-001\n"
         "\n"
-        "Covers: " + REQUIREMENT_ID + "\n"
+        "Covers: R-WIDGET-001\n"
         "Kind: generated-test\n"
         "\n"
         "```gherkin\n"
-        "Given a widget of size 3\n"
-        "When widget_size is called with it\n"
-        "Then the returned size is 3\n"
+        "Given a widget name\n"
+        "When widget_make is invoked with that name\n"
+        "Then it returns a widget\n"
         "```\n",
     )
-
-    # The component's own code.
-    write(repo_root / "gen" / SLUG / "widget.py", "def widget_size(x):\n    return x\n")
-
-    # spec-bundle-assembler stand-in.
+    write(
+        repo_root / "specs" / "product" / "widgets.md",
+        "---\n"
+        "id: P-WIDGET\n"
+        "title: Widgets\n"
+        "status: draft\n"
+        "owners: [test-team]\n"
+        "---\n"
+        "\n"
+        "# Widgets\n"
+        "\n"
+        "## Purpose\n"
+        "\n"
+        "Widgets exist.\n",
+    )
+    write(repo_root / "specs" / "glossary.md", "# Glossary\n")
+    write(repo_root / "gen" / "widget" / "widget.py", "")
     write(
         repo_root / "gen" / "spec-bundle-assembler" / "spec_bundle_assembler.py",
-        "LOG_PATH = " + repr(str(log_path)) + "\n"
-        "\n"
-        "\n"
-        "def assemble_criterion(component_id, criterion_id, repo_root):\n"
-        "    with open(LOG_PATH, 'a', encoding='utf-8') as fh:\n"
-        "        fh.write('assemble_criterion ' + str(criterion_id) + '\\n')\n"
-        "    return {\n"
-        "        'component_id': component_id,\n"
-        "        'criterion_id': criterion_id,\n"
-        "        'covers': " + repr(REQUIREMENT_ID) + ",\n"
-        "        'criterion_text': 'Given a widget of size 3 When widget_size is called with it Then the returned size is 3',\n"
-        "        'requirement_text': 'widget_size(x) MUST return x.',\n"
-        "        'interface': 'widget_size(x: int) -> int',\n"
-        "        'glossary': '',\n"
-        "        'dependency_interfaces': {},\n"
-        "        'testing': '',\n"
-        "    }\n",
+        ASSEMBLER_SOURCE,
     )
-
-    # test-probe stand-in: always ok, no findings.
-    write(
-        repo_root / "gen" / "test-probe" / "test_probe.py",
-        "class ProbeReport:\n"
-        "    def __init__(self):\n"
-        "        self.ok = True\n"
-        "        self.findings = []\n"
-        "        self.tests_run = 0\n"
-        "        self.tests_reached = 0\n"
-        "\n"
-        "    def to_dict(self):\n"
-        "        return {'ok': self.ok, 'findings': list(self.findings),\n"
-        "                'tests_run': self.tests_run, 'tests_reached': self.tests_reached}\n"
-        "\n"
-        "\n"
-        "def probe(test_source, criterion_bundle, module_name, *, timeout=60.0, interpreter=None):\n"
-        "    return ProbeReport()\n",
-    )
+    write(repo_root / "gen" / "test-probe" / "test_probe.py", PROBE_SOURCE)
 
 
 def test_generated_test_without_cache_or_author_fails(tmp_path):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
-    log_path = tmp_path / "calls.log"
-    build_fixture(repo_root, log_path)
+    build_fixture(repo_root)
 
-    # No cached test exists anywhere under verification/.
-    assert not (repo_root / "verification").exists()
+    # No cached test exists for the criterion.
+    cached = (
+        repo_root / "verification" / "widget" / "generated-test" / "test_ac_widget_001.py"
+    )
+    assert not cached.exists()
 
-    report = verifier_orchestrator.verify(COMPONENT_ID, repo_root, judge=None, test_author=None)
+    report = verifier_orchestrator.verify("comp-widget", repo_root, test_author=None)
 
     criteria = field(report, "criteria")
-    matching = [c for c in criteria if field(c, "id") == CRITERION_ID]
-    assert len(matching) == 1, criteria
-    entry = matching[0]
+    matches = [c for c in criteria if field(c, "id") == "AC-WIDGET-001"]
+    assert len(matches) == 1, criteria
+    entry = matches[0]
 
     assert field(entry, "result") != "skipped"
     assert field(entry, "result") == "fail"
