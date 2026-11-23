@@ -25,5 +25,5 @@ Then the ValueError propagates out of run
 
 Given the module's main
 When its parameters are inspected, and main(["--version"]) is called
-Then the parameter names are exactly ["argv"], and the call prints "hotdocs 0.1.0" and returns 0
+Then the parameter names are exactly ["argv"], and the call prints one line starting "hotdocs " and returns 0
 ```

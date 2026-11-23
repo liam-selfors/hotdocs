@@ -70,3 +70,4 @@ None.
 - `D346`: the `kind new` row, routed to `spec-scaffolder` as `component new` is.
 - `main(argv)` alone is the `cli-conventions.md` entry; the injectable
   form is now `run`, and `init` is reached through `hotdocs-init`'s `run`. (`D348`)
+- `D360`: the version is read from the tool root's `pyproject.toml`.

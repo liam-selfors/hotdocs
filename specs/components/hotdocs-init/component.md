@@ -70,3 +70,5 @@ None.
   an initialised project.
 - `main(argv)` alone is the `cli-conventions.md` entry, deriving the tool
   root; the injectable form, called by `hotdocs-cli`, is now `run`. (`D348`)
+- `D360`: the version is read from the tool root's `pyproject.toml`; the
+  next steps give the guide's path.

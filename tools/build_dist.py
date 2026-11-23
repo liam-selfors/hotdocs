@@ -4,7 +4,10 @@
 HAND-AUTHORED REPO TOOL (D358). The installed tool needs, beside its entry
 point, the tool root the components read by path: `gen/`, `pipeline/`,
 `examples/` and `requirements.txt`, in their checkout layout, so "the parent
-of the nearest `gen` directory" still finds it. This stages a package
+of the nearest `gen` directory" still finds it. It also holds `pyproject.toml`,
+which the components read the tool version from, and the guides a project
+gets no copy of: `QUICKSTART.md`, `AUTHORING.md` and `agent-skills/` (D360).
+This stages a package
 
     hotdocs/__init__.py      version
     hotdocs/__main__.py      `python -m hotdocs`
@@ -31,7 +34,8 @@ import tomllib
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
-TOOL_PARTS = ("gen", "pipeline", "examples", "requirements.txt")
+TOOL_PARTS = ("gen", "pipeline", "examples", "requirements.txt",
+              "pyproject.toml", "QUICKSTART.md", "AUTHORING.md", "agent-skills")
 SKIP_DIRS = {"__pycache__", ".hotdocs", ".pytest_cache"}
 DOCS = ("README.md", "QUICKSTART.md", "AUTHORING.md", "LICENSE")
 

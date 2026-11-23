@@ -7,7 +7,7 @@ Kind: generated-test
 Given a fake tool root and run(["<dir>","--example","--yes"])
 When init runs
 Then specs/product/slugs.md exists as a copy of the example, an existing example file is never overwritten,
-  and the output ends with next steps naming "hotdocs lint", "hotdocs generate comp-slugify", "hotdocs verify", and "QUICKSTART.md"
+  and the output ends with next steps naming "hotdocs lint", "hotdocs generate comp-slugify", "hotdocs verify", and the path "<tool_root>/QUICKSTART.md" with the fake tool root's path as it was passed
 
 Given no --example
 When init runs
