@@ -88,7 +88,11 @@ Found by installing the `0.1.0` wheel and following `QUICKSTART.md` as a
 new user would. `D359` and `D360` fixed the crash on a surface failure,
 the version literal and the missing guides; `D361` made `hotdocs spec
 check` report a declared asset with no interface file and stopped its
-model layer asking which test framework to use. These remain.
+model layer asking which test framework to use. `D363`–`D366` gave
+every verb a `--help`, added `hotdocs capability new`, put `/dist/` in
+a new project's `.gitignore`, and made the two page builders name
+`hotdocs corpus-graph build` when the graph is missing. `D367` put the
+documents the guides cite into the package. These remain.
 
 - **`hotdocs lint` does not look for a declared asset's interface
   file.** `interface/assets/<file name>.md` is required
@@ -102,26 +106,22 @@ model layer asking which test framework to use. These remain.
   file, or an export the interface lists under a name the code may not
   use, fails the same way each time. `asset_error` findings whose cause
   is in the spec should end the loop like an environment failure.
-- **`hotdocs <verb> --help` is a usage error.** Every verb prints a
-  `usage error` naming `--help` and its usage line, with exit code 2. `specs/architecture/cli-conventions.md` should state that
-  `--help` and `-h` print the usage line on stdout with exit code 0;
-  every CLI component implements that document, so the change waits for
-  a full wave.
-- **`docs-site build` and `track ui build` do not name their
-  prerequisite.** Without `verification/corpus-graph.json` they fail
-  without saying to run `hotdocs corpus-graph build` first; the message
-  is each component's own. `QUICKSTART.md` now says it.
-- **`hotdocs component new` lays out a component that fails lint.** Its
-  `realizes: []` needs a capability, and nothing lays out a capability
-  file. A `hotdocs capability new <name>` verb, or a `--realizes` flag
-  that also writes the file, would close the gap (`spec-scaffolder`,
-  `hotdocs-cli`).
-- **Smaller.** `hotdocs init`'s `.gitignore` omits `dist/`, which
-  `docs-site build` writes. Generated test files end without a newline.
+  A surface report with an `environment` finding (`R-SURF-006`: the
+  Python environment could not be provisioned) is retried the same way;
+  `R-LOOP-004` ends the loop at once only for an environment failure in
+  generation or verification. Both need the loop to read each finding's
+  `kind`, which its interface does not yet allow, so every
+  `generation-loop` test is re-authored.
+- **A component's own `main` still answers `--help` with a usage
+  error.** `hotdocs-cli` turns that answer into the verb's help (`D363`),
+  so `hotdocs <verb> --help` works; `compile-criteria` alone answers
+  `--help` itself. `specs/architecture/cli-conventions.md` should state
+  that `--help` and `-h` print the usage line on stdout with exit code
+  0; every CLI component implements that document (26 regenerations),
+  so the change waits for a full wave.
+- **Smaller.** Generated test files end without a newline.
   `hotdocs verify --no-model` describes a component never generated as
   needing a fresh run with a model, when it needs `hotdocs generate`.
-  The built-in asset kinds' definitions ship in no installed package,
-  so `QUICKSTART.md` can only point at the repository.
 
 ---
 

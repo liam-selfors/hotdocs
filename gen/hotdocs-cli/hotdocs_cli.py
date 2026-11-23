@@ -4,6 +4,7 @@ import contextlib
 import hashlib
 import importlib
 import importlib.util
+import io
 import os
 import sys
 import tomllib
@@ -27,8 +28,8 @@ VERB_TABLE = [
      "is everything ready"),
     (("track", "feedback"), "gen/provenance-tracker", "provenance_tracker", 0, "no",
      "last failing requirements"),
-    (("track", "ui", "build"), "gen/provenance-tracker-ui", "provenance_tracker_ui", 0,
-     "optional", "build the readiness page"),
+    (("track", "ui", "build"), "gen/provenance-tracker-ui", "provenance_tracker_ui", 0, "optional",
+     "build the readiness page"),
     (("provenance", "check"), "gen/provenance-checker", "provenance_checker", 1, "no",
      "is provenance a hit"),
     (("provenance", "write"), "gen/provenance-writer", "provenance_writer", 0, "no",
@@ -46,8 +47,8 @@ VERB_TABLE = [
      "render the docs site"),
     (("corpus-graph", "build"), "gen/corpus-graph-builder", "corpus_graph_builder.cli", 1, "no",
      "build the corpus graph"),
-    (("assist",), "gen/spec-completeness-assistant", "spec_completeness_assistant", 1,
-     "optional", "review a spec change"),
+    (("assist",), "gen/spec-completeness-assistant", "spec_completeness_assistant", 1, "optional",
+     "review a spec change"),
     (("spec", "check"), "gen/spec-reviewer", "spec_reviewer", 2, "optional",
      "check criteria from their test authors' view"),
     (("decision", "new"), "gen/spec-scaffolder", "spec_scaffolder", 0, "no",
@@ -60,150 +61,168 @@ VERB_TABLE = [
      "lay out a new component"),
     (("kind", "new"), "gen/spec-scaffolder", "spec_scaffolder", 0, "no",
      "scaffold a new asset kind"),
+    (("capability", "new"), "gen/spec-scaffolder", "spec_scaffolder", 0, "no",
+     "lay out a new capability"),
     (("init",), "gen/hotdocs-init", "hotdocs_init", 1, "no", "set up a new project"),
 ]
 
-USAGE = "usage: hotdocs <verb> [args...] | hotdocs [--help | -h | help | --version]"
+USAGE = "usage: hotdocs <verb words> [args...]"
 CONFIG_VAR = "VAR_HOTDOCS_CONFIG"
+LLM_DIR = "gen/llm-endpoint"
+LLM_MODULE = "llm_endpoint"
 
 
 def _default_tool_root():
     for parent in Path(__file__).resolve().parents:
         if parent.name == "gen":
             return parent.parent
-    return None
+    return Path(__file__).resolve().parent
 
 
 def _tool_version(tool_root):
     try:
-        with open(Path(tool_root) / "pyproject.toml", "rb") as handle:
+        with open(os.path.join(os.fspath(tool_root), "pyproject.toml"), "rb") as handle:
             data = tomllib.load(handle)
-    except (OSError, ValueError):
+        version = data["project"]["version"]
+    except Exception:
         return "unknown"
-    project = data.get("project")
-    if not isinstance(project, dict):
-        return "unknown"
-    version = project.get("version")
     if isinstance(version, str) and version:
         return version
     return "unknown"
 
 
 def _verb_lines():
-    width = max(len(" ".join(row[0])) for row in VERB_TABLE)
-    return [f"  {' '.join(row[0]):<{width}}  {row[5]}" for row in VERB_TABLE]
+    names = [" ".join(row[0]) for row in VERB_TABLE]
+    width = max(len(name) for name in names)
+    return [f"  {name.ljust(width)}  {row[5]}" for name, row in zip(names, VERB_TABLE)]
 
 
-def _get(obj, key):
-    if obj is None:
-        return None
+def _get(obj, name):
     if isinstance(obj, dict):
-        return obj.get(key)
-    return getattr(obj, key, None)
+        return obj.get(name)
+    return getattr(obj, name, None)
 
 
-def _base_for(repo_root, tool_root, dir_):
-    if repo_root is not None and (Path(repo_root) / dir_).exists():
+def _module_file(base, dir_, module):
+    """Return the module's file under base, or None when absent."""
+    stem = os.path.join(os.fspath(base), dir_, *module.split("."))
+    if os.path.isfile(stem + ".py"):
+        return stem + ".py"
+    package_init = os.path.join(stem, "__init__.py")
+    if os.path.isfile(package_init):
+        return package_init
+    return None
+
+
+def _choose_base(repo_root, tool_root, dir_):
+    if os.path.isdir(os.path.join(os.fspath(repo_root), dir_)):
         return repo_root
     return tool_root
 
 
-def _module_file(base, dir_, module):
-    stem = Path(base, dir_, *module.split("."))
-    path = Path(str(stem) + ".py")
-    if path.is_file():
-        return path
-    init = stem / "__init__.py"
-    if init.is_file():
-        return init
-    return None
-
-
-def _purge(top):
-    for name in list(sys.modules):
-        if name == top or name.startswith(top + "."):
-            del sys.modules[name]
-
-
 @contextlib.contextmanager
-def _loaded(base, dir_, module, path):
+def _loaded(base, dir_, module, path, key_root):
     if "." in module:
-        top = module.split(".")[0]
-        entry = str(Path(base) / dir_)
-        _purge(top)
-        sys.path.insert(0, entry)
+        root = os.path.join(os.fspath(base), dir_)
+        package = module.split(".")[0]
+
+        def purge():
+            for name in list(sys.modules):
+                if name == package or name.startswith(package + "."):
+                    del sys.modules[name]
+
+        purge()
+        sys.path.insert(0, root)
         importlib.invalidate_caches()
         try:
             yield importlib.import_module(module)
         finally:
-            _purge(top)
-            if entry in sys.path:
-                sys.path.remove(entry)
-    else:
-        digest = hashlib.sha256(str(Path(base)).encode("utf-8")).hexdigest()[:16]
-        name = f"_hotdocs_cli_{digest}_{module}"
-        if path.name == "__init__.py":
-            spec = importlib.util.spec_from_file_location(
-                name, path, submodule_search_locations=[str(path.parent)])
-        else:
-            spec = importlib.util.spec_from_file_location(name, path)
-        mod = importlib.util.module_from_spec(spec)
-        sys.modules[name] = mod
-        try:
-            spec.loader.exec_module(mod)
-            yield mod
-        finally:
-            sys.modules.pop(name, None)
-
-
-def _repo_root_arg(args):
-    for index, token in enumerate(args):
-        if token.startswith("--repo-root="):
-            return token[len("--repo-root="):]
-        if token == "--repo-root" and index + 1 < len(args):
-            return args[index + 1]
-    return None
-
-
-def _configured_model(repo_root, tool_root):
-    dir_ = "gen/llm-endpoint"
-    base = _base_for(repo_root, tool_root, dir_)
-    path = _module_file(base, dir_, "llm_endpoint")
-    with _loaded(base, dir_, "llm_endpoint", path) as mod:
-        config = mod.load_config(Path(repo_root) / "hotdocs.toml")
-    provider = _get(config, "provider")
-    model = _get(config, "model")
-    if provider and model:
-        return f"{provider}:{model}"
-    return None
-
-
-def _exit_code(value):
-    if value is None:
-        return 0
-    return value
-
-
-def _call(fn, tokens, kwargs):
+            if root in sys.path:
+                sys.path.remove(root)
+            purge()
+        return
+    digest = hashlib.sha1(os.fspath(key_root).encode("utf-8")).hexdigest()[:16]
+    name = f"_hotdocs_cli_{digest}_{module}"
+    locations = None
+    if os.path.basename(path) == "__init__.py":
+        locations = [os.path.dirname(path)]
+    spec = importlib.util.spec_from_file_location(
+        name, path, submodule_search_locations=locations
+    )
+    loaded = importlib.util.module_from_spec(spec)
+    sys.modules[name] = loaded
     try:
-        result = fn(tokens, **kwargs)
-    except SystemExit as error:
-        code = error.code
+        with open(path, "rb") as handle:
+            source = handle.read()
+        exec(compile(source, path, "exec"), loaded.__dict__)
+        yield loaded
+    finally:
+        sys.modules.pop(name, None)
+
+
+def _call(fn, args, kwargs):
+    try:
+        code = fn(args, **kwargs)
+    except SystemExit as exit_:
+        code = exit_.code
         if code is None:
             return 0
-        if isinstance(code, int):
-            return code
-        return 1
+        if not isinstance(code, int):
+            return 1
+        return code
     except Exception as error:
         if type(error).__name__ == "ModelResolutionError":
             print(f"usage error: {error}", file=sys.stderr)
             return 2
         raise
-    return _exit_code(result)
+    if code is None:
+        return 0
+    return code
+
+
+def _repo_root_arg(rest):
+    for index, token in enumerate(rest):
+        if token.startswith("--repo-root="):
+            return token[len("--repo-root="):]
+        if token == "--repo-root" and index + 1 < len(rest):
+            return rest[index + 1]
+    return None
+
+
+def _inject_model(row, rest, forwarded, repo_root, tool_root):
+    if "--no-model" in rest:
+        return [token for token in forwarded if token != "--no-model"]
+    if any(token == "--model" or token.startswith("--model=") for token in rest):
+        return forwarded
+    base = _choose_base(repo_root, tool_root, LLM_DIR)
+    path = _module_file(base, LLM_DIR, LLM_MODULE)
+    if path is None:
+        return forwarded
+    with _loaded(base, LLM_DIR, LLM_MODULE, path, repo_root) as endpoint:
+        try:
+            config = endpoint.load_config(Path(repo_root) / "hotdocs.toml")
+        except ValueError as error:
+            print(str(error), file=sys.stderr)
+            return forwarded
+    if config is None:
+        return forwarded
+    provider = _get(config, "provider")
+    model = _get(config, "model")
+    if not provider or not model:
+        return forwarded
+    model_string = f"{provider}:{model}"
+    if row[4] == "optional":
+        print(
+            f"hotdocs: using model {model_string} from hotdocs.toml (pass --no-model to skip)",
+            file=sys.stderr,
+        )
+    return forwarded + [f"--model={model_string}"]
 
 
 def run(argv=None, *, tool_root=None, input_fn=None, output_fn=None, env=None, cwd=None):
-    argv = list(sys.argv[1:] if argv is None else argv)
+    if argv is None:
+        argv = sys.argv[1:]
+    argv = list(argv)
     if tool_root is None:
         tool_root = _default_tool_root()
     if input_fn is None:
@@ -225,76 +244,95 @@ def run(argv=None, *, tool_root=None, input_fn=None, output_fn=None, env=None, c
         output_fn(f"hotdocs {_tool_version(tool_root)}")
         return 0
 
-    matches = [row for row in VERB_TABLE if tuple(argv[:len(row[0])]) == row[0]]
-    if not matches:
+    row = None
+    for candidate in VERB_TABLE:
+        words = list(candidate[0])
+        if argv[: len(words)] == words and (row is None or len(words) > len(row[0])):
+            row = candidate
+    if row is None:
         print(f"usage error: unknown verb: {argv[0]}", file=sys.stderr)
+        print(USAGE, file=sys.stderr)
         for line in _verb_lines():
             print(line, file=sys.stderr)
         return 2
-    words, dir_, module, strip, model_kind, _summary = max(matches, key=lambda r: len(r[0]))
+
+    words, dir_, module, strip, model_kind, summary = row
     verb = " ".join(words)
-    args = argv[len(words):]
-    tokens = argv[strip:]
+    rest = argv[len(words):]
+    forwarded = argv[strip:]
+    help_mode = "--help" in rest or "-h" in rest
     is_init = words == ("init",)
-    fn_name = "run" if is_init else "main"
 
     if is_init:
-        repo_root = None
+        repo_root = tool_root
         base = tool_root
     else:
-        given = _repo_root_arg(args)
-        if given is None:
-            repo_root = os.path.abspath(cwd)
-            tokens.append(f"--repo-root={repo_root}")
+        value = _repo_root_arg(rest)
+        cwd_abs = os.path.abspath(os.fspath(cwd))
+        if value is None:
+            repo_root = cwd_abs
+            forwarded = forwarded + [f"--repo-root={repo_root}"]
         else:
-            repo_root = os.path.abspath(os.path.join(cwd, given))
-        base = _base_for(repo_root, tool_root, dir_)
+            repo_root = os.path.abspath(os.path.join(cwd_abs, value))
+        base = _choose_base(repo_root, tool_root, dir_)
 
     path = _module_file(base, dir_, module)
     if path is None:
-        missing = Path(tool_root, dir_, *module.split("."))
-        print(f"hotdocs: component for '{verb}' not found: {missing}.py", file=sys.stderr)
+        missing = os.path.join(os.fspath(tool_root), dir_, *module.split(".")) + ".py"
+        print(f"hotdocs: {verb}: component not found: {missing}", file=sys.stderr)
         return 2
 
-    saved = []
+    if not is_init and not help_mode and model_kind in ("required", "optional"):
+        forwarded = _inject_model(row, rest, forwarded, repo_root, tool_root)
+
+    set_config = False
     if not is_init:
-        config_path = Path(repo_root) / "hotdocs.toml"
-        if config_path.exists():
-            targets = [env] if env is os.environ else [env, os.environ]
-            for mapping in targets:
-                if CONFIG_VAR not in mapping:
-                    mapping[CONFIG_VAR] = str(config_path)
-                    saved.append(mapping)
+        config_file = os.path.join(repo_root, "hotdocs.toml")
+        if os.path.isfile(config_file) and not os.environ.get(CONFIG_VAR):
+            previous = os.environ.get(CONFIG_VAR)
+            os.environ[CONFIG_VAR] = config_file
+            set_config = True
+
+    captured = io.StringIO()
     try:
-        with _loaded(base, dir_, module, path) as mod:
-            fn = getattr(mod, fn_name, None)
-            if fn is None:
-                print(f"hotdocs: '{verb}' is not available (no {fn_name} in {path})",
-                      file=sys.stderr)
+        with _loaded(base, dir_, module, path, repo_root) as component:
+            entry_name = "run" if is_init else "main"
+            entry = getattr(component, entry_name, None)
+            if entry is None:
+                print(f"hotdocs: {verb}: {entry_name} is not available", file=sys.stderr)
                 return 2
-            if model_kind in ("required", "optional"):
-                if "--no-model" in args:
-                    tokens = [t for t in tokens if t != "--no-model"]
-                elif not any(t == "--model" or t.startswith("--model=") for t in args):
-                    try:
-                        model = _configured_model(repo_root, tool_root)
-                    except ValueError as error:
-                        print(str(error), file=sys.stderr)
-                        model = None
-                    if model is not None:
-                        tokens.append(f"--model={model}")
-                        if model_kind == "optional":
-                            print(f"hotdocs: using model {model} from hotdocs.toml "
-                                  f"(pass --no-model to skip)", file=sys.stderr)
+            kwargs = {}
             if is_init:
-                kwargs = {"tool_root": tool_root, "input_fn": input_fn,
-                          "output_fn": output_fn, "env": env, "cwd": cwd}
+                kwargs = {
+                    "tool_root": tool_root,
+                    "input_fn": input_fn,
+                    "output_fn": output_fn,
+                    "env": env,
+                    "cwd": cwd,
+                }
+            if help_mode:
+                with contextlib.redirect_stderr(captured):
+                    code = _call(entry, forwarded, kwargs)
             else:
-                kwargs = {}
-            return _call(fn, tokens, kwargs)
+                code = _call(entry, forwarded, kwargs)
     finally:
-        for mapping in saved:
-            mapping.pop(CONFIG_VAR, None)
+        if set_config:
+            if previous is None:
+                os.environ.pop(CONFIG_VAR, None)
+            else:
+                os.environ[CONFIG_VAR] = previous
+
+    if help_mode:
+        text = captured.getvalue()
+        lines = text.splitlines()
+        if code == 2 and lines and lines[0].startswith("usage error:"):
+            output_fn(f"hotdocs {verb}: {summary}")
+            for line in lines[1:]:
+                if line.strip():
+                    output_fn(line)
+            return 0
+        sys.stderr.write(text)
+    return code
 
 
 def main(argv=None):

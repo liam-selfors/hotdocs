@@ -24,6 +24,10 @@ With Homebrew, from the tap: `brew install <owner>/hotdocs/hotdocs`
 ship inside the package, read-only, and every project uses them from there.
 This guide, `AUTHORING.md` and `agent-skills/` ship there too: `hotdocs
 init` ends by printing this guide's path, and the other two sit beside it.
+So do the documents they refer to that a project has no copy of
+(`SPEC_GUIDELINES.md`, and under `specs/architecture/` the asset-kind
+documents, `step-phrase-grammar.md` and `cli-conventions.md`), at those
+paths from this guide's directory.
 
 To work on hotdocs itself, install a checkout instead:
 
@@ -112,7 +116,8 @@ and `hotdocs docs-site build` (a browsable site of the specs, written to
 `dist/`). Those last two read `verification/corpus-graph.json`, so run
 `hotdocs corpus-graph build` first, and again after the specs change.
 Verbs that can use a model take the one in `hotdocs.toml`, saying so on
-stderr; `--no-model` skips it. `hotdocs` alone lists every verb.
+stderr; `--no-model` skips it. `hotdocs` alone lists every verb, and
+`hotdocs <verb> --help` prints one verb's usage.
 
 ## 4. Write your own component
 
@@ -128,10 +133,17 @@ A component is a directory of small files, as in the example
   a Given/When/Then with concrete values;
 - `constraints.md`.
 
-`hotdocs component new <name>` lays these out with `realizes: []`, which
-`hotdocs lint` rejects until it names a capability: what the product does
-for its user, one file in `specs/product/`. Write that file yourself, on
-the pattern of the example's `specs/product/slugs.md`:
+A component realizes a capability: what the product does for its user,
+one file in `specs/product/`. Lay out both:
+
+```
+hotdocs capability new slugs          # specs/product/slugs.md, id P-SLUGS
+hotdocs component new slugify --realizes=P-SLUGS
+```
+
+Without `--realizes`, `component new` writes `realizes: []`, which
+`hotdocs lint` rejects. A finished capability file looks like the
+example's `specs/product/slugs.md`:
 
 ```
 ---
@@ -205,8 +217,8 @@ layout, environment, how criteria call it, how its tests are
 strength-checked, and guidance for the model) and an adapter component,
 `comp-kind-<kind>`, that the pipeline runs. The built-in kinds are
 `python` and `javascript` (one ES module of pure functions over JSON
-values, run in Node 24 or newer); their definitions are in the hotdocs
-repository, not in a project. A criterion calls an exported function
+values, run in Node 24 or newer); their definitions ship with the tool,
+beside this guide, not in a project. A criterion calls an exported function
 through the `asset_runner` fixture, and its tests are mutation-tested on
 the JavaScript itself. Never hide another language inside Python strings:
 declare it as an asset. An undeclared kind fails `hotdocs lint`.
@@ -281,9 +293,8 @@ capability that needs a fresh run as `needs a fresh run; pass --model`.
   verification/agentic-generator/test_live_slugify.py`.
 - `hotdocs assist` and `hotdocs impact` need a git repository; without a
   default branch or a merge-base every file counts as changed.
-- No verb takes `--help`: `hotdocs <verb> --help` prints that verb's usage
-  line after a `usage error`, with exit code 2. `hotdocs`
-  alone lists every verb with a one-line summary.
+- `hotdocs <verb> --help` prints the verb's summary and usage line, not a
+  description of each flag; this guide and `AUTHORING.md` hold those.
 - `license_scan not evaluated: no-reference-corpus` in `hotdocs
   generate`'s output is expected in a new project: the license scan
   compares generated code with a reference corpus of licensed code, and

@@ -55,7 +55,7 @@ The everyday commands:
 | `hotdocs impact --changed=...` | blast radius of a spec change |
 | `hotdocs assist --changed=...` | a model's review of a spec change |
 | `hotdocs track feedback comp-<name>` | the last attempt's failing requirements |
-| `hotdocs decision new "<title>"`, `component new <name>`, `kind new <kind>` | scaffold a decision, a component or an asset kind |
+| `hotdocs decision new "<title>"`, `capability new <name>`, `component new <name>`, `kind new <kind>` | scaffold a decision, a capability, a component or an asset kind |
 | `hotdocs track ui build` | a readiness page for the corpus |
 | `hotdocs corpus-graph build`, `docs-site build` | the corpus graph and a browsable site |
 
@@ -78,7 +78,7 @@ since trusting a compiled criterion means trusting its compiler.
 `notes/bootstrap-history.md` tells how each component first landed;
 `verification/<slug>/BOOTSTRAP.md` has each one's full account.
 
-Decisions are ADRs in `specs/decisions/`, `D1` through `D362` (`D1`–`D75`
+Decisions are ADRs in `specs/decisions/`, `D1` through `D367` (`D1`–`D75`
 from the 2026-10 baseline reset, the rest recorded as they were made).
 `notes/initial-ideas.md` holds the original brainstorm, with its own
 informal numbering.

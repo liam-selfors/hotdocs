@@ -6,7 +6,11 @@ description: Define a new hotdocs asset kind (a non-Python artifact type such as
 # Defining a hotdocs asset kind
 
 The contract is `specs/architecture/asset-kinds.md`. Read it first, every
-time; this skill is the procedure for meeting it, not a substitute. A
+time; this skill is the procedure for meeting it, not a substitute. It
+ships with the tool, not in a project: look under the directory that
+holds the tool's `QUICKSTART.md` (`hotdocs init` prints that path), where
+the built-in kinds' definitions, `asset-kind-python.md` and
+`asset-kind-javascript.md`, sit beside it as worked examples. A
 kind is only useful if its gates are as strict as Python's, so most of
 this procedure is about the strength check and the test-only text, where
 past failures came from.

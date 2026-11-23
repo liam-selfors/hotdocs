@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:4c36b0a57074df469094d0b6e368f75e2db986922e6480a7b726f1b62bb8cba3
+# hotdocs-criterion: sha256:531972e9d7423d1f0bfa4d47108beca9cbd43937369f83504ba3ab01f69d9733
 from pathlib import Path
 
 import spec_scaffolder
@@ -20,7 +20,8 @@ def _decision_text(decision_id):
 
 
 def test_no_decisions_directory_returns_d1(tmp_path):
-    repo_root = Path(tmp_path)
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
     assert not (repo_root / "specs" / "decisions").exists()
 
     result = spec_scaffolder.next_decision_id(repo_root)
@@ -28,8 +29,8 @@ def test_no_decisions_directory_returns_d1(tmp_path):
     assert result == "D1"
 
 
-def test_largest_exact_decision_file_plus_one_ignoring_others(tmp_path):
-    repo_root = Path(tmp_path)
+def test_returns_one_past_largest_exact_decision_file(tmp_path):
+    repo_root = tmp_path / "repo"
     decisions = repo_root / "specs" / "decisions"
     decisions.mkdir(parents=True)
 
@@ -41,7 +42,8 @@ def test_largest_exact_decision_file_plus_one_ignoring_others(tmp_path):
         "# Decisions\n\nIndex of decision records.\n", encoding="utf-8"
     )
     (decisions / "D3-notes.md").write_text(
-        "Notes about D3.\n", encoding="utf-8"
+        "# Notes on D3\n\nScratch notes, not a decision record.\n",
+        encoding="utf-8",
     )
 
     result = spec_scaffolder.next_decision_id(repo_root)

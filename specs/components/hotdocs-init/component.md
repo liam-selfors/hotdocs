@@ -72,3 +72,4 @@ None.
   root; the injectable form, called by `hotdocs-cli`, is now `run`. (`D348`)
 - `D360`: the version is read from the tool root's `pyproject.toml`; the
   next steps give the guide's path.
+- `D365`: `.gitignore` gains `/dist/`.

@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:c33387cb8b63dd6c742c53a6bce3a4ea598babf75f4ec828911e273a1824e34a
+# hotdocs-criterion: sha256:d887dcf47d5ef072cac67d80be9cbcf52c4cb6391959e2354fd1e78313456682
 from pathlib import Path
 
 import pytest
@@ -9,12 +9,12 @@ import spec_scaffolder
 D4_TEXT = (
     "---\n"
     "id: D4\n"
-    "title: An earlier decision\n"
+    "title: Earlier decision\n"
     "status: draft\n"
     "owners: [team-a]\n"
     "---\n"
     "\n"
-    "# D4 — An earlier decision\n"
+    "# D4 — Earlier decision\n"
     "\n"
     "## Context\n"
     "\n"
@@ -30,31 +30,19 @@ def make_repo(tmp_path):
     return repo_root
 
 
-def snapshot(repo_root):
-    decisions = repo_root / "specs" / "decisions"
-    return {
-        p.name: p.read_bytes() for p in sorted(decisions.iterdir())
-    }
-
-
-def body(decision_id, title):
+def body(id_, title):
     return (
         "---\n"
-        + "\n"
-        + "# " + decision_id + " — " + title + "\n"
-        + "\n"
-        + "## Context\n"
-        + "\n"
-        + "TODO.\n"
-        + "\n"
-        + "## Decision\n"
-        + "\n"
-        + "TODO.\n"
-        + "\n"
-        + "## Consequences\n"
-        + "\n"
-        + "TODO.\n"
+        + "\n# " + id_ + " — " + title + "\n"
+        + "\n## Context\n\nTODO.\n"
+        + "\n## Decision\n\nTODO.\n"
+        + "\n## Consequences\n\nTODO.\n"
     )
+
+
+def listing(repo_root):
+    decisions = repo_root / "specs" / "decisions"
+    return sorted(p.name for p in decisions.iterdir())
 
 
 def test_new_decision_with_owners_and_builds_on(tmp_path):
@@ -68,22 +56,22 @@ def test_new_decision_with_owners_and_builds_on(tmp_path):
     assert Path(result).resolve() == expected_path.resolve()
     assert expected_path.is_file()
 
-    expected = (
+    expected_text = (
         "---\n"
-        + "id: D5\n"
-        + "title: Slugs are ASCII\n"
-        + "status: draft\n"
-        + "owners: [team-a]\n"
-        + "builds_on: [D4]\n"
+        "id: D5\n"
+        "title: Slugs are ASCII\n"
+        "status: draft\n"
+        "owners: [team-a]\n"
+        "builds_on: [D4]\n"
         + body("D5", "Slugs are ASCII")
     )
     text = expected_path.read_text(encoding="utf-8")
-    assert text == expected
+    assert text == expected_text
     assert "builds_on: [D4]\n" in text.splitlines(keepends=True)
     assert not any(line.startswith("supersedes:") for line in text.splitlines())
 
 
-def test_new_decision_defaults_owners_and_omits_optional_lines(tmp_path):
+def test_new_decision_default_owners_and_no_links(tmp_path):
     repo_root = make_repo(tmp_path)
 
     result = spec_scaffolder.new_decision(repo_root, "No owners")
@@ -92,7 +80,7 @@ def test_new_decision_defaults_owners_and_omits_optional_lines(tmp_path):
     if not path.is_absolute():
         path = repo_root / path
     assert path.is_file()
-    assert path.resolve().parent == (repo_root / "specs" / "decisions").resolve()
+    assert path.parent.resolve() == (repo_root / "specs" / "decisions").resolve()
 
     text = path.read_text(encoding="utf-8")
     lines = text.splitlines()
@@ -100,33 +88,33 @@ def test_new_decision_defaults_owners_and_omits_optional_lines(tmp_path):
     assert not any(line.startswith("builds_on:") for line in lines)
     assert not any(line.startswith("supersedes:") for line in lines)
 
-    decision_id = path.stem
-    expected = (
+    id_ = path.stem
+    expected_text = (
         "---\n"
-        + "id: " + decision_id + "\n"
-        + "title: No owners\n"
-        + "status: draft\n"
-        + "owners: [unassigned]\n"
-        + body(decision_id, "No owners")
+        "id: " + id_ + "\n"
+        "title: No owners\n"
+        "status: draft\n"
+        "owners: [unassigned]\n"
+        + body(id_, "No owners")
     )
-    assert text == expected
+    assert text == expected_text
 
 
 def test_new_decision_unknown_builds_on_raises_and_writes_nothing(tmp_path):
     repo_root = make_repo(tmp_path)
-    before = snapshot(repo_root)
+    before = listing(repo_root)
 
     with pytest.raises(ValueError):
         spec_scaffolder.new_decision(repo_root, "x", builds_on=["D99"])
 
-    assert snapshot(repo_root) == before
+    assert listing(repo_root) == before
 
 
 def test_new_decision_empty_title_raises_and_writes_nothing(tmp_path):
     repo_root = make_repo(tmp_path)
-    before = snapshot(repo_root)
+    before = listing(repo_root)
 
     with pytest.raises(ValueError):
         spec_scaffolder.new_decision(repo_root, "")
 
-    assert snapshot(repo_root) == before
+    assert listing(repo_root) == before

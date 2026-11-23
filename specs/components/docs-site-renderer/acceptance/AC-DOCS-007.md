@@ -11,7 +11,9 @@ Then it returns 0 and out holds the rendered site
 
 Given a repo_root with no verification/corpus-graph.json
 When cli.main runs ["--repo-root=<repo_root>"]
-Then it returns 1
+Then it returns 1, and stderr holds exactly one line, which starts
+  "error: " and ends "verification/corpus-graph.json is missing; run
+  hotdocs corpus-graph build first" (one line, single spaces)
 
 Given any repo_root
 When cli.main runs ["--bogus"] or ["--out"]

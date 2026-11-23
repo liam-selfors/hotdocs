@@ -115,3 +115,5 @@ None.
   (`interface/assets/app.js.md`), inlined once as a module script. New
   `R-UI-010` (status filter, decided by the pure `hiddenByStatus`),
   `AC-UI-010`, `AC-UI-011`.
+- `D366`: a missing `corpus-graph.json` names `hotdocs corpus-graph
+  build` (`R-UI-009`).

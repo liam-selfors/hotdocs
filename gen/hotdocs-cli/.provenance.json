@@ -1,5 +1,5 @@
 {
-  "spec_bundle_hash": "sha256:57fb94a292c7917a70685f9f7e5352ca3d18c286ce9f69e443b8ea1ecc25fb9d",
+  "spec_bundle_hash": "sha256:53fbbd0bcbb23d3895bc3ac36a810794ba6adb20c01782268fe33ec814cc9988",
   "model_pin": "claude-opus-5-5",
   "prompt_version": "v12",
   "retry_feedback": null,
@@ -23,7 +23,7 @@
     "generator": "generator@3.2.0+v12"
   },
   "provenance_hit": false,
-  "generated_at": "2026-11-23T05:37:44Z",
+  "generated_at": "2026-11-23T07:05:22Z",
   "verification_run_id": "hotdocs-cli-attempt-1",
   "verification_report": {
     "component_id": "comp-hotdocs-cli",
@@ -99,6 +99,18 @@
           "prompt_version": "v1",
           "cache_hit": false
         }
+      },
+      {
+        "id": "AC-CLI-007",
+        "covers": "R-CLI-007",
+        "kind": "generated-test",
+        "result": "pass",
+        "test_authoring": {
+          "model": "claude-opus-5-5",
+          "seed": 1,
+          "prompt_version": "v1",
+          "cache_hit": false
+        }
       }
     ],
     "requirement_results": {
@@ -107,10 +119,11 @@
       "R-CLI-003": "pass",
       "R-CLI-004": "pass",
       "R-CLI-005": "pass",
-      "R-CLI-006": "pass"
+      "R-CLI-006": "pass",
+      "R-CLI-007": "pass"
     },
     "interface_drift": false,
-    "mutation_score": 0.82,
+    "mutation_score": 0.85,
     "mutation_error": null,
     "assets": [
       {
