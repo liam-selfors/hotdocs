@@ -1,5 +1,5 @@
 {
-  "spec_bundle_hash": "sha256:1c5ab2cb752c74bdd306a3c84691c561dfd3625e71fe079104ce2aa18b37c94d",
+  "spec_bundle_hash": "sha256:b0c683bedd3417b7a125d13f57bcf5480978085028116746c52f59805586c4a1",
   "model_pin": "claude-opus-5-5",
   "prompt_version": "v12",
   "retry_feedback": null,
@@ -23,7 +23,7 @@
     "generator": "generator@3.2.0+v12"
   },
   "provenance_hit": false,
-  "generated_at": "2026-11-23T06:31:31Z",
+  "generated_at": "2026-11-23T12:51:12Z",
   "verification_run_id": "component-gate-runner-attempt-1",
   "verification_report": {
     "component_id": "comp-component-gate-runner",
@@ -127,7 +127,7 @@
       "R-GATE-011": "pass"
     },
     "interface_drift": false,
-    "mutation_score": 0.900990099009901,
+    "mutation_score": 0.9072164948453608,
     "mutation_error": null,
     "assets": [
       {
