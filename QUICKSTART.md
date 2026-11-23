@@ -22,6 +22,8 @@ pipx install hotdocs          # or: uv tool install hotdocs
 With Homebrew, from the tap: `brew install <owner>/hotdocs/hotdocs`
 (`packaging/homebrew/hotdocs.rb`). Either way the tool's own components
 ship inside the package, read-only, and every project uses them from there.
+This guide, `AUTHORING.md` and `agent-skills/` ship there too: `hotdocs
+init` ends by printing this guide's path, and the other two sit beside it.
 
 To work on hotdocs itself, install a checkout instead:
 
@@ -106,9 +108,11 @@ each criterion's test be written from what its author sees?),
 lint findings, blast radius, a completeness score, overlaps),
 `hotdocs decision new "<title>"` (record why), `hotdocs component new
 <name>` (lay out a component), `hotdocs track ui build` (a readiness page)
-and `hotdocs docs-site build` (a browsable site of the specs). Verbs that
-can use a model take the one in `hotdocs.toml`, saying so on stderr;
-`--no-model` skips it. `hotdocs` alone lists every verb.
+and `hotdocs docs-site build` (a browsable site of the specs, written to
+`dist/`). Those last two read `verification/corpus-graph.json`, so run
+`hotdocs corpus-graph build` first, and again after the specs change.
+Verbs that can use a model take the one in `hotdocs.toml`, saying so on
+stderr; `--no-model` skips it. `hotdocs` alone lists every verb.
 
 ## 4. Write your own component
 
@@ -116,13 +120,43 @@ A component is a directory of small files, as in the example
 (`specs/components/slugify/`):
 
 - `component.md` — the id (`comp-<name>`), owners, and the capability it
-  `realizes` (declared in `specs/product/`);
+  `realizes`;
 - `requirements/R-<NAME>-001.md` — one requirement per file, each with
   `MUST`;
 - `interface/library.md` — the exact function signatures;
 - `acceptance/AC-<NAME>-001.md` — a `Covers:` line naming a requirement and
   a Given/When/Then with concrete values;
 - `constraints.md`.
+
+`hotdocs component new <name>` lays these out with `realizes: []`, which
+`hotdocs lint` rejects until it names a capability: what the product does
+for its user, one file in `specs/product/`. Write that file yourself, on
+the pattern of the example's `specs/product/slugs.md`:
+
+```
+---
+id: P-SLUGS
+title: Titles Become URL Slugs
+status: draft
+owners: [web-team]
+---
+
+# Titles Become URL Slugs
+
+## Purpose
+
+A page title can be turned into a URL-safe slug.
+
+### CS-SLUGS-001
+Covers: P-SLUGS
+Kind: generated-test
+
+(a Given/When/Then in a `gherkin` block, as in an acceptance criterion)
+```
+
+The scenario is optional. It is checked against the generated code of
+every component that realizes the capability, so `hotdocs verify` runs it
+only with a model.
 
 Run `hotdocs lint` after every change, and `hotdocs spec check
 comp-<name>` before generating. The most useful habit: state concrete
@@ -152,12 +186,27 @@ produces is declared in `component.md`'s frontmatter, one line, as
 assets: [javascript:static/app.js]
 ```
 
+Every declared asset also needs an interface file,
+`interface/assets/<file name>.md` (for `static/app.js`,
+`interface/assets/app.js.md`), stating its surface in the kind's
+notation. For `javascript` that is one export per line in a fenced block,
+followed by what each function takes and returns:
+
+```
+export function filterNodes(nodes, query)
+export function init(document)
+```
+
+Without that file every attempt fails the surface check, and `hotdocs
+generate` reports `surface_check_failed` with the file it expected.
+
 Each kind has a definition (`specs/architecture/asset-kind-<kind>.md`:
 layout, environment, how criteria call it, how its tests are
 strength-checked, and guidance for the model) and an adapter component,
 `comp-kind-<kind>`, that the pipeline runs. The built-in kinds are
 `python` and `javascript` (one ES module of pure functions over JSON
-values, run in Node 24 or newer); a criterion calls an exported function
+values, run in Node 24 or newer); their definitions are in the hotdocs
+repository, not in a project. A criterion calls an exported function
 through the `asset_runner` fixture, and its tests are mutation-tested on
 the JavaScript itself. Never hide another language inside Python strings:
 declare it as an asset. An undeclared kind fails `hotdocs lint`.
@@ -189,7 +238,9 @@ re-verifies the committed code first and regenerates only if that fails.
   of what the model replied, which often names a detail the spec left
   out.
 - `surface_check_failed` — the code did not import, used a name a
-  dependency lacks, or mishandled an unknown command-line argument.
+  dependency lacks, mishandled an unknown command-line argument, or an
+  asset lacks an export its interface lists or has no interface file. A
+  `surface:` line gives each finding.
 - An environment failure (`javascript needs node >= 24`, `python
   environment: needs Python 3.14, found 3.12.4`) stops at once with no
   retry: fix the machine or the pin, then run it again.
@@ -230,3 +281,10 @@ capability that needs a fresh run as `needs a fresh run; pass --model`.
   verification/agentic-generator/test_live_slugify.py`.
 - `hotdocs assist` and `hotdocs impact` need a git repository; without a
   default branch or a merge-base every file counts as changed.
+- No verb takes `--help`: `hotdocs <verb> --help` prints that verb's usage
+  line after a `usage error`, with exit code 2. `hotdocs`
+  alone lists every verb with a one-line summary.
+- `license_scan not evaluated: no-reference-corpus` in `hotdocs
+  generate`'s output is expected in a new project: the license scan
+  compares generated code with a reference corpus of licensed code, and
+  none is configured. It never blocks.

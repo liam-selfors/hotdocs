@@ -1,5 +1,5 @@
 {
-  "spec_bundle_hash": "sha256:516f5e949aa6ffb3f5a3b5f728d72eeb521cd3fd09c997778d8714ce4927e65f",
+  "spec_bundle_hash": "sha256:b542b8df843b61ce573a6672e30ee57b42ff29f2179381869b240ec787b383ef",
   "model_pin": "claude-opus-5-5",
   "prompt_version": "v12",
   "retry_feedback": null,
@@ -23,7 +23,7 @@
     "generator": "generator@3.2.0+v12"
   },
   "provenance_hit": false,
-  "generated_at": "2026-11-21T13:06:18Z",
+  "generated_at": "2026-11-23T06:21:17Z",
   "verification_run_id": "spec-completeness-assistant-attempt-1",
   "verification_report": {
     "component_id": "comp-spec-completeness-assistant",
@@ -109,7 +109,7 @@
       "R-ASSIST-011": "pass"
     },
     "interface_drift": false,
-    "mutation_score": 0.8888888888888888,
+    "mutation_score": 0.9,
     "mutation_error": null,
     "assets": [
       {
@@ -249,6 +249,14 @@
         "type": "Base64 High Entropy String"
       },
       {
+        "file": "verification/provenance-checker/generated-test/test_ac_provcheck_001.py",
+        "type": "Hex High Entropy String"
+      },
+      {
+        "file": "verification/provenance-checker/generated-test/test_ac_provcheck_004.py",
+        "type": "Hex High Entropy String"
+      },
+      {
         "file": "verification/provenance-tracker/generated-test/test_ac_track_013.py",
         "type": "Hex High Entropy String"
       },
@@ -258,6 +266,10 @@
       },
       {
         "file": "verification/provenance-writer/generated-test/test_ac_prov_019.py",
+        "type": "Hex High Entropy String"
+      },
+      {
+        "file": "verification/provenance-writer/generated-test/test_ac_prov_020.py",
         "type": "Hex High Entropy String"
       },
       {

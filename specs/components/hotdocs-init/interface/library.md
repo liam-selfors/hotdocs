@@ -17,8 +17,8 @@ Each question is passed to `input_fn` as its text plus one trailing space,
 e.g. `"Save anyway? [y/N] "`.
 `tool_root` is the tool's own repository. `init` copies nothing from it but
 `examples/slugify/`, only with `--example`, to the project root, never under
-`examples/`; it reads `requirements.txt` (`R-INIT-003`) and loads
-`llm-endpoint` from it.
+`examples/`; it reads `requirements.txt` (`R-INIT-003`) and `pyproject.toml`
+(`R-INIT-002`) and loads `llm-endpoint` from it.
 
 ## llm-endpoint
 
@@ -55,4 +55,4 @@ call to a file outside both the project and the tool root, so a log never counts
 `pytest==` plus `importlib.metadata.version("pytest")` (so nothing is missing). A test embeds no secret-shaped string.
 A criterion's `init runs` or `run([...])` calls `run` with a fake tool root as `tool_root`.
 
-Implements: `specs/architecture/cli-conventions.md`
+Implements: `specs/architecture/cli-conventions.md`, `specs/architecture/tool-version.md`

@@ -1,5 +1,6 @@
-# hotdocs-criterion: sha256:36de294461df88b0085a9bc84132208faf9e05c731f2aa3e9765233d1c40922d
+# hotdocs-criterion: sha256:5f807c7bd21bd5cab45f5281484fb23377235cff1a09318f82aa2ef49a7942d9
 import importlib.util
+import os
 import sys
 from pathlib import Path
 
@@ -25,85 +26,94 @@ def _write(path, text):
     path.write_text(text, encoding="utf-8")
 
 
+GLOSSARY = (
+    "# Glossary\n"
+    "\n"
+    "- **Foo** \u2014 a test term.\n"
+)
+
+COMPONENT_MD = (
+    "---\n"
+    "id: comp-foo\n"
+    "title: Foo\n"
+    "status: draft\n"
+    "owners: [team-a]\n"
+    "sealed: true\n"
+    "source_path: legacy/foo/\n"
+    "depends_on: []\n"
+    "---\n"
+    "\n"
+    "# Foo\n"
+    "\n"
+    "## Purpose\n"
+    "\n"
+    "Foo doubles a number.\n"
+)
+
+R_FOO_001 = (
+    "# R-FOO-001\n"
+    "\n"
+    "**R-FOO-001** \u2014 `foo(x)` MUST return `2 * x`.\n"
+)
+
+R_FOO_002 = (
+    "# R-FOO-002\n"
+    "\n"
+    "**R-FOO-002** \u2014 `foo(x)` MUST return `0` for `x = 0`.\n"
+)
+
+AC_FOO_001 = (
+    "# AC-FOO-001\n"
+    "\n"
+    "Covers: R-FOO-001\n"
+    "Kind: generated-test\n"
+    "\n"
+    "```gherkin\n"
+    "Given x = 2\n"
+    "When foo(x) is called\n"
+    "Then it returns 4\n"
+    "```\n"
+)
+
+AC_FOO_002 = (
+    "# AC-FOO-002\n"
+    "\n"
+    "Covers: R-FOO-002\n"
+    "Kind: generated-test\n"
+    "\n"
+    "```gherkin\n"
+    "Given x = 0\n"
+    "When foo(x) is called\n"
+    "Then it returns 0\n"
+    "```\n"
+)
+
+LIBRARY_MD = (
+    "# Library\n"
+    "\n"
+    "```\n"
+    "foo(x: int) -> int\n"
+    "```\n"
+)
+
+CONSTRAINTS_MD = (
+    "# Constraints\n"
+    "\n"
+    "None.\n"
+)
+
+
 def _build_corpus(repo_root):
     specs = repo_root / "specs"
-    _write(
-        specs / "glossary.md",
-        "# Glossary\n"
-        "\n"
-        "- **Foo** \u2014 a test term.\n",
-    )
+    _write(specs / "glossary.md", GLOSSARY)
     comp = specs / "components" / "foo"
-    _write(
-        comp / "component.md",
-        "---\n"
-        "id: comp-foo\n"
-        "title: Foo\n"
-        "status: draft\n"
-        "owners: [team-a]\n"
-        "sealed: true\n"
-        "source_path: legacy/foo/\n"
-        "depends_on: []\n"
-        "---\n"
-        "\n"
-        "# Foo\n"
-        "\n"
-        "## Purpose\n"
-        "\n"
-        "Foo doubles a number.\n",
-    )
-    _write(
-        comp / "requirements" / "R-FOO-001.md",
-        "# R-FOO-001\n"
-        "\n"
-        "**R-FOO-001** \u2014 `foo(x)` MUST return `2 * x`.\n",
-    )
-    _write(
-        comp / "requirements" / "R-FOO-002.md",
-        "# R-FOO-002\n"
-        "\n"
-        "**R-FOO-002** \u2014 `foo(x)` MUST return `0` for `x = 0`.\n",
-    )
-    _write(
-        comp / "acceptance" / "AC-FOO-001.md",
-        "# AC-FOO-001\n"
-        "\n"
-        "Covers: R-FOO-001\n"
-        "Kind: generated-test\n"
-        "\n"
-        "```gherkin\n"
-        "Given x = 2\n"
-        "When foo(x) is called\n"
-        "Then it returns 4\n"
-        "```\n",
-    )
-    _write(
-        comp / "acceptance" / "AC-FOO-002.md",
-        "# AC-FOO-002\n"
-        "\n"
-        "Covers: R-FOO-002\n"
-        "Kind: generated-test\n"
-        "\n"
-        "```gherkin\n"
-        "Given x = 0\n"
-        "When foo(x) is called\n"
-        "Then it returns 0\n"
-        "```\n",
-    )
-    _write(
-        comp / "interface" / "library.md",
-        "# Library\n"
-        "\n"
-        "```\n"
-        "foo(x: int) -> int\n"
-        "```\n",
-    )
-    _write(
-        comp / "constraints.md",
-        "# Constraints\n"
-        "\n"
-        "None.\n",
-    )
+    _write(comp / "component.md", COMPONENT_MD)
+    _write(comp / "requirements" / "R-FOO-001.md", R_FOO_001)
+    _write(comp / "requirements" / "R-FOO-002.md", R_FOO_002)
+    _write(comp / "acceptance" / "AC-FOO-001.md", AC_FOO_001)
+    _write(comp / "acceptance" / "AC-FOO-002.md", AC_FOO_002)
+    _write(comp / "interface" / "library.md", LIBRARY_MD)
+    _write(comp / "constraints.md", CONSTRAINTS_MD)
 
 
 def _linter_path_in(base):
@@ -116,21 +126,17 @@ def _linter_path_in(base):
     return None
 
 
-def _find_spec_linter_path():
-    here = Path(spec_reviewer.__file__).resolve()
+def _find_spec_linter():
+    module_file = Path(spec_reviewer.__file__).resolve()
     candidates = []
-    for parent in here.parents:
-        if parent.name == "gen":
-            candidates.append(parent / "spec-linter")
-        candidates.append(parent / "gen" / "spec-linter")
-        candidates.append(parent / "spec-linter")
-    for entry in sys.path:
-        try:
-            p = Path(entry).resolve()
-        except Exception:
-            continue
+    for p in module_file.parents:
+        if p.name == "gen":
+            candidates.append(p / "spec-linter")
+    for p in module_file.parents:
         candidates.append(p / "gen" / "spec-linter")
-        candidates.append(p / "spec-linter")
+    cwd = Path(os.getcwd()).resolve()
+    for p in [cwd] + list(cwd.parents):
+        candidates.append(p / "gen" / "spec-linter")
     for base in candidates:
         found = _linter_path_in(base)
         if found is not None:
@@ -138,15 +144,21 @@ def _find_spec_linter_path():
     return None
 
 
+def _assert_lint_clean(repo_root):
+    path = _find_spec_linter()
+    if path is None:
+        # No locatable spec-linter copy; check() lints the corpus itself.
+        return
+    spec_linter = load_module(path, "spec_linter")
+    assert spec_linter.lint(None, repo_root).hard_failures == 0
+
+
 @pytest.fixture
 def repo_root(tmp_path):
     root = tmp_path / "repo"
     root.mkdir()
     _build_corpus(root)
-    linter_path = _find_spec_linter_path()
-    if linter_path is not None:
-        spec_linter = load_module(linter_path, "spec_linter")
-        assert spec_linter.lint(None, root).hard_failures == 0
+    _assert_lint_clean(root)
     return root
 
 

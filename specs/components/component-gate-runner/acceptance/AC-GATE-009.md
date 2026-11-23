@@ -26,6 +26,13 @@ When main runs generate for comp-foo with --model=m
 Then it returns 1 and prints text containing
   "model_call_error: empty_response: no files"
 
+Given a faked run_attempts whose last attempt is "surface_failed", with
+  one file, verification_report None and a surface_report whose one
+  finding has message "static/a.js: no interface file"
+When main runs generate for comp-foo with --model=m
+Then it returns 0 and prints text containing "surface_check_failed" and
+  "surface: static/a.js: no interface file"
+
 Given verify returning overall "fail" with one criterion AC-FOO-001,
   result "fail", failure_origin "test", failure_detail message
   "test authoring failed: network: dropped"

@@ -1,7 +1,5 @@
-# hotdocs-criterion: sha256:8b5a4f85fa35ae5504b835d80eac5fa9158a8ce34b56bc17e4abf40d4b8b0543
+# hotdocs-criterion: sha256:5afda32c4ff5158693e493518ef03d39ff85488bb36807a47b535c5488063db5
 import spec_reviewer
-
-import pytest
 
 
 def make_backend(reply_text=None, error=None):
@@ -26,7 +24,7 @@ def make_backend(reply_text=None, error=None):
     return backend, calls
 
 
-def test_judge_parses_reply_and_calls_backend_once(tmp_path, monkeypatch):
+def test_glossary_judge_parses_reply_and_makes_one_call(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     backend, calls = make_backend('ok {"conflicts": true, "rationale": "narrower"}')
     judge = spec_reviewer.glossary_judge("mock", backend)
@@ -36,7 +34,6 @@ def test_judge_parses_reply_and_calls_backend_once(tmp_path, monkeypatch):
 
     assert result is not None
     assert tuple(result) == (True, "narrower")
-    assert result[0] is True
     assert len(calls) == 1
     prompt = calls[0]["prompt"]
     assert isinstance(prompt, str)
@@ -45,21 +42,27 @@ def test_judge_parses_reply_and_calls_backend_once(tmp_path, monkeypatch):
     assert "glossary meaning" in prompt
 
 
-@pytest.mark.parametrize(
-    "reply_text,error",
-    [
-        ("no json", None),
-        ('{"conflicts": "yes", "rationale": "r"}', None),
-        (None, {"category": "timeout", "message": "the call timed out"}),
-    ],
-    ids=["no-json", "non-bool-conflicts", "model-call-error-timeout"],
-)
-def test_judge_returns_none_for_bad_replies(tmp_path, monkeypatch, reply_text, error):
+def test_glossary_judge_returns_none_for_no_json(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
-    backend, calls = make_backend(reply_text, error)
+    backend, calls = make_backend("no json")
     judge = spec_reviewer.glossary_judge("mock", backend)
+    assert judge("Foo", "local meaning", "glossary meaning") is None
+    assert len(calls) == 1
 
-    result = judge("Foo", "local meaning", "glossary meaning")
 
-    assert result is None
+def test_glossary_judge_returns_none_for_non_bool_conflicts(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    backend, calls = make_backend('{"conflicts": "yes", "rationale": "r"}')
+    judge = spec_reviewer.glossary_judge("mock", backend)
+    assert judge("Foo", "local meaning", "glossary meaning") is None
+    assert len(calls) == 1
+
+
+def test_glossary_judge_returns_none_for_model_call_error(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    backend, calls = make_backend(
+        error={"category": "timeout", "message": "request timed out"}
+    )
+    judge = spec_reviewer.glossary_judge("mock", backend)
+    assert judge("Foo", "local meaning", "glossary meaning") is None
     assert len(calls) == 1

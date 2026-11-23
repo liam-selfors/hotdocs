@@ -24,7 +24,8 @@ gap. Advisory only.
 **In scope:** for each criterion of the named components or criteria,
 building the exact `CriterionBundle` its test author receives; a
 deterministic check that every name the criterion references appears in
-what that author can see; one model call per criterion asking what an
+what that author can see; a check that every declared asset has its
+interface file; one model call per criterion asking what an
 author would have to guess and what behavior goes unstated; lint of the
 named components with the model-backed glossary judge (`R-LINT-015`);
 writing proposals to `.hotdocs/proposals/` on request.
@@ -67,3 +68,4 @@ None.
 ## Change log
 
 - `D300`: initial spec.
+- `D361`: the asset interface check; the prompt's test-mechanics sentence.

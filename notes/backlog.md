@@ -82,6 +82,49 @@ should resolve names to the imports they come from.
 
 ---
 
+## From the first walk through an installed package (2026-11-23)
+
+Found by installing the `0.1.0` wheel and following `QUICKSTART.md` as a
+new user would. `D359` and `D360` fixed the crash on a surface failure,
+the version literal and the missing guides; `D361` made `hotdocs spec
+check` report a declared asset with no interface file and stopped its
+model layer asking which test framework to use. These remain.
+
+- **`hotdocs lint` does not look for a declared asset's interface
+  file.** `interface/assets/<file name>.md` is required
+  (`specs/architecture/asset-kinds.md`). `hotdocs spec check` reports a
+  missing one (`D361`); a developer who skips it still learns only from
+  `surface-checker`, after a generation. A lint rule beside `R-LINT-034`
+  would catch it on every path; `spec-linter` is at the root of the hash
+  tree, so it belongs in the next full wave.
+- **A surface failure the spec causes is retried.** `generation-loop`
+  retries every `surface_failed` attempt (`D310`), but a missing interface
+  file, or an export the interface lists under a name the code may not
+  use, fails the same way each time. `asset_error` findings whose cause
+  is in the spec should end the loop like an environment failure.
+- **`hotdocs <verb> --help` is a usage error.** Every verb prints a
+  `usage error` naming `--help` and its usage line, with exit code 2. `specs/architecture/cli-conventions.md` should state that
+  `--help` and `-h` print the usage line on stdout with exit code 0;
+  every CLI component implements that document, so the change waits for
+  a full wave.
+- **`docs-site build` and `track ui build` do not name their
+  prerequisite.** Without `verification/corpus-graph.json` they fail
+  without saying to run `hotdocs corpus-graph build` first; the message
+  is each component's own. `QUICKSTART.md` now says it.
+- **`hotdocs component new` lays out a component that fails lint.** Its
+  `realizes: []` needs a capability, and nothing lays out a capability
+  file. A `hotdocs capability new <name>` verb, or a `--realizes` flag
+  that also writes the file, would close the gap (`spec-scaffolder`,
+  `hotdocs-cli`).
+- **Smaller.** `hotdocs init`'s `.gitignore` omits `dist/`, which
+  `docs-site build` writes. Generated test files end without a newline.
+  `hotdocs verify --no-model` describes a component never generated as
+  needing a fresh run with a model, when it needs `hotdocs generate`.
+  The built-in asset kinds' definitions ship in no installed package,
+  so `QUICKSTART.md` can only point at the repository.
+
+---
+
 ## Resolved entries
 
 Removed from this file, with their rationale in the decision named:

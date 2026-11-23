@@ -62,7 +62,8 @@ are, in this order:
    verification_report, key.spec_bundle_hash, repo_root)`
 4. `license-scanner`'s `scan(component_id, repo_root)`, then
    `secret-scanner`'s `scan(repo_root)`
-5. only if the loop's last `generation_result` has non-empty `files`:
+5. only if the loop's last `generation_result` has non-empty `files`
+   and its last `verification_report` is not `None` (`R-GATE-006`):
    `provenance-writer`'s `write_provenance(component_id, inputs,
    repo_root)`, `inputs` the plain dict `{component_id,
    generation_result, verification_report, license_scan_result,

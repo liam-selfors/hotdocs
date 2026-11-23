@@ -8,6 +8,7 @@
   "blocked": true,
   "block_reason": "verification_failed",
   "model_call_error": null,
+  "surface_report": null,
   "verification": { "...": "a VerificationReport" },
   "attempts": [{"number": 1, "outcome": "verification_failed", "...": "generation-loop's attempt entry"}],
   "license_scan": { "...": "a LicenseScanResult" },
@@ -28,8 +29,9 @@ and whose `license_scan.blocked` is not `true`. Then `provenance_hit` is
 results.
 
 On a non-sealed miss (`R-GATE-004`), `verification` is the loop's last
-`verification_report` (`null` when none ran) and `attempts` is the
-loop's `attempts` list. When the loop's `passed` is true, `blocked` is
+`verification_report` (`null` when none ran), `surface_report` the
+loop's last `surface_report` (`null` when none was made: `D359`) and
+`attempts` the loop's `attempts` list. When the loop's `passed` is true, `blocked` is
 `false` and `block_reason` and `model_call_error` are `null`, whatever
 its `generation_result` holds. Otherwise `blocked` is `true` and
 `block_reason` comes from the last attempt's `outcome` (`R-GATE-004`);
@@ -47,7 +49,7 @@ For a sealed component (`R-GATE-007`), `verification` is `verify`'s
 report and `attempts` is `[]`; `blocked` is `true`, with `block_reason`
 `"verification_failed"`, exactly when that report's `overall` is
 `"fail"`, and otherwise `false` with `block_reason` `null`;
-`model_call_error` is `null`.
+`model_call_error` and `surface_report` are `null`.
 
 `blocked` concerns generation and verification only.
 `license_scan.blocked` and `secret_scan.flagged` are reported as-is;

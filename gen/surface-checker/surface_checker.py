@@ -1,7 +1,15 @@
-"""Surface checker: cheap pre-verification rejection of a generated candidate."""
+"""Surface checker: rejects a candidate cheaply before the long verification.
+
+Checks, in order: the ``python`` environment (R-SURF-006), an import of the
+candidate (R-SURF-001), the names it uses on each direct dependency
+(R-SURF-002), a smoke run of its command line (R-SURF-003) and the names each
+declared asset provides (R-SURF-005).  The candidate only ever runs in a
+subprocess.
+"""
 
 from __future__ import annotations
 
+import ast
 import json
 import os
 import re
@@ -12,47 +20,42 @@ from pathlib import Path
 
 GATE_VERSION = "surface-checker@1.2.0"
 
-_TIMEOUT = 60
-_PROVISION_TIMEOUT = 600
+_LOADER = re.compile(
+    r"importlib\.import_module\(|module_from_spec\(|exec_module\(|\b_load\w*\("
+)
+_IDENT = re.compile(r"[A-Za-z_$][A-Za-z0-9_$]*")
 _CLI_CONVENTIONS = "specs/architecture/cli-conventions.md"
-_LOAD_CALLS = ("importlib.import_module(", "module_from_spec(", "exec_module(")
-_LOAD_FN_RE = re.compile(r"(?<!\w)_load\w*\(")
-_ASSIGN_RE = re.compile(r"^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=(?!=)(.*)$")
-_IDENT_RE = re.compile(r"[A-Za-z_$][A-Za-z0-9_$]*")
 
-_ADAPTER_SCRIPT = r'''
+_ADAPTER_SCRIPT = r"""
 import importlib.util, json, sys
 from pathlib import Path
-p, fn, arg = sys.argv[1:4]
-spec = importlib.util.spec_from_file_location(Path(p).stem, p)
-m = importlib.util.module_from_spec(spec)
-sys.modules[spec.name] = m
-spec.loader.exec_module(m)
-r = getattr(m, fn)(Path(arg))
-def g(k):
-    return r.get(k) if isinstance(r, dict) else getattr(r, k, None)
-if fn == "surface":
-    out = list(g("names"))
+spec = importlib.util.spec_from_file_location(sys.argv[1], sys.argv[2])
+mod = importlib.util.module_from_spec(spec)
+sys.modules[sys.argv[1]] = mod
+spec.loader.exec_module(mod)
+def get(value, key):
+    return value.get(key) if isinstance(value, dict) else getattr(value, key, None)
+if sys.argv[3] == "provision":
+    r = mod.provision(Path(sys.argv[4]))
+    print(json.dumps({"ok": bool(get(r, "ok")), "reason": get(r, "reason"),
+                      "interpreter": get(r, "interpreter")}))
 else:
-    out = {k: g(k) for k in ("ok", "reason", "interpreter")}
-print(json.dumps(out))
-'''
+    print(json.dumps(list(get(mod.surface(Path(sys.argv[4])), "names"))))
+"""
 
-_DEP_SCRIPT = r'''
+_CHECK_NAMES = r"""
 import importlib, json, sys
-mod = sys.argv[1]
-names = json.loads(sys.argv[2])
-m = importlib.import_module(mod)
+mod = importlib.import_module(sys.argv[1])
 missing = []
-for n in names:
-    if hasattr(m, n):
+for name in json.loads(sys.argv[2]):
+    if hasattr(mod, name):
         continue
     try:
-        importlib.import_module(mod + "." + n)
+        importlib.import_module(sys.argv[1] + "." + name)
     except Exception:
-        missing.append(n)
+        missing.append(name)
 print(json.dumps(missing))
-'''
+"""
 
 
 @dataclass
@@ -64,72 +67,74 @@ class SurfaceReport:
         return {"ok": self.ok, "findings": [dict(f) for f in self.findings]}
 
 
-def _tool_root():
-    for p in Path(__file__).resolve().parents:
-        if p.name == "gen":
-            return p.parent
-    return None
+def _finding(kind: str, message: str) -> dict:
+    return {"kind": kind, "message": message}
 
 
-def _find_adapter(repo_root: Path, kind: str):
-    rel = Path("gen") / f"kind-{kind}" / f"kind_{kind.replace('-', '_')}.py"
-    roots = [repo_root]
-    tool = _tool_root()
-    if tool is not None:
-        roots.append(tool)
-    for root in roots:
-        candidate = root / rel
-        if candidate.is_file():
-            return candidate
-    return None
+def _report(findings: list) -> SurfaceReport:
+    return SurfaceReport(ok=not findings, findings=findings)
 
 
-def _env(pythonpath: Path) -> dict:
-    env = dict(os.environ)
-    env["PYTHONPATH"] = str(pythonpath)
-    env["PYTHONDONTWRITEBYTECODE"] = "1"
-    return env
-
-
-def _run(cmd: list, pythonpath: Path, timeout: int):
-    try:
-        return subprocess.run(
-            cmd,
-            env=_env(pythonpath),
-            cwd=str(pythonpath),
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-        )
-    except subprocess.TimeoutExpired:
-        return None
-
-
-def _last_line(text: str) -> str:
-    lines = [ln.strip() for ln in (text or "").splitlines() if ln.strip()]
+def _last(text: str) -> str:
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
     return lines[-1] if lines else ""
 
 
-def _call_adapter(adapter: Path, fn: str, arg: Path, timeout: int):
-    """Returns ("ok", value), ("failed", stderr line) or ("timeout", None)."""
-    proc = _run(
-        [sys.executable, "-c", _ADAPTER_SCRIPT, str(adapter), fn, str(arg)],
+def _run(args: list, pythonpath: Path, timeout: int):
+    env = dict(os.environ)
+    env["PYTHONPATH"] = str(pythonpath)
+    env["PYTHONDONTWRITEBYTECODE"] = "1"
+    try:
+        proc = subprocess.run(
+            [str(a) for a in args],
+            cwd=str(pythonpath),
+            env=env,
+            capture_output=True,
+            text=True,
+            errors="replace",
+            timeout=timeout,
+        )
+    except subprocess.TimeoutExpired:
+        return None, "", "timeout"
+    return proc.returncode, proc.stdout, proc.stderr
+
+
+def _tool_root(default: Path) -> Path:
+    return next(
+        (p.parent for p in Path(__file__).resolve().parents if p.name == "gen"),
+        default,
+    )
+
+
+def _adapter(kind: str, repo_root: Path):
+    rel = Path("gen") / f"kind-{kind}" / f"kind_{kind.replace('-', '_')}.py"
+    for root in (repo_root, _tool_root(repo_root)):
+        if (root / rel).is_file():
+            return root / rel
+    return None
+
+
+def _call_adapter(adapter: Path, mode: str, arg, timeout: int):
+    return _run(
+        [sys.executable, "-c", _ADAPTER_SCRIPT, adapter.stem, adapter, mode, arg],
         adapter.parent,
         timeout,
     )
-    if proc is None:
-        return "timeout", None
-    if proc.returncode != 0:
-        return "failed", _last_line(proc.stderr)
-    return "ok", json.loads(_last_line(proc.stdout))
+
+
+def _provision(adapter: Path, repo_root: Path, timeout: int):
+    rc, out, err = _call_adapter(adapter, "provision", repo_root, timeout)
+    if rc != 0:
+        return None, ("timed out" if rc is None else _last(err))
+    return json.loads(_last(out)), None
+
+
+def _read(path: Path) -> str:
+    return path.read_text(errors="replace") if path.is_file() else ""
 
 
 def _frontmatter(path: Path) -> list:
-    if not path.is_file():
-        return []
-    lines = path.read_text(encoding="utf-8").splitlines()
-    if not lines or lines[0].strip() != "---":
-        return []
+    lines = _read(path).splitlines()
     out = []
     for line in lines[1:]:
         if line.strip() == "---":
@@ -138,231 +143,180 @@ def _frontmatter(path: Path) -> list:
     return out
 
 
-def _fm_value(lines: list, key: str) -> str:
-    for line in lines:
-        if line.startswith(f"{key}:"):
+def _scalar(fm: list, key: str) -> str:
+    for line in fm:
+        if line.startswith(key + ":"):
             return line[len(key) + 1:].strip().strip("'\"")
     return ""
 
 
-def _depends_on(lines: list) -> list:
-    for i, line in enumerate(lines):
-        if line.startswith("depends_on:"):
-            rest = line[len("depends_on:"):].strip()
-            if rest:
-                items = (x.strip().strip("'\"") for x in rest.strip("[]").split(","))
-                return [x for x in items if x]
-            out = []
-            for nxt in lines[i + 1:]:
-                s = nxt.strip()
-                if s.startswith("-"):
-                    out.append(s[1:].strip().strip("'\""))
-                elif s:
+def _list(fm: list, key: str) -> list:
+    for i, line in enumerate(fm):
+        if line.startswith(key + ":"):
+            rest = line[len(key) + 1:].strip()
+            if rest.startswith("["):
+                inner = rest[1:rest.rfind("]")]
+                return [x.strip().strip("'\"") for x in inner.split(",") if x.strip()]
+            items = []
+            for item in fm[i + 1:]:
+                stripped = item.strip()
+                if not stripped.startswith("-"):
                     break
-            return out
+                items.append(stripped[1:].strip().strip("'\""))
+            return items
     return []
 
 
-def _assets(lines: list) -> list:
-    for line in lines:
+def _assets(fm: list) -> list:
+    for line in fm:
         if line.startswith("assets:"):
             inner = line[line.find("[") + 1:line.rfind("]")]
-            out = []
-            for item in inner.split(","):
-                item = item.strip()
-                if item:
-                    kind, _, path = item.partition(":")
-                    out.append((kind.strip(), path.strip()))
-            return out
+            items = [item.strip() for item in inner.split(",") if item.strip()]
+            return [tuple(part.strip() for part in item.split(":", 1)) for item in items]
     return []
 
 
-def _slug(component_id: str) -> str:
-    return component_id[len("comp-"):] if component_id.startswith("comp-") else component_id
-
-
-def _sources(code_dir: Path) -> list:
-    texts = []
-    for p in sorted(code_dir.rglob("*.py")):
-        if "__pycache__" in p.relative_to(code_dir).parts:
-            continue
-        texts.append(p.read_text(encoding="utf-8", errors="replace"))
-    return texts
-
-
-def _uses(texts: list, dep_slug: str, dep_module: str) -> list:
-    quoted = re.compile(r"""(['"])(%s|%s)\1""" % (re.escape(dep_slug), re.escape(dep_module)))
+def _uses(src: str, dep_slug: str, dep_module: str) -> set:
+    try:
+        tree = ast.parse(src)
+    except (SyntaxError, ValueError):
+        return set()
+    quoted = re.compile(
+        r"""(['"])(%s|%s)\1""" % (re.escape(dep_slug), re.escape(dep_module))
+    )
     aliases = {dep_module}
-    for text in texts:
-        for line in text.splitlines():
-            m = _ASSIGN_RE.match(line)
-            if not m:
-                continue
-            rhs = m.group(2)
-            calls = any(c in rhs for c in _LOAD_CALLS) or _LOAD_FN_RE.search(rhs)
-            if calls and quoted.search(rhs):
-                aliases.add(m.group(1))
-    names = set()
-    for alias in aliases:
-        use_re = re.compile(r"(?<![\w.])%s\.([A-Za-z_][A-Za-z0-9_]*)" % re.escape(alias))
-        for text in texts:
-            for name in use_re.findall(text):
-                if not name.startswith("__"):
-                    names.add(name)
-    return sorted(names)
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign):
+            right = ast.get_source_segment(src, node.value) or ""
+            if _LOADER.search(right) and quoted.search(right):
+                aliases.update(t.id for t in node.targets if isinstance(t, ast.Name))
+    return {
+        node.attr
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Attribute)
+        and isinstance(node.value, ast.Name)
+        and node.value.id in aliases
+        and not node.attr.startswith("__")
+    }
 
 
-def _stated_names(text: str) -> list:
+def _stated(text: str) -> set:
     lines = text.splitlines()
-    names = []
-    inside = False
-    for line in lines:
-        if line.startswith("```"):
-            if inside:
-                break
-            inside = True
-            continue
-        if not inside or not line.strip():
-            continue
-        head = line[:line.index("(")] if "(" in line else line
-        idents = _IDENT_RE.findall(head)
-        if idents:
-            names.append(idents[-1])
+    fences = [i for i, line in enumerate(lines) if line.startswith("```")]
+    start, end = (fences + [len(lines), len(lines)])[:2]
+    names = set()
+    for line in lines[start + 1:end]:
+        ids = _IDENT.findall(line.split("(", 1)[0])
+        if ids:
+            names.add(ids[-1])
     return names
 
 
+def _check_asset(kind, path, repo_root, code_dir, iface_dir, provisioned) -> list:
+    adapter = _adapter(kind, repo_root)
+    if adapter is None:
+        return [_finding("asset_error", f"unknown asset kind: {kind}")]
+    if kind not in provisioned:
+        provisioned[kind] = _provision(adapter, repo_root, 60)
+    result, err = provisioned[kind]
+    if result is None or not result["ok"]:
+        reason = err if result is None else result["reason"]
+        return [_finding("asset_error", f"{path}: {reason}")]
+    asset_file = code_dir / path
+    if not asset_file.is_file():
+        return [_finding("asset_error", f"{path}: no such asset file")]
+    file_name = path.rsplit("/", 1)[-1]
+    iface = iface_dir / "assets" / f"{file_name}.md"
+    if not iface.is_file():
+        return [_finding(
+            "asset_error",
+            f"{path}: no interface file interface/assets/{file_name}.md",
+        )]
+    rc, out, err = _call_adapter(adapter, "surface", asset_file, 60)
+    if rc != 0:
+        return [_finding("asset_error", f"{path}: surface failed: {_last(err)}")]
+    provided = set(json.loads(_last(out)))
+    return [
+        _finding("asset_name_missing", f"{path} has no {name}, which its interface states")
+        for name in sorted(_stated(iface.read_text(errors="replace")) - provided)
+    ]
+
+
 def check_surface(component_id: str, repo_root: Path, code_dir: Path | None = None) -> SurfaceReport:
-    repo_root = Path(repo_root)
-    slug = _slug(component_id)
+    repo_root = Path(repo_root).absolute()
+    slug = component_id.removeprefix("comp-")
     module = slug.replace("-", "_")
-    code_dir = Path(code_dir) if code_dir is not None else repo_root / "gen" / slug
-    spec_dir = repo_root / "specs" / "components" / slug
-    findings: list = []
+    code_dir = Path(code_dir).absolute() if code_dir is not None else repo_root / "gen" / slug
 
-    def done() -> SurfaceReport:
-        return SurfaceReport(ok=not findings, findings=findings)
+    # R-SURF-006: environment.
+    adapter = _adapter("python", repo_root)
+    if adapter is None:
+        return _report([_finding("environment", "unknown asset kind: python")])
+    env, err = _provision(adapter, repo_root, 600)
+    if env is None:
+        return _report([_finding("environment", f"python environment: {err}")])
+    if not env["ok"]:
+        return _report([_finding("environment", env["reason"])])
+    interpreter = env["interpreter"]
 
-    # Check 0: environment (R-SURF-006)
-    py_adapter = _find_adapter(repo_root, "python")
-    if py_adapter is None:
-        findings.append({"kind": "environment", "message": "unknown asset kind: python"})
-        return done()
-    status, value = _call_adapter(py_adapter, "provision", repo_root, _PROVISION_TIMEOUT)
-    if status == "timeout":
-        findings.append({"kind": "environment", "message": "python environment: timed out"})
-        return done()
-    if status == "failed":
-        findings.append({"kind": "environment", "message": f"python environment: {value}"})
-        return done()
-    if not value.get("ok"):
-        findings.append({"kind": "environment", "message": str(value.get("reason"))})
-        return done()
-    interp = value.get("interpreter")
+    # R-SURF-001: import.
+    rc, _, err = _run([interpreter, "-c", f"import {module}"], code_dir, 60)
+    if rc != 0:
+        return _report([_finding("import_error", _last(err))])
 
-    # Check 1: import (R-SURF-001)
-    proc = _run([interp, "-c", f"import {module}"], code_dir, _TIMEOUT)
-    if proc is None:
-        findings.append({"kind": "import_error", "message": "timeout"})
-        return done()
-    if proc.returncode != 0:
-        findings.append({"kind": "import_error", "message": _last_line(proc.stderr)})
-        return done()
+    findings = []
+    spec_dir = repo_root / "specs" / "components"
+    fm = _frontmatter(spec_dir / slug / "component.md")
 
-    fm = _frontmatter(spec_dir / "component.md")
-
-    # Check 2: dependency names (R-SURF-002)
-    texts = _sources(code_dir)
-    for dep in _depends_on(fm):
-        dep_slug = _slug(dep)
+    # R-SURF-002: dependency names.
+    sources = [
+        p.read_text(errors="replace")
+        for p in sorted(code_dir.rglob("*.py"))
+        if "__pycache__" not in p.relative_to(code_dir).parts
+    ]
+    for dep in _list(fm, "depends_on"):
+        dep_slug = dep.removeprefix("comp-")
         dep_module = dep_slug.replace("-", "_")
-        dep_fm = _frontmatter(repo_root / "specs" / "components" / dep_slug / "component.md")
-        if _fm_value(dep_fm, "sealed") == "true":
-            dep_dir = repo_root / _fm_value(dep_fm, "source_path")
+        dep_fm = _frontmatter(spec_dir / dep_slug / "component.md")
+        if _scalar(dep_fm, "sealed") == "true":
+            dep_dir = repo_root / _scalar(dep_fm, "source_path")
         else:
             dep_dir = repo_root / "gen" / dep_slug
         if not dep_dir.is_dir():
             continue
-        names = _uses(texts, dep_slug, dep_module)
-        if not names:
+        names = sorted(set().union(*(_uses(src, dep_slug, dep_module) for src in sources)))
+        rc, out, _ = _run(
+            [interpreter, "-c", _CHECK_NAMES, dep_module, json.dumps(names)], dep_dir, 60
+        )
+        if rc != 0:
             continue
-        proc = _run([interp, "-c", _DEP_SCRIPT, dep_module, json.dumps(names)], dep_dir, _TIMEOUT)
-        if proc is None or proc.returncode != 0:
-            continue
-        for name in sorted(json.loads(_last_line(proc.stdout))):
-            findings.append({
-                "kind": "dependency_name",
-                "message": f"{dep_slug} has no {name}, which the candidate uses",
-            })
+        for name in json.loads(_last(out)):
+            findings.append(_finding(
+                "dependency_name", f"{dep_slug} has no {name}, which the candidate uses"
+            ))
 
-    # Check 3: command line (R-SURF-003)
-    library = spec_dir / "interface" / "library.md"
-    lib_text = library.read_text(encoding="utf-8") if library.is_file() else ""
-    if any(
-        ln.lstrip().startswith("Implements:") and _CLI_CONVENTIONS in ln
-        for ln in lib_text.splitlines()
-    ):
-        script = f"import sys\nimport {module}\nsys.exit({module}.main(['--hotdocs-smoke-unknown']))"
-        proc = _run([interp, "-c", script], code_dir, _TIMEOUT)
-        if proc is None:
-            findings.append({"kind": "cli_usage", "message": "timeout"})
+    # R-SURF-003: command line.
+    iface_dir = spec_dir / slug / "interface"
+    library = _read(iface_dir / "library.md").splitlines()
+    if any(line.startswith("Implements:") and _CLI_CONVENTIONS in line for line in library):
+        code = f"import sys, {module}; sys.exit({module}.main(['--hotdocs-smoke-unknown']))"
+        rc, _, err = _run([interpreter, "-c", code], code_dir, 60)
+        if rc is None:
+            findings.append(_finding("cli_usage", "timeout"))
         else:
             parts = []
-            if proc.returncode != 2:
-                parts.append(f"exit {proc.returncode}")
-            err_lines = proc.stderr.splitlines()
-            first = err_lines[0] if err_lines else ""
-            if not first.startswith("usage error: "):
+            if rc != 2:
+                parts.append(f"exit {rc}")
+            if not (err.splitlines() or [""])[0].startswith("usage error: "):
                 parts.append("no usage error line")
-            if "Traceback" in proc.stderr:
+            if "Traceback" in err:
                 parts.append("traceback")
             if parts:
-                findings.append({"kind": "cli_usage", "message": ", ".join(parts)})
+                findings.append(_finding("cli_usage", ", ".join(parts)))
 
-    # Check 4: assets (R-SURF-005)
+    # R-SURF-005: assets.
     provisioned: dict = {}
     for kind, path in _assets(fm):
-        adapter = _find_adapter(repo_root, kind)
-        if adapter is None:
-            findings.append({"kind": "asset_error", "message": f"unknown asset kind: {kind}"})
-            continue
-        if kind not in provisioned:
-            p_status, p_value = _call_adapter(adapter, "provision", repo_root, _TIMEOUT)
-            if p_status == "ok":
-                provisioned[kind] = p_value
-            else:
-                provisioned[kind] = {
-                    "ok": False,
-                    "reason": f"{kind} environment: {p_value if p_status == 'failed' else 'timed out'}",
-                }
-        prov = provisioned[kind]
-        if not prov.get("ok"):
-            findings.append({"kind": "asset_error", "message": f"{path}: {prov.get('reason')}"})
-            continue
-        asset_file = code_dir / path
-        if not asset_file.is_file():
-            findings.append({"kind": "asset_error", "message": f"{path}: no such asset file"})
-            continue
-        file_name = path.rsplit("/", 1)[-1]
-        iface = spec_dir / "interface" / "assets" / f"{file_name}.md"
-        if not iface.is_file():
-            findings.append({
-                "kind": "asset_error",
-                "message": f"{path}: no interface file interface/assets/{file_name}.md",
-            })
-            continue
-        s_status, s_value = _call_adapter(adapter, "surface", asset_file, _TIMEOUT)
-        if s_status == "timeout":
-            findings.append({"kind": "asset_error", "message": f"{path}: surface failed: timeout"})
-            continue
-        if s_status == "failed":
-            findings.append({"kind": "asset_error", "message": f"{path}: surface failed: {s_value}"})
-            continue
-        provided = set(s_value)
-        stated = set(_stated_names(iface.read_text(encoding="utf-8")))
-        for name in sorted(stated - provided):
-            findings.append({
-                "kind": "asset_name_missing",
-                "message": f"{path} has no {name}, which its interface states",
-            })
+        findings.extend(_check_asset(kind, path, repo_root, code_dir, iface_dir, provisioned))
 
-    return done()
+    return _report(findings)

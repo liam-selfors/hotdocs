@@ -1,7 +1,6 @@
 # Library
 
 ```
-TOOL_VERSION = "0.1.0"
 run(argv=None, *, tool_root=None, input_fn=None, output_fn=None,
     env=None, cwd=None) -> int
 main(argv: list[str] | None = None) -> int
@@ -10,6 +9,10 @@ main(argv: list[str] | None = None) -> int
 `main` is the `cli-conventions.md` entry: it returns `run(argv)`, so the
 tool root is derived as below. `run` is the injectable form, called by the
 entry module in `tools/` and by every criterion (`R-CLI-006`).
+
+The tool version printed by `R-CLI-004` is read from `tool_root` as
+`specs/architecture/tool-version.md` says; the module holds no version
+literal.
 
 `argv` defaults to `sys.argv[1:]`, `input_fn` to `input`, `output_fn` to
 `print`, `env` to `os.environ`, `cwd` to the current directory. Normal
@@ -40,10 +43,11 @@ which appends `json.dumps(argv)` as a line to `<project>/calls.log` (the path
 written into its source) and returns `7`. For the `init` row the fake lives
 at `<tool_root>/gen/hotdocs-init/hotdocs_init.py` and defines `run(argv,
 **keywords)` in place of `main`, also logging the keywords it received. A **fake tool root** is a separate temporary
-directory passed as `tool_root`, holding fakes at the same relative paths.
+directory passed as `tool_root`, holding fakes at the same relative paths
+and, where a criterion says so, a `pyproject.toml`.
 A **fake llm-endpoint** at `<project>/gen/llm-endpoint/llm_endpoint.py`
 defines `load_config(config_path=None)`, whose behaviour (return a dict,
 return `None`, or raise `ValueError`) is written into its source. A
 project is a temporary directory passed as `cwd`.
 
-Implements: `specs/architecture/cli-conventions.md`
+Implements: `specs/architecture/cli-conventions.md`, `specs/architecture/tool-version.md`
