@@ -1,10 +1,11 @@
 # hotdocs-criterion: sha256:76bda1c94c414601882f322950db490b618f25acc3fd9df16b94128cdd65d935
 import re
+from pathlib import Path
 
 import test_author
 
 
-PROBE_STANDIN_SOURCE = (
+PROBE_SOURCE = (
     "class _Report:\n"
     "    def __init__(self):\n"
     "        self.ok = True\n"
@@ -13,40 +14,32 @@ PROBE_STANDIN_SOURCE = (
     "        self.tests_reached = 1\n"
     "\n"
     "    def to_dict(self):\n"
-    "        return {\n"
-    "            'ok': self.ok,\n"
-    "            'findings': list(self.findings),\n"
-    "            'tests_run': self.tests_run,\n"
-    "            'tests_reached': self.tests_reached,\n"
-    "        }\n"
+    "        return {'ok': self.ok, 'findings': list(self.findings), "
+    "'tests_run': self.tests_run, 'tests_reached': self.tests_reached}\n"
     "\n"
     "\n"
-    "def probe(test_source, criterion_bundle, module_name, *, timeout=60.0, interpreter=None):\n"
+    "def probe(test_source, criterion_bundle, module_name, *, timeout=60.0, "
+    "interpreter=None, assets=None):\n"
     "    return _Report()\n"
 )
 
-VALID_TEST_FILE = "def test_placeholder():\n    assert True\n"
-
-NONCE_RE = re.compile(r"-----BEGIN FILE ([0-9a-f]{32})-----")
+GOOD_FILE = "def test_placeholder():\n    assert True\n"
 
 
-def _setup_repo(repo_root, monkeypatch):
-    repo_root.mkdir(parents=True, exist_ok=True)
-    probe_dir = repo_root / "gen" / "test-probe"
-    probe_dir.mkdir(parents=True, exist_ok=True)
-    (probe_dir / "test_probe.py").write_text(PROBE_STANDIN_SOURCE, encoding="utf-8")
-    monkeypatch.chdir(repo_root)
-    monkeypatch.delenv("VAR_CACHE_STORE_URL", raising=False)
+def _plant_probe(repo_root):
+    d = Path(repo_root) / "gen" / "test-probe"
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "test_probe.py").write_text(PROBE_SOURCE, encoding="utf-8")
 
 
-def _make_mock(prompts):
+def _make_backend(prompts):
     def backend(prompt, model, **params):
         prompts.append(prompt)
-        nonce = NONCE_RE.findall(prompt)[-1]
+        n = re.findall(r"-----BEGIN FILE ([0-9a-f]{32})-----", prompt)[-1]
         text = (
-            "-----BEGIN FILE " + nonce + "-----\n"
-            + VALID_TEST_FILE
-            + "\n-----END FILE " + nonce + "-----"
+            "-----BEGIN FILE " + n + "-----\n"
+            + GOOD_FILE
+            + "\n-----END FILE " + n + "-----"
         )
         return {
             "text": text,
@@ -58,30 +51,37 @@ def _make_mock(prompts):
     return backend
 
 
-def _base_bundle():
-    return {
+def _bundle(**extra):
+    b = {
         "component_id": "comp-widget-maker",
         "criterion_id": "AC-WIDGET-MAKER-001",
         "covers": "R-WIDGET-MAKER-001",
         "criterion_text": "Given a widget\nWhen made\nThen it exists",
-        "requirement_text": "R-WIDGET-MAKER-001 - The widget MUST be made.",
-        "interface": "make_widget() -> dict",
+        "requirement_text": "R-WIDGET-MAKER-001 The maker MUST make widgets.",
+        "interface": "make() -> dict",
         "glossary": "",
         "dependency_interfaces": {},
     }
+    b.update(extra)
+    return b
 
 
-def test_prompt_holds_lint_block_with_derived_module_name(tmp_path, monkeypatch):
-    repo_root = tmp_path / "repo_derived"
-    _setup_repo(repo_root, monkeypatch)
+def _setup(tmp_path, monkeypatch, name):
+    repo_root = tmp_path / name
+    repo_root.mkdir()
+    monkeypatch.chdir(repo_root)
+    monkeypatch.delenv("VAR_CACHE_STORE_URL", raising=False)
+    _plant_probe(repo_root)
+    return repo_root
+
+
+def test_prompt_holds_lint_block_with_derived_module(tmp_path, monkeypatch):
+    repo_root = _setup(tmp_path, monkeypatch, "s1")
     prompts = []
-    bundle = _base_bundle()
-
     test_author.author_test(
-        bundle, "mock", repo_root=repo_root, llm_backend=_make_mock(prompts)
+        _bundle(), "mock", repo_root=repo_root, llm_backend=_make_backend(prompts)
     )
-
-    assert prompts, "mock model was never called"
+    assert prompts, "the mock model was never called"
     first = prompts[0]
     lines = first.splitlines()
     assert "    import widget_maker" in lines
@@ -89,18 +89,16 @@ def test_prompt_holds_lint_block_with_derived_module_name(tmp_path, monkeypatch)
     assert "@MODULE@" not in first
 
 
-def test_prompt_uses_first_module_name_when_given(tmp_path, monkeypatch):
-    repo_root = tmp_path / "repo_module_names"
-    _setup_repo(repo_root, monkeypatch)
+def test_prompt_uses_first_module_name(tmp_path, monkeypatch):
+    repo_root = _setup(tmp_path, monkeypatch, "s2")
     prompts = []
-    bundle = _base_bundle()
-    bundle["module_names"] = ["alpha_mod", "beta_mod"]
-
     test_author.author_test(
-        bundle, "mock", repo_root=repo_root, llm_backend=_make_mock(prompts)
+        _bundle(module_names=["alpha_mod", "beta_mod"]),
+        "mock",
+        repo_root=repo_root,
+        llm_backend=_make_backend(prompts),
     )
-
-    assert prompts, "mock model was never called"
+    assert prompts, "the mock model was never called"
     lines = prompts[0].splitlines()
     assert "    import alpha_mod" in lines
     assert "    import widget_maker" not in lines

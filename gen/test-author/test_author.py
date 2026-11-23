@@ -1,4 +1,4 @@
-"""Test Author: authors the test code for one generated-test criterion."""
+"""test-author: authors the test code for one generated-test criterion."""
 
 import dataclasses
 import hashlib
@@ -11,19 +11,18 @@ from collections.abc import Mapping
 from pathlib import Path
 
 GATE_VERSION = "generated_test@3.0.0"
+GATE_TYPE = "generated_test"
 PROMPT_VERSION = "v1"
 
-_USAGE = (
-    "usage: hotdocs author-test <component-id> <criterion-id> --model=<model-id> "
-    "[--seed=<n>] [--repo-root=<dir>] [--format=json|text]"
-)
-_FLAGS = ("--model", "--seed", "--repo-root", "--format")
 _HEADER_PREFIX = "# hotdocs-criterion:"
+_HEADER_KEYS = ("criterion_text", "requirement_text", "interface", "glossary", "testing")
 _MAX_REPAIRS = 2
 
 
 @dataclasses.dataclass
 class TestAuthoringResult:
+    __test__ = False
+
     component_id: str
     criterion_id: str
     model: str
@@ -35,6 +34,106 @@ class TestAuthoringResult:
     repair_attempts: int
     probe_findings: list
 
+
+# --------------------------------------------------------------------------
+# Field access helpers
+# --------------------------------------------------------------------------
+
+def _bget(bundle, name, default):
+    if isinstance(bundle, Mapping):
+        return bundle.get(name, default)
+    return getattr(bundle, name, default)
+
+
+def _field(value, name):
+    return value[name] if isinstance(value, Mapping) else getattr(value, name)
+
+
+# --------------------------------------------------------------------------
+# Dependency loading
+# --------------------------------------------------------------------------
+
+def _tool_root():
+    here = Path(__file__).resolve()
+    return next(p for p in here.parents if p.name == "gen").parent
+
+
+def _load_dependency(slug, module_name, repo_root):
+    base = Path(repo_root) / "gen" / slug
+    if not base.is_dir():
+        base = _tool_root() / "gen" / slug
+    flat = base / (module_name + ".py")
+    if flat.is_file():
+        spec = importlib.util.spec_from_file_location(module_name, flat)
+    else:
+        package_dir = base / module_name
+        spec = importlib.util.spec_from_file_location(
+            module_name,
+            package_dir / "__init__.py",
+            submodule_search_locations=[str(package_dir)],
+        )
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+# --------------------------------------------------------------------------
+# Names, paths, hashes
+# --------------------------------------------------------------------------
+
+def _slug(component_id):
+    return component_id.removeprefix("comp-")
+
+
+def _derived_module(component_id):
+    return _slug(component_id).replace("-", "_")
+
+
+def _test_path(component_id, criterion_id):
+    filename = "test_" + criterion_id.lower().replace("-", "_") + ".py"
+    return "verification/" + _slug(component_id) + "/generated-test/" + filename
+
+
+def _criterion_header_hash(bundle):
+    data = {k: (_bget(bundle, k, "") or "") for k in _HEADER_KEYS}
+    text = json.dumps(data, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def _criterion_content_hash(bundle):
+    data = {
+        "component_id": _bget(bundle, "component_id", "") or "",
+        "criterion_id": _bget(bundle, "criterion_id", "") or "",
+        "covers": _bget(bundle, "covers", "") or "",
+        "criterion_text": _bget(bundle, "criterion_text", "") or "",
+        "requirement_text": _bget(bundle, "requirement_text", "") or "",
+        "interface": _bget(bundle, "interface", "") or "",
+        "glossary": _bget(bundle, "glossary", "") or "",
+        "testing": _bget(bundle, "testing", "") or "",
+        "dependency_interfaces": dict(_bget(bundle, "dependency_interfaces", None) or {}),
+        "module_names": list(_bget(bundle, "module_names", None) or []),
+    }
+    text = json.dumps(data, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+    return "sha256:" + hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def _gate_inputs_hash(seed):
+    text = json.dumps({"seed": seed, "prompt_version": PROMPT_VERSION}, sort_keys=True,
+                      separators=(",", ":"))
+    return "sha256:" + hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def _with_header(header, content):
+    first, _, rest = content.partition("\n")
+    if first.startswith(_HEADER_PREFIX):
+        content = rest
+    return header + "\n" + content
+
+
+# --------------------------------------------------------------------------
+# Prompt blocks (specs/architecture/test-author-prompt.md)
+# --------------------------------------------------------------------------
 
 _BLOCK_010 = """\
 The component under test itself needs no custom loader: a plain `import @MODULE@`.
@@ -117,188 +216,108 @@ To confirm a fake ran, the fake's own code appends one line per call to a log fi
 A test builds the source of any file it writes by concatenating strings, with `repr()` for every value it embeds, never with `str.format`, `%` or an f-string over text that holds braces or percent signs."""
 
 _BLOCKS = (
-    _BLOCK_010,
-    _BLOCK_011,
-    _BLOCK_012,
-    _BLOCK_013,
-    _BLOCK_014,
-    _BLOCK_015,
-    _BLOCK_021,
-    _BLOCK_022,
-    _BLOCK_023,
-    _BLOCK_024,
+    _BLOCK_010, _BLOCK_011, _BLOCK_012, _BLOCK_013, _BLOCK_014,
+    _BLOCK_015, _BLOCK_021, _BLOCK_022, _BLOCK_023, _BLOCK_024,
 )
 
 
-def _get(value, name):
-    return value[name] if isinstance(value, dict) else getattr(value, name)
+# --------------------------------------------------------------------------
+# Prompt construction and extraction
+# --------------------------------------------------------------------------
 
-
-def _field(bundle, name, default):
-    if isinstance(bundle, Mapping):
-        value = bundle.get(name, default)
-    else:
-        value = getattr(bundle, name, default)
-    return default if value is None else value
-
-
-def _slug(component_id):
-    return component_id[len("comp-"):] if component_id.startswith("comp-") else component_id
-
-
-def _derived_module(component_id):
-    return _slug(component_id).replace("-", "_")
-
-
-def _tool_root():
-    return next(p.parent for p in Path(__file__).resolve().parents if p.name == "gen")
-
-
-def _load(repo_root, slug):
-    name = slug.replace("-", "_")
-    base = Path(repo_root) / "gen" / slug
-    if not base.is_dir():
-        base = _tool_root() / "gen" / slug
-    flat = base / (name + ".py")
-    if flat.is_file():
-        spec = importlib.util.spec_from_file_location(name, flat)
-    else:
-        pkg = base / name / "__init__.py"
-        spec = importlib.util.spec_from_file_location(
-            name, pkg, submodule_search_locations=[str(pkg.parent)]
-        )
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[name] = module
-    spec.loader.exec_module(module)
-    return module
-
-
-def _sha256(text):
-    return hashlib.sha256(text.encode("utf-8")).hexdigest()
-
-
-def _criterion_header(bundle):
-    data = {
-        k: _field(bundle, k, "")
-        for k in ("criterion_text", "requirement_text", "interface", "glossary", "testing")
-    }
-    text = json.dumps(data, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
-    return _HEADER_PREFIX + " sha256:" + _sha256(text)
-
-
-def _with_header(bundle, content):
-    first, _, rest = content.partition("\n")
-    if first.startswith(_HEADER_PREFIX):
-        content = rest
-    return _criterion_header(bundle) + "\n" + content
-
-
-def _cache_key(cm, bundle, model, seed):
-    criterion = {
-        k: _field(bundle, k, "")
-        for k in (
-            "component_id",
-            "criterion_id",
-            "covers",
-            "criterion_text",
-            "requirement_text",
-            "interface",
-            "glossary",
-            "testing",
-        )
-    }
-    criterion["dependency_interfaces"] = dict(_field(bundle, "dependency_interfaces", {}))
-    criterion["module_names"] = list(_field(bundle, "module_names", []))
-    criterion_hash = _sha256(json.dumps(criterion, sort_keys=True, ensure_ascii=False))
-    inputs_hash = _sha256(
-        json.dumps({"seed": seed, "prompt_version": PROMPT_VERSION}, sort_keys=True)
-    )
-    return cm.CacheKey(
-        spec_bundle_hash="sha256:" + criterion_hash,
-        gate_inputs_hash="sha256:" + inputs_hash,
-        gate_version=GATE_VERSION,
-        model_pin=model,
-    )
-
-
-def _reply_format(nonce):
+def _reply_instruction(nonce):
     return (
-        "Reply format: you have no tool or file access and must answer from this prompt alone. "
-        "Wrap your test file's content exactly as:\n"
+        "You have no tool or file access: answer from the material in this prompt alone.\n"
+        "Reply with the complete test file, wrapped exactly as follows, each marker on a "
+        "line of its own, with nothing but the file between them:\n"
         "-----BEGIN FILE " + nonce + "-----\n"
         "<the complete, exact test file content, verbatim>\n"
         "-----END FILE " + nonce + "-----"
     )
 
 
-def _build_prompt(bundle, nonce):
-    component_id = _field(bundle, "component_id", "")
-    modules = list(_field(bundle, "module_names", [])) or [_derived_module(component_id)]
-    deps = _field(bundle, "dependency_interfaces", {})
-    parts = [
-        "You are writing one pytest test file for one acceptance criterion of component "
-        + component_id
-        + ", from its spec alone, never its implementation. The test exercises the "
+def _build_prompt(bundle, import_names, module):
+    component_id = _bget(bundle, "component_id", "") or ""
+    dependency_interfaces = _bget(bundle, "dependency_interfaces", None) or {}
+    sections = [
+        "You are writing one pytest test file for an acceptance criterion of the "
+        "component `" + component_id + "`. Work from the spec text below alone; the "
+        "implementation is not shown and must not be assumed. The test exercises the "
         "component's public interface as described and asserts the criterion's Then clause.",
-        "You have no tool or file access: answer from the bundle below alone.",
-        "Each module under test is imported with exactly the statement below, in this order:\n"
-        + "\n".join("import " + m for m in modules),
+        "## Module under test\n\n"
+        "Import the module(s) under test with exactly these statements, in this order:\n\n"
+        + "\n".join("import " + name for name in import_names)
+        + "\n\nThe module may be laid out as a `<module>.py` file or a `<module>/` "
+        "package; the import is the same either way.",
         "## Criterion "
-        + _field(bundle, "criterion_id", "")
+        + (_bget(bundle, "criterion_id", "") or "")
         + "\n\nCovers: "
-        + _field(bundle, "covers", "")
+        + (_bget(bundle, "covers", "") or "")
         + "\n\n"
-        + _field(bundle, "criterion_text", ""),
-        "## Covered requirement\n\n" + _field(bundle, "requirement_text", ""),
-        "## Interface of the component under test\n\n" + _field(bundle, "interface", ""),
-        "## Dependency interfaces"
-        + "".join("\n\n### " + dep_id + "\n" + text for dep_id, text in deps.items()),
-        "## Testing guidance\n\n" + _field(bundle, "testing", ""),
-        "## Glossary\n\n" + _field(bundle, "glossary", ""),
-        "## Rules",
+        + (_bget(bundle, "criterion_text", "") or ""),
+        "## Covered requirement\n\n" + (_bget(bundle, "requirement_text", "") or ""),
+        "## Interface of the component under test\n\n" + (_bget(bundle, "interface", "") or ""),
     ]
-    parts.extend(block.replace("@MODULE@", modules[0]) for block in _BLOCKS)
-    parts.append(_reply_format(nonce))
-    return "\n\n".join(parts)
+    for dep_id, text in dependency_interfaces.items():
+        sections.append("## Dependency interface: " + dep_id + "\n\n" + text)
+    sections.append("## Glossary\n\n" + (_bget(bundle, "glossary", "") or ""))
+    sections.append("## Testing guidance\n\n" + (_bget(bundle, "testing", "") or ""))
+    sections.append("## Rules")
+    for block in _BLOCKS:
+        sections.append(block.replace("@MODULE@", module))
+    nonce = secrets.token_hex(16)
+    sections.append(_reply_instruction(nonce))
+    return "\n\n".join(sections), nonce
 
 
-def _repair_prompt(original, source, findings, nonce):
-    lines = "\n".join(
+def _repair_prompt(original_prompt, source, findings):
+    lines = [
         str(f["kind"]) + " (line " + str(f["line"]) + "): " + str(f["message"])
         for f in findings
         if f["severity"] == "error"
-    )
-    return (
-        original
-        + "\n\nYour previous test file was rejected by an automated probe. Its full source:\n\n"
+    ]
+    nonce = secrets.token_hex(16)
+    prompt = (
+        original_prompt
+        + "\n\n## Rejected test\n\nThe test file you wrote was rejected. Its full source:\n\n"
         + source
-        + "\n\nFindings:\n"
-        + lines
-        + "\n\nReply with the complete corrected test file.\n\n"
-        + _reply_format(nonce)
+        + "\n\nIts errors:\n"
+        + "\n".join(lines)
+        + "\n\nWrite the complete corrected test file.\n\n"
+        + _reply_instruction(nonce)
     )
+    return prompt, nonce
 
 
 def _extract(text, nonce):
     match = re.search(
         "-----BEGIN FILE " + nonce + "-----\n(.*?)\n-----END FILE " + nonce + "-----",
         text,
-        re.S,
+        re.DOTALL,
     )
-    return None if match is None else match.group(1)
+    return match.group(1) if match else None
 
+
+def _finding_dict(finding):
+    return {k: _field(finding, k) for k in ("kind", "severity", "line", "message")}
+
+
+def _write(root, rel_path, content):
+    path = Path(root) / rel_path
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(content.encode("utf-8"))
+
+
+# --------------------------------------------------------------------------
+# Library entry point
+# --------------------------------------------------------------------------
 
 def author_test(bundle, model, seed=0, *, repo_root=None, llm_backend=None):
-    repo_root = Path(repo_root) if repo_root is not None else Path.cwd()
-    component_id = _field(bundle, "component_id", "")
-    criterion_id = _field(bundle, "criterion_id", "")
-    rel_path = (
-        "verification/"
-        + _slug(component_id)
-        + "/generated-test/test_"
-        + criterion_id.lower().replace("-", "_")
-        + ".py"
-    )
+    root = Path(repo_root) if repo_root is not None else Path.cwd()
+    component_id = _bget(bundle, "component_id", "") or ""
+    criterion_id = _bget(bundle, "criterion_id", "") or ""
+    rel_path = _test_path(component_id, criterion_id)
+    header = _HEADER_PREFIX + " sha256:" + _criterion_header_hash(bundle)
 
     def result(cache_hit, file, error, repairs, findings):
         return TestAuthoringResult(
@@ -314,152 +333,148 @@ def author_test(bundle, model, seed=0, *, repo_root=None, llm_backend=None):
             probe_findings=findings,
         )
 
-    def write(content):
-        target = repo_root / rel_path
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_bytes(content.encode("utf-8"))
-
-    cm = _load(repo_root, "cache-manager")
-    key = _cache_key(cm, bundle, model, seed)
-    cached = cm.get(key, repo_root=repo_root)
-    if not isinstance(cached, cm.Miss):
-        cached_content = _get(_get(_get(cached, "payload"), "file"), "content")
-        content = _with_header(bundle, cached_content)
-        write(content)
+    cache_manager = _load_dependency("cache-manager", "cache_manager", root)
+    key = cache_manager.CacheKey(
+        spec_bundle_hash=_criterion_content_hash(bundle),
+        gate_inputs_hash=_gate_inputs_hash(seed),
+        gate_version=GATE_VERSION,
+        model_pin=model,
+    )
+    cached = cache_manager.get(key, repo_root=root)
+    if not isinstance(cached, cache_manager.Miss):
+        payload = _field(cached, "payload")
+        content = _with_header(header, _field(_field(payload, "file"), "content"))
+        _write(root, rel_path, content)
         return result(True, {"path": rel_path, "content": content}, None, 0, [])
 
-    llm = _load(repo_root, "llm-endpoint")
-    tp = _load(repo_root, "test-probe")
-    modules = list(_field(bundle, "module_names", []))
-    module_name = modules or _derived_module(component_id)
+    llm_endpoint = _load_dependency("llm-endpoint", "llm_endpoint", root)
+    test_probe = _load_dependency("test-probe", "test_probe", root)
 
-    nonce = secrets.token_hex(16)
-    original = _build_prompt(bundle, nonce)
-    prompt = original
+    module_names = list(_bget(bundle, "module_names", None) or [])
+    derived = _derived_module(component_id)
+    import_names = module_names if module_names else [derived]
+    probe_module = module_names if module_names else derived
+
+    original_prompt, nonce = _build_prompt(bundle, import_names, import_names[0])
+    prompt = original_prompt
     repairs = 0
     findings = []
     while True:
-        response = llm.complete(prompt, model, backend=llm_backend)
-        error = _get(response, "model_call_error")
+        response = llm_endpoint.complete(prompt, model, backend=llm_backend)
+        error = _field(response, "model_call_error")
         if error is not None:
-            return result(
-                False,
-                None,
-                {"category": _get(error, "category"), "message": _get(error, "message")},
-                repairs,
-                findings,
-            )
-        content = _extract(_get(response, "text"), nonce)
-        if content is None:
-            return result(
-                False,
-                None,
-                {
-                    "category": "no_file_block",
-                    "message": "reply holds no matching BEGIN/END FILE marker pair",
-                },
-                repairs,
-                findings,
-            )
-        report = tp.probe(content, bundle, module_name)
-        findings = [dict(f) for f in _get(report, "findings")]
-        if _get(report, "ok"):
+            err = {"category": _field(error, "category"), "message": _field(error, "message")}
+            return result(False, None, err, repairs, findings)
+        source = _extract(_field(response, "text"), nonce)
+        if source is None:
+            err = {
+                "category": "extraction_failed",
+                "message": "reply held no matching BEGIN/END FILE pair",
+            }
+            return result(False, None, err, repairs, findings)
+        report = test_probe.probe(source, bundle, probe_module)
+        findings = [_finding_dict(f) for f in _field(report, "findings")]
+        if _field(report, "ok"):
             break
         if repairs == _MAX_REPAIRS:
-            return result(
-                False,
-                None,
-                {
-                    "category": "test_probe_failed",
-                    "message": "no authored test passed test-probe after "
-                    + str(_MAX_REPAIRS)
-                    + " repair attempts",
-                },
-                repairs,
-                findings,
-            )
+            err = {
+                "category": "test_probe_failed",
+                "message": "authored test failed test-probe after "
+                + str(_MAX_REPAIRS) + " repair attempts",
+            }
+            return result(False, None, err, repairs, findings)
         repairs += 1
-        nonce = secrets.token_hex(16)
-        prompt = _repair_prompt(original, content, findings, nonce)
+        prompt, nonce = _repair_prompt(original_prompt, source, findings)
 
-    final = _with_header(bundle, content)
-    file = {"path": rel_path, "content": final}
-    cm.put(
+    content = _with_header(header, source)
+    accepted = result(False, {"path": rel_path, "content": content}, None, repairs, findings)
+    cache_manager.put(
         key,
-        cm.CachedResult(
-            gate_type="generated_test",
-            payload={
-                "component_id": component_id,
-                "criterion_id": criterion_id,
-                "model": model,
-                "file": dict(file),
-                "seed": seed,
-                "prompt_version": PROMPT_VERSION,
-            },
-            stored_at=cm.now_iso(),
+        cache_manager.CachedResult(
+            gate_type=GATE_TYPE,
+            payload=dataclasses.asdict(accepted),
+            stored_at=cache_manager.now_iso(),
         ),
-        repo_root=repo_root,
+        repo_root=root,
     )
-    write(final)
-    return result(False, file, None, repairs, findings)
+    _write(root, rel_path, content)
+    return accepted
 
 
-def _usage_error(cause):
-    print("usage error: " + cause, file=sys.stderr)
-    print(_USAGE, file=sys.stderr)
-    return 2
+# --------------------------------------------------------------------------
+# CLI
+# --------------------------------------------------------------------------
+
+_USAGE = (
+    "usage: hotdocs author-test <component-id> <criterion-id> --model=<model-id> "
+    "[--seed=<n>] [--repo-root=<dir>] [--format=json|text]"
+)
+_FLAGS = ("--model", "--seed", "--repo-root", "--format")
 
 
-def main(argv=None):
-    if argv is None:
-        argv = sys.argv[1:]
-    opts = {}
-    positional = []
+class _UsageError(Exception):
+    pass
+
+
+def _parse(argv):
+    positionals = []
+    values = {}
     i = 0
     while i < len(argv):
         token = argv[i]
         if token.startswith("-"):
             name, eq, value = token.partition("=")
             if name not in _FLAGS:
-                return _usage_error("unknown argument " + token)
+                raise _UsageError("unknown argument " + token)
             if not eq:
-                if i + 1 >= len(argv):
-                    return _usage_error(name + " requires a value")
+                if i + 1 == len(argv):
+                    raise _UsageError(name + " requires a value")
                 i += 1
                 value = argv[i]
-            opts[name] = value
+            values[name] = value
         else:
-            positional.append(token)
+            positionals.append(token)
         i += 1
-
-    if len(positional) != 2:
-        return _usage_error("expected <component-id> and <criterion-id>")
-    if "--model" not in opts:
-        return _usage_error("missing required --model")
-    fmt = opts.get("--format", "text")
+    if len(positionals) != 2:
+        raise _UsageError("expected <component-id> and <criterion-id>")
+    if "--model" not in values:
+        raise _UsageError("missing required --model")
+    fmt = values.get("--format", "text")
     if fmt not in ("json", "text"):
-        return _usage_error("--format must be json or text")
-    seed_text = opts.get("--seed", "0")
-    if re.fullmatch("-?[0-9]+", seed_text) is None:
-        return _usage_error("--seed must be an integer")
+        raise _UsageError("--format must be json or text")
+    seed = values.get("--seed", "0")
+    if not re.fullmatch(r"-?[0-9]+", seed):
+        raise _UsageError("--seed must be an integer")
+    return {
+        "component_id": positionals[0],
+        "criterion_id": positionals[1],
+        "model": values["--model"],
+        "seed": int(seed),
+        "format": fmt,
+        "repo_root": Path(values["--repo-root"]) if "--repo-root" in values else Path.cwd(),
+    }
 
-    component_id, criterion_id = positional
-    repo_root = Path(opts.get("--repo-root", str(Path.cwd())))
-    assembler = _load(repo_root, "spec-bundle-assembler")
-    bundle = assembler.assemble_criterion(component_id, criterion_id, repo_root)
-    result = author_test(bundle, opts["--model"], int(seed_text), repo_root=repo_root)
 
-    error = _get(result, "model_call_error")
-    if fmt == "json":
+def main(argv=None):
+    argv = sys.argv[1:] if argv is None else list(argv)
+    try:
+        opts = _parse(argv)
+    except _UsageError as exc:
+        print("usage error: " + str(exc), file=sys.stderr)
+        print(_USAGE, file=sys.stderr)
+        return 2
+    repo_root = opts["repo_root"]
+    assembler = _load_dependency("spec-bundle-assembler", "spec_bundle_assembler", repo_root)
+    bundle = assembler.assemble_criterion(opts["component_id"], opts["criterion_id"], repo_root)
+    result = author_test(bundle, opts["model"], opts["seed"], repo_root=repo_root)
+    error = _field(result, "model_call_error")
+    if opts["format"] == "json":
         print(json.dumps(dataclasses.asdict(result)))
     elif error is None:
-        print(criterion_id + ": wrote " + str(_get(_get(result, "file"), "path")))
+        print(opts["criterion_id"] + ": wrote " + str(_field(_field(result, "file"), "path")))
     else:
         print(
-            criterion_id
-            + ": model_call_error "
-            + str(_get(error, "category"))
-            + ": "
-            + str(_get(error, "message"))
+            opts["criterion_id"] + ": model_call_error "
+            + str(_field(error, "category")) + ": " + str(_field(error, "message"))
         )
     return 0 if error is None else 1

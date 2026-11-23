@@ -4,49 +4,73 @@ import re
 import test_author
 
 
-PROBE_STANDIN_SOURCE = (
-    "class _Report:\n"
-    "    def __init__(self):\n"
-    "        self.ok = True\n"
-    "        self.findings = []\n"
-    "        self.tests_run = 1\n"
-    "        self.tests_reached = 1\n"
-    "\n"
-    "    def to_dict(self):\n"
-    "        return {\n"
-    "            'ok': self.ok,\n"
-    "            'findings': list(self.findings),\n"
-    "            'tests_run': self.tests_run,\n"
-    "            'tests_reached': self.tests_reached,\n"
-    "        }\n"
-    "\n"
-    "\n"
-    "def probe(test_source, criterion_bundle, module_name, *, timeout=60.0, interpreter=None):\n"
-    "    return _Report()\n"
+A_COMPONENT_LINE = (
+    "The component under test itself needs no custom loader: "
+    "a plain `import widget_maker`."
 )
+A_DEPENDENCY_LINE = (
+    "A dependency is never interceptable by name-based `sys.modules` "
+    "injection or `mock.patch`."
+)
+SYS_MODULES_LINE = "        sys.modules[module_name] = module"
+EXEC_MODULE_LINE = "        spec.loader.exec_module(module)"
 
-VALID_TEST_FILE = (
+NONCE_RE = r"-----BEGIN FILE ([0-9a-f]{32})-----"
+
+TEST_FILE = (
     "import widget_maker\n"
     "\n"
     "\n"
-    "def test_widget_maker_called():\n"
-    "    widget_maker.make()\n"
+    "def test_make():\n"
+    "    assert widget_maker.make() is not None\n"
 )
 
 
-def _write_probe_standin(repo_root):
+def _write_probe_stand_in(repo_root, log_path):
     probe_dir = repo_root / "gen" / "test-probe"
     probe_dir.mkdir(parents=True, exist_ok=True)
-    (probe_dir / "test_probe.py").write_text(PROBE_STANDIN_SOURCE, encoding="utf-8")
+    source = (
+        "class _Report:\n"
+        "    def __init__(self):\n"
+        "        self.ok = True\n"
+        "        self.findings = []\n"
+        "        self.tests_run = 1\n"
+        "        self.tests_reached = 1\n"
+        "\n"
+        "    def to_dict(self):\n"
+        "        return {\n"
+        "            'ok': self.ok,\n"
+        "            'findings': list(self.findings),\n"
+        "            'tests_run': self.tests_run,\n"
+        "            'tests_reached': self.tests_reached,\n"
+        "        }\n"
+        "\n"
+        "\n"
+        "def probe(test_source, criterion_bundle, module_name, *, timeout=60.0, **kwargs):\n"
+        "    with open(" + repr(str(log_path)) + ", 'a', encoding='utf-8') as fh:\n"
+        "        fh.write('probe\\n')\n"
+        "    return _Report()\n"
+    )
+    (probe_dir / "test_probe.py").write_text(source, encoding="utf-8")
 
 
-def _make_mock(prompts):
-    def backend(prompt, model, **params):
+def test_prompt_holds_dependency_resolution_block(tmp_path, monkeypatch):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    monkeypatch.chdir(repo_root)
+    monkeypatch.delenv("VAR_CACHE_STORE_URL", raising=False)
+
+    probe_log = tmp_path / "probe_calls.log"
+    _write_probe_stand_in(repo_root, probe_log)
+
+    prompts = []
+
+    def mock_backend(prompt, model, **params):
         prompts.append(prompt)
-        nonce = re.findall(r"-----BEGIN FILE ([0-9a-f]{32})-----", prompt)[-1]
+        nonce = re.findall(NONCE_RE, prompt)[-1]
         text = (
             "-----BEGIN FILE " + nonce + "-----\n"
-            + VALID_TEST_FILE
+            + TEST_FILE
             + "\n-----END FILE " + nonce + "-----"
         )
         return {
@@ -56,48 +80,30 @@ def _make_mock(prompts):
             "model_call_error": None,
         }
 
-    return backend
-
-
-def test_prompt_holds_dependency_resolution_block(tmp_path, monkeypatch):
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    monkeypatch.chdir(repo_root)
-    monkeypatch.delenv("VAR_CACHE_STORE_URL", raising=False)
-
-    _write_probe_standin(repo_root)
-
     bundle = {
         "component_id": "comp-widget-maker",
         "criterion_id": "AC-WIDGET-MAKER-001",
         "covers": "R-WIDGET-MAKER-001",
-        "criterion_text": "Given a widget, When make() is called, Then a widget is made.",
-        "requirement_text": "R-WIDGET-MAKER-001 - make() MUST make a widget.",
-        "interface": "make() -> dict",
+        "criterion_text": (
+            "Given nothing\nWhen make() is called\nThen it returns a widget"
+        ),
+        "requirement_text": "R-WIDGET-MAKER-001 make() MUST return a widget.",
+        "interface": "make() -> Widget",
         "glossary": "",
         "dependency_interfaces": {},
     }
 
-    prompts = []
-    backend = _make_mock(prompts)
-
-    test_author.author_test(bundle, "mock", repo_root=repo_root, llm_backend=backend)
+    test_author.author_test(
+        bundle, "mock", repo_root=repo_root, llm_backend=mock_backend
+    )
 
     assert prompts, "the mock model was never called"
-    first_prompt = prompts[0]
-    lines = first_prompt.splitlines()
+    first = prompts[0]
+    lines = first.splitlines()
 
-    assert (
-        "The component under test itself needs no custom loader: a plain `import widget_maker`."
-        in lines
-    )
-    assert (
-        "A dependency is never interceptable by name-based `sys.modules` injection or `mock.patch`."
-        in lines
-    )
+    assert A_COMPONENT_LINE in lines
+    assert A_DEPENDENCY_LINE in lines
 
-    sys_modules_line = "        sys.modules[module_name] = module"
-    exec_module_line = "        spec.loader.exec_module(module)"
-    assert sys_modules_line in lines
-    assert exec_module_line in lines
-    assert lines.index(sys_modules_line) < lines.index(exec_module_line)
+    assert SYS_MODULES_LINE in lines
+    sys_index = lines.index(SYS_MODULES_LINE)
+    assert EXEC_MODULE_LINE in lines[sys_index + 1:]
