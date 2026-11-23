@@ -126,6 +126,14 @@ verify` say why a capability is not passing. These remain.
   accepting it as the same asset changes the fixture contract in
   `specs/architecture/asset-kinds.md`, which twelve components
   implement, so it waits for a full wave.
+- **The drift check reads an example call in `cli.md` as a signature.**
+  The `verifier-orchestrator` regenerated for `D369` takes the first
+  `main(...)` in `interface/cli.md` as `main`'s parameter list, so an
+  example call such as `main(["build"])` drifts against `main(argv)`.
+  `R-VERIFY-004` does not say how `cli.md` documents a callable; it
+  should say that `cli.md` documents only that `main` exists, and
+  `library.md` its signature. `corpus-graph-builder`'s `cli.md` was the
+  one such example and was reworded.
 - **Smaller.** Generated test files end without a newline.
   `hotdocs verify --no-model` describes a component never generated as
   needing a fresh run with a model, when it needs `hotdocs generate`.
