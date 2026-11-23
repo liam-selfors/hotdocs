@@ -74,3 +74,4 @@ None.
   dependencies are imported under the interpreter the `python` adapter's
   `provision` reports, and a failed provision is one `environment`
   finding; `surface-checker@1.2.0`.
+- `D362`: `R-SURF-002` reads uses from the syntax tree.
