@@ -81,3 +81,5 @@ None.
   (`interface/assets/app.js.md`), inlined once as a module script. The
   existing by-type column layout and id search are now stated exactly:
   new `R-DOCS-008`, `R-DOCS-009`, `AC-DOCS-009`–`AC-DOCS-011`.
+- `D366`: a missing `corpus-graph.json` names `hotdocs corpus-graph
+  build` (`R-DOCS-007`).

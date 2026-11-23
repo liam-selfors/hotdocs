@@ -27,10 +27,16 @@ Given a corpus-graph.json containing invalid JSON
 When main runs build
 Then it returns 1
 
-Given no verification/corpus-graph.json, or a faked check_readiness
-  that raises ValueError, or an unknown argument
+Given a faked check_readiness that raises ValueError, or an unknown
+  argument
 When main runs build
 Then it returns 2
+
+Given a repo_root with no verification/corpus-graph.json
+When main runs build
+Then it returns 2, and stderr's first line starts "usage error: missing "
+  and ends "verification/corpus-graph.json; run hotdocs corpus-graph
+  build first" (one line, single spaces)
 
 Given a valid repo_root
 When main runs with ["track", "ui", "serve"], or with any of
