@@ -86,16 +86,17 @@ should resolve names to the imports they come from.
 
 Found by installing the `0.1.0` wheel and following `QUICKSTART.md` as a
 new user would. `D359` and `D360` fixed the crash on a surface failure,
-the version literal and the missing guides; these remain.
+the version literal and the missing guides; `D361` made `hotdocs spec
+check` report a declared asset with no interface file and stopped its
+model layer asking which test framework to use. These remain.
 
-- **A declared asset with no interface file is found only after
-  generation.** `interface/assets/<file name>.md` is required
-  (`specs/architecture/asset-kinds.md`), but neither `hotdocs lint` nor
-  `hotdocs spec check` looks for it, so `surface-checker` reports it as
-  an `asset_error` on each of three attempts (`D359`). A lint rule beside
-  `R-LINT-034` would catch it before any model call; `spec-linter` is at
-  the root of the hash tree, so it belongs in the next full wave. A
-  deterministic `spec-reviewer` finding is the cheaper interim.
+- **`hotdocs lint` does not look for a declared asset's interface
+  file.** `interface/assets/<file name>.md` is required
+  (`specs/architecture/asset-kinds.md`). `hotdocs spec check` reports a
+  missing one (`D361`); a developer who skips it still learns only from
+  `surface-checker`, after a generation. A lint rule beside `R-LINT-034`
+  would catch it on every path; `spec-linter` is at the root of the hash
+  tree, so it belongs in the next full wave.
 - **A surface failure the spec causes is retried.** `generation-loop`
   retries every `surface_failed` attempt (`D310`), but a missing interface
   file, or an export the interface lists under a name the code may not
@@ -106,11 +107,6 @@ the version literal and the missing guides; these remain.
   `--help` and `-h` print the usage line on stdout with exit code 0;
   every CLI component implements that document, so the change waits for
   a full wave.
-- **`spec check`'s model layer asks which test framework to use.** For a
-  minimal component it reports a gap such as "which test framework, and
-  where the test file lives", which the pipeline fixes and no spec
-  states. `spec-reviewer`'s prompt should say so (it regenerates
-  `spec-reviewer` and `spec-completeness-assistant`).
 - **`docs-site build` and `track ui build` do not name their
   prerequisite.** Without `verification/corpus-graph.json` they fail
   without saying to run `hotdocs corpus-graph build` first; the message
