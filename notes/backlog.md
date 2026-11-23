@@ -92,7 +92,8 @@ model layer asking which test framework to use. `D363`–`D366` gave
 every verb a `--help`, added `hotdocs capability new`, put `/dist/` in
 a new project's `.gitignore`, and made the two page builders name
 `hotdocs corpus-graph build` when the graph is missing. `D367` put the
-documents the guides cite into the package. These remain.
+documents the guides cite into the package, and `D368` made `hotdocs
+verify` say why a capability is not passing. These remain.
 
 - **`hotdocs lint` does not look for a declared asset's interface
   file.** `interface/assets/<file name>.md` is required
