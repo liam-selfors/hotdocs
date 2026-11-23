@@ -23,7 +23,7 @@
     "generator": "generator@3.2.0+v12"
   },
   "provenance_hit": false,
-  "generated_at": "2026-11-23T13:43:52Z",
+  "generated_at": "2026-11-23T13:45:30Z",
   "verification_run_id": "graph-query-engine-attempt-1",
   "verification_report": {
     "component_id": "comp-graph-query-engine",
@@ -145,15 +145,8 @@
   "secret_scan": {
     "scope": "full",
     "gate_version": "secret_scanner@3.1.0+detect-secrets.1.5.0",
-    "flagged": true,
-    "matches": [
-      {
-        "rule_id": "Hex High Entropy String",
-        "risk_tier": "low",
-        "file": "packaging/homebrew/hotdocs.rb",
-        "line": 19
-      }
-    ],
+    "flagged": false,
+    "matches": [],
     "allowed": [
       {
         "rule_id": "Hex High Entropy String",
@@ -374,7 +367,7 @@
     ],
     "notified": false,
     "notification_delivery_error": null,
-    "cache_hit": true
+    "cache_hit": false
   },
   "assets": [
     {
