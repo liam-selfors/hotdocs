@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:318a7a7534c7a023298e0c6d41980bbf2da50f9e69babeb828a3e4c07669ec60
+# hotdocs-criterion: sha256:f5a6f54837b488511465f0f8af6367a17347839370be2bfdf0f478d56119a688
 import os
 
 import pytest
@@ -36,78 +36,108 @@ VERBS = [
     ("init", "set up a new project"),
 ]
 
+PYPROJECT = '[project]\nname = "hotdocs"\nversion = "9.8.7a1"\n'
 
-class Collector:
-    def __init__(self):
-        self.lines = []
 
-    def __call__(self, *args, **kwargs):
+def _no_input(*args, **kwargs):
+    raise AssertionError("input_fn must not be called")
+
+
+def _call(argv, tool_root, project, capsys):
+    lines = []
+
+    def output_fn(*args, **kwargs):
         sep = kwargs.get("sep", " ")
-        self.lines.append(sep.join(str(a) for a in args))
+        lines.append(sep.join(str(a) for a in args))
 
-    def text(self):
-        return "\n".join(self.lines)
-
-
-def _run(argv, project, capsys, tool_root=None):
-    out = Collector()
-    kwargs = dict(output_fn=out, env=dict(os.environ), cwd=str(project))
-    if tool_root is not None:
-        kwargs["tool_root"] = str(tool_root)
-    code = hotdocs_cli.run(argv, **kwargs)
+    capsys.readouterr()
+    code = hotdocs_cli.run(
+        argv,
+        tool_root=tool_root,
+        input_fn=_no_input,
+        output_fn=output_fn,
+        env=dict(os.environ),
+        cwd=str(project),
+    )
     captured = capsys.readouterr()
-    return code, out.text() + "\n" + captured.out, captured.err
+    out = "\n".join(lines) + "\n" + captured.out
+    return code, out, captured.err
 
 
-def _assert_verb_list(text):
+@pytest.fixture
+def project(tmp_path):
+    p = tmp_path / "project"
+    p.mkdir()
+    return p
+
+
+@pytest.fixture
+def versioned_root(tmp_path):
+    root = tmp_path / "toolroot"
+    root.mkdir()
+    (root / "pyproject.toml").write_text(PYPROJECT, encoding="utf-8")
+    return root
+
+
+def _assert_verb_lines(text):
+    text_lines = text.splitlines()
     for words, summary in VERBS:
-        assert words in text, "verb missing: " + words
-        assert summary in text, "summary missing: " + summary
+        assert any(words in line and summary in line for line in text_lines), (
+            "verb " + repr(words) + " with summary " + repr(summary) + " not listed in:\n" + text
+        )
 
 
 @pytest.mark.parametrize("argv", [[], ["--help"], ["-h"], ["help"]])
-def test_help_prints_version_and_all_verbs(argv, tmp_path, capsys):
-    project = tmp_path / "project"
-    project.mkdir()
-    code, out, err = _run(argv, project, capsys)
+def test_help_prints_version_and_every_verb(argv, project, versioned_root, capsys):
+    code, out, err = _call(argv, str(versioned_root), project, capsys)
     assert code == 0
-    assert "hotdocs 0.1.0" in out
-    _assert_verb_list(out)
+    assert "hotdocs 9.8.7a1" in out
+    _assert_verb_lines(out)
+    assert any("init" in line and "set up a new project" in line for line in out.splitlines())
 
 
-def test_version(tmp_path, capsys):
-    project = tmp_path / "project"
-    project.mkdir()
-    code, out, err = _run(["--version"], project, capsys)
+def test_version_prints_tool_version(project, versioned_root, capsys):
+    code, out, err = _call(["--version"], str(versioned_root), project, capsys)
     assert code == 0
-    assert "hotdocs 0.1.0" in out
+    assert "hotdocs 9.8.7a1" in out
 
 
-def test_unknown_verb(tmp_path, capsys):
-    project = tmp_path / "project"
-    project.mkdir()
-    code, out, err = _run(["frobnicate"], project, capsys)
+@pytest.mark.parametrize("content", [None, "not toml [", "[tool.x]\n"])
+def test_version_unknown_when_unreadable(content, tmp_path, project, capsys):
+    root = tmp_path / "toolroot_unknown"
+    root.mkdir()
+    if content is not None:
+        (root / "pyproject.toml").write_text(content, encoding="utf-8")
+    code, out, err = _call(["--version"], str(root), project, capsys)
+    assert code == 0
+    assert "hotdocs unknown" in out
+    assert "hotdocs 9.8.7a1" not in out
+
+
+def test_unknown_verb(tmp_path, project, capsys):
+    root = tmp_path / "toolroot_empty"
+    root.mkdir()
+    code, out, err = _call(["frobnicate"], str(root), project, capsys)
     assert code == 2
     assert "unknown verb: frobnicate" in err
-    _assert_verb_list(err)
+    for words, summary in VERBS:
+        assert words in err, "verb " + repr(words) + " missing from stderr:\n" + err
 
 
-def test_lint_missing_module_everywhere(tmp_path, capsys):
-    project = tmp_path / "project"
-    project.mkdir()
-    tool_root = tmp_path / "toolroot"
-    tool_root.mkdir()
-    code, out, err = _run(["lint"], project, capsys, tool_root=tool_root)
+def test_lint_missing_module_names_tool_root_path(tmp_path, project, capsys):
+    root = tmp_path / "toolroot_empty"
+    root.mkdir()
+    code, out, err = _call(["lint"], str(root), project, capsys)
     assert code == 2
-    assert "gen/spec-linter/spec_linter.py" in (out + "\n" + err)
+    combined = (err + "\n" + out).replace("\\", "/")
+    assert "gen/spec-linter/spec_linter.py" in combined
 
 
-def test_lint_module_without_main(tmp_path, capsys):
-    project = tmp_path / "project"
-    (project / "gen" / "spec-linter").mkdir(parents=True)
-    source = "VALUE = " + repr("no main here") + "\n"
-    (project / "gen" / "spec-linter" / "spec_linter.py").write_text(source)
-    tool_root = tmp_path / "toolroot"
-    tool_root.mkdir()
-    code, out, err = _run(["lint"], project, capsys, tool_root=tool_root)
+def test_lint_module_without_main(tmp_path, project, capsys):
+    root = tmp_path / "toolroot_empty"
+    root.mkdir()
+    fake_dir = project / "gen" / "spec-linter"
+    fake_dir.mkdir(parents=True)
+    (fake_dir / "spec_linter.py").write_text("X = " + repr(1) + "\n", encoding="utf-8")
+    code, out, err = _call(["lint"], str(root), project, capsys)
     assert code == 2
