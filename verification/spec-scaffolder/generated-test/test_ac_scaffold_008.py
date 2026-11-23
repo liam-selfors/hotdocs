@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:146399e5698d0bd7f86aa0b29f58e086f44835f8f853d638ad51726b54e97d0f
+# hotdocs-criterion: sha256:94dcd6f9c21809ece7be3c3e0d4ca3d77fe2702ef241d719070a9ff7ffd099bf
 from pathlib import Path
 
 import spec_scaffolder
@@ -36,7 +36,7 @@ def _expected_library(kind, module):
         + kind
         + ".md`",
     ]
-    return "".join(line + "\n" for line in lines)
+    return "\n".join(lines) + "\n"
 
 
 def _expected_requirement(kind, module, upper):
@@ -48,7 +48,7 @@ def _expected_requirement(kind, module, upper):
         + "` MUST carry out `specs/architecture/asset-kind-" + kind
         + ".md`; replace this with one requirement per behaviour the definition states.",
     ]
-    return "".join(line + "\n" for line in lines)
+    return "\n".join(lines) + "\n"
 
 
 def _expected_acceptance(upper):
@@ -66,7 +66,7 @@ def _expected_acceptance(upper):
         "Then the correct suite kills at least the bar's share of the sites and the weak suite fewer",
         "```",
     ]
-    return "".join(line + "\n" for line in lines)
+    return "\n".join(lines) + "\n"
 
 
 def test_new_kind_matches_new_component_plus_three_files(tmp_path):
@@ -76,9 +76,7 @@ def test_new_kind_matches_new_component_plus_three_files(tmp_path):
     (b / "specs").mkdir(parents=True)
 
     spec_scaffolder.new_kind(a, "yaml", title="YAML", realizes=["P-DATA"])
-    spec_scaffolder.new_component(
-        b, "kind-yaml", title="Kind YAML", realizes=["P-DATA"]
-    )
+    spec_scaffolder.new_component(b, "kind-yaml", title="Kind YAML", realizes=["P-DATA"])
 
     a_dir = a / "specs" / "components" / "kind-yaml"
     b_dir = b / "specs" / "components" / "kind-yaml"
@@ -89,8 +87,8 @@ def test_new_kind_matches_new_component_plus_three_files(tmp_path):
     b_files = _files(b_dir)
 
     for rel, content in b_files.items():
-        assert rel in a_files, rel
-        assert a_files[rel] == content, rel
+        assert rel in a_files, "missing in new_kind output: " + rel
+        assert a_files[rel] == content, "bytes differ: " + rel
 
     extra = set(a_files) - set(b_files)
     assert extra == {
@@ -99,15 +97,15 @@ def test_new_kind_matches_new_component_plus_three_files(tmp_path):
         "acceptance/AC-KIND-YAML-001.md",
     }
 
-    library = a_files["interface/library.md"]
-    requirement = a_files["requirements/R-KIND-YAML-001.md"]
-    acceptance = a_files["acceptance/AC-KIND-YAML-001.md"]
+    library = a_files["interface/library.md"].decode("utf-8")
+    requirement = a_files["requirements/R-KIND-YAML-001.md"].decode("utf-8")
+    acceptance = a_files["acceptance/AC-KIND-YAML-001.md"].decode("utf-8")
 
-    assert library == _expected_library("yaml", "yaml").encode("utf-8")
-    assert requirement == _expected_requirement("yaml", "yaml", "YAML").encode("utf-8")
-    assert acceptance == _expected_acceptance("YAML").encode("utf-8")
+    assert library == _expected_library("yaml", "yaml")
+    assert requirement == _expected_requirement("yaml", "yaml", "YAML")
+    assert acceptance == _expected_acceptance("YAML")
 
-    lib_lines = library.decode("utf-8").splitlines()
+    lib_lines = library.splitlines()
     assert "One module file, `kind_yaml.py`, never a package." in lib_lines
     assert "GATE_VERSION: str   # \"kind-yaml@0.1.0\"" in lib_lines
     assert (
@@ -115,7 +113,7 @@ def test_new_kind_matches_new_component_plus_three_files(tmp_path):
         in lib_lines
     )
 
-    ac_lines = acceptance.decode("utf-8").splitlines()
+    ac_lines = acceptance.splitlines()
     assert ac_lines[2] == "Covers: R-KIND-YAML-001"
     assert ac_lines[3] == "Kind: generated-test"
 
@@ -135,5 +133,5 @@ def test_new_kind_defaults(tmp_path):
 
     req = comp_dir / "requirements" / "R-KIND-SQL-001.md"
     assert req.is_file()
-    first_line = req.read_text(encoding="utf-8").splitlines()[0]
-    assert first_line == "# R-KIND-SQL-001"
+    assert req.read_text(encoding="utf-8").splitlines()[0] == "# R-KIND-SQL-001"
+    assert req.read_text(encoding="utf-8") == _expected_requirement("sql", "sql", "SQL")
