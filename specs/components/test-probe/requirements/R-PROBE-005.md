@@ -7,6 +7,8 @@
   report:
 
   - a `failure` or `error` child whose `message` contains
+    `HotdocsProbeUndeclaredAsset`: `R-PROBE-007`'s `test_bug` finding;
+  - any other `failure` or `error` child whose `message` contains
     `HotdocsProbeStubReached` reached the code under test (an `error`
     one in a fixture): no finding;
   - an `error` child whose `message` is exactly

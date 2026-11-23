@@ -43,6 +43,4 @@ is R-VERIFY-011's projection.
 `"environment"` when an asset's kind is unknown or unprovisioned
 (`R-VERIFY-020`), `"implementation"` when a test ran and failed.
 
-**`assets`** (R-VERIFY-020), the implicit `python` asset first, then
-one entry per declared asset in declaration order, as
-`specs/architecture/asset-kinds.md`'s Provenance bullet states.
+**`assets`**: R-VERIFY-020.

@@ -56,7 +56,5 @@ See `constraints.md`.
 
 ## Change log
 
-See the decisions, `D27` onward; latest `D343` (declared assets),
-`D344` (`python` an asset kind: its adapter's mutation sites,
-provisioned first, its `interpreter` for every pytest run, first in
-`assets`; `GATE_VERSION` 3.5.0).
+See the decisions, `D27` onward; latest `D369` (`assets` passed to
+`probe`).

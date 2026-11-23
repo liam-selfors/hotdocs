@@ -120,6 +120,12 @@ verify` say why a capability is not passing. These remain.
   that `--help` and `-h` print the usage line on stdout with exit code
   0; every CLI component implements that document (26 regenerations),
   so the change waits for a full wave.
+- **`asset_runner` could accept `gen/<slug>/<path>`.** Test authors
+  reach for the repository path of a declared asset (issue #21). `D369`
+  makes that a `test_bug` the probe catches and the author repairs;
+  accepting it as the same asset changes the fixture contract in
+  `specs/architecture/asset-kinds.md`, which twelve components
+  implement, so it waits for a full wave.
 - **Smaller.** Generated test files end without a newline.
   `hotdocs verify --no-model` describes a component never generated as
   needing a fresh run with a model, when it needs `hotdocs generate`.
