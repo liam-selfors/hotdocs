@@ -9,6 +9,6 @@
   result. When no test passes after the second repair, or a call returns
   a `model_call_error`, the result has `model_call_error` with category
   `test_probe_failed` (or that call's own error), a null `file`, and
-  nothing is cached or written. `repair_attempts` counts the repair calls
+  nothing is written. `repair_attempts` counts the repair calls
   made and `probe_findings` holds the findings, as dicts, of the last
   probe run.

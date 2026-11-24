@@ -1,7 +1,8 @@
 """Component Gate Runner: runs one component through its gauntlet.
 
-Provenance check, generation on a miss, verification, compliance scanning
-and provenance write, giving one ComponentPipelineResult.
+`run_component_gates` performs the provenance check, generation on a miss,
+verification, compliance scanning and provenance write, giving one
+`ComponentPipelineResult` dict. `main` implements `hotdocs generate`.
 """
 
 import dataclasses
@@ -10,40 +11,40 @@ import importlib.util
 import itertools
 import json
 import math
-import pathlib
+import re
 import sys
 import tomllib
 from collections.abc import Mapping
-from pathlib import Path
+from pathlib import Path, PurePath
 
-_LOAD_COUNTER = itertools.count()
-
-USAGE = (
+_USAGE = (
     "usage: hotdocs generate <component-id> --model=<model-id> [--seed=<n>] "
-    "[--retry-feedback=<R-id>,...] [--max-attempts=<n>] [--mode=single|agentic] "
-    "[--allow-unisolated-exec] [--repo-root=<dir>] [--format=json|text]"
+    "[--retry-feedback=<R-id>,...] [--reauthor=<AC-id>,...] [--max-attempts=<n>] "
+    "[--mode=single|agentic] [--allow-unisolated-exec] [--repo-root=<dir>] "
+    "[--format=json|text]"
 )
 
 _VALUE_FLAGS = (
     "--model",
     "--seed",
     "--retry-feedback",
+    "--reauthor",
     "--max-attempts",
     "--mode",
     "--repo-root",
     "--format",
 )
 
-_OUTCOME_REASONS = {
-    "generation_failed": "model_call_error",
-    "surface_failed": "surface_check_failed",
-    "refused": "refused",
-}
+_MODES = ("single", "agentic")
+_FORMATS = ("json", "text")
+_EXIT_ONE_REASONS = ("model_call_error", "test_authoring_failed")
+
+_load_counter = itertools.count()
 
 
-# --------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
 # Helpers
-# --------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
 
 
 def _get(obj, name, default=None):
@@ -54,10 +55,8 @@ def _get(obj, name, default=None):
 
 
 def _tool_root():
-    for parent in Path(__file__).resolve().parents:
-        if parent.name == "gen":
-            return parent.parent
-    return None
+    here = Path(__file__).resolve()
+    return next(p.parent for p in here.parents if p.name == "gen")
 
 
 def _load(slug, repo_root):
@@ -66,7 +65,7 @@ def _load(slug, repo_root):
     if not directory.is_dir():
         directory = _tool_root() / "gen" / slug
     path = directory / f"{module}.py"
-    name = f"_component_gate_runner_dep_{module}_{next(_LOAD_COUNTER)}"
+    name = f"_component_gate_runner_dep_{module}_{next(_load_counter)}"
     spec = importlib.util.spec_from_file_location(name, path)
     mod = importlib.util.module_from_spec(spec)
     sys.modules[name] = mod
@@ -74,17 +73,8 @@ def _load(slug, repo_root):
     return mod
 
 
-class _Deps:
-    """Loads each dependency lazily, once per run_component_gates call."""
-
-    def __init__(self, repo_root):
-        self.repo_root = repo_root
-        self.modules = {}
-
-    def __call__(self, slug):
-        if slug not in self.modules:
-            self.modules[slug] = _load(slug, self.repo_root)
-        return self.modules[slug]
+def _slug(component_id):
+    return component_id.removeprefix("comp-")
 
 
 def _result(
@@ -97,9 +87,9 @@ def _result(
     model_call_error=None,
     surface_report=None,
     verification=None,
-    attempts,
-    license_scan,
-    secret_scan,
+    attempts=None,
+    license_scan=None,
+    secret_scan=None,
 ):
     return {
         "component_id": component_id,
@@ -110,10 +100,17 @@ def _result(
         "model_call_error": model_call_error,
         "surface_report": surface_report,
         "verification": verification,
-        "attempts": attempts,
+        "attempts": [] if attempts is None else attempts,
         "license_scan": license_scan,
         "secret_scan": secret_scan,
     }
+
+
+def _verification_block_reason(report):
+    fails = [c for c in _get(report, "criteria", []) if _get(c, "result") == "fail"]
+    if fails and all(_get(c, "failure_origin") == "test" for c in fails):
+        return "test_authoring_failed"
+    return "verification_failed"
 
 
 def _count_attempt_files(repo_root, component_id):
@@ -123,58 +120,9 @@ def _count_attempt_files(repo_root, component_id):
     return sum(1 for p in directory.iterdir() if p.is_file())
 
 
-def _verification_block_reason(report):
-    failed = [c for c in _get(report, "criteria", []) if _get(c, "result") == "fail"]
-    if failed and all(_get(c, "failure_origin") == "test" for c in failed):
-        return "test_authoring_failed"
-    return "verification_failed"
-
-
-def _scans(deps, component_id, repo_root):
-    license_scan = deps("license-scanner").scan(component_id, repo_root)
-    secret_scan = deps("secret-scanner").scan(repo_root)
-    return license_scan, secret_scan
-
-
-def _reverify(deps, component_id, repo_root, model, seed, llm_backend):
-    test_author, judge = deps("generation-loop").make_closures(
-        model, seed, repo_root, llm_backend
-    )
-    report = deps("verifier-orchestrator").verify(
-        component_id, repo_root, judge=judge, test_author=test_author
-    )
-    license_scan, secret_scan = _scans(deps, component_id, repo_root)
-    return report, license_scan, secret_scan
-
-
-# --------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
 # Library
-# --------------------------------------------------------------------------
-
-
-def _run_sealed(deps, component_id, repo_root, model, seed, llm_backend, sealed_key):
-    report, license_scan, secret_scan = _reverify(
-        deps, component_id, repo_root, model, seed, llm_backend
-    )
-    inputs = {
-        "component_id": component_id,
-        "owners": _get(sealed_key, "owners"),
-        "source_path": _get(sealed_key, "source_path"),
-        "source_hash": _get(sealed_key, "source_hash"),
-        "verifier_version": _get(sealed_key, "verifier_version"),
-        "verification_report": report,
-    }
-    deps("provenance-writer").write_sealed_provenance(component_id, inputs, repo_root)
-    failed = _get(report, "overall") == "fail"
-    return _result(
-        component_id,
-        blocked=failed,
-        block_reason="verification_failed" if failed else None,
-        verification=report,
-        attempts=[],
-        license_scan=license_scan,
-        secret_scan=secret_scan,
-    )
+# ---------------------------------------------------------------------------
 
 
 def run_component_gates(
@@ -188,50 +136,61 @@ def run_component_gates(
     max_attempts=3,
     mode="single",
     allow_unisolated_exec=False,
+    reauthor=None,
 ):
-    deps = _Deps(repo_root)
-    checker = deps("provenance-checker")
-    sealed_key = checker.current_sealed_key(component_id, repo_root)
-    if sealed_key is not None:
-        return _run_sealed(
-            deps, component_id, repo_root, model, seed, llm_backend, sealed_key
-        )
+    loaded = {}
 
-    key = checker.current_provenance_key(component_id, repo_root)
+    def dep(slug):
+        if slug not in loaded:
+            loaded[slug] = _load(slug, repo_root)
+        return loaded[slug]
+
+    sealed_key = dep("provenance-checker").current_sealed_key(component_id, repo_root)
+    if sealed_key is not None:
+        return _run_sealed(component_id, repo_root, model, seed, llm_backend, sealed_key, dep)
+
+    key = dep("provenance-checker").current_provenance_key(component_id, repo_root)
     spec_bundle_hash = _get(key, "spec_bundle_hash")
     gate_versions = _get(key, "gate_versions")
-    check = checker.check_provenance(
+    check = dep("provenance-checker").check_provenance(
         component_id, spec_bundle_hash, gate_versions, repo_root
     )
-    hit_report = _get(check, "verification_report")
-    hit_license = _get(check, "license_scan")
+
     if (
         _get(check, "hit")
-        and _get(hit_report, "overall") == "pass"
-        and _get(hit_license, "blocked") is not True
+        and _get(_get(check, "verification_report"), "overall") == "pass"
+        and _get(_get(check, "license_scan"), "blocked") is not True
     ):
         return _result(
             component_id,
             provenance_hit=True,
-            verification=hit_report,
-            attempts=[],
-            license_scan=hit_license,
+            verification=_get(check, "verification_report"),
+            license_scan=_get(check, "license_scan"),
             secret_scan=_get(check, "secret_scan"),
         )
 
-    writer_slug = "provenance-writer"
+    if reauthor is not None:
+        test_dir = Path(repo_root) / "verification" / _slug(component_id) / "generated-test"
+        for criterion_id in reauthor:
+            test_file = test_dir / f"test_{criterion_id.lower().replace('-', '_')}.py"
+            if test_file.exists():
+                test_file.unlink()
 
     if _get(check, "reason") == "environment differs":
-        report, license_scan, secret_scan = _reverify(
-            deps, component_id, repo_root, model, seed, llm_backend
+        test_author, judge = dep("generation-loop").make_closures(
+            model, seed, repo_root, llm_backend
         )
+        report = dep("verifier-orchestrator").verify(
+            component_id, repo_root, judge=judge, test_author=test_author
+        )
+        license_scan = dep("license-scanner").scan(component_id, repo_root)
+        secret_scan = dep("secret-scanner").scan(repo_root)
         if (
             _get(report, "overall") == "pass"
             and _get(license_scan, "blocked") is not True
             and _get(secret_scan, "flagged") is not True
         ):
-            slug = component_id[len("comp-"):]
-            manifest_path = Path(repo_root) / "gen" / slug / ".provenance.json"
+            manifest_path = Path(repo_root) / "gen" / _slug(component_id) / ".provenance.json"
             manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
             generation_result = {
                 "files": {},
@@ -254,33 +213,28 @@ def run_component_gates(
                 "attempt_history": manifest.get("attempt_history"),
                 "gate_versions": gate_versions,
             }
-            deps(writer_slug).write_provenance(component_id, inputs, repo_root)
+            dep("provenance-writer").write_provenance(component_id, inputs, repo_root)
             return _result(
                 component_id,
                 reverified=True,
                 verification=report,
-                attempts=[],
                 license_scan=license_scan,
                 secret_scan=secret_scan,
             )
 
-    bundle = deps("spec-bundle-assembler").assemble(
+    bundle = dep("spec-bundle-assembler").assemble(
         component_id, repo_root=repo_root, mode="cold"
     )
 
     def on_attempt(attempt, generation_result, verification_report):
         try:
-            deps("provenance-tracker").write_attempt_record(
-                component_id,
-                generation_result,
-                verification_report,
-                spec_bundle_hash,
-                repo_root,
+            dep("provenance-tracker").write_attempt_record(
+                component_id, generation_result, verification_report, spec_bundle_hash, repo_root
             )
         except Exception:
             pass
 
-    loop = deps("generation-loop").run_attempts(
+    loop = dep("generation-loop").run_attempts(
         component_id,
         bundle,
         repo_root,
@@ -293,12 +247,13 @@ def run_component_gates(
         allow_unisolated_exec=allow_unisolated_exec,
         on_attempt=on_attempt,
     )
-    license_scan, secret_scan = _scans(deps, component_id, repo_root)
-
+    attempts = _get(loop, "attempts")
     generation_result = _get(loop, "generation_result")
     verification_report = _get(loop, "verification_report")
     surface_report = _get(loop, "surface_report")
-    attempts = _get(loop, "attempts")
+
+    license_scan = dep("license-scanner").scan(component_id, repo_root)
+    secret_scan = dep("secret-scanner").scan(repo_root)
 
     if _get(generation_result, "files") and verification_report is not None:
         inputs = {
@@ -312,29 +267,28 @@ def run_component_gates(
             "attempt_history": attempts,
             "gate_versions": gate_versions,
         }
-        deps(writer_slug).write_provenance(component_id, inputs, repo_root)
+        dep("provenance-writer").write_provenance(component_id, inputs, repo_root)
 
-    if _get(loop, "passed"):
-        return _result(
-            component_id,
-            surface_report=surface_report,
-            verification=verification_report,
-            attempts=attempts,
-            license_scan=license_scan,
-            secret_scan=secret_scan,
-        )
-
-    outcome = _get(attempts[-1], "outcome")
-    if outcome in _OUTCOME_REASONS:
-        block_reason = _OUTCOME_REASONS[outcome]
-    else:
-        block_reason = _verification_block_reason(verification_report)
+    blocked = False
+    block_reason = None
     model_call_error = None
-    if block_reason == "model_call_error":
-        model_call_error = _get(generation_result, "model_call_error")
+    if not _get(loop, "passed"):
+        blocked = True
+        outcome = _get(attempts[-1], "outcome")
+        if outcome == "verification_failed":
+            block_reason = _verification_block_reason(verification_report)
+        else:
+            block_reason = {
+                "generation_failed": "model_call_error",
+                "surface_failed": "surface_check_failed",
+                "refused": "refused",
+            }[outcome]
+        if block_reason == "model_call_error":
+            model_call_error = _get(generation_result, "model_call_error")
+
     return _result(
         component_id,
-        blocked=True,
+        blocked=blocked,
         block_reason=block_reason,
         model_call_error=model_call_error,
         surface_report=surface_report,
@@ -345,9 +299,43 @@ def run_component_gates(
     )
 
 
-# --------------------------------------------------------------------------
+def _run_sealed(component_id, repo_root, model, seed, llm_backend, sealed_key, dep):
+    owners = _get(sealed_key, "owners")
+    source_path = _get(sealed_key, "source_path")
+    source_hash = _get(sealed_key, "source_hash")
+    verifier_version = _get(sealed_key, "verifier_version")
+
+    test_author, judge = dep("generation-loop").make_closures(model, seed, repo_root, llm_backend)
+    report = dep("verifier-orchestrator").verify(
+        component_id, repo_root, judge=judge, test_author=test_author
+    )
+    license_scan = dep("license-scanner").scan(component_id, repo_root)
+    secret_scan = dep("secret-scanner").scan(repo_root)
+
+    inputs = {
+        "component_id": component_id,
+        "owners": owners,
+        "source_path": source_path,
+        "source_hash": source_hash,
+        "verifier_version": verifier_version,
+        "verification_report": report,
+    }
+    dep("provenance-writer").write_sealed_provenance(component_id, inputs, repo_root)
+
+    blocked = _get(report, "overall") == "fail"
+    return _result(
+        component_id,
+        blocked=blocked,
+        block_reason="verification_failed" if blocked else None,
+        verification=report,
+        license_scan=license_scan,
+        secret_scan=secret_scan,
+    )
+
+
+# ---------------------------------------------------------------------------
 # JSON conversion (specs/architecture/json-values.md)
-# --------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
 
 
 def to_json(value):
@@ -356,9 +344,7 @@ def to_json(value):
     if isinstance(value, float):
         return value if math.isfinite(value) else repr(value)
     if isinstance(value, Mapping):
-        return {
-            (k if isinstance(k, str) else str(k)): to_json(v) for k, v in value.items()
-        }
+        return {(k if isinstance(k, str) else str(k)): to_json(v) for k, v in value.items()}
     if isinstance(value, (list, tuple)):
         return [to_json(v) for v in value]
     if isinstance(value, (set, frozenset)):
@@ -366,16 +352,14 @@ def to_json(value):
         return sorted(items, key=lambda item: json.dumps(item, sort_keys=True))
     if isinstance(value, (bytes, bytearray)):
         return value.decode("utf-8", errors="replace")
-    if isinstance(value, pathlib.PurePath):
+    if isinstance(value, PurePath):
         return str(value)
     if isinstance(value, enum.Enum):
         return to_json(value.value)
     if callable(getattr(value, "to_dict", None)):
         return to_json(value.to_dict())
-    if dataclasses.is_dataclass(value) and not isinstance(value, type):
-        return {
-            f.name: to_json(getattr(value, f.name)) for f in dataclasses.fields(value)
-        }
+    if dataclasses.is_dataclass(value):
+        return {f.name: to_json(getattr(value, f.name)) for f in dataclasses.fields(value)}
     if hasattr(value, "__dict__"):
         return {
             k: to_json(v)
@@ -385,173 +369,177 @@ def to_json(value):
     return repr(value)
 
 
-# --------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
 # CLI
-# --------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
 
 
-class _UsageError(Exception):
-    pass
+def _usage(cause):
+    print(f"usage error: {cause}", file=sys.stderr)
+    print(_USAGE, file=sys.stderr)
+    return 2
 
 
-def _parse(argv):
-    if not argv or argv[0] != "generate":
-        raise _UsageError("first word must be 'generate'")
-    opts = {}
-    positionals = []
-    i = 1
-    while i < len(argv):
-        token = argv[i]
-        if token == "--allow-unisolated-exec":
-            opts[token] = True
-        elif token.startswith("-"):
-            name, eq, value = token.partition("=")
-            if name not in _VALUE_FLAGS:
-                raise _UsageError(f"unknown argument: {token}")
-            if not eq:
-                i += 1
-                if i >= len(argv):
-                    raise _UsageError(f"{name} needs a value")
-                value = argv[i]
-            opts[name] = value
-        elif positionals:
-            raise _UsageError(f"unknown argument: {token}")
-        else:
-            positionals.append(token)
-        i += 1
-    return positionals, opts
+def _fmt(value):
+    return json.dumps(to_json(value))
 
 
-def _parse_int(name, value):
-    try:
-        return int(value)
-    except ValueError:
-        raise _UsageError(f"{name} must be an integer: {value}") from None
-
-
-def _validate(argv):
-    positionals, opts = _parse(argv)
-    if not positionals:
-        raise _UsageError("missing <component-id>")
-    component_id = positionals[0]
-    if "--model" not in opts:
-        raise _UsageError("missing --model")
-    seed = _parse_int("--seed", opts.get("--seed", "0"))
-    max_attempts = None
-    if "--max-attempts" in opts:
-        max_attempts = _parse_int("--max-attempts", opts["--max-attempts"])
-        if max_attempts < 1:
-            raise _UsageError("--max-attempts must be at least 1")
-    mode = opts.get("--mode")
-    if mode is not None and mode not in ("single", "agentic"):
-        raise _UsageError(f"invalid --mode: {mode}")
-    fmt = opts.get("--format", "text")
-    if fmt not in ("json", "text"):
-        raise _UsageError(f"invalid --format: {fmt}")
-    repo_root = Path(opts.get("--repo-root", "."))
-    slug = component_id[len("comp-"):]
-    if not (
-        component_id.startswith("comp-")
-        and (repo_root / "specs" / "components" / slug / "component.md").is_file()
-    ):
-        raise _UsageError(f"unknown component: {component_id}")
-
-    toml_path = repo_root / "hotdocs.toml"
-    table = {}
-    if toml_path.is_file():
-        with open(toml_path, "rb") as handle:
-            table = tomllib.load(handle).get("generate", {})
-    if "max_attempts" in table:
-        value = table["max_attempts"]
-        if not isinstance(value, int) or isinstance(value, bool) or value < 1:
-            raise _UsageError(f"invalid [generate] max_attempts in {toml_path}")
-        if max_attempts is None:
-            max_attempts = value
-    if "mode" in table:
-        value = table["mode"]
-        if value not in ("single", "agentic"):
-            raise _UsageError(f"invalid [generate] mode in {toml_path}")
-        if mode is None:
-            mode = value
-
-    retry_feedback = None
-    if "--retry-feedback" in opts:
-        retry_feedback = opts["--retry-feedback"].split(",")
-
-    return {
-        "component_id": component_id,
-        "repo_root": repo_root,
-        "model": opts["--model"],
-        "seed": seed,
-        "retry_feedback": retry_feedback,
-        "max_attempts": 3 if max_attempts is None else max_attempts,
-        "mode": "single" if mode is None else mode,
-        "allow_unisolated_exec": opts.get("--allow-unisolated-exec", False),
-        "format": fmt,
-    }
-
-
-def _text_lines(result):
-    lines = [result["component_id"]]
-    if result["provenance_hit"]:
-        lines.append("provenance hit")
-    elif result["reverified"]:
-        lines.append("reverified")
+def _print_text(result):
+    block_reason = _get(result, "block_reason")
+    print(_get(result, "component_id"))
+    if _get(result, "provenance_hit"):
+        print("provenance hit")
+    elif _get(result, "reverified"):
+        print("reverified")
+    elif _get(result, "blocked"):
+        print(block_reason)
     else:
-        lines.append(result["block_reason"] or "passed")
-    for attempt in result["attempts"]:
-        lines.append(f"attempt {_get(attempt, 'number')}: {_get(attempt, 'outcome')}")
-    license_scan = result["license_scan"]
-    secret_scan = result["secret_scan"]
-    lines.append(f"license_scan blocked: {_get(license_scan, 'blocked')}")
-    lines.append(f"secret_scan flagged: {_get(secret_scan, 'flagged')}")
-    error = result["model_call_error"]
-    if error is not None:
-        lines.append(
-            f"model_call_error: {_get(error, 'category')}: {_get(error, 'message')}"
+        print("passed")
+    for attempt in _get(result, "attempts"):
+        print(f"attempt {_get(attempt, 'number')}: {_get(attempt, 'outcome')}")
+    license_scan = _get(result, "license_scan")
+    secret_scan = _get(result, "secret_scan")
+    print(f"license_scan blocked: {_fmt(_get(license_scan, 'blocked'))}")
+    print(f"secret_scan flagged: {_fmt(_get(secret_scan, 'flagged'))}")
+    model_call_error = _get(result, "model_call_error")
+    if model_call_error is not None:
+        print(
+            f"model_call_error: {_get(model_call_error, 'category')}: "
+            f"{_get(model_call_error, 'message')}"
         )
-    if result["block_reason"] == "surface_check_failed":
-        for finding in _get(result["surface_report"], "findings", []):
-            lines.append(f"surface: {_get(finding, 'message')}")
-    verification = result["verification"]
-    if result["block_reason"] == "test_authoring_failed":
-        for criterion in _get(verification, "criteria", []):
+    if block_reason == "surface_check_failed":
+        for finding in _get(_get(result, "surface_report"), "findings"):
+            print(f"surface: {_get(finding, 'message')}")
+    verification = _get(result, "verification")
+    if block_reason == "test_authoring_failed":
+        for criterion in _get(verification, "criteria"):
             if _get(criterion, "result") == "fail":
-                message = _get(_get(criterion, "failure_detail"), "message")
-                lines.append(f"{_get(criterion, 'id')}: {message}")
+                print(
+                    f"{_get(criterion, 'id')}: "
+                    f"{_get(_get(criterion, 'failure_detail'), 'message')}"
+                )
     mutation_error = _get(verification, "mutation_error")
     if mutation_error is not None:
-        lines.append(f"mutation_error: {mutation_error}")
+        print(f"mutation_error: {mutation_error}")
     if _get(license_scan, "evaluated") is False:
-        lines.append(f"license_scan not evaluated: {_get(license_scan, 'reason')}")
-    return lines
+        print(f"license_scan not evaluated: {_get(license_scan, 'reason')}")
 
 
 def main(argv=None):
     if argv is None:
         argv = sys.argv[1:]
+    argv = list(argv)
+    if not argv or argv[0] != "generate":
+        return _usage("expected first word 'generate'")
+
+    opts = {}
+    component_id = None
+    allow_unisolated_exec = False
+    i = 1
+    while i < len(argv):
+        token = argv[i]
+        if token == "--allow-unisolated-exec":
+            allow_unisolated_exec = True
+        elif token.startswith("--"):
+            name, eq, value = token.partition("=")
+            if name not in _VALUE_FLAGS:
+                return _usage(f"unknown argument {token}")
+            if not eq:
+                i += 1
+                if i >= len(argv):
+                    return _usage(f"{name} needs a value")
+                value = argv[i]
+            opts[name] = value
+        elif component_id is not None:
+            return _usage(f"unknown argument {token}")
+        else:
+            component_id = token
+        i += 1
+
+    if component_id is None:
+        return _usage("missing <component-id>")
+    if "--model" not in opts:
+        return _usage("missing --model")
     try:
-        args = _validate(list(argv))
-    except _UsageError as exc:
-        print(f"usage error: {exc}", file=sys.stderr)
-        print(USAGE, file=sys.stderr)
-        return 2
-    result = run_component_gates(
-        args["component_id"],
-        args["repo_root"],
-        args["model"],
-        args["seed"],
-        None,
-        args["retry_feedback"],
-        max_attempts=args["max_attempts"],
-        mode=args["mode"],
-        allow_unisolated_exec=args["allow_unisolated_exec"],
+        seed = int(opts.get("--seed", "0"))
+    except ValueError:
+        return _usage(f"--seed must be an integer, got {opts['--seed']!r}")
+    flag_max_attempts = None
+    if "--max-attempts" in opts:
+        try:
+            flag_max_attempts = int(opts["--max-attempts"])
+        except ValueError:
+            return _usage("--max-attempts must be an integer of at least 1")
+        if flag_max_attempts < 1:
+            return _usage("--max-attempts must be an integer of at least 1")
+    output_format = opts.get("--format", "text")
+    if output_format not in _FORMATS:
+        return _usage(f"--format must be json or text, got {output_format!r}")
+    if "--mode" in opts and opts["--mode"] not in _MODES:
+        return _usage(f"--mode must be single or agentic, got {opts['--mode']!r}")
+
+    repo_root = Path(opts["--repo-root"]) if "--repo-root" in opts else Path.cwd()
+    slug = _slug(component_id)
+    component_md = repo_root / "specs" / "components" / slug / "component.md"
+    if not component_id.startswith("comp-") or not component_md.is_file():
+        return _usage(f"unknown component {component_id}")
+
+    toml_path = repo_root / "hotdocs.toml"
+    table = {}
+    if toml_path.is_file():
+        with open(toml_path, "rb") as fh:
+            table = tomllib.load(fh).get("generate", {})
+    if "max_attempts" in table:
+        value = table["max_attempts"]
+        if not isinstance(value, int) or isinstance(value, bool) or value < 1:
+            return _usage(f"{toml_path}: [generate] max_attempts must be an integer of at least 1")
+    if "mode" in table and table["mode"] not in _MODES:
+        return _usage(f"{toml_path}: [generate] mode must be single or agentic")
+    max_attempts = (
+        flag_max_attempts if flag_max_attempts is not None else table.get("max_attempts", 3)
     )
-    if args["format"] == "json":
-        print(json.dumps(to_json(result)))
+    mode = opts["--mode"] if "--mode" in opts else table.get("mode", "single")
+
+    reauthor = None
+    if "--reauthor" in opts:
+        ids = opts["--reauthor"].split(",")
+        if "" in ids:
+            return _usage("--reauthor needs criterion ids")
+        frontmatter = re.match(r"\A---\s*\n(.*?)\n---", component_md.read_text(encoding="utf-8"), re.S)
+        if frontmatter and re.search(r"^sealed:\s*true\s*$", frontmatter.group(1), re.M):
+            return _usage(f"--reauthor does not apply to sealed {component_id}")
+        acceptance_dir = repo_root / "specs" / "components" / slug / "acceptance"
+        for criterion_id in ids:
+            criterion_file = acceptance_dir / f"{criterion_id}.md"
+            if (
+                not re.fullmatch(r"AC-[A-Za-z0-9-]+", criterion_id)
+                or not criterion_file.is_file()
+                or "Kind: generated-test"
+                not in [line.strip() for line in criterion_file.read_text(encoding="utf-8").splitlines()]
+            ):
+                return _usage(f"{criterion_id} is not a generated-test criterion of {component_id}")
+        reauthor = ids
+
+    retry_feedback = (
+        opts["--retry-feedback"].split(",") if "--retry-feedback" in opts else None
+    )
+
+    result = run_component_gates(
+        component_id,
+        repo_root,
+        opts["--model"],
+        seed,
+        None,
+        retry_feedback,
+        max_attempts=max_attempts,
+        mode=mode,
+        allow_unisolated_exec=allow_unisolated_exec,
+        reauthor=reauthor,
+    )
+
+    if output_format == "json":
+        print(json.dumps(to_json(result), indent=2))
     else:
-        for line in _text_lines(result):
-            print(line)
-    if result["block_reason"] in ("model_call_error", "test_authoring_failed"):
-        return 1
-    return 0
+        _print_text(result)
+
+    return 1 if _get(result, "block_reason") in _EXIT_ONE_REASONS else 0

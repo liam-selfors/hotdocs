@@ -16,6 +16,6 @@ Given a mock model whose response contains no BEGIN/END marker pair at
   all (model_call_error is null, but the text does not conform)
 When author_test is called
 Then the resulting TestAuthoringResult has a null file and is treated
-  as a distinct authoring failure, and nothing is written to cache or
-  to verification/<component>/generated-test/
+  as a distinct authoring failure, and nothing is written to
+  verification/<component>/generated-test/
 ```

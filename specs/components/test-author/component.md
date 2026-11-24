@@ -3,7 +3,7 @@ id: comp-test-author
 title: Test Author
 status: draft
 owners: [pipeline-team]
-depends_on: [comp-spec-bundle-assembler, comp-cache-manager, comp-llm-endpoint, comp-test-probe]
+depends_on: [comp-spec-bundle-assembler, comp-llm-endpoint, comp-test-probe]
 realizes: [P-ZERO-EDIT, P-AMBIGUITY-GATE]
 model_pin: claude-opus-5-5
 sealed: false
@@ -20,8 +20,7 @@ calls it and decides when.
 ## Scope
 
 **In scope:** test code from a criterion's Given/When/Then prose plus
-the target's `interface/`; canonical-model selection (R-AUTHOR-003);
-caching.
+the target's `interface/`; canonical-model selection (R-AUTHOR-003).
 
 **Out of scope:** deciding whether a criterion needs a test (its
 `kind`, R-LINT-010).
@@ -58,4 +57,5 @@ None.
 
 ## Change log
 
-See the decisions, `D56` onward; `D343` specifies the CLI.
+See the decisions, `D56` onward; `D343` specifies the CLI;
+`D370` removes the cache (`R-AUTHOR-030`).

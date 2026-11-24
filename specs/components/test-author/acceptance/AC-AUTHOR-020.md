@@ -11,5 +11,5 @@ When author_test(bundle for comp-widget-maker, "mock", repo_root=<tmp>,
   llm_backend=<mock>) is called
 Then the stand-in was called with module_name "widget_maker" and the
   first reply's file content as test_source, and nothing is written to
-  verification/widget-maker/generated-test/ or to the cache
+  verification/widget-maker/generated-test/
 ```

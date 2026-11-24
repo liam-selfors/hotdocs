@@ -135,6 +135,14 @@ undeclared `asset_runner` path a test bug the probe catches. These remain.
   should say that `cli.md` documents only that `main` exists, and
   `library.md` its signature. `corpus-graph-builder`'s `cli.md` was the
   one such example and was reworded.
+- **A faulty capability-scenario test is never re-authored.** `D370`
+  makes a scenario reuse its committed test, but nothing attributes a
+  failing scenario to its test, so a test with a logic bug fails until
+  someone deletes it. A rule like `R-LOOP-007`'s does not fit: scenarios
+  run once per `hotdocs verify`, with no retry loop. Options: a
+  `hotdocs verify --reauthor=<CS-id>` flag, or re-authoring a scenario
+  test once when its capability's realizing code changed and it failed
+  the same way before and after.
 - **Smaller.** Generated test files end without a newline.
   `hotdocs verify --no-model` describes a component never generated as
   needing a fresh run with a model, when it needs `hotdocs generate`.

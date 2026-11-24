@@ -30,10 +30,4 @@ When author_test(bundle, "mock", repo_root=<tmp>, llm_backend=<mock>)
   is called
 Then the result's file content has exactly one line starting
   "# hotdocs-criterion:", its first, carrying the correct hex
-
-Given a repo_root where that first call already ran
-When author_test is called again with a mock model that must never be
-  called
-Then cache_hit is true and the result's file content begins with the
-  same correct header line
 ```

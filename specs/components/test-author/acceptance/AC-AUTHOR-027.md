@@ -19,5 +19,5 @@ Given the same stand-in and a mock model replying "BAD1", "BAD2", "BAD3"
 When author_test is called
 Then the model was called three times, the result has model_call_error
   with category "test_probe_failed", a null file, repair_attempts 2,
-  probe_findings holding that finding, and nothing is written or cached
+  probe_findings holding that finding, and nothing is written
 ```

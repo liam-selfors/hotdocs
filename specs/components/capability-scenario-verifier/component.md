@@ -22,9 +22,8 @@ of `verifier-orchestrator`, with the same dispatch mechanisms.
 
 ## Rationale
 
-Covers `interface/guarantees/` too (`D2`), for the reason `R-IMPACT-008`
-states. Extracted from `merge-orchestrator` (`D14`) when that
-component's fan-out and word caps crowded together.
+Covers `interface/guarantees/` too (`D2`, `R-IMPACT-008`); extracted
+from `merge-orchestrator` (`D14`).
 
 ## Scope
 
@@ -32,8 +31,7 @@ component's fan-out and word caps crowded together.
 scenario by its declared `kind` with the mechanisms `verifier-orchestrator`
 established; one result per scenario, keyed by `P-id`; checking and
 writing its own provenance for one capability, keyed on its realizing
-components' actual content (`R-SCENARIO-004`) — called internally by
-`provenance-tracker`'s `hotdocs verify`, never by a developer directly.
+components' actual content (`R-SCENARIO-004`), for `hotdocs verify`.
 
 **Out of scope:** deciding whether a merge proceeds
 (`provenance-tracker`'s readiness check does, `D88`); authoring
@@ -74,21 +72,5 @@ None.
 
 ## Change log
 
-- Initial draft (extracted from `merge-orchestrator`, `D14`); renamed
-  from `golden-scenario-verifier`; per-scenario report granularity (`D23`).
-- `D59`–`D61`, `D68`: first real implementation; where scenarios live;
-  `realizes` is per-component; `generated-test` always dispatched fresh.
-- `D87`–`D93`: own provenance mechanism (`R-SCENARIO-004`), keyed on
-  realizing components' actual content; no CLI; wires its own closures.
-- `D174`: specified `check_capability_provenance`/`run_capability_gates`,
-  never built until now. Scenarios are actually run (`R-SCENARIO-005`),
-  the key covers the capability's own scenarios, the closures are
-  specified (`R-SCENARIO-007`/`008`), and `interface/cli.md` is removed.
-- `D175`: cold-generated and landed at 12/12, `mutation_score` 0.84. A
-  `compiled` capability scenario cannot pass with `surface=None`.
-- `D198`: the test author's bundle names the realizing modules.
-- `D344`: `R-SCENARIO-005`, `AC-SCENARIO-013`: tests run under the
-  `python` adapter's `interpreter`; the key covers the Python lock;
-  `capability_scenario_verifier@2.1.0`.
-- `D345`: the key ends with the `python` provision's `versions`
-  (`R-SCENARIO-006`); `capability_scenario_verifier@2.2.0`.
+`D14`, `D23`, `D59`–`D61`, `D68`, `D87`–`D93`, `D174`, `D175`, `D198`,
+`D344`, `D345`, `D370`.

@@ -1,5 +1,6 @@
-# hotdocs-criterion: sha256:1a7a21d11b004a4ebd50521cc10c0994b826265f9962eecb4db2a6117d33b683
+# hotdocs-criterion: sha256:751dc74d3ff4c162ff8f38cdfaba9cedd33bee06b8c60d1c98365d53f7df9beb
 import re
+from pathlib import Path
 
 import test_author
 
@@ -15,57 +16,56 @@ def field(value, name):
 
 
 def _write_probe_stand_in(repo_root, log_path):
-    probe_dir = repo_root / "gen" / "test-probe"
+    probe_dir = Path(repo_root) / "gen" / "test-probe"
     probe_dir.mkdir(parents=True, exist_ok=True)
     source = (
-        "class _Report:\n"
-        "    def __init__(self):\n"
-        "        self.ok = True\n"
-        "        self.findings = []\n"
-        "        self.tests_run = 1\n"
-        "        self.tests_reached = 1\n"
+        "LOG_PATH = " + repr(str(log_path)) + "\n"
+        "\n"
+        "GATE_VERSION = " + repr("test-probe@1.4.0") + "\n"
+        "\n"
+        "\n"
+        "class ProbeReport:\n"
+        "    def __init__(self, ok, findings, tests_run, tests_reached):\n"
+        "        self.ok = ok\n"
+        "        self.findings = findings\n"
+        "        self.tests_run = tests_run\n"
+        "        self.tests_reached = tests_reached\n"
         "\n"
         "    def to_dict(self):\n"
         "        return {\n"
-        "            'ok': self.ok,\n"
-        "            'findings': list(self.findings),\n"
-        "            'tests_run': self.tests_run,\n"
-        "            'tests_reached': self.tests_reached,\n"
+        "            " + repr("ok") + ": self.ok,\n"
+        "            " + repr("findings") + ": [dict(f) for f in self.findings],\n"
+        "            " + repr("tests_run") + ": self.tests_run,\n"
+        "            " + repr("tests_reached") + ": self.tests_reached,\n"
         "        }\n"
         "\n"
         "\n"
-        "def probe(test_source, criterion_bundle, module_name, *, timeout=60.0):\n"
-        "    with open(" + repr(str(log_path)) + ", 'a', encoding='utf-8') as fh:\n"
-        "        fh.write('probe\\n')\n"
-        "    return _Report()\n"
+        "def probe(test_source, criterion_bundle, module_name, *, timeout=60.0,\n"
+        "          interpreter=None, assets=None):\n"
+        "    with open(LOG_PATH, " + repr("a") + ", encoding=" + repr("utf-8") + ") as fh:\n"
+        "        fh.write(" + repr("probe") + " + " + repr("\n") + ")\n"
+        "    return ProbeReport(True, [], 1, 1)\n"
     )
     (probe_dir / "test_probe.py").write_text(source, encoding="utf-8")
 
 
-def test_prompt_contains_unit_file_frontmatter_rule(tmp_path, monkeypatch):
-    repo_root = tmp_path
+def test_first_prompt_contains_unit_file_frontmatter_rule(tmp_path, monkeypatch):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
     monkeypatch.chdir(repo_root)
-    monkeypatch.delenv("VAR_CACHE_STORE_URL", raising=False)
 
     probe_log = tmp_path / "probe_calls.log"
     _write_probe_stand_in(repo_root, probe_log)
 
     prompts = []
-    test_body = (
-        "import widget_maker\n"
-        "\n"
-        "\n"
-        "def test_something():\n"
-        "    widget_maker.make()\n"
-    )
 
     def mock_backend(prompt, model, **params):
         prompts.append(prompt)
-        nonces = re.findall(r"-----BEGIN FILE ([0-9a-f]{32})-----", prompt)
-        nonce = nonces[-1] if nonces else "0" * 32
+        nonce = re.findall(r"-----BEGIN FILE ([0-9a-f]{32})-----", prompt)[-1]
+        body = "def test_placeholder():\n    assert True\n"
         text = (
             "-----BEGIN FILE " + nonce + "-----\n"
-            + test_body
+            + body
             + "\n-----END FILE " + nonce + "-----"
         )
         return {
@@ -79,9 +79,9 @@ def test_prompt_contains_unit_file_frontmatter_rule(tmp_path, monkeypatch):
         "component_id": "comp-widget-maker",
         "criterion_id": "AC-WIDGET-MAKER-001",
         "covers": "R-WIDGET-MAKER-001",
-        "criterion_text": "Given a widget, When make() is called, Then a widget is returned.",
-        "requirement_text": "R-WIDGET-MAKER-001 - make() MUST return a widget.",
-        "interface": "make() -> Widget",
+        "criterion_text": "Given a widget\nWhen made\nThen it exists",
+        "requirement_text": "R-WIDGET-MAKER-001 - The maker MUST make widgets.",
+        "interface": "make_widget(name: str) -> dict",
         "glossary": "",
         "dependency_interfaces": {},
     }
@@ -91,6 +91,7 @@ def test_prompt_contains_unit_file_frontmatter_rule(tmp_path, monkeypatch):
     )
 
     assert result is not None
+    assert field(result, "criterion_id") == "AC-WIDGET-MAKER-001"
     assert len(prompts) >= 1
     first_prompt = prompts[0]
     assert EXPECTED_LINE in first_prompt.splitlines()

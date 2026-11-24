@@ -15,5 +15,4 @@
 }
 ```
 
-`repair_attempts` and `probe_findings` (`R-AUTHOR-027`) are `0` and `[]`
-on a cache hit; `probe_findings` entries are `test-probe`'s finding dicts.
+`cache_hit` is always `false` (`R-AUTHOR-030`). `probe_findings` (`R-AUTHOR-027`) entries are `test-probe`'s finding dicts.

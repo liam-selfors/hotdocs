@@ -1,5 +1,5 @@
 {
-  "spec_bundle_hash": "sha256:cb5522785c53f54b32865ba62d148d38a717551fc19562d0f8e2c48f97da1d05",
+  "spec_bundle_hash": "sha256:db8ae35cc5924790a9c34c793c2cd017812bdca52551f20d1a7c9c20aacd20f9",
   "model_pin": "claude-opus-5-5",
   "prompt_version": "v12",
   "retry_feedback": null,
@@ -13,7 +13,7 @@
   },
   "attempts": 1,
   "attempt_history": [],
-  "pipeline_version": "v1",
+  "pipeline_version": "v3",
   "gate_versions": {
     "compiler": "criterion-compiler@1.0.0",
     "generated_test": "generated_test@3.0.0",
@@ -23,7 +23,7 @@
     "generator": "generator@3.2.0+v12"
   },
   "provenance_hit": false,
-  "generated_at": "2026-11-23T20:01:05Z",
+  "generated_at": "2026-11-24T09:14:46Z",
   "verification_run_id": "corpus-graph-builder-attempt-1",
   "verification_report": {
     "component_id": "comp-corpus-graph-builder",
@@ -32,133 +32,67 @@
         "id": "AC-GRAPH-001",
         "covers": "R-GRAPH-001",
         "kind": "generated-test",
-        "result": "pass",
-        "test_authoring": {
-          "model": "claude-opus-5-5",
-          "seed": 2,
-          "prompt_version": "v1",
-          "cache_hit": false
-        }
+        "result": "pass"
       },
       {
         "id": "AC-GRAPH-002",
         "covers": "R-GRAPH-002",
         "kind": "generated-test",
-        "result": "pass",
-        "test_authoring": {
-          "model": "claude-opus-5-5",
-          "seed": 2,
-          "prompt_version": "v1",
-          "cache_hit": false
-        }
+        "result": "pass"
       },
       {
         "id": "AC-GRAPH-003",
         "covers": "R-GRAPH-003",
         "kind": "generated-test",
-        "result": "pass",
-        "test_authoring": {
-          "model": "claude-opus-5-5",
-          "seed": 2,
-          "prompt_version": "v1",
-          "cache_hit": false
-        }
+        "result": "pass"
       },
       {
         "id": "AC-GRAPH-004",
         "covers": "R-GRAPH-004",
         "kind": "generated-test",
-        "result": "pass",
-        "test_authoring": {
-          "model": "claude-opus-5-5",
-          "seed": 2,
-          "prompt_version": "v1",
-          "cache_hit": false
-        }
+        "result": "pass"
       },
       {
         "id": "AC-GRAPH-005",
         "covers": "R-GRAPH-005",
         "kind": "generated-test",
-        "result": "pass",
-        "test_authoring": {
-          "model": "claude-opus-5-5",
-          "seed": 2,
-          "prompt_version": "v1",
-          "cache_hit": false
-        }
+        "result": "pass"
       },
       {
         "id": "AC-GRAPH-006",
         "covers": "R-GRAPH-006",
         "kind": "generated-test",
-        "result": "pass",
-        "test_authoring": {
-          "model": "claude-opus-5-5",
-          "seed": 2,
-          "prompt_version": "v1",
-          "cache_hit": false
-        }
+        "result": "pass"
       },
       {
         "id": "AC-GRAPH-007",
         "covers": "R-GRAPH-007",
         "kind": "generated-test",
-        "result": "pass",
-        "test_authoring": {
-          "model": "claude-opus-5-5",
-          "seed": 2,
-          "prompt_version": "v1",
-          "cache_hit": false
-        }
+        "result": "pass"
       },
       {
         "id": "AC-GRAPH-008",
         "covers": "R-GRAPH-008",
         "kind": "generated-test",
-        "result": "pass",
-        "test_authoring": {
-          "model": "claude-opus-5-5",
-          "seed": 2,
-          "prompt_version": "v1",
-          "cache_hit": false
-        }
+        "result": "pass"
       },
       {
         "id": "AC-GRAPH-009",
         "covers": "R-GRAPH-009",
         "kind": "generated-test",
-        "result": "pass",
-        "test_authoring": {
-          "model": "claude-opus-5-5",
-          "seed": 2,
-          "prompt_version": "v1",
-          "cache_hit": false
-        }
+        "result": "pass"
       },
       {
         "id": "AC-GRAPH-010",
         "covers": "R-GRAPH-010",
         "kind": "generated-test",
-        "result": "pass",
-        "test_authoring": {
-          "model": "claude-opus-5-5",
-          "seed": 2,
-          "prompt_version": "v1",
-          "cache_hit": false
-        }
+        "result": "pass"
       },
       {
         "id": "AC-GRAPH-011",
         "covers": "R-GRAPH-003",
         "kind": "generated-test",
-        "result": "pass",
-        "test_authoring": {
-          "model": "claude-opus-5-5",
-          "seed": 2,
-          "prompt_version": "v1",
-          "cache_hit": false
-        }
+        "result": "pass"
       }
     ],
     "requirement_results": {
@@ -174,7 +108,7 @@
       "R-GRAPH-010": "pass"
     },
     "interface_drift": false,
-    "mutation_score": 0.8367346938775511,
+    "mutation_score": 0.8113207547169812,
     "mutation_error": null,
     "assets": [
       {

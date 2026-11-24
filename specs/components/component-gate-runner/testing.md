@@ -17,7 +17,7 @@ returned `ComponentPipelineResult`. A stand-in may return plain dicts; a
 and calls `on_attempt` only when its test says so. Unless a criterion
 says otherwise, `current_sealed_key` returns `None`. A CLI test's
 `repo_root` also holds `specs/components/<slug>/component.md`
-(`interface/cli.md`).
+(`specs/architecture/generate-cli.md`).
 
 ## The committed manifest
 

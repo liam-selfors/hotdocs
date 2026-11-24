@@ -1,25 +1,21 @@
-# hotdocs-criterion: sha256:57444f95e6b084da68721fdf1c7ab9ee4c6c58d50d52d573c345c0609743fbea
+# hotdocs-criterion: sha256:37057a262526bbdc3dfd70f40a0b68604bd53ebe28cef5d2129998f16d380cf2
 import json
 import re
 
 import test_author
 
 
-FIRST_CONTENT = (
-    "import widget_maker\n"
-    "\n"
-    "\n"
-    "def test_first_reply():\n"
-    "    assert widget_maker.make_widget('a') is not None"
-)
-
-
 def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def _probe_stand_in_source(log_path):
-    return (
+NONCE_RE = r"-----BEGIN FILE ([0-9a-f]{32})-----"
+
+
+def _write_probe_stand_in(repo_root, log_path):
+    base = repo_root / "gen" / "test-probe"
+    base.mkdir(parents=True, exist_ok=True)
+    source = (
         "import json\n"
         "\n"
         "LOG_PATH = " + repr(str(log_path)) + "\n"
@@ -46,44 +42,41 @@ def _probe_stand_in_source(log_path):
         "    with open(LOG_PATH, 'a', encoding='utf-8') as fh:\n"
         "        fh.write(json.dumps({'test_source': test_source,\n"
         "                             'module_name': module_name}) + '\\n')\n"
-        "    return ProbeReport(\n"
-        "        ok=False,\n"
-        "        findings=[{'kind': 'test_bug', 'severity': 'error', 'line': 1,\n"
-        "                   'message': 'test failed before reaching the code under test'}],\n"
-        "        tests_run=1,\n"
-        "        tests_reached=0,\n"
-        "    )\n"
+        "    findings = [{\n"
+        "        'kind': 'undefined_name',\n"
+        "        'severity': 'error',\n"
+        "        'line': 1,\n"
+        "        'message': \"undefined name 'nowhere'\",\n"
+        "    }]\n"
+        "    return ProbeReport(False, findings, 0, 0)\n"
     )
+    (base / "test_probe.py").write_text(source, encoding="utf-8")
 
 
-def test_rejected_probe_is_not_written_or_cached(tmp_path, monkeypatch):
+def test_ac_author_020_probe_called_with_extracted_content_and_failing_test_not_written(
+    tmp_path, monkeypatch
+):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
     monkeypatch.chdir(repo_root)
-    monkeypatch.delenv("VAR_CACHE_STORE_URL", raising=False)
 
-    log_path = tmp_path / "probe_calls.log"
-    probe_dir = repo_root / "gen" / "test-probe"
-    probe_dir.mkdir(parents=True)
-    (probe_dir / "test_probe.py").write_text(
-        _probe_stand_in_source(log_path), encoding="utf-8"
-    )
+    log_path = tmp_path / "probe_calls.jsonl"
+    _write_probe_stand_in(repo_root, log_path)
 
-    calls = {"n": 0}
+    replied_contents = []
 
     def mock_backend(prompt, model, **params):
-        nonce = re.findall(r"-----BEGIN FILE ([0-9a-f]{32})-----", prompt)[-1]
-        calls["n"] += 1
-        if calls["n"] == 1:
-            content = FIRST_CONTENT
-        else:
-            content = (
-                "import widget_maker\n"
-                "\n"
-                "\n"
-                "def test_repair_" + str(calls["n"]) + "():\n"
-                "    assert widget_maker.make_widget('b') is not None"
-            )
+        nonce = re.findall(NONCE_RE, prompt)[-1]
+        index = len(replied_contents) + 1
+        content = (
+            "# reply " + str(index) + "\n"
+            "import widget_maker\n"
+            "\n"
+            "\n"
+            "def test_make_widget():\n"
+            "    assert widget_maker.make_widget() is not None\n"
+        )
+        replied_contents.append(content)
         text = (
             "-----BEGIN FILE " + nonce + "-----\n"
             + content
@@ -100,9 +93,9 @@ def test_rejected_probe_is_not_written_or_cached(tmp_path, monkeypatch):
         "component_id": "comp-widget-maker",
         "criterion_id": "AC-WIDGET-MAKER-001",
         "covers": "R-WIDGET-MAKER-001",
-        "criterion_text": "Given a widget name When make_widget is called Then a widget is returned",
+        "criterion_text": "Given nothing When make_widget() is called Then a widget is returned",
         "requirement_text": "R-WIDGET-MAKER-001 make_widget MUST return a widget.",
-        "interface": "make_widget(name: str) -> dict",
+        "interface": "make_widget() -> dict",
         "glossary": "",
         "dependency_interfaces": {},
     }
@@ -111,26 +104,24 @@ def test_rejected_probe_is_not_written_or_cached(tmp_path, monkeypatch):
         bundle, "mock", repo_root=repo_root, llm_backend=mock_backend
     )
 
-    assert log_path.is_file(), "test-probe stand-in was never called"
-    lines = [
-        line for line in log_path.read_text(encoding="utf-8").splitlines() if line
-    ]
-    assert lines, "test-probe stand-in was never called"
-    records = [json.loads(line) for line in lines]
+    assert replied_contents, "the mock model was never called"
+    assert log_path.is_file(), "the test-probe stand-in was never called"
 
-    first = records[0]
+    calls = [
+        json.loads(line)
+        for line in log_path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    assert calls, "the test-probe stand-in was never called"
+
+    first = calls[0]
     assert first["module_name"] == "widget_maker"
-    assert first["test_source"] == FIRST_CONTENT
-    for rec in records:
-        assert rec["module_name"] == "widget_maker"
+    assert first["test_source"] == replied_contents[0]
 
     gen_test_dir = repo_root / "verification" / "widget-maker" / "generated-test"
     if gen_test_dir.exists():
         assert [p for p in gen_test_dir.rglob("*") if p.is_file()] == []
+
     verification = repo_root / "verification"
     if verification.exists():
         assert [p for p in verification.rglob("*") if p.is_file()] == []
-
-    cache_dir = repo_root / ".hotdocs" / "cache"
-    if cache_dir.exists():
-        assert [p for p in cache_dir.rglob("*") if p.is_file()] == []

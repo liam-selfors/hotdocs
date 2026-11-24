@@ -7,7 +7,7 @@ Kind: generated-test
 Given one generated-test scenario, run in two separate
   run_capability_scenarios calls with unchanged content
 When both calls complete
-Then the fake test_author was invoked on both calls — no cache file
+Then the fake test_author was invoked on both calls — nothing
   short-circuits the second dispatch
 
 Given a fake test_author that records the bundle it receives
