@@ -20,8 +20,7 @@ generate <component-id>`, before `hotdocs verify` and committing.
 
 ## Rationale
 
-A developer-invoked command (`D76`, `D86`, `D93`): generating is
-deliberate and costly, unlike `hotdocs verify`'s read-only check.
+Developer-invoked (`D76`, `D86`, `D93`): generating is costly.
 `R-SIZE-002` is accepted: wiring dependencies is this component's job.
 
 ## Scope
@@ -68,3 +67,4 @@ None.
 - `D76`, `D86`–`D93`, `D166`, `D170`, `D314`, `D345`.
 - `D359`: a surface failure writes no provenance; its findings are
   reported.
+- `D370`: `--reauthor` (`R-GATE-012`).

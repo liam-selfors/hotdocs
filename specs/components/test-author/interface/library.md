@@ -11,11 +11,11 @@ GATE_VERSION = "generated_test@3.0.0"
 Not a pure function: like `generator`'s `generate()`, it makes an
 external call. `llm_backend` is passed straight to `llm-endpoint`'s
 `backend` parameter, the seam every `AC-AUTHOR-*` mock uses (`D57`).
-Each dependency (`cache-manager`, `llm-endpoint`, `test-probe`) is
+Each dependency (`llm-endpoint`, `test-probe`) is
 loaded from `<repo_root>/gen/<slug>/<module>.py`, else from the tool
 root's copy. The reply format, the `test-probe` stand-in and the
 written file are in `specs/architecture/test-author-fixtures.md`; the
-exact returned, written and cached content, and how a test compares
+exact returned and written content, and how a test compares
 it, in `specs/architecture/test-author-output.md`; the prompt's fixed
 rule blocks in `specs/architecture/test-author-prompt.md`, `specs/architecture/test-reuse.md`.
 

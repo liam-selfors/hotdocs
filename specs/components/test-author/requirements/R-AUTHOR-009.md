@@ -17,6 +17,6 @@
   `author_test` MUST extract strictly from between the markers,
   discarding anything outside (fence, narration, preamble/postamble).
   No matching BEGIN/END pair MUST be a distinct authoring failure —
-  nothing written to cache or disk, same posture `R-AUTHOR-007`
+  nothing written to disk, same posture `R-AUTHOR-007`
   states for a `model_call_error`.
 

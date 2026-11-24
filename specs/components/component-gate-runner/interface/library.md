@@ -8,6 +8,7 @@ run_component_gates(
     component_id: str, repo_root: Path, model: str, seed: int = 0,
     llm_backend=None, retry_feedback: list[str] | None = None, *,
     max_attempts: int = 3, mode: str = "single", allow_unisolated_exec: bool = False,
+    reauthor: list[str] | None = None,
 ) -> ComponentPipelineResult
 ```
 
@@ -17,7 +18,8 @@ run_component_gates(
 unchanged, and `repo_root` goes to every dependency exactly as
 received, never resolved or converted. `run_component_gates` validates
 nothing itself and reads no file except to count
-`.hotdocs/attempts/<component_id>/` (`0` when absent) and, after a
+`.hotdocs/attempts/<component_id>/` (`0` when absent), deletes only
+`R-GATE-012`'s test files, and, after a
 passing re-verification, the committed manifest: every other fact about
 the component comes from its dependencies.
 
@@ -36,7 +38,7 @@ are, in this order:
    repo_root)`, then `check_provenance(component_id,
    key.spec_bundle_hash, key.gate_versions, repo_root)` — on a
    short-circuiting hit (`interface/data/ComponentPipelineResult.md`),
-   nothing below is called
+   nothing below is called; on a miss, `R-GATE-012`'s deletions come next
 1a. only on a miss whose `reason` is `"environment differs"`
    (`R-GATE-011`): `make_closures` and `verify` as a sealed component's
    steps 1 and 2 below, then both scans as in 4. If they pass (`R-GATE-011`), read
@@ -90,6 +92,6 @@ No dependency name beyond these lists is used: `ProvenanceInputs` is a
 dict, never a class from `provenance-writer`. Results from every
 dependency are read with dual dict-or-attribute access.
 
-CLI: see `interface/cli.md`.
+CLI: see `specs/architecture/generate-cli.md`.
 
-Implements: `specs/architecture/cli-conventions.md`, `specs/architecture/json-values.md`
+Implements: `specs/architecture/cli-conventions.md`, `specs/architecture/json-values.md`, `specs/architecture/generate-cli.md`

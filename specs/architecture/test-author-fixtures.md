@@ -23,9 +23,7 @@ stands in for `test-probe` and observes what was written. Every
 mock-backed test passes any model string, such as `"mock"`, with
 `llm_backend` set to its mock. `llm-endpoint` logs each call under the
 current directory's `.hotdocs/calls/`, so a test sets the current
-directory to its temporary `repo_root` (`monkeypatch.chdir`) and unsets
-`VAR_CACHE_STORE_URL`. Each scenario uses a fresh `repo_root`, so no
-scenario sees another's cache entry.
+directory to its temporary `repo_root` (`monkeypatch.chdir`). Each scenario uses a fresh `repo_root`.
 
 ### Bundle
 
@@ -87,9 +85,6 @@ key counts as `""`. When the probed test's first line begins
 `# hotdocs-criterion:`, that line and its newline are dropped before the
 header is prepended.
 
-`author_test` writes nothing but that file and its `cache-manager`
-entry, and only for a test whose probe passed. It calls
-`cache-manager`'s `get` and `put` with `repo_root=repo_root`, so with
-`VAR_CACHE_STORE_URL` unset, "nothing cached" means
-`<repo_root>/.hotdocs/cache/` holds no entry, and "nothing written"
+`author_test` writes nothing but that file, and only for a test whose
+probe passed; it keeps no cache (`R-AUTHOR-030`). "Nothing written"
 means no file exists under `<repo_root>/verification/`.

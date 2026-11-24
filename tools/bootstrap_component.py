@@ -638,7 +638,7 @@ def run(component_id: str, model: str, seed: int, retry_feedback: list[str] | No
             return 2
     if resume is not None:
         # A kept sandbox from an earlier run of the same component, model
-        # and seed: generation and test authoring hit that run's caches, so
+        # and seed: generation hits that run's cache and its tests are on disk, so
         # what lands (and what provenance records) is that run's work.
         sandbox = Path(resume)
     else:
@@ -789,7 +789,7 @@ def main(argv=None) -> int:
                         help="also require verification/<slug>/test_*.py (hand-maintained) to pass against the candidate before swapping")
     parser.add_argument("--resume-sandbox", default=None,
                         help="rerun the full pipeline in a kept sandbox (same component, model and seed); "
-                             "generation and test authoring come from its caches")
+                             "generation comes from its cache and tests from its files")
     parser.add_argument("--sealed-install", action="store_true",
                         help="for a sealed component: generate it unsealed in the sandbox, require its hand-maintained "
                              "characterization suite too, and install the result at its source_path")

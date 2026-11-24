@@ -12,6 +12,6 @@ hotdocs author-test <component-id> <criterion-id> --model=<model-id> [--seed=<n>
 
 | Code | Meaning |
 | --- | --- |
-| `0` | Test code produced (from cache or a fresh model call) and written. |
+| `0` | Test code produced by a model call and written. |
 | `1` | Model-call error (R-AUTHOR-007). |
 | `2` | Usage error. |
