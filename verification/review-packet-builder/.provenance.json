@@ -1,5 +1,5 @@
 {
-  "spec_bundle_hash": "sha256:fa84bd02c085743c8e4dcd848599a4e431b24ae26970ff0aa8ceab64825cce7a",
+  "spec_bundle_hash": "sha256:742e055c2f581a89dd96eabf5655b3136bba9e03f453cdb7382f11584b2cbbaa",
   "model_pin": "claude-opus-5-5",
   "prompt_version": "v12",
   "retry_feedback": null,
@@ -13,7 +13,7 @@
   },
   "attempts": 1,
   "attempt_history": [],
-  "pipeline_version": "v1",
+  "pipeline_version": "v3",
   "gate_versions": {
     "compiler": "criterion-compiler@1.0.0",
     "generated_test": "generated_test@3.0.0",
@@ -23,7 +23,7 @@
     "generator": "generator@3.2.0+v12"
   },
   "provenance_hit": false,
-  "generated_at": "2026-11-23T20:27:16Z",
+  "generated_at": "2026-11-24T09:26:19Z",
   "verification_run_id": "review-packet-builder-attempt-1",
   "verification_report": {
     "component_id": "comp-review-packet-builder",
@@ -129,7 +129,7 @@
       "R-PACKET-013": "pass"
     },
     "interface_drift": false,
-    "mutation_score": 0.86,
+    "mutation_score": 0.9473684210526315,
     "mutation_error": null,
     "assets": [
       {
@@ -168,7 +168,7 @@
       {
         "rule_id": "Hex High Entropy String",
         "file": "gen/review-packet-builder/review_packet_builder.py",
-        "line": 19
+        "line": 10
       },
       {
         "rule_id": "AWS Access Key",
