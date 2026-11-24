@@ -1,5 +1,5 @@
 {
-  "spec_bundle_hash": "sha256:241aec8a885caf7be3eedb4278bc8e7303054399b3338d4743b2065b73734b4a",
+  "spec_bundle_hash": "sha256:d770b096e9b092c0c569ccd7a3b1324ccd2c76394b68a1eaa913da419d005869",
   "model_pin": "claude-opus-5-5",
   "prompt_version": "v12",
   "retry_feedback": null,
@@ -23,7 +23,7 @@
     "generator": "generator@3.2.0+v12"
   },
   "provenance_hit": false,
-  "generated_at": "2026-11-23T16:03:26Z",
+  "generated_at": "2026-11-24T05:49:53Z",
   "verification_run_id": "test-author-attempt-1",
   "verification_report": {
     "component_id": "comp-test-author",
@@ -44,43 +44,13 @@
         "id": "AC-AUTHOR-003",
         "covers": "R-AUTHOR-003",
         "kind": "generated-test",
-        "result": "pass",
-        "test_authoring": {
-          "model": "claude-opus-5-5",
-          "seed": 1,
-          "prompt_version": "v1",
-          "cache_hit": false
-        }
-      },
-      {
-        "id": "AC-AUTHOR-004",
-        "covers": "R-AUTHOR-004",
-        "kind": "generated-test",
-        "result": "pass",
-        "test_authoring": {
-          "model": "claude-opus-5-5",
-          "seed": 1,
-          "prompt_version": "v1",
-          "cache_hit": false
-        }
-      },
-      {
-        "id": "AC-AUTHOR-005",
-        "covers": "R-AUTHOR-005",
-        "kind": "generated-test",
         "result": "pass"
       },
       {
         "id": "AC-AUTHOR-006",
         "covers": "R-AUTHOR-006",
         "kind": "generated-test",
-        "result": "pass",
-        "test_authoring": {
-          "model": "claude-opus-5-5",
-          "seed": 1,
-          "prompt_version": "v1",
-          "cache_hit": false
-        }
+        "result": "pass"
       },
       {
         "id": "AC-AUTHOR-007",
@@ -98,25 +68,13 @@
         "id": "AC-AUTHOR-009",
         "covers": "R-AUTHOR-009",
         "kind": "generated-test",
-        "result": "pass",
-        "test_authoring": {
-          "model": "claude-opus-5-5",
-          "seed": 1,
-          "prompt_version": "v1",
-          "cache_hit": false
-        }
+        "result": "pass"
       },
       {
         "id": "AC-AUTHOR-010",
         "covers": "R-AUTHOR-010",
         "kind": "generated-test",
-        "result": "pass",
-        "test_authoring": {
-          "model": "claude-opus-5-5",
-          "seed": 1,
-          "prompt_version": "v1",
-          "cache_hit": false
-        }
+        "result": "pass"
       },
       {
         "id": "AC-AUTHOR-011",
@@ -146,13 +104,7 @@
         "id": "AC-AUTHOR-015",
         "covers": "R-AUTHOR-015",
         "kind": "generated-test",
-        "result": "pass",
-        "test_authoring": {
-          "model": "claude-opus-5-5",
-          "seed": 1,
-          "prompt_version": "v1",
-          "cache_hit": false
-        }
+        "result": "pass"
       },
       {
         "id": "AC-AUTHOR-016",
@@ -182,13 +134,7 @@
         "id": "AC-AUTHOR-020",
         "covers": "R-AUTHOR-020",
         "kind": "generated-test",
-        "result": "pass",
-        "test_authoring": {
-          "model": "claude-opus-5-5",
-          "seed": 1,
-          "prompt_version": "v1",
-          "cache_hit": false
-        }
+        "result": "pass"
       },
       {
         "id": "AC-AUTHOR-021",
@@ -206,13 +152,7 @@
         "id": "AC-AUTHOR-023",
         "covers": "R-AUTHOR-023",
         "kind": "generated-test",
-        "result": "pass",
-        "test_authoring": {
-          "model": "claude-opus-5-5",
-          "seed": 1,
-          "prompt_version": "v1",
-          "cache_hit": false
-        }
+        "result": "pass"
       },
       {
         "id": "AC-AUTHOR-024",
@@ -224,25 +164,13 @@
         "id": "AC-AUTHOR-025",
         "covers": "R-AUTHOR-025",
         "kind": "generated-test",
-        "result": "pass",
-        "test_authoring": {
-          "model": "claude-opus-5-5",
-          "seed": 1,
-          "prompt_version": "v1",
-          "cache_hit": false
-        }
+        "result": "pass"
       },
       {
         "id": "AC-AUTHOR-026",
         "covers": "R-AUTHOR-026",
         "kind": "generated-test",
-        "result": "pass",
-        "test_authoring": {
-          "model": "claude-opus-5-5",
-          "seed": 1,
-          "prompt_version": "v1",
-          "cache_hit": false
-        }
+        "result": "pass"
       },
       {
         "id": "AC-AUTHOR-027",
@@ -254,17 +182,17 @@
         "id": "AC-AUTHOR-028",
         "covers": "R-AUTHOR-028",
         "kind": "generated-test",
-        "result": "pass",
-        "test_authoring": {
-          "model": "claude-opus-5-5",
-          "seed": 1,
-          "prompt_version": "v1",
-          "cache_hit": false
-        }
+        "result": "pass"
       },
       {
         "id": "AC-AUTHOR-029",
         "covers": "R-AUTHOR-029",
+        "kind": "generated-test",
+        "result": "pass"
+      },
+      {
+        "id": "AC-AUTHOR-030",
+        "covers": "R-AUTHOR-030",
         "kind": "generated-test",
         "result": "pass"
       }
@@ -273,8 +201,6 @@
       "R-AUTHOR-001": "pass",
       "R-AUTHOR-002": "pass",
       "R-AUTHOR-003": "pass",
-      "R-AUTHOR-004": "pass",
-      "R-AUTHOR-005": "pass",
       "R-AUTHOR-006": "pass",
       "R-AUTHOR-007": "pass",
       "R-AUTHOR-008": "pass",
@@ -296,10 +222,11 @@
       "R-AUTHOR-026": "pass",
       "R-AUTHOR-027": "pass",
       "R-AUTHOR-028": "pass",
-      "R-AUTHOR-029": "pass"
+      "R-AUTHOR-029": "pass",
+      "R-AUTHOR-030": "pass"
     },
     "interface_drift": false,
-    "mutation_score": 0.8181818181818182,
+    "mutation_score": 0.898989898989899,
     "mutation_error": null,
     "assets": [
       {

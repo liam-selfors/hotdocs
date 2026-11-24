@@ -83,39 +83,24 @@ def test_ac_author_003_canonical_model_used_regardless_of_generator_model(repo_r
     assert backend.calls[0][1] == "claude-sonnet-5"
 
 
-def test_ac_author_004_cache_hit_skips_the_model(repo_root):
-    # Deriving the real CacheKey by hand would couple this test to
-    # internal hashing/versioning helpers whose names and signatures
-    # have legitimately varied across real regeneration rounds. Instead,
-    # populate the cache the same way a real call would -- via author_test
-    # itself -- then call again with a backend that must never be used.
+def test_ac_author_030_a_deleted_test_is_authored_afresh(repo_root):
+    # D370: no cache. The same bundle authored twice, the first file
+    # deleted in between as a caller does for a faulty test, calls the
+    # model both times and never restores the first test.
     bundle = fake_bundle()
-    seeding_backend = MockBackend([file_block("def test_x(): pass")])
-    first = author_test(bundle, "claude-sonnet-5", repo_root=repo_root, llm_backend=seeding_backend)
-    assert _rf(first, "cache_hit") is False
-
-    backend = MockBackend([])  # must never be called
-    result = author_test(bundle, "claude-sonnet-5", repo_root=repo_root, llm_backend=backend)
-    assert _rf(result, "cache_hit") is True
-    assert backend.calls == []
-    assert _file_field(_rf(result, "file"), "content") == _file_field(_rf(first, "file"), "content")
-
-
-def test_ac_author_005_successful_call_is_cached(repo_root):
-    # Same reasoning as test_ac_author_004: prove "cached under the
-    # correct key" behaviorally -- a second call with a different
-    # backend must return the first call's result, never the second
-    # backend's -- rather than reconstructing the real CacheKey by hand.
     first_backend = MockBackend([file_block("def test_x(): pass")])
-    bundle = fake_bundle()
     first = author_test(bundle, "claude-sonnet-5", repo_root=repo_root, llm_backend=first_backend)
-    assert _body(_file_field(_rf(first, "file"), "content")) == "def test_x(): pass"
+    path = repo_root / _file_field(_rf(first, "file"), "path")
+    assert path.is_file()
+    path.unlink()
 
-    second_backend = MockBackend([file_block("def test_y(): pass")])  # must never be called
+    second_backend = MockBackend([file_block("def test_y(): pass")])
     second = author_test(bundle, "claude-sonnet-5", repo_root=repo_root, llm_backend=second_backend)
-    assert _rf(second, "cache_hit") is True
-    assert second_backend.calls == []
-    assert _body(_file_field(_rf(second, "file"), "content")) == "def test_x(): pass"
+    assert _rf(first, "cache_hit") is False and _rf(second, "cache_hit") is False
+    assert len(second_backend.calls) == 1
+    assert _body(_file_field(_rf(second, "file"), "content")) == "def test_y(): pass"
+    assert _body(path.read_text()) == "def test_y(): pass"
+    assert not (repo_root / ".hotdocs" / "cache").exists()
 
 
 def test_ac_author_006_output_path_under_generated_test_dir(repo_root):

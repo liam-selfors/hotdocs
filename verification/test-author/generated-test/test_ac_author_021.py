@@ -1,6 +1,5 @@
-# hotdocs-criterion: sha256:da1b4cc9ad36596a94fbed9c9bf0e9193c5ce54ec7e08025e55cb06b80d399e9
+# hotdocs-criterion: sha256:805cb3edc8c209e7393e1b32e9a48df1342b624c6544f003f1944b08108be913
 import re
-from pathlib import Path
 
 import test_author
 
@@ -10,7 +9,7 @@ def field(value, name):
 
 
 def _write_probe_stand_in(repo_root, log_path):
-    probe_dir = Path(repo_root) / "gen" / "test-probe"
+    probe_dir = repo_root / "gen" / "test-probe"
     probe_dir.mkdir(parents=True, exist_ok=True)
     source = (
         "class _Report:\n"
@@ -29,7 +28,7 @@ def _write_probe_stand_in(repo_root, log_path):
         "        }\n"
         "\n"
         "\n"
-        "def probe(test_source, criterion_bundle, module_name, *, timeout=60.0, interpreter=None):\n"
+        "def probe(test_source, criterion_bundle, module_name, *, timeout=60.0, **kwargs):\n"
         "    with open(" + repr(str(log_path)) + ", 'a', encoding='utf-8') as fh:\n"
         "        fh.write('probe\\n')\n"
         "    return _Report()\n"
@@ -41,20 +40,19 @@ def test_prompt_holds_dual_access_block(tmp_path, monkeypatch):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
     monkeypatch.chdir(repo_root)
-    monkeypatch.delenv("VAR_CACHE_STORE_URL", raising=False)
 
-    log_path = tmp_path / "probe_calls.log"
-    _write_probe_stand_in(repo_root, log_path)
+    probe_log = tmp_path / "probe_calls.log"
+    _write_probe_stand_in(repo_root, probe_log)
 
     prompts = []
-    test_file = "def test_something():\n    assert True\n"
+    valid_test = "def test_ok():\n    assert True\n"
 
     def mock_backend(prompt, model, **params):
         prompts.append(prompt)
         nonce = re.findall(r"-----BEGIN FILE ([0-9a-f]{32})-----", prompt)[-1]
         text = (
             "-----BEGIN FILE " + nonce + "-----\n"
-            + test_file
+            + valid_test
             + "\n-----END FILE " + nonce + "-----"
         )
         return {
@@ -68,8 +66,8 @@ def test_prompt_holds_dual_access_block(tmp_path, monkeypatch):
         "component_id": "comp-widget-maker",
         "criterion_id": "AC-WIDGET-MAKER-001",
         "covers": "R-WIDGET-MAKER-001",
-        "criterion_text": "Given a widget, When made, Then it exists.",
-        "requirement_text": "R-WIDGET-MAKER-001 - The maker MUST make widgets.",
+        "criterion_text": "Given a widget When made Then it exists",
+        "requirement_text": "R-WIDGET-MAKER-001 The maker MUST make widgets.",
         "interface": "make_widget(name: str) -> dict",
         "glossary": "",
         "dependency_interfaces": {},
@@ -78,10 +76,10 @@ def test_prompt_holds_dual_access_block(tmp_path, monkeypatch):
     result = test_author.author_test(
         bundle, "mock", repo_root=repo_root, llm_backend=mock_backend
     )
-    assert result is not None
-    assert field(result, "model_call_error") is None
 
+    assert field(result, "model_call_error") is None
     assert len(prompts) >= 1
+
     first = prompts[0]
     expected_line = (
         "        return value[name] if isinstance(value, dict) else getattr(value, name)"

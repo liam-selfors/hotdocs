@@ -1,6 +1,6 @@
-# hotdocs-criterion: sha256:eadfb3be65c24ab6b2f3b0742c39c41d2bb0cc08df4a90d55f76f4cc264319f7
+# hotdocs-criterion: sha256:1171a5524b9d42c5082e74b4b9e55c756ed29f487d58a847a93cb71d22318e66
+import json
 import re
-from pathlib import Path
 
 import test_author
 
@@ -30,7 +30,7 @@ def make_bundle():
         "criterion_id": "AC-WIDGET-MAKER-001",
         "covers": "R-WIDGET-MAKER-001",
         "criterion_text": "Given a widget\nWhen made\nThen it exists",
-        "requirement_text": "R-WIDGET-MAKER-001 - a widget MUST be made.",
+        "requirement_text": "R-WIDGET-MAKER-001 - make_widget MUST return a widget.",
         "interface": "make_widget() -> dict",
         "glossary": "",
         "dependency_interfaces": {},
@@ -38,15 +38,22 @@ def make_bundle():
 
 
 def write_probe_stand_in(repo_root, log_path):
-    probe_dir = repo_root / "gen" / "test-probe"
-    probe_dir.mkdir(parents=True, exist_ok=True)
+    target = repo_root / "gen" / "test-probe" / "test_probe.py"
+    target.parent.mkdir(parents=True, exist_ok=True)
     source = (
-        "class _Report:\n"
-        "    def __init__(self, ok, findings):\n"
+        "import json\n"
+        "\n"
+        "LOG = " + repr(str(log_path)) + "\n"
+        "FINDING = " + repr(FINDING) + "\n"
+        "GATE_VERSION = 'test-probe@1.4.0'\n"
+        "\n"
+        "\n"
+        "class ProbeReport:\n"
+        "    def __init__(self, ok, findings, tests_run=0, tests_reached=0):\n"
         "        self.ok = ok\n"
         "        self.findings = findings\n"
-        "        self.tests_run = 0\n"
-        "        self.tests_reached = 0\n"
+        "        self.tests_run = tests_run\n"
+        "        self.tests_reached = tests_reached\n"
         "\n"
         "    def to_dict(self):\n"
         "        return {\n"
@@ -57,26 +64,25 @@ def write_probe_stand_in(repo_root, log_path):
         "        }\n"
         "\n"
         "\n"
-        "def probe(test_source, criterion_bundle, module_name, *, timeout=60.0, interpreter=None):\n"
-        "    with open(" + repr(str(log_path)) + ", 'a', encoding='utf-8') as fh:\n"
-        "        fh.write(repr(test_source) + '\\n')\n"
-        "    if test_source == " + repr("GOOD") + ":\n"
-        "        return _Report(True, [])\n"
-        "    return _Report(False, [dict(" + repr(FINDING) + ")])\n"
+        "def probe(test_source, criterion_bundle, module_name, *, timeout=60.0,\n"
+        "          interpreter=None, assets=None):\n"
+        "    with open(LOG, 'a', encoding='utf-8') as fh:\n"
+        "        fh.write(json.dumps(test_source) + '\\n')\n"
+        "    if test_source == 'GOOD':\n"
+        "        return ProbeReport(True, [], 1, 1)\n"
+        "    return ProbeReport(False, [dict(FINDING)], 0, 0)\n"
     )
-    (probe_dir / "test_probe.py").write_text(source, encoding="utf-8")
+    target.write_text(source, encoding="utf-8")
 
 
-def make_backend(replies, prompts):
-    queue = list(replies)
-
+def make_mock(replies, prompts):
     def backend(prompt, model, **params):
         prompts.append(prompt)
         nonce = re.findall(NONCE_RE, prompt)[-1]
-        content = queue.pop(0)
+        reply = replies[min(len(prompts) - 1, len(replies) - 1)]
         text = (
             "-----BEGIN FILE " + nonce + "-----\n"
-            + content
+            + reply
             + "\n-----END FILE " + nonce + "-----"
         )
         return {
@@ -89,58 +95,67 @@ def make_backend(replies, prompts):
     return backend
 
 
-def files_under(path):
-    path = Path(path)
-    if not path.exists():
+def read_probe_log(log_path):
+    if not log_path.exists():
         return []
-    return [p for p in path.rglob("*") if p.is_file()]
+    return [
+        json.loads(line)
+        for line in log_path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
 
 
-def setup_env(tmp_path, monkeypatch):
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    monkeypatch.chdir(repo_root)
-    monkeypatch.delenv("VAR_CACHE_STORE_URL", raising=False)
-    log_path = tmp_path / "probe_calls.log"
-    write_probe_stand_in(repo_root, log_path)
-    return repo_root, log_path
+def written_files(repo_root):
+    verification = repo_root / "verification"
+    if not verification.exists():
+        return []
+    return [p for p in verification.rglob("*") if p.is_file()]
 
 
 def test_repair_succeeds_on_second_repair(tmp_path, monkeypatch):
-    repo_root, log_path = setup_env(tmp_path, monkeypatch)
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    log_path = tmp_path / "probe_calls.log"
+    write_probe_stand_in(repo_root, log_path)
+    monkeypatch.chdir(repo_root)
+
     prompts = []
-    backend = make_backend(["BAD1", "BAD2", "GOOD"], prompts)
+    backend = make_mock(["BAD1", "BAD2", "GOOD"], prompts)
 
     result = test_author.author_test(
         make_bundle(), "mock", 0, repo_root=repo_root, llm_backend=backend
     )
 
     assert len(prompts) == 3
-    assert "BAD1" in prompts[1]
-    assert "undefined_name (line 3): undefined name 'x'" in prompts[1]
+    second = prompts[1]
+    assert "BAD1" in second
+    assert "undefined_name (line 3): undefined name 'x'" in second
+
+    assert read_probe_log(log_path) == ["BAD1", "BAD2", "GOOD"]
 
     assert field(result, "model_call_error") is None
     assert field(result, "repair_attempts") == 2
     assert list(field(result, "probe_findings")) == []
 
-    file_info = field(result, "file")
-    assert file_info is not None
-    written = repo_root / file_info["path"]
+    file = field(result, "file")
+    assert file is not None
+    content = field(file, "content")
+    assert body(content) == "GOOD"
+
+    written = repo_root / field(file, "path")
     assert written.is_file()
-    written_content = written.read_text(encoding="utf-8")
-    assert written_content.partition("\n")[0].startswith("# hotdocs-criterion:")
-    assert body(written_content) == "GOOD"
-    assert body(file_info["content"]) == "GOOD"
-
-    # The stand-in probe actually ran for each candidate.
-    assert log_path.is_file()
-    assert len(log_path.read_text(encoding="utf-8").splitlines()) == 3
+    assert body(written.read_text(encoding="utf-8")) == "GOOD"
 
 
-def test_repair_exhausted_returns_probe_failure(tmp_path, monkeypatch):
-    repo_root, log_path = setup_env(tmp_path, monkeypatch)
+def test_repair_exhausted_reports_probe_failure(tmp_path, monkeypatch):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    log_path = tmp_path / "probe_calls.log"
+    write_probe_stand_in(repo_root, log_path)
+    monkeypatch.chdir(repo_root)
+
     prompts = []
-    backend = make_backend(["BAD1", "BAD2", "BAD3"], prompts)
+    backend = make_mock(["BAD1", "BAD2", "BAD3"], prompts)
 
     result = test_author.author_test(
         make_bundle(), "mock", 0, repo_root=repo_root, llm_backend=backend
@@ -155,8 +170,4 @@ def test_repair_exhausted_returns_probe_failure(tmp_path, monkeypatch):
     assert field(result, "repair_attempts") == 2
     assert [dict(f) for f in field(result, "probe_findings")] == [FINDING]
 
-    assert files_under(repo_root / "verification") == []
-    assert files_under(repo_root / ".hotdocs" / "cache") == []
-
-    assert log_path.is_file()
-    assert len(log_path.read_text(encoding="utf-8").splitlines()) == 3
+    assert written_files(repo_root) == []
