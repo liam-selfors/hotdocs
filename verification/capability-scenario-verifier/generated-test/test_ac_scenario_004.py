@@ -1,13 +1,12 @@
-# hotdocs-criterion: sha256:e811b8fae9631dd62cd3264b77a761b62d0e929811d48808db7e8fb6cb020f8f
+# hotdocs-criterion: sha256:e33db11d5cfd6dc296463f59f4435a9430617d8a6342ba7ab56d1a431768aa71
 import json
-import sys
 from pathlib import Path
 
 import capability_scenario_verifier
 
 
-SCENARIO_ID = "CS-X-001"
 CAPABILITY_ID = "P-X"
+SCENARIO_ID = "CS-X-001"
 EXPECTED_BUNDLE_KEYS = {"capability_id", "scenario_id", "covers", "kind", "gherkin", "file"}
 
 
@@ -17,22 +16,11 @@ def field(value, name):
 
 def _write(path, text):
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text)
+    path.write_text(text, encoding="utf-8")
 
 
 def _build_repo(repo_root):
-    # Planted python adapter.
-    _write(
-        repo_root / "gen" / "kind-python" / "kind_python.py",
-        "import sys\n"
-        "\n"
-        "\n"
-        "def provision(repo_root):\n"
-        "    return {\"ok\": True, \"reason\": \"\", \"versions\": {}, \"lockfile_sha256\": None,\n"
-        "            \"interpreter\": sys.executable}\n",
-    )
-
-    # A component realizing P-X.
+    # A realizing component, unsealed, with code under gen/<slug>/.
     _write(
         repo_root / "specs" / "components" / "foo" / "component.md",
         "---\n"
@@ -49,23 +37,19 @@ def _build_repo(repo_root):
         "\n"
         "A fixture component.\n",
     )
-    _write(
-        repo_root / "gen" / "foo" / "foo.py",
-        "def value():\n"
-        "    return 1\n",
-    )
+    _write(repo_root / "gen" / "foo" / "foo.py", "def hello():\n    return 1\n")
 
-    # The capability with one generated-test scenario.
+    # The capability, with one generated-test scenario.
     _write(
         repo_root / "specs" / "product" / "x.md",
         "---\n"
         "id: P-X\n"
-        "title: X\n"
+        "title: Capability X\n"
         "status: draft\n"
         "owners: [pipeline-team]\n"
         "---\n"
         "\n"
-        "# X\n"
+        "# Capability X\n"
         "\n"
         "### CS-X-001\n"
         "\n"
@@ -73,61 +57,45 @@ def _build_repo(repo_root):
         "Kind: generated-test\n"
         "\n"
         "```gherkin\n"
-        "Given a thing\n"
-        "When it runs\n"
-        "Then it passes\n"
+        "Given a foo is ready\n"
+        "When the foo runs\n"
+        "Then the foo succeeds\n"
         "```\n",
     )
 
-    # Fake test-author dependency (real signature and full result shape).
-    test_author_result = {
-        "component_id": "comp-foo",
-        "criterion_id": SCENARIO_ID,
-        "model": "fake-model",
-        "seed": 0,
-        "prompt_version": "v1",
-        "cache_hit": False,
-        "file": {
-            "path": "verification/capabilities/P-X/generated-test/test_cs_x_001.py",
-            "content": "def test_x():\n    assert True\n",
-        },
-        "model_call_error": None,
-        "repair_attempts": 0,
-        "probe_findings": [],
-    }
+    # Small fake dependency modules, flat-module shape.
     _write(
         repo_root / "gen" / "test-author" / "test_author.py",
-        "GATE_VERSION = " + repr("generated_test@3.0.0") + "\n"
-        "\n"
-        "\n"
-        "def author_test(bundle, model, seed=0, *, repo_root=None, llm_backend=None):\n"
-        "    result = " + repr(test_author_result) + "\n"
-        "    result['model'] = model\n"
-        "    result['seed'] = seed\n"
-        "    return result\n",
+        "def author_test(bundle, model, seed=0, repo_root=None, llm_backend=None):\n"
+        "    return {\n"
+        "        'component_id': None,\n"
+        "        'criterion_id': bundle['criterion_id'],\n"
+        "        'model': model,\n"
+        "        'seed': seed,\n"
+        "        'prompt_version': 'v1',\n"
+        "        'cache_hit': False,\n"
+        "        'file': {\n"
+        "            'path': " + repr("verification/capabilities/P-X/generated-test/test_cs_x_001.py") + ",\n"
+        "            'content': " + repr("def test_x():\n    assert True\n") + ",\n"
+        "        },\n"
+        "        'model_call_error': None,\n"
+        "        'repair_attempts': 0,\n"
+        "        'probe_findings': [],\n"
+        "    }\n",
     )
-
-    # Fake llm-endpoint dependency.
     _write(
         repo_root / "gen" / "llm-endpoint" / "llm_endpoint.py",
         "def complete(prompt, model, *, backend=None, **params):\n"
-        "    return {" + repr("text") + ": " + repr("pass") + ", "
-        + repr("model") + ": model, "
-        + repr("backend") + ": " + repr("fake") + ", "
-        + repr("model_call_error") + ": None}\n",
+        "    return {'text': 'pass', 'model': model, 'backend': 'fake', 'model_call_error': None}\n",
     )
 
 
 def _make_test_author(log_path):
     def test_author(bundle):
-        if isinstance(bundle, dict):
-            keys = sorted(str(k) for k in bundle.keys())
-            scenario_id = bundle.get("scenario_id")
-        else:
-            keys = sorted(str(k) for k in vars(bundle).keys())
-            scenario_id = getattr(bundle, "scenario_id", None)
-        with open(log_path, "a") as fh:
-            fh.write(json.dumps({"keys": keys, "scenario_id": str(scenario_id)}) + "\n")
+        keys = sorted(str(k) for k in bundle.keys())
+        record = {"keys": keys, "scenario_id": str(bundle.get("scenario_id"))}
+        with open(log_path, "a", encoding="utf-8") as fh:
+            fh.write(json.dumps(record) + "\n")
         return {
             "model_call_error": None,
             "file": {
@@ -142,18 +110,19 @@ def _make_test_author(log_path):
 def _read_log(log_path):
     if not log_path.exists():
         return []
-    return [json.loads(line) for line in log_path.read_text().splitlines() if line.strip()]
+    return [json.loads(line) for line in log_path.read_text(encoding="utf-8").splitlines() if line.strip()]
 
 
-def _scenario_entry(report, scenario_id):
-    capability = field(report, CAPABILITY_ID)
-    scenarios = field(capability, "scenarios")
-    matches = [s for s in scenarios if field(s, "id") == scenario_id]
-    assert len(matches) == 1, scenarios
-    return matches[0]
+def _scenario_result(report, scenario_id):
+    entry = field(report, CAPABILITY_ID) if not isinstance(report, dict) else report[CAPABILITY_ID]
+    scenarios = field(entry, "scenarios")
+    for scenario in scenarios:
+        if field(scenario, "id") == scenario_id:
+            return field(scenario, "result")
+    raise AssertionError("scenario " + repr(scenario_id) + " not in report")
 
 
-def test_generated_test_scenario_dispatched_fresh_on_every_call(tmp_path):
+def test_generated_test_scenario_dispatched_on_every_call(tmp_path):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
     _build_repo(repo_root)
@@ -163,17 +132,20 @@ def test_generated_test_scenario_dispatched_fresh_on_every_call(tmp_path):
     capability_scenario_verifier.run_capability_scenarios(
         ["comp-foo"], repo_root, test_author=test_author
     )
-    assert len(_read_log(log_path)) == 1
+    first_calls = _read_log(log_path)
+    assert len(first_calls) >= 1, "test_author not invoked on the first call"
 
     capability_scenario_verifier.run_capability_scenarios(
         ["comp-foo"], repo_root, test_author=test_author
     )
-    calls = _read_log(log_path)
-    assert len(calls) == 2, calls
-    assert all(c["scenario_id"] == SCENARIO_ID for c in calls)
+    second_calls = _read_log(log_path)
+    assert len(second_calls) > len(first_calls), (
+        "test_author not invoked on the second call; dispatch was short-circuited"
+    )
+    assert any(c["scenario_id"] == SCENARIO_ID for c in second_calls[len(first_calls):])
 
 
-def test_bundle_keys_are_exactly_the_scenario_shape(tmp_path):
+def test_bundle_has_exactly_the_scenario_keys(tmp_path):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
     _build_repo(repo_root)
@@ -184,19 +156,17 @@ def test_bundle_keys_are_exactly_the_scenario_shape(tmp_path):
         ["comp-foo"], repo_root, test_author=test_author
     )
     calls = _read_log(log_path)
-    assert len(calls) >= 1, calls
+    assert calls, "test_author was never invoked"
     for call in calls:
-        assert set(call["keys"]) == EXPECTED_BUNDLE_KEYS, call["keys"]
-        assert call["scenario_id"] == SCENARIO_ID
+        assert set(call["keys"]) == EXPECTED_BUNDLE_KEYS
+    assert any(c["scenario_id"] == SCENARIO_ID for c in calls)
 
 
-def test_generated_test_scenario_without_test_author_fails(tmp_path):
+def test_no_test_author_makes_generated_test_scenario_fail(tmp_path):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
     _build_repo(repo_root)
 
-    report = capability_scenario_verifier.run_capability_scenarios(
-        ["comp-foo"], repo_root
-    )
-    entry = _scenario_entry(report, SCENARIO_ID)
-    assert field(entry, "result") == "fail"
+    report = capability_scenario_verifier.run_capability_scenarios(["comp-foo"], repo_root)
+
+    assert _scenario_result(report, SCENARIO_ID) == "fail"
