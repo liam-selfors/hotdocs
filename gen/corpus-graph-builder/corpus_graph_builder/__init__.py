@@ -1,4 +1,4 @@
-"""Build verification/corpus-graph.json from the spec corpus."""
+"""Corpus Graph Builder: builds verification/corpus-graph.json."""
 
 from __future__ import annotations
 
@@ -10,12 +10,11 @@ from pathlib import Path
 
 import duckdb
 
-__all__ = ["CorpusGraph", "build_corpus_graph", "write_corpus_graph", "main"]
-
-SIZE_CAP = 4000
-EDGE_KINDS = ("depends_on", "realizes", "uses_var")
-NODE_KINDS = ("component", "capability", "var")
-OUTPUT_REL = Path("verification") / "corpus-graph.json"
+_GQE_SLUG = "graph-query-engine"
+_GQE_MODULE = "graph_query_engine"
+_SIZE_CAP = 4000
+_EDGE_KINDS = ("depends_on", "realizes", "uses_var")
+_NODE_KINDS = ("component", "capability", "var")
 
 
 @dataclass
@@ -38,111 +37,85 @@ class CorpusGraph:
 
 def _tool_root() -> Path:
     here = Path(__file__).resolve()
-    for parent in here.parents:
-        if parent.name == "gen":
-            return parent.parent
-    return here.parent
+    return next(p for p in here.parents if p.name == "gen").parent
 
 
-def _load_graph_query_engine(repo_root: Path):
-    dep_dir = repo_root / "gen" / "graph-query-engine"
+def _load_gqe(repo_root: Path):
+    dep_dir = repo_root / "gen" / _GQE_SLUG
     if not dep_dir.is_dir():
-        dep_dir = _tool_root() / "gen" / "graph-query-engine"
-    path = dep_dir / "graph_query_engine.py"
-    name = "graph_query_engine"
-    spec = importlib.util.spec_from_file_location(name, str(path))
+        dep_dir = _tool_root() / "gen" / _GQE_SLUG
+    spec = importlib.util.spec_from_file_location(
+        _GQE_MODULE, str(dep_dir / (_GQE_MODULE + ".py"))
+    )
     module = importlib.util.module_from_spec(spec)
-    sys.modules[name] = module
+    sys.modules[_GQE_MODULE] = module
     spec.loader.exec_module(module)
     return module
-
-
-def _connect(repo_root: Path):
-    gqe = _load_graph_query_engine(repo_root)
-    con = duckdb.connect(":memory:")
-    try:
-        con.execute("INSTALL yaml FROM community")
-    except Exception:
-        pass
-    con.execute("LOAD yaml")
-    load_views = gqe["load_views"] if isinstance(gqe, dict) else getattr(gqe, "load_views")
-    load_views(con, repo_root)
-    return con
 
 
 def _frontmatter(text: str) -> dict:
     lines = text.splitlines()
     result = {}
-    if not lines or lines[0].strip() != "---":
-        return result
-    for line in lines[1:]:
-        if line.strip() == "---":
-            break
-        if ":" in line:
-            key, value = line.split(":", 1)
-            result[key.strip()] = value.strip()
+    if lines and lines[0].strip() == "---":
+        for line in lines[1:]:
+            if line.strip() == "---":
+                break
+            if ":" in line:
+                key, _, value = line.partition(":")
+                result[key.strip()] = value.strip()
     return result
 
 
-def _parse_list(value: str) -> list:
-    inner = value.strip()
-    if inner.startswith("[") and inner.endswith("]"):
-        inner = inner[1:-1]
-    items = [item.strip().strip("\"'") for item in inner.split(",")]
-    return [item for item in items if item]
+def _flow_list(value: str) -> list:
+    inner = value.strip()[1:-1]
+    return [s.strip().strip("\"'") for s in inner.split(",") if s.strip()]
 
 
 def _rate(count: int, total: int) -> float:
-    return count / total if total else 0.0
+    return float(count) / float(total) if total else 0.0
 
 
-def _component_node(repo_root: Path, comp_id: str, sizes: dict) -> dict:
-    slug = comp_id[len("comp-"):] if comp_id.startswith("comp-") else comp_id
-    spec_dir = repo_root / "specs" / "components" / slug
-
-    documents = {}
-    if spec_dir.is_dir():
-        for doc in sorted(spec_dir.rglob("*.md")):
-            if doc.is_file():
-                rel = doc.relative_to(spec_dir).as_posix()
-                documents[rel] = doc.read_text(encoding="utf-8")
-    documents = dict(sorted(documents.items()))
-
-    fm = _frontmatter(documents.get("component.md", ""))
-    sealed = fm.get("sealed", "false").strip("\"'").lower() == "true"
-    owners = _parse_list(fm["owners"]) if "owners" in fm else []
+def _component_node(repo_root: Path, slug: str, sizes: dict) -> dict:
+    comp_dir = repo_root / "specs" / "components" / slug
+    fm = _frontmatter((comp_dir / "component.md").read_text(encoding="utf-8"))
 
     verification = None
     provenance = None
     manifest_path = repo_root / "verification" / slug / ".provenance.json"
     if manifest_path.is_file():
-        with manifest_path.open(encoding="utf-8") as fh:
+        with manifest_path.open("r", encoding="utf-8") as fh:
             manifest = json.load(fh)
         verification = manifest.get("verification_report")
         provenance = {k: v for k, v in manifest.items() if k != "verification_report"}
 
+    count = sizes.get(slug)
+    if count is None:
+        size_status = "unknown"
+    elif count <= _SIZE_CAP:
+        size_status = "ok"
+    else:
+        size_status = "over"
+
     pinned = []
     overrides_path = repo_root / "gen" / slug / ".overrides.json"
     if overrides_path.is_file():
-        with overrides_path.open(encoding="utf-8") as fh:
+        with overrides_path.open("r", encoding="utf-8") as fh:
             loaded = json.load(fh)
         if isinstance(loaded, list):
             pinned = loaded
 
-    words = sizes.get(slug)
-    if words is None:
-        size_status = "unknown"
-    elif words <= SIZE_CAP:
-        size_status = "ok"
-    else:
-        size_status = "over"
+    owners = _flow_list(fm["owners"]) if "owners" in fm else []
+
+    documents = {}
+    for path in sorted(comp_dir.rglob("*.md"), key=lambda p: p.relative_to(comp_dir).as_posix()):
+        documents[path.relative_to(comp_dir).as_posix()] = path.read_text(encoding="utf-8")
 
     return {
         "type": "component",
         "verification": verification,
         "provenance": provenance,
         "size_status": size_status,
-        "sealed": sealed,
+        "sealed": fm.get("sealed") == "true",
         "pinned_overrides": pinned,
         "owners": owners,
         "documents": documents,
@@ -151,14 +124,21 @@ def _component_node(repo_root: Path, comp_id: str, sizes: dict) -> dict:
 
 def build_corpus_graph(repo_root: Path) -> CorpusGraph:
     repo_root = Path(repo_root)
-    con = _connect(repo_root)
+    gqe = _load_gqe(repo_root)
+    con = duckdb.connect(":memory:")
     try:
+        try:
+            con.execute("INSTALL yaml FROM community")
+        except Exception:
+            pass
+        con.execute("LOAD yaml")
+        gqe.load_views(con, repo_root)
+
         node_rows = con.execute(
-            "SELECT DISTINCT id, kind FROM nodes "
-            "WHERE kind IN ('component', 'capability', 'var')"
+            "SELECT id, kind FROM nodes WHERE kind IN ('component', 'capability', 'var')"
         ).fetchall()
         edge_rows = con.execute(
-            "SELECT DISTINCT source_id, target_id, edge_type FROM edges "
+            "SELECT source_id, target_id, edge_type FROM edges "
             "WHERE edge_type IN ('depends_on', 'realizes', 'uses_var')"
         ).fetchall()
         size_rows = con.execute(
@@ -167,50 +147,58 @@ def build_corpus_graph(repo_root: Path) -> CorpusGraph:
     finally:
         con.close()
 
-    sizes = {str(cid): int(wc) for cid, wc in size_rows if wc is not None}
+    sizes = {str(cid): wc for cid, wc in size_rows}
 
     edges = sorted(
         ({"from": str(s), "to": str(t), "kind": str(k)} for s, t, k in edge_rows),
         key=lambda e: (e["from"], e["to"], e["kind"]),
     )
 
-    capabilities = sorted(str(i) for i, k in node_rows if k == "capability")
-    variables = sorted(str(i) for i, k in node_rows if k == "var")
-    components = sorted(str(i) for i, k in node_rows if k == "component")
-
     nodes = {}
-    for cap in capabilities:
-        nodes[cap] = {"type": "capability"}
-    for var in variables:
-        nodes[var] = {"type": "var"}
-    for comp in components:
-        nodes[comp] = _component_node(repo_root, comp, sizes)
+    capabilities = []
+    variables = []
+    components = []
+    for node_id, kind in sorted((str(i), str(k)) for i, k in node_rows):
+        if kind == "component":
+            components.append(node_id)
+            slug = node_id[len("comp-"):] if node_id.startswith("comp-") else node_id
+            nodes[node_id] = _component_node(repo_root, slug, sizes)
+        else:
+            if kind == "capability":
+                capabilities.append(node_id)
+            else:
+                variables.append(node_id)
+            nodes[node_id] = {"type": kind}
 
     realized = {e["to"] for e in edges if e["kind"] == "realizes"}
     used_vars = {e["to"] for e in edges if e["kind"] == "uses_var"}
     depended_on = {e["to"] for e in edges if e["kind"] == "depends_on"}
     realizers = {e["from"] for e in edges if e["kind"] == "realizes"}
 
-    orphan_caps = sum(1 for c in capabilities if c not in realized)
-    orphan_vars = sum(1 for v in variables if v not in used_vars)
-    orphan_comps = sum(
-        1 for c in components if c not in depended_on and c not in realizers
-    )
-
     aggregates = {
-        "orphan_capability_rate": _rate(orphan_caps, len(capabilities)),
-        "orphan_component_rate": _rate(orphan_comps, len(components)),
-        "orphan_var_rate": _rate(orphan_vars, len(variables)),
+        "orphan_capability_rate": _rate(
+            sum(1 for c in capabilities if c not in realized), len(capabilities)
+        ),
+        "orphan_component_rate": _rate(
+            sum(1 for c in components if c not in depended_on and c not in realizers),
+            len(components),
+        ),
+        "orphan_var_rate": _rate(
+            sum(1 for v in variables if v not in used_vars), len(variables)
+        ),
     }
 
     return CorpusGraph(nodes=nodes, edges=edges, aggregates=aggregates)
 
 
 def write_corpus_graph(graph: CorpusGraph, repo_root: Path) -> Path:
-    out = Path(repo_root) / OUTPUT_REL
-    out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_bytes(graph.to_json_bytes())
-    return out
+    out_dir = Path(repo_root) / "verification"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out_path = out_dir / "corpus-graph.json"
+    out_path.write_bytes(graph.to_json_bytes())
+    return out_path
 
 
 from .cli import main  # noqa: E402
+
+__all__ = ["CorpusGraph", "build_corpus_graph", "write_corpus_graph", "main"]

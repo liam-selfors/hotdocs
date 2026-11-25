@@ -1,9 +1,11 @@
-"""`hotdocs corpus-graph build [--repo-root=<dir>]`."""
+"""CLI: hotdocs corpus-graph build [--repo-root=<dir>]."""
 
 from __future__ import annotations
 
 import sys
 from pathlib import Path
+
+from . import build_corpus_graph, write_corpus_graph
 
 USAGE = "usage: hotdocs corpus-graph build [--repo-root=<dir>]"
 
@@ -22,28 +24,26 @@ def main(argv: list[str] | None = None) -> int:
         return _usage_error("expected 'build'")
 
     repo_root = "."
-    i = 1
-    while i < len(argv):
-        tok = argv[i]
-        if tok.startswith("--repo-root="):
-            repo_root = tok[len("--repo-root="):]
-        elif tok == "--repo-root":
-            if i + 1 >= len(argv):
+    rest = argv[1:]
+    i = 0
+    while i < len(rest):
+        token = rest[i]
+        if token.startswith("--repo-root="):
+            repo_root = token[len("--repo-root="):]
+        elif token == "--repo-root":
+            if i + 1 >= len(rest):
                 return _usage_error("--repo-root requires a value")
             i += 1
-            repo_root = argv[i]
+            repo_root = rest[i]
         else:
-            return _usage_error(f"unknown argument {tok!r}")
+            return _usage_error(f"unknown argument: {token}")
         i += 1
-
-    from . import build_corpus_graph, write_corpus_graph
 
     try:
         root = Path(repo_root)
-        graph = build_corpus_graph(root)
-        path = write_corpus_graph(graph, root)
+        path = write_corpus_graph(build_corpus_graph(root), root)
     except Exception as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
-    print(path)
+    print(str(path))
     return 0
