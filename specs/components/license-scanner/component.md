@@ -94,3 +94,5 @@ See `constraints.md`.
 - `D193`: honest gate — `evaluated`/`reason` on every result; no corpus
   is a visible, non-blocking `not evaluated`; a configured but unusable
   corpus fails closed. `gate_version` is now `license_scanner@4.0.x`.
+- `D372`: the scan reads only code and assets, never the manifest or
+  bytecode (`R-LICENSE-012`).
