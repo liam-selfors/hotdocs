@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:11ec0780acd67ce80c22f4d53d34dc6f9797b07e44cad9d845e7bf3566748793
+# hotdocs-criterion: sha256:815ef2cad6c3616df56c7032e7b5a25dace3f0ff81b70a18917bea60453c03f8
 import json
 from pathlib import Path
 
@@ -9,55 +9,81 @@ def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
+def _verification_report():
+    return {
+        "component_id": "comp-foo",
+        "criteria": [
+            {"id": "AC-FOO-001", "covers": "R-FOO-001", "kind": "compiled", "result": "pass"}
+        ],
+        "requirement_results": {"R-FOO-001": "pass"},
+        "interface_drift": False,
+        "mutation_score": 0.9,
+        "mutation_error": None,
+        "assets": [],
+        "overall": "pass",
+    }
+
+
+def _secret_scan():
+    return {
+        "scope": "full",
+        "gate_version": "secret_scanner@3.1.0+detect-secrets.1.5.0",
+        "flagged": False,
+        "matches": [],
+        "allowed": [],
+        "unused_allowlist_entries": [],
+        "notified": False,
+        "notification_delivery_error": None,
+        "cache_hit": False,
+    }
+
+
+def _base_report():
+    return {
+        "scope": "whole-corpus",
+        "ready": True,
+        "components": {
+            "comp-foo": {
+                "hit": True,
+                "reason": None,
+                "verification_report": _verification_report(),
+                "license_scan": {"blocked": False, "findings": []},
+                "secret_scan": _secret_scan(),
+            }
+        },
+        "capabilities": {},
+        "secret_scan": None,
+        "not_ready_reasons": [],
+    }
+
+
 def _write_fake_tracker(repo_root, log_path):
-    fake_dir = repo_root / "gen" / "provenance-tracker"
-    fake_dir.mkdir(parents=True, exist_ok=True)
-    src = (
+    dep_dir = repo_root / "gen" / "provenance-tracker"
+    dep_dir.mkdir(parents=True, exist_ok=True)
+    source = (
+        "import copy\n"
         "import json\n"
-        "from pathlib import Path\n"
-        "\n"
-        "LOG_PATH = " + repr(str(log_path)) + "\n"
-        "\n"
-        "def _passing_result(component_id):\n"
-        "    return {\n"
-        "        'hit': True,\n"
-        "        'reason': None,\n"
-        "        'verification_report': {\n"
-        "            'component_id': component_id,\n"
-        "            'criteria': [],\n"
-        "            'requirement_results': {},\n"
-        "            'interface_drift': False,\n"
-        "            'mutation_score': None,\n"
-        "            'mutation_error': None,\n"
-        "            'assets': [],\n"
-        "            'overall': 'pass',\n"
-        "        },\n"
-        "        'license_scan': {'blocked': False},\n"
-        "        'secret_scan': {'flagged': False},\n"
-        "    }\n"
+        "LOG = " + repr(str(log_path)) + "\n"
+        "BASE = " + repr(_base_report()) + "\n"
         "\n"
         "def check_readiness(repo_root, changed_ids=None, model=None, seed=0, llm_backend=None):\n"
-        "    with open(LOG_PATH, 'a', encoding='utf-8') as fh:\n"
-        "        fh.write(json.dumps(changed_ids) + '\\n')\n"
-        "    scope = 'blast-radius' if changed_ids else 'whole-corpus'\n"
-        "    return {\n"
-        "        'scope': scope,\n"
-        "        'ready': True,\n"
-        "        'components': {'comp-bar': _passing_result('comp-bar')},\n"
-        "        'capabilities': {},\n"
-        "        'not_ready_reasons': [],\n"
-        "    }\n"
+        "    with open(LOG, 'a', encoding='utf-8') as f:\n"
+        "        f.write(json.dumps(changed_ids) + '\\n')\n"
+        "    report = copy.deepcopy(BASE)\n"
+        "    report['scope'] = 'blast-radius' if changed_ids is not None else 'whole-corpus'\n"
+        "    report['ready'] = True\n"
+        "    return report\n"
         "\n"
         "def last_requirement_failures(component_id, repo_root):\n"
         "    return []\n"
     )
-    (fake_dir / "provenance_tracker.py").write_text(src, encoding="utf-8")
+    (dep_dir / "provenance_tracker.py").write_text(source, encoding="utf-8")
 
 
 def _write_corpus_graph(repo_root):
     graph = {
         "nodes": {
-            "comp-bar": {
+            "comp-foo": {
                 "type": "component",
                 "verification": None,
                 "provenance": None,
@@ -82,7 +108,7 @@ def _write_corpus_graph(repo_root):
     )
 
 
-def test_each_build_calls_check_readiness_afresh_and_states_scope(tmp_path):
+def test_ac_ui_007_fresh_check_per_build_and_scope_shown(tmp_path):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
     log_path = tmp_path / "calls.log"
@@ -95,23 +121,20 @@ def test_each_build_calls_check_readiness_afresh_and_states_scope(tmp_path):
     snap1 = provenance_tracker_ui.render_tracker_ui(
         out1, repo_root, changed_ids=["comp-foo"]
     )
-    snap2 = provenance_tracker_ui.render_tracker_ui(out2, repo_root)
-
-    lines = [
-        line for line in log_path.read_text(encoding="utf-8").splitlines() if line.strip()
-    ]
-    assert len(lines) == 2
-    assert json.loads(lines[0]) == ["comp-foo"]
-    assert json.loads(lines[1]) is None
-
     page1 = (out1 / "index.html").read_text(encoding="utf-8")
+
+    snap2 = provenance_tracker_ui.render_tracker_ui(out2, repo_root)
     page2 = (out2 / "index.html").read_text(encoding="utf-8")
+
+    lines = [l for l in log_path.read_text(encoding="utf-8").splitlines() if l.strip()]
+    calls = [json.loads(l) for l in lines]
+    assert calls == [["comp-foo"], None]
+
+    assert field(snap1, "scope") == "blast-radius"
+    assert list(field(snap1, "changed_ids")) == ["comp-foo"]
+    assert field(snap2, "scope") == "whole-corpus"
+    assert field(snap2, "changed_ids") is None
 
     assert "blast-radius" in page1
     assert "comp-foo" in page1
     assert "whole-corpus" in page2
-
-    assert field(snap1, "scope") == "blast-radius"
-    assert field(snap1, "changed_ids") == ["comp-foo"]
-    assert field(snap2, "scope") == "whole-corpus"
-    assert field(snap2, "changed_ids") is None
