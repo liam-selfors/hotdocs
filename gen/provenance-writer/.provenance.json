@@ -1,5 +1,5 @@
 {
-  "spec_bundle_hash": "sha256:7474ac39c950c5c1b69d9237c12684b8d400a7be13177742d3998fb78a84de87",
+  "spec_bundle_hash": "sha256:ef59b2072e15fd891af6e9c6e2ebb04ff71cd4f033e384c644ce46e8d20117fc",
   "model_pin": "claude-opus-5-5",
   "prompt_version": "v12",
   "retry_feedback": null,
@@ -13,7 +13,7 @@
   },
   "attempts": 1,
   "attempt_history": [],
-  "pipeline_version": "v3",
+  "pipeline_version": "v1",
   "gate_versions": {
     "compiler": "criterion-compiler@1.0.0",
     "generated_test": "generated_test@3.0.0",
@@ -23,7 +23,7 @@
     "generator": "generator@3.2.0+v12"
   },
   "provenance_hit": false,
-  "generated_at": "2026-11-24T08:42:49Z",
+  "generated_at": "2026-11-25T07:43:05Z",
   "verification_run_id": "provenance-writer-attempt-1",
   "verification_report": {
     "component_id": "comp-provenance-writer",
@@ -191,7 +191,7 @@
       "R-PROV-022": "pass"
     },
     "interface_drift": false,
-    "mutation_score": 0.9772727272727273,
+    "mutation_score": 0.9795918367346939,
     "mutation_error": null,
     "assets": [
       {

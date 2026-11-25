@@ -1,8 +1,5 @@
-"""Provenance Writer: assembles and writes `.provenance.json` manifests and
-sealed provenance manifests from other components' already-produced results.
-
-Collects, never invents.
-"""
+"""Provenance Writer: assembles and writes `.provenance.json` and the sealed
+counterpart `.sealed-provenance.json`. Collects, never invents."""
 
 import dataclasses
 import enum
@@ -15,9 +12,18 @@ from collections.abc import Mapping
 from datetime import datetime, timezone
 from pathlib import Path
 
-PIPELINE_VERSION = "v3"
+PIPELINE_VERSION = "v1"
 
 USAGE = "usage: hotdocs provenance write <component-id> [--repo-root=<dir>]"
+
+_ATTEMPT_KEYS = (
+    "number",
+    "outcome",
+    "retry_feedback",
+    "error_category",
+    "failed_requirements",
+    "transcript_sha256",
+)
 
 _REQUIRED = (
     "component_id",
@@ -29,13 +35,13 @@ _REQUIRED = (
     "gate_versions",
 )
 
-_ATTEMPT_KEYS = (
-    "number",
-    "outcome",
-    "retry_feedback",
-    "error_category",
-    "failed_requirements",
-    "transcript_sha256",
+_SEALED_FIELDS = (
+    "component_id",
+    "owners",
+    "source_path",
+    "source_hash",
+    "verifier_version",
+    "verification_report",
 )
 
 
@@ -43,7 +49,7 @@ class MissingInputError(Exception):
     """A required upstream result was absent."""
 
 
-class InvalidSealedInputError(Exception):
+class InvalidSealedInputError(ValueError):
     """The sealed inputs would not yield a valid sealed provenance manifest."""
 
 
@@ -77,11 +83,13 @@ def _get(obj, name):
 
 
 def to_json(value):
-    """Convert a value to a form json.dumps accepts (json-values.md)."""
+    """Convert `value` to a json.dumps-acceptable value (json-values.md)."""
     if value is None or isinstance(value, (bool, int, str)):
         return value
     if isinstance(value, float):
-        return value if math.isfinite(value) else repr(value)
+        if math.isfinite(value):
+            return value
+        return repr(value)
     if isinstance(value, Mapping):
         return {
             (k if isinstance(k, str) else str(k)): to_json(v)
@@ -93,7 +101,7 @@ def to_json(value):
         items = [to_json(item) for item in value]
         return sorted(items, key=lambda item: json.dumps(item, sort_keys=True))
     if isinstance(value, (bytes, bytearray)):
-        return value.decode("utf-8", errors="replace")
+        return bytes(value).decode("utf-8", errors="replace")
     if isinstance(value, pathlib.PurePath):
         return str(value)
     if isinstance(value, enum.Enum):
@@ -114,69 +122,64 @@ def to_json(value):
     return repr(value)
 
 
-def _slug(component_id):
-    return component_id.removeprefix("comp-")
-
-
 def _now():
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+def _slug(component_id):
+    if component_id.startswith("comp-"):
+        return component_id[len("comp-"):]
+    return component_id
+
+
 def build_manifest(inputs):
-    """Build the provenance manifest dict from `inputs`."""
+    """Build the provenance manifest dict from `inputs` (dict or object)."""
     for name in _REQUIRED:
         if _get(inputs, name) is None:
             raise MissingInputError(f"missing required input: {name}")
-
-    component_id = _get(inputs, "component_id")
-    generation_result = _get(inputs, "generation_result")
-    verification_report = _get(inputs, "verification_report")
-    license_scan_result = _get(inputs, "license_scan_result")
-    secret_scan_result = _get(inputs, "secret_scan_result")
-    provenance_hit = _get(inputs, "provenance_hit")
-    attempts = _get(inputs, "attempts")
-    attempt_history = _get(inputs, "attempt_history")
+    gr = _get(inputs, "generation_result")
+    vr = _get(inputs, "verification_report")
+    if vr is None and _get(gr, "files"):
+        raise MissingInputError(
+            "missing required input: verification_report "
+            "(generation_result.files is non-empty)"
+        )
     gate_versions = _get(inputs, "gate_versions")
-
-    if verification_report is None and _get(generation_result, "files"):
-        raise MissingInputError("missing required input: verification_report")
-
-    mode = _get(generation_result, "mode")
-    generation = {
-        "mode": "single" if mode is None else mode,
-        "generator_version": _get(gate_versions, "generator"),
-        "transcript_sha256": _get(generation_result, "transcript_sha256"),
-        "turns": _get(generation_result, "turns"),
-        "tool_calls": _get(generation_result, "tool_calls"),
-        "isolation": _get(generation_result, "isolation"),
-    }
-
-    history = [
-        {key: _get(entry, key) for key in _ATTEMPT_KEYS}
-        for entry in (attempt_history or [])
-    ]
-
-    assets = None
-    if verification_report is not None:
-        assets = _get(verification_report, "assets")
-
+    attempts = _get(inputs, "attempts")
+    component_id = _get(inputs, "component_id")
+    mode = _get(gr, "mode")
+    history = _get(inputs, "attempt_history")
+    if history is None:
+        history = []
+    assets = None if vr is None else _get(vr, "assets")
+    if assets is None:
+        assets = []
     manifest = {
-        "spec_bundle_hash": _get(generation_result, "spec_bundle_hash"),
-        "model_pin": _get(generation_result, "model"),
-        "prompt_version": _get(generation_result, "prompt_version"),
-        "retry_feedback": _get(generation_result, "retry_feedback"),
-        "generation": generation,
+        "spec_bundle_hash": _get(gr, "spec_bundle_hash"),
+        "model_pin": _get(gr, "model"),
+        "prompt_version": _get(gr, "prompt_version"),
+        "retry_feedback": _get(gr, "retry_feedback"),
+        "generation": {
+            "mode": "single" if mode is None else mode,
+            "generator_version": _get(gate_versions, "generator"),
+            "transcript_sha256": _get(gr, "transcript_sha256"),
+            "turns": _get(gr, "turns"),
+            "tool_calls": _get(gr, "tool_calls"),
+            "isolation": _get(gr, "isolation"),
+        },
         "attempts": attempts,
-        "attempt_history": history,
+        "attempt_history": [
+            {key: _get(entry, key) for key in _ATTEMPT_KEYS} for entry in history
+        ],
         "pipeline_version": PIPELINE_VERSION,
         "gate_versions": gate_versions,
-        "provenance_hit": provenance_hit,
+        "provenance_hit": _get(inputs, "provenance_hit"),
         "generated_at": _now(),
         "verification_run_id": f"{_slug(component_id)}-attempt-{attempts}",
-        "verification_report": verification_report,
-        "license_scan": license_scan_result,
-        "secret_scan": secret_scan_result,
-        "assets": [] if assets is None else assets,
+        "verification_report": vr,
+        "license_scan": _get(inputs, "license_scan_result"),
+        "secret_scan": _get(inputs, "secret_scan_result"),
+        "assets": assets,
     }
     return to_json(manifest)
 
@@ -192,76 +195,66 @@ def write_provenance(component_id, inputs, repo_root):
         (directory / ".provenance.json").write_text(text, encoding="utf-8")
 
 
-_COMPONENT_ID_RE = r"comp-[a-z0-9]+(-[a-z0-9]+)*"
-_OWNER_RE = r"[a-z0-9]+(-[a-z0-9]+)*"
-_SOURCE_PATH_RE = r"[A-Za-z0-9_][A-Za-z0-9_.-]*(/[A-Za-z0-9_][A-Za-z0-9_.-]*)*/?"
-_SOURCE_HASH_RE = r"sha256:[0-9a-f]{64}"
-_VERIFIER_RE = r"verifier-orchestrator@[0-9]+\.[0-9]+\.[0-9]+"
+_COMPONENT_ID_RE = r"^comp-[a-z0-9]+(-[a-z0-9]+)*$"
+_OWNER_RE = r"^[a-z0-9]+(-[a-z0-9]+)*$"
+_SOURCE_PATH_RE = r"^[A-Za-z0-9_][A-Za-z0-9_.-]*(/[A-Za-z0-9_][A-Za-z0-9_.-]*)*/?$"
+_SOURCE_HASH_RE = r"^sha256:[0-9a-f]{64}$"
+_VERIFIER_RE = r"^verifier-orchestrator@[0-9]+\.[0-9]+\.[0-9]+$"
 
 
 def _matches(pattern, value):
     return isinstance(value, str) and re.fullmatch(pattern, value) is not None
 
 
-def _invalid(cause):
-    raise InvalidSealedInputError(cause)
+def _valid_sealed(manifest):
+    owners = manifest["owners"]
+    if not isinstance(owners, list) or not owners:
+        return False
+    if not all(_matches(_OWNER_RE, owner) for owner in owners):
+        return False
+    source_path = manifest["source_path"]
+    if not _matches(_SOURCE_PATH_RE, source_path):
+        return False
+    if source_path.split("/")[0] == "gen":
+        return False
+    return (
+        _matches(_COMPONENT_ID_RE, manifest["component_id"])
+        and _matches(_SOURCE_HASH_RE, manifest["source_hash"])
+        and _matches(_VERIFIER_RE, manifest["verifier_version"])
+    )
 
 
 def write_sealed_provenance(component_id, inputs, repo_root):
-    fields = (
-        "component_id",
-        "owners",
-        "source_path",
-        "source_hash",
-        "verifier_version",
-        "verification_report",
-    )
-    values = {name: to_json(_get(inputs, name)) for name in fields}
-    for name in fields:
-        if values[name] is None:
-            _invalid(f"missing input: {name}")
+    values = {name: _get(inputs, name) for name in _SEALED_FIELDS}
+    for name, value in values.items():
+        if value is None:
+            raise InvalidSealedInputError(f"missing sealed input: {name}")
     if component_id != values["component_id"]:
-        _invalid("component_id does not match inputs.component_id")
-    if not _matches(_COMPONENT_ID_RE, values["component_id"]):
-        _invalid("invalid component_id")
-    owners = values["owners"]
-    if not isinstance(owners, list) or not owners:
-        _invalid("owners must be a non-empty list")
-    for owner in owners:
-        if not _matches(_OWNER_RE, owner):
-            _invalid("invalid owners entry")
-    source_path = values["source_path"]
-    if not _matches(_SOURCE_PATH_RE, source_path) or source_path.split("/")[0] == "gen":
-        _invalid("invalid source_path")
-    if not _matches(_SOURCE_HASH_RE, values["source_hash"]):
-        _invalid("invalid source_hash")
-    if not _matches(_VERIFIER_RE, values["verifier_version"]):
-        _invalid("invalid verifier_version")
-
+        raise InvalidSealedInputError(
+            "component_id does not match inputs.component_id"
+        )
     report = values["verification_report"]
-    criteria = _get(report, "criteria") if isinstance(report, dict) else None
-    if not isinstance(criteria, list) or not criteria:
-        _invalid("verification_report has no criteria")
-    results = [_get(entry, "result") if isinstance(entry, dict) else None for entry in criteria]
-    for result in results:
-        if result not in ("pass", "fail", "skipped"):
-            _invalid("invalid criterion result")
+    criteria = _get(report, "criteria")
+    if not isinstance(criteria, (list, tuple)) or not criteria:
+        raise InvalidSealedInputError("verification_report has no criteria")
+    results = [_get(entry, "result") for entry in criteria]
+    if any(result not in ("pass", "fail", "skipped") for result in results):
+        raise InvalidSealedInputError("criterion result not pass/fail/skipped")
     overall = _get(report, "overall")
     if overall not in ("pass", "fail"):
-        _invalid("invalid overall")
+        raise InvalidSealedInputError("verification_report overall not pass/fail")
     total = len(results)
     passed = sum(1 for result in results if result == "pass")
     if overall == "pass" and passed != total:
-        _invalid("overall pass requires every criterion to pass")
-
+        raise InvalidSealedInputError("overall pass with non-passing criteria")
     manifest = {
         "kind": "sealed-provenance",
         "version": 1,
-        "component_id": values["component_id"],
-        "owners": owners,
-        "source_path": source_path,
-        "source_hash": values["source_hash"],
-        "verifier_version": values["verifier_version"],
+        "component_id": to_json(values["component_id"]),
+        "owners": to_json(values["owners"]),
+        "source_path": to_json(values["source_path"]),
+        "source_hash": to_json(values["source_hash"]),
+        "verifier_version": to_json(values["verifier_version"]),
         "characterization": {
             "overall": overall,
             "criteria_passed": passed,
@@ -269,10 +262,13 @@ def write_sealed_provenance(component_id, inputs, repo_root):
         },
         "written_at": _now(),
     }
-    text = json.dumps(manifest, indent=2) + "\n"
-    directory = Path(repo_root) / source_path
+    if not _valid_sealed(manifest):
+        raise InvalidSealedInputError("inputs do not yield a valid sealed manifest")
+    directory = Path(repo_root) / manifest["source_path"]
     directory.mkdir(parents=True, exist_ok=True)
-    (directory / ".sealed-provenance.json").write_text(text, encoding="utf-8")
+    (directory / ".sealed-provenance.json").write_text(
+        json.dumps(manifest, indent=2) + "\n", encoding="utf-8"
+    )
 
 
 def _usage_error(cause):
@@ -287,9 +283,9 @@ def main(argv=None):
     argv = list(argv)
     if argv[:2] != ["provenance", "write"]:
         return _usage_error("expected 'provenance write'")
-    rest = argv[2:]
     repo_root = "."
     positionals = []
+    rest = argv[2:]
     i = 0
     while i < len(rest):
         token = rest[i]
@@ -298,8 +294,8 @@ def main(argv=None):
         elif token == "--repo-root":
             if i + 1 >= len(rest):
                 return _usage_error("--repo-root requires a value")
+            repo_root = rest[i + 1]
             i += 1
-            repo_root = rest[i]
         elif token.startswith("--"):
             return _usage_error(f"unrecognized argument: {token}")
         else:
@@ -309,7 +305,7 @@ def main(argv=None):
         return _usage_error("expected exactly one <component-id>")
     try:
         inputs = json.loads(sys.stdin.read())
-    except json.JSONDecodeError as exc:
+    except ValueError as exc:
         return _usage_error(f"malformed JSON on stdin: {exc}")
     try:
         write_provenance(positionals[0], inputs, Path(repo_root))
