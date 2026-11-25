@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:8b2017e052a28f20994148fc2cddd3a7e872aa2adca5b30d4f9ddb2e7a42887f
+# hotdocs-criterion: sha256:3f95594423fea40741bb903bb94d00f9a3cbe4dce88a7e34b69703147814d079
 import json
 from pathlib import Path
 
@@ -6,7 +6,6 @@ import component_gate_runner
 
 
 COMPONENT_ID = "comp-foo"
-LOG_ENV = "GATE_TEST_LOG_AC_GATE_006"
 
 
 def field(value, name):
@@ -14,38 +13,21 @@ def field(value, name):
 
 
 COMMON = (
-    "import dataclasses\n"
     "import json\n"
     "import os\n"
+    "from pathlib import Path\n"
+    "from dataclasses import dataclass\n"
     "\n"
     "\n"
-    "def _conv(v):\n"
-    "    if hasattr(v, 'to_dict') and callable(getattr(v, 'to_dict')):\n"
-    "        return _conv(v.to_dict())\n"
-    "    if dataclasses.is_dataclass(v) and not isinstance(v, type):\n"
-    "        return dict((f.name, _conv(getattr(v, f.name))) for f in dataclasses.fields(v))\n"
-    "    if isinstance(v, dict):\n"
-    "        return dict((str(k), _conv(x)) for k, x in v.items())\n"
-    "    if isinstance(v, (list, tuple)):\n"
-    "        return [_conv(x) for x in v]\n"
-    "    return v\n"
-    "\n"
-    "\n"
-    "def _log(entry):\n"
-    "    with open(os.environ[" + repr(LOG_ENV) + "], 'a', encoding='utf-8') as fh:\n"
-    "        fh.write(json.dumps(entry) + '\\n')\n"
-    "\n"
-    "\n"
-    "def _get(value, name):\n"
-    "    if isinstance(value, dict):\n"
-    "        return value.get(name)\n"
-    "    return getattr(value, name, None)\n"
+    "def _log(rec):\n"
+    "    with open(os.environ['GATE_TEST_LOG'], 'a') as f:\n"
+    "        f.write(json.dumps(rec, default=repr) + '\\n')\n"
     "\n"
     "\n"
 )
 
 
-PROVENANCE_CHECKER = COMMON + (
+CHECKER_SRC = COMMON + (
     "class ProvenanceKey:\n"
     "    def __init__(self, spec_bundle_hash, gate_versions, assets):\n"
     "        self.spec_bundle_hash = spec_bundle_hash\n"
@@ -54,249 +36,295 @@ PROVENANCE_CHECKER = COMMON + (
     "\n"
     "\n"
     "def current_sealed_key(component_id, repo_root):\n"
-    "    _log({'call': 'current_sealed_key', 'component_id': component_id})\n"
+    "    _log({'event': 'current_sealed_key', 'component_id': component_id})\n"
     "    return None\n"
     "\n"
     "\n"
     "def current_provenance_key(component_id, repo_root):\n"
-    "    _log({'call': 'current_provenance_key', 'component_id': component_id})\n"
+    "    _log({'event': 'current_provenance_key', 'component_id': component_id})\n"
     "    return ProvenanceKey(\n"
     "        'sha256:abc123',\n"
     "        {'verifier': 'v@1'},\n"
     "        [{'kind': 'python', 'path': '.', 'definition_sha256': None,\n"
-    "          'adapter_sha256': 'sha256:def', 'versions': {'python': '3.12.4'},\n"
+    "          'adapter_sha256': 'sha256:00', 'versions': {'python': '3.12.0'},\n"
     "          'lockfile_sha256': None}],\n"
     "    )\n"
     "\n"
     "\n"
     "def check_provenance(component_id, spec_bundle_hash, gate_versions, repo_root):\n"
-    "    _log({'call': 'check_provenance', 'spec_bundle_hash': spec_bundle_hash,\n"
-    "          'gate_versions': _conv(gate_versions)})\n"
+    "    _log({'event': 'check_provenance', 'component_id': component_id,\n"
+    "          'spec_bundle_hash': spec_bundle_hash, 'gate_versions': gate_versions})\n"
     "    return {'hit': False, 'reason': 'no manifest', 'verification_report': None,\n"
     "            'license_scan': None, 'secret_scan': None}\n"
     "\n"
     "\n"
     "def check_sealed_provenance(component_id, repo_root):\n"
-    "    _log({'call': 'check_sealed_provenance'})\n"
+    "    _log({'event': 'check_sealed_provenance', 'component_id': component_id})\n"
     "    return {'hit': False, 'sealed': False, 'reason': 'not_sealed',\n"
     "            'verification_report': None, 'license_scan': None, 'secret_scan': None,\n"
     "            'owners': None, 'source_hash': None, 'written_at': None}\n"
 )
 
 
-SPEC_BUNDLE_ASSEMBLER = COMMON + (
+ASSEMBLER_SRC = COMMON + (
     "def assemble(component_id, repo_root, mode='cold'):\n"
-    "    _log({'call': 'assemble', 'component_id': component_id, 'mode': mode})\n"
-    "    return {'component_id': component_id, 'spec_bundle_hash': 'sha256:abc123',\n"
-    "            'spec': 'spec', 'interface': 'iface', 'constraints': '',\n"
-    "            'dependency_interfaces': {}, 'dependency_context': {},\n"
-    "            'dependency_usage': {}, 'vars': {}, 'glossary': '', 'hint_code': None}\n"
+    "    _log({'event': 'assemble', 'component_id': component_id, 'mode': mode})\n"
+    "    return {\n"
+    "        'component_id': component_id,\n"
+    "        'spec_bundle_hash': 'sha256:abc123',\n"
+    "        'spec': 'spec text',\n"
+    "        'interface': 'interface text',\n"
+    "        'constraints': '',\n"
+    "        'dependency_interfaces': {},\n"
+    "        'dependency_context': {},\n"
+    "        'dependency_usage': {},\n"
+    "        'vars': {},\n"
+    "        'glossary': '',\n"
+    "        'hint_code': None,\n"
+    "    }\n"
     "\n"
     "\n"
     "def assemble_criterion(component_id, criterion_id, repo_root):\n"
-    "    return {'component_id': component_id, 'criterion_id': criterion_id,\n"
-    "            'covers': '', 'criterion_text': '', 'requirement_text': '',\n"
-    "            'interface': '', 'glossary': '', 'dependency_interfaces': {}, 'testing': ''}\n"
+    "    _log({'event': 'assemble_criterion', 'component_id': component_id})\n"
+    "    return {\n"
+    "        'component_id': component_id, 'criterion_id': criterion_id,\n"
+    "        'covers': 'R-FOO-001', 'criterion_text': '', 'requirement_text': '',\n"
+    "        'interface': '', 'glossary': '', 'dependency_interfaces': {}, 'testing': '',\n"
+    "    }\n"
 )
 
 
-GENERATION_LOOP_BODY = (
-    "@dataclasses.dataclass\n"
-    "class GenerationResult:\n"
-    "    component_id: object = None\n"
-    "    spec_bundle_hash: object = None\n"
-    "    model: object = None\n"
-    "    prompt_version: object = None\n"
-    "    cache_hit: object = False\n"
-    "    files: object = None\n"
-    "    model_call_error: object = None\n"
-    "    refused: object = None\n"
-    "    retry_feedback: object = None\n"
-    "    mode: object = 'single'\n"
-    "    transcript_sha256: object = None\n"
-    "    turns: object = 1\n"
-    "    tool_calls: object = 0\n"
-    "    isolation: object = None\n"
-    "\n"
-    "\n"
-    "@dataclasses.dataclass\n"
-    "class SurfaceReport:\n"
-    "    ok: object = True\n"
-    "    findings: object = None\n"
-    "\n"
-    "    def to_dict(self):\n"
-    "        return {'ok': self.ok, 'findings': list(self.findings or [])}\n"
-    "\n"
-    "\n"
-    "@dataclasses.dataclass\n"
-    "class AttemptLoopResult:\n"
-    "    passed: object = False\n"
-    "    stop_reason: object = None\n"
-    "    attempts: object = None\n"
-    "    generation_result: object = None\n"
-    "    verification_report: object = None\n"
-    "    surface_report: object = None\n"
-    "\n"
-    "    def to_dict(self):\n"
-    "        return {'passed': self.passed, 'stop_reason': self.stop_reason,\n"
-    "                'attempts': _conv(self.attempts),\n"
-    "                'generation_result': _conv(self.generation_result),\n"
-    "                'verification_report': _conv(self.verification_report),\n"
-    "                'surface_report': _conv(self.surface_report)}\n"
-    "\n"
-    "\n"
+LOOP_SRC = COMMON + (
     "RETRIED_CATEGORIES = ('truncated_response', 'missing_module', 'empty_response',\n"
     "                      'agent_budget_exhausted', 'agent_unfinished', 'undecodable_file',\n"
     "                      'missing_asset', 'malformed_layout')\n"
     "\n"
     "\n"
-    "def _gen(component_id, files, mce=None, marker='g'):\n"
-    "    return GenerationResult(component_id=component_id, spec_bundle_hash='sha256:abc123',\n"
-    "                            model='test-model', prompt_version='v-' + marker,\n"
-    "                            cache_hit=False, files=files, model_call_error=mce,\n"
-    "                            refused=None, retry_feedback=None)\n"
+    "@dataclass\n"
+    "class SurfaceReport:\n"
+    "    ok: bool\n"
+    "    findings: list\n"
+    "\n"
+    "    def to_dict(self):\n"
+    "        return {'ok': self.ok, 'findings': list(self.findings)}\n"
     "\n"
     "\n"
-    "def _vr(component_id, overall, marker):\n"
-    "    return {'component_id': component_id,\n"
-    "            'criteria': [{'id': 'AC-FOO-001', 'covers': 'R-FOO-001', 'kind': 'compiled',\n"
-    "                          'result': 'pass' if overall == 'pass' else 'fail'}],\n"
-    "            'requirement_results': {'R-FOO-001': 'pass' if overall == 'pass' else 'fail'},\n"
-    "            'interface_drift': False, 'mutation_score': None,\n"
-    "            'mutation_error': None, 'assets': [], 'overall': overall,\n"
-    "            'marker': marker}\n"
+    "@dataclass\n"
+    "class AttemptLoopResult:\n"
+    "    passed: bool\n"
+    "    stop_reason: str\n"
+    "    attempts: list\n"
+    "    generation_result: object\n"
+    "    verification_report: object\n"
+    "    surface_report: object\n"
+    "\n"
+    "    def to_dict(self):\n"
+    "        return {'passed': self.passed, 'stop_reason': self.stop_reason,\n"
+    "                'attempts': self.attempts,\n"
+    "                'generation_result': self.generation_result,\n"
+    "                'verification_report': self.verification_report,\n"
+    "                'surface_report': self.surface_report.to_dict()\n"
+    "                if self.surface_report is not None else None}\n"
     "\n"
     "\n"
-    "def _att(number, outcome, feedback, error_category, surface_ok, overall, failed):\n"
-    "    return {'number': number, 'outcome': outcome, 'retry_feedback': feedback,\n"
+    "def _gen(component_id, files, model_call_error, retry_feedback):\n"
+    "    return {\n"
+    "        'component_id': component_id,\n"
+    "        'spec_bundle_hash': 'sha256:abc123',\n"
+    "        'model': 'test-model',\n"
+    "        'prompt_version': 'v1',\n"
+    "        'cache_hit': False,\n"
+    "        'files': files,\n"
+    "        'model_call_error': model_call_error,\n"
+    "        'refused': None,\n"
+    "        'retry_feedback': retry_feedback,\n"
+    "        'mode': 'single',\n"
+    "        'transcript_sha256': None,\n"
+    "        'turns': 1,\n"
+    "        'tool_calls': 0,\n"
+    "        'isolation': None,\n"
+    "    }\n"
+    "\n"
+    "\n"
+    "def _vr(component_id, overall, r2):\n"
+    "    return {\n"
+    "        'component_id': component_id,\n"
+    "        'criteria': [\n"
+    "            {'id': 'AC-FOO-001', 'covers': 'R-FOO-001', 'kind': 'compiled', 'result': 'pass'},\n"
+    "            {'id': 'AC-FOO-002', 'covers': 'R-FOO-002', 'kind': 'compiled', 'result': r2},\n"
+    "        ],\n"
+    "        'requirement_results': {'R-FOO-001': 'pass', 'R-FOO-002': r2},\n"
+    "        'interface_drift': False,\n"
+    "        'mutation_score': 0.9,\n"
+    "        'mutation_error': None,\n"
+    "        'assets': [{'kind': 'python', 'path': '.', 'definition_sha256': None,\n"
+    "                    'adapter_sha256': 'sha256:00', 'versions': {'python': '3.12.0'},\n"
+    "                    'lockfile_sha256': None}],\n"
+    "        'overall': overall,\n"
+    "    }\n"
+    "\n"
+    "\n"
+    "def _attempt(number, outcome, retry_feedback, error_category, surface_ok, overall, failed):\n"
+    "    return {'number': number, 'outcome': outcome, 'retry_feedback': retry_feedback,\n"
     "            'error_category': error_category, 'surface_ok': surface_ok,\n"
     "            'overall': overall, 'failed_requirements': failed,\n"
     "            'transcript_sha256': None, 'reauthored_tests': []}\n"
     "\n"
     "\n"
     "def make_closures(model, seed, repo_root, llm_backend=None):\n"
-    "    _log({'call': 'make_closures'})\n"
+    "    _log({'event': 'make_closures'})\n"
+    "\n"
     "    def test_author(bundle):\n"
     "        return {'model_call_error': None, 'file': None}\n"
+    "\n"
     "    def judge(bundle):\n"
     "        return {'result': 'pass', 'rationale': None}\n"
+    "\n"
     "    return (test_author, judge)\n"
     "\n"
     "\n"
     "def run_attempts(component_id, bundle, repo_root, model, *, mode='single',\n"
     "                 max_attempts=3, retry_feedback=None, seed=0, llm_backend=None,\n"
     "                 allow_unisolated_exec=False, on_attempt=None):\n"
-    "    _log({'call': 'run_attempts', 'component_id': component_id})\n"
-    "    if SCENARIO == 'pass':\n"
-    "        gens = [_gen(component_id, {'foo.py': 'x = 1\\n'}, marker='one'),\n"
-    "                _gen(component_id, {'foo.py': 'x = 2\\n'}, marker='two')]\n"
-    "        vrs = [_vr(component_id, 'fail', 'vr-one'), _vr(component_id, 'pass', 'vr-two')]\n"
-    "        surfaces = [SurfaceReport(True, []), SurfaceReport(True, [])]\n"
-    "        attempts = [_att(1, 'verification_failed', [], None, True, 'fail', ['R-FOO-001']),\n"
-    "                    _att(2, 'passed', ['R-FOO-001'], None, True, 'pass', [])]\n"
+    "    scenario = os.environ['GATE_TEST_SCENARIO']\n"
+    "    steps = []\n"
+    "    if scenario == 'pass':\n"
+    "        g1 = _gen(component_id, {'foo.py': 'x = 1\\n'}, None, None)\n"
+    "        v1 = _vr(component_id, 'fail', 'fail')\n"
+    "        s1 = SurfaceReport(True, [])\n"
+    "        a1 = _attempt(1, 'verification_failed', [], None, True, 'fail', ['R-FOO-002'])\n"
+    "        g2 = _gen(component_id, {'foo.py': 'x = 2\\n'}, None, ['R-FOO-002'])\n"
+    "        v2 = _vr(component_id, 'pass', 'pass')\n"
+    "        s2 = SurfaceReport(True, [])\n"
+    "        a2 = _attempt(2, 'passed', ['R-FOO-002'], None, True, 'pass', [])\n"
+    "        steps = [(a1, g1, v1, s1), (a2, g2, v2, s2)]\n"
     "        passed, stop = True, 'passed'\n"
-    "    elif SCENARIO == 'generation_failed':\n"
-    "        gens = [_gen(component_id, {}, mce={'category': 'network', 'message': 'down'})]\n"
-    "        vrs = [None]\n"
-    "        surfaces = [None]\n"
-    "        attempts = [_att(1, 'generation_failed', [], 'network', None, None, [])]\n"
+    "    elif scenario == 'generation_failed':\n"
+    "        g1 = _gen(component_id, {}, {'category': 'network', 'message': 'down'}, None)\n"
+    "        a1 = _attempt(1, 'generation_failed', [], 'network', None, None, [])\n"
+    "        steps = [(a1, g1, None, None)]\n"
     "        passed, stop = False, 'not_retried'\n"
     "    else:\n"
-    "        gens = [_gen(component_id, {'foo.py': 'x = 1\\n'})]\n"
-    "        vrs = [None]\n"
-    "        surfaces = [SurfaceReport(False, [{'kind': 'asset_error',\n"
-    "                                           'message': 'static/a.js: no interface file'}])]\n"
-    "        attempts = [_att(1, 'surface_failed', [], None, False, None, [])]\n"
+    "        for n in range(1, max_attempts + 1):\n"
+    "            g = _gen(component_id, {'foo.py': 'x = ' + str(n) + '\\n'}, None, None)\n"
+    "            s = SurfaceReport(False, [{'kind': 'asset_error',\n"
+    "                                       'message': 'static/a.js: no interface file'}])\n"
+    "            a = _attempt(n, 'surface_failed', [], None, False, None, [])\n"
+    "            steps.append((a, g, None, s))\n"
     "        passed, stop = False, 'max_attempts'\n"
-    "    for a, g, v in zip(attempts, gens, vrs):\n"
+    "    attempts = []\n"
+    "    for a, g, v, s in steps:\n"
+    "        attempts.append(a)\n"
     "        if on_attempt is not None:\n"
     "            on_attempt(a, g, v)\n"
-    "    result = AttemptLoopResult(passed, stop, attempts, gens[-1], vrs[-1], surfaces[-1])\n"
-    "    _log({'call': 'run_attempts_result',\n"
-    "          'generation_result': _conv(gens[-1]),\n"
-    "          'verification_report': _conv(vrs[-1]),\n"
-    "          'attempts': _conv(attempts)})\n"
-    "    return result\n"
+    "    last_a, last_g, last_v, last_s = steps[-1]\n"
+    "    _log({'event': 'run_attempts', 'scenario': scenario,\n"
+    "          'gen_id': id(last_g),\n"
+    "          'vr_id': id(last_v) if last_v is not None else None,\n"
+    "          'sr_id': id(last_s) if last_s is not None else None,\n"
+    "          'attempts': attempts,\n"
+    "          'attempt_ids': [id(a) for a in attempts],\n"
+    "          'gen': last_g, 'vr': last_v})\n"
+    "    return AttemptLoopResult(passed, stop, attempts, last_g, last_v, last_s)\n"
 )
 
 
-PROVENANCE_TRACKER = COMMON + (
-    "from pathlib import Path\n"
-    "\n"
-    "\n"
+TRACKER_SRC = COMMON + (
     "def write_attempt_record(component_id, generation_result, verification_report,\n"
     "                         spec_bundle_hash, repo_root):\n"
     "    d = Path(repo_root) / '.hotdocs' / 'attempts' / component_id\n"
     "    d.mkdir(parents=True, exist_ok=True)\n"
-    "    n = len([p for p in d.iterdir() if p.is_file()]) + 1\n"
-    "    stamp = '2026-10-25T14:32:0' + str(n) + 'Z'\n"
-    "    record = {'attempt_id': stamp + '-a' + str(n), 'component_id': component_id,\n"
-    "              'timestamp': stamp, 'spec_bundle_hash': spec_bundle_hash,\n"
-    "              'generation': _conv(generation_result),\n"
-    "              'verification': _conv(verification_report)}\n"
-    "    (d / (str(n).zfill(4) + '-attempt.json')).write_text(json.dumps(record), encoding='utf-8')\n"
-    "    _log({'call': 'write_attempt_record', 'component_id': component_id,\n"
-    "          'spec_bundle_hash': spec_bundle_hash})\n"
+    "    n = len(list(d.iterdir())) + 1\n"
+    "    attempt_id = '2026-01-01T00:00:0' + str(n) + 'Z-fake' + str(n)\n"
+    "    record = {\n"
+    "        'attempt_id': attempt_id,\n"
+    "        'component_id': component_id,\n"
+    "        'timestamp': '2026-01-01T00:00:0' + str(n) + 'Z',\n"
+    "        'spec_bundle_hash': spec_bundle_hash,\n"
+    "        'generation': json.loads(json.dumps(generation_result, default=repr)),\n"
+    "        'verification': json.loads(json.dumps(verification_report, default=repr)),\n"
+    "    }\n"
+    "    (d / (attempt_id + '.json')).write_text(json.dumps(record))\n"
+    "    _log({'event': 'write_attempt_record', 'component_id': component_id,\n"
+    "          'gen_id': id(generation_result),\n"
+    "          'vr_id': id(verification_report) if verification_report is not None else None})\n"
     "    return record\n"
-    "\n"
-    "\n"
-    "def check_readiness(repo_root, changed_ids=None, model=None, seed=0, llm_backend=None):\n"
-    "    return {'scope': 'whole-corpus', 'ready': True, 'components': {},\n"
-    "            'capabilities': {}, 'not_ready_reasons': []}\n"
     "\n"
     "\n"
     "def last_requirement_failures(component_id, repo_root):\n"
     "    return []\n"
+    "\n"
+    "\n"
+    "def check_readiness(repo_root, changed_ids=None, model=None, seed=0, llm_backend=None):\n"
+    "    return {'scope': 'whole-corpus', 'ready': True, 'components': {},\n"
+    "            'capabilities': {}, 'secret_scan': None, 'not_ready_reasons': []}\n"
 )
 
 
-LICENSE_SCANNER = COMMON + (
+LICENSE_SRC = COMMON + (
     "def gate_version(repo_root):\n"
     "    return 'license_scanner@4.0.0-no-reference-corpus'\n"
     "\n"
     "\n"
     "def scan(component_id, repo_root):\n"
-    "    result = {'component_id': component_id,\n"
-    "              'gate_version': 'license_scanner@4.0.0-no-reference-corpus',\n"
-    "              'evaluated': False, 'reason': 'no-reference-corpus',\n"
-    "              'similarity_score': None, 'block_threshold': None, 'blocked': False,\n"
-    "              'matches': [], 'notified': False, 'notification_delivery_error': None,\n"
-    "              'cache_hit': False}\n"
-    "    _log({'call': 'license_scan', 'result': _conv(result)})\n"
+    "    result = {\n"
+    "        'component_id': component_id,\n"
+    "        'gate_version': 'license_scanner@4.0.0-no-reference-corpus',\n"
+    "        'evaluated': False,\n"
+    "        'reason': 'no-reference-corpus',\n"
+    "        'similarity_score': None,\n"
+    "        'block_threshold': None,\n"
+    "        'blocked': False,\n"
+    "        'matches': [],\n"
+    "        'notified': False,\n"
+    "        'notification_delivery_error': None,\n"
+    "        'cache_hit': False,\n"
+    "    }\n"
+    "    _log({'event': 'license_scan', 'component_id': component_id, 'result_id': id(result)})\n"
     "    return result\n"
 )
 
 
-SECRET_SCANNER = COMMON + (
-    "@dataclasses.dataclass\n"
+SECRET_SRC = COMMON + (
+    "@dataclass\n"
     "class SecretScanResult:\n"
-    "    scope: object = 'full'\n"
-    "    gate_version: object = None\n"
-    "    flagged: object = False\n"
-    "    matches: object = None\n"
-    "    allowed: object = None\n"
-    "    unused_allowlist_entries: object = None\n"
-    "    notified: object = False\n"
-    "    notification_delivery_error: object = None\n"
-    "    cache_hit: object = False\n"
+    "    scope: str\n"
+    "    gate_version: str\n"
+    "    flagged: bool\n"
+    "    matches: list\n"
+    "    allowed: list\n"
+    "    unused_allowlist_entries: list\n"
+    "    notified: bool\n"
+    "    notification_delivery_error: object\n"
+    "    cache_hit: bool\n"
     "\n"
     "    def to_dict(self):\n"
-    "        return dict((f.name, getattr(self, f.name)) for f in dataclasses.fields(self))\n"
+    "        return {'scope': self.scope, 'gate_version': self.gate_version,\n"
+    "                'flagged': self.flagged, 'matches': self.matches,\n"
+    "                'allowed': self.allowed,\n"
+    "                'unused_allowlist_entries': self.unused_allowlist_entries,\n"
+    "                'notified': self.notified,\n"
+    "                'notification_delivery_error': self.notification_delivery_error,\n"
+    "                'cache_hit': self.cache_hit}\n"
+    "\n"
+    "\n"
+    "def _result(scope):\n"
+    "    return SecretScanResult(scope, 'secret_scanner@3.1.0+detect-secrets.1.5.0',\n"
+    "                            False, [], [], [], False, None, False)\n"
     "\n"
     "\n"
     "def gate_version(repo_root):\n"
-    "    return 'secret_scanner@3.1.0+fake'\n"
+    "    return 'secret_scanner@3.1.0+detect-secrets.1.5.0'\n"
     "\n"
     "\n"
     "def scan(repo_root):\n"
-    "    result = SecretScanResult('full', 'secret_scanner@3.1.0+fake', False, [], [], [],\n"
-    "                              False, None, False)\n"
-    "    _log({'call': 'secret_scan', 'result': _conv(result)})\n"
+    "    result = _result('full')\n"
+    "    _log({'event': 'secret_scan', 'result_id': id(result)})\n"
     "    return result\n"
     "\n"
     "\n"
     "def scan_files(paths, repo_root=None):\n"
-    "    return SecretScanResult('precommit', None, False, [], [], [], False, None, False)\n"
+    "    return _result('precommit')\n"
     "\n"
     "\n"
     "def propose(repo_root):\n"
@@ -304,136 +332,146 @@ SECRET_SCANNER = COMMON + (
 )
 
 
-PROVENANCE_WRITER = COMMON + (
-    "class MissingInputError(Exception):\n"
-    "    pass\n"
-    "\n"
-    "\n"
-    "class InvalidSealedInputError(Exception):\n"
-    "    pass\n"
-    "\n"
-    "\n"
+WRITER_SRC = COMMON + (
     "def write_provenance(component_id, inputs, repo_root):\n"
-    "    _log({'call': 'write_provenance', 'component_id': component_id,\n"
+    "    ids = {}\n"
+    "    for k in ('generation_result', 'verification_report',\n"
+    "              'license_scan_result', 'secret_scan_result'):\n"
+    "        v = inputs.get(k) if isinstance(inputs, dict) else getattr(inputs, k, None)\n"
+    "        ids[k] = id(v) if v is not None else None\n"
+    "    history = inputs.get('attempt_history', []) if isinstance(inputs, dict) else []\n"
+    "    _log({'event': 'write_provenance', 'component_id': component_id,\n"
+    "          'repo_root': str(repo_root),\n"
     "          'inputs_is_dict': isinstance(inputs, dict),\n"
-    "          'inputs': _conv(inputs)})\n"
+    "          'keys': sorted(inputs.keys()) if isinstance(inputs, dict) else None,\n"
+    "          'inputs': inputs if isinstance(inputs, dict) else repr(inputs),\n"
+    "          'ids': ids,\n"
+    "          'attempt_history_ids': [id(a) for a in history]})\n"
     "    return None\n"
     "\n"
     "\n"
     "def write_sealed_provenance(component_id, inputs, repo_root):\n"
-    "    _log({'call': 'write_sealed_provenance', 'component_id': component_id})\n"
+    "    _log({'event': 'write_sealed_provenance', 'component_id': component_id})\n"
     "    return None\n"
 )
 
 
-VERIFIER_ORCHESTRATOR = COMMON + (
+VERIFIER_SRC = COMMON + (
     "GATE_VERSION = 'verifier-orchestrator@3.5.0'\n"
     "DEFAULT_TEST_TIMEOUT = 300.0\n"
     "\n"
     "\n"
     "def verify(component_id, repo_root, judge=None, test_author=None):\n"
-    "    _log({'call': 'verify'})\n"
+    "    _log({'event': 'verify', 'component_id': component_id})\n"
     "    return {'component_id': component_id, 'criteria': [], 'requirement_results': {},\n"
     "            'interface_drift': False, 'mutation_score': None, 'mutation_error': None,\n"
     "            'assets': [], 'overall': 'pass'}\n"
 )
 
 
-def write_fake(repo_root, slug, source):
-    module_name = slug.replace("-", "_")
-    d = Path(repo_root) / "gen" / slug
-    d.mkdir(parents=True, exist_ok=True)
-    (d / (module_name + ".py")).write_text(source, encoding="utf-8")
+FAKES = {
+    "provenance-checker": CHECKER_SRC,
+    "spec-bundle-assembler": ASSEMBLER_SRC,
+    "generation-loop": LOOP_SRC,
+    "provenance-tracker": TRACKER_SRC,
+    "license-scanner": LICENSE_SRC,
+    "secret-scanner": SECRET_SRC,
+    "provenance-writer": WRITER_SRC,
+    "verifier-orchestrator": VERIFIER_SRC,
+}
 
 
-def build_repo(repo_root, scenario):
-    write_fake(repo_root, "provenance-checker", PROVENANCE_CHECKER)
-    write_fake(repo_root, "spec-bundle-assembler", SPEC_BUNDLE_ASSEMBLER)
-    write_fake(
-        repo_root,
-        "generation-loop",
-        COMMON + "SCENARIO = " + repr(scenario) + "\n\n\n" + GENERATION_LOOP_BODY,
-    )
-    write_fake(repo_root, "provenance-tracker", PROVENANCE_TRACKER)
-    write_fake(repo_root, "license-scanner", LICENSE_SCANNER)
-    write_fake(repo_root, "secret-scanner", SECRET_SCANNER)
-    write_fake(repo_root, "provenance-writer", PROVENANCE_WRITER)
-    write_fake(repo_root, "verifier-orchestrator", VERIFIER_ORCHESTRATOR)
-
-
-def read_log(log_path):
-    if not log_path.exists():
-        return []
-    return [json.loads(line) for line in log_path.read_text(encoding="utf-8").splitlines() if line.strip()]
-
-
-def run(tmp_path, monkeypatch, scenario):
+def build_repo(tmp_path, monkeypatch, scenario):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
-    log_path = tmp_path / "calls.log"
-    monkeypatch.setenv(LOG_ENV, str(log_path))
-    build_repo(repo_root, scenario)
-    result = component_gate_runner.run_component_gates(COMPONENT_ID, repo_root, "test-model")
-    return repo_root, result, read_log(log_path)
+    for slug, src in FAKES.items():
+        d = repo_root / "gen" / slug
+        d.mkdir(parents=True)
+        (d / (slug.replace("-", "_") + ".py")).write_text(src)
+    log = tmp_path / "calls.log"
+    log.write_text("")
+    monkeypatch.setenv("GATE_TEST_LOG", str(log))
+    monkeypatch.setenv("GATE_TEST_SCENARIO", scenario)
+    monkeypatch.setattr("sys.dont_write_bytecode", True)
+    return repo_root, log
 
 
-def test_provenance_written_once_after_scans_with_exact_inputs(tmp_path, monkeypatch):
-    repo_root, result, log = run(tmp_path, monkeypatch, "pass")
-    calls = [e["call"] for e in log]
+def read_log(log):
+    return [json.loads(line) for line in log.read_text().splitlines() if line.strip()]
 
-    assert calls.count("write_provenance") == 1, calls
-    wp_index = calls.index("write_provenance")
-    assert "license_scan" in calls and "secret_scan" in calls, calls
-    assert calls.index("license_scan") < wp_index
-    assert calls.index("secret_scan") < wp_index
-    record_indices = [i for i, c in enumerate(calls) if c == "write_attempt_record"]
-    assert len(record_indices) == 2, calls
-    assert all(i < wp_index for i in record_indices)
 
-    attempts_dir = repo_root / ".hotdocs" / "attempts" / COMPONENT_ID
-    assert len([p for p in attempts_dir.iterdir() if p.is_file()]) == 2
+def run(repo_root):
+    return component_gate_runner.run_component_gates(COMPONENT_ID, repo_root, "test-model")
 
-    wp = log[wp_index]
-    assert wp["component_id"] == COMPONENT_ID
-    inputs = wp["inputs"]
-    loop_result = next(e for e in log if e["call"] == "run_attempts_result")
-    license_result = next(e for e in log if e["call"] == "license_scan")["result"]
-    secret_result = next(e for e in log if e["call"] == "secret_scan")["result"]
 
+def test_passing_miss_writes_provenance_once_after_scans(tmp_path, monkeypatch):
+    repo_root, log = build_repo(tmp_path, monkeypatch, "pass")
+    run(repo_root)
+    events = read_log(log)
+    names = [e["event"] for e in events]
+
+    writes = [e for e in events if e["event"] == "write_provenance"]
+    assert len(writes) == 1, names
+    w = writes[0]
+    w_idx = names.index("write_provenance")
+
+    assert "license_scan" in names and "secret_scan" in names, names
+    assert names.index("license_scan") < w_idx
+    assert names.index("secret_scan") < w_idx
+    record_idxs = [i for i, n in enumerate(names) if n == "write_attempt_record"]
+    assert len(record_idxs) == 2, names
+    assert all(i < w_idx for i in record_idxs)
+
+    assert w["component_id"] == COMPONENT_ID
+    assert w["inputs_is_dict"] is True
+    inputs = w["inputs"]
     assert inputs["component_id"] == COMPONENT_ID
     assert inputs["gate_versions"] == {"verifier": "v@1"}
     assert inputs["provenance_hit"] is False
     assert inputs["attempts"] == 2
-    assert inputs["attempt_history"] == loop_result["attempts"]
+    assert len(list((repo_root / ".hotdocs" / "attempts" / COMPONENT_ID).iterdir())) == 2
+
+    loop = [e for e in events if e["event"] == "run_attempts"][0]
+    assert inputs["attempt_history"] == loop["attempts"]
     assert len(inputs["attempt_history"]) == 2
-    assert inputs["generation_result"] == loop_result["generation_result"]
-    assert inputs["verification_report"] == loop_result["verification_report"]
-    assert inputs["license_scan_result"] == license_result
-    assert inputs["secret_scan_result"] == secret_result
+    assert w["attempt_history_ids"] == loop["attempt_ids"]
 
-    assert field(result, "provenance_hit") is False
-    assert field(result, "blocked") is False
+    assert inputs["generation_result"] == loop["gen"]
+    assert inputs["verification_report"] == loop["vr"]
+    assert w["ids"]["generation_result"] == loop["gen_id"]
+    assert w["ids"]["verification_report"] == loop["vr_id"]
 
-
-def test_no_provenance_when_last_generation_has_no_files(tmp_path, monkeypatch):
-    repo_root, result, log = run(tmp_path, monkeypatch, "generation_failed")
-    calls = [e["call"] for e in log]
-    assert "run_attempts" in calls, calls
-    assert "write_provenance" not in calls, calls
-    assert field(result, "blocked") is True
+    lic = [e for e in events if e["event"] == "license_scan"][0]
+    sec = [e for e in events if e["event"] == "secret_scan"][0]
+    assert w["ids"]["license_scan_result"] == lic["result_id"]
+    assert w["ids"]["secret_scan_result"] == sec["result_id"]
+    assert inputs["license_scan_result"]["component_id"] == COMPONENT_ID
+    assert inputs["license_scan_result"]["reason"] == "no-reference-corpus"
 
 
-def test_no_provenance_on_surface_failure(tmp_path, monkeypatch):
-    repo_root, result, log = run(tmp_path, monkeypatch, "surface_failed")
-    calls = [e["call"] for e in log]
-    assert "run_attempts" in calls, calls
-    assert "write_provenance" not in calls, calls
+def test_generation_failed_writes_no_provenance(tmp_path, monkeypatch):
+    repo_root, log = build_repo(tmp_path, monkeypatch, "generation_failed")
+    run(repo_root)
+    names = [e["event"] for e in read_log(log)]
+    assert "run_attempts" in names
+    assert "write_provenance" not in names, names
+
+
+def test_surface_failed_writes_no_provenance(tmp_path, monkeypatch):
+    repo_root, log = build_repo(tmp_path, monkeypatch, "surface_failed")
+    result = run(repo_root)
+    events = read_log(log)
+    names = [e["event"] for e in events]
+    assert "run_attempts" in names
+    assert "write_provenance" not in names, names
 
     assert field(result, "block_reason") == "surface_check_failed"
     assert field(result, "verification") is None
-    surface = field(result, "surface_report")
-    assert surface is not None
-    assert field(surface, "ok") is False
-    assert list(field(surface, "findings")) == [
+    sr = field(result, "surface_report")
+    assert sr is not None
+    loop = [e for e in events if e["event"] == "run_attempts"][0]
+    assert id(sr) == loop["sr_id"]
+    assert field(sr, "ok") is False
+    assert field(sr, "findings") == [
         {"kind": "asset_error", "message": "static/a.js: no interface file"}
     ]
