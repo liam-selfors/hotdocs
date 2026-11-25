@@ -1,7 +1,5 @@
 """Provenance Tracker UI: a static, self-contained corpus-readiness page."""
 
-from __future__ import annotations
-
 import html
 import importlib.util
 import json
@@ -20,114 +18,99 @@ STATUS_LABELS = {
     "not-attempted": "not yet attempted",
 }
 
-FILTERS = (
+FILTERS = [
     ("all", "all"),
     ("passing", "passing"),
     ("failing", "failing"),
     ("missing", "missing"),
     ("not-attempted", "not yet attempted"),
-)
+]
 
-CSS = """body { font-family: sans-serif; margin: 2em; }
+FLAGS = {"--changed", "--repo-root", "--out", "--model", "--seed"}
+
+CSS = """
+body { font-family: sans-serif; margin: 2em; color: #222; }
+.filters button { margin-right: 0.5em; }
 ul.nodes { list-style: none; padding: 0; }
-li.node { margin: 0.4em 0; padding: 0.5em; border-left: 6px solid; }
-li.node.status-passing { border-color: #2e7d32; background: #e8f5e9; }
-li.node.status-failing { border-color: #c62828; background: #ffebee; }
-li.node.status-missing { border-color: #ef6c00; background: #fff3e0; }
-li.node.status-not-attempted { border-color: #757575; background: #f5f5f5; font-style: italic; }
-.node-id { font-weight: bold; margin-right: 0.5em; }
-.node-kind { margin-right: 0.5em; color: #555; }
+li.node { margin: 0.4em 0; padding: 0.4em 0.6em; border-left: 6px solid #999; }
+li.node.status-passing { border-left-color: #2e7d32; background: #e8f5e9; }
+li.node.status-failing { border-left-color: #c62828; background: #ffebee; }
+li.node.status-missing { border-left-color: #ef6c00; background: #fff3e0; }
+li.node.status-not-attempted { border-left-color: #757575; background: #f5f5f5; font-style: italic; }
+.kind { color: #555; margin-left: 0.5em; }
+.status-label { font-weight: bold; margin-left: 0.5em; }
 .retry-feedback { display: block; margin-top: 0.3em; font-family: monospace; }
 """
 
 
-def _get(obj, key):
-    if isinstance(obj, dict):
-        return obj.get(key)
-    return getattr(obj, key, None)
+def _get(value, key):
+    if isinstance(value, dict):
+        return value.get(key)
+    return getattr(value, key, None)
 
 
 def _tool_root():
     for parent in Path(__file__).resolve().parents:
         if parent.name == "gen":
             return parent.parent
-    return None
 
 
-def _load_tracker(repo_root: Path):
-    rel = Path("gen") / "provenance-tracker"
-    directory = repo_root / rel
+def _load_dependency(repo_root, slug, module_name):
+    directory = Path(repo_root) / "gen" / slug
     if not directory.is_dir():
-        directory = _tool_root() / rel
-    path = directory / "provenance_tracker.py"
-    spec = importlib.util.spec_from_file_location("provenance_tracker", path)
+        directory = _tool_root() / "gen" / slug
+    path = directory / f"{module_name}.py"
+    spec = importlib.util.spec_from_file_location(module_name, path)
     module = importlib.util.module_from_spec(spec)
-    sys.modules["provenance_tracker"] = module
+    sys.modules[module_name] = module
     spec.loader.exec_module(module)
     return module
 
 
-def _read_attempts(repo_root: Path, component_id: str) -> list:
-    directory = repo_root / ".hotdocs" / "attempts" / component_id
+def _read_attempts(repo_root, component_id):
+    directory = Path(repo_root) / ".hotdocs" / "attempts" / component_id
     return [
         json.loads(path.read_text(encoding="utf-8"))
         for path in sorted(directory.glob("*.json"))
     ]
 
 
-def _component_node(node_id, result, repo_root, tracker) -> dict:
-    attempts = _read_attempts(repo_root, node_id)
+def _component_status(result, attempts):
     if _get(result, "hit"):
         overall = _get(_get(result, "verification_report"), "overall")
         blocked = _get(_get(result, "license_scan"), "blocked")
-        status = "passing" if overall == "pass" and not blocked else "failing"
-    elif attempts:
-        status = "missing"
-    else:
-        status = "not-attempted"
-    feedback = []
-    if status == "passing":
-        attempts = []
-    elif status in ("failing", "missing"):
-        feedback = list(tracker.last_requirement_failures(node_id, repo_root))
-    return {
-        "id": node_id,
-        "kind": "component",
-        "status": status,
-        "attempts": attempts,
-        "retry_feedback": feedback,
-    }
+        if overall == "pass" and not blocked:
+            return "passing"
+        return "failing"
+    if attempts:
+        return "missing"
+    return "not-attempted"
 
 
-def _capability_node(node_id, result) -> dict:
+def _capability_status(capability_id, result):
     report = _get(result, "capability_scenario_report")
-    overall = _get(_get(report, node_id), "overall")
-    return {
-        "id": node_id,
-        "kind": "capability",
-        "status": "passing" if overall == "pass" else "failing",
-        "attempts": [],
-        "retry_feedback": [],
-    }
+    if _get(_get(report, capability_id), "overall") == "pass":
+        return "passing"
+    return "failing"
 
 
-def _render_node(node: dict) -> str:
+def _render_node(node):
     esc = html.escape
-    status = node["status"]
     parts = [
-        f'<li class="node status-{esc(status)}" data-node-id="{esc(node["id"])}" '
-        f'data-kind="{esc(node["kind"])}" data-status="{esc(status)}">',
+        f'<li class="node status-{esc(node["status"])}" '
+        f'data-node-id="{esc(node["id"])}" data-kind="{esc(node["kind"])}" '
+        f'data-status="{esc(node["status"])}">',
         f'<span class="node-id">{esc(node["id"])}</span>',
-        f'<span class="node-kind">{esc(node["kind"])}</span>',
-        f'<span class="status-label">{esc(STATUS_LABELS[status])}</span>',
+        f'<span class="kind">{esc(node["kind"])}</span>',
+        f'<span class="status-label">{esc(STATUS_LABELS[node["status"]])}</span>',
+        '<ol class="attempts">',
     ]
-    items = [
-        f'<li class="attempt" data-attempt-id="{esc(str(_get(a, "attempt_id")))}">'
-        f'{esc(str(_get(a, "attempt_id")))}</li>'
-        for a in node["attempts"]
-    ]
-    if items:
-        parts.append('<ol class="attempts">' + "".join(items) + "</ol>")
+    for attempt in node["attempts"]:
+        attempt_id = esc(str(attempt["attempt_id"]))
+        parts.append(
+            f'<li class="attempt" data-attempt-id="{attempt_id}">{attempt_id}</li>'
+        )
+    parts.append("</ol>")
     if node["retry_feedback"]:
         text = "--retry-feedback=" + ",".join(node["retry_feedback"])
         parts.append(f'<code class="retry-feedback">{esc(text)}</code>')
@@ -135,26 +118,27 @@ def _render_node(node: dict) -> str:
     return "".join(parts)
 
 
-def _render_page(snapshot: dict, script: str) -> str:
+def _render_page(snapshot, changed_ids, asset_text):
     esc = html.escape
-    data = json.dumps(snapshot, sort_keys=True, ensure_ascii=False).replace("</", "<\\/")
+    snapshot_json = json.dumps(snapshot, sort_keys=True, ensure_ascii=True).replace(
+        "</", "<\\/"
+    )
     lines = [
         "<!DOCTYPE html>",
         '<html lang="en">',
         "<head>",
         '<meta charset="utf-8">',
-        "<title>Provenance Tracker</title>",
-        "<style>",
-        CSS,
-        "</style>",
+        "<title>Provenance tracker</title>",
+        "<style>" + CSS + "</style>",
         "</head>",
         "<body>",
-        "<h1>Provenance Tracker</h1>",
-        f'<p class="scope">Scope: {esc(str(snapshot["scope"]))}</p>',
+        "<h1>Provenance tracker</h1>",
+        f'<p class="scope">Scope: <span class="scope-name">{esc(str(snapshot["scope"]))}</span></p>',
     ]
-    if snapshot["changed_ids"] is not None:
-        changed = ", ".join(snapshot["changed_ids"])
-        lines.append(f'<p class="changed-ids">Changed: {esc(changed)}</p>')
+    if changed_ids is not None:
+        lines.append(
+            f'<p class="changed-ids">Changed: {esc(", ".join(changed_ids))}</p>'
+        )
     lines.append('<div class="filters">')
     for value, label in FILTERS:
         lines.append(f'<button type="button" data-filter="{value}">{label}</button>')
@@ -163,46 +147,69 @@ def _render_page(snapshot: dict, script: str) -> str:
     for node in snapshot["nodes"]:
         lines.append(_render_node(node))
     lines.append("</ul>")
-    lines.append(f'<script type="application/json" id="tracker-snapshot">{data}</script>')
-    lines.append('<script type="module">' + script + "\ninit(document);\n" + "</script>")
+    lines.append(
+        '<script type="application/json" id="tracker-snapshot">'
+        + snapshot_json
+        + "</script>"
+    )
+    lines.append(
+        '<script type="module">' + asset_text + "\ninit(document);\n" + "</script>"
+    )
     lines.append("</body>")
     lines.append("</html>")
     return "\n".join(lines) + "\n"
 
 
 def render_tracker_ui(
-    out_dir: Path,
-    repo_root: Path,
-    changed_ids: list[str] | None = None,
-    model: str | None = None,
-    seed: int = 0,
-    llm_backend=None,
-) -> dict:
-    repo_root = Path(repo_root)
-    out_dir = Path(out_dir)
-    tracker = _load_tracker(repo_root)
+    out_dir, repo_root, changed_ids=None, model=None, seed=0, llm_backend=None
+):
+    tracker = _load_dependency(repo_root, "provenance-tracker", "provenance_tracker")
     report = tracker.check_readiness(repo_root, changed_ids, model, seed, llm_backend)
-    graph_path = repo_root / "verification" / "corpus-graph.json"
+
+    graph_path = Path(repo_root) / "verification" / "corpus-graph.json"
     graph = json.loads(graph_path.read_text(encoding="utf-8"))
 
+    entries = []
     components = _get(report, "components")
+    for component_id in components:
+        result = _get(components, component_id)
+        attempts = _read_attempts(repo_root, component_id)
+        status = _component_status(result, attempts)
+        node_attempts = []
+        retry_feedback = []
+        if status in ("failing", "missing"):
+            node_attempts = attempts
+            retry_feedback = list(
+                tracker.last_requirement_failures(component_id, repo_root)
+            )
+        entries.append(
+            {
+                "id": component_id,
+                "kind": "component",
+                "status": status,
+                "attempts": node_attempts,
+                "retry_feedback": retry_feedback,
+            }
+        )
     capabilities = _get(report, "capabilities")
-    entries = {}
-    for node_id, result in components.items():
-        entries[node_id] = ("component", result)
-    for node_id, result in capabilities.items():
-        entries[node_id] = ("capability", result)
-
-    nodes = []
-    for node_id in sorted(entries):
-        kind, result = entries[node_id]
-        if kind == "component":
-            nodes.append(_component_node(node_id, result, repo_root, tracker))
-        else:
-            nodes.append(_capability_node(node_id, result))
-
-    ids = set(entries)
-    edges = [e for e in graph["edges"] if e["from"] in ids and e["to"] in ids]
+    for capability_id in capabilities:
+        result = _get(capabilities, capability_id)
+        entries.append(
+            {
+                "id": capability_id,
+                "kind": "capability",
+                "status": _capability_status(capability_id, result),
+                "attempts": [],
+                "retry_feedback": [],
+            }
+        )
+    nodes = sorted(entries, key=lambda node: node["id"])
+    node_ids = {node["id"] for node in nodes}
+    edges = [
+        edge
+        for edge in graph["edges"]
+        if edge["from"] in node_ids and edge["to"] in node_ids
+    ]
 
     snapshot = {
         "scope": _get(report, "scope"),
@@ -213,74 +220,68 @@ def render_tracker_ui(
         "edges": edges,
     }
 
-    script = (Path(__file__).parent / "static" / "app.js").read_text(encoding="utf-8")
-    page = _render_page(snapshot, script)
+    asset_text = (Path(__file__).parent / "static" / "app.js").read_text(
+        encoding="utf-8"
+    )
+    page = _render_page(snapshot, changed_ids, asset_text)
+    out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     (out_dir / "index.html").write_bytes(page.encode("utf-8"))
     return snapshot
 
 
-class _UsageError(Exception):
-    pass
-
-
-_FLAGS = ("--changed", "--repo-root", "--out", "--model", "--seed")
-
-
-def _parse(argv: list[str]) -> dict:
-    if list(argv[:3]) != ["track", "ui", "build"]:
-        raise _UsageError("expected 'track ui build'")
-    opts = {"--changed": None, "--repo-root": ".", "--out": None, "--model": None, "--seed": 0}
-    i = 3
-    while i < len(argv):
-        token = argv[i]
-        name, eq, value = token.partition("=")
-        if name not in _FLAGS:
-            raise _UsageError(f"unknown argument {token}")
-        if not eq:
-            i += 1
-            if i >= len(argv):
-                raise _UsageError(f"{name} requires a value")
-            value = argv[i]
-        i += 1
-        if name == "--changed":
-            opts[name] = (opts[name] or []) + value.split(",")
-        elif name == "--seed":
-            try:
-                opts[name] = int(value)
-            except ValueError:
-                raise _UsageError(f"--seed must be an integer, got {value}")
-        else:
-            opts[name] = value
-    return opts
-
-
-def _usage(cause: str) -> int:
+def _usage_error(cause):
     print(f"usage error: {cause}", file=sys.stderr)
     print(USAGE, file=sys.stderr)
     return 2
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(argv=None):
     if argv is None:
         argv = sys.argv[1:]
+    argv = list(argv)
+    if argv[:3] != ["track", "ui", "build"]:
+        return _usage_error("expected 'track ui build'")
+    changed = None
+    values = {}
+    index = 3
+    while index < len(argv):
+        token = argv[index]
+        name, eq, value = token.partition("=")
+        if name not in FLAGS:
+            return _usage_error(f"unknown argument {token}")
+        if not eq:
+            if index + 1 >= len(argv):
+                return _usage_error(f"{name} requires a value")
+            index += 1
+            value = argv[index]
+        if name == "--changed":
+            changed = (changed or []) + value.split(",")
+        else:
+            values[name] = value
+        index += 1
     try:
-        opts = _parse(argv)
-    except _UsageError as exc:
-        return _usage(str(exc))
-    repo_root = Path(opts["--repo-root"])
-    out_dir = Path(opts["--out"]) if opts["--out"] is not None else repo_root / ".hotdocs" / "ui"
+        seed = int(values.get("--seed", "0"))
+    except ValueError:
+        return _usage_error(f"--seed must be an integer, got {values['--seed']}")
+    repo_root = Path(values.get("--repo-root", "."))
+    if "--out" in values:
+        out_dir = Path(values["--out"])
+    else:
+        out_dir = repo_root / ".hotdocs" / "ui"
+    model = values.get("--model")
+
     graph_path = repo_root / "verification" / "corpus-graph.json"
     if not graph_path.is_file():
-        return _usage(f"missing {graph_path}; run hotdocs corpus-graph build first")
-    try:
-        render_tracker_ui(
-            out_dir, repo_root, opts["--changed"], opts["--model"], opts["--seed"]
+        return _usage_error(
+            f"missing {graph_path}; run hotdocs corpus-graph build first"
         )
-    except json.JSONDecodeError as exc:
-        print(f"error: {exc}", file=sys.stderr)
+    try:
+        render_tracker_ui(out_dir, repo_root, changed, model, seed)
+    except json.JSONDecodeError as error:
+        print(f"error: {error}", file=sys.stderr)
         return 1
-    except ValueError as exc:
-        return _usage(str(exc))
+    except ValueError as error:
+        return _usage_error(str(error))
     print(out_dir / "index.html")
     return 0
