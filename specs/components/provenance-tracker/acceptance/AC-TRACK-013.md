@@ -28,9 +28,9 @@ Then ready is false and not_ready_reasons has one entry for comp-seal,
   exactly "comp-seal: sealed provenance source_changed — run hotdocs
   generate comp-seal"
 
-Given the first scenario plus a whole-repository secret scan that is
-  flagged (a faked secret-scanner stored result, if one is read at all)
+Given the first scenario, but the secret-scanner stand-in returns the
+  flagged result
 When check_readiness is called
-Then comp-seal is still ready: a sealed component's readiness is its
-  SealedCheckResult alone
+Then no not_ready_reasons entry contains "comp-seal": a sealed
+  component's readiness is its SealedCheckResult alone
 ```

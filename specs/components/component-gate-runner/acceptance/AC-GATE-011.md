@@ -23,9 +23,12 @@ And write_provenance was called once, after both scans, with
 And reverified is true, blocked is false, provenance_hit is false,
   attempts is [] and verification is verify's report
 
+Given the first scenario, but the secret scan returns {"flagged": true}
+When run_component_gates is called
+Then reverified is true and run_attempts was never called
+
 Given verify returns overall "fail", and separately the license scan
-  returns {"blocked": true}, and separately the secret scan returns
-  {"flagged": true}, and run_attempts returns passed true with a
+  returns {"blocked": true}, and run_attempts returns passed true with a
   generation result with one file
 When run_component_gates is called
 Then the calls after check_provenance are, in order: verify, both scans, assemble,

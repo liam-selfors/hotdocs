@@ -1,6 +1,7 @@
 # Provenance Tracker — Non-Functional Constraints
 
-- **No network access, no model calls for the component half of
+- **No model calls, and no network access but `secret-scanner`'s own
+  webhook (`R-TRACK-016`), for the component half of
   `check_readiness`.** The component check reuses `provenance-checker`'s
   own deterministic logic and never calls `component-gate-runner`
   (`D93`). The capability half may make real model calls, through
@@ -18,7 +19,7 @@
   entire value of this data.
 - **Determinism of assembly, not of the capability half's side
   effects.** Given the same mocked `ProvenanceCheckResult`/
-  `CapabilityProvenanceCheckResult` values for a scope,
+  `CapabilityProvenanceCheckResult` and `secret-scanner` results for a scope,
   `check_readiness`'s own `VerifyReport` assembly MUST be
   byte-identical — a claim about this component's own aggregation
   logic, not a claim that two real `hotdocs verify` runs against a

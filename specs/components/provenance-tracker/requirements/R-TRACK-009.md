@@ -28,11 +28,12 @@
   a miss** (`D93`).
 
   A non-sealed component whose check is a miss, or whose hit carries a
-  failing `verification_report` or blocking scan, is not ready, never a
-  bare boolean: its `not_ready_reasons` entry names the component and
-  which check failed — `verification`, `license_scan`, or `secret_scan` —
-  and, for a failing report, every `R-id` its `requirement_results`
-  marks `"fail"`.
+  failing `verification_report` or a `license_scan` whose `blocked` is
+  true, is not ready, never a bare boolean: its `not_ready_reasons`
+  entry names the component and which check failed — `verification` or
+  `license_scan` — and, for a failing report, every `R-id` its
+  `requirement_results` marks `"fail"`. Its stored `secret_scan` is
+  never read (`R-TRACK-016`).
 
   **`impact-analyzer` MUST be loaded lazily, only at the point it is
   called** (`D98`): given no `changed_ids`, its module is never loaded at

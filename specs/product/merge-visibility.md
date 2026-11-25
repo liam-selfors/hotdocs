@@ -41,3 +41,9 @@ Then the first query shows two components ready and one not ready with its
   (provenance hits, not regenerated) alongside the third's fresh result —
   without needing the first run's CLI output
 ```
+
+The scenario's repository holds a stand-in
+`gen/secret-scanner/secret_scanner.py` whose `scan(repo_root)` returns
+`{"flagged": false, "matches": []}`: `check_readiness` scans the
+repository once for secrets (`D371`), and the real scanner would read
+the scenario's own stand-ins.

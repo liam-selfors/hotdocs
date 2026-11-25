@@ -29,7 +29,10 @@ are both in `nodes`.
 report fields (`R-UI-002`/`R-UI-005`), never a recomputation:
 
 - component, `hit` true, `verification_report.overall` `"pass"`, not
-  `license_scan.blocked`, not `secret_scan.flagged` → `"passing"`
+  `license_scan.blocked` → `"passing"`; its stored `secret_scan` is
+  never read, since the repository's fresh scan is
+  `VerifyReport.secret_scan`, reported through `not_ready_reasons`
+  (`D371`)
 - component, `hit` true, anything else → `"failing"`
 - component, `hit` false, at least one `AttemptRecord` → `"missing"`
 - component, `hit` false, no `AttemptRecord` → `"not-attempted"`

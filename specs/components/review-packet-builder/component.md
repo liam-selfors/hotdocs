@@ -101,3 +101,4 @@ None.
 - `D201`: `R-PACKET-013` covers the tool-root fallback (`D199`); the
   CLI's `--flag value` form and the markdown's remaining fields are
   covered.
+- `D371`: `compliance_flags.secret_scan` is the repository's fresh scan.
