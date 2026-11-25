@@ -1,8 +1,9 @@
-"""provenance-tracker: `hotdocs verify` readiness checks and AttemptRecord history."""
+"""Provenance Tracker: `hotdocs verify` readiness checks and attempt records."""
 
 from __future__ import annotations
 
 import dataclasses
+import datetime
 import enum
 import importlib.util
 import json
@@ -11,7 +12,6 @@ import re
 import sys
 import time
 from collections.abc import Mapping
-from datetime import datetime, timezone
 from pathlib import Path, PurePath
 
 import yaml
@@ -27,10 +27,6 @@ GENERAL_USAGE = (
     "[--seed=<n>] [--repo-root=<dir>] [--format=json|text] | "
     "hotdocs track feedback <component-id> [--repo-root=<dir>]"
 )
-
-_FRONTMATTER_RE = re.compile(r"\A---[ \t]*\r?\n(.*?)\r?\n---[ \t]*(?:\r?\n|\Z)", re.DOTALL)
-
-_last_ns = 0
 
 
 class _Record(dict):
@@ -52,138 +48,103 @@ class AttemptRecord(_Record):
 
 
 # ---------------------------------------------------------------------------
-# Shared helpers
+# JSON conversion (specs/architecture/json-values.md)
 # ---------------------------------------------------------------------------
 
-
-def _get(obj, key, default=None):
-    if isinstance(obj, Mapping):
-        return obj.get(key, default)
-    return getattr(obj, key, default)
-
-
-def _to_json(value):
+def to_json(value):
     if value is None or isinstance(value, (bool, int, str)):
         return value
     if isinstance(value, float):
         return value if math.isfinite(value) else repr(value)
     if isinstance(value, Mapping):
         return {
-            (k if isinstance(k, str) else str(k)): _to_json(v) for k, v in value.items()
+            (k if isinstance(k, str) else str(k)): to_json(v)
+            for k, v in value.items()
         }
     if isinstance(value, (list, tuple)):
-        return [_to_json(item) for item in value]
+        return [to_json(v) for v in value]
     if isinstance(value, (set, frozenset)):
-        items = [_to_json(item) for item in value]
-        return sorted(items, key=lambda item: json.dumps(item, sort_keys=True))
+        return sorted(
+            (to_json(v) for v in value),
+            key=lambda item: json.dumps(item, sort_keys=True),
+        )
     if isinstance(value, (bytes, bytearray)):
         return value.decode("utf-8", errors="replace")
     if isinstance(value, PurePath):
         return str(value)
     if isinstance(value, enum.Enum):
-        return _to_json(value.value)
-    if callable(getattr(value, "to_dict", None)):
-        return _to_json(value.to_dict())
-    if dataclasses.is_dataclass(value) and not isinstance(value, type):
-        return {
-            f.name: _to_json(getattr(value, f.name)) for f in dataclasses.fields(value)
-        }
-    if hasattr(value, "__dict__"):
-        return {
-            k: _to_json(v)
-            for k, v in vars(value).items()
-            if not k.startswith("_") and not callable(v)
-        }
+        return to_json(value.value)
+    try:
+        to_dict = getattr(value, "to_dict", None)
+        if callable(to_dict):
+            return to_json(to_dict())
+        if dataclasses.is_dataclass(value) and not isinstance(value, type):
+            return {
+                f.name: to_json(getattr(value, f.name))
+                for f in dataclasses.fields(value)
+            }
+        if hasattr(value, "__dict__"):
+            return {
+                k: to_json(v)
+                for k, v in vars(value).items()
+                if not k.startswith("_") and not callable(v)
+            }
+    except Exception:
+        pass
     return repr(value)
 
 
-def _tool_root():
-    here = Path(__file__).resolve()
-    for parent in here.parents:
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def _get(obj, key, default=None):
+    if obj is None:
+        return default
+    if isinstance(obj, Mapping):
+        return obj.get(key, default)
+    return getattr(obj, key, default)
+
+
+def _tool_root() -> Path:
+    for parent in Path(__file__).resolve().parents:
         if parent.name == "gen":
             return parent.parent
-    return here.parent
+    raise FileNotFoundError("no directory named gen above " + __file__)
 
 
-def _load_dependency(slug, module_name, repo_root):
+def _load(slug: str, module_name: str, repo_root):
     base = Path(repo_root) / "gen" / slug
     if not base.is_dir():
         base = _tool_root() / "gen" / slug
     path = base / f"{module_name}.py"
+    kwargs = {}
     if not path.is_file():
         path = base / module_name / "__init__.py"
-    spec = importlib.util.spec_from_file_location(module_name, str(path))
+        kwargs["submodule_search_locations"] = [str(path.parent)]
+    spec = importlib.util.spec_from_file_location(module_name, path, **kwargs)
     module = importlib.util.module_from_spec(spec)
     sys.modules[module_name] = module
     spec.loader.exec_module(module)
     return module
 
 
-def _frontmatter(path):
-    match = _FRONTMATTER_RE.match(path.read_text(encoding="utf-8"))
-    if match is None:
-        return {}
-    return yaml.safe_load(match.group(1)) or {}
+_FRONTMATTER = re.compile(r"\A---[ \t]*\r?\n(.*?)\r?\n---[ \t]*(?:\r?\n|\Z)", re.S)
 
 
-def _component_frontmatters(repo_root):
-    files = sorted((Path(repo_root) / "specs" / "components").glob("*/component.md"))
-    return [_frontmatter(f) for f in files]
+def _frontmatter(path: Path) -> dict:
+    match = _FRONTMATTER.match(path.read_text(encoding="utf-8"))
+    return (yaml.safe_load(match.group(1)) if match else None) or {}
+
+
+def _component_frontmatters(repo_root) -> list:
+    base = Path(repo_root) / "specs" / "components"
+    return [_frontmatter(p) for p in sorted(base.glob("*/component.md"))]
 
 
 # ---------------------------------------------------------------------------
 # check_readiness
 # ---------------------------------------------------------------------------
-
-
-def _check_component(pc, cid, repo_root, reasons):
-    sealed_key = pc.current_sealed_key(cid, repo_root)
-    if sealed_key is not None:
-        result = pc.check_sealed_provenance(cid, repo_root)
-        if not _get(result, "hit"):
-            reasons.append(
-                f"{cid}: sealed provenance {_get(result, 'reason')} — run hotdocs generate {cid}"
-            )
-        return result
-
-    key = pc.current_provenance_key(cid, repo_root)
-    result = pc.check_provenance(
-        cid, _get(key, "spec_bundle_hash"), _get(key, "gate_versions"), repo_root
-    )
-    if not _get(result, "hit"):
-        reasons.append(
-            f"{cid}: no provenance for current spec state — run hotdocs generate {cid}"
-        )
-        return result
-
-    report = _get(result, "verification_report")
-    if _get(report, "overall") != "pass":
-        rr = _get(report, "requirement_results") or {}
-        failing = sorted(rid for rid, res in rr.items() if res == "fail")
-        entry = f"{cid}: verification failed"
-        if failing:
-            entry += ": " + ", ".join(failing)
-        reasons.append(entry)
-
-    license_scan = _get(result, "license_scan")
-    if _get(license_scan, "blocked") is True:
-        reasons.append(f"{cid}: license_scan blocked")
-    return result
-
-
-def _capability_reason(cap_id, result):
-    report = _get(_get(result, "capability_scenario_report"), cap_id)
-    if _get(report, "overall") == "pass":
-        return None
-    scenarios = _get(report, "scenarios") or []
-    if not scenarios:
-        return (
-            f"{cap_id}: has no capability scenarios; "
-            "add a CS- scenario to its file under specs/product/"
-        )
-    failed = [_get(s, "id") for s in scenarios if _get(s, "result") == "fail"]
-    return f"{cap_id}: capability scenarios failed: " + ", ".join(str(i) for i in failed)
-
 
 def check_readiness(
     repo_root: Path,
@@ -192,15 +153,16 @@ def check_readiness(
     seed: int = 0,
     llm_backend=None,
 ) -> VerifyReport:
-    repo_root = Path(repo_root)
-    reasons: list[str] = []
     components: dict = {}
     capabilities: dict = {}
+    reasons: list = []
+    secret_scan = None
+    frontmatters = _component_frontmatters(repo_root)
 
     if changed_ids:
         scope = "blast-radius"
-        impact_analyzer = _load_dependency("impact-analyzer", "impact_analyzer", repo_root)
-        blast = impact_analyzer.compute_blast_radius(list(changed_ids), repo_root)
+        impact_analyzer = _load("impact-analyzer", "impact_analyzer", repo_root)
+        blast = impact_analyzer.compute_blast_radius(changed_ids, repo_root)
         precondition_error = _get(blast, "precondition_error")
         if precondition_error is not None:
             return VerifyReport(
@@ -209,52 +171,106 @@ def check_readiness(
                 components={},
                 capabilities={},
                 secret_scan=None,
-                not_ready_reasons=[f"blast radius unavailable: {precondition_error}"],
+                not_ready_reasons=[
+                    f"blast radius unavailable: {precondition_error}"
+                ],
             )
-        component_ids = [_get(e, "component_id") for e in (_get(blast, "impacted") or [])]
-        frontmatters = _component_frontmatters(repo_root)
+        component_ids = [
+            _get(entry, "component_id") for entry in (_get(blast, "impacted") or [])
+        ]
     else:
         scope = "whole-corpus"
-        frontmatters = _component_frontmatters(repo_root)
         component_ids = [fm.get("id") for fm in frontmatters if fm.get("id")]
 
-    pc = _load_dependency("provenance-checker", "provenance_checker", repo_root)
+    if component_ids:
+        checker = _load("provenance-checker", "provenance_checker", repo_root)
     for cid in component_ids:
-        components[cid] = _check_component(pc, cid, repo_root, reasons)
+        sealed_key = checker.current_sealed_key(cid, repo_root)
+        if sealed_key is None:
+            key = checker.current_provenance_key(cid, repo_root)
+            result = checker.check_provenance(
+                cid,
+                _get(key, "spec_bundle_hash"),
+                _get(key, "gate_versions"),
+                repo_root,
+            )
+            components[cid] = result
+            if not _get(result, "hit"):
+                reasons.append(
+                    f"{cid}: no provenance for current spec state — "
+                    f"run hotdocs generate {cid}"
+                )
+                continue
+            report = _get(result, "verification_report")
+            if _get(report, "overall") != "pass":
+                fails = [
+                    rid
+                    for rid, value in (_get(report, "requirement_results") or {}).items()
+                    if value == "fail"
+                ]
+                reason = f"{cid}: verification failed"
+                if fails:
+                    reason += ": " + ", ".join(fails)
+                reasons.append(reason)
+            if _get(_get(result, "license_scan"), "blocked") is True:
+                reasons.append(f"{cid}: license_scan blocked")
+        else:
+            result = checker.check_sealed_provenance(cid, repo_root)
+            components[cid] = result
+            if not _get(result, "hit"):
+                reasons.append(
+                    f"{cid}: sealed provenance {_get(result, 'reason')} — "
+                    f"run hotdocs generate {cid}"
+                )
 
-    in_scope = set(component_ids)
-    cap_ids = sorted(
+    scope_set = set(component_ids)
+    intersecting = sorted(
         {
             cap
             for fm in frontmatters
-            if fm.get("id") in in_scope
+            if fm.get("id") in scope_set
             for cap in (fm.get("realizes") or [])
         }
     )
-    if cap_ids:
-        csv = _load_dependency(
+    if intersecting:
+        verifier = _load(
             "capability-scenario-verifier", "capability_scenario_verifier", repo_root
         )
-        for cap_id in cap_ids:
-            result = csv.check_capability_provenance(cap_id, repo_root)
-            if not _get(result, "hit"):
-                if model is None:
-                    capabilities[cap_id] = result
-                    reasons.append(f"{cap_id}: needs a fresh run; pass --model")
-                    continue
-                result = csv.run_capability_gates(cap_id, repo_root, model, seed, llm_backend)
-            capabilities[cap_id] = result
-            reason = _capability_reason(cap_id, result)
-            if reason is not None:
-                reasons.append(reason)
+    for cap in intersecting:
+        result = verifier.check_capability_provenance(cap, repo_root)
+        if not _get(result, "hit"):
+            if model is None:
+                capabilities[cap] = result
+                reasons.append(f"{cap}: needs a fresh run; pass --model")
+                continue
+            result = verifier.run_capability_gates(
+                cap, repo_root, model, seed, llm_backend
+            )
+        capabilities[cap] = result
+        entry = _get(_get(result, "capability_scenario_report"), cap)
+        if _get(entry, "overall") != "pass":
+            scenarios = _get(entry, "scenarios") or []
+            if not scenarios:
+                reasons.append(
+                    f"{cap}: has no capability scenarios; add a CS- scenario "
+                    f"to its file under specs/product/"
+                )
+            else:
+                failed = [
+                    _get(s, "id") for s in scenarios if _get(s, "result") == "fail"
+                ]
+                reasons.append(
+                    f"{cap}: capability scenarios failed: {', '.join(failed)}"
+                )
 
-    secret_scan = None
     if component_ids:
         try:
-            scanner = _load_dependency("secret-scanner", "secret_scanner", repo_root)
+            scanner = _load("secret-scanner", "secret_scanner", repo_root)
             scan_result = scanner.scan(repo_root)
-        except Exception as exc:  # noqa: BLE001 - reported, never raised
-            reasons.append(f"secret_scan unavailable: {type(exc).__name__}: {exc}")
+        except Exception as exc:
+            reasons.append(
+                f"secret_scan unavailable: {type(exc).__name__}: {exc}"
+            )
         else:
             to_dict = getattr(scan_result, "to_dict", None)
             secret_scan = to_dict() if callable(to_dict) else scan_result
@@ -279,8 +295,11 @@ def check_readiness(
 
 
 # ---------------------------------------------------------------------------
-# AttemptRecord history
+# Attempt records
 # ---------------------------------------------------------------------------
+
+def _attempts_dir(component_id: str, repo_root) -> Path:
+    return Path(repo_root) / ".hotdocs" / "attempts" / component_id
 
 
 def write_attempt_record(
@@ -290,56 +309,49 @@ def write_attempt_record(
     spec_bundle_hash: str,
     repo_root: Path,
 ) -> AttemptRecord:
-    global _last_ns
-    ns = max(time.time_ns(), _last_ns + 1000)
-    _last_ns = ns
-    now = datetime.fromtimestamp(ns // 1_000_000_000, tz=timezone.utc)
-    timestamp = now.strftime("%Y-%m-%dT%H:%M:%SZ")
-    micros = (ns // 1000) % 1_000_000
-    attempt_id = f"{timestamp}-{micros:06x}"
-
+    ns = time.time_ns()
+    moment = datetime.datetime.fromtimestamp(
+        ns // 1_000_000_000, tz=datetime.timezone.utc
+    )
+    timestamp = moment.strftime("%Y-%m-%dT%H:%M:%SZ")
+    attempt_id = f"{timestamp}-{ns % 1_000_000_000:09d}"
     record = AttemptRecord(
         attempt_id=attempt_id,
         component_id=component_id,
         timestamp=timestamp,
         spec_bundle_hash=spec_bundle_hash,
-        generation=_to_json(generation_result),
-        verification=_to_json(verification_report),
+        generation=to_json(generation_result),
+        verification=to_json(verification_report),
     )
-    directory = Path(repo_root) / ".hotdocs" / "attempts" / component_id
+    directory = _attempts_dir(component_id, repo_root)
     directory.mkdir(parents=True, exist_ok=True)
-    (directory / f"{attempt_id}.json").write_text(
-        json.dumps(record, indent=2), encoding="utf-8"
-    )
+    with open(directory / f"{attempt_id}.json", "x", encoding="utf-8") as handle:
+        handle.write(json.dumps(record, indent=2))
     return record
 
 
-def _feedback_ids(verification):
-    requirement_results = verification.get("requirement_results") or {}
-    criteria = verification.get("criteria") or []
-    failing = []
-    for rid, res in requirement_results.items():
-        if res != "fail":
-            continue
-        non_pass = [
-            c for c in criteria if c.get("covers") == rid and c.get("result") != "pass"
-        ]
-        if non_pass and all(
-            c.get("failure_origin", "implementation") in ("test", "environment")
-            for c in non_pass
-        ):
-            continue
-        failing.append(rid)
-    return sorted(failing)
-
-
 def last_requirement_failures(component_id: str, repo_root: Path) -> list[str]:
-    directory = Path(repo_root) / ".hotdocs" / "attempts" / component_id
-    for path in sorted(directory.glob("*.json"), reverse=True):
-        record = json.loads(path.read_text(encoding="utf-8"))
-        verification = record.get("verification")
-        if verification is not None:
-            return _feedback_ids(verification)
+    files = sorted(_attempts_dir(component_id, repo_root).glob("*.json"), reverse=True)
+    for path in files:
+        verification = json.loads(path.read_text(encoding="utf-8")).get("verification")
+        if verification is None:
+            continue
+        criteria = verification.get("criteria") or []
+        failing = []
+        for rid, value in (verification.get("requirement_results") or {}).items():
+            if value != "fail":
+                continue
+            not_passed = [
+                c for c in criteria
+                if c.get("covers") == rid and c.get("result") != "pass"
+            ]
+            if not_passed and all(
+                c.get("failure_origin", "implementation") in ("test", "environment")
+                for c in not_passed
+            ):
+                continue
+            failing.append(rid)
+        return sorted(failing)
     return []
 
 
@@ -347,59 +359,64 @@ def last_requirement_failures(component_id: str, repo_root: Path) -> list[str]:
 # CLI
 # ---------------------------------------------------------------------------
 
+class _UsageError(Exception):
+    pass
 
-def _usage_error(cause, usage):
+
+def _parse(tokens, flags):
+    values: dict = {}
+    positionals: list = []
+    i = 0
+    while i < len(tokens):
+        tok = tokens[i]
+        name, eq, val = tok.partition("=")
+        if eq and name in flags:
+            values.setdefault(name, []).append(val)
+        elif tok in flags:
+            if i + 1 >= len(tokens):
+                raise _UsageError(f"{tok} requires a value")
+            i += 1
+            values.setdefault(tok, []).append(tokens[i])
+        elif tok.startswith("-"):
+            raise _UsageError(f"unknown argument: {tok}")
+        else:
+            positionals.append(tok)
+        i += 1
+    return values, positionals
+
+
+def _usage_error(cause: str, usage: str) -> int:
     print(f"usage error: {cause}", file=sys.stderr)
     print(usage, file=sys.stderr)
     return 2
 
 
-def _parse(tokens, flags):
-    values: dict = {}
-    positionals = []
-    i = 0
-    while i < len(tokens):
-        tok = tokens[i]
-        if tok.startswith("-"):
-            name, eq, val = tok.partition("=")
-            if name not in flags:
-                return None, None, f"unknown argument: {tok}"
-            if not eq:
-                if i + 1 >= len(tokens):
-                    return None, None, f"{name} requires a value"
-                i += 1
-                val = tokens[i]
-            values.setdefault(name, []).append(val)
-        else:
-            positionals.append(tok)
-        i += 1
-    return values, positionals, None
-
-
-def _main_verify(tokens):
-    values, positionals, error = _parse(
-        tokens, ("--changed", "--model", "--seed", "--repo-root", "--format")
-    )
-    if error is not None:
-        return _usage_error(error, VERIFY_USAGE)
-    if positionals:
-        return _usage_error(f"unknown argument: {positionals[0]}", VERIFY_USAGE)
-    seed_text = values.get("--seed", ["0"])[-1]
+def _verify(tokens) -> int:
     try:
-        seed = int(seed_text)
-    except ValueError:
-        return _usage_error(f"--seed must be an integer: {seed_text}", VERIFY_USAGE)
-    fmt = values.get("--format", ["text"])[-1]
-    if fmt not in ("json", "text"):
-        return _usage_error(f"invalid --format: {fmt}", VERIFY_USAGE)
+        values, positionals = _parse(
+            tokens, {"--changed", "--model", "--seed", "--repo-root", "--format"}
+        )
+        if positionals:
+            raise _UsageError(f"unknown argument: {positionals[0]}")
+        seed_text = values.get("--seed", ["0"])[-1]
+        try:
+            seed = int(seed_text)
+        except ValueError:
+            raise _UsageError(f"--seed must be an integer: {seed_text}") from None
+        fmt = values.get("--format", ["text"])[-1]
+        if fmt not in ("json", "text"):
+            raise _UsageError(f"invalid --format: {fmt}")
+    except _UsageError as exc:
+        return _usage_error(str(exc), VERIFY_USAGE)
     repo_root = Path(values["--repo-root"][-1]) if "--repo-root" in values else Path.cwd()
     model = values.get("--model", [None])[-1]
     changed = values.get("--changed") or None
-
-    report = check_readiness(repo_root, changed, model, seed)
+    report = check_readiness(
+        repo_root, changed_ids=changed, model=model, seed=seed
+    )
     ready = bool(_get(report, "ready"))
     if fmt == "json":
-        print(json.dumps(_to_json(report), indent=2))
+        print(json.dumps(to_json(report), indent=2))
     else:
         print("ready" if ready else "not ready")
         for reason in _get(report, "not_ready_reasons") or []:
@@ -407,14 +424,15 @@ def _main_verify(tokens):
     return 0 if ready else 1
 
 
-def _main_feedback(tokens):
-    values, positionals, error = _parse(tokens, ("--repo-root",))
-    if error is not None:
-        return _usage_error(error, FEEDBACK_USAGE)
-    if not positionals:
-        return _usage_error("missing <component-id>", FEEDBACK_USAGE)
-    if len(positionals) > 1:
-        return _usage_error(f"unknown argument: {positionals[1]}", FEEDBACK_USAGE)
+def _feedback(tokens) -> int:
+    try:
+        values, positionals = _parse(tokens, {"--repo-root"})
+        if not positionals:
+            raise _UsageError("missing <component-id>")
+        if len(positionals) > 1:
+            raise _UsageError(f"unknown argument: {positionals[1]}")
+    except _UsageError as exc:
+        return _usage_error(str(exc), FEEDBACK_USAGE)
     repo_root = Path(values["--repo-root"][-1]) if "--repo-root" in values else Path.cwd()
     ids = last_requirement_failures(positionals[0], repo_root)
     if ids:
@@ -427,8 +445,8 @@ def main(argv: list[str] | None = None) -> int:
         argv = sys.argv[1:]
     argv = list(argv)
     if argv[:1] == ["verify"]:
-        return _main_verify(argv[1:])
+        return _verify(argv[1:])
     if argv[:2] == ["track", "feedback"]:
-        return _main_feedback(argv[2:])
-    cause = f"unknown command: {' '.join(argv[:2])}" if argv else "missing command"
-    return _usage_error(cause, GENERAL_USAGE)
+        return _feedback(argv[2:])
+    first = " ".join(argv[:2]) if argv else "(none)"
+    return _usage_error(f"unknown command: {first}", GENERAL_USAGE)
