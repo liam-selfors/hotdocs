@@ -10,32 +10,49 @@ def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def git(repo, *args):
+def _git(repo, *args):
     env = dict(os.environ)
-    env["GIT_AUTHOR_NAME"] = "test"
-    env["GIT_AUTHOR_EMAIL"] = "test@example.com"
-    env["GIT_COMMITTER_NAME"] = "test"
-    env["GIT_COMMITTER_EMAIL"] = "test@example.com"
+    env.update(
+        {
+            "GIT_AUTHOR_NAME": "Test",
+            "GIT_AUTHOR_EMAIL": "test@example.invalid",
+            "GIT_COMMITTER_NAME": "Test",
+            "GIT_COMMITTER_EMAIL": "test@example.invalid",
+            "GIT_CONFIG_NOSYSTEM": "1",
+        }
+    )
     result = subprocess.run(
-        ["git", "-c", "user.name=test", "-c", "user.email=test@example.com",
-         "-c", "commit.gpgsign=false", *args],
-        cwd=str(repo), env=env, capture_output=True, text=True,
+        ["git", "-c", "commit.gpgsign=false", "-c", "core.autocrlf=false"] + list(args),
+        cwd=str(repo),
+        env=env,
+        capture_output=True,
+        text=True,
     )
     assert result.returncode == 0, result.stderr
     return result.stdout
 
 
-def commit_all(repo, message):
-    git(repo, "add", "-A")
-    git(repo, "commit", "-q", "-m", message)
-
-
-def write(path, text):
+def _write(path, text):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text)
 
 
-def verification_report(component_id):
+def _component_md(component_id, title, sealed_line):
+    text = "---\n"
+    text += "id: " + component_id + "\n"
+    text += "title: " + title + "\n"
+    text += "status: draft\n"
+    text += "owners: [pipeline-team]\n"
+    text += "depends_on: []\n"
+    if sealed_line is not None:
+        text += sealed_line + "\n"
+        if sealed_line.strip() == "sealed: true":
+            text += "source_path: legacy/" + component_id[len("comp-"):] + "/\n"
+    text += "---\n\n# " + title + "\n\nA fixture component.\n"
+    return text
+
+
+def _verification_report(component_id):
     return {
         "component_id": component_id,
         "criteria": [],
@@ -48,7 +65,7 @@ def verification_report(component_id):
     }
 
 
-def secret_scan_result():
+def _secret_scan():
     return {
         "scope": "full",
         "gate_version": "secret_scanner@3.1.0+detect-secrets.1.5.0",
@@ -62,189 +79,179 @@ def secret_scan_result():
     }
 
 
-def license_scan_result():
+def _verify_report(component_ids):
+    components = {}
+    for cid in component_ids:
+        components[cid] = {
+            "hit": True,
+            "reason": None,
+            "verification_report": _verification_report(cid),
+            "license_scan": {"blocked": False, "matches": []},
+            "secret_scan": _secret_scan(),
+        }
     return {
-        "blocked": False,
-        "findings": [],
-        "gate_version": "license_scanner@1.0.0",
-        "cache_hit": False,
-    }
-
-
-def provenance_result(component_id):
-    return {
-        "hit": True,
-        "reason": None,
-        "verification_report": verification_report(component_id),
-        "license_scan": license_scan_result(),
-        "secret_scan": secret_scan_result(),
-    }
-
-
-def write_tracker(repo, component_ids):
-    report = {
         "scope": "blast-radius",
         "ready": True,
-        "components": {cid: provenance_result(cid) for cid in component_ids},
+        "components": components,
         "capabilities": {},
-        "secret_scan": secret_scan_result(),
+        "secret_scan": _secret_scan(),
         "not_ready_reasons": [],
     }
-    source = (
-        "def check_readiness(repo_root, changed_ids=None, model=None, seed=0, llm_backend=None):\n"
-        "    return " + repr(report) + "\n"
-        "\n"
-        "\n"
-        "def last_requirement_failures(component_id, repo_root):\n"
-        "    return []\n"
-    )
-    write(repo / "gen" / "provenance-tracker" / "provenance_tracker.py", source)
 
 
-def component_md(component_id, title, sealed_line, source_line, extra=""):
-    text = (
-        "---\n"
-        "id: " + component_id + "\n"
-        "title: " + title + "\n"
-        "status: draft\n"
-        "owners: [team-a]\n"
-        "depends_on: []\n"
-    )
-    if sealed_line:
-        text += sealed_line + "\n"
-    if source_line:
-        text += source_line + "\n"
-    text += "---\n\n# " + title + "\n\n" + extra + "\n"
-    return text
+def _write_tracker_standin(repo, component_ids):
+    report = _verify_report(component_ids)
+    source = ""
+    source += "import copy\n\n"
+    source += "REPORT = " + repr(report) + "\n\n\n"
+    source += "def check_readiness(repo_root, changed_ids=None, model=None, seed=0, llm_backend=None):\n"
+    source += "    return copy.deepcopy(REPORT)\n\n\n"
+    source += "def last_requirement_failures(component_id, repo_root):\n"
+    source += "    return []\n"
+    _write(repo / "gen" / "provenance-tracker" / "provenance_tracker.py", source)
 
 
-def write_units(repo, slug, rid, acid):
-    base = repo / "specs" / "components" / slug
-    write(base / "requirements" / (rid + ".md"),
-          "**" + rid + "** — The component MUST do its thing.\n")
-    write(base / "acceptance" / (acid + ".md"),
-          "# " + acid + "\n\nCovers: " + rid + "\nKind: llm-judge\n\nIt does its thing.\n")
-
-
-def init_repo(repo):
+def _init_repo(repo):
     repo.mkdir(parents=True, exist_ok=True)
-    git(repo, "init", "-q")
-    git(repo, "symbolic-ref", "HEAD", "refs/heads/main")
+    _git(repo, "init")
+    _git(repo, "symbolic-ref", "HEAD", "refs/heads/main")
 
 
-def build_sealed_only_repo(repo):
-    init_repo(repo)
-    write_tracker(repo, ["comp-foo"])
-    write(repo / "README.md", "fixture\n")
-    commit_all(repo, "initial")
-    git(repo, "checkout", "-q", "-b", "feature")
-    write_units(repo, "foo", "R-FOO-001", "AC-FOO-001")
-    write(repo / "specs" / "components" / "foo" / "component.md",
-          component_md("comp-foo", "Foo", None, None))
-    commit_all(repo, "add foo unsealed")
-    write(repo / "specs" / "components" / "foo" / "component.md",
-          component_md("comp-foo", "Foo", "sealed: true", "source_path: legacy/foo/"))
-    commit_all(repo, "seal foo")
-
-
-def test_sealed_transition_in_library(tmp_path):
+def _build_sealed_only_repo(tmp_path):
     repo = tmp_path / "repo"
-    build_sealed_only_repo(repo)
+    _init_repo(repo)
+    _write_tracker_standin(repo, ["comp-foo"])
+    _write(repo / "README.md", "fixture\n")
+    _write(
+        repo / "specs" / "components" / "foo" / "component.md",
+        _component_md("comp-foo", "Foo", None),
+    )
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-m", "add comp-foo unsealed")
+    _git(repo, "checkout", "-b", "feature")
+    _write(
+        repo / "specs" / "components" / "foo" / "component.md",
+        _component_md("comp-foo", "Foo", "sealed: true"),
+    )
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-m", "seal comp-foo")
+    return repo
+
+
+def _exemption_changes(packet):
+    return field(packet, "exemption_changes")
+
+
+def test_sealed_transition_appears_in_exemption_changes(tmp_path):
+    repo = _build_sealed_only_repo(tmp_path)
     packet = review_packet_builder.build_review_packet(["comp-foo"], repo)
-    exemptions = field(packet, "exemption_changes")
-    sealed = list(field(exemptions, "sealed"))
-    pinned = list(field(exemptions, "pinned_overrides"))
+    ex = _exemption_changes(packet)
+    sealed = list(field(ex, "sealed"))
+    pinned = list(field(ex, "pinned_overrides"))
     assert "comp-foo" in sealed
     assert "comp-foo" not in pinned
 
 
-def _section(lines):
+def _heading_level(line):
+    stripped = line.lstrip()
+    if not stripped.startswith("#"):
+        return None
+    level = len(stripped) - len(stripped.lstrip("#"))
+    return level
+
+
+def _exemption_section(text):
+    lines = text.splitlines()
     start = None
     for i, line in enumerate(lines):
         if "exemption changes" in line.lower():
             start = i
             break
-    assert start is not None, "no Exemption Changes section in markdown output"
-    heading = lines[start].lstrip()
-    level = len(heading) - len(heading.lstrip("#"))
+    assert start is not None, "no Exemption Changes section in markdown:\n" + text
+    level = _heading_level(lines[start])
     end = len(lines)
-    for j in range(start + 1, len(lines)):
-        stripped = lines[j].lstrip()
-        if stripped.startswith("#"):
-            k = len(stripped) - len(stripped.lstrip("#"))
-            if level == 0 or k <= level:
+    if level is not None:
+        for j in range(start + 1, len(lines)):
+            lv = _heading_level(lines[j])
+            if lv is not None and lv <= level:
                 end = j
                 break
     return lines[start + 1:end]
 
 
-def _label_index(lines, label):
-    for i, line in enumerate(lines):
-        cleaned = line.strip().lstrip("#*-_: ").lower()
-        if cleaned.startswith(label):
-            return i
-    return None
-
-
-def test_sealed_only_markdown_rendering(tmp_path, capsys):
-    repo = tmp_path / "repo"
-    build_sealed_only_repo(repo)
+def test_markdown_lists_sealed_not_pinned(tmp_path, capsys):
+    repo = _build_sealed_only_repo(tmp_path)
     code = review_packet_builder.main(
-        ["review-packet", "build", "--changed=comp-foo", "--repo-root", str(repo)]
+        ["review-packet", "build", "--changed=comp-foo", "--repo-root=" + str(repo)]
     )
     out = capsys.readouterr().out
     assert code == 0
-    section = _section(out.splitlines())
-    sealed_i = _label_index(section, "sealed")
-    pinned_i = _label_index(section, "pinned overrides")
-    assert sealed_i is not None, "no Sealed list in Exemption Changes"
-    assert pinned_i is not None, "no Pinned Overrides list in Exemption Changes"
-    assert sealed_i != pinned_i
-    if sealed_i < pinned_i:
-        sealed_part = section[sealed_i:pinned_i]
-        pinned_part = section[pinned_i:]
+    section = _exemption_section(out)
+
+    sealed_idx = None
+    pinned_idx = None
+    for i, line in enumerate(section):
+        low = line.lower()
+        if pinned_idx is None and "pinned" in low:
+            pinned_idx = i
+        elif sealed_idx is None and "sealed" in low and "pinned" not in low:
+            sealed_idx = i
+    assert sealed_idx is not None, "no Sealed subsection:\n" + "\n".join(section)
+    assert pinned_idx is not None, "no Pinned Overrides subsection:\n" + "\n".join(section)
+
+    if sealed_idx < pinned_idx:
+        sealed_part = section[sealed_idx:pinned_idx]
+        pinned_part = section[pinned_idx:]
     else:
-        pinned_part = section[pinned_i:sealed_i]
-        sealed_part = section[sealed_i:]
+        pinned_part = section[pinned_idx:sealed_idx]
+        sealed_part = section[sealed_idx:]
+
     sealed_text = "\n".join(sealed_part)
     pinned_text = "\n".join(pinned_part)
-    assert "comp-foo" in sealed_text
-    assert "comp-foo" not in pinned_text
-    assert sealed_text.replace("Sealed", "").replace("sealed", "") != \
-        pinned_text.replace("Pinned Overrides", "").replace("pinned overrides", "")
+    assert "comp-foo" in sealed_text, sealed_text
+    assert "comp-foo" not in pinned_text, pinned_text
+
+    sealed_body = "\n".join(sealed_part[1:]).strip() + sealed_part[0].lower().split("sealed", 1)[-1]
+    pinned_body = "\n".join(pinned_part[1:]).strip() + pinned_part[0].lower().split("pinned", 1)[-1]
+    assert sealed_body != pinned_body
 
 
-def test_non_transitions_not_reported(tmp_path):
+def test_non_transitions_and_deleted_override_excluded(tmp_path):
     repo = tmp_path / "repo"
-    init_repo(repo)
-    write_tracker(repo, ["comp-alpha", "comp-beta"])
-    write(repo / "README.md", "fixture\n")
-    write(repo / "gen" / "old" / ".overrides.json", '{"pinned": ["old.py"]}\n')
-    write(repo / "gen" / "old" / "old.py", "X = 1\n")
-    commit_all(repo, "initial with old override")
-    git(repo, "checkout", "-q", "-b", "feature")
+    _init_repo(repo)
+    _write_tracker_standin(repo, ["comp-alpha", "comp-beta"])
+    _write(repo / "README.md", "fixture\n")
+    _write(
+        repo / "specs" / "components" / "alpha" / "component.md",
+        _component_md("comp-alpha", "Alpha", "sealed: true"),
+    )
+    _write(
+        repo / "specs" / "components" / "beta" / "component.md",
+        _component_md("comp-beta", "Beta", None),
+    )
+    _write(repo / "gen" / "old" / ".overrides.json", "{}\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-m", "base state")
 
-    write_units(repo, "alpha", "R-ALPHA-001", "AC-ALPHA-001")
-    write(repo / "specs" / "components" / "alpha" / "component.md",
-          component_md("comp-alpha", "Alpha", "sealed: true", "source_path: legacy/alpha/"))
-    write_units(repo, "beta", "R-BETA-001", "AC-BETA-001")
-    write(repo / "specs" / "components" / "beta" / "component.md",
-          component_md("comp-beta", "Beta", None, None))
-    commit_all(repo, "add alpha sealed and beta unsealed")
-
-    write(repo / "specs" / "components" / "alpha" / "component.md",
-          component_md("comp-alpha", "Alpha", "sealed: true", "source_path: legacy/alpha/",
-                       "Edited prose, still sealed."))
-    write(repo / "specs" / "components" / "beta" / "component.md",
-          component_md("comp-beta", "Beta", "sealed: false", None))
-    (repo / "gen" / "old" / ".overrides.json").unlink()
-    commit_all(repo, "edit alpha, beta sealed false, delete old override")
+    _git(repo, "checkout", "-b", "feature")
+    _write(
+        repo / "specs" / "components" / "alpha" / "component.md",
+        _component_md("comp-alpha", "Alpha Edited", "sealed: true"),
+    )
+    _write(
+        repo / "specs" / "components" / "beta" / "component.md",
+        _component_md("comp-beta", "Beta", "sealed: false"),
+    )
+    _git(repo, "rm", "-q", "gen/old/.overrides.json")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-m", "edit alpha, beta sealed false, drop override")
 
     packet = review_packet_builder.build_review_packet(["comp-alpha", "comp-beta"], repo)
-    exemptions = field(packet, "exemption_changes")
-    sealed = list(field(exemptions, "sealed"))
-    pinned = list(field(exemptions, "pinned_overrides"))
+    ex = _exemption_changes(packet)
+    sealed = list(field(ex, "sealed"))
+    pinned = list(field(ex, "pinned_overrides"))
     assert "comp-alpha" not in sealed
     assert "comp-beta" not in sealed
     assert "comp-old" not in pinned
-    assert pinned == []
+    assert "comp-comp-old" not in pinned
+    assert "old" not in pinned

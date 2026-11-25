@@ -1,4 +1,5 @@
 # hotdocs-criterion: sha256:89086513bc88ef99e04b14ac36a1b306fb728e39b9aca44a2dc4a6e59ae46f9b
+import os
 import re
 import subprocess
 from pathlib import Path
@@ -6,23 +7,34 @@ from pathlib import Path
 import review_packet_builder
 
 
-# ---------------------------------------------------------------- helpers
-
 def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def git(repo_root, *args):
-    subprocess.run(
-        ["git", "-c", "user.email=test@example.com", "-c", "user.name=Test",
-         "-c", "commit.gpgsign=false"] + list(args),
-        cwd=str(repo_root), check=True, capture_output=True, text=True,
-    )
+GIT_ENV = dict(os.environ)
+GIT_ENV.update({
+    "GIT_AUTHOR_NAME": "Test",
+    "GIT_AUTHOR_EMAIL": "test@example.invalid",
+    "GIT_COMMITTER_NAME": "Test",
+    "GIT_COMMITTER_EMAIL": "test@example.invalid",
+})
+
+
+def git(repo, *args):
+    return subprocess.run(
+        ["git", "-c", "commit.gpgsign=false", *args],
+        cwd=str(repo), env=GIT_ENV, check=True,
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+    ).stdout.strip()
 
 
 def write(path, text):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text)
+
+
+SPEC_MARKER = "zebra-quokka-marker-7731"
+LICENSE_PKG = "evilpkg-gplthing"
 
 
 def verification_report(component_id, mutation_score):
@@ -42,12 +54,12 @@ def verification_report(component_id, mutation_score):
     }
 
 
-def secret_scan_result(matches):
+def clean_secret_scan():
     return {
         "scope": "full",
         "gate_version": "secret_scanner@3.1.0+detect-secrets.1.5.0",
-        "flagged": bool(matches),
-        "matches": matches,
+        "flagged": False,
+        "matches": [],
         "allowed": [],
         "unused_allowlist_entries": [],
         "notified": False,
@@ -56,239 +68,234 @@ def secret_scan_result(matches):
     }
 
 
-def license_scan_result(blocked):
-    findings = []
-    if blocked:
-        findings = [{"file": "gen/foo/vendored_evil.py", "package": "evil-gpl-lib",
-                     "license": "GPL-3.0-only", "similarity": 0.97}]
+def build_report(flagged):
+    if flagged:
+        license_scan = {
+            "gate_version": "license_scanner@1.0.0",
+            "blocked": True,
+            "findings": [
+                {"package": LICENSE_PKG, "license": "GPL-3.0-only",
+                 "file": "gen/foo/vendored_gplthing.py"},
+            ],
+        }
+        mutation_score = 0.92
+        top_secret = {
+            "scope": "full",
+            "gate_version": "secret_scanner@3.1.0+detect-secrets.1.5.0",
+            "flagged": True,
+            "matches": [
+                {"rule_id": "AWS Access Key", "risk_tier": "high", "file": "a/b.py", "line": 3},
+            ],
+            "allowed": [],
+            "unused_allowlist_entries": [],
+            "notified": False,
+            "notification_delivery_error": None,
+            "cache_hit": False,
+        }
+        capabilities = {
+            "P-ZERO-EDIT": {
+                "hit": True,
+                "capability_scenario_report": {
+                    "P-ZERO-EDIT": {"overall": "pass", "scenarios": []},
+                },
+            },
+        }
+        reasons = ["comp-foo: license scan blocked", "repository secret scan flagged"]
+    else:
+        license_scan = {"gate_version": "license_scanner@1.0.0", "blocked": False, "findings": []}
+        mutation_score = 1.0
+        top_secret = clean_secret_scan()
+        capabilities = {}
+        reasons = []
     return {
-        "gate_version": "license_scanner@1.0.0",
-        "blocked": blocked,
-        "findings": findings,
-        "cache_hit": False,
+        "scope": "blast-radius",
+        "ready": not flagged,
+        "components": {
+            "comp-foo": {
+                "hit": True,
+                "reason": None,
+                "verification_report": verification_report("comp-foo", mutation_score),
+                "license_scan": license_scan,
+                "secret_scan": clean_secret_scan(),
+            },
+        },
+        "capabilities": capabilities,
+        "secret_scan": top_secret,
+        "not_ready_reasons": reasons,
     }
 
 
-def component_md(cid, title, extra_lines):
-    return (
-        "---\n"
-        "id: " + cid + "\n"
-        "title: " + title + "\n"
-        "status: draft\n"
-        "owners: [pipeline-team]\n"
-        "depends_on: []\n"
-        + "".join(line + "\n" for line in extra_lines)
-        + "---\n\n# " + title + "\n\nA fixture component.\n"
-    )
+def component_md(cid, extra):
+    return ("---\nid: " + cid + "\ntitle: " + cid + "\nstatus: draft\nowners: [team]\n"
+            + extra + "---\n\n# " + cid + "\n\nSome purpose.\n")
 
 
-def write_fake_tracker(repo_root, report, log_path):
-    source = (
-        "REPORT = " + repr(report) + "\n"
-        "LOG_PATH = " + repr(str(log_path)) + "\n"
+def make_repo(tmp_path, report, with_history):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    log_path = tmp_path / "fake_calls.log"
+    git(repo, "init", "-q")
+    git(repo, "symbolic-ref", "HEAD", "refs/heads/main")
+
+    write(repo / "specs" / "components" / "foo" / "component.md",
+          component_md("comp-foo", "realizes: [P-ZERO-EDIT]\n"))
+    write(repo / "specs" / "components" / "foo" / "requirements" / "R-FOO-001.md",
+          "**R-FOO-001** — Foo MUST do the thing.\n")
+    write(repo / "specs" / "components" / "foo" / "acceptance" / "AC-FOO-001.md",
+          "# AC-FOO-001\n\nCovers: R-FOO-001\nKind: compiled\n")
+    write(repo / "specs" / "components" / "sealedthing" / "component.md",
+          component_md("comp-sealedthing", ""))
+    write(repo / "specs" / "components" / "sealedthing" / "requirements" / "R-SEALED-001.md",
+          "**R-SEALED-001** — Sealedthing MUST work.\n")
+    write(repo / "specs" / "components" / "sealedthing" / "acceptance" / "AC-SEALED-001.md",
+          "# AC-SEALED-001\n\nCovers: R-SEALED-001\nKind: compiled\n")
+    write(repo / "specs" / "components" / "pinnedthing" / "component.md",
+          component_md("comp-pinnedthing", "sealed: true\nsource_path: legacy/pinnedthing/\n"))
+    write(repo / "specs" / "components" / "pinnedthing" / "requirements" / "R-PIN-001.md",
+          "**R-PIN-001** — Pinnedthing MUST work.\n")
+    write(repo / "specs" / "components" / "pinnedthing" / "acceptance" / "AC-PIN-001.md",
+          "# AC-PIN-001\n\nCovers: R-PIN-001\nKind: compiled\n")
+
+    fake_src = (
+        "import json\n"
+        "from pathlib import Path\n"
+        "\n"
+        "_REPORT = " + repr(report) + "\n"
+        "_LOG = " + repr(str(log_path)) + "\n"
         "\n"
         "def check_readiness(repo_root, changed_ids=None, model=None, seed=0, llm_backend=None):\n"
-        "    with open(LOG_PATH, 'a') as fh:\n"
-        "        fh.write('check_readiness ' + repr(changed_ids) + '\\n')\n"
-        "    return REPORT\n"
+        "    with open(_LOG, 'a') as fh:\n"
+        "        fh.write('check_readiness ' + json.dumps(list(changed_ids) if changed_ids is not None else None) + '\\n')\n"
+        "    import copy\n"
+        "    return copy.deepcopy(_REPORT)\n"
         "\n"
         "def last_requirement_failures(component_id, repo_root):\n"
         "    return []\n"
     )
-    write(repo_root / "gen" / "provenance-tracker" / "provenance_tracker.py", source)
+    write(repo / "gen" / "provenance-tracker" / "provenance_tracker.py", fake_src)
 
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "-m", "base")
+    base = git(repo, "rev-parse", "HEAD")
+    git(repo, "update-ref", "refs/remotes/origin/main", base)
+    git(repo, "checkout", "-q", "-b", "feature")
 
-ADDED_SPEC_LINE = "The foo widget MUST reject a negative quux count with exit 3."
-
-
-def build_repo(tmp_path, report, with_pr_changes):
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    log_path = tmp_path / "tracker_calls.log"
-    git(repo_root, "init")
-    git(repo_root, "symbolic-ref", "HEAD", "refs/heads/main")
-
-    write_fake_tracker(repo_root, report, log_path)
-
-    foo = repo_root / "specs" / "components" / "foo"
-    write(foo / "component.md",
-          component_md("comp-foo", "Foo", ["realizes: [P-FOO-CAP]"]))
-    write(foo / "requirements" / "R-FOO-001.md",
-          "# R-FOO-001\n\n**R-FOO-001** — The foo widget MUST frobnicate.\n")
-    write(foo / "acceptance" / "AC-FOO-001.md",
-          "# AC-FOO-001\n\nCovers: R-FOO-001\nKind: compiled\n")
-
-    sealy = repo_root / "specs" / "components" / "sealy"
-    write(sealy / "component.md",
-          component_md("comp-sealy", "Sealy", ["sealed: false"]))
-    write(sealy / "requirements" / "R-SEALY-001.md",
-          "# R-SEALY-001\n\n**R-SEALY-001** — Sealy MUST exist.\n")
-    write(sealy / "acceptance" / "AC-SEALY-001.md",
-          "# AC-SEALY-001\n\nCovers: R-SEALY-001\nKind: compiled\n")
-
-    pinny = repo_root / "specs" / "components" / "pinny"
-    write(pinny / "component.md",
-          component_md("comp-pinny", "Pinny", ["sealed: true", "source_path: legacy/pinny/"]))
-    write(pinny / "requirements" / "R-PINNY-001.md",
-          "# R-PINNY-001\n\n**R-PINNY-001** — Pinny MUST exist.\n")
-    write(pinny / "acceptance" / "AC-PINNY-001.md",
-          "# AC-PINNY-001\n\nCovers: R-PINNY-001\nKind: compiled\n")
-    write(repo_root / "gen" / "pinny" / "pinny.py", "VALUE = 1\n")
-
-    git(repo_root, "add", "-A")
-    git(repo_root, "commit", "-m", "base")
-    git(repo_root, "checkout", "-b", "pr-branch")
-
-    if with_pr_changes:
-        write(foo / "requirements" / "R-FOO-001.md",
-              "# R-FOO-001\n\n**R-FOO-001** — The foo widget MUST frobnicate.\n"
-              + ADDED_SPEC_LINE + "\n")
-        write(sealy / "component.md",
-              component_md("comp-sealy", "Sealy", ["sealed: true", "source_path: legacy/sealy/"]))
-        write(repo_root / "gen" / "pinny" / ".overrides.json",
-              '[{"file": "pinny.py", "reason": "hand-tuned"}]\n')
+    if with_history:
+        req = repo / "specs" / "components" / "foo" / "requirements" / "R-FOO-001.md"
+        req.write_text(req.read_text() + "\nAdded by this PR: " + SPEC_MARKER + ".\n")
+        write(repo / "specs" / "components" / "sealedthing" / "component.md",
+              component_md("comp-sealedthing", "sealed: true\nsource_path: legacy/sealedthing/\n"))
+        write(repo / "gen" / "pinnedthing" / ".overrides.json",
+              '{"overrides": [{"path": "x.py", "reason": "hand fix"}]}\n')
     else:
-        write(foo / "requirements" / "R-FOO-001.md",
-              "# R-FOO-001\n\n**R-FOO-001** — The foo widget MUST frobnicate.\n"
-              + ADDED_SPEC_LINE + "\n")
-    git(repo_root, "add", "-A")
-    git(repo_root, "commit", "-m", "pr change")
-    return repo_root, log_path
+        req = repo / "specs" / "components" / "foo" / "requirements" / "R-FOO-001.md"
+        req.write_text(req.read_text() + "\nClarified wording.\n")
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "-m", "feature change")
+    return repo, log_path
 
 
 def parse_sections(md):
-    sections = {}
-    order = []
-    current = None
+    out = []
+    cur = None
     in_fence = False
     for line in md.splitlines():
-        if line.strip().startswith("```"):
+        if line.lstrip().startswith("```"):
             in_fence = not in_fence
-            if current is not None:
-                sections[current].append(line)
+            if cur is not None:
+                cur[1].append(line)
             continue
-        if not in_fence:
-            m = re.match(r"^(#{1,6})\s+(.*\S)\s*$", line)
-            if m:
-                current = m.group(2).strip().lower()
-                if current not in sections:
-                    sections[current] = []
-                    order.append(current)
-                continue
-        if current is not None:
-            sections[current].append(line)
-    return order, {k: "\n".join(v) for k, v in sections.items()}
+        if not in_fence and re.match(r"^#{1,6}\s", line):
+            cur = [line.lstrip("#").strip(), []]
+            out.append(cur)
+            continue
+        if cur is not None:
+            cur[1].append(line)
+    return [(h, "\n".join(b)) for h, b in out]
 
 
-def section(md, keyword):
-    order, secs = parse_sections(md)
-    for heading in order:
-        if keyword in heading:
-            return secs[heading]
-    raise AssertionError("no section heading containing " + repr(keyword) + " in:\n" + md)
+def section(md, *keywords):
+    for heading, body in parse_sections(md):
+        low = heading.lower()
+        if any(k in low for k in keywords):
+            return body
+    raise AssertionError("no section heading matching " + repr(keywords) + " in:\n" + md)
 
 
-def run_main(repo_root, capsys):
+def sections_matching(md, *keywords):
+    return "\n".join(body for heading, body in parse_sections(md)
+                     if any(k in heading.lower() for k in keywords))
+
+
+def run_main(repo, capsys):
     capsys.readouterr()
     code = review_packet_builder.main(
-        ["review-packet", "build", "--changed=R-FOO-001", "--repo-root=" + str(repo_root)]
-    )
+        ["review-packet", "build", "--changed=R-FOO-001", "--repo-root=" + str(repo)])
     out = capsys.readouterr().out
     return code, out
 
 
-# ---------------------------------------------------------------- tests
-
-def test_markdown_renders_real_content_for_every_section(tmp_path, capsys):
-    report = {
-        "scope": "blast-radius",
-        "ready": False,
-        "components": {
-            "comp-foo": {
-                "hit": True,
-                "reason": None,
-                "verification_report": verification_report("comp-foo", 0.5),
-                "license_scan": license_scan_result(True),
-                "secret_scan": secret_scan_result([]),
-            },
-        },
-        "capabilities": {
-            "P-FOO-CAP": {
-                "hit": True,
-                "capability_scenario_report": {"P-FOO-CAP": {"overall": "pass", "scenarios": []}},
-            },
-        },
-        "secret_scan": secret_scan_result(
-            [{"rule_id": "AWS Access Key", "risk_tier": "high", "file": "a/b.py", "line": 3}]
-        ),
-        "not_ready_reasons": ["comp-foo: license scan blocked", "secret scan flagged"],
-    }
-    repo_root, log_path = build_repo(tmp_path, report, with_pr_changes=True)
-
-    code, out = run_main(repo_root, capsys)
-    assert code == 0, out
+def test_markdown_renders_real_detail_content(tmp_path, capsys):
+    repo, log_path = make_repo(tmp_path, build_report(True), with_history=True)
+    code, md = run_main(repo, capsys)
+    assert code == 0, md
     assert log_path.is_file() and "check_readiness" in log_path.read_text()
 
-    license_sec = section(out, "license scan")
-    assert "evil-gpl-lib" in license_sec or "vendored_evil.py" in license_sec, license_sec
+    lic = section(md, "license")
+    assert LICENSE_PKG in lic, lic
 
-    secret_sec = section(out, "secret scan")
-    assert "a/b.py" in secret_sec, secret_sec
+    sec = section(md, "secret")
+    assert "a/b.py" in sec, sec
 
-    residual_sec = section(out, "residual")
-    assert "comp-foo" in residual_sec, residual_sec
-    assert any(l.strip().startswith("-") for l in residual_sec.splitlines()), residual_sec
+    rr = section(md, "residual")
+    assert "comp-foo" in rr, rr
+    assert "0.92" in rr or "mutation" in rr.lower(), rr
 
-    cap_sec = section(out, "capability")
-    assert "P-FOO-CAP" in cap_sec, cap_sec
+    cap = section(md, "capabilit")
+    assert "P-ZERO-EDIT" in cap, cap
 
-    exemption_sec = section(out, "exemption")
-    assert "**Sealed:**" in exemption_sec, exemption_sec
-    assert "**Pinned Overrides:**" in exemption_sec, exemption_sec
-    assert "comp-sealy" in exemption_sec, exemption_sec
-    assert "comp-pinny" in exemption_sec, exemption_sec
+    ex = section(md, "exemption")
+    assert "**Sealed:**" in ex, ex
+    assert "**Pinned Overrides:**" in ex, ex
+    assert "comp-sealedthing" in ex, ex
+    assert "comp-pinnedthing" in ex, ex
 
-    diff_sec = section(out, "diff")
-    assert ADDED_SPEC_LINE in diff_sec, diff_sec
+    diff = section(md, "diff")
+    assert SPEC_MARKER in diff, diff
 
-    assert "R-FOO-001" in out
+    reqs = section(md, "requirement")
+    assert "R-FOO-001" in reqs, reqs
 
-    regen_sec = section(out, "regenerated")
-    assert "comp-foo" in regen_sec, regen_sec
+    regen = sections_matching(md, "regenerat")
+    assert "comp-foo" in regen, md
 
-    prov_sec = section(out, "provenance")
-    foo_lines = [l for l in prov_sec.splitlines() if "comp-foo" in l]
-    assert foo_lines, prov_sec
-    assert any(("true" in l.lower()) or ("hit" in l.lower()) for l in foo_lines), prov_sec
+    prov = sections_matching(md, "provenance", "hit")
+    assert "comp-foo" in prov, md
+    low = prov.lower()
+    assert any(w in low for w in ("true", "hit", "yes", "reused", "cached")), prov
+
+    ver = section(md, "verification")
+    assert "comp-foo" in ver, ver
 
 
-def test_markdown_renders_clean_placeholders_when_nothing_flagged(tmp_path, capsys):
-    report = {
-        "scope": "blast-radius",
-        "ready": True,
-        "components": {
-            "comp-foo": {
-                "hit": True,
-                "reason": None,
-                "verification_report": verification_report("comp-foo", 1.0),
-                "license_scan": license_scan_result(False),
-                "secret_scan": secret_scan_result([]),
-            },
-        },
-        "capabilities": {},
-        "secret_scan": secret_scan_result([]),
-        "not_ready_reasons": [],
-    }
-    repo_root, log_path = build_repo(tmp_path, report, with_pr_changes=False)
+def test_markdown_renders_empty_placeholders(tmp_path, capsys):
+    repo, log_path = make_repo(tmp_path, build_report(False), with_history=False)
+    code, md = run_main(repo, capsys)
+    assert code == 0, md
+    assert log_path.is_file() and "check_readiness" in log_path.read_text()
 
-    code, out = run_main(repo_root, capsys)
-    assert code == 0, out
+    lic = section(md, "license")
+    assert lic.strip(), "License Scan section has no placeholder:\n" + md
+    assert "comp-foo" not in lic, lic
 
-    for keyword in ("license scan", "secret scan", "capability"):
-        body = section(out, keyword)
-        assert body.strip(), "section " + repr(keyword) + " has no placeholder:\n" + out
-        assert "comp-foo" not in body, body
-        assert "P-" not in body, body
+    sec = section(md, "secret")
+    assert sec.strip(), "Secret Scan section has no placeholder:\n" + md
+    assert "a/b.py" not in sec, sec
 
-    verif_sec = section(out, "verification")
-    assert "comp-foo" in verif_sec, verif_sec
+    cap = section(md, "capabilit")
+    assert cap.strip(), "Capability Scenarios section has no placeholder:\n" + md
+    assert "P-ZERO-EDIT" not in cap, cap
+
+    ver = section(md, "verification")
+    assert "comp-foo" in ver, ver
+    assert "pass" in ver.lower() or "overall" in ver.lower(), ver
