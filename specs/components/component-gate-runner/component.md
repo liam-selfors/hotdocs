@@ -64,7 +64,5 @@ None.
 
 ## Change log
 
-- `D76`, `D86`–`D93`, `D166`, `D170`, `D314`, `D345`.
-- `D359`: a surface failure writes no provenance; its findings are
-  reported.
-- `D370`: `--reauthor` (`R-GATE-012`).
+`D76`, `D86`–`D93`, `D166`, `D170`, `D314`, `D345`, `D359`, `D370`,
+`D371`.

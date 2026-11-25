@@ -1,5 +1,5 @@
 {
-  "spec_bundle_hash": "sha256:b969dfb5d478aeb1f176a12b7dd483e8bb8219d18c2a4c77bfc6deb58c519bd1",
+  "spec_bundle_hash": "sha256:9c77d46f332225b9ef4b346f70c1db676d10d82ce6df6ac489f4bbaaf77fd94a",
   "model_pin": "claude-opus-5-5",
   "prompt_version": "v12",
   "retry_feedback": null,
@@ -13,7 +13,7 @@
   },
   "attempts": 1,
   "attempt_history": [],
-  "pipeline_version": "v3",
+  "pipeline_version": "v1",
   "gate_versions": {
     "compiler": "criterion-compiler@1.0.0",
     "generated_test": "generated_test@3.0.0",
@@ -23,7 +23,7 @@
     "generator": "generator@3.2.0+v12"
   },
   "provenance_hit": false,
-  "generated_at": "2026-11-24T09:18:30Z",
+  "generated_at": "2026-11-25T07:59:30Z",
   "verification_run_id": "docs-site-renderer-attempt-1",
   "verification_report": {
     "component_id": "comp-docs-site-renderer",
@@ -107,7 +107,7 @@
       "R-DOCS-009": "pass"
     },
     "interface_drift": false,
-    "mutation_score": 0.9349593495934959,
+    "mutation_score": 0.8695652173913043,
     "mutation_error": null,
     "assets": [
       {

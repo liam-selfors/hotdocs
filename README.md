@@ -85,7 +85,7 @@ since trusting a compiled criterion means trusting its compiler.
 `notes/bootstrap-history.md` tells how each component first landed;
 `verification/<slug>/BOOTSTRAP.md` has each one's full account.
 
-Decisions are ADRs in `specs/decisions/`, `D1` through `D370` (`D1`–`D75`
+Decisions are ADRs in `specs/decisions/`, `D1` through `D372` (`D1`–`D75`
 from the 2026-10 baseline reset, the rest recorded as they were made).
 `notes/initial-ideas.md` holds the original brainstorm, with its own
 informal numbering.

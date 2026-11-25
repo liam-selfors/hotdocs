@@ -117,3 +117,4 @@ None.
   `AC-UI-010`, `AC-UI-011`.
 - `D366`: a missing `corpus-graph.json` names `hotdocs corpus-graph
   build` (`R-UI-009`).
+- `D371`: a component's stored secret scan no longer sets its status.

@@ -25,10 +25,12 @@ Each `residual_risk` entry is an object with `component_id` (the
 affected component) and `message` (a human-readable description of
 the non-blocking finding, per `R-PACKET-008`) — never a bare string.
 
-Each `compliance_flags.license_scan`/`secret_scan` entry is a
+Each `compliance_flags.license_scan` entry is a
 `{"component_id", "result"}` pair, included only for a component
-whose own `license_scan.blocked` / `secret_scan.flagged` is `true`
-(`R-PACKET-005`) — the array is `[]`, not omitted, when none are.
+whose own `license_scan.blocked` is `true`; `secret_scan` holds at most
+one entry, `component_id` `null`, for the repository scan
+(`R-PACKET-005`). Each array is `[]`, not omitted, when nothing is
+flagged.
 
 `exemption_changes.sealed`/`pinned_overrides` entries are bare
 component ids (`"comp-foo"`, matching `regenerated_components`'s own

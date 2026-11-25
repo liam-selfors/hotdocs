@@ -1,9 +1,7 @@
-# hotdocs-criterion: sha256:f8d96729b2d0a055628f17db58653de02d801ca3fa539017fbf2b7382bd5852c
-import importlib.util
+# hotdocs-criterion: sha256:5e89313b2d30243296c4f956246e040ca2f4503fa28156ae185d76ee54cb66cc
 import os
 import shutil
 import subprocess
-import sys
 from pathlib import Path
 
 import pytest
@@ -15,258 +13,190 @@ def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def _verification_report(component_id, req_id, ac_id):
-    return {
-        "component_id": component_id,
-        "criteria": [
-            {"id": ac_id, "covers": req_id, "kind": "generated-test", "result": "pass"},
-        ],
-        "requirement_results": {req_id: "pass"},
-        "interface_drift": False,
-        "mutation_score": None,
-        "mutation_error": None,
-        "assets": [
-            {
-                "kind": "python",
-                "path": ".",
-                "definition_sha256": None,
-                "adapter_sha256": "sha256:" + "0" * 64,
-                "versions": {"python": "3.12.4"},
-                "lockfile_sha256": None,
-            }
-        ],
-        "overall": "pass",
-    }
+VERIFICATION_REPORT = {
+    "component_id": "comp-foo",
+    "criteria": [
+        {"id": "AC-FOO-002", "covers": "R-FOO-002", "kind": "compiled", "result": "pass"},
+    ],
+    "requirement_results": {"R-FOO-002": "pass"},
+    "interface_drift": False,
+    "mutation_score": None,
+    "mutation_error": None,
+    "assets": [],
+    "overall": "pass",
+}
+
+LICENSE_SCAN = {
+    "gate_version": "license_scanner@1.0.0",
+    "blocked": False,
+    "findings": [],
+    "notified": False,
+    "notification_delivery_error": None,
+    "cache_hit": False,
+}
+
+SECRET_SCAN = {
+    "scope": "full",
+    "gate_version": "secret_scanner@3.1.0+detect-secrets.1.5.0",
+    "flagged": False,
+    "matches": [],
+    "allowed": [],
+    "unused_allowlist_entries": [],
+    "notified": False,
+    "notification_delivery_error": None,
+    "cache_hit": False,
+}
+
+VERIFY_REPORT = {
+    "scope": "blast-radius",
+    "ready": True,
+    "components": {
+        "comp-foo": {
+            "hit": True,
+            "reason": None,
+            "verification_report": VERIFICATION_REPORT,
+            "license_scan": LICENSE_SCAN,
+            "secret_scan": SECRET_SCAN,
+        }
+    },
+    "capabilities": {},
+    "secret_scan": SECRET_SCAN,
+    "not_ready_reasons": [],
+}
+
+CHANGED_IDS = ["comp-foo", "R-FOO-002", "AC-FOO-002"]
 
 
-def _license_scan(blocked):
-    return {"blocked": blocked, "findings": [] if not blocked else [{"license": "GPL-3.0"}]}
-
-
-def _secret_scan(flagged):
-    return {"flagged": flagged, "findings": []}
-
-
-def _hit(component_id, req_id, ac_id, license_blocked=False, secret_flagged=False):
-    return {
-        "hit": True,
-        "reason": None,
-        "verification_report": _verification_report(component_id, req_id, ac_id),
-        "license_scan": _license_scan(license_blocked),
-        "secret_scan": _secret_scan(secret_flagged),
-    }
-
-
-def _write_component(repo_root, slug, req_id, ac_id):
-    base = repo_root / "specs" / "components" / slug
-    (base / "requirements").mkdir(parents=True, exist_ok=True)
-    (base / "acceptance").mkdir(parents=True, exist_ok=True)
-    (base / "interface").mkdir(parents=True, exist_ok=True)
-    (base / "component.md").write_text(
+def write_corpus(repo_root):
+    comp = repo_root / "specs" / "components" / "foo"
+    (comp / "requirements").mkdir(parents=True)
+    (comp / "acceptance").mkdir(parents=True)
+    (comp / "interface").mkdir(parents=True)
+    (comp / "component.md").write_text(
         "---\n"
-        "id: comp-" + slug + "\n"
-        "title: " + slug.capitalize() + " component\n"
+        "id: comp-foo\n"
+        "title: Foo\n"
         "status: draft\n"
-        "owners: [team-a]\n"
+        "owners: [team-foo]\n"
         "depends_on: []\n"
         "sealed: true\n"
-        "source_path: legacy/" + slug + "/\n"
-        "---\n\n"
-        "# " + slug + "\n\nA fixture component.\n"
+        "source_path: legacy/foo/\n"
+        "---\n\n# Foo\n"
     )
-    (base / "requirements" / (req_id + ".md")).write_text(
-        "**" + req_id + "** — The component MUST do its job.\n"
+    (comp / "requirements" / "R-FOO-002.md").write_text(
+        "**R-FOO-002** - Foo MUST do the thing.\n"
     )
-    (base / "acceptance" / (ac_id + ".md")).write_text(
-        "# " + ac_id + "\n\nCovers: " + req_id + "\nKind: generated-test\n\n"
-        "```gherkin\nGiven a thing\nWhen it runs\nThen it works\n```\n"
+    (comp / "acceptance" / "AC-FOO-002.md").write_text(
+        "# AC-FOO-002\n\nCovers: R-FOO-002\nKind: compiled\n"
     )
-    (base / "interface" / "library.md").write_text(
-        "# Library\n\n```\ndo_job() -> None\n```\n"
-    )
+    (comp / "interface" / "library.md").write_text("# Library\n\nfoo()\n")
 
 
-def _write_fake_tracker(repo_root, report, log_path):
-    path = repo_root / "gen" / "provenance-tracker" / "provenance_tracker.py"
-    path.parent.mkdir(parents=True, exist_ok=True)
-    source = (
-        "REPORT = " + repr(report) + "\n"
-        "LOG_PATH = " + repr(str(log_path)) + "\n"
-        "\n"
+def write_fake_tracker(repo_root, log_path):
+    d = repo_root / "gen" / "provenance-tracker"
+    d.mkdir(parents=True, exist_ok=True)
+    src = (
         "def check_readiness(repo_root, changed_ids=None, model=None, seed=0, llm_backend=None):\n"
-        "    with open(LOG_PATH, 'a') as fh:\n"
-        "        fh.write('check_readiness ' + repr(changed_ids) + '\\n')\n"
-        "    import copy\n"
-        "    return copy.deepcopy(REPORT)\n"
+        "    with open(" + repr(str(log_path)) + ", 'a') as f:\n"
+        "        f.write('check_readiness\\n')\n"
+        "    return " + repr(VERIFY_REPORT) + "\n"
         "\n"
         "def last_requirement_failures(component_id, repo_root):\n"
-        "    with open(LOG_PATH, 'a') as fh:\n"
-        "        fh.write('last_requirement_failures ' + repr(component_id) + '\\n')\n"
         "    return []\n"
     )
-    path.write_text(source)
+    (d / "provenance_tracker.py").write_text(src)
 
 
-def _git_env():
+def git(repo_root, *args):
     env = dict(os.environ)
-    env["GIT_AUTHOR_NAME"] = "fixture"
-    env["GIT_AUTHOR_EMAIL"] = "fixture@example.invalid"
-    env["GIT_COMMITTER_NAME"] = "fixture"
-    env["GIT_COMMITTER_EMAIL"] = "fixture@example.invalid"
-    return env
-
-
-def _git(repo_root, *args):
+    env.update({
+        "GIT_AUTHOR_NAME": "t",
+        "GIT_AUTHOR_EMAIL": "t@example.invalid",
+        "GIT_COMMITTER_NAME": "t",
+        "GIT_COMMITTER_EMAIL": "t@example.invalid",
+    })
     subprocess.run(
-        ["git", *args], cwd=str(repo_root), env=_git_env(), check=True,
-        stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        ["git", "-c", "commit.gpgsign=false", *args],
+        cwd=str(repo_root), check=True, capture_output=True, env=env,
     )
 
 
-def _require_git():
-    if shutil.which("git") is None:
-        pytest.skip("git not available")
+def assert_empty_git_fields(packet):
+    spec_diff = field(packet, "spec_diff")
+    assert not spec_diff
+    ex = field(packet, "exemption_changes")
+    if ex:
+        assert list(field(ex, "sealed")) == []
+        assert list(field(ex, "pinned_overrides")) == []
 
 
-def _isolate_git(monkeypatch, repo_root):
-    # Prevent git from discovering any enclosing repository above repo_root.
-    monkeypatch.setenv("GIT_CEILING_DIRECTORIES", str(repo_root.parent))
-    monkeypatch.delenv("GIT_DIR", raising=False)
-    monkeypatch.delenv("GIT_WORK_TREE", raising=False)
-
-
-def _assert_exemption_changes_empty(exemption_changes):
-    if isinstance(exemption_changes, dict) and not exemption_changes:
-        return
-    assert list(field(exemption_changes, "sealed")) == []
-    assert list(field(exemption_changes, "pinned_overrides")) == []
-
-
-def _read_log(log_path):
-    return log_path.read_text().splitlines() if log_path.exists() else []
-
-
-def test_clean_merge_still_produces_packet(tmp_path, monkeypatch):
-    _require_git()
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    _isolate_git(monkeypatch, repo_root)
-    log_path = tmp_path / "calls.log"
-
-    _write_component(repo_root, "foo", "R-FOO-001", "AC-FOO-001")
-    report = {
-        "scope": "blast-radius",
-        "ready": True,
-        "components": {"comp-foo": _hit("comp-foo", "R-FOO-001", "AC-FOO-001")},
-        "capabilities": {},
-        "not_ready_reasons": [],
-    }
-    _write_fake_tracker(repo_root, report, log_path)
-
-    _git(repo_root, "init", "-q")
-    _git(repo_root, "add", "-A")
-    _git(repo_root, "commit", "-q", "-m", "initial")
-
-    changed = ["comp-foo", "R-FOO-001", "AC-FOO-001"]
-    packet = review_packet_builder.build_review_packet(changed, repo_root)
-
-    assert packet is not None
-    assert any(line.startswith("check_readiness") for line in _read_log(log_path))
-
-    assert list(field(packet, "changed_requirements")) == ["R-FOO-001"]
+def assert_tracker_fields(packet):
+    assert list(field(packet, "changed_requirements")) == ["R-FOO-002"]
     assert list(field(packet, "regenerated_components")) == ["comp-foo"]
+    vr = field(packet, "verification_results")
+    assert set(vr.keys()) == {"comp-foo"}
+    assert vr["comp-foo"] == VERIFICATION_REPORT
     flags = field(packet, "compliance_flags")
     assert list(field(flags, "license_scan")) == []
     assert list(field(flags, "secret_scan")) == []
     assert dict(field(packet, "provenance_hit_status")) == {"comp-foo": True}
-    results = field(packet, "verification_results")
-    assert "comp-foo" in results
-    assert field(results["comp-foo"], "overall") == "pass"
     assert dict(field(packet, "capability_scenarios")) == {}
-    # Remaining fields exist on the packet.
-    field(packet, "spec_diff")
-    field(packet, "exemption_changes")
-    field(packet, "residual_risk")
 
 
-def test_zero_commit_repo_still_produces_packet(tmp_path, monkeypatch):
-    _require_git()
+@pytest.fixture
+def isolate_git(monkeypatch, tmp_path):
+    monkeypatch.setenv("GIT_CEILING_DIRECTORIES", str(tmp_path.parent))
+
+
+def test_clean_merge_still_produces_packet(tmp_path, isolate_git):
+    if shutil.which("git") is None:
+        pytest.skip("git not available")
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
-    _isolate_git(monkeypatch, repo_root)
-    log_path = tmp_path / "calls.log"
+    log_path = tmp_path / "tracker.log"
+    write_corpus(repo_root)
+    write_fake_tracker(repo_root, log_path)
+    git(repo_root, "init", "-q")
+    git(repo_root, "add", "-A")
+    git(repo_root, "commit", "-q", "-m", "init")
 
-    _write_component(repo_root, "foo", "R-FOO-001", "AC-FOO-001")
-    report = {
-        "scope": "blast-radius",
-        "ready": True,
-        "components": {"comp-foo": _hit("comp-foo", "R-FOO-001", "AC-FOO-001")},
-        "capabilities": {},
-        "not_ready_reasons": [],
-    }
-    _write_fake_tracker(repo_root, report, log_path)
-
-    _git(repo_root, "init", "-q")
-
-    changed = ["comp-foo", "R-FOO-001", "AC-FOO-001"]
-    packet = review_packet_builder.build_review_packet(changed, repo_root)
+    packet = review_packet_builder.build_review_packet(list(CHANGED_IDS), repo_root)
 
     assert packet is not None
-    assert not field(packet, "spec_diff")
-    _assert_exemption_changes_empty(field(packet, "exemption_changes"))
-    assert list(field(packet, "regenerated_components")) == ["comp-foo"]
-    assert dict(field(packet, "provenance_hit_status")) == {"comp-foo": True}
+    assert log_path.is_file() and log_path.read_text().strip()
+    assert_tracker_fields(packet)
+    rr = field(packet, "residual_risk")
+    assert isinstance(list(rr), list)
 
 
-def test_non_git_repo_root_still_produces_full_packet(tmp_path, monkeypatch):
+def test_zero_commit_repo_produces_packet_with_empty_git_fields(tmp_path, isolate_git):
+    if shutil.which("git") is None:
+        pytest.skip("git not available")
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
-    _isolate_git(monkeypatch, repo_root)
-    log_path = tmp_path / "calls.log"
+    log_path = tmp_path / "tracker.log"
+    write_corpus(repo_root)
+    write_fake_tracker(repo_root, log_path)
+    git(repo_root, "init", "-q")
+
+    packet = review_packet_builder.build_review_packet(list(CHANGED_IDS), repo_root)
+
+    assert packet is not None
+    assert_empty_git_fields(packet)
+    assert_tracker_fields(packet)
+
+
+def test_non_git_repo_produces_packet_with_tracker_fields(tmp_path, isolate_git):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    log_path = tmp_path / "tracker.log"
+    write_corpus(repo_root)
+    write_fake_tracker(repo_root, log_path)
     assert not (repo_root / ".git").exists()
 
-    _write_component(repo_root, "foo", "R-FOO-001", "AC-FOO-001")
-    _write_component(repo_root, "bar", "R-BAR-001", "AC-BAR-001")
-
-    foo_result = _hit("comp-foo", "R-FOO-001", "AC-FOO-001")
-    bar_result = _hit("comp-bar", "R-BAR-001", "AC-BAR-001", license_blocked=True)
-    report = {
-        "scope": "blast-radius",
-        "ready": False,
-        "components": {"comp-foo": foo_result, "comp-bar": bar_result},
-        "capabilities": {},
-        "not_ready_reasons": ["comp-bar: license scan blocked"],
-    }
-    _write_fake_tracker(repo_root, report, log_path)
-
-    changed = [
-        "comp-foo", "R-FOO-001", "AC-FOO-001",
-        "comp-bar", "R-BAR-001", "AC-BAR-001",
-    ]
-    packet = review_packet_builder.build_review_packet(changed, repo_root)
+    packet = review_packet_builder.build_review_packet(list(CHANGED_IDS), repo_root)
 
     assert packet is not None
-    assert any(line.startswith("check_readiness") for line in _read_log(log_path))
-
-    assert not field(packet, "spec_diff")
-    _assert_exemption_changes_empty(field(packet, "exemption_changes"))
-
-    assert sorted(field(packet, "changed_requirements")) == ["R-BAR-001", "R-FOO-001"]
-    assert sorted(field(packet, "regenerated_components")) == ["comp-bar", "comp-foo"]
-
-    results = field(packet, "verification_results")
-    assert results["comp-foo"] == foo_result["verification_report"]
-    assert results["comp-bar"] == bar_result["verification_report"]
-
-    flags = field(packet, "compliance_flags")
-    license_entries = list(field(flags, "license_scan"))
-    assert len(license_entries) == 1
-    assert field(license_entries[0], "component_id") == "comp-bar"
-    assert field(license_entries[0], "result") == bar_result["license_scan"]
-    assert list(field(flags, "secret_scan")) == []
-
-    assert dict(field(packet, "provenance_hit_status")) == {
-        "comp-foo": True,
-        "comp-bar": True,
-    }
-    assert dict(field(packet, "capability_scenarios")) == {}
+    assert log_path.is_file() and log_path.read_text().strip()
+    assert_tracker_fields(packet)
+    assert_empty_git_fields(packet)

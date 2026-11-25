@@ -1,49 +1,63 @@
-"""CLI for `hotdocs docs-site build`."""
+"""``hotdocs docs-site build`` command line."""
+from __future__ import annotations
 
 import json
 import sys
 from pathlib import Path
 
+from . import render_docs_site
+
 USAGE = "usage: hotdocs docs-site build [--repo-root=<dir>] [--out=<dir>]"
+_FLAGS = ("--repo-root", "--out")
 
 
-def _usage_error(cause):
-    print("usage error: " + cause, file=sys.stderr)
+def _usage_error(cause: str) -> int:
+    print(f"usage error: {cause}", file=sys.stderr)
     print(USAGE, file=sys.stderr)
     return 2
 
 
-def main(argv: "list[str] | None" = None) -> int:
-    from . import render_docs_site
-
+def main(argv: list[str] | None = None) -> int:
     if argv is None:
         argv = sys.argv[1:]
-    options = {"--repo-root": ".", "--out": None}
-    index = 0
-    while index < len(argv):
-        token = argv[index]
-        name, eq, value = token.partition("=")
-        if name not in options:
-            return _usage_error("unknown argument " + token)
-        if not eq:
-            if index + 1 >= len(argv):
-                return _usage_error(name + " requires a value")
-            index += 1
-            value = argv[index]
-        options[name] = value
-        index += 1
+    tokens = list(argv)
+    values: dict[str, str] = {}
+    i = 0
+    while i < len(tokens):
+        token = tokens[i]
+        name, sep, value = token.partition("=")
+        if name not in _FLAGS:
+            return _usage_error(f"unknown argument {token}")
+        if not sep:
+            if i + 1 >= len(tokens):
+                return _usage_error(f"{name} needs a value")
+            i += 1
+            value = tokens[i]
+        values[name] = value
+        i += 1
 
-    repo_root = Path(options["--repo-root"])
-    out_dir = Path(options["--out"]) if options["--out"] is not None else repo_root / "dist" / "docs-site"
+    repo_root = Path(values.get("--repo-root", "."))
+    if "--out" in values:
+        out_dir = Path(values["--out"])
+    else:
+        out_dir = repo_root / "dist" / "docs-site"
+
     path = repo_root / "verification" / "corpus-graph.json"
-    if not path.is_file():
-        print("error: " + str(path) + " is missing; run hotdocs corpus-graph build first", file=sys.stderr)
+    try:
+        data = path.read_bytes()
+    except FileNotFoundError:
+        print(
+            f"error: {path} is missing; run hotdocs corpus-graph build first",
+            file=sys.stderr,
+        )
         return 1
     try:
-        graph = json.loads(path.read_text(encoding="utf-8"))
-    except ValueError:
-        print("error: " + str(path) + " is not valid JSON", file=sys.stderr)
+        graph = json.loads(data)
+    except ValueError as exc:
+        message = str(exc).replace("\n", " ")
+        print(f"error: {path} is not valid JSON: {message}", file=sys.stderr)
         return 1
+
     render_docs_site(graph, out_dir)
-    print(out_dir)
+    print(str(out_dir))
     return 0

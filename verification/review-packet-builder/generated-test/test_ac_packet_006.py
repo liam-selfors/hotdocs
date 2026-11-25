@@ -1,19 +1,8 @@
-# hotdocs-criterion: sha256:6970d0cfbaee407fabb74aff63d50d88bb67b6cc54c41019eae250cf25fcf03d
-import importlib.util
-import os
+# hotdocs-criterion: sha256:a1c58b44854d9adb2a7689187f21851eacdd900fa67c0172051c208227928878
 import subprocess
-import sys
 from pathlib import Path
 
 import review_packet_builder
-
-
-def load_module(path, module_name):
-    spec = importlib.util.spec_from_file_location(module_name, path)
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[module_name] = module
-    spec.loader.exec_module(module)
-    return module
 
 
 def field(value, name):
@@ -25,119 +14,123 @@ def _write(path, text):
     path.write_text(text, encoding="utf-8")
 
 
+def _git(repo_root, *args):
+    subprocess.run(
+        ["git", *args],
+        cwd=str(repo_root),
+        check=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+
+
+def _component(repo_root, slug, upper):
+    base = repo_root / "specs" / "components" / slug
+    _write(
+        base / "component.md",
+        "---\n"
+        "id: comp-" + slug + "\n"
+        "title: " + slug.capitalize() + " component\n"
+        "status: draft\n"
+        "owners: [test-team]\n"
+        "depends_on: []\n"
+        "sealed: true\n"
+        "source_path: legacy/" + slug + "/\n"
+        "---\n\n"
+        "# " + slug + "\n\nA fixture component.\n",
+    )
+    _write(
+        base / "requirements" / ("R-" + upper + "-001.md"),
+        "**R-" + upper + "-001** — The " + slug + " component MUST do its job.\n",
+    )
+    _write(
+        base / "acceptance" / ("AC-" + upper + "-001.md"),
+        "# AC-" + upper + "-001\n\n"
+        "Covers: R-" + upper + "-001\n"
+        "Kind: llm-judge\n\n"
+        "```gherkin\n"
+        "Given the " + slug + " component\n"
+        "When it runs\n"
+        "Then it does its job\n"
+        "```\n",
+    )
+    _write(base / "constraints.md", "# Constraints\n\nNone.\n")
+
+
 def _verification_report(component_id, req_id, ac_id):
     return {
         "component_id": component_id,
         "criteria": [
-            {"id": ac_id, "covers": req_id, "kind": "compiled", "result": "pass"},
+            {"id": ac_id, "covers": req_id, "kind": "llm-judge", "result": "pass", "rationale": "ok"}
         ],
         "requirement_results": {req_id: "pass"},
         "interface_drift": False,
         "mutation_score": None,
         "mutation_error": None,
-        "assets": [
-            {
-                "kind": "python",
-                "path": ".",
-                "definition_sha256": None,
-                "adapter_sha256": "sha256:" + "0" * 64,
-                "versions": {"python": "3.12.4"},
-                "lockfile_sha256": None,
-            }
-        ],
+        "assets": [],
         "overall": "pass",
     }
 
 
-def _build_component(repo_root, slug, upper):
-    comp_id = "comp-" + slug
-    req_id = "R-" + upper + "-001"
-    ac_id = "AC-" + upper + "-001"
-    base = repo_root / "specs" / "components" / slug
-    _write(
-        base / "component.md",
-        "---\n"
-        "id: " + comp_id + "\n"
-        "title: " + upper.capitalize() + " fixture component\n"
-        "status: draft\n"
-        "owners: [pipeline-team]\n"
-        "depends_on: []\n"
-        "sealed: true\n"
-        "source_path: legacy/" + slug + "/\n"
-        "---\n"
-        "\n"
-        "# " + comp_id + "\n"
-        "\n"
-        "A fixture component.\n",
-    )
-    _write(
-        base / "requirements" / (req_id + ".md"),
-        "# " + req_id + "\n\n**" + req_id + "** — The component MUST work.\n",
-    )
-    _write(
-        base / "acceptance" / (ac_id + ".md"),
-        "# " + ac_id + "\n\nCovers: " + req_id + "\nKind: compiled\n\n"
-        "```gherkin\nGiven a thing\nWhen it runs\nThen it works\n```\n",
-    )
-    _write(base / "constraints.md", "# Constraints\n\nNone.\n")
-    _write(repo_root / "legacy" / slug / "__init__.py", "")
-    return comp_id, req_id, ac_id
+def _secret_scan():
+    return {
+        "scope": "full",
+        "gate_version": "secret_scanner@3.1.0+detect-secrets.1.5.0",
+        "flagged": False,
+        "matches": [],
+        "allowed": [],
+        "unused_allowlist_entries": [],
+        "notified": False,
+        "notification_delivery_error": None,
+        "cache_hit": False,
+    }
 
 
-def _git(repo_root, *args):
-    env = dict(os.environ)
-    env.update(
-        {
-            "GIT_AUTHOR_NAME": "Test",
-            "GIT_AUTHOR_EMAIL": "test@example.invalid",
-            "GIT_COMMITTER_NAME": "Test",
-            "GIT_COMMITTER_EMAIL": "test@example.invalid",
-        }
-    )
-    subprocess.run(
-        ["git", "-c", "commit.gpgsign=false", *args],
-        cwd=str(repo_root),
-        check=True,
-        capture_output=True,
-        env=env,
-    )
+def _license_scan():
+    return {"blocked": False, "matches": []}
 
 
-def test_provenance_hit_status_reflects_each_component(tmp_path):
+def test_ac_packet_006_provenance_hit_status_per_component(tmp_path):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
+    log_path = tmp_path / "tracker_calls.log"
 
-    foo_id, foo_req, foo_ac = _build_component(repo_root, "foo", "FOO")
-    bar_id, bar_req, bar_ac = _build_component(repo_root, "bar", "BAR")
+    _component(repo_root, "alpha", "ALPHA")
+    _component(repo_root, "beta", "BETA")
 
-    hit_result = {
-        "hit": True,
-        "reason": None,
-        "verification_report": _verification_report(foo_id, foo_req, foo_ac),
-        "license_scan": {"blocked": False, "findings": []},
-        "secret_scan": {"flagged": False, "findings": []},
-    }
-    miss_result = {
-        "hit": False,
-        "reason": "spec_bundle_hash differs",
-        "verification_report": None,
-        "license_scan": None,
-        "secret_scan": None,
-    }
+    _git(repo_root, "init", "-q")
+    _git(repo_root, "config", "user.email", "test@example.invalid")
+    _git(repo_root, "config", "user.name", "Test")
+    _git(repo_root, "add", "-A")
+    _git(repo_root, "commit", "-q", "-m", "initial")
+
     report = {
         "scope": "blast-radius",
         "ready": False,
-        "components": {foo_id: hit_result, bar_id: miss_result},
+        "components": {
+            "comp-alpha": {
+                "hit": True,
+                "reason": None,
+                "verification_report": _verification_report("comp-alpha", "R-ALPHA-001", "AC-ALPHA-001"),
+                "license_scan": _license_scan(),
+                "secret_scan": _secret_scan(),
+            },
+            "comp-beta": {
+                "hit": False,
+                "reason": "no manifest",
+                "verification_report": None,
+                "license_scan": None,
+                "secret_scan": None,
+            },
+        },
         "capabilities": {},
+        "secret_scan": _secret_scan(),
         "not_ready_reasons": [
-            bar_id + ": no provenance for current spec state — run hotdocs generate " + bar_id
+            "comp-beta: no provenance for current spec state — run hotdocs generate comp-beta"
         ],
     }
 
-    log_path = tmp_path / "tracker_calls.log"
     tracker_src = (
-        "import copy\n"
-        "\n"
         "REPORT = " + repr(report) + "\n"
         "LOG_PATH = " + repr(str(log_path)) + "\n"
         "\n"
@@ -145,31 +138,22 @@ def test_provenance_hit_status_reflects_each_component(tmp_path):
         "def check_readiness(repo_root, changed_ids=None, model=None, seed=0, llm_backend=None):\n"
         "    with open(LOG_PATH, 'a', encoding='utf-8') as fh:\n"
         "        fh.write('check_readiness\\n')\n"
-        "    result = copy.deepcopy(REPORT)\n"
-        "    result['scope'] = 'blast-radius' if changed_ids is not None else 'whole-corpus'\n"
-        "    return result\n"
+        "    return REPORT\n"
         "\n"
         "\n"
         "def last_requirement_failures(component_id, repo_root):\n"
         "    return []\n"
     )
-    _write(
-        repo_root / "gen" / "provenance-tracker" / "provenance_tracker.py",
-        tracker_src,
-    )
+    _write(repo_root / "gen" / "provenance-tracker" / "provenance_tracker.py", tracker_src)
 
-    _git(repo_root, "init", "-q")
-    _git(repo_root, "add", "-A")
-    _git(repo_root, "commit", "-q", "-m", "fixture")
-
-    changed_ids = [foo_id, bar_id, foo_req, bar_req]
+    changed_ids = ["comp-alpha", "comp-beta", "R-ALPHA-001", "R-BETA-001"]
     packet = review_packet_builder.build_review_packet(changed_ids, repo_root)
 
     assert log_path.is_file(), "provenance-tracker stand-in was never called"
-    assert "check_readiness" in log_path.read_text(encoding="utf-8").splitlines()
+    assert "check_readiness" in log_path.read_text(encoding="utf-8")
 
     status = field(packet, "provenance_hit_status")
-    assert foo_id in status, "provenance hit status missing for " + foo_id
-    assert bar_id in status, "provenance hit status missing for " + bar_id
-    assert status[foo_id] is True
-    assert status[bar_id] is False
+    assert "comp-alpha" in status, "hit component's status must be shown explicitly"
+    assert "comp-beta" in status, "miss component's status must be shown explicitly, not inferred"
+    assert status["comp-alpha"] is True
+    assert status["comp-beta"] is False

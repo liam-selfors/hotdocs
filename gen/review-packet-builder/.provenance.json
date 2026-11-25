@@ -1,5 +1,5 @@
 {
-  "spec_bundle_hash": "sha256:742e055c2f581a89dd96eabf5655b3136bba9e03f453cdb7382f11584b2cbbaa",
+  "spec_bundle_hash": "sha256:48c9b48a81d9a22d3b55beb066d9524fbcd89681010e4a07135f53e9a751bfd0",
   "model_pin": "claude-opus-5-5",
   "prompt_version": "v12",
   "retry_feedback": null,
@@ -13,7 +13,7 @@
   },
   "attempts": 1,
   "attempt_history": [],
-  "pipeline_version": "v3",
+  "pipeline_version": "v1",
   "gate_versions": {
     "compiler": "criterion-compiler@1.0.0",
     "generated_test": "generated_test@3.0.0",
@@ -23,7 +23,7 @@
     "generator": "generator@3.2.0+v12"
   },
   "provenance_hit": false,
-  "generated_at": "2026-11-24T09:26:19Z",
+  "generated_at": "2026-11-25T08:15:32Z",
   "verification_run_id": "review-packet-builder-attempt-1",
   "verification_report": {
     "component_id": "comp-review-packet-builder",
@@ -68,7 +68,13 @@
         "id": "AC-PACKET-007",
         "covers": "R-PACKET-007",
         "kind": "generated-test",
-        "result": "pass"
+        "result": "pass",
+        "test_authoring": {
+          "model": "claude-opus-5-5",
+          "seed": 2,
+          "prompt_version": "v1",
+          "cache_hit": false
+        }
       },
       {
         "id": "AC-PACKET-008",
@@ -110,7 +116,13 @@
         "id": "AC-PACKET-014",
         "covers": "R-PACKET-012",
         "kind": "generated-test",
-        "result": "pass"
+        "result": "pass",
+        "test_authoring": {
+          "model": "claude-opus-5-5",
+          "seed": 2,
+          "prompt_version": "v1",
+          "cache_hit": false
+        }
       }
     ],
     "requirement_results": {
@@ -129,7 +141,7 @@
       "R-PACKET-013": "pass"
     },
     "interface_drift": false,
-    "mutation_score": 0.9473684210526315,
+    "mutation_score": 0.9622641509433962,
     "mutation_error": null,
     "assets": [
       {
@@ -168,7 +180,7 @@
       {
         "rule_id": "Hex High Entropy String",
         "file": "gen/review-packet-builder/review_packet_builder.py",
-        "line": 10
+        "line": 12
       },
       {
         "rule_id": "AWS Access Key",

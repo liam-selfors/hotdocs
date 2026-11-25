@@ -34,10 +34,11 @@
   `specs/product/<name>.md`, has no `realizes` field to read back.
 
   `VerifyReport.ready` MUST be `true` if and only if every component in
-  scope is ready (`R-TRACK-009`, a sealed one by its sealed manifest)
-  **and** every intersecting capability comes back passing — a single
-  failing component or capability makes `ready` false, with that item
-  named in the report.
+  scope is ready (`R-TRACK-009`, a sealed one by its sealed manifest),
+  every intersecting capability comes back passing, **and** the
+  repository secret scan (`R-TRACK-016`) is neither flagged nor failed —
+  a single failing item makes `ready` false, with that item named in
+  the report.
 
   **`capability-scenario-verifier` MUST be loaded lazily, only when at
   least one capability's `realizes`-set intersects the resolved scope**

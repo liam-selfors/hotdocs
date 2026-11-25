@@ -1,5 +1,5 @@
 {
-  "spec_bundle_hash": "sha256:fb89350467bfbbd2cb5a4dd2891527c849f0914d09b794b90598bc2d1eb349d4",
+  "spec_bundle_hash": "sha256:ca097f019449c520aa605ea279ed89b6c9c7f071d83b8e8f24a666d6add4cdcd",
   "model_pin": "claude-opus-5-5",
   "prompt_version": "v12",
   "retry_feedback": null,
@@ -13,7 +13,7 @@
   },
   "attempts": 1,
   "attempt_history": [],
-  "pipeline_version": "v3",
+  "pipeline_version": "v1",
   "gate_versions": {
     "compiler": "criterion-compiler@1.0.0",
     "generated_test": "generated_test@3.0.0",
@@ -23,7 +23,7 @@
     "generator": "generator@3.2.0+v12"
   },
   "provenance_hit": false,
-  "generated_at": "2026-11-24T08:51:33Z",
+  "generated_at": "2026-11-25T07:50:31Z",
   "verification_run_id": "provenance-tracker-attempt-1",
   "verification_report": {
     "component_id": "comp-provenance-tracker",
@@ -87,6 +87,12 @@
         "covers": "R-TRACK-007",
         "kind": "generated-test",
         "result": "pass"
+      },
+      {
+        "id": "AC-TRACK-016",
+        "covers": "R-TRACK-016",
+        "kind": "generated-test",
+        "result": "pass"
       }
     ],
     "requirement_results": {
@@ -96,10 +102,11 @@
       "R-TRACK-009": "pass",
       "R-TRACK-010": "pass",
       "R-TRACK-011": "pass",
-      "R-TRACK-012": "pass"
+      "R-TRACK-012": "pass",
+      "R-TRACK-016": "pass"
     },
     "interface_drift": false,
-    "mutation_score": 0.8289473684210527,
+    "mutation_score": 0.8,
     "mutation_error": null,
     "assets": [
       {
@@ -219,11 +226,6 @@
         "rule_id": "AWS Access Key",
         "file": "specs/components/secret-scanner/acceptance/AC-SECRET-018.md",
         "line": 7
-      },
-      {
-        "rule_id": "Hex High Entropy String",
-        "file": "verification/provenance-tracker/generated-test/test_ac_track_013.py",
-        "line": 9
       }
     ],
     "unused_allowlist_entries": [
@@ -249,6 +251,10 @@
       },
       {
         "file": "verification/provenance-checker/generated-test/test_ac_provcheck_004.py",
+        "type": "Hex High Entropy String"
+      },
+      {
+        "file": "verification/provenance-tracker/generated-test/test_ac_track_013.py",
         "type": "Hex High Entropy String"
       },
       {

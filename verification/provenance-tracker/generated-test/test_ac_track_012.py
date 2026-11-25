@@ -1,5 +1,13 @@
-# hotdocs-criterion: sha256:d780daaceff4d1d86553ac95e9bf82f091447ca397da7f749f00480e127bd6cc
-import json
+# hotdocs-criterion: sha256:b0c7d2d9eaa3a2d8734077c9e893549b7f3b19c09cd60945dc0fbdcbb3c378c2
+"""AC-TRACK-012: check_readiness reads dict-shaped dependency results.
+
+Given a dict-shaped (never object-shaped) fake provenance-checker result and
+a dict-shaped fake impact-analyzer impacted entry, check_readiness reads
+hit/component_id/etc. correctly from the dict shape and does not raise
+AttributeError.
+"""
+
+import copy
 from pathlib import Path
 
 import pytest
@@ -7,17 +15,133 @@ import pytest
 import provenance_tracker
 
 
+LOG_ENV = "HOTDOCS_AC_TRACK_012_LOG"
+
+COMPONENT_ID = "comp-foo"
+
+
 def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def _write(path, text):
+def has_field(value, name):
+    if isinstance(value, dict):
+        return name in value
+    return hasattr(value, name)
+
+
+GATE_VERSIONS = {
+    "compiler": "criterion-compiler@1.0.0",
+    "generated_test": "generated_test@1.0.0",
+    "verifier": "verifier-orchestrator@2.0.0",
+    "license_scanner": "license_scanner@4.0.3+abc",
+    "secret_scanner": "secret_scanner@0.0.0",
+    "generator": "generator@3.0.0+v11",
+}
+
+ASSETS = [
+    {
+        "kind": "python",
+        "path": ".",
+        "definition_sha256": None,
+        "adapter_sha256": "sha256:00",
+        "versions": {"python": "3.12.4"},
+        "lockfile_sha256": None,
+    }
+]
+
+VERIFICATION_REPORT = {
+    "component_id": COMPONENT_ID,
+    "criteria": [
+        {"id": "AC-FOO-001", "covers": "R-FOO-001", "kind": "compiled", "result": "pass"}
+    ],
+    "requirement_results": {"R-FOO-001": "pass"},
+    "interface_drift": False,
+    "mutation_score": 0.9,
+    "mutation_error": None,
+    "assets": copy.deepcopy(ASSETS),
+    "overall": "pass",
+}
+
+LICENSE_SCAN = {
+    "component_id": COMPONENT_ID,
+    "gate_version": "license_scanner@4.0.3+abc",
+    "evaluated": True,
+    "reason": None,
+    "similarity_score": 0.1,
+    "block_threshold": 0.7,
+    "blocked": False,
+    "matches": [],
+    "notified": False,
+    "notification_delivery_error": None,
+    "cache_hit": False,
+}
+
+STORED_SECRET_SCAN = {
+    "scope": "full",
+    "gate_version": "secret_scanner@0.0.0",
+    "flagged": False,
+    "matches": [],
+    "allowed": [],
+    "unused_allowlist_entries": [],
+    "notified": False,
+    "notification_delivery_error": None,
+    "cache_hit": False,
+}
+
+HIT_RESULT = {
+    "hit": True,
+    "reason": None,
+    "verification_report": VERIFICATION_REPORT,
+    "license_scan": LICENSE_SCAN,
+    "secret_scan": STORED_SECRET_SCAN,
+}
+
+MISS_RESULT = {
+    "hit": False,
+    "reason": "no manifest",
+    "verification_report": None,
+    "license_scan": None,
+    "secret_scan": None,
+}
+
+NOT_SEALED_RESULT = {
+    "hit": False,
+    "sealed": False,
+    "reason": "not_sealed",
+    "verification_report": None,
+    "license_scan": None,
+    "secret_scan": None,
+    "owners": None,
+    "source_hash": None,
+    "written_at": None,
+}
+
+BLAST_RADIUS = {
+    "impacted": [
+        {"component_id": COMPONENT_ID, "reason": "direct", "via": None}
+    ],
+    "precondition_error": None,
+}
+
+LOG_HELPER = (
+    "import os\n"
+    "\n"
+    "def _log(line):\n"
+    "    with open(os.environ[" + repr(LOG_ENV) + "], 'a') as f:\n"
+    "        f.write(line + '\\n')\n"
+    "\n"
+)
+
+
+def write(path, text):
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text, encoding="utf-8")
+    path.write_text(text)
 
 
-def _build_fixture(repo_root):
-    _write(
+def build_fixture(repo_root, check_result):
+    # Minimal spec corpus for the one component.
+    write(
         repo_root / "specs" / "components" / "foo" / "component.md",
         "---\n"
         "id: comp-foo\n"
@@ -31,87 +155,39 @@ def _build_fixture(repo_root):
         "\n"
         "# Foo\n"
         "\n"
+        "## Purpose\n"
+        "\n"
         "A fixture component.\n",
     )
-    _write(
+    write(
         repo_root / "specs" / "components" / "foo" / "requirements" / "R-FOO-001.md",
-        "# R-FOO-001\n\n**R-FOO-001** — Foo MUST work.\n",
+        "# R-FOO-001\n\n**R-FOO-001** — Foo MUST do one thing.\n",
     )
-    _write(
+    write(
         repo_root / "specs" / "components" / "foo" / "acceptance" / "AC-FOO-001.md",
-        "# AC-FOO-001\n\nCovers: R-FOO-001\nKind: generated-test\n",
+        "# AC-FOO-001\n\nCovers: R-FOO-001\nKind: llm-judge\n\nFoo does one thing.\n",
+    )
+    write(
+        repo_root / "specs" / "components" / "foo" / "constraints.md",
+        "# Constraints\n\nNone.\n",
     )
 
-
-def _write_fakes(repo_root, log_path, hit):
-    if hit:
-        result_src = (
-            "    return {\n"
-            "        'hit': True,\n"
-            "        'reason': None,\n"
-            "        'verification_report': {\n"
-            "            'component_id': component_id,\n"
-            "            'criteria': [{'id': 'AC-FOO-001', 'covers': 'R-FOO-001', 'kind': 'generated-test', 'result': 'pass'}],\n"
-            "            'requirement_results': {'R-FOO-001': 'pass'},\n"
-            "            'interface_drift': False,\n"
-            "            'mutation_score': 0.9,\n"
-            "            'mutation_error': None,\n"
-            "            'assets': [{'kind': 'python', 'path': '.', 'definition_sha256': None,\n"
-            "                        'adapter_sha256': 'sha256:00', 'versions': {'python': '3.12.4'},\n"
-            "                        'lockfile_sha256': None}],\n"
-            "            'overall': 'pass',\n"
-            "        },\n"
-            "        'license_scan': {\n"
-            "            'component_id': component_id,\n"
-            "            'gate_version': 'license_scanner@4.0.3+9f2c41ab07de',\n"
-            "            'evaluated': True,\n"
-            "            'reason': None,\n"
-            "            'similarity_score': 0.1,\n"
-            "            'block_threshold': 0.7,\n"
-            "            'blocked': False,\n"
-            "            'matches': [],\n"
-            "            'notified': False,\n"
-            "            'notification_delivery_error': None,\n"
-            "            'cache_hit': False,\n"
-            "        },\n"
-            "        'secret_scan': {\n"
-            "            'scope': 'full',\n"
-            "            'gate_version': 'secret_scanner@3.1.0',\n"
-            "            'flagged': False,\n"
-            "            'matches': [],\n"
-            "            'allowed': [],\n"
-            "            'unused_allowlist_entries': [],\n"
-            "            'notified': False,\n"
-            "            'notification_delivery_error': None,\n"
-            "            'cache_hit': False,\n"
-            "        },\n"
-            "    }\n"
-        )
-    else:
-        result_src = (
-            "    return {\n"
-            "        'hit': False,\n"
-            "        'reason': 'no manifest',\n"
-            "        'verification_report': None,\n"
-            "        'license_scan': None,\n"
-            "        'secret_scan': None,\n"
-            "    }\n"
-        )
-
-    checker_src = (
-        "LOG = " + repr(str(log_path)) + "\n"
+    # Fake provenance-checker: every result is dict-shaped except the
+    # ProvenanceKey, which is documented as an attribute object.
+    write(
+        repo_root / "gen" / "provenance-checker" / "provenance_checker.py",
+        "import copy\n"
+        + LOG_HELPER
+        + "GATE_VERSIONS = " + repr(GATE_VERSIONS) + "\n"
+        "ASSETS = " + repr(ASSETS) + "\n"
+        "CHECK_RESULT = " + repr(check_result) + "\n"
+        "NOT_SEALED = " + repr(NOT_SEALED_RESULT) + "\n"
         "\n"
-        "def _log(line):\n"
-        "    with open(LOG, 'a', encoding='utf-8') as fh:\n"
-        "        fh.write(line + '\\n')\n"
-        "\n"
-        "class _Key:\n"
+        "class ProvenanceKey:\n"
         "    def __init__(self, spec_bundle_hash, gate_versions, assets):\n"
         "        self.spec_bundle_hash = spec_bundle_hash\n"
         "        self.gate_versions = gate_versions\n"
         "        self.assets = assets\n"
-        "    def __getitem__(self, name):\n"
-        "        return getattr(self, name)\n"
         "\n"
         "def current_sealed_key(component_id, repo_root):\n"
         "    _log('current_sealed_key ' + str(component_id))\n"
@@ -119,53 +195,35 @@ def _write_fakes(repo_root, log_path, hit):
         "\n"
         "def current_provenance_key(component_id, repo_root):\n"
         "    _log('current_provenance_key ' + str(component_id))\n"
-        "    return _Key(\n"
-        "        'sha256:abc123',\n"
-        "        {\n"
-        "            'compiler': 'criterion-compiler@1.0.0',\n"
-        "            'generated_test': 'generated_test@1.0.0',\n"
-        "            'verifier': 'verifier-orchestrator@2.0.0',\n"
-        "            'license_scanner': 'license_scanner@4.0.3+9f2c41ab07de',\n"
-        "            'secret_scanner': 'secret_scanner@0.0.0',\n"
-        "            'generator': 'generator@3.0.0+v11',\n"
-        "        },\n"
-        "        [{'kind': 'python', 'path': '.', 'definition_sha256': None,\n"
-        "          'adapter_sha256': 'sha256:00', 'versions': {'python': '3.12.4'},\n"
-        "          'lockfile_sha256': None}],\n"
-        "    )\n"
+        "    return ProvenanceKey('sha256:ab', dict(GATE_VERSIONS), copy.deepcopy(ASSETS))\n"
         "\n"
         "def check_provenance(component_id, spec_bundle_hash, gate_versions, repo_root):\n"
         "    _log('check_provenance ' + str(component_id))\n"
-        + result_src
-        + "\n"
+        "    return copy.deepcopy(CHECK_RESULT)\n"
+        "\n"
         "def check_sealed_provenance(component_id, repo_root):\n"
         "    _log('check_sealed_provenance ' + str(component_id))\n"
-        "    return {\n"
-        "        'hit': False, 'sealed': False, 'reason': 'not_sealed',\n"
-        "        'verification_report': None, 'license_scan': None, 'secret_scan': None,\n"
-        "        'owners': None, 'source_hash': None, 'written_at': None,\n"
-        "    }\n"
+        "    return copy.deepcopy(NOT_SEALED)\n",
     )
-    _write(repo_root / "gen" / "provenance-checker" / "provenance_checker.py", checker_src)
 
-    impact_src = (
-        "LOG = " + repr(str(log_path)) + "\n"
+    # Fake impact-analyzer: dict-shaped report and dict-shaped impacted entry.
+    write(
+        repo_root / "gen" / "impact-analyzer" / "impact_analyzer.py",
+        "import copy\n"
+        + LOG_HELPER
+        + "REPORT = " + repr(BLAST_RADIUS) + "\n"
         "\n"
         "def compute_blast_radius(changed_ids, repo_root):\n"
-        "    with open(LOG, 'a', encoding='utf-8') as fh:\n"
-        "        fh.write('compute_blast_radius ' + ','.join(changed_ids) + '\\n')\n"
-        "    return {\n"
-        "        'impacted': [\n"
-        "            {'component_id': 'comp-foo', 'reason': 'direct', 'via': None},\n"
-        "        ],\n"
-        "        'precondition_error': None,\n"
-        "    }\n"
+        "    _log('compute_blast_radius ' + ','.join(str(c) for c in changed_ids))\n"
+        "    return copy.deepcopy(REPORT)\n",
     )
-    _write(repo_root / "gen" / "impact-analyzer" / "impact_analyzer.py", impact_src)
 
-    csv_src = (
-        "LOG = " + repr(str(log_path)) + "\n"
-        "GATE_VERSION = 'capability_scenario_verifier@2.2.0'\n"
+    # Fake capability-scenario-verifier (dict-shaped hits), in case any
+    # capability is consulted.
+    write(
+        repo_root / "gen" / "capability-scenario-verifier" / "capability_scenario_verifier.py",
+        LOG_HELPER
+        + "GATE_VERSION = 'capability_scenario_verifier@2.2.0'\n"
         "\n"
         "class UnknownCapabilityError(ValueError):\n"
         "    pass\n"
@@ -173,82 +231,96 @@ def _write_fakes(repo_root, log_path, hit):
         "class ModelRequiredError(ValueError):\n"
         "    pass\n"
         "\n"
-        "def _log(line):\n"
-        "    with open(LOG, 'a', encoding='utf-8') as fh:\n"
-        "        fh.write(line + '\\n')\n"
-        "\n"
-        "def run_capability_scenarios(blast_radius, repo_root, judge=None, test_author=None):\n"
-        "    _log('run_capability_scenarios')\n"
-        "    return {}\n"
+        "def _hit(capability_id):\n"
+        "    return {'hit': True, 'capability_scenario_report': {capability_id: {'overall': 'pass', 'scenarios': []}}}\n"
         "\n"
         "def check_capability_provenance(capability_id, repo_root):\n"
         "    _log('check_capability_provenance ' + str(capability_id))\n"
-        "    return {'hit': True, 'capability_scenario_report': {capability_id: {'overall': 'pass', 'scenarios': []}}}\n"
+        "    return _hit(capability_id)\n"
         "\n"
         "def run_capability_gates(capability_id, repo_root, model=None, seed=0, llm_backend=None):\n"
         "    _log('run_capability_gates ' + str(capability_id))\n"
-        "    return {'hit': True, 'capability_scenario_report': {capability_id: {'overall': 'pass', 'scenarios': []}}}\n"
+        "    return _hit(capability_id)\n"
+        "\n"
+        "def run_capability_scenarios(blast_radius, repo_root, judge=None, test_author=None):\n"
+        "    return {}\n",
     )
-    _write(
-        repo_root / "gen" / "capability-scenario-verifier" / "capability_scenario_verifier.py",
-        csv_src,
+
+    # Stand-in secret-scanner, per repository-secret-scan.md's fixtures.
+    write(
+        repo_root / "gen" / "secret-scanner" / "secret_scanner.py",
+        LOG_HELPER
+        + "def scan(repo_root):\n"
+        "    _log('scan ' + str(repo_root))\n"
+        "    return {'flagged': False, 'matches': []}\n"
+        "\n"
+        "def gate_version(repo_root):\n"
+        "    return 'secret_scanner@0.0.0'\n",
     )
 
 
-def _run(repo_root):
-    try:
-        return provenance_tracker.check_readiness(repo_root, changed_ids=["comp-foo"])
-    except AttributeError as exc:  # pragma: no cover - the failure this criterion guards
-        pytest.fail("check_readiness raised AttributeError on dict-shaped results: " + repr(exc))
-
-
-def _log_lines(log_path):
+def read_log(log_path):
     if not log_path.exists():
         return []
-    return [line for line in log_path.read_text(encoding="utf-8").splitlines() if line]
+    return [line for line in log_path.read_text().splitlines() if line]
 
 
-def test_dict_shaped_hit_is_read_correctly(tmp_path):
+@pytest.fixture
+def repo(tmp_path, monkeypatch):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
     log_path = tmp_path / "calls.log"
-    _build_fixture(repo_root)
-    _write_fakes(repo_root, log_path, hit=True)
+    monkeypatch.setenv(LOG_ENV, str(log_path))
+    return repo_root, log_path
 
-    report = _run(repo_root)
 
-    lines = _log_lines(log_path)
-    assert any(line.startswith("compute_blast_radius") for line in lines), lines
-    assert "check_provenance comp-foo" in lines, lines
+def test_dict_shaped_hit_is_read_without_attribute_error(repo):
+    repo_root, log_path = repo
+    build_fixture(repo_root, HIT_RESULT)
+
+    try:
+        report = provenance_tracker.check_readiness(repo_root, changed_ids=[COMPONENT_ID])
+    except AttributeError as exc:  # pragma: no cover - the failure being tested
+        pytest.fail("check_readiness raised AttributeError on dict-shaped results: " + repr(exc))
+
+    log = read_log(log_path)
+    # component_id was read from the dict-shaped impacted entry and passed on.
+    assert "check_provenance " + COMPONENT_ID in log, log
 
     assert field(report, "scope") == "blast-radius"
     components = field(report, "components")
-    assert "comp-foo" in components
-    entry = components["comp-foo"]
+    assert COMPONENT_ID in components
+    entry = components[COMPONENT_ID]
     assert field(entry, "hit") is True
-    assert field(field(entry, "verification_report"), "overall") == "pass"
-    assert field(report, "ready") is True
-    assert list(field(report, "not_ready_reasons")) == []
+    assert field(entry, "reason") is None
+
+    # hit was read correctly from the dict: the component is ready.
+    reasons = list(field(report, "not_ready_reasons"))
+    assert not any(COMPONENT_ID in str(r) for r in reasons), reasons
+    assert field(report, "ready") is True, reasons
+    assert reasons == []
 
 
-def test_dict_shaped_miss_is_read_correctly(tmp_path):
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    log_path = tmp_path / "calls.log"
-    _build_fixture(repo_root)
-    _write_fakes(repo_root, log_path, hit=False)
+def test_dict_shaped_miss_is_read_without_attribute_error(repo):
+    repo_root, log_path = repo
+    build_fixture(repo_root, MISS_RESULT)
 
-    report = _run(repo_root)
+    try:
+        report = provenance_tracker.check_readiness(repo_root, changed_ids=[COMPONENT_ID])
+    except AttributeError as exc:  # pragma: no cover - the failure being tested
+        pytest.fail("check_readiness raised AttributeError on dict-shaped results: " + repr(exc))
 
-    lines = _log_lines(log_path)
-    assert any(line.startswith("compute_blast_radius") for line in lines), lines
-    assert "check_provenance comp-foo" in lines, lines
+    log = read_log(log_path)
+    assert "check_provenance " + COMPONENT_ID in log, log
 
-    assert field(report, "scope") == "blast-radius"
     components = field(report, "components")
-    assert "comp-foo" in components
-    assert field(components["comp-foo"], "hit") is False
+    assert COMPONENT_ID in components
+    entry = components[COMPONENT_ID]
+    assert field(entry, "hit") is False
+    assert field(entry, "reason") == "no manifest"
+
+    # hit=False was read correctly from the dict: not ready, and the
+    # component (by the component_id read from the dict entry) is named.
     assert field(report, "ready") is False
     reasons = list(field(report, "not_ready_reasons"))
-    assert any("comp-foo" in str(r) for r in reasons), reasons
-    json.dumps(reasons)
+    assert any(COMPONENT_ID in str(r) for r in reasons), reasons

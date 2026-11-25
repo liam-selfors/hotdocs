@@ -53,7 +53,7 @@ report and `attempts` is `[]`; `blocked` is `true`, with `block_reason`
 
 `blocked` concerns generation and verification only.
 `license_scan.blocked` and `secret_scan.flagged` are reported as-is;
-whether they stop a merge is `provenance-tracker`'s readiness check,
-not this component's verdict.
+whether they stop a merge is decided by `hotdocs verify` (`D371`), not
+here.
 
 Returned as a dict with exactly these keys.

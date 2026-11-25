@@ -1,5 +1,5 @@
 {
-  "spec_bundle_hash": "sha256:db8ae35cc5924790a9c34c793c2cd017812bdca52551f20d1a7c9c20aacd20f9",
+  "spec_bundle_hash": "sha256:0f5880db695cd942bb43f95051e92a67f7a1e10e03603aef586b9245bee5ac4b",
   "model_pin": "claude-opus-5-5",
   "prompt_version": "v12",
   "retry_feedback": null,
@@ -13,7 +13,7 @@
   },
   "attempts": 1,
   "attempt_history": [],
-  "pipeline_version": "v3",
+  "pipeline_version": "v1",
   "gate_versions": {
     "compiler": "criterion-compiler@1.0.0",
     "generated_test": "generated_test@3.0.0",
@@ -23,7 +23,7 @@
     "generator": "generator@3.2.0+v12"
   },
   "provenance_hit": false,
-  "generated_at": "2026-11-24T09:14:46Z",
+  "generated_at": "2026-11-25T07:56:19Z",
   "verification_run_id": "corpus-graph-builder-attempt-1",
   "verification_report": {
     "component_id": "comp-corpus-graph-builder",
@@ -108,7 +108,7 @@
       "R-GRAPH-010": "pass"
     },
     "interface_drift": false,
-    "mutation_score": 0.8113207547169812,
+    "mutation_score": 0.8269230769230769,
     "mutation_error": null,
     "assets": [
       {
