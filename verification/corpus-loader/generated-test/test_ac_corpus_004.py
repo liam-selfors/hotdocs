@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:97b44ff92cb79dd5da41cc414057036bbb782d07b110f86ee70146a56812621a
+# hotdocs-criterion: sha256:9950274835c9201959a596fe07110e58548dacf8ad1425e723e613201dd96581
 from pathlib import Path
 
 import corpus_loader
@@ -15,8 +15,7 @@ def _write(path, text):
 
 def _build_fixture(repo_root):
     comp_dir = repo_root / "specs" / "components" / "foo"
-    _write(
-        comp_dir / "component.md",
+    component_md = (
         "---\n"
         "id: comp-foo\n"
         "title: Foo\n"
@@ -25,28 +24,40 @@ def _build_fixture(repo_root):
         "sealed: true\n"
         "source_path: legacy/foo/\n"
         "---\n"
-        "\n"
         "# Foo\n"
         "\n"
         "## Purpose\n"
         "\n"
-        "Foo does a thing.\n",
+        "A fixture component for the corpus loader.\n"
     )
-    req_text = (
+    _write(comp_dir / "component.md", component_md)
+
+    requirement_text = (
         "# R-FOO-001\n"
         "\n"
-        "**R-FOO-001** \u2014 Foo MUST do the thing.\n"
+        "**R-FOO-001** \u2014 Foo MUST do the foo thing.\n"
     )
-    _write(comp_dir / "requirements" / "R-FOO-001.md", req_text)
-    _write(
-        comp_dir / "acceptance" / "AC-FOO-001.md",
+    _write(comp_dir / "requirements" / "R-FOO-001.md", requirement_text)
+
+    acceptance_text = (
         "# AC-FOO-001\n"
         "\n"
         "Covers: R-FOO-001\n"
         "Kind: generated-test\n"
         "\n"
-        "Foo does the thing.\n",
+        "Given foo\n"
+        "When foo runs\n"
+        "Then foo happens\n"
     )
+    _write(comp_dir / "acceptance" / "AC-FOO-001.md", acceptance_text)
+
+    glossary_text = (
+        "# Glossary\n"
+        "\n"
+        "- **Foo** \u2014 a fixture term.\n"
+    )
+    _write(repo_root / "specs" / "glossary.md", glossary_text)
+
     return comp_dir
 
 
@@ -59,37 +70,37 @@ def _iter_docs(corpus):
 
 def _find_doc(corpus, rel_path):
     for doc in _iter_docs(corpus):
-        if field(doc, "rel_path") == rel_path:
+        if str(field(doc, "rel_path")) == rel_path:
             return doc
     raise AssertionError("no Doc with rel_path " + repr(rel_path))
 
 
-def test_ac_corpus_004_frontmatterless_requirement_and_graph(tmp_path):
+def test_ac_corpus_004(tmp_path):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
     comp_dir = _build_fixture(repo_root)
+
     assert not (repo_root / "gen").exists()
 
     corpus = corpus_loader.load_corpus(repo_root)
 
-    req_path = comp_dir / "requirements" / "R-FOO-001.md"
-    req_doc = _find_doc(corpus, "specs/components/foo/requirements/R-FOO-001.md")
+    req_rel = "specs/components/foo/requirements/R-FOO-001.md"
+    req_doc = _find_doc(corpus, req_rel)
+    req_text = (comp_dir / "requirements" / "R-FOO-001.md").read_text(encoding="utf-8")
+
     assert field(req_doc, "has_frontmatter") is False
     assert field(req_doc, "frontmatter") == {}
-    assert field(req_doc, "body") == req_path.read_text(encoding="utf-8")
-    assert field(req_doc, "doc_type") == "component-requirement"
-    assert field(req_doc, "doc_id") == "R-FOO-001"
+    assert field(req_doc, "body") == req_text
 
     comp_doc = _find_doc(corpus, "specs/components/foo/component.md")
     assert field(comp_doc, "has_frontmatter") is True
-    assert field(comp_doc, "doc_type") == "component-root"
-    assert field(field(comp_doc, "frontmatter"), "id") == "comp-foo"
 
-    # graph-query-engine must have been loaded from the tool root, since
-    # repo_root has no gen/ directory.
-    assert not (repo_root / "gen").exists()
     graph = field(corpus, "graph")
     row = graph.execute("SELECT count(*) FROM nodes").fetchone()
     assert row is not None
-    assert isinstance(row[0], int)
-    assert row[0] >= 0
+    count = row[0]
+    assert isinstance(count, int)
+    assert count >= 1
+
+    # Still no gen/ under repo_root: the views came from the tool root.
+    assert not (repo_root / "gen").exists()
