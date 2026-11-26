@@ -1,10 +1,10 @@
-# hotdocs-criterion: sha256:fba3042d1004190a9e31c61aa69cff3514b3955df9aade71aaa4158cbd7dcd94
+# hotdocs-criterion: sha256:535bedc36ef440b2d97e5f4cd07549090f6a779f4d1d4ade612112a8218e47fa
 """AC-GQE-007: load_views is idempotent on the same DuckDB connection.
 
-Given a DuckDB connection with load_views already called once,
-when load_views is called again on the same connection,
-then it succeeds without error and every view still returns the same
-results as the first call.
+Given a DuckDB connection with load_views already called once
+When load_views is called again on the same connection
+Then it succeeds without error and every view still returns the same
+  results as the first call
 """
 
 from pathlib import Path
@@ -21,24 +21,25 @@ VIEWS = [
     "component_context",
     "component_provenance",
     "component_size",
+    "bundle_size",
     "decision_lineage",
 ]
 
 
-def _write(path, text):
+def _write(root, rel, text):
+    path = root / rel
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text, encoding="utf-8", newline="\n")
+    path.write_bytes(text.encode("utf-8"))
 
 
 def _frontmatter(lines):
     return "---\n" + "".join(line + "\n" for line in lines) + "---\n"
 
 
-def _build_fixture(repo_root):
-    specs = repo_root / "specs"
-
+def _build_fixture(root):
     _write(
-        specs / "components" / "foo" / "component.md",
+        root,
+        "specs/components/foo/component.md",
         _frontmatter(
             [
                 "id: comp-foo",
@@ -57,7 +58,8 @@ def _build_fixture(repo_root):
         + "one two three\n",
     )
     _write(
-        specs / "components" / "bar" / "component.md",
+        root,
+        "specs/components/bar/component.md",
         _frontmatter(
             [
                 "id: comp-bar",
@@ -71,29 +73,34 @@ def _build_fixture(repo_root):
         + "# Bar\n",
     )
     _write(
-        specs / "components" / "foo" / "requirements" / "R-FOO-001.md",
-        "# R-FOO-001\n" + "\n" + "foo MUST work.\n",
+        root,
+        "specs/components/foo/requirements/R-FOO-001.md",
+        "# R-FOO-001\n\nfoo MUST work.\n",
     )
     _write(
-        specs / "components" / "foo" / "requirements" / "R-FOO-002.md",
-        "# R-FOO-002\n" + "\n" + "foo MUST stop.\n",
+        root,
+        "specs/components/foo/requirements/R-FOO-002.md",
+        "# R-FOO-002\n\nfoo MUST stop.\n",
     )
     _write(
-        specs / "components" / "foo" / "acceptance" / "AC-FOO-001.md",
-        "# AC-FOO-001\n" + "\n" + "Covers: R-FOO-001\n" + "Kind: generated-test\n",
+        root,
+        "specs/components/foo/acceptance/AC-FOO-001.md",
+        "# AC-FOO-001\n\nCovers: R-FOO-001\nKind: generated-test\n",
     )
     _write(
-        specs / "components" / "foo" / "acceptance" / "AC-FOO-002.md",
-        "# AC-FOO-002\n" + "\n" + "Covers: R-FOO-002\n" + "Kind: generated-test\n",
+        root,
+        "specs/components/foo/acceptance/AC-FOO-002.md",
+        "# AC-FOO-002\n\nCovers: R-FOO-002\nKind: generated-test\n",
     )
     _write(
-        specs / "components" / "foo" / "interface" / "guarantees" / "G-FOO-001.md",
-        "# G-FOO-001\n" + "\n" + "foo never fails.\n",
+        root,
+        "specs/components/foo/interface/guarantees/G-FOO-001.md",
+        "# G-FOO-001\n\nfoo never fails.\n",
     )
     _write(
-        specs / "product" / "x.md",
+        root,
+        "specs/product/x.md",
         _frontmatter(["id: P-X", "title: X", "status: draft", "owners: [team]"])
-        + "\n"
         + "# X\n"
         + "\n"
         + "### CS-X-001\n"
@@ -103,13 +110,14 @@ def _build_fixture(repo_root):
         + "Covers: P-X\n",
     )
     _write(
-        specs / "vars" / "x.md",
+        root,
+        "specs/vars/x.md",
         _frontmatter(["id: VAR-X", "title: V", "status: draft", "owners: [team]"])
-        + "\n"
         + "# V\n",
     )
     _write(
-        specs / "decisions" / "D1.md",
+        root,
+        "specs/decisions/D1.md",
         _frontmatter(
             [
                 "id: D1",
@@ -119,11 +127,11 @@ def _build_fixture(repo_root):
                 "last_ratified_commit: 0000000",
             ]
         )
-        + "\n"
         + "# D1\n",
     )
     _write(
-        specs / "decisions" / "D2.md",
+        root,
+        "specs/decisions/D2.md",
         _frontmatter(
             [
                 "id: D2",
@@ -134,24 +142,24 @@ def _build_fixture(repo_root):
                 "builds_on: [D1]",
             ]
         )
-        + "\n"
         + "# D2\n",
     )
-    for sub in ("product", "vars", "decisions"):
-        _write(specs / sub / "README.md", "# Readme\n" + "\n" + "Notes.\n")
+    for d in ("specs/product", "specs/vars", "specs/decisions"):
+        _write(root, d + "/README.md", "# Readme\n\nNotes.\n")
 
 
 def _snapshot(con):
-    snap = {}
+    result = {}
     for view in VIEWS:
         cur = con.execute("SELECT * FROM " + view)
         columns = [d[0] for d in cur.description]
         rows = cur.fetchall()
-        snap[view] = (columns, sorted(repr(r) for r in rows))
-    return snap
+        rows_sorted = sorted(rows, key=repr)
+        result[view] = (columns, rows_sorted)
+    return result
 
 
-def test_load_views_twice_is_idempotent(tmp_path):
+def test_ac_gqe_007_load_views_twice_is_idempotent(tmp_path):
     repo_root = Path(tmp_path).resolve()
     _build_fixture(repo_root)
 
@@ -163,28 +171,21 @@ def test_load_views_twice_is_idempotent(tmp_path):
         graph_query_engine.load_views(con, repo_root)
         first = _snapshot(con)
 
-        # Sanity: the first load produced real data for the core views,
-        # so the comparison below is meaningful.
-        assert len(first["nodes"][1]) > 0
-        assert len(first["edges"][1]) > 0
-        assert len(first["component_docs"][1]) == 2
-        assert len(first["component_context"][1]) == 2
-        assert len(first["component_size"][1]) == 2
-        assert len(first["decision_lineage"][1]) == 2
-
         # Second call on the same connection must not raise.
-        result = graph_query_engine.load_views(con, repo_root)
-        assert result is None
-
+        graph_query_engine.load_views(con, repo_root)
         second = _snapshot(con)
 
         for view in VIEWS:
-            assert view in second, "view missing after second load: " + view
-            assert second[view][0] == first[view][0], (
-                "columns changed for view " + view
-            )
-            assert second[view][1] == first[view][1], (
-                "rows changed for view " + view
-            )
+            assert view in first
+            assert view in second
+            first_cols, first_rows = first[view]
+            second_cols, second_rows = second[view]
+            assert first_cols == second_cols, view + ": columns changed"
+            assert first_rows == second_rows, view + ": rows changed"
+
+        # Sanity: the corpus is actually seen, so the comparison is meaningful.
+        assert len(first["nodes"][1]) > 0
+        assert len(first["edges"][1]) > 0
+        assert len(first["component_docs"][1]) == 2
     finally:
         con.close()

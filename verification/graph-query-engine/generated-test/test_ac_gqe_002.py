@@ -1,4 +1,6 @@
-# hotdocs-criterion: sha256:63e9e5a724b226d40ec41ae662cba8826c6cab9f6a31e15863f1c57c4932728d
+# hotdocs-criterion: sha256:91c37f9a948839a8290d97729be6f8232e04623324eeb971f343c8f951681894
+"""AC-GQE-002: edges view row counts per edge_type over the fixture corpus."""
+
 from pathlib import Path
 
 import duckdb
@@ -9,7 +11,8 @@ import graph_query_engine
 def _write(repo_root, rel, text):
     path = Path(repo_root) / rel
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_bytes(text.encode("utf-8"))
+    with open(path, "w", encoding="utf-8", newline="\n") as fh:
+        fh.write(text)
 
 
 def _build_fixture(repo_root):
@@ -121,7 +124,7 @@ def _build_fixture(repo_root):
         _write(repo_root, d + "/README.md", "# Readme\n\nNotes.\n")
 
 
-def test_ac_gqe_002_edge_counts_per_type(tmp_path):
+def test_ac_gqe_002_edges_counts_per_edge_type(tmp_path):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
     _build_fixture(repo_root)
@@ -133,12 +136,12 @@ def test_ac_gqe_002_edge_counts_per_type(tmp_path):
         graph_query_engine.load_views(con, repo_root)
 
         rows = con.execute(
-            "SELECT edge_type, count(*) FROM edges GROUP BY edge_type"
+            "SELECT edge_type, COUNT(*) FROM edges GROUP BY edge_type"
         ).fetchall()
     finally:
         con.close()
 
-    counts = {edge_type: int(n) for edge_type, n in rows}
+    counts = {r[0]: r[1] for r in rows}
     expected = {
         "depends_on": 1,
         "realizes": 2,

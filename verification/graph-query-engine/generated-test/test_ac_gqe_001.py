@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:72dcece7a7af160690308cef402114c43cb15df32886263750ee7c7ebb532d52
+# hotdocs-criterion: sha256:eb2cfaaacab215c5448d0002ec1cde2f48d4a27fa0675a40ea420019f5e72a6e
 from pathlib import Path
 
 import duckdb
@@ -12,41 +12,37 @@ def _write(repo_root, rel, text):
     path.write_bytes(text.encode("utf-8"))
 
 
-def _frontmatter(lines):
-    return "---\n" + "\n".join(lines) + "\n---\n"
-
-
 def _build_fixture(repo_root):
     _write(
         repo_root,
         "specs/components/foo/component.md",
-        _frontmatter(
-            [
-                "id: comp-foo",
-                "title: Foo",
-                "status: draft",
-                "owners: [team]",
-                "depends_on: [comp-bar]",
-                "realizes: [P-X]",
-                "uses_var: [VAR-X]",
-                "depends_on_guarantees: [G-BAR-001]",
-            ]
-        )
-        + "\n# Foo\n\none two three\n",
+        "---\n"
+        "id: comp-foo\n"
+        "title: Foo\n"
+        "status: draft\n"
+        "owners: [team]\n"
+        "depends_on: [comp-bar]\n"
+        "realizes: [P-X]\n"
+        "uses_var: [VAR-X]\n"
+        "depends_on_guarantees: [G-BAR-001]\n"
+        "---\n"
+        "\n"
+        "# Foo\n"
+        "\n"
+        "one two three\n",
     )
     _write(
         repo_root,
         "specs/components/bar/component.md",
-        _frontmatter(
-            [
-                "id: comp-bar",
-                "title: Bar",
-                "status: draft",
-                "owners: [team]",
-                "realizes: [P-X]",
-            ]
-        )
-        + "\n# Bar\n",
+        "---\n"
+        "id: comp-bar\n"
+        "title: Bar\n"
+        "status: draft\n"
+        "owners: [team]\n"
+        "realizes: [P-X]\n"
+        "---\n"
+        "\n"
+        "# Bar\n",
     )
     _write(
         repo_root,
@@ -71,64 +67,67 @@ def _build_fixture(repo_root):
     _write(
         repo_root,
         "specs/product/x.md",
-        _frontmatter(
-            [
-                "id: P-X",
-                "title: X",
-                "status: draft",
-                "owners: [team]",
-            ]
-        )
-        + "\n# X\n\n### CS-X-001\nCovers: P-X\n\n### CS-X-002\nCovers: P-X\n",
+        "---\n"
+        "id: P-X\n"
+        "title: X\n"
+        "status: draft\n"
+        "owners: [team]\n"
+        "---\n"
+        "\n"
+        "# X\n"
+        "\n"
+        "### CS-X-001\n"
+        "Covers: P-X\n"
+        "\n"
+        "### CS-X-002\n"
+        "Covers: P-X\n",
     )
     _write(
         repo_root,
         "specs/vars/x.md",
-        _frontmatter(
-            [
-                "id: VAR-X",
-                "title: V",
-                "status: draft",
-                "owners: [team]",
-            ]
-        )
-        + "\n# V\n",
+        "---\n"
+        "id: VAR-X\n"
+        "title: V\n"
+        "status: draft\n"
+        "owners: [team]\n"
+        "---\n"
+        "\n"
+        "# V\n",
     )
     _write(
         repo_root,
         "specs/decisions/D1.md",
-        _frontmatter(
-            [
-                "id: D1",
-                "title: One",
-                "status: ratified",
-                "owners: [team]",
-                "last_ratified_commit: 0000000",
-            ]
-        )
-        + "\n# D1\n",
+        "---\n"
+        "id: D1\n"
+        "title: One\n"
+        "status: ratified\n"
+        "owners: [team]\n"
+        "last_ratified_commit: 0000000\n"
+        "---\n"
+        "\n"
+        "# D1\n",
     )
     _write(
         repo_root,
         "specs/decisions/D2.md",
-        _frontmatter(
-            [
-                "id: D2",
-                "title: Two",
-                "status: draft",
-                "owners: [team]",
-                "supersedes: D1",
-                "builds_on: [D1]",
-            ]
-        )
-        + "\n# D2\n",
+        "---\n"
+        "id: D2\n"
+        "title: Two\n"
+        "status: draft\n"
+        "owners: [team]\n"
+        "supersedes: D1\n"
+        "builds_on: [D1]\n"
+        "---\n"
+        "\n"
+        "# D2\n",
     )
     for d in ("specs/product", "specs/vars", "specs/decisions"):
         _write(repo_root, d + "/README.md", "# Readme\n\nNotes.\n")
 
 
-def test_ac_gqe_001_nodes_row_count_per_kind(tmp_path):
-    repo_root = tmp_path.resolve()
+def test_ac_gqe_001_nodes_rows_per_kind(tmp_path):
+    repo_root = (tmp_path / "repo").resolve()
+    repo_root.mkdir()
     _build_fixture(repo_root)
 
     con = duckdb.connect()
@@ -140,7 +139,7 @@ def test_ac_gqe_001_nodes_row_count_per_kind(tmp_path):
         rows = con.execute(
             "SELECT kind, count(*) FROM nodes GROUP BY kind"
         ).fetchall()
-        counts = {kind: n for kind, n in rows}
+        counts = {kind: int(n) for kind, n in rows}
 
         expected = {
             "component": 2,

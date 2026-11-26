@@ -1,8 +1,12 @@
-# hotdocs-criterion: sha256:492a45cc57147e2e55921eaaa00f96bf06f0183408c9805a6fe18bf402c0c9c2
+# hotdocs-criterion: sha256:7fccb7715658bb347289070c23acdd562af10b08cafe19417aebba9419b97a9f
+"""AC-GQE-005: component_provenance rows match each committed
+verification/<component>/.provenance.json file's own JSON content exactly."""
+
 import json
 from pathlib import Path
 
 import duckdb
+import pytest
 
 import graph_query_engine
 
@@ -11,180 +15,253 @@ def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def write(path, text):
+def _write(path, text):
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text, encoding="utf-8", newline="\n")
+    with open(path, "w", encoding="utf-8", newline="\n") as fh:
+        fh.write(text)
 
 
-def build_fixture(repo_root):
-    write(
-        repo_root / "specs" / "components" / "foo" / "component.md",
-        "---\n"
-        + "id: comp-foo\n"
-        + "title: Foo\n"
-        + "status: draft\n"
-        + "owners: [team]\n"
-        + "depends_on: [comp-bar]\n"
-        + "realizes: [P-X]\n"
-        + "uses_var: [VAR-X]\n"
-        + "depends_on_guarantees: [G-BAR-001]\n"
-        + "---\n"
-        + "\n"
-        + "# Foo\n"
-        + "\n"
-        + "one two three\n",
+def _lines(*lines):
+    return "\n".join(lines) + "\n"
+
+
+def _build_fixture(repo_root):
+    specs = repo_root / "specs"
+    _write(
+        specs / "components" / "foo" / "component.md",
+        _lines(
+            "---",
+            "id: comp-foo",
+            "title: Foo",
+            "status: draft",
+            "owners: [team]",
+            "depends_on: [comp-bar]",
+            "realizes: [P-X]",
+            "uses_var: [VAR-X]",
+            "depends_on_guarantees: [G-BAR-001]",
+            "---",
+            "",
+            "# Foo",
+            "",
+            "one two three",
+        ),
     )
-    write(
-        repo_root / "specs" / "components" / "bar" / "component.md",
-        "---\n"
-        + "id: comp-bar\n"
-        + "title: Bar\n"
-        + "status: draft\n"
-        + "owners: [team]\n"
-        + "realizes: [P-X]\n"
-        + "---\n"
-        + "\n"
-        + "# Bar\n",
+    _write(
+        specs / "components" / "bar" / "component.md",
+        _lines(
+            "---",
+            "id: comp-bar",
+            "title: Bar",
+            "status: draft",
+            "owners: [team]",
+            "realizes: [P-X]",
+            "---",
+            "",
+            "# Bar",
+        ),
     )
-    write(
-        repo_root / "specs" / "components" / "foo" / "requirements" / "R-FOO-001.md",
-        "# R-FOO-001\n" + "\n" + "foo MUST work.\n",
+    _write(
+        specs / "components" / "foo" / "requirements" / "R-FOO-001.md",
+        _lines("# R-FOO-001", "", "foo MUST work."),
     )
-    write(
-        repo_root / "specs" / "components" / "foo" / "requirements" / "R-FOO-002.md",
-        "# R-FOO-002\n" + "\n" + "foo MUST stop.\n",
+    _write(
+        specs / "components" / "foo" / "requirements" / "R-FOO-002.md",
+        _lines("# R-FOO-002", "", "foo MUST stop."),
     )
-    write(
-        repo_root / "specs" / "components" / "foo" / "acceptance" / "AC-FOO-001.md",
-        "# AC-FOO-001\n" + "\n" + "Covers: R-FOO-001\n" + "Kind: generated-test\n",
+    _write(
+        specs / "components" / "foo" / "acceptance" / "AC-FOO-001.md",
+        _lines("# AC-FOO-001", "", "Covers: R-FOO-001", "Kind: generated-test"),
     )
-    write(
-        repo_root
-        / "specs"
-        / "components"
-        / "foo"
-        / "interface"
-        / "guarantees"
-        / "G-FOO-001.md",
-        "# G-FOO-001\n" + "\n" + "foo never fails.\n",
+    _write(
+        specs / "components" / "foo" / "interface" / "guarantees" / "G-FOO-001.md",
+        _lines("# G-FOO-001", "", "foo never fails."),
     )
-    write(
-        repo_root / "specs" / "product" / "x.md",
-        "---\n"
-        + "id: P-X\n"
-        + "title: X\n"
-        + "status: draft\n"
-        + "owners: [team]\n"
-        + "---\n"
-        + "# X\n"
-        + "### CS-X-001\n"
-        + "Covers: P-X\n"
-        + "### CS-X-002\n"
-        + "Covers: P-X\n",
+    _write(
+        specs / "product" / "x.md",
+        _lines(
+            "---",
+            "id: P-X",
+            "title: X",
+            "status: draft",
+            "owners: [team]",
+            "---",
+            "# X",
+            "",
+            "### CS-X-001",
+            "Covers: P-X",
+            "",
+            "### CS-X-002",
+            "Covers: P-X",
+        ),
     )
-    write(
-        repo_root / "specs" / "vars" / "x.md",
-        "---\n"
-        + "id: VAR-X\n"
-        + "title: V\n"
-        + "status: draft\n"
-        + "owners: [team]\n"
-        + "---\n"
-        + "# V\n",
+    _write(
+        specs / "vars" / "x.md",
+        _lines(
+            "---",
+            "id: VAR-X",
+            "title: V",
+            "status: draft",
+            "owners: [team]",
+            "---",
+            "# V",
+        ),
     )
-    write(
-        repo_root / "specs" / "decisions" / "D1.md",
-        "---\n"
-        + "id: D1\n"
-        + "title: One\n"
-        + "status: ratified\n"
-        + "owners: [team]\n"
-        + "last_ratified_commit: 0000000\n"
-        + "---\n"
-        + "# D1\n",
+    _write(
+        specs / "decisions" / "D1.md",
+        _lines(
+            "---",
+            "id: D1",
+            "title: One",
+            "status: ratified",
+            "owners: [team]",
+            "last_ratified_commit: 0000000",
+            "---",
+            "# D1",
+        ),
     )
-    write(
-        repo_root / "specs" / "decisions" / "D2.md",
-        "---\n"
-        + "id: D2\n"
-        + "title: Two\n"
-        + "status: draft\n"
-        + "owners: [team]\n"
-        + "supersedes: D1\n"
-        + "builds_on: [D1]\n"
-        + "---\n"
-        + "# D2\n",
+    _write(
+        specs / "decisions" / "D2.md",
+        _lines(
+            "---",
+            "id: D2",
+            "title: Two",
+            "status: draft",
+            "owners: [team]",
+            "supersedes: D1",
+            "builds_on: [D1]",
+            "---",
+            "# D2",
+        ),
     )
     for sub in ("product", "vars", "decisions"):
-        write(repo_root / "specs" / sub / "README.md", "# Readme\n" + "\n" + "Notes.\n")
+        _write(specs / sub / "README.md", _lines("# Readme", "", "Notes."))
 
 
-# Deliberately avoids an ISO-8601 `generated_at` value so that read_json's
-# auto-detection never infers TIMESTAMP WITH TIME ZONE (which would require
-# pytz to materialize); every value here round-trips through DuckDB to the
-# identical Python value.
-PROVENANCE = {
-    "component_id": "comp-foo",
-    "spec_bundle_hash": "sha256-abcdef0123456789",
-    "model": "anthropic:claude-sonnet-5",
-    "generator_version": "gen-v-one",
+# Values deliberately avoid date/timestamp-looking strings so read_json's
+# auto-detection keeps them as plain VARCHAR and compares exactly.
+FOO_PROVENANCE = {
+    "component_id_hint": "foo",
+    "spec_bundle_hash": "abc123def456",
+    "generator_model": "anthropic:example-model",
+    "attempt_count": 2,
     "verification_report": {
-        "passed": True,
-        "criteria_total": 3,
-        "criteria_passed": 3,
-        "summary": "all good",
+        "result": "pass",
+        "passed": 3,
+        "failed": 0,
     },
     "license_scan": {
-        "passed": True,
-        "findings_count": 0,
+        "result": "pass",
+        "findings": 0,
     },
     "secret_scan": {
-        "passed": False,
-        "findings_count": 2,
+        "result": "pass",
+        "findings": 0,
+    },
+    "provenance_hit": False,
+}
+
+BAR_PROVENANCE = {
+    "component_id_hint": "bar",
+    "spec_bundle_hash": "fff000eee111",
+    "generator_model": "anthropic:other-model",
+    "attempt_count": 1,
+    "verification_report": {
+        "result": "fail",
+        "passed": 1,
+        "failed": 2,
+    },
+    "license_scan": {
+        "result": "pass",
+        "findings": 1,
+    },
+    "secret_scan": {
+        "result": "fail",
+        "findings": 4,
     },
     "provenance_hit": True,
 }
 
 
-def test_component_provenance_row_matches_provenance_json_exactly(tmp_path):
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    build_fixture(repo_root)
-
-    prov_path = repo_root / "verification" / "foo" / ".provenance.json"
-    write(prov_path, json.dumps(PROVENANCE, indent=2) + "\n")
-    expected = json.loads(prov_path.read_text(encoding="utf-8"))
-
+def _connect(repo_root):
     con = duckdb.connect()
     try:
         con.execute("INSTALL yaml FROM community")
         con.execute("LOAD yaml")
-        graph_query_engine.load_views(con, repo_root)
+    except Exception as exc:  # pragma: no cover - environment dependent
+        con.close()
+        pytest.skip("yaml community extension unavailable: " + repr(exc))
+    graph_query_engine.load_views(con, repo_root)
+    return con
 
-        cur = con.execute(
-            "SELECT * FROM component_provenance WHERE component_id = ?",
-            ["comp-foo"],
-        )
-        columns = [d[0] for d in cur.description]
-        rows = cur.fetchall()
+
+def _rows_by_component(con):
+    cur = con.execute("SELECT * FROM component_provenance")
+    cols = [d[0] for d in cur.description]
+    out = {}
+    for row in cur.fetchall():
+        rec = dict(zip(cols, row))
+        out[rec["component_id"]] = rec
+    return cols, out
+
+
+def test_component_provenance_row_matches_committed_json(tmp_path):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    _build_fixture(repo_root)
+
+    foo_file = repo_root / "verification" / "foo" / ".provenance.json"
+    bar_file = repo_root / "verification" / "bar" / ".provenance.json"
+    _write(foo_file, json.dumps(FOO_PROVENANCE, indent=2, sort_keys=True) + "\n")
+    _write(bar_file, json.dumps(BAR_PROVENANCE, indent=2, sort_keys=True) + "\n")
+
+    con = _connect(repo_root)
+    try:
+        cols, rows = _rows_by_component(con)
     finally:
         con.close()
 
-    assert len(rows) == 1, "expected exactly one component_provenance row for comp-foo, got " + repr(rows)
-    row = dict(zip(columns, rows[0]))
+    assert "component_id" in cols
+    assert set(rows) == {"comp-foo", "comp-bar"}
 
-    assert field(row, "component_id") == "comp-foo"
+    for comp_id, path in (("comp-foo", foo_file), ("comp-bar", bar_file)):
+        with open(path, "r", encoding="utf-8") as fh:
+            expected = json.load(fh)
+        row = rows[comp_id]
+        assert field(row, "component_id") == comp_id
+        for key, value in expected.items():
+            assert key in row, "missing column " + repr(key)
+            assert field(row, key) == value, (
+                "field " + repr(key) + " of " + repr(comp_id)
+                + ": " + repr(field(row, key)) + " != " + repr(value)
+            )
+        extra = set(row) - set(expected) - {"component_id", "filename"}
+        assert not extra, "unexpected columns " + repr(sorted(extra))
 
+
+def test_component_provenance_single_component_row_matches_file(tmp_path):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    _build_fixture(repo_root)
+
+    foo_file = repo_root / "verification" / "foo" / ".provenance.json"
+    _write(foo_file, json.dumps(FOO_PROVENANCE) + "\n")
+
+    con = _connect(repo_root)
+    try:
+        cols, rows = _rows_by_component(con)
+    finally:
+        con.close()
+
+    assert list(rows) == ["comp-foo"]
+    row = rows["comp-foo"]
+    with open(foo_file, "r", encoding="utf-8") as fh:
+        expected = json.load(fh)
     for key, value in expected.items():
-        assert key in row, "column " + repr(key) + " missing from component_provenance; columns: " + repr(columns)
-        assert field(row, key) == value, (
-            "field " + repr(key) + " mismatch: view=" + repr(field(row, key)) + " file=" + repr(value)
-        )
-
-    # Struct-valued fields come back with exactly the file's own keys, no more, no fewer.
-    for key in ("verification_report", "license_scan", "secret_scan"):
-        got = field(row, key)
-        assert isinstance(got, dict), "expected STRUCT for " + repr(key) + ", got " + repr(got)
-        assert set(got.keys()) == set(expected[key].keys())
-
-    assert field(row, "provenance_hit") is True
+        assert field(row, key) == value
+    assert field(row, "spec_bundle_hash") == "abc123def456"
+    assert field(row, "provenance_hit") is False
+    assert field(row, "verification_report") == {
+        "result": "pass",
+        "passed": 3,
+        "failed": 0,
+    }

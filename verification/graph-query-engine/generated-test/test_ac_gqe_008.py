@@ -1,4 +1,6 @@
-# hotdocs-criterion: sha256:f4a0b7e03c15169051301511f36cea6ef7c8fd16d1862608e226d9bfe12a6df8
+# hotdocs-criterion: sha256:ada076acbf2f325e20d7526d71081e5c0f83fe3a5902a623677a2f3e388b28c7
+from pathlib import Path
+
 import duckdb
 
 import graph_query_engine
@@ -9,7 +11,7 @@ def _write(path, text):
     path.write_bytes(text.encode("utf-8"))
 
 
-def _frontmatter(lines):
+def _fm(lines):
     return "---\n" + "\n".join(lines) + "\n---\n"
 
 
@@ -18,7 +20,7 @@ def _build_fixture(repo_root):
 
     _write(
         specs / "components" / "foo" / "component.md",
-        _frontmatter(
+        _fm(
             [
                 "id: comp-foo",
                 "title: Foo",
@@ -34,7 +36,7 @@ def _build_fixture(repo_root):
     )
     _write(
         specs / "components" / "bar" / "component.md",
-        _frontmatter(
+        _fm(
             [
                 "id: comp-bar",
                 "title: Bar",
@@ -67,19 +69,18 @@ def _build_fixture(repo_root):
     )
     _write(
         specs / "product" / "x.md",
-        _frontmatter(["id: P-X", "title: X", "status: draft", "owners: [team]"])
+        _fm(["id: P-X", "title: X", "status: draft", "owners: [team]"])
         + "# X\n\n### CS-X-001\nCovers: P-X\n\n### CS-X-002\nCovers: P-X\n",
     )
     _write(
         specs / "vars" / "x.md",
-        _frontmatter(["id: VAR-X", "title: V", "status: draft", "owners: [team]"])
+        _fm(["id: VAR-X", "title: V", "status: draft", "owners: [team]"])
         + "# V\n",
     )
-
     # Decision with last_ratified_commit set.
     _write(
         specs / "decisions" / "D1.md",
-        _frontmatter(
+        _fm(
             [
                 "id: D1",
                 "title: One",
@@ -93,7 +94,7 @@ def _build_fixture(repo_root):
     # Decision with no last_ratified_commit field at all.
     _write(
         specs / "decisions" / "D2.md",
-        _frontmatter(
+        _fm(
             [
                 "id: D2",
                 "title: Two",
@@ -105,13 +106,12 @@ def _build_fixture(repo_root):
         )
         + "# D2\n",
     )
+    for d in ("product", "vars", "decisions"):
+        _write(specs / d / "README.md", "# Readme\n\nNotes.\n")
 
-    for sub in ("product", "vars", "decisions"):
-        _write(specs / sub / "README.md", "# Readme\n\nNotes.\n")
 
-
-def test_ac_gqe_008_decision_lineage_columns_and_null_commit(tmp_path):
-    repo_root = tmp_path / "repo"
+def test_ac_gqe_008_decision_lineage(tmp_path):
+    repo_root = Path(tmp_path) / "repo"
     repo_root.mkdir()
     _build_fixture(repo_root)
 
@@ -119,31 +119,32 @@ def test_ac_gqe_008_decision_lineage_columns_and_null_commit(tmp_path):
     try:
         con.execute("INSTALL yaml FROM community")
         con.execute("LOAD yaml")
-
         graph_query_engine.load_views(con, repo_root)
 
-        cur = con.execute("SELECT * FROM decision_lineage ORDER BY id")
+        cur = con.execute("SELECT * FROM decision_lineage")
         columns = [d[0] for d in cur.description]
         rows = cur.fetchall()
+
+        assert sorted(columns) == ["id", "last_ratified_commit"]
+
+        id_idx = columns.index("id")
+        commit_idx = columns.index("last_ratified_commit")
+        by_id = {}
+        for row in rows:
+            by_id[row[id_idx]] = row[commit_idx]
+
+        assert sorted(by_id.keys()) == ["D1", "D2"]
+        assert len(rows) == 2
+
+        assert by_id["D1"] == "0000000"
+
+        assert by_id["D2"] is None
+        assert by_id["D2"] != ""
+
+        null_count = con.execute(
+            "SELECT count(*) FROM decision_lineage "
+            "WHERE id = 'D2' AND last_ratified_commit IS NULL"
+        ).fetchone()[0]
+        assert null_count == 1
     finally:
         con.close()
-
-    # The view has no columns other than id and last_ratified_commit.
-    assert sorted(columns) == ["id", "last_ratified_commit"]
-    assert len(columns) == 2
-
-    by_id = {}
-    for row in rows:
-        record = dict(zip(columns, row))
-        by_id[record["id"]] = record
-
-    # One row per decision record; the frontmatter-less README is not a row.
-    assert len(rows) == 2
-    assert set(by_id) == {"D1", "D2"}
-
-    # The ratified decision carries its commit.
-    assert by_id["D1"]["last_ratified_commit"] == "0000000"
-
-    # The decision with no field at all yields NULL, not an empty string.
-    assert by_id["D2"]["last_ratified_commit"] is None
-    assert by_id["D2"]["last_ratified_commit"] != ""

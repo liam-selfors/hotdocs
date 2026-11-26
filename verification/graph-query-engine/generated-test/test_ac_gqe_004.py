@@ -1,37 +1,33 @@
-# hotdocs-criterion: sha256:bca7d68242793d141ad15d3e7b78251185bd96d632f91795a01478c5b2dd309b
+# hotdocs-criterion: sha256:d78780b2bbc092ce471c3b773366a144e0bc5dbaecafc1863e8937f7954f018b
+from pathlib import Path
+
 import duckdb
 
 import graph_query_engine
 
 
 PURPOSE_LINES = [
-    "Foo keeps the first line of its purpose here.",
-    "It continues the same purpose on a second line.",
+    "Baz keeps the first line of its purpose here.",
+    "It continues the purpose on a second line.",
     "And finishes it on a third line.",
 ]
 
-BAR_PURPOSE_LINES = [
-    "Bar has a purpose too.",
-    "It also spans two lines.",
-]
 
-
-def _write(path, text):
+def write(repo_root, rel, text):
+    path = Path(repo_root) / rel
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8", newline="\n")
 
 
-def _build_corpus(repo_root):
-    specs = repo_root / "specs"
-
-    foo_md = (
+def build_fixture(repo_root):
+    write(
+        repo_root,
+        "specs/components/foo/component.md",
         "---\n"
         "id: comp-foo\n"
         "title: Foo\n"
         "status: draft\n"
         "owners: [team]\n"
-        "sealed: true\n"
-        "source_path: legacy/foo/\n"
         "depends_on: [comp-bar]\n"
         "realizes: [P-X]\n"
         "uses_var: [VAR-X]\n"
@@ -40,59 +36,72 @@ def _build_corpus(repo_root):
         "\n"
         "# Foo\n"
         "\n"
-        "## Purpose\n"
-        "\n"
-        + "\n".join(PURPOSE_LINES)
-        + "\n"
-        "\n"
-        "## Notes\n"
-        "\n"
-        "one two three\n"
+        "one two three\n",
     )
-    _write(specs / "components" / "foo" / "component.md", foo_md)
-
-    bar_md = (
+    write(
+        repo_root,
+        "specs/components/bar/component.md",
         "---\n"
         "id: comp-bar\n"
         "title: Bar\n"
         "status: draft\n"
         "owners: [team]\n"
-        "sealed: true\n"
-        "source_path: legacy/bar/\n"
         "realizes: [P-X]\n"
         "---\n"
         "\n"
-        "# Bar\n"
+        "# Bar\n",
+    )
+    write(
+        repo_root,
+        "specs/components/baz/component.md",
+        "---\n"
+        "id: comp-baz\n"
+        "title: Baz\n"
+        "status: draft\n"
+        "owners: [team]\n"
+        "sealed: true\n"
+        "source_path: legacy/baz/\n"
+        "---\n"
+        "\n"
+        "# Baz\n"
         "\n"
         "## Purpose\n"
         "\n"
-        + "\n".join(BAR_PURPOSE_LINES)
+        + "\n".join(PURPOSE_LINES)
         + "\n"
         "\n"
-        "## Notes\n"
+        "## Rules\n"
         "\n"
-        "Nothing else.\n"
+        "Baz MUST behave.\n",
     )
-    _write(specs / "components" / "bar" / "component.md", bar_md)
-
-    foo = specs / "components" / "foo"
-    _write(foo / "requirements" / "R-FOO-001.md", "# R-FOO-001\n\nfoo MUST work.\n")
-    _write(foo / "requirements" / "R-FOO-002.md", "# R-FOO-002\n\nfoo MUST stop.\n")
-    _write(
-        foo / "acceptance" / "AC-FOO-001.md",
+    write(
+        repo_root,
+        "specs/components/foo/requirements/R-FOO-001.md",
+        "# R-FOO-001\n\nfoo MUST work.\n",
+    )
+    write(
+        repo_root,
+        "specs/components/foo/requirements/R-FOO-002.md",
+        "# R-FOO-002\n\nfoo MUST stop.\n",
+    )
+    write(
+        repo_root,
+        "specs/components/foo/acceptance/AC-FOO-001.md",
         "# AC-FOO-001\n\nCovers: R-FOO-001\nKind: generated-test\n",
     )
-    _write(
-        foo / "acceptance" / "AC-FOO-002.md",
+    write(
+        repo_root,
+        "specs/components/foo/acceptance/AC-FOO-002.md",
         "# AC-FOO-002\n\nCovers: R-FOO-002\nKind: generated-test\n",
     )
-    _write(
-        foo / "interface" / "guarantees" / "G-FOO-001.md",
+    write(
+        repo_root,
+        "specs/components/foo/interface/guarantees/G-FOO-001.md",
         "# G-FOO-001\n\nfoo never fails.\n",
     )
-
-    _write(
-        specs / "product" / "x.md",
+    write(
+        repo_root,
+        "specs/product/x.md",
         "---\n"
         "id: P-X\n"
         "title: X\n"
@@ -107,8 +116,9 @@ def _build_corpus(repo_root):
         "### CS-X-002\n"
         "Covers: P-X\n",
     )
-    _write(
-        specs / "vars" / "x.md",
+    write(
+        repo_root,
+        "specs/vars/x.md",
         "---\n"
         "id: VAR-X\n"
         "title: V\n"
@@ -117,8 +127,9 @@ def _build_corpus(repo_root):
         "---\n"
         "# V\n",
     )
-    _write(
-        specs / "decisions" / "D1.md",
+    write(
+        repo_root,
+        "specs/decisions/D1.md",
         "---\n"
         "id: D1\n"
         "title: One\n"
@@ -128,8 +139,9 @@ def _build_corpus(repo_root):
         "---\n"
         "# D1\n",
     )
-    _write(
-        specs / "decisions" / "D2.md",
+    write(
+        repo_root,
+        "specs/decisions/D2.md",
         "---\n"
         "id: D2\n"
         "title: Two\n"
@@ -140,70 +152,36 @@ def _build_corpus(repo_root):
         "---\n"
         "# D2\n",
     )
-    for sub in ("product", "vars", "decisions"):
-        _write(specs / sub / "README.md", "# Readme\n\nNotes.\n")
+    for d in ("specs/product", "specs/vars", "specs/decisions"):
+        write(repo_root, d + "/README.md", "# Readme\n\nNotes.\n")
 
 
-def _load(repo_root):
-    con = duckdb.connect()
-    con.execute("INSTALL yaml FROM community")
-    con.execute("LOAD yaml")
-    graph_query_engine.load_views(con, repo_root)
-    return con
-
-
-def _purposes(con):
-    rows = con.execute(
-        "SELECT component_id, purpose FROM component_context"
-    ).fetchall()
-    return rows
-
-
-def test_multiline_purpose_is_extracted_in_full(tmp_path):
+def test_ac_gqe_004_component_context_multiline_purpose(tmp_path):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
-    _build_corpus(repo_root)
+    build_fixture(repo_root)
 
-    con = _load(repo_root)
+    con = duckdb.connect()
     try:
-        rows = _purposes(con)
+        con.execute("INSTALL yaml FROM community")
+        con.execute("LOAD yaml")
+        graph_query_engine.load_views(con, repo_root)
+
+        rows = con.execute(
+            "SELECT purpose FROM component_context WHERE component_id = ?",
+            ["comp-baz"],
+        ).fetchall()
     finally:
         con.close()
 
-    foo_rows = [r for r in rows if r[0] == "comp-foo"]
-    assert len(foo_rows) == 1, rows
-    purpose = foo_rows[0][1]
-
+    assert len(rows) == 1, rows
+    purpose = rows[0][0]
     assert purpose is not None
     assert purpose != ""
     assert purpose.strip() != ""
-    # Spans multiple lines: every line is present and newlines are kept.
-    assert "\n" in purpose.strip()
     for line in PURPOSE_LINES:
         assert line in purpose, (line, purpose)
     assert purpose.strip() == "\n".join(PURPOSE_LINES)
-    # Stops at the next section, does not swallow it.
-    assert "## Notes" not in purpose
-    assert "one two three" not in purpose
-
-
-def test_every_component_with_multiline_purpose_gets_full_text(tmp_path):
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    _build_corpus(repo_root)
-
-    con = _load(repo_root)
-    try:
-        rows = _purposes(con)
-    finally:
-        con.close()
-
-    by_id = {}
-    for component_id, purpose in rows:
-        assert component_id not in by_id, rows
-        by_id[component_id] = purpose
-
-    assert set(by_id) == {"comp-foo", "comp-bar"}, rows
-    assert by_id["comp-bar"] is not None
-    assert by_id["comp-bar"].strip() == "\n".join(BAR_PURPOSE_LINES)
-    assert by_id["comp-foo"].strip() == "\n".join(PURPOSE_LINES)
+    assert "\n" in purpose.strip()
+    assert "## Rules" not in purpose
+    assert "Baz MUST behave." not in purpose
