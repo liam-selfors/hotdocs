@@ -1,213 +1,171 @@
-# hotdocs-criterion: sha256:beb41619cbf1d208166cf360dcf260500dae40d5e18a2d61ed1f46eda0a78614
+# hotdocs-criterion: sha256:db25f57ae94943b83627f37b54706c9f1e8683c5b4df7a53a2c41c14e316dea6
 import json
 from pathlib import Path
 
 import spec_linter
 
 
-PRODUCT = """---
-id: P-FOO
-title: Foo works
-status: draft
-owners: [team-a]
----
-
-# Foo works
-
-## Purpose
-
-A foo can be made.
-
-### CS-FOO-001
-Covers: P-FOO
-Kind: generated-test
-
-```gherkin
-Given nothing
-When a foo is made
-Then it exists
-```
-"""
-
-COMPONENT = """---
-id: comp-foo
-title: Foo
-status: draft
-owners: [team-a]
-depends_on: []
-realizes: [P-FOO]
-sealed: false
----
-
-# Foo
-
-## Purpose
-
-Makes a foo.
-
-## Scope
-
-**In scope:** making a foo. **Out of scope:** everything else.
-
-## Definitions
-
-- **Widget** \u2014 here, a blue file kept on the local disk purely for caching purposes.
-
-## Behavior
-
-See `requirements/`.
-
-## Interfaces
-
-See `interface/`.
-
-## Data
-
-None.
-
-## Acceptance criteria
-
-See `acceptance/`.
-
-## Non-functional constraints
-
-See `constraints.md`.
-
-## Open questions
-
-None.
-
-## Change log
-
-- Initial draft.
-"""
-
-REQUIREMENT = """# R-FOO-001
-
-**R-FOO-001** \u2014 `make_foo()` MUST return the string `"foo"`.
-"""
-
-LIBRARY = """# Library
-
-One module file, `foo.py`.
-
-```
-make_foo() -> str
-```
-"""
-
-CLI = """# CLI
-
-```
-foo
-```
-"""
-
-ACCEPTANCE = """# AC-FOO-001
-
-Covers: R-FOO-001
-Kind: generated-test
-
-```gherkin
-Given nothing
-When make_foo() is called
-Then the result is "foo"
-```
-"""
-
-CONSTRAINTS = """# Foo \u2014 Non-Functional Constraints
-
-- **Pure.** No I/O.
-"""
-
-GLOSSARY = """# Glossary
-
-Canonical vocabulary.
-
-- **Widget** \u2014 a reusable unit of frobnication that every component shares
-  through its published interface contract.
-"""
-
-
 def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def write(root, rel, text):
-    p = Path(root) / rel
-    p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(text, encoding="utf-8")
+def as_dict(value):
+    if isinstance(value, str):
+        return json.loads(value)
+    return value
 
 
-def build_corpus(root):
-    write(root, "specs/product/foo.md", PRODUCT)
-    write(root, "specs/components/foo/component.md", COMPONENT)
-    write(root, "specs/components/foo/requirements/R-FOO-001.md", REQUIREMENT)
-    write(root, "specs/components/foo/interface/library.md", LIBRARY)
-    write(root, "specs/components/foo/interface/cli.md", CLI)
-    write(root, "specs/components/foo/acceptance/AC-FOO-001.md", ACCEPTANCE)
-    write(root, "specs/components/foo/constraints.md", CONSTRAINTS)
-    write(root, "specs/glossary.md", GLOSSARY)
+COMPONENT_MD = (
+    "---\n"
+    "id: comp-foo\n"
+    "title: Foo\n"
+    "status: draft\n"
+    "owners: [pipeline-team]\n"
+    "sealed: true\n"
+    "source_path: legacy/foo/\n"
+    "---\n"
+    "\n"
+    "# Foo\n"
+    "\n"
+    "## Purpose\n"
+    "\n"
+    "Foo does one small thing for its users.\n"
+    "\n"
+    "## Rationale\n"
+    "\n"
+    "Chosen in D1.\n"
+    "\n"
+    "## Scope\n"
+    "\n"
+    "- In scope: doing the one small thing.\n"
+    "- Out of scope: everything else.\n"
+    "\n"
+    "## Definitions\n"
+    "\n"
+    "- **Foo** \u2014 a widget the team sells by weight.\n"
+    "\n"
+    "## Behavior\n"
+    "\n"
+    "See `requirements/`.\n"
+    "\n"
+    "## Interfaces\n"
+    "\n"
+    "See `interface/`.\n"
+    "\n"
+    "## Data\n"
+    "\n"
+    "See `interface/data/`.\n"
+    "\n"
+    "## Acceptance criteria\n"
+    "\n"
+    "See `acceptance/`.\n"
+    "\n"
+    "## Non-functional constraints\n"
+    "\n"
+    "See `constraints.md`.\n"
+    "\n"
+    "## Open questions\n"
+    "\n"
+    "## Change log\n"
+    "\n"
+    "- Initial draft.\n"
+)
 
 
-def as_json(value):
-    data = value.to_json()
-    if isinstance(data, (str, bytes)):
-        data = json.loads(data)
-    return data
+def write_corpus(repo_root: Path) -> None:
+    files = {
+        "specs/glossary.md": "# Glossary\n\n- **Foo** \u2014 a made thing.\n",
+        "specs/decisions/D1.md": (
+            "---\n"
+            "id: D1\n"
+            "title: Foo exists\n"
+            "status: draft\n"
+            "owners: [pipeline-team]\n"
+            "---\n"
+            "\n"
+            "# D1: Foo exists\n"
+            "\n"
+            "We decided foo should exist.\n"
+        ),
+        "specs/components/foo/component.md": COMPONENT_MD,
+        "specs/components/foo/requirements/R-FOO-001.md": (
+            "**R-FOO-001** \u2014 Foo MUST do the one small thing (D1).\n"
+        ),
+        "specs/components/foo/acceptance/AC-FOO-001.md": (
+            "# AC-FOO-001\n"
+            "\n"
+            "Covers: R-FOO-001\n"
+            "Kind: generated-test\n"
+            "\n"
+            "```gherkin\n"
+            "Given a foo\n"
+            "When it runs\n"
+            "Then it does the one small thing\n"
+            "```\n"
+        ),
+        "specs/components/foo/constraints.md": (
+            "# Constraints\n\n- None beyond the defaults.\n"
+        ),
+        # the one-warn edit: an interface/cli.md
+        "specs/components/foo/interface/cli.md": (
+            "# CLI\n\n```\nfoo run\n```\n"
+        ),
+    }
+    for rel, text in files.items():
+        p = repo_root / rel
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(text, encoding="utf-8")
 
 
-def sev_count(report, severity):
+COMPONENT_REL = "specs/components/foo/component.md"
+
+
+def lint015(report):
+    return [
+        f
+        for f in field(report, "findings")
+        if field(f, "rule_id") == "R-LINT-015"
+        and str(field(f, "file")).replace("\\", "/") == COMPONENT_REL
+    ]
+
+
+def count(report, severity):
     return sum(1 for f in field(report, "findings") if field(f, "severity") == severity)
 
 
-def r015(report):
-    return [f for f in field(report, "findings") if field(f, "rule_id") == "R-LINT-015"]
-
-
-def r015_json(report):
-    data = as_json(report)
-    return [f for f in data["findings"] if f["rule_id"] == "R-LINT-015"]
+def check_counts(report):
+    n_fail = count(report, "fail")
+    n_warn = count(report, "warn")
+    n_skip = count(report, "skipped")
+    assert field(report, "hard_failures") == n_fail
+    assert field(report, "warnings") == n_warn
+    assert field(report, "skipped") == n_skip
+    summary = field(as_dict(report.to_json()), "summary")
+    assert summary["hard_failures"] == n_fail
+    assert summary["warnings"] == n_warn
+    assert summary["skipped"] == n_skip
 
 
 def test_no_judge_skipped_and_counts(tmp_path):
-    build_corpus(tmp_path)
+    write_corpus(tmp_path)
     report = spec_linter.lint(None, tmp_path)
-
-    fails = sev_count(report, "fail")
-    warns = sev_count(report, "warn")
-    skipped = sev_count(report, "skipped")
-    assert fails == 0
-    assert warns >= 1
-
-    found = r015(report)
+    found = lint015(report)
     assert len(found) == 1
     assert field(found[0], "severity") == "skipped"
-    assert skipped >= 1
-
-    assert field(report, "hard_failures") == fails
-    assert field(report, "warnings") == warns
-    assert field(report, "skipped") == skipped
-
-    summary = as_json(report)["summary"]
-    assert summary["hard_failures"] == fails
-    assert summary["warnings"] == warns
-    assert summary["skipped"] == skipped
+    check_counts(report)
 
 
 def test_strict_counts_warns_as_failures(tmp_path):
-    build_corpus(tmp_path)
-    plain = spec_linter.lint(None, tmp_path)
-    warns = sev_count(plain, "warn")
-    assert sev_count(plain, "fail") == 0
-    assert warns >= 1
-
-    strict = spec_linter.lint(None, tmp_path, strict=True)
-    assert field(strict, "hard_failures") == warns
+    write_corpus(tmp_path)
+    report = spec_linter.lint(None, tmp_path, strict=True)
+    n_fail = count(report, "fail")
+    n_warn = count(report, "warn")
+    assert n_warn >= 1
+    assert field(report, "hard_failures") == n_fail + n_warn
 
 
-def test_judge_conflict_is_fail_with_rationale(tmp_path):
-    build_corpus(tmp_path)
+def test_judge_conflict_fail_with_rationale(tmp_path):
+    write_corpus(tmp_path)
     calls = []
 
     def judge(term, local_text, glossary_text):
@@ -216,48 +174,35 @@ def test_judge_conflict_is_fail_with_rationale(tmp_path):
 
     report = spec_linter.lint(None, tmp_path, judge=judge)
     assert calls
-    found = r015(report)
+    found = lint015(report)
     assert len(found) == 1
     assert field(found[0], "severity") == "fail"
-    js = r015_json(report)
-    assert len(js) == 1
-    assert js[0]["severity"] == "fail"
-    assert js[0]["rationale"] == "contradicts the glossary"
-    if hasattr(found[0], "to_json"):
-        fj = as_json(found[0])
-        assert fj["rationale"] == "contradicts the glossary"
+    js = as_dict(found[0].to_json())
+    assert js["rationale"] == "contradicts the glossary"
+    check_counts(report)
 
 
-def test_judge_consistent_gives_no_finding(tmp_path):
-    build_corpus(tmp_path)
-    calls = []
+def test_judge_consistent_absent(tmp_path):
+    write_corpus(tmp_path)
 
     def judge(term, local_text, glossary_text):
-        calls.append(term)
         return (False, "consistent")
 
     report = spec_linter.lint(None, tmp_path, judge=judge)
-    assert calls
-    assert r015(report) == []
-    assert r015_json(report) == []
+    assert lint015(report) == []
+    check_counts(report)
 
 
-def test_judge_none_is_skipped_without_rationale(tmp_path):
-    build_corpus(tmp_path)
-    calls = []
+def test_judge_none_skipped_no_rationale(tmp_path):
+    write_corpus(tmp_path)
 
     def judge(term, local_text, glossary_text):
-        calls.append(term)
         return None
 
     report = spec_linter.lint(None, tmp_path, judge=judge)
-    assert calls
-    found = r015(report)
+    found = lint015(report)
     assert len(found) == 1
     assert field(found[0], "severity") == "skipped"
-    js = r015_json(report)
-    assert len(js) == 1
-    assert js[0]["severity"] == "skipped"
-    assert "rationale" not in js[0]
-    if hasattr(found[0], "to_json"):
-        assert "rationale" not in as_json(found[0])
+    js = as_dict(found[0].to_json())
+    assert "rationale" not in js
+    check_counts(report)

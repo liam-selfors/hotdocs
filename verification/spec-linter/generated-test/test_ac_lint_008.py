@@ -1,7 +1,5 @@
-# hotdocs-criterion: sha256:af8972e9e0ff7a1128e5c74f6e01be99e950cc4ace61288d1daf87b0d622e7f4
-import io
+# hotdocs-criterion: sha256:baf9746edfcf412471c4fee3084420becef52309f9fbd79ae45d050526800646
 import json
-import contextlib
 from pathlib import Path
 
 import spec_linter
@@ -11,55 +9,30 @@ def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-PRODUCT = (
-    "---\n"
-    "id: P-FOO\n"
-    "title: Foo works\n"
-    "status: draft\n"
-    "owners: [team-a]\n"
-    "---\n"
-    "\n"
-    "# Foo works\n"
-    "\n"
-    "## Purpose\n"
-    "\n"
-    "A foo can be made.\n"
-    "\n"
-    "### CS-FOO-001\n"
-    "Covers: P-FOO\n"
-    "Kind: generated-test\n"
-    "\n"
-    "```gherkin\n"
-    "Given nothing\n"
-    "When a foo is made\n"
-    "Then it exists\n"
-    "```\n"
-)
-
-COMPONENT = (
+COMPONENT_MD = (
     "---\n"
     "id: comp-foo\n"
     "title: Foo\n"
     "status: draft\n"
-    "owners: [team-a]\n"
-    "depends_on: []\n"
-    "realizes: [P-FOO]\n"
-    "sealed: false\n"
+    "owners: [test-team]\n"
+    "sealed: true\n"
+    "source_path: legacy/foo/\n"
     "---\n"
     "\n"
     "# Foo\n"
     "\n"
     "## Purpose\n"
     "\n"
-    "Makes a foo.\n"
+    "Foo does a small thing for tests.\n"
     "\n"
     "## Scope\n"
     "\n"
-    "**In scope:** making a foo. **Out of scope:** everything else.\n"
+    "- In scope: the small thing.\n"
+    "- Out of scope: everything else.\n"
     "\n"
     "## Definitions\n"
     "\n"
-    "No deltas from `specs/glossary.md`.\n"
+    "None.\n"
     "\n"
     "## Behavior\n"
     "\n"
@@ -71,7 +44,7 @@ COMPONENT = (
     "\n"
     "## Data\n"
     "\n"
-    "None.\n"
+    "See `interface/data/`.\n"
     "\n"
     "## Acceptance criteria\n"
     "\n"
@@ -83,8 +56,6 @@ COMPONENT = (
     "\n"
     "## Open questions\n"
     "\n"
-    "None.\n"
-    "\n"
     "## Change log\n"
     "\n"
     "- Initial draft.\n"
@@ -93,117 +64,94 @@ COMPONENT = (
 REQ_001 = (
     "# R-FOO-001\n"
     "\n"
-    "**R-FOO-001** \u2014 `make_foo()` MUST return the string `\"foo\"`.\n"
+    "**R-FOO-001** — Foo MUST do the first thing.\n"
 )
 
-LIBRARY = (
-    "# Library\n"
+REQ_002 = (
+    "# R-FOO-002\n"
     "\n"
-    "One module file, `foo.py`.\n"
-    "\n"
-    "```\n"
-    "make_foo() -> str\n"
-    "```\n"
+    "**R-FOO-002** — Foo MUST do the second thing.\n"
 )
 
 AC_001 = (
     "# AC-FOO-001\n"
     "\n"
-    "Covers: R-FOO-001\n"
-    "Kind: generated-test\n"
+    "Covers: R-FOO-002\n"
+    "Kind: compiled\n"
     "\n"
     "```gherkin\n"
-    "Given nothing\n"
-    "When make_foo() is called\n"
-    "Then the result is \"foo\"\n"
+    "Given a foo\n"
+    "When it runs\n"
+    "Then it does the second thing\n"
     "```\n"
 )
 
 CONSTRAINTS = (
-    "# Foo \u2014 Non-Functional Constraints\n"
+    "# Constraints\n"
     "\n"
-    "- **Pure.** No I/O.\n"
+    "- None measurable; measured by inspection.\n"
+)
+
+GLOSSARY = (
+    "# Glossary\n"
+    "\n"
+    "- **Foo** — a test component.\n"
 )
 
 
-def write(root, rel, text):
-    p = Path(root) / rel
-    p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(text, encoding="utf-8")
+def build_fixture(repo_root: Path) -> None:
+    comp = repo_root / "specs" / "components" / "foo"
+    (comp / "requirements").mkdir(parents=True)
+    (comp / "acceptance").mkdir(parents=True)
+    (comp / "component.md").write_text(COMPONENT_MD)
+    (comp / "requirements" / "R-FOO-001.md").write_text(REQ_001)
+    (comp / "requirements" / "R-FOO-002.md").write_text(REQ_002)
+    (comp / "acceptance" / "AC-FOO-001.md").write_text(AC_001)
+    (comp / "constraints.md").write_text(CONSTRAINTS)
+    (repo_root / "specs" / "glossary.md").write_text(GLOSSARY)
 
 
-def build_clean(root):
-    write(root, "specs/product/foo.md", PRODUCT)
-    write(root, "specs/components/foo/component.md", COMPONENT)
-    write(root, "specs/components/foo/requirements/R-FOO-001.md", REQ_001)
-    write(root, "specs/components/foo/interface/library.md", LIBRARY)
-    write(root, "specs/components/foo/acceptance/AC-FOO-001.md", AC_001)
-    write(root, "specs/components/foo/constraints.md", CONSTRAINTS)
+def names(finding, req_id):
+    message = field(finding, "message") or ""
+    file = field(finding, "file") or ""
+    return req_id in str(message) or req_id in str(file)
 
 
-def build_uncovered(root):
-    build_clean(root)
-    (Path(root) / "specs/components/foo/acceptance/AC-FOO-001.md").unlink()
+def lint_008_findings(findings):
+    return [f for f in findings if field(f, "rule_id") == "R-LINT-008"]
 
 
-def names_req(finding, req_id):
-    message = str(field(finding, "message") or "")
-    file = str(field(finding, "file") or "")
-    return req_id in message or req_id in file
+def test_uncovered_requirement_fails_forward_traceability(tmp_path):
+    build_fixture(tmp_path)
 
-
-def lint_008_findings(report):
-    return [f for f in field(report, "findings")
-            if field(f, "rule_id") == "R-LINT-008"]
-
-
-def test_clean_corpus_has_no_forward_traceability_failure(tmp_path):
-    build_clean(tmp_path)
     report = spec_linter.lint(None, tmp_path)
-    assert lint_008_findings(report) == []
+    findings = list(field(report, "findings"))
+    r008 = lint_008_findings(findings)
 
-
-def test_uncovered_requirement_yields_fail_finding(tmp_path):
-    build_uncovered(tmp_path)
-    report = spec_linter.lint(None, tmp_path)
-    matches = [f for f in lint_008_findings(report)
-               if field(f, "severity") == "fail" and names_req(f, "R-FOO-001")]
-    assert matches, [
-        (field(f, "rule_id"), field(f, "severity"), field(f, "file"),
-         field(f, "message"))
-        for f in field(report, "findings")
+    matching = [
+        f for f in r008
+        if names(f, "R-FOO-001") and field(f, "severity") == "fail"
     ]
+    assert matching, "expected a fail R-LINT-008 finding naming R-FOO-001, got: " + repr(findings)
+
+    # The covered requirement must not be flagged by R-LINT-008.
+    assert not [f for f in r008 if names(f, "R-FOO-002")], repr(r008)
+
     assert field(report, "hard_failures") >= 1
 
 
-def test_uncovered_requirement_only_named_requirement_flagged(tmp_path):
-    build_uncovered(tmp_path)
-    # A second, covered requirement must not be flagged.
-    write(tmp_path, "specs/components/foo/requirements/R-FOO-002.md",
-          "# R-FOO-002\n\n**R-FOO-002** \u2014 `make_foo()` MUST NOT raise.\n")
-    write(tmp_path, "specs/components/foo/acceptance/AC-FOO-002.md",
-          "# AC-FOO-002\n\nCovers: R-FOO-002\nKind: generated-test\n\n"
-          "```gherkin\nGiven nothing\nWhen make_foo() is called\n"
-          "Then nothing is raised\n```\n")
-    report = spec_linter.lint(None, tmp_path)
-    findings = lint_008_findings(report)
-    assert any(field(f, "severity") == "fail" and names_req(f, "R-FOO-001")
-               for f in findings)
-    assert not any(names_req(f, "R-FOO-002") and not names_req(f, "R-FOO-001")
-                   for f in findings)
+def test_uncovered_requirement_cli_json_exit_1(tmp_path, capsys):
+    build_fixture(tmp_path)
 
+    code = spec_linter.main(["--format=json", "--repo-root=" + str(tmp_path)])
+    out = capsys.readouterr().out
 
-def test_cli_json_reports_fail_and_exits_1(tmp_path):
-    build_uncovered(tmp_path)
-    out = io.StringIO()
-    err = io.StringIO()
-    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
-        code = spec_linter.main(["--format=json", "--repo-root=" + str(tmp_path)])
-    assert code == 1, err.getvalue()
-    doc = json.loads(out.getvalue())
-    matches = [f for f in doc["findings"]
-               if f["rule_id"] == "R-LINT-008" and f["severity"] == "fail"
-               and ("R-FOO-001" in str(f.get("message", ""))
-                    or "R-FOO-001" in str(f.get("file", "")))]
-    assert matches, doc
+    assert code == 1
+    doc = json.loads(out)
+    r008 = [f for f in doc["findings"] if f["rule_id"] == "R-LINT-008"]
+    assert any(
+        f["severity"] == "fail"
+        and ("R-FOO-001" in f.get("message", "") or "R-FOO-001" in f.get("file", ""))
+        for f in r008
+    ), repr(doc)
     assert doc["summary"]["hard_failures"] >= 1

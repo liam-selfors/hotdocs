@@ -1,5 +1,7 @@
-# hotdocs-criterion: sha256:5054cc8b4ec253fa97f8a952377056dd10dd6cef07f17195090c08b87817eb39
+# hotdocs-criterion: sha256:e65f5cf2015d076ab08daa8a8362e22627ed770a7f8dd891f788ff82a53216b3
+import io
 import json
+import contextlib
 from pathlib import Path
 
 import pytest
@@ -11,30 +13,10 @@ def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-PRODUCT_FOO = (
-    "---\n"
-    "id: P-FOO\n"
-    "title: Foo works\n"
-    "status: draft\n"
-    "owners: [team-a]\n"
-    "---\n"
-    "\n"
-    "# Foo works\n"
-    "\n"
-    "## Purpose\n"
-    "\n"
-    "A foo can be made.\n"
-    "\n"
-    "### CS-FOO-001\n"
-    "Covers: P-FOO\n"
-    "Kind: generated-test\n"
-    "\n"
-    "```gherkin\n"
-    "Given nothing\n"
-    "When a foo is made\n"
-    "Then it exists\n"
-    "```\n"
-)
+def _write(path, text):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+
 
 COMPONENT_BODY = (
     "\n"
@@ -42,15 +24,16 @@ COMPONENT_BODY = (
     "\n"
     "## Purpose\n"
     "\n"
-    "Makes a foo.\n"
+    "Foo does a small thing for testing.\n"
     "\n"
     "## Scope\n"
     "\n"
-    "**In scope:** making a foo. **Out of scope:** everything else.\n"
+    "- In scope: the small thing.\n"
+    "- Out of scope: everything else.\n"
     "\n"
     "## Definitions\n"
     "\n"
-    "No deltas from `specs/glossary.md`.\n"
+    "None.\n"
     "\n"
     "## Behavior\n"
     "\n"
@@ -62,7 +45,7 @@ COMPONENT_BODY = (
     "\n"
     "## Data\n"
     "\n"
-    "None.\n"
+    "See `interface/data/`.\n"
     "\n"
     "## Acceptance criteria\n"
     "\n"
@@ -74,165 +57,170 @@ COMPONENT_BODY = (
     "\n"
     "## Open questions\n"
     "\n"
-    "None.\n"
-    "\n"
     "## Change log\n"
     "\n"
     "- Initial draft.\n"
 )
 
-CLEAN_FRONTMATTER_LINES = [
-    "id: comp-foo",
-    "title: Foo",
-    "status: draft",
-    "owners: [team-a]",
-    "depends_on: []",
-    "realizes: [P-FOO]",
-    "sealed: false",
-]
 
-REQUIREMENT = (
-    "# R-FOO-001\n"
-    "\n"
-    "**R-FOO-001** \u2014 `make_foo()` MUST return the string `\"foo\"`.\n"
-)
-
-LIBRARY = (
-    "# Library\n"
-    "\n"
-    "One module file, `foo.py`.\n"
-    "\n"
-    "```\n"
-    "make_foo() -> str\n"
-    "```\n"
-)
-
-ACCEPTANCE = (
-    "# AC-FOO-001\n"
-    "\n"
-    "Covers: R-FOO-001\n"
-    "Kind: generated-test\n"
-    "\n"
-    "```gherkin\n"
-    "Given nothing\n"
-    "When make_foo() is called\n"
-    "Then the result is \"foo\"\n"
-    "```\n"
-)
-
-CONSTRAINTS = (
-    "# Foo \u2014 Non-Functional Constraints\n"
-    "\n"
-    "- **Pure.** No I/O.\n"
-)
+def _build_component(repo_root, slug, extra_frontmatter_lines):
+    upper = slug.upper()
+    comp_dir = repo_root / "specs" / "components" / slug
+    fm = (
+        "---\n"
+        "id: comp-" + slug + "\n"
+        "title: " + slug.capitalize() + "\n"
+        "status: draft\n"
+        "owners: [test-team]\n"
+        "depends_on: []\n"
+    )
+    for line in extra_frontmatter_lines:
+        fm += line + "\n"
+    fm += "---\n"
+    _write(comp_dir / "component.md", fm + COMPONENT_BODY)
+    req_id = "R-" + upper + "-001"
+    _write(
+        comp_dir / "requirements" / (req_id + ".md"),
+        "# " + req_id + "\n\n**" + req_id + "** — Foo MUST do the small thing.\n",
+    )
+    _write(
+        comp_dir / "acceptance" / ("AC-" + upper + "-001.md"),
+        "# AC-" + upper + "-001\n"
+        "\n"
+        "Covers: " + req_id + "\n"
+        "Kind: generated-test\n"
+        "\n"
+        "```gherkin\n"
+        "Given a thing\n"
+        "When it runs\n"
+        "Then it does the small thing\n"
+        "```\n",
+    )
+    _write(
+        comp_dir / "constraints.md",
+        "# Constraints\n\n- None beyond defaults; measured by inspection.\n",
+    )
+    return comp_dir
 
 
-def component_md(frontmatter_lines):
-    return "---\n" + "\n".join(frontmatter_lines) + "\n---\n" + COMPONENT_BODY
+def _build_base(repo_root):
+    _write(
+        repo_root / "specs" / "glossary.md",
+        "# Glossary\n\n- **Thing** — a thing used in tests.\n",
+    )
+    _write(
+        repo_root / "specs" / "product" / "foo-cap.md",
+        "---\n"
+        "id: P-FOO-CAP\n"
+        "title: Foo capability\n"
+        "status: draft\n"
+        "owners: [test-team]\n"
+        "---\n"
+        "\n"
+        "# Foo capability\n"
+        "\n"
+        "## Purpose\n"
+        "\n"
+        "A capability for tests.\n"
+        "\n"
+        "## Scope\n"
+        "\n"
+        "- In scope: tests.\n"
+        "\n"
+        "### CS-FOO-CAP-001\n"
+        "\n"
+        "Covers: P-FOO-CAP\n"
+        "Kind: generated-test\n"
+        "\n"
+        "```gherkin\n"
+        "Given the system\n"
+        "When it runs\n"
+        "Then it works\n"
+        "```\n",
+    )
 
 
-def write(path, text):
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text, encoding="utf-8")
+def _r006_fail_findings(report, slug):
+    out = []
+    for f in field(report, "findings"):
+        if field(f, "rule_id") != "R-LINT-006":
+            continue
+        if field(f, "severity") != "fail":
+            continue
+        file_ = str(field(f, "file")).replace("\\", "/")
+        if ("components/" + slug + "/") in file_:
+            out.append(f)
+    return out
 
 
-def build_clean_corpus(repo_root):
-    write(repo_root / "specs" / "product" / "foo.md", PRODUCT_FOO)
-    comp = repo_root / "specs" / "components" / "foo"
-    write(comp / "component.md", component_md(CLEAN_FRONTMATTER_LINES))
-    write(comp / "requirements" / "R-FOO-001.md", REQUIREMENT)
-    write(comp / "interface" / "library.md", LIBRARY)
-    write(comp / "acceptance" / "AC-FOO-001.md", ACCEPTANCE)
-    write(comp / "constraints.md", CONSTRAINTS)
-    return comp / "component.md"
-
-
-VARIANTS = {
-    "sealed-false-empty-realizes": [
-        "id: comp-foo",
-        "title: Foo",
-        "status: draft",
-        "owners: [team-a]",
-        "depends_on: []",
-        "realizes: []",
-        "sealed: false",
+@pytest.mark.parametrize(
+    "extra",
+    [
+        [],  # sealed absent, realizes absent
+        ["sealed: false"],  # sealed false, realizes absent
+        ["realizes: []"],  # sealed absent, empty realizes
+        ["sealed: false", "realizes: []"],  # sealed false, empty realizes
     ],
-    "sealed-false-no-realizes-key": [
-        "id: comp-foo",
-        "title: Foo",
-        "status: draft",
-        "owners: [team-a]",
-        "depends_on: []",
-        "sealed: false",
-    ],
-    "sealed-absent-empty-realizes": [
-        "id: comp-foo",
-        "title: Foo",
-        "status: draft",
-        "owners: [team-a]",
-        "depends_on: []",
-        "realizes: []",
-    ],
-    "sealed-absent-no-realizes-key": [
-        "id: comp-foo",
-        "title: Foo",
-        "status: draft",
-        "owners: [team-a]",
-        "depends_on: []",
-    ],
-}
-
-
-def r_lint_006_fails(findings):
-    return [
-        f
-        for f in findings
-        if field(f, "rule_id") == "R-LINT-006" and field(f, "severity") == "fail"
-    ]
-
-
-def test_clean_corpus_has_no_r_lint_006(tmp_path):
+)
+def test_non_sealed_component_without_realizes_fails_r_lint_006(tmp_path, extra):
     repo_root = tmp_path / "repo"
-    build_clean_corpus(repo_root)
-    report = spec_linter.lint(None, repo_root)
-    assert field(report, "hard_failures") == 0
-    assert r_lint_006_fails(field(report, "findings")) == []
-
-
-@pytest.mark.parametrize("variant", sorted(VARIANTS))
-def test_non_sealed_component_without_realizes_fails(tmp_path, variant):
-    repo_root = tmp_path / "repo"
-    component_path = build_clean_corpus(repo_root)
-
-    # Precondition: the clean corpus lints with no hard failures.
-    assert field(spec_linter.lint(None, repo_root), "hard_failures") == 0
-
-    write(component_path, component_md(VARIANTS[variant]))
+    repo_root.mkdir()
+    _build_base(repo_root)
+    _build_component(repo_root, "foo", extra)
 
     report = spec_linter.lint(None, repo_root)
-    findings = field(report, "findings")
-    matches = r_lint_006_fails(findings)
-    assert matches, "expected a fail-severity R-LINT-006 finding, got: " + repr(findings)
-    assert any(
-        str(field(f, "file")).replace("\\", "/").endswith("specs/components/foo/component.md")
-        for f in matches
-    ), repr(matches)
+
+    matches = _r006_fail_findings(report, "foo")
+    assert matches, (
+        "expected a fail-severity R-LINT-006 finding for comp-foo; got "
+        + repr([(field(f, "rule_id"), field(f, "severity"), field(f, "file"))
+                for f in field(report, "findings")])
+    )
+    files = [str(field(f, "file")).replace("\\", "/") for f in matches]
+    assert any(p.endswith("specs/components/foo/component.md") for p in files)
     assert field(report, "hard_failures") >= 1
 
 
-def test_cli_reports_r_lint_006_and_exits_1(tmp_path, capsys):
+def test_component_with_realizes_entry_has_no_r_lint_006(tmp_path):
     repo_root = tmp_path / "repo"
-    component_path = build_clean_corpus(repo_root)
-    write(component_path, component_md(VARIANTS["sealed-false-empty-realizes"]))
+    repo_root.mkdir()
+    _build_base(repo_root)
+    _build_component(repo_root, "foo", ["sealed: false", "realizes: [P-FOO-CAP]"])
 
-    code = spec_linter.main(["--format=json", "--repo-root=" + str(repo_root)])
-    out = capsys.readouterr().out
+    report = spec_linter.lint(None, repo_root)
+
+    assert _r006_fail_findings(report, "foo") == []
+
+
+def test_sealed_component_without_realizes_has_no_r_lint_006(tmp_path):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    _build_base(repo_root)
+    _build_component(repo_root, "bar", ["sealed: true", "source_path: legacy/bar/"])
+
+    report = spec_linter.lint(None, repo_root)
+
+    assert _r006_fail_findings(report, "bar") == []
+
+
+def test_cli_reports_r_lint_006_and_exits_1(tmp_path):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    _build_base(repo_root)
+    _build_component(repo_root, "foo", ["sealed: false"])
+
+    out = io.StringIO()
+    err = io.StringIO()
+    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+        code = spec_linter.main(["--format=json", "--repo-root=" + str(repo_root)])
+
     assert code == 1
-    data = json.loads(out)
+    doc = json.loads(out.getvalue())
     matches = [
-        f
-        for f in data["findings"]
-        if f["rule_id"] == "R-LINT-006" and f["severity"] == "fail"
+        f for f in doc["findings"]
+        if f["rule_id"] == "R-LINT-006"
+        and f["severity"] == "fail"
+        and "components/foo/" in str(f["file"]).replace("\\", "/")
     ]
-    assert matches, repr(data)
-    assert data["summary"]["hard_failures"] >= 1
+    assert matches
+    assert doc["summary"]["hard_failures"] >= 1

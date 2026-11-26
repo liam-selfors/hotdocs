@@ -1,64 +1,54 @@
-# hotdocs-criterion: sha256:ed8bedfb38ff96306355f7dbe42a09af1f18d23d9e1f43ee25082fa9ece1b209
-import spec_linter
+# hotdocs-criterion: sha256:45b181148828fb5c1c398fd22c584212703e37c0ca595a29f10e09901a8b7e5e
+"""AC-LINT-021: R-LINT-008/R-LINT-009 resolved over graph-query-engine's
+nodes/edges views.
+
+Given comp-foo has R-FOO-001 with no covering criterion, and comp-bar has
+R-BAR-001 covered by AC-BAR-001 plus AC-BAR-002 covering the nonexistent
+R-BAR-999, the linter's only R-LINT-008/R-LINT-009 findings are a fail
+R-LINT-008 for R-FOO-001 and a fail R-LINT-009 for AC-BAR-002.
+"""
 
 from pathlib import Path
+
+import spec_linter
 
 
 def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-PRODUCT_FOO = (
-    "---\n"
-    "id: P-FOO\n"
-    "title: Foo works\n"
-    "status: draft\n"
-    "owners: [team-a]\n"
-    "---\n"
-    "\n"
-    "# Foo works\n"
-    "\n"
-    "## Purpose\n"
-    "\n"
-    "A foo can be made.\n"
-    "\n"
-    "### CS-FOO-001\n"
-    "Covers: P-FOO\n"
-    "Kind: generated-test\n"
-    "\n"
-    "```gherkin\n"
-    "Given nothing\n"
-    "When a foo is made\n"
-    "Then it exists\n"
-    "```\n"
-)
+def write(path, text):
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
 
 
-def component_md(slug, title):
+def component_md(comp_id, slug):
     return (
         "---\n"
-        "id: comp-" + slug + "\n"
-        "title: " + title + "\n"
+        "id: " + comp_id + "\n"
+        "title: " + slug.capitalize() + " Component\n"
         "status: draft\n"
-        "owners: [team-a]\n"
+        "owners: [test-team]\n"
         "depends_on: []\n"
-        "realizes: [P-FOO]\n"
-        "sealed: false\n"
+        "sealed: true\n"
+        "source_path: legacy/" + slug + "/\n"
         "---\n"
         "\n"
-        "# " + title + "\n"
+        "# " + slug.capitalize() + "\n"
         "\n"
         "## Purpose\n"
         "\n"
-        "Makes a " + slug + ".\n"
+        "A small fixture component used for traceability checks.\n"
         "\n"
         "## Scope\n"
         "\n"
-        "**In scope:** making a " + slug + ". **Out of scope:** everything else.\n"
+        "- In scope: fixture behavior.\n"
+        "- Out of scope: everything else.\n"
         "\n"
         "## Definitions\n"
         "\n"
-        "No deltas from `specs/glossary.md`.\n"
+        "None.\n"
         "\n"
         "## Behavior\n"
         "\n"
@@ -70,7 +60,7 @@ def component_md(slug, title):
         "\n"
         "## Data\n"
         "\n"
-        "None.\n"
+        "See `interface/data/`.\n"
         "\n"
         "## Acceptance criteria\n"
         "\n"
@@ -82,136 +72,120 @@ def component_md(slug, title):
         "\n"
         "## Open questions\n"
         "\n"
-        "None.\n"
-        "\n"
         "## Change log\n"
         "\n"
         "- Initial draft.\n"
     )
 
 
-def requirement_md(rid, func, value):
+def requirement_md(rid):
+    return "**" + rid + "** — The component MUST return a value.\n"
+
+
+def acceptance_md(ac_id, covers):
     return (
-        "# " + rid + "\n"
-        "\n"
-        "**" + rid + "** — `" + func + "()` MUST return the string `\"" + value + "\"`.\n"
-    )
-
-
-def library_md(slug, func):
-    return (
-        "# Library\n"
-        "\n"
-        "One module file, `" + slug + ".py`.\n"
-        "\n"
-        "```\n"
-        + func + "() -> str\n"
-        "```\n"
-    )
-
-
-def acceptance_md(acid, covers, func, value):
-    return (
-        "# " + acid + "\n"
+        "# " + ac_id + "\n"
         "\n"
         "Covers: " + covers + "\n"
         "Kind: generated-test\n"
         "\n"
         "```gherkin\n"
-        "Given nothing\n"
-        "When " + func + "() is called\n"
-        "Then the result is \"" + value + "\"\n"
+        "Given a fixture input\n"
+        "When the component runs\n"
+        "Then it returns a value\n"
         "```\n"
     )
 
 
-def constraints_md(title):
-    return (
-        "# " + title + " — Non-Functional Constraints\n"
-        "\n"
-        "- **Pure.** No I/O.\n"
+def constraints_md():
+    return "# Constraints\n\n- None beyond the defaults; measured by review.\n"
+
+
+def build_fixture(repo_root):
+    specs = repo_root / "specs"
+    write(
+        specs / "glossary.md",
+        "# Glossary\n\n- **Fixture term** — a term used only in this fixture.\n",
     )
 
+    foo = specs / "components" / "foo"
+    write(foo / "component.md", component_md("comp-foo", "foo"))
+    write(foo / "requirements" / "R-FOO-001.md", requirement_md("R-FOO-001"))
+    write(foo / "constraints.md", constraints_md())
+    (foo / "acceptance").mkdir(parents=True, exist_ok=True)
 
-def write(root, rel, text):
-    p = root / rel
-    p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(text, encoding="utf-8")
-
-
-def build_component(root, slug, title, func, value):
-    base = "specs/components/" + slug + "/"
-    write(root, base + "component.md", component_md(slug, title))
-    write(root, base + "interface/library.md", library_md(slug, func))
-    write(root, base + "constraints.md", constraints_md(title))
-
-
-def build_clean(root):
-    write(root, "specs/product/foo.md", PRODUCT_FOO)
-    build_component(root, "foo", "Foo", "make_foo", "foo")
-    write(root, "specs/components/foo/requirements/R-FOO-001.md",
-          requirement_md("R-FOO-001", "make_foo", "foo"))
-    write(root, "specs/components/foo/acceptance/AC-FOO-001.md",
-          acceptance_md("AC-FOO-001", "R-FOO-001", "make_foo", "foo"))
+    bar = specs / "components" / "bar"
+    write(bar / "component.md", component_md("comp-bar", "bar"))
+    write(bar / "requirements" / "R-BAR-001.md", requirement_md("R-BAR-001"))
+    write(bar / "acceptance" / "AC-BAR-001.md", acceptance_md("AC-BAR-001", "R-BAR-001"))
+    write(bar / "acceptance" / "AC-BAR-002.md", acceptance_md("AC-BAR-002", "R-BAR-999"))
+    write(bar / "constraints.md", constraints_md())
 
 
-def build_scenario(root):
-    write(root, "specs/product/foo.md", PRODUCT_FOO)
-    # comp-foo: R-FOO-001 with no covering acceptance file.
-    build_component(root, "foo", "Foo", "make_foo", "foo")
-    write(root, "specs/components/foo/requirements/R-FOO-001.md",
-          requirement_md("R-FOO-001", "make_foo", "foo"))
-    # comp-bar: R-BAR-001 covered by AC-BAR-001; AC-BAR-002 covers R-BAR-999.
-    build_component(root, "bar", "Bar", "make_bar", "bar")
-    write(root, "specs/components/bar/requirements/R-BAR-001.md",
-          requirement_md("R-BAR-001", "make_bar", "bar"))
-    write(root, "specs/components/bar/acceptance/AC-BAR-001.md",
-          acceptance_md("AC-BAR-001", "R-BAR-001", "make_bar", "bar"))
-    write(root, "specs/components/bar/acceptance/AC-BAR-002.md",
-          acceptance_md("AC-BAR-002", "R-BAR-999", "make_bar", "bar"))
+def mentions(finding, ident):
+    file_value = field(finding, "file") or ""
+    message = field(finding, "message") or ""
+    return ident in str(file_value) or ident in str(message)
 
 
-def traceability_findings(report):
-    out = []
-    for f in field(report, "findings"):
-        if field(f, "rule_id") in ("R-LINT-008", "R-LINT-009"):
-            out.append(f)
-    return out
+def test_ac_lint_021_traceability_via_nodes_edges(tmp_path):
+    repo_root = tmp_path
+    build_fixture(repo_root)
 
+    report = spec_linter.lint(None, repo_root)
+    findings = list(field(report, "findings"))
 
-def mentions(finding, token):
-    text = str(field(finding, "message")) + " " + str(field(finding, "file"))
-    return token in text
-
-
-def test_clean_corpus_has_no_traceability_findings(tmp_path):
-    build_clean(tmp_path)
-    report = spec_linter.lint(None, tmp_path)
-    assert traceability_findings(report) == []
-
-
-def test_only_traceability_findings_are_r_foo_001_and_ac_bar_002(tmp_path):
-    build_scenario(tmp_path)
-    report = spec_linter.lint(None, tmp_path)
-    found = traceability_findings(report)
-
-    assert len(found) == 2, [
-        (field(f, "rule_id"), field(f, "file"), field(f, "message")) for f in found
+    trace = [
+        f for f in findings if field(f, "rule_id") in ("R-LINT-008", "R-LINT-009")
     ]
 
-    fwd = [f for f in found if field(f, "rule_id") == "R-LINT-008"]
-    back = [f for f in found if field(f, "rule_id") == "R-LINT-009"]
-    assert len(fwd) == 1
-    assert len(back) == 1
+    r008 = [f for f in trace if field(f, "rule_id") == "R-LINT-008"]
+    r009 = [f for f in trace if field(f, "rule_id") == "R-LINT-009"]
 
-    f008 = fwd[0]
-    assert field(f008, "severity") == "fail"
-    assert mentions(f008, "R-FOO-001")
-    assert not mentions(f008, "R-BAR-001")
+    assert len(trace) == 2, "unexpected traceability findings: " + repr(
+        [(field(f, "rule_id"), field(f, "file"), field(f, "message")) for f in trace]
+    )
 
-    f009 = back[0]
-    assert field(f009, "severity") == "fail"
-    assert mentions(f009, "AC-BAR-002")
-    assert not mentions(f009, "AC-BAR-001")
+    assert len(r008) == 1, repr([(field(f, "file"), field(f, "message")) for f in r008])
+    assert field(r008[0], "severity") == "fail"
+    assert mentions(r008[0], "R-FOO-001")
+    assert not mentions(r008[0], "R-BAR-001")
+
+    assert len(r009) == 1, repr([(field(f, "file"), field(f, "message")) for f in r009])
+    assert field(r009[0], "severity") == "fail"
+    assert mentions(r009[0], "AC-BAR-002") or mentions(r009[0], "R-BAR-999")
+    assert not mentions(r009[0], "AC-BAR-001")
 
     assert field(report, "hard_failures") >= 2
+
+    # The findings agree with the nodes/edges views the linter must query.
+    corpus = spec_linter.load_corpus(repo_root)
+    con = field(corpus, "graph")
+
+    requirements = sorted(
+        row[0]
+        for row in con.execute(
+            "SELECT id FROM nodes WHERE kind = 'requirement'"
+        ).fetchall()
+    )
+    assert "R-FOO-001" in requirements
+    assert "R-BAR-001" in requirements
+
+    uncovered = sorted(
+        row[0]
+        for row in con.execute(
+            "SELECT n.id FROM nodes n WHERE n.kind = 'requirement' AND NOT EXISTS ("
+            "SELECT 1 FROM edges e WHERE e.edge_type = 'covers' AND e.target_id = n.id)"
+        ).fetchall()
+    )
+    assert uncovered == ["R-FOO-001"]
+
+    dangling = sorted(
+        (row[0], row[1])
+        for row in con.execute(
+            "SELECT e.source_id, e.target_id FROM edges e WHERE e.edge_type = 'covers' "
+            "AND NOT EXISTS (SELECT 1 FROM nodes n WHERE n.id = e.target_id "
+            "AND n.kind IN ('requirement', 'capability'))"
+        ).fetchall()
+    )
+    assert dangling == [("AC-BAR-002", "R-BAR-999")]

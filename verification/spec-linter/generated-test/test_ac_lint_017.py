@@ -1,134 +1,11 @@
-# hotdocs-criterion: sha256:882e46402efa4f7fd90108c83c2d1ef28d569b0aca00590b05789ee71d2dc536
-"""AC-LINT-017: a guarantee file whose heading differs from its filename stem
-yields a fail-severity finding for rule R-LINT-017."""
+# hotdocs-criterion: sha256:a064764a8c68db6f3afbc88a5b13696e67e121a58d77d6a89c459edb92067263
+from pathlib import Path
 
 import spec_linter
-
-from pathlib import Path
 
 
 def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
-
-
-def severity_of(finding):
-    sev = field(finding, "severity")
-    return getattr(sev, "value", sev)
-
-
-PRODUCT = (
-    "---\n"
-    "id: P-FOO\n"
-    "title: Foo works\n"
-    "status: draft\n"
-    "owners: [team-a]\n"
-    "---\n"
-    "\n"
-    "# Foo works\n"
-    "\n"
-    "## Purpose\n"
-    "\n"
-    "A foo can be made.\n"
-    "\n"
-    "### CS-FOO-001\n"
-    "Covers: P-FOO\n"
-    "Kind: generated-test\n"
-    "\n"
-    "```gherkin\n"
-    "Given nothing\n"
-    "When a foo is made\n"
-    "Then it exists\n"
-    "```\n"
-)
-
-COMPONENT = (
-    "---\n"
-    "id: comp-foo\n"
-    "title: Foo\n"
-    "status: draft\n"
-    "owners: [team-a]\n"
-    "depends_on: []\n"
-    "realizes: [P-FOO]\n"
-    "sealed: false\n"
-    "---\n"
-    "\n"
-    "# Foo\n"
-    "\n"
-    "## Purpose\n"
-    "\n"
-    "Makes a foo.\n"
-    "\n"
-    "## Scope\n"
-    "\n"
-    "**In scope:** making a foo. **Out of scope:** everything else.\n"
-    "\n"
-    "## Definitions\n"
-    "\n"
-    "No deltas from `specs/glossary.md`.\n"
-    "\n"
-    "## Behavior\n"
-    "\n"
-    "See `requirements/`.\n"
-    "\n"
-    "## Interfaces\n"
-    "\n"
-    "See `interface/`.\n"
-    "\n"
-    "## Data\n"
-    "\n"
-    "None.\n"
-    "\n"
-    "## Acceptance criteria\n"
-    "\n"
-    "See `acceptance/`.\n"
-    "\n"
-    "## Non-functional constraints\n"
-    "\n"
-    "See `constraints.md`.\n"
-    "\n"
-    "## Open questions\n"
-    "\n"
-    "None.\n"
-    "\n"
-    "## Change log\n"
-    "\n"
-    "- Initial draft.\n"
-)
-
-REQUIREMENT = (
-    "# R-FOO-001\n"
-    "\n"
-    "**R-FOO-001** \u2014 `make_foo()` MUST return the string `\"foo\"`.\n"
-)
-
-LIBRARY = (
-    "# Library\n"
-    "\n"
-    "One module file, `foo.py`.\n"
-    "\n"
-    "```\n"
-    "make_foo() -> str\n"
-    "```\n"
-)
-
-ACCEPTANCE = (
-    "# AC-FOO-001\n"
-    "\n"
-    "Covers: R-FOO-001\n"
-    "Kind: generated-test\n"
-    "\n"
-    "```gherkin\n"
-    "Given nothing\n"
-    "When make_foo() is called\n"
-    "Then the result is \"foo\"\n"
-    "```\n"
-)
-
-CONSTRAINTS = (
-    "# Foo \u2014 Non-Functional Constraints\n"
-    "\n"
-    "- **Pure.** No I/O.\n"
-)
 
 
 def write(path, text):
@@ -136,53 +13,126 @@ def write(path, text):
     path.write_text(text, encoding="utf-8")
 
 
-def build_clean_corpus(repo_root):
-    write(repo_root / "specs" / "product" / "foo.md", PRODUCT)
-    comp = repo_root / "specs" / "components" / "foo"
-    write(comp / "component.md", COMPONENT)
-    write(comp / "requirements" / "R-FOO-001.md", REQUIREMENT)
-    write(comp / "interface" / "library.md", LIBRARY)
-    write(comp / "acceptance" / "AC-FOO-001.md", ACCEPTANCE)
-    write(comp / "constraints.md", CONSTRAINTS)
-    return comp
-
-
-def guarantee_text(heading_id):
-    return (
-        "# " + heading_id + "\n"
+def build_fixture(repo_root, guarantee_heading):
+    specs = repo_root / "specs"
+    write(
+        specs / "glossary.md",
+        "# Glossary\n\n- **Widget** — a thing the fixture talks about.\n",
+    )
+    comp = specs / "components" / "foo"
+    write(
+        comp / "component.md",
+        "---\n"
+        "id: comp-foo\n"
+        "title: Foo\n"
+        "status: draft\n"
+        "owners: [test-team]\n"
+        "sealed: true\n"
+        "source_path: legacy/foo/\n"
+        "---\n"
         "\n"
-        "**" + heading_id + "** \u2014 `make_foo()` MUST have no side effects.\n"
+        "# Foo\n"
+        "\n"
+        "## Purpose\n"
+        "\n"
+        "Foo does a small thing for the fixture.\n"
+        "\n"
+        "## Scope\n"
+        "\n"
+        "- In scope: the small thing.\n"
+        "\n"
+        "## Definitions\n"
+        "\n"
+        "None.\n"
+        "\n"
+        "## Behavior\n"
+        "\n"
+        "See `requirements/`.\n"
+        "\n"
+        "## Interfaces\n"
+        "\n"
+        "See `interface/`.\n"
+        "\n"
+        "## Data\n"
+        "\n"
+        "See `interface/data/`.\n"
+        "\n"
+        "## Acceptance criteria\n"
+        "\n"
+        "See `acceptance/`.\n"
+        "\n"
+        "## Non-functional constraints\n"
+        "\n"
+        "See `constraints.md`.\n"
+        "\n"
+        "## Open questions\n"
+        "\n"
+        "## Change log\n"
+        "\n"
+        "- Initial draft.\n",
     )
+    write(
+        comp / "requirements" / "R-FOO-001.md",
+        "# R-FOO-001\n"
+        "\n"
+        "**R-FOO-001** — Foo MUST return the small thing when asked.\n",
+    )
+    write(
+        comp / "acceptance" / "AC-FOO-001.md",
+        "# AC-FOO-001\n"
+        "\n"
+        "Covers: R-FOO-001\n"
+        "Kind: generated-test\n"
+        "\n"
+        "```gherkin\n"
+        "Given foo is available\n"
+        "When it is asked for the small thing\n"
+        "Then it returns the small thing\n"
+        "```\n",
+    )
+    write(
+        comp / "constraints.md",
+        "# Constraints\n\nNone.\n",
+    )
+    guarantee = comp / "interface" / "guarantees" / "G-FOO-001.md"
+    write(
+        guarantee,
+        "# " + guarantee_heading + "\n"
+        "\n"
+        "**" + guarantee_heading + "** — Foo MUST return the same small thing "
+        "for the same request.\n",
+    )
+    return guarantee
 
 
-def r_lint_017_findings(report):
-    return [f for f in field(report, "findings") if field(f, "rule_id") == "R-LINT-017"]
+def r_lint_017_fails(report):
+    out = []
+    for finding in field(report, "findings"):
+        if field(finding, "rule_id") == "R-LINT-017" and field(finding, "severity") == "fail":
+            out.append(finding)
+    return out
 
 
-def test_clean_corpus_has_no_hard_failures(tmp_path):
+def test_guarantee_heading_differs_from_filename_stem_fails(tmp_path):
     repo_root = tmp_path / "repo"
-    build_clean_corpus(repo_root)
-    report = spec_linter.lint(None, repo_root)
-    assert field(report, "hard_failures") == 0
-
-
-def test_matching_guarantee_heading_gives_no_r_lint_017_finding(tmp_path):
-    repo_root = tmp_path / "repo"
-    comp = build_clean_corpus(repo_root)
-    write(comp / "interface" / "guarantees" / "G-FOO-001.md", guarantee_text("G-FOO-001"))
-    report = spec_linter.lint(None, repo_root)
-    assert [f for f in r_lint_017_findings(report) if severity_of(f) == "fail"] == []
-
-
-def test_guarantee_heading_mismatch_fails_r_lint_017(tmp_path):
-    repo_root = tmp_path / "repo"
-    comp = build_clean_corpus(repo_root)
-    write(comp / "interface" / "guarantees" / "G-FOO-001.md", guarantee_text("G-FOO-002"))
+    repo_root.mkdir()
+    build_fixture(repo_root, "G-FOO-002")
 
     report = spec_linter.lint(None, repo_root)
 
-    fails = [f for f in r_lint_017_findings(report) if severity_of(f) == "fail"]
+    fails = r_lint_017_fails(report)
     assert fails, "expected a fail-severity R-LINT-017 finding, got: " + repr(
-        field(report, "findings")
+        [(field(f, "rule_id"), field(f, "severity"), field(f, "file")) for f in field(report, "findings")]
     )
+    assert any("G-FOO-001" in str(field(f, "file")) for f in fails)
     assert field(report, "hard_failures") >= 1
+
+
+def test_guarantee_heading_matching_stem_has_no_r_lint_017_failure(tmp_path):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    build_fixture(repo_root, "G-FOO-001")
+
+    report = spec_linter.lint(None, repo_root)
+
+    assert r_lint_017_fails(report) == []

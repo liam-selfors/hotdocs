@@ -1,4 +1,6 @@
-# hotdocs-criterion: sha256:fe64d3f2d56d27bb52571cbd746af789abd9736cec5b33de6eed57c89d05c6f0
+# hotdocs-criterion: sha256:e1fd88fd8de647f242c6dab7a5413856706674cb44c839008cdada48760cd5fd
+"""AC-LINT-035: lint limits its own and citation-/size-checker findings to `paths`."""
+
 import importlib.util
 import sys
 from pathlib import Path
@@ -10,61 +12,36 @@ def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def _write(root, rel, text):
-    p = Path(root) / rel
-    p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(text, encoding="utf-8")
+def _norm(p):
+    return str(p).replace("\\", "/")
 
 
-PRODUCT = (
-    "---\n"
-    "id: P-FOO\n"
-    "title: Foo works\n"
-    "status: draft\n"
-    "owners: [team-a]\n"
-    "---\n"
-    "\n"
-    "# Foo works\n"
-    "\n"
-    "## Purpose\n"
-    "\n"
-    "A foo can be made.\n"
-    "\n"
-    "### CS-FOO-001\n"
-    "Covers: P-FOO\n"
-    "Kind: generated-test\n"
-    "\n"
-    "```gherkin\n"
-    "Given nothing\n"
-    "When a foo is made\n"
-    "Then it exists\n"
-    "```\n"
-)
-
-
-def _component_md(comp_id, title, extra_frontmatter):
+def _component_md(slug, missing):
     return (
         "---\n"
-        "id: " + comp_id + "\n"
-        "title: " + title + "\n"
+        "id: comp-" + slug + "\n"
+        "title: Component " + slug.upper() + "\n"
         "status: draft\n"
-        "owners: [team-a]\n"
-        + extra_frontmatter +
+        "owners: [test-team]\n"
+        "depends_on: [" + missing + "]\n"
+        "sealed: true\n"
+        "source_path: legacy/" + slug + "/\n"
         "---\n"
         "\n"
-        "# " + title + "\n"
+        "# Component " + slug.upper() + "\n"
         "\n"
         "## Purpose\n"
         "\n"
-        "Makes a " + title.lower() + ".\n"
+        "A small fixture component used for testing.\n"
         "\n"
         "## Scope\n"
         "\n"
-        "**In scope:** making a thing. **Out of scope:** everything else.\n"
+        "- In scope: testing.\n"
+        "- Out of scope: everything else.\n"
         "\n"
         "## Definitions\n"
         "\n"
-        "No deltas from `specs/glossary.md`.\n"
+        "None.\n"
         "\n"
         "## Behavior\n"
         "\n"
@@ -76,7 +53,7 @@ def _component_md(comp_id, title, extra_frontmatter):
         "\n"
         "## Data\n"
         "\n"
-        "None.\n"
+        "See `interface/data/`.\n"
         "\n"
         "## Acceptance criteria\n"
         "\n"
@@ -88,101 +65,127 @@ def _component_md(comp_id, title, extra_frontmatter):
         "\n"
         "## Open questions\n"
         "\n"
-        "None.\n"
-        "\n"
         "## Change log\n"
         "\n"
         "- Initial draft.\n"
     )
 
 
-def _write_component(root, slug, comp_id, title, prefix, func, extra_frontmatter):
-    base = "specs/components/" + slug + "/"
-    _write(root, base + "component.md", _component_md(comp_id, title, extra_frontmatter))
-    rid = "R-" + prefix + "-001"
-    acid = "AC-" + prefix + "-001"
-    _write(
-        root,
-        base + "requirements/" + rid + ".md",
-        "# " + rid + "\n\n**" + rid + "** — `" + func + "()` MUST return the string `\"" + slug + "\"`.\n",
-    )
-    _write(
-        root,
-        base + "interface/library.md",
-        "# Library\n\nOne module file.\n\n```\n" + func + "() -> str\n```\n",
-    )
-    _write(
-        root,
-        base + "acceptance/" + acid + ".md",
-        "# " + acid + "\n\n"
-        "Covers: " + rid + "\n"
-        "Kind: generated-test\n"
+def _fake_checker_source(log_path, rule_id):
+    findings = [
+        {
+            "rule_id": rule_id,
+            "severity": "warn",
+            "file": "specs/components/a/component.md",
+            "line": 1,
+            "message": "fake finding for a component.md",
+        },
+        {
+            "rule_id": rule_id,
+            "severity": "warn",
+            "file": "specs/components/b/component.md",
+            "line": 1,
+            "message": "fake finding for b component.md",
+        },
+        {
+            "rule_id": rule_id,
+            "severity": "warn",
+            "file": "specs/components/b/constraints.md",
+            "line": 1,
+            "message": "fake finding for b constraints.md",
+        },
+        {
+            "rule_id": rule_id,
+            "severity": "warn",
+            "file": "specs/glossary.md",
+            "line": 1,
+            "message": "fake finding for glossary",
+        },
+    ]
+    return (
+        "import copy\n"
         "\n"
-        "```gherkin\n"
-        "Given nothing\n"
-        "When " + func + "() is called\n"
-        "Then the result is \"" + slug + "\"\n"
-        "```\n",
-    )
-    _write(
-        root,
-        base + "constraints.md",
-        "# " + title + " — Non-Functional Constraints\n\n- **Pure.** No I/O.\n",
+        "_LOG = " + repr(str(log_path)) + "\n"
+        "_FINDINGS = " + repr(findings) + "\n"
+        "\n"
+        "def check(repo_root):\n"
+        "    with open(_LOG, 'a') as fh:\n"
+        "        fh.write('called\\n')\n"
+        "    return copy.deepcopy(_FINDINGS)\n"
     )
 
 
-def _build_corpus(root):
-    _write(root, "specs/product/foo.md", PRODUCT)
-    _write_component(
-        root, "foo", "comp-foo", "Foo", "FOO", "make_foo",
-        "depends_on: []\nrealizes: [P-FOO]\nsealed: false\n",
+def _build_repo(root):
+    specs = root / "specs"
+    (specs / "components" / "a").mkdir(parents=True)
+    (specs / "components" / "b").mkdir(parents=True)
+    (specs / "components" / "a" / "component.md").write_text(
+        _component_md("a", "comp-does-not-exist-a")
     )
-    _write_component(
-        root, "a", "comp-a", "Alpha", "A", "make_a",
-        "depends_on: [comp-does-not-exist-a]\nsealed: true\nsource_path: legacy/a/\n",
+    (specs / "components" / "b" / "component.md").write_text(
+        _component_md("b", "comp-does-not-exist-b")
     )
-    _write_component(
-        root, "b", "comp-b", "Beta", "B", "make_b",
-        "depends_on: [comp-does-not-exist-b]\nsealed: true\nsource_path: legacy/b/\n",
+    (specs / "components" / "b" / "constraints.md").write_text(
+        "# Constraints\n\nNone.\n"
+    )
+    (specs / "glossary.md").write_text(
+        "# Glossary\n\n- **Fixture term** — a term used only in tests.\n"
     )
 
+    cite_log = root / "cite.log"
+    size_log = root / "size.log"
+    cite_dir = root / "gen" / "citation-checker"
+    size_dir = root / "gen" / "size-checker"
+    cite_dir.mkdir(parents=True)
+    size_dir.mkdir(parents=True)
+    (cite_dir / "citation_checker.py").write_text(
+        _fake_checker_source(cite_log, "R-CITE-FAKE")
+    )
+    (size_dir / "size_checker.py").write_text(
+        _fake_checker_source(size_log, "R-SIZE-FAKE")
+    )
+    return cite_log, size_log
 
-def _norm(f):
-    return str(f).replace("\\", "/")
 
-
-def test_ac_lint_035_paths_limit_findings(tmp_path, monkeypatch):
+def test_ac_lint_035(tmp_path, monkeypatch):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
-    _build_corpus(repo_root)
+    cite_log, size_log = _build_repo(repo_root)
     monkeypatch.chdir(repo_root)
 
-    # Directory path: findings limited to specs/components/a/
-    report_a = spec_linter.lint([Path("specs/components/a")], repo_root)
-    findings_a = list(field(report_a, "findings"))
-    assert findings_a, "expected at least the R-LINT-003 finding for component a"
-    for f in findings_a:
-        file = _norm(field(f, "file"))
-        assert file.startswith("specs/components/a/"), (
-            "finding outside specs/components/a/: " + repr(file) + " " + repr(field(f, "rule_id"))
+    # Directory path: everything under specs/components/a/
+    report = spec_linter.lint([Path("specs/components/a")], repo_root)
+    findings = list(field(report, "findings"))
+    assert findings, "expected findings for component a"
+    for f in findings:
+        assert _norm(field(f, "file")).startswith("specs/components/a/"), (
+            "finding outside specs/components/a/: " + repr(f)
         )
     assert any(
         field(f, "rule_id") == "R-LINT-003"
         and _norm(field(f, "file")) == "specs/components/a/component.md"
-        for f in findings_a
-    ), "no R-LINT-003 finding for specs/components/a/component.md: " + repr(
-        [(field(f, "rule_id"), field(f, "file")) for f in findings_a]
-    )
+        for f in findings
+    ), "missing R-LINT-003 finding for a/component.md: " + repr(findings)
+    # Checker findings within paths are included
+    rule_ids_a = [field(f, "rule_id") for f in findings]
+    assert "R-CITE-FAKE" in rule_ids_a
+    assert "R-SIZE-FAKE" in rule_ids_a
+    assert cite_log.is_file() and "called" in cite_log.read_text()
+    assert size_log.is_file() and "called" in size_log.read_text()
 
-    # File path: findings limited to exactly specs/components/b/component.md
-    report_b = spec_linter.lint([Path("specs/components/b/component.md")], repo_root)
+    # File path: exactly specs/components/b/component.md
+    report_b = spec_linter.lint(
+        [Path("specs/components/b/component.md")], repo_root
+    )
     findings_b = list(field(report_b, "findings"))
-    assert findings_b, "expected at least the R-LINT-003 finding for component b"
+    assert findings_b, "expected findings for component b"
     for f in findings_b:
-        file = _norm(field(f, "file"))
-        assert file == "specs/components/b/component.md", (
-            "finding outside specs/components/b/component.md: " + repr(file) + " " + repr(field(f, "rule_id"))
+        assert _norm(field(f, "file")) == "specs/components/b/component.md", (
+            "finding outside b/component.md: " + repr(f)
         )
     assert any(field(f, "rule_id") == "R-LINT-003" for f in findings_b), (
-        "no R-LINT-003 finding: " + repr([(field(f, "rule_id"), field(f, "file")) for f in findings_b])
+        "missing R-LINT-003 finding for b/component.md: " + repr(findings_b)
     )
+    rule_ids_b = [field(f, "rule_id") for f in findings_b]
+    assert "R-CITE-FAKE" in rule_ids_b
+    assert "R-SIZE-FAKE" in rule_ids_b

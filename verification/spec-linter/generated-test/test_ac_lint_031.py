@@ -1,65 +1,47 @@
-# hotdocs-criterion: sha256:ba842ff7c2e6f149ee6556d988f94559c6c4b4aaa2edda0987e39e30385daddc
-import spec_linter
+# hotdocs-criterion: sha256:d86ad935f775f171c2c638546ab3de26b81f7088b2aa5204dfe1871e2e36f97b
+"""AC-LINT-031: a component with interface/cli.md is warned (R-LINT-031)
+unless one of its requirements cites interface/cli.md and a criterion
+covers that requirement."""
 
 from pathlib import Path
+
+import spec_linter
 
 
 def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-PRODUCT = (
-    "---\n"
-    "id: P-FOO\n"
-    "title: Foo works\n"
-    "status: draft\n"
-    "owners: [team-a]\n"
-    "---\n"
-    "\n"
-    "# Foo works\n"
-    "\n"
-    "## Purpose\n"
-    "\n"
-    "A foo can be made.\n"
-    "\n"
-    "### CS-FOO-001\n"
-    "Covers: P-FOO\n"
-    "Kind: generated-test\n"
-    "\n"
-    "```gherkin\n"
-    "Given nothing\n"
-    "When a foo is made\n"
-    "Then it exists\n"
-    "```\n"
-)
+def write(path, text):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
 
 
 def component_md(slug):
-    title = slug.capitalize()
     return (
         "---\n"
         "id: comp-" + slug + "\n"
-        "title: " + title + "\n"
+        "title: " + slug.capitalize() + " Component\n"
         "status: draft\n"
-        "owners: [team-a]\n"
-        "depends_on: []\n"
-        "realizes: [P-FOO]\n"
-        "sealed: false\n"
+        "owners: [test-team]\n"
+        "sealed: true\n"
+        "source_path: legacy/" + slug + "/\n"
         "---\n"
         "\n"
-        "# " + title + "\n"
+        "# " + slug.capitalize() + "\n"
         "\n"
         "## Purpose\n"
         "\n"
-        "Makes a " + slug + ".\n"
+        "A fixture component used to test the CLI traceability rule.\n"
         "\n"
         "## Scope\n"
         "\n"
-        "**In scope:** making a " + slug + ". **Out of scope:** everything else.\n"
+        "- In scope: a tiny CLI.\n"
+        "- Out of scope: everything else.\n"
         "\n"
         "## Definitions\n"
         "\n"
-        "No deltas from `specs/glossary.md`.\n"
+        "None.\n"
         "\n"
         "## Behavior\n"
         "\n"
@@ -71,7 +53,7 @@ def component_md(slug):
         "\n"
         "## Data\n"
         "\n"
-        "None.\n"
+        "See `interface/data/`.\n"
         "\n"
         "## Acceptance criteria\n"
         "\n"
@@ -83,34 +65,45 @@ def component_md(slug):
         "\n"
         "## Open questions\n"
         "\n"
-        "None.\n"
-        "\n"
         "## Change log\n"
         "\n"
         "- Initial draft.\n"
     )
 
 
-def plain_requirement(rid, func):
+CLI_MD = (
+    "# CLI\n"
+    "\n"
+    "```\n"
+    "tool run [--format=json|text]\n"
+    "```\n"
+    "\n"
+    "Exit codes: `0` success, `1` failure, `2` usage error.\n"
+)
+
+
+def citing_requirement(rid):
     return (
         "# " + rid + "\n"
         "\n"
-        "**" + rid + "** — `" + func + "()` MUST return the string `\"x\"`.\n"
+        "**" + rid + "** — The command line described in `interface/cli.md`\n"
+        "MUST accept `--format=value` and `--format value`; `--format` given\n"
+        "with no value, an unknown argument, or a wrong subcommand MUST exit\n"
+        "`2`; `--format` passes through to the library call; exit codes are\n"
+        "`0`, `1` and `2` as listed there.\n"
     )
 
 
-def cli_requirement(rid, slug):
+def plain_requirement(rid):
     return (
         "# " + rid + "\n"
         "\n"
-        "**" + rid + "** — The command in `interface/cli.md` MUST accept "
-        "`--format=json` and `--format json`, MUST treat `--format` with no "
-        "value or an unknown argument as a usage error, and MUST exit `0` on "
-        "success and `2` on a usage error.\n"
+        "**" + rid + "** — The component MUST return the sum of its two\n"
+        "integer inputs.\n"
     )
 
 
-def acceptance(acid, rid):
+def criterion(acid, rid):
     return (
         "# " + acid + "\n"
         "\n"
@@ -118,104 +111,80 @@ def acceptance(acid, rid):
         "Kind: generated-test\n"
         "\n"
         "```gherkin\n"
-        "Given nothing\n"
-        "When the behavior is exercised\n"
-        "Then it holds\n"
+        "Given the inputs 2 and 3\n"
+        "When the component runs\n"
+        "Then the result is 5\n"
         "```\n"
     )
 
 
-def library_md(slug):
-    mod = slug.replace("-", "_")
-    return (
-        "# Library\n"
-        "\n"
-        "One module file, `" + mod + ".py`.\n"
-        "\n"
-        "```\n"
-        "make_" + mod + "() -> str\n"
-        "```\n"
-    )
+CONSTRAINTS_MD = (
+    "# Constraints\n"
+    "\n"
+    "- Runs in under one second, measured by timing one call.\n"
+)
 
 
-def cli_md(slug):
-    return (
-        "# CLI\n"
-        "\n"
-        "```\n"
-        + slug + " [--format=json|text]\n"
-        "```\n"
-    )
-
-
-CONSTRAINTS = "# Constraints\n\n- **Pure.** No I/O.\n"
-
-
-def write(path, text):
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text, encoding="utf-8")
-
-
-def build_component(repo_root, slug, mode):
+def build_component(repo_root, slug, requirement_text, with_criterion):
     up = slug.upper()
     base = repo_root / "specs" / "components" / slug
+    rid = "R-" + up + "-001"
     write(base / "component.md", component_md(slug))
-    write(base / "interface" / "library.md", library_md(slug))
-    write(base / "interface" / "cli.md", cli_md(slug))
-    write(base / "constraints.md", CONSTRAINTS)
-    r1 = "R-" + up + "-001"
-    a1 = "AC-" + up + "-001"
-    if mode == "covered":
-        write(base / "requirements" / (r1 + ".md"), cli_requirement(r1, slug))
-        write(base / "acceptance" / (a1 + ".md"), acceptance(a1, r1))
-    elif mode == "uncovered":
-        write(base / "requirements" / (r1 + ".md"),
-              plain_requirement(r1, "make_" + slug))
-        write(base / "acceptance" / (a1 + ".md"), acceptance(a1, r1))
-        r2 = "R-" + up + "-002"
-        write(base / "requirements" / (r2 + ".md"), cli_requirement(r2, slug))
-    else:
-        write(base / "requirements" / (r1 + ".md"),
-              plain_requirement(r1, "make_" + slug))
-        write(base / "acceptance" / (a1 + ".md"), acceptance(a1, r1))
+    write(base / "interface" / "cli.md", CLI_MD)
+    write(base / "requirements" / (rid + ".md"), requirement_text(rid))
+    if with_criterion:
+        acid = "AC-" + up + "-001"
+        write(base / "acceptance" / (acid + ".md"), criterion(acid, rid))
+    write(base / "constraints.md", CONSTRAINTS_MD)
 
 
-def owning_slug(finding, slugs):
-    file_value = str(field(finding, "file")).replace("\\", "/")
-    message = str(field(finding, "message"))
-    for slug in slugs:
-        if "/components/" + slug + "/" in "/" + file_value:
-            return slug
-    for slug in slugs:
-        if ("comp-" + slug) in message:
-            return slug
-    return None
+def finding_is_for(finding, slug):
+    message = field(finding, "message") or ""
+    file = str(field(finding, "file") or "").replace("\\", "/")
+    comp_id = "comp-" + slug
+    in_message = any(
+        message[i:i + len(comp_id)] == comp_id
+        and (i + len(comp_id) == len(message)
+             or not (message[i + len(comp_id)].isalnum()
+                     or message[i + len(comp_id)] == "-"))
+        for i in range(len(message))
+    )
+    in_file = ("specs/components/" + slug + "/") in file
+    return in_message or in_file
 
 
-def test_ac_lint_031_cli_without_covered_citing_requirement_warns(tmp_path):
-    repo_root = tmp_path
-    write(repo_root / "specs" / "product" / "foo.md", PRODUCT)
-    build_component(repo_root, "alpha", "covered")
-    build_component(repo_root, "beta", "uncovered")
-    build_component(repo_root, "gamma", "none")
+def test_ac_lint_031_cli_traceability_warns_only_uncovered(tmp_path):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    write(
+        repo_root / "specs" / "glossary.md",
+        "# Glossary\n\n- **Widget** — a fixture term.\n",
+    )
+
+    # 1: citing requirement, covered by a criterion -> no finding
+    build_component(repo_root, "alpha", citing_requirement, True)
+    # 2: citing requirement, no covering criterion -> warn
+    build_component(repo_root, "beta", citing_requirement, False)
+    # 3: no citing requirement at all -> warn
+    build_component(repo_root, "gamma", plain_requirement, True)
 
     report = spec_linter.lint(None, repo_root)
     findings = list(field(report, "findings"))
-    lint031 = [f for f in findings if field(f, "rule_id") == "R-LINT-031"]
+    cli_findings = [f for f in findings if field(f, "rule_id") == "R-LINT-031"]
 
-    slugs = ["alpha", "beta", "gamma"]
-    by_slug = {}
-    for f in lint031:
-        slug = owning_slug(f, slugs)
-        assert slug is not None, "unattributable R-LINT-031 finding: %r" % (f,)
-        by_slug.setdefault(slug, []).append(f)
+    alpha = [f for f in cli_findings if finding_is_for(f, "alpha")]
+    beta = [f for f in cli_findings if finding_is_for(f, "beta")]
+    gamma = [f for f in cli_findings if finding_is_for(f, "gamma")]
 
-    assert "alpha" not in by_slug, by_slug.get("alpha")
-    assert len(by_slug.get("beta", [])) == 1, lint031
-    assert len(by_slug.get("gamma", [])) == 1, lint031
-    assert len(lint031) == 2, lint031
+    assert alpha == [], "unexpected R-LINT-031 finding for comp-alpha: " + repr(alpha)
+    assert len(beta) >= 1, "missing R-LINT-031 finding for comp-beta: " + repr(cli_findings)
+    assert len(gamma) >= 1, "missing R-LINT-031 finding for comp-gamma: " + repr(cli_findings)
 
-    for slug in ("beta", "gamma"):
-        f = by_slug[slug][0]
-        assert field(f, "severity") == "warn"
-        assert ("comp-" + slug) in str(field(f, "message"))
+    # Only the second and third components get a finding.
+    for f in cli_findings:
+        assert finding_is_for(f, "beta") or finding_is_for(f, "gamma"), (
+            "R-LINT-031 finding for an unexpected component: " + repr(f)
+        )
+
+    for f in beta + gamma:
+        assert field(f, "severity") == "warn", repr(f)
