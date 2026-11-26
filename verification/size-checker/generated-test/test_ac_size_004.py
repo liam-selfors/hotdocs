@@ -1,5 +1,7 @@
-# hotdocs-criterion: sha256:36a8ad0b80f5e1af62e046dde3dc1c8ab5d6d00ca349c399e3d3814beeec627f
-import re
+# hotdocs-criterion: sha256:8744ae9c6a1223ad89c07280e5aab98b74d18d2bf78dc7c4361c3a28e1d5f1b7
+"""AC-SIZE-004: a 160-word Purpose section with no decision citation fails
+R-SIZE-004 on length alone, naming the hard-fail threshold of 150."""
+
 from pathlib import Path
 
 import size_checker
@@ -15,93 +17,74 @@ def _write(path, text):
 
 
 def _build_fixture(repo_root):
-    words = ["word"] * 160
-    purpose_text = " ".join(words)
-    assert len(purpose_text.split()) == 160
-    assert re.search(r"\bD\d+\b", purpose_text) is None
-
-    component_md = (
-        "---\n"
-        "id: comp-foo\n"
-        "title: Foo\n"
-        "status: draft\n"
-        "owners: [alice]\n"
-        "sealed: true\n"
-        "source_path: legacy/foo/\n"
-        "---\n"
-        "# Foo\n"
-        "\n"
-        "## Purpose\n"
-        "\n"
-        + purpose_text
-        + "\n"
-        "\n"
-        "## Scope\n"
-        "\n"
-        "- In scope: foo.\n"
-        "\n"
-        "## Definitions\n"
-        "\n"
-        "None.\n"
-        "\n"
-        "## Behavior\n"
-        "\n"
-        "See `requirements/`.\n"
-        "\n"
-        "## Interfaces\n"
-        "\n"
-        "See `interface/`.\n"
-        "\n"
-        "## Data\n"
-        "\n"
-        "See `interface/data/`.\n"
-        "\n"
-        "## Acceptance criteria\n"
-        "\n"
-        "See `acceptance/`.\n"
-        "\n"
-        "## Non-functional constraints\n"
-        "\n"
-        "See `constraints.md`.\n"
-        "\n"
-        "## Open questions\n"
-        "\n"
-        "## Change log\n"
-        "\n"
-        "- Initial.\n"
-    )
     comp_dir = repo_root / "specs" / "components" / "foo"
-    _write(comp_dir / "component.md", component_md)
+
+    purpose_words = ["alpha"] * 160
+    # Spread the words over a few lines; whitespace-split count stays 160.
+    purpose_lines = []
+    for i in range(0, 160, 20):
+        purpose_lines.append(" ".join(purpose_words[i:i + 20]))
+
+    lines = [
+        "---",
+        "id: comp-foo",
+        "title: Foo",
+        "status: draft",
+        "owners: [pipeline-team]",
+        "depends_on: []",
+        "sealed: true",
+        "source_path: legacy/foo/",
+        "---",
+        "",
+        "# Foo",
+        "",
+        "## Purpose",
+        "",
+    ]
+    purpose_heading_line = lines.index("## Purpose") + 1
+    lines.extend(purpose_lines)
+    lines.extend([
+        "",
+        "## Rationale",
+        "",
+        "Short.",
+        "",
+    ])
+    _write(comp_dir / "component.md", "\n".join(lines))
+
     _write(
         comp_dir / "requirements" / "R-FOO-001.md",
-        "# R-FOO-001\n\n**R-FOO-001** — Foo MUST do foo.\n",
+        "# R-FOO-001\n\n**R-FOO-001** — The component MUST do a thing.\n",
     )
     _write(
         comp_dir / "acceptance" / "AC-FOO-001.md",
-        "# AC-FOO-001\n\nCovers: R-FOO-001\nKind: compiled\n\n"
-        "```gherkin\nGiven foo\nWhen foo runs\nThen foo happens\n```\n",
+        "# AC-FOO-001\n\nCovers: R-FOO-001\nKind: generated-test\n\n"
+        "```gherkin\nGiven a thing\nWhen it runs\nThen it works\n```\n",
     )
-    _write(comp_dir / "constraints.md", "# Constraints\n\nNone.\n")
     _write(
-        repo_root / "specs" / "glossary.md",
-        "# Glossary\n\n- **Foo** — a foo.\n",
+        comp_dir / "interface" / "library.md",
+        "# Library\n\n```\ndo_thing() -> None\n```\n",
     )
+    return purpose_heading_line
 
 
-def test_ac_size_004_long_purpose_without_citation_fails(tmp_path):
+def test_ac_size_004_purpose_over_hard_fail_threshold(tmp_path):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
-    _build_fixture(repo_root)
+    heading_line = _build_fixture(repo_root)
 
     findings = size_checker.check(repo_root)
 
     size4 = [f for f in findings if field(f, "rule_id") == "R-SIZE-004"]
-    assert size4, "expected an R-SIZE-004 finding, got: " + repr(findings)
+    assert len(size4) == 1, findings
+    finding = size4[0]
 
-    fails = [f for f in size4 if field(f, "severity") == "fail"]
-    assert fails, "expected R-SIZE-004 to fail (not merely warn): " + repr(size4)
-
-    finding = fails[0]
+    assert field(finding, "severity") == "fail"
     assert field(finding, "file") == "specs/components/foo/component.md"
+    assert field(finding, "line") == heading_line
     assert isinstance(field(finding, "line"), int)
-    assert "150" in str(field(finding, "message"))
+    expected = (
+        "foo: Purpose section has 160 words, above the fail threshold of 150 "
+        "(specs/architecture/size-caps.md)"
+    )
+    assert field(finding, "message") == expected

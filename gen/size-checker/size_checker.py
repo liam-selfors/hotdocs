@@ -1,13 +1,17 @@
-"""Size checker: SPEC_GUIDELINES.md §4 size caps as linter findings."""
+"""Size checker: measures each component against specs/architecture/size-caps.md."""
 
 import importlib.util
 import re
 import sys
 from pathlib import Path
 
-_DIMENSIONS = [
+_CAPS_DOC = "specs/architecture/size-caps.md"
+
+# R-SIZE-001's nine dimensions, in order: (warn above, fail above or None).
+_THRESHOLDS = [
     ("generated_code_loc", 800, 1500),
-    ("component_doc_words", 2000, 4000),
+    ("generator_words", 8000, 14000),
+    ("criterion_words_max", 6000, 12000),
     ("requirement_count", 20, 40),
     ("interface_surface", 10, 20),
     ("fan_out", 7, None),
@@ -19,230 +23,179 @@ _DIMENSIONS = [
 _FILE_WARN, _FILE_FAIL = 250, 500
 _PURPOSE_WARN, _PURPOSE_FAIL = 80, 150
 
-_LIBRARY_LINE = re.compile(r"^\w+\(.*\)\s*(->|:)")
-_PURPOSE_HEADING = re.compile(r"^##\s+Purpose\b")
-_H2 = re.compile(r"^##\s")
+_LIB_SIG = re.compile(r"^\w+\(.*\)\s*(->|:)")
 
 
-def _get(obj, name, default=None):
+def _get(obj, key):
     if isinstance(obj, dict):
-        return obj.get(name, default)
-    return getattr(obj, name, default)
+        return obj[key]
+    return getattr(obj, key)
 
 
 def _tool_root():
     for parent in Path(__file__).resolve().parents:
         if parent.name == "gen":
             return parent.parent
-    return Path(__file__).resolve().parent
 
 
-def _load_dependency(repo_root, slug, module_name):
-    dep_dir = Path(repo_root) / "gen" / slug
-    if not dep_dir.is_dir():
-        dep_dir = _tool_root() / "gen" / slug
-    flat = dep_dir / f"{module_name}.py"
-    if flat.is_file():
-        spec = importlib.util.spec_from_file_location(module_name, flat)
-    else:
-        pkg = dep_dir / module_name
+def _load_corpus_loader(repo_root):
+    base = Path(repo_root) / "gen" / "corpus-loader"
+    if not base.is_dir():
+        base = _tool_root() / "gen" / "corpus-loader"
+    pkg_init = base / "corpus_loader" / "__init__.py"
+    if pkg_init.is_file():
         spec = importlib.util.spec_from_file_location(
-            module_name, pkg / "__init__.py", submodule_search_locations=[str(pkg)]
+            "corpus_loader", pkg_init, submodule_search_locations=[str(pkg_init.parent)]
         )
+    else:
+        spec = importlib.util.spec_from_file_location("corpus_loader", base / "corpus_loader.py")
     module = importlib.util.module_from_spec(spec)
-    sys.modules[module_name] = module
+    sys.modules["corpus_loader"] = module
     spec.loader.exec_module(module)
     return module
 
 
+def _severity(value, warn, fail):
+    if fail is not None and value > fail:
+        return "fail", fail
+    if value > warn:
+        return "warn", warn
+    return None, None
+
+
+def _finding(rule_id, severity, file, line, message):
+    return {"rule_id": rule_id, "severity": severity, "file": file, "line": line, "message": message}
+
+
 def _first_fenced_block(text):
-    inside = False
     block = []
+    inside = False
     for line in text.splitlines():
-        if line.strip().startswith("```"):
+        if line.startswith("```"):
             if inside:
-                return block
+                break
             inside = True
             continue
         if inside:
             block.append(line)
-    return block
+    return "\n".join(block).replace("\\\n", "").split("\n")
 
 
-def _join_continuations(lines):
-    out = []
-    buf = None
-    for line in lines:
-        if buf is not None:
-            line = buf + line
-            buf = None
-        if line.endswith("\\"):
-            buf = line[:-1]
-        else:
-            out.append(line)
-    if buf is not None:
-        out.append(buf)
-    return out
-
-
-def _depends_on(root):
-    deps = _get(_get(root, "frontmatter") or {}, "depends_on") or []
-    if isinstance(deps, str):
-        deps = [deps]
-    return list(deps)
-
-
-def _component_id(name, root):
-    doc_id = _get(root, "doc_id")
-    return doc_id if doc_id else f"comp-{name}"
-
-
-def _generated_code_loc(repo_root, name):
+def _interface_surface(comp):
     count = 0
+    cli = _get(comp, "interface_cli")
+    if cli is not None:
+        count += sum(1 for line in _first_fenced_block(_get(cli, "body")) if line.strip())
+    lib = _get(comp, "interface_library")
+    if lib is not None:
+        count += sum(1 for line in _first_fenced_block(_get(lib, "body")) if _LIB_SIG.match(line))
+    count += len(_get(comp, "interface_data"))
+    return count
+
+
+def _generated_loc(repo_root, name):
+    total = 0
     for path in sorted((Path(repo_root) / "gen" / name).rglob("*.py")):
-        if not path.is_file():
-            continue
         for line in path.read_text(encoding="utf-8").splitlines():
             stripped = line.strip()
             if stripped and not stripped.startswith("#"):
-                count += 1
-    return count
+                total += 1
+    return total
 
 
-def _interface_surface(component):
-    count = 0
-    cli = _get(component, "interface_cli")
-    if cli is not None:
-        for line in _join_continuations(_first_fenced_block(_get(cli, "body") or "")):
-            if line.strip():
-                count += 1
-    library = _get(component, "interface_library")
-    if library is not None:
-        for line in _join_continuations(_first_fenced_block(_get(library, "body") or "")):
-            if _LIBRARY_LINE.match(line):
-                count += 1
-    count += len(_get(component, "interface_data") or {})
-    return count
+def _deps(comp):
+    root = _get(comp, "root")
+    deps = _get(root, "frontmatter").get("depends_on", [])
+    return [d for d in deps if d]
 
 
-def _component_doc_words(graph):
-    cursor = graph.execute("SELECT * FROM component_size")
-    columns = [d[0] for d in cursor.description]
-    rows = cursor.fetchall()
-    wc_index = columns.index("word_count")
-    key_index = next(i for i, c in enumerate(columns) if c != "word_count")
-    return {str(row[key_index]): row[wc_index] for row in rows}
+def _slug(dep):
+    return dep.removeprefix("comp-")
 
 
-def _severity(value, warn, fail):
-    if fail is not None and value > fail:
-        return "fail"
-    if value > warn:
-        return "warn"
-    return None
-
-
-def _finding(rule_id, severity, file, line, message):
-    return {
-        "rule_id": rule_id,
-        "severity": severity,
-        "file": file,
-        "line": line,
-        "message": message,
-    }
-
-
-def _purpose_findings(root, rel):
-    path = _get(root, "path")
-    lines = Path(path).read_text(encoding="utf-8").splitlines()
+def _purpose(root_doc):
+    lines = Path(_get(root_doc, "path")).read_text(encoding="utf-8").splitlines()
     for i, line in enumerate(lines):
-        if _PURPOSE_HEADING.match(line):
-            section = []
+        if line.rstrip() == "## Purpose":
+            words = 0
             for following in lines[i + 1:]:
-                if _H2.match(following):
+                if re.match(r"^##\s", following):
                     break
-                section.append(following)
-            words = len("\n".join(section).split())
-            sev = _severity(words, _PURPOSE_WARN, _PURPOSE_FAIL)
-            if sev is None:
-                return []
-            threshold = _PURPOSE_FAIL if sev == "fail" else _PURPOSE_WARN
-            return [_finding(
-                "R-SIZE-004", sev, rel, i + 1,
-                f"Purpose section has {words} words, above the {sev} "
-                f"threshold of {threshold} (SPEC_GUIDELINES.md §3.4: one paragraph)",
-            )]
-    return []
+                words += len(following.split())
+            return i + 1, words
+    return None, None
 
 
 def check(repo_root: Path) -> list:
-    repo_root = Path(repo_root)
-    corpus_loader = _load_dependency(repo_root, "corpus-loader", "corpus_loader")
-    corpus = corpus_loader.load_corpus(repo_root)
+    loader = _load_corpus_loader(repo_root)
+    corpus = loader.load_corpus(repo_root)
+    components = _get(corpus, "components")
+    graph = _get(corpus, "graph")
 
-    docs = list(_get(corpus, "docs") or [])
-    components = _get(corpus, "components") or {}
-    doc_words = _component_doc_words(_get(corpus, "graph"))
+    bundle = {}
+    rows = graph.execute(
+        "SELECT component_id, generator_words, criterion_words_max FROM bundle_size"
+    ).fetchall()
+    for row in rows:
+        bundle[row[0]] = (int(row[1]), int(row[2]))
 
-    ids_depended_on = []
-    for comp in components.values():
-        ids_depended_on.extend(_depends_on(_get(comp, "root")))
+    deps_by_comp = {name: [_slug(d) for d in _deps(comp)] for name, comp in components.items()}
 
     findings = []
-
     for name in sorted(components):
         comp = components[name]
         root = _get(comp, "root")
-        rel = _get(root, "rel_path") or f"specs/components/{name}/component.md"
-        comp_id = _component_id(name, root)
-        words = doc_words.get(name, doc_words.get(comp_id, 0))
+        file = _get(root, "rel_path")
+        gen_words, crit_words = bundle.get(name, (0, 0))
         values = {
-            "generated_code_loc": _generated_code_loc(repo_root, name),
-            "component_doc_words": words,
-            "requirement_count": len(_get(comp, "requirements") or {}),
+            "generated_code_loc": _generated_loc(repo_root, name),
+            "generator_words": gen_words,
+            "criterion_words_max": crit_words,
+            "requirement_count": len(_get(comp, "requirements")),
             "interface_surface": _interface_surface(comp),
-            "fan_out": len(_depends_on(root)),
-            "fan_in": ids_depended_on.count(comp_id),
-            "guarantee_count": len(_get(comp, "interface_guarantees") or {}),
-            "acceptance_count": len(_get(comp, "acceptance") or {}),
+            "fan_out": len(deps_by_comp[name]),
+            "fan_in": sum(1 for other, deps in deps_by_comp.items() if other != name and name in deps),
+            "guarantee_count": len(_get(comp, "interface_guarantees")),
+            "acceptance_count": len(_get(comp, "acceptance")),
         }
+
         over_warn = []
-        for dim, warn, fail in _DIMENSIONS:
+        for dim, warn, fail in _THRESHOLDS:
             value = values[dim]
-            sev = _severity(value, warn, fail)
-            if sev is None:
-                continue
-            over_warn.append((dim, value))
-            threshold = fail if sev == "fail" else warn
-            findings.append(_finding(
-                "R-SIZE-001", sev, rel, 1,
-                f"{name}: {dim} is {value}, above the {sev} threshold of {threshold}",
-            ))
+            severity, limit = _severity(value, warn, fail)
+            if severity is not None:
+                over_warn.append(f"{dim}={value}")
+                findings.append(_finding(
+                    "R-SIZE-001", severity, file, 1,
+                    f"{name}: {dim} is {value}, above the {severity} threshold of {limit} ({_CAPS_DOC})",
+                ))
+
         if len(over_warn) >= 2:
-            listed = ", ".join(f"{dim}={value}" for dim, value in over_warn)
             findings.append(_finding(
-                "R-SIZE-002", "warn", rel, 1,
-                f"{name}: {len(over_warn)} size-cap dimensions over their warn "
-                f"thresholds at once ({listed}); see SPEC_GUIDELINES.md §4's "
-                f"decomposition-signal guidance",
+                "R-SIZE-002", "warn", file, 1,
+                f"{name}: {len(over_warn)} size-cap dimensions over their warn thresholds at once "
+                f"({', '.join(over_warn)}); see {_CAPS_DOC}'s decomposition-signal rule",
             ))
-        if root is not None:
-            findings.extend(_purpose_findings(root, rel))
 
-    for doc in docs:
-        if _get(doc, "doc_type") not in ("component-requirement", "component-acceptance"):
-            continue
-        words = len((_get(doc, "body") or "").split())
-        sev = _severity(words, _FILE_WARN, _FILE_FAIL)
-        if sev is None:
-            continue
-        threshold = _FILE_FAIL if sev == "fail" else _FILE_WARN
-        rel = _get(doc, "rel_path")
-        findings.append(_finding(
-            "R-SIZE-003", sev, rel, 1,
-            f"{rel} has {words} words, above the per-file {sev} threshold of {threshold}",
-        ))
+        line, words = _purpose(root)
+        if line is not None:
+            severity, limit = _severity(words, _PURPOSE_WARN, _PURPOSE_FAIL)
+            if severity is not None:
+                findings.append(_finding(
+                    "R-SIZE-004", severity, file, line,
+                    f"{name}: Purpose section has {words} words, above the {severity} threshold of {limit} ({_CAPS_DOC})",
+                ))
 
-    order = {_get(doc, "rel_path"): i for i, doc in enumerate(docs)}
-    findings.sort(key=lambda f: (order.get(f["file"], len(order)), f["file"]))
+    for doc in _get(corpus, "docs"):
+        if _get(doc, "doc_type") in ("component-requirement", "component-acceptance"):
+            words = len(_get(doc, "body").split())
+            severity, limit = _severity(words, _FILE_WARN, _FILE_FAIL)
+            if severity is not None:
+                rel = _get(doc, "rel_path")
+                findings.append(_finding(
+                    "R-SIZE-003", severity, rel, 1,
+                    f"{rel} has {words} words, above the per-file {severity} threshold of {limit}",
+                ))
+
+    findings.sort(key=lambda f: f["file"])
     return findings

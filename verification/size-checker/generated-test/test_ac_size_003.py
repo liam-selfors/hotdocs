@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:c2b3999a5d467243d2060ca899ca7e930fa6ff8ed0bd06ae7abf7a2cef5bba25
+# hotdocs-criterion: sha256:3e2423efada13d372c643651e327b84f28d57ac59234c8a2955a865945bcb678
 from pathlib import Path
 
 import size_checker
@@ -8,20 +8,26 @@ def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def _write(path, text):
+def write(path, text):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
 
 
-def _build_fixture(repo_root):
-    comp = repo_root / "specs" / "components" / "foo"
-
-    component_md = (
+def build_fixture(repo_root):
+    specs = repo_root / "specs"
+    write(
+        specs / "glossary.md",
+        "# Glossary\n\n- **Widget** — a small thing used in tests.\n",
+    )
+    comp = specs / "components" / "foo"
+    write(
+        comp / "component.md",
         "---\n"
         "id: comp-foo\n"
         "title: Foo\n"
         "status: draft\n"
-        "owners: [team-a]\n"
+        "owners: [pipeline-team]\n"
+        "depends_on: []\n"
         "sealed: true\n"
         "source_path: legacy/foo/\n"
         "---\n"
@@ -30,123 +36,77 @@ def _build_fixture(repo_root):
         "\n"
         "## Purpose\n"
         "\n"
-        "Foo does a small thing for testing.\n"
-        "\n"
-        "## Scope\n"
-        "\n"
-        "- In scope: the small thing.\n"
-        "\n"
-        "## Definitions\n"
-        "\n"
-        "None.\n"
+        "Foo does a small fixture job for testing size checks.\n"
         "\n"
         "## Behavior\n"
         "\n"
-        "See `requirements/`.\n"
-        "\n"
-        "## Interfaces\n"
-        "\n"
-        "See `interface/`.\n"
-        "\n"
-        "## Data\n"
-        "\n"
-        "See `interface/data/`.\n"
-        "\n"
-        "## Acceptance criteria\n"
-        "\n"
-        "See `acceptance/`.\n"
-        "\n"
-        "## Non-functional constraints\n"
-        "\n"
-        "See `constraints.md`.\n"
-        "\n"
-        "## Open questions\n"
-        "\n"
-        "## Change log\n"
-        "\n"
-        "- Initial.\n"
+        "Foo behaves simply.\n",
     )
-    _write(comp / "component.md", component_md)
-
-    filler = " ".join("filler" + str(i) for i in range(600))
     long_text = (
-        "# R-FOO-001\n"
-        "\n"
-        "**R-FOO-001** — The component MUST do the long thing. "
-        + filler
-        + "\n"
+        "# R-FOO-001\n\n**R-FOO-001** — The component MUST "
+        + " ".join(["word"] * 520)
+        + ".\n"
     )
-    _write(comp / "requirements" / "R-FOO-001.md", long_text)
-
     short_text = (
-        "# R-FOO-002\n"
-        "\n"
-        "**R-FOO-002** — The component MUST do the short thing.\n"
+        "# R-FOO-002\n\n**R-FOO-002** — The component MUST do one short thing.\n"
     )
-    _write(comp / "requirements" / "R-FOO-002.md", short_text)
-
-    ac1 = (
-        "# AC-FOO-001\n"
-        "\n"
-        "Covers: R-FOO-001\n"
-        "Kind: compiled\n"
-        "\n"
-        "Given a thing\n"
-        "When it runs\n"
-        "Then it works\n"
+    write(comp / "requirements" / "R-FOO-001.md", long_text)
+    write(comp / "requirements" / "R-FOO-002.md", short_text)
+    write(
+        comp / "acceptance" / "AC-FOO-001.md",
+        "# AC-FOO-001\n\nCovers: R-FOO-001\nKind: judged\n\n"
+        "Given a thing, when it runs, then it works.\n",
     )
-    _write(comp / "acceptance" / "AC-FOO-001.md", ac1)
-
-    ac2 = (
-        "# AC-FOO-002\n"
-        "\n"
-        "Covers: R-FOO-002\n"
-        "Kind: compiled\n"
-        "\n"
-        "Given another thing\n"
-        "When it runs\n"
-        "Then it also works\n"
+    write(
+        comp / "acceptance" / "AC-FOO-002.md",
+        "# AC-FOO-002\n\nCovers: R-FOO-002\nKind: judged\n\n"
+        "Given a thing, when it runs, then it works.\n",
     )
-    _write(comp / "acceptance" / "AC-FOO-002.md", ac2)
-
-    _write(comp / "constraints.md", "# Constraints\n\nNone.\n")
-
-    total_words = 0
-    for p in comp.rglob("*.md"):
-        total_words += len(p.read_text(encoding="utf-8").split())
-    assert total_words < 4000
-
-    return len(long_text.split()), len(short_text.split())
+    return long_text, short_text
 
 
-def _norm(path_value):
-    return str(path_value).replace("\\", "/")
-
-
-def test_ac_size_003_per_file_word_count(tmp_path):
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    long_count, short_count = _build_fixture(repo_root)
-    assert long_count > 500
-    assert short_count < 250
+def test_ac_size_003(tmp_path):
+    repo_root = tmp_path
+    long_text, short_text = build_fixture(repo_root)
+    long_words = len(long_text.split())
+    short_words = len(short_text.split())
+    assert long_words > 500
+    assert short_words < 250
 
     findings = size_checker.check(repo_root)
 
     long_rel = "specs/components/foo/requirements/R-FOO-001.md"
     short_rel = "specs/components/foo/requirements/R-FOO-002.md"
 
+    def norm(p):
+        return str(p).replace("\\", "/")
+
     size3 = [f for f in findings if field(f, "rule_id") == "R-SIZE-003"]
 
-    long_findings = [f for f in size3 if _norm(field(f, "file")) == long_rel]
-    assert len(long_findings) >= 1, findings
+    long_findings = [f for f in size3 if norm(field(f, "file")) == long_rel]
+    assert long_findings, findings
     fail_findings = [f for f in long_findings if field(f, "severity") == "fail"]
-    assert len(fail_findings) >= 1, long_findings
-    assert any(str(long_count) in str(field(f, "message")) for f in fail_findings), fail_findings
-    for f in fail_findings:
-        assert isinstance(field(f, "line"), int)
+    assert len(fail_findings) == 1, long_findings
+    msg = field(fail_findings[0], "message")
+    expected = (
+        long_rel
+        + " has "
+        + str(long_words)
+        + " words, above the per-file fail threshold of 500"
+    )
+    assert msg == expected
+    assert str(long_words) in msg
 
-    short_findings = [f for f in size3 if _norm(field(f, "file")) == short_rel]
-    assert short_findings == [], short_findings
+    short_findings = [f for f in size3 if norm(field(f, "file")) == short_rel]
+    assert short_findings == []
 
-    size1 = [f for f in findings if field(f, "rule_id") == "R-SIZE-001"]
-    assert size1 == [], size1
+    size1_word = [
+        f
+        for f in findings
+        if field(f, "rule_id") == "R-SIZE-001"
+        and (
+            "generator_words" in field(f, "message")
+            or "criterion_words_max" in field(f, "message")
+        )
+    ]
+    assert size1_word == []

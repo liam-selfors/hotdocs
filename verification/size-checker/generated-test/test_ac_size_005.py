@@ -1,5 +1,4 @@
-# hotdocs-criterion: sha256:8108e8ea1bbd12a97f8a03dc5c415ced933175af7a4acd5c0100df37a0509428
-import re
+# hotdocs-criterion: sha256:6b26721f2bc11025222f7038075749393625c43523a37e6ed3fe018447504b7f
 from pathlib import Path
 
 import size_checker
@@ -14,121 +13,113 @@ def write(path, text):
     path.write_text(text, encoding="utf-8")
 
 
-COMPONENT_MD = (
-    "---\n"
-    "id: comp-foo\n"
-    "title: Foo\n"
-    "status: draft\n"
-    "owners: [team-a]\n"
-    "sealed: true\n"
-    "source_path: legacy/foo/\n"
-    "---\n"
-    "\n"
-    "# Foo\n"
-    "\n"
-    "## Purpose\n"
-    "\n"
-    "Does a small thing.\n"
-    "\n"
-    "## Scope\n"
-    "\n"
-    "- In scope: the small thing.\n"
-    "\n"
-    "## Definitions\n"
-    "\n"
-    "None.\n"
-    "\n"
-    "## Behavior\n"
-    "\n"
-    "See `requirements/`.\n"
-    "\n"
-    "## Interfaces\n"
-    "\n"
-    "See `interface/`.\n"
-    "\n"
-    "## Data\n"
-    "\n"
-    "See `interface/data/`.\n"
-    "\n"
-    "## Acceptance criteria\n"
-    "\n"
-    "See `acceptance/`.\n"
-    "\n"
-    "## Non-functional constraints\n"
-    "\n"
-    "See `constraints.md`.\n"
-    "\n"
-    "## Open questions\n"
-    "\n"
-    "## Change log\n"
-    "\n"
-    "- Created.\n"
-)
-
-CLI_MD = (
-    "# CLI\n"
-    "\n"
-    "```\n"
-    "foo run --fast\n"
-    "foo build \\\n"
-    "  --target x\n"
-    "\n"
-    "foo clean\n"
-    "```\n"
-)
-
-LIBRARY_MD = (
-    "# Library\n"
-    "\n"
-    "```\n"
-    "alpha(x: int) -> int\n"
-    "beta(y: str) -> str\n"
-    "gamma() -> None\n"
-    "delta(a: int, b: int) -> list\n"
-    "epsilon(path: Path) -> dict\n"
-    "These functions do small things.\n"
-    "```\n"
-)
-
-
 def build_fixture(repo_root):
-    specs = repo_root / "specs"
-    write(specs / "glossary.md", "# Glossary\n\n- **Foo** — a thing.\n")
-    comp = specs / "components" / "foo"
-    write(comp / "component.md", COMPONENT_MD)
+    comp = repo_root / "specs" / "components" / "widget"
+
     write(
-        comp / "requirements" / "R-FOO-001.md",
-        "# R-FOO-001\n\n**R-FOO-001** — Foo MUST do the small thing.\n",
+        comp / "component.md",
+        "---\n"
+        "id: comp-widget\n"
+        "title: Widget\n"
+        "status: draft\n"
+        "owners: [pipeline-team]\n"
+        "depends_on: []\n"
+        "sealed: true\n"
+        "source_path: legacy/widget/\n"
+        "---\n"
+        "\n"
+        "# Widget\n"
+        "\n"
+        "## Purpose\n"
+        "\n"
+        "Widget does a small thing for tests.\n",
+    )
+
+    write(
+        comp / "requirements" / "R-WIDGET-001.md",
+        "**R-WIDGET-001** — The widget MUST do the small thing.\n",
     )
     write(
-        comp / "acceptance" / "AC-FOO-001.md",
-        "# AC-FOO-001\n\nCovers: R-FOO-001\nKind: compiled\n\n"
-        "```gherkin\nGiven foo\nWhen it runs\nThen it works\n```\n",
+        comp / "acceptance" / "AC-WIDGET-001.md",
+        "# AC-WIDGET-001\n"
+        "\n"
+        "Covers: R-WIDGET-001\n"
+        "Kind: generated-test\n"
+        "\n"
+        "```gherkin\n"
+        "Given a widget\n"
+        "When it runs\n"
+        "Then it does the small thing\n"
+        "```\n",
     )
-    write(comp / "interface" / "cli.md", CLI_MD)
-    write(comp / "interface" / "library.md", LIBRARY_MD)
-    for name in ("Alpha", "Beta", "Gamma"):
+
+    # cli.md: first fenced block has three non-blank (logical) lines, one of
+    # which ends in a backslash joining it to a fourth physical line, plus
+    # one blank line.
+    backslash = "\\"
+    write(
+        comp / "interface" / "cli.md",
+        "# CLI\n"
+        "\n"
+        "```\n"
+        "widget run --input FILE " + backslash + "\n"
+        "    --output FILE\n"
+        "\n"
+        "widget status\n"
+        "widget version\n"
+        "```\n"
+        "\n"
+        "Prose after the block.\n",
+    )
+
+    # library.md: first fenced block has five signature lines and one prose line.
+    write(
+        comp / "interface" / "library.md",
+        "# Library\n"
+        "\n"
+        "```\n"
+        "alpha(x: int) -> int\n"
+        "beta(y: str) -> str\n"
+        "gamma() -> None\n"
+        "delta(a: int, b: int) -> list\n"
+        "epsilon(path: Path) -> dict\n"
+        "This line is prose and not a signature.\n"
+        "```\n"
+        "\n"
+        "Some explanation.\n",
+    )
+
+    # interface/data/: three files.
+    for stem in ("Alpha", "Beta", "Gamma"):
         write(
-            comp / "interface" / "data" / (name + ".md"),
-            "# " + name + "\n\nA small type.\n",
+            comp / "interface" / "data" / (stem + ".md"),
+            "# " + stem + "\n\nA small data shape.\n",
         )
+
     write(comp / "constraints.md", "# Constraints\n\nNone.\n")
 
 
-def test_ac_size_005_interface_surface_eleven_warns(tmp_path):
+def test_ac_size_005_interface_surface_warn(tmp_path):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
     build_fixture(repo_root)
 
     findings = size_checker.check(repo_root)
 
-    size_findings = [
-        f for f in findings if field(f, "rule_id") == "R-SIZE-001"
+    size_001 = [
+        f
+        for f in findings
+        if field(f, "rule_id") == "R-SIZE-001"
+        and str(field(f, "message")).startswith("widget: ")
     ]
-    assert len(size_findings) == 1, size_findings
-    finding = size_findings[0]
+
+    assert len(size_001) == 1, size_001
+    finding = size_001[0]
     assert field(finding, "severity") == "warn"
     message = field(finding, "message")
     assert "interface_surface" in message
-    assert re.search(r"(?<!\d)11(?!\d)", message), message
-    assert "specs/components/foo/" in field(finding, "file").replace("\\", "/")
+    assert "11" in message
+    assert message == (
+        "widget: interface_surface is 11, above the warn threshold of 10 "
+        "(specs/architecture/size-caps.md)"
+    )

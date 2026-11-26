@@ -1,4 +1,7 @@
-# hotdocs-criterion: sha256:6ee991347726be10bf8cf42eb2039acfc6d862e8edea525ebf885d661e3a4faa
+# hotdocs-criterion: sha256:6690325761601a1e9b28d02c81241ed69cafd4273ac8d96284f9f924c6fd23eb
+"""AC-SIZE-001: a component whose generated-code LOC estimate exceeds 1500
+yields a fail-severity R-SIZE-001 finding naming `generated_code_loc`."""
+
 from pathlib import Path
 
 import size_checker
@@ -17,23 +20,8 @@ def build_fixture(repo_root):
     specs = repo_root / "specs"
 
     write(
-        specs / "product" / "foo.md",
-        "---\n"
-        "id: P-FOO\n"
-        "title: Foo capability\n"
-        "status: draft\n"
-        "owners: [team-a]\n"
-        "---\n"
-        "\n"
-        "# Foo capability\n"
-        "\n"
-        "## Purpose\n"
-        "\n"
-        "Provides foo.\n"
-        "\n"
-        "## Scope\n"
-        "\n"
-        "- In scope: foo.\n",
+        specs / "glossary.md",
+        "# Glossary\n\n- **Widget** — a fixture term.\n",
     )
 
     comp = specs / "components" / "foo"
@@ -43,103 +31,67 @@ def build_fixture(repo_root):
         "id: comp-foo\n"
         "title: Foo\n"
         "status: draft\n"
-        "owners: [team-a]\n"
-        "realizes: [P-FOO]\n"
+        "owners: [pipeline-team]\n"
+        "depends_on: []\n"
+        "sealed: true\n"
+        "source_path: legacy/foo/\n"
         "---\n"
         "\n"
         "# Foo\n"
         "\n"
         "## Purpose\n"
         "\n"
-        "Does foo things for the test fixture.\n"
-        "\n"
-        "## Scope\n"
-        "\n"
-        "- In scope: foo.\n"
-        "- Out of scope: bar.\n"
-        "\n"
-        "## Definitions\n"
-        "\n"
-        "None.\n"
-        "\n"
-        "## Behavior\n"
-        "\n"
-        "See `requirements/`.\n"
-        "\n"
-        "## Interfaces\n"
-        "\n"
-        "See `interface/`.\n"
-        "\n"
-        "## Data\n"
-        "\n"
-        "See `interface/data/`.\n"
-        "\n"
-        "## Acceptance criteria\n"
-        "\n"
-        "See `acceptance/`.\n"
-        "\n"
-        "## Non-functional constraints\n"
-        "\n"
-        "See `constraints.md`.\n"
-        "\n"
-        "## Open questions\n"
-        "\n"
-        "## Change log\n"
-        "\n"
-        "- Initial.\n",
+        "A small fixture component used to exercise the size checker.\n",
     )
     write(
         comp / "requirements" / "R-FOO-001.md",
-        "# R-FOO-001\n"
-        "\n"
-        "**R-FOO-001** — The component MUST do foo.\n",
+        "**R-FOO-001** — The component MUST do one small thing.\n",
     )
     write(
         comp / "acceptance" / "AC-FOO-001.md",
         "# AC-FOO-001\n"
         "\n"
         "Covers: R-FOO-001\n"
-        "Kind: compiled\n"
+        "Kind: generated-test\n"
         "\n"
         "```gherkin\n"
-        "Given foo\n"
-        "When foo runs\n"
-        "Then foo happens\n"
+        "Given a thing\n"
+        "When it runs\n"
+        "Then it does one small thing\n"
         "```\n",
     )
     write(
-        comp / "constraints.md",
-        "# Constraints\n"
+        comp / "interface" / "library.md",
+        "# Library\n"
         "\n"
-        "None.\n",
+        "```\n"
+        "do_thing() -> None\n"
+        "```\n",
     )
 
-    # Generated code well above the 1500 LOC hard-fail cap: 1600 non-blank,
-    # non-comment lines, plus some blank and comment lines that must not count.
-    lines = ["# generated module"]
+    # 1600 non-blank, non-comment lines of generated code: above the
+    # 1500 LOC hard-fail threshold.
+    lines = []
     for i in range(1600):
-        lines.append("value_" + str(i) + " = " + repr(i))
-        if i % 100 == 0:
-            lines.append("")
-            lines.append("# comment " + str(i))
+        lines.append("x_" + str(i) + " = " + repr(i))
     write(repo_root / "gen" / "foo" / "foo.py", "\n".join(lines) + "\n")
 
 
-def test_ac_size_001_generated_code_loc_over_1500_fails(tmp_path):
+def test_ac_size_001_generated_code_loc_over_fail_threshold(tmp_path):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
     build_fixture(repo_root)
 
     findings = size_checker.check(repo_root)
 
-    matching = [
+    size_001 = [f for f in findings if field(f, "rule_id") == "R-SIZE-001"]
+    loc_fail = [
         f
-        for f in findings
-        if field(f, "rule_id") == "R-SIZE-001"
-        and field(f, "severity") == "fail"
+        for f in size_001
+        if field(f, "severity") == "fail"
         and "generated_code_loc" in field(f, "message")
     ]
-    assert matching, (
-        "expected a fail-severity R-SIZE-001 finding naming generated_code_loc, got: "
+    assert loc_fail, (
+        "expected a fail-severity R-SIZE-001 finding naming generated_code_loc; got "
         + repr(findings)
     )
