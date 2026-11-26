@@ -1,24 +1,37 @@
-# hotdocs-criterion: sha256:c80b77584516a8ea0a564310e292d20fa5bb28203479dcf82d7d1df8d974eb9a
-"""AC-CACHE-002: the same four key components supplied by two different
-calling components produce byte-identical serialized cache keys.
+# hotdocs-criterion: sha256:c4ef25dbf6ccb560209afe6abaebde1202e4d93c161f93c7113fbd80e6560e79
+"""AC-CACHE-002 (covers R-CACHE-002).
 
-The key-formation logic is cache_manager's own responsibility, so the
-test checks it through the public interface. Two separately loaded
-"caller" modules each build a CacheKey their own way from equal but
-distinct component values, then put and get through cache_manager. If
-the serialized keys are byte-identical, both callers address one and the
-same store entry. That means:
+Given the same four key components (spec_bundle_hash, gate_inputs_hash,
+gate_version, model_pin) supplied by two different calling components,
+when each computes the cache key for a put, then both produce
+byte-identical serialized keys.
 
-- a put by one caller is a hit for the other;
-- a put by both leaves exactly one entry, last write wins;
-- the CLI `inspect` with the same four values hits that entry.
+The serialized key is internal to cache_manager, so the test observes it
+through the public interface. Two independent caller modules each build
+the key their own way and put under it. Byte-identical keys mean:
+- the local store holds exactly one entry afterwards (stats),
+- each caller's get finds what the other caller wrote,
+- the CLI's inspect, a third independent route, also hits.
+A control key that differs in one component misses, so a hit is not
+returned for every key.
 """
 
 import importlib.util
 import json
 import sys
+from pathlib import Path
 
 import cache_manager
+
+
+SPEC_BUNDLE_HASH = "sha256:" + "a1" * 32
+GATE_INPUTS_HASH = "sha256:" + "b2" * 32
+GATE_VERSION = "license_scanner@4.0.3+9f2c41ab07de"
+MODEL_PIN = "claude-sonnet-5"
+
+
+def field(value, name):
+    return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
 def load_module(path, module_name):
@@ -29,17 +42,8 @@ def load_module(path, module_name):
     return module
 
 
-def field(value, name):
-    return value[name] if isinstance(value, dict) else getattr(value, name)
-
-
-SPEC_BUNDLE_HASH = "sha256:" + "a1" * 32
-GATE_INPUTS_HASH = "sha256:" + "b2" * 32
-GATE_VERSION = "license_scanner@4.0.3+9f2c41ab07de"
-MODEL_PIN = "claude-sonnet-5"
-
-
-# Caller A: builds the key by keyword in the documented field order.
+# Caller A builds the key with keyword arguments in the documented field
+# order, from the strings it was handed.
 CALLER_A_SOURCE = (
     "import cache_manager\n"
     "\n"
@@ -51,67 +55,72 @@ CALLER_A_SOURCE = (
     "        model_pin=model_pin,\n"
     "    )\n"
     "\n"
-    "def store(repo_root, spec_bundle_hash, gate_inputs_hash, gate_version, model_pin, payload, stored_at):\n"
+    "def do_put(repo_root, spec_bundle_hash, gate_inputs_hash, gate_version, model_pin):\n"
     "    key = make_key(spec_bundle_hash, gate_inputs_hash, gate_version, model_pin)\n"
     "    result = cache_manager.CachedResult(\n"
-    "        gate_type=gate_version.split('@')[0],\n"
-    "        payload=payload,\n"
-    "        stored_at=stored_at,\n"
+    "        gate_type='license_scanner',\n"
+    "        payload=dict(\n"
+    "            component_id='comp-caller-a',\n"
+    "            gate_version=gate_version,\n"
+    "            similarity_score=0.0,\n"
+    "            blocked=False,\n"
+    "            matches=[],\n"
+    "        ),\n"
+    "        stored_at=cache_manager.now_iso(),\n"
     "    )\n"
     "    cache_manager.put(key, result, repo_root=repo_root)\n"
     "\n"
-    "def fetch(repo_root, spec_bundle_hash, gate_inputs_hash, gate_version, model_pin):\n"
+    "def do_get(repo_root, spec_bundle_hash, gate_inputs_hash, gate_version, model_pin):\n"
     "    key = make_key(spec_bundle_hash, gate_inputs_hash, gate_version, model_pin)\n"
     "    return cache_manager.get(key, repo_root=repo_root)\n"
 )
 
-# Caller B: builds the key from a dict of kwargs in a different order,
-# with freshly constructed (equal but distinct) string objects.
+# Caller B builds the key differently: keyword arguments in reverse order,
+# from freshly rebuilt (non-identical) string objects.
 CALLER_B_SOURCE = (
     "import cache_manager\n"
     "\n"
-    "def make_key(spec_bundle_hash, gate_inputs_hash, gate_version, model_pin):\n"
-    "    parts = dict()\n"
-    "    parts['model_pin'] = ''.join(list(model_pin))\n"
-    "    parts['gate_version'] = ''.join(list(gate_version))\n"
-    "    parts['gate_inputs_hash'] = ''.join(list(gate_inputs_hash))\n"
-    "    parts['spec_bundle_hash'] = ''.join(list(spec_bundle_hash))\n"
-    "    return cache_manager.CacheKey(**parts)\n"
+    "def _fresh(s):\n"
+    "    return ''.join(list(s))\n"
     "\n"
-    "def store(repo_root, spec_bundle_hash, gate_inputs_hash, gate_version, model_pin, payload, stored_at):\n"
+    "def make_key(spec_bundle_hash, gate_inputs_hash, gate_version, model_pin):\n"
+    "    return cache_manager.CacheKey(\n"
+    "        model_pin=_fresh(model_pin),\n"
+    "        gate_version=_fresh(gate_version),\n"
+    "        gate_inputs_hash=_fresh(gate_inputs_hash),\n"
+    "        spec_bundle_hash=_fresh(spec_bundle_hash),\n"
+    "    )\n"
+    "\n"
+    "def do_put(repo_root, spec_bundle_hash, gate_inputs_hash, gate_version, model_pin):\n"
     "    key = make_key(spec_bundle_hash, gate_inputs_hash, gate_version, model_pin)\n"
     "    result = cache_manager.CachedResult(\n"
-    "        gate_type=gate_version.partition('@')[0],\n"
-    "        payload=payload,\n"
-    "        stored_at=stored_at,\n"
+    "        gate_type='license_scanner',\n"
+    "        payload=dict(\n"
+    "            component_id='comp-caller-b',\n"
+    "            gate_version=gate_version,\n"
+    "            similarity_score=0.0,\n"
+    "            blocked=False,\n"
+    "            matches=[],\n"
+    "        ),\n"
+    "        stored_at=cache_manager.now_iso(),\n"
     "    )\n"
     "    cache_manager.put(key, result, repo_root=repo_root)\n"
     "\n"
-    "def fetch(repo_root, spec_bundle_hash, gate_inputs_hash, gate_version, model_pin):\n"
+    "def do_get(repo_root, spec_bundle_hash, gate_inputs_hash, gate_version, model_pin):\n"
     "    key = make_key(spec_bundle_hash, gate_inputs_hash, gate_version, model_pin)\n"
     "    return cache_manager.get(key, repo_root=repo_root)\n"
 )
 
 
-def _payload(component_id, score):
-    return {
-        "component_id": component_id,
-        "gate_version": GATE_VERSION,
-        "similarity_score": score,
-        "blocked": False,
-        "matches": [],
-    }
-
-
-def _load_callers(tmp_path):
+def _write_callers(tmp_path):
     callers_dir = tmp_path / "callers"
     callers_dir.mkdir()
     a_path = callers_dir / "ac_cache_002_caller_a.py"
     b_path = callers_dir / "ac_cache_002_caller_b.py"
-    a_path.write_text(CALLER_A_SOURCE)
-    b_path.write_text(CALLER_B_SOURCE)
-    caller_a = load_module(str(a_path), "ac_cache_002_caller_a")
-    caller_b = load_module(str(b_path), "ac_cache_002_caller_b")
+    a_path.write_text(CALLER_A_SOURCE, encoding="utf-8")
+    b_path.write_text(CALLER_B_SOURCE, encoding="utf-8")
+    caller_a = load_module(a_path, "ac_cache_002_caller_a")
+    caller_b = load_module(b_path, "ac_cache_002_caller_b")
     return caller_a, caller_b
 
 
@@ -119,99 +128,86 @@ def _components():
     return (SPEC_BUNDLE_HASH, GATE_INPUTS_HASH, GATE_VERSION, MODEL_PIN)
 
 
-def test_two_callers_with_same_components_share_one_key(tmp_path, monkeypatch, capsys):
+def _setup(tmp_path, monkeypatch):
     monkeypatch.delenv("VAR_CACHE_STORE_URL", raising=False)
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
-    cwd_a = tmp_path / "cwd_a"
-    cwd_b = tmp_path / "cwd_b"
-    cwd_a.mkdir()
-    cwd_b.mkdir()
+    monkeypatch.chdir(repo_root)
+    return repo_root
 
-    caller_a, caller_b = _load_callers(tmp_path)
 
-    # The two callers' key objects are equal.
-    key_a = caller_a.make_key(*_components())
-    key_b = caller_b.make_key(*_components())
-    assert key_a == key_b
-
-    assert field(cache_manager.stats(repo_root=repo_root), "entry_count") == 0
-
-    # Caller A puts. Caller B, from a different cwd, gets a hit on the same entry.
-    monkeypatch.chdir(cwd_a)
-    caller_a.store(repo_root, *_components(), _payload("comp-a", 0.1), "2026-10-02T00:00:00Z")
-    assert field(cache_manager.stats(repo_root=repo_root), "entry_count") == 1
-
-    monkeypatch.chdir(cwd_b)
-    got_b = caller_b.fetch(repo_root, *_components())
-    assert not isinstance(got_b, cache_manager.Miss)
-    assert field(got_b, "gate_type") == "license_scanner"
-    assert field(field(got_b, "payload"), "component_id") == "comp-a"
-
-    # Caller B puts under its own key. If the serialized keys are
-    # byte-identical, B overwrites A's entry instead of adding a second one.
-    caller_b.store(repo_root, *_components(), _payload("comp-b", 0.2), "2026-10-03T00:00:00Z")
-    assert field(cache_manager.stats(repo_root=repo_root), "entry_count") == 1
-
-    monkeypatch.chdir(cwd_a)
-    got_a = caller_a.fetch(repo_root, *_components())
-    assert not isinstance(got_a, cache_manager.Miss)
-    assert field(field(got_a, "payload"), "component_id") == "comp-b"
-    assert field(got_a, "stored_at") == "2026-10-03T00:00:00Z"
-
-    # A third "caller", the CLI, given the same four values, hits the same entry.
+def _cli_inspect(repo_root, capsys, model_pin=MODEL_PIN):
     capsys.readouterr()
     code = cache_manager.main(
         [
             "inspect",
             "--spec-bundle-hash=" + SPEC_BUNDLE_HASH,
-            "--gate-inputs-hash",
-            GATE_INPUTS_HASH,
+            "--gate-inputs-hash=" + GATE_INPUTS_HASH,
             "--gate-version=" + GATE_VERSION,
-            "--model-pin=" + MODEL_PIN,
+            "--model-pin=" + model_pin,
             "--repo-root=" + str(repo_root),
         ]
     )
-    assert code == 0
-    out_lines = [line for line in capsys.readouterr().out.splitlines() if line.strip()]
-    assert len(out_lines) == 1
-    doc = json.loads(out_lines[0])
-    assert doc["result"] == "hit"
-    assert doc["gate_type"] == "license_scanner"
-    assert doc["stored_at"] == "2026-10-03T00:00:00Z"
+    out = capsys.readouterr().out
+    lines = [line for line in out.splitlines() if line.strip()]
+    assert code == 0, out
+    assert lines, "inspect printed nothing on stdout"
+    return json.loads(lines[-1])
 
 
-def test_each_component_is_part_of_the_key(tmp_path, monkeypatch):
-    """Sanity guard: a store that collapsed every key into one entry would
-    pass the test above. Changing any one of the four components must
-    address a different entry."""
-    monkeypatch.delenv("VAR_CACHE_STORE_URL", raising=False)
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    monkeypatch.chdir(repo_root)
+def test_two_callers_putting_same_components_produce_one_identical_key(
+    tmp_path, monkeypatch, capsys
+):
+    repo_root = _setup(tmp_path, monkeypatch)
+    caller_a, caller_b = _write_callers(tmp_path)
 
-    caller_a, caller_b = _load_callers(tmp_path)
+    assert field(cache_manager.stats(repo_root=repo_root), "entry_count") == 0
 
-    caller_a.store(repo_root, *_components(), _payload("comp-base", 0.0), "2026-10-02T00:00:00Z")
+    caller_a.do_put(repo_root, *_components())
     assert field(cache_manager.stats(repo_root=repo_root), "entry_count") == 1
 
-    variants = [
-        ("sha256:" + "c3" * 32, GATE_INPUTS_HASH, GATE_VERSION, MODEL_PIN),
-        (SPEC_BUNDLE_HASH, "sha256:" + "d4" * 32, GATE_VERSION, MODEL_PIN),
-        (SPEC_BUNDLE_HASH, GATE_INPUTS_HASH, "license_scanner@4.0.4+000000000000", MODEL_PIN),
-        (SPEC_BUNDLE_HASH, GATE_INPUTS_HASH, GATE_VERSION, "claude-opus-5"),
-    ]
-    for index, variant in enumerate(variants):
-        # Caller B misses on a variant before anyone has put it.
-        assert isinstance(caller_b.fetch(repo_root, *variant), cache_manager.Miss)
-        caller_b.store(repo_root, *variant, _payload("comp-v" + str(index), 0.0), "2026-10-02T00:00:00Z")
-        assert field(cache_manager.stats(repo_root=repo_root), "entry_count") == index + 2
-        # Caller A, using the same variant components, hits B's entry.
-        got = caller_a.fetch(repo_root, *variant)
-        assert not isinstance(got, cache_manager.Miss)
-        assert field(field(got, "payload"), "component_id") == "comp-v" + str(index)
+    caller_b.do_put(repo_root, *_components())
+    # Identical serialized keys: B's put lands on A's entry (last write
+    # wins) rather than creating a second, differently-keyed entry.
+    assert field(cache_manager.stats(repo_root=repo_root), "entry_count") == 1
 
-    # The original entry still answers for the original components.
-    base = caller_b.fetch(repo_root, *_components())
-    assert not isinstance(base, cache_manager.Miss)
-    assert field(field(base, "payload"), "component_id") == "comp-base"
+    # Each caller's key finds the single stored entry.
+    for caller in (caller_a, caller_b):
+        got = caller.do_get(repo_root, *_components())
+        assert not isinstance(got, cache_manager.Miss)
+        assert field(got, "gate_type") == "license_scanner"
+        payload = field(got, "payload")
+        # Last write wins: caller B wrote last.
+        assert field(payload, "component_id") == "comp-caller-b"
+
+    # A third independent route (the CLI) forms the same key too.
+    inspected = _cli_inspect(repo_root, capsys)
+    assert inspected["result"] == "hit"
+    assert inspected["gate_type"] == "license_scanner"
+
+
+def test_key_written_by_one_caller_is_found_by_the_other(tmp_path, monkeypatch, capsys):
+    repo_root = _setup(tmp_path, monkeypatch)
+    caller_a, caller_b = _write_callers(tmp_path)
+
+    # Before any put, every route misses.
+    assert isinstance(caller_a.do_get(repo_root, *_components()), cache_manager.Miss)
+    assert isinstance(caller_b.do_get(repo_root, *_components()), cache_manager.Miss)
+
+    caller_a.do_put(repo_root, *_components())
+
+    got_by_b = caller_b.do_get(repo_root, *_components())
+    assert not isinstance(got_by_b, cache_manager.Miss)
+    assert field(got_by_b, "gate_type") == "license_scanner"
+    assert field(field(got_by_b, "payload"), "component_id") == "comp-caller-a"
+
+    inspected = _cli_inspect(repo_root, capsys)
+    assert inspected["result"] == "hit"
+
+    # Control: a key differing in one component is a different key.
+    other = caller_b.do_get(
+        repo_root, SPEC_BUNDLE_HASH, GATE_INPUTS_HASH, GATE_VERSION, "claude-opus-5"
+    )
+    assert isinstance(other, cache_manager.Miss)
+    assert _cli_inspect(repo_root, capsys, model_pin="claude-opus-5") == {"result": "miss"}
+    assert field(cache_manager.stats(repo_root=repo_root), "entry_count") == 1

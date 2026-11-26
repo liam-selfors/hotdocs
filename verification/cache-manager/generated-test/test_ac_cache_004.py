@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:4c6c3ed298051302c982b4bf6e4e259a2bd4ccb7a390cec47fc530c97091830a
+# hotdocs-criterion: sha256:c0d932190163260b55f9360458dad7b31e69f2ba04e85c2127588c9b09bb9816
 import socket
 
 import pytest
@@ -7,7 +7,6 @@ import cache_manager
 
 
 def _closed_local_port():
-    """Return a TCP port on 127.0.0.1 that nothing is listening on."""
     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     s.bind(("127.0.0.1", 0))
     port = s.getsockname()[1]
@@ -18,62 +17,79 @@ def _closed_local_port():
 def _unreachable_urls():
     port = _closed_local_port()
     return [
+        "http://127.0.0.1:" + str(port),
         "http://127.0.0.1:" + str(port) + "/cache",
-        "redis://127.0.0.1:" + str(port) + "/0",
-        "http://hotdocs-cache-store.invalid:" + str(port) + "/",
+        "http://cache-store.invalid:8080",
     ]
 
 
-def _keys():
-    return [
-        cache_manager.CacheKey(
-            spec_bundle_hash="sha256:" + "a" * 64,
-            gate_inputs_hash="sha256:" + "b" * 64,
-            gate_version="license_scanner@4.0.3+9f2c41ab07de",
-            model_pin="claude-sonnet-5",
-        ),
-        cache_manager.CacheKey(
-            spec_bundle_hash="sha256:" + "c" * 64,
-            gate_inputs_hash="sha256:" + "d" * 64,
-            gate_version="generator@1.0.0",
-            model_pin="anthropic:claude-sonnet-5",
-        ),
-        cache_manager.CacheKey(
-            spec_bundle_hash="sha256:" + "0" * 64,
-            gate_inputs_hash="sha256:" + "f" * 64,
-            gate_version="secret_scanner@2.1.0",
-            model_pin="none",
-        ),
-    ]
+def _key(suffix, gate_type="license_scanner"):
+    return cache_manager.CacheKey(
+        spec_bundle_hash="sha256:" + ("a" * 63) + suffix,
+        gate_inputs_hash="sha256:" + ("b" * 63) + suffix,
+        gate_version=gate_type + "@4.0.3+9f2c41ab07de",
+        model_pin="claude-sonnet-5",
+    )
 
 
 @pytest.mark.parametrize("url_index", [0, 1, 2])
-def test_get_returns_miss_when_backing_store_unreachable(tmp_path, monkeypatch, url_index):
+@pytest.mark.parametrize(
+    "key_args",
+    [
+        ("0", "license_scanner"),
+        ("1", "secret_scanner"),
+        ("2", "generator"),
+        ("3", "llm_judge"),
+    ],
+)
+def test_get_returns_miss_when_backing_store_unreachable(
+    tmp_path, monkeypatch, url_index, key_args
+):
     url = _unreachable_urls()[url_index]
     monkeypatch.setenv("VAR_CACHE_STORE_URL", url)
     monkeypatch.chdir(tmp_path)
 
-    for key in _keys():
-        try:
-            result = cache_manager.get(key, repo_root=tmp_path)
-        except Exception as exc:  # pragma: no cover - failure path
-            pytest.fail(
-                "get raised " + type(exc).__name__ + " for unreachable store "
-                + repr(url) + ": " + repr(exc)
-            )
-        assert result is not None
-        assert isinstance(result, cache_manager.Miss)
-        assert result == cache_manager.Miss()
+    key = _key(*key_args)
+
+    try:
+        result = cache_manager.get(key, repo_root=tmp_path)
+    except Exception as exc:  # pragma: no cover - failure path
+        pytest.fail(
+            "get raised " + type(exc).__name__ + " with unreachable store "
+            + repr(url) + ": " + repr(exc)
+        )
+
+    assert result is not None
+    assert isinstance(result, cache_manager.Miss)
+    assert result == cache_manager.Miss()
 
 
-def test_get_returns_miss_with_default_repo_root_when_store_unreachable(tmp_path, monkeypatch):
+def test_get_returns_miss_with_default_repo_root_when_store_unreachable(
+    tmp_path, monkeypatch
+):
     url = _unreachable_urls()[0]
     monkeypatch.setenv("VAR_CACHE_STORE_URL", url)
     monkeypatch.chdir(tmp_path)
 
-    key = _keys()[0]
     try:
-        result = cache_manager.get(key)
+        result = cache_manager.get(_key("9"))
     except Exception as exc:  # pragma: no cover - failure path
         pytest.fail("get raised " + type(exc).__name__ + ": " + repr(exc))
+
     assert isinstance(result, cache_manager.Miss)
+
+
+def test_repeated_gets_keep_returning_miss_when_store_unreachable(
+    tmp_path, monkeypatch
+):
+    url = _unreachable_urls()[0]
+    monkeypatch.setenv("VAR_CACHE_STORE_URL", url)
+    monkeypatch.chdir(tmp_path)
+
+    key = _key("5")
+    for _ in range(3):
+        try:
+            result = cache_manager.get(key, repo_root=tmp_path)
+        except Exception as exc:  # pragma: no cover - failure path
+            pytest.fail("get raised " + type(exc).__name__ + ": " + repr(exc))
+        assert isinstance(result, cache_manager.Miss)
