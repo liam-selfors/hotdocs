@@ -21,11 +21,7 @@ regeneration and re-verification for that component.
 
 ## Rationale
 
-`cache-manager` records that a candidate was *produced*, never that
-it was *verified* (`D29`). `.provenance.json` is written only from
-`verifier-orchestrator`'s real output (`R-PROV-005`) and reaches a
-committed directory only past `R-MERGE-011`, so a matching one on disk
-*is* the proof.
+See `D29`: a matching manifest on disk is the proof of verification.
 
 ## Scope
 
@@ -67,7 +63,6 @@ See `interface/data/`.
 
 See `acceptance/`.
 
-Every criterion is `kind: generated-test` (`D43`).
 
 ## Non-functional constraints
 
@@ -79,17 +74,5 @@ None.
 
 ## Change log
 
-- Initial draft (`D29`).
-- `D47`: first real implementation.
-- `D163`: `current_provenance_key`, the one definition of the key a hit
-  compares; `R-PROVCHECK-006` covers the CLI (`D162`).
-- `D170`: the sealed counterpart (`R-PROVCHECK-007`/`008`).
-- `D313`: the key names the generator's version.
-- `D343`: the key includes each declared asset's definition, adapter
-  and environment (`R-PROVCHECK-009`); a miss names its `reason`.
-- `D344`: the assets value starts with the implicit `python` entry, path
-  `"."`, for every component; a manifest with no `assets` now misses
-  with `assets differ`. Tests plant a fake `python` adapter.
-- `D345`: a miss only in assets' `versions` or `lockfile_sha256` is
-  `environment differs` (`R-PROVCHECK-010`), so `component-gate-runner`
-  re-verifies instead of regenerating.
+`D29`, `D47`, `D162`, `D163`, `D170`, `D313`, `D343`, `D344`, `D345`,
+`D379`.

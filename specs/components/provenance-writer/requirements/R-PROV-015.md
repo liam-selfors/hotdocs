@@ -6,5 +6,4 @@
   `write_provenance` succeeds; exit `1` on `MissingInputError` (a
   required upstream result was absent); exit `2` on any usage error —
   wrong/missing positional arguments, an unrecognized `--` flag, a
-  `--repo-root` with no value, or malformed JSON on stdin. Found by
-  mutation testing, since no criterion had covered the CLI (`D130`).
+  `--repo-root` with no value, or malformed JSON on stdin. (`D130`)

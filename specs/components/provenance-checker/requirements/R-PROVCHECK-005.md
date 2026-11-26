@@ -1,8 +1,9 @@
 # R-PROVCHECK-005
 
 **R-PROVCHECK-005** — `current_provenance_key(component_id, repo_root)`
-  MUST return a `ProvenanceKey` whose `spec_bundle_hash` is exactly
-  `spec-bundle-assembler`'s cold-mode bundle hash for that component,
+  MUST return a `ProvenanceKey` whose `spec_bundle_hash` and
+  `spec_bundle_parts` are exactly `spec-bundle-assembler`'s cold-mode
+  bundle's for that component,
   and whose `gate_versions` maps exactly `compiler`, `generated_test`,
   `verifier`, `license_scanner`, `secret_scanner` and `generator` to the
   values `interface/library.md` names, unchanged but for `generator`,

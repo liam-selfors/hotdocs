@@ -7,5 +7,4 @@
   dict-or-attribute access, never a bare `.attr` access alone: this
   corpus's duck-typing convention (`D94`) means `ProvenanceInputs`
   itself, not only the values nested inside it, may arrive as either
-  shape (`D128`). The same applies to `R-TRACK-012`'s dependency return
-  values, one level removed.
+  shape (`D128`).

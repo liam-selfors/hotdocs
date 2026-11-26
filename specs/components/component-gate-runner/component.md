@@ -20,8 +20,7 @@ generate <component-id>`, before `hotdocs verify` and committing.
 
 ## Rationale
 
-Developer-invoked (`D76`, `D86`, `D93`): generating is costly.
-`R-SIZE-002` is accepted: wiring dependencies is this component's job.
+See `D76`, `D86`, `D93`.
 
 ## Scope
 

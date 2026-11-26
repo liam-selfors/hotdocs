@@ -3,6 +3,7 @@
 ```json
 {
   "spec_bundle_hash": "sha256:...",
+  "spec_bundle_parts": {"spec": "sha256:...", "dependency_code": "sha256:..."},
   "gate_versions": {
     "compiler": "criterion-compiler@1.0.0",
     "generated_test": "generated_test@1.0.0",
@@ -25,6 +26,6 @@ unchanged from the gate it names; `generator` is its `GATE_VERSION`, a
 `+`, and its `PROMPT_VERSION` (`R-PROVCHECK-005`). `assets` is the
 component's current assets value (`R-PROVCHECK-009`), the `python`
 entry first, alone when it declares none; callers never pass it to `check_provenance`, which
-computes it itself. Returned as an object exposing the three fields as
-attributes; `gate_versions` is a plain `dict[str, str]`, `assets` a
+computes it itself. `spec_bundle_parts` is the bundle's own (`R-PROVCHECK-011`). Returned as an object exposing the four fields as
+attributes; `spec_bundle_parts` is a plain `dict`, `gate_versions` is a plain `dict[str, str]`, `assets` a
 plain `list` of `dict`.

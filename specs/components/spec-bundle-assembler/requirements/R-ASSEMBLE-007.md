@@ -19,6 +19,13 @@
     and `specs/glossary.md`;
   - in `hint` mode, every file under `gen/<target>/`.
 
+  `spec_bundle_parts` MUST be `{"spec": <hash>, "dependency_code":
+  <hash>}`, each written as `spec_bundle_hash` is and built the same way
+  from the same mode prefix: `dependency_code` over exactly the files the
+  `depends_on` components' code directories contribute above, `spec` over
+  every other path (`D379`). A change to a dependency's code alone
+  changes `dependency_code` only.
+
   A code directory never contributes a file whose name starts with `.`
   or anything under `__pycache__`, so writing a manifest there changes no
   hash. A missing file or directory contributes nothing.

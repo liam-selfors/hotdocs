@@ -35,6 +35,14 @@ Then the calls after check_provenance are, in order: verify, both scans, assembl
   run_attempts, both scans, write_provenance, called once with the
   loop's generation result; reverified is false
 
+Given the first scenario, but check_provenance returns reason
+  "dependency code differs" and current_provenance_key's
+  spec_bundle_parts is {"spec": "s", "dependency_code": "d"}
+When run_component_gates is called
+Then reverified is true, run_attempts was never called, and
+  write_provenance's inputs have spec_bundle_parts {"spec": "s",
+  "dependency_code": "d"}
+
 Given check_provenance returns reason "assets differ"
 When run_component_gates is called
 Then verify was never called, run_attempts was called once and

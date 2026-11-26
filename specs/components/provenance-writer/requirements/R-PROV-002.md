@@ -4,6 +4,4 @@
   `retry_feedback` MUST be populated from `generator`'s
   `GenerationResult` — `retry_feedback` copied through exactly as
   recorded there (`R-GEN-012`, restored by `D3`), including `null`
-  when the call was blind. No `sample_index` field — `D3` retired the
-  best-of-k retry loop that gave it a meaning, and nothing since has
-  reintroduced multiple samples per merge.
+  when the call was blind. No `sample_index` field.

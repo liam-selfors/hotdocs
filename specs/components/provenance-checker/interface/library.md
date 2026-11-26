@@ -4,15 +4,11 @@ The importable module is `provenance_checker`
 (`gen/provenance-checker/provenance_checker.py`).
 
 ```
-check_provenance(component_id: str, spec_bundle_hash: str, gate_versions: dict[str, str], repo_root: Path) -> ProvenanceCheckResult
+check_provenance(component_id: str, spec_bundle_hash: str, gate_versions: dict[str, str], repo_root: Path, spec_bundle_parts: dict | None = None) -> ProvenanceCheckResult
 current_provenance_key(component_id: str, repo_root: Path) -> ProvenanceKey
 current_sealed_key(component_id: str, repo_root: Path) -> SealedKey | None
 check_sealed_provenance(component_id: str, repo_root: Path) -> SealedCheckResult
 ```
-
-`check_provenance` is a pure function of the working tree's current
-state plus `VAR-TRUST-JUDGE-PROVENANCE` — no network access, no model
-call, except what an adapter's `provision` does (`R-PROVCHECK-004`).
 
 `current_provenance_key` is the one definition of the values a caller
 passes to `check_provenance`, and that `component-gate-runner` passes
@@ -32,16 +28,13 @@ loading these and the asset reads below, it reads nothing under
 `repo_root`: every other corpus read happens inside `assemble`. It reads, in this order:
 
 1. `spec-bundle-assembler`'s `assemble(component_id, repo_root=...,
-   mode="cold")`, taking only its `spec_bundle_hash`
+   mode="cold")`, taking only its `spec_bundle_hash` and `spec_bundle_parts`
 2. `criterion-compiler`'s `GATE_VERSION`
 3. `test-author`'s `GATE_VERSION`
 4. `verifier-orchestrator`'s `GATE_VERSION`
 5. `license-scanner`'s `gate_version(repo_root)`
 6. `secret-scanner`'s `gate_version(repo_root)`
 7. `generator`'s `GATE_VERSION` and `PROMPT_VERSION`
-
-No network access, no model call, no write, `provision` aside
-(`R-PROVCHECK-004`).
 
 ## Assets (`D343`, `D344`)
 

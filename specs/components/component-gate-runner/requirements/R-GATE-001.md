@@ -9,7 +9,6 @@
   copies the hit's three reports, and nothing else in
   `interface/library.md`'s list is called — no generation,
   verification, scan, or write. Any other result, including a hit
-  recording a failed attempt, proceeds as a miss (an `environment
-  differs` miss first per `R-GATE-011`), so a developer can
-  always re-run a failed `hotdocs generate`. A sealed component is never
+  recording a failed attempt, proceeds as a miss (re-verified
+  first when `R-GATE-011` applies). A sealed component is never
   checked (`R-GATE-007`).

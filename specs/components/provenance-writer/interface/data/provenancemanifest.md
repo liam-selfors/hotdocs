@@ -6,6 +6,7 @@ The manifest's definition: its top-level keys are exactly these
 ```json
 {
   "spec_bundle_hash": "sha256:...",
+  "spec_bundle_parts": {"spec": "sha256:...", "dependency_code": "sha256:..."},
   "model_pin": "claude-sonnet-5",
   "prompt_version": "v1",
   "retry_feedback": null,
