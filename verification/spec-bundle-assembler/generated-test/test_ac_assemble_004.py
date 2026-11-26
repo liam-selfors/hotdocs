@@ -1,9 +1,62 @@
-# hotdocs-criterion: sha256:f123f43674a3fcf96cfd498823489a2368769c678d51c91872d1c0d416788c0f
+# hotdocs-criterion: sha256:7fbaa4fb3cb523aaf5c5635bd633b87ff55b0e67a273ebaf92fce40327c788c9
 import importlib.util
 import sys
 from pathlib import Path
 
 import spec_bundle_assembler
+
+
+def component_files(slug, depends_on="[]", extra_frontmatter="", purpose="Foo doubles a number."):
+    """The files of one fixture component, keyed by path under repo_root."""
+    upper = slug.upper()
+    base = f"specs/components/{slug}/"
+    return {
+        base + "component.md": (
+            "---\n"
+            f"id: comp-{slug}\n"
+            f"title: {slug.capitalize()}\n"
+            "status: draft\n"
+            "owners: [team-a]\n"
+            "sealed: true\n"
+            f"source_path: legacy/{slug}/\n"
+            f"depends_on: {depends_on}\n"
+            + extra_frontmatter +
+            "---\n"
+            "\n"
+            f"# {slug.capitalize()}\n"
+            "\n"
+            "## Purpose\n"
+            "\n"
+            f"{purpose}\n"
+        ),
+        base + f"requirements/R-{upper}-001.md": (
+            f"# R-{upper}-001\n"
+            "\n"
+            f"**R-{upper}-001** — `foo(x)` MUST return `2 * x`.\n"
+        ),
+        base + f"acceptance/AC-{upper}-001.md": (
+            f"# AC-{upper}-001\n"
+            "\n"
+            f"Covers: R-{upper}-001\n"
+            "Kind: generated-test\n"
+            "\n"
+            "```gherkin\n"
+            "Given x = 2\n"
+            "When foo(x) is called\n"
+            "Then it returns 4\n"
+            "```\n"
+        ),
+        base + "interface/library.md": "# Library\n\n```\nfoo(x: int) -> int\n```\n",
+        base + "constraints.md": "# Constraints\n\nNone.\n",
+    }
+
+
+def write_fixture(repo_root, files):
+    files = {"specs/glossary.md": "# Glossary\n\n- **Foo** — a test term.\n", **files}
+    for rel, text in files.items():
+        path = repo_root / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
 
 
 def field(value, name):
@@ -21,91 +74,66 @@ def load_spec_linter():
     return spec_linter
 
 
-def write(path, text):
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text, encoding="utf-8")
+# Glossary texts with no leading or trailing whitespace, so the file's
+# content and its stripped body are the same string.
+GLOSSARY_ONE = (
+    "# Glossary\n"
+    "\n"
+    "Canonical vocabulary for the fixture corpus.\n"
+    "\n"
+    "- **Foo** — a test term.\n"
+    "- **Widget** — a second test term,\n"
+    "  continued on a second line."
+)
 
-
-GLOSSARY_V1 = "# Glossary\n\n- **Foo** \u2014 a test term."
-GLOSSARY_V2 = (
-    "# Glossary\n\n- **Foo** \u2014 a test term.\n"
-    "- **Widget** \u2014 a second test term, added later."
+GLOSSARY_TWO = (
+    "# Glossary\n"
+    "\n"
+    "Revised vocabulary for the fixture corpus.\n"
+    "\n"
+    "- **Foo** — a test term, reworded.\n"
+    "- **Gadget** — a third test term."
 )
 
 
-def write_component(repo_root, slug, comp_id, title, upper, depends_on, func):
-    root = repo_root / "specs" / "components" / slug
-    write(
-        root / "component.md",
-        "---\n"
-        "id: " + comp_id + "\n"
-        "title: " + title + "\n"
-        "status: draft\n"
-        "owners: [team-a]\n"
-        "sealed: true\n"
-        "source_path: legacy/" + slug + "/\n"
-        "depends_on: [" + depends_on + "]\n"
-        "---\n"
-        "\n"
-        "# " + title + "\n"
-        "\n"
-        "## Purpose\n"
-        "\n"
-        + title + " doubles a number.\n",
-    )
-    rid = "R-" + upper + "-001"
-    acid = "AC-" + upper + "-001"
-    write(
-        root / "requirements" / (rid + ".md"),
-        "# " + rid + "\n\n**" + rid + "** \u2014 `" + func + "(x)` MUST return `2 * x`.\n",
-    )
-    write(
-        root / "acceptance" / (acid + ".md"),
-        "# " + acid + "\n"
-        "\n"
-        "Covers: " + rid + "\n"
-        "Kind: generated-test\n"
-        "\n"
-        "```gherkin\n"
-        "Given x = 2\n"
-        "When " + func + "(x) is called\n"
-        "Then it returns 4\n"
-        "```\n",
-    )
-    write(
-        root / "interface" / "library.md",
-        "# Library\n\n```\n" + func + "(x: int) -> int\n```\n",
-    )
-    write(root / "constraints.md", "# Constraints\n\nNone.\n")
-
-
-def build_corpus(repo_root):
-    write(repo_root / "specs" / "glossary.md", GLOSSARY_V1)
-    write_component(repo_root, "foo", "comp-foo", "Foo", "FOO", "", "foo")
-    write_component(repo_root, "bar", "comp-bar", "Bar", "BAR", "comp-foo", "bar")
-
-
-def test_glossary_field_equals_current_glossary_content(tmp_path):
+def test_ac_assemble_004_glossary_is_current_glossary_content(tmp_path):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
-    build_corpus(repo_root)
+    files = component_files("foo")
+    files["specs/glossary.md"] = GLOSSARY_ONE
+    write_fixture(repo_root, files)
 
     spec_linter = load_spec_linter()
     assert spec_linter.lint(None, repo_root).hard_failures == 0
 
-    glossary_path = repo_root / "specs" / "glossary.md"
+    bundle = spec_bundle_assembler.assemble("comp-foo", repo_root)
+    expected = (repo_root / "specs" / "glossary.md").read_text(encoding="utf-8")
+    assert expected == GLOSSARY_ONE
+    assert field(bundle, "glossary") == expected
 
-    for comp_id in ("comp-foo", "comp-bar"):
-        bundle = spec_bundle_assembler.assemble(comp_id, repo_root)
-        expected = glossary_path.read_text(encoding="utf-8")
-        assert field(bundle, "glossary") == expected
-
-    # The glossary is read as it is now, not cached from an earlier run.
-    write(glossary_path, GLOSSARY_V2)
+    # The glossary is the *current* content: change it and re-assemble.
+    (repo_root / "specs" / "glossary.md").write_text(GLOSSARY_TWO, encoding="utf-8")
     assert spec_linter.lint(None, repo_root).hard_failures == 0
 
-    for comp_id in ("comp-foo", "comp-bar"):
-        bundle = spec_bundle_assembler.assemble(comp_id, repo_root)
-        expected = glossary_path.read_text(encoding="utf-8")
-        assert expected == GLOSSARY_V2
+    bundle2 = spec_bundle_assembler.assemble("comp-foo", repo_root)
+    expected2 = (repo_root / "specs" / "glossary.md").read_text(encoding="utf-8")
+    assert field(bundle2, "glossary") == expected2
+    assert field(bundle2, "glossary") != GLOSSARY_ONE
+
+
+def test_ac_assemble_004_glossary_for_any_component(tmp_path):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    files = component_files("foo")
+    files.update(component_files("baz", depends_on="[comp-foo]"))
+    files["specs/glossary.md"] = GLOSSARY_ONE
+    write_fixture(repo_root, files)
+
+    spec_linter = load_spec_linter()
+    assert spec_linter.lint(None, repo_root).hard_failures == 0
+
+    expected = (repo_root / "specs" / "glossary.md").read_text(encoding="utf-8")
+    for component_id in ("comp-foo", "comp-baz"):
+        bundle = spec_bundle_assembler.assemble(component_id, repo_root)
         assert field(bundle, "glossary") == expected
+        assert bundle["glossary"] == expected

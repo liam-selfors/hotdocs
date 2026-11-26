@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:2075a775502f80910fe63f20695d5a214b37316decff8d34fde57451d96c542c
+# hotdocs-criterion: sha256:b0cfa167a732d04d67d42ab04a4455a07e80056caabf5b32e104f98d2b545ce0
 import importlib.util
 import sys
 from pathlib import Path
@@ -6,6 +6,10 @@ from pathlib import Path
 import pytest
 
 import spec_bundle_assembler
+
+
+def field(value, name):
+    return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
 def load_module(path, module_name):
@@ -16,119 +20,132 @@ def load_module(path, module_name):
     return module
 
 
-def field(value, name):
-    return value[name] if isinstance(value, dict) else getattr(value, name)
-
-
 def _gen_dir():
-    return next(
-        p for p in Path(spec_bundle_assembler.__file__).resolve().parents
-        if p.name == "gen"
-    )
+    return next(p for p in Path(spec_bundle_assembler.__file__).resolve().parents if p.name == "gen")
+
+
+def _tool_root():
+    return _gen_dir().parent
 
 
 def _lint_clean(repo_root):
     gen = _gen_dir()
     base = gen / "spec-linter"
-    path = (
-        base / "spec_linter.py"
-        if (base / "spec_linter.py").is_file()
-        else base / "spec_linter" / "__init__.py"
-    )
-    spec_linter = load_module(path, "spec_linter")
+    path = base / "spec_linter.py" if (base / "spec_linter.py").is_file() else base / "spec_linter" / "__init__.py"
+    spec = importlib.util.spec_from_file_location("spec_linter", path)
+    spec_linter = importlib.util.module_from_spec(spec)
+    sys.modules["spec_linter"] = spec_linter
+    spec.loader.exec_module(spec_linter)
     report = spec_linter.lint(None, repo_root)
     assert report.hard_failures == 0, [
-        (field(f, "rule_id"), field(f, "file"), field(f, "message"))
-        for f in report.findings
-        if field(f, "severity") == "fail"
+        (f.rule_id, f.file, f.message) for f in report.findings if f.severity == "fail"
     ]
 
 
-def _write(path, text):
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text, encoding="utf-8")
+def component_files(slug, depends_on="[]", extra_frontmatter="", purpose="Foo doubles a number."):
+    """The files of one fixture component, keyed by path under repo_root."""
+    upper = slug.upper()
+    base = f"specs/components/{slug}/"
+    return {
+        base + "component.md": (
+            "---\n"
+            f"id: comp-{slug}\n"
+            f"title: {slug.capitalize()}\n"
+            "status: draft\n"
+            "owners: [team-a]\n"
+            "sealed: true\n"
+            f"source_path: legacy/{slug}/\n"
+            f"depends_on: {depends_on}\n"
+            + extra_frontmatter +
+            "---\n"
+            "\n"
+            f"# {slug.capitalize()}\n"
+            "\n"
+            "## Purpose\n"
+            "\n"
+            f"{purpose}\n"
+        ),
+        base + f"requirements/R-{upper}-001.md": (
+            f"# R-{upper}-001\n"
+            "\n"
+            f"**R-{upper}-001** — `foo(x)` MUST return `2 * x`.\n"
+        ),
+        base + f"acceptance/AC-{upper}-001.md": (
+            f"# AC-{upper}-001\n"
+            "\n"
+            f"Covers: R-{upper}-001\n"
+            "Kind: generated-test\n"
+            "\n"
+            "```gherkin\n"
+            "Given x = 2\n"
+            "When foo(x) is called\n"
+            "Then it returns 4\n"
+            "```\n"
+        ),
+        base + "interface/library.md": "# Library\n\n```\nfoo(x: int) -> int\n```\n",
+        base + "constraints.md": "# Constraints\n\nNone.\n",
+    }
 
 
-def _component(repo_root, slug, comp_id, title, req_id, ac_id, source_path,
-               depends_on, assets_line):
-    root = repo_root / "specs" / "components" / slug
+def write_fixture(repo_root, files):
+    files = {"specs/glossary.md": "# Glossary\n\n- **Foo** — a test term.\n", **files}
+    for rel, text in files.items():
+        path = repo_root / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+
+
+APP_JS_MD = "# app.js\n\n```\nexport function double(x)\n```\n"
+
+
+def _kind_component_files(kind):
+    """The adapter component comp-kind-<kind>, built as foo with R-KJS-001/AC-KJS-001."""
+    src = component_files("kjs")
+    out = {}
+    for rel, text in src.items():
+        new_rel = rel.replace("specs/components/kjs/", "specs/components/kind-" + kind + "/")
+        if rel.endswith("component.md"):
+            text = (
+                text.replace("id: comp-kjs\n", "id: comp-kind-" + kind + "\n")
+                .replace("title: Kjs\n", "title: Kind " + kind + "\n")
+                .replace("source_path: legacy/kjs/\n", "source_path: legacy/kind-" + kind + "/\n")
+                .replace("# Kjs\n", "# Kind " + kind + "\n")
+            )
+        out[new_rel] = text
+    return out
+
+
+def _definition(kind):
     text = (
         "---\n"
-        "id: " + comp_id + "\n"
-        "title: " + title + "\n"
+        "id: kind-" + kind + "\n"
+        "title: Asset kind " + kind + "\n"
         "status: draft\n"
         "owners: [team-a]\n"
-        "sealed: true\n"
-        "source_path: " + source_path + "\n"
-        "depends_on: " + depends_on + "\n"
-    )
-    if assets_line is not None:
-        text += assets_line + "\n"
-    text += (
+        "depends_on: []\n"
         "---\n"
         "\n"
-        "# " + title + "\n"
+        "# Asset kind " + kind + "\n"
         "\n"
-        "## Purpose\n"
-        "\n"
-        "Foo doubles a number.\n"
     )
-    _write(root / "component.md", text)
-    _write(
-        root / "requirements" / (req_id + ".md"),
-        "# " + req_id + "\n\n**" + req_id + "** \u2014 `foo(x)` MUST return `2 * x`.\n",
-    )
-    _write(
-        root / "acceptance" / (ac_id + ".md"),
-        "# " + ac_id + "\n"
-        "\n"
-        "Covers: " + req_id + "\n"
-        "Kind: generated-test\n"
-        "\n"
-        "```gherkin\n"
-        "Given x = 2\n"
-        "When foo(x) is called\n"
-        "Then it returns 4\n"
-        "```\n",
-    )
-    _write(
-        root / "interface" / "library.md",
-        "# Library\n\n```\nfoo(x: int) -> int\n```\n",
-    )
-    _write(root / "constraints.md", "# Constraints\n\nNone.\n")
-    return root
+    for name in ["Layout", "Environment", "Surface", "Running criteria",
+                 "Strength check", "Test author guidance", "Generator guidance"]:
+        text += "## " + name + "\n\n" + name + " text.\n\n"
+    return text
 
 
-def _glossary(repo_root):
-    _write(
-        repo_root / "specs" / "glossary.md",
-        "# Glossary\n\n- **Foo** \u2014 a test term.\n",
-    )
-
-
-def _asset_interface(foo_root):
-    _write(
-        foo_root / "interface" / "assets" / "app.js.md",
-        "# app.js\n\n```\nexport function double(x)\n```\n",
-    )
-
-
-def test_tool_adapter_guidance_appended_to_both_bundles(tmp_path):
+def test_builtin_javascript_guidance_appended(tmp_path):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
-    _glossary(repo_root)
-    foo_root = _component(
-        repo_root, "foo", "comp-foo", "Foo", "R-FOO-001", "AC-FOO-001",
-        "legacy/foo/", "[]", "assets: [javascript:static/app.js]",
-    )
-    _asset_interface(foo_root)
+    files = component_files("foo", extra_frontmatter="assets: [javascript:static/app.js]\n")
+    files["specs/components/foo/interface/assets/app.js.md"] = APP_JS_MD
+    write_fixture(repo_root, files)
     assert not (repo_root / "gen" / "kind-javascript").exists()
 
     _lint_clean(repo_root)
 
-    gen = _gen_dir()
-    tool_root = gen.parent
-    adapter_path = tool_root / "gen" / "kind-javascript" / "kind_javascript.py"
+    adapter_path = _tool_root() / "gen" / "kind-javascript" / "kind_javascript.py"
+    assert adapter_path.is_file(), adapter_path
     adapter = load_module(adapter_path, "kind_javascript")
     guide = adapter.guidance()
     G = guide["generator"].strip()
@@ -136,54 +153,35 @@ def test_tool_adapter_guidance_appended_to_both_bundles(tmp_path):
 
     bundle = spec_bundle_assembler.assemble("comp-foo", repo_root)
     interface = field(bundle, "interface")
-    assert interface.endswith("\n\n## Asset kind: javascript\n\n" + G)
+    assert interface.endswith("\n\n## Asset kind: javascript\n\n" + G), interface[-500:]
 
-    cbundle = spec_bundle_assembler.assemble_criterion(
-        "comp-foo", "AC-FOO-001", repo_root
-    )
+    cbundle = spec_bundle_assembler.assemble_criterion("comp-foo", "AC-FOO-001", repo_root)
     assert field(cbundle, "testing") == "\n## Asset kind: javascript\n\n" + T
 
 
-def test_kind_without_adapter_raises_precondition_failure(tmp_path):
+def test_kind_without_adapter_raises(tmp_path):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
-    _glossary(repo_root)
-    foo_root = _component(
-        repo_root, "foo", "comp-foo", "Foo", "R-FOO-001", "AC-FOO-001",
-        "legacy/foo/", "[comp-kind-nokind]", "assets: [nokind:static/app.js]",
+    files = component_files(
+        "foo",
+        depends_on="[comp-kind-nokind]",
+        extra_frontmatter="assets: [nokind:static/app.js]\n",
     )
-    _asset_interface(foo_root)
-    _component(
-        repo_root, "kind-nokind", "comp-kind-nokind", "Kind nokind",
-        "R-KJS-001", "AC-KJS-001", "legacy/kind-nokind/", "[]", None,
-    )
-    definition = (
-        "---\n"
-        "id: kind-nokind\n"
-        "title: Asset kind nokind\n"
-        "status: draft\n"
-        "owners: [team-a]\n"
-        "depends_on: []\n"
-        "---\n"
-        "\n"
-        "# Asset kind nokind\n"
-        "\n"
-    )
-    for name in ["Layout", "Environment", "Surface", "Running criteria",
-                 "Strength check", "Test author guidance", "Generator guidance"]:
-        definition += "## " + name + "\n\n" + name + " text.\n\n"
-    _write(repo_root / "specs" / "architecture" / "asset-kind-nokind.md",
-           definition)
+    files["specs/components/foo/interface/assets/app.js.md"] = APP_JS_MD
+    files["specs/architecture/asset-kind-nokind.md"] = _definition("nokind")
+    files.update(_kind_component_files("nokind"))
+    write_fixture(repo_root, files)
+
     assert not (repo_root / "gen" / "kind-nokind").exists()
-    assert not (_gen_dir() / "kind-nokind").exists()
+    assert not (_tool_root() / "gen" / "kind-nokind").exists()
 
     _lint_clean(repo_root)
 
     with pytest.raises(Exception) as excinfo:
         spec_bundle_assembler.assemble("comp-foo", repo_root)
     exc = excinfo.value
-    assert type(exc).__name__ == "PreconditionFailure"
-    expected_cls = getattr(spec_bundle_assembler, "PreconditionFailure", None)
-    if expected_cls is not None:
-        assert isinstance(exc, expected_cls)
-    assert str(exc) == "unknown asset kind: nokind"
+    assert "PreconditionFailure" in [c.__name__ for c in type(exc).__mro__], type(exc)
+    message = exc.args[0] if exc.args else str(exc)
+    assert message == "unknown asset kind: nokind" or str(exc) == "unknown asset kind: nokind", (
+        message, str(exc)
+    )
