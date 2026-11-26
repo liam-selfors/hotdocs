@@ -123,8 +123,8 @@ instead, verified by evaluation, regenerating only the adapter.
   `python`, `surface-checker`'s import and dependency checks are the
   surface gate (`asset-kind-python.md`).
 - **Running criteria.** Every criterion run and mutation run gets the
-  pytest fixture `asset_runner`, from a plugin `verifier-orchestrator`
-  supplies with `-p`. `asset_runner(path)` returns the adapter's
+  pytest fixture `asset_runner`, from the plugin `run-environment`
+  writes (`specs/architecture/run-environment.md`). `asset_runner(path)` returns the adapter's
   callable for the declared asset at `path` in the code being verified;
   a path not declared raises `KeyError`. Generated tests stay plain
   pytest and never run the environment's programs themselves. Every
@@ -136,7 +136,7 @@ instead, verified by evaluation, regenerating only the adapter.
 - **Retries.** `missing_asset` and `malformed_layout` are retried by
   `generation-loop` as `missing_module` is.
 - **Environment.** Before a component's criteria run,
-  `verifier-orchestrator` calls `provision(repo_root)` for the implicit
+  `run-environment` calls `provision(repo_root)` for the implicit
   `python` kind and then each declared kind. When it reports `ok` false,
   every `generated-test` and `compiled` criterion of the component, each
   of which runs its code, is `fail` with `failure_origin` `"environment"` and

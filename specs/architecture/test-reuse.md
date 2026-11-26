@@ -40,7 +40,7 @@ exactly
 with `text` the file's full text as read, `""` when the component has no
 `testing.md`; `uses` each `Uses:` path in order with that file's full
 text; and `kinds` each asset kind the component declares, sorted, with
-its definition's `## Test author guidance` section
+its adapter's `guidance()["test_author"]`, stripped
 (`specs/architecture/asset-kinds.md`); and `drivers` each declared test
 driver, sorted, with its adapter's `guidance()["test_author"]`
 (`specs/architecture/test-drivers.md`). `SpecBundle` never includes it, so the generator never

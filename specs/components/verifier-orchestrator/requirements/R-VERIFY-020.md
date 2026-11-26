@@ -1,6 +1,7 @@
 # R-VERIFY-020
 
-**R-VERIFY-020** — Before any criterion runs, `verify` MUST call
+**R-VERIFY-020** — For a component that is not sealed (`R-VERIFY-017`),
+  before any criterion runs, `verify` MUST call
   `run-environment`'s `prepare(component_id, repo_root)` once (`D383`).
   When it reports `ok` false, every `generated-test` and `compiled`
   criterion is `fail` with `failure_origin` `"environment"` and

@@ -6,7 +6,8 @@
   words of its largest criterion's test-author bundle, `0` with no
   criteria. Words are counted as in `R-GQE-006`; a `component.md`
   drops its `## Rationale`, `## Open questions` and `## Change log`
-  sections; the glossary, `vars` and appended type files are not
+  sections, and a dependency's `## Purpose` counts with its heading
+  word; `\n` is a newline only inside the regular-expression functions; the glossary, `vars` and appended type files are not
   counted:
 
 ```sql
@@ -22,12 +23,12 @@ WITH docs AS (
 counted AS (
   SELECT c, rel, content,
     CASE WHEN rel = 'component.md'
-      THEN array_to_string(list_filter(string_split(body, '\n## '),
+      THEN array_to_string(list_filter(regexp_split_to_array(body, '\n## '),
              lambda s: NOT regexp_matches(s, '^(Rationale|Open questions|Change log)\s*\n')), ' ')
       ELSE body END AS text,
     CASE WHEN rel = 'component.md'
-      THEN coalesce(list_filter(string_split(body, '\n## '),
-             lambda s: starts_with(s, 'Purpose\n'))[1], '')
+      THEN coalesce(list_filter(regexp_split_to_array(body, '\n## '),
+             lambda s: regexp_matches(s, '^Purpose\n'))[1], '')
       ELSE '' END AS purpose
   FROM docs
 ),

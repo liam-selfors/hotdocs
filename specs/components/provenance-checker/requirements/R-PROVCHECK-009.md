@@ -5,8 +5,9 @@
   `prepare(component_id, repo_root)`, whose `close()` is called at once
   (`D383`); a sealed component's (`R-PROVCHECK-007`) are `[]` and `[]`,
   with no call. `current_provenance_key` returns them as `assets` and
-  `drivers`. `check_provenance` computes them itself, only once
-  `spec_bundle_hash` and `gate_versions` match, and MUST miss when
+  `drivers`. `check_provenance` computes them itself, only once `gate_versions`
+  match and either `spec_bundle_hash` matches or `R-PROVCHECK-011`'s
+  parts test applies, and MUST miss when
   `prepare` reports `ok` false (reason its `failure_message`), when the
   manifest's `assets` differs (reason `assets differ`, or
   `R-PROVCHECK-010`'s `environment differs`), or when its `drivers`

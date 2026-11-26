@@ -24,7 +24,8 @@ A dataclass with these fields, plus:
 - `env_for(code_dir: Path) -> dict[str, str]`: `HOTDOCS_ASSETS` and
   `HOTDOCS_DRIVERS` as `specs/architecture/run-environment.md` gives
   them, each asset's `file` being `<code_dir>/<path>`.
-- `close() -> None`: removes `plugin_dir`; calling it again does nothing.
+- `close() -> None`: removes `plugin_dir`; calling it again, or with
+  `plugin_dir` null, does nothing.
 - `to_dict()`: the JSON above.
 
 `assets` entries are `VerificationReport.assets`' (`asset-kinds.md`,

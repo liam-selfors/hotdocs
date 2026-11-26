@@ -38,7 +38,8 @@ has no fixture for errors the whole criterion (`D326`). Test functions
 for a fixture's own suite are written only inside string literals.
 
 A `test-probe` stand-in defines `probe(test_source, criterion_bundle,
-module_name, *, timeout=60.0)` returning an object with `ok` (bool),
+module_name, **kwargs)`; `test-supply` passes `interpreter`, `assets` and
+`drivers` as keywords (`R-SUPPLY-003`). It returns an object with `ok` (bool),
 `findings` (a list of dicts with `kind`, `severity`, `line` and
 `message`) and `to_dict()`. A fixture that does not concern probing
 plants one returning `ok` true with no findings, so every test runs.
@@ -82,7 +83,8 @@ appending to a file the test controls.
 A `generated-test` criterion's file runs as
 `<interpreter> -m pytest <file>`, `<interpreter>` the one the `python`
 adapter's `provision` reported (`D344`), with the working directory
-`repo_root` and `PYTHONPATH` set to `gen/<slug>/` (`R-VERIFY-001`). Its
+`repo_root` and `PYTHONPATH` set to `gen/<slug>/` then the run
+environment's `plugin_dir` (`R-VERIFY-001`, `R-VERIFY-020`). Its
 `result` is `pass` exactly when that run exits `0`, and `fail`
 otherwise. The mutation score and interface drift change only the
 overall verdict, never a criterion's `result`. A fixture plants
@@ -102,9 +104,8 @@ and writes the plugin that gives each run the `asset_runner` fixture
 reaches it only through `verify`.
 
 **A fake kind.** A test concerning assets plants a kind needing no
-program, never `javascript`: `<repo_root>/specs/architecture/asset-kind-fake.md`,
-frontmatter then the seven `## ` sections of asset-kinds.md's "The
-definition", each with one line of text, and
+program, never `javascript`: `<repo_root>/specs/architecture/asset-kind-fake.md`
+(any text), and
 `<repo_root>/gen/kind-fake/kind_fake.py`, its adapter. The component
 declares `assets: [fake:data/table.txt]` in its `component.md`
 frontmatter and writes `gen/<slug>/data/table.txt` as the two lines

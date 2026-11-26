@@ -6,6 +6,6 @@ Kind: generated-test
 ```gherkin
 Given a complete set of ProvenanceInputs
 When write_provenance runs
-Then the written manifest's top-level keys exactly match SPEC_GUIDELINES.md
-  §7's field list — no extra keys, no missing ones
+Then the written manifest's top-level keys exactly match
+  interface/data/provenancemanifest.md's keys — no extra keys, no missing ones
 ```

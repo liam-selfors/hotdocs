@@ -140,23 +140,9 @@ pointing back to this document, exactly as `R-IMPACT-009` does:
   is unchanged (R-GRAPH-006/008: `verification/corpus-graph.json` is
   still a committed, deterministic artifact — only the *construction*
   step, not the output format, moves onto this engine).
-- **`spec-linter`'s size-cap rule** (`rule_size_caps`/`R-SIZE-001`,
-  `D13`) — `component_doc_words` is this view's `word_count`, queried
-  directly rather than recomputed by a second, independently-written
-  Python loop. The one adopter that actually runs a query against this
-  engine via a real `duckdb` dependency, rather than reimplementing
-  equivalent logic natively in Python the way `R-LINT-003`/`004`/`008`/
-  `009`/`018`'s bootstrap implementation still does today (flagged in
-  `notes/backlog.md`, not yet resolved).
-- **`capability-scenario-verifier`'s capability-intersection lookup**
-  (`R-SCENARIO-002`) — "every product capability whose `realizes`-set
-  intersects the blast radius" is a single query against `edges`, not a
-  bespoke intersection written once for this call site. This logic
-  originally lived in `merge-orchestrator` as `R-MERGE-020`; it moved
-  with the rest of the capability-scenario gate when D14 extracted
-  `capability-scenario-verifier` (named `golden-scenario-verifier` at
-  the time; renamed by `D23`) out of `merge-orchestrator` to relieve
-  that component's fan-out/word-count caps.
+- **`size-checker`'s word caps** (`R-SIZE-001`, `D380`) —
+  `generator_words` and `criterion_words_max` are the `bundle_size`
+  view's, queried directly rather than recomputed.
 - **`review-packet-builder`** (`R-PACKET-011`) — every field it reports
   from `verifier-orchestrator`/`license-scanner`/`secret-scanner` is
   read via `component_provenance` instead of a live call into any of

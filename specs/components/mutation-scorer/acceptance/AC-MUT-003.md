@@ -16,7 +16,8 @@ When score is called
 Then mutation_error is None and mutation_score is 1.0
 
 Given qux.py defining qux() whose loop "while i < x: i = i + 1" has a
-  mutant that never terminates, and one test covering it
+  mutant that never terminates, and one test asserting an exact return
+  value for some x > 0
 When score is called
-Then it returns within ten seconds and killed equals mutants
+Then it returns within 60 seconds and killed equals mutants
 ```

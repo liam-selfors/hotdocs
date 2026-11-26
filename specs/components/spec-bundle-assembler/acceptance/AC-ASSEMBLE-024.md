@@ -11,7 +11,11 @@ When assemble_criterion("comp-foo", "AC-FOO-001", repo_root) runs
 Then its testing ends with "\n## Test driver: fake\n\nFake driver text."
   and assemble's SpecBundle contains no "Fake driver text."
 
-Given "drivers: [nodrv]" with no adapter planted
+Given specs/architecture/test-driver-nodrv.md (any text), a component
+  comp-driver-nodrv built as foo is, with source_path
+  legacy/driver-nodrv/, foo's depends_on [comp-driver-nodrv] and
+  "drivers: [nodrv]", and no gen/driver-nodrv/ anywhere, so the corpus
+  lints clean but the driver has no adapter
 When assemble_criterion runs
 Then it raises PreconditionFailure with the message
   "unknown test driver: nodrv"

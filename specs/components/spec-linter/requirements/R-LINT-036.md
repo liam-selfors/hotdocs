@@ -12,8 +12,8 @@
     nor an adapter `gen/driver-<item>/driver_<module>.py` under
     `repo_root` or the tool root (`<module>` the name with `-` as `_`):
     `test driver '<item>' has no definition or adapter`;
-  - is defined in the repository while a component's `depends_on`
-    lacks `comp-driver-<item>`:
+  - for a component file only: is defined in the repository while
+    that component's `depends_on` lacks `comp-driver-<item>`:
     `test driver '<item>' is defined in this repository; depends_on must list comp-driver-<item>`.
 
   A block-style `drivers` list is `drivers must be one line: [a, b]`.

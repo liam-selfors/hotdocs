@@ -4,7 +4,7 @@
 run_capability_scenarios(blast_radius: list[str], repo_root: Path, judge=None, test_author=None) -> CapabilityScenarioReport
 check_capability_provenance(capability_id: str, repo_root: Path) -> CapabilityProvenanceCheckResult
 run_capability_gates(capability_id: str, repo_root: Path, model: str | None = None, seed: int = 0, llm_backend=None) -> CapabilityProvenanceCheckResult
-GATE_VERSION: str  # "capability_scenario_verifier@2.2.0" (R-SCENARIO-006)
+GATE_VERSION: str  # "capability_scenario_verifier@3.0.0" (R-SCENARIO-006)
 class UnknownCapabilityError(ValueError)
 class ModelRequiredError(ValueError)
 ```
@@ -22,7 +22,7 @@ llm_backend)`, passing its own three values through unchanged, after
 A developer never invokes this component directly: it has no CLI
 (`D92`, `D174`).
 
-Implements: `specs/architecture/capability-scenario-fixtures.md`, `specs/architecture/asset-kinds.md`
+Implements: `specs/architecture/capability-scenario-fixtures.md`, `specs/architecture/run-environment.md`
 
 ## Dependencies
 
@@ -45,6 +45,11 @@ these is used.
 - `llm-endpoint`, from `<repo_root>/gen/llm-endpoint/`: `llm_endpoint.
   complete(prompt, model, backend=)`, whose response has `text` and
   `model_call_error` (with `message`).
+- `run-environment`, from `<repo_root>/gen/run-environment/`:
+  `run_environment.prepare_capability(capability_id, repo_root)`, whose
+  result has `ok`, `failure_message`, `interpreter`, `plugin_dir`,
+  `assets`, `drivers`, `pytest_args()`, `env_for(code_dir)` and
+  `close()`.
 
 ## Test fixtures
 
