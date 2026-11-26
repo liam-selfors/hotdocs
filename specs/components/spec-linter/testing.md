@@ -138,4 +138,6 @@ requirement) gives exactly one `warn`, `R-LINT-031`; deleting the
 `Kind: generated-test` line of `AC-FOO-001.md` gives exactly one `fail`,
 `R-LINT-010`. Every acceptance file needs both its `Covers:` and `Kind:`
 lines, and every requirement an RFC 2119 keyword, or the corpus has
-fail findings a criterion did not ask for.
+fail findings a criterion did not ask for. Each file's text is exactly
+its block's lines, the first being its `# <id>` heading: a requirement
+or acceptance file without it, or with another id, fails `R-LINT-007`.
