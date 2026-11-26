@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "hotdocs"
-version = "0.1.0a1"
+version = "0.1.0a2"
 description = "Spec-driven agentic development: specs in, verified code out."
 license = {text = "Apache-2.0"}
 # llm-endpoint reads hotdocs.toml with the standard library's tomllib (3.11+).
