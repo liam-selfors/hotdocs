@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:4003d843fa9f59e8fc3e143a642b3c1b729a6918073b905de95e6ec729d0f1f0
+# hotdocs-criterion: sha256:c1b3e242cd91b1cd91a0d099ddf04ba179d67efd4a4272f3370f7c5403466c68
 import test_probe
 
 
@@ -21,24 +21,25 @@ SOURCE = (
 
 
 def _unknown_imports(report):
-    return [
-        f for f in field(report, "findings")
-        if field(f, "kind") == "unknown_import"
-    ]
+    findings = field(report, "findings")
+    return [f for f in findings if field(f, "kind") == "unknown_import"]
 
 
-def test_unknown_import_reported_once_with_line_and_message():
+def test_unresolvable_import_is_reported_once():
     report = test_probe.probe(SOURCE, {}, "slugify")
     assert field(report, "ok") is False
     unknown = _unknown_imports(report)
     assert len(unknown) == 1
-    assert field(unknown[0], "line") == 2
-    assert field(unknown[0], "message") == "cannot import 'your_module_here'"
+    finding = unknown[0]
+    assert field(finding, "line") == 2
+    assert field(finding, "message") == "cannot import 'your_module_here'"
+    assert field(finding, "severity") == "error"
 
 
 def test_without_second_line_no_unknown_import():
     lines = SOURCE.split("\n")
-    source = "\n".join(lines[:1] + lines[2:])
+    del lines[1]
+    source = "\n".join(lines)
     assert "your_module_here" not in source
     report = test_probe.probe(source, {}, "slugify")
     assert _unknown_imports(report) == []

@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:09275d2c92ad9144749756febb6fc773fc1e8e7b07894de08687c7fb14841024
+# hotdocs-criterion: sha256:783901901cd4ac9bde237cb538d446313d371f7fb706164303c7d023e8cd9e4a
 import test_probe
 
 
@@ -12,7 +12,7 @@ FIRST_SOURCE = (
     "    assert run('filterNodes', [[], 'gen']) == []\n"
 )
 
-LOOKUP_SOURCE = (
+SECOND_SOURCE = (
     "def test_lookup(asset_runner):\n"
     "    run = asset_runner('static/other.js')\n"
     "    assert callable(run)\n"
@@ -28,7 +28,7 @@ def test_calling_declared_asset_reaches_code_under_test():
 
 
 def test_only_looking_up_asset_is_vacuous():
-    report = test_probe.probe(LOOKUP_SOURCE, {}, "app")
+    report = test_probe.probe(SECOND_SOURCE, {}, "app")
     assert field(report, "ok") is True
     assert field(report, "tests_run") == 1
     assert field(report, "tests_reached") == 0
@@ -37,12 +37,13 @@ def test_only_looking_up_asset_is_vacuous():
     finding = findings[0]
     assert field(finding, "kind") == "vacuous"
     assert field(finding, "severity") == "warn"
+    assert field(finding, "line") is None
     assert field(finding, "message") == (
         "test_lookup passed without reaching the code under test"
     )
 
 
-def test_gen_prefixed_path_is_undeclared_test_bug():
+def test_gen_prefixed_path_is_undeclared_without_assets():
     source = FIRST_SOURCE.replace("'static/app.js'", "'gen/app/static/app.js'")
     assert "'gen/app/static/app.js'" in source
     report = test_probe.probe(source, {}, "app")
@@ -53,23 +54,25 @@ def test_gen_prefixed_path_is_undeclared_test_bug():
     finding = findings[0]
     assert field(finding, "kind") == "test_bug"
     assert field(finding, "severity") == "error"
+    assert field(finding, "line") is None
     message = field(finding, "message")
     assert message.startswith("test_filter: ")
     assert "HotdocsProbeUndeclaredAsset" in message
     assert "is not a declared asset path" in message
 
 
-def test_path_missing_from_assets_list_is_test_bug():
+def test_path_not_in_declared_assets_is_test_bug():
     report = test_probe.probe(FIRST_SOURCE, {}, "app", assets=["static/other.js"])
     assert field(report, "ok") is False
     findings = list(field(report, "findings"))
     assert len(findings) == 1
     finding = findings[0]
     assert field(finding, "kind") == "test_bug"
+    assert field(finding, "severity") == "error"
     assert "'static/app.js' is not a declared asset path" in field(finding, "message")
 
 
-def test_path_in_assets_list_reaches_code_under_test():
+def test_path_in_declared_assets_reaches_code_under_test():
     report = test_probe.probe(FIRST_SOURCE, {}, "app", assets=["static/app.js"])
     assert field(report, "ok") is True
     assert list(field(report, "findings")) == []

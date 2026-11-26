@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:632cccf2c2e733fb0f8bc74635af78b32763d7b97dacc158cce271f7052be164
+# hotdocs-criterion: sha256:5e86c5ea1f44cb5d902dbdb02ffef91a53b5314ef93c9dfcfdb8d7565fde1320
 import test_probe
 
 
@@ -15,7 +15,7 @@ SOURCE = (
 )
 
 
-def test_undefined_name_is_the_only_finding():
+def test_ac_probe_002_undefined_name_only_finding():
     report = test_probe.probe(SOURCE, {}, "slugify")
 
     assert field(report, "ok") is False
@@ -30,14 +30,10 @@ def test_undefined_name_is_the_only_finding():
     assert field(finding, "line") == 5
     assert field(finding, "message") == "undefined name 'tmp_dir'"
 
-
-def test_unused_import_gives_no_finding_and_no_stub_run():
-    report = test_probe.probe(SOURCE, {}, "slugify")
-
-    findings = field(report, "findings")
+    # The unused import of os gives no finding of any kind.
     kinds = [field(f, "kind") for f in findings]
     assert kinds == ["undefined_name"]
-    assert all("os" not in field(f, "message") for f in findings)
 
+    # No stub run happens when an error was found in checks 1 to 4.
     assert field(report, "tests_run") == 0
     assert field(report, "tests_reached") == 0
