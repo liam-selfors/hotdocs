@@ -25,7 +25,7 @@ capability scenario (D8):
 | `kind` | How it's checked | Use when |
 | --- | --- | --- |
 | `compiled` | Deterministically compiled to test scaffolding — no model involved. Default. | The criterion is expressible in Given/When/Then and concerns runtime behavior of generated code. |
-| `generated-test` | An agent writes test code from freeform prose; executed thereafter like any other test. | Runtime behavior that resists the Given/When/Then grammar. |
+| `generated-test` | An agent writes test code from the criterion's Given/When/Then text, whose steps may be free prose; executed thereafter like any other test. | Runtime behavior the compiled step grammar cannot express. |
 | `llm-judge` | An agent evaluates the criterion directly against an artifact — no code produced. | Qualities that are not runtime behavior at all (spec hardening, absence of contradiction, clarity). |
 
 ## Rules
@@ -43,6 +43,9 @@ capability scenario (D8):
   test could capture the criterion even in principle. (D5)
 - Generated test code **MUST** live under `verification/`, never under
   `specs/`. (D4)
+- Every criterion file **MUST** hold at least one line starting `Given`,
+  one starting `When` and one starting `Then` (`R-LINT-010`); a file
+  without them fails lint, whatever its `kind`.
 - A `generated-test` criterion's mutation score **MUST** meet 80% (general) or
   90% (freeform-derived) or the merge fails. (D80)
 - An `llm-judge` criterion **MUST** emit structured rationale alongside its
