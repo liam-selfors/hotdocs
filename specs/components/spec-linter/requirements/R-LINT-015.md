@@ -6,6 +6,6 @@
   consistent with (a permitted delta on) the glossary's definition, versus
   substantively conflicting with it (a redefinition in different words).
   A conflict MUST be reported as a `fail`-severity finding with structured
-  rationale (per `SPEC_GUIDELINES.md` §5). **When no model is configured at
+  rationale (per `specs/architecture/acceptance-criteria.md`). **When no model is configured at
   all, this one requirement MUST be skipped with a visible, non-silent
   notice** — not treated as passing, not a crash.

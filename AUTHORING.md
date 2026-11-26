@@ -143,9 +143,13 @@ declaring assets, `hotdocs kind new` and the project Python environment.
 
 ## 6. Size limits
 
-The linter fails a component's docs above 4,000 words, any single
-requirement or criterion file above 500 words, and a `Purpose` section above
-150 words. It warns well before. When a component nears the cap:
+The linter fails a component whose generator bundle (what its generator
+reads: its own docs except `acceptance/`, the documents its `Implements:` line
+appends, and its dependencies' interfaces) is above 14,000 words, or whose
+largest criterion bundle (what one criterion's test author reads) is above
+12,000 words. It also fails any single requirement or criterion file above 500
+words, and a `Purpose` section above 150 words. It warns well before
+(`specs/architecture/size-caps.md`). When a component nears a cap:
 
 - move rationale and history into decision records,
 - move shared rules into `specs/architecture/` documents,

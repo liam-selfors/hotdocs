@@ -14,4 +14,4 @@ So any corpus it is run on, a test's included, must lint clean under
 or guarantee file opens with the heading `# <its id>`, equal to its
 filename's stem, and states itself with an RFC 2119 keyword.
 
-Implements: `SPEC_GUIDELINES.md`, `specs/architecture/cli-conventions.md`
+Implements: `specs/architecture/cli-conventions.md`

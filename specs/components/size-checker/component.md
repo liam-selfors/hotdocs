@@ -14,7 +14,7 @@ sealed: false
 ## Purpose
 
 Measures each component of a spec corpus against the size caps of
-`SPEC_GUIDELINES.md` §4, per component, per unit file and per `Purpose`
+`specs/architecture/size-caps.md`, per component, per unit file and per `Purpose`
 section, and reports each cap exceeded, and each component crowding
 several caps at once, as a finding for the linter's report.
 

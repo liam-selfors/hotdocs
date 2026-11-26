@@ -13,4 +13,4 @@ exactly `rule_id` (the requirement that produced it), `severity`
 `1` when no better line applies) and `message`, in the order of the
 corpus's sorted file paths.
 
-Implements: `SPEC_GUIDELINES.md`
+Implements: `specs/architecture/glossary-and-citations.md`

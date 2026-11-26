@@ -4,7 +4,7 @@
   compute and report the mutation score, and the overall verdict MUST be
   `fail` if it falls below 0.8, or 0.9 when a `generated-test` criterion
   is freeform-derived, written with no Given/When/Then block
-  (`SPEC_GUIDELINES.md` §5, `D80`).
+  (`specs/architecture/acceptance-criteria.md`, `D80`).
 
   **One score for the whole component, never an average** (`D124`):
   each mutant is generated once and counts as killed if *any*

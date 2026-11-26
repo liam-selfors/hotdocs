@@ -5,6 +5,5 @@
   `1.0` even though its `overall` result still reads `"pass"`) — MUST
   be its own section, distinct from pass/fail results. Sourced
   entirely from `provenance-tracker`'s own `verification_report`
-  (`R-PACKET-011`) — never a metric, such as `spec-linter`'s own
-  `component_doc_words`, that no field this component actually reads
+  (`R-PACKET-011`) — never a metric, such as a size-cap measure, that no field this component actually reads
   ever carries.

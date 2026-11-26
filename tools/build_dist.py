@@ -42,7 +42,14 @@ REFERENCE_DOCS = ("SPEC_GUIDELINES.md",
                   "specs/architecture/asset-kind-python.md",
                   "specs/architecture/asset-kind-javascript.md",
                   "specs/architecture/step-phrase-grammar.md",
-                  "specs/architecture/cli-conventions.md")
+                  "specs/architecture/cli-conventions.md",
+                  "specs/architecture/spec-frontmatter.md",
+                  "specs/architecture/spec-layout.md",
+                  "specs/architecture/acceptance-criteria.md",
+                  "specs/architecture/size-caps.md",
+                  "specs/architecture/glossary-and-citations.md",
+                  "specs/architecture/test-drivers.md",
+                  "specs/architecture/test-driver-browser.md")
 TOOL_PARTS = ("gen", "pipeline", "examples", "requirements.txt",
               "pyproject.toml", "QUICKSTART.md", "AUTHORING.md", "agent-skills",
               *REFERENCE_DOCS)

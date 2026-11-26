@@ -19,4 +19,4 @@ It loads `spec-bundle-assembler` from `<repo_root>/gen/spec-bundle-assembler/`,
 `criterion-compiler` from `<repo_root>/pipeline/criterion-compiler/`, each
 else from the tool root (`D199`).
 
-Implements: `specs/architecture/step-phrase-grammar.md`, `SPEC_GUIDELINES.md`, `specs/architecture/verifier-fixtures.md`, `specs/architecture/mutation-runs.md`, `specs/architecture/cli-conventions.md`, `specs/architecture/test-reuse.md`, `specs/architecture/asset-kinds.md`, `specs/architecture/asset-kind-python.md`
+Implements: `specs/architecture/step-phrase-grammar.md`, `specs/architecture/acceptance-criteria.md`, `specs/architecture/verifier-fixtures.md`, `specs/architecture/mutation-runs.md`, `specs/architecture/cli-conventions.md`, `specs/architecture/test-reuse.md`, `specs/architecture/asset-kinds.md`, `specs/architecture/asset-kind-python.md`

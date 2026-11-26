@@ -7,10 +7,4 @@
   directly from the dependency's `component.md` by this component's own
   logic, and never any other part of `component.md`.
 
-  This is the single, explicit exception `R-ASSEMBLE-002` names, scoped
-  to exactly `Purpose` and nothing else: `D21` made `Purpose`
-  dependent-safe by construction (no decision citations, no historical
-  rationale, enforced by `R-LINT-024`), which is what makes handing it
-  to a dependent safe in the first place. If a future need arises to
-  share more of a dependency's `component.md`, that is a new decision
-  with its own safety argument — this requirement does not imply one.
+  This is the single exception `R-ASSEMBLE-002` names (`D21`).

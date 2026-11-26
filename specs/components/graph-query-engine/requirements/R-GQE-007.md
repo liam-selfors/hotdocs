@@ -1,7 +1,7 @@
 # R-GQE-007
 
 **R-GQE-007** — MUST expose a `load_views(con, repo_root)` call that
-  creates all seven views (`R-GQE-001`–`006`, `R-GQE-008`) against a given DuckDB
+  creates all eight views (`R-GQE-001`–`006`, `R-GQE-008`, `R-GQE-009`) against a given DuckDB
   connection, substituting `repo_root` (an absolute path) for every
   `{repo_root}` placeholder in the generated SQL before executing each
   `CREATE VIEW` statement in dependency order (`component_context`
