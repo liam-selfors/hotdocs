@@ -25,6 +25,12 @@ With `--author-tests=<model>:<seed>`, step 2 passes the real
 (`R-VERIFY-019`), gets one written for the unchanged code, as new
 criteria for a weak suite need (D329); if verification still fails, the
 committed tests are put back as they were.
+
+With `--rehash`, step 1 is skipped: for `spec-bundle-assembler` after a
+regeneration that changes how `spec_bundle_hash` is computed (D382), the
+hash its old code put in the bundle can never equal the one its new code
+computes, though the inputs are the same. The swapped-in code is fully
+re-verified and recorded under the hash it computes itself.
 """
 import importlib.util
 import json
@@ -96,13 +102,15 @@ def _carry_test_authoring(slug: str, manifest: dict, report) -> None:
             criterion["test_authoring"] = record
 
 
-def rerecord(component_id: str, pc, pw, vo, lic, sec, author=None) -> bool:
+def rerecord(component_id: str, pc, pw, vo, lic, sec, author=None, rehash=False) -> bool:
     slug = component_id.removeprefix("comp-")
     manifest_path = REPO / "gen" / slug / ".provenance.json"
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     key = pc.current_provenance_key(component_id, REPO)
     current_hash = _get(key, "spec_bundle_hash")
-    if current_hash != manifest.get("spec_bundle_hash"):
+    if rehash:
+        print(f"{component_id}: --rehash -- recording under the hash the current code computes")
+    elif current_hash != manifest.get("spec_bundle_hash"):
         # D379: a miss caused only by dependency code re-verifies the
         # committed code instead of regenerating it.
         parts = _get(key, "spec_bundle_parts") or {}
@@ -164,6 +172,8 @@ def main(argv) -> int:
     lic = _load("license-scanner")
     sec = _load("secret-scanner")
     author = None
+    rehash = "--rehash" in argv
+    argv = [a for a in argv if a != "--rehash"]
     for arg in [a for a in argv if a.startswith("--author-tests=")]:
         argv = [a for a in argv if a != arg]
         model, _, seed = arg.split("=", 1)[1].rpartition(":")
@@ -173,7 +183,7 @@ def main(argv) -> int:
                    if p.is_dir() and not _sealed(p.name)]
     ok = True
     for component_id in ids:
-        ok = rerecord(component_id, pc, pw, vo, lic, sec, author) and ok
+        ok = rerecord(component_id, pc, pw, vo, lic, sec, author, rehash) and ok
     return 0 if ok else 1
 
 
