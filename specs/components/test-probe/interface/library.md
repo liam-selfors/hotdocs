@@ -5,8 +5,8 @@ One module file, `test_probe.py`, never a package.
 ```
 probe(test_source: str, criterion_bundle, module_name: str | list[str], *,
       timeout: float = 60.0, interpreter: str | None = None,
-      assets: list[str] | None = None) -> ProbeReport
-GATE_VERSION: str  # "test-probe@1.4.0"
+      assets: list[str] | None = None, drivers: list[str] | None = None) -> ProbeReport
+GATE_VERSION: str  # "test-probe@1.5.0"
 ```
 
 `interpreter` is the Python that runs the component's tests, the
@@ -14,6 +14,8 @@ GATE_VERSION: str  # "test-probe@1.4.0"
 (`specs/architecture/asset-kinds.md`); `None` means `sys.executable`.
 `assets` is the `path` of each asset the component declares, such as
 `["static/app.js"]`, or `None` when the caller does not know them.
+`drivers` is the fixture name of each test driver the component
+declares, such as `["browser"]` (`specs/architecture/test-drivers.md`).
 
 `criterion_bundle` is a `CriterionBundle` or a mapping with its keys
 (`spec-bundle-assembler`'s `interface/data/CriterionBundle.md`); only
@@ -65,8 +67,9 @@ asset plugin `hotdocs_probe_assets.py` (`R-PROBE-007`):
 ```
 
 with `PYTHONPATH` set to that directory alone, the current directory
-set to it, and `HOTDOCS_PROBE_ASSETS` set to `json.dumps(assets)` when
-`assets` is not `None` and removed from the environment otherwise. Each `testcase` element of `report.xml` is one test; a
+set to it, `HOTDOCS_PROBE_ASSETS` set to `json.dumps(assets)` when
+`assets` is not `None` and removed from the environment otherwise, and
+`HOTDOCS_PROBE_DRIVERS` set to `json.dumps(drivers or [])`. Each `testcase` element of `report.xml` is one test; a
 `failure` or `error` child carries a `message` attribute, which for a
 failure begins with the exception's type name, possibly module-qualified
 (`NameError: ...`, `slugify.HotdocsProbeStubReached: ...`).
@@ -133,6 +136,26 @@ def asset_runner():
         return _reached
 
     return runner
+
+
+class _DriverStub:
+    def __init__(self, name):
+        self._name = name
+
+    def __getattr__(self, name):
+        raise HotdocsProbeStubReached(self._name + "." + name)
+
+
+def _driver_fixture(name):
+    @pytest.fixture(name=name)
+    def fixture():
+        return _DriverStub(name)
+
+    return fixture
+
+
+for _name in json.loads(os.environ.get("HOTDOCS_PROBE_DRIVERS", "[]")):
+    globals()["_driver_" + _name] = _driver_fixture(_name)
 ```
 
 Test fixtures: a test passes `test_source` as a string literal and a

@@ -1,8 +1,7 @@
 # R-VERIFY-014
 
-**R-VERIFY-014** — Every test run MUST have a wall-clock timeout,
-  killing the whole process tree: 300 seconds for a run on unmutated
-  code, whose timeout fails that criterion. Mutation runs MUST follow
-  `specs/architecture/mutation-runs.md` exactly: its tests, sandbox,
-  working directory, `PYTHONPATH`, `--noconftest`, baseline and
-  per-mutant timeouts (`D158`, `D159`, `D280`, `D324`).
+**R-VERIFY-014** — Every criterion's test run MUST have a wall-clock
+  timeout of `DEFAULT_TEST_TIMEOUT` seconds, read at each run, killing
+  the whole process tree as `specs/architecture/run-environment.md`'s
+  "Timeouts" states; a timeout fails that criterion. Mutation runs'
+  timeouts are `mutation-scorer`'s.

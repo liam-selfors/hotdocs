@@ -3,11 +3,12 @@ id: comp-provenance-tracker-ui
 title: Provenance Tracker UI
 status: draft
 owners: [pipeline-team]
-depends_on: [comp-provenance-tracker, comp-corpus-graph-builder, comp-kind-javascript]
+depends_on: [comp-provenance-tracker, comp-corpus-graph-builder, comp-kind-javascript, comp-driver-browser]
 realizes: [P-MERGE-VISIBILITY]
 model_pin: claude-opus-5-5
 sealed: false
 assets: [javascript:static/app.js]
+drivers: [browser]
 ---
 
 # Provenance Tracker UI

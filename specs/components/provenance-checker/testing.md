@@ -93,3 +93,16 @@ defining GATE_VERSION "cc@1", "ta@1" and "vo@1"; license-scanner and
 secret-scanner, each defining gate_version(repo_root) returning "ls@1"
 and "ss@1" and a scan function that records any call; and generator,
 defining GATE_VERSION "gen@3" and PROMPT_VERSION "v11".
+
+## A fake test driver
+
+Criteria about drivers (`AC-PROVCHECK-017`) plant
+`<repo_root>/gen/driver-fake/driver_fake.py`, with no definition file,
+defining `NAME = "fake"`, `FIXTURE = "fake_session"` and
+`provision(repo_root)` returning, from the JSON file
+`<repo_root>/fakedrv.json`, `{"ok": True, "reason": "", "versions": <its versions>, "lockfile_sha256": None}`,
+the file initially `{"versions": {"fakedrv": "2.0"}}`; comp-foo's
+frontmatter gains `drivers: [fake]`. Its expected entry DR is
+`{"name": "fake", "definition_sha256": null, "adapter_sha256": DA, "versions": {"fakedrv": "2.0"}, "lockfile_sha256": null}`,
+DA being `"sha256:"` plus the lowercase hex SHA-256 of `driver_fake.py`'s
+bytes.

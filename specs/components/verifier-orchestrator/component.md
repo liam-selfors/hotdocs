@@ -3,7 +3,7 @@ id: comp-verifier-orchestrator
 title: Verifier Orchestrator
 status: draft
 owners: [pipeline-team]
-depends_on: [comp-criterion-compiler, comp-generator, comp-test-author, comp-spec-bundle-assembler, comp-test-probe]
+depends_on: [comp-criterion-compiler, comp-generator, comp-test-author, comp-spec-bundle-assembler, comp-run-environment, comp-test-supply, comp-mutation-scorer]
 realizes: [P-ZERO-EDIT, P-AMBIGUITY-GATE]
 model_pin: claude-opus-5-5
 sealed: false
@@ -20,13 +20,14 @@ score and the interface drift check.
 
 ## Scope
 
-**In scope:** dispatching each criterion by its `kind`; the drift check;
-the mutation score; provisioning asset environments; one
+**In scope:** dispatching each criterion by its `kind`; running each
+test; the drift check; the verdict, including the mutation bar; one
 `VerificationReport`.
 
-**Out of scope:** the license/secret scans; judging or authoring
-anything (it dispatches to an injectable judge and `test_author` and
-records their results).
+**Out of scope:** provisioning (`run-environment`), supplying tests
+(`test-supply`), mutation (`mutation-scorer`); the license and secret
+scans; judging or authoring anything (it dispatches to an injectable
+judge and `test_author` and records their results).
 
 ## Definitions
 
@@ -56,5 +57,5 @@ See `constraints.md`.
 
 ## Change log
 
-See the decisions, `D27` onward; latest `D369` (`assets` passed to
-`probe`).
+See the decisions, `D27` onward; latest `D383` (split into
+`run-environment`, `test-supply` and `mutation-scorer`).

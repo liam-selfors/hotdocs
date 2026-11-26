@@ -15,7 +15,8 @@
     every `.md` file under its `requirements/` and `interface/`;
   - each document `R-ASSEMBLE-014` appends;
   - each asset-kind adapter `R-ASSEMBLE-016` loads, under the path
-    `gen/kind-<kind>/kind_<module>.py` whichever root it was read from;
+    `gen/kind-<kind>/kind_<module>.py` whichever root it was read from,
+    and each driver adapter `R-ASSEMBLE-017` loads, likewise;
   - for each `depends_on` component, its `component.md` without every
     section but `## Purpose`, every `.md` file under its `interface/`,
     and every file under its code directory

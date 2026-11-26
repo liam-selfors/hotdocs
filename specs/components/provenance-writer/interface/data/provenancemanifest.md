@@ -26,8 +26,10 @@ The manifest's definition: its top-level keys are exactly these
   "secret_scan": { "...": "a SecretScanResult" },
   "assets": [{"kind": "javascript", "path": "static/app.js", "definition_sha256": "sha256:...",
               "adapter_sha256": "sha256:...", "versions": {"node": "24.1.0"},
-              "lockfile_sha256": null}]
+              "lockfile_sha256": null}],
+  "drivers": []
 }
 ```
 
-`assets` is the `verification_report`'s, verbatim (`R-PROV-022`).
+`assets` and `drivers` are the `verification_report`'s, verbatim
+(`R-PROV-022`).

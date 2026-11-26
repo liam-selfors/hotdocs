@@ -8,7 +8,7 @@
   R-LINT-008 becomes: every `requirement` node MUST be the target of at
   least one `covers` edge. R-LINT-009 becomes: every `covers` edge's
   target MUST resolve to a real `requirement` or `capability` node, and
-  (per its existing distinct-message behavior) report separately whether
+  report separately whether
   a non-resolving target looked like an `R-id`, a `P-id`, or neither.
 
   Implementation requirement, not behavioral. Exception: R-LINT-009's

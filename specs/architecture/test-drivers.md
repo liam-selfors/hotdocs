@@ -47,7 +47,7 @@ changing a driver regenerates the driver and the components declaring
 it, never the pipeline. A declared driver with neither a definition nor
 an adapter is a lint failure (`R-LINT-036`); one with no adapter fails
 verification of the declaring component with
-`unknown test driver: <name>`.
+`unknown test driver: <name>` (`R-RUNENV-003`).
 
 ## The definition
 
@@ -96,27 +96,22 @@ open_session(repo_root: Path, work_dir: Path) -> object
   `CriterionBundle`'s `testing` of a declaring component, after the
   asset kinds' texts, `\n## Test driver: <name>\n\n` followed by
   `guidance()["test_author"]`, stripped, for each declared driver in
-  sorted order. The `SpecBundle` never holds it: the generator writes
-  the page, not the tests that drive it.
-- **Environment.** Before a component's criteria run,
-  `verifier-orchestrator` calls `provision(repo_root)` for each declared
-  driver, after the asset kinds. When one reports `ok` false, every
-  `generated-test` and `compiled` criterion of the component is `fail`
-  with `failure_origin` `"environment"` and `failure_detail.message`
-  the adapter's `reason`, and the mutation score is null, exactly as
-  for an asset kind's environment.
-- **Running criteria.** The pytest plugin that supplies `asset_runner`
-  also supplies, for each declared driver, a function-scoped fixture
-  named the adapter's `FIXTURE`, yielding `open_session(repo_root,
-  tmp_path)` and closing it at teardown. The same holds for every
-  baseline and mutant run, and for a capability's scenario runs when the
-  capability declares the driver. A test using a fixture of a driver
-  the component does not declare errors at setup, as any unknown pytest
-  fixture does.
-- **Probe.** `test-probe`'s stub run supplies each declared driver's
-  fixture as an object whose every attribute access raises
+  sorted order (`R-ASSEMBLE-017`). The `SpecBundle` never holds it: the
+  generator writes the page, not the tests that drive it.
+- **Environment.** `run-environment`'s `prepare` provisions each
+  declared driver after the asset kinds (`R-RUNENV-003`). When one
+  fails, every `generated-test` and `compiled` criterion of the
+  component is `fail` with `failure_origin` `"environment"`, exactly as
+  for an asset kind's environment (`R-VERIFY-020`).
+- **Running criteria.** The plugin `specs/architecture/run-environment.md`
+  defines gives each declared driver's fixture to every criterion,
+  baseline and mutant run, and to a capability's scenario runs when the
+  capability declares the driver (`prepare_capability`). A test using a
+  fixture of a driver not declared errors at setup.
+- **Probe.** `test-probe`'s stub run supplies each fixture named in
+  `probe`'s `drivers` as an object whose every attribute access raises
   `HotdocsProbeStubReached`, so a test that reaches the driver reaches
-  the code under test.
+  the code under test (`R-PROBE-009`).
 - **Provenance.** `VerificationReport.drivers` lists each declared
   driver in sorted order, `{"name", "definition_sha256",
   "adapter_sha256", "versions", "lockfile_sha256"}`, hashed as
@@ -124,7 +119,8 @@ open_session(repo_root: Path, work_dir: Path) -> object
   and `provenance-checker`'s key includes it. A miss whose only
   differences are drivers' or assets' `versions` or `lockfile_sha256`
   is `environment differs` (`D345`), so a browser update re-verifies
-  the committed code before anything is regenerated.
+  the committed code before anything is regenerated. A capability's
+  scenario key includes its drivers' `versions` the same way.
 - **Agentic generation.** The agent's `run_scratch_tests` gets no
   driver fixture (`specs/architecture/agent-sandbox.md`).
 

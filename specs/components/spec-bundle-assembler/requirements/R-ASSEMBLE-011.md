@@ -27,5 +27,4 @@
   (`D86`, `D91`, `D93`).
 
   **Deliberately one-directional — a dependency's bundle MUST NOT
-  include anything about how its dependents use it.** A missing
-  contract is an `interface/` change, never a prompt input.
+  include anything about how its dependents use it.**

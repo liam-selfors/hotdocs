@@ -3,7 +3,7 @@ id: comp-capability-scenario-verifier
 title: Capability Scenario Verifier
 status: draft
 owners: [pipeline-team]
-depends_on: [comp-criterion-compiler, comp-test-author, comp-llm-endpoint]
+depends_on: [comp-criterion-compiler, comp-test-author, comp-llm-endpoint, comp-run-environment]
 realizes: [P-ZERO-EDIT, P-AMBIGUITY-GATE]
 model_pin: claude-opus-5-5
 sealed: false

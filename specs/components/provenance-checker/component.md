@@ -3,7 +3,7 @@ id: comp-provenance-checker
 title: Provenance Checker
 status: draft
 owners: [pipeline-team]
-depends_on: [comp-spec-bundle-assembler, comp-criterion-compiler, comp-test-author, comp-verifier-orchestrator, comp-license-scanner, comp-secret-scanner, comp-provenance-writer, comp-generator]
+depends_on: [comp-spec-bundle-assembler, comp-criterion-compiler, comp-test-author, comp-verifier-orchestrator, comp-license-scanner, comp-secret-scanner, comp-provenance-writer, comp-generator, comp-run-environment]
 realizes: [P-ZERO-EDIT]
 uses_var: [VAR-TRUST-JUDGE-PROVENANCE]
 model_pin: claude-opus-5-5

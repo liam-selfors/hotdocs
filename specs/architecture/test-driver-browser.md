@@ -16,8 +16,9 @@ what the page shows (`D373`). `comp-driver-browser` is its adapter.
 ## Environment
 
 Python 3.11 or later (the interpreter `hotdocs` runs on) and the
-Playwright release the adapter pins as `PLAYWRIGHT_VERSION`, with the
-Chromium build that release installs. `provision(repo_root)` builds,
+Playwright release the adapter pins as `PLAYWRIGHT_VERSION`, exactly
+`"1.64.1"`, with the Chromium build that release installs. A newer pin
+is a change to this document. `provision(repo_root)` builds,
 on first use, a virtual environment at
 `<repo_root>/.hotdocs/env/driver-browser/` holding exactly
 `playwright==<PLAYWRIGHT_VERSION>`, then runs

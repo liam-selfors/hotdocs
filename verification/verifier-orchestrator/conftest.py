@@ -86,7 +86,7 @@ def write_bar(repo_root: Path) -> None:
     (comp_dir / "requirements" / "R-BAR-001.md").write_text(BAR_R001, encoding="utf-8")
     (comp_dir / "acceptance" / "AC-BAR-001.md").write_text(BAR_AC001, encoding="utf-8")
 
-# Real assemble_criterion() (R-VERIFY-009, D119) refuses a non-lint-clean
+# Real assemble_criterion() (R-SUPPLY-001, D119) refuses a non-lint-clean
 # corpus (R-ASSEMBLE-005) -- every requirement needs at least one covering
 # acceptance file (R-LINT-008) even when a given test's own extra_acceptance
 # only cares about one of them.

@@ -2,7 +2,7 @@
 
 ```
 verify(component_id: str, repo_root: Path, judge=None, test_author=None) -> VerificationReport
-GATE_VERSION: str  # "verifier-orchestrator@3.5.0" (R-VERIFY-015)
+GATE_VERSION: str  # "verifier-orchestrator@4.0.0" (R-VERIFY-015)
 DEFAULT_TEST_TIMEOUT: float  # 300.0, read at each run (R-VERIFY-014)
 ```
 
@@ -14,9 +14,9 @@ form. Each `criteria` entry is a plain **dict** (`c["id"]`,
 `judge`/`test_author` are the glossary's "Injected `judge`/`test_author`
 callable shape" (`D65`): one `bundle` argument.
 
-It loads `spec-bundle-assembler` from `<repo_root>/gen/spec-bundle-assembler/`,
-`test-probe` from `<repo_root>/gen/test-probe/` and the sealed
+It loads `spec-bundle-assembler`, `run-environment`, `test-supply` and
+`mutation-scorer` from `<repo_root>/gen/<slug>/` and the sealed
 `criterion-compiler` from `<repo_root>/pipeline/criterion-compiler/`, each
 else from the tool root (`D199`).
 
-Implements: `specs/architecture/step-phrase-grammar.md`, `specs/architecture/acceptance-criteria.md`, `specs/architecture/verifier-fixtures.md`, `specs/architecture/mutation-runs.md`, `specs/architecture/cli-conventions.md`, `specs/architecture/test-reuse.md`, `specs/architecture/asset-kinds.md`, `specs/architecture/asset-kind-python.md`
+Implements: `specs/architecture/step-phrase-grammar.md`, `specs/architecture/acceptance-criteria.md`, `specs/architecture/verifier-fixtures.md`, `specs/architecture/cli-conventions.md`, `specs/architecture/run-environment.md`
