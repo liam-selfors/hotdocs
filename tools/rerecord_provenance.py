@@ -103,8 +103,14 @@ def rerecord(component_id: str, pc, pw, vo, lic, sec, author=None) -> bool:
     key = pc.current_provenance_key(component_id, REPO)
     current_hash = _get(key, "spec_bundle_hash")
     if current_hash != manifest.get("spec_bundle_hash"):
-        print(f"{component_id}: SKIPPED -- spec_bundle_hash changed since generation; regenerate it")
-        return False
+        # D379: a miss caused only by dependency code re-verifies the
+        # committed code instead of regenerating it.
+        parts = _get(key, "spec_bundle_parts") or {}
+        recorded = manifest.get("spec_bundle_parts") or {}
+        if not (parts.get("spec") and parts.get("spec") == recorded.get("spec")):
+            print(f"{component_id}: SKIPPED -- spec_bundle_hash changed since generation; regenerate it")
+            return False
+        print(f"{component_id}: dependency code differs -- re-verifying the committed code (D379)")
     tests_dir = REPO / "verification" / slug / "generated-test"
     backup = None
     if author is not None:
@@ -143,6 +149,7 @@ def rerecord(component_id: str, pc, pw, vo, lic, sec, author=None) -> bool:
         "provenance_hit": False,
         "attempts": 1,
         "gate_versions": gate_versions,
+        **({"spec_bundle_parts": _get(key, "spec_bundle_parts")} if _get(key, "spec_bundle_parts") else {}),
     }, REPO)
     hit = _get(pc.check_provenance(component_id, current_hash, gate_versions, REPO), "hit")
     print(f"{component_id}: rerecorded, mutation {_get(report, 'mutation_score')}, "
