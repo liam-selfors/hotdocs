@@ -1,66 +1,71 @@
-# hotdocs-criterion: sha256:fe944dcdf22c53a8ad4629a89268c0ba28c1665040d42ebce95a728cdde93988
-import spec_linter
+# hotdocs-criterion: sha256:7ef7da662ed327b138b69bc613b12ae4728d86c2597a437a34db797579c08632
+"""AC-LINT-033: lint() folds in citation-checker's and size-checker's
+findings as Finding objects, and load_corpus is corpus-loader's."""
 
 from pathlib import Path
+
+import spec_linter
+
+
+COMP_REL = "specs/components/foo/component.md"
 
 
 def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-PRODUCT = (
-    "---\n"
-    "id: P-FOO\n"
-    "title: Foo works\n"
-    "status: draft\n"
-    "owners: [team-a]\n"
-    "---\n"
-    "\n"
-    "# Foo works\n"
-    "\n"
-    "## Purpose\n"
-    "\n"
-    "A foo can be made.\n"
-    "\n"
-    "### CS-FOO-001\n"
-    "Covers: P-FOO\n"
-    "Kind: generated-test\n"
-    "\n"
-    "```gherkin\n"
-    "Given nothing\n"
-    "When a foo is made\n"
-    "Then it exists\n"
-    "```\n"
-)
-
-PURPOSE_TEXT = "Makes a foo. " + " ".join(["foo"] * 157)
+def _write(path, text):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
 
 
-def component_md():
-    return (
+def _purpose_160_words():
+    words = ["token" + str(i) for i in range(1, 161)]
+    return " ".join(words) + "."
+
+
+def _build_corpus(repo_root):
+    specs = repo_root / "specs"
+    for sub in ("product", "architecture", "vars", "decisions"):
+        (specs / sub).mkdir(parents=True, exist_ok=True)
+
+    _write(
+        specs / "glossary.md",
+        "# Glossary\n"
+        "\n"
+        "- **Widget** — a small thing used in tests.\n",
+    )
+
+    comp_dir = specs / "components" / "foo"
+    component_md = (
         "---\n"
         "id: comp-foo\n"
         "title: Foo\n"
         "status: draft\n"
-        "owners: [team-a]\n"
-        "depends_on: []\n"
-        "realizes: [P-FOO]\n"
-        "sealed: false\n"
+        "owners: [test-team]\n"
+        "sealed: true\n"
+        "source_path: legacy/foo/\n"
         "---\n"
         "\n"
         "# Foo\n"
         "\n"
         "## Purpose\n"
         "\n"
-        + PURPOSE_TEXT + "\n"
+        + _purpose_160_words()
+        + "\n"
+        "\n"
+        "## Rationale\n"
+        "\n"
+        "This design follows D9999.\n"
         "\n"
         "## Scope\n"
         "\n"
-        "**In scope:** making a foo. **Out of scope:** everything else.\n"
+        "- In scope: doing the thing.\n"
+        "- Out of scope: everything else.\n"
         "\n"
         "## Definitions\n"
         "\n"
-        "No deltas from `specs/glossary.md`.\n"
+        "None.\n"
         "\n"
         "## Behavior\n"
         "\n"
@@ -72,7 +77,7 @@ def component_md():
         "\n"
         "## Data\n"
         "\n"
-        "None.\n"
+        "See `interface/data/`.\n"
         "\n"
         "## Acceptance criteria\n"
         "\n"
@@ -84,119 +89,102 @@ def component_md():
         "\n"
         "## Open questions\n"
         "\n"
-        "None.\n"
-        "\n"
         "## Change log\n"
         "\n"
-        "- Initial draft (`D999`).\n"
+        "- Initial draft.\n"
+    )
+    _write(comp_dir / "component.md", component_md)
+
+    _write(
+        comp_dir / "requirements" / "R-FOO-001.md",
+        "# R-FOO-001\n"
+        "\n"
+        "**R-FOO-001** — `do_thing` MUST return `1`.\n",
+    )
+    _write(
+        comp_dir / "acceptance" / "AC-FOO-001.md",
+        "# AC-FOO-001\n"
+        "\n"
+        "Covers: R-FOO-001\n"
+        "Kind: generated-test\n"
+        "\n"
+        "```gherkin\n"
+        "Given nothing\n"
+        "When do_thing runs\n"
+        "Then it returns 1\n"
+        "```\n",
+    )
+    _write(
+        comp_dir / "interface" / "library.md",
+        "# Library\n"
+        "\n"
+        "```\n"
+        "do_thing() -> int\n"
+        "```\n",
+    )
+    _write(
+        comp_dir / "constraints.md",
+        "# Constraints\n"
+        "\n"
+        "- `do_thing` returns within 1 second, measured by a timed test.\n",
     )
 
 
-REQ = (
-    "# R-FOO-001\n"
-    "\n"
-    "**R-FOO-001** \u2014 `make_foo()` MUST return the string `\"foo\"`.\n"
-)
-
-LIBRARY = (
-    "# Library\n"
-    "\n"
-    "One module file, `foo.py`.\n"
-    "\n"
-    "```\n"
-    "make_foo() -> str\n"
-    "```\n"
-)
-
-AC = (
-    "# AC-FOO-001\n"
-    "\n"
-    "Covers: R-FOO-001\n"
-    "Kind: generated-test\n"
-    "\n"
-    "```gherkin\n"
-    "Given nothing\n"
-    "When make_foo() is called\n"
-    "Then the result is \"foo\"\n"
-    "```\n"
-)
-
-CONSTRAINTS = (
-    "# Foo \u2014 Non-Functional Constraints\n"
-    "\n"
-    "- **Pure.** No I/O.\n"
-)
-
-
-def write(root, rel, text):
-    p = root / rel
-    p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(text, encoding="utf-8")
-
-
-def build_corpus(repo_root):
-    write(repo_root, "specs/product/foo.md", PRODUCT)
-    write(repo_root, "specs/components/foo/component.md", component_md())
-    write(repo_root, "specs/components/foo/requirements/R-FOO-001.md", REQ)
-    write(repo_root, "specs/components/foo/interface/library.md", LIBRARY)
-    write(repo_root, "specs/components/foo/acceptance/AC-FOO-001.md", AC)
-    write(repo_root, "specs/components/foo/constraints.md", CONSTRAINTS)
-
-
-COMPONENT_FILE = "specs/components/foo/component.md"
-
-
-def norm(path):
-    return str(path).replace("\\", "/")
-
-
-def test_purpose_word_count_is_160():
-    assert len(PURPOSE_TEXT.split()) == 160
+def _findings_for(report, rule_id):
+    return [f for f in field(report, "findings") if field(f, "rule_id") == rule_id]
 
 
 def test_lint_includes_citation_and_size_findings(tmp_path):
-    repo_root = tmp_path
-    build_corpus(repo_root)
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    _build_corpus(repo_root)
 
     report = spec_linter.lint(None, repo_root)
-    findings = list(field(report, "findings"))
 
     cite = [
-        f for f in findings
-        if field(f, "rule_id") == "R-CITE-001"
-        and field(f, "severity") == "fail"
-        and norm(field(f, "file")) == COMPONENT_FILE
+        f for f in _findings_for(report, "R-CITE-001")
+        if field(f, "severity") == "fail" and field(f, "file") == COMP_REL
     ]
-    size = [
-        f for f in findings
-        if field(f, "rule_id") == "R-SIZE-004"
-        and field(f, "severity") == "fail"
-        and norm(field(f, "file")) == COMPONENT_FILE
+    assert len(cite) == 1, [
+        (field(f, "rule_id"), field(f, "severity"), field(f, "file"), field(f, "message"))
+        for f in field(report, "findings")
     ]
-    summary = [
-        (field(f, "rule_id"), field(f, "severity"), norm(field(f, "file")))
-        for f in findings
-    ]
-    assert len(cite) == 1, summary
-    assert len(size) == 1, summary
-    for f in cite + size:
-        assert isinstance(f, spec_linter.Finding), type(f)
 
-    assert field(report, "hard_failures") == 2, summary
+    size = [
+        f for f in _findings_for(report, "R-SIZE-004")
+        if field(f, "severity") == "fail" and field(f, "file") == COMP_REL
+    ]
+    assert len(size) == 1, [
+        (field(f, "rule_id"), field(f, "severity"), field(f, "file"), field(f, "message"))
+        for f in field(report, "findings")
+    ]
+    assert "Purpose section has 160 words" in field(size[0], "message")
+
+    for f in (cite[0], size[0]):
+        assert not isinstance(f, dict)
+        assert isinstance(f, spec_linter.Finding)
+
+    assert field(report, "hard_failures") == 2, [
+        (field(f, "rule_id"), field(f, "severity"), field(f, "file"), field(f, "message"))
+        for f in field(report, "findings")
+    ]
 
 
 def test_load_corpus_returns_corpus_with_component(tmp_path):
-    repo_root = tmp_path
-    build_corpus(repo_root)
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    _build_corpus(repo_root)
 
     load_corpus = spec_linter.load_corpus
     assert callable(load_corpus)
-    corpus = load_corpus(repo_root)
 
+    corpus = load_corpus(repo_root)
     assert type(corpus).__name__ == "Corpus"
+
     components = field(corpus, "components")
     assert "foo" in components
     comp = components["foo"]
     root = field(comp, "root")
     assert root is not None
-    assert norm(field(root, "rel_path")) == COMPONENT_FILE
+    assert field(root, "rel_path") == COMP_REL
+    assert field(root, "doc_id") == "comp-foo"
