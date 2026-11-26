@@ -56,9 +56,6 @@ See `interface/data/`.
 
 See `acceptance/`.
 
-All ten are generated tests over small synthetic corpora, run against
-the real `graph-query-engine`.
-
 ## Non-functional constraints
 
 See `constraints.md`.

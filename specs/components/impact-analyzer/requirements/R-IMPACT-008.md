@@ -22,10 +22,7 @@
   nothing under this requirement. `guarantee_ids` lists the qualifying
   `G-id`s sorted.
 
-  **`depends_on_guarantees`'s real frontmatter shape** (`D49`, found
-  missing from this bundle's own visible text, though already
-  documented for humans in `SPEC_GUIDELINES.md` §2, which no
-  `SpecBundle` ever includes): a flat list of bare `G-<comp>-NNN` id
+  **`depends_on_guarantees`'s frontmatter shape** (`D49`): a flat list of bare `G-<comp>-NNN` id
   strings — e.g. `depends_on_guarantees: [G-CACHE-001]` — never a
   nested structure naming the owning component per entry. A `G-id`'s
   owning component is **never** parsed out of the id string itself

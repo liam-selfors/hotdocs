@@ -33,22 +33,12 @@ environment otherwise kept; an adapter's own subprocesses are
 1. **Import** (`R-SURF-001`): `import <module>` in a subprocess; a
    non-zero exit gives one `import_error` finding, message the last
    non-empty stderr line, and ends the check.
-2. **Dependency names** (`R-SURF-002`): a static scan of the source text,
-   never an import of the candidate. An alias is the dependency's module
-   name, or the left side of an assignment line whose right side calls
-   `importlib.import_module(`, `module_from_spec(`, `exec_module(` or a
-   function named `_load...(` and holds the dependency's slug or module
-   name as a whole quoted string, single or double quotes. Names are
-   checked against the dependency's real module, in one subprocess:
-   `<module>.py` or `<module>/__init__.py` inside `<repo_root>/gen/<dep-slug>/`,
-   or inside `<repo_root>/<source_path>` for a sealed dependency, with
-   `PYTHONPATH` that directory. A use is `<alias>.<name>` not preceded
-   by a word character or `.`, wherever it sits, including after an
-   `import` guarded by `try`/`except ImportError`; names starting `__`
-   are ignored. A name passes when the module has it (`hasattr`) or
-   `<module>.<name>` imports. Each distinct missing name gives one
-   finding, message `<dep-slug> has no <name>, which the candidate uses`;
-   a dependency whose module does not import is skipped.
+2. **Dependency names** (`R-SURF-002`): uses are read from each file's
+   syntax tree, never its text and never by importing the candidate.
+   Names are checked against the dependency's real module, in one
+   subprocess: `<module>.py` or `<module>/__init__.py` inside
+   `<repo_root>/gen/<dep-slug>/`, or inside `<repo_root>/<source_path>`
+   for a sealed dependency, with `PYTHONPATH` that directory.
 3. **Command line** (`R-SURF-003`): only when the component's own
    `interface/library.md` has a line starting `Implements:` that names
    `specs/architecture/cli-conventions.md`. A subprocess, `PYTHONPATH`

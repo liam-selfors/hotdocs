@@ -1,6 +1,6 @@
 # R-PROV-014
 
-**R-PROV-014** — `build_manifest`/`write_provenance` MUST read every
+**R-PROV-014** — `write_provenance` MUST read every
   top-level field of `inputs` itself (`generation_result`,
   `verification_report`, `license_scan_result`, `secret_scan_result`,
   `provenance_hit`, `attempts`, `gate_versions`) using dual

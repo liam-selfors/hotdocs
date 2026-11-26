@@ -23,7 +23,7 @@ content.
 ## Scope
 
 **In scope:** `hotdocs decision new`, `decision ratify`,
-`decision record-commit`, `component new` and `kind new`, and the library functions
+`decision record-commit`, `component new`, `kind new` and `capability new`, and the library functions
 behind them, all acting on files under a given `repo_root`.
 
 **Out of scope:** writing a decision's reasoning or a component's

@@ -62,14 +62,6 @@ See `interface/data/`.
 
 See `acceptance/`.
 
-All three criteria are `kind: generated-test` (`D133`) — each needs a
-synthetic git repo built inside the test itself (real commits, real
-ancestry), not a mock, since the actual behavior being checked is git
-ancestry; `criterion-compiler`'s fixed step grammar has no step form
-for constructing arbitrary commits, only literal-value fixtures and a
-single function call, so this setup is unreachable through `kind:
-compiled` despite the deterministic, judgment-free logic it exercises.
-
 ## Non-functional constraints
 
 See `constraints.md`.

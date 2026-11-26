@@ -7,5 +7,3 @@
   one model is available (R-AUTHOR-003).
 - **No silent partial output.** A model-call error MUST leave
   `verification/<component>/generated-test/` untouched for that criterion.
-- **Credential handling.** Mirrors `generator`'s constraint exactly, for
-  both credentials this component may use.

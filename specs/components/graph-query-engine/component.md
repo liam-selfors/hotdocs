@@ -61,10 +61,6 @@ See `interface/data/`.
 
 See `acceptance/`.
 
-All nine criteria are `kind: compiled` — each view's SQL and the
-loader's own behavior are fully deterministic, no model or judgment
-involved.
-
 ## Non-functional constraints
 
 See `constraints.md`.

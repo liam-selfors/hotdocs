@@ -5,7 +5,7 @@ Kind: generated-test
 
 ```gherkin
 Given a full scan with zero matches
-When secret-scan completes
-Then a SecretScanResult recording the clean outcome is still written to the
-  provenance manifest
+When scan(repo_root) is called
+Then it returns a SecretScanResult with flagged false and matches [],
+  whose to_dict() holds both
 ```

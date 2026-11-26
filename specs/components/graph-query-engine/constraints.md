@@ -11,7 +11,3 @@
   `load_views()` call time, not baked in at generation time — the
   generated SQL is reusable across any checkout, not tied to the one
   it was generated against.
-- **Hand-bootstrapped, not yet cold-regenerated** — the same honest
-  exception `spec-linter` already documents (`generator`/
-  `criterion-compiler` don't exist yet). See
-  `verification/graph-query-engine/BOOTSTRAP.md`.

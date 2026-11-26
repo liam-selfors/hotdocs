@@ -16,8 +16,3 @@ FROM (SELECT regexp_extract(content, '^---\n(.*?)\n---\n', 1, 's') AS fm
   FROM read_text('{repo_root}/specs/decisions/*.md')) AS d
 WHERE fm != '';
 ```
-
-  `R-CITE-004`/`030` MUST query `nodes`/`edges` for `status`/
-  `supersedes`/`builds_on`, and this view only for
-  `last_ratified_commit` when a temporal comparison is actually
-  needed (`decision-drift-detector`'s own job, not spec-linter's).

@@ -43,9 +43,8 @@ standard-library module, or anything `importlib.util.find_spec` finds,
 such as `pytest`: in the probing process when `interpreter` is `None`,
 else in one subprocess of `interpreter`, the current environment kept,
 that checks every remaining part. A `testcase` **reached** the code
-under test exactly when its `failure` message contains
-`HotdocsProbeStubReached`; it gives no finding. A failure of any other
-type that is not a `test_bug` gives no finding either. A timed-out run
+under test exactly when its `failure` or `error` message contains
+`HotdocsProbeStubReached` (`R-PROBE-005`). A timed-out run
 gives exactly one finding, `probe_timeout`: its report is not read. A file
 pytest cannot collect appears in `report.xml` as a `testcase` with an
 `error` whose `message` is `collection failure`; it is no test, and gives

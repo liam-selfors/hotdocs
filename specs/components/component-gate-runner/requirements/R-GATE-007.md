@@ -2,7 +2,8 @@
 
 **R-GATE-007** — A component is sealed exactly when `provenance-checker`'s
   `current_sealed_key` returns a key for it (`D170`); this component
-  never reads `component.md` itself. For a sealed component it MUST skip
+  reads `component.md` itself only for `main`'s `--reauthor` check
+  (`R-GATE-012`). For a sealed component it MUST skip
   `provenance-checker`'s `check_provenance`, `spec-bundle-assembler`, and
   `generator` entirely, and call `verifier-orchestrator` to re-run its
   characterization tests against the code at `source_path`, then both

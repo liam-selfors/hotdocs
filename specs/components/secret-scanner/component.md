@@ -20,13 +20,7 @@ no human sign-off to clear a flag, but no result is ever silent.
 
 ## Rationale
 
-Detection is a maintained library's: a hand-built entropy check flagged
-ordinary identifiers yet could never match a random hex secret (`D168`).
-
-**Known gaps, accepted (`D168`):** the entropy detectors read quoted
-strings only, so an unquoted random token goes unseen, and
-`KeywordDetector`, the only plugin catching a low-entropy password, is
-off because it flags any key containing a word like `secret`.
+See `D168`: detection is a maintained library's, and its accepted gaps.
 
 ## Scope
 

@@ -12,7 +12,7 @@ a usage error.
 
 - `--changed` — repeatable, or comma-separated; omitted means the
   whole-corpus view (`R-UI-007`).
-- `--out` — output directory. Default: `.hotdocs/ui/` — local-only, the
+- `--out` — output directory. Default: `<repo-root>/.hotdocs/ui/` — local-only, the
   same as the tracking data it renders (`SPEC_GUIDELINES.md` §1), never
   `dist/`: unlike `docs-site-renderer`'s output, this page is never
   published.

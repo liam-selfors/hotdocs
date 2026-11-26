@@ -1,7 +1,7 @@
 # provenance manifest
 
-The schema is `SPEC_GUIDELINES.md` §7 itself, reproduced here only for
-convenience, not as a second definition:
+The manifest's definition: its top-level keys are exactly these
+(`D377`).
 
 ```json
 {

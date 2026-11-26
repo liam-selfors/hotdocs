@@ -19,4 +19,4 @@ exact returned and written content, and how a test compares
 it, in `specs/architecture/test-author-output.md`; the prompt's fixed
 rule blocks in `specs/architecture/test-author-prompt.md`, `specs/architecture/test-reuse.md`.
 
-Implements: `specs/architecture/cli-conventions.md`, `specs/architecture/test-author-fixtures.md`, `specs/architecture/test-author-output.md`, `specs/architecture/test-author-prompt.md`
+Implements: `specs/architecture/cli-conventions.md`, `specs/architecture/test-author-fixtures.md`, `specs/architecture/test-author-output.md`, `specs/architecture/test-author-prompt.md`, `specs/architecture/test-reuse.md`

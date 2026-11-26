@@ -55,11 +55,6 @@ See `interface/data/`.
 
 See `acceptance/`.
 
-Mixed `kind`, mirroring `generator`'s own split: the external call itself
-is `generated-test` (exercised via an injected mock backend); backend
-resolution and credential-safety are pure, deterministic checks,
-`compiled`.
-
 ## Non-functional constraints
 
 See `constraints.md`.
