@@ -12,8 +12,7 @@
   `depends_on_guarantees` entries for this upstream component at all, it
   MUST be included unconditionally whenever *any* file under that
   component's `interface/guarantees/` changed, tagged
-  `transitive-guarantee` naming the upstream component — the same safe,
-  coarse default every other `interface/` file kind already has (`D2`).
+  `transitive-guarantee` naming the upstream component (`D2`).
 
   A guarantee file is a `G-*.md` file directly in `interface/guarantees/`;
   its `G-id` is the file's stem. A guarantee file added or removed counts
@@ -33,11 +32,4 @@
   This narrowing is **strictly opt-in**: a dependent's own silence (no
   `depends_on_guarantees` declared) MUST NEVER be read as "this dependent
   relies on nothing here" — only an explicit, non-empty declaration
-  narrows anything. Getting a declared list wrong (under-claiming) is a
-  real residual risk this requirement does not eliminate — it is
-  structurally impossible for a graph-reachability computation to verify
-  a claim about what code *actually* relies on — which is exactly why
-  `D2`'s capability-scenario gate (`capability-scenario-verifier`, its
-  own provenance checked by `provenance-tracker`'s `hotdocs verify`,
-  `D89`) exists as a permanent backstop, not a transitional one,
-  independent of how precise these declarations get.
+  narrows anything.

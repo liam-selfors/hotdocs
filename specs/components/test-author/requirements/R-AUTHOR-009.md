@@ -10,13 +10,11 @@
   ```
 
   with `<nonce>` a fresh, per-call random value in the instruction
-  and the extraction regex — same mechanism `generator` already uses
-  (`R-GEN-015`, `D38`), for one file. MUST also state the model has
+  and the extraction regex (`D38`). MUST also state the model has
   no tool/file access and must answer from the bundle alone.
 
   `author_test` MUST extract strictly from between the markers,
   discarding anything outside (fence, narration, preamble/postamble).
   No matching BEGIN/END pair MUST be a distinct authoring failure —
-  nothing written to disk, same posture `R-AUTHOR-007`
-  states for a `model_call_error`.
+  nothing written to disk.
 

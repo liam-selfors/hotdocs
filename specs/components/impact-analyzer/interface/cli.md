@@ -5,8 +5,7 @@ hotdocs impact --changed <spec-id>... [--repo-root=<dir>] [--format=json|text]
 ```
 
 - `--changed <spec-id>...` — one or more spec ids known to have changed in
-  this diff (as determined by the caller, e.g. from `git diff`'s changed
-  paths resolved to spec ids). Required, ≥1. `--changed` takes every
+  this diff. Required, ≥1. `--changed` takes every
   following token up to the next one starting with `-`;
   `--changed=<id>` takes `<id>`, and may be followed by more ids the
   same way. `--changed` may be repeated; the ids accumulate. Any other

@@ -1,10 +1,7 @@
 # R-GQE-003
 
 **R-GQE-003** — The `component_docs` view MUST return one row per
-  component, its frontmatter fields joined with its full raw text,
-  reading under the data contract `SPEC_GUIDELINES.md` §3.4
-  (`component.md` is the one file in a component's directory carrying
-  frontmatter):
+  component, its frontmatter fields joined with its full raw text:
 
 ```sql
 CREATE OR REPLACE VIEW component_docs AS

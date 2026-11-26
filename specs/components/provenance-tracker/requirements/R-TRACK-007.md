@@ -6,9 +6,7 @@
   if generation reached it, the full `VerificationReport`, taken as
   direct parameters from `component-gate-runner`.
 
-  Written for both outcomes, success and failure (`D19`): a failed
-  attempt commits no provenance, so this record is where a person, or
-  `provenance-tracker-ui` (`D88`), reads why it failed.
+  Written for both outcomes, success and failure (`D19`).
 
   **The returned `AttemptRecord`'s own `generation`/`verification`
   fields MUST be the same JSON-equivalent plain form written to disk**

@@ -74,3 +74,5 @@ with blocks for" some files ends in the `END REPLY` line.
 cache with `cache_manager.get(key, repo_root=repo_root)` or
 `cache_manager.stats(repo_root=repo_root)`; a test MAY build a
 `GenerationResult` by keyword.
+
+All criteria are `generated-test`, with an injected mock model.

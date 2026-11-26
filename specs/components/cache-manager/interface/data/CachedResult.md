@@ -12,18 +12,9 @@
 `compiler`, `generated_test`, `llm_judge`, `license_scanner`,
 `secret_scanner`) and `payload`'s shape MUST match that type's expected
 schema — enforced by `put` (R-CACHE-007), not left to the caller's
-discipline. `generator` was a real, pre-existing gap: this component's
-own `Purpose` names `generator` as a consumer, but the original
-gate-type list omitted it — found only once a real `generator` was
-actually wired to call `put`/`get` for its own `GenerationResult`
-payloads.
+discipline.
 
-**Each gate type's exact required top-level payload keys** (`D40` —
-  this table, not just R-CACHE-007's prose assertion that validation
-  happens, MUST live here: a dependent only ever sees a dependency's
-  `interface/` content, never its `requirements/` — R-ASSEMBLE-002 —
-  so a `requirements/`-only copy of this table is invisible to a cold-
-  mode caller assembling a real `put` call against this contract):
+**Each gate type's exact required top-level payload keys** (`D40`):
 
 | `gate_type` | Required top-level payload keys |
 | --- | --- |

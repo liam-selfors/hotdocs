@@ -37,7 +37,3 @@ template`) for an unmatched step, `unresolved
 reference '<name>'` for an identifier no earlier `Given` binds, `does not
 resolve` for a name the interface lacks, and `is not a literal`
 for an expression, plus `field/index access` when it is one.
-
-`gate_version` corresponds to the `gate_versions.compiler` entry in the
-provenance manifest described in `notes/initial-ideas.md`'s own D7
-(R-COMPILE-010).

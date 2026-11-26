@@ -16,7 +16,6 @@ read as `None`, or `None`), filling a
 provider's defaults from `PROVIDERS` and `DEFAULT_TIMEOUT_SECONDS`; both
 raise `ModelResolutionError` exactly where `R-ENDPOINT-002` says.
 
-Not a pure function: it reaches a network (or the `claude` command).
 `model` is `<provider>:<model>` or a bare name (`R-ENDPOINT-002`).
 `**params` goes to the resolved backend: the HTTP providers understand
 `max_tokens` and `temperature` (`ollama` also `num_ctx`) and ignore the
@@ -65,12 +64,6 @@ api_key_env}`; given `env`, only that dict supplies keys and `PATH`.
 without a `base_url`, raises `ValueError`. `ModelResolutionError` is
 raised by `complete()` for `R-ENDPOINT-002`'s failures.
 `resolve_backend_name(model)` is kept only for compatibility: it returns
-`"anthropic"` for a bare `claude-*` name, the label the `claude`
-command's backend had before there were several providers.
-
-## HTTP, the call log, and config messages
-
-In `specs/architecture/llm-endpoint-http.md`; the `claude` command in
-`specs/architecture/claude-cli-adapter.md`.
+`"anthropic"` for a bare `claude-*` name.
 
 Implements: `specs/architecture/claude-cli-adapter.md`, `specs/architecture/llm-endpoint-http.md`

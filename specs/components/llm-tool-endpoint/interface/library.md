@@ -29,11 +29,7 @@ it propagates.
 Every HTTP request is `urllib.request.urlopen(request, timeout=<seconds>)`,
 looked up on the `urllib.request` module when the call is made, its reply
 used only as a context manager and through `.read()`; an error status
-arrives as `urllib.error.HTTPError`. A test replaces
-`urllib.request.urlopen` with a function that records each
-`Request`'s URL, headers and decoded JSON body and returns scripted
-replies: objects usable as a context manager whose `.read()` returns the
-reply document as UTF-8 JSON bytes.
+arrives as `urllib.error.HTTPError`.
 
 The request bodies, reply shapes and stop mapping for each provider are
 `specs/architecture/tool-use-wire-formats.md`'s.
@@ -43,21 +39,6 @@ The request bodies, reply shapes and stop mapping for each provider are
 running the module with those arguments calls it and exits with its
 return value.
 
-## Test fixtures
-
-A loop test leaves `repo_root` `None`, unsets `VAR_HOTDOCS_CONFIG` and
-runs from a fresh empty directory, so `load_config()` returns `None` and
-a `<provider>:<model>` string takes `PROVIDERS`' defaults; a `claude-cli:`
-model reads no key.
-
-A **fake `claude`** is an executable Python script whose path is passed
-as `claude_command`, run as argv[0] exactly as given, never shell-split: a
-file starting `#!<sys.executable>` with its executable bit set. It reads its own argv, takes the server command from
-the JSON file after `--mcp-config` (`mcpServers.hotdocs.command` and
-`.args`), starts it with stdin and stdout pipes, sends `initialize`, the
-`notifications/initialized` notification, `tools/list` and any scripted
-`tools/call` requests as JSON-RPC lines, then prints stream-json lines
-ending with `{"type": "result", "subtype": "success", "is_error": false,
-"result": "<text>", "num_turns": <n>}` and exits `0`.
+`claude_command` is run as argv[0] exactly as given, never shell-split.
 
 Implements: `specs/architecture/tool-use-wire-formats.md`

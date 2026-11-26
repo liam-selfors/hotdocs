@@ -18,10 +18,7 @@ that implements the verb.
 
 ## Rationale
 
-Every component had its own `main` and nothing routed to them, so there was
-no `hotdocs` command (`D184`). The table of verbs, with each component's
-argument contract, is data so a verb is one row and a generation never
-guesses a contract.
+See `D184`.
 
 ## Scope
 
@@ -54,7 +51,7 @@ See `interface/data/`.
 
 ## Acceptance criteria
 
-See `acceptance/`. All `kind: generated-test`: a temporary project and fake components that log their `argv`.
+See `acceptance/`.
 
 ## Non-functional constraints
 
@@ -66,10 +63,4 @@ None.
 
 ## Change log
 
-- `D184`: initial design. `D185`: setup (`init`) split out to `hotdocs-init`.
-- `D346`: the `kind new` row, routed to `spec-scaffolder` as `component new` is.
-- `main(argv)` alone is the `cli-conventions.md` entry; the injectable
-  form is now `run`, and `init` is reached through `hotdocs-init`'s `run`. (`D348`)
-- `D360`: the version is read from the tool root's `pyproject.toml`.
-- `D363`: `R-CLI-007`, `AC-CLI-007`: `--help` after a verb prints its
-  usage. `D364`: the `capability new` row.
+`D184`, `D185`, `D346`, `D348`, `D360`, `D363`, `D364`.

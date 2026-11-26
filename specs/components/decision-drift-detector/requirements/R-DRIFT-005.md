@@ -10,10 +10,3 @@
   `decision-impact`. `--format=json` MUST print the report as JSON
   matching its own schema; the default/`--format=text` MUST print a
   human-readable rendering.
-
-  Found via mutation testing, not a behavioral test failure (same
-  shape as `R-PROV-015`/`D130` for `provenance-writer`): every
-  acceptance criterion so far exercises `find_decision_drift`/
-  `find_decision_impact` directly as a library call, none through
-  `main()` — `interface/cli.md` documents the CLI but no requirement
-  or acceptance criterion ever covered it.

@@ -23,11 +23,3 @@
   *different* caller than the one that wrote it, MAY safely be treated as
   authoritative the moment it returns a hit — no staleness window, no
   eventual-consistency delay, as long as the precondition above holds.
-  This is the worked example `D2` was built around: if `cache-manager`'s
-  backing store ever changes from a single-node store to one with weaker
-  consistency (e.g. a distributed cluster with eventual consistency across
-  nodes), *that* is a change to this guarantee, not an internal detail —
-  it lives here, under `interface/`, specifically so such a change is
-  visible to and propagates toward whatever depends on it (`D2`), rather
-  than silently invalidating an assumption nobody could see was being
-  relied upon.

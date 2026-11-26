@@ -50,10 +50,6 @@ See `interface/data/`.
 
 See `acceptance/`.
 
-All are `kind: generated-test`: the HTTP loops run against a replaced
-`urllib.request.urlopen`, the `claude-cli` loop against a fake `claude`
-script.
-
 ## Non-functional constraints
 
 See `constraints.md`.
@@ -64,4 +60,4 @@ None.
 
 ## Change log
 
-- `D308`: initial spec.
+`D308`.

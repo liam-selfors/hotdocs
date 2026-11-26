@@ -40,8 +40,7 @@ the highest entry score.
 
 **`gate_version`** is `license_scanner@4.0.<corpus_version>+<H>` for a
 usable corpus, `<H>` being the first 12 lowercase hex digits of the
-SHA-256 of the corpus file's exact bytes, so any change to the corpus
-changes the cache key even without a version bump. When the scan is not evaluated it is `license_scanner@4.0.0-<reason>`
+SHA-256 of the corpus file's exact bytes. When the scan is not evaluated it is `license_scanner@4.0.0-<reason>`
 (`R-LICENSE-005`): `license_scanner@4.0.0-no-reference-corpus`,
 `license_scanner@4.0.0-corpus-unreadable`, or
 `license_scanner@4.0.0-corpus-invalid`.

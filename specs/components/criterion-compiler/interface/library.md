@@ -20,18 +20,14 @@ asked to write. `out_dir` (the CLI's `--out`) is where compiled test files are
 written, default `verification/<slug>/compiled/`.
 
 `compile_criterion` (`R-COMPILE-012`, `D59`) is the lower-level
-primitive `compile` itself uses for each criterion it finds — exposed
-publicly for a caller compiling criterion content that doesn't live
-under any one component's `acceptance/` directory (e.g.
-`capability-scenario-verifier`'s product-capability scenarios). No
+primitive `compile` itself uses for each criterion it finds, public
+for criterion content outside any one component's `acceptance/`. No
 directory scanning, no file I/O: given an already-parsed
 `ParsedCriterion` (a dataclass in this module, fields `criterion_id`,
 `covers`, `kind`, `gherkin`, `file`, built by keyword; `gherkin` holds
 the steps themselves, the ```` ```gherkin ```` fence lines already
 removed, its first line being line 1) and
-an optional `InterfaceSurface` (omit it for content black-box against
-more than one component, which has no single surface to resolve
-against), returns `{"status": "compiled", "source": <text>}` or
+an optional `InterfaceSurface`, returns `{"status": "compiled", "source": <text>}` or
 `{"status": "error", "message": <text>}` — never raises, and never
 writes anything to disk itself. With no surface, only steps naming no
 function, endpoint or type compile (`a <fixture-name> is <literal>`,

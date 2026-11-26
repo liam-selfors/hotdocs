@@ -5,5 +5,4 @@
   any component, under the same `repo_root` and the same
   `VAR-LICENSE-CORPUS-PATH` value — including when there is no usable
   corpus (`R-LICENSE-005`). It MUST NOT scan any file under `gen/`, call
-  `cache-manager`, or write anything. This is how a caller learns the
-  scanner's current version without running a scan (`D163`).
+  `cache-manager`, or write anything (`D163`).

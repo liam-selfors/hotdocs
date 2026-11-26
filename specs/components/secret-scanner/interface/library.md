@@ -48,10 +48,7 @@ cached_result, repo_root=...)` after a fresh scan. A `get` result is a hit only
 if its `payload` (read with dual dict-or-attribute access) is non-null.
 `cache-manager` being unloadable means no lookup, never a failed scan.
 
-`scan` covers every file under `repo_root`, a test's stand-ins
-included, so a stand-in embeds no long random-looking literal, above all
-no temporary-directory path; it reads such values from an environment
-variable. The compliance webhook is POSTed with `urllib.request.urlopen`
+The compliance webhook is POSTed with `urllib.request.urlopen`
 and nothing else, so a test replaces that function.
 
 Implements: `specs/architecture/cli-conventions.md`

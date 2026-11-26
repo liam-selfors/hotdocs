@@ -11,18 +11,12 @@ code.
 - `<component-id>` — the component whose `acceptance/` directory to
   compile.
 - `--target` — emitted test-framework target. Default and only supported
-  value for v1: `pytest` (Python). `--target` affects only the emit phase
-  of compilation, never parsing or interface-resolution (R-COMPILE-011);
-  any value other than `pytest` is a usage error (exit `2`), never a silent
-  fallback.
+  value for v1: `pytest` (Python); any value other than `pytest` is a
+  usage error (exit `2`), never a silent fallback (R-COMPILE-011).
 - `--out` — output directory for compiled test files. Default:
   `verification/<component>/compiled/`.
 - `--repo-root` — repository root. Defaults to the current git repository
-  root, same as every other CLI in this corpus.
-
-Step templates are not redefined here — see
-`specs/architecture/step-phrase-grammar.md`, the corpus-wide convention
-this component implements.
+  root.
 
 **Exit codes:**
 

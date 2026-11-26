@@ -1,13 +1,7 @@
 # R-GQE-002
 
 **R-GQE-002** — The `edges` view MUST return one row per
-  `(source_id, target_id, edge_type)`, reading under the data contracts
-  `SPEC_GUIDELINES.md` §2 (`depends_on`/`realizes`/`uses_var`/
-  `depends_on_guarantees`/`builds_on` as list-valued frontmatter
-  fields, `supersedes` as scalar-valued) and §5 (`Covers:` as a
-  body-text tag, never frontmatter — one per `component-acceptance`
-  file per D1, one per capability scenario heading in a product
-  file):
+  `(source_id, target_id, edge_type)`:
 
 ```sql
 CREATE OR REPLACE VIEW edges AS
@@ -84,21 +78,11 @@ FROM (SELECT regexp_extract(content, '^---\n(.*?)\n---\n', 1, 's') AS fm
   `realizes`/`uses_var`/`depends_on_guarantees` arms MUST read
   `component.md` via `read_text` and extract each field with a regex
   over the flow-style `key: [a, b]` syntax `SPEC_GUIDELINES.md` §2
-  requires (confirmed via corpus-wide grep: never YAML block-list
-  style) — NOT via `read_yaml_frontmatter`'s struct-column
-  auto-detection, which silently DROPS a declared column from its
-  result schema (a bind-time "column not found" error at the call
-  site, not a null value) when that key is absent from every file in
-  the glob at once (`D13`) — true of `uses_var`/`depends_on_guarantees`
-  in sparse corpora such as `graph-query-engine`'s own test fixtures,
-  where no component happens to use either field. The same reasoning
-  governs `supersedes`/`builds_on`'s two new arms (`D74`): neither is
-  present on more than a handful of decision records today, so
-  `read_yaml_frontmatter` would silently drop either column outright.
+  requires — NOT via `read_yaml_frontmatter`, which drops a column
+  absent from every file in the glob, a bind-time error (`D13`). The
+  same holds for the `supersedes`/`builds_on` arms (`D74`).
 
   The decision arms MUST read only a record's frontmatter block, never
-  its whole text: a decision's prose can quote a field, and matching
-  anywhere turned `D137`'s quoted `supersedes: [D17]` into a
-  `supersedes` edge that no decision declares (`D176`). Each arm
+  its whole text: a decision's prose can quote a field (`D176`). Each arm
   extracts the block (`regexp_extract(content, '^---\n(.*?)\n---\n', 1,
   's')`) first, then matches each field at a line start within it.

@@ -1,9 +1,7 @@
 # R-GQE-004
 
 **R-GQE-004** — The `component_context` view MUST return one row per
-  component, just its `Purpose` section's text, reading under the data
-  contract `SPEC_GUIDELINES.md` §3.4 (`Purpose` is `component.md`'s
-  first section, dependent-safe by construction, `D21`):
+  component, just its `Purpose` section's text (`D21`):
 
 ```sql
 CREATE OR REPLACE VIEW component_context AS

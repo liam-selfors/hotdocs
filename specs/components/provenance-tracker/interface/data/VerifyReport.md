@@ -25,5 +25,4 @@ summarized by this component. `secret_scan` is the one fresh
 repository scan (`R-TRACK-016`), never a component's stored one. `ready` (`R-TRACK-010`) is `true` only if
 every entry in both maps is a hit with a passing result and the
 secret scan, when one was due, ran and is not flagged. `not_ready_reasons`
-names every failing or missing entry, human-readable — what `hotdocs
-verify`'s exit code alone can't convey.
+names every failing or missing entry, human-readable.

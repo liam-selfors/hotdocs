@@ -3,8 +3,7 @@
 **R-GEN-009** — Writing output MUST be confined to `gen/<component>/` for
   the target component only. It MUST NOT write to any `sealed` component's
   `source_path`, and MUST NOT overwrite a file listed in that component's
-  `gen/<component>/.overrides.json` (the two declared cold-regen exemptions,
-  §8).
+  `gen/<component>/.overrides.json`.
 
   This MUST be a **precondition check, resolved before any model call is
   attempted**, recorded as its own outcome (`refused`, see

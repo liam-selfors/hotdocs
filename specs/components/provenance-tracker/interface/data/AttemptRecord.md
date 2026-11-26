@@ -14,10 +14,7 @@
 One file per attempt, under `.hotdocs/attempts/<component_id>/`,
 `attempt_id`-prefixed for chronological glob ordering. `verification`
 is `null` exactly when `generation.model_call_error` is populated (no
-candidate was ever produced to verify) — the same mutually-exclusive
-relationship `ComponentPipelineResult` already has between
-`model_call_error` and `verification`, preserved here at the
-per-attempt level.
+candidate was ever produced to verify).
 
 **What `last_requirement_failures` reads of `verification`** (`D95`,
 `R-TRACK-008`), stated here since this component never depends on
@@ -36,6 +33,4 @@ file, never edits this one.
 `generation`/`verification` in exactly this same JSON-equivalent plain
 form** (`D100`) — a dict matching this document's own shape precisely,
 never the original caller-supplied `GenerationResult`/`VerificationReport`
-object echoed back by reference. A caller needing the original object
-already has it, having passed it in; this field exists to describe
-what was recorded, not to hand back what was received.
+object echoed back by reference.

@@ -23,10 +23,7 @@ component's provenance check is currently failing.
 
 ## Rationale
 
-A live answer to "is everything ready" (`D87`, `D88`). `verify` never
-generates code (`D93`), so `component-gate-runner` can depend on this
-component without a cycle; capability scenarios only exercise existing
-code. An unanswerable blast radius is not ready (`D350`).
+See `D87`, `D88`, `D93`, `D350`.
 
 ## Scope
 
@@ -67,4 +64,4 @@ None.
 
 ## Change log
 
-The decisions from `D25`, lately `D292`, `D368` and `D371`.
+`D25`, `D292`, `D368`, `D371`.

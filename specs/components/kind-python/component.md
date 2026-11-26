@@ -22,12 +22,7 @@ mutations that measure how well a test suite checks the code.
 
 ## Rationale
 
-`D344` makes `python` an asset kind like any other, so generation,
-verification and provenance treat every kind through one contract,
-`specs/architecture/asset-kinds.md`. The adapter carries out
-`specs/architecture/asset-kind-python.md`; its mutation sites are
-exactly those `specs/architecture/mutation-runs.md` has always stated
-for Python (`D159`, `D172`), which a parity criterion pins.
+See `D344`, `D159`, `D172`.
 
 ## Scope
 
@@ -40,8 +35,7 @@ import and dependency checks, writing or choosing a lock.
 
 ## Definitions
 
-The **code directory** and the **interpreter** are as
-`interface/library.md` states.
+No deltas from `specs/glossary.md`.
 
 ## Behavior
 
@@ -59,9 +53,6 @@ See `interface/data/`.
 
 See `acceptance/`.
 
-All are `kind: generated-test`, calling the module's functions on code
-directories a test writes under `tmp_path`.
-
 ## Non-functional constraints
 
 See `constraints.md`.
@@ -77,4 +68,4 @@ See `constraints.md`.
 
 ## Change log
 
-- `D344`: initial spec.
+`D344`.

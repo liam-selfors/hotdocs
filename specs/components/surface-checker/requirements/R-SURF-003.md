@@ -8,4 +8,5 @@
   `2`, with a first stderr line starting `usage error: `, and with
   `Traceback` nowhere in stderr, it gives one `cli_usage` finding naming
   what differed: `exit <code>`, `no usage error line`, or `traceback`,
-  joined by `, `. A timeout gives `cli_usage` with message `timeout`.
+  joined by `, ` in that order: a `main` that prints nothing and returns
+  `0` gives `exit 0, no usage error line`. A timeout gives `cli_usage` with message `timeout`.

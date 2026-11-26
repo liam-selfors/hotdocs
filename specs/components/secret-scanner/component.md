@@ -15,8 +15,7 @@ sealed: false
 ## Purpose
 
 Unconditional scan of the entire repository for committed
-secrets, using `detect-secrets`. Same trust shape as `license-scanner`:
-no human sign-off to clear a flag, but no result is ever silent.
+secrets, using `detect-secrets`. No result is ever silent.
 
 ## Rationale
 
@@ -51,8 +50,6 @@ See `interface/data/`.
 
 See `acceptance/`.
 
-Every criterion is `kind: generated-test` (`D43`).
-
 ## Non-functional constraints
 
 See `constraints.md`.
@@ -63,7 +60,4 @@ None.
 
 ## Change log
 
-- Initial draft.
-- `D26`/`D53`/`D54`/`D163`/`D164`: notifications, first generation, `gate_version`, CLI.
-- `D168`: `detect-secrets`, whole repository, allowlist, `propose`.
-- `D195`: sealed allowlist.
+`D26`, `D53`, `D54`, `D163`, `D164`, `D168`, `D195`.

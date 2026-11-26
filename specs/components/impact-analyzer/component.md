@@ -14,7 +14,7 @@ sealed: false
 ## Purpose
 
 From a set of changed spec ids, computes the minimal **blast radius**
-(the term as defined in `specs/glossary.md`) — the set of components
+— the set of components
 that actually need regeneration or re-verification for this change.
 Runs after `spec-linter` passes, assuming a validated, acyclic,
 reference-resolved corpus graph; it does not re-validate that graph
@@ -22,12 +22,7 @@ itself.
 
 ## Rationale
 
-Built on the engine named in `specs/architecture/graph-query-engine.md`
-(R-IMPACT-009): the corpus graph is loaded directly from spec
-frontmatter via DuckDB's `yaml` extension, and transitive propagation
-is computed via `duckpgq` graph-pattern queries — this is the first
-component rebuilt on that shared engine, not a bespoke traversal
-implementation.
+See `specs/architecture/graph-query-engine.md` (`R-IMPACT-009`).
 
 ## Scope
 
@@ -71,44 +66,8 @@ See `constraints.md`.
 
 ## Open questions
 
-None. The two originally recorded here are both resolved:
-
-- ~~R-IMPACT-002/003's whole-`interface.md` byte comparison is
-  blunt~~ — resolved by `D1` (one file per unit) and `D2`
-  (`interface/guarantees/` + `depends_on_guarantees` narrowing). A
-  prose-only edit to `cli.md`/`library.md`/`data/*.md` still propagates:
-  accepted as safe-but-wasteful.
-- ~~Should `R-IMPACT-004`/`005`'s transitive inclusion cascade
-  further?~~ — resolved: it stays one-hop by design. A second-order
-  change (a component's behaviour shifting as a side effect of a
-  var/capability-driven regeneration) is covered two ways (`D2`):
-  `interface/guarantees/` makes a foreseen behavioural dependency
-  explicit and propagating, and `capability-scenario-verifier`, run in
-  `hotdocs verify` (`D89`/`D92`/`D93`), is the permanent backstop for the
-  unforeseen. Eager multi-hop cascading was rejected: it would routinely
-  balloon the blast radius on speculation, against `P-ZERO-EDIT`'s
-  cost-containment premise.
+None.
 
 ## Change log
 
-- Initial draft.
-- `D48`: `R-IMPACT-010` — defines "the prior commit" (merge-base with
-  the default branch), found missing only once a real `generate()`
-  candidate had nowhere to look it up and implemented no git
-  comparison at all. `BlastRadiusReport.md` now states `component_id`
-  is always the full `comp-<slug>` form explicitly, not just by
-  example.
-- `D49`: `R-IMPACT-008` now states `depends_on_guarantees`'s real flat
-  bare-`G-id` shape explicitly — a real candidate guessed a nested
-  structure instead, since the real shape lived only in
-  `SPEC_GUIDELINES.md`, never in any `SpecBundle`.
-- `D50`: a fourth retry, with every fix above in place, passed all 12
-  `AC-IMPACT-*` criteria for real — first successful implementation.
-  `gen/impact-analyzer/impact_analyzer.py` is now that candidate. See
-  `verification/impact-analyzer/BOOTSTRAP.md` for the full account.
-- `D329`, `D347`: pinned behaviour a candidate left unpinned (surviving
-  mutants): guarantee-file selection (`R-IMPACT-008`), the default
-  branch and no-merge-base fallback (`R-IMPACT-010`), report order and
-  reason precedence, the CLI's parsing and text output
-  (`R-IMPACT-011`, `AC-IMPACT-013`–`015`); `testing.md` gives the git
-  fixture recipe.
+`D48`, `D49`, `D50`, `D329`, `D347`.

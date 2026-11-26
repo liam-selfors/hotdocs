@@ -3,9 +3,6 @@
 - **Advisory only.** No gate reads its report, and it never changes a
   file under `specs/`. The only files it writes are proposals under
   `<repo_root>/.hotdocs/proposals/`, and only when asked.
-- **No model means no model call.** Without a `model` it runs only its
-  deterministic check and lint without a judge, and reports
-  `degraded: true`.
 - **The model sees exactly one criterion's bundle per call.** Never two
   criteria, never the code, never `constraints.md`: the call stands in
   for that criterion's test author.

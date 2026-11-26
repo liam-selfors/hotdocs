@@ -19,9 +19,7 @@ and computes corpus-health aggregates.
 
 ## Rationale
 
-The traceability-matrix need and the graph/docs explorer this manifest
-also feeds were both established early on — this component is the
-single source both read from, never two independently-computed copies.
+The single source the traceability matrix and docs explorer both read.
 
 ## Scope
 
@@ -66,15 +64,4 @@ None.
 
 ## Change log
 
-- Initial draft.
-- `D29`: "cache hit" renamed "provenance hit" (`R-GRAPH-008`,
-  `constraints.md`), following the corpus-wide rename.
-- `depends_on` gained `comp-graph-query-engine` (R-GRAPH-009
-  already required building from its views; the dependency was never
-  declared — same drift `D13` found and fixed for `spec-linter`). First
-  real `gen/corpus-graph-builder/` implementation, produced by a real
-  generation step rather than hand-written.
-- `D200`: acceptance criteria made concrete; nodes and provenance read
-  as the manifest's own JSON; `graph-query-engine` loaded by path
-  (`R-GRAPH-010`, `D199`); `R-GRAPH-007` now the CLI, the CI cadence
-  moved to scope.
+`D29`, `D13`, `D200`, `D199`.

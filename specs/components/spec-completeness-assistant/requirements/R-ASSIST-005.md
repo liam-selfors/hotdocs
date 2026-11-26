@@ -15,7 +15,5 @@
   no candidate, no redundancy call is made and `redundancy_flags` is
   `[]`.
 
-  Each `redundancy_flags` entry MUST be `{new_requirement, overlaps_with,
-  rationale}`: `new_requirement` a changed requirement's id,
-  `overlaps_with` the other requirement's id, and `rationale` required.
-  An entry whose pair was not among the candidates is dropped.
+  Each `redundancy_flags` entry MUST have `CompletenessReport.md`'s
+  shape, `new_requirement` a changed requirement's id. An entry whose pair was not among the candidates is dropped.

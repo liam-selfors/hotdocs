@@ -48,9 +48,6 @@ See `interface/`.
 
 See `acceptance/`.
 
-All are `kind: generated-test`, with a `llm-tool-endpoint` stand-in that
-drives the tools from a script.
-
 ## Non-functional constraints
 
 See `constraints.md`.
@@ -61,8 +58,4 @@ None.
 
 ## Change log
 
-- `D309`: initial spec.
-- `D343`: R-AGENT-001 environment check, R-AGENT-002 asset paths, R-AGENT-005 `check_assets`; AC-AGENT-010; `agent-v2`.
-- `D344`: the implicit `python` kind's provision and `.py` layout check
-  come with `generator`'s `check_asset_environment` and `check_assets`;
-  criteria use the generator stand-in, so none changes.
+`D309`, `D343`, `D344`.

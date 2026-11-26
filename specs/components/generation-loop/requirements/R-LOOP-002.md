@@ -5,5 +5,4 @@
   `surface_failed`, `surface_ok` false, and no verification runs for that
   attempt. Otherwise `surface_ok` is true and `verify` runs; an `overall`
   of `pass` is outcome `passed`, anything else `verification_failed`, and
-  `overall` is recorded. A `surface_failed` attempt is followed by
-  another while fewer than `max_attempts` have run.
+  `overall` is recorded.

@@ -20,7 +20,3 @@ hotdocs decision-impact <decision-id> [--format=json|text] [--repo-root=<dir>]
 | --- | --- |
 | `0` | Ran successfully, report produced (an empty report is a clean result, not an error). |
 | `2` | Usage error (not a git repository, unreadable path, missing `<decision-id>` for `decision-impact`). |
-
-Always exits `0` on a successful run regardless of whether anything
-was found — both are diagnostic tools, not gates; nothing about a
-non-empty report is a failure to signal via exit code.

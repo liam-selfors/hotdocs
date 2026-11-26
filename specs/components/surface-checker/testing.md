@@ -65,3 +65,12 @@ example
     ```
     export function a(x)
     ```
+
+A `repo_root` holds, per component, `specs/components/<slug>/component.md`
+with YAML frontmatter between `---` lines (`id`; `depends_on: []` or a
+list, a missing key meaning none; for a sealed one `sealed: true` and
+`source_path: <dir>/`), an
+`interface/library.md` that may hold just `# Library`, and module files
+under `gen/<slug>/` or the sealed `source_path`. A candidate's uses of a
+dependency sit inside function bodies, so importing the candidate never
+runs them. No lint is run.
