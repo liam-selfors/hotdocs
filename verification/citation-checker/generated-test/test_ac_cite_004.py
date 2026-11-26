@@ -1,6 +1,4 @@
-# hotdocs-criterion: sha256:a0fe9c20b55b3b2bb2b0c15d2c990e9752037a610ddd24678867a429eb33af0f
-"""AC-CITE-004: supersedes / status: deprecated consistency (R-CITE-004)."""
-
+# hotdocs-criterion: sha256:33585dfc56f0892c76ab8e96a7f894fe49c972f7344ce00640df5a61b1c67093
 from pathlib import Path
 
 import citation_checker
@@ -10,13 +8,18 @@ def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def _decision(repo_root, n, status, supersedes=None):
+def write(path, text):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+
+
+def decision(repo_root, num, status, supersedes=None):
     lines = [
         "---",
-        "id: D" + str(n),
-        "title: Decision " + str(n),
+        "id: D" + str(num),
+        "title: Decision " + str(num),
         "status: " + status,
-        "owners: [team-a]",
+        "owners: [pipeline-team]",
     ]
     if status == "ratified":
         lines.append("last_ratified_commit: 0000000")
@@ -24,86 +27,75 @@ def _decision(repo_root, n, status, supersedes=None):
         lines.append("supersedes: " + supersedes)
     lines.append("---")
     lines.append("")
-    lines.append("# Decision " + str(n))
+    lines.append("# Decision " + str(num))
     lines.append("")
-    lines.append("A plain decision body with no citations.")
+    lines.append("A decision about topic number " + str(num) + ".")
     lines.append("")
-    path = repo_root / "specs" / "decisions" / ("D" + str(n) + ".md")
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text("\n".join(lines))
+    write(repo_root / "specs" / "decisions" / ("D" + str(num) + ".md"), "\n".join(lines))
 
 
-def _base(repo_root):
-    specs = repo_root / "specs"
-    specs.mkdir(parents=True, exist_ok=True)
-    (specs / "glossary.md").write_text(
-        "# Glossary\n\n- **Example term** — an example entry.\n"
+def base_corpus(repo_root):
+    write(
+        repo_root / "specs" / "glossary.md",
+        "# Glossary\n\n- **Widget** — a small thing.\n",
     )
 
 
-def _cite4(findings):
+def cite_findings(findings, rel_file):
     out = []
     for f in findings:
-        if field(f, "rule_id") == "R-CITE-004":
+        if field(f, "rule_id") != "R-CITE-004":
+            continue
+        if str(field(f, "file")).replace("\\", "/") == rel_file:
             out.append(f)
     return out
 
 
-def _for_file(findings, rel):
-    return [f for f in findings if field(f, "file") == rel]
-
-
-def _check_shape(findings):
-    for f in findings:
-        assert field(f, "severity") in ("fail", "warn")
-        assert isinstance(field(f, "line"), int)
-        assert isinstance(field(f, "message"), str)
-
-
-def test_supersedes_nonexistent_decision_is_flagged(tmp_path):
+def test_supersedes_nonexistent_decision(tmp_path):
     repo_root = tmp_path / "repo"
-    _base(repo_root)
-    _decision(repo_root, 101, "ratified", supersedes="D150")
+    base_corpus(repo_root)
+    decision(repo_root, 20, "ratified", supersedes="D99")
 
     findings = citation_checker.check(repo_root)
-    assert isinstance(findings, list)
-    cite4 = _cite4(findings)
-    _check_shape(cite4)
 
-    hits = _for_file(cite4, "specs/decisions/D101.md")
-    assert hits, "expected an R-CITE-004 finding on D101.md, got " + repr(findings)
+    hits = cite_findings(findings, "specs/decisions/D20.md")
+    assert hits, "expected an R-CITE-004 finding for D20 superseding missing D99; got " + repr(findings)
+    for h in hits:
+        assert field(h, "severity") in ("fail", "warn")
+        assert isinstance(field(h, "line"), int)
 
 
-def test_supersedes_still_ratified_decision_is_flagged_naming_it(tmp_path):
+def test_supersedes_decision_not_deprecated(tmp_path):
     repo_root = tmp_path / "repo"
-    _base(repo_root)
-    _decision(repo_root, 102, "ratified", supersedes="D103")
-    _decision(repo_root, 103, "ratified")
+    base_corpus(repo_root)
+    decision(repo_root, 22, "ratified")
+    decision(repo_root, 21, "ratified", supersedes="D22")
 
     findings = citation_checker.check(repo_root)
-    cite4 = _cite4(findings)
-    _check_shape(cite4)
 
-    hits = _for_file(cite4, "specs/decisions/D102.md")
-    assert hits, "expected an R-CITE-004 finding on D102.md, got " + repr(findings)
-    assert any("D103" in field(f, "message") for f in hits), repr(hits)
+    hits = cite_findings(findings, "specs/decisions/D21.md")
+    assert hits, "expected an R-CITE-004 finding on superseding record D21; got " + repr(findings)
+    assert any("D22" in str(field(h, "message")) for h in hits), (
+        "expected the finding to name D22; got " + repr(hits)
+    )
 
 
-def test_orphan_deprecated_decision_is_flagged(tmp_path):
+def test_deprecated_not_named_by_any_supersedes(tmp_path):
     repo_root = tmp_path / "repo"
-    _base(repo_root)
-    # Orphan: deprecated, but nothing supersedes it.
-    _decision(repo_root, 104, "deprecated")
-    # Control: a consistent supersedes/deprecated pair.
-    _decision(repo_root, 105, "ratified", supersedes="D106")
-    _decision(repo_root, 106, "deprecated")
+    base_corpus(repo_root)
+    decision(repo_root, 23, "deprecated")
+    # A consistent pair as a control.
+    decision(repo_root, 31, "deprecated")
+    decision(repo_root, 30, "ratified", supersedes="D31")
 
     findings = citation_checker.check(repo_root)
-    cite4 = _cite4(findings)
-    _check_shape(cite4)
 
-    hits = _for_file(cite4, "specs/decisions/D104.md")
-    assert hits, "expected an R-CITE-004 finding on D104.md, got " + repr(findings)
+    hits = cite_findings(findings, "specs/decisions/D23.md")
+    assert hits, "expected an R-CITE-004 finding for orphan deprecated D23; got " + repr(findings)
 
-    assert not _for_file(cite4, "specs/decisions/D105.md"), repr(cite4)
-    assert not _for_file(cite4, "specs/decisions/D106.md"), repr(cite4)
+    assert not cite_findings(findings, "specs/decisions/D31.md"), (
+        "D31 is superseded by D30 and should not be flagged; got " + repr(findings)
+    )
+    assert not cite_findings(findings, "specs/decisions/D30.md"), (
+        "D30 supersedes a deprecated D31 and should not be flagged; got " + repr(findings)
+    )

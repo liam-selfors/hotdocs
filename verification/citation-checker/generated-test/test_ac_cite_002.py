@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:54147b82e92d8c25f73e15f59da4eb09956f7b552bb5e744cbfe1e09425a87eb
+# hotdocs-criterion: sha256:df4fd0ca5f81013ca6862d9152ee5c8622e3a0c8296b117625fb21125478c2fe
 from pathlib import Path
 
 import citation_checker
@@ -13,130 +13,133 @@ def write(path, text):
     path.write_text(text, encoding="utf-8")
 
 
-COMPONENT_MD = (
-    "---\n"
-    "id: comp-foo\n"
-    "title: Foo\n"
-    "status: draft\n"
-    "owners: [alice]\n"
-    "sealed: true\n"
-    "source_path: legacy/foo/\n"
-    "---\n"
-    "\n"
-    "# Foo\n"
-    "\n"
-    "## Purpose\n"
-    "\n"
-    "Foo does a small thing for testing.\n"
-    "\n"
-    "## Scope\n"
-    "\n"
-    "- In scope: the small thing.\n"
-    "- Out of scope: everything else.\n"
-    "\n"
-    "## Definitions\n"
-    "\n"
-    "None.\n"
-    "\n"
-    "## Behavior\n"
-    "\n"
-    "See `requirements/`.\n"
-    "\n"
-    "## Interfaces\n"
-    "\n"
-    "See `interface/`.\n"
-    "\n"
-    "## Data\n"
-    "\n"
-    "See `interface/data/`.\n"
-    "\n"
-    "## Acceptance criteria\n"
-    "\n"
-    "See `acceptance/`.\n"
-    "\n"
-    "## Non-functional constraints\n"
-    "\n"
-    "See `constraints.md`.\n"
-    "\n"
-    "## Open questions\n"
-    "\n"
-    "## Change log\n"
-    "\n"
-    "- Initial version.\n"
-)
+def build_fixture(repo_root):
+    specs = repo_root / "specs"
 
-ARCH_MD = (
-    "---\n"
-    "id: graph-query-engine\n"
-    "title: Graph query engine\n"
-    "status: draft\n"
-    "owners: [alice]\n"
-    "---\n"
-    "\n"
-    "# Graph query engine\n"
-    "\n"
-    "## Query surface\n"
-    "\n"
-    "The shared views live here.\n"
-)
-
-REQ_GOOD = (
-    "# R-FOO-001\n"
-    "\n"
-    "**R-FOO-001** — Foo MUST read sizes through "
-    "`specs/architecture/graph-query-engine.md`'s \"Query surface\" section.\n"
-)
-
-REQ_BAD = (
-    "# R-FOO-002\n"
-    "\n"
-    "**R-FOO-002** — Foo MUST read edges through "
-    "`specs/architecture/graph-query-engine.md`'s \"Nonexistent Heading\" section.\n"
-)
-
-
-def acceptance(ac_id, r_id):
-    return (
-        "# " + ac_id + "\n"
+    write(
+        specs / "glossary.md",
+        "# Glossary\n"
         "\n"
-        "Covers: " + r_id + "\n"
-        "Kind: llm-judge\n"
+        "- **Widget** — a small thing used in tests.\n",
+    )
+
+    write(
+        specs / "architecture" / "target.md",
+        "---\n"
+        "id: arch-target\n"
+        "title: Target Document\n"
+        "status: draft\n"
+        "owners: [pipeline-team]\n"
+        "depends_on: []\n"
+        "---\n"
+        "\n"
+        "# Target Document\n"
+        "\n"
+        "Some introductory text.\n"
+        "\n"
+        "## Query surface\n"
+        "\n"
+        "The query surface is described here.\n",
+    )
+
+    comp = specs / "components" / "foo"
+    write(
+        comp / "component.md",
+        "---\n"
+        "id: comp-foo\n"
+        "title: Foo\n"
+        "status: draft\n"
+        "owners: [pipeline-team]\n"
+        "depends_on: []\n"
+        "sealed: true\n"
+        "source_path: legacy/foo/\n"
+        "---\n"
+        "\n"
+        "# Foo\n"
+        "\n"
+        "A fixture component.\n",
+    )
+
+    write(
+        comp / "interface" / "library.md",
+        "# Library\n"
+        "\n"
+        "```\n"
+        "foo() -> None\n"
+        "```\n",
+    )
+
+    write(
+        comp / "requirements" / "R-FOO-001.md",
+        "# R-FOO-001\n"
+        "\n"
+        "**R-FOO-001** — Foo MUST behave as\n"
+        "  `specs/architecture/target.md`'s \"Query surface\" section states.\n",
+    )
+    write(
+        comp / "requirements" / "R-FOO-002.md",
+        "# R-FOO-002\n"
+        "\n"
+        "**R-FOO-002** — Foo MUST behave as\n"
+        "  `specs/architecture/target.md`'s \"Nonexistent Heading\" section states.\n",
+    )
+
+    write(
+        comp / "acceptance" / "AC-FOO-001.md",
+        "# AC-FOO-001\n"
+        "\n"
+        "Covers: R-FOO-001\n"
+        "Kind: generated-test\n"
         "\n"
         "```gherkin\n"
         "Given foo\n"
-        "When it runs\n"
+        "When foo runs\n"
         "Then it behaves\n"
-        "```\n"
+        "```\n",
+    )
+    write(
+        comp / "acceptance" / "AC-FOO-002.md",
+        "# AC-FOO-002\n"
+        "\n"
+        "Covers: R-FOO-002\n"
+        "Kind: generated-test\n"
+        "\n"
+        "```gherkin\n"
+        "Given foo\n"
+        "When foo runs\n"
+        "Then it behaves\n"
+        "```\n",
     )
 
 
-def build_fixture(root):
-    write(root / "specs" / "glossary.md", "# Glossary\n\n- **Thing** — a thing.\n")
-    write(root / "specs" / "architecture" / "graph-query-engine.md", ARCH_MD)
-    comp = root / "specs" / "components" / "foo"
-    write(comp / "component.md", COMPONENT_MD)
-    write(comp / "requirements" / "R-FOO-001.md", REQ_GOOD)
-    write(comp / "requirements" / "R-FOO-002.md", REQ_BAD)
-    write(comp / "acceptance" / "AC-FOO-001.md", acceptance("AC-FOO-001", "R-FOO-001"))
-    write(comp / "acceptance" / "AC-FOO-002.md", acceptance("AC-FOO-002", "R-FOO-002"))
-    write(comp / "constraints.md", "# Constraints\n\nNone.\n")
+def norm(p):
+    return str(p).replace("\\", "/")
 
 
-def test_only_nonexistent_heading_citation_gets_r_cite_002(tmp_path):
+def test_ac_cite_002_only_missing_section_is_flagged(tmp_path):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
     build_fixture(repo_root)
 
     findings = citation_checker.check(repo_root)
+    assert isinstance(findings, list)
 
-    cite_002 = [f for f in findings if field(f, "rule_id") == "R-CITE-002"]
-    files = {field(f, "file") for f in cite_002}
+    cite2 = [f for f in findings if field(f, "rule_id") == "R-CITE-002"]
 
-    good = "specs/components/foo/requirements/R-FOO-001.md"
-    bad = "specs/components/foo/requirements/R-FOO-002.md"
+    good_file = "specs/components/foo/requirements/R-FOO-001.md"
+    bad_file = "specs/components/foo/requirements/R-FOO-002.md"
 
-    assert good not in files, cite_002
-    assert files == {bad}, cite_002
-    assert len(cite_002) == 1, cite_002
-    assert field(cite_002[0], "severity") in ("fail", "warn")
-    assert isinstance(field(cite_002[0], "line"), int)
+    flagged_files = [norm(field(f, "file")) for f in cite2]
+
+    assert good_file not in flagged_files, (
+        "the valid 'Query surface' citation must not be flagged: " + repr(cite2)
+    )
+    assert flagged_files == [bad_file], (
+        "expected exactly one R-CITE-002 finding, on the "
+        "'Nonexistent Heading' citation: " + repr(cite2)
+    )
+
+    finding = cite2[0]
+    assert field(finding, "severity") in ("fail", "warn")
+    assert isinstance(field(finding, "line"), int)
+    assert isinstance(field(finding, "message"), str)
