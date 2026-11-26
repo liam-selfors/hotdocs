@@ -1,8 +1,9 @@
-# hotdocs-criterion: sha256:db0963b9447cf583dbc5da552b0a29e4e976ff18759669910c040a7a6d5541fe
+# hotdocs-criterion: sha256:bc1f8b5d37045dfec21a23a5709d47438310155baa442b7cd2c69b39b1d9c9a2
 import json
 import os
 import stat
 import sys
+from pathlib import Path
 
 import pytest
 
@@ -13,88 +14,105 @@ def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-SUCCESS_STDOUT = (
-    json.dumps({"type": "assistant", "message": {"content": [{"type": "text", "text": "ok"}]}})
-    + "\n"
-    + json.dumps({"type": "result", "is_error": False, "result": "ok"})
-    + "\n"
-)
-
-KEY_MESSAGE = (
+AUTH_KEY_HINT_MESSAGE = (
     "claude command failed (auth): ANTHROPIC_API_KEY is set, so claude used it "
     "instead of your claude.ai login; unset it, or set auth = \"login\" in "
     "hotdocs.toml's [llm] table"
 )
 
 
-def write_config(directory, auth):
-    lines = ["[llm]", 'provider = "claude-cli"', 'model = "m"']
+def _write_config(work_dir, auth):
+    text = "[llm]\n"
+    text += "provider = \"claude-cli\"\n"
+    text += "model = \"m\"\n"
     if auth is not None:
-        lines.append("auth = " + json.dumps(auth))
-    (directory / "hotdocs.toml").write_text("\n".join(lines) + "\n", encoding="utf-8")
+        text += "auth = " + json.dumps(auth) + "\n"
+    (work_dir / "hotdocs.toml").write_text(text, encoding="utf-8")
 
 
-def write_recorder(bin_dir, log_path, stdout_text, stderr_text, exit_code):
-    bin_dir.mkdir(parents=True, exist_ok=True)
-    src_lines = [
-        "#!" + sys.executable,
-        "import json, os, sys",
-        "try:",
-        "    sys.stdin.read()",
-        "except Exception:",
-        "    pass",
-        "with open(" + repr(str(log_path)) + ", 'a', encoding='utf-8') as f:",
-        "    f.write(json.dumps({'args': sys.argv[1:], 'key': os.environ.get('ANTHROPIC_API_KEY')}) + '\\n')",
-        "sys.stdout.buffer.write(" + repr(stdout_text) + ".encode('utf-8'))",
-        "sys.stdout.flush()",
-        "sys.stderr.buffer.write(" + repr(stderr_text) + ".encode('utf-8'))",
-        "sys.stderr.flush()",
-        "sys.exit(" + repr(exit_code) + ")",
-    ]
-    script = bin_dir / "claude"
-    script.write_text("\n".join(src_lines) + "\n", encoding="utf-8")
-    script.chmod(script.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
-    return script
+def _write_recorder(bin_dir, log_path, mode):
+    assistant_event = json.dumps(
+        {
+            "type": "assistant",
+            "message": {"role": "assistant", "content": [{"type": "text", "text": "ok"}]},
+        }
+    )
+    result_event = json.dumps(
+        {"type": "result", "subtype": "success", "is_error": False, "result": "ok"}
+    )
+    src = "#!" + sys.executable + "\n"
+    src += "# -*- coding: utf-8 -*-\n"
+    src += "import json\n"
+    src += "import os\n"
+    src += "import sys\n"
+    src += "LOG = " + repr(str(log_path)) + "\n"
+    src += "MODE = " + repr(mode) + "\n"
+    src += "with open(LOG, 'a', encoding='utf-8') as fh:\n"
+    src += "    fh.write(json.dumps({'args': sys.argv[1:], 'key': os.environ.get('ANTHROPIC_API_KEY')}) + '\\n')\n"
+    src += "try:\n"
+    src += "    sys.stdin.read()\n"
+    src += "except Exception:\n"
+    src += "    pass\n"
+    src += "if MODE == 'ok':\n"
+    src += "    sys.stdout.write(" + repr(assistant_event + "\n") + ")\n"
+    src += "    sys.stdout.write(" + repr(result_event + "\n") + ")\n"
+    src += "    sys.stdout.flush()\n"
+    src += "    sys.exit(0)\n"
+    src += "elif MODE == 'stderr_invalid_key':\n"
+    src += "    sys.stderr.write(" + repr("Invalid API key\n") + ")\n"
+    src += "    sys.stderr.flush()\n"
+    src += "    sys.exit(1)\n"
+    src += "else:\n"
+    src += "    sys.stdout.buffer.write(" + repr("Not logged in \u00b7 Please run /login\n") + ".encode('utf-8'))\n"
+    src += "    sys.stdout.flush()\n"
+    src += "    sys.exit(1)\n"
+    path = bin_dir / "claude"
+    path.write_text(src, encoding="utf-8")
+    path.chmod(path.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH | stat.S_IRUSR)
+    return path
 
 
-def setup(tmp_path, monkeypatch, auth, key, stdout_text, stderr_text, exit_code):
-    work = tmp_path / "work"
-    work.mkdir()
+def _setup(tmp_path, monkeypatch, auth, mode, api_key):
+    work_dir = tmp_path / "work"
+    work_dir.mkdir()
     bin_dir = tmp_path / "bin"
-    log_path = tmp_path / "calls.log"
-    write_config(work, auth)
-    write_recorder(bin_dir, log_path, stdout_text, stderr_text, exit_code)
+    bin_dir.mkdir()
+    log_path = tmp_path / "recorder.log"
+    _write_config(work_dir, auth)
+    _write_recorder(bin_dir, log_path, mode)
     monkeypatch.delenv("VAR_HOTDOCS_CONFIG", raising=False)
-    monkeypatch.chdir(work)
+    monkeypatch.chdir(work_dir)
     monkeypatch.setenv("PATH", str(bin_dir) + os.pathsep + os.environ.get("PATH", ""))
-    if key is None:
+    if api_key is None:
         monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     else:
-        monkeypatch.setenv("ANTHROPIC_API_KEY", key)
+        monkeypatch.setenv("ANTHROPIC_API_KEY", api_key)
     return log_path
 
 
-def read_records(log_path):
+def _records(log_path):
     assert log_path.is_file(), "the claude recorder was never run"
-    return [json.loads(line) for line in log_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    lines = [ln for ln in log_path.read_text(encoding="utf-8").splitlines() if ln.strip()]
+    return [json.loads(ln) for ln in lines]
 
 
-def test_auth_login_uses_safe_mode_and_strips_key(tmp_path, monkeypatch):
-    log_path = setup(tmp_path, monkeypatch, "login", "k1", SUCCESS_STDOUT, "", 0)
+def test_auth_login_uses_safe_mode_and_strips_api_key(tmp_path, monkeypatch):
+    log_path = _setup(tmp_path, monkeypatch, "login", "ok", "k1")
     response = llm_endpoint.complete("hi", "m")
-    records = read_records(log_path)
+    records = _records(log_path)
     assert len(records) == 1
     args = records[0]["args"]
     assert "--safe-mode" in args
     assert "--bare" not in args
     assert records[0]["key"] is None
     assert field(response, "model_call_error") is None
+    assert field(response, "text") == "ok"
 
 
-def test_auth_key_uses_bare_and_keeps_key(tmp_path, monkeypatch):
-    log_path = setup(tmp_path, monkeypatch, "key", "k1", SUCCESS_STDOUT, "", 0)
+def test_auth_key_uses_bare_and_keeps_api_key(tmp_path, monkeypatch):
+    log_path = _setup(tmp_path, monkeypatch, "key", "ok", "k1")
     response = llm_endpoint.complete("hi", "m")
-    records = read_records(log_path)
+    records = _records(log_path)
     assert len(records) == 1
     args = records[0]["args"]
     assert "--bare" in args
@@ -102,33 +120,40 @@ def test_auth_key_uses_bare_and_keeps_key(tmp_path, monkeypatch):
     assert field(response, "model_call_error") is None
 
 
-def test_unset_auth_with_key_auth_failure_explains_login(tmp_path, monkeypatch):
-    log_path = setup(tmp_path, monkeypatch, None, "k1", "", "Invalid API key\n", 1)
+def test_unset_auth_with_key_invalid_key_gives_hint_message(tmp_path, monkeypatch):
+    log_path = _setup(tmp_path, monkeypatch, None, "stderr_invalid_key", "k1")
     response = llm_endpoint.complete("hi", "m")
-    read_records(log_path)
+    _records(log_path)
+    error = field(response, "model_call_error")
+    assert error is not None
+    assert {"category": field(error, "category"), "message": field(error, "message")} == {
+        "category": "auth",
+        "message": AUTH_KEY_HINT_MESSAGE,
+    }
     assert field(response, "text") is None
-    assert field(response, "model_call_error") == {"category": "auth", "message": KEY_MESSAGE}
 
 
-def test_unset_auth_without_key_not_logged_in(tmp_path, monkeypatch):
-    log_path = setup(
-        tmp_path, monkeypatch, None, None, "Not logged in \u00b7 Please run /login\n", "", 1
-    )
+def test_unset_auth_without_key_not_logged_in_gives_plain_message(tmp_path, monkeypatch):
+    log_path = _setup(tmp_path, monkeypatch, None, "stdout_not_logged_in", None)
     response = llm_endpoint.complete("hi", "m")
-    read_records(log_path)
-    assert field(response, "text") is None
-    assert field(response, "model_call_error") == {
+    _records(log_path)
+    error = field(response, "model_call_error")
+    assert error is not None
+    assert {"category": field(error, "category"), "message": field(error, "message")} == {
         "category": "auth",
         "message": "claude command failed (auth)",
     }
-
-
-def test_auth_key_failure_gets_plain_message(tmp_path, monkeypatch):
-    log_path = setup(tmp_path, monkeypatch, "key", "k1", "", "Invalid API key\n", 1)
-    response = llm_endpoint.complete("hi", "m")
-    read_records(log_path)
     assert field(response, "text") is None
-    assert field(response, "model_call_error") == {
+
+
+def test_auth_key_invalid_key_gives_plain_message(tmp_path, monkeypatch):
+    log_path = _setup(tmp_path, monkeypatch, "key", "stderr_invalid_key", "k1")
+    response = llm_endpoint.complete("hi", "m")
+    _records(log_path)
+    error = field(response, "model_call_error")
+    assert error is not None
+    assert {"category": field(error, "category"), "message": field(error, "message")} == {
         "category": "auth",
         "message": "claude command failed (auth)",
     }
+    assert field(response, "text") is None

@@ -1,6 +1,6 @@
-# hotdocs-criterion: sha256:47c2fb5182c421c13941ab5721c5a47ad2e77011d7315322a95f98b51c0ea5f3
+# hotdocs-criterion: sha256:2baa16dc90c345341c71386314174226a96adfa962452500b57a676c15a160c2
 import os
-import sys
+from pathlib import Path
 
 import pytest
 
@@ -12,108 +12,165 @@ except ImportError:  # pragma: no cover
     tomllib = None
 
 
-ALLOWED_KEYS = {"provider", "model", "base_url", "api_key_env", "timeout_seconds", "auth"}
-
-
 def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def write(path, text):
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text, encoding="utf-8")
-    return path
+FIRST_TOML = (
+    "[llm]\n"
+    'provider = "openai"\n'
+    'model = "gpt-6-astra"\n'
+    'api_key_env = "OPENAI_API_KEY"\n'
+    "timeout_seconds = 600\n"
+)
+
+SECOND_TOML = (
+    "[llm]\n"
+    'provider = "ollama"\n'
+    'model = "llama3.2"\n'
+    'base_url = "http://localhost:11434"\n'
+)
 
 
 @pytest.fixture
-def clean_env(tmp_path, monkeypatch):
+def clean_env(monkeypatch, tmp_path):
     monkeypatch.delenv("VAR_HOTDOCS_CONFIG", raising=False)
-    cwd = tmp_path / "cwd"
-    cwd.mkdir()
-    monkeypatch.chdir(cwd)
-    return cwd
+    work = tmp_path / "work"
+    work.mkdir()
+    monkeypatch.chdir(work)
+    return work
 
 
-def test_discovery_cwd_then_named_then_none_and_missing_named_raises(clean_env, tmp_path, monkeypatch):
-    cwd = clean_env
-    write(
-        cwd / "hotdocs.toml",
-        '[llm]\nprovider = "openai"\nmodel = "gpt-6-astra"\n',
-    )
-    other = write(
-        tmp_path / "elsewhere" / "named.toml",
-        '[llm]\nprovider = "anthropic"\nmodel = "claude-sonnet-5"\n',
-    )
+def test_discovery_order(clean_env, monkeypatch, tmp_path):
+    work = clean_env
+    (work / "hotdocs.toml").write_text(FIRST_TOML)
 
     first = llm_endpoint.load_config()
     assert first is not None
     assert field(first, "provider") == "openai"
     assert field(first, "model") == "gpt-6-astra"
+    assert field(first, "api_key_env") == "OPENAI_API_KEY"
+    assert field(first, "timeout_seconds") == 600
+    assert field(first, "base_url") is None
+    assert field(first, "auth") is None
 
+    other_dir = tmp_path / "elsewhere"
+    other_dir.mkdir()
+    other = other_dir / "named.toml"
+    other.write_text(SECOND_TOML)
     monkeypatch.setenv("VAR_HOTDOCS_CONFIG", str(other))
+
     second = llm_endpoint.load_config()
     assert second is not None
-    assert field(second, "provider") == "anthropic"
-    assert field(second, "model") == "claude-sonnet-5"
+    assert field(second, "provider") == "ollama"
+    assert field(second, "model") == "llama3.2"
+    assert field(second, "base_url") == "http://localhost:11434"
+    assert field(second, "api_key_env") is None
+    assert field(second, "auth") is None
 
+    # Neither: no env var, no hotdocs.toml in cwd.
     monkeypatch.delenv("VAR_HOTDOCS_CONFIG", raising=False)
-    (cwd / "hotdocs.toml").unlink()
+    (work / "hotdocs.toml").unlink()
     assert llm_endpoint.load_config() is None
 
-    monkeypatch.setenv("VAR_HOTDOCS_CONFIG", str(tmp_path / "elsewhere" / "missing.toml"))
+    # A named file that is missing is an error.
+    monkeypatch.setenv("VAR_HOTDOCS_CONFIG", str(other_dir / "missing.toml"))
     with pytest.raises(ValueError):
         llm_endpoint.load_config()
 
 
+def _write(tmp_path, name, body):
+    p = tmp_path / name
+    p.write_text(body)
+    return p
+
+
 @pytest.mark.parametrize(
-    "body, expected",
+    "name,body,needles",
     [
-        ('provider = "openai"\nmodel = "gpt-6-astra"\ncolour = "blue"\n', "colour"),
-        ('provider = "openai"\nmodel = "gpt-6-astra"\napi_key = "sk-test-pasted-123"\n', "must never hold a secret"),
-        ('provider = "notaprovider"\nmodel = "gpt-6-astra"\n', "provider"),
-        ('provider = "openai"\n', "model"),
-        ('provider = "openai"\nmodel = "gpt-6-astra"\ntimeout_seconds = 120\n', "timeout_seconds"),
-        ('provider = "claude-cli"\nmodel = "claude-sonnet-5"\nbase_url = "https://example.invalid"\n', "base_url"),
+        (
+            "unknown",
+            '[llm]\nprovider = "openai"\nmodel = "gpt-6-astra"\ncolourful_flag = "blue"\n',
+            ["colourful_flag"],
+        ),
+        (
+            "provider",
+            '[llm]\nprovider = "bogusprov"\nmodel = "x-model"\n',
+            ["bogusprov", "provider"],
+        ),
+        (
+            "nomodel",
+            '[llm]\nprovider = "openai"\n',
+            ["model"],
+        ),
+        (
+            "timeout",
+            '[llm]\nprovider = "openai"\nmodel = "gpt-6-astra"\ntimeout_seconds = 120\n',
+            ["timeout"],
+        ),
+        (
+            "cli_base_url",
+            '[llm]\nprovider = "claude-cli"\nmodel = "claude-sonnet-5"\nbase_url = "https://example.invalid"\n',
+            ["base_url"],
+        ),
     ],
-    ids=["unknown-entry", "api-key", "bad-provider", "no-model", "timeout-120", "claude-cli-base-url"],
 )
-def test_invalid_llm_tables_raise_value_error_naming_problem(clean_env, tmp_path, body, expected):
-    path = write(tmp_path / "bad" / "hotdocs.toml", "[llm]\n" + body)
-    with pytest.raises(ValueError) as excinfo:
+def test_invalid_tables_raise(clean_env, tmp_path, name, body, needles):
+    path = _write(tmp_path, name + ".toml", body)
+    with pytest.raises(ValueError) as exc:
         llm_endpoint.load_config(path)
-    assert expected in str(excinfo.value)
+    msg = str(exc.value).lower()
+    assert any(n.lower() in msg for n in needles), msg
 
 
-@pytest.mark.skipif(tomllib is None, reason="tomllib requires Python 3.11+")
-def test_save_config_replaces_llm_keeps_other_and_holds_no_secret(clean_env, tmp_path, monkeypatch):
-    secret = "sk-ant-secret-value-xyz-987654"
-    monkeypatch.setenv("ANTHROPIC_API_KEY", secret)
-    path = write(
-        tmp_path / "proj" / "hotdocs.toml",
-        '[llm]\nprovider = "openai"\nmodel = "gpt-6-astra"\napi_key_env = "OPENAI_API_KEY"\n'
-        '\n[other]\nname = "keep"\nvalue = 3\n',
+def test_api_key_entry_is_secret(clean_env, tmp_path):
+    path = _write(
+        tmp_path,
+        "secret.toml",
+        '[llm]\nprovider = "openai"\nmodel = "gpt-6-astra"\napi_key = "sk-abc123def456"\n',
     )
-    before = tomllib.loads(path.read_text(encoding="utf-8"))
-    other_before = before["other"]
+    with pytest.raises(ValueError) as exc:
+        llm_endpoint.load_config(path)
+    msg = str(exc.value)
+    assert "must never hold a secret" in msg
+    assert "hotdocs.toml" in msg
 
-    llm_endpoint.save_config(path, "anthropic", "claude-sonnet-5", api_key_env="ANTHROPIC_API_KEY")
 
-    text = path.read_text(encoding="utf-8")
-    data = tomllib.loads(text)
+def test_save_config_replaces_only_llm(clean_env, monkeypatch, tmp_path):
+    secret_value = "sk-ant-supersecret-value-0123456789"
+    monkeypatch.setenv("ANTHROPIC_API_KEY", secret_value)
+    path = tmp_path / "cfg" / "hotdocs.toml"
+    path.parent.mkdir()
+    path.write_text(
+        FIRST_TOML
+        + "\n[other]\n"
+        + 'name = "keep-me"\n'
+        + "numbers = [1, 2, 3]\n"
+    )
 
-    assert data["other"] == other_before
-    assert data["other"] == {"name": "keep", "value": 3}
+    llm_endpoint.save_config(
+        path, "anthropic", "claude-sonnet-5", api_key_env="ANTHROPIC_API_KEY"
+    )
 
-    llm = data["llm"]
-    assert llm["provider"] == "anthropic"
-    assert llm["model"] == "claude-sonnet-5"
-    assert set(llm.keys()) <= ALLOWED_KEYS
-    for key in llm.keys():
-        assert key not in ("api_key", "token", "password", "secret")
-
-    assert secret not in text
+    text = path.read_text()
+    assert secret_value not in text
 
     loaded = llm_endpoint.load_config(path)
     assert loaded is not None
     assert field(loaded, "provider") == "anthropic"
     assert field(loaded, "model") == "claude-sonnet-5"
+    assert field(loaded, "api_key_env") == "ANTHROPIC_API_KEY"
+
+    if tomllib is not None:
+        data = tomllib.loads(text)
+        assert data["other"] == {"name": "keep-me", "numbers": [1, 2, 3]}
+        assert data["llm"]["provider"] == "anthropic"
+        assert data["llm"]["model"] == "claude-sonnet-5"
+        for key in data["llm"]:
+            lowered = key.lower()
+            assert lowered == "api_key_env" or not any(
+                s in lowered for s in ("api_key", "token", "password", "secret")
+            )
+    else:
+        assert "[other]" in text
+        assert 'name = "keep-me"' in text

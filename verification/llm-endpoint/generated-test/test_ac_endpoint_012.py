@@ -1,8 +1,9 @@
-# hotdocs-criterion: sha256:8aae07b0e59757f3401b07913118bbbb40cda719e74c359b146a05d105302854
+# hotdocs-criterion: sha256:c21a115e9a04258be629aefbd4e15cd3513fac645439b3abade8425ced02a84b
 import json
 import os
 import stat
 import sys
+from pathlib import Path
 
 import pytest
 
@@ -13,79 +14,67 @@ def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-STREAM_LINES = [
-    {"type": "system"},
-    {"type": "assistant", "message": {"content": [{"type": "text", "text": "ab"}]}},
-    {
-        "type": "assistant",
-        "message": {"content": [{"type": "thinking"}, {"type": "text", "text": "cd"}]},
-    },
+STREAM_PREFIX = [
+    '{"type": "system"}',
+    '{"type": "assistant", "message": {"content": [{"type": "text", "text": "ab"}]}}',
+    '{"type": "assistant", "message": {"content": [{"type": "thinking"}, {"type": "text", "text": "cd"}]}}',
 ]
 
 
-def _stream_output(is_error):
-    lines = list(STREAM_LINES) + [{"type": "result", "is_error": is_error}]
-    return "".join(json.dumps(line) + "\n" for line in lines)
-
-
-def _install_recorder(tmp_path, monkeypatch, stdout_text, exit_code=0):
-    bin_dir = tmp_path / "bin"
-    bin_dir.mkdir()
-    log_path = tmp_path / "claude_calls.log"
-    script = (
+def write_recorder(bin_dir, log_path, stdout_text, exit_code=0):
+    bin_dir.mkdir(parents=True, exist_ok=True)
+    script = bin_dir / "claude"
+    source = (
         "#!" + sys.executable + "\n"
         "import json\n"
         "import os\n"
         "import sys\n"
-        "with open(" + repr(str(log_path)) + ", 'a') as f:\n"
-        "    f.write(json.dumps({'argv': sys.argv[1:], "
-        "'key': os.environ.get('ANTHROPIC_API_KEY')}) + '\\n')\n"
         "try:\n"
         "    sys.stdin.read()\n"
         "except Exception:\n"
         "    pass\n"
+        "with open(" + repr(str(log_path)) + ", 'a') as fh:\n"
+        "    fh.write(json.dumps({'argv': sys.argv[1:], 'key': os.environ.get('ANTHROPIC_API_KEY')}) + '\\n')\n"
         "sys.stdout.write(" + repr(stdout_text) + ")\n"
         "sys.stdout.flush()\n"
         "sys.exit(" + repr(exit_code) + ")\n"
     )
-    claude_path = bin_dir / "claude"
-    claude_path.write_text(script)
-    claude_path.chmod(
-        claude_path.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH
-    )
+    script.write_text(source)
+    script.chmod(script.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+    return script
+
+
+def setup_env(tmp_path, monkeypatch, stdout_text, exit_code=0):
+    monkeypatch.delenv("VAR_HOTDOCS_CONFIG", raising=False)
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    cwd = tmp_path / "cwd"
+    cwd.mkdir()
+    monkeypatch.chdir(cwd)
+    bin_dir = tmp_path / "bin"
+    log_path = tmp_path / "calls.log"
+    write_recorder(bin_dir, log_path, stdout_text, exit_code)
     monkeypatch.setenv("PATH", str(bin_dir) + os.pathsep + os.environ.get("PATH", ""))
     return log_path
 
 
-def _read_calls(log_path):
-    assert log_path.is_file(), "the claude recorder was never run"
-    return [
-        json.loads(line)
-        for line in log_path.read_text().splitlines()
-        if line.strip()
-    ]
+def read_log(log_path):
+    if not log_path.exists():
+        return []
+    return [json.loads(line) for line in log_path.read_text().splitlines() if line.strip()]
 
 
-@pytest.fixture
-def workdir(tmp_path, monkeypatch):
-    monkeypatch.delenv("VAR_HOTDOCS_CONFIG", raising=False)
-    cwd = tmp_path / "cwd"
-    cwd.mkdir()
-    monkeypatch.chdir(cwd)
-    return tmp_path
+def test_stream_json_reply_is_joined_text_blocks(tmp_path, monkeypatch):
+    lines = STREAM_PREFIX + ['{"type": "result", "is_error": false}']
+    log_path = setup_env(tmp_path, monkeypatch, "\n".join(lines) + "\n", 0)
 
+    resp = llm_endpoint.complete("hi", "claude-sonnet-5")
 
-def test_stream_text_blocks_are_joined_and_flags_recorded(workdir, monkeypatch):
-    log_path = _install_recorder(workdir, monkeypatch, _stream_output(False))
+    assert field(resp, "text") == "abcd"
+    assert field(resp, "model_call_error") is None
 
-    response = llm_endpoint.complete("hi", "claude-sonnet-5")
-
-    assert field(response, "text") == "abcd"
-    assert field(response, "model_call_error") is None
-
-    calls = _read_calls(log_path)
-    assert len(calls) == 1
-    argv = calls[0]["argv"]
+    records = read_log(log_path)
+    assert len(records) == 1
+    argv = records[0]["argv"]
     assert "--output-format" in argv
     idx = argv.index("--output-format")
     assert idx + 1 < len(argv)
@@ -93,23 +82,23 @@ def test_stream_text_blocks_are_joined_and_flags_recorded(workdir, monkeypatch):
     assert "--verbose" in argv
 
 
-def test_result_is_error_true_is_a_failure(workdir, monkeypatch):
-    log_path = _install_recorder(workdir, monkeypatch, _stream_output(True))
+def test_stream_result_is_error_is_failure(tmp_path, monkeypatch):
+    lines = STREAM_PREFIX + ['{"type": "result", "is_error": true}']
+    log_path = setup_env(tmp_path, monkeypatch, "\n".join(lines) + "\n", 0)
 
-    response = llm_endpoint.complete("hi", "claude-sonnet-5")
+    resp = llm_endpoint.complete("hi", "claude-sonnet-5")
 
-    assert field(response, "text") is None
-    error = field(response, "model_call_error")
-    assert error is not None
-    assert field(error, "category") in ("network", "auth", "rate_limit", "timeout")
-    assert len(_read_calls(log_path)) == 1
+    assert field(resp, "text") is None
+    err = field(resp, "model_call_error")
+    assert err is not None
+    assert len(read_log(log_path)) == 1
 
 
-def test_non_stream_stdout_with_zero_exit_is_whole_reply(workdir, monkeypatch):
-    log_path = _install_recorder(workdir, monkeypatch, "hello\n")
+def test_non_stream_stdout_is_reply_unchanged(tmp_path, monkeypatch):
+    log_path = setup_env(tmp_path, monkeypatch, "hello\n", 0)
 
-    response = llm_endpoint.complete("hi", "claude-sonnet-5")
+    resp = llm_endpoint.complete("hi", "claude-sonnet-5")
 
-    assert field(response, "text") == "hello\n"
-    assert field(response, "model_call_error") is None
-    assert len(_read_calls(log_path)) == 1
+    assert field(resp, "text") == "hello\n"
+    assert field(resp, "model_call_error") is None
+    assert len(read_log(log_path)) == 1

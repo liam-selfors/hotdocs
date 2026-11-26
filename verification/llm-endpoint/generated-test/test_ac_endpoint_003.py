@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:9f3d320d2dbecaf840ba7eaf8a9db4b300abb8cd1686520d3786814f096c9e2e
+# hotdocs-criterion: sha256:a7254a7b0bb8bda7a2033c247e18af1f55d64fc4a45ac674de81578eec16b60a
 import io
 import urllib.error
 
@@ -9,39 +9,34 @@ def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def test_ac_endpoint_003_http_429_is_rate_limit_without_retry(tmp_path, monkeypatch):
-    # complete() writes its call log under .hotdocs/calls/ in the current
-    # directory; keep that inside a fresh temporary directory.
-    monkeypatch.chdir(tmp_path)
+def test_ac_endpoint_003_http_429_is_rate_limit_with_no_retry(tmp_path, monkeypatch):
+    workdir = tmp_path / "work"
+    workdir.mkdir()
+    monkeypatch.chdir(workdir)
     monkeypatch.delenv("VAR_HOTDOCS_CONFIG", raising=False)
 
-    calls = []
+    log_path = tmp_path / "backend_calls.log"
 
     def mock_backend(prompt, model, **params):
-        calls.append((prompt, model, dict(params)))
+        with open(log_path, "a", encoding="utf-8") as fh:
+            fh.write("call\n")
         raise urllib.error.HTTPError(
             "https://example.invalid/v1/messages",
             429,
             "Too Many Requests",
             {},
-            io.BytesIO(b'{"error": "rate limited"}'),
+            io.BytesIO(b'{"error": "vendor rate limit text"}'),
         )
 
     model = "anthropic:claude-sonnet-5"
-    response = llm_endpoint.complete("hello", model, backend=mock_backend)
+    response = llm_endpoint.complete("Hello there", model, backend=mock_backend)
 
-    # Exactly one call: no internal retry loop.
-    assert len(calls) == 1
-
-    # Text is null on failure.
-    assert field(response, "text") is None
-
-    # The failure is structured data, with the exact category.
     error = field(response, "model_call_error")
     assert error is not None
     assert not isinstance(error, bool)
-    category = field(error, "category")
-    assert category == "rate_limit"
+    assert field(error, "category") == "rate_limit"
+    assert field(response, "text") is None
 
-    # Still no second call after the response has been built.
+    assert log_path.is_file()
+    calls = [line for line in log_path.read_text(encoding="utf-8").splitlines() if line.strip()]
     assert len(calls) == 1

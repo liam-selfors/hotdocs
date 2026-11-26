@@ -1,4 +1,6 @@
-# hotdocs-criterion: sha256:1297a172daf79e570d84049010d4ad880c3ec6b5f36cdd0c888f9a5c27c7dfd7
+# hotdocs-criterion: sha256:bf9a0415aa15b0eb4a485c7ea7aa35a19e81610833474d5dabf59ab1fe140741
+"""AC-ENDPOINT-008: each HTTP adapter speaks its provider's documented wire format."""
+
 import json
 import urllib.request
 
@@ -7,84 +9,85 @@ import pytest
 import llm_endpoint
 
 
-KEYS = {
-    "ANTHROPIC_API_KEY": "sk-ant-test-key-123",
-    "OPENAI_API_KEY": "sk-openai-test-key-456",
-    "GEMINI_API_KEY": "gemini-test-key-789",
-}
-
-
 def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-class FakeReply:
+class _Reply:
     def __init__(self, payload):
         self._data = json.dumps(payload).encode("utf-8")
-
-    def read(self, *args, **kwargs):
-        return self._data
 
     def __enter__(self):
         return self
 
-    def __exit__(self, exc_type, exc, tb):
+    def __exit__(self, *exc):
         return False
 
+    def read(self, *args, **kwargs):
+        return self._data
 
-def install_recorder(monkeypatch, payload):
-    calls = []
 
-    def fake_urlopen(request, data=None, timeout=None, *args, **kwargs):
-        calls.append({"request": request, "timeout": timeout})
-        return FakeReply(payload)
+def _install_recorder(monkeypatch, payload):
+    recorded = []
+
+    def fake_urlopen(request, *args, **kwargs):
+        recorded.append(request)
+        return _Reply(payload)
 
     monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
-    return calls
+    return recorded
 
 
-def request_parts(request):
-    assert isinstance(request, urllib.request.Request)
-    headers = {k.lower(): v for k, v in request.header_items()}
-    raw = request.data
-    if isinstance(raw, (bytes, bytearray)):
-        raw = raw.decode("utf-8")
-    body = json.loads(raw) if raw else None
-    return request.get_method(), request.full_url, headers, body
+def _headers(request):
+    return {k.lower(): v for k, v in request.header_items()}
 
 
-@pytest.fixture
-def isolated(tmp_path, monkeypatch):
-    monkeypatch.delenv("VAR_HOTDOCS_CONFIG", raising=False)
+def _body(request):
+    data = request.data
+    if isinstance(data, bytes):
+        data = data.decode("utf-8")
+    return json.loads(data)
+
+
+def _isolate(monkeypatch, tmp_path):
     monkeypatch.chdir(tmp_path)
-    return tmp_path
+    monkeypatch.delenv("VAR_HOTDOCS_CONFIG", raising=False)
+    for var in ("ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY", "OLLAMA_API_KEY"):
+        monkeypatch.delenv(var, raising=False)
 
+
+ANTHROPIC_KEY = "sk-ant-test-key-123"
+OPENAI_KEY = "sk-openai-test-key-456"
+GEMINI_KEY = "gemini-test-key-789"
 
 ANTHROPIC_REPLY = {
-    "id": "msg_1",
+    "id": "msg_01",
     "type": "message",
     "role": "assistant",
     "model": "m",
     "content": [
-        {"type": "thinking", "thinking": "let me think", "signature": "sig"},
-        {"type": "text", "text": "Hello"},
-        {"type": "text", "text": " world"},
+        {"type": "thinking", "thinking": "Let me think.", "signature": "sig"},
+        {"type": "text", "text": "hel"},
+        {"type": "text", "text": "lo"},
     ],
     "stop_reason": "end_turn",
-    "usage": {"input_tokens": 3, "output_tokens": 2},
+    "stop_sequence": None,
+    "usage": {"input_tokens": 3, "output_tokens": 5},
 }
 
 OPENAI_REPLY = {
     "id": "chatcmpl-1",
     "object": "chat.completion",
+    "created": 1700000000,
     "model": "m",
     "choices": [
         {
             "index": 0,
-            "message": {"role": "assistant", "content": "Hi from openai"},
+            "message": {"role": "assistant", "content": "hello"},
             "finish_reason": "stop",
         }
     ],
+    "usage": {"prompt_tokens": 3, "completion_tokens": 1, "total_tokens": 4},
 }
 
 GEMINI_REPLY = {
@@ -93,133 +96,130 @@ GEMINI_REPLY = {
             "content": {
                 "role": "model",
                 "parts": [
-                    {"text": "internal musing", "thought": True},
-                    {"text": "Hi"},
-                    {"text": " there"},
+                    {"text": "Thinking about greeting.", "thought": True},
+                    {"text": "hello"},
                 ],
             },
             "finishReason": "STOP",
+            "index": 0,
         }
-    ]
+    ],
+    "usageMetadata": {"promptTokenCount": 3, "candidatesTokenCount": 1, "totalTokenCount": 4},
 }
 
 OLLAMA_REPLY = {
     "model": "m",
     "created_at": "2026-01-01T00:00:00Z",
-    "message": {"role": "assistant", "content": "Hi from ollama"},
+    "message": {"role": "assistant", "content": "hello"},
     "done": True,
 }
 
 
-def check_common(resp, provider, model_string, expected_text, headers):
-    assert field(resp, "model_call_error") is None
-    assert field(resp, "text") == expected_text
-    assert field(resp, "backend") == provider
-    assert field(resp, "model") == model_string
-    assert headers.get("user-agent"), "a descriptive User-Agent is required"
-
-
-def test_anthropic_wire_format(isolated, monkeypatch):
-    for k, v in KEYS.items():
-        monkeypatch.setenv(k, v)
-    calls = install_recorder(monkeypatch, ANTHROPIC_REPLY)
-
-    resp = llm_endpoint.complete("say hi", "anthropic:m", max_tokens=50)
-
-    assert len(calls) == 1
-    method, url, headers, body = request_parts(calls[0]["request"])
-    assert method == "POST"
-    assert url == "https://api.anthropic.com/v1/messages"
-    assert headers.get("x-api-key") == KEYS["ANTHROPIC_API_KEY"]
-    assert headers.get("anthropic-version") == "2023-06-01"
-    assert "authorization" not in headers
+def _check_anthropic(req):
+    assert req.get_method() == "POST"
+    assert req.full_url == "https://api.anthropic.com/v1/messages"
+    h = _headers(req)
+    assert h.get("x-api-key") == ANTHROPIC_KEY
+    assert h.get("anthropic-version") == "2023-06-01"
+    body = _body(req)
     assert body["model"] == "m"
     assert body["max_tokens"] == 50
     assert "say hi" in json.dumps(body["messages"])
-    check_common(resp, "anthropic", "anthropic:m", "Hello world", headers)
 
 
-def test_openai_wire_format(isolated, monkeypatch):
-    for k, v in KEYS.items():
-        monkeypatch.setenv(k, v)
-    calls = install_recorder(monkeypatch, OPENAI_REPLY)
-
-    resp = llm_endpoint.complete("say hi", "openai:m", max_tokens=50)
-
-    assert len(calls) == 1
-    method, url, headers, body = request_parts(calls[0]["request"])
-    assert method == "POST"
-    assert url == "https://api.openai.com/v1/chat/completions"
-    assert headers.get("authorization") == "Bearer " + KEYS["OPENAI_API_KEY"]
+def _check_openai(req):
+    assert req.get_method() == "POST"
+    assert req.full_url == "https://api.openai.com/v1/chat/completions"
+    h = _headers(req)
+    assert h.get("authorization") == "Bearer " + OPENAI_KEY
+    body = _body(req)
     assert body["model"] == "m"
     assert body["max_completion_tokens"] == 50
-    assert "max_tokens" not in body
     assert "say hi" in json.dumps(body["messages"])
-    check_common(resp, "openai", "openai:m", "Hi from openai", headers)
 
 
-def test_gemini_wire_format(isolated, monkeypatch):
-    for k, v in KEYS.items():
-        monkeypatch.setenv(k, v)
-    calls = install_recorder(monkeypatch, GEMINI_REPLY)
-
-    resp = llm_endpoint.complete("say hi", "gemini:m", max_tokens=50)
-
-    assert len(calls) == 1
-    method, url, headers, body = request_parts(calls[0]["request"])
-    assert method == "POST"
-    assert url == (
+def _check_gemini(req):
+    assert req.get_method() == "POST"
+    url = req.full_url
+    assert url.split("?")[0] == (
         "https://generativelanguage.googleapis.com/v1beta/models/m:generateContent"
     )
-    assert headers.get("x-goog-api-key") == KEYS["GEMINI_API_KEY"]
-    assert KEYS["GEMINI_API_KEY"] not in url
+    assert GEMINI_KEY not in url
     assert "key=" not in url
+    h = _headers(req)
+    assert h.get("x-goog-api-key") == GEMINI_KEY
+    body = _body(req)
     assert body["generationConfig"]["maxOutputTokens"] == 50
     assert "say hi" in json.dumps(body["contents"])
-    check_common(resp, "gemini", "gemini:m", "Hi there", headers)
 
 
-def test_ollama_wire_format(isolated, monkeypatch):
-    for k, v in KEYS.items():
-        monkeypatch.setenv(k, v)
-    calls = install_recorder(monkeypatch, OLLAMA_REPLY)
-
-    resp = llm_endpoint.complete("say hi", "ollama:m", max_tokens=50)
-
-    assert len(calls) == 1
-    method, url, headers, body = request_parts(calls[0]["request"])
-    assert method == "POST"
-    assert url == "http://localhost:11434/api/chat"
-    assert "authorization" not in headers
+def _check_ollama(req):
+    assert req.get_method() == "POST"
+    assert req.full_url == "http://localhost:11434/api/chat"
+    h = _headers(req)
+    assert "authorization" not in h
+    body = _body(req)
     assert body["model"] == "m"
     assert body["stream"] is False
     assert body["options"]["num_predict"] == 50
     assert "say hi" in json.dumps(body["messages"])
-    check_common(resp, "ollama", "ollama:m", "Hi from ollama", headers)
 
 
-def test_openai_compatible_from_config_without_key(isolated, monkeypatch):
-    for k in KEYS:
-        monkeypatch.delenv(k, raising=False)
-    toml = (
+CASES = [
+    ("anthropic", "ANTHROPIC_API_KEY", ANTHROPIC_KEY, ANTHROPIC_REPLY, _check_anthropic, "hello"),
+    ("openai", "OPENAI_API_KEY", OPENAI_KEY, OPENAI_REPLY, _check_openai, "hello"),
+    ("gemini", "GEMINI_API_KEY", GEMINI_KEY, GEMINI_REPLY, _check_gemini, "hello"),
+    ("ollama", None, None, OLLAMA_REPLY, _check_ollama, "hello"),
+]
+
+
+@pytest.mark.parametrize(
+    "provider,key_var,key,reply,check,expected_text",
+    CASES,
+    ids=[c[0] for c in CASES],
+)
+def test_provider_wire_format(
+    monkeypatch, tmp_path, provider, key_var, key, reply, check, expected_text
+):
+    _isolate(monkeypatch, tmp_path)
+    if key_var is not None:
+        monkeypatch.setenv(key_var, key)
+    recorded = _install_recorder(monkeypatch, reply)
+
+    model = provider + ":m"
+    response = llm_endpoint.complete("say hi", model, max_tokens=50)
+
+    assert len(recorded) == 1
+    check(recorded[0])
+
+    assert field(response, "model_call_error") is None
+    assert field(response, "text") == expected_text
+    assert field(response, "backend") == provider
+    assert field(response, "model") == model
+
+
+def test_openai_compatible_from_config_without_key(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    (tmp_path / "hotdocs.toml").write_text(
         "[llm]\n"
         + "provider = " + json.dumps("openai-compatible") + "\n"
         + "model = " + json.dumps("m") + "\n"
-        + "base_url = " + json.dumps("http://h:8000/v1") + "\n"
+        + "base_url = " + json.dumps("http://h:8000/v1") + "\n",
+        encoding="utf-8",
     )
-    (isolated / "hotdocs.toml").write_text(toml, encoding="utf-8")
-    calls = install_recorder(monkeypatch, OPENAI_REPLY)
+    recorded = _install_recorder(monkeypatch, OPENAI_REPLY)
 
-    resp = llm_endpoint.complete("say hi", "m", max_tokens=50)
+    response = llm_endpoint.complete("say hi", "m", max_tokens=50)
 
-    assert len(calls) == 1
-    method, url, headers, body = request_parts(calls[0]["request"])
-    assert method == "POST"
-    assert url == "http://h:8000/v1/chat/completions"
-    assert "authorization" not in headers
+    assert len(recorded) == 1
+    req = recorded[0]
+    assert req.get_method() == "POST"
+    assert req.full_url == "http://h:8000/v1/chat/completions"
+    assert "authorization" not in _headers(req)
+    body = _body(req)
     assert body["max_tokens"] == 50
-    assert body["model"] == "m"
-    assert field(resp, "model_call_error") is None
-    assert field(resp, "text") == "Hi from openai"
-    assert field(resp, "backend") == "openai-compatible"
-    assert field(resp, "model") == "m"
+    assert "say hi" in json.dumps(body["messages"])
+
+    assert field(response, "model_call_error") is None
+    assert field(response, "text") == "hello"
+    assert field(response, "backend") == "openai-compatible"

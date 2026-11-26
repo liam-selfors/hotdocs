@@ -1,4 +1,8 @@
-# hotdocs-criterion: sha256:3600c648cc321d62fe3332405b632115768ed4704592ad20979c947db5209108
+# hotdocs-criterion: sha256:03b21854476e5f55e0cc3af77c96f21a1145a883195528f02b95f00d5da11b23
+"""AC-ENDPOINT-015 (covers R-ENDPOINT-007): hotdocs.toml [llm] table loading,
+auth validation, resolve_provider pass-through, invalid TOML, empty-as-unset,
+and save_config round trip."""
+
 import pytest
 
 import llm_endpoint
@@ -9,7 +13,7 @@ def field(value, name):
 
 
 @pytest.fixture(autouse=True)
-def _isolate(monkeypatch, tmp_path):
+def _isolate(tmp_path, monkeypatch):
     monkeypatch.delenv("VAR_HOTDOCS_CONFIG", raising=False)
     work = tmp_path / "cwd"
     work.mkdir()
@@ -21,20 +25,17 @@ def _write(path, text):
     return path
 
 
-def _toml_llm(entries):
+def _llm_table(entries):
     lines = ["[llm]"]
-    for key, value in entries:
-        if isinstance(value, str):
-            lines.append(key + " = " + '"' + value + '"')
-        else:
-            lines.append(key + " = " + repr(value))
+    for name, value in entries:
+        lines.append(name + " = " + '"' + value + '"')
     return "\n".join(lines) + "\n"
 
 
-def test_claude_cli_login_auth_loads_and_resolves(tmp_path):
+def test_claude_cli_auth_login_loads_and_resolves(tmp_path):
     path = _write(
         tmp_path / "hotdocs.toml",
-        _toml_llm([("provider", "claude-cli"), ("model", "m"), ("auth", "login")]),
+        _llm_table([("provider", "claude-cli"), ("model", "m"), ("auth", "login")]),
     )
     config = llm_endpoint.load_config(path)
     assert config is not None
@@ -44,21 +45,22 @@ def test_claude_cli_login_auth_loads_and_resolves(tmp_path):
 
     resolved = llm_endpoint.resolve_provider("m", config)
     assert field(resolved, "auth") == "login"
+    assert field(resolved, "provider") == "claude-cli"
 
 
-def test_claude_cli_invalid_auth_value_rejected(tmp_path):
+def test_claude_cli_auth_token_is_invalid(tmp_path):
     path = _write(
         tmp_path / "hotdocs.toml",
-        _toml_llm([("provider", "claude-cli"), ("model", "m"), ("auth", "token")]),
+        _llm_table([("provider", "claude-cli"), ("model", "m"), ("auth", "token")]),
     )
     with pytest.raises(ValueError):
         llm_endpoint.load_config(path)
 
 
-def test_auth_on_non_claude_cli_provider_rejected(tmp_path):
+def test_auth_on_non_claude_cli_provider_is_invalid(tmp_path):
     path = _write(
         tmp_path / "hotdocs.toml",
-        _toml_llm([("provider", "openai"), ("model", "m"), ("auth", "login")]),
+        _llm_table([("provider", "openai"), ("model", "m"), ("auth", "login")]),
     )
     with pytest.raises(ValueError):
         llm_endpoint.load_config(path)
@@ -79,7 +81,7 @@ def test_resolve_provider_config_without_auth_entry():
     assert field(resolved, "auth") is None
 
 
-def test_invalid_toml_message(tmp_path):
+def test_invalid_toml_raises_with_message(tmp_path):
     path = _write(tmp_path / "hotdocs.toml", "[llm\n")
     with pytest.raises(ValueError) as excinfo:
         llm_endpoint.load_config(path)
@@ -89,7 +91,7 @@ def test_invalid_toml_message(tmp_path):
 def test_empty_base_url_and_api_key_env_read_as_unset(tmp_path):
     path = _write(
         tmp_path / "hotdocs.toml",
-        _toml_llm(
+        _llm_table(
             [
                 ("provider", "openai"),
                 ("model", "m"),
@@ -104,8 +106,8 @@ def test_empty_base_url_and_api_key_env_read_as_unset(tmp_path):
     assert field(config, "api_key_env") is None
 
 
-def test_save_config_with_auth_round_trips(tmp_path):
-    path = tmp_path / "hotdocs.toml"
+def test_save_config_then_load_round_trip(tmp_path):
+    path = tmp_path / "saved" / "hotdocs.toml"
     assert not path.exists()
     llm_endpoint.save_config(path, "claude-cli", "m", auth="login")
     config = llm_endpoint.load_config(path)
