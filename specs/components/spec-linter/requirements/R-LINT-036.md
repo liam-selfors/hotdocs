@@ -16,4 +16,5 @@
     that component's `depends_on` lacks `comp-driver-<item>`:
     `test driver '<item>' is defined in this repository; depends_on must list comp-driver-<item>`.
 
-  A block-style `drivers` list is `drivers must be one line: [a, b]`.
+  An item failing the first check gets no further check. A block-style
+  `drivers` list is `drivers must be one line: [a, b]`.
