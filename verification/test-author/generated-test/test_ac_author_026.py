@@ -1,17 +1,22 @@
-# hotdocs-criterion: sha256:7e47bd97450e6c332a2e522ef9bb5c652db497031548f31c419562e577d3c870
+# hotdocs-criterion: sha256:4d6d74a6a61b227b24b25e97dd8eaf01733b1d1ca560ba7dfbc67007e58d798f
 import re
 
 import test_author
+
+
+NONCE_RE = r"-----BEGIN FILE ([0-9a-f]{32})-----"
+
+GOOD_TEST = "def test_placeholder():\n    assert True\n"
 
 
 def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def _write_probe_stand_in(repo_root, log_path):
+def write_probe_stand_in(repo_root, log_path):
     probe_dir = repo_root / "gen" / "test-probe"
     probe_dir.mkdir(parents=True, exist_ok=True)
-    src = (
+    source = (
         "class _Report:\n"
         "    def __init__(self):\n"
         "        self.ok = True\n"
@@ -20,26 +25,26 @@ def _write_probe_stand_in(repo_root, log_path):
         "        self.tests_reached = 1\n"
         "\n"
         "    def to_dict(self):\n"
-        "        return {'ok': True, 'findings': [], 'tests_run': 1, 'tests_reached': 1}\n"
+        "        return {'ok': self.ok, 'findings': list(self.findings),\n"
+        "                'tests_run': self.tests_run, 'tests_reached': self.tests_reached}\n"
         "\n"
         "\n"
-        "def probe(test_source, criterion_bundle, module_name, *, timeout=60.0, interpreter=None, assets=None):\n"
-        "    with open(" + repr(str(log_path)) + ", 'a') as f:\n"
-        "        f.write('call\\n')\n"
+        "def probe(test_source, criterion_bundle, module_name, *, timeout=60.0, **kwargs):\n"
+        "    with open(" + repr(str(log_path)) + ", 'a', encoding='utf-8') as fh:\n"
+        "        fh.write(repr(module_name) + '\\n')\n"
         "    return _Report()\n"
     )
-    (probe_dir / "test_probe.py").write_text(src)
+    (probe_dir / "test_probe.py").write_text(source, encoding="utf-8")
 
 
-def _make_backend(prompts):
+def make_backend(prompts):
     def backend(prompt, model, **params):
         prompts.append(prompt)
-        nonces = re.findall(r"-----BEGIN FILE ([0-9a-f]{32})-----", prompt)
-        n = nonces[-1]
+        nonce = re.findall(NONCE_RE, prompt)[-1]
         text = (
-            "-----BEGIN FILE " + n + "-----\n"
-            "def test_placeholder():\n    assert True\n"
-            "\n-----END FILE " + n + "-----"
+            "-----BEGIN FILE " + nonce + "-----\n"
+            + GOOD_TEST
+            + "\n-----END FILE " + nonce + "-----"
         )
         return {
             "text": text,
@@ -51,53 +56,50 @@ def _make_backend(prompts):
     return backend
 
 
-def _bundle(component_id, criterion_id, module_names):
+def run_author(tmp_path, monkeypatch, name, bundle):
+    repo_root = tmp_path / name
+    repo_root.mkdir()
+    monkeypatch.chdir(repo_root)
+    write_probe_stand_in(repo_root, tmp_path / (name + "-probe.log"))
+    prompts = []
+    result = test_author.author_test(
+        bundle, "mock", 0, repo_root=repo_root, llm_backend=make_backend(prompts)
+    )
+    return prompts, result
+
+
+def base_bundle(component_id, criterion_id, covers):
     return {
         "component_id": component_id,
         "criterion_id": criterion_id,
-        "covers": criterion_id.replace("AC-", "R-", 1),
-        "criterion_text": "Given something\nWhen something happens\nThen a result",
-        "requirement_text": "The component MUST do something.",
-        "interface": "",
+        "covers": covers,
+        "criterion_text": "Given an input\nWhen it runs\nThen it works",
+        "requirement_text": "The thing MUST work.",
+        "interface": "do_thing(x: str) -> str",
         "glossary": "",
         "dependency_interfaces": {},
-        "module_names": module_names,
     }
 
 
-def _run(repo_root, monkeypatch, bundle):
-    repo_root.mkdir(parents=True, exist_ok=True)
-    log_path = repo_root.parent / (repo_root.name + "-probe.log")
-    _write_probe_stand_in(repo_root, log_path)
-    monkeypatch.chdir(repo_root)
-    prompts = []
-    result = test_author.author_test(
-        bundle,
-        "mock",
-        0,
-        repo_root=repo_root,
-        llm_backend=_make_backend(prompts),
-    )
-    assert field(result, "model_call_error") is None
-    assert prompts, "the mock backend was never called"
-    return prompts
+def test_module_names_replace_derived_import(tmp_path, monkeypatch):
+    bundle = base_bundle("capabilities/P-SLUGS", "AC-P-SLUGS-001", "R-P-SLUGS-001")
+    bundle["module_names"] = ["slugify", "url_tools"]
 
+    prompts, _result = run_author(tmp_path, monkeypatch, "caps", bundle)
 
-def test_module_names_replace_derived_name(tmp_path, monkeypatch):
-    repo_root = tmp_path / "repo-capability"
-    bundle = _bundle(
-        "capabilities/P-SLUGS", "AC-P-SLUGS-001", ["slugify", "url_tools"]
-    )
-    prompts = _run(repo_root, monkeypatch, bundle)
+    assert prompts, "the model backend was never called"
     for prompt in prompts:
         assert "import slugify" in prompt
         assert "import url_tools" in prompt
         assert "import capabilities" not in prompt
 
 
-def test_empty_module_names_uses_derived_name(tmp_path, monkeypatch):
-    repo_root = tmp_path / "repo-semver"
-    bundle = _bundle("comp-semver", "AC-SEMVER-001", [])
-    prompts = _run(repo_root, monkeypatch, bundle)
+def test_empty_module_names_uses_derived_import(tmp_path, monkeypatch):
+    bundle = base_bundle("comp-semver", "AC-SEMVER-001", "R-SEMVER-001")
+    bundle["module_names"] = []
+
+    prompts, _result = run_author(tmp_path, monkeypatch, "semver", bundle)
+
+    assert prompts, "the model backend was never called"
     for prompt in prompts:
         assert "import semver" in prompt

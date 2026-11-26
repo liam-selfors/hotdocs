@@ -1,36 +1,36 @@
-# hotdocs-criterion: sha256:64bfca49ef4c954fd6e57ecebf36c81540b50f032555067d5199f2e623d91645
+# hotdocs-criterion: sha256:1e1980adefb66b45fb5d9ee13e4a73543ec4baca4443de75ade4feea546f14fc
 import re
 from pathlib import Path
 
 import test_author
 
 
-LINE_RATIFIED = "- A document with `status: ratified` also sets the placeholder `last_ratified_commit: 0000000`."
-LINE_NO_YAML = "- A test MUST NEVER `import yaml` or any other third-party package not already installed: it writes and parses frontmatter as plain text."
-
-GOOD_TEST = (
-    "import widget_maker\n"
-    "\n"
-    "\n"
-    "def test_widget():\n"
-    "    assert widget_maker.make() is not None\n"
+LINE_RATIFIED = (
+    "- A document with `status: ratified` also sets the placeholder "
+    "`last_ratified_commit: 0000000`."
 )
+LINE_NO_YAML = (
+    "- A test MUST NEVER `import yaml` or any other third-party package not "
+    "already installed: it writes and parses frontmatter as plain text."
+)
+
+MOCK_TEST_FILE = "def test_placeholder():\n    assert True\n"
 
 
 def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def write_probe_stand_in(repo_root, log_path):
-    probe_dir = Path(repo_root) / "gen" / "test-probe"
+def _write_probe_stand_in(repo_root, log_path):
+    probe_dir = repo_root / "gen" / "test-probe"
     probe_dir.mkdir(parents=True, exist_ok=True)
     source = (
-        "class _Report:\n"
-        "    def __init__(self):\n"
-        "        self.ok = True\n"
-        "        self.findings = []\n"
-        "        self.tests_run = 1\n"
-        "        self.tests_reached = 1\n"
+        "class ProbeReport:\n"
+        "    def __init__(self, ok, findings, tests_run, tests_reached):\n"
+        "        self.ok = ok\n"
+        "        self.findings = findings\n"
+        "        self.tests_run = tests_run\n"
+        "        self.tests_reached = tests_reached\n"
         "\n"
         "    def to_dict(self):\n"
         "        return {\n"
@@ -41,45 +41,37 @@ def write_probe_stand_in(repo_root, log_path):
         "        }\n"
         "\n"
         "\n"
-        "GATE_VERSION = 'test-probe@1.4.0'\n"
+        "GATE_VERSION = 'test-probe@1.5.0'\n"
         "\n"
         "\n"
-        "def probe(test_source, criterion_bundle, module_name, *, timeout=60.0, interpreter=None, assets=None):\n"
+        "def probe(test_source, criterion_bundle, module_name, *, timeout=60.0,\n"
+        "          interpreter=None, assets=None, drivers=None):\n"
         "    with open(" + repr(str(log_path)) + ", 'a', encoding='utf-8') as fh:\n"
         "        fh.write('probe\\n')\n"
-        "    return _Report()\n"
+        "    return ProbeReport(True, [], 1, 1)\n"
     )
     (probe_dir / "test_probe.py").write_text(source, encoding="utf-8")
 
 
-def make_bundle():
-    return {
-        "component_id": "comp-widget-maker",
-        "criterion_id": "AC-WIDGET-MAKER-001",
-        "covers": "R-WIDGET-MAKER-001",
-        "criterion_text": "Given a widget\nWhen make() is called\nThen a widget is returned",
-        "requirement_text": "R-WIDGET-MAKER-001 - make() MUST return a widget.",
-        "interface": "make() -> Widget",
-        "glossary": "",
-        "dependency_interfaces": {},
-    }
-
-
-def test_prompt_holds_block_r_author_012_lines(tmp_path, monkeypatch):
+def test_prompt_holds_block_r_author_012(tmp_path, monkeypatch):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
     monkeypatch.chdir(repo_root)
 
-    probe_log = tmp_path / "probe_calls.log"
-    write_probe_stand_in(repo_root, probe_log)
+    log_path = tmp_path / "probe_calls.log"
+    _write_probe_stand_in(repo_root, log_path)
 
     prompts = []
 
     def mock_backend(prompt, model, **params):
         prompts.append(prompt)
         nonces = re.findall(r"-----BEGIN FILE ([0-9a-f]{32})-----", prompt)
-        n = nonces[-1] if nonces else "0" * 32
-        text = "-----BEGIN FILE " + n + "-----\n" + GOOD_TEST + "\n-----END FILE " + n + "-----"
+        nonce = nonces[-1] if nonces else "0" * 32
+        text = (
+            "-----BEGIN FILE " + nonce + "-----\n"
+            + MOCK_TEST_FILE
+            + "\n-----END FILE " + nonce + "-----"
+        )
         return {
             "text": text,
             "model": model,
@@ -87,14 +79,24 @@ def test_prompt_holds_block_r_author_012_lines(tmp_path, monkeypatch):
             "model_call_error": None,
         }
 
+    bundle = {
+        "component_id": "comp-widget-maker",
+        "criterion_id": "AC-WIDGET-MAKER-001",
+        "covers": "R-WIDGET-MAKER-001",
+        "criterion_text": "Given a widget, When made, Then it exists.",
+        "requirement_text": "R-WIDGET-MAKER-001 — The maker MUST make widgets.",
+        "interface": "make_widget() -> dict",
+        "glossary": "",
+        "dependency_interfaces": {},
+    }
+
     result = test_author.author_test(
-        make_bundle(), "mock", repo_root=repo_root, llm_backend=mock_backend
+        bundle, "mock", repo_root=repo_root, llm_backend=mock_backend
     )
 
     assert result is not None
-    assert field(result, "model_call_error") is None
-    assert len(prompts) >= 1
+    assert len(prompts) >= 1, "mock model was never called"
 
-    lines = prompts[0].splitlines()
-    assert LINE_RATIFIED in lines
-    assert LINE_NO_YAML in lines
+    first_lines = prompts[0].splitlines()
+    assert LINE_RATIFIED in first_lines
+    assert LINE_NO_YAML in first_lines

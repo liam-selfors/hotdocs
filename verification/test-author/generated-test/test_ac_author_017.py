@@ -1,10 +1,13 @@
-# hotdocs-criterion: sha256:9838b24905dcd4b6677f68998bd851246b05f5cdad92c0c3725843685f355a12
+# hotdocs-criterion: sha256:f492a6d26bbb228c30ffaf14789de11f8708c5d82686d7ae4a4decb01f2a2159
+import json
 import re
+
+import pytest
 
 import test_author
 
 
-EXPECTED_TEST = "import test_author\n\n\ndef test_placeholder():\n    assert test_author is not None\n"
+MOCK_TEST = "def test_placeholder():\n    assert 1 + 1 == 2\n"
 
 
 def field(value, name):
@@ -16,121 +19,113 @@ def body(content):
     return rest if first.startswith("# hotdocs-criterion:") else content
 
 
-def mock_backend(prompt, model, **params):
-    nonce = re.findall(r"-----BEGIN FILE ([0-9a-f]{32})-----", prompt)[-1]
-    text = (
-        "-----BEGIN FILE " + nonce + "-----\n"
-        + EXPECTED_TEST
-        + "\n-----END FILE " + nonce + "-----"
-    )
-    return {
-        "text": text,
-        "model": model,
-        "backend": "mock",
-        "model_call_error": None,
-    }
+def make_backend(calls_log):
+    def backend(prompt, model, **params):
+        with open(calls_log, "a", encoding="utf-8") as f:
+            f.write("call\n")
+        nonce = re.findall(r"-----BEGIN FILE ([0-9a-f]{32})-----", prompt)[-1]
+        text = (
+            "-----BEGIN FILE " + nonce + "-----\n"
+            + MOCK_TEST
+            + "\n-----END FILE " + nonce + "-----"
+        )
+        return {
+            "text": text,
+            "model": model,
+            "backend": "mock",
+            "model_call_error": None,
+        }
+
+    return backend
 
 
-def write_probe_stand_in(repo_root, log_path):
+def plant_probe(repo_root, probe_log):
     probe_dir = repo_root / "gen" / "test-probe"
-    probe_dir.mkdir(parents=True)
-    source = (
-        "class _Report:\n"
-        "    def __init__(self):\n"
-        "        self.ok = True\n"
-        "        self.findings = []\n"
-        "        self.tests_run = 1\n"
-        "        self.tests_reached = 1\n"
-        "\n"
-        "    def to_dict(self):\n"
-        "        return {\n"
-        "            'ok': self.ok,\n"
-        "            'findings': list(self.findings),\n"
-        "            'tests_run': self.tests_run,\n"
-        "            'tests_reached': self.tests_reached,\n"
-        "        }\n"
-        "\n"
-        "\n"
-        "def probe(test_source, criterion_bundle, module_name, *, timeout=60.0,\n"
-        "          interpreter=None, assets=None):\n"
-        "    with open(" + repr(str(log_path)) + ", 'a', encoding='utf-8') as fh:\n"
-        "        fh.write('probe\\n')\n"
-        "    return _Report()\n"
-    )
-    (probe_dir / "test_probe.py").write_text(source, encoding="utf-8")
+    probe_dir.mkdir(parents=True, exist_ok=True)
+    lines = [
+        "import json",
+        "",
+        "",
+        "class _Report:",
+        "    def __init__(self):",
+        "        self.ok = True",
+        "        self.findings = []",
+        "        self.tests_run = 1",
+        "        self.tests_reached = 1",
+        "",
+        "    def to_dict(self):",
+        "        return {'ok': self.ok, 'findings': list(self.findings),",
+        "                'tests_run': self.tests_run, 'tests_reached': self.tests_reached}",
+        "",
+        "",
+        "def probe(test_source, criterion_bundle, module_name, *, timeout=60.0,",
+        "          interpreter=None, assets=None, drivers=None):",
+        "    with open(" + repr(str(probe_log)) + ", 'a', encoding='utf-8') as f:",
+        "        f.write(json.dumps({'module_name': module_name}) + '\\n')",
+        "    return _Report()",
+        "",
+    ]
+    (probe_dir / "test_probe.py").write_text("\n".join(lines), encoding="utf-8")
 
 
 BASE_FIELDS = {
     "component_id": "comp-widget-maker",
     "criterion_id": "AC-WIDGET-MAKER-001",
     "covers": "R-WIDGET-MAKER-001",
-    "criterion_text": "Given a widget When made Then it exists",
-    "requirement_text": "R-WIDGET-MAKER-001 widgets MUST be makeable",
-    "interface": "make_widget() -> dict",
+    "criterion_text": "Given a widget\nWhen it is made\nThen it exists",
+    "requirement_text": "R-WIDGET-MAKER-001 widgets MUST be made.",
+    "interface": "make_widget(name: str) -> dict",
     "glossary": "",
 }
 
+EXPECTED_PATH = "verification/widget-maker/generated-test/test_ac_widget_maker_001.py"
+
 
 class PlainBundle:
-    def __init__(self, **kwargs):
-        for key, value in kwargs.items():
-            setattr(self, key, value)
+    def __init__(self, values):
+        for k, v in values.items():
+            setattr(self, k, v)
 
 
-def check_completed(result, repo_root, log_path):
+def run_and_check(tmp_path, monkeypatch, bundle):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    monkeypatch.chdir(repo_root)
+    probe_log = tmp_path / "probe_calls.log"
+    calls_log = tmp_path / "model_calls.log"
+    plant_probe(repo_root, probe_log)
+
+    try:
+        result = test_author.author_test(
+            bundle, "mock", 0,
+            repo_root=repo_root, llm_backend=make_backend(calls_log),
+        )
+    except (AttributeError, KeyError) as exc:
+        pytest.fail("author_test raised " + type(exc).__name__ + ": " + repr(exc))
+
     assert field(result, "model_call_error") is None
+    assert calls_log.is_file() and calls_log.read_text(encoding="utf-8").count("call") >= 1
+    assert probe_log.is_file() and probe_log.read_text(encoding="utf-8").strip() != ""
+
     file = field(result, "file")
     assert file is not None
-    path = file["path"]
-    assert path == "verification/widget-maker/generated-test/test_ac_widget_maker_001.py"
-    assert body(file["content"]) == EXPECTED_TEST
-    written = repo_root / path
+    assert field(file, "path") == EXPECTED_PATH
+    assert body(field(file, "content")) == MOCK_TEST
+
+    written = repo_root / EXPECTED_PATH
     assert written.is_file()
-    assert body(written.read_text(encoding="utf-8")) == EXPECTED_TEST
-    lines = log_path.read_text(encoding="utf-8").splitlines()
-    assert len(lines) >= 1
+    assert written.read_text(encoding="utf-8") == field(file, "content")
+    return result
 
 
 def test_object_bundle_without_dependency_interfaces_attribute(tmp_path, monkeypatch):
-    repo_root = tmp_path / "repo_obj"
-    repo_root.mkdir()
-    log_path = tmp_path / "probe_obj.log"
-    write_probe_stand_in(repo_root, log_path)
-    monkeypatch.chdir(repo_root)
-
-    bundle = PlainBundle(**BASE_FIELDS)
+    bundle = PlainBundle(BASE_FIELDS)
     assert not isinstance(bundle, dict)
     assert not hasattr(bundle, "dependency_interfaces")
-
-    try:
-        result = test_author.author_test(
-            bundle, "mock", 0, repo_root=repo_root, llm_backend=mock_backend
-        )
-    except AttributeError as exc:
-        raise AssertionError(
-            "author_test raised AttributeError for missing dependency_interfaces: " + repr(exc)
-        )
-
-    check_completed(result, repo_root, log_path)
+    run_and_check(tmp_path, monkeypatch, bundle)
 
 
 def test_dict_bundle_without_dependency_interfaces_key(tmp_path, monkeypatch):
-    repo_root = tmp_path / "repo_dict"
-    repo_root.mkdir()
-    log_path = tmp_path / "probe_dict.log"
-    write_probe_stand_in(repo_root, log_path)
-    monkeypatch.chdir(repo_root)
-
     bundle = dict(BASE_FIELDS)
     assert "dependency_interfaces" not in bundle
-
-    try:
-        result = test_author.author_test(
-            bundle, "mock", 0, repo_root=repo_root, llm_backend=mock_backend
-        )
-    except KeyError as exc:
-        raise AssertionError(
-            "author_test raised KeyError for missing dependency_interfaces: " + repr(exc)
-        )
-
-    check_completed(result, repo_root, log_path)
+    run_and_check(tmp_path, monkeypatch, bundle)
