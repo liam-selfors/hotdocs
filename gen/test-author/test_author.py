@@ -1,4 +1,4 @@
-"""test-author: authors the test code for one generated-test criterion."""
+"""Test Author: authors the test code for one generated-test criterion."""
 
 import dataclasses
 import hashlib
@@ -7,6 +7,7 @@ import json
 import re
 import secrets
 import sys
+from collections.abc import Mapping
 from pathlib import Path
 
 GATE_VERSION = "generated_test@3.0.0"
@@ -17,9 +18,9 @@ USAGE = (
     "[--seed=<n>] [--repo-root=<dir>] [--format=json|text]"
 )
 
-HEADER_PREFIX = "# hotdocs-criterion:"
+_VALUE_FLAGS = ("--model", "--seed", "--repo-root", "--format")
 
-_HASH_KEYS = ("criterion_text", "requirement_text", "interface", "glossary", "testing")
+_HEADER_PREFIX = "# hotdocs-criterion:"
 
 
 @dataclasses.dataclass
@@ -36,78 +37,118 @@ class TestAuthoringResult:
     probe_findings: list
 
 
-_BLOCKS = [
-    """The component under test itself needs no custom loader: a plain `import @MODULE@`.
-Its own dependencies are resolved differently. No dependency is statically importable: each is loaded at runtime from `<repo_root>/gen/<dependency-slug>/<module_name>.py` (flat) or `<repo_root>/gen/<dependency-slug>/<module_name>/__init__.py` (package), else from the tool's own copy, so omitting one never makes it missing.
-A dependency is never interceptable by name-based `sys.modules` injection or `mock.patch`.
-To fake a dependency, write a fake module file under a fresh temporary `repo_root`, always in flat-module shape: `<repo_root>/gen/<dependency-slug>/<module_name>.py`. Every real loader checks flat first.
-`module_name` is the slug with hyphens replaced by underscores, never `"__init__"`.
-Whenever a test loads a module from a file path itself, it uses exactly this shape, with `sys.modules[module_name] = module` before `spec.loader.exec_module(module)`, which a dataclass needs:
+BLOCK_R_AUTHOR_010 = "\n".join([
+    "The component under test itself needs no custom loader: a plain `import @MODULE@`.",
+    "Its own dependencies are resolved differently. No dependency is statically importable: each is loaded at runtime from `<repo_root>/gen/<dependency-slug>/<module_name>.py` (flat) or `<repo_root>/gen/<dependency-slug>/<module_name>/__init__.py` (package), else from the tool's own copy, so omitting one never makes it missing.",
+    "A dependency is never interceptable by name-based `sys.modules` injection or `mock.patch`.",
+    "To fake a dependency, write a fake module file under a fresh temporary `repo_root`, always in flat-module shape: `<repo_root>/gen/<dependency-slug>/<module_name>.py`. Every real loader checks flat first.",
+    "`module_name` is the slug with hyphens replaced by underscores, never `\"__init__\"`.",
+    "Whenever a test loads a module from a file path itself, it uses exactly this shape, with `sys.modules[module_name] = module` before `spec.loader.exec_module(module)`, which a dataclass needs:",
+    "",
+    "    import importlib.util",
+    "    import sys",
+    "",
+    "    def load_module(path, module_name):",
+    "        spec = importlib.util.spec_from_file_location(module_name, path)",
+    "        module = importlib.util.module_from_spec(spec)",
+    "        sys.modules[module_name] = module",
+    "        spec.loader.exec_module(module)",
+    "        return module",
+])
 
-    import importlib.util
-    import sys
+BLOCK_R_AUTHOR_011 = "\n".join([
+    "Any fake a test writes for a dependency's behavior MUST match that dependency's real, documented call signature and return shape exactly, as its interface above gives them, never invented or simplified.",
+    "Given a documented return type with named fields, a fake MUST return every field, never a bare list, string or number in its place, even when the test reads only one field. For a dependency that documents",
+    "",
+    "    bar_get(key: str) -> Entry",
+    "    Entry: {\"key\": str, \"value\": str, \"stored_at\": str}",
+    "",
+    "a correct fake is",
+    "",
+    "    def bar_get(key):",
+    "        return {\"key\": key, \"value\": \"v\", \"stored_at\": \"2026-01-01T00:00:00Z\"}",
+    "",
+    "and a fake whose body is `return \"v\"` is wrong.",
+])
 
-    def load_module(path, module_name):
-        spec = importlib.util.spec_from_file_location(module_name, path)
-        module = importlib.util.module_from_spec(spec)
-        sys.modules[module_name] = module
-        spec.loader.exec_module(module)
-        return module""",
-    """Any fake a test writes for a dependency's behavior MUST match that dependency's real, documented call signature and return shape exactly, as its interface above gives them, never invented or simplified.
-Given a documented return type with named fields, a fake MUST return every field, never a bare list, string or number in its place, even when the test reads only one field. For a dependency that documents
+BLOCK_R_AUTHOR_012 = "\n".join([
+    "When a test builds a synthetic spec corpus (a fixture) under a temporary `repo_root`:",
+    "- Every frontmatter-bearing document it builds (`component.md`, `specs/vars/VAR-*.md`, `specs/decisions/D<N>.md`) carries `id`, `title`, `status` and `owners`, always, with `status` exactly one of `draft`, `ratified` or `deprecated`.",
+    "- A document with `status: ratified` also sets the placeholder `last_ratified_commit: 0000000`.",
+    "- Every `requirements/` file of every fixture component has a matching `acceptance/` file with a `Covers:` tag.",
+    "- A unit file (`constraints.md`, or anything under `requirements/`, `interface/` or `acceptance/`) carries no frontmatter at all.",
+    "- A test MUST NEVER `import yaml` or any other third-party package not already installed: it writes and parses frontmatter as plain text.",
+])
 
-    bar_get(key: str) -> Entry
-    Entry: {"key": str, "value": str, "stored_at": str}
+BLOCK_R_AUTHOR_013 = "\n".join([
+    "- A fixture component defaults to `sealed: true` with a short, fake `source_path` not under `gen/`, such as `source_path: legacy/foo/`, unless the criterion concerns `realizes` or capability linkage: sealed exempts it from `realizes` and the capability machinery.",
+    "- Only a criterion that needs `realizes`-driven behavior has the fixture supply a resolvable `P-<id>`.",
+])
 
-a correct fake is
+BLOCK_R_AUTHOR_014 = "\n".join([
+    "- Every list-valued frontmatter field (`owners`, `depends_on`, `realizes`, `uses_var`) uses YAML flow style, such as `owners: [a, b]`, never block style (`- a` lines), which the frontmatter reader does not read as a list.",
+])
 
-    def bar_get(key):
-        return {"key": key, "value": "v", "stored_at": "2026-01-01T00:00:00Z"}
+BLOCK_R_AUTHOR_015 = "\n".join([
+    "- When the criterion depends on a precondition the target checks with `spec-linter`, the test calls `lint()` on the fixture first and asserts zero hard failures before exercising the behavior under test. The call is exactly `lint(None, repo_root)`: `paths` first and positionally `None`, never one positional argument. Every requirement, guarantee and acceptance file the fixture writes starts with its `# <id>` heading line, then a blank line: a file without it fails lint. When the test spec gives the fixture as code, the test copies that code exactly instead of retyping the files.",
+    "",
+    "    import importlib.util",
+    "    import sys",
+    "    from pathlib import Path",
+    "    import @MODULE@",
+    "",
+    "    gen = next(p for p in Path(@MODULE@.__file__).resolve().parents if p.name == \"gen\")",
+    "    base = gen / \"spec-linter\"",
+    "    path = base / \"spec_linter.py\" if (base / \"spec_linter.py\").is_file() else base / \"spec_linter\" / \"__init__.py\"",
+    "    spec = importlib.util.spec_from_file_location(\"spec_linter\", path)",
+    "    spec_linter = importlib.util.module_from_spec(spec)",
+    "    sys.modules[\"spec_linter\"] = spec_linter",
+    "    spec.loader.exec_module(spec_linter)",
+    "    assert spec_linter.lint(None, repo_root).hard_failures == 0",
+])
 
-and a fake whose body is `return "v"` is wrong.""",
-    """When a test builds a synthetic spec corpus (a fixture) under a temporary `repo_root`:
-- Every frontmatter-bearing document it builds (`component.md`, `specs/vars/VAR-*.md`, `specs/decisions/D<N>.md`) carries `id`, `title`, `status` and `owners`, always, with `status` exactly one of `draft`, `ratified` or `deprecated`.
-- A document with `status: ratified` also sets the placeholder `last_ratified_commit: 0000000`.
-- Every `requirements/` file of every fixture component has a matching `acceptance/` file with a `Covers:` tag.
-- A unit file (`constraints.md`, or anything under `requirements/`, `interface/` or `acceptance/`) carries no frontmatter at all.
-- A test MUST NEVER `import yaml` or any other third-party package not already installed: it writes and parses frontmatter as plain text.""",
-    """- A fixture component defaults to `sealed: true` with a short, fake `source_path` not under `gen/`, such as `source_path: legacy/foo/`, unless the criterion concerns `realizes` or capability linkage: sealed exempts it from `realizes` and the capability machinery.
-- Only a criterion that needs `realizes`-driven behavior has the fixture supply a resolvable `P-<id>`.""",
-    """- Every list-valued frontmatter field (`owners`, `depends_on`, `realizes`, `uses_var`) uses YAML flow style, such as `owners: [a, b]`, never block style (`- a` lines), which the frontmatter reader does not read as a list.""",
-    """- When the criterion depends on a precondition the target checks with `spec-linter`, the test calls `lint()` on the fixture first and asserts zero hard failures before exercising the behavior under test. The call is exactly `lint(None, repo_root)`: `paths` first and positionally `None`, never one positional argument. Every requirement, guarantee and acceptance file the fixture writes starts with its `# <id>` heading line, then a blank line: a file without it fails lint. When the test spec gives the fixture as code, the test copies that code exactly instead of retyping the files.
+BLOCK_R_AUTHOR_021 = "\n".join([
+    "Every field read from a value the target itself returns, not only a faked dependency's data, MUST use dual dict-or-attribute access, never one assumed shape:",
+    "",
+    "    def field(value, name):",
+    "        return value[name] if isinstance(value, dict) else getattr(value, name)",
+])
 
-    import importlib.util
-    import sys
-    from pathlib import Path
-    import @MODULE@
+BLOCK_R_AUTHOR_022 = "\n".join([
+    "A test MUST NEVER assert a fake was used by reaching into `sys.modules` under a guessed key: real loaders key modules dynamically, often by `repo_root` or a hash, so any guess is unreliable.",
+])
 
-    gen = next(p for p in Path(@MODULE@.__file__).resolve().parents if p.name == "gen")
-    base = gen / "spec-linter"
-    path = base / "spec_linter.py" if (base / "spec_linter.py").is_file() else base / "spec_linter" / "__init__.py"
-    spec = importlib.util.spec_from_file_location("spec_linter", path)
-    spec_linter = importlib.util.module_from_spec(spec)
-    sys.modules["spec_linter"] = spec_linter
-    spec.loader.exec_module(spec_linter)
-    assert spec_linter.lint(None, repo_root).hard_failures == 0""",
-    """Every field read from a value the target itself returns, not only a faked dependency's data, MUST use dual dict-or-attribute access, never one assumed shape:
+BLOCK_R_AUTHOR_023 = "\n".join([
+    "A test asserting that a wall-clock \"own write time\" field falls within a `[before, after]` window truncates `before` and `after` to the precision of the field's documented format, such as whole seconds for a `%Y-%m-%dT%H:%M:%SZ` example with no fractional digits (`datetime.now(timezone.utc).replace(microsecond=0)`), never comparing a timestamp truncated on write against microsecond-precision bounds.",
+])
 
-    def field(value, name):
-        return value[name] if isinstance(value, dict) else getattr(value, name)""",
-    """A test MUST NEVER assert a fake was used by reaching into `sys.modules` under a guessed key: real loaders key modules dynamically, often by `repo_root` or a hash, so any guess is unreliable.""",
-    """A test asserting that a wall-clock "own write time" field falls within a `[before, after]` window truncates `before` and `after` to the precision of the field's documented format, such as whole seconds for a `%Y-%m-%dT%H:%M:%SZ` example with no fractional digits (`datetime.now(timezone.utc).replace(microsecond=0)`), never comparing a timestamp truncated on write against microsecond-precision bounds.""",
-    """To confirm a fake ran, the fake's own code appends one line per call to a log file at a path the test controls, and the test reads that file; never an in-process, module-level list, since the test cannot reliably find the module object that wrote it.
-A test builds the source of any file it writes by concatenating strings, with `repr()` for every value it embeds, never with `str.format`, `%` or an f-string over text that holds braces or percent signs.""",
-]
+BLOCK_R_AUTHOR_024 = "\n".join([
+    "To confirm a fake ran, the fake's own code appends one line per call to a log file at a path the test controls, and the test reads that file; never an in-process, module-level list, since the test cannot reliably find the module object that wrote it.",
+    "A test builds the source of any file it writes by concatenating strings, with `repr()` for every value it embeds, never with `str.format`, `%` or an f-string over text that holds braces or percent signs.",
+])
+
+_BLOCKS = (
+    BLOCK_R_AUTHOR_010,
+    BLOCK_R_AUTHOR_011,
+    BLOCK_R_AUTHOR_012,
+    BLOCK_R_AUTHOR_013,
+    BLOCK_R_AUTHOR_014,
+    BLOCK_R_AUTHOR_015,
+    BLOCK_R_AUTHOR_021,
+    BLOCK_R_AUTHOR_022,
+    BLOCK_R_AUTHOR_023,
+    BLOCK_R_AUTHOR_024,
+)
 
 
-def _read(value, name):
+def _field(value, name):
     if isinstance(value, dict):
         return value.get(name)
     return getattr(value, name, None)
 
 
-def _field(bundle, name, default):
-    if isinstance(bundle, dict):
+def _bundle_get(bundle, name, default):
+    if isinstance(bundle, Mapping):
         value = bundle.get(name)
     else:
         value = getattr(bundle, name, None)
@@ -118,16 +159,20 @@ def _tool_root():
     for parent in Path(__file__).resolve().parents:
         if parent.name == "gen":
             return parent.parent
-    return None
 
 
-def _load_dependency(slug, module_name, repo_root):
+def _load_dependency(repo_root, slug, module_name):
     base = Path(repo_root) / "gen" / slug
     if not base.is_dir():
         base = _tool_root() / "gen" / slug
-    flat = base / (module_name + ".py")
-    path = flat if flat.is_file() else base / module_name / "__init__.py"
-    spec = importlib.util.spec_from_file_location(module_name, path)
+    path = base / (module_name + ".py")
+    locations = None
+    if not path.is_file():
+        path = base / module_name / "__init__.py"
+        locations = [str(path.parent)]
+    spec = importlib.util.spec_from_file_location(
+        module_name, path, submodule_search_locations=locations
+    )
     module = importlib.util.module_from_spec(spec)
     sys.modules[module_name] = module
     spec.loader.exec_module(module)
@@ -135,88 +180,100 @@ def _load_dependency(slug, module_name, repo_root):
 
 
 def _slug(component_id):
-    return component_id.removeprefix("comp-")
-
-
-def _modules(bundle):
-    names = list(_field(bundle, "module_names", []))
-    if names:
-        return names
-    return [_slug(_field(bundle, "component_id", "")).replace("-", "_")]
-
-
-def _criterion_hash(bundle):
-    values = {key: _field(bundle, key, "") for key in _HASH_KEYS}
-    text = json.dumps(values, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
-    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+    return component_id[len("comp-"):] if component_id.startswith("comp-") else component_id
 
 
 def _reply_instruction(nonce):
     return (
-        "## Reply format\n\n"
-        "Wrap the complete test file's content exactly as follows, each marker on a line of its own:\n\n"
+        "Reply with the complete test file wrapped exactly as:\n\n"
         "-----BEGIN FILE " + nonce + "-----\n"
         "<the complete, exact test file content, verbatim>\n"
-        "-----END FILE " + nonce + "-----"
+        "-----END FILE " + nonce + "-----\n\n"
+        "with each marker on a line of its own. Anything outside the markers is discarded."
     )
 
 
 def _build_prompt(bundle, modules):
-    component_id = _field(bundle, "component_id", "")
+    module = modules[0]
     parts = [
-        "You are writing one pytest test file for one acceptance criterion of the component `"
-        + component_id
-        + "`, from its spec alone, never its implementation. "
+        "You are writing one pytest test file for one acceptance criterion of a "
+        "spec-driven component, from the spec text below alone, never from the "
+        "component's implementation.",
         "You have no tool or file access: answer from this bundle alone.",
-        "## Criterion " + _field(bundle, "criterion_id", "") + "\n\n"
-        "Covers: " + _field(bundle, "covers", "") + "\n\n"
-        + _field(bundle, "criterion_text", "")
-        + "\n\nThe test MUST exercise the component's public interface and assert the criterion's Then clause.",
-        "## Covered requirement\n\n" + _field(bundle, "requirement_text", ""),
-        "## Interface of the component under test\n\n" + _field(bundle, "interface", ""),
-        "## Glossary\n\n" + _field(bundle, "glossary", ""),
+        "## Component\n\n" + _bundle_get(bundle, "component_id", ""),
+        "## Criterion " + _bundle_get(bundle, "criterion_id", "") + "\n\n"
+        + "Covers: " + _bundle_get(bundle, "covers", "") + "\n\n"
+        + _bundle_get(bundle, "criterion_text", ""),
+        "## Covered requirement\n\n" + _bundle_get(bundle, "requirement_text", ""),
+        "## Interface\n\n" + _bundle_get(bundle, "interface", ""),
+        "## Glossary\n\n" + _bundle_get(bundle, "glossary", ""),
         "## Dependency interfaces",
     ]
-    for dep_id, text in _field(bundle, "dependency_interfaces", {}).items():
-        parts.append("### " + dep_id + "\n" + text)
-    testing = _field(bundle, "testing", "")
+    for dep_id, text in _bundle_get(bundle, "dependency_interfaces", {}).items():
+        parts.append("### " + dep_id + "\n\n" + text)
+    testing = _bundle_get(bundle, "testing", "")
     if testing:
-        parts.append("## Test spec\n" + testing)
+        parts.append("## Test spec\n\n" + testing)
     parts.append(
-        "## Module under test\n\nImport the module under test with exactly:\n\n"
+        "## Module under test\n\n"
+        "Import the module under test with exactly this statement:\n\n"
         + "\n".join("import " + name for name in modules)
+        + "\n\nThe generator may lay a module out as `<module>.py` or a `<module>/` "
+        "package; the import is the same either way."
     )
     parts.append("## Rules")
     for block in _BLOCKS:
-        parts.append(block.replace("@MODULE@", modules[0]))
+        parts.append(block.replace("@MODULE@", module))
+    parts.append(
+        "Write the test so it exercises the component's public interface as "
+        "described and asserts the criterion's Then clause."
+    )
     return "\n\n".join(parts)
 
 
 def _extract(text, nonce):
-    pattern = re.compile(
-        "-----BEGIN FILE " + nonce + "-----\n(.*?)\n-----END FILE " + nonce + "-----",
-        re.S,
+    pattern = (
+        re.escape("-----BEGIN FILE " + nonce + "-----") + "\n(.*?)\n"
+        + re.escape("-----END FILE " + nonce + "-----")
     )
-    match = pattern.search(text or "")
+    match = re.search(pattern, text or "", re.DOTALL)
     return None if match is None else match.group(1)
+
+
+def _criterion_hash(bundle):
+    payload = json.dumps(
+        {k: _bundle_get(bundle, k, "") for k in
+         ("criterion_text", "requirement_text", "interface", "glossary", "testing")},
+        sort_keys=True, ensure_ascii=False, separators=(",", ":"),
+    )
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def _with_header(bundle, content):
+    first, _, rest = content.partition("\n")
+    if first.startswith(_HEADER_PREFIX):
+        content = rest
+    return "# hotdocs-criterion: sha256:" + _criterion_hash(bundle) + "\n" + content
 
 
 def _error(response_error):
     return {
-        "category": _read(response_error, "category"),
-        "message": _read(response_error, "message"),
+        "category": _field(response_error, "category"),
+        "message": _field(response_error, "message"),
     }
 
 
 def author_test(bundle, model, seed=0, *, repo_root=None, llm_backend=None):
     repo_root = Path.cwd() if repo_root is None else Path(repo_root)
-    component_id = _field(bundle, "component_id", "")
-    criterion_id = _field(bundle, "criterion_id", "")
-    modules = _modules(bundle)
-    probe_module = list(_field(bundle, "module_names", [])) or modules[0]
-
-    llm_endpoint = _load_dependency("llm-endpoint", "llm_endpoint", repo_root)
-    test_probe = _load_dependency("test-probe", "test_probe", repo_root)
+    component_id = _bundle_get(bundle, "component_id", "")
+    criterion_id = _bundle_get(bundle, "criterion_id", "")
+    slug = _slug(component_id)
+    module_names = list(_bundle_get(bundle, "module_names", []))
+    modules = module_names or [slug.replace("-", "_")]
+    probe_module = module_names or slug.replace("-", "_")
+    drivers = re.findall(
+        r"^## Test driver: (.+)$", _bundle_get(bundle, "testing", ""), re.MULTILINE
+    )
 
     def result(file, error, attempts, findings):
         return TestAuthoringResult(
@@ -232,73 +289,68 @@ def author_test(bundle, model, seed=0, *, repo_root=None, llm_backend=None):
             probe_findings=findings,
         )
 
-    prompt = _build_prompt(bundle, modules)
-    nonce = secrets.token_hex(16)
-    original = prompt + "\n\n" + _reply_instruction(nonce)
-    response = llm_endpoint.complete(original, model, backend=llm_backend)
-    attempts = 0
-    findings = []
-    while True:
-        response_error = _read(response, "model_call_error")
+    llm_endpoint = _load_dependency(repo_root, "llm-endpoint", "llm_endpoint")
+    test_probe = _load_dependency(repo_root, "test-probe", "test_probe")
+
+    base_prompt = _build_prompt(bundle, modules)
+
+    def call(prompt_body):
+        nonce = secrets.token_hex(16)
+        response = llm_endpoint.complete(
+            prompt_body + "\n\n" + _reply_instruction(nonce), model, backend=llm_backend
+        )
+        response_error = _field(response, "model_call_error")
         if response_error:
-            return result(None, _error(response_error), attempts, findings)
-        content = _extract(_read(response, "text"), nonce)
+            return None, _error(response_error)
+        content = _extract(_field(response, "text"), nonce)
         if content is None:
-            return result(
-                None,
-                {
-                    "category": "missing_file_markers",
-                    "message": "reply holds no matching BEGIN/END FILE markers",
-                },
-                attempts,
-                findings,
-            )
-        report = test_probe.probe(content, bundle, probe_module)
-        findings = [dict(f) for f in _read(report, "findings")]
-        if _read(report, "ok"):
-            body = content
-            if body.split("\n", 1)[0].startswith(HEADER_PREFIX):
-                body = body.partition("\n")[2]
-            full = "# hotdocs-criterion: sha256:" + _criterion_hash(bundle) + "\n" + body
+            return None, {
+                "category": "missing_file_markers",
+                "message": "model reply held no matching BEGIN/END FILE markers",
+            }
+        return content, None
+
+    content, error = call(base_prompt)
+    if error:
+        return result(None, error, 0, [])
+
+    attempts = 0
+    while True:
+        report = test_probe.probe(content, bundle, probe_module, drivers=drivers)
+        findings = [dict(f) for f in (_field(report, "findings") or [])]
+        if _field(report, "ok"):
             rel = (
-                "verification/" + _slug(component_id) + "/generated-test/test_"
+                "verification/" + slug + "/generated-test/test_"
                 + criterion_id.lower().replace("-", "_") + ".py"
             )
+            text = _with_header(bundle, content)
             target = repo_root / rel
             target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_bytes(full.encode("utf-8"))
-            return result({"path": rel, "content": full}, None, attempts, findings)
+            with open(target, "w", encoding="utf-8", newline="") as handle:
+                handle.write(text)
+            return result({"path": rel, "content": text}, None, attempts, findings)
         if attempts == 2:
-            return result(
-                None,
-                {
-                    "category": "test_probe_failed",
-                    "message": "authored test failed its probe after 2 repair attempts",
-                },
-                attempts,
-                findings,
-            )
+            return result(None, {
+                "category": "test_probe_failed",
+                "message": "authored test failed test-probe after 2 repair attempts",
+            }, attempts, findings)
         attempts += 1
-        lines = [
-            str(_read(f, "kind")) + " (line " + str(_read(f, "line")) + "): " + str(_read(f, "message"))
-            for f in findings
-            if _read(f, "severity") == "error"
-        ]
-        nonce = secrets.token_hex(16)
-        repair = (
-            original
-            + "\n\n## Rejected test\n\n"
-            "The test file below was rejected by its probe. Reply with the complete corrected test file.\n\n"
-            + content
-            + "\n\n## Probe findings\n\n"
-            + "\n".join(lines)
-            + "\n\n"
-            + _reply_instruction(nonce)
+        lines = "\n".join(
+            str(f.get("kind")) + " (line " + str(f.get("line")) + "): " + str(f.get("message"))
+            for f in findings if f.get("severity") == "error"
         )
-        response = llm_endpoint.complete(repair, model, backend=llm_backend)
-
-
-_FLAGS = {"--model": "model", "--seed": "seed", "--repo-root": "repo_root", "--format": "format"}
+        repair_prompt = (
+            base_prompt
+            + "\n\n## Rejected test\n\n"
+            + "Your previous test file was rejected by test-probe. Its full source:\n\n"
+            + content
+            + "\n\nError findings:\n"
+            + lines
+            + "\n\nReply with the complete corrected test file, not a fragment."
+        )
+        content, error = call(repair_prompt)
+        if error:
+            return result(None, error, attempts, findings)
 
 
 def _usage_error(cause):
@@ -308,50 +360,56 @@ def _usage_error(cause):
 
 
 def main(argv=None):
-    tokens = sys.argv[1:] if argv is None else list(argv)
-    values = {}
-    positional = []
+    if argv is None:
+        argv = sys.argv[1:]
+    opts = {}
+    positionals = []
     i = 0
-    while i < len(tokens):
-        token = tokens[i]
+    while i < len(argv):
+        token = argv[i]
         if token.startswith("--"):
             name, eq, value = token.partition("=")
-            if name not in _FLAGS:
+            if name not in _VALUE_FLAGS:
                 return _usage_error("unknown argument " + token)
             if not eq:
-                if i + 1 == len(tokens):
+                if i + 1 >= len(argv):
                     return _usage_error(name + " requires a value")
                 i += 1
-                value = tokens[i]
-            values[_FLAGS[name]] = value
+                value = argv[i]
+            opts[name] = value
         else:
-            positional.append(token)
+            positionals.append(token)
         i += 1
-    if len(positional) != 2:
+
+    if len(positionals) != 2:
         return _usage_error("expected <component-id> and <criterion-id>")
-    if "model" not in values:
+    if "--model" not in opts:
         return _usage_error("missing required --model")
-    fmt = values.get("format", "text")
+    fmt = opts.get("--format", "text")
     if fmt not in ("json", "text"):
         return _usage_error("--format must be json or text")
-    seed_text = values.get("seed", "0")
+    seed_text = opts.get("--seed", "0")
     if not re.fullmatch(r"-?[0-9]+", seed_text):
         return _usage_error("--seed must be an integer")
 
-    component_id, criterion_id = positional
-    repo_root = Path(values["repo_root"]) if "repo_root" in values else Path.cwd()
-    assembler = _load_dependency("spec-bundle-assembler", "spec_bundle_assembler", repo_root)
-    bundle = assembler.assemble_criterion(component_id, criterion_id, repo_root)
-    result = author_test(bundle, values["model"], int(seed_text), repo_root=repo_root)
+    component_id, criterion_id = positionals
+    model = opts["--model"]
+    seed = int(seed_text)
+    repo_root = Path(opts["--repo-root"]) if "--repo-root" in opts else Path.cwd()
 
-    error = _read(result, "model_call_error")
+    assembler = _load_dependency(repo_root, "spec-bundle-assembler", "spec_bundle_assembler")
+    bundle = assembler.assemble_criterion(component_id, criterion_id, repo_root)
+    result = author_test(bundle, model, seed, repo_root=repo_root)
+
+    error = _field(result, "model_call_error")
     if fmt == "json":
-        print(json.dumps(dataclasses.asdict(result)))
+        data = result if isinstance(result, dict) else dataclasses.asdict(result)
+        print(json.dumps(data))
     elif error is None:
-        print(criterion_id + ": wrote " + str(_read(_read(result, "file"), "path")))
+        print(criterion_id + ": wrote " + str(_field(_field(result, "file"), "path")))
     else:
         print(
-            criterion_id + ": model_call_error " + str(_read(error, "category"))
-            + ": " + str(_read(error, "message"))
+            criterion_id + ": model_call_error " + str(_field(error, "category"))
+            + ": " + str(_field(error, "message"))
         )
     return 0 if error is None else 1

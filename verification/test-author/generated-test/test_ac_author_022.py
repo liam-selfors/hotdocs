@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:47c48043d2d149e26eb996c38236937a2954ed97d1014bb843460a392bc34f3f
+# hotdocs-criterion: sha256:66a10a3af7e4aacdb9d4cf2b6933b727e3e0cee1da64b79f64428e3f8bf80893
 import re
 
 import test_author
@@ -9,6 +9,10 @@ EXPECTED_LINE = (
     "under a guessed key: real loaders key modules dynamically, often by "
     "`repo_root` or a hash, so any guess is unreliable."
 )
+
+
+def field(value, name):
+    return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
 def _write_probe_stand_in(repo_root, log_path):
@@ -23,15 +27,17 @@ def _write_probe_stand_in(repo_root, log_path):
         "        self.tests_reached = 1\n"
         "\n"
         "    def to_dict(self):\n"
-        "        return {'ok': self.ok, 'findings': list(self.findings),\n"
-        "                'tests_run': self.tests_run,\n"
-        "                'tests_reached': self.tests_reached}\n"
+        "        return {\n"
+        "            'ok': self.ok,\n"
+        "            'findings': list(self.findings),\n"
+        "            'tests_run': self.tests_run,\n"
+        "            'tests_reached': self.tests_reached,\n"
+        "        }\n"
         "\n"
         "\n"
-        "def probe(test_source, criterion_bundle, module_name, *, timeout=60.0,\n"
-        "          interpreter=None, assets=None, drivers=None):\n"
+        "def probe(test_source, criterion_bundle, module_name, **kwargs):\n"
         "    with open(" + repr(str(log_path)) + ", 'a', encoding='utf-8') as fh:\n"
-        "        fh.write('probe\\n')\n"
+        "        fh.write('call\\n')\n"
         "    return _Report()\n"
     )
     (probe_dir / "test_probe.py").write_text(source, encoding="utf-8")
@@ -42,30 +48,32 @@ def _bundle():
         "component_id": "comp-widget-maker",
         "criterion_id": "AC-WIDGET-MAKER-001",
         "covers": "R-WIDGET-MAKER-001",
-        "criterion_text": "Given a widget, When made, Then it exists.",
+        "criterion_text": "Given a widget\nWhen it is made\nThen it exists",
         "requirement_text": "R-WIDGET-MAKER-001 - The maker MUST make widgets.",
-        "interface": "make_widget() -> dict",
+        "interface": "make_widget(name: str) -> dict",
         "glossary": "",
         "dependency_interfaces": {},
     }
 
 
-def test_prompt_holds_r_author_022_block(tmp_path, monkeypatch):
+def test_prompt_holds_no_guessed_sys_modules_key_block(tmp_path, monkeypatch):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
     monkeypatch.chdir(repo_root)
+
     log_path = tmp_path / "probe_calls.log"
     _write_probe_stand_in(repo_root, log_path)
 
     prompts = []
-    test_body = "def test_widget():\n    assert True\n"
+    test_file = "def test_widget():\n    assert True\n"
 
     def mock_backend(prompt, model, **params):
         prompts.append(prompt)
-        nonce = re.findall(r"-----BEGIN FILE ([0-9a-f]{32})-----", prompt)[-1]
+        nonces = re.findall(r"-----BEGIN FILE ([0-9a-f]{32})-----", prompt)
+        nonce = nonces[-1]
         text = (
             "-----BEGIN FILE " + nonce + "-----\n"
-            + test_body
+            + test_file
             + "\n-----END FILE " + nonce + "-----"
         )
         return {
@@ -75,10 +83,13 @@ def test_prompt_holds_r_author_022_block(tmp_path, monkeypatch):
             "model_call_error": None,
         }
 
-    test_author.author_test(
+    result = test_author.author_test(
         _bundle(), "mock", repo_root=repo_root, llm_backend=mock_backend
     )
 
-    assert prompts, "the mock model was never called"
+    assert result is not None
+    assert field(result, "model_call_error") is None
+    assert len(prompts) >= 1
+
     first_prompt = prompts[0]
     assert EXPECTED_LINE in first_prompt.splitlines()

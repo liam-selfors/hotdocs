@@ -1,17 +1,29 @@
-# hotdocs-criterion: sha256:19c2c421ae7f3253297c08e4ad9b67f2f23558d42fa740e6c1032efcbbb600ec
+# hotdocs-criterion: sha256:74bfcf7d8e9871abc2500ef6196cacc0205ddc54077a3e8893e974e2a926b6a8
 import re
-from pathlib import Path
 
 import test_author
 
 
+CRITERION_TEXT = (
+    "Given a zorblax widget ZQ-CRITERION-7781 When the maker spins "
+    "Then the widget is quarvish"
+)
+REQUIREMENT_TEXT = (
+    "R-WIDGET-MAKER-001 ZQ-REQUIREMENT-4412: the widget maker MUST spin "
+    "every zorblax widget until it is quarvish"
+)
+INTERFACE_TEXT = (
+    "make_widget(name: str) -> Widget ZQ-INTERFACE-9093 returns a "
+    "quarvish widget"
+)
+GLOSSARY_TEXT = (
+    "Quarvish ZQ-GLOSSARY-2267 means a widget that has been spun "
+    "at least once"
+)
+
+
 def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
-
-
-NONCE_RE = re.compile(r"-----BEGIN FILE ([0-9a-f]{32})-----")
-
-GOOD_TEST = "def test_placeholder():\n    assert 1 + 1 == 2"
 
 
 def write_probe_stand_in(repo_root, log_path):
@@ -26,30 +38,38 @@ def write_probe_stand_in(repo_root, log_path):
         "        self.tests_reached = 1\n"
         "\n"
         "    def to_dict(self):\n"
-        "        return {\n"
-        "            'ok': self.ok,\n"
-        "            'findings': list(self.findings),\n"
-        "            'tests_run': self.tests_run,\n"
-        "            'tests_reached': self.tests_reached,\n"
-        "        }\n"
+        "        return {\"ok\": self.ok, \"findings\": list(self.findings),\n"
+        "                \"tests_run\": self.tests_run,\n"
+        "                \"tests_reached\": self.tests_reached}\n"
         "\n"
         "\n"
-        "def probe(test_source, criterion_bundle, module_name, *, timeout=60.0, **kwargs):\n"
-        "    with open(" + repr(str(log_path)) + ", 'a', encoding='utf-8') as fh:\n"
-        "        fh.write('probe\\n')\n"
+        "def probe(test_source, criterion_bundle, module_name, **kwargs):\n"
+        "    with open(" + repr(str(log_path)) + ", \"a\") as handle:\n"
+        "        handle.write(\"probe\\n\")\n"
         "    return _Report()\n"
     )
-    (probe_dir / "test_probe.py").write_text(source, encoding="utf-8")
+    (probe_dir / "test_probe.py").write_text(source)
 
 
-def make_recording_mock(recorded):
-    def mock_backend(prompt, model=None, **params):
+def test_prompt_holds_criterion_requirement_interface_and_glossary(
+    tmp_path, monkeypatch
+):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    monkeypatch.chdir(repo_root)
+
+    probe_log = tmp_path / "probe_calls.log"
+    write_probe_stand_in(repo_root, probe_log)
+
+    recorded = []
+
+    def mock_backend(prompt, model, **params):
         recorded.append(prompt)
-        matches = NONCE_RE.findall(prompt)
-        nonce = matches[-1] if matches else "0" * 32
+        nonce = re.findall(r"-----BEGIN FILE ([0-9a-f]{32})-----", prompt)[-1]
+        body = "def test_placeholder():\n    assert True\n"
         text = (
             "-----BEGIN FILE " + nonce + "-----\n"
-            + GOOD_TEST
+            + body
             + "\n-----END FILE " + nonce + "-----"
         )
         return {
@@ -59,62 +79,29 @@ def make_recording_mock(recorded):
             "model_call_error": None,
         }
 
-    return mock_backend
-
-
-def test_prompt_contains_criterion_requirement_interface_and_glossary(tmp_path, monkeypatch):
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    monkeypatch.chdir(repo_root)
-
-    probe_log = tmp_path / "probe_calls.log"
-    write_probe_stand_in(repo_root, probe_log)
-
-    criterion_text = (
-        "Given a widget blueprint ZEBRA-CRITERION-7731\n"
-        "When make_widget is called\n"
-        "Then the widget is returned with its blueprint name"
-    )
-    requirement_text = (
-        "R-WIDGET-MAKER-001 OCELOT-REQUIREMENT-4410: the component MUST "
-        "build a widget from a blueprint."
-    )
-    interface = (
-        "# Library\n\n"
-        "make_widget(blueprint: str) -> Widget  # PANGOLIN-INTERFACE-9902\n"
-    )
-    glossary = (
-        "- **Widget** - a thing a widget maker makes; QUOKKA-GLOSSARY-2287."
-    )
-
     bundle = {
         "component_id": "comp-widget-maker",
         "criterion_id": "AC-WIDGET-MAKER-001",
         "covers": "R-WIDGET-MAKER-001",
-        "criterion_text": criterion_text,
-        "requirement_text": requirement_text,
-        "interface": interface,
-        "glossary": glossary,
+        "criterion_text": CRITERION_TEXT,
+        "requirement_text": REQUIREMENT_TEXT,
+        "interface": INTERFACE_TEXT,
+        "glossary": GLOSSARY_TEXT,
         "dependency_interfaces": {},
     }
 
-    recorded = []
     result = test_author.author_test(
-        bundle, "mock", 0, repo_root=repo_root, llm_backend=make_recording_mock(recorded)
+        bundle, "mock", 0, repo_root=repo_root, llm_backend=mock_backend
     )
 
-    assert field(result, "model_call_error") is None
+    assert result is not None
+    assert field(result, "criterion_id") == "AC-WIDGET-MAKER-001"
+
     assert len(recorded) >= 1, "the mock model was never called"
+    prompt = recorded[0]
+    assert isinstance(prompt, str)
 
-    first_prompt = recorded[0]
-    assert isinstance(first_prompt, str)
-    assert criterion_text in first_prompt
-    assert requirement_text in first_prompt
-    assert interface.strip() in first_prompt
-    assert glossary in first_prompt
-
-    for prompt in recorded:
-        assert criterion_text in prompt
-        assert requirement_text in prompt
-        assert interface.strip() in prompt
-        assert glossary in prompt
+    assert CRITERION_TEXT in prompt
+    assert REQUIREMENT_TEXT in prompt
+    assert INTERFACE_TEXT in prompt
+    assert GLOSSARY_TEXT in prompt

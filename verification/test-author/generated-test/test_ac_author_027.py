@@ -1,6 +1,6 @@
-# hotdocs-criterion: sha256:7899da96bf822ee97daf5691bc3aefde571e89462e8e9bc986a5c98690053cf4
+# hotdocs-criterion: sha256:dbb74f975dc115a366eff892074a3bb5bb5c5c7f6ed735a9426fe659ab58170d
+import json
 import re
-from pathlib import Path
 
 import test_author
 
@@ -30,7 +30,7 @@ def make_bundle():
         "criterion_id": "AC-WIDGET-MAKER-001",
         "covers": "R-WIDGET-MAKER-001",
         "criterion_text": "Given a widget When made Then it exists",
-        "requirement_text": "R-WIDGET-MAKER-001 widgets MUST be made.",
+        "requirement_text": "R-WIDGET-MAKER-001 - make_widget MUST return a widget.",
         "interface": "make_widget() -> dict",
         "glossary": "",
         "dependency_interfaces": {},
@@ -41,12 +41,18 @@ def plant_probe_stand_in(repo_root, log_path):
     probe_dir = repo_root / "gen" / "test-probe"
     probe_dir.mkdir(parents=True, exist_ok=True)
     source = (
-        "class ProbeReport:\n"
-        "    def __init__(self, ok, findings, tests_run, tests_reached):\n"
+        "import json\n"
+        "\n"
+        "LOG = " + repr(str(log_path)) + "\n"
+        "FINDING = " + repr(FINDING) + "\n"
+        "\n"
+        "\n"
+        "class _Report:\n"
+        "    def __init__(self, ok, findings):\n"
         "        self.ok = ok\n"
         "        self.findings = findings\n"
-        "        self.tests_run = tests_run\n"
-        "        self.tests_reached = tests_reached\n"
+        "        self.tests_run = 0\n"
+        "        self.tests_reached = 0\n"
         "\n"
         "    def to_dict(self):\n"
         "        return {\n"
@@ -57,18 +63,24 @@ def plant_probe_stand_in(repo_root, log_path):
         "        }\n"
         "\n"
         "\n"
-        "GATE_VERSION = 'test-probe@1.5.0'\n"
-        "\n"
-        "\n"
-        "def probe(test_source, criterion_bundle, module_name, *, timeout=60.0,\n"
-        "          interpreter=None, assets=None, drivers=None):\n"
-        "    with open(" + repr(str(log_path)) + ", 'a', encoding='utf-8') as fh:\n"
-        "        fh.write(repr(test_source) + '\\n')\n"
-        "    if test_source == " + repr("GOOD") + ":\n"
-        "        return ProbeReport(True, [], 1, 1)\n"
-        "    return ProbeReport(False, [dict(" + repr(FINDING) + ")], 0, 0)\n"
+        "def probe(test_source, criterion_bundle, module_name, **kwargs):\n"
+        "    with open(LOG, 'a', encoding='utf-8') as fh:\n"
+        "        fh.write(json.dumps(test_source) + '\\n')\n"
+        "    if test_source == 'GOOD':\n"
+        "        return _Report(True, [])\n"
+        "    return _Report(False, [dict(FINDING)])\n"
     )
     (probe_dir / "test_probe.py").write_text(source, encoding="utf-8")
+
+
+def read_probe_log(log_path):
+    if not log_path.exists():
+        return []
+    return [
+        json.loads(line)
+        for line in log_path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
 
 
 def make_backend(replies, prompts):
@@ -93,19 +105,19 @@ def make_backend(replies, prompts):
     return backend
 
 
-def verification_files(repo_root):
-    vdir = repo_root / "verification"
-    if not vdir.exists():
-        return []
-    return [p for p in vdir.rglob("*") if p.is_file()]
+def nothing_under_verification(repo_root):
+    verification = repo_root / "verification"
+    if not verification.exists():
+        return True
+    return not any(p.is_file() for p in verification.rglob("*"))
 
 
 def test_repair_succeeds_on_second_repair(tmp_path, monkeypatch):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
-    monkeypatch.chdir(repo_root)
     log_path = tmp_path / "probe_calls.log"
     plant_probe_stand_in(repo_root, log_path)
+    monkeypatch.chdir(repo_root)
 
     prompts = []
     backend = make_backend(["BAD1", "BAD2", "GOOD"], prompts)
@@ -115,36 +127,38 @@ def test_repair_succeeds_on_second_repair(tmp_path, monkeypatch):
     )
 
     assert len(prompts) == 3
-    assert "BAD1" in prompts[1]
-    assert "undefined_name (line 3): undefined name 'x'" in prompts[1]
+    second = prompts[1]
+    assert "BAD1" in second
+    assert "undefined_name (line 3): undefined name 'x'" in second
 
-    assert log_path.is_file()
-    assert log_path.read_text(encoding="utf-8").strip() != ""
+    assert read_probe_log(log_path) == ["BAD1", "BAD2", "GOOD"]
 
     assert field(result, "model_call_error") is None
     assert field(result, "repair_attempts") == 2
-    assert list(field(result, "probe_findings")) == []
+    assert field(result, "probe_findings") == []
 
-    file_value = field(result, "file")
-    assert file_value is not None
-    content = field(file_value, "content")
+    file = field(result, "file")
+    assert file is not None
+    path = field(file, "path")
+    content = field(file, "content")
     assert body(content) == "GOOD"
 
-    written = repo_root / field(file_value, "path")
+    written = repo_root / path
     assert written.is_file()
-    written_text = written.read_text(encoding="utf-8")
-    first, sep, rest = written_text.partition("\n")
+    written_text = written.read_bytes().decode("utf-8")
+    first_line, sep, rest = written_text.partition("\n")
     assert sep == "\n"
+    assert first_line.startswith("# hotdocs-criterion:")
     assert rest == "GOOD"
     assert written_text == content
 
 
-def test_repair_exhausted_reports_test_probe_failed(tmp_path, monkeypatch):
+def test_repair_exhausted_gives_test_probe_failed(tmp_path, monkeypatch):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
-    monkeypatch.chdir(repo_root)
     log_path = tmp_path / "probe_calls.log"
     plant_probe_stand_in(repo_root, log_path)
+    monkeypatch.chdir(repo_root)
 
     prompts = []
     backend = make_backend(["BAD1", "BAD2", "BAD3"], prompts)
@@ -154,15 +168,13 @@ def test_repair_exhausted_reports_test_probe_failed(tmp_path, monkeypatch):
     )
 
     assert len(prompts) == 3
-
-    assert log_path.is_file()
-    assert log_path.read_text(encoding="utf-8").strip() != ""
+    assert read_probe_log(log_path) == ["BAD1", "BAD2", "BAD3"]
 
     error = field(result, "model_call_error")
     assert error is not None
     assert field(error, "category") == "test_probe_failed"
     assert field(result, "file") is None
     assert field(result, "repair_attempts") == 2
-    assert [dict(f) for f in field(result, "probe_findings")] == [FINDING]
+    assert field(result, "probe_findings") == [FINDING]
 
-    assert verification_files(repo_root) == []
+    assert nothing_under_verification(repo_root)

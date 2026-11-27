@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:ccb33b1fe05ad04dc6d0da779e9f510df44d12b682aa13c2b8b904f08558bbc5
+# hotdocs-criterion: sha256:23e9d95853e0cd249f6da46a37c92b578d98e5984ad3dfb82a27abf992898d82
 import re
 
 import test_author
@@ -6,11 +6,17 @@ import test_author
 
 DEP_ID = "comp-zebra-quux"
 DEP_INTERFACE = "zq_lookup(x: int, y: str) -> ZqResult"
-FAKE_RULE = "a fake MUST return every field, never a bare list, string or number in its place"
+RULE_LINE = "a fake MUST return every field, never a bare list, string or number in its place"
 
-NONCE_RE = re.compile(r"-----BEGIN FILE ([0-9a-f]{32})-----")
+NONCE_RE = r"-----BEGIN FILE ([0-9a-f]{32})-----"
 
-REPLY_FILE = "def test_placeholder():\n    assert True\n"
+REPLY_FILE = (
+    "import test_author\n"
+    "\n"
+    "\n"
+    "def test_placeholder():\n"
+    "    assert test_author is not None\n"
+)
 
 
 def field(value, name):
@@ -22,9 +28,9 @@ def make_bundle(dependency_interfaces):
         "component_id": "comp-widget-maker",
         "criterion_id": "AC-WIDGET-MAKER-001",
         "covers": "R-WIDGET-MAKER-001",
-        "criterion_text": "Given a widget\nWhen made\nThen it exists",
+        "criterion_text": "Given a widget\nWhen it is made\nThen it exists",
         "requirement_text": "R-WIDGET-MAKER-001 - A widget MUST be made.",
-        "interface": "make_widget() -> dict",
+        "interface": "make_widget(name: str) -> dict",
         "glossary": "",
         "dependency_interfaces": dependency_interfaces,
     }
@@ -42,22 +48,26 @@ def plant_probe_stand_in(repo_root, log_path):
         "        self.tests_reached = 1\n"
         "\n"
         "    def to_dict(self):\n"
-        "        return {'ok': True, 'findings': [], 'tests_run': 1, 'tests_reached': 1}\n"
+        "        return {\n"
+        "            'ok': self.ok,\n"
+        "            'findings': list(self.findings),\n"
+        "            'tests_run': self.tests_run,\n"
+        "            'tests_reached': self.tests_reached,\n"
+        "        }\n"
         "\n"
         "\n"
-        "def probe(test_source, criterion_bundle, module_name, *, timeout=60.0,\n"
-        "          interpreter=None, assets=None, drivers=None):\n"
-        "    with open(" + repr(str(log_path)) + ", 'a', encoding='utf-8') as f:\n"
-        "        f.write('probe\\n')\n"
+        "def probe(test_source, criterion_bundle, module_name, **kwargs):\n"
+        "    with open(" + repr(str(log_path)) + ", 'a', encoding='utf-8') as fh:\n"
+        "        fh.write('probe\\n')\n"
         "    return _Report()\n"
     )
     (probe_dir / "test_probe.py").write_text(source, encoding="utf-8")
 
 
-def make_mock(prompts):
+def make_mock_backend(prompts):
     def backend(prompt, model, **params):
         prompts.append(prompt)
-        nonce = NONCE_RE.findall(prompt)[-1]
+        nonce = re.findall(NONCE_RE, prompt)[-1]
         text = (
             "-----BEGIN FILE " + nonce + "-----\n"
             + REPLY_FILE
@@ -73,35 +83,39 @@ def make_mock(prompts):
     return backend
 
 
-def run(tmp_path, monkeypatch, name, dependency_interfaces):
-    repo_root = tmp_path / name
-    repo_root.mkdir()
-    log_path = tmp_path / (name + "-probe.log")
-    plant_probe_stand_in(repo_root, log_path)
+def run_scenario(repo_root, monkeypatch, dependency_interfaces):
+    repo_root.mkdir(parents=True, exist_ok=True)
     monkeypatch.chdir(repo_root)
+    log_path = repo_root / "probe_calls.log"
+    plant_probe_stand_in(repo_root, log_path)
     prompts = []
+    backend = make_mock_backend(prompts)
     result = test_author.author_test(
         make_bundle(dependency_interfaces),
         "mock",
         repo_root=repo_root,
-        llm_backend=make_mock(prompts),
+        llm_backend=backend,
     )
     return result, prompts
 
 
-def test_dependency_interfaces_in_prompt(tmp_path, monkeypatch):
-    result, prompts = run(
-        tmp_path, monkeypatch, "with-deps", {DEP_ID: DEP_INTERFACE}
+def test_dependency_interfaces_appear_in_prompt_with_fake_rule(tmp_path, monkeypatch):
+    repo_root = tmp_path / "repo_with_dep"
+    result, prompts = run_scenario(
+        repo_root, monkeypatch, {DEP_ID: DEP_INTERFACE}
     )
+
     assert prompts, "the mock model was never called"
     first = prompts[0]
     assert DEP_ID in first
     assert DEP_INTERFACE in first
-    assert FAKE_RULE in first
+    assert RULE_LINE in first
 
 
 def test_empty_dependency_interfaces_adds_no_entry(tmp_path, monkeypatch):
-    result, prompts = run(tmp_path, monkeypatch, "no-deps", {})
+    repo_root = tmp_path / "repo_without_dep"
+    result, prompts = run_scenario(repo_root, monkeypatch, {})
+
     assert field(result, "model_call_error") is None
     assert prompts, "the mock model was never called"
     assert DEP_ID not in prompts[0]

@@ -1,15 +1,27 @@
-# hotdocs-criterion: sha256:f06fd9f5e8e678fb912d1b0a6a2ce0fe4836784cb44e42c7ed9fe1f0abb945df
+# hotdocs-criterion: sha256:6df131c7eb63e0b2f6b33c1f42347e8dc719ff7b224afd39e1b70efcda69b7b7
 import dataclasses
 import json
-from pathlib import Path
 
 import pytest
 
 import test_author
 
 
+FIXED_BUNDLE = {
+    "component_id": "comp-foo",
+    "criterion_id": "AC-FOO-001",
+    "covers": "R-FOO-001",
+    "criterion_text": "Given x When y Then z",
+    "requirement_text": "R-FOO-001 text",
+    "interface": "foo() -> None",
+    "glossary": "",
+    "dependency_interfaces": {},
+    "testing": "",
+}
+
+
 @dataclasses.dataclass
-class FakeResult:
+class StubResult:
     component_id: str
     criterion_id: str
     model: str
@@ -21,18 +33,18 @@ class FakeResult:
     repair_attempts: int
     probe_findings: list
 
+    def __getitem__(self, name):
+        return getattr(self, name)
 
-FIXED_BUNDLE = {
-    "component_id": "comp-foo",
-    "criterion_id": "AC-FOO-001",
-    "covers": "R-FOO-001",
-    "criterion_text": "Given x When y Then z",
-    "requirement_text": "R-FOO-001 MUST do z",
-    "interface": "foo() -> int",
-    "glossary": "",
-    "dependency_interfaces": {},
-    "testing": "",
-}
+    def get(self, name, default=None):
+        return getattr(self, name, default)
+
+    def keys(self):
+        return [f.name for f in dataclasses.fields(self)]
+
+
+def field(value, name):
+    return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
 def make_root(tmp_path, name):
@@ -40,111 +52,114 @@ def make_root(tmp_path, name):
     base = root / "gen" / "spec-bundle-assembler"
     base.mkdir(parents=True)
     source = (
-        "def assemble_criterion(component_id, criterion_id, repo_root):\n"
-        "    return dict(" + repr(FIXED_BUNDLE) + ")\n"
+        "FIXED = " + repr(FIXED_BUNDLE) + "\n"
         "\n"
-        "def assemble(component_id, repo_root, mode='cold'):\n"
-        "    raise RuntimeError('not used')\n"
+        "\n"
+        "def assemble_criterion(component_id, criterion_id, repo_root):\n"
+        "    return dict(FIXED)\n"
+        "\n"
+        "\n"
+        "def assemble(component_id, repo_root, mode=" + repr("cold") + "):\n"
+        "    raise RuntimeError(" + repr("not used") + ")\n"
     )
     (base / "spec_bundle_assembler.py").write_text(source, encoding="utf-8")
     return root
 
 
-def install_stub(monkeypatch, log_path, model_call_error):
+def install_stub(monkeypatch, model_call_error):
+    calls = []
+
     def stub(bundle, model, seed=0, *args, repo_root=None, llm_backend=None, **kwargs):
-        with open(log_path, "a", encoding="utf-8") as fh:
-            fh.write(json.dumps({"seed": seed, "model": model}) + "\n")
-        file = None
-        if model_call_error is None:
-            file = {"path": "p.py", "content": "x"}
-        return FakeResult(
+        if args:
+            seed = args[0] if not isinstance(seed, int) else seed
+        calls.append({"bundle": bundle, "model": model, "seed": seed, "repo_root": repo_root})
+        return StubResult(
             component_id="comp-foo",
             criterion_id="AC-FOO-001",
             model=model,
             seed=seed,
             prompt_version="v1",
             cache_hit=False,
-            file=file,
+            file={"path": "p.py", "content": "x"},
             model_call_error=model_call_error,
             repair_attempts=0,
             probe_findings=[],
         )
 
     monkeypatch.setattr(test_author, "author_test", stub)
+    return calls
 
 
 def valid_argv(root):
     return ["comp-foo", "AC-FOO-001", "--model", "m", "--repo-root", str(root)]
 
 
-def read_log(log_path):
-    return [json.loads(line) for line in Path(log_path).read_text(encoding="utf-8").splitlines() if line.strip()]
-
-
-def test_text_success(tmp_path, monkeypatch, capsys):
-    root = make_root(tmp_path, "r_text")
+def test_text_success_returns_0_and_uses_seed_0(tmp_path, monkeypatch, capsys):
+    root = make_root(tmp_path, "text_ok")
     monkeypatch.chdir(root)
-    log = tmp_path / "log_text.txt"
-    install_stub(monkeypatch, log, None)
+    calls = install_stub(monkeypatch, None)
+    capsys.readouterr()
+
     code = test_author.main(valid_argv(root))
-    out, err = capsys.readouterr()
+    out = capsys.readouterr()
+
     assert code == 0
-    assert out == "AC-FOO-001: wrote p.py\n"
-    calls = read_log(log)
+    assert out.out == "AC-FOO-001: wrote p.py\n"
     assert len(calls) == 1
     assert calls[0]["seed"] == 0
 
 
-def test_json_success(tmp_path, monkeypatch, capsys):
-    root = make_root(tmp_path, "r_json")
+def test_json_format_prints_result_json(tmp_path, monkeypatch, capsys):
+    root = make_root(tmp_path, "json_ok")
     monkeypatch.chdir(root)
-    log = tmp_path / "log_json.txt"
-    install_stub(monkeypatch, log, None)
+    install_stub(monkeypatch, None)
+    capsys.readouterr()
+
     code = test_author.main(valid_argv(root) + ["--format=json"])
-    out, err = capsys.readouterr()
+    out = capsys.readouterr()
+
     assert code == 0
-    doc = json.loads(out)
-    assert doc["criterion_id"] == "AC-FOO-001"
+    doc = json.loads(out.out)
+    assert field(doc, "criterion_id") == "AC-FOO-001"
 
 
-def test_model_call_error(tmp_path, monkeypatch, capsys):
-    root = make_root(tmp_path, "r_err")
+def test_model_call_error_returns_1(tmp_path, monkeypatch, capsys):
+    root = make_root(tmp_path, "error")
     monkeypatch.chdir(root)
-    log = tmp_path / "log_err.txt"
-    install_stub(monkeypatch, log, {"category": "network", "message": "down"})
+    install_stub(monkeypatch, {"category": "network", "message": "down"})
+    capsys.readouterr()
+
     code = test_author.main(valid_argv(root))
-    out, err = capsys.readouterr()
+    out = capsys.readouterr()
+
     assert code == 1
-    assert out == "AC-FOO-001: model_call_error network: down\n"
+    assert out.out == "AC-FOO-001: model_call_error network: down\n"
 
 
 @pytest.mark.parametrize(
-    "case, cause",
+    "case, extra, cause",
     [
-        ("only_component", "expected <component-id> and <criterion-id>"),
-        ("format_xml", "--format must be json or text"),
-        ("seed_x", "--seed must be an integer"),
-        ("bogus", "unknown argument --bogus"),
-        ("final_model", "--model requires a value"),
+        ("one_positional", None, "expected <component-id> and <criterion-id>"),
+        ("bad_format", ["--format=xml"], "--format must be json or text"),
+        ("bad_seed", ["--seed=x"], "--seed must be an integer"),
+        ("unknown", ["--bogus"], "unknown argument --bogus"),
+        ("final_model", ["--model"], "--model requires a value"),
     ],
 )
-def test_usage_errors(tmp_path, monkeypatch, capsys, case, cause):
-    root = make_root(tmp_path, "r_usage_" + case)
+def test_usage_errors_return_2(tmp_path, monkeypatch, capsys, case, extra, cause):
+    root = make_root(tmp_path, "usage_" + case)
     monkeypatch.chdir(root)
-    log = tmp_path / ("log_usage_" + case + ".txt")
-    install_stub(monkeypatch, log, None)
-    if case == "only_component":
+    install_stub(monkeypatch, None)
+    capsys.readouterr()
+
+    if extra is None:
         argv = ["comp-foo"]
-    elif case == "format_xml":
-        argv = valid_argv(root) + ["--format=xml"]
-    elif case == "seed_x":
-        argv = valid_argv(root) + ["--seed=x"]
-    elif case == "bogus":
-        argv = valid_argv(root) + ["--bogus"]
     else:
-        argv = valid_argv(root) + ["--model"]
+        argv = valid_argv(root) + extra
+
     code = test_author.main(argv)
-    out, err = capsys.readouterr()
+    out = capsys.readouterr()
+
     assert code == 2
-    assert out == ""
-    assert err.startswith("usage error: " + cause)
+    assert out.out == ""
+    assert out.err.startswith("usage error: " + cause)

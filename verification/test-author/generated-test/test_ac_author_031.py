@@ -1,20 +1,25 @@
-# hotdocs-criterion: sha256:ba3e02c0266a4a72fff317e05b5f578c5a0ffd6d1f5b4bc4e4eb6d1d422aa8c1
+# hotdocs-criterion: sha256:e875c8fb6f25fa8d47861bb8fdff1914beb26a8ff54bf28e30fa354611dd9499
 import re
-from pathlib import Path
 
 import test_author
-
-
-NONCE_RE = r"-----BEGIN FILE ([0-9a-f]{32})-----"
-
-GOOD_TEST = "def test_placeholder():\n    assert True\n"
 
 
 def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def write_probe_stand_in(repo_root, log_path):
+TESTING_TEXT = "Write fixtures with write_fixture(repo_root)."
+
+MOCK_TEST_FILE = (
+    "import test_author\n"
+    "\n"
+    "\n"
+    "def test_placeholder():\n"
+    "    assert test_author.author_test is not None\n"
+)
+
+
+def _write_probe_stand_in(repo_root, log_path):
     probe_dir = repo_root / "gen" / "test-probe"
     probe_dir.mkdir(parents=True, exist_ok=True)
     source = (
@@ -34,8 +39,7 @@ def write_probe_stand_in(repo_root, log_path):
         "        }\n"
         "\n"
         "\n"
-        "def probe(test_source, criterion_bundle, module_name, *, timeout=60.0, "
-        "interpreter=None, assets=None, drivers=None):\n"
+        "def probe(test_source, criterion_bundle, module_name, **kwargs):\n"
         "    with open(" + repr(str(log_path)) + ", 'a', encoding='utf-8') as fh:\n"
         "        fh.write('probe\\n')\n"
         "    return _Report()\n"
@@ -43,13 +47,13 @@ def write_probe_stand_in(repo_root, log_path):
     (probe_dir / "test_probe.py").write_text(source, encoding="utf-8")
 
 
-def make_mock(prompts):
+def _make_mock(prompts):
     def backend(prompt, model, **params):
         prompts.append(prompt)
-        nonce = re.findall(NONCE_RE, prompt)[-1]
+        nonce = re.findall(r"-----BEGIN FILE ([0-9a-f]{32})-----", prompt)[-1]
         text = (
             "-----BEGIN FILE " + nonce + "-----\n"
-            + GOOD_TEST
+            + MOCK_TEST_FILE
             + "\n-----END FILE " + nonce + "-----"
         )
         return {
@@ -62,13 +66,13 @@ def make_mock(prompts):
     return backend
 
 
-def make_bundle(testing):
+def _bundle(testing):
     return {
         "component_id": "comp-widget-maker",
         "criterion_id": "AC-WIDGET-MAKER-001",
         "covers": "R-WIDGET-MAKER-001",
-        "criterion_text": "Given a widget, when made, then it exists.",
-        "requirement_text": "R-WIDGET-MAKER-001 - The maker MUST make widgets.",
+        "criterion_text": "Given a widget\nWhen it is made\nThen it exists",
+        "requirement_text": "R-WIDGET-MAKER-001 The maker MUST make widgets.",
         "interface": "make_widget(name: str) -> dict",
         "glossary": "",
         "dependency_interfaces": {},
@@ -76,37 +80,30 @@ def make_bundle(testing):
     }
 
 
-def run_author(tmp_path, monkeypatch, name, testing):
-    repo_root = tmp_path / name
-    repo_root.mkdir()
-    log_path = tmp_path / (name + "-probe.log")
-    write_probe_stand_in(repo_root, log_path)
-    monkeypatch.chdir(repo_root)
+def _run(tmp_root, monkeypatch, testing):
+    tmp_root.mkdir(parents=True, exist_ok=True)
+    monkeypatch.chdir(tmp_root)
+    log_path = tmp_root / "probe_calls.log"
+    _write_probe_stand_in(tmp_root, log_path)
     prompts = []
     result = test_author.author_test(
-        make_bundle(testing),
-        "mock",
-        repo_root=repo_root,
-        llm_backend=make_mock(prompts),
+        _bundle(testing), "mock", repo_root=tmp_root, llm_backend=_make_mock(prompts)
     )
-    return result, prompts, log_path
+    return result, prompts
 
 
-def test_testing_text_included_under_test_spec_heading(tmp_path, monkeypatch):
-    testing = "Write fixtures with write_fixture(repo_root)."
-    result, prompts, log_path = run_author(tmp_path, monkeypatch, "with-testing", testing)
-
+def test_prompt_includes_test_spec_when_testing_nonempty(tmp_path, monkeypatch):
+    result, prompts = _run(tmp_path / "with_testing", monkeypatch, TESTING_TEXT)
     assert field(result, "model_call_error") is None
-    assert len(prompts) >= 1
+    assert prompts, "mock model was never called"
     first = prompts[0]
     assert "## Test spec" in first.splitlines()
-    assert "Write fixtures with write_fixture(repo_root)." in first
+    assert TESTING_TEXT in first
 
 
-def test_empty_testing_adds_no_test_spec_heading(tmp_path, monkeypatch):
-    result, prompts, log_path = run_author(tmp_path, monkeypatch, "without-testing", "")
-
+def test_prompt_omits_test_spec_when_testing_empty(tmp_path, monkeypatch):
+    result, prompts = _run(tmp_path / "without_testing", monkeypatch, "")
     assert field(result, "model_call_error") is None
-    assert len(prompts) >= 1
+    assert prompts, "mock model was never called"
     first = prompts[0]
     assert "## Test spec" not in first
