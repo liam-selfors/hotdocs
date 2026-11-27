@@ -1,68 +1,17 @@
-# hotdocs-criterion: sha256:979a7782f7865aa92a93c9853d4d70876e27cde0ad7626ac3c1d0b779a76c3c2
-import generator
-
-import dataclasses
+# hotdocs-criterion: sha256:7773e8e05f2a993091a252358ff89bdf665ad984accb6a0f35b9714782a7b200
+import hashlib
 import importlib.util
+import json
 import re
 import sys
 from pathlib import Path
 
 import pytest
 
+import generator
+
 
 MODEL = "claude-sonnet-5"
-COMPONENT_ID = "comp-widget-maker"
-
-
-def field(value, name):
-    return value[name] if isinstance(value, dict) else getattr(value, name)
-
-
-def load_module(path, module_name):
-    spec = importlib.util.spec_from_file_location(module_name, path)
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[module_name] = module
-    spec.loader.exec_module(module)
-    return module
-
-
-def load_tool_dependency(slug):
-    gen = next(p for p in Path(generator.__file__).resolve().parents if p.name == "gen")
-    module_name = slug.replace("-", "_")
-    base = gen / slug
-    flat = base / (module_name + ".py")
-    path = flat if flat.is_file() else base / module_name / "__init__.py"
-    return load_module(path, module_name)
-
-
-@dataclasses.dataclass
-class FakeSpecBundle:
-    component_id: str
-    spec_bundle_hash: str
-    spec: str
-    interface: str
-    constraints: str
-    dependency_interfaces: dict = dataclasses.field(default_factory=dict)
-    dependency_context: dict = dataclasses.field(default_factory=dict)
-    dependency_usage: dict = dataclasses.field(default_factory=dict)
-    vars: dict = dataclasses.field(default_factory=dict)
-    glossary: str = ""
-    hint_code: object = None
-
-    def __getitem__(self, key):
-        if key not in {f.name for f in dataclasses.fields(self)}:
-            raise KeyError(key)
-        return getattr(self, key)
-
-    def get(self, key, default=None):
-        try:
-            return self[key]
-        except KeyError:
-            return default
-
-    def keys(self):
-        return [f.name for f in dataclasses.fields(self)]
-
 
 COMPONENT_MD = (
     "---\n"
@@ -77,44 +26,85 @@ COMPONENT_MD = (
     "# Widget Maker\n"
 )
 
-FAKE_PYTHON_ADAPTER = (
-    "from pathlib import Path\n"
-    "\n"
-    "KIND = \"python\"\n"
-    "\n"
-    "\n"
-    "def layout_errors(code_dir):\n"
-    "    return [\"bad.py:1: SyntaxError: x\"] if (Path(code_dir) / \"bad.py\").exists() else []\n"
-    "\n"
-    "\n"
-    "def provision(repo_root):\n"
-    "    return {\"ok\": True, \"reason\": \"\", \"versions\": {\"python\": \"3.12\"}, "
-    "\"lockfile_sha256\": None, \"interpreter\": \"/fake/python\"}\n"
-)
+PYTHON_ADAPTER = '''from pathlib import Path
+
+KIND = "python"
+
+
+def layout_errors(code_dir):
+    return ["bad.py:1: SyntaxError: x"] if (Path(code_dir) / "bad.py").exists() else []
+
+
+def provision(repo_root):
+    return {"ok": True, "reason": "", "versions": {"python": "3.12"}, "lockfile_sha256": None, "interpreter": "/fake/python"}
+'''
+
+
+def field(value, name):
+    return value[name] if isinstance(value, dict) else getattr(value, name)
+
+
+def load_module(path, module_name):
+    spec = importlib.util.spec_from_file_location(module_name, path)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def load_cache_manager(repo_root):
+    candidates = []
+    local = Path(repo_root) / "gen" / "cache-manager"
+    candidates.append(local)
+    gen = next(p for p in Path(generator.__file__).resolve().parents if p.name == "gen")
+    candidates.append(gen / "cache-manager")
+    for base in candidates:
+        flat = base / "cache_manager.py"
+        pkg = base / "cache_manager" / "__init__.py"
+        if flat.is_file():
+            return load_module(flat, "cache_manager")
+        if pkg.is_file():
+            return load_module(pkg, "cache_manager")
+    raise RuntimeError("cache_manager not found")
+
+
+class Bundle(dict):
+    def __getattr__(self, name):
+        try:
+            return self[name]
+        except KeyError:
+            raise AttributeError(name)
+
+
+def make_bundle():
+    return Bundle(
+        component_id="comp-widget-maker",
+        spec_bundle_hash="sha256:" + hashlib.sha256(b"ac-gen-023-widget-maker").hexdigest(),
+        spec="# Widget Maker\n\nMakes widgets.",
+        interface="make_widget() -> str",
+        constraints="",
+        dependency_interfaces={},
+        dependency_context={},
+        dependency_usage={},
+        vars={},
+        glossary="",
+        hint_code=None,
+        spec_bundle_parts={},
+    )
 
 
 @pytest.fixture
 def repo_root(tmp_path, monkeypatch):
     monkeypatch.delenv("VAR_CACHE_STORE_URL", raising=False)
     root = tmp_path / "repo"
-    comp_dir = root / "specs" / "components" / "widget-maker"
-    comp_dir.mkdir(parents=True)
-    (comp_dir / "component.md").write_text(COMPONENT_MD, encoding="utf-8")
+    comp = root / "specs" / "components" / "widget-maker"
+    comp.mkdir(parents=True)
+    (comp / "component.md").write_text(COMPONENT_MD, encoding="utf-8")
     adapter_dir = root / "gen" / "kind-python"
     adapter_dir.mkdir(parents=True)
-    (adapter_dir / "kind_python.py").write_text(FAKE_PYTHON_ADAPTER, encoding="utf-8")
-    monkeypatch.chdir(root)
+    (adapter_dir / "kind_python.py").write_text(PYTHON_ADAPTER, encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
     return root
-
-
-def make_bundle():
-    return FakeSpecBundle(
-        component_id=COMPONENT_ID,
-        spec_bundle_hash="sha256:" + "a" * 64,
-        spec="# Widget Maker\n\nMakes widgets.",
-        interface="make_widget() -> str",
-        constraints="None.",
-    )
 
 
 def begin(nonce, path):
@@ -133,109 +123,121 @@ def block(nonce, path, content):
     return begin(nonce, path) + content + end_file(nonce)
 
 
-def make_backend(build_reply, calls):
+def make_backend(build_reply, log_path):
     def backend(prompt, model, **params):
-        calls.append(prompt)
+        with open(log_path, "a", encoding="utf-8") as fh:
+            fh.write("call\n")
         m = re.search(r"-----BEGIN FILE ([0-9a-f]{32}):", prompt)
-        nonce = m.group(1) if m else "0" * 32
+        nonce = m.group(1)
         return {
             "text": build_reply(nonce),
             "model": model,
             "backend": "mock",
             "model_call_error": None,
         }
+
     return backend
 
 
-def run(repo_root, build_reply):
-    calls = []
+def run(repo_root, tmp_path, build_reply):
+    log_path = tmp_path / "mock_calls.log"
+    backend = make_backend(build_reply, log_path)
     result = generator.generate(
-        make_bundle(), MODEL, repo_root=repo_root,
-        llm_backend=make_backend(build_reply, calls),
+        make_bundle(), MODEL, repo_root=repo_root, llm_backend=backend
     )
-    assert calls, "mock model was never called"
-    return result
+    return result, log_path
+
+
+def assert_nothing_cached(repo_root):
+    cm = load_cache_manager(repo_root)
+    key = cm.CacheKey(
+        spec_bundle_hash=make_bundle()["spec_bundle_hash"],
+        gate_inputs_hash="sha256:"
+        + hashlib.sha256(json.dumps(sorted([]), sort_keys=True).encode("utf-8")).hexdigest(),
+        gate_version=generator.GATE_VERSION,
+        model_pin=MODEL,
+    )
+    assert isinstance(cm.get(key, repo_root=repo_root), cm.Miss)
+    assert field(cm.stats(repo_root=repo_root), "entry_count") == 0
 
 
 def error_of(result):
     err = field(result, "model_call_error")
-    assert err is not None, "expected a model_call_error"
+    assert err is not None
     return err
 
 
-def cache_entry_count(repo_root):
-    cache_manager = load_tool_dependency("cache-manager")
-    return field(cache_manager.stats(repo_root=repo_root), "entry_count")
-
-
-WIDGET_CONTENT = "def make_widget():\n    return 'widget'\n"
-
-
-def test_complete_block_without_end_reply_is_truncated(repo_root):
+def test_complete_block_without_end_reply_is_truncated(repo_root, tmp_path):
     def reply(nonce):
-        return block(nonce, "widget_maker.py", WIDGET_CONTENT)
+        return block(nonce, "widget_maker.py", "X = 1\n")
 
-    result = run(repo_root, reply)
+    result, log_path = run(repo_root, tmp_path, reply)
+    assert log_path.exists()
     err = error_of(result)
     assert field(err, "category") == "truncated_response"
     assert field(result, "files") == {}
     assert not (repo_root / "gen" / "widget-maker").exists()
-    assert cache_entry_count(repo_root) == 0
+    assert_nothing_cached(repo_root)
 
 
-def test_unterminated_file_block_with_end_reply_names_file(repo_root):
+def test_unclosed_file_block_with_end_reply_names_path(repo_root, tmp_path):
     def reply(nonce):
         return (
-            block(nonce, "widget_maker.py", WIDGET_CONTENT)
+            block(nonce, "widget_maker.py", "X = 1\n")
             + begin(nonce, "helpers.py")
             + "def helper():\n    return 1\n"
             + end_reply(nonce)
         )
 
-    result = run(repo_root, reply)
+    result, _ = run(repo_root, tmp_path, reply)
     err = error_of(result)
     assert field(err, "category") == "truncated_response"
     assert "helpers.py" in field(err, "message")
+    assert field(result, "files") == {}
+    assert not (repo_root / "gen" / "widget-maker").exists()
 
 
-def test_unterminated_file_block_without_end_reply_names_file(repo_root):
+def test_unclosed_file_block_without_end_reply_names_path(repo_root, tmp_path):
     def reply(nonce):
         return (
-            block(nonce, "widget_maker.py", WIDGET_CONTENT)
+            block(nonce, "widget_maker.py", "X = 1\n")
             + begin(nonce, "helpers.py")
             + "def helper():\n    return 1\n"
         )
 
-    result = run(repo_root, reply)
+    result, _ = run(repo_root, tmp_path, reply)
     err = error_of(result)
     assert field(err, "category") == "truncated_response"
     assert "helpers.py" in field(err, "message")
+    assert field(result, "files") == {}
 
 
-def test_reply_with_no_blocks_is_empty_response(repo_root):
+def test_reply_with_no_begin_file_is_empty_response(repo_root, tmp_path):
     def reply(nonce):
         return "I cannot help with that."
 
-    result = run(repo_root, reply)
+    result, _ = run(repo_root, tmp_path, reply)
     err = error_of(result)
     assert field(err, "category") == "empty_response"
+    assert field(result, "files") == {}
+    assert not (repo_root / "gen" / "widget-maker").exists()
 
 
-def test_reply_without_module_is_missing_module(repo_root):
+def test_reply_without_module_is_missing_module(repo_root, tmp_path):
     def reply(nonce):
-        return block(nonce, "notes.py", "NOTES = 1\n") + end_reply(nonce)
+        return block(nonce, "notes.py", "NOTE = 1\n") + end_reply(nonce)
 
-    result = run(repo_root, reply)
+    result, _ = run(repo_root, tmp_path, reply)
     err = error_of(result)
     assert field(err, "category") == "missing_module"
     assert field(result, "files") == {}
     assert not (repo_root / "gen" / "widget-maker").exists()
-    assert cache_entry_count(repo_root) == 0
+    assert_nothing_cached(repo_root)
 
 
-def test_package_reply_is_accepted_and_written(repo_root):
+def test_package_reply_is_accepted_and_written(repo_root, tmp_path):
     init_content = "from .core import make_widget\n"
-    core_content = WIDGET_CONTENT
+    core_content = "def make_widget():\n    return 'widget'\n"
 
     def reply(nonce):
         return (
@@ -244,12 +246,14 @@ def test_package_reply_is_accepted_and_written(repo_root):
             + end_reply(nonce)
         )
 
-    result = run(repo_root, reply)
+    result, _ = run(repo_root, tmp_path, reply)
     assert field(result, "model_call_error") is None
-    out = repo_root / "gen" / "widget-maker" / "widget_maker"
-    init_file = out / "__init__.py"
-    core_file = out / "core.py"
-    assert init_file.is_file()
-    assert core_file.is_file()
-    assert init_file.read_text(encoding="utf-8") == init_content
-    assert core_file.read_text(encoding="utf-8") == core_content
+    files = field(result, "files")
+    assert files
+    out = repo_root / "gen" / "widget-maker"
+    init_path = out / "widget_maker" / "__init__.py"
+    core_path = out / "widget_maker" / "core.py"
+    assert init_path.is_file()
+    assert core_path.is_file()
+    assert init_path.read_text(encoding="utf-8") == init_content
+    assert core_path.read_text(encoding="utf-8") == core_content

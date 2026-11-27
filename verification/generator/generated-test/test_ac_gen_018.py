@@ -1,27 +1,10 @@
-# hotdocs-criterion: sha256:2d068534eb3e4f8434ed57d6a279a47d00098bd6c67414ad6514220a84512d99
-import hashlib
+# hotdocs-criterion: sha256:decf7dca5a34dbcec31d1576cdb17af23f6241ed6b17d2ef96106495c8017cdd
 import re
-from pathlib import Path
-
-import pytest
 
 import generator
 
 
-PYTHON_ADAPTER_SOURCE = (
-    "from pathlib import Path\n"
-    "\n"
-    "KIND = \"python\"\n"
-    "\n"
-    "\n"
-    "def layout_errors(code_dir):\n"
-    "    return [\"bad.py:1: SyntaxError: x\"] if (Path(code_dir) / \"bad.py\").exists() else []\n"
-    "\n"
-    "\n"
-    "def provision(repo_root):\n"
-    "    return {\"ok\": True, \"reason\": \"\", \"versions\": {\"python\": \"3.12\"}, "
-    "\"lockfile_sha256\": None, \"interpreter\": \"/fake/python\"}\n"
-)
+KNOWN_HASH = "sha256:" + "0123456789abcdef" * 4
 
 COMPONENT_MD = (
     "---\n"
@@ -36,27 +19,73 @@ COMPONENT_MD = (
     "# Widget Maker\n"
 )
 
+FAKE_PYTHON_ADAPTER = '''from pathlib import Path
+
+KIND = "python"
+
+
+def layout_errors(code_dir):
+    return ["bad.py:1: SyntaxError: x"] if (Path(code_dir) / "bad.py").exists() else []
+
+
+def provision(repo_root):
+    return {"ok": True, "reason": "", "versions": {"python": "3.12"}, "lockfile_sha256": None, "interpreter": "/fake/python"}
+'''
+
+
+class Bundle:
+    """An object with the SpecBundle fields, readable as attributes or as a mapping."""
+
+    _FIELDS = (
+        "component_id",
+        "spec_bundle_hash",
+        "spec",
+        "interface",
+        "constraints",
+        "dependency_interfaces",
+        "dependency_context",
+        "dependency_usage",
+        "vars",
+        "glossary",
+        "hint_code",
+        "spec_bundle_parts",
+    )
+
+    def __init__(self, **kwargs):
+        for name in self._FIELDS:
+            setattr(self, name, kwargs[name])
+
+    def __getitem__(self, key):
+        if key not in self._FIELDS:
+            raise KeyError(key)
+        return getattr(self, key)
+
+    def get(self, key, default=None):
+        return getattr(self, key) if key in self._FIELDS else default
+
+    def keys(self):
+        return list(self._FIELDS)
+
+    def __iter__(self):
+        return iter(self._FIELDS)
+
+    def __len__(self):
+        return len(self._FIELDS)
+
+    def __contains__(self, key):
+        return key in self._FIELDS
+
 
 def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-class Bundle(dict):
-    """A SpecBundle stand-in readable both as a mapping and by attribute."""
-
-    def __getattr__(self, name):
-        try:
-            return self[name]
-        except KeyError:
-            raise AttributeError(name)
-
-
-def make_bundle(spec_bundle_hash):
+def make_bundle():
     return Bundle(
         component_id="comp-widget-maker",
-        spec_bundle_hash=spec_bundle_hash,
-        spec="# Widget Maker\n\nR-WIDGET-001 The module MUST define VALUE.",
-        interface="VALUE: int",
+        spec_bundle_hash=KNOWN_HASH,
+        spec="# Widget Maker\n\nR-WIDGET-001 — make_widget MUST return 'widget'.",
+        interface="make_widget() -> str",
         constraints="No network access.",
         dependency_interfaces={},
         dependency_context={},
@@ -64,70 +93,58 @@ def make_bundle(spec_bundle_hash):
         vars={},
         glossary="",
         hint_code=None,
+        spec_bundle_parts={},
     )
 
 
 def plant_repo(repo_root):
-    adapter = repo_root / "gen" / "kind-python" / "kind_python.py"
-    adapter.parent.mkdir(parents=True, exist_ok=True)
-    adapter.write_text(PYTHON_ADAPTER_SOURCE, encoding="utf-8")
-    component_md = repo_root / "specs" / "components" / "widget-maker" / "component.md"
-    component_md.parent.mkdir(parents=True, exist_ok=True)
-    component_md.write_text(COMPONENT_MD, encoding="utf-8")
+    comp_dir = repo_root / "specs" / "components" / "widget-maker"
+    comp_dir.mkdir(parents=True)
+    (comp_dir / "component.md").write_text(COMPONENT_MD, encoding="utf-8")
+    adapter_dir = repo_root / "gen" / "kind-python"
+    adapter_dir.mkdir(parents=True)
+    (adapter_dir / "kind_python.py").write_text(FAKE_PYTHON_ADAPTER, encoding="utf-8")
 
 
-def make_backend(log_path):
-    def backend(prompt, model, **params):
-        with open(log_path, "a", encoding="utf-8") as fh:
-            fh.write("call\n")
+def test_generation_result_spec_bundle_hash_equals_bundle_hash(tmp_path, monkeypatch):
+    monkeypatch.delenv("VAR_CACHE_STORE_URL", raising=False)
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    plant_repo(repo_root)
+
+    calls = []
+
+    def mock_backend(prompt, model, **params):
+        calls.append(model)
         nonce = re.search(r"-----BEGIN FILE ([0-9a-f]{32}):", prompt).group(1)
-        text = (
-            "Here is the component.\n"
-            + "-----BEGIN FILE " + nonce + ": widget_maker.py-----\n"
-            + "VALUE = 1\n"
-            + "-----END FILE " + nonce + "-----\n"
-            + "-----END REPLY " + nonce + "-----\n"
+        reply = (
+            "-----BEGIN FILE " + nonce + ": widget_maker.py-----\n"
+            "def make_widget():\n"
+            "    return 'widget'\n"
+            "-----END FILE " + nonce + "-----\n"
+            "-----END REPLY " + nonce + "-----\n"
         )
         return {
-            "text": text,
+            "text": reply,
             "model": model,
             "backend": "mock",
             "model_call_error": None,
         }
 
-    return backend
-
-
-@pytest.mark.parametrize(
-    "seed",
-    [b"widget-maker bundle one", b"widget-maker bundle two"],
-)
-def test_generation_result_spec_bundle_hash_equals_bundle_hash(tmp_path, monkeypatch, seed):
-    monkeypatch.delenv("VAR_CACHE_STORE_URL", raising=False)
-
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    plant_repo(repo_root)
-    log_path = tmp_path / "backend_calls.log"
-
-    spec_bundle_hash = "sha256:" + hashlib.sha256(seed).hexdigest()
-    bundle = make_bundle(spec_bundle_hash)
-
+    bundle = make_bundle()
     result = generator.generate(
         bundle,
         "claude-sonnet-5",
-        None,
         repo_root=repo_root,
-        llm_backend=make_backend(log_path),
+        llm_backend=mock_backend,
     )
 
-    # The mock model was actually consulted and produced a usable candidate.
-    assert log_path.exists()
-    assert log_path.read_text(encoding="utf-8").count("call\n") >= 1
+    # Preconditions: the mock was reached and produced a usable candidate.
+    assert len(calls) == 1
     assert field(result, "model_call_error") is None
     assert field(result, "refused") is None
     assert field(result, "files")
 
-    # Then clause: the result's spec_bundle_hash equals the bundle's exactly.
-    assert field(result, "spec_bundle_hash") == spec_bundle_hash
+    # Then: the result's spec_bundle_hash equals the bundle's own, exactly.
+    assert field(result, "spec_bundle_hash") == KNOWN_HASH
     assert field(result, "spec_bundle_hash") == bundle.spec_bundle_hash

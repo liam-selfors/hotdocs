@@ -1,26 +1,23 @@
-# hotdocs-criterion: sha256:df8961ca05e47121c532faf44603e546c6160c91d609167f635632881c1a5342
-import generator
-
-import dataclasses
+# hotdocs-criterion: sha256:fc3b547894fa79f0ca21616d377a0f68a28178ac32a8bd5dd7336bc7adc9fc92
+import json
 import re
 from pathlib import Path
 
-import pytest
+import generator
 
 
 PYTHON_ADAPTER = (
     "from pathlib import Path\n"
     "\n"
-    "KIND = 'python'\n"
+    "KIND = \"python\"\n"
     "\n"
     "\n"
     "def layout_errors(code_dir):\n"
-    "    return ['bad.py:1: SyntaxError: x'] if (Path(code_dir) / 'bad.py').exists() else []\n"
+    "    return [\"bad.py:1: SyntaxError: x\"] if (Path(code_dir) / \"bad.py\").exists() else []\n"
     "\n"
     "\n"
     "def provision(repo_root):\n"
-    "    return {'ok': True, 'reason': '', 'versions': {'python': '3.12'}, "
-    "'lockfile_sha256': None, 'interpreter': '/fake/python'}\n"
+    "    return {\"ok\": True, \"reason\": \"\", \"versions\": {\"python\": \"3.12\"}, \"lockfile_sha256\": None, \"interpreter\": \"/fake/python\"}\n"
 )
 
 COMPONENT_MD = (
@@ -29,7 +26,7 @@ COMPONENT_MD = (
     "title: Foo\n"
     "status: draft\n"
     "owners: [pipeline-team]\n"
-    "depends_on: [comp-bar]\n"
+    "depends_on: []\n"
     "sealed: false\n"
     "---\n"
     "\n"
@@ -37,33 +34,29 @@ COMPONENT_MD = (
 )
 
 
-@dataclasses.dataclass
-class FakeSpecBundle:
-    component_id: str
-    spec_bundle_hash: str
-    spec: str
-    interface: str
-    constraints: str
-    dependency_interfaces: dict = dataclasses.field(default_factory=dict)
-    dependency_context: dict = dataclasses.field(default_factory=dict)
-    dependency_usage: dict = dataclasses.field(default_factory=dict)
-    vars: dict = dataclasses.field(default_factory=dict)
-    glossary: str = ""
-    hint_code: object = None
+class Bundle:
+    def __init__(self, **kwargs):
+        self._data = dict(kwargs)
+        for k, v in kwargs.items():
+            setattr(self, k, v)
 
     def __getitem__(self, key):
-        if key not in {f.name for f in dataclasses.fields(self)}:
-            raise KeyError(key)
-        return getattr(self, key)
+        return self._data[key]
 
     def get(self, key, default=None):
-        try:
-            return self[key]
-        except KeyError:
-            return default
+        return self._data.get(key, default)
+
+    def __contains__(self, key):
+        return key in self._data
 
     def keys(self):
-        return [f.name for f in dataclasses.fields(self)]
+        return self._data.keys()
+
+    def __iter__(self):
+        return iter(self._data)
+
+    def __len__(self):
+        return len(self._data)
 
 
 def section(prompt, heading):
@@ -73,21 +66,35 @@ def section(prompt, heading):
     return "\n".join(lines[start:end]).rstrip("\n")
 
 
-def field(value, name):
-    return value[name] if isinstance(value, dict) else getattr(value, name)
-
-
-def test_ac_gen_001_cold_prompt_sections(tmp_path, monkeypatch):
+def test_ac_gen_001(tmp_path, monkeypatch):
     monkeypatch.delenv("VAR_CACHE_STORE_URL", raising=False)
     repo_root = tmp_path / "repo"
-    adapter_dir = repo_root / "gen" / "kind-python"
-    adapter_dir.mkdir(parents=True)
-    (adapter_dir / "kind_python.py").write_text(PYTHON_ADAPTER, encoding="utf-8")
-    comp_dir = repo_root / "specs" / "components" / "foo"
-    comp_dir.mkdir(parents=True)
-    (comp_dir / "component.md").write_text(COMPONENT_MD, encoding="utf-8")
+    repo_root.mkdir()
+    monkeypatch.chdir(repo_root)
 
-    bundle = FakeSpecBundle(
+    adapter = repo_root / "gen" / "kind-python" / "kind_python.py"
+    adapter.parent.mkdir(parents=True)
+    adapter.write_text(PYTHON_ADAPTER, encoding="utf-8")
+
+    comp = repo_root / "specs" / "components" / "foo" / "component.md"
+    comp.parent.mkdir(parents=True)
+    comp.write_text(COMPONENT_MD, encoding="utf-8")
+
+    log_path = tmp_path / "prompts.log"
+
+    def mock_backend(prompt, model, **params):
+        with open(log_path, "a", encoding="utf-8") as fh:
+            fh.write(json.dumps(prompt) + "\n")
+        nonce = re.search(r"-----BEGIN FILE ([0-9a-f]{32}):", prompt).group(1)
+        text = (
+            "-----BEGIN FILE " + nonce + ": foo.py-----\n"
+            "ok\n"
+            "-----END FILE " + nonce + "-----\n"
+            "-----END REPLY " + nonce + "-----\n"
+        )
+        return {"text": text, "model": model, "backend": "mock", "model_call_error": None}
+
+    bundle = Bundle(
         component_id="comp-foo",
         spec_bundle_hash="sha256:" + "a" * 64,
         spec="SPEC-MARK",
@@ -99,38 +106,42 @@ def test_ac_gen_001_cold_prompt_sections(tmp_path, monkeypatch):
         vars={"VAR-X": "VAR-MARK"},
         glossary="GLOSS-MARK",
         hint_code=None,
+        spec_bundle_parts={},
     )
 
-    recorded = []
+    generator.generate(bundle, "mock-model", repo_root=repo_root, llm_backend=mock_backend)
 
-    def mock_backend(prompt, model, **params):
-        recorded.append(prompt)
-        nonce = re.search(r"-----BEGIN FILE ([0-9a-f]{32}):", prompt).group(1)
-        reply = (
-            "-----BEGIN FILE " + nonce + ": foo.py-----\n"
-            "X = 1\n"
-            "-----END FILE " + nonce + "-----\n"
-            "-----END REPLY " + nonce + "-----\n"
-        )
-        return {"text": reply, "model": model, "backend": "mock", "model_call_error": None}
-
-    result = generator.generate(
-        bundle, "mock-model", None, repo_root=repo_root, llm_backend=mock_backend
-    )
-
-    assert field(result, "refused") is None
-    assert len(recorded) == 1
-    prompt = recorded[0]
+    assert log_path.exists(), "mock model was never called"
+    lines = [l for l in log_path.read_text(encoding="utf-8").split("\n") if l]
+    assert len(lines) == 1
+    prompt = json.loads(lines[0])
 
     assert section(prompt, "## SPEC") == "SPEC-MARK"
-    assert section(prompt, "## INTERFACE") == "IFACE-MARK"
-    assert section(prompt, "## CONSTRAINTS") == "CONS-MARK"
-    assert section(prompt, "## DEPENDENCY INTERFACES") == "### comp-bar\nDI-MARK"
     assert section(prompt, "## DEPENDENCY CONTEXT") == "### comp-bar\nDC-MARK"
-    assert section(prompt, "## VARS") == "### VAR-X\nVAR-MARK"
-    assert section(prompt, "## GLOSSARY") == "GLOSS-MARK"
 
-    lines = prompt.split("\n")
-    assert "## DEPENDENCY USAGE" not in lines
-    assert "## HINT_CODE" not in lines
-    assert "## RETRY_FEEDBACK" not in lines
+    headings = [
+        "## SPEC",
+        "## INTERFACE",
+        "## CONSTRAINTS",
+        "## DEPENDENCY INTERFACES",
+        "## DEPENDENCY CONTEXT",
+        "## VARS",
+        "## GLOSSARY",
+    ]
+    expected = {
+        "IFACE-MARK": "## INTERFACE",
+        "CONS-MARK": "## CONSTRAINTS",
+        "DI-MARK": "## DEPENDENCY INTERFACES",
+        "VAR-MARK": "## VARS",
+        "GLOSS-MARK": "## GLOSSARY",
+    }
+    sections = {h: section(prompt, h) for h in headings}
+    for marker, heading in expected.items():
+        assert marker in sections[heading], (marker, heading, sections[heading])
+        for other in headings:
+            if other != heading:
+                assert marker not in sections[other], (marker, other)
+
+    prompt_lines = prompt.split("\n")
+    for forbidden in ("## DEPENDENCY USAGE", "## HINT_CODE", "## RETRY_FEEDBACK"):
+        assert forbidden not in prompt_lines, forbidden

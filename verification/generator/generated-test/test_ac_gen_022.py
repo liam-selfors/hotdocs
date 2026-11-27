@@ -1,87 +1,112 @@
-# hotdocs-criterion: sha256:e72f0eabeba9a2bdef90727187a5541a18a06627096290ff70a4c73e527cd9ed
+# hotdocs-criterion: sha256:1b522704a91cab90534a413ffe5c9fac74f50b727b3b4c87f293ea0bdb45d2c3
+"""AC-GEN-022 (covers R-GEN-020): the prompt tells the model to implement
+exactly what the spec requires and nothing more, and mentions mutation
+testing."""
+
 import re
-import uuid
 from pathlib import Path
 
 import generator
 
 
-FAKE_PYTHON_ADAPTER = (
+PYTHON_ADAPTER = (
     "from pathlib import Path\n"
     "\n"
-    "KIND = " + repr("python") + "\n"
+    'KIND = "python"\n'
     "\n"
     "\n"
     "def layout_errors(code_dir):\n"
-    "    return [" + repr("bad.py:1: SyntaxError: x") + "] if (Path(code_dir) / " + repr("bad.py") + ").exists() else []\n"
+    '    return ["bad.py:1: SyntaxError: x"] if (Path(code_dir) / "bad.py").exists() else []\n'
     "\n"
     "\n"
     "def provision(repo_root):\n"
-    "    return {" + repr("ok") + ": True, " + repr("reason") + ": " + repr("") + ", "
-    + repr("versions") + ": {" + repr("python") + ": " + repr("3.12") + "}, "
-    + repr("lockfile_sha256") + ": None, " + repr("interpreter") + ": " + repr("/fake/python") + "}\n"
+    '    return {"ok": True, "reason": "", "versions": {"python": "3.12"}, "lockfile_sha256": None, "interpreter": "/fake/python"}\n'
 )
 
-COMPONENT_MD = (
-    "---\n"
-    "id: comp-widget-maker\n"
-    "title: Widget Maker\n"
-    "status: draft\n"
-    "owners: [pipeline-team]\n"
-    "depends_on: []\n"
-    "sealed: false\n"
-    "---\n"
-    "\n"
-    "# Widget Maker\n"
-)
+
+class Bundle:
+    """An object with the SpecBundle fields that also reads as a mapping."""
+
+    _FIELDS = (
+        "component_id",
+        "spec_bundle_hash",
+        "spec",
+        "interface",
+        "constraints",
+        "dependency_interfaces",
+        "dependency_context",
+        "dependency_usage",
+        "vars",
+        "glossary",
+        "hint_code",
+        "spec_bundle_parts",
+    )
+
+    def __init__(self, **kwargs):
+        for name in self._FIELDS:
+            setattr(self, name, kwargs[name])
+
+    def __getitem__(self, key):
+        if key not in self._FIELDS:
+            raise KeyError(key)
+        return getattr(self, key)
+
+    def get(self, key, default=None):
+        return getattr(self, key) if key in self._FIELDS else default
+
+    def keys(self):
+        return list(self._FIELDS)
+
+    def __iter__(self):
+        return iter(self._FIELDS)
+
+    def __len__(self):
+        return len(self._FIELDS)
 
 
 def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def _plant_repo(repo_root):
-    adapter_dir = repo_root / "gen" / "kind-python"
-    adapter_dir.mkdir(parents=True)
-    (adapter_dir / "kind_python.py").write_text(FAKE_PYTHON_ADAPTER, encoding="utf-8")
-    comp_dir = repo_root / "specs" / "components" / "widget-maker"
-    comp_dir.mkdir(parents=True)
-    (comp_dir / "component.md").write_text(COMPONENT_MD, encoding="utf-8")
+def make_bundle():
+    return Bundle(
+        component_id="comp-widget-maker",
+        spec_bundle_hash="sha256:" + "ab" * 32,
+        spec="# Widget Maker\n\nMakes widgets.",
+        interface="# Library\n\n```\nmake() -> int\n```",
+        constraints="# Constraints\n\nNone.",
+        dependency_interfaces={},
+        dependency_context={},
+        dependency_usage={},
+        vars={},
+        glossary="# Glossary\n\n- **Widget** - a thing.",
+        hint_code=None,
+        spec_bundle_parts={},
+    )
 
 
-def _bundle():
-    return {
-        "component_id": "comp-widget-maker",
-        "spec_bundle_hash": "sha256:" + uuid.uuid4().hex + uuid.uuid4().hex,
-        "spec": "# Widget Maker\n\nMakes widgets.",
-        "interface": "make_widget() -> str",
-        "constraints": "No network.",
-        "dependency_interfaces": {},
-        "dependency_context": {},
-        "dependency_usage": {},
-        "vars": {},
-        "glossary": "",
-        "hint_code": None,
-    }
-
-
-def test_ac_gen_022_prompt_says_nothing_more_and_mutation_testing(tmp_path, monkeypatch):
+def test_prompt_contains_nothing_more_and_mutation_testing(tmp_path, monkeypatch):
     monkeypatch.delenv("VAR_CACHE_STORE_URL", raising=False)
+    monkeypatch.chdir(tmp_path)
+
     repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    _plant_repo(repo_root)
+    adapter = repo_root / "gen" / "kind-python" / "kind_python.py"
+    adapter.parent.mkdir(parents=True)
+    adapter.write_text(PYTHON_ADAPTER, encoding="utf-8")
 
     prompts = []
 
     def mock_backend(prompt, model, **params):
         prompts.append(prompt)
-        nonce = re.search(r"-----BEGIN FILE ([0-9a-f]{32}):", prompt).group(1)
+        match = re.search(r"-----BEGIN FILE ([0-9a-f]{32}):", prompt)
+        assert match is not None, "prompt does not show the begin marker with a nonce"
+        nonce = match.group(1)
         text = (
             "-----BEGIN FILE " + nonce + ": widget_maker.py-----\n"
-            "def make_widget():\n"
-            "    return 'widget'\n"
-            "-----END FILE " + nonce + "-----\n"
-            "-----END REPLY " + nonce + "-----\n"
+            + "def make():\n"
+            + "    return 1\n"
+            + "-----END FILE " + nonce + "-----\n"
+            + "-----END REPLY " + nonce + "-----\n"
         )
         return {
             "text": text,
@@ -91,15 +116,15 @@ def test_ac_gen_022_prompt_says_nothing_more_and_mutation_testing(tmp_path, monk
         }
 
     result = generator.generate(
-        _bundle(),
-        "mock:model-" + uuid.uuid4().hex,
-        None,
+        make_bundle(),
+        "mock:model",
         repo_root=repo_root,
         llm_backend=mock_backend,
     )
 
     assert field(result, "cache_hit") is False
-    assert len(prompts) == 1
+    assert len(prompts) >= 1, "the mock model was never called"
+
     prompt = prompts[0]
     assert "nothing more" in prompt
     assert "mutation testing" in prompt

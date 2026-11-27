@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:48d6f74423b04914b9b8bd0f8a7adde6ef2b1ff43146ff0073791f1e58a202ec
+# hotdocs-criterion: sha256:ad0df73ec224adb7740997cee3ae4aacf1c00c7e78b919638cb4869c882fc0d6
 import re
 from pathlib import Path
 
@@ -19,6 +19,19 @@ PYTHON_ADAPTER = (
     "    return {\"ok\": True, \"reason\": \"\", \"versions\": {\"python\": \"3.12\"}, \"lockfile_sha256\": None, \"interpreter\": \"/fake/python\"}\n"
 )
 
+COMPONENT_MD = (
+    "---\n"
+    "id: comp-widget-maker\n"
+    "title: Widget Maker\n"
+    "status: draft\n"
+    "owners: [pipeline-team]\n"
+    "depends_on: []\n"
+    "sealed: false\n"
+    "---\n"
+    "\n"
+    "# Widget Maker\n"
+)
+
 
 def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
@@ -31,84 +44,107 @@ def section(prompt, heading):
     return "\n".join(lines[start:end]).rstrip("\n")
 
 
-def _bundle():
-    return {
-        "component_id": "comp-foo",
-        "spec_bundle_hash": "sha256:" + "ab" * 32,
-        "spec": "Foo component spec body. It provides a constant X.",
-        "interface": "Library: X: int",
-        "constraints": "No network access.",
-        "dependency_interfaces": {},
-        "dependency_context": {},
-        "dependency_usage": {},
-        "vars": {},
-        "glossary": "- **Foo** - a thing.",
-        "hint_code": None,
-    }
+class Bundle(dict):
+    def __getattr__(self, name):
+        try:
+            return self[name]
+        except KeyError as exc:
+            raise AttributeError(name) from exc
 
 
-def test_ac_gen_013_retry_feedback_is_bare_ids_in_own_section(tmp_path, monkeypatch):
+def make_bundle():
+    return Bundle(
+        component_id="comp-widget-maker",
+        spec_bundle_hash="sha256:" + "a" * 64,
+        spec="# Widget Maker\n\nMakes widgets.\n\n# R-WIDGET-001\n\n**R-WIDGET-001** - It MUST make a widget.",
+        interface="# Library\n\n```\nmake() -> str\n```",
+        constraints="# Constraints\n\nNone in particular.",
+        dependency_interfaces={},
+        dependency_context={},
+        dependency_usage={},
+        vars={},
+        glossary="# Glossary\n\n- **Widget** - a thing that is made.",
+        hint_code=None,
+        spec_bundle_parts={},
+    )
+
+
+def test_ac_gen_013_retry_feedback_is_bare_distinct_section_and_echoed(tmp_path, monkeypatch):
     monkeypatch.delenv("VAR_CACHE_STORE_URL", raising=False)
-    monkeypatch.chdir(tmp_path)
-    repo_root = tmp_path
 
-    adapter = repo_root / "gen" / "kind-python" / "kind_python.py"
-    adapter.parent.mkdir(parents=True, exist_ok=True)
-    adapter.write_text(PYTHON_ADAPTER, encoding="utf-8")
+    repo_root = tmp_path / "repo"
+    (repo_root / "gen" / "kind-python").mkdir(parents=True)
+    (repo_root / "gen" / "kind-python" / "kind_python.py").write_text(PYTHON_ADAPTER, encoding="utf-8")
+    comp_dir = repo_root / "specs" / "components" / "widget-maker"
+    comp_dir.mkdir(parents=True)
+    (comp_dir / "component.md").write_text(COMPONENT_MD, encoding="utf-8")
+    monkeypatch.chdir(repo_root)
 
-    recorded = []
+    log_dir = tmp_path / "log"
+    log_dir.mkdir()
+    calls_log = log_dir / "calls.log"
 
     def mock_backend(prompt, model, **params):
-        recorded.append(prompt)
+        n = len(list(log_dir.glob("prompt_*.txt")))
+        (log_dir / ("prompt_" + str(n) + ".txt")).write_text(prompt, encoding="utf-8")
+        with open(calls_log, "a", encoding="utf-8") as fh:
+            fh.write("call\n")
         nonce = re.search(r"-----BEGIN FILE ([0-9a-f]{32}):", prompt).group(1)
         text = (
-            "-----BEGIN FILE " + nonce + ": foo.py-----\n"
-            + "X = 1\n"
-            + "-----END FILE " + nonce + "-----\n"
-            + "-----END REPLY " + nonce + "-----\n"
+            "-----BEGIN FILE " + nonce + ": widget_maker.py-----\n"
+            "def make():\n"
+            "    return \"widget\"\n"
+            "-----END FILE " + nonce + "-----\n"
+            "-----END REPLY " + nonce + "-----\n"
         )
         return {"text": text, "model": model, "backend": "mock", "model_call_error": None}
 
     result = generator.generate(
-        _bundle(),
-        "claude-sonnet-5",
+        make_bundle(),
+        "mock-model",
         ["R-FOO-003"],
         repo_root=repo_root,
         llm_backend=mock_backend,
     )
 
-    assert len(recorded) == 1, "mock model should have been called exactly once"
-    prompt = recorded[0]
+    # The mock was called exactly once and recorded its input.
+    assert calls_log.exists(), "mock model was never called"
+    assert calls_log.read_text(encoding="utf-8").splitlines() == ["call"]
+    prompt = (log_dir / "prompt_0.txt").read_text(encoding="utf-8")
+
+    # retry_feedback is its own, distinctly labeled section.
     lines = prompt.split("\n")
+    assert lines.count("## RETRY_FEEDBACK") == 1
+    body = section(prompt, "## RETRY_FEEDBACK")
 
-    # Distinct, labeled section.
-    assert "## RETRY_FEEDBACK" in lines
-    assert "## GLOSSARY" in lines
-    assert lines.index("## RETRY_FEEDBACK") > lines.index("## GLOSSARY")
-
-    fb = section(prompt, "## RETRY_FEEDBACK")
-    fb_lines = [ln for ln in fb.split("\n") if ln.strip()]
-    id_lines = [ln for ln in fb_lines if ln.startswith("- ")]
+    # It contains only the bare R-id "R-FOO-003".
+    assert re.findall(r"\bR-[A-Z0-9]+-\d+\b", body) == ["R-FOO-003"]
+    id_lines = [ln for ln in body.split("\n") if ln.startswith("- ")]
     assert id_lines == ["- R-FOO-003"]
-    other_lines = [ln for ln in fb_lines if not ln.startswith("- ")]
-    assert len(other_lines) <= 1, "only one introductory sentence expected besides id lines"
-    for ln in other_lines:
-        assert not re.search(r"R-[A-Z0-9]+-\d+", ln)
+    non_empty = [ln for ln in body.split("\n") if ln.strip()]
+    assert non_empty[-1] == "- R-FOO-003"
+    assert len(non_empty) == 2, "expected one sentence then one id line, got: " + repr(body)
 
-    # The id appears only in its own section, never merged into bundle fields.
+    # Never merged with the bundle's fields: the id appears only in that section.
     assert prompt.count("R-FOO-003") == 1
+    for heading in ("## SPEC", "## INTERFACE", "## CONSTRAINTS", "## GLOSSARY"):
+        assert "R-FOO-003" not in section(prompt, heading)
 
-    # No Gherkin text, rationale, or expected/actual values anywhere.
+    # No Gherkin text, rationale, or expected/actual values anywhere in the prompt.
+    for ln in lines:
+        stripped = ln.strip()
+        for kw in ("Given ", "When ", "Then ", "And ", "Scenario:", "Feature:"):
+            assert not stripped.startswith(kw), "Gherkin-like line in prompt: " + repr(ln)
     assert "```gherkin" not in prompt
-    assert not re.search(r"(?m)^\s*(Given|Then|Scenario:|Feature:)\b", prompt)
-    assert "rationale" not in prompt.lower()
-    assert not re.search(r"(?i)\bexpected\s*:", prompt)
-    assert not re.search(r"(?i)\bactual\s*:", prompt)
-    assert "AC-FOO-" not in prompt
+    lowered_body = body.lower()
+    for word in ("given", "then", "rationale", "expected", "actual", "ac-"):
+        assert word not in lowered_body, "criterion content in retry feedback: " + repr(body)
+    assert not re.search(r"\bAC-[A-Z0-9]+-\d+\b", prompt)
+    assert not re.search(r"(?im)^\s*rationale\s*:", prompt)
+    assert not re.search(r"(?im)^\s*(expected|actual)\s*[:=]", prompt)
 
-    # Result echoes retry_feedback.
+    # The result echoes the caller's retry_feedback.
     assert field(result, "retry_feedback") == ["R-FOO-003"]
     assert field(result, "cache_hit") is False
-    assert field(result, "refused") is None
     assert field(result, "model_call_error") is None
-    assert field(result, "files")
+    assert field(result, "refused") is None

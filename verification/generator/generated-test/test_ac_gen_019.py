@@ -1,12 +1,13 @@
-# hotdocs-criterion: sha256:08155118fa004941690baf6040bd262d11d825e4ed37f426acb382c9bdf3792c
-import hashlib
+# hotdocs-criterion: sha256:f009f64f7b1a81155acdb5d074e2b2d1760cb8c6883c71b533af9d4ab6d2040b
 import re
 from pathlib import Path
+
+import pytest
 
 import generator
 
 
-PYTHON_ADAPTER = (
+KIND_PYTHON_SRC = (
     "from pathlib import Path\n"
     "\n"
     "KIND = \"python\"\n"
@@ -17,115 +18,109 @@ PYTHON_ADAPTER = (
     "\n"
     "\n"
     "def provision(repo_root):\n"
-    "    return {\"ok\": True, \"reason\": \"\", \"versions\": {\"python\": \"3.12\"}, "
-    "\"lockfile_sha256\": None, \"interpreter\": \"/fake/python\"}\n"
+    "    return {\"ok\": True, \"reason\": \"\", \"versions\": {\"python\": \"3.12\"}, \"lockfile_sha256\": None, \"interpreter\": \"/fake/python\"}\n"
 )
 
-COMPONENT_MD = (
-    "---\n"
-    "id: comp-widget-maker\n"
-    "title: Widget Maker\n"
-    "status: draft\n"
-    "owners: [pipeline-team]\n"
-    "depends_on: []\n"
-    "sealed: false\n"
-    "---\n"
-    "\n"
-    "# Widget Maker\n"
-)
+MODULE_CONTENT = "VALUE = 1\n"
 
 
 def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def make_bundle(tag):
+def plant_python_adapter(repo_root):
+    d = Path(repo_root) / "gen" / "kind-python"
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "kind_python.py").write_text(KIND_PYTHON_SRC, encoding="utf-8")
+
+
+def make_bundle(dependency_usage):
     return {
         "component_id": "comp-widget-maker",
-        "spec_bundle_hash": "sha256:" + hashlib.sha256(tag.encode("utf-8")).hexdigest(),
-        "spec": "Widget maker spec. It makes widgets.",
-        "interface": "make_widget() -> int",
+        "spec_bundle_hash": "sha256:" + "ab" * 32,
+        "spec": "# Widget Maker\n\nThe widget maker makes widgets.",
+        "interface": "# Library\n\n```\nmake() -> int\n```",
         "constraints": "Keep it small.",
         "dependency_interfaces": {},
         "dependency_context": {},
-        "dependency_usage": {},
+        "dependency_usage": dependency_usage,
         "vars": {},
-        "glossary": "Widget: a thing.",
+        "glossary": "- **Widget** - a thing.",
         "hint_code": None,
+        "spec_bundle_parts": {},
     }
 
 
-def make_backend(calls):
+def make_mock(recorded):
     def backend(prompt, model, **params):
-        calls.append(prompt)
+        recorded.append(prompt)
         nonce = re.search(r"-----BEGIN FILE ([0-9a-f]{32}):", prompt).group(1)
         text = (
             "-----BEGIN FILE " + nonce + ": widget_maker.py-----\n"
-            "def make_widget():\n"
-            "    return 1\n"
-            "-----END FILE " + nonce + "-----\n"
-            "-----END REPLY " + nonce + "-----\n"
+            + MODULE_CONTENT
+            + "-----END FILE " + nonce + "-----\n"
+            + "-----END REPLY " + nonce + "-----\n"
         )
         return {"text": text, "model": model, "backend": "mock", "model_call_error": None}
 
     return backend
 
 
-def plant_python_adapter(repo_root):
-    adapter = repo_root / "gen" / "kind-python" / "kind_python.py"
-    adapter.parent.mkdir(parents=True, exist_ok=True)
-    adapter.write_text(PYTHON_ADAPTER, encoding="utf-8")
-
-
-def plant_component(repo_root):
-    comp = repo_root / "specs" / "components" / "widget-maker" / "component.md"
-    comp.parent.mkdir(parents=True, exist_ok=True)
-    comp.write_text(COMPONENT_MD, encoding="utf-8")
-
-
-def test_prompt_instructs_dynamic_loads_resolve_from_repo_root(tmp_path, monkeypatch):
+@pytest.fixture(autouse=True)
+def _no_remote_cache(monkeypatch):
     monkeypatch.delenv("VAR_CACHE_STORE_URL", raising=False)
+
+
+@pytest.mark.parametrize(
+    "dependency_usage",
+    [
+        {},
+        {"comp-bar": "bar.compute(x: int) -> int\n    Compute a number."},
+    ],
+)
+def test_prompt_instructs_dynamic_loads_resolve_from_repo_root(tmp_path, monkeypatch, dependency_usage):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
     plant_python_adapter(repo_root)
-    plant_component(repo_root)
+    monkeypatch.chdir(repo_root)
 
-    calls = []
-    generator.generate(
-        make_bundle("ac-gen-019-a"),
-        "mock-model",
-        repo_root=repo_root,
-        llm_backend=make_backend(calls),
+    recorded = []
+    bundle = make_bundle(dependency_usage)
+    result = generator.generate(
+        bundle, "mock:model", None, repo_root=repo_root, llm_backend=make_mock(recorded)
     )
 
-    assert len(calls) >= 1
-    prompt = calls[0]
-    low = prompt.lower()
+    assert field(result, "refused") is None
+    assert len(recorded) >= 1, "the mock model was never called"
+    prompt = recorded[-1]
+
+    # The bundle text deliberately contains none of these terms, so they can
+    # only come from the generator's own instruction.
     assert "repo_root" in prompt
     assert "sys.modules" in prompt
     assert "__file__" in prompt
-    assert "import" in low
-    assert any(s in low for s in ("tool root", "tool's root", "tool_root", "tool's own")), prompt
+    assert "import" in prompt
+    assert "gen/" in prompt
+    assert "tool" in prompt.lower()
 
 
-def test_generate_completes_without_gen_dir_in_repo_root(tmp_path, monkeypatch):
-    monkeypatch.delenv("VAR_CACHE_STORE_URL", raising=False)
+def test_no_gen_directory_completes_from_tool_root(tmp_path, monkeypatch):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
-    plant_component(repo_root)
     assert not (repo_root / "gen").exists()
+    monkeypatch.chdir(repo_root)
 
-    calls = []
+    recorded = []
+    bundle = make_bundle({})
     result = generator.generate(
-        make_bundle("ac-gen-019-b"),
-        "mock-model",
-        repo_root=repo_root,
-        llm_backend=make_backend(calls),
+        bundle, "mock:model", None, repo_root=repo_root, llm_backend=make_mock(recorded)
     )
 
-    assert result is not None
-    assert field(result, "component_id") == "comp-widget-maker"
-    assert field(result, "prompt_version") == generator.PROMPT_VERSION
-    assert len(calls) == 1
-    err = field(result, "model_call_error")
-    assert err is None or field(err, "category") != "environment"
+    assert field(result, "model_call_error") is None
+    assert field(result, "refused") is None
+    assert field(result, "cache_hit") is False
+    files = field(result, "files")
+    assert files == {"widget_maker.py": MODULE_CONTENT}
+    assert len(recorded) == 1
+    written = repo_root / "gen" / "widget-maker" / "widget_maker.py"
+    assert written.read_text(encoding="utf-8") == MODULE_CONTENT

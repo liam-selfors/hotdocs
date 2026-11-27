@@ -1,5 +1,10 @@
-# hotdocs-criterion: sha256:dd83010bb6d7d3de779ea88bf2d7c802446a56b44dce3ae7e3ffeb4b522928ce
+# hotdocs-criterion: sha256:d028382636441335e153911e6e851bac14640843c747052200dfb4a5399fa56d
+"""AC-GEN-020: the prompt instructs dual dict-or-attribute access for every
+value read from a dependency call, the dependency's own top-level return
+value included (R-GEN-019)."""
+
 import re
+from dataclasses import dataclass, field as dc_field
 from pathlib import Path
 
 import generator
@@ -8,33 +13,44 @@ import generator
 PYTHON_ADAPTER = (
     "from pathlib import Path\n"
     "\n"
-    "KIND = " + repr("python") + "\n"
+    "KIND = \"python\"\n"
     "\n"
     "\n"
     "def layout_errors(code_dir):\n"
-    "    return [" + repr("bad.py:1: SyntaxError: x") + "] if (Path(code_dir) / "
-    + repr("bad.py") + ").exists() else []\n"
+    "    return [\"bad.py:1: SyntaxError: x\"] if (Path(code_dir) / \"bad.py\").exists() else []\n"
     "\n"
     "\n"
     "def provision(repo_root):\n"
-    "    return {" + repr("ok") + ": True, " + repr("reason") + ": " + repr("")
-    + ", " + repr("versions") + ": {" + repr("python") + ": " + repr("3.12")
-    + "}, " + repr("lockfile_sha256") + ": None, " + repr("interpreter") + ": "
-    + repr("/fake/python") + "}\n"
+    "    return {\"ok\": True, \"reason\": \"\", \"versions\": {\"python\": \"3.12\"}, \"lockfile_sha256\": None, \"interpreter\": \"/fake/python\"}\n"
 )
 
-COMPONENT_MD = (
-    "---\n"
-    "id: comp-widget-maker\n"
-    "title: Widget Maker\n"
-    "status: draft\n"
-    "owners: [pipeline-team]\n"
-    "depends_on: []\n"
-    "sealed: false\n"
-    "---\n"
-    "\n"
-    "# Widget Maker\n"
-)
+
+@dataclass
+class Bundle:
+    component_id: str
+    spec_bundle_hash: str
+    spec: str
+    interface: str
+    constraints: str
+    dependency_interfaces: dict = dc_field(default_factory=dict)
+    dependency_context: dict = dc_field(default_factory=dict)
+    dependency_usage: dict = dc_field(default_factory=dict)
+    vars: dict = dc_field(default_factory=dict)
+    glossary: str = ""
+    hint_code: object = None
+    spec_bundle_parts: dict = dc_field(default_factory=dict)
+
+    def __getitem__(self, key):
+        try:
+            return getattr(self, key)
+        except AttributeError:
+            raise KeyError(key)
+
+    def get(self, key, default=None):
+        return getattr(self, key, default)
+
+    def keys(self):
+        return list(self.__dataclass_fields__)
 
 
 def field(value, name):
@@ -47,88 +63,75 @@ def _plant(repo_root):
     adapter.write_text(PYTHON_ADAPTER, encoding="utf-8")
     comp = repo_root / "specs" / "components" / "widget-maker" / "component.md"
     comp.parent.mkdir(parents=True, exist_ok=True)
-    comp.write_text(COMPONENT_MD, encoding="utf-8")
+    comp.write_text(
+        "---\n"
+        "id: comp-widget-maker\n"
+        "title: Widget Maker\n"
+        "status: draft\n"
+        "owners: [pipeline-team]\n"
+        "depends_on: []\n"
+        "sealed: false\n"
+        "---\n"
+        "\n"
+        "# Widget Maker\n",
+        encoding="utf-8",
+    )
 
 
-def _bundle():
-    # Bundle text deliberately avoids the words the assertion looks for.
-    return {
-        "component_id": "comp-widget-maker",
-        "spec_bundle_hash": "sha256:" + "ab" * 32,
-        "spec": "Widget Maker makes widgets.",
-        "interface": "make_widget(name: str) -> str",
-        "constraints": "No network.",
-        "dependency_interfaces": {},
-        "dependency_context": {},
-        "dependency_usage": {},
-        "vars": {},
-        "glossary": "Widget: a small thing.",
-        "hint_code": None,
-    }
-
-
-def _fixed_instructions(prompt):
-    lines = prompt.split("\n")
-    end = lines.index("## SPEC") if "## SPEC" in lines else len(lines)
-    return "\n".join(lines[:end])
-
-
-def test_ac_gen_020_prompt_instructs_dual_access_for_dependency_values(tmp_path, monkeypatch):
+def test_ac_gen_020_prompt_requires_dual_access_for_dependency_values(tmp_path, monkeypatch):
     monkeypatch.delenv("VAR_CACHE_STORE_URL", raising=False)
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
     _plant(repo_root)
 
-    recorded = []
+    # Bundle text deliberately avoids the words the instruction is checked by.
+    bundle = Bundle(
+        component_id="comp-widget-maker",
+        spec_bundle_hash="sha256:" + "a" * 64,
+        spec="Widget maker makes widgets.",
+        interface="make_widget(name) -> str",
+        constraints="Be quick.",
+        glossary="Widget: a small thing.",
+        hint_code=None,
+    )
 
-    def backend(prompt, model, **params):
-        recorded.append(prompt)
+    sent = []
+
+    def mock_backend(prompt, model, **params):
+        sent.append(prompt)
         nonce = re.search(r"-----BEGIN FILE ([0-9a-f]{32}):", prompt).group(1)
         text = (
             "-----BEGIN FILE " + nonce + ": widget_maker.py-----\n"
-            "def make_widget(name):\n"
-            "    return name\n"
+            "X = 1\n"
             "-----END FILE " + nonce + "-----\n"
             "-----END REPLY " + nonce + "-----\n"
         )
-        return {
-            "text": text,
-            "model": model,
-            "backend": "mock",
-            "model_call_error": None,
-        }
-
-    bundle = _bundle()
-    assert bundle["hint_code"] is None  # cold mode
+        return {"text": text, "model": model, "backend": "mock", "model_call_error": None}
 
     result = generator.generate(
-        bundle, "mock-model", repo_root=repo_root, llm_backend=backend
+        bundle, "mock-model", repo_root=repo_root, llm_backend=mock_backend
     )
-    assert field(result, "refused") is None
-    assert len(recorded) >= 1, "mock model was never called"
 
-    prompt = recorded[0]
-    fixed = _fixed_instructions(prompt).lower()
+    assert len(sent) >= 1, "the mock model was never called"
+    assert field(result, "cache_hit") is False
+    prompt = sent[-1]
 
-    # The instruction lives in the generator's own fixed text, not the bundle.
-    assert "depend" in fixed, "prompt does not mention dependencies"
-    assert "dict" in fixed, "prompt does not mention dict access"
-    assert "attr" in fixed, "prompt does not mention attribute access"
-    assert any(
-        k in fixed for k in ("top-level", "top level", "own return", "return value")
-    ), "prompt does not extend dual access to the dependency's top-level return value"
-    assert any(
-        k in fixed for k in ("never", "bare", "alone", "not ")
-    ), "prompt does not forbid a bare attribute access"
-
-    # Find a single paragraph that ties these together.
-    paragraphs = re.split(r"\n\s*\n", fixed)
-    matching = [
+    # Paragraphs that speak of both dicts and attributes form the instruction.
+    paragraphs = re.split(r"\n\s*\n", prompt)
+    relevant = [
         p for p in paragraphs
-        if "dict" in p and "attr" in p and "depend" in p
+        if "attribute" in p.lower() and "dict" in p.lower()
     ]
-    assert matching, "no instruction combines dependency values with dict-or-attribute access"
+    assert relevant, "prompt never instructs dict-or-attribute access"
+    text = "\n".join(relevant).lower()
+
+    assert "dependenc" in text, (
+        "the dual-access instruction does not concern dependency values: " + text
+    )
     assert any(
-        any(k in p for k in ("top-level", "top level", "own return", "return value"))
-        for p in matching
-    ), "dual-access instruction does not cover the dependency's own top-level return value"
+        term in text
+        for term in ("top-level", "top level", "return value", "returned value", "own return", "returns")
+    ), "the instruction does not cover the dependency's own top-level return value: " + text
+    assert any(
+        term in text for term in ("never", "not ", "bare", "alone", "only")
+    ), "the instruction does not forbid a bare attribute access: " + text

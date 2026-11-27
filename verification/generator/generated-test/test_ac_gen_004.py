@@ -1,9 +1,32 @@
-# hotdocs-criterion: sha256:1fc07522960572f43af0d0305e27fb4715f84bdba074c66c1261fffded22f247
+# hotdocs-criterion: sha256:d04c6618e435aaffeb721312c5ffe84cd80a1b72c29451cd9eb6ce19df8f0a41
+"""AC-GEN-004: the model identifier passed to `generate` reaches the model unchanged.
+
+Given the same SpecBundle and two different model identifiers
+When generate is called once with each
+Then the mock model recorded for each call receives the model identifier
+  passed to that call, not a hardcoded default
+"""
+
+import json
 import re
 from pathlib import Path
 
 import generator
 
+
+PYTHON_ADAPTER = (
+    "from pathlib import Path\n"
+    "\n"
+    "KIND = \"python\"\n"
+    "\n"
+    "\n"
+    "def layout_errors(code_dir):\n"
+    "    return [\"bad.py:1: SyntaxError: x\"] if (Path(code_dir) / \"bad.py\").exists() else []\n"
+    "\n"
+    "\n"
+    "def provision(repo_root):\n"
+    "    return {\"ok\": True, \"reason\": \"\", \"versions\": {\"python\": \"3.12\"}, \"lockfile_sha256\": None, \"interpreter\": \"/fake/python\"}\n"
+)
 
 COMPONENT_MD = (
     "---\n"
@@ -18,43 +41,19 @@ COMPONENT_MD = (
     "# Widget Maker\n"
 )
 
-FAKE_PYTHON_ADAPTER = (
-    "from pathlib import Path\n"
-    "\n"
-    "KIND = \"python\"\n"
-    "\n"
-    "\n"
-    "def layout_errors(code_dir):\n"
-    "    return [\"bad.py:1: SyntaxError: x\"] if (Path(code_dir) / \"bad.py\").exists() else []\n"
-    "\n"
-    "\n"
-    "def provision(repo_root):\n"
-    "    return {\"ok\": True, \"reason\": \"\", \"versions\": {\"python\": \"3.12\"}, "
-    "\"lockfile_sha256\": None, \"interpreter\": \"/fake/python\"}\n"
-)
-
 
 def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-class Bundle:
-    def __init__(self, **kwargs):
-        self._data = dict(kwargs)
-        for key, value in kwargs.items():
-            setattr(self, key, value)
+class Bundle(dict):
+    """A mapping with the SpecBundle fields that also reads by attribute."""
 
-    def __getitem__(self, key):
-        return self._data[key]
-
-    def get(self, key, default=None):
-        return self._data.get(key, default)
-
-    def __contains__(self, key):
-        return key in self._data
-
-    def keys(self):
-        return self._data.keys()
+    def __getattr__(self, name):
+        try:
+            return self[name]
+        except KeyError as exc:
+            raise AttributeError(name) from exc
 
 
 def make_bundle():
@@ -62,40 +61,42 @@ def make_bundle():
         component_id="comp-widget-maker",
         spec_bundle_hash="sha256:" + "ab" * 32,
         spec="# Widget Maker\n\nMakes widgets.",
-        interface="make_widget() -> int",
+        interface="make_widget() -> str",
         constraints="No network.",
         dependency_interfaces={},
         dependency_context={},
         dependency_usage={},
         vars={},
-        glossary="",
+        glossary="A widget is a thing.",
         hint_code=None,
+        spec_bundle_parts={},
     )
 
 
-def plant_repo(repo_root):
-    comp_dir = repo_root / "specs" / "components" / "widget-maker"
-    comp_dir.mkdir(parents=True)
-    (comp_dir / "component.md").write_text(COMPONENT_MD, encoding="utf-8")
-    adapter_dir = repo_root / "gen" / "kind-python"
-    adapter_dir.mkdir(parents=True)
-    (adapter_dir / "kind_python.py").write_text(FAKE_PYTHON_ADAPTER, encoding="utf-8")
+def make_repo(root):
+    root.mkdir(parents=True, exist_ok=True)
+    adapter = root / "gen" / "kind-python" / "kind_python.py"
+    adapter.parent.mkdir(parents=True, exist_ok=True)
+    adapter.write_text(PYTHON_ADAPTER, encoding="utf-8")
+    comp = root / "specs" / "components" / "widget-maker" / "component.md"
+    comp.parent.mkdir(parents=True, exist_ok=True)
+    comp.write_text(COMPONENT_MD, encoding="utf-8")
 
 
-def make_backend(log_path):
+def make_mock(log_path):
     def backend(prompt, model, **params):
         with open(log_path, "a", encoding="utf-8") as fh:
-            fh.write(model + "\n")
+            fh.write(json.dumps({"model": model}) + "\n")
         nonce = re.search(r"-----BEGIN FILE ([0-9a-f]{32}):", prompt).group(1)
-        text = (
+        reply = (
             "-----BEGIN FILE " + nonce + ": widget_maker.py-----\n"
             "def make_widget():\n"
-            "    return 1\n"
+            "    return 'widget'\n"
             "-----END FILE " + nonce + "-----\n"
             "-----END REPLY " + nonce + "-----\n"
         )
         return {
-            "text": text,
+            "text": reply,
             "model": model,
             "backend": "mock",
             "model_call_error": None,
@@ -104,36 +105,49 @@ def make_backend(log_path):
     return backend
 
 
-def test_ac_gen_004_model_identifier_passed_through(tmp_path, monkeypatch):
+def read_log(log_path):
+    if not log_path.exists():
+        return []
+    return [
+        json.loads(line)["model"]
+        for line in log_path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+
+
+def test_model_identifier_passed_through_to_mock_model(tmp_path, monkeypatch):
     monkeypatch.delenv("VAR_CACHE_STORE_URL", raising=False)
     repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    plant_repo(repo_root)
-    log_path = tmp_path / "calls.log"
+    make_repo(repo_root)
+    monkeypatch.chdir(tmp_path)
 
     bundle = make_bundle()
-    backend = make_backend(log_path)
+    model_a = "model-alpha-test-1"
+    model_b = "model-beta-test-2"
 
-    model_a = "mock-model-alpha"
-    model_b = "mock-model-beta"
+    log_a = tmp_path / "log_a.jsonl"
+    log_b = tmp_path / "log_b.jsonl"
 
-    result_a = generator.generate(bundle, model_a, repo_root=repo_root, llm_backend=backend)
-    lines_after_a = log_path.read_text(encoding="utf-8").splitlines() if log_path.exists() else []
-    assert lines_after_a == [model_a], (
-        "mock model call for first generate did not receive " + repr(model_a)
-        + "; got " + repr(lines_after_a)
-        + "; result model_call_error=" + repr(field(result_a, "model_call_error"))
-        + " refused=" + repr(field(result_a, "refused"))
+    result_a = generator.generate(
+        bundle, model_a, repo_root=repo_root, llm_backend=make_mock(log_a)
+    )
+    result_b = generator.generate(
+        bundle, model_b, repo_root=repo_root, llm_backend=make_mock(log_b)
     )
 
-    result_b = generator.generate(bundle, model_b, repo_root=repo_root, llm_backend=backend)
-    lines_after_b = log_path.read_text(encoding="utf-8").splitlines()
-    assert lines_after_b == [model_a, model_b], (
-        "mock model call for second generate did not receive " + repr(model_b)
-        + "; got " + repr(lines_after_b)
-        + "; result model_call_error=" + repr(field(result_b, "model_call_error"))
-        + " refused=" + repr(field(result_b, "refused"))
-    )
+    calls_a = read_log(log_a)
+    calls_b = read_log(log_b)
 
+    assert calls_a, "mock model was never called for the first generate call"
+    assert calls_b, "mock model was never called for the second generate call"
+    assert all(m == model_a for m in calls_a), calls_a
+    assert all(m == model_b for m in calls_b), calls_b
+
+    assert field(result_a, "cache_hit") is False
+    assert field(result_b, "cache_hit") is False
+    assert field(result_a, "model_call_error") is None
+    assert field(result_b, "model_call_error") is None
+    assert field(result_a, "refused") is None
+    assert field(result_b, "refused") is None
     assert field(result_a, "model") == model_a
     assert field(result_b, "model") == model_b
