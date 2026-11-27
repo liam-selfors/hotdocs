@@ -1,11 +1,4 @@
-# hotdocs-criterion: sha256:1a87324a5c566f9a5c5badf648403496205c0cf05129345782553c71d59813ef
-"""AC-PROVCHECK-006: check_provenance is read-only (R-PROVCHECK-004).
-
-Given gen/foo/.provenance.json exists, when check_provenance is called for
-comp-foo, on either a hit or a miss, the manifest's content and mtime are
-unchanged and no other file is written.
-"""
-
+# hotdocs-criterion: sha256:64bf9b7781504f7a79587f86250a52aac5b8a3e3718069e814279c6df0bfeac0
 import hashlib
 import json
 import os
@@ -16,20 +9,23 @@ import pytest
 import provenance_checker
 
 
-FIXED_TIME_NS = 1_600_000_000 * 1_000_000_000
 PK = "sha256:" + "a" * 64
-MATCHING_HASH = "sha256:abc"
+MANIFEST_HASH = "sha256:" + "0123456789abcdef" * 4
+OTHER_HASH = "sha256:" + "fedcba9876543210" * 4
+OLD_TIME_NS = 1_000_000_000 * 1_000_000_000  # a fixed, old mtime (2001)
 
 
 def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def _sha256_file(path):
+def sha256_of(path):
     return "sha256:" + hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
 
-def _python_adapter_source():
+def write_python_adapter(repo_root):
+    adapter_dir = repo_root / "gen" / "kind-python"
+    adapter_dir.mkdir(parents=True, exist_ok=True)
     provision_result = {
         "ok": True,
         "reason": "",
@@ -37,28 +33,31 @@ def _python_adapter_source():
         "lockfile_sha256": None,
         "interpreter": "/fake/python",
     }
-    guidance_result = {"generator": "", "test_author": ""}
-    return (
+    src = (
         "KIND = " + repr("python") + "\n"
         "\n"
         "\n"
         "def guidance():\n"
-        "    return " + repr(guidance_result) + "\n"
+        "    return " + repr({"generator": "", "test_author": ""}) + "\n"
         "\n"
         "\n"
         "def provision(repo_root):\n"
         "    return " + repr(provision_result) + "\n"
     )
+    path = adapter_dir / "kind_python.py"
+    path.write_text(src, encoding="utf-8")
+    return path
 
 
-def _component_md():
-    return (
+def write_component_md(repo_root):
+    comp_dir = repo_root / "specs" / "components" / "foo"
+    comp_dir.mkdir(parents=True, exist_ok=True)
+    text = (
         "---\n"
         "id: comp-foo\n"
         "title: Foo\n"
         "status: draft\n"
         "owners: [pipeline-team]\n"
-        "depends_on: []\n"
         "---\n"
         "\n"
         "# Foo\n"
@@ -67,99 +66,98 @@ def _component_md():
         "\n"
         "A fixture component.\n"
     )
+    (comp_dir / "component.md").write_text(text, encoding="utf-8")
 
 
-def _build_repo(repo_root):
-    adapter = repo_root / "gen" / "kind-python" / "kind_python.py"
-    adapter.parent.mkdir(parents=True)
-    adapter.write_text(_python_adapter_source(), encoding="utf-8")
-
-    component_md = repo_root / "specs" / "components" / "foo" / "component.md"
-    component_md.parent.mkdir(parents=True)
-    component_md.write_text(_component_md(), encoding="utf-8")
-
-    python_entry = {
-        "kind": "python",
-        "path": ".",
-        "definition_sha256": None,
-        "adapter_sha256": _sha256_file(adapter),
-        "versions": {"python": "3.12.4", "packages": PK},
-        "lockfile_sha256": None,
-    }
+def write_manifest(repo_root, python_entry):
+    gen_dir = repo_root / "gen" / "foo"
+    gen_dir.mkdir(parents=True, exist_ok=True)
     manifest = {
-        "spec_bundle_hash": MATCHING_HASH,
+        "spec_bundle_hash": MANIFEST_HASH,
         "gate_versions": {},
         "verification_report": {"criteria": []},
         "license_scan": {},
         "secret_scan": {},
         "assets": [python_entry],
+        "drivers": [],
     }
-    manifest_path = repo_root / "gen" / "foo" / ".provenance.json"
-    manifest_path.parent.mkdir(parents=True)
-    manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+    path = gen_dir / ".provenance.json"
+    path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    os.utime(path, ns=(OLD_TIME_NS, OLD_TIME_NS))
+    return path
 
-    # Pin every file's and directory's mtime to a fixed past time, so any
-    # rewrite (even with identical bytes) or any entry created or removed
-    # inside a directory is observable.
-    for dirpath, dirnames, filenames in os.walk(repo_root, topdown=False):
-        for name in filenames:
-            os.utime(os.path.join(dirpath, name), ns=(FIXED_TIME_NS, FIXED_TIME_NS))
-        os.utime(dirpath, ns=(FIXED_TIME_NS, FIXED_TIME_NS))
 
+def build_repo(repo_root):
+    adapter_path = write_python_adapter(repo_root)
+    write_component_md(repo_root)
+    python_entry = {
+        "kind": "python",
+        "path": ".",
+        "definition_sha256": None,
+        "adapter_sha256": sha256_of(adapter_path),
+        "versions": {"python": "3.12.4", "packages": PK},
+        "lockfile_sha256": None,
+    }
+    manifest_path = write_manifest(repo_root, python_entry)
+    # Make every planted file's mtime old and fixed, so any rewrite shows.
+    for p in repo_root.rglob("*"):
+        if p.is_file():
+            os.utime(p, ns=(OLD_TIME_NS, OLD_TIME_NS))
     return manifest_path
 
 
-def _snapshot(repo_root):
-    files = {}
-    dirs = {}
-    for dirpath, dirnames, filenames in os.walk(repo_root):
-        rel_dir = os.path.relpath(dirpath, repo_root)
-        dirs[rel_dir] = os.stat(dirpath).st_mtime_ns
-        for name in filenames:
-            full = os.path.join(dirpath, name)
-            rel = os.path.relpath(full, repo_root)
-            with open(full, "rb") as handle:
-                content = handle.read()
-            files[rel] = (content, os.stat(full).st_mtime_ns)
-    return files, dirs
+def snapshot(root):
+    state = {}
+    for p in sorted(root.rglob("*")):
+        rel = p.relative_to(root).as_posix()
+        st = os.lstat(p)
+        if p.is_dir() and not p.is_symlink():
+            state[rel] = ("dir",)
+        else:
+            state[rel] = ("file", p.read_bytes(), st.st_mtime_ns)
+    return state
 
 
 @pytest.mark.parametrize(
-    "spec_bundle_hash,gate_versions",
-    [
-        pytest.param(MATCHING_HASH, {}, id="hit"),
-        pytest.param("sha256:def", {}, id="miss-spec-bundle-hash"),
-        pytest.param(MATCHING_HASH, {"compiler": "cc@2"}, id="miss-gate-versions"),
-    ],
+    "case",
+    ["hit", "miss-spec-bundle-hash", "miss-gate-versions"],
 )
-def test_check_provenance_writes_nothing(tmp_path, spec_bundle_hash, gate_versions):
+def test_check_provenance_is_read_only(tmp_path, case):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
-    manifest_path = _build_repo(repo_root)
+    manifest_path = build_repo(repo_root)
 
     manifest_bytes_before = manifest_path.read_bytes()
     manifest_mtime_before = os.stat(manifest_path).st_mtime_ns
-    files_before, dirs_before = _snapshot(repo_root)
+    before = snapshot(repo_root)
+
+    if case == "hit":
+        spec_hash, gate_versions = MANIFEST_HASH, {}
+    elif case == "miss-spec-bundle-hash":
+        spec_hash, gate_versions = OTHER_HASH, {}
+    else:
+        spec_hash, gate_versions = MANIFEST_HASH, {"compiler": "criterion-compiler@9.9.9"}
 
     result = provenance_checker.check_provenance(
-        "comp-foo", spec_bundle_hash, gate_versions, repo_root
+        "comp-foo", spec_hash, gate_versions, repo_root
     )
 
-    # The call returned a result (hit or miss); its hit flag is a bool.
-    assert isinstance(field(result, "hit"), bool)
+    # The scenario really is a hit or a miss as intended.
+    if case == "hit":
+        assert field(result, "hit") is True, field(result, "reason")
+    else:
+        assert field(result, "hit") is False
 
-    # The manifest itself is untouched: same content, same mtime.
+    # The manifest's content and mtime are unchanged.
     assert manifest_path.is_file()
     assert manifest_path.read_bytes() == manifest_bytes_before
     assert os.stat(manifest_path).st_mtime_ns == manifest_mtime_before
 
-    # No other file was written, modified, created or deleted anywhere under
-    # repo_root (a __pycache__ or any temporary file would show up here).
-    files_after, dirs_after = _snapshot(repo_root)
-    assert sorted(files_after) == sorted(files_before)
-    for rel, (content, mtime) in files_before.items():
-        assert files_after[rel][0] == content, rel
-        assert files_after[rel][1] == mtime, rel
-    assert sorted(dirs_after) == sorted(dirs_before)
-    for rel, mtime in dirs_before.items():
-        assert dirs_after[rel] == mtime, rel
+    # No other file under repo_root was written, modified, created or deleted.
+    after = snapshot(repo_root)
+    assert set(after) == set(before), (
+        "created: " + repr(sorted(set(after) - set(before)))
+        + " deleted: " + repr(sorted(set(before) - set(after)))
+    )
+    for rel, entry in before.items():
+        assert after[rel] == entry, "changed: " + rel

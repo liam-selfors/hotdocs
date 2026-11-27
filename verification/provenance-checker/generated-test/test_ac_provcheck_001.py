@@ -1,13 +1,4 @@
-# hotdocs-criterion: sha256:3d41298a02339c1f6da36f71a4d0866f39bdef49428e535c5a4c8d6a473cff79
-"""AC-PROVCHECK-001 (covers R-PROVCHECK-002).
-
-Given gen/foo/.provenance.json exists with spec_bundle_hash H, and its
-verification_report has no llm-judge-kind criteria, when check_provenance
-is called for comp-foo with spec_bundle_hash H, then the result's hit is
-true and verification_report, license_scan and secret_scan match the
-committed manifest exactly.
-"""
-
+# hotdocs-criterion: sha256:9649669407c5c4cf66186f5057068485942eb1375770d05941b142a237085db9
 import copy
 import hashlib
 import json
@@ -18,21 +9,26 @@ import pytest
 import provenance_checker
 
 
+H = "sha256:" + "1f" * 32
 PK = "sha256:" + "a" * 64
-H = "sha256:" + "0123456789abcdef" * 4
 
 
 def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
-def _sha256_of(path):
+def _sha(path):
     return "sha256:" + hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
 
-def _write_python_adapter(repo_root):
-    adapter_dir = repo_root / "gen" / "kind-python"
-    adapter_dir.mkdir(parents=True, exist_ok=True)
+def _write(path, text):
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+    return path
+
+
+def _plant_python_adapter(repo_root):
     provision_result = {
         "ok": True,
         "reason": "",
@@ -40,25 +36,22 @@ def _write_python_adapter(repo_root):
         "lockfile_sha256": None,
         "interpreter": "/fake/python",
     }
+    guidance_result = {"generator": "", "test_author": ""}
     src = (
         "KIND = " + repr("python") + "\n"
         "\n"
         "\n"
         "def guidance():\n"
-        "    return " + repr({"generator": "", "test_author": ""}) + "\n"
+        "    return " + repr(guidance_result) + "\n"
         "\n"
         "\n"
         "def provision(repo_root):\n"
         "    return " + repr(provision_result) + "\n"
     )
-    path = adapter_dir / "kind_python.py"
-    path.write_text(src, encoding="utf-8")
-    return path
+    return _write(repo_root / "gen" / "kind-python" / "kind_python.py", src)
 
 
-def _write_component_md(repo_root):
-    comp_dir = repo_root / "specs" / "components" / "foo"
-    comp_dir.mkdir(parents=True, exist_ok=True)
+def _plant_component(repo_root):
     text = (
         "---\n"
         "id: comp-foo\n"
@@ -70,12 +63,14 @@ def _write_component_md(repo_root):
         "\n"
         "# Foo\n"
         "\n"
+        "## Purpose\n"
+        "\n"
         "A fixture component.\n"
     )
-    (comp_dir / "component.md").write_text(text, encoding="utf-8")
+    _write(repo_root / "specs" / "components" / "foo" / "component.md", text)
 
 
-def _build_manifest(python_asset):
+def _build_manifest(python_entry):
     verification_report = {
         "component_id": "comp-foo",
         "criteria": [
@@ -86,7 +81,7 @@ def _build_manifest(python_asset):
                 "kind": "generated-test",
                 "result": "pass",
                 "test_authoring": {
-                    "model": "claude-sonnet-5",
+                    "model": "gpt-5",
                     "seed": 0,
                     "prompt_version": "v1",
                     "cache_hit": False,
@@ -97,7 +92,8 @@ def _build_manifest(python_asset):
         "interface_drift": False,
         "mutation_score": 0.87,
         "mutation_error": None,
-        "assets": [copy.deepcopy(python_asset)],
+        "assets": [python_entry],
+        "drivers": [],
         "overall": "pass",
     }
     license_scan = {
@@ -118,43 +114,27 @@ def _build_manifest(python_asset):
         "gate_version": "secret_scanner@3.1.0+detect-secrets.1.5.0",
         "flagged": False,
         "matches": [],
-        "allowed": [],
+        "allowed": [
+            {"rule_id": "AWS Access Key", "file": "verification/foo/test_x.py", "line": 3}
+        ],
         "unused_allowlist_entries": [],
         "notified": False,
         "notification_delivery_error": None,
-        "cache_hit": False,
+        "cache_hit": True,
     }
     return {
         "spec_bundle_hash": H,
-        "model_pin": "claude-sonnet-5",
-        "prompt_version": "v1",
-        "retry_feedback": None,
-        "generation": {
-            "mode": "single",
-            "generator_version": "generator@3.0.0+v11",
-            "transcript_sha256": None,
-            "turns": 1,
-            "tool_calls": 0,
-            "isolation": None,
-        },
-        "attempts": 1,
-        "attempt_history": [],
-        "pipeline_version": "v1",
         "gate_versions": {},
-        "provenance_hit": False,
-        "generated_at": "2026-01-01T00:00:00Z",
-        "verification_run_id": "run-001",
         "verification_report": verification_report,
         "license_scan": license_scan,
         "secret_scan": secret_scan,
-        "assets": [copy.deepcopy(python_asset)],
+        "assets": [python_entry],
+        "drivers": [],
     }
 
 
 @pytest.mark.parametrize("trust_judge", [None, "false", "true"])
-def test_hash_match_without_llm_judge_is_hit_with_verbatim_results(tmp_path, monkeypatch, trust_judge):
-    # The variable only governs llm-judge criteria: with none present, a
-    # hash match is a hit however VAR-TRUST-JUDGE-PROVENANCE resolves.
+def test_hash_match_without_llm_judge_is_verbatim_hit(tmp_path, monkeypatch, trust_judge):
     if trust_judge is None:
         monkeypatch.delenv("VAR_TRUST_JUDGE_PROVENANCE", raising=False)
     else:
@@ -162,35 +142,31 @@ def test_hash_match_without_llm_judge_is_hit_with_verbatim_results(tmp_path, mon
 
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
+    adapter = _plant_python_adapter(repo_root)
+    _plant_component(repo_root)
 
-    adapter_path = _write_python_adapter(repo_root)
-    _write_component_md(repo_root)
-
-    python_asset = {
+    python_entry = {
         "kind": "python",
         "path": ".",
         "definition_sha256": None,
-        "adapter_sha256": _sha256_of(adapter_path),
+        "adapter_sha256": _sha(adapter),
         "versions": {"python": "3.12.4", "packages": PK},
         "lockfile_sha256": None,
     }
-    manifest = _build_manifest(python_asset)
-
-    # Sanity: the precondition really has no llm-judge-kind criteria.
-    assert all(c["kind"] != "llm-judge" for c in manifest["verification_report"]["criteria"])
-
-    manifest_dir = repo_root / "gen" / "foo"
-    manifest_dir.mkdir(parents=True, exist_ok=True)
-    (manifest_dir / ".provenance.json").write_text(
-        json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8"
+    manifest = _build_manifest(python_entry)
+    assert not any(
+        c.get("kind") == "llm-judge" for c in manifest["verification_report"]["criteria"]
     )
-
-    committed = json.loads((manifest_dir / ".provenance.json").read_text(encoding="utf-8"))
+    _write(
+        repo_root / "gen" / "foo" / ".provenance.json",
+        json.dumps(manifest, indent=2, sort_keys=True),
+    )
+    expected = copy.deepcopy(manifest)
 
     result = provenance_checker.check_provenance("comp-foo", H, {}, repo_root)
 
-    assert field(result, "hit") is True, "expected a hit, got reason " + repr(field(result, "reason"))
+    assert field(result, "hit") is True
     assert field(result, "reason") is None
-    assert field(result, "verification_report") == committed["verification_report"]
-    assert field(result, "license_scan") == committed["license_scan"]
-    assert field(result, "secret_scan") == committed["secret_scan"]
+    assert field(result, "verification_report") == expected["verification_report"]
+    assert field(result, "license_scan") == expected["license_scan"]
+    assert field(result, "secret_scan") == expected["secret_scan"]

@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:71a2b06b975e7e351c14dc02f60410c0aa4b3fd06dd356013315d2709e215c3f
+# hotdocs-criterion: sha256:b93dc59e220f34fab68fb84efb8bfa16885ebb962ae6cf34c7bae93c2603e58f
 import hashlib
 import json
 from pathlib import Path
@@ -9,20 +9,29 @@ import provenance_checker
 
 
 PK = "sha256:" + "a" * 64
-GATE_VERSIONS_JSON = json.dumps({"license_scanner": "1"})
+GATE_VERSIONS = {"license_scanner": "1"}
+GATE_VERSIONS_JSON = json.dumps(GATE_VERSIONS)
+SPEC_BUNDLE_HASH = "sha256:0a1b"
 
 
 def field(value, name):
     return value[name] if isinstance(value, dict) else getattr(value, name)
 
 
+def _write(path, text):
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+    return path
+
+
 def _sha256_file(path):
     return "sha256:" + hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
 
-def _write_python_adapter(repo_root):
-    adapter_dir = repo_root / "gen" / "kind-python"
-    adapter_dir.mkdir(parents=True, exist_ok=True)
+def build_repo(root):
+    root = Path(root)
+
     provision_result = {
         "ok": True,
         "reason": "",
@@ -30,7 +39,7 @@ def _write_python_adapter(repo_root):
         "lockfile_sha256": None,
         "interpreter": "/fake/python",
     }
-    source = (
+    adapter_src = (
         "KIND = " + repr("python") + "\n"
         "\n"
         "\n"
@@ -41,15 +50,9 @@ def _write_python_adapter(repo_root):
         "def provision(repo_root):\n"
         "    return " + repr(provision_result) + "\n"
     )
-    path = adapter_dir / "kind_python.py"
-    path.write_text(source, encoding="utf-8")
-    return path
+    adapter_path = _write(root / "gen" / "kind-python" / "kind_python.py", adapter_src)
 
-
-def _write_component_md(repo_root):
-    comp_dir = repo_root / "specs" / "components" / "foo"
-    comp_dir.mkdir(parents=True, exist_ok=True)
-    text = (
+    component_md = (
         "---\n"
         "id: comp-foo\n"
         "title: Foo\n"
@@ -64,47 +67,10 @@ def _write_component_md(repo_root):
         "\n"
         "A fixture component.\n"
     )
-    (comp_dir / "component.md").write_text(text, encoding="utf-8")
+    _write(root / "specs" / "components" / "foo" / "component.md", component_md)
 
-
-def _write_manifest(repo_root, python_entry):
-    gen_dir = repo_root / "gen" / "foo"
-    gen_dir.mkdir(parents=True, exist_ok=True)
-    manifest = {
-        "spec_bundle_hash": "sha256:0a1b",
-        "gate_versions": {"license_scanner": "1"},
-        "verification_report": {
-            "component_id": "comp-foo",
-            "criteria": [
-                {
-                    "id": "AC-FOO-001",
-                    "covers": "R-FOO-001",
-                    "kind": "generated-test",
-                    "result": "pass",
-                }
-            ],
-            "requirement_results": {"R-FOO-001": "pass"},
-            "interface_drift": False,
-            "mutation_score": 1.0,
-            "mutation_error": None,
-            "assets": [python_entry],
-            "overall": "pass",
-        },
-        "license_scan": {},
-        "secret_scan": {},
-        "assets": [python_entry],
-    }
-    (gen_dir / ".provenance.json").write_text(json.dumps(manifest), encoding="utf-8")
-
-
-@pytest.fixture
-def repo_root(tmp_path, monkeypatch):
-    root = tmp_path / "repo"
-    root.mkdir()
-    adapter_path = _write_python_adapter(root)
-    _write_component_md(root)
     pa = _sha256_file(adapter_path)
-    python_entry = {
+    p_entry = {
         "kind": "python",
         "path": ".",
         "definition_sha256": None,
@@ -112,17 +78,49 @@ def repo_root(tmp_path, monkeypatch):
         "versions": {"python": "3.12.4", "packages": PK},
         "lockfile_sha256": None,
     }
-    _write_manifest(root, python_entry)
-    monkeypatch.delenv("VAR_TRUST_JUDGE_PROVENANCE", raising=False)
-    monkeypatch.chdir(root)
+
+    verification_report = {
+        "component_id": "comp-foo",
+        "criteria": [
+            {
+                "id": "AC-FOO-001",
+                "covers": "R-FOO-001",
+                "kind": "generated-test",
+                "result": "pass",
+            }
+        ],
+        "requirement_results": {"R-FOO-001": "pass"},
+        "interface_drift": False,
+        "mutation_score": 1.0,
+        "mutation_error": None,
+        "assets": [p_entry],
+        "drivers": [],
+        "overall": "pass",
+    }
+
+    manifest = {
+        "spec_bundle_hash": SPEC_BUNDLE_HASH,
+        "gate_versions": GATE_VERSIONS,
+        "provenance_hit": False,
+        "generated_at": "2026-01-01T00:00:00Z",
+        "verification_report": verification_report,
+        "license_scan": {},
+        "secret_scan": {},
+        "assets": [p_entry],
+        "drivers": [],
+    }
+    text = json.dumps(manifest, indent=2)
+    _write(root / "gen" / "foo" / ".provenance.json", text)
+    _write(root / "verification" / "foo" / ".provenance.json", text)
     return root
 
 
-def test_json_equals_form_reports_hit(repo_root, capsys):
+def test_json_hit_with_equals_form(tmp_path, capsys):
+    repo_root = build_repo(tmp_path / "repo")
     argv = [
         "check",
         "comp-foo",
-        "--spec-bundle-hash=sha256:0a1b",
+        "--spec-bundle-hash=" + SPEC_BUNDLE_HASH,
         "--gate-versions=" + GATE_VERSIONS_JSON,
         "--repo-root=" + str(repo_root),
         "--format=json",
@@ -134,7 +132,8 @@ def test_json_equals_form_reports_hit(repo_root, capsys):
     assert field(doc, "hit") is True
 
 
-def test_text_separate_form_reports_miss(repo_root, capsys):
+def test_text_miss_with_separate_value_form(tmp_path, capsys):
+    repo_root = build_repo(tmp_path / "repo")
     argv = [
         "check",
         "comp-foo",
@@ -153,50 +152,31 @@ def test_text_separate_form_reports_miss(repo_root, capsys):
     assert "miss" in out
 
 
-def _usage_cases(root):
-    r = str(root)
+def _usage_cases(repo_root):
+    rr = "--repo-root=" + str(repo_root)
     return {
         "missing-spec-bundle-hash": [
-            "check", "comp-foo",
-            "--gate-versions=" + GATE_VERSIONS_JSON,
-            "--repo-root=" + r,
-            "--format=json",
+            "check", "comp-foo", "--gate-versions=" + GATE_VERSIONS_JSON, rr,
         ],
         "hash-without-prefix": [
-            "check", "comp-foo",
-            "--spec-bundle-hash=0a1b",
-            "--gate-versions=" + GATE_VERSIONS_JSON,
-            "--repo-root=" + r,
-            "--format=json",
+            "check", "comp-foo", "--spec-bundle-hash=0a1b",
+            "--gate-versions=" + GATE_VERSIONS_JSON, rr,
         ],
         "gate-versions-not-object": [
-            "check", "comp-foo",
-            "--spec-bundle-hash=sha256:0a1b",
-            "--gate-versions", "[1]",
-            "--repo-root=" + r,
-            "--format=json",
+            "check", "comp-foo", "--spec-bundle-hash=" + SPEC_BUNDLE_HASH,
+            "--gate-versions", "[1]", rr,
         ],
         "bogus-format": [
-            "check", "comp-foo",
-            "--spec-bundle-hash=sha256:0a1b",
-            "--gate-versions=" + GATE_VERSIONS_JSON,
-            "--repo-root=" + r,
-            "--format=bogus",
+            "check", "comp-foo", "--spec-bundle-hash=" + SPEC_BUNDLE_HASH,
+            "--gate-versions=" + GATE_VERSIONS_JSON, rr, "--format=bogus",
         ],
         "unknown-argument": [
-            "check", "comp-foo",
-            "--spec-bundle-hash=sha256:0a1b",
-            "--gate-versions=" + GATE_VERSIONS_JSON,
-            "--repo-root=" + r,
-            "--format=json",
-            "--hotdocs-smoke-unknown",
+            "check", "comp-foo", "--spec-bundle-hash=" + SPEC_BUNDLE_HASH,
+            "--gate-versions=" + GATE_VERSIONS_JSON, rr, "--hotdocs-smoke-unknown",
         ],
         "repo-root-last-no-value": [
-            "check", "comp-foo",
-            "--spec-bundle-hash=sha256:0a1b",
-            "--gate-versions=" + GATE_VERSIONS_JSON,
-            "--format=json",
-            "--repo-root",
+            "check", "comp-foo", "--spec-bundle-hash=" + SPEC_BUNDLE_HASH,
+            "--gate-versions=" + GATE_VERSIONS_JSON, "--repo-root",
         ],
     }
 
@@ -212,7 +192,8 @@ def _usage_cases(root):
         "repo-root-last-no-value",
     ],
 )
-def test_usage_errors_return_2(repo_root, capsys, case):
+def test_usage_errors_return_2(tmp_path, capsys, case):
+    repo_root = build_repo(tmp_path / "repo")
     argv = _usage_cases(repo_root)[case]
     code = provenance_checker.main(argv)
     capsys.readouterr()

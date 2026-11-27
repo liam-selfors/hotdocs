@@ -1,5 +1,9 @@
 {
-  "spec_bundle_hash": "sha256:a02aac67ba4d31e75b703c85ed63a0c5b176a77715545e24a00b707851e32df6",
+  "spec_bundle_hash": "sha256:1ac2b5739dd210620a4cdc28fe4d9d45e1f52dc9b78521397d6051ee91a0ecae",
+  "spec_bundle_parts": {
+    "spec": "sha256:b8bbfdbf3cc8d6f288f6334bab5a329fa0c5fcf5adb88a66d96c8a86fff9df83",
+    "dependency_code": "sha256:76324c8b0395831b16b46de82186fdad8f5f98a2075ac8d00abc3ee28ede4c76"
+  },
   "model_pin": "claude-opus-5-5",
   "prompt_version": "v12",
   "retry_feedback": null,
@@ -17,13 +21,13 @@
   "gate_versions": {
     "compiler": "criterion-compiler@1.0.0",
     "generated_test": "generated_test@3.0.0",
-    "verifier": "verifier-orchestrator@3.5.0",
+    "verifier": "verifier-orchestrator@4.0.0",
     "license_scanner": "license_scanner@4.0.0-no-reference-corpus",
     "secret_scanner": "secret_scanner@3.1.0+detect-secrets.1.5.0",
     "generator": "generator@3.2.0+v12"
   },
   "provenance_hit": false,
-  "generated_at": "2026-11-25T07:47:41Z",
+  "generated_at": "2026-11-27T05:52:29Z",
   "verification_run_id": "provenance-checker-attempt-1",
   "verification_report": {
     "component_id": "comp-provenance-checker",
@@ -32,91 +36,205 @@
         "id": "AC-PROVCHECK-001",
         "covers": "R-PROVCHECK-002",
         "kind": "generated-test",
-        "result": "pass"
+        "result": "pass",
+        "test_authoring": {
+          "model": "claude-opus-5-5",
+          "seed": 1,
+          "prompt_version": "v1",
+          "cache_hit": false
+        }
       },
       {
         "id": "AC-PROVCHECK-002",
         "covers": "R-PROVCHECK-003",
         "kind": "generated-test",
-        "result": "pass"
+        "result": "pass",
+        "test_authoring": {
+          "model": "claude-opus-5-5",
+          "seed": 1,
+          "prompt_version": "v1",
+          "cache_hit": false
+        }
       },
       {
         "id": "AC-PROVCHECK-003",
         "covers": "R-PROVCHECK-003",
         "kind": "generated-test",
-        "result": "pass"
+        "result": "pass",
+        "test_authoring": {
+          "model": "claude-opus-5-5",
+          "seed": 1,
+          "prompt_version": "v1",
+          "cache_hit": false
+        }
       },
       {
         "id": "AC-PROVCHECK-004",
         "covers": "R-PROVCHECK-003",
         "kind": "generated-test",
-        "result": "pass"
+        "result": "pass",
+        "test_authoring": {
+          "model": "claude-opus-5-5",
+          "seed": 1,
+          "prompt_version": "v1",
+          "cache_hit": false
+        }
       },
       {
         "id": "AC-PROVCHECK-005",
         "covers": "R-PROVCHECK-002",
         "kind": "generated-test",
-        "result": "pass"
+        "result": "pass",
+        "test_authoring": {
+          "model": "claude-opus-5-5",
+          "seed": 1,
+          "prompt_version": "v1",
+          "cache_hit": false
+        }
       },
       {
         "id": "AC-PROVCHECK-006",
         "covers": "R-PROVCHECK-004",
         "kind": "generated-test",
-        "result": "pass"
+        "result": "pass",
+        "test_authoring": {
+          "model": "claude-opus-5-5",
+          "seed": 1,
+          "prompt_version": "v1",
+          "cache_hit": false
+        }
       },
       {
         "id": "AC-PROVCHECK-007",
         "covers": "R-PROVCHECK-001",
         "kind": "generated-test",
-        "result": "pass"
+        "result": "pass",
+        "test_authoring": {
+          "model": "claude-opus-5-5",
+          "seed": 1,
+          "prompt_version": "v1",
+          "cache_hit": false
+        }
       },
       {
         "id": "AC-PROVCHECK-008",
         "covers": "R-PROVCHECK-001",
         "kind": "generated-test",
-        "result": "pass"
+        "result": "pass",
+        "test_authoring": {
+          "model": "claude-opus-5-5",
+          "seed": 1,
+          "prompt_version": "v1",
+          "cache_hit": false
+        }
       },
       {
         "id": "AC-PROVCHECK-009",
         "covers": "R-PROVCHECK-005",
         "kind": "generated-test",
-        "result": "pass"
+        "result": "pass",
+        "test_authoring": {
+          "model": "claude-opus-5-5",
+          "seed": 1,
+          "prompt_version": "v1",
+          "cache_hit": false
+        }
       },
       {
         "id": "AC-PROVCHECK-010",
         "covers": "R-PROVCHECK-006",
         "kind": "generated-test",
-        "result": "pass"
+        "result": "pass",
+        "test_authoring": {
+          "model": "claude-opus-5-5",
+          "seed": 1,
+          "prompt_version": "v1",
+          "cache_hit": false
+        }
       },
       {
         "id": "AC-PROVCHECK-011",
         "covers": "R-PROVCHECK-007",
         "kind": "generated-test",
-        "result": "pass"
+        "result": "pass",
+        "test_authoring": {
+          "model": "claude-opus-5-5",
+          "seed": 1,
+          "prompt_version": "v1",
+          "cache_hit": false
+        }
       },
       {
         "id": "AC-PROVCHECK-012",
         "covers": "R-PROVCHECK-008",
         "kind": "generated-test",
-        "result": "pass"
+        "result": "pass",
+        "test_authoring": {
+          "model": "claude-opus-5-5",
+          "seed": 1,
+          "prompt_version": "v1",
+          "cache_hit": false
+        }
       },
       {
         "id": "AC-PROVCHECK-013",
         "covers": "R-PROVCHECK-008",
         "kind": "generated-test",
-        "result": "pass"
+        "result": "pass",
+        "test_authoring": {
+          "model": "claude-opus-5-5",
+          "seed": 1,
+          "prompt_version": "v1",
+          "cache_hit": false
+        }
       },
       {
         "id": "AC-PROVCHECK-014",
         "covers": "R-PROVCHECK-009",
         "kind": "generated-test",
-        "result": "pass"
+        "result": "pass",
+        "test_authoring": {
+          "model": "claude-opus-5-5",
+          "seed": 1,
+          "prompt_version": "v1",
+          "cache_hit": false
+        }
       },
       {
         "id": "AC-PROVCHECK-015",
         "covers": "R-PROVCHECK-010",
         "kind": "generated-test",
-        "result": "pass"
+        "result": "pass",
+        "test_authoring": {
+          "model": "claude-opus-5-5",
+          "seed": 1,
+          "prompt_version": "v1",
+          "cache_hit": false
+        }
+      },
+      {
+        "id": "AC-PROVCHECK-016",
+        "covers": "R-PROVCHECK-011",
+        "kind": "generated-test",
+        "result": "pass",
+        "test_authoring": {
+          "model": "claude-opus-5-5",
+          "seed": 1,
+          "prompt_version": "v1",
+          "cache_hit": false
+        }
+      },
+      {
+        "id": "AC-PROVCHECK-017",
+        "covers": "R-PROVCHECK-010",
+        "kind": "generated-test",
+        "result": "pass",
+        "test_authoring": {
+          "model": "claude-opus-5-5",
+          "seed": 1,
+          "prompt_version": "v1",
+          "cache_hit": false
+        }
       }
     ],
     "requirement_results": {
@@ -129,10 +247,11 @@
       "R-PROVCHECK-007": "pass",
       "R-PROVCHECK-008": "pass",
       "R-PROVCHECK-009": "pass",
-      "R-PROVCHECK-010": "pass"
+      "R-PROVCHECK-010": "pass",
+      "R-PROVCHECK-011": "pass"
     },
     "interface_drift": false,
-    "mutation_score": 0.9285714285714286,
+    "mutation_score": 0.9491525423728814,
     "mutation_error": null,
     "assets": [
       {
@@ -147,6 +266,7 @@
         "lockfile_sha256": null
       }
     ],
+    "drivers": [],
     "overall": "pass"
   },
   "license_scan": {
@@ -165,8 +285,33 @@
   "secret_scan": {
     "scope": "full",
     "gate_version": "secret_scanner@3.1.0+detect-secrets.1.5.0",
-    "flagged": false,
-    "matches": [],
+    "flagged": true,
+    "matches": [
+      {
+        "rule_id": "Hex High Entropy String",
+        "risk_tier": "low",
+        "file": "verification/provenance-checker/generated-test/test_ac_provcheck_005.py",
+        "line": 14
+      },
+      {
+        "rule_id": "Hex High Entropy String",
+        "risk_tier": "low",
+        "file": "verification/provenance-checker/generated-test/test_ac_provcheck_006.py",
+        "line": 13
+      },
+      {
+        "rule_id": "Hex High Entropy String",
+        "risk_tier": "low",
+        "file": "verification/provenance-checker/generated-test/test_ac_provcheck_006.py",
+        "line": 14
+      },
+      {
+        "rule_id": "Hex High Entropy String",
+        "risk_tier": "low",
+        "file": "verification/provenance-checker/generated-test/test_ac_provcheck_008.py",
+        "line": 14
+      }
+    ],
     "allowed": [
       {
         "rule_id": "AWS Access Key",
@@ -255,11 +400,6 @@
       },
       {
         "rule_id": "Hex High Entropy String",
-        "file": "verification/provenance-checker/generated-test/test_ac_provcheck_001.py",
-        "line": 22
-      },
-      {
-        "rule_id": "Hex High Entropy String",
         "file": "verification/provenance-checker/generated-test/test_ac_provcheck_004.py",
         "line": 14
       }
@@ -280,6 +420,10 @@
       {
         "file": "verification/corpus-graph.json",
         "type": "Base64 High Entropy String"
+      },
+      {
+        "file": "verification/provenance-checker/generated-test/test_ac_provcheck_001.py",
+        "type": "Hex High Entropy String"
       },
       {
         "file": "verification/provenance-tracker/generated-test/test_ac_track_013.py",
@@ -378,5 +522,6 @@
       },
       "lockfile_sha256": null
     }
-  ]
+  ],
+  "drivers": []
 }

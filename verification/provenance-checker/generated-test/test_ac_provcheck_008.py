@@ -1,4 +1,4 @@
-# hotdocs-criterion: sha256:43763b1ce9a67e49b4d0a54a63da4dd13073a719d640dd1056e8578bbb3ebcb7
+# hotdocs-criterion: sha256:3d132566fbc81111fcd96884641da0f9a999c6af54d23acc98d4f8c72bcc15e7
 import hashlib
 import json
 from pathlib import Path
@@ -11,12 +11,15 @@ def field(value, name):
 
 
 PK = "sha256:" + "a" * 64
-H = "sha256:" + "b" * 64
+H = "sha256:" + "0123456789abcdef" * 4
 
 
-def _write_python_adapter(repo_root):
-    adapter_dir = repo_root / "gen" / "kind-python"
-    adapter_dir.mkdir(parents=True, exist_ok=True)
+def _write(path, text):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+
+
+def _plant_python_adapter(repo_root):
     provision_result = {
         "ok": True,
         "reason": "",
@@ -24,26 +27,21 @@ def _write_python_adapter(repo_root):
         "lockfile_sha256": None,
         "interpreter": "/fake/python",
     }
-    guidance_result = {"generator": "", "test_author": ""}
     source = (
         "KIND = " + repr("python") + "\n"
         "\n"
-        "\n"
         "def guidance():\n"
-        "    return " + repr(guidance_result) + "\n"
-        "\n"
+        "    return " + repr({"generator": "", "test_author": ""}) + "\n"
         "\n"
         "def provision(repo_root):\n"
         "    return " + repr(provision_result) + "\n"
     )
-    path = adapter_dir / "kind_python.py"
-    path.write_text(source, encoding="utf-8")
-    return path
+    path = repo_root / "gen" / "kind-python" / "kind_python.py"
+    _write(path, source)
+    return "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def _write_component_md(repo_root):
-    comp_dir = repo_root / "specs" / "components" / "foo"
-    comp_dir.mkdir(parents=True, exist_ok=True)
+def _plant_component(repo_root):
     text = (
         "---\n"
         "id: comp-foo\n"
@@ -55,18 +53,29 @@ def _write_component_md(repo_root):
         "\n"
         "# Foo\n"
     )
-    (comp_dir / "component.md").write_text(text, encoding="utf-8")
+    _write(repo_root / "specs" / "components" / "foo" / "component.md", text)
 
 
-def test_gate_version_mismatch_is_a_miss_even_when_spec_bundle_hash_matches(tmp_path):
+def _plant_manifest(repo_root, gate_versions, assets):
+    manifest = {
+        "spec_bundle_hash": H,
+        "gate_versions": gate_versions,
+        "verification_report": {"criteria": []},
+        "license_scan": {},
+        "secret_scan": {},
+        "assets": assets,
+        "drivers": [],
+    }
+    _write(repo_root / "gen" / "foo" / ".provenance.json", json.dumps(manifest))
+
+
+def test_ac_provcheck_008_gate_version_mismatch_is_miss(tmp_path):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
 
-    adapter_path = _write_python_adapter(repo_root)
-    _write_component_md(repo_root)
-
-    pa = "sha256:" + hashlib.sha256(adapter_path.read_bytes()).hexdigest()
-    python_entry = {
+    pa = _plant_python_adapter(repo_root)
+    _plant_component(repo_root)
+    p_entry = {
         "kind": "python",
         "path": ".",
         "definition_sha256": None,
@@ -74,24 +83,15 @@ def test_gate_version_mismatch_is_a_miss_even_when_spec_bundle_hash_matches(tmp_
         "versions": {"python": "3.12.4", "packages": PK},
         "lockfile_sha256": None,
     }
-
-    manifest = {
-        "spec_bundle_hash": H,
-        "gate_versions": {"license_scanner": "1.0.0"},
-        "verification_report": {"criteria": []},
-        "license_scan": {},
-        "secret_scan": {},
-        "assets": [python_entry],
-    }
-    gen_dir = repo_root / "gen" / "foo"
-    gen_dir.mkdir(parents=True, exist_ok=True)
-    (gen_dir / ".provenance.json").write_text(json.dumps(manifest), encoding="utf-8")
+    _plant_manifest(repo_root, {"license_scanner": "1.0.0"}, [p_entry])
 
     result = provenance_checker.check_provenance(
         "comp-foo",
         H,
         {"license_scanner": "2.0.0"},
-        Path(repo_root),
+        repo_root,
     )
 
     assert field(result, "hit") is False
+    # The manifest exists and was read: the miss is not for want of one.
+    assert field(result, "reason") != "no manifest"
