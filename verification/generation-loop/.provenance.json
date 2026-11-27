@@ -1,8 +1,8 @@
 {
-  "spec_bundle_hash": "sha256:a721d4162c52747a909bf41251856c9fb040aa34e2a18af633652eb8b11e692f",
+  "spec_bundle_hash": "sha256:12a9758ebe3669fd7b0a803e8d8178e06ee672631ac347d436037ebe7ac67015",
   "spec_bundle_parts": {
     "spec": "sha256:4dc007eb4cfd25f59c314a3cb224cbe7456cf19de9ab585b760098258b636714",
-    "dependency_code": "sha256:d737145dc30c95aec75d44c81d0afa1eed0452c17ba73f6cf50535981f1cc1e0"
+    "dependency_code": "sha256:c8e934b8c501f61c083c51a4c56140ebc4a1164e95159aa2e68ba39af5f01112"
   },
   "model_pin": "claude-opus-5-5",
   "prompt_version": "v12",
@@ -27,7 +27,7 @@
     "generator": "generator@3.2.0+v12"
   },
   "provenance_hit": false,
-  "generated_at": "2026-11-27T20:46:44Z",
+  "generated_at": "2026-11-27T23:08:51Z",
   "verification_run_id": "generation-loop-attempt-1",
   "verification_report": {
     "component_id": "comp-generation-loop",
@@ -180,7 +180,7 @@
     "matches": [],
     "notified": false,
     "notification_delivery_error": null,
-    "cache_hit": false
+    "cache_hit": true
   },
   "secret_scan": {
     "scope": "full",
