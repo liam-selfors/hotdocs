@@ -22,4 +22,9 @@ helper process the adapter starts with
 of its own beside this module, exchanging one JSON object per line on
 its standard input and output.
 
+Every handler the helper gives Playwright (`page.on`, `page.route`) is
+a function defined with `def` or `lambda`, never a bound built-in such
+as `list.append`: Playwright sets an attribute on each handler, which a
+built-in cannot hold.
+
 Implements: `specs/architecture/test-drivers.md`, `specs/architecture/test-driver-browser.md`
