@@ -1,10 +1,21 @@
-# hotdocs-criterion: sha256:7094e4a24fa1fb66e293dca65c61717e7220679d5b48d10015dd7acc9c691e63
-"""AC-VERIFY-004: interface drift between gen/<component>/ and interface/ fails verify."""
+# hotdocs-criterion: sha256:e7fb724d2f847ec83e1c2c745d0593b458701079bd64c2fb20dd0c671a36bf55
+"""AC-VERIFY-004: a gen/<component>/ public interface that does not match its
+interface/ contract makes interface_drift true and the overall verdict fail.
 
-import json
+Covers R-VERIFY-004.
+"""
+
 from pathlib import Path
 
 import verifier_orchestrator
+
+
+SLUG = "widget-maker"
+COMPONENT_ID = "comp-widget-maker"
+MODULE = "widget_maker"
+CRITERION_ID = "AC-WIDGET-001"
+REQUIREMENT_ID = "R-WIDGET-001"
+FENCE = "```"
 
 
 def field(value, name):
@@ -16,56 +27,62 @@ def write(path, text):
     path.write_text(text, encoding="utf-8")
 
 
-INTERFACE_TEXT = (
-    "# Library\n"
-    "\n"
-    "```\n"
-    "widget_area(width: int, height: int) -> int\n"
-    "```\n"
-    "\n"
-    "`widget_area` returns the product of its two arguments.\n"
-)
-
-REQUIREMENT_TEXT = (
-    "# R-WIDGET-001\n"
-    "\n"
-    "**R-WIDGET-001** \u2014 This component MUST provide `widget_area(width, height)`\n"
-    "  returning `width * height`.\n"
-)
-
-CRITERION_TEXT = (
-    "# AC-WIDGET-001\n"
-    "\n"
-    "Covers: R-WIDGET-001\n"
-    "Kind: llm-judge\n"
-    "\n"
-    "```gherkin\n"
-    "Given the widget interface documentation\n"
-    "When a reviewer reads it\n"
-    "Then widget_area is clearly documented\n"
-    "```\n"
-)
-
-GLOSSARY_TEXT = "# Glossary\n\n- **Widget** \u2014 a rectangle with an area.\n"
-
-
-def assembler_source(log_path):
+def interface_text():
     return (
-        "import json\n"
+        "# Library\n"
         "\n"
-        "LOG = " + repr(str(log_path)) + "\n"
+        + FENCE + "\n"
+        "compute(a: int, b: int) -> int\n"
+        + FENCE + "\n"
+        "\n"
+        "`compute` adds its two arguments.\n"
+    )
+
+
+def criterion_text():
+    return (
+        "# " + CRITERION_ID + "\n"
+        "\n"
+        "Covers: " + REQUIREMENT_ID + "\n"
+        "Kind: generated-test\n"
+        "\n"
+        + FENCE + "gherkin\n"
+        "Given two numbers\n"
+        "When compute is called with them\n"
+        "Then it returns a number\n"
+        + FENCE + "\n"
+    )
+
+
+def requirement_text():
+    return (
+        "# " + REQUIREMENT_ID + "\n"
+        "\n"
+        "**" + REQUIREMENT_ID + "** — This component MUST provide `compute`.\n"
+    )
+
+
+def glossary_text():
+    return "# Glossary\n\n- **Widget** — a thing this fixture makes.\n"
+
+
+def assembler_source():
+    return (
+        "CRITERION_TEXT = " + repr(criterion_text()) + "\n"
+        "REQUIREMENT_TEXT = " + repr(requirement_text()) + "\n"
+        "INTERFACE_TEXT = " + repr(interface_text()) + "\n"
+        "GLOSSARY_TEXT = " + repr(glossary_text()) + "\n"
+        "\n"
         "\n"
         "def assemble_criterion(component_id, criterion_id, repo_root):\n"
-        "    with open(LOG, 'a', encoding='utf-8') as fh:\n"
-        "        fh.write(criterion_id + '\\n')\n"
         "    return {\n"
         "        'component_id': component_id,\n"
         "        'criterion_id': criterion_id,\n"
-        "        'covers': 'R-WIDGET-001',\n"
-        "        'criterion_text': " + repr(CRITERION_TEXT) + ",\n"
-        "        'requirement_text': " + repr(REQUIREMENT_TEXT) + ",\n"
-        "        'interface': " + repr(INTERFACE_TEXT) + ",\n"
-        "        'glossary': " + repr(GLOSSARY_TEXT) + ",\n"
+        "        'covers': " + repr(REQUIREMENT_ID) + ",\n"
+        "        'criterion_text': CRITERION_TEXT,\n"
+        "        'requirement_text': REQUIREMENT_TEXT,\n"
+        "        'interface': INTERFACE_TEXT,\n"
+        "        'glossary': GLOSSARY_TEXT,\n"
         "        'dependency_interfaces': {},\n"
         "        'testing': '',\n"
         "    }\n"
@@ -74,7 +91,7 @@ def assembler_source(log_path):
 
 def probe_source():
     return (
-        "class _Report:\n"
+        "class ProbeReport:\n"
         "    def __init__(self):\n"
         "        self.ok = True\n"
         "        self.findings = []\n"
@@ -84,111 +101,134 @@ def probe_source():
         "\n"
         "\n"
         "def probe(test_source, criterion_bundle, module_name, **kwargs):\n"
-        "    return _Report()\n"
+        "    return ProbeReport()\n"
     )
 
 
-def build_fixture(root, module_source):
-    root = Path(root)
-    comp = root / "specs" / "components" / "widget"
+def build_fixture(repo_root, module_source):
+    comp_dir = repo_root / "specs" / "components" / SLUG
     write(
-        comp / "component.md",
+        comp_dir / "component.md",
         "---\n"
-        "id: comp-widget\n"
-        "title: Widget\n"
+        "id: " + COMPONENT_ID + "\n"
+        "title: Widget Maker\n"
         "status: draft\n"
         "owners: [test-team]\n"
         "depends_on: []\n"
         "realizes: [P-WIDGET]\n"
         "---\n"
         "\n"
-        "# Widget\n"
+        "# Widget Maker\n"
         "\n"
         "## Purpose\n"
         "\n"
-        "Computes the area of a widget.\n",
+        "Makes widgets for the drift test.\n",
     )
-    write(comp / "interface" / "library.md", INTERFACE_TEXT)
-    write(comp / "requirements" / "R-WIDGET-001.md", REQUIREMENT_TEXT)
-    write(comp / "acceptance" / "AC-WIDGET-001.md", CRITERION_TEXT)
-    write(comp / "constraints.md", "# Constraints\n\nNone.\n")
+    write(comp_dir / "constraints.md", "# Constraints\n\nNone.\n")
+    write(comp_dir / "requirements" / (REQUIREMENT_ID + ".md"), requirement_text())
+    write(comp_dir / "acceptance" / (CRITERION_ID + ".md"), criterion_text())
+    write(comp_dir / "interface" / "library.md", interface_text())
     write(
-        root / "specs" / "product" / "widget.md",
+        repo_root / "specs" / "product" / "widget.md",
         "---\n"
         "id: P-WIDGET\n"
-        "title: Widget areas\n"
+        "title: Widgets\n"
         "status: draft\n"
         "owners: [test-team]\n"
         "---\n"
         "\n"
-        "# P-WIDGET\n"
+        "# Widgets\n"
         "\n"
-        "Users can compute a widget's area.\n",
+        "Users get widgets.\n",
     )
-    write(root / "specs" / "glossary.md", GLOSSARY_TEXT)
+    write(repo_root / "specs" / "glossary.md", glossary_text())
 
-    write(root / "gen" / "widget" / "widget.py", module_source)
+    # The code under test.
+    write(repo_root / "gen" / SLUG / (MODULE + ".py"), module_source)
 
-    log_path = root / "assembler.log"
+    # Stand-ins for dependencies verify / test-supply load from repo_root.
     write(
-        root / "gen" / "spec-bundle-assembler" / "spec_bundle_assembler.py",
-        assembler_source(log_path),
+        repo_root / "gen" / "spec-bundle-assembler" / "spec_bundle_assembler.py",
+        assembler_source(),
     )
-    write(root / "gen" / "test-probe" / "test_probe.py", probe_source())
-    return root
+    write(repo_root / "gen" / "test-probe" / "test_probe.py", probe_source())
 
 
-def judge_pass(bundle):
-    return {"result": "pass", "rationale": "widget_area is documented."}
+def make_test_author(log_path):
+    def test_author_stand_in(bundle):
+        with open(log_path, "a", encoding="utf-8") as handle:
+            handle.write("called\n")
+        return {
+            "component_id": COMPONENT_ID,
+            "criterion_id": CRITERION_ID,
+            "model": "fake-model",
+            "seed": 0,
+            "prompt_version": "v1",
+            "cache_hit": False,
+            "file": {
+                "path": "verification/" + SLUG + "/generated-test/test_ac_widget_001.py",
+                "content": "def test_ok():\n    assert True\n",
+            },
+            "model_call_error": None,
+            "repair_attempts": 0,
+            "probe_findings": [],
+        }
+
+    return test_author_stand_in
 
 
-MATCHING_MODULE = (
-    "def widget_area(width, height):\n"
-    "    return width * height\n"
-)
-
-MISMATCHED_PARAMS_MODULE = (
-    "def widget_area(width, depth):\n"
-    "    return width * depth\n"
-)
-
-MISSING_CALLABLE_MODULE = (
-    "def widget_volume(width, height, depth):\n"
-    "    return width * height * depth\n"
-)
+def run_verify(repo_root):
+    log_path = repo_root / "test_author.log"
+    report = verifier_orchestrator.verify(
+        COMPONENT_ID, repo_root, judge=None, test_author=make_test_author(log_path)
+    )
+    return report
 
 
-def test_matching_interface_has_no_drift(tmp_path):
-    root = build_fixture(tmp_path / "repo", MATCHING_MODULE)
-    report = verifier_orchestrator.verify("comp-widget", root, judge=judge_pass)
+def test_parameter_mismatch_is_interface_drift_and_fails(tmp_path):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    build_fixture(
+        repo_root,
+        "def compute(a, c):\n"
+        "    return a + c\n",
+    )
+
+    report = run_verify(repo_root)
+
+    assert field(report, "interface_drift") is True
+    assert field(report, "overall") == "fail"
+
+
+def test_missing_callable_is_interface_drift_and_fails(tmp_path):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    build_fixture(
+        repo_root,
+        "def other(a, b):\n"
+        "    return a + b\n",
+    )
+
+    report = run_verify(repo_root)
+
+    assert field(report, "interface_drift") is True
+    assert field(report, "overall") == "fail"
+
+
+def test_matching_interface_is_not_drift(tmp_path):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    build_fixture(
+        repo_root,
+        "def compute(a, b):\n"
+        "    return a + b\n"
+        "\n"
+        "\n"
+        "def helper(x):\n"
+        "    return x\n",
+    )
+
+    report = run_verify(repo_root)
+
+    # An undocumented extra public name is never drift (D84).
     assert field(report, "interface_drift") is False
-    assert report.to_dict()["interface_drift"] is False
-
-
-def test_parameter_mismatch_is_drift_and_fails(tmp_path):
-    root = build_fixture(tmp_path / "repo", MISMATCHED_PARAMS_MODULE)
-    report = verifier_orchestrator.verify("comp-widget", root, judge=judge_pass)
-    assert field(report, "interface_drift") is True
-    assert field(report, "overall") == "fail"
-    as_dict = report.to_dict()
-    assert as_dict["interface_drift"] is True
-    assert as_dict["overall"] == "fail"
-
-
-def test_missing_callable_is_drift_and_fails(tmp_path):
-    root = build_fixture(tmp_path / "repo", MISSING_CALLABLE_MODULE)
-    report = verifier_orchestrator.verify("comp-widget", root, judge=judge_pass)
-    assert field(report, "interface_drift") is True
-    assert field(report, "overall") == "fail"
-
-
-def test_cli_reports_drift_with_exit_1(tmp_path, capsys):
-    root = build_fixture(tmp_path / "repo", MISMATCHED_PARAMS_MODULE)
-    code = verifier_orchestrator.main(
-        ["comp-widget", "--repo-root", str(root), "--format=json"]
-    )
-    out = capsys.readouterr().out
-    assert code == 1
-    doc = json.loads(out)
-    assert doc["interface_drift"] is True
-    assert doc["overall"] == "fail"

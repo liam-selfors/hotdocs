@@ -1,41 +1,81 @@
 """Verifier orchestrator: runs every verification gate against one component."""
 
-from __future__ import annotations
-
 import ast
+import dataclasses
 import hashlib
 import importlib.util
-import inspect
 import json
 import os
 import re
+import shutil
 import signal
 import subprocess
 import sys
 import tempfile
 import xml.etree.ElementTree as ET
-from dataclasses import asdict, dataclass
 from pathlib import Path
 
 GATE_VERSION = "verifier-orchestrator@4.0.0"
 DEFAULT_TEST_TIMEOUT = 300.0
 
-_USAGE = "usage: hotdocs verify-component <component-id> [--repo-root=<dir>] [--format=json|text]"
+USAGE = "usage: hotdocs verify-component <component-id> [--repo-root=<dir>] [--format=json|text]"
+
+_AC_HEADING = re.compile(r"^# (AC-[A-Z0-9]+(?:-[A-Z0-9]+)*[a-z]?)", re.M)
+_COVERS = re.compile(r"Covers:\s*`?([RP]-[A-Za-z0-9-]*[A-Za-z0-9])")
+_KIND = re.compile(r"^Kind:\s*`?([a-z-]+)", re.M)
+_GHERKIN = re.compile(r"^```gherkin\s*$", re.M)
+_CALL = re.compile(r"[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*\(")
+_PARAM = re.compile(r"\s*\**([A-Za-z_][A-Za-z0-9_]*)")
+_TEST_DEF = re.compile(r"^\s*def\s+(test_[A-Za-z0-9_]*)\s*\(", re.M)
 
 _CONFTEST = '''import json
 import os
 
 
+def _record(key, value):
+    path = os.environ["HOTDOCS_VO_CAPTURE"]
+    data = {}
+    if os.path.exists(path):
+        with open(path) as handle:
+            data = json.load(handle)
+    data.setdefault(key, value)
+    with open(path, "w") as handle:
+        json.dump(data, handle)
+
+
 def pytest_assertrepr_compare(config, op, left, right):
-    path = {path!r}
-    if not os.path.exists(path):
-        with open(path, "w", encoding="utf-8") as fh:
-            json.dump({{"op": op, "left": repr(left), "right": repr(right)}}, fh)
+    _record("compare", [op, repr(left), repr(right)])
     return None
+
+
+def pytest_runtest_logreport(report):
+    if report.failed:
+        crash = getattr(report.longrepr, "reprcrash", None)
+        text = crash.message if crash is not None else str(report.longrepr)
+        _record("message", text.split("\\n")[0])
+'''
+
+_DRIFT_SCRIPT = '''import importlib, inspect, json, sys
+sys.path.pop(0)
+names = json.loads(sys.argv[2])
+try:
+    module = importlib.import_module(sys.argv[1])
+except Exception:
+    module = None
+out = {}
+for name in names:
+    obj = module
+    try:
+        for part in name.split("."):
+            obj = getattr(obj, part)
+        out[name] = [p.name for p in inspect.signature(obj).parameters.values()]
+    except Exception:
+        out[name] = None
+print(json.dumps(out))
 '''
 
 
-@dataclass
+@dataclasses.dataclass
 class VerificationReport:
     component_id: str
     criteria: list
@@ -47,476 +87,422 @@ class VerificationReport:
     drivers: list
     overall: str
 
-    def to_dict(self) -> dict:
-        return asdict(self)
+    def to_dict(self):
+        return dataclasses.asdict(self)
 
 
-# ---------------------------------------------------------------- helpers
+def _get(obj, name):
+    if isinstance(obj, dict):
+        return obj.get(name)
+    return getattr(obj, name, None)
 
 
-def _get(obj, key):
-    return obj.get(key) if isinstance(obj, dict) else getattr(obj, key, None)
+def _tool_root():
+    for parent in Path(__file__).resolve().parents:
+        if parent.name == "gen":
+            return parent.parent
 
 
-def _read(path: Path) -> str:
-    return path.read_text(encoding="utf-8") if path.is_file() else ""
-
-
-def _slug(component_id: str) -> str:
-    return re.sub(r"^comp-", "", component_id)
-
-
-def _tool_root() -> Path:
-    here = Path(os.path.abspath(__file__))
-    return next(p.parent for p in here.parents if p.name == "gen")
-
-
-def _load_from(code_dir: Path, module_name: str):
-    pkg = code_dir / module_name / "__init__.py"
-    if pkg.is_file():
-        file = pkg
-        locations = [str(pkg.parent)]
-    else:
-        file = code_dir / f"{module_name}.py"
-        locations = None
-    name = "_hotdocs_vo_%s_%s" % (
-        module_name,
-        hashlib.sha256(str(file).encode("utf-8")).hexdigest()[:16],
-    )
-    spec = importlib.util.spec_from_file_location(
-        name, str(file), submodule_search_locations=locations
-    )
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[name] = module
-    old = sys.dont_write_bytecode
-    sys.dont_write_bytecode = True
-    try:
-        spec.loader.exec_module(module)
-    finally:
-        sys.dont_write_bytecode = old
-    return module
-
-
-def _load(repo_root: Path, rel_dir: str, module_name: str):
+def _load(repo_root, rel_dir, module_name):
     base = repo_root / rel_dir
     if not base.is_dir():
         base = _tool_root() / rel_dir
-    return _load_from(base, module_name)
+    path = base / f"{module_name}.py"
+    digest = hashlib.sha256(str(path).encode("utf-8")).hexdigest()[:16]
+    name = f"_hotdocs_vo_{module_name}_{digest}"
+    spec = importlib.util.spec_from_file_location(name, path)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    spec.loader.exec_module(module)
+    return module
 
 
-def _kill_tree(root: int) -> None:
-    listing = subprocess.run(
-        ["ps", "-eo", "pid=,ppid="], capture_output=True, text=True
-    ).stdout
-    children: dict = {}
-    for line in listing.splitlines():
-        pid, ppid = (int(x) for x in line.split())
-        children.setdefault(ppid, []).append(pid)
-    found, stack = [], [root]
-    while stack:
-        for child in children.get(stack.pop(), []):
+def _frontmatter(text):
+    match = re.match(r"---\s*\n(.*?)\n---", text, re.S)
+    body = match.group(1) if match else ""
+    return {k: v.strip() for k, v in re.findall(r"^([A-Za-z_]+):(.*)$", body, re.M)}
+
+
+def _read_criteria(comp_dir):
+    criteria = []
+    for path in sorted((comp_dir / "acceptance").glob("*.md")):
+        text = path.read_text(encoding="utf-8")
+        covers = _COVERS.search(text)
+        kind = _KIND.search(text, covers.end())
+        criteria.append({
+            "id": _AC_HEADING.search(text).group(1),
+            "covers": covers.group(1),
+            "kind": kind.group(1),
+            "freeform": _GHERKIN.search(text) is None,
+        })
+    return criteria
+
+
+def _params(rest):
+    depth = 1
+    parts = [""]
+    for ch in rest:
+        if ch in "([{":
+            depth += 1
+        elif ch in ")]}":
+            depth -= 1
+        if depth == 0:
+            break
+        if ch == "," and depth == 1:
+            parts.append("")
+        else:
+            parts[-1] += ch
+    names = []
+    for part in parts:
+        match = _PARAM.match(part)
+        if match:
+            names.append(match.group(1))
+    return names
+
+
+def _callables_in(text):
+    lines = text.splitlines()
+    found = []
+    in_block = False
+    documenting = False
+    for index, line in enumerate(lines):
+        if line.strip().startswith("```"):
+            documenting = not in_block and line.strip() == "```"
+            in_block = not in_block
+            continue
+        if documenting:
+            match = _CALL.match(line)
+            if match:
+                rest = "\n".join(lines[index:])[match.end():]
+                found.append((match.group()[:-1], _params(rest)))
+    return found
+
+
+def _documented(comp_dir):
+    found = []
+    for name in ("library.md", "cli.md"):
+        path = comp_dir / "interface" / name
+        if path.exists():
+            found.extend(_callables_in(path.read_text(encoding="utf-8")))
+    return found
+
+
+def _drift(code_dir, module_name, documented, repo_root):
+    env = dict(os.environ)
+    env["PYTHONPATH"] = str(code_dir)
+    names = [name for name, _ in documented]
+    proc = subprocess.run(
+        [sys.executable, "-c", _DRIFT_SCRIPT, module_name, json.dumps(names)],
+        cwd=str(repo_root), env=env, capture_output=True, text=True,
+        stdin=subprocess.DEVNULL,
+    )
+    actual = json.loads(proc.stdout)
+    return any(actual[name] != params for name, params in documented)
+
+
+def _kill_tree(proc):
+    listing = subprocess.run(["ps", "-eo", "pid=,ppid="], capture_output=True, text=True).stdout
+    children = {}
+    for line in listing.split("\n"):
+        fields = line.split()
+        if len(fields) == 2:
+            children.setdefault(int(fields[1]), []).append(int(fields[0]))
+    pending = [proc.pid]
+    found = []
+    while pending:
+        for child in children.get(pending.pop(), []):
             found.append(child)
-            stack.append(child)
-    for pid in found + [root]:
+            pending.append(child)
+    for pid in found:
         try:
             os.kill(pid, signal.SIGKILL)
-        except OSError:
+        except ProcessLookupError:
             pass
+    proc.kill()
 
 
-def _run(cmd: list, env: dict, cwd: Path):
-    with tempfile.TemporaryFile() as out:
-        proc = subprocess.Popen(
-            cmd, cwd=str(cwd), env=env, stdout=out, stderr=subprocess.STDOUT
-        )
-        try:
-            rc = proc.wait(timeout=DEFAULT_TEST_TIMEOUT)
-        except subprocess.TimeoutExpired:
-            _kill_tree(proc.pid)
-            proc.wait()
-            rc = None
-        out.seek(0)
-        return rc, out.read().decode("utf-8", "replace")
+def _run(cmd, cwd, env):
+    timeout = DEFAULT_TEST_TIMEOUT
+    proc = subprocess.Popen(
+        cmd, cwd=str(cwd), env=env, stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+    )
+    try:
+        output, _ = proc.communicate(timeout=timeout)
+        return proc.returncode, output, False, timeout
+    except subprocess.TimeoutExpired:
+        _kill_tree(proc)
+        output, _ = proc.communicate()
+        return None, output, True, timeout
 
 
-def _message(rc, output: str) -> str:
-    if rc is None:
-        return f"test timed out after {DEFAULT_TEST_TIMEOUT} seconds"
-    m = re.search(r"^>\s+assert\s+(.+?)\s*$", output, re.M)
-    if m:
-        return m.group(1).replace(" == ", " equals ", 1) + " failed"
-    return f"test run exited with code {rc}"
+def _failure_message(rc, output, timed_out, timeout):
+    if timed_out:
+        return f"test timed out after {timeout} seconds"
+    for line in output.splitlines():
+        if line.startswith("FAILED ") and " - " in line:
+            return line.split(" - ", 1)[1]
+    return f"pytest exited with code {rc}"
 
 
-def _literal(text: str):
+def _literal(text):
     try:
         return ast.literal_eval(text)
     except Exception:
         return None
 
 
-# ---------------------------------------------------------------- parsing
+def _entry(crit):
+    return {"id": crit["id"], "covers": crit["covers"], "kind": crit["kind"], "result": "pass"}
 
 
-def _frontmatter(text: str) -> str:
-    m = re.match(r"---\n(.*?)\n---", text, re.S)
-    return m.group(1) if m else ""
-
-
-def _parse_criteria(spec_dir: Path) -> list:
-    criteria = []
-    for path in sorted((spec_dir / "acceptance").glob("*.md")):
-        text = _read(path)
-        cid = re.search(r"^#\s+(AC-[A-Za-z0-9-]+)", text, re.M).group(1)
-        cov = re.search(r"Covers:\**\s*`?(?:@covers:)?([A-Z]-[A-Za-z0-9-]+)", text)
-        kind = re.search(
-            r"^Kind:\s*`?(compiled|generated-test|llm-judge)", text[cov.end():], re.M
-        ).group(1)
-        criteria.append({
-            "id": cid,
-            "covers": cov.group(1),
-            "kind": kind,
-            "freeform": re.search(r"^\s*```gherkin\s*$", text, re.M) is None,
-        })
-    return criteria
-
-
-def _documented(text: str) -> list:
-    blocks, current, inside = [], [], False
-    for line in text.splitlines():
-        if line.lstrip().startswith("```"):
-            if inside:
-                blocks.append("\n".join(current))
-                current = []
-            inside = not inside
-        elif inside:
-            current.append(line)
-    found = []
-    for block in blocks:
-        for m in re.finditer(r"^[ \t]*(?:def[ \t]+)?([A-Za-z_][\w.]*)\(", block, re.M):
-            depth, i = 1, m.end()
-            while depth:
-                ch = block[i]
-                depth += (ch in "([{") - (ch in ")]}")
-                i += 1
-            found.append((m.group(1), _param_names(block[m.end():i - 1])))
-    return found
-
-
-def _param_names(inner: str) -> list:
-    parts, depth, cur = [], 0, ""
-    for ch in inner:
-        depth += (ch in "([{") - (ch in ")]}")
-        if ch == "," and depth == 0:
-            parts.append(cur)
-            cur = ""
-        else:
-            cur += ch
-    parts.append(cur)
-    names = []
-    for part in parts:
-        m = re.match(r"\s*\**([A-Za-z_]\w*)", part)
-        if m:
-            names.append(m.group(1))
-    return names
-
-
-def _drift(code_dir: Path, module_name: str, spec_dir: Path) -> bool:
-    iface = spec_dir / "interface"
-    documented = _documented(_read(iface / "library.md")) + _documented(_read(iface / "cli.md"))
-    if (iface / "cli.md").is_file():
-        documented.append(("main", ["argv"]))
-    try:
-        module = _load_from(code_dir, module_name)
-    except Exception:
-        return True
-    for name, params in documented:
-        obj = module
-        try:
-            for part in name.split("."):
-                obj = getattr(obj, part)
-            sig = inspect.signature(obj)
-        except (AttributeError, TypeError, ValueError):
-            return True
-        if [p.name for p in sig.parameters.values()] != params:
-            return True
-    return False
-
-
-# ---------------------------------------------------------------- entries
-
-
-def _entry(c: dict, result: str, **extra) -> dict:
-    entry = {"id": c["id"], "covers": c["covers"], "kind": c["kind"], "result": result}
-    entry.update(extra)
-    return entry
-
-
-def _fail(entry: dict, origin: str, message, expected=None, actual=None) -> dict:
+def _fail(entry, message, expected, actual, origin):
     entry["result"] = "fail"
     entry["failure_detail"] = {"message": message, "expected": expected, "actual": actual}
     entry["failure_origin"] = origin
-    return entry
 
 
-def _judge(c: dict, component_id: str, repo_root: Path, judge) -> dict:
-    if judge is None:
-        return _entry(c, "skipped", rationale=None)
-    assembler = _load(repo_root, "gen/spec-bundle-assembler", "spec_bundle_assembler")
-    bundle = assembler.assemble_criterion(component_id, c["id"], repo_root)
-    outcome = judge(bundle)
-    if isinstance(outcome, dict):
-        value = outcome.get("result", outcome.get("verdict"))
-        rationale = outcome.get("rationale")
-    else:
-        value, rationale = outcome, None
-    result = "pass" if value is True or value == "pass" else "fail"
-    return _entry(c, result, rationale=rationale)
+def _judge(entry, component_id, repo_root, judge):
+    entry["result"] = "skipped"
+    entry["rationale"] = None
+    if judge is not None:
+        assembler = _load(repo_root, "gen/spec-bundle-assembler", "spec_bundle_assembler")
+        bundle = assembler.assemble_criterion(component_id, entry["id"], repo_root)
+        outcome = judge(bundle)
+        if isinstance(outcome, dict):
+            value = outcome.get("result", outcome.get("verdict"))
+            entry["rationale"] = outcome.get("rationale")
+        else:
+            value = outcome
+        entry["result"] = "pass" if value in (True, "pass") else "fail"
 
 
-def _requirement_results(spec_dir: Path, entries: list) -> dict:
-    results = {}
-    for rid in sorted(p.stem for p in (spec_dir / "requirements").glob("R-*.md")):
-        covering = [e["result"] for e in entries if e["covers"] == rid]
-        results[rid] = "pass" if all(r == "pass" for r in covering) else "fail"
-    return results
+def _requirement_results(req_ids, entries):
+    return {
+        rid: "pass" if all(e["result"] == "pass" for e in entries if e["covers"] == rid) else "fail"
+        for rid in req_ids
+    }
 
 
-# ---------------------------------------------------------------- verify
-
-
-def verify(component_id: str, repo_root: Path, judge=None, test_author=None) -> VerificationReport:
+def verify(component_id, repo_root, judge=None, test_author=None):
     repo_root = Path(repo_root).absolute()
-    slug = _slug(component_id)
+    slug = component_id.removeprefix("comp-")
+    comp_dir = repo_root / "specs" / "components" / slug
+    frontmatter = _frontmatter((comp_dir / "component.md").read_text(encoding="utf-8"))
+    criteria = _read_criteria(comp_dir)
+    req_ids = sorted(p.stem for p in (comp_dir / "requirements").glob("*.md"))
+    documented = _documented(comp_dir)
     module_name = slug.replace("-", "_")
-    spec_dir = repo_root / "specs" / "components" / slug
-    criteria = _parse_criteria(spec_dir)
-    fm = _frontmatter(_read(spec_dir / "component.md"))
-    sealed = re.search(r"^sealed:\s*true\s*$", fm, re.M)
-    source = re.search(r"^source_path:\s*(\S.*?)\s*$", fm, re.M)
-    if sealed and source:
-        return _verify_sealed(
-            component_id, repo_root, slug, module_name, spec_dir, criteria,
-            repo_root / source.group(1).strip("'\""), judge,
-        )
-    return _verify_unsealed(
-        component_id, repo_root, slug, module_name, spec_dir, criteria, judge, test_author
-    )
+    if frontmatter.get("sealed") == "true":
+        return _verify_sealed(component_id, repo_root, slug, module_name, frontmatter["source_path"],
+                              criteria, req_ids, documented, judge)
+    return _verify_unsealed(component_id, repo_root, slug, module_name, criteria, req_ids,
+                            documented, judge, test_author)
 
 
-def _verify_sealed(component_id, repo_root, slug, module_name, spec_dir, criteria, code_dir, judge):
-    drift = _drift(code_dir, module_name, spec_dir)
+def _verify_sealed(component_id, repo_root, slug, module_name, source_path, criteria, req_ids,
+                   documented, judge):
+    code_dir = repo_root / source_path
+    drift = _drift(code_dir, module_name, documented, repo_root)
     files = sorted((repo_root / "verification" / slug).glob("test_*.py"))
-    names = {}
-    outcomes = {}
-    env = dict(os.environ)
-    env["PYTHONPATH"] = str(code_dir)
-    with tempfile.TemporaryDirectory() as work:
-        for index, file in enumerate(files):
-            names[file] = re.findall(
-                r"^\s*(?:async\s+)?def\s+(test_\w+)\s*\(", _read(file), re.M
-            )
-            xml_path = Path(work) / f"junit_{index}.xml"
-            _run(
-                [sys.executable, "-m", "pytest", str(file), "-p", "no:cacheprovider",
-                 f"--junitxml={xml_path}"],
-                env, repo_root,
-            )
-            if xml_path.is_file():
-                for case in ET.parse(str(xml_path)).getroot().iter("testcase"):
-                    key = (file, case.get("name", "").split("[")[0])
-                    ok = not any(ch.tag in ("failure", "error", "skipped") for ch in case)
-                    outcomes[key] = outcomes.get(key, True) and ok
+    defined = []
+    for path in files:
+        defined.extend(_TEST_DEF.findall(path.read_text(encoding="utf-8")))
+    results = []
+    tmp = Path(tempfile.mkdtemp(prefix="hotdocs-verify-"))
+    try:
+        if files:
+            xml_path = tmp / "junit.xml"
+            env = dict(os.environ)
+            env["PYTHONPATH"] = str(code_dir)
+            _run([sys.executable, "-m", "pytest", *[str(f) for f in files], f"--junitxml={xml_path}"],
+                 repo_root, env)
+            if xml_path.exists():
+                for case in ET.parse(xml_path).iter("testcase"):
+                    passed = not any(child.tag in ("failure", "error", "skipped") for child in case)
+                    results.append((case.get("name").split("[")[0], passed))
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+    def matches(name, base):
+        return name == base or name.startswith(base + "_")
+
     entries = []
-    for c in criteria:
-        if c["kind"] == "llm-judge":
-            entries.append(_judge(c, component_id, repo_root, judge))
-            continue
-        prefix = "test_" + c["id"].lower().replace("-", "_")
-        matches = [
-            (f, n) for f in files for n in names[f]
-            if n == prefix or n.startswith(prefix + "_")
-        ]
-        entry = _entry(c, "pass")
-        failing = [n for f, n in matches if outcomes.get((f, n)) is not True]
-        if not matches:
-            _fail(entry, "implementation", "no characterization test")
-        elif failing:
-            _fail(entry, "implementation", "characterization test failed: " + ", ".join(failing))
+    for crit in criteria:
+        entry = _entry(crit)
+        if crit["kind"] == "llm-judge":
+            _judge(entry, component_id, repo_root, judge)
+        else:
+            base = "test_" + crit["id"].lower().replace("-", "_")
+            exists = any(matches(name, base) for name in defined)
+            outcomes = [passed for name, passed in results if matches(name, base)]
+            if not (exists and outcomes and all(outcomes)):
+                message = "characterization test failed" if exists else "no characterization test"
+                _fail(entry, message, None, None, "implementation")
         entries.append(entry)
-    failed = drift or any(e["result"] == "fail" for e in entries)
+    failed = any(e["result"] == "fail" for e in entries)
+    overall = "fail" if failed or drift or not code_dir.is_dir() else "pass"
     return VerificationReport(
         component_id=component_id,
         criteria=entries,
-        requirement_results=_requirement_results(spec_dir, entries),
+        requirement_results=_requirement_results(req_ids, entries),
         interface_drift=drift,
         mutation_score=None,
         mutation_error=None,
         assets=[],
         drivers=[],
-        overall="fail" if failed else "pass",
+        overall=overall,
     )
 
 
-def _verify_unsealed(component_id, repo_root, slug, module_name, spec_dir, criteria, judge, test_author):
-    run_env_mod = _load(repo_root, "gen/run-environment", "run_environment")
-    env = run_env_mod.prepare(component_id, repo_root)
+def _verify_unsealed(component_id, repo_root, slug, module_name, criteria, req_ids, documented,
+                     judge, test_author):
     code_dir = repo_root / "gen" / slug
+    run_environment = _load(repo_root, "gen/run-environment", "run_environment")
+    environment = run_environment.prepare(component_id, repo_root)
+    tmp = Path(tempfile.mkdtemp(prefix="hotdocs-verify-"))
     try:
-        drift = _drift(code_dir, module_name, spec_dir)
-        ok = _get(env, "ok")
+        ok = _get(environment, "ok")
         entries = []
-        passed = []
+        passing = []
         mutation_score = None
         mutation_error = None
-        mutation_fail = False
-        with tempfile.TemporaryDirectory() as work:
-            work = Path(work)
-            compiled = {}
-            run_env = {}
-            base_cmd = []
-            if ok:
-                run_env = dict(os.environ)
-                run_env.update(_get(env, "env_for")(code_dir))
-                run_env["PYTHONPATH"] = os.pathsep.join(
-                    [str(code_dir), str(_get(env, "plugin_dir"))]
-                )
-                base_cmd = [_get(env, "interpreter"), "-m", "pytest"]
-                extra_args = list(_get(env, "pytest_args")()) + ["-p", "no:cacheprovider"]
-            record = work / "compare.json"
-            if ok and any(c["kind"] == "compiled" for c in criteria):
+        compiled = {}
+        if ok:
+            interpreter = _get(environment, "interpreter")
+            pytest_args = list(_get(environment, "pytest_args")())
+            run_vars = dict(_get(environment, "env_for")(code_dir))
+            run_vars["PYTHONPATH"] = os.pathsep.join([str(code_dir), str(_get(environment, "plugin_dir"))])
+            asset_paths = [_get(a, "path") for a in list(_get(environment, "assets"))[1:]]
+            driver_fixtures = list(_get(environment, "driver_fixtures")())
+            if any(c["kind"] == "compiled" for c in criteria):
                 compiler = _load(repo_root, "pipeline/criterion-compiler", "criterion_compiler")
-                out_dir = work / "compiled"
-                report = compiler.compile(component_id, repo_root, out_dir=out_dir)
-                compiled = {_get(o, "criterion_id"): o for o in _get(report, "outputs")}
-                out_dir.mkdir(parents=True, exist_ok=True)
-                (out_dir / "conftest.py").write_text(
-                    _CONFTEST.format(path=str(record)), encoding="utf-8"
-                )
-            supply_mod = None
-            for c in criteria:
-                if c["kind"] == "llm-judge":
-                    entries.append(_judge(c, component_id, repo_root, judge))
-                    continue
-                entry = _entry(c, "pass")
-                if not ok:
-                    entries.append(_fail(entry, "environment", _get(env, "failure_message")))
-                    continue
-                if c["kind"] == "compiled":
-                    out = compiled.get(
-                        c["id"], {"status": "error", "message": "criterion was not compiled"}
-                    )
-                    if _get(out, "status") != "compiled":
-                        _fail(entry, "test", _get(out, "message"))
-                    else:
-                        record.unlink(missing_ok=True)
-                        file = repo_root / _get(out, "file")
-                        rc, output = _run(base_cmd + [str(file)] + extra_args, run_env, repo_root)
-                        if rc != 0:
-                            expected = actual = None
-                            if record.is_file():
-                                rec = json.loads(record.read_text(encoding="utf-8"))
-                                left, right = _literal(rec["left"]), _literal(rec["right"])
-                                expected, actual = (right, left) if rec["op"] == "==" else (left, right)
-                            _fail(entry, "implementation", _message(rc, output), expected, actual)
-                    entries.append(entry)
-                    continue
-                if supply_mod is None:
-                    supply_mod = _load(repo_root, "gen/test-supply", "test_supply")
-                supplied = supply_mod.supply(
-                    component_id, c["id"], repo_root,
-                    test_author=test_author,
-                    interpreter=_get(env, "interpreter"),
-                    assets=[_get(a, "path") for a in list(_get(env, "assets"))[1:]],
-                    drivers=list(_get(env, "driver_fixtures")()),
+                report = compiler.compile(component_id, repo_root, out_dir=tmp)
+                for out in _get(report, "outputs"):
+                    compiled[_get(out, "criterion_id")] = out
+                (tmp / "conftest.py").write_text(_CONFTEST, encoding="utf-8")
+
+        def pytest(file, extra):
+            env = dict(os.environ)
+            env.update(run_vars)
+            env.update(extra)
+            return _run([interpreter, "-m", "pytest", *pytest_args, str(file)], repo_root, env)
+
+        for crit in criteria:
+            entry = _entry(crit)
+            if crit["kind"] == "llm-judge":
+                _judge(entry, component_id, repo_root, judge)
+            elif not ok:
+                _fail(entry, _get(environment, "failure_message"), None, None, "environment")
+            elif crit["kind"] == "compiled":
+                out = compiled[crit["id"]]
+                if _get(out, "status") != "compiled":
+                    _fail(entry, _get(out, "message"), None, None, "test")
+                else:
+                    capture = tmp / f"capture_{crit['id']}.json"
+                    rc, output, timed_out, timeout = pytest(
+                        repo_root / _get(out, "file"), {"HOTDOCS_VO_CAPTURE": str(capture)})
+                    if rc != 0:
+                        data = json.loads(capture.read_text(encoding="utf-8")) if capture.exists() else {}
+                        op, left, right = data.get("compare", ["==", "None", "None"])
+                        expected, actual = (left, right) if op in ("in", "not in") else (right, left)
+                        message = data.get("message") or _failure_message(rc, output, timed_out, timeout)
+                        _fail(entry, message, _literal(expected), _literal(actual), "implementation")
+            else:
+                test_supply = _load(repo_root, "gen/test-supply", "test_supply")
+                supplied = test_supply.supply(
+                    component_id, crit["id"], repo_root, test_author=test_author,
+                    interpreter=interpreter, assets=asset_paths, drivers=driver_fixtures,
                 )
                 authoring = _get(supplied, "test_authoring")
                 if authoring is not None:
-                    entry["test_authoring"] = dict(authoring)
+                    entry["test_authoring"] = authoring
                 if _get(supplied, "failure_origin") == "test":
-                    _fail(entry, "test", _get(supplied, "failure_message"))
+                    _fail(entry, _get(supplied, "failure_message"), None, None, "test")
                 else:
-                    path = os.path.abspath(_get(supplied, "path"))
-                    rc, output = _run(base_cmd + [path] + extra_args, run_env, repo_root)
+                    path = str(_get(supplied, "path"))
+                    rc, output, timed_out, timeout = pytest(path, {})
                     if rc == 0:
-                        passed.append((path, len(entries)))
+                        passing.append((path, entry))
                     else:
-                        _fail(entry, "implementation", _message(rc, output))
-                entries.append(entry)
+                        _fail(entry, _failure_message(rc, output, timed_out, timeout), None, None,
+                              "implementation")
+            entries.append(entry)
+
         if ok:
             scorer = _load(repo_root, "gen/mutation-scorer", "mutation_scorer")
-            result = scorer.score(component_id, repo_root, [p for p, _ in passed], env)
-            faulty = set(_get(result, "faulty_tests"))
-            for path, index in passed:
-                if path in faulty:
-                    _fail(entries[index], "test", "test fails in the mutation sandbox")
-                    if supply_mod is None:
-                        supply_mod = _load(repo_root, "gen/test-supply", "test_supply")
-                    supply_mod.discard(component_id, entries[index]["id"], repo_root)
+            result = scorer.score(component_id, repo_root, [p for p, _ in passing], environment)
             mutation_score = _get(result, "mutation_score")
             mutation_error = _get(result, "mutation_error")
-            freeform = any(c["kind"] == "generated-test" and c["freeform"] for c in criteria)
-            threshold = 0.9 if freeform else 0.8
-            mutation_fail = mutation_error is not None or (
-                mutation_score is not None and mutation_score < threshold
-            )
-        failed = drift or mutation_fail or any(e["result"] == "fail" for e in entries)
+            faulty = list(_get(result, "faulty_tests"))
+            for path, entry in passing:
+                if path in faulty:
+                    _fail(entry, "test fails in the mutation sandbox", None, None, "test")
+                    test_supply = _load(repo_root, "gen/test-supply", "test_supply")
+                    test_supply.discard(component_id, entry["id"], repo_root)
+
+        drift = _drift(code_dir, module_name, documented, repo_root)
+        bar = 0.9 if any(c["kind"] == "generated-test" and c["freeform"] for c in criteria) else 0.8
+        failed = any(e["result"] == "fail" for e in entries)
+        below = mutation_score is not None and mutation_score < bar
+        overall = "fail" if failed or drift or mutation_error is not None or below else "pass"
         return VerificationReport(
             component_id=component_id,
             criteria=entries,
-            requirement_results=_requirement_results(spec_dir, entries),
+            requirement_results=_requirement_results(req_ids, entries),
             interface_drift=drift,
             mutation_score=mutation_score,
             mutation_error=mutation_error,
-            assets=list(_get(env, "assets")),
-            drivers=list(_get(env, "drivers")),
-            overall="fail" if failed else "pass",
+            assets=list(_get(environment, "assets")),
+            drivers=list(_get(environment, "drivers")),
+            overall=overall,
         )
     finally:
-        _get(env, "close")()
+        _get(environment, "close")()
+        shutil.rmtree(tmp, ignore_errors=True)
 
 
-# ---------------------------------------------------------------- CLI
-
-
-def _usage(cause: str) -> int:
+def _usage_error(cause):
     print(f"usage error: {cause}", file=sys.stderr)
-    print(_USAGE, file=sys.stderr)
+    print(USAGE, file=sys.stderr)
     return 2
 
 
-def main(argv: list[str] | None = None) -> int:
-    args = list(sys.argv[1:] if argv is None else argv)
-    opts = {"--repo-root": ".", "--format": "text"}
-    component_id = None
-    i = 0
-    while i < len(args):
-        token = args[i]
-        flag, eq, value = token.partition("=")
-        if flag in opts:
+def main(argv=None):
+    if argv is None:
+        argv = sys.argv[1:]
+    options = {"--repo-root": ".", "--format": "text"}
+    positional = []
+    index = 0
+    while index < len(argv):
+        token = argv[index]
+        name, eq, value = token.partition("=")
+        if name in options:
             if not eq:
-                i += 1
-                if i == len(args):
-                    return _usage(f"{flag} needs a value")
-                value = args[i]
-            opts[flag] = value
-        elif component_id is None and not token.startswith("-"):
-            component_id = token
+                if index + 1 >= len(argv):
+                    return _usage_error(f"{name} requires a value")
+                index += 1
+                value = argv[index]
+            options[name] = value
+        elif token.startswith("-") or positional:
+            return _usage_error(f"unknown argument: {token}")
         else:
-            return _usage(f"unknown argument: {token}")
-        i += 1
-    if component_id is None:
-        return _usage("missing <component-id>")
-    if opts["--format"] not in ("json", "text"):
-        return _usage(f"invalid --format: {opts['--format']}")
-    repo_root = Path(opts["--repo-root"])
-    if not (repo_root / "specs" / "components" / _slug(component_id) / "component.md").is_file():
-        return _usage(f"unknown component: {component_id}")
+            positional.append(token)
+        index += 1
+    if not positional:
+        return _usage_error("missing <component-id>")
+    if options["--format"] not in ("json", "text"):
+        return _usage_error(f"invalid --format: {options['--format']}")
+    component_id = positional[0]
+    repo_root = Path(options["--repo-root"])
+    slug = component_id.removeprefix("comp-")
+    if not (repo_root / "specs" / "components" / slug / "component.md").is_file():
+        return _usage_error(f"unknown component: {component_id}")
     report = verify(component_id, repo_root)
-    if opts["--format"] == "json":
+    if options["--format"] == "json":
         print(json.dumps(report.to_dict(), indent=2))
     else:
-        print(f"{component_id}: {report.overall}")
-        for c in report.criteria:
-            print(f"  {c['id']}: {c['result']}")
+        print(f"{report.component_id}: {report.overall}")
+        for entry in report.criteria:
+            print(f"  {entry['id']}: {entry['result']}")
     return 0 if report.overall == "pass" else 1
