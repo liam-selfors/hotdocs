@@ -31,3 +31,5 @@
   nested per-entry sub-heading** (e.g. never `### comp-foo`,
   `### P-ZERO-EDIT`). A per-entry sub-heading is indistinguishable
   from the section's own boundary to a heading-boundary parse.
+  "## Provenance Hit Status" renders one line per component,
+  `- <component-id>: hit=<true|false>`.
